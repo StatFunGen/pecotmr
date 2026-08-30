@@ -18,8 +18,8 @@ test_that("H2Estimate constructs with all slots", {
         traitName = "height"
     )
     expect_s4_class(obj, "H2Estimate")
-    expect_equal(obj@h2, 0.3)
-    expect_equal(obj@method, "lder")
+    expect_equal(getH2(obj), 0.3)
+    expect_equal(getMethodNames(obj), "lder")
 })
 
 # show() smoke test, moved here from test_showMethods.R so the test

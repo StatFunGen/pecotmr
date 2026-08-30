@@ -95,31 +95,31 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -2150,101 +2150,6 @@ test_that(".twasFineMappingFits: ignores non-susie methods (e.g. lasso)", {
 })
 
 # ===========================================================================
-# .twasLdFromSketch (mocked extractBlockGenotypes)
-# ===========================================================================
-
-.tw_makeSketchHandle <- function(snp_n = 6L, n_samples = 30L) {
-    new(
-        "GenotypeHandle",
-        path = "/tmp/sketch.gds",
-        format = "gds",
-        snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
-            CHR = rep("1", snp_n),
-            BP = seq(100L, by = 100L, length.out = snp_n),
-            A1 = rep("A", snp_n),
-            A2 = rep("G", snp_n),
-            stringsAsFactors = FALSE
-        ),
-        nSamples = n_samples,
-        sampleIds = paste0("s", seq_len(n_samples)),
-        pgenPtr = NULL
-    )
-}
-
-.tw_mockExtractor <- function(seed = 7, n_samples = 30L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
-        set.seed(seed)
-        panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
-            nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
-        )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
-    }
-}
-
-test_that(".twasLdFromSketch: rejects a non-panel ldSketch", {
-    expect_error(
-        pecotmr:::.twasLdFromSketch(
-            "not_a_handle",
-            c("chr1:100:A:G", "chr1:200:A:G")
-        ),
-        "ldSketch must be a genotype panel"
-    )
-})
-
-test_that(".twasLdFromSketch: variants not in the panel error", {
-    h <- .tw_makeSketchHandle()
-    expect_error(
-        pecotmr:::.twasLdFromSketch(h, c("chr1:100:A:G", "ghost")),
-        "variant id.*not present in the LD sketch"
-    )
-})
-
-test_that(".twasLdFromSketch: returns a square LD matrix named by variantIds", {
-    h <- .tw_makeSketchHandle()
-    local_mocked_bindings(
-        extractBlockGenotypes = .tw_mockExtractor(),
-        .package = "pecotmr"
-    )
-    ids <- c("chr1:200:A:G", "chr1:400:A:G", "chr1:500:A:G")
-    R <- pecotmr:::.twasLdFromSketch(h, ids)
-    expect_true(is.matrix(R))
-    expect_equal(dim(R), c(3L, 3L))
-    expect_equal(rownames(R), ids)
-    expect_equal(colnames(R), ids)
-    # Symmetric, diagonal == 1 (sample correlation).
-    expect_equal(unname(diag(R)), c(1, 1, 1), tolerance = 1e-12)
-    expect_equal(R, t(R), tolerance = 1e-12)
-})
-
-# ===========================================================================
 # .twasWeightsPipelineMatrix: susieFit pre-fit pass-through
 # ===========================================================================
 
@@ -3516,7 +3421,7 @@ test_that(".solveEnsembleGlmnet: solver failure falls back to equal weights", {
 # @noRd
 .twrssf_qcd <- function() {
     data(qtlSumStatsExample, envir = environment())
-    suppressWarnings(suppressMessages(summaryStatsQc(qtlSumStatsExample)))
+    suppressMessages(summaryStatsQc(qtlSumStatsExample))
 }
 
 # @noRd

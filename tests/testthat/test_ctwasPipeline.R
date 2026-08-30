@@ -48,31 +48,31 @@ context("ctwasPipeline")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -2136,19 +2136,19 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     # the previous per-region list dodged this by putting the SAME GWAS block
     # and the SAME gene under two region ids.
     geneOne <- twasWeightsRow(
-        variantIds = gh@snpInfo$SNP[1:5],
+        variantIds = getSnpInfo(gh)$SNP[1:5],
         weights = c(0.1, -0.2, 0.05, 0.0, 0.3)
     )
     geneTwo <- twasWeightsRow(
-        variantIds = gh@snpInfo$SNP[9:13],
+        variantIds = getSnpInfo(gh)$SNP[9:13],
         weights = c(0.2, 0.1, -0.15, 0.05, 0.0)
     )
     # A FLAT weight source is placed into blocks by `traitPos`, so each gene
     # needs the span it sits in.
     geneSpan <- function(i) {
-        bp <- gh@snpInfo$BP[i]
+        bp <- getSnpInfo(gh)$BP[i]
         GenomicRanges::GRanges(
-            str_c("chr", gh@snpInfo$CHR[i][[1L]]),
+            str_c("chr", getSnpInfo(gh)$CHR[i][[1L]]),
             IRanges::IRanges(min(bp), max(bp))
         )
     }
@@ -2335,7 +2335,7 @@ test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", 
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
     gh <- qd@genotypes
-    vids <- gh@snpInfo$SNP[1:5]
+    vids <- getSnpInfo(gh)$SNP[1:5]
     ent <- twasWeightsRow(
         variantIds = vids,
         weights = c(0.1, -0.2, 0.05, 0.3, 0.15)
@@ -2360,7 +2360,7 @@ test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
     gh <- qd@genotypes
-    vids <- gh@snpInfo$SNP[1:5]
+    vids <- getSnpInfo(gh)$SNP[1:5]
     ent <- twasWeightsRow(
         variantIds = vids,
         # v1 (0.005) and v3 (0.001) will be dropped at cutoff 0.01

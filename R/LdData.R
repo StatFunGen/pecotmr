@@ -15,6 +15,14 @@ NULL
 #'   correlation matrix or a \code{GenotypeHandle} (or list of handles for
 #'   mixture panels) for lazy genotype/correlation access.
 #'
+#'   An \code{LdData} \strong{is} a \code{GRanges} over the variants it
+#'   covers -- carrying A1, A2, variant_id and optionally allele_freq,
+#'   variance and n_nomiss as metadata columns -- so \code{length()},
+#'   \code{seqnames()} and \code{start()} answer directly, as they do for
+#'   \code{\link{LdScore}} and \code{\link{LdEigen}}. The correlation may
+#'   be NULL, in which case those ranges are the object's only record of which
+#'   variants it describes.
+#'
 #' @slot correlation A correlation matrix, a list of per-block matrices
 #'   (block-diagonal LD), or NULL if genotypes are available and R should be
 #'   computed on demand.
@@ -26,8 +34,6 @@ NULL
 #' @slot snpIdx Integer vector of 1-based SNP indices into the handle's
 #'   \code{snpInfo}. NULL when correlation is pre-computed, or when the
 #'   source is a matrix (which is already the subset).
-#' @slot variants A \code{GRanges} object with variant metadata (A1, A2,
-#'   variant_id, and optionally allele_freq, variance, n_nomiss).
 #' @slot blockMetadata A \code{GRanges} of blocks or a \code{data.frame} with
 #'   block boundary information.
 #' @slot nRef Integer, reference panel sample size.
@@ -40,11 +46,11 @@ NULL
 #' @export
 setClass(
     "LdData",
+    contains = "GRanges",
     representation(
         correlation = "LdCorrelation",
         genotypeHandle = "LdGenotypeSource",
         snpIdx = "LdSnpIndex",
-        variants = "GRanges",
         blockMetadata = "LdBlockMetadata",
         nRef = "integer",
         mixtureWeights = "LdMixtureWeights"
@@ -60,8 +66,8 @@ setClass(
                 )
             )
         }
-        if (length(object@variants) == 0) {
-            errors <- c(errors, "'variants' must not be empty")
+        if (length(object) == 0) {
+            errors <- c(errors, "an LdData must cover >= 1 variant")
         }
         errors <- c(errors, .ldCheckGenotypeSource(object@genotypeHandle))
         errors <- c(errors, .ldCheckCorrelation(object@correlation))
@@ -98,10 +104,29 @@ setClass(
     }
 )
 
+#' @describeIn LdData-class Refused. Subsetting would narrow the variants
+#'   while \code{correlation} -- variant-by-variant, and \code{snpIdx}, which
+#'   indexes the reference panel -- stayed as they were, leaving an LD matrix
+#'   describing variants the object no longer has. Build the LdData over the
+#'   variant set you want instead.
+#' @param x An \code{LdData}.
+#' @param i,j,... Subscripts; any use is an error.
+#' @param drop Ignored.
+#' @return Nothing: this method always signals an error.
+#' @export
+setMethod("[", "LdData", function(x, i, j, ..., drop = TRUE) {
+    abort(glue(
+        "an LdData cannot be subset: its correlation is variant-by-variant ",
+        "and its snpIdx addresses the reference panel, so narrowing the ",
+        "variants would leave both describing variants that are no longer ",
+        "present. Build the LdData over the variant set you want instead."
+    ))
+})
+
 #' @rdname show-methods
 #' @export
 setMethod("show", "LdData", function(object) {
-    n_var <- length(object@variants)
+    n_var <- length(object)
     has_R <- !is.null(object@correlation)
     has_geno <- !is.null(object@genotypeHandle)
     r_type <- if (has_R && is.list(object@correlation)) {
@@ -201,10 +226,10 @@ LdData <- function(
 ) {
     obj <- new(
         "LdData",
+        variants,
         correlation = correlation,
         genotypeHandle = .ldDataGenotypeSource(genotypeHandle),
         snpIdx = if (is.null(snpIdx)) NULL else as.integer(snpIdx),
-        variants = variants,
         blockMetadata = blockMetadata,
         nRef = as.integer(nRef),
         mixtureWeights = mixtureWeights
@@ -214,8 +239,7 @@ LdData <- function(
 }
 
 # Internal: convert a refPanel data.frame (chrom/pos/A1/A2/variant_id, with
-# optional allele_freq/variance/n_nomiss) into the GRanges form used by the
-# LdData `variants` slot.
+# optional allele_freq/variance/n_nomiss) into the GRanges an LdData is.
 .refPanelToGranges <- function(refPanel) {
     chr <- withChrPrefix(refPanel$chrom)
     pos <- as.integer(refPanel$pos)
@@ -303,13 +327,15 @@ setMethod("hasGenotypes", "LdData", function(x) {
 #' @rdname getVariantIds
 #' @export
 setMethod("getVariantIds", "LdData", function(x, ...) {
-    mcols(x@variants)$variant_id
+    mcols(x)$variant_id
 })
 
 #' @rdname getVariantInfo
 #' @export
 setMethod("getVariantInfo", "LdData", function(x) {
-    x@variants
+    # A plain GRanges view: callers subset and re-wrap it, and carrying the
+    # LD payload along would make those copies quietly expensive.
+    as(x, "GRanges")
 })
 
 #' @rdname getBlockMetadata
@@ -321,9 +347,9 @@ setMethod("getBlockMetadata", "LdData", function(x) {
 #' @rdname getRefPanel
 #' @export
 setMethod("getRefPanel", "LdData", function(x) {
-    mc <- as_tibble(as.data.frame(mcols(x@variants)))
-    mc$chrom <- as.character(seqnames(x@variants))
-    mc$pos <- start(x@variants)
+    mc <- as_tibble(as.data.frame(mcols(x)))
+    mc$chrom <- as.character(seqnames(x))
+    mc$pos <- start(x)
     mc
 })
 

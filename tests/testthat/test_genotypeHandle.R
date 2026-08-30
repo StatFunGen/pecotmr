@@ -61,8 +61,8 @@ test_that("GenotypeHandle: path = .gds uses readGenotypes (gds backend)", {
     skip_if_not_installed("SNPRelate")
     h <- GenotypeHandle(path = gds_path)
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "gds")
-    expect_equal(h@nSamples, 100L)
+    expect_equal(getFormat(h), "gds")
+    expect_equal(getNSamples(h), 100L)
     expect_equal(nrow(getSnpInfo(h)), 349L)
 })
 
@@ -70,16 +70,16 @@ test_that("GenotypeHandle: path = .vcf.gz uses readGenotypes (vcf backend)", {
     skip_if_not_installed("VariantAnnotation")
     h <- GenotypeHandle(path = vcf_path)
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "vcf")
-    expect_equal(h@nSamples, 100L)
+    expect_equal(getFormat(h), "vcf")
+    expect_equal(getNSamples(h), 100L)
 })
 
 test_that("GenotypeHandle: plink1Prefix builds a plink1 handle", {
     skip_if_not_installed("snpStats")
     h <- GenotypeHandle(plink1Prefix = plink_prefix)
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink1")
-    expect_equal(h@nSamples, 100L)
+    expect_equal(getFormat(h), "plink1")
+    expect_equal(getNSamples(h), 100L)
     expect_equal(nrow(getSnpInfo(h)), 349L)
 })
 
@@ -87,8 +87,8 @@ test_that("GenotypeHandle: plink2Prefix builds a plink2 handle", {
     skip_if_not_installed("pgenlibr")
     h <- GenotypeHandle(plink2Prefix = plink_prefix)
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink2")
-    expect_equal(h@nSamples, 100L)
+    expect_equal(getFormat(h), "plink2")
+    expect_equal(getNSamples(h), 100L)
 })
 
 # ===========================================================================
@@ -103,8 +103,8 @@ test_that("GenotypeHandle: bed/bim/fam triplet with matching stems builds plink1
         fam = paste0(plink_prefix, ".fam")
     )
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink1")
-    expect_equal(h@nSamples, 100L)
+    expect_equal(getFormat(h), "plink1")
+    expect_equal(getNSamples(h), 100L)
 })
 
 test_that(".genotypeHandleFromPlink1Triplet: errors when stems disagree", {
@@ -137,7 +137,7 @@ test_that("GenotypeHandle: pgen/pvar/psam triplet with matching stems builds pli
         psam = paste0(plink_prefix, ".psam")
     )
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink2")
+    expect_equal(getFormat(h), "plink2")
 })
 
 test_that(".genotypeHandleFromPlink2Triplet: accepts .pvar.zst by stripping the .zst", {
@@ -267,7 +267,7 @@ test_that("GenotypeHandle ldMeta: dispatches to gds reader for .gds path", {
     on.exit(unlink(f), add = TRUE)
     h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "gds")
+    expect_equal(getFormat(h), "gds")
 })
 
 test_that("GenotypeHandle ldMeta: dispatches to vcf reader for .vcf.gz path", {
@@ -276,7 +276,7 @@ test_that("GenotypeHandle ldMeta: dispatches to vcf reader for .vcf.gz path", {
     on.exit(unlink(f), add = TRUE)
     h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "vcf")
+    expect_equal(getFormat(h), "vcf")
 })
 
 test_that("GenotypeHandle ldMeta: dispatches to plink1 reader for .bed path", {
@@ -285,7 +285,7 @@ test_that("GenotypeHandle ldMeta: dispatches to plink1 reader for .bed path", {
     on.exit(unlink(f), add = TRUE)
     h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink1")
+    expect_equal(getFormat(h), "plink1")
 })
 
 test_that("GenotypeHandle ldMeta: dispatches to plink2 reader for .pgen path", {
@@ -294,7 +294,7 @@ test_that("GenotypeHandle ldMeta: dispatches to plink2 reader for .pgen path", {
     on.exit(unlink(f), add = TRUE)
     h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink2")
+    expect_equal(getFormat(h), "plink2")
 })
 
 test_that("GenotypeHandle ldMeta: .cor.xz payload is rejected (out of scope)", {
@@ -331,7 +331,7 @@ test_that("GenotypeHandle constructs and validates correctly", {
         pgenPtr = NULL
     )
     expect_s4_class(obj, "GenotypeHandle")
-    expect_equal(obj@format, "gds")
+    expect_equal(getFormat(obj), "gds")
     expect_true(methods::validObject(obj))
 })
 
@@ -383,8 +383,8 @@ test_that("genoMeta (named vector) builds a sharded handle", {
         )
     )
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink1")
-    expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+    expect_equal(getFormat(h), "plink1")
+    expect_equal(sort(names(getChromPaths(h))), c("21", "22"))
     expect_equal(nrow(getSnpInfo(h)), 2L * 349L)
 })
 
@@ -398,7 +398,7 @@ test_that("genoMeta meta-file resolves payloads relative to its own directory", 
         metafile
     )
     h <- GenotypeHandle(genoMeta = metafile)
-    expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+    expect_equal(sort(names(getChromPaths(h))), c("21", "22"))
     expect_equal(nrow(getSnpInfo(h)), 2L * 349L)
 })
 
@@ -522,11 +522,11 @@ test_that("genoMeta chroms reads only the requested shard", {
     )
     full <- GenotypeHandle(genoMeta = meta)
     only21 <- GenotypeHandle(genoMeta = meta, chroms = "21")
-    expect_equal(names(only21@chromPaths), "21")
+    expect_equal(names(getChromPaths(only21)), "21")
     expect_equal(nrow(getSnpInfo(only21)), 349L)
     # chr21 is the first shard, so the kept rows/fileIdx match the full handle's.
     expect_equal(getSnpInfo(only21)$SNP, getSnpInfo(full)$SNP[1:349])
-    expect_equal(only21@snpInfo$fileIdx, full@snpInfo$fileIdx[1:349])
+    expect_equal(getSnpInfo(only21)$fileIdx, getSnpInfo(full)$fileIdx[1:349])
 })
 
 test_that("genoMeta chroms canonicalises chromosome labels", {
@@ -539,7 +539,7 @@ test_that("genoMeta chroms canonicalises chromosome labels", {
         ),
         chroms = "chr21"
     )
-    expect_equal(names(h@chromPaths), "21")
+    expect_equal(names(getChromPaths(h)), "21")
 })
 
 test_that("genoMeta chroms falls back to all shards when none match", {
@@ -553,7 +553,7 @@ test_that("genoMeta chroms falls back to all shards when none match", {
         ),
         chroms = "9"
     )
-    expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+    expect_equal(sort(names(getChromPaths(h))), c("21", "22"))
 })
 
 test_that("genoMeta chroms skips a shard whose file does not exist", {
@@ -565,7 +565,7 @@ test_that("genoMeta chroms skips a shard whose file does not exist", {
         "21" = "/no/such/chr21/prefix"
     )
     h <- GenotypeHandle(genoMeta = meta, chroms = "22")
-    expect_equal(names(h@chromPaths), "22")
+    expect_equal(names(getChromPaths(h)), "22")
     expect_error(GenotypeHandle(genoMeta = meta, chroms = c("22", "21")))
 })
 
@@ -685,32 +685,32 @@ test_that(".resolveGenotypeShard honours explicit plink1 format and .bed extensi
     skip_if_not_installed("snpStats")
     h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink1")
     expect_s4_class(h1, "GenotypeHandle")
-    expect_equal(h1@format, "plink1")
+    expect_equal(getFormat(h1), "plink1")
     h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".bed"))
-    expect_equal(h2@format, "plink1")
+    expect_equal(getFormat(h2), "plink1")
 })
 
 test_that(".resolveGenotypeShard honours explicit plink2 format and .pgen extension", {
     skip_if_not_installed("pgenlibr")
     h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink2")
     expect_s4_class(h1, "GenotypeHandle")
-    expect_equal(h1@format, "plink2")
+    expect_equal(getFormat(h1), "plink2")
     h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".pgen"))
-    expect_equal(h2@format, "plink2")
+    expect_equal(getFormat(h2), "plink2")
 })
 
 test_that(".resolveGenotypeShard dispatches gds via explicit format and .gds extension", {
     skip_if_not_installed("SNPRelate")
     h1 <- pecotmr:::.resolveGenotypeShard(gds_path, format = "gds")
-    expect_equal(h1@format, "gds")
+    expect_equal(getFormat(h1), "gds")
     h2 <- pecotmr:::.resolveGenotypeShard(gds_path)
-    expect_equal(h2@format, "gds")
+    expect_equal(getFormat(h2), "gds")
 })
 
 test_that(".resolveGenotypeShard dispatches vcf by extension", {
     skip_if_not_installed("VariantAnnotation")
     h <- pecotmr:::.resolveGenotypeShard(vcf_path)
-    expect_equal(h@format, "vcf")
+    expect_equal(getFormat(h), "vcf")
 })
 
 test_that(".resolveGenotypeShard probes the .pgen sidecar for an extension-less prefix", {
@@ -796,14 +796,16 @@ test_that("genotypeDelayedArray values match getGenotypes transposed", {
 test_that("a NULL index means every row or column, not none", {
     data(qtlDatasetExample, envir = environment())
     gh <- getGenotypeHandle(qtlDatasetExample)
-    seed <- genotypeDelayedArray(gh)@seed
+    seed <- DelayedArray::seed(genotypeDelayedArray(gh))
     full <- S4Arrays::extract_array(seed, list(NULL, NULL))
     expect_equal(dim(full), c(nrow(getSnpInfo(gh)), getNSamples(gh)))
 })
 
 test_that("the seed answers an empty extraction on either axis", {
     data(qtlDatasetExample, envir = environment())
-    seed <- genotypeDelayedArray(getGenotypeHandle(qtlDatasetExample))@seed
+    seed <- DelayedArray::seed(
+        genotypeDelayedArray(getGenotypeHandle(qtlDatasetExample))
+    )
     expect_equal(
         dim(S4Arrays::extract_array(seed, list(integer(0), NULL))),
         c(0L, 165L)

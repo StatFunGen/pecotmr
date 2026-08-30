@@ -46,28 +46,28 @@ context("LdData accessors")
             rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(handle@sampleIds, getSnpInfo(handle)$SNP)
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
             SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
         rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -167,10 +167,10 @@ test_that("getCorrelation: mixture handles without mixtureWeights errors", {
     # Build via new() to skip the constructor's mixtureWeights validity check.
     ld <- new(
         "LdData",
+        .ld_makeVariants(),
         correlation = NULL,
         genotypeHandle = list(gh, gh),
         snpIdx = 1:4,
-        variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1),
         nRef = 0L,
         mixtureWeights = NULL
@@ -186,10 +186,10 @@ test_that("getCorrelation: mixture panels of differing dim error", {
     gh <- .ld_makeHandle(snp_n = 4L)
     ld <- new(
         "LdData",
+        .ld_makeVariants(),
         correlation = NULL,
         genotypeHandle = list(gh_small, gh),
         snpIdx = 1:3,
-        variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1),
         nRef = 0L,
         mixtureWeights = c(0.5, 0.5)
@@ -239,10 +239,10 @@ test_that("getGenotypes: matrix handle is returned unchanged", {
     )
     ld <- new(
         "LdData",
+        .ld_makeVariants(),
         correlation = NULL,
         genotypeHandle = X,
         snpIdx = NULL,
-        variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1),
         nRef = 0L,
         mixtureWeights = NULL
@@ -389,7 +389,7 @@ test_that("LdData validation rejects empty variants", {
     gr <- GenomicRanges::GRanges()
     expect_error(
         LdData(correlation = R, variants = gr, blockMetadata = data.frame()),
-        "must not be empty"
+        "must cover >= 1 variant"
     )
 })
 
@@ -555,7 +555,7 @@ test_that("LdData: validity rejects empty variants", {
             variants = GenomicRanges::GRanges(),
             blockMetadata = S4Vectors::DataFrame(x = 1)
         ),
-        "'variants' must not be empty"
+        "must cover >= 1 variant"
     )
 })
 
@@ -839,8 +839,11 @@ test_that("the payload slots refuse values of the wrong shape", {
 
 test_that("blockMetadata takes ranges as well as tables", {
     gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 1000L))
-    for (v in list(gr, data.frame(chrom = "chr1"),
-                   S4Vectors::DataFrame(chrom = "chr1"))) {
+    for (v in list(
+        gr,
+        data.frame(chrom = "chr1"),
+        S4Vectors::DataFrame(chrom = "chr1")
+    )) {
         ld <- LdData(
             correlation = matrix(1),
             variants = .ld_makeVariants(),

@@ -680,7 +680,7 @@ GenotypeHandle <- function(
 }
 
 #' @rdname getSnpInfo
-#' @export
+#' @keywords internal
 setMethod("getSnpInfo", "GenotypeHandle", function(x) x@snpInfo)
 
 #' @rdname getFormat

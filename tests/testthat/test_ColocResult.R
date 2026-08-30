@@ -254,7 +254,9 @@ test_that("show on an empty ColocResult stops after the header", {
     x <- ColocResult(.cr_pairs()[0, , drop = FALSE], list())
     expect_output(show(x), "with 0 colocalized pair\\(s\\)")
     expect_false(any(grepl(
-        "max PP.H4", capture.output(show(x)), fixed = TRUE
+        "max PP.H4",
+        capture.output(show(x)),
+        fixed = TRUE
     )))
 })
 

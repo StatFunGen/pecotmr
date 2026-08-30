@@ -2168,19 +2168,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # supported by the downstream cTWAS model.
 # @noRd
 .ctwasSnpInfoForBlock <- function(gwasLd) {
-    snpInfo <- .ldSketchSnpInfo(gwasLd)
-    chr <- as.integer(
-        str_remove(as.character(snpInfo$CHR), regex("^chr", ignore_case = TRUE))
-    )
+    gr <- .ldSketchRanges(gwasLd)
+    mc <- S4Vectors::mcols(gr)
     # Base data.frame (not tibble): ctwas indexes snp_map positionally
     # (df[, "pos"] -> vector for region-bound min/max); a tibble column is a
     # 1-col list and errors min().
     data.frame(
-        chrom = chr,
-        id = as.character(snpInfo$SNP),
-        pos = as.integer(snpInfo$BP),
-        alt = as.character(snpInfo$A1),
-        ref = as.character(snpInfo$A2),
+        chrom = as.integer(.ldSketchChrom(gwasLd)),
+        id = as.character(mc$SNP),
+        pos = as.integer(GenomicRanges::start(gr)),
+        alt = as.character(mc$A1),
+        ref = as.character(mc$A2),
         stringsAsFactors = FALSE
     )
 }
@@ -2198,8 +2196,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # @noRd
 .ctwasComputeFullPanelLd <- function(gwasLd) {
     snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
-    geno <- .dosageMatrix(
-        .ldSketchHandle(gwasLd),
+    geno <- .ldSketchDosage(
+        gwasLd,
         seq_len(nrow(snpInfoCtwas)),
         meanImpute = TRUE
     )

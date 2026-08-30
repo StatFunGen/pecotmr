@@ -9,7 +9,6 @@
 # (computeSldscMRef/computeSldscAnnotSd/isBinarySldscAnnot/standardizeSldscTrait)
 # operate on an in-memory SldscData and are tested with in-memory fixtures.
 
-
 # =============================================================================
 # .sldscDetectAnnotCols
 # =============================================================================

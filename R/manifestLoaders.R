@@ -313,7 +313,7 @@ NULL
     if (length(getChromPaths(handle)) > 0L) {
         canonChrom(names(getChromPaths(handle)))
     } else {
-        unique(canonChrom(as.character(.ldSketchSnpInfo(ldSketch)$CHR)))
+        unique(.ldSketchChrom(ldSketch))
     }
 }
 
@@ -327,8 +327,8 @@ NULL
         return(invisible(NULL))
     }
     reqChrom <- .ldContainmentCheckChroms(entryGr, ldSketch, label)
-    snpInfo <- .ldSketchSnpInfo(ldSketch)
-    if (is.null(snpInfo) || nrow(snpInfo) == 0L) {
+    sketchGr <- .ldSketchRanges(ldSketch)
+    if (length(sketchGr) == 0L) {
         msg <- glue(
             "{label}: LD sketch carries no variant metadata; ",
             "skipping the variant-overlap check."
@@ -338,7 +338,7 @@ NULL
     }
     .ldContainmentCheckOverlap(
         entryGr,
-        snpInfo,
+        sketchGr,
         reqChrom,
         minLdOverlapWarn,
         label
@@ -368,26 +368,21 @@ NULL
 # @noRd
 .ldContainmentCheckOverlap <- function(
     entryGr,
-    snpInfo,
+    sketchGr,
     reqChrom,
     minLdOverlapWarn,
     label
 ) {
-    keep <- is_in(canonChrom(as.character(snpInfo$CHR)), reqChrom)
-    snpInfo <- snpInfo[keep, , drop = FALSE]
-    entryVid <- formatVariantId(
-        chrom = canonChrom(as.character(GenomicRanges::seqnames(entryGr))),
-        pos = GenomicRanges::start(entryGr),
-        A2 = as.character(entryGr$A2),
-        A1 = as.character(entryGr$A1)
+    keep <- is_in(
+        canonChrom(as.character(GenomicRanges::seqnames(sketchGr))),
+        reqChrom
     )
-    sketchVid <- formatVariantId(
-        chrom = canonChrom(as.character(snpInfo$CHR)),
-        pos = as.integer(snpInfo$BP),
-        A2 = as.character(snpInfo$A2),
-        A1 = as.character(snpInfo$A1)
+    nOverlap <- length(
+        matchVariants(
+            .grVariantIds(entryGr),
+            .grVariantIds(sketchGr[keep])
+        )$idxA
     )
-    nOverlap <- length(matchVariants(entryVid, sketchVid)$idxA)
     if (nOverlap == 0L) {
         msg <- glue(
             "{label}: none of the {length(entryGr)} summary-statistic ",

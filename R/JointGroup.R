@@ -65,7 +65,7 @@ setClass(
 setClass(
     "IndividualJointGroup",
     contains = "JointGroup",
-    representation(X = "matrix", Y = "matrix", pos = "numeric"),
+    representation(X = "matrix", Y = "matrix", traitPos = "numeric"),
     validity = function(object) {
         errors <- character()
         if (nrow(object@X) != nrow(object@Y)) {
@@ -74,10 +74,16 @@ setClass(
         if (ncol(object@Y) != nrow(object@conditions)) {
             errors <- c(errors, "ncol(Y) must equal nrow(conditions)")
         }
-        if (length(object@pos) > 0L && length(object@pos) != ncol(object@Y)) {
+        if (
+            length(object@traitPos) > 0L &&
+                length(object@traitPos) != ncol(object@Y)
+        ) {
             errors <- c(
                 errors,
-                "when set, 'pos' must have one entry per Y column"
+                str_c(
+                    "when set, 'traitPos' must have one entry per TRAIT ",
+                    "(Y column), not per variant"
+                )
             )
         }
         if (length(errors) == 0L) TRUE else errors
@@ -88,20 +94,25 @@ setClass(
 setClass(
     "SumStatsJointGroup",
     contains = "JointGroup",
-    representation(Z = "matrix", R = "matrix", N = "numeric"),
+    # The LD REFERENCE, not the LD matrix: R is variants x variants, and
+    # every group in an enumeration would hold its own dense copy long before
+    # any of them is fitted. The sketch is a lazy panel, so the matrix is
+    # derived once per group at fit time -- which is what the univariate RSS
+    # path in fineMappingPipeline already does.
+    representation(Z = "matrix", ldSketch = "LdSketchOrNULL", N = "numeric"),
     validity = function(object) {
         errors <- character()
-        if (nrow(object@R) != ncol(object@R)) {
-            errors <- c(errors, "'R' (LD) must be square")
-        }
-        if (nrow(object@Z) != nrow(object@R)) {
-            errors <- c(
-                errors,
-                "'Z' rows (variants) must match the 'R' dimension"
-            )
-        }
         if (ncol(object@Z) != nrow(object@conditions)) {
             errors <- c(errors, "ncol(Z) must equal nrow(conditions)")
+        }
+        if (is.null(rownames(object@Z))) {
+            errors <- c(
+                errors,
+                str_c(
+                    "'Z' must carry the variant ids as rownames: they are ",
+                    "what the LD matrix is derived over"
+                )
+            )
         }
         if (length(errors) == 0L) TRUE else errors
     }
@@ -159,14 +170,36 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
 # @noRd
 .jgY <- function(g) g@Y
 
+# The genomic midpoint of each TRAIT, one per Y column -- fsusie's functional
+# domain coordinate, not a variant position. Named apart from `pos`, which
+# everywhere else in the package means the position of a variant.
 # @noRd
-.jgPos <- function(g) g@pos
+.jgTraitPos <- function(g) g@traitPos
 
 # @noRd
 .jgZ <- function(g) g@Z
 
 # @noRd
-.jgR <- function(g) g@R
+.jgLdSketch <- function(g) g@ldSketch
+
+# The variants a summary-statistics group covers, in Z's row order -- which is
+# the order the derived LD matrix comes back in.
+# @noRd
+.jgVariantIds <- function(g) rownames(.jgZ(g))
+
+# The group's LD matrix, derived from its sketch.
+#
+# Callers must derive ONCE per group and pass the result down: the per-
+# condition entry builder runs once per Z column, so calling this from there
+# would recompute the same matrix for every condition.
+# @noRd
+.jgLdMatrix <- function(g) {
+    .ldFromSketch(
+        .jgLdSketch(g),
+        .jgVariantIds(g),
+        label = "jointEngine"
+    )
+}
 
 # @noRd
 .jgN <- function(g) g@N

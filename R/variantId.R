@@ -412,6 +412,7 @@ variantIdToDf <- function(variantId) {
 #'   per-variant merge/flip/strand diagnostics.
 #' @importFrom dplyr mutate inner_join filter pull select everything row_number
 #' @importFrom dplyr if_else any_of all_of rename across
+#' @importFrom purrr partial
 #' @importFrom vctrs vec_duplicate_detect
 #' @importFrom tidyr separate
 #' @keywords internal
@@ -439,21 +440,20 @@ harmonizeAlleles <- function(
     coerced <- .harmonizeCoerceInputs(targetData, refVariants)
     targetData <- coerced$targetData
     refVariants <- coerced$refVariants
-    matchResult <- .harmonizeJoin(targetData, refVariants)
+    # The index rides along on the join copy only: the restore path below
+    # re-reads `targetData`, and a sentinel column there would bind_rows its
+    # way into the returned frame.
+    matchResult <- .harmonizeJoin(.haIndexTargets(targetData), refVariants)
     if (nrow(matchResult) == 0) {
         return(.harmonizeEmptyResult(matchResult))
     }
-    matchResult <- .harmonizeFlags(matchResult)
-    matchResult <- .harmonizeResolveAmbiguity(
-        matchResult,
-        removeStrandAmbiguous
-    )
-    matchResult <- .harmonizeKeepRule(matchResult, removeIndels)
-    matchResult <- .harmonizeApplyFlips(
+    matchResult <- .harmonizeDecideMatches(
         matchResult,
         colToFlip,
         colToComplement,
-        flipStrand
+        flipStrand,
+        removeIndels,
+        removeStrandAmbiguous
     )
     qcCounts <- .harmonizeQcCounts(matchResult)
     qcSummary <- matchResult
@@ -472,6 +472,48 @@ harmonizeAlleles <- function(
     out
 }
 
+# Turn the raw (chrom, pos) join into a decided match table: classify each
+# pair's allele relationship, drop the strand-ambiguous and indel rows the
+# caller refused, settle each target on a single reference row, then apply the
+# sign / frequency flips the chosen orientation implies. Everything before this
+# builds the join; everything after it shapes the output.
+# @noRd
+.harmonizeDecideMatches <- function(
+    matchResult,
+    colToFlip,
+    colToComplement,
+    flipStrand,
+    removeIndels,
+    removeStrandAmbiguous
+) {
+    matchResult <- .harmonizeFlags(matchResult)
+    matchResult <- .harmonizeResolveAmbiguity(
+        matchResult,
+        removeStrandAmbiguous
+    )
+    matchResult <- .harmonizeKeepRule(matchResult, removeIndels)
+    matchResult <- .harmonizeResolveTargets(matchResult)
+    .harmonizeApplyFlips(
+        matchResult,
+        colToFlip,
+        colToComplement,
+        flipStrand
+    )
+}
+
+# Target-row index carried through the (chrom, pos) join so the resolution
+# below can group the reference rows one target variant matched.
+.haTargetIdx <- ".haTidx"
+
+# Assigned directly rather than through mutate(): the target frame is not
+# name-repaired until the join (.sanitizeNames), and dplyr's data mask refuses
+# a frame carrying an NA or empty column name.
+# @noRd
+.haIndexTargets <- function(targetData) {
+    targetData[[.haTargetIdx]] <- seq_len(nrow(targetData))
+    targetData
+}
+
 # QC / flag columns stripped from the harmonized result before it is returned.
 .harmonizeQcCols <- c(
     "flip1.ref",
@@ -482,7 +524,8 @@ harmonizeAlleles <- function(
     "strand_flip",
     "INDEL",
     "ID_match",
-    "keep"
+    "keep",
+    .haTargetIdx
 )
 
 # Coerce both sides to canonical variant data.frames and strip merge-conflicting
@@ -667,9 +710,66 @@ harmonizeAlleles <- function(
     matchResult
 }
 
-# Named per-row conditional column transforms for the harmonize across() calls
-# (the `flip` condition vector is passed through across's `...`, so no anonymous
-# functions are needed).
+# Reduce the join to at most one reference row per TARGET variant.
+#
+# The join is on (chrom, pos), so a target matches every reference row at its
+# position whose alleles reconcile. Usually that is one row. It is more when
+# the reference carries the variant AND its own flip as separate entries --
+# two distinct indels at one position that happen to be each other's flip is
+# rare but biologically real -- or the same variant once per strand.
+#
+# Matches that DISAGREE about the allele-swap sign are undecidable: the target
+# is either the exact entry or the swapped one and nothing says which. Keeping
+# the first would make the effect direction depend on the reference's row
+# order; keeping both would return the target twice with opposite signs, which
+# is not harmonization but duplication. Those targets are dropped. Matches that
+# agree (the same variant listed twice, or once per strand) resolve to the
+# first row, so this costs nothing where there is no ambiguity.
+#
+# Deciding it here, before the keep flags are counted, is what lets every
+# caller -- matchVariants, the summaryStatsQc panel harmonization, the cTWAS
+# weight harmonization -- agree on the surviving variant set without repeating
+# the rule.
+# @noRd
+.harmonizeResolveTargets <- function(matchResult) {
+    tidx <- matchResult[[.haTargetIdx]]
+    hit <- which(matchResult$keep)
+    # Fast path: one reference row per target is the overwhelmingly common
+    # case, and it needs no grouping at all.
+    if (anyDuplicated(tidx[hit]) == 0L) {
+        return(matchResult)
+    }
+    conflicted <- .harmonizeConflictedTargets(
+        tidx[hit],
+        matchResult$sign_flip[hit]
+    )
+    resolved <- hit[
+        !is_in(tidx[hit], conflicted) & !duplicated(tidx[hit])
+    ]
+    # Named apart from the column it replaces: `keep = keep` inside mutate()
+    # reads the column, not this vector, and silently changes nothing.
+    resolvedKeep <- rep(FALSE, nrow(matchResult))
+    resolvedKeep[resolved] <- TRUE
+    mutate(matchResult, keep = resolvedKeep)
+}
+
+# Target indices whose reference matches disagree about the allele-swap sign.
+# @noRd
+.harmonizeConflictedTargets <- function(tidx, signFlip) {
+    tibble(tidx = tidx, signFlip = signFlip) |>
+        group_by(.data$tidx) |>
+        summarise(nSigns = n_distinct(.data$signFlip), .groups = "drop") |>
+        filter(.data$nSigns > 1L) |>
+        pull("tidx")
+}
+
+# Named per-row conditional column transforms for the harmonize across() calls.
+# The `flip` condition vector is bound with purrr::partial() rather than passed
+# through across()'s `...`, which dplyr deprecated in 1.1.0 -- partial() fixes
+# the argument without an anonymous function, so the no-lambda rule the `...`
+# form was chosen for still holds. partial() is LAZY, so callers bind the
+# condition to a local first: what it captures must not be reassigned before
+# across() calls it.
 # @noRd
 .negateWhere <- function(x, flip) if_else(flip, -x, x)
 # @noRd
@@ -686,13 +786,13 @@ harmonizeAlleles <- function(
     colToComplement,
     flipStrand
 ) {
+    signFlip <- matchResult$sign_flip
     if (!is.null(colToFlip)) {
         .harmonizeCheckCols(colToFlip, matchResult)
         matchResult <- matchResult |>
             mutate(across(
                 all_of(colToFlip),
-                .negateWhere,
-                matchResult$sign_flip
+                partial(.negateWhere, flip = signFlip)
             ))
     }
     if (length(colToComplement) > 0L) {
@@ -700,8 +800,7 @@ harmonizeAlleles <- function(
         matchResult <- matchResult |>
             mutate(across(
                 all_of(colToComplement),
-                .complementWhere,
-                matchResult$sign_flip
+                partial(.complementWhere, flip = signFlip)
             ))
     }
     if (flipStrand) {
@@ -725,11 +824,11 @@ harmonizeAlleles <- function(
 # Strand-flip the target alleles of the strand-flipped rows.
 # @noRd
 .harmonizeFlipStrandCols <- function(matchResult) {
+    strandFlip <- matchResult$strand_flip
     matchResult |>
         mutate(across(
             c("A1.target", "A2.target"),
-            .strandFlipWhere,
-            matchResult$strand_flip
+            partial(.strandFlipWhere, flip = strandFlip)
         ))
 }
 
@@ -993,42 +1092,14 @@ matchVariants <- function(
     if (is.null(h) || nrow(h) == 0L) {
         return(.matchVariantsEmpty())
     }
-    h <- .matchDropSignConflicts(h)
-    if (nrow(h) == 0L) {
-        return(.matchVariantsEmpty())
-    }
-    keep <- !duplicated(h$.mvTidx) # at most one ref per A id
+    # One row per A id, sign-conflicting ids already dropped: harmonizeAlleles
+    # resolves that (see .harmonizeResolveTargets), so there is nothing to
+    # decide a second time here.
     list(
-        idxA = as.integer(h$.mvTidx[keep]),
-        idxB = as.integer(h$.mvRidx[keep]),
-        sign = as.numeric(h$.mvSign[keep])
+        idxA = as.integer(h$.mvTidx),
+        idxB = as.integer(h$.mvRidx),
+        sign = as.numeric(h$.mvSign)
     )
-}
-
-# Drop target variants whose reference matches disagree about the sign.
-#
-# A reference panel can legitimately carry a variant and its own allele flip as
-# two separate entries -- two distinct indels at one position that happen to be
-# each other's flip is rare but biologically real. A target variant then
-# matches BOTH: once exactly (sign +1) and once as an allele swap (sign -1),
-# and there is no way to tell which entry it is. The caller below keeps the
-# first match, so without this the answer would depend on the panel's row
-# order, silently flipping the effect direction for that variant.
-#
-# Only a sign DISAGREEMENT is ambiguous. Duplicate reference entries that agree
-# (the same variant listed twice) still resolve to the first match, so this
-# drops nothing it does not have to.
-# @noRd
-.matchDropSignConflicts <- function(h) {
-    ambiguous <- h |>
-        group_by(.data$.mvTidx) |>
-        summarise(nSigns = n_distinct(.data$.mvSign), .groups = "drop") |>
-        filter(.data$nSigns > 1L) |>
-        pull(".mvTidx")
-    if (length(ambiguous) == 0L) {
-        return(h)
-    }
-    filter(h, !is_in(.data$.mvTidx, ambiguous))
 }
 
 # Backwards-compat alias for external callers

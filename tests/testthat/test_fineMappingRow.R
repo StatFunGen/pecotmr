@@ -1368,8 +1368,11 @@ test_that("every fit credible set gets a row, with its true membership", {
         alpha = alpha,
         V = c(0.1, 0.2),
         lbf_variable = matrix(
-            c(1, 1, 1, 0, 0, 0, 2, 0, 0, 0), 2, 5,
-            byrow = TRUE, dimnames = list(c("L1", "L2"), vn)
+            c(1, 1, 1, 0, 0, 0, 2, 0, 0, 0),
+            2,
+            5,
+            byrow = TRUE,
+            dimnames = list(c("L1", "L2"), vn)
         ),
         sets = list(
             # L2 = {2} sits inside L1 = {1,2,3}: v2 tags to the smaller L2 in
@@ -1422,7 +1425,9 @@ test_that("the summary carries the fit's true (gapped) effect index", {
     )
     class(fit) <- "susie"
     tl <- data.frame(
-        variant_id = vn, pip = fit$pip, logBF = c(1, 1, 1, 2),
+        variant_id = vn,
+        pip = fit$pip,
+        logBF = c(1, 1, 1, 2),
         cs_95 = c("susie_2", "susie_2", "susie_2", "susie_1"),
         stringsAsFactors = FALSE
     )
@@ -1439,7 +1444,9 @@ test_that("a fit with no stored sets falls back to the per-variant column", {
     fit <- list(pip = c(0.5, 0.4, 0.1))
     class(fit) <- "susie"
     tl <- data.frame(
-        variant_id = vn, pip = fit$pip, logBF = c(1, 1, 0),
+        variant_id = vn,
+        pip = fit$pip,
+        logBF = c(1, 1, 0),
         cs_95 = c("susie_1", "susie_1", "susie_0"),
         stringsAsFactors = FALSE
     )

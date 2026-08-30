@@ -122,7 +122,7 @@ test_that(".reconcileScalar resolves arg/column and flags conflicts", {
 test_that(".detectGenotypeFormat builds a PLINK1 handle from a prefix", {
     h <- pecotmr:::.detectGenotypeFormat(.toyRefPrefix())
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(h@format, "plink1")
+    expect_equal(getFormat(h), "plink1")
 })
 
 test_that("BCF sumstats are rejected", {
@@ -197,7 +197,7 @@ test_that("loadGwasSumStatsFromManifest builds from a data.frame manifest", {
         c("SNP", "A1", "A2", "Z", "N") %in%
             colnames(S4Vectors::mcols(obj[[1L]]))
     ))
-    expect_equal(length(obj@qcInfo), 0L) # loaders run no QC
+    expect_equal(length(getQcInfo(obj)), 0L) # loaders run no QC
 })
 
 test_that("loadGwasSumStatsFromManifest reads a manifest file and reconciles genome", {
@@ -662,7 +662,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
     msd <- loadMultiStudyQtlDatasetFromManifest(manifest)
     expect_s4_class(msd, "MultiStudyQtlDataset")
     expect_true(methods::validObject(msd))
-    expect_equal(sort(names(msd@qtlDatasets)), c("study1", "study2"))
+    expect_equal(sort(names(getQtlDatasets(msd))), c("study1", "study2"))
 })
 
 test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary-only study", {
@@ -691,7 +691,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary-only study", 
     )
     expect_true(methods::validObject(msd))
     expect_s4_class(msd@sumStats, "QtlSumStats")
-    expect_equal(names(msd@qtlDatasets), "study1")
+    expect_equal(names(getQtlDatasets(msd)), "study1")
 })
 
 # ===========================================================================
@@ -752,13 +752,13 @@ test_that(".detectGenotypeFormat dispatches by extension", {
         "Could not determine genotype format"
     )
     h <- pecotmr:::.detectGenotypeFormat(paste0(.toyRefPrefix(), ".bed"))
-    expect_equal(h@format, "plink1")
+    expect_equal(getFormat(h), "plink1")
 })
 
 test_that(".resolveLdSketch accepts a genoMeta vector, a path, and rejects bad input", {
     sharded <- pecotmr:::.resolveLdSketch(c("22" = .toyRefPrefix()))
     expect_s4_class(sharded, "GenotypeHandle")
-    expect_true("22" %in% names(sharded@chromPaths))
+    expect_true("22" %in% names(getChromPaths(sharded)))
     expect_s4_class(
         pecotmr:::.resolveLdSketch(.toyRefPrefix()),
         "GenotypeHandle"
@@ -807,7 +807,7 @@ test_that(".materializeLdSketch passes a handle through and restricts spec shard
     spec <- c("22" = .toyRefPrefix(), "21" = "/no/such/chr21/prefix")
     restricted <- pecotmr:::.materializeLdSketch(spec, "22")
     expect_s4_class(restricted, "GenotypeHandle")
-    expect_equal(names(restricted@chromPaths), "22")
+    expect_equal(names(getChromPaths(restricted)), "22")
     expect_error(pecotmr:::.materializeLdSketch(spec, c("22", "21")))
 })
 

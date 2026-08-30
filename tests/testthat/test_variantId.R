@@ -877,10 +877,14 @@ test_that("matchVariants allowFlip = FALSE matches exact alleles only (no swap)"
 }
 
 test_that("harmonizeAlleles warns and returns empty when nothing overlaps", {
-    res <- suppressWarnings(pecotmr:::harmonizeAlleles(
-        .vid_df("1", 100, "A", "G"),
-        .vid_df("1", 999, "A", "G")
-    ))
+    # Asserted, not suppressed: the warning is half of what this test names.
+    expect_warning(
+        res <- pecotmr:::harmonizeAlleles(
+            .vid_df("1", 100, "A", "G"),
+            .vid_df("1", 999, "A", "G")
+        ),
+        "No matching variants found"
+    )
     expect_equal(nrow(res$harmonizedData), 0L)
     expect_equal(attr(res, "qcCounts")$considered, 0L)
 })
@@ -992,6 +996,88 @@ test_that("harmonizeAlleles removeIndels = TRUE drops indels", {
 })
 
 # ===========================================================================
+# harmonizeAlleles: one row per target variant
+#
+# The join is on (chrom, pos), so a reference carrying both orientations of a
+# variant used to return that target TWICE with opposite signs -- a phantom
+# sign-flipped copy that every matchVariants-based LD lookup downstream then
+# refused to match. The resolution now happens here, where the surviving
+# variant set is decided.
+# ===========================================================================
+
+test_that("harmonizeAlleles drops a target the reference cannot decide", {
+    tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
+    ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "G"), c("G", "A"))
+    res <- pecotmr:::harmonizeAlleles(
+        tgt,
+        ref,
+        colToFlip = "Z",
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 0L)
+})
+
+test_that("harmonizeAlleles sees a strand-recorded second orientation too", {
+    # A:G and C:T are the same ambiguity as A:G and G:A -- only a literal
+    # string key would miss it.
+    tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
+    ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "C"), c("G", "T"))
+    res <- pecotmr:::harmonizeAlleles(
+        tgt,
+        ref,
+        colToFlip = "Z",
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 0L)
+})
+
+test_that("harmonizeAlleles keeps one row when the matches agree", {
+    # A second reference row at the same position with reconcilable alleles
+    # and the SAME sign is not ambiguous, so the target survives -- once.
+    tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
+    ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "T"), c("G", "C"))
+    res <- pecotmr:::harmonizeAlleles(
+        tgt,
+        ref,
+        colToFlip = "Z",
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 1L)
+    expect_equal(res$harmonizedData$Z, 2.2)
+})
+
+test_that("harmonizeAlleles leaves a plain multi-allelic position alone", {
+    # A:G and A:T at one position are two different variants, not two records
+    # of one, so the target matches exactly one of them.
+    tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
+    ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "A"), c("G", "T"))
+    res <- pecotmr:::harmonizeAlleles(
+        tgt,
+        ref,
+        colToFlip = "Z",
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 1L)
+    expect_equal(res$harmonizedData$Z, 2.2)
+})
+
+test_that("harmonizeAlleles counts what it kept, not what it joined", {
+    # The counts feed the summaryStatsQc log line; they are taken after the
+    # resolution, so a dropped target is not also reported as a correction.
+    tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
+    ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "G"), c("G", "A"))
+    res <- pecotmr:::harmonizeAlleles(
+        tgt,
+        ref,
+        colToFlip = "Z",
+        matchMinProp = 0
+    )
+    counts <- attr(res, "qcCounts")
+    expect_equal(counts$kept, 0L)
+    expect_equal(counts$signFlip, 0L)
+})
+
+# ===========================================================================
 # withChrPrefix + asGranges error paths
 # ===========================================================================
 
@@ -1060,11 +1146,13 @@ test_that("the drop does not depend on the reference's row order", {
 
 test_that("a single orientation still matches, flipped or not", {
     expect_equal(
-        matchVariants("chr1:100:A:AT", "chr1:100:A:AT")$sign, 1
+        matchVariants("chr1:100:A:AT", "chr1:100:A:AT")$sign,
+        1
     )
     # An unambiguous flip is a match, not an error: only disagreement is.
     expect_equal(
-        matchVariants("chr1:100:A:AT", "chr1:100:AT:A")$sign, -1
+        matchVariants("chr1:100:A:AT", "chr1:100:AT:A")$sign,
+        -1
     )
 })
 
@@ -1079,7 +1167,8 @@ test_that("duplicate reference entries that agree are still matched", {
 test_that("only the ambiguous target is dropped from a mixed set", {
     sumstats <- c("chr1:100:A:AT", "chr1:400:A:G", "chr1:500:C:T")
     panel <- c(
-        "chr1:100:A:AT", "chr1:100:AT:A",
+        "chr1:100:A:AT",
+        "chr1:100:AT:A",
         "chr1:400:A:G",
         "chr1:500:T:C"
     )

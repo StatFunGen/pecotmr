@@ -34,31 +34,31 @@ context("fineMappingPipeline")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -703,25 +703,6 @@ test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
     expect_error(pecotmr:::.fmExtractZn(gr, "x"), "no Z mcol")
     S4Vectors::mcols(gr)$Z <- 1.0
     expect_error(pecotmr:::.fmExtractZn(gr, "x"), "no N mcol")
-})
-
-# ===========================================================================
-# .fmLdFromSketch
-# ===========================================================================
-
-test_that(".fmLdFromSketch: returns named LD matrix; missing variants error", {
-    h <- .fmp_makeHandle()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .package = "pecotmr"
-    )
-    R <- pecotmr:::.fmLdFromSketch(h, c("chr1:100:A:G", "chr1:300:A:G"))
-    expect_equal(dim(R), c(2L, 2L))
-    expect_equal(rownames(R), c("chr1:100:A:G", "chr1:300:A:G"))
-    expect_error(
-        pecotmr:::.fmLdFromSketch(h, c("chr1:100:A:G", "ghost")),
-        "not present in the LD sketch"
-    )
 })
 
 # ===========================================================================
@@ -4691,7 +4672,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out
 # @noRd
 .rssf_qcd <- function() {
     data(qtlSumStatsExample, envir = environment())
-    suppressWarnings(suppressMessages(summaryStatsQc(qtlSumStatsExample)))
+    suppressMessages(summaryStatsQc(qtlSumStatsExample))
 }
 
 # @noRd

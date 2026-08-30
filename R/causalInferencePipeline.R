@@ -733,7 +733,7 @@ causalInferencePipeline <- function(
     wSub <- weights[m$idxA] * m$sign
     zSub <- gwasDf$z[m$idxB]
     gwasIds <- gwasDf$variant_id[m$idxB]
-    ldMat <- .cipLdFromSketch(gwasLd, gwasIds)
+    ldMat <- .ldFromSketch(gwasLd, gwasIds, label = "causalInferencePipeline")
 
     res <- twasZ(weights = wSub, z = zSub, R = ldMat)
     zMat <- res$Z
@@ -775,13 +775,6 @@ causalInferencePipeline <- function(
         )
     }
     warn(msg)
-}
-
-# Build an LD correlation matrix for a given variant subset from an
-# LD sketch. Thin wrapper over the shared `.ldFromSketch` helper
-# (R/ld.R).
-.cipLdFromSketch <- function(ldSketch, variantIds) {
-    .ldFromSketch(ldSketch, variantIds, label = "causalInferencePipeline")
 }
 
 # Compute the Wald-ratio IVW MR estimate for a single tuple. Uses the

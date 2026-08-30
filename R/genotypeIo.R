@@ -440,7 +440,8 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         as.matrix(genotypeCovariates)
     }
     SummarizedExperiment::colData(panel) <- .genotypeColData(
-        gCov, colnames(panel)
+        gCov,
+        colnames(panel)
     )
     panel
 }
@@ -732,10 +733,13 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # layout. The shared form of the t(assay(extractBlockGenotypes(...))) idiom.
 # @noRd
 .dosageMatrix <- function(handle, snpIdx, meanImpute = TRUE) {
-    t(SummarizedExperiment::assay(
-        extractBlockGenotypes(handle, snpIdx, meanImpute = meanImpute),
-        "dosage"
-    ))
+    block <- extractBlockGenotypes(handle, snpIdx, meanImpute = meanImpute)
+    # NULL, not an error, when the reader declines the block: callers read
+    # that as "no genotypes here" (computeLd answers with an identity).
+    if (is.null(block)) {
+        return(NULL)
+    }
+    t(SummarizedExperiment::assay(block, "dosage"))
 }
 
 # Open a GDS read-only, guarantee it is closed on exit, and return fn(gds).

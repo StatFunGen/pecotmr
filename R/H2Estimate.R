@@ -64,6 +64,30 @@ setClass(
 #' @export
 setMethod("getH2", "H2Estimate", function(x) x@h2)
 
+#' @rdname getH2Se
+#' @export
+setMethod("getH2Se", "H2Estimate", function(x) x@h2Se)
+
+#' @rdname getIntercept
+#' @export
+setMethod("getIntercept", "H2Estimate", function(x) x@intercept)
+
+#' @rdname getInterceptSe
+#' @export
+setMethod("getInterceptSe", "H2Estimate", function(x) x@interceptSe)
+
+#' @rdname getNSnps
+#' @export
+setMethod("getNSnps", "H2Estimate", function(x) x@nSnps)
+
+#' @rdname getTraitName
+#' @export
+setMethod("getTraitName", "H2Estimate", function(x) x@traitName)
+
+#' @rdname getMethodNames
+#' @export
+setMethod("getMethodNames", "H2Estimate", function(x) x@method)
+
 #' @rdname getTauBlocks
 #' @export
 setMethod("getTauBlocks", "H2Estimate", function(x) x@tauBlocks)

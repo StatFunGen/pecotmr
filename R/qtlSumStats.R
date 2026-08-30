@@ -538,8 +538,8 @@ setMethod("show", "QtlSumStats", function(object) {
         return(gr)
     }
     tp <- traitPos[i]
-    tssPos <- suppressWarnings(GenomicRanges::start(tp))
-    tesPos <- suppressWarnings(GenomicRanges::end(tp))
+    tssPos <- GenomicRanges::start(tp)
+    tesPos <- GenomicRanges::end(tp)
     if (length(tssPos) == 0L || is.na(tssPos)) {
         return(gr)
     }
