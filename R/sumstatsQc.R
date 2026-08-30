@@ -1722,7 +1722,12 @@ autoDecision <- function(df, highCorrCols) {
 # correspondence between `knownZscores$z` and the LD rows indexed by `knowns`.
 # @noRd
 .raissUnsafeToImpute <- function(refPanelIds, knownIds) {
-    .raissFlipPairMask(refPanelIds) |
+    # unusable-id: the id does not encode its alleles (e.g. an R5 INS/DEL tag).
+    # It is dropped from harmonization for the same reason -- the sumstats cannot
+    # say which orientation was measured -- so imputing it would put back a
+    # variant the drop exists to exclude.
+    !.ldSketchIdUsable(refPanelIds) |
+        .raissFlipPairMask(refPanelIds) |
         .raissFlipOfKnownMask(refPanelIds, knownIds)
 }
 
@@ -3151,6 +3156,26 @@ krigingOutlierQc <- function(
 # harmonizeAlleles against the ldSketch's variant info. Threads the
 # variant-level filters (indels, strand-ambiguous, duplicates) through
 # so the LD-panel-anchored pass handles them in a single sweep.
+# The harmonization reference set: the panel's variants, minus the entries
+# whose id does not encode its alleles (e.g. R5 INS/DEL tags). Their A1/A2
+# columns may be correct, but the summary statistics carry no way to say which
+# orientation was measured at that position, so a GWAS variant there must be
+# dropped rather than aligned by a guess that could sign-flip a real signal --
+# the same "exclude what you can't interpret" rule the RAISS flip-pair /
+# flip-of-known masks apply. Removing the reference row leaves the GWAS variant
+# unmatched, so removeUnmatched removes it.
+#
+# Filtered HERE rather than inside .refVariantsFromSketch because the RAISS
+# path indexes into that frame and would misalign against its dosage if it
+# were filtered globally.
+# @noRd
+.sketchRefVariants <- function(ldSketch) {
+    filter(
+        .refVariantsFromSketch(ldSketch),
+        .ldSketchIdUsable(.data$variant_id)
+    )
+}
+
 .matchAgainstSketch <- function(
     df,
     ldSketch,
@@ -3159,7 +3184,7 @@ krigingOutlierQc <- function(
     removeStrandAmbiguous = TRUE,
     removeDups = TRUE
 ) {
-    refVariants <- .refVariantsFromSketch(ldSketch)
+    refVariants <- .sketchRefVariants(ldSketch)
     flipCandidates <- c("Z", "BETA")
     colToFlip <- intersect(flipCandidates, colnames(df))
     if (length(colToFlip) == 0L) {

@@ -98,6 +98,35 @@ isSnpAlleles <- function(a1, a2) {
     replace_na(isSnp, FALSE)
 }
 
+#' Test whether variant ids encode usable DNA alleles (not a tag like INS/DEL).
+#'
+#' Some LD panels (e.g. ADSP R5) name a variant with a tag where an allele belongs
+#' -- \code{chr21:13988152:INS:T} whose real alleles are \code{A}/\code{AT} -- so the
+#' id no longer encodes its alleles, even though the panel's A1/A2 columns are correct.
+#' The id-string matchers (\code{.ldFromSketchMatch}, \code{.subsetSketchToIds}) key on
+#' the id and cannot interpret such a record. Returns TRUE only where both parsed
+#' alleles are pure DNA; tests for DNA rather than the literal \code{INS}/\code{DEL},
+#' so any tagging convention is caught. A legitimate multi-base indel allele (e.g.
+#' \code{TAATGG}) stays usable.
+#' An id that does not parse to \code{chr:pos:allele:allele} at all -- e.g. an
+#' rsID -- is a different, valid convention (its A1/A2 columns are clean and
+#' \code{matchVariants} handles it by string), so it is NOT flagged; only an id
+#' that parses to the allele form but whose allele slot holds a non-DNA tag is
+#' unusable.
+#' @param ids Character vector of variant ids (\code{chr:pos:A2:A1}).
+#' @return Logical vector, TRUE unless the id parses to a non-DNA allele.
+#' @noRd
+.ldSketchIdUsable <- function(ids) {
+    p <- parseVariantId(ids)
+    parsed <- !is.na(p$A1) & !is.na(p$A2)
+    dnaOk <- replace_na(
+        str_detect(p$A1, "^[ACGT]+$") & str_detect(p$A2, "^[ACGT]+$"),
+        FALSE
+    )
+    # usable = not an allele-encoded id (rsID etc.) OR parsed and pure DNA.
+    !parsed | dnaOk
+}
+
 # Backwards-compat alias
 
 #' Detect the naming convention of variant IDs
