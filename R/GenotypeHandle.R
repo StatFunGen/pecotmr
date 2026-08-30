@@ -812,7 +812,14 @@ setClass(
 setMethod("dim", "GhSeed", function(x) x@dm)
 
 #' @rdname GhSeed-class
-setMethod("dimnames", "GhSeed", function(x) x@dn)
+setMethod("dimnames", "GhSeed", function(x) {
+    # The sample axis is derived from the handle, not stored a second time.
+    # handle@sampleIds is the single copy; storing dn[[2]] as well would
+    # duplicate ~10k anonymous projection-dimension names in every serialised
+    # sketch (see genotypeDelayedArray()). getSampleIds() is character(0) on an
+    # emptied handle, so this stays consistent with dm = c(nVar, 0).
+    list(x@dn[[1L]], as.character(getSampleIds(x@handle)))
+})
 
 # The handle a seed reads through. Internal accessor: GhSeed is not exported,
 # so this adds no public surface, and it keeps the `@` next to the class.
@@ -866,9 +873,12 @@ genotypeDelayedArray <- function(handle) {
         "GhSeed",
         handle = handle,
         dm = c(nrow(si), as.integer(getNSamples(handle))),
+        # Only the variant axis is stored; the sample axis is derived from the
+        # handle in the dimnames() method above, so the ~10k sample ids are not
+        # duplicated between dn[[2]] and handle@sampleIds.
         dn = list(
             normalizeVariantId(as.character(si$SNP)),
-            as.character(getSampleIds(handle))
+            NULL
         )
     )
     DelayedArray::DelayedArray(seed)

@@ -102,11 +102,14 @@ setMethod(
     if (is.null(handle)) {
         return(NULL)
     }
-    si <- getSnpInfo(handle)
-    if (nrow(si) == 0L) {
-        return(handle)
-    }
-    handle@snpInfo <- slice(si, integer(0))
+    # Empty both axes. An emptied sketch references no LD, so its sample axis is
+    # dead weight (~10k anonymous names, the bulk of a skipped-region file).
+    # nSamples must go to 0 alongside sampleIds, or dm (variants x nSamples)
+    # would disagree with the now-empty derived sample dimnames. Reached only via
+    # .emptySketch (the empty / PIP-skip path), never on a surviving region.
+    handle@snpInfo <- slice(getSnpInfo(handle), integer(0))
+    handle@sampleIds <- character(0)
+    handle@nSamples <- 0L
     handle
 }
 
