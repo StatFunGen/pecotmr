@@ -245,9 +245,14 @@ reference:
     contents:
       - getEnrichment
       - getH2
+      - getH2Se
+      - getIntercept
+      - getInterceptSe
       - getLocal
+      - getNSnps
       - getScoreStats
       - getTauBlocks
+      - getTraitName
 
   - subtitle: "LdData"
     contents:
