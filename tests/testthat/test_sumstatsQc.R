@@ -7907,11 +7907,19 @@ test_that("both trimmers empty the sketch for zero-variant entries", {
     }
 })
 
-test_that("emptying keeps every other property of the panel", {
+test_that("emptying drops both axes but keeps the panel's identity", {
     h <- .sk_panel()
     e <- .subsetSketchToRange(h, list())
-    expect_equal(ncol(e), ncol(h))
-    expect_equal(colnames(e), colnames(h))
+    # The sample axis is shed along with the variants: an emptied sketch
+    # references no LD, so its anonymous sample names are dead weight (the bulk
+    # of a skipped-region file). What is kept is the panel's identity -- where
+    # it came from -- not its dimensions.
+    expect_equal(nrow(e), 0L)
+    expect_equal(ncol(e), 0L)
+    hh <- .ldSketchHandle(h)
+    eh <- .ldSketchHandle(e)
+    expect_equal(getFormat(eh), getFormat(hh))
+    expect_equal(getPath(eh), getPath(hh))
 })
 
 test_that(".emptySketch drops the seed's variants, not just the rows", {

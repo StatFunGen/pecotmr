@@ -814,6 +814,41 @@ test_that("the seed answers an empty extraction on either axis", {
     )
 })
 
+test_that("genotypeDelayedArray stores the sample axis once, derives it on read", {
+    # The sample ids are an anonymous projection dimension and would otherwise be
+    # duplicated between GhSeed@dn[[2]] and handle@sampleIds. The seed stores only
+    # the variant axis; dimnames() derives the sample axis from the handle.
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    seed <- genotypeDelayedArray(gh)@seed
+    expect_null(seed@dn[[2L]]) # not stored
+    expect_identical(dimnames(seed)[[2L]], as.character(getSampleIds(gh))) # derived
+    expect_identical(dimnames(seed)[[1L]], seed@dn[[1L]]) # variant axis stored
+    expect_equal(dim(seed)[[2L]], length(dimnames(seed)[[2L]])) # dm consistent
+})
+
+test_that(".emptyGenotypeHandle empties the sample axis as well as the variants", {
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    e <- pecotmr:::.emptyGenotypeHandle(gh)
+    expect_equal(nrow(getSnpInfo(e)), 0L)
+    expect_equal(length(getSampleIds(e)), 0L)
+    expect_equal(getNSamples(e), 0L)
+    # the rebuilt seed is a consistent 0 x 0 (no 0 x nSamples mismatch)
+    seed <- genotypeDelayedArray(e)@seed
+    expect_equal(dim(seed), c(0L, 0L))
+    expect_equal(lengths(dimnames(seed)), c(0L, 0L))
+})
+
+test_that(".emptySketch drops the sample axis on an RSE sketch", {
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    empty <- pecotmr:::.emptySketch(pecotmr:::.genotypeExperiment(gh))
+    h <- pecotmr:::.ldSketchHandle(empty)
+    expect_equal(length(getSampleIds(h)), 0L)
+    expect_equal(nrow(getSnpInfo(h)), 0L)
+})
+
 test_that("nothing is read until a block is actually touched", {
     # The point of the seed: a panel can be described without being read.
     data(qtlDatasetExample, envir = environment())
