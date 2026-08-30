@@ -412,6 +412,7 @@ variantIdToDf <- function(variantId) {
 #'   per-variant merge/flip/strand diagnostics.
 #' @importFrom dplyr mutate inner_join filter pull select everything row_number
 #' @importFrom dplyr if_else any_of all_of rename across
+#' @importFrom purrr partial
 #' @importFrom vctrs vec_duplicate_detect
 #' @importFrom tidyr separate
 #' @keywords internal
@@ -446,18 +447,13 @@ harmonizeAlleles <- function(
     if (nrow(matchResult) == 0) {
         return(.harmonizeEmptyResult(matchResult))
     }
-    matchResult <- .harmonizeFlags(matchResult)
-    matchResult <- .harmonizeResolveAmbiguity(
-        matchResult,
-        removeStrandAmbiguous
-    )
-    matchResult <- .harmonizeKeepRule(matchResult, removeIndels)
-    matchResult <- .harmonizeResolveTargets(matchResult)
-    matchResult <- .harmonizeApplyFlips(
+    matchResult <- .harmonizeDecideMatches(
         matchResult,
         colToFlip,
         colToComplement,
-        flipStrand
+        flipStrand,
+        removeIndels,
+        removeStrandAmbiguous
     )
     qcCounts <- .harmonizeQcCounts(matchResult)
     qcSummary <- matchResult
@@ -474,6 +470,35 @@ harmonizeAlleles <- function(
     out <- list(harmonizedData = result, qcSummary = qcSummary)
     attr(out, "qcCounts") <- qcCounts
     out
+}
+
+# Turn the raw (chrom, pos) join into a decided match table: classify each
+# pair's allele relationship, drop the strand-ambiguous and indel rows the
+# caller refused, settle each target on a single reference row, then apply the
+# sign / frequency flips the chosen orientation implies. Everything before this
+# builds the join; everything after it shapes the output.
+# @noRd
+.harmonizeDecideMatches <- function(
+    matchResult,
+    colToFlip,
+    colToComplement,
+    flipStrand,
+    removeIndels,
+    removeStrandAmbiguous
+) {
+    matchResult <- .harmonizeFlags(matchResult)
+    matchResult <- .harmonizeResolveAmbiguity(
+        matchResult,
+        removeStrandAmbiguous
+    )
+    matchResult <- .harmonizeKeepRule(matchResult, removeIndels)
+    matchResult <- .harmonizeResolveTargets(matchResult)
+    .harmonizeApplyFlips(
+        matchResult,
+        colToFlip,
+        colToComplement,
+        flipStrand
+    )
 }
 
 # Target-row index carried through the (chrom, pos) join so the resolution
@@ -738,9 +763,13 @@ harmonizeAlleles <- function(
         pull("tidx")
 }
 
-# Named per-row conditional column transforms for the harmonize across() calls
-# (the `flip` condition vector is passed through across's `...`, so no anonymous
-# functions are needed).
+# Named per-row conditional column transforms for the harmonize across() calls.
+# The `flip` condition vector is bound with purrr::partial() rather than passed
+# through across()'s `...`, which dplyr deprecated in 1.1.0 -- partial() fixes
+# the argument without an anonymous function, so the no-lambda rule the `...`
+# form was chosen for still holds. partial() is LAZY, so callers bind the
+# condition to a local first: what it captures must not be reassigned before
+# across() calls it.
 # @noRd
 .negateWhere <- function(x, flip) if_else(flip, -x, x)
 # @noRd
@@ -757,13 +786,13 @@ harmonizeAlleles <- function(
     colToComplement,
     flipStrand
 ) {
+    signFlip <- matchResult$sign_flip
     if (!is.null(colToFlip)) {
         .harmonizeCheckCols(colToFlip, matchResult)
         matchResult <- matchResult |>
             mutate(across(
                 all_of(colToFlip),
-                .negateWhere,
-                matchResult$sign_flip
+                partial(.negateWhere, flip = signFlip)
             ))
     }
     if (length(colToComplement) > 0L) {
@@ -771,8 +800,7 @@ harmonizeAlleles <- function(
         matchResult <- matchResult |>
             mutate(across(
                 all_of(colToComplement),
-                .complementWhere,
-                matchResult$sign_flip
+                partial(.complementWhere, flip = signFlip)
             ))
     }
     if (flipStrand) {
@@ -796,11 +824,11 @@ harmonizeAlleles <- function(
 # Strand-flip the target alleles of the strand-flipped rows.
 # @noRd
 .harmonizeFlipStrandCols <- function(matchResult) {
+    strandFlip <- matchResult$strand_flip
     matchResult |>
         mutate(across(
             c("A1.target", "A2.target"),
-            .strandFlipWhere,
-            matchResult$strand_flip
+            partial(.strandFlipWhere, flip = strandFlip)
         ))
 }
 

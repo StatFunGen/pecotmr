@@ -1619,8 +1619,8 @@ test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcInfo are set"
     expect_equal(unique(mc$A1), "T")
     expect_equal(unique(mc$A2), "C")
     expect_equal(unique(mc$N), 500L)
-    expect_equal(qss@qcInfo$role, "strong")
-    expect_equal(length(qss@qcInfo$entryAudit), 2L) # one slot per context
+    expect_equal(getQcInfo(qss)$role, "strong")
+    expect_equal(length(getQcInfo(qss)$entryAudit), 2L) # one slot per context
 })
 
 test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait pairs", {
@@ -1767,7 +1767,7 @@ test_that("qtlSumStatsFromBetaMatrix: NULL rownames -> synthetic ids; placeholde
     expect_equal(mc$SNP, c("var1", "var2"))
     expect_equal(unique(mc$A1), "T")
     expect_equal(unique(mc$N), 500L)
-    expect_equal(qss@qcInfo$role, "strong")
+    expect_equal(getQcInfo(qss)$role, "strong")
 })
 
 # ===========================================================================

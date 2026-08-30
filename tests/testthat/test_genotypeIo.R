@@ -915,7 +915,7 @@ test_that("matchVariantsToKeep filters to specified variants", {
         file.path(td, "test_variants"),
         format = "plink2"
     )
-    vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
+    vi <- pecotmr:::.snpInfoToVariantInfo(getSnpInfo(handle))
 
     # Write a keep file as tab-delimited with chrom/pos columns
     keep_file <- tempfile(fileext = ".tsv")
@@ -938,7 +938,7 @@ test_that("matchVariantsToKeep returns all FALSE for non-matching variants", {
         file.path(td, "test_variants"),
         format = "plink2"
     )
-    vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
+    vi <- pecotmr:::.snpInfoToVariantInfo(getSnpInfo(handle))
 
     keep_file <- tempfile(fileext = ".tsv")
     on.exit(unlink(keep_file), add = TRUE)
@@ -1037,7 +1037,7 @@ test_that("matchVariantsToKeep uses position-only matching when no alleles", {
         file.path(td, "test_variants"),
         format = "plink2"
     )
-    vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
+    vi <- pecotmr:::.snpInfoToVariantInfo(getSnpInfo(handle))
 
     keep_file <- tempfile(fileext = ".tsv")
     on.exit(unlink(keep_file), add = TRUE)
@@ -1068,7 +1068,7 @@ test_that("readGenotypes loads plink2 handle with all variants", {
         format = "plink2"
     )
     expect_s4_class(handle, "GenotypeHandle")
-    expect_equal(handle@nSamples, 100L)
+    expect_equal(getNSamples(handle), 100L)
     expect_equal(nrow(getSnpInfo(handle)), 349L)
     rse <- extractBlockGenotypes(handle, seq_len(nrow(getSnpInfo(handle))))
     expect_s4_class(rse, "SummarizedExperiment")
@@ -1120,7 +1120,7 @@ test_that("loadGenotypeRegion filters by keep_variants_path for plink2", {
         file.path(td, "test_variants"),
         format = "plink2"
     )
-    vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
+    vi <- pecotmr:::.snpInfoToVariantInfo(getSnpInfo(handle))
 
     keep_file <- tempfile(fileext = ".tsv")
     on.exit(unlink(keep_file), add = TRUE)
@@ -1154,8 +1154,8 @@ test_that("readGenotypes plink2 sample names match psam IIDs", {
         file.path(td, "test_variants"),
         format = "plink2"
     )
-    expect_true(all(grepl("^(HG|NA)\\d+", handle@sampleIds)))
-    expect_equal(length(unique(handle@sampleIds)), 100L)
+    expect_true(all(grepl("^(HG|NA)\\d+", getSampleIds(handle))))
+    expect_equal(length(unique(getSampleIds(handle))), 100L)
 })
 
 # ===========================================================================
@@ -1267,9 +1267,9 @@ test_that("readGenotypes creates plink1 handle", {
     skip_if_not_installed("snpStats")
     handle <- readGenotypeHandle(plink_prefix, format = "plink1")
     expect_s4_class(handle, "GenotypeHandle")
-    expect_equal(handle@format, "plink1")
-    expect_equal(handle@nSamples, n_samples)
-    expect_equal(nrow(handle@snpInfo), n_variants)
+    expect_equal(getFormat(handle), "plink1")
+    expect_equal(getNSamples(handle), n_samples)
+    expect_equal(nrow(getSnpInfo(handle)), n_variants)
 })
 
 test_that("loadGenotypeRegion loads plink1 via dispatch", {
@@ -1291,9 +1291,9 @@ test_that("readGenotypes creates plink2 handle", {
     skip_if_not_installed("pgenlibr")
     handle <- readGenotypeHandle(plink_prefix, format = "plink2")
     expect_s4_class(handle, "GenotypeHandle")
-    expect_equal(handle@format, "plink2")
-    expect_equal(handle@nSamples, n_samples)
-    expect_equal(nrow(handle@snpInfo), n_variants)
+    expect_equal(getFormat(handle), "plink2")
+    expect_equal(getNSamples(handle), n_samples)
+    expect_equal(nrow(getSnpInfo(handle)), n_variants)
 })
 
 test_that("extractBlockGenotypes works for plink2", {
@@ -1343,9 +1343,9 @@ test_that("readGenotypes creates vcf handle", {
     skip_if_not_installed("VariantAnnotation")
     handle <- readGenotypeHandle(vcf_path, format = "vcf")
     expect_s4_class(handle, "GenotypeHandle")
-    expect_equal(handle@format, "vcf")
-    expect_equal(handle@nSamples, n_samples)
-    expect_equal(nrow(handle@snpInfo), n_variants)
+    expect_equal(getFormat(handle), "vcf")
+    expect_equal(getNSamples(handle), n_samples)
+    expect_equal(nrow(getSnpInfo(handle)), n_variants)
 })
 
 test_that("loadGenotypeRegion loads VCF via dispatch", {
@@ -1391,9 +1391,9 @@ test_that("readGenotypes creates gds handle", {
     skip_if_not_installed("gdsfmt")
     handle <- readGenotypeHandle(gds_path, format = "gds")
     expect_s4_class(handle, "GenotypeHandle")
-    expect_equal(handle@format, "gds")
-    expect_equal(handle@nSamples, n_samples)
-    expect_equal(nrow(handle@snpInfo), n_variants)
+    expect_equal(getFormat(handle), "gds")
+    expect_equal(getNSamples(handle), n_samples)
+    expect_equal(nrow(getSnpInfo(handle)), n_variants)
 })
 
 test_that("loadGenotypeRegion loads GDS via dispatch", {
@@ -1467,8 +1467,8 @@ test_that("PLINK1 and PLINK2 readGenotypes return consistent alleles", {
     h1 <- readGenotypeHandle(plink_prefix, format = "plink1")
     h2 <- readGenotypeHandle(plink_prefix, format = "plink2")
 
-    expect_equal(h1@snpInfo$A1, h2@snpInfo$A1)
-    expect_equal(h1@snpInfo$A2, h2@snpInfo$A2)
+    expect_equal(getSnpInfo(h1)$A1, getSnpInfo(h2)$A1)
+    expect_equal(getSnpInfo(h1)$A2, getSnpInfo(h2)$A2)
 })
 
 # --- loadGenotypeRegion (dispatch) -----------------------------------------
@@ -1534,7 +1534,7 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
     dosage <- SummarizedExperiment::assay(rse, "dosage")
     # Bioc convention: variants x samples
     expect_equal(nrow(dosage), min(5L, n_snps))
-    expect_equal(ncol(dosage), handle@nSamples)
+    expect_equal(ncol(dosage), getNSamples(handle))
     # rowRanges should have variant info
     rr <- SummarizedExperiment::rowRanges(rse)
     expect_true("A1" %in% names(S4Vectors::mcols(rr)))
@@ -1653,8 +1653,8 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
         ref22 <- spec$ref("_chr22")
         shard <- GenotypeHandle(genoMeta = c("21" = spec$p21, "22" = spec$p22))
         expect_s4_class(shard, "GenotypeHandle")
-        expect_equal(shard@format, ref21@format)
-        expect_equal(sort(names(shard@chromPaths)), c("21", "22"))
+        expect_equal(getFormat(shard), getFormat(ref21))
+        expect_equal(sort(names(getChromPaths(shard))), c("21", "22"))
         n21 <- nrow(getSnpInfo(ref21))
         n22 <- nrow(getSnpInfo(ref22))
         expect_equal(nrow(getSnpInfo(shard)), n21 + n22)
@@ -1678,7 +1678,7 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
             shard <- GenotypeHandle(
                 genoMeta = c("21" = spec$p21, "22" = spec$p22)
             )
-            n21 <- nrow(ref21@snpInfo)
+            n21 <- nrow(getSnpInfo(ref21))
             em <- extractBlockGenotypes(shard, c(1L, 2L, n21 + 1L, n21 + 2L))
             dm <- unname(as.matrix(SummarizedExperiment::assay(em, "dosage")))
             expect_equal(nrow(dm), 4L)
@@ -1707,8 +1707,8 @@ test_that("single-shard sharded handle equals the single-file handle", {
     sh <- GenotypeHandle(
         genoMeta = c("21" = file.path(test_data_dir, "test_variants"))
     )
-    expect_equal(length(sh@chromPaths), 1L)
-    expect_equal(nrow(sh@snpInfo), nrow(ref@snpInfo))
+    expect_equal(length(getChromPaths(sh)), 1L)
+    expect_equal(nrow(getSnpInfo(sh)), nrow(getSnpInfo(ref)))
     expect_equal(.shardDose(sh, 1:10), .shardDose(ref, 1:10))
 })
 
@@ -1731,8 +1731,11 @@ test_that("genoMeta meta-file form matches the named-vector form", {
             "22" = file.path(td_abs, "test_variants_chr22")
         )
     )
-    expect_equal(nrow(hFile@snpInfo), nrow(hVec@snpInfo))
-    expect_equal(sort(names(hFile@chromPaths)), sort(names(hVec@chromPaths)))
+    expect_equal(nrow(getSnpInfo(hFile)), nrow(getSnpInfo(hVec)))
+    expect_equal(
+        sort(names(getChromPaths(hFile))),
+        sort(names(getChromPaths(hVec)))
+    )
     expect_equal(.shardDose(hFile, 1:5), .shardDose(hVec, 1:5))
 })
 
@@ -1815,8 +1818,8 @@ test_that("extractBlockGenotypes on a sharded handle handles an empty block", {
     expect_s4_class(se, "SummarizedExperiment")
     dosage <- SummarizedExperiment::assay(se, "dosage")
     expect_equal(nrow(dosage), 0L)
-    expect_equal(ncol(dosage), shard@nSamples)
-    expect_equal(colnames(dosage), shard@sampleIds)
+    expect_equal(ncol(dosage), getNSamples(shard))
+    expect_equal(colnames(dosage), getSampleIds(shard))
 })
 
 test_that("sharded extraction errors for a chromosome with no payload", {
@@ -1830,8 +1833,8 @@ test_that("sharded extraction errors for a chromosome with no payload", {
     )
     # Drop the chr22 payload but keep its variants in @snpInfo, so routing a
     # chr22 request finds no per-chromosome file.
-    shard@chromPaths <- shard@chromPaths["21"]
-    idx22 <- which(pecotmr:::canonChrom(shard@snpInfo$CHR) == "22")[1]
+    shard@chromPaths <- getChromPaths(shard)["21"]
+    idx22 <- which(pecotmr:::canonChrom(getSnpInfo(shard)$CHR) == "22")[1]
     expect_error(
         extractBlockGenotypes(shard, idx22),
         "no per-chromosome file for chromosome"
@@ -2196,7 +2199,7 @@ test_that("loadGenotypeRegion warns on non-integer dosages without a sidecar", {
     # non-integer values and emits its warning.
     testthat::local_mocked_bindings(
         .extractBlockPlink2 = function(handle, snpIdx) {
-            matrix(0.5, nrow = handle@nSamples, ncol = length(snpIdx))
+            matrix(0.5, nrow = getNSamples(handle), ncol = length(snpIdx))
         },
         .package = "pecotmr"
     )
@@ -2439,11 +2442,11 @@ test_that("readGenotypes returns a panel, not a handle", {
     expect_equal(nrow(panel), nrow(getSnpInfo(handle)))
     expect_equal(
         ncol(panel),
-        length(
+        length(getSampleIds(
             pecotmr:::.ghSeedHandle(
                 DelayedArray::seed(SummarizedExperiment::assay(panel, "dosage"))
-            )@sampleIds
-        )
+            )
+        ))
     )
 })
 

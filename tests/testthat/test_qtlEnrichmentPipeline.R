@@ -153,7 +153,7 @@ test_that("qtlEnrichmentPipeline: ldSketch mismatch errors", {
     # Build the QTL with a sketch carrying a different sample set.
     gfmr <- .qep_makeGwasFmr()
     qSketch <- .qep_makeHandle()
-    qSketch@sampleIds <- paste0("z", seq_len(qSketch@nSamples))
+    qSketch@sampleIds <- paste0("z", seq_len(getNSamples(qSketch)))
     qfmr <- QtlFineMappingResult(
         study = "Q1",
         context = "c1",

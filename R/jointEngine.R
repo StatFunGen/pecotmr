@@ -256,7 +256,7 @@ setMethod(
 # cross-trait). One per-condition entry per trait, with an optional CV slice.
 # @noRd
 .jointFitFsusie <- function(group, Xc, Yc, nCond, cfg, args) {
-    if (length(.jgPos(group)) != nCond) {
+    if (length(.jgTraitPos(group)) != nCond) {
         msg <- glue(
             "fitJointGroup: fsusie requires per-trait positions ('pos'); ",
             "it is cross-trait individual-level only."
@@ -265,7 +265,7 @@ setMethod(
     }
     verbose <- if (is.null(cfg$verbose)) 1 else cfg$verbose
     fitArgs <- .fmMergeUserArgs(
-        list(X = Xc, Y = Yc, pos = .jgPos(group)),
+        list(X = Xc, Y = Yc, pos = .jgTraitPos(group)),
         "fsusie",
         args$methodArgs[["fsusie"]]
     )
@@ -304,7 +304,7 @@ setMethod(
         cvFolds,
         samplePartition = cfg$samplePartition,
         coverage = cfg$coverage,
-        pos = .jgPos(group),
+        pos = .jgTraitPos(group),
         verbose = verbose,
         numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads,
         seed = cfg$seed
@@ -535,13 +535,18 @@ setMethod(
             abort(msg)
         }
         cfg <- .jpConfig(pipeline)
-        fit <- .jointFitMvsusieRss(group, cfg, args)
+        # Derived ONCE here and threaded down: .jointRssEntry runs per
+        # condition, so deriving inside it would rebuild the same matrix for
+        # every column of Z.
+        ldMat <- .jgLdMatrix(group)
+        fit <- .jointFitMvsusieRss(group, ldMat, cfg, args)
         # One per-condition entry (RSS has no sample folds).
         map(
             seq_len(ncol(.jgZ(group))),
             .jointRssEntry,
             fit = fit,
             group = group,
+            ldMat = ldMat,
             cfg = cfg
         )
     }
@@ -550,7 +555,7 @@ setMethod(
 # mvSuSiE-RSS joint fit over summary statistics, with the data-driven reweighted
 # prior. Returns the class-tagged fit.
 # @noRd
-.jointFitMvsusieRss <- function(group, cfg, args) {
+.jointFitMvsusieRss <- function(group, ldMat, cfg, args) {
     ddCut <- if (is.null(cfg$dataDrivenPriorWeightsCutoff)) {
         1e-10
     } else {
@@ -570,7 +575,7 @@ setMethod(
     )
     mvBaseArgs <- list(
         Z = .jgZ(group),
-        R = .jgR(group),
+        R = ldMat,
         N = as.numeric(stats::median(.jgN(group))),
         prior_variance = mvPrior$priorVariance,
         coverage = cfg$coverage
@@ -589,11 +594,11 @@ setMethod(
 
 # One RSS per-condition FineMappingRow (csInput = "Xcorr").
 # @noRd
-.jointRssEntry <- function(r, fit, group, cfg) {
+.jointRssEntry <- function(r, fit, group, ldMat, cfg) {
     .fmPostprocessOne(
         fit = fit,
         method = "mvsusie",
-        dataX = .jgR(group),
+        dataX = ldMat,
         dataY = NULL,
         conditionIdx = r,
         coverage = cfg$coverage,
@@ -958,7 +963,7 @@ setMethod(
         rfd <- if (is.null(cfg$retainFitDetail)) "slim" else cfg$retainFitDetail
         weights <- mrmashRssWeights(
             stat = list(z = .jgZ(group), n = .jgN(group)),
-            LD = .jgR(group),
+            LD = .jgLdMatrix(group),
             retainFit = TRUE,
             fitDetail = rfd
         )
@@ -1093,11 +1098,6 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 ldSketch = ldSketch,
                 cutoffs = args$cutoffs
             )
-            ldMat <- .ldFromSketch(
-                ldSketch,
-                jz$variantIds,
-                label = "jointEngine"
-            )
             groups[[length(groups) + 1L]] <- new(
                 "SumStatsJointGroup",
                 conditions = tibble(
@@ -1106,7 +1106,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                     trait = tid
                 ),
                 Z = jz$Z,
-                R = ldMat,
+                ldSketch = ldSketch,
                 N = jz$nVec
             )
         }
@@ -1143,7 +1143,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         # mvsusie ignores them. Matches the trait order of Y.
         rr <- SummarizedExperiment::rowRanges(xy$se)
         rr <- rr[match(colnames(xy$Y), rownames(xy$se))]
-        pos <- (GenomicRanges::start(rr) + GenomicRanges::end(rr)) / 2
+        traitPos <- (GenomicRanges::start(rr) + GenomicRanges::end(rr)) / 2
         groups[[length(groups) + 1L]] <- new(
             "IndividualJointGroup",
             conditions = tibble(
@@ -1153,7 +1153,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             ),
             X = xy$X,
             Y = xy$Y,
-            pos = as.numeric(pos)
+            traitPos = as.numeric(traitPos)
         )
     }
     groups
@@ -1185,11 +1185,6 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 ldSketch = ldSketch,
                 cutoffs = args$cutoffs
             )
-            ldMat <- .ldFromSketch(
-                ldSketch,
-                jz$variantIds,
-                label = "jointEngine"
-            )
             groups[[length(groups) + 1L]] <- new(
                 "SumStatsJointGroup",
                 conditions = tibble(
@@ -1198,7 +1193,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                     trait = trNames
                 ),
                 Z = jz$Z,
-                R = ldMat,
+                ldSketch = ldSketch,
                 N = jz$nVec
             )
         }
@@ -1277,7 +1272,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             trait = tid
         ),
         Z = jz$Z,
-        R = .ldFromSketch(ldSketch, jz$variantIds, label = "jointEngine"),
+        ldSketch = ldSketch,
         N = jz$nVec
     )
 }
@@ -1392,7 +1387,6 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             ldSketch = ldSketch,
             cutoffs = args$cutoffs
         )
-        ldMat <- .ldFromSketch(ldSketch, jz$variantIds, label = "jointEngine")
         groups[[length(groups) + 1L]] <- new(
             "SumStatsJointGroup",
             conditions = tibble(
@@ -1401,7 +1395,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 trait = gi$traitCol[gIdx]
             ),
             Z = jz$Z,
-            R = ldMat,
+            ldSketch = ldSketch,
             N = jz$nVec
         )
     }

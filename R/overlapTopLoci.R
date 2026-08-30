@@ -162,7 +162,13 @@ setMethod(
 .overlapRelabelGwas <- function(gwasTl, vmap, coordCols) {
     g <- inner_join(gwasTl, vmap, by = c("variant_id" = "gwas_vid"))
     signedCols <- c("beta", "z", "conditional_effect")
-    g <- mutate(g, across(any_of(signedCols), .overlapApplySign, g$.sign))
+    # Bound with partial() rather than across()'s deprecated `...`; the local
+    # matters because partial() resolves it lazily (see .negateWhere et al).
+    rowSign <- g$.sign
+    g <- mutate(
+        g,
+        across(any_of(signedCols), partial(.overlapApplySign, sign = rowSign))
+    )
     if (is_in("af", names(g))) {
         g$af <- if_else(g$.sign < 0 & !is.na(g$af), 1 - g$af, g$af)
     }

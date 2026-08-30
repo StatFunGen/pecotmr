@@ -342,10 +342,10 @@ test_that("partitionLdMatrix validates block structure properly", {
         # Rebuild LdData with modified matrix and block metadata
         invalid_ld_data <- new(
             "LdData",
+            getVariantInfo(ld_data),
             correlation = ldmat,
             genotypeHandle = NULL,
-            variants = ld_data@variants,
-            snpIdx = ld_data@snpIdx,
+            snpIdx = getSnpIdx(ld_data),
             blockMetadata = bm
         )
 
@@ -412,7 +412,7 @@ test_that("partitionLdMatrix handles row/column name mismatches", {
     colnames(ldmat) <- NULL
     mismatched_ld_data <- LdData(
         correlation = ldmat,
-        variants = ld_data@variants,
+        variants = getVariantInfo(ld_data),
         blockMetadata = getBlockMetadata(ld_data)
     )
 
@@ -2755,9 +2755,9 @@ test_that("loadLdSketch: returns LdData with raw genotypes and metadata", {
     # Store genotype matrix directly in genotype_handle (matching loadLdSketch output)
     mock_ld_data <- new(
         "LdData",
+        variants_gr,
         correlation = NULL,
         genotypeHandle = X,
-        variants = variants_gr,
         snpIdx = NULL,
         blockMetadata = blockMetadata
     )
@@ -2821,9 +2821,9 @@ test_that("loadLdSketch: removes monomorphic variants", {
     # Store genotype matrix directly in genotype_handle
     mock_ld_data <- new(
         "LdData",
+        variants_gr,
         correlation = NULL,
         genotypeHandle = X,
-        variants = variants_gr,
         snpIdx = NULL,
         blockMetadata = blockMetadata
     )
@@ -3609,36 +3609,36 @@ test_that(".ldFromSketch rejects an ldSketch that is not a genotype panel", {
 .lds_mockExtractor <- function(seed = 7, nSamples = 30L) {
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
-        nSnp <- nrow(handle@snpInfo)
+        nSnp <- nrow(getSnpInfo(handle))
         panel <- matrix(
             rbinom(nSamples * nSnp, 2, 0.3),
             nrow = nSamples,
             ncol = nSnp,
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         rr <- GenomicRanges::GRanges(
-            seqnames = str_c("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = str_c("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         dosage <- t(panel[, snpIdx, drop = FALSE])
         dimnames(dosage) <- list(
-            handle@snpInfo$SNP[snpIdx],
-            handle@sampleIds
+            getSnpInfo(handle)$SNP[snpIdx],
+            getSampleIds(handle)
         )
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
             colData = S4Vectors::DataFrame(
-                sampleId = handle@sampleIds,
-                row.names = handle@sampleIds
+                sampleId = getSampleIds(handle),
+                row.names = getSampleIds(handle)
             )
         )
     }
@@ -3692,11 +3692,11 @@ test_that(".requireMatchingLdSketches errors when panels differ in a column", {
     si2$A1[1] <- if (identical(si2$A1[1], "A")) "C" else "A" # mutate one allele
     h2 <- new(
         "GenotypeHandle",
-        path = h@path,
-        format = h@format,
+        path = getPath(h),
+        format = getFormat(h),
         snpInfo = si2,
-        nSamples = h@nSamples,
-        sampleIds = h@sampleIds,
+        nSamples = getNSamples(h),
+        sampleIds = getSampleIds(h),
         pgenPtr = NULL,
         chromPaths = character(0)
     )

@@ -2847,17 +2847,16 @@ krigingOutlierQc <- function(
 }
 
 # Build a refVariants data.frame (chrom, pos, A1, A2, variant_id) from the
-# ldSketch GenotypeHandle's snpInfo so harmonizeAlleles can join by (chrom,
-# pos).
-.refVariantsFromSketch <- function(handle) {
-    si <- getSnpInfo(handle)
-    chr <- str_remove(as.character(si$CHR), regex("^chr", ignore_case = TRUE))
+# panel's own variant ranges so harmonizeAlleles can join by (chrom, pos).
+.refVariantsFromSketch <- function(ldSketch) {
+    gr <- .ldSketchRanges(ldSketch)
+    mc <- S4Vectors::mcols(gr)
     data.frame(
-        chrom = chr,
-        pos = as.integer(si$BP),
-        A1 = as.character(si$A1),
-        A2 = as.character(si$A2),
-        variant_id = as.character(si$SNP),
+        chrom = .ldSketchChrom(ldSketch),
+        pos = as.integer(GenomicRanges::start(gr)),
+        A1 = as.character(mc$A1),
+        A2 = as.character(mc$A2),
+        variant_id = as.character(mc$SNP),
         stringsAsFactors = FALSE
     )
 }
@@ -3160,7 +3159,7 @@ krigingOutlierQc <- function(
     removeStrandAmbiguous = TRUE,
     removeDups = TRUE
 ) {
-    refVariants <- .refVariantsFromSketch(.ldSketchHandle(ldSketch))
+    refVariants <- .refVariantsFromSketch(ldSketch)
     flipCandidates <- c("Z", "BETA")
     colToFlip <- intersect(flipCandidates, colnames(df))
     if (length(colToFlip) == 0L) {
@@ -3548,7 +3547,7 @@ krigingOutlierQc <- function(
     qc <- ldMismatchQc(
         zScore = df$Z,
         R = R,
-        nSample = getNSamples(.ldSketchHandle(ldSketch)),
+        nSample = .ldSketchNSamples(ldSketch),
         method = method
     )
     # slalom / dentist can leave NA in the outlier column when their
@@ -3836,12 +3835,11 @@ krigingOutlierQc <- function(
 # --- .runEntrySummaryStatsQc: RAISS imputation step helpers ----------------
 
 # Panel/dosage window indices for the entry, scoped per chromosome.
-.qcRaissWindowIdx <- function(df, sketchSnpInfo, flank) {
+.qcRaissWindowIdx <- function(df, ldSketch, flank) {
+    # canonChrom on BOTH sides: the panel answers in its own seqnames
+    # convention, so the two are only comparable once canonicalized.
     bounds <- tibble(
-        chrom = str_remove(
-            as.character(df$chrom),
-            regex("^chr", ignore_case = TRUE)
-        ),
+        chrom = canonChrom(as.character(df$chrom)),
         pos = as.integer(df$pos)
     ) |>
         group_by(.data$chrom) |>
@@ -3853,13 +3851,11 @@ krigingOutlierQc <- function(
     # inner_join keeps only sketch SNPs whose chromosome appears in df (the
     # old is_in(skChrom, names(loByChr)) guard); filter keeps those inside the
     # [lo, hi] window. idx carries the original sketch row positions.
+    gr <- .ldSketchRanges(ldSketch)
     tibble(
-        chrom = str_remove(
-            as.character(sketchSnpInfo$CHR),
-            regex("^chr", ignore_case = TRUE)
-        ),
-        bp = as.integer(sketchSnpInfo$BP),
-        idx = seq_along(sketchSnpInfo$CHR)
+        chrom = .ldSketchChrom(ldSketch),
+        bp = as.integer(GenomicRanges::start(gr)),
+        idx = seq_along(gr)
     ) |>
         inner_join(bounds, by = "chrom") |>
         filter(.data$bp >= .data$lo & .data$bp <= .data$hi) |>
@@ -3898,23 +3894,17 @@ krigingOutlierQc <- function(
     arrange(knownZ, .data$pos)
 }
 
-.qcRaissBuildInputs <- function(df, ldSketch, windowIdx, sketchSnpInfo, opts) {
-    refPanel <- .refVariantsFromSketch(
-        .ldSketchHandle(ldSketch)
-    )[windowIdx, , drop = FALSE]
+.qcRaissBuildInputs <- function(df, ldSketch, windowIdx, opts) {
+    refPanel <- .refVariantsFromSketch(ldSketch)[windowIdx, , drop = FALSE]
     refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
     refPanel <- arrange(refPanel, .data$pos)
     knownZ <- .qcRaissKnownZ(df)
     # meanImpute = FALSE so per-variant missingness is still visible; the
     # surviving columns are mean-imputed below, which is what meanImpute =
     # TRUE did.
-    dosage <- .dosageMatrix(
-        .ldSketchHandle(ldSketch),
-        windowIdx,
-        meanImpute = FALSE
-    )
+    dosage <- .ldSketchDosage(ldSketch, windowIdx, meanImpute = FALSE)
     colnames(dosage) <- normalizeVariantId(
-        as.character(sketchSnpInfo$SNP[windowIdx])
+        .ldSketchVariantIds(ldSketch)[windowIdx]
     )
     dosage <- dosage[, refPanel$variant_id, drop = FALSE]
     keep <- .qcRaissTargetMask(refPanel, knownZ, dosage, opts)
@@ -4073,8 +4063,7 @@ krigingOutlierQc <- function(
     } else {
         as.integer(opts$imputeOpts$flank)
     }
-    sketchSnpInfo <- .ldSketchSnpInfo(ldSketch)
-    windowIdx <- .qcRaissWindowIdx(df, sketchSnpInfo, flank)
+    windowIdx <- .qcRaissWindowIdx(df, ldSketch, flank)
     if (length(windowIdx) == 0L) {
         .qcEmit(
             lbl,
@@ -4090,7 +4079,7 @@ krigingOutlierQc <- function(
             imputeAfter = nrow(df)
         ))
     }
-    inp <- .qcRaissBuildInputs(df, ldSketch, windowIdx, sketchSnpInfo, opts)
+    inp <- .qcRaissBuildInputs(df, ldSketch, windowIdx, opts)
     if (inp$nDroppedTargets > 0L) {
         .qcEmit(
             lbl,
@@ -4576,14 +4565,14 @@ krigingOutlierQc <- function(
     bounds <- tibble(chrom = chrom, pos = pos) |>
         group_by(chrom) |>
         summarise(lo = min(pos), hi = max(pos), .groups = "drop")
-    si <- .ldSketchSnpInfo(ldSketch)
+    gr <- .ldSketchRanges(ldSketch)
     # left_join keeps every sketch SNP; one on a chromosome absent from the
     # entries gets lo/hi = NA -> inWindow FALSE (the old is_in guard). The
     # explicit is.na() guards force FALSE (never NA) for an absent chrom or an
     # NA bp, replacing the base keep[is.na(keep)] <- FALSE.
     keep <- tibble(
-        chrom = canonChrom(as.character(si$CHR)),
-        bp = as.integer(si$BP)
+        chrom = .ldSketchChrom(ldSketch),
+        bp = as.integer(GenomicRanges::start(gr))
     ) |>
         left_join(bounds, by = "chrom") |>
         mutate(
@@ -4618,9 +4607,8 @@ krigingOutlierQc <- function(
     if (length(ids) == 0L) {
         return(ldSketch)
     }
-    si <- .ldSketchSnpInfo(ldSketch)
     keep <- is_in(
-        normalizeVariantId(as.character(si$SNP)),
+        normalizeVariantId(.ldSketchVariantIds(ldSketch)),
         normalizeVariantId(unique(ids))
     )
     .ldSketchSubset(ldSketch, keep)
@@ -4770,8 +4758,7 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch) || is.null(cutoffs)) {
         return(ldSketch)
     }
-    handle <- .ldSketchHandle(ldSketch)
-    ids <- as.character(getSnpInfo(handle)$SNP)
+    ids <- .ldSketchVariantIds(ldSketch)
     if (length(ids) == 0L) {
         return(ldSketch)
     }
@@ -4779,12 +4766,12 @@ krigingOutlierQc <- function(
     if (all(keep)) {
         return(ldSketch)
     }
-    # Prune the underlying GenotypeHandle, not just an RSE row view. Every
-    # reader reaches the panel through `.ldSketchHandle()` -- the dosage
-    # DelayedArray's seed -- and `sketch[keep, ]` leaves that seed carrying
-    # the whole panel (the trap `.emptySketch()` documents). Rebuild the
-    # sketch from the pruned handle so the drop reaches all of them.
-    pruned <- .subsetGenotypeHandle(handle, keep)
+    # Prune the underlying GenotypeHandle, not just an RSE row view: the
+    # handle is the dosage DelayedArray's seed, and `sketch[keep, ]` leaves
+    # that seed carrying the whole panel (the trap `.emptySketch()`
+    # documents), so every read would still see the dropped variants. This is
+    # a seed-level edit, which is why it reaches for the handle.
+    pruned <- .subsetGenotypeHandle(.ldSketchHandle(ldSketch), keep)
     if (methods::is(ldSketch, "GenotypeHandle")) {
         return(pruned)
     }

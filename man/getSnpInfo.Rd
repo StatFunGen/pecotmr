@@ -17,6 +17,15 @@ A data.frame.
 }
 \description{
 Return the cached SNP metadata data.frame (columns: SNP, CHR,
-  BP, A1, A2, optionally MAF).
+  BP, A1, A2, fileIdx, optionally MAF).
+}
+\details{
+The genotype handle is the seed layer behind a panel and
+  is not part of the public interface; obtain a panel from
+  \code{readGenotypes()} and ask it directly. This table is the READ-PATH
+  view: unlike the panel's \code{rowRanges()} it carries \code{fileIdx},
+  the on-disk variant position that keeps reads correct after a handle has
+  been row-subset. Callers that only need chrom/pos/alleles should use
+  \code{rowRanges()} on the panel instead.
 }
 \keyword{internal}

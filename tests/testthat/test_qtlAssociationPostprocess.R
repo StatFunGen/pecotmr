@@ -81,7 +81,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
     )
 
     expect_s4_class(r, "QtlSumStats")
-    expect_false(is.null(r@qcInfo$associationPostprocess)) # recipe stashed
+    expect_false(is.null(getQcInfo(r)$associationPostprocess)) # recipe stashed
 
     # Bonferroni original == min over variants of p.adjust(P, "bonferroni", n).
     expP <- vapply(

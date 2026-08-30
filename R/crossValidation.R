@@ -441,7 +441,7 @@
     if (verbose < 1) {
         return(invisible(NULL))
     }
-    s <- suppressWarnings(stats::sd(pred, na.rm = TRUE))
+    s <- stats::sd(pred, na.rm = TRUE)
     if (is.na(s) || s == 0) {
         msg <- glue(
             "Predicted values for condition {r} using {mk} have zero ",

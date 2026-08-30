@@ -3,12 +3,43 @@
 \docType{class}
 \name{LdData-class}
 \alias{LdData-class}
+\alias{[,LdData,ANY,ANY,ANY-method}
 \title{LD Data Container}
+\usage{
+\S4method{[}{LdData,ANY,ANY,ANY}(x, i, j, ..., drop = TRUE)
+}
+\arguments{
+\item{x}{An \code{LdData}.}
+
+\item{i, j, ...}{Subscripts; any use is an error.}
+
+\item{drop}{Ignored.}
+}
+\value{
+Nothing: this method always signals an error.
+}
 \description{
 S4 container for LD information. Stores either a pre-computed
   correlation matrix or a \code{GenotypeHandle} (or list of handles for
   mixture panels) for lazy genotype/correlation access.
+
+  An \code{LdData} \strong{is} a \code{GRanges} over the variants it
+  covers -- carrying A1, A2, variant_id and optionally allele_freq,
+  variance and n_nomiss as metadata columns -- so \code{length()},
+  \code{seqnames()} and \code{start()} answer directly, as they do for
+  \code{\link{LdScore}} and \code{\link{LdEigen}}. The correlation may
+  be NULL, in which case those ranges are the object's only record of which
+  variants it describes.
 }
+\section{Functions}{
+\itemize{
+\item \code{x = LdData[i = ANY, j = ANY, drop = ANY]}: Refused. Subsetting would narrow the variants
+while \code{correlation} -- variant-by-variant, and \code{snpIdx}, which
+indexes the reference panel -- stayed as they were, leaving an LD matrix
+describing variants the object no longer has. Build the LdData over the
+variant set you want instead.
+
+}}
 \section{Slots}{
 
 \describe{
@@ -25,9 +56,6 @@ it is unwrapped to its handle.}
 \item{\code{snpIdx}}{Integer vector of 1-based SNP indices into the handle's
 \code{snpInfo}. NULL when correlation is pre-computed, or when the
 source is a matrix (which is already the subset).}
-
-\item{\code{variants}}{A \code{GRanges} object with variant metadata (A1, A2,
-variant_id, and optionally allele_freq, variance, n_nomiss).}
 
 \item{\code{blockMetadata}}{A \code{GRanges} of blocks or a \code{data.frame} with
 block boundary information.}

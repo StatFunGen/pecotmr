@@ -14,7 +14,7 @@ test_that("QtlFineMappingResult: builds a collection keyed by 4-tuple", {
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L)
-    expect_null(res@ldSketch)
+    expect_null(getLdSketch(res))
 })
 
 

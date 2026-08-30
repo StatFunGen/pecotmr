@@ -23,15 +23,14 @@ test_that("JointGroup subclasses construct from a conditions table", {
     g <- new("IndividualJointGroup", conditions = .jg_cond(), X = X, Y = Y)
     expect_s4_class(g, "JointGroup")
     expect_s4_class(g, "IndividualJointGroup")
-    expect_equal(nrow(g@conditions), 2L)
+    expect_equal(nrow(.jgConditions(g)), 2L)
 
-    Z <- matrix(0, 3, 2)
-    R <- diag(3)
+    Z <- matrix(0, 3, 2, dimnames = list(paste0("v", 1:3), NULL))
     sg <- new(
         "SumStatsJointGroup",
         conditions = .jg_cond(),
         Z = Z,
-        R = R,
+        ldSketch = NULL,
         N = c(100, 120)
     )
     expect_s4_class(sg, "JointGroup")
@@ -99,16 +98,17 @@ test_that("JointGroup validity rejects malformed groups", {
         ),
         "ncol\\(Y\\)"
     )
-    # Non-square LD.
+    # Z must name its variants: they are what the LD matrix is derived over,
+    # so an unnamed Z would leave the group unable to say what it covers.
     expect_error(
         new(
             "SumStatsJointGroup",
             conditions = .jg_cond(),
             Z = matrix(0, 3, 2),
-            R = matrix(0, 3, 2),
+            ldSketch = NULL,
             N = 1
         ),
-        "square"
+        "variant ids as rownames"
     )
 })
 

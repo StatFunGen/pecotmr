@@ -112,31 +112,31 @@ context("colocboostPipeline (S4 dispatch)")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -943,15 +943,15 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
 # @noRd
 .cbf_qcd <- function() {
     data(qtlSumStatsExample, envir = environment())
-    suppressWarnings(suppressMessages(summaryStatsQc(qtlSumStatsExample)))
+    suppressMessages(summaryStatsQc(qtlSumStatsExample))
 }
 
 # @noRd
 .cbf_n <- function(ss, ...) {
-    b <- suppressWarnings(suppressMessages(.cbQtlSumStatsBundle(
+    b <- suppressMessages(.cbQtlSumStatsBundle(
         ss,
         cutoffs = .panelCutoffs(list(...))
-    )))
+    ))
     if (length(b) == 0L) 0L else length(b[[1L]]$variantIds)
 }
 

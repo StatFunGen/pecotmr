@@ -1162,9 +1162,14 @@ setGeneric("getFullFit", function(x, ...) standardGeneric("getFullFit"))
 setGeneric("getCvFits", function(x, ...) standardGeneric("getCvFits"))
 
 #' @title Get Method Names
-#' @description Extract method names from a collection class.
-#' @param x A \code{FineMappingResult} or \code{TwasWeights} object.
+#' @description Extract the method name(s) an object was produced with: one
+#'   per entry for a collection, a single name for one estimate.
+#' @param x A \code{FineMappingResult}, \code{TwasWeights},
+#'   \code{CtwasResult} or \code{H2Estimate} object.
 #' @return Character vector.
+#' @examples
+#' data(h2EstimateExample)
+#' getMethodNames(h2EstimateExample)
 #' @export
 setGeneric("getMethodNames", function(x) standardGeneric("getMethodNames"))
 
@@ -1441,9 +1446,16 @@ setGeneric("getScaleResiduals", function(x) {
 
 #' @title Get SNP Info
 #' @description Return the cached SNP metadata data.frame (columns: SNP, CHR,
-#'   BP, A1, A2, optionally MAF).
+#'   BP, A1, A2, fileIdx, optionally MAF).
 #' @param x An object carrying cached SNP metadata.
 #' @return A data.frame.
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly. This table is the READ-PATH
+#'   view: unlike the panel's \code{rowRanges()} it carries \code{fileIdx},
+#'   the on-disk variant position that keeps reads correct after a handle has
+#'   been row-subset. Callers that only need chrom/pos/alleles should use
+#'   \code{rowRanges()} on the panel instead.
 #' @keywords internal
 setGeneric("getSnpInfo", function(x) standardGeneric("getSnpInfo"))
 
@@ -1707,6 +1719,61 @@ setGeneric("getTauBlocks", function(x) standardGeneric("getTauBlocks"))
 #' getH2(h2EstimateExample)
 #' @export
 setGeneric("getH2", function(x) standardGeneric("getH2"))
+
+#' @title Get Heritability Standard Error
+#' @description Return the standard error of the global SNP heritability
+#'   estimate carried by an \code{H2Estimate}.
+#' @param x An \code{H2Estimate}.
+#' @return Numeric (length 1).
+#' @examples
+#' data(h2EstimateExample)
+#' getH2Se(h2EstimateExample)
+#' @export
+setGeneric("getH2Se", function(x) standardGeneric("getH2Se"))
+
+#' @title Get LD-Score Regression Intercept
+#' @description Return the regression intercept carried by an
+#'   \code{H2Estimate}. Values above 1 indicate confounding or sample overlap
+#'   rather than polygenic signal.
+#' @param x An \code{H2Estimate}.
+#' @return Numeric (length 1).
+#' @examples
+#' data(h2EstimateExample)
+#' getIntercept(h2EstimateExample)
+#' @export
+setGeneric("getIntercept", function(x) standardGeneric("getIntercept"))
+
+#' @title Get Intercept Standard Error
+#' @description Return the standard error of the regression intercept carried
+#'   by an \code{H2Estimate}.
+#' @param x An \code{H2Estimate}.
+#' @return Numeric (length 1).
+#' @examples
+#' data(h2EstimateExample)
+#' getInterceptSe(h2EstimateExample)
+#' @export
+setGeneric("getInterceptSe", function(x) standardGeneric("getInterceptSe"))
+
+#' @title Get Variant Count
+#' @description Return the number of variants the heritability estimate was
+#'   computed over.
+#' @param x An \code{H2Estimate}.
+#' @return Integer (length 1).
+#' @examples
+#' data(h2EstimateExample)
+#' getNSnps(h2EstimateExample)
+#' @export
+setGeneric("getNSnps", function(x) standardGeneric("getNSnps"))
+
+#' @title Get Trait Name
+#' @description Return the trait label carried by an \code{H2Estimate}.
+#' @param x An \code{H2Estimate}.
+#' @return Character (length 1).
+#' @examples
+#' data(h2EstimateExample)
+#' getTraitName(h2EstimateExample)
+#' @export
+setGeneric("getTraitName", function(x) standardGeneric("getTraitName"))
 
 # Internal generics for the unified joint-analysis engine (see R/JointGroup.R
 # and dev/jointSpecification-s4-refactor.md). Not exported: the engine and its

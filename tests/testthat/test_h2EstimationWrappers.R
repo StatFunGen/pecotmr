@@ -468,13 +468,13 @@ test_that("estimateh2 with method='lder' returns H2Estimate with correct slots",
     result <- estimateH2(ss, eigen_ref, method = "lder")
 
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(result@h2))
-    expect_true(is.numeric(result@h2Se))
-    expect_true(is.numeric(result@intercept))
-    expect_true(is.numeric(result@interceptSe))
-    expect_equal(result@method, "lder")
-    expect_equal(result@nSnps, nSnps(ss))
-    expect_equal(result@traitName, "test")
+    expect_true(is.numeric(getH2(result)))
+    expect_true(is.numeric(getH2Se(result)))
+    expect_true(is.numeric(getIntercept(result)))
+    expect_true(is.numeric(getInterceptSe(result)))
+    expect_equal(getMethodNames(result), "lder")
+    expect_equal(getNSnps(result), nSnps(ss))
+    expect_equal(getTraitName(result), "test")
 })
 
 test_that("estimateh2 with var_y correction runs without error", {
@@ -488,7 +488,7 @@ test_that("estimateh2 with var_y correction runs without error", {
 
     result <- estimateH2(ss, eigen_ref, method = "lder")
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(result@h2))
+    expect_true(is.numeric(getH2(result)))
 })
 
 test_that("estimateh2 with method='gldsc' returns H2Estimate", {
@@ -497,11 +497,11 @@ test_that("estimateh2 with method='gldsc' returns H2Estimate", {
     result <- estimateH2(ss, score_ref, method = "gldsc")
 
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(result@h2))
-    expect_true(is.numeric(result@h2Se))
-    expect_equal(result@method, "gldsc")
-    expect_equal(result@nSnps, nSnps(ss))
-    expect_equal(result@traitName, "test")
+    expect_true(is.numeric(getH2(result)))
+    expect_true(is.numeric(getH2Se(result)))
+    expect_equal(getMethodNames(result), "gldsc")
+    expect_equal(getNSnps(result), nSnps(ss))
+    expect_equal(getTraitName(result), "test")
 })
 
 test_that("estimateh2 with method='hdl' returns H2Estimate", {
@@ -514,11 +514,11 @@ test_that("estimateh2 with method='hdl' returns H2Estimate", {
     )
 
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(result@h2))
-    expect_true(is.numeric(result@h2Se))
-    expect_equal(result@method, "hdl")
-    expect_equal(result@nSnps, nSnps(ss))
-    expect_equal(result@traitName, "test")
+    expect_true(is.numeric(getH2(result)))
+    expect_true(is.numeric(getH2Se(result)))
+    expect_equal(getMethodNames(result), "hdl")
+    expect_equal(getNSnps(result), nSnps(ss))
+    expect_equal(getTraitName(result), "test")
 })
 
 # ===========================================================================
@@ -1871,7 +1871,7 @@ test_that("gldscUnivariate with baseline-only annotations yields NULL scoreStats
 
 test_that("h2EstimateToSldscTrait assigns category names to unnamed tauBlocks", {
     h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
-    tb <- h2_obj@tauBlocks
+    tb <- getTauBlocks(h2_obj)
     colnames(tb) <- NULL
     h2_obj@tauBlocks <- tb
     result <- h2EstimateToSldscTrait(h2_obj)

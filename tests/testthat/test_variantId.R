@@ -877,10 +877,14 @@ test_that("matchVariants allowFlip = FALSE matches exact alleles only (no swap)"
 }
 
 test_that("harmonizeAlleles warns and returns empty when nothing overlaps", {
-    res <- suppressWarnings(pecotmr:::harmonizeAlleles(
-        .vid_df("1", 100, "A", "G"),
-        .vid_df("1", 999, "A", "G")
-    ))
+    # Asserted, not suppressed: the warning is half of what this test names.
+    expect_warning(
+        res <- pecotmr:::harmonizeAlleles(
+            .vid_df("1", 100, "A", "G"),
+            .vid_df("1", 999, "A", "G")
+        ),
+        "No matching variants found"
+    )
     expect_equal(nrow(res$harmonizedData), 0L)
     expect_equal(attr(res, "qcCounts")$considered, 0L)
 })
@@ -1004,12 +1008,12 @@ test_that("harmonizeAlleles removeIndels = TRUE drops indels", {
 test_that("harmonizeAlleles drops a target the reference cannot decide", {
     tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
     ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "G"), c("G", "A"))
-    res <- suppressWarnings(pecotmr:::harmonizeAlleles(
+    res <- pecotmr:::harmonizeAlleles(
         tgt,
         ref,
         colToFlip = "Z",
         matchMinProp = 0
-    ))
+    )
     expect_equal(nrow(res$harmonizedData), 0L)
 })
 
@@ -1018,12 +1022,12 @@ test_that("harmonizeAlleles sees a strand-recorded second orientation too", {
     # string key would miss it.
     tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
     ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "C"), c("G", "T"))
-    res <- suppressWarnings(pecotmr:::harmonizeAlleles(
+    res <- pecotmr:::harmonizeAlleles(
         tgt,
         ref,
         colToFlip = "Z",
         matchMinProp = 0
-    ))
+    )
     expect_equal(nrow(res$harmonizedData), 0L)
 })
 
@@ -1032,12 +1036,12 @@ test_that("harmonizeAlleles keeps one row when the matches agree", {
     # and the SAME sign is not ambiguous, so the target survives -- once.
     tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
     ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "T"), c("G", "C"))
-    res <- suppressWarnings(pecotmr:::harmonizeAlleles(
+    res <- pecotmr:::harmonizeAlleles(
         tgt,
         ref,
         colToFlip = "Z",
         matchMinProp = 0
-    ))
+    )
     expect_equal(nrow(res$harmonizedData), 1L)
     expect_equal(res$harmonizedData$Z, 2.2)
 })
@@ -1062,12 +1066,12 @@ test_that("harmonizeAlleles counts what it kept, not what it joined", {
     # resolution, so a dropped target is not also reported as a correction.
     tgt <- .vid_df("1", 100, "A", "G", Z = 2.2)
     ref <- .vid_df(c("1", "1"), c(100, 100), c("A", "G"), c("G", "A"))
-    res <- suppressWarnings(pecotmr:::harmonizeAlleles(
+    res <- pecotmr:::harmonizeAlleles(
         tgt,
         ref,
         colToFlip = "Z",
         matchMinProp = 0
-    ))
+    )
     counts <- attr(res, "qcCounts")
     expect_equal(counts$kept, 0L)
     expect_equal(counts$signFlip, 0L)

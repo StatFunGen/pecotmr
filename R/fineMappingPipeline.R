@@ -3185,7 +3185,7 @@ setMethod(
         is.null(rFinite) &&
             (isTRUE(serFallback) || !identical(rMismatch, "none"))
     ) {
-        getNSamples(.ldSketchHandle(ldSketch))
+        .ldSketchNSamples(ldSketch)
     } else {
         rFinite
     }

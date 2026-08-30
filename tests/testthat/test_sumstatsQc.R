@@ -3084,31 +3084,31 @@ context("summaryStatsQc")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(handle@sampleIds, getSnpInfo(handle)$SNP)
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -3209,7 +3209,7 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
 # as real genotype LD sketches do, so a re-keyed entry SNP resolves against it.
 .ssQ_makeHandleVid <- function(snp_n = 8L, n_samples = 60L) {
     h <- .ssQ_makeHandle(snp_n, n_samples)
-    h@snpInfo$SNP <- paste0("chr1:", h@snpInfo$BP, ":G:A")
+    h@snpInfo$SNP <- paste0("chr1:", getSnpInfo(h)$BP, ":G:A")
     h
 }
 
@@ -3297,7 +3297,7 @@ test_that("summaryStatsQc: zMismatchQc reconciles a chr-prefix difference vs the
     # canonical chr-prefixed form, so the opt-in z-mismatch panel match must
     # reconcile the prefix (previously errored "absent from the ldSketch panel").
     h <- .ssQ_makeHandle()
-    h@snpInfo$SNP <- paste0("1:", h@snpInfo$BP, ":G:A") # non-chr-prefixed
+    h@snpInfo$SNP <- paste0("1:", getSnpInfo(h)$BP, ":G:A") # non-chr-prefixed
     ss <- GwasSumStats(
         study = "g1",
         entry = list(.ssQ_makeEntryGr()),
@@ -3790,7 +3790,13 @@ test_that("summaryStatsQc: impute scopes the reference panel/dosage to the regio
     # dosage must be materialized for just those 4 panel variants -- NOT the whole
     # 8-variant sketch (the bug that makes --impute unusable on a per-chromosome
     # sketch: it built dosage for seq_len(nrow(sketchSnpInfo))).
+    #
+    # Observed at extractBlockGenotypes: the single reader every dosage path
+    # funnels through, including the DelayedArray seed behind assay(). The
+    # panel reads its own dosage through the assay now, so watching
+    # .dosageMatrix would no longer see the RAISS read at all.
     cap <- new.env(parent = emptyenv())
+    cap$idx <- list()
     ss <- GwasSumStats(
         study = "g1",
         entry = list(.ssQ_makeEntryGr(
@@ -3800,17 +3806,20 @@ test_that("summaryStatsQc: impute scopes the reference panel/dosage to the regio
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L)
     )
+    inner <- .ssQ_mockExtractor(n_samples = 60L)
     local_mocked_bindings(
-        .dosageMatrix = function(handle, snpIdx, meanImpute = TRUE) {
-            cap$snpIdx <- snpIdx
-            matrix(0, nrow = handle@nSamples, ncol = length(snpIdx))
+        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+            cap$idx <- c(cap$idx, list(snpIdx))
+            inner(handle, snpIdx, meanImpute)
         },
         raiss = function(...) NULL,
         .package = "pecotmr"
     )
     suppressWarnings(summaryStatsQc(ss, impute = TRUE, nCutoff = 0))
-    expect_equal(length(cap$snpIdx), 4L) # region window, not the full 8-SNP sketch
-    expect_true(all(cap$snpIdx %in% 1:4)) # only the in-window panel indices
+    expect_gt(length(cap$idx), 0L)
+    # No read reaches past the region window's 4 panel variants.
+    expect_true(all(map_lgl(cap$idx, function(i) all(i %in% 1:4))))
+    expect_equal(max(map_int(cap$idx, length)), 4L)
 })
 
 test_that("summaryStatsQc: impute = TRUE with raiss returning NULL records 0 imputed", {
@@ -3994,31 +4003,31 @@ context("sumstatsQc internal helpers")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(handle@sampleIds, getSnpInfo(handle)$SNP)
+            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = handle@sampleIds,
-            row.names = handle@sampleIds
+            sampleId = getSampleIds(handle),
+            row.names = getSampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -4468,12 +4477,12 @@ test_that(".applyLdMismatchQcToEntry: errors on variants absent from the sketch"
 }
 
 test_that("harmonization drops a twin-pair variant instead of duplicating it", {
-    harm <- suppressMessages(suppressWarnings(pecotmr:::.qcHarmonizeEntry(
+    harm <- suppressMessages(pecotmr:::.qcHarmonizeEntry(
         .ssTwin_df(),
         .ssTwin_makeHandle(),
         .ssTwin_opts(),
         NA_character_
-    )))
+    ))
     # 3 in, 2 out -- never 4: the undecidable chr1:200 leaves, it does not
     # come back twice with opposite signs.
     expect_equal(nrow(harm$df), 2L)
@@ -4488,15 +4497,15 @@ test_that("kriging and LD-mismatch QC accept every harmonized variant", {
         extractBlockGenotypes = .ssQ_mockExtractor(n_samples = 60L),
         .package = "pecotmr"
     )
-    harm <- suppressMessages(suppressWarnings(
+    harm <- suppressMessages(
         pecotmr:::.qcHarmonizeEntry(.ssTwin_df(), handle, opts, NA_character_)
-    ))
-    expect_no_error(suppressMessages(suppressWarnings(
+    )
+    expect_no_error(suppressMessages(
         pecotmr:::.qcKrigingFlip(harm$df, handle, opts, NA_character_)
-    )))
-    expect_no_error(suppressMessages(suppressWarnings(
+    ))
+    expect_no_error(suppressMessages(
         pecotmr:::.qcMismatchQc(harm$df, handle, opts, NA_character_)
-    )))
+    ))
 })
 
 test_that("the fine-mapping LD build accepts every harmonized variant", {
@@ -4505,12 +4514,12 @@ test_that("the fine-mapping LD build accepts every harmonized variant", {
         extractBlockGenotypes = .ssQ_mockExtractor(n_samples = 60L),
         .package = "pecotmr"
     )
-    harm <- suppressMessages(suppressWarnings(pecotmr:::.qcHarmonizeEntry(
+    harm <- suppressMessages(pecotmr:::.qcHarmonizeEntry(
         .ssTwin_df(),
         handle,
         .ssTwin_opts(),
         NA_character_
-    )))
+    ))
     R <- pecotmr:::.ldFromSketch(
         handle,
         as.character(harm$df$SNP),
@@ -7304,33 +7313,33 @@ test_that("summaryStatsQc kriging QC sign-flips an LD-inconsistent variant and r
     # the row.
     corrExtractor <- function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(42)
-        n <- length(handle@sampleIds)
+        n <- length(getSampleIds(handle))
         k <- length(snpIdx)
         f <- rnorm(n) # shared latent factor
         M <- sapply(seq_len(k), function(j) {
             sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
         })
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = handle@snpInfo$BP[snpIdx],
+                start = getSnpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
-            A1 = handle@snpInfo$A1[snpIdx],
-            A2 = handle@snpInfo$A2[snpIdx]
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
+            A1 = getSnpInfo(handle)$A1[snpIdx],
+            A2 = getSnpInfo(handle)$A2[snpIdx]
         )
         dosage <- t(M)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-        colnames(dosage) <- handle@sampleIds
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- getSampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
             colData = S4Vectors::DataFrame(
-                sampleId = handle@sampleIds,
-                row.names = handle@sampleIds
+                sampleId = getSampleIds(handle),
+                row.names = getSampleIds(handle)
             )
         )
     }

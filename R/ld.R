@@ -892,10 +892,85 @@ loadLdFromGenotype <- function(
     .ldSketchHandle(x)
 }
 
-# The panel's variant table, however the sketch is carried.
+# ---------- LD sketch: the panel's own view of itself ----------
+#
+# These read the panel through the SummarizedExperiment interface rather than
+# reaching past it to the GenotypeHandle. The handle is the DelayedArray's
+# seed -- the READ PATH -- and unwrapping it for metadata leaks that seed into
+# callers that only ever wanted chrom/pos/alleles or a sample count, which the
+# RSE already answers. Reaching for `.ldSketchHandle()` is now reserved for
+# what genuinely lives on the handle: file format/path, chromosome shard
+# routing, the `.afreq` sidecar, and building or pruning the seed itself.
+#
+# A bare GenotypeHandle -- what objects serialised before the slot became an
+# RSE carry -- is projected exactly the way `.genotypeExperiment()` projects
+# one, so both shapes answer identically.
+
+# The panel's variant ranges: seqnames = chromosome (chr-prefixed), start =
+# position, mcols = SNP / A1 / A2.
 # @noRd
-.ldSketchSnpInfo <- function(x) {
-    getSnpInfo(.ldSketchHandle(x))
+.ldSketchRanges <- function(x) {
+    if (methods::is(x, "RangedSummarizedExperiment")) {
+        return(SummarizedExperiment::rowRanges(x))
+    }
+    .genotypeSnpRanges(x, normalizeVariantId(as.character(getSnpInfo(x)$SNP)))
+}
+
+# The panel's variant ids in the panel's OWN labelling. This is the mcols
+# column, not `names()`: the names are normalized ids, while matching against
+# summary statistics has to see the panel's raw labels.
+# @noRd
+.ldSketchVariantIds <- function(x) {
+    as.character(S4Vectors::mcols(.ldSketchRanges(x))$SNP)
+}
+
+# Per-variant chromosome, canonical (no chr prefix).
+# @noRd
+.ldSketchChrom <- function(x) {
+    canonChrom(as.character(GenomicRanges::seqnames(.ldSketchRanges(x))))
+}
+
+# @noRd
+.ldSketchSampleIds <- function(x) {
+    if (methods::is(x, "RangedSummarizedExperiment")) {
+        return(as.character(colnames(x)))
+    }
+    as.character(getSampleIds(x))
+}
+
+# @noRd
+.ldSketchNSamples <- function(x) {
+    length(.ldSketchSampleIds(x))
+}
+
+# The BP / A1 / A2 vectors under the names the panel-comparison error messages
+# report, so the message can name the column a user would recognise.
+# @noRd
+.ldRangesColumns <- function(gr) {
+    mc <- S4Vectors::mcols(gr)
+    list(
+        BP = as.character(GenomicRanges::start(gr)),
+        A1 = as.character(mc$A1),
+        A2 = as.character(mc$A2)
+    )
+}
+
+# Dosage for a variant subset, samples x variants.
+#
+# Read through the assay, so the DelayedArray seed -- and with it the file
+# ordering, the sharded routing and the empty-request guard in
+# `extractBlockGenotypes()` -- stays the single reader. `extract_array()`
+# delegates to that same function with `meanImpute = FALSE`, so imputation is
+# layered on here rather than pushed down.
+# @noRd
+.ldSketchDosage <- function(x, snpIdx, meanImpute = TRUE) {
+    if (!methods::is(x, "RangedSummarizedExperiment")) {
+        return(.dosageMatrix(x, snpIdx, meanImpute = meanImpute))
+    }
+    dosage <- t(as.matrix(
+        SummarizedExperiment::assay(x, "dosage")[snpIdx, , drop = FALSE]
+    ))
+    if (meanImpute) .qtlMeanImpute(dosage) else dosage
 }
 
 .ldFromSketchValidate <- function(ldSketch, label) {
@@ -919,12 +994,11 @@ loadLdFromGenotype <- function(
 
 # Match requested ids to the panel; NULL if none match. Returns kept ids/order.
 .ldFromSketchMatch <- function(ldSketch, variantIds, label, onMissing) {
-    snpInfo <- .ldSketchSnpInfo(ldSketch)
     # Match by (chrom, pos, allele) tuple with an exact id-string fallback for
     # rsID panels; the caller's original ids and order are preserved.
     m <- matchVariants(
         variantIds,
-        as.character(snpInfo$SNP),
+        .ldSketchVariantIds(ldSketch),
         removeStrandAmbiguous = FALSE
     )
     nMissing <- length(variantIds) - length(m$idxA)
@@ -1062,7 +1136,7 @@ loadLdFromGenotype <- function(
 # would have to guess), so an imissCutoff always takes the dosage path.
 # @noRd
 .panelDropMask <- function(
-    handle,
+    ldSketch,
     matched,
     mafCutoff,
     macCutoff,
@@ -1072,18 +1146,20 @@ loadLdFromGenotype <- function(
         # Keyed on the PANEL's own variant labels, not the caller's: .afreq
         # carries the .pvar ids, while `keptIds` is whatever id form the
         # caller asked in (normalized, most often).
-        panelIds <- as.character(getSnpInfo(handle)$SNP)[matched$idx]
-        maf <- .panelAfreqMaf(handle, panelIds)
+        panelIds <- .ldSketchVariantIds(ldSketch)[matched$idx]
+        # The handle stays for this one read: the sidecar is a file beside
+        # the genotypes, which only the seed knows how to find.
+        maf <- .panelAfreqMaf(.ldSketchHandle(ldSketch), panelIds)
         if (!is.null(maf)) {
             effMaf <- .panelEffectiveMaf(
                 mafCutoff,
                 macCutoff,
-                getNSamples(handle)
+                .ldSketchNSamples(ldSketch)
             )
             return(is.na(maf) | maf < effMaf)
         }
     }
-    dosage <- .dosageMatrix(handle, matched$idx, meanImpute = FALSE)
+    dosage <- .ldSketchDosage(ldSketch, matched$idx, meanImpute = FALSE)
     stats <- .panelVariantStats(dosage)
     effMaf <- .panelEffectiveMaf(mafCutoff, macCutoff, nrow(dosage))
     is.na(stats$maf) | stats$maf < effMaf | stats$missRate > imissCutoff
@@ -1119,7 +1195,7 @@ loadLdFromGenotype <- function(
         return(variantIds)
     }
     drop <- .panelDropMask(
-        .ldSketchHandle(ldSketch),
+        ldSketch,
         matched,
         mafCutoff,
         macCutoff,
@@ -1223,11 +1299,9 @@ loadLdFromGenotype <- function(
         )
         abort(msg)
     }
-    qSnp <- .ldSketchSnpInfo(qtlLd)
-    gSnp <- .ldSketchSnpInfo(gwasLd)
-    if (nrow(qSnp) != nrow(gSnp)) {
-        nQ <- nrow(qSnp)
-        nG <- nrow(gSnp)
+    nQ <- length(.ldSketchRanges(qtlLd))
+    nG <- length(.ldSketchRanges(gwasLd))
+    if (nQ != nG) {
         msg <- glue(
             "{pipelineName}: ldSketch panels differ in size ({nQ} vs ",
             "{nG} variants){between}; the two ldSketch panels ",
@@ -1239,17 +1313,19 @@ loadLdFromGenotype <- function(
 
 # Panels must agree on CHR/BP/A1/A2 columns and on the sample set.
 .ldSketchCheckContent <- function(qtlLd, gwasLd, pipelineName, between) {
-    qSnp <- .ldSketchSnpInfo(qtlLd)
-    gSnp <- .ldSketchSnpInfo(gwasLd)
-    if (!identical(canonChrom(qSnp$CHR), canonChrom(gSnp$CHR))) {
+    qGr <- .ldSketchRanges(qtlLd)
+    gGr <- .ldSketchRanges(gwasLd)
+    if (!identical(.ldSketchChrom(qtlLd), .ldSketchChrom(gwasLd))) {
         msg <- glue(
             "{pipelineName}: ldSketch panels differ in column CHR",
             "{between}; use the same ldSketch on both."
         )
         abort(msg)
     }
+    qCol <- .ldRangesColumns(qGr)
+    gCol <- .ldRangesColumns(gGr)
     for (col in c("BP", "A1", "A2")) {
-        if (!identical(as.character(qSnp[[col]]), as.character(gSnp[[col]]))) {
+        if (!identical(qCol[[col]], gCol[[col]])) {
             msg <- glue(
                 "{pipelineName}: ldSketch panels differ in column ",
                 "{col}{between}; use the same ldSketch on both."
@@ -1257,8 +1333,8 @@ loadLdFromGenotype <- function(
             abort(msg)
         }
     }
-    qIds <- getSampleIds(.ldSketchHandle(qtlLd))
-    gIds <- getSampleIds(.ldSketchHandle(gwasLd))
+    qIds <- .ldSketchSampleIds(qtlLd)
+    gIds <- .ldSketchSampleIds(gwasLd)
     if (!identical(qIds, gIds)) {
         msg <- glue(
             "{pipelineName}: ldSketch panels have different sample sets",
@@ -2921,17 +2997,15 @@ loadLdBlock <- function(spec, g) {
     trimSamples,
     shrinkage
 ) {
-    handle <- .ldSketchHandle(panel)
     idx <- if (is.null(snpIdx)) {
-        seq_len(nrow(getSnpInfo(handle)))
+        seq_along(.ldSketchRanges(panel))
     } else {
         snpIdx
     }
-    block <- extractBlockGenotypes(handle, idx)
-    if (is.null(block)) {
+    geno <- .ldSketchDosage(panel, idx)
+    if (is.null(geno)) {
         return(diag(length(idx)))
     }
-    geno <- t(SummarizedExperiment::assay(block, "dosage"))
     if (ncol(geno) < 2L) {
         return(diag(length(idx)))
     }
@@ -2988,13 +3062,14 @@ loadLdBlock <- function(spec, g) {
             "'{fmt}'. Only GDS exposes an on-disk LD routine."
         ))
     }
-    handle <- .ldSketchHandle(X)
     idx <- if (is.null(snpIdx)) {
-        seq_len(nrow(getSnpInfo(handle)))
+        seq_along(.ldSketchRanges(X))
     } else {
         snpIdx
     }
-    R <- .computeBlockLdGds(handle, idx)
+    # The handle stays here on purpose: the GDS on-disk LD routine reads the
+    # file directly, which is a seed-level operation with no assay equivalent.
+    R <- .computeBlockLdGds(.ldSketchHandle(X), idx)
     diag(R) <- 1.0
     R[is.na(R) | is.nan(R)] <- 0
     if (shrinkage > 0 && shrinkage <= 1) {
