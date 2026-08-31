@@ -116,6 +116,73 @@ test_that("normalizeVariantId: strips build suffix and re-emits canonical", {
 })
 
 # ===========================================================================
+# .repairVariantIds
+# ===========================================================================
+
+test_that(".repairVariantIds: rebuilds a tag-allele id from the allele columns", {
+    ids <- c("chr21:13988152:INS:T", "chr21:13988153:DEL:T")
+    expect_equal(
+        pecotmr:::.repairVariantIds(ids, A2 = c("A", "GT"), A1 = c("AT", "G")),
+        c("chr21:13988152:A:AT", "chr21:13988153:GT:G")
+    )
+})
+
+test_that(".repairVariantIds: leaves clean, lower-case and rsID labels alone", {
+    ids <- c(
+        "chr1:100:A:G", # plain SNP
+        "chr1:788757:T:TAATGG", # real insertion, spelled out
+        "chr1:200:a:g", # lower case is DNA, not a tag
+        "chr1:300_A_G", # underscore convention
+        "rs12345", # does not parse to the allele form
+        NA
+    )
+    out <- pecotmr:::.repairVariantIds(
+        ids,
+        A2 = c("A", "T", "A", "A", "C", "A"),
+        A1 = c("G", "TAATGG", "G", "G", "T", "G")
+    )
+    expect_equal(out, as.character(ids))
+})
+
+test_that(".repairVariantIds: preserves the ids' own naming convention", {
+    ids <- c("1:100_A_G", "1:200_INS_G")
+    expect_equal(
+        pecotmr:::.repairVariantIds(ids, A2 = c("A", "A"), A1 = c("G", "AG")),
+        c("1:100_A_G", "1:200_A_AG")
+    )
+})
+
+test_that(".repairVariantIds: keeps the id when the alleles cannot replace it", {
+    ids <- c("chr1:100:INS:T", "chr1:200:INS:T", "chr1:300:INS:T")
+    expect_equal(
+        pecotmr:::.repairVariantIds(
+            ids,
+            A2 = c(NA, "", "A"),
+            A1 = c("AT", "AT", "AT")
+        ),
+        c("chr1:100:INS:T", "chr1:200:INS:T", "chr1:300:A:AT")
+    )
+    # A mis-shaped allele vector is a no-op rather than a recycling error.
+    expect_equal(pecotmr:::.repairVariantIds(ids, "A", "AT"), ids)
+    expect_equal(
+        pecotmr:::.repairVariantIds(character(0), character(0), character(0)),
+        character(0)
+    )
+})
+
+test_that(".repairVariantIds: non-DNA alleles on both sides are still kept", {
+    # Nothing better can be said about these, but the point of the repair is
+    # that a variant is never DROPPED for how its id spells an allele.
+    ids <- c("chr1:100:A:*", "chr1:200:N:G", "chr1:300:A:<DEL>")
+    out <- pecotmr:::.repairVariantIds(
+        ids,
+        A2 = c("A", "N", "A"),
+        A1 = c("*", "G", "<DEL>")
+    )
+    expect_equal(out, ids)
+})
+
+# ===========================================================================
 # parseRegion
 # ===========================================================================
 

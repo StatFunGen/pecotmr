@@ -3250,30 +3250,27 @@ test_that("summaryStatsQc: harmonization re-keys SNP to the panel id and sign-fl
 })
 
 # ---------------------------------------------------------------------------
-# Uninterpretable panel ids (e.g. ADSP R5 INS/DEL tags): drop, don't guess
+# Tag-allele panel ids (e.g. ADSP R5 INS/DEL): repair from the allele columns,
+# never drop the variant
 # ---------------------------------------------------------------------------
 
-test_that(".ldSketchIdUsable flags tag-allele ids but not SNPs, real indels, or rsIDs", {
-    ids <- c(
-        "chr21:13988031:T:C",
-        "chr1:788757:T:TAATGG",
-        "chr21:16298:C:T",
-        "chr21:13988152:INS:T",
-        "chr21:13988153:DEL:T",
-        "rs12345",
-        NA
-    )
-    expect_equal(
-        pecotmr:::.ldSketchIdUsable(ids),
-        c(TRUE, TRUE, TRUE, FALSE, FALSE, TRUE, TRUE)
-    )
+test_that(".ldSketchMatchIds repairs tag ids and leaves clean labels alone", {
+    h <- .ssQ_makeHandleVid() # ids chr1:100:G:A .. chr1:800:G:A, A1=A A2=G
+    h@snpInfo$SNP[h@snpInfo$BP == 200L] <- "chr1:200:INS:A"
+    ids <- pecotmr:::.ldSketchMatchIds(h)
+    # the tag id is re-rendered from the panel's own A2/A1 columns ...
+    expect_equal(ids[2L], "chr1:200:G:A")
+    # ... and every other label is untouched.
+    expect_equal(ids[-2L], pecotmr:::.ldSketchVariantIds(h)[-2L])
+    # the raw accessor still answers the panel FILE's label (.afreq keys on it)
+    expect_equal(pecotmr:::.ldSketchVariantIds(h)[2L], "chr1:200:INS:A")
 })
 
-test_that(".raissUnsafeToImpute now excludes tag-allele ids (third clause)", {
-    # A tag id has no flip twin, so it slipped through before; it must now be
-    # unsafe, while a normal SNP stays safe and the flip-pair behaviour is intact.
-    expect_true(pecotmr:::.raissUnsafeToImpute(
-        "chr21:13988152:INS:T",
+test_that(".raissUnsafeToImpute does not refuse a tag-allele id", {
+    # A tag id is repaired at the panel boundary, so RAISS sees a normal indel
+    # id; only the flip-pair / flip-of-known ambiguities are unsafe.
+    expect_false(pecotmr:::.raissUnsafeToImpute(
+        "chr21:13988152:A:AT",
         character(0)
     ))
     expect_false(pecotmr:::.raissUnsafeToImpute(
@@ -3285,7 +3282,7 @@ test_that(".raissUnsafeToImpute now excludes tag-allele ids (third clause)", {
     expect_true(all(pecotmr:::.raissUnsafeToImpute(fp, character(0))))
 })
 
-test_that("harmonization drops a variant on a tag-named panel position, keeps normal ones", {
+test_that("harmonization keeps a variant on a tag-named panel position", {
     skip_if_not_installed("pgenlibr")
     h <- .ssQ_makeHandleVid() # ids chr1:100:G:A .. chr1:800:G:A, A1=A A2=G
     df <- tibble(
@@ -3303,9 +3300,28 @@ test_that("harmonization drops a variant on a tag-named panel position, keeps no
     # tag the pos-200 panel id (A1/A2 columns stay the real alleles)
     h@snpInfo$SNP[h@snpInfo$BP == 200L] <- "chr1:200:INS:A"
     outT <- pecotmr:::.matchAgainstSketch(df, h, matchMinProp = 0)
-    # pos-200 is dropped (its only reference entry is uninterpretable); pos-100 kept
-    expect_true(100L %in% pecotmr:::parseVariantId(outT$SNP)$pos)
-    expect_false(200L %in% pecotmr:::parseVariantId(outT$SNP)$pos)
+    # the tag costs nothing: both variants survive, with unchanged Z
+    expect_setequal(pecotmr:::parseVariantId(outT$SNP)$pos, c(100L, 200L))
+    expect_equal(outT$SNP, out0$SNP)
+    expect_equal(outT$Z, out0$Z)
+})
+
+test_that("a tag-named panel entry survives the end-to-end sketch subset", {
+    h <- .ssQ_makeHandleVid()
+    h@snpInfo$SNP[h@snpInfo$BP == 200L] <- "chr1:200:INS:A"
+    ss <- GwasSumStats(
+        study = "g1",
+        entry = list(.ssQ_makeEntryGr()),
+        genome = "hg19",
+        ldSketch = h
+    )
+    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    snp <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
+    expect_true("chr1:200:G:A" %in% snp)
+    # the retained sketch keeps the panel row the QC'd entry still refers to
+    expect_true(
+        "chr1:200:G:A" %in% pecotmr:::.ldSketchMatchIds(getLdSketch(out))
+    )
 })
 
 test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants against the panel", {

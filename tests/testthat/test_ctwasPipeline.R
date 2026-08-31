@@ -526,6 +526,25 @@ test_that(".ctwasSnpInfoForBlock: returns ctwas-required columns chrom/id/pos/al
     expect_setequal(colnames(df), c("chrom", "id", "pos", "alt", "ref"))
 })
 
+test_that(".ctwasSnpInfoForBlock: repairs a tag-allele panel id from A1/A2", {
+    # The id becomes the R dimnames and `panelSnps`, both compared against
+    # harmonized (reference-allele) ids, so a tag id would drop the variant.
+    h <- .ctp_makeHandle(snp_n = 3L)
+    h@snpInfo$SNP[2L] <- "chr1:200:INS:A"
+    df <- pecotmr:::.ctwasSnpInfoForBlock(h)
+    expect_equal(df$id[2L], "chr1:200:G:A")
+    expect_equal(df$ref[2L], "G")
+    expect_equal(df$alt[2L], "A")
+    # the LD matrix and variance vector are keyed the same way
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    panel <- pecotmr:::.ctwasComputeFullPanelLd(h)
+    expect_true("chr1:200:G:A" %in% rownames(panel$R))
+    expect_true("chr1:200:G:A" %in% names(panel$variance))
+})
+
 test_that(".ctwasLdPanelKey: returns the on-disk path for an existing GDS sketch", {
     handle <- .ctp_makeHandle()
     key <- pecotmr:::.ctwasLdPanelKey(handle)
