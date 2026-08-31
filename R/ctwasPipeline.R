@@ -2170,12 +2170,19 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 .ctwasSnpInfoForBlock <- function(gwasLd) {
     gr <- .ldSketchRanges(gwasLd)
     mc <- S4Vectors::mcols(gr)
+    # `.ldSketchMatchIds()`, not the raw SNP label: this id becomes the R
+    # dimnames, the `variance` names, `panelSnps` and the weight-harmonization
+    # reference id all at once, and every one of those is compared against a
+    # harmonized (reference-allele) id from the GWAS or the weights. A panel
+    # entry spelling a tag where an allele belongs would fail all four
+    # comparisons and silently drop the variant from the analysis.
+    #
     # Base data.frame (not tibble): ctwas indexes snp_map positionally
     # (df[, "pos"] -> vector for region-bound min/max); a tibble column is a
     # 1-col list and errors min().
     data.frame(
         chrom = as.integer(.ldSketchChrom(gwasLd)),
-        id = as.character(mc$SNP),
+        id = .ldSketchMatchIds(gwasLd),
         pos = as.integer(GenomicRanges::start(gr)),
         alt = as.character(mc$A1),
         ref = as.character(mc$A2),

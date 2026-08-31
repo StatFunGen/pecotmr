@@ -917,11 +917,32 @@ loadLdFromGenotype <- function(
 }
 
 # The panel's variant ids in the panel's OWN labelling. This is the mcols
-# column, not `names()`: the names are normalized ids, while matching against
-# summary statistics has to see the panel's raw labels.
+# column, not `names()`: the names are normalized ids, while anything keyed on
+# the panel FILE -- the `.afreq` sidecar, the ctwas snp_map -- has to see the
+# panel's raw labels.
 # @noRd
 .ldSketchVariantIds <- function(x) {
     as.character(S4Vectors::mcols(.ldSketchRanges(x))$SNP)
+}
+
+# The panel's variant ids as MATCHING keys: the raw labels, with any id whose
+# allele slot holds a tag rather than an allele (chr21:13988152:INS:T) re-
+# rendered from the panel's own A1 / A2 columns, which are correct. Use this
+# wherever a panel id is matched against summary statistics or another id set,
+# and `.ldSketchVariantIds()` only where the file's literal label is wanted.
+#
+# The repair is what lets an untidily-named panel entry be MATCHED rather than
+# discarded: harmonization re-keys a surviving variant to the reference-allele
+# id, so the panel side has to speak the same form or every later id lookup
+# misses the variant it just harmonized.
+# @noRd
+.ldSketchMatchIds <- function(x) {
+    mc <- S4Vectors::mcols(.ldSketchRanges(x))
+    ids <- as.character(mc$SNP)
+    if (is.null(mc$A1) || is.null(mc$A2)) {
+        return(ids)
+    }
+    .repairVariantIds(ids, as.character(mc$A2), as.character(mc$A1))
 }
 
 # Per-variant chromosome, canonical (no chr prefix).
@@ -998,7 +1019,7 @@ loadLdFromGenotype <- function(
     # rsID panels; the caller's original ids and order are preserved.
     m <- matchVariants(
         variantIds,
-        .ldSketchVariantIds(ldSketch),
+        .ldSketchMatchIds(ldSketch),
         removeStrandAmbiguous = FALSE
     )
     nMissing <- length(variantIds) - length(m$idxA)

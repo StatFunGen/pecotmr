@@ -98,33 +98,55 @@ isSnpAlleles <- function(a1, a2) {
     replace_na(isSnp, FALSE)
 }
 
-#' Test whether variant ids encode usable DNA alleles (not a tag like INS/DEL).
+#' Re-render variant ids whose allele slot holds a tag instead of an allele.
 #'
-#' Some LD panels (e.g. ADSP R5) name a variant with a tag where an allele belongs
-#' -- \code{chr21:13988152:INS:T} whose real alleles are \code{A}/\code{AT} -- so the
-#' id no longer encodes its alleles, even though the panel's A1/A2 columns are correct.
-#' The id-string matchers (\code{.ldFromSketchMatch}, \code{.subsetSketchToIds}) key on
-#' the id and cannot interpret such a record. Returns TRUE only where both parsed
-#' alleles are pure DNA; tests for DNA rather than the literal \code{INS}/\code{DEL},
-#' so any tagging convention is caught. A legitimate multi-base indel allele (e.g.
-#' \code{TAATGG}) stays usable.
-#' An id that does not parse to \code{chr:pos:allele:allele} at all -- e.g. an
-#' rsID -- is a different, valid convention (its A1/A2 columns are clean and
-#' \code{matchVariants} handles it by string), so it is NOT flagged; only an id
-#' that parses to the allele form but whose allele slot holds a non-DNA tag is
-#' unusable.
+#' Some LD panels (e.g. ADSP R5) name a variant with a tag where an allele
+#' belongs -- \code{chr21:13988152:INS:T} whose real alleles are
+#' \code{A}/\code{AT} -- so the id string stops encoding its alleles even
+#' though the panel's own A1/A2 columns are correct. The id-string matchers
+#' (\code{.ldFromSketchMatch}, \code{.subsetSketchToIds}) key on the id and
+#' cannot interpret such a record. The allele COLUMNS are authoritative, so the
+#' id is rebuilt from them; the variant is never dropped for how its id happens
+#' to spell an allele.
+#'
+#' Only an id that parses to \code{chr:pos:allele:allele} but whose allele
+#' slots are not pure DNA is rewritten, and only where both supplied alleles are
+#' present. An id that does not parse to the allele form -- an rsID, say -- is a
+#' different, valid convention that \code{matchVariants} handles by exact
+#' string, so it is left alone; so is a clean allele-encoded id, which keeps the
+#' panel's own spelling. The DNA test is case-insensitive, so a lower-case id
+#' (\code{chr1:100:a:g}) is clean, not a tag. Rewritten ids follow the
+#' convention (chr prefix, field separator) detected on \code{ids}, so a
+#' repaired id looks like its neighbours.
+#'
 #' @param ids Character vector of variant ids (\code{chr:pos:A2:A1}).
-#' @return Logical vector, TRUE unless the id parses to a non-DNA allele.
+#' @param A2,A1 Character vectors of authoritative reference / alternate
+#'   alleles, parallel to \code{ids}.
+#' @return \code{ids} with the tag-allele entries re-rendered from
+#'   \code{A2}/\code{A1}.
 #' @noRd
-.ldSketchIdUsable <- function(ids) {
+.repairVariantIds <- function(ids, A2, A1) {
+    ids <- as.character(ids)
+    if (length(A2) != length(ids) || length(A1) != length(ids)) {
+        return(ids)
+    }
     p <- parseVariantId(ids)
-    parsed <- !is.na(p$A1) & !is.na(p$A2)
-    dnaOk <- replace_na(
-        str_detect(p$A1, "^[ACGT]+$") & str_detect(p$A2, "^[ACGT]+$"),
-        FALSE
+    dna <- regex("^[ACGT]+$", ignore_case = TRUE)
+    tagged <- !is.na(p$A1) &
+        !is.na(p$A2) &
+        !replace_na(str_detect(p$A1, dna) & str_detect(p$A2, dna), FALSE)
+    repair <- tagged & !is.na(A2) & !is.na(A1) & A2 != "" & A1 != ""
+    if (!any(repair)) {
+        return(ids)
+    }
+    ids[repair] <- formatVariantId(
+        p$chrom[repair],
+        p$pos[repair],
+        A2[repair],
+        A1[repair],
+        convention = attr(p, "convention")
     )
-    # usable = not an allele-encoded id (rsID etc.) OR parsed and pure DNA.
-    !parsed | dnaOk
+    ids
 }
 
 # Backwards-compat alias

@@ -1722,12 +1722,7 @@ autoDecision <- function(df, highCorrCols) {
 # correspondence between `knownZscores$z` and the LD rows indexed by `knowns`.
 # @noRd
 .raissUnsafeToImpute <- function(refPanelIds, knownIds) {
-    # unusable-id: the id does not encode its alleles (e.g. an R5 INS/DEL tag).
-    # It is dropped from harmonization for the same reason -- the sumstats cannot
-    # say which orientation was measured -- so imputing it would put back a
-    # variant the drop exists to exclude.
-    !.ldSketchIdUsable(refPanelIds) |
-        .raissFlipPairMask(refPanelIds) |
+    .raissFlipPairMask(refPanelIds) |
         .raissFlipOfKnownMask(refPanelIds, knownIds)
 }
 
@@ -2853,6 +2848,9 @@ krigingOutlierQc <- function(
 
 # Build a refVariants data.frame (chrom, pos, A1, A2, variant_id) from the
 # panel's own variant ranges so harmonizeAlleles can join by (chrom, pos).
+# The id comes from `.ldSketchMatchIds()`, not the raw SNP label: a panel entry
+# that spells a tag where an allele belongs still harmonizes off its A1/A2
+# columns, and the repaired id is what the LD lookups downstream can find.
 .refVariantsFromSketch <- function(ldSketch) {
     gr <- .ldSketchRanges(ldSketch)
     mc <- S4Vectors::mcols(gr)
@@ -2861,7 +2859,7 @@ krigingOutlierQc <- function(
         pos = as.integer(GenomicRanges::start(gr)),
         A1 = as.character(mc$A1),
         A2 = as.character(mc$A2),
-        variant_id = as.character(mc$SNP),
+        variant_id = .ldSketchMatchIds(ldSketch),
         stringsAsFactors = FALSE
     )
 }
@@ -3156,26 +3154,6 @@ krigingOutlierQc <- function(
 # harmonizeAlleles against the ldSketch's variant info. Threads the
 # variant-level filters (indels, strand-ambiguous, duplicates) through
 # so the LD-panel-anchored pass handles them in a single sweep.
-# The harmonization reference set: the panel's variants, minus the entries
-# whose id does not encode its alleles (e.g. R5 INS/DEL tags). Their A1/A2
-# columns may be correct, but the summary statistics carry no way to say which
-# orientation was measured at that position, so a GWAS variant there must be
-# dropped rather than aligned by a guess that could sign-flip a real signal --
-# the same "exclude what you can't interpret" rule the RAISS flip-pair /
-# flip-of-known masks apply. Removing the reference row leaves the GWAS variant
-# unmatched, so removeUnmatched removes it.
-#
-# Filtered HERE rather than inside .refVariantsFromSketch because the RAISS
-# path indexes into that frame and would misalign against its dosage if it
-# were filtered globally.
-# @noRd
-.sketchRefVariants <- function(ldSketch) {
-    filter(
-        .refVariantsFromSketch(ldSketch),
-        .ldSketchIdUsable(.data$variant_id)
-    )
-}
-
 .matchAgainstSketch <- function(
     df,
     ldSketch,
@@ -3184,7 +3162,7 @@ krigingOutlierQc <- function(
     removeStrandAmbiguous = TRUE,
     removeDups = TRUE
 ) {
-    refVariants <- .sketchRefVariants(ldSketch)
+    refVariants <- .refVariantsFromSketch(ldSketch)
     flipCandidates <- c("Z", "BETA")
     colToFlip <- intersect(flipCandidates, colnames(df))
     if (length(colToFlip) == 0L) {
@@ -3929,7 +3907,7 @@ krigingOutlierQc <- function(
     # TRUE did.
     dosage <- .ldSketchDosage(ldSketch, windowIdx, meanImpute = FALSE)
     colnames(dosage) <- normalizeVariantId(
-        .ldSketchVariantIds(ldSketch)[windowIdx]
+        .ldSketchMatchIds(ldSketch)[windowIdx]
     )
     dosage <- dosage[, refPanel$variant_id, drop = FALSE]
     keep <- .qcRaissTargetMask(refPanel, knownZ, dosage, opts)
@@ -4642,7 +4620,7 @@ krigingOutlierQc <- function(
         return(ldSketch)
     }
     keep <- is_in(
-        normalizeVariantId(.ldSketchVariantIds(ldSketch)),
+        normalizeVariantId(.ldSketchMatchIds(ldSketch)),
         normalizeVariantId(unique(ids))
     )
     .ldSketchSubset(ldSketch, keep)
@@ -4792,7 +4770,7 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch) || is.null(cutoffs)) {
         return(ldSketch)
     }
-    ids <- .ldSketchVariantIds(ldSketch)
+    ids <- .ldSketchMatchIds(ldSketch)
     if (length(ids) == 0L) {
         return(ldSketch)
     }
