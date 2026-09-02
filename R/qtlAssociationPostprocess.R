@@ -283,12 +283,15 @@ setMethod(
         md[[nm]] <- newCols[[nm]]
     }
     grl <- GenomicRanges::GRangesList(as.list(x))
+    # Rebuilding from as.list() starts from the elements' own seqinfo, so the
+    # build is written back explicitly -- it is collection-level state, and
+    # there is no genome slot to carry it any more.
+    GenomeInfoDb::genome(grl) <- getGenome(x)
     mcols(grl) <- md
     methods::new(
         "QtlSumStats",
         grl,
         ldSketch = getLdSketch(x),
-        genome = getGenome(x),
         qcInfo = qcInfo
     )
 }

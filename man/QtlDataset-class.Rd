@@ -89,9 +89,7 @@ than one of the things being chosen between, so it is always retained.
 \describe{
 \item{\code{study}}{Character (length 1). Study identifier; used in collection
 classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
-entries.}
-
-\item{\code{genotypes}}{The genotype source for lazy access to dosages.
+entries.
 The \code{genotype} experiment's assay reads through this handle; the
 extraction accessors read it directly, so that QC can be applied per
 block.}

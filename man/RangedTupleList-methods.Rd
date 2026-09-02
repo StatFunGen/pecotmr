@@ -10,6 +10,7 @@
 \alias{[,RangedTupleList,ANY,ANY,ANY-method}
 \alias{[[<-,RangedTupleList,ANY,ANY-method}
 \alias{endoapply,RangedTupleList-method}
+\alias{bindROWS,RangedTupleList-method}
 \title{RangedTupleList methods}
 \usage{
 \S4method{nrow}{RangedTupleList}(x)
@@ -27,6 +28,14 @@
 \S4method{[[}{RangedTupleList,ANY,ANY}(x, i, j, ...) <- value
 
 \S4method{endoapply}{RangedTupleList}(X, FUN, ...)
+
+\S4method{bindROWS}{RangedTupleList}(
+  x,
+  objects = list(),
+  use.names = TRUE,
+  ignore.mcols = FALSE,
+  check = TRUE
+)
 }
 \arguments{
 \item{x, X}{A \code{RangedTupleList} collection.}

@@ -11,6 +11,18 @@
 #' @include AllClasses.R tupleSelectors.R
 NULL
 
+#' @title GWAS Summary-Statistic Collection
+#' @description S4 collection of GWAS summary statistics keyed by the identity
+#'   tuple \code{(study)}. Each element is that study's per-variant
+#'   \code{GRanges} covering a single LD block, so build one collection per
+#'   block when sweeping the genome.
+#' @details Required column: \code{study}, unique across rows. The class-level
+#'   slots inherited from \code{\linkS4class{SumStatsBase}} --
+#'   \code{ldSketch}, \code{genome} and \code{qcInfo} -- apply uniformly to
+#'   every row.
+#' @seealso \code{\link{GwasSumStats}} for the constructor and
+#'   \code{\linkS4class{QtlSumStats}} for the QTL counterpart.
+#' @export
 setClass(
     "GwasSumStats",
     contains = "SumStatsBase",
@@ -25,12 +37,7 @@ setClass(
                 str_c("missing columns: ", str_flatten(missingCols, ", "))
             )
         }
-        if (length(object@genome) != 1L || str_length(object@genome) == 0L) {
-            errors <- c(
-                errors,
-                "'genome' slot must be a single non-empty character string"
-            )
-        }
+        errors <- c(errors, .sumStatsCheckGenome(object))
         if (!is.list(object@qcInfo)) {
             errors <- c(errors, "'qcInfo' slot must be a list")
         }
@@ -58,7 +65,7 @@ setClass(
 setMethod("show", "GwasSumStats", function(object) {
     cat(glue(
         "GwasSumStats: {nrow(object)} studies, ",
-        "genome build {object@genome}\n",
+        "genome build {getGenome(object)}\n",
         .trim = FALSE
     ))
     ld <- object@ldSketch
@@ -215,11 +222,14 @@ GwasSumStats <- function(
 # coerce those slots. Used by qtlSumStats.R too.
 # @noRd
 .sumStatsNewValidated <- function(Class, grl, ldSketch, genome, qcInfo) {
+    # The build goes into seqinfo, which is where a GRangesList keeps it and
+    # where every Bioconductor consumer reads it from. Assigned before new()
+    # so validity sees the finished object.
+    GenomeInfoDb::genome(grl) <- as.character(genome)
     obj <- methods::new(
         Class,
         grl,
         ldSketch = .asLdSketch(ldSketch),
-        genome = as.character(genome),
         qcInfo = as.list(qcInfo)
     )
     methods::validObject(obj)

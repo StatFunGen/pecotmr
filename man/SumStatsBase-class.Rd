@@ -8,7 +8,8 @@
 Virtual base class for QTL and GWAS summary statistics
   collections. Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats})
   inherit from \code{\linkS4class{RangedTupleList}} and share the
-  \code{ldSketch} / \code{genome} / \code{qcInfo} slots.
+  \code{ldSketch} / \code{qcInfo} slots, and the genome build in
+  \code{seqinfo()}.
 
   Each element is the per-variant \code{GRanges} of one tuple, so
   \code{x[[i]]} is that tuple's summary statistics and the identity columns
@@ -22,8 +23,6 @@ Virtual base class for QTL and GWAS summary statistics
 or \code{NULL}. Optional: LD-free workflows (e.g. mash, which operates
 across conditions per variant) carry \code{NULL}; pipelines that need LD
 validate its presence when they consume the collection.}
-
-\item{\code{genome}}{Character, genome build label.}
 
 \item{\code{qcInfo}}{A \code{list} recording which QC steps ran. Empty \code{list()}
 on construction; populated by \code{summaryStatsQc()} with a per-step audit

@@ -4463,14 +4463,14 @@ test_that(".panelVariantStats reports NA MAF for an all-missing variant", {
 test_that(".panelVariantFilter is a no-op at its defaults", {
     data(qtlDatasetExample)
     gh <- getGenotypes(qtlDatasetExample)
-    handle <- qtlDatasetExample@genotypes
+    handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
     expect_identical(.panelVariantFilter(handle, ids), ids)
 })
 
 test_that(".panelVariantFilter drops panel-rare variants", {
     data(qtlDatasetExample)
-    handle <- qtlDatasetExample@genotypes
+    handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
     loose <- .panelVariantFilter(handle, ids, mafCutoff = 0.05)
     tight <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
@@ -4483,7 +4483,7 @@ test_that(".panelVariantFilter drops panel-rare variants", {
 
 test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
     data(qtlDatasetExample)
-    handle <- qtlDatasetExample@genotypes
+    handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
     nSamp <- getNSamples(handle)
     # macCutoff / (2 * nSamples) is the same threshold as mafCutoff.
@@ -4499,7 +4499,7 @@ test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
 
 test_that(".panelVariantFilter drops high-missingness variants", {
     data(qtlDatasetExample)
-    handle <- qtlDatasetExample@genotypes
+    handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
     strict <- .panelVariantFilter(handle, ids, imissCutoff = 0)
     expect_lt(length(strict), length(ids))
@@ -4512,7 +4512,7 @@ test_that(".panelVariantFilter passes through ids absent from the panel", {
     # .ldFromSketch's `onMissing`; deciding it here too would let the two
     # disagree about the same variant.
     data(qtlDatasetExample)
-    handle <- qtlDatasetExample@genotypes
+    handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)[1:3]
     withGhost <- c("chr9:999:A:G", ids)
     expect_true(is_in(
@@ -4523,7 +4523,7 @@ test_that(".panelVariantFilter passes through ids absent from the panel", {
 
 test_that(".panelVariantFilter handles empty and NULL input", {
     data(qtlDatasetExample)
-    handle <- qtlDatasetExample@genotypes
+    handle <- getGenotypeHandle(qtlDatasetExample)
     expect_length(
         .panelVariantFilter(handle, character(0), mafCutoff = 0.1),
         0L

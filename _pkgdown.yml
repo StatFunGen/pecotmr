@@ -92,15 +92,20 @@ reference:
     desc: >
       S4 class definitions. The `-class` topic documents the slots and
       validity constraints; the matching constructor topic (next
-      section) documents the user-facing factory function.
+      section) documents the user-facing factory function. Virtual
+      classes have no constructor, and neither does `H2Estimate` --
+      `estimateH2()` builds it.
     contents:
       - AnnotationMatrix-class
       - ColocBoostResult-class
       - ColocResult-class
       - ColocResultBase-class
+      - CtwasResult-class
+      - CtwasResultEntry-class
       - FineMappingResultBase-class
       - FineMappingRow-class
       - GwasFineMappingResult-class
+      - GwasSumStats-class
       - H2Estimate-class
       - LdData-class
       - LdEigen-class
@@ -110,6 +115,7 @@ reference:
       - MultiStudyQtlDataset-class
       - QtlDataset-class
       - QtlFineMappingResult-class
+      - QtlSumStats-class
       - RangedTupleList-class
       - SldscData-class
       - SumStatsBase-class
@@ -118,15 +124,16 @@ reference:
 
   - title: "Class constructors"
     desc: >
-      User-facing constructors. For classes that have both a `-class`
-      topic and a constructor topic, prefer the constructor for
+      User-facing constructors -- one per class, plus the two
+      alternative `QtlSumStats` builders. Every class here also has a
+      `-class` topic in the section above: prefer the constructor for
       day-to-day use; the `-class` topic is the authoritative slot
       reference.
     contents:
       - AnnotationMatrix
-      - CtwasResult
       - ColocBoostResult
       - ColocResult
+      - CtwasResult
       - CtwasResultEntry
       - fineMappingRow
       - GwasFineMappingResult
@@ -158,88 +165,160 @@ reference:
 
   - title: "Class methods"
     desc: >
-      Accessor and behaviour methods grouped by the class they're
-      defined on. Generics with implementations on multiple classes
-      appear under each. S4 pipeline dispatch methods
-      (`fineMappingPipeline`, `colocboostPipeline`,
-      `twasWeightsPipeline`) are listed under "Pipelines" further
-      down rather than repeated per class.
+      Accessor and behaviour methods, grouped by the class each method is
+      defined on. A generic with methods on several classes is listed under
+      every one of them, so each block is the complete callable surface for
+      that class (a subclass also inherits everything listed under its base).
+      S4 pipeline dispatch methods (`fineMappingPipeline`,
+      `colocboostPipeline`, `twasWeightsPipeline`) are listed under
+      "Pipelines" further down rather than repeated per class.
     contents:
       - show-methods
 
-  - subtitle: "AnnotationMatrix"
-    contents:
-      - getBaseline
-      - getCandidates
-      - getGenome
-
   - subtitle: "RangedTupleList"
     contents:
-      # The virtual base every collection inherits: container and metadata
-      # methods, plus the region/variant verbs and the plyranges bridge.
-      - RangedTupleList-methods
-      - subsetRegion
-      - intersectVariants
+      # The virtual base of every tuple collection: container and metadata
+      # methods, the region verb, and the plyranges bridge. The families
+      # that inherit it -- fine-mapping results, colocalization results,
+      # summary statistics, TWAS weights -- follow.
       - flattenTupleRanges
       - nestTupleRanges
+      - RangedTupleList-methods
+      - subsetRegion
+
+  - subtitle: "FineMappingResultBase"
+    contents:
       - computeCsCorrelation
       - fsusieAffectedRegions
       - fsusieCredibleBand
       - getCredibleSetSummary
       - getCs
       - getLbf
-      - getMarginalEffects
-      - getPip
-      - getSusieFit
-      - getTopLoci
-      - getVariantIds
-      - resolveWeights
-
-  - subtitle: "FineMappingResultBase"
-    contents:
       - getLdSketch
+      - getMarginalEffects
       - getMethodNames
       - getRegion
+      - getRetainedMass
       - getStudy
+      - getSusieFit
+      - getTopLoci
+      - getTraitPosition
+      - getVariantIds
+      - intersectVariants
+      - resolveWeights
       - writeSumstatsVcf
 
-  - subtitle: "CtwasResult / CtwasResultEntry"
+  - subtitle: "QtlFineMappingResult"
     contents:
-      - getCtwasParam
-      - getFinemap
-      - getSusieAlpha
+      - getContexts
+      - getCvResult
+      - getFineMappingResult
+      - getPip
+      - getTraits
 
   - subtitle: "GwasFineMappingResult"
     contents:
       - getContexts
       - getFineMappingResult
+      - getPip
       - getTraits
 
-  - subtitle: "GwasSumStats"
+  - subtitle: "FineMappingRow"
     contents:
-      - "getSumStats,GwasSumStats-method"
-      - combineGwasSumStats
+      - getCvResult
+      - getSusieFit
+      - getVariantIds
+
+  - subtitle: "ColocResultBase / ColocResult / ColocBoostResult"
+    contents:
+      - "as.data.frame,ColocBoostResult-method"
+      - "as.data.frame,ColocResult-method"
+      - colocViews
+      - getColocBoostOutcomes
+      - getComputingTime
+      - getLdSketch
+      - getRegionVcp
+
+  - subtitle: "SumStatsBase"
+    contents:
       - getBeta
+      - getGenome
+      - getLdSketch
       - getMaf
       - getN
       - getP
+      - getQcDiagnostics
+      - getQcInfo
       - getSe
-      - getSumStats
-      - getSumstatDf
-      - getVarY
+      - getStudy
+      - getVariantIds
       - getZ
       - nSnps
       - subsetChr
 
-  - subtitle: "ColocResult / ColocBoostResult"
+  - subtitle: "GwasSumStats"
     contents:
-      - colocViews
-      - getColocBoostOutcomes
-      - getComputingTime
-      - getRegionVcp
-      - getRetainedMass
-      - "as.data.frame,ColocResult-method"
-      - "as.data.frame,ColocBoostResult-method"
+      - combineGwasSumStats
+      - getSumstatDf
+      - "getSumStats,GwasSumStats-method"
+      - getVarY
+      - writeSumstatsVcf
+
+  - subtitle: "QtlSumStats"
+    contents:
+      - combineQtlSumStats
+      - getContexts
+      - getSignificantQtls
+      - getSumstatDf
+      - getSumStats
+      - getTraitPosition
+      - getTraits
+      - getVarY
+      - qtlAssociationPostprocess
+
+  - subtitle: "TwasWeights"
+    contents:
+      - getContexts
+      - getCvResult
+      - getDataType
+      - getFits
+      - getLdSketch
+      - getMethodNames
+      - getRegion
+      - getStandardized
+      - getStudy
+      - getTraitPosition
+      - getTraits
+      - getTwasWeights
+      - getVariantIds
+      - getWeights
+      - resolveWeights
+
+  - subtitle: "TwasWeightsRow"
+    contents:
+      - getCvResult
+      - getDataType
+      - getFits
+      - getStandardized
+      - getVariantIds
+      - getWeights
+
+  - subtitle: "AnnotationMatrix"
+    contents:
+      # Classes outside the RangedTupleList hierarchy follow, in
+      # alphabetical order.
+      - getBaseline
+      - getCandidates
+      - getGenome
+
+  - subtitle: "CtwasResult / CtwasResultEntry"
+    contents:
+      - getContexts
+      - getCtwasParam
+      - getFinemap
+      - getMethodNames
+      - getStudy
+      - getSusieAlpha
 
   - subtitle: "H2Estimate"
     contents:
@@ -249,6 +328,7 @@ reference:
       - getIntercept
       - getInterceptSe
       - getLocal
+      - getMethodNames
       - getNSnps
       - getScoreStats
       - getTauBlocks
@@ -263,6 +343,7 @@ reference:
       - getNRef
       - getRefPanel
       - getSnpIdx
+      - getVariantIds
       - getVariantInfo
       - hasGenotypes
 
@@ -273,80 +354,51 @@ reference:
   - subtitle: "LdScore"
     contents:
       - getLdMatrixList
-      - getLdScoreWeights
       - getLdScores
+      - getLdScoreWeights
 
   - subtitle: "LdStatistic"
     contents:
+      - getGenome
       - getInSample
       - getLdBlocks
-
-  - subtitle: "MultiStudyQtlDataset"
-    contents:
-      - getQtlDatasets
-
-  - subtitle: "QtlDataset"
-    contents:
-      - getAf
-      - getGenotypeCovariates
-      - getGenotypes
-      - getPhenotypeCovariates
-      - getPhenotypes
-      - getResidualizedGenotypes
-      - getResidualizedPhenotypes
-      - getScaleResiduals
-      - getTraitPosition
-      - qtlDatasetFilters
-
-  - subtitle: "QtlFineMappingResult"
-    contents:
-      - getFineMappingResult
-
-  - subtitle: "QtlSumStats"
-    contents:
-      - combineQtlSumStats
-      - getContexts
-      - getSignificantQtls
-      - getTraits
-      - qtlAssociationPostprocess
-
-  - subtitle: "SumStatsBase"
-    contents:
-      - getQcInfo
-      - getQcDiagnostics
-
-  - subtitle: "SldscData"
-    contents:
-      - getAnnotData
-      - getFrqData
-      - getTraitRuns
-      - getTraitNames
-      - getAnnotCols
-      - getTraitRun
+      - getNRef
 
   - subtitle: "MashPrior"
     contents:
       - getCvFits
       - getFullFit
 
-  - subtitle: "TwasWeights"
+  - subtitle: "MultiStudyQtlDataset"
     contents:
-      - getCvResult
-      - getDataType
-      - getFits
-      - getStandardized
-      - getTwasWeights
-      - getWeights
+      - getQtlDatasets
+      - getStudy
+      - getSumStats
 
-  - subtitle: "TwasWeightsEntry"
+  - subtitle: "QtlDataset"
     contents:
-      # Same generic surface as TwasWeights — dispatches on per-row entries.
-      - getCvResult
-      - getDataType
-      - getFits
-      - getStandardized
-      - getVariantIds
-      - getWeights
+      - getAf
+      - getContexts
+      - getGenotypeCovariates
+      - getGenotypes
+      - getMaf
+      - getPhenotypeCovariates
+      - getPhenotypes
+      - getResidualizedGenotypes
+      - getResidualizedPhenotypes
+      - getScaleResiduals
+      - getStudy
+      - getTraitPosition
+      - qtlDatasetFilters
+
+  - subtitle: "SldscData"
+    contents:
+      - getAnnotCols
+      - getAnnotData
+      - getFrqData
+      - getTraitNames
+      - getTraitRun
+      - getTraitRuns
 
   - title: "Pipelines"
     desc: >
@@ -396,21 +448,21 @@ reference:
       - autoDecision
       - raiss
       - mergeVariantInfo
-      - mergeSusieCs
       - filterRelatedness
 
   - title: "LD infrastructure"
     desc: >
-      Loading and manipulating LD matrices, plus design-matrix
-      conditioning utilities.
+      Computing, loading, and manipulating LD matrices, plus
+      design-matrix conditioning utilities.
     contents:
       - loadLdMatrix
       - loadLdSketch
+      - loadLdBlock
+      - computeLd
       - checkLd
       - enforceDesignFullRank
       - ldClumpByScore
       - ldLoader
-      - loadLdBlock
       - ldPruneByCorrelation
       - filterVariantsByLdReference
 
@@ -421,7 +473,6 @@ reference:
       lazily, so the Bioconductor accessors apply to it directly.
     contents:
       - readGenotypes
-      - computeLd
       - loadGenotypeRegion
       - readAfreq
       - getRefVariantInfo
@@ -467,12 +518,14 @@ reference:
       - fsusieWrapper
       - getSusieResult
       - computeCsTables
+      - buildTopLoci
       - extractCsInfo
       - extractTopPipInfo
       - formatFinemappingOutput
       - lbfToAlpha
       - postprocessFinemappingFits
       - combineFineMappingResults
+      - mergeSusieCs
       - overlapTopLoci
 
   - title: "TWAS"
@@ -534,11 +587,13 @@ reference:
       - combineTwasWeights
       - twasWeightsCv
       - twasPredict
-      - twasZ
       - estimateSparsity
 
-  - subtitle: "Multi-method p-value combination"
+  - subtitle: "Association testing and p-value combination"
     contents:
+      # twasZ() turns weights plus GWAS summary statistics into a per-tuple
+      # Z and p-value, then delegates cross-tuple pooling to combinePValues().
+      - twasZ
       - combinePValues
       - waldTestPval
 
@@ -653,8 +708,6 @@ reference:
       - genotypeDelayedArray
       - as.data.frame.GwasSumStats
       - rescaleCovW0
-      - buildTopLoci
-      - "getSumStats,GwasSumStats-method"
 
 footer:
  structure:

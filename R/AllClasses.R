@@ -79,7 +79,8 @@ setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 # -----------------------------------------------------------------------------
 # Shared parent of the QTL and GWAS summary statistics collections.
 # Concrete subclasses (QtlSumStats, GwasSumStats) inherit from
-# RangedTupleList and share the ldSketch / genome / qcInfo slots. Each element
+# RangedTupleList and share the ldSketch / qcInfo slots (the genome build
+# lives in seqinfo, not a slot). Each element
 # is one tuple's per-variant GRanges: x[[i]], formerly x$entry[[i]].
 #
 # getZ / getN / getMaf / nSnps are
@@ -92,7 +93,8 @@ setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 #' @description Virtual base class for QTL and GWAS summary statistics
 #'   collections. Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats})
 #'   inherit from \code{\linkS4class{RangedTupleList}} and share the
-#'   \code{ldSketch} / \code{genome} / \code{qcInfo} slots.
+#'   \code{ldSketch} / \code{qcInfo} slots, and the genome build in
+#'   \code{seqinfo()}.
 #'
 #'   Each element is the per-variant \code{GRanges} of one tuple, so
 #'   \code{x[[i]]} is that tuple's summary statistics and the identity columns
@@ -102,7 +104,6 @@ setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 #'   or \code{NULL}. Optional: LD-free workflows (e.g. mash, which operates
 #'   across conditions per variant) carry \code{NULL}; pipelines that need LD
 #'   validate its presence when they consume the collection.
-#' @slot genome Character, genome build label.
 #' @slot qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record (filter names, drop counts, liftover target, RAISS settings, etc.).
@@ -115,7 +116,6 @@ setClass(
     contains = c("VIRTUAL", "RangedTupleList"),
     representation(
         ldSketch = "LdSketchOrNULL",
-        genome = "character",
         qcInfo = "list"
     )
 )
@@ -176,12 +176,51 @@ setClass(
     gr[onWindowChrom & IRanges::overlapsAny(gr, win)]
 }
 
+# The build recorded in seqinfo must be exactly one non-NA value. A missing
+# build is an error rather than a default: every downstream liftover / LD
+# join keys on it, and silently guessing hg38 is how a mismatched panel gets
+# through. Mixed builds mean the parts were never comparable.
+# @noRd
+.sumStatsCheckGenome <- function(object) {
+    # seqinfo records the build per SEQLEVEL, so a collection spanning none
+    # has nowhere to keep one -- whether it has no elements at all or only
+    # empty ones (a PIP-screened region emptied by summaryStatsQc). That is
+    # the one case where a missing build is not a defect: there is nothing
+    # for it to describe. A subset that empties an existing collection keeps
+    # its seqinfo (see .rtlRebuild), so this exempts only what was built with
+    # no ranges in the first place.
+    if (length(GenomeInfoDb::seqlevels(object)) == 0L) {
+        return(NULL)
+    }
+    build <- unique(GenomeInfoDb::genome(object))
+    build <- build[!is.na(build)]
+    if (length(build) == 1L && str_length(build) > 0L) {
+        return(NULL)
+    }
+    if (length(build) == 0L) {
+        return("no genome build in seqinfo(); set one with genome(x) <- ...")
+    }
+    str_c(
+        "seqinfo() names more than one genome build (",
+        str_flatten(build, ", "),
+        ")"
+    )
+}
+
 #' @rdname getGenome
 #' @examples
 #' data(qtlSumStatsExample)
 #' getGenome(qtlSumStatsExample)
 #' @export
-setMethod("getGenome", "SumStatsBase", function(x, ...) x@genome)
+setMethod("getGenome", "SumStatsBase", function(x, ...) {
+    # The build lives in seqinfo, exactly as it does on LdStatistic: a
+    # GRangesList already has somewhere to keep it, and a parallel `genome`
+    # slot went stale against it (getGenome() said hg19 while genome(x) said
+    # NA, so every Bioconductor path that reads genome(x) saw nothing).
+    build <- unique(GenomeInfoDb::genome(x))
+    build <- build[!is.na(build)]
+    if (length(build) == 0L) NA_character_ else build[[1L]]
+})
 
 #' @rdname getQcInfo
 #' @examples

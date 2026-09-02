@@ -3216,3 +3216,225 @@ test_that(".fmEffectIndices parses L-names and falls back to position", {
     expect_equal(.fmEffectIndices(list(L1 = 1, L2 = 2, L7 = 3)), c(1L, 2L, 7L))
     expect_equal(.fmEffectIndices(list(1, 2, 3)), c(1L, 2L, 3L))
 })
+
+
+context("post_finemapping_cs_extraction")
+
+# A single-row QtlFineMappingResult standing in for the retired
+# FineMappingRow. topLoci defaults to one row per variant: the row-payload
+# builder requires the two to be aligned, where the entry tolerated an empty
+# table beside a non-empty variant list.
+.testFineMappingRow <- function(
+    variantIds,
+    susieFit = list(),
+    topLoci = NULL
+) {
+    if (is.null(topLoci)) {
+        topLoci <- data.frame(
+            variant_id = variantIds,
+            pip = rep(0, length(variantIds)),
+            stringsAsFactors = FALSE
+        )
+    }
+    QtlFineMappingResult(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(fineMappingRow(
+            variantIds = variantIds,
+            susieFit = susieFit,
+            topLoci = topLoci
+        ))
+    )
+}
+
+# ===========================================================================
+# getSusieResult
+# ===========================================================================
+
+test_that("getSusieResult returns NULL for empty input", {
+    result <- getSusieResult(list())
+    expect_null(result)
+})
+
+test_that("getSusieResult returns NULL when finemappingEntry missing", {
+    result <- getSusieResult(list(some_data = 42))
+    expect_null(result)
+})
+
+test_that("getSusieResult returns trimmed result when present", {
+    mock_result <- list(pip = c(0.1, 0.5, 0.3), sets = list(cs = list()))
+    con_data <- list(
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
+            susieFit = mock_result
+        )
+    )
+    result <- getSusieResult(con_data)
+    expect_equal(result, mock_result)
+})
+
+# ===========================================================================
+# extractTopPipInfo
+# ===========================================================================
+
+test_that("extractTopPipInfo finds top PIP variant", {
+    con_data <- list(
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
+            susieFit = list(pip = c(0.1, 0.7, 0.2))
+        ),
+        sumstats = list(z = c(1.0, 3.5, -0.5))
+    )
+    result <- extractTopPipInfo(con_data$finemappingEntry, con_data$sumstats)
+    expect_equal(result$top_variant, "chr1:200:C:T")
+    expect_equal(result$top_pip, 0.7)
+    expect_equal(result$top_z, 3.5)
+    expect_equal(result$top_variant_index, 2)
+    expect_true(is.na(result$cs_name))
+    expect_true(is.na(result$variants_per_cs))
+})
+
+test_that("extractTopPipInfo computes p_value from z", {
+    con_data <- list(
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
+            susieFit = list(pip = c(0.9, 0.05, 0.05))
+        ),
+        sumstats = list(z = c(5.0, 0.5, -0.3))
+    )
+    result <- extractTopPipInfo(con_data$finemappingEntry, con_data$sumstats)
+    expected_pval <- pecotmr:::.zToPvalue(5.0)
+    expect_equal(result$p_value, expected_pval)
+})
+
+test_that("extractTopPipInfo handles ties by taking first max", {
+    con_data <- list(
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
+            susieFit = list(pip = c(0.5, 0.5, 0.5))
+        ),
+        sumstats = list(z = c(1.0, 2.0, 3.0))
+    )
+    result <- extractTopPipInfo(con_data$finemappingEntry, con_data$sumstats)
+    expect_equal(result$top_variant_index, 1)
+    expect_equal(result$top_pip, 0.5)
+})
+
+# ===========================================================================
+# extractCsInfo
+# ===========================================================================
+
+test_that("extractCsInfo extracts single CS correctly", {
+    data(qtlSumStatsExample)
+    fe <- .testFineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
+        susieFit = list(sets = list(cs = list(L_1 = c(1, 2))))
+    )
+    top_loci_table <- data.frame(
+        variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+        pip = c(0.3, 0.8),
+        z = c(2.0, 4.5),
+        stringsAsFactors = FALSE
+    )
+    # A single CS short-circuits (no between-CS correlation), so the unrelated
+    # ldSource is not consulted.
+    result <- extractCsInfo(
+        fe,
+        csNames = "L_1",
+        topLociTable = top_loci_table,
+        ldSource = qtlSumStatsExample
+    )
+    expect_equal(nrow(result), 1)
+    expect_equal(result$cs_name, "L_1")
+    expect_equal(result$top_variant, "chr1:200:C:T")
+    expect_equal(result$top_pip, 0.8)
+    expect_equal(result$variants_per_cs, 2)
+    expect_true(is.na(result$cs_corr_max))
+    expect_true(is.na(result$cs_corr_min))
+    expect_false("cs_corr_1" %in% colnames(result))
+})
+
+test_that("extractCsInfo builds correlation columns from the ldSource", {
+    data(qtlSumStatsExample)
+    ss <- qtlSumStatsExample
+    vids <- rownames(getLdSketch(ss))
+    set.seed(1)
+    fit <- list(
+        sets = list(cs = list(L_1 = c(1L, 2L, 3L), L_2 = c(90L, 91L))),
+        pip = runif(length(vids))
+    )
+    tl <- data.frame(
+        variant_id = vids,
+        pip = fit$pip,
+        z = rnorm(length(vids)),
+        stringsAsFactors = FALSE
+    )
+    fe <- .testFineMappingRow(
+        variantIds = vids,
+        susieFit = fit,
+        topLoci = tl
+    )
+    result <- extractCsInfo(
+        fe,
+        csNames = c("L_1", "L_2"),
+        topLociTable = tl,
+        ldSource = ss
+    )
+    expect_equal(nrow(result), 2)
+    expect_true(all(
+        c("cs_corr_1", "cs_corr_2", "cs_corr_max", "cs_corr_min") %in%
+            colnames(result)
+    ))
+    # The cs_corr_j columns are the columns of the computed between-CS matrix
+    # (symmetric; diagonal == 1), reduced on demand from the ldSource.
+    cc <- computeCsCorrelation(fe, ss)
+    expect_equal(result$cs_corr_1, unname(cc[, 1]))
+    expect_equal(result$cs_corr_2, unname(cc[, 2]))
+    expect_equal(result$cs_corr_max, rep(abs(cc[1, 2]), 2))
+    expect_equal(result$cs_corr_min, rep(abs(cc[1, 2]), 2))
+})
+
+test_that("extractCsInfo computes p_value from z-score", {
+    data(qtlSumStatsExample)
+    fe <- .testFineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
+        susieFit = list(sets = list(cs = list(L_1 = c(1, 2))))
+    )
+    top_loci_table <- data.frame(
+        variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+        pip = c(0.9, 0.1),
+        z = c(5.0, 0.5),
+        stringsAsFactors = FALSE
+    )
+    result <- extractCsInfo(
+        fe,
+        csNames = "L_1",
+        topLociTable = top_loci_table,
+        ldSource = qtlSumStatsExample
+    )
+    expected_pval <- pecotmr:::.zToPvalue(5.0)
+    expect_equal(result$p_value, expected_pval, tolerance = 1e-10)
+})
+
+# ===========================================================================
+# getSusieResult: trimmed fit is empty
+# ===========================================================================
+
+test_that("getSusieResult returns NULL when the trimmed susie fit is empty", {
+    conData <- list(
+        # An empty fit with variants present: topLoci must still be aligned
+        # row-for-row, which the entry did not enforce.
+        finemappingEntry = fineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
+            susieFit = list(),
+            topLoci = data.frame(
+                variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+                pip = c(0, 0),
+                stringsAsFactors = FALSE
+            )
+        )
+    )
+    expect_null(getSusieResult(conData))
+})
