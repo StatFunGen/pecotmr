@@ -10,8 +10,9 @@
     if (!is(a, "TwasWeights") || !is(b, "TwasWeights")) {
         abort(".rbindTwasWeights expects two TwasWeights inputs.")
     }
-    # Carry forward every column (joint*, region, ...) via the generic combine.
-    .rbindCollections(list(a, b), ldSketch = ldSketch)
+    # Carry forward every column (joint*, region, ...) and reconcile the
+    # collection-level slots via the shared combine.
+    .combineTupleCollections(list(a, b), ldSketch, ".rbindTwasWeights")
 }
 
 # Normalize combine() varargs: accept either N objects or a single list of
@@ -63,7 +64,7 @@
 #' @export
 combineTwasWeights <- function(..., ldSketch = NULL) {
     parts <- .asCombineList(list(...), "TwasWeights", "combineTwasWeights")
-    reduce(parts, .rbindTwasWeights, ldSketch = ldSketch)
+    .combineTupleCollections(parts, ldSketch, "combineTwasWeights")
 }
 
 # --- Multi-region (jointRegions) helpers for the QtlDataset method ----------

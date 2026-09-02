@@ -1,9 +1,11 @@
 # =============================================================================
 # Tuple row matchers
 # -----------------------------------------------------------------------------
-# Internal helpers shared by the FineMappingResult / TwasWeights /
-# SumStats DFrame-subclass collections to resolve a tuple-keyed selection
-# to a single row index. Pure R helpers -- no S4 dispatch, no exports.
+# Internal helpers shared by the FineMappingResult / TwasWeights / SumStats
+# collections to resolve a tuple-keyed selection to a single row index. Every
+# collection is a RangedTupleList, so these read identity columns off mcols
+# and payloads off the elements -- there is no second shape to branch on.
+# Pure R helpers -- no S4 dispatch, no exports.
 # =============================================================================
 
 # Internal: return integer row indices of `x` where every (column, value)
@@ -23,16 +25,12 @@
     which(ok)
 }
 
-# Read an identity column by name, whichever collection shape `x` has.
-# `x[[k]]` is a column on the DFrame-backed collections but an ELEMENT on a
-# RangedTupleList, where the identity columns live in mcols. The two shapes
-# coexist until every collection has migrated.
+# Read an identity column by name. Every collection keeps its identity
+# columns in mcols; `x[[k]]` addresses an ELEMENT, not a column, so mcols is
+# the only correct read.
 # @noRd
 .tupleColumn <- function(x, k) {
-    if (methods::is(x, "RangedTupleList")) {
-        return(mcols(x)[[k]])
-    }
-    x[[k]]
+    mcols(x)[[k]]
 }
 
 # One collection ELEMENT, whichever shape `x` has. On a RangedTupleList the
@@ -47,10 +45,7 @@
     if (methods::is(x, "FineMappingResultBase")) {
         return(.fmrRowParts(x, i))
     }
-    if (methods::is(x, "RangedTupleList")) {
-        return(x[[i]])
-    }
-    x$entry[[i]]
+    x[[i]]
 }
 
 # ALL elements as a plain list, whichever shape `x` has.
@@ -64,20 +59,14 @@
     ) {
         return(map(seq_len(nrow(x)), .collectionEntry, x = x))
     }
-    if (methods::is(x, "RangedTupleList")) {
-        return(as.list(x))
-    }
-    as.list(x$entry)
+    as.list(x)
 }
 
-# The identity column NAMES, whichever shape `x` has. `names(x)` is element
-# names on a RangedTupleList, not columns.
+# The identity column NAMES. `names(x)` would be the ELEMENT names, not the
+# columns, so this reads mcols.
 # @noRd
 .tupleColumnNames <- function(x) {
-    if (methods::is(x, "RangedTupleList")) {
-        return(colnames(mcols(x)))
-    }
-    names(x)
+    colnames(mcols(x))
 }
 
 # Internal: resolve a tuple-keyed selection (study, context, trait,
@@ -286,13 +275,9 @@
     if (nrow(x) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    if (methods::is(x, "RangedTupleList")) {
-        return(unlist(range(x), use.names = FALSE))
-    }
-    # No fallback to a stored column: nothing carries one any more. A DFrame
-    # collection (CtwasResult) has no region column either, so an empty
-    # GRanges is the honest answer rather than a fabricated span.
-    GenomicRanges::GRanges()
+    # No stored region column: nothing carries one any more, so the span is
+    # always derived from the elements' own ranges.
+    unlist(range(x), use.names = FALSE)
 }
 
 # Internal: append the optional `blockId` provenance column (no-op when NULL).
@@ -406,30 +391,26 @@
 # region) is padded with `.naLikeColumn` -- so adding a column to a class flows
 # through combines automatically rather than being hand-listed at each site.
 # Preserves the concrete class and sets the `ldSketch` slot explicitly (rbind
-# does not reliably carry it). Returns NULL when given no inputs.
+# does not reliably carry it). Returns NULL when given no inputs. Every
+# collection is a RangedTupleList now, so this only drops the NULL parts and
+# hands off; the old DFrame path went with the rebase onto GRangesList.
 #
 # `slots` carries the collection-level state a concrete subclass adds beyond
 # `ldSketch` (SumStatsBase's `genome` / `qcInfo`). It is passed in rather than
 # read off `parts[[1L]]` because those slots describe the WHOLE collection, so
 # merging them is the caller's decision -- first-wins would silently drop the
 # other parts' QC audit.
-.rbindCollections <- function(parts, ldSketch = NULL, slots = list()) {
+.rbindCollections <- function(
+    parts,
+    ldSketch = NULL,
+    slots = list(),
+    genome = NULL
+) {
     parts <- compact(parts)
     if (length(parts) == 0L) {
         return(NULL)
     }
-    if (methods::is(parts[[1L]], "RangedTupleList")) {
-        return(.rbindRangedCollections(parts, ldSketch, slots))
-    }
-    cls <- class(parts[[1L]])[[1L]]
-    allCols <- reduce(map(parts, names), union)
-    combined <- map(allCols, .rbindColumn, parts = parts)
-    names(combined) <- allCols
-    dfArgs <- c(combined, list(check.names = FALSE))
-    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    out <- new(cls, df, ldSketch = ldSketch)
-    validObject(out)
-    out
+    .rbindRangedCollections(parts, ldSketch, slots, genome)
 }
 
 # Internal: aggregate a per-entry accessor across every row of a
@@ -588,11 +569,20 @@
 
 # Concatenate column `cn` across all parts (NA-filling parts that lack it).
 # @noRd
-# Row-binding a RANGED collection: the elements append and the mcols rbind.
-# The DFrame path cannot be reused because there is no column holding the
-# payload any more -- the payload is the container.
+# Row-binding a collection: the elements append and the mcols rbind.
+#
+# S4Vectors::combineRows() does the union-with-NA-fill this needs, but it
+# fails on a GRanges-valued mcols column (`traitPos`) with "GRanges objects
+# don't support [[, as.list(), lapply(), or unlist()". .rbindColumn() binds
+# each column with c() instead, which GRanges does support, so the union is
+# done per column here rather than delegated.
 # @noRd
-.rbindRangedCollections <- function(parts, ldSketch, slots = list()) {
+.rbindRangedCollections <- function(
+    parts,
+    ldSketch,
+    slots = list(),
+    genome = NULL
+) {
     cls <- class(parts[[1L]])[[1L]]
     allCols <- reduce(map(parts, .tupleColumnNames), union)
     combined <- set_names(map(allCols, .rbindColumn, parts = parts), allCols)
@@ -602,6 +592,13 @@
     )
     elements <- list_flatten(map(parts, as.list))
     grl <- GenomicRanges::GRangesList(elements)
+    # Rebuilding from as.list() merges each part's seqinfo, so a part whose
+    # elements never had a build set would leave the result carrying both the
+    # real build and NA. The agreed build is written back explicitly to keep
+    # seqinfo single-valued, which validity requires.
+    if (!is.null(genome)) {
+        GenomeInfoDb::genome(grl) <- genome
+    }
     mcols(grl) <- md
     out <- exec(
         methods::new,
@@ -1006,19 +1003,82 @@
 # first -- and cTWAS computes its full-panel LD from exactly that slot.
 # =============================================================================
 
+# The concrete class of `x`, for map_chr over a list of collections.
+# @noRd
+.firstClass <- function(x) class(x)[[1L]]
+
+# Every part must be the same concrete class: the combined object is built as
+# `parts[[1L]]`'s class, so a mixed set would silently coerce the rest.
+# @noRd
+.rtlRequireSameClass <- function(parts, fn) {
+    classes <- unique(map_chr(parts, .firstClass))
+    if (length(classes) > 1L) {
+        msg <- glue(
+            "{fn}: inputs must be the same concrete class (got ",
+            "{str_flatten(classes, ', ')})."
+        )
+        abort(msg)
+    }
+    invisible(NULL)
+}
+
+# The collection-level slots BEYOND ldSketch that a combine has to merge, for
+# whatever concrete class `parts` are. A slot describes the whole collection,
+# so first-wins would silently drop the other parts' state; each gets its own
+# rule and an unrecognised slot is an error rather than a quiet default, so
+# adding one to a class cannot slip through a combine unnoticed.
+# @noRd
+.rtlExtraSlots <- function(parts, fn) {
+    own <- setdiff(.rtlOwnSlots(parts[[1L]]), "ldSketch")
+    out <- list()
+    if (is_in("qcInfo", own)) {
+        out$qcInfo <- .ssCombineQcInfo(parts, fn)
+    }
+    unknown <- setdiff(own, names(out))
+    if (length(unknown) > 0L) {
+        cls <- class(parts[[1L]])[[1L]]
+        msg <- glue(
+            "{fn}: no merge rule for the collection-level slot(s) ",
+            "{str_flatten(unknown, ', ')} on class '{cls}'."
+        )
+        abort(msg)
+    }
+    out
+}
+
+# Merge `parts` into one collection, reconciling every collection-level slot.
+# The single path behind `c()` / `append()` and the four combine*() wrappers.
+# A non-NULL `ldSketch` overrides the unioned panel.
+# @noRd
+.combineTupleCollections <- function(parts, ldSketch, fn) {
+    .rtlRequireSameClass(parts, fn)
+    # Forced before the rebuild: GRangesList() merges seqinfo and rejects
+    # mismatched builds itself, with a message about sequence-level genomes
+    # that says nothing about which inputs disagreed.
+    genome <- .rtlCombineGenome(parts, fn)
+    .rbindCollections(
+        parts,
+        ldSketch = ldSketch %||% .combineLdSketch(parts, fn),
+        slots = .rtlExtraSlots(parts, fn),
+        genome = genome
+    )
+}
+
+# The single build every part must agree on, or NULL for a family that does
+# not carry one. Read through getGenome() so it works off seqinfo.
+# @noRd
+.rtlCombineGenome <- function(parts, fn) {
+    if (!methods::is(parts[[1L]], "SumStatsBase")) {
+        return(NULL)
+    }
+    .ssCombineGenome(parts, fn)
+}
+
 # Row-bind summary-statistics parts, merging the three collection-level slots.
 # `ldSketch` (when non-NULL) overrides the unioned panel.
 # @noRd
 .rbindSumStats <- function(parts, ldSketch, fn) {
-    sketch <- ldSketch %||% .ssCombineSketch(parts, fn)
-    .rbindCollections(
-        parts,
-        ldSketch = sketch,
-        slots = list(
-            genome = .ssCombineGenome(parts, fn),
-            qcInfo = .ssCombineQcInfo(parts, fn)
-        )
-    )
+    .combineTupleCollections(parts, ldSketch, fn)
 }
 
 # One genome build per collection (every entry shares the LD sketch), so the
@@ -1104,7 +1164,7 @@
 # collection has no panel); a mix is an error, because silently keeping the
 # panels that exist would leave elements harmonized against nothing.
 # @noRd
-.ssCombineSketch <- function(parts, fn) {
+.combineLdSketch <- function(parts, fn) {
     sketches <- map(parts, getLdSketch)
     present <- !map_lgl(sketches, is.null)
     if (!any(present)) {
@@ -1122,7 +1182,33 @@
     .ssCheckSameSource(handles, fn)
     handle <- handles[[1L]]
     handle@snpInfo <- .ssUnionSnpInfo(handles)
+    handle@chromPaths <- .ssUnionChromPaths(handles, fn)
     .asLdSketch(handle)
+}
+
+# Union the per-chromosome shard paths across handles. Two sketches trimmed
+# from one genoMeta panel to different chromosomes share path/format/samples
+# and differ ONLY here, so unioning is what lets their snpInfo rows keep
+# routing: a row reaches its file by its own CHR. One chromosome mapping to
+# two different files means the parts are not the same panel after all.
+# @noRd
+.ssUnionChromPaths <- function(handles, fn) {
+    out <- character(0)
+    for (h in handles) {
+        cp <- h@chromPaths
+        for (ch in names(cp)) {
+            if (is_in(ch, names(out)) && !identical(out[[ch]], cp[[ch]])) {
+                msg <- glue(
+                    "{fn}: chromosome '{ch}' maps to two different genotype ",
+                    "files across the inputs, so their LD sketches cannot ",
+                    "be unioned."
+                )
+                abort(msg)
+            }
+            out[[ch]] <- cp[[ch]]
+        }
+    }
+    out
 }
 
 # Every panel must read from the same file(s): the union keeps the first
@@ -1144,11 +1230,16 @@
 
 # @noRd
 .ssSameGenotypeSource <- function(h, first) {
+    # chromPaths is deliberately NOT compared: two sketches trimmed from the
+    # same genoMeta panel to different chromosomes differ there and nowhere
+    # else, and .ssUnionChromPaths() merges them (erroring on a genuine
+    # conflict). Everything below must match for the union to mean anything --
+    # snpInfo rows carry file POSITIONS, which only make sense against the
+    # same files and the same sample axis.
     identical(h@path, first@path) &&
         identical(h@format, first@format) &&
         identical(h@nSamples, first@nSamples) &&
-        identical(h@sampleIds, first@sampleIds) &&
-        identical(h@chromPaths, first@chromPaths)
+        identical(h@sampleIds, first@sampleIds)
 }
 
 # The parts' snpInfo rows, de-duplicated by variant id and returned in genomic

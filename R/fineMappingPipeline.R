@@ -1027,18 +1027,10 @@ setGeneric("fineMappingPipeline", function(data, ...) {
             ".rbindFineMappingResult expects two FineMappingResultBase inputs."
         )
     }
-    if (!identical(class(a)[[1L]], class(b)[[1L]])) {
-        clsA <- class(a)[[1L]]
-        clsB <- class(b)[[1L]]
-        msg <- glue(
-            ".rbindFineMappingResult: inputs must be the same concrete ",
-            "class (got '{clsA}' and '{clsB}')."
-        )
-        abort(msg)
-    }
-    # Carry forward every column (blockId / joint* / ...) via the generic
-    # combine; the concrete class (QTL vs GWAS) is preserved automatically.
-    .rbindCollections(list(a, b), ldSketch = ldSketch)
+    # Carry forward every column (blockId / joint* / ...) and reconcile the
+    # collection-level slots via the shared combine; the concrete class
+    # (QTL vs GWAS) is preserved and checked there.
+    .combineTupleCollections(list(a, b), ldSketch, ".rbindFineMappingResult")
 }
 
 #' Combine FineMappingResult collections
@@ -1067,7 +1059,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         "FineMappingResultBase",
         "combineFineMappingResults"
     )
-    reduce(parts, .rbindFineMappingResult, ldSketch = ldSketch)
+    .combineTupleCollections(parts, ldSketch, "combineFineMappingResults")
 }
 
 

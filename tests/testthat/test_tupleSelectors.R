@@ -1,20 +1,38 @@
 context("tupleSelectors (internal row-selector helpers)")
 
-# These helpers (.matchTupleRows, .tupleSelectRow, .tupleSelectRowGwasFmr)
-# work on anything with `nrow(x)` and `x[[col]]` semantics, so the tests
-# below use plain base-R data.frames rather than building S4 collections.
+# These helpers read identity columns off `mcols(x)`, so the tests below use
+# a real collection rather than a plain data.frame. `.ts_coll()` builds the
+# smallest one that exercises them: one empty GRanges per row, identity
+# columns in mcols, no payload class.
+
+setClass("TsTestCollection", contains = "RangedTupleList")
+
+.ts_coll <- function(..., stringsAsFactors = FALSE) {
+    cols <- list(...)
+    n <- if (length(cols) == 0L) 0L else length(cols[[1L]])
+    grl <- GenomicRanges::GRangesList(
+        rep(list(GenomicRanges::GRanges()), n)
+    )
+    if (length(cols) > 0L) {
+        S4Vectors::mcols(grl) <- do.call(
+            S4Vectors::DataFrame,
+            c(cols, list(check.names = FALSE))
+        )
+    }
+    methods::new("TsTestCollection", grl)
+}
 
 # ===========================================================================
 # .matchTupleRows
 # ===========================================================================
 
 test_that(".matchTupleRows: empty keys returns every row index", {
-    df <- data.frame(study = c("s1", "s2"), method = c("susie", "lasso"))
+    df <- .ts_coll(study = c("s1", "s2"), method = c("susie", "lasso"))
     expect_equal(pecotmr:::.matchTupleRows(df, list()), c(1L, 2L))
 })
 
 test_that(".matchTupleRows: AND-matches across multiple (column, value) pairs", {
-    df <- data.frame(
+    df <- .ts_coll(
         study = c("s1", "s1", "s2"),
         context = c("c1", "c2", "c1"),
         stringsAsFactors = FALSE
@@ -35,7 +53,7 @@ test_that(".matchTupleRows: AND-matches across multiple (column, value) pairs", 
 # ===========================================================================
 
 test_that(".tupleSelectRow: zero-row input errors with the class label", {
-    empty <- data.frame(
+    empty <- .ts_coll(
         study = character(0),
         context = character(0),
         trait = character(0),
@@ -56,7 +74,7 @@ test_that(".tupleSelectRow: zero-row input errors with the class label", {
 })
 
 test_that(".tupleSelectRow: single-row collection returns 1L without selectors", {
-    one <- data.frame(
+    one <- .ts_coll(
         study = "s1",
         context = "c1",
         trait = "t1",
@@ -67,7 +85,7 @@ test_that(".tupleSelectRow: single-row collection returns 1L without selectors",
 })
 
 test_that(".tupleSelectRow: multi-row + missing selectors errors with row count", {
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
@@ -81,7 +99,7 @@ test_that(".tupleSelectRow: multi-row + missing selectors errors with row count"
 })
 
 test_that(".tupleSelectRow: non-scalar selectors error", {
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("s1", "s2"),
         context = c("c1", "c2"),
         trait = c("t1", "t2"),
@@ -101,7 +119,7 @@ test_that(".tupleSelectRow: non-scalar selectors error", {
 })
 
 test_that(".tupleSelectRow: matching tuple returns first row index", {
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
@@ -121,7 +139,7 @@ test_that(".tupleSelectRow: matching tuple returns first row index", {
 })
 
 test_that(".tupleSelectRow: missing tuple errors with the 4-tuple in the message", {
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
@@ -145,7 +163,7 @@ test_that(".tupleSelectRow: missing tuple errors with the 4-tuple in the message
 # ===========================================================================
 
 test_that(".tupleSelectRowGwasFmr: zero-row input errors", {
-    empty <- data.frame(
+    empty <- .ts_coll(
         study = character(0),
         method = character(0),
         blockId = character(0),
@@ -158,7 +176,7 @@ test_that(".tupleSelectRowGwasFmr: zero-row input errors", {
 })
 
 test_that(".tupleSelectRowGwasFmr: single-row collection returns 1L", {
-    one <- data.frame(
+    one <- .ts_coll(
         study = "g1",
         method = "susie",
         blockId = "region_1",
@@ -168,7 +186,7 @@ test_that(".tupleSelectRowGwasFmr: single-row collection returns 1L", {
 })
 
 test_that(".tupleSelectRowGwasFmr: missing selectors on multi-row errors", {
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("g1", "g2"),
         method = c("susie", "susie"),
         blockId = c("region_1", "region_1"),
@@ -181,7 +199,7 @@ test_that(".tupleSelectRowGwasFmr: missing selectors on multi-row errors", {
 })
 
 test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("r1", "r2"),
@@ -200,7 +218,7 @@ test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
 
 test_that(".tupleSelectRowGwasFmr: region disambiguates per-block rows", {
     # Same (study, method) across two regions; region picks the right row.
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("chr22_1_100", "chr22_500_600"),
@@ -218,7 +236,7 @@ test_that(".tupleSelectRowGwasFmr: region disambiguates per-block rows", {
 })
 
 test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in message", {
-    one <- data.frame(
+    one <- .ts_coll(
         study = "g1",
         method = "susie",
         blockId = "r1",
@@ -238,7 +256,7 @@ test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in m
 test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candidates", {
     # Two rows share (study, method); .tupleSelectRowGwasFmr should error
     # listing the available blockIds since the caller didn't disambiguate.
-    multi <- data.frame(
+    multi <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("region_A", "region_B"),
@@ -255,7 +273,7 @@ test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candi
 # ===========================================================================
 
 test_that(".fmrRowsMatching: no selectors returns every row", {
-    df <- data.frame(
+    df <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
@@ -266,7 +284,7 @@ test_that(".fmrRowsMatching: no selectors returns every row", {
 })
 
 test_that(".fmrRowsMatching: matches a subset without erroring on ambiguity", {
-    df <- data.frame(
+    df <- .ts_coll(
         study = c("s1", "s1", "s2"),
         context = c("c1", "c2", "c1"),
         trait = c("t1", "t1", "t1"),
@@ -280,7 +298,7 @@ test_that(".fmrRowsMatching: matches a subset without erroring on ambiguity", {
 test_that(".fmrRowsMatching: selectors on absent columns are ignored", {
     # GWAS-shaped frame has no context/trait column; passing context must not
     # error and must not constrain the result.
-    gwas <- data.frame(
+    gwas <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("r1", "r2"),
@@ -290,7 +308,7 @@ test_that(".fmrRowsMatching: selectors on absent columns are ignored", {
 })
 
 test_that(".fmrRowsMatching: `region` matches the blockId column", {
-    gwas <- data.frame(
+    gwas <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("r1", "r2"),
@@ -300,7 +318,7 @@ test_that(".fmrRowsMatching: `region` matches the blockId column", {
 })
 
 test_that(".fmrRowsMatching: a vector selector matches any listed value", {
-    df <- data.frame(
+    df <- .ts_coll(
         study = c("s1", "s2", "s3"),
         context = c("c1", "c2", "c3"),
         trait = c("t1", "t1", "t1"),
@@ -318,7 +336,7 @@ test_that(".fmrRowsMatching: a vector selector matches any listed value", {
 # ===========================================================================
 
 test_that(".fmrRowMetadata: emits all five identity columns, NA-filling absent ones", {
-    qtl <- data.frame(
+    qtl <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
@@ -335,7 +353,7 @@ test_that(".fmrRowMetadata: emits all five identity columns, NA-filling absent o
 })
 
 test_that(".fmrRowMetadata: GWAS frame NA-fills context/trait, keeps blockId", {
-    gwas <- data.frame(
+    gwas <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("r1", "r2"),
@@ -348,7 +366,7 @@ test_that(".fmrRowMetadata: GWAS frame NA-fills context/trait, keeps blockId", {
 })
 
 test_that(".fmrRowMetadata: zero-row input yields a zero-row 5-column frame", {
-    empty <- data.frame(
+    empty <- .ts_coll(
         study = character(0),
         method = character(0),
         blockId = character(0),
@@ -401,8 +419,8 @@ test_that(".rbindCollections: all-NULL input returns NULL", {
     expect_null(pecotmr:::.rbindCollections(list(NULL, NULL)))
 })
 
-test_that(".getRegionColumn: an absent region column yields an empty GRanges", {
-    gr <- pecotmr:::.getRegionColumn(S4Vectors::DataFrame(a = 1:2))
+test_that(".getRegionColumn: a zero-row collection yields an empty GRanges", {
+    gr <- pecotmr:::.getRegionColumn(.ts_coll(study = character(0)))
     expect_s4_class(gr, "GRanges")
     expect_length(gr, 0L)
 })
@@ -453,13 +471,14 @@ test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {
 
 test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPos", {
     expect_equal(
-        pecotmr:::.validateTraitPosColumn(S4Vectors::DataFrame(
-            traitPos = c("x", "y")
-        )),
+        pecotmr:::.validateTraitPosColumn(.ts_coll(traitPos = c("x", "y"))),
         "'traitPos' column must be a GRanges"
     )
-    bad <- S4Vectors::DataFrame(a = 1:2)
-    bad@listData$traitPos <- GenomicRanges::GRanges(
+    # A one-range traitPos beside two rows: assigned through the mcols
+    # listData because the parallel-length check would reject it otherwise,
+    # which is exactly the state the validator has to catch.
+    bad <- .ts_coll(a = 1:2)
+    S4Vectors::mcols(bad)@listData$traitPos <- GenomicRanges::GRanges(
         "chr1",
         IRanges::IRanges(1, 1)
     )
@@ -468,7 +487,7 @@ test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPo
         "'traitPos' column must have one range per row"
     )
     expect_length(
-        pecotmr:::.validateTraitPosColumn(S4Vectors::DataFrame(a = 1L)),
+        pecotmr:::.validateTraitPosColumn(.ts_coll(a = 1L)),
         0L
     )
 })

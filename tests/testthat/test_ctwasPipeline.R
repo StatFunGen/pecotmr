@@ -1642,7 +1642,7 @@ test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and
     expect_equal(as.character(out$gwasStudy), "G1")
     # The run's jointly-estimated param is carried on the row.
     expect_equal(
-        unname(getCtwasParam(pecotmr:::.collectionEntry(out, 1L))$group_prior),
+        unname(getCtwasParam(out$entry[[1L]])$group_prior),
         c(0.1, 0.0001)
     )
     # getFinemap aggregates the per-gene rows, tagged with run identity.
@@ -2147,7 +2147,7 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     data(qtlDatasetExample)
     gss <- gwasSumStatsS4Example
     qd <- qtlDatasetExample
-    gh <- qd@genotypes
+    gh <- getGenotypeHandle(qd)
 
     # Two 5-variant synthetic genes from the bundled panel, one anchored in
     # each LD block below. cTWAS's EM runs per region and cannot fit a block
@@ -2353,7 +2353,7 @@ test_that(".ctwasFilterVariants: returns NULL when no variants survive", {
 test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
-    gh <- qd@genotypes
+    gh <- getGenotypeHandle(qd)
     vids <- getSnpInfo(gh)$SNP[1:5]
     ent <- twasWeightsRow(
         variantIds = vids,
@@ -2378,7 +2378,7 @@ test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", 
 test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
-    gh <- qd@genotypes
+    gh <- getGenotypeHandle(qd)
     vids <- getSnpInfo(gh)$SNP[1:5]
     ent <- twasWeightsRow(
         variantIds = vids,

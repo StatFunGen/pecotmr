@@ -3,9 +3,8 @@
 %   R/AnnotationMatrix.R, R/ColocResult.R, R/ColocBoostResult.R,
 %   R/CtwasResult.R, R/GwasFineMappingResult.R, R/H2Estimate.R, R/LdData.R,
 %   R/LdEigen.R, R/LdScore.R, R/MashPrior.R, R/QtlDataset.R,
-%   R/MultiStudyQtlDataset.R, R/QtlFineMappingResult.R, R/TupleRangesView.R,
-%   R/qtlSumStats.R, R/gwasSumStats.R, R/fineMappingRow.R, R/twasWeights.R,
-%   R/twasWeightsRow.R
+%   R/MultiStudyQtlDataset.R, R/QtlFineMappingResult.R, R/qtlSumStats.R,
+%   R/gwasSumStats.R, R/fineMappingRow.R, R/twasWeights.R, R/twasWeightsRow.R
 \name{show-methods}
 \alias{show-methods}
 \alias{show,GenotypeHandle-method}
@@ -22,7 +21,6 @@
 \alias{show,QtlDataset-method}
 \alias{show,MultiStudyQtlDataset-method}
 \alias{show,QtlFineMappingResult-method}
-\alias{show,TupleRangesView-method}
 \alias{show,QtlSumStats-method}
 \alias{show,GwasSumStats-method}
 \alias{show,FineMappingRow-method}
@@ -57,8 +55,6 @@
 \S4method{show}{MultiStudyQtlDataset}(object)
 
 \S4method{show}{QtlFineMappingResult}(object)
-
-\S4method{show}{TupleRangesView}(object)
 
 \S4method{show}{QtlSumStats}(object)
 

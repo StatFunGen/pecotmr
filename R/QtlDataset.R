@@ -46,7 +46,6 @@ NULL
 #' @slot study Character (length 1). Study identifier; used in collection
 #'   classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
 #'   entries.
-#' @slot genotypes The genotype source for lazy access to dosages.
 #'   The \code{genotype} experiment's assay reads through this handle; the
 #'   extraction accessors read it directly, so that QC can be applied per
 #'   block.
@@ -78,7 +77,6 @@ setClass(
     contains = "MultiAssayExperiment",
     representation(
         study = "character",
-        genotypes = "GenotypeHandle",
         scaleResiduals = "logical",
         mafCutoff = "numeric",
         macCutoff = "numeric",
@@ -403,7 +401,6 @@ QtlDataset <- function(
         "QtlDataset",
         .qtlRestrictSamples(mae, keepSamples),
         study = as.character(study),
-        genotypes = handle,
         scaleResiduals = isTRUE(scaleResiduals),
         mafCutoff = as.numeric(mafCutoff),
         macCutoff = as.numeric(macCutoff),
@@ -575,19 +572,15 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
     x[, which(is_in(ids, as.character(keepSamples))), ]
 }
 
-# Replace the genotype handle, rebuilding the genotype experiment along with
-# it. The handle is deliberately held twice -- once as a slot, once inside
-# the assay's seed -- because that is what lets the assay read lazily. Moving
-# one without the other would leave the dosages describing a different panel
-# from the one the extraction accessors read, so nothing may set the slot
-# directly.
+# Replace the genotype handle by rebuilding the genotype experiment around
+# it. The handle lives in exactly one place -- the assay's seed -- so there
+# is no second copy to keep in step; getGenotypeHandle() reads it back.
 # @noRd
 .qtlWithGenotypeHandle <- function(x, handle) {
     exps <- MultiAssayExperiment::experiments(x)
     gCov <- .qtlColDataMatrix(exps[[.QTL_GENO_EXPERIMENT]])
     exps[[.QTL_GENO_EXPERIMENT]] <- .genotypeExperiment(handle, gCov)
     MultiAssayExperiment::experiments(x) <- exps
-    x@genotypes <- handle
     validObject(x)
     x
 }
@@ -673,7 +666,15 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
 
 #' @rdname getGenotypeHandle
 #' @keywords internal
-setMethod("getGenotypeHandle", "QtlDataset", function(x) x@genotypes)
+setMethod("getGenotypeHandle", "QtlDataset", function(x) {
+    # Derived, not stored. The handle already lives inside the genotype
+    # assay's seed -- that is what lets the dosages read lazily -- so a
+    # parallel slot was a second copy that had to be kept in step by hand.
+    # Reading it back removes the invariant instead of policing it.
+    .ldSketchHandle(
+        MultiAssayExperiment::experiments(x)[[.QTL_GENO_EXPERIMENT]]
+    )
+})
 
 #' @rdname qtlDatasetFilters
 #' @export
@@ -2069,8 +2070,9 @@ setMethod("show", "QtlDataset", function(object) {
         .trim = FALSE
     ))
     cat(glue("  {totalTraits} unique traits across contexts\n", .trim = FALSE))
+    gh <- getGenotypeHandle(object)
     cat(glue(
-        "  Genotypes: {object@genotypes@format} @ {object@genotypes@path}\n",
+        "  Genotypes: {getFormat(gh)} @ {getPath(gh)}\n",
         .trim = FALSE
     ))
     cat(glue(

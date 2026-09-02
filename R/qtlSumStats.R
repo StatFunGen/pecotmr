@@ -12,6 +12,19 @@
 #' @include AllClasses.R tupleSelectors.R
 NULL
 
+#' @title QTL Summary-Statistic Collection
+#' @description S4 collection of QTL summary statistics keyed by the identity
+#'   tuple \code{(study, context, trait)}. Each element is that tuple's
+#'   per-variant \code{GRanges} -- \code{variant_id} plus the per-variant
+#'   Z / N / MAF mcols.
+#' @details Required columns: \code{study}, \code{context} and \code{trait};
+#'   the 3-tuple is unique. The class-level slots inherited from
+#'   \code{\linkS4class{SumStatsBase}} -- \code{ldSketch}, \code{genome} and
+#'   \code{qcInfo} -- apply uniformly to every row, and \code{qcInfo} records
+#'   which \code{\link{summaryStatsQc}} passes have run.
+#' @seealso \code{\link{QtlSumStats}} for the constructor and
+#'   \code{\linkS4class{GwasSumStats}} for the GWAS counterpart.
+#' @export
 setClass(
     "QtlSumStats",
     contains = "SumStatsBase",
@@ -58,13 +71,10 @@ setClass(
     NULL
 }
 
-# genome slot: a single non-empty string.
+# The genome build, read from seqinfo (there is no genome slot).
 # @noRd
 .qssCheckGenome <- function(object) {
-    if (length(object@genome) != 1L || str_length(object@genome) == 0L) {
-        return("'genome' slot must be a single non-empty character string")
-    }
-    NULL
+    .sumStatsCheckGenome(object)
 }
 
 # qcInfo slot must be a list.

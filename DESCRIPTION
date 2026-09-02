@@ -140,7 +140,6 @@ Collate:
     'MultiStudyQtlDataset.R'
     'QtlFineMappingResult.R'
     'SldscData.R'
-    'TupleRangesView.R'
     'causalInferencePipeline.R'
     'colocPipeline.R'
     'qtlSumStats.R'

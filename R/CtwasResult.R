@@ -14,6 +14,20 @@
 #' @include AllGenerics.R tupleSelectors.R
 NULL
 
+#' @title cTWAS Result Collection
+#' @description S4 collection of cTWAS runs keyed by the identity tuple
+#'   \code{(gwasStudy, study, context, method)}. Each row holds a
+#'   \code{\linkS4class{CtwasResultEntry}} payload -- fine-mapping posteriors,
+#'   the jointly-estimated group priors, and region metadata -- for one run.
+#' @details Unlike the QTL family, \code{trait} is not part of the key: a cTWAS
+#'   run is multi-gene, so genes live inside the payload. The optional
+#'   \code{jointStudies} / \code{jointContexts} columns tag rows born from a
+#'   multi-study or multi-context run and participate in the uniqueness key,
+#'   exactly as in the \code{\linkS4class{TwasWeights}} and fine-mapping
+#'   families.
+#' @seealso \code{\link{CtwasResult}} for the constructor and
+#'   \code{\link{ctwasPipeline}} for the pipeline that builds one.
+#' @export
 setClass("CtwasResult", contains = "DFrame", validity = function(object) {
     .validateCtwasResult(object)
 })

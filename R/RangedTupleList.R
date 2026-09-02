@@ -132,12 +132,43 @@ methods::setValidity("RangedTupleList", function(object) {
 # drops the subclass's slots -- verified -- which is exactly the desync this
 # class exists to prevent.
 # @noRd
+# Put `x`'s seqinfo back onto a rebuilt GRangesList. Only the seqlevels the
+# rebuild actually spans can be kept, so this restores the genome (and any
+# lengths) for those, and supplies the whole seqinfo when the rebuild spans
+# nothing.
+# @noRd
+.rtlRestoreSeqinfo <- function(grl, x) {
+    si <- GenomeInfoDb::seqinfo(x)
+    if (length(GenomeInfoDb::seqlevels(si)) == 0L) {
+        return(grl)
+    }
+    if (length(GenomeInfoDb::seqlevels(grl)) == 0L) {
+        GenomeInfoDb::seqinfo(grl) <- si
+        return(grl)
+    }
+    keepLevels <- intersect(
+        GenomeInfoDb::seqlevels(si),
+        GenomeInfoDb::seqlevels(grl)
+    )
+    GenomeInfoDb::seqinfo(
+        grl,
+        new2old = match(keepLevels, GenomeInfoDb::seqlevels(grl))
+    ) <- si[keepLevels]
+    grl
+}
+
 .rtlRebuild <- function(x, elements, keep) {
     # mcols and slots are attached BEFORE new(), not after: new() validates
     # during initialize(), and a subclass's validity method reads its identity
     # columns and slots. Building the object bare and filling it in afterwards
     # trips that check on the way past.
     grl <- GenomicRanges::GRangesList(elements)
+    # seqinfo is collection-level state, exactly like the slots below: it
+    # carries the genome build. A rebuild from bare elements starts with the
+    # seqlevels those elements happen to span -- none at all when everything
+    # was dropped -- so the original seqinfo is merged back in, or subsetting
+    # to nothing would silently discard the build.
+    grl <- .rtlRestoreSeqinfo(grl, x)
     md <- mcols(x, use.names = FALSE)
     if (!is.null(md)) {
         mcols(grl) <- md[keep, , drop = FALSE]
@@ -562,4 +593,314 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
         return(g[0L])
     }
     g[onWindowChrom & IRanges::overlapsAny(g, win)]
+}
+
+
+# =============================================================================
+# Combining collections
+# =============================================================================
+
+#' @rdname RangedTupleList-methods
+#' @importFrom S4Vectors bindROWS
+#' @export
+setMethod(
+    "bindROWS",
+    "RangedTupleList",
+    function(
+        x,
+        objects = list(),
+        use.names = TRUE,
+        ignore.mcols = FALSE,
+        check = TRUE
+    ) {
+        # bindROWS() is the one hook `c()` and `append()` share, so defining it
+        # here fixes both. The inherited CompressedList version rbinds the mcols,
+        # which requires identical columns and so fails whenever the parts came
+        # from runs with different optional columns (traitPos / jointContexts /
+        # blockId); it also carries the FIRST part's collection-level slots
+        # silently, making the result depend on argument order.
+        .combineTupleCollections(compact(c(list(x), objects)), NULL, "c")
+    }
+)
+
+
+# =============================================================================
+# The plyranges / dplyr bridge for RangedTupleList collections
+#
+# plyranges has no GRangesList support at all: its verbs dispatch on
+# GenomicRanges / Ranges, and a plain CompressedGRangesList fails exactly as
+# these collections do. That is not a deficiency in the collections, and it is
+# not fixable by changing them.
+#
+# The bridge is a round trip through a flat GRanges instead: flatten the
+# collection (broadcasting its identity tuple onto every range), let plyranges
+# work on the shape it already supports, and nest the result back into the
+# collection's elements. Nothing about the collections has to change, and no
+# wrapper class is needed -- plyranges acts on a real GRanges natively.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Conversions
+# -----------------------------------------------------------------------------
+
+#' Flatten a tuple collection to a plain GRanges
+#'
+#' Concatenates every element's ranges and broadcasts the collection's identity
+#' tuple onto each range, so a plyranges predicate can mix tuple and per-range
+#' columns: \code{filter(x, .context == "blood" & pip > 0.9)}.
+#'
+#' Broadcast columns are prefixed with a dot -- \code{.study},
+#' \code{.context}, \code{.trait}, \code{.method} -- following the
+#' tidySummarizedExperiment convention for framework-injected columns
+#' (\code{.sample}, \code{.feature}). The prefix is not cosmetic: a
+#' collection's identity column can collide with a per-range column of the same
+#' name carrying different information. On
+#' \code{\link{gwasFineMappingExample}} the outer \code{method} is
+#' \code{"susie"} while the per-range \code{method} is \code{"susieRss"} --
+#' the collection's label against the fitter actually used. Prefixing keeps
+#' both, and keeps the name stable so a predicate does not change meaning
+#' between objects.
+#'
+#' Non-atomic \code{mcols} columns -- the per-element \code{susieFit} /
+#' \code{cvResult} payloads -- are dropped. They describe an element, not a
+#' range, so there is no row to broadcast them onto. Use the accessors
+#' (\code{\link{getSusieFit}}, \code{\link{getCvResult}}) for those.
+#'
+#' @param x A \code{RangedTupleList}.
+#' @return A \code{GRanges}.
+#' @examples
+#' data(qtlFineMappingExample)
+#' flat <- flattenTupleRanges(qtlFineMappingExample)
+#' head(names(S4Vectors::mcols(flat)))
+#' @export
+flattenTupleRanges <- function(x) {
+    if (!methods::is(x, "RangedTupleList")) {
+        msg <- glue(
+            "`x` must be a RangedTupleList (got {class(x)[[1L]]})."
+        )
+        abort(msg)
+    }
+    gr <- .rtlGatherElements(x, seq_len(length(x)))
+    md <- mcols(x, use.names = FALSE)
+    if (is.null(md) || ncol(md) == 0L || length(gr) == 0L) {
+        return(gr)
+    }
+    tupleCols <- names(md)[map_lgl(as.list(md), is.atomic)]
+    reps <- rep(seq_len(length(x)), lengths(x))
+    for (nm in tupleCols) {
+        mcols(gr)[[.rtlDotName(nm)]] <- md[[nm]][reps]
+    }
+    gr
+}
+
+# The broadcast name for an identity column. Dotted so it cannot collide with
+# a per-range column, and so the name is the same whatever the object holds.
+# @noRd
+.rtlDotName <- function(nm) {
+    str_c(".", nm)
+}
+
+#' Re-nest a flattened GRanges into a tuple collection
+#'
+#' The inverse of \code{\link{flattenTupleRanges}}: ranges are grouped by the
+#' identity tuple they carry and returned to \code{template}'s elements, so the
+#' collection's class, its per-element payloads and its collection-level slots
+#' all survive a plyranges round trip.
+#'
+#' A tuple with no surviving ranges becomes an empty element rather than being
+#' dropped, so the collection keeps its shape and its metadata stays aligned.
+#'
+#' @param flat A \code{GRanges} produced by \code{flattenTupleRanges} (possibly
+#'   filtered or mutated).
+#' @param template The collection it came from, supplying the tuple grid, the
+#'   payload columns and the slots.
+#' @return An object of \code{template}'s class.
+#' @examples
+#' data(qtlFineMappingExample)
+#' flat <- flattenTupleRanges(qtlFineMappingExample)
+#' nestTupleRanges(flat, qtlFineMappingExample)
+#' @export
+nestTupleRanges <- function(flat, template) {
+    if (!methods::is(template, "RangedTupleList")) {
+        msg <- glue(
+            "`template` must be a RangedTupleList (got ",
+            "{class(template)[[1L]]})."
+        )
+        abort(msg)
+    }
+    if (!methods::is(flat, "GRanges")) {
+        msg <- glue("`flat` must be a GRanges (got {class(flat)[[1L]]}).")
+        abort(msg)
+    }
+    keyCols <- .rtlTupleKeyCols(template)
+    dotted <- map_chr(keyCols, .rtlDotName)
+    wanted <- .rtlTupleKeys(
+        mcols(template, use.names = FALSE),
+        keyCols,
+        n = length(template)
+    )
+    have <- .rtlTupleKeys(
+        mcols(flat, use.names = FALSE),
+        dotted,
+        n = length(flat)
+    )
+    elements <- map(wanted, .rtlPickByKey, flat = flat, have = have)
+    .rtlRebuild(template, elements, seq_len(length(template)))
+}
+
+# The identity columns to group by: the atomic mcols the flattener broadcasts.
+# @noRd
+.rtlTupleKeyCols <- function(x) {
+    md <- mcols(x, use.names = FALSE)
+    if (is.null(md)) {
+        return(character(0))
+    }
+    names(md)[map_lgl(as.list(md), is.atomic)]
+}
+
+# One key string per row. With no identity columns every range belongs to the
+# single element, which is what a one-row collection means.
+# @noRd
+.rtlTupleKeys <- function(md, keyCols, n) {
+    present <- intersect(keyCols, colnames(md))
+    if (length(present) == 0L) {
+        return(rep("", n))
+    }
+    exec(str_c, !!!map(present, .rtlKeyPart, md = md), sep = "\r")
+}
+
+# NA is mapped to a sentinel rather than left alone: str_c() propagates NA, so
+# a single NA-valued identity column (varY is NA_real_ on a z-score collection)
+# would turn every key into NA and the subsequent `have == key` into a logical
+# subscript full of NAs.
+# @noRd
+.rtlKeyPart <- function(nm, md) {
+    v <- as.character(md[[nm]])
+    if_else(is.na(v), "\u0001NA", v)
+}
+
+# @noRd
+.rtlPickByKey <- function(key, flat, have) {
+    flat[have == key]
+}
+
+
+# -----------------------------------------------------------------------------
+# Verbs on the collections themselves
+# -----------------------------------------------------------------------------
+
+# S3 dispatch reaches a method registered on an S4 VIRTUAL base, so one set of
+# methods here serves every RangedTupleList subclass -- the fine-mapping,
+# sumstats, TWAS-weight and coloc collections alike.
+#
+# Shape-preserving verbs flatten, delegate and re-nest, so the caller gets the
+# collection back. Reducing verbs return what the verb produces, because a
+# summary has no per-element shape to nest into.
+
+# These verbs delegate to plyranges' GRanges methods, which only exist once
+# plyranges' namespace is loaded. Without this the failure is an opaque "no
+# applicable method for 'filter' applied to an object of class GRanges" --
+# pointing at the flattened form rather than at the missing package.
+# requireNamespace() both checks and loads, so the check is also the fix.
+# @noRd
+.rtlRequirePlyranges <- function(verb) {
+    if (!requireNamespace("plyranges", quietly = TRUE)) {
+        msg <- glue(
+            "`{verb}()` on a tuple collection needs the plyranges package; ",
+            "install it, or work on flattenTupleRanges(x) directly."
+        )
+        abort(msg)
+    }
+    invisible(NULL)
+}
+
+# `...` is forwarded directly rather than captured with enquos() and spliced:
+# splicing hands the verb quosure OBJECTS instead of expressions to evaluate,
+# and plyranges then fails with "Argument to filter condition must evaluate to
+# a logical vector".
+
+#' @exportS3Method dplyr::filter
+filter.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("filter")
+    out <- dplyr::filter(flattenTupleRanges(.data), ...)
+    nestTupleRanges(out, .data)
+}
+
+#' @exportS3Method dplyr::mutate
+mutate.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("mutate")
+    out <- dplyr::mutate(flattenTupleRanges(.data), ...)
+    nestTupleRanges(out, .data)
+}
+
+#' @exportS3Method dplyr::select
+select.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("select")
+    # The identity columns are kept whatever the selection, or the result
+    # could not be nested back into its elements.
+    out <- dplyr::select(flattenTupleRanges(.data), ...)
+    nestTupleRanges(
+        .rtlRestoreKeys(out, flattenTupleRanges(.data), .data),
+        .data
+    )
+}
+
+# Takes n ranges FROM EACH element, matching arrange()'s within-element rule.
+#
+# Unlike the other verbs this does not flatten: slicing the flat set would take
+# n ranges in TOTAL, which for a many-element collection empties all but the
+# first. Applying the slice per element is both the right semantics and simpler
+# than reconstructing the grouping after a flatten.
+#' @exportS3Method dplyr::slice
+slice.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("slice")
+    elements <- map(as.list(.data), .rtlSliceOne, ...)
+    .rtlRebuild(.data, elements, seq_len(length(.data)))
+}
+
+# @noRd
+.rtlSliceOne <- function(g, ...) {
+    dplyr::slice(g, ...)
+}
+
+# Orders WITHIN each element. A global sort of the flattened set followed by
+# partitioning on the identity tuple leaves each element internally sorted --
+# the two are the same thing for the partitioned result -- so no grouping is
+# needed here. Ordering ACROSS elements would permute the elements themselves,
+# which the identity tuple cannot express.
+#' @exportS3Method dplyr::arrange
+arrange.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("arrange")
+    out <- dplyr::arrange(flattenTupleRanges(.data), ...)
+    nestTupleRanges(out, .data)
+}
+
+#' @exportS3Method dplyr::summarise
+summarise.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("summarise")
+    dplyr::summarise(flattenTupleRanges(.data), ...)
+}
+
+# No count() method: plyranges defines none for GRanges either, so there is
+# nothing to delegate to. Use summarise(group_by(x, ...), n = n()).
+
+#' @exportS3Method dplyr::group_by
+group_by.RangedTupleList <- function(.data, ...) {
+    .rtlRequirePlyranges("group_by")
+    dplyr::group_by(flattenTupleRanges(.data), ...)
+}
+
+# Put back any identity column a selection dropped. Without them the ranges
+# carry no tuple and every one would fall into the first element.
+# @noRd
+.rtlRestoreKeys <- function(out, flat, template) {
+    dotted <- map_chr(.rtlTupleKeyCols(template), .rtlDotName)
+    missing <- setdiff(
+        intersect(dotted, colnames(mcols(flat))),
+        colnames(mcols(out))
+    )
+    for (nm in missing) {
+        mcols(out)[[nm]] <- mcols(flat)[[nm]]
+    }
+    out
 }
