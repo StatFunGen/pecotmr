@@ -287,11 +287,11 @@ test_that(".fmNormalizeMethods: char-vector form deduplicates + seeds susie L de
     res <- pecotmr:::.fmNormalizeMethods(c("susie", "susie", "susieInf"))
     expect_equal(res$tokens, c("susie", "susieInf"))
     expect_equal(names(res$methodArgs), c("susie", "susieInf"))
-    # SuSiE-family tokens get the pipeline L / L_greedy defaults (pecotmr owns
-    # these, not the CLI wrappers).
-    expect_equal(res$methodArgs$susie$L, 20L)
-    expect_equal(res$methodArgs$susie$L_greedy, 5L)
-    expect_equal(res$methodArgs$susieInf$L, 20L)
+    # SuSiE-family tokens get the pipeline L default (pecotmr owns these, not the
+    # CLI wrappers). L_greedy defaults to NULL (greedy off), so it is left unset.
+    expect_equal(res$methodArgs$susie$L, 10L)
+    expect_null(res$methodArgs$susie$L_greedy)
+    expect_equal(res$methodArgs$susieInf$L, 10L)
     # Non-susie-family tokens are left untouched.
     expect_length(
         pecotmr:::.fmNormalizeMethods("mvsusie")$methodArgs$mvsusie,
@@ -306,8 +306,8 @@ test_that(".fmNormalizeMethods: named-list keeps kwargs + fills missing susie L"
     expect_equal(res$tokens, c("susie", "susieInf"))
     expect_equal(res$methodArgs$susie$L, 1) # explicit kwarg wins
     expect_false(res$methodArgs$susie$refine)
-    expect_equal(res$methodArgs$susie$L_greedy, 5L) # filled-in default
-    expect_equal(res$methodArgs$susieInf$L, 20L) # both filled
+    expect_null(res$methodArgs$susie$L_greedy) # greedy off by default (Lgreedy = NULL)
+    expect_equal(res$methodArgs$susieInf$L, 10L) # both filled
 })
 
 test_that(".fmNormalizeMethods: L / Lgreedy args override the susie defaults", {

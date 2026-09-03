@@ -255,9 +255,10 @@
 #' @param keepVariants Character vector or \code{NULL}. Per-call override of the
 #'   \code{QtlDataset} variant allow-list; \code{NULL} uses the dataset's stored
 #'   value.
-#' @param L Integer. Maximum number of SuSiE single effects. Default \code{20}.
-#' @param Lgreedy Integer. Number of greedily-added effects in the SuSiE-inf
-#'   refinement. Default \code{5}.
+#' @param L Integer. Maximum number of SuSiE single effects. Default \code{10}.
+#' @param Lgreedy Integer or \code{NULL}. Number of greedily-added effects in the
+#'   SuSiE-inf refinement (the greedy-L loop). \code{NULL} (default) disables the
+#'   greedy loop and fits \code{L} directly.
 #' @param twasWeights Optional \code{\link{TwasWeights}} resume cache to reuse
 #'   previously fitted weights; \code{NULL} fits fresh.
 #' @param dataDrivenPriorWeightsCutoff Numeric or \code{NULL}. Cutoff below
@@ -458,7 +459,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # Mirrors the convention of .twasNormalizeMethods so the two pipelines
 # expose the same shape on the user side.
 # @noRd
-.fmNormalizeMethods <- function(methods, L = 20L, Lgreedy = 5L) {
+.fmNormalizeMethods <- function(methods, L = 10L, Lgreedy = NULL) {
     if (is.null(methods) || length(methods) == 0L) {
         msg <- glue(
             "fineMappingPipeline: `methods` must be a non-empty character ",
@@ -2594,8 +2595,8 @@ setMethod(
         jointRegions = FALSE,
         jointSpecification = NULL,
         addSusieInf = TRUE,
-        L = 20L,
-        Lgreedy = 5L,
+        L = 10L,
+        Lgreedy = NULL,
         coverage = 0.95,
         secondaryCoverage = c(0.7, 0.5),
         signalCutoff = 0.025,
@@ -3233,8 +3234,8 @@ setMethod(
         data,
         methods,
         addSusieInf = TRUE,
-        L = 20L,
-        Lgreedy = 5L,
+        L = 10L,
+        Lgreedy = NULL,
         coverage = 0.95,
         secondaryCoverage = c(0.7, 0.5),
         signalCutoff = 0.025,
