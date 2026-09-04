@@ -4412,10 +4412,21 @@ krigingOutlierQc <- function(
     if (length(ids) == 0L) {
         return(ldSketch)
     }
-    keep <- is_in(
-        normalizeVariantId(.ldSketchMatchIds(ldSketch)),
-        normalizeVariantId(unique(ids))
+    # Match on the (chrom, pos, allele) tuple rather than the raw id string.
+    # The entry ids have just been canonicalized to chr:pos:A2:A1 by the QC
+    # above, while panel ids are passed through verbatim by
+    # `.repairVariantIds()` whenever their allele fields are already valid DNA
+    # -- so a panel keyed chr:pos:A1:A2 (which is how a PLINK .bim writes ids;
+    # a .pvar writes REF:ALT and is therefore already canonical) matches
+    # nothing under string equality and the panel is silently emptied. This is
+    # the matcher `.ldFromSketchMatch()` and every other LD lookup already use.
+    panelIds <- .ldSketchMatchIds(ldSketch)
+    matched <- matchVariants(
+        panelIds,
+        unique(ids),
+        removeStrandAmbiguous = FALSE
     )
+    keep <- is_in(seq_along(panelIds), matched$idxA)
     .ldSketchSubset(ldSketch, keep)
 }
 

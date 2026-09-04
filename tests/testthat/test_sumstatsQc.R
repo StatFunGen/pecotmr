@@ -3324,6 +3324,31 @@ test_that("a tag-named panel entry survives the end-to-end sketch subset", {
     )
 })
 
+test_that("the sketch survives a panel keyed chr:pos:A1:A2 (PLINK .bim order)", {
+    # Pre-fix regression: harmonization canonicalizes the entry ids to
+    # chr:pos:A2:A1, while panel ids are passed through verbatim whenever their
+    # allele fields are already valid DNA. A panel keyed the other way round --
+    # which is how a PLINK .bim writes ids, whereas a .pvar writes REF:ALT and
+    # is already canonical -- matched nothing under string equality, so
+    # .subsetSketchToIds() silently emptied the sketch and RSS fine-mapping /
+    # TWAS weights aborted later with "not present in the LD sketch panel".
+    h <- .ssQ_makeHandleVid()
+    si <- getSnpInfo(h)
+    h@snpInfo$SNP <- paste0("chr1:", si$BP, ":", si$A1, ":", si$A2)
+    ss <- GwasSumStats(
+        study = "g1",
+        entry = list(.ssQ_makeEntryGr(
+            snp_ids = paste0("chr1:", c(100L, 200L, 300L, 400L), ":G:A")
+        )),
+        genome = "hg19",
+        ldSketch = h
+    )
+    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    kept <- pecotmr:::.ldSketchMatchIds(getLdSketch(out))
+    expect_length(kept, 4L)
+    expect_setequal(pecotmr:::parseVariantId(kept)$pos, c(100L, 200L, 300L, 400L))
+})
+
 test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants against the panel", {
     # Pre-fix regression: a sign-flipped variant kept its input-orientation SNP,
     # which is absent from the panel, so .applyLdMismatchQcToEntry errored with
