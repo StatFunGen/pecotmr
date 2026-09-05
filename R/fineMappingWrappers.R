@@ -2708,8 +2708,11 @@ susieAshRssWeights <- function(
 #' @param Y Phenotype matrix. Required when `mvsusieFit` is NULL.
 #' @param priorVariance Optional mvSuSiE prior variance list.
 #' @param residualVariance Optional residual variance matrix.
-#' @param L Maximum number of components.
-#' @param LGreedy Initial greedy number of components.
+#' @param L Maximum number of components. Default \code{10}, matching
+#'   \code{mvsusieR::mvsusie}.
+#' @param LGreedy Integer or \code{NULL}. Number of greedily-added components.
+#'   \code{NULL} (default) disables the greedy loop and fits \code{L}
+#'   directly.
 #' @param verbose If TRUE, prints mvSuSiE fitting progress.
 #' @param ... Additional arguments passed to `fitMvsusie()` when fitting.
 #' @return Matrix of variant weights.
@@ -2729,8 +2732,8 @@ mvsusieWeights <- function(
     Y = NULL,
     priorVariance = NULL,
     residualVariance = NULL,
-    L = 30,
-    LGreedy = 5,
+    L = 10,
+    LGreedy = NULL,
     verbose = FALSE,
     ...
 ) {
@@ -3021,8 +3024,11 @@ fsusieWeights <- function(
 #'   NULL, \code{mvsusieR::create_mixture_prior()} is used with \code{R =
 #'   ncol(stat$z)}.
 #' @param residualVariance Optional residual covariance matrix.
-#' @param L Maximum number of single effects (default 30).
-#' @param LGreedy Initial greedy effect count (default 5).
+#' @param L Maximum number of single effects. Default \code{10}, matching
+#'   \code{mvsusieR::mvsusie}.
+#' @param LGreedy Integer or \code{NULL}. Number of greedily-added effects.
+#'   \code{NULL} (default) disables the greedy loop and fits \code{L}
+#'   directly.
 #' @param retainFit If TRUE, attaches the fitted object as an attribute.
 #' @param ... Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.
 #'
@@ -3051,8 +3057,8 @@ mvsusieRssWeights <- function(
     mvsusieRssFit = NULL,
     priorVariance = NULL,
     residualVariance = NULL,
-    L = 30,
-    LGreedy = 5,
+    L = 10,
+    LGreedy = NULL,
     retainFit = FALSE,
     ...
 ) {
@@ -3115,6 +3121,8 @@ mvsusieRssWeights <- function(
         Z = Z,
         R = LD,
         N = nScalar,
+        L = L,
+        L_greedy = LGreedy,
         prior_variance = priorVariance,
         residual_variance = residualVariance,
         ...

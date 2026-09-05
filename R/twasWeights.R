@@ -576,7 +576,7 @@ setMethod("show", "TwasWeights", function(object) {
     susie = list(
         fn = "susie_weights",
         impl = "susieWeights",
-        args = list(refine = FALSE, L = 20, L_greedy = 5)
+        args = list(refine = FALSE, L = 10)
     ),
     susieAsh = list(
         fn = "susie_ash_weights",
@@ -659,7 +659,7 @@ setMethod("show", "TwasWeights", function(object) {
     mvsusie = list(
         fn = "mvsusie_weights",
         impl = "mvsusieWeights",
-        args = list(L = 30, L_greedy = 5)
+        args = list(L = 10)
     ),
     mrmash = list(
         fn = "mrmash_weights",

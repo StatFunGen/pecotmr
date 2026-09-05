@@ -2720,9 +2720,32 @@ test_that("susieAshRssWeights returns weights of length p", {
 test_that("mvsusieRssWeights fits mvsusie_rss and returns p x K weights", {
     skip_if_not_installed("mvsusieR")
     m <- .rrwMulti(n = 80, p = 8, K = 2)
-    w <- mvsusieRssWeights(m$stat, m$LD, L = 5, LGreedy = 2)
+    # LGreedy stays at its NULL default: mvsusieR's greedy-L loop errors on
+    # small data ("Values and their weights should have equal length"), which
+    # is why the greedy loop is off unless a caller asks for it.
+    w <- mvsusieRssWeights(m$stat, m$LD, L = 5)
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
+})
+
+test_that("mvsusieRssWeights forwards L / clamped LGreedy to mvsusie_rss", {
+    skip_if_not_installed("mvsusieR")
+    m <- .rrwMulti(n = 80, p = 8, K = 2)
+    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
+    captured <- list()
+    local_mocked_bindings(
+        create_mixture_prior = function(...) list(),
+        mvsusie_rss = function(...) {
+            captured <<- list(...)
+            "mock_fit"
+        },
+        coef.mvsusie = function(...) fakeCoef,
+        .package = "mvsusieR"
+    )
+    w <- mvsusieRssWeights(m$stat, m$LD, L = 3, LGreedy = 7)
+    expect_equal(dim(w), c(m$p, m$K))
+    expect_equal(captured$L, 3)
+    expect_equal(captured$L_greedy, 3) # clamped to min(LGreedy, L)
 })
 
 test_that("mvsusieRssWeights errors on single-context stat$z", {
