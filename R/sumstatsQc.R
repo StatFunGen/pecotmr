@@ -3333,13 +3333,32 @@ krigingOutlierQc <- function(
         abort("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
     }
     # Panel LD for the entry variants via the shared LD-from-sketch helper
-    # (tuple match with chr-prefix tolerance, strand-ambiguous variants kept;
-    # errors if any variant is absent from the panel).
+    # (tuple match with chr-prefix tolerance, strand-ambiguous variants kept).
+    # A variant can survive QC while its panel partner is removed by the panel
+    # MAF/MAC/missingness filter; .panelVariantFilter passes it through and
+    # leaves the drop to onMissing here, so drop it (aligning df with the
+    # returned LD) rather than aborting.
+    nMmIn <- nrow(df)
     R <- .ldFromSketch(
         ldSketch,
         variantIds,
-        label = "summaryStatsQc: zMismatchQc"
+        label = "summaryStatsQc: zMismatchQc",
+        onMissing = "drop"
     )
+    if (is.null(R)) {
+        return(list(
+            df = df[0L, , drop = FALSE], outliers = 0L, diagnostics = NULL,
+            panelUnsupportedDropped = nMmIn
+        ))
+    }
+    keptIds <- attr(R, "keptVariantIds")
+    attr(R, "keptVariantIds") <- NULL
+    nPanelDrop <- 0L
+    if (!is.null(keptIds) && length(keptIds) < nrow(df)) {
+        nPanelDrop <- nrow(df) - length(keptIds)
+        df <- filter(df, is_in(.data$SNP, keptIds))
+        variantIds <- df$SNP
+    }
     qc <- ldMismatchQc(
         zScore = df$Z,
         R = R,
@@ -3367,7 +3386,8 @@ krigingOutlierQc <- function(
     list(
         df = filter(df, !outlierFlags),
         outliers = sum(outlierFlags),
-        diagnostics = diagnostics
+        diagnostics = diagnostics,
+        panelUnsupportedDropped = nPanelDrop
     )
 }
 
@@ -4028,8 +4048,31 @@ krigingOutlierQc <- function(
     R <- .ldFromSketch(
         ldSketch,
         df$SNP,
-        label = "summaryStatsQc: kriging prefilter"
+        label = "summaryStatsQc: kriging prefilter",
+        onMissing = "drop"
     )
+    # A GWAS variant can survive QC while its LD-panel partner is removed by the
+    # panel MAF/MAC/missingness filter (common in the study, rare in the panel --
+    # deletions especially). .panelVariantFilter passes such variants through and
+    # leaves the drop to onMissing here, so drop them (aligning df with the
+    # returned LD) rather than aborting the run.
+    if (is.null(R)) {
+        return(list(
+            df = df[0L, , drop = FALSE], count = 0L,
+            audit = list(krigingFlipped = 0L, panelUnsupportedDropped = nKrIn)
+        ))
+    }
+    keptIds <- attr(R, "keptVariantIds")
+    attr(R, "keptVariantIds") <- NULL
+    nPanelDrop <- 0L
+    if (!is.null(keptIds) && length(keptIds) < nrow(df)) {
+        nPanelDrop <- nrow(df) - length(keptIds)
+        df <- filter(df, is_in(.data$SNP, keptIds))
+        .qcEmit(
+            lbl, "QC track: dropped ", nPanelDrop, " of ", nKrIn,
+            " variant(s) with no LD-panel entry after panel filtering."
+        )
+    }
     nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) {
         opts$nForPip
     } else {
@@ -4054,7 +4097,11 @@ krigingOutlierQc <- function(
     list(
         df = df,
         count = nKr,
-        audit = list(krigingFlipped = nKr, krigingDiagnostics = kr$diagnostics)
+        audit = list(
+            krigingFlipped = nKr,
+            krigingDiagnostics = kr$diagnostics,
+            panelUnsupportedDropped = nPanelDrop
+        )
     )
 }
 
@@ -4070,6 +4117,14 @@ krigingOutlierQc <- function(
         ldMismatchOutliersDropped = ldQc$outliers,
         ldMismatchMethod = opts$zMismatchQc
     )
+    nPanelDrop <- ldQc$panelUnsupportedDropped %||% 0L
+    if (nPanelDrop > 0L) {
+        audit$panelUnsupportedDropped <- nPanelDrop
+        .qcEmit(
+            lbl, "QC track: dropped ", nPanelDrop, " of ", nMmIn,
+            " variant(s) with no LD-panel entry after panel filtering."
+        )
+    }
     if (!is.null(ldQc$diagnostics)) {
         audit$ldMismatchDiagnostics <- ldQc$diagnostics
     }

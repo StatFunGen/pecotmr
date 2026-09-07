@@ -4498,18 +4498,90 @@ test_that(".applyLdMismatchQcToEntry: errors when SNP column is missing", {
     )
 })
 
-test_that(".applyLdMismatchQcToEntry: errors on variants absent from the sketch", {
+test_that(".applyLdMismatchQcToEntry: drops variants absent from the sketch", {
+    # A variant can survive study-side QC while its LD-panel partner is removed
+    # by the panel MAF/MAC/missingness filter, so it is absent from the sketch
+    # the QC lookup sees. .panelVariantFilter passes such a variant through and
+    # leaves the drop to .ldFromSketch's onMissing, so the z-mismatch lookup
+    # drops it (recording the count) instead of aborting the run.
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssh_mockExtractor(),
+        .package = "pecotmr"
+    )
     df <- data.frame(
-        SNP = c("rs1", "ghost"),
-        Z = c(1, 2),
-        N = c(1000, 1000),
+        SNP = c(paste0("rs", 1:6), "ghost"),
+        Z = c(seq(1.0, by = 0.5, length.out = 6L), 2.0),
+        N = rep(1000L, 7L),
         stringsAsFactors = FALSE
     )
+    out <- pecotmr:::.applyLdMismatchQcToEntry(
+        df,
+        .ssh_makeHandle(snp_n = 6L),
+        method = "slalom"
+    )
+    expect_false("ghost" %in% out$df$SNP)
+    expect_equal(out$panelUnsupportedDropped, 1L)
+    expect_true(all(out$df$SNP %in% paste0("rs", 1:6)))
+})
+
+test_that(".qcKrigingFlip: drops a panel-unsupported variant instead of aborting", {
+    # Same contract at the kriging prefilter: the orphan (no sketch entry) is
+    # dropped and counted, and the run continues on the panel-supported subset.
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssh_mockExtractor(),
+        .package = "pecotmr"
+    )
+    df <- data.frame(
+        SNP = c(paste0("rs", 1:6), "ghost"),
+        Z = c(seq(1.0, by = 0.5, length.out = 6L), 2.0),
+        N = rep(1000L, 7L),
+        stringsAsFactors = FALSE
+    )
+    out <- pecotmr:::.qcKrigingFlip(
+        df,
+        .ssh_makeHandle(snp_n = 6L),
+        opts = list(alleleFlipKriging = TRUE, nForPip = NULL),
+        lbl = NA_character_
+    )
+    expect_false("ghost" %in% out$df$SNP)
+    expect_equal(out$audit$panelUnsupportedDropped, 1L)
+    expect_equal(nrow(out$df), 6L)
+})
+
+test_that(".qcKrigingFlip: no-orphan entry is unchanged (drop is a no-op)", {
+    # When every variant has a sketch entry, nothing is dropped and the result
+    # matches the pre-change behaviour (panelUnsupportedDropped == 0).
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssh_mockExtractor(),
+        .package = "pecotmr"
+    )
+    df <- data.frame(
+        SNP = paste0("rs", 1:6),
+        Z = seq(1.0, by = 0.5, length.out = 6L),
+        N = rep(1000L, 6L),
+        stringsAsFactors = FALSE
+    )
+    out <- pecotmr:::.qcKrigingFlip(
+        df,
+        .ssh_makeHandle(snp_n = 6L),
+        opts = list(alleleFlipKriging = TRUE, nForPip = NULL),
+        lbl = NA_character_
+    )
+    expect_equal(out$audit$panelUnsupportedDropped, 0L)
+    expect_equal(nrow(out$df), 6L)
+    expect_setequal(out$df$SNP, paste0("rs", 1:6))
+})
+
+test_that("fine-mapping keeps onMissing='error': a genuinely absent variant still aborts", {
+    # The post-QC invariant: QC now drops panel-unsupported variants, so every
+    # variant reaching fine-mapping has a panel entry. .ldFromSketch's default
+    # onMissing='error' (used by the fine-mapping LD build) MUST still abort on
+    # a genuinely absent variant, guaranteeing that invariant.
     expect_error(
-        pecotmr:::.applyLdMismatchQcToEntry(
-            df,
-            .ssh_makeHandle(),
-            method = "dentist"
+        pecotmr:::.ldFromSketch(
+            .ssh_makeHandle(snp_n = 6L),
+            c("rs1", "ghost"),
+            label = "fine-mapping"
         ),
         "not present in the LD sketch panel"
     )
