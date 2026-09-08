@@ -613,12 +613,13 @@ setMethod(
         ignore.mcols = FALSE,
         check = TRUE
     ) {
-        # bindROWS() is the one hook `c()` and `append()` share, so defining it
-        # here fixes both. The inherited CompressedList version rbinds the mcols,
-        # which requires identical columns and so fails whenever the parts came
-        # from runs with different optional columns (traitPos / jointContexts /
-        # blockId); it also carries the FIRST part's collection-level slots
-        # silently, making the result depend on argument order.
+        # bindROWS() is the one hook `c()` and `append()` share, so defining
+        # it here fixes both. The inherited CompressedList version rbinds the
+        # mcols, requiring identical columns, so it fails whenever the parts
+        # came from runs with different optional columns (traitPos /
+        # jointContexts / blockId); it also carries the FIRST part's
+        # collection-level slots silently, making the result depend on
+        # argument order.
         .combineTupleCollections(compact(c(list(x), objects)), NULL, "c")
     }
 )

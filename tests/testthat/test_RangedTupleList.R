@@ -691,8 +691,6 @@ test_that("nestTupleRanges validates its arguments", {
 })
 
 
-
-
 # ---------------------------------------------------------------------------
 # plyranges / dplyr verbs.
 #

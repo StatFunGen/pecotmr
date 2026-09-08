@@ -253,9 +253,9 @@ SuSiE-inf fit initialises the chained downstream method(s). Default
 
 \item{L}{Integer. Maximum number of SuSiE single effects. Default \code{10}.}
 
-\item{Lgreedy}{Integer or \code{NULL}. Number of greedily-added effects in the
-SuSiE-inf refinement (the greedy-L loop). \code{NULL} (default) disables the
-greedy loop and fits \code{L} directly.}
+\item{Lgreedy}{Integer or \code{NULL}. Number of greedily-added effects in
+the SuSiE-inf refinement (the greedy-L loop). \code{NULL} (default)
+disables the greedy loop and fits \code{L} directly.}
 
 \item{coverage}{Primary credible-set coverage (numeric, length 1). Default
 \code{0.95}.}

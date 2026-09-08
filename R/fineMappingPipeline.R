@@ -256,9 +256,9 @@
 #'   \code{QtlDataset} variant allow-list; \code{NULL} uses the dataset's stored
 #'   value.
 #' @param L Integer. Maximum number of SuSiE single effects. Default \code{10}.
-#' @param Lgreedy Integer or \code{NULL}. Number of greedily-added effects in the
-#'   SuSiE-inf refinement (the greedy-L loop). \code{NULL} (default) disables the
-#'   greedy loop and fits \code{L} directly.
+#' @param Lgreedy Integer or \code{NULL}. Number of greedily-added effects in
+#'   the SuSiE-inf refinement (the greedy-L loop). \code{NULL} (default)
+#'   disables the greedy loop and fits \code{L} directly.
 #' @param twasWeights Optional \code{\link{TwasWeights}} resume cache to reuse
 #'   previously fitted weights; \code{NULL} fits fresh.
 #' @param dataDrivenPriorWeightsCutoff Numeric or \code{NULL}. Cutoff below

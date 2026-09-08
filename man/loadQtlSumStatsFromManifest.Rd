@@ -12,7 +12,9 @@ loadQtlSumStatsFromManifest(
   minLdOverlapWarn = 0.5,
   columnMapping = NULL,
   sampleSelect = NULL,
-  formatMapping = NULL
+  formatMapping = NULL,
+  traitColumn = NULL,
+  variantIdAlleles = c("none", "A2A1", "A1A2")
 )
 }
 \arguments{
@@ -33,6 +35,24 @@ reconciled with an \code{ldSketchPath} column.}
 
 \item{region, minLdOverlapWarn, columnMapping, sampleSelect, formatMapping}{As
 for \code{\link{loadGwasSumStatsFromManifest}}.}
+
+\item{traitColumn}{Optional column of the sumstats file naming the trait of
+each row (e.g. \code{"molecular_trait_id"} in a cis-QTL scan, which writes
+every gene into one table). When set, each manifest row keeps only the
+rows whose \code{traitColumn} equals that row's \code{trait}. Without it
+a multi-trait file loads whole, since \code{region} restriction needs a
+tabix index and neighbouring cis windows overlap regardless.}
+
+\item{variantIdAlleles}{Where to find the alleles when the file has no
+\code{A1}/\code{A2} columns -- a cis-QTL scan reports effect + se against
+the counted allele and leaves the alleles inside the variant id. The order
+within an id cannot be recovered from the string (a \code{.pvar} writes
+\code{REF:ALT}, i.e. pecotmr's canonical \code{A2:A1}; a PLINK
+\code{.bim} writes \code{A1:A2}), so declare it: \code{"none"} (default,
+require real columns), \code{"A2A1"}, or \code{"A1A2"}. An explicit
+allele column always wins. Declaring the wrong order fails silently --
+\code{\link{summaryStatsQc}} will sign- and strand-flip every variant to
+"correct" the apparent mismatch against the panel.}
 }
 \value{
 A \code{QtlSumStats} object.
