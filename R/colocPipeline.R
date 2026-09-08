@@ -1,10 +1,23 @@
-#' @title Colocalization Pipeline (coloc.bf_bf over QTL + GWAS LBF matrices)
-#' @description Per-region pipeline that pairs a QTL
-#'   \code{\link{QtlFineMappingResult}} with a GWAS fine-mapping result (either
-#'   supplied directly as a \code{\link{GwasFineMappingResult}} or computed
-#'   inline from a \code{\link{GwasSumStats}}) and runs
-#'   \code{coloc::coloc.bf_bf} per (QTL tuple, GWAS tuple) pair to produce
-#'   per-pair colocalization posterior probabilities PP.H0-PP.H4.
+#' @title Colocalization Pipeline (coloc.bf_bf over paired LBF matrices)
+#' @description Per-region pipeline that pairs two fine-mapping result
+#'   collections and runs \code{coloc::coloc.bf_bf} per (first-side tuple,
+#'   second-side tuple) pair to produce per-pair colocalization posterior
+#'   probabilities PP.H0-PP.H4.
+#'
+#'   Either side may be a \code{\link{QtlFineMappingResult}} or a
+#'   \code{\link{GwasFineMappingResult}}: QTL-GWAS, QTL-QTL (two molecular
+#'   phenotypes) and GWAS-GWAS (two diseases) all run through one code path,
+#'   since nothing below the identity tuple depends on which flavour a side
+#'   is. The second side may also be handed in as summary statistics
+#'   (\code{\link{QtlSumStats}} or \code{\link{GwasSumStats}}), which are
+#'   fine-mapped inline.
+#'
+#'   The argument names keep the QTL / GWAS wording of the common case. What
+#'   they mean generally is: \code{qtlFineMappingResult} is the side whose
+#'   identity is reported in the unprefixed \code{study} / \code{context} /
+#'   \code{trait} / \code{method} columns, and \code{gwasInput} is the side
+#'   reported in the \code{gwas}-prefixed ones. A GWAS side has no context or
+#'   trait axis, so those two columns are \code{NA} for it.
 #'
 #' @section Why \code{coloc.bf_bf} and not \code{coloc.susie}:
 #' The prior \code{colocWrapper} (now stubbed) used
@@ -20,32 +33,37 @@
 #'     keeps effects at a secondary coverage; otherwise the default
 #'     filter drops effects whose prior variance is below
 #'     \code{priorTol}.
-#'   \item \strong{Multiple-GWAS batching}: when several GWAS
-#'     fine-mapping rows fall in the same region they are merged into
-#'     one combined LBF matrix per QTL pair (one \code{coloc.bf_bf}
-#'     call covers them all).
+#'   \item \strong{Per-tuple LBF reuse}: each second-side tuple's LBF
+#'     matrix is extracted once and scored against every first-side
+#'     tuple, so the filtering above is applied once per tuple rather
+#'     than once per pair.
 #' }
 #' This pipeline preserves all three.
 #'
-#'   GWAS input dispatch:
+#'   Second-side input dispatch:
 #'   \itemize{
-#'     \item \code{gwasInput} is a \code{\link{GwasSumStats}}: GWAS
-#'           fine-mapping is performed inline by
+#'     \item \code{gwasInput} is a \code{\link{QtlSumStats}} or a
+#'           \code{\link{GwasSumStats}}: it is fine-mapped inline by
 #'           \code{\link{fineMappingPipeline}} with the supplied
 #'           \code{finemappingMethods} (default \code{"susie"}).
-#'     \item \code{gwasInput} is a \code{\link{GwasFineMappingResult}}:
-#'           used directly; no inline fine-mapping.
+#'     \item \code{gwasInput} is a fine-mapping result: used directly; no
+#'           inline fine-mapping.
 #'   }
 #'
 #' @section LD-sketch identity check: If
 #'   \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must match
-#'   the LD sketch on \code{gwasInput}. Mismatch is a hard error. When the QTL
-#'   FMR's \code{ldSketch} is \code{NULL} (individual-level fit), the validation
-#'   is skipped on the QTL side.
+#'   the LD sketch on \code{gwasInput}. Mismatch is a hard error. When the
+#'   first side's \code{ldSketch} is \code{NULL} (individual-level fit), the
+#'   validation is skipped on that side and the second side's panel is what the
+#'   result carries forward.
 #'
-#' @param qtlFineMappingResult A \code{\link{QtlFineMappingResult}} (required).
-#' @param gwasInput Either a \code{\link{GwasSumStats}} or a
-#'   \code{\link{GwasFineMappingResult}}.
+#' @param qtlFineMappingResult The first side: a
+#'   \code{\link{QtlFineMappingResult}} or a
+#'   \code{\link{GwasFineMappingResult}} (required).
+#' @param gwasInput The second side: a \code{\link{QtlFineMappingResult}}, a
+#'   \code{\link{GwasFineMappingResult}}, or the summary statistics to
+#'   fine-map inline (\code{\link{QtlSumStats}} or
+#'   \code{\link{GwasSumStats}}).
 #' @param filterLbfCs Logical. When \code{TRUE} (and \code{filterLbfCsSecondary}
 #'   is \code{NULL}), keep only effects that produced a credible set
 #'   (\code{trimmedFit$sets$cs_index}). Default \code{FALSE}.
@@ -68,15 +86,17 @@
 #' @param p12 Prior probability of shared signal per variant. Default
 #'   \code{5e-6}.
 #' @param finemappingMethods Character vector forwarded to
-#'   \code{\link{fineMappingPipeline}} when \code{gwasInput} is a
-#'   \code{GwasSumStats}. Default \code{"susie"}.
-#' @param returnGwasFineMapping Logical. When \code{TRUE}, attach the computed
-#'   \code{GwasFineMappingResult} on the returned data frame as attribute
-#'   \code{"gwasFineMapping"}. Default \code{FALSE}.
-#' @param enrichment Optional data.frame of per-(gwasStudy, qtlStudy,
-#'   qtlContext) enrichment factors with columns \code{gwasStudy},
-#'   \code{qtlStudy}, \code{qtlContext}, \code{enrichment}. Output of
-#'   \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL}, each pair's
+#'   \code{\link{fineMappingPipeline}} when \code{gwasInput} is summary
+#'   statistics rather than a fine-mapping result. Default \code{"susie"}.
+#' @param returnGwasFineMapping Logical. When \code{TRUE}, attach the
+#'   fine-mapping result computed from \code{gwasInput} on the returned object
+#'   as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.
+#' @param enrichment Optional data.frame of per-pair enrichment factors with
+#'   columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
+#'   \code{enrichment}, and optionally \code{gwasContext} / \code{gwasTrait}
+#'   (which the join uses when present, and which
+#'   \code{\link{qtlEnrichmentPipeline}} emits for a QTL outcome side). Output
+#'   of \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL}, each pair's
 #'   \code{p12} prior is scaled to \code{min(p12 * (1 + enrichment), p12Max)}
 #'   (the enrichment-informed colocalization variant, "enloc"). Pairs without a
 #'   matching enrichment row fall back to the baseline \code{p12} with a
@@ -105,11 +125,12 @@
 #'   is coding-invariant, so no sign change is needed); when FALSE, match on
 #'   exact alleles only, so a ref/alt swap is treated as a distinct variant.
 #' @param ... Additional arguments forwarded to \code{coloc::coloc.bf_bf}.
-#' @return A \code{\linkS4class{ColocResult}}: one element per tested (QTL
-#'   credible set, GWAS credible set, block) pair, holding that pair's aligned
-#'   variants with their \code{SNP.PP.H4}. Pair-level metadata carries the
-#'   identity columns (\code{study}, \code{context}, \code{trait},
-#'   \code{method}, \code{gwasStudy}, \code{gwasMethod}), the block and stable
+#' @return A \code{\linkS4class{ColocResult}}: one element per tested
+#'   (first-side credible set, second-side credible set, block) pair, holding
+#'   that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
+#'   metadata carries the identity columns (\code{study}, \code{context},
+#'   \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasContext},
+#'   \code{gwasTrait}, \code{gwasMethod}), the block and stable
 #'   credible-set ids (\code{blockId}, \code{qtlCs}, \code{gwasCs}), the
 #'   standard coloc fields (\code{idx1}, \code{idx2}, \code{nSnps},
 #'   \code{hit1}, \code{hit2}, \code{PP.H0.abf} \ldots \code{PP.H4.abf}) and
@@ -128,6 +149,12 @@
 #' data(gwasFineMappingLbfExample)
 #' colocPipeline(qtlFineMappingLbfExample,
 #'   gwasInput = gwasFineMappingLbfExample)
+#' # Either side may be a QTL result. Pairing this collection against itself
+#' # colocalizes its two contexts, and reports the second side's context and
+#' # trait in gwasContext / gwasTrait.
+#' res <- colocPipeline(qtlFineMappingLbfExample,
+#'   gwasInput = qtlFineMappingLbfExample)
+#' unique(getColocPairs(res)[, c("context", "gwasContext")])
 #' @export
 colocPipeline <- function(
     qtlFineMappingResult,
@@ -194,19 +221,22 @@ colocPipeline <- function(
         abort(msg)
         # nocov end
     }
-    if (!methods::is(p$qtlFineMappingResult, "QtlFineMappingResult")) {
+    if (!methods::is(p$qtlFineMappingResult, "FineMappingResultBase")) {
         msg <- glue(
-            "`qtlFineMappingResult` must be a QtlFineMappingResult ",
+            "`qtlFineMappingResult` must be a QtlFineMappingResult or a ",
+            "GwasFineMappingResult ",
             "(got class '{class(p$qtlFineMappingResult)[[1L]]}')."
         )
         abort(msg)
     }
     if (
-        !methods::is(p$gwasInput, "GwasSumStats") &&
-            !methods::is(p$gwasInput, "GwasFineMappingResult")
+        !methods::is(p$gwasInput, "SumStatsBase") &&
+            !methods::is(p$gwasInput, "FineMappingResultBase")
     ) {
         msg <- glue(
-            "`gwasInput` must be a GwasSumStats or a GwasFineMappingResult ",
+            "`gwasInput` must be a fine-mapping result ",
+            "(QtlFineMappingResult / GwasFineMappingResult) or summary ",
+            "statistics (QtlSumStats / GwasSumStats) ",
             "(got class '{class(p$gwasInput)[[1L]]}')."
         )
         abort(msg)
@@ -235,20 +265,41 @@ colocPipeline <- function(
         )
         abort(msg)
     }
+    .colocValidateEnrichmentKeys(enrichment)
     invisible(NULL)
 }
 
-# Resolve the GWAS side to a GwasFineMappingResult (fine-map QC'd sumstats when
-# a GwasSumStats is passed).
+# One factor per pair: rows that repeat the identity the lookup joins on would
+# make the applied enrichment depend on row order, so they are refused here
+# rather than resolved by taking the first.
+# @noRd
+.colocValidateEnrichmentKeys <- function(enrichment) {
+    idCols <- intersect(
+        c("gwasStudy", "gwasContext", "gwasTrait", "qtlStudy", "qtlContext"),
+        colnames(enrichment)
+    )
+    ids <- select(as_tibble(enrichment), all_of(idCols))
+    if (nrow(distinct(ids)) == nrow(ids)) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "`enrichment` has repeated ({str_flatten(idCols, ', ')}) rows; ",
+        "each pair needs exactly one enrichment factor."
+    )
+    abort(msg)
+}
+
+# Resolve the second side to a fine-mapping collection (fine-map QC'd sumstats
+# when summary statistics are passed, whichever flavour they are).
 # @noRd
 .colocResolveGwasFmr <- function(gwasInput, finemappingMethods) {
-    if (methods::is(gwasInput, "GwasFineMappingResult")) {
+    if (methods::is(gwasInput, "FineMappingResultBase")) {
         return(gwasInput)
     }
     if (length(getQcInfo(gwasInput)) == 0L) {
         msg <- glue(
-            "colocPipeline: gwasInput (GwasSumStats) has no QC record. ",
-            "Call summaryStatsQc() first."
+            "colocPipeline: gwasInput ({class(gwasInput)[[1L]]}) has no QC ",
+            "record. Call summaryStatsQc() first."
         )
         abort(msg)
     }
@@ -278,11 +329,13 @@ colocPipeline <- function(
 
 # The LD reference the result carries forward, so getColocCredibleSets() can
 # recompute purity (section 3.7) without being handed a sketch separately. The
-# QTL and GWAS sketches are already required to match by
-# .colocRequireMatchingLdSketches, so either one identifies the panel.
+# two sides' sketches are already required to match by
+# .colocRequireMatchingLdSketches, so either one identifies the panel -- but a
+# first side fit on individual-level data carries none, and then the second
+# side's panel is the only one there is.
 # @noRd
 .colocLdSketch <- function(p) {
-    getLdSketch(p$qtlFineMappingResult)
+    getLdSketch(p$qtlFineMappingResult) %||% getLdSketch(p$gwasFmr)
 }
 
 # Empty-result early return (attaching the GWAS fine-mapping when requested).
@@ -292,7 +345,7 @@ colocPipeline <- function(
         enriched = p$useEnrichment,
         ldSketch = .colocLdSketch(p)
     )
-    if (p$returnGwasFineMapping && methods::is(p$gwasInput, "GwasSumStats")) {
+    if (p$returnGwasFineMapping && methods::is(p$gwasInput, "SumStatsBase")) {
         attr(out, "gwasFineMapping") <- p$gwasFmr
     }
     out
@@ -316,7 +369,7 @@ colocPipeline <- function(
     q$retainedMass <- qLbfInfo$retainedMass
     q$effect <- qLbfInfo$effect
     compact(map(
-        names(p$gwasLbfByPair),
+        p$gwasLbfByPair,
         .colocScorePairAt,
         qLbfInfo = qLbfInfo,
         p = p,
@@ -324,24 +377,29 @@ colocPipeline <- function(
     ))
 }
 
-# Identity + row payload + log label for a QTL tuple.
+# Identity + row payload + log label for one first-side tuple.
 # @noRd
 .colocQtlTupleInfo <- function(qi, p) {
     fmr <- p$qtlFineMappingResult
-    study <- as.character(fmr$study)[[qi]]
-    context <- as.character(fmr$context)[[qi]]
-    trait <- as.character(fmr$trait)[[qi]]
-    method <- as.character(fmr$method)[[qi]]
-    list(
-        study = study,
-        context = context,
-        trait = trait,
-        method = method,
-        parts = .fmrRowParts(fmr, qi),
-        label = glue(
-            "QTL (study='{study}', context='{context}', ",
-            "trait='{trait}', method='{method}')"
+    ident <- .colocTupleIdentity(fmr, qi)
+    c(
+        ident,
+        list(
+            parts = .fmrRowParts(fmr, qi),
+            label = .fmrTupleLabel(.fmrSideName(fmr), ident)
         )
+    )
+}
+
+# The identity tuple of one fine-mapping row, whichever flavour the collection
+# is (see .fmrIdentityAt for the absent-axis rule).
+# @noRd
+.colocTupleIdentity <- function(fmr, ri) {
+    list(
+        study = .fmrIdentityAt(fmr, "study", ri),
+        context = .fmrIdentityAt(fmr, "context", ri),
+        trait = .fmrIdentityAt(fmr, "trait", ri),
+        method = .fmrIdentityAt(fmr, "method", ri)
     )
 }
 
@@ -355,7 +413,7 @@ colocPipeline <- function(
     if (is.null(aligned)) {
         return(NULL)
     }
-    p12Info <- .colocResolveP12(p, gInfo$study, q$study, q$context)
+    p12Info <- .colocResolveP12(p, gInfo, q)
     pairRes <- .colocRunPair(aligned, p, p12Info$p12Used, q, gInfo)
     if (is.null(pairRes) || is.null(pairRes$summary)) {
         return(NULL)
@@ -373,16 +431,16 @@ colocPipeline <- function(
 # Enrichment-informed p12 (per-(gwasStudy, qtlStudy, qtlContext) scaling capped
 # at p12Max; baseline p12 with no enrichment table / no matching row).
 # @noRd
-.colocResolveP12 <- function(p, gwasStudy, qStudy, qContext) {
+.colocResolveP12 <- function(p, gInfo, q) {
     if (!p$useEnrichment) {
         return(list(enRow = NA_real_, p12Used = p$p12))
     }
-    enRow <- .colocLookupEnrichment(p$enrichment, gwasStudy, qStudy, qContext)
+    enRow <- .colocLookupEnrichment(p$enrichment, gInfo, q)
     if (is.na(enRow)) {
         msg <- glue(
             "colocPipeline: no enrichment entry for ",
-            "(gwasStudy='{gwasStudy}', qtlStudy='{qStudy}', ",
-            "qtlContext='{qContext}'); using baseline p12."
+            "(gwasStudy='{gInfo$study}', qtlStudy='{q$study}', ",
+            "qtlContext='{q$context}'); using baseline p12."
         )
         warn(msg)
         enRow <- 0
@@ -407,10 +465,8 @@ colocPipeline <- function(
         exec(coloc::coloc.bf_bf, !!!colocArgs),
         error = function(e) {
             msg <- glue(
-                "colocPipeline: coloc.bf_bf failed for QTL ",
-                "(study='{q$study}', context='{q$context}', ",
-                "trait='{q$trait}', method='{q$method}') x GWAS ",
-                "(study='{gInfo$study}', method='{gInfo$method}'): ",
+                "colocPipeline: coloc.bf_bf failed for ",
+                "{q$label} x {gInfo$label}: ",
                 "{conditionMessage(e)}"
             )
             warn(msg)
@@ -429,6 +485,8 @@ colocPipeline <- function(
     sm$trait <- q$trait
     sm$method <- q$method
     sm$gwasStudy <- gInfo$study
+    sm$gwasContext <- gInfo$context
+    sm$gwasTrait <- gInfo$trait
     sm$gwasMethod <- gInfo$method
     # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is exactly
     # what retainedMass runs parallel to -- so the mass reported here is the
@@ -471,7 +529,7 @@ colocPipeline <- function(
 # @noRd
 .colocFinalize <- function(results, p) {
     out <- .colocAssemble(results, p$useEnrichment, .colocLdSketch(p))
-    if (p$returnGwasFineMapping && methods::is(p$gwasInput, "GwasSumStats")) {
+    if (p$returnGwasFineMapping && methods::is(p$gwasInput, "SumStatsBase")) {
         attr(out, "gwasFineMapping") <- p$gwasFmr
     }
     out
@@ -497,6 +555,8 @@ colocPipeline <- function(
         "trait",
         "method",
         "gwasStudy",
+        "gwasContext",
+        "gwasTrait",
         "gwasMethod",
         "blockId",
         "qtlCs",
@@ -710,10 +770,14 @@ colocPipeline <- function(
     lbfMatrix[, !is.na(colnames(lbfMatrix)), drop = FALSE]
 }
 
-# Build a per-GWAS-tuple LBF matrix list, keyed by "study|method".
-# Within each key we stack multiple FMR rows row-wise (the legacy
-# "combined GWAS LBF" pattern), drop NA columns, and replace NAs with
-# 0 so a fresh QTL pairing always lands on the same coordinate frame.
+# The second side's LBF matrices, one record per row of the collection, each
+# carrying the row's identity so the pair it scores can be named.
+#
+# One record per ROW rather than per identity key: a QTL second side has many
+# rows sharing (study, method, block) and differing only on context / trait, so
+# keying on the GWAS 2-tuple would let one trait's matrix silently replace
+# another's. Nothing downstream indexes this list by name, so positional
+# records make the collision impossible instead of merely unlikely.
 # @noRd
 .colocPreextractGwasLbf <- function(
     gwasFmr,
@@ -722,39 +786,59 @@ colocPipeline <- function(
     filterLbfCsConcentration,
     priorTol
 ) {
-    keys <- str_c(
-        as.character(gwasFmr$study),
-        as.character(gwasFmr$method),
-        as.character(.colocGwasBlockIds(gwasFmr)),
-        sep = "||"
+    if (nrow(gwasFmr) == 0L) {
+        return(list())
+    }
+    compact(map(
+        seq_len(nrow(gwasFmr)),
+        .colocGwasLbfAt,
+        gwasFmr = gwasFmr,
+        blockIds = .colocGwasBlockIds(gwasFmr),
+        side = .fmrSideName(gwasFmr),
+        filterLbfCs = filterLbfCs,
+        filterLbfCsSecondary = filterLbfCsSecondary,
+        filterLbfCsConcentration = filterLbfCsConcentration,
+        priorTol = priorTol
+    ))
+}
+
+# One second-side row's LBF matrix plus its identity, or NULL when the row has
+# no usable LBF.
+# @noRd
+.colocGwasLbfAt <- function(
+    ri,
+    gwasFmr,
+    blockIds,
+    side,
+    filterLbfCs,
+    filterLbfCsSecondary,
+    filterLbfCsConcentration,
+    priorTol
+) {
+    ident <- .colocTupleIdentity(gwasFmr, ri)
+    blockId <- blockIds[[ri]]
+    label <- .fmrTupleLabel(side, ident, block = blockId)
+    info <- .colocExtractLbfFromEntry(
+        .fmrRowParts(gwasFmr, ri),
+        filterLbfCs,
+        filterLbfCsSecondary,
+        filterLbfCsConcentration,
+        priorTol,
+        label = label
     )
-    out <- list()
-    for (ri in seq_len(nrow(gwasFmr))) {
-        parts <- str_split(keys[[ri]], "\\|\\|")[[1L]]
-        info <- .colocExtractLbfFromEntry(
-            .fmrRowParts(gwasFmr, ri),
-            filterLbfCs,
-            filterLbfCsSecondary,
-            filterLbfCsConcentration,
-            priorTol,
-            label = glue(
-                "GWAS (study='{parts[[1L]]}', method='{parts[[2L]]}', ",
-                "block='{parts[[3L]]}')"
-            )
-        )
-        if (is.null(info)) {
-            next
-        }
-        out[[keys[[ri]]]] <- list(
+    if (is.null(info)) {
+        return(NULL)
+    }
+    c(
+        ident,
+        list(
             lbf = info$lbf,
             retainedMass = info$retainedMass,
             effect = info$effect,
-            study = parts[[1L]],
-            method = parts[[2L]],
-            blockId = parts[[3L]]
+            blockId = blockId,
+            label = label
         )
-    }
-    out
+    )
 }
 
 # The LD block each GWAS fine-mapping row was computed on. The element's own
@@ -807,6 +891,8 @@ colocPipeline <- function(
         trait = character(0),
         method = character(0),
         gwasStudy = character(0),
+        gwasContext = character(0),
+        gwasTrait = character(0),
         gwasMethod = character(0),
         blockId = character(0),
         qtlCs = integer(0),
@@ -829,26 +915,52 @@ colocPipeline <- function(
     ColocResult(base, list(), ldSketch = ldSketch)
 }
 
-# Look up the enrichment factor for a (gwasStudy, qtlStudy, qtlContext)
-# triple in the user-supplied enrichment table. Returns NA when the
-# triple is not present; the caller falls back to the baseline p12 and
-# emits a warning.
+# Look up this pair's enrichment factor in the user-supplied enrichment table.
+#
+# The join uses whichever identity columns the table carries: the
+# (gwasStudy, qtlStudy, qtlContext) triple always, plus gwasContext /
+# gwasTrait when qtlEnrichmentPipeline ran with a QTL outcome side. Without
+# those two, one study's molecular traits are indistinguishable in the table
+# and every one of them would take the same row. Returns NA when the pair is
+# not present; the caller falls back to the baseline p12 and warns.
 # @noRd
-.colocLookupEnrichment <- function(
-    enrichment,
-    gwasStudy,
-    qtlStudy,
-    qtlContext
-) {
-    idx <- which(
-        as.character(enrichment$gwasStudy) == gwasStudy &
-            as.character(enrichment$qtlStudy) == qtlStudy &
-            as.character(enrichment$qtlContext) == qtlContext
+.colocLookupEnrichment <- function(enrichment, gInfo, q) {
+    wanted <- .colocEnrichmentKey(enrichment, gInfo, q)
+    hits <- map(
+        names(wanted),
+        .colocEnrichmentColumnMatches,
+        enrichment = enrichment,
+        wanted = wanted
     )
+    idx <- which(reduce(hits, `&`))
     if (length(idx) == 0L) {
         return(NA_real_)
     }
     as.numeric(enrichment$enrichment[[idx[[1L]]]])
+}
+
+# The identity a pair is looked up by, narrowed to the columns the table has.
+# @noRd
+.colocEnrichmentKey <- function(enrichment, gInfo, q) {
+    wanted <- list(
+        gwasStudy = gInfo$study,
+        gwasContext = gInfo$context,
+        gwasTrait = gInfo$trait,
+        qtlStudy = q$study,
+        qtlContext = q$context
+    )
+    wanted[is_in(names(wanted), colnames(enrichment))]
+}
+
+# One key column's row match. An axis neither side has is NA on both, and
+# matches -- `==` would evaluate to NA there and drop every row.
+# @noRd
+.colocEnrichmentColumnMatches <- function(column, enrichment, wanted) {
+    values <- as.character(enrichment[[column]])
+    if (is.na(wanted[[column]])) {
+        return(is.na(values))
+    }
+    !is.na(values) & values == wanted[[column]]
 }
 
 # Ensure each row data.frame from coloc.bf_bf carries the standard PP
@@ -901,10 +1013,11 @@ colocPipeline <- function(
 # The variant ids of one fine-mapping entry (S4 slot; not pluckable by name).
 # @noRd
 
-# Score the QTL LBF against GWAS pair `gKey` -> a summary row (or NULL).
+# Score the first side's LBF against one second-side record -> a summary row
+# (or NULL).
 # @noRd
-.colocScorePairAt <- function(gKey, qLbfInfo, p, q) {
-    .colocScorePair(qLbfInfo$lbf, p$gwasLbfByPair[[gKey]], q, p)
+.colocScorePairAt <- function(gInfo, qLbfInfo, p, q) {
+    .colocScorePair(qLbfInfo$lbf, gInfo, q, p)
 }
 
 # TRUE when a credible set has fewer than `maxSize` variants.

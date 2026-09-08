@@ -10,8 +10,8 @@ mvsusieRssWeights(
   mvsusieRssFit = NULL,
   priorVariance = NULL,
   residualVariance = NULL,
-  L = 30,
-  LGreedy = 5,
+  L = 10,
+  LGreedy = NULL,
   retainFit = FALSE,
   ...
 )
@@ -30,9 +30,12 @@ ncol(stat$z)}.}
 
 \item{residualVariance}{Optional residual covariance matrix.}
 
-\item{L}{Maximum number of single effects (default 30).}
+\item{L}{Maximum number of single effects. Default \code{10}, matching
+\code{mvsusieR::mvsusie}.}
 
-\item{LGreedy}{Initial greedy effect count (default 5).}
+\item{LGreedy}{Integer or \code{NULL}. Number of greedily-added effects.
+\code{NULL} (default) disables the greedy loop and fits \code{L}
+directly.}
 
 \item{retainFit}{If TRUE, attaches the fitted object as an attribute.}
 

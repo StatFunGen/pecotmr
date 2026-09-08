@@ -9,14 +9,16 @@
     gwasCs = 1L,
     blockId = "chr1_1_1000",
     pp4 = 0.6,
-    trait = "g1"
+    trait = "g1",
+    gwasTrait = NA_character_
 ) {
     n <- max(
         length(qtlCs),
         length(gwasCs),
         length(blockId),
         length(pp4),
-        length(trait)
+        length(trait),
+        length(gwasTrait)
     )
     data.frame(
         study = "s1",
@@ -24,6 +26,8 @@
         trait = trait,
         method = "susie",
         gwasStudy = "G1",
+        gwasContext = NA_character_,
+        gwasTrait = gwasTrait,
         gwasMethod = "susie",
         blockId = blockId,
         qtlCs = as.integer(qtlCs),
@@ -139,6 +143,17 @@ test_that("getColocGenes: keeps distinct genes apart", {
     expect_setequal(genes$trait, c("g1", "g2"))
 })
 
+test_that("getColocGenes: keeps distinct second-side traits apart", {
+    # A QTL-QTL colocalization has a trait axis on BOTH sides. Grouping on the
+    # second side's study alone would pool two molecular phenotypes into one
+    # unit and noisy-OR their posteriors together.
+    pairs <- .cr_pairs(gwasTrait = c("h1", "h2"), pp4 = c(0.5, 0.25))
+    x <- ColocResult(pairs, .cr_variants(2L))
+    genes <- getColocGenes(x)
+    expect_equal(nrow(genes), 2L)
+    expect_setequal(genes$gwasTrait, c("h1", "h2"))
+})
+
 test_that("getColocVariants(pooled): pools by the same rule as genes", {
     pairs <- .cr_pairs(
         qtlCs = c(1L, 2L),
@@ -244,8 +259,8 @@ test_that(".crFirstAtLeast: absorbs floating-point error, not real shortfall", {
 test_that("show summarizes the pairs, studies and best PP.H4", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
     expect_output(show(x), "ColocResult with 1 colocalized pair\\(s\\)")
-    expect_output(show(x), "QTL studies")
-    expect_output(show(x), "GWAS studies")
+    expect_output(show(x), "studies")
+    expect_output(show(x), "paired with")
     expect_output(show(x), "variants")
     expect_output(show(x), "max PP.H4")
 })

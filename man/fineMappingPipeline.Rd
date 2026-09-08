@@ -28,8 +28,8 @@ fineMappingPipeline(data, ...)
   jointRegions = FALSE,
   jointSpecification = NULL,
   addSusieInf = TRUE,
-  L = 20L,
-  Lgreedy = 5L,
+  L = 10L,
+  Lgreedy = NULL,
   coverage = 0.95,
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
@@ -135,8 +135,8 @@ fineMappingPipeline(data, ...)
   data,
   methods,
   addSusieInf = TRUE,
-  L = 20L,
-  Lgreedy = 5L,
+  L = 10L,
+  Lgreedy = NULL,
   coverage = 0.95,
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
@@ -251,10 +251,11 @@ alongside \code{susie} and/or \code{susieAsh}, controls whether the
 SuSiE-inf fit initialises the chained downstream method(s). Default
 \code{TRUE}.}
 
-\item{L}{Integer. Maximum number of SuSiE single effects. Default \code{20}.}
+\item{L}{Integer. Maximum number of SuSiE single effects. Default \code{10}.}
 
-\item{Lgreedy}{Integer. Number of greedily-added effects in the SuSiE-inf
-refinement. Default \code{5}.}
+\item{Lgreedy}{Integer or \code{NULL}. Number of greedily-added effects in the
+SuSiE-inf refinement (the greedy-L loop). \code{NULL} (default) disables the
+greedy loop and fits \code{L} directly.}
 
 \item{coverage}{Primary credible-set coverage (numeric, length 1). Default
 \code{0.95}.}

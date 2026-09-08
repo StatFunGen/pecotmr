@@ -33,6 +33,51 @@
     mcols(x)[[k]]
 }
 
+# ---- flavour-agnostic identity reads ----------------------------------------
+# `context` and `trait` are QTL-only axes: a GwasFineMappingResult is keyed by
+# (study, method) alone. Pipelines that pair the two flavours -- colocPipeline,
+# qtlEnrichmentPipeline -- need "this side has no context" as a VALUE, so these
+# report an absent axis as NA instead of erroring on a missing column.
+
+# One identity column of a collection, as character, NA-filled when the
+# collection has no such axis (length always matches the collection).
+# @noRd
+.fmrIdentityColumn <- function(x, column) {
+    values <- .tupleColumn(x, column)
+    if (is.null(values)) {
+        return(rep(NA_character_, nrow(x)))
+    }
+    as.character(values)
+}
+
+# The same, for a single row. Indexed before coercion so reading one row does
+# not convert the whole column.
+# @noRd
+.fmrIdentityAt <- function(x, column, i) {
+    values <- .tupleColumn(x, column)
+    if (is.null(values)) {
+        return(NA_character_)
+    }
+    as.character(values[[i]])
+}
+
+# Which flavour of fine-mapping collection a side is, for messages.
+# @noRd
+.fmrSideName <- function(x) {
+    if (methods::is(x, "QtlFineMappingResult")) "QTL" else "GWAS"
+}
+
+# A human-readable identity for warnings: the side's flavour plus the identity
+# fields it actually carries (the axes a GWAS side does not have are dropped
+# rather than reported as NA).
+# @noRd
+.fmrTupleLabel <- function(side, ident, block = NULL) {
+    fields <- compact(c(ident, list(block = block)))
+    fields <- fields[!map_lgl(fields, is.na)]
+    shown <- str_c(names(fields), "='", unlist(fields), "'")
+    glue("{side} ({str_flatten(shown, ', ')})")
+}
+
 # One collection ELEMENT, whichever shape `x` has. On a RangedTupleList the
 # elements are the container itself; the DFrame-backed collections still keep
 # them in an `entry` column. Both shapes coexist until every collection has

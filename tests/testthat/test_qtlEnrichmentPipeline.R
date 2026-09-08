@@ -5,6 +5,20 @@ context("qtlEnrichmentPipeline")
 # small fixture, but the heavy mixture-of-enrichment estimator never fires.
 # ===========================================================================
 
+# The internal builders take an identity list keyed by the collection's own
+# columns; the axes a GWAS collection lacks are NA.
+.qep_gwasIdent <- function(
+    study,
+    context = NA_character_,
+    trait = NA_character_
+) {
+    list(study = study, context = context, trait = trait)
+}
+
+.qep_qtlIdent <- function(study, context) {
+    list(study = study, context = context)
+}
+
 .qep_makeHandle <- function(
     snp_n = 6L,
     n_samples = 30L,
@@ -101,15 +115,161 @@ context("qtlEnrichmentPipeline")
 }
 
 # Mock that returns a plausible enrichment list.
+# The shape qtlEnrichment() really returns: the C++ estimator's own field
+# names (src/qtl_enrichment.h), not the pipeline's output columns. A mock that
+# invented the output names is what let a total field-name mismatch --
+# every estimate NA on real data -- sit undetected.
+#
+# `value` is the enrichment the pipeline should REPORT, so it is encoded here
+# as the log-odds the estimator would have produced for it.
 .qep_mockEnrichment <- function(value = 1.5) {
+    logOdds <- log1p(value)
     function(gwasPip, susieQtlRegions, ...) {
         list(
-            enrichment = value,
-            enrichmentSe = 0.1,
-            enrichmentLogOdds = log(value)
+            "Intercept" = -6.5,
+            "sd (intercept)" = 0.5,
+            "Enrichment (no shrinkage)" = logOdds,
+            "Enrichment (w/ shrinkage)" = logOdds,
+            "sd (no shrinkage)" = 0.2,
+            "sd (w/ shrinkage)" = 0.1,
+            "Alternative (coloc) p1" = 1e-4,
+            "Alternative (coloc) p2" = 1e-4,
+            "Alternative (coloc) p12" = 5e-6,
+            "Effective MI rounds" = 25,
+            unused_xqtl_variants = list()
         )
     }
 }
+
+# ===========================================================================
+# End-to-end against the real estimator (no mock)
+# ===========================================================================
+
+test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
+    # Unmocked on purpose. The C++ kernel's field names are the contract, and
+    # a mismatch between them and this pipeline's output columns is invisible
+    # to a mocked run -- which is how every estimate came back NA on real data
+    # while the mocked tests stayed green.
+    ids <- sprintf("chr1:%d:A:G", 100L * seq_len(50L))
+    gwasPip <- rep(0.01, 50L)
+    gwasPip[c(5L, 20L, 35L)] <- c(0.8, 0.6, 0.9)
+    alpha <- matrix(0.001, nrow = 2L, ncol = 50L)
+    alpha[1L, 5L] <- 0.95
+    alpha[2L, 20L] <- 0.95
+    alpha <- alpha / rowSums(alpha)
+    sketch <- .qep_makeHandle()
+    gfmr <- GwasFineMappingResult(
+        study = "G1",
+        method = "susie",
+        entry = list(fineMappingRow(
+            variantIds = ids,
+            susieFit = list(
+                alpha = matrix(1 / 50, nrow = 1L, ncol = 50L),
+                pip = setNames(gwasPip, ids),
+                V = 0.5
+            ),
+            topLoci = data.frame(variant_id = ids, pip = gwasPip)
+        )),
+        ldSketch = sketch
+    )
+    qfmr <- QtlFineMappingResult(
+        study = "Q1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(fineMappingRow(
+            variantIds = ids,
+            susieFit = list(
+                alpha = alpha,
+                pip = setNames(colSums(alpha), ids),
+                V = c(0.5, 0.3)
+            ),
+            topLoci = data.frame(variant_id = ids, pip = colSums(alpha))
+        )),
+        ldSketch = sketch
+    )
+    suppressWarnings(capture.output(
+        out <- qtlEnrichmentPipeline(
+            gwasFineMappingResult = gfmr,
+            qtlFineMappingResult = qfmr,
+            impN = 5,
+            seed = 1L
+        )
+    ))
+    expect_equal(nrow(out), 1L)
+    valueCols <- names(pecotmr:::.enrNaEnrichment())
+    expect_true(all(valueCols %in% colnames(out)))
+    expect_true(all(is.finite(unlist(out[, valueCols]))))
+    # The multiplicative factor and the log-odds must agree.
+    expect_equal(out$enrichment, expm1(out$enrichmentLogOdds))
+})
+
+# ===========================================================================
+# Either side may be a QTL or a GWAS fine-mapping result
+# ===========================================================================
+
+test_that("qtlEnrichmentPipeline: keys a QTL outcome side by its trait", {
+    # Two molecular traits over the same variants with DIFFERENT pips. Keyed by
+    # study alone they collide -- the pipeline would abort on conflicting PIPs
+    # -- and one estimate would stand in for both traits.
+    outcome <- QtlFineMappingResult(
+        study = c("Q1", "Q1"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t2"),
+        method = c("susie", "susie"),
+        entry = list(
+            .qep_makeFmEntry(pip = c(0.9, 0.05, 0.02, 0.02, 0.01)),
+            .qep_makeFmEntry(pip = c(0.1, 0.7, 0.1, 0.05, 0.05))
+        ),
+        ldSketch = .qep_makeHandle()
+    )
+    local_mocked_bindings(
+        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .package = "pecotmr"
+    )
+    out <- qtlEnrichmentPipeline(
+        gwasFineMappingResult = outcome,
+        qtlFineMappingResult = .qep_makeQtlFmr()
+    )
+    expect_equal(nrow(out), 2L)
+    expect_setequal(out$gwasStudy, "Q1")
+    expect_setequal(out$gwasContext, "c1")
+    expect_setequal(out$gwasTrait, c("t1", "t2"))
+})
+
+test_that("qtlEnrichmentPipeline: pairs two GWAS collections", {
+    local_mocked_bindings(
+        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .package = "pecotmr"
+    )
+    out <- qtlEnrichmentPipeline(
+        gwasFineMappingResult = .qep_makeGwasFmr(studies = "G1"),
+        qtlFineMappingResult = .qep_makeGwasFmr(studies = "G2")
+    )
+    expect_equal(nrow(out), 1L)
+    expect_equal(out$gwasStudy, "G1")
+    expect_equal(out$qtlStudy, "G2")
+    # Neither side has a context or trait axis, so all three read NA.
+    expect_true(all(is.na(c(
+        out$gwasContext,
+        out$gwasTrait,
+        out$qtlContext
+    ))))
+})
+
+test_that("qtlEnrichmentPipeline: a QTL outcome side may carry no ldSketch", {
+    # The RSS-derived requirement is a GWAS-side contract; an individual-level
+    # QTL outcome has no panel to check.
+    local_mocked_bindings(
+        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .package = "pecotmr"
+    )
+    out <- qtlEnrichmentPipeline(
+        gwasFineMappingResult = .qep_makeQtlFmr(with_sketch = FALSE),
+        qtlFineMappingResult = .qep_makeQtlFmr()
+    )
+    expect_equal(nrow(out), 1L)
+})
 
 # ===========================================================================
 # Input-type validation
@@ -214,11 +374,7 @@ test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a con
     local_mocked_bindings(
         qtlEnrichment = function(gwasPip, susieQtlRegions, ...) {
             capturedRegions[[length(capturedRegions) + 1L]] <<- susieQtlRegions
-            list(
-                enrichment = 2.0,
-                enrichmentSe = 0.1,
-                enrichmentLogOdds = log(2)
-            )
+            .qep_mockEnrichment(2.0)()
         },
         .package = "pecotmr"
     )
@@ -282,11 +438,11 @@ test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema
         colnames(out),
         c(
             "gwasStudy",
+            "gwasContext",
+            "gwasTrait",
             "qtlStudy",
             "qtlContext",
-            "enrichment",
-            "enrichmentSe",
-            "enrichmentLogOdds"
+            names(pecotmr:::.enrNaEnrichment())
         )
     )
 })
@@ -297,7 +453,7 @@ test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema
 
 test_that(".enrBuildGwasPipVector: extracts pip per study", {
     gfmr <- .qep_makeGwasFmr()
-    out <- pecotmr:::.enrBuildGwasPipVector(gfmr, "G1")
+    out <- pecotmr:::.enrBuildGwasPipVector(gfmr, .qep_gwasIdent("G1"))
     expect_equal(length(out), 3L)
     expect_setequal(names(out), sprintf("chr1:%d:A:G", 100L * (1:3)))
 })
@@ -321,7 +477,7 @@ test_that(".enrBuildGwasPipVector: deduplicates identical PIPs across blocks", {
         entry = list(e1, e2),
         ldSketch = .qep_makeHandle()
     )
-    out <- pecotmr:::.enrBuildGwasPipVector(g, "G1")
+    out <- pecotmr:::.enrBuildGwasPipVector(g, .qep_gwasIdent("G1"))
     expect_setequal(
         names(out),
         c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
@@ -351,14 +507,14 @@ test_that(".enrBuildGwasPipVector: conflicting PIPs across blocks errors", {
         ldSketch = .qep_makeHandle()
     )
     expect_error(
-        pecotmr:::.enrBuildGwasPipVector(g, "G1"),
+        pecotmr:::.enrBuildGwasPipVector(g, .qep_gwasIdent("G1")),
         "conflicting PIPs"
     )
 })
 
 test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes for a (study, context) hit", {
     qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
-    out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")
+    out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, .qep_qtlIdent("Q1", "c1"))
     expect_equal(length(out), 1L)
     expect_true(!is.null(out[[1L]]$alpha))
     expect_true(!is.null(out[[1L]]$pip))
@@ -368,12 +524,18 @@ test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context)
     qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
     # Correct context but wrong study -> no hit, even though context exists.
     expect_equal(
-        length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q_ghost", "c1")),
+        length(pecotmr:::.enrBuildQtlRegionsList(
+            qfmr,
+            .qep_qtlIdent("Q_ghost", "c1")
+        )),
         0L
     )
     # Correct study but wrong context.
     expect_equal(
-        length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c_ghost")),
+        length(pecotmr:::.enrBuildQtlRegionsList(
+            qfmr,
+            .qep_qtlIdent("Q1", "c_ghost")
+        )),
         0L
     )
 })
@@ -435,7 +597,9 @@ test_that("qtlEnrichment: real C++ kernel returns the expected keys (numGwas + p
         verbose = FALSE
     )
     expect_type(res, "list")
-    en <- res[[1L]]
+    # Flat, and addressable by name: the estimates used to sit inside an
+    # unnamed first element, where every by-name read of them returned NULL.
+    en <- res
     expectedKeys <- c(
         "Intercept",
         "Enrichment (no shrinkage)",
@@ -448,6 +612,30 @@ test_that("qtlEnrichment: real C++ kernel returns the expected keys (numGwas + p
     )
     expect_setequal(intersect(expectedKeys, names(en)), expectedKeys)
     expect_true(all(is.finite(unlist(en[expectedKeys]))))
+})
+
+test_that("qtlEnrichment: a single MI round is estimable, not NaN", {
+    # With one round the Bessel-corrected dispersion is 0/0, so no
+    # |x - mean| <= 3 * NaN comparison held, the outlier filter dropped the
+    # only round, and dividing by (m - 1) = 0 made every estimate NaN.
+    fx <- .qep_makeRealKernelInputs()
+    res <- qtlEnrichment(
+        gwasPip = fx$gwasPip,
+        susieQtlRegions = fx$susieQtlRegions,
+        numGwas = 5000,
+        piQtl = 0.5,
+        impN = 1,
+        numThreads = 1,
+        verbose = FALSE,
+        seed = 1L
+    )
+    expect_equal(res[["Effective MI rounds"]], 1)
+    expect_true(all(is.finite(c(
+        res[["Enrichment (w/ shrinkage)"]],
+        res[["sd (w/ shrinkage)"]],
+        res[["Intercept"]],
+        res[["Alternative (coloc) p12"]]
+    ))))
 })
 
 test_that("qtlEnrichment: numGwas omitted -> estimates piGwas from data + warns", {
@@ -620,80 +808,38 @@ test_that("qtlEnrichment: alignNames=FALSE recomputes only the unmatched set", {
 # .enrFlattenEnrichment(): shape coercion + NA fallbacks
 # ===========================================================================
 
-test_that(".enrFlattenEnrichment: numeric scalar falls back to all-NA", {
-    out <- pecotmr:::.enrFlattenEnrichment(1.5)
-    expect_equal(
-        out,
-        list(
-            enrichment = NA_real_,
-            enrichmentSe = NA_real_,
-            enrichmentLogOdds = NA_real_
-        )
-    )
-})
-
-test_that(".enrFlattenEnrichment: plain list picks named scalar fields", {
-    out <- pecotmr:::.enrFlattenEnrichment(
-        list(enrichment = 2.0, enrichmentSe = 0.1, enrichmentLogOdds = log(2))
-    )
+test_that(".enrFlattenEnrichment: reads the estimator's own field names", {
+    out <- pecotmr:::.enrFlattenEnrichment(.qep_mockEnrichment(2.0)())
+    # enrichment is expm1 of the log-odds, so colocPipeline's
+    # p12 * (1 + enrichment) is the enloc prior p12 * exp(a1).
     expect_equal(out$enrichment, 2.0)
+    expect_equal(out$enrichmentLogOdds, log(3))
     expect_equal(out$enrichmentSe, 0.1)
-    expect_equal(out$enrichmentLogOdds, log(2))
+    expect_equal(out$enrichmentSeNoShrinkage, 0.2)
+    expect_equal(out$intercept, -6.5)
+    expect_equal(out$colocP12, 5e-6)
+    expect_equal(out$effectiveMiRounds, 25)
 })
 
-test_that(".enrFlattenEnrichment: non-empty matrix picks columns by name", {
-    m <- matrix(c(2.0, 0.1, log(2)), nrow = 1)
-    colnames(m) <- c("enrichment", "enrichmentSe", "enrichmentLogOdds")
-    out <- pecotmr:::.enrFlattenEnrichment(m)
-    expect_equal(out$enrichment, 2.0)
-    expect_equal(out$enrichmentSe, 0.1)
-    expect_equal(out$enrichmentLogOdds, log(2))
+test_that(".enrFlattenEnrichment: a zero log-odds leaves p12 unscaled", {
+    mock <- .qep_mockEnrichment(2.0)()
+    mock[["Enrichment (w/ shrinkage)"]] <- 0
+    expect_equal(pecotmr:::.enrFlattenEnrichment(mock)$enrichment, 0)
 })
 
-test_that(".enrFlattenEnrichment: empty data.frame falls back to all-NA", {
-    df <- data.frame(
-        enrichment = numeric(0),
-        enrichmentSe = numeric(0),
-        enrichmentLogOdds = numeric(0)
+test_that(".enrFlattenEnrichment: an unrecognized shape warns, not NAs", {
+    # Silent all-NA here is exactly the failure that hid a field-name
+    # mismatch between this pipeline and the C++ estimator.
+    expect_warning(
+        out <- pecotmr:::.enrFlattenEnrichment(1.5),
+        "returned no 'Enrichment \\(w/ shrinkage\\)' field"
     )
-    out <- pecotmr:::.enrFlattenEnrichment(df)
-    expect_equal(
-        out,
-        list(
-            enrichment = NA_real_,
-            enrichmentSe = NA_real_,
-            enrichmentLogOdds = NA_real_
-        )
+    expect_equal(out, pecotmr:::.enrNaEnrichment())
+    expect_warning(
+        out <- pecotmr:::.enrFlattenEnrichment(list(enrichment = 2.0)),
+        "returned no 'Enrichment"
     )
-})
-
-test_that(".enrFlattenEnrichment: non-empty data.frame resolves alternate column names", {
-    df <- data.frame(Enrichment = 3.0, se = 0.2, log_odds = 1.1)
-    out <- pecotmr:::.enrFlattenEnrichment(df)
-    expect_equal(out$enrichment, 3.0)
-    expect_equal(out$enrichmentSe, 0.2)
-    expect_equal(out$enrichmentLogOdds, 1.1)
-})
-
-
-# ===========================================================================
-# .enrPickColumn(): candidate column resolution
-# ===========================================================================
-
-test_that(".enrPickColumn: returns the first matching column's value", {
-    df <- data.frame(se = 0.5, enrichment = 2.5)
-    expect_equal(
-        pecotmr:::.enrPickColumn(df, c("enrichment", "Enrichment")),
-        2.5
-    )
-})
-
-test_that(".enrPickColumn: returns NA_real_ when no candidate matches", {
-    df <- data.frame(foo = 1, bar = 2)
-    expect_identical(
-        pecotmr:::.enrPickColumn(df, c("enrichment", "Enrichment")),
-        NA_real_
-    )
+    expect_true(is.na(out$enrichment))
 })
 
 
@@ -704,7 +850,7 @@ test_that(".enrPickColumn: returns NA_real_ when no candidate matches", {
 test_that(".enrBuildGwasPipVector: unknown study yields numeric(0)", {
     gfmr <- .qep_makeGwasFmr()
     expect_identical(
-        pecotmr:::.enrBuildGwasPipVector(gfmr, "GHOST"),
+        pecotmr:::.enrBuildGwasPipVector(gfmr, .qep_gwasIdent("GHOST")),
         numeric(0)
     )
 })
@@ -728,7 +874,10 @@ test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with
         entry = list(badEntry),
         ldSketch = .qep_makeHandle()
     )
-    expect_identical(pecotmr:::.enrBuildGwasPipVector(g, "G1"), numeric(0))
+    expect_identical(
+        pecotmr:::.enrBuildGwasPipVector(g, .qep_gwasIdent("G1")),
+        numeric(0)
+    )
 })
 
 
@@ -755,7 +904,10 @@ test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
         ldSketch = NULL
     )
     expect_equal(
-        length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")),
+        length(pecotmr:::.enrBuildQtlRegionsList(
+            qfmr,
+            .qep_qtlIdent("Q1", "c1")
+        )),
         0L
     )
 })
@@ -783,7 +935,10 @@ test_that(".enrBuildQtlRegionsList: skips a fit with no V and no prior_variance"
         ldSketch = NULL
     )
     expect_equal(
-        length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")),
+        length(pecotmr:::.enrBuildQtlRegionsList(
+            qfmr,
+            .qep_qtlIdent("Q1", "c1")
+        )),
         0L
     )
 })
@@ -811,7 +966,7 @@ test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's varian
         entry = list(entry),
         ldSketch = NULL
     )
-    out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")
+    out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, .qep_qtlIdent("Q1", "c1"))
     expect_equal(length(out), 1L)
     expect_equal(names(out[[1L]]$pip), c("chr1:100:A:G", "chr1:200:A:G"))
     expect_equal(out[[1L]]$prior_variance, 0.1)
@@ -838,7 +993,7 @@ test_that("qtlEnrichmentPipeline: empty QTL collection errors with the no-triple
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = qfmrEmpty
         ),
-        "triples to compute"
+        "pairs to compute"
     )
 })
 
@@ -897,7 +1052,7 @@ test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and i
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = qfmr
         ),
-        "no usable QTL regions"
+        "no usable regions"
     )
     expect_equal(nrow(out), 0L)
 })

@@ -10,8 +10,8 @@ mvsusieWeights(
   Y = NULL,
   priorVariance = NULL,
   residualVariance = NULL,
-  L = 30,
-  LGreedy = 5,
+  L = 10,
+  LGreedy = NULL,
   verbose = FALSE,
   ...
 )
@@ -27,9 +27,12 @@ mvsusieWeights(
 
 \item{residualVariance}{Optional residual variance matrix.}
 
-\item{L}{Maximum number of components.}
+\item{L}{Maximum number of components. Default \code{10}, matching
+\code{mvsusieR::mvsusie}.}
 
-\item{LGreedy}{Initial greedy number of components.}
+\item{LGreedy}{Integer or \code{NULL}. Number of greedily-added components.
+\code{NULL} (default) disables the greedy loop and fits \code{L}
+directly.}
 
 \item{verbose}{If TRUE, prints mvSuSiE fitting progress.}
 
