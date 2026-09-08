@@ -17,9 +17,9 @@ qtlEnrichmentPipeline(
 )
 }
 \arguments{
-\item{gwasFineMappingResult}{See above.}
+\item{gwasFineMappingResult}{The outcome side; see above.}
 
-\item{qtlFineMappingResult}{See above.}
+\item{qtlFineMappingResult}{The annotation side; see above.}
 
 \item{numGwas}{Number of GWAS variants used to estimate \code{piGwas}. When
 \code{NULL} (default) it is estimated from the data -- bias warning applies
@@ -44,41 +44,67 @@ if the input PIP vector is not genome-wide.}
 \item{...}{Additional arguments forwarded to \code{\link{qtlEnrichment}}.}
 }
 \value{
-A tibble with one row per (gwasStudy, qtlStudy, qtlContext)
-  triple and columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
-  \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds}, plus any
-  extras the underlying estimator emits. Suitable as the \code{enrichment}
-  argument to \code{\link{colocPipeline}} (which joins on the same triple).
+A tibble with one row per (outcome trait, annotation unit) pair.
+  The identity columns are \code{gwasStudy}, \code{gwasContext},
+  \code{gwasTrait}, \code{qtlStudy}, \code{qtlContext}; the axes a side does
+  not have are \code{NA} (\code{gwasContext} / \code{gwasTrait} for a GWAS
+  outcome, \code{qtlContext} for a GWAS annotation). Suitable as the
+  \code{enrichment} argument to \code{\link{colocPipeline}}, which joins on
+  those columns.
+
+  The estimates are \code{enrichmentLogOdds}, the enrichment parameter
+  \eqn{a_1} on the log-odds scale, with its standard error
+  \code{enrichmentSe}; \code{enrichment} is the same quantity as a
+  multiplicative factor, \eqn{e^{a_1} - 1}, which is what
+  \code{colocPipeline} scales \code{p12} by (so \eqn{a_1 = 0} leaves the
+  prior untouched). \code{enrichmentLogOddsNoShrinkage} and
+  \code{enrichmentSeNoShrinkage} are the same estimate before shrinkage,
+  \code{intercept} / \code{interceptSe} are \eqn{a_0}, and \code{colocP1},
+  \code{colocP2}, \code{colocP12} are the enrichment-informed coloc priors
+  the estimator derives from \eqn{(a_0, a_1)} -- an alternative to scaling
+  a baseline \code{p12}. \code{effectiveMiRounds} is how many
+  multiple-imputation rounds survived outlier filtering.
 }
 \description{
-Genome-wide pipeline that computes per-pair (GWAS study, QTL
-  context) enrichment estimates by passing the GWAS PIP vector and the QTL
+Genome-wide pipeline that computes per-pair enrichment
+  estimates by passing an outcome PIP vector and a set of annotation
   credible-set posteriors to \code{\link{qtlEnrichment}}. The returned table
   feeds \code{\link{colocPipeline}} via its \code{enrichment} argument.
 
+  Either side may be a \code{\link{QtlFineMappingResult}} or a
+  \code{\link{GwasFineMappingResult}}, so QTL-in-GWAS, QTL-in-QTL and
+  GWAS-in-GWAS enrichment all run through one code path. The argument names
+  keep the QTL / GWAS wording of the common case; what they mean generally
+  is that \code{gwasFineMappingResult} is the \strong{outcome} whose PIPs
+  are scanned and \code{qtlFineMappingResult} is the \strong{annotation}
+  whose region fits are tested for enrichment within them.
+
 \strong{Not gene-parallelisable}: the enrichment estimator runs over the full
-genome of GWAS PIPs and the full collection of QTL fits at once.
+genome of outcome PIPs and the full collection of annotation fits at once.
 }
 \section{Inputs}{
 
 \itemize{
-  \item \code{gwasFineMappingResult}: a genome-wide
-    \code{\link{GwasFineMappingResult}} (one row per (study, LD
-    block) tuple). Each entry's \code{FineMappingRow$trimmedFit}
-    must carry a \code{pip} vector.
-  \item \code{qtlFineMappingResult}: the genome-wide
-    \code{\link{QtlFineMappingResult}}. Each entry's
+  \item \code{gwasFineMappingResult}: the genome-wide outcome collection.
+    Each entry's \code{FineMappingRow$trimmedFit} must carry a \code{pip}
+    vector. One PIP vector is built per outcome trait -- keyed by
+    \code{study} for a GWAS collection (one trait per study) and by
+    (\code{study}, \code{context}, \code{trait}) for a QTL one, since a
+    variant's PIP differs between molecular traits and pooling them would
+    collide.
+  \item \code{qtlFineMappingResult}: the annotation collection. Each entry's
     \code{trimmedFit} must carry \code{alpha}, \code{pip}, and
-    prior-variance fields (\code{V}).
+    prior-variance fields (\code{V}). Its region fits are pooled per
+    (\code{study}, \code{context}) -- per \code{study} alone for a GWAS
+    collection, which has no context axis.
 }
 }
 
 \section{LD-sketch identity check}{
- The GWAS \code{FineMappingResultBase} must
-  have a non-NULL \code{ldSketch} (RSS-derived). If the QTL FMR also has a
-  non-NULL \code{ldSketch}, the two must match exactly. When the QTL FMR's
-  \code{ldSketch} is NULL (individual-level QTL fit), validation is skipped
-  on the QTL side.
+ A GWAS outcome collection must have a
+  non-NULL \code{ldSketch} (it should be RSS-derived). Where both sides
+  carry one, the two must match exactly; a \code{NULL} on either side (an
+  individual-level fit) skips the check.
 }
 
 \examples{

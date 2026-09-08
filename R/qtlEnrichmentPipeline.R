@@ -1,32 +1,43 @@
 #' @title QTL Enrichment Pipeline (Genome-Wide)
-#' @description Genome-wide pipeline that computes per-pair (GWAS study, QTL
-#'   context) enrichment estimates by passing the GWAS PIP vector and the QTL
+#' @description Genome-wide pipeline that computes per-pair enrichment
+#'   estimates by passing an outcome PIP vector and a set of annotation
 #'   credible-set posteriors to \code{\link{qtlEnrichment}}. The returned table
 #'   feeds \code{\link{colocPipeline}} via its \code{enrichment} argument.
 #'
+#'   Either side may be a \code{\link{QtlFineMappingResult}} or a
+#'   \code{\link{GwasFineMappingResult}}, so QTL-in-GWAS, QTL-in-QTL and
+#'   GWAS-in-GWAS enrichment all run through one code path. The argument names
+#'   keep the QTL / GWAS wording of the common case; what they mean generally
+#'   is that \code{gwasFineMappingResult} is the \strong{outcome} whose PIPs
+#'   are scanned and \code{qtlFineMappingResult} is the \strong{annotation}
+#'   whose region fits are tested for enrichment within them.
+#'
 #' \strong{Not gene-parallelisable}: the enrichment estimator runs over the full
-#' genome of GWAS PIPs and the full collection of QTL fits at once.
+#' genome of outcome PIPs and the full collection of annotation fits at once.
 #'
 #' @section Inputs:
 #' \itemize{
-#'   \item \code{gwasFineMappingResult}: a genome-wide
-#'     \code{\link{GwasFineMappingResult}} (one row per (study, LD
-#'     block) tuple). Each entry's \code{FineMappingRow$trimmedFit}
-#'     must carry a \code{pip} vector.
-#'   \item \code{qtlFineMappingResult}: the genome-wide
-#'     \code{\link{QtlFineMappingResult}}. Each entry's
+#'   \item \code{gwasFineMappingResult}: the genome-wide outcome collection.
+#'     Each entry's \code{FineMappingRow$trimmedFit} must carry a \code{pip}
+#'     vector. One PIP vector is built per outcome trait -- keyed by
+#'     \code{study} for a GWAS collection (one trait per study) and by
+#'     (\code{study}, \code{context}, \code{trait}) for a QTL one, since a
+#'     variant's PIP differs between molecular traits and pooling them would
+#'     collide.
+#'   \item \code{qtlFineMappingResult}: the annotation collection. Each entry's
 #'     \code{trimmedFit} must carry \code{alpha}, \code{pip}, and
-#'     prior-variance fields (\code{V}).
+#'     prior-variance fields (\code{V}). Its region fits are pooled per
+#'     (\code{study}, \code{context}) -- per \code{study} alone for a GWAS
+#'     collection, which has no context axis.
 #' }
 #'
-#' @section LD-sketch identity check: The GWAS \code{FineMappingResultBase} must
-#'   have a non-NULL \code{ldSketch} (RSS-derived). If the QTL FMR also has a
-#'   non-NULL \code{ldSketch}, the two must match exactly. When the QTL FMR's
-#'   \code{ldSketch} is NULL (individual-level QTL fit), validation is skipped
-#'   on the QTL side.
+#' @section LD-sketch identity check: A GWAS outcome collection must have a
+#'   non-NULL \code{ldSketch} (it should be RSS-derived). Where both sides
+#'   carry one, the two must match exactly; a \code{NULL} on either side (an
+#'   individual-level fit) skips the check.
 #'
-#' @param gwasFineMappingResult See above.
-#' @param qtlFineMappingResult See above.
+#' @param gwasFineMappingResult The outcome side; see above.
+#' @param qtlFineMappingResult The annotation side; see above.
 #' @param numGwas Number of GWAS variants used to estimate \code{piGwas}. When
 #'   \code{NULL} (default) it is estimated from the data -- bias warning applies
 #'   if the input PIP vector is not genome-wide.
@@ -42,11 +53,26 @@
 #'   \code{\link{qtlEnrichment}} for reproducible multiple imputation.
 #'   \code{NULL} (default) draws a nondeterministic seed.
 #' @param ... Additional arguments forwarded to \code{\link{qtlEnrichment}}.
-#' @return A tibble with one row per (gwasStudy, qtlStudy, qtlContext)
-#'   triple and columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
-#'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds}, plus any
-#'   extras the underlying estimator emits. Suitable as the \code{enrichment}
-#'   argument to \code{\link{colocPipeline}} (which joins on the same triple).
+#' @return A tibble with one row per (outcome trait, annotation unit) pair.
+#'   The identity columns are \code{gwasStudy}, \code{gwasContext},
+#'   \code{gwasTrait}, \code{qtlStudy}, \code{qtlContext}; the axes a side does
+#'   not have are \code{NA} (\code{gwasContext} / \code{gwasTrait} for a GWAS
+#'   outcome, \code{qtlContext} for a GWAS annotation). Suitable as the
+#'   \code{enrichment} argument to \code{\link{colocPipeline}}, which joins on
+#'   those columns.
+#'
+#'   The estimates are \code{enrichmentLogOdds}, the enrichment parameter
+#'   \eqn{a_1} on the log-odds scale, with its standard error
+#'   \code{enrichmentSe}; \code{enrichment} is the same quantity as a
+#'   multiplicative factor, \eqn{e^{a_1} - 1}, which is what
+#'   \code{colocPipeline} scales \code{p12} by (so \eqn{a_1 = 0} leaves the
+#'   prior untouched). \code{enrichmentLogOddsNoShrinkage} and
+#'   \code{enrichmentSeNoShrinkage} are the same estimate before shrinkage,
+#'   \code{intercept} / \code{interceptSe} are \eqn{a_0}, and \code{colocP1},
+#'   \code{colocP2}, \code{colocP12} are the enrichment-informed coloc priors
+#'   the estimator derives from \eqn{(a_0, a_1)} -- an alternative to scaling
+#'   a baseline \code{p12}. \code{effectiveMiRounds} is how many
+#'   multiple-imputation rounds survived outlier filtering.
 #' @examples
 #' data(gwasFineMappingExample)
 #' data(qtlFineMappingExample)
@@ -70,56 +96,79 @@ qtlEnrichmentPipeline <- function(
     p <- as.list(environment())
     p$dots <- list(...)
     p <- .enrPrepare(p)
-    results <- list_flatten(map(p$gwasStudies, .enrScoreGwasStudy, p = p))
+    results <- list_flatten(map(
+        seq_len(nrow(p$gwasTuples)),
+        .enrScoreOutcomeTuple,
+        p = p
+    ))
     .enrAssemble(results)
 }
 
 # Validate the input classes + LD-sketch presence / identity.
 # @noRd
 .enrValidateInputs <- function(gwasFineMappingResult, qtlFineMappingResult) {
-    if (!methods::is(gwasFineMappingResult, "GwasFineMappingResult")) {
-        abort("`gwasFineMappingResult` must be a GwasFineMappingResult.")
+    if (!methods::is(gwasFineMappingResult, "FineMappingResultBase")) {
+        msg <- glue(
+            "`gwasFineMappingResult` must be a GwasFineMappingResult or a ",
+            "QtlFineMappingResult ",
+            "(got class '{class(gwasFineMappingResult)[[1L]]}')."
+        )
+        abort(msg)
     }
-    if (!methods::is(qtlFineMappingResult, "QtlFineMappingResult")) {
-        abort("`qtlFineMappingResult` must be a QtlFineMappingResult.")
+    if (!methods::is(qtlFineMappingResult, "FineMappingResultBase")) {
+        msg <- glue(
+            "`qtlFineMappingResult` must be a QtlFineMappingResult or a ",
+            "GwasFineMappingResult ",
+            "(got class '{class(qtlFineMappingResult)[[1L]]}')."
+        )
+        abort(msg)
     }
-    gwasLd <- getLdSketch(gwasFineMappingResult)
-    if (is.null(gwasLd)) {
+    outcomeLd <- getLdSketch(gwasFineMappingResult)
+    if (
+        is.null(outcomeLd) &&
+            methods::is(gwasFineMappingResult, "GwasFineMappingResult")
+    ) {
         msg <- glue(
             "qtlEnrichmentPipeline: the GWAS FineMappingResult must have a ",
             "non-NULL ldSketch (it should be RSS-derived)."
         )
         abort(msg)
     }
-    .colocRequireMatchingLdSketches(getLdSketch(qtlFineMappingResult), gwasLd)
+    # Lenient rather than qtl-required: a QTL outcome side may be an
+    # individual-level fit carrying no panel, and the requirement above already
+    # covers the RSS-derived GWAS case.
+    .requireMatchingLdSketches(
+        getLdSketch(qtlFineMappingResult),
+        outcomeLd,
+        pipelineName = "qtlEnrichmentPipeline",
+        nullPolicy = "lenient"
+    )
     invisible(NULL)
 }
 
-# Hoist the GWAS-study-independent work out of the double loop: per-study GWAS
-# PIP vectors, the union variant-name panel, per-tuple QTL regions, and each
-# tuple's one-time alignment to the union panel (errors captured as values).
+# Hoist the outcome-independent work out of the double loop: per-trait outcome
+# PIP vectors, the union variant-name panel, per-tuple annotation regions, and
+# each tuple's one-time alignment to the union panel (errors captured as
+# values).
 # @noRd
 .enrPrepare <- function(p) {
-    p$gwasStudies <- unique(as.character(p$gwasFineMappingResult$study))
-    # Iterate the joint (study, context) key: context alone would silently merge
-    # two studies sharing a context label, giving wrong enrichment estimates.
-    p$qtlTuples <- distinct(tibble(
-        qtlStudy = as.character(p$qtlFineMappingResult$study),
-        qtlContext = as.character(p$qtlFineMappingResult$context)
-    ))
-    if (length(p$gwasStudies) == 0L || nrow(p$qtlTuples) == 0L) {
+    p$gwasTuples <- .enrOutcomeTuples(p$gwasFineMappingResult)
+    p$qtlTuples <- .enrAnnotationTuples(p$qtlFineMappingResult)
+    if (nrow(p$gwasTuples) == 0L || nrow(p$qtlTuples) == 0L) {
         msg <- glue(
-            "qtlEnrichmentPipeline: no (gwasStudy, qtlStudy, qtlContext) ",
-            "triples to compute (one of the inputs has zero rows)."
+            "qtlEnrichmentPipeline: no (outcome, annotation) pairs to ",
+            "compute (one of the inputs has zero rows)."
         )
         abort(msg)
     }
-    p$gwasPipByStudy <- .enrGwasPipByStudy(
-        p$gwasFineMappingResult,
-        p$gwasStudies
+    p$gwasPipByTuple <- map(
+        seq_len(nrow(p$gwasTuples)),
+        .enrGwasPipForRow,
+        gwasTuples = p$gwasTuples,
+        fmr = p$gwasFineMappingResult
     )
     unionGwasNames <- unique(unlist(
-        map(p$gwasPipByStudy, names),
+        map(p$gwasPipByTuple, names),
         use.names = FALSE
     ))
     p$qtlRegionsByTuple <- map(
@@ -136,28 +185,77 @@ qtlEnrichmentPipeline <- function(
     p
 }
 
-# Per-study genome-wide GWAS PIP vectors (named by variant id). A loop rather
-# than map because the varying study is `.enrBuildGwasPipVector`'s second arg.
+# The outcome side's per-trait keys: one PIP vector is built per key. A GWAS
+# collection carries one trait per study, so its QTL-only axes read NA and the
+# key collapses to (study).
 # @noRd
-.enrGwasPipByStudy <- function(gwasFineMappingResult, gwasStudies) {
-    out <- vector("list", length(gwasStudies))
-    for (i in seq_along(gwasStudies)) {
-        out[[i]] <- .enrBuildGwasPipVector(
-            gwasFineMappingResult,
-            gwasStudies[[i]]
-        )
-    }
-    set_names(out, gwasStudies)
+.enrOutcomeTuples <- function(fmr) {
+    distinct(tibble(
+        gwasStudy = .fmrIdentityColumn(fmr, "study"),
+        gwasContext = .fmrIdentityColumn(fmr, "context"),
+        gwasTrait = .fmrIdentityColumn(fmr, "trait")
+    ))
 }
 
-# QTL SuSiE region list for the k-th (study, context) tuple.
+# The annotation side's keys: (study, context), the unit whose region fits are
+# pooled into one enrichment estimate. The joint key matters -- context alone
+# would silently merge two studies sharing a context label -- and a GWAS
+# annotation pools its blocks under one NA-context key.
+# @noRd
+.enrAnnotationTuples <- function(fmr) {
+    distinct(tibble(
+        qtlStudy = .fmrIdentityColumn(fmr, "study"),
+        qtlContext = .fmrIdentityColumn(fmr, "context")
+    ))
+}
+
+# One tuple-table row as an identity list addressed by the collection's OWN
+# column names; the table prefixes them so the result can name both sides.
+# @noRd
+.enrOutcomeIdent <- function(gwasTuples, k) {
+    list(
+        study = gwasTuples$gwasStudy[[k]],
+        context = gwasTuples$gwasContext[[k]],
+        trait = gwasTuples$gwasTrait[[k]]
+    )
+}
+
+# @noRd
+.enrAnnotationIdent <- function(qtlTuples, k) {
+    list(
+        study = qtlTuples$qtlStudy[[k]],
+        context = qtlTuples$qtlContext[[k]]
+    )
+}
+
+# Row indices of `fmr` matching an identity tuple. An axis the collection does
+# not have is NA on both sides and matches, rather than excluding every row.
+# @noRd
+.enrMatchRows <- function(fmr, ident) {
+    hits <- map(names(ident), .enrColumnMatches, fmr = fmr, ident = ident)
+    which(reduce(hits, `&`, .init = rep(TRUE, nrow(fmr))))
+}
+
+# @noRd
+.enrColumnMatches <- function(column, fmr, ident) {
+    values <- .fmrIdentityColumn(fmr, column)
+    wanted <- ident[[column]]
+    if (is.na(wanted)) {
+        return(is.na(values))
+    }
+    !is.na(values) & values == wanted
+}
+
+# The outcome PIP vector for the k-th outcome tuple.
+# @noRd
+.enrGwasPipForRow <- function(k, gwasTuples, fmr) {
+    .enrBuildGwasPipVector(fmr, .enrOutcomeIdent(gwasTuples, k))
+}
+
+# Annotation SuSiE region list for the k-th (study, context) tuple.
 # @noRd
 .enrQtlRegionsForRow <- function(k, qtlTuples, fmr) {
-    .enrBuildQtlRegionsList(
-        fmr,
-        qtlTuples$qtlStudy[[k]],
-        qtlTuples$qtlContext[[k]]
-    )
+    .enrBuildQtlRegionsList(fmr, .enrAnnotationIdent(qtlTuples, k))
 }
 
 # Align one tuple's regions to the union GWAS panel, capturing any error as a
@@ -170,15 +268,15 @@ qtlEnrichmentPipeline <- function(
     )
 }
 
-# Score one GWAS study against every QTL tuple -> enrichment records (empty when
-# the study has no usable PIPs).
+# Score one outcome trait against every annotation tuple -> enrichment records
+# (empty when the outcome has no usable PIPs).
 # @noRd
-.enrScoreGwasStudy <- function(gStudy, p) {
-    gwasPip <- p$gwasPipByStudy[[gStudy]]
+.enrScoreOutcomeTuple <- function(gi, p) {
+    gwasPip <- p$gwasPipByTuple[[gi]]
     if (length(gwasPip) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no usable PIPs for ",
-            "gwasStudy='{gStudy}'; skipping."
+            "{.enrOutcomeLabel(p, gi)}; skipping."
         )
         warn(msg)
         return(list())
@@ -186,41 +284,57 @@ qtlEnrichmentPipeline <- function(
     compact(map(
         seq_len(nrow(p$qtlTuples)),
         .enrScoreTuple,
-        gStudy = gStudy,
+        gi = gi,
         gwasPip = gwasPip,
         p = p
     ))
 }
 
-# Score one (gwasStudy, qtl tuple) pair -> an enrichment record, or NULL when
-# the tuple has no regions or qtlEnrichment fails.
+# Score one (outcome trait, annotation tuple) pair -> an enrichment record, or
+# NULL when the tuple has no regions or qtlEnrichment fails.
 # @noRd
-.enrScoreTuple <- function(k, gStudy, gwasPip, p) {
-    qStudy <- p$qtlTuples$qtlStudy[[k]]
-    qContext <- p$qtlTuples$qtlContext[[k]]
+.enrScoreTuple <- function(k, gi, gwasPip, p) {
     if (length(p$qtlRegionsByTuple[[k]]) == 0L) {
         msg <- glue(
-            "qtlEnrichmentPipeline: no usable QTL regions for ",
-            "(qtlStudy='{qStudy}', qtlContext='{qContext}'); skipping."
+            "qtlEnrichmentPipeline: no usable regions for ",
+            "{.enrAnnotationLabel(p, k)}; skipping."
         )
         warn(msg)
         return(NULL)
     }
-    enr <- .enrRunEnrichment(gStudy, gwasPip, k, qStudy, qContext, p)
+    enr <- .enrRunEnrichment(gi, gwasPip, k, p)
     if (is.null(enr)) {
         return(NULL)
     }
-    row <- .enrFlattenEnrichment(enr)
-    row$gwasStudy <- gStudy
-    row$qtlStudy <- qStudy
-    row$qtlContext <- qContext
-    row
+    c(
+        .enrFlattenEnrichment(enr),
+        as.list(p$gwasTuples[gi, , drop = FALSE]),
+        as.list(p$qtlTuples[k, , drop = FALSE])
+    )
+}
+
+# Human-readable identities for the warnings above, naming each side by its own
+# flavour and only the axes it has.
+# @noRd
+.enrOutcomeLabel <- function(p, gi) {
+    .fmrTupleLabel(
+        .fmrSideName(p$gwasFineMappingResult),
+        .enrOutcomeIdent(p$gwasTuples, gi)
+    )
+}
+
+# @noRd
+.enrAnnotationLabel <- function(p, k) {
+    .fmrTupleLabel(
+        .fmrSideName(p$qtlFineMappingResult),
+        .enrAnnotationIdent(p$qtlTuples, k)
+    )
 }
 
 # Run qtlEnrichment for a pair (with the pre-aligned regions), warning + NULL on
 # failure. alignNames = FALSE reuses the shared per-tuple alignment.
 # @noRd
-.enrRunEnrichment <- function(gStudy, gwasPip, k, qStudy, qContext, p) {
+.enrRunEnrichment <- function(gi, gwasPip, k, p) {
     aligned <- p$alignedByTuple[[k]]
     tryCatch(
         {
@@ -247,8 +361,8 @@ qtlEnrichmentPipeline <- function(
             eMsg <- conditionMessage(e)
             msg <- glue(
                 "qtlEnrichmentPipeline: qtlEnrichment failed for ",
-                "(gwasStudy='{gStudy}', qtlStudy='{qStudy}', ",
-                "qtlContext='{qContext}'): {eMsg}"
+                "{.enrOutcomeLabel(p, gi)} x ",
+                "{.enrAnnotationLabel(p, k)}: {eMsg}"
             )
             warn(msg)
             NULL
@@ -263,21 +377,29 @@ qtlEnrichmentPipeline <- function(
         return(.enrEmptyResult())
     }
     out <- bind_rows(results)
-    idCols <- c("gwasStudy", "qtlStudy", "qtlContext")
-    select(out, all_of(idCols), everything())
+    select(out, all_of(.enrIdCols()), everything())
 }
 
-# The empty enrichment result table.
+# The identity columns of a result row: the outcome trait's tuple, then the
+# annotation unit's.
+# @noRd
+.enrIdCols <- function() {
+    c("gwasStudy", "gwasContext", "gwasTrait", "qtlStudy", "qtlContext")
+}
+
+# The empty enrichment result table, with the same columns a populated one has.
 # @noRd
 .enrEmptyResult <- function() {
-    tibble(
-        gwasStudy = character(0),
-        qtlStudy = character(0),
-        qtlContext = character(0),
-        enrichment = numeric(0),
-        enrichmentSe = numeric(0),
-        enrichmentLogOdds = numeric(0)
+    idCols <- set_names(
+        rep(list(character(0)), length(.enrIdCols())),
+        .enrIdCols()
     )
+    valueNames <- names(.enrNaEnrichment())
+    valueCols <- set_names(
+        rep(list(numeric(0)), length(valueNames)),
+        valueNames
+    )
+    as_tibble(c(idCols, valueCols))
 }
 
 # =============================================================================
@@ -293,15 +415,16 @@ qtlEnrichmentPipeline <- function(
     map(regions, .enrAlignRegion, unionGwasNames = unionGwasNames)
 }
 
-# Build a named GWAS PIP vector for one study. Walks every row of the
-# GwasFineMappingResult tagged with that study, extracts the per-row
-# pip from each FineMappingRow, and concatenates with variant-id
-# names. Errors if any single variant appears with conflicting PIP
-# values across rows.
+# Build a named outcome PIP vector for one trait. Walks every row of the
+# collection carrying that identity, extracts the per-row pip from each
+# FineMappingRow, and concatenates with variant-id names. Errors if any single
+# variant appears with conflicting PIP values across rows -- which is why the
+# identity is the full trait tuple: pooling two molecular traits of one study
+# would collide on every variant they share.
 #' @importFrom dplyr add_count
 #' @noRd
-.enrBuildGwasPipVector <- function(gwasFmr, gStudy) {
-    idx <- which(as.character(gwasFmr$study) == gStudy)
+.enrBuildGwasPipVector <- function(gwasFmr, ident) {
+    idx <- .enrMatchRows(gwasFmr, ident)
     if (length(idx) == 0L) {
         return(numeric(0))
     }
@@ -357,17 +480,14 @@ qtlEnrichmentPipeline <- function(
     set_names(byId$pip, byId$id)
 }
 
-# Build the per-(qtlStudy, qtlContext) list of region fits in the shape
-# that qtlEnrichment expects: list(d) where each d carries
-# alpha, pip, prior_variance (V). Filters on BOTH study and context so
-# entries from different studies that happen to share a context label
-# are not pooled into one enrichment estimate.
+# Build the per-(study, context) list of region fits in the shape that
+# qtlEnrichment expects: list(d) where each d carries alpha, pip,
+# prior_variance (V). Filters on BOTH study and context so entries from
+# different studies that happen to share a context label are not pooled into
+# one enrichment estimate.
 # @noRd
-.enrBuildQtlRegionsList <- function(qtlFmr, qStudy, qContext) {
-    idx <- which(
-        as.character(qtlFmr$study) == qStudy &
-            as.character(qtlFmr$context) == qContext
-    )
+.enrBuildQtlRegionsList <- function(qtlFmr, ident) {
+    idx <- .enrMatchRows(qtlFmr, ident)
     if (length(idx) == 0L) {
         return(list())
     }
@@ -412,56 +532,67 @@ qtlEnrichmentPipeline <- function(
     }
 }
 
-# Coerce qtlEnrichment's variable-shape output into a single-row
-# named list with the canonical columns the caller documents. The
-# underlying estimator returns either a list with named numeric scalars
-# (enrichment, enrichmentSe, enrichmentLogOdds, ...) or a matrix/df --
-# this helper handles both.
+# Project qtlEnrichment()'s output onto the columns this pipeline publishes.
+#
+# The field names are the estimator's own, written in src/qtl_enrichment.h and
+# shared verbatim with upstream fastenloc's enloc.enrich.out, so they are
+# matched literally rather than guessed at. The shrinkage estimates are the
+# ones reported, matching upstream, which likewise switches to the shrunk a1
+# before deriving the coloc priors.
+#
+# `enrichment` is expm1 of the log-odds a1 rather than a1 itself, because
+# colocPipeline consumes it as `p12 * (1 + enrichment)`, which is then exactly
+# the enloc-adjusted prior `p12 * exp(a1)` -- and leaves p12 untouched for an
+# unenriched annotation (a1 = 0). expm1 is bounded below by -1, so a depleted
+# annotation shrinks p12 towards 0 rather than past it.
 # @noRd
 .enrFlattenEnrichment <- function(enr) {
-    if (is.list(enr) && is.null(dim(enr))) {
-        list(
-            enrichment = .enrPickScalar("enrichment", enr),
-            enrichmentSe = .enrPickScalar("enrichmentSe", enr),
-            enrichmentLogOdds = .enrPickScalar("enrichmentLogOdds", enr)
+    if (!is.list(enr) || !is_in("Enrichment (w/ shrinkage)", names(enr))) {
+        msg <- glue(
+            "qtlEnrichmentPipeline: the enrichment estimator returned no ",
+            "'Enrichment (w/ shrinkage)' field, so every estimate is ",
+            "reported as NA. Expected the field names written by ",
+            "qtl_enrichment.h."
         )
-    } else if (is.matrix(enr) || is.data.frame(enr)) {
-        df <- as_tibble(enr, .name_repair = "minimal")
-        if (nrow(df) == 0L) {
-            list(
-                enrichment = NA_real_,
-                enrichmentSe = NA_real_,
-                enrichmentLogOdds = NA_real_
-            )
-        } else {
-            list(
-                enrichment = .enrPickColumn(df, c("enrichment", "Enrichment")),
-                enrichmentSe = .enrPickColumn(
-                    df,
-                    c("enrichmentSe", "se", "stderr")
-                ),
-                enrichmentLogOdds = .enrPickColumn(
-                    df,
-                    c("enrichmentLogOdds", "logOdds", "log_odds")
-                )
-            )
-        }
-    } else {
-        list(
-            enrichment = NA_real_,
-            enrichmentSe = NA_real_,
-            enrichmentLogOdds = NA_real_
-        )
+        warn(msg)
+        return(.enrNaEnrichment())
     }
+    logOdds <- .enrPickScalar("Enrichment (w/ shrinkage)", enr)
+    list(
+        enrichment = expm1(logOdds),
+        enrichmentSe = .enrPickScalar("sd (w/ shrinkage)", enr),
+        enrichmentLogOdds = logOdds,
+        enrichmentLogOddsNoShrinkage = .enrPickScalar(
+            "Enrichment (no shrinkage)",
+            enr
+        ),
+        enrichmentSeNoShrinkage = .enrPickScalar("sd (no shrinkage)", enr),
+        intercept = .enrPickScalar("Intercept", enr),
+        interceptSe = .enrPickScalar("sd (intercept)", enr),
+        colocP1 = .enrPickScalar("Alternative (coloc) p1", enr),
+        colocP2 = .enrPickScalar("Alternative (coloc) p2", enr),
+        colocP12 = .enrPickScalar("Alternative (coloc) p12", enr),
+        effectiveMiRounds = .enrPickScalar("Effective MI rounds", enr)
+    )
 }
 
+# The value columns, all unmeasured. Also the single source of the value-column
+# schema, so the empty result cannot drift from the populated one.
 # @noRd
-.enrPickColumn <- function(df, candidates) {
-    hit <- intersect(candidates, colnames(df))
-    if (length(hit) == 0L) {
-        return(NA_real_)
-    }
-    as.numeric(df[[hit[[1L]]]][[1L]])
+.enrNaEnrichment <- function() {
+    list(
+        enrichment = NA_real_,
+        enrichmentSe = NA_real_,
+        enrichmentLogOdds = NA_real_,
+        enrichmentLogOddsNoShrinkage = NA_real_,
+        enrichmentSeNoShrinkage = NA_real_,
+        intercept = NA_real_,
+        interceptSe = NA_real_,
+        colocP1 = NA_real_,
+        colocP2 = NA_real_,
+        colocP12 = NA_real_,
+        effectiveMiRounds = NA_real_
+    )
 }
 
 
@@ -520,7 +651,15 @@ qtlEnrichmentPipeline <- function(
 #'   imputation sampler; each imputation round derives its own seed from it, so
 #'   a fixed \code{seed} gives reproducible results. \code{NULL} (default) draws
 #'   a nondeterministic seed.
-#' @return A list of enrichment parameter estimates
+#' @return A named list of enrichment parameter estimates, carrying the
+#'   fields the C++ estimator writes -- \code{Intercept},
+#'   \code{sd (intercept)}, \code{Enrichment (no shrinkage)},
+#'   \code{Enrichment (w/ shrinkage)}, \code{sd (no shrinkage)},
+#'   \code{sd (w/ shrinkage)}, \code{Alternative (coloc) p1} / \code{p2} /
+#'   \code{p12} and \code{Effective MI rounds} -- plus
+#'   \code{unused_xqtl_variants}, the QTL variants of each region that no GWAS
+#'   variant matched. The names are upstream fastenloc's;
+#'   \code{\link{qtlEnrichmentPipeline}} is what renames them to a tidy table.
 #'
 #' @examples
 #'
@@ -582,7 +721,7 @@ qtlEnrichment <- function(
     unmatchedVariants <- map(aligned, "unmatched_variants")
     susieQtlRegions <- map(aligned, .enrStripUnmatched)
     # cpp11 requires exact integer types for int parameters.
-    en <- list(qtlEnrichmentRcpp(
+    en <- qtlEnrichmentRcpp(
         rGwasPip = gwasPip,
         rQtlSusieFit = susieQtlRegions,
         piGwas = piGwas,
@@ -593,7 +732,7 @@ qtlEnrichment <- function(
         besselCorrection = besselCorrection,
         numThreads = as.integer(numThreads),
         seed = if (is.null(seed)) NULL else as.integer(seed)
-    ))
+    )
     en$unused_xqtl_variants <- unmatchedVariants
     en
 }

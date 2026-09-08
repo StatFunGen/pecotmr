@@ -8,10 +8,12 @@ ColocResult(pairs, variants, ldSketch = NULL)
 }
 \arguments{
 \item{pairs}{A data frame with one row per tested pair, carrying at least
-the identity columns (\code{study}, \code{context}, \code{trait},
-\code{method}, \code{gwasStudy}, \code{gwasMethod}), \code{blockId},
-\code{qtlCs}, \code{gwasCs}, \code{nSnps} and \code{PP.H0.abf} through
-\code{PP.H4.abf}.}
+the identity columns of both sides (\code{study}, \code{context},
+\code{trait}, \code{method} and \code{gwasStudy}, \code{gwasContext},
+\code{gwasTrait}, \code{gwasMethod}), \code{blockId}, \code{qtlCs},
+\code{gwasCs}, \code{nSnps} and \code{PP.H0.abf} through
+\code{PP.H4.abf}. A GWAS side has no context or trait axis, so those two
+columns are \code{NA} for it.}
 
 \item{variants}{A list, parallel to \code{pairs}' rows, of per-pair data
 frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.}
@@ -31,7 +33,9 @@ Assemble a \code{\linkS4class{ColocResult}} from a pair-level
 \examples{
 pairs <- data.frame(
     study = "s1", context = "c1", trait = "g1", method = "susie",
-    gwasStudy = "G1", gwasMethod = "susie", blockId = "chr1_1_1000",
+    gwasStudy = "G1", gwasContext = NA_character_,
+    gwasTrait = NA_character_, gwasMethod = "susie",
+    blockId = "chr1_1_1000",
     qtlCs = 1L, gwasCs = 1L, nSnps = 2L,
     PP.H0.abf = 0.1, PP.H1.abf = 0.1, PP.H2.abf = 0.1,
     PP.H3.abf = 0.1, PP.H4.abf = 0.6

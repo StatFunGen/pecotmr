@@ -137,6 +137,38 @@ context("colocPipeline")
     )
 }
 
+.cp_makeQtlSumstats <- function(study = "Q1", qc = TRUE) {
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        A1 = rep("A", 5),
+        A2 = rep("G", 5),
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    QtlSumStats(
+        study = study,
+        context = "c1",
+        trait = "t1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .cp_makeHandle(),
+        qcInfo = if (qc) list(step1 = "ok") else list()
+    )
+}
+
+# The enrichment lookup takes each side's identity list, as the scoring loop
+# builds it.
+.cp_side <- function(study, context = NA_character_, trait = NA_character_) {
+    list(study = study, context = context, trait = trait)
+}
+
 .cp_mockColocBfBf <- function() {
     function(qLbf, gLbf, p1, p2, p12, ...) {
         list(
@@ -159,20 +191,20 @@ context("colocPipeline")
 # Input-type validation
 # ===========================================================================
 
-test_that("colocPipeline: rejects non-QtlFineMappingResult qtlFmr", {
+test_that("colocPipeline: rejects a non-fine-mapping first side", {
     expect_error(
         colocPipeline(
             qtlFineMappingResult = "no",
             gwasInput = .cp_makeGwasFmr()
         ),
-        "must be a QtlFineMappingResult"
+        "must be a QtlFineMappingResult or a GwasFineMappingResult"
     )
 })
 
-test_that("colocPipeline: rejects gwasInput that is neither GwasSumStats nor GwasFineMappingResult", {
+test_that("colocPipeline: rejects an unusable second side", {
     expect_error(
         colocPipeline(qtlFineMappingResult = .cp_makeQtlFmr(), gwasInput = 42L),
-        "must be a GwasSumStats or a GwasFineMappingResult"
+        "must be a fine-mapping result"
     )
 })
 
@@ -245,6 +277,94 @@ test_that("colocPipeline: returns one row per (QTL tuple, GWAS tuple) pair", {
     expect_setequal(out$study, "Q1")
     expect_setequal(out$context, c("c1", "c2"))
     expect_setequal(out$gwasStudy, c("G1", "G2"))
+})
+
+# ===========================================================================
+# Either side may be a QTL or a GWAS fine-mapping result
+# ===========================================================================
+
+test_that("colocPipeline: pairs two QTL fine-mapping results", {
+    qfmr <- .cp_makeQtlFmr()
+    # The two second-side rows share (study, method, block) and differ only on
+    # trait -- keyed on the GWAS 2-tuple, one would silently replace the other.
+    other <- .cp_makeQtlFmr(
+        tuples = list(
+            c("Q2", "c1", "t1", "susie"),
+            c("Q2", "c1", "t2", "susie")
+        )
+    )
+    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = other
+    ))
+    expect_equal(nrow(out), 2L)
+    expect_setequal(out$gwasStudy, "Q2")
+    expect_setequal(out$gwasContext, "c1")
+    expect_setequal(out$gwasTrait, c("t1", "t2"))
+})
+
+test_that("colocPipeline: pairs two GWAS fine-mapping results", {
+    first <- .cp_makeGwasFmr(tuples = list(c("G1", "susie")))
+    second <- .cp_makeGwasFmr(tuples = list(c("G2", "susie")))
+    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = first,
+        gwasInput = second
+    ))
+    expect_equal(nrow(out), 1L)
+    expect_equal(as.character(out$study), "G1")
+    expect_equal(as.character(out$gwasStudy), "G2")
+    # Neither side has a context or trait axis, so all four are reported as NA
+    # rather than invented.
+    expect_true(all(is.na(c(
+        out$context,
+        out$trait,
+        out$gwasContext,
+        out$gwasTrait
+    ))))
+})
+
+test_that("colocPipeline: a GWAS first side names itself in warnings", {
+    first <- .cp_makeGwasFmr()
+    second <- .cp_makeGwasFmr(tuples = list(c("G2", "susie")))
+    local_mocked_bindings(
+        coloc.bf_bf = function(...) stop("synthetic test failure"),
+        .package = "coloc"
+    )
+    expect_warning(
+        colocPipeline(qtlFineMappingResult = first, gwasInput = second),
+        "GWAS \\(study='G1', method='susie'\\)"
+    )
+})
+
+test_that("colocPipeline: resolves QtlSumStats by fine-mapping it", {
+    first <- .cp_makeGwasFmr()
+    qss <- .cp_makeQtlSumstats()
+    resolved <- .cp_makeQtlFmr()
+    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    local_mocked_bindings(
+        fineMappingPipeline = function(data, methods, ...) resolved,
+        .package = "pecotmr"
+    )
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = first,
+        gwasInput = qss,
+        returnGwasFineMapping = TRUE,
+        adjustPips = FALSE
+    ))
+    expect_equal(as.character(out$gwasTrait), "t1")
+    expect_identical(attr(out, "gwasFineMapping"), resolved)
+})
+
+test_that("colocPipeline: rejects an un-QCd QtlSumStats second side", {
+    expect_error(
+        colocPipeline(
+            qtlFineMappingResult = .cp_makeQtlFmr(),
+            gwasInput = .cp_makeQtlSumstats(qc = FALSE)
+        ),
+        "has no QC record"
+    )
 })
 
 test_that("colocPipeline: resolves GwasSumStats via fineMappingPipeline (mocked)", {
@@ -351,6 +471,8 @@ test_that("colocPipeline: empty result has the documented schema", {
             "trait",
             "method",
             "gwasStudy",
+            "gwasContext",
+            "gwasTrait",
             "gwasMethod",
             "blockId",
             "qtlCs",
@@ -504,7 +626,14 @@ test_that(".colocLookupEnrichment: returns the value for a (gwasStudy, qtlStudy,
         enrichment = c(2.0, 3.5),
         stringsAsFactors = FALSE
     )
-    expect_equal(pecotmr:::.colocLookupEnrichment(enr, "G2", "Q1", "c1"), 3.5)
+    expect_equal(
+        pecotmr:::.colocLookupEnrichment(
+            enr,
+            .cp_side("G2"),
+            .cp_side("Q1", "c1")
+        ),
+        3.5
+    )
 })
 
 test_that(".colocLookupEnrichment: returns NA when no row matches", {
@@ -517,16 +646,14 @@ test_that(".colocLookupEnrichment: returns NA when no row matches", {
     )
     expect_true(is.na(pecotmr:::.colocLookupEnrichment(
         enr,
-        "ghost",
-        "Q1",
-        "c1"
+        .cp_side("ghost"),
+        .cp_side("Q1", "c1")
     )))
     # qtlStudy mismatch also a miss.
     expect_true(is.na(pecotmr:::.colocLookupEnrichment(
         enr,
-        "G1",
-        "Qghost",
-        "c1"
+        .cp_side("G1"),
+        .cp_side("Qghost", "c1")
     )))
 })
 
@@ -613,6 +740,56 @@ test_that("colocPipeline: enrichment hit scales p12 and emits enrichment/p12Used
     expect_equal(unique(out$enrichment), 2.0)
     # min(p12 * (1 + enrichment), p12Max) = min(5e-6 * 3, 1e-3) = 1.5e-5
     expect_equal(unique(out$p12Used), min(5e-6 * 3, 1e-3))
+})
+
+test_that("colocPipeline: enrichment joins on the second side's trait", {
+    # A QTL second side puts two traits under one study. Joining on the study
+    # alone would give both the first row's factor.
+    qfmr <- .cp_makeQtlFmr()
+    other <- .cp_makeQtlFmr(
+        tuples = list(
+            c("Q2", "c1", "t1", "susie"),
+            c("Q2", "c1", "t2", "susie")
+        )
+    )
+    enr <- data.frame(
+        gwasStudy = c("Q2", "Q2"),
+        gwasContext = c("c1", "c1"),
+        gwasTrait = c("t1", "t2"),
+        qtlStudy = c("Q1", "Q1"),
+        qtlContext = c("c1", "c1"),
+        enrichment = c(1.0, 3.0),
+        stringsAsFactors = FALSE
+    )
+    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = other,
+        enrichment = enr
+    ))
+    pairs <- getColocPairs(out)
+    expect_equal(
+        pairs$enrichment[order(pairs$gwasTrait)],
+        c(1.0, 3.0)
+    )
+})
+
+test_that("colocPipeline: rejects an enrichment table with repeated keys", {
+    enr <- data.frame(
+        gwasStudy = c("G1", "G1"),
+        qtlStudy = c("Q1", "Q1"),
+        qtlContext = c("c1", "c1"),
+        enrichment = c(2.0, 3.0),
+        stringsAsFactors = FALSE
+    )
+    expect_error(
+        colocPipeline(
+            qtlFineMappingResult = .cp_makeQtlFmr(),
+            gwasInput = .cp_makeGwasFmr(),
+            enrichment = enr
+        ),
+        "repeated"
+    )
 })
 
 test_that("colocPipeline: enrichment miss warns and falls back to baseline p12", {

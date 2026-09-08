@@ -10,6 +10,7 @@
 #include <omp.h>
 #include <cmath>
 #include <cstdio>
+#include <numeric>
 
 using namespace cpp11;
 using namespace arma;
@@ -114,6 +115,17 @@ std::vector<size_t> filter_outlier_indices(
         if(fabs(shrinkage_ests[i] - mean) <= threshold * sd) {
             kept.push_back(i);
         }
+    }
+
+    // A filter that removes EVERY round is not a filter: it means the
+    // dispersion estimate was degenerate rather than that every round was an
+    // outlier. With a single MI round and the Bessel correction the sd is
+    // 0/0, so no |x - mean| <= 3 * NaN comparison holds and every round is
+    // dropped -- which then divides by zero throughout the MI combination and
+    // reports NaN for every estimate. Keep them all instead.
+    if(kept.empty()) {
+        kept.resize(n);
+        std::iota(kept.begin(), kept.end(), 0);
     }
 
     return kept;
@@ -313,8 +325,16 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 		bv0 += pow(a0_vec[k] - a0_est, 2.0);
 		bv1 += pow(a1_vec[k] - a1_est, 2.0);
 	}
-	bv0 /= (m - 1);
-	bv1 /= (m - 1);
+	// Rubin's rules need two imputations to estimate a between-round variance;
+	// with one surviving round only the within-round variance is measurable,
+	// and dividing by (m - 1) would make every downstream estimate NaN.
+	if (m > 1) {
+		bv0 /= (m - 1);
+		bv1 /= (m - 1);
+	} else {
+		bv0 = 0;
+		bv1 = 0;
+	}
 	var0 /= m;
 	var1 /= m;
 
@@ -348,7 +368,7 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 			for (size_t i = 0; i < m; i++) {
 				bv1_shrink += pow(a1_shrink_vec[i] - a1_shrink_est, 2.0);
 			}
-			bv1_shrink /= (m - 1);
+			bv1_shrink = (m > 1) ? bv1_shrink / (m - 1) : 0.0;
 			double sd1_shrink = sqrt(var1_shrink + bv1_shrink * (m + 1.0) / m);
 
 			// 2. Shrink the combined estimate again

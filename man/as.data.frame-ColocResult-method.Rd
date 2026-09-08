@@ -25,7 +25,9 @@ Returns the pair-level view, which is the flat table
 \examples{
 pairs <- data.frame(
     study = "s1", context = "c1", trait = "g1", method = "susie",
-    gwasStudy = "G1", gwasMethod = "susie", blockId = "chr1_1_1000",
+    gwasStudy = "G1", gwasContext = NA_character_,
+    gwasTrait = NA_character_, gwasMethod = "susie",
+    blockId = "chr1_1_1000",
     qtlCs = 1L, gwasCs = 1L, nSnps = 2L,
     PP.H0.abf = 0.1, PP.H1.abf = 0.1, PP.H2.abf = 0.1,
     PP.H3.abf = 0.1, PP.H4.abf = 0.6

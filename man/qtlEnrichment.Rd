@@ -66,7 +66,15 @@ a fixed \code{seed} gives reproducible results. \code{NULL} (default) draws
 a nondeterministic seed.}
 }
 \value{
-A list of enrichment parameter estimates
+A named list of enrichment parameter estimates, carrying the
+  fields the C++ estimator writes -- \code{Intercept},
+  \code{sd (intercept)}, \code{Enrichment (no shrinkage)},
+  \code{Enrichment (w/ shrinkage)}, \code{sd (no shrinkage)},
+  \code{sd (w/ shrinkage)}, \code{Alternative (coloc) p1} / \code{p2} /
+  \code{p12} and \code{Effective MI rounds} -- plus
+  \code{unused_xqtl_variants}, the QTL variants of each region that no GWAS
+  variant matched. The names are upstream fastenloc's;
+  \code{\link{qtlEnrichmentPipeline}} is what renames them to a tidy table.
 }
 \description{
 Largely follows from fastenloc

@@ -97,6 +97,8 @@ methods::setValidity("ColocResult", function(object) {
         "trait",
         "method",
         "gwasStudy",
+        "gwasContext",
+        "gwasTrait",
         "gwasMethod",
         "blockId",
         "qtlCs",
@@ -169,8 +171,8 @@ setMethod("show", "ColocResult", function(object) {
         return(invisible(NULL))
     }
     md <- mcols(object, use.names = FALSE)
-    cat("  QTL studies :", str_flatten(unique(md$study), ", "), "\n")
-    cat("  GWAS studies:", str_flatten(unique(md$gwasStudy), ", "), "\n")
+    cat("  studies     :", str_flatten(unique(md$study), ", "), "\n")
+    cat("  paired with :", str_flatten(unique(md$gwasStudy), ", "), "\n")
     cat("  variants    :", sum(lengths(object)), "across all pairs\n")
     cat(
         "  max PP.H4   :",
@@ -187,10 +189,12 @@ setMethod("show", "ColocResult", function(object) {
 #'   table and the per-pair variant tables that go with it. Callers normally
 #'   get one from \code{\link{colocPipeline}} rather than building it directly.
 #' @param pairs A data frame with one row per tested pair, carrying at least
-#'   the identity columns (\code{study}, \code{context}, \code{trait},
-#'   \code{method}, \code{gwasStudy}, \code{gwasMethod}), \code{blockId},
-#'   \code{qtlCs}, \code{gwasCs}, \code{nSnps} and \code{PP.H0.abf} through
-#'   \code{PP.H4.abf}.
+#'   the identity columns of both sides (\code{study}, \code{context},
+#'   \code{trait}, \code{method} and \code{gwasStudy}, \code{gwasContext},
+#'   \code{gwasTrait}, \code{gwasMethod}), \code{blockId}, \code{qtlCs},
+#'   \code{gwasCs}, \code{nSnps} and \code{PP.H0.abf} through
+#'   \code{PP.H4.abf}. A GWAS side has no context or trait axis, so those two
+#'   columns are \code{NA} for it.
 #' @param variants A list, parallel to \code{pairs}' rows, of per-pair data
 #'   frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.
 #' @param ldSketch Optional genotype panel (see \code{\link{readGenotypes}})
@@ -200,7 +204,9 @@ setMethod("show", "ColocResult", function(object) {
 #' @examples
 #' pairs <- data.frame(
 #'     study = "s1", context = "c1", trait = "g1", method = "susie",
-#'     gwasStudy = "G1", gwasMethod = "susie", blockId = "chr1_1_1000",
+#'     gwasStudy = "G1", gwasContext = NA_character_,
+#'     gwasTrait = NA_character_, gwasMethod = "susie",
+#'     blockId = "chr1_1_1000",
 #'     qtlCs = 1L, gwasCs = 1L, nSnps = 2L,
 #'     PP.H0.abf = 0.1, PP.H1.abf = 0.1, PP.H2.abf = 0.1,
 #'     PP.H3.abf = 0.1, PP.H4.abf = 0.6
@@ -301,10 +307,22 @@ ColocResult <- function(pairs, variants, ldSketch = NULL) {
 # ---- views ------------------------------------------------------------------
 
 # The columns that identify a gene-level unit: everything that is fixed within
-# one QTL molecular trait tested against one GWAS study.
+# one first-side trait tested against one second-side trait. Both sides carry
+# the full (study, context, trait, method) tuple, since either may be a QTL
+# collection whose rows differ only on context or trait -- grouping on the
+# study alone would pool two distinct molecular phenotypes into one unit.
 # @noRd
 .crGeneCols <- function() {
-    c("study", "context", "trait", "method", "gwasStudy", "gwasMethod")
+    c(
+        "study",
+        "context",
+        "trait",
+        "method",
+        "gwasStudy",
+        "gwasContext",
+        "gwasTrait",
+        "gwasMethod"
+    )
 }
 
 #' @rdname colocViews
@@ -560,7 +578,9 @@ setMethod(
 #' @examples
 #' pairs <- data.frame(
 #'     study = "s1", context = "c1", trait = "g1", method = "susie",
-#'     gwasStudy = "G1", gwasMethod = "susie", blockId = "chr1_1_1000",
+#'     gwasStudy = "G1", gwasContext = NA_character_,
+#'     gwasTrait = NA_character_, gwasMethod = "susie",
+#'     blockId = "chr1_1_1000",
 #'     qtlCs = 1L, gwasCs = 1L, nSnps = 2L,
 #'     PP.H0.abf = 0.1, PP.H1.abf = 0.1, PP.H2.abf = 0.1,
 #'     PP.H3.abf = 0.1, PP.H4.abf = 0.6

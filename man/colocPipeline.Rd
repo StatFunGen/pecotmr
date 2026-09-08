@@ -2,7 +2,7 @@
 % Please edit documentation in R/colocPipeline.R
 \name{colocPipeline}
 \alias{colocPipeline}
-\title{Colocalization Pipeline (coloc.bf_bf over QTL + GWAS LBF matrices)}
+\title{Colocalization Pipeline (coloc.bf_bf over paired LBF matrices)}
 \usage{
 colocPipeline(
   qtlFineMappingResult,
@@ -24,10 +24,14 @@ colocPipeline(
 )
 }
 \arguments{
-\item{qtlFineMappingResult}{A \code{\link{QtlFineMappingResult}} (required).}
+\item{qtlFineMappingResult}{The first side: a
+\code{\link{QtlFineMappingResult}} or a
+\code{\link{GwasFineMappingResult}} (required).}
 
-\item{gwasInput}{Either a \code{\link{GwasSumStats}} or a
-\code{\link{GwasFineMappingResult}}.}
+\item{gwasInput}{The second side: a \code{\link{QtlFineMappingResult}}, a
+\code{\link{GwasFineMappingResult}}, or the summary statistics to
+fine-map inline (\code{\link{QtlSumStats}} or
+\code{\link{GwasSumStats}}).}
 
 \item{filterLbfCs}{Logical. When \code{TRUE} (and \code{filterLbfCsSecondary}
 is \code{NULL}), keep only effects that produced a credible set
@@ -58,17 +62,19 @@ consulted when \code{filterLbfCsSecondary} is non-NULL. Default \code{0.5}.}
 \code{5e-6}.}
 
 \item{finemappingMethods}{Character vector forwarded to
-\code{\link{fineMappingPipeline}} when \code{gwasInput} is a
-\code{GwasSumStats}. Default \code{"susie"}.}
+\code{\link{fineMappingPipeline}} when \code{gwasInput} is summary
+statistics rather than a fine-mapping result. Default \code{"susie"}.}
 
-\item{returnGwasFineMapping}{Logical. When \code{TRUE}, attach the computed
-\code{GwasFineMappingResult} on the returned data frame as attribute
-\code{"gwasFineMapping"}. Default \code{FALSE}.}
+\item{returnGwasFineMapping}{Logical. When \code{TRUE}, attach the
+fine-mapping result computed from \code{gwasInput} on the returned object
+as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.}
 
-\item{enrichment}{Optional data.frame of per-(gwasStudy, qtlStudy,
-qtlContext) enrichment factors with columns \code{gwasStudy},
-\code{qtlStudy}, \code{qtlContext}, \code{enrichment}. Output of
-\code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL}, each pair's
+\item{enrichment}{Optional data.frame of per-pair enrichment factors with
+columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
+\code{enrichment}, and optionally \code{gwasContext} / \code{gwasTrait}
+(which the join uses when present, and which
+\code{\link{qtlEnrichmentPipeline}} emits for a QTL outcome side). Output
+of \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL}, each pair's
 \code{p12} prior is scaled to \code{min(p12 * (1 + enrichment), p12Max)}
 (the enrichment-informed colocalization variant, "enloc"). Pairs without a
 matching enrichment row fall back to the baseline \code{p12} with a
@@ -103,11 +109,12 @@ exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 \item{...}{Additional arguments forwarded to \code{coloc::coloc.bf_bf}.}
 }
 \value{
-A \code{\linkS4class{ColocResult}}: one element per tested (QTL
-  credible set, GWAS credible set, block) pair, holding that pair's aligned
-  variants with their \code{SNP.PP.H4}. Pair-level metadata carries the
-  identity columns (\code{study}, \code{context}, \code{trait},
-  \code{method}, \code{gwasStudy}, \code{gwasMethod}), the block and stable
+A \code{\linkS4class{ColocResult}}: one element per tested
+  (first-side credible set, second-side credible set, block) pair, holding
+  that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
+  metadata carries the identity columns (\code{study}, \code{context},
+  \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasContext},
+  \code{gwasTrait}, \code{gwasMethod}), the block and stable
   credible-set ids (\code{blockId}, \code{qtlCs}, \code{gwasCs}), the
   standard coloc fields (\code{idx1}, \code{idx2}, \code{nSnps},
   \code{hit1}, \code{hit2}, \code{PP.H0.abf} \ldots \code{PP.H4.abf}) and
@@ -123,12 +130,25 @@ A \code{\linkS4class{ColocResult}}: one element per tested (QTL
   \code{\link{getColocGenes}}.
 }
 \description{
-Per-region pipeline that pairs a QTL
-  \code{\link{QtlFineMappingResult}} with a GWAS fine-mapping result (either
-  supplied directly as a \code{\link{GwasFineMappingResult}} or computed
-  inline from a \code{\link{GwasSumStats}}) and runs
-  \code{coloc::coloc.bf_bf} per (QTL tuple, GWAS tuple) pair to produce
-  per-pair colocalization posterior probabilities PP.H0-PP.H4.
+Per-region pipeline that pairs two fine-mapping result
+  collections and runs \code{coloc::coloc.bf_bf} per (first-side tuple,
+  second-side tuple) pair to produce per-pair colocalization posterior
+  probabilities PP.H0-PP.H4.
+
+  Either side may be a \code{\link{QtlFineMappingResult}} or a
+  \code{\link{GwasFineMappingResult}}: QTL-GWAS, QTL-QTL (two molecular
+  phenotypes) and GWAS-GWAS (two diseases) all run through one code path,
+  since nothing below the identity tuple depends on which flavour a side
+  is. The second side may also be handed in as summary statistics
+  (\code{\link{QtlSumStats}} or \code{\link{GwasSumStats}}), which are
+  fine-mapped inline.
+
+  The argument names keep the QTL / GWAS wording of the common case. What
+  they mean generally is: \code{qtlFineMappingResult} is the side whose
+  identity is reported in the unprefixed \code{study} / \code{context} /
+  \code{trait} / \code{method} columns, and \code{gwasInput} is the side
+  reported in the \code{gwas}-prefixed ones. A GWAS side has no context or
+  trait axis, so those two columns are \code{NA} for it.
 }
 \section{Why \code{coloc.bf_bf} and not \code{coloc.susie}}{
 
@@ -145,30 +165,31 @@ directly. That choice carries three behaviours that
     keeps effects at a secondary coverage; otherwise the default
     filter drops effects whose prior variance is below
     \code{priorTol}.
-  \item \strong{Multiple-GWAS batching}: when several GWAS
-    fine-mapping rows fall in the same region they are merged into
-    one combined LBF matrix per QTL pair (one \code{coloc.bf_bf}
-    call covers them all).
+  \item \strong{Per-tuple LBF reuse}: each second-side tuple's LBF
+    matrix is extracted once and scored against every first-side
+    tuple, so the filtering above is applied once per tuple rather
+    than once per pair.
 }
 This pipeline preserves all three.
 
-  GWAS input dispatch:
+  Second-side input dispatch:
   \itemize{
-    \item \code{gwasInput} is a \code{\link{GwasSumStats}}: GWAS
-          fine-mapping is performed inline by
+    \item \code{gwasInput} is a \code{\link{QtlSumStats}} or a
+          \code{\link{GwasSumStats}}: it is fine-mapped inline by
           \code{\link{fineMappingPipeline}} with the supplied
           \code{finemappingMethods} (default \code{"susie"}).
-    \item \code{gwasInput} is a \code{\link{GwasFineMappingResult}}:
-          used directly; no inline fine-mapping.
+    \item \code{gwasInput} is a fine-mapping result: used directly; no
+          inline fine-mapping.
   }
 }
 
 \section{LD-sketch identity check}{
  If
   \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must match
-  the LD sketch on \code{gwasInput}. Mismatch is a hard error. When the QTL
-  FMR's \code{ldSketch} is \code{NULL} (individual-level fit), the validation
-  is skipped on the QTL side.
+  the LD sketch on \code{gwasInput}. Mismatch is a hard error. When the
+  first side's \code{ldSketch} is \code{NULL} (individual-level fit), the
+  validation is skipped on that side and the second side's panel is what the
+  result carries forward.
 }
 
 \examples{
@@ -176,4 +197,10 @@ data(qtlFineMappingLbfExample)
 data(gwasFineMappingLbfExample)
 colocPipeline(qtlFineMappingLbfExample,
   gwasInput = gwasFineMappingLbfExample)
+# Either side may be a QTL result. Pairing this collection against itself
+# colocalizes its two contexts, and reports the second side's context and
+# trait in gwasContext / gwasTrait.
+res <- colocPipeline(qtlFineMappingLbfExample,
+  gwasInput = qtlFineMappingLbfExample)
+unique(getColocPairs(res)[, c("context", "gwasContext")])
 }
