@@ -200,7 +200,7 @@ test_that("loadGwasSumStatsFromManifest builds from a data.frame manifest", {
     expect_equal(length(getQcInfo(obj)), 0L) # loaders run no QC
 })
 
-test_that("loadGwasSumStatsFromManifest reads a manifest file and reconciles genome", {
+test_that("loadGwasSumStatsFromManifest reads a file and reconciles genome", {
     tmp <- withr::local_tempdir()
     ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "study1.tsv"))
     mfPath <- file.path(tmp, "gwas_manifest.tsv")
@@ -325,7 +325,7 @@ test_that("loadGwasSumStatsFromManifest resolves a YAML column mapping", {
 # Case/control counts -> effective sample size
 # ---------------------------------------------------------------------------
 
-test_that("loadGwasSumStatsFromManifest reads per-variant N_CASE/N_CONTROL (no N)", {
+test_that("loadGwasSumStatsFromManifest reads per-variant N_CASE/N_CONTROL", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     df$n_sample <- NULL # no N column ...
@@ -359,7 +359,7 @@ test_that(".resolveSumstatCols requires an N field or N_CASE + N_CONTROL", {
     )
 })
 
-test_that(".resolveSumstatCols derives the Wald z from beta/se when z is absent", {
+test_that(".resolveSumstatCols derives the Wald z from beta/se", {
     df <- .toyGwasDf(4)
     df$beta <- df$z * 0.5 # se = 0.5 -> beta/se reproduces z
     df$se <- rep(0.5, 4)
@@ -369,7 +369,7 @@ test_that(".resolveSumstatCols derives the Wald z from beta/se when z is absent"
     expect_true(all(c("BETA", "SE") %in% colnames(out))) # beta/se still attached
 })
 
-test_that(".resolveSumstatCols keeps a supplied z (beta/se do not overwrite it)", {
+test_that(".resolveSumstatCols keeps a supplied z over beta/se", {
     df <- .toyGwasDf(4)
     df$beta <- rep(99, 4)
     df$se <- rep(1, 4) # beta/se = 99, must be ignored
@@ -411,7 +411,7 @@ test_that("loadGwasSumStatsFromManifest builds from beta/se with no z column", {
     expect_equal(as.numeric(mc$Z), z_expected) # derived Wald z
 })
 
-test_that(".resolveSumstatCols allows no N when allowNoN = TRUE (study scalar)", {
+test_that(".resolveSumstatCols allows no N when allowNoN = TRUE", {
     df <- .toyGwasDf(3)
     df$n_sample <- NULL # no per-variant N, no counts
     out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl", allowNoN = TRUE)
@@ -419,7 +419,7 @@ test_that(".resolveSumstatCols allows no N when allowNoN = TRUE (study scalar)",
     expect_true(all(c("SNP", "A1", "A2", "Z") %in% colnames(out))) # ... core kept
 })
 
-test_that("loadGwasSumStatsFromManifest builds from a study nSample scalar (no per-variant N)", {
+test_that("loadGwasSumStatsFromManifest builds from a study nSample scalar", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     df$n_sample <- NULL # sumstats has no per-variant N and no counts
@@ -440,7 +440,7 @@ test_that("loadGwasSumStatsFromManifest builds from a study nSample scalar (no p
     expect_equal(as.numeric(obj$nSample), 487511) # forwarded to the slot
 })
 
-test_that("loadGwasSumStatsFromManifest builds from study case/control scalars (no per-variant N)", {
+test_that("loadGwasSumStatsFromManifest builds from case/control scalars", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     df$n_sample <- NULL
@@ -463,7 +463,7 @@ test_that("loadGwasSumStatsFromManifest builds from study case/control scalars (
     expect_equal(as.numeric(obj$nControl), 15000)
 })
 
-test_that("loadGwasSumStatsFromManifest still errors when a study has no N source at all", {
+test_that("loadGwasSumStatsFromManifest errors when a study has no N source", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     df$n_sample <- NULL # no per-variant N, no counts ...
@@ -519,7 +519,7 @@ test_that("loadQtlSumStatsFromManifest builds a per-tuple collection", {
     expect_equal(as.character(obj$context), "Whole_Blood")
 })
 
-test_that("loadQtlSumStatsFromManifest derives the Wald z from beta/se (no z column)", {
+test_that("loadQtlSumStatsFromManifest derives the Wald z from beta/se", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     z_expected <- df$z
@@ -545,7 +545,131 @@ test_that("loadQtlSumStatsFromManifest derives the Wald z from beta/se (no z col
     expect_true(all(c("BETA", "SE") %in% colnames(mc))) # beta/se still attached
 })
 
-test_that("loadQtlSumStatsFromManifest builds from a tuple nSample scalar (no per-variant N)", {
+# A cis-QTL scan's nominal output: every gene in one table, effect columns named
+# bhat/sebhat, no allele columns (the alleles live in the variant id), and the
+# ids written in PLINK .bim order chr:pos:A1:A2.
+.toyQtlCisDf <- function() {
+    # positions + alleles of the first four toy_ref panel variants, so the ids
+    # are consistent with the panel they will be matched against
+    pos <- c(14560203L, 14564328L, 14850625L, 14870204L)
+    a1 <- c("G", "C", "G", "C")
+    a2 <- c("A", "T", "T", "T")
+    data.frame(
+        chrom = rep("22", 8L),
+        pos = rep(pos, 2L),
+        molecular_trait_id = rep(c("geneA", "geneB"), each = 4L),
+        variant_id = rep(paste0("chr22:", pos, ":", a1, ":", a2), 2L),
+        af = rep(0.3, 8L),
+        pvalue = rep(0.1, 8L),
+        bhat = c(1.2, -0.4, 2.1, 0.05, 0.9, -1.1, 0.2, 0.3),
+        sebhat = rep(2, 8L),
+        n = rep(49L, 8L),
+        stringsAsFactors = FALSE
+    )
+}
+
+.qtlCisManifest <- function(path, trait = "geneA") {
+    data.frame(
+        study = "eqtl",
+        context = "context1",
+        trait = trait,
+        sumStatsPath = path,
+        stringsAsFactors = FALSE
+    )
+}
+
+test_that("loadQtlSumStatsFromManifest reads a cis-QTL nominal table", {
+    # Covers the trait filter, id-derived alleles and bhat/sebhat -> Z.
+    tmp <- withr::local_tempdir()
+    ss <- .writeSumstatsTsv(.toyQtlCisDf(), file.path(tmp, "cis.tsv"))
+    obj <- loadQtlSumStatsFromManifest(
+        .qtlCisManifest(ss),
+        genome = "hg38",
+        ldSketch = .toyLdSketch(),
+        traitColumn = "molecular_trait_id",
+        variantIdAlleles = "A1A2"
+    )
+    expect_s4_class(obj, "QtlSumStats")
+    mc <- S4Vectors::mcols(obj[[1L]])
+    expect_length(obj[[1L]], 4L) # geneB's rows dropped
+    expect_equal(as.character(mc$A1), c("G", "C", "G", "C")) # id field 3 -> A1
+    expect_equal(as.character(mc$A2), c("A", "T", "T", "T"))
+    expect_equal(as.numeric(mc$Z), c(0.6, -0.2, 1.05, 0.025)) # bhat/sebhat
+    expect_equal(as.integer(mc$N), rep(49L, 4L))
+})
+
+test_that("variantIdAlleles = 'A2A1' reads the id in canonical order", {
+    tmp <- withr::local_tempdir()
+    ss <- .writeSumstatsTsv(.toyQtlCisDf(), file.path(tmp, "cis.tsv"))
+    obj <- loadQtlSumStatsFromManifest(
+        .qtlCisManifest(ss),
+        genome = "hg38",
+        ldSketch = .toyLdSketch(),
+        traitColumn = "molecular_trait_id",
+        variantIdAlleles = "A2A1"
+    )
+    mc <- S4Vectors::mcols(obj[[1L]])
+    # Alleles come off the id the other way round.
+    expect_equal(as.character(mc$A1), c("A", "T", "T", "T"))
+    expect_equal(as.character(mc$A2), c("G", "C", "G", "C"))
+})
+
+test_that("an explicit allele column beats variantIdAlleles", {
+    tmp <- withr::local_tempdir()
+    df <- .toyQtlCisDf()
+    df$A1 <- "T"
+    df$A2 <- "C"
+    ss <- .writeSumstatsTsv(df, file.path(tmp, "cis.tsv"))
+    obj <- loadQtlSumStatsFromManifest(
+        .qtlCisManifest(ss),
+        genome = "hg38",
+        ldSketch = .toyLdSketch(),
+        traitColumn = "molecular_trait_id",
+        variantIdAlleles = "A1A2"
+    )
+    mc <- S4Vectors::mcols(obj[[1L]])
+    expect_equal(as.character(mc$A1), rep("T", 4L))
+    expect_equal(as.character(mc$A2), rep("C", 4L))
+})
+
+test_that("the trait filter and the id-allele request report what went wrong", {
+    tmp <- withr::local_tempdir()
+    ss <- .writeSumstatsTsv(.toyQtlCisDf(), file.path(tmp, "cis.tsv"))
+    expect_error(
+        loadQtlSumStatsFromManifest(
+            .qtlCisManifest(ss),
+            genome = "hg38",
+            ldSketch = .toyLdSketch(),
+            traitColumn = "no_such_col"
+        ),
+        "not a column of the sumstats file"
+    )
+    expect_error(
+        loadQtlSumStatsFromManifest(
+            .qtlCisManifest(ss, trait = "geneZ"),
+            genome = "hg38",
+            ldSketch = .toyLdSketch(),
+            traitColumn = "molecular_trait_id"
+        ),
+        "no rows with molecular_trait_id == 'geneZ'"
+    )
+    # rsIDs carry no alleles, so the derivation cannot be honoured
+    rs <- .toyGwasDf(5)
+    rs$A1 <- NULL
+    rs$A2 <- NULL
+    rsPath <- .writeSumstatsTsv(rs, file.path(tmp, "rs.tsv"))
+    expect_error(
+        loadQtlSumStatsFromManifest(
+            .qtlCisManifest(rsPath),
+            genome = "hg38",
+            ldSketch = .toyLdSketch(),
+            variantIdAlleles = "A2A1"
+        ),
+        "carry no allele pair"
+    )
+})
+
+test_that("loadQtlSumStatsFromManifest builds from a tuple nSample scalar", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     df$n_sample <- NULL # sumstats has no per-variant N
@@ -568,7 +692,7 @@ test_that("loadQtlSumStatsFromManifest builds from a tuple nSample scalar (no pe
     expect_equal(as.numeric(obj$nSample), 838) # forwarded to the slot
 })
 
-test_that("loadQtlSumStatsFromManifest still errors when a tuple has no N source at all", {
+test_that("loadQtlSumStatsFromManifest errors when a tuple has no N source", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
     df$n_sample <- NULL # no per-variant N ...
@@ -665,7 +789,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
     expect_equal(sort(names(getQtlDatasets(msd))), c("study1", "study2"))
 })
 
-test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary-only study", {
+test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {
     tmp <- withr::local_tempdir()
     bedA <- .writePhenoBed(file.path(tmp, "a.bed"))
     qdMan <- data.frame(
@@ -755,7 +879,7 @@ test_that(".detectGenotypeFormat dispatches by extension", {
     expect_equal(getFormat(h), "plink1")
 })
 
-test_that(".resolveLdSketch accepts a genoMeta vector, a path, and rejects bad input", {
+test_that(".resolveLdSketch accepts a genoMeta vector or path, rejects junk", {
     sharded <- pecotmr:::.resolveLdSketch(c("22" = .toyRefPrefix()))
     expect_s4_class(sharded, "GenotypeHandle")
     expect_true("22" %in% names(getChromPaths(sharded)))
@@ -798,7 +922,7 @@ test_that(".entriesChroms collects canonical chromosomes across entries", {
     expect_equal(pecotmr:::.entriesChroms(list(NULL)), character(0))
 })
 
-test_that(".materializeLdSketch passes a handle through and restricts spec shards", {
+test_that(".materializeLdSketch passes a handle through, restricts shards", {
     h <- .toyLdSketch()
     expect_identical(pecotmr:::.materializeLdSketch(h, "22"), h) # already in memory
     expect_null(pecotmr:::.materializeLdSketch(NULL, "22"))
@@ -811,7 +935,7 @@ test_that(".materializeLdSketch passes a handle through and restricts spec shard
     expect_error(pecotmr:::.materializeLdSketch(spec, c("22", "21")))
 })
 
-test_that("loadGwasSumStatsFromManifest reads only the sumstats chromosomes' shards", {
+test_that("loadGwasSumStatsFromManifest reads only the needed shards", {
     skip_if_not_installed("snpStats")
     tmp <- withr::local_tempdir()
     ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "study1.tsv"))
@@ -831,7 +955,7 @@ test_that("loadGwasSumStatsFromManifest reads only the sumstats chromosomes' sha
     expect_true(methods::validObject(obj))
 })
 
-test_that("ldSketch is resolved from an ldSketchPath column and conflicts error", {
+test_that("ldSketch resolves from an ldSketchPath column; conflicts error", {
     tmp <- withr::local_tempdir()
     ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "s.tsv"))
     manifest <- data.frame(
@@ -965,7 +1089,7 @@ test_that("loadGwasSumStatsFromManifest attaches nCase/nControl/varY", {
     expect_equal(as.numeric(obj$varY), 0.19)
 })
 
-test_that("loadQtlSumStatsFromManifest attaches varY and honours a region arg", {
+test_that("loadQtlSumStatsFromManifest attaches varY and honours region", {
     tmp <- withr::local_tempdir()
     ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "geneA.tsv"))
     manifest <- data.frame(
@@ -1005,7 +1129,7 @@ test_that("loadQtlSumStatsFromManifest attaches varY and honours a region arg", 
     path
 }
 
-test_that("loadQtlDatasetFromManifest attaches per-context and genotype covariates", {
+test_that("loadQtlDatasetFromManifest attaches context/genotype covariates", {
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "ctx.bed"), samples)
@@ -1047,7 +1171,7 @@ test_that("loadQtlDatasetFromManifest reads transposed (QTLtools) covariates", {
     expect_equal(ncol(getPhenotypeCovariates(qd, "ctx")[["ctx"]]), 4L)
 })
 
-test_that("loadQtlDatasetFromManifest accepts a genotype prefix and matrix covariates", {
+test_that("loadQtlDatasetFromManifest accepts a prefix and matrix covariates", {
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "ctx.bed"), samples)

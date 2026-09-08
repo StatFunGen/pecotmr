@@ -513,8 +513,10 @@ NULL
     N = c("n_sample", "N", "n"),
     N_CASE = c("N_CASE", "n_case", "ncase"),
     N_CONTROL = c("N_CONTROL", "n_control", "ncontrol"),
-    BETA = c("beta", "BETA"),
-    SE = c("se", "SE"),
+    # bhat/sebhat (and the betahat/sebetahat spelling) are what a cis-QTL scan
+    # writes -- the pipeline's own TensorQTL nominal output uses bhat/sebhat.
+    BETA = c("beta", "BETA", "bhat", "betahat"),
+    SE = c("se", "SE", "sebhat", "sebetahat"),
     P = c("p", "P", "pvalue", "pval"),
     # AF: the DIRECTIONAL effect-allele frequency, exported as top_loci$af.
     # Declared only via an explicit `af`/`AF` mapping key, or a source column
@@ -923,12 +925,114 @@ NULL
 
 # Read one delimited-text sumstats file. Region reads only when a <path>.tbi
 # sidecar exists; otherwise the whole file is read and any region is ignored.
+# ---------------------------------------------------------------------------
+# Raw-table prefilters. Applied to a sumstats table as read, before
+# `.resolveSumstatCols()` maps it onto the canonical schema.
+# ---------------------------------------------------------------------------
+
+# Keep only the rows belonging to one trait. A cis-QTL scan writes every gene's
+# window into a single table (tensorqtl does), so without this a manifest row
+# pulls in every other gene too; restricting by `region` only helps when the
+# file is tabix-indexed, and cis windows of neighbouring genes overlap anyway.
+# @noRd
+.filterSumstatsByTrait <- function(df, traitColumn, trait, label) {
+    if (is.null(traitColumn) || is.null(trait) || is.na(trait)) {
+        return(df)
+    }
+    if (!is_in(traitColumn, names(df))) {
+        cols <- str_flatten(names(df), ", ")
+        msg <- glue(
+            "{label}: traitColumn '{traitColumn}' is not a column of the ",
+            "sumstats file (has: {cols})."
+        )
+        abort(msg)
+    }
+    keep <- !is.na(df[[traitColumn]]) &
+        as.character(df[[traitColumn]]) == as.character(trait)
+    if (!any(keep)) {
+        msg <- glue(
+            "{label}: no rows with {traitColumn} == '{trait}' in the sumstats ",
+            "file."
+        )
+        abort(msg)
+    }
+    df[keep, , drop = FALSE]
+}
+
+# Populate A1/A2 from the variant id when the file carries no allele columns
+# (a cis-QTL scan reports effect + se against the genotype's counted allele and
+# leaves the alleles inside the id).
+#
+# The allele ORDER within an id is a property of whoever wrote it and cannot be
+# recovered from the string: a .pvar writes REF:ALT, which is pecotmr's
+# canonical A2:A1, while a PLINK .bim writes A1:A2. So the caller declares it
+# rather than the reader guessing -- a wrong guess is silent, not loud, because
+# summaryStatsQc() "corrects" the apparent mismatch by sign- and strand-flipping
+# every variant against the LD panel.
+# @noRd
+.deriveAllelesFromVariantId <- function(df, order, mapping, label) {
+    if (is.null(order) || identical(order, "none")) {
+        return(df)
+    }
+    have <- map_lgl(
+        c("A1", "A2"),
+        function(k) !.mlIsNaOrNull(.resolveSumstatKey(k, df, mapping, label))
+    )
+    if (any(have)) {
+        return(df) # a real allele column always wins
+    }
+    idCol <- .resolveSumstatKey("variant_id", df, mapping, label)
+    if (.mlIsNaOrNull(idCol)) {
+        return(df) # the missing-field error is raised later
+    }
+    parsed <- suppressWarnings(parseVariantId(as.character(df[[idCol]])))
+    bad <- sum(is.na(parsed$A1) | is.na(parsed$A2))
+    if (bad > 0L) {
+        n <- nrow(df)
+        msg <- glue(
+            "{label}: variantIdAlleles = '{order}' was requested but {bad} of ",
+            "{n} variant id(s) carry no allele pair."
+        )
+        abort(msg)
+    }
+    # parseVariantId() reads an id as chr:pos:A2:A1 (pecotmr's canonical
+    # order), so "A2A1" is a straight take and "A1A2" is the swap.
+    if (identical(order, "A2A1")) {
+        df$A1 <- parsed$A1
+        df$A2 <- parsed$A2
+    } else {
+        df$A1 <- parsed$A2
+        df$A2 <- parsed$A1
+    }
+    df
+}
+
+# @noRd
+.applySumstatPrefilters <- function(df, prefilters, mapping, label) {
+    if (is.null(prefilters)) {
+        return(df)
+    }
+    df <- .filterSumstatsByTrait(
+        df,
+        prefilters$traitColumn,
+        prefilters$trait,
+        label
+    )
+    .deriveAllelesFromVariantId(
+        df,
+        prefilters$variantIdAlleles,
+        mapping,
+        label
+    )
+}
+
 .readSumStatsText <- function(
     path,
     region,
     columnMapping,
     label,
-    allowNoN = FALSE
+    allowNoN = FALSE,
+    prefilters = NULL
 ) {
     hasTbi <- file.exists(str_c(path, ".tbi"))
     raw <- if (!is.null(region) && hasTbi) {
@@ -952,6 +1056,12 @@ NULL
             col_types = readr::cols(.default = readr::col_character())
         )
     }
+    raw <- .applySumstatPrefilters(
+        raw,
+        prefilters,
+        .readColumnMapping(columnMapping),
+        label
+    )
     .resolveSumstatCols(raw, columnMapping, label, allowNoN = allowNoN)
 }
 
@@ -963,7 +1073,8 @@ NULL
     sampleSelect,
     formatMapping,
     label,
-    allowNoN = FALSE
+    allowNoN = FALSE,
+    prefilters = NULL
 ) {
     lower <- str_to_lower(path)
     if (str_ends(lower, "\\.bcf")) {
@@ -983,7 +1094,8 @@ NULL
             region,
             columnMapping,
             label,
-            allowNoN = allowNoN
+            allowNoN = allowNoN,
+            prefilters = prefilters
         )
     }
 }
@@ -996,7 +1108,8 @@ NULL
     sampleSelect,
     formatMapping,
     label,
-    allowNoN = FALSE
+    allowNoN = FALSE,
+    prefilters = NULL
 ) {
     df <- .readSumStatsFile(
         path,
@@ -1005,7 +1118,8 @@ NULL
         sampleSelect,
         formatMapping,
         label,
-        allowNoN = allowNoN
+        allowNoN = allowNoN,
+        prefilters = prefilters
     )
     .dfToEntryGranges(df)
 }
@@ -1630,7 +1744,9 @@ loadGwasSumStatsFromManifest <- function(
     columnMapping,
     sampleSelect,
     formatMapping,
-    allowNoN = NULL
+    allowNoN = NULL,
+    traitColumn = NULL,
+    variantIdAlleles = "none"
 ) {
     map(
         seq_len(nrow(df)),
@@ -1641,7 +1757,9 @@ loadGwasSumStatsFromManifest <- function(
         columnMapping = columnMapping,
         sampleSelect = sampleSelect,
         formatMapping = formatMapping,
-        allowNoN = allowNoN
+        allowNoN = allowNoN,
+        traitColumn = traitColumn,
+        variantIdAlleles = variantIdAlleles
     )
 }
 
@@ -1665,6 +1783,22 @@ loadGwasSumStatsFromManifest <- function(
 #'   reconciled with an \code{ldSketchPath} column.
 #' @param region,minLdOverlapWarn,columnMapping,sampleSelect,formatMapping As
 #'   for \code{\link{loadGwasSumStatsFromManifest}}.
+#' @param traitColumn Optional column of the sumstats file naming the trait of
+#'   each row (e.g. \code{"molecular_trait_id"} in a cis-QTL scan, which writes
+#'   every gene into one table). When set, each manifest row keeps only the
+#'   rows whose \code{traitColumn} equals that row's \code{trait}. Without it
+#'   a multi-trait file loads whole, since \code{region} restriction needs a
+#'   tabix index and neighbouring cis windows overlap regardless.
+#' @param variantIdAlleles Where to find the alleles when the file has no
+#'   \code{A1}/\code{A2} columns -- a cis-QTL scan reports effect + se against
+#'   the counted allele and leaves the alleles inside the variant id. The order
+#'   within an id cannot be recovered from the string (a \code{.pvar} writes
+#'   \code{REF:ALT}, i.e. pecotmr's canonical \code{A2:A1}; a PLINK
+#'   \code{.bim} writes \code{A1:A2}), so declare it: \code{"none"} (default,
+#'   require real columns), \code{"A2A1"}, or \code{"A1A2"}. An explicit
+#'   allele column always wins. Declaring the wrong order fails silently --
+#'   \code{\link{summaryStatsQc}} will sign- and strand-flip every variant to
+#'   "correct" the apparent mismatch against the panel.
 #' @return A \code{QtlSumStats} object.
 #' @examples
 #' tsv <- system.file("extdata", "manifests",
@@ -1684,8 +1818,11 @@ loadQtlSumStatsFromManifest <- function(
     minLdOverlapWarn = 0.5,
     columnMapping = NULL,
     sampleSelect = NULL,
-    formatMapping = NULL
+    formatMapping = NULL,
+    traitColumn = NULL,
+    variantIdAlleles = c("none", "A2A1", "A1A2")
 ) {
+    variantIdAlleles <- arg_match(variantIdAlleles)
     base <- .manifestBase(manifest)
     df <- .canonManifestCols(
         .readManifest(manifest),
@@ -1695,17 +1832,7 @@ loadQtlSumStatsFromManifest <- function(
     )
     genome <- .reconcileScalar(df[["genome"]], genome, "genome")
     ldSketchSpec <- .resolveLdSketchInput(df, ldSketch, base)
-
-    # Tuple-level total-N scalar (from the manifest). When a row carries a
-    # usable nSample, summaryStatsQc fills N from it so the sumstats file need
-    # not supply a per-variant N; gate the entry reader's N check per row on it.
-    nSampleCol <- if (is_in("nSample", names(df))) {
-        as.numeric(df$nSample)
-    } else {
-        NULL
-    }
-    allowNoN <- if (!is.null(nSampleCol)) is.finite(nSampleCol) else NULL
-
+    nSample <- .qtlManifestNSample(df)
     entries <- .loadQtlSumStatsEntries(
         df,
         base,
@@ -1713,7 +1840,9 @@ loadQtlSumStatsFromManifest <- function(
         columnMapping,
         sampleSelect,
         formatMapping,
-        allowNoN = allowNoN
+        allowNoN = nSample$allowNoN,
+        traitColumn = traitColumn,
+        variantIdAlleles = variantIdAlleles
     )
 
     # Materialise the LD sketch reading only the chromosomes the summary stats
@@ -1723,8 +1852,27 @@ loadQtlSumStatsFromManifest <- function(
     .qtlSumStatsCheckContainment(ldSketch, entries, df, minLdOverlapWarn)
     ldSketch <- .subsetSketchToRange(ldSketch, entries)
 
-    qtlArgs <- .qtlSumStatsArgs(df, entries, genome, ldSketch, nSampleCol)
-    exec(QtlSumStats, !!!qtlArgs)
+    exec(
+        QtlSumStats,
+        !!!.qtlSumStatsArgs(df, entries, genome, ldSketch, nSample$nSampleCol)
+    )
+}
+
+# The tuple-level total-N scalar a manifest may carry, plus the per-row
+# "this tuple needs no per-variant N" flags derived from it: where a row has a
+# usable nSample, summaryStatsQc fills N from it, so the entry reader's N check
+# is relaxed for that row.
+# @noRd
+.qtlManifestNSample <- function(df) {
+    nSampleCol <- if (is_in("nSample", names(df))) {
+        as.numeric(df$nSample)
+    } else {
+        NULL
+    }
+    list(
+        nSampleCol = nSampleCol,
+        allowNoN = if (!is.null(nSampleCol)) is.finite(nSampleCol) else NULL
+    )
 }
 
 # Per-row LD-containment check (no-op when the sketch is NULL).
@@ -1967,7 +2115,9 @@ loadMultiStudyQtlDatasetFromManifest <- function(
     columnMapping,
     sampleSelect,
     formatMapping,
-    allowNoN
+    allowNoN,
+    traitColumn = NULL,
+    variantIdAlleles = "none"
 ) {
     label <- str_c(
         "QtlSumStats[",
@@ -1994,7 +2144,12 @@ loadMultiStudyQtlDatasetFromManifest <- function(
         sampleSelect,
         formatMapping,
         label,
-        allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]])
+        allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]]),
+        prefilters = list(
+            traitColumn = traitColumn,
+            trait = df$trait[[i]],
+            variantIdAlleles = variantIdAlleles
+        )
     )
 }
 

@@ -3327,38 +3327,54 @@ krigingOutlierQc <- function(
 # variant_id column for downstream joins). Callers record `diagnostics`
 # in the entry's qcInfo audit so the per-variant detail is available
 # for plotting / postprocessing instead of just the outlier count.
-.applyLdMismatchQcToEntry <- function(df, ldSketch, method) {
-    variantIds <- df$SNP
-    if (is.null(variantIds) || any(is.na(variantIds))) {
-        abort("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
-    }
-    # Panel LD for the entry variants via the shared LD-from-sketch helper
-    # (tuple match with chr-prefix tolerance, strand-ambiguous variants kept).
-    # A variant can survive QC while its panel partner is removed by the panel
-    # MAF/MAC/missingness filter; .panelVariantFilter passes it through and
-    # leaves the drop to onMissing here, so drop it (aligning df with the
-    # returned LD) rather than aborting.
-    nMmIn <- nrow(df)
-    R <- .ldFromSketch(
-        ldSketch,
-        variantIds,
-        label = "summaryStatsQc: zMismatchQc",
-        onMissing = "drop"
-    )
+# Panel LD for an entry's variants, via the shared LD-from-sketch helper (tuple
+# match with chr-prefix tolerance, strand-ambiguous variants kept), with the
+# entry narrowed to the variants the panel actually carries.
+#
+# A variant can survive QC while its LD-panel partner is removed by the panel
+# MAF/MAC/missingness filter (common in the study, rare in the panel --
+# deletions especially). .panelVariantFilter passes such variants through and
+# leaves the drop to onMissing here, so they are dropped here (keeping df
+# aligned with the returned LD) rather than aborting the run.
+#
+# Returns list(R, df, dropped). `R` is NULL when no variant is panel-supported,
+# and `df` is empty then -- each caller shapes its own empty result.
+# @noRd
+.qcPanelSupportedLd <- function(df, ldSketch, label) {
+    nIn <- nrow(df)
+    R <- .ldFromSketch(ldSketch, df$SNP, label = label, onMissing = "drop")
     if (is.null(R)) {
-        return(list(
-            df = df[0L, , drop = FALSE], outliers = 0L, diagnostics = NULL,
-            panelUnsupportedDropped = nMmIn
-        ))
+        return(list(R = NULL, df = df[0L, , drop = FALSE], dropped = nIn))
     }
     keptIds <- attr(R, "keptVariantIds")
     attr(R, "keptVariantIds") <- NULL
-    nPanelDrop <- 0L
-    if (!is.null(keptIds) && length(keptIds) < nrow(df)) {
-        nPanelDrop <- nrow(df) - length(keptIds)
-        df <- filter(df, is_in(.data$SNP, keptIds))
-        variantIds <- df$SNP
+    if (is.null(keptIds) || length(keptIds) >= nIn) {
+        return(list(R = R, df = df, dropped = 0L))
     }
+    list(
+        R = R,
+        df = filter(df, is_in(.data$SNP, keptIds)),
+        dropped = nIn - length(keptIds)
+    )
+}
+
+# @noRd
+.applyLdMismatchQcToEntry <- function(df, ldSketch, method) {
+    if (is.null(df$SNP) || any(is.na(df$SNP))) {
+        abort("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
+    }
+    panel <- .qcPanelSupportedLd(df, ldSketch, "summaryStatsQc: zMismatchQc")
+    if (is.null(panel$R)) {
+        return(list(
+            df = panel$df,
+            outliers = 0L,
+            diagnostics = NULL,
+            panelUnsupportedDropped = panel$dropped
+        ))
+    }
+    R <- panel$R
+    df <- panel$df
+    variantIds <- df$SNP
     qc <- ldMismatchQc(
         zScore = df$Z,
         R = R,
@@ -3387,7 +3403,7 @@ krigingOutlierQc <- function(
         df = filter(df, !outlierFlags),
         outliers = sum(outlierFlags),
         diagnostics = diagnostics,
-        panelUnsupportedDropped = nPanelDrop
+        panelUnsupportedDropped = panel$dropped
     )
 }
 
@@ -3822,12 +3838,12 @@ krigingOutlierQc <- function(
     if (is_in("se", colnames(impDf))) {
         out$SE <- impDf$se
     }
-    # RAISS reconstructs the z-score only, so it has no frequency for an imputed
-    # variant. But the OBSERVED variants came in with a (harmonized, directional)
-    # AF, which the rebuilt `out` above would otherwise discard -- leaving
-    # top_loci$af NA for the whole entry under --impute. Re-attach it by SNP so
-    # observed variants keep their AF and imputed variants (absent from `df`) get
-    # NA. No-op when the study declared no frequency.
+    # RAISS reconstructs the z-score only, so it has no frequency for an
+    # imputed variant. But the OBSERVED variants came in with a (harmonized,
+    # directional) AF, which the rebuilt `out` above would otherwise discard --
+    # leaving top_loci$af NA for the whole entry under --impute. Re-attach it by
+    # SNP so observed variants keep their AF and imputed variants (absent from
+    # `df`) get NA. No-op when the study declared no frequency.
     if (is_in("AF", colnames(df))) {
         out$AF <- as.numeric(df$AF)[match(out$SNP, df$SNP)]
     }
@@ -4040,52 +4056,76 @@ krigingOutlierQc <- function(
 
 # Kriging allele-flip QC: sign-flip LD-inconsistent z-scores in place
 # (susieR rule logLR > 2 & |z| > 2); variants are corrected and RETAINED.
+# Report the variants dropped for having no LD-panel entry; silent when the
+# panel supported every one of them.
+# @noRd
+.qcEmitPanelDrop <- function(lbl, dropped, nIn) {
+    if (dropped == 0L) {
+        return(invisible(NULL))
+    }
+    .qcEmit(
+        lbl,
+        "QC track: dropped ",
+        dropped,
+        " of ",
+        nIn,
+        " variant(s) with no LD-panel entry after panel filtering."
+    )
+}
+
+# The sample size the kriging QC runs at: the caller's nForPip when it is
+# usable, else the entry's median N.
+# @noRd
+.qcKrigingN <- function(df, opts) {
+    if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) {
+        return(opts$nForPip)
+    }
+    stats::median(as.numeric(df$N), na.rm = TRUE)
+}
+
+# Negate Z (and BETA, where the entry carries one) for the variants kriging
+# flagged as sign-flipped against the panel.
+# @noRd
+.qcApplyKrigingFlips <- function(df, flip) {
+    if (!any(flip)) {
+        return(df)
+    }
+    df$Z[flip] <- -df$Z[flip]
+    if (is_in("BETA", colnames(df))) {
+        df$BETA[flip] <- -df$BETA[flip]
+    }
+    df
+}
+
+# @noRd
 .qcKrigingFlip <- function(df, ldSketch, opts, lbl) {
     if (!isTRUE(opts$alleleFlipKriging) || nrow(df) < 2L) {
         return(list(df = df, audit = list(), count = 0L))
     }
     nKrIn <- nrow(df)
-    R <- .ldFromSketch(
+    panel <- .qcPanelSupportedLd(
+        df,
         ldSketch,
-        df$SNP,
-        label = "summaryStatsQc: kriging prefilter",
-        onMissing = "drop"
+        "summaryStatsQc: kriging prefilter"
     )
-    # A GWAS variant can survive QC while its LD-panel partner is removed by the
-    # panel MAF/MAC/missingness filter (common in the study, rare in the panel --
-    # deletions especially). .panelVariantFilter passes such variants through and
-    # leaves the drop to onMissing here, so drop them (aligning df with the
-    # returned LD) rather than aborting the run.
-    if (is.null(R)) {
+    if (is.null(panel$R)) {
         return(list(
-            df = df[0L, , drop = FALSE], count = 0L,
+            df = panel$df,
+            count = 0L,
             audit = list(krigingFlipped = 0L, panelUnsupportedDropped = nKrIn)
         ))
     }
-    keptIds <- attr(R, "keptVariantIds")
-    attr(R, "keptVariantIds") <- NULL
-    nPanelDrop <- 0L
-    if (!is.null(keptIds) && length(keptIds) < nrow(df)) {
-        nPanelDrop <- nrow(df) - length(keptIds)
-        df <- filter(df, is_in(.data$SNP, keptIds))
-        .qcEmit(
-            lbl, "QC track: dropped ", nPanelDrop, " of ", nKrIn,
-            " variant(s) with no LD-panel entry after panel filtering."
-        )
-    }
-    nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) {
-        opts$nForPip
-    } else {
-        stats::median(as.numeric(df$N), na.rm = TRUE)
-    }
-    kr <- krigingOutlierQc(df$Z, R, n = nKrig, variantIds = df$SNP)
+    df <- panel$df
+    nPanelDrop <- panel$dropped
+    .qcEmitPanelDrop(lbl, nPanelDrop, nKrIn)
+    kr <- krigingOutlierQc(
+        df$Z,
+        panel$R,
+        n = .qcKrigingN(df, opts),
+        variantIds = df$SNP
+    )
     nKr <- sum(kr$flip)
-    if (nKr > 0L) {
-        df$Z[kr$flip] <- -df$Z[kr$flip]
-        if (is_in("BETA", colnames(df))) {
-            df$BETA[kr$flip] <- -df$BETA[kr$flip]
-        }
-    }
+    df <- .qcApplyKrigingFlips(df, kr$flip)
     .qcEmit(
         lbl,
         "QC track: kriging sign-flipped ",
@@ -4121,7 +4161,11 @@ krigingOutlierQc <- function(
     if (nPanelDrop > 0L) {
         audit$panelUnsupportedDropped <- nPanelDrop
         .qcEmit(
-            lbl, "QC track: dropped ", nPanelDrop, " of ", nMmIn,
+            lbl,
+            "QC track: dropped ",
+            nPanelDrop,
+            " of ",
+            nMmIn,
             " variant(s) with no LD-panel entry after panel filtering."
         )
     }
