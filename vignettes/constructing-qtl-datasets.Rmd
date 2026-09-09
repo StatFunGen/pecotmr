@@ -276,6 +276,49 @@ names(getQtlDatasets(msdManual))
 To attach a summary-only study, pass a `QtlSumStats` object to the `sumStats`
 argument. manifest form, supply `sumStatsManifest`, `genome`, and `ldSketch`).
 
+## Excluding related samples
+
+Both `fineMappingPipeline()` and `twasWeightsPipeline()` fit models that assume
+independent samples. Related individuals break that assumption: they inflate
+the effective sample size, so cross-validated R-squared comes back optimistic
+and PIPs overconfident. Relatedness is therefore a QC step applied *before* the
+dataset is built — the pipelines do not model it.
+
+`filterRelatedness()` takes a kinship table — one row per pair, the shape
+PLINK's `--genome` or KING emits — and returns the individuals to **drop**:
+
+```{r relatedness, eval = requireNamespace("plinkQC", quietly = TRUE) && requireNamespace("igraph", quietly = TRUE)}
+relatedness <- data.frame(
+    IID1 = c(samples[1], samples[3], samples[5]),
+    IID2 = c(samples[2], samples[4], samples[6]),
+    PI_HAT = c(0.50, 0.25, 0.125),
+    stringsAsFactors = FALSE
+)
+excluded <- filterRelatedness(relatedness, relatednessThreshold = 0.0625)
+excluded
+unrelated <- setdiff(samples, excluded)
+length(unrelated)
+```
+
+One member of each related pair comes back, chosen so that what remains is as
+large an unrelated set as possible. `relatednessThreshold` defaults to 0.0625,
+which is third-degree relatives; raise it to 0.125 to keep everyone but
+second-degree and closer.
+
+The exclusion list is not applied for you — feed it to `keepSamples`, the
+constructor argument this vignette introduced above, or subset an existing
+dataset with `qd[, unrelated, ]`. Both narrow `colData` and `sampleMap`
+together.
+
+`analysisType` changes what is being maximised. The default,
+`"maximizeUnrelated"`, keeps the largest unrelated set. `"maximizeCases"`
+instead retains as many cases as it can — the right objective for a
+case/control design, where cases are the scarce resource — and requires
+`phenoData` naming each sample's status.
+
+`filterRelatedness()` needs the suggested packages **igraph** and **plinkQC**;
+the chunk above is skipped when they are not installed.
+
 ## Next steps
 
 Once built, the accessors extract data lazily, applying the stored QC filters
@@ -291,7 +334,7 @@ dim(SummarizedExperiment::assay(getPhenotypes(qd, contexts = "Muscle")))
 ```
 
 `QtlDataset` and `MultiStudyQtlDataset` are direct inputs to
-`fineMappingPipeline()`, `twasWeightsPipeline()` and `colocBoostPipeline()`—
+`fineMappingPipeline()`, `twasWeightsPipeline()` and `colocboostPipeline()`—
 see the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and
 *Multi-trait colocalization with ColocBoost* vignettes.
 

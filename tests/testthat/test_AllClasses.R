@@ -399,7 +399,7 @@ test_that("getVariantIds renders ids the same way the row classes do", {
     data(qtlSumStatsExample, envir = environment())
     expect_equal(
         getVariantIds(qtlSumStatsExample),
-        getSumstatDf(qtlSumStatsExample, require = "Z")$variant_id
+        getSumStatsDf(qtlSumStatsExample, require = "Z")$variant_id
     )
     expect_match(getVariantIds(qtlSumStatsExample)[[1L]], "^chr[^:]+:\\d+:")
 })

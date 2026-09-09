@@ -63,7 +63,7 @@ vhat <- diag(length(conds))
 dimnames(vhat) <- list(conds, conds)
 prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
   components = "canonical")
-model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
   vhat = vhat)
 mashPosterior(model, mk("strong.b", "strong.s"), alpha = 0, vhat = vhat)
 }

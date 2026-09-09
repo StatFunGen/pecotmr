@@ -377,10 +377,15 @@ NULL
         canonChrom(as.character(GenomicRanges::seqnames(sketchGr))),
         reqChrom
     )
+    # Same matching relation `.ldFromSketch()` will use when the LD is
+    # actually loaded, palindromes included -- otherwise this counts an A/T
+    # variant as absent, under-reports the overlap and warns about a panel
+    # that will in fact match.
     nOverlap <- length(
         matchVariants(
             .grVariantIds(entryGr),
-            .grVariantIds(sketchGr[keep])
+            .grVariantIds(sketchGr[keep]),
+            removeStrandAmbiguous = FALSE
         )$idxA
     )
     if (nOverlap == 0L) {

@@ -2038,12 +2038,15 @@ raissSingleMatrixFromX <- function(
 
 #' Impute Summary Statistics Using LD (RAISS)
 #'
-#' This function is a part of the statistical library for SNP imputation from:
-#' https://gitlab.pasteur.fr/statistical-genetics/raiss/-/blob/master/raiss/stat_models.py
-#' It is R implementation of the imputation model described in the paper by
-#' Bogdan Pasaniuc, Noah Zaitlen, et al., titled "Fast and accurate imputation
-#' of summary statistics enhances evidence of functional enrichment", published
-#' in Bioinformatics in 2014.
+#' An R port of the RAISS summary-statistic imputation library, described in
+#' Julienne H, Shi H, Pasaniuc B, Aschard H (2019), "RAISS: robust and accurate
+#' imputation from summary statistics", Bioinformatics 35(22):4837-4839.
+#' \doi{10.1093/bioinformatics/btz466}
+#'
+#' The imputation model it implements is the one introduced in Pasaniuc B,
+#' Zaitlen N, et al. (2014), "Fast and accurate imputation of summary
+#' statistics enhances evidence of functional enrichment", Bioinformatics
+#' 30(20):2906-2914. \doi{10.1093/bioinformatics/btu416}
 #'
 #' This function can process either a single LD matrix or a list of LD matrices
 #' for different blocks. For a list of matrices, it processes each block

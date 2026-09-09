@@ -69,8 +69,9 @@ arrays in a separate cohort). Default is 1.}
 \code{NULL} leaves the RNG state unchanged.}
 }
 \value{
-A list containing the estimated effect sizes (beta) and heritability
-  (h2).
+A list with \code{betaEst} (the estimated effect sizes) and
+  \code{h2} (the estimated heritability). \code{sdprWeights()} returns
+  only \code{betaEst}; call this directly when you also want \code{h2}.
 }
 \description{
 This function is a wrapper for the SDPR C++ implementation, which performs
@@ -78,10 +79,11 @@ Markov Chain Monte Carlo (MCMC) for estimating effect sizes and heritability
 based on summary statistics and reference LD matrices.
 }
 \note{
-This function is a wrapper for the SDPR C++ implementation, which is a
-rewritten and adopted version
-      of the SDPR package. The original SDPR documentation is available at
-      https://htmlpreview.github.io/?https://github.com/eldronzhou/SDPR/blob/main/doc/Manual.html
+This function wraps a rewritten and adapted version of the SDPR C++
+  implementation. SDPR is described in Zhou G, Zhao H (2021), "A fast and
+  robust Bayesian nonparametric method for prediction of complex traits
+  using summary statistics", PLoS Genetics 17(7): e1009697.
+  \doi{10.1371/journal.pgen.1009697}
 }
 \examples{
 # Generate example data

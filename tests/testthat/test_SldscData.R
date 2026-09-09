@@ -78,9 +78,9 @@ test_that("getAnnotCols returns the annotation columns only", {
     expect_equal(getAnnotCols(sd), c("annot_A", "annot_B"))
 })
 
-test_that("getTraitRuns / getTraitNames expose the traits list", {
+test_that("getTraitRuns / getTraits expose the traits list", {
     sd <- .sldscMkData()
-    expect_equal(getTraitNames(sd), c("traitX", "traitY"))
+    expect_equal(getTraits(sd), c("traitX", "traitY"))
     expect_named(getTraitRuns(sd), c("traitX", "traitY"))
 })
 

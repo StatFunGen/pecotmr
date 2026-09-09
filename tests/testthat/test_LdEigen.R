@@ -108,3 +108,79 @@ test_that("subsetting an LdEigen is refused, not silently allowed", {
     expect_error(obj[1:5], "cannot be subset")
     expect_error(obj[1], "Recompute over the subset")
 })
+
+
+# =============================================================================
+# buildLdEigen
+# =============================================================================
+
+test_that("buildLdEigen decomposes a single-block LdData", {
+    ld <- makeTestLdData(n = 6L)
+    ref <- buildLdEigen(ld)
+
+    expect_s4_class(ref, "LdEigen")
+    expect_equal(length(ref), 6L)
+    expect_equal(length(getEigenList(ref)), 1L)
+    expect_equal(length(getLdBlocks(ref)), 1L)
+    expect_equal(getNRef(ref), 500L)
+    expect_false(getInSample(ref))
+    expect_equal(getEigenList(ref)[[1]]$snpIdx, 1:6)
+})
+
+test_that("buildLdEigen gives one block per matrix of a multi-block LdData", {
+    ref <- buildLdEigen(makeTestLdDataMultiBlock(sizes = c(4L, 3L)))
+
+    expect_equal(length(ref), 7L)
+    blocks <- getEigenList(ref)
+    expect_equal(length(blocks), 2L)
+    # snpIdx must index the concatenated variant order, not each block's own.
+    expect_equal(blocks[[1]]$snpIdx, 1:4)
+    expect_equal(blocks[[2]]$snpIdx, 5:7)
+    expect_equal(length(getLdBlocks(ref)), 2L)
+})
+
+test_that("buildLdEigen reconstructs the correlation it was given", {
+    ld <- makeTestLdData(n = 6L)
+    block <- getEigenList(buildLdEigen(ld))[[1]]
+    rebuilt <- block$vectors %*% diag(block$values) %*% t(block$vectors)
+    expect_equal(rebuilt, unname(getCorrelation(ld)), tolerance = 1e-10)
+})
+
+test_that("buildLdEigen carries variant identity across from the LdData", {
+    ref <- buildLdEigen(makeTestLdData(n = 6L))
+    md <- S4Vectors::mcols(ref, use.names = FALSE)
+
+    # An LdData names variants `variant_id` and reports `allele_freq`; an
+    # LdStatistic wants SNP and MAF.
+    expect_equal(names(ref)[[1]], "chr1:1000:C:T")
+    expect_equal(as.character(md$A1)[[1]], "T")
+    expect_equal(as.character(md$A2)[[1]], "C")
+    expect_equal(
+        md$MAF,
+        pmin(seq(0.2, 0.8, length.out = 6), seq(0.8, 0.2, length.out = 6))
+    )
+})
+
+test_that("buildLdEigen truncates to the requested eigenvalue mass", {
+    ld <- makeTestLdData(n = 6L)
+    full <- getEigenList(buildLdEigen(ld))[[1]]
+    cut <- getEigenList(buildLdEigen(ld, eigenvalueTruncation = 0.9))[[1]]
+
+    expect_equal(length(full$values), 6L)
+    expect_lt(length(cut$values), 6L)
+    expect_equal(ncol(cut$vectors), length(cut$values))
+    # The retained components are the leading ones, unchanged.
+    expect_equal(cut$values, full$values[seq_along(cut$values)])
+})
+
+test_that("buildLdEigen prefers an explicit nRef, inSample and genome", {
+    ref <- buildLdEigen(
+        makeTestLdData(),
+        nRef = 12345L,
+        inSample = TRUE,
+        genome = "hg38"
+    )
+    expect_equal(getNRef(ref), 12345L)
+    expect_true(getInSample(ref))
+    expect_equal(getGenome(ref), "hg38")
+})

@@ -126,3 +126,85 @@ test_that("getLdBlocks returns the blocks the statistic was built against", {
     expect_s4_class(getLdBlocks(obj), "GRanges")
     expect_equal(length(getLdBlocks(obj)), 2L)
 })
+
+
+# =============================================================================
+# .ldRefPrepare -- the input handling shared by buildLdEigen/buildLdScore
+# =============================================================================
+
+test_that("the builders accept a bare LdData as well as a list of them", {
+    one <- makeTestLdData(n = 4L, startBp = 1000L)
+    two <- makeTestLdData(n = 3L, startBp = 5000L)
+
+    expect_equal(length(buildLdEigen(one)), 4L)
+    expect_equal(length(buildLdEigen(list(one))), 4L)
+
+    # A list of LdData concatenates: one LD block per element here, and the
+    # variant order follows the list order.
+    joined <- buildLdEigen(list(one, two))
+    expect_equal(length(joined), 7L)
+    expect_equal(length(getEigenList(joined)), 2L)
+    expect_equal(getEigenList(joined)[[2]]$snpIdx, 5:7)
+})
+
+test_that("the builders reject input that is not LdData", {
+    expect_error(buildLdEigen("not-ld"), "must be an LdData")
+    expect_error(buildLdEigen(list()), "must be an LdData")
+    expect_error(
+        buildLdScore(list(makeTestLdData(), "not-ld")),
+        "element\\(s\\) 2 are not LdData"
+    )
+})
+
+test_that("nRef is taken from the LdData, and disagreement is an error", {
+    a <- makeTestLdData(n = 4L, nRef = 500L)
+    b <- makeTestLdData(n = 3L, startBp = 5000L, nRef = 900L)
+
+    expect_equal(getNRef(buildLdEigen(list(a, a))), 500L)
+    expect_error(buildLdEigen(list(a, b)), "differing reference panel sizes")
+    # An explicit nRef settles it.
+    expect_equal(getNRef(buildLdEigen(list(a, b), nRef = 700L)), 700L)
+})
+
+test_that("the genome build comes from the LdData when the caller names none", {
+    ld <- makeTestLdData()
+    # loadLdMatrix() leaves the build unset, which must stay NA rather than
+    # becoming a made-up default.
+    expect_true(is.na(getGenome(buildLdEigen(ld))))
+
+    tagged <- ld
+    GenomeInfoDb::genome(tagged) <- "hg38"
+    expect_equal(getGenome(buildLdEigen(tagged)), "hg38")
+    # An explicit argument still wins.
+    expect_equal(getGenome(buildLdEigen(tagged, genome = "hg19")), "hg19")
+})
+
+test_that("LD block ranges span the variants each block covers", {
+    ref <- buildLdEigen(makeTestLdDataMultiBlock(sizes = c(4L, 3L)))
+    blocks <- getLdBlocks(ref)
+    variants <- GenomicRanges::start(ref)
+
+    expect_equal(
+        as.character(GenomicRanges::seqnames(blocks)),
+        c("chr1", "chr1")
+    )
+    expect_equal(GenomicRanges::start(blocks), c(variants[[1]], variants[[5]]))
+    expect_equal(GenomicRanges::end(blocks), c(variants[[4]], variants[[7]]))
+})
+
+test_that("an LD block spanning chromosomes is rejected", {
+    ld <- makeTestLdData(n = 4L)
+    gr <- as(ld, "GRanges")
+    GenomeInfoDb::seqlevels(gr) <- c("chr1", "chr2")
+    GenomicRanges::seqnames(gr) <- factor(
+        c("chr1", "chr1", "chr2", "chr2"),
+        levels = c("chr1", "chr2")
+    )
+    crossChrom <- LdData(
+        correlation = getCorrelation(ld),
+        variants = gr,
+        blockMetadata = getBlockMetadata(ld),
+        nRef = getNRef(ld)
+    )
+    expect_error(buildLdEigen(crossChrom), "spans 2 chromosomes")
+})

@@ -1,0 +1,313 @@
+---
+title: "Multivariate adaptive shrinkage across contexts with mash"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Multivariate adaptive shrinkage across contexts with mash}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+hasMash <- requireNamespace("mashr", quietly = TRUE) &&
+    requireNamespace("flashier", quietly = TRUE)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5,
+    eval = hasMash
+)
+```
+
+```{r mash-missing, echo=FALSE, eval=!hasMash, results="asis"}
+cat(
+    "**Note:** `mashr` and/or `flashier` are not installed, so the code",
+    "below is shown but not run."
+)
+```
+
+## Overview
+
+A QTL measured in several contexts — tissues, cell types, conditions — is
+usually not a set of independent experiments. Effects are shared, and an
+effect that looks null in one context is often a real effect that context
+was underpowered to see.
+
+[mash](https://github.com/stephenslab/mashr) learns the covariance structure
+of effect sharing from the data and shrinks each variant's per-context
+estimate toward it. `mashPipeline()` drives the whole fit; the chainable
+steps behind it let you swap out any stage.
+
+The input is a named list of summary-statistic collections split into
+**partitions**, each with a distinct job:
+
+| Partition | Role |
+|---|---|
+| `strong` | discovery variants; the data-driven covariances are learned here |
+| `random` | unbiased background; the mixture weights are fit here |
+| `null` | null variants; the residual correlation is estimated here |
+
+`strong` and `random` are required. `null` is optional and used only by the
+residual-correlation estimators that need it.
+
+Fitting chunks below are run with `results = "hide"`: `mashr` and
+`flashier` narrate their progress on stdout, which knitr cannot filter, so
+each fit is split into a compute chunk and a display chunk. The code is
+otherwise exactly what you would type.
+
+```{r load-packages}
+library(pecotmr)
+data(qtlSumStatsMulticontextExample)
+ss <- qtlSumStatsMulticontextExample
+ss
+```
+
+## The one-shot fit
+
+```{r mash-pipeline, results="hide"}
+sumStatsList <- list(strong = ss, random = ss, null = ss)
+fit <- mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
+```
+
+```{r mash-pipeline-show}
+length(fit$U)
+round(head(sort(fit$w, decreasing = TRUE), 5), 4)
+```
+
+`fit$U` is the prior covariance list and `fit$w` the estimated mixture
+weights over it. A large weight on `null` is normal and healthy: most
+variants are not QTLs.
+
+`alpha` must match the scale you are on: `alpha = 0` for effect sizes
+(BETA/SE), `alpha = 1` for Z-scores. `inputScale` controls which pair is
+extracted from the sumstats and defaults to `"auto"` — BETA + SE when every
+entry carries both, otherwise Z with unit standard errors.
+
+## Residual correlation
+
+Conditions measured on overlapping samples have correlated residuals, and
+mash needs an estimate of that correlation (`Vhat`) to avoid reading shared
+noise as shared signal. `residualCorrelationMethod` chooses the estimator:
+
+| Value | Estimator | Needs |
+|---|---|---|
+| `"identity"` (default) | no residual correlation | — |
+| `"simple"` | `mashr::estimate_null_correlation_simple()` | `null` |
+| `"simpleSpecific"` | nearest PD correlation of `cov(nullZ)` | `null` |
+| `"corshrink"` | adaptive shrinkage of the null correlation | `null`, CorShrink |
+| `"mle"` | EM refinement against the prior | `random`, `priorCovariances` |
+
+The default is `"identity"` because it always works, **not** because it is
+the best choice. Multi-context QTL data is the overlapping-sample case par
+excellence — the same donors appear in every context — so the identity
+assumption is usually wrong. Prefer a data-driven estimate whenever you have
+a null set:
+
+```{r mash-vhat, results="hide"}
+fitSimple <- mashPipeline(
+    sumStatsList,
+    alpha = 0,
+    nPcs = 2L,
+    residualCorrelationMethod = "simple"
+)
+```
+
+```{r mash-vhat-show}
+round(head(sort(fitSimple$w, decreasing = TRUE), 5), 4)
+```
+
+Supplying a `null` partition while leaving the default in place reports that
+the partition is going unused, since that combination is more often an
+oversight than an intent.
+
+You can also skip estimation entirely and pass a `Vhat` computed elsewhere —
+useful when it was estimated on a larger reference and shipped as a static
+artefact:
+
+```{r mash-vhat-supplied, eval=FALSE}
+mashPipeline(sumStatsList, alpha = 0, residualCorrelation = myVhat)
+```
+
+## The chain, step by step
+
+`mashPipeline()` is a wrapper over four steps. Take them apart when you want
+to reuse an intermediate, try several priors against one `Vhat`, or compute
+posteriors for a set other than the one you fit on.
+
+```{r mash-chain, results="hide"}
+vhat <- mashResidualCorrelation(sumStatsList, alpha = 0, method = "simple")
+prior <- mashPriorCovariances(sumStatsList, alpha = 0, vhat = vhat, nPcs = 2L)
+model <- mashModelFit(
+    sumStatsList,
+    alpha = 0,
+    priorCovariances = prior,
+    vhat = vhat
+)
+```
+
+```{r mash-chain-show}
+class(model)
+```
+
+`mashPriorCovariances()` returns `list(U, w, loglik)`, while
+`mashCovarianceComponents()` returns a bare covariance list. Either can be
+handed to any consumer — the wrapper is unwrapped for you, so there is no
+need to reach for `$U`.
+
+`mashModelFit()` returns a `mashr` model object. That is not the same thing
+as the `MashPrior` class, which packages a prior for use as a TWAS weight
+method; see [TWAS weights](twas-weights.html).
+
+## Posteriors
+
+`mashPosterior()` applies the fitted model to a target set. Fitting on
+`random` and computing posteriors on `strong` is the standard split — the
+weights should not be learned from the same variants they are applied to.
+
+```{r mash-posterior, results="hide"}
+post <- mashPosterior(model, ss, alpha = 0, vhat = vhat)
+```
+
+```{r mash-posterior-show}
+names(post)
+dim(post$PosteriorMean)
+```
+
+| Matrix | Meaning |
+|---|---|
+| `PosteriorMean` / `PosteriorSD` | shrunk effect and its uncertainty |
+| `lfsr` | local false sign rate — the quantity to threshold on |
+| `lfdr` | local false discovery rate |
+| `NegativeProb` | posterior probability the effect is negative |
+| `PosteriorCov` | per-variant across-context covariance |
+
+`lfsr` is the usual significance measure here: it asks whether the *sign* of
+an effect is confidently known, which is a more honest question than whether
+it is exactly zero.
+
+```{r mash-lfsr}
+# Variants significant in at least one context at lfsr < 0.05
+sum(apply(post$lfsr, 1, min) < 0.05)
+```
+
+## Choosing the covariance components
+
+The data-driven part of the prior is built from `components` and then
+refined by an `engine`:
+
+```{r mash-components, eval=FALSE}
+mashPriorCovariances(
+    sumStatsList,
+    alpha = 0,
+    vhat = vhat,
+    components = c("canonical", "pca", "flash", "flashNonneg"),
+    engine = "cov_ed", # or "ud" / "ud_ted" (udr)
+    nPcs = 2L
+)
+```
+
+`"cov_ed"` is the default and is mashr's own extreme deconvolution. The
+`udr` engines are opt-in and have known numerical issues; `"ud_ted"`
+additionally assumes i.i.d. (Z-scale) data. Their dominant cost is
+`udControl$n_unconstrained` (default 50), which is worth cutting sharply
+when you have few conditions.
+
+To bypass the covariance chain entirely and fit weights against a prior you
+already have:
+
+```{r mash-prior-supplied, eval=FALSE}
+mashPipeline(sumStatsList, alpha = 0, priorCovariances = myU)
+```
+
+## Posterior contrasts and feature scores
+
+Posterior means answer "how big is the effect in each context". A different
+question — "which contexts does this feature deviate in, relative to its own
+average" — is what the contrast layer computes.
+
+```{r mash-contrast, results="hide"}
+data(mashPosteriorExample)
+p <- mashPosteriorExample
+contrast <- mashPosteriorContrast(
+    p$posterior$PosteriorMean,
+    p$posterior$PosteriorCov,
+    p$orig$bhat
+)
+scores <- calculateFeatureScores(contrast)
+```
+
+```{r mash-contrast-show}
+scores
+```
+
+Each row is one condition's meta-analysed deviation score across features —
+a per-context summary of how distinctive that context's effects are. The
+bundled example is a brain cell-type panel, so the conditions are cell
+types (`Ast`, `Exc`, `Mic`, ...) plus the `ALL` pooled column.
+
+## Three ways to score a feature
+
+`calculateFeatureScores()` is one of three scoring routes over the same
+contrast result, and they answer different questions:
+
+```{r scores-three}
+# 1. meta-analysed deviation z, across features (shown above)
+head(scores, 3)
+
+# 2. the fraction of features whose deviation is significant
+nSignificantScore(contrast, pCutoff = 1e-5)
+```
+
+`nSignificantScore()` asks *how often* a condition deviates rather than *how
+strongly* — a condition can carry a large mean deviation driven by a handful
+of features, or a modest one that is consistent across many, and only the
+second is captured here.
+
+The third route brings fine-mapping in. `scoreFromCs()` restricts to the
+lead variant of each credible set, so the score reflects deviation at
+variants that are plausibly causal rather than at whatever tagged them:
+
+```{r score-cs}
+scoreFromCs(p$fineMapping, contrast, condition = "Exc")
+```
+
+It takes the least-significant credible-set lead and reports the largest
+pairwise |mean|/se there — a deliberately conservative summary, since one
+strong credible set should not carry a condition on its own.
+
+The contrast design itself is built from `makePairwiseContrastCol()`, which
+sets +1 and −1 for a pair of conditions in a zero vector, and
+`fitMashContrast()`, which fits one feature's contrast. `mashPosteriorContrast()`
+calls both across all features and pairs, so you only need them directly when
+building a non-pairwise design.
+
+## Utilities
+
+The mash track ships a set of helpers for getting real data into shape:
+
+| Function | Use |
+|---|---|
+| `mashInput()` | build the `(strong, random, null)` matrices from fine-mapping output |
+| `sanitizeMashData()` | replace `NaN`/`Inf` in `bhat`/`sbhat` with safe values |
+| `filterInvalidSummaryStat()` | drop rows mash cannot use |
+| `mergeMashData()` / `sliceMashData()` | combine or subset the matrix bundles |
+| `mashRandNullSample()` | draw the random/null partitions |
+| `filterMixtureComponents()` | drop components with negligible weight |
+| `metaAnalysisPerCondition()` | per-condition fixed-effect meta-analysis |
+| `updateMashModelCov()` | swap a fitted model's covariance list |
+
+## Next steps
+
+- [Building QtlSumStats objects](constructing-sumstats.html) — assembling
+  the multi-context input.
+- [TWAS weights](twas-weights.html) — where a mash prior is consumed, via
+  `MashPrior` and mr.mash.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

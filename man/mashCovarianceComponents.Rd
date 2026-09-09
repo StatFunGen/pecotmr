@@ -8,7 +8,7 @@ mashCovarianceComponents(
   sumStatsList,
   alpha,
   vhat = NULL,
-  components = c("canonical", "pca", "flash", "flash_nonneg"),
+  components = c("canonical", "pca", "flash", "flashNonneg"),
   nPcs = NULL,
   inputScale = c("auto", "beta", "z"),
   setSeed = 999
@@ -23,7 +23,7 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 \item{vhat}{Residual correlation matrix (\code{V}); \code{NULL} -> identity.}
 
 \item{components}{Any of \code{"canonical"}, \code{"pca"}, \code{"flash"},
-\code{"flash_nonneg"}. Built in that fixed order.}
+\code{"flashNonneg"}. Built in that fixed order.}
 
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 

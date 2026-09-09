@@ -1398,7 +1398,7 @@ buildTopLoci <- function(
 }
 
 # The per-variant N column. Numeric, so a fractional *effective* N (e.g.
-# 4 / (1 / nCase + 1 / nControl)) matches getSumstatDf(entry)$N exactly rather
+# 4 / (1 / nCase + 1 / nControl)) matches getSumStatsDf(entry)$N exactly rather
 # than being truncated. With no per-variant n this falls back to the fit's
 # scalar N (integer nrow on the QTL path, NA otherwise); a scalar n recycles.
 # @noRd

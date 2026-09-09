@@ -8,7 +8,7 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
 # CV bookkeeping, ensemble fan-in, and packaging results into a TwasWeights
 # collection. The actual weight learners are external and slow. We mock the
 # weight functions (lassoWeights / enetWeights / susieWeights, plus the
-# RSS-side susieRssWeights / lassosumRssWeights / mrAshRssWeights) to return
+# RSS-side susieRssWeights / lassosumRssWeights / mrashRssWeights) to return
 # zero-valued vectors / matrices so the orchestration runs end-to-end on a
 # small fixture.
 # ===========================================================================
@@ -396,7 +396,7 @@ test_that("twasWeightsPipeline(QtlDataset): RSS-only method rejected", {
     list(
         susieRssWeights = function(stat, LD, ...) rep(0, nrow(LD)),
         lassosumRssWeights = function(stat, LD, ...) rep(0, nrow(LD)),
-        mrAshRssWeights = function(stat, LD, ...) rep(0, nrow(LD)),
+        mrashRssWeights = function(stat, LD, ...) rep(0, nrow(LD)),
         susieInfRssWeights = function(stat, LD, ...) rep(0, nrow(LD)),
         sdprWeights = function(stat, LD, ...) rep(0, nrow(LD))
     )
@@ -579,7 +579,7 @@ test_that("gate: unknown method tokens still error with full menu", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     expect_error(
         twasWeightsPipeline(qd, methods = "totallyMadeUpMethod"),
-        "Unknown TWAS method|unknown method"
+        "unknown method token"
     )
 })
 
@@ -1671,8 +1671,8 @@ test_that(".twasNormalizeMethods: NULL falls through to the 'default' preset", {
 })
 
 test_that(".twasNormalizeMethods: character preset string forwards to .twasMethodLookup", {
-    res <- pecotmr:::.twasNormalizeMethods("fast_default")
-    fast_names <- names(pecotmr:::.twasMethodLookup("fast_default"))
+    res <- pecotmr:::.twasNormalizeMethods("fastDefault")
+    fast_names <- names(pecotmr:::.twasMethodLookup("fastDefault"))
     expect_equal(sort(names(res$methodList)), sort(fast_names))
 })
 
@@ -1862,7 +1862,7 @@ test_that(".twasAssertQcd: passes when qcInfo is populated", {
 })
 
 # ===========================================================================
-# getSumstatDf (public method on GwasSumStats / QtlSumStats; replaces
+# getSumStatsDf (public method on GwasSumStats / QtlSumStats; replaces
 # the now-deleted `.twasSumstatsEntryToDf` shim)
 # ===========================================================================
 
@@ -1903,7 +1903,7 @@ test_that(".twasAssertQcd: passes when qcInfo is populated", {
     )
 }
 
-test_that("getSumstatDf: returns the canonical column layout", {
+test_that("getSumStatsDf: returns the canonical column layout", {
     ss <- .gsd_makeGwasSumStats(data.frame(
         SNP = c("rs1", "rs2"),
         A1 = c("A", "A"),
@@ -1912,7 +1912,7 @@ test_that("getSumstatDf: returns the canonical column layout", {
         N = c(1000L, 1500L),
         MAF = c(0.1, 0.3)
     ))
-    df <- getSumstatDf(ss)
+    df <- getSumStatsDf(ss)
     expect_s3_class(df, "data.frame")
     expect_equal(df$variant_id, c("rs1", "rs2"))
     expect_equal(df$chrom, c("chr1", "chr1"))
@@ -1922,7 +1922,7 @@ test_that("getSumstatDf: returns the canonical column layout", {
     expect_equal(df$maf, c(0.1, 0.3))
 })
 
-test_that("getSumstatDf: derives z from beta/se when derive='zFromBetaSe'", {
+test_that("getSumStatsDf: derives z from beta/se when derive='zFromBetaSe'", {
     ss <- .gsd_makeGwasSumStats(
         data.frame(
             SNP = "rs1",
@@ -1934,13 +1934,13 @@ test_that("getSumstatDf: derives z from beta/se when derive='zFromBetaSe'", {
         ),
         snp_n = 1L
     )
-    df <- getSumstatDf(ss, derive = "zFromBetaSe")
+    df <- getSumStatsDf(ss, derive = "zFromBetaSe")
     expect_equal(df$beta, 0.5)
     expect_equal(df$se, 0.1)
     expect_equal(df$z, 0.5 / 0.1)
 })
 
-test_that("getSumstatDf: omits optional columns when absent", {
+test_that("getSumStatsDf: omits optional columns when absent", {
     ss <- .gsd_makeGwasSumStats(
         data.frame(
             SNP = "rs1",
@@ -1949,7 +1949,7 @@ test_that("getSumstatDf: omits optional columns when absent", {
         ),
         snp_n = 1L
     )
-    df <- getSumstatDf(ss)
+    df <- getSumStatsDf(ss)
     expect_false("z" %in% names(df))
     expect_false("beta" %in% names(df))
     expect_false("se" %in% names(df))
@@ -1957,7 +1957,7 @@ test_that("getSumstatDf: omits optional columns when absent", {
     expect_false("maf" %in% names(df))
 })
 
-test_that("getSumstatDf: require=c('Z','N') errors when columns missing", {
+test_that("getSumStatsDf: require=c('Z','N') errors when columns missing", {
     ss <- .gsd_makeGwasSumStats(
         data.frame(
             SNP = "rs1",
@@ -1967,7 +1967,7 @@ test_that("getSumstatDf: require=c('Z','N') errors when columns missing", {
         ),
         snp_n = 1L
     )
-    expect_error(getSumstatDf(ss, require = c("Z", "N")), "no N mcol")
+    expect_error(getSumStatsDf(ss, require = c("Z", "N")), "no N mcol")
 })
 
 # ===========================================================================
@@ -2964,7 +2964,7 @@ test_that("twasWeightsPipeline(QtlSumStats): NULL methods uses the default RSS p
         twasWeightsPipeline(ss, methods = NULL, verbose = 0)
     ))
     expect_s4_class(res, "TwasWeights")
-    expect_setequal(getMethodNames(res), c("lasso", "prsCs", "dpr_gibbs"))
+    expect_setequal(getMethodNames(res), c("lasso", "prsCs", "dprGibbs"))
 })
 
 test_that("twasWeightsPipeline(QtlSumStats): named-list methods and invalid type", {
@@ -3267,7 +3267,7 @@ test_that("twasWeightsPipeline(QtlSumStats): a mismatched SNP order in a multiva
     ss <- .tp_makeQtlSumStats(n_entries = 2L) # (s1, t1) x 2 ctx
     calls <- 0L
     local_mocked_bindings(
-        getSumstatDf = function(x, study, context, trait, require, ...) {
+        getSumStatsDf = function(x, study, context, trait, require, ...) {
             calls <<- calls + 1L
             vid <- if (calls == 1L) {
                 c("chr1:100:A:G", "chr1:200:A:G")
@@ -3449,7 +3449,7 @@ test_that("twasWeightsPipeline RSS cutoffs match .panelVariantFilter", {
     # Exactly the variants the shared filter names: no more (something else is
     # filtering) and no fewer (the cutoff silently did nothing).
     ss <- .twrssf_qcd()
-    ids <- getSumstatDf(
+    ids <- getSumStatsDf(
         ss,
         study = ss$study[[1L]],
         context = ss$context[[1L]],

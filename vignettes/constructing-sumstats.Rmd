@@ -215,6 +215,42 @@ For a multi-context collection (e.g. as input to `mash`), pass parallel
 `study` / `context` / `trait` vectors and a matching list of `entry` GRanges —
 one element per tuple.
 
+## From effect matrices
+
+Multi-context work often starts from matrices — variants by contexts —
+rather than per-context tables. mash in particular produces and consumes that
+shape, so two builders take it directly instead of making you assemble
+entries by hand.
+
+`qtlSumStatsFromZMatrix()` takes z-scores, with variant IDs as row names and
+contexts as column names:
+
+```{r from-z}
+data(mashInputExample)
+z <- mashInputExample$strong.z[1:6, 1:3]
+rownames(z) <- paste0("chr1:", seq(1000, by = 100, length.out = 6), ":A:G")
+qtlSumStatsFromZMatrix(z, study = "demo")
+```
+
+`qtlSumStatsFromBetaMatrix()` is the effect-size counterpart, taking `bhat`
+and `shat`:
+
+```{r from-beta}
+b <- mashInputExample$strong.b[1:6, 1:3]
+shat <- mashInputExample$strong.s[1:6, 1:3]
+rownames(b) <- rownames(shat) <- rownames(z)
+getContexts(qtlSumStatsFromBetaMatrix(b, shat, study = "demo"))
+```
+
+Both default `ldSketch = NULL`, giving an LD-free collection. That is fine
+for [mash](mash-pipeline.html), which never needs LD, but any RSS method
+does — supply a panel if the result is headed for fine-mapping or
+TWAS-weight learning.
+
+The remaining arguments (`genome`, `n`, `a1`, `a2`, `trait`) fill in the
+metadata a matrix cannot carry. The allele defaults are placeholders, so set
+them if the alleles matter downstream.
+
 ## Reading from files
 
 ### Column mapping (YAML)
@@ -296,7 +332,7 @@ with bgzip and indexed with tabix. **BCF is not supported** — convert to a
 bgzipped VCF first. Support for reading VCFs requires the `VariantAnnotation`
 package.
 
-```{r gwas-vcf, eval=hasVA}
+```{r gwas-vcf, eval = requireNamespace("VariantAnnotation", quietly = TRUE)}
 vcfLines <- c(
     "##fileformat=VCFv4.2",
     '##FORMAT=<ID=ES,Number=A,Type=Float,Description="effect size">',
@@ -363,7 +399,7 @@ gws_qcd <- summaryStatsQc(gws, zMismatchQc = "slalom")
 See the *Quality Control for GWAS and QTL Summary Statistics* vignette for the
 full QC pipeline. `QtlSumStats` and `GwasSumStats` are direct inputs to
 `fineMappingPipeline()`, `twasWeightsPipeline()` (`QtlSumStats` only) and
-`colocBoostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS
+`colocboostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS
 weights with pecotmr* and *Multi-trait colocalization with ColocBoost*
 vignettes.
 

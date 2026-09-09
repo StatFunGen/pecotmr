@@ -109,7 +109,7 @@ test_that(".twas_method_lookup: 'default' preset returns 10 methods", {
 })
 
 test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
-    result <- pecotmr:::.twasMethodLookup("fast_default")
+    result <- pecotmr:::.twasMethodLookup("fastDefault")
     expected_names <- c(
         "susie_weights",
         "susie_inf_weights",
@@ -124,7 +124,7 @@ test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
 })
 
 test_that(".twas_method_lookup: custom vector of short names", {
-    result <- pecotmr:::.twasMethodLookup(c("susie", "enet", "dpr_vb"))
+    result <- pecotmr:::.twasMethodLookup(c("susie", "enet", "dprVb"))
     expect_equal(
         sort(names(result)),
         sort(c("susie_weights", "enet_weights", "dpr_vb_weights"))
@@ -134,12 +134,12 @@ test_that(".twas_method_lookup: custom vector of short names", {
 test_that(".twas_method_lookup: unknown method produces error", {
     expect_error(
         pecotmr:::.twasMethodLookup(c("susie", "nonexistent_method")),
-        "Unknown TWAS method"
+        "unknown method token"
     )
 })
 
 test_that(".twas_method_lookup: default args are set for susie and mrash", {
-    result <- pecotmr:::.twasMethodLookup("fast_default")
+    result <- pecotmr:::.twasMethodLookup("fastDefault")
     expect_equal(result$susie_weights$refine, FALSE)
     # Matches susieR::susie's own defaults (L = min(10, p), greedy loop off),
     # as fineMappingPipeline does.
@@ -157,9 +157,9 @@ test_that(".twas_method_lookup: methods with no special args get empty list", {
 
 test_that(".twas_method_lookup: all DPR variants can coexist", {
     result <- pecotmr:::.twasMethodLookup(c(
-        "dpr_vb",
-        "dpr_gibbs",
-        "dpr_adaptive_gibbs"
+        "dprVb",
+        "dprGibbs",
+        "dprAdaptiveGibbs"
     ))
     expect_equal(
         sort(names(result)),

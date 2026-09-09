@@ -1,10 +1,10 @@
 context("regularized_regression - mr_ash_rss")
 
 # ============================================================================
-# mrAshRssWeights - dispatch + smoke test
+# mrashRssWeights - dispatch + smoke test
 # ============================================================================
 
-test_that("mrAshRssWeights forwards arguments to susieR::mr.ash.rss", {
+test_that("mrashRssWeights forwards arguments to susieR::mr.ash.rss", {
     set.seed(42)
     p <- 10
     bhat <- rnorm(p, sd = 0.1)
@@ -46,7 +46,7 @@ test_that("mrAshRssWeights forwards arguments to susieR::mr.ash.rss", {
             list(mu1 = seq_len(length(bhat)) * 0.01)
         }
     )
-    result <- mrAshRssWeights(
+    result <- mrashRssWeights(
         stat = stat,
         LD = R,
         varY = 1.5,
@@ -69,7 +69,7 @@ test_that("mrAshRssWeights forwards arguments to susieR::mr.ash.rss", {
     expect_equal(result, seq_len(p) * 0.01)
 })
 
-test_that("mrAshRssWeights returns a numeric vector of expected length", {
+test_that("mrashRssWeights returns a numeric vector of expected length", {
     skip_if_not_installed("susieR")
     set.seed(2024)
     n <- 500
@@ -82,7 +82,7 @@ test_that("mrAshRssWeights returns a numeric vector of expected length", {
     shat <- rep(1 / sqrt(n - 1), p)
     R <- cor(X)
     stat <- list(b = bhat, seb = shat, n = rep(n, p))
-    w <- mrAshRssWeights(
+    w <- mrashRssWeights(
         stat = stat,
         LD = R,
         varY = var(y),

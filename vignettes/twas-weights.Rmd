@@ -188,6 +188,86 @@ twasWeightsPipeline(
 )
 ```
 
+## Calling a weight method directly
+
+Each `methods =` value dispatches to an exported function, and those
+functions are usable on their own. Reach for one when you want to fit a
+single model to a matrix you already have — tuning a penalty, comparing
+methods outside the pipeline, or debugging a method that behaves oddly on
+your data.
+
+The individual-level methods take `X` (genotypes) and `y` (phenotype) and
+return a weight vector:
+
+```{r direct-method}
+set.seed(1)
+n <- 200
+p <- 30
+X <- matrix(rnorm(n * p), n, p, dimnames = list(NULL, paste0("v", 1:p)))
+y <- as.vector(X %*% c(rep(0.4, 3), rep(0, p - 3)) + rnorm(n))
+
+w <- lassoWeights(X = X, y = y)
+c(length = length(w), nonzero = sum(w != 0))
+```
+
+The families, and the `methods =` name each answers to:
+
+| Family | `methods =` | Function |
+|---|---|---|
+| Penalized regression | `lasso`, `enet`, `mcp`, `scad`, `l0learn` | `lassoWeights()`, `enetWeights()`, … |
+| Bayesian alphabet | `bayesA` … `bayesR`, `bLasso` | `bayesAWeights()`, `bLassoWeights()`, … |
+| Dirichlet process regression | `dprVb`, `dprGibbs`, `dprAdaptiveGibbs` | `dprVbWeights()`, `dprGibbsWeights()`, … |
+| External PRS methods | `prsCs` (sumstats input only) | `prsCs()`, `sdpr()`, `lassosumRss()` |
+| mr.mash / mr.ash | `mrmash`, `mrash` | `mrmashWeights()`, `mrashWeights()` |
+| SuSiE family | `susie`, `susieInf`, `susieAsh`, `mvsusie`, `fsusie` | `susieWeights()`, `mvsusieWeights()`, … |
+
+Every token is camelCase, matching the function names. Snake_case spellings
+are not accepted: `bayes_r`, `dpr_vb` and `susie_inf` all error with the list
+of known tokens.
+
+Every family has an RSS counterpart taking summary statistics and an LD
+matrix instead of `X`/`y` — `lassosumRssWeights()`, `mcpRssWeights()`,
+`susieRssWeights()`, and so on. Those are what
+`twasWeightsPipeline()` calls when the input is a `QtlSumStats`.
+
+`prsCs()`, `sdpr()` and `lassosumRss()` are exported alongside their
+`*Weights()` adapters because they return more than the coefficient vector.
+`sdpr()` also gives a heritability estimate (`h2`), `lassosumRss()` the whole
+regularization path (`beta` is variants x lambda, plus the `lambda` grid and
+per-fit `loss`), and `prsCs()` the posterior shrinkage parameters (`psiEst`,
+`sigmaEst`, `phiEst`). The adapters reduce each of those to the weights the
+pipeline consumes, so reach for the raw function when you want the
+diagnostics rather than just the weights.
+
+The mr.mash methods need prior covariance matrices, built by
+`buildMrmashPriorMatrices()` from components like `computeCovDiag()` and
+`computeCovFlash()`.
+
+## Cross-validation, ensembling and prediction
+
+The pipeline's `ensemble` method is not a model of its own — it is a weighted
+combination of the others, with the weights chosen by cross-validation.
+Those steps are exported too:
+
+- `twasWeightsCv()` runs the cross-validation that scores each method.
+- `learnTwasWeights()` fits one method across CV folds.
+- `combineTwasWeights()` forms the ensemble from per-method weights.
+- `estimateSparsity()` reports how sparse a fitted weight vector is.
+
+Once you have weights, `twasPredict()` applies them to a genotype matrix.
+It takes a *named list* of weight vectors, with names ending in `_weights`,
+and returns one predicted column per entry:
+
+```{r predict}
+pred <- twasPredict(X, list(gene1_weights = w))
+names(pred)
+round(cor(as.vector(pred[[1]]), y), 3)
+```
+
+That correlation is the in-sample prediction accuracy — on real data you
+would want the cross-validated version from `twasWeightsCv()` instead, since
+in-sample accuracy is optimistic by construction.
+
 ## Common parameters
 
 ```{r tw-params, eval=FALSE}

@@ -26,10 +26,10 @@ following inputs:
 
 | Input class | What it represents | Methods supported |
 |---|---|---|
-| `QtlDataset` | Single-study individual-level data | susie, susieInf, susieAsh, mvsusie, fsusie, susieSer |
-| `MultiStudyQtlDataset` | Multiple `QtlDataset` objects (optionally with an embedded `QtlSumStats`) | susie, susieInf, susieAsh, mvsusie, fsusie (individual-level only), susieSer (individual-level only)|
-| `QtlSumStats` | QTL summary statistics annotated by `(study, context, trait)` | susie, susieInf, susieAsh, mvsusie |
-| `GwasSumStats` | GWAS summary statistics annotated by `study` | susie, susieInf, susieAsh, mvsusie |
+| `QtlDataset` | Single-study individual-level data | susie, susieInf, susieAsh, mvsusie, fsusie |
+| `MultiStudyQtlDataset` | Multiple `QtlDataset` objects (optionally with an embedded `QtlSumStats`) | susie, susieInf, susieAsh, mvsusie, fsusie (individual-level only), ser (via an embedded `QtlSumStats`) |
+| `QtlSumStats` | QTL summary statistics annotated by `(study, context, trait)` | susie, susieInf, susieAsh, mvsusie, ser |
+| `GwasSumStats` | GWAS summary statistics annotated by `study` | susie, susieInf, susieAsh, ser |
 
 Method arguments are the same across input classes; `fineMappingPipeline()`
 routes `methods = "susie"` to `susieR::susie` for individual-level data
@@ -245,6 +245,35 @@ window <- GenomicRanges::GRanges(
 )
 sum(lengths(subsetRegion(fmr, window)))
 ```
+
+## Calling a fitter directly
+
+Each `methods =` value dispatches to an exported fitting function, usable on
+its own when you have matrices rather than a `QtlDataset`:
+
+| `methods =` | Individual-level | Summary-statistics |
+|---|---|---|
+| `susie` | `susieWeights()` | `susieRssWeights()` |
+| `susieInf` | `susieInfWeights()` | `susieInfRssWeights()` |
+| `susieAsh` | `susieAshWeights()` | `susieAshRssWeights()` |
+| `mvsusie` | `mvsusieWeights()` / `fitMvsusie()` | `mvsusieRssWeights()` / `fitMvsusieRss()` |
+| `fsusie` | `fsusieWeights()` / `fitFsusie()` | — |
+
+The `*Weights()` functions return a weight vector, which is what makes a
+fine-mapper usable as a [TWAS weight method](twas-weights.html); the
+`fit*()` functions return the fit object itself when you want the posterior
+rather than the coefficients.
+
+Two are worth calling out:
+
+- `fsusieWrapper()` wraps `fitFsusie()` with the credible-band and
+  affected-region post-processing, and `fsusieGetCs()`,
+  `fsusieCredibleBand()` and `fsusieAffectedRegions()` read those out.
+  fSuSiE needs a *functional* phenotype — a curve per sample, not a scalar —
+  so it does not accept the same `Y` the other methods do.
+- `fitSusieInfThenSusieRss()` chains the two: `susie_inf` first to estimate
+  the infinitesimal component, then SuSiE-RSS on the residual signal. That
+  is what `methods = "susieInf"` runs on summary statistics.
 
 ## Next steps
 

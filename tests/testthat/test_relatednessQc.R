@@ -16,7 +16,7 @@ no_related_pairs_remain <- function(
     all(kept[[value]] < threshold)
 }
 
-test_that("maximize_unrelated removes related individuals and leaves clean set", {
+test_that("maximizeUnrelated removes related individuals and leaves clean set", {
     skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
@@ -32,7 +32,7 @@ test_that("maximize_unrelated removes related individuals and leaves clean set",
     result <- filterRelatedness(
         relatedness = rel,
         relatednessThreshold = threshold,
-        analysisType = "maximize_unrelated"
+        analysisType = "maximizeUnrelated"
     )
 
     expect_type(result, "character")
@@ -55,7 +55,7 @@ test_that("no related pairs returns empty exclusion vector", {
     result <- filterRelatedness(
         relatedness = rel,
         relatednessThreshold = threshold,
-        analysisType = "maximize_unrelated"
+        analysisType = "maximizeUnrelated"
     )
 
     expect_type(result, "character")
@@ -82,7 +82,7 @@ test_that("large component pre-pruning removes individuals", {
     result <- filterRelatedness(
         relatedness = rel,
         relatednessThreshold = threshold,
-        analysisType = "maximize_unrelated",
+        analysisType = "maximizeUnrelated",
         maxComponentSize = 10,
         verbose = TRUE
     )
@@ -93,7 +93,7 @@ test_that("large component pre-pruning removes individuals", {
     expect_true(no_related_pairs_remain(rel, result, threshold))
 })
 
-test_that("maximize_cases preferentially retains cases", {
+test_that("maximizeCases preferentially retains cases", {
     skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
@@ -118,7 +118,7 @@ test_that("maximize_cases preferentially retains cases", {
     result <- filterRelatedness(
         relatedness = rel,
         relatednessThreshold = threshold,
-        analysisType = "maximize_cases",
+        analysisType = "maximizeCases",
         phenoData = pheno,
         phenoCol = "pheno"
     )
@@ -133,7 +133,7 @@ test_that("maximize_cases preferentially retains cases", {
     expect_true(no_related_pairs_remain(rel, result, threshold))
 })
 
-test_that("maximize_cases errors without pheno_data", {
+test_that("maximizeCases errors without phenoData", {
     skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
@@ -148,13 +148,13 @@ test_that("maximize_cases errors without pheno_data", {
         filterRelatedness(
             relatedness = rel,
             relatednessThreshold = 0.125,
-            analysisType = "maximize_cases"
+            analysisType = "maximizeCases"
         ),
         "Must provide phenoData"
     )
 })
 
-test_that("maximize_cases excludes a control listed as IID1 paired with a kept case", {
+test_that("maximizeCases excludes a control listed as IID1 paired with a kept case", {
     skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
@@ -176,7 +176,7 @@ test_that("maximize_cases excludes a control listed as IID1 paired with a kept c
     result <- filterRelatedness(
         relatedness = rel,
         relatednessThreshold = 0.125,
-        analysisType = "maximize_cases",
+        analysisType = "maximizeCases",
         phenoData = pheno
     )
 
@@ -214,7 +214,7 @@ test_that("iterative cleanup loops and warns when related pairs persist", {
         result <- filterRelatedness(
             relatedness = rel,
             relatednessThreshold = 0.125,
-            analysisType = "maximize_unrelated",
+            analysisType = "maximizeUnrelated",
             maxIterations = 2L,
             verbose = TRUE
         ),

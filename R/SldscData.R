@@ -174,9 +174,9 @@ setMethod("getFrqData", "SldscData", function(x) x@frq)
 #' @export
 setMethod("getTraitRuns", "SldscData", function(x) x@traits)
 
-#' @rdname getTraitNames
+#' @rdname getTraits
 #' @export
-setMethod("getTraitNames", "SldscData", function(x) names(x@traits))
+setMethod("getTraits", "SldscData", function(x) names(x@traits))
 
 #' @rdname getAnnotCols
 #' @export

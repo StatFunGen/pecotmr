@@ -9,16 +9,16 @@
 #' @importFrom purrr map map_chr keep set_names list_flatten
 NULL
 
-#' @rdname writeSumstatsVcf
+#' @rdname writeSumStatsVcf
 #' @export
 setMethod(
-    "writeSumstatsVcf",
+    "writeSumStatsVcf",
     signature("GwasSumStats"),
     function(x, outputPath, sampleName = NULL, study = NULL, ...) {
         # nocov start
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(
-                "Package 'VariantAnnotation' is required for writeSumstatsVcf"
+                "Package 'VariantAnnotation' is required for writeSumStatsVcf"
             )
         }
         # nocov end
@@ -87,10 +87,10 @@ setMethod(
     )
 }
 
-#' @rdname writeSumstatsVcf
+#' @rdname writeSumStatsVcf
 #' @export
 setMethod(
-    "writeSumstatsVcf",
+    "writeSumStatsVcf",
     signature("FineMappingResultBase"),
     function(
         x,
@@ -107,7 +107,7 @@ setMethod(
         # nocov start
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(
-                "Package 'VariantAnnotation' is required for writeSumstatsVcf"
+                "Package 'VariantAnnotation' is required for writeSumStatsVcf"
             )
         }
         # nocov end
@@ -171,7 +171,7 @@ setMethod(
         rows <- rows[as.character(x$method)[rows] == method]
     }
     if (length(rows) == 0L) {
-        abort("writeSumstatsVcf: no rows match the supplied selectors.")
+        abort("writeSumStatsVcf: no rows match the supplied selectors.")
     }
     if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
         if (length(rows) != 1L) {
@@ -349,7 +349,7 @@ setMethod(
         base <- marg
         m <- marg
     } else {
-        msg <- glue("writeSumstatsVcf: entry [{sn}] has no variants to write")
+        msg <- glue("writeSumStatsVcf: entry [{sn}] has no variants to write")
         abort(msg)
     }
     list(base = base, m = m, hasPost = hasPost)

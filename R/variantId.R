@@ -384,23 +384,6 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
     out
 }
 
-#' Parse variant IDs into a data frame
-#'
-#' Convenience wrapper around \code{\link{parseVariantId}} returning the parsed
-#' \code{chrom}/\code{pos}/\code{A2}/\code{A1} data frame for a vector of
-#' variant IDs.
-#'
-#' @param variantId A character vector of variant IDs.
-#' @return A data.frame with columns \code{chrom}, \code{pos}, \code{A2},
-#'   \code{A1}.
-#' @seealso \code{\link{parseVariantId}}
-#' @examples
-#' variantIdToDf("chr1:100:A:G")
-#' @export
-variantIdToDf <- function(variantId) {
-    parseVariantId(variantId)
-}
-
 # Complement a DNA allele string (A<->T, C<->G) for strand flipping.
 # @noRd
 .strandFlip <- function(ref) chartr("ATCG", "TAGC", ref)
@@ -593,14 +576,14 @@ harmonizeAlleles <- function(
         variantDf <- targetData |> select(all_of(variantCols))
         otherCols <- targetData |> select(-all_of(variantCols))
         targetData <- bind_cols(
-            variantIdToDf(variantDf),
+            parseVariantId(variantDf),
             otherCols,
             .name_repair = "minimal"
         )
     } else {
-        targetData <- variantIdToDf(targetData)
+        targetData <- parseVariantId(targetData)
     }
-    refVariants <- variantIdToDf(refVariants)
+    refVariants <- parseVariantId(refVariants)
     dropCols <- c("chromosome", "position", "ref", "alt", "variant_id")
     if (any(is_in(dropCols, colnames(targetData)))) {
         targetData <- select(targetData, -any_of(dropCols))
@@ -1250,48 +1233,6 @@ asGranges <- function(regions) {
             end = as.integer(df$end)
         )
     )
-}
-
-# Backwards-compat alias for external callers
-
-#' Test whether two genomic regions overlap
-#'
-#' @param regionA A region string ("chr1:100-200" or "1_100_200") or a
-#'   single-row data.frame with chrom/start/end columns.
-#' @param regionB A region string or single-row data.frame.
-#' @return Logical scalar: TRUE if the regions share at least one base pair.
-#' @importFrom GenomicRanges GRanges
-#' @importFrom IRanges IRanges findOverlaps
-#' @examples
-#' regionsOverlap("chr1:100-200", "chr1:150-250")
-#' @export
-regionsOverlap <- function(regionA, regionB) {
-    grA <- asGranges(regionA)
-    grB <- asGranges(regionB)
-    length(IRanges::findOverlaps(grA, grB)) > 0
-}
-
-#' Find which target regions overlap a query region
-#'
-#' @param query A single region string or single-row data.frame with
-#'   chrom/start/end columns.
-#' @param targets A character vector of region strings, or a multi-row
-#'   data.frame with chrom/start/end columns.
-#' @return Integer vector of 1-based indices into \code{targets} that overlap
-#'   the query. Empty integer vector if no overlaps.
-#' @importFrom GenomicRanges GRanges
-#' @importFrom IRanges IRanges findOverlaps
-#' @importFrom S4Vectors subjectHits
-#' @examples
-#' query <- "chr1:100-200"
-#' targets <- c("chr1:150-250", "chr1:300-400")
-#' findOverlappingRegions(query = query, targets = targets)
-#' @export
-findOverlappingRegions <- function(query, targets) {
-    grQuery <- asGranges(query)
-    grTargets <- asGranges(targets)
-    hits <- IRanges::findOverlaps(grQuery, grTargets)
-    unique(S4Vectors::subjectHits(hits))
 }
 
 #' Classify variant type from allele strings

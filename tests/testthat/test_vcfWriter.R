@@ -1,4 +1,4 @@
-# Tests for writeSumstatsVcf (vcfWriter.R)
+# Tests for writeSumStatsVcf (vcfWriter.R)
 
 # =============================================================================
 # Test data helpers
@@ -79,7 +79,7 @@ make_test_finemapping_result <- function(n = 5) {
 # GwasSumStats to VCF
 # =============================================================================
 
-test_that("writeSumstatsVcf writes GwasSumStats to uncompressed VCF", {
+test_that("writeSumStatsVcf writes GwasSumStats to uncompressed VCF", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
@@ -87,7 +87,7 @@ test_that("writeSumstatsVcf writes GwasSumStats to uncompressed VCF", {
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
 
-    result <- writeSumstatsVcf(ss, out)
+    result <- writeSumStatsVcf(ss, out)
     expect_equal(result, out)
     expect_true(file.exists(out))
     expect_gt(file.info(out)$size, 0)
@@ -97,7 +97,7 @@ test_that("writeSumstatsVcf writes GwasSumStats to uncompressed VCF", {
 # GwasSumStats to bgzipped VCF
 # =============================================================================
 
-test_that("writeSumstatsVcf writes GwasSumStats to bgzipped VCF", {
+test_that("writeSumStatsVcf writes GwasSumStats to bgzipped VCF", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
@@ -105,7 +105,7 @@ test_that("writeSumstatsVcf writes GwasSumStats to bgzipped VCF", {
     out <- tempfile(fileext = ".vcf.bgz")
     on.exit(unlink(c(out, paste0(out, ".tbi")), force = TRUE), add = TRUE)
 
-    result <- writeSumstatsVcf(ss, out)
+    result <- writeSumStatsVcf(ss, out)
     expect_equal(result, out)
     expect_true(file.exists(out))
     expect_gt(file.info(out)$size, 0)
@@ -115,7 +115,7 @@ test_that("writeSumstatsVcf writes GwasSumStats to bgzipped VCF", {
 # FineMappingResult to VCF
 # =============================================================================
 
-test_that("writeSumstatsVcf writes FineMappingResult to uncompressed VCF", {
+test_that("writeSumStatsVcf writes FineMappingResult to uncompressed VCF", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
@@ -123,20 +123,20 @@ test_that("writeSumstatsVcf writes FineMappingResult to uncompressed VCF", {
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
 
-    result <- writeSumstatsVcf(fm, out)
+    result <- writeSumStatsVcf(fm, out)
     expect_equal(result, out)
     expect_true(file.exists(out))
     expect_gt(file.info(out)$size, 0)
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): emits PIP + CS posterior FORMAT fields", {
+test_that("writeSumStatsVcf(FineMappingResult): emits PIP + CS posterior FORMAT fields", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
     fm <- make_test_finemapping_result(5)
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    writeSumstatsVcf(fm, out)
+    writeSumStatsVcf(fm, out)
     ln <- readLines(out)
     # The posterior fields the legacy create_vcf carried must be present. The CS
     # field is DYNAMIC (CS<coverage>) -- the fixture carries cs_95 -> CS95.
@@ -155,7 +155,7 @@ test_that("writeSumstatsVcf(FineMappingResult): emits PIP + CS posterior FORMAT 
 # FineMappingResult to BCF
 # =============================================================================
 
-test_that("writeSumstatsVcf writes FineMappingResult to BCF", {
+test_that("writeSumStatsVcf writes FineMappingResult to BCF", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     skip_if_not_installed("Rsamtools")
@@ -204,7 +204,7 @@ test_that("writeSumstatsVcf writes FineMappingResult to BCF", {
     out <- tempfile(fileext = ".bcf")
     on.exit(unlink(out), add = TRUE)
 
-    result <- writeSumstatsVcf(fm, out)
+    result <- writeSumStatsVcf(fm, out)
     expect_equal(result, out)
     expect_true(file.exists(out))
     expect_gt(file.info(out)$size, 0)
@@ -214,7 +214,7 @@ test_that("writeSumstatsVcf writes FineMappingResult to BCF", {
 # Empty FineMappingResult errors
 # =============================================================================
 
-test_that("writeSumstatsVcf errors on empty FineMappingResult", {
+test_that("writeSumStatsVcf errors on empty FineMappingResult", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
@@ -249,7 +249,7 @@ test_that("writeSumstatsVcf errors on empty FineMappingResult", {
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
 
-    expect_error(writeSumstatsVcf(fm_empty, out), "no variants to write")
+    expect_error(writeSumStatsVcf(fm_empty, out), "no variants to write")
 })
 
 # =============================================================================
@@ -290,7 +290,7 @@ test_that("writeSumstatsVcf errors on empty FineMappingResult", {
     )
 }
 
-test_that("writeSumstatsVcf(FineMappingResult): splitByContext emits one VCF per context", {
+test_that("writeSumStatsVcf(FineMappingResult): splitByContext emits one VCF per context", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
@@ -303,7 +303,7 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext emits one VCF per
         )),
         add = TRUE
     )
-    paths <- writeSumstatsVcf(fmr, baseOut, splitByContext = TRUE)
+    paths <- writeSumStatsVcf(fmr, baseOut, splitByContext = TRUE)
     expect_length(paths, 2L)
     # Each path is decorated with the context tag.
     expect_true(any(grepl("\\.brain\\.vcf$", paths)))
@@ -313,7 +313,7 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext emits one VCF per
     }
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): splitByTrait emits one VCF per trait", {
+test_that("writeSumStatsVcf(FineMappingResult): splitByTrait emits one VCF per trait", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
@@ -326,13 +326,13 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByTrait emits one VCF per t
         )),
         add = TRUE
     )
-    paths <- writeSumstatsVcf(fmr, baseOut, splitByTrait = TRUE)
+    paths <- writeSumStatsVcf(fmr, baseOut, splitByTrait = TRUE)
     expect_length(paths, 2L)
     expect_true(any(grepl("\\.ENSG_A\\.vcf$", paths)))
     expect_true(any(grepl("\\.ENSG_B\\.vcf$", paths)))
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): splitByContext + splitByTrait combines tags", {
+test_that("writeSumStatsVcf(FineMappingResult): splitByContext + splitByTrait combines tags", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
@@ -345,7 +345,7 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext + splitByTrait co
         )),
         add = TRUE
     )
-    paths <- writeSumstatsVcf(
+    paths <- writeSumStatsVcf(
         fmr,
         baseOut,
         splitByContext = TRUE,
@@ -356,12 +356,12 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext + splitByTrait co
     expect_true(any(grepl("\\.blood\\.ENSG_B\\.vcf$", paths)))
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): multi-row without split flags requires selectors", {
+test_that("writeSumStatsVcf(FineMappingResult): multi-row without split flags requires selectors", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
     out <- tempfile(fileext = ".vcf")
-    expect_error(writeSumstatsVcf(fmr, out), "2 matching rows")
+    expect_error(writeSumStatsVcf(fmr, out), "2 matching rows")
 })
 
 # =============================================================================
@@ -398,25 +398,25 @@ test_that("writeSumstatsVcf(FineMappingResult): multi-row without split flags re
     )
 }
 
-test_that("writeSumstatsVcf(GwasSumStats): multi-study without `study` selector errors", {
+test_that("writeSumStatsVcf(GwasSumStats): multi-study without `study` selector errors", {
     skip_if_not_installed("VariantAnnotation")
     ss2 <- .make_two_study_gwasSumStats()
     out <- tempfile(fileext = ".vcf")
-    expect_error(writeSumstatsVcf(ss2, out), "2 studies")
+    expect_error(writeSumStatsVcf(ss2, out), "2 studies")
 })
 
-test_that("writeSumstatsVcf(GwasSumStats): `study` selector writes the chosen study", {
+test_that("writeSumStatsVcf(GwasSumStats): `study` selector writes the chosen study", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss2 <- .make_two_study_gwasSumStats()
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    res <- writeSumstatsVcf(ss2, out, study = "studyB")
+    res <- writeSumStatsVcf(ss2, out, study = "studyB")
     expect_equal(res, out)
     expect_true(file.exists(out))
 })
 
-test_that("writeSumstatsVcf(GwasSumStats): emits the AF genotype field when MAF present", {
+test_that("writeSumStatsVcf(GwasSumStats): emits the AF genotype field when MAF present", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss <- GwasSumStats(
@@ -441,19 +441,19 @@ test_that("writeSumstatsVcf(GwasSumStats): emits the AF genotype field when MAF 
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    writeSumstatsVcf(ss, out)
+    writeSumStatsVcf(ss, out)
     expect_true(file.exists(out))
     # The AF FORMAT field is declared in the header when MAF is present.
     expect_true(any(grepl("ID=AF", readLines(out))))
 })
 
-test_that("writeSumstatsVcf(GwasSumStats): .vcf.gz output is renamed from writeVcf's .bgz", {
+test_that("writeSumStatsVcf(GwasSumStats): .vcf.gz output is renamed from writeVcf's .bgz", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss <- make_test_gwasSumStats(5)
     out <- tempfile(fileext = ".vcf.gz")
     on.exit(unlink(c(out, paste0(out, ".tbi")), force = TRUE), add = TRUE)
-    res <- writeSumstatsVcf(ss, out)
+    res <- writeSumStatsVcf(ss, out)
     expect_equal(res, out)
     # writeVcf always emits .bgz; the writer renames it to the requested .gz.
     expect_true(file.exists(out))
@@ -464,13 +464,13 @@ test_that("writeSumstatsVcf(GwasSumStats): .vcf.gz output is renamed from writeV
 # FineMappingResult: explicit selectors, no-match error, composite/empty tags
 # =============================================================================
 
-test_that("writeSumstatsVcf(FineMappingResult): explicit selectors pick a single row", {
+test_that("writeSumStatsVcf(FineMappingResult): explicit selectors pick a single row", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    res <- writeSumstatsVcf(
+    res <- writeSumStatsVcf(
         fmr,
         out,
         study = "study1",
@@ -482,18 +482,18 @@ test_that("writeSumstatsVcf(FineMappingResult): explicit selectors pick a single
     expect_true(file.exists(out))
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): no matching rows errors", {
+test_that("writeSumStatsVcf(FineMappingResult): no matching rows errors", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
     out <- tempfile(fileext = ".vcf")
     expect_error(
-        writeSumstatsVcf(fmr, out, study = "does_not_exist"),
+        writeSumStatsVcf(fmr, out, study = "does_not_exist"),
         "no rows match"
     )
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): splitByContext decorates composite .vcf.bgz paths", {
+test_that("writeSumStatsVcf(FineMappingResult): splitByContext decorates composite .vcf.bgz paths", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .make_multi_tuple_qtl_fmr()
@@ -510,7 +510,7 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext decorates composi
         ),
         add = TRUE
     )
-    paths <- writeSumstatsVcf(fmr, baseOut, splitByContext = TRUE)
+    paths <- writeSumStatsVcf(fmr, baseOut, splitByContext = TRUE)
     expect_length(paths, 2L)
     # Composite extension is preserved while the context tag is injected before it.
     expect_true(all(grepl("\\.vcf\\.bgz$", paths)))
@@ -518,7 +518,7 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext decorates composi
     expect_true(any(grepl("\\.blood\\.vcf\\.bgz$", paths)))
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): splitByContext on a context-less result keeps the path", {
+test_that("writeSumStatsVcf(FineMappingResult): splitByContext on a context-less result keeps the path", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # GwasFineMappingResult has no context/trait axes, so the split tag set is
@@ -526,13 +526,13 @@ test_that("writeSumstatsVcf(FineMappingResult): splitByContext on a context-less
     fm <- make_test_finemapping_result(5)
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    paths <- writeSumstatsVcf(fm, out, splitByContext = TRUE)
+    paths <- writeSumStatsVcf(fm, out, splitByContext = TRUE)
     expect_length(paths, 1L)
     expect_equal(paths[[1L]], out)
     expect_true(file.exists(out))
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): emits AF from the topLoci `af` column", {
+test_that("writeSumStatsVcf(FineMappingResult): emits AF from the topLoci `af` column", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # The marginal view projects allele frequency to a column named `af`, so a
@@ -568,12 +568,12 @@ test_that("writeSumstatsVcf(FineMappingResult): emits AF from the topLoci `af` c
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    writeSumstatsVcf(fm, out)
+    writeSumStatsVcf(fm, out)
     expect_true(file.exists(out))
     expect_true(any(grepl("ID=AF", readLines(out))))
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit FORMAT fields", {
+test_that("writeSumStatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit FORMAT fields", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # A rich topLoci exercises every posterior FORMAT field: per-variant logBF (LBF),
@@ -615,7 +615,7 @@ test_that("writeSumstatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    writeSumstatsVcf(fm, out)
+    writeSumStatsVcf(fm, out)
     ln <- readLines(out)
     for (id in c(
         "ID=LBF",
@@ -629,7 +629,7 @@ test_that("writeSumstatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit
     }
 })
 
-test_that("writeSumstatsVcf(FineMappingResult): falls back to marginal sumstats when no posterior", {
+test_that("writeSumStatsVcf(FineMappingResult): falls back to marginal sumstats when no posterior", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fm <- make_test_finemapping_result(5)
@@ -641,7 +641,7 @@ test_that("writeSumstatsVcf(FineMappingResult): falls back to marginal sumstats 
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    writeSumstatsVcf(fm, out)
+    writeSumStatsVcf(fm, out)
     expect_true(file.exists(out))
     expect_true(any(grepl("ID=ES", readLines(out), fixed = TRUE))) # marginal beta -> ES
 })

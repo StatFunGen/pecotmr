@@ -1147,12 +1147,12 @@ test_that("twasZ: error when weights and z have different lengths", {
     )
 })
 
-# Phase 2: loadLdSketch() and standardize_genotype_hwe()
+# Phase 2: LD-sketch loading and standardize_genotype_hwe()
 
 # ===========================================================================
 # Direct unit tests for the MR / metric helpers (mock getTopLoci to feed
 # controlled topLoci frames; gwasDf is a plain data.frame as produced by
-# getSumstatDf upstream).
+# getSumStatsDf upstream).
 # ===========================================================================
 
 .cip_gwasDf <- function(

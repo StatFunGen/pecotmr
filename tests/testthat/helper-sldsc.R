@@ -243,8 +243,11 @@
         propH2 = setNames(rep(0.2, n), cats),
         propSnps = setNames(rep(0.1, n), cats),
         h2g = h2g,
+        # Per-block tau has to vary: a constant matrix gives a jackknife
+        # tauStarSe of exactly 0, which drops every trait from the
+        # DerSimonian-Laird meta (nTraits == 0 and all-NA meta rows).
         tauBlocks = matrix(
-            rep(tau, nBlocks * n),
+            rep(tau * seq(0.9, 1.1, length.out = nBlocks), n),
             nBlocks,
             n,
             dimnames = list(NULL, cats)

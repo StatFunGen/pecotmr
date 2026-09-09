@@ -175,3 +175,83 @@ makeGwasBlock <- function(
     )
     obj
 }
+
+
+# =============================================================================
+# LdData fixtures for buildLdEigen() / buildLdScore()
+# =============================================================================
+
+# The mcols a loadLdMatrix() LdData carries: variant_id rather than SNP, and
+# allele_freq rather than MAF. The builders have to cope with that shape.
+.testLdVariants <- function(n, chrom, startBp) {
+    bp <- seq(startBp, by = 100L, length.out = n)
+    gr <- GenomicRanges::GRanges(
+        seqnames = chrom,
+        ranges = IRanges::IRanges(start = as.integer(bp), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        variant_id = paste0(chrom, ":", bp, ":C:T"),
+        A1 = rep("T", n),
+        A2 = rep("C", n),
+        allele_freq = seq(0.2, 0.8, length.out = n)
+    )
+    gr
+}
+
+.testArBlock <- function(n, rho) {
+    rho^abs(outer(seq_len(n), seq_len(n), "-"))
+}
+
+.testBlockMetadata <- function(sizes, chrom, gr) {
+    ends <- cumsum(sizes)
+    starts <- ends - sizes + 1L
+    tibble::tibble(
+        blockId = seq_along(sizes),
+        chrom = sub("^chr", "", chrom),
+        blockStart = as.integer(GenomicRanges::start(gr)[starts]),
+        blockEnd = as.integer(GenomicRanges::start(gr)[ends]),
+        size = as.integer(sizes),
+        startIdx = as.integer(starts),
+        endIdx = as.integer(ends)
+    )
+}
+
+# One block: correlation is a single matrix.
+makeTestLdData <- function(
+    n = 6L,
+    chrom = "chr1",
+    startBp = 1000L,
+    rho = 0.5,
+    nRef = 500L
+) {
+    gr <- .testLdVariants(n, chrom, startBp)
+    R <- .testArBlock(n, rho)
+    dimnames(R) <- list(
+        S4Vectors::mcols(gr)$variant_id,
+        S4Vectors::mcols(gr)$variant_id
+    )
+    LdData(
+        correlation = R,
+        variants = gr,
+        blockMetadata = .testBlockMetadata(n, chrom, gr),
+        nRef = nRef
+    )
+}
+
+# Several blocks in one LdData: correlation is a list of per-block matrices
+# and blockMetadata carries the startIdx/endIdx mapping into the variants.
+makeTestLdDataMultiBlock <- function(
+    sizes = c(4L, 3L),
+    chrom = "chr1",
+    startBp = 1000L,
+    rho = 0.5,
+    nRef = 500L
+) {
+    gr <- .testLdVariants(sum(sizes), chrom, startBp)
+    LdData(
+        correlation = lapply(sizes, .testArBlock, rho = rho),
+        variants = gr,
+        blockMetadata = .testBlockMetadata(sizes, chrom, gr),
+        nRef = nRef
+    )
+}

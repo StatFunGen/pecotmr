@@ -310,7 +310,7 @@ GenotypeHandle <- function(
         msg <- glue(
             "GenotypeHandle: the LD-meta row for region {regionStr} points ",
             "at a pre-computed correlation matrix ({ldPath}). Use ",
-            "loadLdMatrix() / loadLdSketch() for .cor.xz inputs; ",
+            "loadLdMatrix() for .cor.xz inputs; ",
             "GenotypeHandle accepts only genotype payloads (VCF/GDS/PLINK)."
         )
         abort(msg)

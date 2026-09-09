@@ -1010,7 +1010,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         context = as.character(data$context),
         trait = as.character(data$trait)
     )
-    firstDf <- getSumstatDf(
+    firstDf <- getSumStatsDf(
         data,
         study = cols$study[[tupleRows[[1L]]]],
         context = cols$context[[tupleRows[[1L]]]],
@@ -1057,7 +1057,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     nVec <- numeric(length(tupleRows))
     for (kk in seq_along(tupleRows)) {
         i <- tupleRows[[kk]]
-        d <- getSumstatDf(
+        d <- getSumStatsDf(
             data,
             study = cols$study[[i]],
             context = cols$context[[i]],

@@ -6,9 +6,14 @@
 \usage{
 loadLdMatrix(
   ldMetaFilePath,
-  region,
+  region = NULL,
+  block = NULL,
   extractCoordinates = NULL,
   returnGenotype = FALSE,
+  dropMonomorphic = FALSE,
+  materializeGenotypes = FALSE,
+  maxVariants = NULL,
+  seed = NULL,
   nSample = NULL
 )
 }
@@ -18,6 +23,12 @@ loadLdMatrix(
 \item{region}{Region of interest: "chr:start-end" string or data.frame with
 chrom/start/end.}
 
+\item{block}{Integer block index (or vector of them), for sources that
+carry no coordinates: an \code{ldInfo} table (the cTWAS \code{LD_map}
+shape -- an \code{LD_file} column and optionally \code{SNP_file}), a
+correlation or genotype matrix, or a list of either. Supply exactly one
+of \code{region} and \code{block}.}
+
 \item{extractCoordinates}{Optional data.frame with columns "chrom" and "pos"
 for specific coordinates extraction (only for pre-computed LD blocks).}
 
@@ -25,6 +36,21 @@ for specific coordinates extraction (only for pre-computed LD blocks).}
 FALSE (default): always return correlation matrix R. TRUE: return genotype
 matrix X (only valid for PLINK sources). "auto": return X for PLINK
 sources, R for pre-computed sources.}
+
+\item{dropMonomorphic}{Logical. Drop variants with no variation, which
+carry no LD and make a correlation undefined. Needs allele frequencies,
+so it applies to genotype sources.}
+
+\item{materializeGenotypes}{Logical. Read the dosages once and keep them on
+the returned object, so later access does no file I/O. Costs memory and
+saves repeated reads.}
+
+\item{maxVariants}{Integer or \code{NULL}. Randomly thin any block larger
+than this, to bound memory.}
+
+\item{seed}{Integer or \code{NULL}. Seeds the \code{maxVariants} draw,
+offset by the block index so blocks are independent yet reproducible, via
+a scoped \code{withr::local_seed} that leaves the session RNG alone.}
 
 \item{nSample}{Optional sample size for computing variance (=
 2*p*(1-p)*n/(n-1)). If NULL, ref_panel will not include variance or
@@ -67,4 +93,6 @@ The metadata TSV must have columns: chrom, start, end, path. Two formats:
 meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
   package = "pecotmr")
 loadLdMatrix(ldMetaFilePath = meta, region = "chr22:16000000-18000000")
+# Several regions at once return one LdData per block.
+length(loadLdMatrix(meta, region = rep("chr22:16000000-18000000", 2)))
 }

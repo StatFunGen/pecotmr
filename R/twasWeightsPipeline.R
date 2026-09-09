@@ -212,7 +212,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     # input-class compatibility to .fmCheckMethodCapabilities.
     mrash = list(
         individualImpl = "mrashWeights",
-        sumstatImpl = "mrAshRssWeights",
+        sumstatImpl = "mrashRssWeights",
         multivariate = FALSE
     ),
     lasso = list(
@@ -240,7 +240,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         sumstatImpl = "mrmashRssWeights",
         multivariate = TRUE
     ),
-    dpr_gibbs = list(
+    dprGibbs = list(
         individualImpl = "dprGibbsWeights",
         sumstatImpl = "sdprWeights",
         multivariate = FALSE
@@ -252,48 +252,48 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         multivariate = FALSE
     ),
     # Individual-only DPR variants (sumstat counterparts not implemented).
-    dpr_vb = list(
+    dprVb = list(
         individualImpl = "dprVbWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    dpr_adaptive_gibbs = list(
+    dprAdaptiveGibbs = list(
         individualImpl = "dprAdaptiveGibbsWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
     # qgg Bayes alphabet -- individual-only until qgg CRAN release.
-    bayes_a = list(
+    bayesA = list(
         individualImpl = "bayesAWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    bayes_b = list(
+    bayesB = list(
         individualImpl = "bayesBWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    bayes_c = list(
+    bayesC = list(
         individualImpl = "bayesCWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    bayes_l = list(
+    bayesL = list(
         individualImpl = "bLassoWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    bayes_n = list(
+    bayesN = list(
         individualImpl = "bayesNWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    bayes_r = list(
+    bayesR = list(
         individualImpl = "bayesRWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    b_lasso = list(
+    bLasso = list(
         individualImpl = "bLassoWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
@@ -337,7 +337,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # Character `methods`: resolve regular tokens via .twasMethodLookup and append
 # empty stub entries for fine-mapping tokens with no learner counterpart (e.g.
 # fsusie) so the downstream gate can produce a method-specific error rather than
-# "Unknown TWAS method".
+# the generic "unknown method token(s)".
 # @noRd
 .twasNormalizeCharMethods <- function(methods) {
     fmExtra <- setdiff(
@@ -396,16 +396,16 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         "mrash",
         "enet",
         "lasso",
-        "bayes_r",
-        "bayes_l",
-        "bayes_a",
-        "bayes_b",
-        "bayes_c",
-        "bayes_n",
-        "b_lasso",
-        "dpr_vb",
-        "dpr_gibbs",
-        "dpr_adaptive_gibbs",
+        "bayesR",
+        "bayesL",
+        "bayesA",
+        "bayesB",
+        "bayesC",
+        "bayesN",
+        "bLasso",
+        "dprVb",
+        "dprGibbs",
+        "dprAdaptiveGibbs",
         "scad",
         "mcp",
         "l0learn",
@@ -428,16 +428,16 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         mrash = "mrash",
         enet = "enet",
         lasso = "lasso",
-        bayes_r = "bayes_r",
-        bayes_l = "bayes_l",
-        bayes_a = "bayes_a",
-        bayes_b = "bayes_b",
-        bayes_c = "bayes_c",
-        bayes_n = "bayes_n",
-        b_lasso = "b_lasso",
-        dpr_vb = "dpr_vb",
-        dpr_gibbs = "dpr_gibbs",
-        dpr_adaptive_gibbs = "dpr_adaptive_gibbs",
+        bayesR = "bayesR",
+        bayesL = "bayesL",
+        bayesA = "bayesA",
+        bayesB = "bayesB",
+        bayesC = "bayesC",
+        bayesN = "bayesN",
+        bLasso = "bLasso",
+        dprVb = "dprVb",
+        dprGibbs = "dprGibbs",
+        dprAdaptiveGibbs = "dprAdaptiveGibbs",
         scad = "scad",
         mcp = "mcp",
         l0learn = "l0learn",
@@ -941,7 +941,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 #'   embedded individual-level \code{QtlDataset} entries and the optional
 #'   embedded \code{QtlSumStats}, then rbinds the results.
 #' @param methods A character vector of short method names, a preset string
-#'   (\code{"default"} or \code{"fast_default"}), or a named list of
+#'   (\code{"default"} or \code{"fastDefault"}), or a named list of
 #'   \code{<method>_weights = args} entries. For QtlSumStats / GwasSumStats
 #'   inputs the default switches to the RSS preset (\code{c("susieRss",
 #'   "susieInfRss", "lassosumRss", "prsCs", "sdpr")}).
@@ -1529,7 +1529,7 @@ setMethod(
 # @noRd
 .twasSumStatsMethodTokens <- function(methods) {
     if (is.null(methods)) {
-        tokens <- c("lasso", "prsCs", "dpr_gibbs")
+        tokens <- c("lasso", "prsCs", "dprGibbs")
         return(list(tokens = tokens, methodArgs = .twasEmptyMethodArgs(tokens)))
     }
     if (is.character(methods)) {
@@ -1821,7 +1821,7 @@ setMethod(
     ldSketch,
     cutoffs = NULL
 ) {
-    df <- getSumstatDf(
+    df <- getSumStatsDf(
         data,
         study = st,
         context = ctx,
@@ -1994,7 +1994,7 @@ setMethod(
     ldSketch = NULL,
     cutoffs = NULL
 ) {
-    firstDf <- getSumstatDf(
+    firstDf <- getSumStatsDf(
         data,
         study = st,
         context = ctxNames[[1L]],
@@ -2037,7 +2037,7 @@ setMethod(
 .twasQssFillContexts <- function(data, st, tr, ctxNames, variantIds, Z) {
     nVec <- numeric(length(ctxNames))
     for (kk in seq_along(ctxNames)) {
-        d <- getSumstatDf(
+        d <- getSumStatsDf(
             data,
             study = st,
             context = ctxNames[[kk]],

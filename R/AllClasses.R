@@ -85,7 +85,7 @@ setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 #
 # getZ / getN / getMaf / nSnps are
 # defined once on SumStatsBase (they only delegate to getSumStats); subsetChr /
-# getVarY / getSumStats / getSumstatDf stay on the concrete subclass because
+# getVarY / getSumStats / getSumStatsDf stay on the concrete subclass because
 # they rely on the tuple shape (3-tuple QtlSumStats, 1-tuple GwasSumStats).
 # =============================================================================
 

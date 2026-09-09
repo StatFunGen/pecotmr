@@ -10,7 +10,7 @@ mcpRssWeights(
   s = c(0.2, 0.5, 0.9, 1),
   gamma = 3,
   alpha = 1,
-  selection = c("ld_quadratic", "min_fbeta"),
+  selection = c("ldQuadratic", "minFbeta"),
   ...
 )
 }
@@ -27,8 +27,8 @@ sample sizes).}
 
 \item{alpha}{Elastic-net mixing (1 = pure L1). Default 1.}
 
-\item{selection}{Selection strategy: \code{"ld_quadratic"} (default) or
-\code{"min_fbeta"}.}
+\item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
+\code{"minFbeta"}.}
 
 \item{...}{Additional arguments passed to \code{penalizedRss()}.}
 }

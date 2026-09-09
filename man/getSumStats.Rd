@@ -42,8 +42,9 @@ this trait; \code{NULL} matches all traits.}
 enriched by \code{\link{qtlAssociationPostprocess}}, a logical
 \code{significant} mcol for that method is added to the returned entry (the
 significance is derived on the fly, not stored). Flat export flattens this
-full entry GRanges (all mcols) directly; note \code{\link{getSumstatDf}} is
-a fixed GWAS-schema view and does not carry the association columns.}
+full entry GRanges (all mcols) directly; note
+\code{\link{getSumStatsDf}} is a fixed GWAS-schema view and does not
+carry the association columns.}
 
 \item{ranges}{A \code{GRanges} or \code{NULL} (default). A selected tuple can
 own several elements -- one per chromosome, since a multi-seqname entry is

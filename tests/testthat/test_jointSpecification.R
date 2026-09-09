@@ -1670,7 +1670,7 @@ test_that(".buildJointSumstatZMatrix: a mismatched SNP order across entries erro
     )
     calls <- 0L
     local_mocked_bindings(
-        getSumstatDf = function(x, study, context, trait, require, ...) {
+        getSumStatsDf = function(x, study, context, trait, require, ...) {
             calls <<- calls + 1L
             vid <- if (calls == 1L) {
                 c("chr1:100:A:G", "chr1:200:A:G")

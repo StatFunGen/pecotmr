@@ -8,7 +8,7 @@ lassosumRssWeights(
   stat,
   LD,
   s = c(0.2, 0.5, 0.9, 1),
-  selection = c("ld_quadratic", "min_fbeta"),
+  selection = c("ldQuadratic", "minFbeta"),
   ...
 )
 }
@@ -21,9 +21,9 @@ sample sizes).}
 \item{s}{Numeric vector of shrinkage parameters to search over. Default:
 \code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.}
 
-\item{selection}{Selection strategy. Default \code{"ld_quadratic"} uses
+\item{selection}{Selection strategy. Default \code{"ldQuadratic"} uses
 \eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
-\code{"min_fbeta"} is retained as an explicit alternative for debugging.}
+\code{"minFbeta"} is retained as an explicit alternative for debugging.}
 
 \item{...}{Additional arguments passed to \code{lassosumRss()}.}
 }

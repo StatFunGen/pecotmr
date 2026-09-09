@@ -23,11 +23,30 @@ NULL
 # =============================================================================
 
 #' @title Estimate SNP Heritability
-#' @description Estimate SNP heritability from GWAS summary statistics using one
-#'   of three methods: LDER, g-LDSC, or HDL/sHDL.
+#' @description Estimate SNP heritability from GWAS summary statistics using
+#'   one of four methods: S-LDSC, g-LDSC, LDER, or HDL/sHDL. Supplying
+#'   \code{annotations} makes any of them stratified.
 #' @param sumstats A \code{GwasSumStats} object.
-#' @param ldRef An \code{LdStatistic} object (method-appropriate subclass).
-#' @param method Character, one of "lder", "gldsc", "hdl".
+#' @param ldRef An \code{LdStatistic} object (method-appropriate subclass):
+#'   an \code{\link{LdScore}} for \code{"sldsc"} / \code{"gldsc"}, an
+#'   \code{\link{LdEigen}} for \code{"lder"} / \code{"hdl"}. Build either
+#'   from loaded LD with \code{\link{buildLdScore}} /
+#'   \code{\link{buildLdEigen}}.
+#' @param method Character, one of \code{"lder"} (the default),
+#'   \code{"sldsc"}, \code{"gldsc"} or \code{"hdl"}:
+#'   \describe{
+#'     \item{\code{"sldsc"}}{Stratified LD score regression (Finucane et al.
+#'       2015): weighted least squares of \eqn{\chi^2} on LD scores. Needs
+#'       only per-variant scores when unstratified, so it is the cheapest of
+#'       the four and the only one that runs on a scores-only
+#'       \code{LdScore}.}
+#'     \item{\code{"gldsc"}}{Generalized LD score regression (Xiong et al.
+#'       2024): GLS using the full per-block LD matrices.}
+#'     \item{\code{"lder"}}{LD eigenvalue regression (Song et al. 2022).}
+#'     \item{\code{"hdl"}}{High-definition likelihood (Ning et al. 2020),
+#'       stratified as sHDL. Models reference-panel noise explicitly, so it
+#'       shrinks hard when \code{nRef} is small.}
+#'   }
 #' @param annotations An \code{AnnotationMatrix} object, or NULL for
 #'   unstratified estimation.
 #' @param local Logical, whether to compute per-block local estimates.
@@ -36,17 +55,23 @@ NULL
 #'   this study; \code{NULL} matches all studies.
 #' @return An \code{H2Estimate} object.
 #' @examples
-#' data(ldEigenExample)
-#' gr <- GenomicRanges::GRanges("chr1",
-#'   IRanges::IRanges(seq(50, by = 100, length.out = 20), width = 1))
-#' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:20),
-#'   A1 = "A", A2 = "G", Z = rnorm(20), N = 10000L)
+#' data(ldScoreExample)
+#' # The estimators index the z-scores by the reference's own variant order,
+#' # so build the sumstats from the reference rather than alongside it.
+#' gr <- as(ldScoreExample, "GRanges")
+#' set.seed(1)
+#' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+#'   SNP = names(ldScoreExample),
+#'   A1 = S4Vectors::mcols(ldScoreExample)$A1,
+#'   A2 = S4Vectors::mcols(ldScoreExample)$A2,
+#'   Z = rnorm(length(ldScoreExample)),
+#'   N = 100000L)
 #' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
 #' )
 #' ss <- GwasSumStats(study = "trait1", entry = list(gr),
-#'   genome = "hg19", ldSketch = panel)
-#' estimateH2(ss, ldEigenExample, method = "lder")
+#'   genome = getGenome(ldScoreExample), ldSketch = panel)
+#' estimateH2(ss, ldScoreExample, method = "sldsc")
 #' @export
 setGeneric(
     "estimateH2",
@@ -561,9 +586,9 @@ setGeneric("getSumStats", function(x, ...) standardGeneric("getSumStats"))
 #' @return A \code{data.frame}.
 #' @examples
 #' data(qtlSumStatsExample)
-#' getSumstatDf(qtlSumStatsExample)
+#' getSumStatsDf(qtlSumStatsExample)
 #' @export
-setGeneric("getSumstatDf", function(x, ...) standardGeneric("getSumstatDf"))
+setGeneric("getSumStatsDf", function(x, ...) standardGeneric("getSumStatsDf"))
 
 #' @title Get the Embedded QtlDataset List
 #' @description Return the named list of \code{QtlDataset} objects carried by a
@@ -1230,11 +1255,11 @@ setGeneric("getDataType", function(x, ...) standardGeneric("getDataType"))
 #' @return Invisible path to the written file.
 #' @examples
 #' data(gwasSumStatsS4Example)
-#' writeSumstatsVcf(
+#' writeSumStatsVcf(
 #'   gwasSumStatsS4Example, outputPath = tempfile(fileext = ".vcf"))
 #' @export
-setGeneric("writeSumstatsVcf", function(x, outputPath, sampleName = NULL, ...) {
-    standardGeneric("writeSumstatsVcf")
+setGeneric("writeSumStatsVcf", function(x, outputPath, sampleName = NULL, ...) {
+    standardGeneric("writeSumStatsVcf")
 })
 
 # =============================================================================
@@ -1262,7 +1287,8 @@ setGeneric("getContexts", function(x) standardGeneric("getContexts"))
 
 #' @title Get Unique Trait Names
 #' @description Return the unique trait identifiers carried by a collection
-#'   class (e.g., \code{QtlSumStats}).
+#'   class (e.g., \code{QtlSumStats}), or the trait names of an
+#'   \code{\link{SldscData}}.
 #' @param x The object.
 #' @return Character vector of unique trait names.
 #' @examples
@@ -1892,38 +1918,6 @@ setGeneric("getFrqData", function(x) standardGeneric("getFrqData"))
 #' getTraitRuns(sd)
 #' @export
 setGeneric("getTraitRuns", function(x) standardGeneric("getTraitRuns"))
-
-#' @title Get the trait names from an SldscData
-#' @param x An \code{\link{SldscData}} object.
-#' @return A character vector of trait names.
-#' @rdname getTraitNames
-#' @examples
-#' mkRun <- function(cats) {
-#'   n <- length(cats)
-#'   list(categories = cats, tau = setNames(rep(1e-7, n), cats),
-#'     tauSe = setNames(rep(3e-8, n), cats),
-#'     enrichment = setNames(rep(2, n), cats),
-#'     enrichmentSe = setNames(rep(0.4, n), cats),
-#'     enrichmentP = setNames(rep(0.01, n), cats),
-#'     propH2 = setNames(rep(0.2, n), cats),
-#'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
-#' }
-#' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
-#'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
-#' frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
-#'   MAF = rep(0.2, 6))
-#' mkTrait <- function() {
-#'   list(single = list(mkRun(c("annot_A_0", "baselineLD_0")),
-#'     mkRun(c("annot_B_0", "baselineLD_0"))),
-#'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
-#' }
-#' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
-#' getTraitNames(sd)
-#' @export
-setGeneric("getTraitNames", function(x) standardGeneric("getTraitNames"))
 
 #' @title Get the annotation column names from an SldscData
 #' @param x An \code{\link{SldscData}} object.

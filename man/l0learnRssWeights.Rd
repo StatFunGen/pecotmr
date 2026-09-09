@@ -12,7 +12,7 @@ l0learnRssWeights(
   lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
   lambda = NULL,
   lambda2 = 0,
-  selection = c("ld_quadratic", "min_fbeta"),
+  selection = c("ldQuadratic", "minFbeta"),
   maxSwaps = 100,
   ...
 )
@@ -37,8 +37,8 @@ Default \code{"L0"}.}
 
 \item{lambda2}{L2 penalty weight (for L0L2). Default 0.}
 
-\item{selection}{Selection strategy: \code{"ld_quadratic"} (default) or
-\code{"min_fbeta"}.}
+\item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
+\code{"minFbeta"}.}
 
 \item{maxSwaps}{Maximum swap rounds per lambda. Default 100.}
 

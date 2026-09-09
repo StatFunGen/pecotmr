@@ -34,6 +34,28 @@ test_that("pipeline runs end-to-end on a single + joint SldscData", {
     expect_true("baselineLD_0" %in% res$params$baseline_categories)
 })
 
+# The shape assertions above pass even when every meta row is NA, which is
+# what a degenerate per-block tau (constant tauBlocks -> jackknife SE of 0)
+# produces: metafor gets zero-variance inputs and DerSimonian-Laird drops
+# every trait, leaving nTraits == 0. Assert on the values, not just the
+# columns.
+test_that("meta tables pool every trait rather than dropping them", {
+    sd <- .sldscMkData()
+    res <- suppressMessages(sldscPostprocessingPipeline(sd, mafCutoff = 0.05))
+
+    for (tbl in c("tauStar", "enrichment", "enrichstat")) {
+        meta <- res$meta[[tbl]]
+        expect_equal(meta$nTraits, rep(2L, nrow(meta)), info = tbl)
+        expect_false(any(is.na(meta$singleMean)), info = tbl)
+        expect_true(all(is.finite(meta$singleSe)), info = tbl)
+        expect_true(all(meta$singleSe > 0), info = tbl)
+    }
+    # tau* is the one pooled from the jackknife blocks, so it is the column
+    # a zero-variance tauBlocks silently empties.
+    expect_true(all(res$meta$tauStar$singleMean > 0))
+    expect_false(any(is.na(res$meta$tauStar$jointMean)))
+})
+
 test_that("pipeline without joint runs yields NA joint meta", {
     sd <- .sldscMkData(withJoint = FALSE)
     res <- suppressMessages(sldscPostprocessingPipeline(

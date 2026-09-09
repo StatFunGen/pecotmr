@@ -7,7 +7,7 @@
 enforceDesignFullRank(
   X,
   C,
-  strategy = c("correlation", "variance", "response_correlation"),
+  strategy = c("correlation", "variance", "responseCorrelation"),
   response = NULL,
   maxIterations = 300L,
   corrThresholds = seq(0.75, 0.5, by = -0.05),
@@ -25,7 +25,7 @@ Pass \code{NULL} or a zero-column matrix when there are no covariates.}
 \item{strategy}{Passed through to \code{dropCollinearColumns}.}
 
 \item{response}{Passed through to \code{dropCollinearColumns} when
-\code{strategy = "response_correlation"}.}
+\code{strategy = "responseCorrelation"}.}
 
 \item{maxIterations}{Integer. Hard cap on the iterative-prune loop. Default
 300.}

@@ -88,6 +88,87 @@ A non-zero `mafCutoff` requires every entry to carry a `MAF` mcol; non-zero
 with a non-zero cutoff will produce an error - if you don't want a filter to
 run, leave its cutoff at the default value of 0.
 
+## The pieces QC is built from
+
+`summaryStatsQc()` orchestrates the steps below. Each is exported, because
+the same operations come up outside a full QC run — preparing a variant list,
+auditing why something was dropped, or applying one check without the rest.
+
+### Classifying variants
+
+Allele strings decide how a variant is handled: indels cannot be matched to a
+panel the same way SNPs are, and strand-ambiguous SNPs need care.
+
+```{r classify}
+ids <- c(
+    "chr22:10685239:C:T",
+    "chr22:10761227:G:A",
+    "chr22:11285239:CT:C",
+    "chr22:11500000:A:T"
+)
+classifyVariantType(ids)
+```
+
+### Matching a variant list to an LD panel
+
+`filterVariantsByLdReference()` keeps only variants the panel actually
+carries, and reports how many it dropped. It returns both the surviving IDs
+and their positions in the input, so a parallel table can be subset the same
+way.
+
+```{r filter-ld}
+ldMeta <- system.file(
+    "extdata",
+    "ld_reference",
+    "ld_meta_file.tsv",
+    package = "pecotmr"
+)
+kept <- filterVariantsByLdReference(ids, ldMeta)
+kept$data
+kept$idx
+```
+
+`keepIndel = FALSE` additionally drops indels, which is what an
+RSS method wanting a SNP-only design needs:
+
+```{r filter-ld-snps}
+filterVariantsByLdReference(ids, ldMeta, keepIndel = FALSE)$data
+```
+
+### Reconciling two variant tables
+
+`mergeVariantInfo()` matches two variant sets while allowing for flipped
+alleles — the second table is re-oriented to the first rather than treated as
+a different variant:
+
+```{r merge-variants}
+panel <- data.frame(
+    chrom = "chr22", pos = c(10685239, 10761227),
+    ref = c("C", "G"), alt = c("T", "A")
+)
+sumstats <- data.frame(
+    chrom = "chr22", pos = c(10685239, 10761227),
+    ref = c("T", "G"), alt = c("C", "A") # first variant is flipped
+)
+mergeVariantInfo(panel, sumstats)
+```
+
+The flipped variant comes back on the panel's orientation. `all = FALSE`
+returns only the re-oriented second set instead of the union.
+
+### Applying one mismatch check
+
+`ldMismatchQc()` is the LD-mismatch step on its own, taking z-scores plus
+either a correlation matrix (`R`) or genotypes (`X`):
+
+```{r ld-mismatch, eval=FALSE}
+ldMismatchQc(zScore = z, R = ldMatrix, nSample = 10000, method = "slalom")
+```
+
+and `autoDecision()` is the helper that reads credible-set structure to
+decide whether a flagged variant should be imputed or dropped — the choice
+`summaryStatsQc()` otherwise makes for you.
+
 ## Allele-flip QC: the SuSiE kriging prefilter
 
 `alleleFlipKriging = TRUE` enables an optional prefilter that runs **before**
@@ -202,7 +283,7 @@ gws_qcd <- summaryStatsQc(
 ## Next steps
 
 `QtlSumStats` and `GwasSumStats` are direct inputs to `fineMappingPipeline()`,
-`twasWeightsPipeline()` (`QtlSumStats` only) and `colocBoostPipeline()`— see
+`twasWeightsPipeline()` (`QtlSumStats` only) and `colocboostPipeline()`— see
 the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and
 *Multi-trait colocalization with ColocBoost* vignettes.
 

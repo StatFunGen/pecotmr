@@ -669,16 +669,23 @@ NULL
 #'
 #' @docType data
 #'
-#' @description A small synthetic \code{LdEigen} reference (per-block LD
-#' eigen-decompositions over 20 SNPs in 2 blocks) for the heritability
-#' estimators (\code{\link{estimateH2}} with \code{method = "lder"} or
-#' \code{"hdl"}, and \code{\link{computeLdScores}}). All identifiers are
-#' synthetic.
+#' @description An \code{LdEigen} reference for the eigendecomposition-based
+#' heritability estimators (\code{\link{estimateH2}} with
+#' \code{method = "lder"} or \code{"hdl"}, and
+#' \code{\link{computeLdScores}}). Built by \code{\link{buildLdEigen}} from
+#' the first 14 chr22 LD blocks of the de-identified \code{protocol_example}
+#' reference panel, so the LD is real rather than simulated. Describes the
+#' same variants as \code{\link{ldScoreExample}}, so the four estimators can
+#' be compared on one reference.
+#'
+#' The panel behind it has \code{nRef = 1000}. That is small enough that
+#' \code{method = "hdl"}, which models reference-panel noise explicitly,
+#' shrinks its estimate hard -- correct behaviour for a panel this size
+#' rather than a fault.
 #'
 #' @format An \code{LdEigen} object (extends \code{LdStatistic}) with an
 #'   \code{eigenList} of per-block \code{values} / \code{vectors} /
-#'   \code{snpIdx}
-#'   over 20 SNPs in 2 LD blocks.
+#'   \code{snpIdx} over 1300 variants in 14 LD blocks.
 #'
 #' @keywords data
 #'
@@ -695,15 +702,21 @@ NULL
 #'
 #' @docType data
 #'
-#' @description A small synthetic \code{LdScore} reference (per-SNP LD scores,
-#' weights, and per-block LD matrices over 20 SNPs in 2 blocks) for the
-#' heritability estimators (\code{\link{estimateH2}} with
-#' \code{method = "gldsc"}). All identifiers are synthetic.
+#' @description An \code{LdScore} reference (per-variant LD scores, weights,
+#' and per-block LD matrices) for the LD-score-based heritability estimators
+#' (\code{\link{estimateH2}} with \code{method = "sldsc"} or
+#' \code{"gldsc"}). Built by \code{\link{buildLdScore}} from the first 14
+#' chr22 LD blocks of the de-identified \code{protocol_example} reference
+#' panel, so the LD is real rather than simulated. Describes the same variants
+#' as \code{\link{ldEigenExample}}.
+#'
+#' The per-block LD matrices are retained because \code{"gldsc"} and
+#' stratified \code{"sldsc"} both need them; unstratified \code{"sldsc"}
+#' reads only the scores.
 #'
 #' @format An \code{LdScore} object (extends \code{LdStatistic}) carrying
-#'   \code{ldScores}, \code{ldScoreWeights}, and \code{ldMatrixList} over 20
-#'   SNPs
-#'   in 2 LD blocks.
+#'   \code{ldScores}, \code{ldScoreWeights}, and \code{ldMatrixList} over
+#'   1300 variants in 14 LD blocks.
 #'
 #' @keywords data
 #'

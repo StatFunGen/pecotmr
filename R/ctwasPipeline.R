@@ -507,7 +507,7 @@ assembleCtwasInputs <- function(
         }
         ldPanel <- ldPanelsByRegion[[ldKey]]
         ldFileByRegion[[rid]] <- ldKey
-        zSnpPieces[[rid]] <- .ctwasBuildZSnp(gss)
+        zSnpPieces[[rid]] <- .ctwasBuildZSnp(gss, ldPanel$snpInfo$id)
         regionInfoPieces[[rid]] <- .ctwasBuildSingleRegionInfo(rid, gss)
         snpMap[[rid]] <- .ctwasSnpInfoForGwasBlock(gss, ldPanel$snpInfo)
     }
@@ -657,6 +657,7 @@ estCtwasParam <- function(
     }
     groupPriorVarStructure <- arg_match(groupPriorVarStructure)
     ncore <- as.integer(ncore)
+    inputs <- .ctwasResolveLdPaths(inputs)
     extra <- list(...)
     zGene <- .ctwasEnsureZGene(inputs, ncore)
     regionData <- .ctwasAssembleRegionData(inputs, zGene, thin, ncore, extra)
@@ -844,6 +845,7 @@ screenCtwasRegions <- function(estResult, L = 5L, ncore = 1L, ...) {
         abort("Package 'ctwas' is required for screenCtwasRegions.")
         # nocov end
     }
+    estResult <- .ctwasResolveLdPaths(estResult)
     # ctwas::screen_regions requires thin = 1 region_data; expand the
     # thinned set first when assemble_region_data was called with thin < 1
     # (matches ctwas_sumstats's own expand-before-screen step).
@@ -925,6 +927,7 @@ finemapCtwasRegions <- function(screenResult, L = 5L, ncore = 1L, ...) {
         abort("Package 'ctwas' is required for finemapCtwasRegions.")
         # nocov end
     }
+    screenResult <- .ctwasResolveLdPaths(screenResult)
     rd <- screenResult$screened_region_data
     fmRes <- if (length(rd) == 0L) {
         list(finemap_res = NULL, susie_alpha_res = NULL)
@@ -1025,6 +1028,7 @@ mergeCtwasBoundaryRegions <- function(
         abort("Package 'ctwas' is required for mergeCtwasBoundaryRegions.")
     }
     # nocov end
+    finemapResult <- .ctwasResolveLdPaths(finemapResult)
     fmRes <- finemapResult$finemap_res
     if (is.null(fmRes) || nrow(fmRes) == 0L) {
         msg <- glue(
@@ -2099,7 +2103,52 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # helper (R/sumstatsQc.R), then projects to ctwas's column shape and
 # bolts on the `study` column ctwas uses to disambiguate stacked rows.
 # @noRd
-.ctwasBuildZSnp <- function(gwasSumStats) {
+# Match variant ids against the LD panel's ids the way every other LD consumer
+# in the package does -- by (chrom, pos, allele) with ref/alt swaps tolerated --
+# rather than by exact string identity.
+#
+# ctwas already harmonizes TWAS weights this way (see
+# `.ctwasHarmonizeWeights()` below). The GWAS side used plain string joins, so
+# one variant could be kept for the weights and dropped for the z-scores.
+# `removeStrandAmbiguous = FALSE` matches `.ldFromSketchMatch()`, the shared
+# entry point: the panel defines the frame, so an A/T variant is not discarded
+# merely for being palindromic.
+# @noRd
+.ctwasMatchToPanel <- function(ids, panelIds) {
+    matchVariants(ids, panelIds, removeStrandAmbiguous = FALSE)
+}
+
+# Put the GWAS z-scores in the LD panel's allele frame.
+#
+# The z-scores arrive in the GWAS's own frame, while `R`, `variance` and the
+# harmonized weights are all in the panel's. Where the two spell a variant with
+# its alleles swapped, an exact-string join drops it silently -- it is present
+# on both sides, so nothing reports a missing variant and the gene just loses an
+# instrument. Matching allele-aware keeps it, and negating its z (with A1/A2
+# swapped to match) is what makes the retained z agree in sign with the LD it
+# gets modelled against. Variants with no panel match are left alone; ctwas
+# drops them itself when it intersects with `snp_map`.
+# @noRd
+.ctwasHarmonizeZToPanel <- function(zSnp, panelIds) {
+    if (nrow(zSnp) == 0L || length(panelIds) == 0L) {
+        return(zSnp)
+    }
+    m <- .ctwasMatchToPanel(zSnp$id, as.character(panelIds))
+    if (length(m$idxA) == 0L) {
+        return(zSnp)
+    }
+    zSnp$id[m$idxA] <- as.character(panelIds)[m$idxB]
+    flip <- m$idxA[m$sign < 0]
+    if (length(flip) > 0L) {
+        zSnp$z[flip] <- -zSnp$z[flip]
+        swapped <- zSnp$A1[flip]
+        zSnp$A1[flip] <- zSnp$A2[flip]
+        zSnp$A2[flip] <- swapped
+    }
+    zSnp
+}
+
+.ctwasBuildZSnp <- function(gwasSumStats, panelIds) {
     pieces <- list()
     for (i in seq_len(nrow(gwasSumStats))) {
         df <- .entryToSumstatDf(gwasSumStats[[i]], keepChrPrefix = FALSE)
@@ -2113,7 +2162,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             study = as.character(gwasSumStats$study)[[i]]
         )
     }
-    bind_rows(pieces)
+    .ctwasHarmonizeZToPanel(bind_rows(pieces), panelIds)
 }
 
 # Derive the single-row region_info from the LD sketch's snpInfo
@@ -2202,6 +2251,13 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 #              weights to the correlation scale that ctwas expects.
 # @noRd
 .ctwasComputeFullPanelLd <- function(gwasLd) {
+    # Share the validator with `.ldFromSketch()`, the entry point every other
+    # pipeline uses. This function cannot use `.ldFromSketch()` itself -- it
+    # needs the whole panel rather than a matched subset, and returns the
+    # per-variant variance alongside R -- but skipping the guard meant a NULL
+    # or non-panel sketch surfaced as "unable to find an inherited method for
+    # 'getSnpInfo'" instead of saying the LD reference was missing.
+    .ldFromSketchValidate(gwasLd, "ctwasPipeline")
     snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
     geno <- .ldSketchDosage(
         gwasLd,
@@ -2380,7 +2436,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     # this block's own set: it bounds the weight vector actually FITTED, because
     # ctwas fine-maps one region at a time.
     if (!is.null(gwasSnpIds)) {
-        panelSnps <- intersect(panelSnps, as.character(gwasSnpIds))
+        # Allele-aware, not `intersect()`: a swapped spelling is the same
+        # variant, and dropping it here silently shortens the gene's cis span.
+        m <- .ctwasMatchToPanel(panelSnps, as.character(gwasSnpIds))
+        panelSnps <- panelSnps[sort(m$idxA)]
     }
     ctx <- list(
         ldPanel = ldPanel,
@@ -2721,6 +2780,9 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         }
     }
     # Steps 2-3: PIP / CS rescue (only when fineMappingResult was passed).
+    # Relabel first: the auxiliaries are keyed in the fine-mapping result's
+    # frame, the vids in the panel's, and every join from here on is exact.
+    finemapAux <- .ctwasRelabelFinemapAux(finemapAux, vids)
     mustKeep <- .ctwasMustKeep(vids, finemapAux, csMinCor, minPipCutoff)
     # Step 4: cap, keeping must-keep variants first.
     if (length(vids) > maxNumVariants && is.finite(maxNumVariants)) {
@@ -2735,6 +2797,53 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         w <- capped$w
     }
     list(vids = vids, w = w)
+}
+
+# Move a set of variant ids into the frame `vids` uses, leaving ids with no
+# match alone.
+# @noRd
+.ctwasRelabelIds <- function(ids, vids) {
+    if (length(ids) == 0L) {
+        return(ids)
+    }
+    m <- .ctwasMatchToPanel(ids, vids)
+    if (length(m$idxA) > 0L) {
+        ids[m$idxA] <- vids[m$idxB]
+    }
+    ids
+}
+
+# Relabel a gene's fine-mapping auxiliaries into the weight/panel frame.
+#
+# `pip` and `csMembers` are keyed by the fine-mapping result's own spelling of
+# a variant, while `vids` arrive harmonized to the LD panel. Where the two
+# spell one variant with its alleles swapped, the exact-string joins below --
+# `intersect(csMembers, vids)` and `pip[vids]` -- miss it: the credible-set
+# member silently loses its must-keep protection, and its PIP silently reads
+# NA so the cap falls back to |w|. The net effect is dropping the variant the
+# fine-mapping was most confident about, with nothing reported.
+#
+# Only the LABEL moves here. A PIP and a credible-set membership do not depend
+# on which allele is counted, so unlike the z-scores there is no sign to apply.
+# @noRd
+.ctwasRelabelFinemapAux <- function(finemapAux, vids) {
+    if (is.null(finemapAux)) {
+        return(NULL)
+    }
+    if (!is.null(finemapAux$pip)) {
+        names(finemapAux$pip) <- .ctwasRelabelIds(
+            names(finemapAux$pip),
+            vids
+        )
+    }
+    if (length(finemapAux$csMembers) > 0L) {
+        finemapAux$csMembers <- map(
+            finemapAux$csMembers,
+            .ctwasRelabelIds,
+            vids = vids
+        )
+    }
+    finemapAux
 }
 
 # Variants that must survive the cap: members of any high-purity (>= csMinCor)
@@ -2806,6 +2915,75 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         method = as.character(mc$method),
         stringsAsFactors = FALSE
     )
+}
+
+# A cTWAS payload's `LD_file` token does double duty: ctwas asserts the file
+# exists, and pecotmr dispatches on the same string into the cached per-region
+# LD panels. Both make the token machine-specific, so a payload that was
+# serialised (the bundled ctwas*Example objects) carries a path from whatever
+# machine built it. Re-point it at this installation on the way in, using the
+# same "pecotmr://extdata/<path>" convention the genotype handles use.
+#
+# The panels themselves travel with the closures and are never re-read, so
+# this only has to keep the token and the cache keys agreeing with each other.
+# @noRd
+.ctwasResolveLdPaths <- function(payload) {
+    ldMap <- payload$LD_map
+    # Anything that is not a table with an LD_file column is passed through:
+    # callers hand the granular steps hand-built payloads whose LD_map may be
+    # a stub, and there is nothing to re-point in one.
+    if (!is.list(ldMap) || is.null(ldMap[["LD_file"]])) {
+        return(payload)
+    }
+    stored <- as.character(ldMap[["LD_file"]])
+    resolved <- map_chr(stored, .resolveCtwasLdToken)
+    if (identical(resolved, stored)) {
+        return(payload)
+    }
+    keyMap <- set_names(resolved, stored)
+    payload$LD_map$LD_file <- unname(resolved)
+    payload$LD_map$SNP_file <- unname(resolved)
+    .ctwasRekeyLdLoaders(payload, keyMap)
+}
+
+# Only "pecotmr://" tokens move; an ordinary path is the caller's own and is
+# left alone (an unresolvable bundled reference is an error worth hearing).
+# @noRd
+.resolveCtwasLdToken <- function(token) {
+    if (!str_detect(token, "^pecotmr://")) {
+        return(token)
+    }
+    .resolveGenotypeResourcePath(token)
+}
+
+# Rebuild the loader closures over a cache re-keyed to the resolved tokens,
+# so `LD_loader_fun(LD_file)` still finds its panel after the rename.
+# @noRd
+.ctwasRekeyLdLoaders <- function(payload, keyMap) {
+    panels <- .ctwasCachedPanels(payload)
+    if (is.null(panels)) {
+        return(payload)
+    }
+    hit <- is_in(names(panels), names(keyMap))
+    names(panels)[hit] <- unname(keyMap[names(panels)[hit]])
+    payload$LD_loader_fun <- .ctwasMultiBlockLdLoader(panels)
+    payload$snpinfo_loader_fun <- .ctwasMultiBlockSnpInfoLoader(panels)
+    payload
+}
+
+# The panel cache the loader closures were built over, or NULL when the
+# payload carries loaders this package did not create.
+# @noRd
+.ctwasCachedPanels <- function(payload) {
+    loader <- payload$LD_loader_fun
+    if (!is.function(loader)) {
+        return(NULL)
+    }
+    env <- environment(loader)
+    if (is.null(env) || !exists("ldPanelsByRegion", envir = env)) {
+        return(NULL)
+    }
+    get("ldPanelsByRegion", envir = env)
 }
 
 # Multi-block LD loader for ctwas. ctwas invokes
@@ -2891,8 +3069,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (length(blockIds) == 0L) {
         return(panelSnpInfo[FALSE, , drop = FALSE])
     }
-    keep <- is_in(panelSnpInfo$id, blockIds)
-    panelSnpInfo[keep, , drop = FALSE]
+    # Allele-aware, not `is_in()`: see `.ctwasMatchToPanel()`. Rows stay in
+    # panel order, which the ctwas engine indexes positionally.
+    m <- .ctwasMatchToPanel(panelSnpInfo$id, blockIds)
+    panelSnpInfo[sort(m$idxA), , drop = FALSE]
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------

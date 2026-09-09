@@ -154,6 +154,24 @@ test_that("readSldscFrq errors on missing dir / no files", {
     expect_error(readSldscFrq(empty), "no .frq")
 })
 
+# PLINK writes .frq space-aligned rather than delimited. A delimiter-guessing
+# reader parses the padding as empty fields and shifts every column left (CHR
+# and SNP silently all-NA, MAF picking up NCHROBS), which then empties the
+# annot join and takes computeSldscAnnotSd to zero degrees of freedom. The
+# generated fixtures above are tab-delimited, so only a real PLINK file
+# catches it.
+test_that("readSldscFrq parses a space-aligned PLINK .frq", {
+    dir <- system.file("extdata", "sldsc", package = "pecotmr")
+    df <- readSldscFrq(dir, plinkName = "reference.")
+    expect_equal(nrow(df), 343L)
+    expect_false(any(is.na(df$SNP)))
+    expect_false(any(is.na(df$CHR)))
+    expect_true(is.numeric(df$MAF))
+    expect_true(all(df$MAF >= 0 & df$MAF <= 0.5))
+    expect_equal(df$SNP[[1]], "rs10865542")
+    expect_equal(df$MAF[[1]], 0.1656, tolerance = 1e-6)
+})
+
 
 # =============================================================================
 # computeSldscAnnotSd  (operates on SldscData)

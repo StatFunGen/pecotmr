@@ -88,7 +88,7 @@ test_that("lassosumRssWeights dispatches to lassosumRss once per s value", {
         stat = stat,
         LD = R,
         s = c(0.2, 0.9),
-        selection = "min_fbeta"
+        selection = "minFbeta"
     )
     expect_equal(length(call_log$calls), 2L)
     expect_equal(call_log$calls[[1]]$n, 100)
@@ -119,7 +119,7 @@ test_that("lassosumRssWeights defaults to LD-quadratic selection", {
     expect_equal(c(result), expected)
     expect_equal(
         unname(attr(result, "lassosum_selection")["mode"]),
-        "ld_quadratic"
+        "ldQuadratic"
     )
 })
 
@@ -142,7 +142,7 @@ test_that("lassosumRssWeights uses first-max tie behavior for LD-quadratic selec
     expect_equal(c(result), c(1, 0, 0))
     expect_equal(
         unname(attr(result, "lassosum_selection")["mode"]),
-        "ld_quadratic"
+        "ldQuadratic"
     )
 })
 
@@ -166,12 +166,12 @@ test_that("lassosumRssWeights still supports explicit min(fbeta)", {
         stat = stat,
         LD = R,
         s = 0.5,
-        selection = "min_fbeta"
+        selection = "minFbeta"
     )
     expect_equal(c(result), expected)
     expect_equal(
         unname(attr(result, "lassosum_selection")["mode"]),
-        "min_fbeta"
+        "minFbeta"
     )
 })
 

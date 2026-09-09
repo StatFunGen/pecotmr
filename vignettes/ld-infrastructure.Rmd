@@ -1,0 +1,241 @@
+---
+title: "Working with LD references"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Working with LD references}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
+```
+
+## Overview
+
+Almost everything else in pecotmr needs LD. Fine-mapping from summary
+statistics needs it, RSS weight learning needs it, colocalization needs it,
+and the heritability estimators are built on nothing else. The pipelines
+handle it for you, so this vignette is about the layer underneath: loading
+LD for a region, computing it from genotypes, checking it is usable, and
+reducing a variant set that is too correlated to model.
+
+```{r load-packages}
+library(pecotmr)
+ldMeta <- system.file(
+    "extdata",
+    "ld_reference",
+    "ld_meta_file.tsv",
+    package = "pecotmr"
+)
+```
+
+An LD reference is described by a **meta file**: one row per LD block, giving
+the block's coordinates and the path to the genotype or correlation data
+backing it.
+
+```{r meta}
+read.delim(ldMeta, check.names = FALSE)
+```
+
+Paths are relative to the meta file, so a reference directory can be moved
+without rewriting it.
+
+## Loading LD for a region
+
+`loadLdMatrix()` returns an `LdData` — a `GRanges` of the variants plus the
+correlation matrix, or the genotypes to compute it from:
+
+```{r load}
+region <- "chr22:10000000-19000000"
+ld <- loadLdMatrix(ldMeta, region = region)
+ld
+R <- getCorrelation(ld)
+dim(R)
+```
+
+Whether a correlation matrix or a genotype handle comes back depends on the
+source. `returnGenotype = "auto"` (the default for genotype sources) returns
+dosages and computes `R` on demand, which matters because a dense matrix for
+a large region is far bigger than the genotypes it came from.
+
+`getVariantInfo()` gives the variants as a plain `GRanges`, which is what you
+need to align summary statistics against the panel:
+
+```{r variant-info}
+head(getVariantInfo(ld), 3)
+```
+
+**A region is not a block.** Loading a whole region returns one dense matrix
+covering it. To get one matrix per LD block — which the block jackknife in
+[heritability estimation](heritability.html) requires — address the blocks
+individually.
+
+`region` also takes a vector, returning one `LdData` per entry — which is
+how you get per-block LD without writing the loop yourself:
+
+```{r multi-region}
+blocks <- read.delim(ldMeta, check.names = FALSE)
+ldList <- loadLdMatrix(
+    ldMeta,
+    region = sprintf("chr22:%d-%d", blocks$start, blocks$end)
+)
+length(ldList)
+```
+
+### Sources without coordinates
+
+An LD meta file carries coordinates, so its blocks are addressed by `region`.
+Other sources have no coordinates and are addressed by `block` index instead:
+
+- an **`ldInfo` table** — an `LD_file` column and optionally `SNP_file`, the
+  shape cTWAS's `LD_map` uses
+- a **matrix** already in memory, or a list of them
+
+```{r by-block}
+R2 <- computeLd(matrix(rnorm(100 * 10), 100, 10))
+loadLdMatrix(R2, block = 1)
+```
+
+Supplying both `region` and `block`, or neither, is an error — the source
+determines which one applies.
+
+### Options
+
+| Argument | Effect |
+|---|---|
+| `returnGenotype` | `"auto"` gives dosages for genotype sources, `R` for pre-computed |
+| `dropMonomorphic` | drop variants with no variation |
+| `materializeGenotypes` | read dosages once and keep them, so later access does no file I/O |
+| `maxVariants` / `seed` | randomly thin oversized blocks, reproducibly |
+
+```{r options}
+thinned <- loadLdMatrix(ldMeta, region = region, maxVariants = 50, seed = 1)
+length(thinned)
+```
+
+## Computing LD from genotypes
+
+`computeLd()` takes a dosage matrix and returns the correlation matrix:
+
+```{r compute}
+set.seed(1)
+X <- matrix(rnorm(100 * 20), 100, 20, dimnames = list(NULL, paste0("v", 1:20)))
+X[, 5] <- X[, 4] + rnorm(100, sd = 0.01) # a near-duplicate pair
+R2 <- computeLd(X)
+dim(R2)
+```
+
+`method` selects the estimator — `"sample"` (default), `"population"`, or
+`"gcta"` — and `shrinkage` applies shrinkage toward the identity. `backend`
+can hand the work to SNPRelate or snpStats when those are installed.
+
+## Checking that LD is usable
+
+A correlation matrix estimated from finite samples is usually not positive
+definite, and methods that invert it or take its eigendecomposition will
+fail or return nonsense. `checkLd()` reports the diagnosis. Run it on the
+real panel rather than the toy matrix above, which is well conditioned by
+construction:
+
+```{r check}
+diagnosis <- checkLd(R)
+diagnosis[c(
+    "isPd",
+    "isPsd",
+    "minEigenvalue",
+    "nNegative",
+    "conditionNumber"
+)]
+```
+
+That is what a real reference looks like: positive *semi*-definite but not
+positive definite, with a smallest eigenvalue at rounding scale (`-7e-16`)
+and a condition number around `1e9`. The negative value is floating-point
+noise on a rank-deficient matrix, not structure — but it is exactly what
+makes an unguarded `sqrt()` or `solve()` fail, and why LDER clamps
+eigenvalues before forming its weights.
+
+`method = "shrink"` or `"eigenfix"` returns a repaired matrix instead of a
+report:
+
+```{r check-fix}
+fixed <- checkLd(R, method = "eigenfix")
+c(before = diagnosis$minEigenvalue, after = checkLd(fixed$R)$minEigenvalue)
+```
+
+The smallest eigenvalue is lifted off zero, though on a matrix this
+rank-deficient it stays tiny — repair makes the decomposition safe, it does
+not restore rank that the reference panel never had. Repairing also changes
+the data, so prefer a better-conditioned variant set where you can, which is
+what the next section is for.
+
+## Reducing a correlated variant set
+
+Two variants in near-perfect LD carry the same information, and a design
+containing both is singular. Three tools address that, differing in what
+they optimise.
+
+`ldPruneByCorrelation()` drops variants until no pair exceeds a correlation
+threshold, keeping the choice arbitrary among equivalents:
+
+```{r prune}
+pruned <- ldPruneByCorrelation(X, corThres = 0.8)
+ncol(pruned$X.new)
+pruned$filter.id
+```
+
+It returns the reduced matrix and the retained column indices, so a parallel
+table of statistics can be subset the same way.
+
+`ldClumpByScore()` keeps the *best-scoring* variant in each LD clump rather
+than an arbitrary one — pass PIPs or −log10 p-values as `score` and it
+behaves like PLINK's clumping:
+
+```{r clump, eval=FALSE}
+ldClumpByScore(X, score = pips, chr = chrom, pos = position, r2 = 0.2)
+```
+
+`enforceDesignFullRank()` is the targeted version: rather than thresholding
+everything, it drops variants iteratively until the design plus its
+covariates reaches full column rank, and stops there.
+
+```{r full-rank}
+Xdup <- cbind(X, dup = X[, 1]) # exactly collinear
+dim(enforceDesignFullRank(Xdup, C = matrix(1, nrow(Xdup), 1)))
+```
+
+The `C` argument is the covariate matrix the design will sit alongside —
+rank has to be assessed on the combined matrix, since a variant can be
+independent of the other variants yet collinear with a covariate.
+`strategy` chooses what to sacrifice: the most correlated variant, the
+lowest-variance one, or the one least correlated with the response.
+
+## Aligning summary statistics to a panel
+
+The counterpart to all of this is on the summary-statistics side: variants
+must exist in the panel, and their alleles must be oriented the same way.
+`filterVariantsByLdReference()` and `mergeVariantInfo()` do that, and are
+covered in the [QC vignette](rss-qc.html), where the motivation lives.
+
+## Next steps
+
+- [QC for summary statistics](rss-qc.html) — matching statistics to a panel.
+- [Heritability](heritability.html) — `buildLdEigen()` / `buildLdScore()`
+  turn per-block LD into the statistics the h2 estimators consume.
+- [Fine-mapping](fine-mapping.html) and [TWAS weights](twas-weights.html) —
+  the RSS methods that consume LD.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

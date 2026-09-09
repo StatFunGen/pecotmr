@@ -17,3 +17,4 @@ A named numeric vector of prior-matrix weights with the \code{null}
 \description{
 Re-normalize mrmash weight w0 to have total weight sum to 1
 }
+\keyword{internal}

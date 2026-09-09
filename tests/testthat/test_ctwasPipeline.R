@@ -442,7 +442,7 @@ test_that(".ctwasRequireMatchingLdSketches: panel-size mismatch errors", {
 
 test_that(".ctwasBuildZSnp: produces a flat data.frame keyed by SNP/study", {
     ss <- .ctp_makeGwasSumstats(blockIds = "block1")
-    df <- pecotmr:::.ctwasBuildZSnp(ss)
+    df <- pecotmr:::.ctwasBuildZSnp(ss, vapply(1:6, .ctp_snpId, character(1)))
     expect_s3_class(df, "data.frame")
     expect_equal(nrow(df), 6L)
     expect_setequal(
@@ -451,6 +451,96 @@ test_that(".ctwasBuildZSnp: produces a flat data.frame keyed by SNP/study", {
     )
     expect_setequal(df$id, vapply(1:6, .ctp_snpId, character(1)))
     expect_setequal(unique(df$study), "G1")
+})
+
+test_that(".ctwasBuildZSnp: negates z for a panel-flipped variant", {
+    # z arrives in the GWAS frame while R/variance/weights are in the panel's.
+    # An exact-string join dropped a swapped spelling silently -- present on
+    # both sides, so nothing reported it missing and the gene just lost an
+    # instrument.
+    ss <- .ctp_makeGwasSumstats(blockIds = "block1")
+    gwasIds <- vapply(1:6, .ctp_snpId, character(1))
+    panelIds <- gwasIds
+    panelIds[2] <- "chr1:200:A:G" # fixture spells this one G:A
+    plain <- pecotmr:::.ctwasBuildZSnp(ss, gwasIds)
+    flipped <- pecotmr:::.ctwasBuildZSnp(ss, panelIds)
+    i <- match("chr1:200:G:A", plain$id)
+    expect_equal(flipped$id[i], "chr1:200:A:G")
+    expect_equal(flipped$z[i], -plain$z[i])
+    expect_equal(flipped$A1[i], plain$A2[i])
+    expect_equal(flipped$A2[i], plain$A1[i])
+    expect_equal(flipped$id[-i], plain$id[-i])
+    expect_equal(flipped$z[-i], plain$z[-i])
+})
+
+test_that(".ctwasBuildZSnp: leaves variants absent from the panel untouched", {
+    ss <- .ctp_makeGwasSumstats(blockIds = "block1")
+    gwasIds <- vapply(1:6, .ctp_snpId, character(1))
+    plain <- pecotmr:::.ctwasBuildZSnp(ss, gwasIds)
+    none <- pecotmr:::.ctwasBuildZSnp(ss, "chr9:999:A:T")
+    expect_equal(none$id, plain$id)
+    expect_equal(none$z, plain$z)
+})
+
+test_that(".ctwasFilterVariants: a CS member the fine-mapping spells flipped still survives the cap", {
+    # The weights arrive in the panel frame, the fine-mapping auxiliaries in
+    # the fine-mapping result's. An exact-string join lost the credible-set
+    # member's must-keep protection, so the cap dropped the variant the
+    # fine-mapping was most confident about and kept the largest |w| instead.
+    vids <- c("chr1:100:G:A", "chr1:200:G:A", "chr1:300:G:A")
+    w <- c(0.1, 0.2, 0.9)
+    aux <- list(
+        pip = NULL,
+        csMembers = list("chr1:100:A:G"), # flipped spelling of vids[1]
+        csPurity = 0.9
+    )
+    out <- pecotmr:::.ctwasFilterVariants(
+        vids,
+        w,
+        finemapAux = aux,
+        twasWeightCutoff = 0,
+        csMinCor = 0.8,
+        minPipCutoff = 0,
+        maxNumVariants = 1
+    )
+    expect_equal(out$vids, "chr1:100:G:A")
+})
+
+test_that(".ctwasFilterVariants: PIPs spelled flipped still drive the cap", {
+    vids <- c("chr1:100:G:A", "chr1:200:G:A", "chr1:300:G:A")
+    w <- c(0.1, 0.2, 0.9)
+    aux <- list(
+        pip = c("chr1:100:A:G" = 0.95, "chr1:300:A:G" = 0.01),
+        csMembers = list(),
+        csPurity = numeric(0)
+    )
+    out <- pecotmr:::.ctwasFilterVariants(
+        vids,
+        w,
+        finemapAux = aux,
+        twasWeightCutoff = 0,
+        csMinCor = 0,
+        minPipCutoff = 0,
+        maxNumVariants = 1
+    )
+    # PIP 0.95 wins over the larger |w| whose PIP is 0.01.
+    expect_equal(out$vids, "chr1:100:G:A")
+})
+
+test_that(".ctwasSnpInfoForGwasBlock: keeps rows the GWAS spells flipped", {
+    # Regression: `is_in()` on the id string retained none of these.
+    ss <- .ctp_makeGwasSumstats(blockIds = "block1")
+    flippedPanel <- data.frame(
+        chrom = rep(1L, 6),
+        id = sprintf("chr1:%d:A:G", 100L * (1:6)),
+        pos = 100L * (1:6),
+        alt = rep("A", 6),
+        ref = rep("G", 6),
+        stringsAsFactors = FALSE
+    )
+    keep <- pecotmr:::.ctwasSnpInfoForGwasBlock(ss, flippedPanel)
+    expect_equal(nrow(keep), 6L)
+    expect_equal(keep$id, flippedPanel$id)
 })
 
 test_that(".ctwasBuildSingleRegionInfo: pulls chrom + bp span from the GWAS block entry", {
@@ -3092,4 +3182,113 @@ test_that("finemapCtwasRegions: an empty screened-region set returns a NULL fine
     out <- finemapCtwasRegions(screenStub)
     expect_null(out$finemap_res)
     expect_null(out$susie_alpha_res)
+})
+
+# =============================================================================
+# Bundled example payloads: portable LD tokens
+#
+# `LD_map$LD_file` is both something ctwas asserts exists on disk and the key
+# pecotmr dispatches on into the cached LD panels. Serialising an absolute
+# path made the bundled payloads carry the build machine's path, so
+# finemapCtwasRegions() died on `all(file.exists(LD_matrix_files))` for every
+# user. They now carry a "pecotmr://extdata/..." token resolved on the way in.
+# =============================================================================
+
+test_that("bundled cTWAS payloads carry a resolvable LD token", {
+    data(ctwasInputsExample)
+    data(ctwasEstExample)
+    data(ctwasFinemapExample)
+
+    for (payload in list(
+        ctwasInputsExample,
+        ctwasEstExample,
+        ctwasFinemapExample
+    )) {
+        tokens <- as.character(payload$LD_map$LD_file)
+        expect_true(all(startsWith(tokens, "pecotmr://extdata/")))
+        resolved <- vapply(
+            tokens,
+            pecotmr:::.resolveCtwasLdToken,
+            character(1),
+            USE.NAMES = FALSE
+        )
+        expect_true(all(file.exists(resolved)))
+        expect_equal(
+            as.character(payload$LD_map$SNP_file),
+            tokens
+        )
+    }
+})
+
+test_that("resolving the LD token keeps the loader cache keys in step", {
+    data(ctwasEstExample)
+    resolved <- pecotmr:::.ctwasResolveLdPaths(ctwasEstExample)
+    token <- resolved$LD_map$LD_file[[1]]
+
+    # Rewriting LD_map without re-keying the closures would leave the loader
+    # unable to find its panel -- the failure this pairing exists to prevent.
+    expect_true(file.exists(token))
+    expect_true(is.matrix(resolved$LD_loader_fun(token)))
+    expect_false(is.null(resolved$snpinfo_loader_fun(token)))
+})
+
+test_that("an ordinary LD path is left alone", {
+    expect_equal(
+        pecotmr:::.resolveCtwasLdToken("/some/real/path.pgen"),
+        "/some/real/path.pgen"
+    )
+    noLdMap <- list(z_snp = NULL)
+    expect_equal(pecotmr:::.ctwasResolveLdPaths(noLdMap), noLdMap)
+    # Hand-built payloads reach the granular steps with an LD_map stub that is
+    # not a table at all; it has to survive untouched rather than error.
+    stub <- list(LD_map = "ld", LD_loader_fun = function() NULL)
+    expect_equal(pecotmr:::.ctwasResolveLdPaths(stub), stub)
+    expect_equal(
+        pecotmr:::.ctwasResolveLdPaths(list(LD_map = list(other = 1))),
+        list(LD_map = list(other = 1))
+    )
+})
+
+test_that("finemapCtwasRegions runs from the bundled est payload", {
+    skip_if_not_installed("ctwas")
+    data(ctwasEstExample)
+    # The step that the stale absolute paths broke.
+    screened <- suppressMessages(
+        screenCtwasRegions(ctwasEstExample, min_nonSNP_PIP = 0)
+    )
+    out <- suppressMessages(finemapCtwasRegions(screened))
+    expect_gt(nrow(out$finemap_res), 0L)
+})
+
+
+# =============================================================================
+# ctwasPipeline shares the LD-sketch validator
+#
+# ctwasPipeline cannot use `.ldFromSketch()` itself: it needs the whole panel
+# rather than a matched subset, and returns per-variant variance alongside R.
+# It must still fail the same way when the LD reference is missing, rather
+# than surfacing an S4 dispatch error from deep inside.
+# =============================================================================
+
+test_that("ctwas LD assembly reports a missing LD sketch like everything else", {
+    expect_error(
+        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        "carries no ldSketch"
+    )
+    expect_error(
+        pecotmr:::.ctwasComputeFullPanelLd("not a panel"),
+        "must be a genotype panel"
+    )
+})
+
+test_that("the shared validator gives ctwas and .ldFromSketch one message", {
+    shared <- tryCatch(
+        pecotmr:::.ldFromSketch(NULL, "chr1:1:A:G", label = "ctwasPipeline"),
+        error = conditionMessage
+    )
+    own <- tryCatch(
+        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        error = conditionMessage
+    )
+    expect_equal(own, shared)
 })

@@ -139,6 +139,16 @@ Accepted values for `combineMethods`: `acat`, `hmp`,
 `bonferroni`, `fisher`, `stouffer`, `invchisq`, `gbj`, `bj`, `hc`,
 `ghc`, `minp`, `gbj_omni`, `aspu`, `gates` (see `?combinePValues`).
 
+The per-tuple p-value itself comes from `waldTestPval()`, which is exported
+so the same test can be applied to any effect estimate and standard error:
+
+```{r wald}
+waldTestPval(beta = 2.5, se = 0.8, n = 10000)
+```
+
+`n` sets the degrees of freedom, so a small study gives a more conservative
+p-value than the normal approximation would.
+
 ## LD-sketch consistency
 
 Both `twasWeights` and `fineMappingResult` carry an `ldSketch` slot.

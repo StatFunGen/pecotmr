@@ -1161,7 +1161,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
     pecotmr:::fitJointGroup(
         g,
         pipe,
-        "bayes_c",
+        "bayesC",
         list(methodList = list(bayes_c_weights = list()))
     )
     expect_false(is.null(capturedPi))
@@ -1938,7 +1938,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
     pecotmr:::fitJointGroup(
         g,
         pipe,
-        "bayes_b",
+        "bayesB",
         list(methodList = list(bayes_b_weights = list()))
     )
     expect_equal(as.numeric(capturedProbIn), 1 - 0.7, tolerance = 1e-8)

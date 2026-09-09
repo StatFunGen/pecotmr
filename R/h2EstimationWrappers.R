@@ -276,13 +276,18 @@ shrinkLd <- function(
 
 #' @title Validate Genome Build Consistency
 #' @description Check that genome builds match between objects. Each object
-#'   contributes a single genome build (from its \code{genome} slot).
+#'   contributes a single genome build (from its \code{genome} slot). An
+#'   object that records no build is skipped rather than treated as a
+#'   mismatch: \code{loadLdMatrix()} leaves the build unset, so an LD
+#'   reference built from it names no build, and an unknown build cannot
+#'   contradict a known one.
 #' @param ... Objects with a \code{genome} slot.
 #' @return TRUE if all match, error otherwise.
 #' @keywords internal
 checkGenomeBuild <- function(...) {
     objects <- list(...)
     genomes <- map_chr(objects, .h2GenomeOfObject)
+    genomes <- genomes[!is.na(genomes)]
     if (n_distinct(genomes) > 1L) {
         msg <- glue(
             "Genome build mismatch: {str_flatten(genomes, ', ')}"
@@ -508,6 +513,14 @@ NULL
 # IRWLS weight w = 1/(1 + predGenetic)^2 * w2(lam); predGenetic uses the current
 # (clamped) slopes, w2 = pmin(1,lam) (in-sample) or logistic (out-of-sample).
 .lderWeights <- function(lam, ldAnnot, slopes, N, M, rough) {
+    # A correlation matrix's eigenvalues cannot be negative, but a real,
+    # rank-deficient LD block decomposes with a tail of tiny negative values
+    # (order -1e-15) that are pure floating-point noise. Left alone they make
+    # `pmin(1, lam)` negative, and the IRWLS step then takes sqrt() of a
+    # negative weight -- NaN designs and an "NA/NaN/Inf in 'x'" abort from
+    # lm.fit. Clamping at zero drops those null directions from the fit,
+    # which is what a zero-information direction should contribute anyway.
+    lam <- pmax(lam, 0)
     predG <- lam * as.vector(ldAnnot %*% pmin(pmax(slopes, 0), N / M))
     w2 <- if (rough) 1 / (1 + exp(-5 * (lam - 1))) else pmin(1, lam)
     1 / (1 + predG)^2 * w2
@@ -1146,7 +1159,13 @@ NULL
 # s_i = (ldAnnotScaled %*% h2a)_i and h2Total = sum(h2a). With a single 1/M
 # score column this is exactly upstream HDL's llfun (Ning et al. 2020).
 # param = c(h2_1, .., h2_nTau, int).
-.hdlNll <- function(param, n, nRef, lam, bstar, ldAnnotScaled, lim = exp(-18)) {
+# `lim` is upstream HDL's floor on the modelled per-direction variance
+# (llfun.R uses exp(-10)). It has to match: with 40% of a real reference's
+# eigen-directions near zero the floor is active for most of them, and the
+# `bstar^2 / lamh2` term it feeds dominates the likelihood -- a smaller floor
+# changes the objective by orders of magnitude and moves the optimum.
+# @noRd
+.hdlNll <- function(param, n, nRef, lam, bstar, ldAnnotScaled, lim = exp(-10)) {
     nTau <- ncol(ldAnnotScaled)
     h2a <- param[seq_len(nTau)]
     int <- param[nTau + 1L]
@@ -1210,8 +1229,10 @@ NULL
 # Fit HDL by L-BFGS-B over (h2_1..h2_nTau, int); bounds h2_a in [0,1], int in
 # [0,10] (Ning et al. 2020). Parametrizing by per-annotation h2 (scale ~1)
 # keeps the L-BFGS-B finite differences well conditioned.
-.hdlFit <- function(design, n, nRef) {
+.hdlFit <- function(design, n, nRef, warnOnBound = TRUE) {
     nTau <- ncol(design$ldAnnotScaled)
+    lower <- c(rep(0, nTau), 0)
+    upper <- c(rep(1, nTau), 10)
     opt <- optim(
         c(rep(0.1, nTau), 1),
         .hdlNll,
@@ -1221,16 +1242,58 @@ NULL
         bstar = design$bstar,
         ldAnnotScaled = design$ldAnnotScaled,
         method = "L-BFGS-B",
-        lower = c(rep(0, nTau), 0),
-        upper = c(rep(1, nTau), 10)
+        lower = lower,
+        upper = upper
     )
+    if (warnOnBound) {
+        .hdlWarnIfAtBound(opt$par, lower, upper, n, nRef)
+    }
     h2a <- opt$par[seq_len(nTau)]
     list(h2a = h2a, int = opt$par[nTau + 1L], h2 = sum(h2a))
 }
 
+# HDL's likelihood carries a finite-reference term, -lam * h2 / nRef, that
+# subtracts from the modelled variance. Once the reference is small enough
+# relative to the GWAS, that term outgrows the signal term, the modelled
+# variance is driven negative across most directions, and the optimiser walks
+# the intercept out to its upper bound. The heritability that comes back then
+# reflects the boundary rather than the data -- on the bundled reference,
+# nRef = 1000 against N = 1e5 returns 0.08 for a true 0.4 with the intercept
+# pinned at 10.
+#
+# It is a silent failure otherwise, and a detectable one: say so.
+#
+# Only the UPPER bounds are diagnostic. An intercept pinned at 0 simply means
+# no inflation was detected and leaves the heritability sound -- it happens
+# routinely on a well-sized reference -- and a heritability of 0 is a
+# legitimate estimate for a null trait. Warning on those would fire on
+# healthy fits and train the reader to ignore the message.
+# @noRd
+.hdlWarnIfAtBound <- function(par, lower, upper, n, nRef) {
+    tol <- 1e-6
+    atUpper <- par >= upper - tol
+    if (!any(atUpper)) {
+        return(invisible(FALSE))
+    }
+    which <- if (atUpper[[length(atUpper)]]) {
+        "intercept"
+    } else {
+        "heritability"
+    }
+    warn(glue(
+        "HDL: the fitted {which} sits at the top of its range, so the ",
+        "estimate reflects that bound rather than the data. This usually ",
+        "means the LD reference is too small for the GWAS -- the ",
+        "finite-reference correction scales as 1/nRef, and here nRef = ",
+        "{nRef} against N = {round(n)}. Compare the other estimators, or ",
+        "use a larger reference panel."
+    ))
+    invisible(TRUE)
+}
+
 # Baseline modeled variance lamh2_i at the fitted parameters (for local h2 and
 # the sHDL candidate score test).
-.hdlBaselineVar <- function(design, ft, n, nRef, lim = exp(-18)) {
+.hdlBaselineVar <- function(design, ft, n, nRef, lim = exp(-10)) {
     s <- as.vector(design$ldAnnotScaled %*% ft$h2a)
     pmax(
         s * design$lam^2 - design$lam * ft$h2 / nRef + ft$int * design$lam / n,
@@ -1288,7 +1351,7 @@ NULL
 # Local h2 for one block: MLE of the block's genome-wide-scaled h2 with the
 # intercept fixed at the global fit; SE from the Gaussian-variance Fisher
 # information sum((dlamh2/dh2)^2 / (2 lamh2^2)).
-.hdlLocalBlock <- function(bd, b, n, nRef, int, M, lim = exp(-18)) {
+.hdlLocalBlock <- function(bd, b, n, nRef, int, M, lim = exp(-10)) {
     varOf <- function(h2) {
         pmax(h2 / M * bd$lam^2 - h2 * bd$lam / nRef + int * bd$lam / n, lim)
     }
@@ -1454,6 +1517,415 @@ hdlUnivariate <- function(
 NULL
 
 # =============================================================================
+# S-LDSC (Finucane et al. 2015) -- stratified LD score regression
+# -----------------------------------------------------------------------------
+# The original method the other three descend from. It regresses per-variant
+# chi-square on annotation-stratified LD scores:
+#
+#   E[chi2_j] = N * sum_C tau_C * l(j, C) + N*a + 1
+#   with l(j, C) = sum_{k in C} r2_jk
+#
+# Unlike g-LDSC it needs only the per-variant scores, not the per-block LD
+# matrices, so an unstratified run works off a scores-only LdScore. The
+# stratified run needs the matrices, since the per-annotation scores are
+# formed from them exactly as g-LDSC forms its own.
+# =============================================================================
+
+#' @title S-LDSC: Stratified LD Score Regression
+#' @description Estimate heritability and functional enrichment by weighted
+#'   least squares on LD scores (Finucane et al. 2015) -- the original method
+#'   the other three estimators descend from. Per-variant \eqn{\chi^2_j} is
+#'   regressed on annotation-stratified LD scores
+#'   \eqn{\ell_{jC} = \sum_{k \in C} r^2_{jk}} with a confounding
+#'   intercept, fitting
+#'   \eqn{E[\chi^2_j] = N \sum_C \tau_C \ell_{jC} + Na + 1}.
+#'
+#'   Weights are LDSC's two multiplied factors, both floored at 1: the
+#'   heteroskedasticity term \eqn{1 / (2 E[\chi^2_j]^2)}, iterated on the
+#'   fitted values, and the overcounting term \eqn{1 / \ell_j} that stops
+#'   variants in strong LD from being counted many times. Standard errors come
+#'   from a delete-one-block jackknife over the LD blocks.
+#'
+#'   Two routes are taken, matching \code{ldsc.py} -- the split is on
+#'   annotation count, not on preference:
+#'   \describe{
+#'     \item{unstratified}{the two-step estimator: the intercept is fit on
+#'       the variants with \eqn{\chi^2 < 30}, then held fixed while the
+#'       slope is fit over all of them.}
+#'     \item{stratified}{no two-step -- upstream refuses one on a
+#'       partitioned design. Variants with \eqn{\chi^2 >} \code{max(0.001
+#'       N, 80)} are dropped, the design is weighted once, and a single
+#'       weighted least-squares fit follows.}
+#'   }
+#'
+#'   The intercept is reported as estimated and is not floored at 1: the
+#'   model implies at least 1, but a value below it is informative rather
+#'   than an error to clamp away, and clamping would move the heritability
+#'   too.
+#'
+#'   Estimates agree with upstream \code{ldsc} to roughly 1e-6 relative;
+#'   the residual is a small ridge in the weighted solve, which upstream has
+#'   no equivalent of and which exists so an exactly singular design returns
+#'   a value rather than \code{NA}.
+#'
+#'   Unlike \code{\link{pecotmr-h2-gldsc}} this needs only the per-variant
+#'   scores when unstratified, so it runs on a scores-only
+#'   \code{\link{LdScore}}; the stratified fit forms per-annotation scores
+#'   from the per-block LD matrices and therefore requires them.
+#'
+#'   \strong{Scale.} LD score regression is a genome-scale method -- real
+#'   analyses regress over roughly a million variants. On a reference of a
+#'   few thousand the intercept is not identifiable (an unweighted OLS on
+#'   such data returns an intercept several times its true value), and the
+#'   heritability estimate is attenuated as a result. Treat small-reference
+#'   estimates as illustrative. \code{\link{pecotmr-h2-lder}} is much less
+#'   sensitive to reference size and is the better choice there.
+#' @name pecotmr-h2-sldsc
+#' @keywords internal
+#' @references
+#'   Finucane HK, Bulik-Sullivan B, Gusev A, et al. (2015). Partitioning
+#'   heritability by functional annotation using genome-wide association
+#'   summary statistics. Nature Genetics 47(11):1228-1235.
+NULL
+
+# @noRd
+sldscUnivariate <- function(
+    z,
+    n,
+    ldRef,
+    annotations = NULL,
+    local = FALSE,
+    nIter = 2L
+) {
+    M <- length(ldRef)
+    chi2 <- z^2
+    baselineMat <- .h2BaselineMat(annotations)
+    # Same design g-LDSC uses: an all-ones "base" annotation ahead of the
+    # baseline columns, so `crossprod(A)` is the annotation overlap matrix.
+    A <- .gldscAnnotMatrix(annotations, M)
+    scores <- .sldscScoreMatrix(ldRef, baselineMat, M)
+    baseScore <- scores[, 1L]
+    blockIdx <- .sldscBlockIndex(ldRef, M)
+    fit <- .sldscFit(chi2, scores, baseScore, n, A, nIter)
+    jk <- .sldscJackknife(chi2, scores, baseScore, n, A, nIter, blockIdx)
+    .sldscResult(fit, jk, annotations, baselineMat, chi2, baseScore, local, M)
+}
+
+# The design's LD-score columns: the base score first, then one stratified
+# score per baseline annotation. Stratified scores come from the per-block LD
+# matrices, the same source g-LDSC uses.
+# @noRd
+.sldscScoreMatrix <- function(ldRef, baselineMat, M) {
+    base <- as.vector(getLdScores(ldRef)[, 1L])
+    if (is.null(baselineMat)) {
+        return(matrix(base, ncol = 1L, dimnames = list(NULL, "base_l2")))
+    }
+    ldMatrixList <- getLdMatrixList(ldRef)
+    if (length(ldMatrixList) == 0L) {
+        msg <- glue(
+            "stratified S-LDSC requires full per-block LD matrices ",
+            "(ldMatrixList) to form the per-annotation LD scores. Build the ",
+            "reference with `buildLdScore(keepLdMatrices = TRUE)`."
+        )
+        abort(msg)
+    }
+    strat <- matrix(0, M, ncol(baselineMat))
+    for (block in ldMatrixList) {
+        idx <- block$snpIdx
+        strat[idx, ] <- (block$R^2) %*% baselineMat[idx, , drop = FALSE]
+    }
+    cbind(base_l2 = base, strat)
+}
+
+# Per-block variant indices, from the LD matrices when present and otherwise
+# by overlapping the reference's variants with its LD blocks. The jackknife
+# leaves one of these out at a time.
+# @noRd
+.sldscBlockIndex <- function(ldRef, M) {
+    ldMatrixList <- getLdMatrixList(ldRef)
+    if (length(ldMatrixList) > 0L) {
+        return(map(ldMatrixList, "snpIdx"))
+    }
+    snpInfo <- tibble(
+        CHR = as.character(seqnames(ldRef)),
+        BP = start(ldRef)
+    )
+    idx <- snpsPerBlock(snpInfo, getLdBlocks(ldRef))
+    keep <- idx[map_int(idx, length) > 0L]
+    if (length(keep) == 0L) {
+        abort("S-LDSC: no LD block covers any reference variant.")
+    }
+    keep
+}
+
+# Upstream `Hsq.weights` verbatim (ldsc/ldscore/regressions.py):
+#
+#   hsq   = clamp(hsq, 0, 1)
+#   ld    = max(ld, 1);  w_ld = max(w_ld, 1)
+#   c     = hsq * N / M
+#   het_w = 1 / (2 (intercept + c*ld)^2)
+#   w     = het_w / w_ld
+#
+# `ld` is the LD score entering the model and `w_ld` the one computed over
+# just the regression variants. pecotmr carries a single score, so both read
+# the same column -- also the usual case upstream, where --w-ld-chr names the
+# same file as --ref-ld-chr.
+# @noRd
+.sldscWeights <- function(ld, wLd, n, M, hsq, intercept) {
+    hsq <- min(max(hsq, 0), 1)
+    ld <- pmax(ld, 1)
+    wLd <- pmax(wLd, 1)
+    hetW <- 1 / (2 * (intercept + (hsq * n / M) * ld)^2)
+    hetW / wLd
+}
+
+# LDSC's `aggregate`: the method-of-moments h2 that seeds the first weights.
+#   h2 = M (mean(chi2) - intercept) / mean(N * ld)
+# @noRd
+.sldscAggregateH2 <- function(chi2, baseScore, n, M, intercept = 1) {
+    M * (mean(chi2) - intercept) / mean(n * baseScore)
+}
+
+# Upstream takes two different routes and the split is on annotation count,
+# not on preference (ldscore/sumstats.py):
+#
+#   univariate  -- two-step estimator, chi2 < 30 selects step 1, IRWLS twice
+#   partitioned -- NO two-step; it raises rather than attempt one. Variants
+#                  with chi2 > max(0.001*N, 80) are dropped outright, the
+#                  design is weighted once by the initial weights, and a plain
+#                  least-squares jackknife follows (its `old_weights` path).
+#
+# Both are reproduced so the estimates line up with `ldsc.py`.
+# @noRd
+.sldscFit <- function(chi2, scores, baseScore, n, A, nIter) {
+    if (ncol(scores) == 1L) {
+        return(.sldscFitUnivariate(chi2, scores, baseScore, n, A, nIter))
+    }
+    .sldscFitPartitioned(chi2, scores, baseScore, n, A)
+}
+
+# @noRd
+.sldscFitUnivariate <- function(chi2, scores, baseScore, n, A, nIter) {
+    M <- nrow(A)
+    keep <- chi2 < 30
+    if (sum(keep) < 4L) {
+        keep <- rep(TRUE, length(chi2))
+    }
+    # One set of initial weights, formed on the full data, reused by both
+    # steps -- upstream computes `initial_w` once and subsets it for step 1.
+    xTot <- rowSums(scores)
+    aggH2 <- .sldscAggregateH2(chi2, xTot, n, M)
+    w0 <- .sldscWeights(xTot, baseScore, n, M, aggH2, 1)
+    step1 <- .sldscIrwls(
+        chi2[keep],
+        scores[keep, , drop = FALSE],
+        baseScore[keep],
+        n,
+        M,
+        nIter,
+        freeIntercept = TRUE,
+        w0 = w0[keep]
+    )
+    # Not floored at 1. The model implies an intercept of at least 1, but
+    # upstream reports whatever step 1 estimates -- a value below 1 is
+    # informative (it says the data are inconsistent with the model, often
+    # deflation) and clamping it silently would change the h2 as well.
+    intercept <- step1$intercept
+    step2 <- .sldscIrwls(
+        chi2 - intercept,
+        scores,
+        baseScore,
+        n,
+        M,
+        nIter,
+        freeIntercept = FALSE,
+        intercept = intercept,
+        w0 = w0
+    )
+    .sldscCoefToFit(c(step2$coef, intercept), n, A)
+}
+
+# @noRd
+.sldscFitPartitioned <- function(chi2, scores, baseScore, n, A) {
+    M <- nrow(A)
+    keep <- chi2 < max(0.001 * n, 80)
+    if (sum(keep) < ncol(scores) + 2L) {
+        keep <- rep(TRUE, length(chi2))
+    }
+    chi2 <- chi2[keep]
+    scores <- scores[keep, , drop = FALSE]
+    baseScore <- baseScore[keep]
+    # `x_tot` upstream: the row-sum of the design's annotation columns, which
+    # coincides with the base score only when there is a single column.
+    xTot <- rowSums(scores)
+    hsq <- .sldscAggregateH2(chi2, xTot, n, M)
+    w <- .sldscWeights(xTot, baseScore, n, M, hsq, 1)
+    .sldscCoefToFit(.sldscWlsCoef(cbind(scores, 1), chi2, w), n, A)
+}
+
+# Two IRWLS passes, matching upstream's `for i in range(2)`.
+# @noRd
+.sldscIrwls <- function(
+    y,
+    scores,
+    baseScore,
+    n,
+    M,
+    nIter,
+    freeIntercept,
+    intercept = 1,
+    w0 = NULL
+) {
+    design <- if (freeIntercept) cbind(scores, 1) else scores
+    xTot <- rowSums(scores)
+    if (is.null(w0)) {
+        hsq <- .sldscAggregateH2(y, xTot, n, M)
+        w0 <- .sldscWeights(xTot, baseScore, n, M, hsq, intercept)
+    }
+    w <- w0
+    coef <- NULL
+    for (i in seq_len(max(1L, nIter))) {
+        coef <- .sldscWlsCoef(design, y, w)
+        # Upstream builds the weight from the FIRST coefficient and `x_tot`
+        # alone -- a univariate approximation even for a partitioned design --
+        # rather than from the full fitted values.
+        hsq <- M * coef[[1L]] / n
+        if (freeIntercept) {
+            intercept <- max(coef[[length(coef)]], 0)
+        }
+        w <- .sldscWeights(xTot, baseScore, n, M, hsq, intercept)
+    }
+    # Upstream's loop updates the weights `nIter` times and then solves once
+    # more with the converged weights -- three solves for its two passes, not
+    # two. Stopping at the loop's last solve leaves the final weight update
+    # unused and shifts the estimate by around a percent.
+    coef <- .sldscWlsCoef(design, y, w)
+    list(
+        coef = coef[seq_len(ncol(scores))],
+        intercept = if (freeIntercept) coef[[length(coef)]] else intercept
+    )
+}
+
+
+# Solved through ridge-regularised normal equations rather than lm.fit. The
+# base LD-score column is the sum of the stratified ones whenever the baseline
+# annotations partition the genome, which makes the design exactly singular;
+# lm.fit then returns NA coefficients that poison the next IRWLS weight. The
+# ridge is the same negligible one g-LDSC uses for the same reason.
+# @noRd
+.sldscWlsCoef <- function(design, y, w) {
+    sw <- sqrt(pmax(w, 0))
+    x <- design * sw
+    xtx <- crossprod(x)
+    ridge <- 1e-8 * mean(abs(diag(xtx)))
+    as.vector(solve(xtx + diag(ridge, ncol(xtx)), crossprod(x, y * sw)))
+}
+
+# Regressing chi2 on raw LD scores gives coef_C = N * tau_C, so tau = coef/N.
+# Partitioned heritabilities are A'A tau, not tau * M_C: annotations overlap
+# in general (the all-ones base column overlaps every one of them), and the
+# overlap matrix is what turns per-annotation effects into per-annotation
+# heritability. Its leading entry is the total, since A[, 1] is all ones.
+# @noRd
+.sldscCoefToFit <- function(coef, n, A) {
+    nS <- ncol(A)
+    tau <- coef[seq_len(nS)] / n
+    estH <- as.vector(crossprod(A) %*% tau)
+    list(
+        tau = tau,
+        h2 = estH[[1L]],
+        estH = estH,
+        intercept = coef[[nS + 1L]],
+        coef = coef
+    )
+}
+
+# Delete-one-block jackknife over the LD blocks.
+# @noRd
+.sldscJackknife <- function(chi2, scores, baseScore, n, A, nIter, blockIdx) {
+    loo <- map(
+        blockIdx,
+        .sldscLooFit,
+        chi2 = chi2,
+        scores = scores,
+        baseScore = baseScore,
+        n = n,
+        A = A,
+        nIter = nIter
+    )
+    tauBlocks <- exec(rbind, !!!map(loo, "tau"))
+    estHBlocks <- exec(rbind, !!!map(loo, "estH"))
+    intLoo <- map_dbl(loo, "intercept")
+    nB <- length(loo)
+    jkSe <- function(v) sqrt(var(v) * (nB - 1)^2 / nB)
+    list(
+        h2Se = jkSe(estHBlocks[, 1L]),
+        intSe = jkSe(intLoo),
+        tauSe = apply(tauBlocks, 2, jkSe),
+        tauBlocks = tauBlocks,
+        estHBlocks = estHBlocks
+    )
+}
+
+# The left-out block is dropped from the regression rows, but `A` stays whole:
+# the annotation sizes are genome-wide constants, not per-fold quantities.
+# @noRd
+.sldscLooFit <- function(idx, chi2, scores, baseScore, n, A, nIter) {
+    keep <- setdiff(seq_along(chi2), idx)
+    .sldscFit(
+        chi2[keep],
+        scores[keep, , drop = FALSE],
+        baseScore[keep],
+        n,
+        A,
+        nIter
+    )
+}
+
+# @noRd
+.sldscResult <- function(
+    fit,
+    jk,
+    annotations,
+    baselineMat,
+    chi2,
+    baseScore,
+    local,
+    M
+) {
+    localDf <- if (local) .sldscLocal(chi2, baseScore, fit, M) else NULL
+    enrichmentDf <- NULL
+    if (!is.null(baselineMat)) {
+        nm <- SummarizedExperiment::colData(getBaseline(annotations))$name
+        enrichmentDf <- .gldscEnrichmentDf(fit, jk, baselineMat, nm, M)
+    }
+    tau <- if (is.null(baselineMat)) fit$h2 else fit$tau[-1]
+    tauSe <- if (is.null(baselineMat)) jk$h2Se else jk$tauSe[-1]
+    jkRes <- list(
+        se = c(jk$h2Se, jk$intSe),
+        tauSe = tauSe,
+        tauBlocks = if (is.null(baselineMat)) {
+            NULL
+        } else {
+            jk$tauBlocks[, -1, drop = FALSE]
+        }
+    )
+    .h2Result(fit$h2, jkRes, fit$intercept, tau, localDf, enrichmentDf, NULL)
+}
+
+# Per-variant local h2 contribution: the fitted non-intercept signal spread
+# over the variant's own LD score.
+# @noRd
+.sldscLocal <- function(chi2, baseScore, fit, M) {
+    tibble(
+        variantIdx = seq_along(chi2),
+        chi2 = chi2,
+        ldScore = baseScore,
+        h2Local = fit$tau[[1L]] * pmax(baseScore, 0)
+    )
+}
+
+# =============================================================================
 # estimateH2 -- main dispatch
 # =============================================================================
 
@@ -1486,8 +1958,85 @@ NULL
         method,
         "lder" = lderUnivariate(z, n, ldRef, annotations, local, ...),
         "gldsc" = gldscUnivariate(z, n, ldRef, annotations, local, ...),
+        "sldsc" = sldscUnivariate(z, n, ldRef, annotations, local, ...),
         "hdl" = hdlUnivariate(z, n, ldRef, annotations, local, ...)
     )
+}
+
+# The estimators read `z` and the annotation rows positionally, by each LD
+# block's own snpIdx -- nothing is matched on variant id along the way. A
+# sumstats or annotation set that is not the reference's variant list, in the
+# reference's order, therefore yields a silently wrong h2 rather than an
+# error. This is the one place holding all three objects, so check here.
+# @noRd
+.h2ValidateInputs <- function(sumstats, study, ldRef, annotations) {
+    checkGenomeBuild(sumstats, ldRef)
+    .h2CheckBlockCount(ldRef)
+    entry <- getSumStats(sumstats, study = study)
+    .h2CheckVariantCount(length(entry), length(ldRef), glue("study '{study}'"))
+    .h2CheckPositions(entry, ldRef, study)
+    if (is.null(annotations)) {
+        return(invisible(TRUE))
+    }
+    checkGenomeBuild(ldRef, annotations)
+    .h2CheckVariantCount(nrow(annotations), length(ldRef), "`annotations`")
+    invisible(TRUE)
+}
+
+# Every estimator takes its standard error from a delete-one-block jackknife,
+# which needs at least two blocks. With one, LDER and g-LDSC fail deep inside
+# a fold fit ("'x' must be a matrix") and HDL reports an SE of exactly 0, so
+# say so here instead.
+# @noRd
+.h2CheckBlockCount <- function(ldRef) {
+    nBlocks <- length(getLdBlocks(ldRef))
+    if (nBlocks >= 2L) {
+        return(invisible(TRUE))
+    }
+    msg <- glue(
+        "estimateH2: the LD reference carries {nBlocks} LD block(s). The ",
+        "estimators take their standard error from a delete-one-block ",
+        "jackknife, so at least two are required, and a usable SE needs ",
+        "many more. Build the reference from per-block LD -- see ",
+        "`buildLdEigen()` / `buildLdScore()`."
+    )
+    abort(msg)
+}
+
+# @noRd
+.h2CheckVariantCount <- function(n, M, what) {
+    if (n == M) {
+        return(invisible(TRUE))
+    }
+    msg <- glue(
+        "estimateH2: {what} carries {n} variant(s) but the LD reference ",
+        "carries {M}. The estimators index by the reference's variant ",
+        "order, so both must hold the same variants in the same order."
+    )
+    abort(msg)
+}
+
+# Element-wise coordinate check. Coordinates are compared rather than variant
+# ids because the two sides routinely name the same variant differently
+# (rsid vs chr:pos:A2:A1), while the same variant always sits at the same
+# coordinate once the chr prefix is normalized.
+# @noRd
+.h2CheckPositions <- function(entry, ldRef, study) {
+    same <- withChrPrefix(as.character(seqnames(entry))) ==
+        withChrPrefix(as.character(seqnames(ldRef))) &
+        start(entry) == start(ldRef)
+    if (all(same)) {
+        return(invisible(TRUE))
+    }
+    nBad <- sum(!same)
+    firstBad <- which(!same)[[1L]]
+    msg <- glue(
+        "estimateH2: study '{study}' and the LD reference disagree at ",
+        "{nBad} of {length(same)} position(s), the first at index ",
+        "{firstBad}. The estimators index by the reference's variant ",
+        "order, so both must hold the same variants in the same order."
+    )
+    abort(msg)
 }
 
 # Wrap a univariate estimator result list into an H2Estimate S4 object.
@@ -1522,9 +2071,10 @@ setMethod(
         study = NULL,
         ...
     ) {
-        method <- arg_match(method, c("lder", "gldsc", "hdl"))
+        method <- arg_match(method, c("lder", "gldsc", "sldsc", "hdl"))
         .validateMethodRef(method, ldRef)
         study <- .estimateH2ResolveStudy(sumstats, study)
+        .h2ValidateInputs(sumstats, study, ldRef, annotations)
         z <- getZ(sumstats, study = study)
         n <- median(getN(sumstats, study = study))
         M <- nSnps(sumstats, study = study)
@@ -1556,9 +2106,10 @@ setMethod(
         )
         abort(msg)
     }
-    if (method == "gldsc" && !is(ldRef, "LdScore")) {
+    if (is_in(method, c("gldsc", "sldsc")) && !is(ldRef, "LdScore")) {
         msg <- glue(
-            "Method 'gldsc' requires an LdScore object, got {class(ldRef)}"
+            "Method '{method}' requires an LdScore object, ",
+            "got {class(ldRef)}"
         )
         abort(msg)
     }
@@ -1766,13 +2317,20 @@ h2EstimateToSldscTrait <- function(h2Est) {
     }
 }
 
-# The single build named by a GRanges' seqinfo, or an error saying it carries
-# none -- silently returning NA would make a mismatch check pass by accident.
+# The single build named by a GRanges' seqinfo. A GRanges naming none returns
+# NA and checkGenomeBuild() skips it: loadLdMatrix() leaves the build unset,
+# so demanding one here would reject every LD reference the package's own
+# loader produces. Naming more than one is still an error -- such an object
+# is internally inconsistent rather than merely unlabelled, and the
+# coordinate check in .h2CheckPositions() is the stronger guard regardless.
 # @noRd
 .h2GenomeOfRanges <- function(x) {
     g <- unique(GenomeInfoDb::genome(x))
     g <- g[!is.na(g)]
-    if (length(g) != 1L) {
+    if (length(g) == 0L) {
+        return(NA_character_)
+    }
+    if (length(g) > 1L) {
         abort(glue(
             "genome build check: the GRanges names {length(g)} genome ",
             "build(s) in seqinfo(); set one with genome(x) <- \"hg38\"."
@@ -1856,7 +2414,14 @@ h2EstimateToSldscTrait <- function(h2Est) {
 # One HDL delete-one-block jackknife fold: refit leaving block `b` out.
 # @noRd
 .hdlLooFit <- function(b, blockData, M, baselineMat, n, nRef) {
-    .hdlFit(.hdlDesign(blockData[-b], M, baselineMat), n, nRef)
+    # The full-data fit already reported any bound it hit; repeating that
+    # once per left-out block would bury it in noise.
+    .hdlFit(
+        .hdlDesign(blockData[-b], M, baselineMat),
+        n,
+        nRef,
+        warnOnBound = FALSE
+    )
 }
 
 # One HDL local-heritability row for block `b`.

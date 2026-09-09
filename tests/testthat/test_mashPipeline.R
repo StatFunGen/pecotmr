@@ -575,12 +575,14 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
     skip_if_not_installed("flashier")
     data(qtlSumStatsMulticontextExample)
     ss <- qtlSumStatsMulticontextExample
-    # Supplying `null` triggers estimate_null_correlation_simple; leaving nPcs
-    # NULL exercises the `nPcs <- ncol(Bhat) - 1` default in the cov_* chain.
+    # `residualCorrelationMethod = "simple"` runs
+    # estimate_null_correlation_simple on the null set; leaving nPcs NULL
+    # exercises the `nPcs <- ncol(Bhat) - 1` default in the cov_* chain.
     res <- suppressMessages(suppressWarnings(
         mashPipeline(
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
+            residualCorrelationMethod = "simple",
             setSeed = 1L
         )
     ))
@@ -592,6 +594,160 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
         logical(1)
     )))
     expect_equal(sum(res$w), 1, tolerance = 1e-6)
+})
+
+# ---------------------------------------------------------------------------
+# residualCorrelationMethod
+#
+# Vhat used to be chosen by inspecting which partitions were present, so a
+# caller without a null set silently assumed zero residual correlation. The
+# choice is now always explicit.
+# ---------------------------------------------------------------------------
+
+test_that("the default is identity regardless of which partitions are given", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    # The default must not depend on data shape -- that was the old silent
+    # behaviour this argument replaced.
+    withNull <- suppressMessages(suppressWarnings(mashPipeline(
+        list(strong = ss, random = ss, null = ss),
+        alpha = 0,
+        setSeed = 1L
+    )))
+    withoutNull <- suppressMessages(suppressWarnings(mashPipeline(
+        list(strong = ss, random = ss),
+        alpha = 0,
+        setSeed = 1L
+    )))
+    explicit <- suppressMessages(suppressWarnings(mashPipeline(
+        list(strong = ss, random = ss, null = ss),
+        alpha = 0,
+        residualCorrelationMethod = "identity",
+        setSeed = 1L
+    )))
+    expect_equal(withNull$U, withoutNull$U)
+    expect_equal(withNull$w, withoutNull$w)
+    expect_equal(withNull$U, explicit$U)
+})
+
+test_that("an unused null partition is reported", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    # Assembling a null set and still getting identity is more often an
+    # oversight than an intent, so it must not pass silently.
+    expect_message(
+        suppressWarnings(mashPipeline(
+            list(strong = ss, random = ss, null = ss),
+            alpha = 0,
+            setSeed = 1L
+        )),
+        "does not use it"
+    )
+    # Naming identity explicitly does not change that the set is unused.
+    expect_message(
+        suppressWarnings(mashPipeline(
+            list(strong = ss, random = ss, null = ss),
+            alpha = 0,
+            residualCorrelationMethod = "identity",
+            setSeed = 1L
+        )),
+        "'null' partition"
+    )
+})
+
+test_that("no unused-null notice when there is nothing to ignore", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    noNull <- function() {
+        suppressWarnings(mashPipeline(
+            list(strong = ss, random = ss),
+            alpha = 0,
+            setSeed = 1L
+        ))
+    }
+    expect_no_message(noNull(), message = "'null' partition")
+    # Nor when the null set is actually being consumed.
+    usesNull <- function() {
+        suppressWarnings(mashPipeline(
+            list(strong = ss, random = ss, null = ss),
+            alpha = 0,
+            residualCorrelationMethod = "simple",
+            setSeed = 1L
+        ))
+    }
+    expect_no_message(usesNull(), message = "does not use it")
+})
+
+test_that("mashPipeline honours a data-driven residualCorrelationMethod", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    sl <- list(strong = ss, random = ss, null = ss)
+    identityFit <- suppressMessages(suppressWarnings(mashPipeline(
+        sl,
+        alpha = 0,
+        residualCorrelationMethod = "identity",
+        setSeed = 1L
+    )))
+    simpleFit <- suppressMessages(suppressWarnings(mashPipeline(
+        sl,
+        alpha = 0,
+        residualCorrelationMethod = "simple",
+        setSeed = 1L
+    )))
+    # A different V has to move the fit, or the argument is not reaching it.
+    expect_false(isTRUE(all.equal(identityFit$w, simpleFit$w)))
+})
+
+test_that("mashPipeline rejects an unknown residualCorrelationMethod", {
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    expect_error(
+        mashPipeline(
+            list(strong = ss, random = ss),
+            alpha = 0,
+            residualCorrelationMethod = "bogus"
+        ),
+        "bogus"
+    )
+})
+
+test_that("a method needing a partition it lacks errors through mashPipeline", {
+    skip_if_not_installed("mashr")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    expect_error(
+        mashPipeline(
+            list(strong = ss, random = ss),
+            alpha = 0,
+            residualCorrelationMethod = "simple"
+        ),
+        "requires a 'null' entry"
+    )
+})
+
+test_that("a supplied residualCorrelation wins over the method", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    # 'simple' would error without a null set; the supplied matrix means the
+    # estimator is never consulted.
+    res <- suppressMessages(suppressWarnings(mashPipeline(
+        list(strong = ss, random = ss),
+        alpha = 0,
+        residualCorrelation = diag(3),
+        residualCorrelationMethod = "simple",
+        setSeed = 1L
+    )))
+    expect_named(res, c("U", "w"))
 })
 
 # ---------------------------------------------------------------------------
@@ -641,7 +797,7 @@ test_that("mashResidualCorrelation(simple) errors without a null entry", {
     )
 })
 
-test_that("mashResidualCorrelation(simple_specific) returns a null correlation", {
+test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", {
     skip_if_not_installed("mashr")
     data(qtlSumStatsMulticontextExample)
     ss <- qtlSumStatsMulticontextExample
@@ -649,7 +805,7 @@ test_that("mashResidualCorrelation(simple_specific) returns a null correlation",
         mashResidualCorrelation(
             list(strong = ss, null = ss),
             alpha = 0,
-            method = "simple_specific"
+            method = "simpleSpecific"
         )
     ))
     expect_equal(dim(v), c(3L, 3L))
@@ -715,7 +871,7 @@ test_that("mashResidualCorrelation errors when a method's inputs are missing", {
 # ---------------------------------------------------------------------------
 # mashPriorCovariances — the covariance + weight estimator extracted from
 # mashPipeline. Default builds every non-udr component (canonical + pca +
-# flash + flash_nonneg) refined by cov_ed.
+# flash + flashNonneg) refined by cov_ed.
 # ---------------------------------------------------------------------------
 
 test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
@@ -790,7 +946,7 @@ test_that("mashPriorCovariances validates a supplied prior", {
     )
 })
 
-test_that("mashPriorCovariances(flash_nonneg) adds components vs flash-only", {
+test_that("mashPriorCovariances(flashNonneg) adds components vs flash-only", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     data(qtlSumStatsMulticontextExample)
@@ -810,7 +966,7 @@ test_that("mashPriorCovariances(flash_nonneg) adds components vs flash-only", {
             list(strong = ss),
             alpha = 0,
             vhat = diag(3),
-            components = c("canonical", "pca", "flash", "flash_nonneg"),
+            components = c("canonical", "pca", "flash", "flashNonneg"),
             nPcs = 2L,
             setSeed = 1L
         )
@@ -1030,6 +1186,7 @@ test_that("mashPipeline result == composing the two extracted building blocks", 
         mashPipeline(
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
+            residualCorrelationMethod = "simple",
             setSeed = 1L
         )
     ))
@@ -1099,6 +1256,74 @@ test_that("mashModelFit validates the prior and the fitOn entry", {
         ),
         "no 'random' entry"
     )
+})
+
+# ---------------------------------------------------------------------------
+# Prior-shape normalisation (.mashAsUlist)
+#
+# The two producers disagree on shape: mashCovarianceComponents() returns a
+# bare Ulist, mashPriorCovariances() wraps it as list(U, w, loglik). Every
+# consumer must take either, so a chain can be written without reaching for
+# `$U`.
+# ---------------------------------------------------------------------------
+
+test_that(".mashAsUlist unwraps the wrapper and passes a bare Ulist through", {
+    ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
+    wrapped <- list(U = ulist, w = c(0.5, 0.5), loglik = -10)
+
+    expect_equal(pecotmr:::.mashAsUlist(wrapped), ulist)
+    expect_equal(pecotmr:::.mashAsUlist(ulist), ulist)
+    expect_null(pecotmr:::.mashAsUlist(NULL))
+})
+
+test_that(".mashAsUlist does not mistake a covariance named U for the wrapper", {
+    # A genuine Ulist entry named "U" is a matrix, not a list, which is what
+    # keeps the two shapes distinguishable.
+    ulist <- list(U = diag(3), identity = diag(3))
+    expect_equal(pecotmr:::.mashAsUlist(ulist), ulist)
+})
+
+test_that("mashModelFit accepts either prior shape and fits identically", {
+    skip_if_not_installed("mashr")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
+    wrapped <- list(U = ulist, w = NULL, loglik = NULL)
+
+    fit <- function(prior) {
+        suppressMessages(suppressWarnings(mashModelFit(
+            list(random = ss),
+            alpha = 0,
+            priorCovariances = prior,
+            vhat = diag(3),
+            setSeed = 1L
+        )))
+    }
+    expect_equal(fit(wrapped)$loglik, fit(ulist)$loglik)
+})
+
+test_that("mashPriorCovariances accepts either shape for its two prior args", {
+    skip_if_not_installed("mashr")
+    data(qtlSumStatsMulticontextExample)
+    ss <- qtlSumStatsMulticontextExample
+    sl <- list(strong = ss, random = ss)
+    ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
+    wrapped <- list(U = ulist, w = NULL, loglik = NULL)
+
+    bare <- suppressMessages(suppressWarnings(mashPriorCovariances(
+        sl,
+        alpha = 0,
+        vhat = diag(3),
+        priorCovariances = ulist
+    )))
+    wrap <- suppressMessages(suppressWarnings(mashPriorCovariances(
+        sl,
+        alpha = 0,
+        vhat = diag(3),
+        priorCovariances = wrapped
+    )))
+    expect_equal(names(wrap$U), names(bare$U))
+    expect_equal(wrap$w, bare$w)
 })
 
 test_that("mashPosterior returns posterior matrices with covariance", {

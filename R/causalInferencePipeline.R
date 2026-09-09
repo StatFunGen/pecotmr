@@ -349,7 +349,11 @@ causalInferencePipeline <- function(
 # @noRd
 .cipScoreGwasPair <- function(gi, tuple, weightsInfo, fmrEntry, p) {
     gStudy <- as.character(p$gwasSumStats$study)[[gi]]
-    gdf <- getSumstatDf(p$gwasSumStats, study = gStudy, require = c("SNP", "Z"))
+    gdf <- getSumStatsDf(
+        p$gwasSumStats,
+        study = gStudy,
+        require = c("SNP", "Z")
+    )
     twasOut <- .cipComputeTwasZ(
         weights = weightsInfo$weights,
         variantIds = weightsInfo$variantIds,
@@ -706,7 +710,7 @@ causalInferencePipeline <- function(
 }
 
 # Compute the per-tuple TWAS Z from a single GwasSumStats tuple's
-# unpacked data.frame (produced by getSumstatDf upstream). Returns
+# unpacked data.frame (produced by getSumStatsDf upstream). Returns
 # NULL when the overlap is too small.
 .cipComputeTwasZ <- function(
     weights,

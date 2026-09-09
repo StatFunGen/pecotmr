@@ -786,7 +786,7 @@ setMethod(
     ) {
         ma[[adapter$fitArg]] <- fittedModels[[token]]
     }
-    if (isTRUE(cfg$estimatePi) && is_in(token, c("bayes_c", "bayes_b"))) {
+    if (isTRUE(cfg$estimatePi) && is_in(token, c("bayesC", "bayesB"))) {
         ma <- .jointTwasSpikeSlabPi(ma, token, Xc, Yc, cond, cfg, stdz)
     }
     ma
@@ -809,10 +809,10 @@ setMethod(
         seed = cfg$seed
     )
     piHat <- as.numeric(estimateSparsity(mrA))
-    if (token == "bayes_c" && is.null(ma$pi)) {
+    if (token == "bayesC" && is.null(ma$pi)) {
         ma$pi <- piHat
     }
-    if (token == "bayes_b" && is.null(ma$probIn)) {
+    if (token == "bayesB" && is.null(ma$probIn)) {
         ma$probIn <- piHat
     }
     ma

@@ -972,7 +972,7 @@ test_that("colocboost sumstat bundle drops panel-rare variants", {
 test_that("colocboost RSS cutoffs match .panelVariantFilter", {
     ss <- .cbf_qcd()
     ids <- normalizeVariantId(
-        getSumstatDf(
+        getSumStatsDf(
             ss,
             study = ss$study[[1L]],
             context = ss$context[[1L]],
@@ -1013,7 +1013,7 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
     # filtered set has to be passed to the LD build separately rather than by
     # shrinking that vector.
     ss <- .cbf_qcd()
-    df <- getSumstatDf(
+    df <- getSumStatsDf(
         ss,
         study = ss$study[[1L]],
         context = ss$context[[1L]],
@@ -1038,7 +1038,7 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
 
 test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
     ss <- .cbf_qcd()
-    df <- getSumstatDf(
+    df <- getSumStatsDf(
         ss,
         study = ss$study[[1L]],
         context = ss$context[[1L]],

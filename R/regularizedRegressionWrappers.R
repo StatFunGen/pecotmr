@@ -23,10 +23,10 @@
 #' })
 #' stat <- list(b = vapply(ss, `[`, numeric(1), 1L),
 #'   seb = vapply(ss, `[`, numeric(1), 2L), n = rep(nrow(X), ncol(X)))
-#' mrAshRssWeights(stat, cor(X), varY = var(y), sigma2E = var(y),
+#' mrashRssWeights(stat, cor(X), varY = var(y), sigma2E = var(y),
 #'   s0 = c(0, 0.1, 0.5), w0 = c(0.8, 0.1, 0.1))
 #' @export
-mrAshRssWeights <- function(
+mrashRssWeights <- function(
     stat,
     LD,
     varY,
@@ -229,8 +229,9 @@ prsCsWeights <- function(stat, LD, ...) {
 #'
 #' @param seed Integer or \code{NULL}. Random seed for the Gibbs sampler;
 #'   \code{NULL} leaves the RNG state unchanged.
-#' @return A list containing the estimated effect sizes (beta) and heritability
-#'   (h2).
+#' @return A list with \code{betaEst} (the estimated effect sizes) and
+#'   \code{h2} (the estimated heritability). \code{sdprWeights()} returns
+#'   only \code{betaEst}; call this directly when you also want \code{h2}.
 #' @examples
 #' # Generate example data
 #' set.seed(985115)
@@ -272,10 +273,11 @@ prsCsWeights <- function(stat, LD, ...) {
 #' # In sample prediction correlations
 #' cor(X %*% out$betaEst, y) #
 #'
-#' @note This function is a wrapper for the SDPR C++ implementation, which is a
-#' rewritten and adopted version
-#'       of the SDPR package. The original SDPR documentation is available at
-#'       https://htmlpreview.github.io/?https://github.com/eldronzhou/SDPR/blob/main/doc/Manual.html
+#' @note This function wraps a rewritten and adapted version of the SDPR C++
+#'   implementation. SDPR is described in Zhou G, Zhao H (2021), "A fast and
+#'   robust Bayesian nonparametric method for prediction of complex traits
+#'   using summary statistics", PLoS Genetics 17(7): e1009697.
+#'   \doi{10.1371/journal.pgen.1009697}
 #'
 #' @export
 sdpr <- function(
@@ -593,7 +595,7 @@ mrmashRssWeights <- function(
     if (ncol(Z) < 2) {
         msg <- glue(
             "mrmashRssWeights expects stat$z to have >= 2 columns ",
-            "(one per context). For single-context use mrAshRssWeights()."
+            "(one per context). For single-context use mrashRssWeights()."
         )
         abort(msg)
     }
@@ -796,7 +798,7 @@ mrashWeights <- function(X, y, initPriorSd = TRUE, retainFit = FALSE, ...) {
     } else if (length(argsList$beta.init) == ncol(X)) {
         argsList$beta.init <- argsList$beta.init[keep]
     }
-    mrAshArgs <- c(
+    mrashArgs <- c(
         list(
             X = XKeep,
             y = y,
@@ -804,7 +806,7 @@ mrashWeights <- function(X, y, initPriorSd = TRUE, retainFit = FALSE, ...) {
         ),
         argsList
     )
-    fit.mr.ash <- exec(mr.ash, !!!mrAshArgs)
+    fit.mr.ash <- exec(mr.ash, !!!mrashArgs)
     eff.wgt[keep] <- predict(fit.mr.ash, type = "coefficients")[-1]
     if (retainFit) {
         attr(eff.wgt, "fit") <- fit.mr.ash
@@ -1513,7 +1515,7 @@ lassosumRss <- function(
     list(
         beta = candidateBeta[, idx],
         index = idx,
-        mode = "min_fbeta"
+        mode = "minFbeta"
     )
 }
 
@@ -1528,7 +1530,7 @@ lassosumRss <- function(
     list(
         beta = candidateBeta[, idx],
         index = idx,
-        mode = "ld_quadratic"
+        mode = "ldQuadratic"
     )
 }
 
@@ -1684,7 +1686,7 @@ lassosumRss <- function(
 # Shared scaffold for the RSS shrinkage-grid weight functions
 # (lassosumRssWeights / .penalizedRssWeights / l0learnRssWeights). Standardizes
 # the stat -> solverInput conversion, the outer LD-shrinkage grid over `s`, the
-# candidate accumulation, and the ld_quadratic / min_fbeta selection. `method` +
+# candidate accumulation, and the ldQuadratic / minFbeta selection. `method` +
 # `config` pick the per-`s` solver (.rssFitOne) and the finalizer
 # (.rssFinalize).
 .rssShrinkGridWeights <- function(
@@ -1693,7 +1695,7 @@ lassosumRss <- function(
     s,
     method,
     config,
-    selection = c("ld_quadratic", "min_fbeta")
+    selection = c("ldQuadratic", "minFbeta")
 ) {
     selection <- arg_match(selection)
     n <- median(stat$n)
@@ -1709,7 +1711,7 @@ lassosumRss <- function(
         candidateMeta[[length(candidateMeta) + 1L]] <- one$meta
     }
     candidateMeta <- bind_rows(candidateMeta)
-    selectorResult <- if (selection == "ld_quadratic") {
+    selectorResult <- if (selection == "ldQuadratic") {
         .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
     } else {
         .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
@@ -1743,9 +1745,9 @@ lassosumRss <- function(
 #' @param LD LD correlation matrix R (single matrix, NOT pre-shrunk).
 #' @param s Numeric vector of shrinkage parameters to search over. Default:
 #'   \code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.
-#' @param selection Selection strategy. Default \code{"ld_quadratic"} uses
+#' @param selection Selection strategy. Default \code{"ldQuadratic"} uses
 #'   \eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
-#'   \code{"min_fbeta"} is retained as an explicit alternative for debugging.
+#'   \code{"minFbeta"} is retained as an explicit alternative for debugging.
 #' @param ... Additional arguments passed to \code{lassosumRss()}.
 #'
 #' @return A numeric vector of the posterior SNP coefficients at the best (s,
@@ -1768,7 +1770,7 @@ lassosumRssWeights <- function(
     stat,
     LD,
     s = c(0.2, 0.5, 0.9, 1.0),
-    selection = c("ld_quadratic", "min_fbeta"),
+    selection = c("ldQuadratic", "minFbeta"),
     ...
 ) {
     selection <- arg_match(selection)
@@ -1897,7 +1899,7 @@ penalizedRss <- function(
     alpha = 1.0,
     lambda0 = 0,
     lambda2 = 0,
-    selection = c("ld_quadratic", "min_fbeta"),
+    selection = c("ldQuadratic", "minFbeta"),
     ...
 ) {
     selection <- arg_match(selection)
@@ -1931,8 +1933,8 @@ penalizedRss <- function(
 #'   0.5, 0.9, 1.0)}.
 #' @param gamma SCAD concavity parameter. Default 3.7.
 #' @param alpha Elastic-net mixing (1 = pure L1). Default 1.
-#' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
-#'   \code{"min_fbeta"}.
+#' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
+#'   \code{"minFbeta"}.
 #' @param ... Additional arguments passed to \code{penalizedRss()}.
 #' @return A numeric vector of SNP coefficient weights.
 #' @examples
@@ -1955,7 +1957,7 @@ scadRssWeights <- function(
     s = c(0.2, 0.5, 0.9, 1.0),
     gamma = 3.7,
     alpha = 1.0,
-    selection = c("ld_quadratic", "min_fbeta"),
+    selection = c("ldQuadratic", "minFbeta"),
     ...
 ) {
     .penalizedRssWeights(
@@ -1983,8 +1985,8 @@ scadRssWeights <- function(
 #'   0.5, 0.9, 1.0)}.
 #' @param gamma MCP concavity parameter. Default 3.
 #' @param alpha Elastic-net mixing (1 = pure L1). Default 1.
-#' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
-#'   \code{"min_fbeta"}.
+#' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
+#'   \code{"minFbeta"}.
 #' @param ... Additional arguments passed to \code{penalizedRss()}.
 #' @return A numeric vector of SNP coefficient weights.
 #' @examples
@@ -2007,7 +2009,7 @@ mcpRssWeights <- function(
     s = c(0.2, 0.5, 0.9, 1.0),
     gamma = 3.0,
     alpha = 1.0,
-    selection = c("ld_quadratic", "min_fbeta"),
+    selection = c("ldQuadratic", "minFbeta"),
     ...
 ) {
     .penalizedRssWeights(
@@ -2044,8 +2046,8 @@ mcpRssWeights <- function(
 #' @param lambda Numeric vector of L1 penalty values (for L0L1). Default:
 #'   \code{c(0)} (no L1 unless L0L1 is used).
 #' @param lambda2 L2 penalty weight (for L0L2). Default 0.
-#' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
-#'   \code{"min_fbeta"}.
+#' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
+#'   \code{"minFbeta"}.
 #' @param maxSwaps Maximum swap rounds per lambda. Default 100.
 #' @param ... Additional arguments passed to \code{penalizedRss()}.
 #' @return A numeric vector of SNP coefficient weights.
@@ -2071,7 +2073,7 @@ l0learnRssWeights <- function(
     lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
     lambda = NULL,
     lambda2 = 0,
-    selection = c("ld_quadratic", "min_fbeta"),
+    selection = c("ldQuadratic", "minFbeta"),
     maxSwaps = 100,
     ...
 ) {
@@ -2929,13 +2931,13 @@ computeW0 <- function(Bhat, ncomps) {
     return(w0)
 }
 
-compute_w0 <- computeW0
 
 #' Re-normalize mrmash weight w0 to have total weight sum to 1
 #' @param w0 is the weight of mr.mash prior matrices that was generated from
 #'   mr.mash() function.
 #' @return A named numeric vector of prior-matrix weights with the \code{null}
 #'   component removed and the remaining weights renormalized to sum to 1.
+#' @keywords internal
 rescaleCovW0 <- function(w0) {
     # remove null component
     w0 <- w0[names(w0) != "null"]
@@ -2968,7 +2970,6 @@ rescaleCovW0 <- function(w0) {
     return(updatedW0)
 }
 
-rescale_cov_w0 <- rescaleCovW0
 
 ### Function to compute grids
 computeGrid <- function(bhat, sbhat) {

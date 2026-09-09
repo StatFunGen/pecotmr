@@ -82,29 +82,29 @@ test_that("fitSusieInfThenSusieRss returns two fits", {
 
 # === Tests migrated from test_mrmashWrapper.R (mr.mash + glasso/glmnet coef helpers) ===
 
-test_that("compute_w0 returns uniform weights when ncomps == 1", {
+test_that("computeW0 returns uniform weights when ncomps == 1", {
     Bhat <- matrix(c(1, 0, 0, 2, 0, 0), nrow = 3, ncol = 2)
-    result <- pecotmr:::compute_w0(Bhat, ncomps = 1)
+    result <- pecotmr:::computeW0(Bhat, ncomps = 1)
     expect_equal(result, 1)
 })
 
 
-test_that("compute_w0 handles all-zero Bhat by returning uniform weights", {
+test_that("computeW0 handles all-zero Bhat by returning uniform weights", {
     # When Bhat is all zero, prop_nonzero = 0
     # w0 = c(1, 0, ..., 0) => sum(w0 != 0) < 2 => fallback to uniform
     Bhat <- matrix(0, nrow = 5, ncol = 3)
-    result <- pecotmr:::compute_w0(Bhat, ncomps = 4)
+    result <- pecotmr:::computeW0(Bhat, ncomps = 4)
     expect_equal(result, rep(1 / 4, 4))
     expect_equal(sum(result), 1)
 })
 
 
-test_that("compute_w0 distributes weight based on nonzero rows when ncomps > 1", {
+test_that("computeW0 distributes weight based on nonzero rows when ncomps > 1", {
     # 2 out of 4 rows have nonzero entries
     Bhat <- matrix(0, nrow = 4, ncol = 2)
     Bhat[1, 1] <- 1
     Bhat[3, 2] <- 2
-    result <- pecotmr:::compute_w0(Bhat, ncomps = 3)
+    result <- pecotmr:::computeW0(Bhat, ncomps = 3)
     expect_equal(length(result), 3)
     expect_equal(sum(result), 1, tolerance = 1e-10)
     # First element should be (1 - prop_nonzero) = 0.5
@@ -112,10 +112,10 @@ test_that("compute_w0 distributes weight based on nonzero rows when ncomps > 1",
 })
 
 # =========================================================================
-# mrmashWrapper.R: rescale_cov_w0 (lines 300-329)
+# mrmashWrapper.R: rescaleCovW0 (lines 300-329)
 # =========================================================================
 
-test_that("rescale_cov_w0 removes null component and renormalizes", {
+test_that("rescaleCovW0 removes null component and renormalizes", {
     w0 <- c(
         null = 0.3,
         XtX_1 = 0.2,
@@ -123,22 +123,22 @@ test_that("rescale_cov_w0 removes null component and renormalizes", {
         FLASH_1 = 0.15,
         FLASH_2 = 0.25
     )
-    result <- pecotmr:::rescale_cov_w0(w0)
+    result <- pecotmr:::rescaleCovW0(w0)
     expect_false("null" %in% names(result))
     expect_equal(sum(result), 1, tolerance = 1e-10)
 })
 
 
-test_that("rescale_cov_w0 handles all-zero non-null weights", {
+test_that("rescaleCovW0 handles all-zero non-null weights", {
     w0 <- c(null = 1.0, XtX_1 = 0, XtX_2 = 0, FLASH_1 = 0)
-    result <- pecotmr:::rescale_cov_w0(w0)
+    result <- pecotmr:::rescaleCovW0(w0)
     # All non-null weights are zero -> equal weights
     expect_equal(sum(result), 1, tolerance = 1e-10)
     expect_true(all(result == result[1])) # all equal
 })
 
 
-test_that("rescale_cov_w0 groups correctly by prior group prefix", {
+test_that("rescaleCovW0 groups correctly by prior group prefix", {
     w0 <- c(
         null = 0.5,
         PCA_1 = 0.1,
@@ -146,7 +146,7 @@ test_that("rescale_cov_w0 groups correctly by prior group prefix", {
         tFLASH_1 = 0.1,
         tFLASH_2 = 0.1
     )
-    result <- pecotmr:::rescale_cov_w0(w0)
+    result <- pecotmr:::rescaleCovW0(w0)
     expect_true("PCA" %in% names(result))
     expect_true("tFLASH" %in% names(result))
     expect_equal(sum(result), 1, tolerance = 1e-10)
@@ -625,9 +625,9 @@ test_that("lassosumRssWeights returns length-p weights and records the selection
     f <- .rrwStatLd()
     w <- lassosumRssWeights(f$stat, f$LD)
     expect_length(w, f$p)
-    expect_equal(unname(attr(w, "lassosum_selection")["mode"]), "ld_quadratic")
+    expect_equal(unname(attr(w, "lassosum_selection")["mode"]), "ldQuadratic")
     expect_length(
-        lassosumRssWeights(f$stat, f$LD, selection = "min_fbeta"),
+        lassosumRssWeights(f$stat, f$LD, selection = "minFbeta"),
         f$p
     )
 })
@@ -658,10 +658,10 @@ test_that("prsCsWeights and sdprWeights follow the (stat, LD) contract", {
     )
 })
 
-test_that("mrAshRssWeights returns posterior-mean weights of length p", {
+test_that("mrashRssWeights returns posterior-mean weights of length p", {
     skip_if_not_installed("susieR")
     f <- .rrwStatLd()
-    w <- mrAshRssWeights(
+    w <- mrashRssWeights(
         f$stat,
         f$LD,
         varY = 1,
@@ -742,7 +742,7 @@ test_that(".lassosumSelectMinFbeta picks the minimum-fbeta candidate", {
         data.frame(fbeta = c(3, 1, 2, 4))
     )
     expect_equal(r$index, 2)
-    expect_equal(r$mode, "min_fbeta")
+    expect_equal(r$mode, "minFbeta")
     expect_equal(r$beta, cb[, 2])
 })
 
@@ -751,7 +751,7 @@ test_that(".lassosumSelectLdQuadratic scores candidates by c'b / sqrt(b'Rb)", {
     set.seed(8)
     cb <- matrix(rnorm(f$p * 4), f$p, 4)
     r <- pecotmr:::.lassosumSelectLdQuadratic(cb, f$stat$b, f$LD)
-    expect_equal(r$mode, "ld_quadratic")
+    expect_equal(r$mode, "ldQuadratic")
     expect_true(r$index %in% seq_len(4))
     expect_equal(r$beta, cb[, r$index])
 })
