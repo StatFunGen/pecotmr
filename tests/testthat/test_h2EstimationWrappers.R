@@ -2555,21 +2555,26 @@ test_that("S-LDSC recovers enrichment direction for one annotation", {
 # track the reference, pathologies included.
 # =============================================================================
 
-# The generator that produced the pinned values: z ~ N(0, N R diag(v) R + R)
-# block by block over the bundled reference.
+# The z-scores upstream was run on: z ~ N(0, N R diag(v) R + R), drawn block
+# by block over the bundled reference and PINNED as data.
+#
+# Read from a fixture rather than re-simulated because the draw used
+# `eigen()`: z = V sqrt(D) w. eigen() fixes eigenvectors only up to sign, and
+# the sign LAPACK returns differs between builds, so the same seed produced
+# different z -- and therefore different estimates -- on linux-64 than on
+# osx-arm64 / linux-aarch64. The comparisons above are only meaningful
+# against the exact vectors upstream was run on, so those are stored.
+#
+# Rebuild with inst/scripts/build_sldsc_upstream_z.R, and ONLY together with
+# re-deriving the upstream values: the data and the expected numbers are a
+# matched pair.
 .sldscUpstreamZ <- function(ref, h2, n, seed) {
-    M <- length(ref)
-    perSnpVar <- rep(h2 / M, M)
-    set.seed(seed)
-    z <- numeric(M)
-    for (b in getLdMatrixList(ref)) {
-        idx <- b$snpIdx
-        p <- length(idx)
-        sigma <- n * (b$R %*% diag(perSnpVar[idx], p) %*% b$R) + b$R
-        e <- eigen((sigma + t(sigma)) / 2, symmetric = TRUE)
-        z[idx] <- as.vector(e$vectors %*% (sqrt(pmax(e$values, 0)) * rnorm(p)))
+    key <- paste(h2, n, seed, sep = "_")
+    zAll <- readRDS(test_path("test_data", "sldscUpstreamZ.rds"))
+    if (!(key %in% names(zAll))) {
+        stop("no pinned z-scores for case '", key, "'")
     }
-    z
+    zAll[[key]]
 }
 
 test_that("univariate S-LDSC reproduces upstream ldsc to 1e-5", {
@@ -2579,7 +2584,7 @@ test_that("univariate S-LDSC reproduces upstream ldsc to 1e-5", {
     scores <- matrix(as.vector(getLdScores(ref)[, 1]), ncol = 1)
     baseScore <- as.vector(getLdScores(ref)[, 1])
 
-    golden <- list(
+    reference <- list(
         list(
             h2 = 0.4,
             n = 10000,
@@ -2602,7 +2607,7 @@ test_that("univariate S-LDSC reproduces upstream ldsc to 1e-5", {
             int = 8.456195324
         )
     )
-    for (g in golden) {
+    for (g in reference) {
         z <- .sldscUpstreamZ(ref, g$h2, g$n, g$seed)
         fit <- pecotmr:::.sldscFit(
             z^2,
@@ -2626,7 +2631,7 @@ test_that("partitioned S-LDSC reproduces upstream ldsc to 1e-5", {
     scores <- pecotmr:::.sldscScoreMatrix(ref, baselineMat, M)
     A <- cbind(base = 1, annotA = inA)
 
-    golden <- list(
+    reference <- list(
         list(
             h2 = 0.4,
             n = 10000,
@@ -2649,7 +2654,7 @@ test_that("partitioned S-LDSC reproduces upstream ldsc to 1e-5", {
             int = 22.163686076
         )
     )
-    for (g in golden) {
+    for (g in reference) {
         z <- .sldscUpstreamZ(ref, g$h2, g$n, g$seed)
         fit <- pecotmr:::.sldscFit(z^2, scores, scores[, 1], g$n, A, 2L)
         expect_equal(fit$h2, g$h2Hat, tolerance = 1e-5)
@@ -2772,12 +2777,12 @@ test_that("HDL recovers a known h2 given an adequate reference", {
 
 test_that("HDL reproduces upstream HDL", {
     data(ldEigenExample, ldScoreExample)
-    golden <- list(
+    reference <- list(
         list(h2 = 0.4, n = 1e5, seed = 2, nRef = 20000L, want = 0.405111844),
         list(h2 = 0.3, n = 1e4, seed = 5, nRef = 20000L, want = 0.286758612),
         list(h2 = 0.6, n = 5e4, seed = 9, nRef = 50000L, want = 0.646809004)
     )
-    for (g in golden) {
+    for (g in reference) {
         ref <- ldEigenExample
         ref@nRef <- g$nRef
         z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
@@ -2796,12 +2801,12 @@ test_that("the HDL variance floor matches upstream's exp(-10)", {
 
 test_that("LDER reproduces upstream LDER", {
     data(ldEigenExample, ldScoreExample)
-    golden <- list(
+    reference <- list(
         list(h2 = 0.4, n = 1e5, seed = 2, want = 0.416906429),
         list(h2 = 0.3, n = 1e4, seed = 5, want = 0.289677426),
         list(h2 = 0.6, n = 5e4, seed = 9, want = 0.626712459)
     )
-    for (g in golden) {
+    for (g in reference) {
         z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
         est <- pecotmr:::lderUnivariate(z, g$n, ldEigenExample)$h2
         expect_equal(est, g$want, tolerance = 1e-6)
@@ -2810,11 +2815,11 @@ test_that("LDER reproduces upstream LDER", {
 
 test_that("gLDSC reproduces upstream gldsc", {
     data(ldScoreExample)
-    golden <- list(
+    reference <- list(
         list(h2 = 0.4, n = 5e4, seed = 3, want = 0.407716183),
         list(h2 = 0.3, n = 1e4, seed = 5, want = 0.290373743)
     )
-    for (g in golden) {
+    for (g in reference) {
         z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
         est <- pecotmr:::gldscUnivariate(z, g$n, ldScoreExample)$h2
         expect_equal(est, g$want, tolerance = 1e-6)

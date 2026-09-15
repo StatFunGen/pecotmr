@@ -13,7 +13,7 @@
 #   gwasSumStatsS4Example           : GwasSumStats
 #   multiStudyQtlDatasetExample    : MultiStudyQtlDataset
 #
-# Re-run:  pixi run Rscript data-raw/build_examples.R
+# Re-run:  pixi run Rscript inst/scripts/build_examples.R
 # =============================================================================
 
 devtools::load_all(".")
