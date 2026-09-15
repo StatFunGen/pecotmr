@@ -2837,7 +2837,8 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
     expect_equal(result, fake_coef[-1, ])
 })
 
-.fw_makeFsusieFit <- function(seed = 1, n = 150L, p = 24L, J = 16L) {
+.fw_makeFsusieFit <- function(seed = 1, n = 150L, p = 24L, J = 16L,
+                              prior = "mixture_normal_per_scale") {
     set.seed(seed)
     X <- matrix(
         rnorm(n * p),
@@ -2860,6 +2861,7 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
             Y = Y,
             pos = seq_len(J),
             L = 5,
+            prior = prior,
             post_processing = "none",
             verbose = FALSE
         ))
@@ -3460,4 +3462,854 @@ test_that("getSusieResult returns NULL when the trimmed susie fit is empty", {
         )
     )
     expect_null(getSusieResult(conData))
+})
+
+
+# ===========================================================================
+# Weight extraction and variant parsing guards
+# ===========================================================================
+
+test_that("susieRss weight extraction rejects a fit that does not match R", {
+    # A pip vector of a different length than R means the fit and the LD
+    # describe different variant sets; the weights would be silently
+    # mis-assigned rather than wrong-looking.
+    expect_error(
+        pecotmr:::.susieRssExtractWeights(
+            fit = list(pip = c(0.1, 0.2)),
+            z = c(1, 2, 3),
+            R = diag(3),
+            n = 100,
+            requiredFields = c("alpha", "mu")
+        ),
+        "Dimension mismatch: susieRss fit has 2 variants but R has 3 rows"
+    )
+})
+
+test_that("susieRss weights are zero when the fit lacks the coefficient fields", {
+    # Without alpha/mu there is nothing to form coefficients from, so the
+    # contribution is zero rather than an error or a partial answer.
+    w <- pecotmr:::.susieRssExtractWeights(
+        fit = list(pip = c(0.1, 0.2, 0.3)),
+        z = c(1, 2, 3),
+        R = diag(3),
+        n = 100,
+        requiredFields = c("alpha", "mu", "X_column_scale_factors")
+    )
+    expect_equal(w, c(0, 0, 0))
+})
+
+test_that("susieRss weights carry the fit when asked to retain it", {
+    w <- pecotmr:::.susieRssExtractWeights(
+        fit = list(pip = c(0.1, 0.2, 0.3)),
+        z = c(1, 2, 3),
+        R = diag(3),
+        n = 100,
+        requiredFields = "absentField",
+        retainFit = TRUE
+    )
+    expect_false(is.null(attr(w, "fit")))
+    expect_equal(attr(w, "fit")$pip, c(0.1, 0.2, 0.3))
+})
+
+test_that("buildTopLoci rejects variant ids it cannot place", {
+    # Coordinates are required to build the ranges; an unparseable id is an
+    # error rather than an NA row that looks like a real locus.
+    expect_error(
+        pecotmr:::.btlParseVariants(c("rsX", "rsY")),
+        "buildTopLoci: parseVariantId produced invalid coordinates"
+    )
+    # ...and well-formed ids parse to their chrom/pos.
+    ok <- pecotmr:::.btlParseVariants(c("chr1:100:A:G", "chr1:200:C:T"))
+    expect_equal(ok$chrom, c("1", "1"))
+    expect_equal(ok$pos, c(100L, 200L))
+})
+
+
+# ===========================================================================
+# Empty-input paths in the credible-set merge chain
+# ===========================================================================
+
+test_that("merging overlapping sets with nothing to merge yields nothing", {
+    expect_equal(
+        pecotmr:::.mergeAndUpdateOverlapSets(list(), list()),
+        list()
+    )
+    expect_null(pecotmr:::.combineTopLoci(list()))
+})
+
+test_that("correlation extraction reports NA when every value is self-correlation", {
+    # A single-variant set has only the diagonal, so there is no pairwise
+    # correlation to summarise -- reported as NA rather than 1.
+    both <- pecotmr:::.extractCorrelations(c(1, 1, 1))
+    expect_true(is.na(both$max_corr))
+    expect_true(is.na(both$min_corr))
+    # Perfect correlations are excluded, magnitudes are used.
+    mixed <- pecotmr:::.extractCorrelations(c(1, 0.5, -0.9))
+    expect_equal(mixed$max_corr, 0.9)
+    expect_equal(mixed$min_corr, 0.5)
+})
+
+test_that("getSusieResult returns NULL when there is no fine-mapping entry", {
+    expect_null(getSusieResult(list(finemappingEntry = NULL)))
+    expect_null(getSusieResult(list(finemappingEntry = 42)))
+})
+
+
+# ===========================================================================
+# Small credible-set helpers
+# ===========================================================================
+
+test_that("purity lookup answers 0 for a missing or out-of-range set", {
+    # 0 rather than NA: these feed a comparison against minAbsCorr, and NA
+    # would make an unmeasurable set silently pass the filter.
+    expect_equal(pecotmr:::.csPurityAt(1L, c(0.5)), 0.5)
+    expect_equal(pecotmr:::.csPurityAt(2L, c(0.5, NA)), 0)
+    expect_equal(pecotmr:::.csPurityAt(9L, c(0.5)), 0)
+    expect_equal(pecotmr:::.csPurityAt(0L, c(0.5)), 0)
+})
+
+test_that("a cs label parses to its trailing index", {
+    expect_equal(pecotmr:::.cs95ToIndex("susie_3"), 3L)
+    # 0 marks "in no credible set", which is what an empty or NA label means.
+    expect_equal(pecotmr:::.cs95ToIndex(NA_character_), 0L)
+    expect_equal(pecotmr:::.cs95ToIndex(""), 0L)
+})
+
+test_that("the alpha row helper returns a plain numeric row", {
+    am <- matrix(1:6, 2L, 3L)
+    expect_equal(pecotmr:::.amRow(2L, am), c(2, 4, 6))
+    expect_type(pecotmr:::.amRow(1L, am), "double")
+    expect_equal(length(pecotmr:::.fsusieAlphaList(am)), 2L)
+})
+
+test_that("between-CS correlation refuses an ldSource it cannot read LD from", {
+    # The correlation is derived from the source's LD and never stored on the
+    # fit, so an object that carries none cannot be silently accepted.
+    expect_error(
+        pecotmr:::.rowCsCorrelation(list(), 42),
+        "requires a QtlDataset, QtlSumStats, or GwasSumStats"
+    )
+})
+
+
+# ===========================================================================
+# Coverage-indexed lookups and the buildTopLoci column builders
+# ===========================================================================
+
+test_that("a coverage level the tables do not carry yields no credible sets", {
+    # Asking for 50% when only 95% was computed is not an error: the variant
+    # simply belongs to no set at that level.
+    tbl <- list(list(sets = list(cs = list(L1 = 1:2))))
+    expect_equal(
+        pecotmr:::.fmCsIdxAtCoverage(0.5, c(0.95), tbl, nV = 3L),
+        integer(3)
+    )
+    # ...and the effect-index mapping passes its input through unchanged.
+    expect_equal(
+        pecotmr:::.fmEffectIdxAtCoverage(0.5, c(7L, 8L), c(0.95), tbl),
+        c(7L, 8L)
+    )
+})
+
+test_that("effect indices come from the L-names, falling back to position", {
+    # susie names its sets L<k>; anything else is positional so the mapping
+    # never silently collapses two effects onto one index.
+    expect_equal(pecotmr:::.fmEffectIndices(list(1, 2)), 1:2)
+    expect_equal(
+        pecotmr:::.fmEffectIndices(set_names(list(1, 2), c("L3", "L5"))),
+        c(3L, 5L)
+    )
+    # A name that is not L<int> falls back to its own position, not to NA.
+    expect_equal(
+        pecotmr:::.fmEffectIndices(set_names(list(1, 2), c("L3", "junk"))),
+        c(3L, 2L)
+    )
+})
+
+test_that("coverage levels are NA when the tables carry no attribute", {
+    expect_equal(pecotmr:::.btlCoverage(list(1, 2)), c(NA_real_, NA_real_))
+    ct <- list(1, 2)
+    attr(ct, "coverage") <- c(0.95, 0.5)
+    expect_equal(pecotmr:::.btlCoverage(ct), c(0.95, 0.5))
+})
+
+test_that("the N column falls back to the fit N and recycles a scalar", {
+    # Numeric throughout, so a fractional effective N is not truncated.
+    expect_equal(pecotmr:::.btlNColumn(NULL, 500L, 3L), rep(500L, 3L))
+    expect_equal(pecotmr:::.btlNColumn(250, 500L, 3L), rep(250, 3L))
+    expect_equal(pecotmr:::.btlNColumn(c(1, 2, 3), 500L, 3L), c(1, 2, 3))
+    expect_type(pecotmr:::.btlNColumn(250.5, 500L, 2L), "double")
+})
+
+
+# ===========================================================================
+# buildTopLoci per-condition blocks
+# ===========================================================================
+
+test_that("conditional effects are NA when the fit carries no coefficients", {
+    # susie without a coef matrix and no mvsusie fallback: one NA per variant
+    # rather than a shorter vector that would misalign the column.
+    out <- pecotmr:::.btlCondEffect(list(), "susie", 1L, 3L)
+    expect_length(out, 3L)
+    expect_true(all(is.na(out)))
+})
+
+test_that("conditional lfsr passes through when no coverage level matches", {
+    clf <- array(0.1, dim = c(2L, 3L, 1L))
+    out <- pecotmr:::.btlCondLfsr(
+        list(lfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = c(0.95),
+        covSorted = c(0.5),
+        csTables = list(list(sets = list(cs = list(L1 = 1:2)))),
+        nV = 3L
+    )
+    expect_length(out, 3L)
+    expect_true(all(is.na(out)))
+})
+
+test_that("an empty credible-set spec still yields a correctly sized block", {
+    # tibble(.rows = nV): zero columns but the right number of rows, so it
+    # binds against the other blocks instead of collapsing the frame.
+    out <- pecotmr:::.btlCsBlock(
+        "susie",
+        list(
+            csEffectByCov = list(),
+            csColNames = character(0),
+            csPurityByCov = list()
+        ),
+        nV = 4L
+    )
+    expect_equal(nrow(out), 4L)
+    expect_equal(ncol(out), 0L)
+})
+
+
+# ===========================================================================
+# computeCsCorrelation guards and the empty top_loci assembly
+# ===========================================================================
+
+test_that("combining fits with no top_loci yields the empty table, not NULL", {
+    # The empty table keeps its full column set, so downstream binds and
+    # column selections still work on a result that found nothing.
+    out <- pecotmr:::.ppFitsCombine(list(list(a = 1), list(b = 2)))
+    expect_s3_class(out$top_loci, "tbl_df")
+    expect_equal(nrow(out$top_loci), 0L)
+    expect_gt(ncol(out$top_loci), 0L)
+})
+
+test_that("the fit region spans one chromosome or is refused", {
+    r <- pecotmr:::.csVariantRegion(c("chr1:100:A:G", "chr1:200:C:T"))
+    expect_s4_class(r, "GRanges")
+    expect_equal(as.character(GenomicRanges::seqnames(r)), "chr1")
+    # Variants on two chromosomes have no single region to pull LD for.
+    expect_error(
+        pecotmr:::.csVariantRegion(c("chr1:100:A:G", "chr2:200:C:T")),
+        "fit variants span multiple chromosomes"
+    )
+})
+
+test_that("credible-set genotypes must cover every fit variant", {
+    # Silently correlating a subset would report a purity for a set the
+    # genotypes cannot actually measure.
+    data(qtlDatasetExample)
+    expect_error(
+        pecotmr:::.csGenotypesForFit(
+            qtlDatasetExample,
+            c("chr22:1:A:G", "chr22:2:C:T")
+        ),
+        "fit variant\\(s\\) absent from the QtlDataset genotypes"
+    )
+})
+
+
+test_that("buildTopLoci on no variants returns the empty table", {
+    out <- buildTopLoci(
+        fit = list(),
+        csTables = list(),
+        variantNames = character(0),
+        method = "susie"
+    )
+    expect_s3_class(out, "tbl_df")
+    expect_equal(nrow(out), 0L)
+    expect_gt(ncol(out), 0L)
+})
+
+test_that("the multi-CS warning falls back to a positional variant label", {
+    # With no variant names the warning still has to identify which variant,
+    # so it reports #<index> rather than an empty or NA name.
+    expect_warning(
+        pecotmr:::.fmWarnMultiCs(
+            memb = list(integer(0), c(1L, 2L)),
+            out = c(0L, 1L),
+            bestSize = c(0L, 2L),
+            sets = set_names(list(1:2, 3:4), c("L1", "L2")),
+            variantNames = NULL
+        ),
+        "Variant #2 is in multiple credible sets: L1, L2"
+    )
+    # With names it uses the name.
+    expect_warning(
+        pecotmr:::.fmWarnMultiCs(
+            memb = list(integer(0), c(1L, 2L)),
+            out = c(0L, 1L),
+            bestSize = c(0L, 2L),
+            sets = set_names(list(1:2, 3:4), c("L1", "L2")),
+            variantNames = c("chr1:100:A:G", "chr1:200:C:T")
+        ),
+        "Variant chr1:200:C:T is in multiple credible sets"
+    )
+})
+
+
+# ===========================================================================
+# fSuSiE weight shaping
+# ===========================================================================
+
+test_that("fsusie weight rownames fall back through the fit's own names", {
+    # Three sources in priority order, because a trimmed fit may have dropped
+    # whichever one the caller expected. Unnamed weights would silently
+    # misalign against the variant set downstream.
+    W <- matrix(0, 3L, 2L)
+    expect_equal(
+        rownames(pecotmr:::.fsusieWeightsNames(
+            W,
+            list(),
+            c("v1", "v2", "v3"),
+            NULL,
+            3L,
+            2L
+        )),
+        c("v1", "v2", "v3")
+    )
+    expect_equal(
+        rownames(pecotmr:::.fsusieWeightsNames(
+            W,
+            list(csd_X = set_names(1:3, c("c1", "c2", "c3"))),
+            NULL,
+            NULL,
+            3L,
+            2L
+        )),
+        c("c1", "c2", "c3")
+    )
+    expect_equal(
+        rownames(pecotmr:::.fsusieWeightsNames(
+            W,
+            list(pip = set_names(c(0.1, 0.2, 0.3), c("p1", "p2", "p3"))),
+            NULL,
+            NULL,
+            3L,
+            2L
+        )),
+        c("p1", "p2", "p3")
+    )
+    # No source at all: left unnamed rather than given made-up names.
+    expect_null(
+        rownames(pecotmr:::.fsusieWeightsNames(W, list(), NULL, NULL, 3L, 2L))
+    )
+})
+
+test_that("the fsusie fast path uses a trimmed fit's precomputed coef", {
+    # fineMappingPipeline computes coef eagerly before trimming drops
+    # fitted_wc, so a trimmed fit needs no wavelet reconstruction at all.
+    cf <- matrix(1:6, 3L, 2L)
+    W <- pecotmr:::.fsusieWeightsFastPath(
+        list(coef = cf, fitted_wc = NULL),
+        c("a", "b", "c"),
+        retainFit = TRUE
+    )
+    expect_equal(rownames(W), c("a", "b", "c"))
+    expect_false(is.null(attr(W, "fit")))
+    # A fit that still carries fitted_wc is NOT the fast path.
+    expect_null(pecotmr:::.fsusieWeightsFastPath(
+        list(coef = cf, fitted_wc = list(1)),
+        c("a", "b", "c"),
+        retainFit = FALSE
+    ))
+})
+
+
+# ===========================================================================
+# Per-token fit dispatch
+#
+# susieInf is fitted whenever another token chains from it, but it is only
+# EMITTED as its own result when the caller asked for it. These are the two
+# arms of that distinction.
+# ===========================================================================
+
+test_that("susieInf is skipped as a result when it was only a chain input", {
+    # Requesting susie alone with addSusieInf still fits an inf model to chain
+    # from, but keepInf is FALSE so it must not surface as its own method.
+    chainOnly <- pecotmr:::.fmResolveSusieChain("susie", TRUE)
+    expect_false(chainOnly$keepInf)
+    expect_null(pecotmr:::.fmXFitOne("susieInf", list(), chainOnly, "INFFIT"))
+    expect_null(pecotmr:::.fmRssFitOne("susieInf", list(), chainOnly, "INFFIT"))
+})
+
+test_that("susieInf is returned as its own fit when it was requested", {
+    asked <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
+    expect_true(asked$keepInf)
+    expect_equal(
+        pecotmr:::.fmXFitOne("susieInf", list(), asked, "INFFIT"),
+        "INFFIT"
+    )
+    rss <- pecotmr:::.fmRssFitOne("susieInf", list(), asked, "INFFIT")
+    expect_equal(rss$fit, "INFFIT")
+    expect_false(rss$isStd)
+})
+
+
+# ===========================================================================
+# Full-fit column assembly
+# ===========================================================================
+
+test_that("variant count falls back to the CS vector when alpha is unusable", {
+    # A NULL or 1-D alpha carries no variant axis, so the row count has to
+    # come from the per-variant CS positions instead -- otherwise the block
+    # would be the wrong length and misalign against its siblings.
+    f <- pecotmr:::.fullFitColumns
+    expect_equal(
+        nrow(f(
+            alpha = NULL,
+            mu = NULL,
+            scale = NULL,
+            primaryCsPos = c(0L, 1L, 0L),
+            effectOf = 1L
+        )),
+        3L
+    )
+    expect_equal(
+        nrow(f(
+            alpha = c(0.5, 0.5),
+            mu = NULL,
+            scale = NULL,
+            primaryCsPos = c(0L, 1L),
+            effectOf = 1L
+        )),
+        2L
+    )
+})
+
+test_that("includeAllCs widens to every effect rather than the kept ones", {
+    # Without it only effects that survived CS filtering get columns; with it
+    # every row of alpha does, labelled L1..Lk.
+    a <- matrix(c(0.3, 0.7, 0.6, 0.4), nrow = 2L, byrow = TRUE)
+    out <- pecotmr:::.fullFitColumns(
+        alpha = a,
+        mu = a,
+        scale = c(1, 1),
+        primaryCsPos = c(0L, 1L),
+        effectOf = c(1L, 2L),
+        fullFit = TRUE,
+        includeAllCs = TRUE
+    )
+    expect_equal(nrow(out), 2L)
+    expect_gt(ncol(out), 1L)
+})
+
+test_that("susie weight extraction can carry the fit alongside the weights", {
+    w <- pecotmr:::.susieExtractWeights(
+        fit = list(pip = c(0.1, 0.2)),
+        X = NULL,
+        y = NULL,
+        requiredFields = "absentField",
+        retainFit = TRUE
+    )
+    expect_equal(attr(w, "fit")$pip, c(0.1, 0.2))
+    # Without the required fields the weights are zero, not an error.
+    expect_equal(as.numeric(w), c(0, 0))
+})
+
+
+# ===========================================================================
+# Conditional lfsr fill
+# ===========================================================================
+
+test_that("conditional lfsr is filled from the primary credible set", {
+    # Each variant takes the lfsr of the effect its primary-coverage CS
+    # belongs to; variants in no set stay NA rather than borrowing one.
+    clf <- array(0.05, dim = c(2L, 3L, 1L))
+    tbl <- list(list(sets = list(cs = set_names(list(c(1L, 2L)), "L1"))))
+    out <- pecotmr:::.btlCondLfsr(
+        list(clfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = 0.95,
+        covSorted = 0.95,
+        csTables = tbl,
+        nV = 3L
+    )
+    expect_equal(out[1:2], c(0.05, 0.05))
+    expect_true(is.na(out[[3L]]))
+})
+
+test_that("a credible set naming an out-of-range effect is skipped", {
+    # L9 against a 2-effect lfsr array would index out of bounds; the set is
+    # skipped so the remaining sets still fill, rather than erroring.
+    clf <- array(0.05, dim = c(2L, 3L, 1L))
+    tbl <- list(list(sets = list(cs = set_names(list(c(1L, 2L)), "L9"))))
+    out <- pecotmr:::.btlCondLfsr(
+        list(clfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = 0.95,
+        covSorted = 0.95,
+        csTables = tbl,
+        nV = 3L
+    )
+    expect_true(all(is.na(out)))
+})
+
+test_that("no credible sets leaves the conditional lfsr untouched", {
+    clf <- array(0.05, dim = c(2L, 3L, 1L))
+    tbl <- list(list(sets = list(cs = list())))
+    out <- pecotmr:::.btlCondLfsr(
+        list(clfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = 0.95,
+        covSorted = 0.95,
+        csTables = tbl,
+        nV = 3L
+    )
+    expect_true(all(is.na(out)))
+})
+
+# ---------------------------------------------------------------------------
+# susieInf chaining and per-token skips: a chained token reuses the shared
+# susieInf fit, and a token that produces no fit drops out of the block.
+# ---------------------------------------------------------------------------
+
+test_that(".fmXFitOne threads the shared susieInf fit into chained tokens", {
+    local_mocked_bindings(
+        .fmFitSusieIndiv = function(X, y, tk, chainFromInf, coverage,
+                                    userArgs) {
+            list(tk = tk, chained = !is.null(chainFromInf))
+        },
+        .package = "pecotmr"
+    )
+    p <- list(
+        X = NULL, y = NULL, verbose = 0, coverage = 0.95,
+        methodArgs = list(), ctx = "c1", tid = "t1"
+    )
+    chain <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
+    expect_true(chain$chainSusie)
+    expect_true(pecotmr:::.fmXFitOne("susie", p, chain, list(S = TRUE))$chained)
+    # susieAsh is not in this chain, so it fits from scratch.
+    expect_false(
+        pecotmr:::.fmXFitOne("susieAsh", p, chain, list(S = TRUE))$chained
+    )
+    chainAsh <- pecotmr:::.fmResolveSusieChain(c("susieAsh", "susieInf"), TRUE)
+    expect_true(
+        pecotmr:::.fmXFitOne("susieAsh", p, chainAsh, list(S = TRUE))$chained
+    )
+})
+
+test_that(".fmFitXBlock skips a token that produced no fit", {
+    local_mocked_bindings(
+        .fmXInfFit = function(p, chainLocal) NULL,
+        .fmXFitOne = function(tk, p, chainLocal, infFit) {
+            if (tk == "susie") NULL else list(tk = tk)
+        },
+        .fmXPostprocess = function(fit, tk, p) list(done = tk),
+        .fmXCrossValidate = function(out, p) out,
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.fmFitXBlock(
+        X = NULL,
+        y = NULL,
+        toRun = c("susie", "lasso"),
+        addSusieInf = FALSE
+    )
+    # The NULL-fit token contributes no entry rather than an empty one.
+    expect_equal(names(out), "lasso")
+})
+
+test_that(".fmRssFitStd threads the shared susieInf fit when chained", {
+    local_mocked_bindings(
+        .fmFitSusieRss = function(z, R, n, tk, chainFromInf, coverage,
+                                  userArgs, rFinite, rMismatch, rssControl) {
+            list(tk = tk, chained = !is.null(chainFromInf))
+        },
+        .package = "pecotmr"
+    )
+    p <- list(
+        z = NULL, R = NULL, n = 100L, verbose = 0, coverage = 0.95,
+        methodArgs = list(), label = "lab", rFinite = NULL,
+        rMismatch = NULL, rssControl = NULL
+    )
+    chain <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
+    out <- pecotmr:::.fmRssFitStd("susie", p, chain, list(S = TRUE))
+    expect_true(out$fit$chained)
+})
+
+test_that(".fmFitRssBlock skips a token that produced no fit", {
+    local_mocked_bindings(
+        .fmRssInfFit = function(p, chainLocal) NULL,
+        .fmRssFitOne = function(tk, p, chainLocal, infFit) {
+            if (tk == "susie") {
+                NULL
+            } else {
+                list(fit = list(tk = tk), isStd = FALSE)
+            }
+        },
+        .fmRssPostprocess = function(fit, p) list(done = fit$tk),
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.fmFitRssBlock(
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        toRun = c("susie", "susieAsh"),
+        addSusieInf = FALSE
+    )
+    expect_equal(names(out), "susieAsh")
+})
+
+test_that("computeCsTables falls back to 0.95 when nothing supplies coverage", {
+    skip_if_not_installed("susieR")
+    d <- .make_univariate_data(seed = 7, n = 200, p = 8, effect_idx = c(2))
+    fit <- susieR::susie(d$X, d$y, L = 4)
+    # Neither the argument nor the fit names a coverage.
+    fit$sets$requested_coverage <- NULL
+    cts <- pecotmr:::computeCsTables(
+        fit,
+        d$X,
+        coverage = NULL,
+        secondaryCoverage = 0.5,
+        method = "susie",
+        csInput = "X"
+    )
+    expect_equal(attr(cts, "coverage"), c(0.95, 0.5))
+    expect_equal(names(cts), c("CS_95_susie", "CS_50_susie"))
+})
+
+test_that(".ppAssembleRes records sample names from a matrix dataY", {
+    Y <- matrix(
+        1:6,
+        nrow = 3L,
+        dimnames = list(c("s1", "s2", "s3"), c("a", "b"))
+    )
+    p <- list(
+        signalCutoff = 0, method = "susie", dataY = Y,
+        fit = list(), otherQuantities = NULL
+    )
+    topLoci <- data.frame(
+        variant_id = "chr1:1:A:G",
+        pip = 0.9,
+        stringsAsFactors = FALSE
+    )
+    res <- pecotmr:::.ppAssembleRes(p, topLoci, NULL, NULL)
+    expect_equal(res$sampleNames, c("s1", "s2", "s3"))
+    # A list dataY (multi-context) has no single sample vector to record.
+    expect_null(pecotmr:::.sampleNamesFromDataY(list(Y)))
+})
+
+test_that(".btlParseVariants surfaces a parse failure as an error", {
+    local_mocked_bindings(
+        parseVariantId = function(...) stop("boom"),
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.btlParseVariants("chr1:1:A:G"),
+        "buildTopLoci: parseVariantId failed: boom"
+    )
+})
+
+test_that(".btlParseVariants requires one parsed row per variant", {
+    local_mocked_bindings(
+        parseVariantId = function(v) {
+            data.frame(chrom = "chr1", pos = 1L, A1 = "A", A2 = "G")
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.btlParseVariants(c("chr1:1:A:G", "chr1:2:C:T")),
+        "did not return one row per variant"
+    )
+})
+
+test_that(".btlCondLfsr yields all-NA when the primary CS is empty", {
+    clf <- array(0.05, dim = c(1L, 3L, 1L))
+    tables <- list(list(sets = list(cs = list())))
+    out <- pecotmr:::.btlCondLfsr(
+        list(clfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = 0.95,
+        covSorted = 0.95,
+        csTables = tables,
+        nV = 3L
+    )
+    expect_length(out, 3L)
+    expect_true(all(is.na(out)))
+})
+
+.fmw_pipRow <- function() {
+    fineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
+        susieFit = list(pip = c(0.8, 0.2)),
+        topLoci = data.frame(
+            variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+            pip = c(0.8, 0.2),
+            stringsAsFactors = FALSE
+        )
+    )
+}
+
+test_that("mergeSusieCs returns NULL when no row carries a credible set", {
+    res <- GwasFineMappingResult(
+        study = "G1",
+        method = "susie",
+        entry = list(.fmw_pipRow())
+    )
+    # The rows have pip but no cs_95 column, so nothing is extracted.
+    expect_null(mergeSusieCs(res, coverage = 0.95))
+})
+
+test_that(".extractCsEntryRows needs a resolvable pip column", {
+    topLoci <- data.frame(
+        variant_id = c("v1", "v2"),
+        cs_95 = c(1L, 1L),
+        beta = c(1, 2),
+        stringsAsFactors = FALSE
+    )
+    local_mocked_bindings(
+        .fmrRowTopLoci = function(e) topLoci,
+        .package = "pecotmr"
+    )
+    # The credible-set column is present, but there is no pip to rank by.
+    expect_null(pecotmr:::.extractCsEntryRows(1L, list("dummy"), "cs_95"))
+})
+
+test_that("getSusieResult returns NULL for an empty susie fit", {
+    expect_null(getSusieResult(list()))
+    expect_null(getSusieResult(list(a = 1)))
+    row <- fineMappingRow(
+        variantIds = "chr1:1:A:G",
+        susieFit = list(),
+        topLoci = data.frame(
+            variant_id = "chr1:1:A:G",
+            pip = 0.5,
+            stringsAsFactors = FALSE
+        )
+    )
+    res <- GwasFineMappingResult(
+        study = "G1",
+        method = "susie",
+        entry = list(row)
+    )
+    # A FineMappingResult is present, but it carries no fit to return.
+    expect_null(getSusieResult(list(finemappingEntry = res)))
+})
+
+test_that(".btlFullFitBlock defaults the primary CS position to zeros", {
+    cs <- list(csIdxByCov = list(), covSorted = numeric(0))
+    out <- pecotmr:::.btlFullFitBlock(
+        fit = list(),
+        post = list(),
+        coverageValues = numeric(0),
+        cs = cs,
+        csTables = list(),
+        nV = 4L,
+        opts = list()
+    )
+    # No credible sets at any coverage: every variant gets CS position 0.
+    expect_equal(nrow(out), 4L)
+})
+
+test_that(".fsusieScaleCols reads the wavelet columns off a flat prior", {
+    skip_if_not_installed("fsusieR")
+    skip_if_not_installed("wavethresh")
+    obj <- .fw_makeFsusieFit(prior = "mixture_normal")
+    expect_false(
+        is_in(
+            "mixture_normal_per_scale",
+            class(fsusieR::get_G_prior(obj$fit))
+        )
+    )
+    # A flat prior has no per-scale index to read, so the column count comes
+    # from the fitted wavelet coefficients themselves.
+    expect_equal(
+        pecotmr:::.fsusieScaleCols(obj$fit),
+        ncol(as.matrix(obj$fit$fitted_wc[[1L]]))
+    )
+    W <- fsusieWeights(fsusieFit = obj$fit, variantIds = colnames(obj$X))
+    expect_equal(dim(W), c(ncol(obj$X), ncol(obj$Y)))
+})
+
+test_that("fsusieWeights attaches the fit only when asked", {
+    skip_if_not_installed("fsusieR")
+    skip_if_not_installed("wavethresh")
+    obj <- .fw_makeFsusieFit()
+    kept <- fsusieWeights(
+        fsusieFit = obj$fit,
+        variantIds = colnames(obj$X),
+        retainFit = TRUE
+    )
+    expect_false(is.null(attr(kept, "fit")))
+    plain <- fsusieWeights(fsusieFit = obj$fit, variantIds = colnames(obj$X))
+    expect_null(attr(plain, "fit"))
+})
+
+test_that("mvsusieRssWeights attaches the fit only when asked", {
+    skip_if_not_installed("mvsusieR")
+    m <- .rrwMulti(n = 80, p = 8, K = 2)
+    kept <- suppressMessages(
+        mvsusieRssWeights(m$stat, m$LD, L = 5, retainFit = TRUE)
+    )
+    expect_false(is.null(attr(kept, "fit")))
+    expect_equal(dim(kept), c(m$p, m$K))
+})
+
+test_that(".rowCsCorrelation dispatches a QtlDataset to the genotype path", {
+    data(qtlDatasetExample)
+    local_mocked_bindings(
+        .rowCsCorrelationGeno = function(parts, ldSource) "GENO_PATH",
+        .package = "pecotmr"
+    )
+    # Individual-level data reads LD from dosage, not from summary stats.
+    expect_equal(
+        pecotmr:::.rowCsCorrelation(list(), qtlDatasetExample),
+        "GENO_PATH"
+    )
+})
+
+test_that(".btlCondLfsr is all-NA when no table matches the primary coverage", {
+    clf <- array(0.05, dim = c(1L, 3L, 1L))
+    tables <- list(list(sets = list(cs = list(L1 = 1:2))))
+    # covSorted names 0.70 but the only computed table is at 0.95, so there
+    # is no primary table to read the conditional lfsr out of.
+    out <- pecotmr:::.btlCondLfsr(
+        list(clfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = 0.95,
+        covSorted = 0.70,
+        csTables = tables,
+        nV = 3L
+    )
+    expect_true(all(is.na(out)))
+    # Control: when the coverages line up, the CS members are filled.
+    filled <- pecotmr:::.btlCondLfsr(
+        list(clfsr = clf),
+        conditionIdx = 1L,
+        coverageValues = 0.95,
+        covSorted = 0.95,
+        csTables = tables,
+        nV = 3L
+    )
+    expect_equal(filled[1:2], c(0.05, 0.05))
+    expect_true(is.na(filled[[3L]]))
+})
+
+test_that("mergeSusieCs returns NULL when the combined table is empty", {
+    local_mocked_bindings(
+        .fmExtractTopLoci = function(fineMappingResult, csCol) list(a = 1),
+        .combineTopLoci = function(x) NULL,
+        .package = "pecotmr"
+    )
+    res <- GwasFineMappingResult(
+        study = "G1",
+        method = "susie",
+        entry = list(.fmw_pipRow())
+    )
+    # Rows were extracted, but combining them produced nothing to merge.
+    expect_null(mergeSusieCs(res, coverage = 0.95))
 })

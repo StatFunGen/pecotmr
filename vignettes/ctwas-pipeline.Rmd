@@ -1,0 +1,328 @@
+---
+title: "Causal TWAS with ctwasPipeline"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Causal TWAS with ctwasPipeline}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+hasCtwas <- requireNamespace("ctwas", quietly = TRUE)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5,
+    eval = hasCtwas
+)
+# cTWAS narrates each step through the logging package, which writes to
+# stdout rather than as messages, so knitr cannot filter it. Quieten it here
+# to keep the output readable -- in your own session the log is worth
+# watching, since it reports region counts and EM convergence.
+if (hasCtwas) {
+    logging::setLevel("WARN")
+}
+```
+
+```{r ctwas-missing, echo=FALSE, eval=!hasCtwas, results="asis"}
+cat(
+    "**Note:** the `ctwas` package is not installed, so the code below is",
+    "shown but not run. Install it from",
+    "<https://github.com/xinhe-lab/multigroup_ctwas>."
+)
+```
+
+## Overview
+
+A TWAS Z-score (see the
+[TWAS Z-score + MR vignette](twas-zscore.html)) asks whether a gene's
+predicted expression associates with the trait. It asks that question one
+gene at a time, so a gene can score highly purely because it sits near a
+strong GWAS signal that is really driven by a nearby variant.
+
+`ctwasPipeline()` runs
+[cTWAS](https://github.com/xinhe-lab/multigroup_ctwas), which fine-maps
+**genes and SNPs jointly within each LD block**. A gene's posterior
+inclusion probability is therefore conditioned on the SNP signal beside it,
+which is what separates a gene that carries the association from one that
+merely neighbours it.
+
+Inputs:
+
+| Argument | What it is |
+|---|---|
+| `gwasSumStats` | one `GwasSumStats` whose elements are LD blocks |
+| `twasWeights` | per-gene `TwasWeights` / `QtlFineMappingResult` |
+| `twasZ` | optional pre-computed per-gene Z from `causalInferencePipeline()` |
+| `fineMappingResult` | optional; enables the credible-set and PIP variant rescues |
+
+```{r load-packages}
+library(pecotmr)
+```
+
+## The LD block convention
+
+`gwasSumStats` is **one** `GwasSumStats` object whose elements are LD
+blocks, keyed by its `blockId` column — not a list of per-block objects.
+Build it with `loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)` and
+pass it through `summaryStatsQc()`.
+
+A single-block input is rejected: cTWAS estimates its group priors by EM
+across regions, and one region gives it nothing to average over.
+
+```{r bundled}
+ldStem <- file.path(
+    system.file("extdata", "ld_reference", "chr22", package = "pecotmr"),
+    "protocol_example.LD.chr22"
+)
+gwasTsv <- system.file(
+    "extdata",
+    "manifests",
+    "protocol_example.twas.gwas_sumstats.chr22.tsv.gz",
+    package = "pecotmr"
+)
+
+blocks <- GenomicRanges::GRanges(
+    "chr22",
+    IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
+    blockId = c("chr22_1", "chr22_2")
+)
+
+gwasSumStats <- loadGwasSumStatsFromManifest(
+    manifest = data.frame(study = "gwas1", sumStatsPath = gwasTsv),
+    genome = "hg38",
+    ldSketch = ldStem,
+    region = "chr22:10000000-19000000",
+    ldBlocks = blocks
+)
+gwasByRegion <- summaryStatsQc(gwasSumStats, mafCutoff = 0.0025)
+
+data(ctwasWeightsExample)
+```
+
+## Running the pipeline
+
+```{r ctwas-run}
+res <- ctwasPipeline(
+    gwasSumStats = gwasByRegion,
+    twasWeights = list(ctwasWeightsExample),
+    thin = 1,
+    niterPrefit = 3,
+    niter = 10,
+    min_group_size = 1,
+    min_p_single_effect = 0,
+    min_nonSNP_PIP = 0,
+    fallbackToPrefit = TRUE
+)
+res
+```
+
+The settings above are sized for a toy dataset and are **not** defaults you
+should carry into a real analysis:
+
+- `thin = 1` keeps every SNP (production runs thin to `0.1`).
+- `niterPrefit` / `niter` are cut to keep the vignette fast.
+- `min_nonSNP_PIP = 0` disables region screening. The bundled GWAS has no
+  genome-wide-significant signal, so the default (`0.5`) selects no region at
+  all and the result comes back empty. On real data, leave it alone.
+- `fallbackToPrefit = TRUE` recovers from the accurate-EM step returning
+  `NaN` on underpowered data by keeping the prefit estimates.
+
+## Where genes come from
+
+`twasWeights` accepts two shapes:
+
+- a **flat** `TwasWeights` or `QtlFineMappingResult` (or a homogeneous list
+  of them) carrying `region` provenance. Each gene is assigned to its home
+  LD block by `start(region)`, matching cTWAS's own placement rule.
+- a **pre-bucketed named list** keyed by `region_id`, used as-is.
+
+Blocks with no gene weights still contribute their SNP-level signal to the
+group prior — the whole-chromosome pattern where only a few blocks carry
+genes.
+
+A gene whose cis window straddles a block boundary is assigned by its single
+anchor. The signal it loses across the boundary is a separate concern,
+handled by `mergeCtwasBoundaryRegions()` below.
+
+## Trimming each gene's variants
+
+Weight matrices from a permissive QTL model can be large, and cTWAS's cost
+scales with them. Four arguments trim each gene before cTWAS sees it:
+
+| Argument | Effect |
+|---|---|
+| `twasWeightCutoff` | drop variants with `abs(weight)` below the cutoff |
+| `maxNumVariants` | cap variants per gene |
+| `csMinCor` | keep variants in a credible set with purity at least this |
+| `minPipCutoff` | keep variants with PIP above this |
+
+`csMinCor` and `minPipCutoff` mark variants as must-keep, so they survive
+the `maxNumVariants` cap. Both need a `fineMappingResult`; without one they
+are no-ops and the cap falls back to ordering by `abs(weight)`.
+
+```{r ctwas-filters, eval=FALSE}
+ctwasPipeline(
+    gwasSumStats = gwasByRegion,
+    twasWeights = list(ctwasWeightsExample),
+    fineMappingResult = fmr,
+    twasWeightCutoff = 1e-4,
+    maxNumVariants = 1000,
+    csMinCor = 0.8,
+    minPipCutoff = 0.1
+)
+```
+
+## Reading the result
+
+`ctwasPipeline()` returns a `CtwasResult`: one row per
+`(gwasStudy, study, context, method)` run.
+
+```{r ctwas-identity}
+getMethodNames(res)
+getStudy(res)
+getContexts(res)
+```
+
+The per-gene posteriors live in `getFinemap()`:
+
+```{r ctwas-finemap}
+fm <- getFinemap(res)
+as.data.frame(fm)[, c(
+    "molecular_id",
+    "context",
+    "region_id",
+    "z",
+    "susie_pip",
+    "cs"
+)]
+```
+
+`susie_pip` is the quantity cTWAS exists to produce: the probability the
+gene is causal given the SNPs it competes with. Here it is low (the toy GWAS
+has no real signal) and `cs` is `NA` because the gene falls in no credible
+set.
+
+`getSusieAlpha()` returns the per-single-effect alpha matrix behind those
+PIPs, and the EM group priors sit on each row's entry:
+
+```{r ctwas-param}
+param <- getCtwasParam(res$entry[[1]])
+param$group_prior
+param$group_prior_var
+param$converged
+```
+
+By default the context-agnostic SNP background is dropped from the result,
+since it is the null the genes are being scored against rather than a
+finding. Pass `keepSnps = TRUE` to retain it as an extra row
+(`study = context = "SNP"`), which makes the full cTWAS output
+reconstructable.
+
+## The four chainable steps
+
+`ctwasPipeline()` is a wrapper over four steps. Call them directly when you
+want to inspect an intermediate payload, override the estimated priors, or
+re-enter the chain without recomputing what came before.
+
+```{r ctwas-granular}
+inputs <- assembleCtwasInputs(
+    gwasSumStats = gwasByRegion,
+    twasWeights = list(ctwasWeightsExample)
+)
+est <- estCtwasParam(
+    inputs,
+    thin = 1,
+    niterPrefit = 3,
+    niter = 10,
+    min_group_size = 1,
+    min_p_single_effect = 0,
+    fallbackToPrefit = TRUE
+)
+screened <- screenCtwasRegions(est, min_nonSNP_PIP = 0)
+finemapped <- finemapCtwasRegions(screened)
+nrow(finemapped$finemap_res)
+```
+
+`finemap_res` here has more rows than `getFinemap(res)` above: it still
+carries the SNP rows. `asCtwasResult()` is the step that structures the
+payload and drops them.
+
+```{r ctwas-as-result}
+nrow(getFinemap(asCtwasResult(finemapped)))
+nrow(getFinemap(asCtwasResult(finemapped, keepSnps = TRUE)))
+```
+
+Each step's payload is also bundled, so you can enter anywhere:
+
+```{r ctwas-bundled-payloads, eval=FALSE}
+data(ctwasInputsExample) # after assembleCtwasInputs
+data(ctwasEstExample) # after estCtwasParam
+data(ctwasFinemapExample) # after finemapCtwasRegions
+```
+
+The most common reason to use the granular path is to override the priors.
+`estCtwasParam()`'s accurate-EM step can diverge on underpowered data;
+`fallbackToPrefit = TRUE` handles that automatically, but taking the steps
+apart lets you substitute priors of your own into `screenCtwasRegions()`.
+
+## Boundary genes
+
+A gene whose cis window crosses an LD block boundary is fine-mapped in only
+one of the two blocks. `mergeCtwasBoundaryRegions()` re-runs such genes over
+the merged pair:
+
+```{r ctwas-merge, eval=FALSE}
+merged <- mergeCtwasBoundaryRegions(
+    finemapped,
+    pipThresh = 0.5,
+    filterCs = FALSE,
+    maxSNP = Inf
+)
+```
+
+`ctwasPipeline(mergeBoundary = TRUE)` does the same thing inline, with
+`mergePipThresh` / `mergeFilterCs` / `mergeMaxSNP` forwarding to those
+arguments. It is off by default because it only matters when a
+high-PIP gene actually straddles a boundary.
+
+## Common parameters
+
+```{r ctwas-params, eval=FALSE}
+ctwasPipeline(
+    gwasSumStats = gwasByRegion,
+    twasWeights = list(ctwasWeightsExample),
+    method = NULL, # NULL: "ensemble" if present, else every method
+    thin = 0.1,
+    niterPrefit = 3,
+    niter = 30,
+    L = 5,
+    groupPriorVarStructure = "shared_type",
+    ncore = 1,
+    keepSnps = FALSE,
+    mergeBoundary = FALSE,
+    fallbackToPrefit = FALSE
+)
+```
+
+When `method` is `NULL` and several weight methods are present without an
+`"ensemble"`, each method runs as its own independent cTWAS run and
+contributes its own row-set.
+
+## Next steps
+
+- [TWAS weights](twas-weights.html) — training the weights cTWAS consumes.
+- [TWAS Z-scores and MR](twas-zscore.html) — the per-gene Z that
+  `twasZ` optionally supplies here.
+- [QC for summary statistics](rss-qc.html) — `summaryStatsQc()`, which
+  `gwasSumStats` must have been through.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

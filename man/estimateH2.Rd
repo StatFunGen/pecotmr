@@ -27,9 +27,27 @@ estimateH2(
 \arguments{
 \item{sumstats}{A \code{GwasSumStats} object.}
 
-\item{ldRef}{An \code{LdStatistic} object (method-appropriate subclass).}
+\item{ldRef}{An \code{LdStatistic} object (method-appropriate subclass):
+an \code{\link{LdScore}} for \code{"sldsc"} / \code{"gldsc"}, an
+\code{\link{LdEigen}} for \code{"lder"} / \code{"hdl"}. Build either
+from loaded LD with \code{\link{buildLdScore}} /
+\code{\link{buildLdEigen}}.}
 
-\item{method}{Character, one of "lder", "gldsc", "hdl".}
+\item{method}{Character, one of \code{"lder"} (the default),
+\code{"sldsc"}, \code{"gldsc"} or \code{"hdl"}:
+\describe{
+  \item{\code{"sldsc"}}{Stratified LD score regression (Finucane et al.
+    2015): weighted least squares of \eqn{\chi^2} on LD scores. Needs
+    only per-variant scores when unstratified, so it is the cheapest of
+    the four and the only one that runs on a scores-only
+    \code{LdScore}.}
+  \item{\code{"gldsc"}}{Generalized LD score regression (Xiong et al.
+    2024): GLS using the full per-block LD matrices.}
+  \item{\code{"lder"}}{LD eigenvalue regression (Song et al. 2022).}
+  \item{\code{"hdl"}}{High-definition likelihood (Ning et al. 2020),
+    stratified as sHDL. Models reference-panel noise explicitly, so it
+    shrinks hard when \code{nRef} is small.}
+}}
 
 \item{annotations}{An \code{AnnotationMatrix} object, or NULL for
 unstratified estimation.}
@@ -45,19 +63,26 @@ this study; \code{NULL} matches all studies.}
 An \code{H2Estimate} object.
 }
 \description{
-Estimate SNP heritability from GWAS summary statistics using one
-  of three methods: LDER, g-LDSC, or HDL/sHDL.
+Estimate SNP heritability from GWAS summary statistics using
+  one of four methods: S-LDSC, g-LDSC, LDER, or HDL/sHDL. Supplying
+  \code{annotations} makes any of them stratified.
 }
 \examples{
-data(ldEigenExample)
-gr <- GenomicRanges::GRanges("chr1",
-  IRanges::IRanges(seq(50, by = 100, length.out = 20), width = 1))
-S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:20),
-  A1 = "A", A2 = "G", Z = rnorm(20), N = 10000L)
+data(ldScoreExample)
+# The estimators index the z-scores by the reference's own variant order,
+# so build the sumstats from the reference rather than alongside it.
+gr <- as(ldScoreExample, "GRanges")
+set.seed(1)
+S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+  SNP = names(ldScoreExample),
+  A1 = S4Vectors::mcols(ldScoreExample)$A1,
+  A2 = S4Vectors::mcols(ldScoreExample)$A2,
+  Z = rnorm(length(ldScoreExample)),
+  N = 100000L)
 panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr")
 )
 ss <- GwasSumStats(study = "trait1", entry = list(gr),
-  genome = "hg19", ldSketch = panel)
-estimateH2(ss, ldEigenExample, method = "lder")
+  genome = getGenome(ldScoreExample), ldSketch = panel)
+estimateH2(ss, ldScoreExample, method = "sldsc")
 }

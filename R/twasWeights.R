@@ -599,52 +599,52 @@ setMethod("show", "TwasWeights", function(object) {
         impl = "lassoWeights",
         args = list()
     ),
-    bayes_r = list(
+    bayesR = list(
         fn = "bayes_r_weights",
         impl = "bayesRWeights",
         args = list()
     ),
-    bayes_l = list(
+    bayesL = list(
         fn = "bayes_l_weights",
         impl = "bLassoWeights",
         args = list()
     ),
-    bayes_a = list(
+    bayesA = list(
         fn = "bayes_a_weights",
         impl = "bayesAWeights",
         args = list()
     ),
-    bayes_b = list(
+    bayesB = list(
         fn = "bayes_b_weights",
         impl = "bayesBWeights",
         args = list()
     ),
-    bayes_c = list(
+    bayesC = list(
         fn = "bayes_c_weights",
         impl = "bayesCWeights",
         args = list()
     ),
-    bayes_n = list(
+    bayesN = list(
         fn = "bayes_n_weights",
         impl = "bayesNWeights",
         args = list()
     ),
-    b_lasso = list(
+    bLasso = list(
         fn = "b_lasso_weights",
         impl = "bLassoWeights",
         args = list()
     ),
-    dpr_vb = list(
+    dprVb = list(
         fn = "dpr_vb_weights",
         impl = "dprVbWeights",
         args = list()
     ),
-    dpr_gibbs = list(
+    dprGibbs = list(
         fn = "dpr_gibbs_weights",
         impl = "dprGibbsWeights",
         args = list()
     ),
-    dpr_adaptive_gibbs = list(
+    dprAdaptiveGibbs = list(
         fn = "dpr_adaptive_gibbs_weights",
         impl = "dprAdaptiveGibbsWeights",
         args = list()
@@ -673,7 +673,7 @@ setMethod("show", "TwasWeights", function(object) {
     )
 )
 
-# Expand the `default` / `fast_default` preset strings to their method vectors.
+# Expand the `default` / `fastDefault` preset strings to their method vectors.
 # @noRd
 .twasExpandPresets <- function(methods) {
     fastDefault <- c(
@@ -687,11 +687,11 @@ setMethod("show", "TwasWeights", function(object) {
         "l0learn"
     )
     if (length(methods) == 1) {
-        if (methods == "fast_default") {
+        if (methods == "fastDefault") {
             return(fastDefault)
         }
         if (methods == "default") {
-            return(c(fastDefault, "bayes_r", "bayes_c"))
+            return(c(fastDefault, "bayesR", "bayesC"))
         }
     }
     methods
@@ -699,7 +699,7 @@ setMethod("show", "TwasWeights", function(object) {
 
 # Map short method names and presets to weightMethods lists.
 # @param methods A character vector of short method names, or a preset string
-#   ("default" or "fast_default").
+#   ("default" or "fastDefault").
 # @return A named list suitable for the weightMethods parameter.
 # @importFrom purrr map_chr set_names
 # @noRd
@@ -711,8 +711,8 @@ setMethod("show", "TwasWeights", function(object) {
     unknown <- setdiff(methods, names(.twasMethodMap))
     if (length(unknown) > 0) {
         msg <- glue(
-            "Unknown TWAS method(s): {str_flatten(unknown, ', ')}. ",
-            "Available methods: {str_flatten(names(.twasMethodMap), ', ')}"
+            "unknown method token(s): {str_flatten(unknown, ', ')}. ",
+            "Known tokens: {str_flatten(names(.twasMethodMap), ', ')}."
         )
         abort(msg)
     }

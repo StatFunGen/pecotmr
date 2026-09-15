@@ -477,6 +477,335 @@ test_that("estimateh2 with method='lder' returns H2Estimate with correct slots",
     expect_equal(getTraitName(result), "test")
 })
 
+# ===========================================================================
+# estimateH2 input alignment
+#
+# The estimators index z and the annotation rows by each LD block's snpIdx,
+# matching nothing on variant id, so a misaligned input used to return a
+# silently wrong h2 instead of failing.
+# ===========================================================================
+
+# Rebuild `ss`'s single entry with the mcols kept and the ranges replaced.
+.reposition <- function(ss, gr) {
+    entry <- getSumStats(ss)
+    S4Vectors::mcols(gr) <- S4Vectors::mcols(entry)
+    GwasSumStats(
+        study = "test",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = make_test_gwas_genotype_handle()
+    )
+}
+
+test_that("estimateH2 rejects a sumstats with a different variant count", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    short <- GwasSumStats(
+        study = "test",
+        entry = list(getSumStats(ss)[1:10]),
+        genome = "hg19",
+        ldSketch = make_test_gwas_genotype_handle()
+    )
+    expect_error(
+        estimateH2(short, ref, method = "lder"),
+        "carries 10 variant\\(s\\) but the LD reference carries 20"
+    )
+})
+
+test_that("estimateH2 rejects a sumstats at different coordinates", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    shifted <- .reposition(
+        ss,
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(GenomicRanges::start(ref) + 1L, width = 1L)
+        )
+    )
+    expect_error(
+        estimateH2(shifted, ref, method = "lder"),
+        "disagree at 20 of 20 position"
+    )
+})
+
+test_that("estimateH2 rejects a sumstats holding the right variants in the wrong order", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    reordered <- .reposition(
+        ss,
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(rev(GenomicRanges::start(ref)), width = 1L)
+        )
+    )
+    expect_error(
+        estimateH2(reordered, ref, method = "lder"),
+        "same variants in the same order"
+    )
+})
+
+test_that("estimateH2 rejects annotations that do not cover the reference", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    annot <- make_test_annotations(nSnps = 10)
+    expect_error(
+        estimateH2(ss, ref, method = "lder", annotations = annot),
+        "`annotations` carries 10 variant\\(s\\)"
+    )
+})
+
+test_that("estimateH2 rejects a genome build mismatch", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    hg38 <- GwasSumStats(
+        study = "test",
+        entry = list(getSumStats(ss)),
+        genome = "hg38",
+        ldSketch = make_test_gwas_genotype_handle()
+    )
+    expect_error(estimateH2(hg38, ref, method = "lder"), "build mismatch")
+})
+
+test_that("estimateH2 accepts an LD reference that records no genome build", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    # loadLdMatrix() leaves the build unset, so a reference built from it
+    # names none. An unknown build must not read as a mismatch.
+    GenomeInfoDb::genome(ref) <- NA_character_
+    expect_s4_class(estimateH2(ss, ref, method = "lder"), "H2Estimate")
+})
+
+# ===========================================================================
+# S-LDSC (Finucane et al. 2015)
+#
+# The original stratified LD score regression, added alongside the three
+# newer estimators. Unlike g-LDSC it regresses chi2 on per-variant LD scores
+# rather than working from the per-block LD matrices, so an unstratified run
+# needs only the scores.
+# ===========================================================================
+
+test_that("unstratified S-LDSC runs without the per-block LD matrices", {
+    # This is the property that separates it from g-LDSC: a scores-only
+    # LdScore is enough, which is why it is the cheap option.
+    noMat <- make_test_score_ref(with_ld_matrices = FALSE)
+    ss <- make_test_sumstats_for_ref(noMat)
+    expect_error(estimateH2(ss, noMat, method = "gldsc"), "per-block LD")
+    res <- estimateH2(ss, noMat, method = "sldsc")
+    expect_s4_class(res, "H2Estimate")
+    expect_equal(getMethodNames(res), "sldsc")
+    expect_true(is.finite(getH2(res)))
+})
+
+test_that("stratified S-LDSC needs the per-block LD matrices", {
+    noMat <- make_test_score_ref(with_ld_matrices = FALSE)
+    ss <- make_test_sumstats_for_ref(noMat)
+    annot <- make_test_annotations(nSnps = length(noMat))
+    expect_error(
+        estimateH2(ss, noMat, method = "sldsc", annotations = annot),
+        "stratified S-LDSC requires full per-block LD matrices"
+    )
+})
+
+test_that("S-LDSC reports an enrichment table when stratified", {
+    ref <- make_test_score_ref(with_ld_matrices = TRUE)
+    ss <- make_test_sumstats_for_ref(ref)
+    annot <- make_test_annotations(nSnps = length(ref))
+    res <- estimateH2(ss, ref, method = "sldsc", annotations = annot)
+
+    enr <- getEnrichment(res)
+    expect_s3_class(enr, "data.frame")
+    expect_equal(nrow(enr), 2L)
+    expect_true(all(
+        c(
+            "annotation",
+            "tau",
+            "tauSe",
+            "enrichment",
+            "enrichmentSe",
+            "enrichmentP",
+            "propH2",
+            "propSnps"
+        ) %in%
+            names(enr)
+    ))
+    expect_false(is.null(getTauBlocks(res)))
+})
+
+test_that("S-LDSC requires an LdScore, not an LdEigen", {
+    eigenRef <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(eigenRef)
+    expect_error(
+        estimateH2(ss, eigenRef, method = "sldsc"),
+        "requires an LdScore"
+    )
+})
+
+test_that("the S-LDSC weights reproduce upstream Hsq.weights", {
+    # het_w = 1 / (2 (intercept + hsq*N/M * ld)^2), oc_w = 1 / w_ld, both
+    # LD scores floored at 1 and hsq clamped to [0, 1].
+    w <- pecotmr:::.sldscWeights(
+        ld = c(4, 1, 0.5),
+        wLd = c(10, 1, 0.2),
+        n = 1000,
+        M = 100,
+        hsq = 0.5,
+        intercept = 1
+    )
+    cc <- 0.5 * 1000 / 100
+    expected <- (1 / (2 * (1 + cc * c(4, 1, 1))^2)) / c(10, 1, 1)
+    expect_equal(w, expected)
+    expect_true(all(w > 0))
+
+    # hsq is clamped, so an out-of-range estimate cannot blow the weights up.
+    expect_equal(
+        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = 5, intercept = 1),
+        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = 1, intercept = 1)
+    )
+    expect_equal(
+        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = -3, intercept = 1),
+        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = 0, intercept = 1)
+    )
+})
+
+# ===========================================================================
+# Rank-deficient LD
+#
+# A real LD block is routinely rank-deficient, and its decomposition then
+# carries a tail of tiny negative eigenvalues (order -1e-15) that are pure
+# floating-point noise. Those used to reach .lderWeights() as negative
+# regression weights, so IRWLS took sqrt() of a negative and lm.fit aborted
+# with "NA/NaN/Inf in 'x'".
+# ===========================================================================
+
+# An LD block with `dup` variants repeated, so R is singular by construction
+# and eigen() returns a negative-noise tail.
+.rankDeficientEigenRef <- function(nBlocks = 6L, p = 12L, dup = 4L) {
+    blocks <- lapply(seq_len(nBlocks), function(b) {
+        base <- 0.5^abs(outer(seq_len(p - dup), seq_len(p - dup), "-"))
+        keep <- c(seq_len(p - dup), seq_len(dup))
+        R <- base[keep, keep]
+        e <- eigen(R, symmetric = TRUE)
+        list(
+            values = e$values,
+            vectors = e$vectors,
+            snpIdx = as.integer(((b - 1L) * p + 1L):(b * p))
+        )
+    })
+    M <- nBlocks * p
+    snpInfo <- data.frame(
+        SNP = paste0("rs", seq_len(M)),
+        CHR = "chr1",
+        BP = as.integer(seq_len(M) * 100L),
+        A1 = "A",
+        A2 = "G",
+        stringsAsFactors = FALSE
+    )
+    starts <- as.integer(sapply(blocks, function(b) min(b$snpIdx))) * 100L
+    ends <- as.integer(sapply(blocks, function(b) max(b$snpIdx))) * 100L
+    LdEigen(
+        ldBlocks = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(start = starts, end = ends)
+        ),
+        snpInfo = snpInfo,
+        nRef = 500000L,
+        inSample = FALSE,
+        genome = "hg19",
+        eigenvalueTruncation = 1.0,
+        eigenList = blocks
+    )
+}
+
+test_that("a rank-deficient LD block really does yield negative eigenvalues", {
+    ref <- .rankDeficientEigenRef()
+    values <- unlist(lapply(getEigenList(ref), function(b) b$values))
+    expect_true(any(values < 0))
+    expect_true(min(values) > -1e-6) # noise, not structure
+})
+
+test_that("estimateH2 survives negative eigenvalues from rank-deficient LD", {
+    ref <- .rankDeficientEigenRef()
+    ss <- make_test_sumstats_for_ref(ref)
+    res <- estimateH2(ss, ref, method = "lder")
+    expect_s4_class(res, "H2Estimate")
+    expect_false(is.na(getH2(res)))
+})
+
+test_that(".lderWeights never returns a negative weight", {
+    lam <- c(2, 1, 0.5, 0, -1e-15, -3e-15)
+    w <- pecotmr:::.lderWeights(
+        lam,
+        matrix(1, length(lam), 1),
+        slopes = 0.1,
+        N = 1e5,
+        M = 1000,
+        rough = FALSE
+    )
+    expect_false(any(is.na(w)))
+    expect_true(all(w >= 0))
+    # sqrt() of these is what IRWLS forms the design from.
+    expect_false(any(is.na(sqrt(w))))
+})
+
+# ===========================================================================
+# buildLdEigen / buildLdScore -> estimateH2 round trip
+#
+# The builders exist so that a loaded LD reference can reach estimateH2
+# without hand-assembling S4 slots; these pin that the objects they produce
+# are actually accepted, alignment guard included.
+# ===========================================================================
+
+test_that("estimateH2 runs on references built by buildLdEigen/buildLdScore", {
+    ld <- makeTestLdDataMultiBlock(sizes = rep(10L, 5), rho = 0.6)
+    eigenRef <- buildLdEigen(ld, genome = "hg19")
+    scoreRef <- buildLdScore(ld, genome = "hg19")
+    ss <- make_test_sumstats_for_ref(eigenRef)
+
+    expect_s4_class(estimateH2(ss, eigenRef, method = "lder"), "H2Estimate")
+    suppressWarnings(
+        expect_s4_class(estimateH2(ss, eigenRef, method = "hdl"), "H2Estimate")
+    )
+    expect_s4_class(estimateH2(ss, scoreRef, method = "gldsc"), "H2Estimate")
+})
+
+test_that("estimateH2 rejects a single-block LD reference", {
+    # One block used to fail inside the jackknife fold fit with "'x' must be
+    # a matrix" (LDER, g-LDSC) or return an SE of exactly 0 (HDL).
+    ld <- makeTestLdData(n = 30L, rho = 0.6)
+    eigenRef <- buildLdEigen(ld, genome = "hg19")
+    ss <- make_test_sumstats_for_ref(eigenRef)
+    expect_error(
+        estimateH2(ss, eigenRef, method = "lder"),
+        "delete-one-block jackknife"
+    )
+    expect_error(
+        estimateH2(ss, buildLdScore(ld, genome = "hg19"), method = "gldsc"),
+        "at least two are required"
+    )
+})
+
+test_that("buildLdScore(keepLdMatrices = FALSE) is rejected by g-LDSC", {
+    ld <- makeTestLdDataMultiBlock(sizes = rep(10L, 5))
+    scoreRef <- buildLdScore(ld, genome = "hg19", keepLdMatrices = FALSE)
+    ss <- make_test_sumstats_for_ref(scoreRef)
+    expect_error(
+        estimateH2(ss, scoreRef, method = "gldsc"),
+        "requires full per-block LD matrices"
+    )
+})
+
+test_that("estimateH2 accepts a chr-prefix difference between the two sides", {
+    ref <- make_test_eigen_ref()
+    ss <- make_test_sumstats_for_ref(ref)
+    # make_test_sumstats_for_ref already strips the prefix ("1" vs "chr1"),
+    # so this pins that the check normalizes rather than rejects it.
+    expect_equal(
+        as.character(GenomicRanges::seqnames(getSumStats(ss)))[[1]],
+        "1"
+    )
+    expect_s4_class(estimateH2(ss, ref, method = "lder"), "H2Estimate")
+})
+
 test_that("estimateh2 with var_y correction runs without error", {
     eigen_ref <- make_test_eigen_ref()
     ss <- make_test_sumstats_for_ref(
@@ -2078,7 +2407,13 @@ test_that("HDL uses the finite-reference correction (nRef changes h2)", {
     refSmall <- d$eigenRef
     refSmall@nRef <- 2000L
     h2Big <- hdlUnivariate(z, d$N, refBig)$h2
-    h2Small <- hdlUnivariate(z, d$N, refSmall)$h2
+    # nRef = 2000 against this N is exactly the regime where the
+    # finite-reference term dominates, so the fit lands on its bound and says
+    # so. That is the behaviour under test, not noise to be ignored.
+    expect_warning(
+        h2Small <- hdlUnivariate(z, d$N, refSmall)$h2,
+        "sits at the top of its range"
+    )
     expect_gt(abs(h2Big - h2Small), 0.05)
 })
 
@@ -2107,4 +2442,636 @@ test_that("gLDSC requires full LD matrices and gives a positive jackknife SE", {
     res <- gldscUnivariate(d$simZ(rep(0.4 / d$M, d$M)), d$N, d$scoreRef)
     expect_true(is.finite(res$h2Se))
     expect_gt(res$h2Se, 0)
+})
+
+# The two S-LDSC recovery checks live here rather than with the rest of the
+# S-LDSC block because they need .h2RecoveryRefs(), defined just above.
+# S-LDSC is a genome-scale method: real analyses regress over ~1M variants.
+# Every reference in this suite is a few thousand, and at that size the
+# intercept is not identifiable -- an unweighted OLS on the same data also
+# returns an intercept above 3 against a true 1, and attenuates h2 to ~0.30.
+# So these tests check that the estimator is in the right neighbourhood and
+# that its machinery behaves, not that it hits the truth; the attenuation is
+# a property of the data, not of the fit.
+test_that("sldscUnivariate lands near a known h2 on a small reference", {
+    d <- .h2RecoveryRefs(N = 5000)
+    uni <- rep(0.4 / d$M, d$M)
+    set.seed(1)
+    ests <- replicate(
+        20,
+        pecotmr:::sldscUnivariate(d$simZ(uni), d$N, d$scoreRef)$h2
+    )
+    expect_gt(mean(ests), 0.15)
+    expect_lt(mean(ests), 0.65)
+})
+
+test_that("S-LDSC tracks h2 upward when the true h2 rises", {
+    # The check the point estimate cannot make on this scale: whatever the
+    # attenuation, a bigger true h2 must give a bigger estimate.
+    d <- .h2RecoveryRefs(N = 5000)
+    set.seed(1)
+    low <- replicate(
+        10,
+        pecotmr:::sldscUnivariate(
+            d$simZ(rep(0.1 / d$M, d$M)),
+            d$N,
+            d$scoreRef
+        )$h2
+    )
+    set.seed(1)
+    high <- replicate(
+        10,
+        pecotmr:::sldscUnivariate(
+            d$simZ(rep(0.6 / d$M, d$M)),
+            d$N,
+            d$scoreRef
+        )$h2
+    )
+    expect_gt(mean(high), mean(low))
+})
+
+test_that("the S-LDSC intercept is estimated on the low-chi2 variants", {
+    # Two-step: step 1 fits the intercept on chi2 < 30, step 2 holds it fixed
+    # while fitting the slopes. The value is reported as estimated -- upstream
+    # does not floor it at 1, and one below 1 is informative rather than an
+    # error to be clamped away.
+    d <- .h2RecoveryRefs(N = 5000)
+    set.seed(1)
+    res <- pecotmr:::sldscUnivariate(
+        d$simZ(rep(0.4 / d$M, d$M)),
+        d$N,
+        d$scoreRef
+    )
+    expect_true(is.finite(res$intercept))
+    expect_gt(res$intercept, 0)
+})
+
+test_that("S-LDSC recovers enrichment direction for one annotation", {
+    # A single annotation, not a full partition: a set of baseline columns
+    # that exactly partitions the variants is rank-deficient against the
+    # model's implicit all-ones base column, and the split between them is
+    # then arbitrary. Real baseline models overlap and do not partition.
+    d <- .h2RecoveryRefs(N = 5000)
+    M <- d$M
+    inA <- as.integer(seq_len(M) <= M / 2)
+    annot <- AnnotationMatrix(
+        matrix(inA, ncol = 1, dimnames = list(NULL, "annotA")),
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(as.integer(seq_len(M) * 100L), width = 1L)
+        ),
+        data.frame(name = "annotA", tier = "baseline", type = "binary"),
+        genome = "hg19"
+    )
+    perSnp <- ifelse(seq_len(M) <= M / 2, 0.6 / M, 0.2 / M)
+    set.seed(1)
+    e <- mean(replicate(10, {
+        pecotmr:::sldscUnivariate(
+            d$simZ(perSnp),
+            d$N,
+            d$scoreRef,
+            annotations = annot
+        )$enrichment$enrichment
+    }))
+    expect_gt(e, 1) # annotA carries 3x the per-variant heritability
+})
+
+
+# =============================================================================
+# Numerical agreement with upstream LDSC
+#
+# Values below were produced by running ldsc's own `ldscore.regressions.Hsq`
+# (github.com/CBIIT/ldsc) on exactly the data these tests regenerate, in the
+# two configurations `ldscore/sumstats.py` selects:
+#
+#   univariate  -> Hsq(..., twostep = 30)
+#   partitioned -> chi2 < max(0.001 N, 80) filter, then Hsq(..., old_weights
+#                  = True)
+#
+# Agreement is to about 1e-6 relative; the residual is the small ridge in
+# .sldscWlsCoef(), which upstream has no equivalent of. Case 2's intercept
+# sits below 1 and case 3's partitioned h2 is negative -- upstream returns
+# those too, and reproducing them is the point: the implementation should
+# track the reference, pathologies included.
+# =============================================================================
+
+# The z-scores upstream was run on: z ~ N(0, N R diag(v) R + R), drawn block
+# by block over the bundled reference and PINNED as data.
+#
+# Read from a fixture rather than re-simulated because the draw used
+# `eigen()`: z = V sqrt(D) w. eigen() fixes eigenvectors only up to sign, and
+# the sign LAPACK returns differs between builds, so the same seed produced
+# different z -- and therefore different estimates -- on linux-64 than on
+# osx-arm64 / linux-aarch64. The comparisons above are only meaningful
+# against the exact vectors upstream was run on, so those are stored.
+#
+# Rebuild with inst/scripts/build_sldsc_upstream_z.R, and ONLY together with
+# re-deriving the upstream values: the data and the expected numbers are a
+# matched pair.
+.sldscUpstreamZ <- function(ref, h2, n, seed) {
+    key <- paste(h2, n, seed, sep = "_")
+    zAll <- readRDS(test_path("test_data", "sldscUpstreamZ.rds"))
+    if (!(key %in% names(zAll))) {
+        stop("no pinned z-scores for case '", key, "'")
+    }
+    zAll[[key]]
+}
+
+test_that("univariate S-LDSC reproduces upstream ldsc to 1e-5", {
+    data(ldScoreExample)
+    ref <- ldScoreExample
+    M <- length(ref)
+    scores <- matrix(as.vector(getLdScores(ref)[, 1]), ncol = 1)
+    baseScore <- as.vector(getLdScores(ref)[, 1])
+
+    reference <- list(
+        list(
+            h2 = 0.4,
+            n = 10000,
+            seed = 42,
+            h2Hat = 0.300334136,
+            int = 5.736461154
+        ),
+        list(
+            h2 = 0.15,
+            n = 4000,
+            seed = 7,
+            h2Hat = 0.152728247,
+            int = 0.780709941
+        ),
+        list(
+            h2 = 0.6,
+            n = 25000,
+            seed = 99,
+            h2Hat = 0.503086101,
+            int = 8.456195324
+        )
+    )
+    for (g in reference) {
+        z <- .sldscUpstreamZ(ref, g$h2, g$n, g$seed)
+        fit <- pecotmr:::.sldscFit(
+            z^2,
+            scores,
+            baseScore,
+            g$n,
+            matrix(1, M, 1),
+            2L
+        )
+        expect_equal(fit$h2, g$h2Hat, tolerance = 1e-5)
+        expect_equal(fit$intercept, g$int, tolerance = 1e-5)
+    }
+})
+
+test_that("partitioned S-LDSC reproduces upstream ldsc to 1e-5", {
+    data(ldScoreExample)
+    ref <- ldScoreExample
+    M <- length(ref)
+    inA <- as.integer(seq_len(M) <= M / 2)
+    baselineMat <- matrix(inA, ncol = 1, dimnames = list(NULL, "annotA"))
+    scores <- pecotmr:::.sldscScoreMatrix(ref, baselineMat, M)
+    A <- cbind(base = 1, annotA = inA)
+
+    reference <- list(
+        list(
+            h2 = 0.4,
+            n = 10000,
+            seed = 42,
+            h2Hat = 0.361252238,
+            int = 2.027277477
+        ),
+        list(
+            h2 = 0.15,
+            n = 4000,
+            seed = 7,
+            h2Hat = 0.146509163,
+            int = 0.858189571
+        ),
+        list(
+            h2 = 0.6,
+            n = 25000,
+            seed = 99,
+            h2Hat = -0.043265091,
+            int = 22.163686076
+        )
+    )
+    for (g in reference) {
+        z <- .sldscUpstreamZ(ref, g$h2, g$n, g$seed)
+        fit <- pecotmr:::.sldscFit(z^2, scores, scores[, 1], g$n, A, 2L)
+        expect_equal(fit$h2, g$h2Hat, tolerance = 1e-5)
+        expect_equal(fit$intercept, g$int, tolerance = 1e-5)
+    }
+})
+
+test_that("the two S-LDSC routes differ, as upstream's do", {
+    # Univariate takes the two-step estimator; partitioned takes the
+    # chi2-filtered single-pass `old_weights` route. Upstream refuses to run
+    # two-step on a partitioned design at all, so these must not converge to
+    # one shared code path.
+    data(ldScoreExample)
+    ref <- ldScoreExample
+    M <- length(ref)
+    z <- .sldscUpstreamZ(ref, 0.4, 10000, 42)
+    scores <- matrix(as.vector(getLdScores(ref)[, 1]), ncol = 1)
+    uni <- pecotmr:::.sldscFit(
+        z^2,
+        scores,
+        scores[, 1],
+        10000,
+        matrix(1, M, 1),
+        2L
+    )
+    inA <- as.integer(seq_len(M) <= M / 2)
+    part <- pecotmr:::.sldscFit(
+        z^2,
+        pecotmr:::.sldscScoreMatrix(
+            ref,
+            matrix(inA, ncol = 1, dimnames = list(NULL, "annotA")),
+            M
+        ),
+        scores[, 1],
+        10000,
+        cbind(base = 1, annotA = inA),
+        2L
+    )
+    expect_false(isTRUE(all.equal(uni$intercept, part$intercept)))
+})
+
+
+# =============================================================================
+# HDL: the finite-reference bound
+# =============================================================================
+
+test_that("HDL reports when its fit lands on an optimiser bound", {
+    # HDL subtracts lam * h2 / nRef from the modelled variance. Once the
+    # reference is small enough relative to the GWAS, that term outgrows the
+    # signal, the variance is driven negative across most directions, and the
+    # optimiser walks the intercept out to its upper bound -- returning a
+    # heritability that reflects the bound rather than the data. It used to do
+    # that silently.
+    data(ldEigenExample, ldScoreExample)
+    M <- length(ldScoreExample)
+    z <- .sldscUpstreamZ(ldScoreExample, 0.4, 1e5, 2)
+
+    small <- ldEigenExample
+    small@nRef <- 1000L
+    expect_warning(
+        est <- pecotmr:::hdlUnivariate(z, 1e5, small)$h2,
+        "sits at the top of its range"
+    )
+
+    big <- ldEigenExample
+    big@nRef <- 20000L
+    expect_no_warning(
+        ok <- pecotmr:::hdlUnivariate(z, 1e5, big)$h2,
+        message = "sits at the top of its range"
+    )
+    expect_gt(ok, 0.3) # recovers the simulated 0.4
+    # The bound answer is simply not the data's answer -- here it overshoots,
+    # elsewhere it undershoots, which is the point of flagging it rather than
+    # asserting a direction.
+    expect_gt(abs(est - ok), 0.2)
+})
+
+test_that("HDL recovers a known h2 given an adequate reference", {
+    data(ldEigenExample, ldScoreExample)
+    ref <- ldEigenExample
+    ref@nRef <- 20000L
+    ests <- vapply(
+        1:5,
+        function(seed) {
+            suppressWarnings(
+                pecotmr:::hdlUnivariate(
+                    .sldscUpstreamZ(ldScoreExample, 0.4, 1e5, seed),
+                    1e5,
+                    ref
+                )$h2
+            )
+        },
+        numeric(1)
+    )
+    expect_lt(abs(mean(ests) - 0.4), 0.1)
+})
+
+
+# =============================================================================
+# Numerical agreement with the other three upstreams
+#
+# Values reproduce the reference implementations run on the data these tests
+# regenerate:
+#   HDL   github.com/zhenin/HDL          (HDL/R/llfun.R, optimised the same way)
+#   LDER  github.com/shuangsong0110/LDER (R/get.res.R two-stage + ldscore.R)
+#   gLDSC github.com/xzw20046/gldsc      (R/middle_fun.R gls.left.right +
+#                                         gls.estimator)
+#
+# Measured agreement when this was pinned: HDL exact (0e+00), LDER machine
+# precision (~1e-16), gLDSC ~3e-8 -- the last from the small ridge on the GLS
+# solve, which upstream has no equivalent of.
+#
+# Two deliberate departures, both no-ops wherever upstream is defined:
+#   * LDER clamps negative eigenvalues before forming weights. Upstream does
+#     not, and dies with "NA/NaN/Inf in 'x'" on a rank-deficient reference --
+#     verified by running it on this same data.
+#   * gLDSC and S-LDSC carry a 1e-8 ridge so an exactly singular design
+#     returns a value rather than NA.
+# =============================================================================
+
+test_that("HDL reproduces upstream HDL", {
+    data(ldEigenExample, ldScoreExample)
+    reference <- list(
+        list(h2 = 0.4, n = 1e5, seed = 2, nRef = 20000L, want = 0.405111844),
+        list(h2 = 0.3, n = 1e4, seed = 5, nRef = 20000L, want = 0.286758612),
+        list(h2 = 0.6, n = 5e4, seed = 9, nRef = 50000L, want = 0.646809004)
+    )
+    for (g in reference) {
+        ref <- ldEigenExample
+        ref@nRef <- g$nRef
+        z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
+        est <- suppressWarnings(pecotmr:::hdlUnivariate(z, g$n, ref)$h2)
+        expect_equal(est, g$want, tolerance = 1e-6)
+    }
+})
+
+test_that("the HDL variance floor matches upstream's exp(-10)", {
+    # Upstream llfun floors the modelled per-direction variance at exp(-10).
+    # On a real reference the floor is active for a large share of the
+    # eigen-directions, and the bstar^2/lamh2 term it feeds dominates the
+    # likelihood -- a different floor silently moves the optimum.
+    expect_equal(formals(pecotmr:::.hdlNll)$lim, quote(exp(-10)))
+})
+
+test_that("LDER reproduces upstream LDER", {
+    data(ldEigenExample, ldScoreExample)
+    reference <- list(
+        list(h2 = 0.4, n = 1e5, seed = 2, want = 0.416906429),
+        list(h2 = 0.3, n = 1e4, seed = 5, want = 0.289677426),
+        list(h2 = 0.6, n = 5e4, seed = 9, want = 0.626712459)
+    )
+    for (g in reference) {
+        z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
+        est <- pecotmr:::lderUnivariate(z, g$n, ldEigenExample)$h2
+        expect_equal(est, g$want, tolerance = 1e-6)
+    }
+})
+
+test_that("gLDSC reproduces upstream gldsc", {
+    data(ldScoreExample)
+    reference <- list(
+        list(h2 = 0.4, n = 5e4, seed = 3, want = 0.407716183),
+        list(h2 = 0.3, n = 1e4, seed = 5, want = 0.290373743)
+    )
+    for (g in reference) {
+        z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
+        est <- pecotmr:::gldscUnivariate(z, g$n, ldScoreExample)$h2
+        expect_equal(est, g$want, tolerance = 1e-6)
+    }
+})
+
+
+# ===========================================================================
+# Study resolution, genome checking and the chi2 filter fallback
+# ===========================================================================
+
+test_that("an explicit study is used without inspecting the collection", {
+    expect_equal(pecotmr:::.estimateH2ResolveStudy(NULL, "myStudy"), "myStudy")
+})
+
+test_that("the genome check reports NA, the build, or refuses a mixture", {
+    gr <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(1L, 2L), width = 1L)
+    )
+    # No build recorded: NA rather than a guess.
+    expect_true(is.na(pecotmr:::.h2GenomeOfRanges(gr)))
+    GenomeInfoDb::genome(gr) <- c("hg19", "hg38")
+    # Mixed builds mean the parts were never comparable.
+    expect_error(
+        pecotmr:::.h2GenomeOfRanges(gr),
+        "names 2 genome build"
+    )
+    GenomeInfoDb::genome(gr) <- "hg38"
+    expect_equal(pecotmr:::.h2GenomeOfRanges(gr), "hg38")
+})
+
+test_that("the chi2 filter is abandoned when too few variants survive it", {
+    # Upstream drops chi2 >= 30, but with fewer than 4 survivors the
+    # regression has nothing to fit, so the filter is dropped rather than
+    # returning an estimate from 3 points.
+    A <- matrix(1, 6L, 1L)
+    sc <- matrix(1, 6L, 1L)
+    out <- pecotmr:::.sldscFitUnivariate(
+        rep(100, 6L),
+        sc,
+        rep(1, 6L),
+        1000,
+        A,
+        2L
+    )
+    expect_setequal(
+        names(out),
+        c("tau", "h2", "estH", "intercept", "coef")
+    )
+    expect_false(is.na(out$h2))
+})
+
+
+# ===========================================================================
+# HDL bound diagnostics and the partitioned chi2 filter
+# ===========================================================================
+
+test_that("HDL warns only when a parameter sits at its UPPER bound", {
+    # Only upper bounds are diagnostic: an intercept resting at 0 just means
+    # no confounding and is routine, so a lower bound must not warn.
+    f <- pecotmr:::.hdlWarnIfAtBound
+    expect_silent(f(c(0.1, 0.5), c(0, 0), c(1, 2), 1000, 500))
+    # At a lower bound: still silent.
+    expect_silent(f(c(0, 0), c(0, 0), c(1, 2), 1000, 500))
+})
+
+test_that("the HDL bound warning names which parameter pinned", {
+    # The last parameter is the intercept; anything else is heritability.
+    f <- pecotmr:::.hdlWarnIfAtBound
+    expect_warning(
+        f(c(0.1, 2), c(0, 0), c(1, 2), 1000, 500),
+        "the fitted intercept sits at the top of its range"
+    )
+    expect_warning(
+        f(c(1, 0.5), c(0, 0), c(1, 2), 1000, 500),
+        "the fitted heritability sits at the top of its range"
+    )
+})
+
+test_that("the partitioned chi2 filter is abandoned when too few survive", {
+    # Stratified S-LDSC needs more surviving variants than annotations + 2;
+    # below that the filter is dropped rather than solving an underdetermined
+    # system.
+    A <- matrix(1, 6L, 1L)
+    sc <- matrix(1, 6L, 2L)
+    out <- pecotmr:::.sldscFitPartitioned(
+        rep(1e6, 6L),
+        sc,
+        rep(1, 6L),
+        1000,
+        A
+    )
+    expect_setequal(
+        names(out),
+        c("tau", "h2", "estH", "intercept", "coef")
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Fallbacks and degenerate inputs: each returns a defined answer rather than
+# propagating an error out of an estimator.
+# ---------------------------------------------------------------------------
+
+test_that(".rmaMetaFallbackToDL falls back to the closed-form estimator", {
+    skip_if_not_installed("metafor")
+    # DL never iterates, so it is a safe landing point when REML/ML fail on
+    # small or near-homogeneous inputs.
+    expect_warning(
+        fit <- pecotmr:::.rmaMetaFallbackToDL(
+            simpleError("did not converge"),
+            means = c(0.1, 0.2, 0.15),
+            ses = c(0.05, 0.06, 0.04),
+            method = "REML"
+        ),
+        "method = 'REML'\\) failed .* falling back to DL"
+    )
+    expect_equal(fit$method, "DL")
+})
+
+test_that(".h2BaselineMat is NULL when no annotation is baseline tier", {
+    n <- 5L
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(
+            start = as.integer(seq(50, by = 100, length.out = n)),
+            width = 1L
+        )
+    )
+    mat <- matrix(c(rep(1L, n), rep(0L, n)), nrow = n, ncol = 2L)
+    colnames(mat) <- c("cand_A", "cand_B")
+    meta <- data.frame(
+        name = c("cand_A", "cand_B"),
+        tier = c("candidate", "candidate"),
+        type = c("binary", "binary"),
+        stringsAsFactors = FALSE
+    )
+    am <- AnnotationMatrix(mat, gr, meta, genome = "hg19")
+    # The object has annotations, but none of them are baseline.
+    expect_equal(ncol(assay(getBaseline(am), "annotations")), 0L)
+    expect_null(pecotmr:::.h2BaselineMat(am))
+    expect_null(pecotmr:::.h2BaselineMat(NULL))
+})
+
+test_that(".lderGetRes(twostage = FALSE) returns the free-intercept fit", {
+    set.seed(4)
+    m <- 60L
+    res <- pecotmr:::.lderGetRes(
+        x = rnorm(m),
+        lam = abs(rnorm(m, 3, 0.5)),
+        ldAnnot = matrix(1, nrow = m, ncol = 1L),
+        N = 1000,
+        M = 5000,
+        M_a = 5000,
+        rough = FALSE,
+        twostage = FALSE
+    )
+    # One pass, no chi2 outlier filtering, intercept left free.
+    expect_setequal(names(res), c("h2", "h2a", "tau", "a"))
+    expect_true(is.finite(res$a))
+})
+
+test_that(".lderLocalBlock reports NA for a block too small to fit", {
+    out <- pecotmr:::.lderLocalBlock(
+        list(lam = c(1, 2), x = c(0.5, 0.6)),
+        b = 7L,
+        N = 1000,
+        a = 1
+    )
+    # Fewer than 3 eigenvalues: a slope cannot be identified.
+    expect_equal(out$blockId, 7L)
+    expect_true(is.na(out$h2Local))
+    expect_true(is.na(out$h2LocalSe))
+})
+
+test_that(".h2Enrichment names unnamed annotation columns positionally", {
+    baselineMat <- matrix(c(1, 0, 1, 1), nrow = 2L)
+    expect_null(colnames(baselineMat))
+    out <- pecotmr:::.h2Enrichment(
+        baselineMat,
+        tau = c(0.1, 0.2),
+        tauSe = c(0.01, 0.02),
+        tauBlocks = matrix(c(0.1, 0.2, 0.1, 0.2), nrow = 2L),
+        h2 = 0.3
+    )
+    expect_equal(out$annotation, c("annot_1", "annot_2"))
+})
+
+test_that(".sldscBlockIndex errors when no block covers a variant", {
+    n <- 6L
+    snpInfo <- data.frame(
+        CHR = rep("chr22", n),
+        BP = as.integer(seq(1000, by = 100, length.out = n)),
+        SNP = str_c("chr22:", seq(1000, by = 100, length.out = n), ":A:G"),
+        A1 = rep("A", n),
+        A2 = rep("G", n),
+        stringsAsFactors = FALSE
+    )
+    mk <- function(blocks) {
+        LdScore(
+            snpInfo = snpInfo,
+            ldScores = matrix(1, nrow = n, ncol = 1L),
+            ldScoreWeights = rep(1, n),
+            ldBlocks = blocks,
+            nRef = 100L,
+            genome = "hg19",
+            ldMatrixList = list()
+        )
+    }
+    # With no precomputed matrices the blocks are intersected with the
+    # variants; blocks on another chromosome cover nothing.
+    disjoint <- suppressWarnings(
+        mk(GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000)))
+    )
+    expect_error(
+        suppressWarnings(pecotmr:::.sldscBlockIndex(disjoint, n)),
+        "no LD block covers any reference variant"
+    )
+    covering <- mk(GenomicRanges::GRanges("chr22", IRanges::IRanges(1, 10000)))
+    idx <- pecotmr:::.sldscBlockIndex(covering, n)
+    expect_equal(unname(lengths(idx)), n)
+})
+
+test_that(".sldscIrwls derives its own starting weights when none are given", {
+    set.seed(3)
+    nv <- 40L
+    scores <- matrix(abs(rnorm(nv * 2L, 5, 1)), nrow = nv)
+    y <- 1 + rowSums(scores) * 1e-4 * 500 + rnorm(nv, sd = 0.05)
+    fit <- pecotmr:::.sldscIrwls(
+        y = y,
+        scores = scores,
+        baseScore = rowSums(scores),
+        n = 500,
+        M = 1000,
+        nIter = 2L,
+        freeIntercept = FALSE,
+        intercept = 1,
+        w0 = NULL
+    )
+    expect_setequal(names(fit), c("coef", "intercept"))
+    expect_true(all(is.finite(fit$coef)))
+})
+
+test_that(".sldscLocal clamps a negative LD score to zero", {
+    out <- pecotmr:::.sldscLocal(
+        chi2 = c(1.2, 3.4),
+        baseScore = c(10, -2),
+        fit = list(tau = c(1e-5)),
+        M = 1000
+    )
+    expect_equal(out$variantIdx, 1:2)
+    expect_equal(out$ldScore, c(10, -2))
+    # A negative LD score cannot contribute negative heritability.
+    expect_equal(out$h2Local, c(1e-4, 0))
 })

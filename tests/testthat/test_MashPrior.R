@@ -72,3 +72,23 @@ test_that("MashPrior: show reports 'cvFits: none' for a full-only bundle", {
     expect_true(any(grepl("cvFits: none", out)))
     expect_true(any(grepl("fullFit: present", out)))
 })
+
+
+test_that("the cvFits check rejects a list with no perFoldFits", {
+    f <- pecotmr:::.mashPriorCheckCvFits
+    msg <- "`cvFits` must be a list with a `perFoldFits` element"
+    expect_equal(f(list(somethingElse = 1)), msg)
+    expect_equal(f("not a list"), msg)
+    # NULL is the "no CV was run" case and is accepted.
+    expect_null(f(NULL))
+})
+
+
+test_that("the partition check stops when perFoldFits is not a list", {
+    # The fold-count comparison below it would be meaningless, and the
+    # perFoldFits check already reports the type problem.
+    expect_null(pecotmr:::.mashPriorCheckPartition(list(
+        perFoldFits = "not a list",
+        samplePartition = data.frame(Sample = "a", Fold = 1L)
+    )))
+})

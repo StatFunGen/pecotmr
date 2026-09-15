@@ -79,7 +79,7 @@ test_that("lassosumRssWeights calls lassosumRss and returns betaEst", {
     expect_equal(c(result), expected)
     expect_equal(
         unname(attr(result, "lassosum_selection")["mode"]),
-        "ld_quadratic"
+        "ldQuadratic"
     )
 })
 
@@ -106,7 +106,7 @@ test_that("lassosumRssWeights clamps correlation input before scaling", {
         stat = stat,
         LD = R,
         s = 0.5,
-        selection = "min_fbeta"
+        selection = "minFbeta"
     )
     scaled_cor <- captured / sqrt(n)
     expect_true(max(abs(scaled_cor)) < 1)

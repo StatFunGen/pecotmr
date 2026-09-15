@@ -8,6 +8,8 @@ mashPipeline(
   sumStatsList,
   alpha,
   residualCorrelation = NULL,
+  residualCorrelationMethod = c("identity", "simple", "simpleSpecific", "corshrink",
+    "mle"),
   priorCovariances = NULL,
   nPcs = NULL,
   inputScale = c("auto", "beta", "z"),
@@ -18,22 +20,48 @@ mashPipeline(
 \item{sumStatsList}{Named list (or \code{SimpleList}) of
 \code{\link{QtlSumStats}} or \code{\link{GwasSumStats}} objects. Required
 names: \code{"strong"} (discovery variants), \code{"random"} (random
-background). Optional: \code{"null"} (for residual correlation estimation).}
+background, the partition the mixture weights are fit on). Optional:
+\code{"null"} (null variants), needed only by the
+\code{residualCorrelationMethod} values that estimate \eqn{\hat V} from
+them.}
 
 \item{alpha}{Numeric (length 1). Variance-stabilising-transform exponent
 forwarded to \code{mashr::mash_set_data()}. Use \code{alpha = 0} on the
 BETA scale, \code{alpha = 1} on the Z scale.}
 
 \item{residualCorrelation}{Optional pre-computed residual correlation matrix
-(\code{Vhat}). When supplied, replaces the inline
-\code{mashr::estimate_null_correlation_simple()} call entirely and the
-\code{"random"} slot of \code{sumStatsList} becomes optional (the function
-does not need it for anything else). Useful when \code{Vhat} was estimated
-previously on a larger reference and shipped as a static artefact (the
-legacy MWE pattern).}
+(\code{Vhat}). When supplied, it is used as-is:
+\code{residualCorrelationMethod} is not consulted, and the
+\code{"random"} slot of \code{sumStatsList} becomes optional (the
+function does not need it for anything else). Useful when \code{Vhat} was
+estimated previously on a larger reference and shipped as a static
+artefact (the legacy MWE pattern).}
+
+\item{residualCorrelationMethod}{How to estimate \eqn{\hat V} when
+  \code{residualCorrelation} is not supplied; forwarded to
+  \code{\link{mashResidualCorrelation}}, which is where each estimator is
+  described.
+
+  \code{"identity"} (the default) takes the residual correlation to be the
+  identity, needs no extra partition, and never depends on which partitions
+  were supplied. It is the safe default rather than the best one: it
+  assumes conditions share no residual correlation, which
+  overlapping-sample designs -- the usual multi-context QTL case, where the
+  same donors are measured in every context -- violate. Supplying a
+  \code{"null"} partition while leaving this at \code{"identity"} reports
+  that the partition is unused, since that combination is more often an
+  oversight than an intent.
+
+  The estimators differ in what they require: \code{"simple"},
+  \code{"simpleSpecific"} and \code{"corshrink"} need a \code{"null"}
+  entry; \code{"mle"} needs \code{"random"} plus a supplied
+  \code{priorCovariances} to refine against. A named method whose
+  requirement is unmet is a hard error, not a silent fallback.}
 
 \item{priorCovariances}{Optional named list of square covariance matrices
-(the \code{Ulist} \code{mashr::mash()} consumes). When supplied, replaces
+(the \code{Ulist} \code{mashr::mash()} consumes), or a
+\code{\link{mashPriorCovariances}} result, which is unwrapped to its
+\code{U}. When supplied, replaces
 the canonical + PCA + flash + ED chain (\code{cov_canonical} /
 \code{cov_pca} / \code{cov_flash} / \code{cov_ed}) entirely; mash sees only
 the supplied matrices. Every entry must be a \code{ncol(Bhat) x ncol(Bhat)}

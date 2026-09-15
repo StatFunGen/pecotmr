@@ -1056,3 +1056,44 @@ test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and i
     )
     expect_equal(nrow(out), 0L)
 })
+
+test_that(".enrRunEnrichment turns a stored alignment failure into a warning", {
+    cnd <- simpleCondition("boom")
+    class(cnd) <- c("simpleError", "error", "condition")
+    # The alignment failure was captured earlier and stored in place of the
+    # aligned data; re-signalling it here routes it through the same handler
+    # a live failure would take.
+    expect_warning(
+        out <- pecotmr:::.enrRunEnrichment(
+            1L,
+            gwasPip = NULL,
+            k = 1L,
+            p = list(alignedByTuple = list(cnd))
+        ),
+        "qtlEnrichment failed"
+    )
+    expect_null(out)
+})
+
+test_that(".enrBuildQtlRegionsList reads prior variance under either name", {
+    pip <- c(v1 = 0.5, v2 = 0.5)
+    run <- function(fit) {
+        local_mocked_bindings(
+            .enrMatchRows = function(qtlFmr, ident) 1L,
+            .fmrRowParts = function(qtlFmr, i) "parts",
+            getSusieFit = function(parts) fit,
+            .package = "pecotmr"
+        )
+        pecotmr:::.enrBuildQtlRegionsList("fmr", "ident")
+    }
+    base <- list(alpha = matrix(0.5, 1L, 2L), pip = pip)
+    # `V` is susie's name for it; `prior_variance` is the older one. Either
+    # is accepted, and a fit carrying neither is skipped rather than kept
+    # with a NULL prior.
+    expect_equal(run(c(base, list(V = 0.7)))[[1L]]$prior_variance, 0.7)
+    expect_equal(
+        run(c(base, list(prior_variance = 0.3)))[[1L]]$prior_variance,
+        0.3
+    )
+    expect_length(run(base), 0L)
+})

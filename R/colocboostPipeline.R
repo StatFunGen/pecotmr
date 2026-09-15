@@ -154,9 +154,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # Run colocboost() with tryCatch + timing.
 .cbRun <- function(label, args) {
     if (!requireNamespace("colocboost", quietly = TRUE)) {
-        # nocov start
         abort("The colocboost package is required for colocboostPipeline().")
-        # nocov end
     }
     t1 <- Sys.time()
     args <- compact(args)
@@ -665,7 +663,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         tr <- as.character(ss$trait)[[i]]
         label <- str_c(st, ctx, tr, sep = ":")
         pair <- .cbSumstatPair(
-            df = getSumstatDf(
+            df = getSumStatsDf(
                 ss,
                 study = st,
                 context = ctx,
@@ -696,7 +694,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     for (i in seq_len(nrow(gws))) {
         st <- as.character(gws$study)[[i]]
         pair <- .cbSumstatPair(
-            df = getSumstatDf(gws, study = st, require = "Z"),
+            df = getSumStatsDf(gws, study = st, require = "Z"),
             ldSketch = ldSketch,
             varY = if (is_in("varY", .tupleColumnNames(gws))) {
                 gws$varY[[i]]

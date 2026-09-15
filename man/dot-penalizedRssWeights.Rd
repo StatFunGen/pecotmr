@@ -13,7 +13,7 @@
   alpha = 1,
   lambda0 = 0,
   lambda2 = 0,
-  selection = c("ld_quadratic", "min_fbeta"),
+  selection = c("ldQuadratic", "minFbeta"),
   ...
 )
 }

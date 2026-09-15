@@ -217,3 +217,12 @@ test_that("a joint column must be character", {
         "'jointStudies' column must be character \\(got integer\\)"
     )
 })
+
+
+test_that("an empty ranged payload flattens to NULL", {
+    expect_null(pecotmr:::.ctwasPayloadAsDf(GenomicRanges::GRanges()))
+    expect_null(pecotmr:::.ctwasPayloadAsDf(NULL))
+    # A non-GRanges payload is passed straight through.
+    df <- data.frame(a = 1)
+    expect_equal(pecotmr:::.ctwasPayloadAsDf(df), df)
+})

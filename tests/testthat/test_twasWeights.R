@@ -109,7 +109,7 @@ test_that(".twas_method_lookup: 'default' preset returns 10 methods", {
 })
 
 test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
-    result <- pecotmr:::.twasMethodLookup("fast_default")
+    result <- pecotmr:::.twasMethodLookup("fastDefault")
     expected_names <- c(
         "susie_weights",
         "susie_inf_weights",
@@ -124,7 +124,7 @@ test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
 })
 
 test_that(".twas_method_lookup: custom vector of short names", {
-    result <- pecotmr:::.twasMethodLookup(c("susie", "enet", "dpr_vb"))
+    result <- pecotmr:::.twasMethodLookup(c("susie", "enet", "dprVb"))
     expect_equal(
         sort(names(result)),
         sort(c("susie_weights", "enet_weights", "dpr_vb_weights"))
@@ -134,12 +134,12 @@ test_that(".twas_method_lookup: custom vector of short names", {
 test_that(".twas_method_lookup: unknown method produces error", {
     expect_error(
         pecotmr:::.twasMethodLookup(c("susie", "nonexistent_method")),
-        "Unknown TWAS method"
+        "unknown method token"
     )
 })
 
 test_that(".twas_method_lookup: default args are set for susie and mrash", {
-    result <- pecotmr:::.twasMethodLookup("fast_default")
+    result <- pecotmr:::.twasMethodLookup("fastDefault")
     expect_equal(result$susie_weights$refine, FALSE)
     # Matches susieR::susie's own defaults (L = min(10, p), greedy loop off),
     # as fineMappingPipeline does.
@@ -157,9 +157,9 @@ test_that(".twas_method_lookup: methods with no special args get empty list", {
 
 test_that(".twas_method_lookup: all DPR variants can coexist", {
     result <- pecotmr:::.twasMethodLookup(c(
-        "dpr_vb",
-        "dpr_gibbs",
-        "dpr_adaptive_gibbs"
+        "dprVb",
+        "dprGibbs",
+        "dprAdaptiveGibbs"
     ))
     expect_equal(
         sort(names(result)),
@@ -1618,4 +1618,96 @@ test_that("twasPredict: accepts a TwasWeights S4 collection", {
     expect_equal(names(res), c("lasso_predicted", "enet_predicted"))
     expect_equal(res[["lasso_predicted"]], X %*% matrix(w1, ncol = 1))
     expect_equal(res[["enet_predicted"]], X %*% matrix(w2, ncol = 1))
+})
+
+
+# ===========================================================================
+# TwasWeights validity and variant identity
+# ===========================================================================
+
+test_that("validity names the missing key and payload columns", {
+    data(twasWeightsExample)
+    bad <- twasWeightsExample
+    S4Vectors::mcols(bad)$method <- NULL
+    expect_equal(
+        pecotmr:::.twasValidateRequiredCols(bad),
+        "missing columns: method"
+    )
+    expect_equal(
+        pecotmr:::.twasValidateRequiredCols(twasWeightsExample),
+        character()
+    )
+    bad2 <- twasWeightsExample
+    S4Vectors::mcols(bad2)$cvResult <- NULL
+    expect_equal(
+        pecotmr:::.twasValidateEntries(bad2),
+        "missing entry payload columns: cvResult"
+    )
+})
+
+test_that("an unnamed genotype matrix is refused rather than given fake ids", {
+    # A synthetic "variant_<i>" label would not create identity, only defer
+    # the failure to wherever the genomic range is needed.
+    X <- matrix(1:4, 2L, 2L)
+    expect_error(
+        pecotmr:::.twasVariantIds(X),
+        "the genotype matrix has no colnames"
+    )
+    colnames(X) <- c("chr1:1:A:G", "chr1:2:C:T")
+    expect_equal(pecotmr:::.twasVariantIds(X), c("chr1:1:A:G", "chr1:2:C:T"))
+})
+
+test_that(".twasApplyRownames leaves weights alone when X has no colnames", {
+    weightsList <- list(a = matrix(1:4, nrow = 2L))
+    noNames <- matrix(0, nrow = 3L, ncol = 2L)
+    # Without variant names on X there is nothing to label the rows with.
+    expect_identical(
+        pecotmr:::.twasApplyRownames(weightsList, noNames),
+        weightsList
+    )
+    named <- noNames
+    colnames(named) <- c("v1", "v2")
+    out <- pecotmr:::.twasApplyRownames(weightsList, named)
+    expect_equal(rownames(out$a), c("v1", "v2"))
+})
+
+test_that(".twasBadColMsg names the offending column and its class", {
+    expect_equal(
+        as.character(pecotmr:::.twasBadColMsg("study", data.frame(study = 1:2))),
+        "'study' column must be character (got integer)"
+    )
+})
+
+test_that(".twasMethodRows keeps a per-outcome context vector", {
+    vids <- c("chr1:100:A:G", "chr1:200:C:T")
+    Y <- matrix(0, nrow = 4L, ncol = 2L,
+        dimnames = list(NULL, c("y1", "y2")))
+    wMat <- matrix(
+        c(0.1, 0.2, 0.3, 0.4),
+        nrow = 2L,
+        dimnames = list(vids, c("y1", "y2"))
+    )
+    mkCtx <- function(contexts) {
+        list(
+            Y = Y, trait = c("t1", "t2"), context = contexts, study = "s1",
+            retainFits = FALSE, standardized = TRUE, dataType = "rnaseq"
+        )
+    }
+    # One context per outcome column: used as-is, not recycled.
+    perOutcome <- pecotmr:::.twasMethodRows(
+        "lasso_weights", wMat, vids, mkCtx(c("cA", "cB"))
+    )
+    expect_length(perOutcome, 2L)
+    expect_equal(
+        vapply(perOutcome, function(z) z$context, character(1)),
+        c("cA", "cB")
+    )
+    # A single context is recycled across the outcomes instead.
+    recycled <- pecotmr:::.twasMethodRows(
+        "lasso_weights", wMat, vids, mkCtx("cOnly")
+    )
+    expect_equal(
+        vapply(recycled, function(z) z$context, character(1)),
+        c("cOnly", "cOnly")
+    )
 })

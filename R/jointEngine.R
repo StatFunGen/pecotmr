@@ -125,7 +125,12 @@ NULL
         return(GenomicRanges::granges(rr[trait])[1L])
     }
     if (methods::is(data, "QtlSumStats")) {
-        if (!is_in("traitPos", names(data))) {
+        # colnames(), not names(): a collection's names() are its GRangesList
+        # ELEMENT names (empty here), while the per-row columns live in mcols.
+        # Reading names() made this guard always fire, so the whole branch
+        # below was dead and every sumstats-derived row fell back to the
+        # chrUn sentinel instead of its real trait position.
+        if (!is_in("traitPos", colnames(data))) {
             return(NULL)
         }
         idx <- which(
@@ -135,10 +140,9 @@ NULL
         if (length(idx) == 0L) {
             return(NULL)
         }
+        # traitPos is a GRanges column and `idx` came from which(), so this
+        # is always a length-1 range.
         tp <- data$traitPos[idx[[1L]]]
-        if (length(tp) == 0L) {
-            return(NULL)
-        }
         return(GenomicRanges::granges(tp)[1L])
     }
     NULL
@@ -786,7 +790,7 @@ setMethod(
     ) {
         ma[[adapter$fitArg]] <- fittedModels[[token]]
     }
-    if (isTRUE(cfg$estimatePi) && is_in(token, c("bayes_c", "bayes_b"))) {
+    if (isTRUE(cfg$estimatePi) && is_in(token, c("bayesC", "bayesB"))) {
         ma <- .jointTwasSpikeSlabPi(ma, token, Xc, Yc, cond, cfg, stdz)
     }
     ma
@@ -809,10 +813,10 @@ setMethod(
         seed = cfg$seed
     )
     piHat <- as.numeric(estimateSparsity(mrA))
-    if (token == "bayes_c" && is.null(ma$pi)) {
+    if (token == "bayesC" && is.null(ma$pi)) {
         ma$pi <- piHat
     }
-    if (token == "bayes_b" && is.null(ma$probIn)) {
+    if (token == "bayesB" && is.null(ma$probIn)) {
         ma$probIn <- piHat
     }
     ma

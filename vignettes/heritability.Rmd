@@ -1,0 +1,385 @@
+---
+title: "SNP heritability and functional enrichment"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{SNP heritability and functional enrichment}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
+```
+
+## Overview
+
+`estimateH2()` estimates SNP heritability from GWAS summary statistics and
+an LD reference. Four estimators are available, differing in what they model
+and what they need:
+
+| `method` | Approach | LD input |
+|---|---|---|
+| `"sldsc"` | Stratified LD score regression (Finucane 2015) | `LdScore` |
+| `"gldsc"` | Generalized LDSC — GLS with full block LD (Xiong 2024) | `LdScore` + matrices |
+| `"lder"` | LD eigenvalue regression (Song 2022) | `LdEigen` |
+| `"hdl"` | High-definition likelihood (Ning 2020) | `LdEigen` |
+
+Supplying `annotations` makes any of them stratified, adding a
+per-annotation enrichment table.
+
+There is a second, separate track in the package: when stratified LDSC has
+already been run externally by [polyfun][pf], `sldscPostprocessingPipeline()`
+postprocesses those outputs. Both are covered below.
+
+[pf]: https://github.com/omerwe/polyfun
+
+```{r load-packages}
+library(pecotmr)
+data(ldScoreExample, ldEigenExample)
+ldScoreExample
+```
+
+Both bundled references describe the same 1300 variants across 14 chr22 LD
+blocks, taken from the de-identified `protocol_example` panel, so the four
+methods can be compared on one dataset.
+
+## Variants must line up
+
+Every estimator reads the z-scores positionally, indexed by the LD
+reference's own variant order — nothing is matched on variant ID along the
+way. `estimateH2()` therefore checks up front that the summary statistics,
+the annotations and the reference describe the same variants, in the same
+order, on the same genome build, and refuses to run otherwise.
+
+The practical consequence: build the summary statistics *from* the reference
+rather than alongside it.
+
+```{r simulate-gwas}
+# A GWAS simulated on this reference so the true h2 is known: z is drawn
+# from the standard model z ~ N(0, N R diag(v) R + R), block by block.
+M <- length(ldScoreExample)
+nGwas <- 10000
+h2True <- 0.4
+perSnpVar <- rep(h2True / M, M)
+
+set.seed(1)
+z <- numeric(M)
+for (block in getLdMatrixList(ldScoreExample)) {
+    idx <- block$snpIdx
+    p <- length(idx)
+    sigma <- nGwas * (block$R %*% diag(perSnpVar[idx], p) %*% block$R) +
+        block$R
+    e <- eigen((sigma + t(sigma)) / 2, symmetric = TRUE)
+    z[idx] <- as.vector(e$vectors %*% (sqrt(pmax(e$values, 0)) * rnorm(p)))
+}
+
+gr <- as(ldScoreExample, "GRanges")
+S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = names(ldScoreExample),
+    A1 = S4Vectors::mcols(ldScoreExample)$A1,
+    A2 = S4Vectors::mcols(ldScoreExample)$A2,
+    Z = z,
+    N = as.integer(nGwas)
+)
+gwas <- GwasSumStats(
+    study = "trait1",
+    entry = list(gr),
+    genome = getGenome(ldScoreExample),
+    ldSketch = readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+)
+```
+
+## Estimating heritability
+
+```{r estimate}
+methods <- c("sldsc", "gldsc", "lder", "hdl")
+estimates <- lapply(methods, function(m) {
+    ref <- if (m %in% c("sldsc", "gldsc")) ldScoreExample else ldEigenExample
+    suppressWarnings(estimateH2(gwas, ref, method = m))
+})
+names(estimates) <- methods
+
+data.frame(
+    method = methods,
+    h2 = round(vapply(estimates, getH2, numeric(1)), 3),
+    se = round(vapply(estimates, getH2Se, numeric(1)), 3),
+    row.names = NULL
+)
+```
+
+The true value is `r h2True`. Three of the four land close to it; `sldsc`
+comes in low, and that is worth understanding rather than tuning away.
+
+**`sldsc` is attenuated because the reference is small.** LD score
+regression is a genome-scale method — real analyses regress over roughly a
+million variants. On 1300 the intercept is not identifiable: an unweighted
+OLS on this same data returns an intercept several times its true value of
+1, and the heritability absorbs the difference. `lder` is the least
+sensitive to reference size, which is why it is the default.
+
+All four are checked against their reference implementations — [ldsc][ldsc],
+[HDL][hdl], [LDER][lder] and [gldsc][gldsc] — on identical inputs: HDL agrees
+exactly, LDER to machine precision, gLDSC to ~3e-8 and S-LDSC to ~1e-6. The
+small residuals are a ridge on the weighted solve, which keeps an exactly
+singular design from returning `NA`. Agreement holds even where the
+reference implementations misbehave, such as an S-LDSC intercept below 1 or
+a negative partitioned heritability.
+
+One deliberate difference: LDER here clamps negative eigenvalues before
+forming its regression weights. A real, rank-deficient LD block decomposes
+with a tail of tiny negative values that are floating-point noise, and
+upstream takes `sqrt()` of the resulting negative weight and aborts. The
+clamp changes nothing wherever upstream runs.
+
+[ldsc]: https://github.com/bulik/ldsc
+[hdl]: https://github.com/zhenin/HDL
+[lder]: https://github.com/shuangsong0110/LDER
+[gldsc]: https://github.com/xzw20046/gldsc
+
+**`hdl` has a reference-size limit, and it tells you when it hits it.** It
+is the only one of the four that models reference-panel *noise* explicitly:
+its likelihood subtracts a term scaling as `1/nRef` from the modelled
+variance. Once the reference is small relative to the GWAS, that term
+outgrows the signal, the modelled variance is driven to its floor across
+most eigen-directions, and the optimiser walks the intercept out to the top
+of its range — returning a number that reflects that bound rather than the
+data. At `N = 1e5` against this reference (`nRef` =
+`r getNRef(ldEigenExample)`) it drifts to about 0.56 for a true 0.4 and
+warns that the fit sits on a bound. At the `N = 1e4` used here it is
+comfortably inside its range. If HDL disagrees sharply with the others,
+check for that warning and compare `getN()` against `getNRef()`.
+
+A standard error of zero, or an estimate pinned at a boundary, almost always
+means the reference is too small rather than that the trait has no
+heritability. The block jackknife needs at least two LD blocks and wants many
+more; `estimateH2()` refuses a single-block reference outright.
+
+## Building an LD reference
+
+The bundled references were built with `buildLdEigen()` / `buildLdScore()`,
+which turn already-loaded LD into the statistic each estimator needs. Load
+the LD **per block** — loading a whole region at once returns one dense
+matrix, which is one block, and one block has no jackknife.
+
+```{r build-ref, eval=FALSE}
+metaPath <- "/path/to/ld_meta_file.tsv"
+blocks <- read.delim(metaPath, check.names = FALSE)
+regions <- sprintf("chr22:%d-%d", blocks$start, blocks$end)
+
+ldList <- lapply(regions, function(r) loadLdMatrix(metaPath, region = r))
+
+ldEigen <- buildLdEigen(ldList, genome = "hg38")
+ldScore <- buildLdScore(ldList, genome = "hg38")
+```
+
+`nRef` and the genome build default to what the loaded LD records.
+`buildLdScore(keepLdMatrices = FALSE)` drops the per-block matrices, which
+shrinks the object by roughly an order of magnitude — but only unstratified
+`"sldsc"` can use the result, since `"gldsc"` and stratified `"sldsc"` both
+form their per-annotation scores from those matrices.
+
+## Stratified estimation and enrichment
+
+Passing an `AnnotationMatrix` partitions heritability across annotations.
+The annotation rows must line up with the reference, exactly as the summary
+statistics do.
+
+```{r annotate}
+# An illustrative annotation over the first half of the reference, simulated
+# to carry three times the per-variant heritability of the rest.
+inA <- seq_len(M) <= M / 2
+perSnpVarStrat <- ifelse(inA, 0.225 / sum(inA), 0.075 / sum(!inA))
+
+set.seed(1)
+zStrat <- numeric(M)
+for (block in getLdMatrixList(ldScoreExample)) {
+    idx <- block$snpIdx
+    p <- length(idx)
+    sigma <- nGwas *
+        (block$R %*% diag(perSnpVarStrat[idx], p) %*% block$R) +
+        block$R
+    e <- eigen((sigma + t(sigma)) / 2, symmetric = TRUE)
+    zStrat[idx] <- as.vector(
+        e$vectors %*% (sqrt(pmax(e$values, 0)) * rnorm(p))
+    )
+}
+S4Vectors::mcols(gr)$Z <- zStrat
+gwasStrat <- GwasSumStats(
+    study = "trait1",
+    entry = list(gr),
+    genome = getGenome(ldScoreExample),
+    ldSketch = readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+)
+
+annot <- AnnotationMatrix(
+    matrix(as.integer(inA), ncol = 1, dimnames = list(NULL, "annotA")),
+    as(ldScoreExample, "GRanges"),
+    data.frame(name = "annotA", tier = "baseline", type = "binary"),
+    genome = getGenome(ldScoreExample)
+)
+```
+
+```{r enrichment}
+strat <- estimateH2(
+    gwasStrat,
+    ldScoreExample,
+    method = "gldsc",
+    annotations = annot
+)
+as.data.frame(getEnrichment(strat))[, c(
+    "annotation",
+    "tau",
+    "enrichment",
+    "enrichmentSe",
+    "propH2",
+    "propSnps"
+)]
+```
+
+`enrichment` is the proportion of heritability divided by the proportion of
+variants: above 1 means the annotation carries more heritability than its
+share of the genome. The simulated truth here is 3, and the estimate is
+directionally right but attenuated — again a consequence of the reference's
+size rather than of the annotation.
+
+Annotations come from files via `readAnnotations()`, which reads BED, BigWig
+and LDSC `.annot` formats at a given set of variant positions:
+
+```{r read-annotations, eval=FALSE}
+annot <- readAnnotations(
+    c(enhancer = "enhancers.bed", conservation = "phastCons.bw"),
+    snpRanges = as(ldScoreExample, "GRanges"),
+    genome = "hg38"
+)
+```
+
+The `tier` column decides how each annotation is used: `"baseline"`
+annotations enter the model and get an enrichment estimate, while
+`"candidate"` annotations are scored against the fitted baseline (the sHDL
+score test, via `getScoreStats()`).
+
+One structural caveat: a set of baseline annotations that exactly partitions
+the variants is rank-deficient by construction, because the model's implicit
+all-ones base annotation is then their sum. Real baseline models — the LDSC
+baselineLD set, for instance — use overlapping annotations and do not have
+this problem.
+
+## Postprocessing external polyfun runs
+
+The second track handles stratified LDSC that was run outside R by polyfun.
+The readers load its outputs, `SldscData` bundles them, and the pipeline
+does the computation — no file I/O of its own.
+
+```{r sldsc-read}
+sldscDir <- system.file("extdata", "sldsc", package = "pecotmr")
+traitDir <- system.file("extdata", "sldsc_trait", package = "pecotmr")
+
+annotTable <- readSldscAnnot(sldscDir)
+frq <- readSldscFrq(sldscDir, plinkName = "reference.")
+
+traitNames <- c(traitA = "sumstats", traitB = "sumstats2", traitC = "sumstats3")
+runs <- lapply(traitNames, function(t) {
+    readSldscTrait(file.path(traitDir, paste0(t, ".parquet")))
+})
+runs$traitA$categories
+```
+
+Those categories are a real baseline model — `Coding_UCSC`,
+`Conserved_LindbladToh` and `Repressed_Hoffman`, each split into common and
+low-frequency, plus `base` — with `ANNOT_0` as the target annotation under
+test.
+
+```{r sldsc-pipeline}
+sldscData <- SldscData(
+    annot = annotTable,
+    frq = frq,
+    traits = lapply(runs, function(r) list(single = list(r)))
+)
+result <- sldscPostprocessingPipeline(
+    sldscData,
+    targetCategories = "ANNOT_0"
+)
+as.data.frame(result$meta$enrichment)
+```
+
+The pipeline standardizes each trait's tau to Gazal tau\*, back-solves a
+jackknife standard error for the enrichment statistic, and pools traits by
+DerSimonian-Laird random-effects meta-analysis. `sldscSubsetMeta()` re-runs
+the meta over a subset of traits without refitting anything:
+
+```{r sldsc-subset}
+subset <- sldscSubsetMeta(result, subsetTraits = c("traitB", "traitC"))
+unlist(subset$enrichment$ANNOT_0)
+```
+
+Each polyfun run may be a `single` target run or a `joint` one; supplying
+both lets the pipeline report the target's enrichment from the single fit
+alongside its coefficient from the joint fit.
+
+### The postprocessing steps
+
+`sldscPostprocessingPipeline()` is a wrapper over steps that are exported
+individually, which is what you want when auditing a surprising number:
+
+```{r sldsc-steps}
+computeSldscMRef(sldscData, mafCutoff = 0.05) # the M_ref that scales tau*
+isBinarySldscAnnot(sldscData) # binary vs continuous
+```
+
+`computeSldscAnnotSd()` gives the per-annotation standard deviation that
+turns tau into Gazal tau\*, `standardizeSldscTrait()` does that
+standardisation for one trait's run, and `metaSldscRandom()` is the
+DerSimonian-Laird pooling across traits. Running them yourself is the way to
+see which of the three a strange tau\* came from.
+
+`getAnnotData()`, `getFrqData()`, `getAnnotCols()` and `getTraitRuns()` read
+the corresponding parts of an `SldscData` back out.
+
+### LD scores from an existing reference
+
+`computeLdScores()` derives per-variant LD scores from an `LdEigen` or
+`LdScore`, optionally stratified by annotation:
+
+```{r compute-ld-scores}
+scores <- computeLdScores(ldEigenExample)
+head(round(as.vector(scores[, 1]), 3))
+```
+
+This is the same quantity `buildLdScore()` stores, reconstructed from the
+eigendecomposition — `sum_i V[j,i]^2 d[i]^2` rather than `sum_k r^2_jk`.
+The two agree, which is worth knowing when you have one object and need the
+other's input.
+
+## Bridging the two tracks
+
+`h2EstimateToSldscTrait()` converts an `H2Estimate` into the same list shape
+`readSldscTrait()` produces, so an in-package estimate can be meta-analysed
+alongside polyfun runs:
+
+```{r bridge}
+names(h2EstimateToSldscTrait(strat))
+```
+
+## Next steps
+
+- [Molecular QTL enrichment](xqtl-enrichment.html) — the complementary
+  per-variant QTL/GWAS enrichment analysis.
+- [QC for summary statistics](rss-qc.html) — preparing the GWAS side.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

@@ -399,7 +399,7 @@ test_that("getVariantIds renders ids the same way the row classes do", {
     data(qtlSumStatsExample, envir = environment())
     expect_equal(
         getVariantIds(qtlSumStatsExample),
-        getSumstatDf(qtlSumStatsExample, require = "Z")$variant_id
+        getSumStatsDf(qtlSumStatsExample, require = "Z")$variant_id
     )
     expect_match(getVariantIds(qtlSumStatsExample)[[1L]], "^chr[^:]+:\\d+:")
 })
@@ -472,4 +472,84 @@ test_that("adjustPips drops non-overlapping entries and says so", {
     )
     expect_equal(nrow(out), 1L)
     expect_equal(as.character(mcols(out)$study), "s1")
+})
+
+
+# ===========================================================================
+# .ssStitchElements()'s `ranges` filter
+#
+# getSumStats(x, ranges = ) is a documented argument that nothing exercised:
+# every call left it NULL and returned through the early exit, so the
+# chromosome test and the overlap intersection were both cold.
+# ===========================================================================
+
+test_that("getSumStats(ranges=) narrows the variants to the window", {
+    data(gwasSumStatsS4Example)
+    full <- getSumStats(gwasSumStatsS4Example)
+    span <- range(GenomicRanges::start(full))
+    win <- GenomicRanges::GRanges(
+        as.character(GenomicRanges::seqnames(full))[[1L]],
+        IRanges::IRanges(
+            span[[1L]],
+            span[[1L]] + (span[[2L]] - span[[1L]]) %/% 4L
+        )
+    )
+    sub <- getSumStats(gwasSumStatsS4Example, ranges = win)
+    expect_s4_class(sub, "GRanges")
+    expect_lt(length(sub), length(full))
+    expect_gt(length(sub), 0L)
+    expect_true(all(IRanges::overlapsAny(sub, win)))
+})
+
+test_that("getSumStats(ranges=) on another chromosome returns nothing", {
+    # The chromosome test short-circuits before overlapsAny(), which would
+    # otherwise warn about disjoint seqlevels.
+    data(gwasSumStatsS4Example)
+    off <- GenomicRanges::GRanges("chrZZ", IRanges::IRanges(1L, 100L))
+    sub <- suppressWarnings(getSumStats(gwasSumStatsS4Example, ranges = off))
+    expect_s4_class(sub, "GRanges")
+    expect_equal(length(sub), 0L)
+})
+
+
+test_that("the genome check names a missing build and a mixed one", {
+    f <- pecotmr:::.sumStatsCheckGenome
+    gr <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(100L, 200L), width = 1L)
+    )
+    # No build recorded anywhere.
+    expect_match(f(gr), "no genome build in seqinfo")
+    # Two different builds across seqlevels.
+    GenomeInfoDb::genome(gr) <- c("hg19", "hg38")
+    expect_match(f(gr), "names more than one genome build")
+    # A single build is accepted.
+    GenomeInfoDb::genome(gr) <- "hg38"
+    expect_null(f(gr))
+})
+
+
+test_that("an empty collection has no variants", {
+    setClass(
+        "RcEmptyKid",
+        contains = "RangedTupleList",
+        representation(genome = "character", ldSketch = "ANY", qcInfo = "list")
+    )
+    empty <- new(
+        "RcEmptyKid",
+        GenomicRanges::GRangesList(),
+        genome = "hg38",
+        ldSketch = NULL,
+        qcInfo = list()
+    )
+    expect_equal(nrow(empty), 0L)
+    expect_equal(pecotmr:::.rcAllVariants(empty), character(0))
+})
+
+test_that("retained mass is NULL for a fit that never went through reconciliation", {
+    # NULL rather than a vector of 1s: nothing was dropped, so there is no
+    # mass to report.
+    expect_null(pecotmr:::.rcFitRetainedMass(NULL))
+    expect_null(pecotmr:::.rcFitRetainedMass("not a fit"))
+    expect_equal(pecotmr:::.rcFitRetainedMass(list(retained_mass = 0.8)), 0.8)
 })

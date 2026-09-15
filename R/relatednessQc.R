@@ -9,8 +9,8 @@
 #'   .kin0 output). Must contain columns for IID1, IID2, and relatedness value.
 #' @param relatednessThreshold Kinship threshold above which individuals are
 #'   considered related (default 0.0625, i.e. 2nd degree).
-#' @param analysisType One of \code{"maximize_unrelated"} (default) or
-#'   \code{"maximize_cases"}. The latter preserves cases in case-control
+#' @param analysisType One of \code{"maximizeUnrelated"} (default) or
+#'   \code{"maximizeCases"}. The latter preserves cases in case-control
 #'   studies.
 #' @param relatednessIid1 Column name for first individual ID (default "IID1").
 #' @param relatednessIid2 Column name for second individual ID (default "IID2").
@@ -19,7 +19,7 @@
 #' @param relatednessValue Column name for the relatedness measure (default
 #'   "PI_HAT").
 #' @param phenoData A data.frame with columns \code{IID} and the column named by
-#'   \code{phenoCol}. Required when \code{analysisType = "maximize_cases"}.
+#'   \code{phenoCol}. Required when \code{analysisType = "maximizeCases"}.
 #' @param phenoCol Column name for the phenotype (default "pheno"). Expected to
 #'   be binary (1 = case, 0 = control).
 #' @param otherCriterion Optional data.frame with additional filtering criteria
@@ -47,7 +47,7 @@
 filterRelatedness <- function(
     relatedness,
     relatednessThreshold = 0.0625,
-    analysisType = c("maximize_unrelated", "maximize_cases"),
+    analysisType = c("maximizeUnrelated", "maximizeCases"),
     relatednessIid1 = "IID1",
     relatednessIid2 = "IID2",
     relatednessFid1 = NULL,
@@ -69,8 +69,8 @@ filterRelatedness <- function(
     analysisType <- arg_match(analysisType)
     p <- as.list(environment())
     p$relatedness <- as_tibble(relatedness)
-    if (analysisType == "maximize_cases" && is.null(phenoData)) {
-        abort("Must provide phenoData when analysisType is 'maximize_cases'")
+    if (analysisType == "maximizeCases" && is.null(phenoData)) {
+        abort("Must provide phenoData when analysisType is 'maximizeCases'")
     }
     # Phase 1: graph-based pre-pruning of large components.
     highRelatedIndiv <- .relatednessPrune(p)
@@ -90,11 +90,11 @@ filterRelatedness <- function(
     allExclude
 }
 
-# Phase-2 dispatch: maximize_unrelated runs plinkQC directly; maximize_cases
+# Phase-2 dispatch: maximizeUnrelated runs plinkQC directly; maximizeCases
 # preserves cases. Returns list(allExclude, kin).
 # @noRd
 .relatednessPhase2 <- function(kin, plinkqcArgs, analysisType, p) {
-    if (analysisType == "maximize_unrelated") {
+    if (analysisType == "maximizeUnrelated") {
         return(list(
             allExclude = .relatednessRunPlinkqc(kin, plinkqcArgs)$IID,
             kin = kin
@@ -105,14 +105,12 @@ filterRelatedness <- function(
 
 # @noRd
 .relatednessRequirePackages <- function() {
-    # nocov start
     if (!requireNamespace("igraph", quietly = TRUE)) {
         abort("Package 'igraph' is required for filterRelatedness")
     }
     if (!requireNamespace("plinkQC", quietly = TRUE)) {
         abort("Package 'plinkQC' is required for filterRelatedness")
     }
-    # nocov end
 }
 
 # Graph pre-pruning: iteratively remove the highest-degree nodes of any
@@ -211,7 +209,7 @@ filterRelatedness <- function(
     )
 }
 
-# maximize_cases: preserve cases, preferentially remove controls. Returns
+# maximizeCases: preserve cases, preferentially remove controls. Returns
 # list(allExclude, kin) (kin is restricted to phenotyped individuals).
 # @noRd
 .relatednessMaximizeCases <- function(kin, plinkqcArgs, p) {

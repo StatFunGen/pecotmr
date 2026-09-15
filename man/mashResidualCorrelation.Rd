@@ -7,7 +7,7 @@
 mashResidualCorrelation(
   sumStatsList,
   alpha,
-  method = c("simple", "identity", "mle", "corshrink", "simple_specific"),
+  method = c("simple", "identity", "mle", "corshrink", "simpleSpecific"),
   priorCovariances = NULL,
   nSubset = 6000L,
   maxIter = 6L,
@@ -27,14 +27,16 @@ off \code{"strong"}.}
 \item{method}{Estimator, all on the \code{"null"} partition unless noted.
 \code{"simple"} = mashr \code{estimate_null_correlation_simple()};
 \code{"identity"} = \code{diag(nConditions)} (reads only \code{"strong"});
-\code{"simple_specific"} = \code{Matrix::nearPD(cov(nullZ), corr = TRUE)};
+\code{"simpleSpecific"} = \code{Matrix::nearPD(cov(nullZ), corr = TRUE)};
 \code{"corshrink"} = \code{CorShrink::CorShrinkData()} adaptive-shrinkage
 correlation (needs the \pkg{CorShrink} package); \code{"mle"} =
 \code{mashr::mash_estimate_corr_em()} on a random subset (needs
 \code{"random"} + \code{priorCovariances}).}
 
 \item{priorCovariances}{Prior \code{U} list (required by \code{method =
-"mle"}).}
+"mle"}). Accepts a bare named list of covariance matrices or a
+\code{\link{mashPriorCovariances}} result, which is unwrapped to its
+\code{U}.}
 
 \item{nSubset, maxIter}{\code{method = "mle"} controls (random-subset size and
 EM iterations).}

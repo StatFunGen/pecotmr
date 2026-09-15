@@ -156,3 +156,62 @@ test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
     # ... but any selection argument is rejected.
     expect_error(getSumStats(mt, study = "s1"), "does not accept selection")
 })
+
+
+# ===========================================================================
+# Validity branches
+#
+# Every construction above builds a VALID object, so the message-returning
+# arms of the checks were never reached.
+# ===========================================================================
+
+test_that("MultiStudyQtlDataset: rejects an empty qtlDatasets list", {
+    expect_error(
+        MultiStudyQtlDataset(qtlDatasets = list()),
+        "'qtlDatasets' must be a non-empty named list"
+    )
+})
+
+test_that("MultiStudyQtlDataset: rejects duplicated study names", {
+    qd <- QtlDataset(
+        study = "s1",
+        genotypes = .sc_makeGenotypeHandle(),
+        phenotypes = list(brain = .sc_makeSe())
+    )
+    expect_error(
+        MultiStudyQtlDataset(qtlDatasets = list(s1 = qd, s1 = qd)),
+        "names of 'qtlDatasets' must be unique"
+    )
+})
+
+test_that("MultiStudyQtlDataset: rejects a non-QtlSumStats sumStats", {
+    qd <- QtlDataset(
+        study = "s1",
+        genotypes = .sc_makeGenotypeHandle(),
+        phenotypes = list(brain = .sc_makeSe())
+    )
+    expect_error(
+        MultiStudyQtlDataset(
+            qtlDatasets = list(s1 = qd, s2 = qd),
+            sumStats = "not a QtlSumStats"
+        ),
+        "'sumStats' must be a QtlSumStats object or NULL"
+    )
+})
+
+
+test_that("getStudy unions the individual-level and summary-only studies", {
+    # The sumStats arm was never taken: every collection built above carries
+    # only QtlDatasets, so getStudy() only ever read their names.
+    data(qtlSumStatsExample)
+    qd <- QtlDataset(
+        study = "s1",
+        genotypes = .sc_makeGenotypeHandle(),
+        phenotypes = list(brain = .sc_makeSe())
+    )
+    mt <- MultiStudyQtlDataset(
+        qtlDatasets = list(s1 = qd),
+        sumStats = qtlSumStatsExample
+    )
+    expect_setequal(getStudy(mt), c("s1", "study1"))
+})

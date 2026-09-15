@@ -434,6 +434,22 @@ createLdMatrix <- function(ldMatrices, variants) {
 #' @param ldMetaFilePath Path to the LD metadata TSV file.
 #' @param region Region of interest: "chr:start-end" string or data.frame with
 #'   chrom/start/end.
+#' @param block Integer block index (or vector of them), for sources that
+#'   carry no coordinates: an \code{ldInfo} table (the cTWAS \code{LD_map}
+#'   shape -- an \code{LD_file} column and optionally \code{SNP_file}), a
+#'   correlation or genotype matrix, or a list of either. Supply exactly one
+#'   of \code{region} and \code{block}.
+#' @param dropMonomorphic Logical. Drop variants with no variation, which
+#'   carry no LD and make a correlation undefined. Needs allele frequencies,
+#'   so it applies to genotype sources.
+#' @param materializeGenotypes Logical. Read the dosages once and keep them on
+#'   the returned object, so later access does no file I/O. Costs memory and
+#'   saves repeated reads.
+#' @param maxVariants Integer or \code{NULL}. Randomly thin any block larger
+#'   than this, to bound memory.
+#' @param seed Integer or \code{NULL}. Seeds the \code{maxVariants} draw,
+#'   offset by the block index so blocks are independent yet reproducible, via
+#'   a scoped \code{withr::local_seed} that leaves the session RNG alone.
 #' @param extractCoordinates Optional data.frame with columns "chrom" and "pos"
 #'   for specific coordinates extraction (only for pre-computed LD blocks).
 #' @param returnGenotype Controls what ldMatrix contains in the return value.
@@ -462,13 +478,291 @@ createLdMatrix <- function(ldMatrices, variants) {
 #' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
 #'   package = "pecotmr")
 #' loadLdMatrix(ldMetaFilePath = meta, region = "chr22:16000000-18000000")
+#' # Several regions at once return one LdData per block.
+#' length(loadLdMatrix(meta, region = rep("chr22:16000000-18000000", 2)))
 #' @export
 loadLdMatrix <- function(
     ldMetaFilePath,
-    region,
+    region = NULL,
+    block = NULL,
     extractCoordinates = NULL,
     returnGenotype = FALSE,
+    dropMonomorphic = FALSE,
+    materializeGenotypes = FALSE,
+    maxVariants = NULL,
+    seed = NULL,
     nSample = NULL
+) {
+    .ldLoadValidateAddress(ldMetaFilePath, region, block)
+    keys <- if (is.null(region)) block else region
+    # Only an atomic vector addresses several blocks. `region` also accepts a
+    # single data.frame / GRanges spec, whose length is its column count --
+    # treating that as many keys would map over the columns.
+    if (is.atomic(keys) && length(keys) > 1L) {
+        return(map(
+            keys,
+            .loadLdOne,
+            source = ldMetaFilePath,
+            byRegion = is.null(block),
+            extractCoordinates = extractCoordinates,
+            returnGenotype = returnGenotype,
+            dropMonomorphic = dropMonomorphic,
+            materializeGenotypes = materializeGenotypes,
+            maxVariants = maxVariants,
+            seed = seed,
+            nSample = nSample
+        ))
+    }
+    .loadLdOne(
+        keys,
+        ldMetaFilePath,
+        byRegion = is.null(block),
+        extractCoordinates = extractCoordinates,
+        returnGenotype = returnGenotype,
+        dropMonomorphic = dropMonomorphic,
+        materializeGenotypes = materializeGenotypes,
+        maxVariants = maxVariants,
+        seed = seed,
+        nSample = nSample
+    )
+}
+
+# A source is addressed either by genomic region (an LD meta file, which
+# carries coordinates) or by block index (an `ldInfo` table or in-memory
+# matrices, which do not). Exactly one addressing mode applies.
+# @noRd
+.ldLoadValidateAddress <- function(source, region, block) {
+    if (is.null(region) && is.null(block)) {
+        abort("loadLdMatrix: supply either `region` or `block`.")
+    }
+    if (!is.null(region) && !is.null(block)) {
+        abort("loadLdMatrix: supply `region` or `block`, not both.")
+    }
+    if (!is.null(region) && !is.character(source)) {
+        msg <- glue(
+            "loadLdMatrix: `region` addresses an LD meta file, but ",
+            "`ldMetaFilePath` is a {class(source)[[1L]]}. Coordinate-free ",
+            "sources (an `ldInfo` table, a matrix, or a list of matrices) ",
+            "are addressed with `block`."
+        )
+        abort(msg)
+    }
+    invisible(TRUE)
+}
+
+# One block, whatever the source. Everything that is not an LD meta file is
+# coordinate-free and indexed by `block`.
+# @noRd
+.loadLdOne <- function(
+    key,
+    source,
+    byRegion,
+    extractCoordinates,
+    returnGenotype,
+    dropMonomorphic,
+    materializeGenotypes,
+    maxVariants,
+    seed,
+    nSample
+) {
+    result <- if (byRegion) {
+        .loadLdFromMeta(
+            source,
+            key,
+            extractCoordinates,
+            returnGenotype,
+            nSample
+        )
+    } else {
+        .loadLdFromIndexed(source, key, returnGenotype)
+    }
+    result <- .loadLdDedup(result)
+    result <- .ldApplyMonomorphic(result, dropMonomorphic)
+    result <- .ldApplySubsample(result, maxVariants, seed, key)
+    .ldApplyMaterialize(result, materializeGenotypes)
+}
+
+# Coordinate-free sources, addressed by block index: an `ldInfo` table (the
+# cTWAS LD_map shape -- LD_file plus optional SNP_file, no coordinates), a
+# single in-memory matrix, or a list of them. Every source returns an LdData,
+# so callers never have to branch on what they loaded from.
+# @noRd
+.loadLdFromIndexed <- function(source, block, returnGenotype) {
+    if (is.data.frame(source)) {
+        return(.ldInfoBlock(source, block))
+    }
+    mat <- if (is.list(source)) source[[block]] else source
+    if (!is.matrix(mat)) {
+        msg <- glue(
+            "loadLdMatrix: cannot address a {class(source)[[1L]]} by block. ",
+            "Supply an LD meta file path, an `ldInfo` data.frame, a matrix, ",
+            "or a list of matrices."
+        )
+        abort(msg)
+    }
+    .ldDataFromMatrix(mat, isGenotype = nrow(mat) > ncol(mat))
+}
+
+# One row of an `ldInfo` table. Genotype paths are read and correlated;
+# pre-computed .cor.xz blocks are read directly.
+# @noRd
+.ldInfoBlock <- function(ldInfo, block) {
+    if (!is_in("LD_file", colnames(ldInfo))) {
+        abort("loadLdMatrix: an `ldInfo` table needs an `LD_file` column.")
+    }
+    ldPath <- as.character(ldInfo$LD_file)[block]
+    if (isGenotypeSource(ldPath)) {
+        geno <- loadGenotypeRegion(ldPath)
+        return(.ldDataFromMatrix(geno, isGenotype = TRUE))
+    }
+    snpFile <- if (is_in("SNP_file", colnames(ldInfo))) {
+        as.character(ldInfo$SNP_file)[block]
+    } else {
+        NULL # processLdMatrix auto-detects the .bim / .pvar companion
+    }
+    .ldDataFromProcessed(processLdMatrix(ldPath, snpFile))
+}
+
+# Wrap processLdMatrix()'s (matrix, variants) pair as an LdData so BOTH
+# `ldInfo` sources return one type -- the contract .loadLdFromIndexed states
+# and the post-load chain (dedup / monomorphic / subsample) relies on.
+#
+# Not .ldDataFromMatrix(): that one is for a bare matrix with no metadata and
+# substitutes placeholder chrNA:1..n coordinates. A precomputed LD block comes
+# with its .bim/.pvar, so the real chrom/pos/alleles are carried through.
+# @noRd
+.ldDataFromProcessed <- function(proc) {
+    v <- proc$ldVariants
+    n <- nrow(v)
+    gr <- .refPanelToGranges(data.frame(
+        chrom = as.character(v$chrom),
+        pos = as.integer(v$pos),
+        variant_id = as.character(v$variants),
+        A1 = as.character(v$A1),
+        A2 = as.character(v$A2),
+        stringsAsFactors = FALSE
+    ))
+    LdData(
+        correlation = proc$ldMatrix,
+        variants = gr,
+        blockMetadata = tibble(
+            blockId = 1L,
+            size = n,
+            startIdx = 1L,
+            endIdx = n
+        ),
+        nRef = 0L
+    )
+}
+
+# Wrap a bare matrix as an LdData so every source returns one type. Variant
+# identity comes from the dimnames when present.
+# @noRd
+.ldDataFromMatrix <- function(mat, isGenotype) {
+    ids <- if (isGenotype) colnames(mat) else rownames(mat)
+    n <- if (isGenotype) ncol(mat) else nrow(mat)
+    if (is.null(ids)) {
+        ids <- str_c("v", seq_len(n))
+    }
+    gr <- GRanges(
+        seqnames = rep("chrNA", n),
+        ranges = IRanges::IRanges(start = seq_len(n), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(variant_id = ids)
+    LdData(
+        correlation = if (isGenotype) NULL else mat,
+        genotypeHandle = if (isGenotype) mat else NULL,
+        variants = gr,
+        blockMetadata = tibble(blockId = 1L, size = n),
+        nRef = if (isGenotype) nrow(mat) else 0L
+    )
+}
+
+# Drop variants with no variation. They carry no LD, and a zero-variance
+# column makes a correlation undefined.
+# @noRd
+.ldApplyMonomorphic <- function(ld, dropMonomorphic) {
+    if (!isTRUE(dropMonomorphic)) {
+        return(ld)
+    }
+    refPanel <- getRefPanel(ld)
+    if (is.null(refPanel) || !is_in("allele_freq", colnames(refPanel))) {
+        return(ld)
+    }
+    p <- refPanel$allele_freq
+    keep <- !is.na(p) & p > 0 & p < 1
+    if (all(keep)) {
+        return(ld)
+    }
+    .ldSubsetData(ld, which(keep))
+}
+
+# Randomly thin an oversized block, seeded per block so a run is reproducible
+# without disturbing the session RNG.
+# @noRd
+.ldApplySubsample <- function(ld, maxVariants, seed, key) {
+    if (is.null(maxVariants) || length(ld) <= maxVariants) {
+        return(ld)
+    }
+    if (!is.null(seed)) {
+        offset <- if (is.numeric(key)) as.integer(key) else 0L
+        withr::local_seed(as.integer(seed) + offset)
+    }
+    .ldSubsetData(ld, sort(sample(length(ld), maxVariants)))
+}
+
+# Read the dosages once and keep them on the object, so later access does no
+# file I/O.
+# @noRd
+.ldApplyMaterialize <- function(ld, materializeGenotypes) {
+    if (!isTRUE(materializeGenotypes) || !hasGenotypes(ld)) {
+        return(ld)
+    }
+    X <- getGenotypes(ld)
+    if (!is.matrix(X)) {
+        return(ld)
+    }
+    LdData(
+        correlation = NULL,
+        genotypeHandle = X,
+        snpIdx = NULL,
+        variants = getVariantInfo(ld),
+        blockMetadata = getBlockMetadata(ld),
+        nRef = getNRef(ld)
+    )
+}
+
+# Narrow an LdData to a subset of its variants, keeping correlation and
+# genotypes consistent with the ranges.
+# @noRd
+.ldSubsetData <- function(ld, idx) {
+    R <- ld@correlation
+    if (!is.null(R) && is.matrix(R)) {
+        R <- R[idx, idx, drop = FALSE]
+    }
+    gh <- ld@genotypeHandle
+    if (is.matrix(gh)) {
+        gh <- gh[, idx, drop = FALSE]
+    } else if (!is.null(ld@snpIdx)) {
+        ld@snpIdx <- ld@snpIdx[idx]
+    }
+    LdData(
+        correlation = R,
+        genotypeHandle = gh,
+        snpIdx = if (is.matrix(gh)) NULL else ld@snpIdx,
+        variants = getVariantInfo(ld)[idx],
+        blockMetadata = getBlockMetadata(ld),
+        nRef = getNRef(ld)
+    )
+}
+
+# @noRd
+.loadLdFromMeta <- function(
+    ldMetaFilePath,
+    region,
+    extractCoordinates,
+    returnGenotype,
+    nSample
 ) {
     source <- resolveLdSource(ldMetaFilePath)
     isGeno <- is_in(source$type, c("plink2", "plink1", "vcf", "gds"))
@@ -476,7 +770,7 @@ loadLdMatrix <- function(
     if (identical(returnGenotype, "auto")) {
         returnGenotype <- isGeno
     }
-    result <- .loadLdDispatch(
+    .loadLdDispatch(
         source,
         isGeno,
         region,
@@ -484,7 +778,6 @@ loadLdMatrix <- function(
         returnGenotype,
         nSample
     )
-    .loadLdDedup(result)
 }
 
 # ---------- Internal: resolve LD source type ----------
@@ -909,7 +1202,15 @@ loadLdFromGenotype <- function(
 # The panel's variant ranges: seqnames = chromosome (chr-prefixed), start =
 # position, mcols = SNP / A1 / A2.
 # @noRd
-.ldSketchRanges <- function(x) {
+.ldSketchRanges <- function(x, label = "LD sketch") {
+    # The chokepoint every panel accessor funnels through, so the guard lives
+    # here rather than being repeated at each entry point. Without it a NULL
+    # or non-panel sketch surfaces as "unable to find an inherited method for
+    # 'getSnpInfo'" from whichever accessor happened to touch it first, which
+    # says nothing about the LD reference being the problem. Callers that
+    # validate with their own label (`.ldFromSketch`, the ctwas assembler) do
+    # so first, so their message wins.
+    .ldFromSketchValidate(x, label)
     if (methods::is(x, "RangedSummarizedExperiment")) {
         return(SummarizedExperiment::rowRanges(x))
     }
@@ -985,6 +1286,8 @@ loadLdFromGenotype <- function(
 # layered on here rather than pushed down.
 # @noRd
 .ldSketchDosage <- function(x, snpIdx, meanImpute = TRUE) {
+    # The other primitive that does not pass through `.ldSketchRanges()`.
+    .ldFromSketchValidate(x, "LD sketch")
     if (!methods::is(x, "RangedSummarizedExperiment")) {
         return(.dosageMatrix(x, snpIdx, meanImpute = meanImpute))
     }
@@ -1034,7 +1337,11 @@ loadLdFromGenotype <- function(
         return(NULL)
     }
     o <- order(m$idxA) # restore the caller's requested order
-    list(keptIds = variantIds[m$idxA[o]], idx = m$idxB[o])
+    list(
+        keptIds = variantIds[m$idxA[o]],
+        idx = m$idxB[o],
+        sign = m$sign[o]
+    )
 }
 
 .ldFromSketch <- function(
@@ -1054,6 +1361,16 @@ loadLdFromGenotype <- function(
         method = "sample",
         snpIdx = matched$idx
     )
+    # The match above is allele-aware, so a panel entry whose alleles are
+    # swapped relative to the caller's id still matches -- but the dosage it
+    # returns counts the OTHER allele, which negates every correlation that
+    # variant takes part in (r(2 - x, y) = -r(x, y)). Put the matrix back in
+    # the caller's frame exactly as `.cbFlipPairToCanonical()` does:
+    # LD_ij -> sign_i * sign_j * LD_ij. A no-op on a harmonized panel, where
+    # every sign is +1.
+    if (any(matched$sign < 0)) {
+        ldMat <- ldMat * outer(matched$sign, matched$sign)
+    }
     dimnames(ldMat) <- list(matched$keptIds, matched$keptIds)
     if (onMissing == "drop") {
         attr(ldMat, "keptVariantIds") <- matched$keptIds
@@ -1402,63 +1719,6 @@ standardizeGenotypeHwe <- function(X, alleleFreq) {
     sweep(Xstd, 2, sqrt(2 * alleleFreq * (1 - alleleFreq)), "/")
 }
 
-#' Load LD sketch genotypes for a region
-#'
-#' Loads genotype data for a region via \code{loadLdMatrix(returnGenotype=TRUE)}
-#' and removes monomorphic variants. Returns the raw genotype matrix and
-#' metadata, which callers can use to derive either a correlation matrix R (for
-#' summary-based weight training or fine-mapping) or an SVD (for TWAS z-score
-#' computation).
-#'
-#' @param ldMetaFilePath Path to the LD metadata TSV file.
-#' @param region Region of interest: "chr:start-end" string or data.frame with
-#'   chrom/start/end.
-#' @param nSample Optional original panel sample size for computing variance (=
-#'   2*p*(1-p)*n/(n-1)). Passed through to \code{loadLdMatrix()}.
-#'
-#' @return An \code{LdData} S4 object with monomorphic variants removed.
-#'   Consumers should use S4 accessors: \code{getGenotypes()},
-#'   \code{getRefPanel()}, \code{getVariantIds()}. The number of sketch samples
-#'   is \code{nrow(getGenotypes(result))}.
-#' @examples
-#' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
-#'   package = "pecotmr")
-#' loadLdSketch(ldMetaFilePath = meta, region = "chr22:16000000-18000000")
-#' @export
-loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
-    result <- loadLdMatrix(
-        ldMetaFilePath,
-        region,
-        returnGenotype = TRUE,
-        nSample = nSample
-    )
-    if (!is(result, "LdData")) {
-        abort("loadLdMatrix must return an LdData object")
-    }
-    X <- getGenotypes(result)
-    refPanel <- getRefPanel(result)
-
-    # Remove monomorphic variants (zero variance under HWE)
-    p <- refPanel$allele_freq
-    polymorphic <- p > 0 & p < 1
-    if (!all(polymorphic)) {
-        X <- X[, polymorphic, drop = FALSE]
-        refPanel <- refPanel[polymorphic, , drop = FALSE]
-    }
-
-    # Rebuild LdData with the extracted (and filtered) genotype matrix stored
-    # directly in genotypeHandle so getGenotypes() returns it without needing
-    # the original file handle.
-    variantsGr <- .refPanelToGranges(refPanel)
-    LdData(
-        correlation = NULL,
-        genotypeHandle = X,
-        snpIdx = NULL,
-        variants = variantsGr,
-        blockMetadata = getBlockMetadata(result),
-        nRef = getNRef(result)
-    )
-}
 
 # ---------- Internal: load LD from pre-computed blocks ----------
 
@@ -1467,38 +1727,61 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
 #' @noRd
 # --- loadLdFromBlocks helpers -----------------------------------------------
 
-# Load + region-extract each LD block; track each block's chromosome.
+# One block's record: the region-extracted matrix, its variants, and the
+# chromosome it sits on (falling back to the requested region's when the
+# block contributed nothing).
+#
+# A RECORD rather than a position in three parallel lists: the filter and the
+# metadata builder below would otherwise have to keep four sequences in the
+# same order by hand, and a slip there would silently attach one block's
+# chromosome to another block's variants.
+# @noRd
+.loadLdOneBlock <- function(
+    j,
+    ldFilePaths,
+    bimFilePaths,
+    intersectedLdFiles,
+    extractCoordinates
+) {
+    proc <- processLdMatrix(ldFilePaths[[j]], bimFilePaths[[j]])
+    extracted <- extractLdForRegion(
+        ldMatrix = proc$ldMatrix,
+        variants = proc$ldVariants,
+        region = intersectedLdFiles$region,
+        extractCoordinates = extractCoordinates
+    )
+    blockVariants <- extracted$extractedLdVariants
+    list(
+        matrix = extracted$extractedLdMatrix,
+        variants = blockVariants,
+        chrom = if (nrow(blockVariants) > 0) {
+            as.character(blockVariants$chrom[[1L]])
+        } else {
+            as.character(intersectedLdFiles$region$chrom)
+        }
+    )
+}
+
+# Load + region-extract each LD block, one record per block.
 .loadLdBlocksLoop <- function(
     ldFilePaths,
     bimFilePaths,
     intersectedLdFiles,
     extractCoordinates
 ) {
-    matrices <- list()
-    variants <- list()
-    blockChroms <- character(length(ldFilePaths))
-    for (j in seq_along(ldFilePaths)) {
-        proc <- processLdMatrix(ldFilePaths[j], bimFilePaths[j])
-        extracted <- extractLdForRegion(
-            ldMatrix = proc$ldMatrix,
-            variants = proc$ldVariants,
-            region = intersectedLdFiles$region,
-            extractCoordinates = extractCoordinates
-        )
-        matrices[[j]] <- extracted$extractedLdMatrix
-        variants[[j]] <- extracted$extractedLdVariants
-        blockChroms[j] <- if (nrow(variants[[j]]) > 0) {
-            as.character(variants[[j]]$chrom[1])
-        } else {
-            as.character(intersectedLdFiles$region$chrom)
-        }
-    }
-    list(matrices = matrices, variants = variants, blockChroms = blockChroms)
+    map(
+        seq_along(ldFilePaths),
+        .loadLdOneBlock,
+        ldFilePaths = ldFilePaths,
+        bimFilePaths = bimFilePaths,
+        intersectedLdFiles = intersectedLdFiles,
+        extractCoordinates = extractCoordinates
+    )
 }
 
 # Drop blocks with no variants in the region (error if none remain).
-.loadLdFilterEmpty <- function(blocks, ldFilePaths) {
-    nonEmpty <- map_lgl(blocks$variants, .ldBlockHasVariants)
+.loadLdFilterEmpty <- function(blocks) {
+    nonEmpty <- map_lgl(map(blocks, "variants"), .ldBlockHasVariants)
     if (!any(nonEmpty)) {
         abort("No variants found in any LD block for the specified region.")
     }
@@ -1510,26 +1793,17 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
         )
         inform(msg)
     }
-    list(
-        matrices = blocks$matrices[nonEmpty],
-        variants = blocks$variants[nonEmpty],
-        blockChroms = blocks$blockChroms[nonEmpty],
-        ldFilePaths = ldFilePaths[nonEmpty]
-    )
+    blocks[nonEmpty]
 }
 
 # Per-block metadata (id, chrom, span, size, index range in the merged matrix).
-.loadLdBlockMetadata <- function(
-    variants,
-    ldFilePaths,
-    blockChroms,
-    ldVariants
-) {
+.loadLdBlockMetadata <- function(blocks, ldVariants) {
+    variants <- map(blocks, "variants")
     blockVariants <- map(variants, "variants")
     blockPositions <- map(variants, "pos")
     tibble(
-        blockId = seq_along(ldFilePaths),
-        chrom = blockChroms,
+        blockId = seq_along(blocks),
+        chrom = map_chr(blocks, "chrom"),
         blockStart = map_dbl(blockPositions, min),
         blockEnd = map_dbl(blockPositions, max),
         size = map_int(blockVariants, length),
@@ -1589,19 +1863,15 @@ loadLdFromBlocks <- function(
         intersectedLdFiles,
         extractCoordinates
     )
-    filtered <- .loadLdFilterEmpty(blocks, ldFilePaths)
+    kept <- .loadLdFilterEmpty(blocks)
+    keptVariants <- map(kept, "variants")
     ldMatrix <- createLdMatrix(
-        ldMatrices = filtered$matrices,
-        variants = filtered$variants
+        ldMatrices = map(kept, "matrix"),
+        variants = keptVariants
     )
     ldVariants <- rownames(ldMatrix)
-    blockMetadata <- .loadLdBlockMetadata(
-        filtered$variants,
-        filtered$ldFilePaths,
-        filtered$blockChroms,
-        ldVariants
-    )
-    refPanel <- .loadLdRefPanel(ldMatrix, filtered$variants, nSample)
+    blockMetadata <- .loadLdBlockMetadata(kept, ldVariants)
+    refPanel <- .loadLdRefPanel(ldMatrix, keptVariants, nSample)
     variantsGr <- .refPanelToGranges(refPanel)
     LdData(
         correlation = ldMatrix,
@@ -1827,9 +2097,6 @@ validateBlockStructure <- function(matrix, blockMetadata, variantIds) {
     # Exclude boundary variants (potential overlaps)
     vi <- variantIds[si:(ei - 1)]
     vj <- variantIds[(sj + 1):ej]
-    if (length(vi) == 0 || length(vj) == 0) {
-        return(character(0))
-    }
     maxVal <- max(abs(matrix[vi, vj, drop = FALSE]))
     if (maxVal <= 1e-10) {
         return(character(0))
@@ -2185,13 +2452,11 @@ ldPruneByCorrelation <- function(
         !requireNamespace("SNPRelate", quietly = TRUE) ||
             !requireNamespace("gdsfmt", quietly = TRUE)
     ) {
-        # nocov start
         msg <- glue(
             "Packages 'SNPRelate' and 'gdsfmt' are required for ",
             "backend='snprelate'."
         )
         abort(msg)
-        # nocov end
     }
 }
 
@@ -2253,11 +2518,11 @@ ldPruneByCorrelation <- function(
 #' @param strategy One of \code{"correlation"} (remove the column with the
 #'   largest sum of absolute pairwise correlations among the candidates; when
 #'   only two candidates, one is picked at random), \code{"variance"} (remove
-#'   the lowest-variance candidate), or \code{"response_correlation"} (remove
+#'   the lowest-variance candidate), or \code{"responseCorrelation"} (remove
 #'   the candidate whose correlation with \code{response} has the smallest
 #'   magnitude).
 #' @param response Numeric vector required when \code{strategy =
-#'   "response_correlation"}; the outcome to correlate against.
+#'   "responseCorrelation"}; the outcome to correlate against.
 #' @param verbose Logical. If TRUE, print which column was removed. Default
 #'   FALSE.
 #'
@@ -2331,7 +2596,7 @@ ldPruneByCorrelation <- function(
     if (is.null(response)) {
         msg <- glue(
             "response must be supplied for strategy = ",
-            "'response_correlation'"
+            "'responseCorrelation'"
         )
         abort(msg)
     }
@@ -2355,7 +2620,7 @@ ldPruneByCorrelation <- function(
 dropCollinearColumns <- function(
     X,
     problematicCols,
-    strategy = c("correlation", "variance", "response_correlation"),
+    strategy = c("correlation", "variance", "responseCorrelation"),
     response = NULL,
     verbose = FALSE,
     seed = NULL
@@ -2536,7 +2801,7 @@ dropCollinearColumns <- function(
 #'   Pass \code{NULL} or a zero-column matrix when there are no covariates.
 #' @param strategy Passed through to \code{dropCollinearColumns}.
 #' @param response Passed through to \code{dropCollinearColumns} when
-#'   \code{strategy = "response_correlation"}.
+#'   \code{strategy = "responseCorrelation"}.
 #' @param maxIterations Integer. Hard cap on the iterative-prune loop. Default
 #'   300.
 #' @param corrThresholds Numeric vector of |cor| thresholds used for the
@@ -2566,7 +2831,7 @@ dropCollinearColumns <- function(
 enforceDesignFullRank <- function(
     X,
     C,
-    strategy = c("correlation", "variance", "response_correlation"),
+    strategy = c("correlation", "variance", "responseCorrelation"),
     response = NULL,
     maxIterations = 300L,
     corrThresholds = seq(0.75, 0.5, by = -0.05),
@@ -2607,22 +2872,18 @@ enforceDesignFullRank <- function(
 # Require the bigsnpr/bigstatsr packages used for score-based LD clumping.
 .ldClumpCheckDeps <- function() {
     if (!requireNamespace("bigsnpr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'bigsnpr' is required. Install from CRAN: ",
             "install.packages('bigsnpr')"
         )
         abort(msg)
-        # nocov end
     }
     if (!requireNamespace("bigstatsr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'bigstatsr' is required. Install from CRAN: ",
             "install.packages('bigstatsr')"
         )
         abort(msg)
-        # nocov end
     }
 }
 
@@ -2755,243 +3016,8 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
     getCorrelation(ld)
 }
 
-# Validate an ldLoader spec: exactly one source + per-mode requirements.
-.ldLoaderValidate <- function(rList, xList, ldMetaPath, regions, ldInfo) {
-    nSources <- sum(
-        !is.null(rList),
-        !is.null(xList),
-        !is.null(ldMetaPath),
-        !is.null(ldInfo)
-    )
-    if (nSources != 1) {
-        abort("Provide exactly one of rList, xList, ldMetaPath, or ldInfo.")
-    }
-    if (!is.null(ldMetaPath) && is.null(regions)) {
-        abort("'regions' is required when using ldMetaPath.")
-    }
-    if (
-        !is.null(ldInfo) &&
-            (!is.data.frame(ldInfo) || !is_in("LD_file", colnames(ldInfo)))
-    ) {
-        abort("ldInfo must be a data.frame with column 'LD_file'.")
-    }
-}
 
-#' Create an LD loader for on-demand block-wise LD retrieval
-#'
-#' Constructs a loader function that retrieves per-block LD matrices on demand.
-#' This avoids loading all blocks into memory simultaneously, which is critical
-#' for genome-wide analyses with hundreds of blocks.
-#'
-#' Four modes are supported:
-#'
-#' \describe{
-#'   \item{list mode (R)}{Pre-loaded list of LD correlation matrices.
-#'     Simple but uses more memory. Set \code{R_list}.}
-#'   \item{list mode (X)}{Pre-loaded list of genotype matrices (n x p_g).
-#'     Set \code{X_list}.}
-#'   \item{region mode}{Loads LD from a pecotmr metadata TSV file on the fly
-#'     via \code{\link{loadLdMatrix}}. Memory-efficient for large datasets.
-#'     Set \code{ld_meta_path} and \code{regions}.}
-#'   \item{ldInfo mode}{Loads pre-computed LD blocks from \code{.cor.xz}
-#'     files listed in an \code{ldInfo} data.frame (as returned by
-#'     cTWAS meta-data utilities). Set \code{ldInfo}.}
-#' }
-#'
-#' @param rList List of G precomputed LD correlation matrices (p_g x p_g).
-#' @param xList List of G genotype matrices (n x p_g).
-#' @param ldMetaPath Path to a pecotmr LD metadata TSV file (as used by
-#'   \code{\link{loadLdMatrix}}).
-#' @param regions Character vector of G region strings (e.g.,
-#'   \code{"chr22:17238266-19744294"}). Required when \code{ldMetaPath} is used.
-#' @param ldInfo A data.frame with column \code{LD_file} (paths to genotype
-#'   files or \code{.cor.xz} LD matrix files) and optionally \code{SNP_file}
-#'   (paths to companion \code{.bim} files for pre-computed blocks; defaults to
-#'   \code{paste0(LD_file, ".bim")} if absent). Genotype paths can be PLINK2
-#'   prefixes, PLINK1 prefixes, VCF files, or GDS files. As returned by cTWAS
-#'   meta-data utilities.
-#' @param returnGenotype Logical. When using region mode, return the genotype
-#'   matrix X (\code{TRUE}) or LD correlation R (\code{FALSE}, default).
-#' @param maxVariants Integer or \code{NULL}. If set, randomly subsample blocks
-#'   larger than this to control memory usage.
-#' @param seed Integer or \code{NULL}. When \code{maxVariants} triggers
-#'   subsampling, seeds the draw (offset by the block index so each block is
-#'   independent yet reproducible) via a scoped \code{withr::local_seed}, so the
-#'   session RNG is left untouched. \code{NULL} (default) leaves the draw under
-#'   the session RNG, so an outer \code{set.seed()} still governs it.
-#'
-#' @return An \code{ldLoaderSpec} object (an opaque list describing the source).
-#'   Pass it with a block index to \code{\link{loadLdBlock}} to load one block.
-#'
-#' @seealso \code{\link{loadLdBlock}}
-#' @examples
-#' # List mode with pre-computed LD
-#' R1 <- diag(10)
-#' R2 <- diag(15)
-#' spec <- ldLoader(rList = list(R1, R2))
-#' loadLdBlock(spec, 1)  # returns R1
-#' loadLdBlock(spec, 2)  # returns R2
-#'
-#' @export
-ldLoader <- function(
-    rList = NULL,
-    xList = NULL,
-    ldMetaPath = NULL,
-    regions = NULL,
-    ldInfo = NULL,
-    returnGenotype = FALSE,
-    maxVariants = NULL,
-    seed = NULL
-) {
-    .ldLoaderValidate(rList, xList, ldMetaPath, regions, ldInfo)
-    mode <- if (!is.null(rList)) {
-        "rList"
-    } else if (!is.null(xList)) {
-        "xList"
-    } else if (!is.null(ldMetaPath)) {
-        "meta"
-    } else {
-        "info"
-    }
-    structure(
-        list(
-            mode = mode,
-            rList = rList,
-            xList = xList,
-            ldMetaPath = ldMetaPath,
-            regions = regions,
-            ldInfo = ldInfo,
-            returnGenotype = returnGenotype,
-            maxVariants = maxVariants,
-            seed = seed
-        ),
-        class = "ldLoaderSpec"
-    )
-}
-
-
-# ---- Per-block loaders (one per ldLoader source mode) -----------------------
-# Top-level workers dispatched by .ldLoadBlock() on the spec's $mode; formerly
-# branch closures inside ldLoader().
-
-# @noRd
-.ldLoadRList <- function(g, rList, maxVariants) {
-    R <- rList[[g]]
-    if (!is.null(maxVariants) && ncol(R) > maxVariants) {
-        keep <- sort(sample(ncol(R), maxVariants))
-        R <- R[keep, keep]
-    }
-    R
-}
-
-# @noRd
-.ldLoadXList <- function(g, xList, maxVariants) {
-    X <- xList[[g]]
-    if (!is.null(maxVariants) && ncol(X) > maxVariants) {
-        keep <- sort(sample(ncol(X), maxVariants))
-        X <- X[, keep]
-    }
-    X
-}
-
-# @noRd
-.ldLoadRegionMeta <- function(
-    g,
-    ldMetaPath,
-    regions,
-    returnGenotype,
-    maxVariants
-) {
-    ld <- loadLdMatrix(
-        ldMetaPath,
-        region = regions[g],
-        returnGenotype = returnGenotype
-    )
-    mat <- extractLdMatrix(ld, wantGenotype = returnGenotype)
-    if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
-        keep <- sort(sample(ncol(mat), maxVariants))
-        if (returnGenotype || nrow(mat) > ncol(mat)) {
-            mat <- mat[, keep]
-        } else {
-            mat <- mat[keep, keep]
-        }
-    }
-    # Center and scale genotype matrices
-    if (returnGenotype || nrow(mat) > ncol(mat)) {
-        mat <- scale(mat)
-        mat[is.na(mat)] <- 0
-    }
-    mat
-}
-
-# @noRd
-.ldLoadIdInfo <- function(g, ldInfo, maxVariants) {
-    ldPath <- ldInfo$LD_file[g]
-
-    # Auto-detect format: genotype source or pre-computed block
-    if (isGenotypeSource(ldPath)) {
-        geno <- loadGenotypeRegion(ldPath)
-        mat <- computeLd(geno)
-    } else {
-        # Pre-computed .cor.xz block
-        snpFile <- if (is_in("SNP_file", colnames(ldInfo))) {
-            ldInfo$SNP_file[g]
-        } else {
-            NULL # let processLdMatrix auto-detect .bim/.pvar/.pvar.zst
-        }
-        ld <- processLdMatrix(ldPath, snpFile)
-        mat <- extractLdMatrix(ld)
-    }
-
-    if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
-        keep <- sort(sample(ncol(mat), maxVariants))
-        mat <- mat[keep, keep]
-    }
-    mat
-}
-
-# Dispatch a single block load by the spec's source mode.
-# @noRd
-.ldLoadBlock <- function(spec, g) {
-    if (!is.null(spec$seed)) {
-        withr::local_seed(as.integer(spec$seed) + as.integer(g))
-    }
-    switch(
-        spec$mode,
-        rList = .ldLoadRList(g, spec$rList, spec$maxVariants),
-        xList = .ldLoadXList(g, spec$xList, spec$maxVariants),
-        meta = .ldLoadRegionMeta(
-            g,
-            spec$ldMetaPath,
-            spec$regions,
-            spec$returnGenotype,
-            spec$maxVariants
-        ),
-        info = .ldLoadIdInfo(g, spec$ldInfo, spec$maxVariants)
-    )
-}
-
-#' Load one LD block from an ldLoader spec
-#'
-#' Given an \code{ldLoaderSpec} (from \code{\link{ldLoader}}) and a block index
-#' \code{g}, load the corresponding LD correlation matrix (or the genotype
-#' matrix, in region mode with \code{returnGenotype = TRUE}).
-#'
-#' @param spec An \code{ldLoaderSpec} object returned by \code{\link{ldLoader}}.
-#' @param g Integer block index (1-based).
-#' @return The LD correlation matrix or genotype matrix for block \code{g}.
-#' @seealso \code{\link{ldLoader}}
-#' @examples
-#' spec <- ldLoader(rList = list(diag(10), diag(15)))
-#' loadLdBlock(spec, 1)
-#' @export
-loadLdBlock <- function(spec, g) {
-    if (!inherits(spec, "ldLoaderSpec")) {
-        abort("`spec` must be an ldLoaderSpec (from ldLoader()).")
-    }
-    .ldLoadBlock(spec, g)
-}
-
+# ---- Per-block helpers ------------------------------------------------------
 
 # =============================================================================
 # LD correlation matrix from a dosage matrix
@@ -3319,14 +3345,12 @@ computeLd <- function(
 #' @return Correlation matrix.
 #' @noRd
 .computeLdSnprelate <- function(X) {
-    # nocov start
     if (!requireNamespace("SNPRelate", quietly = TRUE)) {
         abort("Package 'SNPRelate' is required for backend='snprelate'")
     }
     if (!requireNamespace("gdsfmt", quietly = TRUE)) {
         abort("Package 'gdsfmt' is required for backend='snprelate'")
     }
-    # nocov end
 
     tmpGds <- tempfile(fileext = ".gds")
     on.exit(unlink(tmpGds), add = TRUE)
@@ -3366,11 +3390,9 @@ computeLd <- function(
 #' @return Correlation matrix (r, not r^2).
 #' @noRd
 .computeLdSnpstats <- function(X) {
-    # nocov start
     if (!requireNamespace("snpStats", quietly = TRUE)) {
         abort("Package 'snpStats' is required for backend='snpstats'")
     }
-    # nocov end
 
     # snpStats expects counts of the B allele as raw codes: 1=AA, 2=AB, 3=BB,
     # 0=NA pecotmr dosage is ALT count (0/1/2), so map: 0->1, 1->2, 2->3, NA->0

@@ -246,70 +246,6 @@ test_that("regionToDf: honours custom column names", {
 })
 
 # ===========================================================================
-# regionsOverlap
-# ===========================================================================
-
-test_that("regionsOverlap: TRUE when regions share a base pair", {
-    expect_true(regionsOverlap("chr1:100-200", "chr1:150-250"))
-    expect_true(regionsOverlap("chr1:100-200", "chr1:200-300")) # touching
-})
-
-test_that("regionsOverlap: FALSE when regions are disjoint", {
-    expect_false(regionsOverlap("chr1:100-200", "chr1:300-400"))
-})
-
-test_that("regionsOverlap: FALSE across different chromosomes", {
-    # Bioconductor warns when comparing GRanges with disjoint seqlevels —
-    # the semantics of "no overlap" is exactly what we want here.
-    expect_false(suppressWarnings(regionsOverlap(
-        "chr1:100-200",
-        "chr2:100-200"
-    )))
-})
-
-test_that("regionsOverlap: accepts data.frame input", {
-    a <- data.frame(
-        chrom = "1",
-        start = 100L,
-        end = 200L,
-        stringsAsFactors = FALSE
-    )
-    b <- data.frame(
-        chrom = "1",
-        start = 150L,
-        end = 300L,
-        stringsAsFactors = FALSE
-    )
-    expect_true(regionsOverlap(a, b))
-})
-
-# ===========================================================================
-# findOverlappingRegions
-# ===========================================================================
-
-test_that("findOverlappingRegions: returns the indices of overlapping targets", {
-    targets <- c("chr1:100-200", "chr1:300-400", "chr1:150-250", "chr2:100-200")
-    res <- findOverlappingRegions("chr1:175-225", targets)
-    expect_equal(sort(res), c(1L, 3L))
-})
-
-test_that("findOverlappingRegions: empty result when no overlap", {
-    res <- findOverlappingRegions(
-        "chr1:500-600",
-        c("chr1:100-200", "chr1:300-400")
-    )
-    expect_equal(res, integer(0))
-})
-
-test_that("findOverlappingRegions: deduplicates target hits", {
-    res <- findOverlappingRegions(
-        "chr1:150-160",
-        c("chr1:100-200", "chr1:300-400")
-    )
-    expect_equal(res, 1L)
-})
-
-# ===========================================================================
 # classifyVariantType
 # ===========================================================================
 
@@ -543,12 +479,12 @@ test_that("normalizeVariantId leaves unparseable ids (rsIDs) unchanged", {
 })
 
 # =============================================================================
-# variantIdToDf
+# parseVariantId — id-format coverage (was the variantIdToDf alias)
 # =============================================================================
 
-test_that("variantIdToDf handles colon-separated format", {
+test_that("parseVariantId handles colon-separated format", {
     ids <- c("1:100:A:G", "2:200:C:T")
-    result <- pecotmr:::variantIdToDf(ids)
+    result <- parseVariantId(ids)
     expect_equal(nrow(result), 2)
     expect_equal(result$chrom, c("1", "2"))
     expect_equal(result$pos, c(100L, 200L))
@@ -557,37 +493,37 @@ test_that("variantIdToDf handles colon-separated format", {
 })
 
 
-test_that("variantIdToDf handles underscore-separated format", {
+test_that("parseVariantId handles underscore-separated format", {
     ids <- c("1:100_A_G", "2:200_C_T")
-    result <- pecotmr:::variantIdToDf(ids)
+    result <- parseVariantId(ids)
     expect_equal(nrow(result), 2)
     expect_equal(result$A2, c("A", "C"))
 })
 
 
-test_that("variantIdToDf strips chr prefix", {
+test_that("parseVariantId strips chr prefix", {
     ids <- c("chr1:100:A:G", "chr2:200:C:T")
-    result <- pecotmr:::variantIdToDf(ids)
+    result <- parseVariantId(ids)
     expect_equal(result$chrom, c("1", "2"))
 })
 
 
-test_that("variantIdToDf handles data.frame input with named columns", {
+test_that("parseVariantId handles data.frame input with named columns", {
     df <- data.frame(
         chrom = c("chr1", "2"),
         pos = c(100, 200),
         A2 = c("A", "C"),
         A1 = c("G", "T")
     )
-    suppressWarnings(result <- pecotmr:::variantIdToDf(df))
+    suppressWarnings(result <- parseVariantId(df))
     expect_equal(result$chrom, c("1", "2"))
     expect_equal(result$pos, c(100L, 200L))
 })
 
 
-test_that("variantIdToDf handles 5-part IDs with build suffix", {
+test_that("parseVariantId handles 5-part IDs with build suffix", {
     ids <- c("chr1:100:A:G:b38", "chr2:200:T:C")
-    result <- pecotmr:::variantIdToDf(ids)
+    result <- parseVariantId(ids)
     expect_equal(ncol(result), 4)
     expect_equal(colnames(result), c("chrom", "pos", "A2", "A1"))
     expect_equal(result$chrom, c("1", "2"))
@@ -596,9 +532,9 @@ test_that("variantIdToDf handles 5-part IDs with build suffix", {
 })
 
 
-test_that("variantIdToDf handles mixed 4/5-part IDs", {
+test_that("parseVariantId handles mixed 4/5-part IDs", {
     ids <- c("1:100:A:G", "chr2:200:T:C:b38", "3:300:G:A:b37")
-    suppressWarnings(result <- pecotmr:::variantIdToDf(ids))
+    suppressWarnings(result <- parseVariantId(ids))
     expect_equal(nrow(result), 3)
     expect_equal(ncol(result), 4)
     expect_equal(result$A1, c("G", "C", "A"))
@@ -636,79 +572,6 @@ test_that("parseVariantId handles data.frame with generic column names", {
     expect_equal(result$pos, c(100L, 200L))
     expect_equal(result$A2, c("A", "T"))
     expect_equal(result$A1, c("G", "C"))
-})
-
-# =============================================================================
-
-# =============================================================================
-# regionsOverlap
-# =============================================================================
-
-test_that("regionsOverlap detects overlapping regions on same chromosome", {
-    expect_true(regionsOverlap("chr1:100-300", "chr1:200-400"))
-})
-
-
-test_that("regionsOverlap returns FALSE for non-overlapping same-chr regions", {
-    expect_false(regionsOverlap("chr1:100-200", "chr1:300-400"))
-})
-
-
-test_that("regionsOverlap returns FALSE for different chromosomes", {
-    expect_false(regionsOverlap("chr1:100-300", "chr2:100-300"))
-})
-
-
-test_that("regionsOverlap detects touching boundaries", {
-    expect_true(regionsOverlap("chr1:100-200", "chr1:200-300"))
-})
-
-
-test_that("regionsOverlap works with underscore-separated IDs", {
-    expect_true(regionsOverlap("1_100_300", "1_200_400"))
-    expect_false(regionsOverlap("1_100_200", "2_100_200"))
-})
-
-
-test_that("regionsOverlap works with data.frame input", {
-    df_a <- data.frame(chrom = 1, start = 100, end = 300)
-    df_b <- data.frame(chrom = 1, start = 200, end = 400)
-    expect_true(regionsOverlap(df_a, df_b))
-})
-
-# =============================================================================
-# findOverlappingRegions
-# =============================================================================
-
-test_that("findOverlappingRegions returns correct indices", {
-    query <- "chr1:100-300"
-    targets <- c("chr1:200-400", "chr2:100-200", "chr1:50-150")
-    result <- findOverlappingRegions(query, targets)
-    expect_true(1 %in% result)
-    expect_true(3 %in% result)
-    expect_false(2 %in% result)
-})
-
-
-test_that("findOverlappingRegions returns empty vector for no matches", {
-    query <- "chr1:100-200"
-    targets <- c("chr2:100-200", "chr3:100-200")
-    result <- findOverlappingRegions(query, targets)
-    expect_length(result, 0)
-})
-
-
-test_that("findOverlappingRegions works with data.frame targets", {
-    query <- "chr1:100-300"
-    targets <- data.frame(
-        chrom = c(1, 2, 1),
-        start = c(200, 100, 50),
-        end = c(400, 200, 150)
-    )
-    result <- findOverlappingRegions(query, targets)
-    expect_true(1 %in% result)
-    expect_true(3 %in% result)
-    expect_false(2 %in% result)
 })
 
 # =============================================================================
@@ -1249,4 +1112,99 @@ test_that("the rule applies to SNP flip pairs, not just indels", {
     # not specific to indels.
     panel <- c("chr1:200:A:G", "chr1:200:G:A")
     expect_length(matchVariants("chr1:200:A:G", panel)$idxA, 0L)
+})
+
+
+test_that("a convention without an allele separator keeps the default", {
+    f <- pecotmr:::formatVariantId
+    expect_equal(f("1", 100L, "A", "G"), "chr1:100:A:G")
+    # hasChr honoured, alleleSep absent -> ":" retained.
+    expect_equal(
+        f("1", 100L, "A", "G", convention = list(hasChr = TRUE)),
+        "chr1:100:A:G"
+    )
+    # Both honoured.
+    expect_equal(
+        f(
+            "1",
+            100L,
+            "A",
+            "G",
+            convention = list(hasChr = FALSE, alleleSep = "_")
+        ),
+        "1:100_A_G"
+    )
+})
+
+test_that("columns with no names at all are given placeholder names", {
+    df <- as.data.frame(matrix(1:4, 2L, 2L))
+    colnames(df) <- NULL
+    out <- pecotmr:::.sanitizeNames(df)
+    # make.unique de-duplicates the repeated placeholder.
+    expect_equal(colnames(out), c("unnamed", "unnamed_1"))
+})
+
+test_that(".harmonizeQcCounts attributes drops with and without INDEL", {
+    mk <- function(withIndel) {
+        d <- data.frame(
+            keep = c(TRUE, FALSE, TRUE),
+            sign_flip = c(FALSE, FALSE, TRUE),
+            strand_flip = c(FALSE, TRUE, FALSE),
+            strand_unambiguous = c(TRUE, FALSE, TRUE),
+            stringsAsFactors = FALSE
+        )
+        if (withIndel) {
+            d$INDEL <- c(FALSE, TRUE, FALSE)
+        }
+        d
+    }
+    bare <- pecotmr:::.harmonizeQcCounts(mk(FALSE))
+    expect_equal(bare$considered, 3L)
+    expect_equal(bare$kept, 2L)
+    # With no INDEL column nothing can be attributed to indels, so the same
+    # dropped variant is counted as strand-ambiguous instead.
+    expect_equal(bare$droppedIndel, 0L)
+    expect_equal(bare$droppedAmbiguous, 1L)
+    expect_equal(bare$droppedOther, 0L)
+    withIndel <- pecotmr:::.harmonizeQcCounts(mk(TRUE))
+    expect_equal(withIndel$droppedIndel, 1L)
+    expect_equal(withIndel$droppedAmbiguous, 0L)
+    expect_equal(withIndel$droppedOther, 0L)
+})
+
+test_that(".harmonizeRestoreUnmatched is a no-op when nothing is unmatched", {
+    matchResult <- data.frame(
+        A1.ref = c("G", "T"),
+        A2.ref = c("A", "C"),
+        variants_id_qced = c("chr1:100:A:G", "chr1:200:C:T"),
+        keep = c(TRUE, TRUE),
+        stringsAsFactors = FALSE
+    )
+    result <- data.frame(
+        variants_id_original = c("chr1:100:A:G", "chr1:200:C:T"),
+        stringsAsFactors = FALSE
+    )
+    targetData <- data.frame(
+        chrom = c("chr1", "chr1"),
+        pos = c(100L, 200L),
+        A1 = c("G", "T"),
+        A2 = c("A", "C"),
+        stringsAsFactors = FALSE
+    )
+    out <- pecotmr:::.harmonizeRestoreUnmatched(result, matchResult, targetData)
+    # Every target variant is already in the result, so nothing is appended.
+    expect_identical(out$result, result)
+    expect_setequal(names(out$qcSummary), c("A1", "A2", "variant_id"))
+    # Control: an unmatched target variant IS appended.
+    withExtra <- rbind(
+        targetData,
+        data.frame(
+            chrom = "chr1", pos = 300L, A1 = "A", A2 = "G",
+            stringsAsFactors = FALSE
+        )
+    )
+    appended <- pecotmr:::.harmonizeRestoreUnmatched(
+        result, matchResult, withExtra
+    )
+    expect_equal(nrow(appended$result), 3L)
 })

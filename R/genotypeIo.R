@@ -131,14 +131,12 @@ setMethod(
 
 #' @keywords internal
 .makeGdsHandle <- function(path) {
-    # nocov start
     if (!requireNamespace("SNPRelate", quietly = TRUE)) {
         abort("Package 'SNPRelate' is required for reading GDS files.")
     }
     if (!requireNamespace("gdsfmt", quietly = TRUE)) {
         abort("Package 'gdsfmt' is required for reading GDS files.")
     }
-    # nocov end
     if (!file.exists(path)) {
         msg <- glue("GDS file not found: {path}")
         abort(msg)
@@ -162,11 +160,9 @@ setMethod(
 
 #' @keywords internal
 .makeVcfHandle <- function(path, ...) {
-    # nocov start
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
         abort("Package 'VariantAnnotation' is required for reading VCF files.")
     }
-    # nocov end
     if (!file.exists(path)) {
         msg <- glue("VCF file not found: {path}")
         abort(msg)
@@ -206,11 +202,9 @@ setMethod(
 
 #' @keywords internal
 .makePlink1Handle <- function(path, ...) {
-    # nocov start
     if (!requireNamespace("snpStats", quietly = TRUE)) {
         abort("Package 'snpStats' is required for reading plink1 files.")
     }
-    # nocov end
     stem <- .plink1RequireFiles(path)
     meta <- .plink1ReadMeta(stem)
     new(
@@ -272,11 +266,9 @@ setMethod(
 
 #' @keywords internal
 .makePlink2Handle <- function(path, ...) {
-    # nocov start
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
         abort("Package 'pgenlibr' is required for reading plink2 files.")
     }
-    # nocov end
 
     stem <- .plinkStem(path)
 
@@ -934,13 +926,11 @@ readFam <- function(bed) {
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
 openBed <- function(bed) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install pgenlibr: ",
             "https://cran.r-project.org/web/packages/pgenlibr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     rawSCt <- nrow(readFam(bed))
     return(pgenlibr::NewPgen(bed, raw_sample_ct = rawSCt))
@@ -1163,13 +1153,11 @@ resolvePlink2Paths <- function(prefix) {
 #' @noRd
 readPvar <- function(pvarPath) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "pgenlibr is required. Install from ",
             "https://cran.r-project.org/web/packages/pgenlibr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     pvar <- pgenlibr::NewPvar(pvarPath)
     on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)

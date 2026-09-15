@@ -327,6 +327,8 @@ fitSusieInfThenSusieRss <- function(
 #' @param yScalar Scaling factor for phenotype effects. Default 1.
 #' @param af Effect-allele frequencies (exported as the \code{af} column; never
 #'   MAF). Default NULL.
+#' @param n Optional per-variant sample size, exported as the \code{N} column.
+#'   Default NULL -> \code{N} falls back to the fit's own scalar sample size.
 #' @param coverage Primary credible-set coverage.
 #' @param secondaryCoverage Additional credible-set coverages.
 #' @param signalCutoff PIP cutoff for including non-CS variants in top loci.
@@ -1398,7 +1400,7 @@ buildTopLoci <- function(
 }
 
 # The per-variant N column. Numeric, so a fractional *effective* N (e.g.
-# 4 / (1 / nCase + 1 / nControl)) matches getSumstatDf(entry)$N exactly rather
+# 4 / (1 / nCase + 1 / nControl)) matches getSumStatsDf(entry)$N exactly rather
 # than being truncated. With no per-variant n this falls back to the fit's
 # scalar N (integer nrow on the QTL path, NA otherwise); a scalar n recycles.
 # @noRd
@@ -2207,13 +2209,11 @@ fsusieWrapper <- function(
     ...
 ) {
     if (!requireNamespace("fsusieR", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install fsusieR: ",
             "https://github.com/stephenslab/fsusieR"
         )
         abort(msg)
-        # nocov end
     }
     fsusieObj <- fsusieR::susiF(
         X = X,
@@ -2738,13 +2738,11 @@ mvsusieWeights <- function(
     ...
 ) {
     if (!requireNamespace("mvsusieR", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'mvsusieR' is required. Install with: ",
             "devtools::install_github('stephenslab/mvsusieR')"
         )
         abort(msg)
-        # nocov end
     }
     if (is.null(mvsusieFit)) {
         inform("mvsusieFit is not provided; fitting mvSuSiE now ...")
@@ -2917,14 +2915,12 @@ fsusieWeights <- function(
 
 # fSuSiE weight reconstruction needs fsusieR + wavethresh.
 .fsusieWeightsRequire <- function() {
-    # nocov start
     if (!requireNamespace("fsusieR", quietly = TRUE)) {
         abort("Package 'fsusieR' is required for fsusieWeights().")
     }
     if (!requireNamespace("wavethresh", quietly = TRUE)) {
         abort("Package 'wavethresh' is required for fsusieWeights().")
     }
-    # nocov end
 }
 
 # A full (untrimmed) fit must retain the wavelet-reconstruction slots.
@@ -3063,13 +3059,11 @@ mvsusieRssWeights <- function(
     ...
 ) {
     if (!requireNamespace("mvsusieR", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'mvsusieR' is required. ",
             "Install with: devtools::install_github('stephenslab/mvsusieR')"
         )
         abort(msg)
-        # nocov end
     }
     if (is.null(mvsusieRssFit)) {
         mvsusieRssFit <- .mvsusieRssBuildFit(

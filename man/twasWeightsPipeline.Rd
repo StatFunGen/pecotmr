@@ -105,7 +105,7 @@ embedded \code{QtlSumStats}, then rbinds the results.}
 \item{...}{Reserved for method-specific arguments.}
 
 \item{methods}{A character vector of short method names, a preset string
-(\code{"default"} or \code{"fast_default"}), or a named list of
+(\code{"default"} or \code{"fastDefault"}), or a named list of
 \code{<method>_weights = args} entries. For QtlSumStats / GwasSumStats
 inputs the default switches to the RSS preset (\code{c("susieRss",
 "susieInfRss", "lassosumRss", "prsCs", "sdpr")}).}

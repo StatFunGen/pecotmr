@@ -474,3 +474,48 @@ test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on t
     ))
     expect_equal(length(sig), expN)
 })
+
+test_that(".qapSignificanceMask returns empty masks for an unknown method", {
+    # Both public callers wrap this in arg_match(), so the fall-through is
+    # only reachable by calling the helper directly. It is tested here so the
+    # contract is explicit: an unrecognized method yields the untouched empty
+    # masks rather than erroring or silently returning the wrong ones.
+    g <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100, 200), width = 1)
+    )
+    S4Vectors::mcols(g)$variant_id <- c("chr1:100:A:G", "chr1:200:C:T")
+    S4Vectors::mcols(g)$Z <- c(1, 2)
+    S4Vectors::mcols(g)$N <- c(10L, 10L)
+    qss <- QtlSumStats(
+        study = "s1", context = "c1", trait = "g1",
+        entry = list(g), genome = "hg19"
+    )
+    local_mocked_bindings(
+        getQcInfo = function(x) {
+            list(associationPostprocess = list(
+                fdrThreshold = 0.05,
+                pvalueCol = "pval_nominal"
+            ))
+        },
+        .qapEmptyMask = function(i, x, pcol) str_c("EMPTY", i),
+        .package = "pecotmr"
+    )
+    expect_equal(
+        pecotmr:::.qapSignificanceMask(qss, "not_a_method", 0.05),
+        list("EMPTY1")
+    )
+})
+
+test_that(".qapPermutationCols reuses a supplied q_beta", {
+    x <- list(
+        p_beta = c(0.01, 0.2),
+        q_beta = c(0.02, 0.3),
+        beta_shape1 = c(1, 1),
+        beta_shape2 = c(1, 1),
+        pval_nominal = c(0.01, 0.2)
+    )
+    cols <- pecotmr:::.qapPermutationCols(x, 0.05)
+    # q_beta is already present, so it is not recomputed or re-added.
+    expect_setequal(names(cols), c("fdr_beta", "p_nominal_threshold"))
+})

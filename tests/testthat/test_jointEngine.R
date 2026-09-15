@@ -1161,7 +1161,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
     pecotmr:::fitJointGroup(
         g,
         pipe,
-        "bayes_c",
+        "bayesC",
         list(methodList = list(bayes_c_weights = list()))
     )
     expect_false(is.null(capturedPi))
@@ -1938,7 +1938,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
     pecotmr:::fitJointGroup(
         g,
         pipe,
-        "bayes_b",
+        "bayesB",
         list(methodList = list(bayes_b_weights = list()))
     )
     expect_equal(as.numeric(capturedProbIn), 1 - 0.7, tolerance = 1e-8)
@@ -2265,4 +2265,428 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
     )
     expect_null(res) # empty cell -> NULL
     expect_equal(captured, c("g1", "g2")) # 871-875 ran
+})
+
+
+# ===========================================================================
+# Per-row anchors: .traitPosFor() / .fitRegionFor()
+#
+# traitPos and region are DISTINCT anchors and diverge by input type, but
+# nothing exercised either helper. The QtlSumStats traitPos branch was in fact
+# unreachable: its guard read names(data) -- a collection's GRangesList
+# element names, always empty -- rather than colnames(), so every
+# sumstats-derived row silently fell back to the chrUn sentinel.
+# ===========================================================================
+
+.je_mkSsEntry <- function(chr, pos) {
+    gr <- GenomicRanges::GRanges(chr, IRanges::IRanges(pos, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        variant_id = str_c(chr, ":", pos, ":C:T"),
+        A1 = rep("T", length(pos)),
+        A2 = rep("C", length(pos)),
+        z = rep(1.5, length(pos)),
+        n = rep(100L, length(pos))
+    )
+    gr
+}
+
+# A QtlSumStats carrying a traitPos column, which no bundled fixture has.
+.je_ssWithTraitPos <- function() {
+    QtlSumStats(
+        study = c("S", "S"),
+        context = c("brain", "brain"),
+        trait = c("G1", "G2"),
+        entry = list(
+            .je_mkSsEntry("chr1", c(100L, 200L)),
+            .je_mkSsEntry("chr1", c(300L, 400L))
+        ),
+        genome = "hg38",
+        traitPos = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(500L, 900L), width = 1L)
+        )
+    )
+}
+
+test_that("traitPos comes from the QtlSumStats traitPos column", {
+    ss <- .je_ssWithTraitPos()
+    g1 <- pecotmr:::.traitPosFor(ss, "brain", "G1")
+    g2 <- pecotmr:::.traitPosFor(ss, "brain", "G2")
+    expect_s4_class(g1, "GRanges")
+    expect_equal(GenomicRanges::start(g1), 500L)
+    expect_equal(GenomicRanges::start(g2), 900L)
+    # The anchor is the supplied position, NOT the variant span (100-200).
+    expect_equal(as.character(GenomicRanges::seqnames(g1)), "chr1")
+})
+
+test_that("traitPos is NULL when the sumstats cannot supply one", {
+    ss <- .je_ssWithTraitPos()
+    expect_null(pecotmr:::.traitPosFor(ss, "brain", "absentTrait"))
+    expect_null(pecotmr:::.traitPosFor(ss, "absentContext", "G1"))
+    # A collection with no traitPos column at all.
+    data(qtlSumStatsExample)
+    expect_false(is_in("traitPos", colnames(qtlSumStatsExample)))
+    expect_null(pecotmr:::.traitPosFor(
+        qtlSumStatsExample,
+        as.character(qtlSumStatsExample$context)[[1L]],
+        as.character(qtlSumStatsExample$trait)[[1L]]
+    ))
+})
+
+test_that("the fit region of a QtlSumStats row is its variant span", {
+    # Sumstats carry no cis-window, so the fitted span IS the region --
+    # deliberately different from traitPos (500) above.
+    ss <- .je_ssWithTraitPos()
+    r <- pecotmr:::.fitRegionFor(ss, "brain", "G1")
+    expect_s4_class(r, "GRanges")
+    expect_equal(GenomicRanges::start(r), 100L)
+    expect_equal(GenomicRanges::end(r), 200L)
+    expect_null(pecotmr:::.fitRegionFor(ss, "brain", "absentTrait"))
+})
+
+test_that("the fit region of a QtlDataset row is traitPos +/- the cis window", {
+    data(qtlDatasetExample)
+    qd <- qtlDatasetExample
+    cx <- getContexts(qd)[[1L]]
+    tr <- rownames(getPhenotypes(qd, contexts = cx))[[1L]]
+    tp <- pecotmr:::.traitPosFor(qd, cx, tr)
+    bare <- pecotmr:::.fitRegionFor(qd, cx, tr)
+    wide <- pecotmr:::.fitRegionFor(qd, cx, tr, cisWindow = 1e5)
+    # With no window the region collapses onto the trait position.
+    expect_equal(GenomicRanges::start(bare), GenomicRanges::start(tp))
+    # With one it is symmetric about it.
+    expect_equal(
+        GenomicRanges::start(wide),
+        GenomicRanges::start(tp) - 1e5L
+    )
+    expect_equal(GenomicRanges::end(wide), GenomicRanges::end(tp) + 1e5L)
+})
+
+test_that("the anchors are NULL for a trait the dataset does not carry", {
+    data(qtlDatasetExample)
+    qd <- qtlDatasetExample
+    cx <- getContexts(qd)[[1L]]
+    expect_null(pecotmr:::.traitPosFor(qd, cx, "absentTrait"))
+    expect_null(pecotmr:::.traitPosFor(qd, "absentContext", "anything"))
+    expect_null(pecotmr:::.fitRegionFor(qd, cx, "absentTrait"))
+})
+
+test_that("the anchors are NULL for an unsupported input class", {
+    expect_null(pecotmr:::.traitPosFor(42, "a", "b"))
+    expect_null(pecotmr:::.fitRegionFor(42, "a", "b"))
+})
+
+
+test_that("a sumstats entry with no variants has no fit region", {
+    # A fitted tuple can still carry zero variants; there is then no span to
+    # report, which is distinct from the trait being absent.
+    emptyEntry <- GenomicRanges::GRanges()
+    S4Vectors::mcols(emptyEntry) <- S4Vectors::DataFrame(
+        variant_id = character(0),
+        A1 = character(0),
+        A2 = character(0),
+        z = numeric(0),
+        n = integer(0)
+    )
+    ss <- QtlSumStats(
+        study = "S",
+        context = "brain",
+        trait = "G0",
+        entry = list(emptyEntry),
+        genome = "hg38"
+    )
+    expect_null(pecotmr:::.fitRegionFor(ss, "brain", "G0"))
+})
+
+test_that("slicing a CV result to one condition tolerates absent payloads", {
+    # predictions / metrics are optional; their absence must not be mistaken
+    # for a condition with no result.
+    expect_null(pecotmr:::.sliceTwasCvResultToCondition(NULL, 1L))
+    sliced <- pecotmr:::.sliceTwasCvResultToCondition(
+        list(
+            samplePartition = "sp",
+            predictions = NULL,
+            metrics = NULL,
+            foldFits = "ff"
+        ),
+        1L
+    )
+    expect_null(sliced$predictions)
+    expect_null(sliced$metrics)
+    expect_equal(sliced$samplePartition, "sp")
+    expect_equal(sliced$foldFits, "ff")
+})
+
+test_that("the CV slicers keep their result two-dimensional", {
+    # drop = FALSE throughout: a one-condition slice must stay a matrix so the
+    # downstream per-method assembly keeps working.
+    m <- matrix(1:6, 2L, 3L, dimnames = list(c("a", "b"), c("x", "y", "z")))
+    col <- pecotmr:::.fmCvSliceCol(m, 2L)
+    row <- pecotmr:::.fmCvSliceRow(m, 1L)
+    expect_equal(dim(col), c(2L, 1L))
+    expect_equal(dim(row), c(1L, 3L))
+    expect_equal(as.vector(col), c(3L, 4L))
+    expect_equal(as.vector(row), c(1L, 3L, 5L))
+})
+
+
+test_that("the anchor vector keeps traitPos and region distinct", {
+    # Same rows, two anchors that genuinely differ: the supplied trait
+    # positions (500 / 900) versus the fitted variant spans (100-200 /
+    # 300-400). Nothing exercised the region kind before.
+    ss <- .je_ssWithTraitPos()
+    region <- pecotmr:::.anchorVector(
+        ss,
+        c("brain", "brain"),
+        c("G1", "G2"),
+        kind = "region"
+    )
+    anchors <- pecotmr:::.anchorVector(
+        ss,
+        c("brain", "brain"),
+        c("G1", "G2"),
+        kind = "traitPos"
+    )
+    expect_equal(length(region), 2L)
+    expect_equal(GenomicRanges::start(region), c(100L, 300L))
+    expect_equal(GenomicRanges::end(region), c(200L, 400L))
+    expect_equal(GenomicRanges::start(anchors), c(500L, 900L))
+})
+
+
+test_that("a fine-mapping CV handoff tolerates missing performance", {
+    # prediction and performance are separate slots keyed by token; a fit
+    # that recorded predictions but no performance still hands over its
+    # predictions, with metrics NULL rather than erroring.
+    f <- pecotmr:::.twasFmHandoffCv
+    expect_null(f(NULL, "susie"))
+    expect_null(f(list(a = 1), "susie"))
+    cv <- list(
+        samplePartition = "SP",
+        prediction = set_names(list("PRED"), "susie_predicted"),
+        performance = list()
+    )
+    out <- f(cv, "susie")
+    expect_equal(out$predictions, "PRED")
+    expect_null(out$metrics)
+    expect_equal(out$samplePartition, "SP")
+    # The token suffix is stripped when matching, so performance is found.
+    cv$performance <- set_names(list("PERF"), "susie")
+    expect_equal(f(cv, "susie")$metrics, "PERF")
+})
+
+
+test_that("joint specs accumulate by rbinding distinct tuples", {
+    # runJointSpecs folds each spec's result into the accumulator; the tuple
+    # key must stay unique, so two results describing the SAME tuple are
+    # refused rather than silently duplicating a row.
+    data(qtlFineMappingExample)
+    a <- qtlFineMappingExample
+    b <- qtlFineMappingExample
+    S4Vectors::mcols(b)$study <- "otherStudy"
+    out <- pecotmr:::.rbindFineMappingResult(a, b)
+    expect_equal(length(out), 2L)
+    expect_setequal(
+        unique(as.character(out$study)),
+        c(as.character(a$study)[[1L]], "otherStudy")
+    )
+    expect_error(
+        pecotmr:::.rbindFineMappingResult(a, a),
+        "tuple uniqueness"
+    )
+})
+
+test_that("rbinding an empty collection leaves the other unchanged", {
+    data(qtlFineMappingExample)
+    expect_equal(
+        length(pecotmr:::.rbindFineMappingResult(
+            qtlFineMappingExample,
+            qtlFineMappingExample[0]
+        )),
+        length(qtlFineMappingExample)
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Spec accumulation and config defaults: several specs fold into one result by
+# collection kind, and an unset ensemble config falls back to its documented
+# defaults rather than to NULL.
+# ---------------------------------------------------------------------------
+
+test_that(".runJointSpecs row-binds TWAS results across specs", {
+    calls <- 0L
+    local_mocked_bindings(
+        .jpConfig = function(pipeline) list(ldSketch = NULL),
+        .runOneJointSpec = function(...) {
+            calls <<- calls + 1L
+            str_c("R", calls)
+        },
+        .rbindTwasWeights = function(out, res, ldSketch) str_c(out, "+", res),
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.runJointSpecs(
+        list("s1", "s2", "s3"), NULL, "individual",
+        NULL, "lasso", NULL, NULL, list()
+    )
+    # The first spec seeds `out`; later ones are bound onto it.
+    expect_equal(out, "R1+R2+R3")
+})
+
+test_that(".runJointSpecs row-binds fine-mapping results across specs", {
+    calls <- 0L
+    local_mocked_bindings(
+        .jpConfig = function(pipeline) list(ldSketch = NULL),
+        .runOneJointSpec = function(...) {
+            calls <<- calls + 1L
+            str_c("F", calls)
+        },
+        .rbindFineMappingResult = function(out, res, ldSketch) {
+            str_c(out, "&", res)
+        },
+        .package = "pecotmr"
+    )
+    # The pipeline class, not the data, picks which rbind is used.
+    out <- pecotmr:::.runJointSpecs(
+        list("s1", "s2"), NULL, "individual",
+        new("FmJointPipeline"), "susie", NULL, NULL, list()
+    )
+    expect_equal(out, "F1&F2")
+})
+
+test_that(".runJointSpecs skips a spec that produced nothing", {
+    local_mocked_bindings(
+        .jpConfig = function(pipeline) list(ldSketch = NULL),
+        .runOneJointSpec = function(spec, ...) {
+            if (spec == "s1") NULL else "KEPT"
+        },
+        .rbindTwasWeights = function(out, res, ldSketch) str_c(out, "+", res),
+        .package = "pecotmr"
+    )
+    # A NULL spec must not seed `out`, or the bind would carry a NULL.
+    expect_equal(
+        pecotmr:::.runJointSpecs(
+            list("s1", "s2"), NULL, "individual",
+            NULL, "lasso", NULL, NULL, list()
+        ),
+        "KEPT"
+    )
+})
+
+test_that(".twasGroupArgs yields no fitted models when the fit is absent", {
+    local_mocked_bindings(
+        .jpConfig = function(p) list(),
+        .jgConditions = function(g) list(study = "s", context = "c",
+            trait = "t"),
+        .twasFineMappingFits = function(...) NULL,
+        .twasCvResultFor = function(...) NULL,
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.twasGroupArgs(
+        "g",
+        new("TwasJointPipeline"),
+        list(fineMappingResult = "notNull")
+    )
+    # An empty list, not NULL: downstream indexes it per region.
+    expect_identical(out$fittedModels, list())
+})
+
+test_that(".twasEnsembleLayer falls back to its documented config defaults", {
+    local_mocked_bindings(
+        .jgY = function(g) matrix(0, 2L, 1L),
+        .jgConditions = function(g) data.frame(),
+        .package = "pecotmr"
+    )
+    # An empty cfg must still resolve r2Cut = 0.01 and solver = "quadprog";
+    # with no conditions the layer maps over nothing and returns a list.
+    out <- pecotmr:::.twasEnsembleLayer("grp", list(), list())
+    expect_type(out, "list")
+    expect_length(out, 0L)
+    explicit <- pecotmr:::.twasEnsembleLayer(
+        "grp",
+        list(),
+        list(
+            ensembleR2Threshold = 0.2,
+            ensembleSolver = "nnls",
+            ensembleAlpha = 0.5
+        )
+    )
+    expect_length(explicit, 0L)
+})
+
+test_that(".jointTwasCv prefers per-call CV settings over the config", {
+    seen <- NULL
+    local_mocked_bindings(
+        .twasFmHandoffCv = function(...) NULL,
+        .jointTwasLeakageWarn = function(...) invisible(NULL),
+        twasWeightsCv = function(X, Y, fold, samplePartitions, weightMethods,
+                                 retainFits, maxNumVariants, numThreads,
+                                 data_driven_priorMatricesCv, verbose, seed) {
+            seen <<- list(sp = samplePartitions, mcv = maxNumVariants)
+            "CV"
+        },
+        .jointTwasCvResult = function(cv, token) cv,
+        .package = "pecotmr"
+    )
+    args <- list(
+        fineMappingCv = NULL,
+        samplePartition = "ARGS_SP",
+        dataDrivenPriorMatricesCv = NULL
+    )
+    cfg <- list(
+        cvFolds = 5L, samplePartition = "CFG_SP", maxCvVariants = 77L,
+        cvThreads = 1, seed = 1L, verbose = 0
+    )
+    pecotmr:::.jointTwasCv(
+        NULL, NULL, "lasso", NULL, c(1, 2), args, cfg, "lasso"
+    )
+    expect_equal(seen$sp, "ARGS_SP")
+    expect_equal(seen$mcv, 77L)
+    # With no per-call partition the config supplies it, and a non-positive
+    # maxCvVariants means "no cap" rather than "cap at zero".
+    argsBare <- args
+    argsBare$samplePartition <- NULL
+    cfgUncapped <- cfg
+    cfgUncapped$maxCvVariants <- 0
+    pecotmr:::.jointTwasCv(
+        NULL, NULL, "lasso", NULL, c(1, 2), argsBare, cfgUncapped, "lasso"
+    )
+    expect_equal(seen$sp, "CFG_SP")
+    expect_equal(seen$mcv, Inf)
+})
+
+test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
+    seen <- NULL
+    phenotypes <- matrix(
+        0,
+        nrow = 1L,
+        ncol = 2L,
+        dimnames = list("t1", c("s1", "s2"))
+    )
+    local_mocked_bindings(
+        getStudy = function(data) "S1",
+        getPhenotypes = function(data, contexts) phenotypes,
+        .fmResidPheno = function(data, contexts, traitId, naAction) {
+            matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "t1"))
+        },
+        .fmResidGeno = function(data, contexts, traitId = NULL,
+                                cisWindow = NULL, region = NULL) {
+            seen <<- list(traitId = traitId, cisWindow = cisWindow,
+                region = region)
+            matrix(0, 2L, 2L, dimnames = list(c("s1", "s2"), c("v1", "v2")))
+        },
+        .package = "pecotmr"
+    )
+    scope <- list(
+        studies = "S1",
+        contexts = list(S1 = "cA"),
+        traits = list(S1 = "t1")
+    )
+    pecotmr:::.enumUnivariateIndividual(
+        NULL, scope, list(region = "chr1:1-1000")
+    )
+    # An explicit region replaces the trait-anchored cis window entirely --
+    # neither traitId nor cisWindow is passed down.
+    expect_equal(seen$region, "chr1:1-1000")
+    expect_null(seen$cisWindow)
+    expect_null(seen$traitId)
 })

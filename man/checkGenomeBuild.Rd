@@ -14,6 +14,10 @@ TRUE if all match, error otherwise.
 }
 \description{
 Check that genome builds match between objects. Each object
-  contributes a single genome build (from its \code{genome} slot).
+  contributes a single genome build (from its \code{genome} slot). An
+  object that records no build is skipped rather than treated as a
+  mismatch: \code{loadLdMatrix()} leaves the build unset, so an LD
+  reference built from it names no build, and an unknown build cannot
+  contradict a known one.
 }
 \keyword{internal}

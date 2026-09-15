@@ -110,6 +110,103 @@ LdEigen <- function(
     obj
 }
 
+#' @title Build an LdEigen from loaded LD
+#' @description Eigendecompose already-loaded LD, block by block, into the
+#'   \code{LdEigen} that \code{\link{estimateH2}} consumes for
+#'   \code{method = "lder"} and \code{method = "hdl"}. This is the supported
+#'   route from an LD reference to an h2 input: \code{\link{LdEigen}} itself
+#'   is the low-level constructor and expects the decompositions to have been
+#'   computed already.
+#'
+#'   No file I/O happens here. Read the LD first with
+#'   \code{\link{loadLdMatrix}} -- passing a vector of regions returns one
+#'   \code{LdData} per block -- then pass the result in.
+#' @param ldBlockData An \code{\link{LdData}}, or a list of them, covering
+#'   the reference variants. An \code{LdData} whose correlation is a list of
+#'   per-block matrices contributes one LD block per matrix; one whose
+#'   correlation is a single matrix contributes one block. Blocks are kept in
+#'   the order given, and that order defines the variant order of the result.
+#'
+#'   Block structure matters downstream: \code{\link{estimateH2}} takes its
+#'   standard error from a delete-one-block jackknife, so it requires at
+#'   least two blocks and wants many more. Loading a whole region as one
+#'   dense matrix yields a single block.
+#' @param nRef Integer, the LD reference panel sample size. Defaults to the
+#'   size recorded by the supplied \code{LdData}; required when they record
+#'   none, and an error when they disagree.
+#' @param inSample Logical, whether the reference is the GWAS cohort itself.
+#'   Selects LDER's weighting and HDL's finite-reference correction.
+#' @param genome Character, genome build. Defaults to the build recorded by
+#'   the supplied \code{LdData}, which \code{\link{loadLdMatrix}} leaves
+#'   unset.
+#' @param eigenvalueTruncation Numeric in (0, 1]; the proportion of each
+#'   block's eigenvalue mass to retain. \code{1} (the default) keeps every
+#'   component; HDL conventionally uses \code{0.9}.
+#' @return An \code{LdEigen} over every variant in \code{ldBlockData}.
+#' @seealso \code{\link{buildLdScore}} for the g-LDSC input,
+#'   \code{\link{estimateH2}}, \code{\link{loadLdMatrix}}
+#' @examples
+#' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
+#'   package = "pecotmr")
+#' ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
+#' ldEigen <- buildLdEigen(ld, genome = "hg38")
+#' ldEigen
+#' length(getEigenList(ldEigen))
+#' @export
+buildLdEigen <- function(
+    ldBlockData,
+    nRef = NULL,
+    inSample = FALSE,
+    genome = NA_character_,
+    eigenvalueTruncation = 1
+) {
+    prep <- .ldRefPrepare(ldBlockData, nRef, genome)
+    eigenList <- map2(
+        prep$blocks,
+        prep$snpIdx,
+        .ldEigenOneBlock,
+        truncation = eigenvalueTruncation
+    )
+    LdEigen(
+        snpInfo = prep$snpInfo,
+        eigenList = eigenList,
+        ldBlocks = prep$ldBlocks,
+        nRef = prep$nRef,
+        inSample = inSample,
+        genome = prep$genome,
+        eigenvalueTruncation = eigenvalueTruncation
+    )
+}
+
+# One block's decomposition, truncated to the leading components carrying
+# `truncation` of its eigenvalue mass.
+# @noRd
+.ldEigenOneBlock <- function(block, snpIdx, truncation) {
+    e <- eigen(block$R, symmetric = TRUE)
+    keep <- .ldEigenKeep(e$values, truncation)
+    list(
+        values = e$values[keep],
+        vectors = e$vectors[, keep, drop = FALSE],
+        snpIdx = as.integer(snpIdx)
+    )
+}
+
+# Rounding can leave a near-singular block with slightly negative trailing
+# eigenvalues, so the cumulative mass is taken over the clamped values --
+# otherwise the running total can dip and pick the wrong cut point.
+# @noRd
+.ldEigenKeep <- function(values, truncation) {
+    if (truncation >= 1) {
+        return(seq_along(values))
+    }
+    positive <- pmax(values, 0)
+    total <- sum(positive)
+    if (total <= 0) {
+        return(seq_along(values))
+    }
+    seq_len(which(cumsum(positive) / total >= truncation)[[1L]])
+}
+
 #' @describeIn LdEigen-class Refused. Subsetting would narrow the variants
 #'   while \code{eigenList} -- a slot, because it is per block rather than
 #'   per variant -- stayed as it was, leaving decompositions that describe

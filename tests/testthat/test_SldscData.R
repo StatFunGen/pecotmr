@@ -78,9 +78,9 @@ test_that("getAnnotCols returns the annotation columns only", {
     expect_equal(getAnnotCols(sd), c("annot_A", "annot_B"))
 })
 
-test_that("getTraitRuns / getTraitNames expose the traits list", {
+test_that("getTraitRuns / getTraits expose the traits list", {
     sd <- .sldscMkData()
-    expect_equal(getTraitNames(sd), c("traitX", "traitY"))
+    expect_equal(getTraits(sd), c("traitX", "traitY"))
     expect_named(getTraitRuns(sd), c("traitX", "traitY"))
 })
 
@@ -111,4 +111,13 @@ test_that("show prints a compact summary", {
     expect_true(any(grepl("SldscData", out)))
     expect_true(any(grepl("annot_A, annot_B", out)))
     expect_true(any(grepl("traitX, traitY", out)))
+})
+
+
+test_that("a trait whose `single` is not a list is rejected", {
+    tr <- list(traitA = list(single = "not a list"))
+    expect_match(
+        pecotmr:::.sldscDataCheckOneTrait("traitA", tr),
+        "traits\\[\\['traitA'\\]\\]\\$single must be a list of runs"
+    )
 })

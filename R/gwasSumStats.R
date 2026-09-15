@@ -398,10 +398,10 @@ setMethod(
 
 # getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R).
 
-#' @rdname getSumstatDf
+#' @rdname getSumStatsDf
 #' @export
 setMethod(
-    "getSumstatDf",
+    "getSumStatsDf",
     "GwasSumStats",
     function(
         x,

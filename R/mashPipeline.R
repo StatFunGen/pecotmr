@@ -7,19 +7,44 @@
 #' @param sumStatsList Named list (or \code{SimpleList}) of
 #'   \code{\link{QtlSumStats}} or \code{\link{GwasSumStats}} objects. Required
 #'   names: \code{"strong"} (discovery variants), \code{"random"} (random
-#'   background). Optional: \code{"null"} (for residual correlation estimation).
+#'   background, the partition the mixture weights are fit on). Optional:
+#'   \code{"null"} (null variants), needed only by the
+#'   \code{residualCorrelationMethod} values that estimate \eqn{\hat V} from
+#'   them.
 #' @param alpha Numeric (length 1). Variance-stabilising-transform exponent
 #'   forwarded to \code{mashr::mash_set_data()}. Use \code{alpha = 0} on the
 #'   BETA scale, \code{alpha = 1} on the Z scale.
 #' @param residualCorrelation Optional pre-computed residual correlation matrix
-#'   (\code{Vhat}). When supplied, replaces the inline
-#'   \code{mashr::estimate_null_correlation_simple()} call entirely and the
-#'   \code{"random"} slot of \code{sumStatsList} becomes optional (the function
-#'   does not need it for anything else). Useful when \code{Vhat} was estimated
-#'   previously on a larger reference and shipped as a static artefact (the
-#'   legacy MWE pattern).
+#'   (\code{Vhat}). When supplied, it is used as-is:
+#'   \code{residualCorrelationMethod} is not consulted, and the
+#'   \code{"random"} slot of \code{sumStatsList} becomes optional (the
+#'   function does not need it for anything else). Useful when \code{Vhat} was
+#'   estimated previously on a larger reference and shipped as a static
+#'   artefact (the legacy MWE pattern).
+#' @param residualCorrelationMethod How to estimate \eqn{\hat V} when
+#'   \code{residualCorrelation} is not supplied; forwarded to
+#'   \code{\link{mashResidualCorrelation}}, which is where each estimator is
+#'   described.
+#'
+#'   \code{"identity"} (the default) takes the residual correlation to be the
+#'   identity, needs no extra partition, and never depends on which partitions
+#'   were supplied. It is the safe default rather than the best one: it
+#'   assumes conditions share no residual correlation, which
+#'   overlapping-sample designs -- the usual multi-context QTL case, where the
+#'   same donors are measured in every context -- violate. Supplying a
+#'   \code{"null"} partition while leaving this at \code{"identity"} reports
+#'   that the partition is unused, since that combination is more often an
+#'   oversight than an intent.
+#'
+#'   The estimators differ in what they require: \code{"simple"},
+#'   \code{"simpleSpecific"} and \code{"corshrink"} need a \code{"null"}
+#'   entry; \code{"mle"} needs \code{"random"} plus a supplied
+#'   \code{priorCovariances} to refine against. A named method whose
+#'   requirement is unmet is a hard error, not a silent fallback.
 #' @param priorCovariances Optional named list of square covariance matrices
-#'   (the \code{Ulist} \code{mashr::mash()} consumes). When supplied, replaces
+#'   (the \code{Ulist} \code{mashr::mash()} consumes), or a
+#'   \code{\link{mashPriorCovariances}} result, which is unwrapped to its
+#'   \code{U}. When supplied, replaces
 #'   the canonical + PCA + flash + ED chain (\code{cov_canonical} /
 #'   \code{cov_pca} / \code{cov_flash} / \code{cov_ed}) entirely; mash sees only
 #'   the supplied matrices. Every entry must be a \code{ncol(Bhat) x ncol(Bhat)}
@@ -57,12 +82,20 @@ mashPipeline <- function(
     sumStatsList,
     alpha,
     residualCorrelation = NULL,
+    residualCorrelationMethod = c(
+        "identity",
+        "simple",
+        "simpleSpecific",
+        "corshrink",
+        "mle"
+    ),
     priorCovariances = NULL,
     nPcs = NULL,
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
 ) {
     inputScale <- arg_match(inputScale)
+    residualCorrelationMethod <- arg_match(residualCorrelationMethod)
     .mashRequirePriorPackages()
     # Accept either a base list or a S4Vectors::SimpleList.
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -74,7 +107,9 @@ mashPipeline <- function(
         sumStatsList,
         alpha,
         inputScale,
-        residualCorrelation
+        residualCorrelation,
+        residualCorrelationMethod,
+        priorCovariances
     )
     # mashPriorCovariances() owns the cov_* chain, the supplied-prior bypass,
     # and the mash() weight fit; mashPipeline just forwards its arguments.
@@ -128,8 +163,52 @@ mashPipeline <- function(
     }
 }
 
-# Vhat: the supplied residualCorrelation, else estimate it via
-# mashResidualCorrelation ('simple' when a null set exists, else 'identity').
+# Identity ignores the null partition entirely, so a caller who assembled one
+# and still landed on identity has gone to real trouble for nothing -- most
+# likely they expected the null set to be used. Say so rather than quietly
+# discarding it. Identity assumes conditions share no residual correlation,
+# which overlapping-sample designs (the usual multi-context QTL case, where
+# the same donors appear in every context) violate.
+# @noRd
+.mashNoteUnusedNull <- function(method, sumStatsList) {
+    hasNull <- is_in("null", names(sumStatsList)) && !is.null(sumStatsList$null)
+    if (method != "identity" || !hasNull) {
+        return(invisible(FALSE))
+    }
+    inform(glue(
+        "mashPipeline: `sumStatsList` carries a 'null' partition, but ",
+        "residualCorrelationMethod = 'identity' does not use it -- the ",
+        "residual correlation is taken to be the identity. Pass ",
+        "'simple' (or 'simpleSpecific' / 'corshrink') to estimate it from ",
+        "those null variants instead."
+    ))
+    invisible(TRUE)
+}
+
+# A prior covariance list reaches the consumers in one of two shapes, because
+# the two producers disagree: mashCovarianceComponents() returns a bare Ulist
+# (a named list of matrices) while mashPriorCovariances() wraps it as
+# list(U, w, loglik). Accept either, so the output of either producer can be
+# handed straight to any consumer. A real Ulist entry named "U" would be a
+# matrix rather than a list, so the two shapes cannot be confused.
+# @noRd
+.mashAsUlist <- function(priorCovariances) {
+    isWrapped <- is.list(priorCovariances) &&
+        is_in("U", names(priorCovariances)) &&
+        is.list(priorCovariances$U) &&
+        !is.matrix(priorCovariances$U)
+    if (isWrapped) {
+        return(priorCovariances$U)
+    }
+    priorCovariances
+}
+
+# Vhat: the supplied residualCorrelation, else whatever
+# `residualCorrelationMethod` names. The method used to be inferred from the
+# partitions present ('simple' when a null set existed, else 'identity'),
+# which meant a caller without a null set silently assumed zero residual
+# correlation between conditions -- a statistical choice, made invisibly.
+# It is now always the caller's, named up front.
 # setSeed = NULL leaves the RNG stream (seeded by the caller) untouched, so
 # delegated calls consume it in the original order.
 # @noRd
@@ -137,16 +216,19 @@ mashPipeline <- function(
     sumStatsList,
     alpha,
     inputScale,
-    residualCorrelation
+    residualCorrelation,
+    method,
+    priorCovariances
 ) {
     if (!is.null(residualCorrelation)) {
         return(residualCorrelation)
     }
-    hasNull <- is_in("null", names(sumStatsList)) && !is.null(sumStatsList$null)
+    .mashNoteUnusedNull(method, sumStatsList)
     mashResidualCorrelation(
         sumStatsList,
         alpha,
-        method = if (hasNull) "simple" else "identity",
+        method = method,
+        priorCovariances = priorCovariances,
         inputScale = inputScale,
         setSeed = NULL
     )
@@ -166,13 +248,15 @@ mashPipeline <- function(
 #' @param method Estimator, all on the \code{"null"} partition unless noted.
 #'   \code{"simple"} = mashr \code{estimate_null_correlation_simple()};
 #'   \code{"identity"} = \code{diag(nConditions)} (reads only \code{"strong"});
-#'   \code{"simple_specific"} = \code{Matrix::nearPD(cov(nullZ), corr = TRUE)};
+#'   \code{"simpleSpecific"} = \code{Matrix::nearPD(cov(nullZ), corr = TRUE)};
 #'   \code{"corshrink"} = \code{CorShrink::CorShrinkData()} adaptive-shrinkage
 #'   correlation (needs the \pkg{CorShrink} package); \code{"mle"} =
 #'   \code{mashr::mash_estimate_corr_em()} on a random subset (needs
 #'   \code{"random"} + \code{priorCovariances}).
 #' @param priorCovariances Prior \code{U} list (required by \code{method =
-#'   "mle"}).
+#'   "mle"}). Accepts a bare named list of covariance matrices or a
+#'   \code{\link{mashPriorCovariances}} result, which is unwrapped to its
+#'   \code{U}.
 #' @param nSubset,maxIter \code{method = "mle"} controls (random-subset size and
 #'   EM iterations).
 #' @param inputScale SumStats -> matrix conversion scale (\code{"auto"} /
@@ -191,7 +275,7 @@ mashPipeline <- function(
 mashResidualCorrelation <- function(
     sumStatsList,
     alpha,
-    method = c("simple", "identity", "mle", "corshrink", "simple_specific"),
+    method = c("simple", "identity", "mle", "corshrink", "simpleSpecific"),
     priorCovariances = NULL,
     nSubset = 6000L,
     maxIter = 6L,
@@ -201,13 +285,11 @@ mashResidualCorrelation <- function(
     method <- arg_match(method)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -289,6 +371,7 @@ mashResidualCorrelation <- function(
         )
         abort(msg)
     }
+    priorCovariances <- .mashAsUlist(priorCovariances)
     randomMats <- .mashSumStatsToMatrices(
         sumStatsList$random,
         "random",
@@ -311,7 +394,7 @@ mashResidualCorrelation <- function(
     fit$V
 }
 
-# methods 'corshrink' / 'simple_specific': estimate V on the null z-matrix. The
+# methods 'corshrink' / 'simpleSpecific': estimate V on the null z-matrix. The
 # `null` partition is already the null variants (max|z| < 2), so no
 # re-thresholding is needed.
 # @noRd
@@ -329,7 +412,7 @@ mashResidualCorrelation <- function(
         inputScale = inputScale
     )
     nullZ <- nullMats$b / nullMats$s
-    if (method == "simple_specific") {
+    if (method == "simpleSpecific") {
         return(as.matrix(
             Matrix::nearPD(
                 stats::cov(nullZ),
@@ -340,13 +423,11 @@ mashResidualCorrelation <- function(
         ))
     }
     if (!requireNamespace("CorShrink", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "mashResidualCorrelation: method 'corshrink' needs the CorShrink ",
-            "package. Install it, or use 'simple' / 'simple_specific'."
+            "package. Install it, or use 'simple' / 'simpleSpecific'."
         )
         abort(msg)
-        # nocov end
     }
     as.matrix(
         CorShrink::CorShrinkData(
@@ -358,7 +439,7 @@ mashResidualCorrelation <- function(
 }
 
 # Internal: build the requested data-driven covariance components off a prepared
-# mashr data object, in a fixed order (canonical, pca, flash, flash_nonneg) so a
+# mashr data object, in a fixed order (canonical, pca, flash, flashNonneg) so a
 # given `components` set reproduces the same ordering everywhere. RNG is
 # consumed only by cov_flash / cov_flash(nonneg). Shared by mashPriorCovariances
 # and the exported mashCovarianceComponents.
@@ -377,7 +458,7 @@ mashResidualCorrelation <- function(
     if (is_in("flash", components)) {
         comps <- c(comps, mashr::cov_flash(mashData))
     }
-    if (is_in("flash_nonneg", components)) {
+    if (is_in("flashNonneg", components)) {
         comps <- c(comps, mashr::cov_flash(mashData, factors = "nonneg"))
     }
     comps
@@ -396,7 +477,7 @@ mashResidualCorrelation <- function(
 #' @param alpha mash \code{alpha}.
 #' @param vhat Residual correlation matrix (\code{V}); \code{NULL} -> identity.
 #' @param components Any of \code{"canonical"}, \code{"pca"}, \code{"flash"},
-#'   \code{"flash_nonneg"}. Built in that fixed order.
+#'   \code{"flashNonneg"}. Built in that fixed order.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param inputScale SumStats -> matrix conversion scale.
 #' @param setSeed Integer seed (\code{cov_flash} is stochastic), or \code{NULL}
@@ -413,7 +494,7 @@ mashCovarianceComponents <- function(
     sumStatsList,
     alpha,
     vhat = NULL,
-    components = c("canonical", "pca", "flash", "flash_nonneg"),
+    components = c("canonical", "pca", "flash", "flashNonneg"),
     nPcs = NULL,
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
@@ -443,7 +524,7 @@ mashCovarianceComponents <- function(
 #'   collection. Split out of \code{\link{mashPipeline}} so the
 #'   covariance-estimation chain lives in one place. The default builds every
 #'   non-udr covariance component (\code{canonical + pca + flash +
-#'   flash_nonneg}) and refines them with mashr extreme deconvolution
+#'   flashNonneg}) and refines them with mashr extreme deconvolution
 #'   (\code{cov_ed}).
 #' @param sumStatsList Named list (or \code{S4Vectors::SimpleList}) with at
 #'   least \code{"strong"} (the discovery set the covariances are learned on).
@@ -452,7 +533,7 @@ mashCovarianceComponents <- function(
 #'   \code{\link{mashResidualCorrelation}}. \code{NULL} -> identity.
 #' @param components Data-driven covariance components, any of
 #'   \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
-#'   \code{cov_flash}), \code{"flash_nonneg"} (\code{cov_flash(factors =
+#'   \code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
 #'   "nonneg")}). Built in that fixed order. Ignored by the \code{"ud"} /
 #'   \code{"ud_ted"} engines.
 #' @param engine Covariance-refinement engine. \code{"cov_ed"} (default; mashr's
@@ -463,11 +544,15 @@ mashCovarianceComponents <- function(
 #'   not the default; \code{"ud_ted"} additionally needs i.i.d. (z-scale) data).
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param priorCovariances Optional caller-supplied prior \code{U}: a non-empty
-#'   named list of \code{nCond x nCond} matrices. When supplied, the covariance
-#'   chain is bypassed and only the mixture-weight fit runs.
+#'   named list of \code{nCond x nCond} matrices, or a
+#'   \code{\link{mashPriorCovariances}} result, which is unwrapped to its
+#'   \code{U}. When supplied, the covariance chain is bypassed and only the
+#'   mixture-weight fit runs.
 #' @param priorComponents Optional caller-supplied raw covariance components (a
 #'   non-empty named list, e.g. the concatenated
-#'   \code{\link{mashCovarianceComponents}} outputs). When supplied, these are
+#'   \code{\link{mashCovarianceComponents}} outputs, or a
+#'   \code{\link{mashPriorCovariances}} result, which is unwrapped to its
+#'   \code{U}). When supplied, these are
 #'   refined by \code{engine} instead of being rebuilt internally -- the
 #'   mixture-prior pipeline where separate steps built the components.
 #'   \code{components} / \code{nPcs} are then ignored. Distinct from
@@ -494,7 +579,7 @@ mashPriorCovariances <- function(
     sumStatsList,
     alpha,
     vhat = NULL,
-    components = c("canonical", "pca", "flash", "flash_nonneg"),
+    components = c("canonical", "pca", "flash", "flashNonneg"),
     engine = c("cov_ed", "ud", "ud_ted"),
     nPcs = NULL,
     priorCovariances = NULL,
@@ -545,7 +630,7 @@ mashPriorCovariances <- function(
     components,
     caller = "mashPriorCovariances"
 ) {
-    valid <- c("canonical", "pca", "flash", "flash_nonneg")
+    valid <- c("canonical", "pca", "flash", "flashNonneg")
     bad <- setdiff(as.character(components), valid)
     if (length(bad) > 0L) {
         msg <- glue(
@@ -561,22 +646,18 @@ mashPriorCovariances <- function(
 # @noRd
 .mashRequirePriorPackages <- function() {
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (!requireNamespace("flashier", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install flashier: ",
             "https://github.com/willwerscheid/flashier"
         )
         abort(msg)
-        # nocov end
     }
 }
 
@@ -601,6 +682,7 @@ mashPriorCovariances <- function(
 # matrices. Returns list(U, w = NULL, loglik = NULL).
 # @noRd
 .mashUserPriorCovariances <- function(priorCovariances, mashData) {
+    priorCovariances <- .mashAsUlist(priorCovariances)
     if (
         !is.list(priorCovariances) ||
             length(priorCovariances) == 0L ||
@@ -659,6 +741,7 @@ mashPriorCovariances <- function(
     components,
     nPcs
 ) {
+    priorComponents <- .mashAsUlist(priorComponents)
     if (is.null(priorComponents)) {
         return(.mashBuildComponents(
             mashData,
@@ -739,13 +822,11 @@ mashPriorCovariances <- function(
 # @noRd
 .mashEngineUd <- function(mashData, engine, udControl) {
     if (!requireNamespace("udr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "mashPriorCovariances: engine '{engine}' needs the udr package. ",
             "Install it, or use the default 'cov_ed'."
         )
         abort(msg)
-        # nocov end
     }
     udControl <- utils::modifyList(
         list(
@@ -782,8 +863,11 @@ mashPriorCovariances <- function(
 #'   \code{\link{QtlSumStats}} / \code{\link{GwasSumStats}}; must contain the
 #'   \code{fitOn} entry.
 #' @param alpha mash \code{alpha} (forwarded to \code{mashr::mash_set_data()}).
-#' @param priorCovariances The prior covariance list (\code{U}) to fit with --
-#'   e.g. the \code{$U} of a \code{\link{mashPriorCovariances}} result.
+#' @param priorCovariances The prior covariance list (\code{U}) to fit with.
+#'   Either shape the producers return is accepted: a bare named list of
+#'   covariance matrices (\code{\link{mashCovarianceComponents}}) or the
+#'   \code{list(U, w, loglik)} a \code{\link{mashPriorCovariances}} result
+#'   carries, which is unwrapped to its \code{U}.
 #' @param vhat Residual correlation matrix (\code{V}); \code{NULL} -> identity.
 #' @param fitOn Partition to learn the mixture weights on: \code{"random"}
 #'   (default, the standard unbiased choice) or \code{"strong"}.
@@ -808,7 +892,7 @@ mashPriorCovariances <- function(
 #' dimnames(vhat) <- list(conds, conds)
 #' prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
 #'   components = "canonical")
-#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
 #' @export
 mashModelFit <- function(
@@ -824,17 +908,16 @@ mashModelFit <- function(
     fitOn <- arg_match(fitOn)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
     }
+    priorCovariances <- .mashAsUlist(priorCovariances)
     .mashValidatePriorCovList(priorCovariances)
     if (is.null(sumStatsList[[fitOn]])) {
         msg <- glue(
@@ -911,7 +994,7 @@ mashModelFit <- function(
 #' dimnames(vhat) <- list(conds, conds)
 #' prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
 #'   components = "canonical")
-#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
 #' mashPosterior(model, mk("strong.b", "strong.s"), alpha = 0, vhat = vhat)
 #' @export
@@ -926,13 +1009,11 @@ mashPosterior <- function(
 ) {
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
     ex <- .mashExcludeConditions(
@@ -1274,7 +1355,7 @@ mashPosteriorContrast <- function(
 #' dimnames(vhat) <- list(conds, conds)
 #' prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
 #'   components = "canonical")
-#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
 #' updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
 #' @export

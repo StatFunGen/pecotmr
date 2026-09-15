@@ -193,11 +193,11 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #'   `<plinkName><chr>.frq`). Falls back to all `*.frq` in the directory when
 #'   the prefix matches nothing.
 #' @return A \code{data.frame}: \code{CHR}, \code{SNP}, \code{MAF}.
-#' @importFrom vroom vroom
+#' @importFrom readr read_table cols
 #' @importFrom tidyselect all_of
 #' @examples
 #' sldsc <- system.file("extdata", "sldsc", package = "pecotmr")
-#' readSldscFrq(sldsc, plinkName = "reference.")
+#' head(readSldscFrq(sldsc, plinkName = "reference."))
 #' @export
 readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
     if (!dir.exists(frqfileDir)) {
@@ -1001,13 +1001,18 @@ sldscSubsetMeta <- function(
     )
 }
 
-# Read one .frq file's CHR/SNP/MAF columns.
+# Read one .frq file's CHR/SNP/MAF columns. PLINK writes .frq
+# whitespace-aligned rather than delimited, so the columns need read_table's
+# whitespace collapsing: vroom guesses a single-space delimiter, reads the
+# padding as empty fields, and shifts every value one or more columns left
+# (CHR and SNP come back all-NA, MAF picks up NCHROBS). read_table also
+# accepts the tab-delimited .frq some pipelines emit, since a tab is
+# whitespace too.
 # @noRd
 .sldscReadFrqFile <- function(f) {
-    vroom(
-        f,
-        col_select = all_of(c("CHR", "SNP", "MAF")),
-        show_col_types = FALSE
+    select(
+        read_table(f, col_types = cols()),
+        all_of(c("CHR", "SNP", "MAF"))
     )
 }
 

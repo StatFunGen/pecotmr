@@ -52,11 +52,12 @@ articles:
     contents:
     - constructing-qtl-datasets
     - constructing-sumstats
-  - title: "Quality Control"
+  - title: "LD and quality control"
     desc: >
-      Allele alignment and LD-mismatch QC for GWAS and QTL summary
-      statistics.
+      Loading, computing and conditioning LD references, and the allele
+      alignment and LD-mismatch QC that matches summary statistics to them.
     contents:
+    - ld-infrastructure
     - rss-qc
   - title: "Fine-mapping"
     desc: >
@@ -64,14 +65,25 @@ articles:
       summary statistics, and GWAS summary statistics.
     contents:
     - fine-mapping
+    - finemapping-postprocessing
   - title: "TWAS"
     desc: >
       Training TWAS weights from QTL data (individual-level and
-      summary-statistics, single and multi-context) and computing
-      per-gene TWAS Z-scores from GWAS summary statistics.
+      summary-statistics, single and multi-context), computing per-gene
+      TWAS Z-scores from GWAS summary statistics, and fine-mapping genes
+      jointly with SNPs so a gene's PIP is conditioned on the signal
+      beside it.
     contents:
     - twas-weights
     - twas-zscore
+    - ctwas-pipeline
+  - title: "Cross-context modeling"
+    desc: >
+      Multivariate adaptive shrinkage across contexts: learning the
+      covariance structure of effect sharing and shrinking per-context
+      estimates toward it.
+    contents:
+    - mash-pipeline
   - title: "Colocalization"
     desc: >
       Pairwise QTL/GWAS colocalization (coloc.bf_bf) and multi-trait
@@ -79,8 +91,13 @@ articles:
     contents:
     - coloc-pipeline
     - colocboost-pipeline
-  - title: "Enrichment Analysis"
+  - title: "Heritability and enrichment"
+    desc: >
+      SNP heritability from GWAS summary statistics by four estimators,
+      functional enrichment across annotations, postprocessing of external
+      polyfun sLDSC runs, and per-variant molecular-QTL enrichment.
     contents:
+    - heritability
     - xqtl-enrichment
   - title: "Resources"
     navbar: ~
@@ -206,7 +223,7 @@ reference:
       - getVariantIds
       - intersectVariants
       - resolveWeights
-      - writeSumstatsVcf
+      - writeSumStatsVcf
 
   - subtitle: "QtlFineMappingResult"
     contents:
@@ -258,18 +275,19 @@ reference:
 
   - subtitle: "GwasSumStats"
     contents:
+      - as.data.frame.GwasSumStats
       - combineGwasSumStats
-      - getSumstatDf
+      - getSumStatsDf
       - "getSumStats,GwasSumStats-method"
       - getVarY
-      - writeSumstatsVcf
+      - writeSumStatsVcf
 
   - subtitle: "QtlSumStats"
     contents:
       - combineQtlSumStats
       - getContexts
       - getSignificantQtls
-      - getSumstatDf
+      - getSumStatsDf
       - getSumStats
       - getTraitPosition
       - getTraits
@@ -396,7 +414,6 @@ reference:
       - getAnnotCols
       - getAnnotData
       - getFrqData
-      - getTraitNames
       - getTraitRun
       - getTraitRuns
 
@@ -456,13 +473,10 @@ reference:
       design-matrix conditioning utilities.
     contents:
       - loadLdMatrix
-      - loadLdSketch
-      - loadLdBlock
       - computeLd
       - checkLd
       - enforceDesignFullRank
       - ldClumpByScore
-      - ldLoader
       - ldPruneByCorrelation
       - filterVariantsByLdReference
 
@@ -484,13 +498,10 @@ reference:
       (`chr:pos:A2:A1`) and genomic regions (`chr:start-end`).
     contents:
       - parseVariantId
-      - variantIdToDf
       - normalizeVariantId
       - classifyVariantType
       - parseRegion
       - regionToDf
-      - regionsOverlap
-      - findOverlappingRegions
       - asGranges
 
   - title: "Fine-mapping"
@@ -571,7 +582,7 @@ reference:
   - subtitle: "mr.mash / mr.ash"
     contents:
       - mrashWeights
-      - mrAshRssWeights
+      - mrashRssWeights
       - mrmashWeights
       - mrmashRssWeights
       - mrmashWrapper
@@ -629,12 +640,16 @@ reference:
 
   - title: "Heritability and enrichment"
     desc: >
-      Heritability estimation, LD-score computation, stratified
-      LD-score regression utilities, and per-variant QTL/GWAS
-      enrichment analysis (low-level kernel that powers
-      \code{qtlEnrichmentPipeline}).
+      Heritability estimation, the two builders that turn a loaded LD
+      reference into the statistic each estimator needs
+      (\code{buildLdEigen} for LDER/HDL, \code{buildLdScore} for
+      g-LDSC), LD-score computation, stratified LD-score regression
+      utilities, and per-variant QTL/GWAS enrichment analysis (low-level
+      kernel that powers \code{qtlEnrichmentPipeline}).
     contents:
       - estimateH2
+      - buildLdEigen
+      - buildLdScore
       - computeLdScores
       - computeSldscAnnotSd
       - computeSldscMRef
@@ -687,27 +702,6 @@ reference:
       - ldEigenExample
       - ldScoreExample
       - h2EstimateExample
-
-  - title: internal
-    desc: >
-      Implementation details that have `.Rd` topics but no front-facing
-      role. Hidden from the reference index but still searchable and
-      rendered.
-    contents:
-      - GenotypeHandle
-      - GenotypeHandle-class
-      - getSnpInfo
-      - getFormat
-      - getPath
-      - getSampleIds
-      - getPgenPtr
-      - getNSamples
-      - getChromPaths
-      - getGenotypeHandle
-      - extractBlockGenotypes
-      - genotypeDelayedArray
-      - as.data.frame.GwasSumStats
-      - rescaleCovW0
 
 footer:
  structure:

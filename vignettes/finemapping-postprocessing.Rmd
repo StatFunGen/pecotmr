@@ -1,0 +1,295 @@
+---
+title: "Post-processing fine-mapping results"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Post-processing fine-mapping results}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
+```
+
+## Overview
+
+[`fineMappingPipeline()`](fine-mapping.html) returns a
+`QtlFineMappingResult` or `GwasFineMappingResult`. This vignette covers what
+you do with one afterwards: summarising credible sets, comparing results
+across studies, intersecting QTL with GWAS, and reaching the underlying
+SuSiE quantities when the summaries are not enough.
+
+Every function here reads an existing result — none of them refit anything.
+
+```{r load-packages}
+library(pecotmr)
+data(qtlFineMappingExample, gwasFineMappingExample)
+data(qtlFineMappingLbfExample, gwasFineMappingLbfExample)
+data(qtlFineMappingPairedExample, qtlDatasetExample)
+qtlFineMappingExample
+```
+
+## The two tables
+
+A fine-mapping result carries two flat summaries, and which one you want
+depends on whether your unit of interest is a variant or a credible set.
+
+**`getTopLoci()`** is one row per retained variant, with its PIP, effect
+size, and credible-set membership at each coverage level:
+
+```{r top-loci}
+topLoci <- getTopLoci(qtlFineMappingExample)
+dim(topLoci)
+head(as.data.frame(topLoci)[, c(
+    "variant_id",
+    "pip",
+    "cs_95",
+    "cs_95_purity",
+    "beta",
+    "se"
+)], 4)
+```
+
+`cs_95` names the credible set the variant belongs to, or is `NA` when it
+belongs to none. The `cs_70` / `cs_50` columns give the same membership at
+looser coverage, so a variant can be in a 95% set but not a 50% one.
+
+**`getCredibleSetSummary()`** is one row per credible set instead:
+
+```{r cs-summary}
+as.data.frame(getCredibleSetSummary(qtlFineMappingExample))[, c(
+    "cs",
+    "coverage",
+    "n_variants",
+    "purity_min",
+    "cs_log10bf",
+    "lead_variant",
+    "lead_pip"
+)]
+```
+
+`purity_min` is the smallest absolute correlation between any pair of
+variants in the set — the standard measure of whether a credible set is a
+single signal or an artefact of a few uncorrelated variants being lumped
+together. `cs_log10bf` says how much the data prefer that effect being
+present.
+
+A credible set with low `purity_min` deserves suspicion before
+interpretation, which is why the pipeline exposes `minPurity` as a filter
+rather than dropping such sets silently.
+
+## Merging overlapping credible sets
+
+A multi-effect SuSiE fit can return credible sets that overlap, especially
+when two effects are in strong LD. `mergeSusieCs()` collapses those into one
+row per variant: `credibleSetNames` labels every set the variant belongs to
+(comma-joined when it belongs to more than one), and `maxPip` / `medianPip`
+summarise its PIP across them. The example fit has a single set, so each
+label names just that one:
+
+```{r merge-cs}
+merged <- mergeSusieCs(qtlFineMappingExample, coverage = 0.95)
+dim(merged)
+head(as.data.frame(merged), 4)
+```
+
+Use it when downstream code needs a variant to belong to at most one set —
+overlap-counting, for instance, would otherwise double-count.
+
+## Intersecting QTL and GWAS
+
+`overlapTopLoci()` joins two fine-mapping results on shared variants,
+prefixing each side's columns. It is the cheap first pass before
+[colocalization](coloc-pipeline.html): if the two credible sets share no
+variants at all, there is nothing for a coloc model to work with.
+
+```{r overlap}
+overlap <- overlapTopLoci(qtlFineMappingLbfExample, gwasFineMappingLbfExample)
+nrow(overlap)
+head(as.data.frame(overlap)[, c(
+    "variant_id",
+    "qtl_pip",
+    "gwas_pip",
+    "qtl_cs_95",
+    "gwas_cs_95"
+)], 4)
+```
+
+The variants worth attention are those in a credible set on *both* sides:
+
+```{r overlap-both}
+both <- overlap[!is.na(overlap$qtl_cs_95) & !is.na(overlap$gwas_cs_95), ]
+nrow(both)
+table(both$qtl_cs_95, both$gwas_cs_95)
+```
+
+Here that filter removes nothing, because `topLoci` in this result retains
+only credible-set variants — every shared variant is in one set on each
+side. The filter earns its place on results where `topLoci` also carries
+high-PIP variants outside any set, which is the usual case once
+`pipCutoff` is in play.
+
+A non-empty overlap is not evidence of a shared causal variant, however
+large: two independent signals in the same LD block overlap too. That
+question is what `colocPipeline()` answers.
+
+## Combining results
+
+`combineFineMappingResults()` stacks several results into one collection,
+which is how per-region or per-chromosome runs are assembled after
+parallel execution:
+
+```{r combine}
+combined <- combineFineMappingResults(
+    qtlFineMappingExample,
+    qtlFineMappingLbfExample
+)
+nrow(combined)
+data.frame(
+    study = combined$study,
+    context = combined$context,
+    trait = combined$trait,
+    method = combined$method
+)
+```
+
+The inputs keep their own identity columns, so a combined object still
+distinguishes which study and method each row came from. Note that the
+identity columns are read with `$`: `as.data.frame()` on a collection
+flattens its *variants*, not its per-row metadata.
+
+## Between-credible-set correlation
+
+`computeCsCorrelation()` reports how correlated a fit's credible sets are
+with each other. It is computed on demand rather than stored, because it
+needs LD — and the LD lives with the data, not with the fit:
+
+```{r cs-corr}
+computeCsCorrelation(qtlFineMappingPairedExample, qtlDatasetExample)
+```
+
+The `ldSource` argument takes a `QtlDataset`, `QtlSumStats` or
+`GwasSumStats` — whichever object the fit was derived from. It must cover
+the fit's region: a source whose variants do not reach the fit's window
+cannot supply the correlations, and the function says so rather than
+returning something empty.
+
+Near-zero off-diagonal entries, as here, mean the credible sets are
+capturing distinct signals. Strongly correlated sets suggest the fit split
+one signal in two.
+
+## Reaching the SuSiE quantities
+
+When the flat tables are not enough — you want the per-effect posterior, or
+to re-derive PIPs under a different assumption — the underlying fit is
+available.
+
+`getLbf()` returns the log Bayes factors, one row per variant and one
+column per single effect:
+
+```{r lbf}
+lbf <- getLbf(qtlFineMappingLbfExample)
+unit <- lbf[lbf$trait == lbf$trait[1] & lbf$context == lbf$context[1], ]
+lbfMatrix <- as.matrix(unit[, grep("^lbf_L", names(unit))])
+dim(lbfMatrix)
+```
+
+`lbfToAlpha()` converts those to single-effect inclusion probabilities.
+It normalises **across each row**, so the matrix has to be oriented with
+effects as rows — transpose the variants-by-effects layout above:
+
+```{r lbf-alpha}
+alpha <- lbfToAlpha(t(lbfMatrix))
+dim(alpha)
+rowSums(alpha) # each single effect sums to 1 across variants
+```
+
+Getting that orientation wrong is quiet rather than loud: normalising across
+effects for each variant also produces a matrix whose rows sum to 1, just
+not one that means anything.
+
+The LBF matrix is also what `colocPipeline()` consumes, which is why
+`fineMappingPipeline(..., keepLbf = TRUE)` is required before
+colocalization.
+
+`getSusieFit()` returns the raw per-unit SuSiE object when you need
+something the accessors do not expose:
+
+```{r susie-fit}
+fit <- getSusieFit(qtlFineMappingExample)
+class(fit)
+names(fit)
+```
+
+`alpha` and `lbf_variable` are the per-effect matrices, `sets` the credible
+sets before any purity filtering, and `V` the estimated prior variances —
+everything the flat tables above are derived from.
+
+## How the tables are built
+
+The summaries above are not stored by the fitter — they are derived from the
+raw SuSiE fit by a short chain that `fineMappingPipeline()` runs for you:
+
+```
+postprocessFinemappingFits()   # per-method fits -> a post object
+  -> computeCsTables()         # credible sets from alpha, with purity
+  -> buildTopLoci()            # the flat one-row-per-variant table
+  -> formatFinemappingOutput() # assemble the result payload
+```
+
+Call them directly when you have SuSiE fits from elsewhere and want
+pecotmr's tables over them, or when you need to change how credible sets are
+formed — `computeCsTables()` is where the coverage levels and purity
+threshold are applied, so re-running it with a different `coverage` gives a
+different `top_loci` without refitting anything.
+
+Two smaller extractors sit at the row level and are what
+`getCredibleSetSummary()` is assembled from:
+
+- `extractCsInfo(fmRow, csNames, topLociTable, ldSource)` — per-credible-set
+  detail for one result row, including the between-variant correlations that
+  give `purity_min`, which is why it needs an `ldSource`.
+- `extractTopPipInfo(fmRow, sumstats)` — the lead variant and its statistics,
+  joined against summary statistics.
+
+`getSusieResult()` unwraps a per-condition fit list into the single SuSiE
+object the other helpers expect.
+
+## Writing results out
+
+`writeSumStatsVcf()` serialises a fine-mapping result — or summary
+statistics — to GWAS-VCF, the interchange format most external tools read:
+
+```{r vcf, eval=FALSE}
+writeSumStatsVcf(
+    qtlFineMappingExample,
+    file = "finemapping.vcf.gz",
+    genome = "hg38"
+)
+```
+
+It needs the `VariantAnnotation` package, which is a suggested dependency
+rather than a hard one.
+
+## Next steps
+
+- [Fine-mapping](fine-mapping.html) — producing the results this vignette
+  consumes.
+- [Colocalization](coloc-pipeline.html) — the model that answers whether an
+  overlap reflects a shared causal variant.
+- [TWAS weights](twas-weights.html) — reusing a fine-mapping fit as a weight
+  method.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

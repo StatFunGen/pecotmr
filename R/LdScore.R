@@ -106,6 +106,113 @@ LdScore <- function(
     obj
 }
 
+#' @title Build an LdScore from loaded LD
+#' @description Compute per-variant LD scores from already-loaded LD, block by
+#'   block, into the \code{LdScore} that \code{\link{estimateH2}} consumes
+#'   for \code{method = "gldsc"}. This is the supported route from an LD
+#'   reference to an h2 input: \code{\link{LdScore}} itself is the low-level
+#'   constructor and expects the scores to have been computed already.
+#'
+#'   The score is \eqn{\ell_j = \sum_k r^2_{jk}} within each block, the same
+#'   quantity \code{\link{computeLdScores}} reconstructs from an
+#'   \code{\link{LdEigen}}, so the two agree on a shared reference.
+#'
+#'   No file I/O happens here. Read the LD first with
+#'   \code{\link{loadLdMatrix}} -- passing a vector of regions returns one
+#'   \code{LdData} per block -- then pass the result in.
+#' @param ldBlockData An \code{\link{LdData}}, or a list of them, covering
+#'   the reference variants. An \code{LdData} whose correlation is a list of
+#'   per-block matrices contributes one LD block per matrix; one whose
+#'   correlation is a single matrix contributes one block. Blocks are kept in
+#'   the order given, and that order defines the variant order of the result.
+#'
+#'   Block structure matters downstream: \code{\link{estimateH2}} takes its
+#'   standard error from a delete-one-block jackknife, so it requires at
+#'   least two blocks and wants many more. Loading a whole region as one
+#'   dense matrix yields a single block.
+#' @param nRef Integer, the LD reference panel sample size. Defaults to the
+#'   size recorded by the supplied \code{LdData}; required when they record
+#'   none, and an error when they disagree.
+#' @param inSample Logical, whether the reference is the GWAS cohort itself.
+#' @param genome Character, genome build. Defaults to the build recorded by
+#'   the supplied \code{LdData}, which \code{\link{loadLdMatrix}} leaves
+#'   unset.
+#' @param ldScoreWeights Optional numeric regression weights, one per variant.
+#'   Defaults to the conventional \eqn{1/\max(\ell_j, 1)}.
+#' @param keepLdMatrices Logical. Keep each block's LD matrix on the result.
+#'   \code{TRUE} (the default) is required for \code{method = "gldsc"},
+#'   which forms its FGLS residual covariance from them and errors without
+#'   them. \code{FALSE} drops them, leaving a scores-only object.
+#' @return An \code{LdScore} over every variant in \code{ldBlockData}.
+#' @seealso \code{\link{buildLdEigen}} for the LDER / HDL input,
+#'   \code{\link{estimateH2}}, \code{\link{computeLdScores}}
+#' @examples
+#' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
+#'   package = "pecotmr")
+#' ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
+#' ldScore <- buildLdScore(ld, genome = "hg38")
+#' ldScore
+#' head(getLdScores(ldScore))
+#' @export
+buildLdScore <- function(
+    ldBlockData,
+    nRef = NULL,
+    inSample = FALSE,
+    genome = NA_character_,
+    ldScoreWeights = NULL,
+    keepLdMatrices = TRUE
+) {
+    prep <- .ldRefPrepare(ldBlockData, nRef, genome)
+    l2 <- .ldScoreVector(prep$blocks, prep$snpIdx, nrow(prep$snpInfo))
+    ldMatrixList <- if (isTRUE(keepLdMatrices)) {
+        map2(prep$blocks, prep$snpIdx, .ldScoreKeepMatrix)
+    } else {
+        list()
+    }
+    LdScore(
+        snpInfo = prep$snpInfo,
+        ldScores = matrix(l2, ncol = 1, dimnames = list(NULL, "base_l2")),
+        ldScoreWeights = .ldScoreResolveWeights(ldScoreWeights, l2),
+        ldBlocks = prep$ldBlocks,
+        nRef = prep$nRef,
+        inSample = inSample,
+        genome = prep$genome,
+        ldMatrixList = ldMatrixList
+    )
+}
+
+# Per-variant sum of r^2 within the variant's own block, scattered back into
+# reference order.
+# @noRd
+.ldScoreVector <- function(blocks, snpIdx, nVariants) {
+    l2 <- numeric(nVariants)
+    for (b in seq_along(blocks)) {
+        l2[snpIdx[[b]]] <- rowSums(blocks[[b]]$R^2)
+    }
+    l2
+}
+
+# @noRd
+.ldScoreKeepMatrix <- function(block, snpIdx) {
+    list(R = block$R, snpIdx = as.integer(snpIdx))
+}
+
+# The conventional LDSC heteroskedasticity weight, with the score floored at
+# 1 so a variant in near-perfect linkage equilibrium cannot dominate.
+# @noRd
+.ldScoreResolveWeights <- function(ldScoreWeights, l2) {
+    if (is.null(ldScoreWeights)) {
+        return(1 / pmax(l2, 1))
+    }
+    if (length(ldScoreWeights) != length(l2)) {
+        abort(glue(
+            "`ldScoreWeights` has {length(ldScoreWeights)} value(s) for ",
+            "{length(l2)} variant(s)."
+        ))
+    }
+    as.numeric(ldScoreWeights)
+}
+
 #' @rdname show-methods
 #' @export
 setMethod("show", "LdScore", function(object) {

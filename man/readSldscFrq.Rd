@@ -24,5 +24,5 @@ Reads the per-chromosome PLINK `.frq` files for the reference
 }
 \examples{
 sldsc <- system.file("extdata", "sldsc", package = "pecotmr")
-readSldscFrq(sldsc, plinkName = "reference.")
+head(readSldscFrq(sldsc, plinkName = "reference."))
 }

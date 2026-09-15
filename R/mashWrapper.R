@@ -1227,7 +1227,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashRowDf <- function(x, rIdx, setup, requireCols) {
     if (setup$isQtl) {
-        getSumstatDf(
+        getSumStatsDf(
             x,
             study = setup$studyCol[[rIdx]],
             context = setup$contextCol[[rIdx]],
@@ -1235,7 +1235,7 @@ qtlSumStatsFromBetaMatrix <- function(
             require = requireCols
         )
     } else {
-        getSumstatDf(x, study = setup$studyCol[[rIdx]], require = requireCols)
+        getSumStatsDf(x, study = setup$studyCol[[rIdx]], require = requireCols)
     }
 }
 
@@ -1347,7 +1347,7 @@ qtlSumStatsFromBetaMatrix <- function(
 .mashAsDataFrameOrNull <- function(m) {
     if (is.null(m)) {
         return(NULL)
-    } # nocov  (partitions are always matrices here, never NULL)
+    }
     as.data.frame(m)
 }
 

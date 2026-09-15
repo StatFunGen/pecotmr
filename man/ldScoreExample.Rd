@@ -6,15 +6,21 @@
 \title{Example LD-Score Reference}
 \format{
 An \code{LdScore} object (extends \code{LdStatistic}) carrying
-  \code{ldScores}, \code{ldScoreWeights}, and \code{ldMatrixList} over 20
-  SNPs
-  in 2 LD blocks.
+  \code{ldScores}, \code{ldScoreWeights}, and \code{ldMatrixList} over
+  1300 variants in 14 LD blocks.
 }
 \description{
-A small synthetic \code{LdScore} reference (per-SNP LD scores,
-weights, and per-block LD matrices over 20 SNPs in 2 blocks) for the
-heritability estimators (\code{\link{estimateH2}} with
-\code{method = "gldsc"}). All identifiers are synthetic.
+An \code{LdScore} reference (per-variant LD scores, weights,
+and per-block LD matrices) for the LD-score-based heritability estimators
+(\code{\link{estimateH2}} with \code{method = "sldsc"} or
+\code{"gldsc"}). Built by \code{\link{buildLdScore}} from the first 14
+chr22 LD blocks of the de-identified \code{protocol_example} reference
+panel, so the LD is real rather than simulated. Describes the same variants
+as \code{\link{ldEigenExample}}.
+
+The per-block LD matrices are retained because \code{"gldsc"} and
+stratified \code{"sldsc"} both need them; unstratified \code{"sldsc"}
+reads only the scores.
 }
 \examples{
 data(ldScoreExample)

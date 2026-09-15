@@ -9,19 +9,17 @@
 #' @importFrom purrr map map_chr keep set_names list_flatten
 NULL
 
-#' @rdname writeSumstatsVcf
+#' @rdname writeSumStatsVcf
 #' @export
 setMethod(
-    "writeSumstatsVcf",
+    "writeSumStatsVcf",
     signature("GwasSumStats"),
     function(x, outputPath, sampleName = NULL, study = NULL, ...) {
-        # nocov start
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(
-                "Package 'VariantAnnotation' is required for writeSumstatsVcf"
+                "Package 'VariantAnnotation' is required for writeSumStatsVcf"
             )
         }
-        # nocov end
         study <- .vcfResolveStudy(x, study)
         ss <- getSumStats(x, study = study)
         mc <- mcols(ss)
@@ -87,10 +85,10 @@ setMethod(
     )
 }
 
-#' @rdname writeSumstatsVcf
+#' @rdname writeSumStatsVcf
 #' @export
 setMethod(
-    "writeSumstatsVcf",
+    "writeSumStatsVcf",
     signature("FineMappingResultBase"),
     function(
         x,
@@ -104,13 +102,11 @@ setMethod(
         splitByTrait = FALSE,
         ...
     ) {
-        # nocov start
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(
-                "Package 'VariantAnnotation' is required for writeSumstatsVcf"
+                "Package 'VariantAnnotation' is required for writeSumStatsVcf"
             )
         }
-        # nocov end
 
         # Resolve the set of rows to write. With both selectors NULL and no
         # split flags, the collection must have exactly one row. Splitting
@@ -171,7 +167,7 @@ setMethod(
         rows <- rows[as.character(x$method)[rows] == method]
     }
     if (length(rows) == 0L) {
-        abort("writeSumstatsVcf: no rows match the supplied selectors.")
+        abort("writeSumStatsVcf: no rows match the supplied selectors.")
     }
     if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
         if (length(rows) != 1L) {
@@ -349,7 +345,7 @@ setMethod(
         base <- marg
         m <- marg
     } else {
-        msg <- glue("writeSumstatsVcf: entry [{sn}] has no variants to write")
+        msg <- glue("writeSumStatsVcf: entry [{sn}] has no variants to write")
         abort(msg)
     }
     list(base = base, m = m, hasPost = hasPost)
@@ -571,10 +567,24 @@ setMethod(
     )
     VariantAnnotation::writeVcf(vcf, tmpVcfStem, index = TRUE)
     # asBcf appends ".bcf" to destination, so strip the extension.
-    asBcf(
-        tmpVcfBgz,
-        dictionary = unique(chrom),
-        destination = str_remove(outputPath, "\\.bcf$")
+    # Rsamtools disabled asBcf() (>= 2.26 raises "temporarily disabled"), so
+    # the bare upstream error is translated into something actionable rather
+    # than surfacing as an opaque failure from a documented output format.
+    tryCatch(
+        asBcf(
+            tmpVcfBgz,
+            dictionary = unique(chrom),
+            destination = str_remove(outputPath, "\\.bcf$")
+        ),
+        error = function(e) {
+            msg <- glue(
+                "writeSumStatsVcf: BCF output needs a working ",
+                "Rsamtools::asBcf(), which the installed Rsamtools does not ",
+                "provide (\"{conditionMessage(e)}\"). Write a bgzipped VCF ",
+                "instead by giving the output path a .vcf.bgz extension."
+            )
+            abort(msg)
+        }
     )
 }
 

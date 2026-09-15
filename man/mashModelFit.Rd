@@ -22,8 +22,11 @@ mashModelFit(
 
 \item{alpha}{mash \code{alpha} (forwarded to \code{mashr::mash_set_data()}).}
 
-\item{priorCovariances}{The prior covariance list (\code{U}) to fit with --
-e.g. the \code{$U} of a \code{\link{mashPriorCovariances}} result.}
+\item{priorCovariances}{The prior covariance list (\code{U}) to fit with.
+Either shape the producers return is accepted: a bare named list of
+covariance matrices (\code{\link{mashCovarianceComponents}}) or the
+\code{list(U, w, loglik)} a \code{\link{mashPriorCovariances}} result
+carries, which is unwrapped to its \code{U}.}
 
 \item{vhat}{Residual correlation matrix (\code{V}); \code{NULL} -> identity.}
 
@@ -63,7 +66,7 @@ vhat <- diag(length(conds))
 dimnames(vhat) <- list(conds, conds)
 prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
   components = "canonical")
-model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
   vhat = vhat)
 }
 \seealso{

@@ -322,6 +322,22 @@ test_that("purity is NA for every set when there is no LD reference", {
     expect_equal(.crPuritiesFor(out, NULL), c(NA_real_, NA_real_))
 })
 
+test_that("purity is computed per set when an LD reference is supplied", {
+    # The counterpart of the NULL case above: with a panel in hand each set
+    # is mapped through .crPurityOne rather than short-circuiting to NA.
+    ids <- .cr_panelIds(3L)
+    out <- tibble(csVariants = list(ids, ids[[1L]]))
+    pur <- .crPuritiesFor(out, .cr_panel())
+    expect_length(pur, 2L)
+    expect_false(anyNA(pur))
+    expect_equal(pur[[2L]], 1) # singleton is pure by definition
+    expect_equal(
+        pur[[1L]],
+        .crPurityOne(ids, .cr_panel()),
+        tolerance = 1e-8
+    )
+})
+
 # ===========================================================================
 # Validity
 # ===========================================================================
@@ -350,4 +366,45 @@ test_that("validity names elements whose variants lack SNP.PP.H4", {
         mcols(bad[[1L]])$SNP.PP.H4 <- NULL,
         "have no SNP.PP.H4 column in their variant metadata"
     )
+})
+
+
+# ===========================================================================
+# Empty-input paths
+#
+# Every view above was built from a populated result, so the early returns
+# that answer an empty collection were never taken.
+# ===========================================================================
+
+test_that("the views answer an empty collection with empty tables", {
+    empty <- ColocResult(.cr_pairs(), .cr_variants())[0]
+    expect_equal(length(empty), 0L)
+    expect_equal(nrow(.crLongVariants(empty)), 0L)
+    expect_equal(.crPairFilter(empty, 0, FALSE), integer(0))
+    expect_equal(nrow(getColocGenes(empty)), 0L)
+})
+
+test_that("pivoting a per-row column that is absent yields the empty frame", {
+    # coloc only emits SNP.PP.H4.rowK for the rows it actually fitted.
+    expect_equal(nrow(.crPivotOne(9L, data.frame(a = 1))), 0L)
+})
+
+test_that("a NULL purity cutoff leaves the credible sets untouched", {
+    # NULL means "do not filter", which is different from filtering at 0.
+    out <- tibble(a = 1, purity = NA_real_)
+    expect_identical(.crApplyPurityFilter(out, NULL), out)
+})
+
+test_that("a pair with no variants contributes no credible set", {
+    # A fitted pair can still carry zero variants; it drops out of the credible
+    # set view rather than producing an empty row.
+    noVariants <- data.frame(
+        variant_id = character(0),
+        SNP.PP.H4 = numeric(0)
+    )
+    cr <- ColocResult(.cr_pairs(), list(noVariants))
+    expect_equal(length(cr[[1L]]), 0L)
+    expect_null(.crCsForPair(1L, cr, coverage = 0.95))
+    # ...and the accessor over that result is an empty table, not an error.
+    expect_equal(nrow(getColocCredibleSets(cr)), 0L)
 })

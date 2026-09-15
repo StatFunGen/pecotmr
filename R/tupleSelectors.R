@@ -426,8 +426,9 @@
             return(.tupleColumn(p, cn))
         }
     }
-    # unreachable: cn is always drawn from allCols, so some part has it
-    NULL # nocov
+    # Callers always draw `cn` from allCols, so in practice some part has it;
+    # the NULL is the honest answer when none does.
+    NULL
 }
 
 # Internal: row-bind two or more per-tuple collection objects (TwasWeights /

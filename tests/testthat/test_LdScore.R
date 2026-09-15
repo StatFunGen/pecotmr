@@ -111,3 +111,70 @@ test_that("validity requires the score columns to be present in mcols", {
     S4Vectors::mcols(bad)$ldScoreWeights <- NULL
     expect_error(methods::validObject(bad), "ldScoreWeights")
 })
+
+
+# =============================================================================
+# buildLdScore
+# =============================================================================
+
+test_that("buildLdScore computes per-block sums of r^2", {
+    ld <- makeTestLdData(n = 6L)
+    ref <- buildLdScore(ld)
+
+    expect_s4_class(ref, "LdScore")
+    expect_equal(length(ref), 6L)
+    expect_equal(colnames(getLdScores(ref)), "base_l2")
+    expect_equal(
+        as.vector(getLdScores(ref)[, 1]),
+        rowSums(unname(getCorrelation(ld))^2)
+    )
+})
+
+test_that("buildLdScore scores each block against only its own variants", {
+    ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
+    scores <- as.vector(getLdScores(buildLdScore(ld))[, 1])
+    perBlock <- unlist(lapply(getCorrelation(ld), function(R) rowSums(R^2)))
+
+    expect_equal(length(scores), 7L)
+    expect_equal(scores, perBlock)
+})
+
+# buildLdScore and computeLdScores(LdEigen) are two routes to the same
+# quantity -- sum_k r^2_jk versus sum_i V[j,i]^2 d[i]^2 -- so a disagreement
+# means one of them has drifted.
+test_that("buildLdScore agrees with computeLdScores on the same reference", {
+    for (ld in list(makeTestLdData(n = 6L), makeTestLdDataMultiBlock())) {
+        expect_equal(
+            as.vector(getLdScores(buildLdScore(ld))[, 1]),
+            as.vector(computeLdScores(buildLdEigen(ld))[, 1])
+        )
+    }
+})
+
+test_that("buildLdScore keeps per-block LD matrices for g-LDSC by default", {
+    ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
+    mats <- getLdMatrixList(buildLdScore(ld))
+
+    expect_equal(length(mats), 2L)
+    expect_equal(dim(mats[[1]]$R), c(4L, 4L))
+    expect_equal(mats[[1]]$snpIdx, 1:4)
+    expect_equal(mats[[2]]$snpIdx, 5:7)
+    expect_equal(
+        length(getLdMatrixList(buildLdScore(ld, keepLdMatrices = FALSE))),
+        0L
+    )
+})
+
+test_that("buildLdScore defaults weights to 1/max(l2, 1)", {
+    ld <- makeTestLdData(n = 6L)
+    ref <- buildLdScore(ld)
+    l2 <- as.vector(getLdScores(ref)[, 1])
+    expect_equal(getLdScoreWeights(ref), 1 / pmax(l2, 1))
+
+    custom <- buildLdScore(ld, ldScoreWeights = rep(2, 6))
+    expect_equal(getLdScoreWeights(custom), rep(2, 6))
+    expect_error(
+        buildLdScore(ld, ldScoreWeights = rep(2, 3)),
+        "3 value\\(s\\) for 6 variant\\(s\\)"
+    )
+})

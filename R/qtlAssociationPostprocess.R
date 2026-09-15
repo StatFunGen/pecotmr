@@ -25,13 +25,12 @@
 # Returns a numeric vector aligned to `p`.
 .qapSafeQvalue <- function(p) {
     if (!requireNamespace("qvalue", quietly = TRUE)) {
-        # nocov start  (optional-package guard; qvalue is Suggests-only)
+        # Optional-package guard; qvalue is Suggests-only.
         msg <- glue(
             "qtlAssociationPostprocess: the 'qvalue' package is required for ",
             "Storey q-values. Install Bioconductor 'qvalue'."
         )
         abort(msg)
-        # nocov end
     }
     tryCatch(
         qvalue::qvalue(p)$qvalues,

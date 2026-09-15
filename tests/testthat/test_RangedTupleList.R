@@ -812,3 +812,33 @@ test_that(".rtlTupleKeyCols is empty when there are no mcols", {
     gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 2))
     expect_equal(.rtlTupleKeyCols(gr), character(0))
 })
+
+
+test_that("`[[<-` rejects a non-scalar or NA index", {
+    x <- .rtl_makeKid()
+    expect_error(x[[c(1L, 2L)]] <- x[[1L]], "takes a single non-NA index")
+    expect_error(x[[NA_integer_]] <- x[[1L]], "takes a single non-NA index")
+})
+
+
+test_that("range keys of an empty collection are empty", {
+    expect_equal(
+        pecotmr:::.rtlRangeKeys(GenomicRanges::GRangesList()),
+        character(0)
+    )
+})
+
+test_that("seqinfo is left alone when the source carries none", {
+    # Nothing to restore from, so the rebuild is returned untouched.
+    empty <- new(
+        "RtlTestKid",
+        GenomicRanges::GRangesList(),
+        genome = "hg38",
+        ldSketch = NULL,
+        qcInfo = list()
+    )
+    grl <- GenomicRanges::GRangesList(
+        a = GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
+    )
+    expect_identical(pecotmr:::.rtlRestoreSeqinfo(grl, empty), grl)
+})

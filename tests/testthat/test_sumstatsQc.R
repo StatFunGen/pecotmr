@@ -7189,7 +7189,7 @@ test_that("dentistSingleWindow: rsq warning on a near-singular LD block", {
 
 test_that("harmonizeAlleles renames an empty target column to unnamed_N", {
     # 5 columns whose first four are positional (NOT literally named
-    # chrom/pos/A2/A1), so harmonizeAlleles routes through variantIdToDf -- which
+    # chrom/pos/A2/A1), so harmonizeAlleles routes through parseVariantId -- which
     # preserves the extra column -- rather than the select()-based path. The 5th
     # column has an empty name, so the joined matchResult carries an empty-named
     # column and sanitizeNames() rewrites it to "unnamed_1" (sumstatsQc.R:83).

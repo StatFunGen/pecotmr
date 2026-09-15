@@ -8,7 +8,7 @@ mashPriorCovariances(
   sumStatsList,
   alpha,
   vhat = NULL,
-  components = c("canonical", "pca", "flash", "flash_nonneg"),
+  components = c("canonical", "pca", "flash", "flashNonneg"),
   engine = c("cov_ed", "ud", "ud_ted"),
   nPcs = NULL,
   priorCovariances = NULL,
@@ -29,7 +29,7 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 
 \item{components}{Data-driven covariance components, any of
 \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
-\code{cov_flash}), \code{"flash_nonneg"} (\code{cov_flash(factors =
+\code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
 "nonneg")}). Built in that fixed order. Ignored by the \code{"ud"} /
 \code{"ud_ted"} engines.}
 
@@ -43,12 +43,16 @@ not the default; \code{"ud_ted"} additionally needs i.i.d. (z-scale) data).}
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 
 \item{priorCovariances}{Optional caller-supplied prior \code{U}: a non-empty
-named list of \code{nCond x nCond} matrices. When supplied, the covariance
-chain is bypassed and only the mixture-weight fit runs.}
+named list of \code{nCond x nCond} matrices, or a
+\code{\link{mashPriorCovariances}} result, which is unwrapped to its
+\code{U}. When supplied, the covariance chain is bypassed and only the
+mixture-weight fit runs.}
 
 \item{priorComponents}{Optional caller-supplied raw covariance components (a
 non-empty named list, e.g. the concatenated
-\code{\link{mashCovarianceComponents}} outputs). When supplied, these are
+\code{\link{mashCovarianceComponents}} outputs, or a
+\code{\link{mashPriorCovariances}} result, which is unwrapped to its
+\code{U}). When supplied, these are
 refined by \code{engine} instead of being rebuilt internally -- the
 mixture-prior pipeline where separate steps built the components.
 \code{components} / \code{nPcs} are then ignored. Distinct from
@@ -76,7 +80,7 @@ Build the mash prior covariance list \code{U} and mixture
   collection. Split out of \code{\link{mashPipeline}} so the
   covariance-estimation chain lives in one place. The default builds every
   non-udr covariance component (\code{canonical + pca + flash +
-  flash_nonneg}) and refines them with mashr extreme deconvolution
+  flashNonneg}) and refines them with mashr extreme deconvolution
   (\code{cov_ed}).
 }
 \examples{

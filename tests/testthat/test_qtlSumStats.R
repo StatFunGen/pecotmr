@@ -603,3 +603,63 @@ test_that("combineQtlSumStats() passes a lone input through and validates", {
         "every input must be a QtlSumStats"
     )
 })
+
+
+# ===========================================================================
+# Trait-distance annotation and validity messages
+# ===========================================================================
+
+test_that("trait distances are added to an entry that carries no mcols", {
+    # Regression: mcols() on a bare GRanges is a zero-COLUMN DataFrame that
+    # still has one row per variant. Swapping it for DataFrame(row.names =
+    # NULL) discarded the row count and the assignment died with
+    # "2 elements in value to replace 0 elements".
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(10L, 20L), width = 1L)
+    )
+    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(5L, width = 1L))
+    out <- pecotmr:::.qssAppendTraitDist(1L, list(gr), tp)
+    expect_equal(S4Vectors::mcols(out)$tss_distance, c(5L, 15L))
+    expect_equal(S4Vectors::mcols(out)$tes_distance, c(5L, 15L))
+})
+
+test_that("existing mcols survive the trait-distance annotation", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(10L, 20L), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(z = c(1.5, 2.5))
+    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(5L, width = 1L))
+    out <- pecotmr:::.qssAppendTraitDist(1L, list(gr), tp)
+    expect_equal(
+        colnames(S4Vectors::mcols(out)),
+        c("z", "tss_distance", "tes_distance")
+    )
+    expect_equal(S4Vectors::mcols(out)$z, c(1.5, 2.5))
+})
+
+test_that("an entry with no variants is returned untouched", {
+    gr0 <- GenomicRanges::GRanges()
+    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(5L, width = 1L))
+    expect_equal(length(pecotmr:::.qssAppendTraitDist(1L, list(gr0), tp)), 0L)
+})
+
+test_that("validity names the identity columns that are missing", {
+    data(qtlSumStatsExample)
+    bad <- qtlSumStatsExample
+    S4Vectors::mcols(bad)$trait <- NULL
+    expect_equal(
+        pecotmr:::.qssCheckRequiredCols(bad),
+        "missing columns: trait"
+    )
+    expect_null(pecotmr:::.qssCheckRequiredCols(qtlSumStatsExample))
+})
+
+test_that(".appendTraitDistances is a no-op without a trait position", {
+    entry <- list(
+        GenomicRanges::GRanges("chr1", IRanges::IRanges(100, width = 1))
+    )
+    # No anchor to measure TSS/TES distance from, so entries pass through.
+    expect_identical(pecotmr:::.appendTraitDistances(entry, NULL), entry)
+})

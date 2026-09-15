@@ -7,7 +7,7 @@
 filterRelatedness(
   relatedness,
   relatednessThreshold = 0.0625,
-  analysisType = c("maximize_unrelated", "maximize_cases"),
+  analysisType = c("maximizeUnrelated", "maximizeCases"),
   relatednessIid1 = "IID1",
   relatednessIid2 = "IID2",
   relatednessFid1 = NULL,
@@ -33,8 +33,8 @@ filterRelatedness(
 \item{relatednessThreshold}{Kinship threshold above which individuals are
 considered related (default 0.0625, i.e. 2nd degree).}
 
-\item{analysisType}{One of \code{"maximize_unrelated"} (default) or
-\code{"maximize_cases"}. The latter preserves cases in case-control
+\item{analysisType}{One of \code{"maximizeUnrelated"} (default) or
+\code{"maximizeCases"}. The latter preserves cases in case-control
 studies.}
 
 \item{relatednessIid1}{Column name for first individual ID (default "IID1").}
@@ -49,7 +49,7 @@ studies.}
 "PI_HAT").}
 
 \item{phenoData}{A data.frame with columns \code{IID} and the column named by
-\code{phenoCol}. Required when \code{analysisType = "maximize_cases"}.}
+\code{phenoCol}. Required when \code{analysisType = "maximizeCases"}.}
 
 \item{phenoCol}{Column name for the phenotype (default "pheno"). Expected to
 be binary (1 = case, 0 = control).}
