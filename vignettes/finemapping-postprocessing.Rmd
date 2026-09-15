@@ -90,13 +90,15 @@ rather than dropping such sets silently.
 
 A multi-effect SuSiE fit can return credible sets that overlap, especially
 when two effects are in strong LD. `mergeSusieCs()` collapses those into one
-row per variant, keeping the smallest credible-set index a variant belongs
-to:
+row per variant: `credibleSetNames` labels every set the variant belongs to
+(comma-joined when it belongs to more than one), and `maxPip` / `medianPip`
+summarise its PIP across them. The example fit has a single set, so each
+label names just that one:
 
 ```{r merge-cs}
 merged <- mergeSusieCs(qtlFineMappingExample, coverage = 0.95)
 dim(merged)
-head(as.data.frame(merged)[, c("variant_id", "cs", "pip")], 4)
+head(as.data.frame(merged), 4)
 ```
 
 Use it when downstream code needs a variant to belong to at most one set —
@@ -151,11 +153,18 @@ combined <- combineFineMappingResults(
     qtlFineMappingLbfExample
 )
 nrow(combined)
-as.data.frame(combined)[, c("study", "context", "trait", "method")]
+data.frame(
+    study = combined$study,
+    context = combined$context,
+    trait = combined$trait,
+    method = combined$method
+)
 ```
 
 The inputs keep their own identity columns, so a combined object still
-distinguishes which study and method each row came from.
+distinguishes which study and method each row came from. Note that the
+identity columns are read with `$`: `as.data.frame()` on a collection
+flattens its *variants*, not its per-row metadata.
 
 ## Between-credible-set correlation
 

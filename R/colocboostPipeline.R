@@ -154,9 +154,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # Run colocboost() with tryCatch + timing.
 .cbRun <- function(label, args) {
     if (!requireNamespace("colocboost", quietly = TRUE)) {
-        # nocov start
         abort("The colocboost package is required for colocboostPipeline().")
-        # nocov end
     }
     t1 <- Sys.time()
     args <- compact(args)

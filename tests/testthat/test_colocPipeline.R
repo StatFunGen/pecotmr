@@ -1205,3 +1205,65 @@ test_that("colocPipeline publishes coloc's variant count as nSnps", {
     already <- data.frame(nSnps = 7L)
     expect_equal(.colocRenameNsnps(already)$nSnps, 7L)
 })
+
+
+test_that("an explicit blockId is preferred over the derived range key", {
+    # blockId keys the external block manifest, so it carries the true block
+    # BOUNDARIES rather than the span of whichever variants survived QC.
+    data(gwasFineMappingExample)
+    expect_equal(
+        pecotmr:::.colocGwasBlockIds(gwasFineMappingExample),
+        "region_1"
+    )
+    # Without the column the identity falls back to the variant span.
+    g <- gwasFineMappingExample
+    S4Vectors::mcols(g)$blockId <- NULL
+    expect_equal(
+        pecotmr:::.colocGwasBlockIds(g),
+        pecotmr:::.rtlRangeKeys(g)
+    )
+    expect_match(pecotmr:::.colocGwasBlockIds(g), "^chr22_")
+})
+
+test_that("an enrichment axis neither side has matches on NA", {
+    # `==` evaluates to NA against an absent axis, which would drop every row;
+    # the NA-wanted case has to match NA values explicitly instead.
+    f <- pecotmr:::.colocEnrichmentColumnMatches
+    enr <- data.frame(a = c("x", NA))
+    expect_equal(f("a", enr, list(a = NA_character_)), c(FALSE, TRUE))
+    expect_equal(f("a", enr, list(a = "x")), c(TRUE, FALSE))
+})
+
+
+test_that("PIP adjustment is skipped when either side has no rows", {
+    # Intersecting variants across an empty side would empty the other, so
+    # the inputs are passed through untouched instead.
+    data(qtlFineMappingExample, gwasFineMappingExample)
+    p <- list(
+        adjustPips = TRUE,
+        qtlFineMappingResult = qtlFineMappingExample[0],
+        gwasFmr = gwasFineMappingExample
+    )
+    expect_identical(pecotmr:::.colocMaybeAdjustPips(p), p)
+    # ...and it is skipped outright when not requested.
+    p2 <- list(
+        adjustPips = FALSE,
+        qtlFineMappingResult = qtlFineMappingExample,
+        gwasFmr = gwasFineMappingExample
+    )
+    expect_identical(pecotmr:::.colocMaybeAdjustPips(p2), p2)
+})
+
+test_that("pre-extracting LBF from an empty GWAS result yields no blocks", {
+    data(gwasFineMappingExample)
+    expect_equal(
+        pecotmr:::.colocPreextractGwasLbf(
+            gwasFineMappingExample[0],
+            FALSE,
+            FALSE,
+            FALSE,
+            1e-9
+        ),
+        list()
+    )
+})

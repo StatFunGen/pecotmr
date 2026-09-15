@@ -645,3 +645,90 @@ test_that("writeSumStatsVcf(FineMappingResult): falls back to marginal sumstats 
     expect_true(file.exists(out))
     expect_true(any(grepl("ID=ES", readLines(out), fixed = TRUE))) # marginal beta -> ES
 })
+
+
+# ===========================================================================
+# Output formats
+# ===========================================================================
+
+test_that("plain and bgzipped VCF are written, the latter with an index", {
+    skip_if_not_installed("VariantAnnotation")
+    data(gwasSumStatsS4Example)
+    d <- withr::local_tempdir()
+    writeSumStatsVcf(gwasSumStatsS4Example, outputPath = file.path(d, "a.vcf"))
+    expect_true(file.exists(file.path(d, "a.vcf")))
+    writeSumStatsVcf(
+        gwasSumStatsS4Example,
+        outputPath = file.path(d, "b.vcf.bgz")
+    )
+    expect_true(file.exists(file.path(d, "b.vcf.bgz")))
+    # index = TRUE, so the tabix index is written alongside.
+    expect_true(file.exists(file.path(d, "b.vcf.bgz.tbi")))
+})
+
+test_that("BCF output explains itself when Rsamtools cannot convert", {
+    # Rsamtools >= 2.26 raises "asBcf() is temporarily disabled". Left bare
+    # that surfaces as an opaque failure from a documented output format, so
+    # it is translated into the cause plus the workaround.
+    skip_if_not_installed("VariantAnnotation")
+    skip_if_not_installed("Rsamtools")
+    data(gwasSumStatsS4Example)
+    d <- withr::local_tempdir()
+    canConvert <- !inherits(
+        tryCatch(
+            Rsamtools::asBcf("nonexistent", "x", "y"),
+            error = function(e) e
+        ),
+        "error"
+    )
+    skip_if(canConvert, "Rsamtools::asBcf() works here; nothing to translate")
+    expect_error(
+        writeSumStatsVcf(
+            gwasSumStatsS4Example,
+            outputPath = file.path(d, "c.bcf")
+        ),
+        "BCF output needs a working Rsamtools::asBcf"
+    )
+})
+
+test_that(".vcfResolveBody uses posterior rows when no marginals exist", {
+    local_mocked_bindings(
+        getTopLoci = function(entry, signalCutoff) {
+            data.frame(variant_id = c("v1", "v2"), pip = c(0.9, 0.1))
+        },
+        getMarginalEffects = function(entry) stop("none"),
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.vcfResolveBody("e", "S1")
+    expect_true(out$hasPost)
+    expect_equal(nrow(out$base), 2L)
+    # No marginal table to align against, so there is nothing to merge in.
+    expect_null(out$m)
+})
+
+test_that(".writeVcfImpl adds the chr prefix to bare chromosome names", {
+    skip_if_not_installed("VariantAnnotation")
+    out <- tempfile(fileext = ".vcf")
+    on.exit(unlink(out), add = TRUE)
+    geno <- matrix(c(1.5, -0.5), ncol = 1L, dimnames = list(NULL, "S1"))
+    header <- S4Vectors::DataFrame(
+        Number = "1",
+        Type = "Float",
+        Description = "Z score",
+        row.names = "Z"
+    )
+    pecotmr:::.writeVcfImpl(
+        chrom = c("1", "1"),
+        pos = c(100L, 200L),
+        ref = c("A", "C"),
+        alt = c("G", "T"),
+        snpIds = c("rs1", "rs2"),
+        geno = list(Z = geno),
+        genoHeader = header,
+        sampleName = "S1",
+        outputPath = out
+    )
+    body <- readLines(out)
+    body <- body[!startsWith(body, "#")]
+    expect_true(all(startsWith(body, "chr1\t")))
+})

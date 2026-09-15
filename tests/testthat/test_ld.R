@@ -4353,3 +4353,601 @@ test_that("panel identity uses the allele-repaired ids for comparison", {
         pecotmr:::.ldSketchVariantIds(panel)
     )
 })
+
+
+# ===========================================================================
+# Sketch accessors and per-variant panel statistics
+# ===========================================================================
+
+test_that("the sketch accessors are NULL-safe", {
+    # A collection with no LD sketch is a legitimate state (individual-level
+    # inputs), so these answer NULL rather than erroring.
+    expect_null(pecotmr:::.ldSketchHandle(NULL))
+    expect_null(pecotmr:::.ldSketchSubset(NULL, 1L))
+})
+
+test_that("panel statistics report zero missingness for a sample-less panel", {
+    # With no samples the missing RATE is undefined as 1 - nObs/nSamp; report
+    # 0 per variant rather than NaN, which would poison the QC comparisons.
+    d0 <- matrix(numeric(0), nrow = 0L, ncol = 3L)
+    expect_equal(pecotmr:::.panelVariantStats(d0)$missRate, rep(0, 3L))
+})
+
+test_that("panel allele frequencies are computed per variant", {
+    d <- matrix(c(0, 1, 2, 0, 0, 0), nrow = 2L, byrow = TRUE)
+    st <- pecotmr:::.panelVariantStats(d)
+    expect_equal(st$af, c(0, 0.25, 0.5))
+    # maf folds above 0.5.
+    expect_equal(st$maf, pmin(st$af, 1 - st$af))
+})
+
+
+test_that("panel variant filtering is a no-op without a panel or variants", {
+    # Both early exits return the caller's ids unchanged: with no panel there
+    # is nothing to filter against, and with no variants nothing to filter.
+    expect_equal(
+        pecotmr:::.panelVariantFilter(NULL, c("v1", "v2")),
+        c("v1", "v2")
+    )
+    expect_equal(
+        pecotmr:::.panelVariantFilter(NULL, character(0)),
+        character(0)
+    )
+})
+
+
+# ===========================================================================
+# Empty sketches, the .afreq fast path, and design rank
+# ===========================================================================
+
+test_that("emptying a sketch clears both axes", {
+    # An emptied sketch references no LD, so its sample axis is dead weight;
+    # nSamples must go to 0 alongside sampleIds or the derived dosage
+    # dimnames would disagree with the matrix.
+    expect_null(pecotmr:::.emptySketch(NULL))
+    h <- new(
+        "GenotypeHandle",
+        path = "/tmp/x.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = c("a", "b"),
+            CHR = "1",
+            BP = 1:2,
+            A1 = "A",
+            A2 = "G",
+            fileIdx = 1:2,
+            stringsAsFactors = FALSE
+        ),
+        nSamples = 2L,
+        sampleIds = c("s1", "s2"),
+        pgenPtr = NULL
+    )
+    e <- pecotmr:::.emptySketch(h)
+    expect_equal(nrow(pecotmr:::getSnpInfo(e)), 0L)
+    expect_equal(length(pecotmr:::getSampleIds(e)), 0L)
+})
+
+test_that("a missing or malformed afreq sidecar degrades to no frequencies", {
+    # The sidecar is optional; a bad one must not take the whole filter down,
+    # it just falls back to reading dosage.
+    expect_null(pecotmr:::.panelAfreqTable("/nonexistent/prefix"))
+    h <- new(
+        "GenotypeHandle",
+        path = "/tmp/x.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = c("a", "b"),
+            CHR = "1",
+            BP = 1:2,
+            A1 = "A",
+            A2 = "G",
+            fileIdx = 1:2,
+            stringsAsFactors = FALSE
+        ),
+        nSamples = 2L,
+        sampleIds = c("s1", "s2"),
+        pgenPtr = NULL
+    )
+    # The fast path is plink2-only.
+    expect_null(pecotmr:::.panelAfreqMaf(h, c("a", "b")))
+})
+
+test_that("collinear design columns are reported, full-rank ones are not", {
+    full <- matrix(
+        c(1, 0, 0, 1),
+        2L,
+        2L,
+        dimnames = list(NULL, c("a", "b"))
+    )
+    expect_equal(
+        pecotmr:::.edfrProblematicColnames(full, full),
+        character(0)
+    )
+    # b is a multiple of a: QR pivots it past the rank boundary.
+    dup <- cbind(a = c(1, 0), b = c(2, 0))
+    expect_equal(pecotmr:::.edfrProblematicColnames(dup, dup), "b")
+})
+
+test_that("computeLd refuses snpIdx against an already-materialized block", {
+    # snpIdx selects variants FROM a panel; a bare matrix is already the
+    # block, so accepting it would silently ignore the subscript.
+    expect_error(
+        computeLd(matrix(rnorm(20), 10L, 2L), snpIdx = 1L),
+        "`snpIdx` selects variants from a genotype panel"
+    )
+})
+
+
+# ===========================================================================
+# Block-indexed sources and LdData subsetting
+# ===========================================================================
+
+test_that("a block-indexed source must be addressable by block", {
+    # `block` only means something for a meta file, an ldInfo frame, a matrix
+    # or a list of them; anything else is refused rather than silently
+    # returning the wrong block.
+    expect_error(
+        pecotmr:::.loadLdFromIndexed("a string", 1L, FALSE),
+        "cannot address a character by block"
+    )
+})
+
+test_that("a matrix and a list of matrices both address by block", {
+    R <- diag(3)
+    dimnames(R) <- list(c("v1", "v2", "v3"), c("v1", "v2", "v3"))
+    expect_s4_class(pecotmr:::.loadLdFromIndexed(R, 1L, FALSE), "LdData")
+    # The list form picks the requested element.
+    both <- pecotmr:::.loadLdFromIndexed(list(R, R), 2L, FALSE)
+    expect_s4_class(both, "LdData")
+    expect_equal(length(both), 3L)
+})
+
+test_that("materializing genotypes is a no-op without genotypes to read", {
+    # Both exits return the LdData untouched: not requested, and requested
+    # but the source is a correlation matrix with nothing to materialize.
+    R <- diag(3)
+    dimnames(R) <- list(c("v1", "v2", "v3"), c("v1", "v2", "v3"))
+    ld <- pecotmr:::.ldDataFromMatrix(R, isGenotype = FALSE)
+    expect_identical(pecotmr:::.ldApplyMaterialize(ld, FALSE), ld)
+    expect_identical(pecotmr:::.ldApplyMaterialize(ld, TRUE), ld)
+})
+
+test_that("subsetting an LdData narrows the correlation on both axes", {
+    R <- diag(3)
+    dimnames(R) <- list(c("v1", "v2", "v3"), c("v1", "v2", "v3"))
+    ld <- pecotmr:::.ldDataFromMatrix(R, isGenotype = FALSE)
+    out <- pecotmr:::.ldSubsetData(ld, c(1L, 3L))
+    expect_equal(length(out), 2L)
+    expect_equal(dim(getCorrelation(out)), c(2L, 2L))
+})
+
+# ---------------------------------------------------------------------------
+# LdData narrowing and materialization: each genotype source shape (matrix,
+# handle + snpIdx, mixture list) narrows differently, and only the matrix
+# shape can be materialized.
+# ---------------------------------------------------------------------------
+
+.ldcov_gr <- function(variant_ids, af = NULL) {
+    rp <- pecotmr:::parseVariantId(variant_ids)
+    rp$variant_id <- variant_ids
+    if (!is.null(af)) {
+        rp$allele_freq <- af
+    }
+    pecotmr:::.refPanelToGranges(rp)
+}
+
+.ldcov_bm <- function(n) {
+    data.frame(
+        blockId = 1L,
+        chrom = "chr1",
+        blockStart = 100,
+        blockEnd = 100 * n,
+        size = n,
+        startIdx = 1L,
+        endIdx = n,
+        stringsAsFactors = FALSE
+    )
+}
+
+.ldcov_handle <- function() {
+    new(
+        "GenotypeHandle",
+        path = "/tmp/test.gds",
+        format = "gds",
+        snpInfo = data.frame(),
+        nSamples = 0L,
+        sampleIds = character(),
+        pgenPtr = NULL
+    )
+}
+
+test_that(".loadLdDedup passes through when there are no variant ids", {
+    # A GRanges with no variant_id column: getVariantIds() is NULL, so there
+    # is nothing to deduplicate against.
+    bare <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100, 200, 300), width = 1)
+    )
+    ld <- LdData(
+        correlation = diag(3),
+        variants = bare,
+        blockMetadata = .ldcov_bm(3L)
+    )
+    expect_null(getVariantIds(ld))
+    expect_identical(pecotmr:::.loadLdDedup(ld), ld)
+})
+
+test_that(".ldApplyMonomorphic keeps an all-polymorphic block unchanged", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    ld <- LdData(
+        correlation = diag(3),
+        variants = .ldcov_gr(v, af = c(0.2, 0.3, 0.4)),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    # Every allele_freq is strictly inside (0, 1), so no subset is taken.
+    expect_identical(pecotmr:::.ldApplyMonomorphic(ld, TRUE), ld)
+})
+
+test_that(".ldApplyMonomorphic needs an allele_freq column to act", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    ld <- LdData(
+        correlation = diag(3),
+        variants = .ldcov_gr(v),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    # No frequencies to judge monomorphism by, so the request is a no-op
+    # rather than an error -- distinct from the all-polymorphic case.
+    expect_false(is_in("allele_freq", colnames(getRefPanel(ld))))
+    expect_identical(pecotmr:::.ldApplyMonomorphic(ld, TRUE), ld)
+})
+
+test_that(".ldApplyMonomorphic drops monomorphic variants", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    ld <- LdData(
+        correlation = diag(3),
+        variants = .ldcov_gr(v, af = c(0.2, 0.0, 0.4)),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    out <- pecotmr:::.ldApplyMonomorphic(ld, TRUE)
+    expect_equal(getVariantIds(out), c("chr1:100:A:G", "chr1:300:G:A"))
+    expect_equal(dim(getCorrelation(out)), c(2L, 2L))
+})
+
+test_that(".ldApplyMaterialize leaves a mixture list alone", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    m1 <- matrix(0, nrow = 4L, ncol = 3L, dimnames = list(NULL, v))
+    m2 <- matrix(1, nrow = 4L, ncol = 3L, dimnames = list(NULL, v))
+    ld <- LdData(
+        correlation = NULL,
+        genotypeHandle = list(m1, m2),
+        mixtureWeights = c(0.5, 0.5),
+        variants = .ldcov_gr(v),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    # getGenotypes() on a mixture returns a LIST of dosage matrices; there is
+    # no single matrix to fold into the object.
+    expect_false(is.matrix(getGenotypes(ld)))
+    expect_identical(pecotmr:::.ldApplyMaterialize(ld, TRUE), ld)
+})
+
+test_that(".ldSubsetData narrows a dosage matrix by column", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    m <- matrix(0, nrow = 4L, ncol = 3L, dimnames = list(NULL, v))
+    ld <- LdData(
+        correlation = NULL,
+        genotypeHandle = m,
+        snpIdx = NULL,
+        variants = .ldcov_gr(v),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    out <- pecotmr:::.ldSubsetData(ld, c(1L, 3L))
+    expect_equal(dim(pecotmr:::getGenotypeHandle(out)), c(4L, 2L))
+    expect_equal(getVariantIds(out), c("chr1:100:A:G", "chr1:300:G:A"))
+})
+
+test_that(".ldSubsetData narrows a handle through snpIdx", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    ld <- LdData(
+        correlation = NULL,
+        genotypeHandle = .ldcov_handle(),
+        snpIdx = c(5L, 6L, 7L),
+        variants = .ldcov_gr(v),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    out <- pecotmr:::.ldSubsetData(ld, c(1L, 3L))
+    # The handle is untouched; snpIdx selects into its full snpInfo, so
+    # subsetting picks positions 1 and 3 OF THE INDEX, not of the file.
+    expect_equal(pecotmr:::getSnpIdx(out), c(5L, 7L))
+    expect_equal(getVariantIds(out), c("chr1:100:A:G", "chr1:300:G:A"))
+})
+
+test_that(".ldSketchMatchIds returns bare ids when alleles are absent", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100, 200), width = 1)
+    )
+    S4Vectors::mcols(gr)$SNP <- c("chr1:100:A:G", "chr1:200:C:T")
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(x = matrix(0, nrow = 2L, ncol = 1L)),
+        rowRanges = gr
+    )
+    # With no A1/A2 columns there is nothing to repair the ids against.
+    expect_equal(
+        pecotmr:::.ldSketchMatchIds(se),
+        c("chr1:100:A:G", "chr1:200:C:T")
+    )
+})
+
+test_that(".panelVariantFilter is a no-op without a sketch", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    # An active cutoff still cannot filter anything with no panel to read
+    # frequencies from.
+    expect_equal(
+        pecotmr:::.panelVariantFilter(NULL, v, mafCutoff = 0.01),
+        v
+    )
+    expect_equal(
+        pecotmr:::.panelVariantFilter(NULL, character(0), mafCutoff = 0.01),
+        character(0)
+    )
+})
+
+test_that(".panelVariantFilter is a no-op when nothing matches the panel", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100, 200), width = 1)
+    )
+    S4Vectors::mcols(gr)$SNP <- c("chr1:100:A:G", "chr1:200:C:T")
+    sketch <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(x = matrix(0, nrow = 2L, ncol = 1L)),
+        rowRanges = gr
+    )
+    ids <- c("chr9:999:A:G", "chr9:888:C:T")
+    # The sketch exists but shares no variant with the request, so there is
+    # no frequency to filter on and the ids pass through untouched.
+    expect_equal(
+        pecotmr:::.panelVariantFilter(sketch, ids, mafCutoff = 0.01),
+        ids
+    )
+})
+
+test_that(".ldSketchNullGuard names the label in its strict error", {
+    expect_error(
+        pecotmr:::.ldSketchNullGuard("Q", NULL, "myPipe", "myLabel", "strict"),
+        "ldSketch on `myLabel` is non-NULL"
+    )
+    expect_error(
+        pecotmr:::.ldSketchNullGuard("Q", NULL, "myPipe", NULL, "strict"),
+        "qtl ldSketch is non-NULL"
+    )
+    # lenient tolerates the same input.
+    expect_true(
+        pecotmr:::.ldSketchNullGuard("Q", NULL, "myPipe", "myLabel", "lenient")
+    )
+})
+
+test_that(".ldSketchCheckContent rejects panels on different chromosomes", {
+    mkSe <- function(chr, pos) {
+        g <- GenomicRanges::GRanges(chr, IRanges::IRanges(pos, width = 1))
+        S4Vectors::mcols(g)$SNP <- str_c(chr, ":", pos, ":A:G")
+        SummarizedExperiment::SummarizedExperiment(
+            assays = list(x = matrix(0, nrow = length(pos), ncol = 1L)),
+            rowRanges = g
+        )
+    }
+    expect_error(
+        pecotmr:::.ldSketchCheckContent(
+            mkSe("chr1", c(100, 200)),
+            mkSe("chr2", c(100, 200)),
+            "myPipe",
+            " between X and Y"
+        ),
+        "differ in column CHR between X and Y"
+    )
+})
+
+test_that(".blockPairMessages is silent on a clean block pair", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    m <- diag(3)
+    rownames(m) <- colnames(m) <- v
+    # Cross-block correlation is zero everywhere, which is what a correct
+    # block structure looks like.
+    bm <- data.frame(startIdx = c(1L, 2L), endIdx = c(1L, 3L))
+    expect_equal(
+        pecotmr:::.blockPairMessages(1L, 2L, bm, m, v, 3L),
+        character(0)
+    )
+})
+
+test_that(".dropCollinearPickCor is reproducible under a seed", {
+    X <- cbind(a = c(1, 2, 3, 4, 5), b = c(1, 2, 3, 4, 5.0001))
+    first <- pecotmr:::.dropCollinearPickCor(X, c(1L, 2L), FALSE, seed = 42L)
+    second <- pecotmr:::.dropCollinearPickCor(X, c(1L, 2L), FALSE, seed = 42L)
+    # Two candidates means the choice is random; the seed pins it.
+    expect_identical(first, second)
+    expect_true(first %in% c(1L, 2L))
+})
+
+test_that("extractLdMatrix returns the correlation when genotypes are absent", {
+    v <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    ld <- LdData(
+        correlation = diag(3),
+        variants = .ldcov_gr(v),
+        blockMetadata = .ldcov_bm(3L)
+    )
+    expect_false(hasGenotypes(ld))
+    # wantGenotype is honoured only when genotypes exist; otherwise the
+    # correlation is returned rather than erroring.
+    expect_equal(dim(pecotmr:::extractLdMatrix(ld)), c(3L, 3L))
+    expect_equal(
+        dim(pecotmr:::extractLdMatrix(ld, wantGenotype = TRUE)),
+        c(3L, 3L)
+    )
+})
+
+# ---------------------------------------------------------------------------
+# computeLd default index: with snpIdx = NULL every variant in the panel is
+# used, on both the in-memory and the on-disk route.
+# ---------------------------------------------------------------------------
+
+test_that("computeLd(panel) defaults to the panel's whole variant set", {
+    panel <- readGenotypes(
+        path = test_path("test_data", "test_variants.gds"),
+        format = "gds"
+    )
+    sub <- panel[1:6, ]
+    R <- computeLd(sub)
+    expect_equal(dim(R), c(6L, 6L))
+    expect_equal(unname(diag(R)), rep(1, 6L))
+    # The NULL default must agree with spelling the index out.
+    expect_equal(unname(R), unname(computeLd(sub, snpIdx = 1:6)))
+})
+
+test_that("computeLd(onDisk) defaults to every variant in the panel", {
+    skip_if_not_installed("SNPRelate")
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants.gds"),
+        format = "gds"
+    )
+    R <- computeLd(handle, backend = "snprelate", onDisk = TRUE)
+    n <- nrow(pecotmr:::getSnpInfo(handle))
+    expect_equal(dim(R), c(n, n))
+    expect_identical(rownames(R), pecotmr:::getSnpInfo(handle)$SNP)
+})
+
+test_that("computeLd(onDisk) applies shrinkage toward the identity", {
+    skip_if_not_installed("SNPRelate")
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants.gds"),
+        format = "gds"
+    )
+    idx <- 1:6
+    plain <- computeLd(handle, snpIdx = idx, backend = "snprelate",
+        onDisk = TRUE)
+    shrunk <- computeLd(handle, snpIdx = idx, backend = "snprelate",
+        onDisk = TRUE, shrinkage = 0.5)
+    # (1 - s) * R + s * I: off-diagonals halve, the diagonal stays 1.
+    expect_equal(unname(diag(shrunk)), rep(1, length(idx)))
+    expect_equal(
+        unname(shrunk[upper.tri(shrunk)]),
+        unname(0.5 * plain[upper.tri(plain)])
+    )
+})
+
+# ---------------------------------------------------------------------------
+# .ldInfoBlock: an `ldInfo` row names the LD matrix, and the variant metadata
+# is either named alongside it or auto-detected from the LD path.
+# ---------------------------------------------------------------------------
+
+test_that(".ldInfoBlock reads a block with an explicit SNP_file", {
+    ldFile <- file.path(
+        geno_test_data_dir,
+        "LD_block_1.chr1_1000_1200.float16.txt.xz"
+    )
+    bimFile <- file.path(
+        geno_test_data_dir,
+        "LD_block_1.chr1_1000_1200.float16.bim"
+    )
+    out <- pecotmr:::.ldInfoBlock(
+        data.frame(
+            LD_file = ldFile,
+            SNP_file = bimFile,
+            stringsAsFactors = FALSE
+        ),
+        1L
+    )
+    # Both ldInfo sources return an LdData, so the post-load chain does not
+    # have to branch on which kind of LD_file it was given.
+    expect_s4_class(out, "LdData")
+    expect_equal(dim(getCorrelation(out)), c(5L, 5L))
+    expect_equal(
+        head(getVariantIds(out), 3L),
+        c("chr1:1000:A:G", "chr1:1040:A:G", "chr1:1080:A:G")
+    )
+    # The .bim coordinates are carried through rather than replaced with the
+    # chrNA:1..n placeholders a bare matrix would get.
+    refPanel <- getRefPanel(out)
+    expect_equal(as.character(refPanel$chrom[[1L]]), "chr1")
+    expect_equal(as.integer(refPanel$pos[[1L]]), 1000L)
+})
+
+test_that("loadLdMatrix reads an ldInfo table of precomputed LD", {
+    info <- data.frame(
+        LD_file = file.path(
+            geno_test_data_dir,
+            "LD_block_1.chr1_1000_1200.float16.txt.xz"
+        ),
+        SNP_file = file.path(
+            geno_test_data_dir,
+            "LD_block_1.chr1_1000_1200.float16.bim"
+        ),
+        stringsAsFactors = FALSE
+    )
+    # End-to-end: the whole post-load chain (dedup, monomorphic, subsample,
+    # materialize) runs against a precomputed block, not just a genotype one.
+    out <- loadLdMatrix(info, block = 1L)
+    expect_s4_class(out, "LdData")
+    expect_equal(length(getVariantIds(out)), 5L)
+    expect_equal(unname(diag(getCorrelation(out))), rep(1, 5L))
+})
+
+test_that(".ldInfoBlock auto-detects the variant file beside the matrix", {
+    # Auto-detection APPENDS the suffix to the LD path, so the companion of
+    # `block.cor.xz` is `block.cor.xz.bim` -- not a sibling with the LD
+    # extension swapped out.
+    dir <- withr::local_tempdir()
+    ldFile <- file.path(dir, "block.cor.xz")
+    file.copy(
+        file.path(
+            geno_test_data_dir,
+            "LD_block_1.chr1_1000_1200.float16.txt.xz"
+        ),
+        ldFile
+    )
+    file.copy(
+        file.path(
+            geno_test_data_dir,
+            "LD_block_1.chr1_1000_1200.float16.bim"
+        ),
+        str_c(ldFile, ".bim")
+    )
+    auto <- pecotmr:::.ldInfoBlock(
+        data.frame(LD_file = ldFile, stringsAsFactors = FALSE),
+        1L
+    )
+    explicit <- pecotmr:::.ldInfoBlock(
+        data.frame(
+            LD_file = ldFile,
+            SNP_file = str_c(ldFile, ".bim"),
+            stringsAsFactors = FALSE
+        ),
+        1L
+    )
+    expect_identical(auto, explicit)
+    expect_s4_class(auto, "LdData")
+    expect_equal(dim(getCorrelation(auto)), c(5L, 5L))
+})
+
+test_that(".ldInfoBlock requires an LD_file column", {
+    expect_error(
+        pecotmr:::.ldInfoBlock(data.frame(x = 1), 1L),
+        "needs an `LD_file` column"
+    )
+})
+
+test_that(".panelAfreqMaf returns NULL when no sidecar exists at all", {
+    skip_if_not_installed("pgenlibr")
+    # This plink2 fixture ships without an .afreq, so every shard's table is
+    # absent -- distinct from the partial-sidecar case above.
+    handle <- readGenotypeHandle(
+        test_path("test_data/test_variants_chr22"),
+        format = "plink2"
+    )
+    expect_equal(pecotmr:::getFormat(handle), "plink2")
+    expect_null(
+        pecotmr:::.panelAfreqMaf(
+            handle,
+            as.character(pecotmr:::getSnpInfo(handle)$SNP)
+        )
+    )
+})

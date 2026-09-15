@@ -325,13 +325,11 @@ assembleCtwasInputs <- function(
 # @noRd
 .ctwasValidateGwasList <- function(gwasSumStats) {
     if (!requireNamespace("ctwas", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'ctwas' is required for the cTWAS pipeline. ",
             "Install from https://github.com/xinhe-lab/ctwas ."
         )
         abort(msg)
-        # nocov end
     }
     if (missing(gwasSumStats) || !methods::is(gwasSumStats, "GwasSumStats")) {
         msg <- glue(
@@ -651,9 +649,7 @@ estCtwasParam <- function(
     ...
 ) {
     if (!requireNamespace("ctwas", quietly = TRUE)) {
-        # nocov start
         abort("Package 'ctwas' is required for estCtwasParam.")
-        # nocov end
     }
     groupPriorVarStructure <- arg_match(groupPriorVarStructure)
     ncore <- as.integer(ncore)
@@ -841,9 +837,7 @@ estCtwasParam <- function(
 #' @export
 screenCtwasRegions <- function(estResult, L = 5L, ncore = 1L, ...) {
     if (!requireNamespace("ctwas", quietly = TRUE)) {
-        # nocov start
         abort("Package 'ctwas' is required for screenCtwasRegions.")
-        # nocov end
     }
     estResult <- .ctwasResolveLdPaths(estResult)
     # ctwas::screen_regions requires thin = 1 region_data; expand the
@@ -923,9 +917,7 @@ screenCtwasRegions <- function(estResult, L = 5L, ncore = 1L, ...) {
 #' @export
 finemapCtwasRegions <- function(screenResult, L = 5L, ncore = 1L, ...) {
     if (!requireNamespace("ctwas", quietly = TRUE)) {
-        # nocov start
         abort("Package 'ctwas' is required for finemapCtwasRegions.")
-        # nocov end
     }
     screenResult <- .ctwasResolveLdPaths(screenResult)
     rd <- screenResult$screened_region_data
@@ -1023,11 +1015,9 @@ mergeCtwasBoundaryRegions <- function(
     ncore = 1L,
     ...
 ) {
-    # nocov start
     if (!requireNamespace("ctwas", quietly = TRUE)) {
         abort("Package 'ctwas' is required for mergeCtwasBoundaryRegions.")
     }
-    # nocov end
     finemapResult <- .ctwasResolveLdPaths(finemapResult)
     fmRes <- finemapResult$finemap_res
     if (is.null(fmRes) || nrow(fmRes) == 0L) {
@@ -2184,6 +2174,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         pos <- c(pos, as.integer(GenomicRanges::start(gr)))
         chrs <- c(chrs, as.character(GenomicRanges::seqnames(gr)))
     }
+    # Emptiness is checked FIRST: `pos` and `chrs` are filled from the same
+    # GRanges in the same loop, so an empty block has zero chromosomes too,
+    # and the chromosome check below would report it as "spans multiple
+    # chromosomes ()" -- which is both wrong and unactionable.
+    if (length(pos) == 0L) {
+        msg <- glue(
+            "ctwasPipeline: GwasSumStats block '{regionId}' has no variants ",
+            "to define region bounds."
+        )
+        abort(msg)
+    }
     chr <- unique(as.integer(
         str_remove(chrs, regex("^chr", ignore_case = TRUE))
     ))
@@ -2191,13 +2192,6 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         msg <- glue(
             "ctwasPipeline: GwasSumStats block '{regionId}' spans multiple ",
             "chromosomes ({str_flatten(chr, ', ')})."
-        )
-        abort(msg)
-    }
-    if (length(pos) == 0L) {
-        msg <- glue(
-            "ctwasPipeline: GwasSumStats block '{regionId}' has no variants ",
-            "to define region bounds."
         )
         abort(msg)
     }
@@ -2409,6 +2403,24 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # z.s) / sqrt(t(wgt) %*% R_wgt %*% wgt), so wgt must be a numeric matrix
 # (not a vector) and R_wgt must be the LD submatrix over the same SNPs.
 #
+# The panel variants a gene's cis span may reach.
+#
+# ctwas's compute_gene_z asserts every weight variant exists in the block's
+# z_snp$id. An LD sketch covering more than the block (e.g. a whole-chrom
+# PLINK2) leaks variants outside it, so intersect with the caller's GWAS
+# sumstats variant set when provided.
+#
+# Allele-aware, not `intersect()`: a swapped spelling is the same variant,
+# and dropping it here silently shortens the gene's cis span.
+# @noRd
+.ctwasPanelSnpsForGwas <- function(panelSnps, gwasSnpIds) {
+    if (is.null(gwasSnpIds)) {
+        return(panelSnps)
+    }
+    m <- .ctwasMatchToPanel(panelSnps, as.character(gwasSnpIds))
+    panelSnps[sort(m$idxA)]
+}
+
 # R_wgt is sliced from the cached full-panel LD by SNP ID -- no
 # per-gene genotype re-extraction. Variants absent from the panel
 # are dropped from that gene's row set.
@@ -2424,23 +2436,12 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     gwasSnpIds = NULL,
     regionSnpIds = NULL
 ) {
-    panelSnps <- rownames(ldPanel$R)
-    # ctwas's compute_gene_z asserts every weight variant exists in the block's
-    # z_snp$id. An LD sketch covering more than the block (e.g. a whole-chrom
-    # PLINK2) leaks variants outside it, so intersect with the caller's GWAS
-    # sumstats variant set when provided.
-    #
     # Two variant sets, because they answer different questions. `gwasSnpIds` is
     # the GLOBAL set: it bounds the gene's cis SPAN, which has to cover every
     # block the gene reaches for boundary detection to work. `regionSnpIds` is
     # this block's own set: it bounds the weight vector actually FITTED, because
     # ctwas fine-maps one region at a time.
-    if (!is.null(gwasSnpIds)) {
-        # Allele-aware, not `intersect()`: a swapped spelling is the same
-        # variant, and dropping it here silently shortens the gene's cis span.
-        m <- .ctwasMatchToPanel(panelSnps, as.character(gwasSnpIds))
-        panelSnps <- panelSnps[sort(m$idxA)]
-    }
+    panelSnps <- .ctwasPanelSnpsForGwas(rownames(ldPanel$R), gwasSnpIds)
     ctx <- list(
         ldPanel = ldPanel,
         panelSnps = panelSnps,
@@ -2712,11 +2713,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (nrow(tl) == 0L) {
         return(NULL)
     }
-    pip <- if (is_in("pip", names(tl))) {
-        set_names(as.numeric(tl$pip), as.character(tl$variant_id))
-    } else {
-        NULL
-    }
+    # `pip` is part of the topLoci schema -- fineMappingRow() requires it on
+    # any non-empty table, and the zero-row case returned above -- so there is
+    # no pip-less frame to guard against here.
+    pip <- set_names(as.numeric(tl$pip), as.character(tl$variant_id))
     cs <- .ctwasCsMembership(tl)
     list(pip = pip, csMembers = cs$csMembers, csPurity = cs$csPurity)
 }

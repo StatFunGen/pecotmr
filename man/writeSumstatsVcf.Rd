@@ -60,8 +60,10 @@ Invisible path to the written file.
 }
 \description{
 Creates a VCF object from GWAS summary statistics or fine-mapping results and
-writes it to disk. Supports bgzipped VCF (.vcf.gz/.vcf.bgz) and BCF (.bcf)
-output formats via VariantAnnotation and Rsamtools.
+writes it to disk via VariantAnnotation and Rsamtools. Supports bgzipped
+VCF (.vcf.gz/.vcf.bgz); BCF (.bcf) additionally needs a working
+\code{Rsamtools::asBcf()}, which recent Rsamtools releases disable, so
+prefer .vcf.bgz.
 }
 \examples{
 data(gwasSumStatsS4Example)

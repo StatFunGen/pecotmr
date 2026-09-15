@@ -1113,3 +1113,98 @@ test_that("the rule applies to SNP flip pairs, not just indels", {
     panel <- c("chr1:200:A:G", "chr1:200:G:A")
     expect_length(matchVariants("chr1:200:A:G", panel)$idxA, 0L)
 })
+
+
+test_that("a convention without an allele separator keeps the default", {
+    f <- pecotmr:::formatVariantId
+    expect_equal(f("1", 100L, "A", "G"), "chr1:100:A:G")
+    # hasChr honoured, alleleSep absent -> ":" retained.
+    expect_equal(
+        f("1", 100L, "A", "G", convention = list(hasChr = TRUE)),
+        "chr1:100:A:G"
+    )
+    # Both honoured.
+    expect_equal(
+        f(
+            "1",
+            100L,
+            "A",
+            "G",
+            convention = list(hasChr = FALSE, alleleSep = "_")
+        ),
+        "1:100_A_G"
+    )
+})
+
+test_that("columns with no names at all are given placeholder names", {
+    df <- as.data.frame(matrix(1:4, 2L, 2L))
+    colnames(df) <- NULL
+    out <- pecotmr:::.sanitizeNames(df)
+    # make.unique de-duplicates the repeated placeholder.
+    expect_equal(colnames(out), c("unnamed", "unnamed_1"))
+})
+
+test_that(".harmonizeQcCounts attributes drops with and without INDEL", {
+    mk <- function(withIndel) {
+        d <- data.frame(
+            keep = c(TRUE, FALSE, TRUE),
+            sign_flip = c(FALSE, FALSE, TRUE),
+            strand_flip = c(FALSE, TRUE, FALSE),
+            strand_unambiguous = c(TRUE, FALSE, TRUE),
+            stringsAsFactors = FALSE
+        )
+        if (withIndel) {
+            d$INDEL <- c(FALSE, TRUE, FALSE)
+        }
+        d
+    }
+    bare <- pecotmr:::.harmonizeQcCounts(mk(FALSE))
+    expect_equal(bare$considered, 3L)
+    expect_equal(bare$kept, 2L)
+    # With no INDEL column nothing can be attributed to indels, so the same
+    # dropped variant is counted as strand-ambiguous instead.
+    expect_equal(bare$droppedIndel, 0L)
+    expect_equal(bare$droppedAmbiguous, 1L)
+    expect_equal(bare$droppedOther, 0L)
+    withIndel <- pecotmr:::.harmonizeQcCounts(mk(TRUE))
+    expect_equal(withIndel$droppedIndel, 1L)
+    expect_equal(withIndel$droppedAmbiguous, 0L)
+    expect_equal(withIndel$droppedOther, 0L)
+})
+
+test_that(".harmonizeRestoreUnmatched is a no-op when nothing is unmatched", {
+    matchResult <- data.frame(
+        A1.ref = c("G", "T"),
+        A2.ref = c("A", "C"),
+        variants_id_qced = c("chr1:100:A:G", "chr1:200:C:T"),
+        keep = c(TRUE, TRUE),
+        stringsAsFactors = FALSE
+    )
+    result <- data.frame(
+        variants_id_original = c("chr1:100:A:G", "chr1:200:C:T"),
+        stringsAsFactors = FALSE
+    )
+    targetData <- data.frame(
+        chrom = c("chr1", "chr1"),
+        pos = c(100L, 200L),
+        A1 = c("G", "T"),
+        A2 = c("A", "C"),
+        stringsAsFactors = FALSE
+    )
+    out <- pecotmr:::.harmonizeRestoreUnmatched(result, matchResult, targetData)
+    # Every target variant is already in the result, so nothing is appended.
+    expect_identical(out$result, result)
+    expect_setequal(names(out$qcSummary), c("A1", "A2", "variant_id"))
+    # Control: an unmatched target variant IS appended.
+    withExtra <- rbind(
+        targetData,
+        data.frame(
+            chrom = "chr1", pos = 300L, A1 = "A", A2 = "G",
+            stringsAsFactors = FALSE
+        )
+    )
+    appended <- pecotmr:::.harmonizeRestoreUnmatched(
+        result, matchResult, withExtra
+    )
+    expect_equal(nrow(appended$result), 3L)
+})

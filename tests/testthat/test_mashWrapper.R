@@ -2013,3 +2013,43 @@ test_that("mashInput: independentVariants matches across allele flip + chr prefi
     expect_true(length(rn_ids) > 0L)
     expect_true(all(rn_ids %in% paste0("chr1:", c(100, 200, 300), ":A:G")))
 })
+
+
+test_that("a NULL partition passes through as NULL", {
+    expect_null(pecotmr:::.mashAsDataFrameOrNull(NULL))
+    # A matrix becomes a base data.frame, keeping the variant-id rownames the
+    # downstream combine step relies on.
+    m <- matrix(
+        1:4,
+        2L,
+        2L,
+        dimnames = list(c("v1", "v2"), c("a", "b"))
+    )
+    out <- pecotmr:::.mashAsDataFrameOrNull(m)
+    expect_s3_class(out, "data.frame")
+    expect_equal(rownames(out), c("v1", "v2"))
+})
+
+test_that(".qtlSumStatsFromMatrix synthesises coords for unparseable ids", {
+    local_mocked_bindings(
+        parseVariantId = function(...) stop("bad"),
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.qtlSumStatsFromMatrix(
+        vids = c("weird1", "weird2"),
+        nCond = 1L,
+        study = "s1",
+        ldSketch = NULL,
+        context = "cA",
+        trait = "g1",
+        genome = "hg19",
+        role = "input",
+        mcolFn = function(i, k) list(Z = c(1, 2))
+    )
+    expect_s4_class(out, "QtlSumStats")
+    gr <- out[[1L]]
+    # Ids that carry no coordinates land on chr1 at their own row index, so
+    # the object stays well-formed instead of failing to build.
+    expect_equal(as.character(GenomicRanges::seqnames(gr)), c("chr1", "chr1"))
+    expect_equal(GenomicRanges::start(gr), c(1L, 2L))
+})

@@ -1455,3 +1455,210 @@ test_that("a fit with no stored sets falls back to the per-variant column", {
     expect_equal(s$n_variants, 2L)
     expect_equal(s$cs, "susie_1")
 })
+
+
+# ===========================================================================
+# Purity filtering, coverage defaults and column projection
+# ===========================================================================
+
+test_that("purity filtering keeps everything when there is nothing to judge", {
+    # No purity columns, or purity columns with no matching cs column: the
+    # entry cannot be assessed, so nothing is dropped rather than everything.
+    tl <- tibble(variant_id = c("a", "b"), pip = c(0.1, 0.9))
+    expect_equal(pecotmr:::.fmePurityKeep(tl, 0.8), c(TRUE, TRUE))
+    tl2 <- tibble(
+        variant_id = c("a", "b"),
+        cs_0.95_purity = c(0.9, 0.2)
+    )
+    expect_equal(pecotmr:::.fmePurityKeep(tl2, 0.8), c(TRUE, TRUE))
+})
+
+test_that("purity filtering drops only in-CS variants below the threshold", {
+    # `susie_0` means "in no credible set", so that row survives regardless
+    # of the purity recorded beside it.
+    tl <- tibble(
+        variant_id = c("a", "b"),
+        cs_0.95 = c("susie_1", "susie_0"),
+        cs_0.95_purity = c(0.2, 0.9)
+    )
+    expect_equal(pecotmr:::.fmePurityKeep(tl, 0.8), c(FALSE, TRUE))
+})
+
+test_that("an unusable coverage falls back to 0.95", {
+    expect_equal(pecotmr:::.adjustPipsCoverage(NULL), 0.95)
+})
+
+test_that("the credible-set prefix defaults to cs with no method column", {
+    tl <- tibble(variant_id = c("a", "b"), pip = c(0.1, 0.9))
+    expect_equal(pecotmr:::.adjustPipsMethodLabel(tl), "cs")
+})
+
+test_that("projecting an absent column yields typed NAs of the right length", {
+    # One NA per row, of the requested type, so the column binds against the
+    # rest of the table instead of collapsing it.
+    tl <- tibble(variant_id = c("a", "b"), pip = c(0.1, 0.9))
+    expect_equal(
+        pecotmr:::.tlCol(tl, "nope", "character"),
+        rep(NA_character_, 2L)
+    )
+    expect_equal(pecotmr:::.tlCol(tl, "nope", "numeric"), rep(NA_real_, 2L))
+    expect_equal(pecotmr:::.tlCol(tl, "nope", "integer"), rep(NA_integer_, 2L))
+    expect_equal(pecotmr:::.tlCol(tl, "pip", "numeric"), c(0.1, 0.9))
+})
+
+
+# ===========================================================================
+# Credible-set summary assembly and PIP adjustment
+# ===========================================================================
+
+test_that("an absent or empty topLoci summarises to the empty CS table", {
+    expect_equal(nrow(pecotmr:::.csSummaryFit(NULL, list(), 0.95)), 0L)
+    expect_equal(
+        nrow(pecotmr:::.csSummaryFit(tibble(a = integer(0)), list(), 0.95)),
+        0L
+    )
+})
+
+test_that("credible sets are resolved from the secondary store by coverage", {
+    # A trimmed fit keeps non-primary coverages in sets_secondary, keyed
+    # cs_<pct>_; asking for a coverage it does not hold is NULL, not the
+    # primary sets, which would silently answer the wrong question.
+    sec <- list(cs_70_x = list(sets = list(cs = list(L1 = 1:2))))
+    fit <- list(sets = list(), sets_secondary = sec)
+    expect_equal(
+        pecotmr:::.csSetsForCoverage(fit, 0.70)$cs$L1,
+        1:2
+    )
+    expect_null(pecotmr:::.csSetsForCoverage(fit, 0.95))
+})
+
+test_that("an untrimmed fit with no recorded coverage uses its primary sets", {
+    # No requested_coverage and no secondary store: the primary sets are the
+    # only ones there are, so they answer for any coverage.
+    fit <- list(sets = list(cs = list(L1 = 1:2)))
+    expect_equal(pecotmr:::.csSetsForCoverage(fit, 0.95)$cs$L1, 1:2)
+})
+
+test_that("mean conditional effect is NA when the column is absent", {
+    expect_true(is.na(pecotmr:::.csMeanEffect(tibble(a = 1))))
+    expect_equal(
+        pecotmr:::.csMeanEffect(tibble(conditional_effect = c(1, 3))),
+        2
+    )
+})
+
+test_that("rebuilding an empty topLoci returns it unchanged", {
+    tl <- tibble(variant_id = character(0))
+    expect_equal(
+        nrow(pecotmr:::.adjustPipsRebuildTopLoci(tl, list(), character(0))),
+        0L
+    )
+})
+
+test_that("posterior columns are left in place when the fit has no alpha", {
+    # Without alpha there is nothing to recompute from, so the existing
+    # values stay rather than being overwritten with NA.
+    tl <- tibble(variant_id = "a")
+    expect_equal(pecotmr:::.adjustPipsPosterior(tl, list())$variant_id, "a")
+})
+
+# ---------------------------------------------------------------------------
+# adjustPips index resolution and the CS-label fallbacks: each decides how a
+# fit slot lines up with the entry's variants, or what to call a set when the
+# table does not say.
+# ---------------------------------------------------------------------------
+
+test_that(".csMethodTag falls back to the fit class when no label survives", {
+    fit <- structure(list(), class = "susieAsh")
+    expect_equal(pecotmr:::.csMethodTag(NULL, fit, "cs_95"), "susie_ash")
+    # "_0" means "not in a credible set", so it is filtered out and cannot
+    # supply the tag either.
+    onlyNull <- data.frame(
+        variant_id = "v1",
+        cs_95 = "L1_0",
+        stringsAsFactors = FALSE
+    )
+    expect_equal(pecotmr:::.csMethodTag(onlyNull, fit, "cs_95"), "susie_ash")
+    labelled <- data.frame(
+        variant_id = "v1",
+        cs_95 = "susie_1",
+        stringsAsFactors = FALSE
+    )
+    expect_equal(pecotmr:::.csMethodTag(labelled, fit, "cs_95"), "susie")
+})
+
+test_that(".csSummaryRow returns NULL when the set has no rows in the table", {
+    ctx <- list(
+        tl = tibble::tibble(variant_id = c("v1", "v2"), pip = c(0.5, 0.5))
+    )
+    expect_null(pecotmr:::.csSummaryRow(list(ids = "zzz", eff = 1L), ctx))
+})
+
+test_that(".adjustPipsIdxFor accepts the null-weight extra column", {
+    p <- list(nVariants = 3L, keepIdx = c(1L, 2L, 3L), cols = c(1L, 2L, 3L, 4L))
+    expect_equal(pecotmr:::.adjustPipsIdxFor(3L, p, "alpha"), c(1L, 2L, 3L))
+    # A null_weight fit carries one column MORE than the entry's variants.
+    expect_equal(
+        pecotmr:::.adjustPipsIdxFor(4L, p, "alpha"),
+        c(1L, 2L, 3L, 4L)
+    )
+    expect_error(
+        pecotmr:::.adjustPipsIdxFor(9L, p, "alpha"),
+        "fit slot `alpha` spans 9 variants but the entry has 3"
+    )
+})
+
+test_that(".adjustPipsCols treats a dimensionless slot as a vector", {
+    p <- list(nVariants = 3L, keepIdx = c(1L, 3L), cols = c(1L, 2L, 3L))
+    expect_equal(pecotmr:::.adjustPipsCols(c(10, 20, 30), p, "pip"), c(10, 30))
+    expect_null(pecotmr:::.adjustPipsCols(NULL, p, "pip"))
+})
+
+test_that(".adjustPipsRebuildSecondary passes through an entry with no sets", {
+    entry <- list(a = 1)
+    expect_identical(
+        pecotmr:::.adjustPipsRebuildSecondary(entry, NULL, NULL),
+        entry
+    )
+})
+
+test_that(".adjustPipsMethodLabel defaults to 'cs'", {
+    expect_equal(pecotmr:::.adjustPipsMethodLabel(data.frame(x = 1)), "cs")
+    # A method column of all NA names nothing either.
+    expect_equal(
+        pecotmr:::.adjustPipsMethodLabel(
+            data.frame(method = NA_character_, stringsAsFactors = FALSE)
+        ),
+        "cs"
+    )
+    expect_equal(
+        pecotmr:::.adjustPipsMethodLabel(
+            data.frame(method = "susie", stringsAsFactors = FALSE)
+        ),
+        "susie"
+    )
+})
+
+test_that("show(FineMappingRow) reports zero sets for an empty row", {
+    empty <- fineMappingRow(
+        variantIds = character(0),
+        susieFit = list(pip = numeric(0)),
+        topLoci = data.frame(
+            variant_id = character(0),
+            pip = numeric(0),
+            stringsAsFactors = FALSE
+        )
+    )
+    expect_output(show(empty), "0 variants, 0 credible sets")
+    withCs <- fineMappingRow(
+        variantIds = c("chr1:1:A:G", "chr1:2:C:T"),
+        susieFit = list(pip = c(0.9, 0.1)),
+        topLoci = data.frame(
+            variant_id = c("chr1:1:A:G", "chr1:2:C:T"),
+            pip = c(0.9, 0.1),
+            cs_95 = c("L1_1", "L1_0"),
+            stringsAsFactors = FALSE
+        )
+    )
+    expect_output(show(withCs), "2 variants, 1 credible sets")
+})

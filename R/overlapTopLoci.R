@@ -108,12 +108,10 @@ setMethod(
         if (is.null(vmap)) {
             return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols, type))
         }
+        # No zero-row check on `g`: every gwas_vid in `vmap` is drawn from
+        # gwasTl$variant_id, so once vmap is non-NULL the inner join above
+        # always matches. The no-overlap case is the is.null(vmap) return.
         g <- .overlapRelabelGwas(gwasTl, vmap, coordCols)
-        if (nrow(g) == 0L) {
-            # nocov start
-            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols, type))
-            # nocov end
-        }
         # Wide cross-product per shared variant, variant key kept once (QTL).
         merged <- inner_join(
             .overlapPrefixNonKey(qtlTl, "qtl_", keyCols),

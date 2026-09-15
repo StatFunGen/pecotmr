@@ -1072,12 +1072,11 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # list(dosage, maf, af).
 # @noRd
 .qtlVariantFilters <- function(dosage, x) {
+    # No zero-variant guard: the only caller returns early when snpIdx is
+    # empty, and extraction preserves the column count (.restoreRequestedOrder
+    # aborts on a mismatch). The body is 0-column safe regardless -- colSums
+    # gives numeric(0) and the mask logical(0), yielding the same empty result.
     nSamp <- nrow(dosage)
-    if (ncol(dosage) == 0L) {
-        # nocov start (unreachable: zero-variant paths return early above)
-        return(list(dosage = dosage, maf = numeric(0), af = numeric(0)))
-        # nocov end
-    }
     nObs <- colSums(!is.na(dosage))
     sumD <- colSums(dosage, na.rm = TRUE)
     p <- if_else(nObs > 0L, sumD / (2 * nObs), NA_real_)

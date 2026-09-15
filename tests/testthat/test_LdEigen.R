@@ -184,3 +184,12 @@ test_that("buildLdEigen prefers an explicit nRef, inSample and genome", {
     expect_true(getInSample(ref))
     expect_equal(getGenome(ref), "hg38")
 })
+
+
+test_that("eigenvalue truncation keeps everything when there is no mass", {
+    # All-nonpositive eigenvalues carry no cumulative mass to threshold
+    # against, so every index is kept rather than none.
+    expect_equal(pecotmr:::.ldEigenKeep(c(0, -1, -2), 0.9), 1:3)
+    # ...and a truncation of 1 keeps everything by definition.
+    expect_equal(pecotmr:::.ldEigenKeep(c(3, 2, 1), 1), 1:3)
+})

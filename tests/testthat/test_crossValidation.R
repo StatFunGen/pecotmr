@@ -310,3 +310,38 @@ test_that("a NULL per-method weight matrix yields an all-NA prediction, not an e
     expect_true(all(is.na(r$prediction$empty_predicted)))
     expect_false(all(is.na(r$prediction$mock_predicted)))
 })
+
+
+test_that("sample names are synthesized when neither matrix carries rownames", {
+    # The CV split is keyed by sample name, so unnamed inputs still need a
+    # stable per-row identity rather than falling back to positions.
+    X <- matrix(1:6, 3L, 2L)
+    Y <- matrix(1:3, 3L, 1L)
+    out <- pecotmr:::.cvSetDimnames(X, Y)
+    expect_equal(rownames(out$X), c("sample_1", "sample_2", "sample_3"))
+    expect_equal(rownames(out$Y), rownames(out$X))
+})
+
+test_that("numThreads = -1 asks BiocParallel for the worker count", {
+    # -1 means "all available"; anything else is capped at what is available.
+    expect_equal(
+        pecotmr:::.cvNumCores(-1),
+        BiocParallel::bpworkers(BiocParallel::MulticoreParam())
+    )
+    expect_equal(pecotmr:::.cvNumCores(1), 1)
+})
+
+test_that("a seed makes a CV call reproducible without leaking RNG state", {
+    # withr::local_seed, not set.seed: the caller's stream must be untouched
+    # after the call returns (Bioconductor asks packages not to set.seed).
+    f <- function() {
+        pecotmr:::.applySeed(42)
+        runif(1)
+    }
+    expect_equal(f(), f())
+    set.seed(1)
+    before <- runif(1)
+    set.seed(1)
+    invisible(f())
+    expect_equal(runif(1), before)
+})

@@ -125,7 +125,12 @@ NULL
         return(GenomicRanges::granges(rr[trait])[1L])
     }
     if (methods::is(data, "QtlSumStats")) {
-        if (!is_in("traitPos", names(data))) {
+        # colnames(), not names(): a collection's names() are its GRangesList
+        # ELEMENT names (empty here), while the per-row columns live in mcols.
+        # Reading names() made this guard always fire, so the whole branch
+        # below was dead and every sumstats-derived row fell back to the
+        # chrUn sentinel instead of its real trait position.
+        if (!is_in("traitPos", colnames(data))) {
             return(NULL)
         }
         idx <- which(
@@ -135,10 +140,9 @@ NULL
         if (length(idx) == 0L) {
             return(NULL)
         }
+        # traitPos is a GRanges column and `idx` came from which(), so this
+        # is always a length-1 range.
         tp <- data$traitPos[idx[[1L]]]
-        if (length(tp) == 0L) {
-            return(NULL)
-        }
         return(GenomicRanges::granges(tp)[1L])
     }
     NULL

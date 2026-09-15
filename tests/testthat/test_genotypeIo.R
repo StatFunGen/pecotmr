@@ -2510,3 +2510,172 @@ test_that("readGenotypes reaches the explicit-triplet source too", {
     expect_s4_class(panel, "RangedSummarizedExperiment")
     expect_equal(dim(panel), dim(readGenotypes(stem, format = "plink1")))
 })
+
+
+# ===========================================================================
+# Format detection and handle/covariate helpers
+#
+# The extension->format switch had only two of its fourteen arms exercised,
+# and the NULL-safe / legacy-handle / covariate-alignment branches none.
+# ===========================================================================
+
+test_that("every file extension maps to its genotype format", {
+    f <- pecotmr:::.h2FormatFromExt
+    expect_equal(f("vcf"), "vcf")
+    expect_equal(f("bcf"), "vcf")
+    expect_equal(f("bed"), "plink1")
+    expect_equal(f("bim"), "plink1")
+    expect_equal(f("fam"), "plink1")
+    expect_equal(f("pgen"), "plink2")
+    expect_equal(f("pvar"), "plink2")
+    expect_equal(f("psam"), "plink2")
+    expect_equal(f("gds"), "gds")
+    expect_equal(f("rds"), "rds")
+    expect_equal(f("rdata"), "rds")
+    expect_equal(f("annot"), "ldsc_annot")
+    expect_equal(f("bw"), "bigwig")
+    expect_equal(f("bigwig"), "bigwig")
+    # An unrecognised extension is NULL, not an error: the caller decides.
+    expect_null(f("zzz"))
+})
+
+test_that("the unsupported-format signaller names its context when given one", {
+    expect_error(
+        pecotmr:::.abortUnsupportedFormat("weird", "myContext"),
+        "Unsupported format in myContext: weird"
+    )
+    expect_error(
+        pecotmr:::.abortUnsupportedFormat("weird"),
+        "Unsupported genotype format: weird"
+    )
+})
+
+test_that("the handle helpers are NULL-safe", {
+    expect_null(pecotmr:::.emptyGenotypeHandle(NULL))
+    expect_null(pecotmr:::.subsetGenotypeHandle(NULL, 1L))
+})
+
+test_that("a legacy handle without fileIdx is not subset", {
+    # Without fileIdx there is no way to keep on-disk positions correct after
+    # dropping rows, so the handle is returned whole rather than silently
+    # mis-indexed.
+    h <- new(
+        "GenotypeHandle",
+        path = "/tmp/x.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = c("a", "b", "c"),
+            CHR = "1",
+            BP = 1:3,
+            A1 = "A",
+            A2 = "G",
+            stringsAsFactors = FALSE
+        ),
+        nSamples = 2L,
+        sampleIds = c("s1", "s2"),
+        pgenPtr = NULL
+    )
+    sub <- pecotmr:::.subsetGenotypeHandle(h, 1L)
+    expect_equal(nrow(pecotmr:::getSnpInfo(sub)), 3L)
+})
+
+test_that("covariate colData aligns to the panel's samples", {
+    f <- pecotmr:::.genotypeColData
+    ids <- c("s1", "s2")
+    # No covariates at all: an empty DataFrame that still names the samples.
+    empty <- f(matrix(numeric(0), 0L, 0L), ids)
+    expect_equal(rownames(empty), ids)
+    expect_equal(ncol(empty), 0L)
+    # Unnamed rows of the right length are taken positionally.
+    cd <- f(matrix(1:2, 2L, 1L, dimnames = list(NULL, "pc1")), ids)
+    expect_equal(rownames(cd), ids)
+    expect_equal(as.numeric(cd$pc1), c(1, 2))
+    # Unnamed rows of the WRONG length are an error, not a silent recycle.
+    expect_error(
+        f(matrix(1, 3L, 1L), ids),
+        "has 3 rows but the panel has 2 samples"
+    )
+})
+
+
+test_that("a panel with no covariates gets an empty colData", {
+    prefix <- sub(
+        "\\.bed$",
+        "",
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    panel <- readGenotypes(plink1Prefix = prefix)
+    out <- pecotmr:::.genotypeExperimentCovariates(panel, NULL)
+    cd <- SummarizedExperiment::colData(out)
+    expect_equal(ncol(cd), 0L)
+    # The samples are still named, so the assay keeps a column for each.
+    expect_equal(rownames(cd), colnames(panel))
+})
+
+test_that("block extraction rejects a format it has no reader for", {
+    # The constructor rejects an unknown format outright, so this guard can
+    # only be reached by a direct slot set -- which is exactly what it exists
+    # to catch.
+    h <- new(
+        "GenotypeHandle",
+        path = "/tmp/x.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = "a",
+            CHR = "1",
+            BP = 1L,
+            A1 = "A",
+            A2 = "G",
+            fileIdx = 1L,
+            stringsAsFactors = FALSE
+        ),
+        nSamples = 1L,
+        sampleIds = "s1",
+        pgenPtr = NULL
+    )
+    expect_error(
+        new(
+            "GenotypeHandle",
+            path = "/tmp/x",
+            format = "zzz",
+            snpInfo = getSnpInfo(h),
+            nSamples = 1L,
+            sampleIds = "s1",
+            pgenPtr = NULL
+        ),
+        "'format' must be one of"
+    )
+    h@format <- "zzz"
+    expect_error(
+        pecotmr:::.extractBlockByFormat(h, 1L),
+        "Unsupported format in extractBlockGenotypes: zzz"
+    )
+})
+
+test_that("stochastic inversion is a no-op when no id matches the metadata", {
+    # The metadata exists and parses, but names other variants entirely, so
+    # there is nothing to invert and the result passes through untouched.
+    meta <- withr::local_tempfile(fileext = ".stochastic_meta.tsv")
+    readr::write_tsv(
+        data.frame(
+            id = c("other1", "other2"),
+            u_min = c(0, 0),
+            u_max = c(1, 1)
+        ),
+        meta
+    )
+    X <- matrix(
+        1:4,
+        2L,
+        2L,
+        dimnames = list(c("s1", "s2"), c("v1", "v2"))
+    )
+    res <- list(X = X)
+    out <- pecotmr:::.loadGenoInvertStochastic(
+        res,
+        genotype = "/tmp/does_not_matter",
+        stochasticMetaPath = meta,
+        stochasticMetaFormat = "generic"
+    )
+    expect_identical(out$X, X)
+})

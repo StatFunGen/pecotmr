@@ -3292,3 +3292,442 @@ test_that("the shared validator gives ctwas and .ldFromSketch one message", {
     )
     expect_equal(own, shared)
 })
+
+
+# ===========================================================================
+# Degenerate inputs to the ctwas assembly helpers
+# ===========================================================================
+
+test_that("gene coordinates are NULL when there are no weights", {
+    expect_null(pecotmr:::.ctwasGeneCoords(NULL))
+    expect_null(pecotmr:::.ctwasGeneCoords(list()))
+})
+
+test_that("z harmonization is a no-op when either side is empty", {
+    # Both exits return the input untouched: an empty GWAS has nothing to
+    # relabel, and an empty panel has nothing to relabel it to.
+    empty <- tibble(
+        id = character(0),
+        chrom = integer(0),
+        pos = integer(0),
+        A1 = character(0),
+        A2 = character(0),
+        z = numeric(0),
+        study = character(0)
+    )
+    expect_equal(
+        nrow(pecotmr:::.ctwasHarmonizeZToPanel(empty, "chr1:1:A:G")),
+        0L
+    )
+    one <- tibble(
+        id = "chr1:1:A:G",
+        chrom = 1L,
+        pos = 1L,
+        A1 = "G",
+        A2 = "A",
+        z = 1.5,
+        study = "S"
+    )
+    expect_identical(
+        pecotmr:::.ctwasHarmonizeZToPanel(one, character(0)),
+        one
+    )
+    # A panel that shares no variant leaves the ids alone.
+    expect_equal(
+        pecotmr:::.ctwasHarmonizeZToPanel(one, "chr9:9:C:T")$id,
+        "chr1:1:A:G"
+    )
+})
+
+test_that("alpha renormalization refuses a row with no finite mass", {
+    # log(0) across a whole row leaves no maximum to subtract, so the
+    # renormalized alpha would be NaN rather than a distribution.
+    alpha <- matrix(c(0, 0, 0.5, 0.5), nrow = 2L, byrow = TRUE)
+    expect_null(pecotmr:::.ctwasRenormAlpha(alpha, 1:2))
+    ok <- matrix(c(0.25, 0.75, 0.5, 0.5), nrow = 2L, byrow = TRUE)
+    out <- pecotmr:::.ctwasRenormAlpha(ok, 1:2)
+    expect_equal(unname(rowSums(out)), c(1, 1))
+})
+
+
+test_that("the SNP background row is omitted when no SNP rows were fitted", {
+    # ctwas tags its non-gene background with type == "SNP"; a run with none
+    # contributes no row rather than an empty one.
+    expect_null(
+        pecotmr:::.ctwasSnpRow("G", "susie", "", NULL, NULL, NULL)
+    )
+})
+
+test_that("subsetting to SNP rows answers NULL when there are none", {
+    expect_null(pecotmr:::.ctwasSubsetSnp(NULL))
+    geneOnly <- data.frame(
+        id = "a",
+        type = "gene",
+        stringsAsFactors = FALSE
+    )
+    expect_null(pecotmr:::.ctwasSubsetSnp(geneOnly))
+    mixed <- data.frame(
+        id = c("a", "b"),
+        type = c("SNP", "gene"),
+        stringsAsFactors = FALSE
+    )
+    expect_equal(nrow(pecotmr:::.ctwasSubsetSnp(mixed)), 1L)
+})
+
+
+# ===========================================================================
+# Assembly shortcuts and block placement
+# ===========================================================================
+
+test_that("a precomputed z_gene is used rather than recomputed", {
+    # compute_gene_z is the expensive step; supplying it must short-circuit.
+    expect_equal(
+        pecotmr:::.ctwasEnsureZGene(list(z_gene = "PRECOMPUTED"), 1L),
+        "PRECOMPUTED"
+    )
+})
+
+test_that("boundary genes are NULL for a single-region run", {
+    # Boundary adjustment only means something across two or more regions.
+    expect_null(pecotmr:::.ctwasBoundaryGenes(
+        list(region_info = data.frame(a = 1)),
+        1L,
+        list()
+    ))
+})
+
+test_that("relabelling ids is a no-op on an empty set and flips when matched", {
+    expect_equal(
+        pecotmr:::.ctwasRelabelIds(character(0), "chr1:1:A:G"),
+        character(0)
+    )
+    # A swapped spelling is the same variant, relabelled to the panel frame.
+    expect_equal(
+        pecotmr:::.ctwasRelabelIds("chr1:1:G:A", "chr1:1:A:G"),
+        "chr1:1:A:G"
+    )
+})
+
+test_that("re-keying LD loaders is a no-op when no panels are cached", {
+    payload <- list(a = 1)
+    expect_identical(
+        pecotmr:::.ctwasRekeyLdLoaders(payload, list(x = "y")),
+        payload
+    )
+})
+
+test_that("a variant is placed in the block whose half-open window holds it", {
+    # [start, end): an unplaceable or out-of-range anchor is NA rather than
+    # being snapped to the nearest block.
+    f <- pecotmr:::.ctwasBlockIdForVariant
+    expect_equal(f(1L, 50L, "1", "1", 1L, 100L, "B1"), "B1")
+    expect_true(is.na(f(1L, 500L, "1", "1", 1L, 100L, "B1")))
+    expect_true(is.na(f(1L, NA_integer_, "1", "1", 1L, 100L, "B1")))
+    # The window excludes its end.
+    expect_true(is.na(f(1L, 100L, "1", "1", 1L, 100L, "B1")))
+})
+
+
+# ===========================================================================
+# Row coordinates, trait positions and the loader panel cache
+# ===========================================================================
+
+test_that("row coordinates prefer the gene cache, then the variant id", {
+    # Genes are keyed by name and have no parseable coordinates; variants
+    # carry theirs in the id. An id that is neither is NULL rather than a
+    # fabricated position.
+    f <- pecotmr:::.ctwasRowCoord
+    cached <- f(1L, "G1", list(G1 = list(chrom = "chr9", start = 5L, end = 9L)))
+    expect_equal(cached$chrom, "chr9")
+    parsed <- f(1L, "chr1:100:A:G", NULL)
+    expect_equal(parsed$chrom, "chr1")
+    expect_equal(parsed$start, 100L)
+    # A single-base variant spans one position.
+    expect_equal(parsed$end, 100L)
+    expect_null(f(1L, "rsNOTPARSEABLE", NULL))
+})
+
+test_that("trait positions are NULL when the weights do not carry them", {
+    data(twasWeightsExample)
+    expect_false(
+        is_in("traitPos", pecotmr:::.tupleColumnNames(twasWeightsExample))
+    )
+    expect_null(pecotmr:::.ctwasTraitPosAt(twasWeightsExample, 1L))
+})
+
+test_that("the panel cache is NULL for loaders this package did not build", {
+    # Re-keying only makes sense over our own closure; a foreign or
+    # non-function loader is left alone rather than reached into.
+    expect_null(pecotmr:::.ctwasCachedPanels(list(LD_loader_fun = "nope")))
+    expect_null(
+        pecotmr:::.ctwasCachedPanels(list(LD_loader_fun = function(x) x))
+    )
+})
+
+
+# ===========================================================================
+# Input validation
+# ===========================================================================
+
+test_that("block ids must be present, non-empty and unique", {
+    # blockId becomes the region id, so a missing or empty one leaves an
+    # element unkeyable and a repeated one would have two elements silently
+    # overwrite each other.
+    gs <- .ctp_makeGwasSumstats(blockIds = c("block1", "block2"))
+    expect_silent(pecotmr:::.ctwasValidateGwasEntries(gs))
+
+    missing <- gs
+    S4Vectors::mcols(missing)$blockId <- c("b", NA_character_)
+    expect_error(
+        pecotmr:::.ctwasValidateGwasEntries(missing),
+        "empty or missing `blockId`"
+    )
+
+    blank <- gs
+    S4Vectors::mcols(blank)$blockId <- c("", "b2")
+    expect_error(
+        pecotmr:::.ctwasValidateGwasEntries(blank),
+        "empty or missing `blockId`"
+    )
+
+    dup <- gs
+    S4Vectors::mcols(dup)$blockId <- c("dup", "dup")
+    expect_error(
+        pecotmr:::.ctwasValidateGwasEntries(dup),
+        "block ids must be unique; repeated: dup"
+    )
+})
+
+test_that("each weight entry must be a TwasWeights or QtlFineMappingResult", {
+    # The per-gene weight source is one of those two; anything else would
+    # fail later inside the assembly with a far less specific message.
+    expect_error(
+        pecotmr:::.ctwasValidateWeightEntries(list(r1 = "not a TwasWeights")),
+        "twasWeights\\[\\['r1'\\]\\] must be a TwasWeights or QtlFineMappingResult"
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Input guards and coordinate fallbacks: each rejects a shape the pipeline
+# cannot proceed on, or substitutes a placeholder for an unplaced feature.
+# ---------------------------------------------------------------------------
+
+test_that(".ctwasValidateGwasList requires a blockId column", {
+    skip_if_not_installed("ctwas")
+    gss <- .ctp_makeGwasSumstats()
+    # A GwasSumStats built by a current constructor always carries blockId;
+    # dropping it stands in for an object deserialized from an older one.
+    S4Vectors::mcols(gss)$blockId <- NULL
+    expect_false(is_in("blockId", colnames(gss)))
+    expect_error(
+        pecotmr:::.ctwasValidateGwasList(gss),
+        "has no `blockId` column"
+    )
+})
+
+test_that(".ctwasResolveAndValidateWeights requires a weight source", {
+    expect_error(
+        pecotmr:::.ctwasResolveAndValidateWeights(NULL, NULL),
+        "`twasWeights` is required"
+    )
+    expect_error(
+        pecotmr:::.ctwasResolveAndValidateWeights(),
+        "`twasWeights` is required"
+    )
+})
+
+test_that(".ctwasPrefitRegionFilter errors when nothing survives", {
+    regionData <- list(
+        r1 = list(gid = character(0), sid = "s1"),
+        r2 = list(gid = character(0), sid = character(0))
+    )
+    # Default minGene = 1 drops both regions: neither carries a gene.
+    expect_error(
+        pecotmr:::.ctwasPrefitRegionFilter(regionData, list()),
+        "No regions selected!"
+    )
+    kept <- pecotmr:::.ctwasPrefitRegionFilter(
+        list(r1 = list(gid = "g1", sid = c("s1", "s2"))),
+        list()
+    )
+    expect_equal(names(kept), "r1")
+})
+
+test_that(".ctwasBlockGrFromIds places unparseable ids on chrUn", {
+    # asGranges() warns on the unparseable id before erroring; the fallback
+    # catches the error, and the warning is incidental to what is tested.
+    gr <- suppressWarnings(
+        pecotmr:::.ctwasBlockGrFromIds(c("chr1_100_200", "not-a-region"))
+    )
+    expect_equal(
+        as.character(GenomicRanges::seqnames(gr)),
+        c("chr1", "chrUn")
+    )
+    # start = 1, end = 0 is a deliberately EMPTY range, so an unplaced block
+    # overlaps nothing rather than silently matching everything.
+    expect_equal(GenomicRanges::start(gr), c(100L, 1L))
+    expect_equal(GenomicRanges::end(gr), c(200L, 0L))
+    expect_equal(GenomicRanges::width(gr)[[2L]], 0L)
+})
+
+test_that(".ctwasCoordField falls back for an unplaced feature", {
+    expect_equal(pecotmr:::.ctwasCoordField(NULL, "chrom", TRUE), "chrUnplaced")
+    expect_equal(pecotmr:::.ctwasCoordField2(NULL, "start", TRUE), 1L)
+    co <- list(chrom = "chr7", start = 42L)
+    expect_equal(pecotmr:::.ctwasCoordField(co, "chrom", TRUE), "chr7")
+    expect_equal(pecotmr:::.ctwasCoordField2(co, "start", TRUE), 42L)
+})
+
+test_that(".ctwasBuildSingleRegionInfo reports an empty block accurately", {
+    emptyGr <- GenomicRanges::GRanges()
+    S4Vectors::mcols(emptyGr)$variant_id <- character(0)
+    S4Vectors::mcols(emptyGr)$Z <- numeric(0)
+    S4Vectors::mcols(emptyGr)$N <- integer(0)
+    gss <- GwasSumStats(
+        study = "G1",
+        entry = list(emptyGr),
+        genome = "hg19",
+        blockId = "b1"
+    )
+    # Emptiness is checked before the chromosome count -- otherwise a block
+    # with no variants is reported as spanning "multiple chromosomes ()".
+    expect_error(
+        pecotmr:::.ctwasBuildSingleRegionInfo("b1", gss),
+        "has no variants to define region bounds"
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Per-gene weight assembly: each skip below returns NULL so the gene drops out
+# of the run, rather than contributing a mis-sliced weight vector.
+# ---------------------------------------------------------------------------
+
+.ctp_noLdGwas <- function() {
+    mkGr <- function(chr, pos) {
+        g <- GenomicRanges::GRanges(chr, IRanges::IRanges(pos, width = 1))
+        S4Vectors::mcols(g)$variant_id <- str_c(chr, ":", pos, ":A:G")
+        S4Vectors::mcols(g)$Z <- rep(1, length(pos))
+        S4Vectors::mcols(g)$N <- rep(100L, length(pos))
+        g
+    }
+    GwasSumStats(
+        study = c("G1", "G1"),
+        entry = list(mkGr("chr1", c(100L, 200L)), mkGr("chr1", c(300L, 400L))),
+        genome = "hg19",
+        blockId = c("b1", "b2"),
+        qcInfo = list(step1 = "ok")
+    )
+}
+
+test_that(".ctwasFirstPass requires an LD reference on every region", {
+    byBlock <- pecotmr:::.ctwasGwasByBlock(.ctp_noLdGwas())
+    expect_null(getLdSketch(byBlock[[1L]]))
+    expect_error(
+        pecotmr:::.ctwasFirstPass("b1", byBlock, list(b1 = NULL)),
+        "region 'b1' carries no ldSketch"
+    )
+})
+
+test_that("ctwasPipeline aborts when no genes could be modeled", {
+    local_mocked_bindings(
+        .ctwasRequireNamedLists = function(...) invisible(NULL),
+        .ctwasResolveMethods = function(...) "susie",
+        .ctwasGwasStudy = function(...) "G1",
+        .ctwasRunMethod = function(...) list(),
+        .package = "pecotmr"
+    )
+    expect_error(
+        ctwasPipeline(gwasSumStats = .ctp_noLdGwas(), twasWeights = list()),
+        "no genes were modeled"
+    )
+})
+
+test_that(".ctwasAlignGeneWeights returns NULL when the row has no variants", {
+    row <- twasWeightsRow(variantIds = character(0), weights = numeric(0))
+    expect_null(pecotmr:::.ctwasAlignGeneWeights(row, NULL, NULL))
+})
+
+test_that(".ctwasTraitPosAt is bounded by the traitPos column length", {
+    row <- fineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
+        susieFit = list(pip = c(0.8, 0.2)),
+        topLoci = data.frame(
+            variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+            pip = c(0.8, 0.2),
+            stringsAsFactors = FALSE
+        )
+    )
+    res <- GwasFineMappingResult(
+        study = "G1",
+        method = "susie",
+        entry = list(row),
+        traitPos = GenomicRanges::GRanges("chr1", IRanges::IRanges(500, 900))
+    )
+    expect_s4_class(pecotmr:::.ctwasTraitPosAt(res, 1L), "GRanges")
+    # One row, so row 2 has no anchor to report.
+    expect_null(pecotmr:::.ctwasTraitPosAt(res, 2L))
+})
+
+test_that(".ctwasRenormalizeSusieWeights skips fits it cannot slice", {
+    alpha <- matrix(c(0.5, 0.5, 0.3, 0.7), nrow = 2L, byrow = TRUE)
+    mu <- matrix(1, nrow = 2L, ncol = 2L)
+    good <- list(alpha = alpha, mu = mu, X_column_scale_factors = c(1, 1))
+    origVids <- c("v1", "v2")
+    origW <- c(0.5, 0.5)
+    keptIdx <- c(1L, 2L)
+    harmonizedW <- c(0.5, 0.5)
+    run <- function(fits) {
+        pecotmr:::.ctwasRenormalizeSusieWeights(
+            fits, origVids, origW, keptIdx, harmonizedW
+        )
+    }
+    # Any missing susie field: nothing to renormalize from.
+    expect_null(run(list(mu = mu, X_column_scale_factors = c(1, 1))))
+    expect_null(run(list(alpha = alpha, X_column_scale_factors = c(1, 1))))
+    expect_null(run(list(alpha = alpha, mu = mu)))
+    # susieInf / susieAsh carry an infinitesimal term that alpha and mu alone
+    # cannot reproduce, so those fits take the plain subset path instead.
+    expect_null(run(c(good, list(theta = 1))))
+    expect_null(run(c(good, list(omega_weights = 1))))
+    # Fit-vs-entry dimension mismatch (e.g. a null_weight fit's extra column).
+    expect_null(run(list(
+        alpha = matrix(0.25, nrow = 2L, ncol = 3L),
+        mu = matrix(1, nrow = 2L, ncol = 3L),
+        X_column_scale_factors = c(1, 1, 1)
+    )))
+    # An all-zero alpha has no finite row maximum in log space.
+    expect_null(run(list(
+        alpha = matrix(0, nrow = 2L, ncol = 2L),
+        mu = mu,
+        X_column_scale_factors = c(1, 1)
+    )))
+    expect_equal(run(good), c(0.8, 1.2))
+})
+
+test_that(".ctwasResolveAndValidateWeights requires region_id names", {
+    local_mocked_bindings(
+        .ctwasResolveWeightBuckets = function(twasWeights, gwasSumStats) {
+            list("a", "b")
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.ctwasResolveAndValidateWeights(list(x = 1), NULL),
+        "must resolve to a named list keyed by region_id"
+    )
+})
+
+test_that(".ctwasResolveAndValidateWeights rejects a blank region name", {
+    local_mocked_bindings(
+        .ctwasResolveWeightBuckets = function(twasWeights, gwasSumStats) {
+            stats::setNames(list("a", "b"), c("r1", ""))
+        },
+        .package = "pecotmr"
+    )
+    # A partially-named list is as unusable as an unnamed one: the blank key
+    # cannot address a region.
+    expect_error(
+        pecotmr:::.ctwasResolveAndValidateWeights(list(x = 1), NULL),
+        "must resolve to a named list keyed by region_id"
+    )
+})

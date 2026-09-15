@@ -897,3 +897,25 @@ test_that("only the requested variants are read", {
 test_that("genotypeDelayedArray rejects a non-handle", {
     expect_error(genotypeDelayedArray("not a handle"), "GenotypeHandle")
 })
+
+
+test_that("the resource-path resolver passes non-scalar and NA paths through", {
+    # Only a length-1 non-NA string can carry a "pecotmr://" reference, so
+    # anything else is returned untouched rather than matched against.
+    f <- pecotmr:::.resolveGenotypeResourcePath
+    expect_identical(f(NA_character_), NA_character_)
+    expect_length(f(character(0)), 0L)
+    expect_identical(f(c("a", "b")), c("a", "b"))
+    # ...and an ordinary scalar path still comes back unchanged.
+    expect_identical(f("/tmp/plink"), "/tmp/plink")
+})
+
+
+test_that("an unresolvable bundled resource reference is an error", {
+    expect_error(
+        pecotmr:::.resolveGenotypeResourcePath(
+            "pecotmr://extdata/no_such_resource_anywhere"
+        ),
+        "cannot resolve bundled genotype resource"
+    )
+})

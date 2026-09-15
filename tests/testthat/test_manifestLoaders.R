@@ -1678,3 +1678,81 @@ test_that("loadGwasSumStatsFromManifest splits by LD block when asked", {
     # Same variants either way, just distributed across the blocks.
     expect_equal(sum(lengths(split)), sum(lengths(plain)))
 })
+
+
+test_that("containment checking is skipped when there is no LD sketch", {
+    # Nothing to contain the variants in, so the check is a no-op rather than
+    # an error about a missing panel.
+    expect_null(
+        pecotmr:::.qtlSumStatsCheckContainment(NULL, NULL, NULL, 0.5)
+    )
+})
+
+test_that(".deriveAllelesFromVariantId passes through with no id column", {
+    df <- data.frame(foo = 1, bar = 2)
+    # Neither an allele column nor a resolvable variant_id: the missing-field
+    # error belongs to the caller, so nothing is derived or raised here.
+    expect_identical(
+        pecotmr:::.deriveAllelesFromVariantId(
+            df,
+            order = c("A1", "A2"),
+            mapping = NULL,
+            label = "lab"
+        ),
+        df
+    )
+})
+
+test_that(".resolveGenoCov accepts a single genotypeCovariatePath", {
+    dir <- withr::local_tempdir()
+    covPath <- file.path(dir, "cov.tsv")
+    cov <- data.frame(
+        id = c("c1", "c2"),
+        s1 = c(0.1, 0.3),
+        s2 = c(0.2, 0.4),
+        stringsAsFactors = FALSE
+    )
+    readr::write_tsv(cov, covPath, progress = FALSE)
+    rows <- data.frame(
+        genotypeCovariatePath = c("cov.tsv", "cov.tsv", NA),
+        stringsAsFactors = FALSE
+    )
+    # Repeated identical paths collapse to one; only a genuine conflict errors.
+    out <- pecotmr:::.resolveGenoCov(rows, "s1", dir, FALSE, NULL)
+    expect_true(is.matrix(out))
+    expect_equal(nrow(out), 2L)
+    conflicting <- data.frame(
+        genotypeCovariatePath = c("a.tsv", "b.tsv"),
+        stringsAsFactors = FALSE
+    )
+    expect_error(
+        pecotmr:::.resolveGenoCov(conflicting, "s1", dir, FALSE, NULL),
+        "references multiple genotypeCovariatePath values"
+    )
+    # Blank / NA paths leave nothing to resolve, which yields the empty
+    # covariate matrix rather than an error.
+    none <- data.frame(
+        genotypeCovariatePath = c(NA, ""),
+        stringsAsFactors = FALSE
+    )
+    empty <- pecotmr:::.resolveGenoCov(none, "s1", dir, FALSE, NULL)
+    expect_true(is.matrix(empty))
+    expect_equal(dim(empty), c(0L, 0L))
+})
+
+test_that(".readTabixRegion returns a bare tibble for a headerless file", {
+    skip_if_not_installed("Rsamtools")
+    dir <- withr::local_tempdir()
+    plain <- file.path(dir, "noheader.tsv")
+    writeLines(c("chr1\t100\t200\tA", "chr1\t300\t400\tB"), plain)
+    bgz <- Rsamtools::bgzip(plain, file.path(dir, "noheader.tsv.bgz"),
+        overwrite = TRUE)
+    Rsamtools::indexTabix(bgz, seq = 1L, start = 2L, end = 3L)
+    # With no "#" header line there are no column names to build an empty
+    # frame from, so the miss returns a column-less tibble.
+    expect_length(Rsamtools::headerTabix(Rsamtools::TabixFile(bgz))$header, 0L)
+    out <- pecotmr:::.readTabixRegion(bgz, "chr9:1-100")
+    expect_s3_class(out, "tbl_df")
+    expect_equal(nrow(out), 0L)
+    expect_equal(ncol(out), 0L)
+})

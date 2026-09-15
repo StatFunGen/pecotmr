@@ -491,3 +491,140 @@ test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPo
         0L
     )
 })
+
+
+test_that("an exemplar column absent from every part is NULL", {
+    # Callers draw the name from allCols so in practice some part has it; the
+    # fallthrough is the honest answer when none does, not an error.
+    expect_null(pecotmr:::.exemplarColumn("nosuchcol", list()))
+})
+
+
+# ===========================================================================
+# Combining collections: QC records and chromosome-path unions
+# ===========================================================================
+
+test_that("combining inputs that carry no QC record yields an empty audit", {
+    # Empty, not a fabricated record: claiming QC that never ran would be
+    # worse than reporting none.
+    expect_equal(pecotmr:::.ssCombineQcInfo(list(), "combineX"), list())
+})
+
+test_that("chromosome paths union when they agree and abort when they clash", {
+    # A sharded sketch routes a row to its file by CHR, so one chromosome
+    # mapping to two files means the parts are not the same panel at all.
+    mk <- function(paths) {
+        new(
+            "GenotypeHandle",
+            path = "/tmp/x.gds",
+            format = "gds",
+            snpInfo = data.frame(
+                SNP = "a",
+                CHR = "1",
+                BP = 1L,
+                A1 = "A",
+                A2 = "G",
+                fileIdx = 1L,
+                stringsAsFactors = FALSE
+            ),
+            nSamples = 1L,
+            sampleIds = "s1",
+            pgenPtr = NULL,
+            chromPaths = paths
+        )
+    }
+    h1 <- mk(c("1" = "/data/chr1.pgen"))
+    h2 <- mk(c("1" = "/data/chr1.pgen", "2" = "/data/chr2.pgen"))
+    out <- pecotmr:::.ssUnionChromPaths(list(h1, h2), "combineX")
+    expect_equal(sort(names(out)), c("1", "2"))
+    expect_equal(unname(out[["1"]]), "/data/chr1.pgen")
+    # Same chromosome, different file -> refused.
+    h3 <- mk(c("1" = "/other/chr1.pgen"))
+    expect_error(
+        pecotmr:::.ssUnionChromPaths(list(h1, h3), "combineX"),
+        "chromosome '1' maps to two different genotype"
+    )
+})
+
+
+# ===========================================================================
+# Row-payload coercion and unmerged collection slots
+# ===========================================================================
+
+test_that("an empty collection coerces to itself, not to a row", {
+    # getFineMappingResult() hands over a single-row COLLECTION, so the
+    # coercion has to accept that shape -- but an empty one has no row to
+    # extract and must come back untouched.
+    data(qtlFineMappingExample, twasWeightsExample)
+    expect_s4_class(
+        pecotmr:::.asFmRowPayload(qtlFineMappingExample[0]),
+        "QtlFineMappingResult"
+    )
+    expect_s4_class(
+        pecotmr:::.asTwRowPayload(twasWeightsExample[0]),
+        "TwasWeights"
+    )
+    # A populated one becomes the row payload.
+    expect_s4_class(
+        pecotmr:::.asFmRowPayload(qtlFineMappingExample),
+        "FineMappingRow"
+    )
+    expect_s4_class(
+        pecotmr:::.asTwRowPayload(twasWeightsExample),
+        "TwasWeightsRow"
+    )
+    # Anything that is not a collection passes straight through.
+    expect_equal(pecotmr:::.asFmRowPayload(42), 42)
+    expect_equal(pecotmr:::.asTwRowPayload("x"), "x")
+})
+
+test_that("a collection-level slot with no merge rule is refused", {
+    # Silently dropping a slot when combining would lose provenance, so an
+    # unrecognised one is an error naming the slot(s) and the class.
+    setClass(
+        "TsExtraKid",
+        contains = "RangedTupleList",
+        representation(
+            genome = "character",
+            ldSketch = "ANY",
+            surprise = "character"
+        )
+    )
+    k <- new(
+        "TsExtraKid",
+        GenomicRanges::GRangesList(
+            a = GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, width = 1L))
+        ),
+        genome = "hg38",
+        ldSketch = NULL,
+        surprise = "boo"
+    )
+    expect_error(
+        pecotmr:::.rtlExtraSlots(list(k, k), "combineX"),
+        "no merge rule for the collection-level slot"
+    )
+    # The message names the offending slots and the class.
+    expect_error(
+        pecotmr:::.rtlExtraSlots(list(k, k), "combineX"),
+        "surprise"
+    )
+})
+
+test_that(".twrRowResolveWeights drops rows whose weights are all NA", {
+    allNa <- twasWeightsRow(
+        variantIds = c("chr1:1:A:G", "chr1:2:C:T"),
+        weights = c(NA_real_, NA_real_)
+    )
+    out <- pecotmr:::.twrRowResolveWeights(allNa)
+    # Nothing usable survives, so the row contributes no variants at all.
+    expect_length(out$variantIds, 0L)
+    expect_length(out$weights, 0L)
+    # Control: a single usable weight is kept, and only that one.
+    partial <- twasWeightsRow(
+        variantIds = c("chr1:1:A:G", "chr1:2:C:T"),
+        weights = c(NA_real_, 0.5)
+    )
+    kept <- pecotmr:::.twrRowResolveWeights(partial)
+    expect_equal(kept$variantIds, "chr1:2:C:T")
+    expect_equal(kept$weights, 0.5)
+})

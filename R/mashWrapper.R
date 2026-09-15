@@ -1347,7 +1347,7 @@ qtlSumStatsFromBetaMatrix <- function(
 .mashAsDataFrameOrNull <- function(m) {
     if (is.null(m)) {
         return(NULL)
-    } # nocov  (partitions are always matrices here, never NULL)
+    }
     as.data.frame(m)
 }
 

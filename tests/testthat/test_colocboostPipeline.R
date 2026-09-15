@@ -1051,3 +1051,203 @@ test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
         cutoffs = list(mafCutoff = 0.99, macCutoff = 0, imissCutoff = 1)
     )))
 })
+
+
+# ===========================================================================
+# Outcome naming and canonical allele flipping
+# ===========================================================================
+
+test_that("outcome names are defaulted, context-qualified and de-duplicated", {
+    # Three distinct problems: an unnamed column, the same trait appearing in
+    # two contexts, and a name that clashes with one already assigned.
+    f <- pecotmr:::.cbTraitName
+    expect_equal(f(NULL, "brain", character(0), c("a", "b")), "outcome3")
+    expect_equal(f("", "brain", character(0), "a"), "outcome2")
+    # Same trait in more than one context gets the context prefix.
+    expect_equal(f("G1", "brain", "G1", character(0)), "brain_G1")
+    # A clash with an already-assigned name is made unique.
+    expect_equal(f("G1", "brain", character(0), "G1"), "G1.1")
+    # Nothing to fix.
+    expect_equal(f("G1", "brain", character(0), character(0)), "G1")
+})
+
+test_that("flipping to canonical drops a matrix with no shared variants", {
+    # Zero columns but the sample rows preserved, so the result still binds
+    # against the other contexts rather than collapsing.
+    m <- matrix(
+        1:4,
+        2L,
+        2L,
+        dimnames = list(NULL, c("chr9:1:A:G", "chr9:2:C:T"))
+    )
+    out <- pecotmr:::.cbFlipMatrixToCanonical(m, "chr1:100:A:G")
+    expect_equal(dim(out), c(2L, 0L))
+})
+
+test_that("flipping a sumstat/LD pair with no shared variants yields NULL", {
+    # NULL, not an empty pair: there is nothing to colocalize, and an empty
+    # sumstat would look like a fitted-but-null result.
+    pair <- list(
+        sumstat = tibble(variant = "chr9:1:A:G", z = 1),
+        LD = diag(1)
+    )
+    expect_null(pecotmr:::.cbFlipPairToCanonical(pair, "chr1:100:A:G"))
+})
+
+
+test_that("outcome info is the empty frame when nothing contributed", {
+    # Same shape as a populated one, so the downstream bind and join still
+    # work on a run that produced no outcomes.
+    out <- pecotmr:::.cbOutcomeInfo(list(), NULL, NULL)
+    expect_equal(nrow(out), 0L)
+    expect_equal(
+        colnames(out),
+        colnames(pecotmr:::.cbEmptyOutcomeInfo())
+    )
+})
+
+test_that("a MultiStudyQtlDataset with no embedded sumstats yields no pairs", {
+    # The sumstats arm is optional; its absence is an empty bundle rather
+    # than an error, so a purely individual-level collection still runs.
+    data(multiStudyQtlDatasetExample)
+    out <- pecotmr:::.cbMultiStudySumstats(
+        multiStudyQtlDatasetExample,
+        contexts = NULL,
+        traitId = NULL
+    )
+    expect_equal(out$qtlPairs, list())
+    expect_null(out$qtlLdSketch)
+})
+
+test_that("the signal screen passes Y through when no cutoff applies", {
+    # A NULL / absent screen spec means "do not screen", which is different
+    # from a screen that everything failed.
+    Y <- matrix(1:4, 2L, 2L, dimnames = list(c("s1", "s2"), c("t1", "t2")))
+    expect_identical(
+        pecotmr:::.cbApplyScreen(NULL, Y, "brain", NULL),
+        Y
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Per-context skips: a context that cannot supply usable X/Y drops out with an
+# explanation, rather than reaching colocboost as an empty or misaligned pair.
+# ---------------------------------------------------------------------------
+
+.cbp_mat <- function(rowNames, colNames) {
+    matrix(
+        0,
+        nrow = length(rowNames),
+        ncol = length(colNames),
+        dimnames = list(rowNames, colNames)
+    )
+}
+
+test_that(".cbBuildContextXY skips a context with no genotypes", {
+    local_mocked_bindings(
+        .cbResidualizedY = function(...) .cbp_mat(c("s1", "s2"), "f1"),
+        .cbResidualizedX = function(...) NULL,
+        .package = "pecotmr"
+    )
+    expect_null(pecotmr:::.cbBuildContextXY("c1", list()))
+})
+
+test_that(".cbBuildContextXY skips a context with no shared samples", {
+    local_mocked_bindings(
+        .cbResidualizedY = function(...) .cbp_mat(c("s1", "s2"), "f1"),
+        .cbResidualizedX = function(...) {
+            .cbp_mat(c("z9", "z8"), c("chr1:1:A:G", "chr1:2:C:T"))
+        },
+        .package = "pecotmr"
+    )
+    # X and Y are each non-empty, but they describe disjoint sample sets.
+    expect_message(
+        res <- pecotmr:::.cbBuildContextXY("c1", list()),
+        "no samples shared between residualized X and Y"
+    )
+    expect_null(res)
+})
+
+test_that(".cbResidualizedX reports why genotypes were unavailable", {
+    local_mocked_bindings(
+        getResidualizedGenotypes = function(...) stop("kaboom"),
+        .package = "pecotmr"
+    )
+    # The underlying message is carried through so the skip is diagnosable.
+    expect_message(
+        res <- pecotmr:::.cbResidualizedX(
+            NULL, "c1", NULL, NULL, NULL, NULL
+        ),
+        "residualized genotypes unavailable: kaboom"
+    )
+    expect_null(res)
+})
+
+test_that(".cbApplyScreen keeps the outcomes that clear the screen", {
+    Y <- .cbp_mat(c("s1", "s2"), c("f1", "f2"))
+    local_mocked_bindings(
+        .cbPipSkipOutcomes = function(X, Y, cutoff) Y[, 1, drop = FALSE],
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.cbApplyScreen(NULL, Y, "c1", 0.5)
+    expect_equal(ncol(out), 1L)
+    expect_equal(colnames(out), "f1")
+})
+
+test_that(".cbToResultObject skips a separate_gwas study that produced none", {
+    raw <- list(
+        xqtl_coloc = NULL,
+        joint_gwas = NULL,
+        separate_gwas = list(G1 = NULL, G2 = .cbr_fake()),
+        computing_time = list()
+    )
+    x <- pecotmr:::.cbToResultObject(raw, .cbr_info())
+    # G1 contributes no row at all; its key must not survive as an empty one.
+    expect_equal(nrow(x), 1L)
+    expect_equal(as.character(x$gwasStudy), "G2")
+    expect_equal(as.character(x$analysis), "separate_gwas")
+})
+
+test_that(".cbRunXqtlOnly passes a focal outcome through as an index", {
+    local_mocked_bindings(
+        .cbRun = function(label, args) {
+            list(result = list(focal = args$focal_outcome_idx), time = 0)
+        },
+        .package = "pecotmr"
+    )
+    bundle <- list(
+        outcomeNames = c("tA", "tB"),
+        Y = list(1, 2),
+        X = list(),
+        dict_YX = NULL
+    )
+    run <- suppressMessages(pecotmr:::.cbRunXqtlOnly(bundle, "tB", list()))
+    # colocboost wants a position, not a name.
+    expect_equal(run$result$focal, 2L)
+    absent <- suppressMessages(
+        pecotmr:::.cbRunXqtlOnly(bundle, "nope", list())
+    )
+    expect_null(absent$result$focal)
+    none <- suppressMessages(pecotmr:::.cbRunXqtlOnly(bundle, NULL, list()))
+    expect_null(none$result$focal)
+})
+
+test_that(".cbAppendGwasPairs disambiguates a colliding study key", {
+    local_mocked_bindings(
+        .cbRequireSumStatsQc = function(...) invisible(NULL),
+        .cbGwasSumStatsBundle = function(gwasSumStats, cutoffs) {
+            list(dup = "GWAS")
+        },
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.cbAppendGwasPairs(
+        list(dup = "QTL", other = "X"),
+        "notNull",
+        qtlLdSketch = NULL
+    )
+    # The QTL pair keeps its key; the GWAS pair is suffixed rather than
+    # overwriting it.
+    expect_equal(names(out), c("dup", "other", "dup.1"))
+    expect_equal(out[["dup"]], "QTL")
+    expect_equal(out[["dup.1"]], "GWAS")
+})

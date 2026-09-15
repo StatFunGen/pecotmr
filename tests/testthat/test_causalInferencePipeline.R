@@ -1626,3 +1626,233 @@ test_that(".cipPairLabel: names both sides of the pair", {
     expect_true(grepl("trait='t1'", label, fixed = TRUE))
     expect_true(grepl("study='G1'", label, fixed = TRUE))
 })
+
+
+# ===========================================================================
+# Column indexing, CV metric lookup and V alignment
+# ===========================================================================
+
+test_that("an absent GWAS column fills NA rather than dropping rows", {
+    # The result table has one row per requested index either way, so a
+    # missing optional column must not shorten it.
+    expect_equal(pecotmr:::.cipGwasCol(NULL, c(1L, 2L)), c(NA_real_, NA_real_))
+    expect_equal(pecotmr:::.cipGwasCol(c(9, 8, 7), c(1L, 3L)), c(9, 7))
+})
+
+test_that("a tuple with no CV record scores NA", {
+    # NA, not 0: no cross-validation was run, which is different from a fit
+    # that cross-validated badly.
+    expect_true(is.na(pecotmr:::.cipCvMetric(
+        NULL,
+        "s",
+        "c",
+        "t",
+        "m",
+        which = "rsq"
+    )))
+})
+
+test_that("V is aligned to the weight names, and refuses to guess", {
+    V <- matrix(1:6, 3L, 2L, dimnames = list(c("a", "b", "c"), NULL))
+    # Named alignment reorders rather than assuming position.
+    aligned <- pecotmr:::.twasZAlignV(V, c("c", "a"), 2L)
+    expect_equal(dim(aligned), c(2L, 2L))
+    expect_equal(unname(aligned[, 1L]), c(3L, 1L))
+    expect_equal(rownames(aligned), c("c", "a"))
+    # A weight variant with no row in V is an error, not a silent drop.
+    expect_error(
+        pecotmr:::.twasZAlignV(V, "zz", 1L),
+        "V is missing rows for 1 variant"
+    )
+})
+
+
+# ===========================================================================
+# Method selection and the CS-aware MR composite
+# ===========================================================================
+
+test_that("selecting the best method over an empty frame is a no-op", {
+    df0 <- tibble(
+        qtlStudy = character(0),
+        context = character(0),
+        trait = character(0),
+        method = character(0),
+        gwasStudy = character(0),
+        twasZ = numeric(0)
+    )
+    expect_equal(nrow(pecotmr:::.cipSelectBestMethod(df0, c(a = 1))), 0L)
+})
+
+test_that("a credible set below the cumulative-PIP cutoff contributes nothing", {
+    # cpip is the SUM of member PIPs; a set that does not reach the cutoff is
+    # dropped rather than contributing a poorly-supported Wald ratio.
+    inst <- tibble(
+        cs = c("L1", "L1"),
+        pip = c(0.1, 0.1),
+        bhatX = c(2, 2),
+        sbhatX = c(0.1, 0.1),
+        bhatY = c(1, 2),
+        sbhatY = c(0.1, 0.1)
+    )
+    expect_null(pecotmr:::.cipCsComposite("L1", inst, 0.5))
+    # A set id that matches nothing has cpip 0 and is likewise dropped.
+    expect_null(pecotmr:::.cipCsComposite("L9", inst, 0.5))
+})
+
+test_that("a zero exposure effect yields no composite rather than infinity", {
+    # by/bx is the Wald ratio; bx == 0 makes it non-finite, so the set is
+    # dropped instead of propagating Inf into the IVW pooling.
+    inst <- tibble(
+        cs = c("L1", "L1"),
+        pip = c(0.5, 0.5),
+        bhatX = c(0, 0),
+        sbhatX = c(0.1, 0.1),
+        bhatY = c(1, 2),
+        sbhatY = c(0.1, 0.1)
+    )
+    expect_null(pecotmr:::.cipCsComposite("L1", inst, 0.5))
+})
+
+test_that("a well-supported credible set yields a finite composite", {
+    inst <- tibble(
+        cs = c("L1", "L1"),
+        pip = c(0.5, 0.5),
+        bhatX = c(2, 2),
+        sbhatX = c(0.1, 0.1),
+        bhatY = c(1, 2),
+        sbhatY = c(0.1, 0.1)
+    )
+    out <- pecotmr:::.cipCsComposite("L1", inst, 0.5)
+    expect_true(is.finite(out$bhat))
+    expect_gt(out$sbhat, 0)
+})
+
+# ---------------------------------------------------------------------------
+# Work-list and scoring guards: the pipeline refuses to return an empty result
+# silently, and a tuple that cannot be scored drops out rather than erroring.
+# ---------------------------------------------------------------------------
+
+test_that(".cipResolveWorkList rejects empty weight collections", {
+    local_mocked_bindings(
+        .cipBuildQtlWorkList = function(twasWeights, fineMappingResult) {
+            data.frame()
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.cipResolveWorkList(NULL, NULL),
+        "no QTL tuples to score"
+    )
+})
+
+test_that(".cipCvSelection errors when no method clears the CV cutoffs", {
+    local_mocked_bindings(
+        .cipMethodMetrics = function(...) {
+            data.frame(
+                qtlStudy = "s", context = "c", trait = "t",
+                method = "m", rsq = 0.01, stringsAsFactors = FALSE
+            )
+        },
+        .cipFilterEligibleMethods = function(...) data.frame(),
+        .package = "pecotmr"
+    )
+    p <- list(
+        twasWeights = "notNull", rsqCutoff = 0.5, rsqPvalCutoff = 0.05,
+        qtlRows = data.frame(a = 1), rsqOption = NULL, rsqPvalOption = NULL
+    )
+    # Naming the cutoffs in the message is what makes this actionable.
+    expect_error(
+        pecotmr:::.cipCvSelection(p),
+        "rsqCutoff = 0.5 / rsqPvalCutoff = 0.05"
+    )
+})
+
+test_that(".cipRun errors when no tuple produced a result", {
+    local_mocked_bindings(
+        .cipValidateInputs = function(...) invisible(NULL),
+        .cipCheckLdSketches = function(...) NULL,
+        .cipResolveWorkList = function(...) data.frame(x = 1),
+        .cipCvSelection = function(p) {
+            list(
+                qtlRows = data.frame(x = 1),
+                rsqLookup = NULL,
+                selectionActive = FALSE
+            )
+        },
+        .cipScoreQtlTuple = function(qi, p) list(),
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.cipRun(list()),
+        "no \\(qtl, gwas\\) tuples produced a result"
+    )
+})
+
+test_that(".cipScoreQtlTuple skips a tuple with no weights", {
+    local_mocked_bindings(
+        .cipExtractWeights = function(...) NULL,
+        .package = "pecotmr"
+    )
+    p <- list(
+        qtlRows = data.frame(
+            qtlStudy = "s", context = "c", trait = "t", method = "m",
+            useFmrForWeights = FALSE, stringsAsFactors = FALSE
+        ),
+        twasWeights = NULL,
+        fineMappingResult = NULL
+    )
+    # An empty list contributes no rows once flattened.
+    expect_identical(pecotmr:::.cipScoreQtlTuple(1L, p), list())
+})
+
+test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
+    local_mocked_bindings(
+        getSumStatsDf = function(...) data.frame(SNP = "v1", Z = 1),
+        .cipComputeTwasZ = function(...) NULL,
+        .cipPairLabel = function(...) "lab",
+        .package = "pecotmr"
+    )
+    p <- list(gwasSumStats = list(study = "G1"), gwasLd = NULL,
+        alleleFlip = FALSE)
+    expect_null(
+        pecotmr:::.cipScoreGwasPair(1L, NULL, list(), NULL, p)
+    )
+})
+
+test_that(".cipRunMr routes to the CS-aware estimator when asked", {
+    local_mocked_bindings(
+        .cipComputeMrCsAware = function(...) list(SENTINEL = TRUE),
+        .package = "pecotmr"
+    )
+    p <- list(
+        mrPvalCutoff = 1, mrMethod = "csAware",
+        mrCpipCutoff = 0.5, alleleFlip = FALSE
+    )
+    out <- pecotmr:::.cipRunMr(
+        fmrEntry = "notNull",
+        gdf = NULL,
+        twasOut = list(pval = 0.001),
+        p = p
+    )
+    expect_true(isTRUE(out$SENTINEL))
+})
+
+test_that(".cipCvMetric reads metrics wrapped or bare, NA when absent", {
+    local_mocked_bindings(
+        getCvResult = function(...) list(rsq = 0.42, pval = 0.01),
+        .package = "pecotmr"
+    )
+    # A bare metrics list (no $metrics wrapper) is read directly.
+    expect_equal(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "rsq"), 0.42)
+    expect_true(is.na(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "zzz")))
+})
+
+test_that(".cipCvMetric returns NA when the CV result cannot be read", {
+    local_mocked_bindings(
+        getCvResult = function(...) stop("nope"),
+        .package = "pecotmr"
+    )
+    expect_true(
+        is.na(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "rsq"))
+    )
+})

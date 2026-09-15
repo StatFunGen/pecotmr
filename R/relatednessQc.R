@@ -105,14 +105,12 @@ filterRelatedness <- function(
 
 # @noRd
 .relatednessRequirePackages <- function() {
-    # nocov start
     if (!requireNamespace("igraph", quietly = TRUE)) {
         abort("Package 'igraph' is required for filterRelatedness")
     }
     if (!requireNamespace("plinkQC", quietly = TRUE)) {
         abort("Package 'plinkQC' is required for filterRelatedness")
     }
-    # nocov end
 }
 
 # Graph pre-pruning: iteratively remove the highest-degree nodes of any

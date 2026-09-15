@@ -96,9 +96,6 @@ setClass(
 .ldRefPrepare <- function(ldBlockData, nRef, genome) {
     dataList <- .ldRefAsDataList(ldBlockData)
     blocks <- list_flatten(map(dataList, .ldRefBlocksOf))
-    if (length(blocks) == 0L) {
-        abort("`ldBlockData` yielded no LD blocks.")
-    }
     resolvedGenome <- .ldRefResolveGenome(dataList, genome)
     list(
         blocks = blocks,

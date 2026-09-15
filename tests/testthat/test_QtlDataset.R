@@ -2942,6 +2942,57 @@ test_that("subsetting by context keeps the genotype experiment", {
     expect_true(validObject(out))
 })
 
+test_that("subsetting by sample and context together narrows both axes", {
+    # `x[, j, k]`: the experiment axis is applied here, then the remaining
+    # axes go back through the method with no `k` so the inherited one runs.
+    qd <- .qm_makeDataset()
+    out <- suppressWarnings(suppressMessages(qd[, paste0("s", 1:5), "brain"]))
+    expect_s4_class(out, "QtlDataset")
+    expect_equal(getContexts(out), "brain")
+    expect_equal(nrow(MultiAssayExperiment::colData(out)), 5L)
+    expect_true(validObject(out))
+})
+
+test_that("subsetting by feature and context leaves the samples alone", {
+    # `x[i, , k]`: no sample subscript, so every sample survives.
+    qd <- .qm_makeDataset()
+    out <- suppressWarnings(suppressMessages(qd[1, , "brain"]))
+    expect_s4_class(out, "QtlDataset")
+    expect_equal(getContexts(out), "brain")
+    expect_equal(nrow(MultiAssayExperiment::colData(out)), 12L)
+    expect_true(validObject(out))
+})
+
+test_that("all three subscripts can be given at once", {
+    qd <- .qm_makeDataset()
+    out <- suppressWarnings(suppressMessages(
+        qd[1, paste0("s", 1:5), "brain"]
+    ))
+    expect_s4_class(out, "QtlDataset")
+    expect_equal(getContexts(out), "brain")
+    expect_equal(nrow(MultiAssayExperiment::colData(out)), 5L)
+    expect_true(validObject(out))
+})
+
+test_that("the experiment subscript accepts logical and numeric, not just names", {
+    qd <- .qm_makeDataset()
+    nms <- names(MultiAssayExperiment::experiments(qd))
+    expect_equal(nms, c("genotype", "brain", "liver"))
+    expect_equal(pecotmr:::.qtlExperimentIndex("brain", nms), 2L)
+    expect_equal(
+        pecotmr:::.qtlExperimentIndex(c(TRUE, TRUE, FALSE), nms),
+        c(1L, 2L)
+    )
+    expect_equal(pecotmr:::.qtlExperimentIndex(c(1, 2), nms), c(1L, 2L))
+})
+
+test_that("a logical experiment subscript recycles over the experiments", {
+    # rep(k, length.out =) is what makes a short logical usable at all.
+    nms <- c("genotype", "brain", "liver")
+    expect_equal(pecotmr:::.qtlExperimentIndex(TRUE, nms), c(1L, 2L, 3L))
+    expect_equal(pecotmr:::.qtlExperimentIndex(c(TRUE, FALSE), nms), c(1L, 3L))
+})
+
 test_that("subsetting to no context at all is an error", {
     qd <- .qm_makeDataset()
     expect_error(qd[,, "genotype"], "selects no QTL context")
@@ -3092,4 +3143,114 @@ test_that("QtlDataset still rejects a genotype source it cannot open", {
         ),
         "must be a genotype panel"
     )
+})
+
+
+# ===========================================================================
+# Validity and guard branches
+#
+# Every construction elsewhere in this file builds a VALID object, so the
+# message-returning arms of the checks and the two sample-intersection
+# guards were never executed.
+# ===========================================================================
+
+test_that("validity rejects a non-scalar scaleResiduals", {
+    # The constructor coerces via isTRUE(); validity guards direct slot sets.
+    qd <- .qh_makeDataset()
+    qd@scaleResiduals <- c(TRUE, FALSE)
+    expect_error(validObject(qd), "scaleResiduals.*single logical")
+})
+
+test_that("the phenotype-list check rejects duplicated context names", {
+    se <- .qh_makeSe()
+    errs <- pecotmr:::.qtlCheckPhenotypeList(list(brain = se, brain = se))
+    expect_true(any(str_detect(
+        errs,
+        "context names in 'phenotypes' must be unique"
+    )))
+})
+
+test_that("the phenotype check reports a missing genotype experiment", {
+    # Reached with a bare MultiAssayExperiment: a QtlDataset that had lost the
+    # genotype experiment would fail MAE's own validity first.
+    mae <- MultiAssayExperiment::MultiAssayExperiment(
+        experiments = list(brain = .qh_makeSe())
+    )
+    expect_equal(
+        pecotmr:::.qtlValidatePhenotypes(mae),
+        "experiment 'genotype' is missing"
+    )
+})
+
+test_that("the phenotype check reports an empty context set", {
+    qd <- .qh_makeDataset()
+    gse <- MultiAssayExperiment::experiments(qd)[["genotype"]]
+    mae <- MultiAssayExperiment::MultiAssayExperiment(
+        experiments = list(genotype = gse)
+    )
+    expect_equal(
+        pecotmr:::.qtlValidatePhenotypes(mae),
+        "'phenotypes' must not be empty"
+    )
+})
+
+test_that("aligning genotypes and covariates errors when they share no samples", {
+    G <- matrix(0, 2L, 2L, dimnames = list(c("a", "b"), c("v1", "v2")))
+    C <- matrix(0, 2L, 1L, dimnames = list(c("x", "y"), "pc1"))
+    expect_error(
+        pecotmr:::.qtlAlignGC(G, C, contexts = "brain"),
+        "No samples in common between the genotype matrix"
+    )
+    # ...and a NULL covariate matrix is a no-op rather than an error.
+    expect_equal(pecotmr:::.qtlAlignGC(G, NULL, "brain"), list(G = G, C = NULL))
+})
+
+test_that("residualizing a context errors when covariates share no samples", {
+    se <- .qh_makeSe()
+    C <- matrix(
+        0,
+        2L,
+        1L,
+        dimnames = list(c("nobody1", "nobody2"), "pc1")
+    )
+    expect_error(
+        pecotmr:::.qtlResidualizeContextPheno(
+            se,
+            C,
+            ctx = "brain",
+            outlierAction = "none",
+            outlierPvalThreshold = 1,
+            scaleResiduals = FALSE
+        ),
+        "context 'brain': no samples shared"
+    )
+})
+
+
+test_that("trait-position validation skips a context whose ranges do not line up", {
+    # rowRanges and rownames disagreeing means the context cannot be compared
+    # against the others; it is skipped rather than reported as a conflict.
+    mkSe <- function(traits) {
+        SummarizedExperiment::SummarizedExperiment(
+            assays = list(
+                x = matrix(
+                    0,
+                    length(traits),
+                    2L,
+                    dimnames = list(traits, c("s1", "s2"))
+                )
+            )
+        )
+    }
+    mae <- MultiAssayExperiment::MultiAssayExperiment(
+        experiments = list(
+            brain = mkSe(c("t1", "t2")),
+            liver = mkSe(c("t1", "t2"))
+        )
+    )
+    expect_equal(pecotmr:::.qtlValidateTraitPositions(mae), character(0))
+})
+
+test_that("aligning covariates with nothing to align returns NULL", {
+    expect_null(pecotmr:::.qtlAlignCovariates(list(), NULL))
 })

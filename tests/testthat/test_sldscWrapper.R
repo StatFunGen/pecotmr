@@ -850,3 +850,35 @@ test_that(".sldscViewForMeta returns NULL when no matching columns", {
     view <- fn(per_trait, "single")
     expect_null(view$traitX)
 })
+
+
+test_that("a constant annotation column contributes no variance", {
+    # var() of a constant is 0 and of an all-NA column is NA; both must come
+    # back as 0 so the column simply drops out of the weighted sum rather
+    # than poisoning it with NA.
+    f <- pecotmr:::.sldscColVarContrib
+    expect_equal(f("a", data.frame(a = c(1, 1, 1)), 2), 0)
+    expect_equal(f("a", data.frame(a = c(NA_real_, NA_real_)), 2), 0)
+    expect_equal(f("a", data.frame(a = c(1, 2, 3)), 2), 2)
+})
+
+test_that("readSldscAnnot accepts annotCols by position", {
+    dir <- withr::local_tempdir()
+    for (chr in 1:2) {
+        .make_annot_gz(dir, chr)
+    }
+    # A numeric annotCols indexes into the DETECTED columns, so 1 is the
+    # first annotation rather than the first column of the file.
+    one <- readSldscAnnot(dir, annotCols = 1L)
+    expect_true(is_in("annot_A", names(one)))
+    expect_false(is_in("annot_B", names(one)))
+    both <- readSldscAnnot(dir, annotCols = c(1L, 2L))
+    expect_true(all(is_in(c("annot_A", "annot_B"), names(both))))
+})
+
+test_that("sldscSubsetMeta requires a per_trait element", {
+    expect_error(
+        sldscSubsetMeta(list(other = 1), subsetTraits = "t1"),
+        "has no `per_trait` element"
+    )
+})

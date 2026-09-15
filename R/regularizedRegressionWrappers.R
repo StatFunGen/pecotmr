@@ -411,13 +411,11 @@ mrmashWeights <- function(
     ...
 ) {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'mr.mashr' is required. Install with: ",
             "devtools::install_github('stephenslab/mr.mashr')"
         )
         abort(msg)
-        # nocov end
     }
     dotArgs <- list(...)
     if (is.null(mrmashFit)) {
@@ -577,14 +575,12 @@ mrmashRssWeights <- function(
 # @noRd
 .mrmashRssRequirePackage <- function() {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'mr.mashr' is required. ",
             "Install with: ",
             "devtools::install_github('stephenslab/mr.mash.alpha')"
         )
         abort(msg)
-        # nocov end
     }
 }
 
@@ -715,13 +711,11 @@ initPriorSd <- function(X, y, n = 30) {
 glmnetWeights <- function(X, y, alpha) {
     # Check if glmnet is installed
     if (!requireNamespace("glmnet", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install glmnet: ",
             "https://cran.r-project.org/web/packages/glmnet/index.html"
         )
         abort(msg)
-        # nocov end
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "glmnetWeights")
@@ -883,13 +877,11 @@ bayesAlphabetWeights <- function(
 # @noRd
 .bayesAlphabetValidate <- function(X, y, Z) {
     if (!requireNamespace("qgg", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install qgg: ",
             "https://cran.r-project.org/web/packages/qgg/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (!(length(y) == nrow(X))) {
         abort("All objects must have the same number of rows")
@@ -2125,13 +2117,11 @@ l0learnRssWeights <- function(
 #' @keywords internal
 ncvregWeights <- function(X, y, penalty, nfolds = 5, ...) {
     if (!requireNamespace("ncvreg", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install ncvreg: ",
             "https://cran.r-project.org/package=ncvreg"
         )
         abort(msg)
-        # nocov end
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "ncvregWeights")
@@ -2210,13 +2200,11 @@ mcpWeights <- function(X, y, nfolds = 5, ...) {
 #' @export
 l0learnWeights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
     if (!requireNamespace("L0Learn", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install L0Learn: ",
             "https://cran.r-project.org/package=L0Learn"
         )
         abort(msg)
-        # nocov end
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "l0learnWeights")
@@ -2272,13 +2260,11 @@ bglrWeights <- function(
     ...
 ) {
     if (!requireNamespace("BGLR", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install BGLR: ",
             "https://cran.r-project.org/package=BGLR"
         )
         abort(msg)
-        # nocov end
     }
     eff.wgt <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "bglrWeights")
@@ -2420,13 +2406,11 @@ bLassoWeights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
 #' @export
 dprWeights <- function(X, y, fittingMethod = "VB", retainFit = FALSE, ...) {
     if (!requireNamespace("RcppDPR", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install RcppDPR: ",
             "https://cran.r-project.org/package=RcppDPR"
         )
         abort(msg)
-        # nocov end
     }
     eff.wgt <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "dprWeights")
@@ -2623,22 +2607,18 @@ mrmashWrapper <- function(
 # @noRd
 .mrmashRequirePackages <- function() {
     if (!requireNamespace("glmnet", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install glmnet: ",
             "https://cran.r-project.org/web/packages/glmnet/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mr.mashr: ",
             "https://github.com/stephenslab/mr.mashr"
         )
         abort(msg)
-        # nocov end
     }
 }
 
@@ -3129,9 +3109,7 @@ buildMrmashPriorMatrices <- function(
     singletons = TRUE
 ) {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
-        # nocov start
         abort("Package 'mr.mashr' is required.")
-        # nocov end
     }
     if (is.null(dataDrivenPriorMatrices) && !isTRUE(canonicalPriorMatrices)) {
         msg <- glue(

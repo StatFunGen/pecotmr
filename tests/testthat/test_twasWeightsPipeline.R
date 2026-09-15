@@ -1126,19 +1126,67 @@ test_that("twasWeightsPipeline(ANY): unsupported input class errors", {
 # twasMultivariateWeightsPipeline
 # ===========================================================================
 
-# NOTE: twasMultivariateWeightsPipeline currently bottoms out on a
-# `getWeights(twasWeight)` call (R/twasWeights.R:2105) that omits the
-# (study, context, trait, method) selectors and therefore errors whenever
-# the inner learnTwasWeights() returns a collection with >1 row — which it
-# always does when both mr.mash and mvSuSiE are requested (the default).
-# Skipping this test until that path is reworked to walk all rows; flagging
-# here so coverage doesn't appear lifted on a known-broken pipeline.
-test_that("twasMultivariateWeightsPipeline: known-broken under the new TwasWeights API", {
-    skip(
-        "twasMultivariateWeightsPipeline calls getWeights() on a multi-row TwasWeights without selectors; needs a follow-up fix in production code."
-    )
-})
+# twasMultivariateWeightsPipeline() was a deprecation stub and was removed in
+# 2be68392; its documented replacement is twasWeightsPipeline() with both
+# multivariate tokens passed together. That migration path is what is tested
+# here -- the two solvers must fit side by side and partition their output by
+# (study, context, trait, method) rather than collide.
 
+test_that("twasWeightsPipeline: mr.mash and mvSuSiE fit side by side", {
+    qd <- .tp_makeQtlDataset(
+        contexts = c("brain", "liver"),
+        traits = c("ENSG_A", "ENSG_B")
+    )
+    fmr <- .tp_makeStubFineMappingResult(
+        study = "study1",
+        contexts = c("brain", "liver"),
+        traits = c("ENSG_A", "ENSG_B"),
+        method = "mvsusie"
+    )
+    mvCalls <- 0L
+    mrCalls <- 0L
+    mkW <- function(X, Y) {
+        matrix(
+            0,
+            nrow = ncol(X),
+            ncol = ncol(Y),
+            dimnames = list(colnames(X), colnames(Y))
+        )
+    }
+    mocks <- list(
+        extractBlockGenotypes = .tp_mockExtractor(),
+        mvsusieWeights = function(X, Y, mvsusieFit = NULL, ...) {
+            mvCalls <<- mvCalls + 1L
+            mkW(X, Y)
+        },
+        mrmashWeights = function(X, Y, ...) {
+            mrCalls <<- mrCalls + 1L
+            mkW(X, Y)
+        }
+    )
+    do.call(local_mocked_bindings, c(mocks, list(.package = "pecotmr")))
+    res <- suppressMessages(suppressWarnings(
+        twasWeightsPipeline(
+            qd,
+            methods = c("mrmash", "mvsusie"),
+            fineMappingResult = fmr,
+            cisWindow = 1000L,
+            cvFolds = 0,
+            ensemble = FALSE,
+            estimatePi = FALSE,
+            verbose = 0
+        )
+    ))
+    expect_s4_class(res, "TwasWeights")
+    # Both solvers ran, and each contributes its own rows.
+    expect_gte(mvCalls, 1L)
+    expect_gte(mrCalls, 1L)
+    expect_setequal(getMethodNames(res), c("mrmash", "mvsusie"))
+    expect_setequal(getContexts(res), c("brain", "liver"))
+    expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
+    # 2 contexts x 2 traits x 2 methods, with no method overwriting the other.
+    expect_equal(nrow(res), 8L)
+})
 # imputeMissingGwasForSketch was removed: it duplicated the inline RAISS
 # imputation step at the bottom of .runEntrySummaryStatsQc (sumstatsQc.R),
 # had no production callers, and was orphaned post-S4-refactor. The RAISS-
@@ -2217,6 +2265,86 @@ test_that(".twasMergeRegionEntries returns a single entry unchanged", {
     expect_identical(
         pecotmr:::.twasMergeRegionEntries(list(e), "chr1:1-100"),
         e
+    )
+})
+
+test_that(".twasMergeRegionEntries rbinds matrix weights across regions", {
+    mk <- function(vids, w) {
+        twasWeightsRow(variantIds = vids, weights = w)
+    }
+    m1 <- matrix(
+        c(0.1, 0.2, 0.3, 0.4),
+        nrow = 2L,
+        dimnames = list(c("chr1:100:A:G", "chr1:200:A:G"), c("cA", "cB"))
+    )
+    m2 <- matrix(
+        c(0.5, 0.6, 0.7, 0.8),
+        nrow = 2L,
+        dimnames = list(c("chr1:300:A:G", "chr1:400:A:G"), c("cA", "cB"))
+    )
+    m <- pecotmr:::.twasMergeRegionEntries(
+        list(mk(rownames(m1), m1), mk(rownames(m2), m2)),
+        c("r1", "r2")
+    )
+    w <- getWeights(m)
+    # Matrix weights stack by ROW -- one row per variant, contexts preserved
+    # as columns. The vector branch would have flattened this to length 8.
+    expect_true(is.matrix(w))
+    expect_equal(dim(w), c(4L, 2L))
+    expect_equal(colnames(w), c("cA", "cB"))
+    expect_equal(rownames(w), c(
+        "chr1:100:A:G", "chr1:200:A:G",
+        "chr1:300:A:G", "chr1:400:A:G"
+    ))
+    expect_equal(unname(w[, "cA"]), c(0.1, 0.2, 0.5, 0.6))
+    expect_equal(unname(w[, "cB"]), c(0.3, 0.4, 0.7, 0.8))
+    expect_equal(names(getFits(m)), c("r1", "r2"))
+})
+
+test_that(".twasNormalizeCharMethods: fine-mapping-only tokens skip lookup", {
+    # `ser` and `fsusie` are fine-mapping tokens with no weight extractor in
+    # the method table, so `regular` is empty and the lookup is never called.
+    res <- pecotmr:::.twasNormalizeCharMethods(c("ser", "fsusie"))
+    expect_equal(res$tokens, c("ser", "fsusie"))
+    expect_equal(
+        sort(names(res$methodList)),
+        c("fsusie_weights", "ser_weights")
+    )
+    expect_equal(res$methodList[["ser_weights"]], list())
+    expect_equal(res$methodList[["fsusie_weights"]], list())
+})
+
+test_that(".twasMergedEntryForRow gathers one key across regions", {
+    data(twasWeightsExample)
+    tw <- twasWeightsExample
+    base <- data.frame(
+        study = as.character(tw$study),
+        context = as.character(tw$context),
+        trait = as.character(tw$trait),
+        method = as.character(tw$method),
+        stringsAsFactors = FALSE
+    )
+    m <- pecotmr:::.twasMergedEntryForRow(1L, base, list(tw, tw), c("rA", "rB"))
+    expect_s4_class(m, "TwasWeightsRow")
+    expect_equal(names(getFits(m)), c("rA", "rB"))
+    # Same table twice: the merged entry carries both regions' variants.
+    one <- pecotmr:::.twasMergedEntryForRow(1L, base, list(tw), "rA")
+    expect_equal(
+        length(pecotmr:::.twrPartsVariantIds(m)),
+        2L * length(pecotmr:::.twrPartsVariantIds(one))
+    )
+})
+
+test_that(".twasMergedEntryForRow returns NULL when no region matches", {
+    data(twasWeightsExample)
+    bad <- data.frame(
+        study = "nope", context = "x", trait = "y", method = "z",
+        stringsAsFactors = FALSE
+    )
+    expect_null(
+        pecotmr:::.twasMergedEntryForRow(
+            1L, bad, list(twasWeightsExample), "rA"
+        )
     )
 })
 
@@ -3409,6 +3537,96 @@ test_that(".solveEnsembleGlmnet: solver failure falls back to equal weights", {
     expect_equal(z, c(0.5, 0.5))
 })
 
+test_that(".solveEnsembleGlmnet: all-zero fit falls back to equal weights", {
+    skip_if_not_installed("glmnet")
+    # `lower.limits = 0` forbids negative coefficients, so a strictly
+    # NEGATIVE predictor/outcome relation drives every coefficient to zero
+    # at any lambda -- deterministic without seeding the CV folds.
+    n <- 60L
+    x1 <- seq_len(n) / n
+    P <- cbind(x1, x1^2, sqrt(x1))
+    y <- -x1
+    expect_warning(
+        z <- pecotmr:::.solveEnsembleGlmnet(P, y, 3L),
+        "all-zero solution"
+    )
+    expect_equal(z, rep(1 / 3, 3L))
+})
+
+test_that(".ensembleBuildPd accepts vector predictions", {
+    nm <- list(
+        predNames = c("aPredicted", "bPredicted"),
+        baseNames = c("a", "b"),
+        K = 2L
+    )
+    aln <- list(yD = c(1, 2, 3, 4), predOrder = 1:4, nD = 4L)
+    predsD <- list(aPredicted = c(1, 2, 3, 4), bPredicted = c(5, 6, 7, 8))
+    Pd <- pecotmr:::.ensembleBuildPd(predsD, nm, aln, contextIndex = 1L, d = 1L)
+    # A plain vector takes the non-matrix branch: no context column to pick.
+    expect_equal(dim(Pd), c(4L, 2L))
+    expect_equal(colnames(Pd), c("a", "b"))
+    expect_equal(unname(Pd[, "a"]), c(1, 2, 3, 4))
+    expect_equal(unname(Pd[, "b"]), c(5, 6, 7, 8))
+})
+
+test_that(".ensembleBuildPd errors when prediction length misaligns", {
+    nm <- list(
+        predNames = c("aPredicted", "bPredicted"),
+        baseNames = c("a", "b"),
+        K = 2L
+    )
+    # predOrder selects 3 rows but the alignment claims 5 samples.
+    aln <- list(yD = c(1, 2, 3, 4, 5), predOrder = 1:3, nD = 5L)
+    predsD <- list(aPredicted = c(1, 2, 3, 4), bPredicted = c(5, 6, 7, 8))
+    expect_error(
+        pecotmr:::.ensembleBuildPd(predsD, nm, aln, 1L, 7L),
+        "Prediction length for method 'aPredicted' in dataset 7"
+    )
+})
+
+test_that(".ensembleAccumulateWeights returns a matrix for multi-context", {
+    w1 <- matrix(
+        c(1, 2, 3, 4),
+        nrow = 2L,
+        dimnames = list(c("v1", "v2"), c("c1", "c2"))
+    )
+    w2 <- matrix(
+        c(5, 6, 7, 8),
+        nrow = 2L,
+        dimnames = list(c("v1", "v2"), c("c1", "c2"))
+    )
+    out <- pecotmr:::.ensembleAccumulateWeights(
+        list(a_weights = w1, b_weights = w2),
+        c("a_weights", "b_weights"),
+        c(TRUE, TRUE),
+        c(0.25, 0.75)
+    )
+    # Two columns, so the univariate vector shortcut must NOT fire.
+    expect_true(is.matrix(out))
+    expect_equal(dim(out), c(2L, 2L))
+    expect_equal(dimnames(out), list(c("v1", "v2"), c("c1", "c2")))
+    expect_equal(out, 0.25 * w1 + 0.75 * w2)
+})
+
+test_that(".ensembleAccumulateWeights skips a dim-mismatched member", {
+    w1 <- matrix(
+        c(1, 2, 3, 4),
+        nrow = 2L,
+        dimnames = list(c("v1", "v2"), c("c1", "c2"))
+    )
+    expect_warning(
+        out <- pecotmr:::.ensembleAccumulateWeights(
+            list(a_weights = w1, b_weights = matrix(1:6, nrow = 3L)),
+            c("a_weights", "b_weights"),
+            c(TRUE, TRUE),
+            c(0.5, 0.5)
+        ),
+        "inconsistent dimensions"
+    )
+    # Only the conforming member contributes; its zeta is NOT renormalized.
+    expect_equal(out, 0.5 * w1)
+})
+
 
 # ---------------------------------------------------------------------------
 # RSS panel filters on QtlSumStats input.
@@ -3503,4 +3721,229 @@ test_that(".twasQssUnivariateFitCtx keeps z, ids and LD aligned", {
     expect_equal(rownames(cut$ldMat), cut$variantIds)
     keep <- is_in(plain$variantIds, cut$variantIds)
     expect_equal(cut$stat$z, plain$stat$z[keep])
+})
+
+
+# ===========================================================================
+# Fine-mapping method resolution and per-token argument plumbing
+# ===========================================================================
+
+test_that("no fineMappingResult means no fine-mapping methods are present", {
+    expect_equal(
+        pecotmr:::.twasFineMappingMethodsPresent(NULL),
+        character(0)
+    )
+})
+
+test_that("a fine-mapping token with no weight extractor is refused", {
+    # susie/susieInf/susieAsh/mvsusie/fsusie have adapters; `ser` is a
+    # fine-mapping-only method with no weights to extract, so asking for it
+    # is an error rather than a silently missing row.
+    expect_null(pecotmr:::.twasCheckFmAdapters(character(0)))
+    expect_error(
+        pecotmr:::.twasCheckFmAdapters("ser"),
+        "method\\(s\\) ser have no TWAS-weight extractor"
+    )
+})
+
+test_that("per-token user arguments default to an empty list", {
+    # NULL would splice as a missing argument rather than "nothing to add".
+    expect_equal(pecotmr:::.twasUserArgs(list(), "susie"), list())
+    expect_equal(
+        pecotmr:::.twasUserArgs(list(susie = list(L = 5)), "susie"),
+        list(L = 5)
+    )
+})
+
+test_that("a missing multivariate fit warns with the tuple that was skipped", {
+    expect_warning(
+        pecotmr:::.twasWarnNoFitMv("mvsusie", "S1", "G1"),
+        "no 'mvsusie' fit found in fineMappingResult"
+    )
+})
+
+
+# ===========================================================================
+# The methods= argument in its three accepted shapes
+# ===========================================================================
+
+test_that("method tokens are read from a character vector or a named list", {
+    # The argument reaches here as either a character vector or a list keyed
+    # by implementation name; both must yield the same bare tokens so the
+    # downstream comparisons work on one vocabulary.
+    f <- pecotmr:::.twasMethodTokensFromArg
+    expect_equal(f(c("lasso", "enet")), c("lasso", "enet"))
+    expect_equal(
+        f(list(lasso_weights = list(), enetWeights = list())),
+        c("lasso", "enet")
+    )
+    # Anything else contributes no tokens rather than erroring.
+    expect_equal(f(42), character(0))
+})
+
+test_that("mrmash is stripped from either shape, leaving others intact", {
+    # mrmash is dispatched by the joint path, so the per-method loop must not
+    # also run it -- otherwise the tuple is fitted twice.
+    g <- pecotmr:::.twasMsStripMrmash
+    expect_equal(g(c("lasso", "mrmash", "enet")), c("lasso", "enet"))
+    expect_equal(
+        names(g(list(lasso_weights = list(), mrmash_weights = list()))),
+        "lasso_weights"
+    )
+    # An unrecognised shape passes through untouched.
+    expect_equal(g(42), 42)
+})
+
+test_that("a region lacking a tuple contributes no entry for it", {
+    # NULL, not an empty row: a region that never fitted the tuple must not
+    # dilute the merged weights with zeros.
+    data(twasWeightsExample)
+    tw <- twasWeightsExample
+    key <- c(
+        as.character(tw$study)[[1L]],
+        as.character(tw$context)[[1L]],
+        as.character(tw$trait)[[1L]],
+        as.character(tw$method)[[1L]]
+    )
+    expect_s4_class(
+        pecotmr:::.twasEntryMatchingKey(tw, key),
+        "TwasWeightsRow"
+    )
+    expect_null(
+        pecotmr:::.twasEntryMatchingKey(tw, c("nope", "x", "y", "z"))
+    )
+})
+
+
+# ===========================================================================
+# Merging per-region and joint results
+# ===========================================================================
+
+test_that("merging regions short-circuits on none and on one", {
+    # A single region needs no key-wise merge, and no regions is NULL rather
+    # than an empty collection the caller would have to special-case anyway.
+    data(twasWeightsExample)
+    expect_null(pecotmr:::.twasMergeRegionResults(list(), NULL))
+    expect_identical(
+        pecotmr:::.twasMergeRegionResults(list(twasWeightsExample), NULL),
+        twasWeightsExample
+    )
+})
+
+test_that("assembling per-tuple and joint results covers all four cases", {
+    # Both empty is an error -- the run produced nothing and returning an
+    # empty collection would look like a successful null result.
+    data(twasWeightsExample)
+    tw <- twasWeightsExample
+    expect_error(
+        pecotmr:::.twasQdsAssemble(NULL, NULL),
+        "no \\(context, trait\\) pair produced any weights"
+    )
+    expect_identical(pecotmr:::.twasQdsAssemble(tw, NULL), tw)
+    expect_identical(pecotmr:::.twasQdsAssemble(NULL, tw), tw)
+})
+
+test_that("an empty methods argument is detected in either shape", {
+    expect_true(pecotmr:::.twasMethodsEmpty(character(0)))
+    expect_true(pecotmr:::.twasMethodsEmpty(list()))
+    expect_false(pecotmr:::.twasMethodsEmpty("lasso"))
+})
+
+# ---------------------------------------------------------------------------
+# Multivariate skip/merge paths: a region or tuple that produces no fit must
+# drop out quietly rather than contributing empty weights.
+# ---------------------------------------------------------------------------
+
+test_that(".twasMvThreadFit warns and returns NULL when the fit is absent", {
+    spec <- list(adapter = list(rssFitArg = "susie_fit"))
+    expect_warning(
+        r <- pecotmr:::.twasMvThreadFit(
+            spec,
+            list(a = 1),
+            "mvsusie",
+            "S1",
+            "T1",
+            c("cA", "cB"),
+            list(fineMappingResult = NULL)
+        ),
+        "no 'mvsusie' fit found"
+    )
+    expect_null(r)
+})
+
+test_that(".twasQssMultivariateFitOne returns no rows when the fit is absent", {
+    p <- list(
+        fineMappingResult = NULL,
+        methodArgs = list(),
+        retainFitDetail = FALSE
+    )
+    # mvsusie carries an adapter, so the missing pre-fit short-circuits
+    # before any weight function is called.
+    expect_warning(
+        rows <- pecotmr:::.twasQssMultivariateFitOne(
+            "mvsusie", "S1", "T1", c("cA", "cB"), NULL, NULL, p
+        ),
+        "no 'mvsusie' fit found"
+    )
+    expect_identical(rows, list())
+})
+
+test_that(".twasQssMultivariateFitOne promotes vector weights to a matrix", {
+    mvStat <- list(
+        stat = NULL,
+        variantIds = c("chr1:1:A:G", "chr1:2:A:G")
+    )
+    p <- list(methodArgs = list(), retainFitDetail = FALSE, dataType = "rnaseq")
+    local_mocked_bindings(
+        .twasTryWeights = function(...) c(0.5, 0.25),
+        .package = "pecotmr"
+    )
+    # mrmash has no adapter, so the thread-fit branch is skipped entirely.
+    rows <- pecotmr:::.twasQssMultivariateFitOne(
+        "mrmash", "S1", "T1", "cA", mvStat, NULL, p
+    )
+    expect_length(rows, 1L)
+    expect_equal(rows[[1L]]$context, "cA")
+    expect_equal(unname(getWeights(rows[[1L]]$entry)), c(0.5, 0.25))
+})
+
+test_that(".twasQssAssemble passes the joint result through alone", {
+    jr <- "SENTINEL_JOINT"
+    expect_identical(
+        pecotmr:::.twasQssAssemble(list(), jr, list(ldSketch = NULL)),
+        jr
+    )
+})
+
+test_that(".twasMsJointPhase aborts when only mrmash asked and it fails", {
+    local_mocked_bindings(
+        .twasDispatchJointSpecsMultiStudy = function(...) NULL,
+        .package = "pecotmr"
+    )
+    p <- list(
+        methods = "mrmash", data = NULL, contexts = NULL, traitId = NULL,
+        cisWindow = NULL, verbose = FALSE, retainFit = FALSE,
+        retainFitDetail = FALSE, seed = 1L
+    )
+    # Stripping mrmash leaves nothing, so a NULL joint result is fatal
+    # rather than a fall-through to the per-tuple phase.
+    expect_error(
+        pecotmr:::.twasMsJointPhase(p, list(spec1 = "x"), NULL),
+        "no joint fits produced"
+    )
+})
+
+test_that(".twasRunMultivariateGrid returns NULL when every region is empty", {
+    local_mocked_bindings(
+        .twasMvGridRegion = function(...) NULL,
+        .twasRegionLabel = function(x) "rX",
+        .package = "pecotmr"
+    )
+    expect_null(
+        pecotmr:::.twasRunMultivariateGrid(
+            traits = "T1",
+            marker = NULL,
+            ctx = list(xRegions = list(1, 2))
+        )
+    )
 })

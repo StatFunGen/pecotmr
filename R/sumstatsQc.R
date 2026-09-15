@@ -2531,7 +2531,6 @@ effectiveN <- function(nCase, nControl) {
                 )
             )
     ) {
-        # nocov start
         msg <- glue(
             "krigingOutlierQc requires a susieR that provides ",
             "estimate_s_rss() and kriging_rss(); the installed susieR does ",
@@ -2539,7 +2538,6 @@ effectiveN <- function(nCase, nControl) {
             "disable alleleFlipKriging."
         )
         abort(msg)
-        # nocov end
     }
 }
 

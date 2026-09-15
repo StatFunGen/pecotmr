@@ -2820,3 +2820,253 @@ test_that("gLDSC reproduces upstream gldsc", {
         expect_equal(est, g$want, tolerance = 1e-6)
     }
 })
+
+
+# ===========================================================================
+# Study resolution, genome checking and the chi2 filter fallback
+# ===========================================================================
+
+test_that("an explicit study is used without inspecting the collection", {
+    expect_equal(pecotmr:::.estimateH2ResolveStudy(NULL, "myStudy"), "myStudy")
+})
+
+test_that("the genome check reports NA, the build, or refuses a mixture", {
+    gr <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(1L, 2L), width = 1L)
+    )
+    # No build recorded: NA rather than a guess.
+    expect_true(is.na(pecotmr:::.h2GenomeOfRanges(gr)))
+    GenomeInfoDb::genome(gr) <- c("hg19", "hg38")
+    # Mixed builds mean the parts were never comparable.
+    expect_error(
+        pecotmr:::.h2GenomeOfRanges(gr),
+        "names 2 genome build"
+    )
+    GenomeInfoDb::genome(gr) <- "hg38"
+    expect_equal(pecotmr:::.h2GenomeOfRanges(gr), "hg38")
+})
+
+test_that("the chi2 filter is abandoned when too few variants survive it", {
+    # Upstream drops chi2 >= 30, but with fewer than 4 survivors the
+    # regression has nothing to fit, so the filter is dropped rather than
+    # returning an estimate from 3 points.
+    A <- matrix(1, 6L, 1L)
+    sc <- matrix(1, 6L, 1L)
+    out <- pecotmr:::.sldscFitUnivariate(
+        rep(100, 6L),
+        sc,
+        rep(1, 6L),
+        1000,
+        A,
+        2L
+    )
+    expect_setequal(
+        names(out),
+        c("tau", "h2", "estH", "intercept", "coef")
+    )
+    expect_false(is.na(out$h2))
+})
+
+
+# ===========================================================================
+# HDL bound diagnostics and the partitioned chi2 filter
+# ===========================================================================
+
+test_that("HDL warns only when a parameter sits at its UPPER bound", {
+    # Only upper bounds are diagnostic: an intercept resting at 0 just means
+    # no confounding and is routine, so a lower bound must not warn.
+    f <- pecotmr:::.hdlWarnIfAtBound
+    expect_silent(f(c(0.1, 0.5), c(0, 0), c(1, 2), 1000, 500))
+    # At a lower bound: still silent.
+    expect_silent(f(c(0, 0), c(0, 0), c(1, 2), 1000, 500))
+})
+
+test_that("the HDL bound warning names which parameter pinned", {
+    # The last parameter is the intercept; anything else is heritability.
+    f <- pecotmr:::.hdlWarnIfAtBound
+    expect_warning(
+        f(c(0.1, 2), c(0, 0), c(1, 2), 1000, 500),
+        "the fitted intercept sits at the top of its range"
+    )
+    expect_warning(
+        f(c(1, 0.5), c(0, 0), c(1, 2), 1000, 500),
+        "the fitted heritability sits at the top of its range"
+    )
+})
+
+test_that("the partitioned chi2 filter is abandoned when too few survive", {
+    # Stratified S-LDSC needs more surviving variants than annotations + 2;
+    # below that the filter is dropped rather than solving an underdetermined
+    # system.
+    A <- matrix(1, 6L, 1L)
+    sc <- matrix(1, 6L, 2L)
+    out <- pecotmr:::.sldscFitPartitioned(
+        rep(1e6, 6L),
+        sc,
+        rep(1, 6L),
+        1000,
+        A
+    )
+    expect_setequal(
+        names(out),
+        c("tau", "h2", "estH", "intercept", "coef")
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Fallbacks and degenerate inputs: each returns a defined answer rather than
+# propagating an error out of an estimator.
+# ---------------------------------------------------------------------------
+
+test_that(".rmaMetaFallbackToDL falls back to the closed-form estimator", {
+    skip_if_not_installed("metafor")
+    # DL never iterates, so it is a safe landing point when REML/ML fail on
+    # small or near-homogeneous inputs.
+    expect_warning(
+        fit <- pecotmr:::.rmaMetaFallbackToDL(
+            simpleError("did not converge"),
+            means = c(0.1, 0.2, 0.15),
+            ses = c(0.05, 0.06, 0.04),
+            method = "REML"
+        ),
+        "method = 'REML'\\) failed .* falling back to DL"
+    )
+    expect_equal(fit$method, "DL")
+})
+
+test_that(".h2BaselineMat is NULL when no annotation is baseline tier", {
+    n <- 5L
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(
+            start = as.integer(seq(50, by = 100, length.out = n)),
+            width = 1L
+        )
+    )
+    mat <- matrix(c(rep(1L, n), rep(0L, n)), nrow = n, ncol = 2L)
+    colnames(mat) <- c("cand_A", "cand_B")
+    meta <- data.frame(
+        name = c("cand_A", "cand_B"),
+        tier = c("candidate", "candidate"),
+        type = c("binary", "binary"),
+        stringsAsFactors = FALSE
+    )
+    am <- AnnotationMatrix(mat, gr, meta, genome = "hg19")
+    # The object has annotations, but none of them are baseline.
+    expect_equal(ncol(assay(getBaseline(am), "annotations")), 0L)
+    expect_null(pecotmr:::.h2BaselineMat(am))
+    expect_null(pecotmr:::.h2BaselineMat(NULL))
+})
+
+test_that(".lderGetRes(twostage = FALSE) returns the free-intercept fit", {
+    set.seed(4)
+    m <- 60L
+    res <- pecotmr:::.lderGetRes(
+        x = rnorm(m),
+        lam = abs(rnorm(m, 3, 0.5)),
+        ldAnnot = matrix(1, nrow = m, ncol = 1L),
+        N = 1000,
+        M = 5000,
+        M_a = 5000,
+        rough = FALSE,
+        twostage = FALSE
+    )
+    # One pass, no chi2 outlier filtering, intercept left free.
+    expect_setequal(names(res), c("h2", "h2a", "tau", "a"))
+    expect_true(is.finite(res$a))
+})
+
+test_that(".lderLocalBlock reports NA for a block too small to fit", {
+    out <- pecotmr:::.lderLocalBlock(
+        list(lam = c(1, 2), x = c(0.5, 0.6)),
+        b = 7L,
+        N = 1000,
+        a = 1
+    )
+    # Fewer than 3 eigenvalues: a slope cannot be identified.
+    expect_equal(out$blockId, 7L)
+    expect_true(is.na(out$h2Local))
+    expect_true(is.na(out$h2LocalSe))
+})
+
+test_that(".h2Enrichment names unnamed annotation columns positionally", {
+    baselineMat <- matrix(c(1, 0, 1, 1), nrow = 2L)
+    expect_null(colnames(baselineMat))
+    out <- pecotmr:::.h2Enrichment(
+        baselineMat,
+        tau = c(0.1, 0.2),
+        tauSe = c(0.01, 0.02),
+        tauBlocks = matrix(c(0.1, 0.2, 0.1, 0.2), nrow = 2L),
+        h2 = 0.3
+    )
+    expect_equal(out$annotation, c("annot_1", "annot_2"))
+})
+
+test_that(".sldscBlockIndex errors when no block covers a variant", {
+    n <- 6L
+    snpInfo <- data.frame(
+        CHR = rep("chr22", n),
+        BP = as.integer(seq(1000, by = 100, length.out = n)),
+        SNP = str_c("chr22:", seq(1000, by = 100, length.out = n), ":A:G"),
+        A1 = rep("A", n),
+        A2 = rep("G", n),
+        stringsAsFactors = FALSE
+    )
+    mk <- function(blocks) {
+        LdScore(
+            snpInfo = snpInfo,
+            ldScores = matrix(1, nrow = n, ncol = 1L),
+            ldScoreWeights = rep(1, n),
+            ldBlocks = blocks,
+            nRef = 100L,
+            genome = "hg19",
+            ldMatrixList = list()
+        )
+    }
+    # With no precomputed matrices the blocks are intersected with the
+    # variants; blocks on another chromosome cover nothing.
+    disjoint <- suppressWarnings(
+        mk(GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000)))
+    )
+    expect_error(
+        suppressWarnings(pecotmr:::.sldscBlockIndex(disjoint, n)),
+        "no LD block covers any reference variant"
+    )
+    covering <- mk(GenomicRanges::GRanges("chr22", IRanges::IRanges(1, 10000)))
+    idx <- pecotmr:::.sldscBlockIndex(covering, n)
+    expect_equal(unname(lengths(idx)), n)
+})
+
+test_that(".sldscIrwls derives its own starting weights when none are given", {
+    set.seed(3)
+    nv <- 40L
+    scores <- matrix(abs(rnorm(nv * 2L, 5, 1)), nrow = nv)
+    y <- 1 + rowSums(scores) * 1e-4 * 500 + rnorm(nv, sd = 0.05)
+    fit <- pecotmr:::.sldscIrwls(
+        y = y,
+        scores = scores,
+        baseScore = rowSums(scores),
+        n = 500,
+        M = 1000,
+        nIter = 2L,
+        freeIntercept = FALSE,
+        intercept = 1,
+        w0 = NULL
+    )
+    expect_setequal(names(fit), c("coef", "intercept"))
+    expect_true(all(is.finite(fit$coef)))
+})
+
+test_that(".sldscLocal clamps a negative LD score to zero", {
+    out <- pecotmr:::.sldscLocal(
+        chi2 = c(1.2, 3.4),
+        baseScore = c(10, -2),
+        fit = list(tau = c(1e-5)),
+        M = 1000
+    )
+    expect_equal(out$variantIdx, 1:2)
+    expect_equal(out$ldScore, c(10, -2))
+    # A negative LD score cannot contribute negative heritability.
+    expect_equal(out$h2Local, c(1e-4, 0))
+})

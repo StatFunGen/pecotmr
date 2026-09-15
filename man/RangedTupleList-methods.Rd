@@ -55,6 +55,12 @@
 \item{drop}{Passed through to the inherited method.}
 
 \item{FUN}{A function applied to each element, returning a \code{GRanges}.}
+
+\item{objects}{Further collections to append, as \code{c()} and
+\code{append()} pass them.}
+
+\item{use.names, ignore.mcols, check}{Unused; present for generic
+compatibility.}
 }
 \value{
 \code{nrow()} and \code{ncol()} integers; \code{colnames()} a

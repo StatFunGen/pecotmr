@@ -275,3 +275,52 @@ test_that("pipeline warns and skips a joint run that fails to standardize", {
     # the single side still produced an estimate
     expect_false(is.na(res$per_trait$traitX$summary$tauStarSingle[1]))
 })
+
+
+test_that("target stats default every annotation to non-binary", {
+    # With no binary flags supplied, nothing is treated as binary rather than
+    # the flags being dropped -- enrichment needs one entry per target.
+    sd <- set_names(c(1, 2), c("t1", "t2"))
+    out <- pecotmr:::.sldscTargetStats(sd, logical(0), c("t1", "t2"))
+    expect_equal(unname(out$isBinary), c(FALSE, FALSE))
+    expect_equal(names(out$isBinary), c("t1", "t2"))
+    # Supplied flags are subset to the targets.
+    out2 <- pecotmr:::.sldscTargetStats(
+        sd,
+        set_names(c(TRUE, FALSE), c("t1", "t2")),
+        "t1"
+    )
+    expect_true(unname(out2$isBinary))
+})
+
+test_that(".sldscCollectSingle returns empty parts for no standardizations", {
+    out <- pecotmr:::.sldscCollectSingle(list())
+    expect_null(out$singleDf)
+    expect_null(out$blocksSingle)
+    expect_length(out$singleH2gs, 0L)
+})
+
+test_that(".sldscTraitSingle tolerates a trait with no single-mode runs", {
+    local_mocked_bindings(
+        getTraitRun = function(...) NULL,
+        .package = "pecotmr"
+    )
+    ctx <- list(sldscData = NULL, targetCategories = c("t1", "t2"))
+    out <- pecotmr:::.sldscTraitSingle("tr", ctx)
+    # NULL becomes an empty list so the min() below it stays well-defined.
+    expect_setequal(names(out), c("singleDf", "blocksSingle", "singleH2gs"))
+    expect_null(out$singleDf)
+})
+
+test_that(".sldscFallbackMessage says '(none)' with no baseline categories", {
+    expect_message(
+        pecotmr:::.sldscFallbackMessage(
+            list(categories = c("a", "b")),
+            oldNames = "x",
+            targetCategories = "a",
+            nTarget = 1L,
+            nBaseline = 0L
+        ),
+        "baseline \\(0\\): \\(none\\)"
+    )
+})

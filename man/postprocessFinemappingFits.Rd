@@ -45,6 +45,9 @@ input used for credible-set purity and correlations.}
 \item{af}{Effect-allele frequencies (exported as the \code{af} column; never
 MAF). Default NULL.}
 
+\item{n}{Optional per-variant sample size, exported as the \code{N} column.
+Default NULL -> \code{N} falls back to the fit's own scalar sample size.}
+
 \item{coverage}{Primary credible-set coverage.}
 
 \item{secondaryCoverage}{Additional credible-set coverages.}

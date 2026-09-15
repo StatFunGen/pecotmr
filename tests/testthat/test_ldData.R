@@ -852,3 +852,21 @@ test_that("blockMetadata takes ranges as well as tables", {
         expect_s4_class(ld, "LdData")
     }
 })
+
+
+test_that("show() labels a list-valued correlation block-diagonal", {
+    # Only single-matrix LdData objects were ever printed, so the other arm
+    # of the label was never produced.
+    ld <- makeTestLdDataMultiBlock(sizes = c(2L, 2L))
+    expect_output(show(ld), "block-diagonal")
+    expect_output(show(ld), "LdData: 4 variants")
+})
+
+
+test_that("an LdData refuses to be subset", {
+    # Narrowing would leave the correlation and snpIdx describing variants
+    # that are no longer present, so `[` errors rather than half-working.
+    ld <- makeTestLdData(n = 3L)
+    expect_error(ld[1:2], "an LdData cannot be subset")
+    expect_error(ld[1:2, ], "an LdData cannot be subset")
+})

@@ -285,13 +285,11 @@ mashResidualCorrelation <- function(
     method <- arg_match(method)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -425,13 +423,11 @@ mashResidualCorrelation <- function(
         ))
     }
     if (!requireNamespace("CorShrink", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "mashResidualCorrelation: method 'corshrink' needs the CorShrink ",
             "package. Install it, or use 'simple' / 'simpleSpecific'."
         )
         abort(msg)
-        # nocov end
     }
     as.matrix(
         CorShrink::CorShrinkData(
@@ -650,22 +646,18 @@ mashPriorCovariances <- function(
 # @noRd
 .mashRequirePriorPackages <- function() {
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (!requireNamespace("flashier", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install flashier: ",
             "https://github.com/willwerscheid/flashier"
         )
         abort(msg)
-        # nocov end
     }
 }
 
@@ -830,13 +822,11 @@ mashPriorCovariances <- function(
 # @noRd
 .mashEngineUd <- function(mashData, engine, udControl) {
     if (!requireNamespace("udr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "mashPriorCovariances: engine '{engine}' needs the udr package. ",
             "Install it, or use the default 'cov_ed'."
         )
         abort(msg)
-        # nocov end
     }
     udControl <- utils::modifyList(
         list(
@@ -918,13 +908,11 @@ mashModelFit <- function(
     fitOn <- arg_match(fitOn)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -1021,13 +1009,11 @@ mashPosterior <- function(
 ) {
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
         abort(msg)
-        # nocov end
     }
     mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
     ex <- .mashExcludeConditions(

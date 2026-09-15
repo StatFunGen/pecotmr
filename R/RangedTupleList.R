@@ -44,6 +44,10 @@ NULL
 #' @param drop Passed through to the inherited method.
 #' @param ... Additional arguments passed on.
 #' @param FUN A function applied to each element, returning a \code{GRanges}.
+#' @param objects Further collections to append, as \code{c()} and
+#'   \code{append()} pass them.
+#' @param use.names,ignore.mcols,check Unused; present for generic
+#'   compatibility.
 #' @return \code{nrow()} and \code{ncol()} integers; \code{colnames()} a
 #'   character vector; \code{$} a metadata column; \code{$<-}, \code{[} and
 #'   \code{endoapply()} a collection of the same class.
@@ -228,8 +232,10 @@ setMethod("nrow", "RangedTupleList", function(x) length(x))
 #' @rdname RangedTupleList-methods
 #' @export
 setMethod("ncol", "RangedTupleList", function(x) {
-    md <- mcols(x, use.names = FALSE)
-    if (is.null(md)) 0L else ncol(md)
+    # No is.null() arm: `elementMetadata` is a typed DataFrame slot, so a
+    # collection with no metadata carries a zero-COLUMN DataFrame rather than
+    # NULL, and ncol() already answers 0 for it.
+    ncol(mcols(x, use.names = FALSE))
 })
 
 #' @rdname RangedTupleList-methods
@@ -239,29 +245,22 @@ setMethod("colnames", "RangedTupleList", function(x, do.NULL = TRUE, prefix) {
     # Completes the nrow / ncol / `$` set. Without it `colnames(x)` returns
     # NULL rather than erroring, so code that asks a collection for its column
     # names gets a silent wrong answer instead of a signal.
-    md <- mcols(x, use.names = FALSE)
-    if (is.null(md)) NULL else colnames(md)
+    colnames(mcols(x, use.names = FALSE))
 })
 
 #' @rdname RangedTupleList-methods
 #' @export
 setMethod("$", "RangedTupleList", function(x, name) {
-    md <- mcols(x, use.names = FALSE)
-    if (is.null(md)) {
-        return(NULL)
-    }
-    md[[name]]
+    # A zero-column DataFrame answers NULL for any name, which is the same
+    # thing the removed is.null() arm returned.
+    mcols(x, use.names = FALSE)[[name]]
 })
 
 #' @rdname RangedTupleList-methods
 #' @export
 setMethod("$<-", "RangedTupleList", function(x, name, value) {
     md <- mcols(x, use.names = FALSE)
-    if (is.null(md)) {
-        md <- S4Vectors::DataFrame(set_names(list(value), name))
-    } else {
-        md[[name]] <- value
-    }
+    md[[name]] <- value
     mcols(x) <- md
     x
 })
@@ -752,10 +751,9 @@ nestTupleRanges <- function(flat, template) {
 # The identity columns to group by: the atomic mcols the flattener broadcasts.
 # @noRd
 .rtlTupleKeyCols <- function(x) {
+    # No is.null() arm: see ncol() above -- mcols() answers a zero-column
+    # DataFrame, and names() of one is already character(0).
     md <- mcols(x, use.names = FALSE)
-    if (is.null(md)) {
-        return(character(0))
-    }
     names(md)[map_lgl(as.list(md), is.atomic)]
 }
 

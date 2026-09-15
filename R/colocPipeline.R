@@ -213,13 +213,11 @@ colocPipeline <- function(
         .colocValidateEnrichment(p$enrichment)
     }
     if (!requireNamespace("coloc", quietly = TRUE)) {
-        # nocov start
         msg <- glue(
             "Package 'coloc' is required for colocPipeline. ",
             "Install with: install.packages('coloc')."
         )
         abort(msg)
-        # nocov end
     }
     if (!methods::is(p$qtlFineMappingResult, "FineMappingResultBase")) {
         msg <- glue(

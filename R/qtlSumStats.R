@@ -80,9 +80,7 @@ setClass(
 # qcInfo slot must be a list.
 # @noRd
 .qssCheckQcInfo <- function(object) {
-    if (!is.list(object@qcInfo)) {
-        return("'qcInfo' slot must be a list")
-    }
+    # The slot's declared type enforces this; nothing to check.
     NULL
 }
 
@@ -548,17 +546,19 @@ setMethod("show", "QtlSumStats", function(object) {
     if (length(gr) == 0L) {
         return(gr)
     }
+    # `traitPos[i]` is a length-1 GRanges (an out-of-range `i` errors here
+    # rather than yielding an empty one), and a GRanges cannot carry an NA
+    # start, so the position is always real.
     tp <- traitPos[i]
     tssPos <- GenomicRanges::start(tp)
     tesPos <- GenomicRanges::end(tp)
-    if (length(tssPos) == 0L || is.na(tssPos)) {
-        return(gr)
-    }
     pos <- GenomicRanges::start(gr)
+    # No zero-column swap: mcols() on a GRanges is never NULL, and a variant
+    # set with no metadata yields a zero-COLUMN DataFrame that already carries
+    # one row per variant. Replacing it with DataFrame(row.names = NULL) threw
+    # that row count away, so the assignment below died with "n elements in
+    # value to replace 0 elements" for any entry without mcols.
     mc <- S4Vectors::mcols(gr)
-    if (is.null(mc) || ncol(mc) == 0L) {
-        mc <- S4Vectors::DataFrame(row.names = NULL)
-    }
     if (is.null(mc[["tss_distance"]])) {
         mc[["tss_distance"]] <- pos - tssPos
     }

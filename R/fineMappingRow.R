@@ -197,15 +197,14 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         error = function(e) NULL
     )
     if (is.null(fn)) {
-        # nocov start  (defensive guard against an upstream fsusieR rename; only
-        # reachable if fsusieR drops this unexported S3 method)
+        # Defensive guard against an upstream fsusieR rename; only reachable
+        # if fsusieR drops this unexported S3 method.
         msg <- glue(
             "fsusieR's internal update_cal_credible_band.susiF not found; ",
             "cannot compute the fSuSiE credible band (upstream fsusieR API ",
             "changed)."
         )
         abort(msg)
-        # nocov end
     }
     indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
     fn(fit, indxLst)

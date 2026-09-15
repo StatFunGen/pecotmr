@@ -112,3 +112,12 @@ test_that("show prints a compact summary", {
     expect_true(any(grepl("annot_A, annot_B", out)))
     expect_true(any(grepl("traitX, traitY", out)))
 })
+
+
+test_that("a trait whose `single` is not a list is rejected", {
+    tr <- list(traitA = list(single = "not a list"))
+    expect_match(
+        pecotmr:::.sldscDataCheckOneTrait("traitA", tr),
+        "traits\\[\\['traitA'\\]\\]\\$single must be a list of runs"
+    )
+})

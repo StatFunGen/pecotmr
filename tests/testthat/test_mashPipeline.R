@@ -1760,3 +1760,49 @@ test_that("mashPosterior: default (NULL) vhat and excludeCondition dropping ever
         "drops every condition"
     )
 })
+
+
+test_that("contrast rows fall back to the positional index when unnamed", {
+    # posteriorMean usually carries feature rownames, but an unnamed matrix
+    # still needs a feature_id -- the position, not NA, so the contrast table
+    # stays joinable.
+    f <- pecotmr:::.mashContrastDf
+    pm <- matrix(1:4, 2L, 2L)
+    d <- f(
+        1L,
+        pm,
+        "c1",
+        matrix(0.1, 2L, 1L),
+        matrix(0.2, 2L, 1L),
+        matrix(0.3, 2L, 1L)
+    )
+    expect_equal(d$feature_id, "1")
+    rownames(pm) <- c("f1", "f2")
+    d2 <- f(
+        2L,
+        pm,
+        "c1",
+        matrix(0.1, 2L, 1L),
+        matrix(0.2, 2L, 1L),
+        matrix(0.3, 2L, 1L)
+    )
+    expect_equal(d2$feature_id, "f2")
+})
+
+test_that(".mashUdFit re-raises an unrelated udr failure unchanged", {
+    skip_if_not_installed("udr")
+    local_mocked_bindings(.mashUdControl = function(...) list(),
+        .package = "pecotmr")
+    # Only the ud_ted i.i.d. incompatibility is rewrapped; anything else must
+    # surface as itself rather than being swallowed into a NULL fit.
+    expect_error(
+        with_mocked_bindings(
+            pecotmr:::.mashUdFit(
+                NULL, list(Bhat = matrix(0, 2L, 2L)), "ud_ted", list()
+            ),
+            ud_fit = function(...) stop("totally unrelated failure"),
+            .package = "udr"
+        ),
+        "totally unrelated failure"
+    )
+})

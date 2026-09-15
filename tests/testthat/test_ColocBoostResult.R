@@ -5,72 +5,6 @@
 # pair, and it computes no PP.H0-PP.H4 decomposition at all. Several tests
 # below guard exactly that boundary.
 
-# A minimal stand-in for a colocboost object, shaped like the real one:
-# cos_details keyed by cos_id, purity as a SQUARE matrix over sets, and
-# top variables as a data frame with set ids for rownames.
-.cbr_fake <- function(
-    ids = "cos1:y1_y2",
-    outcomes = list(c("t1", "t2")),
-    members = list(2L),
-    variants = list("chr1:200:C:T"),
-    npc = 0.9,
-    nRegion = 4L,
-    focal = FALSE
-) {
-    regionIds <- str_c("chr1:", seq_len(nRegion) * 100L, ":C:T")
-    vcp <- set_names(seq_len(nRegion) / (nRegion * 2), regionIds)
-    purity <- matrix(
-        1,
-        nrow = length(ids),
-        ncol = length(ids),
-        dimnames = list(ids, ids)
-    )
-    structure(
-        list(
-            cos_summary = tibble(
-                cos_id = ids,
-                focal_outcome = focal,
-                top_variable = map_chr(variants, 1L),
-                top_variable_vcp = rep(0.8, length(ids))
-            ),
-            vcp = vcp,
-            cos_details = list(
-                cos = list(
-                    cos_index = set_names(members, ids),
-                    cos_variables = set_names(variants, ids)
-                ),
-                cos_outcomes = list(
-                    outcome_name = set_names(outcomes, ids)
-                ),
-                cos_vcp = set_names(
-                    rep(list(as.numeric(vcp)), length(ids)),
-                    ids
-                ),
-                cos_npc = set_names(rep(npc, length(ids)), ids),
-                cos_min_npc_outcome = set_names(rep(npc, length(ids)), ids),
-                cos_purity = list(min_abs_cor = purity),
-                cos_top_variables = data.frame(
-                    top_index = unlist(members),
-                    top_variables = unlist(variants),
-                    row.names = ids,
-                    stringsAsFactors = FALSE
-                )
-            )
-        ),
-        class = "colocboost"
-    )
-}
-
-.cbr_info <- function(names = c("t1", "t2")) {
-    data.frame(
-        name = names,
-        context = str_c("ctx", seq_along(names)),
-        trait = "GENE1",
-        study = "study1",
-        dataForm = "individual",
-        stringsAsFactors = FALSE
-    )
-}
 
 test_that("ColocBoostResult: one element per confidence set", {
     x <- ColocBoostResult(
@@ -441,4 +375,80 @@ test_that("validity names missing identity and outcomeInfo columns", {
     bad <- x
     mcols(bad)$analysis <- NULL
     expect_error(methods::validObject(bad), "missing columns: analysis")
+})
+
+
+# ===========================================================================
+# Empty-input paths
+#
+# The views and row builders were only ever driven by populated results, so
+# their empty answers were never produced.
+# ===========================================================================
+
+test_that("uncolocalized rows are empty when there is nothing to report", {
+    # Two separate exits: no ucos_details at all, and details carrying an
+    # empty index.
+    expect_equal(.cbrUncolocalizedRows(list(), "xqtl", NA_character_), list())
+    expect_equal(
+        .cbrUncolocalizedRows(
+            list(ucos_details = list(ucos = list(ucos_index = list()))),
+            "xqtl",
+            NA_character_
+        ),
+        list()
+    )
+})
+
+test_that("a summary lookup that matches no set yields an NA row", {
+    # NA rather than zero rows: the set exists, its summary just is not there.
+    out <- .cbrSummaryFor(
+        list(cos_summary = data.frame(cos_id = "other")),
+        "missing_id"
+    )
+    expect_equal(nrow(out), 1L)
+    expect_true(is.na(out$top_variable))
+    expect_true(is.na(out$top_variable_vcp))
+})
+
+test_that("the views answer an empty collection with empty tables", {
+    data(colocboostResultExample)
+    empty <- colocboostResultExample[0]
+    expect_equal(length(empty), 0L)
+    expect_equal(nrow(.cbrLongVariants(empty)), 0L)
+    expect_equal(nrow(getColocBoostOutcomes(empty)), 0L)
+})
+
+test_that("outcome info defaults to the empty frame and is not joined", {
+    # With no outcomeInfo the constructor substitutes the empty frame, and the
+    # outcomes view returns before attempting a join against it.
+    cb <- ColocBoostResult(list(.cbr_fake()), analysis = "xqtl")
+    expect_equal(nrow(cb@outcomeInfo), 0L)
+    out <- getColocBoostOutcomes(cb)
+    expect_gt(nrow(out), 0L)
+    expect_false(is_in("outcomeTrait", colnames(out)))
+})
+
+
+test_that("validity names the outcomeInfo columns that are missing", {
+    cb <- ColocBoostResult(list(.cbr_fake()), analysis = "xqtl")
+    cb@outcomeInfo <- data.frame(name = "t1")
+    expect_match(
+        .cbrCheckOutcomeInfo(cb),
+        "outcomeInfo is missing columns: study, context, trait, dataForm"
+    )
+})
+
+test_that("the region vcp skips runs that cannot supply one", {
+    # Two ways a run is unusable: no vcp at all, and a vcp whose names are
+    # missing so the variants cannot be placed.
+    unnamed <- c(0.5, 0.5)
+    expect_null(.cbrRegionVcp(list(list(vcp = unnamed))))
+    expect_null(.cbrRegionVcp(list(list(vcp = NULL))))
+    # ...and a later run that does carry one is still found.
+    gr <- .cbrRegionVcp(list(
+        list(vcp = NULL),
+        list(vcp = set_names(0.7, "chr1:100:C:T"))
+    ))
+    expect_s4_class(gr, "GRanges")
+    expect_equal(length(gr), 1L)
 })
