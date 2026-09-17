@@ -3295,7 +3295,7 @@ test_that(".requireMatchingLdSketches errors when slots are not GenotypeHandle",
     )
 })
 
-test_that(".requireMatchingLdSketches errors when panels differ in a column", {
+test_that(".requireMatchingLdSketches errors on swapped alleles", {
     skip_if_not_installed("pgenlibr")
     h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
@@ -3303,7 +3303,8 @@ test_that(".requireMatchingLdSketches errors when panels differ in a column", {
     )
     si <- getSnpInfo(h)
     si2 <- si
-    si2$A1[1] <- if (identical(si2$A1[1], "A")) "C" else "A" # mutate one allele
+    si2$A1[1] <- si$A2[1] # swap the coding of one shared variant
+    si2$A2[1] <- si$A1[1]
     h2 <- new(
         "GenotypeHandle",
         path = getPath(h),
@@ -3316,7 +3317,107 @@ test_that(".requireMatchingLdSketches errors when panels differ in a column", {
     )
     expect_error(
         pecotmr:::.requireMatchingLdSketches(h, h2, "testPipeline"),
-        "differ in column"
+        "swapped A1/A2"
+    )
+})
+
+test_that(".requireMatchingLdSketches accepts panels trimmed differently", {
+    # The reported bug: one LD sketch shared by a QtlSumStats and a
+    # GwasSumStats, each trimmed by its own summaryStatsQc to a different
+    # surviving variant set. The panels overlap but are not identical.
+    si <- data.frame(
+        SNP = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
+        CHR = rep("1", 4L),
+        BP = c(100L, 200L, 300L, 400L),
+        A1 = c("A", "C", "G", "T"),
+        A2 = c("G", "T", "A", "C"),
+        stringsAsFactors = FALSE
+    )
+    mk <- function(rows) {
+        new(
+            "GenotypeHandle",
+            path = "/tmp/x",
+            format = "gds",
+            snpInfo = si[rows, , drop = FALSE],
+            nSamples = 3L,
+            sampleIds = str_c("s", 1:3),
+            pgenPtr = NULL,
+            chromPaths = character(0)
+        )
+    }
+    expect_warning(
+        expect_null(
+            pecotmr:::.requireMatchingLdSketches(
+                mk(1:3),
+                mk(2:4),
+                "trimPipelineA"
+            )
+        ),
+        "share 2 variant"
+    )
+})
+
+test_that(".requireMatchingLdSketches errors when panels share no variant", {
+    mkSi <- function(bp) {
+        data.frame(
+            SNP = str_c("1:", bp, ":A:G"),
+            CHR = rep("1", length(bp)),
+            BP = as.integer(bp),
+            A1 = rep("A", length(bp)),
+            A2 = rep("G", length(bp)),
+            stringsAsFactors = FALSE
+        )
+    }
+    mk <- function(bp) {
+        new(
+            "GenotypeHandle",
+            path = "/tmp/x",
+            format = "gds",
+            snpInfo = mkSi(bp),
+            nSamples = 3L,
+            sampleIds = str_c("s", 1:3),
+            pgenPtr = NULL,
+            chromPaths = character(0)
+        )
+    }
+    expect_error(
+        pecotmr:::.requireMatchingLdSketches(
+            mk(c(100, 200)),
+            mk(c(900, 950)),
+            "disjointPipeline"
+        ),
+        "share no variant"
+    )
+})
+
+test_that(".requireMatchingLdSketches errors on a different sample set", {
+    si <- data.frame(
+        SNP = "1:100:A:G",
+        CHR = "1",
+        BP = 100L,
+        A1 = "A",
+        A2 = "G",
+        stringsAsFactors = FALSE
+    )
+    mk <- function(ids) {
+        new(
+            "GenotypeHandle",
+            path = "/tmp/x",
+            format = "gds",
+            snpInfo = si,
+            nSamples = length(ids),
+            sampleIds = ids,
+            pgenPtr = NULL,
+            chromPaths = character(0)
+        )
+    }
+    expect_error(
+        pecotmr:::.requireMatchingLdSketches(
+            mk(str_c("s", 1:3)),
+            mk(str_c("t", 1:3)),
+            "samplePipeline"
+        ),
+        "different sample sets"
     )
 })
 
@@ -4727,6 +4828,8 @@ test_that(".ldSketchNullGuard names the label in its strict error", {
 })
 
 test_that(".ldSketchCheckContent rejects panels on different chromosomes", {
+    # Disjoint chromosomes leave the two panels with nothing in common, which
+    # is a different LD reference rather than a trimming difference.
     mkSe <- function(chr, pos) {
         g <- GenomicRanges::GRanges(chr, IRanges::IRanges(pos, width = 1))
         S4Vectors::mcols(g)$SNP <- str_c(chr, ":", pos, ":A:G")
@@ -4742,7 +4845,7 @@ test_that(".ldSketchCheckContent rejects panels on different chromosomes", {
             "myPipe",
             " between X and Y"
         ),
-        "differ in column CHR between X and Y"
+        "share no variant between X and Y"
     )
 })
 

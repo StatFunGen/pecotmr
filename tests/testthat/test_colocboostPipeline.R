@@ -326,13 +326,25 @@ test_that(".cbRequireMatchingLdSketches: NULL sides are allowed", {
     ))
 })
 
-test_that(".cbRequireMatchingLdSketches: variant-count mismatch errors", {
-    expect_error(
-        pecotmr:::.cbRequireMatchingLdSketches(
+test_that(".cbRequireMatchingLdSketches: accepts differently trimmed panels", {
+    # Separate QC of the two sides trims one shared LD reference to two
+    # overlapping-but-unequal variant sets; the check reports, not refuses.
+    expect_warning(
+        expect_null(pecotmr:::.cbRequireMatchingLdSketches(
             .cbp_makeHandle(snp_n = 4L),
             .cbp_makeHandle(snp_n = 5L)
+        )),
+        "share 4 variant"
+    )
+})
+
+test_that(".cbRequireMatchingLdSketches: sample-set mismatch errors", {
+    expect_error(
+        pecotmr:::.cbRequireMatchingLdSketches(
+            .cbp_makeHandle(sample_prefix = "a"),
+            .cbp_makeHandle(sample_prefix = "b")
         ),
-        "differ in size"
+        "different sample sets"
     )
 })
 

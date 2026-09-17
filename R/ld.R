@@ -1581,16 +1581,21 @@ loadLdFromGenotype <- function(
     }
     list(mafCutoff = maf, macCutoff = mac, imissCutoff = imiss)
 }
-# ---------- LD sketch: cross-pipeline LD-panel equality check ----------
+# ---------- LD sketch: cross-pipeline LD-panel compatibility check ----------
 
-# Internal: assert that two `GenotypeHandle` LD sketches describe the same
-# reference panel: same variant identity (chr-agnostic CHR via canonChrom,
-# exact BP/A1/A2, in the same order) and the same sampleIds. The SNP label is
-# not compared, so a pure chr-prefix difference does not fail; an allele swap
-# (different A1/A2) still does, since it means a different LD coding. Shared by
-# causalInferencePipeline, colocPipeline,
-# qtlEnrichmentPipeline, ctwasPipeline, and
-# colocboostPipeline.
+# Internal: assert that two LD sketches describe the same reference panel --
+# the same samples, and the same allele coding (A1/A2 in the same orientation)
+# on the variants they share. The SNP label is not compared, so a pure
+# chr-prefix difference does not fail; an allele swap still does, since it
+# means the two panels code their LD in opposite directions.
+#
+# The two panels' variant SETS need not agree, and after independent QC they
+# normally do not: each object's sketch is trimmed to its own span and its own
+# surviving variants, so one LD reference used for a QTL and a GWAS collection
+# yields two differently trimmed sketches. Downstream LD lookups are all
+# id-matched, so a partial overlap is reported (once per session) rather than
+# refused; no overlap at all is an error. Shared by causalInferencePipeline,
+# colocPipeline, qtlEnrichmentPipeline, ctwasPipeline, and colocboostPipeline.
 #
 # NULL handling:
 #   nullPolicy = "qtl-required" (default): a NULL qtlLd skips the check; a
@@ -1628,7 +1633,17 @@ loadLdFromGenotype <- function(
     FALSE
 }
 
-# Both must be GenotypeHandles with matching panel size.
+# Both must be genotype panels. Panel SIZE is deliberately NOT compared: two
+# objects that share one LD sketch stop carrying identical variant sets as soon
+# as they are QC'd separately, because each object's sketch is trimmed to its
+# own position span at load (`.subsetSketchToRange`) and to its own surviving
+# variants at the end of QC (`.subsetSketchToIds`). A QTL and a GWAS collection
+# put through `summaryStatsQc` independently therefore diverge by construction,
+# which is the normal case rather than a mistake. Every downstream LD lookup
+# matches by variant id (`.ldFromSketch`), never by position in the panel, so
+# divergent variant sets cost only the variants one side lacks. What would not
+# be harmless -- two genuinely different reference panels -- is what
+# `.ldSketchCheckContent` catches, by sample set and by allele coding.
 .ldSketchCheckShape <- function(qtlLd, gwasLd, pipelineName, between) {
     if (!.ldIsPanel(qtlLd) || !.ldIsPanel(gwasLd)) {
         msg <- glue(
@@ -1637,40 +1652,137 @@ loadLdFromGenotype <- function(
         )
         abort(msg)
     }
-    nQ <- length(.ldSketchRanges(qtlLd))
-    nG <- length(.ldSketchRanges(gwasLd))
-    if (nQ != nG) {
-        msg <- glue(
-            "{pipelineName}: ldSketch panels differ in size ({nQ} vs ",
-            "{nG} variants){between}; the two ldSketch panels ",
-            "must match exactly."
-        )
-        abort(msg)
-    }
 }
 
-# Panels must agree on CHR/BP/A1/A2 columns and on the sample set.
-.ldSketchCheckContent <- function(qtlLd, gwasLd, pipelineName, between) {
-    qGr <- .ldSketchRanges(qtlLd)
-    gGr <- .ldSketchRanges(gwasLd)
-    if (!identical(.ldSketchChrom(qtlLd), .ldSketchChrom(gwasLd))) {
+# The (chrom, position, allele-pair) key the two panels are compared on. The
+# allele pair is order-insensitive, so an A1/A2 swap keys to the SAME variant
+# and is then reported as an allele-coding difference rather than looking like
+# two unrelated variants that happen not to overlap. A panel carrying no allele
+# columns falls back to chrom:position, which is all it can be keyed on.
+# @noRd
+.ldSketchVariantKeys <- function(x) {
+    gr <- .ldSketchRanges(x)
+    mc <- S4Vectors::mcols(gr)
+    stem <- str_c(
+        canonChrom(as.character(GenomicRanges::seqnames(gr))),
+        ":",
+        as.character(GenomicRanges::start(gr))
+    )
+    if (is.null(mc$A1) || is.null(mc$A2)) {
+        return(stem)
+    }
+    # str_c propagates NA, which would make a variant with an unknown allele
+    # match nothing on either side; an empty field keeps it comparable.
+    a1 <- as.character(mc$A1)
+    a2 <- as.character(mc$A2)
+    a1 <- if_else(is.na(a1), "", a1)
+    a2 <- if_else(is.na(a2), "", a2)
+    str_c(stem, ":", if_else(a1 < a2, a1, a2), ":", if_else(a1 < a2, a2, a1))
+}
+
+# The panel's A1 (effect / counted) allele, which fixes the sign of every
+# correlation the variant takes part in.
+# @noRd
+.ldSketchA1 <- function(x) {
+    as.character(S4Vectors::mcols(.ldSketchRanges(x))$A1)
+}
+
+# A shared variant whose A1/A2 are swapped between the panels is the same
+# variant coded in opposite directions, so the two panels' LD matrices disagree
+# in sign wherever it appears. That is a different reference, not a trimming
+# difference, and it is an error.
+# @noRd
+.ldSketchCheckAlleleCoding <- function(
+    qtlLd,
+    gwasLd,
+    qIdx,
+    gIdx,
+    pipelineName,
+    between
+) {
+    qA1 <- .ldSketchA1(qtlLd)[qIdx]
+    gA1 <- .ldSketchA1(gwasLd)[gIdx]
+    if (length(qA1) == 0L || length(gA1) == 0L) {
+        return(invisible(NULL))
+    }
+    nSwapped <- sum(qA1 != gA1, na.rm = TRUE)
+    if (nSwapped > 0L) {
         msg <- glue(
-            "{pipelineName}: ldSketch panels differ in column CHR",
-            "{between}; use the same ldSketch on both."
+            "{pipelineName}: {nSwapped} variant(s) present in both ldSketch ",
+            "panels carry swapped A1/A2 alleles{between}, so the two panels ",
+            "code their LD in opposite directions; use the same ldSketch on ",
+            "both."
         )
         abort(msg)
     }
-    qCol <- .ldRangesColumns(qGr)
-    gCol <- .ldRangesColumns(gGr)
-    for (col in c("BP", "A1", "A2")) {
-        if (!identical(qCol[[col]], gCol[[col]])) {
-            msg <- glue(
-                "{pipelineName}: ldSketch panels differ in column ",
-                "{col}{between}; use the same ldSketch on both."
-            )
-            abort(msg)
-        }
+    invisible(NULL)
+}
+
+# A partial overlap is the expected result of QC-ing the two sides separately,
+# so it is reported once per session rather than on every call: ctwasPipeline
+# and colocboostPipeline run this check once per region / per bundle.
+# @noRd
+.ldSketchReportOverlap <- function(nQ, nG, nShared, pipelineName, between) {
+    if (nShared == nQ && nShared == nG) {
+        return(invisible(NULL))
     }
+    msg <- glue(
+        "{pipelineName}: the two ldSketch panels share {nShared} variant(s) ",
+        "of {nQ} (QTL side) and {nG} (GWAS side){between}. LD is looked up ",
+        "per variant, so only the shared ones contribute. Differing variant ",
+        "sets are expected when the two sides were QC'd separately."
+    )
+    warn(
+        msg,
+        .frequency = "once",
+        .frequency_id = str_c("pecotmrLdSketchOverlap-", pipelineName)
+    )
+    invisible(NULL)
+}
+
+# Compare the two panels variant by variant. A partial overlap passes; what
+# fails is no overlap at all (two unrelated panels) or a shared variant whose
+# alleles are swapped.
+# @noRd
+.ldSketchCheckOverlap <- function(qtlLd, gwasLd, pipelineName, between) {
+    qKey <- .ldSketchVariantKeys(qtlLd)
+    gKey <- .ldSketchVariantKeys(gwasLd)
+    # An emptied panel -- what a zero-variant object carries, since it
+    # references no LD -- contradicts nothing, so there is nothing to compare.
+    if (length(qKey) == 0L || length(gKey) == 0L) {
+        return(invisible(NULL))
+    }
+    idx <- match(qKey, gKey)
+    shared <- which(!is.na(idx))
+    if (length(shared) == 0L) {
+        msg <- glue(
+            "{pipelineName}: the two ldSketch panels share no variant",
+            "{between} ({length(qKey)} vs {length(gKey)} variants); they ",
+            "describe different LD references."
+        )
+        abort(msg)
+    }
+    .ldSketchCheckAlleleCoding(
+        qtlLd,
+        gwasLd,
+        shared,
+        idx[shared],
+        pipelineName,
+        between
+    )
+    .ldSketchReportOverlap(
+        length(qKey),
+        length(gKey),
+        length(shared),
+        pipelineName,
+        between
+    )
+}
+
+# Panels must describe the same reference panel: the same samples, and the same
+# allele coding on the variants they share. Their variant SETS need not agree
+# -- see `.ldSketchCheckShape` for why.
+.ldSketchCheckContent <- function(qtlLd, gwasLd, pipelineName, between) {
     qIds <- .ldSketchSampleIds(qtlLd)
     gIds <- .ldSketchSampleIds(gwasLd)
     if (!identical(qIds, gIds)) {
@@ -1680,6 +1792,7 @@ loadLdFromGenotype <- function(
         )
         abort(msg)
     }
+    .ldSketchCheckOverlap(qtlLd, gwasLd, pipelineName, between)
 }
 
 .requireMatchingLdSketches <- function(

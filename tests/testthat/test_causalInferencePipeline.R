@@ -224,9 +224,9 @@ test_that(".cipRequireMatchingLdSketches: NULL twas-side ldSketch is allowed", {
     expect_s4_class(out, "GRanges")
 })
 
-test_that(".cipRequireMatchingLdSketches: panel size mismatch errors", {
-    bigSketch <- .cip_makeHandle(snp_n = 7L)
-    twBig <- TwasWeights(
+test_that(".cipRequireMatchingLdSketches: sample set mismatch errors", {
+    otherPanel <- .cip_makeHandle(sample_prefix = "other")
+    twOther <- TwasWeights(
         study = "Q1",
         context = "c1",
         trait = "t1",
@@ -235,14 +235,28 @@ test_that(".cipRequireMatchingLdSketches: panel size mismatch errors", {
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
             weights = rep(0.1, 5)
         )),
-        ldSketch = bigSketch
+        ldSketch = otherPanel
     )
     expect_error(
         causalInferencePipeline(
             gwasSumStats = .cip_makeGwasSumstats(),
-            twasWeights = twBig
+            twasWeights = twOther
         ),
-        "differ in size"
+        "different sample sets"
+    )
+})
+
+test_that(".cipRequireMatchingLdSketches: differently trimmed panels pass", {
+    # Independent QC of the QTL and GWAS sides leaves one LD reference as two
+    # overlapping-but-unequal panels, which the check reports rather than
+    # refuses.
+    expect_warning(
+        expect_null(pecotmr:::.cipRequireMatchingLdSketches(
+            .cip_makeHandle(snp_n = 6L),
+            .cip_makeHandle(snp_n = 7L),
+            label = "twasWeights"
+        )),
+        "share 6 variant"
     )
 })
 

@@ -183,13 +183,19 @@ This pipeline preserves all three.
   }
 }
 
-\section{LD-sketch identity check}{
+\section{LD-sketch compatibility check}{
  If
-  \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must match
-  the LD sketch on \code{gwasInput}. Mismatch is a hard error. When the
-  first side's \code{ldSketch} is \code{NULL} (individual-level fit), the
-  validation is skipped on that side and the second side's panel is what the
-  result carries forward.
+  \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must come
+  from the same reference panel as the LD sketch on \code{gwasInput}: the
+  same samples, and the same allele orientation on the variants the two
+  carry in common. The two need NOT carry the same variants --- running
+  \code{\link{summaryStatsQc}} on the two sides separately normally leaves
+  each sketch trimmed to its own surviving variants, and LD is looked up per
+  variant, so a partial overlap only warns (once per session). No shared
+  variant at all, a different sample set, or a swapped A1/A2 on a shared
+  variant is a hard error. When the first side's \code{ldSketch} is
+  \code{NULL} (individual-level fit), the validation is skipped on that side
+  and the second side's panel is what the result carries forward.
 }
 
 \examples{

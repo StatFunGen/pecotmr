@@ -16,11 +16,16 @@
 #'           MR computed from \code{fineMappingResult}.
 #'   }
 #'
-#' @section LD-sketch identity check: If a QTL input (TwasWeights or
+#' @section LD-sketch compatibility check: If a QTL input (TwasWeights or
 #'   QtlFineMappingResult) carries a non-\code{NULL} \code{ldSketch}, it must
-#'   match the \code{ldSketch} on \code{gwasSumStats}. Mismatch is a hard error.
-#'   A QTL input with \code{ldSketch = NULL} (the fit was learned from
-#'   individual-level data) skips the validation for that input.
+#'   come from the same reference panel as the \code{ldSketch} on
+#'   \code{gwasSumStats} --- same samples, same allele orientation on the
+#'   shared variants. The two need NOT carry the same variants: QC-ing the two
+#'   sides separately trims each sketch to its own surviving variants, and a
+#'   partial overlap only warns. A different sample set, a swapped A1/A2 on a
+#'   shared variant, or no shared variant at all is a hard error. A QTL input
+#'   with \code{ldSketch = NULL} (the fit was learned from individual-level
+#'   data) skips the validation for that input.
 #'
 #' @section Output shape:
 #' A long-format \code{GRanges} with one row per
@@ -466,7 +471,7 @@ causalInferencePipeline <- function(
 # Internal helpers
 # =============================================================================
 
-# Compare two GenotypeHandles for LD-sketch identity. Thin wrapper over
+# Check two LD sketches for reference-panel compatibility. Thin wrapper over
 # the shared `.requireMatchingLdSketches` helper (R/ld.R).
 .cipRequireMatchingLdSketches <- function(qtlLd, gwasLd, label) {
     .requireMatchingLdSketches(
