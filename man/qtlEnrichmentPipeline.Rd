@@ -100,11 +100,14 @@ genome of outcome PIPs and the full collection of annotation fits at once.
 }
 }
 
-\section{LD-sketch identity check}{
- A GWAS outcome collection must have a
-  non-NULL \code{ldSketch} (it should be RSS-derived). Where both sides
-  carry one, the two must match exactly; a \code{NULL} on either side (an
-  individual-level fit) skips the check.
+\section{LD-sketch compatibility check}{
+ A GWAS outcome collection must have
+  a non-NULL \code{ldSketch} (it should be RSS-derived). Where both sides
+  carry one, the two must come from the same reference panel --- same
+  samples, same allele orientation on the variants they share --- but need
+  NOT carry the same variants: QC-ing the two sides separately trims each
+  sketch to its own surviving variants, and a partial overlap only warns. A
+  \code{NULL} on either side (an individual-level fit) skips the check.
 }
 
 \examples{

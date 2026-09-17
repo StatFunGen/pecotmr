@@ -164,10 +164,14 @@ Pipeline that hands a per-block set of
   blocks.
 }
 
-\section{LD-sketch identity check}{
- Per block: \code{getLdSketch(twasWeights)}
-  (when non-NULL) must match \code{getLdSketch(gwasSumStats)}. Mismatch is a
-  hard error.
+\section{LD-sketch compatibility check}{
+ Per block:
+  \code{getLdSketch(twasWeights)} (when non-NULL) must come from the same
+  reference panel as \code{getLdSketch(gwasSumStats)} --- same samples, same
+  allele orientation on the shared variants. The two need NOT carry the same
+  variants; a partial overlap, which is what QC-ing the two sides separately
+  produces, only warns. A different sample set, a swapped A1/A2 on a shared
+  variant, or no shared variant at all is a hard error.
 }
 
 \examples{

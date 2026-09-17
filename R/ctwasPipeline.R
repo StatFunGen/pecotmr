@@ -17,9 +17,13 @@
 #'   cannot converge on a single region, so callers must supply at least two
 #'   blocks.
 #'
-#' @section LD-sketch identity check: Per block: \code{getLdSketch(twasWeights)}
-#'   (when non-NULL) must match \code{getLdSketch(gwasSumStats)}. Mismatch is a
-#'   hard error.
+#' @section LD-sketch compatibility check: Per block:
+#'   \code{getLdSketch(twasWeights)} (when non-NULL) must come from the same
+#'   reference panel as \code{getLdSketch(gwasSumStats)} --- same samples, same
+#'   allele orientation on the shared variants. The two need NOT carry the same
+#'   variants; a partial overlap, which is what QC-ing the two sides separately
+#'   produces, only warns. A different sample set, a swapped A1/A2 on a shared
+#'   variant, or no shared variant at all is a hard error.
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} whose elements are LD
 #'   blocks (at least two), keyed by its \code{blockId} column, with
@@ -1233,7 +1237,7 @@ mergeCtwasBoundaryRegions <- function(
 # Internal helpers
 # =============================================================================
 
-# LD-sketch identity check. Thin wrapper over the shared
+# LD-sketch compatibility check. Thin wrapper over the shared
 # `.requireMatchingLdSketches` helper (R/ld.R).
 .ctwasRequireMatchingLdSketches <- function(twLd, gwasLd) {
     .requireMatchingLdSketches(twLd, gwasLd, pipelineName = "ctwasPipeline")

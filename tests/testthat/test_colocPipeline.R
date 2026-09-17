@@ -241,18 +241,30 @@ test_that(".colocRequireMatchingLdSketches: non-NULL qtl + NULL gwas errors", {
     )
 })
 
-test_that(".colocRequireMatchingLdSketches: panel size mismatch errors", {
+test_that(".colocRequireMatchingLdSketches: sample set mismatch errors", {
     qfmr <- .cp_makeQtlFmr()
-    bigSketch <- .cp_makeHandle(snp_n = 7L)
+    otherPanel <- .cp_makeHandle(sample_prefix = "other")
     gfmr <- GwasFineMappingResult(
         study = "G1",
         method = "susie",
         entry = list(.cp_makeFmEntry()),
-        ldSketch = bigSketch
+        ldSketch = otherPanel
     )
     expect_error(
         colocPipeline(qtlFineMappingResult = qfmr, gwasInput = gfmr),
-        "ldSketch panels differ in size"
+        "different sample sets"
+    )
+})
+
+test_that(".colocRequireMatchingLdSketches: differently trimmed panels pass", {
+    # The two sides QC'd separately keep different subsets of one LD
+    # reference; the panels overlap, so the check warns rather than aborting.
+    expect_warning(
+        expect_null(pecotmr:::.colocRequireMatchingLdSketches(
+            .cp_makeHandle(snp_n = 6L),
+            .cp_makeHandle(snp_n = 7L)
+        )),
+        "share 6 variant"
     )
 })
 

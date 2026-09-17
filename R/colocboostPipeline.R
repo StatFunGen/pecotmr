@@ -718,7 +718,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     bundle
 }
 
-# Compare two GenotypeHandles for the LD-sketch equality contract. Thin
+# Check two LD sketches for the reference-panel compatibility contract. Thin
 # wrapper over the shared `.requireMatchingLdSketches` helper (R/ld.R)
 # using the "lenient" null policy: a NULL on either side skips the check
 # (only colocboostPipeline allows that, since some bundles only have a

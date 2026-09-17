@@ -7,8 +7,8 @@ context("ctwasPipeline")
 # ===========================================================================
 
 # 12 = 6 variants x the 2 blocks the default GwasSumStats fixture builds. The
-# LD-sketch identity check compares panels between the GWAS and weight sides,
-# so every fixture has to draw on the same one.
+# LD-sketch compatibility check compares panels between the GWAS and weight
+# sides, so every fixture has to draw on the same one.
 .ctp_makeHandle <- function(snp_n = 12L, n_samples = 30L) {
     # Use a per-process tempfile so .ctwasLdPanelKey's file.exists check
     # succeeds against the fixture handle (real LD-sketch payloads exist
@@ -427,12 +427,27 @@ test_that(".ctwasRequireMatchingLdSketches: NULL twas-side handle is allowed", {
     ))
 })
 
-test_that(".ctwasRequireMatchingLdSketches: panel-size mismatch errors", {
+test_that(".ctwasRequireMatchingLdSketches: differently trimmed panels ok", {
+    # One LD reference QC'd separately on the two sides leaves each sketch
+    # trimmed to its own surviving variants, so the panels overlap without
+    # being identical. That is the normal case, not an error.
     twLd <- .ctp_makeHandle(snp_n = 5L)
     gwasLd <- .ctp_makeHandle(snp_n = 6L)
+    expect_warning(
+        expect_null(pecotmr:::.ctwasRequireMatchingLdSketches(twLd, gwasLd)),
+        "share 5 variant"
+    )
+})
+
+test_that(".ctwasRequireMatchingLdSketches: disjoint panels error", {
+    twLd <- .ctp_makeHandle(snp_n = 3L)
+    gwasLd <- .ctp_makeHandle(snp_n = 3L)
+    si <- getSnpInfo(gwasLd)
+    si$BP <- si$BP + 1e6L
+    gwasLd@snpInfo <- si
     expect_error(
         pecotmr:::.ctwasRequireMatchingLdSketches(twLd, gwasLd),
-        "ldSketch panels differ in size"
+        "share no variant"
     )
 })
 
