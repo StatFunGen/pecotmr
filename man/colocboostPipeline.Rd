@@ -106,7 +106,9 @@ accessors).}
 
 \item{focalTrait}{Optional trait name; when supplied and present in the
 assembled outcome list, the colocboost xQTL-only run uses it as the focal
-outcome.}
+outcome. Only \code{xqtlColoc} reads it: \code{jointGwas} is
+non-focal by construction and \code{separateGwas} always makes the
+GWAS study focal.}
 
 \item{xqtlColoc, jointGwas, separateGwas}{Logical flags selecting which
 colocboost variants to run.}
@@ -172,6 +174,9 @@ Protocol-level multi-trait colocalization analysis using
           shared LD reference (\code{ldSketch}). Must already have
           been passed through \code{\link{summaryStatsQc}} (the
           pipeline rejects inputs whose \code{getQcInfo()} is empty).
+          Every analysis variant is available on this input, including
+          \code{xqtlColoc}, which colocalizes the QTL studies against
+          each other with no GWAS involved.
     \item \code{MultiStudyQtlDataset} -- a mixture of one or more
           individual-level \code{QtlDataset} studies and an optional
           \code{QtlSumStats} collection.
@@ -214,7 +219,12 @@ for either side; colocboost has its own variable-selection algorithm.
 
   \itemize{
     \item \code{xqtlColoc} (default \code{TRUE}): run a colocboost
-          model over the QTL contexts only (individual-level inputs).
+          model over the QTL outcomes only, excluding
+          \code{gwasSumStats}. Works for either data form -- the
+          individual-level contexts, the summary-level QTL studies, or
+          both together when a \code{MultiStudyQtlDataset} carries a
+          mixture. This is the only variant that honors
+          \code{focalTrait}.
     \item \code{jointGwas} (default \code{FALSE}): run a non-focal
           colocboost model that combines all QTL contexts/studies
           with the supplied \code{gwasSumStats} studies.
