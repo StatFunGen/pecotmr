@@ -1188,7 +1188,12 @@ test_that(".cbResidualizedX reports why genotypes were unavailable", {
     # The underlying message is carried through so the skip is diagnosable.
     expect_message(
         res <- pecotmr:::.cbResidualizedX(
-            NULL, "c1", NULL, NULL, NULL, NULL
+            NULL,
+            "c1",
+            NULL,
+            NULL,
+            NULL,
+            NULL
         ),
         "residualized genotypes unavailable: kaboom"
     )
@@ -1233,15 +1238,160 @@ test_that(".cbRunXqtlOnly passes a focal outcome through as an index", {
         X = list(),
         dict_YX = NULL
     )
-    run <- suppressMessages(pecotmr:::.cbRunXqtlOnly(bundle, "tB", list()))
+    empty <- pecotmr:::.cbMergeSumstatBundles(list())
+    run <- suppressMessages(
+        pecotmr:::.cbRunXqtlOnly(bundle, empty, TRUE, "tB", list())
+    )
     # colocboost wants a position, not a name.
     expect_equal(run$result$focal, 2L)
     absent <- suppressMessages(
-        pecotmr:::.cbRunXqtlOnly(bundle, "nope", list())
+        pecotmr:::.cbRunXqtlOnly(bundle, empty, TRUE, "nope", list())
     )
     expect_null(absent$result$focal)
-    none <- suppressMessages(pecotmr:::.cbRunXqtlOnly(bundle, NULL, list()))
+    none <- suppressMessages(
+        pecotmr:::.cbRunXqtlOnly(bundle, empty, TRUE, NULL, list())
+    )
     expect_null(none$result$focal)
+})
+
+# A summary-level QTL side used to make xqtlColoc a silent no-op: the run was
+# gated on having an individual bundle, so the default flags returned an empty
+# ColocBoostResult with all-NULL timings and no message.
+test_that(".cbRunXqtlOnly runs on a summary-level QTL side alone", {
+    captured <- NULL
+    local_mocked_bindings(
+        .cbRun = function(label, args) {
+            captured <<- args
+            list(result = list(ran = TRUE), time = 0)
+        },
+        .package = "pecotmr"
+    )
+    ssBundle <- pecotmr:::.cbMergeSumstatBundles(list(
+        qtlA = list(sumstat = list(z = 1), LD = diag(2)),
+        qtlB = list(sumstat = list(z = 2), LD = diag(2))
+    ))
+    run <- suppressMessages(
+        pecotmr:::.cbRunXqtlOnly(NULL, ssBundle, FALSE, "qtlB", list())
+    )
+    expect_equal(run$result$ran, TRUE)
+    expect_null(captured$X)
+    expect_null(captured$Y)
+    expect_null(captured$dict_YX)
+    expect_equal(names(captured$sumstat), c("qtlA", "qtlB"))
+    expect_equal(captured$outcome_names, c("qtlA", "qtlB"))
+    # focalTrait is honored on the summary-level side too.
+    expect_equal(captured$focal_outcome_idx, 2L)
+    # Identical LD matrices dedupe to one, so the dict points both at it.
+    expect_equal(unname(captured$dict_sumstatLD[, "LD"]), c(1L, 1L))
+})
+
+test_that(".cbRunXqtlOnly combines individual and summary-level QTL sides", {
+    captured <- NULL
+    local_mocked_bindings(
+        .cbRun = function(label, args) {
+            captured <<- args
+            list(result = NULL, time = 0)
+        },
+        .package = "pecotmr"
+    )
+    bundle <- list(
+        outcomeNames = c("tA", "tB"),
+        Y = list(1, 2),
+        X = list(),
+        dict_YX = NULL
+    )
+    ssBundle <- pecotmr:::.cbMergeSumstatBundles(list(
+        qtlC = list(sumstat = list(z = 3), LD = diag(2))
+    ))
+    suppressMessages(
+        pecotmr:::.cbRunXqtlOnly(bundle, ssBundle, TRUE, "qtlC", list())
+    )
+    expect_equal(captured$outcome_names, c("tA", "tB", "qtlC"))
+    expect_equal(captured$focal_outcome_idx, 3L)
+})
+
+test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
+    called <- character(0)
+    local_mocked_bindings(
+        .cbRunXqtlOnly = function(...) {
+            called <<- c(called, "xqtl")
+            list(result = list(stub = TRUE), time = 1)
+        },
+        .cbOutcomeInfo = function(...) pecotmr:::.cbEmptyOutcomeInfo(),
+        .package = "pecotmr"
+    )
+    merged <- pecotmr:::.cbMergeSumstatBundles(list(
+        qtlA = list(sumstat = list(z = 1), LD = diag(2)),
+        gwasG = list(sumstat = list(z = 2), LD = diag(2))
+    ))
+    qtlOnly <- pecotmr:::.cbMergeSumstatBundles(list(
+        qtlA = list(sumstat = list(z = 1), LD = diag(2))
+    ))
+    out <- suppressMessages(pecotmr:::.cbRunVariants(
+        NULL,
+        merged,
+        xqtlColoc = TRUE,
+        jointGwas = FALSE,
+        separateGwas = FALSE,
+        focalTrait = NULL,
+        dotArgs = list(),
+        qtlSumstatBundle = qtlOnly
+    ))
+    expect_equal(called, "xqtl")
+    expect_false(is.null(getComputingTime(out)$Analysis$xqtl_coloc))
+})
+
+test_that(".cbRunVariants warns instead of silently skipping an analysis", {
+    local_mocked_bindings(
+        .cbOutcomeInfo = function(...) pecotmr:::.cbEmptyOutcomeInfo(),
+        .package = "pecotmr"
+    )
+    # Individual-level QTL side, no sumstats anywhere: the two GWAS variants
+    # cannot run, and the caller is told so rather than getting a bare empty.
+    ind <- list(
+        outcomeNames = "tA",
+        Y = list(1),
+        X = list(),
+        dict_YX = NULL
+    )
+    warnings <- capture_warnings(
+        suppressMessages(pecotmr:::.cbRunVariants(
+            ind,
+            pecotmr:::.cbMergeSumstatBundles(list()),
+            xqtlColoc = FALSE,
+            jointGwas = TRUE,
+            separateGwas = TRUE,
+            focalTrait = NULL,
+            dotArgs = list()
+        ))
+    )
+    expect_length(warnings, 2L)
+    expect_match(warnings[[1L]], "jointGwas = TRUE was requested")
+    expect_match(warnings[[2L]], "separateGwas = TRUE was requested")
+})
+
+test_that(".cbRunVariants warns when xqtlColoc has only GWAS sumstats", {
+    local_mocked_bindings(
+        .cbOutcomeInfo = function(...) pecotmr:::.cbEmptyOutcomeInfo(),
+        .package = "pecotmr"
+    )
+    gwasOnly <- pecotmr:::.cbMergeSumstatBundles(list(
+        gwasG = list(sumstat = list(z = 1), LD = diag(2))
+    ))
+    out <- expect_warning(
+        suppressMessages(pecotmr:::.cbRunVariants(
+            NULL,
+            gwasOnly,
+            xqtlColoc = TRUE,
+            jointGwas = FALSE,
+            separateGwas = FALSE,
+            focalTrait = NULL,
+            dotArgs = list(),
+            qtlSumstatBundle = pecotmr:::.cbMergeSumstatBundles(list())
+        )),
+        "xqtlColoc = TRUE was requested"
+    )
+    expect_null(getComputingTime(out)$Analysis$xqtl_coloc)
 })
 
 test_that(".cbAppendGwasPairs disambiguates a colliding study key", {

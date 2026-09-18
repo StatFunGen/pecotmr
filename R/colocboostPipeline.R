@@ -11,6 +11,9 @@
 #'           shared LD reference (\code{ldSketch}). Must already have
 #'           been passed through \code{\link{summaryStatsQc}} (the
 #'           pipeline rejects inputs whose \code{getQcInfo()} is empty).
+#'           Every analysis variant is available on this input, including
+#'           \code{xqtlColoc}, which colocalizes the QTL studies against
+#'           each other with no GWAS involved.
 #'     \item \code{MultiStudyQtlDataset} -- a mixture of one or more
 #'           individual-level \code{QtlDataset} studies and an optional
 #'           \code{QtlSumStats} collection.
@@ -50,7 +53,12 @@
 #' @section Analysis variants:
 #'   \itemize{
 #'     \item \code{xqtlColoc} (default \code{TRUE}): run a colocboost
-#'           model over the QTL contexts only (individual-level inputs).
+#'           model over the QTL outcomes only, excluding
+#'           \code{gwasSumStats}. Works for either data form -- the
+#'           individual-level contexts, the summary-level QTL studies, or
+#'           both together when a \code{MultiStudyQtlDataset} carries a
+#'           mixture. This is the only variant that honors
+#'           \code{focalTrait}.
 #'     \item \code{jointGwas} (default \code{FALSE}): run a non-focal
 #'           colocboost model that combines all QTL contexts/studies
 #'           with the supplied \code{gwasSumStats} studies.
@@ -80,7 +88,9 @@
 #'   analysis to; \code{NULL} (default) uses all samples.
 #' @param focalTrait Optional trait name; when supplied and present in the
 #'   assembled outcome list, the colocboost xQTL-only run uses it as the focal
-#'   outcome.
+#'   outcome. Only \code{xqtlColoc} reads it: \code{jointGwas} is
+#'   non-focal by construction and \code{separateGwas} always makes the
+#'   GWAS study focal.
 #' @param xqtlColoc,jointGwas,separateGwas Logical flags selecting which
 #'   colocboost variants to run.
 #' @param pipCutoffToSkip Individual-level pre-filter (ports the legacy
@@ -780,9 +790,25 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     )
 }
 
+# A requested analysis with nothing to run on would otherwise be a silent
+# no-op: the caller gets an empty ColocBoostResult whose getComputingTime()
+# entries are all NULL, with no indication of why. Say so.
+# @noRd
+.cbWarnNoData <- function(flag, needed) {
+    msg <- glue(
+        "colocboostPipeline: {flag} = TRUE was requested, but there is no ",
+        "{needed} to run it on. Skipping it -- the returned ",
+        "ColocBoostResult will hold no confidence sets from this analysis ",
+        "and its getComputingTime() entry will be NULL."
+    )
+    warn(msg)
+}
+
 # Shared dispatch: accepts a fully-prepared individual bundle (possibly
 # NULL) plus a sumstat bundle (possibly empty) and runs the three
-# colocboost variants the user requested.
+# colocboost variants the user requested. `qtlSumstatBundle` is the QTL-side
+# subset of `sumstatBundle` (see .cbDriver); only the xQTL-only run uses it,
+# so that a GWAS study never becomes an xQTL-only outcome.
 .cbRunVariants <- function(
     individualBundle,
     sumstatBundle,
@@ -791,11 +817,14 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     separateGwas,
     focalTrait,
     dotArgs,
-    qtlLdSketch = NULL
+    qtlLdSketch = NULL,
+    qtlSumstatBundle = NULL
 ) {
     results <- .cbEmptyResult()
     hasInd <- !is.null(individualBundle)
     hasSs <- length(sumstatBundle$sumstat) > 0L
+    qtlSumstatBundle <- qtlSumstatBundle %||% .cbMergeSumstatBundles(list())
+    hasQtlSs <- length(qtlSumstatBundle$sumstat) > 0L
     if (!hasInd && !hasSs) {
         msg <- glue(
             "colocboostPipeline: no QTL inputs remain after selection. ",
@@ -804,25 +833,48 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         inform(msg)
         return(.cbEmptyResultObject())
     }
-    if (isTRUE(xqtlColoc) && hasInd) {
-        run <- .cbRunXqtlOnly(individualBundle, focalTrait, dotArgs)
-        results$xqtl_coloc <- run$result
-        results$computing_time$Analysis$xqtl_coloc <- run$time
+    if (isTRUE(xqtlColoc)) {
+        if (hasInd || hasQtlSs) {
+            run <- .cbRunXqtlOnly(
+                individualBundle,
+                qtlSumstatBundle,
+                hasInd,
+                focalTrait,
+                dotArgs
+            )
+            results$xqtl_coloc <- run$result
+            results$computing_time$Analysis$xqtl_coloc <- run$time
+        } else {
+            .cbWarnNoData("xqtlColoc", "QTL data")
+        }
     }
-    if (isTRUE(jointGwas) && hasSs) {
-        run <- .cbRunJointGwas(individualBundle, sumstatBundle, hasInd, dotArgs)
-        results$joint_gwas <- run$result
-        results$computing_time$Analysis$joint_gwas <- run$time
+    if (isTRUE(jointGwas)) {
+        if (hasSs) {
+            run <- .cbRunJointGwas(
+                individualBundle,
+                sumstatBundle,
+                hasInd,
+                dotArgs
+            )
+            results$joint_gwas <- run$result
+            results$computing_time$Analysis$joint_gwas <- run$time
+        } else {
+            .cbWarnNoData("jointGwas", "summary-statistic data")
+        }
     }
-    if (isTRUE(separateGwas) && hasSs) {
-        run <- .cbRunSeparateGwas(
-            individualBundle,
-            sumstatBundle,
-            hasInd,
-            dotArgs
-        )
-        results$separate_gwas <- run$result
-        results$computing_time$Analysis$separate_gwas <- run$time
+    if (isTRUE(separateGwas)) {
+        if (hasSs) {
+            run <- .cbRunSeparateGwas(
+                individualBundle,
+                sumstatBundle,
+                hasInd,
+                dotArgs
+            )
+            results$separate_gwas <- run$result
+            results$computing_time$Analysis$separate_gwas <- run$time
+        } else {
+            .cbWarnNoData("separateGwas", "summary-statistic data")
+        }
     }
     .cbToResultObject(
         results,
@@ -886,28 +938,59 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 }
 
 # xQTL-only ColocBoost run -> list(result, time).
+#
+# Either side may be absent: `individualBundle` is NULL for a summary-level
+# QTL input, and `sumstatBundle` is empty for an individual-level one. It holds
+# the QTL-side sumstats ONLY -- a GWAS study must never be pulled into the
+# xQTL-only analysis, which is why this does not take the merged bundle the
+# joint / separate runs use.
 # @noRd
-.cbRunXqtlOnly <- function(individualBundle, focalTrait, dotArgs) {
-    traits <- individualBundle$outcomeNames
+.cbRunXqtlOnly <- function(
+    individualBundle,
+    sumstatBundle,
+    hasInd,
+    focalTrait,
+    dotArgs
+) {
+    traits <- c(
+        if (hasInd) individualBundle$outcomeNames else character(),
+        names(sumstatBundle$sumstat)
+    )
     focalIdx <- if (!is.null(focalTrait) && is_in(focalTrait, traits)) {
         which(traits == focalTrait)
     } else {
         NULL
     }
-    nCtx <- length(individualBundle$Y)
-    msg <- glue(
-        "====== Performing xQTL-only ColocBoost on {nCtx} contexts. ====="
-    )
+    nCtx <- if (hasInd) length(individualBundle$Y) else 0L
+    nSs <- length(sumstatBundle$sumstat)
+    msg <- if (nSs > 0L) {
+        glue(
+            "====== Performing xQTL-only ColocBoost on {nCtx} contexts ",
+            "and {nSs} summary-statistic studies. ====="
+        )
+    } else {
+        glue(
+            "====== Performing xQTL-only ColocBoost on {nCtx} contexts. ====="
+        )
+    }
     inform(msg)
+    ldArgs <- if (nSs > 0L) .cbBuildLdArgs(sumstatBundle$LD) else list()
     args <- c(
         list(
-            X = individualBundle$X,
-            Y = individualBundle$Y,
-            dict_YX = individualBundle$dict_YX,
+            X = if (hasInd) individualBundle$X else NULL,
+            Y = if (hasInd) individualBundle$Y else NULL,
+            dict_YX = if (hasInd) individualBundle$dict_YX else NULL,
+            sumstat = if (nSs > 0L) sumstatBundle$sumstat else NULL,
+            dict_sumstatLD = if (nSs > 0L) {
+                sumstatBundle$dict_sumstatLD
+            } else {
+                NULL
+            },
             outcome_names = traits,
             focal_outcome_idx = focalIdx,
             output_level = 2
         ),
+        ldArgs,
         dotArgs
     )
     run <- .cbRun("xQTL-only ColocBoost", args)
@@ -1190,6 +1273,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         combinedPairs <- harmonized$pairs
     }
     sumstatBundle <- .cbMergeSumstatBundles(combinedPairs)
+    # The xQTL-only run gets its own bundle over just the QTL-side pairs, so
+    # a GWAS study is never treated as an xQTL outcome. Rebuilding it through
+    # .cbMergeSumstatBundles (rather than subsetting the merged one) keeps the
+    # deduplicated LD list and dict_sumstatLD consistent for the subset.
+    qtlKeys <- intersect(names(combinedPairs), names(qtlPairs))
+    qtlSumstatBundle <- .cbMergeSumstatBundles(combinedPairs[qtlKeys])
     .cbRunVariants(
         individualBundle,
         sumstatBundle,
@@ -1198,7 +1287,8 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         separateGwas,
         focalTrait,
         dotArgs,
-        qtlLdSketch = qtlLdSketch
+        qtlLdSketch = qtlLdSketch,
+        qtlSumstatBundle = qtlSumstatBundle
     )
 }
 
