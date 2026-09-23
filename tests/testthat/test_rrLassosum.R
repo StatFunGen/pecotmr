@@ -18,7 +18,7 @@ test_that("lassosumRss errors on non-positive sample size", {
 test_that("lassosumRss errors on mismatched bhat and R dimensions", {
     expect_error(
         lassosumRss(bhat = rnorm(10), R = diag(5), n = 100),
-        "number of rows of 'R'"
+        "bhat.*Must have length"
     )
 })
 

@@ -4,7 +4,7 @@
 \alias{finemapCtwasRegions}
 \title{Fine-map cTWAS regions}
 \usage{
-finemapCtwasRegions(screenResult, L = 5L, ncore = 1L, ...)
+finemapCtwasRegions(screenResult, L = 5L, ncore = 1L, ctwasArgs = list())
 }
 \arguments{
 \item{screenResult}{A list returned by \code{\link{screenCtwasRegions}}.}
@@ -13,7 +13,8 @@ finemapCtwasRegions(screenResult, L = 5L, ncore = 1L, ...)
 
 \item{ncore}{Number of cores.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::finemap_regions}.}
+\item{ctwasArgs}{Optional named list of additional arguments
+forwarded to \code{ctwas::finemap_regions}.}
 }
 \value{
 A list mirroring \code{ctwas::ctwas_sumstats}'s output:

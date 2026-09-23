@@ -234,7 +234,7 @@ test_that("pvalAcat returns NA when the Cauchy statistic is non-finite", {
 test_that(".combinePvalAlignR rejects a non-matrix R", {
     expect_error(
         pecotmr:::.combinePvalAlignR(5, c("a", "b")),
-        "must be a matrix"
+        "Must be of type 'matrix'"
     )
 })
 
@@ -580,3 +580,13 @@ test_that("waldTestPval with very large se gives p near 1", {
 # =============================================================================
 # parseRegion
 # =============================================================================
+
+test_that("pvalCombine: argument guards fire", {
+    expect_error(waldTestPval("a", 1, 10), "beta.*Must be of type 'numeric'")
+    expect_error(waldTestPval(1, "a", 10), "se.*Must be of type 'numeric'")
+    expect_error(waldTestPval(1, 1, "a"), "n.*Must be of type 'numeric'")
+    expect_error(
+        combinePValues(pvals = 0.5, methods = "fisher", naRm = NA),
+        "naRm.*May not be NA"
+    )
+})

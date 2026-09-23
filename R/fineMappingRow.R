@@ -41,19 +41,22 @@ setClass(
     prototype(susieFit = NULL, cvResult = NULL)
 )
 
+#' @importFrom checkmate makeAssertCollection assertList
 methods::setValidity("FineMappingRow", function(object) {
-    errors <- character(0)
-    if (!is.null(object@cvResult) && !is.list(object@cvResult)) {
-        errors <- c(errors, "cvResult must be NULL or a list")
-    }
+    coll <- makeAssertCollection()
+    assertList(
+        object@cvResult,
+        null.ok = TRUE,
+        .var.name = "cvResult",
+        add = coll
+    )
+    # mcols() is an S4 DataFrame, not a data.frame, so checkDataFrame does not
+    # apply; the row-count contract stays a plain check.
     md <- mcols(object@variants, use.names = FALSE)
     if (!is.null(md) && nrow(md) != length(object@variants)) {
-        errors <- c(
-            errors,
-            "variants' metadata columns must have one row per variant"
-        )
+        coll$push("variants' metadata columns must have one row per variant")
     }
-    if (length(errors) == 0L) TRUE else errors
+    coll$getMessages()
 })
 
 #' @title Build One Fine-Mapping Row
@@ -191,10 +194,11 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # call is the only path that works across all post_processing modes. Guarded so
 # an upstream fsusieR change surfaces as a clear error, not a silent NULL.
 # @noRd
+#' @importFrom rlang try_fetch
 .fsusiePopulateCredibleBand <- function(fit) {
-    fn <- tryCatch(
+    fn <- try_fetch(
         get("update_cal_credible_band.susiF", envir = asNamespace("fsusieR")),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     if (is.null(fn)) {
         # Defensive guard against an upstream fsusieR rename; only reachable
@@ -217,7 +221,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(vid) || length(vid) == 0L) {
         return(NA_character_)
     }
-    tryCatch(parseVariantId(vid[1])$chrom, error = function(e) NA_character_)
+    try_fetch(parseVariantId(vid[1])$chrom, error = function(cnd) NA_character_)
 }
 
 .emptyCredibleBand <- function() {
@@ -303,7 +307,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         return(GenomicRanges::GRanges())
     }
     fit <- .fsusiePopulateCredibleBand(fit)
-    reg <- tryCatch(fsusieR::affected_reg(fit), error = function(e) NULL)
+    reg <- try_fetch(fsusieR::affected_reg(fit), error = function(cnd) NULL)
     if (is.null(reg) || nrow(reg) == 0L) {
         return(GenomicRanges::GRanges())
     }
@@ -668,21 +672,27 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # cs_log10bf: strongest member logBF (NA when the column is absent).
 # @noRd
 .csLog10Bf <- function(m) {
-    if (is_in("logBF", names(m))) {
-        suppressWarnings(max(m$logBF, na.rm = TRUE))
-    } else {
-        NA_real_
+    if (!is_in("logBF", names(m))) {
+        return(NA_real_)
     }
+    # Filtering first avoids max()'s empty-input warning entirely, and keeps
+    # this branch agreeing with the NA_real_ returned above: an empty or
+    # all-NA column previously yielded -Inf.
+    v <- m$logBF[is.finite(m$logBF)]
+    if (length(v) == 0L) NA_real_ else max(v)
 }
 
 # cs_mean_effect: mean conditional effect over the CS (NA when absent).
 # @noRd
 .csMeanEffect <- function(m) {
-    if (is_in("conditional_effect", names(m))) {
-        suppressWarnings(mean(as.numeric(m$conditional_effect), na.rm = TRUE))
-    } else {
-        NA_real_
+    if (!is_in("conditional_effect", names(m))) {
+        return(NA_real_)
     }
+    # suppressWarnings covers only the coercion; the empty case is handled
+    # explicitly so it returns NA_real_ rather than NaN.
+    v <- suppressWarnings(as.numeric(m$conditional_effect))
+    v <- v[is.finite(v)]
+    if (length(v) == 0L) NA_real_ else mean(v)
 }
 
 
@@ -1427,7 +1437,7 @@ setMethod("show", "FineMappingRow", function(object) {
     nCs <- if (nrow(tl) > 0L) {
         csCols <- names(tl)[str_detect(names(tl), "^cs_[0-9]+$")]
         if (length(csCols) > 0L) {
-            length(unique(unlist(map(csCols, .fmeNonNullCsLabels, tl = tl))))
+            length(unique(list_c(map(csCols, .fmeNonNullCsLabels, tl = tl))))
         } else {
             0L
         }

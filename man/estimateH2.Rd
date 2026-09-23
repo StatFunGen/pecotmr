@@ -21,6 +21,7 @@ estimateH2(
   annotations = NULL,
   local = FALSE,
   study = NULL,
+  estimatorArgs = list(),
   ...
 )
 }
@@ -58,6 +59,9 @@ unstratified estimation.}
 
 \item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
 this study; \code{NULL} matches all studies.}
+
+\item{estimatorArgs}{Optional named list of estimator-specific options
+(\code{lambda} for lder / gldsc / hdl, \code{nIter} for sldsc).}
 }
 \value{
 An \code{H2Estimate} object.

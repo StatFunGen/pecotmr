@@ -24,7 +24,7 @@ test_that("penalizedRss errors on non-positive sample size", {
 test_that("penalizedRss errors on mismatched bhat and R dimensions", {
     expect_error(
         penalizedRss(bhat = rnorm(10), R = diag(5), n = 100, penalty = "MCP"),
-        "number of rows of 'R'"
+        "bhat.*Must have length"
     )
 })
 

@@ -751,6 +751,7 @@ setMethod(
 # Resolve the single pinned entry and return its GRanges view (aggregating
 # across multiple entries requires type = "data.frame").
 # @noRd
+#' @importFrom rlang try_fetch
 .fmrbTopLociGranges <- function(
     x,
     study,
@@ -761,7 +762,7 @@ setMethod(
     signalCutoff,
     minPurity
 ) {
-    sel <- tryCatch(
+    sel <- try_fetch(
         .fmrSelectEntry(
             x,
             study = study,
@@ -770,7 +771,7 @@ setMethod(
             method = method,
             region = region
         ),
-        error = function(e) e
+        error = function(cnd) cnd
     )
     if (inherits(sel, "error")) {
         msg <- glue(
@@ -867,7 +868,9 @@ setMethod("resolveWeights", "FineMappingResultBase", function(x, ...) {
     # The per-variant weight of the row a selector pins. Defined on the
     # collection because that is what getFineMappingResult() now returns; the
     # body is the per-row primitive, so the two cannot drift.
-    .fmrRowResolveWeights(.fmrSelectEntry(x, ...), ...)
+    # `...` is the row selector; it is consumed by .fmrSelectEntry and has
+    # no meaning to the per-row primitive, so it is not forwarded twice.
+    .fmrRowResolveWeights(.fmrSelectEntry(x, ...))
 })
 
 #' @rdname getVariantIds

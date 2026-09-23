@@ -195,6 +195,6 @@ test_that("validity names the metadata columns it requires", {
     SummarizedExperiment::colData(bad)$tier <- NULL
     expect_error(
         methods::validObject(bad),
-        "must have columns: name, tier, type"
+        "Colnames must include the elements \\{'name','tier','type'\\}"
     )
 })

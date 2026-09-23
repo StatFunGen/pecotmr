@@ -29,6 +29,7 @@
 }
 
 
+#' @importFrom checkmate assertFileExists
 #' @title Read S-LDSC outputs from polyfun for one trait/run
 #'
 #' @description Reads the regression outputs produced by `polyfun/ldsc.py` for a
@@ -56,12 +57,7 @@
 #' @export
 readSldscTrait <- function(prefix) {
     files <- str_c(prefix, c(".results", ".log", ".part_delete"))
-    for (f in files) {
-        if (!file.exists(f)) {
-            msg <- glue("readSldscTrait: missing file: {f}")
-            abort(msg)
-        }
-    }
+    assertFileExists(files, access = "r", .var.name = "readSldscTrait input")
     results <- vroom(files[1], show_col_types = FALSE)
     cats <- as.character(results$Category)
     h2g <- .readSldscH2g(files[2])
@@ -128,6 +124,7 @@ readSldscTrait <- function(prefix) {
 }
 
 
+#' @importFrom checkmate assertDirectoryExists
 #' @title Read target annotation files (.annot.gz) into one table
 #'
 #' @description Reads the per-chromosome polyfun `.annot.gz` files in a
@@ -148,12 +145,11 @@ readSldscTrait <- function(prefix) {
 #' readSldscAnnot(sldsc)
 #' @export
 readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
-    if (!dir.exists(targetAnnoDir)) {
-        msg <- glue(
-            "readSldscAnnot: targetAnnoDir does not exist: {targetAnnoDir}"
-        )
-        abort(msg)
-    }
+    assertDirectoryExists(
+        targetAnnoDir,
+        access = "r",
+        .var.name = "targetAnnoDir"
+    )
     annoFiles <- list.files(
         targetAnnoDir,
         pattern = "\\.annot\\.gz$",
@@ -181,6 +177,7 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 }
 
 
+#' @importFrom checkmate assertDirectoryExists
 #' @title Read PLINK allele-frequency files (.frq) into one table
 #'
 #' @description Reads the per-chromosome PLINK `.frq` files for the reference
@@ -200,10 +197,7 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #' head(readSldscFrq(sldsc, plinkName = "reference."))
 #' @export
 readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
-    if (!dir.exists(frqfileDir)) {
-        msg <- glue("readSldscFrq: frqfileDir does not exist: {frqfileDir}")
-        abort(msg)
-    }
+    assertDirectoryExists(frqfileDir, access = "r", .var.name = "frqfileDir")
     pat <- str_c(
         "^",
         str_replace_all(plinkName, "([.])", "\\\\\\1"),
@@ -227,6 +221,7 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 }
 
 
+#' @importFrom checkmate assertClass
 #' @title Compute per-annotation standard deviation, MAF-restricted
 #'
 #' @description Computes the standard deviation of each annotation column in the
@@ -272,9 +267,7 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 #' @importFrom purrr map map_dbl compact reduce
 #' @export
 computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
-    if (!is(sldscData, "SldscData")) {
-        abort("computeSldscAnnotSd: `sldscData` must be an SldscData object.")
-    }
+    assertClass(sldscData, "SldscData")
     annot <- getAnnotData(sldscData)
     frq <- getFrqData(sldscData)
     if (mafCutoff > 0 && nrow(frq) == 0L) {
@@ -347,6 +340,7 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 }
 
 
+#' @importFrom checkmate assertClass
 #' @title Reference-panel SNP count (the M_ref used to standardise tau*)
 #'
 #' @description `M_ref` is the number of SNPs in the REFERENCE PANEL over which
@@ -398,9 +392,7 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 #' computeSldscMRef(sldscData = sd)
 #' @export
 computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
-    if (!is(sldscData, "SldscData")) {
-        abort("computeSldscMRef: `sldscData` must be an SldscData object.")
-    }
+    assertClass(sldscData, "SldscData")
     frq <- getFrqData(sldscData)
     if (nrow(frq) > 0L) {
         return(as.integer(
@@ -422,6 +414,7 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
 }
 
 
+#' @importFrom checkmate assertClass
 #' @title Detect whether each annotation is binary or continuous
 #'
 #' @description Inspects each annotation column and returns whether its values
@@ -461,9 +454,7 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
 #' isBinarySldscAnnot(sd)
 #' @export
 isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
-    if (!is(sldscData, "SldscData")) {
-        abort("isBinarySldscAnnot: `sldscData` must be an SldscData object.")
-    }
+    assertClass(sldscData, "SldscData")
     annot <- getAnnotData(sldscData)
     colsUse <- if (is.null(annotCols)) {
         getAnnotCols(sldscData)
@@ -482,6 +473,7 @@ isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
 }
 
 
+#' @importFrom checkmate assertClass
 #' @title Standardize tau and compute EnrichStat for one polyfun run
 #'
 #' @description Applies the Gazal standardization \eqn{\tau^*_C = \tau_C \cdot
@@ -544,9 +536,7 @@ standardizeSldscTrait <- function(
     MRef,
     targetCategories = NULL
 ) {
-    if (!is(sldscData, "SldscData")) {
-        abort("standardizeSldscTrait: `sldscData` must be an SldscData object.")
-    }
+    assertClass(sldscData, "SldscData")
     mode <- arg_match(mode)
     traitData <- .stdTraitRun(sldscData, trait, mode, idx)
     targetCategories <- .stdTargetCategories(

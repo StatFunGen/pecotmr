@@ -705,7 +705,7 @@ test_that("colocPipeline: rejects a non-data.frame enrichment", {
             gwasInput = gfmr,
             enrichment = "not a data frame"
         ),
-        "must be a data.frame"
+        "Must be of type 'data.frame'"
     )
 })
 
@@ -723,7 +723,7 @@ test_that("colocPipeline: rejects enrichment missing required columns", {
             gwasInput = gfmr,
             enrichment = bad
         ),
-        "is missing column"
+        "Colnames must include the elements"
     )
 })
 
@@ -1251,19 +1251,32 @@ test_that("PIP adjustment is skipped when either side has no rows", {
     # Intersecting variants across an empty side would empty the other, so
     # the inputs are passed through untouched instead.
     data(qtlFineMappingExample, gwasFineMappingExample)
-    p <- list(
-        adjustPips = TRUE,
+    # It now returns just the two (possibly adjusted) inputs, not a bundle.
+    emptyQtl <- list(
         qtlFineMappingResult = qtlFineMappingExample[0],
         gwasFmr = gwasFineMappingExample
     )
-    expect_identical(pecotmr:::.colocMaybeAdjustPips(p), p)
+    expect_identical(
+        pecotmr:::.colocMaybeAdjustPips(
+            adjustPips = TRUE,
+            qtlFineMappingResult = emptyQtl$qtlFineMappingResult,
+            gwasFmr = emptyQtl$gwasFmr
+        ),
+        emptyQtl
+    )
     # ...and it is skipped outright when not requested.
-    p2 <- list(
-        adjustPips = FALSE,
+    notAsked <- list(
         qtlFineMappingResult = qtlFineMappingExample,
         gwasFmr = gwasFineMappingExample
     )
-    expect_identical(pecotmr:::.colocMaybeAdjustPips(p2), p2)
+    expect_identical(
+        pecotmr:::.colocMaybeAdjustPips(
+            adjustPips = FALSE,
+            qtlFineMappingResult = notAsked$qtlFineMappingResult,
+            gwasFmr = notAsked$gwasFmr
+        ),
+        notAsked
+    )
 })
 
 test_that("pre-extracting LBF from an empty GWAS result yields no blocks", {

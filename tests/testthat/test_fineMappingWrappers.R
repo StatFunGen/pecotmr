@@ -257,6 +257,18 @@ test_that("get_cs_info reports variant in multiple CSs as multiple rows", {
 # susieWeights
 # =============================================================================
 
+test_that("susie*Weights refuse to fine-map when no fit is supplied", {
+    # These extract weights from an existing fit; twasWeightsPipeline gates
+    # susie-family tokens up front, so a NULL fit here is a caller error, not
+    # an invitation to run susie.
+    data(eqtlRegionExample)
+    X <- eqtlRegionExample$X[, 1:30]
+    y <- eqtlRegionExample$yRes
+    expect_error(susieWeights(X, y), "no 'susie' fit supplied")
+    expect_error(susieAshWeights(X, y), "no 'susieAsh' fit supplied")
+    expect_error(susieInfWeights(X, y), "no 'susieInf' fit supplied")
+})
+
 test_that("susieWeights returns zeros when fit lacks alpha/mu", {
     fake_fit <- list(pip = rep(0.01, 5))
     result <- susieWeights(susieFit = fake_fit)
@@ -2641,13 +2653,13 @@ test_that(".susie_rss_extract_weights returns correct-length vector", {
     n <- 500
     R <- diag(p)
     z <- rnorm(p)
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
     w <- pecotmr:::.susieRssExtractWeights(
-        fit = NULL,
+        fit = fit,
         z = z,
         R = R,
         n = n,
-        requiredFields = c("alpha", "mu", "X_column_scale_factors"),
-        userArgs = list(L = 5)
+        requiredFields = c("alpha", "mu", "X_column_scale_factors")
     )
     expect_equal(length(w), p)
     expect_true(all(is.finite(w)))
@@ -2661,7 +2673,8 @@ test_that("susieRssWeights follows (stat, LD) convention", {
     R <- diag(p)
     z <- rnorm(p)
     stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-    w <- susieRssWeights(stat, R, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
+    w <- susieRssWeights(stat, R, susieRssFit = fit)
     expect_equal(length(w), p)
     expect_true(all(is.finite(w)))
 })
@@ -2674,7 +2687,8 @@ test_that("susieRssWeights retains fit when retainFit = TRUE", {
     R <- diag(p)
     z <- rnorm(p)
     stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-    w <- susieRssWeights(stat, R, retainFit = TRUE, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
+    w <- susieRssWeights(stat, R, susieRssFit = fit, retainFit = TRUE)
     expect_false(is.null(attr(w, "fit")))
 })
 
@@ -2686,7 +2700,8 @@ test_that("susieInfRssWeights works", {
     R <- diag(p)
     z <- rnorm(p)
     stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-    w <- susieInfRssWeights(stat, R, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
+    w <- susieInfRssWeights(stat, R, susieInfRssFit = fit)
     expect_equal(length(w), p)
     expect_true(all(is.finite(w)))
 })
@@ -2712,40 +2727,37 @@ test_that("mvsusieWeights real fit returns p x K weights or errors on unstable s
 test_that("susieAshRssWeights returns weights of length p", {
     skip_if_not_installed("susieR")
     f <- .rrwStatLd()
-    w <- susieAshRssWeights(f$stat, f$LD, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(
+        z = f$stat$z,
+        R = f$LD,
+        n = median(f$stat$n),
+        L = 5
+    )
+    w <- susieAshRssWeights(f$stat, f$LD, susieAshRssFit = fit)
     expect_length(w, f$p)
     expect_true(all(is.finite(w)))
 })
 
-test_that("mvsusieRssWeights fits mvsusie_rss and returns p x K weights", {
+test_that("mvsusieRssWeights returns p x K weights from a supplied fit", {
     skip_if_not_installed("mvsusieR")
     m <- .rrwMulti(n = 80, p = 8, K = 2)
-    # LGreedy stays at its NULL default: mvsusieR's greedy-L loop errors on
-    # small data ("Values and their weights should have equal length"), which
-    # is why the greedy loop is off unless a caller asks for it.
-    w <- mvsusieRssWeights(m$stat, m$LD, L = 5)
+    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
+    local_mocked_bindings(
+        coef.mvsusie = function(...) fakeCoef,
+        .package = "mvsusieR"
+    )
+    w <- mvsusieRssWeights(m$stat, m$LD, mvsusieRssFit = "precomputed_fit")
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
 })
 
-test_that("mvsusieRssWeights forwards L / clamped LGreedy to mvsusie_rss", {
+test_that("mvsusieRssWeights refuses to fine-map when no fit is supplied", {
     skip_if_not_installed("mvsusieR")
     m <- .rrwMulti(n = 80, p = 8, K = 2)
-    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
-    captured <- list()
-    local_mocked_bindings(
-        create_mixture_prior = function(...) list(),
-        mvsusie_rss = function(...) {
-            captured <<- list(...)
-            "mock_fit"
-        },
-        coef.mvsusie = function(...) fakeCoef,
-        .package = "mvsusieR"
+    expect_error(
+        mvsusieRssWeights(m$stat, m$LD),
+        "`mvsusieRssFit` is required"
     )
-    w <- mvsusieRssWeights(m$stat, m$LD, L = 3, LGreedy = 7)
-    expect_equal(dim(w), c(m$p, m$K))
-    expect_equal(captured$L, 3)
-    expect_equal(captured$L_greedy, 3) # clamped to min(LGreedy, L)
 })
 
 test_that("mvsusieRssWeights errors on single-context stat$z", {
@@ -2762,60 +2774,20 @@ test_that("mvsusieWeights errors when mvsusieR package is not available", {
         "mvsusieR is installed; skipping missing-package test"
     )
 
-    expect_error(
-        mvsusieWeights(
-            mvsusieFit = NULL,
-            X = matrix(1, 10, 5),
-            Y = matrix(1, 10, 3)
-        ),
-        "mvsusieR"
-    )
+    expect_error(mvsusieWeights(mvsusieFit = NULL), "mvsusieR")
 })
 
-test_that("mvsusieWeights errors when X and Y are NULL and fit is NULL", {
+test_that("mvsusieWeights refuses to fine-map when no fit is supplied", {
     skip_if_not(
         requireNamespace("mvsusieR", quietly = TRUE),
         "mvsusieR not installed"
     )
+    # mvSuSiE fitting belongs to fineMappingPipeline(); this extractor must
+    # not silently refit when the caller forgets the fit.
     expect_error(
-        mvsusieWeights(mvsusieFit = NULL, X = NULL, Y = NULL),
-        "Both X and Y must be provided"
+        mvsusieWeights(mvsusieFit = NULL),
+        "`mvsusieFit` is required"
     )
-})
-
-test_that("mvsusieWeights fits model and returns coefficients when fit is NULL", {
-    skip_if_not(
-        requireNamespace("mvsusieR", quietly = TRUE),
-        "mvsusieR not installed"
-    )
-    set.seed(42)
-    n <- 30
-    p <- 5
-    R <- 3
-    X <- matrix(rnorm(n * p), n, p)
-    Y <- matrix(rnorm(n * R), n, R)
-    fake_coef <- matrix(rnorm((p + 1) * R), nrow = p + 1, ncol = R)
-    captured <- list()
-
-    local_mocked_bindings(
-        create_mixture_prior = function(...) list(),
-        mvsusie = function(...) {
-            captured <<- list(...)
-            "mock_fit"
-        },
-        coef.mvsusie = function(...) fake_coef,
-        .package = "mvsusieR"
-    )
-
-    result <- expect_message(
-        mvsusieWeights(X = X, Y = Y, L = 12, LGreedy = 4),
-        "mvsusieFit is not provided"
-    )
-    # Should return coef without intercept row
-    expect_equal(dim(result), c(p, R))
-    expect_equal(result, fake_coef[-1, ])
-    expect_equal(captured$L, 12)
-    expect_equal(captured$L_greedy, 4)
 })
 
 test_that("mvsusieWeights returns coefficients from provided fit", {
@@ -2837,8 +2809,13 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
     expect_equal(result, fake_coef[-1, ])
 })
 
-.fw_makeFsusieFit <- function(seed = 1, n = 150L, p = 24L, J = 16L,
-                              prior = "mixture_normal_per_scale") {
+.fw_makeFsusieFit <- function(
+    seed = 1,
+    n = 150L,
+    p = 24L,
+    J = 16L,
+    prior = "mixture_normal_per_scale"
+) {
     set.seed(seed)
     X <- matrix(
         rnorm(n * p),
@@ -3843,18 +3820,70 @@ test_that("susieInf is skipped as a result when it was only a chain input", {
     # from, but keepInf is FALSE so it must not surface as its own method.
     chainOnly <- pecotmr:::.fmResolveSusieChain("susie", TRUE)
     expect_false(chainOnly$keepInf)
-    expect_null(pecotmr:::.fmXFitOne("susieInf", list(), chainOnly, "INFFIT"))
-    expect_null(pecotmr:::.fmRssFitOne("susieInf", list(), chainOnly, "INFFIT"))
+    expect_null(pecotmr:::.fmXFitOne(
+        "susieInf",
+        chainOnly,
+        "INFFIT",
+        X = NULL,
+        y = NULL,
+        coverage = 0.95,
+        methodArgs = list(),
+        verbose = 0,
+        ctx = "c1",
+        tid = "t1"
+    ))
+    expect_null(pecotmr:::.fmRssFitOne(
+        "susieInf",
+        chainOnly,
+        "INFFIT",
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        coverage = 0.95,
+        methodArgs = list(),
+        rFinite = NULL,
+        rMismatch = NULL,
+        rssControl = NULL,
+        verbose = 0,
+        label = "lab",
+        serFallback = FALSE
+    ))
 })
 
 test_that("susieInf is returned as its own fit when it was requested", {
     asked <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
     expect_true(asked$keepInf)
     expect_equal(
-        pecotmr:::.fmXFitOne("susieInf", list(), asked, "INFFIT"),
+        pecotmr:::.fmXFitOne(
+            "susieInf",
+            asked,
+            "INFFIT",
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        ),
         "INFFIT"
     )
-    rss <- pecotmr:::.fmRssFitOne("susieInf", list(), asked, "INFFIT")
+    rss <- pecotmr:::.fmRssFitOne(
+        "susieInf",
+        asked,
+        "INFFIT",
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        coverage = 0.95,
+        methodArgs = list(),
+        rFinite = NULL,
+        rMismatch = NULL,
+        rssControl = NULL,
+        verbose = 0,
+        label = "lab",
+        serFallback = FALSE
+    )
     expect_equal(rss$fit, "INFFIT")
     expect_false(rss$isStd)
 })
@@ -3980,37 +4009,74 @@ test_that("no credible sets leaves the conditional lfsr untouched", {
 
 test_that(".fmXFitOne threads the shared susieInf fit into chained tokens", {
     local_mocked_bindings(
-        .fmFitSusieIndiv = function(X, y, tk, chainFromInf, coverage,
-                                    userArgs) {
+        .fmFitSusieIndiv = function(
+            X,
+            y,
+            tk,
+            chainFromInf,
+            coverage,
+            userArgs
+        ) {
             list(tk = tk, chained = !is.null(chainFromInf))
         },
         .package = "pecotmr"
     )
-    p <- list(
-        X = NULL, y = NULL, verbose = 0, coverage = 0.95,
-        methodArgs = list(), ctx = "c1", tid = "t1"
-    )
     chain <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
     expect_true(chain$chainSusie)
-    expect_true(pecotmr:::.fmXFitOne("susie", p, chain, list(S = TRUE))$chained)
+    expect_true(
+        pecotmr:::.fmXFitOne(
+            "susie",
+            chain,
+            list(S = TRUE),
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        )$chained
+    )
     # susieAsh is not in this chain, so it fits from scratch.
     expect_false(
-        pecotmr:::.fmXFitOne("susieAsh", p, chain, list(S = TRUE))$chained
+        pecotmr:::.fmXFitOne(
+            "susieAsh",
+            chain,
+            list(S = TRUE),
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        )$chained
     )
     chainAsh <- pecotmr:::.fmResolveSusieChain(c("susieAsh", "susieInf"), TRUE)
     expect_true(
-        pecotmr:::.fmXFitOne("susieAsh", p, chainAsh, list(S = TRUE))$chained
+        pecotmr:::.fmXFitOne(
+            "susieAsh",
+            chainAsh,
+            list(S = TRUE),
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        )$chained
     )
 })
 
 test_that(".fmFitXBlock skips a token that produced no fit", {
     local_mocked_bindings(
-        .fmXInfFit = function(p, chainLocal) NULL,
-        .fmXFitOne = function(tk, p, chainLocal, infFit) {
+        .fmXInfFit = function(chainLocal, ...) NULL,
+        .fmXFitOne = function(tk, chainLocal, infFit, ...) {
             if (tk == "susie") NULL else list(tk = tk)
         },
-        .fmXPostprocess = function(fit, tk, p) list(done = tk),
-        .fmXCrossValidate = function(out, p) out,
+        .fmXPostprocess = function(fit, tk, ...) list(done = tk),
+        .fmXCrossValidate = function(out, ...) out,
         .package = "pecotmr"
     )
     out <- pecotmr:::.fmFitXBlock(
@@ -4025,33 +4091,53 @@ test_that(".fmFitXBlock skips a token that produced no fit", {
 
 test_that(".fmRssFitStd threads the shared susieInf fit when chained", {
     local_mocked_bindings(
-        .fmFitSusieRss = function(z, R, n, tk, chainFromInf, coverage,
-                                  userArgs, rFinite, rMismatch, rssControl) {
+        .fmFitSusieRss = function(
+            z,
+            R,
+            n,
+            tk,
+            chainFromInf,
+            coverage,
+            userArgs,
+            rFinite,
+            rMismatch,
+            rssControl
+        ) {
             list(tk = tk, chained = !is.null(chainFromInf))
         },
         .package = "pecotmr"
     )
-    p <- list(
-        z = NULL, R = NULL, n = 100L, verbose = 0, coverage = 0.95,
-        methodArgs = list(), label = "lab", rFinite = NULL,
-        rMismatch = NULL, rssControl = NULL
-    )
     chain <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
-    out <- pecotmr:::.fmRssFitStd("susie", p, chain, list(S = TRUE))
+    out <- pecotmr:::.fmRssFitStd(
+        "susie",
+        chain,
+        list(S = TRUE),
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        coverage = 0.95,
+        methodArgs = list(),
+        rFinite = NULL,
+        rMismatch = NULL,
+        rssControl = NULL,
+        verbose = 0,
+        label = "lab",
+        serFallback = FALSE
+    )
     expect_true(out$fit$chained)
 })
 
 test_that(".fmFitRssBlock skips a token that produced no fit", {
     local_mocked_bindings(
-        .fmRssInfFit = function(p, chainLocal) NULL,
-        .fmRssFitOne = function(tk, p, chainLocal, infFit) {
+        .fmRssInfFit = function(chainLocal, ...) NULL,
+        .fmRssFitOne = function(tk, chainLocal, infFit, ...) {
             if (tk == "susie") {
                 NULL
             } else {
                 list(fit = list(tk = tk), isStd = FALSE)
             }
         },
-        .fmRssPostprocess = function(fit, p) list(done = fit$tk),
+        .fmRssPostprocess = function(fit, ...) list(done = fit$tk),
         .package = "pecotmr"
     )
     out <- pecotmr:::.fmFitRssBlock(
@@ -4088,30 +4174,39 @@ test_that(".ppAssembleRes records sample names from a matrix dataY", {
         nrow = 3L,
         dimnames = list(c("s1", "s2", "s3"), c("a", "b"))
     )
-    p <- list(
-        signalCutoff = 0, method = "susie", dataY = Y,
-        fit = list(), otherQuantities = NULL
-    )
     topLoci <- data.frame(
         variant_id = "chr1:1:A:G",
         pip = 0.9,
         stringsAsFactors = FALSE
     )
-    res <- pecotmr:::.ppAssembleRes(p, topLoci, NULL, NULL)
+    res <- pecotmr:::.ppAssembleRes(
+        topLoci,
+        NULL,
+        NULL,
+        fit = list(),
+        method = "susie",
+        dataY = Y,
+        otherQuantities = NULL,
+        signalCutoff = 0
+    )
     expect_equal(res$sampleNames, c("s1", "s2", "s3"))
     # A list dataY (multi-context) has no single sample vector to record.
     expect_null(pecotmr:::.sampleNamesFromDataY(list(Y)))
 })
 
-test_that(".btlParseVariants surfaces a parse failure as an error", {
+test_that(".btlParseVariants surfaces a parse failure as a chained error", {
     local_mocked_bindings(
         parseVariantId = function(...) stop("boom"),
         .package = "pecotmr"
     )
-    expect_error(
+    cnd <- expect_error(
         pecotmr:::.btlParseVariants("chr1:1:A:G"),
-        "buildTopLoci: parseVariantId failed: boom"
+        "buildTopLoci: parseVariantId failed"
     )
+    # try_fetch(parent = cnd) keeps the cause as a real condition rather than
+    # flattening it into the message, so the original is still reachable.
+    expect_s3_class(cnd$parent, "condition")
+    expect_match(conditionMessage(cnd$parent), "boom")
 })
 
 test_that(".btlParseVariants requires one parsed row per variant", {
@@ -4252,8 +4347,16 @@ test_that("fsusieWeights attaches the fit only when asked", {
 test_that("mvsusieRssWeights attaches the fit only when asked", {
     skip_if_not_installed("mvsusieR")
     m <- .rrwMulti(n = 80, p = 8, K = 2)
-    kept <- suppressMessages(
-        mvsusieRssWeights(m$stat, m$LD, L = 5, retainFit = TRUE)
+    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
+    local_mocked_bindings(
+        coef.mvsusie = function(...) fakeCoef,
+        .package = "mvsusieR"
+    )
+    kept <- mvsusieRssWeights(
+        m$stat,
+        m$LD,
+        mvsusieRssFit = "precomputed_fit",
+        retainFit = TRUE
     )
     expect_false(is.null(attr(kept, "fit")))
     expect_equal(dim(kept), c(m$p, m$K))
@@ -4312,4 +4415,67 @@ test_that("mergeSusieCs returns NULL when the combined table is empty", {
     )
     # Rows were extracted, but combining them produced nothing to merge.
     expect_null(mergeSusieCs(res, coverage = 0.95))
+})
+
+test_that("susie*Weights: retainFit / stat / methodArgs guards fire", {
+    # Each guard is the first statement, so the remaining arguments stay
+    # unforced and can be left as placeholders.
+    expect_error(susieWeights(retainFit = NA), "retainFit.*May not be NA")
+    expect_error(susieAshWeights(retainFit = 1L), "retainFit.*logical flag")
+    expect_error(susieInfWeights(retainFit = 1L), "retainFit.*logical flag")
+    expect_error(
+        susieRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        susieInfRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        susieAshRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+})
+
+test_that("mvsusie / fsusie wrappers: numeric guards fire", {
+    expect_error(
+        fitMvsusie(NULL, NULL, NULL, coverage = 2),
+        "coverage.*is not <= 1"
+    )
+    expect_error(
+        fitMvsusieRss(NULL, NULL, N = -1, NULL),
+        "N.*is not >= 0"
+    )
+    expect_error(
+        fitMvsusieRss(NULL, NULL, N = 100, NULL, coverage = -1),
+        "coverage.*is not >= 0"
+    )
+    expect_error(
+        fsusieGetCs(NULL, NULL, requestedCoverage = 2),
+        "requestedCoverage.*is not <= 1"
+    )
+})
+
+test_that("fitSusieInfThenSusieRss: argument guards fire", {
+    expect_error(
+        fitSusieInfThenSusieRss(z = "nope", R = NULL, n = 100),
+        "z.*Must be of type 'numeric'"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(z = 1, R = NULL, n = -1),
+        "n.*is not >= 0"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(z = 1, R = NULL, n = 1, args = 1L),
+        "args.*Must be of type 'list'"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(
+            z = 1,
+            R = NULL,
+            n = 1,
+            fittedModels = 1L
+        ),
+        "fittedModels.*Must be of type 'list'"
+    )
 })

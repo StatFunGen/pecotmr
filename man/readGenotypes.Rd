@@ -8,9 +8,9 @@
 \usage{
 readGenotypes(path, format = NULL, ...)
 
-\S4method{readGenotypes}{character}(path, format = NULL, ...)
+\S4method{readGenotypes}{character}(path, format = NULL, vcfArgs = list(), ...)
 
-\S4method{readGenotypes}{missing}(path, format = NULL, ...)
+\S4method{readGenotypes}{missing}(path, format = NULL, vcfArgs = list(), ...)
 }
 \arguments{
 \item{path}{Character, path to a single self-describing genotype file
@@ -23,6 +23,9 @@ inferred from file extension.}
 
 \item{...}{The keyword source arguments described above, plus any further
 arguments forwarded to the format-specific reader.}
+
+\item{vcfArgs}{Optional named list of arguments forwarded to
+\code{VariantAnnotation::readVcf} when the source is a VCF.}
 }
 \value{
 A \code{RangedSummarizedExperiment} of variants x samples.

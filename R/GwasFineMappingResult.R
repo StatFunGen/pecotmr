@@ -35,23 +35,23 @@ setClass(
 # ---- GwasFineMappingResult validity helpers --------------------------------
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
 .validateGwasFineMappingResult <- function(object) {
-    errors <- .gfmrCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .gfmrCheckEntries(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        .tupleColumnNames(object),
+        must.include = c("study", "method"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    errors <- c(errors, .gfmrCheckLdSketch(object))
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# @noRd
-.gfmrCheckRequiredCols <- function(object) {
-    required <- c("study", "method")
-    missingCols <- setdiff(required, .tupleColumnNames(object))
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.gfmrCheckEntries(object))
+    coll$getMessages()
 }
 
 # @noRd
@@ -67,22 +67,16 @@ setClass(
 .gfmrCheckEntryLength <- function(object) {
     # The variants and their topLoci ARE the elements now, so what is left to
     # check is that the fit payload columns are present and parallel.
-    missingCols <- setdiff(
-        c("susieFit", "cvResult"),
-        .tupleColumnNames(object)
+    res <- checkNames(
+        .tupleColumnNames(object),
+        must.include = c("susieFit", "cvResult"),
+        what = "colnames"
     )
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "missing entry payload columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    if (isTRUE(res)) {
+        return(NULL)
     }
-    NULL
+    str_c("missing entry payload columns: ", res)
 }
-
-# @noRd
-
-# @noRd
 
 # @noRd
 .gfmrCheckTupleUniqueness <- function(object) {
@@ -110,12 +104,6 @@ setClass(
 # @noRd
 .gfmrColOf <- function(cn, object) {
     .tupleColumn(object, cn)
-}
-
-# @noRd
-.gfmrCheckLdSketch <- function(object) {
-    # The slot's class union enforces the type; nothing to check.
-    NULL
 }
 
 

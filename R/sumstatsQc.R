@@ -69,7 +69,9 @@ NULL
 #' v2 <- data.frame(chrom = "1", pos = 2:4, alt = "A", ref = "G")
 #' mergeVariantInfo(v1, v2, all = TRUE)
 #' @export
+#' @importFrom checkmate assertFlag
 mergeVariantInfo <- function(variants1, variants2, all = TRUE) {
+    assertFlag(all)
     df1 <- .variantsToDf(variants1)
     df2 <- .variantsToDf(variants2)
 
@@ -177,20 +179,33 @@ resolveLdInput <- function(
 }
 
 # Run DENTIST on a single window, unpacking the shared tuning parameters.
-.dentistCallSingle <- function(zScore, ldMat, nSample, p) {
+.dentistCallSingle <- function(
+    zScore,
+    ldMat,
+    nSample,
+    pValueThreshold,
+    propSVD,
+    gcControl,
+    nIter,
+    gPvalueThreshold,
+    duprThreshold,
+    ncpus,
+    correctChenEtAlBug,
+    seed
+) {
     dentistSingleWindow(
         zScore,
         R = ldMat,
         nSample = nSample,
-        pValueThreshold = p$pValueThreshold,
-        propSVD = p$propSVD,
-        gcControl = p$gcControl,
-        nIter = p$nIter,
-        gPvalueThreshold = p$gPvalueThreshold,
-        duprThreshold = p$duprThreshold,
-        ncpus = p$ncpus,
-        correctChenEtAlBug = p$correctChenEtAlBug,
-        seed = p$seed
+        pValueThreshold = pValueThreshold,
+        propSVD = propSVD,
+        gcControl = gcControl,
+        nIter = nIter,
+        gPvalueThreshold = gPvalueThreshold,
+        duprThreshold = duprThreshold,
+        ncpus = ncpus,
+        correctChenEtAlBug = correctChenEtAlBug,
+        seed = seed
     )
 }
 
@@ -202,7 +217,15 @@ resolveLdInput <- function(
     windowMode,
     windowSize,
     minDim,
-    p
+    pValueThreshold,
+    propSVD,
+    gcControl,
+    nIter,
+    gPvalueThreshold,
+    duprThreshold,
+    ncpus,
+    correctChenEtAlBug,
+    seed
 ) {
     if (windowMode == "distance") {
         windowDividedRes <- segmentByDist(
@@ -225,7 +248,15 @@ resolveLdInput <- function(
             zScoreK,
             ldMatK,
             nSample,
-            p
+            pValueThreshold = pValueThreshold,
+            propSVD = propSVD,
+            gcControl = gcControl,
+            nIter = nIter,
+            gPvalueThreshold = gPvalueThreshold,
+            duprThreshold = duprThreshold,
+            ncpus = ncpus,
+            correctChenEtAlBug = correctChenEtAlBug,
+            seed = seed
         )
     }
     mergeWindows(dentistResultByWindow, windowDividedRes)
@@ -371,9 +402,21 @@ dentist <- function(
     nSample <- resolved$nSample
     sumStat <- .dentistResolveColumns(sumStat)
     windowMode <- arg_match(windowMode)
-    p <- as.list(environment())
     if (nrow(sumStat) < minDim) {
-        return(.dentistCallSingle(sumStat$z, ldMat, nSample, p))
+        return(.dentistCallSingle(
+            sumStat$z,
+            ldMat,
+            nSample,
+            pValueThreshold = pValueThreshold,
+            propSVD = propSVD,
+            gcControl = gcControl,
+            nIter = nIter,
+            gPvalueThreshold = gPvalueThreshold,
+            duprThreshold = duprThreshold,
+            ncpus = ncpus,
+            correctChenEtAlBug = correctChenEtAlBug,
+            seed = seed
+        ))
     }
     .dentistWindows(
         sumStat,
@@ -382,7 +425,15 @@ dentist <- function(
         windowMode,
         windowSize,
         minDim,
-        p
+        pValueThreshold = pValueThreshold,
+        propSVD = propSVD,
+        gcControl = gcControl,
+        nIter = nIter,
+        gPvalueThreshold = gPvalueThreshold,
+        duprThreshold = duprThreshold,
+        ncpus = ncpus,
+        correctChenEtAlBug = correctChenEtAlBug,
+        seed = seed
     )
 }
 
@@ -1239,6 +1290,7 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
 }
 
 # Lead-variant LD column. From X, compute just that column (avoid full p x p).
+#' @importFrom checkmate assertMatrix
 .slalomLeadR <- function(zScore, R, X, leadIdx) {
     if (!is.null(X)) {
         if (!is.matrix(X)) {
@@ -1246,9 +1298,7 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
         }
         return(as.numeric(cor(X, X[, leadIdx])))
     }
-    if (!is.matrix(R) || nrow(R) != ncol(R) || nrow(R) != length(zScore)) {
-        abort("R must be a square matrix matching the length of zScore.")
-    }
+    assertMatrix(R, nrows = length(zScore), ncols = length(zScore))
     R[, leadIdx]
 }
 
@@ -1434,8 +1484,10 @@ slalom <- function(
 #' df <- data.frame(cs_name = c("L1", "L2"), top_z = c(5, 3.5),
 #'   p_value = c(1e-10, 1e-6))
 #' autoDecision(df, highCorrCols = character(0))
+#' @importFrom checkmate assertCharacter
 #' @export
 autoDecision <- function(df, highCorrCols) {
+    assertCharacter(highCorrCols, any.missing = FALSE)
     # Identify top_cs
     topCsIndex <- which.max(abs(df$top_z))
     df$top_cs <- FALSE
@@ -2127,6 +2179,7 @@ raiss <- function(
     .raissLdBlocksPath(refPanel, knownZscores, ldMatrix, p)
 }
 
+#' @importFrom checkmate assertNumeric
 #' @param zt Vector of known z scores.
 #' @param sigT Matrix of known linkage disequilibrium (LD) correlation.
 #' @param sigIT Correlation matrix with rows corresponding to unknown SNPs (to
@@ -2150,9 +2203,9 @@ raissModel <- function(
     reportConditionNumber = FALSE
 ) {
     sigTInv <- invertMatRecursive(sigT, lamb, rcond)
-    if (!is.numeric(zt) || !is.numeric(sigT) || !is.numeric(sigIT)) {
-        abort("zt, sigT, and sigIT must be numeric.")
-    }
+    assertNumeric(zt)
+    assertNumeric(sigT)
+    assertNumeric(sigIT)
     if (batch) {
         conditionNumber <- if (reportConditionNumber) {
             rep(kappa(sigT, exact = TRUE, norm = "2"), nrow(sigIT))
@@ -2364,8 +2417,9 @@ varInBoundaries <- function(var, lamb) {
     return(var)
 }
 
+#' @importFrom rlang try_fetch
 invertMat <- function(mat, lamb, rcond) {
-    tryCatch(
+    try_fetch(
         {
             # Modify the diagonal elements of mat
             diag(mat) <- 1 + lamb
@@ -2373,7 +2427,7 @@ invertMat <- function(mat, lamb, rcond) {
             matInv <- ginv(mat, tol = rcond)
             return(matInv)
         },
-        error = function(e) {
+        error = function(cnd) {
             # Second attempt with updated lamb and rcond in case of an error
             diag(mat) <- 1 + lamb * 1.1
             matInv <- ginv(mat, tol = rcond * 1.1)
@@ -2383,7 +2437,7 @@ invertMat <- function(mat, lamb, rcond) {
 }
 
 invertMatRecursive <- function(mat, lamb, rcond) {
-    tryCatch(
+    try_fetch(
         {
             # Modify the diagonal elements of mat
             diag(mat) <- 1 + lamb
@@ -2391,7 +2445,7 @@ invertMatRecursive <- function(mat, lamb, rcond) {
             matInv <- ginv(mat, tol = rcond)
             return(matInv)
         },
-        error = function(e) {
+        error = function(cnd) {
             # Recursive call with updated lamb and rcond in case of an error
             invertMat(mat, lamb * 1.1, rcond * 1.1)
         }
@@ -2440,9 +2494,8 @@ invertMatEigen <- function(mat, tol = 1e-3) {
 #'   \code{X} is provided. One of \code{"sample"} (default),
 #'   \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is provided
 #'   directly.
-#' @param ... Additional arguments passed to the underlying QC method
-#'   (\code{\link{dentistSingleWindow}} or \code{\link{slalom}}).
-#'
+#' @param methodArgs Optional named list of options passed to the
+#'   underlying QC method (\code{slalom} or \code{dentistSingleWindow}).
 #' @return A data frame with at least a logical \code{outlier} column indicating
 #'   which variants are identified as outliers. The remaining columns depend on
 #'   the method used.
@@ -2462,21 +2515,27 @@ ldMismatchQc <- function(
     nSample = NULL,
     method = c("slalom", "dentist"),
     ldMethod = "sample",
-    ...
+    methodArgs = list()
 ) {
     method <- arg_match(method)
     if (method == "dentist") {
-        qcResults <- dentistSingleWindow(
-            zScore,
-            R = R,
-            X = X,
-            nSample = nSample,
-            ldMethod = ldMethod,
-            ...
+        callArgs <- list_modify(
+            list(
+                zScore,
+                R = R,
+                X = X,
+                nSample = nSample,
+                ldMethod = ldMethod
+            ),
+            !!!methodArgs
         )
-        return(qcResults)
+        return(exec(dentistSingleWindow, !!!callArgs))
     } else {
-        qcResults <- slalom(zScore, R = R, X = X, ldMethod = ldMethod, ...)
+        callArgs <- list_modify(
+            list(zScore, R = R, X = X, ldMethod = ldMethod),
+            !!!methodArgs
+        )
+        qcResults <- exec(slalom, !!!callArgs)
         # Standardize output: slalom uses "outliers", rename to "outlier" for
         # consistency
         result <- qcResults$data
@@ -2577,6 +2636,7 @@ effectiveN <- function(nCase, nControl) {
 #' krigingOutlierQc(
 #'   zScore = rnorm(20), R = R, n = 415, variantIds = colnames(X))
 #' @export
+#' @importFrom checkmate assertMatrix
 krigingOutlierQc <- function(
     zScore,
     R,
@@ -2587,9 +2647,7 @@ krigingOutlierQc <- function(
 ) {
     zScore <- as.numeric(zScore)
     m <- length(zScore)
-    if (is.null(R) || !is.matrix(R) || nrow(R) != m || ncol(R) != m) {
-        abort("krigingOutlierQc requires a square LD matrix aligned to zScore.")
-    }
+    assertMatrix(R, nrows = m, ncols = m, .var.name = "R (LD matrix)")
     if (missing(n) || length(n) != 1L || is.na(n) || !is.finite(n) || n <= 0) {
         abort("krigingOutlierQc requires a single positive sample size 'n'.")
     }
@@ -3282,6 +3340,7 @@ krigingOutlierQc <- function(
 }
 
 # Per-row sanity checks: sequence the guarded checks, accumulating the audit.
+#' @importFrom purrr list_modify
 .applySanityChecks <- function(
     df,
     coerceNumeric = TRUE,
@@ -3300,25 +3359,25 @@ krigingOutlierQc <- function(
     }
     r <- .scCoerceNumeric(df, coerceNumeric)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     r <- .scNormalizeChr(df, normalizeChr, dropNonstandardChr)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     r <- .scDropMissData(df, dropMissData)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     r <- .scDropPOutOfRange(df, dropPOutOfRange)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     r <- .scClampSmallP(df, clampSmallP, smallPFloor)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     r <- .scDropZeroEffect(df, dropZeroEffect)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     r <- .scDropNonpositiveSe(df, dropNonpositiveSe)
     df <- r$df
-    audit <- modifyList(audit, r$audit)
+    audit <- list_modify(audit, !!!r$audit)
     list(df = df, audit = audit)
 }
 
@@ -4375,20 +4434,20 @@ krigingOutlierQc <- function(
     lbl <- init$lbl
     san <- .qcStepSanity(df, opts, lbl)
     df <- san$df
-    entryAudit <- modifyList(entryAudit, san$audit)
+    entryAudit <- list_modify(entryAudit, !!!san$audit)
     eff <- .qcStepEffectiveN(df, opts, lbl)
     df <- eff$df
     entryAudit$nSource <- eff$nSource
     opts <- eff$opts
     cf <- .qcStepContentFilters(df, opts, lbl)
     df <- cf$df
-    entryAudit <- modifyList(entryAudit, cf$audit)
+    entryAudit <- list_modify(entryAudit, !!!cf$audit)
     der <- .qcStepDerive(df, opts, entryAudit)
     df <- der$df
     entryAudit <- der$entryAudit
     ks <- .qcStepKeepSkip(df, opts)
     df <- ks$df
-    entryAudit <- modifyList(entryAudit, ks$audit)
+    entryAudit <- list_modify(entryAudit, !!!ks$audit)
     list(
         df = df,
         entryAudit = entryAudit,
@@ -4417,22 +4476,22 @@ krigingOutlierQc <- function(
     }
     harm <- .qcHarmonizeEntry(df, ldSketch, opts, lbl)
     df <- harm$df
-    entryAudit <- modifyList(entryAudit, harm$audit)
-    qcCount <- modifyList(qcCount, harm$counts)
+    entryAudit <- list_modify(entryAudit, !!!harm$audit)
+    qcCount <- list_modify(qcCount, !!!harm$counts)
     scr <- .qcStepScreen(df, opts)
     df <- scr$df
-    entryAudit <- modifyList(entryAudit, scr$audit)
+    entryAudit <- list_modify(entryAudit, !!!scr$audit)
     kr <- .qcKrigingFlip(df, ldSketch, opts, lbl)
     df <- kr$df
-    entryAudit <- modifyList(entryAudit, kr$audit)
+    entryAudit <- list_modify(entryAudit, !!!kr$audit)
     qcCount$krigingFlipped <- kr$count
     mm <- .qcMismatchQc(df, ldSketch, opts, lbl)
     df <- mm$df
-    entryAudit <- modifyList(entryAudit, mm$audit)
+    entryAudit <- list_modify(entryAudit, !!!mm$audit)
     qcCount$mismatchRemoved <- mm$count
     imp <- .qcRaissImputeStep(df, ldSketch, opts, lbl, qcCount)
     df <- imp$df
-    entryAudit <- modifyList(entryAudit, imp$audit)
+    entryAudit <- list_modify(entryAudit, !!!imp$audit)
     qcCount <- imp$qcCount
     .qcEmitRollup(entryAudit, qcCount, opts, pre$nStudyIn, nrow(df), lbl)
     entryAudit$variantsOut <- nrow(df)
@@ -4457,8 +4516,8 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch)) {
         return(NULL)
     }
-    chrom <- unlist(map(entries, .entryChrom), use.names = FALSE)
-    pos <- unlist(map(entries, .entryPos), use.names = FALSE)
+    chrom <- unname(list_c(map(entries, .entryChrom)))
+    pos <- unname(list_c(map(entries, .entryPos)))
     ok <- !is.na(chrom) & !is.na(pos)
     chrom <- chrom[ok]
     pos <- pos[ok]
@@ -4508,7 +4567,7 @@ krigingOutlierQc <- function(
     if (nRanges == 0L) {
         return(.emptySketch(ldSketch))
     }
-    ids <- unlist(map(entries, .entrySnpIds), use.names = FALSE)
+    ids <- unname(list_c(map(entries, .entrySnpIds)))
     if (length(ids) == 0L) {
         return(ldSketch)
     }
@@ -4533,13 +4592,9 @@ krigingOutlierQc <- function(
 # --- summaryStatsQc orchestration helpers ----------------------------------
 
 # Validate input class + per-entry MAF/INFO column availability.
+#' @importFrom checkmate assertMultiClass
 .ssqcCheckEntries <- function(sumstats, mafCutoff, infoCutoff) {
-    if (
-        !methods::is(sumstats, "QtlSumStats") &&
-            !methods::is(sumstats, "GwasSumStats")
-    ) {
-        abort("summaryStatsQc requires a QtlSumStats or GwasSumStats input.")
-    }
+    assertMultiClass(sumstats, c("QtlSumStats", "GwasSumStats"))
     for (i in seq_len(nrow(sumstats))) {
         cols <- colnames(S4Vectors::mcols(.collectionEntry(sumstats, i)))
         # mafCutoff no longer pre-aborts on a missing frequency: .cfMaf
@@ -4582,39 +4637,69 @@ krigingOutlierQc <- function(
 }
 
 # Build the per-entry QC options list from the captured call parameters.
-.ssqcBuildOpts <- function(p) {
-    optNames <- c(
-        "removeIndels",
-        "removeStrandAmbiguous",
-        "mafCutoff",
-        "macCutoff",
-        "imissCutoff",
-        "infoCutoff",
-        "nCutoff",
-        "skipRegion",
-        "zMismatchQc",
-        "alleleFlipKriging",
-        "effectiveN",
-        "impute",
-        "imputeOpts",
-        "matchMinProp",
-        "coerceNumeric",
-        "normalizeChr",
-        "dropNonstandardChr",
-        "dropMissData",
-        "dropPOutOfRange",
-        "clampSmallP",
-        "smallPFloor",
-        "dropZeroEffect",
-        "dropNonpositiveSe"
+.ssqcBuildOpts <- function(
+    removeIndels,
+    removeStrandAmbiguous,
+    mafCutoff,
+    macCutoff,
+    imissCutoff,
+    infoCutoff,
+    nCutoff,
+    skipRegion,
+    zMismatchQc,
+    alleleFlipKriging,
+    effectiveN,
+    impute,
+    imputeOpts,
+    matchMinProp,
+    coerceNumeric,
+    normalizeChr,
+    dropNonstandardChr,
+    dropMissData,
+    dropPOutOfRange,
+    clampSmallP,
+    smallPFloor,
+    dropZeroEffect,
+    dropNonpositiveSe,
+    keepVariants,
+    pipCutoffToSkip,
+    absZCutoffToSkip,
+    bfCutoffToSkip,
+    logBfCutoffToSkip
+) {
+    # Built explicitly rather than by subsetting a captured environment with a
+    # character vector: a renamed argument is now an error, not a NULL entry.
+    opts <- list(
+        removeIndels = removeIndels,
+        removeStrandAmbiguous = removeStrandAmbiguous,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff,
+        infoCutoff = infoCutoff,
+        nCutoff = nCutoff,
+        skipRegion = skipRegion,
+        zMismatchQc = zMismatchQc,
+        alleleFlipKriging = alleleFlipKriging,
+        effectiveN = effectiveN,
+        impute = impute,
+        imputeOpts = imputeOpts,
+        matchMinProp = matchMinProp,
+        coerceNumeric = coerceNumeric,
+        normalizeChr = normalizeChr,
+        dropNonstandardChr = dropNonstandardChr,
+        dropMissData = dropMissData,
+        dropPOutOfRange = dropPOutOfRange,
+        clampSmallP = clampSmallP,
+        smallPFloor = smallPFloor,
+        dropZeroEffect = dropZeroEffect,
+        dropNonpositiveSe = dropNonpositiveSe
     )
-    opts <- p[optNames]
-    opts$keepVariants <- as.character(p$keepVariants)
+    opts$keepVariants <- as.character(keepVariants)
     opts$screen <- .resolveScreenMetric(
-        p$pipCutoffToSkip,
-        p$absZCutoffToSkip,
-        p$bfCutoffToSkip,
-        p$logBfCutoffToSkip
+        pipCutoffToSkip,
+        absZCutoffToSkip,
+        bfCutoffToSkip,
+        logBfCutoffToSkip
     )
     opts$nCase <- NULL
     opts$nControl <- NULL
@@ -4704,7 +4789,7 @@ krigingOutlierQc <- function(
     # and from the summary statistics alike.
     ldSketch <- .ssqcPrunePanel(
         getLdSketch(sumstats),
-        .panelCutoffs(opts),
+        .panelCutoffs(opts$mafCutoff, opts$macCutoff, opts$imissCutoff),
         "summaryStatsQc"
     )
     refGenome <- getGenome(sumstats)
@@ -4728,36 +4813,61 @@ krigingOutlierQc <- function(
 }
 
 # Assemble the qcInfo record (echoed options + per-entry audits).
-.ssqcBuildQcInfo <- function(p, entryAudits) {
-    optNames <- c(
-        "removeIndels",
-        "removeStrandAmbiguous",
-        "mafCutoff",
-        "macCutoff",
-        "imissCutoff",
-        "infoCutoff",
-        "nCutoff",
-        "pipCutoffToSkip",
-        "absZCutoffToSkip",
-        "bfCutoffToSkip",
-        "logBfCutoffToSkip",
-        "zMismatchQc",
-        "alleleFlipKriging",
-        "effectiveN",
-        "impute",
-        "coerceNumeric",
-        "normalizeChr",
-        "dropNonstandardChr",
-        "dropMissData",
-        "dropPOutOfRange",
-        "clampSmallP",
-        "smallPFloor",
-        "dropZeroEffect",
-        "dropNonpositiveSe"
-    )
+.ssqcBuildQcInfo <- function(
+    entryAudits,
+    removeIndels,
+    removeStrandAmbiguous,
+    mafCutoff,
+    macCutoff,
+    imissCutoff,
+    infoCutoff,
+    nCutoff,
+    pipCutoffToSkip,
+    absZCutoffToSkip,
+    bfCutoffToSkip,
+    logBfCutoffToSkip,
+    zMismatchQc,
+    alleleFlipKriging,
+    effectiveN,
+    impute,
+    coerceNumeric,
+    normalizeChr,
+    dropNonstandardChr,
+    dropMissData,
+    dropPOutOfRange,
+    clampSmallP,
+    smallPFloor,
+    dropZeroEffect,
+    dropNonpositiveSe
+) {
     list(
         timestamp = NA_character_,
-        options = p[optNames],
+        options = list(
+            removeIndels = removeIndels,
+            removeStrandAmbiguous = removeStrandAmbiguous,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff,
+            infoCutoff = infoCutoff,
+            nCutoff = nCutoff,
+            pipCutoffToSkip = pipCutoffToSkip,
+            absZCutoffToSkip = absZCutoffToSkip,
+            bfCutoffToSkip = bfCutoffToSkip,
+            logBfCutoffToSkip = logBfCutoffToSkip,
+            zMismatchQc = zMismatchQc,
+            alleleFlipKriging = alleleFlipKriging,
+            effectiveN = effectiveN,
+            impute = impute,
+            coerceNumeric = coerceNumeric,
+            normalizeChr = normalizeChr,
+            dropNonstandardChr = dropNonstandardChr,
+            dropMissData = dropMissData,
+            dropPOutOfRange = dropPOutOfRange,
+            clampSmallP = clampSmallP,
+            smallPFloor = smallPFloor,
+            dropZeroEffect = dropZeroEffect,
+            dropNonpositiveSe = dropNonpositiveSe
+        ),
         entryAudit = entryAudits
     )
 }
@@ -5002,10 +5112,64 @@ summaryStatsQc <- function(
     zMismatchQc <- arg_match(zMismatchQc)
     .ssqcCheckEntries(sumstats, mafCutoff, infoCutoff)
     .ssqcCheckPanelCutoffs(mafCutoff, macCutoff, imissCutoff)
-    p <- as.list(environment())
-    opts <- .ssqcBuildOpts(p)
+    opts <- .ssqcBuildOpts(
+        removeIndels = removeIndels,
+        removeStrandAmbiguous = removeStrandAmbiguous,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff,
+        infoCutoff = infoCutoff,
+        nCutoff = nCutoff,
+        skipRegion = skipRegion,
+        zMismatchQc = zMismatchQc,
+        alleleFlipKriging = alleleFlipKriging,
+        effectiveN = effectiveN,
+        impute = impute,
+        imputeOpts = imputeOpts,
+        matchMinProp = matchMinProp,
+        coerceNumeric = coerceNumeric,
+        normalizeChr = normalizeChr,
+        dropNonstandardChr = dropNonstandardChr,
+        dropMissData = dropMissData,
+        dropPOutOfRange = dropPOutOfRange,
+        clampSmallP = clampSmallP,
+        smallPFloor = smallPFloor,
+        dropZeroEffect = dropZeroEffect,
+        dropNonpositiveSe = dropNonpositiveSe,
+        keepVariants = keepVariants,
+        pipCutoffToSkip = pipCutoffToSkip,
+        absZCutoffToSkip = absZCutoffToSkip,
+        bfCutoffToSkip = bfCutoffToSkip,
+        logBfCutoffToSkip = logBfCutoffToSkip
+    )
     res <- .ssqcRunEntries(sumstats, opts)
-    qcInfo <- .ssqcBuildQcInfo(p, res$entryAudits)
+    qcInfo <- .ssqcBuildQcInfo(
+        res$entryAudits,
+        removeIndels = removeIndels,
+        removeStrandAmbiguous = removeStrandAmbiguous,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff,
+        infoCutoff = infoCutoff,
+        nCutoff = nCutoff,
+        pipCutoffToSkip = pipCutoffToSkip,
+        absZCutoffToSkip = absZCutoffToSkip,
+        bfCutoffToSkip = bfCutoffToSkip,
+        logBfCutoffToSkip = logBfCutoffToSkip,
+        zMismatchQc = zMismatchQc,
+        alleleFlipKriging = alleleFlipKriging,
+        effectiveN = effectiveN,
+        impute = impute,
+        coerceNumeric = coerceNumeric,
+        normalizeChr = normalizeChr,
+        dropNonstandardChr = dropNonstandardChr,
+        dropMissData = dropMissData,
+        dropPOutOfRange = dropPOutOfRange,
+        clampSmallP = clampSmallP,
+        smallPFloor = smallPFloor,
+        dropZeroEffect = dropZeroEffect,
+        dropNonpositiveSe = dropNonpositiveSe
+    )
     # From the PRUNED panel, not the input's: narrowing the original again
     # would hand back a sketch the panel filter never reached.
     newLdSketch <- .subsetSketchToIds(res$ldSketch, res$newEntries)

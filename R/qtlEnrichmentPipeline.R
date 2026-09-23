@@ -55,7 +55,9 @@
 #' @param seed Integer or \code{NULL}. Base random seed forwarded to
 #'   \code{\link{qtlEnrichment}} for reproducible multiple imputation.
 #'   \code{NULL} (default) draws a nondeterministic seed.
-#' @param ... Additional arguments forwarded to \code{\link{qtlEnrichment}}.
+#' @param verbose Logical. Print progress messages. Default \code{TRUE}.
+#' @param enrichmentArgs Optional named list of options forwarded to
+#'   \code{\link{qtlEnrichment}}.
 #' @return A tibble with one row per (outcome trait, annotation unit) pair.
 #'   The identity columns are \code{gwasStudy}, \code{gwasContext},
 #'   \code{gwasTrait}, \code{qtlStudy}, \code{qtlContext}; the axes a side does
@@ -93,39 +95,46 @@ qtlEnrichmentPipeline <- function(
     impN = 25,
     numThreads = 1L,
     seed = NULL,
-    ...
+    verbose = TRUE,
+    enrichmentArgs = list()
 ) {
     .enrValidateInputs(gwasFineMappingResult, qtlFineMappingResult)
-    p <- as.list(environment())
-    p$dots <- list(...)
-    p <- .enrPrepare(p)
+    prep <- .enrPrepare(gwasFineMappingResult, qtlFineMappingResult)
+    gwasTuples <- prep$gwasTuples
+    qtlTuples <- prep$qtlTuples
+    alignedByTuple <- prep$alignedByTuple
     results <- list_flatten(map(
-        seq_len(nrow(p$gwasTuples)),
+        seq_len(nrow(gwasTuples)),
         .enrScoreOutcomeTuple,
-        p = p
+        gwasPipByTuple = prep$gwasPipByTuple,
+        qtlRegionsByTuple = prep$qtlRegionsByTuple,
+        alignedByTuple = alignedByTuple,
+        numGwas = numGwas,
+        piQtl = piQtl,
+        lambda = lambda,
+        impN = impN,
+        numThreads = numThreads,
+        seed = seed,
+        verbose = verbose,
+        enrichmentArgs = enrichmentArgs,
+        gwasFineMappingResult = gwasFineMappingResult,
+        gwasTuples = gwasTuples,
+        qtlFineMappingResult = qtlFineMappingResult,
+        qtlTuples = qtlTuples
     ))
     .enrAssemble(results)
 }
 
 # Validate the input classes + LD-sketch presence / identity.
 # @noRd
+#' @importFrom checkmate assertMultiClass
 .enrValidateInputs <- function(gwasFineMappingResult, qtlFineMappingResult) {
-    if (!methods::is(gwasFineMappingResult, "FineMappingResultBase")) {
-        msg <- glue(
-            "`gwasFineMappingResult` must be a GwasFineMappingResult or a ",
-            "QtlFineMappingResult ",
-            "(got class '{class(gwasFineMappingResult)[[1L]]}')."
-        )
-        abort(msg)
-    }
-    if (!methods::is(qtlFineMappingResult, "FineMappingResultBase")) {
-        msg <- glue(
-            "`qtlFineMappingResult` must be a QtlFineMappingResult or a ",
-            "GwasFineMappingResult ",
-            "(got class '{class(qtlFineMappingResult)[[1L]]}')."
-        )
-        abort(msg)
-    }
+    # assertMultiClass rather than assertClass on the virtual parent: naming
+    # both concrete subclasses is more use to a caller than
+    # "FineMappingResultBase", and these two are its only subclasses.
+    fmrClasses <- c("GwasFineMappingResult", "QtlFineMappingResult")
+    assertMultiClass(gwasFineMappingResult, fmrClasses)
+    assertMultiClass(qtlFineMappingResult, fmrClasses)
     outcomeLd <- getLdSketch(gwasFineMappingResult)
     if (
         is.null(outcomeLd) &&
@@ -154,38 +163,41 @@ qtlEnrichmentPipeline <- function(
 # each tuple's one-time alignment to the union panel (errors captured as
 # values).
 # @noRd
-.enrPrepare <- function(p) {
-    p$gwasTuples <- .enrOutcomeTuples(p$gwasFineMappingResult)
-    p$qtlTuples <- .enrAnnotationTuples(p$qtlFineMappingResult)
-    if (nrow(p$gwasTuples) == 0L || nrow(p$qtlTuples) == 0L) {
+.enrPrepare <- function(gwasFineMappingResult, qtlFineMappingResult) {
+    gwasTuples <- .enrOutcomeTuples(gwasFineMappingResult)
+    qtlTuples <- .enrAnnotationTuples(qtlFineMappingResult)
+    if (nrow(gwasTuples) == 0L || nrow(qtlTuples) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no (outcome, annotation) pairs to ",
             "compute (one of the inputs has zero rows)."
         )
         abort(msg)
     }
-    p$gwasPipByTuple <- map(
-        seq_len(nrow(p$gwasTuples)),
+    gwasPipByTuple <- map(
+        seq_len(nrow(gwasTuples)),
         .enrGwasPipForRow,
-        gwasTuples = p$gwasTuples,
-        fmr = p$gwasFineMappingResult
+        gwasTuples = gwasTuples,
+        fmr = gwasFineMappingResult
     )
-    unionGwasNames <- unique(unlist(
-        map(p$gwasPipByTuple, names),
-        use.names = FALSE
-    ))
-    p$qtlRegionsByTuple <- map(
-        seq_len(nrow(p$qtlTuples)),
+    unionGwasNames <- unique(unname(list_c(map(gwasPipByTuple, names))))
+    qtlRegionsByTuple <- map(
+        seq_len(nrow(qtlTuples)),
         .enrQtlRegionsForRow,
-        qtlTuples = p$qtlTuples,
-        fmr = p$qtlFineMappingResult
+        qtlTuples = qtlTuples,
+        fmr = qtlFineMappingResult
     )
-    p$alignedByTuple <- map(
-        p$qtlRegionsByTuple,
+    alignedByTuple <- map(
+        qtlRegionsByTuple,
         .enrAlignRegionsSafe,
         unionGwasNames = unionGwasNames
     )
-    p
+    list(
+        gwasTuples = gwasTuples,
+        qtlTuples = qtlTuples,
+        gwasPipByTuple = gwasPipByTuple,
+        qtlRegionsByTuple = qtlRegionsByTuple,
+        alignedByTuple = alignedByTuple
+    )
 }
 
 # The outcome side's per-trait keys: one PIP vector is built per key. A GWAS
@@ -264,82 +276,167 @@ qtlEnrichmentPipeline <- function(
 # Align one tuple's regions to the union GWAS panel, capturing any error as a
 # value (re-raised + skipped per (gwas, tuple) below, never aborting).
 # @noRd
+#' @importFrom rlang try_fetch
 .enrAlignRegionsSafe <- function(regions, unionGwasNames) {
-    tryCatch(
+    try_fetch(
         .enrAlignRegions(regions, unionGwasNames),
-        error = function(e) e
+        error = function(cnd) cnd
     )
 }
 
 # Score one outcome trait against every annotation tuple -> enrichment records
 # (empty when the outcome has no usable PIPs).
 # @noRd
-.enrScoreOutcomeTuple <- function(gi, p) {
-    gwasPip <- p$gwasPipByTuple[[gi]]
+.enrScoreOutcomeTuple <- function(
+    gi,
+    gwasPipByTuple,
+    qtlRegionsByTuple,
+    alignedByTuple = alignedByTuple,
+    numGwas = numGwas,
+    piQtl = piQtl,
+    lambda = lambda,
+    impN = impN,
+    numThreads = numThreads,
+    seed = seed,
+    verbose = verbose,
+    enrichmentArgs = enrichmentArgs,
+    gwasFineMappingResult = gwasFineMappingResult,
+    gwasTuples = gwasTuples,
+    qtlFineMappingResult = qtlFineMappingResult,
+    qtlTuples = qtlTuples
+) {
+    gwasPip <- gwasPipByTuple[[gi]]
     if (length(gwasPip) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no usable PIPs for ",
-            "{.enrOutcomeLabel(p, gi)}; skipping."
+            "{.enrOutcomeLabel(gwasFineMappingResult, gwasTuples, gi)}; ",
+            "skipping."
         )
         warn(msg)
         return(list())
     }
     compact(map(
-        seq_len(nrow(p$qtlTuples)),
+        seq_len(nrow(qtlTuples)),
         .enrScoreTuple,
         gi = gi,
         gwasPip = gwasPip,
-        p = p
+        qtlRegionsByTuple = qtlRegionsByTuple,
+        alignedByTuple = alignedByTuple,
+        numGwas = numGwas,
+        piQtl = piQtl,
+        lambda = lambda,
+        impN = impN,
+        numThreads = numThreads,
+        seed = seed,
+        verbose = verbose,
+        enrichmentArgs = enrichmentArgs,
+        gwasFineMappingResult = gwasFineMappingResult,
+        gwasTuples = gwasTuples,
+        qtlFineMappingResult = qtlFineMappingResult,
+        qtlTuples = qtlTuples
     ))
 }
 
 # Score one (outcome trait, annotation tuple) pair -> an enrichment record, or
 # NULL when the tuple has no regions or qtlEnrichment fails.
 # @noRd
-.enrScoreTuple <- function(k, gi, gwasPip, p) {
-    if (length(p$qtlRegionsByTuple[[k]]) == 0L) {
+.enrScoreTuple <- function(
+    k,
+    gi,
+    gwasPip,
+    qtlRegionsByTuple,
+    alignedByTuple = alignedByTuple,
+    numGwas = numGwas,
+    piQtl = piQtl,
+    lambda = lambda,
+    impN = impN,
+    numThreads = numThreads,
+    seed = seed,
+    verbose = verbose,
+    enrichmentArgs = enrichmentArgs,
+    gwasFineMappingResult = gwasFineMappingResult,
+    gwasTuples = gwasTuples,
+    qtlFineMappingResult = qtlFineMappingResult,
+    qtlTuples = qtlTuples
+) {
+    if (length(qtlRegionsByTuple[[k]]) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no usable regions for ",
-            "{.enrAnnotationLabel(p, k)}; skipping."
+            "{.enrAnnotationLabel(qtlFineMappingResult, qtlTuples, k)}; ",
+            "skipping."
         )
         warn(msg)
         return(NULL)
     }
-    enr <- .enrRunEnrichment(gi, gwasPip, k, p)
+    enr <- .enrRunEnrichment(
+        gi,
+        gwasPip,
+        k,
+        alignedByTuple = alignedByTuple,
+        numGwas = numGwas,
+        piQtl = piQtl,
+        lambda = lambda,
+        impN = impN,
+        numThreads = numThreads,
+        seed = seed,
+        verbose = verbose,
+        enrichmentArgs = enrichmentArgs,
+        gwasFineMappingResult = gwasFineMappingResult,
+        gwasTuples = gwasTuples,
+        qtlFineMappingResult = qtlFineMappingResult,
+        qtlTuples = qtlTuples
+    )
     if (is.null(enr)) {
         return(NULL)
     }
     c(
         .enrFlattenEnrichment(enr),
-        as.list(p$gwasTuples[gi, , drop = FALSE]),
-        as.list(p$qtlTuples[k, , drop = FALSE])
+        as.list(gwasTuples[gi, , drop = FALSE]),
+        as.list(qtlTuples[k, , drop = FALSE])
     )
 }
 
 # Human-readable identities for the warnings above, naming each side by its own
 # flavour and only the axes it has.
 # @noRd
-.enrOutcomeLabel <- function(p, gi) {
+.enrOutcomeLabel <- function(gwasFineMappingResult, gwasTuples, gi) {
     .fmrTupleLabel(
-        .fmrSideName(p$gwasFineMappingResult),
-        .enrOutcomeIdent(p$gwasTuples, gi)
+        .fmrSideName(gwasFineMappingResult),
+        .enrOutcomeIdent(gwasTuples, gi)
     )
 }
 
 # @noRd
-.enrAnnotationLabel <- function(p, k) {
+.enrAnnotationLabel <- function(qtlFineMappingResult, qtlTuples, k) {
     .fmrTupleLabel(
-        .fmrSideName(p$qtlFineMappingResult),
-        .enrAnnotationIdent(p$qtlTuples, k)
+        .fmrSideName(qtlFineMappingResult),
+        .enrAnnotationIdent(qtlTuples, k)
     )
 }
 
 # Run qtlEnrichment for a pair (with the pre-aligned regions), warning + NULL on
 # failure. alignNames = FALSE reuses the shared per-tuple alignment.
 # @noRd
-.enrRunEnrichment <- function(gi, gwasPip, k, p) {
-    aligned <- p$alignedByTuple[[k]]
-    tryCatch(
+.enrRunEnrichment <- function(
+    gi,
+    gwasPip,
+    k,
+    alignedByTuple,
+    numGwas,
+    piQtl,
+    lambda,
+    impN,
+    numThreads,
+    seed,
+    verbose,
+    enrichmentArgs,
+    gwasFineMappingResult,
+    gwasTuples,
+    qtlFineMappingResult,
+    qtlTuples
+) {
+    aligned <- alignedByTuple[[k]]
+    try_fetch(
         {
             if (inherits(aligned, "condition")) {
                 cnd_signal(aligned)
@@ -348,24 +445,26 @@ qtlEnrichmentPipeline <- function(
                 list(
                     gwasPip = gwasPip,
                     susieQtlRegions = aligned,
-                    numGwas = p$numGwas,
-                    piQtl = p$piQtl,
-                    lambda = p$lambda,
-                    impN = p$impN,
-                    numThreads = p$numThreads,
-                    seed = p$seed,
+                    numGwas = numGwas,
+                    piQtl = piQtl,
+                    lambda = lambda,
+                    impN = impN,
+                    numThreads = numThreads,
+                    seed = seed,
+                    verbose = verbose,
                     alignNames = FALSE
                 ),
-                p$dots
+                enrichmentArgs
             )
             exec(qtlEnrichment, !!!enrichArgs)
         },
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
+            eMsg <- conditionMessage(cnd)
             msg <- glue(
                 "qtlEnrichmentPipeline: qtlEnrichment failed for ",
-                "{.enrOutcomeLabel(p, gi)} x ",
-                "{.enrAnnotationLabel(p, k)}: {eMsg}"
+                "{.enrOutcomeLabel(gwasFineMappingResult, gwasTuples, gi)} x ",
+                "{.enrAnnotationLabel(qtlFineMappingResult, qtlTuples, k)}: ",
+                "{eMsg}"
             )
             warn(msg)
             NULL
@@ -453,7 +552,7 @@ qtlEnrichmentPipeline <- function(
     if (length(pieces) == 0L) {
         return(numeric(0))
     }
-    all <- unlist(pieces)
+    all <- list_c(pieces)
     if (n_distinct(names(all)) < length(all)) {
         all <- .enrCollapseDuplicatePips(all)
     }
@@ -776,7 +875,7 @@ qtlEnrichment <- function(
         "variables inside of credible sets or signal clusters."
     )
     warn(msg)
-    allPips <- unlist(map(susieQtlRegions, "pip"))
+    allPips <- list_c(map(susieQtlRegions, "pip"))
     piQtl <- sum(allPips) / length(allPips)
     if (verbose) {
         piQtlR <- round(piQtl, 5)

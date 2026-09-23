@@ -11,7 +11,7 @@ ldMismatchQc(
   nSample = NULL,
   method = c("slalom", "dentist"),
   ldMethod = "sample",
-  ...
+  methodArgs = list()
 )
 }
 \arguments{
@@ -34,8 +34,8 @@ when \code{X} is provided.}
 \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is provided
 directly.}
 
-\item{...}{Additional arguments passed to the underlying QC method
-(\code{\link{dentistSingleWindow}} or \code{\link{slalom}}).}
+\item{methodArgs}{Optional named list of options passed to the
+underlying QC method (\code{slalom} or \code{dentistSingleWindow}).}
 }
 \value{
 A data frame with at least a logical \code{outlier} column indicating

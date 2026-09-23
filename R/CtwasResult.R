@@ -37,22 +37,23 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 # Collect all contract violations (empty vector = valid). Entry checks run only
 # once the required columns are present.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames
 .validateCtwasResult <- function(object) {
-    errors <- .ctwasResCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .ctwasResCheckEntries(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        names(object),
+        must.include = c("gwasStudy", "study", "context", "method", "entry"),
+        what = "colnames",
+        .var.name = "columns",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# @noRd
-.ctwasResCheckRequiredCols <- function(object) {
-    required <- c("gwasStudy", "study", "context", "method", "entry")
-    missingCols <- setdiff(required, names(object))
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.ctwasResCheckEntries(object))
+    coll$getMessages()
 }
 
 # @noRd
@@ -89,7 +90,7 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 
 # @noRd
 .ctwasResCheckJointCols <- function(object, jointCols) {
-    unlist(compact(map(jointCols, .ctwasResJointColError, object = object)))
+    list_c(compact(map(jointCols, .ctwasResJointColError, object = object)))
 }
 
 # @noRd

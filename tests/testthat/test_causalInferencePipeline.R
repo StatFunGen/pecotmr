@@ -141,7 +141,7 @@ context("causalInferencePipeline")
 test_that("causalInferencePipeline: rejects non-GwasSumStats input", {
     expect_error(
         causalInferencePipeline(gwasSumStats = "no"),
-        "must be a GwasSumStats"
+        "Must inherit from class 'GwasSumStats'"
     )
 })
 
@@ -168,7 +168,7 @@ test_that("causalInferencePipeline: rejects non-TwasWeights twasWeights arg", {
             gwasSumStats = .cip_makeGwasSumstats(),
             twasWeights = "not a TwasWeights"
         ),
-        "must be a TwasWeights"
+        "Must inherit from class 'TwasWeights'"
     )
 })
 
@@ -640,7 +640,7 @@ test_that("twasZ: non-matrix non-numeric weights errors out", {
 test_that("twasZ: length mismatch between weights and z errors", {
     expect_error(
         pecotmr:::twasZ(c(0.1, 0.2, 0.3), z = c(1, 2)),
-        "nrow\\(weights\\) must equal length\\(z\\)"
+        "weights.*Must have exactly 2 rows"
     )
 })
 
@@ -702,7 +702,7 @@ test_that("twasZ: R path positional alignment errors on dim mismatch", {
     R_short <- unname(d$R[1:(d$p - 1), 1:(d$p - 1)])
     expect_error(
         pecotmr:::twasZ(w, rnorm(d$p), R = R_short),
-        "positional alignment requires nrow\\(R\\) == nrow\\(weights\\)"
+        "R \\(positional alignment\\).*Must have exactly 8 rows"
     )
 })
 
@@ -749,7 +749,7 @@ test_that("twasZ: SVD path positional alignment errors on dim mismatch", {
     V_short <- s$v[1:(d$p - 1), , drop = FALSE]
     expect_error(
         pecotmr:::twasZ(w, rnorm(d$p), V = V_short, D = s$d, nSketch = d$n),
-        "positional alignment requires nrow\\(V\\) == nrow\\(weights\\)"
+        "V \\(positional alignment\\).*Must have exactly 8 rows"
     )
 })
 
@@ -794,7 +794,7 @@ test_that("twasZ: combineMethods K>=2 forwards to combinePValues with correlatio
 # ===========================================================================
 
 test_that("twasZ errors when weights and z lengths differ", {
-    expect_error(twasZ(c(1, 2), c(1, 2, 3)), "must equal")
+    expect_error(twasZ(c(1, 2), c(1, 2, 3)), "Must have exactly 3 rows")
 })
 
 
@@ -1157,7 +1157,7 @@ test_that("twasZ: error when weights and z have different lengths", {
             D = c(1, 1),
             nSketch = 10
         ),
-        "nrow\\(weights\\) must equal length\\(z\\)"
+        "weights.*Must have exactly 3 rows"
     )
 })
 
@@ -1763,20 +1763,27 @@ test_that(".cipCvSelection errors when no method clears the CV cutoffs", {
     local_mocked_bindings(
         .cipMethodMetrics = function(...) {
             data.frame(
-                qtlStudy = "s", context = "c", trait = "t",
-                method = "m", rsq = 0.01, stringsAsFactors = FALSE
+                qtlStudy = "s",
+                context = "c",
+                trait = "t",
+                method = "m",
+                rsq = 0.01,
+                stringsAsFactors = FALSE
             )
         },
         .cipFilterEligibleMethods = function(...) data.frame(),
         .package = "pecotmr"
     )
-    p <- list(
-        twasWeights = "notNull", rsqCutoff = 0.5, rsqPvalCutoff = 0.05,
-        qtlRows = data.frame(a = 1), rsqOption = NULL, rsqPvalOption = NULL
-    )
     # Naming the cutoffs in the message is what makes this actionable.
     expect_error(
-        pecotmr:::.cipCvSelection(p),
+        pecotmr:::.cipCvSelection(
+            qtlRows = data.frame(a = 1),
+            twasWeights = "notNull",
+            rsqCutoff = 0.5,
+            rsqOption = NULL,
+            rsqPvalCutoff = 0.05,
+            rsqPvalOption = NULL
+        ),
         "rsqCutoff = 0.5 / rsqPvalCutoff = 0.05"
     )
 })
@@ -1786,18 +1793,32 @@ test_that(".cipRun errors when no tuple produced a result", {
         .cipValidateInputs = function(...) invisible(NULL),
         .cipCheckLdSketches = function(...) NULL,
         .cipResolveWorkList = function(...) data.frame(x = 1),
-        .cipCvSelection = function(p) {
+        .cipCvSelection = function(...) {
             list(
                 qtlRows = data.frame(x = 1),
                 rsqLookup = NULL,
                 selectionActive = FALSE
             )
         },
-        .cipScoreQtlTuple = function(qi, p) list(),
+        .cipScoreQtlTuple = function(qi, ...) list(),
         .package = "pecotmr"
     )
     expect_error(
-        pecotmr:::.cipRun(list()),
+        pecotmr:::.cipRun(
+            gwasSumStats = NULL,
+            twasWeights = NULL,
+            fineMappingResult = NULL,
+            combineMethods = NULL,
+            rsqCutoff = NULL,
+            rsqOption = NULL,
+            rsqPvalCutoff = NULL,
+            rsqPvalOption = NULL,
+            alleleFlip = FALSE,
+            mrMethod = "csAware",
+            mrPipCutoff = 0,
+            mrCpipCutoff = 0,
+            mrPvalCutoff = 1
+        ),
         "no \\(qtl, gwas\\) tuples produced a result"
     )
 })
@@ -1809,8 +1830,12 @@ test_that(".cipScoreQtlTuple skips a tuple with no weights", {
     )
     p <- list(
         qtlRows = data.frame(
-            qtlStudy = "s", context = "c", trait = "t", method = "m",
-            useFmrForWeights = FALSE, stringsAsFactors = FALSE
+            qtlStudy = "s",
+            context = "c",
+            trait = "t",
+            method = "m",
+            useFmrForWeights = FALSE,
+            stringsAsFactors = FALSE
         ),
         twasWeights = NULL,
         fineMappingResult = NULL
@@ -1826,10 +1851,20 @@ test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
         .cipPairLabel = function(...) "lab",
         .package = "pecotmr"
     )
-    p <- list(gwasSumStats = list(study = "G1"), gwasLd = NULL,
-        alleleFlip = FALSE)
     expect_null(
-        pecotmr:::.cipScoreGwasPair(1L, NULL, list(), NULL, p)
+        pecotmr:::.cipScoreGwasPair(
+            1L,
+            NULL,
+            list(),
+            NULL,
+            gwasSumStats = list(study = "G1"),
+            gwasLd = NULL,
+            alleleFlip = FALSE,
+            mrMethod = "csAware",
+            mrPipCutoff = 0,
+            mrCpipCutoff = 0,
+            mrPvalCutoff = 1
+        )
     )
 })
 
@@ -1838,15 +1873,15 @@ test_that(".cipRunMr routes to the CS-aware estimator when asked", {
         .cipComputeMrCsAware = function(...) list(SENTINEL = TRUE),
         .package = "pecotmr"
     )
-    p <- list(
-        mrPvalCutoff = 1, mrMethod = "csAware",
-        mrCpipCutoff = 0.5, alleleFlip = FALSE
-    )
     out <- pecotmr:::.cipRunMr(
         fmrEntry = "notNull",
         gdf = NULL,
         twasOut = list(pval = 0.001),
-        p = p
+        alleleFlip = FALSE,
+        mrMethod = "csAware",
+        mrPipCutoff = 0,
+        mrCpipCutoff = 0.5,
+        mrPvalCutoff = 1
     )
     expect_true(isTRUE(out$SENTINEL))
 })
@@ -1868,5 +1903,16 @@ test_that(".cipCvMetric returns NA when the CV result cannot be read", {
     )
     expect_true(
         is.na(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "rsq"))
+    )
+})
+
+test_that("twasZ: nSketch / combineMethods guards fire", {
+    expect_error(
+        twasZ(matrix(1, 1, 1), 1, nSketch = 0),
+        "nSketch.*Must be >= 1"
+    )
+    expect_error(
+        twasZ(matrix(1, 1, 1), 1, combineMethods = 1L),
+        "combineMethods.*Must be of type 'character'"
     )
 })

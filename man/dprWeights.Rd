@@ -7,13 +7,13 @@
 \alias{dprAdaptiveGibbsWeights}
 \title{Compute Weights Using Dirichlet Process Regression (RcppDPR)}
 \usage{
-dprWeights(X, y, fittingMethod = "VB", retainFit = FALSE, ...)
+dprWeights(X, y, fittingMethod = "VB", retainFit = FALSE, methodArgs = list())
 
-dprVbWeights(X, y, nK = 8, retainFit = FALSE, ...)
+dprVbWeights(X, y, nK = 8, retainFit = FALSE, methodArgs = list())
 
-dprGibbsWeights(X, y, sStep = 5000, retainFit = FALSE, ...)
+dprGibbsWeights(X, y, sStep = 5000, retainFit = FALSE, methodArgs = list())
 
-dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, ...)
+dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, methodArgs = list())
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -26,7 +26,8 @@ dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, ...)
 \item{retainFit}{Logical. Attach the full fitted-model object to the result.
 Default \code{FALSE}.}
 
-\item{...}{Additional arguments passed through to `RcppDPR::fit_model`.}
+\item{methodArgs}{Optional named list of options passed through to
+`RcppDPR::fit_model`.}
 
 \item{nK}{Integer. Number of variational mixture components for the VB fit
 (\code{dprVbWeights}). Default \code{8}.}

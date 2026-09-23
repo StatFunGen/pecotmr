@@ -4,7 +4,7 @@
 \alias{prsCsWeights}
 \title{Extract weights from prsCs function}
 \usage{
-prsCsWeights(stat, LD, ...)
+prsCsWeights(stat, LD, methodArgs = list())
 }
 \arguments{
 \item{stat}{A list of summary statistics with elements \code{b} (effect
@@ -13,7 +13,7 @@ sizes) and \code{n} (per-variant sample sizes).}
 \item{LD}{Numeric LD (correlation) matrix aligned to the variants in
 \code{stat}.}
 
-\item{...}{Additional arguments forwarded to \code{prsCs}.}
+\item{methodArgs}{Optional named list of options forwarded to \code{prsCs}.}
 }
 \value{
 A numeric vector of the posterior SNP coefficients.

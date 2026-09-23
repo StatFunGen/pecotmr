@@ -842,10 +842,12 @@ isGenotypeSource <- function(path) {
 #' @importFrom vroom vroom
 #' @noRd
 # Read + validate the first row of an LD metadata TSV (>=4 columns).
+#' @importFrom checkmate checkFileExists
 .resolveLdReadMeta <- function(path) {
-    if (!file.exists(path)) {
+    res <- checkFileExists(path, access = "r")
+    if (!isTRUE(res)) {
         msg <- glue(
-            "LD metadata file not found: {path}",
+            "LD metadata file: {res}",
             "\n  Expected: a TSV file with columns chrom, start, end, path.",
             .trim = FALSE
         )
@@ -1432,8 +1434,9 @@ loadLdFromGenotype <- function(
 # not carry them. A malformed sidecar must not take the whole filter down, so
 # it degrades to "no frequencies here" and the caller falls back to dosage.
 # @noRd
+#' @importFrom rlang try_fetch
 .panelAfreqTable <- function(prefix) {
-    af <- tryCatch(readAfreq(prefix), error = function(e) NULL)
+    af <- try_fetch(readAfreq(prefix), error = function(cnd) NULL)
     if (is.null(af) || !all(is_in(c("id", "alt_freq"), colnames(af)))) {
         return(NULL)
     }
@@ -1572,10 +1575,10 @@ loadLdFromGenotype <- function(
 # The panel-filter cutoffs a pipeline call carries, or NULL when none is set
 # (so the filter short-circuits without touching the panel).
 # @noRd
-.panelCutoffs <- function(p) {
-    maf <- p$mafCutoff %||% 0
-    mac <- p$macCutoff %||% 0
-    imiss <- p$imissCutoff %||% 1
+.panelCutoffs <- function(mafCutoff = 0, macCutoff = 0, imissCutoff = 1) {
+    maf <- mafCutoff %||% 0
+    mac <- macCutoff %||% 0
+    imiss <- imissCutoff %||% 1
     if (maf <= 0 && mac <= 0 && imiss >= 1) {
         return(NULL)
     }
@@ -2017,11 +2020,14 @@ loadLdFromBlocks <- function(
 #'   variantIds = c("chr22:16050000:A:G", "chr22:17000000:C:T"),
 #'   ldReferenceMetaFile = meta)
 #' @export
+#' @importFrom checkmate assertCharacter assertFlag
 filterVariantsByLdReference <- function(
     variantIds,
     ldReferenceMetaFile,
     keepIndel = TRUE
 ) {
+    assertCharacter(variantIds, any.missing = FALSE)
+    assertFlag(keepIndel)
     variantsDf <- parseVariantId(variantIds)
 
     # Derive region to scope the reference lookup
@@ -2131,15 +2137,14 @@ filterVariantsByLdReference <- function(
     blockMetadata
 }
 
+#' @importFrom checkmate assertClass
 partitionLdMatrix <- function(
     ldData,
     mergeSmallBlocks = TRUE,
     minMergedBlockSize = 500,
     maxMergedBlockSize = 10000
 ) {
-    if (!is(ldData, "LdData")) {
-        abort("ldData must be an LdData object")
-    }
+    assertClass(ldData, "LdData")
     combinedMatrix <- getCorrelation(ldData)
     blockMetadata <- getBlockMetadata(ldData)
     if (is(blockMetadata, "GRanges")) {
@@ -2604,7 +2609,7 @@ ldPruneByCorrelation <- function(
         ld.threshold = corThres,
         verbose = verbose
     )
-    keepIds <- sort(unlist(keepList, use.names = FALSE))
+    keepIds <- sort(unname(list_c(keepList)))
     X.new <- X[, keepIds, drop = FALSE]
     if (verbose) {
         nKept <- length(keepIds)
@@ -2985,32 +2990,23 @@ enforceDesignFullRank <- function(
 # Require the bigsnpr/bigstatsr packages used for score-based LD clumping.
 .ldClumpCheckDeps <- function() {
     if (!requireNamespace("bigsnpr", quietly = TRUE)) {
-        msg <- glue(
-            "Package 'bigsnpr' is required. Install from CRAN: ",
-            "install.packages('bigsnpr')"
-        )
-        abort(msg)
+        abort("Package 'bigsnpr' is required.")
     }
     if (!requireNamespace("bigstatsr", quietly = TRUE)) {
-        msg <- glue(
-            "Package 'bigstatsr' is required. Install from CRAN: ",
-            "install.packages('bigstatsr')"
-        )
-        abort(msg)
+        abort("Package 'bigstatsr' is required.")
     }
 }
 
 # Validate the clumping inputs (dimensions of score/chr/pos vs X).
+#' @importFrom checkmate assertVector
 .ldClumpValidate <- function(X, score, chr, pos) {
+    # NOT assertMatrix: X may be a bigstatsr FBM, which is not a base matrix.
     if (ncol(X) < 1L) {
         abort("ldClumpByScore: X must have at least one column")
     }
-    if (!is.null(score) && length(score) != ncol(X)) {
-        abort("ldClumpByScore: length(score) must equal ncol(X)")
-    }
-    if (length(chr) != ncol(X) || length(pos) != ncol(X)) {
-        abort("ldClumpByScore: chr and pos must have length equal to ncol(X)")
-    }
+    assertVector(score, len = ncol(X), null.ok = TRUE)
+    assertVector(chr, len = ncol(X))
+    assertVector(pos, len = ncol(X))
 }
 
 # Wrap X as a bigstatsr FBM (pass through if already one).
@@ -3113,6 +3109,7 @@ ldClumpByScore <- function(
 # without materializing them all in memory at once.
 # =============================================================================
 
+#' @importFrom checkmate assertClass
 #' Extract the LD or genotype matrix from an LdData S4 object.
 #' @param ld An LdData object.
 #' @param wantGenotype Logical; if TRUE, extract the genotype matrix (via
@@ -3120,9 +3117,7 @@ ldClumpByScore <- function(
 #' @return A matrix.
 #' @noRd
 extractLdMatrix <- function(ld, wantGenotype = FALSE) {
-    if (!is(ld, "LdData")) {
-        abort("ld must be an LdData object")
-    }
+    assertClass(ld, "LdData")
     if (wantGenotype && hasGenotypes(ld)) {
         return(getGenotypes(ld))
     }

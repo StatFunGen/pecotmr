@@ -285,11 +285,7 @@ mashResidualCorrelation <- function(
     method <- arg_match(method)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -646,18 +642,10 @@ mashPriorCovariances <- function(
 # @noRd
 .mashRequirePriorPackages <- function() {
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (!requireNamespace("flashier", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install flashier: ",
-            "https://github.com/willwerscheid/flashier"
-        )
-        abort(msg)
+        abort("Package 'flashier' is required for this function.")
     }
 }
 
@@ -792,13 +780,15 @@ mashPriorCovariances <- function(
 # ud_fit with a directed error for the ud_ted / non-i.i.d. (per-variant SE)
 # incompatibility.
 # @noRd
+#' @importFrom rlang try_fetch
 .mashUdFit <- function(fit0, mashData, engine, udControl) {
     control <- .mashUdControl(engine, udControl, ncol(mashData$Bhat))
-    tryCatch(
+    try_fetch(
         udr::ud_fit(fit0, control = control, verbose = FALSE),
-        error = function(e) {
+        error = function(cnd) {
             if (
-                engine == "ud_ted" && str_detect(conditionMessage(e), "i.i.d")
+                engine == "ud_ted" &&
+                    str_detect(conditionMessage(cnd), "i.i.d")
             ) {
                 msg <- glue(
                     "mashPriorCovariances: engine 'ud_ted' (udr TED update) ",
@@ -806,12 +796,12 @@ mashPriorCovariances <- function(
                     "scale does not provide (per-variant SE). Use engine 'ud' ",
                     "(ED update), or a z-scale input."
                 )
-                abort(msg)
+                abort(msg, parent = cnd)
             }
             # Not the ud_ted i.i.d. case rewrapped above -- re-raise the
             # original condition unchanged so unrelated udr failures surface
             # (and aren't swallowed as a NULL fit).
-            cnd_signal(e)
+            cnd_signal(cnd)
         }
     )
 }
@@ -828,14 +818,15 @@ mashPriorCovariances <- function(
         )
         abort(msg)
     }
-    udControl <- utils::modifyList(
+    # NULL in a user control means "use the default", so drop before merging.
+    udControl <- list_modify(
         list(
             n_unconstrained = 50L,
             maxiter = 1000L,
             tol = 1e-2,
             tol.lik = 1e-2
         ),
-        udControl
+        !!!compact(udControl)
     )
     U.can <- mashr::cov_canonical(mashData)
     fit0 <- udr::ud_init(
@@ -908,11 +899,7 @@ mashModelFit <- function(
     fitOn <- arg_match(fitOn)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -1009,11 +996,7 @@ mashPosterior <- function(
 ) {
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
     ex <- .mashExcludeConditions(
@@ -1088,8 +1071,10 @@ mashPosterior <- function(
 #'   \code{pair[2]}.
 #' @examples
 #' makePairwiseContrastCol(c("a", "b"), "mean_contrast_")
+#' @importFrom checkmate assertCharacter
 #' @export
 makePairwiseContrastCol <- function(pair, template) {
+    assertCharacter(pair, len = 2L, any.missing = FALSE)
     template[pair[1]] <- 1
     template[pair[2]] <- -1
     template
@@ -1124,6 +1109,7 @@ makePairwiseContrastCol <- function(pair, template) {
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' fitMashContrast(1L, om, pm, pv)
+#' @importFrom checkmate assertCount assertNumeric
 #' @export
 fitMashContrast <- function(
     index,
@@ -1132,6 +1118,8 @@ fitMashContrast <- function(
     posteriorVcov,
     grouping = NULL
 ) {
+    assertCount(index, positive = TRUE)
+    assertNumeric(grouping, null.ok = TRUE)
     populationNames <- colnames(posteriorMean)
     if (!is.null(populationNames)) {
         populationNames <- str_remove_all(populationNames, "BETA_")
@@ -1287,6 +1275,7 @@ fitMashContrast <- function(
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' mashPosteriorContrast(pm, pv, om)
+#' @importFrom checkmate assertNumeric
 #' @export
 mashPosteriorContrast <- function(
     posteriorMean,
@@ -1294,6 +1283,7 @@ mashPosteriorContrast <- function(
     origMean,
     grouping = NULL
 ) {
+    assertNumeric(grouping, null.ok = TRUE)
     origMean <- origMean[, colnames(posteriorMean), drop = FALSE]
     origMean[is.nan(origMean)] <- 0
 
@@ -1358,8 +1348,11 @@ mashPosteriorContrast <- function(
 #' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
 #' updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
+#' @importFrom checkmate assertCharacter
 #' @export
 updateMashModelCov <- function(mashModel, allSamples, samples) {
+    assertCharacter(allSamples, any.missing = FALSE)
+    assertCharacter(samples, any.missing = FALSE)
     cov <- mashModel$fitted_g$Ulist
 
     # Remove matrices for dropped conditions
@@ -1430,8 +1423,14 @@ updateMashModelCov <- function(mashModel, allSamples, samples) {
 #' vhat <- diag(3)
 #' dimnames(vhat) <- list(cond, cond)
 #' sliceMashData(dat, vhat = vhat, snps = 1:4, samples = NULL)
+#' @importFrom checkmate assertList assertCharacter
 #' @export
 sliceMashData <- function(data, vhat, snps, samples) {
+    assertList(data)
+    # `snps` and `samples` are SUBSCRIPTS -- `data$bhat[snps, samples]` -- so
+    # character names, integer indices and NULL are all valid. No type
+    # assertion is correct here (the @example passes snps = 1:4 and
+    # samples = NULL).
     data$bhat <- as.matrix(data$bhat[snps, samples])
     data$sbhat <- as.matrix(data$sbhat[snps, samples])
     data$Z <- as.matrix(data$Z[snps, samples])
@@ -1452,8 +1451,10 @@ sliceMashData <- function(data, vhat, snps, samples) {
 #' @return The data list with sanitized values.
 #' @examples
 #' sanitizeMashData(list(strong = list(z = matrix(rnorm(9), 3, 3))))
+#' @importFrom checkmate assertList
 #' @export
 sanitizeMashData <- function(data) {
+    assertList(data)
     data$bhat[is.nan(data$bhat)] <- 0
     data$sbhat[is.nan(data$sbhat) | is.infinite(data$sbhat)] <- 1e3
     data
@@ -1618,8 +1619,10 @@ metaAnalysisPerCondition <- function(
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
 #' calculateFeatureScores(cr, metaMethod = "mean")
+#' @importFrom checkmate assertString
 #' @export
 calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
+    assertString(metaMethod)
     cr <- as_tibble(contrastResult)
     effCols <- names(cr)[str_detect(names(cr), "mean_contrast_.*deviation")]
     if (length(effCols) == 0L) {
@@ -1661,8 +1664,10 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
 #' nSignificantScore(cr, pCutoff = 0.05)
+#' @importFrom checkmate assertNumber
 #' @export
 nSignificantScore <- function(contrastResult, pCutoff = 1e-5) {
+    assertNumber(pCutoff, lower = 0, upper = 1)
     cr <- as_tibble(contrastResult)
     pCols <- names(cr)[str_detect(names(cr), "p_contrast_.*deviation")]
     if (length(pCols) == 0L) {

@@ -74,7 +74,7 @@
 .fmrTupleLabel <- function(side, ident, block = NULL) {
     fields <- compact(c(ident, list(block = block)))
     fields <- fields[!map_lgl(fields, is.na)]
-    shown <- str_c(names(fields), "='", unlist(fields), "'")
+    shown <- str_c(names(fields), "='", map_chr(fields, as.character), "'")
     glue("{side} ({str_flatten(shown, ', ')})")
 }
 
@@ -119,6 +119,7 @@
 # TwasWeights accessors. Returns an error when no row matches; returns
 # the single row index when the collection has exactly one row and any
 # selector argument was omitted.
+#' @importFrom checkmate assertVector
 .tupleSelectRow <- function(
     x,
     study,
@@ -149,16 +150,10 @@
         )
         abort(msg)
     }
-    if (
-        length(study) != 1L ||
-            length(context) != 1L ||
-            length(trait) != 1L ||
-            length(method) != 1L
-    ) {
-        abort(
-            "`study`, `context`, `trait`, and `method` must each be length 1."
-        )
-    }
+    assertVector(study, len = 1L)
+    assertVector(context, len = 1L)
+    assertVector(trait, len = 1L)
+    assertVector(method, len = 1L)
     .tupleMatchQtl(x, study, context, trait, method)
 }
 
@@ -183,6 +178,7 @@
 # index of a GwasFineMappingResult collection. `region` may be NULL when
 # the (study, method) pair maps to a single row; otherwise it disambiguates
 # among per-block rows of a genome-wide collection.
+#' @importFrom checkmate assertVector
 .tupleSelectRowGwasFmr <- function(x, study, method, region = NULL) {
     if (nrow(x) == 0L) {
         abort("GwasFineMappingResult has no rows.")
@@ -201,12 +197,9 @@
         )
         abort(msg)
     }
-    if (length(study) != 1L || length(method) != 1L) {
-        abort("`study` and `method` must each be length 1.")
-    }
-    if (!is.null(region) && length(region) != 1L) {
-        abort("`region` must be length 1 when supplied.")
-    }
+    assertVector(study, len = 1L)
+    assertVector(method, len = 1L)
+    assertVector(region, len = 1L, null.ok = TRUE)
     .tupleMatchGwas(x, study, method, region)
 }
 
@@ -387,13 +380,15 @@
     cols
 }
 
+#' @importFrom checkmate checkClass
 .validateTraitPosColumn <- function(object) {
     if (!is_in("traitPos", .tupleColumnNames(object))) {
         return(character(0))
     }
     traitPos <- .tupleColumn(object, "traitPos")
-    if (!methods::is(traitPos, "GRanges")) {
-        return("'traitPos' column must be a GRanges")
+    res <- checkClass(traitPos, "GRanges")
+    if (!isTRUE(res)) {
+        return(str_c("'traitPos' column ", res))
     }
     if (length(traitPos) != nrow(object)) {
         return("'traitPos' column must have one range per row")
@@ -541,6 +536,7 @@
 # list(done, result) on a successful single-select, else list(done = FALSE, sel)
 # carrying the selection error (or NULL when no selector was given).
 # @noRd
+#' @importFrom rlang try_fetch
 .fmrTrySingle <- function(
     x,
     study,
@@ -559,7 +555,7 @@
     if (!anySelector) {
         return(list(done = FALSE, sel = NULL))
     }
-    sel <- tryCatch(
+    sel <- try_fetch(
         .fmrSelectEntry(
             x,
             study = study,
@@ -568,7 +564,7 @@
             method = method,
             region = region
         ),
-        error = function(e) e
+        error = function(cnd) cnd
     )
     if (!inherits(sel, "error")) {
         return(list(done = TRUE, result = onSingle(sel, ...)))
@@ -730,8 +726,7 @@
     type = c("data.frame", "GRanges"),
     signalCutoff = 0.025,
     minPurity = NULL,
-    raw = FALSE,
-    ...
+    raw = FALSE
 ) {
     tl <- .fmrPartsTopLoci(parts)
     # raw = TRUE returns the stored canonical table verbatim: every variant,
@@ -748,7 +743,7 @@
 }
 
 # @noRd
-.fmrRowPip <- function(parts, ...) {
+.fmrRowPip <- function(parts) {
     tl <- .fmrPartsTopLoci(parts)
     if (nrow(tl) == 0L || !is_in("pip", names(tl))) {
         return(numeric(0))
@@ -757,7 +752,7 @@
 }
 
 # @noRd
-.fmrRowMarginalEffects <- function(parts, maxPval = NULL, ...) {
+.fmrRowMarginalEffects <- function(parts, maxPval = NULL) {
     tl <- .fmrPartsTopLoci(parts)
     if (nrow(tl) == 0L) {
         return(.projectMarginalView(tl))
@@ -771,7 +766,7 @@
 }
 
 # @noRd
-.fmrRowCs <- function(parts, coverage = 0.95, minPurity = NULL, ...) {
+.fmrRowCs <- function(parts, coverage = 0.95, minPurity = NULL) {
     tl <- .fmrPartsTopLoci(parts)
     if (nrow(tl) == 0L) {
         return(.projectPosteriorView(tl))
@@ -805,7 +800,7 @@
 }
 
 # @noRd
-.fmrRowLbf <- function(parts, ...) {
+.fmrRowLbf <- function(parts) {
     lbf <- .asLbfMatrix(getSusieFit(parts))
     vids <- .fmrPartsVariantIds(parts)
     if (is.null(lbf) || ncol(lbf) != length(vids)) {
@@ -817,17 +812,17 @@
 }
 
 # @noRd
-.fmrRowCredibleSetSummary <- function(parts, coverage = 0.95, ...) {
+.fmrRowCredibleSetSummary <- function(parts, coverage = 0.95) {
     .csSummaryFit(.fmrPartsTopLoci(parts), getSusieFit(parts), coverage)
 }
 
 # @noRd
-.fmrRowFsusieCredibleBand <- function(parts, ...) {
+.fmrRowFsusieCredibleBand <- function(parts) {
     .fsusieCredibleBandFit(getSusieFit(parts))
 }
 
 # @noRd
-.fmrRowFsusieAffectedRegions <- function(parts, ...) {
+.fmrRowFsusieAffectedRegions <- function(parts) {
     .fsusieAffectedRegionsFit(
         getSusieFit(parts),
         topLoci = .fmrPartsTopLoci(parts)
@@ -835,7 +830,7 @@
 }
 
 # @noRd
-.fmrRowResolveWeights <- function(parts, ...) {
+.fmrRowResolveWeights <- function(parts) {
     empty <- list(variantIds = character(0), weights = numeric(0))
     # The topLoci posterior view projects the effect to `beta`; use it as the
     # per-variant weight, aligned with variant_id.
@@ -882,7 +877,7 @@
 # The weight vector aligned to the row's variant ids -- what resolveWeights
 # produced from a TwasWeightsRow.
 # @noRd
-.twrRowResolveWeights <- function(parts, ...) {
+.twrRowResolveWeights <- function(parts) {
     empty <- list(variantIds = character(0), weights = numeric(0))
     vids <- .twrPartsVariantIds(parts)
     w <- getWeights(parts)
@@ -914,11 +909,11 @@
 # The per-variant weight vector of one row, whichever weight source it came
 # from.
 # @noRd
-.rowResolveWeights <- function(parts, ...) {
+.rowResolveWeights <- function(parts) {
     if (methods::is(parts, "TwasWeightsRow")) {
-        return(.twrRowResolveWeights(parts, ...))
+        return(.twrRowResolveWeights(parts))
     }
-    .fmrRowResolveWeights(parts, ...)
+    .fmrRowResolveWeights(parts)
 }
 
 # The cross-validated / per-method fits of one row, or NULL for a

@@ -17,8 +17,7 @@ causalInferencePipeline(
   mrCpipCutoff = 0.5,
   mrPvalCutoff = 1,
   combineMethods = NULL,
-  alleleFlip = TRUE,
-  ...
+  alleleFlip = TRUE
 )
 }
 \arguments{
@@ -93,8 +92,6 @@ skips combination.}
 to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
 effect / weight sign-flipped accordingly; when FALSE, match on exact
 alleles only, so a ref/alt swap is treated as a distinct variant.}
-
-\item{...}{Reserved.}
 }
 \value{
 A \code{GRanges} as described above.

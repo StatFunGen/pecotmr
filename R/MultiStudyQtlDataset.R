@@ -57,14 +57,14 @@ setClass(
 }
 
 # @noRd
+#' @importFrom checkmate checkList
 .msqdCheckDatasets <- function(qtlDatasets) {
-    if (!is.list(qtlDatasets) || length(qtlDatasets) == 0L) {
-        return("'qtlDatasets' must be a non-empty named list")
+    # names = "unique" subsumes the old named/non-empty/non-NA/unique checks.
+    res <- checkList(qtlDatasets, min.len = 1L, names = "unique")
+    if (!isTRUE(res)) {
+        return(str_c("'qtlDatasets' ", res))
     }
-    c(
-        .msqdCheckDatasetNames(names(qtlDatasets)),
-        .msqdCheckDatasetTypes(qtlDatasets)
-    )
+    .msqdCheckDatasetTypes(qtlDatasets)
 }
 
 # @noRd
@@ -129,7 +129,7 @@ setClass(
     traitRanges <- map(object@qtlDatasets, .msqdTraitRanges)
     pairs <- utils::combn(seq_along(traitRanges), 2L)
     dsNames <- names(object@qtlDatasets)
-    unlist(compact(map(
+    list_c(compact(map(
         seq_len(ncol(pairs)),
         .msqdPairErrors,
         pairs = pairs,
@@ -231,8 +231,10 @@ setClass(
 #'   study = "s2", genotypes = panel, phenotypes = list(brain = se)
 #' )
 #' MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+#' @importFrom checkmate assertList
 #' @export
 MultiStudyQtlDataset <- function(qtlDatasets, sumStats = NULL) {
+    assertList(qtlDatasets, min.len = 1L, names = "unique")
     obj <- new(
         "MultiStudyQtlDataset",
         qtlDatasets = qtlDatasets,

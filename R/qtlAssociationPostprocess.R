@@ -23,21 +23,22 @@
 # edge-case retries only (never a hand-rolled substitute): lambda=0 for
 # missing/infinite handling, bootstrap pi0 for the "pi0 <= 0" degenerate case.
 # Returns a numeric vector aligned to `p`.
+#' @importFrom rlang try_fetch
 .qapSafeQvalue <- function(p) {
     if (!requireNamespace("qvalue", quietly = TRUE)) {
         # Optional-package guard; qvalue is Suggests-only.
         msg <- glue(
             "qtlAssociationPostprocess: the 'qvalue' package is required for ",
-            "Storey q-values. Install Bioconductor 'qvalue'."
+            "Storey q-values."
         )
         abort(msg)
     }
-    tryCatch(
+    try_fetch(
         qvalue::qvalue(p)$qvalues,
-        error = function(e) {
-            if (str_detect(conditionMessage(e), "missing or infinite")) {
+        error = function(cnd) {
+            if (str_detect(conditionMessage(cnd), "missing or infinite")) {
                 qvalue::qvalue(p, lambda = 0)$qvalues
-            } else if (str_detect(conditionMessage(e), "pi0 <= 0")) {
+            } else if (str_detect(conditionMessage(cnd), "pi0 <= 0")) {
                 maxP <- max(p, na.rm = TRUE)
                 lambdaSeq <- seq(0, min(0.9, maxP * 0.95), length.out = 10)
                 qvalue::qvalue(
@@ -46,12 +47,13 @@
                     pi0.method = "bootstrap"
                 )$qvalues
             } else {
+                # The cause is chained via `parent`, so it is no longer
+                # interpolated into the message.
                 msg <- glue(
-                    "qtlAssociationPostprocess: qvalue::qvalue failed ",
-                    "({conditionMessage(e)}). Not substituting a ",
-                    "hand-rolled q-value."
+                    "qtlAssociationPostprocess: qvalue::qvalue failed. ",
+                    "Not substituting a hand-rolled q-value."
                 )
-                abort(msg)
+                abort(msg, parent = cnd)
             }
         }
     )

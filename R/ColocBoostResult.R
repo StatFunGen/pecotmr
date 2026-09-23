@@ -90,26 +90,25 @@ methods::setValidity("ColocBoostResult", function(object) {
 }
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
+#' @importFrom checkmate checkSubset
 .validateColocBoostResult <- function(object) {
-    errors <- .cbrCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- c(
-            .cbrCheckVcpColumn(object),
-            .cbrCheckOutcomeInfo(object)
-        )
+    coll <- makeAssertCollection()
+    assertNames(
+        colnames(mcols(object, use.names = FALSE)) %||% character(0),
+        must.include = .cbrRequiredCols(),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# @noRd
-.cbrCheckRequiredCols <- function(object) {
-    md <- mcols(object, use.names = FALSE)
-    have <- if (is.null(md)) character(0) else colnames(md)
-    missingCols <- setdiff(.cbrRequiredCols(), have)
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.cbrCheckVcpColumn(object))
+    coll$push(.cbrCheckOutcomeInfo(object))
+    coll$getMessages()
 }
 
 # The per-variant layer is the point of the class, exactly as SNP.PP.H4 is for
@@ -145,28 +144,23 @@ methods::setValidity("ColocBoostResult", function(object) {
     if (nrow(info) == 0L) {
         return(NULL)
     }
-    missingCols <- setdiff(
-        c("name", "study", "context", "trait", "dataForm"),
-        colnames(info)
+    cols <- checkNames(
+        colnames(info),
+        must.include = c("name", "study", "context", "trait", "dataForm"),
+        what = "colnames"
     )
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "outcomeInfo is missing columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    if (!isTRUE(cols)) {
+        return(str_c("outcomeInfo is missing columns: ", cols))
     }
     if (length(object) == 0L) {
         return(NULL)
     }
     named <- unique(unlist(mcols(object, use.names = FALSE)$outcomes))
-    unknown <- setdiff(named, as.character(info$name))
-    if (length(unknown) == 0L) {
+    resolved <- checkSubset(named, as.character(info$name))
+    if (isTRUE(resolved)) {
         return(NULL)
     }
-    str_c(
-        "outcome(s) not present in outcomeInfo: ",
-        str_flatten(utils::head(unknown, 5L), ", ")
-    )
+    str_c("outcome(s) not in outcomeInfo: ", resolved)
 }
 
 # ---- accessors --------------------------------------------------------------
@@ -257,7 +251,7 @@ ColocBoostResult <- function(
         gwasStudy = gwasStudy,
         includeUncolocalized = includeUncolocalized
     )
-    rows <- unlist(rows, recursive = FALSE, use.names = FALSE)
+    rows <- unname(list_flatten(rows))
     .cbrAssemble(
         rows,
         outcomeInfo = as.data.frame(outcomeInfo),

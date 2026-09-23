@@ -334,9 +334,10 @@ sldscPostprocessingPipeline <- function(
 
 # Standardize the i-th single run (NULL + warning on failure).
 # @noRd
+#' @importFrom rlang try_fetch
 .sldscStandardizeSingle <- function(i, trait, ctx) {
     catName <- ctx$targetCategories[i]
-    std <- tryCatch(
+    std <- try_fetch(
         standardizeSldscTrait(
             ctx$sldscData,
             trait,
@@ -346,13 +347,11 @@ sldscPostprocessingPipeline <- function(
             MRef = ctx$MRef,
             targetCategories = catName
         ),
-        error = function(e) {
-            eMsg <- e$message
+        error = function(cnd) {
             msg <- glue(
-                "[sldsc] Failed to standardize single {catName} for ",
-                "{trait}: {eMsg}"
+                "[sldsc] Failed to standardize single {catName} for {trait}"
             )
-            warn(msg)
+            warn(msg, parent = cnd)
             NULL
         }
     )
@@ -401,7 +400,7 @@ sldscPostprocessingPipeline <- function(
     if (is.null(getTraitRun(ctx$sldscData, trait, "joint"))) {
         return(empty)
     }
-    std <- tryCatch(
+    std <- try_fetch(
         standardizeSldscTrait(
             ctx$sldscData,
             trait,
@@ -410,12 +409,9 @@ sldscPostprocessingPipeline <- function(
             MRef = ctx$MRef,
             targetCategories = ctx$targetCategories
         ),
-        error = function(e) {
-            eMsg <- e$message
-            msg <- glue(
-                "[sldsc] Failed to standardize joint for {trait}: {eMsg}"
-            )
-            warn(msg)
+        error = function(cnd) {
+            msg <- glue("[sldsc] Failed to standardize joint for {trait}")
+            warn(msg, parent = cnd)
             NULL
         }
     )

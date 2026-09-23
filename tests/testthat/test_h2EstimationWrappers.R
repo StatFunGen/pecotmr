@@ -377,7 +377,7 @@ test_that("h2EstimateToSldscTrait returns correct list structure", {
 test_that("h2EstimateToSldscTrait errors on non-H2Estimate input", {
     expect_error(
         h2EstimateToSldscTrait(list(h2 = 0.3)),
-        "must be an H2Estimate"
+        "Must inherit from class 'H2Estimate'"
     )
 })
 

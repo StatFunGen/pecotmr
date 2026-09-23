@@ -48,19 +48,19 @@ test_that("input is validated", {
     d <- mk_xy()
     expect_error(
         cv(d$X, d$Y, fold = 0, fitFold = mock_fit_fold),
-        "positive integer"
+        "Must be >= 1"
     )
     expect_error(
         cv(d$X, d$Y, fold = "a", fitFold = mock_fit_fold),
-        "positive integer"
+        "Must be of type 'count'"
     )
     expect_error(
         cv(as.data.frame(d$X), d$Y, fold = 2, fitFold = mock_fit_fold),
-        "X must be a matrix"
+        "Must be of type 'matrix'"
     )
     expect_error(
         cv(d$X, d$Y[1:5, , drop = FALSE], fold = 2, fitFold = mock_fit_fold),
-        "same"
+        "Must have exactly 30 rows"
     )
     expect_error(
         cv(d$X, d$Y, fitFold = mock_fit_fold),

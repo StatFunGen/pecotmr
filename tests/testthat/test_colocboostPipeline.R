@@ -962,7 +962,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
 .cbf_n <- function(ss, ...) {
     b <- suppressMessages(.cbQtlSumStatsBundle(
         ss,
-        cutoffs = .panelCutoffs(list(...))
+        cutoffs = .panelCutoffs(...)
     ))
     if (length(b) == 0L) 0L else length(b[[1L]]$variantIds)
 }
@@ -1185,19 +1185,19 @@ test_that(".cbResidualizedX reports why genotypes were unavailable", {
         getResidualizedGenotypes = function(...) stop("kaboom"),
         .package = "pecotmr"
     )
-    # The underlying message is carried through so the skip is diagnosable.
-    expect_message(
-        res <- pecotmr:::.cbResidualizedX(
-            NULL,
-            "c1",
-            NULL,
-            NULL,
-            NULL,
-            NULL
-        ),
-        "residualized genotypes unavailable: kaboom"
+    # The cause is chained via `parent`, not flattened into the text, so the
+    # rendered message still shows it AND it stays reachable as a condition.
+    # catch_cnd() rather than expect_message(), which returns NULL.
+    cnd <- rlang::catch_cnd(
+        pecotmr:::.cbResidualizedX(NULL, "c1", NULL, NULL, NULL, NULL),
+        classes = "message"
     )
-    expect_null(res)
+    expect_match(conditionMessage(cnd), "residualized genotypes unavailable")
+    expect_match(conditionMessage(cnd), "kaboom")
+    expect_match(conditionMessage(cnd$parent), "kaboom")
+    expect_null(suppressMessages(
+        pecotmr:::.cbResidualizedX(NULL, "c1", NULL, NULL, NULL, NULL)
+    ))
 })
 
 test_that(".cbApplyScreen keeps the outcomes that clear the screen", {
@@ -1334,7 +1334,7 @@ test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
         jointGwas = FALSE,
         separateGwas = FALSE,
         focalTrait = NULL,
-        dotArgs = list(),
+        colocboostArgs = list(),
         qtlSumstatBundle = qtlOnly
     ))
     expect_equal(called, "xqtl")
@@ -1362,7 +1362,7 @@ test_that(".cbRunVariants warns instead of silently skipping an analysis", {
             jointGwas = TRUE,
             separateGwas = TRUE,
             focalTrait = NULL,
-            dotArgs = list()
+            colocboostArgs = list()
         ))
     )
     expect_length(warnings, 2L)
@@ -1386,7 +1386,7 @@ test_that(".cbRunVariants warns when xqtlColoc has only GWAS sumstats", {
             jointGwas = FALSE,
             separateGwas = FALSE,
             focalTrait = NULL,
-            dotArgs = list(),
+            colocboostArgs = list(),
             qtlSumstatBundle = pecotmr:::.cbMergeSumstatBundles(list())
         )),
         "xqtlColoc = TRUE was requested"

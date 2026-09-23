@@ -5,7 +5,6 @@
 # pair, and it computes no PP.H0-PP.H4 decomposition at all. Several tests
 # below guard exactly that boundary.
 
-
 test_that("ColocBoostResult: one element per confidence set", {
     x <- ColocBoostResult(
         list(.cbr_fake()),
@@ -374,7 +373,10 @@ test_that("validity names missing identity and outcomeInfo columns", {
     )
     bad <- x
     mcols(bad)$analysis <- NULL
-    expect_error(methods::validObject(bad), "missing columns: analysis")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'analysis'\\}"
+    )
 })
 
 
@@ -434,7 +436,10 @@ test_that("validity names the outcomeInfo columns that are missing", {
     cb@outcomeInfo <- data.frame(name = "t1")
     expect_match(
         .cbrCheckOutcomeInfo(cb),
-        "outcomeInfo is missing columns: study, context, trait, dataForm"
+        paste0(
+            "outcomeInfo is missing columns: .*",
+            "missing elements \\{'study','context','trait','dataForm'\\}"
+        )
     )
 })
 

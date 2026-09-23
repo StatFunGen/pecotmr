@@ -25,7 +25,7 @@ test_that("prsCs errors on mismatched maf length", {
 test_that("prsCs errors on mismatched bhat and R dimensions", {
     expect_error(
         prsCs(bhat = rnorm(10), R = diag(5), n = 100),
-        "number of rows of 'R'"
+        "bhat.*Must have length"
     )
 })
 
@@ -202,10 +202,12 @@ test_that("prsCsWeights calls prsCs and returns betaEst", {
     result <- prsCsWeights(
         stat = stat,
         LD = R,
-        maf = rep(0.3, p),
-        nIter = 50,
-        nBurnin = 10,
-        thin = 2
+        methodArgs = list(
+            maf = rep(0.3, p),
+            nIter = 50,
+            nBurnin = 10,
+            thin = 2
+        )
     )
     expect_equal(length(result), p)
     expect_true(is.numeric(result))

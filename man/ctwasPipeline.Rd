@@ -27,7 +27,7 @@ ctwasPipeline(
   mergePipThresh = 0.5,
   mergeFilterCs = FALSE,
   mergeMaxSNP = Inf,
-  ...
+  ctwasArgs = list()
 )
 }
 \arguments{
@@ -128,7 +128,8 @@ credible set to be selected. Default \code{FALSE}. Ignored unless
 \item{mergeMaxSNP}{Numeric (length 1). Per-merged-region SNP cap. Default
 \code{Inf}. Ignored unless \code{mergeBoundary = TRUE}.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::ctwas_sumstats}.}
+\item{ctwasArgs}{Optional named list of additional arguments
+forwarded to \code{ctwas::ctwas_sumstats}.}
 }
 \value{
 A \code{\link{CtwasResult}} collection: one row per \code{(gwasStudy,

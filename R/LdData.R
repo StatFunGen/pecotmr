@@ -214,6 +214,8 @@ setMethod("show", "LdData", function(object) {
 #'   blockMetadata = S4Vectors::DataFrame(
 #'     chrom = "22", start = 1L, end = 1000L))
 #' ld
+#' @importFrom checkmate assert checkMatrix checkList checkNull
+#' @importFrom checkmate assertNumeric
 #' @export
 LdData <- function(
     correlation = NULL,
@@ -224,6 +226,15 @@ LdData <- function(
     nRef = 0L,
     mixtureWeights = NULL
 ) {
+    # correlation is documented as a matrix OR a list of matrices OR NULL,
+    # so this must be an or-combination, not assertMatrix.
+    assert(
+        checkMatrix(correlation),
+        checkList(correlation),
+        checkNull(correlation),
+        .var.name = "correlation"
+    )
+    assertNumeric(mixtureWeights, null.ok = TRUE)
     obj <- new(
         "LdData",
         variants,

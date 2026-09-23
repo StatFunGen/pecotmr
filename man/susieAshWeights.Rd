@@ -4,19 +4,18 @@
 \alias{susieAshWeights}
 \title{Compute SuSiE-ASH TWAS weights}
 \usage{
-susieAshWeights(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE, ...)
+susieAshWeights(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE)
 }
 \arguments{
-\item{X}{Genotype matrix. Required when `susieAshFit` is NULL.}
+\item{X}{Optional genotype matrix; when supplied it is only used to
+check that the fit covers the same number of variants.}
 
-\item{y}{Phenotype vector. Required when `susieAshFit` is NULL.}
+\item{y}{Unused; retained for signature compatibility.}
 
 \item{susieAshFit}{Optional fitted SuSiE-ASH object.}
 
 \item{retainFit}{If TRUE, stores the fitted object as an attribute on the
 returned weights.}
-
-\item{...}{Additional arguments passed to `susieR::susie()` when fitting.}
 }
 \value{
 Numeric vector of variant weights.
@@ -29,5 +28,6 @@ Extracts coefficients from an existing SuSiE-ASH fit or fits
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:30]
 y <- eqtlRegionExample$yRes
-susieAshWeights(X, y)
+fit <- susieR::susie(X, y, L = 5)
+susieAshWeights(susieAshFit = fit)
 }

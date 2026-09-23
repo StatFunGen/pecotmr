@@ -1573,7 +1573,7 @@ test_that("parseMethods: split-form and leaf validation errors", {
             caps = caps,
             multivariateMethods = "mrmash"
         ),
-        "non-empty character vector"
+        "Must have length >= 1"
     )
     expect_error(
         pecotmr:::parseMethods(
@@ -1584,7 +1584,7 @@ test_that("parseMethods: split-form and leaf validation errors", {
             caps = caps,
             multivariateMethods = "mrmash"
         ),
-        "non-empty character vector"
+        "Must have length >= 1"
     )
     expect_error(
         pecotmr:::parseMethods(
@@ -2593,7 +2593,7 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         as.character(ss$context),
         "probe",
         ldSketch = getLdSketch(ss),
-        cutoffs = .panelCutoffs(list(...))
+        cutoffs = .panelCutoffs(...)
     ))
 }
 

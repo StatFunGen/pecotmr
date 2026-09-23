@@ -20,7 +20,7 @@ colocPipeline(
   p12Max = 0.001,
   adjustPips = TRUE,
   alleleFlip = TRUE,
-  ...
+  colocArgs = list()
 )
 }
 \arguments{
@@ -106,7 +106,8 @@ between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized (LBF
 is coding-invariant, so no sign change is needed); when FALSE, match on
 exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 
-\item{...}{Additional arguments forwarded to \code{coloc::coloc.bf_bf}.}
+\item{colocArgs}{Optional named list of additional arguments forwarded
+to \code{coloc::coloc.bf_bf}.}
 }
 \value{
 A \code{\linkS4class{ColocResult}}: one element per tested

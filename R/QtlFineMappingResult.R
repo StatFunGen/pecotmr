@@ -42,24 +42,23 @@ setClass(
 # run only once the required columns are present; the ldSketch check always
 # runs.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
 .validateQtlFineMappingResult <- function(object) {
-    errors <- .qfmrCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .qfmrCheckEntries(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        .tupleColumnNames(object),
+        must.include = c("study", "context", "trait", "method"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    errors <- c(errors, .qfmrCheckLdSketch(object))
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# The study/context/trait/method/entry columns must be present.
-# @noRd
-.qfmrCheckRequiredCols <- function(object) {
-    required <- c("study", "context", "trait", "method")
-    missingCols <- setdiff(required, .tupleColumnNames(object))
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.qfmrCheckEntries(object))
+    coll$getMessages()
 }
 
 # Entry-column + region/traitPos + joint-column + tuple-uniqueness contract.
@@ -81,17 +80,15 @@ setClass(
 # to check is that the fit payload columns are present and parallel.
 # @noRd
 .qfmrCheckEntryLength <- function(object) {
-    missingCols <- setdiff(
-        c("susieFit", "cvResult"),
-        .tupleColumnNames(object)
+    res <- checkNames(
+        .tupleColumnNames(object),
+        must.include = c("susieFit", "cvResult"),
+        what = "colnames"
     )
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "missing entry payload columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    if (isTRUE(res)) {
+        return(NULL)
     }
-    NULL
+    str_c("missing entry payload columns: ", res)
 }
 
 # @noRd
@@ -101,7 +98,7 @@ setClass(
 # Each present joint* column must be character.
 # @noRd
 .qfmrCheckJointCols <- function(object, jointCols) {
-    unlist(compact(map(jointCols, .qfmrJointColError, object = object)))
+    list_c(compact(map(jointCols, .qfmrJointColError, object = object)))
 }
 
 # @noRd
@@ -141,12 +138,6 @@ setClass(
 }
 
 # ldSketch must be a GenotypeHandle or NULL.
-# @noRd
-.qfmrCheckLdSketch <- function(object) {
-    # The slot's class union enforces the type; nothing to check.
-    NULL
-}
-
 
 # The identity-tuple vectors and the payload list are parallel: one entry per
 # (study, context, trait, method). A length mismatch would otherwise surface as
@@ -204,6 +195,8 @@ setClass(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 #' QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(fe))
+#' @importFrom checkmate assertCharacter assert checkList
+#' @importFrom checkmate checkClass
 #' @export
 QtlFineMappingResult <- function(
     study,
@@ -217,6 +210,20 @@ QtlFineMappingResult <- function(
     traitPos = NULL,
     ldSketch = NULL
 ) {
+    assertCharacter(study, any.missing = FALSE)
+    assertCharacter(context, any.missing = FALSE)
+    assertCharacter(trait, any.missing = FALSE)
+    assertCharacter(method, any.missing = FALSE)
+    # `entry` is documented as "List / SimpleList"; SimpleList is S4 and
+    # fails checkList, so this must be an or-combination.
+    assert(
+        checkList(entry),
+        checkClass(entry, "SimpleList"),
+        .var.name = "entry"
+    )
+    assertCharacter(jointStudies, null.ok = TRUE)
+    assertCharacter(jointContexts, null.ok = TRUE)
+    assertCharacter(jointTraits, null.ok = TRUE)
     n <- length(study)
     .qfmrCheckTupleLengths(study, context, trait, method, entry)
     entry <- map(entry, .asFmRowPayload)

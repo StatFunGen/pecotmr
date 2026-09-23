@@ -109,11 +109,12 @@ NULL
 #              cis-window, so the fitted span IS the region).
 # Each returns a length-1 GRanges, or NULL when the anchor is unavailable (the
 # accumulator / builder then records a chrUn sentinel).
+#' @importFrom rlang try_fetch
 .traitPosFor <- function(data, context, trait) {
     if (methods::is(data, "QtlDataset")) {
-        se <- tryCatch(
+        se <- try_fetch(
             getPhenotypes(data, contexts = context),
-            error = function(e) NULL
+            error = function(cnd) NULL
         )
         if (is.null(se)) {
             return(NULL)
@@ -273,13 +274,13 @@ setMethod(
         "fsusie",
         args$methodArgs[["fsusie"]]
     )
-    fit <- exec(fitFsusie, !!!fitArgs)
+    fit <- exec(fitFsusie, !!!.splitMethodArgs(fitFsusie, fitArgs))
     # Collapse the functional fit to a variants x features weight matrix now
     # (trimming later drops fitted_wc/csd_X); store on $coef so a trimmed fit
     # can still yield TWAS weights.
-    fit$coef <- tryCatch(
+    fit$coef <- try_fetch(
         fsusieWeights(fsusieFit = fit, variantIds = colnames(Xc)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     fit <- .setFinemappingFitClass(fit, "fsusie")
     cvM <- .jointFsusieCv(Xc, Yc, group, cfg, args, verbose)
@@ -436,7 +437,7 @@ setMethod(
         "mvsusie",
         args$methodArgs[["mvsusie"]]
     )
-    fit <- exec(fitMvsusie, !!!fitArgs)
+    fit <- exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, fitArgs))
     fit <- .setFinemappingFitClass(fit, "mvsusie")
     cvM <- .jointMvCv(
         Xc,
@@ -592,7 +593,10 @@ setMethod(
         "mvsusie",
         args$methodArgs[["mvsusie"]]
     )
-    fit <- exec(fitMvsusieRss, !!!fitArgs)
+    fit <- exec(
+        fitMvsusieRss,
+        !!!.splitMethodArgs(fitMvsusieRss, fitArgs)
+    )
     .setFinemappingFitClass(fit, "mvsusie")
 }
 
@@ -715,7 +719,7 @@ setMethod(
         nCond <- ncol(Yc)
         cond <- .jgConditions(group)
         methodKey <- .twasMethodKey(token)
-        stdz <- cfg$standardized
+        stdz <- cfg$standardized %||% FALSE
         fittedModels <- args$fittedModels %||% list()
         ma <- .jointTwasMethodArgs(
             args,
@@ -891,6 +895,24 @@ setMethod(
 
 # Cross-validated prediction result for a TWAS token: reuse fine-mapping's own
 # CV when available, else run twasWeightsCv (skipping all-zero-weight methods).
+# Whether `token` should be cross-validated. `cvWeightMethods` is the caller's
+# explicit override of the CV method set; NULL (the default) means "every
+# method that produced non-zero weights", which is what the per-method
+# all-zero check below enforces.
+# @noRd
+.jointTwasCvRequested <- function(cvWeightMethods, token) {
+    if (is.null(cvWeightMethods)) {
+        return(TRUE)
+    }
+    requested <- if (is.list(cvWeightMethods)) {
+        names(cvWeightMethods)
+    } else {
+        as.character(cvWeightMethods)
+    }
+    # Accept either the short token or the `<token>_weights` method key.
+    is_in(token, str_remove(requested, "(_weights|Weights)$"))
+}
+
 # @noRd
 .jointTwasCv <- function(Xc, Yc, wm, ma, W, args, cfg, token) {
     cvFolds <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
@@ -898,8 +920,22 @@ setMethod(
         return(NULL)
     }
     cvRes <- .twasFmHandoffCv(args$fineMappingCv, token)
-    if (!is.null(cvRes) || (!is.null(W) && all(W == 0))) {
+    if (!is.null(cvRes)) {
         return(cvRes)
+    }
+    if (!.jointTwasCvRequested(cfg$cvWeightMethods, token)) {
+        return(NULL)
+    }
+    if (!is.null(W) && all(W == 0)) {
+        # Restored with the notice it used to carry: a method whose weights
+        # are all zero contributes nothing to cross-validation, and dropping
+        # it silently made an empty ensemble look like a modelling result.
+        msg <- glue(
+            "twasWeightsPipeline: method '{token}' is excluded from ",
+            "cross-validation because all of its weights are zero."
+        )
+        warn(msg)
+        return(NULL)
     }
     .jointTwasLeakageWarn(args, ma)
     verbose <- if (is.null(cfg$verbose)) 1 else cfg$verbose
@@ -922,7 +958,7 @@ setMethod(
         retainFits = TRUE,
         maxNumVariants = mcv,
         numThreads = if (is.null(cfg$cvThreads)) 1 else cfg$cvThreads,
-        data_driven_priorMatricesCv = args$dataDrivenPriorMatricesCv,
+        dataDrivenPriorMatricesCv = args$dataDrivenPriorMatricesCv,
         verbose = verbose,
         seed = cfg$seed
     )
@@ -1215,8 +1251,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         context = as.character(data$context),
         trait = as.character(data$trait)
     )
-    allCtxs <- unique(unlist(scope$contexts, use.names = FALSE))
-    allTrs <- unique(unlist(scope$traits, use.names = FALSE))
+    allCtxs <- unique(unname(list_c(scope$contexts)))
+    allTrs <- unique(unname(list_c(scope$traits)))
     groups <- list()
     for (cx in allCtxs) {
         for (tid in allTrs) {
@@ -1610,7 +1646,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         cfg$ensembleSolver
     }
     alpha <- if (is.null(cfg$ensembleAlpha)) 1 else cfg$ensembleAlpha
-    stdz <- cfg$standardized
+    stdz <- cfg$standardized %||% FALSE
     map(
         seq_len(nrow(.jgConditions(group))),
         .twasEnsembleCondition,
@@ -1682,7 +1718,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     if (length(passing) < 2L) {
         return(NULL)
     }
-    ens <- tryCatch(
+    ens <- try_fetch(
         ensembleWeights(
             cvResults = list(
                 prediction = coll$preds[str_c(passing, "_predicted")]
@@ -1693,7 +1729,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             solver = solver,
             alpha = alpha
         ),
-        error = function(err) NULL
+        error = function(cnd) NULL
     )
     if (is.null(ens) || is.null(ens$ensembleTwasWeights)) {
         return(NULL)

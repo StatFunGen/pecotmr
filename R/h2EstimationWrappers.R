@@ -393,6 +393,7 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     metafor::rma(yi = means, sei = ses, method = "DL")
 }
 
+#' @importFrom rlang try_fetch
 .rmaMeta <- function(means, ses, method = "DL") {
     k <- length(means)
     if (k != length(ses)) {
@@ -409,9 +410,9 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     fit <- if (identical(method, "DL")) {
         metafor::rma(yi = means, sei = ses, method = "DL")
     } else {
-        tryCatch(
+        try_fetch(
             metafor::rma(yi = means, sei = ses, method = method),
-            error = function(e) .rmaMetaFallbackToDL(e, means, ses, method)
+            error = function(cnd) .rmaMetaFallbackToDL(cnd, means, ses, method)
         )
     }
     list(
@@ -496,11 +497,11 @@ NULL
 # Concatenate per-block stats into the genome-wide regression design. M_a is
 # the annotation SNP counts (univariate: total number of directions).
 .lderDesign <- function(blockStats, baselineMat) {
-    x <- unlist(map(blockStats, "x"))
+    x <- list_c(map(blockStats, "x"))
     ldAnnotList <- map(blockStats, "ldAnnot")
     list(
         x = x,
-        lam = unlist(map(blockStats, "lam")),
+        lam = list_c(map(blockStats, "lam")),
         ldAnnot = exec(rbind, !!!ldAnnotList),
         blockId = rep(
             seq_along(blockStats),
@@ -614,8 +615,8 @@ NULL
         rough = rough,
         twostage = twostage
     )
-    h2Loo <- unlist(map(loo, "h2"))
-    aLoo <- unlist(map(loo, "a"))
+    h2Loo <- map_dbl(loo, "h2")
+    aLoo <- map_dbl(loo, "a")
     tauList <- map(loo, "tau")
     tauBlocks <- exec(rbind, !!!tauList)
     jkSe <- function(v) sqrt((nB - 1) / nB * sum((v - mean(v))^2))
@@ -941,7 +942,7 @@ NULL
     estHBlocks <- exec(rbind, !!!estHList)
     tauList <- map(loo, "tau")
     tauBlocks <- exec(rbind, !!!tauList)
-    intLoo <- unlist(map(loo, "intercept"))
+    intLoo <- map_dbl(loo, "intercept")
     jkSe <- function(v) sqrt(var(v) * (nB - 1)^2 / nB)
     list(
         h2Se = jkSe(estHBlocks[, 1]),
@@ -1076,8 +1077,8 @@ gldscUnivariate <- function(
     M <- length(ldRef)
     A <- .gldscAnnotMatrix(annotations, M)
     preps <- map(ldMatrixList, .gldscBlockPrep, z = z, A = A)
-    rawNtau <- sum(unlist(map(preps, "y"))) /
-        sum(unlist(map(preps, "ldsc")))
+    rawNtau <- sum(list_c(map(preps, "y"))) /
+        sum(list_c(map(preps, "ldsc")))
     contrib <- map(preps, .gldscBlockGls, rawNtau = rawNtau)
     left <- reduce(map(contrib, "L"), `+`)
     right <- reduce(map(contrib, "R"), `+`)
@@ -1199,8 +1200,8 @@ NULL
 # eigenvalue-score matrix, and M_a. Univariate uses a single all-ones score
 # column (l_{i,base} = 1) scaled by total M.
 .hdlDesign <- function(blockData, M, baselineMat) {
-    lam <- unlist(map(blockData, "lam"))
-    bstar <- unlist(map(blockData, "bstar"))
+    lam <- list_c(map(blockData, "lam"))
+    bstar <- list_c(map(blockData, "bstar"))
     blockId <- rep(
         seq_along(blockData),
         lengths(map(blockData, "lam"))
@@ -1321,7 +1322,7 @@ NULL
     )
     h2aList <- map(loo, "h2a")
     h2aBlocks <- exec(rbind, !!!h2aList)
-    intLoo <- unlist(map(loo, "int"))
+    intLoo <- map_dbl(loo, "int")
     jkSe <- function(x) sqrt(mean((x - mean(x))^2) * (nBlocks - 1))
     list(
         h2aSe = apply(h2aBlocks, 2, jkSe),
@@ -1952,15 +1953,21 @@ sldscUnivariate <- function(
     ldRef,
     annotations,
     local,
-    ...
+    estimatorArgs = list()
 ) {
-    switch(
+    # `estimatorArgs` rather than `...`: the four estimators take different
+    # trailing arguments (`lambda` for lder/gldsc/hdl, `nIter` for sldsc), so
+    # an unknown name should fail here rather than at whichever estimator the
+    # method token happens to select.
+    base <- list(z, n, ldRef, annotations, local)
+    fn <- switch(
         method,
-        "lder" = lderUnivariate(z, n, ldRef, annotations, local, ...),
-        "gldsc" = gldscUnivariate(z, n, ldRef, annotations, local, ...),
-        "sldsc" = sldscUnivariate(z, n, ldRef, annotations, local, ...),
-        "hdl" = hdlUnivariate(z, n, ldRef, annotations, local, ...)
+        "lder" = lderUnivariate,
+        "gldsc" = gldscUnivariate,
+        "sldsc" = sldscUnivariate,
+        "hdl" = hdlUnivariate
     )
+    exec(fn, !!!base, !!!estimatorArgs)
 }
 
 # The estimators read `z` and the annotation rows positionally, by each LD
@@ -2069,6 +2076,7 @@ setMethod(
         annotations = NULL,
         local = FALSE,
         study = NULL,
+        estimatorArgs = list(),
         ...
     ) {
         method <- arg_match(method, c("lder", "gldsc", "sldsc", "hdl"))
@@ -2091,7 +2099,7 @@ setMethod(
             ldRef,
             annotations,
             local,
-            ...
+            estimatorArgs = estimatorArgs
         )
         .h2EstimateFromResult(result, method, M, study)
     }
@@ -2224,6 +2232,7 @@ setMethod(
 # Converter: H2Estimate -> sldsc_wrapper list format
 # =============================================================================
 
+#' @importFrom checkmate assertClass
 #' @title Convert H2Estimate to S-LDSC Trait Format
 #' @description Convert an \code{H2Estimate} object into the list format
 #'   expected by \code{\link{standardizeSldscTrait}} and
@@ -2249,9 +2258,7 @@ setMethod(
 #' h2EstimateToSldscTrait(h2EstimateExample)
 #' @export
 h2EstimateToSldscTrait <- function(h2Est) {
-    if (!is(h2Est, "H2Estimate")) {
-        abort("h2Est must be an H2Estimate object")
-    }
+    assertClass(h2Est, "H2Estimate")
 
     enrichDf <- getEnrichment(h2Est)
     if (is.null(enrichDf)) {

@@ -16,7 +16,7 @@ mrmashRssWeights(
   covY = NULL,
   retainFit = FALSE,
   fitDetail = c("slim", "full"),
-  ...
+  methodArgs = list()
 )
 }
 \arguments{
@@ -60,7 +60,8 @@ coefficients are already the returned weights); \code{"full"} additionally
 keeps the complete \code{mr.mash.rss} fit under \code{$fit}. Mirrors
 \code{\link{mrmashWeights}}.}
 
-\item{...}{Additional arguments forwarded to \code{mr.mashr::mr.mash.rss}.}
+\item{methodArgs}{Optional named list of options forwarded to
+\code{mr.mashr::mr.mash.rss}.}
 }
 \value{
 A numeric matrix of per-variant per-context weights (variants x

@@ -224,3 +224,16 @@ test_that("iterative cleanup loops and warns when related pairs persist", {
     expect_type(result, "character")
     expect_equal(length(result), 0L)
 })
+
+test_that(".relatednessLargestComponent guards an empty component list", {
+    # max(integer(0)) warns and returns -Inf; with no related pairs the
+    # pruning loop must simply not run, without emitting that warning.
+    expect_identical(
+        pecotmr:::.relatednessLargestComponent(list(csize = integer(0))),
+        0L
+    )
+    expect_identical(
+        pecotmr:::.relatednessLargestComponent(list(csize = c(3L, 7L))),
+        7L
+    )
+})

@@ -599,11 +599,11 @@ test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
     )
     expect_error(
         pecotmr:::.rbindFineMappingResult(fmr, "not_an_fmr"),
-        "expects two FineMappingResultBase inputs"
+        "Must inherit from class 'FineMappingResultBase'"
     )
     expect_error(
         pecotmr:::.rbindFineMappingResult("not_an_fmr", fmr),
-        "expects two FineMappingResultBase inputs"
+        "Must inherit from class 'FineMappingResultBase'"
     )
 })
 

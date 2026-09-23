@@ -92,3 +92,11 @@ test_that("the partition check stops when perFoldFits is not a list", {
         samplePartition = data.frame(Sample = "a", Fold = 1L)
     )))
 })
+
+test_that("MashPrior: cvFits must be a list or NULL", {
+    expect_error(
+        MashPrior(fullFit = list(U = list(U1 = diag(2))), cvFits = "nope"),
+        "cvFits.*Must be of type 'list'"
+    )
+    expect_silent(MashPrior(fullFit = list(U = list(U1 = diag(2)))))
+})

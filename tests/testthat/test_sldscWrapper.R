@@ -47,7 +47,10 @@ test_that("readSldscTrait reads polyfun outputs correctly", {
 })
 
 test_that("readSldscTrait errors on missing files", {
-    expect_error(readSldscTrait("/nonexistent/prefix"), "missing file")
+    expect_error(
+        readSldscTrait("/nonexistent/prefix"),
+        "File does not exist"
+    )
 })
 
 test_that("readSldscTrait errors when h2 not in log", {
@@ -225,7 +228,10 @@ test_that("computeSldscAnnotSd errors when there are no annotation columns", {
 })
 
 test_that("computeSldscAnnotSd errors on non-SldscData input", {
-    expect_error(computeSldscAnnotSd(list(a = 1)), "must be an SldscData")
+    expect_error(
+        computeSldscAnnotSd(list(a = 1)),
+        "Must inherit from class 'SldscData'"
+    )
 })
 
 test_that("computeSldscAnnotSd errors with zero degrees of freedom", {
@@ -298,7 +304,10 @@ test_that("computeSldscMRef errors when mafCutoff > 0 but no frq data", {
 })
 
 test_that("computeSldscMRef errors on non-SldscData input", {
-    expect_error(computeSldscMRef(list(a = 1)), "must be an SldscData")
+    expect_error(
+        computeSldscMRef(list(a = 1)),
+        "Must inherit from class 'SldscData'"
+    )
 })
 
 
@@ -327,7 +336,10 @@ test_that("isBinarySldscAnnot respects annotCols (numeric)", {
 })
 
 test_that("isBinarySldscAnnot errors on non-SldscData input", {
-    expect_error(isBinarySldscAnnot(list(a = 1)), "must be an SldscData")
+    expect_error(
+        isBinarySldscAnnot(list(a = 1)),
+        "Must inherit from class 'SldscData'"
+    )
 })
 
 
@@ -521,7 +533,7 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
             sdAnnot = c(A_0 = 0.5),
             MRef = 1000L
         ),
-        "must be an SldscData"
+        "Must inherit from class 'SldscData'"
     )
 })
 

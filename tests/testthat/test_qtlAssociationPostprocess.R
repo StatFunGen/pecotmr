@@ -488,15 +488,20 @@ test_that(".qapSignificanceMask returns empty masks for an unknown method", {
     S4Vectors::mcols(g)$Z <- c(1, 2)
     S4Vectors::mcols(g)$N <- c(10L, 10L)
     qss <- QtlSumStats(
-        study = "s1", context = "c1", trait = "g1",
-        entry = list(g), genome = "hg19"
+        study = "s1",
+        context = "c1",
+        trait = "g1",
+        entry = list(g),
+        genome = "hg19"
     )
     local_mocked_bindings(
         getQcInfo = function(x) {
-            list(associationPostprocess = list(
-                fdrThreshold = 0.05,
-                pvalueCol = "pval_nominal"
-            ))
+            list(
+                associationPostprocess = list(
+                    fdrThreshold = 0.05,
+                    pvalueCol = "pval_nominal"
+                )
+            )
         },
         .qapEmptyMask = function(i, x, pcol) str_c("EMPTY", i),
         .package = "pecotmr"

@@ -2316,9 +2316,11 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
             niter = 5L,
             niterPrefit = 2L,
             # Toy panel: relax the production filters that gate out tiny inputs.
-            min_group_size = 1L,
-            min_p_single_effect = 0,
-            filter_L = FALSE
+            ctwasArgs = list(
+                min_group_size = 1L,
+                min_p_single_effect = 0,
+                filter_L = FALSE
+            )
         )
     ))
 
@@ -3269,7 +3271,10 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
     data(ctwasEstExample)
     # The step that the stale absolute paths broke.
     screened <- suppressMessages(
-        screenCtwasRegions(ctwasEstExample, min_nonSNP_PIP = 0)
+        screenCtwasRegions(
+            ctwasEstExample,
+            ctwasArgs = list(min_nonSNP_PIP = 0)
+        )
     )
     out <- suppressMessages(finemapCtwasRegions(screened))
     expect_gt(nrow(out$finemap_res), 0L)
@@ -3693,7 +3698,11 @@ test_that(".ctwasRenormalizeSusieWeights skips fits it cannot slice", {
     harmonizedW <- c(0.5, 0.5)
     run <- function(fits) {
         pecotmr:::.ctwasRenormalizeSusieWeights(
-            fits, origVids, origW, keptIdx, harmonizedW
+            fits,
+            origVids,
+            origW,
+            keptIdx,
+            harmonizedW
         )
     }
     # Any missing susie field: nothing to renormalize from.
@@ -3744,5 +3753,13 @@ test_that(".ctwasResolveAndValidateWeights rejects a blank region name", {
     expect_error(
         pecotmr:::.ctwasResolveAndValidateWeights(list(x = 1), NULL),
         "must resolve to a named list keyed by region_id"
+    )
+})
+
+test_that("asCtwasResult: keepSnps must be a flag", {
+    expect_error(asCtwasResult(NULL, keepSnps = NA), "keepSnps.*May not be NA")
+    expect_error(
+        asCtwasResult(NULL, keepSnps = 1L),
+        "keepSnps.*logical flag"
     )
 })

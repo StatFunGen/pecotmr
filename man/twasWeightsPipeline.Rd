@@ -185,7 +185,11 @@ limit).}
 
 \item{cvThreads}{Threads for CV parallelism. Default 1.}
 
-\item{cvWeightMethods}{Optional override of methods used for CV.}
+\item{cvWeightMethods}{Optional override of which methods are
+cross-validated, as a character vector of tokens or a named method
+list. \code{NULL} (default) cross-validates every method that
+produced non-zero weights; a method whose weights are all zero is
+excluded with a warning either way.}
 
 \item{ensemble}{Logical. Compute SR-TWAS ensemble weights. Default
 \code{TRUE}.}

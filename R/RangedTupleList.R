@@ -324,6 +324,7 @@ setMethod("[[<-", "RangedTupleList", function(x, i, j, ..., value) {
 
 # Resolve `[[` index forms (positive integer or element name) to a position.
 # @noRd
+#' @importFrom checkmate assertScalar
 .rtlAssignIndex <- function(x, i) {
     if (is.character(i)) {
         pos <- match(i, names(x))
@@ -332,9 +333,7 @@ setMethod("[[<-", "RangedTupleList", function(x, i, j, ..., value) {
         }
         return(pos)
     }
-    if (length(i) != 1L || is.na(i)) {
-        abort("`[[<-` takes a single non-NA index.")
-    }
+    assertScalar(i, na.ok = FALSE, .var.name = "`[[<-` index")
     as.integer(i)
 }
 
@@ -436,7 +435,12 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
     }
     pieces <- map(entry, .rtlSplitOne)
     list(
-        entry = unlist(pieces, recursive = FALSE, use.names = TRUE),
+        # unname(): the flattened names were an artifact of base unlist()'s
+        # `outer.inner` mangling and were never coherent -- a multi-seqname
+        # entry got `a.chr1`, a single-seqname one got bare `a`, an unnamed
+        # input got `chr1` or "". Nothing reads them, and the seqname path
+        # already had to unname() derived values to keep them out of mcols.
+        entry = unname(list_flatten(pieces)),
         fromIdx = rep(seq_along(entry), lengths(pieces))
     )
 }
@@ -499,7 +503,12 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
         warn(msg)
     }
     list(
-        entry = unlist(pieces, recursive = FALSE, use.names = TRUE),
+        # unname(): the flattened names were an artifact of base unlist()'s
+        # `outer.inner` mangling and were never coherent -- a multi-seqname
+        # entry got `a.chr1`, a single-seqname one got bare `a`, an unnamed
+        # input got `chr1` or "". Nothing reads them, and the seqname path
+        # already had to unname() derived values to keep them out of mcols.
+        entry = unname(list_flatten(pieces)),
         fromIdx = rep(seq_along(entry), lengths(pieces)),
         blockId = unname(list_c(map(pieces, names)))
     )

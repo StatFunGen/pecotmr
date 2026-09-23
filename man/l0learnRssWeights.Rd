@@ -14,7 +14,7 @@ l0learnRssWeights(
   lambda2 = 0,
   selection = c("ldQuadratic", "minFbeta"),
   maxSwaps = 100,
-  ...
+  methodArgs = list()
 )
 }
 \arguments{
@@ -42,7 +42,8 @@ Default \code{"L0"}.}
 
 \item{maxSwaps}{Maximum swap rounds per lambda. Default 100.}
 
-\item{...}{Additional arguments passed to \code{penalizedRss()}.}
+\item{methodArgs}{Optional named list of options passed to
+\code{penalizedRss()}.}
 }
 \value{
 A numeric vector of SNP coefficient weights.

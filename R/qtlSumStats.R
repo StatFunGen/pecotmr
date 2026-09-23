@@ -36,52 +36,31 @@ setClass(
 # Collect all contract violations (empty vector = valid). The per-entry checks
 # run only once the basic slot/column checks pass (they assume those columns).
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames
 .validateQtlSumStats <- function(object) {
-    errors <- c(
-        .qssCheckLdSketch(object),
-        .qssCheckRequiredCols(object),
-        .qssCheckGenome(object),
-        .qssCheckQcInfo(object),
-        .validateTraitPosColumn(object)
+    coll <- makeAssertCollection()
+    # `names(object)` is element names on a RangedTupleList, so the required
+    # metadata columns are read from mcols directly.
+    assertNames(
+        colnames(mcols(object)) %||% character(0),
+        must.include = c("study", "context", "trait"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
     )
-    if (length(errors) == 0L) {
-        errors <- .qssCheckEntries(object)
+    coll$push(.qssCheckGenome(object))
+    coll$push(.validateTraitPosColumn(object))
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# ldSketch must be a GenotypeHandle or NULL.
-# @noRd
-.qssCheckLdSketch <- function(object) {
-    # The slot's class union enforces the type; nothing to check.
-    NULL
-}
-
-# The study/context/trait metadata columns must be present. `names(object)` is
-# element names on a RangedTupleList, so the check reads mcols directly.
-# @noRd
-.qssCheckRequiredCols <- function(object) {
-    missingCols <- setdiff(
-        c("study", "context", "trait"),
-        colnames(mcols(object))
-    )
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.qssCheckEntries(object))
+    coll$getMessages()
 }
 
 # The genome build, read from seqinfo (there is no genome slot).
 # @noRd
 .qssCheckGenome <- function(object) {
     .sumStatsCheckGenome(object)
-}
-
-# qcInfo slot must be a list.
-# @noRd
-.qssCheckQcInfo <- function(object) {
-    # The slot's declared type enforces this; nothing to check.
-    NULL
 }
 
 # Element contract. The elements ARE GRanges by construction now -- the
@@ -321,6 +300,7 @@ QtlSumStats <- function(
 # Internal: resolve a (study, context, trait) tuple to its element indices.
 # Returns a VECTOR: a tuple whose entry spanned several chromosomes was split
 # into one element per seqname at construction.
+#' @importFrom checkmate assertVector
 .qtlSumStatsSelectRow <- function(x, study, context, trait) {
     if (nrow(x) == 0L) {
         abort("QtlSumStats has no rows.")
@@ -341,9 +321,9 @@ QtlSumStats <- function(
         )
         abort(msg)
     }
-    if (length(study) != 1L || length(context) != 1L || length(trait) != 1L) {
-        abort("`study`, `context`, and `trait` must each be length 1.")
-    }
+    assertVector(study, len = 1L)
+    assertVector(context, len = 1L)
+    assertVector(trait, len = 1L)
     .qssMatchTuple(x, study, context, trait)
 }
 

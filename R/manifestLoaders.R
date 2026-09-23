@@ -30,17 +30,14 @@ NULL
 
 # Read a manifest into a tibble. A data.frame/tibble is passed through; a
 # single path is read by extension (.csv -> read_csv, else read_tsv).
+#' @importFrom checkmate assertString
+#' @importFrom checkmate assertFileExists
 .readManifest <- function(manifest) {
     if (is.data.frame(manifest)) {
         return(as_tibble(manifest, .name_repair = "minimal"))
     }
-    if (!is.character(manifest) || length(manifest) != 1L) {
-        abort("`manifest` must be a data.frame or a single file path.")
-    }
-    if (!file.exists(manifest)) {
-        msg <- glue("manifest file not found: {manifest}")
-        abort(msg)
-    }
+    assertString(manifest, .var.name = "manifest (data.frame or file path)")
+    assertFileExists(manifest, access = "r", .var.name = "manifest file")
     if (str_detect(manifest, regex("\\.csv$", ignore_case = TRUE))) {
         readr::read_csv(manifest, show_col_types = FALSE, progress = FALSE)
     } else {
@@ -77,6 +74,34 @@ NULL
 # `required` canonical columns are present. `aliases` is a named list keyed by
 # canonical name; each value is the character vector of accepted source names
 # (including the canonical name itself). The first alias present wins.
+# The QtlDataset pass-through arguments, asserted at the loader so a bad value
+# is reported against the argument the caller passed rather than surfacing from
+# QtlDataset's validity several hundred lines later. Types match
+# .qtlValidateScalars exactly, so this tightens nothing.
+# @noRd
+#' @importFrom checkmate assertLogical assertNumber assertFlag assertCharacter
+.assertQtlPassThrough <- function(
+    scaleResiduals,
+    mafCutoff,
+    macCutoff,
+    xvarCutoff,
+    imissCutoff,
+    keepSamples,
+    keepVariants,
+    keepIndel
+) {
+    assertLogical(scaleResiduals, len = 1L)
+    assertNumber(mafCutoff, lower = 0, finite = TRUE)
+    assertNumber(macCutoff, lower = 0, finite = TRUE)
+    assertNumber(xvarCutoff, lower = 0, finite = TRUE)
+    assertNumber(imissCutoff, lower = 0, finite = TRUE)
+    assertCharacter(keepSamples)
+    assertCharacter(keepVariants)
+    assertFlag(keepIndel)
+    invisible(NULL)
+}
+
+#' @importFrom checkmate assertNames
 .canonManifestCols <- function(df, aliases, required, label) {
     for (canon in names(aliases)) {
         if (is_in(canon, names(df))) {
@@ -87,14 +112,12 @@ NULL
             names(df)[match(hit[[1L]], names(df))] <- canon
         }
     }
-    missingCols <- setdiff(required, names(df))
-    if (length(missingCols) > 0L) {
-        msg <- glue(
-            "{label} manifest is missing required column(s): ",
-            "{str_flatten(missingCols, ', ')}"
-        )
-        abort(msg)
-    }
+    assertNames(
+        names(df),
+        must.include = required,
+        what = "colnames",
+        .var.name = str_c(label, " manifest")
+    )
     df
 }
 
@@ -295,10 +318,9 @@ NULL
 # empty entries contribute nothing; NA seqnames are dropped. Always returns a
 # character vector (character(0) when nothing is present, never NULL).
 .entriesChroms <- function(entries) {
-    ch <- as.character(unlist(
-        map(entries, .mlEntryChroms),
-        use.names = FALSE
-    ))
+    # as.character() is load-bearing: an all-empty list concatenates to NULL,
+    # and this helper promises character(0).
+    ch <- as.character(unname(list_c(map(entries, .mlEntryChroms))))
     unique(ch[!is.na(ch)])
 }
 
@@ -487,7 +509,7 @@ NULL
     if (is.null(gr)) {
         return(emptyDf)
     }
-    lines <- unlist(Rsamtools::scanTabix(tf, param = gr), use.names = FALSE)
+    lines <- unname(list_c(Rsamtools::scanTabix(tf, param = gr)))
     if (length(lines) == 0L) {
         return(emptyDf)
     }
@@ -562,6 +584,7 @@ NULL
 # standard key (chrom/pos/variant_id/...) to the source column name. Accepts a
 # named list/vector, or a path to a YAML file of `standardName: sourceName`
 # entries (the xqtl-protocol column-mapping format).
+#' @importFrom checkmate assertFileExists
 .readColumnMapping <- function(columnMapping) {
     if (is.null(columnMapping)) {
         return(NULL)
@@ -574,10 +597,11 @@ NULL
         return(map_chr(columnMapping, as.character))
     }
     if (is.character(columnMapping) && length(columnMapping) == 1L) {
-        if (!file.exists(columnMapping)) {
-            msg <- glue("columnMapping file not found: {columnMapping}")
-            abort(msg)
-        }
+        assertFileExists(
+            columnMapping,
+            access = "r",
+            .var.name = "columnMapping file"
+        )
         mapping <- yaml::read_yaml(columnMapping)
         if (
             !is.list(mapping) ||
@@ -845,9 +869,11 @@ NULL
 # effect allele (A1) is ALT; the other allele (A2) is REF. Stats come from the
 # per-study FORMAT fields ES/SE/LP/SS/EAF, with Z = ES / SE.
 .vcfToSumstatDf <- function(vcf, sampleSelect, formatMapping, label) {
-    fmap <- modifyList(
+    fmap <- list_modify(
         .gwasVcfFormatDefaults,
-        if (is.null(formatMapping)) list() else as.list(formatMapping)
+        !!!compact(
+            if (is.null(formatMapping)) list() else as.list(formatMapping)
+        )
     )
     rr <- SummarizedExperiment::rowRanges(vcf)
     altList <- VariantAnnotation::alt(vcf)
@@ -898,8 +924,8 @@ NULL
 .readSumStatsVcf <- function(path, region, sampleSelect, formatMapping, label) {
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
         msg <- glue(
-            "{label}: reading VCF sumstats requires the 'VariantAnnotation' ",
-            "package; please install it."
+            "{label}: reading VCF sumstats requires the ",
+            "'VariantAnnotation' package."
         )
         abort(msg)
     }
@@ -1443,6 +1469,7 @@ NULL
 #'   study = "s1", genotypePath = file.path(d, "example.chr22"))
 #' loadQtlDatasetFromManifest(manifest = manifest, study = "s1")
 #' @importFrom stringr str_ends
+#' @importFrom checkmate assertString assertFlag
 #' @export
 loadQtlDatasetFromManifest <- function(
     manifest,
@@ -1459,6 +1486,18 @@ loadQtlDatasetFromManifest <- function(
     keepIndel = TRUE,
     transposeCovariates = FALSE
 ) {
+    assertString(study, null.ok = TRUE)
+    assertFlag(transposeCovariates)
+    .assertQtlPassThrough(
+        scaleResiduals = scaleResiduals,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        xvarCutoff = xvarCutoff,
+        imissCutoff = imissCutoff,
+        keepSamples = keepSamples,
+        keepVariants = keepVariants,
+        keepIndel = keepIndel
+    )
     base <- .manifestBase(manifest)
     df <- .canonManifestCols(
         .readManifest(manifest),
@@ -1955,6 +1994,7 @@ loadQtlSumStatsFromManifest <- function(
 #'   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
 #'   genotypePath = file.path(d, "example.chr22"))
 #' loadMultiStudyQtlDatasetFromManifest(qtlDatasetsManifest = manifest)
+#' @importFrom checkmate assertFlag assertNumber
 #' @export
 loadMultiStudyQtlDatasetFromManifest <- function(
     qtlDatasetsManifest,
@@ -1976,6 +2016,18 @@ loadMultiStudyQtlDatasetFromManifest <- function(
     keepVariants = character(0),
     keepIndel = TRUE
 ) {
+    assertFlag(transposeCovariates)
+    assertNumber(minLdOverlapWarn, lower = 0, upper = 1)
+    .assertQtlPassThrough(
+        scaleResiduals = scaleResiduals,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        xvarCutoff = xvarCutoff,
+        imissCutoff = imissCutoff,
+        keepSamples = keepSamples,
+        keepVariants = keepVariants,
+        keepIndel = keepIndel
+    )
     qc <- .msqQcArgs(
         scaleResiduals,
         mafCutoff,

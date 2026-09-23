@@ -38,26 +38,35 @@ setClass(
 # The tier/type vocabulary is the only thing left to check: the SNP-by-
 # annotation shape is now enforced by SummarizedExperiment itself.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames assertSubset
 .validateAnnotationMatrix <- function(object) {
-    errors <- character()
+    coll <- makeAssertCollection()
     cd <- SummarizedExperiment::colData(object)
-    required <- c("name", "tier", "type")
-    if (!all(is_in(required, colnames(cd)))) {
-        return("annotationMeta must have columns: name, tier, type")
+    assertNames(
+        colnames(cd),
+        must.include = c("name", "tier", "type"),
+        what = "colnames",
+        .var.name = "annotationMeta",
+        add = coll
+    )
+    # The value checks below read those columns; without them they would
+    # report the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (!all(is_in(cd$tier, c("baseline", "candidate")))) {
-        errors <- c(
-            errors,
-            "annotationMeta$tier must be 'baseline' or 'candidate'"
-        )
-    }
-    if (!all(is_in(cd$type, c("binary", "continuous")))) {
-        errors <- c(
-            errors,
-            "annotationMeta$type must be 'binary' or 'continuous'"
-        )
-    }
-    if (length(errors) == 0) TRUE else errors
+    assertSubset(
+        cd$tier,
+        c("baseline", "candidate"),
+        .var.name = "annotationMeta$tier",
+        add = coll
+    )
+    assertSubset(
+        cd$type,
+        c("binary", "continuous"),
+        .var.name = "annotationMeta$type",
+        add = coll
+    )
+    coll$getMessages()
 }
 
 #' @rdname show-methods
@@ -114,6 +123,7 @@ setMethod("getGenome", "AnnotationMatrix", function(x, ...) {
     if (!all(is_in(requiredCols, colnames(annotationMeta)))) {
         abort("annotationMeta must have columns: name, tier, type")
     }
+    # NOT assertMatrix: `annotations` may be a sparse Matrix, not a base one.
     if (ncol(annotations) != nrow(annotationMeta)) {
         abort(glue(
             "`annotations` has {ncol(annotations)} column(s) for ",
@@ -187,7 +197,9 @@ AnnotationMatrix <- function(
 # rows, the assay and the per-annotation table aligned, where the previous
 # implementation rebuilt the object from three separately-subset pieces.
 # @noRd
+#' @importFrom checkmate assertClass
 .annotTier <- function(annot, tier) {
+    assertClass(annot, "AnnotationMatrix")
     annot[, SummarizedExperiment::colData(annot)$tier == tier]
 }
 

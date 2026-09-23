@@ -626,7 +626,10 @@ test_that("QtlFineMappingResult: getMarginalEffects with tuple selectors", {
 test_that("validity names a missing identity column", {
     bad <- .qfmr_res()
     mcols(bad)$trait <- NULL
-    expect_error(methods::validObject(bad), "missing columns: trait")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'trait'\\}"
+    )
 })
 
 test_that("validity names a missing entry payload column", {
@@ -634,7 +637,7 @@ test_that("validity names a missing entry payload column", {
     mcols(bad)$susieFit <- NULL
     expect_error(
         methods::validObject(bad),
-        "missing entry payload columns: susieFit"
+        "missing entry payload columns: .*missing elements \\{'susieFit'\\}"
     )
 })
 

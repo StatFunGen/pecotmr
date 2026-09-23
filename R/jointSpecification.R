@@ -135,10 +135,9 @@
         return(character(0))
     }
     if (is.null(context)) {
-        return(unique(unlist(
-            map(getContexts(data), .spTraitsInContext, data = data),
-            use.names = FALSE
-        )))
+        return(unique(unname(list_c(
+            map(getContexts(data), .spTraitsInContext, data = data)
+        ))))
     }
     # Checked here rather than left to the accessor: `.spListTraits` answers
     # "which traits are in this scope", and an absent context is an empty
@@ -692,6 +691,7 @@ parseTraitIds <- function(traitId, data) {
 # --- parseMethods helpers ---------------------------------------------------
 
 # Validate mutual exclusivity of primary vs split method specs.
+#' @importFrom checkmate assertCharacter
 .parseMethodsValidateArgs <- function(
     primaryGiven,
     splitGiven,
@@ -720,14 +720,8 @@ parseTraitIds <- function(traitId, data) {
             )
             abort(msg)
         }
-        if (!is.character(sumStatsMethods) || length(sumStatsMethods) == 0L) {
-            abort("`sumStatsMethods` must be a non-empty character vector.")
-        }
-        if (
-            !is.character(qtlDatasetMethods) || length(qtlDatasetMethods) == 0L
-        ) {
-            abort("`qtlDatasetMethods` must be a non-empty character vector.")
-        }
+        assertCharacter(sumStatsMethods, min.len = 1L)
+        assertCharacter(qtlDatasetMethods, min.len = 1L)
     }
 }
 
@@ -1659,9 +1653,34 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     # Run the joint dispatch once per region block, then merge per
     # (study, context, trait, method) across regions. A single block (cis or
     # jointRegions=TRUE concatenated) returns its result directly.
-    args <- as.list(environment())
-    args$xRegions <- NULL
-    perRegion <- map(xRegions, .fmDispatchJointSpecRegion, args = args)
+    # xRegions is deliberately absent: each region is supplied per call.
+    perRegion <- map(
+        xRegions,
+        .fmDispatchJointSpecRegion,
+        parsedJointSpec = parsedJointSpec,
+        data = data,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        cisWindow = cisWindow,
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        verbose = verbose,
+        methodArgs = methodArgs,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        cvFolds = cvFolds,
+        cvThreads = cvThreads,
+        samplePartition = samplePartition,
+        pipCutoffToSkip = pipCutoffToSkip,
+        fineMappingResult = fineMappingResult,
+        fullFit = fullFit,
+        fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs,
+        seed = seed
+    )
     perRegion <- compact(perRegion)
     if (length(perRegion) == 0L) {
         return(NULL)
@@ -1673,26 +1692,38 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 }
 
 # FmJointPipeline for individual-level fine-mapping, built from the call params.
-.fmJointPipeline <- function(args) {
+.fmJointPipeline <- function(
+    coverage,
+    secondaryCoverage,
+    signalCutoff,
+    minAbsCorr,
+    dataDrivenPriorWeightsCutoff,
+    cvFolds,
+    cvThreads,
+    samplePartition,
+    verbose,
+    fullFit,
+    fullFitAlphaOnly,
+    includeAllCs,
+    seed
+) {
     new(
         "FmJointPipeline",
-        config = c(
-            args[c(
-                "coverage",
-                "secondaryCoverage",
-                "signalCutoff",
-                "minAbsCorr",
-                "dataDrivenPriorWeightsCutoff",
-                "cvFolds",
-                "cvThreads",
-                "samplePartition",
-                "verbose",
-                "fullFit",
-                "fullFitAlphaOnly",
-                "includeAllCs",
-                "seed"
-            )],
-            list(ldSketch = NULL)
+        config = list(
+            coverage = coverage,
+            secondaryCoverage = secondaryCoverage,
+            signalCutoff = signalCutoff,
+            minAbsCorr = minAbsCorr,
+            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+            cvFolds = cvFolds,
+            cvThreads = cvThreads,
+            samplePartition = samplePartition,
+            verbose = verbose,
+            fullFit = fullFit,
+            fullFitAlphaOnly = fullFitAlphaOnly,
+            includeAllCs = includeAllCs,
+            seed = seed,
+            ldSketch = NULL
         )
     )
 }
@@ -1726,7 +1757,21 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     # Engine routing (jointEngine.R); one region block (the caller loops
     # regions).
     .jointRejectStudyOnIndividual(parsedJointSpec)
-    pipeline <- .fmJointPipeline(as.list(environment()))
+    pipeline <- .fmJointPipeline(
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        cvFolds = cvFolds,
+        cvThreads = cvThreads,
+        samplePartition = samplePartition,
+        verbose = verbose,
+        fullFit = fullFit,
+        fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs,
+        seed = seed
+    )
     .runJointSpecs(
         parsedJointSpec,
         data,
@@ -1753,22 +1798,32 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 # FmJointPipeline for summary-statistics fine-mapping (RSS: no sample folds;
 # LD sketch drawn from the data).
-.fmSumStatsPipeline <- function(args) {
+.fmSumStatsPipeline <- function(
+    data,
+    coverage,
+    secondaryCoverage,
+    signalCutoff,
+    minAbsCorr,
+    dataDrivenPriorWeightsCutoff,
+    verbose,
+    fullFit,
+    fullFitAlphaOnly,
+    includeAllCs
+) {
     new(
         "FmJointPipeline",
-        config = c(
-            args[c(
-                "coverage",
-                "secondaryCoverage",
-                "signalCutoff",
-                "minAbsCorr",
-                "dataDrivenPriorWeightsCutoff",
-                "verbose",
-                "fullFit",
-                "fullFitAlphaOnly",
-                "includeAllCs"
-            )],
-            list(cvFolds = 0L, ldSketch = getLdSketch(args$data))
+        config = list(
+            coverage = coverage,
+            secondaryCoverage = secondaryCoverage,
+            signalCutoff = signalCutoff,
+            minAbsCorr = minAbsCorr,
+            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+            verbose = verbose,
+            fullFit = fullFit,
+            fullFitAlphaOnly = fullFitAlphaOnly,
+            includeAllCs = includeAllCs,
+            cvFolds = 0L,
+            ldSketch = getLdSketch(data)
         )
     )
 }
@@ -1798,7 +1853,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     # Engine routing (jointEngine.R): the dispatch table + .runJointCell replace
     # the per-axis switch + the cross-context/trait/study/composed leaf
     # dispatchers.
-    pipeline <- .fmSumStatsPipeline(as.list(environment()))
+    pipeline <- .fmSumStatsPipeline(
+        data = data,
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        verbose = verbose,
+        fullFit = fullFit,
+        fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs
+    )
     .runJointSpecs(
         parsedJointSpec,
         data,
@@ -1813,11 +1879,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             methodArgs = methodArgs,
             verbose = verbose,
             cache = fineMappingResult,
-            cutoffs = .panelCutoffs(list(
+            cutoffs = .panelCutoffs(
                 mafCutoff = mafCutoff,
                 macCutoff = macCutoff,
                 imissCutoff = imissCutoff
-            ))
+            )
         )
     )
 }
@@ -1855,32 +1921,45 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 }
 
 # Fine-map the non-study-axis specs on each individual-level QtlDataset.
-.fmMultiStudyQtlLoop <- function(nonStudyAxisSpecs, qtlDatasets, args) {
+.fmMultiStudyQtlLoop <- function(
+    nonStudyAxisSpecs,
+    qtlDatasets,
+    methods,
+    contexts,
+    traitIds,
+    cisWindow,
+    coverage,
+    secondaryCoverage,
+    signalCutoff,
+    minAbsCorr,
+    verbose,
+    methodArgs,
+    xRegions,
+    twasWeights,
+    dataDrivenPriorWeightsCutoff
+) {
     out <- NULL
     if (length(nonStudyAxisSpecs) == 0L) {
         return(out)
     }
-    fwd <- args[c(
-        "methods",
-        "contexts",
-        "traitIds",
-        "cisWindow",
-        "coverage",
-        "secondaryCoverage",
-        "signalCutoff",
-        "minAbsCorr",
-        "verbose",
-        "methodArgs",
-        "xRegions",
-        "twasWeights",
-        "dataDrivenPriorWeightsCutoff"
-    )]
     for (qdName in names(qtlDatasets)) {
-        qdArgs <- c(
-            list(nonStudyAxisSpecs, qtlDatasets[[qdName]]),
-            fwd
+        qdRes <- .fmDispatchJointSpecsQtlDataset(
+            nonStudyAxisSpecs,
+            qtlDatasets[[qdName]],
+            methods = methods,
+            contexts = contexts,
+            traitIds = traitIds,
+            cisWindow = cisWindow,
+            coverage = coverage,
+            secondaryCoverage = secondaryCoverage,
+            signalCutoff = signalCutoff,
+            minAbsCorr = minAbsCorr,
+            verbose = verbose,
+            methodArgs = methodArgs,
+            xRegions = xRegions,
+            twasWeights = twasWeights,
+            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
         )
-        qdRes <- exec(.fmDispatchJointSpecsQtlDataset, !!!qdArgs)
         if (!is.null(qdRes)) {
             out <- if (is.null(out)) {
                 qdRes
@@ -1898,8 +1977,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     sumStats,
     studyAxisSpecs,
     out,
-    args,
-    verbose
+    methods,
+    contexts,
+    traitIds,
+    coverage,
+    secondaryCoverage,
+    signalCutoff,
+    minAbsCorr,
+    verbose,
+    methodArgs,
+    twasWeights,
+    dataDrivenPriorWeightsCutoff
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
@@ -1911,24 +1999,21 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         }
         return(out)
     }
-    fwd <- args[c(
-        "methods",
-        "contexts",
-        "traitIds",
-        "coverage",
-        "secondaryCoverage",
-        "signalCutoff",
-        "minAbsCorr",
-        "verbose",
-        "methodArgs",
-        "twasWeights",
-        "dataDrivenPriorWeightsCutoff"
-    )]
-    ssArgs <- c(
-        list(parsedJointSpec, sumStats),
-        fwd
+    ssRes <- .fmDispatchJointSpecsQtlSumStats(
+        parsedJointSpec,
+        sumStats,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        verbose = verbose,
+        methodArgs = methodArgs,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
     )
-    ssRes <- exec(.fmDispatchJointSpecsQtlSumStats, !!!ssArgs)
     if (is.null(ssRes)) {
         return(out)
     }
@@ -1957,19 +2042,43 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     twasWeights = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10
 ) {
-    args <- as.list(environment())
     qtlDatasets <- getQtlDatasets(data)
     sumStats <- getSumStats(data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .fmMultiStudyWarnExcluded(specs$study, qtlDatasets, verbose)
-    out <- .fmMultiStudyQtlLoop(specs$nonStudy, qtlDatasets, args)
+    out <- .fmMultiStudyQtlLoop(
+        specs$nonStudy,
+        qtlDatasets,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        cisWindow = cisWindow,
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        verbose = verbose,
+        methodArgs = methodArgs,
+        xRegions = xRegions,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+    )
     .fmMultiStudySumStats(
         parsedJointSpec,
         sumStats,
         specs$study,
         out,
-        args,
-        verbose
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        verbose = verbose,
+        methodArgs = methodArgs,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
     )
 }
 
@@ -2145,11 +2254,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         args = list(
             methodArgs = list(),
             verbose = verbose,
-            cutoffs = .panelCutoffs(list(
+            cutoffs = .panelCutoffs(
                 mafCutoff = mafCutoff,
                 macCutoff = macCutoff,
                 imissCutoff = imissCutoff
-            ))
+            )
         )
     )
 }
@@ -2175,29 +2284,39 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 }
 
 # Learn weights for the non-study-axis specs on each individual-level dataset.
-.twasMultiStudyQtlLoop <- function(nonStudyAxisSpecs, qtlDatasets, args) {
+.twasMultiStudyQtlLoop <- function(
+    nonStudyAxisSpecs,
+    qtlDatasets,
+    methods,
+    contexts,
+    traitIds,
+    cisWindow,
+    dataType,
+    verbose,
+    xRegions,
+    retainFit,
+    retainFitDetail,
+    seed
+) {
     out <- NULL
     if (length(nonStudyAxisSpecs) == 0L) {
         return(out)
     }
-    fwd <- args[c(
-        "methods",
-        "contexts",
-        "traitIds",
-        "cisWindow",
-        "dataType",
-        "verbose",
-        "xRegions",
-        "retainFit",
-        "retainFitDetail",
-        "seed"
-    )]
     for (qdName in names(qtlDatasets)) {
-        qdArgs <- c(
-            list(nonStudyAxisSpecs, qtlDatasets[[qdName]]),
-            fwd
+        qdRes <- .twasDispatchJointSpecsQtlDataset(
+            nonStudyAxisSpecs,
+            qtlDatasets[[qdName]],
+            methods = methods,
+            contexts = contexts,
+            traitIds = traitIds,
+            cisWindow = cisWindow,
+            dataType = dataType,
+            verbose = verbose,
+            xRegions = xRegions,
+            retainFit = retainFit,
+            retainFitDetail = retainFitDetail,
+            seed = seed
         )
-        qdRes <- exec(.twasDispatchJointSpecsQtlDataset, !!!qdArgs)
         if (!is.null(qdRes)) {
             out <- if (is.null(out)) {
                 qdRes
@@ -2215,8 +2334,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     sumStats,
     studyAxisSpecs,
     out,
-    args,
-    verbose
+    methods,
+    contexts,
+    traitIds,
+    dataType,
+    verbose,
+    retainFit,
+    retainFitDetail
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
@@ -2228,20 +2352,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         }
         return(out)
     }
-    fwd <- args[c(
-        "methods",
-        "contexts",
-        "traitIds",
-        "dataType",
-        "verbose",
-        "retainFit",
-        "retainFitDetail"
-    )]
-    ssArgs <- c(
-        list(parsedJointSpec, sumStats),
-        fwd
+    ssRes <- .twasDispatchJointSpecsQtlSumStats(
+        parsedJointSpec,
+        sumStats,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        dataType = dataType,
+        verbose = verbose,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail
     )
-    ssRes <- exec(.twasDispatchJointSpecsQtlSumStats, !!!ssArgs)
     if (is.null(ssRes)) {
         return(out)
     }
@@ -2267,19 +2388,36 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     retainFitDetail = "slim",
     seed = NULL
 ) {
-    args <- as.list(environment())
     qtlDatasets <- getQtlDatasets(data)
     sumStats <- getSumStats(data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .twasMultiStudyWarnExcluded(specs$study, qtlDatasets, verbose)
-    out <- .twasMultiStudyQtlLoop(specs$nonStudy, qtlDatasets, args)
+    out <- .twasMultiStudyQtlLoop(
+        specs$nonStudy,
+        qtlDatasets,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        cisWindow = cisWindow,
+        dataType = dataType,
+        verbose = verbose,
+        xRegions = xRegions,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail,
+        seed = seed
+    )
     .twasMultiStudySumStats(
         parsedJointSpec,
         sumStats,
         specs$study,
         out,
-        args,
-        verbose
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        dataType = dataType,
+        verbose = verbose,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail
     )
 }
 
@@ -2359,9 +2497,58 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # One region's FM joint-spec dispatch; `args` bundles the shared call arguments.
 # @noRd
-.fmDispatchJointSpecRegion <- function(rg, args) {
-    regionArgs <- c(args, list(region = rg))
-    exec(.fmDispatchJointSpecsQtlDatasetOneRegion, !!!regionArgs)
+.fmDispatchJointSpecRegion <- function(
+    rg,
+    parsedJointSpec,
+    data,
+    methods,
+    contexts,
+    traitIds,
+    cisWindow,
+    coverage,
+    secondaryCoverage,
+    signalCutoff,
+    minAbsCorr,
+    verbose,
+    methodArgs,
+    twasWeights,
+    dataDrivenPriorWeightsCutoff,
+    cvFolds,
+    cvThreads,
+    samplePartition,
+    pipCutoffToSkip,
+    fineMappingResult,
+    fullFit,
+    fullFitAlphaOnly,
+    includeAllCs,
+    seed
+) {
+    .fmDispatchJointSpecsQtlDatasetOneRegion(
+        parsedJointSpec = parsedJointSpec,
+        data = data,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        cisWindow = cisWindow,
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        verbose = verbose,
+        methodArgs = methodArgs,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        cvFolds = cvFolds,
+        cvThreads = cvThreads,
+        samplePartition = samplePartition,
+        pipCutoffToSkip = pipCutoffToSkip,
+        fineMappingResult = fineMappingResult,
+        fullFit = fullFit,
+        fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs,
+        seed = seed,
+        region = rg
+    )
 }
 
 # One region's TWAS joint-spec dispatch over a QtlDataset.

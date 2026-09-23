@@ -4,7 +4,7 @@
 \alias{fitMvsusie}
 \title{Fit mvSuSiE on individual-level (X, Y) data}
 \usage{
-fitMvsusie(X, Y, prior_variance, coverage = 0.95, ...)
+fitMvsusie(X, Y, prior_variance, coverage = 0.95, methodArgs = list())
 }
 \arguments{
 \item{X}{Numeric matrix of genotypes (samples x variants).}
@@ -18,7 +18,8 @@ domain-specific prior.}
 
 \item{coverage}{Credible set coverage (default 0.95).}
 
-\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie}.}
+\item{methodArgs}{Optional named list of options forwarded to
+\code{mvsusieR::mvsusie}.}
 }
 \value{
 The fit object returned by \code{mvsusieR::mvsusie}.

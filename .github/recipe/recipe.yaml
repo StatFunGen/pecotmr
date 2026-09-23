@@ -41,6 +41,7 @@ requirements:
     - r-base
     - r-bglr
     - r-bigsnpr
+    - r-checkmate
     - r-coda
     - r-coloc
     - r-colocboost
@@ -48,7 +49,6 @@ requirements:
     - r-cpp11
     - r-cpp11armadillo
     - r-ctwas
-    - r-decor
     - r-dplyr
     - r-flashier
     - r-fsusier
@@ -109,6 +109,7 @@ requirements:
     - r-base
     - r-bglr
     - r-bigsnpr
+    - r-checkmate
     - r-coda
     - r-coloc
     - r-colocboost
@@ -116,7 +117,6 @@ requirements:
     - r-cpp11
     - r-cpp11armadillo
     - r-ctwas
-    - r-decor
     - r-dplyr
     - r-flashier
     - r-fsusier

@@ -102,7 +102,6 @@
 #'   to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
 #'   effect / weight sign-flipped accordingly; when FALSE, match on exact
 #'   alleles only, so a ref/alt swap is treated as a distinct variant.
-#' @param ... Reserved.
 #' @return A \code{GRanges} as described above.
 #' @examples
 #' data(qtlDatasetExample)
@@ -125,48 +124,87 @@ causalInferencePipeline <- function(
     mrCpipCutoff = 0.5,
     mrPvalCutoff = 1,
     combineMethods = NULL,
-    alleleFlip = TRUE,
-    ...
+    alleleFlip = TRUE
 ) {
     mrMethod <- arg_match(mrMethod)
-    p <- as.list(environment())
-    p$dots <- list(...)
-    .cipRun(p)
+    .cipRun(
+        gwasSumStats = gwasSumStats,
+        twasWeights = twasWeights,
+        fineMappingResult = fineMappingResult,
+        combineMethods = combineMethods,
+        rsqCutoff = rsqCutoff,
+        rsqOption = rsqOption,
+        rsqPvalCutoff = rsqPvalCutoff,
+        rsqPvalOption = rsqPvalOption,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
+    )
 }
 
-# Orchestrate the causal-inference pipeline over a parameter bundle `p` (from
-# as.list(environment())): validate, resolve the QTL work list, apply optional
-# CV selection, score every (qtl, gwas) pair, and finalize.
+# Orchestrate the causal-inference pipeline: validate, resolve the QTL work
+# list, apply optional CV selection, score every (qtl, gwas) pair, finalize.
 # @noRd
-.cipRun <- function(p) {
-    .cipValidateInputs(p$gwasSumStats, p$twasWeights, p$fineMappingResult)
-    p$gwasLd <- .cipCheckLdSketches(
-        p$gwasSumStats,
-        p$twasWeights,
-        p$fineMappingResult
+.cipRun <- function(
+    gwasSumStats,
+    twasWeights,
+    fineMappingResult,
+    combineMethods,
+    rsqCutoff,
+    rsqOption,
+    rsqPvalCutoff,
+    rsqPvalOption,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    .cipValidateInputs(gwasSumStats, twasWeights, fineMappingResult)
+    gwasLd <- .cipCheckLdSketches(
+        gwasSumStats,
+        twasWeights,
+        fineMappingResult
     )
-    p$qtlRows <- .cipResolveWorkList(p$twasWeights, p$fineMappingResult)
-    sel <- .cipCvSelection(p)
-    p$qtlRows <- sel$qtlRows
+    qtlRows <- .cipResolveWorkList(twasWeights, fineMappingResult)
+    sel <- .cipCvSelection(
+        qtlRows = qtlRows,
+        twasWeights = twasWeights,
+        rsqCutoff = rsqCutoff,
+        rsqOption = rsqOption,
+        rsqPvalCutoff = rsqPvalCutoff,
+        rsqPvalOption = rsqPvalOption
+    )
+    qtlRows <- sel$qtlRows
     outRows <- list_flatten(map(
-        seq_len(nrow(p$qtlRows)),
+        seq_len(nrow(qtlRows)),
         .cipScoreQtlTuple,
-        p = p
+        qtlRows = qtlRows,
+        twasWeights = twasWeights,
+        fineMappingResult = fineMappingResult,
+        gwasSumStats = gwasSumStats,
+        gwasLd = gwasLd,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
     ))
     if (length(outRows) == 0L) {
         abort(
             "causalInferencePipeline: no (qtl, gwas) tuples produced a result."
         )
     }
-    .cipFinalize(outRows, sel, p$combineMethods)
+    .cipFinalize(outRows, sel, combineMethods)
 }
 
 # Validate the object classes + QC state of the pipeline inputs.
 # @noRd
+#' @importFrom checkmate assertClass checkClass
 .cipValidateInputs <- function(gwasSumStats, twasWeights, fineMappingResult) {
-    if (!methods::is(gwasSumStats, "GwasSumStats")) {
-        abort("`gwasSumStats` must be a GwasSumStats object.")
-    }
+    assertClass(gwasSumStats, "GwasSumStats")
     if (length(getQcInfo(gwasSumStats)) == 0L) {
         msg <- glue(
             "causalInferencePipeline: gwasSumStats has no QC record ",
@@ -181,17 +219,18 @@ causalInferencePipeline <- function(
         )
         abort(msg)
     }
-    if (!is.null(twasWeights) && !methods::is(twasWeights, "TwasWeights")) {
-        abort("`twasWeights` must be a TwasWeights object or NULL.")
-    }
-    if (
-        !is.null(fineMappingResult) &&
-            !methods::is(fineMappingResult, "QtlFineMappingResult")
-    ) {
+    assertClass(twasWeights, "TwasWeights", null.ok = TRUE)
+    # Composed rather than asserted: rejecting the GWAS-side class here is
+    # deliberate, and checkClass alone cannot say so.
+    res <- checkClass(
+        fineMappingResult,
+        "QtlFineMappingResult",
+        null.ok = TRUE
+    )
+    if (!isTRUE(res)) {
         msg <- glue(
-            "`fineMappingResult` must be a QtlFineMappingResult or NULL ",
-            "(causalInferencePipeline does not accept GWAS-side fine ",
-            "mapping for the QTL slot)."
+            "`fineMappingResult` {res} (causalInferencePipeline does not ",
+            "accept GWAS-side fine mapping for the QTL slot)."
         )
         abort(msg)
     }
@@ -240,21 +279,28 @@ causalInferencePipeline <- function(
 # filter to eligible methods now, deferring the final best-method pick to after
 # the TWAS Z. Returns list(qtlRows, rsqLookup, selectionActive).
 # @noRd
-.cipCvSelection <- function(p) {
-    selectionActive <- !is.null(p$twasWeights) &&
-        (p$rsqCutoff > 0 || is.finite(p$rsqPvalCutoff))
+.cipCvSelection <- function(
+    qtlRows,
+    twasWeights,
+    rsqCutoff,
+    rsqOption,
+    rsqPvalCutoff,
+    rsqPvalOption
+) {
+    selectionActive <- !is.null(twasWeights) &&
+        (rsqCutoff > 0 || is.finite(rsqPvalCutoff))
     if (!selectionActive) {
         return(list(
-            qtlRows = p$qtlRows,
+            qtlRows = qtlRows,
             rsqLookup = NULL,
             selectionActive = FALSE
         ))
     }
     metricTab <- .cipMethodMetrics(
-        p$qtlRows,
-        p$twasWeights,
-        p$rsqOption,
-        p$rsqPvalOption
+        qtlRows,
+        twasWeights,
+        rsqOption,
+        rsqPvalOption
     )
     rsqLookup <- set_names(
         metricTab$rsq,
@@ -267,15 +313,15 @@ causalInferencePipeline <- function(
         )
     )
     qtlRows <- .cipFilterEligibleMethods(
-        p$qtlRows,
+        qtlRows,
         metricTab,
-        p$rsqCutoff,
-        p$rsqPvalCutoff
+        rsqCutoff,
+        rsqPvalCutoff
     )
     if (nrow(qtlRows) == 0L) {
         msg <- glue(
             "causalInferencePipeline: every QTL tuple was filtered out by ",
-            "rsqCutoff = {p$rsqCutoff} / rsqPvalCutoff = {p$rsqPvalCutoff} ",
+            "rsqCutoff = {rsqCutoff} / rsqPvalCutoff = {rsqPvalCutoff} ",
             "(no method cleared the CV cutoffs)."
         )
         abort(msg)
@@ -286,25 +332,37 @@ causalInferencePipeline <- function(
 # Score one QTL tuple against every GWAS study -> a list of result records
 # (empty when the tuple has no usable weights).
 # @noRd
-.cipScoreQtlTuple <- function(qi, p) {
-    qStudy <- p$qtlRows$qtlStudy[[qi]]
-    qContext <- p$qtlRows$context[[qi]]
-    qTrait <- p$qtlRows$trait[[qi]]
-    qMethod <- p$qtlRows$method[[qi]]
+.cipScoreQtlTuple <- function(
+    qi,
+    qtlRows,
+    twasWeights,
+    fineMappingResult,
+    gwasSumStats,
+    gwasLd,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    qStudy <- qtlRows$qtlStudy[[qi]]
+    qContext <- qtlRows$context[[qi]]
+    qTrait <- qtlRows$trait[[qi]]
+    qMethod <- qtlRows$method[[qi]]
     weightsInfo <- .cipExtractWeights(
-        twasWeights = p$twasWeights,
-        fineMappingResult = p$fineMappingResult,
+        twasWeights = twasWeights,
+        fineMappingResult = fineMappingResult,
         study = qStudy,
         context = qContext,
         trait = qTrait,
         method = qMethod,
-        useFmr = p$qtlRows$useFmrForWeights[[qi]]
+        useFmr = qtlRows$useFmrForWeights[[qi]]
     )
     if (is.null(weightsInfo)) {
         return(list())
     }
     fmrEntry <- .cipResolveFmrEntry(
-        p$fineMappingResult,
+        fineMappingResult,
         qStudy,
         qContext,
         qTrait,
@@ -317,12 +375,18 @@ causalInferencePipeline <- function(
         qMethod = qMethod
     )
     compact(map(
-        seq_len(nrow(p$gwasSumStats)),
+        seq_len(nrow(gwasSumStats)),
         .cipScoreGwasPair,
         tuple = tuple,
         weightsInfo = weightsInfo,
         fmrEntry = fmrEntry,
-        p = p
+        gwasSumStats = gwasSumStats,
+        gwasLd = gwasLd,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
     ))
 }
 
@@ -352,10 +416,22 @@ causalInferencePipeline <- function(
 # Score one (qtl tuple, gwas study) pair -> a result record, or NULL when the
 # TWAS Z cannot be computed (too little overlap).
 # @noRd
-.cipScoreGwasPair <- function(gi, tuple, weightsInfo, fmrEntry, p) {
-    gStudy <- as.character(p$gwasSumStats$study)[[gi]]
+.cipScoreGwasPair <- function(
+    gi,
+    tuple,
+    weightsInfo,
+    fmrEntry,
+    gwasSumStats,
+    gwasLd,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    gStudy <- as.character(gwasSumStats$study)[[gi]]
     gdf <- getSumStatsDf(
-        p$gwasSumStats,
+        gwasSumStats,
         study = gStudy,
         require = c("SNP", "Z")
     )
@@ -363,14 +439,23 @@ causalInferencePipeline <- function(
         weights = weightsInfo$weights,
         variantIds = weightsInfo$variantIds,
         gwasDf = gdf,
-        gwasLd = p$gwasLd,
-        alleleFlip = p$alleleFlip,
+        gwasLd = gwasLd,
+        alleleFlip = alleleFlip,
         label = .cipPairLabel(tuple, gStudy)
     )
     if (is.null(twasOut)) {
         return(NULL)
     }
-    mrOut <- .cipRunMr(fmrEntry, gdf, twasOut, p)
+    mrOut <- .cipRunMr(
+        fmrEntry,
+        gdf,
+        twasOut,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
+    )
     .cipResultRow(tuple, gStudy, twasOut, mrOut)
 }
 
@@ -387,25 +472,34 @@ causalInferencePipeline <- function(
 # Run MR for a pair, gated on the TWAS p-value (mrPvalCutoff >= 1 disables the
 # gate) and the presence of a fine-mapping entry.
 # @noRd
-.cipRunMr <- function(fmrEntry, gdf, twasOut, p) {
-    mrGateOpen <- p$mrPvalCutoff >= 1 ||
-        (!is.na(twasOut$pval) && twasOut$pval < p$mrPvalCutoff)
+.cipRunMr <- function(
+    fmrEntry,
+    gdf,
+    twasOut,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    mrGateOpen <- mrPvalCutoff >= 1 ||
+        (!is.na(twasOut$pval) && twasOut$pval < mrPvalCutoff)
     if (is.null(fmrEntry) || !mrGateOpen) {
         return(.cipEmptyMr())
     }
-    if (p$mrMethod == "csAware") {
+    if (mrMethod == "csAware") {
         .cipComputeMrCsAware(
             fmrEntry = fmrEntry,
             gwasDf = gdf,
-            cpipCutoff = p$mrCpipCutoff,
-            alleleFlip = p$alleleFlip
+            cpipCutoff = mrCpipCutoff,
+            alleleFlip = alleleFlip
         )
     } else {
         .cipComputeMr(
             fmrEntry = fmrEntry,
             gwasDf = gdf,
-            pipCutoff = p$mrPipCutoff,
-            alleleFlip = p$alleleFlip
+            pipCutoff = mrPipCutoff,
+            alleleFlip = alleleFlip
         )
     }
 }
@@ -511,8 +605,9 @@ causalInferencePipeline <- function(
 # metrics vector / data frame is tolerated too. `which` is a vector of candidate
 # metric names; the first present is used. Returns NA when no usable metric.
 # @noRd
+#' @importFrom rlang try_fetch
 .cipCvMetric <- function(twasWeights, study, context, trait, method, which) {
-    perf <- tryCatch(
+    perf <- try_fetch(
         getCvResult(
             twasWeights,
             study = study,
@@ -520,7 +615,7 @@ causalInferencePipeline <- function(
             trait = trait,
             method = method
         ),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     if (is.null(perf)) {
         return(NA_real_)
@@ -1235,6 +1330,7 @@ causalInferencePipeline <- function(
 
 # Row-align V to the weights (by name when available, else positionally).
 # @noRd
+#' @importFrom checkmate assertMatrix
 .twasZAlignV <- function(V, rn, nW) {
     if (!is.null(rownames(V)) && !is.null(rn)) {
         idx <- match(rn, rownames(V))
@@ -1247,11 +1343,7 @@ causalInferencePipeline <- function(
         }
         return(V[idx, , drop = FALSE])
     }
-    if (nrow(V) != nW) {
-        abort(
-            "twasZ: positional alignment requires nrow(V) == nrow(weights)."
-        )
-    }
+    assertMatrix(V, nrows = nW, .var.name = "V (positional alignment)")
     V
 }
 
@@ -1270,6 +1362,7 @@ causalInferencePipeline <- function(
 
 # Symmetric-align R to the weights (by name when available, else positionally).
 # @noRd
+#' @importFrom checkmate assertMatrix
 .twasZAlignR <- function(R, rn, nW) {
     if (!is.null(rownames(R)) && !is.null(rn)) {
         idx <- match(rn, rownames(R))
@@ -1282,11 +1375,7 @@ causalInferencePipeline <- function(
         }
         return(R[idx, idx, drop = FALSE])
     }
-    if (nrow(R) != nW) {
-        abort(
-            "twasZ: positional alignment requires nrow(R) == nrow(weights)."
-        )
-    }
+    assertMatrix(R, nrows = nW, .var.name = "R (positional alignment)")
     R
 }
 
@@ -1347,6 +1436,7 @@ causalInferencePipeline <- function(
 #' w <- setNames(rnorm(20) * 0.1, colnames(X))
 #' twasZ(weights = w, z = rnorm(20), R = cor(X))
 #' @export
+#' @importFrom checkmate assertCharacter assertCount
 twasZ <- function(
     weights,
     z,
@@ -1357,6 +1447,8 @@ twasZ <- function(
     nSketch = NULL,
     combineMethods = NULL
 ) {
+    assertCount(nSketch, positive = TRUE, null.ok = TRUE)
+    assertCharacter(combineMethods, null.ok = TRUE)
     weights <- .twasZPrepWeights(weights, z)
     covY <- .twasZCovY(
         weights = weights,
@@ -1387,6 +1479,7 @@ twasZ <- function(
 # Coerce a weight vector to a one-column matrix, validate the class / dims, and
 # default the column names.
 # @noRd
+#' @importFrom checkmate assertMatrix
 .twasZPrepWeights <- function(weights, z) {
     if (is.numeric(weights) && is.null(dim(weights))) {
         nm <- if (!is.null(names(weights))) names(weights) else NULL
@@ -1398,9 +1491,7 @@ twasZ <- function(
     if (is.null(colnames(weights))) {
         colnames(weights) <- str_c("method", seq_len(ncol(weights)))
     }
-    if (nrow(weights) != length(z)) {
-        abort("nrow(weights) must equal length(z).")
-    }
+    assertMatrix(weights, nrows = length(z))
     weights
 }
 

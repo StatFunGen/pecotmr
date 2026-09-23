@@ -170,13 +170,12 @@
 # Validate inputs, coerce a vector Y to a one-column matrix, and set stable
 # row/column dimnames on X and Y. Returns list(X, Y).
 # @noRd
+#' @importFrom checkmate assert assertCount assertMatrix
+#' @importFrom checkmate checkAtomicVector checkMatrix
 .cvPrepareData <- function(X, Y, fold, verbose) {
-    if (!is.null(fold) && (!is.numeric(fold) || fold <= 0)) {
-        abort("Invalid value for 'fold'. It must be a positive integer.")
-    }
-    if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
-        abort("X must be a matrix and Y must be a matrix or a vector.")
-    }
+    assertCount(fold, positive = TRUE, null.ok = TRUE)
+    assertMatrix(X)
+    assert(checkMatrix(Y), checkAtomicVector(Y), .var.name = "Y")
     if (is.vector(Y)) {
         Y <- matrix(Y, ncol = 1)
         if (verbose >= 1) {
@@ -187,9 +186,7 @@
             inform(msg)
         }
     }
-    if (nrow(X) != nrow(Y)) {
-        abort("The number of rows in X and Y must be the same.")
-    }
+    assertMatrix(Y, nrows = nrow(X))
     .cvSetDimnames(X, Y)
 }
 
@@ -377,7 +374,7 @@
 # @noRd
 .cvAggregate <- function(foldResults, Y, verbose) {
     metricNames <- c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
-    methodKeys <- unique(unlist(map(foldResults, .cvPredNames)))
+    methodKeys <- unique(list_c(map(foldResults, .cvPredNames)))
     prediction <- list()
     performance <- list()
     for (mk in methodKeys) {

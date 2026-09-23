@@ -2202,7 +2202,7 @@ test_that("slalom basic output structure", {
 test_that("slalom errors on non-square R", {
     z <- rnorm(10)
     R <- matrix(rnorm(50), nrow = 5, ncol = 10)
-    expect_error(slalom(zScore = z, R = R), "R must be a square matrix")
+    expect_error(slalom(zScore = z, R = R), "R.*Must have exactly 10 rows")
 })
 
 test_that("slalom accepts X matrix instead of R", {
@@ -2597,7 +2597,7 @@ test_that("edge case: mismatched dimensions error", {
     R <- diag(5)
     expect_error(
         slalom(zScore = z, R = R),
-        "R must be a square matrix matching the length of zScore"
+        "R.*Must have exactly 10 rows"
     )
 })
 
@@ -3124,7 +3124,7 @@ context("summaryStatsQc")
 test_that("summaryStatsQc: rejects non-SumStats input", {
     expect_error(
         summaryStatsQc("not_a_sumstats"),
-        "requires a QtlSumStats or GwasSumStats input"
+        "Must inherit from class 'QtlSumStats'/'GwasSumStats'"
     )
 })
 
@@ -6709,7 +6709,7 @@ test_that("raissModel batch = FALSE reports the condition number", {
 test_that("krigingOutlierQc requires a square LD matrix aligned to zScore", {
     expect_error(
         krigingOutlierQc(c(1, 2, 3), diag(2), n = 100),
-        "square LD matrix"
+        "R \\(LD matrix\\).*Must have exactly 3 rows"
     )
 })
 
@@ -8213,4 +8213,15 @@ test_that("an allele swap complements af but leaves the directionless maf", {
     expect_equal(h$AF, 0.2)
     expect_equal(h$Z, -2.0)
     expect_equal(h$MAF, 0.2)
+})
+
+test_that("sumstatsQc: argument guards fire", {
+    expect_error(
+        mergeVariantInfo(data.frame(), data.frame(), all = NA),
+        "all.*May not be NA"
+    )
+    expect_error(
+        autoDecision(data.frame(), highCorrCols = 1L),
+        "highCorrCols.*Must be of type 'character'"
+    )
 })

@@ -227,8 +227,15 @@ detectVariantConvention <- function(ids) {
 #'   stored as \code{attr(result, "convention")}.
 #' @examples
 #' parseVariantId(c("chr1:100:A:G", "chr2:200:T:C"))
+#' @importFrom checkmate assert checkCharacter checkDataFrame
 #' @export
 parseVariantId <- function(ids) {
+    # `ids` is documented as a character vector OR a data.frame.
+    assert(
+        checkCharacter(ids),
+        checkDataFrame(ids),
+        .var.name = "ids"
+    )
     if (is.data.frame(ids)) {
         return(.parseVariantIdDf(ids))
     }
@@ -355,8 +362,12 @@ formatVariantId <- function(
 #'   rsIDs) are returned unchanged.
 #' @examples
 #' normalizeVariantId(c("1:100:A:G", "2:200:T:C"))
+#' @importFrom checkmate assertCharacter assertFlag assertList
 #' @export
 normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
+    assertCharacter(ids)
+    assertFlag(chrPrefix)
+    assertList(convention, null.ok = TRUE)
     parsed <- parseVariantId(ids)
     out <- as.character(ids)
     # Only re-format ids that parsed into a chrom + pos; leave unparseable ids
@@ -468,8 +479,7 @@ harmonizeAlleles <- function(
     removeIndels = FALSE,
     removeStrandAmbiguous = TRUE,
     removeDups = FALSE,
-    colToComplement = character(),
-    ...
+    colToComplement = character()
 ) {
     coerced <- .harmonizeCoerceInputs(targetData, refVariants)
     targetData <- coerced$targetData
@@ -1179,8 +1189,13 @@ parseRegion <- function(region) {
 #'   \code{colnames}: a normalized character chromosome plus integer start/end.
 #' @examples
 #' regionToDf(c("1_100_200", "2_300_400"))
+#' @importFrom checkmate assertCharacter
 #' @export
 regionToDf <- function(ldRegionId, colnames = c("chrom", "start", "end")) {
+    # @param says "A string", but the function is vectorised and callers pass
+    # a character vector -- assert what it actually accepts, not the prose.
+    assertCharacter(ldRegionId, any.missing = FALSE)
+    assertCharacter(colnames, len = 3L, any.missing = FALSE)
     parts <- str_split(ldRegionId, "[_:-]", simplify = TRUE)
     regionOfInterest <- as_tibble(parts, .name_repair = "minimal")
     colnames(regionOfInterest) <- colnames

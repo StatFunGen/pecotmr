@@ -46,25 +46,23 @@ setClass(
 # region/traitPos provenance, joint* column types, tuple uniqueness, and the
 # optional ldSketch. Returns TRUE or a character vector of error messages.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames
 .validateTwasWeights <- function(object) {
-    errors <- .twasValidateRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .twasValidateColumns(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        .tupleColumnNames(object),
+        must.include = c("study", "context", "trait", "method"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    errors <- c(errors, .twasValidateLdSketch(object))
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# Required key/entry columns must all be present.
-# @noRd
-.twasValidateRequiredCols <- function(object) {
-    required <- c("study", "context", "trait", "method")
-    missingCols <- setdiff(required, .tupleColumnNames(object))
-    if (length(missingCols) > 0L) {
-        str_c("missing columns: ", str_flatten(missingCols, ", "))
-    } else {
-        character()
-    }
+    coll$push(.twasValidateColumns(object))
+    coll$getMessages()
 }
 
 # Column-level checks that run only once the required columns are present.
@@ -127,14 +125,6 @@ setClass(
     }
 }
 
-# The ldSketch slot's class union enforces its type, so there is nothing left
-# for validity to check.
-# @noRd
-.twasValidateLdSketch <- function(object) {
-    character()
-}
-
-
 # =============================================================================
 
 #' @title Create a TwasWeights Collection Object
@@ -169,6 +159,8 @@ setClass(
 #' tw <- TwasWeights(study = "s1", context = "brain", trait = "gene1",
 #'   method = "susie", entry = list(twe))
 #' tw
+#' @importFrom checkmate assertCharacter assert checkList
+#' @importFrom checkmate checkClass
 #' @export
 TwasWeights <- function(
     study,
@@ -182,6 +174,20 @@ TwasWeights <- function(
     traitPos = NULL,
     ldSketch = NULL
 ) {
+    assertCharacter(study, any.missing = FALSE)
+    assertCharacter(context, any.missing = FALSE)
+    assertCharacter(trait, any.missing = FALSE)
+    assertCharacter(method, any.missing = FALSE)
+    # `entry` is documented as "List / SimpleList"; SimpleList is S4 and
+    # fails checkList, so this must be an or-combination.
+    assert(
+        checkList(entry),
+        checkClass(entry, "SimpleList"),
+        .var.name = "entry"
+    )
+    assertCharacter(jointStudies, null.ok = TRUE)
+    assertCharacter(jointContexts, null.ok = TRUE)
+    assertCharacter(jointTraits, null.ok = TRUE)
     n <- .twasCheckRowLengths(study, context, trait, method, entry)
     entry <- map(entry, .asTwRowPayload)
     .checkRowPayloads(entry, "TwasWeightsRow", "TWAS-weight")
@@ -576,7 +582,8 @@ setMethod("show", "TwasWeights", function(object) {
     susie = list(
         fn = "susie_weights",
         impl = "susieWeights",
-        args = list(refine = FALSE, L = 10)
+        # No fitting defaults: susieWeights extracts from a supplied fit.
+        args = list()
     ),
     susieAsh = list(
         fn = "susie_ash_weights",
@@ -659,7 +666,8 @@ setMethod("show", "TwasWeights", function(object) {
     mvsusie = list(
         fn = "mvsusie_weights",
         impl = "mvsusieWeights",
-        args = list(L = 10)
+        # No fitting defaults: mvsusieWeights extracts from a supplied fit.
+        args = list()
     ),
     mrmash = list(
         fn = "mrmash_weights",
@@ -967,13 +975,14 @@ setMethod("show", "TwasWeights", function(object) {
         names(weightMethods[["susie_weights"]]),
         fitArgNames
     )]
-    # modifyList (not list_modify): a NULL user arg should UNSET the key here.
-    susieInfArgs <- modifyList(
+    # A NULL user arg should UNSET the key, so compact() first -- that is the
+    # same rule the old modifyList relied on, now stated rather than implied.
+    susieInfArgs <- list_modify(
         list(convergence_method = "pip"),
-        weightMethods[["susie_inf_weights"]][setdiff(
+        !!!compact(weightMethods[["susie_inf_weights"]][setdiff(
             names(weightMethods[["susie_inf_weights"]]),
             fitArgNames
-        )]
+        )])
     )
     fits <- fitSusieInfThenSusie(
         X,
@@ -1061,18 +1070,24 @@ setMethod("show", "TwasWeights", function(object) {
 # Per-fold priors bound to a multivariate fitter's camelCase args (mr.mash
 # data-driven matrices / mvsusie reweighted mixture prior for fold `j`).
 # @noRd
-.twasFoldPriors <- function(args, method, j, cvArgs) {
+.twasFoldPriors <- function(
+    args,
+    method,
+    j,
+    dataDrivenPriorMatricesCv,
+    reweightedMixturePriorCv
+) {
     if (
-        !is.null(cvArgs$data_driven_priorMatricesCv) &&
+        !is.null(dataDrivenPriorMatricesCv) &&
             is_in(method, c("mrmash_weights", "mrmashWeights"))
     ) {
-        args$dataDrivenPriorMatrices <- cvArgs$data_driven_priorMatricesCv[[j]]
+        args$dataDrivenPriorMatrices <- dataDrivenPriorMatricesCv[[j]]
     }
     if (
-        !is.null(cvArgs$reweightedMixturePriorCv) &&
+        !is.null(reweightedMixturePriorCv) &&
             is_in(method, c("mvsusie_weights", "mvsusieWeights"))
     ) {
-        args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
+        args$prior_variance <- reweightedMixturePriorCv[[j]]
     }
     args
 }
@@ -1080,11 +1095,17 @@ setMethod("show", "TwasWeights", function(object) {
 # One fold's multivariate weight fit; returns list(W, fit).
 # @noRd
 .twasFoldMultivariate <- function(method, fnName, args, Xtr, Ytr, j, ctx) {
-    args <- .twasFoldPriors(args, method, j, ctx$cvArgs)
+    args <- .twasFoldPriors(
+        args,
+        method,
+        j,
+        ctx$dataDrivenPriorMatricesCv,
+        ctx$reweightedMixturePriorCv
+    )
     if (isTRUE(ctx$retainFits) && is_in("retainFit", names(formals(fnName)))) {
         args$retainFit <- TRUE
     }
-    callArgs <- c(list(X = Xtr, Y = Ytr), args)
+    callArgs <- .twasWeightCallArgs(fnName, list(X = Xtr, Y = Ytr), args)
     W <- if (ctx$verbose < 2) {
         .quietEval(exec(fnName, !!!callArgs))
     } else {
@@ -1170,7 +1191,10 @@ setMethod("show", "TwasWeights", function(object) {
 #'   seed is scoped to the call, so the session RNG is left as it was found.
 #'   \code{NULL} (default) does not seed at all and uses the historical
 #'   parallel default.
-#' @param ... Additional arguments forwarded to the per-method weight learners.
+#' @param dataDrivenPriorMatricesCv Optional list, one element per fold, of
+#'   data-driven prior matrices for the mr.mash learner.
+#' @param reweightedMixturePriorCv Optional list, one element per fold, of
+#'   reweighted mixture priors for the mvSuSiE learner.
 #' @return A list with the following components:
 #' \itemize{
 #'   \item `samplePartition`: A dataframe showing the sample partitioning used
@@ -1204,6 +1228,8 @@ setMethod("show", "TwasWeights", function(object) {
 #' Y <- multiTraitData$Y
 #' twasWeightsCv(X, Y[, 1, drop = FALSE], fold = 3,
 #'   weightMethods = list(susie_weights = list()))
+#' @importFrom checkmate assertDataFrame assertNumber assertInt
+#' @importFrom checkmate assertFlag assertCount
 #' @export
 twasWeightsCv <- function(
     X,
@@ -1217,11 +1243,35 @@ twasWeightsCv <- function(
     verbose = 1,
     retainFits = FALSE,
     seed = NULL,
-    ...
+    dataDrivenPriorMatricesCv = NULL,
+    reweightedMixturePriorCv = NULL
 ) {
-    p <- as.list(environment())
-    p$cvArgs <- list(...)
-    .twasWeightsCvImpl(p)
+    # X / Y / fold are asserted downstream in .cvPrepareData; these are the
+    # arguments nothing else checks.
+    assertDataFrame(samplePartitions, null.ok = TRUE)
+    # NOT assertCount: `Inf` is the "no cap" sentinel (jointEngine passes it
+    # when cfg$maxCvVariants is unset), and .cvSubsampleVariants relies on
+    # `ncol(X) <= maxNumVariants` being FALSE for it.
+    assertNumber(maxNumVariants, lower = 1, null.ok = TRUE)
+    assertInt(numThreads)
+    assertCount(verbose)
+    assertFlag(retainFits)
+    assertInt(seed, null.ok = TRUE)
+    .twasWeightsCvImpl(
+        X = X,
+        Y = Y,
+        fold = fold,
+        samplePartitions = samplePartitions,
+        weightMethods = weightMethods,
+        maxNumVariants = maxNumVariants,
+        variantsToKeep = variantsToKeep,
+        numThreads = numThreads,
+        verbose = verbose,
+        retainFits = retainFits,
+        seed = seed,
+        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        reweightedMixturePriorCv = reweightedMixturePriorCv
+    )
 }
 
 # Multivariate weight methods (snake + camel) fit on the whole Y for a fold;
@@ -1236,16 +1286,30 @@ twasWeightsCv <- function(
     "mvsusieWeights"
 )
 
-# twasWeightsCv worker. `p` is the captured public arguments plus `cvArgs`
-# (the `...`). With no weightMethods the caller only wants the fold partition.
+# twasWeightsCv worker. With no weightMethods the caller only wants the fold
+# partition.
 # @noRd
-.twasWeightsCvImpl <- function(p) {
-    weightMethods <- if (is.character(p$weightMethods)) {
-        .twasMethodLookup(p$weightMethods)
+.twasWeightsCvImpl <- function(
+    X,
+    Y,
+    fold,
+    samplePartitions,
+    weightMethods,
+    maxNumVariants,
+    variantsToKeep,
+    numThreads,
+    verbose,
+    retainFits,
+    seed,
+    dataDrivenPriorMatricesCv,
+    reweightedMixturePriorCv
+) {
+    weightMethods <- if (is.character(weightMethods)) {
+        .twasMethodLookup(weightMethods)
     } else {
-        p$weightMethods
+        weightMethods
     }
-    if (is.null(p$seed) && !exists(".Random.seed") && p$verbose >= 1) {
+    if (is.null(seed) && !exists(".Random.seed") && verbose >= 1) {
         inform(str_c(
             "! No seed set. Pass `seed=` or call ",
             "set.seed() for reproducibility."
@@ -1253,40 +1317,41 @@ twasWeightsCv <- function(
     }
     if (is.null(weightMethods)) {
         res <- .crossValidateWeights(
-            p$X,
-            p$Y,
-            fold = p$fold,
-            samplePartitions = p$samplePartitions,
+            X,
+            Y,
+            fold = fold,
+            samplePartitions = samplePartitions,
             fitFold = .cvNoopFitFold,
-            numThreads = p$numThreads,
-            maxNumVariants = p$maxNumVariants,
-            variantsToKeep = p$variantsToKeep,
-            retainFits = p$retainFits,
-            verbose = p$verbose,
-            seed = p$seed
+            numThreads = numThreads,
+            maxNumVariants = maxNumVariants,
+            variantsToKeep = variantsToKeep,
+            retainFits = retainFits,
+            verbose = verbose,
+            seed = seed
         )
         return(list(samplePartition = res$samplePartition))
     }
     cvFitCtx <- list(
         weightMethods = weightMethods,
         multivariateWeightMethods = .twasCvMultivariateMethods,
-        cvArgs = p$cvArgs,
-        retainFits = p$retainFits,
-        verbose = p$verbose
+        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        reweightedMixturePriorCv = reweightedMixturePriorCv,
+        retainFits = retainFits,
+        verbose = verbose
     )
     .crossValidateWeights(
-        p$X,
-        p$Y,
-        fold = p$fold,
-        samplePartitions = p$samplePartitions,
+        X,
+        Y,
+        fold = fold,
+        samplePartitions = samplePartitions,
         fitFold = .weightFitFold,
         fitFoldCtx = cvFitCtx,
-        numThreads = p$numThreads,
-        maxNumVariants = p$maxNumVariants,
-        variantsToKeep = p$variantsToKeep,
-        retainFits = p$retainFits,
-        verbose = p$verbose,
-        seed = p$seed
+        numThreads = numThreads,
+        maxNumVariants = maxNumVariants,
+        variantsToKeep = variantsToKeep,
+        retainFits = retainFits,
+        verbose = verbose,
+        seed = seed
     )
 }
 
@@ -1377,7 +1442,11 @@ twasWeightsCv <- function(
 # Multivariate fit: one call producing the full variants x features matrix.
 # @noRd
 .twasFitMultivariate <- function(fnName, args, ctx) {
-    call <- c(list(X = ctx$Xfiltered, Y = ctx$Y), args)
+    call <- .twasWeightCallArgs(
+        fnName,
+        list(X = ctx$Xfiltered, Y = ctx$Y),
+        args
+    )
     weightsMatrix <- if (ctx$verbose < 2) {
         .quietEval(exec(fnName, !!!call))
     } else {
@@ -1397,7 +1466,11 @@ twasWeightsCv <- function(
     weightsMatrix <- matrix(0, nrow = ncol(ctx$Xfiltered), ncol = ncol(ctx$Y))
     methodFit <- NULL
     for (k in seq_len(ncol(ctx$Y))) {
-        call <- c(list(X = ctx$Xfiltered, y = ctx$Y[, k]), args)
+        call <- .twasWeightCallArgs(
+            fnName,
+            list(X = ctx$Xfiltered, y = ctx$Y[, k]),
+            args
+        )
         weightsVector <- if (ctx$verbose < 2) {
             .quietEval(exec(fnName, !!!call))
         } else {
@@ -1550,6 +1623,8 @@ twasWeightsCv <- function(
 #' @importFrom rlang !!! abort warn inform arg_match cnd_signal .data
 #' @importFrom glue glue
 #' @importFrom tictoc tic toc
+#' @importFrom checkmate assertString assertInt assertFlag assertCount
+#' @importFrom checkmate assert checkList checkCharacter
 learnTwasWeights <- function(
     X,
     Y,
@@ -1567,21 +1642,50 @@ learnTwasWeights <- function(
     verbose = 1,
     seed = NULL
 ) {
-    .learnTwasWeightsImpl(as.list(environment()))
+    assertString(study)
+    assertString(context)
+    assertString(trait)
+    assertInt(numThreads)
+    assertFlag(retainFits)
+    assertFlag(standardized)
+    assertString(dataType, null.ok = TRUE)
+    assertCount(verbose)
+    assertInt(seed, null.ok = TRUE)
+    # weightMethods is documented as a named list OR a character vector.
+    assert(
+        checkList(weightMethods),
+        checkCharacter(weightMethods),
+        .var.name = "weightMethods"
+    )
+    .learnTwasWeightsImpl(
+        X = X,
+        Y = Y,
+        weightMethods = weightMethods,
+        study = study,
+        context = context,
+        trait = trait,
+        numThreads = numThreads,
+        fittedModels = fittedModels,
+        retainFits = retainFits,
+        retainFitDetail = retainFitDetail,
+        standardized = standardized,
+        dataType = dataType,
+        ldSketch = ldSketch,
+        verbose = verbose,
+        seed = seed
+    )
 }
 
 # Validate X/Y shapes; coerce a vector Y to a one-column matrix. Returns Y.
 # @noRd
+#' @importFrom checkmate assert assertMatrix checkAtomicVector checkMatrix
 .twasValidateXY <- function(X, Y) {
-    if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
-        abort("X must be a matrix and Y must be a matrix or a vector.")
-    }
+    assertMatrix(X)
+    assert(checkMatrix(Y), checkAtomicVector(Y), .var.name = "Y")
     if (is.vector(Y)) {
         Y <- matrix(Y, ncol = 1)
     }
-    if (nrow(X) != nrow(Y)) {
-        abort("The number of rows in X and Y must be the same.")
-    }
+    assertMatrix(Y, nrows = nrow(X))
     Y
 }
 
@@ -1643,53 +1747,68 @@ learnTwasWeights <- function(
 # learnTwasWeights worker: validate, resolve methods, fit each, and assemble the
 # TwasWeights collection. `p` is the captured public arguments.
 # @noRd
-.learnTwasWeightsImpl <- function(p) {
-    .applySeed(p$seed)
-    retainFitDetail <- p$retainFitDetail
+.learnTwasWeightsImpl <- function(
+    X,
+    Y,
+    weightMethods,
+    study,
+    context,
+    trait,
+    numThreads,
+    fittedModels,
+    retainFits,
+    retainFitDetail,
+    standardized,
+    dataType,
+    ldSketch,
+    verbose,
+    seed
+) {
+    .applySeed(seed)
     retainFitDetail <- arg_match(retainFitDetail, c("slim", "full"))
-    Y <- .twasValidateXY(p$X, p$Y)
-    weightMethods <- if (is.character(p$weightMethods)) {
-        .twasMethodLookup(p$weightMethods)
+    Y <- .twasValidateXY(X, Y)
+    weightMethods <- if (is.character(weightMethods)) {
+        .twasMethodLookup(weightMethods)
     } else {
-        p$weightMethods
+        weightMethods
     }
-    validColumns <- .nonzeroVarColumns(p$X)
-    Xfiltered <- as.matrix(p$X[, validColumns, drop = FALSE])
+    validColumns <- .nonzeroVarColumns(X)
+    Xfiltered <- as.matrix(X[, validColumns, drop = FALSE])
     weightMethods <- .prepareSusieWeightMethods(
         Xfiltered,
         Y,
         weightMethods,
-        p$fittedModels
+        fittedModels
     )
     ctx <- list(
-        X = p$X,
+        X = X,
         Y = Y,
         Xfiltered = Xfiltered,
         validColumns = validColumns,
-        study = p$study,
-        context = p$context,
-        trait = p$trait,
-        retainFits = p$retainFits,
+        study = study,
+        context = context,
+        trait = trait,
+        retainFits = retainFits,
         retainFitDetail = retainFitDetail,
-        standardized = p$standardized,
-        dataType = p$dataType,
-        verbose = p$verbose,
-        rngSeed = p$seed
+        standardized = standardized,
+        dataType = dataType,
+        verbose = verbose,
+        rngSeed = seed
     )
     weightsList <- .twasFitAllMethods(
         weightMethods,
         ctx,
-        .twasResolveCores(p$numThreads)
+        .twasResolveCores(numThreads)
     )
-    weightsList <- .twasApplyRownames(weightsList, p$X)
-    rows <- .buildTwasWeightEntries(weightsList, .twasVariantIds(p$X), ctx)
+    weightsList <- .twasApplyRownames(weightsList, X)
+    rows <- .buildTwasWeightEntries(weightsList, .twasVariantIds(X), ctx)
     TwasWeights(
         study = rows$study,
         context = rows$context,
         trait = rows$trait,
         method = rows$method,
         entry = rows$entry,
-        ldSketch = p$ldSketch
+        ldSketch = ldSketch
     )
 }
 
@@ -1724,7 +1843,15 @@ learnTwasWeights <- function(
 #' tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(twe))
 #' twasPredict(X, tw)
+#' @importFrom checkmate assert checkList checkClass
+#' @importFrom checkmate assertList
 twasPredict <- function(X, weightsList) {
+    # The body branches on TwasWeights, so this is a list OR that S4 class.
+    assert(
+        checkList(weightsList),
+        checkClass(weightsList, "TwasWeights"),
+        .var.name = "weightsList"
+    )
     if (is(weightsList, "TwasWeights")) {
         # Per-row weights vector/matrix payloads. Use the method name as key
         # for compatibility with the legacy snake_case "<method>_predicted"
@@ -1861,10 +1988,21 @@ estimateSparsity <- function(weightResults) {
     .twasFoldRow(k, cvFolds[[k]], sampleNames)
 }
 
+# Route a caller's per-method arguments into a weight function. A wrapper's
+# own formals (a pre-fit, retainFit, initPriorSd, ...) bind by name; anything
+# else is a tool option and goes in the wrapper's `methodArgs` list, so an
+# unknown option errors inside the wrapper rather than vanishing. Wrappers
+# with no `methodArgs` formal get everything by name, and R reports an unused
+# argument -- which is the point.
+# @noRd
+.twasWeightCallArgs <- function(fnName, baseArgs, userArgs) {
+    c(baseArgs, .splitMethodArgs(fnName, userArgs))
+}
+
 # One univariate fold's weight column for outcome `k` (quiet unless verbose).
 # @noRd
 .twasFitColWeight <- function(k, ctx, fnName, Xtr, Ytr, args) {
-    callArgs <- c(list(X = Xtr, y = Ytr[, k]), args)
+    callArgs <- .twasWeightCallArgs(fnName, list(X = Xtr, y = Ytr[, k]), args)
     w <- if (ctx$verbose < 2) {
         .quietEval(exec(fnName, !!!callArgs))
     } else {

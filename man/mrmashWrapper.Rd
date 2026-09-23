@@ -21,8 +21,7 @@ mrmashWrapper(
   bInitMethod = "enet",
   maxIter = 5000,
   tol = 0.01,
-  verbose = FALSE,
-  ...
+  verbose = FALSE
 )
 }
 \arguments{
@@ -75,8 +74,6 @@ Default is "enet".}
 
 \item{verbose}{A logical indicating whether to print verbose output. Default
 is FALSE.}
-
-\item{...}{Additional arguments to be passed to mr.mash.}
 }
 \value{
 A mr.mash fit, stored as a list with some or all of the following

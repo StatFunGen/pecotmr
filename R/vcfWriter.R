@@ -324,13 +324,13 @@ setMethod(
 # marginal ES=beta / SE / LP / AF on top. Returns list(base, m, hasPost).
 # @noRd
 .vcfResolveBody <- function(entry, sn) {
-    post <- tryCatch(
+    post <- try_fetch(
         as_tibble(getTopLoci(entry, signalCutoff = 0)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
-    marg <- tryCatch(
+    marg <- try_fetch(
         as_tibble(getMarginalEffects(entry)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     hasPost <- !is.null(post) && nrow(post) > 0L
     hasMarg <- !is.null(marg) && nrow(marg) > 0L
@@ -558,6 +558,7 @@ setMethod(
 
 # BCF path: write a temporary bgzipped VCF, then convert to BCF via asBcf.
 # @noRd
+#' @importFrom rlang try_fetch
 .vcfWriteBcf <- function(vcf, outputPath, chrom) {
     tmpVcfStem <- tempfile(fileext = ".vcf")
     tmpVcfBgz <- str_c(tmpVcfStem, ".bgz")
@@ -570,20 +571,20 @@ setMethod(
     # Rsamtools disabled asBcf() (>= 2.26 raises "temporarily disabled"), so
     # the bare upstream error is translated into something actionable rather
     # than surfacing as an opaque failure from a documented output format.
-    tryCatch(
+    try_fetch(
         asBcf(
             tmpVcfBgz,
             dictionary = unique(chrom),
             destination = str_remove(outputPath, "\\.bcf$")
         ),
-        error = function(e) {
+        error = function(cnd) {
             msg <- glue(
                 "writeSumStatsVcf: BCF output needs a working ",
                 "Rsamtools::asBcf(), which the installed Rsamtools does not ",
-                "provide (\"{conditionMessage(e)}\"). Write a bgzipped VCF ",
-                "instead by giving the output path a .vcf.bgz extension."
+                "provide. Write a bgzipped VCF instead by giving the output ",
+                "path a .vcf.bgz extension."
             )
-            abort(msg)
+            abort(msg, parent = cnd)
         }
     )
 }

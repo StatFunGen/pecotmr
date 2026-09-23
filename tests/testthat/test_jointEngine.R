@@ -2525,8 +2525,14 @@ test_that(".runJointSpecs row-binds TWAS results across specs", {
         .package = "pecotmr"
     )
     out <- pecotmr:::.runJointSpecs(
-        list("s1", "s2", "s3"), NULL, "individual",
-        NULL, "lasso", NULL, NULL, list()
+        list("s1", "s2", "s3"),
+        NULL,
+        "individual",
+        NULL,
+        "lasso",
+        NULL,
+        NULL,
+        list()
     )
     # The first spec seeds `out`; later ones are bound onto it.
     expect_equal(out, "R1+R2+R3")
@@ -2547,8 +2553,14 @@ test_that(".runJointSpecs row-binds fine-mapping results across specs", {
     )
     # The pipeline class, not the data, picks which rbind is used.
     out <- pecotmr:::.runJointSpecs(
-        list("s1", "s2"), NULL, "individual",
-        new("FmJointPipeline"), "susie", NULL, NULL, list()
+        list("s1", "s2"),
+        NULL,
+        "individual",
+        new("FmJointPipeline"),
+        "susie",
+        NULL,
+        NULL,
+        list()
     )
     expect_equal(out, "F1&F2")
 })
@@ -2565,8 +2577,14 @@ test_that(".runJointSpecs skips a spec that produced nothing", {
     # A NULL spec must not seed `out`, or the bind would carry a NULL.
     expect_equal(
         pecotmr:::.runJointSpecs(
-            list("s1", "s2"), NULL, "individual",
-            NULL, "lasso", NULL, NULL, list()
+            list("s1", "s2"),
+            NULL,
+            "individual",
+            NULL,
+            "lasso",
+            NULL,
+            NULL,
+            list()
         ),
         "KEPT"
     )
@@ -2575,8 +2593,9 @@ test_that(".runJointSpecs skips a spec that produced nothing", {
 test_that(".twasGroupArgs yields no fitted models when the fit is absent", {
     local_mocked_bindings(
         .jpConfig = function(p) list(),
-        .jgConditions = function(g) list(study = "s", context = "c",
-            trait = "t"),
+        .jgConditions = function(g) {
+            list(study = "s", context = "c", trait = "t")
+        },
         .twasFineMappingFits = function(...) NULL,
         .twasCvResultFor = function(...) NULL,
         .package = "pecotmr"
@@ -2618,9 +2637,19 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
     local_mocked_bindings(
         .twasFmHandoffCv = function(...) NULL,
         .jointTwasLeakageWarn = function(...) invisible(NULL),
-        twasWeightsCv = function(X, Y, fold, samplePartitions, weightMethods,
-                                 retainFits, maxNumVariants, numThreads,
-                                 data_driven_priorMatricesCv, verbose, seed) {
+        twasWeightsCv = function(
+            X,
+            Y,
+            fold,
+            samplePartitions,
+            weightMethods,
+            retainFits,
+            maxNumVariants,
+            numThreads,
+            dataDrivenPriorMatricesCv,
+            verbose,
+            seed
+        ) {
             seen <<- list(sp = samplePartitions, mcv = maxNumVariants)
             "CV"
         },
@@ -2633,11 +2662,22 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
         dataDrivenPriorMatricesCv = NULL
     )
     cfg <- list(
-        cvFolds = 5L, samplePartition = "CFG_SP", maxCvVariants = 77L,
-        cvThreads = 1, seed = 1L, verbose = 0
+        cvFolds = 5L,
+        samplePartition = "CFG_SP",
+        maxCvVariants = 77L,
+        cvThreads = 1,
+        seed = 1L,
+        verbose = 0
     )
     pecotmr:::.jointTwasCv(
-        NULL, NULL, "lasso", NULL, c(1, 2), args, cfg, "lasso"
+        NULL,
+        NULL,
+        "lasso",
+        NULL,
+        c(1, 2),
+        args,
+        cfg,
+        "lasso"
     )
     expect_equal(seen$sp, "ARGS_SP")
     expect_equal(seen$mcv, 77L)
@@ -2648,7 +2688,14 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
     cfgUncapped <- cfg
     cfgUncapped$maxCvVariants <- 0
     pecotmr:::.jointTwasCv(
-        NULL, NULL, "lasso", NULL, c(1, 2), argsBare, cfgUncapped, "lasso"
+        NULL,
+        NULL,
+        "lasso",
+        NULL,
+        c(1, 2),
+        argsBare,
+        cfgUncapped,
+        "lasso"
     )
     expect_equal(seen$sp, "CFG_SP")
     expect_equal(seen$mcv, Inf)
@@ -2668,10 +2715,18 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         .fmResidPheno = function(data, contexts, traitId, naAction) {
             matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "t1"))
         },
-        .fmResidGeno = function(data, contexts, traitId = NULL,
-                                cisWindow = NULL, region = NULL) {
-            seen <<- list(traitId = traitId, cisWindow = cisWindow,
-                region = region)
+        .fmResidGeno = function(
+            data,
+            contexts,
+            traitId = NULL,
+            cisWindow = NULL,
+            region = NULL
+        ) {
+            seen <<- list(
+                traitId = traitId,
+                cisWindow = cisWindow,
+                region = region
+            )
             matrix(0, 2L, 2L, dimnames = list(c("s1", "s2"), c("v1", "v2")))
         },
         .package = "pecotmr"
@@ -2682,11 +2737,73 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         traits = list(S1 = "t1")
     )
     pecotmr:::.enumUnivariateIndividual(
-        NULL, scope, list(region = "chr1:1-1000")
+        NULL,
+        scope,
+        list(region = "chr1:1-1000")
     )
     # An explicit region replaces the trait-anchored cis window entirely --
     # neither traitId nor cisWindow is passed down.
     expect_equal(seen$region, "chr1:1-1000")
     expect_null(seen$cisWindow)
     expect_null(seen$traitId)
+})
+
+# ---------------------------------------------------------------------------
+# cvWeightMethods: the override and the all-zero notice. Both were amputated
+# by 693e6d63 (the parameter stayed, its read path did not), so they are
+# covered here to stop the same silent loss happening twice.
+# ---------------------------------------------------------------------------
+
+test_that(".jointTwasCvRequested: NULL means every method", {
+    expect_true(pecotmr:::.jointTwasCvRequested(NULL, "susie"))
+    expect_true(pecotmr:::.jointTwasCvRequested(NULL, "lasso"))
+})
+
+test_that(".jointTwasCvRequested accepts tokens and method keys alike", {
+    expect_true(pecotmr:::.jointTwasCvRequested(c("susie", "lasso"), "susie"))
+    expect_false(pecotmr:::.jointTwasCvRequested(c("susie", "lasso"), "mrash"))
+    # the `<token>_weights` spelling used by weightMethods lists
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(c("susie_weights"), "susie")
+    )
+    # and a named method list, not just a character vector
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "lasso")
+    )
+    expect_false(
+        pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "susie")
+    )
+})
+
+test_that(".jointTwasCv skips a method excluded by cvWeightMethods", {
+    cfg <- list(cvFolds = 5L, cvWeightMethods = c("lasso"))
+    out <- pecotmr:::.jointTwasCv(
+        Xc = NULL,
+        Yc = NULL,
+        wm = NULL,
+        ma = NULL,
+        W = matrix(1, 2, 1),
+        args = list(),
+        cfg = cfg,
+        token = "susie"
+    )
+    expect_null(out)
+})
+
+test_that(".jointTwasCv warns when a method is all-zero, not silently", {
+    cfg <- list(cvFolds = 5L, cvWeightMethods = NULL)
+    expect_warning(
+        out <- pecotmr:::.jointTwasCv(
+            Xc = NULL,
+            Yc = NULL,
+            wm = NULL,
+            ma = NULL,
+            W = matrix(0, 3, 1),
+            args = list(),
+            cfg = cfg,
+            token = "susie"
+        ),
+        "all of its weights are zero"
+    )
+    expect_null(out)
 })

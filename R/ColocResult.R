@@ -78,15 +78,24 @@ methods::setValidity("ColocResult", function(object) {
 })
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
 .validateColocResult <- function(object) {
-    errors <- .crCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- c(
-            .crCheckPpColumns(object),
-            .crCheckVariantColumn(object)
-        )
+    coll <- makeAssertCollection()
+    assertNames(
+        colnames(mcols(object, use.names = FALSE)) %||% character(0),
+        must.include = .crRequiredCols(),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (length(errors) == 0L) TRUE else errors
+    coll$push(.crCheckPpColumns(object))
+    coll$push(.crCheckVariantColumn(object))
+    coll$getMessages()
 }
 
 # @noRd
@@ -112,28 +121,19 @@ methods::setValidity("ColocResult", function(object) {
     str_c("PP.H", 0:4, ".abf")
 }
 
-# @noRd
-.crCheckRequiredCols <- function(object) {
-    md <- mcols(object, use.names = FALSE)
-    have <- if (is.null(md)) character(0) else colnames(md)
-    missingCols <- setdiff(.crRequiredCols(), have)
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
-}
-
+# The posterior columns are a distinct contract from the identity columns
+# above, so they keep their own wording.
 # @noRd
 .crCheckPpColumns <- function(object) {
-    md <- mcols(object, use.names = FALSE)
-    missingCols <- setdiff(.crPpCols(), colnames(md))
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "missing posterior columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    res <- checkNames(
+        colnames(mcols(object, use.names = FALSE)),
+        must.include = .crPpCols(),
+        what = "colnames"
+    )
+    if (isTRUE(res)) {
+        return(NULL)
     }
-    NULL
+    str_c("missing posterior columns: ", res)
 }
 
 # The per-variant layer is the whole point of the class, so an element without
@@ -532,19 +532,20 @@ setMethod(
 }
 
 # @noRd
+#' @importFrom rlang try_fetch
 .crPurityOne <- function(ids, ldSketch) {
     # A singleton set has no pair to correlate, and susie treats it as pure.
     if (length(ids) < 2L) {
         return(1)
     }
-    ld <- tryCatch(
+    ld <- try_fetch(
         .ldFromSketch(
             ldSketch,
             ids,
             label = "getColocCredibleSets",
             onMissing = "drop"
         ),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     if (is.null(ld) || nrow(ld) < 2L) {
         return(NA_real_)

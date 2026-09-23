@@ -17,7 +17,8 @@ twasWeightsCv(
   verbose = 1,
   retainFits = FALSE,
   seed = NULL,
-  ...
+  dataDrivenPriorMatricesCv = NULL,
+  reweightedMixturePriorCv = NULL
 )
 }
 \arguments{
@@ -67,7 +68,11 @@ seed is scoped to the call, so the session RNG is left as it was found.
 \code{NULL} (default) does not seed at all and uses the historical
 parallel default.}
 
-\item{...}{Additional arguments forwarded to the per-method weight learners.}
+\item{dataDrivenPriorMatricesCv}{Optional list, one element per fold, of
+data-driven prior matrices for the mr.mash learner.}
+
+\item{reweightedMixturePriorCv}{Optional list, one element per fold, of
+reweighted mixture priors for the mvSuSiE learner.}
 }
 \value{
 A list with the following components:

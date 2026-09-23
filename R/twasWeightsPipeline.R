@@ -6,10 +6,10 @@
 # column (delegates to the generic `.rbindCollections`, which unions columns
 # and pads a side lacking an optional column such as joint* / region).
 # @noRd
+#' @importFrom checkmate assertClass
 .rbindTwasWeights <- function(a, b, ldSketch = NULL) {
-    if (!is(a, "TwasWeights") || !is(b, "TwasWeights")) {
-        abort(".rbindTwasWeights expects two TwasWeights inputs.")
-    }
+    assertClass(a, "TwasWeights")
+    assertClass(b, "TwasWeights")
     # Carry forward every column (joint*, region, ...) and reconcile the
     # collection-level slots via the shared combine.
     .combineTupleCollections(list(a, b), ldSketch, ".rbindTwasWeights")
@@ -126,13 +126,10 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     weights <- if (is.matrix(wList[[1L]])) {
         exec(rbind, !!!wList)
     } else {
-        unlist(wList, use.names = FALSE)
+        unname(list_c(wList))
     }
     twasWeightsRow(
-        variantIds = unlist(
-            map(entries, .twrPartsVariantIds),
-            use.names = FALSE
-        ),
+        variantIds = unname(list_c(map(entries, .twrPartsVariantIds))),
         weights = weights,
         fits = set_names(map(entries, getFits), regionLabels),
         cvResult = .twasRegionCvDf(entries, regionLabels),
@@ -148,6 +145,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # otherwise the partition the per-fold priors were computed on) NULL input
 # returns all-NULL, preserving the supplied samplePartition.
 # @noRd
+#' @importFrom checkmate assertClass
 .unpackMashPrior <- function(mashPrior, samplePartition = NULL) {
     if (is.null(mashPrior)) {
         return(list(
@@ -156,9 +154,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
             samplePartition = samplePartition
         ))
     }
-    if (!is(mashPrior, "MashPrior")) {
-        abort("`mashPrior` must be a MashPrior object (see ?MashPrior).")
-    }
+    assertClass(mashPrior, "MashPrior")
     cvFits <- getCvFits(mashPrior)
     perFold <- if (!is.null(cvFits)) cvFits$perFoldFits else NULL
     sp <- samplePartition
@@ -366,7 +362,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 .twasNormalizeListMethods <- function(methods) {
     methodList <- list()
     for (tk in names(methods)) {
-        base <- tryCatch(.twasMethodLookup(tk), error = function(e) NULL)
+        base <- try_fetch(.twasMethodLookup(tk), error = function(cnd) NULL)
         if (is.null(base)) {
             # Fine-mapping-only / unknown token with no learner default: keep
             # as-is (the downstream capability gate produces the message).
@@ -374,7 +370,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
             next
         }
         snake <- names(base)[[1L]]
-        merged <- modifyList(base[[snake]], methods[[tk]])
+        merged <- list_modify(base[[snake]], !!!compact(methods[[tk]]))
         attr(merged, "impl") <- attr(base[[snake]], "impl")
         methodList[[snake]] <- merged
     }
@@ -654,6 +650,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # A supplied fineMappingResult is mandatory (fine-mapping is never re-fit) and
 # must be a FineMappingResult.
 # @noRd
+#' @importFrom checkmate assertClass
 .twasRequireFmResult <- function(fineMappingResult, fmTokens) {
     if (is.null(fineMappingResult)) {
         fmStr <- str_flatten(unique(fmTokens), ", ")
@@ -665,9 +662,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         )
         abort(msg)
     }
-    if (!is(fineMappingResult, "FineMappingResultBase")) {
-        abort("`fineMappingResult` must be a FineMappingResult or NULL.")
-    }
+    assertClass(fineMappingResult, "FineMappingResultBase")
     invisible(NULL)
 }
 
@@ -772,13 +767,12 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # suitable for `learnTwasWeights`. Pulls the trimmedFit from the matching
 # entry. Returns a (possibly empty) list.
 # @noRd
+#' @importFrom checkmate assertClass
 .twasFineMappingFits <- function(fineMappingResult, study, context, trait) {
     if (is.null(fineMappingResult)) {
         return(list())
     }
-    if (!is(fineMappingResult, "FineMappingResultBase")) {
-        abort("`fineMappingResult` must be a FineMappingResult or NULL.")
-    }
+    assertClass(fineMappingResult, "FineMappingResultBase")
     out <- list()
     methods <- as.character(fineMappingResult$method)
     for (canonical in c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")) {
@@ -1024,7 +1018,11 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 #' @param maxCvVariants Maximum number of variants for CV. Default -1 (no
 #'   limit).
 #' @param cvThreads Threads for CV parallelism. Default 1.
-#' @param cvWeightMethods Optional override of methods used for CV.
+#' @param cvWeightMethods Optional override of which methods are
+#'   cross-validated, as a character vector of tokens or a named method
+#'   list. \code{NULL} (default) cross-validates every method that
+#'   produced non-zero weights; a method whose weights are all zero is
+#'   excluded with a warning either way.
 #' @param ensemble Logical. Compute SR-TWAS ensemble weights. Default
 #'   \code{TRUE}.
 #' @param ensembleR2Threshold Minimum CV R-squared for ensemble inclusion.
@@ -1153,55 +1151,193 @@ setMethod(
     ) {
         naAction <- arg_match(naAction)
         retainFitDetail <- arg_match(retainFitDetail)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .twasPipelineQtlDataset(p)
+        .twasPipelineQtlDataset(
+            data = data,
+            methods = methods,
+            contexts = contexts,
+            traitId = traitId,
+            region = region,
+            cisWindow = cisWindow,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            xvarCutoff = xvarCutoff,
+            imissCutoff = imissCutoff,
+            keepIndel = keepIndel,
+            keepSamples = keepSamples,
+            keepVariants = keepVariants,
+            jointRegions = jointRegions,
+            jointSpecification = jointSpecification,
+            fineMappingResult = fineMappingResult,
+            twasWeights = twasWeights,
+            mashPrior = mashPrior,
+            cvFolds = cvFolds,
+            samplePartition = samplePartition,
+            fitFullData = fitFullData,
+            cvWeightMethods = cvWeightMethods,
+            maxCvVariants = maxCvVariants,
+            cvThreads = cvThreads,
+            ensemble = ensemble,
+            ensembleR2Threshold = ensembleR2Threshold,
+            ensembleSolver = ensembleSolver,
+            ensembleAlpha = ensembleAlpha,
+            estimatePi = estimatePi,
+            retainFit = retainFit,
+            retainFitDetail = retainFitDetail,
+            dataType = dataType,
+            naAction = naAction,
+            verbose = verbose,
+            seed = seed
+        )
     }
 )
 
 # ---- QtlDataset pipeline worker + phase helpers ----------------------------
 
-.twasPipelineQtlDataset <- function(p) {
-    .twasQdsCheckRegionCisWindow(p)
-    p$xRegions <- .makeXRegions(p$region, p$jointRegions)
+.twasPipelineQtlDataset <- function(
+    data,
+    methods,
+    contexts,
+    traitId,
+    region,
+    cisWindow,
+    mafCutoff,
+    macCutoff,
+    xvarCutoff,
+    imissCutoff,
+    keepIndel,
+    keepSamples,
+    keepVariants,
+    jointRegions,
+    jointSpecification,
+    fineMappingResult,
+    twasWeights,
+    mashPrior,
+    cvFolds,
+    samplePartition,
+    fitFullData,
+    cvWeightMethods,
+    maxCvVariants,
+    cvThreads,
+    ensemble,
+    ensembleR2Threshold,
+    ensembleSolver,
+    ensembleAlpha,
+    estimatePi,
+    retainFit,
+    retainFitDetail,
+    dataType,
+    naAction,
+    verbose,
+    seed
+) {
+    .twasQdsCheckRegionCisWindow(region, cisWindow)
+    xRegions <- .makeXRegions(region, jointRegions)
     # Per-call filter overrides replace the construct-time slot values on a
     # validated copy. Variant QC is a data property applied identically to
     # fine-mapping and TWAS -- there is no TWAS-specific variant filter.
-    p$data <- .qtlApplyFilterOverrides(
-        p$data,
-        p$mafCutoff,
-        p$macCutoff,
-        p$xvarCutoff,
-        p$imissCutoff,
-        p$keepIndel,
-        p$keepSamples,
-        p$keepVariants
+    data <- .qtlApplyFilterOverrides(
+        data,
+        mafCutoff,
+        macCutoff,
+        xvarCutoff,
+        imissCutoff,
+        keepIndel,
+        keepSamples,
+        keepVariants
     )
-    p$parsedJointSpec <- parseJointSpecification(p$jointSpecification, p$data)
-    p$norm <- .twasNormalizeMethods(p$methods)
-    .twasCheckMethodCapabilities(p$norm$tokens, "QtlDataset")
-    .twasCheckFineMappingMethods(
-        p$norm$tokens,
-        p$fineMappingResult,
-        "QtlDataset"
+    parsedJointSpec <- parseJointSpecification(jointSpecification, data)
+    norm <- .twasNormalizeMethods(methods)
+    .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")
+    .twasCheckFineMappingMethods(norm$tokens, fineMappingResult, "QtlDataset")
+    .twasQdsCheckFitFull(fitFullData, cvFolds)
+    mash <- .twasQdsUnpackMash(mashPrior, samplePartition, norm)
+    samplePartition <- mash$samplePartition
+    dataDrivenPriorMatricesCv <- mash$dataDrivenPriorMatricesCv
+    norm <- mash$norm
+    joint <- .twasQdsJointPhase(
+        parsedJointSpec,
+        norm,
+        data,
+        contexts,
+        traitId,
+        cisWindow,
+        dataType,
+        verbose,
+        xRegions,
+        retainFit,
+        retainFitDetail,
+        seed
     )
-    .twasQdsCheckFitFull(p)
-    p <- .twasQdsUnpackMash(p)
-    joint <- .twasQdsJointPhase(p)
     if (joint$done) {
         return(joint$result)
     }
-    p$norm <- joint$norm
-    p$jointResult <- joint$result
-    p <- .twasQdsResolveGrid(p)
-    .twasQdsAssemble(.twasQdsDispatch(p), p$jointResult)
+    # The joint phase consumes the mrmash token; `norm` comes back holding
+    # only the methods that still have to go through the per-tuple loop.
+    norm <- joint$norm
+    grid <- .twasQdsResolveGrid(data, contexts, traitId, region, norm$tokens)
+    study <- grid$study
+    useCtx <- grid$useCtx
+    allTraits <- grid$allTraits
+    marker <- .twasQdsMarker(
+        cvFolds = cvFolds,
+        samplePartition = samplePartition,
+        fitFullData = fitFullData,
+        dataType = dataType,
+        retainFitDetail = retainFitDetail,
+        ensemble = ensemble,
+        ensembleR2Threshold = ensembleR2Threshold,
+        ensembleSolver = ensembleSolver,
+        ensembleAlpha = ensembleAlpha,
+        maxCvVariants = maxCvVariants,
+        cvThreads = cvThreads,
+        estimatePi = estimatePi,
+        verbose = verbose,
+        seed = seed,
+        cvWeightMethods = cvWeightMethods
+    )
+    tw <- if (grid$multivariate) {
+        .twasRunMultivariateGrid(
+            allTraits,
+            marker,
+            .twasQdsGridCtx(
+                xRegions = xRegions,
+                data = data,
+                norm = norm,
+                useCtx = useCtx,
+                fineMappingResult = fineMappingResult,
+                dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+                cisWindow = cisWindow,
+                verbose = verbose
+            )
+        )
+    } else {
+        .twasQdsUnivariateEngine(
+            study = study,
+            useCtx = useCtx,
+            allTraits = allTraits,
+            marker = marker,
+            data = data,
+            xRegions = xRegions,
+            norm = norm,
+            fineMappingResult = fineMappingResult,
+            twasWeights = twasWeights,
+            dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+            cisWindow = cisWindow,
+            naAction = naAction,
+            verbose = verbose
+        )
+    }
+    .twasQdsAssemble(tw, joint$result)
 }
 
 # `cisWindow` expands a trait's own coordinates; `region` is literal. Supplying
 # both signals a misunderstanding -> reject.
 # @noRd
-.twasQdsCheckRegionCisWindow <- function(p) {
-    if (!is.null(p$region) && !is.null(p$cisWindow)) {
+.twasQdsCheckRegionCisWindow <- function(
+    region,
+    cisWindow
+) {
+    if (!is.null(region) && !is.null(cisWindow)) {
         msg <- glue(
             "twasWeightsPipeline(QtlDataset): specify either `region` or ",
             "`cisWindow`, not both. `cisWindow` expands each trait's own ",
@@ -1214,8 +1350,11 @@ setMethod(
 
 # fitFullData = FALSE (CV-only) is meaningful only with cross-validation.
 # @noRd
-.twasQdsCheckFitFull <- function(p) {
-    if (!isTRUE(p$fitFullData) && p$cvFolds <= 1L) {
+.twasQdsCheckFitFull <- function(
+    fitFullData,
+    cvFolds
+) {
+    if (!isTRUE(fitFullData) && cvFolds <= 1L) {
         msg <- glue(
             "twasWeightsPipeline: fitFullData = FALSE requires ",
             "cross-validation (cvFolds > 1)."
@@ -1229,11 +1368,13 @@ setMethod(
 # args, the per-fold priors + fold partition into the CV machinery. Returns the
 # updated parameter bundle.
 # @noRd
-.twasQdsUnpackMash <- function(p) {
-    mp <- .unpackMashPrior(p$mashPrior, p$samplePartition)
-    p$samplePartition <- mp$samplePartition
-    p$dataDrivenPriorMatricesCv <- mp$dataDrivenPriorMatricesCv
-    if (!is.null(p$mashPrior) && !is_in("mrmash", p$norm$tokens)) {
+.twasQdsUnpackMash <- function(
+    mashPrior,
+    samplePartition,
+    norm
+) {
+    mp <- .unpackMashPrior(mashPrior, samplePartition)
+    if (!is.null(mashPrior) && !is_in("mrmash", norm$tokens)) {
         msg <- glue(
             "`mashPrior` was supplied but 'mrmash' is not among `methods`; ",
             "the data-driven prior is ignored."
@@ -1242,11 +1383,15 @@ setMethod(
     }
     if (
         !is.null(mp$fullPrior) &&
-            is_in("mrmash_weights", names(p$norm$methodList))
+            is_in("mrmash_weights", names(norm$methodList))
     ) {
-        p$norm$methodList$mrmash_weights$dataDrivenPriorMatrices <- mp$fullPrior
+        norm$methodList$mrmash_weights$dataDrivenPriorMatrices <- mp$fullPrior
     }
-    p
+    list(
+        samplePartition = mp$samplePartition,
+        dataDrivenPriorMatricesCv = mp$dataDrivenPriorMatricesCv,
+        norm = norm
+    )
 }
 
 # Explicit jointSpecification path: run the per-spec axis dispatcher for
@@ -1254,25 +1399,38 @@ setMethod(
 # with `result`; otherwise `norm` is the mrmash-stripped normalization for the
 # per-tuple loop below.
 # @noRd
-.twasQdsJointPhase <- function(p) {
-    if (length(p$parsedJointSpec) == 0L) {
-        return(list(done = FALSE, result = NULL, norm = p$norm))
+.twasQdsJointPhase <- function(
+    parsedJointSpec,
+    norm,
+    data,
+    contexts,
+    traitId,
+    cisWindow,
+    dataType,
+    verbose,
+    xRegions,
+    retainFit,
+    retainFitDetail,
+    seed
+) {
+    if (length(parsedJointSpec) == 0L) {
+        return(list(done = FALSE, result = NULL, norm = norm))
     }
     jointResult <- .twasDispatchJointSpecsQtlDataset(
-        p$parsedJointSpec,
-        p$data,
-        intersect(p$norm$tokens, "mrmash"),
-        p$contexts,
-        p$traitId,
-        p$cisWindow,
-        p$dataType,
-        p$verbose,
-        xRegions = p$xRegions,
-        retainFit = p$retainFit,
-        retainFitDetail = p$retainFitDetail,
-        seed = p$seed
+        parsedJointSpec,
+        data,
+        intersect(norm$tokens, "mrmash"),
+        contexts,
+        traitId,
+        cisWindow,
+        dataType,
+        verbose,
+        xRegions = xRegions,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail,
+        seed = seed
     )
-    keep <- setdiff(p$norm$tokens, intersect(p$norm$tokens, "mrmash"))
+    keep <- setdiff(norm$tokens, intersect(norm$tokens, "mrmash"))
     if (length(keep) == 0L) {
         if (is.null(jointResult)) {
             msg <- glue(
@@ -1284,7 +1442,7 @@ setMethod(
         }
         return(list(done = TRUE, result = jointResult))
     }
-    norm <- p$norm
+    norm <- norm
     norm$tokens <- keep
     keepKeys <- which(
         is_in(str_remove(names(norm$methodList), "(_weights|Weights)$"), keep)
@@ -1296,21 +1454,23 @@ setMethod(
 # Resolve the (context, trait) grid + multivariate flag and build the joint-
 # pipeline marker + shared grid context. Returns the updated parameter bundle.
 # @noRd
-.twasQdsResolveGrid <- function(p) {
-    p$study <- getStudy(p$data)
-    p$useCtx <- .twasQdsResolveContexts(p$data, p$contexts)
-    p$allTraits <- .twasQdsResolveTraits(
-        p$data,
-        p$useCtx,
-        p$traitId,
-        p$region
+.twasQdsResolveGrid <- function(
+    data,
+    contexts,
+    traitId,
+    region,
+    tokens
+) {
+    study <- getStudy(data)
+    useCtx <- .twasQdsResolveContexts(data, contexts)
+    allTraits <- .twasQdsResolveTraits(data, useCtx, traitId, region)
+    .twasCheckMultivariateY(tokens, length(allTraits), length(useCtx))
+    list(
+        study = study,
+        useCtx = useCtx,
+        allTraits = allTraits,
+        multivariate = any(map_lgl(tokens, .twasIsMultivariateToken))
     )
-    p$nCtx <- length(p$useCtx)
-    .twasCheckMultivariateY(p$norm$tokens, length(p$allTraits), p$nCtx)
-    p$multivariate <- any(map_lgl(p$norm$tokens, .twasIsMultivariateToken))
-    p$marker <- .twasQdsMarker(p)
-    p$twasGridCtx <- .twasQdsGridCtx(p)
-    p
 }
 
 # Selected contexts (all when NULL; else validated against the dataset).
@@ -1342,7 +1502,7 @@ setMethod(
         traitId = traitId,
         region = region
     )
-    allTraits <- unique(unlist(perCtxTraits))
+    allTraits <- unique(list_c(perCtxTraits))
     if (length(allTraits) == 0L) {
         abort("twasWeightsPipeline(QtlDataset): no traits selected.")
     }
@@ -1351,25 +1511,42 @@ setMethod(
 
 # Joint-pipeline marker carrying the CV / ensemble config for the engine.
 # @noRd
-.twasQdsMarker <- function(p) {
+.twasQdsMarker <- function(
+    cvFolds,
+    samplePartition,
+    fitFullData,
+    dataType,
+    retainFitDetail,
+    ensemble,
+    ensembleR2Threshold,
+    ensembleSolver,
+    ensembleAlpha,
+    maxCvVariants,
+    cvThreads,
+    estimatePi,
+    verbose,
+    seed,
+    cvWeightMethods
+) {
     new(
         "TwasJointPipeline",
         config = list(
-            cvFolds = p$cvFolds,
-            samplePartition = p$samplePartition,
-            fitFullData = p$fitFullData,
-            dataType = p$dataType,
-            retainFitDetail = p$retainFitDetail,
+            cvFolds = cvFolds,
+            samplePartition = samplePartition,
+            fitFullData = fitFullData,
+            dataType = dataType,
+            retainFitDetail = retainFitDetail,
             standardized = FALSE,
-            ensemble = p$ensemble,
-            ensembleR2Threshold = p$ensembleR2Threshold,
-            ensembleSolver = p$ensembleSolver,
-            ensembleAlpha = p$ensembleAlpha,
-            maxCvVariants = p$maxCvVariants,
-            cvThreads = p$cvThreads,
-            estimatePi = p$estimatePi,
-            verbose = p$verbose,
-            seed = p$seed,
+            ensemble = ensemble,
+            ensembleR2Threshold = ensembleR2Threshold,
+            ensembleSolver = ensembleSolver,
+            ensembleAlpha = ensembleAlpha,
+            cvWeightMethods = cvWeightMethods,
+            maxCvVariants = maxCvVariants,
+            cvThreads = cvThreads,
+            estimatePi = estimatePi,
+            verbose = verbose,
+            seed = seed,
             ldSketch = NULL
         )
     )
@@ -1377,46 +1554,69 @@ setMethod(
 
 # Shared grid context consumed by both dispatch paths.
 # @noRd
-.twasQdsGridCtx <- function(p) {
+.twasQdsGridCtx <- function(
+    xRegions,
+    data,
+    norm,
+    useCtx,
+    fineMappingResult,
+    dataDrivenPriorMatricesCv,
+    cisWindow,
+    verbose
+) {
     list(
-        xRegions = p$xRegions,
-        data = p$data,
-        norm = p$norm,
-        useCtx = p$useCtx,
-        fineMappingResult = p$fineMappingResult,
-        dataDrivenPriorMatricesCv = p$dataDrivenPriorMatricesCv,
-        cisWindow = p$cisWindow,
-        verbose = p$verbose
+        xRegions = xRegions,
+        data = data,
+        norm = norm,
+        useCtx = useCtx,
+        fineMappingResult = fineMappingResult,
+        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        cisWindow = cisWindow,
+        verbose = verbose
     )
-}
-
-# Top-level dispatch: multivariate joint grid vs univariate engine path.
-# @noRd
-.twasQdsDispatch <- function(p) {
-    if (p$multivariate) {
-        return(.twasRunMultivariateGrid(p$allTraits, p$marker, p$twasGridCtx))
-    }
-    .twasQdsUnivariateEngine(p)
 }
 
 # Univariate methods ROUTED THROUGH THE ENGINE: one 1-condition group per
 # (context, trait), per region -> the SAME per-method fitter (+ ensemble layer
 # for >= 2 methods + resume cache) as the joint paths, merged across regions.
 # @noRd
-.twasQdsUnivariateEngine <- function(p) {
+.twasQdsUnivariateEngine <- function(
+    study,
+    useCtx,
+    allTraits,
+    marker,
+    data,
+    xRegions,
+    norm,
+    fineMappingResult,
+    twasWeights,
+    dataDrivenPriorMatricesCv,
+    cisWindow,
+    naAction,
+    verbose
+) {
     univCell <- .lookupJointCell("univariate", "individual")
     scope <- list(
-        studies = p$study,
-        contexts = set_names(list(p$useCtx), p$study),
-        traits = set_names(list(p$allTraits), p$study)
+        studies = study,
+        contexts = set_names(list(useCtx), study),
+        traits = set_names(list(allTraits), study)
     )
-    labs <- map_chr(p$xRegions, .twasRegionLabel)
+    labs <- map_chr(xRegions, .twasRegionLabel)
     perRegion <- map(
-        seq_along(p$xRegions),
+        seq_along(xRegions),
         .twasQdsUnivRegion,
         univCell = univCell,
-        p = p,
-        scope = scope
+        scope = scope,
+        marker = marker,
+        data = data,
+        xRegions = xRegions,
+        norm = norm,
+        fineMappingResult = fineMappingResult,
+        twasWeights = twasWeights,
+        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        cisWindow = cisWindow,
+        naAction = naAction,
+        verbose = verbose
     )
     keep <- !map_lgl(perRegion, is.null)
     .twasMergeRegionResults(perRegion[keep], labs[keep])
@@ -1424,18 +1624,28 @@ setMethod(
 
 # Per-region engine args for the univariate path.
 # @noRd
-.twasQdsUnivArgs <- function(p, bi) {
+.twasQdsUnivArgs <- function(
+    bi,
+    xRegions,
+    norm,
+    fineMappingResult,
+    twasWeights,
+    dataDrivenPriorMatricesCv,
+    cisWindow,
+    naAction,
+    verbose
+) {
     list(
-        methodList = p$norm$methodList,
-        fineMappingResult = p$fineMappingResult,
-        cache = p$twasWeights,
-        dataDrivenPriorMatricesCv = p$dataDrivenPriorMatricesCv,
-        cisWindow = p$cisWindow,
-        region = p$xRegions[[bi]],
+        methodList = norm$methodList,
+        fineMappingResult = fineMappingResult,
+        cache = twasWeights,
+        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        cisWindow = cisWindow,
+        region = xRegions[[bi]],
         regionIndex = bi,
-        nRegions = length(p$xRegions),
-        naAction = p$naAction,
-        verbose = p$verbose
+        nRegions = length(xRegions),
+        naAction = naAction,
+        verbose = verbose
     )
 }
 
@@ -1493,34 +1703,118 @@ setMethod(
         ...
     ) {
         retainFitDetail <- arg_match(retainFitDetail)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .twasPipelineQtlSumStats(p)
+        .twasPipelineQtlSumStats(
+            data = data,
+            methods = methods,
+            contexts = contexts,
+            traitId = traitId,
+            jointSpecification = jointSpecification,
+            fineMappingResult = fineMappingResult,
+            twasWeights = twasWeights,
+            retainFit = retainFit,
+            retainFitDetail = retainFitDetail,
+            dataType = dataType,
+            verbose = verbose,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff
+        )
     }
 )
 
 # ---- QtlSumStats pipeline worker + phase helpers ---------------------------
 
-.twasPipelineQtlSumStats <- function(p) {
+.twasPipelineQtlSumStats <- function(
+    data,
+    methods,
+    contexts,
+    traitId,
+    jointSpecification,
+    fineMappingResult,
+    twasWeights,
+    retainFit,
+    retainFitDetail,
+    dataType,
+    verbose,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
     # summaryStatsQc() is mandatory before twasWeightsPipeline for SumStats
     # input; it also drops variants not present in the ldSketch, so every
     # entry's SNP set is a subset of the ldSketch panel by the time we get here.
-    .twasAssertQcd(p$data)
-    p$parsedJointSpec <- parseJointSpecification(p$jointSpecification, p$data)
-    tm <- .twasSumStatsMethodTokens(p$methods)
-    p$tokens <- tm$tokens
-    p$methodArgs <- tm$methodArgs
-    .twasCheckMethodCapabilities(p$tokens, "QtlSumStats")
-    .twasCheckFineMappingMethods(p$tokens, p$fineMappingResult, "QtlSumStats")
-    joint <- .twasQssJointPhase(p)
+    .twasAssertQcd(data)
+    parsedJointSpec <- parseJointSpecification(jointSpecification, data)
+    tm <- .twasSumStatsMethodTokens(methods)
+    tokens <- tm$tokens
+    methodArgs <- tm$methodArgs
+    .twasCheckMethodCapabilities(tokens, "QtlSumStats")
+    .twasCheckFineMappingMethods(tokens, fineMappingResult, "QtlSumStats")
+    joint <- .twasQssJointPhase(
+        parsedJointSpec,
+        data,
+        tokens,
+        methodArgs,
+        contexts,
+        traitId,
+        dataType,
+        verbose,
+        retainFit,
+        retainFitDetail,
+        mafCutoff,
+        macCutoff,
+        imissCutoff
+    )
     if (joint$done) {
         return(joint$result)
     }
-    p$tokens <- joint$tokens
-    p$methodArgs <- joint$methodArgs
-    p <- .twasQssSelectAndPartition(p)
-    rows <- c(.twasQssUnivariateRows(p), .twasQssMultivariateRows(p))
-    .twasQssAssemble(rows, joint$result, p)
+    # The joint phase consumes the mrmash token; what it hands back is the
+    # remainder that still has to go through the per-tuple loop.
+    tokens <- joint$tokens
+    methodArgs <- joint$methodArgs
+    part <- .twasQssSelectAndPartition(data, tokens, contexts, traitId)
+    studyCol <- part$studyCol
+    contextCol <- part$contextCol
+    traitCol <- part$traitCol
+    selRows <- part$selRows
+    multivariateTokens <- part$multivariateTokens
+    univariateTokens <- part$univariateTokens
+    ldSketch <- part$ldSketch
+    rows <- c(
+        .twasQssUnivariateRows(
+            selRows,
+            univariateTokens = univariateTokens,
+            studyCol = studyCol,
+            contextCol = contextCol,
+            traitCol = traitCol,
+            data = data,
+            ldSketch = ldSketch,
+            twasWeights = twasWeights,
+            dataType = dataType,
+            fineMappingResult = fineMappingResult,
+            methodArgs = methodArgs,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff
+        ),
+        .twasQssMultivariateRows(
+            selRows,
+            multivariateTokens = multivariateTokens,
+            studyCol = studyCol,
+            contextCol = contextCol,
+            traitCol = traitCol,
+            data = data,
+            ldSketch = ldSketch,
+            methodArgs = methodArgs,
+            retainFitDetail = retainFitDetail,
+            fineMappingResult = fineMappingResult,
+            dataType = dataType,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff
+        )
+    )
+    .twasQssAssemble(rows, joint$result, ldSketch)
 }
 
 # Normalize the methods argument into (tokens, methodArgs). The default set
@@ -1558,30 +1852,44 @@ setMethod(
 # methodArgs): `done` requests an early return with `result`; otherwise the
 # remaining (non-mrmash) tokens + args continue through the per-tuple loop.
 # @noRd
-.twasQssJointPhase <- function(p) {
-    if (length(p$parsedJointSpec) == 0L) {
+.twasQssJointPhase <- function(
+    parsedJointSpec,
+    data,
+    tokens,
+    methodArgs,
+    contexts,
+    traitId,
+    dataType,
+    verbose,
+    retainFit,
+    retainFitDetail,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
+    if (length(parsedJointSpec) == 0L) {
         return(list(
             done = FALSE,
             result = NULL,
-            tokens = p$tokens,
-            methodArgs = p$methodArgs
+            tokens = tokens,
+            methodArgs = methodArgs
         ))
     }
     jointResult <- .twasDispatchJointSpecsQtlSumStats(
-        p$parsedJointSpec,
-        p$data,
-        intersect(p$tokens, "mrmash"),
-        p$contexts,
-        p$traitId,
-        p$dataType,
-        p$verbose,
-        retainFit = p$retainFit,
-        retainFitDetail = p$retainFitDetail,
-        mafCutoff = p$mafCutoff %||% 0,
-        macCutoff = p$macCutoff %||% 0,
-        imissCutoff = p$imissCutoff %||% 1
+        parsedJointSpec,
+        data,
+        intersect(tokens, "mrmash"),
+        contexts,
+        traitId,
+        dataType,
+        verbose,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail,
+        mafCutoff = mafCutoff %||% 0,
+        macCutoff = macCutoff %||% 0,
+        imissCutoff = imissCutoff %||% 1
     )
-    keep <- setdiff(p$tokens, "mrmash")
+    keep <- setdiff(tokens, "mrmash")
     if (length(keep) == 0L) {
         if (is.null(jointResult)) {
             abort("twasWeightsPipeline(QtlSumStats): no joint fits produced.")
@@ -1592,7 +1900,7 @@ setMethod(
         done = FALSE,
         result = jointResult,
         tokens = keep,
-        methodArgs = p$methodArgs[keep]
+        methodArgs = methodArgs[keep]
     )
 }
 
@@ -1600,28 +1908,53 @@ setMethod(
 # attach the LD sketch, and enforce the multivariate >=2-contexts rule. Returns
 # the updated parameter bundle.
 # @noRd
-.twasQssSelectAndPartition <- function(p) {
-    p$studyCol <- as.character(p$data$study)
-    p$contextCol <- as.character(p$data$context)
-    p$traitCol <- as.character(p$data$trait)
-    p$selRows <- .twasQssSelectRows(p)
-    isMv <- map_lgl(p$tokens, .twasIsMultivariateToken)
-    p$multivariateTokens <- p$tokens[isMv]
-    p$univariateTokens <- p$tokens[!isMv]
-    p$ldSketch <- getLdSketch(p$data)
-    .twasQssCheckMultivariate(p)
-    p
+.twasQssSelectAndPartition <- function(data, tokens, contexts, traitId) {
+    studyCol <- as.character(data$study)
+    contextCol <- as.character(data$context)
+    traitCol <- as.character(data$trait)
+    selRows <- .twasQssSelectRows(
+        data,
+        contextCol,
+        traitCol,
+        contexts,
+        traitId
+    )
+    isMv <- map_lgl(tokens, .twasIsMultivariateToken)
+    multivariateTokens <- tokens[isMv]
+    univariateTokens <- tokens[!isMv]
+    .twasQssCheckMultivariate(
+        multivariateTokens,
+        selRows,
+        studyCol,
+        contextCol,
+        traitCol
+    )
+    list(
+        studyCol = studyCol,
+        contextCol = contextCol,
+        traitCol = traitCol,
+        selRows = selRows,
+        multivariateTokens = multivariateTokens,
+        univariateTokens = univariateTokens,
+        ldSketch = getLdSketch(data)
+    )
 }
 
 # Row indices matching the contexts / traitId filters (error if none).
 # @noRd
-.twasQssSelectRows <- function(p) {
-    selRows <- seq_len(nrow(p$data))
-    if (!is.null(p$contexts)) {
-        selRows <- selRows[is_in(p$contextCol[selRows], p$contexts)]
+.twasQssSelectRows <- function(
+    data,
+    contextCol,
+    traitCol,
+    contexts,
+    traitId
+) {
+    selRows <- seq_len(nrow(data))
+    if (!is.null(contexts)) {
+        selRows <- selRows[is_in(contextCol[selRows], contexts)]
     }
-    if (!is.null(p$traitId)) {
-        selRows <- selRows[is_in(p$traitCol[selRows], p$traitId)]
+    if (!is.null(traitId)) {
+        selRows <- selRows[is_in(traitCol[selRows], traitId)]
     }
     if (length(selRows) == 0L) {
         msg <- glue(
@@ -1635,18 +1968,24 @@ setMethod(
 
 # Multivariate methods require at least two contexts within some (study, trait).
 # @noRd
-.twasQssCheckMultivariate <- function(p) {
-    if (length(p$multivariateTokens) == 0L) {
+.twasQssCheckMultivariate <- function(
+    multivariateTokens,
+    selRows,
+    studyCol,
+    contextCol,
+    traitCol
+) {
+    if (length(multivariateTokens) == 0L) {
         return(invisible(NULL))
     }
     groupKey <- str_c(
-        p$studyCol[p$selRows],
-        p$traitCol[p$selRows],
+        studyCol[selRows],
+        traitCol[selRows],
         sep = "||"
     )
-    perGroupNCtx <- map_int(split(p$contextCol[p$selRows], groupKey), length)
+    perGroupNCtx <- map_int(split(contextCol[selRows], groupKey), length)
     if (all(perGroupNCtx < 2L)) {
-        mvStr <- str_flatten(p$multivariateTokens, ", ")
+        mvStr <- str_flatten(multivariateTokens, ", ")
         msg <- glue(
             "twasWeightsPipeline(QtlSumStats): multivariate method(s) ",
             "{mvStr} require at least two contexts per (study, trait); the ",
@@ -1724,17 +2063,20 @@ setMethod(
 
 # Run a weight function, warning (with `errPrefix`) and returning NULL on error.
 # @noRd
+#' @importFrom rlang try_fetch
 .twasTryWeights <- function(fn, stat, ldMat, userArgs, errPrefix) {
-    tryCatch(
+    try_fetch(
         {
             wfn <- get(fn, mode = "function")
-            wArgs <- c(list(stat = stat, LD = ldMat), userArgs)
+            wArgs <- .twasWeightCallArgs(
+                fn,
+                list(stat = stat, LD = ldMat),
+                userArgs
+            )
             exec(wfn, !!!wArgs)
         },
-        error = function(e) {
-            eMsg <- conditionMessage(e)
-            msg <- glue("{errPrefix}{eMsg}")
-            warn(msg)
+        error = function(cnd) {
+            warn(errPrefix, parent = cnd)
             NULL
         }
     )
@@ -1742,26 +2084,72 @@ setMethod(
 
 # ---- Univariate dispatch: per (study, context, trait), per method ----------
 
-.twasQssUnivariateRows <- function(p) {
-    if (length(p$univariateTokens) == 0L) {
+.twasQssUnivariateRows <- function(
+    selRows,
+    univariateTokens,
+    studyCol,
+    contextCol,
+    traitCol,
+    data,
+    ldSketch,
+    twasWeights,
+    dataType,
+    fineMappingResult,
+    methodArgs,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
+    if (length(univariateTokens) == 0L) {
         return(list())
     }
-    list_flatten(map(p$selRows, .twasQssUnivariateRowsForEntry, p = p))
+    list_flatten(map(
+        selRows,
+        .twasQssUnivariateRowsForEntry,
+        univariateTokens = univariateTokens,
+        studyCol = studyCol,
+        contextCol = contextCol,
+        traitCol = traitCol,
+        data = data,
+        ldSketch = ldSketch,
+        twasWeights = twasWeights,
+        dataType = dataType,
+        fineMappingResult = fineMappingResult,
+        methodArgs = methodArgs,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff
+    ))
 }
 
 # Cached + freshly-fitted rows for one sumstats entry. Resume cache: pull cached
 # entries up front and reduce the per-entry fit work to the un-cached tokens.
 # @noRd
-.twasQssUnivariateRowsForEntry <- function(i, p) {
-    st <- p$studyCol[i]
-    ctx <- p$contextCol[i]
-    tr <- p$traitCol[i]
+.twasQssUnivariateRowsForEntry <- function(
+    i,
+    univariateTokens,
+    studyCol,
+    contextCol,
+    traitCol,
+    data,
+    ldSketch,
+    twasWeights,
+    dataType,
+    fineMappingResult,
+    methodArgs,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
+    st <- studyCol[i]
+    ctx <- contextCol[i]
+    tr <- traitCol[i]
     cacheHits <- .twasResolveCacheHits(
-        p$twasWeights,
+        twasWeights,
         st,
         ctx,
         tr,
-        p$univariateTokens
+        univariateTokens
     )
     cachedRows <- imap(
         cacheHits,
@@ -1770,17 +2158,17 @@ setMethod(
         ctx = ctx,
         tr = tr
     )
-    toFit <- setdiff(p$univariateTokens, names(cacheHits))
+    toFit <- setdiff(univariateTokens, names(cacheHits))
     if (length(toFit) == 0L) {
         return(unname(cachedRows))
     }
     fitCtx <- .twasQssUnivariateFitCtx(
-        p$data,
+        data,
         st,
         ctx,
         tr,
-        p$ldSketch,
-        cutoffs = .panelCutoffs(p)
+        ldSketch,
+        cutoffs = .panelCutoffs(mafCutoff, macCutoff, imissCutoff)
     )
     fitted <- compact(map(
         toFit,
@@ -1789,7 +2177,9 @@ setMethod(
         ctx = ctx,
         tr = tr,
         fitCtx = fitCtx,
-        p = p
+        methodArgs = methodArgs,
+        fineMappingResult = fineMappingResult,
+        dataType = dataType
     ))
     c(unname(cachedRows), fitted)
 }
@@ -1865,15 +2255,24 @@ setMethod(
 
 # Fit one univariate method for one entry -> a row record, or NULL on skip.
 # @noRd
-.twasQssUnivariateFitOne <- function(tk, st, ctx, tr, fitCtx, p) {
+.twasQssUnivariateFitOne <- function(
+    tk,
+    st,
+    ctx,
+    tr,
+    fitCtx,
+    methodArgs,
+    fineMappingResult,
+    dataType
+) {
     spec <- .twasResolveWeightFn(tk)
-    userArgs <- .twasUserArgs(p$methodArgs, tk)
+    userArgs <- .twasUserArgs(methodArgs, tk)
     # When the token is a fine-mapping method, pass the precomputed fit into the
     # *Rss weight function via its dedicated *Fit arg. The gate above ensures
     # fineMappingResult is non-NULL here.
     if (!is.null(spec$adapter)) {
         fit <- .twasFineMappingFitFor(
-            p$fineMappingResult,
+            fineMappingResult,
             study = st,
             context = ctx,
             trait = tr,
@@ -1908,7 +2307,7 @@ setMethod(
             fits = fitAttr,
             cvResult = NULL,
             standardized = TRUE,
-            dataType = p$dataType
+            dataType = dataType
         )
     )
 }
@@ -1935,50 +2334,99 @@ setMethod(
 
 # ---- Multivariate dispatch: per (study, trait), all selected contexts ------
 
-.twasQssMultivariateRows <- function(p) {
-    if (length(p$multivariateTokens) == 0L) {
+.twasQssMultivariateRows <- function(
+    selRows,
+    multivariateTokens,
+    studyCol,
+    contextCol,
+    traitCol,
+    data,
+    ldSketch,
+    methodArgs,
+    retainFitDetail,
+    fineMappingResult,
+    dataType,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
+    if (length(multivariateTokens) == 0L) {
         return(list())
     }
     groupKey <- str_c(
-        p$studyCol[p$selRows],
-        p$traitCol[p$selRows],
+        studyCol[selRows],
+        traitCol[selRows],
         sep = "||"
     )
-    groups <- split(p$selRows, groupKey)
-    list_flatten(map(groups, .twasQssMultivariateGroupRows, p = p))
+    groups <- split(selRows, groupKey)
+    list_flatten(map(
+        groups,
+        .twasQssMultivariateGroupRows,
+        multivariateTokens = multivariateTokens,
+        studyCol = studyCol,
+        contextCol = contextCol,
+        traitCol = traitCol,
+        data = data,
+        ldSketch = ldSketch,
+        methodArgs = methodArgs,
+        retainFitDetail = retainFitDetail,
+        fineMappingResult = fineMappingResult,
+        dataType = dataType,
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff
+    ))
 }
 
 # Multivariate rows for one (study, trait) group across its contexts.
 # @noRd
-.twasQssMultivariateGroupRows <- function(gIdx, p) {
+.twasQssMultivariateGroupRows <- function(
+    gIdx,
+    multivariateTokens,
+    studyCol,
+    contextCol,
+    traitCol,
+    data,
+    ldSketch,
+    methodArgs,
+    retainFitDetail,
+    fineMappingResult,
+    dataType,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
     if (length(gIdx) < 2L) {
         return(list())
     }
-    st <- p$studyCol[gIdx[[1L]]]
-    tr <- p$traitCol[gIdx[[1L]]]
-    ctxNames <- p$contextCol[gIdx]
+    st <- studyCol[gIdx[[1L]]]
+    tr <- traitCol[gIdx[[1L]]]
+    ctxNames <- contextCol[gIdx]
     mvStat <- .twasQssMultivariateStat(
-        p$data,
+        data,
         st,
         tr,
         ctxNames,
-        ldSketch = p$ldSketch,
-        cutoffs = .panelCutoffs(p)
+        ldSketch = ldSketch,
+        cutoffs = .panelCutoffs(mafCutoff, macCutoff, imissCutoff)
     )
     ldMat <- .ldFromSketch(
-        p$ldSketch,
+        ldSketch,
         mvStat$variantIds,
         label = "twasWeightsPipeline"
     )
     list_flatten(map(
-        p$multivariateTokens,
+        multivariateTokens,
         .twasQssMultivariateFitOne,
         st = st,
         tr = tr,
         ctxNames = ctxNames,
         mvStat = mvStat,
         ldMat = ldMat,
-        p = p
+        methodArgs = methodArgs,
+        retainFitDetail = retainFitDetail,
+        fineMappingResult = fineMappingResult,
+        dataType = dataType
     ))
 }
 
@@ -2070,17 +2518,36 @@ setMethod(
 # Fit one multivariate method for a group -> one row record per context (empty
 # list on skip).
 # @noRd
-.twasQssMultivariateFitOne <- function(tk, st, tr, ctxNames, mvStat, ldMat, p) {
+.twasQssMultivariateFitOne <- function(
+    tk,
+    st,
+    tr,
+    ctxNames,
+    mvStat,
+    ldMat,
+    methodArgs,
+    retainFitDetail,
+    fineMappingResult,
+    dataType
+) {
     spec <- .twasResolveWeightFn(tk)
     userArgs <- .twasMrmashRetainDefaults(
-        .twasUserArgs(p$methodArgs, tk),
+        .twasUserArgs(methodArgs, tk),
         spec$adapter,
         tk,
-        p$retainFitDetail
+        retainFitDetail
     )
     # mvsusie is fine-mapping; thread its pre-fit through (mr.mash is not).
     if (!is.null(spec$adapter)) {
-        userArgs <- .twasMvThreadFit(spec, userArgs, tk, st, tr, ctxNames, p)
+        userArgs <- .twasMvThreadFit(
+            spec,
+            userArgs,
+            tk,
+            st,
+            tr,
+            ctxNames,
+            fineMappingResult
+        )
         if (is.null(userArgs)) {
             return(list())
         }
@@ -2108,16 +2575,24 @@ setMethod(
         st,
         tr,
         tk,
-        p$dataType
+        dataType
     )
 }
 
 # Thread the precomputed fine-mapping fit into a multivariate method's args;
 # returns NULL (signalling skip) when the fit is absent.
 # @noRd
-.twasMvThreadFit <- function(spec, userArgs, tk, st, tr, ctxNames, p) {
+.twasMvThreadFit <- function(
+    spec,
+    userArgs,
+    tk,
+    st,
+    tr,
+    ctxNames,
+    fineMappingResult
+) {
     fit <- .twasFineMappingFitFor(
-        p$fineMappingResult,
+        fineMappingResult,
         study = st,
         context = ctxNames[[1L]],
         trait = tr,
@@ -2181,8 +2656,12 @@ setMethod(
 
 # Combine the per-tuple result with any joint result (error if both empty).
 # @noRd
-.twasQssAssemble <- function(rows, jointResult, p) {
-    perTupleResult <- .twasRowsToWeights(rows, p$ldSketch)
+.twasQssAssemble <- function(
+    rows,
+    jointResult,
+    ldSketch
+) {
+    perTupleResult <- .twasRowsToWeights(rows, ldSketch)
     if (is.null(jointResult)) {
         if (is.null(perTupleResult)) {
             msg <- glue(
@@ -2196,7 +2675,7 @@ setMethod(
     if (is.null(perTupleResult)) {
         return(jointResult)
     }
-    .rbindTwasWeights(perTupleResult, jointResult, ldSketch = p$ldSketch)
+    .rbindTwasWeights(perTupleResult, jointResult, ldSketch = ldSketch)
 }
 
 
@@ -2283,9 +2762,24 @@ setMethod(
     ) {
         naAction <- arg_match(naAction)
         retainFitDetail <- arg_match(retainFitDetail)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .twasPipelineMultiStudy(p)
+        .twasPipelineMultiStudy(
+            data = data,
+            region = region,
+            cisWindow = cisWindow,
+            jointRegions = jointRegions,
+            jointSpecification = jointSpecification,
+            methods = methods,
+            fineMappingResult = fineMappingResult,
+            contexts = contexts,
+            traitId = traitId,
+            verbose = verbose,
+            retainFit = retainFit,
+            retainFitDetail = retainFitDetail,
+            seed = seed,
+            twasWeights = twasWeights,
+            naAction = naAction,
+            dots = list(...)
+        )
     }
 )
 
@@ -2322,54 +2816,110 @@ setMethod(
     (is.character(methods) || is.list(methods)) && length(methods) == 0L
 }
 
-.twasPipelineMultiStudy <- function(p) {
-    if (!is.null(p$region) && !is.null(p$cisWindow)) {
+.twasPipelineMultiStudy <- function(
+    data,
+    region,
+    cisWindow,
+    jointRegions,
+    jointSpecification,
+    methods,
+    fineMappingResult,
+    contexts,
+    traitId,
+    verbose,
+    retainFit,
+    retainFitDetail,
+    seed,
+    twasWeights,
+    naAction,
+    dots
+) {
+    if (!is.null(region) && !is.null(cisWindow)) {
         msg <- glue(
             "twasWeightsPipeline(MultiStudyQtlDataset): specify either ",
             "`region` or `cisWindow`, not both."
         )
         abort(msg)
     }
-    xRegions <- .makeXRegions(p$region, p$jointRegions)
-    parsedJointSpec <- parseJointSpecification(p$jointSpecification, p$data)
+    xRegions <- .makeXRegions(region, jointRegions)
+    parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     # Gate fine-mapping methods early so the recursion into the embedded
     # QtlDataset / QtlSumStats components doesn't re-run fine-mapping.
     .twasCheckFineMappingMethods(
-        .twasMethodTokensFromArg(p$methods),
-        p$fineMappingResult,
+        .twasMethodTokensFromArg(methods),
+        fineMappingResult,
         "MultiStudyQtlDataset"
     )
-    joint <- .twasMsJointPhase(p, parsedJointSpec, xRegions)
+    joint <- .twasMsJointPhase(
+        parsedJointSpec,
+        xRegions,
+        data = data,
+        methods = methods,
+        contexts = contexts,
+        traitId = traitId,
+        cisWindow = cisWindow,
+        verbose = verbose,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail,
+        seed = seed
+    )
     if (joint$done) {
         return(joint$result)
     }
-    .twasMsDriver(p, joint$result, joint$methods)
+    .twasMsDriver(
+        data = data,
+        contexts = contexts,
+        traitId = traitId,
+        cisWindow = cisWindow,
+        region = region,
+        jointRegions = jointRegions,
+        fineMappingResult = fineMappingResult,
+        twasWeights = twasWeights,
+        naAction = naAction,
+        verbose = verbose,
+        seed = seed,
+        dots = dots,
+        joint$result,
+        joint$methods
+    )
 }
 
 # Joint-specification dispatch for mrmash. Returns list(done, result, methods)
 # where `done` requests an early return with `result` and `methods` is the
 # mrmash-stripped set for the per-component recursion.
 # @noRd
-.twasMsJointPhase <- function(p, parsedJointSpec, xRegions) {
+.twasMsJointPhase <- function(
+    parsedJointSpec,
+    xRegions,
+    data,
+    methods,
+    contexts,
+    traitId,
+    cisWindow,
+    verbose,
+    retainFit,
+    retainFitDetail,
+    seed
+) {
     if (length(parsedJointSpec) == 0L) {
-        return(list(done = FALSE, result = NULL, methods = p$methods))
+        return(list(done = FALSE, result = NULL, methods = methods))
     }
-    jointMethods <- intersect(.twasMethodTokensFromArg(p$methods), "mrmash")
+    jointMethods <- intersect(.twasMethodTokensFromArg(methods), "mrmash")
     jointResult <- .twasDispatchJointSpecsMultiStudy(
         parsedJointSpec,
-        p$data,
+        data,
         jointMethods,
-        p$contexts,
-        p$traitId,
-        p$cisWindow,
+        contexts,
+        traitId,
+        cisWindow,
         NULL,
-        p$verbose,
+        verbose,
         xRegions = xRegions,
-        retainFit = p$retainFit,
-        retainFitDetail = p$retainFitDetail,
-        seed = p$seed
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail,
+        seed = seed
     )
-    methods <- .twasMsStripMrmash(p$methods)
+    methods <- .twasMsStripMrmash(methods)
     if (.twasMethodsEmpty(methods)) {
         if (is.null(jointResult)) {
             msg <- glue(
@@ -2385,23 +2935,38 @@ setMethod(
 
 # Run the per-study / per-component recursion via the shared multi-study driver.
 # @noRd
-.twasMsDriver <- function(p, jointResult, methods) {
+.twasMsDriver <- function(
+    data,
+    contexts,
+    traitId,
+    cisWindow,
+    region,
+    jointRegions,
+    fineMappingResult,
+    twasWeights,
+    naAction,
+    verbose,
+    seed,
+    dots,
+    jointResult,
+    methods
+) {
     cfg <- list(
         methods = methods,
-        contexts = p$contexts,
-        traitId = p$traitId,
-        region = p$region,
-        cisWindow = p$cisWindow,
-        jointRegions = p$jointRegions,
-        fineMappingResult = p$fineMappingResult,
-        twasWeights = p$twasWeights,
-        naAction = p$naAction,
-        verbose = p$verbose,
-        seed = p$seed,
-        dotArgs = p$dots
+        contexts = contexts,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        jointRegions = jointRegions,
+        fineMappingResult = fineMappingResult,
+        twasWeights = twasWeights,
+        naAction = naAction,
+        verbose = verbose,
+        seed = seed,
+        dotArgs = dots
     )
     .multiStudyPipelineDriver(
-        p$data,
+        data,
         jointResult,
         .twasPerStudy,
         .twasSumStats,
@@ -2442,11 +3007,7 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 # @noRd
 .solveEnsembleQuadprog <- function(Pvalid, yObs, Kvalid) {
     if (!requireNamespace("quadprog", quietly = TRUE)) {
-        msg <- glue(
-            "Package 'quadprog' is required for solver='quadprog'. ",
-            "Install with: install.packages('quadprog')"
-        )
-        abort(msg)
+        abort("Package 'quadprog' is required for solver='quadprog'.")
     }
 
     Dmat <- crossprod(Pvalid)
@@ -2459,15 +3020,14 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     Amat <- cbind(rep(1, Kvalid), diag(Kvalid))
     bvec <- c(1, rep(0, Kvalid))
 
-    qpSol <- tryCatch(
+    qpSol <- try_fetch(
         solve.QP(Dmat = Dmat, dvec = dvec, Amat = Amat, bvec = bvec, meq = 1),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
             msg <- glue(
-                "QP solver failed: {eMsg}. Falling back to equal weights ",
-                "among valid methods."
+                "QP solver failed. Falling back to equal weights among ",
+                "valid methods."
             )
-            warn(msg)
+            warn(msg, parent = cnd)
             NULL
         }
     )
@@ -2495,21 +3055,14 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 # @noRd
 .solveEnsembleNnls <- function(Pvalid, yObs, Kvalid) {
     if (!requireNamespace("nnls", quietly = TRUE)) {
-        msg <- glue(
-            "Package 'nnls' is required for solver='nnls'. ",
-            "Install with: install.packages('nnls')"
-        )
-        abort(msg)
+        abort("Package 'nnls' is required for solver='nnls'.")
     }
 
-    fit <- tryCatch(
+    fit <- try_fetch(
         nnls::nnls(Pvalid, yObs),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
-            msg <- glue(
-                "NNLS solver failed: {eMsg}. Falling back to equal weights."
-            )
-            warn(msg)
+        error = function(cnd) {
+            msg <- "NNLS solver failed. Falling back to equal weights."
+            warn(msg, parent = cnd)
             NULL
         }
     )
@@ -2532,12 +3085,24 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 # Ensemble stacking objective (sum of squared residuals). `...` absorbs the
 # gradient's extra optim args (PtP, Pty).
 # @noRd
-.ensembleObj <- function(z, Pvalid, yObs, ...) sum((yObs - Pvalid %*% z)^2)
+.ensembleObj <- function(Pvalid, yObs) {
+    # Captured by name, and forced here so the closure holds values rather
+    # than promises into a frame that has already returned.
+    force(Pvalid)
+    force(yObs)
+    function(z) sum((yObs - Pvalid %*% z)^2)
+}
 
-# Gradient of the ensemble stacking objective. `...` absorbs the objective's
-# extra optim args (Pvalid, yObs).
+# Gradient of the ensemble stacking objective, same construction. Building
+# both as closures of exactly what each needs is what lets optim() be called
+# with no `...`: previously it forwarded the union of both callbacks'
+# arguments to both, and each absorbed the other's half in a `...` tail.
 # @noRd
-.ensembleGrad <- function(z, PtP, Pty, ...) as.vector(2 * (PtP %*% z - Pty))
+.ensembleGrad <- function(PtP, Pty) {
+    force(PtP)
+    force(Pty)
+    function(z) as.vector(2 * (PtP %*% z - Pty))
+}
 
 # Solve ensemble stacking via L-BFGS-B (box-constrained optimization, then
 # normalize). Uses base R optim() with analytical gradient. No extra
@@ -2551,25 +3116,19 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     PtP <- crossprod(Pvalid)
     Pty <- as.vector(crossprod(Pvalid, yObs))
 
-    fit <- tryCatch(
+    fit <- try_fetch(
         optim(
             par = rep(1 / Kvalid, Kvalid),
-            fn = .ensembleObj,
-            gr = .ensembleGrad,
-            Pvalid = Pvalid,
-            yObs = yObs,
-            PtP = PtP,
-            Pty = Pty,
+            fn = .ensembleObj(Pvalid, yObs),
+            gr = .ensembleGrad(PtP, Pty),
             method = "L-BFGS-B",
             lower = rep(0, Kvalid)
         ),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
             msg <- glue(
-                "L-BFGS-B solver failed: {eMsg}. Falling back to equal ",
-                "weights."
+                "L-BFGS-B solver failed. Falling back to equal weights."
             )
-            warn(msg)
+            warn(msg, parent = cnd)
             NULL
         }
     )
@@ -2602,14 +3161,10 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 # @noRd
 .solveEnsembleGlmnet <- function(Pvalid, yObs, Kvalid, alpha = 1) {
     if (!requireNamespace("glmnet", quietly = TRUE)) {
-        msg <- glue(
-            "Package 'glmnet' is required for solver='glmnet'. ",
-            "Install with: install.packages('glmnet')"
-        )
-        abort(msg)
+        abort("Package 'glmnet' is required for solver='glmnet'.")
     }
 
-    fit <- tryCatch(
+    fit <- try_fetch(
         glmnet::cv.glmnet(
             x = Pvalid,
             y = yObs,
@@ -2617,13 +3172,11 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
             alpha = alpha,
             intercept = FALSE
         ),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
             msg <- glue(
-                "glmnet solver failed: {eMsg}. Falling back to equal ",
-                "weights."
+                "glmnet solver failed. Falling back to equal weights."
             )
-            warn(msg)
+            warn(msg, parent = cnd)
             NULL
         }
     )
@@ -2787,6 +3340,7 @@ ensembleWeights <- function(
 
 # Validate the required scalar / presence constraints on the raw inputs.
 # @noRd
+#' @importFrom checkmate assertCount
 .ensembleValidateArgs <- function(cvResults, Y, contextIndex) {
     if (is.null(cvResults)) {
         abort("'cvResults' is required.")
@@ -2794,13 +3348,7 @@ ensembleWeights <- function(
     if (is.null(Y)) {
         abort("'Y' is required.")
     }
-    if (
-        !is.numeric(contextIndex) ||
-            length(contextIndex) != 1 ||
-            contextIndex < 1
-    ) {
-        abort("'contextIndex' must be a positive integer scalar.")
-    }
+    assertCount(contextIndex, positive = TRUE)
     invisible(NULL)
 }
 
@@ -3292,16 +3840,40 @@ ensembleWeights <- function(
     }
 }
 
-# One region's univariate joint-cell fit (region `bi` of p$xRegions).
+# One region's univariate joint-cell fit (region `bi` of `xRegions`).
 # @noRd
-.twasQdsUnivRegion <- function(bi, univCell, p, scope) {
+.twasQdsUnivRegion <- function(
+    bi,
+    univCell,
+    scope,
+    marker,
+    data,
+    xRegions,
+    norm,
+    fineMappingResult,
+    twasWeights,
+    dataDrivenPriorMatricesCv,
+    cisWindow,
+    naAction,
+    verbose
+) {
     .runJointCell(
         univCell,
-        p$marker,
-        p$data,
+        marker,
+        data,
         scope,
-        p$norm$tokens,
-        args = .twasQdsUnivArgs(p, bi)
+        norm$tokens,
+        args = .twasQdsUnivArgs(
+            bi,
+            xRegions = xRegions,
+            norm = norm,
+            fineMappingResult = fineMappingResult,
+            twasWeights = twasWeights,
+            dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+            cisWindow = cisWindow,
+            naAction = naAction,
+            verbose = verbose
+        )
     )
 }
 

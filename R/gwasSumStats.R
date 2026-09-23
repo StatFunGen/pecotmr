@@ -22,25 +22,24 @@ NULL
 #'   every row.
 #' @seealso \code{\link{GwasSumStats}} for the constructor and
 #'   \code{\linkS4class{QtlSumStats}} for the QTL counterpart.
+#' @importFrom checkmate makeAssertCollection assertNames assertList
 #' @export
 setClass(
     "GwasSumStats",
     contains = "SumStatsBase",
     validity = function(object) {
         # The ldSketch slot's class union enforces its type.
-        errors <- character()
-        required <- "study"
-        missingCols <- setdiff(required, colnames(mcols(object)))
-        if (length(missingCols) > 0L) {
-            errors <- c(
-                errors,
-                str_c("missing columns: ", str_flatten(missingCols, ", "))
-            )
-        }
-        errors <- c(errors, .sumStatsCheckGenome(object))
-        if (!is.list(object@qcInfo)) {
-            errors <- c(errors, "'qcInfo' slot must be a list")
-        }
+        coll <- makeAssertCollection()
+        assertNames(
+            colnames(mcols(object)) %||% character(0),
+            must.include = "study",
+            what = "colnames",
+            .var.name = "mcols",
+            add = coll
+        )
+        coll$push(.sumStatsCheckGenome(object))
+        assertList(object@qcInfo, .var.name = "qcInfo", add = coll)
+        errors <- coll$getMessages()
         if (length(errors) == 0L) {
             # The elements ARE GRanges by construction now -- the container is
             # a GRangesList -- so the old per-element type and length checks

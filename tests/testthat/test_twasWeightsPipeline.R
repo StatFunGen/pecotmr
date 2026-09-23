@@ -571,7 +571,7 @@ test_that("gate: non-FineMappingResult object passed in errors", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     expect_error(
         twasWeightsPipeline(qd, methods = "susie", fineMappingResult = list()),
-        "must be a FineMappingResult"
+        "Must inherit from class 'FineMappingResultBase'"
     )
 })
 
@@ -2133,7 +2133,7 @@ test_that(".twasFineMappingFits: non-FineMappingResult input errors", {
             context = "c1",
             trait = "t1"
         ),
-        "must be a FineMappingResult or NULL"
+        "Must inherit from class 'FineMappingResultBase'"
     )
 })
 
@@ -2292,10 +2292,15 @@ test_that(".twasMergeRegionEntries rbinds matrix weights across regions", {
     expect_true(is.matrix(w))
     expect_equal(dim(w), c(4L, 2L))
     expect_equal(colnames(w), c("cA", "cB"))
-    expect_equal(rownames(w), c(
-        "chr1:100:A:G", "chr1:200:A:G",
-        "chr1:300:A:G", "chr1:400:A:G"
-    ))
+    expect_equal(
+        rownames(w),
+        c(
+            "chr1:100:A:G",
+            "chr1:200:A:G",
+            "chr1:300:A:G",
+            "chr1:400:A:G"
+        )
+    )
     expect_equal(unname(w[, "cA"]), c(0.1, 0.2, 0.5, 0.6))
     expect_equal(unname(w[, "cB"]), c(0.3, 0.4, 0.7, 0.8))
     expect_equal(names(getFits(m)), c("r1", "r2"))
@@ -2338,12 +2343,18 @@ test_that(".twasMergedEntryForRow gathers one key across regions", {
 test_that(".twasMergedEntryForRow returns NULL when no region matches", {
     data(twasWeightsExample)
     bad <- data.frame(
-        study = "nope", context = "x", trait = "y", method = "z",
+        study = "nope",
+        context = "x",
+        trait = "y",
+        method = "z",
         stringsAsFactors = FALSE
     )
     expect_null(
         pecotmr:::.twasMergedEntryForRow(
-            1L, bad, list(twasWeightsExample), "rA"
+            1L,
+            bad,
+            list(twasWeightsExample),
+            "rA"
         )
     )
 })
@@ -2639,7 +2650,7 @@ test_that(".rbindTwasWeights: concatenates two collections and rejects non-TwasW
     expect_setequal(as.character(out$method), c("lasso", "enet"))
     expect_error(
         pecotmr:::.rbindTwasWeights(list(), .tp_tw()),
-        "expects two TwasWeights"
+        "Must inherit from class 'TwasWeights'"
     )
 })
 
@@ -3864,7 +3875,7 @@ test_that(".twasMvThreadFit warns and returns NULL when the fit is absent", {
             "S1",
             "T1",
             c("cA", "cB"),
-            list(fineMappingResult = NULL)
+            fineMappingResult = NULL
         ),
         "no 'mvsusie' fit found"
     )
@@ -3872,16 +3883,20 @@ test_that(".twasMvThreadFit warns and returns NULL when the fit is absent", {
 })
 
 test_that(".twasQssMultivariateFitOne returns no rows when the fit is absent", {
-    p <- list(
-        fineMappingResult = NULL,
-        methodArgs = list(),
-        retainFitDetail = FALSE
-    )
     # mvsusie carries an adapter, so the missing pre-fit short-circuits
     # before any weight function is called.
     expect_warning(
         rows <- pecotmr:::.twasQssMultivariateFitOne(
-            "mvsusie", "S1", "T1", c("cA", "cB"), NULL, NULL, p
+            "mvsusie",
+            "S1",
+            "T1",
+            c("cA", "cB"),
+            NULL,
+            NULL,
+            methodArgs = list(),
+            retainFitDetail = FALSE,
+            fineMappingResult = NULL,
+            dataType = NULL
         ),
         "no 'mvsusie' fit found"
     )
@@ -3893,14 +3908,22 @@ test_that(".twasQssMultivariateFitOne promotes vector weights to a matrix", {
         stat = NULL,
         variantIds = c("chr1:1:A:G", "chr1:2:A:G")
     )
-    p <- list(methodArgs = list(), retainFitDetail = FALSE, dataType = "rnaseq")
     local_mocked_bindings(
         .twasTryWeights = function(...) c(0.5, 0.25),
         .package = "pecotmr"
     )
     # mrmash has no adapter, so the thread-fit branch is skipped entirely.
     rows <- pecotmr:::.twasQssMultivariateFitOne(
-        "mrmash", "S1", "T1", "cA", mvStat, NULL, p
+        "mrmash",
+        "S1",
+        "T1",
+        "cA",
+        mvStat,
+        NULL,
+        methodArgs = list(),
+        retainFitDetail = FALSE,
+        fineMappingResult = NULL,
+        dataType = "rnaseq"
     )
     expect_length(rows, 1L)
     expect_equal(rows[[1L]]$context, "cA")
@@ -3910,7 +3933,7 @@ test_that(".twasQssMultivariateFitOne promotes vector weights to a matrix", {
 test_that(".twasQssAssemble passes the joint result through alone", {
     jr <- "SENTINEL_JOINT"
     expect_identical(
-        pecotmr:::.twasQssAssemble(list(), jr, list(ldSketch = NULL)),
+        pecotmr:::.twasQssAssemble(list(), jr, ldSketch = NULL),
         jr
     )
 })
@@ -3920,15 +3943,22 @@ test_that(".twasMsJointPhase aborts when only mrmash asked and it fails", {
         .twasDispatchJointSpecsMultiStudy = function(...) NULL,
         .package = "pecotmr"
     )
-    p <- list(
-        methods = "mrmash", data = NULL, contexts = NULL, traitId = NULL,
-        cisWindow = NULL, verbose = FALSE, retainFit = FALSE,
-        retainFitDetail = FALSE, seed = 1L
-    )
     # Stripping mrmash leaves nothing, so a NULL joint result is fatal
     # rather than a fall-through to the per-tuple phase.
     expect_error(
-        pecotmr:::.twasMsJointPhase(p, list(spec1 = "x"), NULL),
+        pecotmr:::.twasMsJointPhase(
+            list(spec1 = "x"),
+            NULL,
+            data = NULL,
+            methods = "mrmash",
+            contexts = NULL,
+            traitId = NULL,
+            cisWindow = NULL,
+            verbose = FALSE,
+            retainFit = FALSE,
+            retainFitDetail = FALSE,
+            seed = 1L
+        ),
         "no joint fits produced"
     )
 })

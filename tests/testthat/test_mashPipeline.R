@@ -1791,18 +1791,56 @@ test_that("contrast rows fall back to the positional index when unnamed", {
 
 test_that(".mashUdFit re-raises an unrelated udr failure unchanged", {
     skip_if_not_installed("udr")
-    local_mocked_bindings(.mashUdControl = function(...) list(),
-        .package = "pecotmr")
+    local_mocked_bindings(
+        .mashUdControl = function(...) list(),
+        .package = "pecotmr"
+    )
     # Only the ud_ted i.i.d. incompatibility is rewrapped; anything else must
     # surface as itself rather than being swallowed into a NULL fit.
     expect_error(
         with_mocked_bindings(
             pecotmr:::.mashUdFit(
-                NULL, list(Bhat = matrix(0, 2L, 2L)), "ud_ted", list()
+                NULL,
+                list(Bhat = matrix(0, 2L, 2L)),
+                "ud_ted",
+                list()
             ),
             ud_fit = function(...) stop("totally unrelated failure"),
             .package = "udr"
         ),
         "totally unrelated failure"
     )
+})
+
+test_that("mashPipeline helpers: argument guards fire", {
+    expect_error(
+        fitMashContrast(
+            0L,
+            matrix(0, 2, 2),
+            matrix(0, 2, 2),
+            array(0, c(2, 2, 2))
+        ),
+        "index.*Must be >= 1"
+    )
+    expect_error(
+        updateMashModelCov(list(), allSamples = 1L, samples = "a"),
+        "allSamples.*Must be of type 'character'"
+    )
+    expect_error(
+        sliceMashData("not-a-list", vhat = diag(2), snps = 1L, samples = NULL),
+        "data.*Must be of type 'list'"
+    )
+    expect_error(
+        calculateFeatureScores(data.frame(), metaMethod = 1L),
+        "metaMethod.*Must be of type 'string'"
+    )
+    expect_error(
+        nSignificantScore(data.frame(), pCutoff = 2),
+        "pCutoff.*is not <= 1"
+    )
+    expect_error(
+        makePairwiseContrastCol(c("a", "b", "c"), template = c(a = 0)),
+        "pair.*Must have length 2"
+    )
+    expect_error(sanitizeMashData("nope"), "data.*Must be of type 'list'")
 })

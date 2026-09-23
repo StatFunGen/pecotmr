@@ -4,7 +4,16 @@
 \alias{bglrWeights}
 \title{Compute Weights Using a BGLR Linear Regression Model}
 \usage{
-bglrWeights(X, y, model, nIter, burnIn, thin, etaArgs = list(), ...)
+bglrWeights(
+  X,
+  y,
+  model,
+  nIter,
+  burnIn,
+  thin,
+  etaArgs = list(),
+  methodArgs = list()
+)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -22,7 +31,8 @@ bglrWeights(X, y, model, nIter, burnIn, thin, etaArgs = list(), ...)
 \item{etaArgs}{Optional named list of additional arguments included in the
 `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).}
 
-\item{...}{Additional arguments passed through to `BGLR::BGLR`.}
+\item{methodArgs}{Optional named list of options passed through to
+`BGLR::BGLR`.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

@@ -118,30 +118,39 @@ setClass(
 
 # study / scaleResiduals / keepIndel scalars + the four non-negative cutoffs.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertString assertLogical
+#' @importFrom checkmate assertFlag assertNumber
+#' @importFrom purrr walk
 .qtlValidateScalars <- function(object) {
-    errors <- character()
-    if (length(object@study) != 1L || str_length(object@study) == 0L) {
-        errors <- c(
-            errors,
-            "'study' must be a single non-empty character string"
-        )
-    }
-    if (length(object@scaleResiduals) != 1L) {
-        errors <- c(errors, "'scaleResiduals' must be a single logical value")
-    }
-    if (length(object@keepIndel) != 1L || is.na(object@keepIndel)) {
-        errors <- c(errors, "'keepIndel' must be a single logical value")
-    }
-    for (nm in c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff")) {
-        v <- methods::slot(object, nm)
-        if (length(v) != 1L || is.na(v) || !is.finite(v) || v < 0) {
-            errors <- c(
-                errors,
-                glue("'{nm}' must be a single finite non-negative numeric")
-            )
-        }
-    }
-    errors
+    coll <- makeAssertCollection()
+    assertString(object@study, min.chars = 1L, .var.name = "study", add = coll)
+    assertLogical(
+        object@scaleResiduals,
+        len = 1L,
+        .var.name = "scaleResiduals",
+        add = coll
+    )
+    assertFlag(object@keepIndel, .var.name = "keepIndel", add = coll)
+    walk(
+        c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff"),
+        .qtlValidateCutoff,
+        object = object,
+        coll = coll
+    )
+    coll$getMessages()
+}
+
+# Each cutoff slot must be a single finite non-negative number.
+# @noRd
+#' @importFrom checkmate assertNumber
+.qtlValidateCutoff <- function(nm, object, coll) {
+    assertNumber(
+        methods::slot(object, nm),
+        lower = 0,
+        finite = TRUE,
+        .var.name = nm,
+        add = coll
+    )
 }
 
 # Shape checks on the phenotype list handed to the constructor. Run before
@@ -770,19 +779,17 @@ setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
 
 # A literal `region` GRanges, each range optionally extended by cisWindow.
 # @noRd
+#' @importFrom checkmate assertNumber
+#' @importFrom checkmate assertClass
 .qtlLiteralRegion <- function(region, cisWindow) {
-    if (!methods::is(region, "GRanges")) {
-        abort("`region` must be a GRanges object.")
-    }
+    assertClass(region, "GRanges")
     if (length(region) == 0L) {
         abort("`region` must contain at least one range.")
     }
     if (is.null(cisWindow)) {
         return(region)
     }
-    if (length(cisWindow) != 1L || cisWindow < 0) {
-        abort("`cisWindow` must be a single non-negative value.")
-    }
+    assertNumber(cisWindow, lower = 0)
     GenomicRanges::GRanges(
         seqnames = GenomicRanges::seqnames(region),
         ranges = IRanges::IRanges(
@@ -841,7 +848,7 @@ setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
 #' @export
 setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     tids <- if (is.null(traitId)) {
-        unique(unlist(map(.qtlPhenotypeList(x), rownames)))
+        unique(list_c(map(.qtlPhenotypeList(x), rownames)))
     } else {
         as.character(traitId)
     }
@@ -871,8 +878,9 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 
 # Internal: keepIndel slot read, tolerant of QtlDataset objects serialized
 # before the slot existed (treat a missing slot as TRUE = keep indels).
+#' @importFrom purrr possibly
 .qtlKeepIndel <- function(x) {
-    isTRUE(tryCatch(getKeepIndel(x), error = function(e) TRUE))
+    isTRUE(possibly(getKeepIndel, otherwise = TRUE)(x))
 }
 
 # Internal: return a copy of a QtlDataset with the supplied filter cutoffs /
@@ -1347,6 +1355,7 @@ setMethod(
 #
 # Returns all-TRUE (no-op) when there are too few samples to support
 # a covariance estimate (n < p + 2).
+#' @importFrom rlang try_fetch
 .qtlOutlierKeepMask <- function(Y, pvalThreshold) {
     Y <- as.matrix(Y)
     n <- nrow(Y)
@@ -1363,7 +1372,7 @@ setMethod(
         return(rep(TRUE, n))
     }
     if (requireNamespace("robustbase", quietly = TRUE)) {
-        mcd <- tryCatch(robustbase::covMcd(Y), error = function(e) NULL)
+        mcd <- try_fetch(robustbase::covMcd(Y), error = function(cnd) NULL)
         if (!is.null(mcd)) {
             ctr <- mcd$center
             covMat <- mcd$cov
@@ -1380,7 +1389,17 @@ setMethod(
         ctr <- colMeans(Y)
         covMat <- stats::cov(Y)
     }
-    invCov <- tryCatch(solve(covMat), error = function(e) MASS::ginv(covMat))
+    invCov <- try_fetch(
+        solve(covMat),
+        error = function(cnd) {
+            msg <- glue(
+                "outlier detection: the trait covariance is singular; ",
+                "using a Moore-Penrose pseudo-inverse instead."
+            )
+            inform(msg, parent = cnd)
+            MASS::ginv(covMat)
+        }
+    )
     Yc <- sweep(Y, 2L, ctr)
     d2 <- rowSums((Yc %*% invCov) * Yc)
     raw <- stats::pchisq(d2, df = p, lower.tail = FALSE)
@@ -1792,9 +1811,25 @@ setMethod(
             residualizeGenotypeCovariatesFromGenotypes
         ) ||
             is.null(residualizeGenotypeCovariatesFromGenotypes)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .qtlResidualizedGenotypesImpl(p)
+        .qtlResidualizedGenotypesImpl(
+            x = x,
+            contexts = contexts,
+            traitId = traitId,
+            region = region,
+            cisWindow = cisWindow,
+            samples = samples,
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize = genotypeCovariatesToResidualize,
+            covariateNaAction = covariateNaAction,
+            convPheno = residualizePhenotypeCovariates,
+            convPhenoMissing = convPhenoMissing,
+            precPheno = residualizePhenotypeCovariatesFromGenotypes,
+            precPhenoMissing = precPhenoMissing,
+            convGeno = residualizeGenotypeCovariates,
+            convGenoMissing = convGenoMissing,
+            precGeno = residualizeGenotypeCovariatesFromGenotypes,
+            precGenoMissing = precGenoMissing
+        )
     }
 )
 
@@ -1826,66 +1861,102 @@ setMethod(
 # precision spellings. Paired here because the reconciliation rule is the same
 # for both and only the argument names differ.
 # @noRd
-.qtlResidualizationFlags <- function(p) {
+.qtlResidualizationFlags <- function(
+    convPheno,
+    convPhenoMissing,
+    precPheno,
+    precPhenoMissing,
+    convGeno,
+    convGenoMissing,
+    precGeno,
+    precGenoMissing
+) {
     list(
         pheno = .qtlResolveResidualizationFlag(
-            p$residualizePhenotypeCovariates,
-            p$convPhenoMissing,
-            p$residualizePhenotypeCovariatesFromGenotypes,
-            p$precPhenoMissing,
-            "residualizePhenotypeCovariates",
-            "residualizePhenotypeCovariatesFromGenotypes"
+            convPheno,
+            convPhenoMissing,
+            precPheno,
+            precPhenoMissing,
+            "convPheno",
+            "precPheno"
         ),
         geno = .qtlResolveResidualizationFlag(
-            p$residualizeGenotypeCovariates,
-            p$convGenoMissing,
-            p$residualizeGenotypeCovariatesFromGenotypes,
-            p$precGenoMissing,
-            "residualizeGenotypeCovariates",
-            "residualizeGenotypeCovariatesFromGenotypes"
+            convGeno,
+            convGenoMissing,
+            precGeno,
+            precGenoMissing,
+            "convGeno",
+            "precGeno"
         )
     )
 }
 
-.qtlResidualizedGenotypesImpl <- function(p) {
-    bad <- setdiff(p$contexts, getContexts(p$x))
+.qtlResidualizedGenotypesImpl <- function(
+    x,
+    contexts,
+    traitId,
+    region,
+    cisWindow,
+    samples,
+    phenotypeCovariatesToResidualize,
+    genotypeCovariatesToResidualize,
+    covariateNaAction,
+    convPheno,
+    convPhenoMissing,
+    precPheno,
+    precPhenoMissing,
+    convGeno,
+    convGenoMissing,
+    precGeno,
+    precGenoMissing
+) {
+    bad <- setdiff(contexts, getContexts(x))
     if (length(bad) > 0L) {
         msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
         abort(msg)
     }
-    include <- .qtlResidualizationFlags(p)
+    include <- .qtlResidualizationFlags(
+        convPheno = convPheno,
+        convPhenoMissing = convPhenoMissing,
+        precPheno = precPheno,
+        precPhenoMissing = precPhenoMissing,
+        convGeno = convGeno,
+        convGenoMissing = convGenoMissing,
+        precGeno = precGeno,
+        precGenoMissing = precGenoMissing
+    )
     includePheno <- include$pheno
     includeGeno <- include$geno
     phenoSel <- .qtlResolvePhenoSelection(
-        p$x,
-        p$contexts,
-        p$phenotypeCovariatesToResidualize
+        x,
+        contexts,
+        phenotypeCovariatesToResidualize
     )
-    genoSel <- .qtlResolveGenoSelection(p$x, p$genotypeCovariatesToResidualize)
+    genoSel <- .qtlResolveGenoSelection(x, genotypeCovariatesToResidualize)
     G <- getGenotypes(
-        p$x,
-        traitId = p$traitId,
-        region = p$region,
-        cisWindow = p$cisWindow,
-        samples = p$samples
+        x,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        samples = samples
     )
     if (ncol(G) == 0L) {
         return(G)
     }
     C <- .qtlBuildResidualizationDesign(
-        p$x,
-        contexts = p$contexts,
+        x,
+        contexts = contexts,
         phenoSelection = phenoSel,
         genoSelection = genoSel,
         includePheno = includePheno,
         includeGeno = includeGeno
     )
-    C <- .qtlHandleCovariateNa(C, p$covariateNaAction)
-    aligned <- .qtlAlignGC(G, C, p$contexts)
+    C <- .qtlHandleCovariateNa(C, covariateNaAction)
+    aligned <- .qtlAlignGC(G, C, contexts)
     .qtlResidualizeQr(
         aligned$G,
         aligned$C,
-        scaleResiduals = getScaleResiduals(p$x)
+        scaleResiduals = getScaleResiduals(x)
     )
 }
 
@@ -1927,9 +1998,26 @@ setMethod(
             residualizeGenotypeCovariatesFromPhenotypes
         ) ||
             is.null(residualizeGenotypeCovariatesFromPhenotypes)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .qtlResidualizedPhenotypesImpl(p)
+        .qtlResidualizedPhenotypesImpl(
+            x = x,
+            contexts = contexts,
+            traitId = traitId,
+            region = region,
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize = genotypeCovariatesToResidualize,
+            naAction = naAction,
+            covariateNaAction = covariateNaAction,
+            outlierAction = outlierAction,
+            outlierPvalThreshold = outlierPvalThreshold,
+            convPheno = residualizePhenotypeCovariates,
+            convPhenoMissing = convPhenoMissing,
+            precPheno = residualizePhenotypeCovariatesFromPhenotypes,
+            precPhenoMissing = precPhenoMissing,
+            convGeno = residualizeGenotypeCovariates,
+            convGenoMissing = convGenoMissing,
+            precGeno = residualizeGenotypeCovariatesFromPhenotypes,
+            precGenoMissing = precGenoMissing
+        )
     }
 )
 
@@ -1989,23 +2077,32 @@ setMethod(
 # Resolve the phenotype/genotype covariate inclusion flags (convenience vs
 # precise `*FromPhenotypes`) for getResidualizedPhenotypes.
 # @noRd
-.qtlResidPhenoFlags <- function(p) {
+.qtlResidPhenoFlags <- function(
+    convPheno,
+    convPhenoMissing,
+    precPheno,
+    precPhenoMissing,
+    convGeno,
+    convGenoMissing,
+    precGeno,
+    precGenoMissing
+) {
     list(
         includePheno = .qtlResolveResidualizationFlag(
-            p$residualizePhenotypeCovariates,
-            p$convPhenoMissing,
-            p$residualizePhenotypeCovariatesFromPhenotypes,
-            p$precPhenoMissing,
-            "residualizePhenotypeCovariates",
-            "residualizePhenotypeCovariatesFromPhenotypes"
+            convPheno,
+            convPhenoMissing,
+            precPheno,
+            precPhenoMissing,
+            "convPheno",
+            "precPheno"
         ),
         includeGeno = .qtlResolveResidualizationFlag(
-            p$residualizeGenotypeCovariates,
-            p$convGenoMissing,
-            p$residualizeGenotypeCovariatesFromPhenotypes,
-            p$precGenoMissing,
-            "residualizeGenotypeCovariates",
-            "residualizeGenotypeCovariatesFromPhenotypes"
+            convGeno,
+            convGenoMissing,
+            precGeno,
+            precGenoMissing,
+            "convGeno",
+            "precGeno"
         )
     )
 }
@@ -2014,42 +2111,78 @@ setMethod(
 # NA-handle Y, build the covariate design, and per-context residualize +
 # outlier-filter. `p` holds the setMethod args + precomputed missing() flags.
 # @noRd
-.qtlResidualizedPhenotypesImpl <- function(p) {
-    bad <- setdiff(p$contexts, getContexts(p$x))
+.qtlResidualizedPhenotypesImpl <- function(
+    x,
+    contexts,
+    traitId,
+    region,
+    phenotypeCovariatesToResidualize,
+    genotypeCovariatesToResidualize,
+    naAction,
+    covariateNaAction,
+    outlierAction,
+    outlierPvalThreshold,
+    convPheno,
+    convPhenoMissing,
+    precPheno,
+    precPhenoMissing,
+    convGeno,
+    convGenoMissing,
+    precGeno,
+    precGenoMissing
+) {
+    bad <- setdiff(contexts, getContexts(x))
     if (length(bad) > 0L) {
         msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
         abort(msg)
     }
-    flags <- .qtlResidPhenoFlags(p)
+    flags <- .qtlResidPhenoFlags(
+        convPheno = convPheno,
+        convPhenoMissing = convPhenoMissing,
+        precPheno = precPheno,
+        precPhenoMissing = precPhenoMissing,
+        convGeno = convGeno,
+        convGenoMissing = convGenoMissing,
+        precGeno = precGeno,
+        precGenoMissing = precGenoMissing
+    )
     includePheno <- flags$includePheno
     includeGeno <- flags$includeGeno
     phenoSel <- .qtlResolvePhenoSelection(
-        p$x,
-        p$contexts,
-        p$phenotypeCovariatesToResidualize
+        x,
+        contexts,
+        phenotypeCovariatesToResidualize
     )
-    genoSel <- .qtlResolveGenoSelection(p$x, p$genotypeCovariatesToResidualize)
+    genoSel <- .qtlResolveGenoSelection(x, genotypeCovariatesToResidualize)
     Yraw <- .qtlResidPhenoY(
-        p$x,
-        p$contexts,
-        p$traitId,
-        p$region,
-        p$naAction
+        x,
+        contexts,
+        traitId,
+        region,
+        naAction
     )
     C <- .qtlBuildResidualizationDesign(
-        p$x,
-        contexts = p$contexts,
+        x,
+        contexts = contexts,
         phenoSelection = phenoSel,
         genoSelection = genoSel,
         includePheno = includePheno,
         includeGeno = includeGeno
     )
-    C <- .qtlHandleCovariateNa(C, p$covariateNaAction)
+    C <- .qtlHandleCovariateNa(C, covariateNaAction)
     out <- set_names(
-        map(p$contexts, .qtlResidualizeContext, Yraw = Yraw, C = C, p = p),
-        p$contexts
+        map(
+            contexts,
+            .qtlResidualizeContext,
+            Yraw = Yraw,
+            C = C,
+            x = x,
+            outlierAction = outlierAction,
+            outlierPvalThreshold = outlierPvalThreshold
+        ),
+        contexts
     )
-    if (length(p$contexts) == 1L) out[[1L]] else out
+    if (length(contexts) == 1L) out[[1L]] else out
 }
 
 
@@ -2059,10 +2192,7 @@ setMethod("show", "QtlDataset", function(object) {
     pheno <- .qtlPhenotypeList(object)
     nCtx <- length(pheno)
     ctxNames <- names(pheno)
-    totalTraits <- length(unique(unlist(
-        map(pheno, rownames),
-        use.names = FALSE
-    )))
+    totalTraits <- length(unique(unname(list_c(map(pheno, rownames)))))
     cat(glue("QtlDataset for study '{object@study}'\n", .trim = FALSE))
     cat(glue(
         "  {nCtx} context(s): {str_flatten(ctxNames, ', ')}\n",
@@ -2128,13 +2258,20 @@ setMethod("show", "QtlDataset", function(object) {
 
 # Residualize + filter one context's raw phenotype matrix against covariates C.
 # @noRd
-.qtlResidualizeContext <- function(ctx, Yraw, C, p) {
+.qtlResidualizeContext <- function(
+    ctx,
+    Yraw,
+    C,
+    x,
+    outlierAction,
+    outlierPvalThreshold
+) {
     .qtlResidualizeContextPheno(
         Yraw[[ctx]],
         C,
         ctx,
-        p$outlierAction,
-        p$outlierPvalThreshold,
-        getScaleResiduals(p$x)
+        outlierAction,
+        outlierPvalThreshold,
+        getScaleResiduals(x)
     )
 }

@@ -38,18 +38,17 @@ setClass(
 )
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertCount assertLogical
 .validateLdStatistic <- function(object) {
-    errors <- character()
-    if (length(object@nRef) != 1L || object@nRef <= 0L) {
-        errors <- c(errors, "'nRef' must be a single positive integer")
-    }
-    if (length(object@inSample) != 1L) {
-        errors <- c(errors, "'inSample' must be a single logical value")
-    }
+    coll <- makeAssertCollection()
+    assertCount(object@nRef, positive = TRUE, .var.name = "nRef", add = coll)
+    # assertLogical(len = 1) rather than assertFlag: the slot's declared type
+    # already excludes non-logicals, and NA is tolerated here as it was before.
+    assertLogical(object@inSample, len = 1L, .var.name = "inSample", add = coll)
     if (length(object) == 0L) {
-        errors <- c(errors, "an LdStatistic must carry at least one variant")
+        coll$push("an LdStatistic must carry at least one variant")
     }
-    if (length(errors) == 0) TRUE else errors
+    coll$getMessages()
 }
 
 # The variants of an LD reference, as the GRanges every subclass is built on.
@@ -149,14 +148,10 @@ setClass(
 }
 
 # @noRd
+#' @importFrom checkmate assertMatrix
 .ldRefOneBlock <- function(R, gr) {
     R <- as.matrix(R)
-    if (nrow(R) != length(gr)) {
-        abort(glue(
-            "an LD block's correlation matrix is {nrow(R)}x{ncol(R)} but ",
-            "covers {length(gr)} variant(s)."
-        ))
-    }
+    assertMatrix(R, nrows = length(gr), .var.name = "LD block correlation")
     list(R = R, gr = gr)
 }
 

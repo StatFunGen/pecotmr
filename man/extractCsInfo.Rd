@@ -7,8 +7,10 @@
 extractCsInfo(fmRow, csNames, topLociTable, ldSource)
 }
 \arguments{
-\item{fmRow}{A \code{\link{fineMappingRow}} carrying the SuSiE
-fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).}
+\item{fmRow}{A \code{\link{fineMappingRow}}, or a single-row
+fine-mapping collection as returned by
+\code{\link{getFineMappingResult}}, carrying the SuSiE fit and
+variant ids.}
 
 \item{csNames}{Character vector. Names of the Credible Sets, usually in the
 format "L_<number>".}

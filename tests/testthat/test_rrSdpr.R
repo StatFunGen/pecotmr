@@ -4,7 +4,7 @@ context("regularized_regression - sdpr")
 test_that("sdpr errors on mismatched bhat and R dimensions", {
     expect_error(
         sdpr(bhat = rnorm(10), R = diag(5), n = 100),
-        "number of rows of 'R'"
+        "bhat.*Must have length"
     )
 })
 
@@ -223,10 +223,12 @@ test_that("sdprWeights calls sdpr and returns beta_est", {
     result <- sdprWeights(
         stat = stat,
         LD = R,
-        iter = 50,
-        burn = 10,
-        thin = 2,
-        verbose = FALSE
+        methodArgs = list(
+            iter = 50,
+            burn = 10,
+            thin = 2,
+            verbose = FALSE
+        )
     )
     expect_equal(length(result), p)
     expect_true(is.numeric(result))

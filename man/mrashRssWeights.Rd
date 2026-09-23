@@ -4,7 +4,16 @@
 \alias{mrashRssWeights}
 \title{Extract weights from mr.ash.rss (susieR)}
 \usage{
-mrashRssWeights(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...)
+mrashRssWeights(
+  stat,
+  LD,
+  varY,
+  sigma2E,
+  s0,
+  w0,
+  z = numeric(0),
+  methodArgs = list()
+)
 }
 \arguments{
 \item{stat}{A list of summary statistics with elements \code{b} (effect
@@ -26,7 +35,8 @@ grid).}
 \item{z}{Optional numeric vector of z-scores; defaults to \code{numeric(0)}
 (derived from \code{stat}).}
 
-\item{...}{Additional arguments forwarded to \code{mr.ash.rss}.}
+\item{methodArgs}{Optional named list of options forwarded to
+\code{mr.ash.rss}.}
 }
 \value{
 A numeric vector of the posterior mean of the coefficients.

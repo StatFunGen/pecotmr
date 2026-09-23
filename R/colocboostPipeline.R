@@ -120,9 +120,10 @@
 #'   swaps recognized (flipping z / residualized dosage / LD to a shared
 #'   coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
 #'   swap is treated as a distinct variant.
-#' @param ... Additional arguments forwarded to
-#'   \code{\link[colocboost]{colocboost}} (e.g., \code{M}, \code{L},
-#'   \code{output_level}).
+#' @param colocboostArgs Optional named list of additional arguments
+#'   forwarded to \code{\link[colocboost]{colocboost}} (e.g., \code{M},
+#'   \code{L}, \code{output_level}).
+#' @param ... Required by the generic; the methods take no further arguments.
 #' @return A \code{\linkS4class{ColocBoostResult}}: one element per
 #'   confidence set (CoS) across every analysis that ran, holding that set's
 #'   member variants with their \code{vcp}. The \code{analysis} column marks
@@ -162,18 +163,18 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # =============================================================================
 
 # Run colocboost() with tryCatch + timing.
+#' @importFrom rlang try_fetch
 .cbRun <- function(label, args) {
     if (!requireNamespace("colocboost", quietly = TRUE)) {
         abort("The colocboost package is required for colocboostPipeline().")
     }
     t1 <- Sys.time()
     args <- compact(args)
-    res <- tryCatch(
+    res <- try_fetch(
         exec(colocboost::colocboost, !!!args),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
-            msg <- glue("{label} failed: {eMsg}")
-            inform(msg)
+        error = function(cnd) {
+            msg <- glue("{label} failed")
+            inform(msg, parent = cnd)
             NULL
         }
     )
@@ -398,20 +399,19 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # Residualized phenotypes for one context (message + NULL on failure).
 # @noRd
 .cbResidualizedY <- function(qd, ctx, traitId, region) {
-    tryCatch(
+    try_fetch(
         getResidualizedPhenotypes(
             qd,
             contexts = ctx,
             traitId = traitId,
             region = region
         ),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
             msg <- glue(
                 "colocboostPipeline: skipping context '{ctx}' ",
-                "(residualized phenotypes unavailable: {eMsg})."
+                "(residualized phenotypes unavailable)."
             )
-            inform(msg)
+            inform(msg, parent = cnd)
             NULL
         }
     )
@@ -420,7 +420,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # Residualized genotypes for one context (message + NULL on failure).
 # @noRd
 .cbResidualizedX <- function(qd, ctx, traitId, region, cisWindow, samples) {
-    tryCatch(
+    try_fetch(
         getResidualizedGenotypes(
             qd,
             contexts = ctx,
@@ -429,13 +429,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             cisWindow = cisWindow,
             samples = samples
         ),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
             msg <- glue(
                 "colocboostPipeline: skipping context '{ctx}' ",
-                "(residualized genotypes unavailable: {eMsg})."
+                "(residualized genotypes unavailable)."
             )
-            inform(msg)
+            inform(msg, parent = cnd)
             NULL
         }
     )
@@ -488,7 +487,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # list(YSplit, dict). (Sequential make.unique naming -- kept as a loop.)
 # @noRd
 .cbSplitY <- function(YperCtx, xMatch) {
-    allTraitNames <- unlist(map(YperCtx, colnames), use.names = FALSE)
+    allTraitNames <- unname(list_c(map(YperCtx, colnames)))
     dupTraits <- unique(allTraitNames[
         duplicated(allTraitNames) | duplicated(allTraitNames, fromLast = TRUE)
     ])
@@ -816,7 +815,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     jointGwas,
     separateGwas,
     focalTrait,
-    dotArgs,
+    colocboostArgs,
     qtlLdSketch = NULL,
     qtlSumstatBundle = NULL
 ) {
@@ -840,7 +839,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
                 qtlSumstatBundle,
                 hasInd,
                 focalTrait,
-                dotArgs
+                colocboostArgs
             )
             results$xqtl_coloc <- run$result
             results$computing_time$Analysis$xqtl_coloc <- run$time
@@ -854,7 +853,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
                 individualBundle,
                 sumstatBundle,
                 hasInd,
-                dotArgs
+                colocboostArgs
             )
             results$joint_gwas <- run$result
             results$computing_time$Analysis$joint_gwas <- run$time
@@ -868,7 +867,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
                 individualBundle,
                 sumstatBundle,
                 hasInd,
-                dotArgs
+                colocboostArgs
             )
             results$separate_gwas <- run$result
             results$computing_time$Analysis$separate_gwas <- run$time
@@ -950,7 +949,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     sumstatBundle,
     hasInd,
     focalTrait,
-    dotArgs
+    colocboostArgs
 ) {
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
@@ -991,7 +990,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             output_level = 2
         ),
         ldArgs,
-        dotArgs
+        colocboostArgs
     )
     run <- .cbRun("xQTL-only ColocBoost", args)
     list(result = run$result, time = run$time)
@@ -1039,7 +1038,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 
 # Joint (non-focal) QTL + GWAS run -> list(result, time).
 # @noRd
-.cbRunJointGwas <- function(individualBundle, sumstatBundle, hasInd, dotArgs) {
+.cbRunJointGwas <- function(
+    individualBundle,
+    sumstatBundle,
+    hasInd,
+    colocboostArgs
+) {
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
         names(sumstatBundle$sumstat)
@@ -1064,7 +1068,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             output_level = 2
         ),
         ldArgs,
-        dotArgs
+        colocboostArgs
     )
     run <- .cbRun("Joint GWAS ColocBoost", args)
     list(result = run$result, time = run$time)
@@ -1076,7 +1080,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     individualBundle,
     sumstatBundle,
     hasInd,
-    dotArgs
+    colocboostArgs
 ) {
     ssNames <- names(sumstatBundle$sumstat)
     t1 <- Sys.time()
@@ -1088,7 +1092,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             individualBundle = individualBundle,
             sumstatBundle = sumstatBundle,
             hasInd = hasInd,
-            dotArgs = dotArgs
+            colocboostArgs = colocboostArgs
         ),
         ssNames
     )
@@ -1115,7 +1119,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     individualBundle,
     sumstatBundle,
     hasInd,
-    dotArgs
+    colocboostArgs
 ) {
     ldIdx <- sumstatBundle$dict_sumstatLD[i, 2L]
     ldArgs <- .cbBuildLdArgs(sumstatBundle$LD[ldIdx])
@@ -1140,7 +1144,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             output_level = 2
         ),
         ldArgs,
-        dotArgs
+        colocboostArgs
     )
     .cbRun(str_c("Separate GWAS ColocBoost for ", study), args)$result
 }
@@ -1209,12 +1213,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     if (!is.null(individualBundle)) {
         ids <- c(
             ids,
-            unlist(map(individualBundle$X, colnames), use.names = FALSE)
+            unname(list_c(map(individualBundle$X, colnames)))
         )
     }
     ids <- c(
         ids,
-        unlist(map(pairs, list("sumstat", "variant")), use.names = FALSE)
+        unname(list_c(map(pairs, list("sumstat", "variant"))))
     )
     ids <- unique(ids[!is.na(ids)])
     if (length(ids) == 0L) {
@@ -1248,7 +1252,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     jointGwas,
     separateGwas,
     focalTrait,
-    dotArgs,
+    colocboostArgs,
     qtlLdSketch = NULL,
     alleleFlip = TRUE,
     cutoffs = NULL
@@ -1286,7 +1290,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         jointGwas,
         separateGwas,
         focalTrait,
-        dotArgs,
+        colocboostArgs,
         qtlLdSketch = qtlLdSketch,
         qtlSumstatBundle = qtlSumstatBundle
     )
@@ -1328,45 +1332,64 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # =============================================================================
 
 # The QtlDataset colocboost run: screen spec, individual-level bundle, shared
-# driver. Split out so the method is only its signature -- twenty formals plus
-# a body is past the length a reviewer (or BiocCheck) will accept, and the
-# signature is the part that cannot be shortened.
-# `p` is the method's named arguments; `dots` is its `...`, which
-# as.list(environment()) does not capture.
+# driver. Split out so the method body stays short; the arguments are passed
+# explicitly rather than bundled, so a rename is a compile-time error and the
+# dependency of each helper is visible.
 # @noRd
-.cbQtlDatasetDrive <- function(p, dots) {
+.cbQtlDatasetDrive <- function(
+    qtlData,
+    gwasSumStats,
+    contexts,
+    traitId,
+    region,
+    cisWindow,
+    focalTrait,
+    xqtlColoc,
+    jointGwas,
+    separateGwas,
+    samples,
+    mafCutoff,
+    macCutoff,
+    imissCutoff,
+    pipCutoffToSkip,
+    absZCutoffToSkip,
+    bfCutoffToSkip,
+    logBfCutoffToSkip,
+    alleleFlip,
+    colocboostArgs
+) {
     screenSpec <- .cbScreenSpec(
-        p$pipCutoffToSkip,
-        p$absZCutoffToSkip,
-        p$bfCutoffToSkip,
-        p$logBfCutoffToSkip
+        pipCutoffToSkip,
+        absZCutoffToSkip,
+        bfCutoffToSkip,
+        logBfCutoffToSkip
     )
     indBundle <- .cbIndividualBundle(
-        p$qtlData,
-        contexts = p$contexts,
-        traitId = p$traitId,
-        region = p$region,
-        cisWindow = p$cisWindow,
-        samples = p$samples,
+        qtlData,
+        contexts = contexts,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        samples = samples,
         pipCutoffToSkip = screenSpec
     )
     .cbDriver(
         indBundle,
         qtlPairs = list(),
-        p$gwasSumStats,
-        p$xqtlColoc,
-        p$jointGwas,
-        p$separateGwas,
-        p$focalTrait,
-        dots,
-        alleleFlip = p$alleleFlip,
+        gwasSumStats,
+        xqtlColoc,
+        jointGwas,
+        separateGwas,
+        focalTrait,
+        colocboostArgs,
+        alleleFlip = alleleFlip,
         # The QTL side is individual-level here, but the GWAS side may still
         # be sumstats, so the panel cutoffs still apply to it.
-        cutoffs = .panelCutoffs(list(
-            mafCutoff = p$mafCutoff,
-            macCutoff = p$macCutoff,
-            imissCutoff = p$imissCutoff
-        ))
+        cutoffs = .panelCutoffs(
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff
+        )
     )
 }
 
@@ -1396,9 +1419,30 @@ setMethod(
         bfCutoffToSkip = 0,
         logBfCutoffToSkip = 0,
         alleleFlip = TRUE,
-        ...
+        colocboostArgs = list()
     ) {
-        .cbQtlDatasetDrive(as.list(environment()), list(...))
+        .cbQtlDatasetDrive(
+            qtlData = qtlData,
+            gwasSumStats = gwasSumStats,
+            contexts = contexts,
+            traitId = traitId,
+            region = region,
+            cisWindow = cisWindow,
+            focalTrait = focalTrait,
+            xqtlColoc = xqtlColoc,
+            jointGwas = jointGwas,
+            separateGwas = separateGwas,
+            samples = samples,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff,
+            pipCutoffToSkip = pipCutoffToSkip,
+            absZCutoffToSkip = absZCutoffToSkip,
+            bfCutoffToSkip = bfCutoffToSkip,
+            logBfCutoffToSkip = logBfCutoffToSkip,
+            alleleFlip = alleleFlip,
+            colocboostArgs = colocboostArgs
+        )
     }
 )
 
@@ -1422,15 +1466,14 @@ setMethod(
         mafCutoff = 0,
         macCutoff = 0,
         imissCutoff = 1,
-        ...
+        colocboostArgs = list()
     ) {
         .cbRequireSumStatsQc(qtlData, "qtlData")
-        dotArgs <- list(...)
-        cutoffs <- .panelCutoffs(list(
+        cutoffs <- .panelCutoffs(
             mafCutoff = mafCutoff,
             macCutoff = macCutoff,
             imissCutoff = imissCutoff
-        ))
+        )
         qtlPairs <- .cbQtlSumStatsBundle(
             qtlData,
             contexts = contexts,
@@ -1445,7 +1488,7 @@ setMethod(
             jointGwas = jointGwas,
             separateGwas = separateGwas,
             focalTrait = focalTrait,
-            dotArgs = dotArgs,
+            colocboostArgs = colocboostArgs,
             qtlLdSketch = getLdSketch(qtlData),
             alleleFlip = alleleFlip,
             cutoffs = cutoffs
@@ -1478,43 +1521,95 @@ setMethod(
         bfCutoffToSkip = 0,
         logBfCutoffToSkip = 0,
         alleleFlip = TRUE,
-        ...
+        colocboostArgs = list()
     ) {
-        p <- as.list(environment())
-        p$dotArgs <- list(...)
-        .cbPipelineMultiStudy(p)
+        .cbPipelineMultiStudy(
+            qtlData = qtlData,
+            gwasSumStats = gwasSumStats,
+            contexts = contexts,
+            traitId = traitId,
+            region = region,
+            cisWindow = cisWindow,
+            focalTrait = focalTrait,
+            xqtlColoc = xqtlColoc,
+            jointGwas = jointGwas,
+            separateGwas = separateGwas,
+            samples = samples,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff,
+            pipCutoffToSkip = pipCutoffToSkip,
+            absZCutoffToSkip = absZCutoffToSkip,
+            bfCutoffToSkip = bfCutoffToSkip,
+            logBfCutoffToSkip = logBfCutoffToSkip,
+            alleleFlip = alleleFlip,
+            colocboostArgs = colocboostArgs
+        )
     }
 )
 
 # MultiStudyQtlDataset colocboost worker: aggregate the per-study individual
 # bundles + embedded sumstats, then dispatch to the shared driver.
 # @noRd
-.cbPipelineMultiStudy <- function(p) {
+.cbPipelineMultiStudy <- function(
+    qtlData,
+    gwasSumStats,
+    contexts,
+    traitId,
+    region,
+    cisWindow,
+    focalTrait,
+    xqtlColoc,
+    jointGwas,
+    separateGwas,
+    samples,
+    mafCutoff,
+    macCutoff,
+    imissCutoff,
+    pipCutoffToSkip,
+    absZCutoffToSkip,
+    bfCutoffToSkip,
+    logBfCutoffToSkip,
+    alleleFlip,
+    colocboostArgs
+) {
     screenSpec <- .cbScreenSpec(
-        p$pipCutoffToSkip,
-        p$absZCutoffToSkip,
-        p$bfCutoffToSkip,
-        p$logBfCutoffToSkip
+        pipCutoffToSkip,
+        absZCutoffToSkip,
+        bfCutoffToSkip,
+        logBfCutoffToSkip
     )
-    indBundle <- .cbMultiStudyIndBundle(p, screenSpec)
-    cutoffs <- .panelCutoffs(p)
+    indBundle <- .cbMultiStudyIndBundle(
+        qtlData = qtlData,
+        contexts = contexts,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        samples = samples,
+        screenSpec = screenSpec
+    )
+    cutoffs <- .panelCutoffs(
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff
+    )
     ss <- .cbMultiStudySumstats(
-        p$qtlData,
-        p$contexts,
-        p$traitId,
+        qtlData,
+        contexts,
+        traitId,
         cutoffs = cutoffs
     )
     .cbDriver(
         indBundle,
         ss$qtlPairs,
-        p$gwasSumStats,
-        p$xqtlColoc,
-        p$jointGwas,
-        p$separateGwas,
-        p$focalTrait,
-        p$dotArgs,
+        gwasSumStats,
+        xqtlColoc,
+        jointGwas,
+        separateGwas,
+        focalTrait,
+        colocboostArgs,
         qtlLdSketch = ss$qtlLdSketch,
-        alleleFlip = p$alleleFlip,
+        alleleFlip = alleleFlip,
         cutoffs = cutoffs
     )
 }
@@ -1524,8 +1619,16 @@ setMethod(
 # outcomes when two studies share a trait. Returns the combined bundle or NULL.
 # (Sequential offset-shifted merge -- kept as a loop.)
 # @noRd
-.cbMultiStudyIndBundle <- function(p, screenSpec) {
-    qtlDatasets <- getQtlDatasets(p$qtlData)
+.cbMultiStudyIndBundle <- function(
+    qtlData,
+    contexts,
+    traitId,
+    region,
+    cisWindow,
+    samples,
+    screenSpec
+) {
+    qtlDatasets <- getQtlDatasets(qtlData)
     combinedX <- list()
     combinedY <- list()
     combinedDict <- matrix(integer(0), ncol = 2L)
@@ -1535,11 +1638,11 @@ setMethod(
     for (study in names(qtlDatasets)) {
         sub <- .cbIndividualBundle(
             qtlDatasets[[study]],
-            contexts = p$contexts,
-            traitId = p$traitId,
-            region = p$region,
-            cisWindow = p$cisWindow,
-            samples = p$samples,
+            contexts = contexts,
+            traitId = traitId,
+            region = region,
+            cisWindow = cisWindow,
+            samples = samples,
             pipCutoffToSkip = screenSpec
         )
         if (is.null(sub)) {
@@ -1649,7 +1752,7 @@ setMethod(
     individualBundle,
     sumstatBundle,
     hasInd,
-    dotArgs
+    colocboostArgs
 ) {
     .cbRunOneSeparateGwas(
         i,
@@ -1657,6 +1760,6 @@ setMethod(
         individualBundle,
         sumstatBundle,
         hasInd,
-        dotArgs
+        colocboostArgs
     )
 }

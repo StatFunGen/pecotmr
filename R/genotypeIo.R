@@ -33,8 +33,10 @@ NULL
 setMethod(
     "readGenotypes",
     signature(path = "character"),
-    function(path, format = NULL, ...) {
-        .genotypeExperiment(.readGenotypeHandle(path, format = format, ...))
+    function(path, format = NULL, vcfArgs = list(), ...) {
+        .genotypeExperiment(
+            .readGenotypeHandle(path, format = format, vcfArgs = vcfArgs)
+        )
     }
 )
 
@@ -43,8 +45,10 @@ setMethod(
 setMethod(
     "readGenotypes",
     signature(path = "missing"),
-    function(path, format = NULL, ...) {
-        .genotypeExperiment(GenotypeHandle(...))
+    function(path, format = NULL, vcfArgs = list(), ...) {
+        .genotypeExperiment(
+            GenotypeHandle(format = format, vcfArgs = vcfArgs, ...)
+        )
     }
 )
 
@@ -52,16 +56,16 @@ setMethod(
 # handle-construction machinery below calls this rather than readGenotypes()
 # so it does not wrap and immediately unwrap a panel on every hop.
 # @noRd
-.readGenotypeHandle <- function(path, format = NULL, ...) {
+.readGenotypeHandle <- function(path, format = NULL, vcfArgs = list()) {
     if (is.null(format)) {
         format <- .h2DetectFormat(path)
     }
     switch(
         format,
         "gds" = .makeGdsHandle(path),
-        "vcf" = .makeVcfHandle(path, ...),
-        "plink1" = .makePlink1Handle(path, ...),
-        "plink2" = .makePlink2Handle(path, ...),
+        "vcf" = .makeVcfHandle(path, vcfArgs = vcfArgs),
+        "plink1" = .makePlink1Handle(path),
+        "plink2" = .makePlink2Handle(path),
         .abortUnsupportedFormat(format)
     )
 }
@@ -129,6 +133,7 @@ setMethod(
     handle
 }
 
+#' @importFrom checkmate assertFileExists
 #' @keywords internal
 .makeGdsHandle <- function(path) {
     if (!requireNamespace("SNPRelate", quietly = TRUE)) {
@@ -137,10 +142,7 @@ setMethod(
     if (!requireNamespace("gdsfmt", quietly = TRUE)) {
         abort("Package 'gdsfmt' is required for reading GDS files.")
     }
-    if (!file.exists(path)) {
-        msg <- glue("GDS file not found: {path}")
-        abort(msg)
-    }
+    assertFileExists(path, access = "r", .var.name = "GDS file")
 
     snpInfo <- .gdsSnpInfo(path)
 
@@ -158,15 +160,13 @@ setMethod(
     )
 }
 
+#' @importFrom checkmate assertFileExists
 #' @keywords internal
-.makeVcfHandle <- function(path, ...) {
+.makeVcfHandle <- function(path, vcfArgs = list()) {
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
         abort("Package 'VariantAnnotation' is required for reading VCF files.")
     }
-    if (!file.exists(path)) {
-        msg <- glue("VCF file not found: {path}")
-        abort(msg)
-    }
+    assertFileExists(path, access = "r", .var.name = "VCF file")
 
     hdr <- VariantAnnotation::scanVcfHeader(path)
     sampleIds <- as.character(VariantAnnotation::samples(hdr))
@@ -177,7 +177,12 @@ setMethod(
         info = NA,
         geno = NA
     )
-    vcf <- VariantAnnotation::readVcf(path, param = param, ...)
+    vcf <- exec(
+        VariantAnnotation::readVcf,
+        path,
+        param = param,
+        !!!vcfArgs
+    )
     rd <- rowRanges(vcf)
 
     # pecotmr convention: A1 = ALT (effect), A2 = REF
@@ -201,7 +206,7 @@ setMethod(
 }
 
 #' @keywords internal
-.makePlink1Handle <- function(path, ...) {
+.makePlink1Handle <- function(path) {
     if (!requireNamespace("snpStats", quietly = TRUE)) {
         abort("Package 'snpStats' is required for reading plink1 files.")
     }
@@ -220,14 +225,14 @@ setMethod(
 
 # Resolve the plink1 stem and assert its .bed/.bim/.fam all exist.
 # @noRd
+#' @importFrom checkmate assertFileExists
 .plink1RequireFiles <- function(path) {
     stem <- .plinkStem(path)
-    for (f in str_c(stem, c(".bed", ".bim", ".fam"))) {
-        if (!file.exists(f)) {
-            msg <- glue("Plink file not found: {f}")
-            abort(msg)
-        }
-    }
+    assertFileExists(
+        str_c(stem, c(".bed", ".bim", ".fam")),
+        access = "r",
+        .var.name = "Plink file"
+    )
     stem
 }
 
@@ -265,7 +270,7 @@ setMethod(
 }
 
 #' @keywords internal
-.makePlink2Handle <- function(path, ...) {
+.makePlink2Handle <- function(path) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
         abort("Package 'pgenlibr' is required for reading plink2 files.")
     }
@@ -606,7 +611,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # trips on disjoint seqlevels) and restore the requested snpIdx order.
 # @noRd
 .combineShardedSes <- function(ses, groups) {
-    ord <- order(unlist(groups, use.names = FALSE))
+    ord <- order(unname(list_c(groups)))
     dosages <- map(ses, .seDosage)
     combinedDos <- exec(rbind, !!!dosages)[ord, , drop = FALSE]
     rowRangesList <- unname(map(ses, SummarizedExperiment::rowRanges))
@@ -677,6 +682,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 }
 
 #' @keywords internal
+#' @importFrom rlang try_fetch
 .extractBlockPlink2 <- function(handle, snpIdx) {
     # pgenlibr::ReadList returns ALT dosage = A1 dosage in pecotmr convention.
     # The cached @pgenPtr does not survive saveRDS/readRDS (external pointers
@@ -697,13 +703,13 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     if (is.null(ptr)) {
         ptr <- pgenlibr::NewPgen(paths$pgen)
     }
-    geno <- tryCatch(
+    geno <- try_fetch(
         pgenlibr::ReadList(
             ptr,
             variant_subset = variantSubset,
             meanimpute = FALSE
         ),
-        error = function(e) {
+        error = function(cnd) {
             reopened <- pgenlibr::NewPgen(paths$pgen)
             pgenlibr::ReadList(
                 reopened,
@@ -926,11 +932,7 @@ readFam <- function(bed) {
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
 openBed <- function(bed) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install pgenlibr: ",
-            "https://cran.r-project.org/web/packages/pgenlibr/index.html"
-        )
-        abort(msg)
+        abort("Package 'pgenlibr' is required for this function.")
     }
     rawSCt <- nrow(readFam(bed))
     return(pgenlibr::NewPgen(bed, raw_sample_ct = rawSCt))
@@ -949,7 +951,9 @@ openBed <- function(bed) {
 #'   package = "pecotmr"), "protocol_example.LD.chr22")
 #' readAfreq(stem)
 #' @export
+#' @importFrom checkmate assertString
 readAfreq <- function(prefix) {
+    assertString(prefix)
     afreqZst <- str_c(prefix, ".afreq.zst")
     afreqPlain <- str_c(prefix, ".afreq")
     if (file.exists(afreqZst)) {
@@ -1107,20 +1111,13 @@ invertMinmaxScaling <- function(X, uMin, uMax) {
 
 # ---------- Internal helpers for PLINK2 format ----------
 
+#' @importFrom checkmate assertFileExists
 #' Resolve and validate PLINK2 file paths for a given prefix.
 #' @return Named list with pgen, pvar, psam paths.
 #' @noRd
 resolvePlink2Paths <- function(prefix) {
     pgen <- str_c(prefix, ".pgen")
-    if (!file.exists(pgen)) {
-        msg <- glue(
-            "PLINK2 .pgen file not found at: {pgen}\n",
-            "  Note: .pgen must be uncompressed (plink2 does not ",
-            "compress .pgen).",
-            .trim = FALSE
-        )
-        abort(msg)
-    }
+    assertFileExists(pgen, access = "r", .var.name = "PLINK2 .pgen file")
     # Prefer plain .pvar (fast, no extra deps); fall back to .pvar.zst
     pvar <- if (file.exists(str_c(prefix, ".pvar"))) {
         str_c(prefix, ".pvar")
@@ -1131,15 +1128,7 @@ resolvePlink2Paths <- function(prefix) {
         abort(msg)
     }
     psam <- str_c(prefix, ".psam")
-    if (!file.exists(psam)) {
-        msg <- glue(
-            "PLINK2 .psam file not found at: {psam}\n",
-            "  Note: .psam must be uncompressed (plink2 does not ",
-            "compress .psam).",
-            .trim = FALSE
-        )
-        abort(msg)
-    }
+    assertFileExists(psam, access = "r", .var.name = "PLINK2 .psam file")
     list(pgen = pgen, pvar = pvar, psam = psam)
 }
 
@@ -1153,11 +1142,7 @@ resolvePlink2Paths <- function(prefix) {
 #' @noRd
 readPvar <- function(pvarPath) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-        msg <- glue(
-            "pgenlibr is required. Install from ",
-            "https://cran.r-project.org/web/packages/pgenlibr/index.html"
-        )
-        abort(msg)
+        abort("Package 'pgenlibr' is required.")
     }
     pvar <- pgenlibr::NewPvar(pvarPath)
     on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
@@ -1377,9 +1362,9 @@ getRefVariantInfo <- function(source, region = NULL) {
 #' @importFrom readr read_lines
 #' @noRd
 matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
-    keepRaw <- tryCatch(
+    keepRaw <- try_fetch(
         as.data.frame(vroom(keepVariantsPath, show_col_types = FALSE)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     if (
         !is.null(keepRaw) &&

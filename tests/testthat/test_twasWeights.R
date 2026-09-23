@@ -138,13 +138,11 @@ test_that(".twas_method_lookup: unknown method produces error", {
     )
 })
 
-test_that(".twas_method_lookup: default args are set for susie and mrash", {
+test_that(".twas_method_lookup: default args are set for mrash, not susie", {
     result <- pecotmr:::.twasMethodLookup("fastDefault")
-    expect_equal(result$susie_weights$refine, FALSE)
-    # Matches susieR::susie's own defaults (L = min(10, p), greedy loop off),
-    # as fineMappingPipeline does.
-    expect_equal(result$susie_weights$L, 10)
-    expect_null(result$susie_weights$L_greedy)
+    # susie carries NO fitting defaults: susieWeights extracts from a supplied
+    # fit and never runs susie, so `refine` / `L` would have nothing to configure.
+    expect_length(result$susie_weights, 0L)
     expect_equal(result$mrash_weights$initPriorSd, TRUE)
     expect_equal(result$mrash_weights$max.iter, 100)
 })
@@ -268,7 +266,7 @@ test_that("twasWeights: X must be a matrix", {
     d <- make_data()
     expect_error(
         learnTwasWeights(as.data.frame(d$X), d$Y, weightMethods = list()),
-        "X must be a matrix"
+        "X.*Must be of type 'matrix'"
     )
 })
 
@@ -279,7 +277,7 @@ test_that("twasWeights: Y must be a matrix or vector", {
     # 1 row which mismatches X's 50 rows, triggering the row count error.
     expect_error(
         learnTwasWeights(d$X, list(d$Y), weightMethods = list()),
-        "The number of rows in X and Y must be the same"
+        "One of the following must apply"
     )
 })
 
@@ -311,7 +309,7 @@ test_that("twasWeights: mismatched row counts error", {
     Y_short <- d$Y[1:30, , drop = FALSE]
     expect_error(
         learnTwasWeights(d$X, Y_short, weightMethods = list()),
-        "The number of rows in X and Y must be the same"
+        "Y.*Must have exactly 50 rows"
     )
 })
 
@@ -673,7 +671,7 @@ test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", 
     expect_true(is.finite(perf[1, "rsq"]))
 })
 
-test_that("twasWeightsCv: multivariate cv_args data_driven_priorMatricesCv is plumbed through", {
+test_that("twasWeightsCv: dataDrivenPriorMatricesCv is plumbed through", {
     set.seed(42)
     n <- 20
     p <- 4
@@ -703,7 +701,7 @@ test_that("twasWeightsCv: multivariate cv_args data_driven_priorMatricesCv is pl
         Y,
         fold = 2,
         weightMethods = list(mrmashWeights = list()),
-        data_driven_priorMatricesCv = prior_cv
+        dataDrivenPriorMatricesCv = prior_cv
     )
     # mrmashWeights mock should have been called and received the per-fold prior
     # matrix under the camelCase name that actually binds mrmashWrapper's
@@ -810,10 +808,13 @@ test_that("twasWeightsCv handles errors appropriately", {
     )
     weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
     expect_error(twasWeightsCv(X, y, fold = NULL), "fold.*samplePartitions")
-    expect_error(twasWeightsCv(X, y, fold = "invalid"), "positive integer")
-    expect_error(twasWeightsCv(X, y, fold = -1), "positive integer")
-    expect_error(twasWeightsCv(2, y, fold = 2), "must be a matrix")
-    expect_error(twasWeightsCv(X, 2, fold = 2), "number of rows")
+    expect_error(
+        twasWeightsCv(X, y, fold = "invalid"),
+        "Must be of type 'count'"
+    )
+    expect_error(twasWeightsCv(X, y, fold = -1), "Must be >= 1")
+    expect_error(twasWeightsCv(2, y, fold = 2), "Must be of type 'matrix'")
+    expect_error(twasWeightsCv(X, 2, fold = 2), "Y.*Must have exactly 10 rows")
     expect_error(
         twasWeightsCv(
             matrix(rnorm(4, nrow = 2)),
@@ -840,7 +841,7 @@ test_that("learnTwasWeights handles errors appropriately", {
             matrix(rnorm(4, nrow = 2)),
             matrix(rnorm(2, nrow = 1))
         ),
-        "unused argument"
+        "weightMethods.*is missing"
     )
     expect_error(learnTwasWeights(X, y), "weightMethods")
 })
@@ -1629,14 +1630,11 @@ test_that("validity names the missing key and payload columns", {
     data(twasWeightsExample)
     bad <- twasWeightsExample
     S4Vectors::mcols(bad)$method <- NULL
-    expect_equal(
-        pecotmr:::.twasValidateRequiredCols(bad),
-        "missing columns: method"
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'method'\\}"
     )
-    expect_equal(
-        pecotmr:::.twasValidateRequiredCols(twasWeightsExample),
-        character()
-    )
+    expect_true(methods::validObject(twasWeightsExample))
     bad2 <- twasWeightsExample
     S4Vectors::mcols(bad2)$cvResult <- NULL
     expect_equal(
@@ -1673,15 +1671,17 @@ test_that(".twasApplyRownames leaves weights alone when X has no colnames", {
 
 test_that(".twasBadColMsg names the offending column and its class", {
     expect_equal(
-        as.character(pecotmr:::.twasBadColMsg("study", data.frame(study = 1:2))),
+        as.character(pecotmr:::.twasBadColMsg(
+            "study",
+            data.frame(study = 1:2)
+        )),
         "'study' column must be character (got integer)"
     )
 })
 
 test_that(".twasMethodRows keeps a per-outcome context vector", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T")
-    Y <- matrix(0, nrow = 4L, ncol = 2L,
-        dimnames = list(NULL, c("y1", "y2")))
+    Y <- matrix(0, nrow = 4L, ncol = 2L, dimnames = list(NULL, c("y1", "y2")))
     wMat <- matrix(
         c(0.1, 0.2, 0.3, 0.4),
         nrow = 2L,
@@ -1689,13 +1689,21 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
     )
     mkCtx <- function(contexts) {
         list(
-            Y = Y, trait = c("t1", "t2"), context = contexts, study = "s1",
-            retainFits = FALSE, standardized = TRUE, dataType = "rnaseq"
+            Y = Y,
+            trait = c("t1", "t2"),
+            context = contexts,
+            study = "s1",
+            retainFits = FALSE,
+            standardized = TRUE,
+            dataType = "rnaseq"
         )
     }
     # One context per outcome column: used as-is, not recycled.
     perOutcome <- pecotmr:::.twasMethodRows(
-        "lasso_weights", wMat, vids, mkCtx(c("cA", "cB"))
+        "lasso_weights",
+        wMat,
+        vids,
+        mkCtx(c("cA", "cB"))
     )
     expect_length(perOutcome, 2L)
     expect_equal(
@@ -1704,10 +1712,83 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
     )
     # A single context is recycled across the outcomes instead.
     recycled <- pecotmr:::.twasMethodRows(
-        "lasso_weights", wMat, vids, mkCtx("cOnly")
+        "lasso_weights",
+        wMat,
+        vids,
+        mkCtx("cOnly")
     )
     expect_equal(
         vapply(recycled, function(z) z$context, character(1)),
         c("cOnly", "cOnly")
+    )
+})
+
+test_that("twasWeightsCv: argument guards fire", {
+    d <- generate_X_Y(seed = 1)
+    base <- list(X = d$X, Y = d$Y, fold = 2, weightMethods = list())
+    expect_error(
+        exec(
+            twasWeightsCv,
+            !!!list_modify(base, !!!list(samplePartitions = 1L))
+        ),
+        "samplePartitions.*Must be of type 'data.frame'"
+    )
+    expect_error(
+        exec(twasWeightsCv, !!!list_modify(base, !!!list(maxNumVariants = 0))),
+        "maxNumVariants.*is not >= 1"
+    )
+    expect_error(
+        exec(twasWeightsCv, !!!list_modify(base, !!!list(numThreads = 1.5))),
+        "numThreads.*Must be of type 'single integerish value'"
+    )
+    expect_error(
+        exec(twasWeightsCv, !!!list_modify(base, !!!list(retainFits = NA))),
+        "retainFits.*May not be NA"
+    )
+    expect_error(
+        exec(twasWeightsCv, !!!list_modify(base, !!!list(seed = "x"))),
+        "seed.*Must be of type 'single integerish value'"
+    )
+    # Inf is the documented "no cap" sentinel and must still be accepted.
+    expect_no_error(
+        exec(twasWeightsCv, !!!list_modify(base, !!!list(maxNumVariants = Inf)))
+    )
+})
+
+test_that("learnTwasWeights: argument guards fire", {
+    d <- generate_X_Y(seed = 1)
+    base <- list(X = d$X, Y = d$Y, weightMethods = list())
+    expect_error(
+        exec(learnTwasWeights, !!!list_modify(base, !!!list(study = 1L))),
+        "study.*Must be of type 'string'"
+    )
+    # Called directly, not via modifyList(): modifyList() DROPS an element
+    # whose value is NULL, so the argument would fall back to its default.
+    expect_error(
+        learnTwasWeights(
+            d$X,
+            d$Y,
+            weightMethods = list(),
+            standardized = NULL
+        ),
+        "standardized.*Must be of type 'logical flag'"
+    )
+    expect_error(
+        exec(learnTwasWeights, !!!list_modify(base, !!!list(dataType = 1L))),
+        "dataType.*Must be of type 'string'"
+    )
+    expect_error(
+        exec(
+            learnTwasWeights,
+            !!!list_modify(base, !!!list(weightMethods = 1L))
+        ),
+        "weightMethods.*One of the following must apply"
+    )
+})
+
+test_that("twasPredict: weightsList must be a list or TwasWeights", {
+    expect_error(
+        twasPredict(matrix(0, 2, 2), "nope"),
+        "weightsList.*One of the following must apply"
     )
 })

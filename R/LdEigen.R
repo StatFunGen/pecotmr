@@ -40,26 +40,28 @@ setClass(
 )
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertList
 .validateLdEigen <- function(object) {
+    coll <- makeAssertCollection()
     parentCheck <- .validateLdStatistic(object)
-    errors <- if (isTRUE(parentCheck)) character() else parentCheck
-    if (length(object@eigenList) != length(object@ldBlocks)) {
-        errors <- c(
-            errors,
-            "Length of 'eigenList' must match number of LD blocks"
-        )
+    if (!isTRUE(parentCheck)) {
+        coll$push(parentCheck)
     }
+    assertList(
+        object@eigenList,
+        len = length(object@ldBlocks),
+        .var.name = "eigenList",
+        add = coll
+    )
+    # checkmate has no exclusive lower bound, so (0, 1] stays a plain check.
     if (
         length(object@eigenvalueTruncation) != 1L ||
             object@eigenvalueTruncation <= 0 ||
             object@eigenvalueTruncation > 1
     ) {
-        errors <- c(
-            errors,
-            "'eigenvalueTruncation' must be a single value in (0, 1]"
-        )
+        coll$push("'eigenvalueTruncation' must be a single value in (0, 1]")
     }
-    if (length(errors) == 0) TRUE else errors
+    coll$getMessages()
 }
 
 #' @title Create an LdEigen
@@ -87,6 +89,7 @@ setClass(
 #'   ldBlocks = blocks, nRef = 100L, genome = "hg19")
 #' length(le)
 #' length(getEigenList(le))
+#' @importFrom checkmate assertDataFrame assertList assertCount
 #' @export
 LdEigen <- function(
     snpInfo,
@@ -97,6 +100,9 @@ LdEigen <- function(
     genome = NA_character_,
     eigenvalueTruncation = 1
 ) {
+    assertDataFrame(snpInfo)
+    assertList(eigenList)
+    assertCount(nRef, positive = TRUE)
     obj <- methods::new(
         "LdEigen",
         .ldStatRanges(snpInfo, genome),
@@ -110,6 +116,7 @@ LdEigen <- function(
     obj
 }
 
+#' @importFrom checkmate assertCount assertFlag
 #' @title Build an LdEigen from loaded LD
 #' @description Eigendecompose already-loaded LD, block by block, into the
 #'   \code{LdEigen} that \code{\link{estimateH2}} consumes for
@@ -160,6 +167,8 @@ buildLdEigen <- function(
     genome = NA_character_,
     eigenvalueTruncation = 1
 ) {
+    assertCount(nRef, positive = TRUE, null.ok = TRUE)
+    assertFlag(inSample)
     prep <- .ldRefPrepare(ldBlockData, nRef, genome)
     eigenList <- map2(
         prep$blocks,

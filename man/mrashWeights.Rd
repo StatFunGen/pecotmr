@@ -4,7 +4,7 @@
 \alias{mrashWeights}
 \title{Compute Weights Using mr.ash Shrinkage}
 \usage{
-mrashWeights(X, y, initPriorSd = TRUE, retainFit = FALSE, ...)
+mrashWeights(X, y, initPriorSd = TRUE, retainFit = FALSE, methodArgs = list())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -17,7 +17,7 @@ from the data. Default \code{TRUE}.}
 \item{retainFit}{Logical. Attach the full fitted-model object to the result.
 Default \code{FALSE}.}
 
-\item{...}{Additional arguments forwarded to \code{mr.ash}.}
+\item{methodArgs}{Optional named list of options forwarded to \code{mr.ash}.}
 }
 \value{
 A numeric vector of weights, one per variant (column of \code{X});

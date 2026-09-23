@@ -2053,3 +2053,27 @@ test_that(".qtlSumStatsFromMatrix synthesises coords for unparseable ids", {
     expect_equal(as.character(GenomicRanges::seqnames(gr)), c("chr1", "chr1"))
     expect_equal(GenomicRanges::start(gr), c(1L, 2L))
 })
+
+test_that("mashWrapper: argument guards fire", {
+    expect_error(
+        filterInvalidSummaryStat("not-a-list"),
+        "datList.*Must be of type 'list'"
+    )
+    expect_error(
+        filterInvalidSummaryStat(list(), sigPCutoff = 2),
+        "sigPCutoff.*is not <= 1"
+    )
+    expect_error(
+        filterInvalidSummaryStat(list(), filterByMissingRate = -1),
+        "filterByMissingRate.*is not >= 0"
+    )
+    expect_error(
+        filterMixtureComponents(conditionsToKeep = 1L, U = list()),
+        "conditionsToKeep.*Must be of type 'character'"
+    )
+    expect_error(
+        filterMixtureComponents("a", U = list(), wCutoff = -1),
+        "wCutoff.*is not >= 0"
+    )
+    expect_error(mergeMashData("nope", list()), "Must be of type 'list'")
+})

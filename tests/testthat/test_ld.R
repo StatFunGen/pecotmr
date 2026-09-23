@@ -300,7 +300,7 @@ test_that("partitionLdMatrix handles empty matrix gracefully", {
     # Expect the S4 type-check error
     expect_error(
         partitionLdMatrix(empty_ld_data),
-        "ldData must be an LdData object"
+        "Assertion on 'ldData'.*Must inherit from class 'LdData'"
     )
 })
 
@@ -1312,7 +1312,7 @@ test_that("resolveLdSource detects precomputed from metadata", {
 test_that("resolveLdSource errors on missing file", {
     expect_error(
         pecotmr:::resolveLdSource("/nonexistent/file.tsv"),
-        "not found"
+        "LD metadata file: File does not exist"
     )
 })
 
@@ -1994,7 +1994,7 @@ test_that("ldClumpByScore errors on mismatched score length", {
     X <- matrix(rnorm(20), 5, 4)
     expect_error(
         ldClumpByScore(X, score = c(1, 2), chr = rep(1L, 4), pos = 1:4),
-        "length\\(score\\)"
+        "score.*Must have length 4"
     )
 })
 
@@ -2004,7 +2004,7 @@ test_that("ldClumpByScore errors on mismatched chr/pos length", {
     X <- matrix(rnorm(20), 5, 4)
     expect_error(
         ldClumpByScore(X, score = runif(4), chr = rep(1L, 2), pos = 1:4),
-        "chr and pos"
+        "chr.*Must have length 4"
     )
 })
 
@@ -2391,7 +2391,7 @@ test_that("ldClumpByScore validates input lengths", {
             chr = rep(1L, 2),
             pos = seq_len(3) * 1000L
         ),
-        "chr and pos"
+        "chr.*Must have length 3"
     )
 })
 
@@ -3906,7 +3906,10 @@ test_that("ldClumpByScore accepts a pre-built FBM and reports retained count (ve
 # =============================================================================
 
 test_that("extractLdMatrix errors on non-LdData input", {
-    expect_error(pecotmr:::extractLdMatrix(list()), "must be an LdData object")
+    expect_error(
+        pecotmr:::extractLdMatrix(list()),
+        "Must inherit from class 'LdData'"
+    )
 })
 
 test_that("extractLdMatrix returns the genotype matrix when wantGenotype=TRUE", {
@@ -4139,14 +4142,14 @@ test_that(".panelVariantFilter handles empty and NULL input", {
 test_that(".panelCutoffs short-circuits when no cutoff is set", {
     # NULL means the panel is never touched, which is what keeps the default
     # path free of an extra dosage read.
-    expect_null(.panelCutoffs(list()))
-    expect_null(.panelCutoffs(list(
+    expect_null(.panelCutoffs())
+    expect_null(.panelCutoffs(
         mafCutoff = 0,
         macCutoff = 0,
         imissCutoff = 1
-    )))
-    expect_equal(.panelCutoffs(list(mafCutoff = 0.01))$mafCutoff, 0.01)
-    expect_equal(.panelCutoffs(list(imissCutoff = 0.5))$imissCutoff, 0.5)
+    ))
+    expect_equal(.panelCutoffs(mafCutoff = 0.01)$mafCutoff, 0.01)
+    expect_equal(.panelCutoffs(imissCutoff = 0.5)$imissCutoff, 0.5)
 })
 
 
@@ -4925,10 +4928,19 @@ test_that("computeLd(onDisk) applies shrinkage toward the identity", {
         format = "gds"
     )
     idx <- 1:6
-    plain <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE)
-    shrunk <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE, shrinkage = 0.5)
+    plain <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE
+    )
+    shrunk <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE,
+        shrinkage = 0.5
+    )
     # (1 - s) * R + s * I: off-diagonals halve, the diagonal stays 1.
     expect_equal(unname(diag(shrunk)), rep(1, length(idx)))
     expect_equal(

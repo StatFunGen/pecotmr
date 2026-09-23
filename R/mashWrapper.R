@@ -54,6 +54,7 @@ filterBySignificance <- function(zMatrix, sigPCutoff) {
 #' datList <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
 #' filterInvalidSummaryStat(datList)
 #' @export
+#' @importFrom checkmate assertFlag assertList assertNumber
 filterInvalidSummaryStat <- function(
     datList,
     bhat = NULL,
@@ -63,6 +64,16 @@ filterInvalidSummaryStat <- function(
     sigPCutoff = 1E-6,
     filterByMissingRate = 0.2
 ) {
+    assertList(datList)
+    assertFlag(btoz)
+    # NULL is how callers disable each filter.
+    assertNumber(sigPCutoff, lower = 0, upper = 1, null.ok = TRUE)
+    assertNumber(
+        filterByMissingRate,
+        lower = 0,
+        upper = 1,
+        null.ok = TRUE
+    )
     if (
         !is.null(bhat) &&
             !is.null(sbhat) &&
@@ -177,12 +188,15 @@ filterInvalidSummaryStat <- function(
 #' })
 #' filterMixtureComponents(conditionsToKeep = conditionsToKeep, U = U)
 #' @export
+#' @importFrom checkmate assertCharacter assertNumber
 filterMixtureComponents <- function(
     conditionsToKeep,
     U,
     w = NULL,
     wCutoff = 1e-04
 ) {
+    assertCharacter(conditionsToKeep, any.missing = FALSE)
+    assertNumber(wCutoff, lower = 0, finite = TRUE)
     conditionsToFilter <- setdiff(colnames(U[[1]]), conditionsToKeep)
     sumW <- sum(w)
     U <- .mashSubsetU(U, conditionsToKeep)
@@ -345,8 +359,11 @@ mashRandNullSample <- function(
 #'     c("chr1:400:A:G", "chr1:500:A:G", "chr1:600:A:G"),
 #'     c("t1", "t2", "t3")))))
 #' mergeMashData(a, b)
+#' @importFrom checkmate assertList
 #' @export
 mergeMashData <- function(resData, oneData) {
+    assertList(resData, null.ok = TRUE)
+    assertList(oneData, null.ok = TRUE)
     if (length(resData) == 0 || is.null(resData)) {
         return(oneData)
     }
@@ -944,6 +961,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # where they don't parse), builds one GRanges entry per condition with mcols
 # from `mcolFn(j)`, and wraps the entries as a QtlSumStats.
 # @noRd
+#' @importFrom rlang try_fetch
 .qtlSumStatsFromMatrix <- function(
     vids,
     nCond,
@@ -959,9 +977,9 @@ qtlSumStatsFromBetaMatrix <- function(
     context <- .qszmRecycle(context, nCond, "context")
     trait <- .qszmRecycle(trait, nCond, "trait")
     # Decode chrom/pos from the variant ids; synthesise where they do not parse.
-    parsed <- tryCatch(
+    parsed <- try_fetch(
         suppressWarnings(parseVariantId(vids)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     chrom <- if (!is.null(parsed)) {
         as.character(parsed$chrom)
