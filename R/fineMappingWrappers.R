@@ -1857,11 +1857,15 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
     if (method == "mvsusie") {
         trimmed <- .trimAddMvsusie(trimmed, fit, effectIdx)
     }
-    # fSuSiE: keep the precomputed variants x features TWAS weight matrix
-    # (fsusieWeights output, attached as $coef before trimming) so downstream
-    # TWAS can read it without the dropped wavelet slots.
-    if (method == "fsusie" && !is.null(fit$coef)) {
-        trimmed$coef <- fit$coef
+    # fSuSiE: retain functional summaries and precomputed weights. The base
+    # trimmed fit already retains alpha, lbf_variable and sets for coloc.
+    if (method == "fsusie") {
+        if (.isFsusieFit(fit)) {
+            fit <- .fsusiePopulateCredibleBand(fit)
+        }
+        keep <- intersect(c("coef", "fitted_func", "cred_band", "outing_grid",
+                            "cs", "csd_X", "lfsr_func"), names(fit))
+        trimmed[keep] <- fit[keep]
     }
     class(trimmed) <- unique(c(method, "susie"))
     trimmed

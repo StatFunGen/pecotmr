@@ -179,10 +179,10 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 .isFsusieFit <- function(fit) {
     !is.null(fit) &&
         is.list(fit) &&
-        !is.null(fit$fitted_wc2) &&
         !is.null(fit$fitted_func) &&
         !is.null(fit$outing_grid) &&
-        !is.null(fit$alpha)
+        (!is.null(fit$cred_band) ||
+             (!is.null(fit$fitted_wc2) && !is.null(fit$alpha)))
 }
 
 # Populate `obj$cred_band` via fsusieR's wavethresh/GenW band computation. That
@@ -192,6 +192,9 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # an upstream fsusieR change surfaces as a clear error, not a silent NULL.
 # @noRd
 .fsusiePopulateCredibleBand <- function(fit) {
+    # Native post_processing="none" can leave zero-filled placeholder bands.
+    # Only reuse bands after trimming has removed the reconstruction fields.
+    if (is.null(fit$fitted_wc2) && !is.null(fit$cred_band)) return(fit)
     fn <- tryCatch(
         get("update_cal_credible_band.susiF", envir = asNamespace("fsusieR")),
         error = function(e) NULL

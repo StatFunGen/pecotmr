@@ -23,8 +23,8 @@ The sub-intervals of the functional grid where a credible set's band excludes
 zero (the genomic footprint of each fSuSiE effect), from the upstream
 \code{fsusieR::affected_reg}. Returns a \code{GRanges} with the credible-set
 label, its purity, and the effect \code{direction}
-(\code{"pos"}/\code{"neg"}; upstream discards it). Requires an UNtrimmed fit;
-empty otherwise.
+(\code{"pos"}/\code{"neg"}; upstream discards it). Uses retained functional
+summaries or an untrimmed fit; empty when those fields are absent.
 }
 \examples{
 data(fsusieFineMappingExample)
