@@ -59,7 +59,7 @@
     traits = c("ENSG1", "ENSG2")
 ) {
     phenos <- setNames(
-        lapply(contexts, function(cx) .js_makeSe(traits = traits)),
+        map(contexts, function(cx) .js_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -81,7 +81,7 @@
         trait = traits,
         stringsAsFactors = FALSE
     )
-    entries <- lapply(seq_len(nrow(rows)), function(i) {
+    entries <- map(seq_len(nrow(rows)), function(i) {
         gr <- GenomicRanges::GRanges(
             seqnames = "chr1",
             ranges = IRanges::IRanges(start = c(100L, 200L), width = 1L)
@@ -803,7 +803,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         study = rows$study,
         context = rows$context,
         trait = rows$trait,
-        entry = lapply(seq_len(nrow(rows)), function(.) makeGr()),
+        entry = map(seq_len(nrow(rows)), function(.) makeGr()),
         genome = "hg19",
         ldSketch = .jd_makeHandle(),
         qcInfo = list(step1 = "ok")
@@ -1113,7 +1113,7 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie",
     traits = c("t1", "t2")
 ) {
     phen <- setNames(
-        lapply(contexts, function(.) .jd_makeSe(traits = traits)),
+        map(contexts, function(.) .jd_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -2323,7 +2323,7 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             setNames(
-                lapply(c("c1", "c2"), function(.) {
+                map(c("c1", "c2"), function(.) {
                     matrix(
                         rnorm(12),
                         6,

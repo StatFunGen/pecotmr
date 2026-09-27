@@ -482,11 +482,11 @@ test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
     mc <- list(methodArgs = list(nit = 200, nburn = 20, nthin = 1))
-    expect_length(do.call(bayesNWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesLWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesAWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesCWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesRWeights, c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesNWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesCWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesRWeights, !!!c(list(f$X, f$y), mc)), f$p)
 })
 
 test_that("bayesAlphabetWeights validates matching row counts before fitting", {
@@ -794,10 +794,9 @@ test_that("buildMrmashPriorMatrices builds an expanded S0 list and a prior grid"
     expect_true(is.list(res$S0))
     expect_gt(length(res$S0), 1)
     expect_true(is.numeric(res$priorGrid))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$S0,
-        function(s) all(dim(s) == c(3, 3)),
-        logical(1)
+        function(s) all(dim(s) == c(3, 3))
     )))
 })
 

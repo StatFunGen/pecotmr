@@ -1270,7 +1270,7 @@ test_that("QtlDataset builder errors on inconsistent per-context paths", {
             collapse = "\t"
         )
     )
-    rows <- vapply(
+    rows <- map_chr(
         seq_len(n),
         function(i) {
             vals <- c(
@@ -1297,8 +1297,7 @@ test_that("QtlDataset builder errors on inconsistent per-context paths", {
                 ),
                 collapse = "\t"
             )
-        },
-        character(1)
+        }
     )
     writeLines(c(meta, rows), path)
     path

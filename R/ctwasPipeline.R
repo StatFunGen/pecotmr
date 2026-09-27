@@ -133,8 +133,8 @@
 #' gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 #' ctwasPipeline(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample), thin = 1, niterPrefit = 3,
-#'   niter = 10, min_group_size = 1, min_p_single_effect = 0,
-#'   fallbackToPrefit = TRUE)
+#'   niter = 10, fallbackToPrefit = TRUE,
+#'   ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 #' @export
 ctwasPipeline <- function(
     gwasSumStats,
@@ -271,8 +271,8 @@ ctwasPipeline <- function(
         ncore = ncore,
         ctwasArgs = ctwasArgs
     )
-    if (mergeBoundary) {
-        finemap <- .ctwasMaybeMerge(
+    merged <- if (mergeBoundary) {
+        .ctwasMaybeMerge(
             finemap,
             mergePipThresh = mergePipThresh,
             mergeFilterCs = mergeFilterCs,
@@ -281,9 +281,11 @@ ctwasPipeline <- function(
             ncore = ncore,
             ctwasArgs = ctwasArgs
         )
+    } else {
+        finemap
     }
     .ctwasRunToRows(
-        finemap,
+        merged,
         gwasStudy = gwasStudy,
         method = m,
         keepSnps = keepSnps
@@ -550,42 +552,76 @@ assembleCtwasInputs <- function(
 # Returns list(ldPanelsByRegion, zSnpPieces, regionInfoPieces, snpMap,
 # ldFileByRegion).
 # @noRd
-.ctwasFirstPass <- function(regionIds, gwasSumStats, twasWeights) {
-    ldPanelsByRegion <- list()
-    zSnpPieces <- list()
-    regionInfoPieces <- list()
-    snpMap <- list()
-    ldFileByRegion <- set_names(character(length(regionIds)), regionIds)
-    for (rid in regionIds) {
-        gss <- gwasSumStats[[rid]]
-        tw <- twasWeights[[rid]]
-        gwasLd <- getLdSketch(gss)
-        if (is.null(gwasLd)) {
-            msg <- glue(
-                "ctwasPipeline: GwasSumStats for region '{rid}' carries no ",
-                "ldSketch (ldSketch = NULL); cTWAS requires an LD reference."
-            )
-            abort(msg)
-        }
-        if (!is.null(tw)) {
-            .ctwasRequireMatchingLdSketches(getLdSketch(tw), gwasLd)
-        }
-        ldKey <- .ctwasLdPanelKey(gwasLd)
-        if (is.null(ldPanelsByRegion[[ldKey]])) {
-            ldPanelsByRegion[[ldKey]] <- .ctwasComputeFullPanelLd(gwasLd)
-        }
-        ldPanel <- ldPanelsByRegion[[ldKey]]
-        ldFileByRegion[[rid]] <- ldKey
-        zSnpPieces[[rid]] <- .ctwasBuildZSnp(gss, ldPanel$snpInfo$id)
-        regionInfoPieces[[rid]] <- .ctwasBuildSingleRegionInfo(rid, gss)
-        snpMap[[rid]] <- .ctwasSnpInfoForGwasBlock(gss, ldPanel$snpInfo)
+# One region's GWAS LD sketch, checked against the region's weights.
+# @noRd
+.ctwasRegionGwasLd <- function(rid, gwasSumStats, twasWeights) {
+    gwasLd <- getLdSketch(gwasSumStats[[rid]])
+    if (is.null(gwasLd)) {
+        msg <- glue(
+            "ctwasPipeline: GwasSumStats for region '{rid}' carries no ",
+            "ldSketch (ldSketch = NULL); cTWAS requires an LD reference."
+        )
+        abort(msg)
     }
+    tw <- twasWeights[[rid]]
+    if (!is.null(tw)) {
+        .ctwasRequireMatchingLdSketches(getLdSketch(tw), gwasLd)
+    }
+    gwasLd
+}
+
+# @noRd
+.ctwasZSnpAt <- function(rid, ldPanel, gwasSumStats) {
+    .ctwasBuildZSnp(gwasSumStats[[rid]], ldPanel$snpInfo$id)
+}
+
+# @noRd
+.ctwasSnpMapAt <- function(rid, ldPanel, gwasSumStats) {
+    .ctwasSnpInfoForGwasBlock(gwasSumStats[[rid]], ldPanel$snpInfo)
+}
+
+# @noRd
+.ctwasRegionInfoAt <- function(rid, gwasSumStats) {
+    .ctwasBuildSingleRegionInfo(rid, gwasSumStats[[rid]])
+}
+
+.ctwasFirstPass <- function(regionIds, gwasSumStats, twasWeights) {
+    sketches <- map(
+        regionIds,
+        .ctwasRegionGwasLd,
+        gwasSumStats = gwasSumStats,
+        twasWeights = twasWeights
+    )
+    ldKeys <- map_chr(sketches, .ctwasLdPanelKey)
+    # The panel cache is "compute once per distinct key": the first region
+    # carrying each key is the one whose sketch gets expanded, and every
+    # region then reads its panel back out by key.
+    firstOfKey <- !duplicated(ldKeys)
+    ldPanelsByRegion <- set_names(
+        map(sketches[firstOfKey], .ctwasComputeFullPanelLd),
+        ldKeys[firstOfKey]
+    )
+    panels <- unname(ldPanelsByRegion[ldKeys])
     list(
         ldPanelsByRegion = ldPanelsByRegion,
-        zSnpPieces = zSnpPieces,
-        regionInfoPieces = regionInfoPieces,
-        snpMap = snpMap,
-        ldFileByRegion = ldFileByRegion
+        zSnpPieces = set_names(
+            map2(regionIds, panels, .ctwasZSnpAt, gwasSumStats = gwasSumStats),
+            regionIds
+        ),
+        regionInfoPieces = set_names(
+            map(regionIds, .ctwasRegionInfoAt, gwasSumStats = gwasSumStats),
+            regionIds
+        ),
+        snpMap = set_names(
+            map2(
+                regionIds,
+                panels,
+                .ctwasSnpMapAt,
+                gwasSumStats = gwasSumStats
+            ),
+            regionIds
+        ),
+        ldFileByRegion = set_names(ldKeys, regionIds)
     )
 }
 
@@ -604,34 +640,63 @@ assembleCtwasInputs <- function(
     cutoffs,
     globalGwasSnpIds
 ) {
-    weightsList <- list()
-    for (rid in regionIds) {
-        tw <- twasWeights[[rid]]
-        if (is.null(tw)) {
-            next
-        }
-        twMethod <- .ctwasFilterMethod(tw, resolvedMethod)
-        if (is.null(twMethod)) {
-            next
-        }
-        ldPanel <- fp$ldPanelsByRegion[[fp$ldFileByRegion[[rid]]]]
-        blockWeights <- .ctwasBuildWeights(
-            twMethod,
-            ldPanel,
-            fineMappingResult = fineMappingResult,
-            twasWeightCutoff = cutoffs$twasWeightCutoff,
-            csMinCor = cutoffs$csMinCor,
-            minPipCutoff = cutoffs$minPipCutoff,
-            maxNumVariants = cutoffs$maxNumVariants,
-            gwasSnpIds = globalGwasSnpIds,
-            regionSnpIds = fp$snpMap[[rid]]$id
-        )
-        if (length(blockWeights) > 0L) {
-            names(blockWeights) <- str_c(rid, "|", names(blockWeights))
-            weightsList <- c(weightsList, blockWeights)
-        }
+    perRegion <- map(
+        regionIds,
+        .ctwasRegionBlockWeights,
+        twasWeights = twasWeights,
+        fp = fp,
+        resolvedMethod = resolvedMethod,
+        fineMappingResult = fineMappingResult,
+        cutoffs = cutoffs,
+        globalGwasSnpIds = globalGwasSnpIds
+    )
+    .ctwasConcat(compact(perRegion))
+}
+
+# Concatenate per-region lists, empty-safe.
+# @noRd
+.ctwasConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
     }
-    weightsList
+    list_c(pieces)
+}
+
+# One region's block weights, region-qualified, or NULL when the region has no
+# weights for the resolved method.
+# @noRd
+.ctwasRegionBlockWeights <- function(
+    rid,
+    twasWeights,
+    fp,
+    resolvedMethod,
+    fineMappingResult,
+    cutoffs,
+    globalGwasSnpIds
+) {
+    tw <- twasWeights[[rid]]
+    if (is.null(tw)) {
+        return(NULL)
+    }
+    twMethod <- .ctwasFilterMethod(tw, resolvedMethod)
+    if (is.null(twMethod)) {
+        return(NULL)
+    }
+    blockWeights <- .ctwasBuildWeights(
+        twMethod,
+        fp$ldPanelsByRegion[[fp$ldFileByRegion[[rid]]]],
+        fineMappingResult = fineMappingResult,
+        twasWeightCutoff = cutoffs$twasWeightCutoff,
+        csMinCor = cutoffs$csMinCor,
+        minPipCutoff = cutoffs$minPipCutoff,
+        maxNumVariants = cutoffs$maxNumVariants,
+        gwasSnpIds = globalGwasSnpIds,
+        regionSnpIds = fp$snpMap[[rid]]$id
+    )
+    if (length(blockWeights) == 0L) {
+        return(NULL)
+    }
+    set_names(blockWeights, str_c(rid, "|", names(blockWeights)))
 }
 
 # Concatenate the per-region pieces into the ctwas-shape input list.
@@ -701,8 +766,8 @@ assembleCtwasInputs <- function(
 #' @examples
 #' data(ctwasInputsExample)
 #' estCtwasParam(ctwasInputsExample, thin = 1, niterPrefit = 3,
-#'   niter = 10, min_group_size = 1, min_p_single_effect = 0,
-#'   fallbackToPrefit = TRUE)
+#'   niter = 10, fallbackToPrefit = TRUE,
+#'   ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 #' @export
 estCtwasParam <- function(
     inputs,
@@ -748,9 +813,8 @@ estCtwasParam <- function(
     # assemble_region_data does not echo z_gene back, so propagate the
     # precomputed z_gene we passed in (inputs$z_gene is NULL when twasZ was not
     # supplied) so $z_gene resolves to the right entry.
-    inputs$z_gene <- zGene
     c(
-        inputs,
+        list_assign(inputs, z_gene = zGene),
         list(
             region_data = regionData,
             boundary_genes = boundaryGenes,
@@ -996,7 +1060,8 @@ screenCtwasRegions <- function(
 #' inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
 #' est <- estCtwasParam(inp, thin = 1, niterPrefit = 3, niter = 10,
-#'   min_group_size = 1, min_p_single_effect = 0, fallbackToPrefit = TRUE)
+#'   fallbackToPrefit = TRUE,
+#'   ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 #' screened <- screenCtwasRegions(est, L = 5L)
 #' finemapCtwasRegions(screened, L = 5L)
 #' @export
@@ -1033,13 +1098,11 @@ finemapCtwasRegions <- function(
     }
     # Repair cTWAS's molecular_id mislabel (first-"|" split of our composite
     # id).
-    fmRes$finemap_res <- .ctwasFixMolecularId(fmRes$finemap_res)
-    fmRes$susie_alpha_res <- .ctwasFixMolecularId(fmRes$susie_alpha_res)
     list(
         z_gene = screenResult$z_gene,
         param = screenResult$param,
-        finemap_res = fmRes$finemap_res,
-        susie_alpha_res = fmRes$susie_alpha_res,
+        finemap_res = .ctwasFixMolecularId(fmRes$finemap_res),
+        susie_alpha_res = .ctwasFixMolecularId(fmRes$susie_alpha_res),
         region_data = screenResult$region_data,
         boundary_genes = screenResult$boundary_genes,
         screen_res = screenResult$screen_res,
@@ -1128,8 +1191,7 @@ mergeCtwasBoundaryRegions <- function(
         ncore
     )
     fa <- .ctwasMergeDispatch(finemapResult, common, L)
-    userExtra <- ctwasArgs
-    userExtra <- userExtra[setdiff(names(userExtra), names(fa$args))]
+    userExtra <- ctwasArgs[setdiff(names(ctwasArgs), names(fa$args))]
     callArgs <- c(fa$args, userExtra)
     res <- exec(fa$fn, !!!callArgs)
     .ctwasApplyMergeResult(finemapResult, res)
@@ -1190,22 +1252,18 @@ mergeCtwasBoundaryRegions <- function(
 # ctwas actually returned).
 # @noRd
 .ctwasApplyMergeResult <- function(finemapResult, res) {
-    finemapResult$finemap_res <- res$updated_finemap_res
-    finemapResult$susie_alpha_res <- res$updated_susie_alpha_res
-    if (!is.null(res$updated_region_data)) {
-        finemapResult$region_data <- res$updated_region_data
-    }
-    if (!is.null(res$updated_region_info)) {
-        finemapResult$region_info <- res$updated_region_info
-    }
-    if (!is.null(res$updated_LD_map)) {
-        finemapResult$LD_map <- res$updated_LD_map
-    }
-    if (!is.null(res$updated_snp_map)) {
-        finemapResult$snp_map <- res$updated_snp_map
-    }
-    finemapResult$merge_res <- res
-    finemapResult
+    list_assign(
+        finemapResult,
+        finemap_res = res$updated_finemap_res,
+        susie_alpha_res = res$updated_susie_alpha_res,
+        merge_res = res,
+        !!!compact(list(
+            region_data = res$updated_region_data,
+            region_info = res$updated_region_info,
+            LD_map = res$updated_LD_map,
+            snp_map = res$updated_snp_map
+        ))
+    )
 }
 
 # Invoke a ctwas function with a fixed `args` list plus optional `extra`
@@ -1215,7 +1273,7 @@ mergeCtwasBoundaryRegions <- function(
 # @noRd
 .ctwasInvoke <- function(fn, args, extra = list()) {
     if (length(extra) > 0L) {
-        extra <- extra[setdiff(names(extra), names(args))]
+        deduped <- extra[setdiff(names(extra), names(args))]
         # `...` is forwarded uniformly to four different ctwas functions
         # (assemble_region_data / est_param / screen_regions /
         # finemap_regions). Restrict to fn's explicit formals so an arg
@@ -1223,11 +1281,12 @@ mergeCtwasBoundaryRegions <- function(
         # that fn would otherwise forward via its own `...` (e.g. into
         # susie_rss) don't bleed into incompatible downstream functions.
         formalsFn <- try_fetch(names(formals(fn)), error = function(cnd) NULL)
-        if (!is.null(formalsFn)) {
-            explicitFormals <- setdiff(formalsFn, "...")
-            extra <- extra[intersect(names(extra), explicitFormals)]
+        usable <- if (is.null(formalsFn)) {
+            deduped
+        } else {
+            deduped[intersect(names(deduped), setdiff(formalsFn, "..."))]
         }
-        args <- c(args, extra)
+        args <- c(args, usable)
     }
     exec(fn, !!!args)
 }
@@ -1263,9 +1322,10 @@ mergeCtwasBoundaryRegions <- function(
     )
     prefit <- .ctwasInvoke(fitEm, fitArgs, extra)
     adj <- .ctwasApplyThin(prefit$group_prior, prefit$group_size, thin)
-    groupSize <- adj$groupSize
-    if (length(adj$groupPrior) > 0L) {
-        groupSize <- groupSize[names(adj$groupPrior)]
+    groupSize <- if (length(adj$groupPrior) > 0L) {
+        adj$groupSize[names(adj$groupPrior)]
+    } else {
+        adj$groupSize
     }
     list(
         group_prior = adj$groupPrior,
@@ -1293,13 +1353,12 @@ mergeCtwasBoundaryRegions <- function(
     minGene <- if (!is.null(extra$min_gene)) as.integer(extra$min_gene) else 1L
     nGid <- lengths(map(region_data, "gid"))
     nSid <- lengths(map(region_data, "sid"))
-    keep <- rep(TRUE, length(region_data))
-    if (minVar > 0L) {
-        keep <- keep & (nSid + nGid) >= minVar
+    byVar <- if (minVar > 0L) {
+        (nSid + nGid) >= minVar
+    } else {
+        rep(TRUE, length(region_data))
     }
-    if (minGene > 0L) {
-        keep <- keep & nGid >= minGene
-    }
+    keep <- if (minGene > 0L) byVar & nGid >= minGene else byVar
     fitRegionData <- region_data[keep]
     if (length(fitRegionData) == 0L) {
         abort("No regions selected!")
@@ -1310,15 +1369,23 @@ mergeCtwasBoundaryRegions <- function(
 # Rescale the SNP group prior / size by `thin` (the SNP subsampling factor).
 # @noRd
 .ctwasApplyThin <- function(groupPrior, groupSize, thin) {
-    if (thin != 1) {
-        if (is_in("SNP", names(groupPrior))) {
-            groupPrior["SNP"] <- groupPrior["SNP"] * thin
-        }
-        if (is_in("SNP", names(groupSize))) {
-            groupSize["SNP"] <- groupSize["SNP"] / thin
-        }
+    if (thin == 1) {
+        return(list(groupPrior = groupPrior, groupSize = groupSize))
     }
-    list(groupPrior = groupPrior, groupSize = groupSize)
+    list(
+        groupPrior = .ctwasScaleSnpGroup(groupPrior, thin),
+        groupSize = .ctwasScaleSnpGroup(groupSize, 1 / thin)
+    )
+}
+
+# Scale the "SNP" entry of a per-group vector, leaving the molecular groups
+# alone. A vector without a SNP group passes through unchanged.
+# @noRd
+.ctwasScaleSnpGroup <- function(groups, factor) {
+    if (!is_in("SNP", names(groups))) {
+        return(groups)
+    }
+    replace(groups, "SNP", groups[["SNP"]] * factor)
 }
 
 # =============================================================================
@@ -1464,31 +1531,37 @@ mergeCtwasBoundaryRegions <- function(
 # becomes a 0-width chrUn sentinel, which matches no anchor and so yields the
 # documented "NA when the anchor falls in no block".
 # @noRd
-.ctwasBlockGrFromIds <- function(ids) {
-    n <- length(ids)
-    chrom <- character(n)
-    start <- integer(n)
-    end <- integer(n)
-    for (i in seq_len(n)) {
-        g <- try_fetch(
-            asGranges(str_replace(
-                as.character(ids[[i]]),
-                "_([0-9]+)_([0-9]+)$",
-                ":\\1-\\2"
-            )),
-            error = function(cnd) NULL
-        )
-        if (!is.null(g) && length(g) >= 1L) {
-            chrom[[i]] <- as.character(GenomicRanges::seqnames(g))[[1L]]
-            start[[i]] <- GenomicRanges::start(g)[[1L]]
-            end[[i]] <- GenomicRanges::end(g)[[1L]]
-        } else {
-            chrom[[i]] <- "chrUn"
-            start[[i]] <- 1L
-            end[[i]] <- 0L
-        }
+# One block id parsed into chrom/start/end, or the unplaced sentinel when it
+# does not parse as a range.
+# @noRd
+.ctwasBlockCoords <- function(id) {
+    g <- try_fetch(
+        asGranges(str_replace(
+            as.character(id),
+            "_([0-9]+)_([0-9]+)$",
+            ":\\1-\\2"
+        )),
+        error = function(cnd) NULL
+    )
+    if (is.null(g) || length(g) < 1L) {
+        return(list(chrom = "chrUn", start = 1L, end = 0L))
     }
-    GenomicRanges::GRanges(chrom, IRanges::IRanges(start = start, end = end))
+    list(
+        chrom = as.character(GenomicRanges::seqnames(g))[[1L]],
+        start = GenomicRanges::start(g)[[1L]],
+        end = GenomicRanges::end(g)[[1L]]
+    )
+}
+
+.ctwasBlockGrFromIds <- function(ids) {
+    coords <- map(ids, .ctwasBlockCoords)
+    GenomicRanges::GRanges(
+        map_chr(coords, "chrom"),
+        IRanges::IRanges(
+            start = map_int(coords, "start"),
+            end = map_int(coords, "end")
+        )
+    )
 }
 
 # Place each gene (row) of a flat weight source into its home LD block. The
@@ -1564,6 +1637,22 @@ mergeCtwasBoundaryRegions <- function(
 # that block's GWAS LD sketch (the panel its weights are harmonized against, and
 # what the downstream match-check expects).
 # @noRd
+# The genes homed into region `rid`, carrying that region's LD sketch, or
+# NULL when nothing landed there. `slot<-` applied as a function returns a
+# copy rather than writing into the subset in place.
+# @noRd
+.ctwasBucketForRegion <- function(rid, combined, home, gwasSumStats) {
+    idx <- which(home == rid)
+    if (length(idx) == 0L) {
+        return(NULL)
+    }
+    `slot<-`(
+        combined[idx, ],
+        "ldSketch",
+        value = getLdSketch(gwasSumStats[[rid]])
+    )
+}
+
 .ctwasBucketWeights <- function(weights, gwasSumStats) {
     combined <- .ctwasCombineWeightSources(weights)
     # Placement anchors on the GENE's own position, not on a stored analysis
@@ -1593,16 +1682,16 @@ mergeCtwasBoundaryRegions <- function(
         )
         warn(msg)
     }
-    out <- list()
-    for (rid in names(gwasSumStats)) {
-        idx <- which(home == rid)
-        if (length(idx) == 0L) {
-            next
-        }
-        sub <- combined[idx, ]
-        sub@ldSketch <- getLdSketch(gwasSumStats[[rid]])
-        out[[rid]] <- sub
-    }
+    out <- compact(set_names(
+        map(
+            names(gwasSumStats),
+            .ctwasBucketForRegion,
+            combined = combined,
+            home = home,
+            gwasSumStats = gwasSumStats
+        ),
+        names(gwasSumStats)
+    ))
     if (length(out) == 0L) {
         msg <- glue(
             "assembleCtwasInputs: no gene placed into any LD block. ",
@@ -1678,8 +1767,10 @@ mergeCtwasBoundaryRegions <- function(
     # Read the collection's own `study` column. map() over a GwasSumStats
     # iterates its ELEMENTS (per-block GRanges), which carry no study, so it
     # would silently yield NA for every block.
-    studies <- unique(.ctwasStudyChr(gwasSumStats))
-    studies <- studies[!is.na(studies) & str_length(studies) > 0L]
+    allStudies <- unique(.ctwasStudyChr(gwasSumStats))
+    studies <- allStudies[
+        !is.na(allStudies) & str_length(allStudies) > 0L
+    ]
     if (length(studies) == 0L) {
         return(NA_character_)
     }
@@ -1743,8 +1834,14 @@ mergeCtwasBoundaryRegions <- function(
     }
     isGene <- lengths(str_split(as.character(df$id), "\\|")) >= 5L
     if (any(isGene)) {
-        df$molecular_id[isGene] <-
-            .ctwasParseGeneIds(as.character(df$id)[isGene])$trait
+        return(mutate(
+            df,
+            molecular_id = replace(
+                .data$molecular_id,
+                isGene,
+                .ctwasParseGeneIds(as.character(df$id)[isGene])$trait
+            )
+        ))
     }
     df
 }
@@ -1880,8 +1977,10 @@ mergeCtwasBoundaryRegions <- function(
             )
         )
     )
-    mcols(gr) <- S4Vectors::DataFrame(df, check.names = FALSE)
-    gr[placed]
+    S4Vectors::`mcols<-`(
+        gr,
+        value = S4Vectors::DataFrame(df, check.names = FALSE)
+    )[placed]
 }
 
 # @noRd
@@ -1943,8 +2042,10 @@ mergeCtwasBoundaryRegions <- function(
             end = as.integer(ri$stop)
         )
     )
-    mcols(gr) <- S4Vectors::DataFrame(ri, check.names = FALSE)
-    gr
+    S4Vectors::`mcols<-`(
+        gr,
+        value = S4Vectors::DataFrame(ri, check.names = FALSE)
+    )
 }
 
 # Decompose one cTWAS run (a `finemapCtwasRegions` output) into per-context
@@ -1975,7 +2076,7 @@ mergeCtwasBoundaryRegions <- function(
     }
     fmDf <- .ctwasAsDf(runResult$finemap_res)
     saDf <- .ctwasAsDf(runResult$susie_alpha_res)
-    rows <- map(
+    contextRows <- map(
         contexts,
         .ctwasContextRow,
         parsed = parsed,
@@ -1986,19 +2087,12 @@ mergeCtwasBoundaryRegions <- function(
         saDf = saDf,
         runResult = runResult
     )
-    if (keepSnps) {
-        snpRow <- .ctwasSnpRow(
-            gwasStudy,
-            method,
-            jointStr,
-            fmDf,
-            saDf,
-            runResult
-        )
-        if (!is.null(snpRow)) {
-            rows <- c(rows, list(snpRow))
-        }
+    snpRow <- if (!keepSnps) {
+        NULL
+    } else {
+        .ctwasSnpRow(gwasStudy, method, jointStr, fmDf, saDf, runResult)
     }
+    rows <- c(contextRows, compact(list(snpRow)))
     rows
 }
 
@@ -2094,8 +2188,8 @@ mergeCtwasBoundaryRegions <- function(
     if (is.null(zSnp) || is.null(zSnp$study)) {
         return(NA_character_)
     }
-    s <- unique(as.character(zSnp$study))
-    s <- s[!is.na(s) & str_length(s) > 0L]
+    allStudies <- unique(as.character(zSnp$study))
+    s <- allStudies[!is.na(allStudies) & str_length(allStudies) > 0L]
     if (length(s) == 0L) {
         return(NA_character_)
     }
@@ -2179,9 +2273,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     # Row subset carries every column forward (joint* / region / ...); the old
     # hand-listed rebuild silently dropped them.
-    out <- tw[keep, ]
-    out@ldSketch <- getLdSketch(tw)
-    out
+    methods::initialize(tw[keep, ], ldSketch = getLdSketch(tw))
 }
 
 # Build the per-variant Z data.frame ctwas expects from a GwasSumStats.
@@ -2223,31 +2315,45 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (length(m$idxA) == 0L) {
         return(zSnp)
     }
-    zSnp$id[m$idxA] <- as.character(panelIds)[m$idxB]
+    relabelled <- mutate(
+        zSnp,
+        id = replace(.data$id, m$idxA, as.character(panelIds)[m$idxB])
+    )
     flip <- m$idxA[m$sign < 0]
-    if (length(flip) > 0L) {
-        zSnp$z[flip] <- -zSnp$z[flip]
-        swapped <- zSnp$A1[flip]
-        zSnp$A1[flip] <- zSnp$A2[flip]
-        zSnp$A2[flip] <- swapped
+    if (length(flip) == 0L) {
+        return(relabelled)
     }
-    zSnp
+    # A swapped variant counts the other allele: negate z and exchange the
+    # allele columns. Both replacements read the ORIGINAL frame, so the pair
+    # swaps rather than each taking the other's already-swapped value.
+    mutate(
+        relabelled,
+        z = replace(.data$z, flip, -relabelled$z[flip]),
+        A1 = replace(.data$A1, flip, relabelled$A2[flip]),
+        A2 = replace(.data$A2, flip, relabelled$A1[flip])
+    )
+}
+
+# @noRd
+.ctwasZSnpPiece <- function(i, gwasSumStats) {
+    df <- .entryToSumstatDf(gwasSumStats[[i]], keepChrPrefix = FALSE)
+    tibble(
+        id = df$variant_id,
+        chrom = as.integer(df$chrom),
+        pos = df$pos,
+        A1 = df$A1,
+        A2 = df$A2,
+        z = df$z,
+        study = as.character(gwasSumStats$study)[[i]]
+    )
 }
 
 .ctwasBuildZSnp <- function(gwasSumStats, panelIds) {
-    pieces <- list()
-    for (i in seq_len(nrow(gwasSumStats))) {
-        df <- .entryToSumstatDf(gwasSumStats[[i]], keepChrPrefix = FALSE)
-        pieces[[i]] <- tibble(
-            id = df$variant_id,
-            chrom = as.integer(df$chrom),
-            pos = df$pos,
-            A1 = df$A1,
-            A2 = df$A2,
-            z = df$z,
-            study = as.character(gwasSumStats$study)[[i]]
-        )
-    }
+    pieces <- map(
+        seq_len(nrow(gwasSumStats)),
+        .ctwasZSnpPiece,
+        gwasSumStats = gwasSumStats
+    )
     .ctwasHarmonizeZToPanel(bind_rows(pieces), panelIds)
 }
 
@@ -2255,6 +2361,31 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # (min/max BP per chromosome). The sketch is assumed to cover exactly
 # one block.
 # @noRd
+# @noRd
+.ctwasEntryPositions <- function(i, gss) {
+    gr <- gss[[i]]
+    list(
+        pos = as.integer(GenomicRanges::start(gr)),
+        chrs = as.character(GenomicRanges::seqnames(gr))
+    )
+}
+
+# @noRd
+.ctwasConcatInt <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(integer(0))
+    }
+    list_c(pieces)
+}
+
+# @noRd
+.ctwasConcatChr <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(character(0))
+    }
+    list_c(pieces)
+}
+
 .ctwasBuildSingleRegionInfo <- function(regionId, gss) {
     # Derive the block's [start, stop] from the GWAS variants actually in this
     # block (the GwasSumStats entry GRanges) -- NOT the LD sketch. When many
@@ -2263,13 +2394,9 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     # would collapse to the same whole-chromosome [start, stop] and every SNP
     # would be assigned to every region (inflating SNP group_size N-fold and
     # diluting the gene prior to ~0).
-    pos <- integer(0)
-    chrs <- character(0)
-    for (i in seq_len(nrow(gss))) {
-        gr <- gss[[i]]
-        pos <- c(pos, as.integer(GenomicRanges::start(gr)))
-        chrs <- c(chrs, as.character(GenomicRanges::seqnames(gr)))
-    }
+    entries <- map(seq_len(nrow(gss)), .ctwasEntryPositions, gss = gss)
+    pos <- .ctwasConcatInt(map(entries, "pos"))
+    chrs <- .ctwasConcatChr(map(entries, "chrs"))
     # Emptiness is checked FIRST: `pos` and `chrs` are filled from the same
     # GRanges in the same loop, so an empty block has zero chromosomes too,
     # and the chromosome check below would report it as "spans multiple
@@ -2354,9 +2481,11 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         seq_len(nrow(snpInfoCtwas)),
         meanImpute = TRUE
     )
-    R <- computeLd(geno, method = "sample")
     snpIds <- snpInfoCtwas$id
-    dimnames(R) <- list(snpIds, snpIds)
+    R <- `dimnames<-`(
+        computeLd(geno, method = "sample"),
+        list(snpIds, snpIds)
+    )
     variance <- set_names(apply(geno, 2, stats::var, na.rm = TRUE), snpIds)
     list(R = R, snpInfo = snpInfoCtwas, variance = variance)
 }
@@ -2435,10 +2564,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 ) {
     # Fields are READ with `[[`: `$` on a list falls back to prefix matching,
     # so `fits$mu` would silently return `mu2` on a fit that has no `mu`.
-    alpha <- fits[["alpha"]]
+    rawAlpha <- fits[["alpha"]]
     mu <- fits[["mu"]]
     xCol <- fits[["X_column_scale_factors"]]
-    if (is.null(alpha) || is.null(mu) || is.null(xCol)) {
+    if (is.null(rawAlpha) || is.null(mu) || is.null(xCol)) {
         return(NULL)
     }
     # susieInf / susieAsh carry an infinitesimal term: coef.susie is
@@ -2449,7 +2578,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (!is.null(fits[["theta"]]) || !is.null(fits[["omega_weights"]])) {
         return(NULL)
     }
-    alpha <- as.matrix(alpha)
+    alpha <- as.matrix(rawAlpha)
     if (
         ncol(alpha) != length(origVids) ||
             ncol(mu) != length(origVids) ||
@@ -2461,16 +2590,16 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     # Per-variant sign flip applied by allele harmonization. NaN signs
     # (origW == 0) default to +1.
-    signFlip <- sign(harmonizedW / origW[keptIdx])
-    signFlip[!is.finite(signFlip)] <- 1
+    rawSign <- sign(harmonizedW / origW[keptIdx])
+    signFlip <- replace(rawSign, !is.finite(rawSign), 1)
     newAlpha <- .ctwasRenormAlpha(alpha, keptIdx)
     if (is.null(newAlpha)) {
         return(NULL)
     }
     muSub <- sweep(mu[, keptIdx, drop = FALSE], 2L, signFlip, `*`)
-    xColSub <- xCol[keptIdx]
+    rawScale <- xCol[keptIdx]
     # Guard against zero scale factors (shouldn't happen in practice).
-    xColSub[xColSub == 0] <- 1
+    xColSub <- replace(rawScale, rawScale == 0, 1)
     as.numeric(colSums(newAlpha * muSub) / xColSub)
 }
 
@@ -2557,11 +2686,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         twasWeights = twasWeights,
         ctx = ctx
     ))
-    out <- list()
-    for (g in genes) {
-        out[[g$key]] <- g$entry
-    }
-    out
+    # Later genes overwrite an earlier one sharing a key, which is what the
+    # `out[[g$key]] <- ...` loop did.
+    keyed <- set_names(map(genes, "entry"), map_chr(genes, "key"))
+    keyed[!duplicated(names(keyed), fromLast = TRUE)]
 }
 
 # Panel variant info in the (chrom/pos/A2/A1/variant_id) frame harmonizeAlleles
@@ -2630,33 +2758,32 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # genotype variance from the LD panel)). Returns the adjusted weight vector.
 # @noRd
 .ctwasAdjustGeneWeights <- function(parts, aligned, ldPanel) {
-    w <- aligned$w
     fits <- .rowFits(parts)
     shrank <- length(aligned$keptIdx) < length(aligned$origVids)
-    if (.ctwasIsSusieFit(fits) && shrank) {
-        renorm <- .ctwasRenormalizeSusieWeights(
+    # A NULL renormalization means the fit could not be re-keyed onto the
+    # kept variants, so the harmonized weights stand as they are.
+    renorm <- if (.ctwasIsSusieFit(fits) && shrank) {
+        .ctwasRenormalizeSusieWeights(
             fits,
             origVids = aligned$origVids,
             origW = aligned$origW,
             keptIdx = aligned$keptIdx,
-            harmonizedW = w
+            harmonizedW = aligned$w
         )
-        if (!is.null(renorm)) {
-            w <- renorm
-        }
     }
-    if (!.rowStandardized(parts)) {
-        varLookup <- ldPanel$variance[aligned$vids]
-        if (anyNA(varLookup)) {
-            msg <- glue(
-                ".ctwasBuildWeights: missing genotype variance for ",
-                "{sum(is.na(varLookup))} variant(s) in the LD panel."
-            )
-            abort(msg)
-        }
-        w <- w * sqrt(varLookup)
+    renormalized <- renorm %||% aligned$w
+    if (.rowStandardized(parts)) {
+        return(renormalized)
     }
-    w
+    varLookup <- ldPanel$variance[aligned$vids]
+    if (anyNA(varLookup)) {
+        msg <- glue(
+            ".ctwasBuildWeights: missing genotype variance for ",
+            "{sum(is.na(varLookup))} variant(s) in the LD panel."
+        )
+        abort(msg)
+    }
+    renormalized * sqrt(varLookup)
 }
 
 # The ctwas per-gene weight entry (weight matrix, LD submatrix, chrom/BP span,
@@ -2790,13 +2917,14 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(fineMappingResult)) {
         return(NULL)
     }
-    selectors <- list(study = study, method = method)
-    if (is_in("context", .tupleColumnNames(fineMappingResult))) {
-        selectors$context <- context
-    }
-    if (is_in("trait", .tupleColumnNames(fineMappingResult))) {
-        selectors$trait <- trait
-    }
+    cols <- .tupleColumnNames(fineMappingResult)
+    selectors <- c(
+        list(study = study, method = method),
+        compact(list(
+            context = if (is_in("context", cols)) context,
+            trait = if (is_in("trait", cols)) trait
+        ))
+    )
     selArgs <- c(list(fineMappingResult), selectors)
     entry <- try_fetch(
         exec(getFineMappingResult, !!!selArgs),
@@ -2821,25 +2949,39 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # `<method>_<idx>` where idx == 0 means "not in any CS"; cs_95_purity (when
 # present) broadcasts one purity value across a CS's rows.
 # @noRd
+# One credible set's member variants and its purity.
+# @noRd
+.ctwasCsEntry <- function(k, tl, csIdx, keepIdx) {
+    inCs <- csIdx == k & keepIdx
+    purity <- if (is_in("cs_95_purity", names(tl))) {
+        as.numeric(tl$cs_95_purity[which(inCs)[1L]])
+    } else {
+        NA_real_
+    }
+    list(members = as.character(tl$variant_id)[inCs], purity = purity)
+}
+
 .ctwasCsMembership <- function(tl) {
-    csMembers <- list()
-    csPurity <- numeric(0)
     if (!is_in("cs_95", names(tl))) {
-        return(list(csMembers = csMembers, csPurity = csPurity))
+        return(list(csMembers = list(), csPurity = numeric(0)))
     }
     csIdx <- suppressWarnings(as.integer(str_remove(tl$cs_95, "^.*_")))
     keepIdx <- !is.na(csIdx) & csIdx > 0L
-    for (k in sort(unique(csIdx[keepIdx]))) {
-        inCs <- csIdx == k & keepIdx
-        csMembers[[length(csMembers) + 1L]] <- as.character(tl$variant_id)[inCs]
-        p <- if (is_in("cs_95_purity", names(tl))) {
-            as.numeric(tl$cs_95_purity[which(inCs)[1L]])
+    entries <- map(
+        sort(unique(csIdx[keepIdx])),
+        .ctwasCsEntry,
+        tl = tl,
+        csIdx = csIdx,
+        keepIdx = keepIdx
+    )
+    list(
+        csMembers = map(entries, "members"),
+        csPurity = if (length(entries) == 0L) {
+            numeric(0)
         } else {
-            NA_real_
+            map_dbl(entries, "purity")
         }
-        csPurity <- c(csPurity, p)
-    }
-    list(csMembers = csMembers, csPurity = csPurity)
+    )
 }
 
 # Apply the four trimCtwasVariants filters to one gene's (vids, w)
@@ -2869,30 +3011,34 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     # Step 1: magnitude.
     if (twasWeightCutoff > 0) {
         magKeep <- !is.na(w) & abs(w) >= twasWeightCutoff
-        vids <- vids[magKeep]
-        w <- w[magKeep]
-        if (length(vids) == 0L) {
+        keptVids <- vids[magKeep]
+        keptW <- w[magKeep]
+        if (length(keptVids) == 0L) {
             return(NULL)
         }
+    } else {
+        keptVids <- vids
+        keptW <- w
     }
     # Steps 2-3: PIP / CS rescue (only when fineMappingResult was passed).
     # Relabel first: the auxiliaries are keyed in the fine-mapping result's
     # frame, the vids in the panel's, and every join from here on is exact.
-    finemapAux <- .ctwasRelabelFinemapAux(finemapAux, vids)
-    mustKeep <- .ctwasMustKeep(vids, finemapAux, csMinCor, minPipCutoff)
+    finemapAux <- .ctwasRelabelFinemapAux(finemapAux, keptVids)
+    mustKeep <- .ctwasMustKeep(keptVids, finemapAux, csMinCor, minPipCutoff)
     # Step 4: cap, keeping must-keep variants first.
-    if (length(vids) > maxNumVariants && is.finite(maxNumVariants)) {
-        capped <- .ctwasCapVariants(
-            vids,
-            w,
+    capping <- length(keptVids) > maxNumVariants && is.finite(maxNumVariants)
+    capped <- if (!capping) {
+        list(vids = keptVids, w = keptW)
+    } else {
+        .ctwasCapVariants(
+            keptVids,
+            keptW,
             mustKeep,
             finemapAux,
             maxNumVariants
         )
-        vids <- capped$vids
-        w <- capped$w
     }
-    list(vids = vids, w = w)
+    list(vids = capped$vids, w = capped$w)
 }
 
 # Move a set of variant ids into the frame `vids` uses, leaving ids with no
@@ -2903,10 +3049,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(ids)
     }
     m <- .ctwasMatchToPanel(ids, vids)
-    if (length(m$idxA) > 0L) {
-        ids[m$idxA] <- vids[m$idxB]
+    if (length(m$idxA) == 0L) {
+        return(ids)
     }
-    ids
+    replace(ids, m$idxA, vids[m$idxB])
 }
 
 # Relabel a gene's fine-mapping auxiliaries into the weight/panel frame.
@@ -2926,63 +3072,78 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(finemapAux)) {
         return(NULL)
     }
-    if (!is.null(finemapAux$pip)) {
-        names(finemapAux$pip) <- .ctwasRelabelIds(
-            names(finemapAux$pip),
-            vids
+    relabelled <- if (is.null(finemapAux$pip)) {
+        finemapAux
+    } else {
+        list_assign(
+            finemapAux,
+            pip = set_names(
+                finemapAux$pip,
+                .ctwasRelabelIds(names(finemapAux$pip), vids)
+            )
         )
     }
-    if (length(finemapAux$csMembers) > 0L) {
-        finemapAux$csMembers <- map(
-            finemapAux$csMembers,
-            .ctwasRelabelIds,
-            vids = vids
-        )
+    if (length(finemapAux$csMembers) == 0L) {
+        return(relabelled)
     }
-    finemapAux
+    list_assign(
+        relabelled,
+        csMembers = map(finemapAux$csMembers, .ctwasRelabelIds, vids = vids)
+    )
 }
 
 # Variants that must survive the cap: members of any high-purity (>= csMinCor)
 # credible set, plus any with PIP > minPipCutoff. Empty when no finemapAux.
 # @noRd
+# Variants rescued by credible set `k`, when that set is pure enough.
+# @noRd
+.ctwasCsRescued <- function(k, finemapAux, vids, csMinCor) {
+    if (is.na(finemapAux$csPurity[k]) || finemapAux$csPurity[k] < csMinCor) {
+        return(character(0))
+    }
+    intersect(finemapAux$csMembers[[k]], vids)
+}
+
 .ctwasMustKeep <- function(vids, finemapAux, csMinCor, minPipCutoff) {
-    mustKeep <- character(0)
     if (is.null(finemapAux)) {
-        return(mustKeep)
+        return(character(0))
     }
-    if (length(finemapAux$csMembers) > 0L && csMinCor > 0) {
-        for (k in seq_along(finemapAux$csMembers)) {
-            if (
-                !is.na(finemapAux$csPurity[k]) &&
-                    finemapAux$csPurity[k] >= csMinCor
-            ) {
-                mustKeep <- union(
-                    mustKeep,
-                    intersect(finemapAux$csMembers[[k]], vids)
-                )
-            }
-        }
+    fromCs <- if (length(finemapAux$csMembers) > 0L && csMinCor > 0) {
+        map(
+            seq_along(finemapAux$csMembers),
+            .ctwasCsRescued,
+            finemapAux = finemapAux,
+            vids = vids,
+            csMinCor = csMinCor
+        )
+    } else {
+        list()
     }
-    if (!is.null(finemapAux$pip) && minPipCutoff > 0) {
+    fromPip <- if (!is.null(finemapAux$pip) && minPipCutoff > 0) {
         hits <- names(finemapAux$pip)[finemapAux$pip > minPipCutoff]
-        mustKeep <- union(mustKeep, intersect(hits, vids))
+        intersect(hits, vids)
+    } else {
+        character(0)
     }
-    mustKeep
+    # union() folded over the pieces, so each variant appears once and in
+    # first-rescued order -- the same thing the repeated unions produced.
+    reduce(c(fromCs, list(fromPip)), union, .init = character(0))
 }
 
 # Cap to maxNumVariants: must-keep variants first, then fill by descending PIP
 # (falling back to |w| for variants the PIP table doesn't cover).
 # @noRd
 .ctwasCapVariants <- function(vids, w, mustKeep, finemapAux, maxNumVariants) {
-    priorities <- if (!is.null(finemapAux) && !is.null(finemapAux$pip)) {
+    fromPip <- if (!is.null(finemapAux) && !is.null(finemapAux$pip)) {
         unname(finemapAux$pip[vids])
     } else {
         NULL
     }
-    if (is.null(priorities) || all(is.na(priorities))) {
-        priorities <- abs(w)
+    # No usable PIPs at all -> rank on |weight|; otherwise fill only the gaps.
+    priorities <- if (is.null(fromPip) || all(is.na(fromPip))) {
+        abs(w)
     } else {
-        priorities[is.na(priorities)] <- abs(w)[is.na(priorities)]
+        replace(fromPip, is.na(fromPip), abs(w)[is.na(fromPip)])
     }
     isMust <- is_in(vids, mustKeep)
     ord <- order(!isMust, -priorities)
@@ -3037,9 +3198,15 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(payload)
     }
     keyMap <- set_names(resolved, stored)
-    payload$LD_map$LD_file <- unname(resolved)
-    payload$LD_map$SNP_file <- unname(resolved)
-    .ctwasRekeyLdLoaders(payload, keyMap)
+    rekeyed <- list_assign(
+        payload,
+        LD_map = list_assign(
+            payload$LD_map,
+            LD_file = unname(resolved),
+            SNP_file = unname(resolved)
+        )
+    )
+    .ctwasRekeyLdLoaders(rekeyed, keyMap)
 }
 
 # Only "pecotmr://" tokens move; an ordinary path is the caller's own and is
@@ -3061,10 +3228,15 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(payload)
     }
     hit <- is_in(names(panels), names(keyMap))
-    names(panels)[hit] <- unname(keyMap[names(panels)[hit]])
-    payload$LD_loader_fun <- .ctwasMultiBlockLdLoader(panels)
-    payload$snpinfo_loader_fun <- .ctwasMultiBlockSnpInfoLoader(panels)
-    payload
+    rekeyed <- `names<-`(
+        panels,
+        replace(names(panels), hit, unname(keyMap[names(panels)[hit]]))
+    )
+    list_assign(
+        payload,
+        LD_loader_fun = .ctwasMultiBlockLdLoader(rekeyed),
+        snpinfo_loader_fun = .ctwasMultiBlockSnpInfoLoader(rekeyed)
+    )
 }
 
 # The panel cache the loader closures were built over, or NULL when the
@@ -3099,8 +3271,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     # Published explicitly so .ctwasCachedPanels can recover the cache from a
     # loader we built, instead of looking the name up inside the closure's
     # environment.
-    attr(fn, "ldPanelsByRegion") <- ldPanelsByRegion
-    fn
+    `attr<-`(fn, "ldPanelsByRegion", ldPanelsByRegion)
 }
 
 # Multi-block SNP-info loader for ctwas. Mirrors the LD loader.
@@ -3156,15 +3327,22 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # the block's GWAS variants (intersected against the cached panel) so
 # snp_map[[region_id]] is sized to the block, not the whole panel.
 # @noRd
-.ctwasSnpInfoForGwasBlock <- function(gwasSumStats, panelSnpInfo) {
-    blockIds <- character(0)
-    for (i in seq_len(nrow(gwasSumStats))) {
-        mc <- S4Vectors::mcols(gwasSumStats[[i]])
-        if (is_in("SNP", colnames(mc))) {
-            blockIds <- c(blockIds, as.character(mc$SNP))
-        }
+# One entry's variant ids, or none when it does not carry a SNP column.
+# @noRd
+.ctwasEntrySnpIds <- function(i, gwasSumStats) {
+    mc <- S4Vectors::mcols(gwasSumStats[[i]])
+    if (!is_in("SNP", colnames(mc))) {
+        return(character(0))
     }
-    blockIds <- unique(blockIds)
+    as.character(mc$SNP)
+}
+
+.ctwasSnpInfoForGwasBlock <- function(gwasSumStats, panelSnpInfo) {
+    blockIds <- unique(.ctwasConcatChr(map(
+        seq_len(nrow(gwasSumStats)),
+        .ctwasEntrySnpIds,
+        gwasSumStats = gwasSumStats
+    )))
     if (length(blockIds) == 0L) {
         return(panelSnpInfo[FALSE, , drop = FALSE])
     }

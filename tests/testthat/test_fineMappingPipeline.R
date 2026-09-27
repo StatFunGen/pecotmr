@@ -105,7 +105,7 @@ context("fineMappingPipeline")
 ) {
     gh <- .fmp_makeHandle()
     phen <- setNames(
-        lapply(contexts, function(.) .fmp_makeSe(traits = traits)),
+        map(contexts, function(.) .fmp_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -1405,7 +1405,10 @@ test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake metho
         coverage = 0.95,
         verbose = 0
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
     expect_setequal(colnames(cv$samplePartition), c("Sample", "Fold"))
     # Keyed by the TWAS snake method name (adapter methodKey base).
     expect_true("susie_predicted" %in% names(cv$prediction))
@@ -4019,7 +4022,10 @@ test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitte
         coverage = 0.95,
         verbose = 0
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
     expect_true("mvsusie_performance" %in% names(cv$performance))
     expect_equal(dim(cv$prediction[["mvsusie_predicted"]]), c(n, R))
 })
@@ -4192,7 +4198,10 @@ test_that(".fmWeightsCv covers per-fold prior, NULL-weights, and no-overlap bran
         verbose = 0,
         mvPriorCv = list("1" = list(priorVariance = diag(2)))
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
 })
 
 test_that("fineMappingPipeline(QtlSumStats): susieInf RSS chain (mocked)", {

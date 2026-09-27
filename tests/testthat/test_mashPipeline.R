@@ -239,10 +239,9 @@ test_that("updateMashModelCov drops dropped conditions + resizes remaining cov m
         samples = c("brain", "blood")
     )
     expect_false("muscle" %in% names(m2$fitted_g$Ulist))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         m2$fitted_g$Ulist,
-        function(x) all(dim(x) == c(2L, 2L)),
-        logical(1)
+        function(x) all(dim(x) == c(2L, 2L))
     )))
     expect_false(any(grepl("muscle", names(m2$fitted_g$pi))))
     # Brain matrix has a single 1 at the brain position (the first of the
@@ -348,10 +347,9 @@ test_that("mashPipeline runs end-to-end on qtlSumStatsMulticontextExample", {
     expect_type(res$U, "list")
     expect_gt(length(res$U), 0L)
     # Every covariance matrix is 3x3 (one row/col per context)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_type(res$w, "double")
     expect_equal(sum(res$w), 1, tolerance = 1e-6)
@@ -588,10 +586,9 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
     ))
     expect_named(res, c("U", "w"))
     expect_gt(length(res$U), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_equal(sum(res$w), 1, tolerance = 1e-6)
 })
@@ -890,10 +887,9 @@ test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
     ))
     expect_named(pc, c("U", "w", "loglik"))
     expect_gt(length(pc$U), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         pc$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
     expect_null(pc$loglik)
@@ -995,10 +991,9 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
         )
     ))
     expect_gt(length(pc$U), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         pc$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
 })
@@ -1058,10 +1053,9 @@ test_that("mashCovarianceComponents builds a single requested component", {
         )
     ))
     expect_gt(length(fl), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         fl,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
 })
 

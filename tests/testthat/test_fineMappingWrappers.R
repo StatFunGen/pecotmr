@@ -642,7 +642,7 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
         mu2 = mu2
     )
 
-    cs_tables <- lapply(names(cs_at_cov), function(cov_str) {
+    cs_tables <- map(names(cs_at_cov), function(cov_str) {
         cs_list <- cs_at_cov[[cov_str]]
         if (is.null(cs_list)) {
             cs_list <- list()
@@ -672,7 +672,7 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
                 purity = purity_df
             ),
             cs_corr = if (n_cs > 0L) {
-                lapply(seq_len(n_cs), function(i) {
+                map(seq_len(n_cs), function(i) {
                     matrix(c(1, cs_purity_value, cs_purity_value, 1), nrow = 2)
                 })
             } else {
@@ -2760,11 +2760,17 @@ test_that("mvsusieRssWeights refuses to fine-map when no fit is supplied", {
     )
 })
 
-test_that("mvsusieRssWeights errors on single-context stat$z", {
+test_that("mvsusieRssWeights demands a fit before anything else", {
     skip_if_not_installed("mvsusieR")
     f <- .rrwStatLd()
     oneCol <- list(z = matrix(f$stat$z, ncol = 1), n = f$n)
-    expect_error(mvsusieRssWeights(oneCol, f$LD), ">= 2 columns")
+    # The old ">= 2 columns" guard validated *fitting* inputs and left with
+    # the fitting branch; with no fit supplied, the missing fit is the
+    # fundamental problem and `stat` is not read at all.
+    expect_error(
+        mvsusieRssWeights(oneCol, f$LD),
+        "`mvsusieRssFit` is required"
+    )
 })
 
 # ---- mvsusieWeights ----

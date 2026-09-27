@@ -57,7 +57,6 @@ make these objects. In this example the object is `GwasSumStats` object called
 ```{r run-qc, eval=FALSE}
 gws_qcd <- summaryStatsQc(
     gws,
-    useDbsnpRefCheck = FALSE, # opt-in to MungeSumstats dbSNP checks
     removeIndels = FALSE,
     removeStrandAmbiguous = TRUE,
     mafCutoff = 0, # 0 = off; > 0 requires MAF column

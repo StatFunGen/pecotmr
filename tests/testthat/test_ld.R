@@ -242,7 +242,7 @@ test_that("partitionLdMatrix properly merges small blocks", {
     )
 
     # Check if merged blocks are larger than min_block_size
-    block_sizes <- sapply(partitioned$ldMatrices, nrow)
+    block_sizes <- map_int(partitioned$ldMatrices, nrow)
     expect_true(all(
         block_sizes >= min_block_size |
             block_sizes == length(getVariantIds(ld_data))
@@ -277,7 +277,7 @@ test_that("partitionLdMatrix respects max_merged_block_size", {
     )
 
     # Check if no block exceeds max_block_size
-    block_sizes <- sapply(partitioned$ldMatrices, nrow)
+    block_sizes <- map_int(partitioned$ldMatrices, nrow)
     expect_true(all(block_sizes <= max_block_size))
 
     file.remove(LD_meta_file_path)
@@ -1233,7 +1233,7 @@ test_that("extractBlockMatrices warns and skips out-of-range blocks", {
         result <- pecotmr:::extractBlockMatrices(mat, blockMetadata, vnames),
         "outside the range"
     )
-    valid_blocks <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+    valid_blocks <- compact(result$ldMatrices)
     expect_equal(length(valid_blocks), 1)
     expect_equal(nrow(valid_blocks[[1]]), 2)
 })
@@ -3703,7 +3703,7 @@ test_that("extractBlockMatrices skips blocks where endIdx < startIdx", {
         stringsAsFactors = FALSE
     )
     result <- pecotmr:::extractBlockMatrices(mat, bm, vnames)
-    valid <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+    valid <- compact(result$ldMatrices)
     expect_length(valid, 1)
     expect_equal(nrow(valid[[1]]), 2L)
 })
@@ -4029,7 +4029,7 @@ test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast
     set.seed(11)
     nS <- 100L
     af <- c(rep(0.35, 5L), rep(0.004, 5L))
-    d <- vapply(af, function(f) rbinom(nS, 2L, f), numeric(nS))
+    d <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
     colnames(d) <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     d[1:80, 2] <- NA
     d

@@ -294,6 +294,6 @@
         }
         tr
     }
-    traits <- setNames(lapply(traitNames, function(.) mkTrait()), traitNames)
+    traits <- setNames(map(traitNames, function(.) mkTrait()), traitNames)
     SldscData(annot = annot, frq = frq, traits = traits)
 }

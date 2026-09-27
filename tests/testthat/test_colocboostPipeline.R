@@ -179,7 +179,7 @@ context("colocboostPipeline (S4 dispatch)")
 ) {
     gh <- .cbp_makeHandle()
     phen <- setNames(
-        lapply(contexts, function(.) .cbp_makeSe(traits = traits)),
+        map(contexts, function(.) .cbp_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -608,11 +608,11 @@ test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)
         ldSketch = .cbp_makeHandle(),
         qcInfo = list(ok = 1)
     )
-    g0 <- do.call(GwasSumStats, base)
+    g0 <- exec(GwasSumStats, !!!base)
     expect_false(any(
         c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
     ))
-    g1 <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+    g1 <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
     expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
     expect_equal(g1$nCase, 500)
     expect_equal(g1$nControl, 1500)
@@ -645,11 +645,11 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
         .package = "pecotmr"
     )
     # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
-    gcc <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+    gcc <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
     bcc <- pecotmr:::.cbGwasSumStatsBundle(gcc)
     expect_true(all(bcc[["G1"]]$sumstat$n == 4 / (1 / 500 + 1 / 1500)))
     # quantitative (no nCase/nControl) -> per-variant N (1000)
-    bq <- pecotmr:::.cbGwasSumStatsBundle(do.call(GwasSumStats, base))
+    bq <- pecotmr:::.cbGwasSumStatsBundle(exec(GwasSumStats, !!!base))
     expect_true(all(bq[["G1"]]$sumstat$n == 1000L))
 })
 

@@ -65,20 +65,20 @@ pvalAcat <- function(pvals, naRm = TRUE) {
     #     avoid Inf from floating-point precision loss in pi*0.5
     #   - large-stat asymptotic: when the mean Cauchy variate is > 1e15 the
     #     CDF tail collapses to (1/T) / pi (Cauchy survival expansion)
-    if (naRm) {
-        pvals <- pvals[!is.na(pvals)]
-    }
-    if (length(pvals) == 0L) {
+    present <- if (naRm) pvals[!is.na(pvals)] else pvals
+    if (length(present) == 0L) {
         return(NA_real_)
     }
-    if (length(pvals) == 1L) {
-        return(pvals[[1]])
+    if (length(present) == 1L) {
+        return(present[[1]])
     }
-    pvals <- pmin(pvals, 0.99)
+    # Capped below 1: tan(pi * (0.5 - 1)) is -Inf, which would sink the
+    # combined statistic regardless of the other p-values.
+    capped <- pmin(present, 0.99)
     cauchyVals <- if_else(
-        pvals < 1e-15,
-        1 / (pvals * pi),
-        tan(pi * (0.5 - pvals))
+        capped < 1e-15,
+        1 / (capped * pi),
+        tan(pi * (0.5 - capped))
     )
     stat <- mean(cauchyVals)
     if (!is.finite(stat)) {
@@ -166,14 +166,8 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
     }
     switch(
         method,
-        aspu = {
-            result <- aSPU::aSPUs(Zs = zScores, corSNP = R)
-            result$pvs["aSPUs"]
-        },
-        gates = {
-            result <- aSPU::GATES2(ldmatrix = R, p = pvals)
-            result[["Pg"]]
-        },
+        aspu = aSPU::aSPUs(Zs = zScores, corSNP = R)$pvs["aSPUs"],
+        gates = aSPU::GATES2(ldmatrix = R, p = pvals)[["Pg"]],
         .abortUnknownMethod("aSPU", method)
     )
 }

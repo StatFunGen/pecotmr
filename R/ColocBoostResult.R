@@ -250,8 +250,9 @@ ColocBoostResult <- function(
         analysis = analysis,
         gwasStudy = gwasStudy,
         includeUncolocalized = includeUncolocalized
-    )
-    rows <- unname(list_flatten(rows))
+    ) |>
+        list_flatten() |>
+        unname()
     .cbrAssemble(
         rows,
         outcomeInfo = as.data.frame(outcomeInfo),
@@ -269,10 +270,12 @@ ColocBoostResult <- function(
     if (is.null(res)) {
         return(list())
     }
-    out <- .cbrColocalizedRows(res, analysis[[i]], gwasStudy[[i]])
-    if (isTRUE(includeUncolocalized)) {
-        out <- c(out, .cbrUncolocalizedRows(res, analysis[[i]], gwasStudy[[i]]))
-    }
+    out <- c(
+        .cbrColocalizedRows(res, analysis[[i]], gwasStudy[[i]]),
+        if (isTRUE(includeUncolocalized)) {
+            .cbrUncolocalizedRows(res, analysis[[i]], gwasStudy[[i]])
+        }
+    )
     out
 }
 
@@ -375,15 +378,15 @@ ColocBoostResult <- function(
 # The cos_summary row for one set, or an empty tibble when absent.
 # @noRd
 .cbrSummaryFor <- function(res, id) {
-    s <- res$cos_summary
-    if (is.null(s) || nrow(s) == 0L || !is_in("cos_id", colnames(s))) {
+    raw <- res$cos_summary
+    if (is.null(raw) || nrow(raw) == 0L || !is_in("cos_id", colnames(raw))) {
         return(tibble(
             top_variable = NA_character_,
             top_variable_vcp = NA_real_,
             focal_outcome = NA
         ))
     }
-    s <- as.data.frame(s, stringsAsFactors = FALSE)
+    s <- as.data.frame(raw, stringsAsFactors = FALSE)
     hit <- which(as.character(s$cos_id) == id)
     if (length(hit) == 0L) {
         return(tibble(
@@ -450,10 +453,13 @@ ColocBoostResult <- function(
         if (is.null(ids)) {
             next
         }
-        gr <- .variantIdsToGRanges(ids, what = "colocboost vcp names")
-        mcols(gr) <- cbind(
-            mcols(gr, use.names = FALSE),
-            S4Vectors::DataFrame(vcp = as.numeric(res$vcp))
+        bare <- .variantIdsToGRanges(ids, what = "colocboost vcp names")
+        gr <- S4Vectors::`mcols<-`(
+            bare,
+            value = cbind(
+                mcols(bare, use.names = FALSE),
+                S4Vectors::DataFrame(vcp = as.numeric(res$vcp))
+            )
         )
         return(gr)
     }
@@ -469,8 +475,10 @@ ColocBoostResult <- function(
     computingTime
 ) {
     elements <- map(rows, .cbrElementFor)
-    grl <- GenomicRanges::GRangesList(elements)
-    mcols(grl) <- .cbrMcolsFor(rows)
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(elements),
+        value = .cbrMcolsFor(rows)
+    )
     obj <- new(
         "ColocBoostResult",
         grl,
@@ -486,33 +494,42 @@ ColocBoostResult <- function(
 # @noRd
 .cbrElementFor <- function(row) {
     v <- row$variants
-    gr <- .variantIdsToGRanges(
+    bare <- .variantIdsToGRanges(
         as.character(v$variant_id),
         what = "colocboost variant name"
     )
     # Appended, not assigned: the A1 / A2 columns .variantIdsToGRanges()
     # attaches are the variant identity, and overwriting mcols would leave the
     # element unable to name its own variants.
-    mcols(gr) <- cbind(
-        mcols(gr, use.names = FALSE),
-        S4Vectors::DataFrame(vcp = as.numeric(v$vcp))
+    gr <- S4Vectors::`mcols<-`(
+        bare,
+        value = cbind(
+            mcols(bare, use.names = FALSE),
+            S4Vectors::DataFrame(vcp = as.numeric(v$vcp))
+        )
     )
     gr
 }
 
 # @noRd
 .cbrMcolsFor <- function(rows) {
-    if (length(rows) == 0L) {
-        md <- S4Vectors::DataFrame(.cbrEmptyMeta())
-        md$outcomes <- IRanges::CharacterList()
-        return(md)
-    }
-    meta <- bind_rows(map(rows, "meta"))
-    md <- S4Vectors::DataFrame(meta, check.names = FALSE)
     # A CharacterList column, so a set of any size lives in one row instead of
     # being flattened to a delimited string a caller has to re-split.
-    md$outcomes <- IRanges::CharacterList(map(rows, "outcomes"))
-    md
+    if (length(rows) == 0L) {
+        return(cbind(
+            S4Vectors::DataFrame(.cbrEmptyMeta()),
+            S4Vectors::DataFrame(outcomes = IRanges::CharacterList())
+        ))
+    }
+    cbind(
+        S4Vectors::DataFrame(
+            bind_rows(map(rows, "meta")),
+            check.names = FALSE
+        ),
+        S4Vectors::DataFrame(
+            outcomes = IRanges::CharacterList(map(rows, "outcomes"))
+        )
+    )
 }
 
 # @noRd
@@ -544,10 +561,11 @@ setMethod("getColocPairs", "ColocBoostResult", function(x, ...) {
         return(tibble())
     }
     flat <- as.data.frame(md[, setdiff(colnames(md), "outcomes")])
-    out <- as_tibble(flat, .name_repair = "minimal")
-    out$outcomes <- map_chr(as.list(md$outcomes), str_flatten, collapse = "; ")
-    out$nOutcomes <- lengths(md$outcomes)
-    out
+    mutate(
+        as_tibble(flat, .name_repair = "minimal"),
+        outcomes = map_chr(as.list(md$outcomes), str_flatten, collapse = "; "),
+        nOutcomes = lengths(md$outcomes)
+    )
 })
 
 #' @rdname colocViews
@@ -584,10 +602,11 @@ setMethod(
     n <- lengths(x)
     setIdx <- rep(seq_len(length(x)), n)
     flat <- unlist(x, use.names = FALSE)
-    out <- as_tibble(md[setIdx, , drop = FALSE], .name_repair = "minimal")
-    out$variant_id <- .grVariantIds(flat)
-    out$vcp <- as.numeric(mcols(flat, use.names = FALSE)$vcp)
-    out
+    mutate(
+        as_tibble(md[setIdx, , drop = FALSE], .name_repair = "minimal"),
+        variant_id = .grVariantIds(flat),
+        vcp = as.numeric(mcols(flat, use.names = FALSE)$vcp)
+    )
 }
 
 #' @title ColocBoost Outcome View
@@ -619,11 +638,13 @@ setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x, ...) {
     outcomes <- as.list(md$outcomes)
     reps <- lengths(outcomes)
     flat <- as.data.frame(md[, setdiff(colnames(md), "outcomes"), drop = FALSE])
-    out <- as_tibble(
-        flat[rep(seq_len(nrow(flat)), reps), , drop = FALSE],
-        .name_repair = "minimal"
+    out <- mutate(
+        as_tibble(
+            flat[rep(seq_len(nrow(flat)), reps), , drop = FALSE],
+            .name_repair = "minimal"
+        ),
+        outcome = unlist(outcomes, use.names = FALSE)
     )
-    out$outcome <- unlist(outcomes, use.names = FALSE)
     info <- x@outcomeInfo
     if (nrow(info) == 0L) {
         return(out)

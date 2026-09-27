@@ -249,7 +249,7 @@ makeTestLdDataMultiBlock <- function(
 ) {
     gr <- .testLdVariants(sum(sizes), chrom, startBp)
     LdData(
-        correlation = lapply(sizes, .testArBlock, rho = rho),
+        correlation = map(sizes, .testArBlock, rho = rho),
         variants = gr,
         blockMetadata = .testBlockMetadata(sizes, chrom, gr),
         nRef = nRef

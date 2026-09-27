@@ -112,10 +112,13 @@ twasWeightsRow <- function(
         )
         abort(msg)
     }
-    mcols(gr)$weight <- w
+    withWeight <- S4Vectors::`mcols<-`(
+        gr,
+        value = `[[<-`(mcols(gr, use.names = FALSE), "weight", value = w)
+    )
     obj <- new(
         "TwasWeightsRow",
-        variants = gr,
+        variants = withWeight,
         weights = w,
         fits = fits,
         cvResult = cvResult,

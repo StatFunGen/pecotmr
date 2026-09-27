@@ -43,17 +43,22 @@ setClass(
 
 # @noRd
 .validateMultiStudyQtlDataset <- function(object) {
-    errors <- c(
+    # Each stage only makes sense once the previous one holds: the study count
+    # reads slots the type checks just validated, and trait consistency reads
+    # across the studies the count check just confirmed.
+    slotErrors <- c(
         .msqdCheckDatasets(object@qtlDatasets),
         .msqdCheckSumStats(object@sumStats)
     )
-    if (length(errors) == 0L) {
-        errors <- .msqdCheckStudyCount(object)
+    if (length(slotErrors) > 0L) {
+        return(slotErrors)
     }
-    if (length(errors) == 0L) {
-        errors <- .msqdCheckTraitConsistency(object)
+    countErrors <- .msqdCheckStudyCount(object)
+    if (length(countErrors) > 0L) {
+        return(countErrors)
     }
-    if (length(errors) == 0L) TRUE else errors
+    traitErrors <- .msqdCheckTraitConsistency(object)
+    if (length(traitErrors) == 0L) TRUE else traitErrors
 }
 
 # @noRd
@@ -141,19 +146,40 @@ setClass(
 # Per-dataset trait -> rowRanges map (first occurrence of each trait id).
 # @noRd
 .msqdTraitRanges <- function(qd) {
-    out <- list()
-    for (ctx in getContexts(qd)) {
-        se <- getPhenotypes(qd, ctx)
-        rr <- SummarizedExperiment::rowRanges(se)
-        ids <- rownames(se)
-        for (i in seq_along(ids)) {
-            tid <- ids[[i]]
-            if (is.null(out[[tid]])) {
-                out[[tid]] <- rr[i]
-            }
-        }
+    pairs <- .msqdConcat(map(getContexts(qd), .msqdContextTraitRanges, qd = qd))
+    if (length(pairs) == 0L) {
+        return(list())
     }
-    out
+    # First occurrence of each trait id wins, as the "only set it while still
+    # NULL" assignment did.
+    tids <- map_chr(pairs, "tid")
+    keep <- !duplicated(tids)
+    set_names(map(pairs[keep], "range"), tids[keep])
+}
+
+# @noRd
+.msqdConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
+    }
+    list_c(pieces)
+}
+
+# @noRd
+.msqdTraitRangePair <- function(i, ids, rr) {
+    list(tid = ids[[i]], range = rr[i])
+}
+
+# One context's (trait, range) pairs in row order.
+# @noRd
+.msqdContextTraitRanges <- function(ctx, qd) {
+    se <- getPhenotypes(qd, ctx)
+    map(
+        seq_along(rownames(se)),
+        .msqdTraitRangePair,
+        ids = rownames(se),
+        rr = SummarizedExperiment::rowRanges(se)
+    )
 }
 
 # Inconsistency errors for the k-th dataset pair.

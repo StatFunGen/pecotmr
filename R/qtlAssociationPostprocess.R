@@ -96,18 +96,18 @@
 # an entry's af / tss_distance / tes_distance mcols. Shared by the correction
 # and the significance derivation so the filtered set is defined once.
 .qapFilterKeep <- function(mc, mafCutoff, cisWindow, afCol, nVar) {
-    keep <- rep(TRUE, nVar)
-    if (mafCutoff > 0 && !is.null(mc[[afCol]])) {
-        af <- mc[[afCol]]
-        keep <- keep & (pmin(af, 1 - af) > mafCutoff)
+    byMaf <- if (mafCutoff > 0 && !is.null(mc[[afCol]])) {
+        pmin(mc[[afCol]], 1 - mc[[afCol]]) > mafCutoff
+    } else {
+        rep(TRUE, nVar)
     }
-    if (
-        cisWindow > 0 && !is.null(mc$tss_distance) && !is.null(mc$tes_distance)
-    ) {
-        keep <- keep &
-            (mc$tss_distance >= -cisWindow & mc$tes_distance <= cisWindow)
+    inCis <- cisWindow > 0 &&
+        !is.null(mc$tss_distance) &&
+        !is.null(mc$tes_distance)
+    if (!inCis) {
+        return(byMaf)
     }
-    keep
+    byMaf & (mc$tss_distance >= -cisWindow & mc$tes_distance <= cisWindow)
 }
 
 # Per-gene logical masks of significant variants under a correction method (the
@@ -153,15 +153,25 @@
         )
         abort(msg)
     }
-    thr <- as.numeric(x$p_nominal_threshold)
-    for (i in seq_len(nrow(x))) {
-        if (is.na(thr[i])) {
-            next
-        }
-        pv <- S4Vectors::mcols(x[[i]])[[pcol]]
-        masks[[i]] <- !is.na(pv) & pv < thr[i]
+    map(
+        seq_len(nrow(x)),
+        .qapPermutationMaskAt,
+        x = x,
+        masks = masks,
+        thr = as.numeric(x$p_nominal_threshold),
+        pcol = pcol
+    )
+}
+
+# Entry `i`'s permutation mask, or the incoming mask when the gene has no
+# threshold to apply.
+# @noRd
+.qapPermutationMaskAt <- function(i, x, masks, thr, pcol) {
+    if (is.na(thr[i])) {
+        return(masks[[i]])
     }
-    masks
+    pv <- S4Vectors::mcols(x[[i]])[[pcol]]
+    !is.na(pv) & pv < thr[i]
 }
 
 # Bonferroni significance (original / filtered flavour): a global variant-level
@@ -185,17 +195,20 @@
     }
     # global scalar
     varThr <- max(as.numeric(.tupleColumn(x, pMinCol))[sig], na.rm = TRUE)
-    nVar <- as.numeric(.tupleColumn(x, nCol))
-    for (i in seq_len(nrow(x))) {
-        masks[[i]] <- .qapBonferroniRowMask(
-            x[[i]],
-            recipe,
-            flav,
-            nVar[i],
-            varThr
-        )
-    }
-    masks
+    map(
+        seq_len(nrow(x)),
+        .qapBonferroniMaskAt,
+        x = x,
+        recipe = recipe,
+        flav = flav,
+        nVar = as.numeric(.tupleColumn(x, nCol)),
+        varThr = varThr
+    )
+}
+
+# @noRd
+.qapBonferroniMaskAt <- function(i, x, recipe, flav, nVar, varThr) {
+    .qapBonferroniRowMask(x[[i]], recipe, flav, nVar[i], varThr)
 }
 
 # One entry's Bonferroni keep-mask: Bonferroni-adjusted p <= the global
@@ -204,9 +217,11 @@
 .qapBonferroniRowMask <- function(entry, recipe, flav, nVarI, varThr) {
     mc <- S4Vectors::mcols(entry)
     pv <- mc[[recipe$pvalueCol]]
-    keep <- pmin(1, pv * nVarI) <= varThr
-    if (flav == "filtered") {
-        keep <- keep &
+    bySignificance <- pmin(1, pv * nVarI) <= varThr
+    keep <- if (flav != "filtered") {
+        bySignificance
+    } else {
+        bySignificance &
             .qapFilterKeep(
                 mc,
                 recipe$mafCutoff,
@@ -221,6 +236,17 @@
 # Q-value significance: per-entry mask of variant q-values below the threshold
 # for the FDR-significant genes.
 # @noRd
+# Entry `i`'s q-value mask, or the incoming mask when the gene is not
+# FDR-significant or carries no per-variant q-values.
+# @noRd
+.qapQvalueMaskAt <- function(i, x, masks, sig, threshold) {
+    mc <- S4Vectors::mcols(x[[i]])
+    if (!isTRUE(sig[i]) || is.null(mc$qvalue)) {
+        return(masks[[i]])
+    }
+    !is.na(mc$qvalue) & mc$qvalue < threshold
+}
+
 .qapMaskQvalue <- function(x, masks, threshold) {
     qCol <- if (!is.null(x$q_beta)) "q_beta" else "q_bonferroni_min_original"
     if (is.null(.tupleColumn(x, qCol))) {
@@ -230,14 +256,14 @@
         )
         abort(msg)
     }
-    sig <- replace_na(as.numeric(.tupleColumn(x, qCol)) < threshold, FALSE)
-    for (i in seq_len(nrow(x))) {
-        mc <- S4Vectors::mcols(x[[i]])
-        if (isTRUE(sig[i]) && !is.null(mc$qvalue)) {
-            masks[[i]] <- !is.na(mc$qvalue) & mc$qvalue < threshold
-        }
-    }
-    masks
+    map(
+        seq_len(nrow(x)),
+        .qapQvalueMaskAt,
+        x = x,
+        masks = masks,
+        sig = replace_na(as.numeric(.tupleColumn(x, qCol)) < threshold, FALSE),
+        threshold = threshold
+    )
 }
 
 #' @rdname getSignificantQtls
@@ -262,8 +288,9 @@ setMethod(
     ) {
         method <- arg_match(method)
         masks <- .qapSignificanceMask(x, method, threshold)
-        pieces <- map(seq_len(nrow(x)), .qapMaskedEntry, x = x, masks = masks)
-        pieces <- pieces[!map_lgl(pieces, is.null)]
+        pieces <- compact(
+            map(seq_len(nrow(x)), .qapMaskedEntry, x = x, masks = masks)
+        )
         if (length(pieces) == 0L) {
             return(x[[1L]][0L])
         }
@@ -279,16 +306,28 @@ setMethod(
     # The collection is a GRangesList now, not a DFrame: the per-variant
     # GRanges are the elements and `newCols` are per-tuple metadata, so the
     # rebuild keeps the elements as-is and only rewrites mcols.
-    md <- mcols(x, use.names = FALSE)
-    for (nm in names(newCols)) {
-        md[[nm]] <- newCols[[nm]]
+    existing <- mcols(x, use.names = FALSE)
+    # A NULL entry in `newCols` removed that column, which is what dropping
+    # every named column and re-adding only the non-NULL ones reproduces.
+    kept <- existing[,
+        setdiff(colnames(existing), names(newCols)),
+        drop = FALSE
+    ]
+    added <- compact(newCols)
+    md <- if (length(added) == 0L) {
+        kept
+    } else {
+        cbind(kept, S4Vectors::DataFrame(added, check.names = FALSE))
     }
-    grl <- GenomicRanges::GRangesList(as.list(x))
     # Rebuilding from as.list() starts from the elements' own seqinfo, so the
     # build is written back explicitly -- it is collection-level state, and
     # there is no genome slot to carry it any more.
-    GenomeInfoDb::genome(grl) <- getGenome(x)
-    mcols(grl) <- md
+    built <- .withGenomeBuild(
+        GenomicRanges::GRangesList(as.list(x)),
+        TRUE,
+        getGenome(x)
+    )
+    grl <- S4Vectors::`mcols<-`(built, value = md)
     methods::new(
         "QtlSumStats",
         grl,
@@ -333,10 +372,8 @@ setMethod(
             multiple = TRUE
         )
         filtering <- (mafCutoff > 0 || cisWindow > 0)
-        newCols <- list()
-        if (is_in("bonferroni", methods)) {
-            newCols <- c(
-                newCols,
+        newCols <- c(
+            if (is_in("bonferroni", methods)) {
                 .qapBonferroniCols(
                     x,
                     mafCutoff,
@@ -345,22 +382,25 @@ setMethod(
                     afCol,
                     filtering
                 )
-            )
-        }
-        if (is_in("permutation", methods) && !is.null(x$p_beta)) {
-            newCols <- c(newCols, .qapPermutationCols(x, fdrThreshold))
-        }
+            },
+            if (is_in("permutation", methods) && !is.null(x$p_beta)) {
+                .qapPermutationCols(x, fdrThreshold)
+            }
+        ) %||%
+            list()
         # Stash the correction recipe so getSignificantQtls /
         # annotateSignificance can reproduce significance cheaply (thresholds,
         # not flags).
-        qc <- getQcInfo(x)
-        qc$associationPostprocess <- .qapRecipe(
-            fdrThreshold,
-            mafCutoff,
-            cisWindow,
-            methods,
-            pvalueCol,
-            afCol
+        qc <- list_assign(
+            getQcInfo(x),
+            associationPostprocess = .qapRecipe(
+                fdrThreshold,
+                mafCutoff,
+                cisWindow,
+                methods,
+                pvalueCol,
+                afCol
+            )
         )
         .qapRebuild(x, newCols, qc)
     }
@@ -400,17 +440,20 @@ setMethod(
         cisWindow,
         filtering
     )
-    cols <- list(p_bonferroni_min_original = perGene$orig)
     gaO <- .qapGlobalAdjust(perGene$orig)
-    cols$fdr_bonferroni_min_original <- gaO$fdr
-    cols$q_bonferroni_min_original <- gaO$q
-    if (filtering) {
-        cols$p_bonferroni_min_filtered <- perGene$filt
-        gaF <- .qapGlobalAdjust(perGene$filt)
-        cols$fdr_bonferroni_min_filtered <- gaF$fdr
-        cols$q_bonferroni_min_filtered <- gaF$q
-    }
-    cols
+    gaF <- if (filtering) .qapGlobalAdjust(perGene$filt) else NULL
+    c(
+        list(
+            p_bonferroni_min_original = perGene$orig,
+            fdr_bonferroni_min_original = gaO$fdr,
+            q_bonferroni_min_original = gaO$q
+        ),
+        compact(list(
+            p_bonferroni_min_filtered = if (filtering) perGene$filt,
+            fdr_bonferroni_min_filtered = gaF$fdr,
+            q_bonferroni_min_filtered = gaF$q
+        ))
+    )
 }
 
 # The n_variants row column is mandatory for the Bonferroni correction.
@@ -430,6 +473,43 @@ setMethod(
 # pre-filter always retains the global-min variant, so the min over the entry is
 # the exact per-gene min. Returns list(orig, filt).
 # @noRd
+# One gene's Bonferroni-adjusted minimum p-value, before and after the
+# variant filter. NA on either side means the gene had nothing to adjust.
+# @noRd
+.qapBonferroniForGene <- function(
+    i,
+    x,
+    pvalueCol,
+    nVar,
+    nVarFilt,
+    afCol,
+    mafCutoff,
+    cisWindow,
+    filtering
+) {
+    mc <- S4Vectors::mcols(x[[i]])
+    pv <- mc[[pvalueCol]]
+    if (is.null(pv) || length(pv) == 0L) {
+        return(list(orig = NA_real_, filt = NA_real_))
+    }
+    orig <- min(stats::p.adjust(pv, method = "bonferroni", n = nVar[i]))
+    if (!filtering) {
+        return(list(orig = orig, filt = NA_real_))
+    }
+    keep <- .qapFilterKeep(mc, mafCutoff, cisWindow, afCol, length(pv))
+    if (!any(keep)) {
+        return(list(orig = orig, filt = NA_real_))
+    }
+    list(
+        orig = orig,
+        filt = min(stats::p.adjust(
+            pv[keep],
+            method = "bonferroni",
+            n = nVarFilt[i]
+        ))
+    )
+}
+
 .qapBonferroniPerGene <- function(
     x,
     nVar,
@@ -440,32 +520,22 @@ setMethod(
     cisWindow,
     filtering
 ) {
-    n <- nrow(x)
-    pBonfOrig <- rep(NA_real_, n)
-    pBonfFilt <- rep(NA_real_, n)
-    for (i in seq_len(n)) {
-        mc <- S4Vectors::mcols(x[[i]])
-        pv <- mc[[pvalueCol]]
-        if (is.null(pv) || length(pv) == 0L) {
-            next
-        }
-        pBonfOrig[i] <- min(stats::p.adjust(
-            pv,
-            method = "bonferroni",
-            n = nVar[i]
-        ))
-        if (filtering) {
-            keep <- .qapFilterKeep(mc, mafCutoff, cisWindow, afCol, length(pv))
-            if (any(keep)) {
-                pBonfFilt[i] <- min(stats::p.adjust(
-                    pv[keep],
-                    method = "bonferroni",
-                    n = nVarFilt[i]
-                ))
-            }
-        }
-    }
-    list(orig = pBonfOrig, filt = pBonfFilt)
+    perGene <- map(
+        seq_len(nrow(x)),
+        .qapBonferroniForGene,
+        x = x,
+        pvalueCol = pvalueCol,
+        nVar = nVar,
+        nVarFilt = nVarFilt,
+        afCol = afCol,
+        mafCutoff = mafCutoff,
+        cisWindow = cisWindow,
+        filtering = filtering
+    )
+    list(
+        orig = map_dbl(perGene, "orig"),
+        filt = map_dbl(perGene, "filt")
+    )
 }
 
 # Permutation columns: BH-FDR of p_beta, the Storey q-value (q_beta, when
@@ -478,21 +548,23 @@ setMethod(
     } else {
         .qapSafeQvalue(pBeta)
     }
-    cols <- list()
-    if (is.null(x$q_beta)) {
-        cols$q_beta <- qBeta
-    }
-    cols$fdr_beta <- stats::p.adjust(pBeta, method = "fdr")
-    if (!is.null(x$beta_shape1) && !is.null(x$beta_shape2)) {
-        cols$p_nominal_threshold <- .qapPermutationNominalThreshold(
-            pBeta,
-            qBeta,
-            as.numeric(x$beta_shape1),
-            as.numeric(x$beta_shape2),
-            fdrThreshold
-        )
-    }
-    cols
+    c(
+        compact(list(q_beta = if (is.null(x$q_beta)) qBeta)),
+        list(fdr_beta = stats::p.adjust(pBeta, method = "fdr")),
+        compact(list(
+            p_nominal_threshold = if (
+                !is.null(x$beta_shape1) && !is.null(x$beta_shape2)
+            ) {
+                .qapPermutationNominalThreshold(
+                    pBeta,
+                    qBeta,
+                    as.numeric(x$beta_shape1),
+                    as.numeric(x$beta_shape2),
+                    fdrThreshold
+                )
+            }
+        ))
+    )
 }
 
 # The significance recipe stashed for cheap downstream re-derivation.
@@ -531,8 +603,15 @@ setMethod(
     if (length(gr) == 0L) {
         return(NULL)
     }
-    gr$study <- as.character(x$study)[i]
-    gr$context <- as.character(x$context)[i]
-    gr$trait <- as.character(x$trait)[i]
-    gr
+    S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(
+            mcols(gr, use.names = FALSE),
+            S4Vectors::DataFrame(
+                study = as.character(x$study)[i],
+                context = as.character(x$context)[i],
+                trait = as.character(x$trait)[i]
+            )
+        )
+    )
 }

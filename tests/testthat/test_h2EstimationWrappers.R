@@ -24,7 +24,7 @@ make_test_eigen_ref <- function(nSnps = 20, nBlocks = 2) {
         stringsAsFactors = FALSE
     )
 
-    eigen_list <- lapply(seq_len(nBlocks), function(b) {
+    eigen_list <- map(seq_len(nBlocks), function(b) {
         idx <- seq((b - 1) * snps_per_block + 1, b * snps_per_block)
         p <- length(idx)
         set.seed(42 + b)
@@ -78,7 +78,7 @@ make_test_score_ref <- function(
     ld_score_weights <- rep(1 / nSnps, nSnps)
 
     ld_matrix_list <- if (with_ld_matrices) {
-        lapply(seq_len(nBlocks), function(b) {
+        map(seq_len(nBlocks), function(b) {
             idx <- seq((b - 1) * snps_per_block + 1, b * snps_per_block)
             p <- length(idx)
             # AR(1) LD so per-SNP LD scores vary (equicorrelated R gives a
@@ -680,7 +680,7 @@ test_that("the S-LDSC weights reproduce upstream Hsq.weights", {
 # An LD block with `dup` variants repeated, so R is singular by construction
 # and eigen() returns a negative-noise tail.
 .rankDeficientEigenRef <- function(nBlocks = 6L, p = 12L, dup = 4L) {
-    blocks <- lapply(seq_len(nBlocks), function(b) {
+    blocks <- map(seq_len(nBlocks), function(b) {
         base <- 0.5^abs(outer(seq_len(p - dup), seq_len(p - dup), "-"))
         keep <- c(seq_len(p - dup), seq_len(dup))
         R <- base[keep, keep]
@@ -700,8 +700,8 @@ test_that("the S-LDSC weights reproduce upstream Hsq.weights", {
         A2 = "G",
         stringsAsFactors = FALSE
     )
-    starts <- as.integer(sapply(blocks, function(b) min(b$snpIdx))) * 100L
-    ends <- as.integer(sapply(blocks, function(b) max(b$snpIdx))) * 100L
+    starts <- as.integer(map_dbl(blocks, function(b) min(b$snpIdx))) * 100L
+    ends <- as.integer(map_dbl(blocks, function(b) max(b$snpIdx))) * 100L
     LdEigen(
         ldBlocks = GenomicRanges::GRanges(
             "chr1",
@@ -718,7 +718,7 @@ test_that("the S-LDSC weights reproduce upstream Hsq.weights", {
 
 test_that("a rank-deficient LD block really does yield negative eigenvalues", {
     ref <- .rankDeficientEigenRef()
-    values <- unlist(lapply(getEigenList(ref), function(b) b$values))
+    values <- unlist(map(getEigenList(ref), function(b) b$values))
     expect_true(any(values < 0))
     expect_true(min(values) > -1e-6) # noise, not structure
 })
@@ -968,7 +968,7 @@ test_that("jackknifeSe computes known case correctly", {
     full_mean <- mean(vals)
     n <- length(vals)
     # Leave-one-out means: remove element i, compute mean of remaining
-    loo_means <- vapply(seq_len(n), function(i) mean(vals[-i]), numeric(1))
+    loo_means <- map_dbl(seq_len(n), function(i) mean(vals[-i]))
     estimates_loo <- matrix(loo_means, ncol = 1)
     se <- pecotmr:::jackknifeSe(full_mean, estimates_loo)
     # Pseudo-values: n * full - (n-1) * loo
@@ -2009,10 +2009,12 @@ makeCoverageAnnot <- function(
         stringsAsFactors = FALSE
     )
     if (nCand > 0L) {
-        cand <- vapply(
-            seq_len(nCand),
-            function(k) as.numeric(rbinom(n_snps, 1, 0.3 + 0.1 * k)),
-            numeric(n_snps)
+        cand <- exec(
+            cbind,
+            !!!map(
+                seq_len(nCand),
+                function(k) as.numeric(rbinom(n_snps, 1, 0.3 + 0.1 * k))
+            )
         )
         mat <- cbind(mat, cand)
         meta <- rbind(
@@ -2260,7 +2262,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
 # references plus a simulator closure. No external dependencies.
 .h2RecoveryRefs <- function(nBlocks = 30L, p = 40L, N = 80000) {
     M <- nBlocks * p
-    blocks <- lapply(seq_len(nBlocks), function(b) {
+    blocks <- map(seq_len(nBlocks), function(b) {
         R <- 0.6^abs(outer(seq_len(p), seq_len(p), "-"))
         e <- eigen(R, symmetric = TRUE)
         list(
@@ -2278,8 +2280,8 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
         A2 = "G",
         stringsAsFactors = FALSE
     )
-    starts <- as.integer(unlist(lapply(blocks, function(b) min(b$idx)))) * 100L
-    ends <- as.integer(unlist(lapply(blocks, function(b) max(b$idx)))) * 100L
+    starts <- as.integer(map_dbl(blocks, function(b) min(b$idx))) * 100L
+    ends <- as.integer(map_dbl(blocks, function(b) max(b$idx))) * 100L
     gr <- GenomicRanges::GRanges(
         "chr1",
         IRanges::IRanges(start = starts, end = ends)
@@ -2292,7 +2294,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
         inSample = FALSE,
         genome = "hg19",
         eigenvalueTruncation = 1.0,
-        eigenList = lapply(blocks, function(b) {
+        eigenList = map(blocks, function(b) {
             list(
                 values = b$values,
                 vectors = b$vectors,
@@ -2312,12 +2314,12 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
         genome = "hg19",
         ldScores = matrix(lsv, ncol = 1, dimnames = list(NULL, "base_l2")),
         ldScoreWeights = rep(1, M),
-        ldMatrixList = lapply(blocks, function(b) {
+        ldMatrixList = map(blocks, function(b) {
             list(R = b$R, snpIdx = as.integer(b$idx))
         })
     )
     simZ <- function(perSnpVar) {
-        unlist(lapply(blocks, function(b) {
+        unlist(map(blocks, function(b) {
             S <- N * (b$R %*% diag(perSnpVar[b$idx], p) %*% b$R) + b$R
             as.vector(crossprod(chol(S), rnorm(p)))
         }))
@@ -2736,7 +2738,7 @@ test_that("HDL recovers a known h2 given an adequate reference", {
     data(ldEigenExample, ldScoreExample)
     ref <- ldEigenExample
     ref@nRef <- 20000L
-    ests <- vapply(
+    ests <- map_dbl(
         1:5,
         function(seed) {
             suppressWarnings(
@@ -2746,8 +2748,7 @@ test_that("HDL recovers a known h2 given an adequate reference", {
                     ref
                 )$h2
             )
-        },
-        numeric(1)
+        }
     )
     expect_lt(abs(mean(ests) - 0.4), 0.1)
 })

@@ -39,23 +39,21 @@ setClass(
         )
         coll$push(.sumStatsCheckGenome(object))
         assertList(object@qcInfo, .var.name = "qcInfo", add = coll)
-        errors <- coll$getMessages()
-        if (length(errors) == 0L) {
-            # The elements ARE GRanges by construction now -- the container is
-            # a GRangesList -- so the old per-element type and length checks
-            # are gone. The one-seqname/one-strand invariant is enforced by
-            # RangedTupleList's own validity.
-            # Keyed on (study, range), not study alone: a study split across
-            # chromosomes contributes one element per seqname, so the study
-            # label legitimately repeats.
-            if (.ssHasDuplicateKeys(object, "study")) {
-                errors <- c(
-                    errors,
-                    "(study, range) must be unique"
-                )
-            }
+        slotErrors <- coll$getMessages()
+        if (length(slotErrors) > 0L) {
+            return(slotErrors)
         }
-        if (length(errors) == 0L) TRUE else errors
+        # The elements ARE GRanges by construction now -- the container is
+        # a GRangesList -- so the old per-element type and length checks
+        # are gone. The one-seqname/one-strand invariant is enforced by
+        # RangedTupleList's own validity.
+        # Keyed on (study, range), not study alone: a study split across
+        # chromosomes contributes one element per seqname, so the study
+        # label legitimately repeats.
+        if (.ssHasDuplicateKeys(object, "study")) {
+            return("(study, range) must be unique")
+        }
+        TRUE
     }
 )
 
@@ -191,9 +189,9 @@ GwasSumStats <- function(
     cols <- list(
         study = as.character(study),
         varY = varY
-    )
-    cols <- .gwasAppendOptional(cols, nCase, nControl, nSample, study)
-    cols <- .gwasAppendExtras(cols, list(...))
+    ) |>
+        .gwasAppendOptional(nCase, nControl, nSample, study) |>
+        .gwasAppendExtras(list(...))
     dfArgs <- c(cols, list(check.names = FALSE))
     # The per-study GRanges become the collection's ELEMENTS; everything else
     # is per-study metadata and goes in mcols. There is no `entry` column.
@@ -205,13 +203,16 @@ GwasSumStats <- function(
     # with its metadata row replicated alongside. Splitting is unconditional:
     # a stored element always spans exactly one seqname.
     split <- .gwasSplitEntry(entry, ldBlocks, blockId, length(entry))
-    grl <- GenomicRanges::GRangesList(split$entry)
-    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    md <- md[split$fromIdx, , drop = FALSE]
     # `blockId` is always present, so downstream code (cTWAS in particular) can
     # key regions without first asking how the collection was built.
-    md$blockId <- split$blockId
-    mcols(grl) <- md
+    md <- cbind(
+        exec(S4Vectors::DataFrame, !!!dfArgs)[split$fromIdx, , drop = FALSE],
+        S4Vectors::DataFrame(blockId = split$blockId)
+    )
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md
+    )
     .sumStatsNewValidated("GwasSumStats", grl, ldSketch, genome, qcInfo)
 }
 
@@ -224,10 +225,10 @@ GwasSumStats <- function(
     # The build goes into seqinfo, which is where a GRangesList keeps it and
     # where every Bioconductor consumer reads it from. Assigned before new()
     # so validity sees the finished object.
-    GenomeInfoDb::genome(grl) <- as.character(genome)
+    built <- GenomeInfoDb::`genome<-`(grl, value = as.character(genome))
     obj <- methods::new(
         Class,
-        grl,
+        built,
         ldSketch = .asLdSketch(ldSketch),
         qcInfo = as.list(qcInfo)
     )
@@ -255,15 +256,18 @@ GwasSumStats <- function(
     # columns, so an entry that still splits further replicates its id rather
     # than falling out of alignment. This is what lets a rebuild (QC) carry
     # block keys through instead of silently re-deriving them as seqnames.
-    split$blockId <- if (!is.null(blockId)) {
-        .gwasCheckBlockId(blockId, n)[split$fromIdx]
-    } else {
-        # unname(): the seqname splitter names its pieces, and those names
-        # would otherwise ride into the mcols column and make it inconsistent
-        # with the block path, which produces a bare character vector.
-        unname(map_chr(split$entry, .gwasElementSeqname))
-    }
-    split
+    list_assign(
+        split,
+        blockId = if (!is.null(blockId)) {
+            .gwasCheckBlockId(blockId, n)[split$fromIdx]
+        } else {
+            # unname(): the seqname splitter names its pieces, and those names
+            # would otherwise ride into the mcols column and make it
+            # inconsistent with the block path, which produces a bare
+            # character vector.
+            unname(map_chr(split$entry, .gwasElementSeqname))
+        }
+    )
 }
 
 # @noRd
@@ -317,25 +321,26 @@ GwasSumStats <- function(
 # when supplied; NA for the non-case/control studies in a mixed collection).
 # @noRd
 .gwasAppendOptional <- function(cols, nCase, nControl, nSample, study) {
-    if (!is.null(nCase)) {
-        cols$nCase <- .recyclePerStudy(nCase, "nCase", study)
-    }
-    if (!is.null(nControl)) {
-        cols$nControl <- .recyclePerStudy(nControl, "nControl", study)
-    }
-    if (!is.null(nSample)) {
-        cols$nSample <- .recyclePerStudy(nSample, "nSample", study)
-    }
-    cols
+    c(
+        cols,
+        compact(list(
+            nCase = if (!is.null(nCase)) {
+                .recyclePerStudy(nCase, "nCase", study)
+            },
+            nControl = if (!is.null(nControl)) {
+                .recyclePerStudy(nControl, "nControl", study)
+            },
+            nSample = if (!is.null(nSample)) {
+                .recyclePerStudy(nSample, "nSample", study)
+            }
+        ))
+    )
 }
 
 # Append any user-supplied extra columns (from `...`).
 # @noRd
 .gwasAppendExtras <- function(cols, extras) {
-    for (nm in names(extras)) {
-        cols[[nm]] <- extras[[nm]]
-    }
-    cols
+    c(cols, extras)
 }
 
 
@@ -457,9 +462,11 @@ as.data.frame.GwasSumStats <- function(
     ...
 ) {
     gr <- getSumStats(x, study = study)
-    mc <- as.data.frame(mcols(gr))
-    mc$CHR <- as.character(seqnames(gr))
-    mc$BP <- start(gr)
+    mc <- mutate(
+        as.data.frame(mcols(gr)),
+        CHR = as.character(seqnames(gr)),
+        BP = start(gr)
+    )
     firstCols <- c("SNP", "CHR", "BP")
     restCols <- setdiff(names(mc), firstCols)
     select(mc, all_of(c(firstCols, restCols)))

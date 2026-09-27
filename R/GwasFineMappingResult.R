@@ -93,8 +93,8 @@ setClass(
     keyTbl <- as_tibble(set_names(
         map(keyCols, .gfmrColOf, object = object),
         keyCols
-    ))
-    keyTbl$range <- .rtlRangeKeys(object)
+    )) |>
+        mutate(range = .rtlRangeKeys(object))
     if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
         return("(study, method, range) tuple uniqueness violated")
     }
@@ -158,17 +158,19 @@ GwasFineMappingResult <- function(
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
         cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
-    )
-    cols <- .appendBlockIdCol(cols, blockId, n)
-    cols <- .appendTraitPosCol(cols, traitPos, n)
+    ) |>
+        .appendBlockIdCol(blockId, n) |>
+        .appendTraitPosCol(traitPos, n)
     dfArgs <- c(cols, list(check.names = FALSE))
     # Each entry's variants become one ELEMENT, its topLoci that element's
     # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
     # splits by chromosome with its metadata row replicated.
     split <- .rtlSplitBySeqname(map(entry, rowVariants))
-    grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md[split$fromIdx, , drop = FALSE]
+    )
     obj <- new(
         "GwasFineMappingResult",
         grl,

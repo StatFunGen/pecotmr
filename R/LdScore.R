@@ -86,13 +86,19 @@ LdScore <- function(
     ldScores <- as.matrix(ldScores)
     assertMatrix(ldScores, nrows = length(gr))
     assertNumeric(ldScoreWeights, len = length(gr))
-    md <- S4Vectors::mcols(gr, use.names = FALSE)
-    md$ldScores <- ldScores
-    md$ldScoreWeights <- as.numeric(ldScoreWeights)
-    S4Vectors::mcols(gr) <- md
+    scored <- S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(
+            S4Vectors::mcols(gr, use.names = FALSE),
+            S4Vectors::DataFrame(
+                ldScores = I(ldScores),
+                ldScoreWeights = as.numeric(ldScoreWeights)
+            )
+        )
+    )
     obj <- methods::new(
         "LdScore",
-        gr,
+        scored,
         ldBlocks = .asLdBlockRanges(ldBlocks),
         nRef = as.integer(nRef),
         inSample = isTRUE(inSample),
@@ -185,11 +191,21 @@ buildLdScore <- function(
 # reference order.
 # @noRd
 .ldScoreVector <- function(blocks, snpIdx, nVariants) {
-    l2 <- numeric(nVariants)
-    for (b in seq_along(blocks)) {
-        l2[snpIdx[[b]]] <- rowSums(blocks[[b]]$R^2)
+    if (length(blocks) == 0L) {
+        return(numeric(nVariants))
     }
-    l2
+    # The blocks partition the variants, so each variant's score lands in
+    # exactly one place; variants in no block stay zero.
+    replace(
+        numeric(nVariants),
+        list_c(snpIdx),
+        list_c(map(blocks, .ldScoreBlockSums))
+    )
+}
+
+# @noRd
+.ldScoreBlockSums <- function(block) {
+    rowSums(block$R^2)
 }
 
 # @noRd

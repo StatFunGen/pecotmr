@@ -18,23 +18,27 @@
 # Normalize combine() varargs: accept either N objects or a single list of
 # them; drop NULLs; require at least one input of the expected class `cls`.
 .asCombineList <- function(parts, cls, fn) {
-    if (
+    # A single list argument is the collection itself, not a one-element
+    # variadic call.
+    unwrapped <- if (
         length(parts) == 1L &&
             is.list(parts[[1L]]) &&
             !methods::is(parts[[1L]], cls)
     ) {
-        parts <- parts[[1L]]
+        parts[[1L]]
+    } else {
+        parts
     }
-    parts <- compact(parts)
-    if (length(parts) == 0L) {
+    present <- compact(unwrapped)
+    if (length(present) == 0L) {
         msg <- glue("{fn}: nothing to combine (need at least one {cls}).")
         abort(msg)
     }
-    if (!all(map_lgl(parts, methods::is, cls))) {
+    if (!all(map_lgl(present, methods::is, cls))) {
         msg <- glue("{fn}: every input must be a {cls}.")
         abort(msg)
     }
-    parts
+    present
 }
 
 #' Combine TwasWeights collections
@@ -113,28 +117,28 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # reporting data.frame.
 .twasMergeRegionEntries <- function(entries, regionLabels) {
     keep <- !map_lgl(entries, is.null)
-    entries <- entries[keep]
-    regionLabels <- regionLabels[keep]
-    if (length(entries) == 0L) {
+    fitted <- entries[keep]
+    fittedLabels <- regionLabels[keep]
+    if (length(fitted) == 0L) {
         return(NULL)
     }
-    if (length(entries) == 1L) {
-        return(entries[[1L]])
+    if (length(fitted) == 1L) {
+        return(fitted[[1L]])
     }
-    entries <- map(entries, .asTwRowPayload)
-    wList <- map(entries, getWeights)
+    payloads <- map(fitted, .asTwRowPayload)
+    wList <- map(payloads, getWeights)
     weights <- if (is.matrix(wList[[1L]])) {
         exec(rbind, !!!wList)
     } else {
         unname(list_c(wList))
     }
     twasWeightsRow(
-        variantIds = unname(list_c(map(entries, .twrPartsVariantIds))),
+        variantIds = unname(list_c(map(payloads, .twrPartsVariantIds))),
         weights = weights,
-        fits = set_names(map(entries, getFits), regionLabels),
-        cvResult = .twasRegionCvDf(entries, regionLabels),
-        standardized = getStandardized(entries[[1L]]),
-        dataType = getDataType(entries[[1L]])
+        fits = set_names(map(payloads, getFits), fittedLabels),
+        cvResult = .twasRegionCvDf(payloads, fittedLabels),
+        standardized = getStandardized(payloads[[1L]]),
+        dataType = getDataType(payloads[[1L]])
     )
 }
 
@@ -157,10 +161,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     assertClass(mashPrior, "MashPrior")
     cvFits <- getCvFits(mashPrior)
     perFold <- if (!is.null(cvFits)) cvFits$perFoldFits else NULL
-    sp <- samplePartition
-    if (is.null(sp) && !is.null(cvFits) && !is.null(cvFits$samplePartition)) {
-        sp <- cvFits$samplePartition
-    }
+    sp <- samplePartition %||% cvFits$samplePartition
     list(
         fullPrior = getFullFit(mashPrior),
         dataDrivenPriorMatricesCv = perFold,
@@ -341,14 +342,12 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         .twasKnownMethodLookupNames()
     )
     regular <- setdiff(methods, fmExtra)
-    methodList <- if (length(regular) > 0L) {
-        .twasMethodLookup(regular)
-    } else {
-        list()
-    }
-    for (tk in fmExtra) {
-        methodList[[str_c(tk, "_weights")]] <- list()
-    }
+    # Fine-mapping tokens carry no learner arguments of their own, so each
+    # gets an empty stub entry under its `<token>_weights` key.
+    methodList <- c(
+        if (length(regular) > 0L) .twasMethodLookup(regular) else list(),
+        .twasEmptyMethodArgs(str_c(fmExtra, "_weights"))
+    )
     # Tokens come from the user input (canonical camelCase) -- the snake keys in
     # methodList are an internal detail of learnTwasWeights.
     list(tokens = unique(methods), methodList = methodList)
@@ -359,21 +358,31 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # token->impl map as an "impl" attribute (without this, downstream
 # .resolveMethodFunction falls back to the bare token, which is not a function).
 # @noRd
-.twasNormalizeListMethods <- function(methods) {
-    methodList <- list()
-    for (tk in names(methods)) {
-        base <- try_fetch(.twasMethodLookup(tk), error = function(cnd) NULL)
-        if (is.null(base)) {
-            # Fine-mapping-only / unknown token with no learner default: keep
-            # as-is (the downstream capability gate produces the message).
-            methodList[[tk]] <- methods[[tk]]
-            next
-        }
-        snake <- names(base)[[1L]]
-        merged <- list_modify(base[[snake]], !!!compact(methods[[tk]]))
-        attr(merged, "impl") <- attr(base[[snake]], "impl")
-        methodList[[snake]] <- merged
+# One `methods` entry re-keyed to its canonical name, with the caller's
+# kwargs merged over the method's defaults. A token with no learner default
+# is kept under its own name (the capability gate reports it downstream).
+# @noRd
+.twasNormalizeOneMethod <- function(tk, methods) {
+    base <- try_fetch(.twasMethodLookup(tk), error = function(cnd) NULL)
+    if (is.null(base)) {
+        return(list(key = tk, args = methods[[tk]]))
     }
+    snake <- names(base)[[1L]]
+    merged <- list_modify(base[[snake]], !!!compact(methods[[tk]]))
+    # `impl` tells .resolveMethodFunction which function backs the token;
+    # without it the bare token is used, which is not a function.
+    list(
+        key = snake,
+        args = `attr<-`(merged, "impl", attr(base[[snake]], "impl"))
+    )
+}
+
+.twasNormalizeListMethods <- function(methods) {
+    entries <- map(names(methods), .twasNormalizeOneMethod, methods = methods)
+    # Later entries win on a repeated canonical key, as the keyed assignment
+    # in the loop did.
+    keyed <- set_names(map(entries, "args"), map_chr(entries, "key"))
+    methodList <- keyed[!duplicated(names(keyed), fromLast = TRUE)]
     list(
         tokens = .twasTokensFromMethodList(methodList),
         methodList = methodList
@@ -593,19 +602,26 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         return(character(0))
     }
     methods <- str_to_lower(as.character(fineMappingResult$method))
-    present <- character(0)
-    for (canonical in .twasFineMappingTokens()) {
-        candidates <- str_to_lower(c(
-            canonical,
-            str_c(
-                str_to_lower(str_sub(canonical, 1L, 1L)),
-                str_sub(canonical, 2L)
-            ),
-            str_replace_all(canonical, "([A-Z])", "_\\1")
-        ))
-        if (any(is_in(methods, candidates))) present <- c(present, canonical)
-    }
-    present
+    keep(.twasFineMappingTokens(), .twasTokenPresentIn, methods = methods)
+}
+
+# The spellings one canonical token may appear under: itself, its camelCase
+# form, and its snake_case form -- all lowercased for comparison.
+# @noRd
+.twasSpellingCandidates <- function(canonical) {
+    str_to_lower(c(
+        canonical,
+        str_c(
+            str_to_lower(str_sub(canonical, 1L, 1L)),
+            str_sub(canonical, 2L)
+        ),
+        str_replace_all(canonical, "([A-Z])", "_\\1")
+    ))
+}
+
+# @noRd
+.twasTokenPresentIn <- function(canonical, methods) {
+    any(is_in(methods, .twasSpellingCandidates(canonical)))
 }
 
 # Reject fine-mapping methods (susie / susieInf / susieAsh / mvsusie /
@@ -617,7 +633,12 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # step with fineMappingPipeline. Methods with no TWAS-weight extractor
 # (fsusie) are rejected with a method-specific message.
 # @noRd
-.twasCheckFineMappingMethods <- function(tokens, fineMappingResult, inputKind) {
+.twasCheckFineMappingMethods <- function(
+    tokens,
+    fineMappingResult,
+    inputKind,
+    cvFolds = 0
+) {
     fmTokens <- intersect(tokens, .twasFineMappingTokens())
     if (length(fmTokens) == 0L) {
         return(invisible(NULL))
@@ -628,7 +649,54 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     .twasCheckFmAdapters(fmTokens)
     .twasRequireFmResult(fineMappingResult, fmTokens)
     .twasCheckFmPresent(fmTokens, fineMappingResult)
+    .twasCheckFmCvPresent(fmTokens, fineMappingResult, cvFolds)
     invisible(NULL)
+}
+
+# Whether row `i` of a FineMappingResult carries a cross-validation result.
+# @noRd
+.fmrRowHasCv <- function(i, fineMappingResult) {
+    !is.null(getCvResult(.fmrRowParts(fineMappingResult, i)))
+}
+
+# Whether a FineMappingResult carries any cross-validation result at all.
+# @noRd
+.fmrAnyCvResult <- function(fineMappingResult) {
+    if (!is(fineMappingResult, "FineMappingResultBase")) {
+        return(FALSE)
+    }
+    n <- nrow(fineMappingResult)
+    if (is.null(n) || n == 0L) {
+        return(FALSE)
+    }
+    any(map_lgl(
+        seq_len(n),
+        .fmrRowHasCv,
+        fineMappingResult = fineMappingResult
+    ))
+}
+
+# Cross-validating a fine-mapping method needs that method's per-fold fits,
+# and this pipeline never fine-maps for itself. Only fineMappingPipeline() run
+# with cvFolds > 1 produces them, so require them up front rather than
+# discovering the gap once the folds are already being scored.
+# @noRd
+.twasCheckFmCvPresent <- function(fmTokens, fineMappingResult, cvFolds) {
+    if (is.null(cvFolds) || cvFolds <= 1L) {
+        return(invisible(NULL))
+    }
+    if (.fmrAnyCvResult(fineMappingResult)) {
+        return(invisible(NULL))
+    }
+    fmStr <- str_flatten(fmTokens, ", ")
+    msg <- glue(
+        "twasWeightsPipeline: cross-validating method(s) {fmStr} needs each ",
+        "fold's own fine-mapping fit, but the supplied fineMappingResult ",
+        "carries no cross-validation. Run fineMappingPipeline() with ",
+        "cvFolds > 1; its fold partition is then reused for every other ",
+        "weight method so all of them are scored on the same folds."
+    )
+    abort(msg)
 }
 
 # Reject fine-mapping methods that have no TWAS-weight extractor (e.g. fsusie).
@@ -773,32 +841,46 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         return(list())
     }
     assertClass(fineMappingResult, "FineMappingResultBase")
-    out <- list()
-    methods <- as.character(fineMappingResult$method)
-    for (canonical in c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")) {
-        candidates <- c(
-            canonical,
-            str_c(
-                str_to_lower(str_sub(canonical, 1L, 1L)),
-                str_sub(canonical, 2L)
-            ),
-            str_replace_all(canonical, "([A-Z])", "_\\1")
-        )
-        candidates <- str_to_lower(candidates)
-        idx <- which(
-            is_in(str_to_lower(methods), candidates) &
-                as.character(fineMappingResult$study) == study &
-                as.character(fineMappingResult$context) == context &
-                as.character(fineMappingResult$trait) == trait
-        )
-        if (length(idx) > 0L) {
-            out[[canonical]] <- getSusieFit(.fmrRowParts(
-                fineMappingResult,
-                idx[[1L]]
-            ))
-        }
+    tokens <- c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")
+    found <- compact(set_names(
+        map(
+            tokens,
+            .twasFitForToken,
+            fineMappingResult = fineMappingResult,
+            study = study,
+            context = context,
+            trait = trait
+        ),
+        tokens
+    ))
+    # compact() on an all-NULL named list leaves a zero-length names
+    # attribute, which is not the bare list() the contract promises.
+    if (length(found) == 0L) list() else found
+}
+
+# The fit this result holds for one token on one tuple, or NULL when it has
+# none. The first matching row wins, as the keyed assignment it replaced did.
+# @noRd
+.twasFitForToken <- function(
+    canonical,
+    fineMappingResult,
+    study,
+    context,
+    trait
+) {
+    idx <- which(
+        is_in(
+            str_to_lower(as.character(fineMappingResult$method)),
+            .twasSpellingCandidates(canonical)
+        ) &
+            as.character(fineMappingResult$study) == study &
+            as.character(fineMappingResult$context) == context &
+            as.character(fineMappingResult$trait) == trait
+    )
+    if (length(idx) == 0L) {
+        return(NULL)
     }
-    out
+    getSusieFit(.fmrRowParts(fineMappingResult, idx[[1L]]))
 }
 
 # Locate a fine-mapping fit for one (study, context, trait, token) tuple.
@@ -836,6 +918,34 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # per-region list; the first region carrying CV is used. Returns NULL when no
 # fine-mapping entry for the tuple recorded CV.
 # @noRd
+# Concatenate per-row lists, empty-safe.
+# @noRd
+.twasCvConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
+    }
+    list_c(pieces)
+}
+
+# Row `i`'s cross-validation result, or NULL when it has none. Multi-region
+# entries store cvResult as a named per-region list, so the first region that
+# carries a partition stands for the row.
+# @noRd
+.twasRowCvResult <- function(i, fineMappingResult) {
+    cv <- getCvResult(.fmrRowParts(fineMappingResult, i))
+    if (is.null(cv)) {
+        return(NULL)
+    }
+    if (!is.null(cv$samplePartition)) {
+        return(cv)
+    }
+    hit <- keep(cv, .twasCvHasPartition)
+    if (length(hit) == 0L) {
+        return(NULL)
+    }
+    hit[[1L]]
+}
+
 .twasCvResultFor <- function(fineMappingResult, study, context, trait) {
     if (is.null(fineMappingResult)) {
         return(NULL)
@@ -851,36 +961,21 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (length(idx) == 0L) {
         return(NULL)
     }
-    samplePartition <- NULL
-    prediction <- list()
-    performance <- list()
-    for (i in idx) {
-        cv <- getCvResult(.fmrRowParts(fineMappingResult, i))
-        if (is.null(cv)) {
-            next
-        }
-        # Multi-region entries store cvResult as a named per-region list; pick
-        # the first region that carries a partition.
-        if (is.null(cv$samplePartition)) {
-            hit <- keep(cv, .twasCvHasPartition)
-            if (length(hit) == 0L) {
-                next
-            }
-            cv <- hit[[1L]]
-        }
-        if (is.null(samplePartition)) {
-            samplePartition <- cv$samplePartition
-        }
-        prediction <- c(prediction, cv$prediction)
-        performance <- c(performance, cv$performance)
-    }
+    cvs <- compact(map(
+        idx,
+        .twasRowCvResult,
+        fineMappingResult = fineMappingResult
+    ))
+    prediction <- .twasCvConcat(map(cvs, "prediction"))
     if (length(prediction) == 0L) {
         return(NULL)
     }
     list(
-        samplePartition = samplePartition,
+        # The first row that carries one defines the partition, as the
+        # "only set it if still NULL" assignment did.
+        samplePartition = cvs[[1L]]$samplePartition,
         prediction = prediction,
-        performance = performance
+        performance = .twasCvConcat(map(cvs, "performance"))
     )
 }
 
@@ -1081,8 +1176,8 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
 # @noRd
 .twasRunMultivariateGrid <- function(traits, marker, ctx) {
     synthSpec <- list(list(axes = c("context", "trait"), scope = NULL))
-    labs <- map_chr(ctx$xRegions, .twasRegionLabel)
-    perRegion <- map(
+    allLabs <- map_chr(ctx$xRegions, .twasRegionLabel)
+    allRegions <- map(
         seq_along(ctx$xRegions),
         .twasMvGridRegion,
         synthSpec = synthSpec,
@@ -1090,9 +1185,9 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
         ctx = ctx,
         traits = traits
     )
-    keep <- !map_lgl(perRegion, is.null)
-    perRegion <- perRegion[keep]
-    labs <- labs[keep]
+    keep <- !map_lgl(allRegions, is.null)
+    perRegion <- allRegions[keep]
+    labs <- allLabs[keep]
     if (length(perRegion) == 0L) {
         return(NULL)
     }
@@ -1246,17 +1341,21 @@ setMethod(
         keepVariants
     )
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
-    norm <- .twasNormalizeMethods(methods)
-    .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")
-    .twasCheckFineMappingMethods(norm$tokens, fineMappingResult, "QtlDataset")
+    rawNorm <- .twasNormalizeMethods(methods)
+    .twasCheckMethodCapabilities(rawNorm$tokens, "QtlDataset")
+    .twasCheckFineMappingMethods(
+        rawNorm$tokens,
+        fineMappingResult,
+        "QtlDataset",
+        cvFolds = cvFolds
+    )
     .twasQdsCheckFitFull(fitFullData, cvFolds)
-    mash <- .twasQdsUnpackMash(mashPrior, samplePartition, norm)
+    mash <- .twasQdsUnpackMash(mashPrior, samplePartition, rawNorm)
     samplePartition <- mash$samplePartition
     dataDrivenPriorMatricesCv <- mash$dataDrivenPriorMatricesCv
-    norm <- mash$norm
     joint <- .twasQdsJointPhase(
         parsedJointSpec,
-        norm,
+        mash$norm,
         data,
         contexts,
         traitId,
@@ -1381,16 +1480,32 @@ setMethod(
         )
         warn(msg)
     }
-    if (
+    withPrior <- if (
         !is.null(mp$fullPrior) &&
             is_in("mrmash_weights", names(norm$methodList))
     ) {
-        norm$methodList$mrmash_weights$dataDrivenPriorMatrices <- mp$fullPrior
+        .twasQdsSetMrmashPrior(norm, mp$fullPrior)
+    } else {
+        norm
     }
     list(
         samplePartition = mp$samplePartition,
         dataDrivenPriorMatricesCv = mp$dataDrivenPriorMatricesCv,
-        norm = norm
+        norm = withPrior
+    )
+}
+
+# The normalized argument list with mr.mash's full-data prior attached,
+# leaving every other method's arguments untouched.
+# @noRd
+.twasQdsSetMrmashPrior <- function(norm, fullPrior) {
+    updated <- list_assign(
+        norm$methodList$mrmash_weights,
+        dataDrivenPriorMatrices = fullPrior
+    )
+    list_assign(
+        norm,
+        methodList = list_assign(norm$methodList, mrmash_weights = updated)
     )
 }
 
@@ -1442,13 +1557,18 @@ setMethod(
         }
         return(list(done = TRUE, result = jointResult))
     }
-    norm <- norm
-    norm$tokens <- keep
     keepKeys <- which(
         is_in(str_remove(names(norm$methodList), "(_weights|Weights)$"), keep)
     )
-    norm$methodList <- norm$methodList[keepKeys]
-    list(done = FALSE, result = jointResult, norm = norm)
+    list(
+        done = FALSE,
+        result = jointResult,
+        norm = list_assign(
+            norm,
+            tokens = keep,
+            methodList = norm$methodList[keepKeys]
+        )
+    )
 }
 
 # Resolve the (context, trait) grid + multivariate flag and build the joint-
@@ -1746,15 +1866,15 @@ setMethod(
     .twasAssertQcd(data)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     tm <- .twasSumStatsMethodTokens(methods)
-    tokens <- tm$tokens
-    methodArgs <- tm$methodArgs
-    .twasCheckMethodCapabilities(tokens, "QtlSumStats")
-    .twasCheckFineMappingMethods(tokens, fineMappingResult, "QtlSumStats")
+    allTokens <- tm$tokens
+    allMethodArgs <- tm$methodArgs
+    .twasCheckMethodCapabilities(allTokens, "QtlSumStats")
+    .twasCheckFineMappingMethods(allTokens, fineMappingResult, "QtlSumStats")
     joint <- .twasQssJointPhase(
         parsedJointSpec,
         data,
-        tokens,
-        methodArgs,
+        allTokens,
+        allMethodArgs,
         contexts,
         traitId,
         dataType,
@@ -1949,12 +2069,15 @@ setMethod(
     contexts,
     traitId
 ) {
-    selRows <- seq_len(nrow(data))
-    if (!is.null(contexts)) {
-        selRows <- selRows[is_in(contextCol[selRows], contexts)]
+    byContext <- if (is.null(contexts)) {
+        seq_len(nrow(data))
+    } else {
+        which(is_in(contextCol, contexts))
     }
-    if (!is.null(traitId)) {
-        selRows <- selRows[is_in(traitCol[selRows], traitId)]
+    selRows <- if (is.null(traitId)) {
+        byContext
+    } else {
+        byContext[is_in(traitCol[byContext], traitId)]
     }
     if (length(selRows) == 0L) {
         msg <- glue(
@@ -2052,13 +2175,13 @@ setMethod(
     if (!is.null(adapter) || tk != "mrmash") {
         return(userArgs)
     }
-    if (is.null(userArgs$retainFit)) {
-        userArgs$retainFit <- TRUE
-    }
-    if (is.null(userArgs$fitDetail)) {
-        userArgs$fitDetail <- retainFitDetail
-    }
-    userArgs
+    list_assign(
+        userArgs,
+        !!!compact(list(
+            retainFit = if (is.null(userArgs$retainFit)) TRUE,
+            fitDetail = if (is.null(userArgs$fitDetail)) retainFitDetail
+        ))
+    )
 }
 
 # Run a weight function, warning (with `errPrefix`) and returning NULL on error.
@@ -2211,7 +2334,7 @@ setMethod(
     ldSketch,
     cutoffs = NULL
 ) {
-    df <- getSumStatsDf(
+    allDf <- getSumStatsDf(
         data,
         study = st,
         context = ctx,
@@ -2226,16 +2349,13 @@ setMethod(
         "twasWeightsPipeline(QtlSumStats): study='{st}', ",
         "context='{ctx}', trait='{tr}'"
     )
-    df <- df[
-        .panelKeepMask(df$variant_id, ldSketch, cutoffs, label),
+    df <- allDf[
+        .panelKeepMask(allDf$variant_id, ldSketch, cutoffs, label),
         ,
         drop = FALSE
     ]
     variantIds <- df$variant_id
-    varY <- getVarY(data, study = st, context = ctx, trait = tr)
-    if (is.null(varY)) {
-        varY <- 1
-    }
+    varY <- getVarY(data, study = st, context = ctx, trait = tr) %||% 1
     stat <- list(
         z = df$z,
         n = stats::median(df$N, na.rm = TRUE),
@@ -2266,23 +2386,29 @@ setMethod(
     dataType
 ) {
     spec <- .twasResolveWeightFn(tk)
-    userArgs <- .twasUserArgs(methodArgs, tk)
+    baseArgs <- .twasUserArgs(methodArgs, tk)
     # When the token is a fine-mapping method, pass the precomputed fit into the
     # *Rss weight function via its dedicated *Fit arg. The gate above ensures
     # fineMappingResult is non-NULL here.
-    if (!is.null(spec$adapter)) {
-        fit <- .twasFineMappingFitFor(
+    fit <- if (is.null(spec$adapter)) {
+        NULL
+    } else {
+        .twasFineMappingFitFor(
             fineMappingResult,
             study = st,
             context = ctx,
             trait = tr,
             token = tk
         )
-        if (is.null(fit)) {
-            .twasWarnNoFitUniv(tk, st, ctx, tr)
-            return(NULL)
-        }
-        userArgs[[spec$adapter$rssFitArg]] <- fit
+    }
+    if (!is.null(spec$adapter) && is.null(fit)) {
+        .twasWarnNoFitUniv(tk, st, ctx, tr)
+        return(NULL)
+    }
+    userArgs <- if (is.null(fit)) {
+        baseArgs
+    } else {
+        list_assign(baseArgs, !!!set_names(list(fit), spec$adapter$rssFitArg))
     }
     weights <- .twasTryWeights(
         spec$fn,
@@ -2295,7 +2421,7 @@ setMethod(
         return(NULL)
     }
     fitAttr <- attr(weights, "fit")
-    attr(weights, "fit") <- NULL
+    bare <- `attr<-`(weights, "fit", NULL)
     .twasRowRecord(
         st,
         ctx,
@@ -2303,7 +2429,7 @@ setMethod(
         tk,
         twasWeightsRow(
             variantIds = fitCtx$variantIds,
-            weights = as.numeric(weights),
+            weights = as.numeric(bare),
             fits = fitAttr,
             cvResult = NULL,
             standardized = TRUE,
@@ -2442,7 +2568,7 @@ setMethod(
     ldSketch = NULL,
     cutoffs = NULL
 ) {
-    firstDf <- getSumStatsDf(
+    allDf <- getSumStatsDf(
         data,
         study = st,
         context = ctxNames[[1L]],
@@ -2457,16 +2583,10 @@ setMethod(
         "twasWeightsPipeline(QtlSumStats, multivariate): study='{st}', ",
         "trait='{tr}'"
     )
-    keep <- .panelKeepMask(firstDf$variant_id, ldSketch, cutoffs, label)
-    firstDf <- firstDf[keep, , drop = FALSE]
+    keep <- .panelKeepMask(allDf$variant_id, ldSketch, cutoffs, label)
+    firstDf <- allDf[keep, , drop = FALSE]
     variantIds <- firstDf$variant_id
-    Z <- matrix(
-        NA_real_,
-        nrow = length(variantIds),
-        ncol = length(ctxNames),
-        dimnames = list(variantIds, ctxNames)
-    )
-    filled <- .twasQssFillContexts(data, st, tr, ctxNames, variantIds, Z)
+    filled <- .twasQssFillContexts(data, st, tr, ctxNames, variantIds)
     list(
         variantIds = variantIds,
         stat = list(
@@ -2482,24 +2602,43 @@ setMethod(
 # position, not by name, so a differing order would silently pair one context's
 # variant with another's.
 # @noRd
-.twasQssFillContexts <- function(data, st, tr, ctxNames, variantIds, Z) {
-    nVec <- numeric(length(ctxNames))
-    for (kk in seq_along(ctxNames)) {
-        d <- getSumStatsDf(
-            data,
-            study = st,
-            context = ctxNames[[kk]],
-            trait = tr,
-            require = c("Z", "N"),
-            derive = "zFromBetaSe"
-        )
-        d <- d[is_in(d$variant_id, variantIds), , drop = FALSE]
-        .twasQssCheckSnpOrder(d$variant_id, variantIds, st, tr)
-        Z[, kk] <- d$z
-        nVec[kk] <- stats::median(d$N, na.rm = TRUE)
-    }
-    names(nVec) <- ctxNames
-    list(z = Z, n = nVec)
+# One context's z column and median N, checked against the shared SNP order.
+# @noRd
+.twasQssContextStats <- function(ctx, data, st, tr, variantIds) {
+    d <- getSumStatsDf(
+        data,
+        study = st,
+        context = ctx,
+        trait = tr,
+        require = c("Z", "N"),
+        derive = "zFromBetaSe"
+    )
+    kept <- d[is_in(d$variant_id, variantIds), , drop = FALSE]
+    .twasQssCheckSnpOrder(kept$variant_id, variantIds, st, tr)
+    list(z = kept$z, n = stats::median(kept$N, na.rm = TRUE))
+}
+
+# Every context shares one SNP order (asserted per context), which is what
+# lets the columns simply be laid side by side rather than filled into a
+# preallocated matrix.
+.twasQssFillContexts <- function(data, st, tr, ctxNames, variantIds) {
+    stats <- map(
+        ctxNames,
+        .twasQssContextStats,
+        data = data,
+        st = st,
+        tr = tr,
+        variantIds = variantIds
+    )
+    list(
+        z = matrix(
+            unname(list_c(map(stats, "z"))),
+            nrow = length(variantIds),
+            ncol = length(ctxNames),
+            dimnames = list(variantIds, ctxNames)
+        ),
+        n = set_names(map_dbl(stats, "n"), ctxNames)
+    )
 }
 
 # @noRd
@@ -2531,26 +2670,29 @@ setMethod(
     dataType
 ) {
     spec <- .twasResolveWeightFn(tk)
-    userArgs <- .twasMrmashRetainDefaults(
+    baseArgs <- .twasMrmashRetainDefaults(
         .twasUserArgs(methodArgs, tk),
         spec$adapter,
         tk,
         retainFitDetail
     )
     # mvsusie is fine-mapping; thread its pre-fit through (mr.mash is not).
-    if (!is.null(spec$adapter)) {
-        userArgs <- .twasMvThreadFit(
+    userArgs <- if (is.null(spec$adapter)) {
+        baseArgs
+    } else {
+        .twasMvThreadFit(
             spec,
-            userArgs,
+            baseArgs,
             tk,
             st,
             tr,
             ctxNames,
             fineMappingResult
         )
-        if (is.null(userArgs)) {
-            return(list())
-        }
+    }
+    # .twasMvThreadFit answers NULL when the pre-fit it needs is missing.
+    if (is.null(userArgs)) {
+        return(list())
     }
     weights <- .twasTryWeights(
         spec$fn,
@@ -2562,13 +2704,11 @@ setMethod(
     if (is.null(weights)) {
         return(list())
     }
-    if (!is.matrix(weights)) {
-        weights <- as.matrix(weights)
-    }
-    fitAttr <- attr(weights, "fit")
-    attr(weights, "fit") <- NULL
+    wMatrix <- if (is.matrix(weights)) weights else as.matrix(weights)
+    fitAttr <- attr(wMatrix, "fit")
+    bare <- `attr<-`(wMatrix, "fit", NULL)
     .twasMvContextRows(
-        weights,
+        bare,
         fitAttr,
         ctxNames,
         mvStat,
@@ -2602,8 +2742,7 @@ setMethod(
         .twasWarnNoFitMv(tk, st, tr)
         return(NULL)
     }
-    userArgs[[spec$adapter$rssFitArg]] <- fit
-    userArgs
+    list_assign(userArgs, !!!set_names(list(fit), spec$adapter$rssFitArg))
 }
 
 # Warning for a missing multivariate fine-mapping fit.
@@ -3010,10 +3149,10 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
         abort("Package 'quadprog' is required for solver='quadprog'.")
     }
 
-    Dmat <- crossprod(Pvalid)
+    gram <- crossprod(Pvalid)
     dvec <- as.vector(crossprod(Pvalid, yObs))
     # Ridge term for numerical stability (small relative to trace)
-    Dmat <- Dmat + 1e-8 * mean(diag(Dmat)) * diag(Kvalid)
+    Dmat <- gram + 1e-8 * mean(diag(gram)) * diag(Kvalid)
 
     # Constraint matrix: first constraint is equality (sum = 1), then Kvalid
     # non-negativity constraints.
@@ -3185,8 +3324,8 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
         return(rep(1 / Kvalid, Kvalid))
     }
 
-    zetaValid <- as.numeric(coef(fit, s = "lambda.min"))[-1] # drop intercept
-    zetaValid <- pmax(zetaValid, 0)
+    # [-1] drops the intercept.
+    zetaValid <- pmax(as.numeric(coef(fit, s = "lambda.min"))[-1], 0)
     zetaSum <- sum(zetaValid)
     if (zetaSum <= 0) {
         warn(
@@ -3548,30 +3687,45 @@ ensembleWeights <- function(
 
 # Assemble one dataset's (samples x methods) prediction matrix.
 # @noRd
-.ensembleBuildPd <- function(predsD, nm, aln, contextIndex, d) {
-    Pd <- matrix(NA_real_, nrow = aln$nD, ncol = nm$K)
-    colnames(Pd) <- nm$baseNames
-    for (k in seq_along(nm$predNames)) {
-        predMat <- predsD[[nm$predNames[k]]]
-        pCol <- if (is.matrix(predMat)) {
-            predMat[aln$predOrder, contextIndex]
-        } else {
-            as.numeric(predMat)[aln$predOrder]
-        }
-        if (length(pCol) != aln$nD) {
-            methodName <- nm$predNames[k]
-            nCol <- length(pCol)
-            nAligned <- aln$nD
-            msg <- glue(
-                "Prediction length for method '{methodName}' in dataset ",
-                "{d} ({nCol}) does not match number of aligned samples ",
-                "({nAligned})."
-            )
-            abort(msg)
-        }
-        Pd[, k] <- pCol
+# One method's aligned prediction column for dataset `d`.
+# @noRd
+.ensemblePredColumn <- function(k, predsD, nm, aln, contextIndex, d) {
+    methodName <- nm$predNames[k]
+    predMat <- predsD[[methodName]]
+    pCol <- if (is.matrix(predMat)) {
+        predMat[aln$predOrder, contextIndex]
+    } else {
+        as.numeric(predMat)[aln$predOrder]
     }
-    Pd
+    if (length(pCol) != aln$nD) {
+        nCol <- length(pCol)
+        nAligned <- aln$nD
+        msg <- glue(
+            "Prediction length for method '{methodName}' in dataset ",
+            "{d} ({nCol}) does not match number of aligned samples ",
+            "({nAligned})."
+        )
+        abort(msg)
+    }
+    pCol
+}
+
+.ensembleBuildPd <- function(predsD, nm, aln, contextIndex, d) {
+    cols <- map(
+        seq_along(nm$predNames),
+        .ensemblePredColumn,
+        predsD = predsD,
+        nm = nm,
+        aln = aln,
+        contextIndex = contextIndex,
+        d = d
+    )
+    matrix(
+        unname(list_c(cols)),
+        nrow = aln$nD,
+        ncol = nm$K,
+        dimnames = list(NULL, nm$baseNames)
+    )
 }
 
 # Drop rows with any NA prediction/outcome; error when too few remain.
@@ -3621,18 +3775,14 @@ ensembleWeights <- function(
         solver,
         alpha
     )
-    zeta <- rep(0, nm$K)
-    zeta[validMethods] <- zetaValid
-    names(zeta) <- nm$baseNames
-    zeta
+    zeta <- replace(rep(0, nm$K), validMethods, zetaValid)
+    set_names(zeta, nm$baseNames)
 }
 
 # Degenerate case: a single signal-bearing method takes full weight.
 # @noRd
 .ensembleSingleMethodZeta <- function(validMethods, baseNames, K) {
-    zeta <- rep(0, K)
-    zeta[validMethods] <- 1
-    names(zeta) <- baseNames
+    zeta <- set_names(replace(rep(0, K), validMethods, 1), baseNames)
     methodName <- baseNames[validMethods]
     msg <- glue(
         "Only one method ('{methodName}') has non-zero variance ",
@@ -3708,24 +3858,45 @@ ensembleWeights <- function(
 
 # Zeta-weighted sum of the matched weight matrices; univariate -> named vector.
 # @noRd
+# One method's zeta-scaled contribution, or NULL when its weight matrix does
+# not line up with the first one's shape.
+# @noRd
+.ensembleWeightTerm <- function(i, wtList, wtKeys, zeta, shape) {
+    wMat <- .ensembleAsMatrix(wtList[[wtKeys[i]]])
+    if (!identical(dim(wMat), shape)) {
+        wtKey <- wtKeys[i]
+        msg <- glue(
+            "Weight matrix for '{wtKey}' has inconsistent dimensions; ",
+            "skipping."
+        )
+        warn(msg)
+        return(NULL)
+    }
+    zeta[i] * wMat
+}
+
 .ensembleAccumulateWeights <- function(wtList, wtKeys, matched, zeta) {
     firstWt <- .ensembleAsMatrix(wtList[[wtKeys[which(matched)[1]]]])
-    ensembleTwasWt <- matrix(0, nrow = nrow(firstWt), ncol = ncol(firstWt))
-    rownames(ensembleTwasWt) <- rownames(firstWt)
-    colnames(ensembleTwasWt) <- colnames(firstWt)
-    for (i in which(matched)) {
-        wMat <- .ensembleAsMatrix(wtList[[wtKeys[i]]])
-        if (!identical(dim(wMat), dim(ensembleTwasWt))) {
-            wtKey <- wtKeys[i]
-            msg <- glue(
-                "Weight matrix for '{wtKey}' has inconsistent dimensions; ",
-                "skipping."
-            )
-            warn(msg)
-            next
-        }
-        ensembleTwasWt <- ensembleTwasWt + zeta[i] * wMat
-    }
+    shape <- dim(firstWt)
+    # The ensemble is the sum of the scaled contributions, so it is a fold
+    # over them rather than a matrix added into repeatedly.
+    ensembleTwasWt <- reduce(
+        compact(map(
+            which(matched),
+            .ensembleWeightTerm,
+            wtList = wtList,
+            wtKeys = wtKeys,
+            zeta = zeta,
+            shape = shape
+        )),
+        `+`,
+        .init = matrix(
+            0,
+            nrow = nrow(firstWt),
+            ncol = ncol(firstWt),
+            dimnames = dimnames(firstWt)
+        )
+    )
     # For the univariate case, return as a named vector.
     if (ncol(ensembleTwasWt) == 1) {
         return(set_names(as.numeric(ensembleTwasWt), rownames(ensembleTwasWt)))

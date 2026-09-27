@@ -319,9 +319,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     YperCtx <- set_names(map(built, "Y"), map_chr(built, "ctx"))
     dedup <- .cbDedupX(XperCtx)
     split <- .cbSplitY(YperCtx, dedup$xMatch)
-    outcomeInfo <- split$outcomeInfo
-    outcomeInfo$study <- getStudy(qd)
-    outcomeInfo$dataForm <- "individual"
+    outcomeInfo <- mutate(
+        split$outcomeInfo,
+        study = getStudy(qd),
+        dataForm = "individual"
+    )
     list(
         X = dedup$uniqueX,
         Y = split$YSplit,
@@ -357,11 +359,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # NULL when the context should be skipped.
 # @noRd
 .cbBuildContextXY <- function(ctx, p) {
-    Y <- .cbResidualizedY(p$qd, ctx, p$traitId, p$region)
-    if (is.null(Y) || ncol(Y) == 0L) {
+    rawY <- .cbResidualizedY(p$qd, ctx, p$traitId, p$region)
+    if (is.null(rawY) || ncol(rawY) == 0L) {
         return(NULL)
     }
-    X <- .cbResidualizedX(
+    rawX <- .cbResidualizedX(
         p$qd,
         ctx,
         p$traitId,
@@ -369,16 +371,16 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         p$cisWindow,
         p$samples
     )
-    if (is.null(X) || ncol(X) == 0L) {
+    if (is.null(rawX) || ncol(rawX) == 0L) {
         return(NULL)
     }
     # Canonicalize variant colnames (chr-prefix + separator, allele order
     # preserved; rsIDs passed through) so colocboost's name-based matching
-    # aligns
-    # them with the sumstat / LD ids and across studies. A genuine ref/alt swap
-    # stays a distinct id -- names are aligned here, allele *coding* is not.
-    colnames(X) <- normalizeVariantId(colnames(X))
-    common <- intersect(rownames(X), rownames(Y))
+    # aligns them with the sumstat / LD ids and across studies. A genuine
+    # ref/alt swap stays a distinct id -- names are aligned here, allele
+    # *coding* is not.
+    named <- `colnames<-`(rawX, normalizeVariantId(colnames(rawX)))
+    common <- intersect(rownames(named), rownames(rawY))
     if (length(common) == 0L) {
         msg <- glue(
             "colocboostPipeline: skipping context '{ctx}' ",
@@ -387,9 +389,13 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         inform(msg)
         return(NULL)
     }
-    X <- X[common, , drop = FALSE]
-    Y <- Y[common, , drop = FALSE]
-    Y <- .cbApplyScreen(X, Y, ctx, p$pipCutoffToSkip)
+    X <- named[common, , drop = FALSE]
+    Y <- .cbApplyScreen(
+        X,
+        rawY[common, , drop = FALSE],
+        ctx,
+        p$pipCutoffToSkip
+    )
     if (is.null(Y)) {
         return(NULL)
     }
@@ -460,26 +466,27 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     Y
 }
 
+# The index of the first element of `xs` identical to `xs[[i]]`.
+# @noRd
+.cbFirstIdentical <- function(i, xs) {
+    which(map_lgl(xs, identical, xs[[i]]))[[1L]]
+}
+
 # Deduplicate X matrices identical across contexts so dict_YX can fan out to a
 # smaller X set. Returns list(uniqueX, xMatch) where xMatch[i] is the uniqueX
-# index for the i-th context. (Sequential back-reference dedup -- kept as a
-# loop.)
+# index for the i-th context.
+#
+# Each context resolves to the first context it matches, so nothing has to be
+# carried between iterations: the ones that resolve to themselves are the
+# unique set, and every context's slot is its representative's position in it.
 # @noRd
 .cbDedupX <- function(XperCtx) {
-    uniqueX <- list()
-    xMatch <- integer(length(XperCtx))
-    for (i in seq_along(XperCtx)) {
-        matched <- names(uniqueX)[
-            map_lgl(uniqueX, identical, XperCtx[[i]])
-        ]
-        if (length(matched) > 0L) {
-            xMatch[[i]] <- match(matched[[1L]], names(uniqueX))
-        } else {
-            uniqueX[[names(XperCtx)[i]]] <- XperCtx[[i]]
-            xMatch[[i]] <- length(uniqueX)
-        }
-    }
-    list(uniqueX = uniqueX, xMatch = xMatch)
+    firstIdx <- map_int(seq_along(XperCtx), .cbFirstIdentical, xs = XperCtx)
+    keepIdx <- which(firstIdx == seq_along(XperCtx))
+    list(
+        uniqueX = XperCtx[keepIdx],
+        xMatch = match(firstIdx, keepIdx)
+    )
 }
 
 # Split each context's Y into single-trait columns (context-qualifying duplicate
@@ -491,55 +498,93 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     dupTraits <- unique(allTraitNames[
         duplicated(allTraitNames) | duplicated(allTraitNames, fromLast = TRUE)
     ])
-    YSplit <- list()
-    dict <- matrix(integer(0), ncol = 2L)
+    # Every (context, column) pair, flattened once so the rest is positional.
+    pairs <- .cbConcat(map(
+        seq_along(YperCtx),
+        .cbYPairsForContext,
+        YperCtx = YperCtx,
+        xMatch = xMatch
+    ))
     # The outcome NAME is a display label: context-qualified only when a trait
-    # is ambiguous, then made unique. That makes it lossy -- a bare name could
-    # be a trait seen in one context or a trait literally called that -- so the
-    # (context, trait) it was minted from is recorded alongside it here, the
-    # only point where both are still in hand.
-    info <- list()
-    for (i in seq_along(YperCtx)) {
-        Y <- YperCtx[[i]]
-        ctx <- names(YperCtx)[i]
-        for (j in seq_len(ncol(Y))) {
-            tname <- .cbTraitName(
-                colnames(Y)[j],
-                ctx,
-                dupTraits,
-                names(YSplit)
-            )
-            YSplit[[tname]] <- Y[, j, drop = FALSE]
-            dict <- rbind(dict, c(length(YSplit), xMatch[[i]]))
-            info[[length(info) + 1L]] <- tibble(
-                name = tname,
-                context = ctx,
-                trait = as.character(colnames(Y)[j] %||% NA_character_)
-            )
-        }
-    }
-    colnames(dict) <- c("Y", "X")
-    list(
-        YSplit = YSplit,
-        dict = dict,
-        outcomeInfo = bind_rows(info)
+    # is ambiguous, then made unique. Making it unique depends on the names
+    # already minted, so this one step is a fold -- the only sequential part.
+    outcomeNames <- reduce(
+        pairs,
+        .cbAccumOutcomeName,
+        dupTraits = dupTraits,
+        .init = character(0)
     )
+    # The name is lossy -- a bare name could be a trait seen in one context or
+    # a trait literally called that -- so the (context, trait) it was minted
+    # from is recorded alongside it, the only point where both are in hand.
+    list(
+        YSplit = set_names(map(pairs, "col"), outcomeNames),
+        dict = cbind(Y = seq_along(pairs), X = map_int(pairs, "xIdx")),
+        outcomeInfo = bind_rows(map2(outcomeNames, pairs, .cbOutcomeInfoRow))
+    )
+}
+
+# Concatenate a list of lists into one, empty-safe.
+# @noRd
+.cbConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
+    }
+    list_c(pieces)
+}
+
+# One (context, column) pair: the column itself plus what it was minted from.
+# @noRd
+.cbYPair <- function(j, Y, ctx, xIdx) {
+    list(
+        col = Y[, j, drop = FALSE],
+        ctx = ctx,
+        raw = colnames(Y)[j],
+        trait = as.character(colnames(Y)[j] %||% NA_character_),
+        xIdx = xIdx
+    )
+}
+
+# @noRd
+.cbYPairsForContext <- function(i, YperCtx, xMatch) {
+    Y <- YperCtx[[i]]
+    map(
+        seq_len(ncol(Y)),
+        .cbYPair,
+        Y = Y,
+        ctx = names(YperCtx)[i],
+        xIdx = xMatch[[i]]
+    )
+}
+
+# @noRd
+.cbAccumOutcomeName <- function(existing, pair, dupTraits) {
+    c(existing, .cbTraitName(pair$raw, pair$ctx, dupTraits, existing))
+}
+
+# @noRd
+.cbOutcomeInfoRow <- function(name, pair) {
+    tibble(name = name, context = pair$ctx, trait = pair$trait)
 }
 
 # Resolve a unique outcome name for a single trait column: default unnamed
 # columns, context-qualify duplicates, and make.unique against existing names.
 # @noRd
 .cbTraitName <- function(tname, ctx, dupTraits, existing) {
-    if (is.null(tname) || is.na(tname) || tname == "") {
-        tname <- str_c("outcome", length(existing) + 1L)
+    named <- if (is.null(tname) || is.na(tname) || tname == "") {
+        str_c("outcome", length(existing) + 1L)
+    } else {
+        tname
     }
-    if (is_in(tname, dupTraits)) {
-        tname <- str_c(ctx, "_", tname)
+    qualified <- if (is_in(named, dupTraits)) {
+        str_c(ctx, "_", named)
+    } else {
+        named
     }
-    if (is_in(tname, existing)) {
-        tname <- make.unique(c(existing, tname))[length(existing) + 1L]
+    if (!is_in(qualified, existing)) {
+        return(qualified)
     }
-    tname
+    make.unique(c(existing, qualified))[length(existing) + 1L]
 }
 
 # Build a single (sumstat data.frame, LD correlation matrix) pair from a
@@ -556,7 +601,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     if (is.null(df) || nrow(df) == 0L) {
         return(NULL)
     }
-    df$variant_id <- .cbSumstatVariantIds(df)
+    df <- mutate(df, variant_id = .cbSumstatVariantIds(df))
     # Canonicalize ids (chr-prefix + separator, allele order preserved; rsIDs
     # passed through) so the sumstat `variant` column and the LD dimnames align
     # by name with the individual X colnames and across studies/sumstats.
@@ -587,10 +632,13 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         return(NULL)
     }
     keptIds <- attr(R, "keptVariantIds")
-    attr(R, "keptVariantIds") <- NULL
-    df <- filter(df, is_in(variantIds, keptIds))
-    ss <- .cbSumstatFrame(df, keptIds, nCase, nControl, varY)
-    list(sumstat = ss, LD = R, variantIds = keptIds)
+    kept <- filter(df, is_in(variantIds, keptIds))
+    ss <- .cbSumstatFrame(kept, keptIds, nCase, nControl, varY)
+    list(
+        sumstat = ss,
+        LD = `attr<-`(R, "keptVariantIds", NULL),
+        variantIds = keptIds
+    )
 }
 
 # The colocboost sumstat frame for one entry, over the variants the LD panel
@@ -604,10 +652,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         variant = keptIds,
         stringsAsFactors = FALSE
     )
-    if (!is.null(varY) && !is.na(varY)) {
-        ss$var_y <- varY
-    }
-    ss
+    mutate(
+        ss,
+        !!!compact(list(
+            var_y = if (!is.null(varY) && !is.na(varY)) varY
+        ))
+    )
 }
 
 # Resolve a sumstat entry's variant ids, falling back to the canonical
@@ -653,43 +703,70 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         return(list())
     }
     ldSketch <- getLdSketch(ss)
-    keepRow <- rep(TRUE, nrow(ss))
-    if (!is.null(contexts) && length(contexts) > 0L) {
-        keepRow <- keepRow & is_in(as.character(ss$context), contexts)
+    byContext <- if (!is.null(contexts) && length(contexts) > 0L) {
+        is_in(as.character(ss$context), contexts)
+    } else {
+        rep(TRUE, nrow(ss))
     }
-    if (!is.null(traitId) && length(traitId) > 0L) {
-        keepRow <- keepRow & is_in(as.character(ss$trait), traitId)
+    byTrait <- if (!is.null(traitId) && length(traitId) > 0L) {
+        is_in(as.character(ss$trait), traitId)
+    } else {
+        TRUE
     }
+    keepRow <- byContext & byTrait
     if (!any(keepRow)) {
         return(list())
     }
     rows <- which(keepRow)
 
-    bundle <- list()
-    for (i in rows) {
-        st <- as.character(ss$study)[[i]]
-        ctx <- as.character(ss$context)[[i]]
-        tr <- as.character(ss$trait)[[i]]
-        label <- str_c(st, ctx, tr, sep = ":")
-        pair <- .cbSumstatPair(
-            df = getSumStatsDf(
-                ss,
-                study = st,
-                context = ctx,
-                trait = tr,
-                require = "Z"
-            ),
+    compact(set_names(
+        map(
+            rows,
+            .cbQtlEntryPair,
+            ss = ss,
             ldSketch = ldSketch,
-            varY = if (is_in("varY", .tupleColumnNames(ss))) {
-                ss$varY[[i]]
-            } else {
-                NA_real_
-            },
             cutoffs = cutoffs
-        )
-        if (!is.null(pair)) bundle[[label]] <- pair
+        ),
+        map_chr(rows, .cbQtlEntryLabel, ss = ss)
+    ))
+}
+
+# @noRd
+.cbQtlEntryLabel <- function(i, ss) {
+    str_c(
+        as.character(ss$study)[[i]],
+        as.character(ss$context)[[i]],
+        as.character(ss$trait)[[i]],
+        sep = ":"
+    )
+}
+
+# One QTL entry's (sumstat, LD) pair, or NULL when it has no panel overlap.
+# @noRd
+.cbQtlEntryPair <- function(i, ss, ldSketch, cutoffs) {
+    .cbSumstatPair(
+        df = getSumStatsDf(
+            ss,
+            study = as.character(ss$study)[[i]],
+            context = as.character(ss$context)[[i]],
+            trait = as.character(ss$trait)[[i]],
+            require = "Z"
+        ),
+        ldSketch = ldSketch,
+        varY = .cbTupleValue(ss, "varY", i),
+        cutoffs = cutoffs
+    )
+}
+
+# A tuple column's value for row `i`, or NA when the collection lacks it.
+# `[[` on one of these collections extracts an ELEMENT, not a column, so this
+# goes through mcols() the way the `$` method does.
+# @noRd
+.cbTupleValue <- function(collection, column, i) {
+    if (!is_in(column, .tupleColumnNames(collection))) {
+        return(NA_real_)
     }
-    bundle
+    S4Vectors::mcols(collection, use.names = FALSE)[[column]][[i]]
 }
 
 # Same as .cbQtlSumStatsBundle for a GwasSumStats collection, keyed by
@@ -699,32 +776,33 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         return(list())
     }
     ldSketch <- getLdSketch(gws)
-    bundle <- list()
-    for (i in seq_len(nrow(gws))) {
-        st <- as.character(gws$study)[[i]]
-        pair <- .cbSumstatPair(
-            df = getSumStatsDf(gws, study = st, require = "Z"),
+    compact(set_names(
+        map(
+            seq_len(nrow(gws)),
+            .cbGwasEntryPair,
+            gws = gws,
             ldSketch = ldSketch,
-            varY = if (is_in("varY", .tupleColumnNames(gws))) {
-                gws$varY[[i]]
-            } else {
-                NA_real_
-            },
-            nCase = if (is_in("nCase", .tupleColumnNames(gws))) {
-                gws$nCase[[i]]
-            } else {
-                NA_real_
-            },
-            nControl = if (is_in("nControl", .tupleColumnNames(gws))) {
-                gws$nControl[[i]]
-            } else {
-                NA_real_
-            },
             cutoffs = cutoffs
-        )
-        if (!is.null(pair)) bundle[[st]] <- pair
-    }
-    bundle
+        ),
+        as.character(gws$study)
+    ))
+}
+
+# One GWAS entry's (sumstat, LD) pair, or NULL when it has no panel overlap.
+# @noRd
+.cbGwasEntryPair <- function(i, gws, ldSketch, cutoffs) {
+    .cbSumstatPair(
+        df = getSumStatsDf(
+            gws,
+            study = as.character(gws$study)[[i]],
+            require = "Z"
+        ),
+        ldSketch = ldSketch,
+        varY = .cbTupleValue(gws, "varY", i),
+        nCase = .cbTupleValue(gws, "nCase", i),
+        nControl = .cbTupleValue(gws, "nControl", i),
+        cutoffs = cutoffs
+    )
 }
 
 # Check two LD sketches for the reference-panel compatibility contract. Thin
@@ -752,24 +830,20 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             dict_sumstatLD = matrix(integer(0), ncol = 2L)
         ))
     }
-    ldUnique <- list()
-    ldMatch <- integer(length(bundles))
-    for (i in seq_along(bundles)) {
-        ld <- bundles[[i]]$LD
-        matched <- which(map_lgl(ldUnique, identical, ld))
-        if (length(matched) > 0L) {
-            ldMatch[[i]] <- matched[[1L]]
-        } else {
-            ldUnique[[length(ldUnique) + 1L]] <- ld
-            ldMatch[[i]] <- length(ldUnique)
-        }
-    }
-    names(ldUnique) <- str_c("LD", seq_along(ldUnique))
-    sumstat <- map(bundles, "sumstat")
-    names(sumstat) <- names(bundles)
-    dict <- cbind(seq_along(bundles), ldMatch)
-    colnames(dict) <- c("sumstat", "LD")
-    list(sumstat = sumstat, LD = ldUnique, dict_sumstatLD = dict)
+    # Same shape as .cbDedupX: every bundle resolves to the first bundle
+    # carrying an identical LD matrix, so the unique set and the back-mapping
+    # both fall out without carrying state.
+    lds <- map(bundles, "LD")
+    firstIdx <- map_int(seq_along(lds), .cbFirstIdentical, xs = lds)
+    keepIdx <- which(firstIdx == seq_along(lds))
+    list(
+        sumstat = map(bundles, "sumstat"),
+        LD = set_names(lds[keepIdx], str_c("LD", seq_along(keepIdx))),
+        dict_sumstatLD = cbind(
+            sumstat = seq_along(bundles),
+            LD = match(firstIdx, keepIdx)
+        )
+    )
 }
 
 # Build an empty result skeleton consistent with what the per-method
@@ -793,6 +867,21 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # no-op: the caller gets an empty ColocBoostResult whose getComputingTime()
 # entries are all NULL, with no indication of why. Say so.
 # @noRd
+# TRUE when an analysis was requested and has the data to run. When it was
+# requested but cannot run, warn and answer FALSE, so the caller's compact()
+# drops it instead of skipping it silently.
+# @noRd
+.cbCanRun <- function(requested, hasData, flag, needed) {
+    if (!isTRUE(requested)) {
+        return(FALSE)
+    }
+    if (isTRUE(hasData)) {
+        return(TRUE)
+    }
+    .cbWarnNoData(flag, needed)
+    FALSE
+}
+
 .cbWarnNoData <- function(flag, needed) {
     msg <- glue(
         "colocboostPipeline: {flag} = TRUE was requested, but there is no ",
@@ -819,7 +908,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     qtlLdSketch = NULL,
     qtlSumstatBundle = NULL
 ) {
-    results <- .cbEmptyResult()
+    empty <- .cbEmptyResult()
     hasInd <- !is.null(individualBundle)
     hasSs <- length(sumstatBundle$sumstat) > 0L
     qtlSumstatBundle <- qtlSumstatBundle %||% .cbMergeSumstatBundles(list())
@@ -832,49 +921,57 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         inform(msg)
         return(.cbEmptyResultObject())
     }
-    if (isTRUE(xqtlColoc)) {
-        if (hasInd || hasQtlSs) {
-            run <- .cbRunXqtlOnly(
+    # Each analysis contributes an entry only when it was requested AND has
+    # the data; .cbCanRun warns in the "requested but cannot" case so the skip
+    # is never silent, and compact() drops what did not run.
+    runs <- compact(list(
+        xqtl_coloc = if (
+            .cbCanRun(xqtlColoc, hasInd || hasQtlSs, "xqtlColoc", "QTL data")
+        ) {
+            .cbRunXqtlOnly(
                 individualBundle,
                 qtlSumstatBundle,
                 hasInd,
                 focalTrait,
                 colocboostArgs
             )
-            results$xqtl_coloc <- run$result
-            results$computing_time$Analysis$xqtl_coloc <- run$time
-        } else {
-            .cbWarnNoData("xqtlColoc", "QTL data")
-        }
-    }
-    if (isTRUE(jointGwas)) {
-        if (hasSs) {
-            run <- .cbRunJointGwas(
+        },
+        joint_gwas = if (
+            .cbCanRun(jointGwas, hasSs, "jointGwas", "summary-statistic data")
+        ) {
+            .cbRunJointGwas(
                 individualBundle,
                 sumstatBundle,
                 hasInd,
                 colocboostArgs
             )
-            results$joint_gwas <- run$result
-            results$computing_time$Analysis$joint_gwas <- run$time
-        } else {
-            .cbWarnNoData("jointGwas", "summary-statistic data")
-        }
-    }
-    if (isTRUE(separateGwas)) {
-        if (hasSs) {
-            run <- .cbRunSeparateGwas(
+        },
+        separate_gwas = if (
+            .cbCanRun(
+                separateGwas,
+                hasSs,
+                "separateGwas",
+                "summary-statistic data"
+            )
+        ) {
+            .cbRunSeparateGwas(
                 individualBundle,
                 sumstatBundle,
                 hasInd,
                 colocboostArgs
             )
-            results$separate_gwas <- run$result
-            results$computing_time$Analysis$separate_gwas <- run$time
-        } else {
-            .cbWarnNoData("separateGwas", "summary-statistic data")
         }
-    }
+    ))
+    results <- list_assign(
+        list_assign(empty, !!!map(runs, "result")),
+        computing_time = list_assign(
+            empty$computing_time,
+            Analysis = list_assign(
+                empty$computing_time$Analysis,
+                !!!map(runs, "time")
+            )
+        )
+    )
     .cbToResultObject(
         results,
         .cbOutcomeInfo(individualBundle, sumstatBundle, hasInd),
@@ -903,33 +1000,57 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # key: without it the separate-GWAS sets would be indistinguishable from each
 # other once flattened.
 # @noRd
+# @noRd
+.cbJointRun <- function(nm, results) {
+    if (is.null(results[[nm]])) {
+        return(NULL)
+    }
+    list(run = results[[nm]], analysis = nm, gwasStudy = NA_character_)
+}
+
+# @noRd
+.cbSeparateRun <- function(i, sep, keys) {
+    if (is.null(sep[[i]])) {
+        return(NULL)
+    }
+    list(run = sep[[i]], analysis = "separate_gwas", gwasStudy = keys[[i]])
+}
+
+# One character field across run records, empty-safe.
+# @noRd
+.cbEntryField <- function(entries, field) {
+    if (length(entries) == 0L) {
+        return(character(0))
+    }
+    map_chr(entries, field)
+}
+
 .cbToResultObject <- function(results, outcomeInfo, ldSketch = NULL) {
-    runs <- list()
-    analysis <- character(0)
-    gwasStudy <- character(0)
-    for (nm in c("xqtl_coloc", "joint_gwas")) {
-        if (!is.null(results[[nm]])) {
-            runs[[length(runs) + 1L]] <- results[[nm]]
-            analysis <- c(analysis, nm)
-            gwasStudy <- c(gwasStudy, NA_character_)
-        }
-    }
     sep <- results$separate_gwas
-    if (!is.null(sep) && length(sep) > 0L) {
-        keys <- names(sep) %||% as.character(seq_along(sep))
-        for (i in seq_along(sep)) {
-            if (is.null(sep[[i]])) {
-                next
-            }
-            runs[[length(runs) + 1L]] <- sep[[i]]
-            analysis <- c(analysis, "separate_gwas")
-            gwasStudy <- c(gwasStudy, keys[[i]])
-        }
+    sepRuns <- if (is.null(sep) || length(sep) == 0L) {
+        list()
+    } else {
+        compact(map(
+            seq_along(sep),
+            .cbSeparateRun,
+            sep = sep,
+            keys = names(sep) %||% as.character(seq_along(sep))
+        ))
     }
+    # One record per run, so the three parallel vectors are read off a single
+    # list instead of being grown in step with each other.
+    entries <- c(
+        compact(map(
+            c("xqtl_coloc", "joint_gwas"),
+            .cbJointRun,
+            results = results
+        )),
+        sepRuns
+    )
     ColocBoostResult(
-        results = runs,
-        analysis = analysis,
-        gwasStudy = gwasStudy,
+        results = map(entries, "run"),
+        analysis = .cbEntryField(entries, "analysis"),
+        gwasStudy = .cbEntryField(entries, "gwasStudy"),
         outcomeInfo = outcomeInfo,
         ldSketch = ldSketch,
         computingTime = results$computing_time %||% list()
@@ -1005,20 +1126,19 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # invented.
 # @noRd
 .cbOutcomeInfo <- function(individualBundle, sumstatBundle, hasInd) {
-    parts <- list()
-    if (isTRUE(hasInd) && !is.null(individualBundle$outcomeInfo)) {
-        parts[[length(parts) + 1L]] <- individualBundle$outcomeInfo
-    }
     ssNames <- names(sumstatBundle$sumstat)
-    if (length(ssNames) > 0L) {
-        parts[[length(parts) + 1L]] <- tibble(
-            name = ssNames,
-            context = NA_character_,
-            trait = NA_character_,
-            study = ssNames,
-            dataForm = "sumstats"
-        )
-    }
+    parts <- compact(list(
+        if (isTRUE(hasInd)) individualBundle$outcomeInfo,
+        if (length(ssNames) > 0L) {
+            tibble(
+                name = ssNames,
+                context = NA_character_,
+                trait = NA_character_,
+                study = ssNames,
+                dataForm = "sumstats"
+            )
+        }
+    ))
     if (length(parts) == 0L) {
         return(.cbEmptyOutcomeInfo())
     }
@@ -1168,13 +1288,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ia <- mm$idxA[o]
     ib <- mm$idxB[o]
     sgn <- mm$sign[o]
-    out <- m[, ia, drop = FALSE]
-    flip <- which(sgn == -1)
-    if (length(flip) > 0L) {
-        out[, flip] <- -out[, flip]
-    }
-    colnames(out) <- canonical[ib]
-    out
+    # sgn is +1 / -1 per matched column, so one sweep applies every flip.
+    out <- sweep(m[, ia, drop = FALSE], 2L, sgn, FUN = "*")
+    `colnames<-`(out, canonical[ib])
 }
 
 # Relabel a (sumstat, LD) pair to the canonical coding: flip the z-score and the
@@ -1192,11 +1308,15 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ia <- mm$idxA[o]
     ib <- mm$idxB[o]
     sgn <- mm$sign[o]
-    ss <- p$sumstat[ia, , drop = FALSE]
-    ss$z <- ss$z * sgn
-    ss$variant <- canonical[ib]
-    ld <- p$LD[ia, ia, drop = FALSE] * outer(sgn, sgn)
-    dimnames(ld) <- list(canonical[ib], canonical[ib])
+    ss <- mutate(
+        p$sumstat[ia, , drop = FALSE],
+        z = .data$z * sgn,
+        variant = canonical[ib]
+    )
+    ld <- `dimnames<-`(
+        p$LD[ia, ia, drop = FALSE] * outer(sgn, sgn),
+        list(canonical[ib], canonical[ib])
+    )
     list(sumstat = ss, LD = ld, variantIds = canonical[ib])
 }
 
@@ -1209,18 +1329,13 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # locus. Only invoked when alleleFlip = TRUE.
 # @noRd
 .cbHarmonizeAlleles <- function(individualBundle, pairs) {
-    ids <- character(0)
-    if (!is.null(individualBundle)) {
-        ids <- c(
-            ids,
+    allIds <- c(
+        if (!is.null(individualBundle)) {
             unname(list_c(map(individualBundle$X, colnames)))
-        )
-    }
-    ids <- c(
-        ids,
+        },
         unname(list_c(map(pairs, list("sumstat", "variant"))))
     )
-    ids <- unique(ids[!is.na(ids)])
+    ids <- unique(allIds[!is.na(allIds)])
     if (length(ids) == 0L) {
         return(list(individualBundle = individualBundle, pairs = pairs))
     }
@@ -1228,16 +1343,24 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ok <- !is.na(parsed$chrom) & !is.na(parsed$pos)
     locus <- if_else(ok, str_c(parsed$chrom, parsed$pos, sep = ":"), ids)
     canonical <- ids[!duplicated(locus)]
-    if (!is.null(individualBundle)) {
-        individualBundle$X <- map(
-            individualBundle$X,
-            .cbFlipMatrixToCanonical,
-            canonical = canonical
+    flipped <- if (is.null(individualBundle)) {
+        NULL
+    } else {
+        list_assign(
+            individualBundle,
+            X = map(
+                individualBundle$X,
+                .cbFlipMatrixToCanonical,
+                canonical = canonical
+            )
         )
     }
-    pairs <- map(pairs, .cbFlipPairToCanonical, canonical = canonical)
-    pairs <- pairs[!map_lgl(pairs, is.null)]
-    list(individualBundle = individualBundle, pairs = pairs)
+    list(
+        individualBundle = flipped,
+        pairs = compact(
+            map(pairs, .cbFlipPairToCanonical, canonical = canonical)
+        )
+    )
 }
 
 # Top-level driver shared by all input methods. qtlPairs and gwasPairs
@@ -1271,20 +1394,20 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     # so swapped variants are combined with a consistent sign (alleleFlip =
     # TRUE); alleleFlip = FALSE leaves the names-only canonicalization done at
     # the source builders, which keeps swapped variants distinct.
-    if (isTRUE(alleleFlip)) {
-        harmonized <- .cbHarmonizeAlleles(individualBundle, combinedPairs)
-        individualBundle <- harmonized$individualBundle
-        combinedPairs <- harmonized$pairs
+    harmonized <- if (isTRUE(alleleFlip)) {
+        .cbHarmonizeAlleles(individualBundle, combinedPairs)
+    } else {
+        list(individualBundle = individualBundle, pairs = combinedPairs)
     }
-    sumstatBundle <- .cbMergeSumstatBundles(combinedPairs)
+    sumstatBundle <- .cbMergeSumstatBundles(harmonized$pairs)
     # The xQTL-only run gets its own bundle over just the QTL-side pairs, so
     # a GWAS study is never treated as an xQTL outcome. Rebuilding it through
     # .cbMergeSumstatBundles (rather than subsetting the merged one) keeps the
     # deduplicated LD list and dict_sumstatLD consistent for the subset.
-    qtlKeys <- intersect(names(combinedPairs), names(qtlPairs))
-    qtlSumstatBundle <- .cbMergeSumstatBundles(combinedPairs[qtlKeys])
+    qtlKeys <- intersect(names(harmonized$pairs), names(qtlPairs))
+    qtlSumstatBundle <- .cbMergeSumstatBundles(harmonized$pairs[qtlKeys])
     .cbRunVariants(
-        individualBundle,
+        harmonized$individualBundle,
         sumstatBundle,
         xqtlColoc,
         jointGwas,
@@ -1314,17 +1437,17 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         .cbRequireMatchingLdSketches(qtlLdSketch, getLdSketch(gwasSumStats))
     }
     gwasPairs <- .cbGwasSumStatsBundle(gwasSumStats, cutoffs = cutoffs)
-    combinedPairs <- qtlPairs
-    for (label in names(gwasPairs)) {
-        key <- label
-        if (is_in(key, names(combinedPairs))) {
-            key <- make.unique(
-                c(names(combinedPairs), key)
-            )[length(combinedPairs) + 1L]
-        }
-        combinedPairs[[key]] <- gwasPairs[[label]]
+    if (length(gwasPairs) == 0L) {
+        return(qtlPairs)
     }
-    combinedPairs
+    # Disambiguating one label at a time against the names so far gives the
+    # same answer as one make.unique() over the whole sequence, since it too
+    # renames left to right and leaves the first occurrence alone.
+    keys <- make.unique(c(names(qtlPairs), names(gwasPairs)))
+    c(
+        qtlPairs,
+        set_names(gwasPairs, keys[length(qtlPairs) + seq_along(gwasPairs)])
+    )
 }
 
 # =============================================================================
@@ -1619,6 +1742,52 @@ setMethod(
 # outcomes when two studies share a trait. Returns the combined bundle or NULL.
 # (Sequential offset-shifted merge -- kept as a loop.)
 # @noRd
+# One study's bundle with its names study-prefixed, or NULL when it has
+# nothing to contribute.
+# @noRd
+.cbStudyBundle <- function(
+    study,
+    qtlDatasets,
+    contexts,
+    traitId,
+    region,
+    cisWindow,
+    samples,
+    screenSpec
+) {
+    sub <- .cbIndividualBundle(
+        qtlDatasets[[study]],
+        contexts = contexts,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        samples = samples,
+        pipCutoffToSkip = screenSpec
+    )
+    if (is.null(sub)) {
+        return(NULL)
+    }
+    .cbPrefixStudyNames(sub, study)
+}
+
+# @noRd
+.cbFieldLength <- function(sub, field) {
+    length(sub[[field]])
+}
+
+# How many entries precede each element, given per-element counts.
+# @noRd
+.cbOffsets <- function(counts) {
+    cumsum(c(0L, counts))[seq_along(counts)]
+}
+
+# Study `i`'s dict, renumbered into the combined X / Y ordering.
+# @noRd
+.cbShiftStudyDict <- function(i, subs, xOffsets, yOffsets) {
+    d <- subs[[i]]$dict_YX
+    cbind(Y = d[, "Y"] + yOffsets[[i]], X = d[, "X"] + xOffsets[[i]])
+}
+
 .cbMultiStudyIndBundle <- function(
     qtlData,
     contexts,
@@ -1629,46 +1798,44 @@ setMethod(
     screenSpec
 ) {
     qtlDatasets <- getQtlDatasets(qtlData)
-    combinedX <- list()
-    combinedY <- list()
-    combinedDict <- matrix(integer(0), ncol = 2L)
-    colnames(combinedDict) <- c("Y", "X")
-    combinedOutcomes <- character()
-    combinedInfo <- list()
-    for (study in names(qtlDatasets)) {
-        sub <- .cbIndividualBundle(
-            qtlDatasets[[study]],
-            contexts = contexts,
-            traitId = traitId,
-            region = region,
-            cisWindow = cisWindow,
-            samples = samples,
-            pipCutoffToSkip = screenSpec
-        )
-        if (is.null(sub)) {
-            next
-        }
-        sub <- .cbPrefixStudyNames(sub, study)
-        xOffset <- length(combinedX)
-        yOffset <- length(combinedY)
-        combinedX <- c(combinedX, sub$X)
-        combinedY <- c(combinedY, sub$Y)
-        shifted <- sub$dict_YX
-        shifted[, "Y"] <- shifted[, "Y"] + yOffset
-        shifted[, "X"] <- shifted[, "X"] + xOffset
-        combinedDict <- rbind(combinedDict, shifted)
-        combinedOutcomes <- c(combinedOutcomes, sub$outcomeNames)
-        combinedInfo[[length(combinedInfo) + 1L]] <- sub$outcomeInfo
+    subs <- compact(map(
+        names(qtlDatasets),
+        .cbStudyBundle,
+        qtlDatasets = qtlDatasets,
+        contexts = contexts,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        samples = samples,
+        screenSpec = screenSpec
+    ))
+    if (length(subs) == 0L) {
+        return(NULL)
     }
+    # Each study's dict indexes its own X and Y, so it shifts by however many
+    # entries the studies before it contributed -- a cumulative count, known
+    # once all the bundles are in hand rather than tracked while looping.
+    xOffsets <- .cbOffsets(map_int(subs, .cbFieldLength, field = "X"))
+    yOffsets <- .cbOffsets(map_int(subs, .cbFieldLength, field = "Y"))
+    combinedX <- .cbConcat(map(subs, "X"))
     if (length(combinedX) == 0L) {
         return(NULL)
     }
     list(
         X = combinedX,
-        Y = combinedY,
-        dict_YX = combinedDict,
-        outcomeNames = combinedOutcomes,
-        outcomeInfo = bind_rows(combinedInfo)
+        Y = .cbConcat(map(subs, "Y")),
+        dict_YX = do.call(
+            rbind,
+            map(
+                seq_along(subs),
+                .cbShiftStudyDict,
+                subs = subs,
+                xOffsets = xOffsets,
+                yOffsets = yOffsets
+            )
+        ),
+        outcomeNames = .cbConcat(map(subs, "outcomeNames")),
+        outcomeInfo = bind_rows(map(subs, "outcomeInfo"))
     )
 }
 
@@ -1676,17 +1843,29 @@ setMethod(
 # outcome names).
 # @noRd
 .cbPrefixStudyNames <- function(sub, study) {
-    names(sub$X) <- str_c(study, names(sub$X), sep = ":")
-    sub$outcomeNames <- str_c(study, sub$outcomeNames, sep = ":")
-    names(sub$Y) <- sub$outcomeNames
+    outcomeNames <- str_c(study, sub$outcomeNames, sep = ":")
+    renamed <- list_assign(
+        sub,
+        X = set_names(sub$X, str_c(study, names(sub$X), sep = ":")),
+        Y = set_names(sub$Y, outcomeNames),
+        outcomeNames = outcomeNames
+    )
     # The lookup table is keyed on the outcome NAME, so it has to be renamed in
     # the same pass -- a stale key silently drops every outcome of this study
     # from the identity join.
-    if (!is.null(sub$outcomeInfo) && nrow(sub$outcomeInfo) > 0L) {
-        sub$outcomeInfo$name <- str_c(study, sub$outcomeInfo$name, sep = ":")
-        sub$outcomeInfo$study <- study
+    if (is.null(sub$outcomeInfo) || nrow(sub$outcomeInfo) == 0L) {
+        return(renamed)
     }
-    sub
+    # `studyLabel` so the data mask cannot shadow it with the `study` column.
+    studyLabel <- study
+    list_assign(
+        renamed,
+        outcomeInfo = mutate(
+            sub$outcomeInfo,
+            name = str_c(studyLabel, .data$name, sep = ":"),
+            study = studyLabel
+        )
+    )
 }
 
 # Sumstat side of a MultiStudyQtlDataset: bundle any embedded QtlSumStats.

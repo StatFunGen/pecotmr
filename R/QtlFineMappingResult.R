@@ -228,7 +228,7 @@ QtlFineMappingResult <- function(
     .qfmrCheckTupleLengths(study, context, trait, method, entry)
     entry <- map(entry, .asFmRowPayload)
     .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
-    cols <- list(
+    baseCols <- list(
         study = as.character(study),
         context = as.character(context),
         trait = as.character(trait),
@@ -236,22 +236,24 @@ QtlFineMappingResult <- function(
         susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
         cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
     )
-    cols <- .qfmrAppendJointCols(
-        cols,
+    withJoint <- .qfmrAppendJointCols(
+        baseCols,
         jointStudies,
         jointContexts,
         jointTraits,
         n
     )
-    cols <- .appendTraitPosCol(cols, traitPos, n)
+    cols <- .appendTraitPosCol(withJoint, traitPos, n)
     dfArgs <- c(cols, list(check.names = FALSE))
     # Each entry's variants become one ELEMENT, its topLoci that element's
     # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
     # splits by chromosome with its metadata row replicated.
     split <- .rtlSplitBySeqname(map(entry, rowVariants))
-    grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md[split$fromIdx, , drop = FALSE]
+    )
     obj <- new(
         "QtlFineMappingResult",
         grl,
@@ -261,7 +263,18 @@ QtlFineMappingResult <- function(
     obj
 }
 
-# Append any supplied joint* provenance columns (each must match length(study)).
+# Each joint-provenance column must be one value per row.
+# @noRd
+.qfmrCheckJointColLength <- function(nm, val, n) {
+    if (length(val) == n) {
+        return(invisible(NULL))
+    }
+    msg <- glue("`{nm}` must have the same length as `study`.")
+    abort(msg)
+}
+
+# Append any supplied joint* provenance columns (each must match
+# length(study)).
 # @noRd
 .qfmrAppendJointCols <- function(
     cols,
@@ -270,23 +283,13 @@ QtlFineMappingResult <- function(
     jointTraits,
     n
 ) {
-    joints <- list(
+    supplied <- compact(list(
         jointStudies = jointStudies,
         jointContexts = jointContexts,
         jointTraits = jointTraits
-    )
-    for (nm in names(joints)) {
-        val <- joints[[nm]]
-        if (is.null(val)) {
-            next
-        }
-        if (length(val) != n) {
-            msg <- glue("`{nm}` must have the same length as `study`.")
-            abort(msg)
-        }
-        cols[[nm]] <- as.character(val)
-    }
-    cols
+    ))
+    walk2(names(supplied), supplied, .qfmrCheckJointColLength, n = n)
+    c(cols, map(supplied, as.character))
 }
 
 # The single row a (study, context, trait, method) selector pins.
@@ -338,9 +341,7 @@ setMethod(
                 "{as.character(x$study)[1L]}|{as.character(x$context)[1L]}|",
                 "{as.character(x$trait)[1L]}|{as.character(x$method)[1L]}"
             )
-            out <- list()
-            out[[nm]] <- pip
-            return(out)
+            return(set_names(list(pip), nm))
         }
         pip
     }

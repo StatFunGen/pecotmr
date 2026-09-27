@@ -26,7 +26,7 @@ context("qtlAssociationPostprocess")
     # qvalue::qvalue estimates pi0 on its default path (no fallback needed).
     pBeta <- c(10^(-c(8, 7, 6, 5, 4, 3)), stats::ppoints(54))
     G <- length(pBeta)
-    entries <- lapply(seq_len(G), function(i) {
+    entries <- map(seq_len(G), function(i) {
         if (i %in% emptyIdx) {
             return(GenomicRanges::GRanges())
         } # no variants
@@ -68,7 +68,7 @@ context("qtlAssociationPostprocess")
         beta_shape1 = shape1,
         beta_shape2 = rep(200, G)
     )
-    do.call(QtlSumStats, args[setdiff(names(args), drop)])
+    exec(QtlSumStats, !!!args[setdiff(names(args), drop)])
 }
 
 test_that("qtlAssociationPostprocess enriches with package-computed columns", {
@@ -84,7 +84,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
     expect_false(is.null(getQcInfo(r)$associationPostprocess)) # recipe stashed
 
     # Bonferroni original == min over variants of p.adjust(P, "bonferroni", n).
-    expP <- vapply(
+    expP <- map_dbl(
         seq_len(nrow(x)),
         function(i) {
             min(stats::p.adjust(
@@ -92,8 +92,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
                 "bonferroni",
                 n = 50
             ))
-        },
-        numeric(1)
+        }
     )
     expect_equal(as.numeric(r$p_bonferroni_min_original), expP)
     expect_equal(
@@ -161,12 +160,11 @@ test_that("getSignificantQtls (bonferroni) matches the derived threshold rule", 
     sigGenes <- which(fdr < 0.5)
     expect_gt(length(sigGenes), 0)
     varThr <- max(as.numeric(r$p_bonferroni_min_original)[sigGenes])
-    expN <- sum(vapply(
+    expN <- sum(map_int(
         seq_len(nrow(r)),
         function(i) {
             sum(pmin(1, S4Vectors::mcols(r[[i]])$P * 50) <= varThr)
-        },
-        integer(1)
+        }
     ))
     expect_equal(length(sig), expN)
 })
@@ -273,15 +271,14 @@ test_that("getSignificantQtls (permutation) uses each gene's nominal threshold",
     expect_true("trait" %in% names(S4Vectors::mcols(sig)))
     # Reproduce: per gene, variants with P < p_nominal_threshold[gene].
     thr <- as.numeric(r$p_nominal_threshold)
-    expN <- sum(vapply(
+    expN <- sum(map_int(
         seq_len(nrow(r)),
         function(i) {
             if (is.na(thr[i])) {
                 return(0L)
             }
             sum(S4Vectors::mcols(r[[i]])$P < thr[i])
-        },
-        integer(1)
+        }
     ))
     expect_gt(expN, 0)
     expect_equal(length(sig), expN)
@@ -301,15 +298,14 @@ test_that("getSignificantQtls (permutation) skips genes with an NA threshold", {
     sig <- getSignificantQtls(r, "permutation")
     expect_s4_class(sig, "GRanges")
     # Gene 1 contributes nothing; total is the sum over the non-NA-threshold genes.
-    expN <- sum(vapply(
+    expN <- sum(map_int(
         seq_len(nrow(r)),
         function(i) {
             if (is.na(thr[i])) {
                 return(0L)
             }
             sum(S4Vectors::mcols(r[[i]])$P < thr[i])
-        },
-        integer(1)
+        }
     ))
     expect_equal(length(sig), expN)
 })
@@ -360,12 +356,11 @@ test_that("getSignificantQtls (qvalue) selects variants by their qvalue mcol", {
     qb <- as.numeric(r$q_beta)
     sigGenes <- which(qb < 0.1)
     expect_gt(length(sigGenes), 0)
-    expN <- sum(vapply(
+    expN <- sum(map_int(
         sigGenes,
         function(i) {
             sum(S4Vectors::mcols(r[[i]])$qvalue < 0.1)
-        },
-        integer(1)
+        }
     ))
     expect_gt(expN, 0)
     expect_equal(length(sig), expN)
@@ -438,9 +433,9 @@ test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_
         cisWindow = 1e6,
         methods = "bonferroni"
     )
-    P <- lapply(seq_len(nrow(x)), function(i) S4Vectors::mcols(x[[i]])$P)
-    expFilt <- vapply(P, function(p) min(pmin(1, p[1:2] * 30)), numeric(1)) # v1,v2 @ n=30
-    expOrig <- vapply(P, function(p) min(pmin(1, p * 50)), numeric(1)) # all @ n=50
+    P <- map(seq_len(nrow(x)), function(i) S4Vectors::mcols(x[[i]])$P)
+    expFilt <- map_dbl(P, function(p) min(pmin(1, p[1:2] * 30))) # v1,v2 @ n=30
+    expOrig <- map_dbl(P, function(p) min(pmin(1, p * 50))) # all @ n=50
     expect_equal(as.numeric(r$p_bonferroni_min_filtered), expFilt)
     expect_equal(as.numeric(r$p_bonferroni_min_original), expOrig)
     # A smaller test count makes the filtered flavour no less significant.
@@ -464,13 +459,12 @@ test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on t
     expect_gt(length(sigGenes), 0) # signal genes pass
     varThr <- max(as.numeric(r$p_bonferroni_min_filtered)[sigGenes])
     # only MAF/cis-passing variants (v1,v2) with P*n_filtered <= threshold qualify
-    expN <- sum(vapply(
+    expN <- sum(map_int(
         seq_len(nrow(r)),
         function(i) {
             p <- S4Vectors::mcols(r[[i]])$P[1:2]
             sum(pmin(1, p * 30) <= varThr)
-        },
-        integer(1)
+        }
     ))
     expect_equal(length(sig), expN)
 })

@@ -467,29 +467,10 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         )
         abort(msg)
     }
-    if (is.character(methods)) {
-        tokens <- unique(methods)
-        methodArgs <- set_names(rep(list(list()), length(tokens)), tokens)
+    parsed <- if (is.character(methods)) {
+        .fmMethodsFromTokens(methods)
     } else if (is.list(methods)) {
-        if (is.null(names(methods)) || any(names(methods) == "")) {
-            msg <- glue(
-                "fineMappingPipeline: when `methods` is a list it must be ",
-                "named (one entry per method token)."
-            )
-            abort(msg)
-        }
-        nonListChild <- !map_lgl(methods, is.list)
-        if (any(nonListChild)) {
-            badNames <- str_flatten(names(methods)[nonListChild], ", ")
-            msg <- glue(
-                "fineMappingPipeline: each entry of the `methods` list must ",
-                "itself be a list of named kwargs (got non-list value ",
-                "for: {badNames})."
-            )
-            abort(msg)
-        }
-        tokens <- unique(names(methods))
-        methodArgs <- methods[tokens]
+        .fmMethodsFromKwargs(methods)
     } else {
         cls <- class(methods)[[1L]]
         msg <- glue(
@@ -498,8 +479,49 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         )
         abort(msg)
     }
-    methodArgs <- .fmSeedSusieDefaults(methodArgs, tokens, L, Lgreedy)
-    list(tokens = tokens, methodArgs = methodArgs)
+    list(
+        tokens = parsed$tokens,
+        methodArgs = .fmSeedSusieDefaults(
+            parsed$methodArgs,
+            parsed$tokens,
+            L,
+            Lgreedy
+        )
+    )
+}
+
+# A bare character vector of tokens: every token gets empty kwargs.
+# @noRd
+.fmMethodsFromTokens <- function(methods) {
+    tokens <- unique(methods)
+    list(
+        tokens = tokens,
+        methodArgs = set_names(rep(list(list()), length(tokens)), tokens)
+    )
+}
+
+# A named list of <token> = <kwargs> entries.
+# @noRd
+.fmMethodsFromKwargs <- function(methods) {
+    if (is.null(names(methods)) || any(names(methods) == "")) {
+        msg <- glue(
+            "fineMappingPipeline: when `methods` is a list it must be ",
+            "named (one entry per method token)."
+        )
+        abort(msg)
+    }
+    nonListChild <- !map_lgl(methods, is.list)
+    if (any(nonListChild)) {
+        badNames <- str_flatten(names(methods)[nonListChild], ", ")
+        msg <- glue(
+            "fineMappingPipeline: each entry of the `methods` list must ",
+            "itself be a list of named kwargs (got non-list value ",
+            "for: {badNames})."
+        )
+        abort(msg)
+    }
+    tokens <- unique(names(methods))
+    list(tokens = tokens, methodArgs = methods[tokens])
 }
 
 # SuSiE-family fit defaults live here (the single source of truth), not in CLI
@@ -507,15 +529,35 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # already set them.
 # @noRd
 .fmSeedSusieDefaults <- function(methodArgs, tokens, L, Lgreedy) {
-    for (tk in intersect(tokens, c("susie", "susieInf", "susieAsh"))) {
-        if (is.null(methodArgs[[tk]][["L"]])) {
-            methodArgs[[tk]][["L"]] <- L
-        }
-        if (is.null(methodArgs[[tk]][["L_greedy"]])) {
-            methodArgs[[tk]][["L_greedy"]] <- Lgreedy
-        }
+    seeded <- intersect(tokens, c("susie", "susieInf", "susieAsh"))
+    if (length(seeded) == 0L) {
+        return(methodArgs)
     }
-    methodArgs
+    list_assign(
+        methodArgs,
+        !!!set_names(
+            map(
+                seeded,
+                .fmSeedTokenDefaults,
+                methodArgs = methodArgs,
+                L = L,
+                Lgreedy = Lgreedy
+            ),
+            seeded
+        )
+    )
+}
+
+# One token's kwargs with L / L_greedy filled in where the caller left them
+# unset. A token with no kwargs at all still gets the defaults.
+# @noRd
+.fmSeedTokenDefaults <- function(tk, methodArgs, L, Lgreedy) {
+    args <- methodArgs[[tk]] %||% list()
+    list_assign(
+        args,
+        L = args[["L"]] %||% L,
+        L_greedy = args[["L_greedy"]] %||% Lgreedy
+    )
 }
 
 
@@ -703,19 +745,22 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     if (!is(fineMappingResult, "GwasFineMappingResult")) {
         return(NULL)
     }
-    idx <- .matchTupleRows(
+    matched <- .matchTupleRows(
         fineMappingResult,
         list(study = study, method = method)
     )
-    if (length(idx) == 0L) {
+    if (length(matched) == 0L) {
         return(NULL)
     }
-    if (length(idx) > 1L) {
-        keys <- .rtlRangeKeys(fineMappingResult)[idx]
-        idx <- idx[keys == blockId]
-        if (length(idx) == 0L) {
-            return(NULL)
-        }
+    # Several rows share (study, method) when the study was split into blocks;
+    # the block key picks the one this lookup wants.
+    idx <- if (length(matched) == 1L) {
+        matched
+    } else {
+        matched[.rtlRangeKeys(fineMappingResult)[matched] == blockId]
+    }
+    if (length(idx) == 0L) {
+        return(NULL)
     }
     .fmrRowParts(fineMappingResult, idx[[1L]])
 }
@@ -874,8 +919,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     rssControl,
     keepFullFit
 ) {
-    z <- zn$z
-    names(z) <- zn$variantIds
+    z <- set_names(zn$z, zn$variantIds)
     ldMat <- .ldFromSketch(
         ldSketch,
         zn$variantIds,
@@ -1050,8 +1094,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
             imissCutoff = imissCutoff
         )
     )
-    z <- zn$z
-    names(z) <- zn$variantIds
+    z <- set_names(zn$z, zn$variantIds)
     ldMat <- .ldFromSketch(
         ldSketch,
         zn$variantIds,
@@ -1242,23 +1285,33 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 )
 
 .resPickFlags <- function() {
-    out <- list()
-    # Walk up from the immediate caller; the public setMethod frame is
-    # where the user-facing args live. sys.frames()[[1]] is the global
-    # env so stop before that.
+    # Walk up from the immediate caller; the public setMethod frame is where
+    # the user-facing args live. Each flag takes its value from the first
+    # frame that supplies a non-NULL one -- assigning NULL into a list is a
+    # no-op, so the original loop kept searching past those too.
     frames <- sys.frames()
-    for (i in seq_along(frames)) {
-        fr <- frames[[i]]
-        for (nm in .resFlagNames) {
-            if (
-                !is_in(nm, names(out)) &&
-                    exists(nm, envir = fr, inherits = FALSE)
-            ) {
-                out[[nm]] <- get(nm, envir = fr, inherits = FALSE)
-            }
-        }
+    compact(set_names(
+        map(.resFlagNames, .resFlagFromFrames, frames = frames),
+        .resFlagNames
+    ))
+}
+
+# @noRd
+.resFrameValue <- function(fr, nm) {
+    if (!exists(nm, envir = fr, inherits = FALSE)) {
+        return(NULL)
     }
-    out
+    get(nm, envir = fr, inherits = FALSE)
+}
+
+# @noRd
+.resFlagIsSupplied <- function(value) {
+    !is.null(value)
+}
+
+# @noRd
+.resFlagFromFrames <- function(nm, frames) {
+    detect(map(frames, .resFrameValue, nm = nm), .resFlagIsSupplied)
 }
 
 .fmResidPheno <- function(x, ...) {
@@ -1508,8 +1561,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     if (is.null(ddpm) || is.null(ddpm$U)) {
         return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
     }
-    w0Updated <- rescaleCovW0(fitParts$w0)
-    w0Updated <- w0Updated[is_in(names(w0Updated), names(ddpm$U))]
+    rescaled <- rescaleCovW0(fitParts$w0)
+    w0Updated <- rescaled[is_in(names(rescaled), names(ddpm$U))]
     if (length(w0Updated) == 0L) {
         return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
     }
@@ -1522,6 +1575,27 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         ),
         residualVariance = fitParts$V
     )
+}
+
+# Rows of a TwasWeights whose method is mr.mash and whose identity matches
+# every axis the caller FIXED. A NULL axis means "do not filter on it".
+# @noRd
+.fmMrmashSelector <- function(twasWeights, study, trait, context) {
+    axes <- compact(list(study = study, trait = trait, context = context))
+    reduce(
+        names(axes),
+        .fmMrmashNarrow,
+        twasWeights = twasWeights,
+        axes = axes,
+        .init = as.character(twasWeights$method) == "mrmash"
+    )
+}
+
+# `.tupleColumn()` not `[[`: on a RangedTupleList `[[` extracts an ELEMENT
+# (the variant set), while the identity axes live in mcols.
+# @noRd
+.fmMrmashNarrow <- function(sel, axis, twasWeights, axes) {
+    sel & as.character(.tupleColumn(twasWeights, axis)) == axes[[axis]]
 }
 
 # Locate the retained mr.mash fit payload {dataDrivenPriorMatrices, w0, V} for
@@ -1550,19 +1624,9 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         return(NULL)
     }
     # Each per-context mr.mash row of a joint group carries the SHARED joint
-    # fit,
-    # so the consumer matches the FIXED axes and leaves the jointed axis NULL
-    # (match-any). study/trait/context = NULL means "do not filter that axis".
-    sel <- as.character(twasWeights$method) == "mrmash"
-    if (!is.null(study)) {
-        sel <- sel & as.character(twasWeights$study) == study
-    }
-    if (!is.null(trait)) {
-        sel <- sel & as.character(twasWeights$trait) == trait
-    }
-    if (!is.null(context)) {
-        sel <- sel & as.character(twasWeights$context) == context
-    }
+    # fit, so the consumer matches the FIXED axes and leaves the jointed axis
+    # NULL (match-any). study/trait/context = NULL means "skip that axis".
+    sel <- .fmMrmashSelector(twasWeights, study, trait, context)
     for (i in which(sel)) {
         f <- getFits(.twrRowParts(twasWeights, i))
         if (!is.null(f)) return(f)
@@ -1586,16 +1650,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     if (is.null(twasWeights)) {
         return(NULL)
     }
-    sel <- as.character(twasWeights$method) == "mrmash"
-    if (!is.null(study)) {
-        sel <- sel & as.character(twasWeights$study) == study
-    }
-    if (!is.null(trait)) {
-        sel <- sel & as.character(twasWeights$trait) == trait
-    }
-    if (!is.null(context)) {
-        sel <- sel & as.character(twasWeights$context) == context
-    }
+    sel <- .fmMrmashSelector(twasWeights, study, trait, context)
     for (i in which(sel)) {
         cv <- getCvResult(.twrRowParts(twasWeights, i))
         if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
@@ -1623,33 +1678,61 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     foldFits <- mvCv$foldFits
     sp <- mvCv$samplePartition
     foldIds <- if (!is.null(sp)) sort(unique(sp$Fold)) else seq_along(foldFits)
-    out <- set_names(vector("list", length(foldIds)), as.character(foldIds))
-    for (i in seq_along(foldIds)) {
-        # Match the fold fit by name ("fold_<id>") when available, else by
-        # position.
-        nm <- str_c("fold_", foldIds[[i]])
-        ff <- if (!is.null(names(foldFits)) && is_in(nm, names(foldFits))) {
-            foldFits[[nm]]
-        } else if (length(foldFits) >= i) {
-            foldFits[[i]]
-        } else {
-            NULL
-        }
-        if (is.null(ff)) {
-            next
-        }
-        out[[i]] <- if (!is.null(ff$w0)) {
-            .buildMvsusieReweightedPrior(ff, conditionNames, weightsTol)
-        } else {
-            .buildMvsusieReweightedPrior(
-                fullFitParts,
-                conditionNames,
-                weightsTol,
-                overrideU = ff$dataDrivenPriorMatrices
-            )
-        }
+    # A fold with no fit keeps its NULL slot, so the result stays aligned
+    # with `foldIds` -- which is what `out[[i]] <- ...` left behind.
+    set_names(
+        map(
+            seq_along(foldIds),
+            .fmFoldPriorAt,
+            foldIds = foldIds,
+            foldFits = foldFits,
+            fullFitParts = fullFitParts,
+            conditionNames = conditionNames,
+            weightsTol = weightsTol
+        ),
+        as.character(foldIds)
+    )
+}
+
+# Fold `i`'s fit, matched by name ("fold_<id>") when available, else by
+# position.
+# @noRd
+.fmFoldFitAt <- function(i, foldIds, foldFits) {
+    nm <- str_c("fold_", foldIds[[i]])
+    if (!is.null(names(foldFits)) && is_in(nm, names(foldFits))) {
+        return(foldFits[[nm]])
     }
-    out
+    if (length(foldFits) >= i) {
+        return(foldFits[[i]])
+    }
+    NULL
+}
+
+# Fold `i`'s reweighted mixture prior, or NULL when the fold has no fit. A
+# fold that carries its own w0 defines the prior; otherwise the full-data fit
+# does, with the fold's data-driven matrices substituted in.
+# @noRd
+.fmFoldPriorAt <- function(
+    i,
+    foldIds,
+    foldFits,
+    fullFitParts,
+    conditionNames,
+    weightsTol
+) {
+    ff <- .fmFoldFitAt(i, foldIds, foldFits)
+    if (is.null(ff)) {
+        return(NULL)
+    }
+    if (!is.null(ff$w0)) {
+        return(.buildMvsusieReweightedPrior(ff, conditionNames, weightsTol))
+    }
+    .buildMvsusieReweightedPrior(
+        fullFitParts,
+        conditionNames,
+        weightsTol,
+        overrideU = ff$dataDrivenPriorMatrices
+    )
 }
 
 # PCA-reduce a (samples x traits) phenotype matrix to its top `nPCs` principal
@@ -1664,22 +1747,23 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     if (is.null(dim(Y)) || ncol(Y) < 2L) {
         return(NULL)
     }
-    Y <- Y[stats::complete.cases(Y), , drop = FALSE]
-    if (nrow(Y) < 2L) {
+    complete <- Y[stats::complete.cases(Y), , drop = FALSE]
+    if (nrow(complete) < 2L) {
         return(NULL)
     }
-    Y <- Y[, apply(Y, 2L, stats::var) > 0, drop = FALSE]
-    if (ncol(Y) < 2L) {
+    varying <- complete[,
+        apply(complete, 2L, stats::var) > 0,
+        drop = FALSE
+    ]
+    if (ncol(varying) < 2L) {
         return(NULL)
     }
-    scores <- stats::prcomp(Y, center = TRUE, scale. = TRUE)$x
+    scores <- stats::prcomp(varying, center = TRUE, scale. = TRUE)$x
     k <- min(as.integer(nPCs), ncol(scores))
     if (k < 1L) {
         return(NULL)
     }
-    scores <- scores[, seq_len(k), drop = FALSE]
-    colnames(scores) <- str_c("topPC", seq_len(k))
-    scores
+    `colnames<-`(scores[, seq_len(k), drop = FALSE], str_c("topPC", seq_len(k)))
 }
 
 # Per-column marginal-association z-scores of y on each column of X (univariate
@@ -1717,10 +1801,9 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     if (sum(ok) < 2L || ncol(X) < 1L) {
         return(fallback)
     }
-    Xs <- X[ok, , drop = FALSE]
-    if (!is.double(Xs)) {
-        storage.mode(Xs) <- "double"
-    } # susieR needs double X
+    raw <- X[ok, , drop = FALSE]
+    # susieR needs a double X.
+    Xs <- if (is.double(raw)) raw else `storage.mode<-`(raw, "double")
     ys <- y[ok]
     metric <- scr$metric
     cutoff <- scr$cutoff
@@ -1839,21 +1922,65 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # max of the regions before it (a sequential offset fold, per cs_<coverage>
 # column).
 # @noRd
-.fmRenumberCs <- function(tls, csCols) {
-    offsets <- set_names(integer(length(csCols)), csCols)
-    for (i in seq_along(tls)) {
-        tl <- tls[[i]]
-        for (cc in csCols) {
-            if (!is_in(cc, names(tl))) {
-                next
-            }
-            idx <- .fmCsIdx(tl[[cc]])
-            tl[[cc]] <- .fmRelabelCs(tl[[cc]], offsets[[cc]])
-            offsets[[cc]] <- offsets[[cc]] + max(c(0L, idx), na.rm = TRUE)
-        }
-        tls[[i]] <- tl
+# The highest credible-set index table `tl` uses in column `cc`, or 0 when it
+# has no such column.
+# @noRd
+.fmCsMaxIn <- function(tl, cc) {
+    if (!is_in(cc, names(tl))) {
+        return(0L)
     }
-    tls
+    max(c(0L, .fmCsIdx(tl[[cc]])), na.rm = TRUE)
+}
+
+# How many credible sets precede each element, given per-element counts.
+# @noRd
+.fmExclusiveCumsum <- function(counts) {
+    cumsum(c(0L, counts))[seq_along(counts)]
+}
+
+# @noRd
+.fmColumnOffsets <- function(cc, tls) {
+    .fmExclusiveCumsum(map_int(tls, .fmCsMaxIn, cc = cc))
+}
+
+# @noRd
+.fmTableHasCol <- function(cc, tl) {
+    is_in(cc, names(tl))
+}
+
+# @noRd
+.fmRelabelColumn <- function(cc, tl, offsets, i) {
+    .fmRelabelCs(tl[[cc]], offsets[[cc]][[i]])
+}
+
+# @noRd
+.fmRenumberTable <- function(i, tls, csCols, offsets) {
+    tl <- tls[[i]]
+    present <- keep(csCols, .fmTableHasCol, tl = tl)
+    if (length(present) == 0L) {
+        return(tl)
+    }
+    mutate(
+        tl,
+        !!!set_names(
+            map(present, .fmRelabelColumn, tl = tl, offsets = offsets, i = i),
+            present
+        )
+    )
+}
+
+.fmRenumberCs <- function(tls, csCols) {
+    # A table's offset in a column is how many credible sets the tables
+    # before it contributed there -- a cumulative count, so it is known up
+    # front instead of being carried through the walk.
+    offsets <- set_names(map(csCols, .fmColumnOffsets, tls = tls), csCols)
+    map(
+        seq_along(tls),
+        .fmRenumberTable,
+        tls = tls,
+        csCols = csCols,
+        offsets = offsets
+    )
 }
 
 
@@ -1889,13 +2016,15 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         list()
     }
     # Order matters: base < capability defaults < user overrides.
-    if (length(capDefaults) > 0L) {
-        baseArgs <- list_modify(baseArgs, !!!compact(capDefaults))
+    withCaps <- if (length(capDefaults) > 0L) {
+        list_modify(baseArgs, !!!compact(capDefaults))
+    } else {
+        baseArgs
     }
-    if (length(userArgs) > 0L) {
-        baseArgs <- list_modify(baseArgs, !!!compact(userArgs))
+    if (length(userArgs) == 0L) {
+        return(withCaps)
     }
-    baseArgs
+    list_modify(withCaps, !!!compact(userArgs))
 }
 
 
@@ -1907,13 +2036,13 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # shared `.entryToSumstatDf` helper (R/sumstatsQc.R).
 # @noRd
 .fmExtractZn <- function(gr, label, ldSketch = NULL, cutoffs = NULL) {
-    df <- .entryToSumstatDf(gr, require = c("SNP", "Z", "N"), label = label)
+    allDf <- .entryToSumstatDf(gr, require = c("SNP", "Z", "N"), label = label)
     # Filtered HERE rather than at the LD build: z, the LD matrix and the
     # allele frequencies are all keyed off `variantIds`, so narrowing the id
     # set at its source keeps them aligned by construction instead of by three
     # subsetting steps staying in step with one another.
-    keep <- .panelKeepMask(df$variant_id, ldSketch, cutoffs, label)
-    df <- df[keep, , drop = FALSE]
+    keep <- .panelKeepMask(allDf$variant_id, ldSketch, cutoffs, label)
+    df <- allDf[keep, , drop = FALSE]
     list(
         variantIds = df$variant_id,
         z = df$z,
@@ -2016,6 +2145,29 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     NULL
 }
 
+# The minimal fold-fit payload: exactly the fields the weight extractors
+# read, so K folds x (study, context, trait) does not retain K full SuSiE fits.
+# `trimFinemappingFit()` is the credible-set-driven trimmer for the fit stored
+# on a row; a fold fit has no credible sets to key on and is only ever used to
+# re-extract weights, so it keeps a smaller set.
+# @noRd
+.fmLeanFoldFit <- function(fit, token) {
+    if (is.null(fit)) {
+        return(NULL)
+    }
+    keep <- c(
+        "pip",
+        "alpha",
+        "mu",
+        "X_column_scale_factors",
+        "theta",
+        "coef",
+        "V"
+    )
+    lean <- fit[intersect(keep, names(fit))]
+    `class<-`(lean, unique(c(token, class(fit))))
+}
+
 # Per-fold univariate-susie-family weights (susie / susieInf / susieAsh).
 # @noRd
 .fmFoldWeightsSusie <- function(token, Xtr, Ytr, coverage, userArgs) {
@@ -2033,9 +2185,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         susieInf = susieInfWeights(susieInfFit = fit),
         susieAsh = susieAshWeights(susieAshFit = fit)
     )
-    w <- as.numeric(w)
-    names(w) <- colnames(Xtr)
-    .fmAsMat(w)
+    out <- .fmAsMat(set_names(as.numeric(w), colnames(Xtr)))
+    `attr<-`(out, "fit", .fmLeanFoldFit(fit, token))
 }
 
 # Per-fold mvsusie weights. Reuses the data-driven reweighted prior + residual
@@ -2054,16 +2205,15 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
             mvPrior$priorVariance
         }
     )
-    if (!is.null(mvPrior) && !is.null(mvPrior$residualVariance)) {
-        baseArgs$residual_variance <- mvPrior$residualVariance
-    }
-    mvArgs <- .fmMergeUserArgs(baseArgs, "mvsusie", userArgs)
+    withPrior <- list_assign(
+        baseArgs,
+        !!!compact(list(residual_variance = mvPrior$residualVariance))
+    )
+    mvArgs <- .fmMergeUserArgs(withPrior, "mvsusie", userArgs)
     fit <- exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, mvArgs))
-    W <- as.matrix(mvsusieWeights(mvsusieFit = fit))
-    if (is.null(rownames(W))) {
-        rownames(W) <- colnames(Xtr)
-    }
-    W
+    raw <- as.matrix(mvsusieWeights(mvsusieFit = fit))
+    W <- `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
+    `attr<-`(W, "fit", .fmLeanFoldFit(fit, "mvsusie"))
 }
 
 # Per-fold fsusie weights.
@@ -2076,7 +2226,12 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
     fit <- exec(fitFsusie, !!!.splitMethodArgs(fitFsusie, fsArgs))
     W <- fsusieWeights(fsusieFit = fit, variantIds = colnames(Xtr))
-    as.matrix(W)
+    out <- as.matrix(W)
+    # fSuSiE cannot be re-extracted from a trimmed fit, so the precomputed
+    # weight matrix rides along as `coef` the same way the row-level trimmer
+    # does it.
+    withCoef <- list_assign(fit, coef = out)
+    `attr<-`(out, "fit", .fmLeanFoldFit(withCoef, "fsusie"))
 }
 
 # Per-fold fine-mapping fit for the CV engine. `ctx` carries mvPrior, mvPriorCv,
@@ -2100,32 +2255,70 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     } else {
         mvPrior
     }
-    weights <- list()
-    for (tk in tokens) {
-        weights[[.fmTwasMethodKey(tk)]] <- try_fetch(
-            .fmFoldWeights(
-                tk,
-                Xtr,
-                Ytr,
-                coverage,
-                methodArgs[[tk]],
-                pos,
-                mvPriorThisFold
-            ),
-            error = function(cnd) {
-                if (verbose >= 1) {
-                    eMsg <- conditionMessage(cnd)
-                    msg <- glue(
-                        "  CV fold {j}, method {tk} failed: {eMsg}",
-                        .trim = FALSE
-                    )
-                    inform(msg)
-                }
-                NULL
+    keys <- map_chr(tokens, .fmTwasMethodKey)
+    results <- map(
+        tokens,
+        .fmFoldTokenResult,
+        Xtr = Xtr,
+        Ytr = Ytr,
+        coverage = coverage,
+        methodArgs = methodArgs,
+        pos = pos,
+        mvPriorThisFold = mvPriorThisFold,
+        j = j,
+        verbose = verbose
+    )
+    list(
+        weights = set_names(map(results, "weights"), keys),
+        fits = compact(set_names(map(results, "fit"), keys))
+    )
+}
+
+# One token's fold result. The CV engine's fitFold contract is
+# list(weights = <key -> matrix>, fits = <key -> fitted model>); the fold
+# helpers attach their (lean) fit to the weight matrix, so it is split back
+# out here rather than stripped in place.
+# @noRd
+.fmFoldTokenResult <- function(
+    tk,
+    Xtr,
+    Ytr,
+    coverage,
+    methodArgs,
+    pos,
+    mvPriorThisFold,
+    j,
+    verbose
+) {
+    w <- try_fetch(
+        .fmFoldWeights(
+            tk,
+            Xtr,
+            Ytr,
+            coverage,
+            methodArgs[[tk]],
+            pos,
+            mvPriorThisFold
+        ),
+        error = function(cnd) {
+            if (verbose >= 1) {
+                eMsg <- conditionMessage(cnd)
+                msg <- glue(
+                    "  CV fold {j}, method {tk} failed: {eMsg}",
+                    .trim = FALSE
+                )
+                inform(msg)
             }
-        )
+            NULL
+        }
+    )
+    if (is.null(w)) {
+        return(list(weights = NULL, fit = NULL))
     }
-    list(weights = weights, fits = list())
+    list(
+        weights = `attr<-`(w, "fit", NULL),
+        fit = attr(w, "fit")
+    )
 }
 
 # Cross-validate a homogeneous set of fine-mapping `tokens` over (X, Y) via the
@@ -2176,12 +2369,30 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         fitFoldCtx = cvFitCtx,
         numThreads = numThreads,
         verbose = verbose,
-        seed = seed
+        seed = seed,
+        # Retained so twasWeightsCv can cross-validate a SuSiE-family method:
+        # those wrappers extract from a supplied fit and never refit, so the
+        # fold's own fit is the only thing that makes per-fold extraction
+        # possible.
+        retainFits = TRUE
     )
+    # Recorded at the producer so a consumer can refuse fits trained on a
+    # different split; without it a mismatched partition would leak held-out
+    # samples into training and inflate the CV metrics.
+    foldFits <- if (is.null(res$foldFits)) {
+        NULL
+    } else {
+        `attr<-`(
+            res$foldFits,
+            "partitionKey",
+            .cvPartitionKey(res$samplePartition)
+        )
+    }
     list(
         samplePartition = res$samplePartition,
         prediction = res$prediction,
-        performance = res$performance
+        performance = res$performance,
+        foldFits = foldFits
     )
 }
 
@@ -2201,8 +2412,22 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     list(
         samplePartition = cv$samplePartition,
         prediction = cv$prediction[pk],
-        performance = cv$performance[mk]
+        performance = cv$performance[mk],
+        foldFits = .fmSliceFoldFits(cv$foldFits, key)
     )
+}
+
+# One method's per-fold fits, keyed by fold, from the full CV payload.
+# @noRd
+.fmSliceFoldFits <- function(foldFits, key) {
+    if (is.null(foldFits) || length(foldFits) == 0L) {
+        return(NULL)
+    }
+    out <- map(foldFits, key)
+    if (all(map_lgl(out, is.null))) {
+        return(NULL)
+    }
+    `attr<-`(out, "partitionKey", attr(foldFits, "partitionKey"))
 }
 
 # Rebuild a FineMappingRow with a cvResult attached (the class is immutable).
@@ -2340,7 +2565,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     fullFitAlphaOnly,
     includeAllCs
 ) {
-    X <- .fmResidGenoBlock(
+    allX <- .fmResidGenoBlock(
         ctx,
         tid,
         rg,
@@ -2348,7 +2573,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         data = data,
         cisWindow = cisWindow
     )
-    common <- intersect(rownames(X), rownames(Y))
+    common <- intersect(rownames(allX), rownames(Y))
     if (length(common) < 2L) {
         msg <- glue(
             "fineMappingPipeline: too few shared samples between ",
@@ -2356,12 +2581,12 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         )
         abort(msg)
     }
-    X <- X[common, , drop = FALSE]
-    y <- Y[common, , drop = FALSE]
-    if (ncol(y) > 1L) {
-        y <- y[, 1L, drop = TRUE]
+    X <- allX[common, , drop = FALSE]
+    yBlock <- Y[common, , drop = FALSE]
+    y <- if (ncol(yBlock) > 1L) {
+        yBlock[, 1L, drop = TRUE]
     } else {
-        y <- drop(y)
+        drop(yBlock)
     }
     if (!.fmSerScreen(X, y, screen)) {
         if (verbose >= 1) {
@@ -2856,16 +3081,17 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 ) {
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
-    tokens <- norm$tokens
-    methodArgs <- norm$methodArgs
-    .fmCheckMethodCapabilities(tokens, "QtlDataset")
-    jointResult <- NULL
+    allTokens <- norm$tokens
+    allMethodArgs <- norm$methodArgs
+    .fmCheckMethodCapabilities(allTokens, "QtlDataset")
     hadJointSpec <- length(parsedJointSpec) > 0L
-    if (hadJointSpec) {
-        jointResult <- .fmQdsJointDispatch(
+    jointResult <- if (!hadJointSpec) {
+        NULL
+    } else {
+        .fmQdsJointDispatch(
             parsedJointSpec,
-            intersect(tokens, c("mvsusie", "fsusie")),
-            methodArgs,
+            intersect(allTokens, c("mvsusie", "fsusie")),
+            allMethodArgs,
             data = data,
             contexts = contexts,
             traitId = traitId,
@@ -2888,15 +3114,27 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
             includeAllCs = includeAllCs,
             seed = seed
         )
-        tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
-        methodArgs <- methodArgs[tokens]
     }
+    # The joint dispatch consumed the multivariate tokens; the univariate
+    # phase runs on whatever is left.
+    narrowed <- .fmNarrowAfterJoint(hadJointSpec, allTokens, allMethodArgs)
     list(
-        tokens = tokens,
-        methodArgs = methodArgs,
+        tokens = narrowed$tokens,
+        methodArgs = narrowed$methodArgs,
         jointResult = jointResult,
-        exhaustedByJoint = hadJointSpec && length(tokens) == 0L
+        exhaustedByJoint = hadJointSpec && length(narrowed$tokens) == 0L
     )
+}
+
+# The tokens (and their args) still owed a univariate fit after a joint
+# dispatch ran. A run with no joint specification keeps everything.
+# @noRd
+.fmNarrowAfterJoint <- function(hadJointSpec, tokens, methodArgs) {
+    if (!hadJointSpec) {
+        return(list(tokens = tokens, methodArgs = methodArgs))
+    }
+    remaining <- setdiff(tokens, c("mvsusie", "fsusie"))
+    list(tokens = remaining, methodArgs = methodArgs[remaining])
 }
 
 # Trait ids available in one context, intersected with the requested traitId or
@@ -2904,12 +3142,16 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # @noRd
 .fmQdsTraitsForContext <- function(ctx, data, traitId, region) {
     se <- getPhenotypes(data, contexts = ctx)
-    ids <- rownames(se)
-    if (!is.null(traitId)) {
-        ids <- intersect(ids, traitId)
+    allIds <- rownames(se)
+    ids <- if (!is.null(traitId)) {
+        intersect(allIds, traitId)
     } else if (!is.null(region)) {
-        rr <- SummarizedExperiment::rowRanges(se)
-        ids <- ids[IRanges::overlapsAny(rr, region)]
+        allIds[IRanges::overlapsAny(
+            SummarizedExperiment::rowRanges(se),
+            region
+        )]
+    } else {
+        allIds
     }
     ids
 }
@@ -2934,14 +3176,16 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         }
         contexts
     }
-    perCtxTraits <- map(
-        useCtx,
-        .fmQdsTraitsForContext,
-        data = data,
-        traitId = traitId,
-        region = region
+    perCtxTraits <- set_names(
+        map(
+            useCtx,
+            .fmQdsTraitsForContext,
+            data = data,
+            traitId = traitId,
+            region = region
+        ),
+        useCtx
     )
-    names(perCtxTraits) <- useCtx
     allTraits <- unique(list_c(perCtxTraits))
     if (length(allTraits) == 0L) {
         abort("fineMappingPipeline(QtlDataset): no traits selected.")
@@ -3385,7 +3629,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 }
 
 #' @rdname fineMappingPipeline
-#' @importFrom purrr list_c list_flatten list_modify list_rbind
+#' @importFrom purrr list_c list_flatten list_modify list_rbind list_assign
+#' @importFrom purrr discard walk2 detect zap
 #' @export
 setMethod(
     "fineMappingPipeline",
@@ -3583,17 +3828,17 @@ setMethod(
 ) {
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .fmNormalizeMethods(methods)
-    tokens <- norm$tokens
-    methodArgs <- norm$methodArgs
-    .fmCheckMethodCapabilities(tokens, "MultiStudyQtlDataset")
-    jointResult <- NULL
-    methods <- methods
+    allTokens <- norm$tokens
+    allMethodArgs <- norm$methodArgs
+    .fmCheckMethodCapabilities(allTokens, "MultiStudyQtlDataset")
     hadJointSpec <- length(parsedJointSpec) > 0L
-    if (hadJointSpec) {
-        jointResult <- .fmDispatchJointSpecsMultiStudy(
+    jointResult <- if (!hadJointSpec) {
+        NULL
+    } else {
+        .fmDispatchJointSpecsMultiStudy(
             parsedJointSpec,
             data,
-            intersect(tokens, c("mvsusie", "fsusie")),
+            intersect(allTokens, c("mvsusie", "fsusie")),
             contexts,
             traitId,
             cisWindow,
@@ -3602,20 +3847,26 @@ setMethod(
             signalCutoff,
             minAbsCorr,
             verbose,
-            methodArgs = methodArgs,
+            methodArgs = allMethodArgs,
             xRegions = xRegions,
             twasWeights = twasWeights,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
         )
-        tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
-        methodArgs <- methodArgs[tokens]
-        methods <- if (length(methodArgs) > 0L) methodArgs else tokens
     }
+    # The joint dispatch consumed the multivariate tokens; the univariate
+    # phase runs on whatever is left.
+    narrowed <- .fmNarrowAfterJoint(hadJointSpec, allTokens, allMethodArgs)
     list(
-        tokens = tokens,
-        methods = methods,
+        tokens = narrowed$tokens,
+        methods = if (!hadJointSpec) {
+            methods
+        } else if (length(narrowed$methodArgs) > 0L) {
+            narrowed$methodArgs
+        } else {
+            narrowed$tokens
+        },
         jointResult = jointResult,
-        exhaustedByJoint = hadJointSpec && length(tokens) == 0L
+        exhaustedByJoint = hadJointSpec && length(narrowed$tokens) == 0L
     )
 }
 
@@ -3891,16 +4142,17 @@ setMethod(
 ) {
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .fmNormalizeMethods(methods)
-    tokens <- norm$tokens
-    methodArgs <- norm$methodArgs
-    .fmCheckMethodCapabilities(tokens, "QtlSumStats")
-    jointResult <- NULL
+    allTokens <- norm$tokens
+    allMethodArgs <- norm$methodArgs
+    .fmCheckMethodCapabilities(allTokens, "QtlSumStats")
     hadJointSpec <- length(parsedJointSpec) > 0L
-    if (hadJointSpec) {
-        jointResult <- .fmDispatchJointSpecsQtlSumStats(
+    jointResult <- if (!hadJointSpec) {
+        NULL
+    } else {
+        .fmDispatchJointSpecsQtlSumStats(
             parsedJointSpec,
             data,
-            intersect(tokens, "mvsusie"),
+            intersect(allTokens, "mvsusie"),
             contexts,
             traitId,
             coverage,
@@ -3908,7 +4160,7 @@ setMethod(
             signalCutoff,
             minAbsCorr,
             verbose,
-            methodArgs = methodArgs,
+            methodArgs = allMethodArgs,
             twasWeights = twasWeights,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
             fineMappingResult = fineMappingResult,
@@ -3919,14 +4171,15 @@ setMethod(
             macCutoff = macCutoff %||% 0,
             imissCutoff = imissCutoff %||% 1
         )
-        tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
-        methodArgs <- methodArgs[tokens]
     }
+    # The joint dispatch consumed the multivariate tokens; the univariate
+    # phase runs on whatever is left.
+    narrowed <- .fmNarrowAfterJoint(hadJointSpec, allTokens, allMethodArgs)
     list(
-        tokens = tokens,
-        methodArgs = methodArgs,
+        tokens = narrowed$tokens,
+        methodArgs = narrowed$methodArgs,
         jointResult = jointResult,
-        exhaustedByJoint = hadJointSpec && length(tokens) == 0L
+        exhaustedByJoint = hadJointSpec && length(narrowed$tokens) == 0L
     )
 }
 
@@ -3941,12 +4194,15 @@ setMethod(
     studyCol <- as.character(data$study)
     contextCol <- as.character(data$context)
     traitCol <- as.character(data$trait)
-    selRows <- seq_len(nrow(data))
-    if (!is.null(contexts)) {
-        selRows <- selRows[is_in(contextCol[selRows], contexts)]
+    byContext <- if (is.null(contexts)) {
+        seq_len(nrow(data))
+    } else {
+        which(is_in(contextCol, contexts))
     }
-    if (!is.null(traitId)) {
-        selRows <- selRows[is_in(traitCol[selRows], traitId)]
+    selRows <- if (is.null(traitId)) {
+        byContext
+    } else {
+        byContext[is_in(traitCol[byContext], traitId)]
     }
     if (length(selRows) == 0L) {
         msg <- glue(

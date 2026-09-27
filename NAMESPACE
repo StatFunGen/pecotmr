@@ -579,9 +579,12 @@ importFrom(methods,
 )
 importFrom(purrr,
   compact,
+  detect,
+  discard,
   exec,
   imap,
   keep,
+  list_assign,
   list_c,
   list_flatten,
   list_modify,
@@ -597,7 +600,9 @@ importFrom(purrr,
   possibly,
   reduce,
   set_names,
-  walk
+  walk,
+  walk2,
+  zap
 )
 importFrom(quadprog,solve.QP)
 importFrom(readr,

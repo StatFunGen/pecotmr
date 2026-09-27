@@ -84,10 +84,10 @@ context("colocPipeline")
         )
     }
     QtlFineMappingResult(
-        study = vapply(tuples, `[[`, character(1), 1),
-        context = vapply(tuples, `[[`, character(1), 2),
-        trait = vapply(tuples, `[[`, character(1), 3),
-        method = vapply(tuples, `[[`, character(1), 4),
+        study = map_chr(tuples, 1L),
+        context = map_chr(tuples, 2L),
+        trait = map_chr(tuples, 3L),
+        method = map_chr(tuples, 4L),
         entry = entries,
         ldSketch = if (with_sketch) .cp_makeHandle() else NULL
     )
@@ -106,8 +106,8 @@ context("colocPipeline")
         )
     }
     GwasFineMappingResult(
-        study = vapply(tuples, `[[`, character(1), 1),
-        method = vapply(tuples, `[[`, character(1), 2),
+        study = map_chr(tuples, 1L),
+        method = map_chr(tuples, 2L),
         entry = entries,
         ldSketch = if (with_sketch) .cp_makeHandle() else NULL
     )

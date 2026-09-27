@@ -255,7 +255,7 @@ test_that("retainFits collects per-fold fits only when requested", {
         fitFold = fit_with_model,
         retainFits = FALSE
     ))
-    expect_true(all(vapply(r_off$foldFits, length, integer(1)) == 0L))
+    expect_true(all(map_int(r_off$foldFits, length) == 0L))
     r_on <- suppressMessages(cv(
         d$X,
         d$Y,

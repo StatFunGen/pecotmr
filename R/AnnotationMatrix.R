@@ -95,8 +95,10 @@ setMethod("show", "AnnotationMatrix", function(object) {
 #' @rdname getGenome
 #' @export
 setMethod("getGenome", "AnnotationMatrix", function(x, ...) {
-    build <- unique(GenomeInfoDb::genome(SummarizedExperiment::rowRanges(x)))
-    build <- build[!is.na(build)]
+    build <- discard(
+        unique(GenomeInfoDb::genome(SummarizedExperiment::rowRanges(x))),
+        is.na
+    )
     if (length(build) == 0L) NA_character_ else build[[1L]]
 })
 
@@ -160,21 +162,24 @@ AnnotationMatrix <- function(
     genome = "hg19"
 ) {
     .amCheckInputs(annotations, annotationMeta)
-    if (is.null(colnames(annotations))) {
-        colnames(annotations) <- annotationMeta$name
-    }
+    annotations <- `colnames<-`(
+        annotations,
+        colnames(annotations) %||% annotationMeta$name
+    )
     if (nrow(annotations) != length(snpRanges)) {
         abort(glue(
             "`annotations` has {nrow(annotations)} row(s) for ",
             "{length(snpRanges)} SNP range(s); the rows must match."
         ))
     }
-    if (!is.null(genome) && length(genome) == 1L && !is.na(genome)) {
-        GenomeInfoDb::genome(snpRanges) <- genome
+    named <- if (!is.null(genome) && length(genome) == 1L && !is.na(genome)) {
+        GenomeInfoDb::`genome<-`(snpRanges, value = genome)
+    } else {
+        snpRanges
     }
     se <- SummarizedExperiment::SummarizedExperiment(
         assays = list(annotations = annotations),
-        rowRanges = snpRanges,
+        rowRanges = named,
         # Keyed off the assay's own colnames, not annotationMeta$name:
         # SummarizedExperiment requires the two to agree, and the previous
         # class let them diverge, so taking the name column would reject

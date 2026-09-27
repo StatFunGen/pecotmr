@@ -55,6 +55,6 @@ Step 2 of the three-step \code{\link{ctwasPipeline}}: assembles
 \examples{
 data(ctwasInputsExample)
 estCtwasParam(ctwasInputsExample, thin = 1, niterPrefit = 3,
-  niter = 10, min_group_size = 1, min_p_single_effect = 0,
-  fallbackToPrefit = TRUE)
+  niter = 10, fallbackToPrefit = TRUE,
+  ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 }

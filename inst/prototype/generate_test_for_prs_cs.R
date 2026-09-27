@@ -22,10 +22,10 @@ sigma0 <- c(0.001, .1, .5, 1, 5, 10, 20, 30, .005)
 omega0 <- rep(1 / K, K)
 
 # Calculate summary statistics
-b.hat <- sapply(1:p, function(j) {
+b.hat <- purrr::map_dbl(1:p, function(j) {
     summary(lm(y ~ X[, j]))$coefficients[-1, 1]
 })
-s.hat <- sapply(1:p, function(j) {
+s.hat <- purrr::map_dbl(1:p, function(j) {
     summary(lm(y ~ X[, j]))$coefficients[-1, 2]
 })
 R.hat <- cor(X)

@@ -46,7 +46,8 @@ gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
 est <- estCtwasParam(inp, thin = 1, niterPrefit = 3, niter = 10,
-  min_group_size = 1, min_p_single_effect = 0, fallbackToPrefit = TRUE)
+  fallbackToPrefit = TRUE,
+  ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 screened <- screenCtwasRegions(est, L = 5L)
 finemapCtwasRegions(screened, L = 5L)
 }

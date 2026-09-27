@@ -525,38 +525,37 @@ qtlEnrichmentPipeline <- function(
 # would collide on every variant they share.
 #' @importFrom dplyr add_count
 #' @noRd
+# One row's PIP vector keyed by variant id, or NULL when the row carries no
+# fit, no PIPs, or ids that do not line up with them.
+# @noRd
+.enrRowPipVector <- function(i, gwasFmr) {
+    parts <- .fmrRowParts(gwasFmr, i)
+    fit <- getSusieFit(parts)
+    if (is.null(fit) || is.null(fit$pip)) {
+        return(NULL)
+    }
+    pip <- as.numeric(fit$pip)
+    ids <- names(fit$pip) %||% .fmrPartsVariantIds(parts)
+    if (length(ids) != length(pip)) {
+        return(NULL)
+    }
+    set_names(pip, as.character(ids))
+}
+
 .enrBuildGwasPipVector <- function(gwasFmr, ident) {
     idx <- .enrMatchRows(gwasFmr, ident)
     if (length(idx) == 0L) {
         return(numeric(0))
     }
-    pieces <- list()
-    for (i in idx) {
-        parts <- .fmrRowParts(gwasFmr, i)
-        fit <- getSusieFit(parts)
-        if (is.null(fit) || is.null(fit$pip)) {
-            next
-        }
-        pip <- as.numeric(fit$pip)
-        ids <- if (!is.null(names(fit$pip))) {
-            names(fit$pip)
-        } else {
-            .fmrPartsVariantIds(parts)
-        }
-        if (length(ids) != length(pip)) {
-            next
-        }
-        pieces[[length(pieces) + 1L]] <-
-            set_names(pip, as.character(ids))
-    }
+    pieces <- compact(map(idx, .enrRowPipVector, gwasFmr = gwasFmr))
     if (length(pieces) == 0L) {
         return(numeric(0))
     }
-    all <- list_c(pieces)
-    if (n_distinct(names(all)) < length(all)) {
-        all <- .enrCollapseDuplicatePips(all)
+    combined <- list_c(pieces)
+    if (n_distinct(names(combined)) == length(combined)) {
+        return(combined)
     }
-    all
+    .enrCollapseDuplicatePips(combined)
 }
 
 # Collapse duplicate variant ids across GWAS blocks: agreeing PIPs (rounded to
@@ -593,33 +592,31 @@ qtlEnrichmentPipeline <- function(
     if (length(idx) == 0L) {
         return(list())
     }
-    out <- list()
-    for (i in idx) {
-        parts <- .fmrRowParts(qtlFmr, i)
-        fit <- getSusieFit(parts)
-        if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) {
-            next
-        }
-        pV <- if (!is.null(fit$V)) {
-            fit$V
-        } else if (!is.null(fit$prior_variance)) {
-            fit$prior_variance
-        } else {
-            NULL
-        }
-        if (is.null(pV)) {
-            next
-        }
-        if (is.null(names(fit$pip))) {
-            names(fit$pip) <- .fmrPartsVariantIds(parts)
-        }
-        out[[length(out) + 1L]] <- list(
-            alpha = fit$alpha,
-            pip = fit$pip,
-            prior_variance = pV
-        )
+    compact(map(idx, .enrRowRegion, qtlFmr = qtlFmr))
+}
+
+# One row's region payload for qtlEnrichment, or NULL when the row lacks a
+# fit, an alpha, PIPs, or a prior variance. The PIP names fall back to the
+# row's own variant ids when the fit did not carry any.
+# @noRd
+.enrRowRegion <- function(i, qtlFmr) {
+    parts <- .fmrRowParts(qtlFmr, i)
+    fit <- getSusieFit(parts)
+    if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) {
+        return(NULL)
     }
-    out
+    priorVariance <- fit$V %||% fit$prior_variance
+    if (is.null(priorVariance)) {
+        return(NULL)
+    }
+    list(
+        alpha = fit$alpha,
+        pip = set_names(
+            fit$pip,
+            names(fit$pip) %||% .fmrPartsVariantIds(parts)
+        ),
+        prior_variance = priorVariance
+    )
 }
 
 # Pull one enrichment field from qtlEnrichment's list output as a scalar numeric
@@ -835,8 +832,7 @@ qtlEnrichment <- function(
         numThreads = as.integer(numThreads),
         seed = if (is.null(seed)) NULL else as.integer(seed)
     )
-    en$unused_xqtl_variants <- unmatchedVariants
-    en
+    list_assign(en, unused_xqtl_variants = unmatchedVariants)
 }
 
 # piGwas = sum(gwasPip) / numGwas (estimated from the data, with a warning, when
@@ -846,17 +842,15 @@ qtlEnrichment <- function(
     if (!is.null(numGwas)) {
         return(sum(gwasPip) / numGwas)
     }
-    msg <- glue(
+    warn(glue(
         "numGwas is not provided. Estimating piGwas from the data. Note ",
         "that this estimate may be biased if the input gwasPip does not ",
         "contain genome-wide variants."
-    )
-    warn(msg)
+    ))
     piGwas <- sum(gwasPip) / length(gwasPip)
     if (verbose) {
         piGwasR <- round(piGwas, 5)
-        msg <- glue("Estimated piGwas: {piGwasR}\n", .trim = FALSE)
-        inform(msg)
+        inform(glue("Estimated piGwas: {piGwasR}\n", .trim = FALSE))
     }
     piGwas
 }
@@ -879,8 +873,7 @@ qtlEnrichment <- function(
     piQtl <- sum(allPips) / length(allPips)
     if (verbose) {
         piQtlR <- round(piQtl, 5)
-        msg <- glue("Estimated piQtl: {piQtlR}\n", .trim = FALSE)
-        inform(msg)
+        inform(glue("Estimated piQtl: {piQtlR}\n", .trim = FALSE))
     }
     piQtl
 }
@@ -947,14 +940,17 @@ qtlEnrichment <- function(
 # @noRd
 .enrAlignRegionByMatch <- function(x, gwasPip) {
     mm <- matchVariants(names(x$pip), names(gwasPip))
-    nm <- names(x$pip)
-    nm[mm$idxA] <- names(gwasPip)[mm$idxB]
-    names(x$pip) <- nm
-    unmatchedIdx <- setdiff(seq_along(x$pip), mm$idxA)
-    if (length(unmatchedIdx) > 0) {
-        x$unmatched_variants <- names(x$pip)[unmatchedIdx]
-    }
-    x
+    nm <- replace(names(x$pip), mm$idxA, names(gwasPip)[mm$idxB])
+    aligned <- list_assign(x, pip = set_names(x$pip, nm))
+    unmatchedIdx <- setdiff(seq_along(aligned$pip), mm$idxA)
+    list_assign(
+        aligned,
+        !!!compact(list(
+            unmatched_variants = if (length(unmatchedIdx) > 0) {
+                names(aligned$pip)[unmatchedIdx]
+            }
+        ))
+    )
 }
 
 # Record the region's variants absent from the GWAS name set (cheap membership
@@ -962,17 +958,20 @@ qtlEnrichment <- function(
 # @noRd
 .enrMarkUnmatched <- function(x, gwasNameSet) {
     unmatchedIdx <- which(!is_in(names(x$pip), gwasNameSet))
-    if (length(unmatchedIdx) > 0) {
-        x$unmatched_variants <- names(x$pip)[unmatchedIdx]
-    }
-    x
+    list_assign(
+        x,
+        !!!compact(list(
+            unmatched_variants = if (length(unmatchedIdx) > 0) {
+                names(x$pip)[unmatchedIdx]
+            }
+        ))
+    )
 }
 
 # Drop the transient unmatched_variants field from a region.
 # @noRd
 .enrStripUnmatched <- function(x) {
-    x$unmatched_variants <- NULL
-    x
+    list_modify(x, unmatched_variants = zap())
 }
 
 # Relabel one region's matched pip names to the union GWAS panel (unmatched
@@ -981,9 +980,8 @@ qtlEnrichment <- function(
 .enrAlignRegion <- function(x, unionGwasNames) {
     if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
         mm <- matchVariants(names(x$pip), unionGwasNames)
-        nm <- names(x$pip)
-        nm[mm$idxA] <- unionGwasNames[mm$idxB]
-        names(x$pip) <- nm
+        nm <- replace(names(x$pip), mm$idxA, unionGwasNames[mm$idxB])
+        return(list_assign(x, pip = set_names(x$pip, nm)))
     }
     x
 }

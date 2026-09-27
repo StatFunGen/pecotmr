@@ -102,16 +102,28 @@ NULL
 }
 
 #' @importFrom checkmate assertNames
-.canonManifestCols <- function(df, aliases, required, label) {
-    for (canon in names(aliases)) {
-        if (is_in(canon, names(df))) {
-            next
-        }
-        hit <- intersect(aliases[[canon]], names(df))
-        if (length(hit) >= 1L) {
-            names(df)[match(hit[[1L]], names(df))] <- canon
-        }
+# The existing column an alias set points at, or NULL when the canonical name
+# is already present or nothing matches.
+# @noRd
+.manifestAliasHit <- function(canon, aliases, df) {
+    if (is_in(canon, names(df))) {
+        return(NULL)
     }
+    hit <- intersect(aliases[[canon]], names(df))
+    if (length(hit) == 0L) {
+        return(NULL)
+    }
+    hit[[1L]]
+}
+
+.canonManifestCols <- function(df, aliases, required, label) {
+    # Each alias resolves against the ORIGINAL names, so renaming one cannot
+    # change what another matches.
+    renames <- compact(set_names(
+        map(names(aliases), .manifestAliasHit, aliases = aliases, df = df),
+        names(aliases)
+    ))
+    df <- rename(df, !!!renames)
     assertNames(
         names(df),
         must.include = required,
@@ -125,8 +137,9 @@ NULL
 # both as a constant manifest column and as a function argument. The column (if
 # present) must be constant; a supplied argument must agree with it.
 .reconcileScalar <- function(colValues, arg, name, required = TRUE) {
-    colVal <- NULL
-    if (!is.null(colValues)) {
+    colVal <- if (is.null(colValues)) {
+        NULL
+    } else {
         v <- unique(as.character(colValues[
             !is.na(colValues) &
                 str_length(as.character(colValues)) > 0L
@@ -138,7 +151,7 @@ NULL
             )
             abort(msg)
         }
-        if (length(v) == 1L) colVal <- v
+        if (length(v) == 1L) v else NULL
     }
     if (!is.null(arg) && !is.null(colVal)) {
         if (!identical(as.character(arg), colVal)) {
@@ -261,12 +274,13 @@ NULL
     if (!is.null(open)) {
         return(open)
     }
-    colSpec <- NULL
     # is_in guard, not `!is.null(df$ldSketchPath)`: on a tibble `$` for an
     # absent column NULLs but WARNS ("Unknown or uninitialised column"), where a
     # data.frame was silent. ldSketchPath is optional (LD may come via
     # `ldSketch`).
-    if (is_in("ldSketchPath", names(df))) {
+    colSpec <- if (!is_in("ldSketchPath", names(df))) {
+        NULL
+    } else {
         v <- unique(as.character(df$ldSketchPath[
             !is.na(df$ldSketchPath) &
                 str_length(as.character(df$ldSketchPath)) > 0L
@@ -274,13 +288,13 @@ NULL
         if (length(v) > 1L) {
             abort("`ldSketchPath` column must be constant across the manifest.")
         }
-        if (length(v) == 1L) colSpec <- .resolveRel(v, base)
+        if (length(v) == 1L) .resolveRel(v, base) else NULL
     }
-    spec <- ldSketch
+    spec <- ldSketch %||% colSpec
     if (
-        !is.null(spec) &&
+        !is.null(ldSketch) &&
             !is.null(colSpec) &&
-            !identical(as.character(spec), as.character(colSpec))
+            !identical(as.character(ldSketch), as.character(colSpec))
     ) {
         msg <- glue(
             "`ldSketch` argument disagrees with the manifest ",
@@ -288,7 +302,6 @@ NULL
         )
         abort(msg)
     }
-    spec <- spec %||% colSpec
     if (is.null(spec)) {
         msg <- glue(
             "`ldSketch` must be provided as an argument or an ",
@@ -673,14 +686,19 @@ NULL
 .resolveSumstatCols <- function(df, columnMapping, label, allowNoN = FALSE) {
     # Strip a leading '#' from the first column name so a '#CHR'-style header
     # (common in GWAS TSVs) resolves the same on plain-text and tabix reads.
-    if (ncol(df) > 0L) {
-        names(df)[1L] <- str_remove(names(df)[1L], "^#")
+    unhashed <- if (ncol(df) == 0L) {
+        df
+    } else {
+        `names<-`(
+            df,
+            replace(names(df), 1L, str_remove(names(df)[1L], "^#"))
+        )
     }
     mapping <- .readColumnMapping(columnMapping)
-    resolved <- .resolveSumstatRequired(df, mapping, label)
-    z <- .resolveSumstatZ(df, mapping, label)
-    n <- .resolveSumstatN(df, mapping, label, allowNoN)
-    .buildSumstatOut(df, resolved, z, n, mapping, label)
+    resolved <- .resolveSumstatRequired(unhashed, mapping, label)
+    z <- .resolveSumstatZ(unhashed, mapping, label)
+    n <- .resolveSumstatN(unhashed, mapping, label, allowNoN)
+    .buildSumstatOut(unhashed, resolved, z, n, mapping, label)
 }
 
 # Resolve + validate the always-required columns (chrom/pos/variant_id/A1/A2).
@@ -767,18 +785,17 @@ NULL
         A1 = as.character(df[[resolved$A1]]),
         A2 = as.character(df[[resolved$A2]])
     )
-    out$Z <- if (z$hasZ) {
-        as.numeric(df[[z$zSrc]])
-    } else {
-        as.numeric(df[[z$betaSrc]]) / as.numeric(df[[z$seSrc]])
-    }
-    if (n$hasN) {
-        out$N <- as.numeric(df[[n$nSrc]])
-    }
-    if (n$hasCounts) {
-        out$N_CASE <- as.numeric(df[[n$ncaseSrc]])
-        out$N_CONTROL <- as.numeric(df[[n$ncontrolSrc]])
-    }
+    sampleSize <- c(
+        if (n$hasN) list(N = as.numeric(df[[n$nSrc]])) else list(),
+        if (n$hasCounts) {
+            list(
+                N_CASE = as.numeric(df[[n$ncaseSrc]]),
+                N_CONTROL = as.numeric(df[[n$ncontrolSrc]])
+            )
+        } else {
+            list()
+        }
+    )
     # `claimed` = the source columns named by explicit mappings, so an
     # auto-detected key never re-reads a column another key already claimed.
     claimed <- if (is.null(mapping)) {
@@ -786,15 +803,50 @@ NULL
     } else {
         unname(as.character(mapping))
     }
-    afSrc <- .resolveSumstatKey("AF", df, mapping, label, claimed)
-    for (key in c("BETA", "SE", "P", "AF", "MAF", "INFO")) {
-        src <- .resolveSumstatKey(key, df, mapping, label, claimed)
-        if (!is.na(src) && !is.null(src)) {
-            out[[key]] <- as.numeric(df[[src]])
-        }
-    }
-    .warnAfProvenance(out, afSrc, label)
-    out
+    optionalKeys <- c("BETA", "SE", "P", "AF", "MAF", "INFO")
+    sources <- set_names(
+        map(
+            optionalKeys,
+            .resolveSumstatKeyFor,
+            df = df,
+            mapping = mapping,
+            label = label,
+            claimed = claimed
+        ),
+        optionalKeys
+    )
+    present <- keep(sources, .sumstatSourceFound)
+    result <- mutate(
+        out,
+        Z = if (z$hasZ) {
+            as.numeric(df[[z$zSrc]])
+        } else {
+            as.numeric(df[[z$betaSrc]]) / as.numeric(df[[z$seSrc]])
+        },
+        !!!sampleSize,
+        !!!map(present, .sumstatNumericColumn, df = df)
+    )
+    .warnAfProvenance(
+        result,
+        .resolveSumstatKey("AF", df, mapping, label, claimed),
+        label
+    )
+    result
+}
+
+# @noRd
+.resolveSumstatKeyFor <- function(key, df, mapping, label, claimed) {
+    .resolveSumstatKey(key, df, mapping, label, claimed)
+}
+
+# @noRd
+.sumstatSourceFound <- function(src) {
+    !is.null(src) && !is.na(src)
+}
+
+# @noRd
+.sumstatNumericColumn <- function(src, df) {
+    as.numeric(df[[src]])
 }
 
 # An exported af of NA must never be silent, and the two ways to get one are
@@ -910,13 +962,13 @@ NULL
         BETA = es,
         SE = se
     )
-    if (!is.null(lp)) {
-        out$P <- 10^(-lp)
-    }
-    if (!is.null(eaf)) {
-        out$MAF <- pmin(eaf, 1 - eaf)
-    }
-    out
+    mutate(
+        out,
+        !!!compact(list(
+            P = if (!is.null(lp)) 10^(-lp),
+            MAF = if (!is.null(eaf)) pmin(eaf, 1 - eaf)
+        ))
+    )
 }
 
 # Read one GWAS-VCF sumstats file (region-restricted only when bgzipped +
@@ -1029,13 +1081,9 @@ NULL
     # parseVariantId() reads an id as chr:pos:A2:A1 (pecotmr's canonical
     # order), so "A2A1" is a straight take and "A1A2" is the swap.
     if (identical(order, "A2A1")) {
-        df$A1 <- parsed$A1
-        df$A2 <- parsed$A2
-    } else {
-        df$A1 <- parsed$A2
-        df$A2 <- parsed$A1
+        return(mutate(df, A1 = parsed$A1, A2 = parsed$A2))
     }
-    df
+    mutate(df, A1 = parsed$A2, A2 = parsed$A1)
 }
 
 # @noRd
@@ -1087,13 +1135,13 @@ NULL
             col_types = readr::cols(.default = readr::col_character())
         )
     }
-    raw <- .applySumstatPrefilters(
+    filtered <- .applySumstatPrefilters(
         raw,
         prefilters,
         .readColumnMapping(columnMapping),
         label
     )
-    .resolveSumstatCols(raw, columnMapping, label, allowNoN = allowNoN)
+    .resolveSumstatCols(filtered, columnMapping, label, allowNoN = allowNoN)
 }
 
 # Dispatch a sumstats file to the text or GWAS-VCF reader. BCF is rejected.
@@ -1167,12 +1215,12 @@ NULL
         readr::read_tsv(path, show_col_types = FALSE, progress = FALSE),
         check.names = FALSE
     )
-    rn <- as.character(raw[[1L]])
-    m <- as.matrix(raw[, -1L, drop = FALSE])
-    rownames(m) <- rn
-    storage.mode(m) <- "double"
+    m <- `rownames<-`(
+        `storage.mode<-`(as.matrix(raw[, -1L, drop = FALSE]), "double"),
+        as.character(raw[[1L]])
+    )
     if (transpose) {
-        m <- t(m)
+        return(t(m))
     }
     m
 }
@@ -1234,17 +1282,22 @@ NULL
         )
         abort(msg)
     }
-    meta <- bed[, c(chrCol, startCol, endCol, geneCol)]
-    names(meta) <- c("chrom", "start", "end", "gene_id")
-    sampleCols <- setdiff(names(bed), .bedReservedCols())
-    expr <- as.matrix(bed[, sampleCols, drop = FALSE])
-    storage.mode(expr) <- "double"
-    rownames(expr) <- meta$gene_id
-    rr <- GenomicRanges::GRanges(
-        seqnames = meta$chrom,
-        ranges = IRanges::IRanges(start = meta$start + 1L, end = meta$end)
+    meta <- `names<-`(
+        bed[, c(chrCol, startCol, endCol, geneCol)],
+        c("chrom", "start", "end", "gene_id")
     )
-    names(rr) <- meta$gene_id
+    sampleCols <- setdiff(names(bed), .bedReservedCols())
+    expr <- `rownames<-`(
+        `storage.mode<-`(as.matrix(bed[, sampleCols, drop = FALSE]), "double"),
+        meta$gene_id
+    )
+    rr <- `names<-`(
+        GenomicRanges::GRanges(
+            seqnames = meta$chrom,
+            ranges = IRanges::IRanges(start = meta$start + 1L, end = meta$end)
+        ),
+        meta$gene_id
+    )
     list(expr = expr, rr = rr)
 }
 
@@ -1360,24 +1413,31 @@ NULL
         )
         abort(msg)
     }
-    covPath <- NULL
-    if (is_in("covariatePath", names(sub))) {
-        covs <- unique(sub$covariatePath[
-            !is.na(sub$covariatePath) &
-                str_length(as.character(sub$covariatePath)) > 0L
-        ])
-        if (length(covs) > 1L) {
-            msg <- glue(
-                "Context '{cx}' (study '{study}') references multiple ",
-                "covariatePath values: {str_flatten(covs, ', ')}"
-            )
-            abort(msg)
-        }
-        if (length(covs) == 1L) {
-            covPath <- .resolveRel(covs[[1L]], base)
-        }
-    }
+    covPath <- .oneContextCovariatePath(sub, cx, study, base)
     .buildContextSe(.resolveRel(pths[[1L]], base), covPath, transposeCov)
+}
+
+# The single covariate path a context declares, or NULL when the manifest has
+# no covariatePath column or the context leaves it blank.
+# @noRd
+.oneContextCovariatePath <- function(sub, cx, study, base) {
+    if (!is_in("covariatePath", names(sub))) {
+        return(NULL)
+    }
+    covs <- unique(sub$covariatePath[
+        !is.na(sub$covariatePath) &
+            str_length(as.character(sub$covariatePath)) > 0L
+    ])
+    if (length(covs) > 1L) {
+        abort(glue(
+            "Context '{cx}' (study '{study}') references multiple ",
+            "covariatePath values: {str_flatten(covs, ', ')}"
+        ))
+    }
+    if (length(covs) == 0L) {
+        return(NULL)
+    }
+    .resolveRel(covs[[1L]], base)
 }
 
 # The genotype handle: an override panel/path, else the study's single
@@ -1669,14 +1729,19 @@ loadGwasSumStatsFromManifest <- function(
     )
     # Materialise the LD sketch reading only the chromosomes the sumstats cover,
     # then run the deferred per-study containment checks and trim to range.
-    ldSketch <- .materializeLdSketch(ldSketchSpec, .entriesChroms(entries))
-    .checkGwasLdContainment(ldSketch, entries, df, minLdOverlapWarn)
-    ldSketch <- .subsetSketchToRange(ldSketch, entries)
-    gwasArgs <- .gwasSumStatsArgs(df, entries, genome, ldSketch, ns)
+    materialized <- .materializeLdSketch(
+        ldSketchSpec,
+        .entriesChroms(entries)
+    )
+    .checkGwasLdContainment(materialized, entries, df, minLdOverlapWarn)
+    ldSketch <- .subsetSketchToRange(materialized, entries)
     # Without a block manifest a genome-wide file splits by chromosome, which
     # is too coarse for cTWAS; with one, each study becomes one element per LD
     # block. The constructor does the splitting either way.
-    gwasArgs$ldBlocks <- ldBlocks
+    gwasArgs <- list_assign(
+        .gwasSumStatsArgs(df, entries, genome, ldSketch, ns),
+        ldBlocks = ldBlocks
+    )
     exec(GwasSumStats, !!!gwasArgs)
 }
 
@@ -1754,25 +1819,20 @@ loadGwasSumStatsFromManifest <- function(
 # GwasSumStats() constructor args, including any present study scalars + varY.
 # @noRd
 .gwasSumStatsArgs <- function(df, entries, genome, ldSketch, ns) {
-    args <- list(
-        study = as.character(df$study),
-        entry = entries,
-        genome = genome,
-        ldSketch = ldSketch
+    c(
+        list(
+            study = as.character(df$study),
+            entry = entries,
+            genome = genome,
+            ldSketch = ldSketch
+        ),
+        compact(list(
+            nCase = ns$nCase,
+            nControl = ns$nControl,
+            nSample = ns$nSample,
+            varY = if (is_in("varY", names(df))) as.numeric(df$varY)
+        ))
     )
-    if (!is.null(ns$nCase)) {
-        args$nCase <- ns$nCase
-    }
-    if (!is.null(ns$nControl)) {
-        args$nControl <- ns$nControl
-    }
-    if (!is.null(ns$nSample)) {
-        args$nSample <- ns$nSample
-    }
-    if (is_in("varY", names(df))) {
-        args$varY <- as.numeric(df$varY)
-    }
-    args
 }
 
 # Build the entry list for a QtlSumStats manifest. `allowNoN` is an optional
@@ -1892,9 +1952,12 @@ loadQtlSumStatsFromManifest <- function(
     # Materialise the LD sketch reading only the chromosomes the summary stats
     # cover (skips other shards of a chrom-sharded panel), check containment,
     # then trim its snpInfo to the summary stats' per-chromosome position span.
-    ldSketch <- .materializeLdSketch(ldSketchSpec, .entriesChroms(entries))
-    .qtlSumStatsCheckContainment(ldSketch, entries, df, minLdOverlapWarn)
-    ldSketch <- .subsetSketchToRange(ldSketch, entries)
+    materialized <- .materializeLdSketch(
+        ldSketchSpec,
+        .entriesChroms(entries)
+    )
+    .qtlSumStatsCheckContainment(materialized, entries, df, minLdOverlapWarn)
+    ldSketch <- .subsetSketchToRange(materialized, entries)
 
     exec(
         QtlSumStats,
@@ -1960,13 +2023,13 @@ loadQtlSumStatsFromManifest <- function(
         genome = genome,
         ldSketch = ldSketch
     )
-    if (!is.null(nSampleCol)) {
-        args$nSample <- nSampleCol
-    }
-    if (is_in("varY", names(df))) {
-        args$varY <- as.numeric(df$varY)
-    }
-    args
+    c(
+        args,
+        compact(list(
+            nSample = nSampleCol,
+            varY = if (is_in("varY", names(df))) as.numeric(df$varY)
+        ))
+    )
 }
 
 #' @title Load a MultiStudyQtlDataset from manifests

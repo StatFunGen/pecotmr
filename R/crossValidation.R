@@ -49,18 +49,35 @@
     }
     lmFit <- stats::lm(actual ~ pred)
     s <- summary(lmFit)
-    out["corr"] <- stats::cor(actual, pred)
-    out["rsq"] <- s$r.squared
-    out["adj_rsq"] <- s$adj.r.squared
-    out["pval"] <- if (nrow(s$coefficients) >= 2L) {
-        s$coefficients[2L, 4L]
-    } else {
-        NA_real_
-    }
     res <- actual - pred
-    out["RMSE"] <- sqrt(mean(res^2))
-    out["MAE"] <- mean(abs(res))
-    out
+    c(
+        corr = stats::cor(actual, pred),
+        rsq = s$r.squared,
+        adj_rsq = s$adj.r.squared,
+        pval = if (nrow(s$coefficients) >= 2L) {
+            s$coefficients[2L, 4L]
+        } else {
+            NA_real_
+        },
+        RMSE = sqrt(mean(res^2)),
+        MAE = mean(abs(res))
+    )
+}
+
+# A canonical fingerprint of a Sample/Fold partition, used to prove that
+# per-fold fits handed to twasWeightsCv were trained on the same folds it is
+# scoring. Sample order is normalised first, so two partitions that assign the
+# same samples to the same folds agree regardless of row order.
+# @noRd
+.cvPartitionKey <- function(samplePartition) {
+    if (is.null(samplePartition)) {
+        return(NULL)
+    }
+    tbl <- samplePartition |>
+        arrange(.data$Sample, .data$Fold) |>
+        mutate(.key = str_c(.data$Sample, "=", .data$Fold)) |>
+        pull(".key")
+    rlang::hash(tbl)
 }
 
 # One CV fold: split train/test by fold `j`, drop zero-variance training
@@ -85,11 +102,11 @@
     if (all(isTest) || !any(isTest)) {
         return(list(preds = list(), fits = list()))
     }
-    Xtr <- X[!isTest, , drop = FALSE]
+    trainAll <- X[!isTest, , drop = FALSE]
     Xte <- X[isTest, , drop = FALSE]
     Ytr <- Y[!isTest, , drop = FALSE]
-    keep <- .nonzeroVarColumns(Xtr)
-    Xtr <- Xtr[, keep, drop = FALSE]
+    keep <- .nonzeroVarColumns(trainAll)
+    Xtr <- trainAll[, keep, drop = FALSE]
     ff <- fitFold(Xtr, Ytr, j, fitFoldCtx)
     preds <- map(ff$weights, .cvFoldPrediction, Xte = Xte)
     list(preds = preds, fits = if (isTRUE(retainFits)) ff$fits else list())
@@ -199,19 +216,22 @@
     } else {
         str_c("sample_", seq_len(nrow(X)))
     }
-    if (is.null(rownames(X))) {
-        rownames(X) <- sampleNames
-    }
-    if (is.null(rownames(Y))) {
-        rownames(Y) <- sampleNames
-    }
-    if (is.null(colnames(X))) {
-        colnames(X) <- str_c("variable_", seq_len(ncol(X)))
-    }
-    if (is.null(colnames(Y))) {
-        colnames(Y) <- str_c("context_", seq_len(ncol(Y)))
-    }
-    list(X = X, Y = Y)
+    list(
+        X = `dimnames<-`(
+            X,
+            list(
+                rownames(X) %||% sampleNames,
+                colnames(X) %||% str_c("variable_", seq_len(ncol(X)))
+            )
+        ),
+        Y = `dimnames<-`(
+            Y,
+            list(
+                rownames(Y) %||% sampleNames,
+                colnames(Y) %||% str_c("context_", seq_len(ncol(Y)))
+            )
+        )
+    )
 }
 
 # Optional variant subsample (compute saver; e.g. TWAS weight CV).
@@ -375,20 +395,29 @@
 .cvAggregate <- function(foldResults, Y, verbose) {
     metricNames <- c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
     methodKeys <- unique(list_c(map(foldResults, .cvPredNames)))
-    prediction <- list()
-    performance <- list()
-    for (mk in methodKeys) {
-        predMat <- .cvPredMatrix(foldResults, mk, Y)
-        prediction[[.cvOutputKey(mk, "predicted")]] <- predMat
-        performance[[.cvOutputKey(mk, "performance")]] <- .cvPerformance(
-            predMat,
-            Y,
-            mk,
-            verbose,
-            metricNames
+    predMats <- map(methodKeys, .cvPredMatrix, foldResults = foldResults, Y = Y)
+    list(
+        prediction = set_names(
+            predMats,
+            map_chr(methodKeys, .cvOutputKey, suffix = "predicted")
+        ),
+        performance = set_names(
+            map2(
+                predMats,
+                methodKeys,
+                .cvPerformanceFor,
+                Y = Y,
+                verbose = verbose,
+                metricNames = metricNames
+            ),
+            map_chr(methodKeys, .cvOutputKey, suffix = "performance")
         )
-    }
-    list(prediction = prediction, performance = performance)
+    )
+}
+
+# @noRd
+.cvPerformanceFor <- function(predMat, mk, Y, verbose, metricNames) {
+    .cvPerformance(predMat, Y, mk, verbose, metricNames)
 }
 
 # @noRd
@@ -399,15 +428,19 @@
 # Assemble the (samples x conditions) prediction matrix for a method, scattering
 # each fold's held-out predictions by row name.
 # @noRd
-.cvPredMatrix <- function(foldResults, mk, Y) {
+.cvPredMatrix <- function(mk, foldResults, Y) {
+    # Deliberate scatter: the folds partition the samples, so each writes its
+    # own held-out rows once and samples in no fold stay NA.
     predMat <- matrix(NA_real_, nrow(Y), ncol(Y), dimnames = dimnames(Y))
-    for (fr in foldResults) {
-        yh <- fr$preds[[mk]]
-        if (!is.null(yh)) {
-            predMat[rownames(yh), ] <- yh
-        }
+    for (yh in compact(map(foldResults, .cvFoldPreds, mk = mk))) {
+        predMat[rownames(yh), ] <- yh
     }
     predMat
+}
+
+# @noRd
+.cvFoldPreds <- function(fr, mk) {
+    fr$preds[[mk]]
 }
 
 # Per-condition performance metrics (conditions x metrics).
@@ -421,10 +454,10 @@
         mk = mk,
         verbose = verbose
     )
-    perf <- exec(rbind, !!!metricRows)
-    colnames(perf) <- metricNames
-    rownames(perf) <- colnames(Y)
-    perf
+    `dimnames<-`(
+        exec(rbind, !!!metricRows),
+        list(colnames(Y), metricNames)
+    )
 }
 
 # @noRd
@@ -467,12 +500,13 @@
     if (is.null(W)) {
         return(NULL)
     }
-    W[is.na(W)] <- 0
+    W <- replace(W, is.na(W), 0)
     common <- intersect(colnames(Xte), rownames(W))
     if (length(common) == 0L) {
         return(NULL)
     }
-    yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
-    rownames(yhat) <- rownames(Xte)
-    yhat
+    `rownames<-`(
+        Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE],
+        rownames(Xte)
+    )
 }

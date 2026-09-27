@@ -959,7 +959,7 @@ test_that("filterMixtureComponents subsets conditions", {
             width = 1L
         )
     )
-    entries <- lapply(seq_along(contexts), function(i) {
+    entries <- map(seq_along(contexts), function(i) {
         gr <- ranges
         S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcolsBuilder(i, nSnp))
         gr

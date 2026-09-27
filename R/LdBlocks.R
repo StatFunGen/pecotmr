@@ -44,15 +44,17 @@ NULL
         what = "colnames",
         .var.name = "ldBlocks table"
     )
-    gr <- GenomicRanges::GRanges(
+    exec(
+        GenomicRanges::GRanges,
         seqnames = as.character(df$chrom),
         ranges = IRanges::IRanges(
             start = as.integer(df$start),
             end = as.integer(df$end)
-        )
+        ),
+        !!!compact(list(
+            blockId = if (is_in("blockId", colnames(df))) {
+                as.character(df$blockId)
+            }
+        ))
     )
-    if (is_in("blockId", colnames(df))) {
-        mcols(gr)$blockId <- as.character(df$blockId)
-    }
-    gr
 }

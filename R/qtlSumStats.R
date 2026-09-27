@@ -168,10 +168,10 @@ QtlSumStats <- function(
     n <- length(study)
     varY <- .qssValidateArgs(context, trait, entry, genome, varY, n)
     entry <- .qssAddTraitDistances(entry, traitPos, n)
-    cols <- .qssBaseCols(study, context, trait, varY)
-    cols <- .qssAppendNSample(cols, nSample, n)
-    cols <- .appendTraitPosCol(cols, traitPos, n)
-    cols <- .qssAppendExtras(cols, list(...))
+    cols <- .qssBaseCols(study, context, trait, varY) |>
+        .qssAppendNSample(nSample, n) |>
+        .appendTraitPosCol(traitPos, n) |>
+        .qssAppendExtras(list(...))
     dfArgs <- c(cols, list(check.names = FALSE))
     # The per-tuple GRanges become the collection's ELEMENTS; the tuple keys
     # and per-tuple scalars go in mcols. There is no `entry` column.
@@ -181,9 +181,11 @@ QtlSumStats <- function(
     # A multi-seqname entry (e.g. a genome-wide GWAS) is split into one
     # element per chromosome, with its metadata row replicated alongside.
     split <- .rtlSplitBySeqname(entry)
-    grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md[split$fromIdx, , drop = FALSE]
+    )
     .sumStatsNewValidated("QtlSumStats", grl, ldSketch, genome, qcInfo)
 }
 
@@ -262,17 +264,16 @@ QtlSumStats <- function(
     if (is.null(nSample)) {
         return(cols)
     }
-    cols$nSample <- as.numeric(.qssRecycleTo(nSample, n, "nSample"))
-    cols
+    c(
+        cols,
+        list(nSample = as.numeric(.qssRecycleTo(nSample, n, "nSample")))
+    )
 }
 
 # Append any user-supplied extra columns (from `...`).
 # @noRd
 .qssAppendExtras <- function(cols, extras) {
-    for (nm in names(extras)) {
-        cols[[nm]] <- extras[[nm]]
-    }
-    cols
+    c(cols, extras)
 }
 
 # Annotate each entry's variants with tss_distance / tes_distance from the
@@ -385,8 +386,10 @@ setMethod(
         ...
     ) {
         idx <- .qtlSumStatsSelectRow(x, study, context, trait)
-        gr <- .ssStitchElements(x, idx, ranges)
-        if (!is.null(annotateSignificance)) {
+        stitched <- .ssStitchElements(x, idx, ranges)
+        gr <- if (is.null(annotateSignificance)) {
+            stitched
+        } else {
             m <- arg_match(
                 annotateSignificance,
                 c(
@@ -396,10 +399,14 @@ setMethod(
                     "qvalue"
                 )
             )
-            S4Vectors::mcols(gr)[["significant"]] <- .qapSignificanceMask(
-                x,
-                m
-            )[[idx]]
+            S4Vectors::`mcols<-`(
+                stitched,
+                value = `[[<-`(
+                    S4Vectors::mcols(stitched, use.names = FALSE),
+                    "significant",
+                    value = .qapSignificanceMask(x, m)[[idx]]
+                )
+            )
         }
         gr
     }
@@ -539,14 +546,17 @@ setMethod("show", "QtlSumStats", function(object) {
     # that row count away, so the assignment below died with "n elements in
     # value to replace 0 elements" for any entry without mcols.
     mc <- S4Vectors::mcols(gr)
-    if (is.null(mc[["tss_distance"]])) {
-        mc[["tss_distance"]] <- pos - tssPos
+    added <- compact(list(
+        tss_distance = if (is.null(mc[["tss_distance"]])) pos - tssPos,
+        tes_distance = if (is.null(mc[["tes_distance"]])) pos - tesPos
+    ))
+    if (length(added) == 0L) {
+        return(gr)
     }
-    if (is.null(mc[["tes_distance"]])) {
-        mc[["tes_distance"]] <- pos - tesPos
-    }
-    S4Vectors::mcols(gr) <- mc
-    gr
+    S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(mc, exec(S4Vectors::DataFrame, !!!added))
+    )
 }
 
 # Entry `i` of a SumStats collection restricted to chromosome `chrName`. Shared

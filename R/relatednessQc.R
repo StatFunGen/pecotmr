@@ -113,7 +113,7 @@ filterRelatedness <- function(
         relatednessIid2
     )
     # Phase 3: iterative cleanup + combine with the graph-pruned individuals.
-    allExclude <- .relatednessIterativeCleanup(
+    cleaned <- .relatednessIterativeCleanup(
         filtered$kin,
         filtered$allExclude,
         plinkqcArgs,
@@ -124,7 +124,7 @@ filterRelatedness <- function(
         relatednessValue,
         relatednessThreshold
     )
-    allExclude <- unique(c(allExclude, highRelatedIndiv))
+    allExclude <- unique(c(cleaned, highRelatedIndiv))
     .relatednessReport(allExclude, verbose, relatednessThreshold)
     allExclude
 }
@@ -201,21 +201,44 @@ filterRelatedness <- function(
         as.data.frame(edges),
         directed = FALSE
     )
-    workingComp <- igraph::components(workingGraph)
-    highRelatedIndiv <- character(0)
-    while (.relatednessLargestComponent(workingComp) > maxComponentSize) {
-        .relatednessPruneMessage(workingComp, verbose, reduceFraction)
-        nodesToRemove <- .relatednessNodesToRemove(
-            workingGraph,
-            workingComp,
-            maxComponentSize,
-            reduceFraction
-        )
-        highRelatedIndiv <- c(highRelatedIndiv, nodesToRemove)
-        workingGraph <- igraph::delete_vertices(workingGraph, nodesToRemove)
-        workingComp <- igraph::components(workingGraph)
+    .relatednessPruneStep(
+        workingGraph,
+        character(0),
+        maxComponentSize,
+        reduceFraction,
+        verbose
+    )
+}
+
+# One pruning round: stop once the largest component fits, otherwise drop the
+# chosen nodes and recurse on the smaller graph. Each round removes a
+# fraction of the largest component, so the recursion is shallow.
+# @noRd
+.relatednessPruneStep <- function(
+    graph,
+    removed,
+    maxComponentSize,
+    reduceFraction,
+    verbose
+) {
+    comp <- igraph::components(graph)
+    if (.relatednessLargestComponent(comp) <= maxComponentSize) {
+        return(removed)
     }
-    highRelatedIndiv
+    .relatednessPruneMessage(comp, verbose, reduceFraction)
+    nodesToRemove <- .relatednessNodesToRemove(
+        graph,
+        comp,
+        maxComponentSize,
+        reduceFraction
+    )
+    .relatednessPruneStep(
+        igraph::delete_vertices(graph, nodesToRemove),
+        c(removed, nodesToRemove),
+        maxComponentSize,
+        reduceFraction,
+        verbose
+    )
 }
 
 # @noRd
@@ -319,23 +342,23 @@ filterRelatedness <- function(
     relatednessIid1,
     relatednessIid2
 ) {
-    phenoData <- as_tibble(phenoData)
-    phenoData <- filter(phenoData, !is.na(.data[[phenoCol]]))
     relatedIndividuals <- unique(c(
         kin[[relatednessIid1]],
         kin[[relatednessIid2]]
     ))
-    phenoData <- filter(phenoData, is_in(.data$IID, relatedIndividuals))
-    relatedCases <- phenoData |>
+    related <- as_tibble(phenoData) |>
+        filter(!is.na(.data[[phenoCol]])) |>
+        filter(is_in(.data$IID, relatedIndividuals))
+    relatedCases <- related |>
         filter(.data[[phenoCol]] == 1) |>
         pull("IID")
-    relatedControls <- phenoData |>
+    relatedControls <- related |>
         filter(.data[[phenoCol]] == 0) |>
         pull("IID")
     kin <- filter(
         kin,
-        is_in(.data[[relatednessIid1]], phenoData$IID) &
-            is_in(.data[[relatednessIid2]], phenoData$IID)
+        is_in(.data[[relatednessIid1]], related$IID) &
+            is_in(.data[[relatednessIid2]], related$IID)
     )
     # Step 1: filter among cases.
     caseKin <- filter(
@@ -409,34 +432,59 @@ filterRelatedness <- function(
         relatednessValue = relatednessValue,
         relatednessThreshold = relatednessThreshold
     )
-    remaining <- exec(.relatednessRemaining, kin, allExclude, !!!remainingArgs)
-    iter <- 0L
-    while (nrow(remaining) > 0 && iter < maxIterations) {
-        if (verbose) {
-            msg <- glue(
-                "Iteration {iter + 1L}: {nrow(remaining)} related pairs ",
-                "remaining."
-            )
-            inform(msg)
-        }
-        additional <- .relatednessRunPlinkqc(remaining, plinkqcArgs)
-        allExclude <- c(allExclude, additional$IID)
-        remaining <- exec(
-            .relatednessRemaining,
-            kin,
-            allExclude,
-            !!!remainingArgs
-        )
-        iter <- iter + 1L
-    }
-    if (nrow(remaining) > 0) {
+    final <- .relatednessCleanupStep(
+        kin = kin,
+        allExclude = allExclude,
+        iter = 0L,
+        maxIterations = maxIterations,
+        plinkqcArgs = plinkqcArgs,
+        remainingArgs = remainingArgs,
+        verbose = verbose
+    )
+    if (nrow(final$remaining) > 0) {
         msg <- glue(
-            "After {maxIterations} iterations, {nrow(remaining)} related ",
-            "pairs remain."
+            "After {maxIterations} iterations, {nrow(final$remaining)} ",
+            "related pairs remain."
         )
         warn(msg)
     }
-    allExclude
+    final$allExclude
+}
+
+# One cleanup round: re-run plinkQC on whatever is still related, add its
+# exclusions, and recurse until nothing is related or the iteration cap is
+# reached. Returns the accumulated exclusions and what is still related.
+# @noRd
+.relatednessCleanupStep <- function(
+    kin,
+    allExclude,
+    iter,
+    maxIterations,
+    plinkqcArgs,
+    remainingArgs,
+    verbose
+) {
+    remaining <- exec(.relatednessRemaining, kin, allExclude, !!!remainingArgs)
+    if (nrow(remaining) == 0 || iter >= maxIterations) {
+        return(list(allExclude = allExclude, remaining = remaining))
+    }
+    if (verbose) {
+        msg <- glue(
+            "Iteration {iter + 1L}: {nrow(remaining)} related pairs ",
+            "remaining."
+        )
+        inform(msg)
+    }
+    additional <- .relatednessRunPlinkqc(remaining, plinkqcArgs)
+    .relatednessCleanupStep(
+        kin = kin,
+        allExclude = c(allExclude, additional$IID),
+        iter = iter + 1L,
+        maxIterations = maxIterations,
+        plinkqcArgs = plinkqcArgs,
+        remainingArgs = remainingArgs,
+        verbose = verbose
+    )
 }
 
 # The still-related pairs above threshold after excluding `allExclude`.

@@ -168,9 +168,9 @@ causalInferencePipeline <- function(
         twasWeights,
         fineMappingResult
     )
-    qtlRows <- .cipResolveWorkList(twasWeights, fineMappingResult)
+    allRows <- .cipResolveWorkList(twasWeights, fineMappingResult)
     sel <- .cipCvSelection(
-        qtlRows = qtlRows,
+        qtlRows = allRows,
         twasWeights = twasWeights,
         rsqCutoff = rsqCutoff,
         rsqOption = rsqOption,
@@ -271,8 +271,7 @@ causalInferencePipeline <- function(
         )
         abort(msg)
     }
-    qtlRows$useFmrForWeights <- is.null(twasWeights)
-    qtlRows
+    mutate(qtlRows, useFmrForWeights = is.null(twasWeights))
 }
 
 # Optional CV weight selection (legacy pick_best_model + update_twas_method):
@@ -546,17 +545,21 @@ causalInferencePipeline <- function(
 # GRanges, and (optionally) combine across methods.
 # @noRd
 .cipFinalize <- function(outRows, sel, combineMethods) {
-    resultDf <- .cipRowsToDf(outRows)
+    allRows <- .cipRowsToDf(outRows)
     # Final best-method pick + NA/Inf re-selection (legacy update_twas_method):
     # per (qtlStudy, context, trait, gwasStudy) keep the highest-rsqOption
     # eligible method whose TWAS Z is finite, falling back to the top-rsq method
     # when none is finite. SS-TWAS groups (no usable rsq) keep all methods.
-    if (sel$selectionActive) {
-        resultDf <- .cipSelectBestMethod(resultDf, sel$rsqLookup)
+    resultDf <- if (sel$selectionActive) {
+        .cipSelectBestMethod(allRows, sel$rsqLookup)
+    } else {
+        allRows
     }
-    out <- .cipDfToGranges(resultDf)
-    if (!is.null(combineMethods)) {
-        out <- .cipCombineAcrossMethods(out, methods = combineMethods)
+    perMethod <- .cipDfToGranges(resultDf)
+    out <- if (is.null(combineMethods)) {
+        perMethod
+    } else {
+        .cipCombineAcrossMethods(perMethod, methods = combineMethods)
     }
     out
 }
@@ -680,24 +683,49 @@ causalInferencePipeline <- function(
         metricTab$trait,
         sep = "\r"
     )
-    keep <- logical(nrow(qtlRows))
-    pvalGate <- is.finite(rsqPvalCutoff)
-    for (g in unique(grp)) {
-        idx <- which(grp == g)
-        rsq <- metricTab$rsq[idx]
-        if (all(is.na(rsq))) {
-            keep[idx] <- TRUE
-            next
-        } # SS-TWAS: keep all
-        elig <- !is.na(rsq) & rsq >= rsqCutoff
-        if (pvalGate) {
-            elig <- elig &
-                !is.na(metricTab$pval[idx]) &
-                metricTab$pval[idx] < rsqPvalCutoff
-        }
-        keep[idx[elig]] <- TRUE
+    kept <- .cipConcatInt(map(
+        unique(grp),
+        .cipEligibleRowsIn,
+        grp = grp,
+        metricTab = metricTab,
+        rsqCutoff = rsqCutoff,
+        rsqPvalCutoff = rsqPvalCutoff
+    ))
+    filter(qtlRows, .cipRowMask(kept, nrow(qtlRows)))
+}
+
+# @noRd
+.cipConcatInt <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(integer(0))
     }
-    filter(qtlRows, keep)
+    list_c(pieces)
+}
+
+# A logical mask of length `n` that is TRUE at `at`.
+# @noRd
+.cipRowMask <- function(at, n) {
+    replace(logical(n), at, TRUE)
+}
+
+# The rows of group `g` that clear the R^2 (and optional p-value) gate. A
+# group with no usable R^2 at all is SS-TWAS, which keeps every row.
+# @noRd
+.cipEligibleRowsIn <- function(g, grp, metricTab, rsqCutoff, rsqPvalCutoff) {
+    idx <- which(grp == g)
+    rsq <- metricTab$rsq[idx]
+    if (all(is.na(rsq))) {
+        return(idx)
+    }
+    byRsq <- !is.na(rsq) & rsq >= rsqCutoff
+    elig <- if (!is.finite(rsqPvalCutoff)) {
+        byRsq
+    } else {
+        byRsq &
+            !is.na(metricTab$pval[idx]) &
+            metricTab$pval[idx] < rsqPvalCutoff
+    }
+    idx[elig]
 }
 
 # Final best-method pick + NA/Inf re-selection (legacy update_twas_method): per
@@ -713,21 +741,30 @@ causalInferencePipeline <- function(
     key <- str_c(df$qtlStudy, df$context, df$trait, df$method, sep = "\r")
     rsq <- unname(rsqLookup[key])
     grp <- str_c(df$qtlStudy, df$context, df$trait, df$gwasStudy, sep = "\r")
-    keepRow <- logical(nrow(df))
-    for (g in unique(grp)) {
-        idx <- which(grp == g)
-        r <- rsq[idx]
-        if (all(is.na(r))) {
-            keepRow[idx] <- TRUE
-            next
-        } # SS-TWAS: keep all
-        ord <- idx[order(r, decreasing = TRUE)] # NA sorts last
-        z <- suppressWarnings(as.numeric(df$twasZ[ord]))
-        fin <- which(is.finite(z))
-        sel <- if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
-        keepRow[sel] <- TRUE
+    kept <- .cipConcatInt(map(
+        unique(grp),
+        .cipBestRowsIn,
+        grp = grp,
+        df = df,
+        rsq = rsq
+    ))
+    filter(df, .cipRowMask(kept, nrow(df)))
+}
+
+# The row group `g` contributes: the highest-R^2 method whose twasZ is finite,
+# else the highest-R^2 one. A group with no usable R^2 is SS-TWAS and keeps
+# every row.
+# @noRd
+.cipBestRowsIn <- function(g, grp, df, rsq) {
+    idx <- which(grp == g)
+    r <- rsq[idx]
+    if (all(is.na(r))) {
+        return(idx)
     }
-    filter(df, keepRow)
+    ord <- idx[order(r, decreasing = TRUE)] # NA sorts last
+    z <- suppressWarnings(as.numeric(df$twasZ[ord]))
+    fin <- which(is.finite(z))
+    if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
 }
 
 .cipFmrHasTuple <- function(fmr, study, context, trait, method) {
@@ -1175,8 +1212,8 @@ causalInferencePipeline <- function(
 # returns the pooled effect, its SE (1/sqrt(sum w)), two-tailed p-value,
 # Cochran's Q, and the number pooled (n = 0 when nothing is poolable).
 .ivwPool <- function(effect, se) {
-    w <- 1 / se^2
-    ok <- is.finite(w) & w > 0
+    invVar <- 1 / se^2
+    ok <- is.finite(invVar) & invVar > 0
     if (!any(ok)) {
         return(list(
             effect = NA_real_,
@@ -1187,7 +1224,7 @@ causalInferencePipeline <- function(
         ))
     }
     effect <- effect[ok]
-    w <- w[ok]
+    w <- invVar[ok]
     metaEff <- sum(w * effect) / sum(w)
     metaSe <- 1 / sqrt(sum(w))
     list(
@@ -1204,10 +1241,15 @@ causalInferencePipeline <- function(
 # falls back to any column whose name starts with "cs" (e.g. cs_0.95).
 .cipTlCols <- function(tl) {
     cn <- colnames(tl)
-    cs <- intersect("cs", cn)
-    if (length(cs) == 0L) {
-        csCand <- cn[str_detect(cn, "^cs")]
-        if (length(csCand) > 0L) cs <- csCand[[1L]]
+    exact <- intersect("cs", cn)
+    # No bare `cs` column: fall back to the first cs_<coverage> variant.
+    csCand <- cn[str_detect(cn, "^cs")]
+    cs <- if (length(exact) > 0L) {
+        exact
+    } else if (length(csCand) > 0L) {
+        csCand[[1L]]
+    } else {
+        exact
     }
     list(
         pip = intersect(c("pip", "PIP"), cn),
@@ -1251,8 +1293,7 @@ causalInferencePipeline <- function(
             "nCs"
         ))
     )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcols)
-    gr
+    S4Vectors::`mcols<-`(gr, value = S4Vectors::DataFrame(mcols))
 }
 
 # Combine TWAS p-values across method for each (qtlStudy, context,
@@ -1260,37 +1301,64 @@ causalInferencePipeline <- function(
 # combined p-value and methodName = "combined.<methodToken>". Uses
 # combinePValues() with the cross-method correlation set to the identity
 # (we have no cross-method covariance available downstream).
+# @noRd
+.cipConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
+    }
+    list_c(pieces)
+}
+
+# One combined row: the group's first row re-stamped with the combined
+# p-value for method `m`. The per-method statistics do not carry over, so
+# they are blanked rather than inherited.
+# @noRd
+.cipCombinedRow <- function(m, mc, rows, cp) {
+    mutate(
+        slice(mc, rows[[1L]]),
+        method = str_c("combined.", m),
+        twasZ = NA_real_,
+        twasPval = as.numeric(cp$results[[m]]$pval),
+        waldRatio = NA_real_,
+        waldRatioSe = NA_real_,
+        mrPval = NA_real_,
+        nIV = NA_integer_
+    )
+}
+
+# One group's combined rows, or none when it holds a single method (nothing
+# to combine across).
+# @noRd
+.cipCombinedRowsFor <- function(rows, mc, methods) {
+    if (length(rows) < 2L) {
+        return(list())
+    }
+    cp <- combinePValues(
+        pvals = as.numeric(mc$twasPval[rows]),
+        zScores = as.numeric(mc$twasZ[rows]),
+        methods = methods
+    )
+    map(methods, .cipCombinedRow, mc = mc, rows = rows, cp = cp)
+}
+
 .cipCombineAcrossMethods <- function(gr, methods) {
     mc <- as_tibble(as.data.frame(S4Vectors::mcols(gr)))
     key <- str_c(mc$qtlStudy, mc$context, mc$trait, mc$gwasStudy, sep = "||")
     groups <- split(seq_len(nrow(mc)), key)
-    extras <- list()
-    for (gkey in names(groups)) {
-        rows <- groups[[gkey]]
-        if (length(rows) < 2L) {
-            next
-        }
-        pvals <- as.numeric(mc$twasPval[rows])
-        zvec <- as.numeric(mc$twasZ[rows])
-        cp <- combinePValues(pvals = pvals, zScores = zvec, methods = methods)
-        for (m in methods) {
-            newRow <- slice(mc, rows[[1L]])
-            newRow$method <- str_c("combined.", m)
-            newRow$twasZ <- NA_real_
-            newRow$twasPval <- as.numeric(cp$results[[m]]$pval)
-            newRow$waldRatio <- NA_real_
-            newRow$waldRatioSe <- NA_real_
-            newRow$mrPval <- NA_real_
-            newRow$nIV <- NA_integer_
-            extras[[length(extras) + 1L]] <- newRow
-        }
-    }
+    extras <- .cipConcat(map(
+        groups,
+        .cipCombinedRowsFor,
+        mc = mc,
+        methods = methods
+    ))
     if (length(extras) == 0L) {
         return(gr)
     }
     newMcs <- bind_rows(extras)
-    newGr <- gr[rep(1L, nrow(newMcs))]
-    S4Vectors::mcols(newGr) <- S4Vectors::DataFrame(newMcs)
+    newGr <- S4Vectors::`mcols<-`(
+        gr[rep(1L, nrow(newMcs))],
+        value = S4Vectors::DataFrame(newMcs)
+    )
     c(gr, newGr)
 }
 
@@ -1462,8 +1530,10 @@ twasZ <- function(
     stats <- as.numeric(crossprod(weights, as.numeric(z)))
     zVec <- stats / ySd
     pVec <- .zToPvalue(zVec)
-    zMatrix <- cbind(Z = zVec, pval = pVec)
-    rownames(zMatrix) <- colnames(weights)
+    zMatrix <- `rownames<-`(
+        cbind(Z = zVec, pval = pVec),
+        colnames(weights)
+    )
     combined <- .twasZCombine(
         combineMethods,
         ncol(weights),
@@ -1488,11 +1558,13 @@ twasZ <- function(
     if (!is.matrix(weights)) {
         abort("`weights` must be a numeric vector or a matrix.")
     }
-    if (is.null(colnames(weights))) {
-        colnames(weights) <- str_c("method", seq_len(ncol(weights)))
+    named <- if (is.null(colnames(weights))) {
+        `colnames<-`(weights, str_c("method", seq_len(ncol(weights))))
+    } else {
+        weights
     }
-    assertMatrix(weights, nrows = length(z))
-    weights
+    assertMatrix(named, nrows = length(z), .var.name = "weights")
+    named
 }
 
 # Optional cross-tuple p-value combination via combinePValues (K == 1 uses the
@@ -1506,13 +1578,14 @@ twasZ <- function(
     if (K == 1L) {
         return(.twasZCombineSingle(combineMethods, pVec, zMatrix))
     }
-    sig <- covY / tcrossprod(ySd, ySd)
-    rownames(sig) <- colnames(sig) <- rownames(zMatrix)
-    names(pVec) <- rownames(zMatrix)
-    names(zVec) <- rownames(zMatrix)
+    methodNames <- rownames(zMatrix)
+    sig <- `dimnames<-`(
+        covY / tcrossprod(ySd, ySd),
+        list(methodNames, methodNames)
+    )
     combinePValues(
-        pvals = pVec,
-        zScores = zVec,
+        pvals = set_names(pVec, methodNames),
+        zScores = set_names(zVec, methodNames),
         methods = combineMethods,
         R = sig
     )

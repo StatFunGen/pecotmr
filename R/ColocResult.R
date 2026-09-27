@@ -227,13 +227,15 @@ ColocResult <- function(pairs, variants, ldSketch = NULL) {
         abort(msg)
     }
     elements <- map(variants, .crVariantsToGRanges)
-    grl <- GenomicRanges::GRangesList(elements)
     # Set unconditionally, including at zero rows: an empty result still has to
     # carry the column schema, or it fails validity and a caller reading
     # `result$PP.H4.abf` gets NULL exactly when there is nothing to report.
-    mcols(grl) <- exec(
-        S4Vectors::DataFrame,
-        !!!c(as.list(pairs), list(check.names = FALSE))
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(elements),
+        value = exec(
+            S4Vectors::DataFrame,
+            !!!c(as.list(pairs), list(check.names = FALSE))
+        )
     )
     obj <- new("ColocResult", grl, ldSketch = .asLdSketch(ldSketch))
     validObject(obj)
@@ -267,8 +269,10 @@ ColocResult <- function(pairs, variants, ldSketch = NULL) {
         S4Vectors::DataFrame,
         !!!c(as.list(v[keep]), list(check.names = FALSE))
     )
-    mcols(gr) <- cbind(mcols(gr, use.names = FALSE), extra)
-    gr
+    S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(mcols(gr, use.names = FALSE), extra)
+    )
 }
 
 # Pivot coloc.bf_bf's WIDE $results (one SNP.PP.H4.rowK column per $summary
@@ -357,11 +361,13 @@ setMethod("getColocVariants", "ColocResult", function(x, pooled = FALSE, ...) {
     n <- lengths(x)
     pairIdx <- rep(seq_len(length(x)), n)
     flat <- unlist(x, use.names = FALSE)
-    out <- as_tibble(md[pairIdx, , drop = FALSE], .name_repair = "minimal")
-    out$variant_id <- .grVariantIds(flat)
-    out$SNP.PP.H4 <- as.numeric(mcols(flat, use.names = FALSE)$SNP.PP.H4)
-    out$colocPp <- out$PP.H4.abf * out$SNP.PP.H4
-    out
+    snpPp <- as.numeric(mcols(flat, use.names = FALSE)$SNP.PP.H4)
+    as_tibble(md[pairIdx, , drop = FALSE], .name_repair = "minimal") |>
+        mutate(
+            variant_id = .grVariantIds(flat),
+            SNP.PP.H4 = snpPp,
+            colocPp = .data$PP.H4.abf * snpPp
+        )
 }
 
 # Pool per-variant posteriors to the gene tier, by the section 3.5 rule: sum
@@ -450,14 +456,15 @@ setMethod(
         # Filtering happens BEFORE any LD work, so a stricter threshold costs
         # strictly less -- which is the reason purity lives on the accessor
         # rather than being precomputed at construction.
-        sets <- map(keep, .crCsForPair, x = x, coverage = coverage)
-        sets <- compact(sets)
+        sets <- compact(map(keep, .crCsForPair, x = x, coverage = coverage))
         if (length(sets) == 0L) {
             return(tibble())
         }
         out <- bind_rows(sets)
-        out$purity <- .crPuritiesFor(out, getLdSketch(x))
-        .crApplyPurityFilter(out, minAbsCorr)
+        .crApplyPurityFilter(
+            mutate(out, purity = .crPuritiesFor(out, getLdSketch(x))),
+            minAbsCorr
+        )
     }
 )
 
@@ -469,14 +476,18 @@ setMethod(
         return(integer(0))
     }
     md <- as.data.frame(mcols(x, use.names = FALSE))
-    ok <- rep(TRUE, nrow(md))
-    if (!is.null(minPp4)) {
-        ok <- ok & md$PP.H4.abf >= minPp4
+    byPp4 <- if (is.null(minPp4)) {
+        rep(TRUE, nrow(md))
+    } else {
+        md$PP.H4.abf >= minPp4
     }
-    if (isTRUE(requireMaxH4)) {
+    byMaxH4 <- if (isTRUE(requireMaxH4)) {
         pp <- as.matrix(md[, .crPpCols(), drop = FALSE])
-        ok <- ok & (max.col(pp, ties.method = "first") == 5L)
+        max.col(pp, ties.method = "first") == 5L
+    } else {
+        TRUE
     }
+    ok <- byPp4 & byMaxH4
     which(ok & !is.na(ok))
 }
 
@@ -499,13 +510,14 @@ setMethod(
     members <- ord[seq_len(nKeep)]
     ids <- .grVariantIds(g[members])
     md <- as.data.frame(mcols(x, use.names = FALSE))[i, , drop = FALSE]
-    row <- as_tibble(md, .name_repair = "minimal")
-    row$csSize <- length(members)
-    row$csCoverage <- cum[[nKeep]]
-    row$leadVariant <- ids[[1L]]
-    row$leadPp <- pp[ord][[1L]]
-    row$csVariants <- list(ids)
-    row
+    mutate(
+        as_tibble(md, .name_repair = "minimal"),
+        csSize = length(members),
+        csCoverage = cum[[nKeep]],
+        leadVariant = ids[[1L]],
+        leadPp = pp[ord][[1L]],
+        csVariants = list(ids)
+    )
 }
 
 # Index of the first cumulative value reaching `target`; the whole vector when

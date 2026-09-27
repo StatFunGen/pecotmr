@@ -33,5 +33,5 @@ stat <- list(
   n = rep(nrow(X), ncol(X))
 )
 LD <- cor(X)
-prsCsWeights(stat, LD, maf = rep(0.3, ncol(X)))
+prsCsWeights(stat, LD, methodArgs = list(maf = rep(0.3, ncol(X))))
 }

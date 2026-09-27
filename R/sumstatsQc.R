@@ -31,10 +31,11 @@ NULL
 # @noRd
 .variantsToDf <- function(x) {
     df <- if (is(x, "GRanges")) {
-        mc <- as.data.frame(mcols(x))
-        mc$chrom <- as.character(seqnames(x))
-        mc$pos <- start(x)
-        as_tibble(mc)
+        as_tibble(mutate(
+            as.data.frame(mcols(x)),
+            chrom = as.character(seqnames(x)),
+            pos = start(x)
+        ))
     } else {
         as_tibble(x)
     }
@@ -82,23 +83,26 @@ mergeVariantInfo <- function(variants1, variants2, all = TRUE) {
     matchIdx <- match(key2, key1)
     hasMatch <- !is.na(matchIdx)
 
-    flip <- rep(FALSE, nrow(df2))
     mi <- matchIdx[hasMatch]
-    flip[hasMatch] <- df2$alt[hasMatch] == df1$ref[mi] &
-        df2$ref[hasMatch] == df1$alt[mi]
+    flip <- replace(
+        rep(FALSE, nrow(df2)),
+        hasMatch,
+        df2$alt[hasMatch] == df1$ref[mi] & df2$ref[hasMatch] == df1$alt[mi]
+    )
 
-    # Apply flips to df2
+    # Apply flips to df2. Both replacements read the ORIGINAL `df2`, so the
+    # pair swaps rather than each taking the other's already-swapped value.
     flipRows <- which(hasMatch)[flip[hasMatch]]
-    if (length(flipRows) > 0) {
-        tmp <- df2$alt[flipRows]
-        df2$alt[flipRows] <- df2$ref[flipRows]
-        df2$ref[flipRows] <- tmp
-    }
+    flipped <- mutate(
+        df2,
+        alt = replace(.data$alt, flipRows, df2$ref[flipRows]),
+        ref = replace(.data$ref, flipRows, df2$alt[flipRows])
+    )
 
     if (all) {
-        distinct(bind_rows(df1, df2))
+        distinct(bind_rows(df1, flipped))
     } else {
-        df2
+        flipped
     }
 }
 
@@ -169,13 +173,23 @@ resolveLdInput <- function(
         )
         abort(msg)
     }
-    if (!is_in("pos", lc)) {
-        colnames(sumStat)[which(is_in(lc, "position"))] <- "pos"
+    withPos <- if (is_in("pos", lc)) {
+        sumStat
+    } else {
+        `colnames<-`(
+            sumStat,
+            replace(colnames(sumStat), which(is_in(lc, "position")), "pos")
+        )
     }
-    if (!is_in("z", lc)) {
-        colnames(sumStat)[which(is_in(lc, "zscore"))] <- "z"
+    named <- if (is_in("z", lc)) {
+        withPos
+    } else {
+        `colnames<-`(
+            withPos,
+            replace(colnames(withPos), which(is_in(lc, "zscore")), "z")
+        )
     }
-    arrange(sumStat, .data$pos)
+    arrange(named, .data$pos)
 }
 
 # Run DENTIST on a single window, unpacking the shared tuning parameters.
@@ -210,6 +224,44 @@ resolveLdInput <- function(
 }
 
 # Segment into windows, run DENTIST per window, and merge the results.
+# DENTIST on window `k`.
+# @noRd
+.dentistWindowAt <- function(
+    k,
+    sumStat,
+    ldMat,
+    nSample,
+    windowDividedRes,
+    pValueThreshold,
+    propSVD,
+    gcControl,
+    nIter,
+    gPvalueThreshold,
+    duprThreshold,
+    ncpus,
+    correctChenEtAlBug,
+    seed
+) {
+    # windowEndIdx is 1-based exclusive; convert to an inclusive range.
+    idxRange <- windowDividedRes$windowStartIdx[
+        k
+    ]:(windowDividedRes$windowEndIdx[k] - 1L)
+    .dentistCallSingle(
+        sumStat$z[idxRange],
+        ldMat[idxRange, idxRange],
+        nSample,
+        pValueThreshold = pValueThreshold,
+        propSVD = propSVD,
+        gcControl = gcControl,
+        nIter = nIter,
+        gPvalueThreshold = gPvalueThreshold,
+        duprThreshold = duprThreshold,
+        ncpus = ncpus,
+        correctChenEtAlBug = correctChenEtAlBug,
+        seed = seed
+    )
+}
+
 .dentistWindows <- function(
     sumStat,
     ldMat,
@@ -236,29 +288,23 @@ resolveLdInput <- function(
     } else {
         windowDividedRes <- segmentByCount(sumStat$pos, maxCount = minDim)
     }
-    dentistResultByWindow <- list()
-    for (k in seq_len(nrow(windowDividedRes))) {
-        # windowEndIdx is 1-based exclusive; convert to an inclusive range.
-        idxRange <- windowDividedRes$windowStartIdx[
-            k
-        ]:(windowDividedRes$windowEndIdx[k] - 1L)
-        zScoreK <- sumStat$z[idxRange]
-        ldMatK <- ldMat[idxRange, idxRange]
-        dentistResultByWindow[[k]] <- .dentistCallSingle(
-            zScoreK,
-            ldMatK,
-            nSample,
-            pValueThreshold = pValueThreshold,
-            propSVD = propSVD,
-            gcControl = gcControl,
-            nIter = nIter,
-            gPvalueThreshold = gPvalueThreshold,
-            duprThreshold = duprThreshold,
-            ncpus = ncpus,
-            correctChenEtAlBug = correctChenEtAlBug,
-            seed = seed
-        )
-    }
+    dentistResultByWindow <- map(
+        seq_len(nrow(windowDividedRes)),
+        .dentistWindowAt,
+        sumStat = sumStat,
+        ldMat = ldMat,
+        nSample = nSample,
+        windowDividedRes = windowDividedRes,
+        pValueThreshold = pValueThreshold,
+        propSVD = propSVD,
+        gcControl = gcControl,
+        nIter = nIter,
+        gPvalueThreshold = gPvalueThreshold,
+        duprThreshold = duprThreshold,
+        ncpus = ncpus,
+        correctChenEtAlBug = correctChenEtAlBug,
+        seed = seed
+    )
     mergeWindows(dentistResultByWindow, windowDividedRes)
 }
 
@@ -467,23 +513,25 @@ dentist <- function(
 
 # Optionally deduplicate near-perfectly-correlated variants before imputation.
 .dentistDedup <- function(zScore, ldMat, duprThreshold) {
-    dedupRes <- NULL
-    rThreshold <- round(sqrt(duprThreshold) * 1000) / 1000
-    if (duprThreshold < 1.0) {
-        dedupRes <- .findDuplicateVariants(zScore, ldMat, rThreshold)
-        numDup <- sum(dedupRes$dupBearer != -1)
-        if (numDup > 0) {
-            nZ <- length(zScore)
-            msg <- glue(
-                "{numDup} duplicated variants out of a total of {nZ} ",
-                "were found at r threshold of {rThreshold}"
-            )
-            inform(msg)
-        }
-        zScore <- dedupRes$filteredZ
-        ldMat <- dedupRes$filteredLD
+    if (duprThreshold >= 1.0) {
+        return(list(zScore = zScore, ldMat = ldMat, dedupRes = NULL))
     }
-    list(zScore = zScore, ldMat = ldMat, dedupRes = dedupRes)
+    rThreshold <- round(sqrt(duprThreshold) * 1000) / 1000
+    dedupRes <- .findDuplicateVariants(zScore, ldMat, rThreshold)
+    numDup <- sum(dedupRes$dupBearer != -1)
+    if (numDup > 0) {
+        nZ <- length(zScore)
+        msg <- glue(
+            "{numDup} duplicated variants out of a total of {nZ} ",
+            "were found at r threshold of {rThreshold}"
+        )
+        inform(msg)
+    }
+    list(
+        zScore = dedupRes$filteredZ,
+        ldMat = dedupRes$filteredLD,
+        dedupRes = dedupRes
+    )
 }
 
 # Run the C++ iterative imputation and snake_case the output. The C++ returns
@@ -491,7 +539,7 @@ dentist <- function(
 # warning here (no warning handler / shared env needed).
 .dentistRunImpute <- function(ldMat, nSample, zScore, p) {
     verboseIter <- getOption("pecotmr.dentist.verbose", FALSE)
-    res <- dentistIterativeImpute(
+    raw <- dentistIterativeImpute(
         # cpp11 requires exact integer types for int parameters
         ldMat,
         as.integer(nSample),
@@ -506,8 +554,8 @@ dentist <- function(
         verboseIter,
         if (is.null(p$seed)) NULL else as.integer(p$seed)
     )
-    rsqExceed <- res$rsqExceed
-    res$rsqExceed <- NULL
+    rsqExceed <- raw$rsqExceed
+    res <- list_modify(raw, rsqExceed = zap())
     if (length(rsqExceed) > 0) {
         nExceed <- length(rsqExceed)
         maxExceed <- max(rsqExceed)
@@ -623,9 +671,11 @@ dentistSingleWindow <- function(
     )
     orgZscore <- zScore
     dedup <- .dentistDedup(zScore, ldMat, duprThreshold)
-    res <- .dentistRunImpute(dedup$ldMat, nSample, dedup$zScore, p)
-    if (duprThreshold < 1.0) {
-        res <- addDupsBackDentist(orgZscore, res, dedup$dedupRes)
+    imputed <- .dentistRunImpute(dedup$ldMat, nSample, dedup$zScore, p)
+    res <- if (duprThreshold < 1.0) {
+        addDupsBackDentist(orgZscore, imputed, dedup$dedupRes)
+    } else {
+        imputed
     }
     .dentistOutlierStat(res, pValueThreshold)
 }
@@ -663,17 +713,10 @@ dentistSingleWindow <- function(
 
 # Map each variant to its row in the de-duplicated DENTIST output.
 .dentistBuildAssignIdx <- function(dupBearer, nrowsDup) {
-    count <- 1
-    assignIdx <- rep(0, nrowsDup)
-    for (i in seq_along(dupBearer)) {
-        if (dupBearer[i] == -1) {
-            assignIdx[i] <- count
-            count <- count + 1
-        } else {
-            assignIdx[i] <- dupBearer[i]
-        }
-    }
-    assignIdx
+    # Non-duplicates take the next free slot, which is just how many
+    # non-duplicates have been seen so far; duplicates point at their bearer.
+    isNew <- dupBearer == -1
+    if_else(isNew, as.numeric(cumsum(isNew)), as.numeric(dupBearer))
 }
 
 # Rebuild the full per-variant table, recovering duplicates (sign-flipped).
@@ -685,33 +728,26 @@ dentistSingleWindow <- function(
     iterToCorrect <- dentistOutput$iter_to_correct
     rsq <- dentistOutput$rsq
     zDiff <- dentistOutput$z_diff
-    updatedData <- tibble(
-        original_z = numeric(nrowsDup),
-        imputed_z = numeric(nrowsDup),
-        iter_to_correct = numeric(nrowsDup),
-        rsq = numeric(nrowsDup),
-        z_diff = numeric(nrowsDup),
-        is_duplicate = logical(nrowsDup)
+    # Every row is independent of every other, so the whole table is built in
+    # one shot. Duplicates sign-flip imputed_z and recompute z_diff from their
+    # own z-score, so z_diff^2 matches the binary stat (DENTIST.h l706).
+    isDup <- dupBearer != -1
+    originalZ <- zScore[seq_len(nrowsDup)]
+    rsqRow <- rsq[assignIdx]
+    imputedRow <- imputedZ[assignIdx] * if_else(isDup, sign, 1)
+    denom <- sqrt(pmax(1 - rsqRow, 1e-8))
+    tibble(
+        original_z = originalZ,
+        imputed_z = imputedRow,
+        iter_to_correct = iterToCorrect[assignIdx],
+        rsq = rsqRow,
+        z_diff = if_else(
+            isDup,
+            (originalZ - imputedRow) / denom,
+            zDiff[assignIdx]
+        ),
+        is_duplicate = isDup
     )
-    for (i in seq_len(nrowsDup)) {
-        updatedData$original_z[i] <- zScore[i]
-        updatedData$iter_to_correct[i] <- iterToCorrect[assignIdx[i]]
-        updatedData$rsq[i] <- rsq[assignIdx[i]]
-        if (dupBearer[i] == -1) {
-            updatedData$imputed_z[i] <- imputedZ[assignIdx[i]]
-            updatedData$z_diff[i] <- zDiff[assignIdx[i]]
-            updatedData$is_duplicate[i] <- FALSE
-        } else {
-            # Duplicate: sign-flip imputed_z, recompute z_diff from its own
-            # z-score so z_diff^2 matches the binary stat (DENTIST.h l706).
-            updatedData$imputed_z[i] <- imputedZ[assignIdx[i]] * sign[i]
-            denom <- sqrt(max(1 - updatedData$rsq[i], 1e-8))
-            updatedData$z_diff[i] <-
-                (zScore[i] - updatedData$imputed_z[i]) / denom
-            updatedData$is_duplicate[i] <- TRUE
-        }
-    }
-    updatedData
 }
 
 addDupsBackDentist <- function(zScore, dentistOutput, findDupOutput) {
@@ -744,24 +780,16 @@ addDupsBackDentist <- function(zScore, dentistOutput, findDupOutput) {
 detectGaps <- function(pos, gapThreshold, verbose = FALSE) {
     n <- length(pos)
     diffs <- diff(pos)
-    allGaps <- c(1L)
-    for (i in seq_along(diffs)) {
-        if (diffs[i] > gapThreshold) {
-            allGaps <- c(allGaps, i + 1L)
-        }
-    }
-    allGaps <- c(allGaps, n + 1L)
+    allGaps <- c(1L, which(diffs > gapThreshold) + 1L, n + 1L)
 
     if (verbose && length(allGaps) - 2 > 0) {
         nGaps <- length(allGaps) - 2
-        msg <- glue("No. of gaps found: {nGaps}")
-        inform(msg)
+        inform(glue("No. of gaps found: {nGaps}"))
         for (i in 2:(length(allGaps) - 1)) {
             gapNo <- i - 1
             startPos <- pos[allGaps[i] - 1]
             endPos <- pos[allGaps[i]]
-            msg <- glue("  Gap {gapNo}: {startPos} - {endPos}", .trim = FALSE)
-            inform(msg)
+            inform(glue("  Gap {gapNo}: {startPos} - {endPos}", .trim = FALSE))
         }
     }
     allGaps
@@ -907,17 +935,28 @@ buildSegmentResult <- function(
     )
 }
 
+# One field across a block's window records, typed as `c()` would have left
+# it (empty when the block produced no window).
+# @noRd
+.swlField <- function(windows, field) {
+    if (length(windows) == 0L) {
+        return(integer(0))
+    }
+    list_c(map(windows, field))
+}
+
+# The loop itself stays: where the next window starts depends on the window
+# just emitted, and the block ends when the stepper says so. What is gone is
+# the four parallel `c()` accumulators -- each window is one record now, and
+# the vectors are read off at the end.
 .swlBlockWindows <- function(blockStart, blockEnd, fns, ctx) {
     startIdx <- blockStart
     endIdx <- fns$initEndFn(startIdx, blockEnd, ctx)
     oldStartIdx <- startIdx
     notStartInterval <- FALSE
-    notLastInterval <- TRUE
-    times <- 0
-    starts <- ends <- fillStarts <- fillEnds <- integer(0)
+    windows <- list()
     repeat {
-        times <- times + 1
-        if (times > 400) {
+        if (length(windows) >= 400) {
             abort("Windowing iteration limit exceeded")
         }
         win <- .swlWindow(
@@ -929,26 +968,51 @@ buildSegmentResult <- function(
             fns,
             ctx
         )
-        startIdx <- win$startIdx
-        notLastInterval <- win$notLastInterval
-        starts <- c(starts, startIdx)
-        ends <- c(ends, min(endIdx, blockEnd))
-        fillStarts <- c(fillStarts, win$fills$start)
-        fillEnds <- c(fillEnds, win$fills$end)
-        if (!notLastInterval) {
+        windows[[length(windows) + 1L]] <- list(
+            start = win$startIdx,
+            end = min(endIdx, blockEnd),
+            fillStart = win$fills$start,
+            fillEnd = win$fills$end
+        )
+        if (!win$notLastInterval) {
             break
         }
-        oldStartIdx <- startIdx
-        stepped <- fns$stepFn(startIdx, blockEnd, ctx)
+        oldStartIdx <- win$startIdx
+        stepped <- fns$stepFn(win$startIdx, blockEnd, ctx)
         startIdx <- stepped$startIdx
         endIdx <- stepped$endIdx
         notStartInterval <- TRUE
     }
     list(
-        starts = starts,
-        ends = ends,
-        fillStarts = fillStarts,
-        fillEnds = fillEnds
+        starts = .swlField(windows, "start"),
+        ends = .swlField(windows, "end"),
+        fillStarts = .swlField(windows, "fillStart"),
+        fillEnds = .swlField(windows, "fillEnd")
+    )
+}
+
+# Is block `k` long enough to window?
+# @noRd
+.swlBlockQualifies <- function(k, allGaps, minBlockFn, ctx) {
+    minBlockFn(allGaps[k + 1] - allGaps[k], ctx)
+}
+
+# Block `k`'s windows, with the block's outer fill bounds snapped to the
+# block's own edges. `replace()` returns a copy, so nothing is mutated.
+# @noRd
+.swlBlockAt <- function(k, allGaps, fns, ctx) {
+    w <- .swlBlockWindows(allGaps[k], allGaps[k + 1], fns, ctx)
+    # First window's fill starts at the window start; last window's fill ends
+    # at the window end.
+    list(
+        starts = w$starts,
+        ends = w$ends,
+        fillStarts = replace(w$fillStarts, 1L, w$starts[1L]),
+        fillEnds = replace(
+            w$fillEnds,
+            length(w$fillEnds),
+            w$ends[length(w$ends)]
+        )
     )
 }
 
@@ -963,10 +1027,6 @@ slidingWindowLoop <- function(
     adjustLastFn = NULL,
     verbose = FALSE
 ) {
-    startList <- integer(0)
-    endList <- integer(0)
-    fillStartList <- integer(0)
-    fillEndList <- integer(0)
     fns <- list(
         minBlockFn = minBlockFn,
         initEndFn = initEndFn,
@@ -974,27 +1034,25 @@ slidingWindowLoop <- function(
         stepFn = stepFn,
         adjustLastFn = adjustLastFn
     )
-    for (k in seq_len(length(allGaps) - 1)) {
-        blockStart <- allGaps[k]
-        blockEnd <- allGaps[k + 1]
-        if (!minBlockFn(blockEnd - blockStart, ctx)) {
-            next
-        }
-        w <- .swlBlockWindows(blockStart, blockEnd, fns, ctx)
-        # First window's fill starts at the window start; last window's fill
-        # ends at the window end.
-        w$fillStarts[1] <- w$starts[1]
-        w$fillEnds[length(w$fillEnds)] <- w$ends[length(w$ends)]
-        startList <- c(startList, w$starts)
-        endList <- c(endList, w$ends)
-        fillStartList <- c(fillStartList, w$fillStarts)
-        fillEndList <- c(fillEndList, w$fillEnds)
-    }
+    blocks <- keep(
+        seq_len(length(allGaps) - 1),
+        .swlBlockQualifies,
+        allGaps = allGaps,
+        minBlockFn = minBlockFn,
+        ctx = ctx
+    )
+    windowed <- map(
+        blocks,
+        .swlBlockAt,
+        allGaps = allGaps,
+        fns = fns,
+        ctx = ctx
+    )
     buildSegmentResult(
-        startList,
-        endList,
-        fillStartList,
-        fillEndList,
+        .swlField(windowed, "starts"),
+        .swlField(windowed, "ends"),
+        .swlField(windowed, "fillStarts"),
+        .swlField(windowed, "fillEnds"),
         n,
         verbose
     )
@@ -1003,11 +1061,15 @@ slidingWindowLoop <- function(
 # Apply the quarter-distance index map `quaterIdx` `n` times to `x` (n = 1..4
 # gives the 1st..4th quarter boundary from x). Used by segmentByDist.
 # @noRd
+# One quarter-index hop; the step index is unused, `reduce` just applies it
+# `n` times.
+# @noRd
+.nthQuaterStep <- function(x, step, quaterIdx) {
+    quaterIdx[x]
+}
+
 .nthQuaterIdx <- function(x, n, quaterIdx) {
-    for (i in seq_len(n)) {
-        x <- quaterIdx[x]
-    }
-    x
+    reduce(seq_len(n), .nthQuaterStep, quaterIdx = quaterIdx, .init = x)
 }
 
 #' Segment Genomic Region by Distance (Original DENTIST Algorithm)
@@ -1052,22 +1114,20 @@ slidingWindowLoop <- function(
 # --- segmentByDist helpers --------------------------------------------------
 
 # For each SNP, the last SNP index within cutoff/4 distance (clamped to [1, n]).
+# For each SNP, the index of the last SNP within a quarter of `cutoff`.
+#
+# The C++ original walks a second pointer forward, which is the same thing as
+# counting how many positions fall strictly below each target -- that is
+# `findInterval(..., left.open = TRUE)`, so no pointer has to be carried.
+# Verified identical to the pointer walk over 600 random inputs, tied
+# positions included.
 .segByDistQuaterIdx <- function(pos, n, cutoff) {
-    quaterIdx <- integer(n)
-    j <- 1
-    while (j <= n && pos[j] < cutoff / 4 + as.numeric(pos[1])) {
-        j <- j + 1
-    }
-    quaterIdx[1] <- max(j - 1, 1L)
-    for (i in 2:n) {
-        j <- quaterIdx[i - 1]
-        while (j <= n && pos[j] < cutoff / 4 + as.numeric(pos[i])) {
-            j <- j + 1
-        }
-        quaterIdx[i] <- max(j - 1, 1L)
-    }
-    quaterIdx <- pmin(quaterIdx, n)
-    pmax(quaterIdx, 1L)
+    lastBelow <- findInterval(
+        as.numeric(pos) + cutoff / 4,
+        pos,
+        left.open = TRUE
+    )
+    pmax(pmin(lastBelow, n), 1L)
 }
 
 # Advance the window start by one quarter-step and recompute its end.
@@ -1212,28 +1272,32 @@ segmentByCount <- function(pos, maxCount, gapDist = 1e6, verbose = FALSE) {
 #'   within the fillers and combines them into a single data frame.
 #'
 #' @noRd
+# Window `k`'s rows, indexed globally and trimmed to that window's fill range.
+# @noRd
+.dentistMergeWindowAt <- function(k, dentistResultByWindow, windowDividedRes) {
+    imputedK <- dentistResultByWindow[[k]]
+    offset <- windowDividedRes$windowStartIdx[k] - 1
+    imputedK |>
+        mutate(
+            index_within_window = seq_len(nrow(imputedK)),
+            index_global = .data$index_within_window + offset
+        ) |>
+        filter(
+            .data$index_global >= windowDividedRes$fillStartIdx[k] &
+                .data$index_global < windowDividedRes$fillEndIdx[k]
+        )
+}
+
 mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
     if (length(dentistResultByWindow) != nrow(windowDividedRes)) {
         abort("Different number of windows and imputed results!")
     }
-    mergedResults <- c()
-    for (k in seq_len(nrow(windowDividedRes))) {
-        imputedK <- dentistResultByWindow[[k]]
-        imputedK$index_within_window <- seq_len(nrow(imputedK))
-        imputedK <- imputedK |>
-            mutate(
-                index_global = .data$index_within_window +
-                    windowDividedRes$windowStartIdx[k] -
-                    1
-            )
-        extractedResults <- imputedK |>
-            filter(
-                .data$index_global >= windowDividedRes$fillStartIdx[k] &
-                    .data$index_global < windowDividedRes$fillEndIdx[k]
-            )
-        mergedResults <- bind_rows(mergedResults, extractedResults)
-    }
-    return(mergedResults)
+    bind_rows(map(
+        seq_len(nrow(windowDividedRes)),
+        .dentistMergeWindowAt,
+        dentistResultByWindow = dentistResultByWindow,
+        windowDividedRes = windowDividedRes
+    ))
 }
 
 # ## File-I/O functions (dentist_from_files, read_dentist_sumstat,
@@ -1311,8 +1375,10 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
     nlog10pDentistSThreshold
 ) {
     r2Lead <- rLead^2
-    tDentistS <- (zScore - rLead * zScore[leadIdx])^2 / (1 - r2Lead)
-    tDentistS[tDentistS < 0] <- Inf
+    rawT <- (zScore - rLead * zScore[leadIdx])^2 / (1 - r2Lead)
+    # A negative statistic means 1 - r2 went negative (|r| > 1 from a
+    # mismatched panel); Inf routes it straight to the outlier branch.
+    tDentistS <- replace(rawT, rawT < 0, Inf)
     nlog10pDentistS <- -log10(pchisq(tDentistS, df = 1, lower.tail = FALSE))
     outliers <- (r2Lead > r2Threshold) &
         (nlog10pDentistS > nlog10pDentistSThreshold)
@@ -1490,34 +1556,32 @@ autoDecision <- function(df, highCorrCols) {
     assertCharacter(highCorrCols, any.missing = FALSE)
     # Identify top_cs
     topCsIndex <- which.max(abs(df$top_z))
-    df$top_cs <- FALSE
-    df$top_cs[topCsIndex] <- TRUE
-
-    # Identify tagged_cs
-    df$tagged_cs <- map_lgl(
-        seq_len(nrow(df)),
-        .autoDecisionTagged,
-        df = df,
-        highCorrCols = highCorrCols
+    withTop <- mutate(df, top_cs = seq_len(nrow(df)) == topCsIndex)
+    # Identify tagged_cs. `.autoDecisionTagged()` reads `top_cs`, so it has to
+    # see the frame that already carries it.
+    flagged <- mutate(
+        withTop,
+        tagged_cs = map_lgl(
+            seq_len(nrow(withTop)),
+            .autoDecisionTagged,
+            df = withTop,
+            highCorrCols = highCorrCols
+        )
     )
-
     # Count total and remaining CS
-    totalCs <- nrow(df)
-    taggedCsCount <- sum(df$tagged_cs)
-    if (totalCs > 0) {
-        remainingCs <- totalCs - 1 - taggedCsCount
-    } else {
-        remainingCs <- 0
-    }
+    totalCs <- nrow(flagged)
+    taggedCsCount <- sum(flagged$tagged_cs)
+    remainingCs <- if (totalCs > 0) totalCs - 1 - taggedCsCount else 0
     # Determine method
-    df$method <- case_when(
-        taggedCsCount == 0 & totalCs > 1 ~ "BVSR",
-        (remainingCs == 0 & totalCs > 1) | (totalCs == 1) ~ "SER",
-        remainingCs > 0 ~ "BCR",
-        TRUE ~ NA_character_
+    mutate(
+        flagged,
+        method = case_when(
+            taggedCsCount == 0 & totalCs > 1 ~ "BVSR",
+            (remainingCs == 0 & totalCs > 1) | (totalCs == 1) ~ "SER",
+            remainingCs > 0 ~ "BCR",
+            TRUE ~ NA_character_
+        )
     )
-
-    return(df)
 }
 
 
@@ -1605,6 +1669,20 @@ autoDecision <- function(df, highCorrCols) {
     !is_in(seq_len(n), m$idxA)
 }
 
+# The retained-component mask, truncated to at most `maxRank` components.
+# @noRd
+.svdCapRank <- function(keep, maxRank) {
+    if (is.null(maxRank) || maxRank <= 0) {
+        return(keep)
+    }
+    keepIdx <- which(keep)
+    nKeep <- min(length(keepIdx), maxRank)
+    if (length(keepIdx) <= nKeep) {
+        return(keep)
+    }
+    replace(keep, keepIdx[(nKeep + 1):length(keepIdx)], FALSE)
+}
+
 # Rows that match a known sumstats variant in the opposite orientation.
 # @noRd
 .raissFlipOfKnownMask <- function(refPanelIds, knownIds) {
@@ -1613,8 +1691,7 @@ autoDecision <- function(df, highCorrCols) {
         return(mask)
     }
     m <- matchVariants(refPanelIds, knownIds, removeStrandAmbiguous = FALSE)
-    mask[m$idxA[m$sign < 0]] <- TRUE
-    mask
+    replace(mask, m$idxA[m$sign < 0], TRUE)
 }
 
 # Positions the GWAS already typed.
@@ -1690,9 +1767,9 @@ raissSingleMatrix <- function(
     zt <- knownZscores$z
     sigT <- ldMatrix[knowns, knowns, drop = FALSE]
     sigIT <- ldMatrix[unknowns, knowns, drop = FALSE]
-    results <- raissModel(zt, sigT, sigIT, lamb, rcond)
-    results <- formatRaissDf(results, refPanel, unknowns)
-    results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
+    results <- raissModel(zt, sigT, sigIT, lamb, rcond) |>
+        formatRaissDf(refPanel, unknowns) |>
+        filterRaissOutput(r2Threshold, minimumLd, verbose)
     resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) |>
         arrange(.data$pos)
     resultFilter <- mergeRaissDf(results$zscores, knownZscores) |>
@@ -1781,7 +1858,7 @@ raissSingleMatrix <- function(
     w <- U %*% (d / d2PlusC * VtZt)
     # Single dgemm X' %*% [w | U]: col 1 (rows unknowns) -> mu; rest -> A.
     XtWU <- crossprod(X, cbind(w, U))
-    mu <- as.numeric(XtWU[unknowns, 1])
+    muRaw <- as.numeric(XtWU[unknowns, 1])
     A <- XtWU[unknowns, -1, drop = FALSE]
     rm(XtWU)
     # Variance and LD score in one pass over A^2.
@@ -1799,7 +1876,7 @@ raissSingleMatrix <- function(
     # R2 correction (same as raissModel).
     varNorm <- varInBoundaries(varRaw, lamb)
     R2 <- (1 + lamb) - varNorm
-    mu <- mu / sqrt(R2)
+    mu <- muRaw / sqrt(R2)
     list(
         var = varNorm,
         mu = mu,
@@ -1838,8 +1915,8 @@ raissSingleMatrixFromX <- function(
         svdTol,
         nrow(X)
     )
-    results <- formatRaissDf(imp, refPanel, unknowns)
-    results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
+    results <- formatRaissDf(imp, refPanel, unknowns) |>
+        filterRaissOutput(r2Threshold, minimumLd, verbose)
     resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) |>
         arrange(.data$pos)
     resultFilter <- mergeRaissDf(results$zscores, knownZscores) |>
@@ -1867,36 +1944,53 @@ raissSingleMatrixFromX <- function(
     lastVar <- combinedResult$variant_id[nrow(combinedResult)]
     firstVar <- newResult$variant_id[1]
 
-    if (lastVar == firstVar) {
-        newR2 <- newResult$raissR2[1]
-        oldR2 <- combinedResult$raissR2[nrow(combinedResult)]
-        if (is.na(newR2) && is.na(oldR2)) {
-            # Both are NA - keep the existing one
-        } else if (is.na(oldR2)) {
-            # Old is NA but new is not - use new
-            combinedResult[nrow(combinedResult), ] <- newResult[1, ]
-        } else if (is.na(newR2)) {
-            # New is NA but old is not - keep old
-        } else if (newR2 > oldR2) {
-            # Both are non-NA and new is better - use new
-            combinedResult[nrow(combinedResult), ] <- newResult[1, ]
-        }
-
-        # Add remaining rows from new (excluding first)
-        if (nrow(newResult) > 1) {
-            combinedResult <- bind_rows(combinedResult, newResult[-1, ])
-        }
-    } else {
+    if (lastVar != firstVar) {
         # No overlap - combine all rows
-        combinedResult <- bind_rows(combinedResult, newResult)
+        return(bind_rows(combinedResult, newResult))
     }
-
-    return(combinedResult)
+    # The shared boundary variant is kept from whichever side imputed it
+    # better; two NAs, a tie, or an NA on the new side keep the existing row.
+    newR2 <- newResult$raissR2[1]
+    oldR2 <- combinedResult$raissR2[nrow(combinedResult)]
+    preferNew <- !is.na(newR2) && (is.na(oldR2) || newR2 > oldR2)
+    resolved <- if (preferNew) {
+        bind_rows(combinedResult[-nrow(combinedResult), ], newResult[1, ])
+    } else {
+        combinedResult
+    }
+    # Every row of `newResult` past the boundary variant is new.
+    bind_rows(resolved, newResult[-1, ])
 }
 
 # --- raiss: genotype-matrix and LD-matrix path helpers ---------------------
 
 # List of genotype-matrix blocks: impute each via SVD, then row-bind.
+# One genotype block's imputation, or NULL when the block yields nothing.
+# @noRd
+.raissGenotypeBlockAt <- function(
+    i,
+    refPanel,
+    knownZscores,
+    genotypeMatrix,
+    p
+) {
+    if (p$verbose) {
+        nBlocks <- length(genotypeMatrix)
+        msg <- glue("Processing block {i} of {nBlocks}")
+        inform(msg)
+    }
+    raissSingleMatrixFromX(
+        refPanel,
+        knownZscores,
+        genotypeMatrix[[i]],
+        p$lamb,
+        p$svdTol,
+        p$r2Threshold,
+        p$minimumLd,
+        verbose = FALSE
+    )
+}
+
 .raissGenotypeBlocks <- function(refPanel, knownZscores, genotypeMatrix, p) {
     if (p$verbose) {
         msg <- glue(
@@ -1905,27 +1999,14 @@ raissSingleMatrixFromX <- function(
         )
         inform(msg)
     }
-    resultsList <- list()
-    for (i in seq_along(genotypeMatrix)) {
-        if (p$verbose) {
-            nBlocks <- length(genotypeMatrix)
-            msg <- glue("Processing block {i} of {nBlocks}")
-            inform(msg)
-        }
-        blockResult <- raissSingleMatrixFromX(
-            refPanel,
-            knownZscores,
-            genotypeMatrix[[i]],
-            p$lamb,
-            p$svdTol,
-            p$r2Threshold,
-            p$minimumLd,
-            verbose = FALSE
-        )
-        if (!is.null(blockResult)) {
-            resultsList[[length(resultsList) + 1]] <- blockResult
-        }
-    }
+    resultsList <- compact(map(
+        seq_along(genotypeMatrix),
+        .raissGenotypeBlockAt,
+        refPanel = refPanel,
+        knownZscores = knownZscores,
+        genotypeMatrix = genotypeMatrix,
+        p = p
+    ))
     if (length(resultsList) == 0) {
         if (p$verbose) {
             inform("No blocks could be processed.")
@@ -2002,20 +2083,14 @@ raissSingleMatrixFromX <- function(
 
 # Combine per-block imputation results (boundary-dedup) + rebuild LD matrix.
 .raissLdBlocksCombine <- function(resultsList) {
-    combinedNofilter <- resultsList[[1]]$resultNofilter
-    combinedFilter <- resultsList[[1]]$resultFilter
-    if (length(resultsList) > 1) {
-        for (i in 2:length(resultsList)) {
-            combinedNofilter <- .combineWithBoundaryCheck(
-                combinedNofilter,
-                resultsList[[i]]$resultNofilter
-            )
-            combinedFilter <- .combineWithBoundaryCheck(
-                combinedFilter,
-                resultsList[[i]]$resultFilter
-            )
-        }
-    }
+    combinedNofilter <- reduce(
+        map(resultsList, "resultNofilter"),
+        .combineWithBoundaryCheck
+    )
+    combinedFilter <- reduce(
+        map(resultsList, "resultFilter"),
+        .combineWithBoundaryCheck
+    )
     ldFilteredList <- map(resultsList, "ldMat")
     variantList <- map(ldFilteredList, .ldVariantsDf)
     ldMatrix <- createLdMatrix(
@@ -2030,29 +2105,56 @@ raissSingleMatrixFromX <- function(
 }
 
 # LD-block imputation path: impute each block then combine.
+# One LD block's imputation, or NULL when the block yields nothing.
+# @noRd
+.raissLdBlockAt <- function(
+    blockId,
+    refPanel,
+    knownZscores,
+    ldMatrix,
+    variantIndices,
+    blockIds,
+    p
+) {
+    if (p$verbose) {
+        nBlocks <- length(blockIds)
+        msg <- glue("Processing block {blockId} of {nBlocks}")
+        inform(msg)
+    }
+    .raissLdBlockOne(
+        refPanel,
+        knownZscores,
+        ldMatrix,
+        variantIndices,
+        blockId,
+        p
+    )
+}
+
 .raissLdBlocksPath <- function(refPanel, knownZscores, ldMatrix, p) {
     if (p$verbose) {
         inform("Processing multiple LD blocks...")
     }
     variantIndices <- ldMatrix$variantIndices
     blockIds <- unique(variantIndices$blockId)
-    resultsList <- list()
-    for (blockId in blockIds) {
-        if (p$verbose) {
-            nBlocks <- length(blockIds)
-            msg <- glue("Processing block {blockId} of {nBlocks}")
-            inform(msg)
-        }
-        blockResult <- .raissLdBlockOne(
-            refPanel,
-            knownZscores,
-            ldMatrix,
-            variantIndices,
-            blockId,
-            p
-        )
-        if (!is.null(blockResult)) resultsList[[blockId]] <- blockResult
+    perBlock <- map(
+        blockIds,
+        .raissLdBlockAt,
+        refPanel = refPanel,
+        knownZscores = knownZscores,
+        ldMatrix = ldMatrix,
+        variantIndices = variantIndices,
+        blockIds = blockIds,
+        p = p
+    )
+    # `resultsList[[blockId]] <- ...` named the entries only when blockIds are
+    # character, so keep that distinction rather than inventing names.
+    blockResults <- if (is.character(blockIds)) {
+        set_names(perBlock, blockIds)
+    } else {
+        perBlock
     }
+    resultsList <- compact(blockResults)
     if (length(resultsList) == 0) {
         if (p$verbose) {
             msg <- glue(
@@ -2298,29 +2400,35 @@ mergeRaissDf <- function(raissDf, knownZscores) {
     # Identify rows that came from knownZscores
     fromKnown <- !is.na(mergedDf$z.y) & is.na(mergedDf$z.x)
 
-    # Set Var to -1 and raissLdScore to Inf for these rows
-    mergedDf$Var[fromKnown] <- -1
-    mergedDf$raissLdScore[fromKnown] <- Inf
-
-    # If there are overlapping columns (e.g., z.x and z.y), resolve them For
-    # example, use z from knownZscores where available, otherwise use z from
-    # raissDf
-    mergedDf$z <- if_else(fromKnown, mergedDf$z.y, mergedDf$z.x)
-
-    # Remove the extra columns produced by the join (z.x, z.y).
-    mergedDf <- select(mergedDf, -all_of(c("z.x", "z.y")))
-    mergedDf <- arrange(mergedDf, .data$pos)
-    # assign imputed variants beta, se as NA to avoid confusion, since they are
-    # not imputed. beta/se are optional (knownZscores may omit them), so guard
-    # on column presence explicitly rather than relying on a data.frame
-    # silently creating an all-NA column on `$col[mask] <- NA`.
-    if (is_in("beta", colnames(mergedDf))) {
-        mergedDf$beta[mergedDf$Var == -1] <- NA
-    }
-    if (is_in("se", colnames(mergedDf))) {
-        mergedDf$se[mergedDf$Var == -1] <- NA
-    }
-    return(mergedDf)
+    resolved <- mutate(
+        mergedDf,
+        # A known variant was not imputed, so it carries no imputation
+        # quality: Var = -1 and an infinite LD score mark it as observed.
+        Var = replace(.data$Var, fromKnown, -1),
+        raissLdScore = replace(.data$raissLdScore, fromKnown, Inf),
+        # Overlapping z columns resolved: z from knownZscores where available,
+        # otherwise z from raissDf.
+        z = if_else(fromKnown, .data$z.y, .data$z.x)
+    ) |>
+        # Remove the extra columns produced by the join (z.x, z.y).
+        select(-all_of(c("z.x", "z.y"))) |>
+        arrange(.data$pos)
+    # Imputed variants' beta / se are NA to avoid confusion, since they are not
+    # imputed. Both are optional (knownZscores may omit them), so guard on
+    # column presence explicitly rather than relying on a data.frame silently
+    # creating an all-NA column on `$col[mask] <- NA`.
+    observed <- resolved$Var == -1
+    mutate(
+        resolved,
+        !!!compact(list(
+            beta = if (is_in("beta", colnames(resolved))) {
+                replace(resolved$beta, observed, NA)
+            },
+            se = if (is_in("se", colnames(resolved))) {
+                replace(resolved$se, observed, NA)
+            }
+        ))
+    )
 }
 
 # Format one aligned "label: value" report line (label left-padded to
@@ -2367,7 +2475,7 @@ filterRaissOutput <- function(
     minimumLd = 5,
     verbose = TRUE
 ) {
-    zscores <- select(
+    selected <- select(
         zscores,
         all_of(c(
             "chrom",
@@ -2380,16 +2488,15 @@ filterRaissOutput <- function(
             "raissLdScore"
         ))
     )
-    zscores$raissR2 <- 1 - zscores$Var
-    zscoresNofilter <- zscores
-    zscores <- filter(
-        zscores,
+    zscoresNofilter <- mutate(selected, raissR2 = 1 - .data$Var)
+    kept <- filter(
+        zscoresNofilter,
         .data$raissR2 > r2Threshold & .data$raissLdScore >= minimumLd
     )
     if (verbose) {
-        .filterRaissReport(zscoresNofilter, zscores, r2Threshold, minimumLd)
+        .filterRaissReport(zscoresNofilter, kept, r2Threshold, minimumLd)
     }
-    list(zscoresNofilter = zscoresNofilter, zscores = zscores)
+    list(zscoresNofilter = zscoresNofilter, zscores = kept)
 }
 
 computeMu <- function(sigIT, sigTInv, zt) {
@@ -2412,9 +2519,8 @@ checkInversion <- function(sigT, sigTInv) {
 }
 
 varInBoundaries <- function(var, lamb) {
-    var[var < 0] <- 0
-    var[var > (0.99999 + lamb)] <- 1
-    return(var)
+    floored <- replace(var, var < 0, 0)
+    replace(floored, floored > (0.99999 + lamb), 1)
 }
 
 #' @importFrom rlang try_fetch
@@ -2538,12 +2644,13 @@ ldMismatchQc <- function(
         qcResults <- exec(slalom, !!!callArgs)
         # Standardize output: slalom uses "outliers", rename to "outlier" for
         # consistency
-        result <- qcResults$data
-        if (
-            is_in("outliers", colnames(result)) &&
-                !is_in("outlier", colnames(result))
-        ) {
-            result <- rename(result, outlier = "outliers")
+        raw <- qcResults$data
+        renameOutliers <- is_in("outliers", colnames(raw)) &&
+            !is_in("outlier", colnames(raw))
+        result <- if (renameOutliers) {
+            rename(raw, outlier = "outliers")
+        } else {
+            raw
         }
         return(result)
     }
@@ -2574,9 +2681,11 @@ ldMismatchQc <- function(
 effectiveN <- function(nCase, nControl) {
     nCase <- as.numeric(nCase)
     nControl <- as.numeric(nControl)
-    out <- 4 / (1 / nCase + 1 / nControl)
-    out[is.na(nCase) | is.na(nControl) | nCase <= 0 | nControl <= 0] <- NA_real_
-    out
+    replace(
+        4 / (1 / nCase + 1 / nControl),
+        is.na(nCase) | is.na(nControl) | nCase <= 0 | nControl <= 0,
+        NA_real_
+    )
 }
 
 # Require a susieR that provides the kriging RSS diagnostic.
@@ -2732,9 +2841,17 @@ krigingOutlierQc <- function(
         seqnames = chr,
         ranges = IRanges::IRanges(start = as.integer(df$pos), width = 1L)
     )
-    if (is_in("variant_id", colnames(df)) && !is_in("SNP", colnames(df))) {
-        df$SNP <- df$variant_id
-    }
+    df <- mutate(
+        df,
+        !!!compact(list(
+            SNP = if (
+                is_in("variant_id", colnames(df)) &&
+                    !is_in("SNP", colnames(df))
+            ) {
+                df$variant_id
+            }
+        ))
+    )
     baseCols <- c("SNP", "A1", "A2", "Z", "N")
     # AF = directional effect-allele frequency (exported as af); MAF =
     # directionless QC frequency. Both carried when the loader resolved them.
@@ -2749,8 +2866,10 @@ krigingOutlierQc <- function(
         "N_CONTROL"
     )
     use <- intersect(c(baseCols, optCols), colnames(df))
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(select(df, all_of(use)))
-    gr
+    S4Vectors::`mcols<-`(
+        gr,
+        value = S4Vectors::DataFrame(select(df, all_of(use)))
+    )
 }
 
 # -----------------------------------------------------------------------------
@@ -2791,15 +2910,24 @@ krigingOutlierQc <- function(
 }
 
 # Append the optional numeric stat columns present on the entry's mcols.
+# One mcols column as numeric.
+# @noRd
+.entryStatColumn <- function(src, mc) {
+    as.numeric(mc[[src]])
+}
+
 .entryDfAddStats <- function(df, mc) {
     statMap <- c(z = "Z", beta = "BETA", se = "SE", N = "N", maf = "MAF")
-    for (out in names(statMap)) {
-        src <- statMap[[out]]
-        if (is_in(src, colnames(mc))) {
-            df[[out]] <- as.numeric(mc[[src]])
-        }
-    }
-    df
+    present <- statMap[is_in(statMap, colnames(mc))]
+    # mutate() overwrites an existing column in place and appends a new one,
+    # which is what the `df[[out]] <-` loop did.
+    mutate(
+        df,
+        !!!set_names(
+            map(unname(present), .entryStatColumn, mc = mc),
+            names(present)
+        )
+    )
 }
 
 .entryToSumstatDf <- function(
@@ -2817,21 +2945,21 @@ krigingOutlierQc <- function(
             abort(msg)
         }
     }
-    chr <- as.character(GenomicRanges::seqnames(gr))
-    if (!keepChrPrefix) {
-        chr <- str_remove(chr, regex("^chr", ignore_case = TRUE))
+    seqChr <- as.character(GenomicRanges::seqnames(gr))
+    chr <- if (keepChrPrefix) {
+        seqChr
+    } else {
+        str_remove(seqChr, regex("^chr", ignore_case = TRUE))
     }
-    df <- .entryDfBase(gr, mc, chr)
-    df <- .entryDfAddStats(df, mc)
-    if (
-        derive == "zFromBetaSe" &&
-            is.null(df[["z"]]) &&
-            !is.null(df[["beta"]]) &&
-            !is.null(df[["se"]])
-    ) {
-        df[["z"]] <- df[["beta"]] / df[["se"]]
+    df <- .entryDfBase(gr, mc, chr) |> .entryDfAddStats(mc)
+    deriveZ <- derive == "zFromBetaSe" &&
+        is.null(df[["z"]]) &&
+        !is.null(df[["beta"]]) &&
+        !is.null(df[["se"]])
+    if (!deriveZ) {
+        return(df)
     }
-    df
+    mutate(df, z = .data$beta / .data$se)
 }
 
 # Derive BETA and SE columns from signed Z when the entry has only Z.
@@ -2854,7 +2982,7 @@ krigingOutlierQc <- function(
     }
     s <- svd(mat)
     d <- s$d
-    keep <- if (tol > 0 && length(d) > 0) {
+    aboveTol <- if (tol > 0 && length(d) > 0) {
         out <- d / d[1] > tol
         if (!any(out)) {
             abort("All singular values are below the tolerance threshold.")
@@ -2863,13 +2991,7 @@ krigingOutlierQc <- function(
     } else {
         rep(TRUE, length(d))
     }
-    if (!is.null(maxRank) && maxRank > 0) {
-        nKeep <- min(sum(keep), maxRank)
-        keepIdx <- which(keep)
-        if (length(keepIdx) > nKeep) {
-            keep[keepIdx[(nKeep + 1):length(keepIdx)]] <- FALSE
-        }
-    }
+    keep <- .svdCapRank(aboveTol, maxRank)
     list(
         u = s$u[, keep, drop = FALSE],
         d = d[keep],
@@ -2936,13 +3058,14 @@ krigingOutlierQc <- function(
     bs <- .zToBetaSe(z, maf, n)
     se <- bs$se
     beta <- bs$beta
-    if (!hasBeta) {
-        df$BETA <- beta
-    }
-    if (!hasSe) {
-        df$SE <- se
-    }
-    list(df = df, audit = list(nDerived = sum(!is.na(se))))
+    derived <- mutate(
+        df,
+        !!!compact(list(
+            BETA = if (!hasBeta) beta,
+            SE = if (!hasSe) se
+        ))
+    )
+    list(df = derived, audit = list(nDerived = sum(!is.na(se))))
 }
 
 # Drop variants whose (chrom, pos) overlaps any user-supplied skipRegion.
@@ -2983,22 +3106,32 @@ krigingOutlierQc <- function(
     abort(msg)
 }
 
+# Rows falling inside skip region `i`.
+# @noRd
+.skipRegionMask <- function(i, parsed, dfChr, pos) {
+    dfChr == parsed$chrom[i] & pos >= parsed$start[i] & pos <= parsed$end[i]
+}
+
 .applySkipRegion <- function(df, skipRegion) {
     if (is.null(skipRegion) || length(skipRegion) == 0L) {
         return(df)
     }
     parsed <- .parseSkipRegion(skipRegion)
-    dropMask <- rep(FALSE, nrow(df))
     dfChr <- str_remove(
         as.character(df$chrom),
         regex("^chr", ignore_case = TRUE)
     )
-    for (i in seq_len(nrow(parsed))) {
-        dropMask <- dropMask |
-            (dfChr == parsed$chrom[i] &
-                df$pos >= parsed$start[i] &
-                df$pos <= parsed$end[i])
-    }
+    dropMask <- reduce(
+        map(
+            seq_len(nrow(parsed)),
+            .skipRegionMask,
+            parsed = parsed,
+            dfChr = dfChr,
+            pos = df$pos
+        ),
+        `|`,
+        .init = rep(FALSE, nrow(df))
+    )
     filter(df, !dropMask)
 }
 
@@ -3042,12 +3175,16 @@ krigingOutlierQc <- function(
         removeStrandAmbiguous = removeStrandAmbiguous,
         removeDups = removeDups
     )
-    out <- res$harmonizedData
-    if (!is_in("chrom", colnames(out)) && is_in("chr", colnames(out))) {
-        colnames(out)[colnames(out) == "chr"] <- "chrom"
+    raw <- res$harmonizedData
+    out <- if (!is_in("chrom", colnames(raw)) && is_in("chr", colnames(raw))) {
+        `colnames<-`(
+            raw,
+            replace(colnames(raw), colnames(raw) == "chr", "chrom")
+        )
+    } else {
+        raw
     }
-    attr(out, "qcCounts") <- attr(res, "qcCounts")
-    out
+    `attr<-`(out, "qcCounts", attr(res, "qcCounts"))
 }
 
 # Variant-content filters (MAF / INFO / N). Pure data-frame column
@@ -3108,22 +3245,42 @@ krigingOutlierQc <- function(
     if (!(nCutoff > 0 && is_in("N", colnames(df)) && nrow(df) > 0L)) {
         return(list(df = df, dropped = NULL))
     }
-    nVals <- as.numeric(df$N)
+    allN <- as.numeric(df$N)
     before <- nrow(df)
-    if (any(is.na(nVals))) {
-        df <- filter(df, !is.na(nVals))
-        nVals <- nVals[!is.na(nVals)]
+    # A variant with no N cannot be scored against the cohort median.
+    hasN <- !is.na(allN)
+    nVals <- allN[hasN]
+    withN <- if (all(hasN)) df else filter(df, hasN)
+    madN <- if (length(nVals) > 0L) stats::mad(nVals, constant = 1) else 0
+    # A zero MAD means every retained N is identical, so no variant is an
+    # outlier and the z-score would divide by zero.
+    kept <- if (madN > 0) {
+        filter(withN, abs(nVals - stats::median(nVals)) / madN <= nCutoff)
+    } else {
+        withN
     }
-    if (length(nVals) > 0L) {
-        medN <- stats::median(nVals)
-        madN <- stats::mad(nVals, constant = 1)
-        if (madN > 0) {
-            zN <- abs(nVals - medN) / madN
-            df <- filter(df, zN <= nCutoff)
-        }
-    }
-    list(df = df, dropped = before - nrow(df))
+    list(df = kept, dropped = before - nrow(kept))
 }
+
+# An audit record with the unset entries omitted. An all-unset record is the
+# empty list, not a zero-length named one, so callers can compare it directly.
+# @noRd
+.qcAudit <- function(...) {
+    entries <- compact(list(...))
+    if (length(entries) == 0L) {
+        return(list())
+    }
+    entries
+}
+
+# The same, for counters that are reported only when something happened.
+# @noRd
+.qcAuditPositive <- function(...) {
+    exec(.qcAudit, !!!discard(list(...), .qcCountIsZero))
+}
+
+# @noRd
+.qcCountIsZero <- function(n) is.null(n) || n <= 0L
 
 .applyContentFilters <- function(
     df,
@@ -3131,23 +3288,17 @@ krigingOutlierQc <- function(
     infoCutoff = 0,
     nCutoff = 5
 ) {
-    audit <- list()
-    r <- .cfMaf(df, mafCutoff)
-    df <- r$df
-    if (!is.null(r$dropped)) {
-        audit$mafDropped <- r$dropped
-    }
-    r <- .cfInfo(df, infoCutoff)
-    df <- r$df
-    if (!is.null(r$dropped)) {
-        audit$infoDropped <- r$dropped
-    }
-    r <- .cfN(df, nCutoff)
-    df <- r$df
-    if (!is.null(r$dropped)) {
-        audit$nDropped <- r$dropped
-    }
-    list(df = df, audit = audit)
+    maf <- .cfMaf(df, mafCutoff)
+    info <- .cfInfo(maf$df, infoCutoff)
+    n <- .cfN(info$df, nCutoff)
+    list(
+        df = n$df,
+        audit = .qcAudit(
+            mafDropped = maf$dropped,
+            infoDropped = info$dropped,
+            nDropped = n$dropped
+        )
+    )
 }
 
 # Per-row variant sanity / hygiene checks ported from MungeSumstats's
@@ -3174,6 +3325,20 @@ krigingOutlierQc <- function(
 # --- .applySanityChecks per-check helpers (each guards its own flag) --------
 
 # Coerce known numeric columns; count NAs newly introduced by coercion.
+# @noRd
+.scColumnIsNumeric <- function(col, df) {
+    is.numeric(df[[col]])
+}
+
+# One column coerced to numeric, with the count of NAs that coercion
+# introduced (values that were present but unparseable).
+# @noRd
+.scCoerceColumn <- function(col, df) {
+    orig <- df[[col]]
+    coerced <- suppressWarnings(as.numeric(orig))
+    list(values = coerced, na = sum(is.na(coerced) & !is.na(orig)))
+}
+
 .scCoerceNumeric <- function(df, coerceNumeric) {
     if (!coerceNumeric) {
         return(list(df = df, audit = list()))
@@ -3194,21 +3359,15 @@ krigingOutlierQc <- function(
         ),
         colnames(df)
     )
-    naIntroduced <- 0L
-    for (col in numericCols) {
-        orig <- df[[col]]
-        if (is.numeric(orig)) {
-            next
-        }
-        coerced <- suppressWarnings(as.numeric(orig))
-        naIntroduced <- naIntroduced + sum(is.na(coerced) & !is.na(orig))
-        df[[col]] <- coerced
-    }
-    audit <- list()
-    if (naIntroduced > 0L) {
-        audit$nonNumericCoerced <- naIntroduced
-    }
-    list(df = df, audit = audit)
+    toCoerce <- numericCols[
+        !map_lgl(numericCols, .scColumnIsNumeric, df = df)
+    ]
+    coercions <- map(toCoerce, .scCoerceColumn, df = df)
+    naIntroduced <- sum(map_int(coercions, "na"))
+    list(
+        df = mutate(df, !!!set_names(map(coercions, "values"), toCoerce)),
+        audit = .qcAuditPositive(nonNumericCoerced = naIntroduced)
+    )
 }
 
 # Normalize chromosome labels; optionally drop non-standard chromosomes.
@@ -3216,23 +3375,23 @@ krigingOutlierQc <- function(
     if (!normalizeChr || !is_in("chrom", colnames(df))) {
         return(list(df = df, audit = list()))
     }
-    chr <- as.character(df$chrom)
-    chr <- str_remove(chr, regex("^chr", ignore_case = TRUE))
-    chr <- str_remove(chr, regex("^ch", ignore_case = TRUE))
-    chr <- str_to_upper(chr)
-    chr[chr == "23"] <- "X"
-    chr[chr == "24"] <- "Y"
-    chr[chr == "M"] <- "MT"
-    df$chrom <- chr
-    audit <- list()
-    if (dropNonstandardChr) {
-        before <- nrow(df)
-        standardChrs <- c(as.character(seq_len(22)), "X", "Y", "MT")
-        df <- filter(df, is_in(chr, standardChrs))
-        dropped <- before - nrow(df)
-        if (dropped > 0L) audit$nonstandardChrDropped <- dropped
+    chr <- as.character(df$chrom) |>
+        str_remove(regex("^chr", ignore_case = TRUE)) |>
+        str_remove(regex("^ch", ignore_case = TRUE)) |>
+        str_to_upper() |>
+        canonChromLabel()
+    normalized <- mutate(df, chrom = chr)
+    if (!dropNonstandardChr) {
+        return(list(df = normalized, audit = list()))
     }
-    list(df = df, audit = audit)
+    standardChrs <- c(as.character(seq_len(22)), "X", "Y", "MT")
+    kept <- filter(normalized, is_in(chr, standardChrs))
+    list(
+        df = kept,
+        audit = .qcAuditPositive(
+            nonstandardChrDropped = nrow(normalized) - nrow(kept)
+        )
+    )
 }
 
 # Drop rows missing any vital column (chrom/pos/A1/A2 + first signed stat).
@@ -3240,22 +3399,20 @@ krigingOutlierQc <- function(
     if (!dropMissData || nrow(df) == 0L) {
         return(list(df = df, audit = list()))
     }
-    vital <- intersect(c("chrom", "pos", "A1", "A2"), colnames(df))
     signedCol <- intersect(c("Z", "BETA"), colnames(df))[1L]
-    if (!is.na(signedCol)) {
-        vital <- c(vital, signedCol)
+    vital <- c(
+        intersect(c("chrom", "pos", "A1", "A2"), colnames(df)),
+        if (!is.na(signedCol)) signedCol
+    )
+    if (length(vital) == 0L) {
+        return(list(df = df, audit = list()))
     }
-    audit <- list()
-    if (length(vital) > 0L) {
-        before <- nrow(df)
-        bad <- reduce(map(vital, .scColIsNa, df = df), `|`)
-        if (any(bad)) {
-            df <- filter(df, !bad)
-        }
-        dropped <- before - nrow(df)
-        if (dropped > 0L) audit$missDataDropped <- dropped
-    }
-    list(df = df, audit = audit)
+    bad <- reduce(map(vital, .scColIsNa, df = df), `|`)
+    kept <- filter(df, !bad)
+    list(
+        df = kept,
+        audit = .qcAuditPositive(missDataDropped = nrow(df) - nrow(kept))
+    )
 }
 
 # Drop rows whose P is outside [0, 1].
@@ -3269,12 +3426,10 @@ krigingOutlierQc <- function(
     if (any(bad)) {
         df <- filter(df, !bad)
     }
-    dropped <- before - nrow(df)
-    audit <- list()
-    if (dropped > 0L) {
-        audit$pOutOfRangeDropped <- dropped
-    }
-    list(df = df, audit = audit)
+    list(
+        df = df,
+        audit = .qcAuditPositive(pOutOfRangeDropped = before - nrow(df))
+    )
 }
 
 # Clamp tiny P-values up to the floor.
@@ -3285,15 +3440,22 @@ krigingOutlierQc <- function(
     p <- as.numeric(df$P)
     smallMask <- !is.na(p) & p >= 0 & p < smallPFloor
     nClamped <- sum(smallMask)
-    audit <- list()
-    if (nClamped > 0L) {
-        df$P[smallMask] <- smallPFloor
-        audit$smallPClamped <- nClamped
+    if (nClamped == 0L) {
+        return(list(df = df, audit = list()))
     }
-    list(df = df, audit = audit)
+    clamped <- mutate(df, P = replace(.data$P, smallMask, smallPFloor))
+    list(df = clamped, audit = list(smallPClamped = nClamped))
 }
 
 # Drop rows whose effect equals the null sentinel (0, or 1 for OR).
+# Rows whose effect column holds the no-effect sentinel (1 for OR, else 0).
+# @noRd
+.scZeroEffectMask <- function(col, df) {
+    vals <- as.numeric(df[[col]])
+    sentinel <- if (col == "OR") 1 else 0
+    !is.na(vals) & vals == sentinel
+}
+
 .scDropZeroEffect <- function(df, dropZeroEffect) {
     if (!dropZeroEffect || nrow(df) == 0L) {
         return(list(df = df, audit = list()))
@@ -3302,22 +3464,19 @@ krigingOutlierQc <- function(
         c("BETA", "LOG_ODDS", "SIGNED_SUMSTAT", "OR"),
         colnames(df)
     )
-    audit <- list()
-    if (length(effectCols) > 0L) {
-        before <- nrow(df)
-        badMask <- rep(FALSE, nrow(df))
-        for (col in effectCols) {
-            vals <- as.numeric(df[[col]])
-            sentinel <- if (col == "OR") 1 else 0
-            badMask <- badMask | (!is.na(vals) & vals == sentinel)
-        }
-        if (any(badMask)) {
-            df <- filter(df, !badMask)
-        }
-        dropped <- before - nrow(df)
-        if (dropped > 0L) audit$zeroEffectDropped <- dropped
+    if (length(effectCols) == 0L) {
+        return(list(df = df, audit = list()))
     }
-    list(df = df, audit = audit)
+    badMask <- reduce(
+        map(effectCols, .scZeroEffectMask, df = df),
+        `|`,
+        .init = rep(FALSE, nrow(df))
+    )
+    kept <- filter(df, !badMask)
+    list(
+        df = kept,
+        audit = .qcAuditPositive(zeroEffectDropped = nrow(df) - nrow(kept))
+    )
 }
 
 # Drop rows with non-positive standard error.
@@ -3331,12 +3490,10 @@ krigingOutlierQc <- function(
     if (any(bad)) {
         df <- filter(df, !bad)
     }
-    dropped <- before - nrow(df)
-    audit <- list()
-    if (dropped > 0L) {
-        audit$nonpositiveSeDropped <- dropped
-    }
-    list(df = df, audit = audit)
+    list(
+        df = df,
+        audit = .qcAuditPositive(nonpositiveSeDropped = before - nrow(df))
+    )
 }
 
 # Per-row sanity checks: sequence the guarded checks, accumulating the audit.
@@ -3353,32 +3510,33 @@ krigingOutlierQc <- function(
     dropZeroEffect = TRUE,
     dropNonpositiveSe = TRUE
 ) {
-    audit <- list()
     if (nrow(df) == 0L) {
-        return(list(df = df, audit = audit))
+        return(list(df = df, audit = list()))
     }
-    r <- .scCoerceNumeric(df, coerceNumeric)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    r <- .scNormalizeChr(df, normalizeChr, dropNonstandardChr)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    r <- .scDropMissData(df, dropMissData)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    r <- .scDropPOutOfRange(df, dropPOutOfRange)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    r <- .scClampSmallP(df, clampSmallP, smallPFloor)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    r <- .scDropZeroEffect(df, dropZeroEffect)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    r <- .scDropNonpositiveSe(df, dropNonpositiveSe)
-    df <- r$df
-    audit <- list_modify(audit, !!!r$audit)
-    list(df = df, audit = audit)
+    # Order matters: numeric coercion first (later checks compare numbers),
+    # then the label fixes, then the row drops, then the small-P clamp.
+    steps <- list(
+        list(fn = .scCoerceNumeric, args = list(coerceNumeric)),
+        list(
+            fn = .scNormalizeChr,
+            args = list(normalizeChr, dropNonstandardChr)
+        ),
+        list(fn = .scDropMissData, args = list(dropMissData)),
+        list(fn = .scDropPOutOfRange, args = list(dropPOutOfRange)),
+        list(fn = .scClampSmallP, args = list(clampSmallP, smallPFloor)),
+        list(fn = .scDropZeroEffect, args = list(dropZeroEffect)),
+        list(fn = .scDropNonpositiveSe, args = list(dropNonpositiveSe))
+    )
+    reduce(steps, .scApplyStep, .init = list(df = df, audit = list()))
+}
+
+# Run one sanity-check step against the accumulated (df, audit) state. Every
+# step takes the frame first and returns list(df, audit); a step that declines
+# to run returns the frame unchanged and an empty audit.
+# @noRd
+.scApplyStep <- function(state, step) {
+    r <- exec(step$fn, state$df, !!!step$args)
+    list(df = r$df, audit = list_modify(state$audit, !!!r$audit))
 }
 
 # Apply ldMismatchQc (SLALOM/DENTIST) against the LD sketch. Returns the
@@ -3402,12 +3560,12 @@ krigingOutlierQc <- function(
 # @noRd
 .qcPanelSupportedLd <- function(df, ldSketch, label) {
     nIn <- nrow(df)
-    R <- .ldFromSketch(ldSketch, df$SNP, label = label, onMissing = "drop")
-    if (is.null(R)) {
+    raw <- .ldFromSketch(ldSketch, df$SNP, label = label, onMissing = "drop")
+    if (is.null(raw)) {
         return(list(R = NULL, df = df[0L, , drop = FALSE], dropped = nIn))
     }
-    keptIds <- attr(R, "keptVariantIds")
-    attr(R, "keptVariantIds") <- NULL
+    keptIds <- attr(raw, "keptVariantIds")
+    R <- `attr<-`(raw, "keptVariantIds", NULL)
     if (is.null(keptIds) || length(keptIds) >= nIn) {
         return(list(R = R, df = df, dropped = 0L))
     }
@@ -3446,8 +3604,7 @@ krigingOutlierQc <- function(
     # chisq for variants effectively orthogonal to the lead). Treat NA as
     # "no evidence of being an outlier" (conservative: keep the variant)
     # so the downstream df / sum() / IRanges construction stay finite.
-    outlierFlags <- qc$outlier
-    outlierFlags[is.na(outlierFlags)] <- FALSE
+    outlierFlags <- replace(qc$outlier, is.na(qc$outlier), FALSE)
     # Attach the variant_id column so the diagnostics data.frame stays
     # self-describing once it's separated from the input df.
     diagnostics <- if (is.data.frame(qc)) {
@@ -3667,16 +3824,25 @@ krigingOutlierQc <- function(
         return(list(df = df, nSource = "column"))
     }
     if (f$hasCols) {
-        df$N <- as.numeric(df$N_CASE) + as.numeric(df$N_CONTROL)
-        return(list(df = df, nSource = "total"))
+        return(list(
+            df = mutate(
+                df,
+                N = as.numeric(.data$N_CASE) + as.numeric(.data$N_CONTROL)
+            ),
+            nSource = "total"
+        ))
     }
     if (f$hasScalar) {
-        df$N <- rep(opts$nCase + opts$nControl, f$nRow)
-        return(list(df = df, nSource = "total"))
+        return(list(
+            df = mutate(df, N = rep(opts$nCase + opts$nControl, f$nRow)),
+            nSource = "total"
+        ))
     }
     if (f$hasNSample) {
-        df$N <- rep(opts$nSample, f$nRow)
-        return(list(df = df, nSource = "study-n"))
+        return(list(
+            df = mutate(df, N = rep(opts$nSample, f$nRow)),
+            nSource = "study-n"
+        ))
     }
     list(df = df, nSource = NA_character_)
 }
@@ -3691,8 +3857,10 @@ krigingOutlierQc <- function(
                 "n_case/n_control."
             )
         }
-        df$N <- effectiveN(df$N_CASE, df$N_CONTROL)
-        return(list(df = df, nSource = "effective"))
+        return(list(
+            df = mutate(df, N = effectiveN(.data$N_CASE, .data$N_CONTROL)),
+            nSource = "effective"
+        ))
     }
     if (f$hasScalar) {
         if (f$hasN) {
@@ -3702,15 +3870,22 @@ krigingOutlierQc <- function(
                 "nCase/nControl."
             )
         }
-        df$N <- rep(effectiveN(opts$nCase, opts$nControl), f$nRow)
-        return(list(df = df, nSource = "effective"))
+        return(list(
+            df = mutate(
+                df,
+                N = rep(effectiveN(opts$nCase, opts$nControl), f$nRow)
+            ),
+            nSource = "effective"
+        ))
     }
     if (f$hasN) {
         return(list(df = df, nSource = "column"))
     }
     if (f$hasNSample) {
-        df$N <- rep(opts$nSample, f$nRow)
-        return(list(df = df, nSource = "study-n"))
+        return(list(
+            df = mutate(df, N = rep(opts$nSample, f$nRow)),
+            nSource = "study-n"
+        ))
     }
     list(df = df, nSource = NA_character_)
 }
@@ -3759,6 +3934,10 @@ krigingOutlierQc <- function(
 # frame, plus whichever of N / BETA / SE the caller carries, sorted by position
 # to match the reference panel.
 # @noRd
+.qcRaissNumericColumn <- function(nm, df) {
+    as.numeric(df[[nm]])
+}
+
 .qcRaissKnownZ <- function(df) {
     knownVariantIds <- if (!is.null(df$SNP)) {
         as.character(df$SNP)
@@ -3778,38 +3957,40 @@ krigingOutlierQc <- function(
     # merged output so the imputed rows sit in the same frame as the known
     # ones.
     optional <- c(N = "n", BETA = "beta", SE = "se")
-    for (nm in names(optional)) {
-        if (is_in(nm, colnames(df))) {
-            knownZ[[optional[[nm]]]] <- as.numeric(df[[nm]])
-        }
-    }
-    arrange(knownZ, .data$pos)
+    present <- optional[is_in(names(optional), colnames(df))]
+    extras <- set_names(
+        map(names(present), .qcRaissNumericColumn, df = df),
+        unname(present)
+    )
+    knownZ |> mutate(!!!extras) |> arrange(.data$pos)
 }
 
 .qcRaissBuildInputs <- function(df, ldSketch, windowIdx, opts) {
-    refPanel <- .refVariantsFromSketch(ldSketch)[windowIdx, , drop = FALSE]
-    refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
-    refPanel <- arrange(refPanel, .data$pos)
+    windowPanel <- .refVariantsFromSketch(ldSketch)[
+        windowIdx,
+        ,
+        drop = FALSE
+    ] |>
+        mutate(variant_id = normalizeVariantId(.data$variant_id)) |>
+        arrange(.data$pos)
     knownZ <- .qcRaissKnownZ(df)
     # meanImpute = FALSE so per-variant missingness is still visible; the
     # surviving columns are mean-imputed below, which is what meanImpute =
     # TRUE did.
-    dosage <- .ldSketchDosage(ldSketch, windowIdx, meanImpute = FALSE)
-    colnames(dosage) <- normalizeVariantId(
-        .ldSketchMatchIds(ldSketch)[windowIdx]
+    windowDosage <- `colnames<-`(
+        .ldSketchDosage(ldSketch, windowIdx, meanImpute = FALSE),
+        normalizeVariantId(.ldSketchMatchIds(ldSketch)[windowIdx])
     )
-    dosage <- dosage[, refPanel$variant_id, drop = FALSE]
-    keep <- .qcRaissTargetMask(refPanel, knownZ, dosage, opts)
-    nDropped <- sum(!keep)
-    refPanel <- refPanel[keep, , drop = FALSE]
-    dosage <- dosage[, keep, drop = FALSE]
-    scaledDosage <- scale(.qtlMeanImpute(dosage))
-    scaledDosage[is.na(scaledDosage)] <- 0
+    windowed <- windowDosage[, windowPanel$variant_id, drop = FALSE]
+    keep <- .qcRaissTargetMask(windowPanel, knownZ, windowed, opts)
+    refPanel <- windowPanel[keep, , drop = FALSE]
+    scaled <- scale(.qtlMeanImpute(windowed[, keep, drop = FALSE]))
+    scaledDosage <- replace(scaled, is.na(scaled), 0)
     list(
         refPanel = refPanel,
         knownZ = knownZ,
         scaledDosage = scaledDosage,
-        nDroppedTargets = nDropped
+        nDroppedTargets = sum(!keep)
     )
 }
 
@@ -3881,36 +4062,43 @@ krigingOutlierQc <- function(
         return(list(df = df, total = NA_integer_, imputed = 0L))
     }
     impDf <- imputed$resultFilter
-    out <- tibble(
-        chrom = impDf$chrom,
-        pos = impDf$pos,
-        SNP = impDf$variant_id,
-        A1 = impDf$A1,
-        A2 = impDf$A2,
-        Z = impDf$z
+    rebuilt <- mutate(
+        tibble(
+            chrom = impDf$chrom,
+            pos = impDf$pos,
+            SNP = impDf$variant_id,
+            A1 = impDf$A1,
+            A2 = impDf$A2,
+            Z = impDf$z
+        ),
+        !!!compact(list(
+            N = if (is_in("n", colnames(impDf))) impDf$n,
+            BETA = if (is_in("beta", colnames(impDf))) impDf$beta,
+            SE = if (is_in("se", colnames(impDf))) impDf$se
+        ))
     )
-    if (is_in("n", colnames(impDf))) {
-        out$N <- impDf$n
-    }
-    if (is_in("beta", colnames(impDf))) {
-        out$BETA <- impDf$beta
-    }
-    if (is_in("se", colnames(impDf))) {
-        out$SE <- impDf$se
-    }
     # RAISS reconstructs the z-score only, so it has no frequency for an
     # imputed variant. But the OBSERVED variants came in with a (harmonized,
-    # directional) AF, which the rebuilt `out` above would otherwise discard --
+    # directional) AF, which the rebuilt frame above would otherwise discard --
     # leaving top_loci$af NA for the whole entry under --impute. Re-attach it by
     # SNP so observed variants keep their AF and imputed variants (absent from
     # `df`) get NA. No-op when the study declared no frequency.
-    if (is_in("AF", colnames(df))) {
-        out$AF <- as.numeric(df$AF)[match(out$SNP, df$SNP)]
+    withAf <- if (is_in("AF", colnames(df))) {
+        mutate(rebuilt, AF = as.numeric(df$AF)[match(.data$SNP, df$SNP)])
+    } else {
+        rebuilt
     }
-    if (is_in("N", colnames(out)) && any(is.na(out$N))) {
-        out$N[is.na(out$N)] <- stats::median(out$N, na.rm = TRUE)
-    }
+    out <- .qcFillMissingN(withAf)
     list(df = out, total = nrow(out), imputed = nrow(out) - nrow(knownZ))
+}
+
+# Imputed variants carry no sample size, so they inherit the observed median.
+# @noRd
+.qcFillMissingN <- function(out) {
+    if (!is_in("N", colnames(out)) || !any(is.na(out$N))) {
+        return(out)
+    }
+    mutate(out, N = replace_na(.data$N, stats::median(.data$N, na.rm = TRUE)))
 }
 
 # Emit the RAISS net-change QC track line.
@@ -3958,7 +4146,6 @@ krigingOutlierQc <- function(
 # fields + before/after counts (imputation adds variants, so not monotonic).
 .qcRaissImpute <- function(df, ldSketch, opts, lbl) {
     imputeBefore <- nrow(df)
-    audit <- list()
     flank <- if (is.null(opts$imputeOpts$flank)) {
         0L
     } else {
@@ -3972,10 +4159,9 @@ krigingOutlierQc <- function(
             "(no LD-panel variants in the ",
             "region window)."
         )
-        audit$raissImputedVariants <- 0L
         return(list(
             df = df,
-            audit = audit,
+            audit = list(raissImputedVariants = 0L),
             imputeBefore = imputeBefore,
             imputeAfter = nrow(df)
         ))
@@ -3992,10 +4178,12 @@ krigingOutlierQc <- function(
     imputed <- .qcRaissRun(inp, opts)
     merged <- .qcRaissMerge(imputed, inp$knownZ, df)
     df <- merged$df
-    if (!is.na(merged$total)) {
-        audit$raissTotalVariants <- merged$total
-    }
-    audit$raissImputedVariants <- merged$imputed
+    audit <- c(
+        .qcAudit(
+            raissTotalVariants = if (!is.na(merged$total)) merged$total
+        ),
+        list(raissImputedVariants = merged$imputed)
+    )
     imputeAfter <- nrow(df)
     .qcRaissReport(imputeBefore, imputeAfter, lbl)
     list(
@@ -4017,7 +4205,7 @@ krigingOutlierQc <- function(
 .qcRemovedSegments <- function(entryAudit, qcCount, opts) {
     sc <- entryAudit$sanityChecks
     cf <- entryAudit$contentFilters
-    segs <- c(
+    c(
         .qcSeg(sc$nonstandardChrDropped, "nonstdChr"),
         .qcSeg(sc$missDataDropped, "missData"),
         .qcSeg(sc$pOutOfRangeDropped, "badP"),
@@ -4026,12 +4214,11 @@ krigingOutlierQc <- function(
         .qcSeg(cf$mafDropped, "maf"),
         .qcSeg(cf$infoDropped, "info"),
         .qcSeg(cf$nDropped, "nCutoff"),
-        .qcSeg(qcCount$harmDropped, "harmonization")
+        .qcSeg(qcCount$harmDropped, "harmonization"),
+        if (!identical(opts$zMismatchQc, "none")) {
+            str_c("mismatch ", qcCount$mismatchRemoved)
+        }
     )
-    if (!identical(opts$zMismatchQc, "none")) {
-        segs <- c(segs, str_c("mismatch ", qcCount$mismatchRemoved))
-    }
-    segs
 }
 
 # Emit the per-entry QC rollup: corrected (retained), removed, imputed.
@@ -4041,15 +4228,13 @@ krigingOutlierQc <- function(
         "sign-flip ",
         qcCount$harmCorrSign,
         ", strand-flip ",
-        qcCount$harmCorrStrand
+        qcCount$harmCorrStrand,
+        if (isTRUE(opts$alleleFlipKriging)) {
+            str_c(", kriging-flip ", qcCount$krigingFlipped)
+        } else {
+            ""
+        }
     )
-    if (isTRUE(opts$alleleFlipKriging)) {
-        correctedSeg <- str_c(
-            correctedSeg,
-            ", kriging-flip ",
-            qcCount$krigingFlipped
-        )
-    }
     impSeg <- if (isTRUE(opts$impute) && !is.na(qcCount$imputeAfter)) {
         str_c(
             " | imputed ",
@@ -4081,7 +4266,7 @@ krigingOutlierQc <- function(
 # Panel-vs-sumstats allele harmonization + counter bookkeeping.
 .qcHarmonizeEntry <- function(df, ldSketch, opts, lbl) {
     nHarmIn <- nrow(df)
-    df <- .matchAgainstSketch(
+    matched <- .matchAgainstSketch(
         df,
         ldSketch,
         matchMinProp = opts$matchMinProp,
@@ -4089,27 +4274,35 @@ krigingOutlierQc <- function(
         removeStrandAmbiguous = opts$removeStrandAmbiguous,
         removeDups = TRUE
     )
-    harmCounts <- attr(df, "qcCounts")
-    attr(df, "qcCounts") <- NULL
+    harmCounts <- attr(matched, "qcCounts")
     # Re-key SNP to the harmonized id: .matchAgainstSketch rewrites variant_id
     # to the panel orientation + sign-flips swapped variants but leaves SNP; a
     # stale SNP makes flipped variants miss the panel in later lookups.
-    if (!is.null(df$variant_id)) {
-        df$SNP <- df$variant_id
-    }
-    counts <- list(
-        harmCorrSign = 0L,
-        harmCorrStrand = 0L,
-        harmDropped = nHarmIn - nrow(df)
+    reKeyed <- mutate(
+        `attr<-`(matched, "qcCounts", NULL),
+        !!!compact(list(SNP = matched$variant_id))
     )
-    if (!is.null(harmCounts)) {
-        counts$harmCorrSign <- harmCounts$signFlip
-        counts$harmCorrStrand <- harmCounts$strandFlip
-    }
-    .qcHarmonizeReport(nrow(df), nHarmIn, counts, !is.null(harmCounts), lbl)
+    counts <- list_assign(
+        list(
+            harmCorrSign = 0L,
+            harmCorrStrand = 0L,
+            harmDropped = nHarmIn - nrow(reKeyed)
+        ),
+        !!!compact(list(
+            harmCorrSign = harmCounts$signFlip,
+            harmCorrStrand = harmCounts$strandFlip
+        ))
+    )
+    .qcHarmonizeReport(
+        nrow(reKeyed),
+        nHarmIn,
+        counts,
+        !is.null(harmCounts),
+        lbl
+    )
     list(
-        df = df,
-        audit = list(matchedAgainstSketch = nrow(df)),
+        df = reKeyed,
+        audit = list(matchedAgainstSketch = nrow(reKeyed)),
         counts = counts
     )
 }
@@ -4150,11 +4343,15 @@ krigingOutlierQc <- function(
     if (!any(flip)) {
         return(df)
     }
-    df$Z[flip] <- -df$Z[flip]
-    if (is_in("BETA", colnames(df))) {
-        df$BETA[flip] <- -df$BETA[flip]
-    }
-    df
+    mutate(
+        df,
+        Z = replace(.data$Z, flip, -df$Z[flip]),
+        !!!compact(list(
+            BETA = if (is_in("BETA", colnames(df))) {
+                replace(df$BETA, flip, -df$BETA[flip])
+            }
+        ))
+    )
 }
 
 # @noRd
@@ -4175,17 +4372,17 @@ krigingOutlierQc <- function(
             audit = list(krigingFlipped = 0L, panelUnsupportedDropped = nKrIn)
         ))
     }
-    df <- panel$df
+    supported <- panel$df
     nPanelDrop <- panel$dropped
     .qcEmitPanelDrop(lbl, nPanelDrop, nKrIn)
     kr <- krigingOutlierQc(
-        df$Z,
+        supported$Z,
         panel$R,
-        n = .qcKrigingN(df, opts),
-        variantIds = df$SNP
+        n = .qcKrigingN(supported, opts),
+        variantIds = supported$SNP
     )
     nKr <- sum(kr$flip)
-    df <- .qcApplyKrigingFlips(df, kr$flip)
+    flipped <- .qcApplyKrigingFlips(supported, kr$flip)
     .qcEmit(
         lbl,
         "QC track: kriging sign-flipped ",
@@ -4195,7 +4392,7 @@ krigingOutlierQc <- function(
         " LD-inconsistent variant(s)."
     )
     list(
-        df = df,
+        df = flipped,
         count = nKr,
         audit = list(
             krigingFlipped = nKr,
@@ -4213,13 +4410,19 @@ krigingOutlierQc <- function(
     nMmIn <- nrow(df)
     ldQc <- .applyLdMismatchQcToEntry(df, ldSketch, opts$zMismatchQc)
     df <- ldQc$df
-    audit <- list(
+    baseAudit <- list(
         ldMismatchOutliersDropped = ldQc$outliers,
         ldMismatchMethod = opts$zMismatchQc
     )
     nPanelDrop <- ldQc$panelUnsupportedDropped %||% 0L
+    audit <- c(
+        baseAudit,
+        .qcAudit(
+            panelUnsupportedDropped = if (nPanelDrop > 0L) nPanelDrop,
+            ldMismatchDiagnostics = ldQc$diagnostics
+        )
+    )
     if (nPanelDrop > 0L) {
-        audit$panelUnsupportedDropped <- nPanelDrop
         .qcEmit(
             lbl,
             "QC track: dropped ",
@@ -4228,9 +4431,6 @@ krigingOutlierQc <- function(
             nMmIn,
             " variant(s) with no LD-panel entry after panel filtering."
         )
-    }
-    if (!is.null(ldQc$diagnostics)) {
-        audit$ldMismatchDiagnostics <- ldQc$diagnostics
     }
     .qcEmit(
         lbl,
@@ -4289,10 +4489,9 @@ krigingOutlierQc <- function(
         dropNonpositiveSe = opts$dropNonpositiveSe
     )
     df <- sanity$df
-    audit <- list()
-    if (length(sanity$audit) > 0L) {
-        audit$sanityChecks <- sanity$audit
-    }
+    audit <- .qcAudit(
+        sanityChecks = if (length(sanity$audit) > 0L) sanity$audit
+    )
     if (nSanIn > 0L && nrow(df) != nSanIn) {
         .qcEmit(
             lbl,
@@ -4311,13 +4510,20 @@ krigingOutlierQc <- function(
 .qcStepEffectiveN <- function(df, opts, lbl) {
     nRes <- .resolveEffectiveN(df, opts, lbl)
     df <- nRes$df
-    if (
-        isTRUE(is_in(nRes$nSource, c("effective", "total"))) &&
-            is_in("N", colnames(df))
-    ) {
-        opts$nForPip <- stats::median(as.numeric(df$N), na.rm = TRUE)
-    }
-    list(df = df, nSource = nRes$nSource, opts = opts)
+    applied <- isTRUE(is_in(nRes$nSource, c("effective", "total"))) &&
+        is_in("N", colnames(df))
+    list(
+        df = df,
+        nSource = nRes$nSource,
+        opts = list_assign(
+            opts,
+            !!!compact(list(
+                nForPip = if (applied) {
+                    stats::median(as.numeric(df$N), na.rm = TRUE)
+                }
+            ))
+        )
+    )
 }
 
 # Variant-content filters (MAF / INFO / N).
@@ -4330,10 +4536,9 @@ krigingOutlierQc <- function(
         nCutoff = opts$nCutoff
     )
     df <- cf$df
-    audit <- list()
-    if (length(cf$audit) > 0L) {
-        audit$contentFilters <- cf$audit
-    }
+    audit <- .qcAudit(
+        contentFilters = if (length(cf$audit) > 0L) cf$audit
+    )
     if (nFiltIn > 0L && nrow(df) != nFiltIn) {
         .qcEmit(
             lbl,
@@ -4350,110 +4555,283 @@ krigingOutlierQc <- function(
 # Derive BETA/SE from signed Z, then P from Z (re-clamping tiny P).
 .qcStepDerive <- function(df, opts, entryAudit) {
     derived <- .deriveBetaSeFromZ(df)
-    df <- derived$df
-    if (!is.null(derived$audit)) {
-        entryAudit$betaSeFromZ <- derived$audit
+    withBetaSe <- list_assign(
+        entryAudit,
+        !!!compact(list(betaSeFromZ = derived$audit))
+    )
+    if (!is_in("Z", colnames(derived$df)) || is_in("P", colnames(derived$df))) {
+        return(list(df = derived$df, entryAudit = withBetaSe))
     }
-    if (is_in("Z", colnames(df)) && !is_in("P", colnames(df))) {
-        df$P <- .zToPvalue(df$Z)
-        entryAudit$pValueFromZ <- sum(!is.na(df$P))
-        if (isTRUE(opts$clampSmallP) && nrow(df) > 0L) {
-            smallMask <- !is.na(df$P) & df$P >= 0 & df$P < opts$smallPFloor
-            nClamped <- sum(smallMask)
-            if (nClamped > 0L) {
-                df$P[smallMask] <- opts$smallPFloor
-                prev <- entryAudit$sanityChecks$smallPClamped %||% 0L
-                if (is.null(entryAudit$sanityChecks)) {
-                    entryAudit$sanityChecks <- list()
-                }
-                entryAudit$sanityChecks$smallPClamped <- prev + nClamped
-            }
-        }
+    withP <- mutate(derived$df, P = .zToPvalue(.data$Z))
+    clamped <- .qcClampDerivedP(withP, opts)
+    list(
+        df = clamped$df,
+        entryAudit = list_assign(
+            withBetaSe,
+            pValueFromZ = sum(!is.na(withP$P)),
+            !!!compact(list(
+                sanityChecks = .qcAddClampCount(
+                    entryAudit$sanityChecks,
+                    clamped$nClamped
+                )
+            ))
+        )
+    )
+}
+
+# Re-clamp the P values just derived from Z, and report how many moved.
+# @noRd
+.qcClampDerivedP <- function(df, opts) {
+    if (!isTRUE(opts$clampSmallP) || nrow(df) == 0L) {
+        return(list(df = df, nClamped = 0L))
     }
-    list(df = df, entryAudit = entryAudit)
+    smallMask <- !is.na(df$P) & df$P >= 0 & df$P < opts$smallPFloor
+    if (sum(smallMask) == 0L) {
+        return(list(df = df, nClamped = 0L))
+    }
+    list(
+        df = mutate(
+            df,
+            P = replace(.data$P, smallMask, opts$smallPFloor)
+        ),
+        nClamped = sum(smallMask)
+    )
+}
+
+# Fold this step's clamp count into the sanity-check record the earlier
+# per-row checks may already have written. NULL when nothing was clamped, so
+# the caller can drop the key rather than record an empty record.
+# @noRd
+.qcAddClampCount <- function(sanityChecks, nClamped) {
+    if (nClamped == 0L) {
+        return(NULL)
+    }
+    list_assign(
+        sanityChecks %||% list(),
+        smallPClamped = (sanityChecks$smallPClamped %||% 0L) + nClamped
+    )
 }
 
 # keepVariants subset + skipRegion drop.
 .qcStepKeepSkip <- function(df, opts) {
-    audit <- list()
-    if (length(opts$keepVariants) > 0L) {
-        before <- nrow(df)
-        df <- filter(df, is_in(.data$SNP, opts$keepVariants))
-        audit$keepVariantsDropped <- before - nrow(df)
+    nIn <- nrow(df)
+    kept <- if (length(opts$keepVariants) > 0L) {
+        filter(df, is_in(.data$SNP, opts$keepVariants))
+    } else {
+        df
     }
-    if (!is.null(opts$skipRegion) && length(opts$skipRegion) > 0L) {
-        before <- nrow(df)
-        df <- .applySkipRegion(df, opts$skipRegion)
-        audit$skipRegionDropped <- before - nrow(df)
+    nKept <- nrow(kept)
+    skipped <- if (!is.null(opts$skipRegion) && length(opts$skipRegion) > 0L) {
+        .applySkipRegion(kept, opts$skipRegion)
+    } else {
+        kept
     }
-    list(df = df, audit = audit)
+    list(
+        df = skipped,
+        audit = .qcAudit(
+            keepVariantsDropped = if (length(opts$keepVariants) > 0L) {
+                nIn - nKept
+            },
+            skipRegionDropped = if (
+                !is.null(opts$skipRegion) && length(opts$skipRegion) > 0L
+            ) {
+                nKept - nrow(skipped)
+            }
+        )
+    )
 }
 
 # Optional post-harmonization signal screen (PIP / |Z| / BF / logBF).
 .qcStepScreen <- function(df, opts) {
-    audit <- list()
-    if (!is.null(opts$screen)) {
-        scr <- .applyEntryScreen(df, n = opts$nForPip, screen = opts$screen)
-        df <- scr$df
-        audit$pipScreenSkipped <- isTRUE(scr$skipped)
-        if (isTRUE(scr$skipped)) audit$pipScreenReason <- scr$reason
+    if (is.null(opts$screen)) {
+        return(list(df = df, audit = list()))
     }
-    list(df = df, audit = audit)
+    scr <- .applyEntryScreen(df, n = opts$nForPip, screen = opts$screen)
+    list(
+        df = scr$df,
+        audit = c(
+            list(pipScreenSkipped = isTRUE(scr$skipped)),
+            .qcAudit(pipScreenReason = if (isTRUE(scr$skipped)) scr$reason)
+        )
+    )
 }
 
 # Optional RAISS imputation step wrapper (guarded; threads impute counters).
 .qcRaissImputeStep <- function(df, ldSketch, opts, lbl, qcCount) {
-    audit <- list()
-    if (isTRUE(opts$impute) && nrow(df) >= 1L) {
-        imp <- .qcRaissImpute(df, ldSketch, opts, lbl)
-        df <- imp$df
-        audit <- imp$audit
-        qcCount$imputeBefore <- imp$imputeBefore
-        qcCount$imputeAfter <- imp$imputeAfter
+    if (!isTRUE(opts$impute) || nrow(df) < 1L) {
+        return(list(df = df, audit = list(), qcCount = qcCount))
     }
-    list(df = df, audit = audit, qcCount = qcCount)
+    imp <- .qcRaissImpute(df, ldSketch, opts, lbl)
+    list(
+        df = imp$df,
+        audit = imp$audit,
+        qcCount = list_assign(
+            qcCount,
+            imputeBefore = imp$imputeBefore,
+            imputeAfter = imp$imputeAfter
+        )
+    )
 }
 
 # Early return when too few variants survive pre-harmonization QC.
 .qcEarlyExit <- function(df, entryAudit, qcCount, opts, nIn, lbl) {
-    entryAudit$earlyExit <-
-        "fewer than two variants after pre-harmonization QC"
+    withExit <- list_assign(
+        entryAudit,
+        earlyExit = "fewer than two variants after pre-harmonization QC"
+    )
     # Still emit the rollup. An entry that QC empties is precisely the case a
     # user needs told about, and returning early used to make those drops
     # invisible in the log -- the audit recorded them, nothing said so.
-    .qcEmitRollup(entryAudit, qcCount, opts, nIn, nrow(df), lbl)
-    list(gr = .dfToEntryGranges(df), audit = entryAudit)
+    .qcEmitRollup(withExit, qcCount, opts, nIn, nrow(df), lbl)
+    list(gr = .dfToEntryGranges(df), audit = withExit)
+}
+
+# Each QC phase below is (state) -> state, so the sequence reads as a pipeline
+# rather than a run of reassignments. `state` carries df + entryAudit + opts +
+# qcCount + lbl (+ ldSketch for the panel-aware phases); a phase touches only
+# the parts it owns and passes the rest through.
+
+# Per-row sanity checks.
+# @noRd
+.qcPhaseSanity <- function(state) {
+    san <- .qcStepSanity(state$df, state$opts, state$lbl)
+    list_assign(
+        state,
+        df = san$df,
+        entryAudit = list_modify(state$entryAudit, !!!san$audit)
+    )
+}
+
+# Effective-N canonicalization, which also rewrites `opts$nForPip`.
+# @noRd
+.qcPhaseEffectiveN <- function(state) {
+    eff <- .qcStepEffectiveN(state$df, state$opts, state$lbl)
+    list_assign(
+        state,
+        df = eff$df,
+        entryAudit = list_assign(state$entryAudit, nSource = eff$nSource),
+        opts = eff$opts
+    )
+}
+
+# MAF / INFO / N content filters.
+# @noRd
+.qcPhaseContentFilters <- function(state) {
+    cf <- .qcStepContentFilters(state$df, state$opts, state$lbl)
+    list_assign(
+        state,
+        df = cf$df,
+        entryAudit = list_modify(state$entryAudit, !!!cf$audit)
+    )
+}
+
+# BETA/SE from Z, then P from Z. Owns the audit outright (it folds its own
+# clamp count into the sanity record the earlier phase may have written).
+# @noRd
+.qcPhaseDerive <- function(state) {
+    der <- .qcStepDerive(state$df, state$opts, state$entryAudit)
+    list_assign(state, df = der$df, entryAudit = der$entryAudit)
+}
+
+# keepVariants subset + skipRegion drop.
+# @noRd
+.qcPhaseKeepSkip <- function(state) {
+    ks <- .qcStepKeepSkip(state$df, state$opts)
+    list_assign(
+        state,
+        df = ks$df,
+        entryAudit = list_modify(state$entryAudit, !!!ks$audit)
+    )
+}
+
+# Panel-vs-sumstats allele harmonization.
+# @noRd
+.qcPhaseHarmonize <- function(state) {
+    harm <- .qcHarmonizeEntry(
+        state$df,
+        state$ldSketch,
+        state$opts,
+        state$lbl
+    )
+    list_assign(
+        state,
+        df = harm$df,
+        entryAudit = list_modify(state$entryAudit, !!!harm$audit),
+        qcCount = list_modify(state$qcCount, !!!harm$counts)
+    )
+}
+
+# Post-harmonization signal screen.
+# @noRd
+.qcPhaseScreen <- function(state) {
+    scr <- .qcStepScreen(state$df, state$opts)
+    list_assign(
+        state,
+        df = scr$df,
+        entryAudit = list_modify(state$entryAudit, !!!scr$audit)
+    )
+}
+
+# Kriging sign-flips and LD-mismatch QC. One phase, because the mismatch check
+# reads the kriging-corrected frame and the two counts are reported together.
+# @noRd
+.qcPhaseLdChecks <- function(state) {
+    kr <- .qcKrigingFlip(state$df, state$ldSketch, state$opts, state$lbl)
+    mm <- .qcMismatchQc(kr$df, state$ldSketch, state$opts, state$lbl)
+    list_assign(
+        state,
+        df = mm$df,
+        entryAudit = list_modify(
+            list_modify(state$entryAudit, !!!kr$audit),
+            !!!mm$audit
+        ),
+        qcCount = list_assign(
+            state$qcCount,
+            krigingFlipped = kr$count,
+            mismatchRemoved = mm$count
+        )
+    )
+}
+
+# Optional RAISS imputation.
+# @noRd
+.qcPhaseImpute <- function(state) {
+    imp <- .qcRaissImputeStep(
+        state$df,
+        state$ldSketch,
+        state$opts,
+        state$lbl,
+        state$qcCount
+    )
+    list_assign(
+        state,
+        df = imp$df,
+        entryAudit = list_modify(state$entryAudit, !!!imp$audit),
+        qcCount = imp$qcCount
+    )
 }
 
 # Pre-harmonization phase: init + sanity + effective-N + content + derive +
 # keep/skip. Returns the QC state carried into the harmonization phase.
 .qcPreHarmonize <- function(gr, opts, entryLabel) {
     init <- .qcInitEntry(gr, entryLabel)
-    df <- init$df
-    entryAudit <- init$entryAudit
-    lbl <- init$lbl
-    san <- .qcStepSanity(df, opts, lbl)
-    df <- san$df
-    entryAudit <- list_modify(entryAudit, !!!san$audit)
-    eff <- .qcStepEffectiveN(df, opts, lbl)
-    df <- eff$df
-    entryAudit$nSource <- eff$nSource
-    opts <- eff$opts
-    cf <- .qcStepContentFilters(df, opts, lbl)
-    df <- cf$df
-    entryAudit <- list_modify(entryAudit, !!!cf$audit)
-    der <- .qcStepDerive(df, opts, entryAudit)
-    df <- der$df
-    entryAudit <- der$entryAudit
-    ks <- .qcStepKeepSkip(df, opts)
-    df <- ks$df
-    entryAudit <- list_modify(entryAudit, !!!ks$audit)
-    list(
-        df = df,
-        entryAudit = entryAudit,
+    final <- list(
+        df = init$df,
+        entryAudit = init$entryAudit,
         opts = opts,
+        lbl = init$lbl
+    ) |>
+        .qcPhaseSanity() |>
+        .qcPhaseEffectiveN() |>
+        .qcPhaseContentFilters() |>
+        .qcPhaseDerive() |>
+        .qcPhaseKeepSkip()
+    list(
+        df = final$df,
+        entryAudit = final$entryAudit,
+        opts = final$opts,
         qcCount = init$qcCount,
-        lbl = lbl,
+        lbl = final$lbl,
         nStudyIn = init$nStudyIn
     )
 }
@@ -4466,36 +4844,40 @@ krigingOutlierQc <- function(
     entryLabel = NULL
 ) {
     pre <- .qcPreHarmonize(gr, opts, entryLabel)
-    df <- pre$df
-    entryAudit <- pre$entryAudit
-    opts <- pre$opts
-    qcCount <- pre$qcCount
-    lbl <- pre$lbl
-    if (nrow(df) < 2L) {
-        return(.qcEarlyExit(df, entryAudit, qcCount, opts, length(gr), lbl))
+    if (nrow(pre$df) < 2L) {
+        return(.qcEarlyExit(
+            pre$df,
+            pre$entryAudit,
+            pre$qcCount,
+            pre$opts,
+            length(gr),
+            pre$lbl
+        ))
     }
-    harm <- .qcHarmonizeEntry(df, ldSketch, opts, lbl)
-    df <- harm$df
-    entryAudit <- list_modify(entryAudit, !!!harm$audit)
-    qcCount <- list_modify(qcCount, !!!harm$counts)
-    scr <- .qcStepScreen(df, opts)
-    df <- scr$df
-    entryAudit <- list_modify(entryAudit, !!!scr$audit)
-    kr <- .qcKrigingFlip(df, ldSketch, opts, lbl)
-    df <- kr$df
-    entryAudit <- list_modify(entryAudit, !!!kr$audit)
-    qcCount$krigingFlipped <- kr$count
-    mm <- .qcMismatchQc(df, ldSketch, opts, lbl)
-    df <- mm$df
-    entryAudit <- list_modify(entryAudit, !!!mm$audit)
-    qcCount$mismatchRemoved <- mm$count
-    imp <- .qcRaissImputeStep(df, ldSketch, opts, lbl, qcCount)
-    df <- imp$df
-    entryAudit <- list_modify(entryAudit, !!!imp$audit)
-    qcCount <- imp$qcCount
-    .qcEmitRollup(entryAudit, qcCount, opts, pre$nStudyIn, nrow(df), lbl)
-    entryAudit$variantsOut <- nrow(df)
-    list(gr = .dfToEntryGranges(df), audit = entryAudit)
+    final <- list(
+        df = pre$df,
+        entryAudit = pre$entryAudit,
+        qcCount = pre$qcCount,
+        opts = pre$opts,
+        lbl = pre$lbl,
+        ldSketch = ldSketch
+    ) |>
+        .qcPhaseHarmonize() |>
+        .qcPhaseScreen() |>
+        .qcPhaseLdChecks() |>
+        .qcPhaseImpute()
+    .qcEmitRollup(
+        final$entryAudit,
+        final$qcCount,
+        final$opts,
+        pre$nStudyIn,
+        nrow(final$df),
+        final$lbl
+    )
+    list(
+        gr = .dfToEntryGranges(final$df),
+        audit = list_assign(final$entryAudit, variantsOut = nrow(final$df))
+    )
 }
 
 # Shrink an LD-sketch GenotypeHandle to the panel variants inside the summary
@@ -4516,11 +4898,11 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch)) {
         return(NULL)
     }
-    chrom <- unname(list_c(map(entries, .entryChrom)))
-    pos <- unname(list_c(map(entries, .entryPos)))
-    ok <- !is.na(chrom) & !is.na(pos)
-    chrom <- chrom[ok]
-    pos <- pos[ok]
+    chromAll <- unname(list_c(map(entries, .entryChrom)))
+    posAll <- unname(list_c(map(entries, .entryPos)))
+    ok <- !is.na(chromAll) & !is.na(posAll)
+    chrom <- chromAll[ok]
+    pos <- posAll[ok]
     if (length(pos) == 0L) {
         # No span to keep: a zero-variant object references no LD, so the
         # retained panel is empty rather than the full genome-wide sketch.
@@ -4694,43 +5076,41 @@ krigingOutlierQc <- function(
         dropZeroEffect = dropZeroEffect,
         dropNonpositiveSe = dropNonpositiveSe
     )
-    opts$keepVariants <- as.character(keepVariants)
-    opts$screen <- .resolveScreenMetric(
-        pipCutoffToSkip,
-        absZCutoffToSkip,
-        bfCutoffToSkip,
-        logBfCutoffToSkip
+    # nCase / nControl / nForPip are deliberately absent here: they are
+    # per-entry, and `.ssqcEntryOpts()` adds them for the entry being run.
+    list_assign(
+        opts,
+        keepVariants = as.character(keepVariants),
+        screen = .resolveScreenMetric(
+            pipCutoffToSkip,
+            absZCutoffToSkip,
+            bfCutoffToSkip,
+            logBfCutoffToSkip
+        )
     )
-    opts$nCase <- NULL
-    opts$nControl <- NULL
-    opts$nForPip <- NULL
-    opts
 }
 
 # Per-entry sample-size options: median N for PIP, study case/control/total N.
 .ssqcEntryOpts <- function(opts, sumstats, i) {
     mc <- S4Vectors::mcols(.collectionEntry(sumstats, i))
-    opts$nForPip <- if (is_in("N", colnames(mc))) {
-        stats::median(mc$N, na.rm = TRUE)
-    } else {
-        NULL
-    }
-    opts$nCase <- if (is_in("nCase", .tupleColumnNames(sumstats))) {
-        as.numeric(sumstats$nCase)[[i]]
-    } else {
-        NULL
-    }
-    opts$nControl <- if (is_in("nControl", .tupleColumnNames(sumstats))) {
-        as.numeric(sumstats$nControl)[[i]]
-    } else {
-        NULL
-    }
-    opts$nSample <- if (is_in("nSample", .tupleColumnNames(sumstats))) {
-        as.numeric(sumstats$nSample)[[i]]
-    } else {
-        NULL
-    }
-    opts
+    cols <- .tupleColumnNames(sumstats)
+    list_assign(
+        opts,
+        !!!compact(list(
+            nForPip = if (is_in("N", colnames(mc))) {
+                stats::median(mc$N, na.rm = TRUE)
+            },
+            nCase = if (is_in("nCase", cols)) {
+                as.numeric(sumstats$nCase)[[i]]
+            },
+            nControl = if (is_in("nControl", cols)) {
+                as.numeric(sumstats$nControl)[[i]]
+            },
+            nSample = if (is_in("nSample", cols)) {
+                as.numeric(sumstats$nSample)[[i]]
+            }
+        ))
+    )
 }
 
 # Per-entry log label: study/context/trait (QTL) or study (GWAS).
@@ -4779,10 +5159,22 @@ krigingOutlierQc <- function(
     .genotypeExperiment(pruned)
 }
 
+# One entry's QC result: list(gr, audit). `opts` arrives as the shared base
+# options; the per-entry fields are derived here rather than carried over from
+# the previous entry.
+# @noRd
+.ssqcRunEntry <- function(i, sumstats, opts, ldSketch, refGenome, isQtl) {
+    .runEntrySummaryStatsQc(
+        gr = .collectionEntry(sumstats, i),
+        ldSketch = ldSketch,
+        refGenome = refGenome,
+        opts = .ssqcEntryOpts(opts, sumstats, i),
+        entryLabel = .ssqcEntryLabel(sumstats, i, isQtl)
+    )
+}
+
 # Run the per-entry QC pipeline across all entries.
 .ssqcRunEntries <- function(sumstats, opts) {
-    newEntries <- vector("list", nrow(sumstats))
-    entryAudits <- vector("list", nrow(sumstats))
     isQtl <- methods::is(sumstats, "QtlSumStats")
     # Panel filter, once for the shared LD reference and BEFORE any entry is
     # harmonized, so a variant the panel cannot support is gone from the LD
@@ -4793,21 +5185,18 @@ krigingOutlierQc <- function(
         "summaryStatsQc"
     )
     refGenome <- getGenome(sumstats)
-    for (i in seq_len(nrow(sumstats))) {
-        opts <- .ssqcEntryOpts(opts, sumstats, i)
-        result <- .runEntrySummaryStatsQc(
-            gr = .collectionEntry(sumstats, i),
-            ldSketch = ldSketch,
-            refGenome = refGenome,
-            opts = opts,
-            entryLabel = .ssqcEntryLabel(sumstats, i, isQtl)
-        )
-        newEntries[[i]] <- result$gr
-        entryAudits[[i]] <- result$audit
-    }
+    results <- map(
+        seq_len(nrow(sumstats)),
+        .ssqcRunEntry,
+        sumstats = sumstats,
+        opts = opts,
+        ldSketch = ldSketch,
+        refGenome = refGenome,
+        isQtl = isQtl
+    )
     list(
-        newEntries = newEntries,
-        entryAudits = entryAudits,
+        newEntries = map(results, "gr"),
+        entryAudits = map(results, "audit"),
         ldSketch = ldSketch
     )
 }
@@ -5291,10 +5680,7 @@ summaryStatsQc <- function(
     # `variants` column: .ldMergeVariants then reads $variants as character(0)
     # (length 0 -> the block is skipped) instead of hitting an absent column
     # (which a data.frame returned silently as NULL and a tibble warns on).
-    variants <- colnames(ld)
-    if (is.null(variants)) {
-        variants <- character(0)
-    }
+    variants <- colnames(ld) %||% character(0)
     tibble(variants = variants)
 }
 

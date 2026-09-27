@@ -180,7 +180,7 @@ dummy_pheno_data <- function(
         end_matrix <- end_matrix[sample(nrow(end_matrix)), ]
     }
     pheno_data <- t(pheno_data)
-    pheno_data <- lapply(seq_len(ncol(pheno_data)), function(i) {
+    pheno_data <- map(seq_len(ncol(pheno_data)), function(i) {
         pheno_data[, i, drop = FALSE]
     })
     return(pheno_data)
@@ -648,7 +648,7 @@ test_that("invertMinmaxScaling preserves correlation structure", {
     n <- 200
     k <- 3
     # Simulate U = W'G (G is raw, not standardized, matching rss_ld_sketch)
-    G <- sapply(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p))
+    G <- exec(cbind, !!!map(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p)))
     W <- matrix(rnorm(n * n, 0, 1 / sqrt(n)), n, n)
     U_original <- crossprod(W, G)
 

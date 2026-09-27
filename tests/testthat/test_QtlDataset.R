@@ -83,7 +83,7 @@ context("QtlDataset internal helpers")
 ) {
     gh <- .qh_makeHandle(n_samples = n_samples, a1 = a1, a2 = a2)
     pheno <- setNames(
-        lapply(contexts, function(.) .qh_makeSe(n_samples = n_samples)),
+        map(contexts, function(.) .qh_makeSe(n_samples = n_samples)),
         contexts
     )
     if (is.null(geno_cov)) {
@@ -986,7 +986,7 @@ context("QtlDataset residualization methods")
 ) {
     gh <- .qr_makeHandle(n_samples = n_samples)
     pheno <- setNames(
-        lapply(contexts, function(.) .qr_makeSe(n_samples = n_samples)),
+        map(contexts, function(.) .qr_makeSe(n_samples = n_samples)),
         contexts
     )
     if (is.null(geno_cov)) {

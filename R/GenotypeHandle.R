@@ -49,36 +49,27 @@ setClass(
         chromPaths = character(0)
     ),
     validity = function(object) {
-        errors <- character()
-        if (length(object@path) != 1L) {
-            errors <- c(errors, "'path' must be a single character string")
-        }
-        valid_formats <- c("gds", "vcf", "plink1", "plink2")
-        if (!is_in(object@format, valid_formats)) {
-            errors <- c(
-                errors,
+        validFormats <- c("gds", "vcf", "plink1", "plink2")
+        nm <- names(object@chromPaths)
+        badChromPaths <- length(object@chromPaths) > 0L &&
+            (is.null(nm) || any(str_length(nm) == 0L) || anyDuplicated(nm))
+        errors <- c(
+            if (length(object@path) != 1L) {
+                "'path' must be a single character string"
+            },
+            if (!is_in(object@format, validFormats)) {
                 str_c(
                     "'format' must be one of: ",
-                    str_flatten(valid_formats, ", ")
+                    str_flatten(validFormats, ", ")
                 )
-            )
-        }
-        if (length(object@chromPaths) > 0L) {
-            nm <- names(object@chromPaths)
-            if (
-                is.null(nm) ||
-                    any(str_length(nm) == 0L) ||
-                    anyDuplicated(nm)
-            ) {
-                errors <- c(
-                    errors,
-                    str_c(
-                        "'chromPaths' must be a uniquely-named ",
-                        "character vector (names = chromosomes)"
-                    )
+            },
+            if (badChromPaths) {
+                str_c(
+                    "'chromPaths' must be a uniquely-named ",
+                    "character vector (names = chromosomes)"
                 )
             }
-        }
+        )
         if (length(errors) == 0) TRUE else errors
     }
 )
@@ -614,10 +605,10 @@ GenotypeHandle <- function(
             "GenotypeHandle(genoMeta): no chromosomes found in the meta input."
         )
     }
-    parsed <- .chromMetaSelect(parsed, chroms)
-    shards <- map(parsed$path, .resolveGenotypeShard, format = format)
+    selected <- .chromMetaSelect(parsed, chroms)
+    shards <- map(selected$path, .resolveGenotypeShard, format = format)
     sharedFormat <- .chromMetaCheckFormats(shards)
-    .chromMetaCheckSamples(shards, parsed)
+    .chromMetaCheckSamples(shards, selected)
     unifiedSnpInfo <- bind_rows(map(shards, .ghSnpInfo))
     new(
         "GenotypeHandle",
@@ -680,23 +671,36 @@ GenotypeHandle <- function(
     invisible(NULL)
 }
 
+# One shard's chromosome -> path mapping.
+# @noRd
+.chromShardPaths <- function(shard) {
+    chroms <- unique(canonChrom(getSnpInfo(shard)$CHR))
+    set_names(rep(getPath(shard), length(chroms)), chroms)
+}
+
+# A chromosome may only come from one file; two shards claiming it means the
+# panel is not split cleanly per chromosome.
+# @noRd
+.checkChromNotSplit <- function(ch, count) {
+    if (count <= 1L) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "GenotypeHandle(genoMeta): chromosome '{ch}' appears ",
+        "in more than one per-chromosome file."
+    )
+    abort(msg)
+}
+
 # Map each chromosome to its shard path, erroring if a chromosome spans files.
-# (Sequential uniqueness accumulation -- kept as a loop.)
 # @noRd
 .chromMetaPaths <- function(shards) {
-    chromPaths <- character(0)
-    for (i in seq_along(shards)) {
-        for (ch in unique(canonChrom(getSnpInfo(shards[[i]])$CHR))) {
-            if (is_in(ch, names(chromPaths))) {
-                msg <- glue(
-                    "GenotypeHandle(genoMeta): chromosome '{ch}' appears ",
-                    "in more than one per-chromosome file."
-                )
-                abort(msg)
-            }
-            chromPaths[[ch]] <- getPath(shards[[i]])
-        }
+    if (length(shards) == 0L) {
+        return(character(0))
     }
+    chromPaths <- list_c(map(shards, .chromShardPaths))
+    counts <- table(names(chromPaths))
+    walk2(names(counts), as.integer(counts), .checkChromNotSplit)
     chromPaths
 }
 

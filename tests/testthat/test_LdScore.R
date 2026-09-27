@@ -133,7 +133,7 @@ test_that("buildLdScore computes per-block sums of r^2", {
 test_that("buildLdScore scores each block against only its own variants", {
     ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
     scores <- as.vector(getLdScores(buildLdScore(ld))[, 1])
-    perBlock <- unlist(lapply(getCorrelation(ld), function(R) rowSums(R^2)))
+    perBlock <- unlist(map(getCorrelation(ld), function(R) rowSums(R^2)))
 
     expect_equal(length(scores), 7L)
     expect_equal(scores, perBlock)

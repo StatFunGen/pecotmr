@@ -30,13 +30,21 @@
     # getTopLoci frame (study/context/trait/method) that carries no
     # variant_id; restore the join key so the empty join still resolves
     # instead of erroring in inner_join()'s `by` check.
-    if (!is_in("variant_id", names(qp))) {
-        qp$variant_id <- character(0)
+    inner_join(
+        .overlapWithJoinKey(qp),
+        .overlapWithJoinKey(gp),
+        by = "variant_id"
+    )
+}
+
+# The join key, restored as an empty column when the frame carries no signal
+# and so never got one.
+# @noRd
+.overlapWithJoinKey <- function(tl) {
+    if (is_in("variant_id", names(tl))) {
+        return(tl)
     }
-    if (!is_in("variant_id", names(gp))) {
-        gp$variant_id <- character(0)
-    }
-    inner_join(qp, gp, by = "variant_id")
+    mutate(tl, variant_id = character(0))
 }
 
 # Convert the merged frame to the requested output type.
@@ -158,20 +166,32 @@ setMethod(
 # helper columns.
 # @noRd
 .overlapRelabelGwas <- function(gwasTl, vmap, coordCols) {
-    g <- inner_join(gwasTl, vmap, by = c("variant_id" = "gwas_vid"))
+    joined <- inner_join(gwasTl, vmap, by = c("variant_id" = "gwas_vid"))
     signedCols <- c("beta", "z", "conditional_effect")
     # Bound with partial() rather than across()'s deprecated `...`; the local
     # matters because partial() resolves it lazily (see .negateWhere et al).
-    rowSign <- g$.sign
-    g <- mutate(
-        g,
+    rowSign <- joined$.sign
+    signed <- mutate(
+        joined,
         across(any_of(signedCols), partial(.overlapApplySign, sign = rowSign))
     )
-    if (is_in("af", names(g))) {
-        g$af <- if_else(g$.sign < 0 & !is.na(g$af), 1 - g$af, g$af)
-    }
-    g$variant_id <- g$canon_vid
-    select(g, all_of(setdiff(names(g), c(coordCols, "canon_vid", ".sign"))))
+    relabelled <- mutate(
+        signed,
+        !!!compact(list(
+            af = if (is_in("af", names(signed))) {
+                if_else(
+                    signed$.sign < 0 & !is.na(signed$af),
+                    1 - signed$af,
+                    signed$af
+                )
+            }
+        )),
+        variant_id = .data$canon_vid
+    )
+    select(
+        relabelled,
+        all_of(setdiff(names(relabelled), c(coordCols, "canon_vid", ".sign")))
+    )
 }
 
 # Build a GRanges from an overlap table: variants as width-1 ranges, all other
@@ -186,6 +206,8 @@ setMethod(
         seqnames = str_c("chr", p$chrom),
         ranges = IRanges::IRanges(start = p$pos, width = 1L)
     )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(df, check.names = FALSE)
-    gr
+    S4Vectors::`mcols<-`(
+        gr,
+        value = S4Vectors::DataFrame(df, check.names = FALSE)
+    )
 }

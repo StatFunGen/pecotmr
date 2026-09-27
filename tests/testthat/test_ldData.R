@@ -153,7 +153,7 @@ test_that("getCorrelation: mixture handles produce a weighted-average R", {
         },
         .package = "pecotmr"
     )
-    R_each <- lapply(list(gh1, gh2), function(h) {
+    R_each <- map(list(gh1, gh2), function(h) {
         geno <- extractBlockGenotypes(h, 1:4)
         Xt <- t(SummarizedExperiment::assay(geno, "dosage"))
         computeLd(Xt, method = "sample")

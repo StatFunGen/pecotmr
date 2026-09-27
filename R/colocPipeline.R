@@ -188,15 +188,15 @@ colocPipeline <- function(
         enrichment = enrichment,
         useEnrichment = useEnrichment
     )
-    gwasFmr <- .colocResolveGwasFmr(gwasInput, finemappingMethods)
+    rawGwasFmr <- .colocResolveGwasFmr(gwasInput, finemappingMethods)
     .colocRequireMatchingLdSketches(
         getLdSketch(qtlFineMappingResult),
-        getLdSketch(gwasFmr)
+        getLdSketch(rawGwasFmr)
     )
     adjusted <- .colocMaybeAdjustPips(
         adjustPips = adjustPips,
         qtlFineMappingResult = qtlFineMappingResult,
-        gwasFmr = gwasFmr
+        gwasFmr = rawGwasFmr
     )
     qtlFineMappingResult <- adjusted$qtlFineMappingResult
     gwasFmr <- adjusted$gwasFmr
@@ -392,10 +392,7 @@ colocPipeline <- function(
         enriched = useEnrichment,
         ldSketch = .colocLdSketch(qtlFineMappingResult, gwasFmr)
     )
-    if (returnGwasFineMapping && methods::is(gwasInput, "SumStatsBase")) {
-        attr(out, "gwasFineMapping") <- gwasFmr
-    }
-    out
+    .colocAttachGwasFm(out, returnGwasFineMapping, gwasInput, gwasFmr)
 }
 
 # Score one QTL tuple against every pre-extracted GWAS pair -> summary rows.
@@ -429,13 +426,16 @@ colocPipeline <- function(
     if (is.null(qLbfInfo)) {
         return(list())
     }
-    q$retainedMass <- qLbfInfo$retainedMass
-    q$effect <- qLbfInfo$effect
+    scored <- list_assign(
+        q,
+        retainedMass = qLbfInfo$retainedMass,
+        effect = qLbfInfo$effect
+    )
     compact(map(
         gwasLbfByPair,
         .colocScorePairAt,
         qLbfInfo = qLbfInfo,
-        q = q,
+        q = scored,
         useEnrichment = useEnrichment,
         enrichment = enrichment,
         p12 = p12,
@@ -539,15 +539,15 @@ colocPipeline <- function(
     if (!useEnrichment) {
         return(list(enRow = NA_real_, p12Used = p12))
     }
-    enRow <- .colocLookupEnrichment(enrichment, gInfo, q)
-    if (is.na(enRow)) {
+    looked <- .colocLookupEnrichment(enrichment, gInfo, q)
+    enRow <- if (is.na(looked)) 0 else looked
+    if (is.na(looked)) {
         msg <- glue(
             "colocPipeline: no enrichment entry for ",
             "(gwasStudy='{gInfo$study}', qtlStudy='{q$study}', ",
             "qtlContext='{q$context}'); using baseline p12."
         )
         warn(msg)
-        enRow <- 0
     }
     list(enRow = enRow, p12Used = min(p12 * (1 + enRow), p12Max))
 }
@@ -579,6 +579,19 @@ colocPipeline <- function(
     )
 }
 
+# The enrichment columns, present only when the pipeline used an enrichment
+# table. A NULL `p12Info` carries the zero-row schema an empty result needs.
+# @noRd
+.colocEnrichmentCols <- function(useEnrichment, p12Info) {
+    if (!useEnrichment) {
+        return(list())
+    }
+    if (is.null(p12Info)) {
+        return(list(enrichment = numeric(0), p12Used = numeric(0)))
+    }
+    list(enrichment = p12Info$enRow, p12Used = p12Info$p12Used)
+}
+
 # Build a coloc summary row carrying the QTL / GWAS identity + enrichment.
 # @noRd
 .colocSummaryRow <- function(
@@ -588,51 +601,51 @@ colocPipeline <- function(
     useEnrichment,
     p12Info
 ) {
-    sm <- as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
-    sm <- .colocRenameNsnps(sm)
-    sm$study <- q$study
-    sm$context <- q$context
-    sm$trait <- q$trait
-    sm$method <- q$method
-    sm$gwasStudy <- gInfo$study
-    sm$gwasContext <- gInfo$context
-    sm$gwasTrait <- gInfo$trait
-    sm$gwasMethod <- gInfo$method
-    # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is exactly
-    # what retainedMass runs parallel to -- so the mass reported here is the
-    # mass of the two effects this row actually scores, not a per-entry
-    # average.
-    sm$qtlRetainedMass <- .colocPickAt(
-        q$retainedMass,
-        sm[["idx1"]],
-        nrow(sm)
+    sm <- .colocRenameNsnps(
+        as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
     )
-    sm$gwasRetainedMass <- .colocPickAt(
-        gInfo$retainedMass,
-        sm[["idx2"]],
-        nrow(sm)
+    mutate(
+        sm,
+        study = q$study,
+        context = q$context,
+        trait = q$trait,
+        method = q$method,
+        gwasStudy = gInfo$study,
+        gwasContext = gInfo$context,
+        gwasTrait = gInfo$trait,
+        gwasMethod = gInfo$method,
+        # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is
+        # exactly what retainedMass runs parallel to -- so the mass reported
+        # here is the mass of the two effects this row actually scores, not a
+        # per-entry average.
+        qtlRetainedMass = .colocPickAt(
+            q$retainedMass,
+            sm[["idx1"]],
+            nrow(sm)
+        ),
+        gwasRetainedMass = .colocPickAt(
+            gInfo$retainedMass,
+            sm[["idx2"]],
+            nrow(sm)
+        ),
+        # coloc's idx1 / idx2 number the rows of THIS call, so they are not
+        # comparable across blocks. The fit's own effect indices are, and they
+        # are what the credible-set and gene views group on.
+        qtlCs = .colocPickAt(
+            q$effect,
+            sm[["idx1"]],
+            nrow(sm),
+            fill = NA_integer_
+        ),
+        gwasCs = .colocPickAt(
+            gInfo$effect,
+            sm[["idx2"]],
+            nrow(sm),
+            fill = NA_integer_
+        ),
+        blockId = gInfo$blockId %||% NA_character_,
+        !!!.colocEnrichmentCols(useEnrichment, p12Info)
     )
-    # coloc's idx1 / idx2 number the rows of THIS call, so they are not
-    # comparable across blocks. The fit's own effect indices are, and they are
-    # what the credible-set and gene views group on.
-    sm$qtlCs <- .colocPickAt(
-        q$effect,
-        sm[["idx1"]],
-        nrow(sm),
-        fill = NA_integer_
-    )
-    sm$gwasCs <- .colocPickAt(
-        gInfo$effect,
-        sm[["idx2"]],
-        nrow(sm),
-        fill = NA_integer_
-    )
-    sm$blockId <- gInfo$blockId %||% NA_character_
-    if (useEnrichment) {
-        sm$enrichment <- p12Info$enRow
-        sm$p12Used <- p12Info$p12Used
-    }
-    sm
 }
 
 # Assemble the result table + attach the GWAS fine-mapping when requested.
@@ -650,10 +663,17 @@ colocPipeline <- function(
         useEnrichment,
         .colocLdSketch(qtlFineMappingResult, gwasFmr)
     )
-    if (returnGwasFineMapping && methods::is(gwasInput, "SumStatsBase")) {
-        attr(out, "gwasFineMapping") <- gwasFmr
+    .colocAttachGwasFm(out, returnGwasFineMapping, gwasInput, gwasFmr)
+}
+
+# The GWAS fine-mapping the pipeline produced, carried back on the result when
+# the caller asked for it and the GWAS side was fine-mapped here.
+# @noRd
+.colocAttachGwasFm <- function(out, returnGwasFineMapping, gwasInput, gwasFmr) {
+    if (!returnGwasFineMapping || !methods::is(gwasInput, "SumStatsBase")) {
+        return(out)
     }
-    out
+    `attr<-`(out, "gwasFineMapping", gwasFmr)
 }
 
 # Row-bind + column-order the per-pair summary rows (empty result when none).
@@ -681,11 +701,9 @@ colocPipeline <- function(
         "gwasMethod",
         "blockId",
         "qtlCs",
-        "gwasCs"
+        "gwasCs",
+        if (useEnrichment) c("enrichment", "p12Used")
     )
-    if (useEnrichment) {
-        idCols <- c(idCols, "enrichment", "p12Used")
-    }
     select(out, all_of(idCols), everything())
 }
 
@@ -718,8 +736,9 @@ colocPipeline <- function(
     coverage = 0.5,
     concentration = 0.5
 ) {
-    fit$V <- NULL # disable V-based filtering inside susie_get_cs
-    csList <- susie_get_cs(fit, coverage = coverage, dedup = FALSE)
+    # V zapped to disable V-based filtering inside susie_get_cs
+    unfiltered <- list_modify(fit, V = zap())
+    csList <- susie_get_cs(unfiltered, coverage = coverage, dedup = FALSE)
     totalVariants <- ncol(fit$alpha)
     maxSize <- totalVariants * coverage * concentration
     keep <- map_lgl(csList$cs, .colocCsUnderMax, maxSize = maxSize)
@@ -749,25 +768,25 @@ colocPipeline <- function(
         warn(msg)
         return(NULL)
     }
-    lbfMatrix <- .colocLbfMatrix(fit, label)
-    if (is.null(lbfMatrix)) {
+    allRows <- .colocLbfMatrix(fit, label)
+    if (is.null(allRows)) {
         return(NULL)
     }
-    mass <- .colocEffectRetainedMass(fit, nrow(lbfMatrix))
+    allMass <- .colocEffectRetainedMass(fit, nrow(allRows))
     keep <- .colocSelectLbfRows(
-        lbfMatrix,
+        allRows,
         fit,
         filterLbfCs,
         filterLbfCsSecondary,
         filterLbfCsConcentration,
         priorTol
     )
-    lbfMatrix <- lbfMatrix[keep, , drop = FALSE]
-    mass <- mass[keep]
-    if (nrow(lbfMatrix) == 0L) {
+    kept <- allRows[keep, , drop = FALSE]
+    mass <- allMass[keep]
+    if (nrow(kept) == 0L) {
         return(NULL)
     }
-    lbfMatrix <- .colocAssignLbfColnames(lbfMatrix, parts)
+    lbfMatrix <- .colocAssignLbfColnames(kept, parts)
     if (ncol(lbfMatrix) == 0L) {
         return(NULL)
     }
@@ -878,17 +897,25 @@ colocPipeline <- function(
     as.numeric(mass)
 }
 
+# The entry's variant ids, when the matrix does not already name its columns.
+# @noRd
+.colocLbfNamesFrom <- function(lbfMatrix, parts) {
+    if (!is.null(colnames(lbfMatrix)) && !any(is.na(colnames(lbfMatrix)))) {
+        return(lbfMatrix)
+    }
+    vids <- .fmrPartsVariantIds(parts)
+    if (length(vids) != ncol(lbfMatrix)) {
+        return(lbfMatrix)
+    }
+    `colnames<-`(lbfMatrix, vids)
+}
+
 # Assign variant-id column names (fit-provided, else the row's rendered
 # variant ids) and drop columns with an NA id.
 # @noRd
 .colocAssignLbfColnames <- function(lbfMatrix, parts) {
-    if (is.null(colnames(lbfMatrix)) || any(is.na(colnames(lbfMatrix)))) {
-        vids <- .fmrPartsVariantIds(parts)
-        if (length(vids) == ncol(lbfMatrix)) {
-            colnames(lbfMatrix) <- vids
-        }
-    }
-    lbfMatrix[, !is.na(colnames(lbfMatrix)), drop = FALSE]
+    named <- .colocLbfNamesFrom(lbfMatrix, parts)
+    named[, !is.na(colnames(named)), drop = FALSE]
 }
 
 # The second side's LBF matrices, one record per row of the collection, each
@@ -994,10 +1021,8 @@ colocPipeline <- function(
     # Relabel both matrices to one shared id so coloc.bf_bf sees identical
     # names.
     sharedIds <- gids[m$idxB]
-    qSub <- qtlLbf[, m$idxA, drop = FALSE]
-    gSub <- gwasLbf[, m$idxB, drop = FALSE]
-    colnames(qSub) <- sharedIds
-    colnames(gSub) <- sharedIds
+    qSub <- `colnames<-`(qtlLbf[, m$idxA, drop = FALSE], sharedIds)
+    gSub <- `colnames<-`(gwasLbf[, m$idxB, drop = FALSE], sharedIds)
     list(qtl = qSub, gwas = gSub)
 }
 
@@ -1029,11 +1054,11 @@ colocPipeline <- function(
         qtlRetainedMass = numeric(0),
         gwasRetainedMass = numeric(0)
     )
-    if (enriched) {
-        base$enrichment <- numeric(0)
-        base$p12Used <- numeric(0)
-    }
-    ColocResult(base, list(), ldSketch = ldSketch)
+    ColocResult(
+        mutate(base, !!!.colocEnrichmentCols(enriched, NULL)),
+        list(),
+        ldSketch = ldSketch
+    )
 }
 
 # Look up this pair's enrichment factor in the user-supplied enrichment table.
@@ -1089,19 +1114,25 @@ colocPipeline <- function(
 # shape.
 # @noRd
 .colocStandardiseRow <- function(sm) {
-    for (col in c(
-        "idx1",
-        "idx2",
-        "nSnps",
-        "PP.H0.abf",
-        "PP.H1.abf",
-        "PP.H2.abf",
-        "PP.H3.abf",
-        "PP.H4.abf"
-    )) {
-        if (!is_in(col, colnames(sm))) sm[[col]] <- NA
-    }
-    sm
+    missing <- setdiff(
+        c(
+            "idx1",
+            "idx2",
+            "nSnps",
+            "PP.H0.abf",
+            "PP.H1.abf",
+            "PP.H2.abf",
+            "PP.H3.abf",
+            "PP.H4.abf"
+        ),
+        colnames(sm)
+    )
+    mutate(sm, !!!set_names(map(missing, .colocMissingColumn), missing))
+}
+
+# @noRd
+.colocMissingColumn <- function(col) {
+    NA
 }
 
 # coloc.bf_bf names the aligned-variant count `nsnps`; this package publishes
@@ -1124,9 +1155,7 @@ colocPipeline <- function(
     }
     idx <- as.integer(idx)
     ok <- !is.na(idx) & idx >= 1L & idx <= length(values)
-    out <- rep(fill, length(idx))
-    out[ok] <- values[idx[ok]]
-    out
+    replace(rep(fill, length(idx)), ok, values[idx[ok]])
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------

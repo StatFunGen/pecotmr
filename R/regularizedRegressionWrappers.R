@@ -195,7 +195,7 @@ prsCs <- function(
 #'   n = rep(nrow(X), ncol(X))
 #' )
 #' LD <- cor(X)
-#' prsCsWeights(stat, LD, maf = rep(0.3, ncol(X)))
+#' prsCsWeights(stat, LD, methodArgs = list(maf = rep(0.3, ncol(X))))
 #' @export
 prsCsWeights <- function(stat, LD, methodArgs = list()) {
     callArgs <- list_modify(
@@ -477,16 +477,28 @@ mrmashWeights <- function(
         return(weights)
     }
     fitDetail <- arg_match(fitDetail)
-    fitList <- list(
-        dataDrivenPriorMatrices = dataDrivenPriorMatrices,
-        w0 = fit$w0,
-        V = fit$V
+    fitList <- c(
+        list(
+            dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+            w0 = fit$w0,
+            V = fit$V
+        ),
+        compact(list(fit = if (fitDetail == "full") fit))
     )
-    if (fitDetail == "full") {
-        fitList$fit <- fit
+    `attr<-`(weights, "fit", fitList)
+}
+
+# The `beta.init` override for mr.ash: lasso weights when the caller supplied
+# none, or the caller's own initialisation restricted to the retained columns.
+# @noRd
+.mrashBetaInit <- function(methodArgs, XKeep, y, X, keep) {
+    if (!is_in("beta.init", names(methodArgs))) {
+        return(list(beta.init = lassoWeights(XKeep, y)))
     }
-    attr(weights, "fit") <- fitList
-    weights
+    if (length(methodArgs$beta.init) != ncol(X)) {
+        return(list())
+    }
+    list(beta.init = methodArgs$beta.init[keep])
 }
 
 #' Compute mr.mash-RSS TWAS weights from summary statistics
@@ -748,8 +760,7 @@ glmnetWeights <- function(X, y, alpha) {
         intercept = TRUE,
         standardize = FALSE
     )
-    eff.wgt[keep] <- coef(enet, s = "lambda.min")[2:(sum(keep) + 1)]
-    return(eff.wgt)
+    replace(eff.wgt, keep, coef(enet, s = "lambda.min")[2:(sum(keep) + 1)])
 }
 
 #' Compute TWAS weights via elastic net (glmnet, alpha = 0.5)
@@ -813,15 +824,12 @@ mrashWeights <- function(
 ) {
     assertFlag(initPriorSd)
     assertFlag(retainFit)
-    eff.wgt <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "mrashWeights")
     XKeep <- X[, keep, drop = FALSE]
-    argsList <- methodArgs
-    if (!is_in("beta.init", names(argsList))) {
-        argsList$beta.init <- lassoWeights(XKeep, y)
-    } else if (length(argsList$beta.init) == ncol(X)) {
-        argsList$beta.init <- argsList$beta.init[keep]
-    }
+    argsList <- list_assign(
+        methodArgs,
+        !!!.mrashBetaInit(methodArgs, XKeep, y, X, keep)
+    )
     mrashArgs <- c(
         list(
             X = XKeep,
@@ -831,11 +839,16 @@ mrashWeights <- function(
         argsList
     )
     fit.mr.ash <- exec(mr.ash, !!!mrashArgs)
-    eff.wgt[keep] <- predict(fit.mr.ash, type = "coefficients")[-1]
-    if (retainFit) {
-        attr(eff.wgt, "fit") <- fit.mr.ash
+    # Zero-variance columns were never fitted and keep a zero weight.
+    eff.wgt <- replace(
+        rep(0, ncol(X)),
+        keep,
+        predict(fit.mr.ash, type = "coefficients")[-1]
+    )
+    if (!retainFit) {
+        return(eff.wgt)
     }
-    return(eff.wgt)
+    `attr<-`(eff.wgt, "fit", fit.mr.ash)
 }
 #' Extract Coefficients From Bayesian Linear Regression
 #'
@@ -901,9 +914,7 @@ bayesAlphabetWeights <- function(
         !!!methodArgs
     )
     model <- exec(qgg::gbayes, !!!callArgs)
-
-    eff.wgt[keep] <- model$bm
-    return(eff.wgt)
+    replace(eff.wgt, keep, model$bm)
 }
 
 # Shared input validation for the gbayes-backed weight fitters: qgg present,
@@ -1556,9 +1567,12 @@ lassosumRss <- function(
     ldBeta <- LD %*% candidateBeta
     bxy <- as.numeric(crossprod(corInput, candidateBeta))
     bxxb <- colSums(candidateBeta * ldBeta)
-    scores <- rep(-Inf, length(bxy))
     positive <- is.finite(bxxb) & bxxb > 0
-    scores[positive] <- bxy[positive] / sqrt(bxxb[positive])
+    scores <- replace(
+        rep(-Inf, length(bxy)),
+        positive,
+        bxy[positive] / sqrt(bxxb[positive])
+    )
     idx <- .lassosumFirstMax(scores)
     list(
         beta = candidateBeta[, idx],
@@ -1598,17 +1612,21 @@ lassosumRss <- function(
     # `solveArgs` rather than `...`: the two solvers take different fixed
     # argument sets, and both callers know theirs statically, so an unknown
     # solver argument should be an error here rather than reaching the solver.
-    result <- exec(solveFn, z, lambda[order], R, !!!solveArgs)
+    solved <- exec(solveFn, z, lambda[order], R, !!!solveArgs)
     # Reorder back to original lambda order via the inverse permutation.
     invOrder <- order(order)
-    result$beta <- result$beta[, invOrder, drop = FALSE]
-    result$conv <- result$conv[invOrder]
-    result$loss <- result$loss[invOrder]
-    result$fbeta <- result$fbeta[invOrder]
-    result$lambda <- lambda
-    result$nparams <- as.integer(colSums(result$beta != 0))
-    result$betaEst <- as.numeric(result$beta[, which.min(result$fbeta)])
-    result
+    beta <- solved$beta[, invOrder, drop = FALSE]
+    fbeta <- solved$fbeta[invOrder]
+    list_assign(
+        solved,
+        beta = beta,
+        conv = solved$conv[invOrder],
+        loss = solved$loss[invOrder],
+        fbeta = fbeta,
+        lambda = lambda,
+        nparams = as.integer(colSums(beta != 0)),
+        betaEst = as.numeric(beta[, which.min(fbeta)])
+    )
 }
 
 # Per-`s` fit for one RSS method (`method` selects the solver + which `config`
@@ -1687,14 +1705,7 @@ lassosumRss <- function(
 # @noRd
 .rssFinalize <- function(method, bestBeta, sel, meta, config) {
     base <- c(mode = sel$mode, index = sel$index)
-    attr(
-        bestBeta,
-        if (method == "lassosum") {
-            "lassosum_selection"
-        } else {
-            "penalized_rss_selection"
-        }
-    ) <- switch(
+    selection <- switch(
         method,
         lassosum = c(
             base,
@@ -1715,7 +1726,12 @@ lassosumRss <- function(
             lambda = meta$lambda[sel$index]
         )
     )
-    bestBeta
+    attrName <- if (method == "lassosum") {
+        "lassosum_selection"
+    } else {
+        "penalized_rss_selection"
+    }
+    `attr<-`(bestBeta, attrName, selection)
 }
 
 # Shared scaffold for the RSS shrinkage-grid weight functions
@@ -1724,6 +1740,19 @@ lassosumRss <- function(
 # candidate accumulation, and the ldQuadratic / minFbeta selection. `method` +
 # `config` pick the per-`s` solver (.rssFitOne) and the finalizer
 # (.rssFinalize).
+# One shrinkage level's fit against the correspondingly shrunk LD.
+# @noRd
+.rssFitAtS <- function(sVal, method, solverInput, LD, n, p, config) {
+    .rssFitOne(
+        method,
+        solverInput,
+        (1 - sVal) * LD + sVal * diag(p),
+        n,
+        sVal,
+        config
+    )
+}
+
 .rssShrinkGridWeights <- function(
     stat,
     LD,
@@ -1737,15 +1766,18 @@ lassosumRss <- function(
     p <- nrow(LD)
     corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
     solverInput <- corInput * sqrt(n)
-    candidateBeta <- NULL
-    candidateMeta <- list()
-    for (sVal in s) {
-        LDs <- (1 - sVal) * LD + sVal * diag(p)
-        one <- .rssFitOne(method, solverInput, LDs, n, sVal, config)
-        candidateBeta <- cbind(candidateBeta, one$beta)
-        candidateMeta[[length(candidateMeta) + 1L]] <- one$meta
-    }
-    candidateMeta <- bind_rows(candidateMeta)
+    fits <- map(
+        s,
+        .rssFitAtS,
+        method = method,
+        solverInput = solverInput,
+        LD = LD,
+        n = n,
+        p = p,
+        config = config
+    )
+    candidateBeta <- exec(cbind, !!!map(fits, "beta"))
+    candidateMeta <- bind_rows(map(fits, "meta"))
     selectorResult <- if (selection == "ldQuadratic") {
         .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
     } else {
@@ -2195,8 +2227,7 @@ ncvregWeights <- function(X, y, penalty, nfolds = 5, methodArgs = list()) {
         !!!methodArgs
     )
     fit <- exec(ncvreg::cv.ncvreg, !!!callArgs)
-    eff.wgt[keep] <- coef(fit, lambda = fit$lambda.min)[-1]
-    return(eff.wgt)
+    replace(eff.wgt, keep, coef(fit, lambda = fit$lambda.min)[-1])
 }
 
 #' Compute Weights Using SCAD-Penalized Regression
@@ -2304,13 +2335,10 @@ l0learnWeights <- function(
     lambdaIdx <- which.min(as.numeric(fit$cvMeans[[gammaIdx]]))
     bestGamma <- fit$fit$gamma[gammaIdx]
     bestLambda <- fit$fit$lambda[[gammaIdx]][lambdaIdx]
-    coefs <- as.numeric(coef(fit, lambda = bestLambda, gamma = bestGamma))
+    raw <- as.numeric(coef(fit, lambda = bestLambda, gamma = bestGamma))
     # If intercept was included, drop it (first row).
-    if (length(coefs) == sum(keep) + 1L) {
-        coefs <- coefs[-1L]
-    }
-    eff.wgt[keep] <- coefs
-    return(eff.wgt)
+    coefs <- if (length(raw) == sum(keep) + 1L) raw[-1L] else raw
+    replace(eff.wgt, keep, coefs)
 }
 
 #' Compute Weights Using a BGLR Linear Regression Model
@@ -2368,8 +2396,7 @@ bglrWeights <- function(
         !!!methodArgs
     )
     fit <- exec(BGLR::BGLR, !!!callArgs)
-    eff.wgt[keep] <- as.numeric(fit$ETA[[1]]$b)
-    return(eff.wgt)
+    replace(eff.wgt, keep, as.numeric(fit$ETA[[1]]$b))
 }
 
 #' Compute Weights Using BayesB
@@ -2516,7 +2543,7 @@ dprWeights <- function(
     if (!requireNamespace("RcppDPR", quietly = TRUE)) {
         abort("Package 'RcppDPR' is required for this function.")
     }
-    eff.wgt <- rep(0, ncol(X))
+    zeros <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "dprWeights")
     w <- matrix(1, nrow = nrow(X), ncol = 1)
     callArgs <- list_modify(
@@ -2530,11 +2557,11 @@ dprWeights <- function(
         !!!methodArgs
     )
     fit <- exec(RcppDPR::fit_model, !!!callArgs)
-    eff.wgt[keep] <- as.numeric(fit$beta + fit$alpha)
-    if (retainFit) {
-        attr(eff.wgt, "fit") <- fit
+    eff.wgt <- replace(zeros, keep, as.numeric(fit$beta + fit$alpha))
+    if (!retainFit) {
+        return(eff.wgt)
     }
-    return(eff.wgt)
+    `attr<-`(eff.wgt, "fit", fit)
 }
 
 #' @rdname dprWeights
@@ -2752,8 +2779,10 @@ mrmashWrapper <- function(
         w0Threshold = w0Threshold,
         nthreads = nthreads
     )
-    fitMrmash$analysis_time <- proc.time()["elapsed"] - time1["elapsed"]
-    fitMrmash
+    list_assign(
+        fitMrmash,
+        analysis_time = proc.time()["elapsed"] - time1["elapsed"]
+    )
 }
 
 # Require glmnet + mr.mashr; also emit the no-seed reproducibility message.
@@ -2924,6 +2953,11 @@ mrmashWrapper <- function(
     )
 }
 
+# @noRd
+.rrDropIntercept <- function(coefs) {
+    as.vector(coefs)[-1]
+}
+
 #' Compute initial mr.mash coefficients via group-lasso
 #'
 #' Fit a group-lasso (one group per response) to obtain initial estimates of the
@@ -2971,17 +3005,20 @@ computeCoefficientsGlasso <- function(
     )
     coeffGlmnet <- coef(cvfitGlmnet, s = "lambda.min")
 
-    # Build matrix of initial estimates for mr.mash
-    B <- matrix(as.numeric(NA), nrow = p, ncol = r)
-
-    for (i in seq_along(coeffGlmnet)) {
-        B[, i] <- as.vector(coeffGlmnet[[i]])[-1]
-    }
+    # Build matrix of initial estimates for mr.mash: one column per outcome,
+    # each the glmnet coefficients with the intercept dropped.
+    B <- matrix(
+        unname(list_c(map(coeffGlmnet, .rrDropIntercept))),
+        nrow = p,
+        ncol = r
+    )
 
     # Make predictions if requested.
     if (!is.null(Xnew)) {
-        YhatGlmnet <- drop(predict(cvfitGlmnet, newx = Xnew, s = "lambda.min"))
-        colnames(YhatGlmnet) <- conditionNames
+        YhatGlmnet <- `colnames<-`(
+            drop(predict(cvfitGlmnet, newx = Xnew, s = "lambda.min")),
+            conditionNames
+        )
         res <- list(Bhat = B, Ytrain = Y, Yhat_new = YhatGlmnet)
     } else {
         res <- list(Bhat = B, Ytrain = Y)
@@ -3042,8 +3079,7 @@ computeCoefficientsUnivGlmnet <- function(
 
     if (!is.null(Xnew)) {
         yhatList <- map(out, "yhat_new")
-        YhatNew <- exec(cbind, !!!yhatList)
-        colnames(YhatNew) <- colnames(Y)
+        YhatNew <- `colnames<-`(exec(cbind, !!!yhatList), colnames(Y))
         results <- list(
             Bhat = Bhat[-1, ],
             intercept = Bhat[1, ],
@@ -3060,20 +3096,17 @@ computeCoefficientsUnivGlmnet <- function(
 computeW0 <- function(Bhat, ncomps) {
     propNonzero <- sum(rowSums(abs(Bhat)) > 0) / nrow(Bhat)
 
-    if (ncomps > 1) {
-        w0 <- c(
-            (1 - propNonzero),
-            rep(propNonzero / (ncomps - 1), (ncomps - 1))
-        )
+    fromData <- if (ncomps > 1) {
+        c((1 - propNonzero), rep(propNonzero / (ncomps - 1), (ncomps - 1)))
     } else {
-        w0 <- 1
+        1
     }
-
-    if (sum(w0 != 0) < 2) {
-        w0 <- rep(1 / ncomps, ncomps)
+    # Fewer than two non-zero components leaves nothing to mix: fall back to
+    # a flat prior over all of them.
+    if (sum(fromData != 0) < 2) {
+        return(rep(1 / ncomps, ncomps))
     }
-
-    return(w0)
+    fromData
 }
 
 
@@ -3085,50 +3118,40 @@ computeW0 <- function(Bhat, ncomps) {
 #' @keywords internal
 rescaleCovW0 <- function(w0) {
     # remove null component
-    w0 <- w0[names(w0) != "null"]
+    nonNull <- w0[names(w0) != "null"]
 
     # split by prior group
-    groups <- str_remove(names(w0), "_[^_]+$")
-    groupList <- split(w0, groups)
+    groups <- str_remove(names(nonNull), "_[^_]+$")
+    groupList <- split(nonNull, groups)
 
     # get per group sum -- one scalar per group
-    weightsList <- map_dbl(groupList, sum)
-    sumWeights <- sum(weightsList)
-    if (sumWeights > 0) {
-        weightsList <- weightsList / sumWeights
+    groupSums <- map_dbl(groupList, sum)
+    sumWeights <- sum(groupSums)
+    weightsList <- if (sumWeights > 0) {
+        groupSums / sumWeights
     } else {
         # Use equal weights if all non null weights are zeros
-        weightsList <- set_names(
-            rep(1 / length(weightsList), length(weightsList)),
-            names(weightsList)
+        set_names(
+            rep(1 / length(groupSums), length(groupSums)),
+            names(groupSums)
         )
     }
-    # vector to store updated group w0
-    updatedW0 <- rep(NA, length(unique(groups)))
-    names(updatedW0) <- unique(groups)
-
-    # replace with updated values
-    updatedW0[names(weightsList)] <- weightsList
-    return(updatedW0)
+    # One w0 slot per group, filled from the supplied weights.
+    groupKeys <- unique(groups)
+    replace(
+        set_names(rep(NA, length(groupKeys)), groupKeys),
+        names(weightsList),
+        weightsList
+    )
 }
 
 
 ### Function to compute grids
 computeGrid <- function(bhat, sbhat) {
-    gridMins <- c()
-    gridMaxs <- c()
-
     include <- !(sbhat == 0 | !is.finite(sbhat) | is.na(sbhat) | is.na(bhat))
     gmax <- gridMax(bhat[include], sbhat[include])
     gmin <- gridMin(bhat[include], sbhat[include])
-    gridMins <- c(gridMins, gmin)
-    gridMaxs <- c(gridMaxs, gmax)
-
-    gminTot <- min(gridMins)
-    gmaxTot <- max(gridMaxs)
-    grid <- autoselectMixsd(gminTot, gmaxTot, mult = sqrt(2))^2
-
-    return(grid)
+    autoselectMixsd(gmin, gmax, mult = sqrt(2))^2
 }
 
 
@@ -3200,12 +3223,8 @@ computeCovFlash <- function(Y) {
     if (nrow(covar) == 0) {
         abort("computeCovFlash: FLASH produced an empty covariance matrix.")
     }
-    s <- apply(Y, 2, sd, na.rm = TRUE)
-    if (length(s) > 1) {
-        s <- diag(s)
-    } else {
-        s <- matrix(s, 1, 1)
-    }
+    sds <- apply(Y, 2, sd, na.rm = TRUE)
+    s <- if (length(sds) > 1) diag(sds) else matrix(sds, 1, 1)
     s %*% cov2cor(covar) %*% s
 }
 

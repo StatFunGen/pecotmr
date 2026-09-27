@@ -1026,7 +1026,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
 .je_ensEntries <- function(group, predCor) {
     Y <- .jgY(group)
     vars <- colnames(.jgX(group))
-    lapply(seq_len(ncol(Y)), function(r) {
+    map(seq_len(ncol(Y)), function(r) {
         pr <- predCor * Y[, r] + rnorm(nrow(Y), sd = 0.3)
         names(pr) <- rownames(Y)
         rsq <- stats::cor(Y[, r], pr)^2
@@ -1086,7 +1086,7 @@ test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", 
             standardized = FALSE
         )
     )
-    expect_true(all(vapply(ens, is.null, logical(1))))
+    expect_true(all(map_lgl(ens, is.null)))
 })
 
 # ---- engine twas fitter: orchestration absorbed from .twasWeightsPipelineMatrix
@@ -1627,7 +1627,7 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
     g <- pecotmr:::.enumUnivariateIndividual(NULL, scope)
     expect_length(g, 4L) # 2 ctx x 2 traits
     expect_true(all(
-        vapply(g, function(x) nrow(.jgConditions(x)), integer(1)) == 1L
+        map_int(g, function(x) nrow(.jgConditions(x))) == 1L
     ))
 })
 
@@ -1802,7 +1802,7 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen skips when < 2 survivor
         pecotmr:::fitJointGroup(g, pipe, "mvsusie", list(pipCutoffToSkip = 0.8))
     )
     expect_length(entries, 2L) # one per ORIGINAL cond
-    expect_true(all(vapply(entries, is.null, logical(1)))) # all-NULL (skipped)
+    expect_true(all(map_lgl(entries, is.null))) # all-NULL (skipped)
 })
 
 test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of conditions", {
@@ -2060,7 +2060,7 @@ test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
             standardized = FALSE
         )
     )
-    expect_true(all(vapply(ens, is.null, logical(1)))) # < 2 usable -> NULL
+    expect_true(all(map_lgl(ens, is.null))) # < 2 usable -> NULL
 })
 
 test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
@@ -2081,7 +2081,7 @@ test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
             standardized = FALSE
         )
     )
-    expect_true(all(vapply(ens, is.null, logical(1))))
+    expect_true(all(map_lgl(ens, is.null)))
 })
 
 test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's variant ids", {
@@ -2773,6 +2773,20 @@ test_that(".jointTwasCvRequested accepts tokens and method keys alike", {
     expect_false(
         pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "susie")
     )
+    # a multi-word token: `susie_inf_weights` strips to `susie_inf`, which is
+    # not the canonical `susieInf`, so suffix-stripping alone misses it
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(c("susie_inf_weights"), "susieInf")
+    )
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(
+            list(susieInfWeights = list()),
+            "susieInf"
+        )
+    )
+    expect_false(
+        pecotmr:::.jointTwasCvRequested(c("susie_inf_weights"), "susie")
+    )
 })
 
 test_that(".jointTwasCv skips a method excluded by cvWeightMethods", {
@@ -2806,4 +2820,107 @@ test_that(".jointTwasCv warns when a method is all-zero, not silently", {
         "all of its weights are zero"
     )
     expect_null(out)
+})
+
+test_that(".jointTwasCv refuses a fine-mapping method with no per-fold fits", {
+    # Without a CV handoff from the FineMappingResult there is no fold fit,
+    # and this layer never fine-maps -- so it refuses rather than re-fitting.
+    cfg <- list(cvFolds = 5L, cvWeightMethods = NULL)
+    expect_error(
+        pecotmr:::.jointTwasCv(
+            Xc = NULL,
+            Yc = NULL,
+            wm = NULL,
+            ma = NULL,
+            W = matrix(1, 3, 1),
+            args = list(),
+            cfg = cfg,
+            token = "susie"
+        ),
+        "needs each fold's own fine-mapping fit"
+    )
+})
+
+test_that(".jointCvPartition lets the fine-mapping folds govern the group", {
+    sp <- data.frame(
+        Sample = c("s1", "s2", "s3", "s4"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+    ids <- c("s1", "s2", "s3", "s4")
+    # the fine-mapping CV's own partition is what every method is scored on
+    expect_equal(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = NULL,
+            sampleIds = ids,
+            cvFolds = 2L
+        ),
+        sp
+    )
+    # an identical explicit partition is no conflict
+    expect_equal(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = sp,
+            sampleIds = ids,
+            cvFolds = 2L
+        ),
+        sp
+    )
+    # with no fine-mapping CV the explicit partition still wins
+    expect_equal(
+        pecotmr:::.jointCvPartition(
+            fmCv = NULL,
+            userSp = sp,
+            sampleIds = ids,
+            cvFolds = 2L
+        ),
+        sp
+    )
+    # and with neither, no partition is fixed here: an integer `cvFolds` only
+    # validates, leaving twasWeightsCv() to draw the folds downstream
+    expect_null(
+        pecotmr:::.jointCvPartition(
+            fmCv = NULL,
+            userSp = NULL,
+            sampleIds = ids,
+            cvFolds = 2L
+        )
+    )
+})
+
+test_that(".jointCvPartition rejects fold samples absent from the dataset", {
+    sp <- data.frame(
+        Sample = c("s1", "s2", "ghost1", "ghost2"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+    expect_error(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = NULL,
+            sampleIds = c("s1", "s2", "s3"),
+            cvFolds = 2L
+        ),
+        "ghost1, ghost2"
+    )
+})
+
+test_that(".jointCvPartition rejects a partition conflicting with the CV's", {
+    sp <- data.frame(
+        Sample = c("s1", "s2", "s3", "s4"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+    other <- data.frame(
+        Sample = c("s1", "s2", "s3", "s4"),
+        Fold = c(2L, 2L, 1L, 1L)
+    )
+    expect_error(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = other,
+            sampleIds = c("s1", "s2", "s3", "s4"),
+            cvFolds = 2L
+        ),
+        "differs from the fine-mapping"
+    )
 })

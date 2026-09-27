@@ -68,15 +68,28 @@ setClass(
         seqnames = withChrPrefix(as.character(snpInfo$CHR)),
         ranges = IRanges::IRanges(as.integer(snpInfo$BP), width = 1L)
     )
-    names(gr) <- as.character(snpInfo$SNP)
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        select(snpInfo, -any_of(c("CHR", "BP"))),
-        row.names = NULL
+    labelled <- S4Vectors::`mcols<-`(
+        `names<-`(gr, as.character(snpInfo$SNP)),
+        value = S4Vectors::DataFrame(
+            select(snpInfo, -any_of(c("CHR", "BP"))),
+            row.names = NULL
+        )
     )
-    if (!is.null(genome) && length(genome) == 1L && nzchar(genome)) {
-        GenomeInfoDb::genome(gr) <- genome
+    .withGenomeBuild(
+        labelled,
+        !is.null(genome) && length(genome) == 1L && nzchar(genome),
+        genome
+    )
+}
+
+# The ranges carrying `genome` as their seqinfo build, when the caller named
+# one. GRanges has no constructor argument for it, so it is written back.
+# @noRd
+.withGenomeBuild <- function(gr, named, genome) {
+    if (!named) {
+        return(gr)
     }
-    gr
+    GenomeInfoDb::`genome<-`(gr, value = genome)
 }
 
 # =============================================================================
@@ -261,10 +274,7 @@ setClass(
             end = map_int(blocks, .ldRefBlockEnd)
         )
     )
-    if (.ldRefNamedGenome(genome)) {
-        GenomeInfoDb::genome(gr) <- genome
-    }
-    gr
+    .withGenomeBuild(gr, .ldRefNamedGenome(genome), genome)
 }
 
 # An LD block is within-chromosome by construction, and .ldRefBlockRanges()
@@ -304,8 +314,7 @@ setClass(
     if (!is.null(nRef)) {
         return(as.integer(nRef))
     }
-    found <- unique(map_int(dataList, .ldRefNRefOf))
-    found <- found[!is.na(found)]
+    found <- discard(unique(map_int(dataList, .ldRefNRefOf)), is.na)
     if (length(found) == 0L) {
         abort(glue(
             "`nRef` is required: none of the supplied LdData records a ",
@@ -332,15 +341,13 @@ setClass(
     if (.ldRefNamedGenome(genome)) {
         return(genome)
     }
-    found <- unique(map_chr(dataList, .ldRefGenomeOf))
-    found <- found[!is.na(found)]
+    found <- discard(unique(map_chr(dataList, .ldRefGenomeOf)), is.na)
     if (length(found) == 1L) found[[1L]] else NA_character_
 }
 
 # @noRd
 .ldRefGenomeOf <- function(x) {
-    g <- unique(GenomeInfoDb::genome(as(x, "GRanges")))
-    g <- g[!is.na(g)]
+    g <- discard(unique(GenomeInfoDb::genome(as(x, "GRanges"))), is.na)
     if (length(g) == 1L) g[[1L]] else NA_character_
 }
 
@@ -361,7 +368,6 @@ setMethod("getLdBlocks", "LdStatistic", function(x) x@ldBlocks)
 setMethod("getGenome", "LdStatistic", function(x, ...) {
     # The build lives in seqinfo, not a slot: a GRanges already has somewhere
     # to keep it, and storing it twice is what the retired LdBlocks class did.
-    build <- unique(GenomeInfoDb::genome(x))
-    build <- build[!is.na(build)]
+    build <- discard(unique(GenomeInfoDb::genome(x)), is.na)
     if (length(build) == 0L) NA_character_ else build[[1L]]
 })

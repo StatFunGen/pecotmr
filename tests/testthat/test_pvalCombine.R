@@ -143,10 +143,9 @@ test_that("combinePValues: runs multiple methods at once", {
     p <- c(0.01, 0.1, 0.4)
     res <- combinePValues(pvals = p, methods = c("acat", "bonferroni"))
     expect_equal(names(res$results), c("acat", "bonferroni"))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$results,
-        function(r) is.finite(r$pval),
-        logical(1)
+        function(r) is.finite(r$pval)
     )))
 })
 

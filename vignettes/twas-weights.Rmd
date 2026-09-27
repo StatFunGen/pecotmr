@@ -98,11 +98,22 @@ set of per-variant weight estimates. When you pass an existing
 matching `(study, context, trait)` tuple is added to the ensemble as an
 additional weights row instead of being re-fit.
 
+The same holds under cross-validation: each fold needs a fit trained on that
+fold's rows, and the weights pipeline will not produce one. Run the
+fine-mapping with `cvFolds` so those per-fold fits travel with the result —
+requesting a fine-mapping method under cross-validation without them is an
+error. That fold partition then governs the whole run: every other weight
+method is cross-validated on the same folds, which is what makes their
+scores comparable. The fold samples must be the samples of the dataset being
+scored, or the run stops rather than scoring a fit against rows it was never
+separated from.
+
 ```{r individual-with-fmr}
 fmr <- fineMappingPipeline(
     qtlDatasetExample,
     methods = "susie",
-    cisWindow = 1e6
+    cisWindow = 1e6,
+    cvFolds = 3
 )
 tw2 <- twasWeightsPipeline(
     qtlDatasetExample,
@@ -250,7 +261,7 @@ combination of the others, with the weights chosen by cross-validation.
 Those steps are exported too:
 
 - `twasWeightsCv()` runs the cross-validation that scores each method.
-- `learnTwasWeights()` fits one method across CV folds.
+- `learnTwasWeights()` runs the requested weight methods on the full data.
 - `combineTwasWeights()` forms the ensemble from per-method weights.
 - `estimateSparsity()` reports how sparse a fitted weight vector is.
 
@@ -279,6 +290,9 @@ twasWeightsPipeline(
     region = "chr22:25000000-26000000",
     cisWindow = 5e5,
     cvFolds = 5,
+    # required for a fine-mapping method, and under cvFolds > 1 it must carry
+    # the per-fold fits (fineMappingPipeline(..., cvFolds = 5))
+    fineMappingResult = fmr,
     samplePartition = NULL,
     maxCvVariants = -1,
     cvThreads = 1,

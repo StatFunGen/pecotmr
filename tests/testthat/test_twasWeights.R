@@ -586,58 +586,67 @@ test_that("twasWeightsCv: multivariate Y with multiple columns", {
 #
 # ===========================================================================
 
-test_that("twasWeights: SuSiE-inf is fitted before and initializes ordinary SuSiE", {
+test_that("learnTwasWeights refuses the susie + susieInf pair without fits", {
+    # The chained susieInf -> susie fit lives in fineMappingPipeline() now;
+    # learnTwasWeights never fine-maps, so the pair is an error here.
+    # fitSusieInfThenSusie() itself is covered in test_fineMappingWrappers.R.
     d <- make_data(n = 50, p = 10)
-    y_vec <- as.numeric(d$Y)
-    susie_calls <- list()
-
-    local_mocked_bindings(
-        susieInfWeights = function(X, y, ...) rep(0, ncol(X)),
-        susieWeights = function(X, y, ...) {
-            rep(0, ncol(X))
-        }
-    )
-    # The two chained SuSiE fits now run through .fmFitSusieIndiv, which calls
-    # susieR::susie, so capture at the susieR namespace.
-    local_mocked_bindings(
-        susie = function(...) {
-            args <- list(...)
-            susie_calls[[length(susie_calls) + 1]] <<- args
-            make_fake_susie_fit(
-                p = ncol(args$X),
-                L = if (identical(args$unmappable_effects, "inf")) {
-                    7
-                } else {
-                    args$L
-                },
-                inf = identical(args$unmappable_effects, "inf")
+    expect_error(
+        learnTwasWeights(
+            d$X,
+            as.numeric(d$Y),
+            weightMethods = list(
+                susie_weights = list(),
+                susie_inf_weights = list()
             )
-        },
-        .package = "susieR"
+        ),
+        "susie, susieInf"
     )
-
-    result <- learnTwasWeights(
-        d$X,
-        y_vec,
-        weightMethods = list(
-            susie_weights = list(L = 5, L_greedy = 3),
-            susie_inf_weights = list()
-        )
-    )
-
-    expect_equal(getMethodNames(result), c("susie", "susie_inf"))
-    expect_length(susie_calls, 2)
-    expect_equal(susie_calls[[1]]$unmappable_effects, "inf")
-    expect_equal(susie_calls[[1]]$convergence_method, "pip")
-    expect_equal(susie_calls[[2]]$unmappable_effects, "none")
-    expect_true("susieInf" %in% class(susie_calls[[2]]$model_init))
-    expect_equal(susie_calls[[2]]$L_greedy, 5)
 })
 
 
-# ===========================================================================
-# twasWeightsCv: extra split_data / sample-name / variant-selection branches
-# ===========================================================================
+test_that("learnTwasWeights resolves fits under camelCase method names", {
+    # `susieWeights` and `susie_weights` name the same method; a fit supplied
+    # for one spelling must land on the other's arguments too.
+    d <- make_data(n = 50, p = 10)
+    seen <- NULL
+    local_mocked_bindings(
+        susieWeights = function(X, y, susieFit = NULL, ...) {
+            seen <<- susieFit
+            rep(0, ncol(X))
+        }
+    )
+    learnTwasWeights(
+        d$X,
+        as.numeric(d$Y),
+        weightMethods = list(susieWeights = list()),
+        fittedModels = list(susie = make_fake_susie_fit(p = 10, L = 5))
+    )
+    expect_true("susie" %in% class(seen))
+})
+
+
+test_that("learnTwasWeights runs susie + susieInf from supplied fits", {
+    d <- make_data(n = 50, p = 10)
+    local_mocked_bindings(
+        susieInfWeights = function(X, y, ...) rep(0, ncol(X)),
+        susieWeights = function(X, y, ...) rep(0, ncol(X))
+    )
+    result <- learnTwasWeights(
+        d$X,
+        as.numeric(d$Y),
+        weightMethods = list(
+            susie_weights = list(),
+            susie_inf_weights = list()
+        ),
+        fittedModels = list(
+            susie = make_fake_susie_fit(p = 10, L = 5),
+            susieInf = make_fake_susie_fit(p = 10, L = 7, inf = TRUE)
+        )
+    )
+    expect_equal(getMethodNames(result), c("susie", "susie_inf"))
+})
+
 
 test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", {
     set.seed(42)
@@ -707,12 +716,11 @@ test_that("twasWeightsCv: dataDrivenPriorMatricesCv is plumbed through", {
     # matrix under the camelCase name that actually binds mrmashWrapper's
     # `dataDrivenPriorMatrices` argument (the snake_case form was a latent no-op).
     expect_true(length(captured_args) >= 1)
-    expect_true(any(vapply(
+    expect_true(any(map_lgl(
         captured_args,
         function(a) {
             "dataDrivenPriorMatrices" %in% names(a)
-        },
-        logical(1)
+        }
     )))
 })
 
@@ -776,10 +784,12 @@ test_that("twasWeightsCv is reproducible with seed", {
     X <- sim$X
     y = sim$Y
     local_mocked_bindings(
-        susieWeights = function(X, y, ...) rnorm(ncol(X)),
+        enetWeights = function(X, y, ...) rnorm(ncol(X)),
         glmnetWeights = function(X, y, ...) runif(ncol(X))
     )
-    weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
+    # Non-SuSiE methods: this test is about the seeded fold partition, and a
+    # SuSiE-family token now requires per-fold fits it has no reason to carry.
+    weight_methods_test <- list(enetWeights = list(), glmnetWeights = list())
     set.seed(1)
     result_seed1 <- twasWeightsCv(
         X,
@@ -1344,26 +1354,24 @@ test_that(".resolveMethodFunction: unresolvable key falls back to the key itself
 #
 # ===========================================================================
 
-test_that(".prepareSusieWeightMethods: seeds susie_weights from a supplied susieInf fit (vector Y)", {
-    d <- make_data(n = 40, p = 8)
-    y_vec <- as.numeric(d$Y) # vector -> exercises the Y matrix coercion
+test_that(".prepareSusieWeightMethods writes supplied fits onto the method args", {
     infFit <- make_fake_susie_fit(p = 8, L = 3, inf = TRUE)
+    susieFit <- make_fake_susie_fit(p = 8, L = 5)
 
     wm <- pecotmr:::.prepareSusieWeightMethods(
-        d$X,
-        y_vec,
         weightMethods = list(
-            susie_weights = list(L = 5),
+            susie_weights = list(),
             susie_inf_weights = list()
         ),
-        fittedModels = list(susieInf = infFit)
+        fittedModels = list(susie = susieFit, susieInf = infFit)
     )
 
-    # The supplied susieInf fit is class-tagged and propagated onto susie_inf_weights,
-    # and susie_weights is rebuilt from it (model_init carries the inf fit).
+    # Each supplied fit is class-tagged and lands on its own method's args.
+    # susie's fitting arguments are NOT derived from the inf fit: that
+    # prepares a susie fit, which belongs to fineMappingPipeline().
     expect_true("susieInf" %in% class(wm$susie_inf_weights$susieInfFit))
-    expect_true("susieInf" %in% class(wm$susie_weights$model_init))
-    expect_equal(wm$susie_weights$unmappable_effects, "none")
+    expect_true("susie" %in% class(wm$susie_weights$susieFit))
+    expect_null(wm$susie_weights$model_init)
 })
 
 # ===========================================================================
@@ -1411,22 +1419,27 @@ test_that("twasWeightsCv: mvsusie per-fold reweighted prior is plumbed (verbose=
     )
     prior_cv <- list(matrix(1, 2, 2), matrix(2, 2, 2))
     set.seed(1)
+    # A SuSiE-family token needs that fold's own fit; the fitter is mocked
+    # here, so a stub per fold is enough to reach the per-fold prior path.
+    sp <- suppressMessages(twasWeightsCv(X, Y, fold = 2))$samplePartition
+    foldFits <- list(fold_1 = "FIT1", fold_2 = "FIT2")
+    attr(foldFits, "partitionKey") <- pecotmr:::.cvPartitionKey(sp)
     result <- suppressMessages(twasWeightsCv(
         X,
         Y,
-        fold = 2,
+        samplePartitions = sp,
         weightMethods = list(mvsusieWeights = list()),
         reweightedMixturePriorCv = prior_cv,
+        fittedModelsCv = list(mvsusie = foldFits),
         verbose = 2
     ))
     expect_true("prediction" %in% names(result))
     # the per-fold prior_variance was forwarded to the multivariate fitter
-    expect_true(any(vapply(
+    expect_true(any(map_lgl(
         captured,
         function(a) {
             "prior_variance" %in% names(a)
-        },
-        logical(1)
+        }
     )))
 })
 
@@ -1462,10 +1475,9 @@ test_that("twasWeightsCv: retainFits forwards retainFit to a multivariate fitter
         retainFits = TRUE
     ))
     expect_true("foldFits" %in% names(result))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         captured,
-        function(a) isTRUE(a$retainFit),
-        logical(1)
+        function(a) isTRUE(a$retainFit)
     )))
 })
 
@@ -1707,7 +1719,7 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
     )
     expect_length(perOutcome, 2L)
     expect_equal(
-        vapply(perOutcome, function(z) z$context, character(1)),
+        map_chr(perOutcome, function(z) z$context),
         c("cA", "cB")
     )
     # A single context is recycled across the outcomes instead.
@@ -1718,7 +1730,7 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
         mkCtx("cOnly")
     )
     expect_equal(
-        vapply(recycled, function(z) z$context, character(1)),
+        map_chr(recycled, function(z) z$context),
         c("cOnly", "cOnly")
     )
 })
@@ -1790,5 +1802,226 @@ test_that("twasPredict: weightsList must be a list or TwasWeights", {
     expect_error(
         twasPredict(matrix(0, 2, 2), "nope"),
         "weightsList.*One of the following must apply"
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Cross-validating a SuSiE-family method. Those wrappers extract from a
+# supplied fit and never fine-map, so CV is only possible when
+# fineMappingPipeline's own CV retained each fold's fit.
+# ---------------------------------------------------------------------------
+
+.twcv_foldFits <- function(seed = 11, fold = 3) {
+    set.seed(seed)
+    data(eqtlRegionExample)
+    X <- eqtlRegionExample$X[, 1:40]
+    y <- eqtlRegionExample$yRes
+    Y <- matrix(y, ncol = 1, dimnames = list(rownames(X), "t1"))
+    cv <- pecotmr:::.fmWeightsCv(
+        X,
+        Y,
+        tokens = "susie",
+        methodArgs = list(),
+        fold = fold,
+        verbose = 0,
+        seed = 1
+    )
+    list(X = X, Y = Y, cv = cv, slice = pecotmr:::.fmSliceCv(cv, "susie"))
+}
+
+test_that("fineMappingPipeline CV retains a lean per-fold fit", {
+    skip_if_not_installed("susieR")
+    f <- suppressMessages(.twcv_foldFits())
+    expect_false(is.null(f$cv$foldFits))
+    expect_equal(names(f$cv$foldFits), c("fold_1", "fold_2", "fold_3"))
+    # lean: only the fields the weight extractors read
+    fit1 <- f$cv$foldFits[["fold_1"]][["susie"]]
+    expect_true(all(c("pip", "alpha", "mu") %in% names(fit1)))
+    expect_false("lbf_variable" %in% names(fit1))
+    # and it slices per method onto the row payload
+    expect_equal(names(f$slice$foldFits), c("fold_1", "fold_2", "fold_3"))
+})
+
+test_that("twasWeightsCv cannot cross-validate susie without the fold fits", {
+    skip_if_not_installed("susieR")
+    f <- suppressMessages(.twcv_foldFits())
+    expect_error(
+        suppressMessages(twasWeightsCv(
+            f$X,
+            f$Y,
+            samplePartitions = f$slice$samplePartition,
+            weightMethods = list(susie_weights = list()),
+            verbose = 0
+        )),
+        "never run fine-mapping themselves"
+    )
+})
+
+test_that("twasWeightsCv cross-validates susie from the retained fold fits", {
+    skip_if_not_installed("susieR")
+    f <- suppressMessages(.twcv_foldFits())
+    out <- suppressMessages(twasWeightsCv(
+        f$X,
+        f$Y,
+        samplePartitions = f$slice$samplePartition,
+        weightMethods = list(susie_weights = list()),
+        fittedModelsCv = list(susie = f$slice$foldFits),
+        verbose = 0
+    ))
+    expect_true(all(c("prediction", "performance") %in% names(out)))
+    expect_false(is.null(out$prediction))
+})
+
+test_that(".twasFoldFit injects the fold's fit under the adapter's fit arg", {
+    ff <- list(susie = list(fold_1 = "FIT1", fold_2 = "FIT2"))
+    a <- pecotmr:::.twasFoldFit(list(), "susie_weights", 2L, ff)
+    expect_identical(a$susieFit, "FIT2")
+    # a method with no fine-mapping adapter is untouched
+    b <- pecotmr:::.twasFoldFit(list(), "lasso_weights", 1L, ff)
+    expect_length(b, 0L)
+    # and so is the NULL case
+    expect_length(pecotmr:::.twasFoldFit(list(), "susie_weights", 1L, NULL), 0L)
+})
+
+test_that("twasWeightsCv refuses fold fits from a different partition", {
+    skip_if_not_installed("susieR")
+    f <- suppressMessages(.twcv_foldFits())
+    wm <- list(susie_weights = list())
+
+    # (a) no partition at all: a freshly drawn one would score each fold with
+    # a fit that saw its held-out samples.
+    expect_error(
+        suppressMessages(twasWeightsCv(
+            f$X,
+            f$Y,
+            weightMethods = wm,
+            verbose = 0,
+            fittedModelsCv = list(susie = f$slice$foldFits)
+        )),
+        "needs the fold partition"
+    )
+
+    # (b) fits with no fingerprint cannot be shown to match.
+    unstamped <- f$slice$foldFits
+    attr(unstamped, "partitionKey") <- NULL
+    expect_error(
+        suppressMessages(twasWeightsCv(
+            f$X,
+            f$Y,
+            weightMethods = wm,
+            verbose = 0,
+            samplePartitions = f$slice$samplePartition,
+            fittedModelsCv = list(susie = unstamped)
+        )),
+        "no partition fingerprint"
+    )
+
+    # (c) a genuinely different split is caught by the fingerprint.
+    other <- suppressMessages(pecotmr:::.fmWeightsCv(
+        f$X,
+        f$Y,
+        tokens = "susie",
+        methodArgs = list(),
+        fold = 3,
+        verbose = 0,
+        seed = 77
+    ))
+    expect_error(
+        suppressMessages(twasWeightsCv(
+            f$X,
+            f$Y,
+            weightMethods = wm,
+            verbose = 0,
+            samplePartitions = other$samplePartition,
+            fittedModelsCv = list(susie = f$slice$foldFits)
+        )),
+        "trained on a different fold partition"
+    )
+})
+
+test_that(".cvPartitionKey ignores row order but not fold assignment", {
+    sp <- data.frame(Sample = c("s1", "s2", "s3"), Fold = c(1L, 2L, 1L))
+    shuffled <- sp[c(3, 1, 2), ]
+    expect_identical(
+        pecotmr:::.cvPartitionKey(sp),
+        pecotmr:::.cvPartitionKey(shuffled)
+    )
+    moved <- sp
+    moved$Fold <- c(1L, 1L, 2L)
+    expect_false(identical(
+        pecotmr:::.cvPartitionKey(sp),
+        pecotmr:::.cvPartitionKey(moved)
+    ))
+})
+
+# ---------------------------------------------------------------------------
+# Up-front gate: a SuSiE-family method without its fit is refused before any
+# fitting work, rather than surfacing from inside the per-fold map.
+# ---------------------------------------------------------------------------
+
+test_that("learnTwasWeights refuses a susie token with no fit", {
+    skip_if_not_installed("susieR")
+    set.seed(11)
+    data(eqtlRegionExample)
+    X <- eqtlRegionExample$X[, 1:40]
+    Y <- matrix(
+        eqtlRegionExample$yRes,
+        ncol = 1,
+        dimnames = list(rownames(X), "t1")
+    )
+    expect_error(
+        suppressMessages(learnTwasWeights(
+            X,
+            Y,
+            weightMethods = list(susie_weights = list()),
+            verbose = 0
+        )),
+        "never run fine-mapping themselves"
+    )
+    # supplying it through fittedModels satisfies the gate
+    fit <- suppressMessages(susieR::susie(X, Y[, 1], L = 5))
+    expect_no_error(suppressMessages(learnTwasWeights(
+        X,
+        Y,
+        weightMethods = list(susie_weights = list()),
+        fittedModels = list(susie = fit),
+        verbose = 0
+    )))
+    # a method with no fine-mapping adapter is unaffected
+    expect_no_error(suppressMessages(learnTwasWeights(
+        X,
+        Y,
+        weightMethods = list(lasso_weights = list()),
+        verbose = 0
+    )))
+})
+
+test_that("twasWeightsCv refuses a susie token with no per-fold fits", {
+    skip_if_not_installed("susieR")
+    f <- suppressMessages(.twcv_foldFits())
+    expect_error(
+        suppressMessages(twasWeightsCv(
+            f$X,
+            f$Y,
+            samplePartitions = f$slice$samplePartition,
+            weightMethods = list(susie_weights = list()),
+            verbose = 0
+        )),
+        "needs that fold's own fit"
+    )
+})
+
+test_that(".twasSusieTokensRequested matches both method spellings", {
+    expect_equal(
+        pecotmr:::.twasSusieTokensRequested(list(susie_weights = list())),
+        "susie"
+    )
+    expect_equal(
+        pecotmr:::.twasSusieTokensRequested(c("mvsusieWeights")),
+        "mvsusie"
+    )
+    expect_length(
+        pecotmr:::.twasSusieTokensRequested(list(lasso_weights = list())),
+        0L
     )
 })

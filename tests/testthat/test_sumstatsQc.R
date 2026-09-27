@@ -1058,18 +1058,18 @@ generate_block_diagonal_test_data <- function(
     }
 
     # Create block metadata
-    block_sizes <- sapply(block_boundaries, function(b) b[2] - b[1] + 1)
+    block_sizes <- map_dbl(block_boundaries, function(b) b[2] - b[1] + 1)
     blockMetadata <- data.frame(
         blockId = seq_along(block_boundaries),
         chrom = rep(1, length(block_boundaries)),
         size = block_sizes,
-        startIdx = sapply(seq_along(block_boundaries), function(i) {
+        startIdx = map_dbl(seq_along(block_boundaries), function(i) {
             # Adjust for 1-based indexing in R
             if (i == 1) {
                 return(1)
             }
             # Count unique variants before this block
-            sum(sapply(1:(i - 1), function(j) {
+            sum(map_dbl(1:(i - 1), function(j) {
                 # If there's an overlap with the next block, count one less
                 if (
                     j < length(block_boundaries) &&
@@ -1084,9 +1084,9 @@ generate_block_diagonal_test_data <- function(
             })) +
                 1
         }),
-        endIdx = sapply(seq_along(block_boundaries), function(i) {
+        endIdx = map_dbl(seq_along(block_boundaries), function(i) {
             # Count all unique variants up to and including this block
-            sum(sapply(1:i, function(j) {
+            sum(map_dbl(1:i, function(j) {
                 # If there's an overlap with the next block, count one less
                 if (
                     j < i &&
@@ -4874,7 +4874,7 @@ test_that("summaryStatsQc: absZ / bf / logBf screens skip a no-signal entry", {
         list(bfCutoffToSkip = 100),
         list(logBfCutoffToSkip = 5)
     )) {
-        res <- do.call(summaryStatsQc, c(list(mk()), arg, list(nCutoff = 0)))
+        res <- exec(summaryStatsQc, !!!c(list(mk()), arg, list(nCutoff = 0)))
         ea <- getQcInfo(res)$entryAudit[[1L]]
         expect_true(isTRUE(ea$pipScreenSkipped))
         expect_equal(length(res[[1L]]), 0L)
@@ -4933,10 +4933,7 @@ generate_dentist_data <- function(
     outlier_indices <- sample(1:nSnps, n_outliers)
     z_scores[outlier_indices] <- rnorm(n_outliers, mean = 0, sd = 5)
     sumstat <- data.frame(
-        position = unlist(lapply(
-            seq(start_pos, end_pos, length.out = nSnps),
-            round
-        )),
+        position = map_dbl(seq(start_pos, end_pos, length.out = nSnps), round),
         z = z_scores
     )
     return(list(sumstat = sumstat, ldMat = ld_matrix, nSample = sample_size))
@@ -7328,9 +7325,12 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
         n <- length(getSampleIds(handle))
         k <- length(snpIdx)
         f <- rnorm(n) # shared latent factor
-        M <- sapply(seq_len(k), function(j) {
-            sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
-        })
+        M <- exec(
+            cbind,
+            !!!map(seq_len(k), function(j) {
+                sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
+            })
+        )
         rr <- GenomicRanges::GRanges(
             seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
@@ -7621,7 +7621,7 @@ test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
     set.seed(1)
     nS <- 100L
     af <- c(runif(20L, 0.2, 0.4), runif(20L, 0.002, 0.01))
-    dosage <- vapply(af, function(f) rbinom(nS, 2L, f), numeric(nS))
+    dosage <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
     ids <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     colnames(dosage) <- ids
     dosage[1:60, 3] <- NA

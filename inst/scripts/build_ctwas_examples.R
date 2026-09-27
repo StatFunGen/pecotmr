@@ -25,6 +25,7 @@
 # =============================================================================
 
 devtools::load_all(".", quiet = TRUE)
+library(purrr)
 
 # -----------------------------------------------------------------------------
 # 1. Inputs: the bundled chr22 LD panel, GWAS sumstats, and TWAS weights.
@@ -101,7 +102,7 @@ repointLd <- function(payload) {
         return(payload)
     }
     stored <- as.character(payload$LD_map$LD_file)
-    portable <- vapply(stored, asResource, character(1), USE.NAMES = FALSE)
+    portable <- map_chr(stored, asResource)
     keyMap <- setNames(portable, stored)
     payload$LD_map$LD_file <- portable
     payload$LD_map$SNP_file <- portable
@@ -134,9 +135,9 @@ invisible(estCtwasParam(
 ))
 invisible(finemapCtwasRegions(
     screenCtwasRegions(
-    ctwasEstExample,
-    ctwasArgs = list(min_nonSNP_PIP = 0)
-)
+        ctwasEstExample,
+        ctwasArgs = list(min_nonSNP_PIP = 0)
+    )
 ))
 invisible(asCtwasResult(ctwasFinemapExample))
 invisible(mergeCtwasBoundaryRegions(ctwasFinemapExample))
