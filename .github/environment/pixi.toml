@@ -9,7 +9,7 @@ platforms = [
 
 [tasks]
 devtools_document = "cd $GITHUB_WORKSPACE; R -e 'devtools::document()'"
-devtools_test = "cd $GITHUB_WORKSPACE; R -e 'devtools::test()'"
+devtools_test = "cd $GITHUB_WORKSPACE; R -e 'devtools::test(stop_on_failure = TRUE)'"
 codecov = "cd $GITHUB_WORKSPACE; R -e 'covr::codecov(quiet = FALSE)'"
 rcmdcheck = "cd $GITHUB_WORKSPACE; R -e 'rcmdcheck::rcmdcheck()'"
 bioccheck_git_clone = "cd $GITHUB_WORKSPACE; R -e 'BiocCheck::BiocCheckGitClone()'"

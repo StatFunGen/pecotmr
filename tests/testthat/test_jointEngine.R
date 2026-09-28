@@ -845,7 +845,7 @@ test_that(".runJointCell: cross-trait twas -> per-trait weight vectors", {
     expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
-test_that("fitJointGroup(Individual, Fm): fsusie returns one entry per trait", {
+test_that("fitJointGroup(Individual, Fm): fsusie keeps one entry for all traits", {
     set.seed(12)
     n <- 10L
     X <- matrix(
@@ -888,9 +888,12 @@ test_that("fitJointGroup(Individual, Fm): fsusie returns one entry per trait", {
 
     entries <- pecotmr:::fitJointGroup(grp, pipe, "fsusie", list())
     expect_type(entries, "list")
-    expect_length(entries, 2L) # one per trait
+    expect_length(entries, 1L)
     expect_s4_class(entries[[1L]], "FineMappingRow")
+    expect_identical(captured$Y, Y)
     expect_equal(captured$pos, c(100, 200)) # functional domain threaded
+    expect_identical(entries[[1L]]@susieFit$trait_names, c("G1", "G2"))
+    expect_equal(entries[[1L]]@susieFit$trait_positions, c(100, 200))
 })
 
 test_that("fitJointGroup(Individual, Fm): fsusie without pos errors; unknown token errors", {
@@ -1787,7 +1790,7 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
     )
     entries <- pecotmr:::fitJointGroup(grp, pipe, "fsusie", list())
     expect_true(cvCalled) # CV path exercised
-    expect_length(entries, 2L)
+    expect_length(entries, 1L)
 })
 
 test_that("fitJointGroup(Individual, Fm): SER pre-screen skips when < 2 survivors", {
