@@ -3092,9 +3092,12 @@ test_that("twasWeightsPipeline(QtlSumStats): NULL methods uses the default RSS p
         !!!c(
             list(
                 extractBlockGenotypes = .tp_mockExtractor(),
-                prsCsWeights = function(stat, LD, ...) rep(0, nrow(LD)),
-                sdprWeights = function(stat, LD, ...) rep(0, nrow(LD))
+                prsCsWeights = function(stat, LD, ...) rep(0, nrow(LD))
             ),
+            # .tp_mockSumstatWeights() already mocks sdprWeights. Passing a
+            # binding to local_mocked_bindings() twice makes it record the
+            # first mock as the "original", so unwinding restores the mock
+            # instead of the real function and it leaks for the session.
             .tp_mockSumstatWeights(),
             list(.package = "pecotmr")
         )

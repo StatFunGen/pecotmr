@@ -782,7 +782,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
 test_that("twasWeightsCv is reproducible with seed", {
     sim <- generate_X_Y(seed = 1)
     X <- sim$X
-    y = sim$Y
+    y <- sim$Y
     local_mocked_bindings(
         enetWeights = function(X, y, ...) rnorm(ncol(X)),
         glmnetWeights = function(X, y, ...) runif(ncol(X))
@@ -811,7 +811,7 @@ test_that("twasWeightsCv is reproducible with seed", {
 test_that("twasWeightsCv handles errors appropriately", {
     sim <- generate_X_Y(seed = 1)
     X <- sim$X
-    y = sim$Y
+    y <- sim$Y
     local_mocked_bindings(
         susieWeights = function(X, y, ...) rnorm(ncol(X)),
         glmnetWeights = function(X, y, ...) runif(ncol(X))
@@ -840,7 +840,7 @@ test_that("twasWeightsCv handles errors appropriately", {
 test_that("learnTwasWeights handles errors appropriately", {
     sim <- generate_X_Y(seed = 1)
     X <- sim$X
-    y = sim$Y
+    y <- sim$Y
     local_mocked_bindings(
         susieWeights = function(X, y, ...) rnorm(ncol(X)),
         glmnetWeights = function(X, y, ...) runif(ncol(X))

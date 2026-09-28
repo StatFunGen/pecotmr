@@ -20,8 +20,8 @@ generate_X_Y <- function(
         rownames(X) <- NULL
     }
 
-    beta = rep(0, num_features)
-    beta[1:4] = 1
+    beta <- rep(0, num_features)
+    beta[1:4] <- 1
     y <- X %*% beta + rnorm(num_samples)
     y <- matrix(y, nrow = num_samples, ncol = 1)
     if (y_rownames) {
