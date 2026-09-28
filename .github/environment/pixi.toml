@@ -30,7 +30,7 @@ r45 = {features = ["r45"]}
 "bioconductor-bioccheck" = "*"
 "bioconductor-plyranges" = "*"
 "bioconductor-tidysummarizedexperiment" = "*"
-# "gcc" = "*"
+"gcc" = "*"
 "r-covr" = "*"
 "r-decor" = "*"
 "r-devtools" = "*"
