@@ -80,7 +80,7 @@ test_that("penalizedRss runs with MCP and returns correct structure", {
     n <- 100
     bhat <- rnorm(p, sd = 0.1)
     R <- diag(p)
-    for (i in 1:(p - 1)) {
+    for (i in seq_len(p - 1)) {
         R[i, i + 1] <- 0.3
         R[i + 1, i] <- 0.3
     }

@@ -718,7 +718,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         path = "/tmp/jd.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),

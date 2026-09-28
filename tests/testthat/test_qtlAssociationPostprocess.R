@@ -71,8 +71,14 @@ context("qtlAssociationPostprocess")
     exec(QtlSumStats, !!!args[setdiff(names(args), drop)])
 }
 
+# The default fixture is 60 genes of GRanges + mcols and costs ~0.5s to build,
+# which is most of this file's runtime when every test rebuilds it. S4 objects
+# are copy-on-modify, so one shared instance is safe; tests needing a variant
+# still call .qapFixture() with arguments.
+.qapDefaultFixture <- .qapFixture()
+
 test_that("qtlAssociationPostprocess enriches with package-computed columns", {
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
         fdrThreshold = 0.1,
@@ -117,7 +123,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
 
 test_that("q-values come from qvalue::qvalue, not a hand-rolled fallback", {
     skip_if_not_installed("qvalue")
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(x, methods = "permutation")
     expect_equal(
         as.numeric(r$q_beta),
@@ -130,7 +136,7 @@ test_that("q-values come from qvalue::qvalue, not a hand-rolled fallback", {
 })
 
 test_that("permutation nominal threshold == stats::qbeta of the empirical cutoff", {
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
         fdrThreshold = 0.1,
@@ -149,7 +155,7 @@ test_that("permutation nominal threshold == stats::qbeta of the empirical cutoff
 })
 
 test_that("getSignificantQtls (bonferroni) matches the derived threshold rule", {
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(x, mafCutoff = 0.01, cisWindow = 1e6)
     sig <- getSignificantQtls(r, "bonferroni_original", threshold = 0.5)
     expect_s4_class(sig, "GRanges")
@@ -170,7 +176,7 @@ test_that("getSignificantQtls (bonferroni) matches the derived threshold rule", 
 })
 
 test_that("getSumStats(annotateSignificance=) adds a derived logical mcol", {
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(x, methods = "permutation")
     gr <- getSumStats(
         r,
@@ -192,7 +198,7 @@ test_that("getSumStats(annotateSignificance=) adds a derived logical mcol", {
 })
 
 test_that("significance accessors require a postprocessed object", {
-    x <- .qapFixture() # not postprocessed
+    x <- .qapDefaultFixture # not postprocessed
     expect_error(
         getSignificantQtls(x, "bonferroni_original"),
         "qtlAssociationPostprocess"
@@ -216,7 +222,7 @@ test_that(".qapSafeQvalue retries with lambda=0 on qvalue 'missing or infinite'"
         },
         .package = "qvalue"
     )
-    r <- qtlAssociationPostprocess(.qapFixture(), methods = "permutation")
+    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation")
     expect_true(all(as.numeric(r$q_beta) == 0.111))
 })
 
@@ -231,7 +237,7 @@ test_that(".qapSafeQvalue retries with bootstrap pi0 on qvalue 'pi0 <= 0'", {
         },
         .package = "qvalue"
     )
-    r <- qtlAssociationPostprocess(.qapFixture(), methods = "permutation")
+    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation")
     expect_true(all(as.numeric(r$q_beta) == 0.222))
 })
 
@@ -242,7 +248,7 @@ test_that(".qapSafeQvalue re-raises a non-native qvalue error (no hand-rolled q)
         .package = "qvalue"
     )
     expect_error(
-        qtlAssociationPostprocess(.qapFixture(), methods = "permutation"),
+        qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation"),
         "qvalue::qvalue failed"
     )
 })
@@ -251,7 +257,7 @@ test_that("permutation nominal threshold is NA for every gene when none pass FDR
     # An impossibly small FDR threshold leaves no q_beta-significant gene, so the
     # empirical p_beta bracketing is empty and every nominal threshold is NA.
     r <- qtlAssociationPostprocess(
-        .qapFixture(),
+        .qapDefaultFixture,
         fdrThreshold = 1e-300,
         methods = "permutation"
     )
@@ -262,7 +268,7 @@ test_that("permutation nominal threshold is NA for every gene when none pass FDR
 
 test_that("getSignificantQtls (permutation) uses each gene's nominal threshold", {
     r <- qtlAssociationPostprocess(
-        .qapFixture(),
+        .qapDefaultFixture,
         fdrThreshold = 0.1,
         methods = "permutation"
     )
@@ -322,7 +328,7 @@ test_that("getSignificantQtls (permutation) errors without a nominal threshold",
 
 test_that("getSignificantQtls (bonferroni_filtered) applies the MAF/cis keep filter", {
     r <- qtlAssociationPostprocess(
-        .qapFixture(),
+        .qapDefaultFixture,
         mafCutoff = 0.01,
         cisWindow = 1e6
     )
@@ -339,7 +345,7 @@ test_that("getSignificantQtls (bonferroni_filtered) applies the MAF/cis keep fil
 })
 
 test_that("getSignificantQtls (bonferroni) errors when its columns are absent", {
-    r <- qtlAssociationPostprocess(.qapFixture(), methods = "permutation") # no bonferroni
+    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation") # no bonferroni
     expect_error(getSignificantQtls(r, "bonferroni_original"), "columns absent")
 })
 
@@ -380,7 +386,7 @@ test_that("getSignificantQtls (qvalue) errors when no event q column exists", {
 
 test_that("getSignificantQtls returns an empty GRanges when nothing is significant", {
     r <- qtlAssociationPostprocess(
-        .qapFixture(),
+        .qapDefaultFixture,
         mafCutoff = 0.01,
         cisWindow = 1e6
     )
@@ -426,7 +432,7 @@ test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_
     # Fixture entries: af = (.30, .20, .005, .40), tss/tes_distance = (0, 500, 9e5, 2e6).
     # With mafCutoff 0.01 + cisWindow 1e6 the filtered set keeps only v1, v2
     # (v3 fails MAF, v4 is outside the cis window); the filtered count is 30.
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
         mafCutoff = 0.01,
@@ -445,7 +451,7 @@ test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_
 })
 
 test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on the filtered set", {
-    x <- .qapFixture()
+    x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
         mafCutoff = 0.01,

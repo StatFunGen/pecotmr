@@ -25,7 +25,7 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
         path = "/tmp/tp.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -155,7 +155,7 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
             )
         }
         tl <- data.frame(
-            variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(3L))),
+            variant_id = sprintf("chr1:%d:A:G", 100L * seq_len(3L)),
             pip = c(0.9, 0.5, 0.1),
             stringsAsFactors = FALSE
         )
@@ -1259,7 +1259,7 @@ make_weight_list <- function(p = 20, method_names, seed = 2) {
     setNames(
         map(method_names, function(m) {
             w <- matrix(rnorm(p), ncol = 1)
-            rownames(w) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            rownames(w) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
             colnames(w) <- "outcome_1"
             w
         }),
@@ -1536,7 +1536,7 @@ test_that("ensembleWeights: end-to-end with twasWeightsCv output", {
     n <- 100
     p <- 20
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("sample_", seq_len(n))
 
     beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
@@ -2105,10 +2105,10 @@ context("twasWeights internal helpers (extra)")
 
 .tw_makeFmEntry <- function(method_tag = "susie", n = 3) {
     fineMappingRow(
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
         susieFit = list(payload = method_tag),
         topLoci = data.frame(
-            variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            variant_id = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             pip = seq(0.9, by = -0.1, length.out = n),
             stringsAsFactors = FALSE
         )

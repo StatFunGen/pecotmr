@@ -10,7 +10,7 @@ context("LdData accessors")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -34,7 +34,7 @@ context("LdData accessors")
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
         A1 = rep("A", snp_n),
         A2 = rep("G", snp_n),
-        variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n)))
+        variant_id = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n))
     )
     gr
 }

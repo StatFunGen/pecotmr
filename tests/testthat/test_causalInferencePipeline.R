@@ -12,7 +12,7 @@ context("causalInferencePipeline")
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -596,7 +596,7 @@ context("twas: twasZ and harmonize deprecated wrappers")
 .tz_makeLd <- function(n = 100, p = 8, seed = 7) {
     set.seed(seed)
     X <- matrix(rbinom(n * p, 2, runif(p, 0.2, 0.8)), nrow = n, ncol = p)
-    vid <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    vid <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     colnames(X) <- vid
     af <- colMeans(X) / 2
     Xstd <- sweep(X, 2, 2 * af)
@@ -689,7 +689,7 @@ test_that("twasZ: R path errors when R is missing rows named in weights", {
     d <- .tz_makeLd()
     w <- rnorm(d$p)
     names(w) <- d$vid
-    R_short <- d$R[1:(d$p - 1), 1:(d$p - 1)]
+    R_short <- d$R[seq_len(d$p - 1), seq_len(d$p - 1)]
     expect_error(
         pecotmr:::twasZ(w, rnorm(d$p), R = R_short),
         "R is missing rows for"
@@ -699,7 +699,7 @@ test_that("twasZ: R path errors when R is missing rows named in weights", {
 test_that("twasZ: R path positional alignment errors on dim mismatch", {
     d <- .tz_makeLd()
     w <- rnorm(d$p) # unnamed -> positional alignment
-    R_short <- unname(d$R[1:(d$p - 1), 1:(d$p - 1)])
+    R_short <- unname(d$R[seq_len(d$p - 1), seq_len(d$p - 1)])
     expect_error(
         pecotmr:::twasZ(w, rnorm(d$p), R = R_short),
         "R \\(positional alignment\\).*Must have exactly 8 rows"
@@ -734,7 +734,7 @@ test_that("twasZ: SVD path errors when V is missing rows named in weights", {
     s <- svd(d$Xstd)
     rownames(s$v) <- d$vid[seq_len(nrow(s$v))]
     w <- rnorm(d$p)
-    names(w) <- c(d$vid[1:(d$p - 1)], "ghost")
+    names(w) <- c(d$vid[seq_len(d$p - 1)], "ghost")
     expect_error(
         pecotmr:::twasZ(w, rnorm(d$p), V = s$v, D = s$d, nSketch = d$n),
         "V is missing rows for"
@@ -746,7 +746,7 @@ test_that("twasZ: SVD path positional alignment errors on dim mismatch", {
     s <- svd(d$Xstd)
     # Pass an unnamed V with the wrong nrow.
     w <- rnorm(d$p)
-    V_short <- s$v[1:(d$p - 1), , drop = FALSE]
+    V_short <- s$v[seq_len(d$p - 1), , drop = FALSE]
     expect_error(
         pecotmr:::twasZ(w, rnorm(d$p), V = V_short, D = s$d, nSketch = d$n),
         "V \\(positional alignment\\).*Must have exactly 8 rows"
@@ -889,7 +889,7 @@ test_that("twasZ: computing R from X matches providing R directly", {
     n <- 20
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- paste0("SNP", 1:p)
+    colnames(X) <- paste0("SNP", seq_len(p))
     R <- cor(X)
     weights <- rnorm(p)
     z <- rnorm(p)
@@ -1012,14 +1012,14 @@ test_that("twasZ: matrix weights produce one Z row per column", {
     p <- 5
     k <- 3
     weights <- matrix(rnorm(p * k), nrow = p, ncol = k)
-    rownames(weights) <- paste0("SNP", 1:p)
-    colnames(weights) <- paste0("Cond", 1:k)
+    rownames(weights) <- paste0("SNP", seq_len(p))
+    colnames(weights) <- paste0("Cond", seq_len(k))
     z <- rnorm(p)
     R <- diag(p)
-    rownames(R) <- colnames(R) <- paste0("SNP", 1:p)
+    rownames(R) <- colnames(R) <- paste0("SNP", seq_len(p))
     result <- twasZ(weights, z, R = R)
     expect_equal(nrow(result$Z), k)
-    expect_equal(rownames(result$Z), paste0("Cond", 1:k))
+    expect_equal(rownames(result$Z), paste0("Cond", seq_len(k)))
     expect_equal(colnames(result$Z), c("Z", "pval"))
     # combineMethods omitted -> combined is NULL
     expect_null(result$combined)
@@ -1035,11 +1035,11 @@ test_that("twasZ: combineMethods returns combined p-value summary", {
         rnorm(p * k),
         nrow = p,
         ncol = k,
-        dimnames = list(paste0("SNP", 1:p), paste0("Cond", 1:k))
+        dimnames = list(paste0("SNP", seq_len(p)), paste0("Cond", seq_len(k)))
     )
     z <- rnorm(p)
     R <- diag(p)
-    rownames(R) <- colnames(R) <- paste0("SNP", 1:p)
+    rownames(R) <- colnames(R) <- paste0("SNP", seq_len(p))
     result <- twasZ(weights, z, R = R, combineMethods = "ACAT")
     expect_false(is.null(result$combined))
 })

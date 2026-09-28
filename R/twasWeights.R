@@ -1366,7 +1366,7 @@ setMethod("show", "TwasWeights", function(object) {
 #'   process.
 #' }
 #' @importFrom purrr map
-#' @importFrom BiocParallel bplapply bpworkers MulticoreParam
+#' @importFrom BiocParallel bplapply multicoreWorkers MulticoreParam
 #' @importFrom quadprog solve.QP
 #' @examples
 #' data(multiTraitData)
@@ -1940,7 +1940,7 @@ learnTwasWeights <- function(
 # requested count capped at what is available.
 # @noRd
 .twasResolveCores <- function(numThreads) {
-    avail <- bpworkers(MulticoreParam())
+    avail <- multicoreWorkers()
     min(if (numThreads == -1) avail else numThreads, avail)
 }
 

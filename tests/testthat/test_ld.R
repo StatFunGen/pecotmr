@@ -202,7 +202,7 @@ test_that("partitionLdMatrix correctly partitions multiple blocks", {
     # Check if block IDs are correct
     expect_setequal(
         unique(partitioned$variantIndices$blockId),
-        1:expected_block_count
+        seq_len(expected_block_count)
     )
 
     file.remove(LD_meta_file_path)
@@ -1949,7 +1949,7 @@ test_that("enforceDesignFullRank fallback to correlation pruning works", {
         X[, 3] + rnorm(n, sd = 1e-10),
         X[, 1] + X[, 2] + rnorm(n, sd = 1e-10)
     )
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(ncol(X))))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(ncol(X)))
     C <- matrix(rnorm(n), n, 1)
     result <- enforceDesignFullRank(
         X,
@@ -2096,7 +2096,7 @@ test_that("ldPruneByCorrelation removes highly correlated columns", {
     n <- 50
     p <- 10
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
     result <- ldPruneByCorrelation(X, corThres = 0.9)
     expect_true(ncol(result$X.new) < p)
@@ -2108,10 +2108,10 @@ test_that("ldPruneByCorrelation keeps all columns when uncorrelated", {
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     result <- ldPruneByCorrelation(X, corThres = 0.99)
     expect_equal(ncol(result$X.new), p)
-    expect_equal(result$filter.id, 1:p)
+    expect_equal(result$filter.id, seq_len(p))
 })
 
 test_that("ldPruneByCorrelation preserves colnames for single remaining column", {
@@ -2139,7 +2139,7 @@ test_that("ldPruneByCorrelation strict threshold removes at least as many as len
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 3] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 5] <- X[, 4] + rnorm(n, sd = 0.1)
@@ -3720,7 +3720,7 @@ test_that("ldPruneByCorrelation snprelate backend prunes correlated columns", {
     p <- 6
     X <- matrix(rbinom(n * p, 2, 0.3), n, p)
     X[, 2] <- X[, 1] # perfect LD between columns 1 and 2
-    colnames(X) <- paste0("snp", 1:p)
+    colnames(X) <- paste0("snp", seq_len(p))
     result <- suppressMessages(
         ldPruneByCorrelation(
             X,

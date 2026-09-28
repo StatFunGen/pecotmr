@@ -439,7 +439,7 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
         p,
         k,
         dimnames = list(
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p)),
             paste0("c", seq_len(k))
         )
     )
@@ -568,7 +568,7 @@ test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regressi
     K <- 2L
     nObs <- 400L
     X <- matrix(rnorm(nObs * p), nObs, p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     R <- cor(X)
     Z <- matrix(
         rnorm(p * K),
@@ -1127,9 +1127,12 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:3)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (1:3))
+        )
     )
-    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
+    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", seq_len(n)), "c1"))
     g <- new(
         "IndividualJointGroup",
         conditions = data.frame(
@@ -1270,12 +1273,12 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
             p,
             length(colLabels),
             dimnames = list(
-                sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+                sprintf("chr1:%d:A:G", 100L * seq_len(p)),
                 colLabels
             )
         ),
         nVec = rep(100, length(colLabels)),
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p))
     )
 }
 .je_mockLd <- function(sketch, vids, ...) {
@@ -1751,13 +1754,16 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("chr1:100:A:G", "chr1:200:A:G"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("G1", "G2"))
+        dimnames = list(paste0("s", seq_len(n)), c("G1", "G2"))
     )
     grp <- new(
         "IndividualJointGroup",
@@ -1812,13 +1818,16 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of condi
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("chr1:100:A:G", "chr1:200:A:G"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), c("c1", "c2", "c3"))
+        dimnames = list(paste0("s", seq_len(n)), c("c1", "c2", "c3"))
     )
     g <- new(
         "IndividualJointGroup",
@@ -1904,9 +1913,12 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:3)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (1:3))
+        )
     )
-    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
+    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", seq_len(n)), "c1"))
     g <- new(
         "IndividualJointGroup",
         conditions = data.frame(

@@ -207,7 +207,7 @@ dummy_covar_data <- function(
         covar <- covar[sample(nrow(covar)), ]
     }
     if (row_na) {
-        covar[sample(length(covar), 1), 1:number_of_covars] <- NA
+        covar[sample(length(covar), 1), seq_len(number_of_covars)] <- NA
     }
     return(covar)
 }

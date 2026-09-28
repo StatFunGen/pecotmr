@@ -978,7 +978,7 @@ test_that("getCredibleSetSummary aggregates across a collection with entry ident
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            paste0("chr1:", (seq_len(p)) * 100, ":A:G")
+            paste0("chr1:", seq_len(p) * 100, ":A:G")
         )
     )
     b1 <- sin(seq(0, 2 * pi, length.out = J))

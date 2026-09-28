@@ -131,7 +131,7 @@
 # and keys the output via .cvOutputKey(). `maxNumVariants` (optional) randomly
 # subsamples variants up front to bound compute; `numThreads` parallelises the
 # fold loop (-1 = all cores, 0/1 = serial).
-#' @importFrom BiocParallel bplapply bpworkers MulticoreParam
+#' @importFrom BiocParallel bplapply multicoreWorkers MulticoreParam
 #' @importFrom stats sd lm cor
 #' @importFrom dplyr n_distinct
 #' @noRd
@@ -341,13 +341,12 @@
 }
 
 # @noRd
+# multicoreWorkers() rather than bpworkers(MulticoreParam()): the two answer
+# the same number, but constructing a MulticoreParam costs ~0.6s (almost all
+# of it garbage collection) and this runs on every fit.
 .cvNumCores <- function(numThreads) {
-    numCores <- if (numThreads == -1) {
-        bpworkers(MulticoreParam())
-    } else {
-        numThreads
-    }
-    min(numCores, bpworkers(MulticoreParam()))
+    avail <- multicoreWorkers()
+    min(if (numThreads == -1) avail else numThreads, avail)
 }
 
 # Run each fold (parallel via BiocParallel when >= 2 cores).

@@ -1424,7 +1424,7 @@ test_that("shrinkLd wen_stephens uses genetic map when provided", {
     # Result should be symmetric
     expect_equal(res, t(res))
     # Off-diagonal elements should be shrunk (closer to zero than original)
-    for (i in 1:(p - 1)) {
+    for (i in seq_len(p - 1)) {
         for (j in (i + 1):p) {
             expect_true(abs(res[i, j]) <= abs(R[i, j]) + 1e-10)
         }

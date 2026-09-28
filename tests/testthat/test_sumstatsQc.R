@@ -410,7 +410,7 @@ test_that("formatRaissDf returns correctly formatted data frame", {
         A2 = sample(c("A", "T", "G", "C"), 10, replace = TRUE)
     )
 
-    unknowns <- sample(1:nrow(ref_panel), 5)
+    unknowns <- sample(seq_len(nrow(ref_panel)), 5)
 
     result <- formatRaissDf(imp, ref_panel, unknowns)
 
@@ -761,7 +761,7 @@ test_that("raissSingleMatrixFromX returns NULL with no known overlap", {
     ref_panel <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         stringsAsFactors = FALSE
@@ -794,7 +794,7 @@ test_that("raissSingleMatrixFromX returns known z when nothing to impute", {
     ref_panel <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         stringsAsFactors = FALSE
@@ -802,7 +802,7 @@ test_that("raissSingleMatrixFromX returns known z when nothing to impute", {
     known_zscores <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         z = rnorm(p),
@@ -832,7 +832,7 @@ test_that("raiss with single-matrix LD list dispatches to single matrix path", {
     ref_panel <- data.frame(
         chrom = rep(1, n_variants),
         pos = seq(10, n_variants * 10, 10),
-        variant_id = paste0("rs", 1:n_variants),
+        variant_id = paste0("rs", seq_len(n_variants)),
         A1 = rep("A", n_variants),
         A2 = rep("G", n_variants),
         stringsAsFactors = FALSE
@@ -875,7 +875,7 @@ test_that("raiss with genotype_matrix list processes multiple blocks", {
     ref_panel <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         stringsAsFactors = FALSE
@@ -919,7 +919,7 @@ test_that("raiss with genotype_matrix list returns NULL when all blocks fail", {
     ref_panel <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         stringsAsFactors = FALSE
@@ -1002,7 +1002,7 @@ generate_block_diagonal_test_data <- function(
         block_size <- 5
         n_blocks <- ceiling(n_variants / block_size)
         block_boundaries <- list()
-        for (i in 1:n_blocks) {
+        for (i in seq_len(n_blocks)) {
             startIdx <- (i - 1) * block_size + 1
             endIdx <- min(i * block_size, n_variants)
             block_boundaries[[i]] <- c(startIdx, endIdx)
@@ -1021,8 +1021,8 @@ generate_block_diagonal_test_data <- function(
 
         # Create the block matrix with correlations ONLY within the block
         block_matrix <- matrix(0, nrow = n_block, ncol = n_block)
-        for (a in 1:n_block) {
-            for (b in 1:n_block) {
+        for (a in seq_len(n_block)) {
+            for (b in seq_len(n_block)) {
                 if (a == b) {
                     block_matrix[a, b] <- 1
                 } else {
@@ -1069,7 +1069,7 @@ generate_block_diagonal_test_data <- function(
                 return(1)
             }
             # Count unique variants before this block
-            sum(map_dbl(1:(i - 1), function(j) {
+            sum(map_dbl(seq_len(i - 1), function(j) {
                 # If there's an overlap with the next block, count one less
                 if (
                     j < length(block_boundaries) &&
@@ -1086,7 +1086,7 @@ generate_block_diagonal_test_data <- function(
         }),
         endIdx = map_dbl(seq_along(block_boundaries), function(i) {
             # Count all unique variants up to and including this block
-            sum(map_dbl(1:i, function(j) {
+            sum(map_dbl(seq_len(i), function(j) {
                 # If there's an overlap with the next block, count one less
                 if (
                     j < i &&
@@ -1281,7 +1281,7 @@ test_that("overlapping blocks keep variant IDs but may differ in z", {
     # Test 2: For overlapping blocks, verify boundary variants exist and have valid values
     # Identify boundary variants
     boundary_variants <- character(0)
-    for (i in 1:(length(test_data$block_boundaries) - 1)) {
+    for (i in seq_len(length(test_data$block_boundaries) - 1)) {
         overlap_pos <- test_data$block_boundaries[[i]][2]
         boundary_variants <- c(boundary_variants, paste0("var", overlap_pos))
     }
@@ -1367,7 +1367,7 @@ test_that("raiss handles block boundaries correctly", {
 
     # Check that boundary variants have reasonable values
     boundary_variants <- character(0)
-    for (i in 1:(length(test_data$block_boundaries) - 1)) {
+    for (i in seq_len(length(test_data$block_boundaries) - 1)) {
         overlap_pos <- test_data$block_boundaries[[i]][2]
         boundary_variants <- c(boundary_variants, paste0("var", overlap_pos))
     }
@@ -2181,7 +2181,7 @@ test_that("slalom basic output structure", {
     z <- rnorm(n)
     R <- diag(n)
     # Add some off-diagonal correlations
-    for (i in 1:(n - 1)) {
+    for (i in seq_len(n - 1)) {
         R[i, i + 1] <- 0.3
         R[i + 1, i] <- 0.3
     }
@@ -2214,7 +2214,7 @@ test_that("slalom accepts X matrix instead of R", {
         nrow = n_samples,
         ncol = n_snps
     )
-    colnames(X) <- paste0("snp", 1:n_snps)
+    colnames(X) <- paste0("snp", seq_len(n_snps))
     z <- rnorm(n_snps)
 
     result <- slalom(zScore = z, X = X)
@@ -4921,7 +4921,7 @@ generate_dentist_data <- function(
 ) {
     set.seed(seed)
     cor_matrix <- matrix(0, nrow = nSnps, ncol = nSnps)
-    for (i in 1:(nSnps - 1)) {
+    for (i in seq_len(nSnps - 1)) {
         for (j in (i + 1):nSnps) {
             cor_matrix[i, j] <- runif(1, 0.2, 0.8)
             cor_matrix[j, i] <- cor_matrix[i, j]
@@ -4930,7 +4930,7 @@ generate_dentist_data <- function(
     diag(cor_matrix) <- 1
     ld_matrix <- cov2cor(make.positive.definite(cor_matrix))
     z_scores <- mvrnorm(n = 1, mu = rep(0, nSnps), Sigma = ld_matrix)
-    outlier_indices <- sample(1:nSnps, n_outliers)
+    outlier_indices <- sample(seq_len(nSnps), n_outliers)
     z_scores[outlier_indices] <- rnorm(n_outliers, mean = 0, sd = 5)
     sumstat <- data.frame(
         position = map_dbl(seq(start_pos, end_pos, length.out = nSnps), round),
@@ -4947,7 +4947,7 @@ generate_dentist_single_window_data <- function(
 ) {
     set.seed(seed)
     cor_matrix <- matrix(0, nrow = nSnps, ncol = nSnps)
-    for (i in 1:(nSnps - 1)) {
+    for (i in seq_len(nSnps - 1)) {
         for (j in (i + 1):nSnps) {
             cor_matrix[i, j] <- runif(1, 0.2, 0.8)
             cor_matrix[j, i] <- cor_matrix[i, j]
@@ -4956,7 +4956,7 @@ generate_dentist_single_window_data <- function(
     diag(cor_matrix) <- 1
     ld_matrix <- cov2cor(make.positive.definite(cor_matrix))
     z_scores <- mvrnorm(n = 1, mu = rep(0, nSnps), Sigma = ld_matrix)
-    outlier_indices <- sample(1:nSnps, n_outliers)
+    outlier_indices <- sample(seq_len(nSnps), n_outliers)
     z_scores[outlier_indices] <- rnorm(n_outliers, mean = 0, sd = 5)
     return(list(z_scores = z_scores, ldMat = ld_matrix, nSample = sample_size))
 }
@@ -5019,7 +5019,7 @@ test_that("dentist accepts 'position' and 'zscore' column names", {
     nSnps <- 80
     n_samples <- 100
     cor_matrix <- matrix(0, nrow = nSnps, ncol = nSnps)
-    for (i in 1:(nSnps - 1)) {
+    for (i in seq_len(nSnps - 1)) {
         for (j in (i + 1):nSnps) {
             cor_matrix[i, j] <- runif(1, 0.2, 0.8)
             cor_matrix[j, i] <- cor_matrix[i, j]
@@ -5184,7 +5184,7 @@ test_that("dentistSingleWindow dedup path with message for duplicates", {
     nSnps <- 80
     n_samples <- 100
     cor_matrix <- matrix(0, nrow = nSnps, ncol = nSnps)
-    for (i in 1:(nSnps - 1)) {
+    for (i in seq_len(nSnps - 1)) {
         for (j in (i + 1):nSnps) {
             cor_matrix[i, j] <- runif(1, 0.2, 0.8)
             cor_matrix[j, i] <- cor_matrix[i, j]
@@ -5279,11 +5279,11 @@ test_that("segment_by_dist fill regions cover all input positions", {
     res <- pecotmr:::segmentByDist(pos, maxDist = 2000000, minDim = 10)
     # Collect all fill region indices
     covered <- integer(0)
-    for (k in 1:nrow(res)) {
+    for (k in seq_len(nrow(res))) {
         covered <- c(covered, res$fillStartIdx[k]:(res$fillEndIdx[k] - 1L))
     }
     # Every position from 1 to length(pos) should be covered
-    expect_equal(sort(unique(covered)), 1:length(pos))
+    expect_equal(sort(unique(covered)), seq_along(pos))
 })
 
 test_that("segment_by_dist errors on empty positions", {
@@ -5352,7 +5352,7 @@ test_that("segment_by_count produces valid windows", {
     # All window ends should be <= length(pos) + 1
     expect_true(all(res$windowEndIdx <= length(pos) + 1))
     # Fill regions should be within windows
-    for (k in 1:nrow(res)) {
+    for (k in seq_len(nrow(res))) {
         expect_true(res$fillStartIdx[k] >= res$windowStartIdx[k])
         expect_true(res$fillEndIdx[k] <= res$windowEndIdx[k])
     }
@@ -5362,10 +5362,10 @@ test_that("segment_by_count fill regions cover all positions", {
     pos <- seq(1000000, by = 1000, length.out = 500)
     res <- pecotmr:::segmentByCount(pos, maxCount = 100)
     covered <- integer(0)
-    for (k in 1:nrow(res)) {
+    for (k in seq_len(nrow(res))) {
         covered <- c(covered, res$fillStartIdx[k]:(res$fillEndIdx[k] - 1L))
     }
-    expect_equal(sort(unique(covered)), 1:length(pos))
+    expect_equal(sort(unique(covered)), seq_along(pos))
 })
 
 test_that("segment_by_count handles centromeric gap", {
@@ -5379,10 +5379,10 @@ test_that("segment_by_count handles centromeric gap", {
     expect_true(nrow(res) >= 2)
     # Fill regions should still cover all positions
     covered <- integer(0)
-    for (k in 1:nrow(res)) {
+    for (k in seq_len(nrow(res))) {
         covered <- c(covered, res$fillStartIdx[k]:(res$fillEndIdx[k] - 1L))
     }
-    expect_equal(sort(unique(covered)), 1:length(pos))
+    expect_equal(sort(unique(covered)), seq_along(pos))
 })
 
 test_that("segment_by_count skips blocks smaller than half max_count", {
@@ -5444,7 +5444,7 @@ test_that("merge_windows returns exactly N rows", {
     )
     dentist_result_by_window <- list()
     suppressWarnings({
-        for (k in 1:nrow(window_divided_res)) {
+        for (k in seq_len(nrow(window_divided_res))) {
             idx_range <- window_divided_res$windowStartIdx[
                 k
             ]:(window_divided_res$windowEndIdx[k] - 1L)
@@ -5594,21 +5594,21 @@ test_that("segment_by_dist and segment_by_count agree on even spacing", {
 
     # Both should cover all positions
     covered_dist <- integer(0)
-    for (k in 1:nrow(res_dist)) {
+    for (k in seq_len(nrow(res_dist))) {
         covered_dist <- c(
             covered_dist,
             res_dist$fillStartIdx[k]:(res_dist$fillEndIdx[k] - 1L)
         )
     }
     covered_count <- integer(0)
-    for (k in 1:nrow(res_count)) {
+    for (k in seq_len(nrow(res_count))) {
         covered_count <- c(
             covered_count,
             res_count$fillStartIdx[k]:(res_count$fillEndIdx[k] - 1L)
         )
     }
-    expect_equal(sort(unique(covered_dist)), 1:n)
-    expect_equal(sort(unique(covered_count)), 1:n)
+    expect_equal(sort(unique(covered_dist)), seq_len(n))
+    expect_equal(sort(unique(covered_count)), seq_len(n))
 })
 
 test_that("both windowing modes produce same dentist results on uniform data", {
@@ -6236,7 +6236,7 @@ test_that("raissSingleMatrix coerces a data.frame LD matrix and is verbose", {
     ref_panel <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         stringsAsFactors = FALSE
@@ -6361,7 +6361,7 @@ test_that("raissSingleMatrixFromX emits no-known / no-unknown messages", {
     ref_panel <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         stringsAsFactors = FALSE
@@ -6392,7 +6392,7 @@ test_that("raissSingleMatrixFromX emits no-known / no-unknown messages", {
     all_known <- data.frame(
         chrom = rep(1, p),
         pos = seq(10, p * 10, 10),
-        variant_id = paste0("rs", 1:p),
+        variant_id = paste0("rs", seq_len(p)),
         A1 = rep("A", p),
         A2 = rep("G", p),
         z = rnorm(p),
@@ -6565,8 +6565,8 @@ ssqcOverlapImputedBlocks <- function(seed = 5) {
     mkBlock <- function(ids) {
         nb <- length(ids)
         m <- matrix(0, nb, nb)
-        for (a in 1:nb) {
-            for (b in 1:nb) {
+        for (a in seq_len(nb)) {
+            for (b in seq_len(nb)) {
                 m[a, b] <- if (a == b) 1 else 0.9^abs(a - b)
             }
         }

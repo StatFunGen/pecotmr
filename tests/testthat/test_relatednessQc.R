@@ -70,7 +70,7 @@ test_that("large component pre-pruning removes individuals", {
     n <- 30
     ids <- paste0("IND", seq_len(n))
     rel <- data.frame(
-        IID1 = ids[1:(n - 1)],
+        IID1 = ids[seq_len(n - 1)],
         IID2 = ids[2:n],
         PI_HAT = rep(0.20, n - 1),
         stringsAsFactors = FALSE

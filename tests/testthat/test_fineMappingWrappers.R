@@ -358,7 +358,7 @@ test_that("init_prior_sd returns n standard deviations", {
 
 # Helper: build a minimal synthetic SuSiE-family output for post-processing
 make_fake_susie_output <- function(p = 5, L = 3, has_V = TRUE) {
-    vnames <- paste0("chr1:", 1:p, ":A:G")
+    vnames <- paste0("chr1:", seq_len(p), ":A:G")
     out <- list(
         pip = setNames(rep(0.01, p), vnames),
         alpha = matrix(1 / p, nrow = L, ncol = p),
@@ -411,8 +411,8 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
     p <- 5
     L <- 3
     R <- 2
-    vnames <- paste0("chr1:", 1:p, ":A:G")
-    cnames <- paste0("cond_", 1:R)
+    vnames <- paste0("chr1:", seq_len(p), ":A:G")
+    cnames <- paste0("cond_", seq_len(R))
     fake_coef <- matrix(rnorm((p + 1) * R), nrow = p + 1, ncol = R)
 
     fake_output <- list(
@@ -2829,7 +2829,7 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     b1 <- sin(seq(0, 2 * pi, length.out = J))

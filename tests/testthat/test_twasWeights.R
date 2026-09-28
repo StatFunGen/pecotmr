@@ -6,7 +6,7 @@ context("twasWeights")
 make_data <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
     set.seed(seed)
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("sample_", seq_len(n))
 
     beta <- rep(0, p)
@@ -653,7 +653,7 @@ test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", 
     n <- 30
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n), ncol = 1)
     rownames(Y) <- rownames(X)
@@ -685,7 +685,7 @@ test_that("twasWeightsCv: dataDrivenPriorMatricesCv is plumbed through", {
     n <- 20
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -738,7 +738,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     # all columns valid (no zero variance)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     Y <- matrix(rnorm(n * 2), nrow = n, ncol = 2)
     colnames(Y) <- c("y1", "y2")
 
@@ -753,7 +753,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
                 ncol = ncol(Y)
             )
             rownames(m) <- c(
-                sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+                sprintf("chr1:%d:A:G", 100L * seq_len(p)),
                 "extra1",
                 "extra2"
             )
@@ -771,7 +771,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
     expect_equal(ncol(.weightsByMethod(result, "mrmashWeights")), 2)
     expect_equal(
         rownames(.weightsByMethod(result, "mrmashWeights")),
-        sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+        sprintf("chr1:%d:A:G", 100L * seq_len(p))
     )
 })
 
@@ -1399,7 +1399,7 @@ test_that("twasWeightsCv: mvsusie per-fold reweighted prior is plumbed (verbose=
     n <- 24
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -1448,7 +1448,7 @@ test_that("twasWeightsCv: retainFits forwards retainFit to a multivariate fitter
     n <- 24
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -1513,7 +1513,7 @@ test_that("learnTwasWeights: multivariate fitter with retainFits + verbose=2 (fi
     n <- 24
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -1611,11 +1611,11 @@ test_that("twasPredict: accepts a TwasWeights S4 collection", {
     w1 <- rnorm(p)
     w2 <- rnorm(p)
     e1 <- twasWeightsRow(
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = w1
     )
     e2 <- twasWeightsRow(
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = w2
     )
     tw <- TwasWeights(

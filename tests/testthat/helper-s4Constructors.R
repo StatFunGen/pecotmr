@@ -62,7 +62,7 @@ context("s4Constructors")
     dataType = "expression"
 ) {
     twasWeightsRow(
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = rnorm(p),
         standardized = standardized,
         dataType = dataType

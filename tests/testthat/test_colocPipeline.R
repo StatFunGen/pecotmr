@@ -13,7 +13,7 @@ context("colocPipeline")
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -36,7 +36,7 @@ context("colocPipeline")
     tl <- data.frame(
         variant_id = variant_ids,
         chrom = rep("1", n),
-        pos = as.integer(100 * (1:n)),
+        pos = as.integer(100 * seq_len(n)),
         A1 = rep("G", n),
         A2 = rep("A", n),
         N = rep(1000, n),

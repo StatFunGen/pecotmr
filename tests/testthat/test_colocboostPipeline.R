@@ -95,7 +95,7 @@ context("colocboostPipeline (S4 dispatch)")
         path = "/tmp/cb.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -666,7 +666,10 @@ test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutof
         rbinom(n * p, 2, 0.3),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
+        )
     )
     Y <- cbind(
         sig = X[, 1] * 1.5 + rnorm(n, sd = 0.3), # strong signal at v1

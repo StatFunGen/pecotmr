@@ -310,7 +310,7 @@ test_that("computeCoefficientsGlasso runs without Xnew", {
     r <- 3
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     result <- pecotmr:::computeCoefficientsGlasso(
         X,
         Y,
@@ -334,7 +334,7 @@ test_that("computeCoefficientsGlasso runs with Xnew", {
     r <- 3
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     Xnew <- matrix(rnorm(10 * p), nrow = 10, ncol = p)
     result <- pecotmr:::computeCoefficientsGlasso(
         X,
@@ -361,7 +361,7 @@ test_that("computeCoefficientsUnivGlmnet runs without Xnew", {
     r <- 2
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     result <- pecotmr:::computeCoefficientsUnivGlmnet(
         X,
         Y,
@@ -386,7 +386,7 @@ test_that("computeCoefficientsUnivGlmnet runs with Xnew", {
     r <- 2
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     Xnew <- matrix(rnorm(8 * p), nrow = 8, ncol = p)
     result <- pecotmr:::computeCoefficientsUnivGlmnet(
         X,
@@ -411,7 +411,7 @@ test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
     r <- 2
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     Y[1:5, 1] <- NA # introduce missing values in one condition
     result <- pecotmr:::computeCoefficientsUnivGlmnet(
         X,

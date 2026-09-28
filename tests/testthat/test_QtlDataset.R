@@ -1988,7 +1988,7 @@ test_that("dentist accepts zscore column name variant", {
 test_that("dentist errors when sum_stat missing required columns", {
     skip_if_not_installed("pgenlibr")
     X <- load_test_genotype()$X
-    bad_stat <- data.frame(x = 1:ncol(X), y = rnorm(ncol(X)))
+    bad_stat <- data.frame(x = seq_len(ncol(X)), y = rnorm(ncol(X)))
     expect_error(dentist(bad_stat, X = X), "missing either")
 })
 

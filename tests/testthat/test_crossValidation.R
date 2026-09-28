@@ -32,7 +32,7 @@ mk_xy <- function(n = 30, p = 6, k = 1, seed = 1) {
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     Y <- matrix(
@@ -326,7 +326,7 @@ test_that("numThreads = -1 asks BiocParallel for the worker count", {
     # -1 means "all available"; anything else is capped at what is available.
     expect_equal(
         pecotmr:::.cvNumCores(-1),
-        BiocParallel::bpworkers(BiocParallel::MulticoreParam())
+        BiocParallel::multicoreWorkers()
     )
     expect_equal(pecotmr:::.cvNumCores(1), 1)
 })
