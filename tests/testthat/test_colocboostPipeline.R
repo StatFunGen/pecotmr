@@ -1416,3 +1416,7 @@ test_that(".cbAppendGwasPairs disambiguates a colliding study key", {
     expect_equal(out[["dup"]], "QTL")
     expect_equal(out[["dup.1"]], "GWAS")
 })
+
+test_that(".cbConcat answers an empty list for no pieces", {
+    expect_identical(pecotmr:::.cbConcat(list()), list())
+})

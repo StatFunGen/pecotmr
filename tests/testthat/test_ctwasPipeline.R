@@ -3758,3 +3758,9 @@ test_that("asCtwasResult: keepSnps must be a flag", {
         "keepSnps.*logical flag"
     )
 })
+
+test_that("the ctwas concat helpers answer an empty vector of their own type", {
+    expect_identical(pecotmr:::.ctwasConcat(list()), list())
+    expect_identical(pecotmr:::.ctwasConcatInt(list()), integer(0))
+    expect_identical(pecotmr:::.ctwasConcatChr(list()), character(0))
+})

@@ -222,3 +222,7 @@ test_that("MultiStudyQtlDataset: qtlDatasets guard fires on a non-list", {
         "qtlDatasets.*Must be of type 'list'"
     )
 })
+
+test_that(".msqdConcat answers an empty list for no pieces", {
+    expect_identical(pecotmr:::.msqdConcat(list()), list())
+})

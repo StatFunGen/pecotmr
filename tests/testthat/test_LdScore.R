@@ -194,3 +194,9 @@ test_that("buildLdScore: argument guards fire", {
         "keepLdMatrices.*May not be NA"
     )
 })
+
+test_that(".ldScoreVector answers all-zero scores when there are no blocks", {
+    # Variants in no block keep a zero score, so no blocks at all is a
+    # zero vector of the full variant length rather than an error.
+    expect_identical(pecotmr:::.ldScoreVector(list(), NULL, 3L), numeric(3))
+})

@@ -3269,3 +3269,7 @@ test_that("outlier detection reports a singular trait covariance", {
     expect_match(conditionMessage(cnd), "singular")
     expect_match(conditionMessage(cnd), "pseudo-inverse")
 })
+
+test_that(".qtlConcat answers an empty list for no pieces", {
+    expect_identical(pecotmr:::.qtlConcat(list()), list())
+})

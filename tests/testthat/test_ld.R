@@ -5066,3 +5066,32 @@ test_that(".panelAfreqMaf returns NULL when no sidecar exists at all", {
         )
     )
 })
+
+test_that(".ldConcatChr answers character(0) for no pieces", {
+    expect_identical(pecotmr:::.ldConcatChr(list()), character(0))
+})
+
+test_that(".ldTrimTrailingNull answers an empty list when nothing is filled", {
+    expect_identical(pecotmr:::.ldTrimTrailingNull(list(NULL, NULL)), list())
+})
+
+test_that("the ldSketch cross-checks are no-ops when a side has no variants", {
+    # A zero-variant panel -- what an emptied object carries -- contradicts
+    # nothing, so there is nothing to compare and the check returns quietly.
+    local_mocked_bindings(.ldSketchA1 = function(x) character(0))
+    expect_null(pecotmr:::.ldSketchCheckAlleleCoding(
+        NULL,
+        NULL,
+        integer(0),
+        integer(0),
+        "testPipeline",
+        ""
+    ))
+})
+
+test_that(".ldSketchCheckOverlap is a no-op when a side has no variants", {
+    local_mocked_bindings(.ldSketchVariantKeys = function(x) character(0))
+    expect_null(
+        pecotmr:::.ldSketchCheckOverlap(NULL, NULL, "testPipeline", "")
+    )
+})

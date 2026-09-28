@@ -4765,3 +4765,14 @@ test_that(".fmExtractZn keeps z, ids and n aligned after filtering", {
     expect_equal(filtered$z, unfiltered$z[keep])
     expect_equal(filtered$variantIds, unfiltered$variantIds[keep])
 })
+
+test_that(".fmLeanFoldFit passes a NULL fit straight through", {
+    expect_null(pecotmr:::.fmLeanFoldFit(NULL, "susie"))
+})
+
+test_that(".fmPerStudy / .fmSumStats answer NULL when no method fits the kind", {
+    # No individual / sumstat method in the list means there is nothing for
+    # that route to run, which is a NULL rather than an empty result object.
+    expect_null(pecotmr:::.fmPerStudy(NULL, list(methods = list())))
+    expect_null(pecotmr:::.fmSumStats(NULL, list(methods = list())))
+})

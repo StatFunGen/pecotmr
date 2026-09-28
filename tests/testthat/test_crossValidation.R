@@ -345,3 +345,7 @@ test_that("a seed makes a CV call reproducible without leaking RNG state", {
     invisible(f())
     expect_equal(runif(1), before)
 })
+
+test_that(".cvPartitionKey answers NULL when there is no partition to key", {
+    expect_null(pecotmr:::.cvPartitionKey(NULL))
+})

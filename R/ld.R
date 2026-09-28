@@ -1316,18 +1316,6 @@ loadLdFromGenotype <- function(
     length(.ldSketchSampleIds(x))
 }
 
-# The BP / A1 / A2 vectors under the names the panel-comparison error messages
-# report, so the message can name the column a user would recognise.
-# @noRd
-.ldRangesColumns <- function(gr) {
-    mc <- S4Vectors::mcols(gr)
-    list(
-        BP = as.character(GenomicRanges::start(gr)),
-        A1 = as.character(mc$A1),
-        A2 = as.character(mc$A2)
-    )
-}
-
 # Dosage for a variant subset, samples x variants.
 #
 # Read through the assay, so the DelayedArray seed -- and with it the file

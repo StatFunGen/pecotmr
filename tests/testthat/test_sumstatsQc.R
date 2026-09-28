@@ -8225,3 +8225,7 @@ test_that("sumstatsQc: argument guards fire", {
         "highCorrCols.*Must be of type 'character'"
     )
 })
+
+test_that(".entrySnpIds answers character(0) for a NULL entry", {
+    expect_identical(pecotmr:::.entrySnpIds(NULL), character(0))
+})

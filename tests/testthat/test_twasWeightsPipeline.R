@@ -3980,3 +3980,42 @@ test_that(".twasRunMultivariateGrid returns NULL when every region is empty", {
         )
     )
 })
+
+test_that(".fmrAnyCvResult reports whether any row carries cross-validation", {
+    # Not a fine-mapping result at all, and a result whose rows carry no
+    # cvResult, both answer FALSE; one row with a cvResult answers TRUE.
+    expect_false(pecotmr:::.fmrAnyCvResult(NULL))
+    expect_false(pecotmr:::.fmrAnyCvResult("not a result"))
+    tl <- data.frame(
+        variant_id = "chr1:100:A:G",
+        pip = 0.5,
+        stringsAsFactors = FALSE
+    )
+    bare <- fineMappingRow("chr1:100:A:G", list(), tl)
+    noCv <- QtlFineMappingResult(
+        study = "S",
+        context = "C",
+        trait = "T",
+        method = "susie",
+        entry = list(bare)
+    )
+    expect_false(pecotmr:::.fmrAnyCvResult(noCv))
+    withCv <- QtlFineMappingResult(
+        study = "S",
+        context = "C",
+        trait = "T",
+        method = "susie",
+        entry = list(fineMappingRow(
+            "chr1:100:A:G",
+            list(),
+            tl,
+            cvResult = list(
+                samplePartition = data.frame(
+                    Sample = c("s1", "s2"),
+                    Fold = c(1L, 2L)
+                )
+            )
+        ))
+    )
+    expect_true(pecotmr:::.fmrAnyCvResult(withCv))
+})

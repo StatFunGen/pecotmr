@@ -1916,3 +1916,13 @@ test_that("twasZ: nSketch / combineMethods guards fire", {
         "combineMethods.*Must be of type 'character'"
     )
 })
+
+# ---------------------------------------------------------------------------
+# Empty-input guards. These exist because list_c() errors on an empty list,
+# so the guard is the contract: nothing in, empty of the right type out.
+# ---------------------------------------------------------------------------
+
+test_that("the concat helpers answer an empty vector of their own type", {
+    expect_identical(pecotmr:::.cipConcatInt(list()), integer(0))
+    expect_identical(pecotmr:::.cipConcat(list()), list())
+})

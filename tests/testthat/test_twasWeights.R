@@ -2025,3 +2025,8 @@ test_that(".twasSusieTokensRequested matches both method spellings", {
         0L
     )
 })
+
+test_that("the twas lookup helpers answer NULL when the token is absent", {
+    expect_null(pecotmr:::.twasMethodArgsFor(list(), "susie"))
+    expect_null(pecotmr:::.twasFoldFitsFor(NULL, "susie"))
+})

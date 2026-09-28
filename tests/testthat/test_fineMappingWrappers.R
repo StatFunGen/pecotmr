@@ -4485,3 +4485,41 @@ test_that("fitSusieInfThenSusieRss: argument guards fire", {
         "fittedModels.*Must be of type 'list'"
     )
 })
+
+test_that(".fmwConcat answers an empty list for no pieces", {
+    expect_identical(pecotmr:::.fmwConcat(list()), list())
+})
+
+test_that(".ufOverlapPairs needs at least two sets to form a pair", {
+    expect_identical(pecotmr:::.ufOverlapPairs(list()), list())
+    expect_identical(pecotmr:::.ufOverlapPairs(list(1L)), list())
+})
+
+test_that(".btlPrimaryEffects answers integer(0) with no primary CS", {
+    # No coverage values at all, and a coverage that matches no CS: both mean
+    # there is no primary set whose effects could be named.
+    expect_identical(
+        pecotmr:::.btlPrimaryEffects(
+            c(0.95),
+            list(covSorted = numeric(0)),
+            list()
+        ),
+        integer(0)
+    )
+    expect_identical(
+        pecotmr:::.btlPrimaryEffects(c(0.95), list(covSorted = 0.5), list()),
+        integer(0)
+    )
+})
+
+test_that(".btlCondLfsrForSet answers NULL for an unusable effect index", {
+    clf <- array(0, dim = c(1L, 2L, 1L))
+    # effect index out of range for clf's first dimension
+    expect_null(
+        pecotmr:::.btlCondLfsrForSet(1L, list(1L), c(99L), clf, 1L, 2L)
+    )
+    # in range, but the set names no variant inside 1..nV
+    expect_null(
+        pecotmr:::.btlCondLfsrForSet(1L, list(integer(0)), c(1L), clf, 1L, 2L)
+    )
+})

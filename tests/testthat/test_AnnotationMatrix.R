@@ -198,3 +198,13 @@ test_that("validity names the metadata columns it requires", {
         "Colnames must include the elements \\{'name','tier','type'\\}"
     )
 })
+
+test_that("AnnotationMatrix keeps the ranges as given when genome is absent", {
+    # A NULL genome leaves the ranges' seqinfo alone rather than setting it.
+    gr <- make_test_granges(10)
+    meta <- make_test_annotation_meta()
+    mat <- matrix(0, nrow = 10, ncol = 3)
+    am <- AnnotationMatrix(mat, gr, meta, genome = NULL)
+    expect_s4_class(am, "AnnotationMatrix")
+    expect_true(all(is.na(GenomeInfoDb::genome(am))))
+})

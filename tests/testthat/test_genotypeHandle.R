@@ -919,3 +919,7 @@ test_that("an unresolvable bundled resource reference is an error", {
         "cannot resolve bundled genotype resource"
     )
 })
+
+test_that(".chromMetaPaths answers character(0) for no shards", {
+    expect_identical(pecotmr:::.chromMetaPaths(list()), character(0))
+})

@@ -2077,3 +2077,28 @@ test_that("mashWrapper: argument guards fire", {
     )
     expect_error(mergeMashData("nope", list()), "Must be of type 'list'")
 })
+
+test_that(".mashConcatChr answers character(0) for no pieces", {
+    expect_identical(pecotmr:::.mashConcatChr(list()), character(0))
+})
+
+test_that(".mashPrefixRownames leaves an absent or empty matrix alone", {
+    expect_null(pecotmr:::.mashPrefixRownames(NULL, "ctx"))
+    empty <- matrix(numeric(0), nrow = 0L, ncol = 1L)
+    expect_identical(pecotmr:::.mashPrefixRownames(empty, "ctx"), empty)
+})
+
+test_that(".mashProcessZ skips the missing-rate filter when none is asked for", {
+    # A NULL filterByMissingRate means "clean the values, keep every row".
+    z <- matrix(c(1, NA, 3, 4), nrow = 2, dimnames = list(c("v1", "v2"), NULL))
+    out <- pecotmr:::.mashProcessZ(z, NULL)
+    expect_equal(nrow(out), 2L)
+    expect_equal(unname(out[2, 1]), 0) # NA replaced by 0, row retained
+})
+
+test_that(".mashFilterZ leaves a list with no z-carrying partition alone", {
+    # list_assign() would CREATE an absent component as NULL, so a list with
+    # nothing to rewrite has to come back identical.
+    datList <- list(other = list(bhat = matrix(1)))
+    expect_identical(pecotmr:::.mashFilterZ(datList, 0.5, NULL), datList)
+})

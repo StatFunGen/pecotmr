@@ -324,3 +324,20 @@ test_that(".sldscFallbackMessage says '(none)' with no baseline categories", {
         "baseline \\(0\\): \\(none\\)"
     )
 })
+
+test_that(".sldscRelabelMetaEntry passes through what it cannot relabel", {
+    # No entry, or an entry with no `target` column, has nothing to relabel.
+    expect_null(pecotmr:::.sldscRelabelMetaEntry(NULL, c(a = "b")))
+    noTarget <- data.frame(other = "x", stringsAsFactors = FALSE)
+    expect_identical(
+        pecotmr:::.sldscRelabelMetaEntry(noTarget, c(a = "b")),
+        noTarget
+    )
+})
+
+test_that(".sldscRelabelOneTrait relabels nothing without a target summary", {
+    # No summary, or a summary with no `target` column, contributes no
+    # relabelled summary to the result.
+    out <- pecotmr:::.sldscRelabelOneTrait(list(), c(a = "b"))
+    expect_false(is_in("summary", names(out)))
+})

@@ -631,3 +631,7 @@ test_that(".twrRowResolveWeights drops rows whose weights are all NA", {
     expect_equal(kept$variantIds, "chr1:2:C:T")
     expect_equal(kept$weights, 0.5)
 })
+
+test_that(".ssConcatChr answers character(0) for no pieces", {
+    expect_identical(pecotmr:::.ssConcatChr(list()), character(0))
+})

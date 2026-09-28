@@ -2651,3 +2651,12 @@ test_that(".buildJointSumstatZMatrix honours a missingness cutoff", {
         length(.bjz_build(ss)$variantIds)
     )
 })
+
+test_that(".fmScopeUserLimit answers NULL for an absent limit", {
+    expect_null(pecotmr:::.fmScopeUserLimit(NULL, "s1", TRUE))
+})
+
+test_that(".msFoldStudyResults answers NULL when every fold is empty", {
+    expect_null(pecotmr:::.msFoldStudyResults(list(), NULL))
+    expect_null(pecotmr:::.msFoldStudyResults(list(NULL, NULL), NULL))
+})

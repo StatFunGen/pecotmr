@@ -2936,3 +2936,12 @@ test_that(".jointCvPartition rejects a partition conflicting with the CV's", {
         "differs from the fine-mapping"
     )
 })
+
+test_that(".twasEnsembleCollect answers empty parts when no token contributes", {
+    # No tokens means nothing to gather, which is empty containers of the
+    # right shape rather than NULL.
+    out <- pecotmr:::.twasEnsembleCollect(NULL, list(), character(0))
+    expect_identical(out$preds, list())
+    expect_identical(out$wts, list())
+    expect_identical(out$rsq, c())
+})

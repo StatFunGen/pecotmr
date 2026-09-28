@@ -73,18 +73,6 @@ setClass(
 }
 
 # @noRd
-.msqdCheckDatasetNames <- function(nm) {
-    isEmpty <- any(str_length(nm) == 0L, na.rm = TRUE)
-    if (is.null(nm) || isEmpty || any(is.na(nm))) {
-        return("'qtlDatasets' must be a named list with non-empty names")
-    }
-    if (n_distinct(nm) < length(nm)) {
-        return("names of 'qtlDatasets' must be unique")
-    }
-    NULL
-}
-
-# @noRd
 .msqdCheckDatasetTypes <- function(qtlDatasets) {
     if (any(!map_lgl(qtlDatasets, .msqdIsQtlDataset))) {
         return("every element of 'qtlDatasets' must be a QtlDataset")

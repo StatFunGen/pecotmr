@@ -663,3 +663,11 @@ test_that(".appendTraitDistances is a no-op without a trait position", {
     # No anchor to measure TSS/TES distance from, so entries pass through.
     expect_identical(pecotmr:::.appendTraitDistances(entry, NULL), entry)
 })
+
+test_that(".qssAppendTraitDist returns an empty entry untouched", {
+    # A variant set with no ranges has no positions to take a distance from.
+    empty <- GenomicRanges::GRanges()
+    out <- pecotmr:::.qssAppendTraitDist(1L, list(empty), NULL)
+    expect_s4_class(out, "GRanges")
+    expect_length(out, 0L)
+})

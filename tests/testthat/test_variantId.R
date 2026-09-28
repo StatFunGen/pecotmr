@@ -1242,3 +1242,18 @@ test_that("regionToDf: argument guards fire", {
         "colnames.*Must have length 3"
     )
 })
+
+test_that("asGranges leaves an already chr-prefixed chromosome alone", {
+    # The prefix is added only when absent; a frame that already carries it
+    # must not become "chrchr1".
+    gr <- asGranges(data.frame(
+        chrom = c("chr1", "chr2"),
+        start = c(100L, 200L),
+        end = c(150L, 250L),
+        stringsAsFactors = FALSE
+    ))
+    expect_identical(
+        as.character(GenomicRanges::seqnames(gr)),
+        c("chr1", "chr2")
+    )
+})
