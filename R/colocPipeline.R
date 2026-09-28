@@ -130,7 +130,8 @@
 #'   between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized (LBF
 #'   is coding-invariant, so no sign change is needed); when FALSE, match on
 #'   exact alleles only, so a ref/alt swap is treated as a distinct variant.
-#' @param ... Additional arguments forwarded to \code{coloc::coloc.bf_bf}.
+#' @param colocArgs Optional named list of additional arguments forwarded
+#'   to \code{coloc::coloc.bf_bf}.
 #' @return A \code{\linkS4class{ColocResult}}: one element per tested
 #'   (first-side credible set, second-side credible set, block) pair, holding
 #'   that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
@@ -178,70 +179,106 @@ colocPipeline <- function(
     p12Max = 1e-3,
     adjustPips = TRUE,
     alleleFlip = TRUE,
-    ...
+    colocArgs = list()
 ) {
-    p <- as.list(environment())
-    p$dots <- list(...)
-    p$useEnrichment <- !is.null(enrichment)
-    .colocValidateInputs(p)
-    p$gwasFmr <- .colocResolveGwasFmr(gwasInput, finemappingMethods)
+    useEnrichment <- !is.null(enrichment)
+    .colocValidateInputs(
+        gwasInput = gwasInput,
+        qtlFineMappingResult = qtlFineMappingResult,
+        enrichment = enrichment,
+        useEnrichment = useEnrichment
+    )
+    rawGwasFmr <- .colocResolveGwasFmr(gwasInput, finemappingMethods)
     .colocRequireMatchingLdSketches(
         getLdSketch(qtlFineMappingResult),
-        getLdSketch(p$gwasFmr)
+        getLdSketch(rawGwasFmr)
     )
-    p <- .colocMaybeAdjustPips(p)
+    adjusted <- .colocMaybeAdjustPips(
+        adjustPips = adjustPips,
+        qtlFineMappingResult = qtlFineMappingResult,
+        gwasFmr = rawGwasFmr
+    )
+    qtlFineMappingResult <- adjusted$qtlFineMappingResult
+    gwasFmr <- adjusted$gwasFmr
     # Pre-extract per-GWAS-tuple LBF matrices: group the GWAS FMR by study,
     # stack each study's LBF rows, and store per-(study, method) batched
     # matrices (reproduces the legacy row-wise combine per xQTL).
-    p$gwasLbfByPair <- .colocPreextractGwasLbf(
-        p$gwasFmr,
+    gwasLbfByPair <- .colocPreextractGwasLbf(
+        gwasFmr,
         filterLbfCs,
         filterLbfCsSecondary,
         filterLbfCsConcentration,
         priorTol
     )
-    if (length(p$gwasLbfByPair) == 0L) {
-        return(.colocEarlyReturn(p))
+    if (length(gwasLbfByPair) == 0L) {
+        return(.colocEarlyReturn(
+            useEnrichment = useEnrichment,
+            qtlFineMappingResult = qtlFineMappingResult,
+            gwasFmr = gwasFmr,
+            gwasInput = gwasInput,
+            returnGwasFineMapping = returnGwasFineMapping
+        ))
     }
     results <- list_flatten(map(
-        seq_len(nrow(p$qtlFineMappingResult)),
+        seq_len(nrow(qtlFineMappingResult)),
         .colocScoreQtlTuple,
-        p = p
+        qtlFineMappingResult = qtlFineMappingResult,
+        gwasLbfByPair = gwasLbfByPair,
+        filterLbfCs = filterLbfCs,
+        filterLbfCsSecondary = filterLbfCsSecondary,
+        filterLbfCsConcentration = filterLbfCsConcentration,
+        priorTol = priorTol,
+        useEnrichment = useEnrichment,
+        enrichment = enrichment,
+        p12 = p12,
+        p12Max = p12Max,
+        p1 = p1,
+        p2 = p2,
+        alleleFlip = alleleFlip,
+        colocArgs = colocArgs
     ))
-    .colocFinalize(results, p)
+    .colocFinalize(
+        results,
+        useEnrichment = useEnrichment,
+        qtlFineMappingResult = qtlFineMappingResult,
+        gwasFmr = gwasFmr,
+        gwasInput = gwasInput,
+        returnGwasFineMapping = returnGwasFineMapping
+    )
 }
 
 # Validate the enrichment table (when supplied), the coloc package, and the
 # input object classes.
 # @noRd
-.colocValidateInputs <- function(p) {
-    if (p$useEnrichment) {
-        .colocValidateEnrichment(p$enrichment)
+.colocValidateInputs <- function(
+    gwasInput,
+    qtlFineMappingResult,
+    enrichment,
+    useEnrichment
+) {
+    if (useEnrichment) {
+        .colocValidateEnrichment(enrichment)
     }
     if (!requireNamespace("coloc", quietly = TRUE)) {
-        msg <- glue(
-            "Package 'coloc' is required for colocPipeline. ",
-            "Install with: install.packages('coloc')."
-        )
-        abort(msg)
+        abort("Package 'coloc' is required for colocPipeline.")
     }
-    if (!methods::is(p$qtlFineMappingResult, "FineMappingResultBase")) {
+    if (!methods::is(qtlFineMappingResult, "FineMappingResultBase")) {
         msg <- glue(
             "`qtlFineMappingResult` must be a QtlFineMappingResult or a ",
             "GwasFineMappingResult ",
-            "(got class '{class(p$qtlFineMappingResult)[[1L]]}')."
+            "(got class '{class(qtlFineMappingResult)[[1L]]}')."
         )
         abort(msg)
     }
     if (
-        !methods::is(p$gwasInput, "SumStatsBase") &&
-            !methods::is(p$gwasInput, "FineMappingResultBase")
+        !methods::is(gwasInput, "SumStatsBase") &&
+            !methods::is(gwasInput, "FineMappingResultBase")
     ) {
         msg <- glue(
             "`gwasInput` must be a fine-mapping result ",
             "(QtlFineMappingResult / GwasFineMappingResult) or summary ",
             "statistics (QtlSumStats / GwasSumStats) ",
-            "(got class '{class(p$gwasInput)[[1L]]}')."
+            "(got class '{class(gwasInput)[[1L]]}')."
         )
         abort(msg)
     }
@@ -251,24 +288,18 @@ colocPipeline <- function(
 # The enrichment table must be a data.frame carrying the required id + value
 # columns.
 # @noRd
+#' @importFrom checkmate assertDataFrame assertNames
 .colocValidateEnrichment <- function(enrichment) {
-    if (!is.data.frame(enrichment)) {
-        msg <- glue(
-            "`enrichment` must be a data.frame with at least gwasStudy, ",
-            "qtlStudy, qtlContext, enrichment columns (output of ",
-            "qtlEnrichmentPipeline)."
-        )
-        abort(msg)
-    }
-    required <- c("gwasStudy", "qtlStudy", "qtlContext", "enrichment")
-    missingCols <- setdiff(required, colnames(enrichment))
-    if (length(missingCols) > 0L) {
-        msg <- glue(
-            "`enrichment` is missing column(s): ",
-            "{str_flatten(missingCols, ', ')}"
-        )
-        abort(msg)
-    }
+    # The producer is named in .var.name so a caller passing the wrong object
+    # is pointed at what produces the right one.
+    label <- "enrichment (output of qtlEnrichmentPipeline)"
+    assertDataFrame(enrichment, .var.name = label)
+    assertNames(
+        colnames(enrichment),
+        must.include = c("gwasStudy", "qtlStudy", "qtlContext", "enrichment"),
+        what = "colnames",
+        .var.name = label
+    )
     .colocValidateEnrichmentKeys(enrichment)
     invisible(NULL)
 }
@@ -318,17 +349,23 @@ colocPipeline <- function(
 # adjusted each side to the UNION of the other's variants -- a union is not an
 # intersection, so the two sides could still end up on different sets.
 # @noRd
-.colocMaybeAdjustPips <- function(p) {
-    if (!isTRUE(p$adjustPips)) {
-        return(p)
+.colocMaybeAdjustPips <- function(
+    adjustPips,
+    qtlFineMappingResult,
+    gwasFmr
+) {
+    unchanged <- list(
+        qtlFineMappingResult = qtlFineMappingResult,
+        gwasFmr = gwasFmr
+    )
+    if (!isTRUE(adjustPips)) {
+        return(unchanged)
     }
-    if (nrow(p$qtlFineMappingResult) == 0L || nrow(p$gwasFmr) == 0L) {
-        return(p)
+    if (nrow(qtlFineMappingResult) == 0L || nrow(gwasFmr) == 0L) {
+        return(unchanged)
     }
-    both <- intersectVariants(p$qtlFineMappingResult, p$gwasFmr)
-    p$qtlFineMappingResult <- both$x
-    p$gwasFmr <- both$y
-    p
+    both <- intersectVariants(qtlFineMappingResult, gwasFmr)
+    list(qtlFineMappingResult = both$x, gwasFmr = both$y)
 }
 
 # The LD reference the result carries forward, so getColocCredibleSets() can
@@ -338,53 +375,82 @@ colocPipeline <- function(
 # first side fit on individual-level data carries none, and then the second
 # side's panel is the only one there is.
 # @noRd
-.colocLdSketch <- function(p) {
-    getLdSketch(p$qtlFineMappingResult) %||% getLdSketch(p$gwasFmr)
+.colocLdSketch <- function(qtlFineMappingResult, gwasFmr) {
+    getLdSketch(qtlFineMappingResult) %||% getLdSketch(gwasFmr)
 }
 
 # Empty-result early return (attaching the GWAS fine-mapping when requested).
 # @noRd
-.colocEarlyReturn <- function(p) {
+.colocEarlyReturn <- function(
+    useEnrichment,
+    qtlFineMappingResult,
+    gwasFmr,
+    gwasInput,
+    returnGwasFineMapping
+) {
     out <- .colocEmptyResult(
-        enriched = p$useEnrichment,
-        ldSketch = .colocLdSketch(p)
+        enriched = useEnrichment,
+        ldSketch = .colocLdSketch(qtlFineMappingResult, gwasFmr)
     )
-    if (p$returnGwasFineMapping && methods::is(p$gwasInput, "SumStatsBase")) {
-        attr(out, "gwasFineMapping") <- p$gwasFmr
-    }
-    out
+    .colocAttachGwasFm(out, returnGwasFineMapping, gwasInput, gwasFmr)
 }
 
 # Score one QTL tuple against every pre-extracted GWAS pair -> summary rows.
 # @noRd
-.colocScoreQtlTuple <- function(qi, p) {
-    q <- .colocQtlTupleInfo(qi, p)
+.colocScoreQtlTuple <- function(
+    qi,
+    qtlFineMappingResult,
+    gwasLbfByPair,
+    filterLbfCs,
+    filterLbfCsSecondary,
+    filterLbfCsConcentration,
+    priorTol,
+    useEnrichment,
+    enrichment,
+    p12,
+    p12Max,
+    p1,
+    p2,
+    alleleFlip,
+    colocArgs
+) {
+    q <- .colocQtlTupleInfo(qi, qtlFineMappingResult)
     qLbfInfo <- .colocExtractLbfFromEntry(
         q$parts,
-        p$filterLbfCs,
-        p$filterLbfCsSecondary,
-        p$filterLbfCsConcentration,
-        p$priorTol,
+        filterLbfCs,
+        filterLbfCsSecondary,
+        filterLbfCsConcentration,
+        priorTol,
         label = q$label
     )
     if (is.null(qLbfInfo)) {
         return(list())
     }
-    q$retainedMass <- qLbfInfo$retainedMass
-    q$effect <- qLbfInfo$effect
+    scored <- list_assign(
+        q,
+        retainedMass = qLbfInfo$retainedMass,
+        effect = qLbfInfo$effect
+    )
     compact(map(
-        p$gwasLbfByPair,
+        gwasLbfByPair,
         .colocScorePairAt,
         qLbfInfo = qLbfInfo,
-        p = p,
-        q = q
+        q = scored,
+        useEnrichment = useEnrichment,
+        enrichment = enrichment,
+        p12 = p12,
+        p12Max = p12Max,
+        p1 = p1,
+        p2 = p2,
+        alleleFlip = alleleFlip,
+        colocArgs = colocArgs
     ))
 }
 
 # Identity + row payload + log label for one first-side tuple.
 # @noRd
-.colocQtlTupleInfo <- function(qi, p) {
-    fmr <- p$qtlFineMappingResult
+.colocQtlTupleInfo <- function(qi, qtlFineMappingResult) {
+    fmr <- qtlFineMappingResult
     ident <- .colocTupleIdentity(fmr, qi)
     c(
         ident,
@@ -410,19 +476,46 @@ colocPipeline <- function(
 # Score one (QTL, GWAS) pair via coloc.bf_bf -> a summary row, or NULL when the
 # variants don't align or coloc fails / returns no summary.
 # @noRd
-.colocScorePair <- function(qLbf, gInfo, q, p) {
+.colocScorePair <- function(
+    qLbf,
+    gInfo,
+    q,
+    useEnrichment,
+    enrichment,
+    p12,
+    p12Max,
+    p1,
+    p2,
+    alleleFlip,
+    colocArgs
+) {
     # Align variants between the QTL and GWAS LBF matrices by (chrom, pos,
     # allele) tuple via matchVariants (see .colocAlignLbf).
-    aligned <- .colocAlignLbf(qLbf, gInfo$lbf, alleleFlip = p$alleleFlip)
+    aligned <- .colocAlignLbf(qLbf, gInfo$lbf, alleleFlip = alleleFlip)
     if (is.null(aligned)) {
         return(NULL)
     }
-    p12Info <- .colocResolveP12(p, gInfo, q)
-    pairRes <- .colocRunPair(aligned, p, p12Info$p12Used, q, gInfo)
+    p12Info <- .colocResolveP12(
+        gInfo,
+        q,
+        useEnrichment = useEnrichment,
+        enrichment = enrichment,
+        p12 = p12,
+        p12Max = p12Max
+    )
+    pairRes <- .colocRunPair(
+        aligned,
+        p12Info$p12Used,
+        q,
+        gInfo,
+        p1 = p1,
+        p2 = p2,
+        colocArgs = colocArgs
+    )
     if (is.null(pairRes) || is.null(pairRes$summary)) {
         return(NULL)
     }
-    rows <- .colocSummaryRow(pairRes, q, gInfo, p, p12Info)
+    rows <- .colocSummaryRow(pairRes, q, gInfo, useEnrichment, p12Info)
     # $results is the per-variant layer that process_coloc_results() used to
     # consume and that this pipeline silently dropped. It is pivoted here, the
     # only place that knows which results column belongs to which summary row.
@@ -435,108 +528,152 @@ colocPipeline <- function(
 # Enrichment-informed p12 (per-(gwasStudy, qtlStudy, qtlContext) scaling capped
 # at p12Max; baseline p12 with no enrichment table / no matching row).
 # @noRd
-.colocResolveP12 <- function(p, gInfo, q) {
-    if (!p$useEnrichment) {
-        return(list(enRow = NA_real_, p12Used = p$p12))
+.colocResolveP12 <- function(
+    gInfo,
+    q,
+    useEnrichment,
+    enrichment,
+    p12,
+    p12Max
+) {
+    if (!useEnrichment) {
+        return(list(enRow = NA_real_, p12Used = p12))
     }
-    enRow <- .colocLookupEnrichment(p$enrichment, gInfo, q)
-    if (is.na(enRow)) {
+    looked <- .colocLookupEnrichment(enrichment, gInfo, q)
+    enRow <- if (is.na(looked)) 0 else looked
+    if (is.na(looked)) {
         msg <- glue(
             "colocPipeline: no enrichment entry for ",
             "(gwasStudy='{gInfo$study}', qtlStudy='{q$study}', ",
             "qtlContext='{q$context}'); using baseline p12."
         )
         warn(msg)
-        enRow <- 0
     }
-    list(enRow = enRow, p12Used = min(p$p12 * (1 + enRow), p$p12Max))
+    list(enRow = enRow, p12Used = min(p12 * (1 + enRow), p12Max))
 }
 
 # Run coloc.bf_bf for an aligned pair, warning + NULL on failure.
 # @noRd
-.colocRunPair <- function(aligned, p, p12Used, q, gInfo) {
-    colocArgs <- c(
+#' @importFrom rlang try_fetch
+.colocRunPair <- function(aligned, p12Used, q, gInfo, p1, p2, colocArgs) {
+    callArgs <- c(
         list(
             aligned$qtl,
             aligned$gwas,
-            p1 = p$p1,
-            p2 = p$p2,
+            p1 = p1,
+            p2 = p2,
             p12 = p12Used
         ),
-        p$dots
+        colocArgs
     )
-    tryCatch(
-        exec(coloc::coloc.bf_bf, !!!colocArgs),
-        error = function(e) {
+    try_fetch(
+        exec(coloc::coloc.bf_bf, !!!callArgs),
+        error = function(cnd) {
             msg <- glue(
                 "colocPipeline: coloc.bf_bf failed for ",
-                "{q$label} x {gInfo$label}: ",
-                "{conditionMessage(e)}"
+                "{q$label} x {gInfo$label}"
             )
-            warn(msg)
+            warn(msg, parent = cnd)
             NULL
         }
     )
 }
 
+# The enrichment columns, present only when the pipeline used an enrichment
+# table. A NULL `p12Info` carries the zero-row schema an empty result needs.
+# @noRd
+.colocEnrichmentCols <- function(useEnrichment, p12Info) {
+    if (!useEnrichment) {
+        return(list())
+    }
+    if (is.null(p12Info)) {
+        return(list(enrichment = numeric(0), p12Used = numeric(0)))
+    }
+    list(enrichment = p12Info$enRow, p12Used = p12Info$p12Used)
+}
+
 # Build a coloc summary row carrying the QTL / GWAS identity + enrichment.
 # @noRd
-.colocSummaryRow <- function(pairRes, q, gInfo, p, p12Info) {
-    sm <- as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
-    sm <- .colocRenameNsnps(sm)
-    sm$study <- q$study
-    sm$context <- q$context
-    sm$trait <- q$trait
-    sm$method <- q$method
-    sm$gwasStudy <- gInfo$study
-    sm$gwasContext <- gInfo$context
-    sm$gwasTrait <- gInfo$trait
-    sm$gwasMethod <- gInfo$method
-    # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is exactly
-    # what retainedMass runs parallel to -- so the mass reported here is the
-    # mass of the two effects this row actually scores, not a per-entry
-    # average.
-    sm$qtlRetainedMass <- .colocPickAt(
-        q$retainedMass,
-        sm[["idx1"]],
-        nrow(sm)
+.colocSummaryRow <- function(
+    pairRes,
+    q,
+    gInfo,
+    useEnrichment,
+    p12Info
+) {
+    sm <- .colocRenameNsnps(
+        as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
     )
-    sm$gwasRetainedMass <- .colocPickAt(
-        gInfo$retainedMass,
-        sm[["idx2"]],
-        nrow(sm)
+    mutate(
+        sm,
+        study = q$study,
+        context = q$context,
+        trait = q$trait,
+        method = q$method,
+        gwasStudy = gInfo$study,
+        gwasContext = gInfo$context,
+        gwasTrait = gInfo$trait,
+        gwasMethod = gInfo$method,
+        # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is
+        # exactly what retainedMass runs parallel to -- so the mass reported
+        # here is the mass of the two effects this row actually scores, not a
+        # per-entry average.
+        qtlRetainedMass = .colocPickAt(
+            q$retainedMass,
+            sm[["idx1"]],
+            nrow(sm)
+        ),
+        gwasRetainedMass = .colocPickAt(
+            gInfo$retainedMass,
+            sm[["idx2"]],
+            nrow(sm)
+        ),
+        # coloc's idx1 / idx2 number the rows of THIS call, so they are not
+        # comparable across blocks. The fit's own effect indices are, and they
+        # are what the credible-set and gene views group on.
+        qtlCs = .colocPickAt(
+            q$effect,
+            sm[["idx1"]],
+            nrow(sm),
+            fill = NA_integer_
+        ),
+        gwasCs = .colocPickAt(
+            gInfo$effect,
+            sm[["idx2"]],
+            nrow(sm),
+            fill = NA_integer_
+        ),
+        blockId = gInfo$blockId %||% NA_character_,
+        !!!.colocEnrichmentCols(useEnrichment, p12Info)
     )
-    # coloc's idx1 / idx2 number the rows of THIS call, so they are not
-    # comparable across blocks. The fit's own effect indices are, and they are
-    # what the credible-set and gene views group on.
-    sm$qtlCs <- .colocPickAt(
-        q$effect,
-        sm[["idx1"]],
-        nrow(sm),
-        fill = NA_integer_
-    )
-    sm$gwasCs <- .colocPickAt(
-        gInfo$effect,
-        sm[["idx2"]],
-        nrow(sm),
-        fill = NA_integer_
-    )
-    sm$blockId <- gInfo$blockId %||% NA_character_
-    if (p$useEnrichment) {
-        sm$enrichment <- p12Info$enRow
-        sm$p12Used <- p12Info$p12Used
-    }
-    sm
 }
 
 # Assemble the result table + attach the GWAS fine-mapping when requested.
 # @noRd
-.colocFinalize <- function(results, p) {
-    out <- .colocAssemble(results, p$useEnrichment, .colocLdSketch(p))
-    if (p$returnGwasFineMapping && methods::is(p$gwasInput, "SumStatsBase")) {
-        attr(out, "gwasFineMapping") <- p$gwasFmr
+.colocFinalize <- function(
+    results,
+    useEnrichment,
+    qtlFineMappingResult,
+    gwasFmr,
+    gwasInput,
+    returnGwasFineMapping
+) {
+    out <- .colocAssemble(
+        results,
+        useEnrichment,
+        .colocLdSketch(qtlFineMappingResult, gwasFmr)
+    )
+    .colocAttachGwasFm(out, returnGwasFineMapping, gwasInput, gwasFmr)
+}
+
+# The GWAS fine-mapping the pipeline produced, carried back on the result when
+# the caller asked for it and the GWAS side was fine-mapped here.
+# @noRd
+.colocAttachGwasFm <- function(out, returnGwasFineMapping, gwasInput, gwasFmr) {
+    if (!returnGwasFineMapping || !methods::is(gwasInput, "SumStatsBase")) {
+        return(out)
     }
-    out
+    `attr<-`(out, "gwasFineMapping", gwasFmr)
 }
 
 # Row-bind + column-order the per-pair summary rows (empty result when none).
@@ -546,7 +683,7 @@ colocPipeline <- function(
         return(.colocEmptyResult(enriched = useEnrichment, ldSketch = ldSketch))
     }
     rows <- bind_rows(map(map(results, "rows"), .colocStandardiseRow))
-    variants <- unlist(map(results, "variants"), recursive = FALSE)
+    variants <- list_c(map(results, "variants"))
     ColocResult(.colocOrderColumns(rows, useEnrichment), variants, ldSketch)
 }
 
@@ -564,11 +701,9 @@ colocPipeline <- function(
         "gwasMethod",
         "blockId",
         "qtlCs",
-        "gwasCs"
+        "gwasCs",
+        if (useEnrichment) c("enrichment", "p12Used")
     )
-    if (useEnrichment) {
-        idCols <- c(idCols, "enrichment", "p12Used")
-    }
     select(out, all_of(idCols), everything())
 }
 
@@ -601,8 +736,9 @@ colocPipeline <- function(
     coverage = 0.5,
     concentration = 0.5
 ) {
-    fit$V <- NULL # disable V-based filtering inside susie_get_cs
-    csList <- susie_get_cs(fit, coverage = coverage, dedup = FALSE)
+    # V zapped to disable V-based filtering inside susie_get_cs
+    unfiltered <- list_modify(fit, V = zap())
+    csList <- susie_get_cs(unfiltered, coverage = coverage, dedup = FALSE)
     totalVariants <- ncol(fit$alpha)
     maxSize <- totalVariants * coverage * concentration
     keep <- map_lgl(csList$cs, .colocCsUnderMax, maxSize = maxSize)
@@ -632,25 +768,25 @@ colocPipeline <- function(
         warn(msg)
         return(NULL)
     }
-    lbfMatrix <- .colocLbfMatrix(fit, label)
-    if (is.null(lbfMatrix)) {
+    allRows <- .colocLbfMatrix(fit, label)
+    if (is.null(allRows)) {
         return(NULL)
     }
-    mass <- .colocEffectRetainedMass(fit, nrow(lbfMatrix))
+    allMass <- .colocEffectRetainedMass(fit, nrow(allRows))
     keep <- .colocSelectLbfRows(
-        lbfMatrix,
+        allRows,
         fit,
         filterLbfCs,
         filterLbfCsSecondary,
         filterLbfCsConcentration,
         priorTol
     )
-    lbfMatrix <- lbfMatrix[keep, , drop = FALSE]
-    mass <- mass[keep]
-    if (nrow(lbfMatrix) == 0L) {
+    kept <- allRows[keep, , drop = FALSE]
+    mass <- allMass[keep]
+    if (nrow(kept) == 0L) {
         return(NULL)
     }
-    lbfMatrix <- .colocAssignLbfColnames(lbfMatrix, parts)
+    lbfMatrix <- .colocAssignLbfColnames(kept, parts)
     if (ncol(lbfMatrix) == 0L) {
         return(NULL)
     }
@@ -729,13 +865,13 @@ colocPipeline <- function(
             return(csIdx)
         }
     } else if (!is.null(filterLbfCsSecondary)) {
-        secIdx <- tryCatch(
+        secIdx <- try_fetch(
             .colocFilterCsByConcentration(
                 fit,
                 coverage = filterLbfCsSecondary,
                 concentration = filterLbfCsConcentration
             ),
-            error = function(e) NULL
+            error = function(cnd) NULL
         )
         if (!is.null(secIdx) && length(secIdx) > 0L) {
             return(secIdx)
@@ -761,17 +897,25 @@ colocPipeline <- function(
     as.numeric(mass)
 }
 
+# The entry's variant ids, when the matrix does not already name its columns.
+# @noRd
+.colocLbfNamesFrom <- function(lbfMatrix, parts) {
+    if (!is.null(colnames(lbfMatrix)) && !any(is.na(colnames(lbfMatrix)))) {
+        return(lbfMatrix)
+    }
+    vids <- .fmrPartsVariantIds(parts)
+    if (length(vids) != ncol(lbfMatrix)) {
+        return(lbfMatrix)
+    }
+    `colnames<-`(lbfMatrix, vids)
+}
+
 # Assign variant-id column names (fit-provided, else the row's rendered
 # variant ids) and drop columns with an NA id.
 # @noRd
 .colocAssignLbfColnames <- function(lbfMatrix, parts) {
-    if (is.null(colnames(lbfMatrix)) || any(is.na(colnames(lbfMatrix)))) {
-        vids <- .fmrPartsVariantIds(parts)
-        if (length(vids) == ncol(lbfMatrix)) {
-            colnames(lbfMatrix) <- vids
-        }
-    }
-    lbfMatrix[, !is.na(colnames(lbfMatrix)), drop = FALSE]
+    named <- .colocLbfNamesFrom(lbfMatrix, parts)
+    named[, !is.na(colnames(named)), drop = FALSE]
 }
 
 # The second side's LBF matrices, one record per row of the collection, each
@@ -877,10 +1021,8 @@ colocPipeline <- function(
     # Relabel both matrices to one shared id so coloc.bf_bf sees identical
     # names.
     sharedIds <- gids[m$idxB]
-    qSub <- qtlLbf[, m$idxA, drop = FALSE]
-    gSub <- gwasLbf[, m$idxB, drop = FALSE]
-    colnames(qSub) <- sharedIds
-    colnames(gSub) <- sharedIds
+    qSub <- `colnames<-`(qtlLbf[, m$idxA, drop = FALSE], sharedIds)
+    gSub <- `colnames<-`(gwasLbf[, m$idxB, drop = FALSE], sharedIds)
     list(qtl = qSub, gwas = gSub)
 }
 
@@ -912,11 +1054,11 @@ colocPipeline <- function(
         qtlRetainedMass = numeric(0),
         gwasRetainedMass = numeric(0)
     )
-    if (enriched) {
-        base$enrichment <- numeric(0)
-        base$p12Used <- numeric(0)
-    }
-    ColocResult(base, list(), ldSketch = ldSketch)
+    ColocResult(
+        mutate(base, !!!.colocEnrichmentCols(enriched, NULL)),
+        list(),
+        ldSketch = ldSketch
+    )
 }
 
 # Look up this pair's enrichment factor in the user-supplied enrichment table.
@@ -972,19 +1114,25 @@ colocPipeline <- function(
 # shape.
 # @noRd
 .colocStandardiseRow <- function(sm) {
-    for (col in c(
-        "idx1",
-        "idx2",
-        "nSnps",
-        "PP.H0.abf",
-        "PP.H1.abf",
-        "PP.H2.abf",
-        "PP.H3.abf",
-        "PP.H4.abf"
-    )) {
-        if (!is_in(col, colnames(sm))) sm[[col]] <- NA
-    }
-    sm
+    missing <- setdiff(
+        c(
+            "idx1",
+            "idx2",
+            "nSnps",
+            "PP.H0.abf",
+            "PP.H1.abf",
+            "PP.H2.abf",
+            "PP.H3.abf",
+            "PP.H4.abf"
+        ),
+        colnames(sm)
+    )
+    mutate(sm, !!!set_names(map(missing, .colocMissingColumn), missing))
+}
+
+# @noRd
+.colocMissingColumn <- function(col) {
+    NA
 }
 
 # coloc.bf_bf names the aligned-variant count `nsnps`; this package publishes
@@ -1007,9 +1155,7 @@ colocPipeline <- function(
     }
     idx <- as.integer(idx)
     ok <- !is.na(idx) & idx >= 1L & idx <= length(values)
-    out <- rep(fill, length(idx))
-    out[ok] <- values[idx[ok]]
-    out
+    replace(rep(fill, length(idx)), ok, values[idx[ok]])
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
@@ -1020,8 +1166,32 @@ colocPipeline <- function(
 # Score the first side's LBF against one second-side record -> a summary row
 # (or NULL).
 # @noRd
-.colocScorePairAt <- function(gInfo, qLbfInfo, p, q) {
-    .colocScorePair(qLbfInfo$lbf, gInfo, q, p)
+.colocScorePairAt <- function(
+    gInfo,
+    qLbfInfo,
+    q,
+    useEnrichment,
+    enrichment,
+    p12,
+    p12Max,
+    p1,
+    p2,
+    alleleFlip,
+    colocArgs
+) {
+    .colocScorePair(
+        qLbfInfo$lbf,
+        gInfo,
+        q,
+        useEnrichment = useEnrichment,
+        enrichment = enrichment,
+        p12 = p12,
+        p12Max = p12Max,
+        p1 = p1,
+        p2 = p2,
+        alleleFlip = alleleFlip,
+        colocArgs = colocArgs
+    )
 }
 
 # TRUE when a credible set has fewer than `maxSize` variants.

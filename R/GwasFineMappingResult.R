@@ -35,23 +35,23 @@ setClass(
 # ---- GwasFineMappingResult validity helpers --------------------------------
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
 .validateGwasFineMappingResult <- function(object) {
-    errors <- .gfmrCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .gfmrCheckEntries(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        .tupleColumnNames(object),
+        must.include = c("study", "method"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    errors <- c(errors, .gfmrCheckLdSketch(object))
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# @noRd
-.gfmrCheckRequiredCols <- function(object) {
-    required <- c("study", "method")
-    missingCols <- setdiff(required, .tupleColumnNames(object))
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.gfmrCheckEntries(object))
+    coll$getMessages()
 }
 
 # @noRd
@@ -67,22 +67,16 @@ setClass(
 .gfmrCheckEntryLength <- function(object) {
     # The variants and their topLoci ARE the elements now, so what is left to
     # check is that the fit payload columns are present and parallel.
-    missingCols <- setdiff(
-        c("susieFit", "cvResult"),
-        .tupleColumnNames(object)
+    res <- checkNames(
+        .tupleColumnNames(object),
+        must.include = c("susieFit", "cvResult"),
+        what = "colnames"
     )
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "missing entry payload columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    if (isTRUE(res)) {
+        return(NULL)
     }
-    NULL
+    str_c("missing entry payload columns: ", res)
 }
-
-# @noRd
-
-# @noRd
 
 # @noRd
 .gfmrCheckTupleUniqueness <- function(object) {
@@ -99,8 +93,8 @@ setClass(
     keyTbl <- as_tibble(set_names(
         map(keyCols, .gfmrColOf, object = object),
         keyCols
-    ))
-    keyTbl$range <- .rtlRangeKeys(object)
+    )) |>
+        mutate(range = .rtlRangeKeys(object))
     if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
         return("(study, method, range) tuple uniqueness violated")
     }
@@ -110,12 +104,6 @@ setClass(
 # @noRd
 .gfmrColOf <- function(cn, object) {
     .tupleColumn(object, cn)
-}
-
-# @noRd
-.gfmrCheckLdSketch <- function(object) {
-    # The slot's class union enforces the type; nothing to check.
-    NULL
 }
 
 
@@ -170,17 +158,19 @@ GwasFineMappingResult <- function(
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
         cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
-    )
-    cols <- .appendBlockIdCol(cols, blockId, n)
-    cols <- .appendTraitPosCol(cols, traitPos, n)
+    ) |>
+        .appendBlockIdCol(blockId, n) |>
+        .appendTraitPosCol(traitPos, n)
     dfArgs <- c(cols, list(check.names = FALSE))
     # Each entry's variants become one ELEMENT, its topLoci that element's
     # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
     # splits by chromosome with its metadata row replicated.
     split <- .rtlSplitBySeqname(map(entry, rowVariants))
-    grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md[split$fromIdx, , drop = FALSE]
+    )
     obj <- new(
         "GwasFineMappingResult",
         grl,

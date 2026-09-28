@@ -4,7 +4,7 @@
 \alias{screenCtwasRegions}
 \title{Screen cTWAS regions}
 \usage{
-screenCtwasRegions(estResult, L = 5L, ncore = 1L, ...)
+screenCtwasRegions(estResult, L = 5L, ncore = 1L, ctwasArgs = list())
 }
 \arguments{
 \item{estResult}{A list returned by \code{\link{estCtwasParam}}.}
@@ -16,7 +16,8 @@ single-effect (SER) model and ignores L. \code{L} is applied by
 
 \item{ncore}{Number of cores.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::screen_regions}
+\item{ctwasArgs}{Optional named list of additional arguments
+forwarded to \code{ctwas::screen_regions}
 (e.g. \code{min_nonSNP_PIP}, \code{min_snp_pval}, \code{min_var},
 \code{min_gene}).}
 }

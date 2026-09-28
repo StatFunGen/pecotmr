@@ -91,7 +91,7 @@ context("ctwasPipeline")
         ranges = IRanges::IRanges(start = 100L * idx, width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = vapply(idx, .ctp_snpId, character(1)),
+        SNP = map_chr(idx, .ctp_snpId),
         A1 = rep("A", 6),
         A2 = rep("G", 6),
         Z = rnorm(6),
@@ -119,7 +119,7 @@ context("ctwasPipeline")
 # inside block 1 -- pass 7:11 for a gene that lives in block 2.
 .ctp_makeTwasWeights <- function(variantIdx = 1:5) {
     e <- twasWeightsRow(
-        variantIds = vapply(variantIdx, .ctp_snpId, character(1)),
+        variantIds = map_chr(variantIdx, .ctp_snpId),
         weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
     )
     TwasWeights(
@@ -136,7 +136,7 @@ context("ctwasPipeline")
 # the topLoci posterior_mean carries the weight vector (what resolveWeights
 # reads). Mirrors .ctp_makeTwasWeights so the two sources are comparable.
 .ctp_makeFmrWeightSource <- function() {
-    vids <- vapply(1:5, .ctp_snpId, character(1))
+    vids <- map_chr(1:5, .ctp_snpId)
     w <- c(0.1, 0.05, -0.2, 0.3, 0.0)
     tl <- data.frame(
         variant_id = vids,
@@ -271,7 +271,7 @@ test_that("assembleCtwasInputs: accepts a QtlFineMappingResult weight source (to
         trait = "t1",
         method = "susie",
         entry = list(twasWeightsRow(
-            variantIds = vapply(1:5, .ctp_snpId, character(1)),
+            variantIds = map_chr(1:5, .ctp_snpId),
             weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
             standardized = TRUE
         )),
@@ -325,11 +325,11 @@ test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
             qcInfo = if (qc) list(step1 = "ok") else list()
         )
     }
-    ss1 <- mkBlockGss("G1", vapply(1:3, .ctp_snpId, character(1)))
-    ss2 <- mkBlockGss("G2", vapply(4:6, .ctp_snpId, character(1)))
+    ss1 <- mkBlockGss("G1", map_chr(1:3, .ctp_snpId))
+    ss2 <- mkBlockGss("G2", map_chr(4:6, .ctp_snpId))
     # Cross-boundary weights: v2..v5 (4 variants spanning both blocks).
     crossEntry <- twasWeightsRow(
-        variantIds = vapply(2:5, .ctp_snpId, character(1)),
+        variantIds = map_chr(2:5, .ctp_snpId),
         weights = c(0.1, 0.2, 0.3, 0.4)
     )
     tw <- TwasWeights(
@@ -358,7 +358,7 @@ test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
     entry <- inputs$weights[[1L]]
     wgt <- entry$wgt
     expect_equal(nrow(wgt), 2L)
-    expect_setequal(rownames(wgt), vapply(2:3, .ctp_snpId, character(1)))
+    expect_setequal(rownames(wgt), map_chr(2:3, .ctp_snpId))
     expect_equal(nrow(entry$R_wgt), 2L)
     expect_equal(entry$n_wgt, 2L)
     expect_equal(entry$p0, 200L)
@@ -457,14 +457,14 @@ test_that(".ctwasRequireMatchingLdSketches: disjoint panels error", {
 
 test_that(".ctwasBuildZSnp: produces a flat data.frame keyed by SNP/study", {
     ss <- .ctp_makeGwasSumstats(blockIds = "block1")
-    df <- pecotmr:::.ctwasBuildZSnp(ss, vapply(1:6, .ctp_snpId, character(1)))
+    df <- pecotmr:::.ctwasBuildZSnp(ss, map_chr(1:6, .ctp_snpId))
     expect_s3_class(df, "data.frame")
     expect_equal(nrow(df), 6L)
     expect_setequal(
         colnames(df),
         c("id", "chrom", "pos", "A1", "A2", "z", "study")
     )
-    expect_setequal(df$id, vapply(1:6, .ctp_snpId, character(1)))
+    expect_setequal(df$id, map_chr(1:6, .ctp_snpId))
     expect_setequal(unique(df$study), "G1")
 })
 
@@ -474,7 +474,7 @@ test_that(".ctwasBuildZSnp: negates z for a panel-flipped variant", {
     # both sides, so nothing reported it missing and the gene just lost an
     # instrument.
     ss <- .ctp_makeGwasSumstats(blockIds = "block1")
-    gwasIds <- vapply(1:6, .ctp_snpId, character(1))
+    gwasIds <- map_chr(1:6, .ctp_snpId)
     panelIds <- gwasIds
     panelIds[2] <- "chr1:200:A:G" # fixture spells this one G:A
     plain <- pecotmr:::.ctwasBuildZSnp(ss, gwasIds)
@@ -490,7 +490,7 @@ test_that(".ctwasBuildZSnp: negates z for a panel-flipped variant", {
 
 test_that(".ctwasBuildZSnp: leaves variants absent from the panel untouched", {
     ss <- .ctp_makeGwasSumstats(blockIds = "block1")
-    gwasIds <- vapply(1:6, .ctp_snpId, character(1))
+    gwasIds <- map_chr(1:6, .ctp_snpId)
     plain <- pecotmr:::.ctwasBuildZSnp(ss, gwasIds)
     none <- pecotmr:::.ctwasBuildZSnp(ss, "chr9:999:A:T")
     expect_equal(none$id, plain$id)
@@ -800,7 +800,7 @@ test_that(".ctwasResolveMethod: multi-method + no ensemble + no caller method er
         context = rep("c1", length(methods)),
         trait = rep("t1", length(methods)),
         method = methods,
-        entry = lapply(methods, function(m) {
+        entry = map(methods, function(m) {
             twasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
                 weights = c(0.1, 0.2, 0.3)
@@ -913,7 +913,7 @@ test_that(".ctwasIsPreBucketed / .ctwasCombineWeightSources: dispatch flat vs pr
 test_that(".ctwasBucketWeights: places a flat 2-gene source into its home blocks", {
     mkE <- function() {
         twasWeightsRow(
-            variantIds = vapply(1:5, .ctp_snpId, character(1)),
+            variantIds = map_chr(1:5, .ctp_snpId),
             weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
         )
     }
@@ -1037,11 +1037,11 @@ test_that(".ctwasRunToRows: multi-context run -> per-context rows sharing jointC
     rows <- pecotmr:::.ctwasRunToRows(run, gwasStudy = "D1", method = "susie")
     expect_length(rows, 2L)
     expect_setequal(
-        vapply(rows, function(r) r$context, ""),
+        map_chr(rows, function(r) r$context),
         c("brain", "liver")
     )
     expect_true(all(
-        vapply(rows, function(r) r$jointContexts, "") == "brain,liver"
+        map_chr(rows, function(r) r$jointContexts) == "brain,liver"
     ))
     # Each per-context row keeps only its own genes but shares the joint param.
     expect_equal(nrow(getFinemap(rows[[1L]]$entry)), 2L)
@@ -1157,7 +1157,7 @@ test_that(".ctwasBuildWeights: scales non-standardized weights by sqrt(variance)
     # weights should be multiplied by sqrt(variance) before reaching the
     # final wgt matrix.
     panel$variance <- setNames(c(0.5, 1, 2, 4, 8, 16), panel$snpInfo$id)
-    ids5 <- vapply(1:5, .ctp_snpId, character(1))
+    ids5 <- map_chr(1:5, .ctp_snpId)
     rawW <- c(0.1, 0.2, 0.3, 0.4, 0.5)
     tw <- TwasWeights(
         study = "Q1",
@@ -1175,7 +1175,7 @@ test_that(".ctwasBuildWeights: scales non-standardized weights by sqrt(variance)
 test_that(".ctwasBuildWeights: standardized weights bypass variance scaling", {
     panel <- .ctp_makeLdPanel()
     panel$variance <- setNames(c(0.5, 1, 2, 4, 8, 16), panel$snpInfo$id)
-    ids5 <- vapply(1:5, .ctp_snpId, character(1))
+    ids5 <- map_chr(1:5, .ctp_snpId)
     rawW <- c(0.1, 0.2, 0.3, 0.4, 0.5)
     tw <- TwasWeights(
         study = "Q1",
@@ -1410,21 +1410,18 @@ test_that(".ctwasRenormalizeSusieWeights: skips Omega-weighted susieInf fits", {
         harmonizedW = origW[1:3]
     )
     expect_type(
-        do.call(
-            pecotmr:::.ctwasRenormalizeSusieWeights,
-            c(list(base), args)
-        ),
+        exec(pecotmr:::.ctwasRenormalizeSusieWeights, !!!c(list(base), args)),
         "double"
     )
     withTheta <- c(base, list(theta = rep(0.1, 4)))
-    expect_null(do.call(
+    expect_null(exec(
         pecotmr:::.ctwasRenormalizeSusieWeights,
-        c(list(withTheta), args)
+        !!!c(list(withTheta), args)
     ))
     withOmega <- c(base, list(omega_weights = rep(1, 4)))
-    expect_null(do.call(
+    expect_null(exec(
         pecotmr:::.ctwasRenormalizeSusieWeights,
-        c(list(withOmega), args)
+        !!!c(list(withOmega), args)
     ))
 })
 
@@ -1432,7 +1429,7 @@ test_that(".ctwasSnpInfoForGwasBlock: restricts panel snpInfo to block GWAS vari
     ss <- .ctp_makeGwasSumstats()
     panelInfo <- data.frame(
         chrom = 1L,
-        id = vapply(1:6, .ctp_snpId, character(1)), # whole panel
+        id = map_chr(1:6, .ctp_snpId), # whole panel
         pos = seq(100L, by = 100L, length.out = 6L),
         alt = "A",
         ref = "G",
@@ -1450,7 +1447,7 @@ test_that(".ctwasSnpInfoForGwasBlock: restricts panel snpInfo to block GWAS vari
 test_that(".ctwasBuildWeights: keys per-tuple weights, adds gene metadata", {
     tw <- .ctp_makeTwasWeights()
     panel <- .ctp_makeLdPanel()
-    ids5 <- vapply(1:5, .ctp_snpId, character(1))
+    ids5 <- map_chr(1:5, .ctp_snpId)
     wl <- pecotmr:::.ctwasBuildWeights(tw, panel)
     expect_equal(length(wl), 1L)
     expect_equal(names(wl), "Q1|c1|t1|susie")
@@ -1471,7 +1468,7 @@ test_that(".ctwasBuildWeights: keys per-tuple weights, adds gene metadata", {
 })
 
 test_that(".ctwasBuildWeights: drops variants not present in the LD panel", {
-    ids3 <- vapply(1:3, .ctp_snpId, character(1))
+    ids3 <- map_chr(1:3, .ctp_snpId)
     missing <- c("chr1:99900:G:A", "chr1:99910:G:A") # not in panel
     tw <- TwasWeights(
         study = "Q1",
@@ -1496,8 +1493,8 @@ test_that(".ctwasBuildWeights: intersects with gwasSnpIds when supplied", {
     # ids 1, 2, 4 (a subset). Weight variants that live in the panel but
     # outside the block (id 3 here) must be dropped, otherwise ctwas's
     # compute_gene_z asserts the weight variant is missing from z_snp.
-    ids5 <- vapply(1:5, .ctp_snpId, character(1))
-    blockIds <- vapply(c(1, 2, 4), .ctp_snpId, character(1))
+    ids5 <- map_chr(1:5, .ctp_snpId)
+    blockIds <- map_chr(c(1, 2, 4), .ctp_snpId)
     tw <- TwasWeights(
         study = "Q1",
         context = "c1",
@@ -1525,7 +1522,7 @@ test_that(".ctwasComputeFullPanelLd: extracts once + returns cached R + snpInfo 
         .package = "pecotmr"
     )
     out <- pecotmr:::.ctwasComputeFullPanelLd(.ctp_makeHandle(snp_n = 6L))
-    ids6 <- vapply(1:6, .ctp_snpId, character(1))
+    ids6 <- map_chr(1:6, .ctp_snpId)
     expect_named(out, c("R", "snpInfo", "variance"))
     expect_true(is.matrix(out$R))
     expect_equal(dim(out$R), c(6L, 6L))
@@ -2316,9 +2313,11 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
             niter = 5L,
             niterPrefit = 2L,
             # Toy panel: relax the production filters that gate out tiny inputs.
-            min_group_size = 1L,
-            min_p_single_effect = 0,
-            filter_L = FALSE
+            ctwasArgs = list(
+                min_group_size = 1L,
+                min_p_single_effect = 0,
+                filter_L = FALSE
+            )
         )
     ))
 
@@ -2672,7 +2671,7 @@ test_that("assembleCtwasInputs: rejects a non-FineMappingResultBase fineMappingR
 test_that("assembleCtwasInputs: skips a block whose TwasWeights lacks the resolved method", {
     skip_if_not_installed("ctwas")
     ss <- .ctp_makeGwasSumstats()
-    ids5 <- vapply(1:5, .ctp_snpId, character(1))
+    ids5 <- map_chr(1:5, .ctp_snpId)
     mkTw <- function(m) {
         TwasWeights(
             study = "Q1",
@@ -2782,7 +2781,7 @@ test_that("TwasWeightsRow: rejects mismatched variantIds/weights lengths", {
     # rather than producing a gene that gets silently dropped downstream.
     expect_error(
         twasWeightsRow(
-            variantIds = vapply(1:5, .ctp_snpId, character(1)),
+            variantIds = map_chr(1:5, .ctp_snpId),
             weights = c(0.1, 0.2, 0.3)
         ),
         "length\\(weights\\) is 3 but 5 variants were supplied"
@@ -2816,7 +2815,7 @@ test_that(".ctwasBuildWeights: skips a gene when no variant survives gwasSnpIds 
 
 test_that(".ctwasBuildWeights: SuSiE renormalization fires when variants are dropped", {
     panel <- .ctp_makeLdPanel()
-    ids4 <- vapply(1:4, .ctp_snpId, character(1))
+    ids4 <- map_chr(1:4, .ctp_snpId)
     bogus <- "chr1:99900:G:A" # absent from the 6-SNP panel
     # Fit dims line up with the 5 original variants. Two single effects,
     # each concentrated on one of the first two variants; lbfToAlpha
@@ -3096,7 +3095,7 @@ test_that(".ctwasRunToRows: empty weights -> no rows; a context mixing studies e
 test_that(".ctwasBucketWeights: unplaced genes warn + drop; empty blocks skipped", {
     mkE <- function() {
         twasWeightsRow(
-            variantIds = vapply(1:5, .ctp_snpId, character(1)),
+            variantIds = map_chr(1:5, .ctp_snpId),
             weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
         )
     }
@@ -3127,7 +3126,7 @@ test_that(".ctwasBucketWeights: unplaced genes warn + drop; empty blocks skipped
 test_that(".ctwasBucketWeights: errors when no gene lands in any block", {
     mkE <- function() {
         twasWeightsRow(
-            variantIds = vapply(1:5, .ctp_snpId, character(1)),
+            variantIds = map_chr(1:5, .ctp_snpId),
             weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
         )
     }
@@ -3221,11 +3220,9 @@ test_that("bundled cTWAS payloads carry a resolvable LD token", {
     )) {
         tokens <- as.character(payload$LD_map$LD_file)
         expect_true(all(startsWith(tokens, "pecotmr://extdata/")))
-        resolved <- vapply(
+        resolved <- map_chr(
             tokens,
-            pecotmr:::.resolveCtwasLdToken,
-            character(1),
-            USE.NAMES = FALSE
+            pecotmr:::.resolveCtwasLdToken
         )
         expect_true(all(file.exists(resolved)))
         expect_equal(
@@ -3269,7 +3266,10 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
     data(ctwasEstExample)
     # The step that the stale absolute paths broke.
     screened <- suppressMessages(
-        screenCtwasRegions(ctwasEstExample, min_nonSNP_PIP = 0)
+        screenCtwasRegions(
+            ctwasEstExample,
+            ctwasArgs = list(min_nonSNP_PIP = 0)
+        )
     )
     out <- suppressMessages(finemapCtwasRegions(screened))
     expect_gt(nrow(out$finemap_res), 0L)
@@ -3693,7 +3693,11 @@ test_that(".ctwasRenormalizeSusieWeights skips fits it cannot slice", {
     harmonizedW <- c(0.5, 0.5)
     run <- function(fits) {
         pecotmr:::.ctwasRenormalizeSusieWeights(
-            fits, origVids, origW, keptIdx, harmonizedW
+            fits,
+            origVids,
+            origW,
+            keptIdx,
+            harmonizedW
         )
     }
     # Any missing susie field: nothing to renormalize from.
@@ -3744,5 +3748,13 @@ test_that(".ctwasResolveAndValidateWeights rejects a blank region name", {
     expect_error(
         pecotmr:::.ctwasResolveAndValidateWeights(list(x = 1), NULL),
         "must resolve to a named list keyed by region_id"
+    )
+})
+
+test_that("asCtwasResult: keepSnps must be a flag", {
+    expect_error(asCtwasResult(NULL, keepSnps = NA), "keepSnps.*May not be NA")
+    expect_error(
+        asCtwasResult(NULL, keepSnps = 1L),
+        "keepSnps.*logical flag"
     )
 })

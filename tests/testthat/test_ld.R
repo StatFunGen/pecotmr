@@ -202,7 +202,7 @@ test_that("partitionLdMatrix correctly partitions multiple blocks", {
     # Check if block IDs are correct
     expect_setequal(
         unique(partitioned$variantIndices$blockId),
-        1:expected_block_count
+        seq_len(expected_block_count)
     )
 
     file.remove(LD_meta_file_path)
@@ -242,7 +242,7 @@ test_that("partitionLdMatrix properly merges small blocks", {
     )
 
     # Check if merged blocks are larger than min_block_size
-    block_sizes <- sapply(partitioned$ldMatrices, nrow)
+    block_sizes <- map_int(partitioned$ldMatrices, nrow)
     expect_true(all(
         block_sizes >= min_block_size |
             block_sizes == length(getVariantIds(ld_data))
@@ -277,7 +277,7 @@ test_that("partitionLdMatrix respects max_merged_block_size", {
     )
 
     # Check if no block exceeds max_block_size
-    block_sizes <- sapply(partitioned$ldMatrices, nrow)
+    block_sizes <- map_int(partitioned$ldMatrices, nrow)
     expect_true(all(block_sizes <= max_block_size))
 
     file.remove(LD_meta_file_path)
@@ -300,7 +300,7 @@ test_that("partitionLdMatrix handles empty matrix gracefully", {
     # Expect the S4 type-check error
     expect_error(
         partitionLdMatrix(empty_ld_data),
-        "ldData must be an LdData object"
+        "Assertion on 'ldData'.*Must inherit from class 'LdData'"
     )
 })
 
@@ -1233,7 +1233,7 @@ test_that("extractBlockMatrices warns and skips out-of-range blocks", {
         result <- pecotmr:::extractBlockMatrices(mat, blockMetadata, vnames),
         "outside the range"
     )
-    valid_blocks <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+    valid_blocks <- compact(result$ldMatrices)
     expect_equal(length(valid_blocks), 1)
     expect_equal(nrow(valid_blocks[[1]]), 2)
 })
@@ -1312,7 +1312,7 @@ test_that("resolveLdSource detects precomputed from metadata", {
 test_that("resolveLdSource errors on missing file", {
     expect_error(
         pecotmr:::resolveLdSource("/nonexistent/file.tsv"),
-        "not found"
+        "LD metadata file: File does not exist"
     )
 })
 
@@ -1949,7 +1949,7 @@ test_that("enforceDesignFullRank fallback to correlation pruning works", {
         X[, 3] + rnorm(n, sd = 1e-10),
         X[, 1] + X[, 2] + rnorm(n, sd = 1e-10)
     )
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(ncol(X))))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(ncol(X)))
     C <- matrix(rnorm(n), n, 1)
     result <- enforceDesignFullRank(
         X,
@@ -1994,7 +1994,7 @@ test_that("ldClumpByScore errors on mismatched score length", {
     X <- matrix(rnorm(20), 5, 4)
     expect_error(
         ldClumpByScore(X, score = c(1, 2), chr = rep(1L, 4), pos = 1:4),
-        "length\\(score\\)"
+        "score.*Must have length 4"
     )
 })
 
@@ -2004,7 +2004,7 @@ test_that("ldClumpByScore errors on mismatched chr/pos length", {
     X <- matrix(rnorm(20), 5, 4)
     expect_error(
         ldClumpByScore(X, score = runif(4), chr = rep(1L, 2), pos = 1:4),
-        "chr and pos"
+        "chr.*Must have length 4"
     )
 })
 
@@ -2096,7 +2096,7 @@ test_that("ldPruneByCorrelation removes highly correlated columns", {
     n <- 50
     p <- 10
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
     result <- ldPruneByCorrelation(X, corThres = 0.9)
     expect_true(ncol(result$X.new) < p)
@@ -2108,10 +2108,10 @@ test_that("ldPruneByCorrelation keeps all columns when uncorrelated", {
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     result <- ldPruneByCorrelation(X, corThres = 0.99)
     expect_equal(ncol(result$X.new), p)
-    expect_equal(result$filter.id, 1:p)
+    expect_equal(result$filter.id, seq_len(p))
 })
 
 test_that("ldPruneByCorrelation preserves colnames for single remaining column", {
@@ -2139,7 +2139,7 @@ test_that("ldPruneByCorrelation strict threshold removes at least as many as len
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 3] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 5] <- X[, 4] + rnorm(n, sd = 0.1)
@@ -2391,7 +2391,7 @@ test_that("ldClumpByScore validates input lengths", {
             chr = rep(1L, 2),
             pos = seq_len(3) * 1000L
         ),
-        "chr and pos"
+        "chr.*Must have length 3"
     )
 })
 
@@ -3703,7 +3703,7 @@ test_that("extractBlockMatrices skips blocks where endIdx < startIdx", {
         stringsAsFactors = FALSE
     )
     result <- pecotmr:::extractBlockMatrices(mat, bm, vnames)
-    valid <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+    valid <- compact(result$ldMatrices)
     expect_length(valid, 1)
     expect_equal(nrow(valid[[1]]), 2L)
 })
@@ -3720,7 +3720,7 @@ test_that("ldPruneByCorrelation snprelate backend prunes correlated columns", {
     p <- 6
     X <- matrix(rbinom(n * p, 2, 0.3), n, p)
     X[, 2] <- X[, 1] # perfect LD between columns 1 and 2
-    colnames(X) <- paste0("snp", 1:p)
+    colnames(X) <- paste0("snp", seq_len(p))
     result <- suppressMessages(
         ldPruneByCorrelation(
             X,
@@ -3906,7 +3906,10 @@ test_that("ldClumpByScore accepts a pre-built FBM and reports retained count (ve
 # =============================================================================
 
 test_that("extractLdMatrix errors on non-LdData input", {
-    expect_error(pecotmr:::extractLdMatrix(list()), "must be an LdData object")
+    expect_error(
+        pecotmr:::extractLdMatrix(list()),
+        "Must inherit from class 'LdData'"
+    )
 })
 
 test_that("extractLdMatrix returns the genotype matrix when wantGenotype=TRUE", {
@@ -4026,7 +4029,7 @@ test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast
     set.seed(11)
     nS <- 100L
     af <- c(rep(0.35, 5L), rep(0.004, 5L))
-    d <- vapply(af, function(f) rbinom(nS, 2L, f), numeric(nS))
+    d <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
     colnames(d) <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     d[1:80, 2] <- NA
     d
@@ -4139,14 +4142,14 @@ test_that(".panelVariantFilter handles empty and NULL input", {
 test_that(".panelCutoffs short-circuits when no cutoff is set", {
     # NULL means the panel is never touched, which is what keeps the default
     # path free of an extra dosage read.
-    expect_null(.panelCutoffs(list()))
-    expect_null(.panelCutoffs(list(
+    expect_null(.panelCutoffs())
+    expect_null(.panelCutoffs(
         mafCutoff = 0,
         macCutoff = 0,
         imissCutoff = 1
-    )))
-    expect_equal(.panelCutoffs(list(mafCutoff = 0.01))$mafCutoff, 0.01)
-    expect_equal(.panelCutoffs(list(imissCutoff = 0.5))$imissCutoff, 0.5)
+    ))
+    expect_equal(.panelCutoffs(mafCutoff = 0.01)$mafCutoff, 0.01)
+    expect_equal(.panelCutoffs(imissCutoff = 0.5)$imissCutoff, 0.5)
 })
 
 
@@ -4925,10 +4928,19 @@ test_that("computeLd(onDisk) applies shrinkage toward the identity", {
         format = "gds"
     )
     idx <- 1:6
-    plain <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE)
-    shrunk <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE, shrinkage = 0.5)
+    plain <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE
+    )
+    shrunk <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE,
+        shrinkage = 0.5
+    )
     # (1 - s) * R + s * I: off-diagonals halve, the diagonal stays 1.
     expect_equal(unname(diag(shrunk)), rep(1, length(idx)))
     expect_equal(

@@ -285,11 +285,7 @@ mashResidualCorrelation <- function(
     method <- arg_match(method)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -445,23 +441,15 @@ mashResidualCorrelation <- function(
 # and the exported mashCovarianceComponents.
 # @noRd
 .mashBuildComponents <- function(mashData, components, nPcs = NULL) {
-    comps <- list()
-    if (is_in("canonical", components)) {
-        comps <- c(comps, mashr::cov_canonical(mashData))
-    }
-    if (is_in("pca", components)) {
-        if (is.null(nPcs)) {
-            nPcs <- ncol(mashData$Bhat) - 1
+    npc <- nPcs %||% (ncol(mashData$Bhat) - 1)
+    c(
+        if (is_in("canonical", components)) mashr::cov_canonical(mashData),
+        if (is_in("pca", components)) mashr::cov_pca(mashData, npc = npc),
+        if (is_in("flash", components)) mashr::cov_flash(mashData),
+        if (is_in("flashNonneg", components)) {
+            mashr::cov_flash(mashData, factors = "nonneg")
         }
-        comps <- c(comps, mashr::cov_pca(mashData, npc = nPcs))
-    }
-    if (is_in("flash", components)) {
-        comps <- c(comps, mashr::cov_flash(mashData))
-    }
-    if (is_in("flashNonneg", components)) {
-        comps <- c(comps, mashr::cov_flash(mashData, factors = "nonneg"))
-    }
-    comps
+    )
 }
 
 #' @title Build mash Data-Driven Covariance Components
@@ -617,11 +605,11 @@ mashPriorCovariances <- function(
             engine
         )
     }
-    if (is.null(result$w)) {
-        m <- mashr::mash(mashData, Ulist = result$U, outputlevel = 1)
-        result$w <- mashr::get_estimated_pi(m)
-    }
-    list(U = result$U, w = result$w, loglik = result$loglik)
+    w <- result$w %||%
+        mashr::get_estimated_pi(
+            mashr::mash(mashData, Ulist = result$U, outputlevel = 1)
+        )
+    list(U = result$U, w = w, loglik = result$loglik)
 }
 
 # Reject unknown prior-covariance component names.
@@ -646,18 +634,10 @@ mashPriorCovariances <- function(
 # @noRd
 .mashRequirePriorPackages <- function() {
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (!requireNamespace("flashier", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install flashier: ",
-            "https://github.com/willwerscheid/flashier"
-        )
-        abort(msg)
+        abort("Package 'flashier' is required for this function.")
     }
 }
 
@@ -792,13 +772,15 @@ mashPriorCovariances <- function(
 # ud_fit with a directed error for the ud_ted / non-i.i.d. (per-variant SE)
 # incompatibility.
 # @noRd
+#' @importFrom rlang try_fetch
 .mashUdFit <- function(fit0, mashData, engine, udControl) {
     control <- .mashUdControl(engine, udControl, ncol(mashData$Bhat))
-    tryCatch(
+    try_fetch(
         udr::ud_fit(fit0, control = control, verbose = FALSE),
-        error = function(e) {
+        error = function(cnd) {
             if (
-                engine == "ud_ted" && str_detect(conditionMessage(e), "i.i.d")
+                engine == "ud_ted" &&
+                    str_detect(conditionMessage(cnd), "i.i.d")
             ) {
                 msg <- glue(
                     "mashPriorCovariances: engine 'ud_ted' (udr TED update) ",
@@ -806,12 +788,12 @@ mashPriorCovariances <- function(
                     "scale does not provide (per-variant SE). Use engine 'ud' ",
                     "(ED update), or a z-scale input."
                 )
-                abort(msg)
+                abort(msg, parent = cnd)
             }
             # Not the ud_ted i.i.d. case rewrapped above -- re-raise the
             # original condition unchanged so unrelated udr failures surface
             # (and aren't swallowed as a NULL fit).
-            cnd_signal(e)
+            cnd_signal(cnd)
         }
     )
 }
@@ -828,14 +810,15 @@ mashPriorCovariances <- function(
         )
         abort(msg)
     }
-    udControl <- utils::modifyList(
+    # NULL in a user control means "use the default", so drop before merging.
+    udControl <- list_modify(
         list(
             n_unconstrained = 50L,
             maxiter = 1000L,
             tol = 1e-2,
             tol.lik = 1e-2
         ),
-        udControl
+        !!!compact(udControl)
     )
     U.can <- mashr::cov_canonical(mashData)
     fit0 <- udr::ud_init(
@@ -908,11 +891,7 @@ mashModelFit <- function(
     fitOn <- arg_match(fitOn)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -1009,11 +988,7 @@ mashPosterior <- function(
 ) {
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
     ex <- .mashExcludeConditions(
@@ -1088,11 +1063,11 @@ mashPosterior <- function(
 #'   \code{pair[2]}.
 #' @examples
 #' makePairwiseContrastCol(c("a", "b"), "mean_contrast_")
+#' @importFrom checkmate assertCharacter
 #' @export
 makePairwiseContrastCol <- function(pair, template) {
-    template[pair[1]] <- 1
-    template[pair[2]] <- -1
-    template
+    assertCharacter(pair, len = 2L, any.missing = FALSE)
+    replace(template, pair, c(1, -1))
 }
 
 #' Compute pairwise contrasts from mash posterior
@@ -1124,6 +1099,7 @@ makePairwiseContrastCol <- function(pair, template) {
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' fitMashContrast(1L, om, pm, pv)
+#' @importFrom checkmate assertCount assertNumeric
 #' @export
 fitMashContrast <- function(
     index,
@@ -1132,12 +1108,15 @@ fitMashContrast <- function(
     posteriorVcov,
     grouping = NULL
 ) {
-    populationNames <- colnames(posteriorMean)
-    if (!is.null(populationNames)) {
-        populationNames <- str_remove_all(populationNames, "BETA_")
+    assertCount(index, positive = TRUE)
+    assertNumeric(grouping, null.ok = TRUE)
+    rawNames <- colnames(posteriorMean)
+    populationNames <- if (is.null(rawNames)) {
+        NULL
+    } else {
+        str_remove_all(rawNames, "BETA_")
     }
-    origMeanVector <- origMean[index, ]
-    names(origMeanVector) <- populationNames
+    origMeanVector <- set_names(origMean[index, ], populationNames)
     tested <- names(origMeanVector[origMeanVector != 0])
     if (length(tested) < 2) {
         return(NULL)
@@ -1171,10 +1150,9 @@ fitMashContrast <- function(
 .mashContrastDesign <- function(tested, nPop, grouping) {
     pairwiseVector <- set_names(rep(0, nPop), tested)
     if (nPop <= 2) {
-        pairwiseVector[tested[1]] <- 1
-        pairwiseVector[tested[2]] <- -1
+        contrast <- replace(pairwiseVector, tested[1:2], c(1, -1))
         return(matrix(
-            pairwiseVector,
+            contrast,
             ncol = 1,
             dimnames = list(tested, str_c(tested[1], "_vs_", tested[2]))
         ))
@@ -1188,43 +1166,79 @@ fitMashContrast <- function(
 # conditions sharing their deviation weight.
 # @noRd
 .mashDeviationContrast <- function(tested, nPop, grouping) {
-    dev <- matrix(-1, nPop, nPop, dimnames = list(tested, tested))
-    diag(dev) <- nPop - 1
-    uniqueGroups <- unique(grouping)
-    for (grp in uniqueGroups[uniqueGroups > 0]) {
-        grpMask <- grouping == grp
-        grpSize <- sum(grpMask)
-        diag(dev)[grpMask] <- (nPop - 1) / grpSize
-        dev[grpMask, grpMask] <- (nPop - 1) / grpSize
-    }
-    colnames(dev) <- str_c(tested, "_deviation")
-    dev
+    # Three cases, stated directly: conditions sharing a group split the
+    # deviation weight between them, the diagonal carries the full weight,
+    # and everything else contributes -1.
+    groupSize <- as.integer(table(grouping)[as.character(grouping)])
+    sameGroup <- outer(grouping, grouping, "==") &
+        matrix(grouping > 0, nPop, nPop)
+    matrix(
+        ifelse(
+            sameGroup,
+            matrix((nPop - 1) / groupSize, nPop, nPop),
+            ifelse(diag(TRUE, nPop), nPop - 1, -1)
+        ),
+        nPop,
+        nPop,
+        dimnames = list(tested, str_c(tested, "_deviation"))
+    )
 }
 
 # Pairwise (all-pairs) contrasts, with grouped conditions' contributions split
 # evenly across the group.
 # @noRd
+# One grouped condition's share of a pairwise column: the group's matched
+# contribution split evenly across its members.
+# @noRd
+.mashSplitGroupShare <- function(column, dg, grouping, groups, pwCol) {
+    rowsInGroup <- names(grouping[grouping == dg])
+    matchedRow <- rowsInGroup[is_in(rowsInGroup, groups)]
+    if (length(matchedRow) == 0) {
+        return(column)
+    }
+    replace(column, rowsInGroup, pwCol[matchedRow] / length(rowsInGroup))
+}
+
+# One pairwise column, with each grouped condition's contribution split
+# across its group. A column whose two sides share a grouping (or that
+# involves no grouped condition) is left as it is.
+# @noRd
+.mashAdjustPairwiseColumn <- function(col, pw, grouping) {
+    column <- pw[, col]
+    groups <- str_split(col, "_vs_")[[1]]
+    groupValues <- grouping[is_in(names(grouping), groups)]
+    relevant <- names(groupValues[groupValues > 0])
+    if (n_distinct(groupValues) <= 1 || length(relevant) == 0) {
+        return(column)
+    }
+    reduce(
+        unique(groupValues[groupValues > 0]),
+        .mashSplitGroupShare,
+        grouping = grouping,
+        groups = groups,
+        pwCol = column,
+        .init = column
+    )
+}
+
 .mashPairwiseContrast <- function(tested, grouping, pairwiseVector) {
     twoCombn <- combn(tested, 2)
     pwNames <- apply(twoCombn, 2, str_flatten, collapse = "_vs_")
-    pw <- apply(twoCombn, 2, makePairwiseContrastCol, pairwiseVector)
-    colnames(pw) <- pwNames
-    pwAdj <- pw
-    for (col in colnames(pw)) {
-        groups <- str_split(col, "_vs_")[[1]]
-        groupValues <- grouping[is_in(names(grouping), groups)]
-        relevant <- names(groupValues[groupValues > 0])
-        if (n_distinct(groupValues) > 1 && length(relevant) > 0) {
-            for (dg in unique(groupValues[groupValues > 0])) {
-                rowsInGroup <- names(grouping[grouping == dg])
-                matchedRow <- rowsInGroup[is_in(rowsInGroup, groups)]
-                if (length(matchedRow) > 0) {
-                    pwAdj[rowsInGroup, col] <- pw[matchedRow, col] /
-                        length(rowsInGroup)
-                }
-            }
-        }
-    }
+    pw <- `colnames<-`(
+        apply(twoCombn, 2, makePairwiseContrastCol, pairwiseVector),
+        pwNames
+    )
+    pwAdj <- matrix(
+        unname(list_c(map(
+            colnames(pw),
+            .mashAdjustPairwiseColumn,
+            pw = pw,
+            grouping = grouping
+        ))),
+        nrow = nrow(pw),
+        ncol = ncol(pw),
+        dimnames = dimnames(pw)
+    )
     pwAdj
 }
 
@@ -1238,19 +1252,38 @@ fitMashContrast <- function(
     contrastSe,
     contrastP
 ) {
-    fid <- rownames(posteriorMean)[index]
-    if (is.null(fid)) {
-        fid <- as.character(index)
-    }
-    df <- tibble(feature_id = fid)
+    fid <- rownames(posteriorMean)[index] %||% as.character(index)
     # unname: contrast* carry contrastDesign colnames; tibble (unlike
-    # data.frame) preserves a named scalar's name on the column.
-    for (i in seq_along(cnames)) {
-        df[[str_c("mean_contrast_", cnames[i])]] <- unname(contrastDiff[i])
-        df[[str_c("se_contrast_", cnames[i])]] <- unname(contrastSe[i])
-        df[[str_c("p_contrast_", cnames[i])]] <- unname(contrastP[i])
-    }
-    df
+    # data.frame) preserves a named scalar's name on the column. Columns are
+    # interleaved mean/se/p per contrast, which is the order the loop built.
+    cols <- list_c(map(
+        seq_along(cnames),
+        .mashContrastColumns,
+        cnames = cnames,
+        contrastDiff = contrastDiff,
+        contrastSe = contrastSe,
+        contrastP = contrastP
+    ))
+    tibble(feature_id = fid, !!!cols)
+}
+
+# One contrast's three columns, named for it.
+# @noRd
+.mashContrastColumns <- function(
+    i,
+    cnames,
+    contrastDiff,
+    contrastSe,
+    contrastP
+) {
+    set_names(
+        list(
+            unname(contrastDiff[i]),
+            unname(contrastSe[i]),
+            unname(contrastP[i])
+        ),
+        str_c(c("mean_contrast_", "se_contrast_", "p_contrast_"), cnames[i])
+    )
 }
 
 #' Posterior contrast table over an entire mash posterior
@@ -1287,6 +1320,7 @@ fitMashContrast <- function(
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' mashPosteriorContrast(pm, pv, om)
+#' @importFrom checkmate assertNumeric
 #' @export
 mashPosteriorContrast <- function(
     posteriorMean,
@@ -1294,18 +1328,18 @@ mashPosteriorContrast <- function(
     origMean,
     grouping = NULL
 ) {
-    origMean <- origMean[, colnames(posteriorMean), drop = FALSE]
-    origMean[is.nan(origMean)] <- 0
+    assertNumeric(grouping, null.ok = TRUE)
+    aligned <- origMean[, colnames(posteriorMean), drop = FALSE]
+    origMean <- replace(aligned, is.nan(aligned), 0)
 
-    parts <- map(
+    parts <- compact(map(
         seq_len(nrow(posteriorMean)),
         fitMashContrast,
         origMean = origMean,
         posteriorMean = posteriorMean,
         posteriorVcov = posteriorVcov,
         grouping = grouping
-    )
-    parts <- compact(parts)
+    ))
     if (length(parts) == 0L) {
         return(tibble())
     }
@@ -1358,51 +1392,76 @@ mashPosteriorContrast <- function(
 #' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
 #' updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
+#' @importFrom checkmate assertCharacter
 #' @export
 updateMashModelCov <- function(mashModel, allSamples, samples) {
-    cov <- mashModel$fitted_g$Ulist
-
-    # Remove matrices for dropped conditions
+    assertCharacter(allSamples, any.missing = FALSE)
+    assertCharacter(samples, any.missing = FALSE)
     unwanted <- setdiff(allSamples, samples)
-    for (d in names(cov)) {
-        if (is_in(d, unwanted) || is_in(d, str_c("ED_", unwanted))) {
-            cov[[d]] <- NULL
-        }
+    cov <- mashModel$fitted_g$Ulist
+    retained <- discard(names(cov), .mashCovIsDropped, unwanted = unwanted)
+    resized <- set_names(
+        map(retained, .mashResizeCov, cov = cov, samples = samples),
+        retained
+    )
+    keptPi <- discard(
+        names(mashModel$fitted_g$pi),
+        .mashPiMentionsDropped,
+        unwanted = unwanted
+    )
+    list_assign(
+        mashModel,
+        fitted_g = list_assign(
+            mashModel$fitted_g,
+            Ulist = resized,
+            pi = mashModel$fitted_g$pi[keptPi]
+        )
+    )
+}
+
+# A covariance component belongs to a dropped condition, under either its
+# bare name or its ED_ prefixed one.
+# @noRd
+.mashCovIsDropped <- function(d, unwanted) {
+    is_in(d, unwanted) || is_in(d, str_c("ED_", unwanted))
+}
+
+# A mixture-weight name mentioning any dropped condition.
+# @noRd
+.mashPiMentionsDropped <- function(nm, unwanted) {
+    any(map_lgl(unwanted, .mashNameMentions, nm = nm))
+}
+
+# @noRd
+.mashNameMentions <- function(s, nm) {
+    str_detect(nm, fixed(s))
+}
+
+# One covariance component resized to the retained conditions. A
+# condition-specific component is a single 1 on its own diagonal entry;
+# `identity` is a single 1 in the first cell; anything else is subset by
+# name when it has one, else positionally.
+# @noRd
+.mashResizeCov <- function(d, cov, samples) {
+    n <- length(samples)
+    if (is_in(d, samples)) {
+        at <- which(samples == d)
+        return(replace(matrix(0, n, n), (at - 1L) * n + at, 1))
     }
-
-    # Resize remaining matrices to match retained conditions
-    for (d in names(cov)) {
-        if (is_in(d, samples)) {
-            # Condition-specific: single 1 on diagonal
-            m <- matrix(0, length(samples), length(samples))
-            m[which(samples == d), which(samples == d)] <- 1
-            cov[[d]] <- m
-        } else if (d == "identity") {
-            m <- matrix(0, length(samples), length(samples))
-            m[1, 1] <- 1
-            cov[[d]] <- m
-        } else if (is.null(colnames(cov[[d]]))) {
-            cov[[d]] <- cov[[d]][
-                seq_along(samples),
-                seq_along(samples)
-            ]
-        } else {
-            cov[[d]] <- cov[[d]][samples, samples]
-        }
-        cov[[d]] <- as.matrix(cov[[d]])
+    if (d == "identity") {
+        return(replace(matrix(0, n, n), 1L, 1))
     }
-
-    mashModel$fitted_g$Ulist <- cov
-
-    # Prune mixture weights for removed conditions
-    for (s in unwanted) {
-        dropIdx <- which(str_detect(names(mashModel$fitted_g$pi), fixed(s)))
-        if (length(dropIdx) > 0) {
-            mashModel$fitted_g$pi <- mashModel$fitted_g$pi[-dropIdx]
-        }
+    if (is.null(colnames(cov[[d]]))) {
+        return(as.matrix(cov[[d]][seq_along(samples), seq_along(samples)]))
     }
+    as.matrix(cov[[d]][samples, samples])
+}
 
-    mashModel
+# One matrix sliced to (snps, samples), relabelled with the retained
+# condition names. `snps` / `samples` are subscripts, so NULL is meaningful.
+# @noRd
+.mashSliceMatrix <- function(m, rows, cols) {
+    `colnames<-`(as.matrix(m[rows, cols]), cols)
 }
 
 #' Subset mash data matrices to specific SNPs and conditions
@@ -1430,17 +1489,22 @@ updateMashModelCov <- function(mashModel, allSamples, samples) {
 #' vhat <- diag(3)
 #' dimnames(vhat) <- list(cond, cond)
 #' sliceMashData(dat, vhat = vhat, snps = 1:4, samples = NULL)
+#' @importFrom checkmate assertList assertCharacter
 #' @export
 sliceMashData <- function(data, vhat, snps, samples) {
-    data$bhat <- as.matrix(data$bhat[snps, samples])
-    data$sbhat <- as.matrix(data$sbhat[snps, samples])
-    data$Z <- as.matrix(data$Z[snps, samples])
-    vhat <- as.matrix(vhat[samples, samples])
-    data$snp <- data$snp[is_in(data$snp, snps)]
-    colnames(data$bhat) <- colnames(data$sbhat) <- colnames(data$Z) <- colnames(
-        vhat
-    ) <- samples
-    list(data = data, vhat = vhat)
+    assertList(data)
+    # `snps` and `samples` are SUBSCRIPTS -- `data$bhat[snps, samples]` -- so
+    # character names, integer indices and NULL are all valid. No type
+    # assertion is correct here (the @example passes snps = 1:4 and
+    # samples = NULL).
+    sliced <- list_assign(
+        data,
+        bhat = .mashSliceMatrix(data$bhat, snps, samples),
+        sbhat = .mashSliceMatrix(data$sbhat, snps, samples),
+        Z = .mashSliceMatrix(data$Z, snps, samples),
+        snp = data$snp[is_in(data$snp, snps)]
+    )
+    list(data = sliced, vhat = .mashSliceMatrix(vhat, samples, samples))
 }
 
 #' Sanitize NaN/Inf values in mash data
@@ -1452,11 +1516,19 @@ sliceMashData <- function(data, vhat, snps, samples) {
 #' @return The data list with sanitized values.
 #' @examples
 #' sanitizeMashData(list(strong = list(z = matrix(rnorm(9), 3, 3))))
+#' @importFrom checkmate assertList
 #' @export
 sanitizeMashData <- function(data) {
-    data$bhat[is.nan(data$bhat)] <- 0
-    data$sbhat[is.nan(data$sbhat) | is.infinite(data$sbhat)] <- 1e3
-    data
+    assertList(data)
+    list_assign(
+        data,
+        bhat = replace(data$bhat, is.nan(data$bhat), 0),
+        sbhat = replace(
+            data$sbhat,
+            is.nan(data$sbhat) | is.infinite(data$sbhat),
+            1e3
+        )
+    )
 }
 
 #' Random-Effects Meta-Analysis of Mash Pairwise Contrasts, per Condition
@@ -1618,8 +1690,10 @@ metaAnalysisPerCondition <- function(
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
 #' calculateFeatureScores(cr, metaMethod = "mean")
+#' @importFrom checkmate assertString
 #' @export
 calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
+    assertString(metaMethod)
     cr <- as_tibble(contrastResult)
     effCols <- names(cr)[str_detect(names(cr), "mean_contrast_.*deviation")]
     if (length(effCols) == 0L) {
@@ -1661,8 +1735,10 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
 #' nSignificantScore(cr, pCutoff = 0.05)
+#' @importFrom checkmate assertNumber
 #' @export
 nSignificantScore <- function(contrastResult, pCutoff = 1e-5) {
+    assertNumber(pCutoff, lower = 0, upper = 1)
     cr <- as_tibble(contrastResult)
     pCols <- names(cr)[str_detect(names(cr), "p_contrast_.*deviation")]
     if (length(pCols) == 0L) {
@@ -1713,8 +1789,8 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
         return(NA_real_)
     }
     leadRows <- bind_rows(map(css, .csLeadRow, fineMapping = fineMapping))
-    cr <- as_tibble(contrastResults)
-    cr <- filter(cr, is_in(.data$feature_id, leadRows$variants))
+    cr <- as_tibble(contrastResults) |>
+        filter(is_in(.data$feature_id, leadRows$variants))
     if (nrow(cr) == 0L) {
         return(NA_real_)
     }
@@ -1776,11 +1852,11 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
     if (!is_in(seCol, names(cr))) {
         return(NA_real_)
     }
-    es <- abs(as.numeric(cr[[ec]]))
-    se <- as.numeric(cr[[seCol]])
-    keep <- is.finite(es) & is.finite(se) & se > 0
-    es <- es[keep]
-    se <- se[keep]
+    esAll <- abs(as.numeric(cr[[ec]]))
+    seAll <- as.numeric(cr[[seCol]])
+    keep <- is.finite(esAll) & is.finite(seAll) & seAll > 0
+    es <- esAll[keep]
+    se <- seAll[keep]
     if (length(es) < 1L) {
         return(NA_real_)
     }

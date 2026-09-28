@@ -366,7 +366,7 @@ test_that("accessors require length-1 selection args", {
     obj <- .qtlMakeOne()
     expect_error(
         getSumStats(obj, study = c("s1", "s2"), context = "c1", trait = "t1"),
-        "must each be length 1"
+        "Must have length 1"
     )
 })
 
@@ -649,11 +649,11 @@ test_that("validity names the identity columns that are missing", {
     data(qtlSumStatsExample)
     bad <- qtlSumStatsExample
     S4Vectors::mcols(bad)$trait <- NULL
-    expect_equal(
-        pecotmr:::.qssCheckRequiredCols(bad),
-        "missing columns: trait"
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'trait'\\}"
     )
-    expect_null(pecotmr:::.qssCheckRequiredCols(qtlSumStatsExample))
+    expect_true(methods::validObject(qtlSumStatsExample))
 })
 
 test_that(".appendTraitDistances is a no-op without a trait position", {

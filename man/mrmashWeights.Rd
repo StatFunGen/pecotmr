@@ -10,7 +10,8 @@ mrmashWeights(
   Y = NULL,
   retainFit = FALSE,
   fitDetail = c("slim", "full"),
-  ...
+  dataDrivenPriorMatrices = NULL,
+  methodArgs = list()
 )
 }
 \arguments{
@@ -33,7 +34,12 @@ is not duplicated. `"full"` additionally retains the complete mr.mash fit
 under `$fit` (consistent with how susie fits are kept), at the cost of a
 larger payload.}
 
-\item{...}{Additional arguments passed to `mrmashWrapper()` when fitting.}
+\item{dataDrivenPriorMatrices}{Optional list of data-driven prior
+covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
+and retained in the payload for mvSuSiE prior reconstruction.}
+
+\item{methodArgs}{Optional named list of options passed to
+`mrmashWrapper()` when fitting.}
 }
 \value{
 Matrix of variant weights.

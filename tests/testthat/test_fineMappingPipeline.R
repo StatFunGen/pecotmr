@@ -17,7 +17,7 @@ context("fineMappingPipeline")
         path = "/tmp/fmsketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -105,7 +105,7 @@ context("fineMappingPipeline")
 ) {
     gh <- .fmp_makeHandle()
     phen <- setNames(
-        lapply(contexts, function(.) .fmp_makeSe(traits = traits)),
+        map(contexts, function(.) .fmp_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -599,11 +599,11 @@ test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
     )
     expect_error(
         pecotmr:::.rbindFineMappingResult(fmr, "not_an_fmr"),
-        "expects two FineMappingResultBase inputs"
+        "Must inherit from class 'FineMappingResultBase'"
     )
     expect_error(
         pecotmr:::.rbindFineMappingResult("not_an_fmr", fmr),
-        "expects two FineMappingResultBase inputs"
+        "Must inherit from class 'FineMappingResultBase'"
     )
 })
 
@@ -906,7 +906,7 @@ test_that(".fmSerScreen: disables on 0, skips no-signal, keeps signal + adaptive
     n <- 150L
     p <- 25L
     X <- matrix(rnorm(n * p), n, p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     yNull <- rnorm(n) # no association
     ySig <- X[, 1] * 2 + rnorm(n, sd = 0.3) # strong single effect at v1
     fn <- function(...) suppressMessages(pecotmr:::.fmSerScreen(...))
@@ -1391,7 +1391,7 @@ test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake metho
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     y <- X[, 2] * 1.5 + rnorm(n, sd = 0.5)
@@ -1405,7 +1405,10 @@ test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake metho
         coverage = 0.95,
         verbose = 0
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
     expect_setequal(colnames(cv$samplePartition), c("Sample", "Fold"))
     # Keyed by the TWAS snake method name (adapter methodKey base).
     expect_true("susie_predicted" %in% names(cv$prediction))
@@ -1434,7 +1437,7 @@ test_that(".fmWeightsCv reuses a supplied samplePartition verbatim", {
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     y <- X[, 1] + rnorm(n, sd = 0.5)
@@ -4007,7 +4010,10 @@ test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitte
         rbinom(n * p, 2, 0.4),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
+        )
     )
     Y <- matrix(rnorm(n * R), n, R, dimnames = list(rownames(X), c("c1", "c2")))
     cv <- pecotmr:::.fmWeightsCv(
@@ -4019,7 +4025,10 @@ test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitte
         coverage = 0.95,
         verbose = 0
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
     expect_true("mvsusie_performance" %in% names(cv$performance))
     expect_equal(dim(cv$prediction[["mvsusie_predicted"]]), c(n, R))
 })
@@ -4044,7 +4053,10 @@ test_that(".fmFoldWeights covers the fSuSiE branch (mocked fitter)", {
         rbinom(n * p, 2, 0.4),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
+        )
     )
     Y <- matrix(rnorm(n * 4L), n, 4L, dimnames = list(rownames(X), NULL))
     W <- pecotmr:::.fmFoldWeights(
@@ -4192,7 +4204,10 @@ test_that(".fmWeightsCv covers per-fold prior, NULL-weights, and no-overlap bran
         verbose = 0,
         mvPriorCv = list("1" = list(priorVariance = diag(2)))
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
 })
 
 test_that("fineMappingPipeline(QtlSumStats): susieInf RSS chain (mocked)", {

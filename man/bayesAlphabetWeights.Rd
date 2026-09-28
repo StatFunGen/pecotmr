@@ -13,7 +13,7 @@ bayesAlphabetWeights(
   nit = 5000,
   nburn = 1000,
   nthin = 5,
-  ...
+  methodArgs = list()
 )
 }
 \arguments{
@@ -37,7 +37,8 @@ Options are bayesN, bayesL, bayesA, bayesC, or bayesR.}
 \item{nthin}{Integer. Thinning interval for retained MCMC samples. Default
 \code{5}.}
 
-\item{...}{Additional arguments forwarded to \code{qgg::gbayes}.}
+\item{methodArgs}{Optional named list of options forwarded to
+\code{qgg::gbayes}.}
 }
 \value{
 A vector containing the weights to be applied to each genotype in

@@ -13,7 +13,7 @@ context("colocPipeline")
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -36,7 +36,7 @@ context("colocPipeline")
     tl <- data.frame(
         variant_id = variant_ids,
         chrom = rep("1", n),
-        pos = as.integer(100 * (1:n)),
+        pos = as.integer(100 * seq_len(n)),
         A1 = rep("G", n),
         A2 = rep("A", n),
         N = rep(1000, n),
@@ -84,10 +84,10 @@ context("colocPipeline")
         )
     }
     QtlFineMappingResult(
-        study = vapply(tuples, `[[`, character(1), 1),
-        context = vapply(tuples, `[[`, character(1), 2),
-        trait = vapply(tuples, `[[`, character(1), 3),
-        method = vapply(tuples, `[[`, character(1), 4),
+        study = map_chr(tuples, 1L),
+        context = map_chr(tuples, 2L),
+        trait = map_chr(tuples, 3L),
+        method = map_chr(tuples, 4L),
         entry = entries,
         ldSketch = if (with_sketch) .cp_makeHandle() else NULL
     )
@@ -106,8 +106,8 @@ context("colocPipeline")
         )
     }
     GwasFineMappingResult(
-        study = vapply(tuples, `[[`, character(1), 1),
-        method = vapply(tuples, `[[`, character(1), 2),
+        study = map_chr(tuples, 1L),
+        method = map_chr(tuples, 2L),
         entry = entries,
         ldSketch = if (with_sketch) .cp_makeHandle() else NULL
     )
@@ -705,7 +705,7 @@ test_that("colocPipeline: rejects a non-data.frame enrichment", {
             gwasInput = gfmr,
             enrichment = "not a data frame"
         ),
-        "must be a data.frame"
+        "Must be of type 'data.frame'"
     )
 })
 
@@ -723,7 +723,7 @@ test_that("colocPipeline: rejects enrichment missing required columns", {
             gwasInput = gfmr,
             enrichment = bad
         ),
-        "is missing column"
+        "Colnames must include the elements"
     )
 })
 
@@ -1251,19 +1251,32 @@ test_that("PIP adjustment is skipped when either side has no rows", {
     # Intersecting variants across an empty side would empty the other, so
     # the inputs are passed through untouched instead.
     data(qtlFineMappingExample, gwasFineMappingExample)
-    p <- list(
-        adjustPips = TRUE,
+    # It now returns just the two (possibly adjusted) inputs, not a bundle.
+    emptyQtl <- list(
         qtlFineMappingResult = qtlFineMappingExample[0],
         gwasFmr = gwasFineMappingExample
     )
-    expect_identical(pecotmr:::.colocMaybeAdjustPips(p), p)
+    expect_identical(
+        pecotmr:::.colocMaybeAdjustPips(
+            adjustPips = TRUE,
+            qtlFineMappingResult = emptyQtl$qtlFineMappingResult,
+            gwasFmr = emptyQtl$gwasFmr
+        ),
+        emptyQtl
+    )
     # ...and it is skipped outright when not requested.
-    p2 <- list(
-        adjustPips = FALSE,
+    notAsked <- list(
         qtlFineMappingResult = qtlFineMappingExample,
         gwasFmr = gwasFineMappingExample
     )
-    expect_identical(pecotmr:::.colocMaybeAdjustPips(p2), p2)
+    expect_identical(
+        pecotmr:::.colocMaybeAdjustPips(
+            adjustPips = FALSE,
+            qtlFineMappingResult = notAsked$qtlFineMappingResult,
+            gwasFmr = notAsked$gwasFmr
+        ),
+        notAsked
+    )
 })
 
 test_that("pre-extracting LBF from an empty GWAS result yields no blocks", {

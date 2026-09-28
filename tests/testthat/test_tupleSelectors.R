@@ -14,9 +14,9 @@ setClass("TsTestCollection", contains = "RangedTupleList")
         rep(list(GenomicRanges::GRanges()), n)
     )
     if (length(cols) > 0L) {
-        S4Vectors::mcols(grl) <- do.call(
+        S4Vectors::mcols(grl) <- exec(
             S4Vectors::DataFrame,
-            c(cols, list(check.names = FALSE))
+            !!!c(cols, list(check.names = FALSE))
         )
     }
     methods::new("TsTestCollection", grl)
@@ -114,7 +114,7 @@ test_that(".tupleSelectRow: non-scalar selectors error", {
             trait = "t1",
             method = "susie"
         ),
-        "must each be length 1"
+        "Must have length 1"
     )
 })
 
@@ -212,7 +212,7 @@ test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
             method = "susie",
             region = c("r1", "r2")
         ),
-        "`region` must be length 1"
+        "region.*Must have length 1"
     )
 })
 
@@ -472,7 +472,10 @@ test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {
 test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPos", {
     expect_equal(
         pecotmr:::.validateTraitPosColumn(.ts_coll(traitPos = c("x", "y"))),
-        "'traitPos' column must be a GRanges"
+        str_c(
+            "'traitPos' column Must inherit from class 'GRanges', ",
+            "but has class 'character'"
+        )
     )
     # A one-range traitPos beside two rows: assigned through the mcols
     # listData because the parallel-length check would reject it otherwise,

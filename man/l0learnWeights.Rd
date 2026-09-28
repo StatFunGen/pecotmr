@@ -4,7 +4,7 @@
 \alias{l0learnWeights}
 \title{Compute Weights Using L0Learn}
 \usage{
-l0learnWeights(X, y, penalty = "L0", nFolds = 5, ...)
+l0learnWeights(X, y, penalty = "L0", nFolds = 5, methodArgs = list())
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -16,7 +16,8 @@ l0learnWeights(X, y, penalty = "L0", nFolds = 5, ...)
 
 \item{nFolds}{Number of cross-validation folds. Default is 5.}
 
-\item{...}{Additional arguments passed through to `L0Learn::L0Learn.cvfit`
+\item{methodArgs}{Optional named list of options passed through to
+`L0Learn::L0Learn.cvfit`
 (e.g. `nGamma`, `gammaMin`, `gammaMax`, `algorithm`, `maxSuppSize`).}
 }
 \value{

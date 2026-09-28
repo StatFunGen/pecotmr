@@ -39,7 +39,7 @@ test_that("LdScore rejects ld_scores row mismatch with snp_info", {
                 ldMatrixList = list()
             )
         ),
-        "ldScores.*must be parallel"
+        "ldScores.*Must have exactly 10 rows, but has 5 rows"
     )
 })
 
@@ -73,7 +73,7 @@ test_that("LdScore rejects weights that are not parallel to the variants", {
             ldScoreWeights = runif(n - 1L),
             ldMatrixList = list()
         ),
-        "they must be parallel"
+        "ldScoreWeights.*Must have length 10, but has length 9"
     )
 })
 
@@ -133,7 +133,7 @@ test_that("buildLdScore computes per-block sums of r^2", {
 test_that("buildLdScore scores each block against only its own variants", {
     ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
     scores <- as.vector(getLdScores(buildLdScore(ld))[, 1])
-    perBlock <- unlist(lapply(getCorrelation(ld), function(R) rowSums(R^2)))
+    perBlock <- unlist(map(getCorrelation(ld), function(R) rowSums(R^2)))
 
     expect_equal(length(scores), 7L)
     expect_equal(scores, perBlock)
@@ -175,6 +175,22 @@ test_that("buildLdScore defaults weights to 1/max(l2, 1)", {
     expect_equal(getLdScoreWeights(custom), rep(2, 6))
     expect_error(
         buildLdScore(ld, ldScoreWeights = rep(2, 3)),
-        "3 value\\(s\\) for 6 variant\\(s\\)"
+        "ldScoreWeights.*Must have length 6, but has length 3"
+    )
+})
+
+test_that("buildLdScore: argument guards fire", {
+    meta <- system.file(
+        "extdata",
+        "ld_reference",
+        "ld_meta_file.tsv",
+        package = "pecotmr"
+    )
+    ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
+    expect_error(buildLdScore(ld, nRef = 0L), "nRef.*Must be >= 1")
+    expect_error(buildLdScore(ld, inSample = NA), "inSample.*May not be NA")
+    expect_error(
+        buildLdScore(ld, keepLdMatrices = NA),
+        "keepLdMatrices.*May not be NA"
     )
 })

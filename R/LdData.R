@@ -56,53 +56,47 @@ setClass(
         mixtureWeights = "LdMixtureWeights"
     ),
     validity = function(object) {
-        errors <- character()
-        if (is.null(object@correlation) && is.null(object@genotypeHandle)) {
-            errors <- c(
-                errors,
+        errors <- c(
+            if (is.null(object@correlation) && is.null(object@genotypeHandle)) {
                 str_c(
                     "At least one of 'correlation' or ",
                     "'genotypeHandle' must be non-NULL"
                 )
-            )
-        }
-        if (length(object) == 0) {
-            errors <- c(errors, "an LdData must cover >= 1 variant")
-        }
-        errors <- c(errors, .ldCheckGenotypeSource(object@genotypeHandle))
-        errors <- c(errors, .ldCheckCorrelation(object@correlation))
-        if (!is.null(object@mixtureWeights)) {
-            if (!is.list(object@genotypeHandle)) {
-                errors <- c(
-                    errors,
-                    str_c(
-                        "'mixtureWeights' may only be set when ",
-                        "'genotypeHandle' is a list of panels"
-                    )
-                )
-            } else {
-                w <- object@mixtureWeights
-                if (
-                    !is.numeric(w) || length(w) != length(object@genotypeHandle)
-                ) {
-                    errors <- c(
-                        errors,
-                        str_c(
-                            "'mixtureWeights' must be numeric of length ",
-                            "equal to the genotypeHandle list"
-                        )
-                    )
-                } else if (any(w < 0) || abs(sum(w) - 1) > 1e-6) {
-                    errors <- c(
-                        errors,
-                        "'mixtureWeights' must be non-negative and sum to 1"
-                    )
-                }
-            }
-        }
+            },
+            if (length(object) == 0) "an LdData must cover >= 1 variant",
+            .ldCheckGenotypeSource(object@genotypeHandle),
+            .ldCheckCorrelation(object@correlation),
+            .ldCheckMixtureWeights(object)
+        )
         if (length(errors) == 0) TRUE else errors
     }
 )
+
+# Mixture weights are only meaningful over a LIST of panels, and must then be
+# a proper simplex over them. NULL weights are always valid.
+# @noRd
+.ldCheckMixtureWeights <- function(object) {
+    if (is.null(object@mixtureWeights)) {
+        return(NULL)
+    }
+    if (!is.list(object@genotypeHandle)) {
+        return(str_c(
+            "'mixtureWeights' may only be set when ",
+            "'genotypeHandle' is a list of panels"
+        ))
+    }
+    w <- object@mixtureWeights
+    if (!is.numeric(w) || length(w) != length(object@genotypeHandle)) {
+        return(str_c(
+            "'mixtureWeights' must be numeric of length ",
+            "equal to the genotypeHandle list"
+        ))
+    }
+    if (any(w < 0) || abs(sum(w) - 1) > 1e-6) {
+        return("'mixtureWeights' must be non-negative and sum to 1")
+    }
+    NULL
+}
 
 #' @describeIn LdData-class Refused. Subsetting would narrow the variants
 #'   while \code{correlation} -- variant-by-variant, and \code{snpIdx}, which
@@ -214,6 +208,8 @@ setMethod("show", "LdData", function(object) {
 #'   blockMetadata = S4Vectors::DataFrame(
 #'     chrom = "22", start = 1L, end = 1000L))
 #' ld
+#' @importFrom checkmate assert checkMatrix checkList checkNull
+#' @importFrom checkmate assertNumeric
 #' @export
 LdData <- function(
     correlation = NULL,
@@ -224,6 +220,15 @@ LdData <- function(
     nRef = 0L,
     mixtureWeights = NULL
 ) {
+    # correlation is documented as a matrix OR a list of matrices OR NULL,
+    # so this must be an or-combination, not assertMatrix.
+    assert(
+        checkMatrix(correlation),
+        checkList(correlation),
+        checkNull(correlation),
+        .var.name = "correlation"
+    )
+    assertNumeric(mixtureWeights, null.ok = TRUE)
     obj <- new(
         "LdData",
         variants,
@@ -255,14 +260,23 @@ LdData <- function(
         A2 = refPanel$A2
     )
 
-    optional <- c("allele_freq", "variance", "n_nomiss")
-    for (col in optional) {
-        if (is_in(col, names(refPanel))) {
-            mcolsData[[col]] <- refPanel[[col]]
-        }
-    }
-    mcols(gr) <- mcolsData
-    gr
+    optional <- intersect(
+        c("allele_freq", "variance", "n_nomiss"),
+        names(refPanel)
+    )
+    `mcols<-`(
+        gr,
+        value = cbind(
+            mcolsData,
+            DataFrame(refPanel[optional], check.names = FALSE)
+        )
+    )
+}
+
+# One panel scaled by its mixture weight.
+# @noRd
+.ldScalePanel <- function(w, panel) {
+    w * panel
 }
 
 #' @rdname getCorrelation
@@ -293,13 +307,16 @@ setMethod("getCorrelation", "LdData", function(x) {
             )
             abort(msg)
         }
-        w <- x@mixtureWeights
-        R <- matrix(0, nrow = dims[[1L]], ncol = dims[[1L]])
-        for (k in seq_along(perPanel)) {
-            R <- R + w[[k]] * perPanel[[k]]
-        }
-        dimnames(R) <- dimnames(perPanel[[1L]])
-        return(R)
+        # The mixture is a weighted sum over the panels, so it is a fold.
+        weighted <- map2(x@mixtureWeights, perPanel, .ldScalePanel)
+        return(`dimnames<-`(
+            reduce(
+                weighted,
+                `+`,
+                .init = matrix(0, nrow = dims[[1L]], ncol = dims[[1L]])
+            ),
+            dimnames(perPanel[[1L]])
+        ))
     }
     computeLd(.ldSourceDosages(x@genotypeHandle, x@snpIdx), method = "sample")
 })
@@ -347,10 +364,11 @@ setMethod("getBlockMetadata", "LdData", function(x) {
 #' @rdname getRefPanel
 #' @export
 setMethod("getRefPanel", "LdData", function(x) {
-    mc <- as_tibble(as.data.frame(mcols(x)))
-    mc$chrom <- as.character(seqnames(x))
-    mc$pos <- start(x)
-    mc
+    mutate(
+        as_tibble(as.data.frame(mcols(x))),
+        chrom = as.character(seqnames(x)),
+        pos = start(x)
+    )
 })
 
 #' @rdname getGenotypeHandle

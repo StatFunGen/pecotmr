@@ -37,22 +37,23 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 # Collect all contract violations (empty vector = valid). Entry checks run only
 # once the required columns are present.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames
 .validateCtwasResult <- function(object) {
-    errors <- .ctwasResCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .ctwasResCheckEntries(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        names(object),
+        must.include = c("gwasStudy", "study", "context", "method", "entry"),
+        what = "colnames",
+        .var.name = "columns",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# @noRd
-.ctwasResCheckRequiredCols <- function(object) {
-    required <- c("gwasStudy", "study", "context", "method", "entry")
-    missingCols <- setdiff(required, names(object))
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.ctwasResCheckEntries(object))
+    coll$getMessages()
 }
 
 # @noRd
@@ -89,7 +90,7 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 
 # @noRd
 .ctwasResCheckJointCols <- function(object, jointCols) {
-    unlist(compact(map(jointCols, .ctwasResJointColError, object = object)))
+    list_c(compact(map(jointCols, .ctwasResJointColError, object = object)))
 }
 
 # @noRd
@@ -121,6 +122,16 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 # @noRd
 .ctwasResColOf <- function(cn, object) {
     object[[cn]]
+}
+
+# Each joint-provenance column must be one value per row.
+# @noRd
+.ctwasCheckJointColLength <- function(nm, val, n) {
+    if (length(val) == n) {
+        return(invisible(NULL))
+    }
+    msg <- glue("`{nm}` must have the same length as `gwasStudy`.")
+    abort(msg)
 }
 
 #' @title Create a CtwasResult Collection
@@ -177,18 +188,16 @@ CtwasResult <- function(
         method = as.character(method),
         entry = S4Vectors::SimpleList(entry)
     )
-    for (nm in c("jointStudies", "jointContexts")) {
-        val <- get(nm)
-        if (is.null(val)) {
-            next
-        }
-        if (length(val) != n) {
-            msg <- glue("`{nm}` must have the same length as `gwasStudy`.")
-            abort(msg)
-        }
-        cols[[nm]] <- as.character(val)
-    }
-    dfArgs <- c(cols, list(check.names = FALSE))
+    supplied <- compact(list(
+        jointStudies = jointStudies,
+        jointContexts = jointContexts
+    ))
+    walk2(names(supplied), supplied, .ctwasCheckJointColLength, n = n)
+    dfArgs <- c(
+        cols,
+        map(supplied, as.character),
+        list(check.names = FALSE)
+    )
     df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- new("CtwasResult", df)
     validObject(obj)
@@ -219,8 +228,9 @@ setMethod("getContexts", "CtwasResult", function(x) {
     if (n == 0L) {
         return(NULL)
     }
-    parts <- map(seq_len(n), .ctwasAggregateRow, x = x, getter = getter)
-    parts <- compact(parts)
+    parts <- compact(
+        map(seq_len(n), .ctwasAggregateRow, x = x, getter = getter)
+    )
     if (length(parts) == 0L) {
         return(NULL)
     }

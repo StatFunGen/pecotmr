@@ -192,8 +192,7 @@ setClass(
     if (length(GenomeInfoDb::seqlevels(object)) == 0L) {
         return(NULL)
     }
-    build <- unique(GenomeInfoDb::genome(object))
-    build <- build[!is.na(build)]
+    build <- discard(unique(GenomeInfoDb::genome(object)), is.na)
     if (length(build) == 1L && str_length(build) > 0L) {
         return(NULL)
     }
@@ -217,8 +216,7 @@ setMethod("getGenome", "SumStatsBase", function(x, ...) {
     # GRangesList already has somewhere to keep it, and a parallel `genome`
     # slot went stale against it (getGenome() said hg19 while genome(x) said
     # NA, so every Bioconductor path that reads genome(x) saw nothing).
-    build <- unique(GenomeInfoDb::genome(x))
-    build <- build[!is.na(build)]
+    build <- discard(unique(GenomeInfoDb::genome(x)), is.na)
     if (length(build) == 0L) NA_character_ else build[[1L]]
 })
 
@@ -439,15 +437,32 @@ setMethod(
     }
 )
 
+# The collection's identity columns plus the per-entry payload columns.
+# @noRd
+.withEntryPayload <- function(md, entries) {
+    # `[[<-` not cbind(): the collection may already carry these columns, and
+    # they must be REPLACED -- cbind would append a second copy of each, which
+    # every reader then shadows with the stale one.
+    withFit <- `[[<-`(
+        md,
+        "susieFit",
+        value = S4Vectors::SimpleList(map(entries, getSusieFit))
+    )
+    `[[<-`(
+        withFit,
+        "cvResult",
+        value = S4Vectors::SimpleList(map(entries, getCvResult))
+    )
+}
+
 # Rebuild a fine-mapping collection from adjusted entries, keeping every
 # identity column and collection-level slot.
 # @noRd
 .fmrFromEntries <- function(x, entries) {
-    grl <- GenomicRanges::GRangesList(map(entries, rowVariants))
-    md <- mcols(x, use.names = FALSE)
-    md$susieFit <- S4Vectors::SimpleList(map(entries, getSusieFit))
-    md$cvResult <- S4Vectors::SimpleList(map(entries, getCvResult))
-    mcols(grl) <- md
+    grl <- `mcols<-`(
+        GenomicRanges::GRangesList(map(entries, rowVariants)),
+        value = .withEntryPayload(mcols(x, use.names = FALSE), entries)
+    )
     new(class(x), grl, ldSketch = .asLdSketch(getLdSketch(x)))
 }
 
@@ -534,8 +549,7 @@ setMethod("getRetainedMass", "FineMappingResultBase", function(x, ...) {
     if (nrow(x) == 0L) {
         return(.rcEmptyMass(x))
     }
-    parts <- map(seq_len(nrow(x)), .rcMassForRow, x = x)
-    parts <- compact(parts)
+    parts <- compact(map(seq_len(nrow(x)), .rcMassForRow, x = x))
     if (length(parts) == 0L) {
         return(.rcEmptyMass(x))
     }
@@ -691,8 +705,8 @@ setMethod("fsusieCredibleBand", "FineMappingResultBase", function(x, ...) {
 #' @rdname fsusieAffectedRegions
 #' @export
 setMethod("fsusieAffectedRegions", "FineMappingResultBase", function(x, ...) {
-    grs <- map(seq_len(nrow(x)), .fsusieEntryAffectedRegions, x = x)
-    grs <- grs[lengths(grs) > 0L]
+    perRow <- map(seq_len(nrow(x)), .fsusieEntryAffectedRegions, x = x)
+    grs <- perRow[lengths(perRow) > 0L]
     if (length(grs) == 0L) {
         return(GenomicRanges::GRanges())
     }
@@ -751,6 +765,7 @@ setMethod(
 # Resolve the single pinned entry and return its GRanges view (aggregating
 # across multiple entries requires type = "data.frame").
 # @noRd
+#' @importFrom rlang try_fetch
 .fmrbTopLociGranges <- function(
     x,
     study,
@@ -761,7 +776,7 @@ setMethod(
     signalCutoff,
     minPurity
 ) {
-    sel <- tryCatch(
+    sel <- try_fetch(
         .fmrSelectEntry(
             x,
             study = study,
@@ -770,7 +785,7 @@ setMethod(
             method = method,
             region = region
         ),
-        error = function(e) e
+        error = function(cnd) cnd
     )
     if (inherits(sel, "error")) {
         msg <- glue(
@@ -867,7 +882,9 @@ setMethod("resolveWeights", "FineMappingResultBase", function(x, ...) {
     # The per-variant weight of the row a selector pins. Defined on the
     # collection because that is what getFineMappingResult() now returns; the
     # body is the per-row primitive, so the two cannot drift.
-    .fmrRowResolveWeights(.fmrSelectEntry(x, ...), ...)
+    # `...` is the row selector; it is consumed by .fmrSelectEntry and has
+    # no meaning to the per-row primitive, so it is not forwarded twice.
+    .fmrRowResolveWeights(.fmrSelectEntry(x, ...))
 })
 
 #' @rdname getVariantIds

@@ -10,7 +10,7 @@
         rnorm(n * p),
         n,
         p,
-        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (seq_len(p))))
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * seq_len(p)))
     )
     b <- rnorm(p)
     b[-(1:2)] <- 0
@@ -21,15 +21,13 @@
 # Single-context summary statistics + LD for the *_rss_weights(stat, LD) contract.
 .rrwStatLd <- function(n = 50, p = 6, seed = 1) {
     d <- .rrwXy(n, p, seed)
-    bhat <- vapply(
+    bhat <- map_dbl(
         seq_len(p),
-        function(j) summary(lm(d$y ~ d$X[, j]))$coefficients[2, 1],
-        numeric(1)
+        function(j) summary(lm(d$y ~ d$X[, j]))$coefficients[2, 1]
     )
-    sehat <- vapply(
+    sehat <- map_dbl(
         seq_len(p),
-        function(j) summary(lm(d$y ~ d$X[, j]))$coefficients[2, 2],
-        numeric(1)
+        function(j) summary(lm(d$y ~ d$X[, j]))$coefficients[2, 2]
     )
     zhat <- bhat / sehat
     LD <- cor(d$X)
@@ -52,25 +50,20 @@
         rnorm(n * p),
         n,
         p,
-        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (seq_len(p))))
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * seq_len(p)))
     )
     B <- matrix(0, p, K)
     B[1, ] <- rnorm(K, sd = 2)
     B[2, ] <- rnorm(K, sd = 2)
     Y <- X %*% B + matrix(rnorm(n * K), n, K)
     colnames(Y) <- paste0("ctx", seq_len(K))
-    Z <- vapply(
-        seq_len(K),
-        function(k) {
-            vapply(
-                seq_len(p),
-                function(j) {
-                    summary(lm(Y[, k] ~ X[, j]))$coefficients[2, 3]
-                },
-                numeric(1)
-            )
-        },
-        numeric(p)
+    Z <- exec(
+        cbind,
+        !!!map(seq_len(K), function(k) {
+            map_dbl(seq_len(p), function(j) {
+                summary(lm(Y[, k] ~ X[, j]))$coefficients[2, 3]
+            })
+        })
     )
     colnames(Z) <- colnames(Y)
     list(X = X, Y = Y, LD = cor(X), stat = list(z = Z, n = n), p = p, K = K)

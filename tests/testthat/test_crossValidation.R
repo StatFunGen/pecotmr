@@ -32,7 +32,7 @@ mk_xy <- function(n = 30, p = 6, k = 1, seed = 1) {
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     Y <- matrix(
@@ -48,19 +48,19 @@ test_that("input is validated", {
     d <- mk_xy()
     expect_error(
         cv(d$X, d$Y, fold = 0, fitFold = mock_fit_fold),
-        "positive integer"
+        "Must be >= 1"
     )
     expect_error(
         cv(d$X, d$Y, fold = "a", fitFold = mock_fit_fold),
-        "positive integer"
+        "Must be of type 'count'"
     )
     expect_error(
         cv(as.data.frame(d$X), d$Y, fold = 2, fitFold = mock_fit_fold),
-        "X must be a matrix"
+        "Must be of type 'matrix'"
     )
     expect_error(
         cv(d$X, d$Y[1:5, , drop = FALSE], fold = 2, fitFold = mock_fit_fold),
-        "same"
+        "Must have exactly 30 rows"
     )
     expect_error(
         cv(d$X, d$Y, fitFold = mock_fit_fold),
@@ -255,7 +255,7 @@ test_that("retainFits collects per-fold fits only when requested", {
         fitFold = fit_with_model,
         retainFits = FALSE
     ))
-    expect_true(all(vapply(r_off$foldFits, length, integer(1)) == 0L))
+    expect_true(all(map_int(r_off$foldFits, length) == 0L))
     r_on <- suppressMessages(cv(
         d$X,
         d$Y,
@@ -326,7 +326,7 @@ test_that("numThreads = -1 asks BiocParallel for the worker count", {
     # -1 means "all available"; anything else is capped at what is available.
     expect_equal(
         pecotmr:::.cvNumCores(-1),
-        BiocParallel::bpworkers(BiocParallel::MulticoreParam())
+        BiocParallel::multicoreWorkers()
     )
     expect_equal(pecotmr:::.cvNumCores(1), 1)
 })

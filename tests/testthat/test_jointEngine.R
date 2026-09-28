@@ -439,7 +439,7 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
         p,
         k,
         dimnames = list(
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p)),
             paste0("c", seq_len(k))
         )
     )
@@ -568,7 +568,7 @@ test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regressi
     K <- 2L
     nObs <- 400L
     X <- matrix(rnorm(nObs * p), nObs, p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     R <- cor(X)
     Z <- matrix(
         rnorm(p * K),
@@ -1026,7 +1026,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
 .je_ensEntries <- function(group, predCor) {
     Y <- .jgY(group)
     vars <- colnames(.jgX(group))
-    lapply(seq_len(ncol(Y)), function(r) {
+    map(seq_len(ncol(Y)), function(r) {
         pr <- predCor * Y[, r] + rnorm(nrow(Y), sd = 0.3)
         names(pr) <- rownames(Y)
         rsq <- stats::cor(Y[, r], pr)^2
@@ -1086,7 +1086,7 @@ test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", 
             standardized = FALSE
         )
     )
-    expect_true(all(vapply(ens, is.null, logical(1))))
+    expect_true(all(map_lgl(ens, is.null)))
 })
 
 # ---- engine twas fitter: orchestration absorbed from .twasWeightsPipelineMatrix
@@ -1127,9 +1127,12 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:3)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (1:3))
+        )
     )
-    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
+    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", seq_len(n)), "c1"))
     g <- new(
         "IndividualJointGroup",
         conditions = data.frame(
@@ -1270,12 +1273,12 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
             p,
             length(colLabels),
             dimnames = list(
-                sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+                sprintf("chr1:%d:A:G", 100L * seq_len(p)),
                 colLabels
             )
         ),
         nVec = rep(100, length(colLabels)),
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p))
     )
 }
 .je_mockLd <- function(sketch, vids, ...) {
@@ -1627,7 +1630,7 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
     g <- pecotmr:::.enumUnivariateIndividual(NULL, scope)
     expect_length(g, 4L) # 2 ctx x 2 traits
     expect_true(all(
-        vapply(g, function(x) nrow(.jgConditions(x)), integer(1)) == 1L
+        map_int(g, function(x) nrow(.jgConditions(x))) == 1L
     ))
 })
 
@@ -1751,13 +1754,16 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("chr1:100:A:G", "chr1:200:A:G"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("G1", "G2"))
+        dimnames = list(paste0("s", seq_len(n)), c("G1", "G2"))
     )
     grp <- new(
         "IndividualJointGroup",
@@ -1802,7 +1808,7 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen skips when < 2 survivor
         pecotmr:::fitJointGroup(g, pipe, "mvsusie", list(pipCutoffToSkip = 0.8))
     )
     expect_length(entries, 2L) # one per ORIGINAL cond
-    expect_true(all(vapply(entries, is.null, logical(1)))) # all-NULL (skipped)
+    expect_true(all(map_lgl(entries, is.null))) # all-NULL (skipped)
 })
 
 test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of conditions", {
@@ -1812,13 +1818,16 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of condi
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("chr1:100:A:G", "chr1:200:A:G"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), c("c1", "c2", "c3"))
+        dimnames = list(paste0("s", seq_len(n)), c("c1", "c2", "c3"))
     )
     g <- new(
         "IndividualJointGroup",
@@ -1904,9 +1913,12 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:3)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (1:3))
+        )
     )
-    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
+    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", seq_len(n)), "c1"))
     g <- new(
         "IndividualJointGroup",
         conditions = data.frame(
@@ -2060,7 +2072,7 @@ test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
             standardized = FALSE
         )
     )
-    expect_true(all(vapply(ens, is.null, logical(1)))) # < 2 usable -> NULL
+    expect_true(all(map_lgl(ens, is.null))) # < 2 usable -> NULL
 })
 
 test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
@@ -2081,7 +2093,7 @@ test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
             standardized = FALSE
         )
     )
-    expect_true(all(vapply(ens, is.null, logical(1))))
+    expect_true(all(map_lgl(ens, is.null)))
 })
 
 test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's variant ids", {
@@ -2525,8 +2537,14 @@ test_that(".runJointSpecs row-binds TWAS results across specs", {
         .package = "pecotmr"
     )
     out <- pecotmr:::.runJointSpecs(
-        list("s1", "s2", "s3"), NULL, "individual",
-        NULL, "lasso", NULL, NULL, list()
+        list("s1", "s2", "s3"),
+        NULL,
+        "individual",
+        NULL,
+        "lasso",
+        NULL,
+        NULL,
+        list()
     )
     # The first spec seeds `out`; later ones are bound onto it.
     expect_equal(out, "R1+R2+R3")
@@ -2547,8 +2565,14 @@ test_that(".runJointSpecs row-binds fine-mapping results across specs", {
     )
     # The pipeline class, not the data, picks which rbind is used.
     out <- pecotmr:::.runJointSpecs(
-        list("s1", "s2"), NULL, "individual",
-        new("FmJointPipeline"), "susie", NULL, NULL, list()
+        list("s1", "s2"),
+        NULL,
+        "individual",
+        new("FmJointPipeline"),
+        "susie",
+        NULL,
+        NULL,
+        list()
     )
     expect_equal(out, "F1&F2")
 })
@@ -2565,8 +2589,14 @@ test_that(".runJointSpecs skips a spec that produced nothing", {
     # A NULL spec must not seed `out`, or the bind would carry a NULL.
     expect_equal(
         pecotmr:::.runJointSpecs(
-            list("s1", "s2"), NULL, "individual",
-            NULL, "lasso", NULL, NULL, list()
+            list("s1", "s2"),
+            NULL,
+            "individual",
+            NULL,
+            "lasso",
+            NULL,
+            NULL,
+            list()
         ),
         "KEPT"
     )
@@ -2575,8 +2605,9 @@ test_that(".runJointSpecs skips a spec that produced nothing", {
 test_that(".twasGroupArgs yields no fitted models when the fit is absent", {
     local_mocked_bindings(
         .jpConfig = function(p) list(),
-        .jgConditions = function(g) list(study = "s", context = "c",
-            trait = "t"),
+        .jgConditions = function(g) {
+            list(study = "s", context = "c", trait = "t")
+        },
         .twasFineMappingFits = function(...) NULL,
         .twasCvResultFor = function(...) NULL,
         .package = "pecotmr"
@@ -2618,9 +2649,19 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
     local_mocked_bindings(
         .twasFmHandoffCv = function(...) NULL,
         .jointTwasLeakageWarn = function(...) invisible(NULL),
-        twasWeightsCv = function(X, Y, fold, samplePartitions, weightMethods,
-                                 retainFits, maxNumVariants, numThreads,
-                                 data_driven_priorMatricesCv, verbose, seed) {
+        twasWeightsCv = function(
+            X,
+            Y,
+            fold,
+            samplePartitions,
+            weightMethods,
+            retainFits,
+            maxNumVariants,
+            numThreads,
+            dataDrivenPriorMatricesCv,
+            verbose,
+            seed
+        ) {
             seen <<- list(sp = samplePartitions, mcv = maxNumVariants)
             "CV"
         },
@@ -2633,11 +2674,22 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
         dataDrivenPriorMatricesCv = NULL
     )
     cfg <- list(
-        cvFolds = 5L, samplePartition = "CFG_SP", maxCvVariants = 77L,
-        cvThreads = 1, seed = 1L, verbose = 0
+        cvFolds = 5L,
+        samplePartition = "CFG_SP",
+        maxCvVariants = 77L,
+        cvThreads = 1,
+        seed = 1L,
+        verbose = 0
     )
     pecotmr:::.jointTwasCv(
-        NULL, NULL, "lasso", NULL, c(1, 2), args, cfg, "lasso"
+        NULL,
+        NULL,
+        "lasso",
+        NULL,
+        c(1, 2),
+        args,
+        cfg,
+        "lasso"
     )
     expect_equal(seen$sp, "ARGS_SP")
     expect_equal(seen$mcv, 77L)
@@ -2648,7 +2700,14 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
     cfgUncapped <- cfg
     cfgUncapped$maxCvVariants <- 0
     pecotmr:::.jointTwasCv(
-        NULL, NULL, "lasso", NULL, c(1, 2), argsBare, cfgUncapped, "lasso"
+        NULL,
+        NULL,
+        "lasso",
+        NULL,
+        c(1, 2),
+        argsBare,
+        cfgUncapped,
+        "lasso"
     )
     expect_equal(seen$sp, "CFG_SP")
     expect_equal(seen$mcv, Inf)
@@ -2668,10 +2727,18 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         .fmResidPheno = function(data, contexts, traitId, naAction) {
             matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "t1"))
         },
-        .fmResidGeno = function(data, contexts, traitId = NULL,
-                                cisWindow = NULL, region = NULL) {
-            seen <<- list(traitId = traitId, cisWindow = cisWindow,
-                region = region)
+        .fmResidGeno = function(
+            data,
+            contexts,
+            traitId = NULL,
+            cisWindow = NULL,
+            region = NULL
+        ) {
+            seen <<- list(
+                traitId = traitId,
+                cisWindow = cisWindow,
+                region = region
+            )
             matrix(0, 2L, 2L, dimnames = list(c("s1", "s2"), c("v1", "v2")))
         },
         .package = "pecotmr"
@@ -2682,11 +2749,190 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         traits = list(S1 = "t1")
     )
     pecotmr:::.enumUnivariateIndividual(
-        NULL, scope, list(region = "chr1:1-1000")
+        NULL,
+        scope,
+        list(region = "chr1:1-1000")
     )
     # An explicit region replaces the trait-anchored cis window entirely --
     # neither traitId nor cisWindow is passed down.
     expect_equal(seen$region, "chr1:1-1000")
     expect_null(seen$cisWindow)
     expect_null(seen$traitId)
+})
+
+# ---------------------------------------------------------------------------
+# cvWeightMethods: the override and the all-zero notice. Both were amputated
+# by 693e6d63 (the parameter stayed, its read path did not), so they are
+# covered here to stop the same silent loss happening twice.
+# ---------------------------------------------------------------------------
+
+test_that(".jointTwasCvRequested: NULL means every method", {
+    expect_true(pecotmr:::.jointTwasCvRequested(NULL, "susie"))
+    expect_true(pecotmr:::.jointTwasCvRequested(NULL, "lasso"))
+})
+
+test_that(".jointTwasCvRequested accepts tokens and method keys alike", {
+    expect_true(pecotmr:::.jointTwasCvRequested(c("susie", "lasso"), "susie"))
+    expect_false(pecotmr:::.jointTwasCvRequested(c("susie", "lasso"), "mrash"))
+    # the `<token>_weights` spelling used by weightMethods lists
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(c("susie_weights"), "susie")
+    )
+    # and a named method list, not just a character vector
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "lasso")
+    )
+    expect_false(
+        pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "susie")
+    )
+    # a multi-word token: `susie_inf_weights` strips to `susie_inf`, which is
+    # not the canonical `susieInf`, so suffix-stripping alone misses it
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(c("susie_inf_weights"), "susieInf")
+    )
+    expect_true(
+        pecotmr:::.jointTwasCvRequested(
+            list(susieInfWeights = list()),
+            "susieInf"
+        )
+    )
+    expect_false(
+        pecotmr:::.jointTwasCvRequested(c("susie_inf_weights"), "susie")
+    )
+})
+
+test_that(".jointTwasCv skips a method excluded by cvWeightMethods", {
+    cfg <- list(cvFolds = 5L, cvWeightMethods = c("lasso"))
+    out <- pecotmr:::.jointTwasCv(
+        Xc = NULL,
+        Yc = NULL,
+        wm = NULL,
+        ma = NULL,
+        W = matrix(1, 2, 1),
+        args = list(),
+        cfg = cfg,
+        token = "susie"
+    )
+    expect_null(out)
+})
+
+test_that(".jointTwasCv warns when a method is all-zero, not silently", {
+    cfg <- list(cvFolds = 5L, cvWeightMethods = NULL)
+    expect_warning(
+        out <- pecotmr:::.jointTwasCv(
+            Xc = NULL,
+            Yc = NULL,
+            wm = NULL,
+            ma = NULL,
+            W = matrix(0, 3, 1),
+            args = list(),
+            cfg = cfg,
+            token = "susie"
+        ),
+        "all of its weights are zero"
+    )
+    expect_null(out)
+})
+
+test_that(".jointTwasCv refuses a fine-mapping method with no per-fold fits", {
+    # Without a CV handoff from the FineMappingResult there is no fold fit,
+    # and this layer never fine-maps -- so it refuses rather than re-fitting.
+    cfg <- list(cvFolds = 5L, cvWeightMethods = NULL)
+    expect_error(
+        pecotmr:::.jointTwasCv(
+            Xc = NULL,
+            Yc = NULL,
+            wm = NULL,
+            ma = NULL,
+            W = matrix(1, 3, 1),
+            args = list(),
+            cfg = cfg,
+            token = "susie"
+        ),
+        "needs each fold's own fine-mapping fit"
+    )
+})
+
+test_that(".jointCvPartition lets the fine-mapping folds govern the group", {
+    sp <- data.frame(
+        Sample = c("s1", "s2", "s3", "s4"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+    ids <- c("s1", "s2", "s3", "s4")
+    # the fine-mapping CV's own partition is what every method is scored on
+    expect_equal(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = NULL,
+            sampleIds = ids,
+            cvFolds = 2L
+        ),
+        sp
+    )
+    # an identical explicit partition is no conflict
+    expect_equal(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = sp,
+            sampleIds = ids,
+            cvFolds = 2L
+        ),
+        sp
+    )
+    # with no fine-mapping CV the explicit partition still wins
+    expect_equal(
+        pecotmr:::.jointCvPartition(
+            fmCv = NULL,
+            userSp = sp,
+            sampleIds = ids,
+            cvFolds = 2L
+        ),
+        sp
+    )
+    # and with neither, no partition is fixed here: an integer `cvFolds` only
+    # validates, leaving twasWeightsCv() to draw the folds downstream
+    expect_null(
+        pecotmr:::.jointCvPartition(
+            fmCv = NULL,
+            userSp = NULL,
+            sampleIds = ids,
+            cvFolds = 2L
+        )
+    )
+})
+
+test_that(".jointCvPartition rejects fold samples absent from the dataset", {
+    sp <- data.frame(
+        Sample = c("s1", "s2", "ghost1", "ghost2"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+    expect_error(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = NULL,
+            sampleIds = c("s1", "s2", "s3"),
+            cvFolds = 2L
+        ),
+        "ghost1, ghost2"
+    )
+})
+
+test_that(".jointCvPartition rejects a partition conflicting with the CV's", {
+    sp <- data.frame(
+        Sample = c("s1", "s2", "s3", "s4"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+    other <- data.frame(
+        Sample = c("s1", "s2", "s3", "s4"),
+        Fold = c(2L, 2L, 1L, 1L)
+    )
+    expect_error(
+        pecotmr:::.jointCvPartition(
+            fmCv = list(samplePartition = sp),
+            userSp = other,
+            sampleIds = c("s1", "s2", "s3", "s4"),
+            cvFolds = 2L
+        ),
+        "differs from the fine-mapping"
+    )
 })

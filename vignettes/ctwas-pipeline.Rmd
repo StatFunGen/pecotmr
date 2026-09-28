@@ -113,10 +113,12 @@ res <- ctwasPipeline(
     thin = 1,
     niterPrefit = 3,
     niter = 10,
-    min_group_size = 1,
-    min_p_single_effect = 0,
-    min_nonSNP_PIP = 0,
-    fallbackToPrefit = TRUE
+    fallbackToPrefit = TRUE,
+    ctwasArgs = list(
+        min_group_size = 1,
+        min_p_single_effect = 0,
+        min_nonSNP_PIP = 0
+    )
 )
 res
 ```
@@ -239,11 +241,10 @@ est <- estCtwasParam(
     thin = 1,
     niterPrefit = 3,
     niter = 10,
-    min_group_size = 1,
-    min_p_single_effect = 0,
-    fallbackToPrefit = TRUE
+    fallbackToPrefit = TRUE,
+    ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0)
 )
-screened <- screenCtwasRegions(est, min_nonSNP_PIP = 0)
+screened <- screenCtwasRegions(est, ctwasArgs = list(min_nonSNP_PIP = 0))
 finemapped <- finemapCtwasRegions(screened)
 nrow(finemapped$finemap_res)
 ```

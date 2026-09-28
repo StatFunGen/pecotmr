@@ -83,7 +83,7 @@ context("QtlDataset internal helpers")
 ) {
     gh <- .qh_makeHandle(n_samples = n_samples, a1 = a1, a2 = a2)
     pheno <- setNames(
-        lapply(contexts, function(.) .qh_makeSe(n_samples = n_samples)),
+        map(contexts, function(.) .qh_makeSe(n_samples = n_samples)),
         contexts
     )
     if (is.null(geno_cov)) {
@@ -269,7 +269,7 @@ test_that(".qtlResolveVariantRegion: region must be a GRanges; multi-range is al
     qd <- .qh_makeDataset()
     expect_error(
         pecotmr:::.qtlResolveVariantRegion(qd, region = "chr1:100-200"),
-        "must be a GRanges object"
+        "Must inherit from class 'GRanges'"
     )
     expect_error(
         pecotmr:::.qtlResolveVariantRegion(
@@ -809,7 +809,7 @@ test_that("QtlDataset: keepIndel defaults to TRUE; validity rejects non-scalar",
     expect_true(qd@keepIndel)
     # The constructor coerces via isTRUE(); validity guards direct new()/slot sets.
     qd@keepIndel <- c(TRUE, FALSE)
-    expect_error(validObject(qd), "keepIndel.*single logical")
+    expect_error(validObject(qd), "Variable 'keepIndel'")
 })
 
 test_that(".qtlExtractBlock: mafCutoff drops low-MAF variants", {
@@ -986,7 +986,7 @@ context("QtlDataset residualization methods")
 ) {
     gh <- .qr_makeHandle(n_samples = n_samples)
     pheno <- setNames(
-        lapply(contexts, function(.) .qr_makeSe(n_samples = n_samples)),
+        map(contexts, function(.) .qr_makeSe(n_samples = n_samples)),
         contexts
     )
     if (is.null(geno_cov)) {
@@ -1988,7 +1988,7 @@ test_that("dentist accepts zscore column name variant", {
 test_that("dentist errors when sum_stat missing required columns", {
     skip_if_not_installed("pgenlibr")
     X <- load_test_genotype()$X
-    bad_stat <- data.frame(x = 1:ncol(X), y = rnorm(ncol(X)))
+    bad_stat <- data.frame(x = seq_len(ncol(X)), y = rnorm(ncol(X)))
     expect_error(dentist(bad_stat, X = X), "missing either")
 })
 
@@ -2016,7 +2016,7 @@ test_that("QtlDataset: rejects empty study name", {
             genotypes = .sc_makeGenotypeHandle(),
             phenotypes = list(brain = se)
         ),
-        "non-empty character string"
+        "Variable 'study'.*at least 1 characters"
     )
 })
 
@@ -2067,7 +2067,7 @@ test_that("QtlDataset: rejects negative QC cutoffs", {
             phenotypes = list(brain = se),
             mafCutoff = -0.1
         ),
-        "non-negative numeric"
+        "is not >= 0"
     )
 })
 
@@ -2319,7 +2319,10 @@ test_that(".qtlResolveVariantRegion rejects a non-GRanges / empty region", {
         genotypes = h,
         phenotypes = list(ctx = .mr_makeSE(getSampleIds(h)))
     )
-    expect_error(getGenotypes(qd, region = "chr21:1-2"), "must be a GRanges")
+    expect_error(
+        getGenotypes(qd, region = "chr21:1-2"),
+        "Must inherit from class 'GRanges'"
+    )
     expect_error(
         getGenotypes(qd, region = GenomicRanges::GRanges()),
         "at least one range"
@@ -2386,7 +2389,7 @@ test_that(".qtlResolveVariantRegion: region path rejects a non-scalar/negative c
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100, 200))
     expect_error(
         pecotmr:::.qtlResolveVariantRegion(qd, region = region, cisWindow = -5),
-        "must be a single non-negative value"
+        "cisWindow"
     )
     expect_error(
         pecotmr:::.qtlResolveVariantRegion(
@@ -2394,7 +2397,7 @@ test_that(".qtlResolveVariantRegion: region path rejects a non-scalar/negative c
             region = region,
             cisWindow = c(1, 2)
         ),
-        "must be a single non-negative value"
+        "cisWindow"
     )
 })
 
@@ -3158,7 +3161,7 @@ test_that("validity rejects a non-scalar scaleResiduals", {
     # The constructor coerces via isTRUE(); validity guards direct slot sets.
     qd <- .qh_makeDataset()
     qd@scaleResiduals <- c(TRUE, FALSE)
-    expect_error(validObject(qd), "scaleResiduals.*single logical")
+    expect_error(validObject(qd), "Variable 'scaleResiduals'")
 })
 
 test_that("the phenotype-list check rejects duplicated context names", {
@@ -3253,4 +3256,16 @@ test_that("trait-position validation skips a context whose ranges do not line up
 
 test_that("aligning covariates with nothing to align returns NULL", {
     expect_null(pecotmr:::.qtlAlignCovariates(list(), NULL))
+})
+
+test_that("outlier detection reports a singular trait covariance", {
+    # A singular covariance silently became a pseudo-inverse, while the
+    # sibling robustbase-missing branch already informed the user.
+    Y <- cbind(a = c(1, 2, 3, 4), b = c(2, 4, 6, 8))
+    cnd <- rlang::catch_cnd(
+        pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 0.05),
+        classes = "message"
+    )
+    expect_match(conditionMessage(cnd), "singular")
+    expect_match(conditionMessage(cnd), "pseudo-inverse")
 })

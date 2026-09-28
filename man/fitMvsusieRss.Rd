@@ -4,7 +4,7 @@
 \alias{fitMvsusieRss}
 \title{Fit mvSuSiE-RSS on summary-statistic (Z, R, N) data}
 \usage{
-fitMvsusieRss(Z, R, N, prior_variance, coverage = 0.95, ...)
+fitMvsusieRss(Z, R, N, prior_variance, coverage = 0.95, methodArgs = list())
 }
 \arguments{
 \item{Z}{Numeric matrix of Z-scores (variants x conditions).}
@@ -17,7 +17,8 @@ fitMvsusieRss(Z, R, N, prior_variance, coverage = 0.95, ...)
 
 \item{coverage}{Credible set coverage (default 0.95).}
 
-\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.}
+\item{methodArgs}{Optional named list of options forwarded to
+\code{mvsusieR::mvsusie_rss}.}
 }
 \value{
 The fit object returned by \code{mvsusieR::mvsusie_rss}.

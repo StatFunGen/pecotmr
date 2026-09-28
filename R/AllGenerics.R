@@ -50,6 +50,8 @@ NULL
 #' @param annotations An \code{AnnotationMatrix} object, or NULL for
 #'   unstratified estimation.
 #' @param local Logical, whether to compute per-block local estimates.
+#' @param estimatorArgs Optional named list of estimator-specific options
+#'   (\code{lambda} for lder / gldsc / hdl, \code{nIter} for sldsc).
 #' @param ... Additional method-specific arguments.
 #' @param study Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this study; \code{NULL} matches all studies.
@@ -139,6 +141,8 @@ setGeneric("computeLdScores", function(ldRef, annotations = NULL, ...) {
 #'   inferred from file extension.
 #' @param ... The keyword source arguments described above, plus any further
 #'   arguments forwarded to the format-specific reader.
+#' @param vcfArgs Optional named list of arguments forwarded to
+#'   \code{VariantAnnotation::readVcf} when the source is a VCF.
 #' @return A \code{RangedSummarizedExperiment} of variants x samples.
 #' @seealso \code{\link{computeLd}}
 #' @examples

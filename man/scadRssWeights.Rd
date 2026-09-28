@@ -11,7 +11,7 @@ scadRssWeights(
   gamma = 3.7,
   alpha = 1,
   selection = c("ldQuadratic", "minFbeta"),
-  ...
+  methodArgs = list()
 )
 }
 \arguments{
@@ -30,7 +30,8 @@ sample sizes).}
 \item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
 \code{"minFbeta"}.}
 
-\item{...}{Additional arguments passed to \code{penalizedRss()}.}
+\item{methodArgs}{Optional named list of options passed to
+\code{penalizedRss()}.}
 }
 \value{
 A numeric vector of SNP coefficient weights.

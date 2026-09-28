@@ -29,7 +29,7 @@ context("qtlEnrichmentPipeline")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -282,7 +282,7 @@ test_that("qtlEnrichmentPipeline: rejects non-GwasFineMappingResult gwasFmr", {
             gwasFineMappingResult = "no",
             qtlFineMappingResult = qfmr
         ),
-        "must be a GwasFineMappingResult"
+        "Must inherit from class 'GwasFineMappingResult'"
     )
 })
 
@@ -293,7 +293,7 @@ test_that("qtlEnrichmentPipeline: rejects non-QtlFineMappingResult qtlFmr", {
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = "no"
         ),
-        "must be a QtlFineMappingResult"
+        "Must inherit from class 'GwasFineMappingResult'"
     )
 })
 
@@ -1068,7 +1068,18 @@ test_that(".enrRunEnrichment turns a stored alignment failure into a warning", {
             1L,
             gwasPip = NULL,
             k = 1L,
-            p = list(alignedByTuple = list(cnd))
+            alignedByTuple = list(cnd),
+            numGwas = NULL,
+            piQtl = NULL,
+            lambda = 1,
+            impN = 25,
+            numThreads = 1L,
+            seed = NULL,
+            enrichmentArgs = list(),
+            gwasFineMappingResult = NULL,
+            gwasTuples = data.frame(study = "g"),
+            qtlFineMappingResult = NULL,
+            qtlTuples = data.frame(study = "q")
         ),
         "qtlEnrichment failed"
     )

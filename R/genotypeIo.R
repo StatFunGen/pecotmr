@@ -33,8 +33,10 @@ NULL
 setMethod(
     "readGenotypes",
     signature(path = "character"),
-    function(path, format = NULL, ...) {
-        .genotypeExperiment(.readGenotypeHandle(path, format = format, ...))
+    function(path, format = NULL, vcfArgs = list(), ...) {
+        .genotypeExperiment(
+            .readGenotypeHandle(path, format = format, vcfArgs = vcfArgs)
+        )
     }
 )
 
@@ -43,8 +45,10 @@ setMethod(
 setMethod(
     "readGenotypes",
     signature(path = "missing"),
-    function(path, format = NULL, ...) {
-        .genotypeExperiment(GenotypeHandle(...))
+    function(path, format = NULL, vcfArgs = list(), ...) {
+        .genotypeExperiment(
+            GenotypeHandle(format = format, vcfArgs = vcfArgs, ...)
+        )
     }
 )
 
@@ -52,16 +56,16 @@ setMethod(
 # handle-construction machinery below calls this rather than readGenotypes()
 # so it does not wrap and immediately unwrap a panel on every hop.
 # @noRd
-.readGenotypeHandle <- function(path, format = NULL, ...) {
+.readGenotypeHandle <- function(path, format = NULL, vcfArgs = list()) {
     if (is.null(format)) {
         format <- .h2DetectFormat(path)
     }
     switch(
         format,
         "gds" = .makeGdsHandle(path),
-        "vcf" = .makeVcfHandle(path, ...),
-        "plink1" = .makePlink1Handle(path, ...),
-        "plink2" = .makePlink2Handle(path, ...),
+        "vcf" = .makeVcfHandle(path, vcfArgs = vcfArgs),
+        "plink1" = .makePlink1Handle(path),
+        "plink2" = .makePlink2Handle(path),
         .abortUnsupportedFormat(format)
     )
 }
@@ -79,8 +83,7 @@ setMethod(
 # (unsubset) handle fileIdx == seq_len(nrow), so reads are unchanged.
 # @noRd
 .withFileIdx <- function(snpInfo) {
-    snpInfo$fileIdx <- seq_len(nrow(snpInfo))
-    snpInfo
+    mutate(snpInfo, fileIdx = seq_len(nrow(snpInfo)))
 }
 
 # Restrict a GenotypeHandle's @snpInfo to `keep` (a logical mask or integer row
@@ -107,10 +110,12 @@ setMethod(
     # nSamples must go to 0 alongside sampleIds, or dm (variants x nSamples)
     # would disagree with the now-empty derived sample dimnames. Reached only
     # via .emptySketch (the empty / PIP-skip path), never on a surviving region.
-    handle@snpInfo <- slice(getSnpInfo(handle), integer(0))
-    handle@sampleIds <- character(0)
-    handle@nSamples <- 0L
-    handle
+    methods::initialize(
+        handle,
+        snpInfo = slice(getSnpInfo(handle), integer(0)),
+        sampleIds = character(0),
+        nSamples = 0L
+    )
 }
 
 .subsetGenotypeHandle <- function(handle, keep) {
@@ -125,10 +130,10 @@ setMethod(
     if (!is_in("fileIdx", names(si))) {
         return(handle)
     } # legacy handle: unsafe
-    handle@snpInfo <- slice(si, keepIdx)
-    handle
+    methods::initialize(handle, snpInfo = slice(si, keepIdx))
 }
 
+#' @importFrom checkmate assertFileExists
 #' @keywords internal
 .makeGdsHandle <- function(path) {
     if (!requireNamespace("SNPRelate", quietly = TRUE)) {
@@ -137,10 +142,7 @@ setMethod(
     if (!requireNamespace("gdsfmt", quietly = TRUE)) {
         abort("Package 'gdsfmt' is required for reading GDS files.")
     }
-    if (!file.exists(path)) {
-        msg <- glue("GDS file not found: {path}")
-        abort(msg)
-    }
+    assertFileExists(path, access = "r", .var.name = "GDS file")
 
     snpInfo <- .gdsSnpInfo(path)
 
@@ -158,15 +160,13 @@ setMethod(
     )
 }
 
+#' @importFrom checkmate assertFileExists
 #' @keywords internal
-.makeVcfHandle <- function(path, ...) {
+.makeVcfHandle <- function(path, vcfArgs = list()) {
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
         abort("Package 'VariantAnnotation' is required for reading VCF files.")
     }
-    if (!file.exists(path)) {
-        msg <- glue("VCF file not found: {path}")
-        abort(msg)
-    }
+    assertFileExists(path, access = "r", .var.name = "VCF file")
 
     hdr <- VariantAnnotation::scanVcfHeader(path)
     sampleIds <- as.character(VariantAnnotation::samples(hdr))
@@ -177,7 +177,12 @@ setMethod(
         info = NA,
         geno = NA
     )
-    vcf <- VariantAnnotation::readVcf(path, param = param, ...)
+    vcf <- exec(
+        VariantAnnotation::readVcf,
+        path,
+        param = param,
+        !!!vcfArgs
+    )
     rd <- rowRanges(vcf)
 
     # pecotmr convention: A1 = ALT (effect), A2 = REF
@@ -201,7 +206,7 @@ setMethod(
 }
 
 #' @keywords internal
-.makePlink1Handle <- function(path, ...) {
+.makePlink1Handle <- function(path) {
     if (!requireNamespace("snpStats", quietly = TRUE)) {
         abort("Package 'snpStats' is required for reading plink1 files.")
     }
@@ -220,14 +225,14 @@ setMethod(
 
 # Resolve the plink1 stem and assert its .bed/.bim/.fam all exist.
 # @noRd
+#' @importFrom checkmate assertFileExists
 .plink1RequireFiles <- function(path) {
     stem <- .plinkStem(path)
-    for (f in str_c(stem, c(".bed", ".bim", ".fam"))) {
-        if (!file.exists(f)) {
-            msg <- glue("Plink file not found: {f}")
-            abort(msg)
-        }
-    }
+    assertFileExists(
+        str_c(stem, c(".bed", ".bim", ".fam")),
+        access = "r",
+        .var.name = "Plink file"
+    )
     stem
 }
 
@@ -265,7 +270,7 @@ setMethod(
 }
 
 #' @keywords internal
-.makePlink2Handle <- function(path, ...) {
+.makePlink2Handle <- function(path) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
         abort("Package 'pgenlibr' is required for reading plink2 files.")
     }
@@ -290,9 +295,9 @@ setMethod(
     psam <- vroom(
         paths$psam,
         delim = "\t",
-        show_col_types = FALSE
+        show_col_types = FALSE,
+        .name_repair = .psamHeaderNames
     )
-    names(psam) <- str_remove(names(psam), "^#")
     sampleIds <- as.character(psam$IID)
 
     pgen <- pgenlibr::NewPgen(paths$pgen)
@@ -349,14 +354,12 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     # Read ascending, then put the columns back in the requested order. See
     # .restoreRequestedOrder() for why this is not merely tidiness.
     ord <- order(.genotypeFilePos(handle, snpIdx))
-    geno <- .extractBlockByFormat(handle, snpIdx[ord])
-    if (is.null(geno)) {
+    raw <- .extractBlockByFormat(handle, snpIdx[ord])
+    if (is.null(raw)) {
         return(NULL)
     }
-    geno <- .restoreRequestedOrder(geno, ord)
-    if (meanImpute) {
-        geno <- .meanImputeGeno(geno)
-    }
+    ordered <- .restoreRequestedOrder(raw, ord)
+    geno <- if (meanImpute) .meanImputeGeno(ordered) else ordered
     .blockGenotypesToSe(geno, handle, snpIdx)
 }
 
@@ -431,11 +434,31 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     } else {
         as.matrix(genotypeCovariates)
     }
-    SummarizedExperiment::colData(panel) <- .genotypeColData(
-        gCov,
-        colnames(panel)
+    SummarizedExperiment::`colData<-`(
+        panel,
+        value = .genotypeColData(gCov, colnames(panel))
     )
-    panel
+}
+
+# PLINK2 writes the .psam header line with a leading "#" on the first field.
+# @noRd
+.psamHeaderNames <- function(nms) str_remove(nms, "^#")
+
+# Covariate rows carry the sample identity. An unnamed matrix is only
+# interpretable when it already has one row per panel sample, in order.
+# @noRd
+.genotypeCovariateRownames <- function(gCov, sampleIds) {
+    if (!is.null(rownames(gCov))) {
+        return(gCov)
+    }
+    if (nrow(gCov) != length(sampleIds)) {
+        abort(glue(
+            "'genotypeCovariates' has {nrow(gCov)} rows but the panel ",
+            "has {length(sampleIds)} samples; name its rows to align ",
+            "them explicitly"
+        ))
+    }
+    `rownames<-`(gCov, sampleIds)
 }
 
 # Per-sample covariates as a colData aligned to the panel's sample order.
@@ -447,19 +470,11 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     if (ncol(gCov) == 0L || nrow(gCov) == 0L) {
         return(empty)
     }
-    if (is.null(rownames(gCov))) {
-        if (nrow(gCov) != length(sampleIds)) {
-            abort(glue(
-                "'genotypeCovariates' has {nrow(gCov)} rows but the panel ",
-                "has {length(sampleIds)} samples; name its rows to align ",
-                "them explicitly"
-            ))
-        }
-        rownames(gCov) <- sampleIds
-    }
-    aligned <- gCov[match(sampleIds, rownames(gCov)), , drop = FALSE]
-    rownames(aligned) <- sampleIds
-    S4Vectors::DataFrame(aligned, row.names = sampleIds)
+    named <- .genotypeCovariateRownames(gCov, sampleIds)
+    S4Vectors::DataFrame(
+        named[match(sampleIds, rownames(named)), , drop = FALSE],
+        row.names = sampleIds
+    )
 }
 
 # snpInfo as rowRanges for a genotype panel: width-1 ranges at each
@@ -471,17 +486,16 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # @noRd
 .genotypeSnpRanges <- function(genotypes, variantIds) {
     si <- getSnpInfo(genotypes)
-    gr <- GenomicRanges::GRanges(
-        seqnames = withChrPrefix(as.character(si$CHR)),
-        ranges = IRanges::IRanges(as.integer(si$BP), width = 1L)
+    `names<-`(
+        GenomicRanges::GRanges(
+            seqnames = withChrPrefix(as.character(si$CHR)),
+            ranges = IRanges::IRanges(as.integer(si$BP), width = 1L),
+            SNP = as.character(si$SNP),
+            A1 = as.character(si$A1),
+            A2 = as.character(si$A2)
+        ),
+        variantIds
     )
-    names(gr) <- variantIds
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = as.character(si$SNP),
-        A1 = as.character(si$A1),
-        A2 = as.character(si$A2)
-    )
-    gr
 }
 
 # Dispatch block extraction to the format-specific backend (samples x variants).
@@ -509,14 +523,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     )
     rowRanges <- GRanges(
         seqnames = chr,
-        ranges = IRanges(start = as.integer(si$BP), width = 1L)
+        ranges = IRanges(start = as.integer(si$BP), width = 1L),
+        SNP = si$SNP,
+        A1 = si$A1,
+        A2 = si$A2
     )
-    mcols(rowRanges) <- DataFrame(SNP = si$SNP, A1 = si$A1, A2 = si$A2)
     sampleIds <- getSampleIds(handle)
     # Transpose to Bioc convention: variants x samples.
-    dosage <- t(geno)
-    rownames(dosage) <- si$SNP
-    colnames(dosage) <- sampleIds
+    dosage <- `dimnames<-`(t(geno), list(si$SNP, sampleIds))
     SummarizedExperiment(
         assays = list(dosage = dosage),
         rowRanges = rowRanges,
@@ -545,11 +559,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     }
     blockGlobal <- which(unifiedChr == chrom) # file-order global indices
     localIdx <- match(snpIdx[posInReq], blockGlobal)
-    th <- handle
-    th@path <- handle@chromPaths[[chrom]]
-    th@snpInfo <- slice(handle@snpInfo, blockGlobal)
-    th@pgenPtr <- NULL
-    th@chromPaths <- character(0) # treat as single-file
+    th <- methods::initialize(
+        handle,
+        path = handle@chromPaths[[chrom]],
+        snpInfo = slice(handle@snpInfo, blockGlobal),
+        pgenPtr = NULL,
+        # Treated as single-file: the view addresses one chromosome's payload.
+        chromPaths = character(0)
+    )
     extractBlockGenotypes(th, localIdx, meanImpute = meanImpute)
 }
 
@@ -606,7 +623,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # trips on disjoint seqlevels) and restore the requested snpIdx order.
 # @noRd
 .combineShardedSes <- function(ses, groups) {
-    ord <- order(unlist(groups, use.names = FALSE))
+    ord <- order(unname(list_c(groups)))
     dosages <- map(ses, .seDosage)
     combinedDos <- exec(rbind, !!!dosages)[ord, , drop = FALSE]
     rowRangesList <- unname(map(ses, SummarizedExperiment::rowRanges))
@@ -649,14 +666,13 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     )
     gt <- VariantAnnotation::geno(vcf)$GT
 
-    # Convert GT strings to ALT dosage (A1 dosage)
-    geno <- matrix(NA_real_, nrow = ncol(gt), ncol = nrow(gt))
-    for (j in seq_len(nrow(gt))) {
-        g <- gt[j, ]
-        geno[, j] <- map_dbl(g, .gtStringToDosage)
-    }
-
-    geno
+    # Convert GT strings to ALT dosage (A1 dosage): one column per variant,
+    # laid side by side rather than filled into a preallocated matrix.
+    matrix(
+        map_dbl(as.vector(t(gt)), .gtStringToDosage),
+        nrow = ncol(gt),
+        ncol = nrow(gt)
+    )
 }
 
 #' @keywords internal
@@ -671,18 +687,16 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     )
     # snpStats as(x, "numeric") gives count of B allele (A2/bim col 6).
     # Flip to count A1 (bim col 5 / effect allele).
-    geno <- 2 - as(plinkData$genotypes, "numeric")
-    storage.mode(geno) <- "double"
-    geno
+    `storage.mode<-`(2 - as(plinkData$genotypes, "numeric"), "double")
 }
 
 #' @keywords internal
+#' @importFrom rlang try_fetch
 .extractBlockPlink2 <- function(handle, snpIdx) {
     # pgenlibr::ReadList returns ALT dosage = A1 dosage in pecotmr convention.
     # The cached @pgenPtr does not survive saveRDS/readRDS (external pointers
     # become stale), so we re-open from getPath() on the fly if the cached
     # pointer errors out. Opening is cheap relative to dosage extraction.
-    ptr <- getPgenPtr(handle)
     paths <- resolvePlink2Paths(.genotypeReadPath(handle))
     # `variant_subset` indexes the .pgen by FILE position. `snpIdx` is a
     # position into @snpInfo, which may have been row-subset; translate through
@@ -694,16 +708,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     # A sharded handle routes through a transient view with pgenPtr = NULL (one
     # pgen per chromosome), and a deserialized pointer is stale; open a fresh
     # pgen up front in those cases rather than provoking a caught read error.
-    if (is.null(ptr)) {
-        ptr <- pgenlibr::NewPgen(paths$pgen)
-    }
-    geno <- tryCatch(
+    ptr <- getPgenPtr(handle) %||% pgenlibr::NewPgen(paths$pgen)
+    geno <- try_fetch(
         pgenlibr::ReadList(
             ptr,
             variant_subset = variantSubset,
             meanimpute = FALSE
         ),
-        error = function(e) {
+        error = function(cnd) {
             reopened <- pgenlibr::NewPgen(paths$pgen)
             pgenlibr::ReadList(
                 reopened,
@@ -712,8 +724,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
             )
         }
     )
-    storage.mode(geno) <- "double"
-    geno
+    `storage.mode<-`(geno, "double")
 }
 
 # =============================================================================
@@ -802,12 +813,15 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 .meanImputeGeno <- function(geno) {
-    naCols <- which(colSums(is.na(geno)) > 0L)
-    for (j in naCols) {
-        colMean <- mean(geno[, j], na.rm = TRUE)
-        geno[is.na(geno[, j]), j] <- colMean
+    naMask <- is.na(geno)
+    if (!any(naMask)) {
+        return(geno)
     }
-    geno
+    # One fill over the whole matrix rather than a copy per column: geno is
+    # samples x variants, so rebuilding it column by column is the expensive
+    # way to say this.
+    means <- colMeans(geno, na.rm = TRUE)
+    replace(geno, naMask, means[col(geno)[naMask]])
 }
 
 #' @keywords internal
@@ -911,9 +925,10 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 #' @importFrom SummarizedExperiment assay
 readBim <- function(bed) {
     bimf <- str_c(file_path_sans_ext(bed), ".bim")
-    bim <- vroom(bimf, col_names = FALSE)
-    colnames(bim) <- c("chrom", "id", "gpos", "pos", "a1", "a0")
-    return(bim)
+    `colnames<-`(
+        vroom(bimf, col_names = FALSE),
+        c("chrom", "id", "gpos", "pos", "a1", "a0")
+    )
 }
 
 #' @importFrom vroom vroom
@@ -926,11 +941,7 @@ readFam <- function(bed) {
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
 openBed <- function(bed) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install pgenlibr: ",
-            "https://cran.r-project.org/web/packages/pgenlibr/index.html"
-        )
-        abort(msg)
+        abort("Package 'pgenlibr' is required for this function.")
     }
     rawSCt <- nrow(readFam(bed))
     return(pgenlibr::NewPgen(bed, raw_sample_ct = rawSCt))
@@ -949,7 +960,9 @@ openBed <- function(bed) {
 #'   package = "pecotmr"), "protocol_example.LD.chr22")
 #' readAfreq(stem)
 #' @export
+#' @importFrom checkmate assertString
 readAfreq <- function(prefix) {
+    assertString(prefix)
     afreqZst <- str_c(prefix, ".afreq.zst")
     afreqPlain <- str_c(prefix, ".afreq")
     if (file.exists(afreqZst)) {
@@ -969,7 +982,7 @@ readAfreq <- function(prefix) {
     }
     # PLINK2 .afreq: REF = A2, ALT = A1, ALT_FREQS = A1 (effect allele)
     # frequency
-    af <- rename(
+    renamed <- rename(
         af,
         "chrom" = "#CHROM",
         "id" = "ID",
@@ -978,15 +991,19 @@ readAfreq <- function(prefix) {
         "alt_freq" = "ALT_FREQS",
         "obs_ct" = "OBS_CT"
     )
-    cols <- c("chrom", "id", "A2", "A1", "alt_freq", "obs_ct")
-    # Stochastic genotype .afreq includes U_MIN/U_MAX for exact min-max
-    # inversion
-    if (is_in("U_MIN", colnames(af))) {
-        af <- rename(af, "u_min" = "U_MIN", "u_max" = "U_MAX")
-        cols <- c(cols, "u_min", "u_max")
+    # A stochastic-genotype .afreq also carries U_MIN / U_MAX, which
+    # invertMinmaxScaling() needs for an exact min-max inversion.
+    stochastic <- is_in("U_MIN", colnames(renamed))
+    cols <- c(
+        c("chrom", "id", "A2", "A1", "alt_freq", "obs_ct"),
+        if (stochastic) c("u_min", "u_max")
+    )
+    out <- if (stochastic) {
+        rename(renamed, "u_min" = "U_MIN", "u_max" = "U_MAX")
+    } else {
+        renamed
     }
-    af <- select(af, all_of(cols))
-    return(af)
+    select(out, all_of(cols))
 }
 
 #' Read stochastic genotype sidecar metadata (U_MIN/U_MAX).
@@ -1014,16 +1031,15 @@ readStochasticMeta <- function(path, format = NULL) {
         return(NULL)
     }
 
-    if (is.null(format)) {
-        format <- if (str_detect(path, "\\.afreq(\\.zst)?$")) {
+    detected <- format %||%
+        if (str_detect(path, "\\.afreq(\\.zst)?$")) {
             "afreq"
         } else {
             "generic"
         }
-    }
-    format <- arg_match(format, c("afreq", "generic"))
+    resolved <- arg_match(detected, c("afreq", "generic"))
 
-    if (format == "afreq") {
+    if (resolved == "afreq") {
         # readAfreq expects a prefix, not a full path - strip the .afreq[.zst]
         # suffix
         prefix <- str_remove(path, "\\.afreq(\\.zst)?$")
@@ -1099,28 +1115,22 @@ invertMinmaxScaling <- function(X, uMin, uMax) {
         )
         abort(msg)
     }
-    denom <- uMax - uMin
-    denom[denom == 0] <- 1 # monomorphic: scaling was identity
+    span <- uMax - uMin
+    # Monomorphic variant: the forward scaling was the identity.
+    denom <- replace(span, span == 0, 1)
     # Invert: U_original = U_scaled * (u_max - u_min) / 2 + u_min
     sweep(sweep(X, 2, denom / 2, "*"), 2, uMin, "+")
 }
 
 # ---------- Internal helpers for PLINK2 format ----------
 
+#' @importFrom checkmate assertFileExists
 #' Resolve and validate PLINK2 file paths for a given prefix.
 #' @return Named list with pgen, pvar, psam paths.
 #' @noRd
 resolvePlink2Paths <- function(prefix) {
     pgen <- str_c(prefix, ".pgen")
-    if (!file.exists(pgen)) {
-        msg <- glue(
-            "PLINK2 .pgen file not found at: {pgen}\n",
-            "  Note: .pgen must be uncompressed (plink2 does not ",
-            "compress .pgen).",
-            .trim = FALSE
-        )
-        abort(msg)
-    }
+    assertFileExists(pgen, access = "r", .var.name = "PLINK2 .pgen file")
     # Prefer plain .pvar (fast, no extra deps); fall back to .pvar.zst
     pvar <- if (file.exists(str_c(prefix, ".pvar"))) {
         str_c(prefix, ".pvar")
@@ -1131,15 +1141,7 @@ resolvePlink2Paths <- function(prefix) {
         abort(msg)
     }
     psam <- str_c(prefix, ".psam")
-    if (!file.exists(psam)) {
-        msg <- glue(
-            "PLINK2 .psam file not found at: {psam}\n",
-            "  Note: .psam must be uncompressed (plink2 does not ",
-            "compress .psam).",
-            .trim = FALSE
-        )
-        abort(msg)
-    }
+    assertFileExists(psam, access = "r", .var.name = "PLINK2 .psam file")
     list(pgen = pgen, pvar = pvar, psam = psam)
 }
 
@@ -1153,11 +1155,7 @@ resolvePlink2Paths <- function(prefix) {
 #' @noRd
 readPvar <- function(pvarPath) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-        msg <- glue(
-            "pgenlibr is required. Install from ",
-            "https://cran.r-project.org/web/packages/pgenlibr/index.html"
-        )
-        abort(msg)
+        abort("Package 'pgenlibr' is required.")
     }
     pvar <- pgenlibr::NewPvar(pvarPath)
     on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
@@ -1172,6 +1170,32 @@ readPvar <- function(pvarPath) {
     )
 }
 
+# PLINK1 .bim files come in a 6-column form and a 9-column extended form;
+# the column meanings are positional, so the width selects the header.
+# @noRd
+.plinkVariantColnames <- function(n, snpFilePath) {
+    if (n == 6) {
+        return(c("chrom", "id", "gpos", "pos", "A1", "A2"))
+    }
+    if (n == 9) {
+        return(c(
+            "chrom",
+            "id",
+            "gpos",
+            "pos",
+            "A1",
+            "A2",
+            "variance",
+            "allele_freq",
+            "n_nomiss"
+        ))
+    }
+    abort(glue(
+        "Unexpected number of columns ({n}) in variant file: ",
+        "{snpFilePath}"
+    ))
+}
+
 #' Read variant metadata from either .bim or .pvar/.pvar.zst file.
 #'
 #' Auto-detects the format by extension and header, then returns a standardized
@@ -1184,39 +1208,17 @@ readPvar <- function(pvarPath) {
 #' @importFrom readr read_table cols col_character
 #' @noRd
 readVariantMetadata <- function(snpFilePath) {
-    isPvar <- str_detect(snpFilePath, "\\.(pvar|pvar\\.zst)$")
-    if (!isPvar) {
-        firstLine <- read_lines(snpFilePath, n_max = 1)
-        isPvar <- str_detect(firstLine, "^#CHROM")
-    }
+    # Extension first, then the header line: a .pvar written without its
+    # extension still announces itself with a #CHROM header.
+    byExtension <- str_detect(snpFilePath, "\\.(pvar|pvar\\.zst)$")
+    isPvar <- byExtension ||
+        str_detect(read_lines(snpFilePath, n_max = 1), "^#CHROM")
 
     if (isPvar) {
         readPvar(snpFilePath)
     } else {
         df <- read_table(snpFilePath, col_names = FALSE, col_types = cols())
-        n <- ncol(df)
-        if (n == 6) {
-            names(df) <- c("chrom", "id", "gpos", "pos", "A1", "A2")
-        } else if (n == 9) {
-            names(df) <- c(
-                "chrom",
-                "id",
-                "gpos",
-                "pos",
-                "A1",
-                "A2",
-                "variance",
-                "allele_freq",
-                "n_nomiss"
-            )
-        } else {
-            msg <- glue(
-                "Unexpected number of columns ({n}) in variant file: ",
-                "{snpFilePath}"
-            )
-            abort(msg)
-        }
-        df
+        `names<-`(df, .plinkVariantColnames(ncol(df), snpFilePath))
     }
 }
 
@@ -1274,10 +1276,14 @@ getRefVariantInfo <- function(source, region = NULL) {
     paths <- resolvePlink2Paths(dataPath)
     info <- readPvar(paths$pvar)
     afreq <- readAfreq(dataPath)
-    if (!is.null(afreq)) {
-        info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
-    }
-    info
+    mutate(
+        info,
+        !!!compact(list(
+            allele_freq = if (!is.null(afreq)) {
+                afreq$alt_freq[match(info$id, afreq$id)]
+            }
+        ))
+    )
 }
 
 # plink1 variant info from the .bim (col5 = A1, col6 = A2).
@@ -1302,9 +1308,10 @@ getRefVariantInfo <- function(source, region = NULL) {
         region = region,
         returnVariantInfo = TRUE
     )
-    info <- result$variant_info
-    info$allele_freq <- colMeans(result$X, na.rm = TRUE) / 2
-    info
+    mutate(
+        result$variant_info,
+        allele_freq = colMeans(result$X, na.rm = TRUE) / 2
+    )
 }
 
 # Pre-computed LD variant info: read the per-intersection bim/pvar metadata
@@ -1315,9 +1322,8 @@ getRefVariantInfo <- function(source, region = NULL) {
         resolved$metaPath,
         region
     )$intersections$bimFilePaths
-    info <- bind_rows(map(bimPaths, .refReadBimMeta))
-    info$id <- normalizeVariantId(info$id)
-    info
+    bind_rows(map(bimPaths, .refReadBimMeta)) |>
+        mutate(id = normalizeVariantId(.data$id))
 }
 
 # Read one bim/pvar metadata file into a canonical variant-info data.frame,
@@ -1332,12 +1338,16 @@ getRefVariantInfo <- function(source, region = NULL) {
         A2 = df$A2,
         A1 = df$A1
     )
-    for (col in c("variance", "allele_freq", "n_nomiss")) {
-        if (is_in(col, names(df))) {
-            out[[col]] <- df[[col]]
-        }
-    }
-    out
+    optional <- intersect(c("variance", "allele_freq", "n_nomiss"), names(df))
+    mutate(
+        out,
+        !!!set_names(map(optional, .refMetaColumn, df = df), optional)
+    )
+}
+
+# @noRd
+.refMetaColumn <- function(col, df) {
+    df[[col]]
 }
 
 # Filter plink2 / plink1 variant info to the requested region.
@@ -1361,14 +1371,25 @@ getRefVariantInfo <- function(source, region = NULL) {
 # OR-mask across a multi-row (one row per chrom) parsed region.
 # @noRd
 .refMultiRegionMask <- function(infoChrom, pos, parsed) {
-    inRegion <- rep(FALSE, length(infoChrom))
-    for (r in seq_len(nrow(parsed))) {
-        inRegion <- inRegion |
-            (infoChrom == as.character(parsed$chrom[r]) &
-                pos >= parsed$start[r] &
-                pos <= parsed$end[r])
-    }
-    inRegion
+    reduce(
+        map(
+            seq_len(nrow(parsed)),
+            .refRegionRowMask,
+            infoChrom = infoChrom,
+            pos = pos,
+            parsed = parsed
+        ),
+        `|`,
+        .init = rep(FALSE, length(infoChrom))
+    )
+}
+
+# Variants falling inside parsed region row `r`.
+# @noRd
+.refRegionRowMask <- function(r, infoChrom, pos, parsed) {
+    infoChrom == as.character(parsed$chrom[r]) &
+        pos >= parsed$start[r] &
+        pos <= parsed$end[r]
 }
 
 #' Match variant_info against a whitelist file, returning logical index. Uses
@@ -1377,9 +1398,9 @@ getRefVariantInfo <- function(source, region = NULL) {
 #' @importFrom readr read_lines
 #' @noRd
 matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
-    keepRaw <- tryCatch(
+    keepRaw <- try_fetch(
         as.data.frame(vroom(keepVariantsPath, show_col_types = FALSE)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     if (
         !is.null(keepRaw) &&
@@ -1467,16 +1488,16 @@ loadGenotypeRegion <- function(
     handleSnpInfo <- getSnpInfo(handle)
     snpIdx <- .loadGenoSnpIdx(handleSnpInfo, region)
     # Samples x variants matrix (pecotmr convention); callers handle missing.
-    result <- list(
+    extracted <- list(
         X = .dosageMatrix(handle, snpIdx, meanImpute = FALSE),
         variant_info = .loadGenoAttachAfreq(
             handle,
             .snpInfoToVariantInfo(slice(handleSnpInfo, snpIdx))
         )
     )
-    result <- .loadGenoPostFilter(result, keepIndel, keepVariantsPath)
+    filtered <- .loadGenoPostFilter(extracted, keepIndel, keepVariantsPath)
     result <- .loadGenoInvertStochastic(
-        result,
+        filtered,
         genotype,
         stochasticMetaPath,
         stochasticMetaFormat
@@ -1545,20 +1566,32 @@ loadGenotypeRegion <- function(
 # Apply the indel-drop and variant-whitelist post-filters to (X, variant_info).
 # @noRd
 .loadGenoPostFilter <- function(result, keepIndel, keepVariantsPath) {
-    if (!keepIndel) {
-        snpMask <- isSnpAlleles(
-            result$variant_info$A1,
-            result$variant_info$A2
+    snpOnly <- if (keepIndel) {
+        result
+    } else {
+        .loadGenoSubsetVariants(
+            result,
+            isSnpAlleles(result$variant_info$A1, result$variant_info$A2)
         )
-        result$X <- result$X[, snpMask, drop = FALSE]
-        result$variant_info <- result$variant_info[snpMask, , drop = FALSE]
     }
-    if (!is.null(keepVariantsPath)) {
-        keepIdx <- matchVariantsToKeep(result$variant_info, keepVariantsPath)
-        result$X <- result$X[, keepIdx, drop = FALSE]
-        result$variant_info <- result$variant_info[keepIdx, , drop = FALSE]
+    if (is.null(keepVariantsPath)) {
+        return(snpOnly)
     }
-    result
+    .loadGenoSubsetVariants(
+        snpOnly,
+        matchVariantsToKeep(snpOnly$variant_info, keepVariantsPath)
+    )
+}
+
+# Subset a loaded (X, variant_info) pair along the variant axis, keeping the
+# dosage columns and the metadata rows in step.
+# @noRd
+.loadGenoSubsetVariants <- function(result, keep) {
+    list_assign(
+        result,
+        X = result$X[, keep, drop = FALSE],
+        variant_info = result$variant_info[keep, , drop = FALSE]
+    )
 }
 
 # Detect stochastic genotype scaling and restore the original scale from a
@@ -1584,19 +1617,31 @@ loadGenotypeRegion <- function(
     if (!any(matched)) {
         return(result)
     }
-    result$X[, matched] <- invertMinmaxScaling(
-        result$X[, matched, drop = FALSE],
-        smeta$u_min[idx[matched]],
-        smeta$u_max[idx[matched]]
+    inverted <- `[<-`(
+        result$X,
+        ,
+        matched,
+        value = invertMinmaxScaling(
+            result$X[, matched, drop = FALSE],
+            smeta$u_min[idx[matched]],
+            smeta$u_max[idx[matched]]
+        )
     )
-    result$variant_info$u_min <- smeta$u_min[idx]
-    result$variant_info$u_max <- smeta$u_max[idx]
+    restored <- list_assign(
+        result,
+        X = inverted,
+        variant_info = mutate(
+            result$variant_info,
+            u_min = smeta$u_min[idx],
+            u_max = smeta$u_max[idx]
+        )
+    )
     msg <- glue(
         "Stochastic genotype detected: restored original scale via ",
         "{basename(metaPath)}"
     )
     inform(msg)
-    result
+    restored
 }
 
 # Warn when non-integer dosages are present but no stochastic sidecar was found.
@@ -1685,8 +1730,7 @@ loadGenotypeRegion <- function(
     if (is.null(geno) || length(geno) == 0) {
         return(NULL)
     }
-    storage.mode(geno) <- "double"
-    geno
+    `storage.mode<-`(geno, "double")
 }
 
 # The sample-LD matrix for `handle`'s `snpIdx` variants (NA correlations -> 0).
@@ -1704,13 +1748,10 @@ loadGenotypeRegion <- function(
         slide = -1,
         verbose = FALSE
     )
-    R <- ldMat$LD
-    R[is.na(R)] <- 0
+    raw <- replace(ldMat$LD, is.na(ldMat$LD), 0)
     inv <- order(ord)
-    R <- R[inv, inv, drop = FALSE]
     ids <- getSnpInfo(handle)$SNP[snpIdx]
-    dimnames(R) <- list(ids, ids)
-    R
+    `dimnames<-`(raw[inv, inv, drop = FALSE], list(ids, ids))
 }
 
 # The (SNP, CHR, BP, A1, A2) snpInfo frame from an open GDS. A1 = the first

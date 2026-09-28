@@ -28,6 +28,7 @@ Imports:
     BiocGenerics,
     BiocParallel,
     Biostrings,
+    checkmate,
     coloc,
     colocboost,
     DelayedArray,

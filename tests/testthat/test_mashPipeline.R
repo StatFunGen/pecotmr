@@ -239,10 +239,9 @@ test_that("updateMashModelCov drops dropped conditions + resizes remaining cov m
         samples = c("brain", "blood")
     )
     expect_false("muscle" %in% names(m2$fitted_g$Ulist))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         m2$fitted_g$Ulist,
-        function(x) all(dim(x) == c(2L, 2L)),
-        logical(1)
+        function(x) all(dim(x) == c(2L, 2L))
     )))
     expect_false(any(grepl("muscle", names(m2$fitted_g$pi))))
     # Brain matrix has a single 1 at the brain position (the first of the
@@ -333,8 +332,7 @@ test_that("fitMashContrast: 3-tested-conditions yields deviation + pairwise cont
 test_that("mashPipeline runs end-to-end on qtlSumStatsMulticontextExample", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     # Use the same fixture for strong/random; nPcs <= ncol - 1 (3 contexts).
     res <- suppressMessages(suppressWarnings(
         mashPipeline(
@@ -348,10 +346,9 @@ test_that("mashPipeline runs end-to-end on qtlSumStatsMulticontextExample", {
     expect_type(res$U, "list")
     expect_gt(length(res$U), 0L)
     # Every covariance matrix is 3x3 (one row/col per context)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_type(res$w, "double")
     expect_equal(sum(res$w), 1, tolerance = 1e-6)
@@ -495,8 +492,7 @@ test_that("mashPipeline coerces a SimpleList before validating its names", {
 test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     vhat <- diag(3)
     # Empty list.
     expect_error(
@@ -527,8 +523,7 @@ test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
 test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     vhat <- diag(3)
     expect_error(
         suppressMessages(suppressWarnings(
@@ -546,8 +541,7 @@ test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
 test_that("mashPipeline passes supplied residualCorrelation + priorCovariances through", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     vhat <- diag(3)
     U0 <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     res <- suppressMessages(suppressWarnings(
@@ -573,8 +567,7 @@ test_that("mashPipeline passes supplied residualCorrelation + priorCovariances t
 test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     # `residualCorrelationMethod = "simple"` runs
     # estimate_null_correlation_simple on the null set; leaving nPcs NULL
     # exercises the `nPcs <- ncol(Bhat) - 1` default in the cov_* chain.
@@ -588,10 +581,9 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
     ))
     expect_named(res, c("U", "w"))
     expect_gt(length(res$U), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_equal(sum(res$w), 1, tolerance = 1e-6)
 })
@@ -607,42 +599,47 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
 test_that("the default is identity regardless of which partitions are given", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
+    prior <- mashTinyPrior()
     # The default must not depend on data shape -- that was the old silent
-    # behaviour this argument replaced.
+    # behaviour this argument replaced. `w` is what carries the evidence: it
+    # is fitted against V, so an identical `w` across the three calls is the
+    # same V reaching mash() each time. (`U` is the supplied prior passed
+    # through, so comparing it would prove nothing here.)
     withNull <- suppressMessages(suppressWarnings(mashPipeline(
         list(strong = ss, random = ss, null = ss),
         alpha = 0,
+        priorCovariances = prior,
         setSeed = 1L
     )))
     withoutNull <- suppressMessages(suppressWarnings(mashPipeline(
         list(strong = ss, random = ss),
         alpha = 0,
+        priorCovariances = prior,
         setSeed = 1L
     )))
     explicit <- suppressMessages(suppressWarnings(mashPipeline(
         list(strong = ss, random = ss, null = ss),
         alpha = 0,
         residualCorrelationMethod = "identity",
+        priorCovariances = prior,
         setSeed = 1L
     )))
-    expect_equal(withNull$U, withoutNull$U)
     expect_equal(withNull$w, withoutNull$w)
-    expect_equal(withNull$U, explicit$U)
+    expect_equal(withNull$w, explicit$w)
 })
 
 test_that("an unused null partition is reported", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     # Assembling a null set and still getting identity is more often an
     # oversight than an intent, so it must not pass silently.
     expect_message(
         suppressWarnings(mashPipeline(
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
+            priorCovariances = mashTinyPrior(),
             setSeed = 1L
         )),
         "does not use it"
@@ -653,6 +650,7 @@ test_that("an unused null partition is reported", {
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
             residualCorrelationMethod = "identity",
+            priorCovariances = mashTinyPrior(),
             setSeed = 1L
         )),
         "'null' partition"
@@ -662,12 +660,12 @@ test_that("an unused null partition is reported", {
 test_that("no unused-null notice when there is nothing to ignore", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     noNull <- function() {
         suppressWarnings(mashPipeline(
             list(strong = ss, random = ss),
             alpha = 0,
+            priorCovariances = mashTinyPrior(),
             setSeed = 1L
         ))
     }
@@ -678,6 +676,7 @@ test_that("no unused-null notice when there is nothing to ignore", {
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
             residualCorrelationMethod = "simple",
+            priorCovariances = mashTinyPrior(),
             setSeed = 1L
         ))
     }
@@ -687,19 +686,21 @@ test_that("no unused-null notice when there is nothing to ignore", {
 test_that("mashPipeline honours a data-driven residualCorrelationMethod", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     sl <- list(strong = ss, random = ss, null = ss)
+    prior <- mashTinyPrior()
     identityFit <- suppressMessages(suppressWarnings(mashPipeline(
         sl,
         alpha = 0,
         residualCorrelationMethod = "identity",
+        priorCovariances = prior,
         setSeed = 1L
     )))
     simpleFit <- suppressMessages(suppressWarnings(mashPipeline(
         sl,
         alpha = 0,
         residualCorrelationMethod = "simple",
+        priorCovariances = prior,
         setSeed = 1L
     )))
     # A different V has to move the fit, or the argument is not reaching it.
@@ -707,8 +708,7 @@ test_that("mashPipeline honours a data-driven residualCorrelationMethod", {
 })
 
 test_that("mashPipeline rejects an unknown residualCorrelationMethod", {
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashPipeline(
             list(strong = ss, random = ss),
@@ -721,8 +721,7 @@ test_that("mashPipeline rejects an unknown residualCorrelationMethod", {
 
 test_that("a method needing a partition it lacks errors through mashPipeline", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashPipeline(
             list(strong = ss, random = ss),
@@ -736,8 +735,7 @@ test_that("a method needing a partition it lacks errors through mashPipeline", {
 test_that("a supplied residualCorrelation wins over the method", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     # 'simple' would error without a null set; the supplied matrix means the
     # estimator is never consulted.
     res <- suppressMessages(suppressWarnings(mashPipeline(
@@ -745,6 +743,7 @@ test_that("a supplied residualCorrelation wins over the method", {
         alpha = 0,
         residualCorrelation = diag(3),
         residualCorrelationMethod = "simple",
+        priorCovariances = mashTinyPrior(),
         setSeed = 1L
     )))
     expect_named(res, c("U", "w"))
@@ -756,8 +755,7 @@ test_that("a supplied residualCorrelation wins over the method", {
 
 test_that("mashResidualCorrelation(identity) is an identity of the right size", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     v <- mashResidualCorrelation(
         list(strong = ss),
         alpha = 0,
@@ -769,8 +767,7 @@ test_that("mashResidualCorrelation(identity) is an identity of the right size", 
 
 test_that("mashResidualCorrelation(simple) returns a null correlation matrix", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, null = ss),
@@ -785,8 +782,7 @@ test_that("mashResidualCorrelation(simple) returns a null correlation matrix", {
 
 test_that("mashResidualCorrelation(simple) errors without a null entry", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashResidualCorrelation(
             list(strong = ss),
@@ -799,8 +795,7 @@ test_that("mashResidualCorrelation(simple) errors without a null entry", {
 
 test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, null = ss),
@@ -815,8 +810,7 @@ test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", 
 test_that("mashResidualCorrelation(corshrink) returns a 3x3 correlation matrix", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("CorShrink")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, null = ss),
@@ -830,8 +824,7 @@ test_that("mashResidualCorrelation(corshrink) returns a 3x3 correlation matrix",
 
 test_that("mashResidualCorrelation(mle) refines V against a supplied prior", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, random = ss),
@@ -848,8 +841,7 @@ test_that("mashResidualCorrelation(mle) refines V against a supplied prior", {
 
 test_that("mashResidualCorrelation errors when a method's inputs are missing", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashResidualCorrelation(
             list(strong = ss),
@@ -877,8 +869,7 @@ test_that("mashResidualCorrelation errors when a method's inputs are missing", {
 test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     pc <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -890,10 +881,9 @@ test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
     ))
     expect_named(pc, c("U", "w", "loglik"))
     expect_gt(length(pc$U), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         pc$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
     expect_null(pc$loglik)
@@ -902,8 +892,7 @@ test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
 test_that("mashPriorCovariances passes a supplied prior through unchanged", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     U0 <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     pc <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
@@ -920,8 +909,7 @@ test_that("mashPriorCovariances passes a supplied prior through unchanged", {
 test_that("mashPriorCovariances validates a supplied prior", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         suppressMessages(suppressWarnings(
             mashPriorCovariances(
@@ -949,8 +937,7 @@ test_that("mashPriorCovariances validates a supplied prior", {
 test_that("mashPriorCovariances(flashNonneg) adds components vs flash-only", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     base <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -978,8 +965,7 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     skip_if_not_installed("udr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     # A toy-sized udr config: `n_unconstrained` dominates the cost, and the default
     # (50, sized for many-condition data) is pathological on a 3-condition fixture
     # (it drove a 5+ minute fit). 2 unconstrained matrices suffice to exercise the
@@ -995,10 +981,9 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
         )
     ))
     expect_gt(length(pc$U), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         pc$U,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
 })
@@ -1007,8 +992,7 @@ test_that("mashPriorCovariances engine 'ud_ted' errors clearly on non-i.i.d. dat
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     skip_if_not_installed("udr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         suppressMessages(suppressWarnings(
             mashPriorCovariances(
@@ -1026,8 +1010,7 @@ test_that("mashPriorCovariances engine 'ud_ted' errors clearly on non-i.i.d. dat
 test_that("mashPriorCovariances rejects an unknown component", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashPriorCovariances(
             list(strong = ss),
@@ -1046,8 +1029,7 @@ test_that("mashPriorCovariances rejects an unknown component", {
 test_that("mashCovarianceComponents builds a single requested component", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     fl <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1058,18 +1040,16 @@ test_that("mashCovarianceComponents builds a single requested component", {
         )
     ))
     expect_gt(length(fl), 0L)
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         fl,
-        function(m) all(dim(m) == c(3L, 3L)),
-        logical(1)
+        function(m) all(dim(m) == c(3L, 3L))
     )))
 })
 
 test_that("mashCovarianceComponents default builds all non-udr components", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     one <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1094,8 +1074,7 @@ test_that("mashCovarianceComponents default builds all non-udr components", {
 test_that("mashCovarianceComponents feeds mashPriorCovariances (same components)", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     comps <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1121,8 +1100,7 @@ test_that("mashCovarianceComponents feeds mashPriorCovariances (same components)
 test_that("mashCovarianceComponents rejects unknown components", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1136,8 +1114,7 @@ test_that("mashCovarianceComponents rejects unknown components", {
 test_that("mashPriorCovariances refines supplied priorComponents (pipeline mode)", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     comps <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1165,8 +1142,7 @@ test_that("mashPriorCovariances refines supplied priorComponents (pipeline mode)
 test_that("mashPriorCovariances validates priorComponents", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashPriorCovariances(
             list(strong = ss),
@@ -1180,8 +1156,7 @@ test_that("mashPriorCovariances validates priorComponents", {
 test_that("mashPipeline result == composing the two extracted building blocks", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     full <- suppressMessages(suppressWarnings(
         mashPipeline(
             list(strong = ss, random = ss, null = ss),
@@ -1233,8 +1208,7 @@ test_that("mashPipeline result == composing the two extracted building blocks", 
 
 test_that("mashModelFit returns a fitted mash model", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     m <- .mashTestModel(ss)
     expect_s3_class(m, "mash")
     expect_false(is.null(m$fitted_g))
@@ -1242,8 +1216,7 @@ test_that("mashModelFit returns a fitted mash model", {
 
 test_that("mashModelFit validates the prior and the fitOn entry", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashModelFit(list(random = ss), alpha = 0, priorCovariances = list()),
         "non-empty named list"
@@ -1285,8 +1258,7 @@ test_that(".mashAsUlist does not mistake a covariance named U for the wrapper", 
 
 test_that("mashModelFit accepts either prior shape and fits identically", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     wrapped <- list(U = ulist, w = NULL, loglik = NULL)
 
@@ -1304,8 +1276,7 @@ test_that("mashModelFit accepts either prior shape and fits identically", {
 
 test_that("mashPriorCovariances accepts either shape for its two prior args", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     sl <- list(strong = ss, random = ss)
     ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     wrapped <- list(U = ulist, w = NULL, loglik = NULL)
@@ -1328,8 +1299,7 @@ test_that("mashPriorCovariances accepts either shape for its two prior args", {
 
 test_that("mashPosterior returns posterior matrices with covariance", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     post <- suppressMessages(suppressWarnings(
         mashPosterior(.mashTestModel(ss), ss, alpha = 0, vhat = diag(3))
     ))
@@ -1343,8 +1313,7 @@ test_that("mashPosterior returns posterior matrices with covariance", {
 
 test_that("mashPosterior outputPosteriorCov = FALSE omits PosteriorCov", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     post <- suppressMessages(suppressWarnings(
         mashPosterior(
             .mashTestModel(ss),
@@ -1360,8 +1329,7 @@ test_that("mashPosterior outputPosteriorCov = FALSE omits PosteriorCov", {
 
 test_that("mashPosterior(excludeCondition) drops the condition from model + output", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     conds <- colnames(.mashSumStatsToMatrices(ss, "strong")$b)
     post <- suppressMessages(suppressWarnings(
         mashPosterior(
@@ -1378,8 +1346,7 @@ test_that("mashPosterior(excludeCondition) drops the condition from model + outp
 
 test_that("mashPosterior errors on an unknown excludeCondition", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashPosterior(
             .mashTestModel(ss),
@@ -1394,8 +1361,7 @@ test_that("mashPosterior errors on an unknown excludeCondition", {
 
 test_that("fitMashContrast consumes a mashPosterior result", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     post <- suppressMessages(suppressWarnings(
         mashPosterior(.mashTestModel(ss), ss, alpha = 0, vhat = diag(3))
     ))
@@ -1672,8 +1638,7 @@ test_that("mashPosteriorContrast: empty frame when every feature is dropped", {
 
 test_that("mashResidualCorrelation(mle): errors without a 'random' entry", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     expect_error(
         mashResidualCorrelation(list(strong = ss), alpha = 0, method = "mle"),
         "requires a 'random' entry"
@@ -1682,8 +1647,7 @@ test_that("mashResidualCorrelation(mle): errors without a 'random' entry", {
 
 test_that("mashResidualCorrelation accepts a SimpleList sumStatsList", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     V <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             S4Vectors::SimpleList(null = ss),
@@ -1696,8 +1660,7 @@ test_that("mashResidualCorrelation accepts a SimpleList sumStatsList", {
 
 test_that("mashCovarianceComponents: SimpleList input + default (NULL) vhat", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     cc <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             S4Vectors::SimpleList(strong = ss),
@@ -1711,8 +1674,7 @@ test_that("mashCovarianceComponents: SimpleList input + default (NULL) vhat", {
 
 test_that("mashPriorCovariances: SimpleList input (canonical only)", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     pc <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             S4Vectors::SimpleList(strong = ss),
@@ -1726,8 +1688,7 @@ test_that("mashPriorCovariances: SimpleList input (canonical only)", {
 
 test_that("mashModelFit: SimpleList input + default (NULL) vhat", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     m <- suppressMessages(suppressWarnings(
         mashModelFit(
             S4Vectors::SimpleList(random = ss),
@@ -1741,8 +1702,7 @@ test_that("mashModelFit: SimpleList input + default (NULL) vhat", {
 
 test_that("mashPosterior: default (NULL) vhat and excludeCondition dropping every condition", {
     skip_if_not_installed("mashr")
-    data(qtlSumStatsMulticontextExample)
-    ss <- qtlSumStatsMulticontextExample
+    ss <- mashFixture()
     model <- .mashTestModel(ss)
     conds <- colnames(.mashSumStatsToMatrices(ss, "strong")$b)
     # NULL vhat path: omit vhat so mashPosterior fills the identity default.
@@ -1791,18 +1751,56 @@ test_that("contrast rows fall back to the positional index when unnamed", {
 
 test_that(".mashUdFit re-raises an unrelated udr failure unchanged", {
     skip_if_not_installed("udr")
-    local_mocked_bindings(.mashUdControl = function(...) list(),
-        .package = "pecotmr")
+    local_mocked_bindings(
+        .mashUdControl = function(...) list(),
+        .package = "pecotmr"
+    )
     # Only the ud_ted i.i.d. incompatibility is rewrapped; anything else must
     # surface as itself rather than being swallowed into a NULL fit.
     expect_error(
         with_mocked_bindings(
             pecotmr:::.mashUdFit(
-                NULL, list(Bhat = matrix(0, 2L, 2L)), "ud_ted", list()
+                NULL,
+                list(Bhat = matrix(0, 2L, 2L)),
+                "ud_ted",
+                list()
             ),
             ud_fit = function(...) stop("totally unrelated failure"),
             .package = "udr"
         ),
         "totally unrelated failure"
     )
+})
+
+test_that("mashPipeline helpers: argument guards fire", {
+    expect_error(
+        fitMashContrast(
+            0L,
+            matrix(0, 2, 2),
+            matrix(0, 2, 2),
+            array(0, c(2, 2, 2))
+        ),
+        "index.*Must be >= 1"
+    )
+    expect_error(
+        updateMashModelCov(list(), allSamples = 1L, samples = "a"),
+        "allSamples.*Must be of type 'character'"
+    )
+    expect_error(
+        sliceMashData("not-a-list", vhat = diag(2), snps = 1L, samples = NULL),
+        "data.*Must be of type 'list'"
+    )
+    expect_error(
+        calculateFeatureScores(data.frame(), metaMethod = 1L),
+        "metaMethod.*Must be of type 'string'"
+    )
+    expect_error(
+        nSignificantScore(data.frame(), pCutoff = 2),
+        "pCutoff.*is not <= 1"
+    )
+    expect_error(
+        makePairwiseContrastCol(c("a", "b", "c"), template = c(a = 0)),
+        "pair.*Must have length 2"
+    )
+    expect_error(sanitizeMashData("nope"), "data.*Must be of type 'list'")
 })

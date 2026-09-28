@@ -180,7 +180,7 @@ dummy_pheno_data <- function(
         end_matrix <- end_matrix[sample(nrow(end_matrix)), ]
     }
     pheno_data <- t(pheno_data)
-    pheno_data <- lapply(seq_len(ncol(pheno_data)), function(i) {
+    pheno_data <- map(seq_len(ncol(pheno_data)), function(i) {
         pheno_data[, i, drop = FALSE]
     })
     return(pheno_data)
@@ -207,7 +207,7 @@ dummy_covar_data <- function(
         covar <- covar[sample(nrow(covar)), ]
     }
     if (row_na) {
-        covar[sample(length(covar), 1), 1:number_of_covars] <- NA
+        covar[sample(length(covar), 1), seq_len(number_of_covars)] <- NA
     }
     return(covar)
 }
@@ -648,7 +648,7 @@ test_that("invertMinmaxScaling preserves correlation structure", {
     n <- 200
     k <- 3
     # Simulate U = W'G (G is raw, not standardized, matching rss_ld_sketch)
-    G <- sapply(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p))
+    G <- exec(cbind, !!!map(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p)))
     W <- matrix(rnorm(n * n, 0, 1 / sqrt(n)), n, n)
     U_original <- crossprod(W, G)
 
@@ -1712,6 +1712,27 @@ test_that("single-shard sharded handle equals the single-file handle", {
     expect_equal(.shardDose(sh, 1:10), .shardDose(ref, 1:10))
 })
 
+test_that("readGenotypes(genoMeta=) forwards `format` to the shard reader", {
+    skip_if_not_installed("snpStats")
+    # Regression: the path = "missing" method bound `format` to its own formal
+    # and then called GenotypeHandle(...) without it, so an explicit format was
+    # silently dropped and every shard fell back to extension probing.
+    seen <- new.env(parent = emptyenv())
+    seen$fmt <- NA_character_
+    local_mocked_bindings(
+        .resolveGenotypeShard = function(p, format = NULL) {
+            seen$fmt <- if (is.null(format)) "<NULL>" else format
+            pecotmr:::.makePlink1Handle(p)
+        },
+        .package = "pecotmr"
+    )
+    readGenotypes(
+        genoMeta = c("21" = file.path(test_data_dir, "test_variants")),
+        format = "plink1"
+    )
+    expect_identical(seen$fmt, "plink1")
+})
+
 test_that("genoMeta meta-file form matches the named-vector form", {
     skip_if_not_installed("snpStats")
     td_abs <- normalizePath(test_data_dir)
@@ -1762,7 +1783,7 @@ test_that(".makeGdsHandle errors when GDS file is absent", {
     skip_if_not_installed("gdsfmt")
     expect_error(
         pecotmr:::.makeGdsHandle("/no/such/file.gds"),
-        "GDS file not found"
+        "GDS file.*File does not exist"
     )
 })
 
@@ -1770,7 +1791,7 @@ test_that(".makeVcfHandle errors when VCF file is absent", {
     skip_if_not_installed("VariantAnnotation")
     expect_error(
         pecotmr:::.makeVcfHandle("/no/such/file.vcf.gz"),
-        "VCF file not found"
+        "VCF file.*File does not exist"
     )
 })
 
@@ -1781,7 +1802,7 @@ test_that(".makePlink1Handle errors when plink1 trio is absent", {
             tempdir(),
             "missingPlink1Prefix"
         )),
-        "Plink file not found"
+        "Plink file.*File does not exist"
     )
 })
 
@@ -2108,7 +2129,7 @@ test_that("resolvePlink2Paths errors when .psam is missing", {
     prefix <- .gioMakePlink2Stub(c("pgen", "pvar"))
     expect_error(
         pecotmr:::resolvePlink2Paths(prefix),
-        "PLINK2 .psam file not found"
+        "PLINK2 .psam file.*File does not exist"
     )
 })
 

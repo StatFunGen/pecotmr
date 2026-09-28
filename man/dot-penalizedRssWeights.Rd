@@ -14,12 +14,15 @@
   lambda0 = 0,
   lambda2 = 0,
   selection = c("ldQuadratic", "minFbeta"),
-  ...
+  methodArgs = list()
 )
 }
 \arguments{
-\item{stat, LD, s, selection, penalty, gamma, alpha, lambda0, lambda2, ...}{See the
+\item{stat, LD, s, selection, penalty, gamma, alpha, lambda0, lambda2}{See the
 public wrappers for details.}
+
+\item{methodArgs}{Optional named list of options forwarded to
+\code{penalizedRss()}.}
 }
 \value{
 Numeric weight vector of length \code{nrow(LD)}.

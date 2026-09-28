@@ -13,7 +13,7 @@ estCtwasParam(
     "shared_all", "independent"),
   ncore = 1L,
   fallbackToPrefit = FALSE,
-  ...
+  ctwasArgs = list()
 )
 }
 \arguments{
@@ -37,7 +37,8 @@ deliberately broad; a genuinely broken input still surfaces because the
 prefit re-run will itself error. Mirrors the legacy ctwas_2 workaround on
 toy data where the accurate EM cannot be estimated.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::est_param} (e.g.
+\item{ctwasArgs}{Optional named list of additional arguments
+forwarded to \code{ctwas::est_param} (e.g.
 \code{min_p_single_effect}, \code{min_group_size}).}
 }
 \value{
@@ -54,6 +55,6 @@ Step 2 of the three-step \code{\link{ctwasPipeline}}: assembles
 \examples{
 data(ctwasInputsExample)
 estCtwasParam(ctwasInputsExample, thin = 1, niterPrefit = 3,
-  niter = 10, min_group_size = 1, min_p_single_effect = 0,
-  fallbackToPrefit = TRUE)
+  niter = 10, fallbackToPrefit = TRUE,
+  ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 }

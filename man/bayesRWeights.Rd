@@ -4,7 +4,7 @@
 \alias{bayesRWeights}
 \title{BayesR TWAS weights (hierarchical mixture prior)}
 \usage{
-bayesRWeights(X, y, Z = NULL, ...)
+bayesRWeights(X, y, Z = NULL, methodArgs = list())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -13,7 +13,8 @@ bayesRWeights(X, y, Z = NULL, ...)
 
 \item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
 
-\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\item{methodArgs}{Optional named list of options forwarded to
+\code{bayesAlphabetWeights} /
 \code{qgg}.}
 }
 \value{

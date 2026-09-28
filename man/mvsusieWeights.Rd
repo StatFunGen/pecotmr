@@ -4,46 +4,18 @@
 \alias{mvsusieWeights}
 \title{Compute mvSuSiE TWAS weights}
 \usage{
-mvsusieWeights(
-  mvsusieFit = NULL,
-  X = NULL,
-  Y = NULL,
-  priorVariance = NULL,
-  residualVariance = NULL,
-  L = 10,
-  LGreedy = NULL,
-  verbose = FALSE,
-  ...
-)
+mvsusieWeights(mvsusieFit = NULL)
 }
 \arguments{
-\item{mvsusieFit}{Optional fitted mvSuSiE object.}
-
-\item{X}{Genotype matrix. Required when `mvsusieFit` is NULL.}
-
-\item{Y}{Phenotype matrix. Required when `mvsusieFit` is NULL.}
-
-\item{priorVariance}{Optional mvSuSiE prior variance list.}
-
-\item{residualVariance}{Optional residual variance matrix.}
-
-\item{L}{Maximum number of components. Default \code{10}, matching
-\code{mvsusieR::mvsusie}.}
-
-\item{LGreedy}{Integer or \code{NULL}. Number of greedily-added components.
-\code{NULL} (default) disables the greedy loop and fits \code{L}
-directly.}
-
-\item{verbose}{If TRUE, prints mvSuSiE fitting progress.}
-
-\item{...}{Additional arguments passed to `fitMvsusie()` when fitting.}
+\item{mvsusieFit}{A fitted mvSuSiE object. Required.}
 }
 \value{
 Matrix of variant weights.
 }
 \description{
-Extracts coefficients from an existing mvSuSiE fit or fits `fitMvsusie()`
-from `X` and `Y`.
+Extracts coefficients from an existing mvSuSiE fit. This never fits
+mvSuSiE itself: fine-mapping belongs to \code{fineMappingPipeline()}, and a
+missing fit is an error rather than an invitation to refit.
 }
 \examples{
 \donttest{
@@ -52,6 +24,9 @@ library(susieR)
 data(multiTraitData)
 X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y
-mvsusieWeights(X = X, Y = Y, L = 5, LGreedy = 2)
+fit <- fitMvsusie(X = X, Y = Y,
+  prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
+  methodArgs = list(L = 5))
+mvsusieWeights(mvsusieFit = fit)
 }
 }

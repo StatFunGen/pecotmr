@@ -4,17 +4,7 @@
 \alias{mvsusieRssWeights}
 \title{Compute mvSuSiE-RSS TWAS weights from summary statistics}
 \usage{
-mvsusieRssWeights(
-  stat,
-  LD,
-  mvsusieRssFit = NULL,
-  priorVariance = NULL,
-  residualVariance = NULL,
-  L = 10,
-  LGreedy = NULL,
-  retainFit = FALSE,
-  ...
-)
+mvsusieRssWeights(stat, LD, mvsusieRssFit = NULL, retainFit = FALSE)
 }
 \arguments{
 \item{stat}{A list with \code{z} (matrix variants x conditions) and \code{n}
@@ -22,24 +12,10 @@ mvsusieRssWeights(
 
 \item{LD}{LD correlation matrix.}
 
-\item{mvsusieRssFit}{Optional pre-fitted \code{mvsusieRss} object.}
-
-\item{priorVariance}{Optional mvSuSiE prior variance specification. When
-NULL, \code{mvsusieR::create_mixture_prior()} is used with \code{R =
-ncol(stat$z)}.}
-
-\item{residualVariance}{Optional residual covariance matrix.}
-
-\item{L}{Maximum number of single effects. Default \code{10}, matching
-\code{mvsusieR::mvsusie}.}
-
-\item{LGreedy}{Integer or \code{NULL}. Number of greedily-added effects.
-\code{NULL} (default) disables the greedy loop and fits \code{L}
-directly.}
+\item{mvsusieRssFit}{A fitted \code{mvsusieRss} object. Required: this
+extracts weights and never runs fine-mapping itself.}
 
 \item{retainFit}{If TRUE, attaches the fitted object as an attribute.}
-
-\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.}
 }
 \value{
 A numeric matrix of per-variant per-context weights (variants x

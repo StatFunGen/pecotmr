@@ -4,7 +4,14 @@
 \alias{bLassoWeights}
 \title{Compute Weights Using the Bayesian LASSO (BGLR)}
 \usage{
-bLassoWeights(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...)
+bLassoWeights(
+  X,
+  y,
+  nIter = 10000,
+  burnIn = 2000,
+  thin = 5,
+  methodArgs = list()
+)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -17,7 +24,8 @@ bLassoWeights(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...)
 
 \item{thin}{Thinning interval. Default is 5.}
 
-\item{...}{Additional arguments passed through to `BGLR::BGLR`.}
+\item{methodArgs}{Optional named list of options passed through to
+`BGLR::BGLR`.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

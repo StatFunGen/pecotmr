@@ -11,7 +11,7 @@ mergeCtwasBoundaryRegions(
   maxSNP = Inf,
   L = 5L,
   ncore = 1L,
-  ...
+  ctwasArgs = list()
 )
 }
 \arguments{
@@ -38,7 +38,9 @@ re-fine-mapping (LD path only). Default \code{5}.}
 
 \item{ncore}{Number of cores. Default \code{1}.}
 
-\item{...}{Forwarded to the underlying ctwas postprocess function.}
+\item{ctwasArgs}{Optional named list of additional arguments
+forwarded to the underlying ctwas postprocess
+function.}
 }
 \value{
 The \code{finemapResult} list with \code{finemap_res},

@@ -38,8 +38,12 @@ NULL
 #' @return Numeric vector of two-sided p-values.
 #' @examples
 #' waldTestPval(beta = 0.3, se = 0.1, n = 1000)
+#' @importFrom checkmate assertNumeric
 #' @export
 waldTestPval <- function(beta, se, n) {
+    assertNumeric(beta)
+    assertNumeric(se)
+    assertNumeric(n)
     # Calculate the t statistic
     tValue <- beta / se
     # Degrees of freedom
@@ -61,20 +65,20 @@ pvalAcat <- function(pvals, naRm = TRUE) {
     #     avoid Inf from floating-point precision loss in pi*0.5
     #   - large-stat asymptotic: when the mean Cauchy variate is > 1e15 the
     #     CDF tail collapses to (1/T) / pi (Cauchy survival expansion)
-    if (naRm) {
-        pvals <- pvals[!is.na(pvals)]
-    }
-    if (length(pvals) == 0L) {
+    present <- if (naRm) pvals[!is.na(pvals)] else pvals
+    if (length(present) == 0L) {
         return(NA_real_)
     }
-    if (length(pvals) == 1L) {
-        return(pvals[[1]])
+    if (length(present) == 1L) {
+        return(present[[1]])
     }
-    pvals <- pmin(pvals, 0.99)
+    # Capped below 1: tan(pi * (0.5 - 1)) is -Inf, which would sink the
+    # combined statistic regardless of the other p-values.
+    capped <- pmin(present, 0.99)
     cauchyVals <- if_else(
-        pvals < 1e-15,
-        1 / (pvals * pi),
-        tan(pi * (0.5 - pvals))
+        capped < 1e-15,
+        1 / (capped * pi),
+        tan(pi * (0.5 - capped))
     )
     stat <- mean(cauchyVals)
     if (!is.finite(stat)) {
@@ -89,11 +93,7 @@ pvalAcat <- function(pvals, naRm = TRUE) {
 pvalHmp <- function(pvals) {
     # Make sure harmonicmeanp is installed
     if (!requireNamespace("harmonicmeanp", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install harmonicmeanp: ",
-            "https://cran.r-project.org/web/packages/harmonicmeanp/index.html"
-        )
-        abort(msg)
+        abort("Package 'harmonicmeanp' is required for this function.")
     }
     # https://search.r-project.org/CRAN/refmans/harmonicmeanp/html/pLandau.html
     L <- length(pvals)
@@ -120,11 +120,7 @@ pvalHmp <- function(pvals) {
 
 pvalPoolr <- function(pvals, method, R) {
     if (!requireNamespace("poolr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this method, please install poolr: ",
-            "install.packages('poolr')"
-        )
-        abort(msg)
+        abort("Package 'poolr' is required for this method.")
     }
     fn <- switch(
         method,
@@ -138,7 +134,7 @@ pvalPoolr <- function(pvals, method, R) {
 
 pvalGbj <- function(zScores, R, method) {
     if (!requireNamespace("GBJ", quietly = TRUE)) {
-        abort("To use this method, please install GBJ: install.packages('GBJ')")
+        abort("Package 'GBJ' is required for this method.")
     }
     result <- switch(
         method,
@@ -165,19 +161,13 @@ pvalGbj <- function(zScores, R, method) {
 pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
     if (!requireNamespace("aSPU", quietly = TRUE)) {
         abort(
-            "To use this method, please install aSPU: install.packages('aSPU')"
+            "Package 'aSPU' is required for this method."
         )
     }
     switch(
         method,
-        aspu = {
-            result <- aSPU::aSPUs(Zs = zScores, corSNP = R)
-            result$pvs["aSPUs"]
-        },
-        gates = {
-            result <- aSPU::GATES2(ldmatrix = R, p = pvals)
-            result[["Pg"]]
-        },
+        aspu = aSPU::aSPUs(Zs = zScores, corSNP = R)$pvs["aSPUs"],
+        gates = aSPU::GATES2(ldmatrix = R, p = pvals)[["Pg"]],
         .abortUnknownMethod("aSPU", method)
     )
 }
@@ -233,13 +223,12 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 # Internal: align an R correlation matrix to a target order. If R has
 # rownames/colnames, reorder to match `targetNames`; require every target
 # name to be present. If R is unnamed, only length check.
+#' @importFrom checkmate assertMatrix
 .combinePvalAlignR <- function(R, targetNames) {
     if (is.null(R)) {
         return(NULL)
     }
-    if (!is.matrix(R)) {
-        abort("`R` must be a matrix.")
-    }
+    assertMatrix(R)
     if (nrow(R) != ncol(R)) {
         abort("`R` must be square.")
     }
@@ -347,6 +336,7 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 #' @examples
 #' combinePValues(pvals = c(0.01, 0.2, 0.5), methods = "fisher", R = diag(3))
 #' @export
+#' @importFrom checkmate assertFlag
 combinePValues <- function(
     pvals = NULL,
     zScores = NULL,
@@ -354,6 +344,7 @@ combinePValues <- function(
     R = NULL,
     naRm = TRUE
 ) {
+    assertFlag(naRm)
     methods <- .combinePvalCheckMethods(methods)
     nPvalsIn <- if (is.null(pvals)) 0L else length(pvals)
     nZScoresIn <- if (is.null(zScores)) 0L else length(zScores)
@@ -517,13 +508,13 @@ combinePValues <- function(
 }
 
 # @noRd
+#' @importFrom rlang try_fetch
 .combinePvalRunOne <- function(m, pvalsK, zScoresK, Raligned) {
-    p <- tryCatch(
+    p <- try_fetch(
         .combinePvalSingle(m, pvals = pvalsK, zScores = zScoresK, R = Raligned),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
-            msg <- glue("combinePValues: method '{m}' failed: {eMsg}")
-            warn(msg)
+        error = function(cnd) {
+            msg <- glue("combinePValues: method '{m}' failed")
+            warn(msg, parent = cnd)
             NA_real_
         }
     )

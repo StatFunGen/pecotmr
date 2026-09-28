@@ -30,7 +30,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   bfCutoffToSkip = 0,
   logBfCutoffToSkip = 0,
   alleleFlip = TRUE,
-  ...
+  colocboostArgs = list()
 )
 
 \S4method{colocboostPipeline}{QtlSumStats}(
@@ -48,7 +48,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   mafCutoff = 0,
   macCutoff = 0,
   imissCutoff = 1,
-  ...
+  colocboostArgs = list()
 )
 
 \S4method{colocboostPipeline}{MultiStudyQtlDataset}(
@@ -71,7 +71,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   bfCutoffToSkip = 0,
   logBfCutoffToSkip = 0,
   alleleFlip = TRUE,
-  ...
+  colocboostArgs = list()
 )
 
 \S4method{colocboostPipeline}{ANY}(qtlData, gwasSumStats = NULL, ...)
@@ -83,9 +83,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
 \item{gwasSumStats}{Optional \code{GwasSumStats} with the GWAS studies to
 colocalize against. \code{NULL} to skip GWAS colocalization.}
 
-\item{...}{Additional arguments forwarded to
-\code{\link[colocboost]{colocboost}} (e.g., \code{M}, \code{L},
-\code{output_level}).}
+\item{...}{Required by the generic; the methods take no further arguments.}
 
 \item{contexts}{Optional character vector of context names to restrict the
 individual-level / QtlSumStats QTL analysis to. When \code{NULL} (default),
@@ -146,6 +144,10 @@ across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
 swaps recognized (flipping z / residualized dosage / LD to a shared
 coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
 swap is treated as a distinct variant.}
+
+\item{colocboostArgs}{Optional named list of additional arguments
+forwarded to \code{\link[colocboost]{colocboost}} (e.g., \code{M},
+\code{L}, \code{output_level}).}
 }
 \value{
 A \code{\linkS4class{ColocBoostResult}}: one element per

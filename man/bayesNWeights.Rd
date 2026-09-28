@@ -4,7 +4,7 @@
 \alias{bayesNWeights}
 \title{BayesN TWAS weights (Gaussian prior, ridge-equivalent)}
 \usage{
-bayesNWeights(X, y, Z = NULL, ...)
+bayesNWeights(X, y, Z = NULL, methodArgs = list())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -13,7 +13,8 @@ bayesNWeights(X, y, Z = NULL, ...)
 
 \item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
 
-\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\item{methodArgs}{Optional named list of options forwarded to
+\code{bayesAlphabetWeights} /
 \code{qgg}.}
 }
 \value{

@@ -110,14 +110,19 @@ a null set:
 fitSimple <- mashPipeline(
     sumStatsList,
     alpha = 0,
-    nPcs = 2L,
-    residualCorrelationMethod = "simple"
+    residualCorrelationMethod = "simple",
+    priorCovariances = fit$U
 )
 ```
 
 ```{r mash-vhat-show}
 round(head(sort(fitSimple$w, decreasing = TRUE), 5), 4)
 ```
+
+Passing `fit$U` back in holds the prior fixed, so `Vhat` is the only thing
+that differs from the fit above and the shift in the weights is attributable
+to it alone. Re-estimating the prior here would confound the comparison --
+and cost a second data-driven estimate for a prior you already have.
 
 Supplying a `null` partition while leaving the default in place reports that
 the partition is going unused, since that combination is more often an

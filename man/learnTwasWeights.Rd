@@ -50,7 +50,12 @@ set to -1, the function uses all available cores. If set to 0 or 1, no
 parallel processing is performed. If set to 2 or more, parallel processing
 is enabled with that many threads.}
 
-\item{fittedModels}{Optional named list of fitted SuSiE-family models.}
+\item{fittedModels}{Named list of fitted SuSiE-family models, keyed by
+token (\code{susie}, \code{susieInf}, \code{mvsusie}, \code{fsusie}).
+Required whenever a SuSiE-family weight method is requested: those
+methods extract weights from an existing fit and never fine-map, so a
+missing fit is an error. Run \code{\link{fineMappingPipeline}} to
+produce the fits.}
 
 \item{retainFits}{If TRUE, retain fitted model objects as attributes on
 returned weight matrices when supported by the weight method.}
@@ -91,6 +96,10 @@ parallel processing to handle multiple methods.
 data(multiTraitData)
 X <- multiTraitData$X[, 1:80]
 Y <- multiTraitData$Y
+# SuSiE-family methods extract weights from an existing fit and never
+# fine-map themselves, so the fit is supplied via `fittedModels`.
+fit <- susieR::susie(X, Y[, 1], L = 5)
 learnTwasWeights(X, Y[, 1, drop = FALSE],
-  weightMethods = list(susie_weights = list()))
+  weightMethods = list(susie_weights = list()),
+  fittedModels = list(susie = fit))
 }

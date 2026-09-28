@@ -95,7 +95,7 @@ context("colocboostPipeline (S4 dispatch)")
         path = "/tmp/cb.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -179,7 +179,7 @@ context("colocboostPipeline (S4 dispatch)")
 ) {
     gh <- .cbp_makeHandle()
     phen <- setNames(
-        lapply(contexts, function(.) .cbp_makeSe(traits = traits)),
+        map(contexts, function(.) .cbp_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -608,11 +608,11 @@ test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)
         ldSketch = .cbp_makeHandle(),
         qcInfo = list(ok = 1)
     )
-    g0 <- do.call(GwasSumStats, base)
+    g0 <- exec(GwasSumStats, !!!base)
     expect_false(any(
         c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
     ))
-    g1 <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+    g1 <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
     expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
     expect_equal(g1$nCase, 500)
     expect_equal(g1$nControl, 1500)
@@ -645,11 +645,11 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
         .package = "pecotmr"
     )
     # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
-    gcc <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+    gcc <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
     bcc <- pecotmr:::.cbGwasSumStatsBundle(gcc)
     expect_true(all(bcc[["G1"]]$sumstat$n == 4 / (1 / 500 + 1 / 1500)))
     # quantitative (no nCase/nControl) -> per-variant N (1000)
-    bq <- pecotmr:::.cbGwasSumStatsBundle(do.call(GwasSumStats, base))
+    bq <- pecotmr:::.cbGwasSumStatsBundle(exec(GwasSumStats, !!!base))
     expect_true(all(bq[["G1"]]$sumstat$n == 1000L))
 })
 
@@ -666,7 +666,10 @@ test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutof
         rbinom(n * p, 2, 0.3),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
+        )
     )
     Y <- cbind(
         sig = X[, 1] * 1.5 + rnorm(n, sd = 0.3), # strong signal at v1
@@ -962,7 +965,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
 .cbf_n <- function(ss, ...) {
     b <- suppressMessages(.cbQtlSumStatsBundle(
         ss,
-        cutoffs = .panelCutoffs(list(...))
+        cutoffs = .panelCutoffs(...)
     ))
     if (length(b) == 0L) 0L else length(b[[1L]]$variantIds)
 }
@@ -1185,19 +1188,19 @@ test_that(".cbResidualizedX reports why genotypes were unavailable", {
         getResidualizedGenotypes = function(...) stop("kaboom"),
         .package = "pecotmr"
     )
-    # The underlying message is carried through so the skip is diagnosable.
-    expect_message(
-        res <- pecotmr:::.cbResidualizedX(
-            NULL,
-            "c1",
-            NULL,
-            NULL,
-            NULL,
-            NULL
-        ),
-        "residualized genotypes unavailable: kaboom"
+    # The cause is chained via `parent`, not flattened into the text, so the
+    # rendered message still shows it AND it stays reachable as a condition.
+    # catch_cnd() rather than expect_message(), which returns NULL.
+    cnd <- rlang::catch_cnd(
+        pecotmr:::.cbResidualizedX(NULL, "c1", NULL, NULL, NULL, NULL),
+        classes = "message"
     )
-    expect_null(res)
+    expect_match(conditionMessage(cnd), "residualized genotypes unavailable")
+    expect_match(conditionMessage(cnd), "kaboom")
+    expect_match(conditionMessage(cnd$parent), "kaboom")
+    expect_null(suppressMessages(
+        pecotmr:::.cbResidualizedX(NULL, "c1", NULL, NULL, NULL, NULL)
+    ))
 })
 
 test_that(".cbApplyScreen keeps the outcomes that clear the screen", {
@@ -1334,7 +1337,7 @@ test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
         jointGwas = FALSE,
         separateGwas = FALSE,
         focalTrait = NULL,
-        dotArgs = list(),
+        colocboostArgs = list(),
         qtlSumstatBundle = qtlOnly
     ))
     expect_equal(called, "xqtl")
@@ -1362,7 +1365,7 @@ test_that(".cbRunVariants warns instead of silently skipping an analysis", {
             jointGwas = TRUE,
             separateGwas = TRUE,
             focalTrait = NULL,
-            dotArgs = list()
+            colocboostArgs = list()
         ))
     )
     expect_length(warnings, 2L)
@@ -1386,7 +1389,7 @@ test_that(".cbRunVariants warns when xqtlColoc has only GWAS sumstats", {
             jointGwas = FALSE,
             separateGwas = FALSE,
             focalTrait = NULL,
-            dotArgs = list(),
+            colocboostArgs = list(),
             qtlSumstatBundle = pecotmr:::.cbMergeSumstatBundles(list())
         )),
         "xqtlColoc = TRUE was requested"

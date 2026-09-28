@@ -4,7 +4,7 @@
 \alias{bayesCWeights}
 \title{BayesC TWAS weights (rounded-spike prior)}
 \usage{
-bayesCWeights(X, y, Z = NULL, pi = 0.1, ...)
+bayesCWeights(X, y, Z = NULL, pi = 0.1, methodArgs = list())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -16,7 +16,8 @@ bayesCWeights(X, y, Z = NULL, pi = 0.1, ...)
 \item{pi}{Numeric in (0, 1). Prior proportion of non-null effects for the
 BayesC mixture. Default \code{0.1}.}
 
-\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\item{methodArgs}{Optional named list of options forwarded to
+\code{bayesAlphabetWeights} /
 \code{qgg}.}
 }
 \value{

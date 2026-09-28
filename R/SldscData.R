@@ -46,30 +46,34 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 }
 
 # @noRd
+#' @importFrom checkmate checkNames
 .sldscDataCheckAnnot <- function(annot) {
-    errs <- character(0)
-    if (!all(is_in(c("CHR", "SNP"), names(annot)))) {
-        errs <- c(errs, "`annot` must have columns CHR and SNP.")
-    }
+    cols <- checkNames(names(annot), must.include = c("CHR", "SNP"))
     annotCols <- setdiff(names(annot), c("CHR", "SNP", "BP", "CM"))
-    if (length(annotCols) == 0L) {
-        errs <- c(
-            errs,
+    c(
+        if (!isTRUE(cols)) {
+            str_c("`annot` must have columns CHR and SNP: ", cols)
+        },
+        if (length(annotCols) == 0L) {
             str_c(
                 "`annot` must have at least one annotation ",
                 "column beyond CHR/SNP/BP/CM."
             )
-        )
-    }
-    errs
+        }
+    ) %||%
+        character(0)
 }
 
 # @noRd
 .sldscDataCheckFrq <- function(frq) {
-    if (nrow(frq) > 0L && !all(is_in(c("SNP", "MAF"), names(frq)))) {
-        return("non-empty `frq` must have columns SNP and MAF.")
+    if (nrow(frq) == 0L) {
+        return(NULL)
     }
-    NULL
+    cols <- checkNames(names(frq), must.include = c("SNP", "MAF"))
+    if (isTRUE(cols)) {
+        return(NULL)
+    }
+    str_c("non-empty `frq` must have columns SNP and MAF: ", cols)
 }
 
 # @noRd
@@ -77,11 +81,14 @@ setValidity("SldscData", function(object) .validateSldscData(object))
     if (length(tr) == 0L) {
         return(NULL)
     }
-    errs <- character(0)
-    if (is.null(names(tr)) || any(str_length(names(tr)) == 0L, na.rm = TRUE)) {
-        errs <- c(errs, "`traits` must be a named list (one entry per trait).")
-    }
-    c(errs, unlist(compact(map(names(tr), .sldscDataCheckOneTrait, tr = tr))))
+    unnamed <- is.null(names(tr)) ||
+        any(str_length(names(tr)) == 0L, na.rm = TRUE)
+    c(
+        if (unnamed) {
+            "`traits` must be a named list (one entry per trait)."
+        },
+        list_c(compact(map(names(tr), .sldscDataCheckOneTrait, tr = tr)))
+    )
 }
 
 # @noRd

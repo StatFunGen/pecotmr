@@ -147,18 +147,17 @@ methods::setValidity("RangedTupleList", function(object) {
         return(grl)
     }
     if (length(GenomeInfoDb::seqlevels(grl)) == 0L) {
-        GenomeInfoDb::seqinfo(grl) <- si
-        return(grl)
+        return(GenomeInfoDb::`seqinfo<-`(grl, value = si))
     }
     keepLevels <- intersect(
         GenomeInfoDb::seqlevels(si),
         GenomeInfoDb::seqlevels(grl)
     )
-    GenomeInfoDb::seqinfo(
+    GenomeInfoDb::`seqinfo<-`(
         grl,
-        new2old = match(keepLevels, GenomeInfoDb::seqlevels(grl))
-    ) <- si[keepLevels]
-    grl
+        new2old = match(keepLevels, GenomeInfoDb::seqlevels(grl)),
+        value = si[keepLevels]
+    )
 }
 
 .rtlRebuild <- function(x, elements, keep) {
@@ -166,16 +165,18 @@ methods::setValidity("RangedTupleList", function(object) {
     # during initialize(), and a subclass's validity method reads its identity
     # columns and slots. Building the object bare and filling it in afterwards
     # trips that check on the way past.
-    grl <- GenomicRanges::GRangesList(elements)
+    bare <- GenomicRanges::GRangesList(elements)
     # seqinfo is collection-level state, exactly like the slots below: it
     # carries the genome build. A rebuild from bare elements starts with the
     # seqlevels those elements happen to span -- none at all when everything
     # was dropped -- so the original seqinfo is merged back in, or subsetting
     # to nothing would silently discard the build.
-    grl <- .rtlRestoreSeqinfo(grl, x)
+    withSeqinfo <- .rtlRestoreSeqinfo(bare, x)
     md <- mcols(x, use.names = FALSE)
-    if (!is.null(md)) {
-        mcols(grl) <- md[keep, , drop = FALSE]
+    grl <- if (is.null(md)) {
+        withSeqinfo
+    } else {
+        S4Vectors::`mcols<-`(withSeqinfo, value = md[keep, , drop = FALSE])
     }
     ownSlots <- .rtlOwnSlots(x)
     slotArgs <- set_names(map(ownSlots, .rtlGetSlot, x = x), ownSlots)
@@ -259,10 +260,8 @@ setMethod("$", "RangedTupleList", function(x, name) {
 #' @rdname RangedTupleList-methods
 #' @export
 setMethod("$<-", "RangedTupleList", function(x, name, value) {
-    md <- mcols(x, use.names = FALSE)
-    md[[name]] <- value
-    mcols(x) <- md
-    x
+    md <- `[[<-`(mcols(x, use.names = FALSE), name, value = value)
+    S4Vectors::`mcols<-`(x, value = md)
 })
 
 #' @rdname RangedTupleList-methods
@@ -307,8 +306,7 @@ setMethod("[[<-", "RangedTupleList", function(x, i, j, ..., value) {
         abort(msg)
     }
     idx <- .rtlAssignIndex(x, i)
-    elements <- as.list(x)
-    elements[[idx]] <- value
+    elements <- `[[<-`(as.list(x), idx, value = value)
     # Growing the collection has no defined identity row for the new element,
     # and mcols would be padded with NA -- which the validity method reads as a
     # broken tuple. Rejected here so the failure names the real cause.
@@ -324,6 +322,7 @@ setMethod("[[<-", "RangedTupleList", function(x, i, j, ..., value) {
 
 # Resolve `[[` index forms (positive integer or element name) to a position.
 # @noRd
+#' @importFrom checkmate assertScalar
 .rtlAssignIndex <- function(x, i) {
     if (is.character(i)) {
         pos <- match(i, names(x))
@@ -332,9 +331,7 @@ setMethod("[[<-", "RangedTupleList", function(x, i, j, ..., value) {
         }
         return(pos)
     }
-    if (length(i) != 1L || is.na(i)) {
-        abort("`[[<-` takes a single non-NA index.")
-    }
+    assertScalar(i, na.ok = FALSE, .var.name = "`[[<-` index")
     as.integer(i)
 }
 
@@ -436,7 +433,12 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
     }
     pieces <- map(entry, .rtlSplitOne)
     list(
-        entry = unlist(pieces, recursive = FALSE, use.names = TRUE),
+        # unname(): the flattened names were an artifact of base unlist()'s
+        # `outer.inner` mangling and were never coherent -- a multi-seqname
+        # entry got `a.chr1`, a single-seqname one got bare `a`, an unnamed
+        # input got `chr1` or "". Nothing reads them, and the seqname path
+        # already had to unname() derived values to keep them out of mcols.
+        entry = unname(list_flatten(pieces)),
         fromIdx = rep(seq_along(entry), lengths(pieces))
     )
 }
@@ -499,7 +501,12 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
         warn(msg)
     }
     list(
-        entry = unlist(pieces, recursive = FALSE, use.names = TRUE),
+        # unname(): the flattened names were an artifact of base unlist()'s
+        # `outer.inner` mangling and were never coherent -- a multi-seqname
+        # entry got `a.chr1`, a single-seqname one got bare `a`, an unnamed
+        # input got `chr1` or "". Nothing reads them, and the seqname path
+        # already had to unname() derived values to keep them out of mcols.
+        entry = unname(list_flatten(pieces)),
         fromIdx = rep(seq_along(entry), lengths(pieces)),
         blockId = unname(list_c(map(pieces, names)))
     )
@@ -528,8 +535,9 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
         )
         abort(msg)
     }
-    names(blocks) <- keys
-    blocks
+    # `names<-` not set_names(): `blocks` is a GRanges, and set_names() is
+    # vector-only -- it rejects an S4 object.
+    `names<-`(blocks, keys)
 }
 
 # Block keys come from names(), a `blockId` mcol, or the rendered range, in
@@ -686,11 +694,26 @@ flattenTupleRanges <- function(x) {
         return(gr)
     }
     tupleCols <- names(md)[map_lgl(as.list(md), is.atomic)]
-    reps <- rep(seq_len(length(x)), lengths(x))
-    for (nm in tupleCols) {
-        mcols(gr)[[.rtlDotName(nm)]] <- md[[nm]][reps]
+    if (length(tupleCols) == 0L) {
+        return(gr)
     }
-    gr
+    reps <- rep(seq_len(length(x)), lengths(x))
+    broadcast <- set_names(
+        map(md[tupleCols], .rtlBroadcastColumn, reps = reps),
+        map_chr(tupleCols, .rtlDotName)
+    )
+    `mcols<-`(
+        gr,
+        value = cbind(
+            mcols(gr, use.names = FALSE),
+            DataFrame(broadcast, check.names = FALSE)
+        )
+    )
+}
+
+# @noRd
+.rtlBroadcastColumn <- function(col, reps) {
+    col[reps]
 }
 
 # The broadcast name for an identity column. Dotted so it cannot collide with
@@ -898,8 +921,14 @@ group_by.RangedTupleList <- function(.data, ...) {
         intersect(dotted, colnames(mcols(flat))),
         colnames(mcols(out))
     )
-    for (nm in missing) {
-        mcols(out)[[nm]] <- mcols(flat)[[nm]]
+    if (length(missing) == 0L) {
+        return(out)
     }
-    out
+    `mcols<-`(
+        out,
+        value = cbind(
+            mcols(out, use.names = FALSE),
+            mcols(flat, use.names = FALSE)[, missing, drop = FALSE]
+        )
+    )
 }

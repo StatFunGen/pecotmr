@@ -42,7 +42,11 @@ test_that("mrashWeights subsets a user-supplied beta.init of length ncol(X) by k
     y <- X[, 1] * 0.5 + rnorm(n)
     user_beta_init <- seq(0.01, by = 0.01, length.out = p)
     expect_warning(
-        result <- mrashWeights(X, y, beta.init = user_beta_init),
+        result <- mrashWeights(
+            X,
+            y,
+            methodArgs = list(beta.init = user_beta_init)
+        ),
         "mrashWeights: dropping 1 zero-variance column"
     )
     expect_equal(length(result), p)

@@ -70,7 +70,7 @@ test_that("large component pre-pruning removes individuals", {
     n <- 30
     ids <- paste0("IND", seq_len(n))
     rel <- data.frame(
-        IID1 = ids[1:(n - 1)],
+        IID1 = ids[seq_len(n - 1)],
         IID2 = ids[2:n],
         PI_HAT = rep(0.20, n - 1),
         stringsAsFactors = FALSE
@@ -223,4 +223,17 @@ test_that("iterative cleanup loops and warns when related pairs persist", {
     # Nobody is excluded because the (mocked) filter never fails anyone.
     expect_type(result, "character")
     expect_equal(length(result), 0L)
+})
+
+test_that(".relatednessLargestComponent guards an empty component list", {
+    # max(integer(0)) warns and returns -Inf; with no related pairs the
+    # pruning loop must simply not run, without emitting that warning.
+    expect_identical(
+        pecotmr:::.relatednessLargestComponent(list(csize = integer(0))),
+        0L
+    )
+    expect_identical(
+        pecotmr:::.relatednessLargestComponent(list(csize = c(3L, 7L))),
+        7L
+    )
 })

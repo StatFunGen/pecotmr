@@ -125,7 +125,7 @@ test_that(".genotypeHandleFromPlink1Triplet: errors on non-character input", {
             bim = "x.bim",
             fam = "x.fam"
         ),
-        "must be a single file path"
+        "Must be of type 'string'"
     )
 })
 

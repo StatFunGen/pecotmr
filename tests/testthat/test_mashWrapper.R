@@ -941,7 +941,7 @@ test_that("filterMixtureComponents subsets conditions", {
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(nSnp))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(nSnp)),
             CHR = "1",
             BP = seq(100L, by = 100L, length.out = nSnp),
             A1 = "A",
@@ -959,7 +959,7 @@ test_that("filterMixtureComponents subsets conditions", {
             width = 1L
         )
     )
-    entries <- lapply(seq_along(contexts), function(i) {
+    entries <- map(seq_along(contexts), function(i) {
         gr <- ranges
         S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcolsBuilder(i, nSnp))
         gr
@@ -978,7 +978,7 @@ test_that("filterMixtureComponents subsets conditions", {
 test_that(".mashSumStatsToMatrices: auto picks BETA+SE when present", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             Z = rnorm(n),
@@ -995,7 +995,7 @@ test_that(".mashSumStatsToMatrices: auto picks BETA+SE when present", {
 test_that(".mashSumStatsToMatrices: auto falls back to Z when no BETA/SE", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             Z = rnorm(n)
@@ -1009,7 +1009,7 @@ test_that(".mashSumStatsToMatrices: auto falls back to Z when no BETA/SE", {
 test_that(".mashSumStatsToMatrices: inputScale='beta' errors when BETA missing", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             Z = rnorm(n)
@@ -1024,7 +1024,7 @@ test_that(".mashSumStatsToMatrices: inputScale='beta' errors when BETA missing",
 test_that(".mashSumStatsToMatrices: inputScale='z' forces Z+1 even when BETA present", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             Z = rnorm(n),
@@ -1040,7 +1040,7 @@ test_that(".mashSumStatsToMatrices: inputScale='z' forces Z+1 even when BETA pre
 test_that(".mashSumStatsToMatrices: errors when no usable scale", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             N = rep(1000L, n)
@@ -1055,7 +1055,7 @@ test_that(".mashSumStatsToMatrices: errors when no usable scale", {
 test_that(".mashSumStatsToMatrices: inputScale='z' errors when Z missing", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             BETA = rnorm(n, sd = 0.1),
@@ -1119,7 +1119,7 @@ test_that(".mashObjectMatrices warns and pins the first method on a multi-method
 test_that(".mashObjectPartitions errors when < 2 conditions remain after excludeCondition", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             BETA = rnorm(n, sd = 0.1),
@@ -1143,7 +1143,7 @@ test_that(".mashObjectPartitions errors when < 2 conditions remain after exclude
 test_that(".mashObjectPartitions warns when no variants match the independent-variant list", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
             A1 = "A",
             A2 = "G",
             BETA = rnorm(n, sd = 0.1),
@@ -2052,4 +2052,28 @@ test_that(".qtlSumStatsFromMatrix synthesises coords for unparseable ids", {
     # the object stays well-formed instead of failing to build.
     expect_equal(as.character(GenomicRanges::seqnames(gr)), c("chr1", "chr1"))
     expect_equal(GenomicRanges::start(gr), c(1L, 2L))
+})
+
+test_that("mashWrapper: argument guards fire", {
+    expect_error(
+        filterInvalidSummaryStat("not-a-list"),
+        "datList.*Must be of type 'list'"
+    )
+    expect_error(
+        filterInvalidSummaryStat(list(), sigPCutoff = 2),
+        "sigPCutoff.*is not <= 1"
+    )
+    expect_error(
+        filterInvalidSummaryStat(list(), filterByMissingRate = -1),
+        "filterByMissingRate.*is not >= 0"
+    )
+    expect_error(
+        filterMixtureComponents(conditionsToKeep = 1L, U = list()),
+        "conditionsToKeep.*Must be of type 'character'"
+    )
+    expect_error(
+        filterMixtureComponents("a", U = list(), wCutoff = -1),
+        "wCutoff.*is not >= 0"
+    )
+    expect_error(mergeMashData("nope", list()), "Must be of type 'list'")
 })

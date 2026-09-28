@@ -15,17 +15,17 @@ generate_X_Y <- function(
     )
 
     if (X_rownames) {
-        rownames(X) <- paste0("sample", 1:num_samples)
+        rownames(X) <- paste0("sample", seq_len(num_samples))
     } else {
         rownames(X) <- NULL
     }
 
-    beta = rep(0, num_features)
-    beta[1:4] = 1
+    beta <- rep(0, num_features)
+    beta[1:4] <- 1
     y <- X %*% beta + rnorm(num_samples)
     y <- matrix(y, nrow = num_samples, ncol = 1)
     if (y_rownames) {
-        rownames(y) <- paste0("sample", 1:num_samples)
+        rownames(y) <- paste0("sample", seq_len(num_samples))
     } else {
         rownames(y) <- NULL
     }

@@ -47,10 +47,13 @@ library(pecotmr)
 data(qtlDatasetExample, gwasSumStatsS4Example)
 
 # Pre-compute the QTL-side products from the bundled QtlDataset.
+# cvFolds carries the per-fold susie fits through to the weights pipeline,
+# which never fine-maps for itself.
 fmr <- fineMappingPipeline(
     qtlDatasetExample,
     methods = "susie",
-    cisWindow = 1e6
+    cisWindow = 1e6,
+    cvFolds = 3
 )
 tw <- twasWeightsPipeline(
     qtlDatasetExample,

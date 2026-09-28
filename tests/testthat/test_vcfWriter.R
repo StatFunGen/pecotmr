@@ -259,7 +259,7 @@ test_that("writeSumStatsVcf errors on empty FineMappingResult", {
 .make_multi_tuple_qtl_fmr <- function() {
     contexts <- c("brain", "blood")
     traits <- c("ENSG_A", "ENSG_B")
-    entries <- lapply(seq_along(contexts), function(i) {
+    entries <- map(seq_along(contexts), function(i) {
         ids <- paste0("chr1:", 100 * (1:3), ":T:A")
         tl <- data.frame(
             variant_id = ids,

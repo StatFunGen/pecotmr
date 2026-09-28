@@ -12,24 +12,20 @@ filterBySignificance <- function(zMatrix, sigPCutoff) {
 # data.frame round-trip.
 # @noRd
 .mashReplaceValues <- function(x, replaceWith) {
-    m <- as.matrix(x)
-    storage.mode(m) <- "double"
-    m[is.nan(m) | is.infinite(m) | is.na(m)] <- replaceWith
-    m
+    m <- `storage.mode<-`(as.matrix(x), "double")
+    replace(m, is.nan(m) | is.infinite(m) | is.na(m), replaceWith)
 }
 
 # Coerce z-scores to a matrix (NaN/Inf/NA -> 0) and, when a missing-rate
 # threshold is given, drop rows falling below it.
 # @noRd
 .mashProcessZ <- function(zData, filterByMissingRate) {
-    zData <- .mashReplaceValues(zData, 0)
-
-    if (!is.null(filterByMissingRate)) {
-        proportionNonzero <- apply(zData, 1, .mashRowNonzeroRate)
-        zData <- zData[proportionNonzero >= filterByMissingRate, , drop = FALSE]
+    cleaned <- .mashReplaceValues(zData, 0)
+    if (is.null(filterByMissingRate)) {
+        return(cleaned)
     }
-
-    return(zData)
+    proportionNonzero <- apply(cleaned, 1, .mashRowNonzeroRate)
+    cleaned[proportionNonzero >= filterByMissingRate, , drop = FALSE]
 }
 
 #' Filter invalid summary statistics for mash input
@@ -54,6 +50,7 @@ filterBySignificance <- function(zMatrix, sigPCutoff) {
 #' datList <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
 #' filterInvalidSummaryStat(datList)
 #' @export
+#' @importFrom checkmate assertFlag assertList assertNumber
 filterInvalidSummaryStat <- function(
     datList,
     bhat = NULL,
@@ -63,25 +60,34 @@ filterInvalidSummaryStat <- function(
     sigPCutoff = 1E-6,
     filterByMissingRate = 0.2
 ) {
-    if (
+    assertList(datList)
+    assertFlag(btoz)
+    # NULL is how callers disable each filter.
+    assertNumber(sigPCutoff, lower = 0, upper = 1, null.ok = TRUE)
+    assertNumber(
+        filterByMissingRate,
+        lower = 0,
+        upper = 1,
+        null.ok = TRUE
+    )
+    reset <- if (
         !is.null(bhat) &&
             !is.null(sbhat) &&
             all(is_in(c(bhat, sbhat), names(datList)))
     ) {
-        datList <- .mashFilterBhatSbhat(
-            datList,
-            bhat,
-            sbhat,
-            filterByMissingRate
-        )
+        .mashFilterBhatSbhat(datList, bhat, sbhat, filterByMissingRate)
+    } else {
+        datList
     }
-    if (btoz) {
-        datList <- .mashFilterBtoz(datList, bhat, sbhat, sigPCutoff)
+    withZ <- if (btoz) {
+        .mashFilterBtoz(reset, bhat, sbhat, sigPCutoff)
+    } else {
+        reset
     }
-    if (!is.null(z)) {
-        datList <- .mashFilterZ(datList, filterByMissingRate, sigPCutoff)
+    if (is.null(z)) {
+        return(withZ)
     }
-    datList
+    .mashFilterZ(withZ, filterByMissingRate, sigPCutoff)
 }
 
 # Reset invalid bhat/sbhat cells (bhat -> 0, sbhat -> 1000) and, when a
@@ -92,66 +98,117 @@ filterInvalidSummaryStat <- function(
     if (is.null(datList[[bhat]]) || is.null(datList[[sbhat]])) {
         return(datList)
     }
-    datList[[bhat]] <- .mashReplaceValues(datList[[bhat]], 0)
-    datList[[sbhat]] <- .mashReplaceValues(datList[[sbhat]], 1000)
-    hasNullOrRandom <- is_in("null.b", names(datList)) ||
-        is_in("random.b", names(datList))
+    reset <- list_assign(
+        datList,
+        !!!set_names(
+            list(
+                .mashReplaceValues(datList[[bhat]], 0),
+                .mashReplaceValues(datList[[sbhat]], 1000)
+            ),
+            c(bhat, sbhat)
+        )
+    )
+    hasNullOrRandom <- is_in("null.b", names(reset)) ||
+        is_in("random.b", names(reset))
     if (!hasNullOrRandom || is.null(filterByMissingRate)) {
-        return(datList)
+        return(reset)
     }
-    proportionNonzero <- apply(datList[[bhat]], 1, .mashRowNonzeroRate)
+    proportionNonzero <- apply(reset[[bhat]], 1, .mashRowNonzeroRate)
     keep <- proportionNonzero >= filterByMissingRate
-    datList[[bhat]] <- datList[[bhat]][keep, ]
-    datList[[sbhat]] <- datList[[sbhat]][keep, ]
-    datList
+    list_assign(
+        reset,
+        !!!set_names(
+            list(reset[[bhat]][keep, ], reset[[sbhat]][keep, ]),
+            c(bhat, sbhat)
+        )
+    )
 }
 
 # Derive z = bhat / sbhat (into a `<condition>.z` or `z` slot) and apply the
 # significance cutoff to strong signals.
 # @noRd
 .mashFilterBtoz <- function(datList, bhat, sbhat, sigPCutoff) {
-    if (any(str_detect(bhat, "\\.b$")) || any(str_detect(sbhat, "\\.s$"))) {
-        zName <- str_c(str_remove(bhat, "\\.b$"), ".z")
-        if (!is.null(datList[[bhat]]) && !is.null(datList[[sbhat]])) {
-            datList[[zName]] <- as.matrix(datList[[bhat]] / datList[[sbhat]])
-        } else {
-            datList[zName] <- list(NULL)
-        }
-    } else if (!is.null(datList[[bhat]]) && !is.null(datList[[sbhat]])) {
-        datList[["z"]] <- as.matrix(datList[[bhat]] / datList[[sbhat]])
+    perCondition <- any(str_detect(bhat, "\\.b$")) ||
+        any(str_detect(sbhat, "\\.s$"))
+    zName <- if (perCondition) {
+        str_c(str_remove(bhat, "\\.b$"), ".z")
     } else {
-        datList["z"] <- list(NULL)
+        "z"
     }
-    if (is_in("strong.z", names(datList)) && !is.null(sigPCutoff)) {
-        keepIndex <- filterBySignificance(datList$strong.z, sigPCutoff)
-        datList[["strong.z"]] <- datList$strong.z[keepIndex, ]
-        datList[["strong.b"]] <- datList$strong.b[keepIndex, ]
-        datList[["strong.s"]] <- datList$strong.s[keepIndex, ]
+    # list(NULL) not NULL: the z slot must EXIST and be empty, where assigning
+    # NULL would delete it.
+    zValue <- if (!is.null(datList[[bhat]]) && !is.null(datList[[sbhat]])) {
+        list(as.matrix(datList[[bhat]] / datList[[sbhat]]))
+    } else {
+        list(NULL)
     }
-    datList
+    withZ <- list_assign(datList, !!!set_names(zValue, zName))
+    if (!is_in("strong.z", names(withZ)) || is.null(sigPCutoff)) {
+        return(withZ)
+    }
+    keepIndex <- filterBySignificance(withZ$strong.z, sigPCutoff)
+    list_assign(
+        withZ,
+        strong.z = withZ$strong.z[keepIndex, ],
+        strong.b = withZ$strong.b[keepIndex, ],
+        strong.s = withZ$strong.s[keepIndex, ]
+    )
 }
 
 # Process each partition's z-matrix (missing-rate filter) and apply the
 # significance cutoff to strong z-scores.
 # @noRd
 .mashFilterZ <- function(datList, filterByMissingRate, sigPCutoff) {
-    for (comp in c("strong", "random", "null")) {
-        if (!is.null(datList[[comp]]) && !is.null(datList[[comp]]$z)) {
-            datList[[comp]]$z <- .mashProcessZ(
-                datList[[comp]]$z,
-                filterByMissingRate
+    # Only partitions that are present and carry a z get rewritten:
+    # `list_assign()` would otherwise CREATE an absent component as NULL.
+    components <- keep(
+        intersect(c("strong", "random", "null"), names(datList)),
+        .mashPartitionHasZ,
+        datList = datList
+    )
+    processed <- if (length(components) == 0L) {
+        datList
+    } else {
+        list_assign(
+            datList,
+            !!!set_names(
+                map(
+                    components,
+                    .mashProcessPartition,
+                    datList = datList,
+                    filterByMissingRate = filterByMissingRate
+                ),
+                components
             )
-        }
+        )
     }
     if (
-        !is.null(datList$strong) &&
-            !is.null(datList$strong$z) &&
-            !is.null(sigPCutoff)
+        is.null(processed$strong) ||
+            is.null(processed$strong$z) ||
+            is.null(sigPCutoff)
     ) {
-        keepIndex <- filterBySignificance(datList$strong$z, sigPCutoff)
-        datList$strong$z <- datList$strong$z[keepIndex, , drop = FALSE]
+        return(processed)
     }
-    datList
+    keepIndex <- filterBySignificance(processed$strong$z, sigPCutoff)
+    list_assign(
+        processed,
+        strong = list_assign(
+            processed$strong,
+            z = processed$strong$z[keepIndex, , drop = FALSE]
+        )
+    )
+}
+
+# @noRd
+.mashPartitionHasZ <- function(comp, datList) {
+    !is.null(datList[[comp]]) && !is.null(datList[[comp]]$z)
+}
+
+# One partition with its z-matrix missing-rate filtered.
+# @noRd
+.mashProcessPartition <- function(comp, datList, filterByMissingRate) {
+    part <- datList[[comp]]
+    list_assign(part, z = .mashProcessZ(part$z, filterByMissingRate))
 }
 
 #' Filter conditions from mash prior mixture components
@@ -177,34 +234,38 @@ filterInvalidSummaryStat <- function(
 #' })
 #' filterMixtureComponents(conditionsToKeep = conditionsToKeep, U = U)
 #' @export
+#' @importFrom checkmate assertCharacter assertNumber
 filterMixtureComponents <- function(
     conditionsToKeep,
     U,
     w = NULL,
     wCutoff = 1e-04
 ) {
+    assertCharacter(conditionsToKeep, any.missing = FALSE)
+    assertNumber(wCutoff, lower = 0, finite = TRUE)
     conditionsToFilter <- setdiff(colnames(U[[1]]), conditionsToKeep)
     sumW <- sum(w)
-    U <- .mashSubsetU(U, conditionsToKeep)
+    subsetU <- .mashSubsetU(U, conditionsToKeep)
     # Drop all-zero matrices, then those below the weight cutoff.
-    keepNames <- names(keep(U, .mashMatrixNonzero))
-    if (!is.null(w)) {
-        keepNames <- intersect(keepNames, names(w[w >= wCutoff]))
+    nonzero <- names(keep(subsetU, .mashMatrixNonzero))
+    keepNames <- if (is.null(w)) {
+        nonzero
+    } else {
+        intersect(nonzero, names(w[w >= wCutoff]))
     }
-    U <- U[keepNames]
-    if (!is.null(w)) {
-        w <- w[keepNames]
-    }
-    # Manually remove the U components driven by non-relevant contexts: the EM
-    # can leave tiny non-zero diagonals, so all-zero removal alone won't drop
-    # them, yet real diagonal signal must be kept.
-    U[conditionsToFilter] <- NULL
-    w <- w[!is_in(names(w), conditionsToFilter)]
+    # Also drop the U components driven by non-relevant contexts: the EM can
+    # leave tiny non-zero diagonals, so all-zero removal alone won't drop them,
+    # yet real diagonal signal must be kept.
+    keptU <- subsetU[setdiff(keepNames, conditionsToFilter)]
+    keptW <- w[keepNames]
+    survivors <- keptW[!is_in(names(keptW), conditionsToFilter)]
     # Rescale the surviving weights back to the original total.
-    w <- (w / sum(w)) * sumW
-    msg <- glue("{length(U)} components of matrices remained after filtering.")
+    rescaled <- (survivors / sum(survivors)) * sumW
+    msg <- glue(
+        "{length(keptU)} components of matrices remained after filtering."
+    )
     inform(msg)
-    list(U = U, w = w)
+    list(U = keptU, w = rescaled)
 }
 
 # Subset every U matrix to the kept conditions (erroring if a matrix lacks one).
@@ -315,14 +376,22 @@ mashRandNullSample <- function(
             )
             abort(msg)
         }
-        for (key in intersect(names(dat), c("z", "bhat", "sbhat"))) {
-            keep <- setdiff(colnames(dat[[key]]), excludeCondition)
-            dat[[key]] <- dat[[key]][, keep, drop = FALSE]
-        }
+        keys <- intersect(names(dat), c("z", "bhat", "sbhat"))
+        dat <- list_assign(
+            dat,
+            !!!set_names(
+                map(dat[keys], .mashDropConditions, drop = excludeCondition),
+                keys
+            )
+        )
     }
+    .mashExtractOneData(dat, nRandom, nNull)
+}
 
-    result <- .mashExtractOneData(dat, nRandom, nNull)
-    return(result)
+# One matrix without the excluded condition columns.
+# @noRd
+.mashDropConditions <- function(m, drop) {
+    m[, setdiff(colnames(m), drop), drop = FALSE]
 }
 
 #' Merge two mash data lists
@@ -345,8 +414,11 @@ mashRandNullSample <- function(
 #'     c("chr1:400:A:G", "chr1:500:A:G", "chr1:600:A:G"),
 #'     c("t1", "t2", "t3")))))
 #' mergeMashData(a, b)
+#' @importFrom checkmate assertList
 #' @export
 mergeMashData <- function(resData, oneData) {
+    assertList(resData, null.ok = TRUE)
+    assertList(oneData, null.ok = TRUE)
     if (length(resData) == 0 || is.null(resData)) {
         return(oneData)
     }
@@ -354,14 +426,15 @@ mergeMashData <- function(resData, oneData) {
         return(resData)
     }
 
-    combinedData <- map(
-        names(oneData),
-        .mashCombineDatum,
-        oneData = oneData,
-        resData = resData
+    set_names(
+        map(
+            names(oneData),
+            .mashCombineDatum,
+            oneData = oneData,
+            resData = resData
+        ),
+        names(oneData)
     )
-    names(combinedData) <- names(oneData)
-    return(combinedData)
 }
 
 # Build variants x conditions (Bhat, Shat) matrices for ONE object plus the
@@ -405,9 +478,9 @@ mergeMashData <- function(resData, oneData) {
 # PIP) variant.
 # @noRd
 .mashFmrMatrices <- function(obj, coverage) {
-    me <- getMarginalEffects(obj)
-    cs <- getCs(obj, coverage = coverage)
-    if (!all(is_in(c("variant_id", "context", "beta", "se"), names(me)))) {
+    rawMe <- getMarginalEffects(obj)
+    rawCs <- getCs(obj, coverage = coverage)
+    if (!all(is_in(c("variant_id", "context", "beta", "se"), names(rawMe)))) {
         msg <- glue(
             "mashInput: getMarginalEffects() must return variant_id/context/",
             "beta/se columns; a FineMappingResult with >= 2 contexts is ",
@@ -415,22 +488,24 @@ mergeMashData <- function(resData, oneData) {
         )
         abort(msg)
     }
-    pinned <- .mashFmrMethodPin(me, cs)
+    pinned <- .mashFmrMethodPin(rawMe, rawCs)
     me <- pinned$me
     cs <- pinned$cs
     contexts <- unique(me$context)
     variants <- unique(me$variant_id)
-    b <- matrix(
+    empty <- matrix(
         NA_real_,
         length(variants),
         length(contexts),
         dimnames = list(variants, contexts)
     )
-    s <- b
+    # One (variant, context) cell per long-format row; the rest stay NA.
     cell <- cbind(match(me$variant_id, variants), match(me$context, contexts))
-    b[cell] <- me$beta
-    s[cell] <- me$se
-    list(b = b, s = s, strongRows = .mashFmrStrongRows(cs, variants))
+    list(
+        b = replace(empty, cell, me$beta),
+        s = replace(empty, cell, me$se),
+        strongRows = .mashFmrStrongRows(cs, variants)
+    )
 }
 
 # A multi-method FineMappingResult would duplicate (variant, context) cells;
@@ -453,19 +528,23 @@ mergeMashData <- function(resData, oneData) {
     list(me = me, cs = cs)
 }
 
+# The max-PIP variant among one credible set's rows.
+# @noRd
+.mashLeadVariant <- function(rows, cs) {
+    cs$variant_id[[rows[[which.max(cs$pip[rows])]]]]
+}
+
 # Row indices (into `variants`) of each credible set's lead (max PIP) variant.
 # @noRd
 .mashFmrStrongRows <- function(cs, variants) {
-    strongVar <- character(0)
     csCol <- names(cs)[str_detect(names(cs), "^cs_")]
-    if (nrow(cs) > 0L && length(csCol) > 0L && is_in("pip", names(cs))) {
+    strongVar <- if (
+        nrow(cs) > 0L && length(csCol) > 0L && is_in("pip", names(cs))
+    ) {
         grp <- interaction(cs$context, cs[[csCol[[1L]]]], drop = TRUE)
-        for (rows in split(seq_len(nrow(cs)), grp)) {
-            strongVar <- c(
-                strongVar,
-                cs$variant_id[[rows[[which.max(cs$pip[rows])]]]]
-            )
-        }
+        map_chr(split(seq_len(nrow(cs)), grp), .mashLeadVariant, cs = cs)
+    } else {
+        character(0)
     }
     strongRows <- sort(match(unique(strongVar), variants))
     strongRows[!is.na(strongRows)]
@@ -545,20 +624,21 @@ mergeMashData <- function(resData, oneData) {
 # empty partition.
 # @noRd
 .mashPartitionOut <- function(mats, keepCols, rn) {
-    out <- list()
-    if (length(mats$strongRows) > 0L) {
-        out[["strong.b"]] <- mats$b[mats$strongRows, keepCols, drop = FALSE]
-        out[["strong.s"]] <- mats$s[mats$strongRows, keepCols, drop = FALSE]
-    }
-    if (!is.null(rn$random) && length(rn$random) > 0L) {
-        out[["random.b"]] <- rn$random$bhat
-        out[["random.s"]] <- rn$random$sbhat
-    }
-    if (!is.null(rn$null) && length(rn$null) > 0L) {
-        out[["null.b"]] <- rn$null$bhat
-        out[["null.s"]] <- rn$null$sbhat
-    }
-    out
+    hasStrong <- length(mats$strongRows) > 0L
+    hasRandom <- !is.null(rn$random) && length(rn$random) > 0L
+    hasNull <- !is.null(rn$null) && length(rn$null) > 0L
+    compact(list(
+        strong.b = if (hasStrong) {
+            mats$b[mats$strongRows, keepCols, drop = FALSE]
+        },
+        strong.s = if (hasStrong) {
+            mats$s[mats$strongRows, keepCols, drop = FALSE]
+        },
+        random.b = if (hasRandom) rn$random$bhat,
+        random.s = if (hasRandom) rn$random$sbhat,
+        null.b = if (hasNull) rn$null$bhat,
+        null.s = if (hasNull) rn$null$sbhat
+    ))
 }
 
 #' Assemble MASH strong / random / null input from S4 objects
@@ -667,7 +747,7 @@ mashInput <- function(
         abort(msg)
     }
     if (is.null(names(objects)) || any(str_length(names(objects)) == 0L)) {
-        names(objects) <- str_c("region", seq_along(objects))
+        return(set_names(objects, str_c("region", seq_along(objects))))
     }
     objects
 }
@@ -676,22 +756,33 @@ mashInput <- function(
 # rownames by region before accumulating.
 # @noRd
 .mashCombinePartitions <- function(objects, cfg) {
-    combined <- list()
-    for (nm in names(objects)) {
-        part <- .mashObjectPartitions(
-            objects[[nm]],
-            nRandom = cfg$nRandom,
-            nNull = cfg$nNull,
-            excludeCondition = cfg$excludeCondition,
-            coverage = cfg$coverage,
-            inputScale = cfg$inputScale,
-            seed = cfg$seed,
-            independentVariants = cfg$independentVariants
-        )
-        part <- map(part, .mashPrefixRownames, nm = nm)
-        combined <- mergeMashData(combined, part)
-    }
-    combined
+    reduce(
+        map(
+            names(objects),
+            .mashRegionPartitions,
+            objects = objects,
+            cfg = cfg
+        ),
+        mergeMashData,
+        .init = list()
+    )
+}
+
+# One region's partitions, with its rownames region-prefixed so the merge can
+# tell same-named variants from different regions apart.
+# @noRd
+.mashRegionPartitions <- function(nm, objects, cfg) {
+    part <- .mashObjectPartitions(
+        objects[[nm]],
+        nRandom = cfg$nRandom,
+        nNull = cfg$nNull,
+        excludeCondition = cfg$excludeCondition,
+        coverage = cfg$coverage,
+        inputScale = cfg$inputScale,
+        seed = cfg$seed,
+        independentVariants = cfg$independentVariants
+    )
+    map(part, .mashPrefixRownames, nm = nm)
 }
 
 # Coerce to data.frame, clean each partition + derive z (random/null before
@@ -699,55 +790,78 @@ mashInput <- function(
 # 1-row matrix shape, add the strong XtX, and optionally drop b/s slots.
 # @noRd
 .mashFinalizeCombined <- function(combined, sigPCutoff, zOnly) {
-    combined <- map(combined, .mashAsDataFrameOrNull)
-    for (cond in c("random", "null", "strong")) {
-        bKey <- str_c(cond, ".b")
-        sKey <- str_c(cond, ".s")
-        if (!is.null(combined[[bKey]]) && !is.null(combined[[sKey]])) {
-            combined <- filterInvalidSummaryStat(
-                combined,
-                bhat = bKey,
-                sbhat = sKey,
-                btoz = TRUE,
-                sigPCutoff = sigPCutoff
-            )
-        }
+    # Each condition's z derivation sees the frame the previous one produced,
+    # so the sweep is a fold rather than a variable rewritten three times.
+    withZ <- reduce(
+        c("random", "null", "strong"),
+        .mashDeriveZFor,
+        sigPCutoff = sigPCutoff,
+        .init = map(combined, .mashAsDataFrameOrNull)
+    )
+    shaped <- .mashAddXtX(.mashRestoreStrongShape(withZ))
+    if (!zOnly) {
+        return(shaped)
     }
-    combined <- .mashRestoreStrongShape(combined)
-    combined <- .mashAddXtX(combined)
-    if (zOnly) {
-        combined[str_detect(names(combined), "\\.(b|s)$")] <- NULL
+    shaped[!str_detect(names(shaped), "\\.(b|s)$")]
+}
+
+# Derive z for one condition, when it carries both b and s.
+# @noRd
+.mashDeriveZFor <- function(combined, cond, sigPCutoff) {
+    bKey <- str_c(cond, ".b")
+    sKey <- str_c(cond, ".s")
+    if (is.null(combined[[bKey]]) || is.null(combined[[sKey]])) {
+        return(combined)
     }
-    combined
+    filterInvalidSummaryStat(
+        combined,
+        bhat = bKey,
+        sbhat = sKey,
+        btoz = TRUE,
+        sigPCutoff = sigPCutoff
+    )
 }
 
 # filterInvalidSummaryStat subsets strong without drop = FALSE, so a single
 # surviving strong variant degrades to a vector; restore the 1-row matrix.
 # @noRd
 .mashRestoreStrongShape <- function(combined) {
-    for (k in c("strong.b", "strong.s", "strong.z")) {
-        v <- combined[[k]]
-        if (!is.null(v) && is.null(dim(v))) {
-            combined[[k]] <- matrix(
-                v,
-                nrow = 1L,
-                dimnames = list(NULL, names(v))
-            )
-        }
+    # Only keys that exist AND lost their dim are rewritten; `list_assign()`
+    # would otherwise create an absent key as NULL.
+    needs <- keep(
+        intersect(c("strong.b", "strong.s", "strong.z"), names(combined)),
+        .mashLostDim,
+        combined = combined
+    )
+    if (length(needs) == 0L) {
+        return(combined)
     }
-    combined
+    list_assign(
+        combined,
+        !!!set_names(map(combined[needs], .mashAsOneRow), needs)
+    )
+}
+
+# @noRd
+.mashLostDim <- function(k, combined) {
+    !is.null(combined[[k]]) && is.null(dim(combined[[k]]))
+}
+
+# @noRd
+.mashAsOneRow <- function(v) {
+    matrix(v, nrow = 1L, dimnames = list(NULL, names(v)))
 }
 
 # Strong XtX cross-product (conditions x conditions), when strong.z is present.
 # @noRd
 .mashAddXtX <- function(combined) {
     if (
-        !is.null(combined$strong.z) && nrow(as.matrix(combined$strong.z)) > 0L
+        is.null(combined$strong.z) || nrow(as.matrix(combined$strong.z)) == 0L
     ) {
-        sz <- as.matrix(combined$strong.z)
-        combined$XtX <- crossprod(sz) / nrow(sz)
+        return(combined)
     }
-    combined
+    sz <- as.matrix(combined$strong.z)
+    list_assign(combined, XtX = crossprod(sz) / nrow(sz))
 }
 
 #' @title Build a QtlSumStats from a Z-score matrix
@@ -812,10 +926,7 @@ qtlSumStatsFromZMatrix <- function(
         )
         abort(msg)
     }
-    vids <- rownames(z)
-    if (is.null(vids)) {
-        vids <- str_c("var", seq_len(nrow(z)))
-    }
+    vids <- rownames(z) %||% str_c("var", seq_len(nrow(z)))
     .qtlSumStatsFromMatrix(
         vids = vids,
         nCond = ncol(z),
@@ -888,10 +999,7 @@ qtlSumStatsFromBetaMatrix <- function(
     role = "mash"
 ) {
     .mashValidateBetaMatrix(bhat, shat)
-    vids <- rownames(bhat)
-    if (is.null(vids)) {
-        vids <- str_c("var", seq_len(nrow(bhat)))
-    }
+    vids <- rownames(bhat) %||% str_c("var", seq_len(nrow(bhat)))
     .qtlSumStatsFromMatrix(
         vids = vids,
         nCond = ncol(bhat),
@@ -944,6 +1052,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # where they don't parse), builds one GRanges entry per condition with mcols
 # from `mcolFn(j)`, and wraps the entries as a QtlSumStats.
 # @noRd
+#' @importFrom rlang try_fetch
 .qtlSumStatsFromMatrix <- function(
     vids,
     nCond,
@@ -959,22 +1068,28 @@ qtlSumStatsFromBetaMatrix <- function(
     context <- .qszmRecycle(context, nCond, "context")
     trait <- .qszmRecycle(trait, nCond, "trait")
     # Decode chrom/pos from the variant ids; synthesise where they do not parse.
-    parsed <- tryCatch(
+    parsed <- try_fetch(
         suppressWarnings(parseVariantId(vids)),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
-    chrom <- if (!is.null(parsed)) {
+    rawChrom <- if (!is.null(parsed)) {
         as.character(parsed$chrom)
     } else {
         rep(NA_character_, length(vids))
     }
-    pos <- if (!is.null(parsed)) {
+    rawPos <- if (!is.null(parsed)) {
         suppressWarnings(as.integer(parsed$pos))
     } else {
         rep(NA_integer_, length(vids))
     }
-    chrom[is.na(chrom) | str_length(chrom) == 0L] <- "chr1"
-    pos[is.na(pos)] <- seq_along(pos)[is.na(pos)]
+    # An unparseable id still needs a placeable coordinate: the GRanges is
+    # keyed by the variant id, so the range only has to be unique and ordered.
+    chrom <- replace(
+        rawChrom,
+        is.na(rawChrom) | str_length(rawChrom) == 0L,
+        "chr1"
+    )
+    pos <- replace(rawPos, is.na(rawPos), seq_along(rawPos)[is.na(rawPos)])
     entries <- map(
         seq_len(nCond),
         .qszmEntry,
@@ -1055,16 +1170,15 @@ qtlSumStatsFromBetaMatrix <- function(
     setup <- .mashBlockSetup(x)
     resolvedScale <- .mashResolveScale(x, role, inputScale)
     blocks <- .mashBuildBlockMatrices(x, setup, resolvedScale)
-    bhatBlocks <- blocks$bhat
-    shatBlocks <- blocks$shat
-    bhat <- exec(rbind, !!!bhatBlocks)
-    shat <- exec(rbind, !!!shatBlocks)
+    bhat <- exec(rbind, !!!blocks$bhat)
+    shat <- exec(rbind, !!!blocks$shat)
     # bhat NA -> 0, shat NA / <= 0 -> 1000 (the mash_set_data
     # zero_Bhat_Shat_reset convention; missing-cell variants do not drive the
     # fit).
-    bhat[is.na(bhat)] <- 0
-    shat[is.na(shat) | shat <= 0] <- 1000
-    list(b = bhat, s = shat)
+    list(
+        b = replace(bhat, is.na(bhat), 0),
+        s = replace(shat, is.na(shat) | shat <= 0, 1000)
+    )
 }
 
 # The SumStats input must be a QC'd, non-empty QtlSumStats / GwasSumStats.
@@ -1199,26 +1313,54 @@ qtlSumStatsFromBetaMatrix <- function(
     } else {
         c("SNP", "Z")
     }
-    variantOrder <- character()
-    perContextB <- list()
-    perContextSe <- list()
-    for (rIdx in rowsInBlock) {
-        df <- .mashRowDf(x, rIdx, setup, requireCols)
-        snps <- df$variant_id
-        variantOrder <- c(variantOrder, setdiff(snps, variantOrder))
-        ctx <- setup$contextCol[[rIdx]]
-        if (resolvedScale == "beta") {
-            perContextB[[ctx]] <- set_names(df$beta, snps)
-            perContextSe[[ctx]] <- set_names(df$se, snps)
-        } else {
-            perContextB[[ctx]] <- set_names(df$z, snps)
-            perContextSe[[ctx]] <- set_names(rep(1, length(snps)), snps)
-        }
-    }
+    rows <- map(
+        rowsInBlock,
+        .mashContextRow,
+        x = x,
+        setup = setup,
+        requireCols = requireCols,
+        resolvedScale = resolvedScale
+    )
+    contexts <- map_chr(rows, "context")
+    # A later row overwrites an earlier one sharing a context, as the keyed
+    # assignment did; the variant order is first-seen across all rows.
+    lastPerContext <- !duplicated(contexts, fromLast = TRUE)
     list(
-        variantOrder = variantOrder,
-        perContextB = perContextB,
-        perContextSe = perContextSe
+        variantOrder = unique(.mashConcatChr(map(rows, "snps"))),
+        perContextB = set_names(
+            map(rows[lastPerContext], "b"),
+            contexts[lastPerContext]
+        ),
+        perContextSe = set_names(
+            map(rows[lastPerContext], "se"),
+            contexts[lastPerContext]
+        )
+    )
+}
+
+# @noRd
+.mashConcatChr <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(character(0))
+    }
+    as.character(list_c(pieces))
+}
+
+# One row's effect / standard-error vectors for its context. On the z scale
+# the standard errors are unit by construction.
+# @noRd
+.mashContextRow <- function(rIdx, x, setup, requireCols, resolvedScale) {
+    df <- .mashRowDf(x, rIdx, setup, requireCols)
+    snps <- df$variant_id
+    onBeta <- resolvedScale == "beta"
+    list(
+        context = setup$contextCol[[rIdx]],
+        snps = snps,
+        b = set_names(if (onBeta) df$beta else df$z, snps),
+        se = set_names(
+            if (onBeta) df$se else rep(1, length(snps)),
+            snps
+        )
     )
 }
 
@@ -1245,19 +1387,44 @@ qtlSumStatsFromBetaMatrix <- function(
 .mashBlockMatrix <- function(bkey, x, setup, resolvedScale) {
     rowsInBlock <- which(setup$blockKeys == bkey)
     pc <- .mashBlockPerContext(x, rowsInBlock, setup, resolvedScale)
-    dims <- list(pc$variantOrder, setup$columnLabels)
-    nVar <- length(pc$variantOrder)
-    nCol <- length(setup$columnLabels)
-    bMat <- matrix(NA_real_, nrow = nVar, ncol = nCol, dimnames = dims)
-    sMat <- matrix(NA_real_, nrow = nVar, ncol = nCol, dimnames = dims)
-    for (ctx in names(pc$perContextB)) {
-        bMat[names(pc$perContextB[[ctx]]), ctx] <- pc$perContextB[[ctx]]
-        sMat[names(pc$perContextSe[[ctx]]), ctx] <- pc$perContextSe[[ctx]]
+    # Every context owns one column, so each is built whole and the columns
+    # are laid side by side -- no scatter into a preallocated matrix, and the
+    # block-qualified rownames go on at construction.
+    dims <- list(
+        str_c(bkey, pc$variantOrder, sep = "::"),
+        setup$columnLabels
+    )
+    list(
+        b = .mashContextMatrix(pc$perContextB, pc$variantOrder, dims),
+        s = .mashContextMatrix(pc$perContextSe, pc$variantOrder, dims)
+    )
+}
+
+# One context's column, aligned to `variantOrder`. Indexing a named vector by
+# a variant it lacks yields NA, which is the unfilled cell.
+# @noRd
+.mashContextColumn <- function(ctx, perContext, variantOrder) {
+    v <- perContext[[ctx]]
+    if (is.null(v)) {
+        return(rep(NA_real_, length(variantOrder)))
     }
-    rn <- str_c(bkey, pc$variantOrder, sep = "::")
-    rownames(bMat) <- rn
-    rownames(sMat) <- rn
-    list(b = bMat, s = sMat)
+    unname(v[variantOrder])
+}
+
+# @noRd
+.mashContextMatrix <- function(perContext, variantOrder, dims) {
+    cols <- map(
+        dims[[2L]],
+        .mashContextColumn,
+        perContext = perContext,
+        variantOrder = variantOrder
+    )
+    matrix(
+        unname(list_c(cols)),
+        nrow = length(variantOrder),
+        ncol = length(dims[[2L]]),
+        dimnames = dims
+    )
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
@@ -1325,19 +1492,19 @@ qtlSumStatsFromBetaMatrix <- function(
             "means two objects share a name or the prefix invariant broke."
         ))
     }
-    combined <- bind_rows(as.data.frame(rd), as.data.frame(od))
-    combined[is.na(combined)] <- NaN
-    rownames(combined) <- c(rnRes, rnOne)
-    combined
+    joined <- bind_rows(as.data.frame(rd), as.data.frame(od))
+    # NaN, not NA: mash reads a missing cell as NaN.
+    combined <- replace(joined, is.na(joined), NaN)
+    `rownames<-`(combined, c(rnRes, rnOne))
 }
 
 # Region-prefix one partition matrix's rownames (no-op for empty/NULL).
 # @noRd
 .mashPrefixRownames <- function(m, nm) {
-    if (!is.null(m) && nrow(m) > 0L) {
-        rownames(m) <- str_c(rownames(m), nm, sep = "_")
+    if (is.null(m) || nrow(m) == 0L) {
+        return(m)
     }
-    m
+    `rownames<-`(m, str_c(rownames(m), nm, sep = "_"))
 }
 
 # Coerce one partition to a data.frame (NULL passes through). Kept as a base
@@ -1359,8 +1526,7 @@ qtlSumStatsFromBetaMatrix <- function(
         ranges = IRanges::IRanges(start = pos, width = 1L)
     )
     mcolCallArgs <- c(list(j, vids), mcolArgs)
-    S4Vectors::mcols(gr) <- exec(mcolFn, !!!mcolCallArgs)
-    gr
+    S4Vectors::`mcols<-`(gr, value = exec(mcolFn, !!!mcolCallArgs))
 }
 
 # mcols for condition `j` of a z-scale matrix (Z + placeholder N/alleles).

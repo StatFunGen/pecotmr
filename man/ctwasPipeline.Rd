@@ -27,7 +27,7 @@ ctwasPipeline(
   mergePipThresh = 0.5,
   mergeFilterCs = FALSE,
   mergeMaxSNP = Inf,
-  ...
+  ctwasArgs = list()
 )
 }
 \arguments{
@@ -128,7 +128,8 @@ credible set to be selected. Default \code{FALSE}. Ignored unless
 \item{mergeMaxSNP}{Numeric (length 1). Per-merged-region SNP cap. Default
 \code{Inf}. Ignored unless \code{mergeBoundary = TRUE}.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::ctwas_sumstats}.}
+\item{ctwasArgs}{Optional named list of additional arguments
+forwarded to \code{ctwas::ctwas_sumstats}.}
 }
 \value{
 A \code{\link{CtwasResult}} collection: one row per \code{(gwasStudy,
@@ -190,6 +191,6 @@ gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 ctwasPipeline(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample), thin = 1, niterPrefit = 3,
-  niter = 10, min_group_size = 1, min_p_single_effect = 0,
-  fallbackToPrefit = TRUE)
+  niter = 10, fallbackToPrefit = TRUE,
+  ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
 }

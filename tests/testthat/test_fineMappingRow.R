@@ -288,7 +288,7 @@ test_that("FineMappingRow cvResult defaults to NULL and rejects non-list", {
             topLoci = tl,
             cvResult = 1:3
         ),
-        "cvResult must be NULL or a list"
+        "cvResult.*Must be of type 'list' \\(or 'NULL'\\)"
     )
 })
 
@@ -978,7 +978,7 @@ test_that("getCredibleSetSummary aggregates across a collection with entry ident
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            paste0("chr1:", (seq_len(p)) * 100, ":A:G")
+            paste0("chr1:", seq_len(p) * 100, ":A:G")
         )
     )
     b1 <- sin(seq(0, 2 * pi, length.out = J))
@@ -1661,4 +1661,34 @@ test_that("show(FineMappingRow) reports zero sets for an empty row", {
         )
     )
     expect_output(show(withCs), "2 variants, 1 credible sets")
+})
+
+test_that(".csLog10Bf and .csMeanEffect return NA, never -Inf or NaN", {
+    # Both previously disagreed with their own missing-column branch: an empty
+    # or all-NA column yielded -Inf / NaN from max() / mean() while a missing
+    # column yielded NA_real_. These values reach output tables.
+    expect_identical(pecotmr:::.csLog10Bf(list()), NA_real_)
+    expect_identical(
+        pecotmr:::.csLog10Bf(list(logBF = numeric(0))),
+        NA_real_
+    )
+    expect_identical(
+        pecotmr:::.csLog10Bf(list(logBF = c(NA_real_, NA_real_))),
+        NA_real_
+    )
+    expect_identical(pecotmr:::.csLog10Bf(list(logBF = c(1, 3, 2))), 3)
+
+    expect_identical(pecotmr:::.csMeanEffect(list()), NA_real_)
+    expect_identical(
+        pecotmr:::.csMeanEffect(list(conditional_effect = numeric(0))),
+        NA_real_
+    )
+    expect_identical(
+        pecotmr:::.csMeanEffect(list(conditional_effect = c(NA, NA))),
+        NA_real_
+    )
+    expect_identical(
+        pecotmr:::.csMeanEffect(list(conditional_effect = c(1, 3))),
+        2
+    )
 })

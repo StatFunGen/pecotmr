@@ -4,13 +4,7 @@
 \alias{susieRssWeights}
 \title{Compute SuSiE-RSS TWAS weights}
 \usage{
-susieRssWeights(
-  stat,
-  LD,
-  susieRssFit = NULL,
-  retainFit = TRUE,
-  methodArgs = list()
-)
+susieRssWeights(stat, LD, susieRssFit = NULL, retainFit = TRUE)
 }
 \arguments{
 \item{stat}{List with components \code{z} (z-scores), \code{n} (sample
@@ -18,14 +12,10 @@ sizes).}
 
 \item{LD}{LD correlation matrix.}
 
-\item{susieRssFit}{Optional pre-fitted SuSiE-RSS object.}
+\item{susieRssFit}{A fitted SuSiE-RSS object. Required: these wrappers
+extract weights and never run fine-mapping themselves.}
 
 \item{retainFit}{If TRUE, stores the fitted object as an attribute.}
-
-\item{methodArgs}{Named list of additional arguments passed to
-\code{susieR::susie_rss()}. Use this instead of \code{...} to avoid partial
-matching of short argument names (e.g. \code{L}) to the \code{LD}
-parameter.}
 }
 \value{
 Numeric vector of variant weights.
@@ -47,5 +37,6 @@ stat <- list(
   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
   n = rep(nrow(X), ncol(X)))
 LD <- cor(X)
-susieRssWeights(stat, LD)
+fit <- susieR::susie_rss(z = stat$z, R = LD, n = nrow(X), L = 5)
+susieRssWeights(stat, LD, susieRssFit = fit)
 }

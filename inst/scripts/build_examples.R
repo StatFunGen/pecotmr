@@ -17,6 +17,7 @@
 # =============================================================================
 
 devtools::load_all(".")
+library(purrr)
 
 set.seed(20260620L)
 
@@ -249,7 +250,7 @@ multiCtxBetas <- list(
     }
 )
 
-multiCtxEntries <- lapply(multiCtxNames, function(ctx) {
+multiCtxEntries <- map(multiCtxNames, function(ctx) {
     bj <- multiCtxBetas[[ctx]]
     yCtx <- as.numeric(X %*% bj + stats::rnorm(nSample, sd = 1))
     zc <- numeric(nVar)

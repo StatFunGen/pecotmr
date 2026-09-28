@@ -102,7 +102,6 @@
 #'   to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
 #'   effect / weight sign-flipped accordingly; when FALSE, match on exact
 #'   alleles only, so a ref/alt swap is treated as a distinct variant.
-#' @param ... Reserved.
 #' @return A \code{GRanges} as described above.
 #' @examples
 #' data(qtlDatasetExample)
@@ -125,48 +124,87 @@ causalInferencePipeline <- function(
     mrCpipCutoff = 0.5,
     mrPvalCutoff = 1,
     combineMethods = NULL,
-    alleleFlip = TRUE,
-    ...
+    alleleFlip = TRUE
 ) {
     mrMethod <- arg_match(mrMethod)
-    p <- as.list(environment())
-    p$dots <- list(...)
-    .cipRun(p)
+    .cipRun(
+        gwasSumStats = gwasSumStats,
+        twasWeights = twasWeights,
+        fineMappingResult = fineMappingResult,
+        combineMethods = combineMethods,
+        rsqCutoff = rsqCutoff,
+        rsqOption = rsqOption,
+        rsqPvalCutoff = rsqPvalCutoff,
+        rsqPvalOption = rsqPvalOption,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
+    )
 }
 
-# Orchestrate the causal-inference pipeline over a parameter bundle `p` (from
-# as.list(environment())): validate, resolve the QTL work list, apply optional
-# CV selection, score every (qtl, gwas) pair, and finalize.
+# Orchestrate the causal-inference pipeline: validate, resolve the QTL work
+# list, apply optional CV selection, score every (qtl, gwas) pair, finalize.
 # @noRd
-.cipRun <- function(p) {
-    .cipValidateInputs(p$gwasSumStats, p$twasWeights, p$fineMappingResult)
-    p$gwasLd <- .cipCheckLdSketches(
-        p$gwasSumStats,
-        p$twasWeights,
-        p$fineMappingResult
+.cipRun <- function(
+    gwasSumStats,
+    twasWeights,
+    fineMappingResult,
+    combineMethods,
+    rsqCutoff,
+    rsqOption,
+    rsqPvalCutoff,
+    rsqPvalOption,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    .cipValidateInputs(gwasSumStats, twasWeights, fineMappingResult)
+    gwasLd <- .cipCheckLdSketches(
+        gwasSumStats,
+        twasWeights,
+        fineMappingResult
     )
-    p$qtlRows <- .cipResolveWorkList(p$twasWeights, p$fineMappingResult)
-    sel <- .cipCvSelection(p)
-    p$qtlRows <- sel$qtlRows
+    allRows <- .cipResolveWorkList(twasWeights, fineMappingResult)
+    sel <- .cipCvSelection(
+        qtlRows = allRows,
+        twasWeights = twasWeights,
+        rsqCutoff = rsqCutoff,
+        rsqOption = rsqOption,
+        rsqPvalCutoff = rsqPvalCutoff,
+        rsqPvalOption = rsqPvalOption
+    )
+    qtlRows <- sel$qtlRows
     outRows <- list_flatten(map(
-        seq_len(nrow(p$qtlRows)),
+        seq_len(nrow(qtlRows)),
         .cipScoreQtlTuple,
-        p = p
+        qtlRows = qtlRows,
+        twasWeights = twasWeights,
+        fineMappingResult = fineMappingResult,
+        gwasSumStats = gwasSumStats,
+        gwasLd = gwasLd,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
     ))
     if (length(outRows) == 0L) {
         abort(
             "causalInferencePipeline: no (qtl, gwas) tuples produced a result."
         )
     }
-    .cipFinalize(outRows, sel, p$combineMethods)
+    .cipFinalize(outRows, sel, combineMethods)
 }
 
 # Validate the object classes + QC state of the pipeline inputs.
 # @noRd
+#' @importFrom checkmate assertClass checkClass
 .cipValidateInputs <- function(gwasSumStats, twasWeights, fineMappingResult) {
-    if (!methods::is(gwasSumStats, "GwasSumStats")) {
-        abort("`gwasSumStats` must be a GwasSumStats object.")
-    }
+    assertClass(gwasSumStats, "GwasSumStats")
     if (length(getQcInfo(gwasSumStats)) == 0L) {
         msg <- glue(
             "causalInferencePipeline: gwasSumStats has no QC record ",
@@ -181,17 +219,18 @@ causalInferencePipeline <- function(
         )
         abort(msg)
     }
-    if (!is.null(twasWeights) && !methods::is(twasWeights, "TwasWeights")) {
-        abort("`twasWeights` must be a TwasWeights object or NULL.")
-    }
-    if (
-        !is.null(fineMappingResult) &&
-            !methods::is(fineMappingResult, "QtlFineMappingResult")
-    ) {
+    assertClass(twasWeights, "TwasWeights", null.ok = TRUE)
+    # Composed rather than asserted: rejecting the GWAS-side class here is
+    # deliberate, and checkClass alone cannot say so.
+    res <- checkClass(
+        fineMappingResult,
+        "QtlFineMappingResult",
+        null.ok = TRUE
+    )
+    if (!isTRUE(res)) {
         msg <- glue(
-            "`fineMappingResult` must be a QtlFineMappingResult or NULL ",
-            "(causalInferencePipeline does not accept GWAS-side fine ",
-            "mapping for the QTL slot)."
+            "`fineMappingResult` {res} (causalInferencePipeline does not ",
+            "accept GWAS-side fine mapping for the QTL slot)."
         )
         abort(msg)
     }
@@ -232,29 +271,35 @@ causalInferencePipeline <- function(
         )
         abort(msg)
     }
-    qtlRows$useFmrForWeights <- is.null(twasWeights)
-    qtlRows
+    mutate(qtlRows, useFmrForWeights = is.null(twasWeights))
 }
 
 # Optional CV weight selection (legacy pick_best_model + update_twas_method):
 # filter to eligible methods now, deferring the final best-method pick to after
 # the TWAS Z. Returns list(qtlRows, rsqLookup, selectionActive).
 # @noRd
-.cipCvSelection <- function(p) {
-    selectionActive <- !is.null(p$twasWeights) &&
-        (p$rsqCutoff > 0 || is.finite(p$rsqPvalCutoff))
+.cipCvSelection <- function(
+    qtlRows,
+    twasWeights,
+    rsqCutoff,
+    rsqOption,
+    rsqPvalCutoff,
+    rsqPvalOption
+) {
+    selectionActive <- !is.null(twasWeights) &&
+        (rsqCutoff > 0 || is.finite(rsqPvalCutoff))
     if (!selectionActive) {
         return(list(
-            qtlRows = p$qtlRows,
+            qtlRows = qtlRows,
             rsqLookup = NULL,
             selectionActive = FALSE
         ))
     }
     metricTab <- .cipMethodMetrics(
-        p$qtlRows,
-        p$twasWeights,
-        p$rsqOption,
-        p$rsqPvalOption
+        qtlRows,
+        twasWeights,
+        rsqOption,
+        rsqPvalOption
     )
     rsqLookup <- set_names(
         metricTab$rsq,
@@ -267,15 +312,15 @@ causalInferencePipeline <- function(
         )
     )
     qtlRows <- .cipFilterEligibleMethods(
-        p$qtlRows,
+        qtlRows,
         metricTab,
-        p$rsqCutoff,
-        p$rsqPvalCutoff
+        rsqCutoff,
+        rsqPvalCutoff
     )
     if (nrow(qtlRows) == 0L) {
         msg <- glue(
             "causalInferencePipeline: every QTL tuple was filtered out by ",
-            "rsqCutoff = {p$rsqCutoff} / rsqPvalCutoff = {p$rsqPvalCutoff} ",
+            "rsqCutoff = {rsqCutoff} / rsqPvalCutoff = {rsqPvalCutoff} ",
             "(no method cleared the CV cutoffs)."
         )
         abort(msg)
@@ -286,25 +331,37 @@ causalInferencePipeline <- function(
 # Score one QTL tuple against every GWAS study -> a list of result records
 # (empty when the tuple has no usable weights).
 # @noRd
-.cipScoreQtlTuple <- function(qi, p) {
-    qStudy <- p$qtlRows$qtlStudy[[qi]]
-    qContext <- p$qtlRows$context[[qi]]
-    qTrait <- p$qtlRows$trait[[qi]]
-    qMethod <- p$qtlRows$method[[qi]]
+.cipScoreQtlTuple <- function(
+    qi,
+    qtlRows,
+    twasWeights,
+    fineMappingResult,
+    gwasSumStats,
+    gwasLd,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    qStudy <- qtlRows$qtlStudy[[qi]]
+    qContext <- qtlRows$context[[qi]]
+    qTrait <- qtlRows$trait[[qi]]
+    qMethod <- qtlRows$method[[qi]]
     weightsInfo <- .cipExtractWeights(
-        twasWeights = p$twasWeights,
-        fineMappingResult = p$fineMappingResult,
+        twasWeights = twasWeights,
+        fineMappingResult = fineMappingResult,
         study = qStudy,
         context = qContext,
         trait = qTrait,
         method = qMethod,
-        useFmr = p$qtlRows$useFmrForWeights[[qi]]
+        useFmr = qtlRows$useFmrForWeights[[qi]]
     )
     if (is.null(weightsInfo)) {
         return(list())
     }
     fmrEntry <- .cipResolveFmrEntry(
-        p$fineMappingResult,
+        fineMappingResult,
         qStudy,
         qContext,
         qTrait,
@@ -317,12 +374,18 @@ causalInferencePipeline <- function(
         qMethod = qMethod
     )
     compact(map(
-        seq_len(nrow(p$gwasSumStats)),
+        seq_len(nrow(gwasSumStats)),
         .cipScoreGwasPair,
         tuple = tuple,
         weightsInfo = weightsInfo,
         fmrEntry = fmrEntry,
-        p = p
+        gwasSumStats = gwasSumStats,
+        gwasLd = gwasLd,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
     ))
 }
 
@@ -352,10 +415,22 @@ causalInferencePipeline <- function(
 # Score one (qtl tuple, gwas study) pair -> a result record, or NULL when the
 # TWAS Z cannot be computed (too little overlap).
 # @noRd
-.cipScoreGwasPair <- function(gi, tuple, weightsInfo, fmrEntry, p) {
-    gStudy <- as.character(p$gwasSumStats$study)[[gi]]
+.cipScoreGwasPair <- function(
+    gi,
+    tuple,
+    weightsInfo,
+    fmrEntry,
+    gwasSumStats,
+    gwasLd,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    gStudy <- as.character(gwasSumStats$study)[[gi]]
     gdf <- getSumStatsDf(
-        p$gwasSumStats,
+        gwasSumStats,
         study = gStudy,
         require = c("SNP", "Z")
     )
@@ -363,14 +438,23 @@ causalInferencePipeline <- function(
         weights = weightsInfo$weights,
         variantIds = weightsInfo$variantIds,
         gwasDf = gdf,
-        gwasLd = p$gwasLd,
-        alleleFlip = p$alleleFlip,
+        gwasLd = gwasLd,
+        alleleFlip = alleleFlip,
         label = .cipPairLabel(tuple, gStudy)
     )
     if (is.null(twasOut)) {
         return(NULL)
     }
-    mrOut <- .cipRunMr(fmrEntry, gdf, twasOut, p)
+    mrOut <- .cipRunMr(
+        fmrEntry,
+        gdf,
+        twasOut,
+        alleleFlip = alleleFlip,
+        mrMethod = mrMethod,
+        mrPipCutoff = mrPipCutoff,
+        mrCpipCutoff = mrCpipCutoff,
+        mrPvalCutoff = mrPvalCutoff
+    )
     .cipResultRow(tuple, gStudy, twasOut, mrOut)
 }
 
@@ -387,25 +471,34 @@ causalInferencePipeline <- function(
 # Run MR for a pair, gated on the TWAS p-value (mrPvalCutoff >= 1 disables the
 # gate) and the presence of a fine-mapping entry.
 # @noRd
-.cipRunMr <- function(fmrEntry, gdf, twasOut, p) {
-    mrGateOpen <- p$mrPvalCutoff >= 1 ||
-        (!is.na(twasOut$pval) && twasOut$pval < p$mrPvalCutoff)
+.cipRunMr <- function(
+    fmrEntry,
+    gdf,
+    twasOut,
+    alleleFlip,
+    mrMethod,
+    mrPipCutoff,
+    mrCpipCutoff,
+    mrPvalCutoff
+) {
+    mrGateOpen <- mrPvalCutoff >= 1 ||
+        (!is.na(twasOut$pval) && twasOut$pval < mrPvalCutoff)
     if (is.null(fmrEntry) || !mrGateOpen) {
         return(.cipEmptyMr())
     }
-    if (p$mrMethod == "csAware") {
+    if (mrMethod == "csAware") {
         .cipComputeMrCsAware(
             fmrEntry = fmrEntry,
             gwasDf = gdf,
-            cpipCutoff = p$mrCpipCutoff,
-            alleleFlip = p$alleleFlip
+            cpipCutoff = mrCpipCutoff,
+            alleleFlip = alleleFlip
         )
     } else {
         .cipComputeMr(
             fmrEntry = fmrEntry,
             gwasDf = gdf,
-            pipCutoff = p$mrPipCutoff,
-            alleleFlip = p$alleleFlip
+            pipCutoff = mrPipCutoff,
+            alleleFlip = alleleFlip
         )
     }
 }
@@ -452,17 +545,21 @@ causalInferencePipeline <- function(
 # GRanges, and (optionally) combine across methods.
 # @noRd
 .cipFinalize <- function(outRows, sel, combineMethods) {
-    resultDf <- .cipRowsToDf(outRows)
+    allRows <- .cipRowsToDf(outRows)
     # Final best-method pick + NA/Inf re-selection (legacy update_twas_method):
     # per (qtlStudy, context, trait, gwasStudy) keep the highest-rsqOption
     # eligible method whose TWAS Z is finite, falling back to the top-rsq method
     # when none is finite. SS-TWAS groups (no usable rsq) keep all methods.
-    if (sel$selectionActive) {
-        resultDf <- .cipSelectBestMethod(resultDf, sel$rsqLookup)
+    resultDf <- if (sel$selectionActive) {
+        .cipSelectBestMethod(allRows, sel$rsqLookup)
+    } else {
+        allRows
     }
-    out <- .cipDfToGranges(resultDf)
-    if (!is.null(combineMethods)) {
-        out <- .cipCombineAcrossMethods(out, methods = combineMethods)
+    perMethod <- .cipDfToGranges(resultDf)
+    out <- if (is.null(combineMethods)) {
+        perMethod
+    } else {
+        .cipCombineAcrossMethods(perMethod, methods = combineMethods)
     }
     out
 }
@@ -511,8 +608,9 @@ causalInferencePipeline <- function(
 # metrics vector / data frame is tolerated too. `which` is a vector of candidate
 # metric names; the first present is used. Returns NA when no usable metric.
 # @noRd
+#' @importFrom rlang try_fetch
 .cipCvMetric <- function(twasWeights, study, context, trait, method, which) {
-    perf <- tryCatch(
+    perf <- try_fetch(
         getCvResult(
             twasWeights,
             study = study,
@@ -520,7 +618,7 @@ causalInferencePipeline <- function(
             trait = trait,
             method = method
         ),
-        error = function(e) NULL
+        error = function(cnd) NULL
     )
     if (is.null(perf)) {
         return(NA_real_)
@@ -585,24 +683,49 @@ causalInferencePipeline <- function(
         metricTab$trait,
         sep = "\r"
     )
-    keep <- logical(nrow(qtlRows))
-    pvalGate <- is.finite(rsqPvalCutoff)
-    for (g in unique(grp)) {
-        idx <- which(grp == g)
-        rsq <- metricTab$rsq[idx]
-        if (all(is.na(rsq))) {
-            keep[idx] <- TRUE
-            next
-        } # SS-TWAS: keep all
-        elig <- !is.na(rsq) & rsq >= rsqCutoff
-        if (pvalGate) {
-            elig <- elig &
-                !is.na(metricTab$pval[idx]) &
-                metricTab$pval[idx] < rsqPvalCutoff
-        }
-        keep[idx[elig]] <- TRUE
+    kept <- .cipConcatInt(map(
+        unique(grp),
+        .cipEligibleRowsIn,
+        grp = grp,
+        metricTab = metricTab,
+        rsqCutoff = rsqCutoff,
+        rsqPvalCutoff = rsqPvalCutoff
+    ))
+    filter(qtlRows, .cipRowMask(kept, nrow(qtlRows)))
+}
+
+# @noRd
+.cipConcatInt <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(integer(0))
     }
-    filter(qtlRows, keep)
+    list_c(pieces)
+}
+
+# A logical mask of length `n` that is TRUE at `at`.
+# @noRd
+.cipRowMask <- function(at, n) {
+    replace(logical(n), at, TRUE)
+}
+
+# The rows of group `g` that clear the R^2 (and optional p-value) gate. A
+# group with no usable R^2 at all is SS-TWAS, which keeps every row.
+# @noRd
+.cipEligibleRowsIn <- function(g, grp, metricTab, rsqCutoff, rsqPvalCutoff) {
+    idx <- which(grp == g)
+    rsq <- metricTab$rsq[idx]
+    if (all(is.na(rsq))) {
+        return(idx)
+    }
+    byRsq <- !is.na(rsq) & rsq >= rsqCutoff
+    elig <- if (!is.finite(rsqPvalCutoff)) {
+        byRsq
+    } else {
+        byRsq &
+            !is.na(metricTab$pval[idx]) &
+            metricTab$pval[idx] < rsqPvalCutoff
+    }
+    idx[elig]
 }
 
 # Final best-method pick + NA/Inf re-selection (legacy update_twas_method): per
@@ -618,21 +741,30 @@ causalInferencePipeline <- function(
     key <- str_c(df$qtlStudy, df$context, df$trait, df$method, sep = "\r")
     rsq <- unname(rsqLookup[key])
     grp <- str_c(df$qtlStudy, df$context, df$trait, df$gwasStudy, sep = "\r")
-    keepRow <- logical(nrow(df))
-    for (g in unique(grp)) {
-        idx <- which(grp == g)
-        r <- rsq[idx]
-        if (all(is.na(r))) {
-            keepRow[idx] <- TRUE
-            next
-        } # SS-TWAS: keep all
-        ord <- idx[order(r, decreasing = TRUE)] # NA sorts last
-        z <- suppressWarnings(as.numeric(df$twasZ[ord]))
-        fin <- which(is.finite(z))
-        sel <- if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
-        keepRow[sel] <- TRUE
+    kept <- .cipConcatInt(map(
+        unique(grp),
+        .cipBestRowsIn,
+        grp = grp,
+        df = df,
+        rsq = rsq
+    ))
+    filter(df, .cipRowMask(kept, nrow(df)))
+}
+
+# The row group `g` contributes: the highest-R^2 method whose twasZ is finite,
+# else the highest-R^2 one. A group with no usable R^2 is SS-TWAS and keeps
+# every row.
+# @noRd
+.cipBestRowsIn <- function(g, grp, df, rsq) {
+    idx <- which(grp == g)
+    r <- rsq[idx]
+    if (all(is.na(r))) {
+        return(idx)
     }
-    filter(df, keepRow)
+    ord <- idx[order(r, decreasing = TRUE)] # NA sorts last
+    z <- suppressWarnings(as.numeric(df$twasZ[ord]))
+    fin <- which(is.finite(z))
+    if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
 }
 
 .cipFmrHasTuple <- function(fmr, study, context, trait, method) {
@@ -1080,8 +1212,8 @@ causalInferencePipeline <- function(
 # returns the pooled effect, its SE (1/sqrt(sum w)), two-tailed p-value,
 # Cochran's Q, and the number pooled (n = 0 when nothing is poolable).
 .ivwPool <- function(effect, se) {
-    w <- 1 / se^2
-    ok <- is.finite(w) & w > 0
+    invVar <- 1 / se^2
+    ok <- is.finite(invVar) & invVar > 0
     if (!any(ok)) {
         return(list(
             effect = NA_real_,
@@ -1092,7 +1224,7 @@ causalInferencePipeline <- function(
         ))
     }
     effect <- effect[ok]
-    w <- w[ok]
+    w <- invVar[ok]
     metaEff <- sum(w * effect) / sum(w)
     metaSe <- 1 / sqrt(sum(w))
     list(
@@ -1109,10 +1241,15 @@ causalInferencePipeline <- function(
 # falls back to any column whose name starts with "cs" (e.g. cs_0.95).
 .cipTlCols <- function(tl) {
     cn <- colnames(tl)
-    cs <- intersect("cs", cn)
-    if (length(cs) == 0L) {
-        csCand <- cn[str_detect(cn, "^cs")]
-        if (length(csCand) > 0L) cs <- csCand[[1L]]
+    exact <- intersect("cs", cn)
+    # No bare `cs` column: fall back to the first cs_<coverage> variant.
+    csCand <- cn[str_detect(cn, "^cs")]
+    cs <- if (length(exact) > 0L) {
+        exact
+    } else if (length(csCand) > 0L) {
+        csCand[[1L]]
+    } else {
+        exact
     }
     list(
         pip = intersect(c("pip", "PIP"), cn),
@@ -1156,8 +1293,7 @@ causalInferencePipeline <- function(
             "nCs"
         ))
     )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcols)
-    gr
+    S4Vectors::`mcols<-`(gr, value = S4Vectors::DataFrame(mcols))
 }
 
 # Combine TWAS p-values across method for each (qtlStudy, context,
@@ -1165,37 +1301,64 @@ causalInferencePipeline <- function(
 # combined p-value and methodName = "combined.<methodToken>". Uses
 # combinePValues() with the cross-method correlation set to the identity
 # (we have no cross-method covariance available downstream).
+# @noRd
+.cipConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
+    }
+    list_c(pieces)
+}
+
+# One combined row: the group's first row re-stamped with the combined
+# p-value for method `m`. The per-method statistics do not carry over, so
+# they are blanked rather than inherited.
+# @noRd
+.cipCombinedRow <- function(m, mc, rows, cp) {
+    mutate(
+        slice(mc, rows[[1L]]),
+        method = str_c("combined.", m),
+        twasZ = NA_real_,
+        twasPval = as.numeric(cp$results[[m]]$pval),
+        waldRatio = NA_real_,
+        waldRatioSe = NA_real_,
+        mrPval = NA_real_,
+        nIV = NA_integer_
+    )
+}
+
+# One group's combined rows, or none when it holds a single method (nothing
+# to combine across).
+# @noRd
+.cipCombinedRowsFor <- function(rows, mc, methods) {
+    if (length(rows) < 2L) {
+        return(list())
+    }
+    cp <- combinePValues(
+        pvals = as.numeric(mc$twasPval[rows]),
+        zScores = as.numeric(mc$twasZ[rows]),
+        methods = methods
+    )
+    map(methods, .cipCombinedRow, mc = mc, rows = rows, cp = cp)
+}
+
 .cipCombineAcrossMethods <- function(gr, methods) {
     mc <- as_tibble(as.data.frame(S4Vectors::mcols(gr)))
     key <- str_c(mc$qtlStudy, mc$context, mc$trait, mc$gwasStudy, sep = "||")
     groups <- split(seq_len(nrow(mc)), key)
-    extras <- list()
-    for (gkey in names(groups)) {
-        rows <- groups[[gkey]]
-        if (length(rows) < 2L) {
-            next
-        }
-        pvals <- as.numeric(mc$twasPval[rows])
-        zvec <- as.numeric(mc$twasZ[rows])
-        cp <- combinePValues(pvals = pvals, zScores = zvec, methods = methods)
-        for (m in methods) {
-            newRow <- slice(mc, rows[[1L]])
-            newRow$method <- str_c("combined.", m)
-            newRow$twasZ <- NA_real_
-            newRow$twasPval <- as.numeric(cp$results[[m]]$pval)
-            newRow$waldRatio <- NA_real_
-            newRow$waldRatioSe <- NA_real_
-            newRow$mrPval <- NA_real_
-            newRow$nIV <- NA_integer_
-            extras[[length(extras) + 1L]] <- newRow
-        }
-    }
+    extras <- .cipConcat(map(
+        groups,
+        .cipCombinedRowsFor,
+        mc = mc,
+        methods = methods
+    ))
     if (length(extras) == 0L) {
         return(gr)
     }
     newMcs <- bind_rows(extras)
-    newGr <- gr[rep(1L, nrow(newMcs))]
-    S4Vectors::mcols(newGr) <- S4Vectors::DataFrame(newMcs)
+    newGr <- S4Vectors::`mcols<-`(
+        gr[rep(1L, nrow(newMcs))],
+        value = S4Vectors::DataFrame(newMcs)
+    )
     c(gr, newGr)
 }
 
@@ -1235,6 +1398,7 @@ causalInferencePipeline <- function(
 
 # Row-align V to the weights (by name when available, else positionally).
 # @noRd
+#' @importFrom checkmate assertMatrix
 .twasZAlignV <- function(V, rn, nW) {
     if (!is.null(rownames(V)) && !is.null(rn)) {
         idx <- match(rn, rownames(V))
@@ -1247,11 +1411,7 @@ causalInferencePipeline <- function(
         }
         return(V[idx, , drop = FALSE])
     }
-    if (nrow(V) != nW) {
-        abort(
-            "twasZ: positional alignment requires nrow(V) == nrow(weights)."
-        )
-    }
+    assertMatrix(V, nrows = nW, .var.name = "V (positional alignment)")
     V
 }
 
@@ -1270,6 +1430,7 @@ causalInferencePipeline <- function(
 
 # Symmetric-align R to the weights (by name when available, else positionally).
 # @noRd
+#' @importFrom checkmate assertMatrix
 .twasZAlignR <- function(R, rn, nW) {
     if (!is.null(rownames(R)) && !is.null(rn)) {
         idx <- match(rn, rownames(R))
@@ -1282,11 +1443,7 @@ causalInferencePipeline <- function(
         }
         return(R[idx, idx, drop = FALSE])
     }
-    if (nrow(R) != nW) {
-        abort(
-            "twasZ: positional alignment requires nrow(R) == nrow(weights)."
-        )
-    }
+    assertMatrix(R, nrows = nW, .var.name = "R (positional alignment)")
     R
 }
 
@@ -1347,6 +1504,7 @@ causalInferencePipeline <- function(
 #' w <- setNames(rnorm(20) * 0.1, colnames(X))
 #' twasZ(weights = w, z = rnorm(20), R = cor(X))
 #' @export
+#' @importFrom checkmate assertCharacter assertCount
 twasZ <- function(
     weights,
     z,
@@ -1357,6 +1515,8 @@ twasZ <- function(
     nSketch = NULL,
     combineMethods = NULL
 ) {
+    assertCount(nSketch, positive = TRUE, null.ok = TRUE)
+    assertCharacter(combineMethods, null.ok = TRUE)
     weights <- .twasZPrepWeights(weights, z)
     covY <- .twasZCovY(
         weights = weights,
@@ -1370,8 +1530,10 @@ twasZ <- function(
     stats <- as.numeric(crossprod(weights, as.numeric(z)))
     zVec <- stats / ySd
     pVec <- .zToPvalue(zVec)
-    zMatrix <- cbind(Z = zVec, pval = pVec)
-    rownames(zMatrix) <- colnames(weights)
+    zMatrix <- `rownames<-`(
+        cbind(Z = zVec, pval = pVec),
+        colnames(weights)
+    )
     combined <- .twasZCombine(
         combineMethods,
         ncol(weights),
@@ -1387,6 +1549,7 @@ twasZ <- function(
 # Coerce a weight vector to a one-column matrix, validate the class / dims, and
 # default the column names.
 # @noRd
+#' @importFrom checkmate assertMatrix
 .twasZPrepWeights <- function(weights, z) {
     if (is.numeric(weights) && is.null(dim(weights))) {
         nm <- if (!is.null(names(weights))) names(weights) else NULL
@@ -1395,13 +1558,13 @@ twasZ <- function(
     if (!is.matrix(weights)) {
         abort("`weights` must be a numeric vector or a matrix.")
     }
-    if (is.null(colnames(weights))) {
-        colnames(weights) <- str_c("method", seq_len(ncol(weights)))
+    named <- if (is.null(colnames(weights))) {
+        `colnames<-`(weights, str_c("method", seq_len(ncol(weights))))
+    } else {
+        weights
     }
-    if (nrow(weights) != length(z)) {
-        abort("nrow(weights) must equal length(z).")
-    }
-    weights
+    assertMatrix(named, nrows = length(z), .var.name = "weights")
+    named
 }
 
 # Optional cross-tuple p-value combination via combinePValues (K == 1 uses the
@@ -1415,13 +1578,14 @@ twasZ <- function(
     if (K == 1L) {
         return(.twasZCombineSingle(combineMethods, pVec, zMatrix))
     }
-    sig <- covY / tcrossprod(ySd, ySd)
-    rownames(sig) <- colnames(sig) <- rownames(zMatrix)
-    names(pVec) <- rownames(zMatrix)
-    names(zVec) <- rownames(zMatrix)
+    methodNames <- rownames(zMatrix)
+    sig <- `dimnames<-`(
+        covY / tcrossprod(ySd, ySd),
+        list(methodNames, methodNames)
+    )
     combinePValues(
-        pvals = pVec,
-        zScores = zVec,
+        pvals = set_names(pVec, methodNames),
+        zScores = set_names(zVec, methodNames),
         methods = combineMethods,
         R = sig
     )

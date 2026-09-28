@@ -13,7 +13,8 @@ qtlEnrichmentPipeline(
   impN = 25,
   numThreads = 1L,
   seed = NULL,
-  ...
+  verbose = TRUE,
+  enrichmentArgs = list()
 )
 }
 \arguments{
@@ -41,7 +42,10 @@ if the input PIP vector is not genome-wide.}
 \code{\link{qtlEnrichment}} for reproducible multiple imputation.
 \code{NULL} (default) draws a nondeterministic seed.}
 
-\item{...}{Additional arguments forwarded to \code{\link{qtlEnrichment}}.}
+\item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
+
+\item{enrichmentArgs}{Optional named list of options forwarded to
+\code{\link{qtlEnrichment}}.}
 }
 \value{
 A tibble with one row per (outcome trait, annotation unit) pair.

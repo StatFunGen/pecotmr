@@ -302,7 +302,7 @@ test_that("GwasFineMappingResult: .tupleSelectRowGwasFmr requires both selectors
     expect_error(getPip(res), "Pass `study` and `method`")
     expect_error(
         getPip(res, study = c("g1", "g2"), method = "susie"),
-        "must each be length 1"
+        "Must have length 1"
     )
     expect_error(getPip(res, study = "ghost", method = "susie"), "No entry for")
 })
@@ -352,7 +352,10 @@ test_that("validity names a missing identity column", {
     )
     bad <- res
     mcols(bad)$method <- NULL
-    expect_error(methods::validObject(bad), "missing columns: method")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'method'\\}"
+    )
 })
 
 test_that("validity names a missing entry payload column", {
@@ -365,6 +368,6 @@ test_that("validity names a missing entry payload column", {
     mcols(bad)$cvResult <- NULL
     expect_error(
         methods::validObject(bad),
-        "missing entry payload columns: cvResult"
+        "missing entry payload columns: .*missing elements \\{'cvResult'\\}"
     )
 })

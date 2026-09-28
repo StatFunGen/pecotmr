@@ -43,7 +43,7 @@ test_that("LdEigen rejects eigen_list length mismatch", {
                 eigenvalueTruncation = 0.9
             )
         ),
-        "eigenList.*must match"
+        "Variable 'eigenList'.*Must have length"
     )
 })
 
@@ -192,4 +192,50 @@ test_that("eigenvalue truncation keeps everything when there is no mass", {
     expect_equal(pecotmr:::.ldEigenKeep(c(0, -1, -2), 0.9), 1:3)
     # ...and a truncation of 1 keeps everything by definition.
     expect_equal(pecotmr:::.ldEigenKeep(c(3, 2, 1), 1), 1:3)
+})
+
+test_that("LdEigen: argument guards fire", {
+    ldblocks <- make_test_ldblocks()
+    snp_info <- make_test_snp_info(10)
+    eigen_list <- list(
+        list(values = c(1, 0.5), vectors = matrix(0, 10, 2), snpIdx = 1:10),
+        list(values = 0.8, vectors = matrix(0, 10, 1), snpIdx = 1:10)
+    )
+    ok <- list(
+        ldBlocks = ldblocks,
+        snpInfo = snp_info,
+        nRef = 500L,
+        eigenList = eigen_list
+    )
+    expect_error(
+        exec(LdEigen, !!!list_modify(ok, !!!list(snpInfo = "not-a-df"))),
+        "snpInfo.*Must be of type 'data.frame'"
+    )
+    expect_error(
+        exec(LdEigen, !!!list_modify(ok, !!!list(eigenList = "not-a-list"))),
+        "eigenList.*Must be of type 'list'"
+    )
+    expect_error(
+        exec(LdEigen, !!!list_modify(ok, !!!list(nRef = 0L))),
+        "nRef.*Must be >= 1"
+    )
+    expect_error(
+        exec(LdEigen, !!!list_modify(ok, !!!list(nRef = "500"))),
+        "nRef.*Must be of type 'count'"
+    )
+})
+
+test_that("buildLdEigen: argument guards fire", {
+    meta <- system.file(
+        "extdata",
+        "ld_reference",
+        "ld_meta_file.tsv",
+        package = "pecotmr"
+    )
+    ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
+    expect_error(buildLdEigen(ld, nRef = 0L), "nRef.*Must be >= 1")
+    expect_error(
+        buildLdEigen(ld, inSample = NA),
+        "inSample.*May not be NA"
+    )
 })

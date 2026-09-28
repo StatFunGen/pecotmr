@@ -49,7 +49,7 @@ test_that("getGenome returns the genome build string (via an LdScore subclass)",
 test_that("validity rejects an nRef that is not a single positive integer", {
     # Matched on the validity text, not just "nRef": the argument name alone
     # also appears in R's own argument-matching errors.
-    msg <- "'nRef' must be a single positive integer"
+    msg <- "Variable 'nRef'"
     expect_error(.lds_score(nRef = 0L), msg)
     expect_error(.lds_score(nRef = -1L), msg)
     expect_error(.lds_score(nRef = c(10L, 20L)), msg)
@@ -62,7 +62,7 @@ test_that("validity rejects an inSample that is not a single flag", {
     # not collapse length, which is why the nRef branch IS reachable above.)
     # This one guards direct new() use -- migration scripts, deserialization.
     gr <- as(.lds_score(), "GRanges")
-    msg <- "'inSample' must be a single logical value"
+    msg <- "Variable 'inSample': Must have length 1"
     mk <- function(flag) {
         methods::new(
             "LdScore",
@@ -384,7 +384,7 @@ test_that("a block matrix sized differently from its span is rejected", {
             correlation = list(diag(2), diag(2)),
             blockMetadata = misSpan
         )),
-        "correlation matrix is 2x2 but covers 3 variant"
+        "LD block correlation.*Must have exactly 3 rows"
     )
 })
 

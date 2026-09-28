@@ -235,7 +235,7 @@ test_that("mrmashWrapper errors when X and Y row counts differ", {
             matrix(1:6, nrow = 3, ncol = 2),
             matrix(1:8, nrow = 4, ncol = 2)
         ),
-        "same number of rows"
+        "Assertion on 'Y'.*Must have exactly 3 rows"
     )
 })
 
@@ -310,7 +310,7 @@ test_that("computeCoefficientsGlasso runs without Xnew", {
     r <- 3
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     result <- pecotmr:::computeCoefficientsGlasso(
         X,
         Y,
@@ -334,7 +334,7 @@ test_that("computeCoefficientsGlasso runs with Xnew", {
     r <- 3
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     Xnew <- matrix(rnorm(10 * p), nrow = 10, ncol = p)
     result <- pecotmr:::computeCoefficientsGlasso(
         X,
@@ -361,7 +361,7 @@ test_that("computeCoefficientsUnivGlmnet runs without Xnew", {
     r <- 2
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     result <- pecotmr:::computeCoefficientsUnivGlmnet(
         X,
         Y,
@@ -386,7 +386,7 @@ test_that("computeCoefficientsUnivGlmnet runs with Xnew", {
     r <- 2
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     Xnew <- matrix(rnorm(8 * p), nrow = 8, ncol = p)
     result <- pecotmr:::computeCoefficientsUnivGlmnet(
         X,
@@ -411,7 +411,7 @@ test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
     r <- 2
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     Y <- matrix(rnorm(n * r), nrow = n, ncol = r)
-    colnames(Y) <- paste0("cond", 1:r)
+    colnames(Y) <- paste0("cond", seq_len(r))
     Y[1:5, 1] <- NA # introduce missing values in one condition
     result <- pecotmr:::computeCoefficientsUnivGlmnet(
         X,
@@ -481,12 +481,12 @@ test_that("mrashWeights returns length-p weights and can retain the fit", {
 test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
-    mc <- list(nit = 200, nburn = 20, nthin = 1)
-    expect_length(do.call(bayesNWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesLWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesAWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesCWeights, c(list(f$X, f$y), mc)), f$p)
-    expect_length(do.call(bayesRWeights, c(list(f$X, f$y), mc)), f$p)
+    mc <- list(methodArgs = list(nit = 200, nburn = 20, nthin = 1))
+    expect_length(exec(bayesNWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesCWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesRWeights, !!!c(list(f$X, f$y), mc)), f$p)
 })
 
 test_that("bayesAlphabetWeights validates matching row counts before fitting", {
@@ -494,7 +494,7 @@ test_that("bayesAlphabetWeights validates matching row counts before fitting", {
     f <- .rrwXy()
     expect_error(
         bayesAlphabetWeights(f$X, f$y[-1], method = "bayesN"),
-        "same number of rows"
+        "y.*Must have length 50"
     )
     expect_error(
         bayesAlphabetWeights(
@@ -503,7 +503,7 @@ test_that("bayesAlphabetWeights validates matching row counts before fitting", {
             method = "bayesN",
             Z = matrix(1, f$n - 1, 1)
         ),
-        "same number of rows"
+        "Z.*Must have exactly 50 rows"
     )
 })
 
@@ -539,7 +539,11 @@ test_that("dprAdaptiveGibbsWeights returns length-p weights", {
     skip_if_not_installed("RcppDPR")
     f <- .rrwXy()
     invisible(capture.output(
-        w <- dprAdaptiveGibbsWeights(f$X, f$y, s_step = 100)
+        w <- dprAdaptiveGibbsWeights(
+            f$X,
+            f$y,
+            methodArgs = list(s_step = 100)
+        )
     ))
     expect_length(w, f$p)
 })
@@ -552,7 +556,7 @@ test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
     w <- suppressMessages(mrmashWeights(
         X = m$X,
         Y = m$Y,
-        canonicalPriorMatrices = TRUE
+        methodArgs = list(canonicalPriorMatrices = TRUE)
     ))
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
@@ -614,8 +618,8 @@ test_that("RSS solvers validate their R-matrix / sample-size / length inputs", {
     expect_error(lassosumRss(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
     expect_error(penalizedRss(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
     expect_error(prsCs(f$stat$b, f$LD, -1), "sample size")
-    expect_error(prsCs(f$stat$b[-1], f$LD, f$n), "number of rows of 'R'")
-    expect_error(sdpr(f$stat$b[-1], f$LD, f$n), "number of rows of 'R'")
+    expect_error(prsCs(f$stat$b[-1], f$LD, f$n), "bhat.*Must have length 6")
+    expect_error(sdpr(f$stat$b[-1], f$LD, f$n), "bhat.*Must have length 6")
     expect_error(sdpr(f$stat$b, f$LD, f$n, M = 2), "at least 4")
 })
 
@@ -642,17 +646,23 @@ test_that("scadRssWeights / mcpRssWeights / l0learnRssWeights return length-p we
 test_that("prsCsWeights and sdprWeights follow the (stat, LD) contract", {
     f <- .rrwStatLd()
     expect_length(
-        prsCsWeights(f$stat, f$LD, nIter = 100, nBurnin = 20, thin = 1),
+        prsCsWeights(
+            f$stat,
+            f$LD,
+            methodArgs = list(nIter = 100, nBurnin = 20, thin = 1)
+        ),
         f$p
     )
     expect_length(
         sdprWeights(
             f$stat,
             f$LD,
-            iter = 100,
-            burn = 20,
-            thin = 1,
-            verbose = FALSE
+            methodArgs = list(
+                iter = 100,
+                burn = 20,
+                thin = 1,
+                verbose = FALSE
+            )
         ),
         f$p
     )
@@ -784,10 +794,9 @@ test_that("buildMrmashPriorMatrices builds an expanded S0 list and a prior grid"
     expect_true(is.list(res$S0))
     expect_gt(length(res$S0), 1)
     expect_true(is.numeric(res$priorGrid))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$S0,
-        function(s) all(dim(s) == c(3, 3)),
-        logical(1)
+        function(s) all(dim(s) == c(3, 3))
     )))
 })
 
@@ -870,4 +879,83 @@ test_that("mrmashWeights(retainFit=TRUE) attaches {dataDrivenPriorMatrices, w0, 
         mrmashWeights(mrmashFit = fakeFit, dataDrivenPriorMatrices = ddpm),
         "fit"
     ))
+})
+
+test_that("MCMC / optimiser control arguments are guarded", {
+    expect_error(
+        bayesBWeights(NULL, NULL, nIter = 0),
+        "nIter.*Must be >= 1"
+    )
+    expect_error(
+        bayesBWeights(NULL, NULL, thin = 0),
+        "thin.*Must be >= 1"
+    )
+    expect_error(
+        bayesBWeights(NULL, NULL, probIn = 2),
+        "probIn.*is not <= 1"
+    )
+    expect_error(
+        bLassoWeights(NULL, NULL, burnIn = -1),
+        "burnIn.*Must be >= 0"
+    )
+    expect_error(
+        dprGibbsWeights(NULL, NULL, sStep = 0),
+        "sStep.*Must be >= 1"
+    )
+    expect_error(
+        dprAdaptiveGibbsWeights(NULL, NULL, retainFit = NA),
+        "retainFit.*May not be NA"
+    )
+    expect_error(
+        ncvregWeights(NULL, NULL, penalty = "SCAD", nfolds = 0),
+        "nfolds.*Must be >= 1"
+    )
+    expect_error(
+        mrashWeights(NULL, NULL, initPriorSd = NA),
+        "initPriorSd.*May not be NA"
+    )
+    expect_error(
+        computeCoefficientsGlasso(NULL, NULL, standardize = NA, nthreads = 1),
+        "standardize.*May not be NA"
+    )
+    expect_error(
+        computeCoefficientsGlasso(
+            NULL,
+            NULL,
+            standardize = TRUE,
+            nthreads = 1.5
+        ),
+        "nthreads.*integerish"
+    )
+})
+
+test_that("RSS solver control arguments are guarded", {
+    expect_error(
+        lassosumRss(NULL, NULL, NULL, thr = -1),
+        "thr.*is not >= 0"
+    )
+    expect_error(
+        lassosumRss(NULL, NULL, NULL, maxiter = 0),
+        "maxiter.*Must be >= 1"
+    )
+    expect_error(
+        scadRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        scadRssWeights(stat = list(), LD = NULL, s = -1),
+        "s.*is not >= 0"
+    )
+    expect_error(
+        mcpRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        mrashRssWeights(stat = "nope", LD = NULL, NULL, NULL, NULL, NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        mrmashRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
 })
