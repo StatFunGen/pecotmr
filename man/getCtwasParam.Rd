@@ -7,7 +7,7 @@
 \usage{
 getCtwasParam(x, ...)
 
-\S4method{getCtwasParam}{CtwasResultEntry}(x, ...)
+\S4method{getCtwasParam}{CtwasResultEntry}(x)
 }
 \arguments{
 \item{x}{A \code{CtwasResultEntry}.}

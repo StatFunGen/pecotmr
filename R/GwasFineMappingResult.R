@@ -197,15 +197,17 @@ setMethod("getContexts", "GwasFineMappingResult", function(x) NULL)
 setMethod("getTraits", "GwasFineMappingResult", function(x) NULL)
 
 # Per-tuple lookup keyed by (study, method, blockId). The generic
-# accepts the full set of selectors; context/trait args are ignored for
-# GwasFineMappingResult. `region` (passed via `...`) is the per-block
-# disambiguator for multi-block genome-wide collections.
+# accepts the full set of selectors; `context` / `trait` are QTL-only and a
+# GwasFineMappingResult refuses them rather than ignoring them, the same way
+# getSumStats(GwasSumStats) does. `region` is the per-block disambiguator
+# for multi-block genome-wide collections.
 #' @rdname getFineMappingResult
 #' @export
 setMethod(
     "getFineMappingResult",
     "GwasFineMappingResult",
     function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
+        .gwasFmrRefuseQtlSelectors(context, trait)
         x[.tupleSelectRowGwasFmr(x, study, method)]
     }
 )
@@ -222,13 +224,54 @@ setMethod(
         trait = NULL,
         method = NULL,
         region = NULL,
-        returnList = FALSE,
-        ...
+        returnList = FALSE
     ) {
+        .gwasFmrRefuseQtlSelectors(context, trait)
         idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-        .fmrRowPip(.fmrRowParts(x, idx))
+        pip <- .fmrRowPip(.fmrRowParts(x, idx))
+        if (!isTRUE(returnList)) {
+            return(pip)
+        }
+        # Documented as "a per-entry list keyed by identity tuple"; the QTL
+        # method has always honoured it and this one silently returned the
+        # flat vector. A GWAS row is keyed by (study, method).
+        set_names(
+            list(pip),
+            glue(
+                "{as.character(x$study)[idx]}|{as.character(x$method)[idx]}"
+            )
+        )
     }
 )
+
+# `context` / `trait` belong to the QTL axis. Naming them keeps the shared
+# accessor signature, but a GWAS collection has no such axis, so asking for
+# one is a mistake rather than a no-op.
+# @noRd
+.gwasFmrRefuseQtlSelectors <- function(context, trait) {
+    # NA counts as unset, not as a selection: callers that thread a whole
+    # (study, context, trait, method) record fill the axes a collection does
+    # not have with NA, and that is an absence rather than a request.
+    given <- c(
+        context = .gwasFmrSelectorGiven(context),
+        trait = .gwasFmrSelectorGiven(trait)
+    )
+    if (!any(given)) {
+        return(invisible(NULL))
+    }
+    bad <- names(given)[given]
+    abort(glue(
+        "GwasFineMappingResult has no context or trait axis, so ",
+        "{str_flatten(sprintf('`%s`', bad), ' and ')} ",
+        "{if (length(bad) == 1L) 'does' else 'do'} not select anything. ",
+        "Select with `study`, `method` and `region`."
+    ))
+}
+
+# @noRd
+.gwasFmrSelectorGiven <- function(v) {
+    !is.null(v) && !all(is.na(v))
+}
 
 # Row selector for the base delegating accessors (getCs / getTopLoci /
 # getMarginalEffects / getSusieFit / getVariantIds live on
@@ -242,9 +285,13 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        region = NULL,
-        ...
+        region = NULL
     ) {
+        # No refusal here, unlike the public accessors: this is the blind
+        # delegation point for the shared base accessors, and callers such
+        # as the VCF writer thread a whole selector record through it
+        # without knowing the class. The user-facing entry points are where
+        # a QTL-only selector is a mistake worth reporting.
         .fmrRowParts(x, .tupleSelectRowGwasFmr(x, study, method, region))
     }
 )

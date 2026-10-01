@@ -7,7 +7,7 @@
 \usage{
 getAf(x, ...)
 
-\S4method{getAf}{QtlDataset}(x, traitId = NULL, region = NULL, cisWindow = NULL, samples = NULL, ...)
+\S4method{getAf}{QtlDataset}(x, traitId = NULL, region = NULL, cisWindow = NULL, samples = NULL)
 }
 \arguments{
 \item{x}{A \code{QtlDataset} object.}

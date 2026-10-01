@@ -80,24 +80,46 @@ NULL
 # .qtlValidateScalars exactly, so this tightens nothing.
 # @noRd
 #' @importFrom checkmate assertLogical assertNumber assertFlag assertCharacter
-.assertQtlPassThrough <- function(
-    scaleResiduals,
-    mafCutoff,
-    macCutoff,
-    xvarCutoff,
-    imissCutoff,
-    keepSamples,
-    keepVariants,
-    keepIndel
-) {
+.assertQtlPassThrough <- function(scaleResiduals, genotypeFilterArgs) {
     assertLogical(scaleResiduals, len = 1L)
-    assertNumber(mafCutoff, lower = 0, finite = TRUE)
-    assertNumber(macCutoff, lower = 0, finite = TRUE)
-    assertNumber(xvarCutoff, lower = 0, finite = TRUE)
-    assertNumber(imissCutoff, lower = 0, finite = TRUE)
-    assertCharacter(keepSamples)
-    assertCharacter(keepVariants)
-    assertFlag(keepIndel)
+    .assertMethodConfig(
+        genotypeFilterArgs,
+        "genotypeFilterConfig",
+        "genotypeFilter"
+    )
+    # Only what the caller actually set: an unset field defers to QtlDataset's
+    # own default and has nothing to check here.
+    walk(
+        c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff"),
+        .assertQtlFilterNumber,
+        genotypeFilterArgs = genotypeFilterArgs
+    )
+    walk(
+        c("keepSamples", "keepVariants"),
+        .assertQtlFilterCharacter,
+        genotypeFilterArgs = genotypeFilterArgs
+    )
+    if (!is.null(genotypeFilterArgs$keepIndel)) {
+        assertFlag(genotypeFilterArgs$keepIndel)
+    }
+    invisible(NULL)
+}
+
+# @noRd
+.assertQtlFilterNumber <- function(field, genotypeFilterArgs) {
+    v <- genotypeFilterArgs[[field]]
+    if (!is.null(v)) {
+        assertNumber(v, lower = 0, finite = TRUE, .var.name = field)
+    }
+    invisible(NULL)
+}
+
+# @noRd
+.assertQtlFilterCharacter <- function(field, genotypeFilterArgs) {
+    v <- genotypeFilterArgs[[field]]
+    if (!is.null(v)) {
+        assertCharacter(v, .var.name = field)
+    }
     invisible(NULL)
 }
 
@@ -777,15 +799,32 @@ NULL
 # Assemble the standardized sumstat data.frame (chrom/pos/SNP/A1/A2/Z, optional
 # N / N_CASE / N_CONTROL, and any present BETA/SE/P/MAF/INFO).
 # @noRd
-.buildSumstatOut <- function(df, resolved, z, n, mapping, label) {
-    out <- tibble(
+# The source columns named by explicit mappings, so an auto-detected key never
+# re-reads a column another key already claimed.
+# @noRd
+.sumstatClaimedCols <- function(mapping) {
+    if (is.null(mapping)) {
+        return(character())
+    }
+    unname(as.character(mapping))
+}
+
+# The identity columns every summary-statistic table carries.
+# @noRd
+.sumstatIdentityCols <- function(df, resolved) {
+    tibble(
         chrom = as.character(df[[resolved$chrom]]),
         pos = as.integer(df[[resolved$pos]]),
         SNP = as.character(df[[resolved$variant_id]]),
         A1 = as.character(df[[resolved$A1]]),
         A2 = as.character(df[[resolved$A2]])
     )
-    sampleSize <- c(
+}
+
+# N, or the case / control pair, whichever the manifest supplied.
+# @noRd
+.sumstatSampleSizeCols <- function(df, n) {
+    c(
         if (n$hasN) list(N = as.numeric(df[[n$nSrc]])) else list(),
         if (n$hasCounts) {
             list(
@@ -796,13 +835,12 @@ NULL
             list()
         }
     )
-    # `claimed` = the source columns named by explicit mappings, so an
-    # auto-detected key never re-reads a column another key already claimed.
-    claimed <- if (is.null(mapping)) {
-        character()
-    } else {
-        unname(as.character(mapping))
-    }
+}
+
+# The optional statistic columns that `df` actually carries, keyed by the
+# canonical name each will be written under.
+# @noRd
+.sumstatOptionalSources <- function(df, mapping, label, claimed) {
     optionalKeys <- c("BETA", "SE", "P", "AF", "MAF", "INFO")
     sources <- set_names(
         map(
@@ -815,15 +853,20 @@ NULL
         ),
         optionalKeys
     )
-    present <- keep(sources, .sumstatSourceFound)
+    keep(sources, .sumstatSourceFound)
+}
+
+.buildSumstatOut <- function(df, resolved, z, n, mapping, label) {
+    claimed <- .sumstatClaimedCols(mapping)
+    present <- .sumstatOptionalSources(df, mapping, label, claimed)
     result <- mutate(
-        out,
+        .sumstatIdentityCols(df, resolved),
         Z = if (z$hasZ) {
             as.numeric(df[[z$zSrc]])
         } else {
             as.numeric(df[[z$betaSrc]]) / as.numeric(df[[z$seSrc]])
         },
-        !!!sampleSize,
+        !!!.sumstatSampleSizeCols(df, n),
         !!!map(present, .sumstatNumericColumn, df = df)
     )
     .warnAfProvenance(
@@ -1515,10 +1558,10 @@ NULL
 #'   a genotype path/prefix; reconciled with a \code{genotypePath} column.
 #' @param genotypeCovariates A numeric matrix (samples x covariates) or a path
 #'   to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.
-#' @param scaleResiduals,mafCutoff,macCutoff,xvarCutoff Pass-through
-#'   \code{\link{QtlDataset}} arguments (stored as lazy QC slots).
-#' @param imissCutoff,keepSamples,keepVariants,keepIndel Pass-through
-#'   \code{\link{QtlDataset}} arguments (stored as lazy QC slots).
+#' @param scaleResiduals Pass-through \code{\link{QtlDataset}} argument.
+#' @param genotypeFilterArgs Pass-through \code{\link{QtlDataset}} filtering
+#'   options, built with \code{\link{genotypeFilterConfig}} and stored as lazy
+#'   QC slots.
 #' @param transposeCovariates Transpose covariate TSVs (QTLtools layout) before
 #'   treating them as samples-as-rows.
 #' @return A \code{QtlDataset} object.
@@ -1537,27 +1580,12 @@ loadQtlDatasetFromManifest <- function(
     genotypes = NULL,
     genotypeCovariates = NULL,
     scaleResiduals = TRUE,
-    mafCutoff = 0,
-    macCutoff = 0,
-    xvarCutoff = 0,
-    imissCutoff = 0,
-    keepSamples = character(0),
-    keepVariants = character(0),
-    keepIndel = TRUE,
+    genotypeFilterArgs = genotypeFilterConfig(),
     transposeCovariates = FALSE
 ) {
     assertString(study, null.ok = TRUE)
     assertFlag(transposeCovariates)
-    .assertQtlPassThrough(
-        scaleResiduals = scaleResiduals,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        xvarCutoff = xvarCutoff,
-        imissCutoff = imissCutoff,
-        keepSamples = keepSamples,
-        keepVariants = keepVariants,
-        keepIndel = keepIndel
-    )
+    .assertQtlPassThrough(scaleResiduals, genotypeFilterArgs)
     base <- .manifestBase(manifest)
     df <- .canonManifestCols(
         .readManifest(manifest),
@@ -1568,16 +1596,7 @@ loadQtlDatasetFromManifest <- function(
     # df[["study"]] (not df$study): study is optional here (it may be passed as
     # the `study` arg instead), and a tibble `$` on an absent column warns.
     study <- .reconcileScalar(df[["study"]], study, "study")
-    qc <- list(
-        scaleResiduals = scaleResiduals,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        xvarCutoff = xvarCutoff,
-        imissCutoff = imissCutoff,
-        keepSamples = keepSamples,
-        keepVariants = keepVariants,
-        keepIndel = keepIndel
-    )
+    qc <- .msqQcArgs(scaleResiduals, genotypeFilterArgs)
     .buildQtlDatasetFromRows(
         df,
         study,
@@ -2046,10 +2065,11 @@ loadQtlSumStatsFromManifest <- function(
 #' @param columnMapping,sampleSelect,formatMapping Passed to the QtlSumStats
 #'   loader for \code{sumStatsManifest}.
 #' @param transposeCovariates Transpose covariate TSVs (QTLtools layout).
-#' @param scaleResiduals,mafCutoff,macCutoff,xvarCutoff Pass-through
-#'   \code{\link{QtlDataset}} arguments applied to every study.
-#' @param imissCutoff,keepSamples,keepVariants,keepIndel Pass-through
-#'   \code{\link{QtlDataset}} arguments applied to every study.
+#' @param scaleResiduals Pass-through \code{\link{QtlDataset}} argument,
+#'   applied to every study.
+#' @param genotypeFilterArgs Pass-through \code{\link{QtlDataset}} filtering
+#'   options, built with \code{\link{genotypeFilterConfig}} and applied to
+#'   every study.
 #' @return A \code{MultiStudyQtlDataset} object.
 #' @examples
 #' d <- system.file("extdata", "qtl_mini", package = "pecotmr")
@@ -2071,36 +2091,12 @@ loadMultiStudyQtlDatasetFromManifest <- function(
     formatMapping = NULL,
     transposeCovariates = FALSE,
     scaleResiduals = TRUE,
-    mafCutoff = 0,
-    macCutoff = 0,
-    xvarCutoff = 0,
-    imissCutoff = 0,
-    keepSamples = character(0),
-    keepVariants = character(0),
-    keepIndel = TRUE
+    genotypeFilterArgs = genotypeFilterConfig()
 ) {
     assertFlag(transposeCovariates)
     assertNumber(minLdOverlapWarn, lower = 0, upper = 1)
-    .assertQtlPassThrough(
-        scaleResiduals = scaleResiduals,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        xvarCutoff = xvarCutoff,
-        imissCutoff = imissCutoff,
-        keepSamples = keepSamples,
-        keepVariants = keepVariants,
-        keepIndel = keepIndel
-    )
-    qc <- .msqQcArgs(
-        scaleResiduals,
-        mafCutoff,
-        macCutoff,
-        xvarCutoff,
-        imissCutoff,
-        keepSamples,
-        keepVariants,
-        keepIndel
-    )
+    .assertQtlPassThrough(scaleResiduals, genotypeFilterArgs)
+    qc <- .msqQcArgs(scaleResiduals, genotypeFilterArgs)
     qtlDatasets <- .msqBuildDatasets(
         qtlDatasetsManifest,
         transposeCovariates,
@@ -2119,27 +2115,14 @@ loadMultiStudyQtlDatasetFromManifest <- function(
     MultiStudyQtlDataset(qtlDatasets = qtlDatasets, sumStats = sumStats)
 }
 
-# Bundle the per-study QC / sample-filter arguments into a list.
+# Bundle the per-study QC / sample-filter arguments into a list. What remains
+# after genotypeFilterConfig() absorbed the seven filter fields: this is what is
+# spliced into QtlDataset().
 # @noRd
-.msqQcArgs <- function(
-    scaleResiduals,
-    mafCutoff,
-    macCutoff,
-    xvarCutoff,
-    imissCutoff,
-    keepSamples,
-    keepVariants,
-    keepIndel
-) {
+.msqQcArgs <- function(scaleResiduals, genotypeFilterArgs) {
     list(
         scaleResiduals = scaleResiduals,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        xvarCutoff = xvarCutoff,
-        imissCutoff = imissCutoff,
-        keepSamples = keepSamples,
-        keepVariants = keepVariants,
-        keepIndel = keepIndel
+        genotypeFilterArgs = genotypeFilterArgs
     )
 }
 

@@ -12,7 +12,8 @@ buildMrmashPriorMatrices(
   canonicalPriorMatrices = TRUE,
   priorGrid = NULL,
   hetgrid = c(0, 0.25, 0.5, 0.75, 1),
-  singletons = TRUE
+  singletons = TRUE,
+  zeromat = TRUE
 )
 }
 \arguments{
@@ -23,8 +24,9 @@ buildMrmashPriorMatrices(
 \item{K}{Number of conditions. When NULL, inferred from \code{ncol(Bhat)}.}
 
 \item{dataDrivenPriorMatrices}{Optional list with element \code{U} (list of
-raw covariance matrices) computed e.g. by \code{\link{computeCovFlash}} /
-\code{\link{computeCovDiag}}.}
+raw covariance matrices) computed e.g. by
+\code{\link{computeCovDiag}}, or by \code{mashr::cov_flash}, which
+returns such a list directly.}
 
 \item{canonicalPriorMatrices}{Logical. When TRUE (default for RSS), include
 the standard canonical mixture from
@@ -40,6 +42,11 @@ NULL, derived from \code{Bhat}, \code{Shat} via \code{computeGrid()}.}
 
 \item{singletons}{Whether to include single-condition prior components.
 Default TRUE.}
+
+\item{zeromat}{Logical. Passed to \code{mr.mashr::expand_covs()}: whether
+the expanded mixture includes the all-zero (null) component. Default
+\code{TRUE}, which is mr.mash's own convention --- a mixture with no
+null component cannot shrink an effect to zero.}
 }
 \value{
 A list with components \code{S0} (the expanded list of prior

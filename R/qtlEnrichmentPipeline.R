@@ -1,3 +1,51 @@
+#' @title Arguments For The QTL Enrichment Estimator
+#' @description The algorithmic settings \code{\link{qtlEnrichment}} takes,
+#'   as one checked bundle. Everything else that function accepts --- the two
+#'   data arguments, \code{numThreads}, \code{seed}, \code{verbose}, and the
+#'   \code{alignNames} switch --- is the pipeline's own business and is not
+#'   settable here.
+#' @param numGwas Number of GWAS variants used to estimate \code{piGwas}.
+#'   \code{NULL} (default) estimates it from the data, which is biased unless
+#'   the outcome PIP vector really is genome-wide.
+#' @param piQtl Per-variant prior of being a causal QTL variant. \code{NULL}
+#'   (default) estimates it from the data.
+#' @param lambda Shrinkage parameter, shrinking the enrichment estimate
+#'   towards zero as in ridge regression. \code{0} applies no shrinkage.
+#'   Default \code{1.0}.
+#' @param impN Rounds of multiple imputation to draw QTL from. Default
+#'   \code{25}.
+#' @param doubleShrinkage Logical. Apply the double-shrinkage correction to
+#'   the enrichment estimate. Default \code{FALSE}.
+#' @param besselCorrection Logical. Apply Bessel's correction when estimating
+#'   the sampling variance. Default \code{TRUE}.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' qtlEnrichmentConfig(lambda = 0, impN = 50)
+#' @export
+qtlEnrichmentConfig <- function(
+    numGwas = NULL,
+    piQtl = NULL,
+    lambda = 1.0,
+    impN = 25,
+    doubleShrinkage = FALSE,
+    besselCorrection = TRUE
+) {
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            numGwas = numGwas,
+            piQtl = piQtl,
+            lambda = lambda,
+            impN = impN,
+            doubleShrinkage = doubleShrinkage,
+            besselCorrection = besselCorrection
+        ),
+        extra = list(),
+        label = "qtlEnrichmentConfig",
+        engine = "qtlEnrichment"
+    )
+}
+
 #' @title QTL Enrichment Pipeline (Genome-Wide)
 #' @description Genome-wide pipeline that computes per-pair enrichment
 #'   estimates by passing an outcome PIP vector and a set of annotation
@@ -41,23 +89,17 @@
 #'
 #' @param gwasFineMappingResult The outcome side; see above.
 #' @param qtlFineMappingResult The annotation side; see above.
-#' @param numGwas Number of GWAS variants used to estimate \code{piGwas}. When
-#'   \code{NULL} (default) it is estimated from the data -- bias warning applies
-#'   if the input PIP vector is not genome-wide.
-#' @param piQtl Per-variant prior of being a QTL causal variant. \code{NULL}
-#'   (default) estimates from the data.
-#' @param lambda Shrinkage parameter for the enrichment estimator. Default
-#'   \code{1.0}.
-#' @param impN Number of imputed samples used by the estimator. Default
-#'   \code{25}.
+#' @param methodArgs The estimator's algorithmic settings, built with
+#'   \code{\link{qtlEnrichmentConfig}}: \code{numGwas}, \code{piQtl},
+#'   \code{lambda}, \code{impN}, \code{doubleShrinkage} and
+#'   \code{besselCorrection}. A bare list is refused, since it cannot be
+#'   checked.
 #' @param numThreads Number of threads used by \code{qtlEnrichment}. Default
 #'   \code{1}.
 #' @param seed Integer or \code{NULL}. Base random seed forwarded to
 #'   \code{\link{qtlEnrichment}} for reproducible multiple imputation.
 #'   \code{NULL} (default) draws a nondeterministic seed.
 #' @param verbose Logical. Print progress messages. Default \code{TRUE}.
-#' @param enrichmentArgs Optional named list of options forwarded to
-#'   \code{\link{qtlEnrichment}}.
 #' @return A tibble with one row per (outcome trait, annotation unit) pair.
 #'   The identity columns are \code{gwasStudy}, \code{gwasContext},
 #'   \code{gwasTrait}, \code{qtlStudy}, \code{qtlContext}; the axes a side does
@@ -69,15 +111,17 @@
 #'   The estimates are \code{enrichmentLogOdds}, the enrichment parameter
 #'   \eqn{a_1} on the log-odds scale, with its standard error
 #'   \code{enrichmentSe}; \code{enrichment} is the same quantity as a
-#'   multiplicative factor, \eqn{e^{a_1} - 1}, which is what
-#'   \code{colocPipeline} scales \code{p12} by (so \eqn{a_1 = 0} leaves the
-#'   prior untouched). \code{enrichmentLogOddsNoShrinkage} and
+#'   multiplicative factor, \eqn{e^{a_1} - 1}, reported for interpretation
+#'   (so \eqn{a_1 = 0} means no enrichment).
+#'   \code{enrichmentLogOddsNoShrinkage} and
 #'   \code{enrichmentSeNoShrinkage} are the same estimate before shrinkage,
 #'   \code{intercept} / \code{interceptSe} are \eqn{a_0}, and \code{colocP1},
-#'   \code{colocP2}, \code{colocP12} are the enrichment-informed coloc priors
-#'   the estimator derives from \eqn{(a_0, a_1)} -- an alternative to scaling
-#'   a baseline \code{p12}. \code{effectiveMiRounds} is how many
-#'   multiple-imputation rounds survived outlier filtering.
+#'   \code{colocP2}, \code{colocP12} are the enrichment-informed priors the
+#'   estimator derives from \eqn{(a_0, a_1)} exactly as fastenloc's
+#'   \code{set_enrich_params} does; those three are what
+#'   \code{\link{colocPipeline}} scores with when given this table.
+#'   \code{effectiveMiRounds} is how many multiple-imputation rounds survived
+#'   outlier filtering.
 #' @examples
 #' data(gwasFineMappingExample)
 #' data(qtlFineMappingExample)
@@ -89,15 +133,12 @@
 qtlEnrichmentPipeline <- function(
     gwasFineMappingResult,
     qtlFineMappingResult,
-    numGwas = NULL,
-    piQtl = NULL,
-    lambda = 1.0,
-    impN = 25,
+    methodArgs = qtlEnrichmentConfig(),
     numThreads = 1L,
     seed = NULL,
-    verbose = TRUE,
-    enrichmentArgs = list()
+    verbose = TRUE
 ) {
+    .assertMethodConfig(methodArgs, "qtlEnrichmentConfig", "methodArgs")
     .enrValidateInputs(gwasFineMappingResult, qtlFineMappingResult)
     prep <- .enrPrepare(gwasFineMappingResult, qtlFineMappingResult)
     gwasTuples <- prep$gwasTuples
@@ -109,14 +150,10 @@ qtlEnrichmentPipeline <- function(
         gwasPipByTuple = prep$gwasPipByTuple,
         qtlRegionsByTuple = prep$qtlRegionsByTuple,
         alignedByTuple = alignedByTuple,
-        numGwas = numGwas,
-        piQtl = piQtl,
-        lambda = lambda,
-        impN = impN,
+        methodArgs = methodArgs,
         numThreads = numThreads,
         seed = seed,
         verbose = verbose,
-        enrichmentArgs = enrichmentArgs,
         gwasFineMappingResult = gwasFineMappingResult,
         gwasTuples = gwasTuples,
         qtlFineMappingResult = qtlFineMappingResult,
@@ -292,14 +329,10 @@ qtlEnrichmentPipeline <- function(
     gwasPipByTuple,
     qtlRegionsByTuple,
     alignedByTuple = alignedByTuple,
-    numGwas = numGwas,
-    piQtl = piQtl,
-    lambda = lambda,
-    impN = impN,
-    numThreads = numThreads,
-    seed = seed,
-    verbose = verbose,
-    enrichmentArgs = enrichmentArgs,
+    methodArgs,
+    numThreads,
+    seed,
+    verbose,
     gwasFineMappingResult = gwasFineMappingResult,
     gwasTuples = gwasTuples,
     qtlFineMappingResult = qtlFineMappingResult,
@@ -322,14 +355,10 @@ qtlEnrichmentPipeline <- function(
         gwasPip = gwasPip,
         qtlRegionsByTuple = qtlRegionsByTuple,
         alignedByTuple = alignedByTuple,
-        numGwas = numGwas,
-        piQtl = piQtl,
-        lambda = lambda,
-        impN = impN,
+        methodArgs = methodArgs,
         numThreads = numThreads,
         seed = seed,
         verbose = verbose,
-        enrichmentArgs = enrichmentArgs,
         gwasFineMappingResult = gwasFineMappingResult,
         gwasTuples = gwasTuples,
         qtlFineMappingResult = qtlFineMappingResult,
@@ -346,14 +375,10 @@ qtlEnrichmentPipeline <- function(
     gwasPip,
     qtlRegionsByTuple,
     alignedByTuple = alignedByTuple,
-    numGwas = numGwas,
-    piQtl = piQtl,
-    lambda = lambda,
-    impN = impN,
-    numThreads = numThreads,
-    seed = seed,
-    verbose = verbose,
-    enrichmentArgs = enrichmentArgs,
+    methodArgs,
+    numThreads,
+    seed,
+    verbose,
     gwasFineMappingResult = gwasFineMappingResult,
     gwasTuples = gwasTuples,
     qtlFineMappingResult = qtlFineMappingResult,
@@ -373,14 +398,10 @@ qtlEnrichmentPipeline <- function(
         gwasPip,
         k,
         alignedByTuple = alignedByTuple,
-        numGwas = numGwas,
-        piQtl = piQtl,
-        lambda = lambda,
-        impN = impN,
+        methodArgs = methodArgs,
         numThreads = numThreads,
         seed = seed,
         verbose = verbose,
-        enrichmentArgs = enrichmentArgs,
         gwasFineMappingResult = gwasFineMappingResult,
         gwasTuples = gwasTuples,
         qtlFineMappingResult = qtlFineMappingResult,
@@ -415,21 +436,17 @@ qtlEnrichmentPipeline <- function(
 }
 
 # Run qtlEnrichment for a pair (with the pre-aligned regions), warning + NULL on
-# failure. alignNames = FALSE reuses the shared per-tuple alignment.
+# failure.
 # @noRd
 .enrRunEnrichment <- function(
     gi,
     gwasPip,
     k,
     alignedByTuple,
-    numGwas,
-    piQtl,
-    lambda,
-    impN,
+    methodArgs,
     numThreads,
     seed,
     verbose,
-    enrichmentArgs,
     gwasFineMappingResult,
     gwasTuples,
     qtlFineMappingResult,
@@ -441,22 +458,19 @@ qtlEnrichmentPipeline <- function(
             if (inherits(aligned, "condition")) {
                 cnd_signal(aligned)
             }
-            enrichArgs <- c(
-                list(
-                    gwasPip = gwasPip,
-                    susieQtlRegions = aligned,
-                    numGwas = numGwas,
-                    piQtl = piQtl,
-                    lambda = lambda,
-                    impN = impN,
-                    numThreads = numThreads,
-                    seed = seed,
-                    verbose = verbose,
-                    alignNames = FALSE
-                ),
-                enrichmentArgs
+            # alignNames = FALSE reuses the per-tuple alignment; it is the
+            # pipeline's own invariant, which is why `methodArgs` cannot
+            # carry it -- qtlEnrichmentConfig() has no such formal.
+            exec(
+                qtlEnrichment,
+                gwasPip = gwasPip,
+                susieQtlRegions = aligned,
+                numThreads = numThreads,
+                seed = seed,
+                verbose = verbose,
+                alignNames = FALSE,
+                !!!methodArgs
             )
-            exec(qtlEnrichment, !!!enrichArgs)
         },
         error = function(cnd) {
             eMsg <- conditionMessage(cnd)

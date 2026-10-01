@@ -10,7 +10,8 @@ krigingOutlierQc(
   n,
   variantIds = NULL,
   zThreshold = 2,
-  logLRThreshold = 2
+  logLRThreshold = 2,
+  methodArgs = krigingConfig()
 )
 }
 \arguments{
@@ -28,6 +29,9 @@ default \code{s} is \code{susieR::estimate_s_rss()}).}
 
 \item{logLRThreshold}{Log-likelihood-ratio cutoff for the allele-switch rule
 (default \code{2}, matching susieR).}
+
+\item{methodArgs}{Extra arguments for \code{susieR::kriging_rss()}, built
+with \code{\link{krigingConfig}} -- \code{r_tol} and \code{s}.}
 }
 \value{
 A list with \code{flip} (logical vector; \code{TRUE} = allele switch,

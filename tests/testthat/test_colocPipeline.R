@@ -520,9 +520,7 @@ test_that(".colocExtractLbfFromEntry: entry without trimmedFit returns NULL with
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
             e,
-            FALSE,
-            NULL,
-            1e-9
+            colocLbfFilterConfig()
         ),
         "has no trimmedFit"
     )
@@ -561,9 +559,10 @@ test_that(".colocExtractLbfFromEntry: filterLbfCs subsets by cs_index", {
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        filterLbfCs = TRUE,
-        filterLbfCsSecondary = NULL,
-        priorTol = 1e-9
+        lbfFilterArgs = colocLbfFilterConfig(
+            filterLbfCs = TRUE,
+            secondary = NULL
+        )
     )
     expect_equal(nrow(out$lbf), 2L)
 })
@@ -638,13 +637,15 @@ test_that(".colocLookupEnrichment: returns the value for a (gwasStudy, qtlStudy,
         enrichment = c(2.0, 3.5),
         stringsAsFactors = FALSE
     )
+    # Returns the matching ROW, so the caller can read the enloc priors off
+    # it rather than only the enrichment factor.
     expect_equal(
         pecotmr:::.colocLookupEnrichment(
             enr,
             .cp_side("G2"),
             .cp_side("Q1", "c1")
         ),
-        3.5
+        2L
     )
 })
 
@@ -729,7 +730,7 @@ test_that("colocPipeline: rejects enrichment missing required columns", {
 
 # --- enrichment end-to-end (lookup + p12 scaling + output columns) ----------
 
-test_that("colocPipeline: enrichment hit scales p12 and emits enrichment/p12Used", {
+test_that("colocPipeline: enrichment mode takes its priors from the table", {
     qfmr <- .cp_makeQtlFmr() # Q1 / c1 / t1 / susie
     gfmr <- .cp_makeGwasFmr() # G1 / susie
     enr <- data.frame(
@@ -737,6 +738,9 @@ test_that("colocPipeline: enrichment hit scales p12 and emits enrichment/p12Used
         qtlStudy = "Q1",
         qtlContext = "c1",
         enrichment = 2.0,
+        colocP1 = 3e-4,
+        colocP2 = 7e-4,
+        colocP12 = 2.5e-5,
         stringsAsFactors = FALSE
     )
     local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
@@ -747,11 +751,68 @@ test_that("colocPipeline: enrichment hit scales p12 and emits enrichment/p12Used
             enrichment = enr
         )
     )
-    expect_equal(nrow(out), 1L)
+    # Enrichment mode scores every (QTL effect, GWAS effect) pair itself
+    # rather than calling coloc.bf_bf, so the fixture's 2 x 2 effects give
+    # four rows; the mock used elsewhere collapses them to one.
+    expect_equal(nrow(out), 4L)
     expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))
     expect_equal(unique(out$enrichment), 2.0)
-    # min(p12 * (1 + enrichment), p12Max) = min(5e-6 * 3, 1e-3) = 1.5e-5
-    expect_equal(unique(out$p12Used), min(5e-6 * 3, 1e-3))
+    # qtlEnrichmentPipeline derives p12 = P_eqtl * expit(a0 + a1) the way
+    # fastenloc does; the pipeline uses that, rather than scaling a default.
+    expect_equal(unique(out$p12Used), 2.5e-5)
+})
+
+test_that("enrichment mode reports RCP and LCP alongside the hypotheses", {
+    qfmr <- .cp_makeQtlFmr()
+    gfmr <- .cp_makeGwasFmr()
+    enr <- data.frame(
+        gwasStudy = "G1",
+        qtlStudy = "Q1",
+        qtlContext = "c1",
+        enrichment = 2.0,
+        colocP1 = 3e-4,
+        colocP2 = 7e-4,
+        colocP12 = 2.5e-5,
+        stringsAsFactors = FALSE
+    )
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = gfmr,
+        enrichment = enr
+    ))
+    pairs <- getColocPairs(out)
+    expect_true(all(c("RCP", "LCP") %in% colnames(pairs)))
+    # The two names for the same quantities: fastenloc's RCP is the posterior
+    # of one shared causal variant, and LCP adds the distinct-variant case.
+    expect_equal(pairs$RCP, pairs$PP.H4.abf)
+    expect_equal(pairs$LCP, pairs$PP.H3.abf + pairs$PP.H4.abf)
+    probs <- pairs$PP.H0.abf +
+        pairs$PP.H1.abf +
+        pairs$PP.H2.abf +
+        pairs$PP.H3.abf +
+        pairs$PP.H4.abf
+    expect_equal(probs, rep(1, nrow(pairs)))
+})
+
+test_that("colocPipeline: an enrichment table without the priors is refused", {
+    qfmr <- .cp_makeQtlFmr()
+    gfmr <- .cp_makeGwasFmr()
+    enr <- data.frame(
+        gwasStudy = "G1",
+        qtlStudy = "Q1",
+        qtlContext = "c1",
+        enrichment = 2.0,
+        stringsAsFactors = FALSE
+    )
+    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    expect_error(
+        suppressWarnings(colocPipeline(
+            qtlFineMappingResult = qfmr,
+            gwasInput = gfmr,
+            enrichment = enr
+        )),
+        "missing colocP1, colocP2, colocP12"
+    )
 })
 
 test_that("colocPipeline: enrichment joins on the second side's trait", {
@@ -771,6 +832,9 @@ test_that("colocPipeline: enrichment joins on the second side's trait", {
         qtlStudy = c("Q1", "Q1"),
         qtlContext = c("c1", "c1"),
         enrichment = c(1.0, 3.0),
+        colocP1 = c(3e-4, 3e-4),
+        colocP2 = c(7e-4, 7e-4),
+        colocP12 = c(1e-5, 3e-5),
         stringsAsFactors = FALSE
     )
     local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
@@ -780,9 +844,15 @@ test_that("colocPipeline: enrichment joins on the second side's trait", {
         enrichment = enr
     ))
     pairs <- getColocPairs(out)
+    # Four effect pairs per trait now that enrichment mode scores each one,
+    # so the check is that each trait carries its own factor throughout.
     expect_equal(
-        pairs$enrichment[order(pairs$gwasTrait)],
-        c(1.0, 3.0)
+        unique(pairs$enrichment[pairs$gwasTrait == "t1"]),
+        1.0
+    )
+    expect_equal(
+        unique(pairs$enrichment[pairs$gwasTrait == "t2"]),
+        3.0
     )
 })
 
@@ -804,7 +874,7 @@ test_that("colocPipeline: rejects an enrichment table with repeated keys", {
     )
 })
 
-test_that("colocPipeline: enrichment miss warns and falls back to baseline p12", {
+test_that("colocPipeline: an enrichment miss warns and drops to plain priors", {
     qfmr <- .cp_makeQtlFmr()
     gfmr <- .cp_makeGwasFmr()
     enr <- data.frame(
@@ -823,9 +893,12 @@ test_that("colocPipeline: enrichment miss warns and falls back to baseline p12",
         )
     )
     expect_match(w, "no enrichment entry", all = FALSE)
-    expect_equal(nrow(out), 1L)
-    expect_equal(unique(out$enrichment), 0) # enRow reset to 0 on miss
-    expect_equal(unique(out$p12Used), 5e-6) # baseline p12 unchanged
+    expect_equal(nrow(out), 4L)
+    # A miss means there is no enrichment estimate for this pair, so it is
+    # scored with the unconditional priors rather than a fabricated factor
+    # of zero applied to a default.
+    expect_true(is.na(unique(out$enrichment)))
+    expect_equal(unique(out$p12Used), 5e-6)
 })
 
 # --- returnGwasFineMapping attached on the empty-pair early return (~205) ----
@@ -973,10 +1046,11 @@ test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        filterLbfCs = FALSE,
-        filterLbfCsSecondary = NULL,
-        filterLbfCsConcentration = 0.5,
-        priorTol = 1e-9
+        lbfFilterArgs = colocLbfFilterConfig(
+            filterLbfCs = FALSE,
+            secondary = NULL,
+            concentration = 0.5
+        )
     )
     expect_equal(nrow(out$lbf), 4L) # 2 + 2 stacked
     expect_setequal(colnames(out$lbf), sprintf("chr1:%d:A:G", 100L * (1:4)))
@@ -997,10 +1071,11 @@ test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)",
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        filterLbfCs = FALSE,
-        filterLbfCsSecondary = NULL,
-        filterLbfCsConcentration = 0.5,
-        priorTol = 1e-9
+        lbfFilterArgs = colocLbfFilterConfig(
+            filterLbfCs = FALSE,
+            secondary = NULL,
+            concentration = 0.5
+        )
     )
     expect_equal(nrow(out$lbf), 2L)
 })
@@ -1015,10 +1090,11 @@ test_that(".colocExtractLbfFromEntry: warns + NULL when fit carries no LBF slot"
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
             e,
-            filterLbfCs = FALSE,
-            filterLbfCsSecondary = NULL,
-            filterLbfCsConcentration = 0.5,
-            priorTol = 1e-9
+            lbfFilterArgs = colocLbfFilterConfig(
+                filterLbfCs = FALSE,
+                secondary = NULL,
+                concentration = 0.5
+            )
         ),
         "no lbf_variable"
     )
@@ -1042,10 +1118,11 @@ test_that(".colocExtractLbfFromEntry: warns + NULL on an empty LBF matrix", {
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
             e,
-            filterLbfCs = FALSE,
-            filterLbfCsSecondary = NULL,
-            filterLbfCsConcentration = 0.5,
-            priorTol = 1e-9
+            lbfFilterArgs = colocLbfFilterConfig(
+                filterLbfCs = FALSE,
+                secondary = NULL,
+                concentration = 0.5
+            )
         ),
         "LBF matrix is empty"
     )
@@ -1075,10 +1152,11 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        filterLbfCs = FALSE,
-        filterLbfCsSecondary = 0.95,
-        filterLbfCsConcentration = 0.5,
-        priorTol = 1e-9
+        lbfFilterArgs = colocLbfFilterConfig(
+            filterLbfCs = FALSE,
+            secondary = 0.95,
+            concentration = 0.5
+        )
     )
     expect_equal(nrow(out$lbf), 1L)
     expect_equal(as.numeric(out$lbf), c(2, 5, 8, 11)) # row 2 of matrix(1:12, 3, 4)
@@ -1093,10 +1171,11 @@ test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit 
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        filterLbfCs = FALSE,
-        filterLbfCsSecondary = NULL,
-        filterLbfCsConcentration = 0.5,
-        priorTol = 1e-9
+        lbfFilterArgs = colocLbfFilterConfig(
+            filterLbfCs = FALSE,
+            secondary = NULL,
+            concentration = 0.5
+        )
     )
     expect_equal(colnames(out$lbf), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
@@ -1119,10 +1198,11 @@ test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        filterLbfCs = FALSE,
-        filterLbfCsSecondary = NULL,
-        filterLbfCsConcentration = 0.5,
-        priorTol = 1e-9
+        lbfFilterArgs = colocLbfFilterConfig(
+            filterLbfCs = FALSE,
+            secondary = NULL,
+            concentration = 0.5
+        )
     )
     expect_null(out)
 })
@@ -1161,11 +1241,21 @@ test_that(".colocSelectLbfRows returns indices into the unfiltered rows", {
         V = c(0.5, 0, 0.2, 0)
     )
     expect_equal(
-        .colocSelectLbfRows(lbf, fit, TRUE, NULL, NULL, 1e-9),
+        .colocSelectLbfRows(
+            lbf,
+            fit,
+            colocLbfFilterConfig(filterLbfCs = TRUE),
+            1e-9
+        ),
         c(2L, 4L)
     )
     expect_equal(
-        .colocSelectLbfRows(lbf, fit, FALSE, NULL, NULL, 1e-9),
+        .colocSelectLbfRows(
+            lbf,
+            fit,
+            colocLbfFilterConfig(filterLbfCs = FALSE),
+            1e-9
+        ),
         c(1L, 3L)
     )
 })
@@ -1175,7 +1265,12 @@ test_that(".colocSelectLbfRows does not prefix-match sets_secondary", {
     lbf <- matrix(0, nrow = 3L, ncol = 2L)
     fit <- list(sets_secondary = list(cs_index = 1L), V = c(1, 1, 0))
     expect_equal(
-        .colocSelectLbfRows(lbf, fit, TRUE, NULL, NULL, 1e-9),
+        .colocSelectLbfRows(
+            lbf,
+            fit,
+            colocLbfFilterConfig(filterLbfCs = TRUE),
+            1e-9
+        ),
         seq_len(3L)
     )
 })
@@ -1218,6 +1313,30 @@ test_that("colocPipeline publishes coloc's variant count as nSnps", {
     expect_equal(.colocRenameNsnps(already)$nSnps, 7L)
 })
 
+
+test_that("gwasFineMapping is refused when the GWAS is already fine-mapped", {
+    # The bundle configures the fine-mapping run colocPipeline does on a raw
+    # GwasSumStats. Handed an already-fine-mapped GWAS there is no such run,
+    # so a setting given here would be dropped rather than honoured.
+    data(qtlFineMappingExample, gwasFineMappingExample)
+    expect_error(
+        colocPipeline(
+            qtlFineMappingExample,
+            gwasFineMappingExample,
+            gwasFineMappingArgs = gwasFineMappingConfig(methods = "susieInf")
+        ),
+        "there is no run to configure"
+    )
+    # The default bundle is not a request, so it passes silently.
+    expect_no_error(pecotmr:::.colocResolveGwasFmr(
+        gwasFineMappingExample,
+        gwasFineMappingConfig()
+    ))
+    expect_no_error(pecotmr:::.colocResolveGwasFmr(
+        gwasFineMappingExample,
+        list()
+    ))
+})
 
 test_that("an explicit blockId is preferred over the derived range key", {
     # blockId keys the external block manifest, so it carries the true block
@@ -1284,11 +1403,159 @@ test_that("pre-extracting LBF from an empty GWAS result yields no blocks", {
     expect_equal(
         pecotmr:::.colocPreextractGwasLbf(
             gwasFineMappingExample[0],
-            FALSE,
-            FALSE,
-            FALSE,
-            1e-9
+            colocLbfFilterConfig()
         ),
         list()
     )
+})
+
+test_that("colocPriorConfig carries the priors and rejects a typo", {
+    pr <- colocPriorConfig(p12 = 1e-5)
+    expect_s4_class(pr, "MethodConfig")
+    expect_equal(pr$p12, 1e-5)
+    expect_equal(pr$p1, 1e-4)
+    expect_error(colocPriorConfig(p13 = 1e-5), "unused argument")
+})
+
+test_that("colocLbfFilterConfig carries the filter settings", {
+    lf <- colocLbfFilterConfig(filterLbfCs = TRUE, concentration = 0.25)
+    expect_true(lf$filterLbfCs)
+    expect_equal(lf$concentration, 0.25)
+    # NULL secondary means "primary sets only" and is not forwarded.
+    expect_false(is_in("secondary", names(colocLbfFilterConfig())))
+    expect_error(colocLbfFilterConfig(concentrations = 0.25), "unused argument")
+})
+
+test_that("colocConfig is checked against coloc.bf_bf", {
+    skip_if_not_installed("coloc")
+    expect_s4_class(colocConfig(), "MethodConfig")
+    expect_output(show(colocConfig()), "checked against coloc::coloc.bf_bf")
+    expect_error(colocConfig(overlapMin = 0.5), "unknown argument")
+})
+
+test_that("priors cannot be set twice", {
+    skip_if_not_installed("coloc")
+    # p1/p2/p12 are read by the enrichment adjustment as well as forwarded,
+    # so allowing them in methodArgs would let the two disagree.
+    expect_error(
+        pecotmr:::.colocEngineArgs(colocConfig(p12 = 1e-5), colocPriorConfig()),
+        "set through `priors`"
+    )
+    expect_silent(
+        pecotmr:::.colocEngineArgs(colocConfig(), colocPriorConfig())
+    )
+})
+
+test_that("colocPipeline refuses bare lists where a constructor is due", {
+    expect_error(
+        pecotmr:::.colocAssertGroups(
+            list(p1 = 1e-4),
+            colocLbfFilterConfig(),
+            colocConfig()
+        ),
+        "must be built with colocPriorConfig\\(\\)"
+    )
+    expect_error(
+        pecotmr:::.colocAssertGroups(
+            colocPriorConfig(),
+            list(filterLbfCs = TRUE),
+            colocConfig()
+        ),
+        "must be built with colocLbfFilterConfig\\(\\)"
+    )
+})
+
+test_that("priors and enrichment cannot both be given", {
+    qfmr <- .cp_makeQtlFmr()
+    gfmr <- .cp_makeGwasFmr()
+    enr <- data.frame(
+        gwasStudy = "G1",
+        qtlStudy = "Q1",
+        qtlContext = "c1",
+        enrichment = 2.0,
+        colocP1 = 3e-4,
+        colocP2 = 7e-4,
+        colocP12 = 2.5e-5,
+        stringsAsFactors = FALSE
+    )
+    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    # fastenloc skips enrichment silently in this situation; pecotmr refuses,
+    # because scoring with one set of priors while enriching with another is
+    # never what the caller meant.
+    expect_error(
+        colocPipeline(
+            qtlFineMappingResult = qfmr,
+            gwasInput = gfmr,
+            priors = colocPriorConfig(p12 = 1e-5),
+            enrichment = enr
+        ),
+        "cannot both be given"
+    )
+    # Either alone is fine.
+    expect_no_error(suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = gfmr,
+        priors = colocPriorConfig(p12 = 1e-5)
+    )))
+    expect_no_error(suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = gfmr,
+        enrichment = enr
+    )))
+})
+
+test_that("gwasFineMappingConfig carries only what the inline fit can use", {
+    g <- gwasFineMappingConfig()
+    expect_s4_class(g, "MethodConfig")
+    expect_setequal(
+        names(g),
+        c(
+            "methods",
+            "credibleSetArgs",
+            "rssArgs",
+            "panelFilterArgs",
+            "addSusieInf",
+            "fitRetention"
+        )
+    )
+    # Nested bundles survive: the inline fit gets a real credibleSetArgs.
+    expect_s4_class(
+        gwasFineMappingConfig(
+            credibleSetArgs = credibleSetConfig(coverage = 0.9)
+        )$credibleSetArgs,
+        "MethodConfig"
+    )
+    expect_equal(
+        gwasFineMappingConfig(
+            credibleSetArgs = credibleSetConfig(coverage = 0.9)
+        )$credibleSetArgs$coverage,
+        0.9
+    )
+    # The fineMappingPipeline settings that cannot apply are absent, not
+    # carried-and-ignored: it IS the fine-mapping call, so there is no
+    # resume cache; CV is refused on sumstats; residualization has nothing
+    # to regress out.
+    for (nm in c("fineMappingResult", "crossValidation", "residualization")) {
+        expect_false(nm %in% names(formals(gwasFineMappingConfig)), label = nm)
+    }
+    # Every field it does carry is a real fineMappingPipeline(GwasSumStats)
+    # argument.
+    accepted <- names(formals(
+        getMethod(
+            "fineMappingPipeline",
+            "GwasSumStats"
+        )@.Data
+    ))
+    expect_true(all(is_in(
+        setdiff(names(formals(gwasFineMappingConfig)), "methods"),
+        c(
+            accepted,
+            "credibleSetArgs",
+            "rssArgs",
+            "panelFilterArgs",
+            "addSusieInf",
+            "fitRetention"
+        )
+    )))
+    expect_error(gwasFineMappingConfig(fitRetention = "none"), "must be one of")
 })

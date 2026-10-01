@@ -13,8 +13,7 @@ learnTwasWeights(
   trait = "",
   numThreads = 1,
   fittedModels = NULL,
-  retainFits = FALSE,
-  retainFitDetail = c("slim", "full"),
+  fitRetention = c("none", "slim", "full"),
   standardized = FALSE,
   dataType = NULL,
   ldSketch = NULL,
@@ -57,11 +56,11 @@ methods extract weights from an existing fit and never fine-map, so a
 missing fit is an error. Run \code{\link{fineMappingPipeline}} to
 produce the fits.}
 
-\item{retainFits}{If TRUE, retain fitted model objects as attributes on
-returned weight matrices when supported by the weight method.}
-
-\item{retainFitDetail}{Character. Level of fit detail to retain:
-\code{"slim"} (default) or \code{"full"}.}
+\item{fitRetention}{How much of each per-method fit is kept on the result:
+\code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
+payload downstream needs, \code{"full"} keeps the whole fitted object.
+Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
+for every other method the two behave alike.}
 
 \item{standardized}{Logical. Whether the supplied \code{X} / \code{Y} are
 already standardized. Default \code{FALSE}.}

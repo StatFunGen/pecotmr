@@ -16,7 +16,7 @@ GwasSumStats(
   qcInfo = list(),
   ldBlocks = NULL,
   blockId = NULL,
-  ...
+  extraCols = list()
 )
 }
 \arguments{
@@ -74,7 +74,11 @@ it to carry existing keys through a rebuild; without it a rebuild would
 re-derive them as seqnames and collapse distinct blocks onto one key.
 Mutually exclusive with \code{ldBlocks}.}
 
-\item{...}{Additional per-study columns to attach to the collection.}
+\item{extraCols}{Optional named list of additional per-study columns to
+attach to the collection's \code{mcols}. Named rather than variadic
+because the base class's own constructor, \code{GRangesList(...)}, uses
+\code{...} for its \emph{elements}: a bare \code{...} here would read
+as adding an entry rather than a metadata column.}
 }
 \value{
 A \code{GwasSumStats} object.

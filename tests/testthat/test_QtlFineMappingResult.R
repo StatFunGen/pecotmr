@@ -651,3 +651,21 @@ test_that("a joint column must be character, not a factor or number", {
         "'jointStudies' column must be character \\(got integer\\)"
     )
 })
+
+test_that("a QtlFineMappingResult refuses a region selector", {
+    data(qtlFineMappingExample)
+    # Region selection belongs to GwasFineMappingResult. The shared
+    # FineMappingResultBase accessors pass `region` to every selector, and
+    # this one used to absorb it in `...` and silently return the
+    # study/context/trait/method match instead.
+    expect_error(
+        getSusieFit(qtlFineMappingExample, region = "chr22:1-2"),
+        "not region-indexed"
+    )
+    expect_error(
+        getVariantIds(qtlFineMappingExample, region = "chr22:1-2"),
+        "not region-indexed"
+    )
+    # The supported selectors still work.
+    expect_type(getSusieFit(qtlFineMappingExample, method = "susie"), "list")
+})

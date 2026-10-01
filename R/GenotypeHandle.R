@@ -725,7 +725,7 @@ setMethod("getPath", "GenotypeHandle", function(x) x@path)
 
 #' @rdname getChromPaths
 #' @keywords internal
-setMethod("getChromPaths", "GenotypeHandle", function(x, ...) x@chromPaths)
+setMethod("getChromPaths", "GenotypeHandle", function(x) x@chromPaths)
 
 # Resolve a portable bundled-resource reference of the form
 # "pecotmr://extdata/<stem>" to a concrete filesystem path via

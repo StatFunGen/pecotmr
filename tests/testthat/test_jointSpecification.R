@@ -1731,7 +1731,8 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1769,7 +1770,8 @@ test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1831,7 +1833,8 @@ test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, comp
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1870,7 +1873,8 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2116,11 +2120,13 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
         contexts = NULL,
         traitIds = NULL,
         cisWindow = NULL,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        verbose = 1
+        verbose = 1,
+        credibleSetArgs = credibleSetConfig(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     ))
     expect_s4_class(out, "QtlFineMappingResult")
     expect_equal(nrow(out), 2L) # indA row + ssC row
@@ -2147,11 +2153,13 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
             contexts = NULL,
             traitIds = NULL,
             cisWindow = NULL,
-            coverage = 0.95,
-            secondaryCoverage = 0.5,
-            signalCutoff = 0.1,
-            minAbsCorr = 0.5,
-            verbose = 1
+            verbose = 1,
+            credibleSetArgs = credibleSetConfig(
+                coverage = 0.95,
+                secondaryCoverage = 0.5,
+                signalCutoff = 0.1,
+                minAbsCorr = 0.5
+            )
         ),
         "no sumStats slot"
     )
@@ -2272,7 +2280,8 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context",
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2312,7 +2321,8 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2352,7 +2362,8 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2385,7 +2396,8 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2482,12 +2494,14 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
         contexts = NULL,
         traitIds = NULL,
         cisWindow = NULL,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
         verbose = 0,
-        xRegions = list(r1, r2)
+        xRegions = list(r1, r2),
+        credibleSetArgs = credibleSetConfig(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L) # 907-910
@@ -2517,11 +2531,13 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         contexts = NULL,
         traitIds = NULL,
         cisWindow = 1000L,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        verbose = 0
+        verbose = 0,
+        credibleSetArgs = credibleSetConfig(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )
     expect_identical(out, res1) # length-1 short-circuit (909)
     local_mocked_bindings(
@@ -2535,11 +2551,13 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         contexts = NULL,
         traitIds = NULL,
         cisWindow = 1000L,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        verbose = 0
+        verbose = 0,
+        credibleSetArgs = credibleSetConfig(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )) # all-NULL (908)
 })
 
@@ -2593,7 +2611,7 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         as.character(ss$context),
         "probe",
         ldSketch = getLdSketch(ss),
-        cutoffs = .panelCutoffs(...)
+        cutoffs = .panelCutoffs(panelFilterConfig(...))
     ))
 }
 
@@ -2624,7 +2642,7 @@ test_that(".buildJointSumstatZMatrix agrees with .panelVariantFilter", {
             length(.panelVariantFilter(
                 getLdSketch(ss),
                 ids,
-                mafCutoff = cut
+                panelFilterConfig(mafCutoff = cut)
             )),
             label = str_c("mafCutoff ", cut)
         )

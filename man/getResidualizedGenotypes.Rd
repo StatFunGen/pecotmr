@@ -20,8 +20,7 @@ getResidualizedGenotypes(x, ...)
   residualizeGenotypeCovariates = TRUE,
   residualizePhenotypeCovariatesFromGenotypes = NULL,
   residualizeGenotypeCovariatesFromGenotypes = NULL,
-  covariateNaAction = c("impute", "drop"),
-  ...
+  covariateNaAction = c("impute", "drop")
 )
 }
 \arguments{

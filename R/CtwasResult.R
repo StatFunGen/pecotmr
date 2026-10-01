@@ -239,13 +239,13 @@ setMethod("getContexts", "CtwasResult", function(x) {
 
 #' @rdname getFinemap
 #' @export
-setMethod("getFinemap", "CtwasResult", function(x, ...) {
+setMethod("getFinemap", "CtwasResult", function(x) {
     .ctwasAggregateRows(x, getFinemap)
 })
 
 #' @rdname getSusieAlpha
 #' @export
-setMethod("getSusieAlpha", "CtwasResult", function(x, ...) {
+setMethod("getSusieAlpha", "CtwasResult", function(x) {
     .ctwasAggregateRows(x, getSusieAlpha)
 })
 

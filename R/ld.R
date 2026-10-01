@@ -607,7 +607,7 @@ loadLdMatrix <- function(
             nSample
         )
     } else {
-        .loadLdFromIndexed(source, key, returnGenotype)
+        .loadLdFromIndexed(source, key)
     }
     loaded |>
         .loadLdDedup() |>
@@ -621,7 +621,7 @@ loadLdMatrix <- function(
 # single in-memory matrix, or a list of them. Every source returns an LdData,
 # so callers never have to branch on what they loaded from.
 # @noRd
-.loadLdFromIndexed <- function(source, block, returnGenotype) {
+.loadLdFromIndexed <- function(source, block) {
     if (is.data.frame(source)) {
         return(.ldInfoBlock(source, block))
     }
@@ -1515,13 +1515,8 @@ loadLdFromGenotype <- function(
 # sidecar (its observation count is an ALLELE count, whose ploidy the mask
 # would have to guess), so an imissCutoff always takes the dosage path.
 # @noRd
-.panelDropMask <- function(
-    ldSketch,
-    matched,
-    mafCutoff,
-    macCutoff,
-    imissCutoff
-) {
+.panelDropMask <- function(ldSketch, matched, panelFilterArgs) {
+    imissCutoff <- panelFilterArgs$imissCutoff
     if (imissCutoff >= 1) {
         # Keyed on the PANEL's own variant labels, not the caller's: .afreq
         # carries the .pvar ids, while `keptIds` is whatever id form the
@@ -1532,8 +1527,8 @@ loadLdFromGenotype <- function(
         maf <- .panelAfreqMaf(.ldSketchHandle(ldSketch), panelIds)
         if (!is.null(maf)) {
             effMaf <- .panelEffectiveMaf(
-                mafCutoff,
-                macCutoff,
+                panelFilterArgs$mafCutoff,
+                panelFilterArgs$macCutoff,
                 .ldSketchNSamples(ldSketch)
             )
             return(is.na(maf) | maf < effMaf)
@@ -1541,7 +1536,11 @@ loadLdFromGenotype <- function(
     }
     dosage <- .ldSketchDosage(ldSketch, matched$idx, meanImpute = FALSE)
     stats <- .panelVariantStats(dosage)
-    effMaf <- .panelEffectiveMaf(mafCutoff, macCutoff, nrow(dosage))
+    effMaf <- .panelEffectiveMaf(
+        panelFilterArgs$mafCutoff,
+        panelFilterArgs$macCutoff,
+        nrow(dosage)
+    )
     is.na(stats$maf) | stats$maf < effMaf | stats$missRate > imissCutoff
 }
 
@@ -1556,15 +1555,13 @@ loadLdFromGenotype <- function(
 .panelVariantFilter <- function(
     ldSketch,
     variantIds,
-    mafCutoff = 0,
-    macCutoff = 0,
-    imissCutoff = 1,
+    panelFilterArgs = panelFilterConfig(),
     label = ".panelVariantFilter"
 ) {
-    mafCutoff <- mafCutoff %||% 0
-    macCutoff <- macCutoff %||% 0
-    imissCutoff <- imissCutoff %||% 1
-    if (mafCutoff <= 0 && macCutoff <= 0 && imissCutoff >= 1) {
+    # .panelCutoffs answers NULL for a filter that would keep everything,
+    # which is also the cheap exit here.
+    cutoffs <- .panelCutoffs(panelFilterArgs)
+    if (is.null(cutoffs)) {
         return(variantIds)
     }
     if (is.null(ldSketch) || length(variantIds) == 0L) {
@@ -1574,13 +1571,7 @@ loadLdFromGenotype <- function(
     if (is.null(matched)) {
         return(variantIds)
     }
-    drop <- .panelDropMask(
-        ldSketch,
-        matched,
-        mafCutoff,
-        macCutoff,
-        imissCutoff
-    )
+    drop <- .panelDropMask(ldSketch, matched, cutoffs)
     variantIds[!is_in(variantIds, matched$keptIds[drop])]
 }
 
@@ -1591,14 +1582,7 @@ loadLdFromGenotype <- function(
     if (is.null(ldSketch) || is.null(cutoffs)) {
         return(rep(TRUE, length(variantIds)))
     }
-    kept <- .panelVariantFilter(
-        ldSketch,
-        variantIds,
-        mafCutoff = cutoffs$mafCutoff,
-        macCutoff = cutoffs$macCutoff,
-        imissCutoff = cutoffs$imissCutoff,
-        label = label
-    )
+    kept <- .panelVariantFilter(ldSketch, variantIds, cutoffs, label = label)
     keep <- is_in(variantIds, kept)
     nDropped <- sum(!keep)
     if (nDropped > 0L) {
@@ -1614,10 +1598,13 @@ loadLdFromGenotype <- function(
 # The panel-filter cutoffs a pipeline call carries, or NULL when none is set
 # (so the filter short-circuits without touching the panel).
 # @noRd
-.panelCutoffs <- function(mafCutoff = 0, macCutoff = 0, imissCutoff = 1) {
-    maf <- mafCutoff %||% 0
-    mac <- macCutoff %||% 0
-    imiss <- imissCutoff %||% 1
+.panelCutoffs <- function(panelFilterArgs = panelFilterConfig()) {
+    # NULL fields are how the pipelines spell "not set"; normalise them to the
+    # no-op values so the short-circuit below is the only place that decides
+    # whether a filter is worth running.
+    maf <- panelFilterArgs$mafCutoff %||% 0
+    mac <- panelFilterArgs$macCutoff %||% 0
+    imiss <- panelFilterArgs$imissCutoff %||% 1
     if (maf <= 0 && mac <= 0 && imiss >= 1) {
         return(NULL)
     }
@@ -2635,6 +2622,47 @@ checkLd <- function(
     list(X.new = X.new, filter.id = filter.id)
 }
 
+#' @title Options for the SNPRelate LD-Pruning Backend
+#' @description Build a checked record of extra arguments for
+#'   \code{SNPRelate::snpgdsLDpruning()}, the engine behind
+#'   \code{ldPruneByCorrelation(backend = "snprelate")}.
+#' @param ... Arguments for \code{SNPRelate::snpgdsLDpruning()} -- in
+#'   practice the window controls \code{slide.max.bp} and
+#'   \code{slide.max.n} (pruning is greedy within a window, so the window
+#'   bounds which pairs are ever compared), \code{maf},
+#'   \code{missing.rate}, \code{remove.monosnp} and \code{num.thread}.
+#'   \code{gdsobj}, \code{method}, \code{ld.threshold} and \code{verbose}
+#'   are supplied by pecotmr and refused. The temporary GDS pecotmr writes
+#'   holds every sample and variant of \code{X} on one synthetic chromosome,
+#'   so \code{sample.id}, \code{snp.id} and \code{autosome.only} are not
+#'   meaningful selectors here.
+#' @return A \code{MethodConfig} record for
+#'   \code{ldPruneByCorrelation(methodArgs =)}.
+#' @seealso \code{\link{ldPruneByCorrelation}}
+#' @examples
+#' ldPruningConfig(slide.max.bp = 1e6)
+#' @export
+ldPruningConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            gdsobj = "the temporary GDS pecotmr writes from `X`",
+            method = "fixed at 'corr' by this backend",
+            ld.threshold = "the caller's `corThres`",
+            verbose = "the caller's `verbose`"
+        ),
+        "ldPruningConfig"
+    )
+    .newMethodConfig(
+        "SNPRelate::snpgdsLDpruning",
+        defaults = list(),
+        extra = extra,
+        label = "ldPruningConfig",
+        engine = "ldPruning"
+    )
+}
+
 #' Prune columns by pairwise correlation (LD-style prune)
 #'
 #' Performs LD pruning using one of two backends. The default \code{"hclust"}
@@ -2659,6 +2687,12 @@ checkLd <- function(
 #'       \code{SNPRelate::snpgdsLDpruning(method = "corr")}.}
 #'   }
 #' @param verbose Logical. If TRUE, print progress messages. Default FALSE.
+#' @param methodArgs Extra arguments for
+#'   \code{SNPRelate::snpgdsLDpruning()}, built with
+#'   \code{\link{ldPruningConfig}} -- the window controls in particular.
+#'   Only the \code{"snprelate"} backend has an engine to configure, so
+#'   supplying options alongside \code{backend = "hclust"} is an error
+#'   rather than a silent no-op.
 #'
 #' @return A list with:
 #'   \describe{
@@ -2680,11 +2714,26 @@ ldPruneByCorrelation <- function(
     X,
     corThres = 0.8,
     backend = c("hclust", "snprelate"),
-    verbose = FALSE
+    verbose = FALSE,
+    methodArgs = ldPruningConfig()
 ) {
     backend <- arg_match(backend)
+    .assertMethodConfig(methodArgs, "ldPruningConfig", "methodArgs")
     if (backend == "snprelate") {
-        return(.ldPruneSnprelate(X, corThres = corThres, verbose = verbose))
+        return(.ldPruneSnprelate(
+            X,
+            corThres = corThres,
+            verbose = verbose,
+            methodArgs = methodArgs
+        ))
+    }
+    if (length(methodArgs) > 0L) {
+        msg <- glue(
+            "ldPruneByCorrelation: `methodArgs` configures ",
+            "SNPRelate::snpgdsLDpruning(), which backend 'hclust' does not ",
+            "call. Pass backend = 'snprelate', or drop `methodArgs`."
+        )
+        abort(msg)
     }
     .ldPruneHclust(X, corThres, verbose)
 }
@@ -2719,7 +2768,7 @@ ldPruneByCorrelation <- function(
     )
 }
 
-.ldPruneSnprelate <- function(X, corThres, verbose) {
+.ldPruneSnprelate <- function(X, corThres, verbose, methodArgs) {
     .ldPruneSnprelateDeps()
     p <- ncol(X)
     snpNames <- colnames(X) %||% str_c("snp", seq_len(p))
@@ -2728,11 +2777,13 @@ ldPruneByCorrelation <- function(
     .ldPruneSnprelateCreateGds(tmpGds, X, snpNames, p)
     gds <- SNPRelate::snpgdsOpen(tmpGds, allow.duplicate = TRUE)
     on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
-    keepList <- SNPRelate::snpgdsLDpruning(
+    keepList <- exec(
+        SNPRelate::snpgdsLDpruning,
         gds,
         method = "corr",
         ld.threshold = corThres,
-        verbose = verbose
+        verbose = verbose,
+        !!!as.list(methodArgs)
     )
     keepIds <- sort(unname(list_c(keepList)))
     X.new <- X[, keepIds, drop = FALSE]
@@ -3238,12 +3289,12 @@ ldClumpByScore <- function(
 # without materializing them all in memory at once.
 # =============================================================================
 
-#' @importFrom checkmate assertClass
 #' Extract the LD or genotype matrix from an LdData S4 object.
 #' @param ld An LdData object.
 #' @param wantGenotype Logical; if TRUE, extract the genotype matrix (via
 #'   \code{getGenotypes()}).
 #' @return A matrix.
+#' @importFrom checkmate assertClass
 #' @noRd
 extractLdMatrix <- function(ld, wantGenotype = FALSE) {
     assertClass(ld, "LdData")

@@ -193,33 +193,16 @@ resolveLdInput <- function(
 }
 
 # Run DENTIST on a single window, unpacking the shared tuning parameters.
-.dentistCallSingle <- function(
-    zScore,
-    ldMat,
-    nSample,
-    pValueThreshold,
-    propSVD,
-    gcControl,
-    nIter,
-    gPvalueThreshold,
-    duprThreshold,
-    ncpus,
-    correctChenEtAlBug,
-    seed
-) {
-    dentistSingleWindow(
+.dentistCallSingle <- function(zScore, ldMat, nSample, methodArgs) {
+    # dentistSingleWindow is what dentistConfig() is built for -- ldMismatchQc
+    # splices the same bundle into it -- so the tunables travel as one value
+    # rather than being named again at every hop down from dentist().
+    exec(
+        dentistSingleWindow,
         zScore,
         R = ldMat,
         nSample = nSample,
-        pValueThreshold = pValueThreshold,
-        propSVD = propSVD,
-        gcControl = gcControl,
-        nIter = nIter,
-        gPvalueThreshold = gPvalueThreshold,
-        duprThreshold = duprThreshold,
-        ncpus = ncpus,
-        correctChenEtAlBug = correctChenEtAlBug,
-        seed = seed
+        !!!methodArgs
     )
 }
 
@@ -232,15 +215,7 @@ resolveLdInput <- function(
     ldMat,
     nSample,
     windowDividedRes,
-    pValueThreshold,
-    propSVD,
-    gcControl,
-    nIter,
-    gPvalueThreshold,
-    duprThreshold,
-    ncpus,
-    correctChenEtAlBug,
-    seed
+    methodArgs
 ) {
     # windowEndIdx is 1-based exclusive; convert to an inclusive range.
     idxRange <- windowDividedRes$windowStartIdx[
@@ -250,15 +225,7 @@ resolveLdInput <- function(
         sumStat$z[idxRange],
         ldMat[idxRange, idxRange],
         nSample,
-        pValueThreshold = pValueThreshold,
-        propSVD = propSVD,
-        gcControl = gcControl,
-        nIter = nIter,
-        gPvalueThreshold = gPvalueThreshold,
-        duprThreshold = duprThreshold,
-        ncpus = ncpus,
-        correctChenEtAlBug = correctChenEtAlBug,
-        seed = seed
+        methodArgs
     )
 }
 
@@ -269,15 +236,7 @@ resolveLdInput <- function(
     windowMode,
     windowSize,
     minDim,
-    pValueThreshold,
-    propSVD,
-    gcControl,
-    nIter,
-    gPvalueThreshold,
-    duprThreshold,
-    ncpus,
-    correctChenEtAlBug,
-    seed
+    methodArgs
 ) {
     if (windowMode == "distance") {
         windowDividedRes <- segmentByDist(
@@ -295,15 +254,7 @@ resolveLdInput <- function(
         ldMat = ldMat,
         nSample = nSample,
         windowDividedRes = windowDividedRes,
-        pValueThreshold = pValueThreshold,
-        propSVD = propSVD,
-        gcControl = gcControl,
-        nIter = nIter,
-        gPvalueThreshold = gPvalueThreshold,
-        duprThreshold = duprThreshold,
-        ncpus = ncpus,
-        correctChenEtAlBug = correctChenEtAlBug,
-        seed = seed
+        methodArgs = methodArgs
     )
     mergeWindows(dentistResultByWindow, windowDividedRes)
 }
@@ -345,8 +296,8 @@ resolveLdInput <- function(
 #'   Default is 0.05.
 #' @param duprThreshold The absolute correlation r value threshold to be
 #'   considered duplicate. Default is 0.99.
-#' @param ncpus The number of CPU cores to use for parallel processing. Default
-#'   is 1.
+#' @param numThreads The number of CPU cores to use for parallel processing.
+#'   Default is 1.
 #' @param correctChenEtAlBug Logical indicating whether to correct the Chen et
 #'   al. bug. Default is TRUE.
 #' @param minDim In distance mode: minimum number of SNPs per block (default
@@ -425,13 +376,13 @@ dentist <- function(
     nSample = NULL,
     windowSize = 2000000,
     windowMode = c("distance", "count"),
-    pValueThreshold = 5.0369e-8,
+    pValueThreshold = 5e-8,
     propSVD = 0.4,
     gcControl = FALSE,
     nIter = 10,
     gPvalueThreshold = 0.05,
     duprThreshold = 0.99,
-    ncpus = 1,
+    numThreads = 1,
     correctChenEtAlBug = TRUE,
     minDim = 2000,
     ldMethod = "sample",
@@ -448,21 +399,22 @@ dentist <- function(
     nSample <- resolved$nSample
     sumStat <- .dentistResolveColumns(sumStat)
     windowMode <- arg_match(windowMode)
+    # Gathered once, here, so no helper below has to name them again. The
+    # values are this function's own formals, so its defaults win over
+    # dentistConfig()'s wherever the two differ.
+    methodArgs <- dentistConfig(
+        pValueThreshold = pValueThreshold,
+        propSVD = propSVD,
+        gcControl = gcControl,
+        nIter = nIter,
+        gPvalueThreshold = gPvalueThreshold,
+        duprThreshold = duprThreshold,
+        numThreads = numThreads,
+        correctChenEtAlBug = correctChenEtAlBug,
+        seed = seed
+    )
     if (nrow(sumStat) < minDim) {
-        return(.dentistCallSingle(
-            sumStat$z,
-            ldMat,
-            nSample,
-            pValueThreshold = pValueThreshold,
-            propSVD = propSVD,
-            gcControl = gcControl,
-            nIter = nIter,
-            gPvalueThreshold = gPvalueThreshold,
-            duprThreshold = duprThreshold,
-            ncpus = ncpus,
-            correctChenEtAlBug = correctChenEtAlBug,
-            seed = seed
-        ))
+        return(.dentistCallSingle(sumStat$z, ldMat, nSample, methodArgs))
     }
     .dentistWindows(
         sumStat,
@@ -471,15 +423,7 @@ dentist <- function(
         windowMode,
         windowSize,
         minDim,
-        pValueThreshold = pValueThreshold,
-        propSVD = propSVD,
-        gcControl = gcControl,
-        nIter = nIter,
-        gPvalueThreshold = gPvalueThreshold,
-        duprThreshold = duprThreshold,
-        ncpus = ncpus,
-        correctChenEtAlBug = correctChenEtAlBug,
-        seed = seed
+        methodArgs
     )
 }
 
@@ -549,7 +493,7 @@ dentist <- function(
         p$gcControl,
         as.integer(p$nIter),
         p$gPvalueThreshold,
-        as.integer(p$ncpus),
+        as.integer(p$numThreads),
         p$correctChenEtAlBug,
         verboseIter,
         if (is.null(p$seed)) NULL else as.integer(p$seed)
@@ -611,7 +555,7 @@ dentist <- function(
 #' @param nIter Number of iterations. Default is 10.
 #' @param gPvalueThreshold Grouping p-value threshold. Default is 0.05.
 #' @param duprThreshold Duplicate r-squared threshold. Default is 0.99.
-#' @param ncpus Number of CPU cores. Default is 1.
+#' @param numThreads Number of CPU cores. Default is 1.
 #' @param correctChenEtAlBug Correct the original DENTIST operator! bug. Default
 #'   is TRUE.
 #' @param ldMethod Character string specifying the LD computation method when
@@ -644,7 +588,7 @@ dentistSingleWindow <- function(
     nIter = 10,
     gPvalueThreshold = 0.05,
     duprThreshold = 0.99,
-    ncpus = 1,
+    numThreads = 1,
     correctChenEtAlBug = TRUE,
     ldMethod = "sample",
     seed = NULL
@@ -665,7 +609,7 @@ dentistSingleWindow <- function(
         gcControl = gcControl,
         nIter = nIter,
         gPvalueThreshold = gPvalueThreshold,
-        ncpus = ncpus,
+        numThreads = numThreads,
         correctChenEtAlBug = correctChenEtAlBug,
         seed = seed
     )
@@ -712,7 +656,7 @@ dentistSingleWindow <- function(
 }
 
 # Map each variant to its row in the de-duplicated DENTIST output.
-.dentistBuildAssignIdx <- function(dupBearer, nrowsDup) {
+.dentistBuildAssignIdx <- function(dupBearer) {
     # Non-duplicates take the next free slot, which is just how many
     # non-duplicates have been seen so far; duplicates point at their bearer.
     isNew <- dupBearer == -1
@@ -754,7 +698,7 @@ addDupsBackDentist <- function(zScore, dentistOutput, findDupOutput) {
     dupBearer <- findDupOutput$dupBearer
     nrowsDup <- length(dupBearer)
     .dentistValidateDups(zScore, dentistOutput, dupBearer, nrowsDup)
-    assignIdx <- .dentistBuildAssignIdx(dupBearer, nrowsDup)
+    assignIdx <- .dentistBuildAssignIdx(dupBearer)
     .dentistFillDups(zScore, dentistOutput, findDupOutput, assignIdx)
 }
 
@@ -1310,14 +1254,6 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
 # SLALoM: Approximate Bayes Factor single-causal-variant outlier detection
 # =============================================================================
 
-# Numerically stable log-sum-exp.
-# @noRd
-.logSumExp <- function(x) {
-    maxX <- max(x, na.rm = TRUE)
-    sumExp <- sum(exp(x - maxX), na.rm = TRUE)
-    return(maxX + log(sumExp))
-}
-
 # Approximate (Wakefield) Bayes factors from z-scores and standard errors:
 # per-variant log-BF and normalized posterior probabilities.
 # @noRd
@@ -1325,7 +1261,9 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
     V <- se^2
     r <- W / (W + V)
     lbf <- 0.5 * (log(1 - r) + (r * z^2))
-    denom <- .logSumExp(lbf)
+    # matrixStats is an Import and its logSumExp is the same algorithm in C;
+    # pecotmr carried a hand-rolled R copy of it.
+    denom <- matrixStats::logSumExp(lbf, na.rm = TRUE)
     prob <- exp(lbf - denom)
     return(list(lbf = lbf, prob = prob))
 }
@@ -1344,24 +1282,11 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
 # --- slalom helpers ---------------------------------------------------------
 
 # Require exactly one of R (LD matrix) or X (genotype matrix).
-.slalomValidate <- function(R, X) {
-    if (is.null(R) && is.null(X)) {
-        abort("Either R (LD matrix) or X (genotype matrix) must be provided.")
-    }
-    if (!is.null(R) && !is.null(X)) {
-        abort("Provide either R or X, not both.")
-    }
-}
-
-# Lead-variant LD column. From X, compute just that column (avoid full p x p).
+# Lead-variant LD column. `R` has already been resolved from `X` where the
+# caller gave genotypes, so there is one source here and `ldMethod` has
+# already been applied.
 #' @importFrom checkmate assertMatrix
-.slalomLeadR <- function(zScore, R, X, leadIdx) {
-    if (!is.null(X)) {
-        if (!is.matrix(X)) {
-            X <- as.matrix(X)
-        }
-        return(as.numeric(cor(X, X[, leadIdx])))
-    }
+.slalomLeadR <- function(zScore, R, leadIdx) {
     assertMatrix(R, nrows = length(zScore), ncols = length(zScore))
     R[, leadIdx]
 }
@@ -1476,7 +1401,13 @@ slalom <- function(
     leadVariantChoice = "pvalue",
     ldMethod = "sample"
 ) {
-    .slalomValidate(R, X)
+    # Resolve the LD the same way dentist does, so `ldMethod` selects the
+    # estimator it advertises. This used to correlate the lead column of `X`
+    # with cor() directly, which skipped computeLd entirely: "population"
+    # and "gcta" were accepted and silently given sample LD. Building the
+    # full matrix is the cost of honouring the choice, and is what the
+    # sibling QC method already pays on the same input.
+    R <- resolveLdInput(R = R, X = X, ldMethod = ldMethod)$R
     # One-sided p-value matching the original Python (stats.norm.cdf): lead is
     # the most negative z-score when leadVariantChoice == "pvalue".
     pvalue <- pnorm(zScore)
@@ -1493,7 +1424,7 @@ slalom <- function(
     } else {
         which.max(prob)
     }
-    rLead <- .slalomLeadR(zScore, R, X, leadIdx)
+    rLead <- .slalomLeadR(zScore, R, leadIdx)
     ds <- .slalomDentistS(
         zScore,
         rLead,
@@ -2281,6 +2212,78 @@ raiss <- function(
     .raissLdBlocksPath(refPanel, knownZscores, ldMatrix, p)
 }
 
+#' @title Arguments For RAISS Imputation During Summary-Statistic QC
+#' @description The settings \code{\link{summaryStatsQc}} uses when
+#'   \code{impute = TRUE}. Four are forwarded to \code{\link{raiss}}; the
+#'   other four are pecotmr's own, bounding which panel variants RAISS is
+#'   asked to impute and how wide a window it reads.
+#'
+#'   \code{\link{raiss}} also takes an \code{rcond}, but only on its
+#'   LD-matrix path. QC always hands it a genotype matrix, which routes
+#'   through the SVD solver and uses \code{svdTol} instead, so \code{rcond}
+#'   is not offered here --- naming it is an error rather than a setting that
+#'   silently does nothing.
+#' @param lamb Regularization term added to the LD diagonal. Default
+#'   \code{0.01}.
+#' @param svdTol Singular-value cutoff for the pseudo-inverse. Default
+#'   \code{1e-12}. Note this is tighter than \code{\link{raiss}}'s own
+#'   \code{1e-8} default.
+#' @param r2Threshold Imputation \eqn{R^2} below which a variant is dropped
+#'   from the output. Default \code{0.6}.
+#' @param minimumLd Minimum LD score for retaining an imputed variant.
+#'   Default \code{5}.
+#' @param mafCutoff Minor-allele-frequency floor for a variant to be an
+#'   imputation TARGET. Default \code{0}.
+#' @param macCutoff Minor-allele-count floor for a target; the stricter of
+#'   this and \code{mafCutoff} applies. Default \code{0}.
+#' @param imissCutoff Missingness ceiling for a target. Default \code{1}.
+#' @param flank Base pairs by which to widen the analysis-region window on
+#'   each side, retaining LD context for edge variants. Default \code{0}.
+#' @return A \code{\link{MethodConfig}} object.
+#' @seealso \code{\link{summaryStatsQc}}, \code{\link{raiss}}
+#' @examples
+#' raissConfig(mafCutoff = 0.01, flank = 5e5)
+#' @export
+raissConfig <- function(
+    lamb = 0.01,
+    svdTol = 1e-12,
+    r2Threshold = 0.6,
+    minimumLd = 5,
+    mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1,
+    flank = 0
+) {
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            lamb = lamb,
+            svdTol = svdTol,
+            r2Threshold = r2Threshold,
+            minimumLd = minimumLd,
+            mafCutoff = mafCutoff,
+            macCutoff = macCutoff,
+            imissCutoff = imissCutoff,
+            flank = flank
+        ),
+        extra = list(),
+        label = "raissConfig",
+        engine = "raiss"
+    )
+}
+
+# The RAISS bundle as a plain list with every field present. A constructor
+# result already carries all eight -- they are all formals with defaults --
+# and the empty list that means "no options" becomes the defaults outright,
+# so the read sites need no per-field fallback.
+# @noRd
+.ssqcResolveImputeArgs <- function(imputeArgs) {
+    if (length(imputeArgs) == 0L) {
+        return(as.list(raissConfig()))
+    }
+    as.list(imputeArgs)
+}
+
 #' @importFrom checkmate assertNumeric
 #' @param zt Vector of known z scores.
 #' @param sigT Matrix of known linkage disequilibrium (LD) correlation.
@@ -2581,6 +2584,128 @@ invertMatEigen <- function(mat, tol = 1e-3) {
 # Top-level summaryStatsQc() pipeline + helpers
 # =============================================================================
 
+#' @title Arguments For The SLALOM LD-Mismatch Check
+#' @description Options for \code{\link{slalom}}, pecotmr's SLALOM
+#'   implementation. Every field is a formal of that function, so an unknown
+#'   name is rejected by R as an unused argument; there is no \code{...}
+#'   because the contract is complete. Pass the result as
+#'   \code{ldMismatchQc(method = )} or
+#'   \code{summaryStatsQc(ldMismatchQcMethod = )}.
+#' @param standardError Per-variant standard errors. \code{NULL} (default)
+#'   leaves \code{\link{slalom}}'s own data-dependent default in place.
+#' @param abfPriorVariance Prior variance for the approximate Bayes factor.
+#'   Default \code{0.04}.
+#' @param nlog10pDentistSThreshold \code{-log10(p)} threshold on the
+#'   DENTIST-S statistic above which a variant is an outlier. Default
+#'   \code{4.0}.
+#' @param r2Threshold Minimum r-squared with the lead variant for a variant to
+#'   be tested. Default \code{0.6}.
+#' @param leadVariantChoice How the lead variant is chosen. Default
+#'   \code{"pvalue"}.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' slalomConfig(r2Threshold = 0.8)
+#' @export
+slalomConfig <- function(
+    standardError = NULL,
+    abfPriorVariance = 0.04,
+    nlog10pDentistSThreshold = 4.0,
+    r2Threshold = 0.6,
+    leadVariantChoice = "pvalue"
+) {
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            standardError = standardError,
+            abfPriorVariance = abfPriorVariance,
+            nlog10pDentistSThreshold = nlog10pDentistSThreshold,
+            r2Threshold = r2Threshold,
+            leadVariantChoice = leadVariantChoice
+        ),
+        extra = list(),
+        label = "slalomConfig",
+        engine = "slalom"
+    )
+}
+
+#' @title Arguments For The DENTIST LD-Mismatch Check
+#' @description Options for \code{\link{dentistSingleWindow}}, pecotmr's
+#'   DENTIST implementation. Every field is a formal of that function, so an
+#'   unknown name is rejected by R as an unused argument; there is no
+#'   \code{...} because the contract is complete. Pass the result as
+#'   \code{ldMismatchQc(method = )} or
+#'   \code{summaryStatsQc(ldMismatchQcMethod = )}.
+#' @param pValueThreshold Significance threshold for the DENTIST statistic.
+#'   Default \code{5e-8}.
+#' @param propSVD Proportion of the singular value decomposition retained.
+#'   Default \code{0.4}.
+#' @param gcControl Logical; apply genomic control. Default \code{FALSE}.
+#' @param nIter Number of DENTIST iterations. Default \code{10}.
+#' @param gPvalueThreshold Grouping p-value threshold. Default \code{0.05}.
+#' @param duprThreshold Duplicate r-squared threshold. Default \code{0.99}.
+#' @param numThreads Number of CPU cores. Default \code{1}.
+#' @param correctChenEtAlBug Logical; apply the Chen et al. correction.
+#'   Default \code{TRUE}.
+#' @param seed Integer or \code{NULL}. Random seed for the iteration.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' dentistConfig(propSVD = 0.5)
+#' @export
+dentistConfig <- function(
+    pValueThreshold = 5e-8,
+    propSVD = 0.4,
+    gcControl = FALSE,
+    nIter = 10,
+    gPvalueThreshold = 0.05,
+    duprThreshold = 0.99,
+    numThreads = 1,
+    correctChenEtAlBug = TRUE,
+    seed = NULL
+) {
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            pValueThreshold = pValueThreshold,
+            propSVD = propSVD,
+            gcControl = gcControl,
+            nIter = nIter,
+            gPvalueThreshold = gPvalueThreshold,
+            duprThreshold = duprThreshold,
+            numThreads = numThreads,
+            correctChenEtAlBug = correctChenEtAlBug,
+            seed = seed
+        ),
+        extra = list(),
+        label = "dentistConfig",
+        engine = "dentist"
+    )
+}
+
+# The engines ldMismatchQc dispatches to, and the constructor for each. Keyed
+# by the name `method` accepts, so a bare name resolves to an empty record.
+# @noRd
+.ldMismatchCtors <- function() {
+    list(slalom = slalomConfig, dentist = dentistConfig)
+}
+
+# Normalize summaryStatsQc's ldMismatchQcMethod: a name (including "none", for
+# which there is no engine to configure) or the engine's constructor. Returns
+# the value unchanged once validated, so it can be handed straight to
+# ldMismatchQc(method = ).
+# @noRd
+.resolveLdMismatchChoice <- function(x) {
+    allowed <- c("none", names(.ldMismatchCtors()))
+    engine <- .engineOf(if (is.character(x)) x[[1L]] else x)
+    if (is.null(engine) || !is_in(engine, allowed)) {
+        .resolveEngineChoice(
+            if (is.character(x)) x[[1L]] else x,
+            allowed,
+            "ldMismatchQcMethod"
+        )
+    }
+    if (is.character(x)) x[[1L]] else x
+}
+
 #' Detect LD-Summary Statistic Mismatches
 #'
 #' Unified wrapper for detecting outlier variants due to LD-summary statistic
@@ -2594,14 +2719,15 @@ invertMatEigen <- function(mat, tol = 1e-3) {
 #' @param nSample Number of samples in the LD reference panel. Required when
 #'   \code{R} is provided and \code{method = "dentist"}; inferred from \code{X}
 #'   when \code{X} is provided.
-#' @param method Character string specifying the QC method: \code{"slalom"}
-#'   (default) or \code{"dentist"}.
+#' @param method Which QC method to run: \code{"slalom"} (default) or
+#'   \code{"dentist"}, or the matching constructor --
+#'   \code{\link{slalomConfig}} / \code{\link{dentistConfig}} -- to configure
+#'   it at the same time. The constructor carries the choice, so there is no
+#'   separate options argument that could disagree with it.
 #' @param ldMethod Character string specifying the LD computation method when
 #'   \code{X} is provided. One of \code{"sample"} (default),
 #'   \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is provided
 #'   directly.
-#' @param methodArgs Optional named list of options passed to the
-#'   underlying QC method (\code{slalom} or \code{dentistSingleWindow}).
 #' @return A data frame with at least a logical \code{outlier} column indicating
 #'   which variants are identified as outliers. The remaining columns depend on
 #'   the method used.
@@ -2620,11 +2746,18 @@ ldMismatchQc <- function(
     X = NULL,
     nSample = NULL,
     method = c("slalom", "dentist"),
-    ldMethod = "sample",
-    methodArgs = list()
+    ldMethod = "sample"
 ) {
-    method <- arg_match(method)
-    if (method == "dentist") {
+    # `method` carries both the choice and its options: a bare name resolves
+    # to that engine with no options set, a constructor result to that engine
+    # configured. One value, so the two cannot disagree.
+    chosen <- .resolveEngineChoice(
+        if (is.character(method)) method[[1L]] else method,
+        names(.ldMismatchCtors()),
+        "method"
+    )
+    methodArgs <- chosen$args
+    if (chosen$engine == "dentist") {
         callArgs <- list_modify(
             list(
                 zScore,
@@ -2709,6 +2842,41 @@ effectiveN <- function(nCase, nControl) {
     }
 }
 
+#' @title Options for the susieR Kriging RSS Diagnostic
+#' @description Build a checked record of extra arguments for
+#'   \code{susieR::kriging_rss()}, the engine behind
+#'   \code{\link{krigingOutlierQc}}.
+#' @param ... Arguments for \code{susieR::kriging_rss()}: \code{r_tol} (the
+#'   eigenvalue tolerance below which an LD eigenvalue is treated as zero) and
+#'   \code{s} (the estimated proportion of LD/sumstats mismatch, which
+#'   defaults to \code{susieR::estimate_s_rss()}). \code{z}, \code{R} and
+#'   \code{n} are supplied by pecotmr and refused.
+#' @return A \code{MethodConfig} record for
+#'   \code{krigingOutlierQc(methodArgs =)}.
+#' @seealso \code{\link{krigingOutlierQc}}
+#' @examples
+#' krigingConfig(r_tol = 1e-06)
+#' @export
+krigingConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            z = "the caller's `zScore`",
+            R = "the caller's `R`",
+            n = "the caller's `n`"
+        ),
+        "krigingConfig"
+    )
+    .newMethodConfig(
+        "susieR::kriging_rss",
+        defaults = list(),
+        extra = extra,
+        label = "krigingConfig",
+        engine = "kriging"
+    )
+}
+
 #' Kriging-style LD-consistency outlier QC
 #'
 #' Flags variants whose observed z-score is inconsistent with the value
@@ -2733,6 +2901,8 @@ effectiveN <- function(nCase, nControl) {
 #'   \code{2}, matching susieR).
 #' @param logLRThreshold Log-likelihood-ratio cutoff for the allele-switch rule
 #'   (default \code{2}, matching susieR).
+#' @param methodArgs Extra arguments for \code{susieR::kriging_rss()}, built
+#'   with \code{\link{krigingConfig}} -- \code{r_tol} and \code{s}.
 #' @return A list with \code{flip} (logical vector; \code{TRUE} = allele switch,
 #'   z-score should be sign-flipped) and \code{diagnostics} (data frame of
 #'   per-variant \code{z}, \code{condmean}, \code{z_std_diff}, \code{logLR}, and
@@ -2752,8 +2922,10 @@ krigingOutlierQc <- function(
     n,
     variantIds = NULL,
     zThreshold = 2,
-    logLRThreshold = 2
+    logLRThreshold = 2,
+    methodArgs = krigingConfig()
 ) {
+    .assertMethodConfig(methodArgs, "krigingConfig", "methodArgs")
     zScore <- as.numeric(zScore)
     m <- length(zScore)
     assertMatrix(R, nrows = m, ncols = m, .var.name = "R (LD matrix)")
@@ -2766,7 +2938,13 @@ krigingOutlierQc <- function(
     }
     # susieR kriging RSS diagnostic (kriging_rss(z, R, n)): s defaults to
     # estimate_s_rss(); logLR matches susieR's allele-switch selection.
-    cd <- susieR::kriging_rss(z = zScore, R = R, n = n)$conditional_dist
+    cd <- exec(
+        susieR::kriging_rss,
+        z = zScore,
+        R = R,
+        n = n,
+        !!!as.list(methodArgs)
+    )$conditional_dist
     condMean <- as.numeric(cd$condmean)
     zStdDiff <- as.numeric(cd$z_std_diff)
     logLR <- as.numeric(cd$logLR)
@@ -3581,7 +3759,11 @@ krigingOutlierQc <- function(
     if (is.null(df$SNP) || any(is.na(df$SNP))) {
         abort("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
     }
-    panel <- .qcPanelSupportedLd(df, ldSketch, "summaryStatsQc: zMismatchQc")
+    panel <- .qcPanelSupportedLd(
+        df,
+        ldSketch,
+        "summaryStatsQc: ldMismatchQcMethod"
+    )
     if (is.null(panel$R)) {
         return(list(
             df = panel$df,
@@ -3628,7 +3810,7 @@ krigingOutlierQc <- function(
 # Signal screen: skip an entry/block with no strong signal by a chosen metric.
 # -----------------------------------------------------------------------------
 # The screen is driven by ONE metric at a time (enforced by
-# .resolveScreenMetric): pip : max single-effect PIP (susie_ser $pip); cutoff<0
+# signalScreenConfig): pip : max single-effect PIP (susie_ser $pip); cutoff<0
 # => 3/nVar absZ : max |Z| (no model fit) logBf : max per-variant single-effect
 # logBF (susie_ser $lbf_variable) bf : same evidence on the raw BF scale
 # (compare maxlogBF > log(cutoff)) A "screen spec" flowing through the pipelines
@@ -3636,7 +3818,8 @@ krigingOutlierQc <- function(
 # `pipCutoffToSkip`) OR a resolved screen object `list(metric, cutoff)`.
 # .asScreen() canonicalizes either into `list(metric, cutoff)` or NULL (no
 # screen); the pipeline channels stay untyped so only the screen primitives need
-# to interpret the spec.
+# to interpret the spec. signalScreenConfig() is what the public entry points
+# take; .screenResolve() turns one into the spec described above.
 
 # Canonicalize a screen spec into list(metric, cutoff) or NULL (no screen).
 .asScreen <- function(spec) {
@@ -3663,48 +3846,6 @@ krigingOutlierQc <- function(
     list(metric = "pip", cutoff = as.numeric(spec))
 }
 
-# Turn the four public cutoff arguments into a single screen object (or NULL).
-# Enforces one-metric-at-a-time and rejects meaningless negative cutoffs. The
-# pip metric keeps its `< 0 => 3 / nVariants` adaptive convention (resolved at
-# screen time); absZ / bf must be > 0; logBf may be any non-zero value.
-.resolveScreenMetric <- function(
-    pipCutoffToSkip = 0,
-    absZCutoffToSkip = 0,
-    bfCutoffToSkip = 0,
-    logBfCutoffToSkip = 0
-) {
-    scalar <- function(x) {
-        if (is.null(x) || length(x) != 1L || is.na(x)) 0 else as.numeric(x)
-    }
-    cuts <- c(
-        pip = scalar(pipCutoffToSkip),
-        absZ = scalar(absZCutoffToSkip),
-        bf = scalar(bfCutoffToSkip),
-        logBf = scalar(logBfCutoffToSkip)
-    )
-    on <- cuts[cuts != 0]
-    if (length(on) == 0L) {
-        return(NULL)
-    }
-    if (length(on) > 1L) {
-        nonZero <- str_flatten(sprintf("%s=%g", names(on), on), collapse = ", ")
-        msg <- glue(
-            "Only one signal screen may be enabled at a time, but these ",
-            "are non-zero: {nonZero}. Set all but one of pipCutoffToSkip / ",
-            "absZCutoffToSkip / bfCutoffToSkip / logBfCutoffToSkip to 0."
-        )
-        abort(msg)
-    }
-    metric <- names(on)
-    cutoff <- unname(on[[1L]])
-    if (metric == "absZ" && cutoff < 0) {
-        abort("absZCutoffToSkip must be > 0 (it screens on max|Z|).")
-    }
-    if (metric == "bf" && cutoff < 0) {
-        abort("bfCutoffToSkip must be > 0 (Bayes factors are positive).")
-    }
-    list(metric = metric, cutoff = cutoff)
-}
 
 # Decide whether the z-scores of one entry clear the chosen screen. Returns
 # list(ok = logical, reason = character). susie_ser is fit at most once, and
@@ -3995,7 +4136,7 @@ krigingOutlierQc <- function(
 }
 
 # Which reference-panel variants to keep, given the MAF / MAC / missingness
-# cutoffs in `imputeOpts`.
+# cutoffs in `imputeArgs`.
 #
 # The cutoffs govern what RAISS is willing to IMPUTE, not what it is willing to
 # keep, so an observed variant survives whatever its frequency in the LD panel.
@@ -4009,9 +4150,9 @@ krigingOutlierQc <- function(
 # study is much smaller than the panel.
 # @noRd
 .qcRaissTargetMask <- function(refPanel, knownZ, dosage, opts) {
-    mafCutoff <- opts$imputeOpts$mafCutoff %||% 0
-    macCutoff <- opts$imputeOpts$macCutoff %||% 0
-    imissCutoff <- opts$imputeOpts$imissCutoff %||% 1
+    mafCutoff <- opts$imputeArgs$mafCutoff
+    macCutoff <- opts$imputeArgs$macCutoff
+    imissCutoff <- opts$imputeArgs$imissCutoff
     keep <- rep(TRUE, nrow(refPanel))
     if (mafCutoff <= 0 && macCutoff <= 0 && imissCutoff >= 1) {
         return(keep)
@@ -4042,17 +4183,30 @@ krigingOutlierQc <- function(
     .panelVariantStats(dosage)
 }
 
+
+# raissConfig() covers two audiences: four fields are raiss()'s own formals and
+# four bound what RAISS is asked to impute. Splitting the bundle here lets the
+# call site splice rather than name each field, and keeps the two groups from
+# being confused for one another.
+# @noRd
+.raissForwardedNames <- function() {
+    c("lamb", "svdTol", "r2Threshold", "minimumLd")
+}
+
+# @noRd
+.raissForwardedArgs <- function(imputeArgs) {
+    as.list(imputeArgs)[.raissForwardedNames()]
+}
+
 # Run RAISS with per-call option defaults.
 .qcRaissRun <- function(inp, opts) {
-    raiss(
+    exec(
+        raiss,
         refPanel = inp$refPanel,
         knownZscores = inp$knownZ,
         genotypeMatrix = inp$scaledDosage,
-        svdTol = opts$imputeOpts$svdTol %||% 1e-12,
-        lamb = opts$imputeOpts$lamb %||% 0.01,
-        r2Threshold = opts$imputeOpts$r2Threshold %||% 0.6,
-        minimumLd = opts$imputeOpts$minimumLd %||% 5,
-        verbose = FALSE
+        verbose = FALSE,
+        !!!.raissForwardedArgs(opts$imputeArgs)
     )
 }
 
@@ -4146,11 +4300,7 @@ krigingOutlierQc <- function(
 # fields + before/after counts (imputation adds variants, so not monotonic).
 .qcRaissImpute <- function(df, ldSketch, opts, lbl) {
     imputeBefore <- nrow(df)
-    flank <- if (is.null(opts$imputeOpts$flank)) {
-        0L
-    } else {
-        as.integer(opts$imputeOpts$flank)
-    }
+    flank <- as.integer(opts$imputeArgs$flank)
     windowIdx <- .qcRaissWindowIdx(df, ldSketch, flank)
     if (length(windowIdx) == 0L) {
         .qcEmit(
@@ -4215,7 +4365,7 @@ krigingOutlierQc <- function(
         .qcSeg(cf$infoDropped, "info"),
         .qcSeg(cf$nDropped, "nCutoff"),
         .qcSeg(qcCount$harmDropped, "harmonization"),
-        if (!identical(opts$zMismatchQc, "none")) {
+        if (!identical(.engineOf(opts$ldMismatchQcMethod), "none")) {
             str_c("mismatch ", qcCount$mismatchRemoved)
         }
     )
@@ -4270,8 +4420,8 @@ krigingOutlierQc <- function(
         df,
         ldSketch,
         matchMinProp = opts$matchMinProp,
-        removeIndels = opts$removeIndels,
-        removeStrandAmbiguous = opts$removeStrandAmbiguous,
+        removeIndels = opts$sumstatsFilterArgs$removeIndels,
+        removeStrandAmbiguous = opts$sumstatsFilterArgs$removeStrandAmbiguous,
         removeDups = TRUE
     )
     harmCounts <- attr(matched, "qcCounts")
@@ -4404,15 +4554,18 @@ krigingOutlierQc <- function(
 
 # LD-mismatch QC (SLALOM / DENTIST). Retains full per-variant diagnostics.
 .qcMismatchQc <- function(df, ldSketch, opts, lbl) {
-    if (identical(opts$zMismatchQc, "none") || nrow(df) < 2L) {
+    if (
+        identical(.engineOf(opts$ldMismatchQcMethod), "none") ||
+            nrow(df) < 2L
+    ) {
         return(list(df = df, audit = list(), count = 0L))
     }
     nMmIn <- nrow(df)
-    ldQc <- .applyLdMismatchQcToEntry(df, ldSketch, opts$zMismatchQc)
+    ldQc <- .applyLdMismatchQcToEntry(df, ldSketch, opts$ldMismatchQcMethod)
     df <- ldQc$df
     baseAudit <- list(
         ldMismatchOutliersDropped = ldQc$outliers,
-        ldMismatchMethod = opts$zMismatchQc
+        ldMismatchMethod = .engineOf(opts$ldMismatchQcMethod)
     )
     nPanelDrop <- ldQc$panelUnsupportedDropped %||% 0L
     audit <- c(
@@ -4435,7 +4588,7 @@ krigingOutlierQc <- function(
     .qcEmit(
         lbl,
         "QC track: ",
-        opts$zMismatchQc,
+        .engineOf(opts$ldMismatchQcMethod),
         " removed ",
         ldQc$outliers,
         " of ",
@@ -4476,18 +4629,10 @@ krigingOutlierQc <- function(
 # numeric coercion, CHR normalization, missing-data drop). Runs first.
 .qcStepSanity <- function(df, opts, lbl) {
     nSanIn <- nrow(df)
-    sanity <- .applySanityChecks(
-        df,
-        coerceNumeric = opts$coerceNumeric,
-        normalizeChr = opts$normalizeChr,
-        dropNonstandardChr = opts$dropNonstandardChr,
-        dropMissData = opts$dropMissData,
-        dropPOutOfRange = opts$dropPOutOfRange,
-        clampSmallP = opts$clampSmallP,
-        smallPFloor = opts$smallPFloor,
-        dropZeroEffect = opts$dropZeroEffect,
-        dropNonpositiveSe = opts$dropNonpositiveSe
-    )
+    # The boundary: the bundle travels this far, and .applySanityChecks and
+    # the per-check helpers below it keep plain scalars.
+    cleaning <- opts$sumstatsCleaningArgs
+    sanity <- exec(.applySanityChecks, df, !!!cleaning)
     df <- sanity$df
     audit <- .qcAudit(
         sanityChecks = if (length(sanity$audit) > 0L) sanity$audit
@@ -4529,11 +4674,15 @@ krigingOutlierQc <- function(
 # Variant-content filters (MAF / INFO / N).
 .qcStepContentFilters <- function(df, opts, lbl) {
     nFiltIn <- nrow(df)
+    # One mafCutoff drives two filters: the sumstats' own MAF column here,
+    # and the LD panel in .ssqcPrunePanel. It has always been a single knob,
+    # so it is read from panelFilter in both places rather than quietly
+    # becoming two separate settings.
     cf <- .applyContentFilters(
         df,
-        mafCutoff = opts$mafCutoff,
-        infoCutoff = opts$infoCutoff,
-        nCutoff = opts$nCutoff
+        mafCutoff = opts$panelFilterArgs$mafCutoff,
+        infoCutoff = opts$sumstatsFilterArgs$infoCutoff,
+        nCutoff = opts$sumstatsFilterArgs$nCutoff
     )
     df <- cf$df
     audit <- .qcAudit(
@@ -4582,18 +4731,17 @@ krigingOutlierQc <- function(
 # Re-clamp the P values just derived from Z, and report how many moved.
 # @noRd
 .qcClampDerivedP <- function(df, opts) {
-    if (!isTRUE(opts$clampSmallP) || nrow(df) == 0L) {
+    cleaning <- opts$sumstatsCleaningArgs
+    if (!isTRUE(cleaning$clampSmallP) || nrow(df) == 0L) {
         return(list(df = df, nClamped = 0L))
     }
-    smallMask <- !is.na(df$P) & df$P >= 0 & df$P < opts$smallPFloor
+    floorP <- cleaning$smallPFloor
+    smallMask <- !is.na(df$P) & df$P >= 0 & df$P < floorP
     if (sum(smallMask) == 0L) {
         return(list(df = df, nClamped = 0L))
     }
     list(
-        df = mutate(
-            df,
-            P = replace(.data$P, smallMask, opts$smallPFloor)
-        ),
+        df = mutate(df, P = replace(.data$P, smallMask, floorP)),
         nClamped = sum(smallMask)
     )
 }
@@ -4839,7 +4987,6 @@ krigingOutlierQc <- function(
 .runEntrySummaryStatsQc <- function(
     gr,
     ldSketch,
-    refGenome,
     opts,
     entryLabel = NULL
 ) {
@@ -4975,7 +5122,7 @@ krigingOutlierQc <- function(
 
 # Validate input class + per-entry MAF/INFO column availability.
 #' @importFrom checkmate assertMultiClass
-.ssqcCheckEntries <- function(sumstats, mafCutoff, infoCutoff) {
+.ssqcCheckEntries <- function(sumstats, infoCutoff) {
     assertMultiClass(sumstats, c("QtlSumStats", "GwasSumStats"))
     for (i in seq_len(nrow(sumstats))) {
         cols <- colnames(S4Vectors::mcols(.collectionEntry(sumstats, i)))
@@ -5001,13 +5148,10 @@ krigingOutlierQc <- function(
 # Shape-check the panel-filter trio. Runs before the panel is opened, so a
 # malformed cutoff fails on the call rather than after a dosage read.
 # @noRd
-.ssqcCheckPanelCutoffs <- function(mafCutoff, macCutoff, imissCutoff) {
-    cutoffs <- list(
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        imissCutoff = imissCutoff
-    )
-    bad <- names(cutoffs)[!map_lgl(cutoffs, .ssqcIsCutoff)]
+.ssqcCheckPanelCutoffs <- function(panelFilterArgs) {
+    bad <- names(panelFilterArgs)[
+        !map_lgl(as.list(panelFilterArgs), .ssqcIsCutoff)
+    ]
     if (length(bad) > 0L) {
         msg <- glue(
             "summaryStatsQc: {str_flatten(bad, ', ')} must each be a single ",
@@ -5020,73 +5164,39 @@ krigingOutlierQc <- function(
 
 # Build the per-entry QC options list from the captured call parameters.
 .ssqcBuildOpts <- function(
-    removeIndels,
-    removeStrandAmbiguous,
-    mafCutoff,
-    macCutoff,
-    imissCutoff,
-    infoCutoff,
-    nCutoff,
+    sumstatsFilterArgs,
+    panelFilterArgs,
     skipRegion,
-    zMismatchQc,
+    ldMismatchQcMethod,
     alleleFlipKriging,
     effectiveN,
     impute,
-    imputeOpts,
+    imputeArgs,
     matchMinProp,
-    coerceNumeric,
-    normalizeChr,
-    dropNonstandardChr,
-    dropMissData,
-    dropPOutOfRange,
-    clampSmallP,
-    smallPFloor,
-    dropZeroEffect,
-    dropNonpositiveSe,
+    sumstatsCleaningArgs,
     keepVariants,
-    pipCutoffToSkip,
-    absZCutoffToSkip,
-    bfCutoffToSkip,
-    logBfCutoffToSkip
+    signalScreenArgs
 ) {
     # Built explicitly rather than by subsetting a captured environment with a
     # character vector: a renamed argument is now an error, not a NULL entry.
     opts <- list(
-        removeIndels = removeIndels,
-        removeStrandAmbiguous = removeStrandAmbiguous,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        imissCutoff = imissCutoff,
-        infoCutoff = infoCutoff,
-        nCutoff = nCutoff,
+        sumstatsFilterArgs = sumstatsFilterArgs,
+        panelFilterArgs = panelFilterArgs,
         skipRegion = skipRegion,
-        zMismatchQc = zMismatchQc,
+        ldMismatchQcMethod = ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,
         effectiveN = effectiveN,
         impute = impute,
-        imputeOpts = imputeOpts,
+        imputeArgs = imputeArgs,
         matchMinProp = matchMinProp,
-        coerceNumeric = coerceNumeric,
-        normalizeChr = normalizeChr,
-        dropNonstandardChr = dropNonstandardChr,
-        dropMissData = dropMissData,
-        dropPOutOfRange = dropPOutOfRange,
-        clampSmallP = clampSmallP,
-        smallPFloor = smallPFloor,
-        dropZeroEffect = dropZeroEffect,
-        dropNonpositiveSe = dropNonpositiveSe
+        sumstatsCleaningArgs = sumstatsCleaningArgs
     )
     # nCase / nControl / nForPip are deliberately absent here: they are
     # per-entry, and `.ssqcEntryOpts()` adds them for the entry being run.
     list_assign(
         opts,
         keepVariants = as.character(keepVariants),
-        screen = .resolveScreenMetric(
-            pipCutoffToSkip,
-            absZCutoffToSkip,
-            bfCutoffToSkip,
-            logBfCutoffToSkip
-        )
+        screen = .screenResolve(signalScreenArgs)
     )
 }
 
@@ -5163,11 +5273,10 @@ krigingOutlierQc <- function(
 # options; the per-entry fields are derived here rather than carried over from
 # the previous entry.
 # @noRd
-.ssqcRunEntry <- function(i, sumstats, opts, ldSketch, refGenome, isQtl) {
+.ssqcRunEntry <- function(i, sumstats, opts, ldSketch, isQtl) {
     .runEntrySummaryStatsQc(
         gr = .collectionEntry(sumstats, i),
         ldSketch = ldSketch,
-        refGenome = refGenome,
         opts = .ssqcEntryOpts(opts, sumstats, i),
         entryLabel = .ssqcEntryLabel(sumstats, i, isQtl)
     )
@@ -5181,7 +5290,7 @@ krigingOutlierQc <- function(
     # and from the summary statistics alike.
     ldSketch <- .ssqcPrunePanel(
         getLdSketch(sumstats),
-        .panelCutoffs(opts$mafCutoff, opts$macCutoff, opts$imissCutoff),
+        .panelCutoffs(opts$panelFilterArgs),
         "summaryStatsQc"
     )
     refGenome <- getGenome(sumstats)
@@ -5191,7 +5300,6 @@ krigingOutlierQc <- function(
         sumstats = sumstats,
         opts = opts,
         ldSketch = ldSketch,
-        refGenome = refGenome,
         isQtl = isQtl
     )
     list(
@@ -5201,61 +5309,60 @@ krigingOutlierQc <- function(
     )
 }
 
+# One screen metric's cutoff as qcInfo echoes it. The bundle leaves an unset
+# metric absent; the echoed record has always spelled "off" as 0, and readers
+# like getQcDiagnostics() index these four names, so the output shape is kept
+# even though the input is now one argument.
+# @noRd
+.ssqcScreenEcho <- function(signalScreenArgs, metric) {
+    signalScreenArgs[[metric]] %||% 0
+}
+
 # Assemble the qcInfo record (echoed options + per-entry audits).
 .ssqcBuildQcInfo <- function(
     entryAudits,
-    removeIndels,
-    removeStrandAmbiguous,
-    mafCutoff,
-    macCutoff,
-    imissCutoff,
-    infoCutoff,
-    nCutoff,
-    pipCutoffToSkip,
-    absZCutoffToSkip,
-    bfCutoffToSkip,
-    logBfCutoffToSkip,
-    zMismatchQc,
+    sumstatsFilterArgs,
+    panelFilterArgs,
+    signalScreenArgs,
+    ldMismatchQcMethod,
     alleleFlipKriging,
     effectiveN,
     impute,
-    coerceNumeric,
-    normalizeChr,
-    dropNonstandardChr,
-    dropMissData,
-    dropPOutOfRange,
-    clampSmallP,
-    smallPFloor,
-    dropZeroEffect,
-    dropNonpositiveSe
+    sumstatsCleaningArgs
 ) {
     list(
         timestamp = NA_character_,
+        # Echoed FLAT, not nested: this record is part of the returned
+        # object's shape, which readers like getQcDiagnostics() index by
+        # these names. The bundles are an argument convention, not an
+        # output one.
         options = list(
-            removeIndels = removeIndels,
-            removeStrandAmbiguous = removeStrandAmbiguous,
-            mafCutoff = mafCutoff,
-            macCutoff = macCutoff,
-            imissCutoff = imissCutoff,
-            infoCutoff = infoCutoff,
-            nCutoff = nCutoff,
-            pipCutoffToSkip = pipCutoffToSkip,
-            absZCutoffToSkip = absZCutoffToSkip,
-            bfCutoffToSkip = bfCutoffToSkip,
-            logBfCutoffToSkip = logBfCutoffToSkip,
-            zMismatchQc = zMismatchQc,
+            removeIndels = sumstatsFilterArgs$removeIndels,
+            removeStrandAmbiguous = sumstatsFilterArgs$removeStrandAmbiguous,
+            mafCutoff = panelFilterArgs$mafCutoff,
+            macCutoff = panelFilterArgs$macCutoff,
+            imissCutoff = panelFilterArgs$imissCutoff,
+            infoCutoff = sumstatsFilterArgs$infoCutoff,
+            nCutoff = sumstatsFilterArgs$nCutoff,
+            pipCutoffToSkip = .ssqcScreenEcho(signalScreenArgs, "pip"),
+            absZCutoffToSkip = .ssqcScreenEcho(signalScreenArgs, "absZ"),
+            bfCutoffToSkip = .ssqcScreenEcho(signalScreenArgs, "bf"),
+            logBfCutoffToSkip = .ssqcScreenEcho(signalScreenArgs, "logBf"),
+            ldMismatchQcMethod = ldMismatchQcMethod,
             alleleFlipKriging = alleleFlipKriging,
             effectiveN = effectiveN,
             impute = impute,
-            coerceNumeric = coerceNumeric,
-            normalizeChr = normalizeChr,
-            dropNonstandardChr = dropNonstandardChr,
-            dropMissData = dropMissData,
-            dropPOutOfRange = dropPOutOfRange,
-            clampSmallP = clampSmallP,
-            smallPFloor = smallPFloor,
-            dropZeroEffect = dropZeroEffect,
-            dropNonpositiveSe = dropNonpositiveSe
+            # Echoed FLAT for the same reason the screen cutoffs are: these
+            # nine names are part of the returned object's shape.
+            coerceNumeric = sumstatsCleaningArgs$coerceNumeric,
+            normalizeChr = sumstatsCleaningArgs$normalizeChr,
+            dropNonstandardChr = sumstatsCleaningArgs$dropNonstandardChr,
+            dropMissData = sumstatsCleaningArgs$dropMissData,
+            dropPOutOfRange = sumstatsCleaningArgs$dropPOutOfRange,
+            clampSmallP = sumstatsCleaningArgs$clampSmallP,
+            smallPFloor = sumstatsCleaningArgs$smallPFloor,
+            dropZeroEffect = sumstatsCleaningArgs$dropZeroEffect,
+            dropNonpositiveSe = sumstatsCleaningArgs$dropNonpositiveSe
         ),
         entryAudit = entryAudits
     )
@@ -5349,49 +5456,46 @@ krigingOutlierQc <- function(
 #'   variant common in the panel but rare in the study is dropped as well.
 #'
 #' @param sumstats A \code{QtlSumStats} or \code{GwasSumStats} collection.
-#' @param removeIndels Logical (length 1). When \code{TRUE}, drop indels during
-#'   panel harmonization. Default \code{FALSE}.
-#' @param removeStrandAmbiguous Logical (length 1). When \code{TRUE}, drop A/T
-#'   and C/G strand-ambiguous variants. Default \code{TRUE}.
-#' @param mafCutoff Numeric (length 1). Minor-allele-frequency threshold,
-#'   measured wherever it can be: against the summary statistics' own
-#'   \code{AF} / \code{MAF} / \code{FRQ} column when one is present, and
-#'   against the LD reference panel. Default 0 (off). See the panel-filters
-#'   section below.
-#' @param macCutoff Numeric (length 1). Minor-allele-count threshold for the
-#'   LD reference panel, converted to a MAF equivalent using
-#'   \code{macCutoff / (2 * nSamples)}; the stricter of it and
-#'   \code{mafCutoff} applies. Default 0 (off).
-#' @param imissCutoff Numeric (length 1). Per-variant missingness-rate ceiling
-#'   for the LD reference panel. Default 1 (off).
-#' @param infoCutoff Numeric (length 1). INFO score threshold. Default 0.
-#'   Requires \code{INFO} column when non-zero.
-#' @param nCutoff Numeric (length 1). Sample-size deviation threshold: drop
-#'   variants whose \code{N} is more than \code{nCutoff}
-#'   median-absolute-deviations from the median. Set to 0 to disable. Default 5.
+#' @param sumstatsFilterArgs Row filters applied to the summary statistics
+#'   themselves, built with \code{\link{sumstatsFilterConfig}}:
+#'   \code{removeIndels} drops indels during panel harmonization,
+#'   \code{removeStrandAmbiguous} drops A/T and C/G variants,
+#'   \code{infoCutoff} is an INFO-score floor (requiring an \code{INFO}
+#'   column when non-zero), and \code{nCutoff} drops variants whose \code{N}
+#'   is more than that many median-absolute-deviations from the median (0
+#'   disables it).
+#' @param panelFilterArgs LD-reference-panel filters, built with
+#'   \code{\link{panelFilterConfig}}. \code{macCutoff} is converted to a MAF
+#'   equivalent using \code{macCutoff / (2 * nSamples)} and the stricter of
+#'   it and \code{mafCutoff} applies; \code{imissCutoff} is a per-variant
+#'   missingness ceiling. See the panel-filters section below.
+#'
+#'   \code{mafCutoff} is the one setting that reaches past the panel: it is
+#'   measured wherever it can be, against the summary statistics' own
+#'   \code{AF} / \code{MAF} / \code{FRQ} column when one is present
+#'   \emph{and} against the panel. It has always been a single knob, so it
+#'   lives here rather than being split into two that could disagree.
 #' @param keepVariants Optional character vector of variant IDs (SNP column) to
 #'   retain prior to harmonization.
 #' @param skipRegion Optional character vector of \code{"chr:start-end"}
 #'   strings, or a \code{GRanges}, of regions to drop.
-#' @param pipCutoffToSkip Numeric (length 1). When \code{!= 0}, run an
-#'   LD-independent single-effect SER screen and skip the entry if no PIP
-#'   exceeds the cutoff. \code{< 0} resolves to \code{3 / nVariants}. Default 0
-#'   (no screen).
-#' @param absZCutoffToSkip Numeric (length 1). Alternative signal screen: skip
-#'   the entry when \code{max(abs(Z))} does not exceed the cutoff. No model fit.
-#'   Default 0 (off).
-#' @param bfCutoffToSkip Numeric (length 1). Alternative signal screen: skip the
-#'   entry when the largest per-variant single-effect Bayes factor (from the
-#'   same \code{susie_ser} fit as the PIP screen) does not exceed the cutoff.
-#'   Compared in log space (\code{maxlogBF > log(cutoff)}). Must be \code{> 0}.
-#'   Default 0 (off).
-#' @param logBfCutoffToSkip Numeric (length 1). As \code{bfCutoffToSkip} but the
-#'   cutoff is on the log Bayes factor scale (\code{maxlogBF > cutoff}). Default
-#'   0 (off). Exactly one of \code{pipCutoffToSkip} / \code{absZCutoffToSkip} /
-#'   \code{bfCutoffToSkip} / \code{logBfCutoffToSkip} may be non-zero (one
-#'   screening metric at a time); enabling more than one is an error.
-#' @param zMismatchQc One of \code{"none"} (default), \code{"slalom"},
-#'   \code{"dentist"}.
+#' @param signalScreenArgs Whether to skip an entry before fitting it,
+#'   built with
+#'   \code{\link{signalScreenConfig}} --- the same bundle
+#'   \code{\link{fineMappingPipeline}} and \code{\link{colocboostPipeline}}
+#'   take. \code{pip} runs an LD-independent single-effect SER screen and
+#'   skips the entry if no PIP exceeds the cutoff (\code{< 0} resolves to
+#'   \code{3 / nVariants}); \code{absZ} skips when \code{max(abs(Z))} does
+#'   not exceed the cutoff, with no model fit; \code{bf} and \code{logBf}
+#'   screen the largest per-variant single-effect Bayes factor from that same
+#'   \code{susie_ser} fit, on the raw and log scales respectively. One metric
+#'   at a time --- the constructor rejects a conflicting pair. Unset (the
+#'   default) screens nothing.
+#' @param ldMismatchQcMethod Which LD-mismatch check to run: \code{"none"}
+#'   (default), \code{"slalom"} or \code{"dentist"}, or the matching
+#'   constructor -- \code{\link{slalomConfig}} / \code{\link{dentistConfig}} --
+#'   to configure it at the same time. Exactly one engine is selected either
+#'   way, since the constructor carries the choice.
 #' @param alleleFlipKriging Logical (length 1). Opt-in kriging LD-consistency
 #'   prefilter run before SLALOM/DENTIST. Default \code{FALSE}.
 #' @param effectiveN Logical (length 1). When \code{TRUE} (default) and the
@@ -5411,18 +5515,20 @@ krigingOutlierQc <- function(
 #'   \code{ldSketch}. Default \code{FALSE}. (Note: RAISS against the sketch is
 #'   not yet fully wired for the new path; the option is accepted but currently
 #'   emits a warning and is skipped.)
-#' @param imputeOpts Named list of RAISS parameters. RAISS imputation scopes its
-#'   reference panel to the analysis-region window (so a per-chromosome /
-#'   genome-wide \code{ldSketch} does not materialize its full dosage);
-#'   \code{flank} (default 0) widens that window by the given number of base
-#'   pairs on each side to retain LD context for edge variants.
+#' @param imputeArgs RAISS settings, built with \code{\link{raissConfig}}.
+#'   A bare list is refused, since it cannot be checked.
 #'
-#'   \code{mafCutoff} (default 0), \code{macCutoff} (default 0) and
-#'   \code{imissCutoff} (default 1) bound which panel variants RAISS will
-#'   attempt to impute. Without them every rare variant in the window of a
-#'   large LD sketch becomes an imputation target, which is slow and of little
-#'   value when the study is far smaller than the panel. The stricter of
-#'   \code{mafCutoff} and \code{macCutoff / (2 * nSamples)} applies, matching
+#'   RAISS imputation scopes its reference panel to the analysis-region window
+#'   (so a per-chromosome / genome-wide \code{ldSketch} does not materialize
+#'   its full dosage); \code{flank} widens that window by the given number of
+#'   base pairs on each side to retain LD context for edge variants.
+#'
+#'   \code{mafCutoff}, \code{macCutoff} and \code{imissCutoff} bound which
+#'   panel variants RAISS will attempt to impute. Without them every rare
+#'   variant in the window of a large LD sketch becomes an imputation target,
+#'   which is slow and of little value when the study is far smaller than the
+#'   panel. The stricter of \code{mafCutoff} and
+#'   \code{macCutoff / (2 * nSamples)} applies, matching
 #'   \code{\link{QtlDataset}}.
 #'
 #'   These are a \strong{further} tightening applied to imputation targets
@@ -5430,32 +5536,21 @@ krigingOutlierQc <- function(
 #'   the panel handed to RAISS holds nothing below those. Use them to impute
 #'   only common variants from a panel deliberately kept wider than that ---
 #'   e.g. \code{mafCutoff = 0.001} with
-#'   \code{imputeOpts = list(mafCutoff = 0.01)}. A variant present in the
-#'   sumstats is never dropped here: RAISS derives its LD basis from those
+#'   \code{imputeArgs = raissConfig(mafCutoff = 0.01)}. A variant present in
+#'   the sumstats is never dropped here: RAISS derives its LD basis from those
 #'   same panel rows.
+#'
+#'   \code{lamb}, \code{svdTol}, \code{r2Threshold} and \code{minimumLd}
+#'   are forwarded to \code{\link{raiss}} itself.
 #' @param matchMinProp Minimum proportion of LD panel variants that must be
 #'   matched by the sumstats; default 0.
-#' @param coerceNumeric Logical. Coerce signed columns
-#'   (Z/BETA/SE/OR/LOG_ODDS/SIGNED_SUMSTAT/P/MAF/FRQ/INFO/N) to numeric. Default
-#'   \code{TRUE}.
-#' @param normalizeChr Logical. Strip \code{"chr"} prefix, uppercase the
-#'   chromosome label, and map 23->X, 24->Y, M->MT. Default \code{TRUE}.
-#' @param dropNonstandardChr Logical. Drop variants whose CHR (after
-#'   normalization) is outside 1..22, X, Y, MT. Default \code{TRUE}.
-#' @param dropMissData Logical. Drop rows with NA in any vital column (chrom,
-#'   pos, A1, A2, and at least one of Z / BETA). Default \code{TRUE}.
-#' @param dropPOutOfRange Logical. Drop rows where \code{P < 0} or \code{P > 1}.
-#'   Default \code{TRUE}.
-#' @param clampSmallP Logical. Floor non-negative P values below
-#'   \code{smallPFloor} to \code{smallPFloor} so \code{-log10(P)} stays finite.
-#'   Applied to both input and Z-derived P values. Default \code{TRUE}.
-#' @param smallPFloor Numeric (length 1). Floor for \code{clampSmallP}. Default
-#'   \code{5e-324} (R's smallest positive double).
-#' @param dropZeroEffect Logical. Drop rows where any effect column is exactly 0
-#'   (\code{BETA}, \code{LOG_ODDS}, \code{SIGNED_SUMSTAT}) or \code{OR} is
-#'   exactly 1. Default \code{TRUE}.
-#' @param dropNonpositiveSe Logical. Drop rows where \code{SE <= 0}. Default
-#'   \code{TRUE}.
+#' @param sumstatsCleaningArgs What makes a row a well-formed record, built with
+#'   \code{\link{sumstatsCleaningConfig}}: \code{coerceNumeric},
+#'   \code{normalizeChr} / \code{dropNonstandardChr}, \code{dropMissData},
+#'   \code{dropPOutOfRange}, \code{clampSmallP} / \code{smallPFloor},
+#'   \code{dropZeroEffect} and \code{dropNonpositiveSe}. Applied before any
+#'   filter or screen. Distinct from \code{sumstatsFilter}, which applies
+#'   quality thresholds to rows that are already well formed.
 #' @return A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries
 #'   and \code{qcInfo} populated.
 #' @examples
@@ -5464,100 +5559,59 @@ krigingOutlierQc <- function(
 #' @export
 summaryStatsQc <- function(
     sumstats,
-    removeIndels = FALSE,
-    removeStrandAmbiguous = TRUE,
-    mafCutoff = 0,
-    macCutoff = 0,
-    imissCutoff = 1,
-    infoCutoff = 0,
-    nCutoff = 5,
+    sumstatsFilterArgs = sumstatsFilterConfig(),
+    panelFilterArgs = panelFilterConfig(),
     keepVariants = NULL,
     skipRegion = NULL,
-    pipCutoffToSkip = 0,
-    absZCutoffToSkip = 0,
-    bfCutoffToSkip = 0,
-    logBfCutoffToSkip = 0,
-    zMismatchQc = c("none", "slalom", "dentist"),
+    signalScreenArgs = signalScreenConfig(),
+    ldMismatchQcMethod = c("none", "slalom", "dentist"),
     alleleFlipKriging = FALSE,
     effectiveN = TRUE,
     impute = FALSE,
-    imputeOpts = list(
-        rcond = 0.01,
-        r2Threshold = 0.6,
-        minimumLd = 5,
-        lamb = 0.01
-    ),
+    imputeArgs = raissConfig(),
     matchMinProp = 0,
-    coerceNumeric = TRUE,
-    normalizeChr = TRUE,
-    dropNonstandardChr = TRUE,
-    dropMissData = TRUE,
-    dropPOutOfRange = TRUE,
-    clampSmallP = TRUE,
-    smallPFloor = 5e-324,
-    dropZeroEffect = TRUE,
-    dropNonpositiveSe = TRUE
+    sumstatsCleaningArgs = sumstatsCleaningConfig()
 ) {
-    zMismatchQc <- arg_match(zMismatchQc)
-    .ssqcCheckEntries(sumstats, mafCutoff, infoCutoff)
-    .ssqcCheckPanelCutoffs(mafCutoff, macCutoff, imissCutoff)
+    # Either a name or the engine's constructor; the record carries both the
+    # choice and its options, so they cannot disagree.
+    ldMismatchQcMethod <- .resolveLdMismatchChoice(ldMismatchQcMethod)
+    .assertMethodConfig(
+        sumstatsFilterArgs,
+        "sumstatsFilterConfig",
+        "sumstatsFilter"
+    )
+    .assertMethodConfig(panelFilterArgs, "panelFilterConfig", "panelFilter")
+    .assertMethodConfig(signalScreenArgs, "signalScreenConfig", "signalScreen")
+    cleaning <- .sumstatsCleaningResolve(sumstatsCleaningArgs)
+    .assertMethodConfig(imputeArgs, "raissConfig", "imputeArgs")
+    imputeArgs <- .ssqcResolveImputeArgs(imputeArgs)
+    .ssqcCheckEntries(sumstats, sumstatsFilterArgs$infoCutoff)
+    .ssqcCheckPanelCutoffs(panelFilterArgs)
     opts <- .ssqcBuildOpts(
-        removeIndels = removeIndels,
-        removeStrandAmbiguous = removeStrandAmbiguous,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        imissCutoff = imissCutoff,
-        infoCutoff = infoCutoff,
-        nCutoff = nCutoff,
+        sumstatsFilterArgs = sumstatsFilterArgs,
+        panelFilterArgs = panelFilterArgs,
         skipRegion = skipRegion,
-        zMismatchQc = zMismatchQc,
+        ldMismatchQcMethod = ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,
         effectiveN = effectiveN,
         impute = impute,
-        imputeOpts = imputeOpts,
+        imputeArgs = imputeArgs,
         matchMinProp = matchMinProp,
-        coerceNumeric = coerceNumeric,
-        normalizeChr = normalizeChr,
-        dropNonstandardChr = dropNonstandardChr,
-        dropMissData = dropMissData,
-        dropPOutOfRange = dropPOutOfRange,
-        clampSmallP = clampSmallP,
-        smallPFloor = smallPFloor,
-        dropZeroEffect = dropZeroEffect,
-        dropNonpositiveSe = dropNonpositiveSe,
+        sumstatsCleaningArgs = cleaning,
         keepVariants = keepVariants,
-        pipCutoffToSkip = pipCutoffToSkip,
-        absZCutoffToSkip = absZCutoffToSkip,
-        bfCutoffToSkip = bfCutoffToSkip,
-        logBfCutoffToSkip = logBfCutoffToSkip
+        signalScreenArgs = signalScreenArgs
     )
     res <- .ssqcRunEntries(sumstats, opts)
     qcInfo <- .ssqcBuildQcInfo(
         res$entryAudits,
-        removeIndels = removeIndels,
-        removeStrandAmbiguous = removeStrandAmbiguous,
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        imissCutoff = imissCutoff,
-        infoCutoff = infoCutoff,
-        nCutoff = nCutoff,
-        pipCutoffToSkip = pipCutoffToSkip,
-        absZCutoffToSkip = absZCutoffToSkip,
-        bfCutoffToSkip = bfCutoffToSkip,
-        logBfCutoffToSkip = logBfCutoffToSkip,
-        zMismatchQc = zMismatchQc,
+        sumstatsFilterArgs = sumstatsFilterArgs,
+        panelFilterArgs = panelFilterArgs,
+        signalScreenArgs = signalScreenArgs,
+        ldMismatchQcMethod = ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,
         effectiveN = effectiveN,
         impute = impute,
-        coerceNumeric = coerceNumeric,
-        normalizeChr = normalizeChr,
-        dropNonstandardChr = dropNonstandardChr,
-        dropMissData = dropMissData,
-        dropPOutOfRange = dropPOutOfRange,
-        clampSmallP = clampSmallP,
-        smallPFloor = smallPFloor,
-        dropZeroEffect = dropZeroEffect,
-        dropNonpositiveSe = dropNonpositiveSe
+        sumstatsCleaningArgs = cleaning
     )
     # From the PRUNED panel, not the input's: narrowing the original again
     # would hand back a sketch the panel filter never reached.

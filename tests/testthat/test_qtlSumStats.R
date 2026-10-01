@@ -279,9 +279,22 @@ test_that("QtlSumStats: accepts and stores extra per-tuple columns via ...", {
         entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
         genome = "hg19",
         ldSketch = .qtlMakeGenotypeHandle(),
-        cohort = c("UKB", "FinnGen")
+        extraCols = list(cohort = c("UKB", "FinnGen"))
     )
     expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
+    # Not variadic: the base class's GRangesList(...) means ELEMENTS,
+    # so a bare `cohort =` here would read as adding an entry.
+    expect_error(
+        QtlSumStats(
+            study = "s1",
+            context = "c1",
+            trait = "t1",
+            entry = list(),
+            genome = "hg19",
+            cohort = "UKB"
+        ),
+        "unused argument"
+    )
 })
 
 # ===========================================================================

@@ -11,13 +11,13 @@
 \usage{
 getCvResult(x, ...)
 
-\S4method{getCvResult}{QtlFineMappingResult}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+\S4method{getCvResult}{QtlFineMappingResult}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 
-\S4method{getCvResult}{FineMappingRow}(x, ...)
+\S4method{getCvResult}{FineMappingRow}(x)
 
-\S4method{getCvResult}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+\S4method{getCvResult}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 
-\S4method{getCvResult}{TwasWeightsRow}(x, ...)
+\S4method{getCvResult}{TwasWeightsRow}(x)
 }
 \arguments{
 \item{x}{A \code{FineMappingRow} or \code{FineMappingResult}.}

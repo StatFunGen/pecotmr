@@ -394,7 +394,7 @@ setMethod("endoapply", "RangedTupleList", function(X, FUN, ...) {
 
 #' @rdname subsetRegion
 #' @export
-setMethod("subsetRegion", "RangedTupleList", function(x, region, ...) {
+setMethod("subsetRegion", "RangedTupleList", function(x, region) {
     win <- .asGRegion(region)
     elements <- map(as.list(x), .rtlRestrictOne, win = win)
     keep <- lengths(elements) > 0L
@@ -876,13 +876,10 @@ select.RangedTupleList <- function(.data, ...) {
 #' @exportS3Method dplyr::slice
 slice.RangedTupleList <- function(.data, ...) {
     .rtlRequirePlyranges("slice")
-    elements <- map(as.list(.data), .rtlSliceOne, ...)
+    # map() forwards `...` to the function, so the user's slice expressions
+    # reach dplyr::slice directly -- no wrapper needed.
+    elements <- map(as.list(.data), dplyr::slice, ...)
     .rtlRebuild(.data, elements, seq_len(length(.data)))
-}
-
-# @noRd
-.rtlSliceOne <- function(g, ...) {
-    dplyr::slice(g, ...)
 }
 
 # Orders WITHIN each element. A global sort of the flattened set followed by

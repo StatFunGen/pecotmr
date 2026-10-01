@@ -894,3 +894,36 @@ test_that("sldscSubsetMeta requires a per_trait element", {
         "has no `per_trait` element"
     )
 })
+
+test_that("metaSldscRandom forwards metaArgs to metafor::rma", {
+    seen <- NULL
+    real <- metafor::rma
+    mkEst <- function(m, s) {
+        list(
+            summary = data.frame(
+                target = "annot_A_0",
+                enrichment = m,
+                enrichmentSe = s
+            )
+        )
+    }
+    perTrait <- list(
+        traitX = mkEst(1.5, 0.3),
+        traitY = mkEst(1.8, 0.4),
+        traitZ = mkEst(1.2, 0.25)
+    )
+    suppressWarnings(with_mocked_bindings(
+        metaSldscRandom(
+            perTrait,
+            category = "annot_A_0",
+            quantity = "enrichment",
+            metaArgs = rmaConfig(test = "knha")
+        ),
+        rma = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "metafor"
+    ))
+    expect_equal(seen$test, "knha")
+})

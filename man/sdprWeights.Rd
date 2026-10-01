@@ -4,7 +4,7 @@
 \alias{sdprWeights}
 \title{Extract weights from sdpr function}
 \usage{
-sdprWeights(stat, LD, methodArgs = list())
+sdprWeights(stat, LD, methodArgs = sdprConfig())
 }
 \arguments{
 \item{stat}{A list of summary statistics with elements \code{b} (effect
@@ -13,7 +13,10 @@ sizes) and \code{n} (per-variant sample sizes).}
 \item{LD}{Numeric LD (correlation) matrix aligned to the variants in
 \code{stat}.}
 
-\item{methodArgs}{Optional named list of options forwarded to \code{sdpr}.}
+\item{methodArgs}{Options forwarded to \code{sdpr}, built
+with \code{\link{sdprConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of the posterior SNP coefficients.

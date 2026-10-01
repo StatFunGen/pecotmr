@@ -4,7 +4,12 @@
 \alias{susieInfRssWeights}
 \title{Compute SuSiE-inf-RSS TWAS weights}
 \usage{
-susieInfRssWeights(stat, LD, susieInfRssFit = NULL, retainFit = TRUE)
+susieInfRssWeights(
+  stat,
+  LD,
+  susieInfRssFit = NULL,
+  fitRetention = c("slim", "none", "full")
+)
 }
 \arguments{
 \item{stat}{List with components \code{z} (z-scores), \code{n} (sample
@@ -14,7 +19,10 @@ sizes).}
 
 \item{susieInfRssFit}{Optional pre-fitted SuSiE-inf-RSS object.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 Numeric vector of variant weights.

@@ -23,24 +23,23 @@ getColocCredibleSets(x, coverage = 0.95, minPp4 = NULL, minAbsCorr = 0.8, ...)
 
 getColocGenes(x, ...)
 
-\S4method{getColocPairs}{ColocResult}(x, ...)
+\S4method{getColocPairs}{ColocResult}(x)
 
-\S4method{getColocVariants}{ColocResult}(x, pooled = FALSE, ...)
+\S4method{getColocVariants}{ColocResult}(x, pooled = FALSE)
 
-\S4method{getColocGenes}{ColocResult}(x, ...)
+\S4method{getColocGenes}{ColocResult}(x)
 
 \S4method{getColocCredibleSets}{ColocResult}(
   x,
   coverage = 0.95,
   minPp4 = NULL,
   minAbsCorr = 0.8,
-  requireMaxH4 = FALSE,
-  ...
+  requireMaxH4 = FALSE
 )
 
-\S4method{getColocPairs}{ColocBoostResult}(x, ...)
+\S4method{getColocPairs}{ColocBoostResult}(x)
 
-\S4method{getColocVariants}{ColocBoostResult}(x, pooled = FALSE, ...)
+\S4method{getColocVariants}{ColocBoostResult}(x, pooled = FALSE)
 }
 \arguments{
 \item{x}{A \code{ColocResult}.}

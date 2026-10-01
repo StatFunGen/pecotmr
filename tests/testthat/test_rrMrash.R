@@ -45,7 +45,7 @@ test_that("mrashWeights subsets a user-supplied beta.init of length ncol(X) by k
         result <- mrashWeights(
             X,
             y,
-            methodArgs = list(beta.init = user_beta_init)
+            methodArgs = mrashConfig(beta.init = user_beta_init)
         ),
         "mrashWeights: dropping 1 zero-variance column"
     )

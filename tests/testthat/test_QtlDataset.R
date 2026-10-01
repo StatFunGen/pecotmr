@@ -89,12 +89,14 @@ context("QtlDataset internal helpers")
     if (is.null(geno_cov)) {
         geno_cov <- matrix(numeric(0), nrow = 0, ncol = 0)
     }
+    # `...` is the genotype filter now: every caller passes only filter
+    # fields (mafCutoff / xvarCutoff / imissCutoff / keepVariants).
     QtlDataset(
         study = "study1",
         genotypes = gh,
         phenotypes = pheno,
         genotypeCovariates = geno_cov,
-        ...
+        genotypeFilterArgs = genotypeFilterConfig(...)
     )
 }
 
@@ -374,13 +376,15 @@ test_that(".qtlApplyFilterOverrides replaces every supplied slot on a validated 
     qd <- .qh_makeDataset(contexts = "brain")
     out <- pecotmr:::.qtlApplyFilterOverrides(
         qd,
-        mafCutoff = 0.05,
-        macCutoff = 10,
-        xvarCutoff = 0.01,
-        imissCutoff = 0.1,
-        keepIndel = FALSE,
-        keepSamples = c("s1", "s2"),
-        keepVariants = c("rs1", "rs2")
+        genotypeFilterConfig(
+            mafCutoff = 0.05,
+            macCutoff = 10,
+            xvarCutoff = 0.01,
+            imissCutoff = 0.1,
+            keepIndel = FALSE,
+            keepSamples = c("s1", "s2"),
+            keepVariants = c("rs1", "rs2")
+        )
     )
     expect_equal(out@mafCutoff, 0.05)
     expect_equal(out@macCutoff, 10)
@@ -396,7 +400,10 @@ test_that(".qtlApplyFilterOverrides replaces every supplied slot on a validated 
 
 test_that(".qtlApplyFilterOverrides leaves stored slots untouched when args are NULL", {
     qd <- .qh_makeDataset(contexts = "brain")
-    expect_identical(pecotmr:::.qtlApplyFilterOverrides(qd), qd)
+    expect_identical(
+        pecotmr:::.qtlApplyFilterOverrides(qd, genotypeFilterConfig()),
+        qd
+    )
 })
 
 # ===========================================================================
@@ -743,7 +750,7 @@ test_that(".qtlExtractBlock: keepSamples restriction narrows the returned set", 
     qd <- .qh_makeDataset()
     qd <- pecotmr:::.qtlApplyFilterOverrides(
         qd,
-        keepSamples = paste0("s", 1:6)
+        genotypeFilterConfig(keepSamples = paste0("s", 1:6))
     )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
@@ -757,7 +764,7 @@ test_that(".qtlExtractBlock: per-call samples arg further narrows the sample set
     qd <- .qh_makeDataset()
     qd <- pecotmr:::.qtlApplyFilterOverrides(
         qd,
-        keepSamples = paste0("s", 1:6)
+        genotypeFilterConfig(keepSamples = paste0("s", 1:6))
     )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
@@ -2065,7 +2072,7 @@ test_that("QtlDataset: rejects negative QC cutoffs", {
             study = "s1",
             genotypes = .sc_makeGenotypeHandle(),
             phenotypes = list(brain = se),
-            mafCutoff = -0.1
+            genotypeFilterArgs = genotypeFilterConfig(mafCutoff = -0.1)
         ),
         "is not >= 0"
     )
@@ -2424,7 +2431,7 @@ test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-
     # none are panel samples
     qd <- pecotmr:::.qtlApplyFilterOverrides(
         qd,
-        keepSamples = c("zzz1", "zzz2")
+        genotypeFilterConfig(keepSamples = c("zzz1", "zzz2"))
     )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
@@ -2805,11 +2812,13 @@ test_that("QtlDataset filter accessors round-trip what was passed in", {
     data(qtlDatasetExample, envir = environment())
     x <- .qtlApplyFilterOverrides(
         qtlDatasetExample,
-        mafCutoff = 0.05,
-        macCutoff = 10,
-        xvarCutoff = 0.01,
-        imissCutoff = 0.1,
-        keepIndel = FALSE
+        genotypeFilterConfig(
+            mafCutoff = 0.05,
+            macCutoff = 10,
+            xvarCutoff = 0.01,
+            imissCutoff = 0.1,
+            keepIndel = FALSE
+        )
     )
     expect_equal(getMafCutoff(x), 0.05)
     expect_equal(getMacCutoff(x), 10)
@@ -3272,4 +3281,32 @@ test_that("outlier detection reports a singular trait covariance", {
 
 test_that(".qtlConcat answers an empty list for no pieces", {
     expect_identical(pecotmr:::.qtlConcat(list()), list())
+})
+
+test_that("covMcdConfig refuses the data and the RNG seed", {
+    expect_error(covMcdConfig(x = matrix(0)), "the trait matrix")
+    expect_error(covMcdConfig(seed = 1), "pecotmr's own RNG handling")
+    expect_error(covMcdConfig(nosuch = 1), "unknown argument")
+    expect_equal(covMcdConfig(alpha = 0.75)$alpha, 0.75)
+})
+
+test_that(".qtlOutlierKeepMask forwards outlierArgs to robustbase::covMcd", {
+    skip_if_not_installed("robustbase")
+    seen <- NULL
+    real <- robustbase::covMcd
+    set.seed(3)
+    Y <- matrix(rnorm(60 * 2), 60, 2)
+    with_mocked_bindings(
+        pecotmr:::.qtlOutlierKeepMask(
+            Y,
+            pvalThreshold = 1e-3,
+            outlierArgs = covMcdConfig(alpha = 0.9)
+        ),
+        covMcd = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "robustbase"
+    )
+    expect_equal(seen$alpha, 0.9)
 })

@@ -69,7 +69,11 @@ ss
 
 ```{r mash-pipeline, results="hide"}
 sumStatsList <- list(strong = ss, random = ss, null = ss)
-fit <- mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
+fit <- mashPipeline(
+    sumStatsList,
+    alpha = 0,
+    prior = mashPriorConfig(nPcs = 2L)
+)
 ```
 
 ```{r mash-pipeline-show}
@@ -111,7 +115,7 @@ fitSimple <- mashPipeline(
     sumStatsList,
     alpha = 0,
     residualCorrelationMethod = "simple",
-    priorCovariances = fit$U
+    prior = mashPriorConfig(priorCovariances = fit$U)
 )
 ```
 
@@ -209,16 +213,22 @@ mashPriorCovariances(
     alpha = 0,
     vhat = vhat,
     components = c("canonical", "pca", "flash", "flashNonneg"),
-    engine = "cov_ed", # or "ud" / "ud_ted" (udr)
+    engine = "covEd", # or "covUdr", or "none"
     nPcs = 2L
 )
 ```
 
-`"cov_ed"` is the default and is mashr's own extreme deconvolution. The
-`udr` engines are opt-in and have known numerical issues; `"ud_ted"`
-additionally assumes i.i.d. (Z-scale) data. Their dominant cost is
-`udControl$n_unconstrained` (default 50), which is worth cutting sharply
-when you have few conditions.
+`"covEd"` is the default and is mashr's own extreme deconvolution. `"covUdr"`
+is opt-in and has known numerical issues; its TED update additionally assumes
+i.i.d. (Z-scale) data, so it is requested as
+`covUdrConfig(unconstrainedUpdate = "ted")` rather than as a separate engine
+name. Its dominant cost is `covUdrConfig(nUnconstrained = )` (default 50),
+which is worth cutting sharply when you have few conditions.
+
+The engine refines only the *data-driven* components. Canonical components
+are fixed structural hypotheses -- identity, singletons, equal effects -- and
+reach the prior unmodified, matching mashr's own workflow. `engine = "none"`
+uses the data-driven components as generated, without refinement.
 
 To bypass the covariance chain entirely and fit weights against a prior you
 already have:

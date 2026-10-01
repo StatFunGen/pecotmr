@@ -393,7 +393,7 @@ The collections carry no QC yet. Run `summaryStatsQc()` before any downstream
 analysis (it populates `qcInfo`; downstream pipelines require it):
 
 ```{r qc, eval=FALSE}
-gws_qcd <- summaryStatsQc(gws, zMismatchQc = "slalom")
+gws_qcd <- summaryStatsQc(gws, ldMismatchQcMethod = "slalom")
 ```
 
 See the *Quality Control for GWAS and QTL Summary Statistics* vignette for the

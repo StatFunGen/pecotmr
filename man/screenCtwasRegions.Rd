@@ -4,22 +4,16 @@
 \alias{screenCtwasRegions}
 \title{Screen cTWAS regions}
 \usage{
-screenCtwasRegions(estResult, L = 5L, ncore = 1L, ctwasArgs = list())
+screenCtwasRegions(estResult, numThreads = 1L, methodArgs = ctwasConfig())
 }
 \arguments{
 \item{estResult}{A list returned by \code{\link{estCtwasParam}}.}
 
-\item{L}{Unused. Retained for call-site compatibility with
-\code{\link{ctwasPipeline}}; ctwas's screening always uses the
-single-effect (SER) model and ignores L. \code{L} is applied by
-\code{\link{finemapCtwasRegions}} downstream.}
+\item{numThreads}{Number of cores.}
 
-\item{ncore}{Number of cores.}
-
-\item{ctwasArgs}{Optional named list of additional arguments
-forwarded to \code{ctwas::screen_regions}
-(e.g. \code{min_nonSNP_PIP}, \code{min_snp_pval}, \code{min_var},
-\code{min_gene}).}
+\item{methodArgs}{Additional arguments forwarded to ctwas, built
+with \code{\link{ctwasConfig}}. Names are checked against what
+the ctwas steps accept between them.}
 }
 \value{
 The \code{estResult} list augmented with \code{screen_res} (the full
@@ -34,5 +28,5 @@ Step 3 of the three-step \code{\link{ctwasPipeline}}: runs
 }
 \examples{
 data(ctwasEstExample)
-screenCtwasRegions(ctwasEstExample, L = 5L)
+screenCtwasRegions(ctwasEstExample)
 }

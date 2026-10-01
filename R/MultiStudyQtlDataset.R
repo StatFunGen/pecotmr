@@ -264,17 +264,11 @@ setMethod("getQtlDatasets", "MultiStudyQtlDataset", function(x) x@qtlDatasets)
 
 #' @rdname getSumStats
 #' @export
-setMethod("getSumStats", "MultiStudyQtlDataset", function(x, ...) {
-    if (length(list(...)) > 0L) {
-        msg <- glue(
-            "getSumStats(MultiStudyQtlDataset) does not accept selection ",
-            "arguments; it returns the embedded QtlSumStats collection ",
-            "(use getSumStats() on that result to fetch one entry)."
-        )
-        abort(msg)
-    }
-    x@sumStats
-})
+# No selectors: this returns the embedded QtlSumStats collection whole, and
+# one entry is fetched by calling getSumStats() on that result. Taking no
+# extra formals is what refuses a selector -- R reports the unused argument
+# by name.
+setMethod("getSumStats", "MultiStudyQtlDataset", function(x) x@sumStats)
 
 #' @rdname getStudy
 #' @export

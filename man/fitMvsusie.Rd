@@ -4,7 +4,7 @@
 \alias{fitMvsusie}
 \title{Fit mvSuSiE on individual-level (X, Y) data}
 \usage{
-fitMvsusie(X, Y, prior_variance, coverage = 0.95, methodArgs = list())
+fitMvsusie(X, Y, prior_variance, coverage = 0.95, methodArgs = mvsusieConfig())
 }
 \arguments{
 \item{X}{Numeric matrix of genotypes (samples x variants).}
@@ -18,8 +18,10 @@ domain-specific prior.}
 
 \item{coverage}{Credible set coverage (default 0.95).}
 
-\item{methodArgs}{Optional named list of options forwarded to
-\code{mvsusieR::mvsusie}.}
+\item{methodArgs}{Options forwarded to \code{mvsusieR::mvsusie}, built
+with \code{\link{mvsusieConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be silently
+ignored.}
 }
 \value{
 The fit object returned by \code{mvsusieR::mvsusie}.

@@ -365,7 +365,7 @@ setMethod("getLdBlocks", "LdStatistic", function(x) x@ldBlocks)
 
 #' @rdname getGenome
 #' @export
-setMethod("getGenome", "LdStatistic", function(x, ...) {
+setMethod("getGenome", "LdStatistic", function(x) {
     # The build lives in seqinfo, not a slot: a GRanges already has somewhere
     # to keep it, and storing it twice is what the retired LdBlocks class did.
     build <- discard(unique(GenomeInfoDb::genome(x)), is.na)

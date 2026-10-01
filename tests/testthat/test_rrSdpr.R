@@ -223,7 +223,7 @@ test_that("sdprWeights calls sdpr and returns beta_est", {
     result <- sdprWeights(
         stat = stat,
         LD = R,
-        methodArgs = list(
+        methodArgs = sdprConfig(
             iter = 50,
             burn = 10,
             thin = 2,

@@ -14,7 +14,8 @@ qtlAssociationPostprocess(x, ...)
   cisWindow = 0,
   methods = c("permutation", "bonferroni"),
   pvalueCol = "P",
-  afCol = "af"
+  afCol = "af",
+  qvalueArgs = qvalueConfig()
 )
 }
 \arguments{
@@ -42,6 +43,10 @@ no stored column -- it is a significance query (see
 
 \item{pvalueCol, afCol}{Entry mcol names for the per-variant p-value / allele
 frequency (defaults \code{"P"} / \code{"af"}).}
+
+\item{qvalueArgs}{Extra arguments for \code{qvalue::qvalue()}, built with
+\code{\link{qvalueConfig}} -- the \code{pi0.method} / \code{lambda}
+pair in particular, which sets how the null proportion is estimated.}
 }
 \value{
 The input \code{QtlSumStats} with added correction columns.
@@ -69,7 +74,8 @@ entries <- lapply(seq_len(G), function(i) {
 })
 qss <- QtlSumStats(study = rep("s", G), context = rep("brain", G),
   trait = paste0("g", seq_len(G)), entry = entries, genome = "hg19",
-  n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),
-  p_beta = pBeta, beta_shape1 = rep(1, G), beta_shape2 = rep(200, G))
+  extraCols = list(
+    n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),
+    p_beta = pBeta, beta_shape1 = rep(1, G), beta_shape2 = rep(200, G)))
 qtlAssociationPostprocess(qss)
 }

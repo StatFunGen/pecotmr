@@ -134,34 +134,34 @@ twasWeightsRow <- function(
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "TwasWeightsRow", function(x, ...) {
+setMethod("getVariantIds", "TwasWeightsRow", function(x) {
     .grVariantIds(x@variants)
 })
 
 #' @rdname getWeights
 #' @export
-setMethod("getWeights", "TwasWeightsRow", function(x, ...) x@weights)
+setMethod("getWeights", "TwasWeightsRow", function(x) x@weights)
 
 #' @rdname getFits
 #' @export
-setMethod("getFits", "TwasWeightsRow", function(x, ...) x@fits)
+setMethod("getFits", "TwasWeightsRow", function(x) x@fits)
 
 #' @rdname getCvResult
 #' @export
-setMethod("getCvResult", "TwasWeightsRow", function(x, ...) x@cvResult)
+setMethod("getCvResult", "TwasWeightsRow", function(x) x@cvResult)
 
 #' @rdname getStandardized
 #' @export
-setMethod("getStandardized", "TwasWeightsRow", function(x, ...) {
+setMethod("getStandardized", "TwasWeightsRow", function(x) {
     isTRUE(x@standardized)
 })
 
 #' @rdname getDataType
 #' @export
-setMethod("getDataType", "TwasWeightsRow", function(x, ...) x@dataType)
+setMethod("getDataType", "TwasWeightsRow", function(x) x@dataType)
 
 # @noRd
-setMethod("rowVariants", "TwasWeightsRow", function(x, ...) x@variants)
+setMethod("rowVariants", "TwasWeightsRow", function(x) x@variants)
 
 #' @rdname show-methods
 #' @export

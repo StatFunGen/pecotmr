@@ -12,20 +12,13 @@ postprocessFinemappingFits(
   yScalar = 1,
   af = NULL,
   n = NULL,
-  coverage = NULL,
-  secondaryCoverage = c(0.7, 0.5),
-  signalCutoff = 0.1,
+  credibleSetArgs = credibleSetConfig(),
+  fitRetention = "slim",
   otherQuantities = NULL,
   region = NULL,
   priorEffTol = 1e-09,
-  minAbsCorr = 0.8,
-  medianAbsCorr = NULL,
   csInput = NULL,
-  conditionIdx = NULL,
-  trim = TRUE,
-  fullFit = FALSE,
-  fullFitAlphaOnly = TRUE,
-  includeAllCs = FALSE
+  conditionIdx = NULL
 )
 }
 \arguments{
@@ -48,41 +41,36 @@ MAF). Default NULL.}
 \item{n}{Optional per-variant sample size, exported as the \code{N} column.
 Default NULL -> \code{N} falls back to the fit's own scalar sample size.}
 
-\item{coverage}{Primary credible-set coverage.}
+\item{credibleSetArgs}{How credible sets are built and reported, built with
+\code{\link{credibleSetConfig}}: \code{coverage},
+\code{secondaryCoverage}, \code{signalCutoff} (the PIP cutoff for
+including non-credible-set variants in top loci), \code{minAbsCorr} and
+\code{medianAbsCorr} for purity, and \code{includeAllCs}.}
 
-\item{secondaryCoverage}{Additional credible-set coverages.}
+\item{fitRetention}{How much of each fit is kept: \code{"slim"} (default)
+trims the retained fit to what downstream needs, \code{"full"} keeps the
+whole fit object. The \code{topLoci} table's per-credible-set columns
+are governed by \code{credibleSet}'s \code{perCsColumns} instead.}
 
-\item{signalCutoff}{PIP cutoff for including non-CS variants in top loci.}
+\item{otherQuantities}{Optional named list of extra per-method quantities to
+carry on the result untouched (returned as the \code{otherQuantities}
+element). Default \code{NULL}.}
 
-\item{otherQuantities}{Optional list carried into each method result.}
+\item{region}{Optional \code{"chr:start-end"} string naming the region the
+fits cover; recorded on the result. Default \code{NULL}.}
 
-\item{region}{Optional genomic anchor (\code{"chr:start-end"} or
-\code{GRanges}) recorded on the result; \code{NULL} to omit.}
+\item{priorEffTol}{Numeric (length 1). Effects whose prior variance
+\code{V} is at or below this tolerance are dropped as unconverged before
+the credible sets are read. Default \code{1e-9}.}
 
-\item{priorEffTol}{Tolerance for retaining effects by prior variance.}
+\item{csInput}{One of \code{"X"}, \code{"Xcorr"}, \code{"fsusie"}: how
+credible-set purity is computed from \code{dataX}. \code{NULL} (default)
+lets each method pick its own -- \code{"Xcorr"} for the RSS methods,
+\code{"fsusie"} for fsusie, \code{"X"} otherwise.}
 
-\item{minAbsCorr}{Minimum absolute correlation for credible-set purity.}
-
-\item{medianAbsCorr}{Numeric or \code{NULL}. Median absolute within-CS
-correlation threshold for purity; \code{NULL} uses only \code{minAbsCorr}.}
-
-\item{csInput}{Optional precomputed credible-set specification, or
-\code{NULL} to derive it from the fits.}
-
-\item{conditionIdx}{Integer or \code{NULL}. Index of the conditioned effect
-(per-condition output); \code{NULL} for the unconditioned fit.}
-
-\item{trim}{Logical. Trim the retained fit to the fields needed downstream.
-Default \code{TRUE}.}
-
-\item{fullFit}{Logical. Retain the full fit object on each entry. Default
-\code{FALSE}.}
-
-\item{fullFitAlphaOnly}{Logical. When retaining the full fit, keep only the
-per-effect alpha matrix. Default \code{TRUE}.}
-
-\item{includeAllCs}{Logical. Include all credible sets rather than only the
-top one. Default \code{FALSE}.}
+\item{conditionIdx}{Integer or \code{NULL}. For a multi-condition
+(3-D) fit, the condition to slice out; \code{NULL} (default) keeps the
+unconditioned fit.}
 }
 \value{
 A list with \code{finemappingResults} (per-method post-processed

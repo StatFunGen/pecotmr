@@ -8,21 +8,11 @@ filterRelatedness(
   relatedness,
   relatednessThreshold = 0.0625,
   analysisType = c("maximizeUnrelated", "maximizeCases"),
-  relatednessIid1 = "IID1",
-  relatednessIid2 = "IID2",
-  relatednessFid1 = NULL,
-  relatednessFid2 = NULL,
-  relatednessValue = "PI_HAT",
+  columns = relatednessColumns(),
   phenoData = NULL,
   phenoCol = "pheno",
-  otherCriterion = NULL,
-  otherCriterionThreshold = NULL,
-  otherCriterionDirection = "ge",
-  otherCriterionIid = "IID",
-  otherCriterionMeasure = NULL,
-  maxComponentSize = 20L,
-  reduceFraction = 0.05,
-  maxIterations = 20L,
+  pruning = relatednessPruning(),
+  plinkQcArgs = plinkQcConfig(),
   verbose = FALSE
 )
 }
@@ -37,16 +27,9 @@ considered related (default 0.0625, i.e. 2nd degree).}
 \code{"maximizeCases"}. The latter preserves cases in case-control
 studies.}
 
-\item{relatednessIid1}{Column name for first individual ID (default "IID1").}
-
-\item{relatednessIid2}{Column name for second individual ID (default "IID2").}
-
-\item{relatednessFid1}{Column name for first family ID (default NULL).}
-
-\item{relatednessFid2}{Column name for second family ID (default NULL).}
-
-\item{relatednessValue}{Column name for the relatedness measure (default
-"PI_HAT").}
+\item{columns}{Which columns of \code{relatedness} hold the pair
+identifiers and the relatedness measure. Build with
+\code{\link{relatednessColumns}}.}
 
 \item{phenoData}{A data.frame with columns \code{IID} and the column named by
 \code{phenoCol}. Required when \code{analysisType = "maximizeCases"}.}
@@ -54,27 +37,12 @@ studies.}
 \item{phenoCol}{Column name for the phenotype (default "pheno"). Expected to
 be binary (1 = case, 0 = control).}
 
-\item{otherCriterion}{Optional data.frame with additional filtering criteria
-(passed to \code{plinkQC::relatednessFilter}).}
+\item{pruning}{Bounds on the graph pre-pruning and the iterative cleanup.
+Build with \code{\link{relatednessPruning}}.}
 
-\item{otherCriterionThreshold}{Threshold for additional criterion.}
-
-\item{otherCriterionDirection}{Direction for threshold comparison (default
-"ge").}
-
-\item{otherCriterionIid}{Column name for individual ID in criterion data
-(default "IID").}
-
-\item{otherCriterionMeasure}{Column name for the criterion measure.}
-
-\item{maxComponentSize}{Maximum component size before graph-based pre-pruning
-(default 20).}
-
-\item{reduceFraction}{Fraction of highest-degree nodes to remove per
-iteration during pre-pruning (default 0.05).}
-
-\item{maxIterations}{Maximum plinkQC iterations for resolving remaining
-related pairs (default 20).}
+\item{plinkQcArgs}{Additional arguments forwarded to
+\code{plinkQC::relatednessFilter}. Build with
+\code{\link{plinkQcConfig}}.}
 
 \item{verbose}{Logical, print progress messages (default FALSE).}
 }
@@ -90,6 +58,6 @@ pruning (removing highest-degree nodes), then applies
 \examples{
 rel <- data.frame(IID1 = c("s1", "s2"), IID2 = c("s2", "s3"),
   value = c(0.5, 0.1))
-filterRelatedness(rel, relatednessIid1 = "IID1", relatednessIid2 = "IID2",
-  relatednessValue = "value", relatednessThreshold = 0.2)
+filterRelatedness(rel, relatednessThreshold = 0.2,
+  columns = relatednessColumns(value = "value"))
 }

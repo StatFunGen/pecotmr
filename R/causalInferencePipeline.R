@@ -52,48 +52,23 @@
 #'   supplied, drives the MR computation and (when \code{twasWeights = NULL})
 #'   the TWAS-Z weights via the SuSiE-style coefficients on each entry's
 #'   \code{topLoci}.
-#' @param rsqCutoff Numeric (length 1). When \code{> 0}, performs CV weight
-#'   selection (ports the legacy \code{twas_pipeline} \code{pick_best_model} +
-#'   \code{update_twas_method}): per \code{(study, context, trait, gwasStudy)}
-#'   keep only the method whose \code{cvResult} \code{rsqOption} metric is
-#'   highest among methods that clear both \code{rsqCutoff} and the
-#'   \code{rsqPvalCutoff} gate AND that produced a finite TWAS Z (the NA/Inf
-#'   re-selection); groups where no method clears the cutoffs are dropped. A
-#'   group whose methods carry no usable \code{cvResult} (the SS-TWAS path)
-#'   keeps all methods. Needs the \code{twasWeights} \code{cvResult}, so
-#'   selection is a no-op on the fineMappingResult-only path. Default \code{0}
-#'   (no selection; score every method).
-#' @param rsqPvalCutoff Numeric (length 1). CV-p-value gate for weight selection
-#'   (ports legacy \code{rsq_pval_cutoff}): a method is eligible only when its
-#'   \code{cvResult} \code{rsqPvalOption} metric is \code{< rsqPvalCutoff}.
-#'   Default \code{Inf} (no p-value gate). A finite value activates selection
-#'   even when \code{rsqCutoff = 0}.
-#' @param rsqOption Character. Which \code{cvResult} metric is the "r-squared"
-#'   used for the cutoff and ranking (ports legacy \code{rsq_option}); typically
-#'   \code{"rsq"} or \code{"adj_rsq"}. Default \code{"rsq"}.
-#' @param rsqPvalOption Character vector of candidate \code{cvResult} metric
-#'   names for the p-value gate (ports legacy \code{rsq_pval_option}); the first
-#'   one present in a tuple's metrics is used. Default \code{c("adj_rsq_pval",
-#'   "pval")}.
-#' @param mrPipCutoff Numeric (length 1). PIP threshold for a \code{topLoci}
-#'   variant to be used as an instrumental variable. Used only when
-#'   \code{mrMethod = "ivwPerVariant"}. Default \code{0.5}.
-#' @param mrMethod One of \code{"ivwPerVariant"} (default) or \code{"csAware"}.
-#'   The IVW-per-variant method filters topLoci variants by \code{pip >
-#'   mrPipCutoff} and IVW-pools Wald ratios across variants. The CS-aware method
-#'   groups variants by credible set (column \code{cs} in topLoci), computes a
-#'   PIP-weighted composite Wald ratio per CS using \code{mrCpipCutoff} on the
-#'   per-CS cumulative PIP, then IVW-pools across CSs and reports Cochran's Q +
-#'   I-squared in the output columns \code{Q}, \code{I2}.
-#' @param mrCpipCutoff Numeric (length 1). Cumulative-PIP cutoff for retaining a
-#'   credible set. Used only when \code{mrMethod = "csAware"}. Default
-#'   \code{0.5}.
-#' @param mrPvalCutoff Numeric (length 1). TWAS-p-value gate for running MR
-#'   (ports the legacy \code{twas_pipeline} \code{mr_pval_cutoff}): MR is
-#'   computed for a \code{(qtl tuple, gwas)} only when its \code{twasPval <
-#'   mrPvalCutoff}; otherwise the MR output columns are \code{NA}. Default
-#'   \code{1} (no gate; MR runs wherever a \code{fineMappingResult} entry
-#'   exists).
+#' @param weightSelectionArgs How one TWAS method's weights are picked per
+#'   \code{(study, context, trait, gwasStudy)} tuple, built with
+#'   \code{\link{weightSelectionConfig}}: \code{cutoff} (minimum
+#'   cross-validated r-squared, default \code{0}), \code{pvalCutoff} (the
+#'   CV-p-value gate, default \code{Inf}), and \code{metric} /
+#'   \code{pvalMetric} naming which \code{cvResult} metrics those two read.
+#'   Selection runs when \code{cutoff > 0} or \code{pvalCutoff} is finite;
+#'   it keeps the highest-\code{metric} method among those clearing both
+#'   gates that also produced a finite TWAS Z. Otherwise every method is
+#'   carried through. Ports the legacy \code{twas_pipeline}
+#'   \code{pick_best_model} / \code{update_twas_method}.
+#' @param mrArgs How Mendelian randomization is run, built with
+#'   \code{\link{mrConfig}}: \code{method} (\code{"ivwPerVariant"}, the
+#'   default, or \code{"csAware"}), the PIP threshold that method reads
+#'   (\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}, the
+#'   TWAS-p-value gate below which MR runs at all (default \code{1}, no
+#'   gate; otherwise the MR columns are \code{NA}).
 #' @param combineMethods Optional character vector forwarded to
 #'   \code{\link{combinePValues}} for cross-method combination per
 #'   \code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL} (default)
@@ -115,32 +90,25 @@ causalInferencePipeline <- function(
     gwasSumStats,
     twasWeights = NULL,
     fineMappingResult = NULL,
-    rsqCutoff = 0,
-    rsqPvalCutoff = Inf,
-    rsqOption = "rsq",
-    rsqPvalOption = c("adj_rsq_pval", "pval"),
-    mrPipCutoff = 0.5,
-    mrMethod = c("ivwPerVariant", "csAware"),
-    mrCpipCutoff = 0.5,
-    mrPvalCutoff = 1,
+    weightSelectionArgs = weightSelectionConfig(),
+    mrArgs = mrConfig(),
     combineMethods = NULL,
     alleleFlip = TRUE
 ) {
-    mrMethod <- arg_match(mrMethod)
+    .assertMethodConfig(
+        weightSelectionArgs,
+        "weightSelectionConfig",
+        "weightSelection"
+    )
+    .assertMethodConfig(mrArgs, "mrConfig", "mr")
     .cipRun(
         gwasSumStats = gwasSumStats,
         twasWeights = twasWeights,
         fineMappingResult = fineMappingResult,
         combineMethods = combineMethods,
-        rsqCutoff = rsqCutoff,
-        rsqOption = rsqOption,
-        rsqPvalCutoff = rsqPvalCutoff,
-        rsqPvalOption = rsqPvalOption,
+        weightSelectionArgs = weightSelectionArgs,
         alleleFlip = alleleFlip,
-        mrMethod = mrMethod,
-        mrPipCutoff = mrPipCutoff,
-        mrCpipCutoff = mrCpipCutoff,
-        mrPvalCutoff = mrPvalCutoff
+        mrArgs = mrArgs
     )
 }
 
@@ -152,15 +120,9 @@ causalInferencePipeline <- function(
     twasWeights,
     fineMappingResult,
     combineMethods,
-    rsqCutoff,
-    rsqOption,
-    rsqPvalCutoff,
-    rsqPvalOption,
+    weightSelectionArgs,
     alleleFlip,
-    mrMethod,
-    mrPipCutoff,
-    mrCpipCutoff,
-    mrPvalCutoff
+    mrArgs
 ) {
     .cipValidateInputs(gwasSumStats, twasWeights, fineMappingResult)
     gwasLd <- .cipCheckLdSketches(
@@ -172,10 +134,7 @@ causalInferencePipeline <- function(
     sel <- .cipCvSelection(
         qtlRows = allRows,
         twasWeights = twasWeights,
-        rsqCutoff = rsqCutoff,
-        rsqOption = rsqOption,
-        rsqPvalCutoff = rsqPvalCutoff,
-        rsqPvalOption = rsqPvalOption
+        weightSelectionArgs = weightSelectionArgs
     )
     qtlRows <- sel$qtlRows
     outRows <- list_flatten(map(
@@ -187,10 +146,7 @@ causalInferencePipeline <- function(
         gwasSumStats = gwasSumStats,
         gwasLd = gwasLd,
         alleleFlip = alleleFlip,
-        mrMethod = mrMethod,
-        mrPipCutoff = mrPipCutoff,
-        mrCpipCutoff = mrCpipCutoff,
-        mrPvalCutoff = mrPvalCutoff
+        mrArgs = mrArgs
     ))
     if (length(outRows) == 0L) {
         abort(
@@ -281,11 +237,14 @@ causalInferencePipeline <- function(
 .cipCvSelection <- function(
     qtlRows,
     twasWeights,
-    rsqCutoff,
-    rsqOption,
-    rsqPvalCutoff,
-    rsqPvalOption
+    weightSelectionArgs
 ) {
+    # The bundle's terminal. .cipMethodMetrics / .cipEligibleRowsIn below
+    # take plain scalars, so it is unrolled once, here.
+    rsqCutoff <- weightSelectionArgs$cutoff
+    rsqPvalCutoff <- weightSelectionArgs$pvalCutoff
+    rsqOption <- weightSelectionArgs$metric
+    rsqPvalOption <- weightSelectionArgs$pvalMetric
     selectionActive <- !is.null(twasWeights) &&
         (rsqCutoff > 0 || is.finite(rsqPvalCutoff))
     if (!selectionActive) {
@@ -320,7 +279,8 @@ causalInferencePipeline <- function(
     if (nrow(qtlRows) == 0L) {
         msg <- glue(
             "causalInferencePipeline: every QTL tuple was filtered out by ",
-            "rsqCutoff = {rsqCutoff} / rsqPvalCutoff = {rsqPvalCutoff} ",
+            "weightSelectionConfig(cutoff = {rsqCutoff}, ",
+            "pvalCutoff = {rsqPvalCutoff}) ",
             "(no method cleared the CV cutoffs)."
         )
         abort(msg)
@@ -339,10 +299,7 @@ causalInferencePipeline <- function(
     gwasSumStats,
     gwasLd,
     alleleFlip,
-    mrMethod,
-    mrPipCutoff,
-    mrCpipCutoff,
-    mrPvalCutoff
+    mrArgs
 ) {
     qStudy <- qtlRows$qtlStudy[[qi]]
     qContext <- qtlRows$context[[qi]]
@@ -382,10 +339,7 @@ causalInferencePipeline <- function(
         gwasSumStats = gwasSumStats,
         gwasLd = gwasLd,
         alleleFlip = alleleFlip,
-        mrMethod = mrMethod,
-        mrPipCutoff = mrPipCutoff,
-        mrCpipCutoff = mrCpipCutoff,
-        mrPvalCutoff = mrPvalCutoff
+        mrArgs = mrArgs
     ))
 }
 
@@ -423,10 +377,7 @@ causalInferencePipeline <- function(
     gwasSumStats,
     gwasLd,
     alleleFlip,
-    mrMethod,
-    mrPipCutoff,
-    mrCpipCutoff,
-    mrPvalCutoff
+    mrArgs
 ) {
     gStudy <- as.character(gwasSumStats$study)[[gi]]
     gdf <- getSumStatsDf(
@@ -450,10 +401,7 @@ causalInferencePipeline <- function(
         gdf,
         twasOut,
         alleleFlip = alleleFlip,
-        mrMethod = mrMethod,
-        mrPipCutoff = mrPipCutoff,
-        mrCpipCutoff = mrCpipCutoff,
-        mrPvalCutoff = mrPvalCutoff
+        mrArgs = mrArgs
     )
     .cipResultRow(tuple, gStudy, twasOut, mrOut)
 }
@@ -476,11 +424,13 @@ causalInferencePipeline <- function(
     gdf,
     twasOut,
     alleleFlip,
-    mrMethod,
-    mrPipCutoff,
-    mrCpipCutoff,
-    mrPvalCutoff
+    mrArgs
 ) {
+    # The bundle's terminal; the MR engines below take plain scalars.
+    mrMethod <- mrArgs$method
+    mrPipCutoff <- mrArgs$pipCutoff
+    mrCpipCutoff <- mrArgs$cpipCutoff
+    mrPvalCutoff <- mrArgs$pvalCutoff
     mrGateOpen <- mrPvalCutoff >= 1 ||
         (!is.na(twasOut$pval) && twasOut$pval < mrPvalCutoff)
     if (is.null(fmrEntry) || !mrGateOpen) {
@@ -1635,4 +1585,106 @@ twasZ <- function(
 # @noRd
 .cipSingleMethodPval <- function(m, pVec) {
     list(method = m, pval = as.numeric(pVec[[1L]]))
+}
+
+#' @title TWAS Weight-Selection Settings
+#' @description How \code{\link{causalInferencePipeline}} picks which TWAS
+#'   method's weights to use for each \code{(study, context, trait,
+#'   gwasStudy)} tuple, from the cross-validation metrics on the
+#'   \code{cvResult}. Selection runs when \code{cutoff > 0} or
+#'   \code{pvalCutoff} is finite; otherwise every method is carried through.
+#' @param cutoff Numeric. Minimum cross-validated r-squared a method must
+#'   reach to be eligible. Default \code{0} (no r-squared gate).
+#' @param pvalCutoff Numeric. A method is eligible only when its
+#'   \code{cvResult} p-value metric is below this. Default \code{Inf} (no
+#'   gate). A finite value activates selection even when \code{cutoff = 0}.
+#' @param metric Character. Which \code{cvResult} metric is the r-squared
+#'   used for the cutoff and for ranking; typically \code{"rsq"} or
+#'   \code{"adj_rsq"}. Default \code{"rsq"}.
+#' @param pvalMetric Character vector of candidate \code{cvResult} metric
+#'   names for the p-value gate; the first one present in a tuple's metrics
+#'   is used. Default \code{c("adj_rsq_pval", "pval")}.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' weightSelectionConfig(cutoff = 0.01, metric = "adj_rsq")
+#' @export
+weightSelectionConfig <- function(
+    cutoff = 0,
+    pvalCutoff = Inf,
+    metric = "rsq",
+    pvalMetric = c("adj_rsq_pval", "pval")
+) {
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            cutoff = cutoff,
+            pvalCutoff = pvalCutoff,
+            metric = metric,
+            pvalMetric = pvalMetric
+        ),
+        extra = list(),
+        label = "weightSelectionConfig",
+        engine = "weightSelection"
+    )
+}
+
+#' @title Mendelian-Randomization Settings
+#' @description How \code{\link{causalInferencePipeline}} runs MR from a
+#'   tuple's \code{topLoci} table.
+#' @param method \code{"ivwPerVariant"} (default) filters \code{topLoci}
+#'   variants by \code{pip > pipCutoff} and IVW-pools their Wald ratios.
+#'   \code{"csAware"} groups variants by credible set and computes a
+#'   PIP-weighted composite Wald ratio per set, using \code{cpipCutoff}.
+#' @param pipCutoff Numeric. PIP threshold for a variant to be used as an
+#'   instrument. Default \code{0.5}. Used only by \code{"ivwPerVariant"}.
+#' @param cpipCutoff Numeric. Cumulative-PIP cutoff for retaining a credible
+#'   set. Default \code{0.5}. Used only by \code{"csAware"}.
+#' @param pvalCutoff Numeric. MR runs for a \code{(qtl tuple, gwas)} pair
+#'   only when its \code{twasPval} is below this; otherwise the MR columns
+#'   are \code{NA}. Default \code{1} (no gate).
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mrConfig(method = "csAware", cpipCutoff = 0.8)
+#' @export
+mrConfig <- function(
+    method = c("ivwPerVariant", "csAware"),
+    pipCutoff = 0.5,
+    cpipCutoff = 0.5,
+    pvalCutoff = 1
+) {
+    method <- arg_match(method)
+    .mrAssertApplicable(method, pipCutoff, cpipCutoff)
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            method = method,
+            pipCutoff = pipCutoff,
+            cpipCutoff = cpipCutoff,
+            pvalCutoff = pvalCutoff
+        ),
+        extra = list(),
+        label = "mrConfig",
+        engine = "mr"
+    )
+}
+
+# Each method reads exactly one of the two PIP cutoffs. Setting the other to
+# something other than its default is a request that would be ignored, so it
+# fails here rather than silently doing nothing.
+# @noRd
+.mrAssertApplicable <- function(method, pipCutoff, cpipCutoff) {
+    unused <- if (method == "csAware") {
+        if (!isTRUE(all.equal(pipCutoff, 0.5))) "pipCutoff" else NULL
+    } else {
+        if (!isTRUE(all.equal(cpipCutoff, 0.5))) "cpipCutoff" else NULL
+    }
+    if (is.null(unused)) {
+        return(invisible(NULL))
+    }
+    other <- if (method == "csAware") "cpipCutoff" else "pipCutoff"
+    abort(glue(
+        "mrConfig: `{unused}` is not read by method = \"{method}\"; that ",
+        "method uses `{other}`. Set the one its method reads, or change ",
+        "`method`."
+    ))
 }

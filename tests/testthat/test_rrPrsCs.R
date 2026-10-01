@@ -202,7 +202,7 @@ test_that("prsCsWeights calls prsCs and returns betaEst", {
     result <- prsCsWeights(
         stat = stat,
         LD = R,
-        methodArgs = list(
+        methodArgs = prsCsConfig(
             maf = rep(0.3, p),
             nIter = 50,
             nBurnin = 10,

@@ -10,13 +10,7 @@ loadQtlDatasetFromManifest(
   genotypes = NULL,
   genotypeCovariates = NULL,
   scaleResiduals = TRUE,
-  mafCutoff = 0,
-  macCutoff = 0,
-  xvarCutoff = 0,
-  imissCutoff = 0,
-  keepSamples = character(0),
-  keepVariants = character(0),
-  keepIndel = TRUE,
+  genotypeFilterArgs = genotypeFilterConfig(),
   transposeCovariates = FALSE
 )
 }
@@ -36,11 +30,11 @@ a genotype path/prefix; reconciled with a \code{genotypePath} column.}
 \item{genotypeCovariates}{A numeric matrix (samples x covariates) or a path
 to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.}
 
-\item{scaleResiduals, mafCutoff, macCutoff, xvarCutoff}{Pass-through
-\code{\link{QtlDataset}} arguments (stored as lazy QC slots).}
+\item{scaleResiduals}{Pass-through \code{\link{QtlDataset}} argument.}
 
-\item{imissCutoff, keepSamples, keepVariants, keepIndel}{Pass-through
-\code{\link{QtlDataset}} arguments (stored as lazy QC slots).}
+\item{genotypeFilterArgs}{Pass-through \code{\link{QtlDataset}} filtering
+options, built with \code{\link{genotypeFilterConfig}} and stored as lazy
+QC slots.}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout) before
 treating them as samples-as-rows.}

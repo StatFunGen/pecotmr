@@ -11,7 +11,7 @@ mcpRssWeights(
   gamma = 3,
   alpha = 1,
   selection = c("ldQuadratic", "minFbeta"),
-  methodArgs = list()
+  methodArgs = penalizedRssConfig()
 )
 }
 \arguments{
@@ -30,8 +30,10 @@ sample sizes).}
 \item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
 \code{"minFbeta"}.}
 
-\item{methodArgs}{Optional named list of options passed to
-\code{penalizedRss()}.}
+\item{methodArgs}{Options forwarded to \code{penalizedRss}, built
+with \code{\link{penalizedRssConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of SNP coefficient weights.

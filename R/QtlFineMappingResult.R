@@ -210,6 +210,63 @@ QtlFineMappingResult <- function(
     traitPos = NULL,
     ldSketch = NULL
 ) {
+    .qfmrAssertArgs(
+        study,
+        context,
+        trait,
+        method,
+        entry,
+        jointStudies,
+        jointContexts,
+        jointTraits
+    )
+    n <- length(study)
+    .qfmrCheckTupleLengths(study, context, trait, method, entry)
+    payloads <- map(entry, .asFmRowPayload)
+    .checkRowPayloads(payloads, "FineMappingRow", "fine-mapping")
+    cols <- .qfmrMetadataCols(
+        study,
+        context,
+        trait,
+        method,
+        payloads,
+        jointStudies,
+        jointContexts,
+        jointTraits,
+        traitPos,
+        n
+    )
+    dfArgs <- c(cols, list(check.names = FALSE))
+    # Each entry's variants become one ELEMENT, its topLoci that element's
+    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
+    # splits by chromosome with its metadata row replicated.
+    split <- .rtlSplitBySeqname(map(payloads, rowVariants))
+    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md[split$fromIdx, , drop = FALSE]
+    )
+    obj <- new(
+        "QtlFineMappingResult",
+        grl,
+        ldSketch = .asLdSketch(ldSketch)
+    )
+    validObject(obj)
+    obj
+}
+
+# Every argument's type contract, checked before anything is built.
+# @noRd
+.qfmrAssertArgs <- function(
+    study,
+    context,
+    trait,
+    method,
+    entry,
+    jointStudies,
+    jointContexts,
+    jointTraits
+) {
     assertCharacter(study, any.missing = FALSE)
     assertCharacter(context, any.missing = FALSE)
     assertCharacter(trait, any.missing = FALSE)
@@ -224,17 +281,30 @@ QtlFineMappingResult <- function(
     assertCharacter(jointStudies, null.ok = TRUE)
     assertCharacter(jointContexts, null.ok = TRUE)
     assertCharacter(jointTraits, null.ok = TRUE)
-    n <- length(study)
-    .qfmrCheckTupleLengths(study, context, trait, method, entry)
-    entry <- map(entry, .asFmRowPayload)
-    .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
+}
+
+# The collection's outer mcols: the identity tuple, each entry's fit / cv
+# payload, and any joint-provenance or trait-position columns.
+# @noRd
+.qfmrMetadataCols <- function(
+    study,
+    context,
+    trait,
+    method,
+    payloads,
+    jointStudies,
+    jointContexts,
+    jointTraits,
+    traitPos,
+    n
+) {
     baseCols <- list(
         study = as.character(study),
         context = as.character(context),
         trait = as.character(trait),
         method = as.character(method),
-        susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
-        cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
+        susieFit = S4Vectors::SimpleList(map(payloads, getSusieFit)),
+        cvResult = S4Vectors::SimpleList(map(payloads, getCvResult))
     )
     withJoint <- .qfmrAppendJointCols(
         baseCols,
@@ -243,24 +313,7 @@ QtlFineMappingResult <- function(
         jointTraits,
         n
     )
-    cols <- .appendTraitPosCol(withJoint, traitPos, n)
-    dfArgs <- c(cols, list(check.names = FALSE))
-    # Each entry's variants become one ELEMENT, its topLoci that element's
-    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
-    # splits by chromosome with its metadata row replicated.
-    split <- .rtlSplitBySeqname(map(entry, rowVariants))
-    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    grl <- S4Vectors::`mcols<-`(
-        GenomicRanges::GRangesList(split$entry),
-        value = md[split$fromIdx, , drop = FALSE]
-    )
-    obj <- new(
-        "QtlFineMappingResult",
-        grl,
-        ldSketch = .asLdSketch(ldSketch)
-    )
-    validObject(obj)
-    obj
+    .appendTraitPosCol(withJoint, traitPos, n)
 }
 
 # Each joint-provenance column must be one value per row.
@@ -327,8 +380,7 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        returnList = FALSE,
-        ...
+        returnList = FALSE
     ) {
         pip <- .fmrRowPip(
             .fmrRowParts(
@@ -359,8 +411,19 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        ...
+        region = NULL
     ) {
+        # The shared FineMappingResultBase accessors pass the whole selector
+        # set, and only GwasFineMappingResult is region-indexed. Refusing a
+        # non-NULL `region` is the point of naming it: it used to vanish into
+        # `...` and silently return the study/context/trait/method match.
+        if (!is.null(region)) {
+            abort(glue(
+                "QtlFineMappingResult is not region-indexed: select with ",
+                "study / context / trait / method. `region` applies to ",
+                "GwasFineMappingResult only."
+            ))
+        }
         .fmrRowParts(
             x,
             .qfmrSelectRowIndex(x, study, context, trait, method)
@@ -378,8 +441,7 @@ setMethod(
         study = NULL,
         context = NULL,
         trait = NULL,
-        method = NULL,
-        ...
+        method = NULL
     ) {
         getCvResult(.fmrRowParts(
             x,

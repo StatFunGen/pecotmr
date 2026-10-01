@@ -3985,6 +3985,9 @@ test_that("computeLd errors when a non-internal backend is paired with non-sampl
 # ldPruneByCorrelation's `cor.X <- cor(X)`) are reachable by mocking the *base*
 # `requireNamespace` (so it reports Rfast missing) for the duration of the call.
 test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast is absent", {
+    # Captured BEFORE the rebinding: inside the mock, `base::requireNamespace`
+    # resolves to the mock itself, so delegating through it recurses.
+    realRequireNamespace <- base::requireNamespace
     with_mocked_bindings(
         {
             set.seed(1)
@@ -4004,7 +4007,7 @@ test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast
             if (identical(package, "Rfast")) {
                 FALSE
             } else {
-                base::requireNamespace(package, ...)
+                realRequireNamespace(package, ...)
             }
         },
         .package = "base"
@@ -4076,8 +4079,16 @@ test_that(".panelVariantFilter drops panel-rare variants", {
     data(qtlDatasetExample)
     handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
-    loose <- .panelVariantFilter(handle, ids, mafCutoff = 0.05)
-    tight <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    loose <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(mafCutoff = 0.05)
+    )
+    tight <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(mafCutoff = 0.2)
+    )
     expect_lt(length(loose), length(ids))
     expect_lt(length(tight), length(loose))
     # Kept sets are nested as the cutoff rises, and order is the caller's.
@@ -4091,13 +4102,25 @@ test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
     nSamp <- getNSamples(handle)
     # macCutoff / (2 * nSamples) is the same threshold as mafCutoff.
-    byMac <- .panelVariantFilter(handle, ids, macCutoff = 0.1 * 2 * nSamp)
-    byMaf <- .panelVariantFilter(handle, ids, mafCutoff = 0.1)
+    byMac <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(macCutoff = 0.1 * 2 * nSamp)
+    )
+    byMaf <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(mafCutoff = 0.1)
+    )
     expect_identical(byMac, byMaf)
     # The stricter of the two wins.
     expect_identical(
-        .panelVariantFilter(handle, ids, mafCutoff = 0.2, macCutoff = 2),
-        .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+        .panelVariantFilter(
+            handle,
+            ids,
+            panelFilterConfig(mafCutoff = 0.2, macCutoff = 2)
+        ),
+        .panelVariantFilter(handle, ids, panelFilterConfig(mafCutoff = 0.2))
     )
 })
 
@@ -4105,10 +4128,17 @@ test_that(".panelVariantFilter drops high-missingness variants", {
     data(qtlDatasetExample)
     handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
-    strict <- .panelVariantFilter(handle, ids, imissCutoff = 0)
+    strict <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(imissCutoff = 0)
+    )
     expect_lt(length(strict), length(ids))
     # A cutoff above the panel's worst variant keeps everything.
-    expect_identical(.panelVariantFilter(handle, ids, imissCutoff = 1), ids)
+    expect_identical(
+        .panelVariantFilter(handle, ids, panelFilterConfig(imissCutoff = 1)),
+        ids
+    )
 })
 
 test_that(".panelVariantFilter passes through ids absent from the panel", {
@@ -4121,7 +4151,11 @@ test_that(".panelVariantFilter passes through ids absent from the panel", {
     withGhost <- c("chr9:999:A:G", ids)
     expect_true(is_in(
         "chr9:999:A:G",
-        .panelVariantFilter(handle, withGhost, mafCutoff = 0.001)
+        .panelVariantFilter(
+            handle,
+            withGhost,
+            panelFilterConfig(mafCutoff = 0.001)
+        )
     ))
 })
 
@@ -4129,11 +4163,19 @@ test_that(".panelVariantFilter handles empty and NULL input", {
     data(qtlDatasetExample)
     handle <- getGenotypeHandle(qtlDatasetExample)
     expect_length(
-        .panelVariantFilter(handle, character(0), mafCutoff = 0.1),
+        .panelVariantFilter(
+            handle,
+            character(0),
+            panelFilterConfig(mafCutoff = 0.1)
+        ),
         0L
     )
     expect_identical(
-        .panelVariantFilter(NULL, "chr1:1:A:G", mafCutoff = 0.1),
+        .panelVariantFilter(
+            NULL,
+            "chr1:1:A:G",
+            panelFilterConfig(mafCutoff = 0.1)
+        ),
         "chr1:1:A:G"
     )
 })
@@ -4143,13 +4185,19 @@ test_that(".panelCutoffs short-circuits when no cutoff is set", {
     # NULL means the panel is never touched, which is what keeps the default
     # path free of an extra dosage read.
     expect_null(.panelCutoffs())
-    expect_null(.panelCutoffs(
+    expect_null(.panelCutoffs(panelFilterConfig(
         mafCutoff = 0,
         macCutoff = 0,
         imissCutoff = 1
-    ))
-    expect_equal(.panelCutoffs(mafCutoff = 0.01)$mafCutoff, 0.01)
-    expect_equal(.panelCutoffs(imissCutoff = 0.5)$imissCutoff, 0.5)
+    )))
+    expect_equal(
+        .panelCutoffs(panelFilterConfig(mafCutoff = 0.01))$mafCutoff,
+        0.01
+    )
+    expect_equal(
+        .panelCutoffs(panelFilterConfig(imissCutoff = 0.5))$imissCutoff,
+        0.5
+    )
 })
 
 
@@ -4196,13 +4244,21 @@ test_that(".panelVariantFilter: .afreq and dosage agree on what to drop", {
     skip_if_not_installed("pgenlibr")
     handle <- .pvfAfreqHandle()
     ids <- as.character(getSnpInfo(handle)$SNP)
-    viaAfreq <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    viaAfreq <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(mafCutoff = 0.2)
+    )
     # Force the dosage path by hiding the sidecar from the fast path.
     local_mocked_bindings(
         .panelAfreqMaf = function(handle, variantIds) NULL,
         .package = "pecotmr"
     )
-    viaDosage <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    viaDosage <- .panelVariantFilter(
+        handle,
+        ids,
+        panelFilterConfig(mafCutoff = 0.2)
+    )
     expect_lt(length(viaAfreq), length(ids))
     expect_identical(viaAfreq, viaDosage)
 })
@@ -4220,7 +4276,11 @@ test_that(".panelVariantFilter uses dosage whenever missingness is capped", {
         .package = "pecotmr"
     )
     expect_no_error(
-        .panelVariantFilter(handle, ids, mafCutoff = 0.2, imissCutoff = 0.5)
+        .panelVariantFilter(
+            handle,
+            ids,
+            panelFilterConfig(mafCutoff = 0.2, imissCutoff = 0.5)
+        )
     )
 })
 
@@ -4591,7 +4651,7 @@ test_that("a block-indexed source must be addressable by block", {
     # or a list of them; anything else is refused rather than silently
     # returning the wrong block.
     expect_error(
-        pecotmr:::.loadLdFromIndexed("a string", 1L, FALSE),
+        pecotmr:::.loadLdFromIndexed("a string", 1L),
         "cannot address a character by block"
     )
 })
@@ -4599,9 +4659,9 @@ test_that("a block-indexed source must be addressable by block", {
 test_that("a matrix and a list of matrices both address by block", {
     R <- diag(3)
     dimnames(R) <- list(c("v1", "v2", "v3"), c("v1", "v2", "v3"))
-    expect_s4_class(pecotmr:::.loadLdFromIndexed(R, 1L, FALSE), "LdData")
+    expect_s4_class(pecotmr:::.loadLdFromIndexed(R, 1L), "LdData")
     # The list form picks the requested element.
-    both <- pecotmr:::.loadLdFromIndexed(list(R, R), 2L, FALSE)
+    both <- pecotmr:::.loadLdFromIndexed(list(R, R), 2L)
     expect_s4_class(both, "LdData")
     expect_equal(length(both), 3L)
 })
@@ -4787,11 +4847,19 @@ test_that(".panelVariantFilter is a no-op without a sketch", {
     # An active cutoff still cannot filter anything with no panel to read
     # frequencies from.
     expect_equal(
-        pecotmr:::.panelVariantFilter(NULL, v, mafCutoff = 0.01),
+        pecotmr:::.panelVariantFilter(
+            NULL,
+            v,
+            panelFilterConfig(mafCutoff = 0.01)
+        ),
         v
     )
     expect_equal(
-        pecotmr:::.panelVariantFilter(NULL, character(0), mafCutoff = 0.01),
+        pecotmr:::.panelVariantFilter(
+            NULL,
+            character(0),
+            panelFilterConfig(mafCutoff = 0.01)
+        ),
         character(0)
     )
 })
@@ -4810,7 +4878,11 @@ test_that(".panelVariantFilter is a no-op when nothing matches the panel", {
     # The sketch exists but shares no variant with the request, so there is
     # no frequency to filter on and the ids pass through untouched.
     expect_equal(
-        pecotmr:::.panelVariantFilter(sketch, ids, mafCutoff = 0.01),
+        pecotmr:::.panelVariantFilter(
+            sketch,
+            ids,
+            panelFilterConfig(mafCutoff = 0.01)
+        ),
         ids
     )
 })
@@ -5094,4 +5166,58 @@ test_that(".ldSketchCheckOverlap is a no-op when a side has no variants", {
     expect_null(
         pecotmr:::.ldSketchCheckOverlap(NULL, NULL, "testPipeline", "")
     )
+})
+
+test_that("ldPruningConfig refuses what the snprelate backend owns", {
+    expect_error(ldPruningConfig(gdsobj = 1), "the temporary GDS")
+    expect_error(ldPruningConfig(method = "r"), "fixed at 'corr'")
+    expect_error(ldPruningConfig(ld.threshold = 0.5), "the caller's `corThres`")
+    expect_error(ldPruningConfig(verbose = TRUE), "the caller's `verbose`")
+    expect_error(ldPruningConfig(nosuch = 1), "unknown argument")
+    expect_equal(ldPruningConfig(slide.max.bp = 1e6)$slide.max.bp, 1e6)
+})
+
+test_that("ldPruneByCorrelation refuses options its backend never uses", {
+    set.seed(1)
+    X <- matrix(rnorm(100 * 5), 100, 5)
+    expect_error(
+        ldPruneByCorrelation(
+            X,
+            backend = "hclust",
+            methodArgs = ldPruningConfig(slide.max.n = 10L)
+        ),
+        "backend 'hclust' does not call"
+    )
+    # No options is the default, so the hclust path still works untouched.
+    expect_length(ldPruneByCorrelation(X, corThres = 0.9)$filter.id, 5L)
+    expect_error(
+        ldPruneByCorrelation(X, methodArgs = list(slide.max.n = 10L)),
+        "ldPruningConfig"
+    )
+})
+
+test_that("ldPruneByCorrelation forwards methodArgs to SNPRelate", {
+    skip_if_not_installed("SNPRelate")
+    skip_if_not_installed("gdsfmt")
+    seen <- NULL
+    real <- SNPRelate::snpgdsLDpruning
+    set.seed(2)
+    X <- matrix(sample(0:2, 100 * 6, replace = TRUE), 100, 6)
+    colnames(X) <- str_c("snp", seq_len(6))
+    suppressMessages(with_mocked_bindings(
+        ldPruneByCorrelation(
+            X,
+            corThres = 0.9,
+            backend = "snprelate",
+            methodArgs = ldPruningConfig(slide.max.n = 3L)
+        ),
+        snpgdsLDpruning = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "SNPRelate"
+    ))
+    expect_equal(seen$slide.max.n, 3L)
+    expect_equal(seen$method, "corr")
+    expect_equal(seen$ld.threshold, 0.9)
 })

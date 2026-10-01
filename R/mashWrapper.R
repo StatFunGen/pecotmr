@@ -937,10 +937,7 @@ qtlSumStatsFromZMatrix <- function(
         genome = genome,
         role = role,
         mcolFn = .mashZMcolFn,
-        a1 = a1,
-        a2 = a2,
-        z = z,
-        n = n
+        mcolArgs = list(a1 = a1, a2 = a2, z = z, n = n)
     )
 }
 
@@ -1010,11 +1007,7 @@ qtlSumStatsFromBetaMatrix <- function(
         genome = genome,
         role = role,
         mcolFn = .mashBetaMcolFn,
-        a1 = a1,
-        a2 = a2,
-        bhat = bhat,
-        shat = shat,
-        n = n
+        mcolArgs = list(a1 = a1, a2 = a2, bhat = bhat, shat = shat, n = n)
     )
 }
 
@@ -1063,7 +1056,7 @@ qtlSumStatsFromBetaMatrix <- function(
     genome,
     role,
     mcolFn,
-    ...
+    mcolArgs = list()
 ) {
     context <- .qszmRecycle(context, nCond, "context")
     trait <- .qszmRecycle(trait, nCond, "trait")
@@ -1097,7 +1090,7 @@ qtlSumStatsFromBetaMatrix <- function(
         pos = pos,
         vids = vids,
         mcolFn = mcolFn,
-        mcolArgs = list(...)
+        mcolArgs = mcolArgs
     )
     QtlSumStats(
         study = rep(as.character(study), nCond),

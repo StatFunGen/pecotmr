@@ -32,15 +32,14 @@
 #'           \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
 #'           The pipeline does \emph{not} run a separate
 #'           individual-level QC pass.
-#'     \item \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} act
-#'           at ANALYSIS time on the sumstat sides, measured against the
-#'           \strong{LD reference panel}: a variant whose panel genotypes fall
-#'           below the cutoffs is dropped before the LD matrix is built. They
-#'           apply to a \code{QtlSumStats} QTL side and to a
-#'           \code{GwasSumStats} GWAS side (so they still bite when the QTL
-#'           side is individual-level). Defaults (\code{0}, \code{0},
-#'           \code{1}) filter nothing. Unlike
-#'           \code{summaryStatsQc(imputeOpts = ...)}, which only bounds what
+#'     \item \code{panelFilter} acts at ANALYSIS time on the sumstat
+#'           sides, measured against the \strong{LD reference panel}: a
+#'           variant whose panel genotypes fall below its cutoffs is dropped
+#'           before the LD matrix is built. It applies to a
+#'           \code{QtlSumStats} QTL side and to a \code{GwasSumStats} GWAS
+#'           side (so it still bites when the QTL side is
+#'           individual-level). Its defaults filter nothing. Unlike
+#'           \code{summaryStatsQc(imputeArgs = ...)}, which only bounds what
 #'           RAISS will impute, these discard \emph{observed} variants.
 #'     \item All summary-statistic QC (variant filters, harmonization
 #'           against the \code{ldSketch}, LD-mismatch detection, RAISS
@@ -81,9 +80,13 @@
 #'   variant-window selection).
 #' @param region Optional single-range \code{GRanges} describing the analysis
 #'   window. Mutually exclusive with \code{traitId} (see the \code{QtlDataset}
-#'   accessors).
+#'   accessors). Individual-level input only: summary statistics carry no
+#'   genotypes to window, so the \code{QtlSumStats} method does not take it
+#'   --- matching \code{\link{fineMappingPipeline}} and
+#'   \code{\link{twasWeightsPipeline}}.
 #' @param cisWindow Optional cis window in basepairs; required with
-#'   \code{traitId}, optional with \code{region}.
+#'   \code{traitId}, optional with \code{region}. Individual-level input
+#'   only, as for \code{region}.
 #' @param samples Optional character vector of sample IDs to restrict the
 #'   analysis to; \code{NULL} (default) uses all samples.
 #' @param focalTrait Optional trait name; when supplied and present in the
@@ -93,36 +96,43 @@
 #'   GWAS study focal.
 #' @param xqtlColoc,jointGwas,separateGwas Logical flags selecting which
 #'   colocboost variants to run.
-#' @param pipCutoffToSkip Individual-level pre-filter (ports the legacy
-#'   \code{pip_cutoff_to_skip_ind}). Scalar (applied to every context) or a
-#'   context-named numeric vector. For each context, every outcome is fit with a
-#'   single-effect SuSiE (\code{L = 1}) and dropped unless some variant's PIP
-#'   exceeds the cutoff; a context with no surviving outcome is skipped.
-#'   \code{0} (default) disables it; a negative value uses \code{3 /
-#'   n_variants}. (Summary-statistic skipping is handled upstream by
-#'   \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)
-#' @param absZCutoffToSkip,bfCutoffToSkip,logBfCutoffToSkip Alternative
-#'   individual-level pre-filter metrics used in place of
-#'   \code{pipCutoffToSkip}: drop an outcome unless its maximum marginal
-#'   \code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
-#'   single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
-#'   (\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
-#'   Scalars, each defaulting to 0 (off). Exactly one screening metric may be
-#'   enabled: setting any of these requires \code{pipCutoffToSkip = 0}.
-#' @param mafCutoff,macCutoff,imissCutoff Analysis-time filters applied to the
-#'   summary-statistic sides against the LD reference panel: a variant whose
-#'   panel genotypes fall below the cutoffs is dropped before the LD matrix is
-#'   built. Defaults (\code{0}, \code{0}, \code{1}) filter nothing. See the
-#'   Details section for how these relate to the individual-level cutoffs
-#'   recorded on a \code{QtlDataset}.
+#' @param signalScreenArgs Individual-level pre-filter (ports the legacy
+#'   \code{pip_cutoff_to_skip_ind}), built with
+#'   \code{\link{signalScreenConfig}}. For each context every outcome is fit
+#'   with a single-effect SuSiE (\code{L = 1}) and dropped unless the chosen
+#'   metric exceeds its cutoff; a context with no surviving outcome is
+#'   skipped:
+#'   \itemize{
+#'     \item \code{pip} --- the maximum PIP. A negative cutoff uses
+#'       \code{3 / n_variants}. Uniquely here it may also be a
+#'       \strong{context-named} numeric vector rather than a scalar,
+#'       applying a different cutoff per context.
+#'     \item \code{absZ} --- the maximum marginal \code{|z|}.
+#'     \item \code{bf} / \code{logBf} --- the maximum per-variant Bayes
+#'       factor or log Bayes factor from the \code{L = 1} fit.
+#'   }
+#'   Only one metric may be enabled, which
+#'   \code{\link{signalScreenConfig}} enforces when you build it. Unset (the
+#'   default) screens nothing. Summary-statistic skipping is handled upstream
+#'   by \code{\link{summaryStatsQc}}.
+#' @param panelFilterArgs Analysis-time filters applied to the summary-statistic
+#'   sides against the LD reference panel, built with
+#'   \code{\link{panelFilterConfig}}: a variant whose panel genotypes fall
+#'   below its cutoffs is dropped before the LD matrix is built. The defaults
+#'   filter nothing. See the Details section for how these relate to the
+#'   individual-level cutoffs recorded on a \code{QtlDataset}.
 #' @param alleleFlip Logical, default \code{TRUE}. When TRUE, harmonize variants
 #'   across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
 #'   swaps recognized (flipping z / residualized dosage / LD to a shared
 #'   coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
 #'   swap is treated as a distinct variant.
-#' @param colocboostArgs Optional named list of additional arguments
-#'   forwarded to \code{\link[colocboost]{colocboost}} (e.g., \code{M},
-#'   \code{L}, \code{output_level}).
+#' @param methodArgs Additional arguments forwarded to
+#'   \code{colocboost::colocboost}, built with
+#'   \code{\link{colocboostConfig}}. Names are checked against that
+#'   function's formals, so a misspelled option errors instead of being
+#'   dropped inside the run. The data slots the pipeline assembles itself
+#'   (\code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
+#'   \code{focal_outcome_idx}) are refused.
 #' @param ... Required by the generic; the methods take no further arguments.
 #' @return A \code{\linkS4class{ColocBoostResult}}: one element per
 #'   confidence set (CoS) across every analysis that ran, holding that set's
@@ -155,8 +165,95 @@ NULL
 #' colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
 #' @export
 setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
+    .cbAssertInputClass(qtlData)
     standardGeneric("colocboostPipeline")
 })
+
+# At least one analysis has to be selected. The three flags are independent
+# -- any combination is a valid request -- so they stay separate arguments;
+# all-FALSE is the one combination that is not a request at all, and it used
+# to run silently and return nothing.
+# @noRd
+.cbAssertAnyRun <- function(xqtlColoc, jointGwas, separateGwas) {
+    if (any(c(isTRUE(xqtlColoc), isTRUE(jointGwas), isTRUE(separateGwas)))) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "colocboostPipeline: no analysis selected. Set at least one of ",
+        "`xqtlColoc` (xQTL-only), `jointGwas` (all GWAS jointly) or ",
+        "`separateGwas` (one run per GWAS study) to TRUE."
+    ))
+}
+
+# @noRd
+.cbAssertInputClass <- function(qtlData) {
+    ok <- c("QtlDataset", "QtlSumStats", "MultiStudyQtlDataset")
+    if (any(map_lgl(ok, is, object = qtlData))) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "colocboostPipeline does not accept inputs of class ",
+        "'{class(qtlData)[[1L]]}'. Pass a QtlDataset, QtlSumStats, or ",
+        "MultiStudyQtlDataset for QTL data."
+    ))
+}
+
+#' @title colocboost Engine Settings
+#' @description Additional arguments forwarded to
+#'   \code{colocboost::colocboost}. Names are checked against that
+#'   function's own formals, so a misspelled option is an error here rather
+#'   than a setting silently dropped inside the run.
+#'
+#'   The data arguments \code{colocboostPipeline} assembles itself ---
+#'   \code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
+#'   \code{focal_outcome_idx} --- are not settable here.
+#' @param ... Named \code{colocboost::colocboost} arguments.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' colocboostConfig(M = 5)
+#' @export
+colocboostConfig <- function(...) {
+    extra <- list(...)
+    .cbRefusePipelineOwned(extra)
+    .newMethodConfig(
+        "colocboost::colocboost",
+        defaults = list(),
+        extra = extra,
+        label = "colocboostConfig",
+        engine = "colocboost"
+    )
+}
+
+# The data slots the pipeline builds from its inputs. They are real
+# colocboost formals, so the union check would accept them -- but the
+# pipeline supplies them, so a value given here would be overwritten.
+# @noRd
+.cbPipelineOwnedArgs <- function() {
+    c(
+        "X",
+        "Y",
+        "sumstat",
+        "LD",
+        "X_ref",
+        "focal_outcome_idx",
+        "dict_YX",
+        "dict_sumstatLD"
+    )
+}
+
+# @noRd
+.cbRefusePipelineOwned <- function(extra) {
+    clash <- intersect(names(extra), .cbPipelineOwnedArgs())
+    if (length(clash) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "colocboostConfig: {str_flatten(clash, ', ')} ",
+        "{if (length(clash) == 1L) 'is' else 'are'} assembled by ",
+        "colocboostPipeline() from its inputs, so a value set here would be ",
+        "overwritten. Use the pipeline's own arguments instead."
+    ))
+}
 
 # =============================================================================
 # Helpers (private)
@@ -169,6 +266,8 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         abort("The colocboost package is required for colocboostPipeline().")
     }
     t1 <- Sys.time()
+    # Callers splice the flattened bundle in with the assembled data slots;
+    # drop the slots that resolved to NULL before handing them over.
     args <- compact(args)
     res <- try_fetch(
         exec(colocboost::colocboost, !!!args),
@@ -231,61 +330,6 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     pipCutoffToSkip[[1L]]
 }
 
-# Combine the four colocboost screen cutoffs into a single spec to thread
-# through the pipCutoffToSkip channel: a resolved screen object when a new
-# metric (absZ / bf / logBf) is set, otherwise the (possibly context-named)
-# legacy pipCutoffToSkip. Enforces one screening metric at a time.
-.cbScreenSpec <- function(
-    pipCutoffToSkip,
-    absZCutoffToSkip,
-    bfCutoffToSkip,
-    logBfCutoffToSkip
-) {
-    newScreen <- .resolveScreenMetric(
-        0,
-        absZCutoffToSkip,
-        bfCutoffToSkip,
-        logBfCutoffToSkip
-    )
-    pipOn <- !is.null(pipCutoffToSkip) &&
-        length(pipCutoffToSkip) > 0L &&
-        any(as.numeric(pipCutoffToSkip) != 0, na.rm = TRUE)
-    if (!is.null(newScreen) && pipOn) {
-        msg <- glue(
-            "colocboostPipeline: only one signal screen may be enabled ",
-            "at a time; unset pipCutoffToSkip to use absZCutoffToSkip / ",
-            "bfCutoffToSkip / logBfCutoffToSkip."
-        )
-        abort(msg)
-    }
-    if (!is.null(newScreen)) newScreen else pipCutoffToSkip
-}
-
-# Per-outcome single-trait skip (ports the legacy qc_individual_data
-# pip_cutoff_to_skip): for each outcome column of Y, fit a single-effect
-# SuSiE (L = 1, max_iter = 100) on (X, Y[, j]) and keep the outcome only if
-# any variant's PIP exceeds the cutoff. A cutoff < 0 means 3 / n_variants.
-# Returns the retained Y (NULL when no outcome clears the threshold).
-.cbPipSkipOutcomes <- function(X, Y, spec) {
-    if (is.null(.asScreen(spec))) {
-        return(Y)
-    }
-    # Single-effect screen per outcome, sharing the L = 1 SuSiE pre-screen
-    # (.fmSerScreen) with the fine-mapping pipeline. fallback = FALSE: an
-    # outcome that cannot be screened (too few samples / fit failure) is
-    # dropped.
-    keep <- map_lgl(
-        seq_len(ncol(Y)),
-        .cbScreenOutcome,
-        X = X,
-        Y = Y,
-        spec = spec
-    )
-    if (!any(keep)) {
-        return(NULL)
-    }
-    Y[, keep, drop = FALSE]
-}
 
 # Materialise an individual-level QtlDataset into the colocboost
 # (X, Y, dict_YX, outcome_names) bundle. Each context becomes one X /
@@ -897,6 +941,105 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # colocboost variants the user requested. `qtlSumstatBundle` is the QTL-side
 # subset of `sumstatBundle` (see .cbDriver); only the xQTL-only run uses it,
 # so that a GWAS study never becomes an xQTL-only outcome.
+# The analyses that were requested AND have data to run on, keyed by the
+# result slot each fills. .cbCanRun warns in the "requested but cannot" case
+# so the skip is never silent, and compact() drops what did not run.
+# @noRd
+.cbDispatchRuns <- function(
+    individualBundle,
+    sumstatBundle,
+    qtlSumstatBundle,
+    xqtlColoc,
+    jointGwas,
+    separateGwas,
+    hasInd,
+    hasSs,
+    hasQtlSs,
+    focalTrait,
+    methodArgs
+) {
+    compact(list(
+        xqtl_coloc = if (
+            .cbCanRun(xqtlColoc, hasInd || hasQtlSs, "xqtlColoc", "QTL data")
+        ) {
+            .cbRunXqtlOnly(
+                individualBundle,
+                qtlSumstatBundle,
+                hasInd,
+                focalTrait,
+                methodArgs
+            )
+        },
+        joint_gwas = if (
+            .cbCanRun(jointGwas, hasSs, "jointGwas", "summary-statistic data")
+        ) {
+            .cbRunJointGwas(
+                individualBundle,
+                sumstatBundle,
+                hasInd,
+                methodArgs
+            )
+        },
+        separate_gwas = if (
+            .cbCanRun(
+                separateGwas,
+                hasSs,
+                "separateGwas",
+                "summary-statistic data"
+            )
+        ) {
+            .cbRunSeparateGwas(
+                individualBundle,
+                sumstatBundle,
+                hasInd,
+                methodArgs
+            )
+        }
+    ))
+}
+
+# Each run's result and timing folded into the empty result skeleton, so a
+# slot no analysis filled keeps the skeleton's own (empty) value.
+# @noRd
+.cbMergeRuns <- function(empty, runs) {
+    list_assign(
+        list_assign(empty, !!!map(runs, "result")),
+        computing_time = list_assign(
+            empty$computing_time,
+            Analysis = list_assign(
+                empty$computing_time$Analysis,
+                !!!map(runs, "time")
+            )
+        )
+    )
+}
+# Per-outcome single-trait skip (ports the legacy qc_individual_data
+# pip_cutoff_to_skip): for each outcome column of Y, fit a single-effect
+# SuSiE (L = 1, max_iter = 100) on (X, Y[, j]) and keep the outcome only if
+# any variant's PIP exceeds the cutoff. A cutoff < 0 means 3 / n_variants.
+# Returns the retained Y (NULL when no outcome clears the threshold).
+.cbPipSkipOutcomes <- function(X, Y, spec) {
+    if (is.null(.asScreen(spec))) {
+        return(Y)
+    }
+    # Single-effect screen per outcome, sharing the L = 1 SuSiE pre-screen
+    # (.fmSerScreen) with the fine-mapping pipeline. fallback = FALSE: an
+    # outcome that cannot be screened (too few samples / fit failure) is
+    # dropped.
+    keep <- map_lgl(
+        seq_len(ncol(Y)),
+        .cbScreenOutcome,
+        X = X,
+        Y = Y,
+        spec = spec
+    )
+    if (!any(keep)) {
+        return(NULL)
+    }
+    Y[, keep, drop = FALSE]
+}
+
+
 .cbRunVariants <- function(
     individualBundle,
     sumstatBundle,
@@ -904,7 +1047,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     jointGwas,
     separateGwas,
     focalTrait,
-    colocboostArgs,
+    methodArgs,
     qtlLdSketch = NULL,
     qtlSumstatBundle = NULL
 ) {
@@ -921,57 +1064,20 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         inform(msg)
         return(.cbEmptyResultObject())
     }
-    # Each analysis contributes an entry only when it was requested AND has
-    # the data; .cbCanRun warns in the "requested but cannot" case so the skip
-    # is never silent, and compact() drops what did not run.
-    runs <- compact(list(
-        xqtl_coloc = if (
-            .cbCanRun(xqtlColoc, hasInd || hasQtlSs, "xqtlColoc", "QTL data")
-        ) {
-            .cbRunXqtlOnly(
-                individualBundle,
-                qtlSumstatBundle,
-                hasInd,
-                focalTrait,
-                colocboostArgs
-            )
-        },
-        joint_gwas = if (
-            .cbCanRun(jointGwas, hasSs, "jointGwas", "summary-statistic data")
-        ) {
-            .cbRunJointGwas(
-                individualBundle,
-                sumstatBundle,
-                hasInd,
-                colocboostArgs
-            )
-        },
-        separate_gwas = if (
-            .cbCanRun(
-                separateGwas,
-                hasSs,
-                "separateGwas",
-                "summary-statistic data"
-            )
-        ) {
-            .cbRunSeparateGwas(
-                individualBundle,
-                sumstatBundle,
-                hasInd,
-                colocboostArgs
-            )
-        }
-    ))
-    results <- list_assign(
-        list_assign(empty, !!!map(runs, "result")),
-        computing_time = list_assign(
-            empty$computing_time,
-            Analysis = list_assign(
-                empty$computing_time$Analysis,
-                !!!map(runs, "time")
-            )
-        )
+    runs <- .cbDispatchRuns(
+        individualBundle,
+        sumstatBundle,
+        qtlSumstatBundle,
+        xqtlColoc,
+        jointGwas,
+        separateGwas,
+        hasInd,
+        hasSs,
+        hasQtlSs,
+        focalTrait,
+        methodArgs
     )
+    results <- .cbMergeRuns(empty, runs)
     .cbToResultObject(
         results,
         .cbOutcomeInfo(individualBundle, sumstatBundle, hasInd),
@@ -1070,7 +1176,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     sumstatBundle,
     hasInd,
     focalTrait,
-    colocboostArgs
+    methodArgs
 ) {
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
@@ -1111,7 +1217,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             output_level = 2
         ),
         ldArgs,
-        colocboostArgs
+        # as.list(): c() would append the MethodConfig record as one opaque
+        # element instead of splicing its entries, and exec() would then hand
+        # that object to colocboost as a positional argument.
+        as.list(methodArgs)
     )
     run <- .cbRun("xQTL-only ColocBoost", args)
     list(result = run$result, time = run$time)
@@ -1162,7 +1271,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     individualBundle,
     sumstatBundle,
     hasInd,
-    colocboostArgs
+    methodArgs
 ) {
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
@@ -1188,7 +1297,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             output_level = 2
         ),
         ldArgs,
-        colocboostArgs
+        # as.list(): c() would append the MethodConfig record as one opaque
+        # element instead of splicing its entries, and exec() would then hand
+        # that object to colocboost as a positional argument.
+        as.list(methodArgs)
     )
     run <- .cbRun("Joint GWAS ColocBoost", args)
     list(result = run$result, time = run$time)
@@ -1200,7 +1312,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     individualBundle,
     sumstatBundle,
     hasInd,
-    colocboostArgs
+    methodArgs
 ) {
     ssNames <- names(sumstatBundle$sumstat)
     t1 <- Sys.time()
@@ -1212,7 +1324,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             individualBundle = individualBundle,
             sumstatBundle = sumstatBundle,
             hasInd = hasInd,
-            colocboostArgs = colocboostArgs
+            methodArgs = methodArgs
         ),
         ssNames
     )
@@ -1239,7 +1351,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     individualBundle,
     sumstatBundle,
     hasInd,
-    colocboostArgs
+    methodArgs
 ) {
     ldIdx <- sumstatBundle$dict_sumstatLD[i, 2L]
     ldArgs <- .cbBuildLdArgs(sumstatBundle$LD[ldIdx])
@@ -1264,7 +1376,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             output_level = 2
         ),
         ldArgs,
-        colocboostArgs
+        # as.list(): c() would append the MethodConfig record as one opaque
+        # element instead of splicing its entries, and exec() would then hand
+        # that object to colocboost as a positional argument.
+        as.list(methodArgs)
     )
     .cbRun(str_c("Separate GWAS ColocBoost for ", study), args)$result
 }
@@ -1375,7 +1490,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     jointGwas,
     separateGwas,
     focalTrait,
-    colocboostArgs,
+    methodArgs,
     qtlLdSketch = NULL,
     alleleFlip = TRUE,
     cutoffs = NULL
@@ -1413,7 +1528,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         jointGwas,
         separateGwas,
         focalTrait,
-        colocboostArgs,
+        methodArgs,
         qtlLdSketch = qtlLdSketch,
         qtlSumstatBundle = qtlSumstatBundle
     )
@@ -1471,22 +1586,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     jointGwas,
     separateGwas,
     samples,
-    mafCutoff,
-    macCutoff,
-    imissCutoff,
-    pipCutoffToSkip,
-    absZCutoffToSkip,
-    bfCutoffToSkip,
-    logBfCutoffToSkip,
+    panelFilterArgs,
+    signalScreenArgs,
     alleleFlip,
-    colocboostArgs
+    methodArgs
 ) {
-    screenSpec <- .cbScreenSpec(
-        pipCutoffToSkip,
-        absZCutoffToSkip,
-        bfCutoffToSkip,
-        logBfCutoffToSkip
-    )
+    screenSpec <- .screenResolve(signalScreenArgs)
     indBundle <- .cbIndividualBundle(
         qtlData,
         contexts = contexts,
@@ -1504,15 +1609,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         jointGwas,
         separateGwas,
         focalTrait,
-        colocboostArgs,
+        methodArgs,
         alleleFlip = alleleFlip,
         # The QTL side is individual-level here, but the GWAS side may still
         # be sumstats, so the panel cutoffs still apply to it.
-        cutoffs = .panelCutoffs(
-            mafCutoff = mafCutoff,
-            macCutoff = macCutoff,
-            imissCutoff = imissCutoff
-        )
+        cutoffs = .panelCutoffs(panelFilterArgs)
     )
 }
 
@@ -1534,16 +1635,17 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         samples = NULL,
-        mafCutoff = 0,
-        macCutoff = 0,
-        imissCutoff = 1,
-        pipCutoffToSkip = 0,
-        absZCutoffToSkip = 0,
-        bfCutoffToSkip = 0,
-        logBfCutoffToSkip = 0,
+        panelFilterArgs = panelFilterConfig(),
+        signalScreenArgs = signalScreenConfig(),
         alleleFlip = TRUE,
-        colocboostArgs = list()
+        # `list()`, not colocboostConfig(): the formal shadows the
+        # constructor, so a constructor-call default is a recursive
+        # reference. An empty list is the "no options" spelling
+        # .assertMethodConfig already accepts; anything else must be built.
+        methodArgs = colocboostConfig()
     ) {
+        .assertMethodConfig(methodArgs, "colocboostConfig", "methodArgs")
+        .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbQtlDatasetDrive(
             qtlData = qtlData,
             gwasSumStats = gwasSumStats,
@@ -1556,15 +1658,10 @@ setMethod(
             jointGwas = jointGwas,
             separateGwas = separateGwas,
             samples = samples,
-            mafCutoff = mafCutoff,
-            macCutoff = macCutoff,
-            imissCutoff = imissCutoff,
-            pipCutoffToSkip = pipCutoffToSkip,
-            absZCutoffToSkip = absZCutoffToSkip,
-            bfCutoffToSkip = bfCutoffToSkip,
-            logBfCutoffToSkip = logBfCutoffToSkip,
+            panelFilterArgs = panelFilterArgs,
+            signalScreenArgs = signalScreenArgs,
             alleleFlip = alleleFlip,
-            colocboostArgs = colocboostArgs
+            methodArgs = methodArgs
         )
     }
 )
@@ -1579,24 +1676,18 @@ setMethod(
         gwasSumStats = NULL,
         contexts = NULL,
         traitId = NULL,
-        region = NULL,
-        cisWindow = NULL,
         focalTrait = NULL,
         xqtlColoc = TRUE,
         jointGwas = FALSE,
         separateGwas = FALSE,
         alleleFlip = TRUE,
-        mafCutoff = 0,
-        macCutoff = 0,
-        imissCutoff = 1,
-        colocboostArgs = list()
+        panelFilterArgs = panelFilterConfig(),
+        methodArgs = colocboostConfig()
     ) {
+        .assertMethodConfig(methodArgs, "colocboostConfig", "methodArgs")
+        .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbRequireSumStatsQc(qtlData, "qtlData")
-        cutoffs <- .panelCutoffs(
-            mafCutoff = mafCutoff,
-            macCutoff = macCutoff,
-            imissCutoff = imissCutoff
-        )
+        cutoffs <- .panelCutoffs(panelFilterArgs)
         qtlPairs <- .cbQtlSumStatsBundle(
             qtlData,
             contexts = contexts,
@@ -1611,7 +1702,7 @@ setMethod(
             jointGwas = jointGwas,
             separateGwas = separateGwas,
             focalTrait = focalTrait,
-            colocboostArgs = colocboostArgs,
+            methodArgs = methodArgs,
             qtlLdSketch = getLdSketch(qtlData),
             alleleFlip = alleleFlip,
             cutoffs = cutoffs
@@ -1636,16 +1727,17 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         samples = NULL,
-        mafCutoff = 0,
-        macCutoff = 0,
-        imissCutoff = 1,
-        pipCutoffToSkip = 0,
-        absZCutoffToSkip = 0,
-        bfCutoffToSkip = 0,
-        logBfCutoffToSkip = 0,
+        panelFilterArgs = panelFilterConfig(),
+        signalScreenArgs = signalScreenConfig(),
         alleleFlip = TRUE,
-        colocboostArgs = list()
+        # `list()`, not colocboostConfig(): the formal shadows the
+        # constructor, so a constructor-call default is a recursive
+        # reference. An empty list is the "no options" spelling
+        # .assertMethodConfig already accepts; anything else must be built.
+        methodArgs = colocboostConfig()
     ) {
+        .assertMethodConfig(methodArgs, "colocboostConfig", "methodArgs")
+        .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbPipelineMultiStudy(
             qtlData = qtlData,
             gwasSumStats = gwasSumStats,
@@ -1658,15 +1750,10 @@ setMethod(
             jointGwas = jointGwas,
             separateGwas = separateGwas,
             samples = samples,
-            mafCutoff = mafCutoff,
-            macCutoff = macCutoff,
-            imissCutoff = imissCutoff,
-            pipCutoffToSkip = pipCutoffToSkip,
-            absZCutoffToSkip = absZCutoffToSkip,
-            bfCutoffToSkip = bfCutoffToSkip,
-            logBfCutoffToSkip = logBfCutoffToSkip,
+            panelFilterArgs = panelFilterArgs,
+            signalScreenArgs = signalScreenArgs,
             alleleFlip = alleleFlip,
-            colocboostArgs = colocboostArgs
+            methodArgs = methodArgs
         )
     }
 )
@@ -1686,22 +1773,12 @@ setMethod(
     jointGwas,
     separateGwas,
     samples,
-    mafCutoff,
-    macCutoff,
-    imissCutoff,
-    pipCutoffToSkip,
-    absZCutoffToSkip,
-    bfCutoffToSkip,
-    logBfCutoffToSkip,
+    panelFilterArgs,
+    signalScreenArgs,
     alleleFlip,
-    colocboostArgs
+    methodArgs
 ) {
-    screenSpec <- .cbScreenSpec(
-        pipCutoffToSkip,
-        absZCutoffToSkip,
-        bfCutoffToSkip,
-        logBfCutoffToSkip
-    )
+    screenSpec <- .screenResolve(signalScreenArgs)
     indBundle <- .cbMultiStudyIndBundle(
         qtlData = qtlData,
         contexts = contexts,
@@ -1711,11 +1788,7 @@ setMethod(
         samples = samples,
         screenSpec = screenSpec
     )
-    cutoffs <- .panelCutoffs(
-        mafCutoff = mafCutoff,
-        macCutoff = macCutoff,
-        imissCutoff = imissCutoff
-    )
+    cutoffs <- .panelCutoffs(panelFilterArgs)
     ss <- .cbMultiStudySumstats(
         qtlData,
         contexts,
@@ -1730,7 +1803,7 @@ setMethod(
         jointGwas,
         separateGwas,
         focalTrait,
-        colocboostArgs,
+        methodArgs,
         qtlLdSketch = ss$qtlLdSketch,
         alleleFlip = alleleFlip,
         cutoffs = cutoffs
@@ -1824,9 +1897,9 @@ setMethod(
     list(
         X = combinedX,
         Y = .cbConcat(map(subs, "Y")),
-        dict_YX = do.call(
+        dict_YX = exec(
             rbind,
-            map(
+            !!!map(
                 seq_along(subs),
                 .cbShiftStudyDict,
                 subs = subs,
@@ -1893,22 +1966,6 @@ setMethod(
     )
 }
 
-#' @rdname colocboostPipeline
-#' @export
-setMethod(
-    "colocboostPipeline",
-    "ANY",
-    function(qtlData, gwasSumStats = NULL, ...) {
-        cls <- class(qtlData)[[1L]]
-        msg <- glue(
-            "colocboostPipeline does not accept inputs of class ",
-            "'{cls}'. Pass a QtlDataset, QtlSumStats, or ",
-            "MultiStudyQtlDataset for QTL data."
-        )
-        abort(msg)
-    }
-)
-
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
 # TRUE when a matrix is non-square (a samples x variants genotype reference).
@@ -1931,7 +1988,7 @@ setMethod(
     individualBundle,
     sumstatBundle,
     hasInd,
-    colocboostArgs
+    methodArgs
 ) {
     .cbRunOneSeparateGwas(
         i,
@@ -1939,6 +1996,6 @@ setMethod(
         individualBundle,
         sumstatBundle,
         hasInd,
-        colocboostArgs
+        methodArgs
     )
 }

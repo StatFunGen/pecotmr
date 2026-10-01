@@ -11,8 +11,10 @@
 #' @param w0 Numeric vector of prior mixture weights (summing to 1).
 #' @param z Optional numeric vector of z-scores; defaults to \code{numeric(0)}
 #'   (derived from \code{stat}).
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{mr.ash.rss}.
+#' @param methodArgs Options forwarded to \code{susieR::mr.ash.rss}, built
+#'   with \code{\link{mrashConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of the posterior mean of the coefficients.
 #' @importFrom susieR mr.ash.rss
 #' @examples
@@ -36,8 +38,9 @@ mrashRssWeights <- function(
     s0,
     w0,
     z = numeric(0),
-    methodArgs = list()
+    methodArgs = mrashConfig()
 ) {
+    .assertMethodConfig(methodArgs, "mrashConfig", "methodArgs")
     assertList(stat)
     assertNumeric(z)
     callArgs <- list_modify(
@@ -181,7 +184,10 @@ prsCs <- function(
 #'   sizes) and \code{n} (per-variant sample sizes).
 #' @param LD Numeric LD (correlation) matrix aligned to the variants in
 #'   \code{stat}.
-#' @param methodArgs Optional named list of options forwarded to \code{prsCs}.
+#' @param methodArgs Options forwarded to \code{prsCs}, built
+#'   with \code{\link{prsCsConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of the posterior SNP coefficients.
 #' @examples
 #' data(eqtlRegionExample)
@@ -195,9 +201,10 @@ prsCs <- function(
 #'   n = rep(nrow(X), ncol(X))
 #' )
 #' LD <- cor(X)
-#' prsCsWeights(stat, LD, methodArgs = list(maf = rep(0.3, ncol(X))))
+#' prsCsWeights(stat, LD, methodArgs = prsCsConfig(maf = rep(0.3, ncol(X))))
 #' @export
-prsCsWeights <- function(stat, LD, methodArgs = list()) {
+prsCsWeights <- function(stat, LD, methodArgs = prsCsConfig()) {
+    .assertMethodConfig(methodArgs, "prsCsConfig", "methodArgs")
     callArgs <- list_modify(
         list(bhat = stat$b, R = LD, n = median(stat$n)),
         !!!methodArgs
@@ -232,7 +239,7 @@ prsCsWeights <- function(stat, LD, methodArgs = list()) {
 #' @param iter Number of iterations for MCMC. Default is 1000.
 #' @param burn Number of burn-in iterations for MCMC. Default is 200.
 #' @param thin Thinning interval for MCMC. Default is 5.
-#' @param nThreads Number of threads to use. Default is 1.
+#' @param numThreads Number of threads to use. Default is 1.
 #' @param optLlk Which likelihood to evaluate. 1 for equation 6 (slightly shrink
 #'   the correlation of SNPs) and 2 for equation 5 (SNPs genotyped on different
 #'   arrays in a separate cohort). Default is 1.
@@ -305,7 +312,7 @@ sdpr <- function(
     iter = 1000,
     burn = 200,
     thin = 5,
-    nThreads = 1,
+    numThreads = 1,
     optLlk = 1,
     verbose = TRUE,
     seed = NULL
@@ -327,7 +334,7 @@ sdpr <- function(
         iter = as.integer(iter),
         burn = as.integer(burn),
         thin = as.integer(thin),
-        nThreads = as.integer(nThreads),
+        numThreads = as.integer(numThreads),
         optLlk = as.integer(optLlk),
         verbose = verbose,
         seed = seed
@@ -360,7 +367,10 @@ sdpr <- function(
 #'   sizes) and \code{n} (per-variant sample sizes).
 #' @param LD Numeric LD (correlation) matrix aligned to the variants in
 #'   \code{stat}.
-#' @param methodArgs Optional named list of options forwarded to \code{sdpr}.
+#' @param methodArgs Options forwarded to \code{sdpr}, built
+#'   with \code{\link{sdprConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of the posterior SNP coefficients.
 #' @examples
 #' data(eqtlRegionExample)
@@ -376,7 +386,8 @@ sdpr <- function(
 #' LD <- cor(X)
 #' sdprWeights(stat, LD)
 #' @export
-sdprWeights <- function(stat, LD, methodArgs = list()) {
+sdprWeights <- function(stat, LD, methodArgs = sdprConfig()) {
+    .assertMethodConfig(methodArgs, "sdprConfig", "methodArgs")
     callArgs <- list_modify(
         list(bhat = stat$b, R = LD, n = median(stat$n)),
         !!!methodArgs
@@ -395,19 +406,19 @@ sdprWeights <- function(stat, LD, methodArgs = list()) {
 #' @param mrmashFit Optional fitted mr.mash object.
 #' @param X Genotype matrix. Required when `mrmashFit` is NULL.
 #' @param Y Phenotype matrix. Required when `mrmashFit` is NULL.
-#' @param retainFit If TRUE, attach (as the `"fit"` attribute of the returned
-#'   weights) the parts of the mr.mash fit that `fineMappingPipeline` needs to
-#'   rebuild the mvSuSiE reweighted mixture prior + residual variance: the
-#'   original data-driven prior matrices (`dataDrivenPriorMatrices`), the fitted
-#'   mixture weights (`w0`) and the residual covariance (`V`). Default FALSE.
-#' @param fitDetail How much of the fit to retain when `retainFit = TRUE`.
-#'   `"slim"` (default) keeps only the three reconstruction inputs above; the
-#'   heavy coefficient matrix (`mu1`) is already returned as the weights, so it
-#'   is not duplicated. `"full"` additionally retains the complete mr.mash fit
-#'   under `$fit` (consistent with how susie fits are kept), at the cost of a
-#'   larger payload.
-#' @param methodArgs Optional named list of options passed to
-#'   `mrmashWrapper()` when fitting.
+#' @param fitRetention How much of the mr.mash fit is kept as the
+#'   \code{"fit"} attribute of the returned weights. \code{"none"} (default)
+#'   attaches nothing. \code{"slim"} keeps what \code{fineMappingPipeline}
+#'   needs to rebuild the mvSuSiE reweighted mixture prior and residual
+#'   variance --- the original \code{dataDrivenPriorMatrices}, the fitted
+#'   \code{w0} and \code{V}; the heavy coefficient matrix \code{mu1} is
+#'   already returned as the weights, so it is not duplicated. \code{"full"}
+#'   additionally retains the complete fit under \code{$fit}, at the cost of
+#'   a larger payload.
+#' @param methodArgs Options forwarded to \code{mr.mashr::mr.mash}, built
+#'   with \code{\link{mrmashConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return Matrix of variant weights.
 #' @examples
 #' data(multiTraitData)
@@ -415,7 +426,7 @@ sdprWeights <- function(stat, LD, methodArgs = list()) {
 #' Y <- multiTraitData$Y
 #' ddpm <- multiTraitData$priorMatrices
 #' fit <- mrmashWrapper(X = X, Y = Y, dataDrivenPriorMatrices = ddpm,
-#'   canonicalPriorMatrices = TRUE)
+#'   prior = mrmashPriorConfig(canonicalPriorMatrices = TRUE))
 #' mrmashWeights(mrmashFit = fit, X = X, Y = Y)
 #' @param dataDrivenPriorMatrices Optional list of data-driven prior
 #'   covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
@@ -425,11 +436,12 @@ mrmashWeights <- function(
     mrmashFit = NULL,
     X = NULL,
     Y = NULL,
-    retainFit = FALSE,
-    fitDetail = c("slim", "full"),
+    fitRetention = c("none", "slim", "full"),
     dataDrivenPriorMatrices = NULL,
-    methodArgs = list()
+    methodArgs = mrmashConfig()
 ) {
+    fitRetention <- arg_match(fitRetention)
+    .assertMethodConfig(methodArgs, "mrmashConfig", "methodArgs")
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
         abort("Package 'mr.mashr' is required.")
     }
@@ -438,52 +450,54 @@ mrmashWeights <- function(
         if (is.null(X) || is.null(Y)) {
             abort("Both X and Y must be provided if mrmashFit is NULL.")
         }
+        # methodArgs is one flat bag; the prior-construction names belong to
+        # mrmashWrapper's `prior` group, so they are routed there rather
+        # than passed as top-level arguments it no longer has.
+        split <- .mrmashSplitPriorArgs(as.list(methodArgs))
         mrmashFit <- exec(
             mrmashWrapper,
             X,
             Y,
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
-            !!!methodArgs
+            prior = exec(mrmashPriorConfig, !!!split$prior),
+            !!!split$rest
         )
     }
     out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, ]
     # mu1 (= out) is already the returned weights; the payload carries only the
     # mvSuSiE data-driven-prior reconstruction inputs (w0, V, and the raw prior
-    # matrices), plus the whole fit when fitDetail = "full".
+    # matrices), plus the whole fit at fitRetention = "full".
     .mrmashAttachFit(
         out,
         mrmashFit,
         dataDrivenPriorMatrices,
-        retainFit,
-        fitDetail
+        fitRetention
     )
 }
 
 
 # Attach the mvSuSiE-prior reconstruction payload as the "fit" attribute,
 # shared by mrmashWeights (individual) and mrmashRssWeights (summary stats):
-# the data-driven prior matrices + fitted w0 + V, and -- when fitDetail =
-# "full" -- the whole fit. The coefficients are already the returned `weights`,
-# so mu1 is not duplicated. Returns `weights` unchanged unless retainFit is
-# TRUE.
+# the data-driven prior matrices + fitted w0 + V, and -- at
+# fitRetention = "full" -- the whole fit. The coefficients are already the
+# returned `weights`, so mu1 is not duplicated. Returns `weights` unchanged
+# at fitRetention = "none".
 .mrmashAttachFit <- function(
     weights,
     fit,
     dataDrivenPriorMatrices,
-    retainFit,
-    fitDetail = c("slim", "full")
+    fitRetention
 ) {
-    if (!isTRUE(retainFit)) {
+    if (identical(fitRetention, "none")) {
         return(weights)
     }
-    fitDetail <- arg_match(fitDetail)
     fitList <- c(
         list(
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
             w0 = fit$w0,
             V = fit$V
         ),
-        compact(list(fit = if (fitDetail == "full") fit))
+        compact(list(fit = if (fitRetention == "full") fit))
     )
     `attr<-`(weights, "fit", fitList)
 }
@@ -516,9 +530,9 @@ mrmashWeights <- function(
 #' \code{\link{mrmashWrapper}}: \code{computeGrid} +
 #' \code{mr.mashr::compute_canonical_covs()} + \code{mr.mashr::expand_covs()}
 #' for \code{S0}, and \code{computeW0} for the mixture weights. Supply
-#' \code{dataDrivenPriorMatrices} (e.g. from \code{\link{computeCovFlash}} /
-#' \code{\link{computeCovDiag}}) to add data-driven covariance components
-#' alongside the canonical mixture.
+#' \code{dataDrivenPriorMatrices} (e.g. from
+#' \code{\link{computeCovDiag}}, or \code{mashr::cov_flash}) to add
+#' data-driven covariance components alongside the canonical mixture.
 #'
 #' @param stat A list with \code{z} (variants x conditions matrix) and \code{n}
 #'   (per-context numeric vector or scalar). May also include \code{Bhat},
@@ -540,18 +554,19 @@ mrmashWeights <- function(
 #'   the identity matrix of size K.
 #' @param covY Optional response covariance matrix (K x K). When NULL, defaults
 #'   to the identity matrix of size K.
-#' @param retainFit If TRUE, attaches (as the \code{"fit"} attribute on the
-#'   returned weights) the inputs \code{fineMappingPipeline} needs to rebuild
-#'   the mvSuSiE reweighted prior: \code{dataDrivenPriorMatrices}, the fitted
-#'   \code{w0}, and the fitted \code{V}. Default FALSE.
-#' @param fitDetail How much to retain when \code{retainFit = TRUE}.
-#'   \code{"slim"} (default) keeps only those reconstruction inputs (the
-#'   coefficients are already the returned weights); \code{"full"} additionally
-#'   keeps the complete \code{mr.mash.rss} fit under \code{$fit}. Mirrors
-#'   \code{\link{mrmashWeights}}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{mr.mashr::mr.mash.rss}.
-#'
+#' @param fitRetention How much of the mr.mash fit is kept as the
+#'   \code{"fit"} attribute of the returned weights. \code{"none"} (default)
+#'   attaches nothing. \code{"slim"} keeps what \code{fineMappingPipeline}
+#'   needs to rebuild the mvSuSiE reweighted mixture prior and residual
+#'   variance --- the original \code{dataDrivenPriorMatrices}, the fitted
+#'   \code{w0} and \code{V}; the heavy coefficient matrix \code{mu1} is
+#'   already returned as the weights, so it is not duplicated. \code{"full"}
+#'   additionally retains the complete fit under \code{$fit}, at the cost of
+#'   a larger payload.
+#' @param methodArgs Options forwarded to \code{mr.mashr::mr.mash.rss}, built
+#'   with \code{\link{mrmashConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric matrix of per-variant per-context weights (variants x
 #'   conditions).
 #' @examples
@@ -577,13 +592,13 @@ mrmashRssWeights <- function(
     w0 = NULL,
     V = NULL,
     covY = NULL,
-    retainFit = FALSE,
-    fitDetail = c("slim", "full"),
-    methodArgs = list()
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = mrmashConfig()
 ) {
+    fitRetention <- arg_match(fitRetention)
+    .assertMethodConfig(methodArgs, "mrmashConfig", "methodArgs")
     assertList(stat)
     assertFlag(canonicalPriorMatrices)
-    assertFlag(retainFit)
     .mrmashRssRequirePackage()
     if (is.null(mrmashRssFit)) {
         mrmashRssFit <- .mrmashRssComputeFit(
@@ -604,8 +619,7 @@ mrmashRssWeights <- function(
         weights,
         mrmashRssFit,
         dataDrivenPriorMatrices,
-        retainFit,
-        fitDetail
+        fitRetention
     )
 }
 
@@ -677,7 +691,7 @@ mrmashRssWeights <- function(
     }
     # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer
     # Bhat/Shat. n must be a scalar (mr.mash.rss contract); use the median.
-    rssArgs <- c(
+    rssConfig <- c(
         list(
             Bhat = ss$Bhat,
             Shat = ss$Shat,
@@ -688,9 +702,11 @@ mrmashRssWeights <- function(
             S0 = S0,
             w0 = w0
         ),
-        dots
+        # `dots` is the caller's mrmashConfig() record; c() would append it as
+        # one opaque element instead of splicing its entries.
+        as.list(dots)
     )
-    exec(mr.mashr::mr.mash.rss, !!!rssArgs)
+    exec(mr.mashr::mr.mash.rss, !!!rssConfig)
 }
 
 
@@ -728,6 +744,197 @@ initPriorSd <- function(X, y, n = 30) {
     keep
 }
 
+# --- TWAS weight-method argument constructors -------------------------------
+#
+# One constructor per fitting engine, not per method token: several tokens
+# share an engine (lasso and enet both fit with glmnet; bayesA/C/N/R all use
+# qgg), and it is the engine that defines what the options are.
+
+#' @title Arguments For A TWAS Weight-Fitting Engine
+#' @description Options forwarded to the engine behind a TWAS weight method,
+#'   checked against that engine's live formals where it enumerates them. Pass
+#'   the result as an element of \code{\link{twasWeightsMethodsConfig}}, or
+#'   directly to the matching weights function.
+#'
+#'   A method's individual-level and summary-statistic paths often run
+#'   DIFFERENT engines, and then each takes its own constructor:
+#'   \code{lassoWeights} fits with glmnet (\code{glmnetConfig}) while
+#'   \code{lassosumRssWeights} runs pecotmr's lassosum solver
+#'   (\code{lassosumConfig}); \code{scadWeights} / \code{mcpWeights} /
+#'   \code{l0learnWeights} use ncvreg and L0Learn while their \code{*Rss}
+#'   counterparts use \code{penalizedRssConfig}; \code{dprGibbsWeights} uses
+#'   RcppDPR and \code{sdprWeights} uses \code{sdprConfig}. Splitting them is
+#'   what lets each be checked exactly, rather than against a union in which
+#'   an option meant for the other path would pass and then be dropped.
+#'
+#'   \code{glmnetConfig}, \code{ncvregConfig} and \code{dprConfig} cannot be
+#'   checked: \code{cv.glmnet}, \code{cv.ncvreg} and \code{fit_model} each
+#'   take \code{...}, so they accept any name and there is nothing to check
+#'   against. Every other constructor here rejects an unknown option. See
+#'   \code{\link{MethodConfig}}.
+#' @param ... Arguments for the engine, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' glmnetConfig(nfold = 10)
+#' qggConfig(nit = 1000)
+#' lassosumConfig(thr = 1e-4)
+#' @name twasEngineConfig
+NULL
+
+#' @rdname twasEngineConfig
+#' @export
+glmnetConfig <- function(...) {
+    .newMethodConfig(
+        "glmnet::cv.glmnet",
+        defaults = list(),
+        extra = list(...),
+        label = "glmnetConfig",
+        engine = "glmnet"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+qggConfig <- function(...) {
+    .newMethodConfig(
+        "qgg::gbayes",
+        defaults = list(),
+        extra = list(...),
+        label = "qggConfig",
+        engine = "qgg"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+bglrConfig <- function(...) {
+    .newMethodConfig(
+        "BGLR::BGLR",
+        defaults = list(),
+        extra = list(...),
+        label = "bglrConfig",
+        engine = "bglr"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+dprConfig <- function(...) {
+    .newMethodConfig(
+        "RcppDPR::fit_model",
+        defaults = list(),
+        extra = list(...),
+        label = "dprConfig",
+        engine = "dpr"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+ncvregConfig <- function(...) {
+    .newMethodConfig(
+        "ncvreg::cv.ncvreg",
+        defaults = list(),
+        extra = list(...),
+        label = "ncvregConfig",
+        engine = "ncvreg"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+l0learnConfig <- function(...) {
+    .newMethodConfig(
+        "L0Learn::L0Learn.cvfit",
+        defaults = list(),
+        extra = list(...),
+        label = "l0learnConfig",
+        engine = "l0learn"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+mrashConfig <- function(...) {
+    .newMethodConfig(
+        c("susieR::mr.ash", "susieR::mr.ash.rss"),
+        defaults = list(),
+        extra = list(...),
+        label = "mrashConfig",
+        engine = "mrash"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+prsCsConfig <- function(...) {
+    .newMethodConfig(
+        "pecotmr::prsCs",
+        defaults = list(),
+        extra = list(...),
+        label = "prsCsConfig",
+        engine = "prsCs"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+lassosumConfig <- function(...) {
+    .newMethodConfig(
+        "pecotmr::lassosumRss",
+        defaults = list(),
+        extra = list(...),
+        label = "lassosumConfig",
+        engine = "lassosum"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+penalizedRssConfig <- function(...) {
+    .newMethodConfig(
+        "pecotmr::penalizedRss",
+        defaults = list(),
+        extra = list(...),
+        label = "penalizedRssConfig",
+        engine = "penalizedRss"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+sdprConfig <- function(...) {
+    .newMethodConfig(
+        "pecotmr::sdpr",
+        defaults = list(),
+        extra = list(...),
+        label = "sdprConfig",
+        engine = "sdpr"
+    )
+}
+
+#' @rdname twasEngineConfig
+#' @export
+mrmashConfig <- function(...) {
+    .newMethodConfig(
+        c("mr.mashr::mr.mash", "mr.mashr::mr.mash.rss"),
+        defaults = list(),
+        extra = list(...),
+        label = "mrmashConfig",
+        engine = "mrmash",
+        # The bag is split before the engine sees it: .mrmashSplitPriorArgs
+        # routes the prior-covariance names to mrmashPriorConfig() and the rest
+        # to mr.mash. So the accepted set is both, read from the live
+        # formals of each rather than transcribed.
+        accepted = unique(c(
+            .engineAcceptedNames(
+                c("mr.mashr::mr.mash", "mr.mashr::mr.mash.rss")
+            ),
+            names(formals(mrmashPriorConfig))
+        ))
+    )
+}
+
 #' Compute TWAS weights via penalized regression (glmnet)
 #'
 #' Fit a cross-validated elastic-net / lasso model with \code{glmnet::cv.glmnet}
@@ -737,6 +944,9 @@ initPriorSd <- function(X, y, n = 30) {
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param alpha Elastic-net mixing parameter in \code{[0, 1]}: \code{1} = lasso,
 #'   \code{0} = ridge, \code{0.5} = elastic net.
+#' @param methodArgs Additional arguments forwarded to
+#'   \code{glmnet::cv.glmnet}, built with \code{\link{glmnetConfig}}. A bare
+#'   list is refused, since it cannot be checked against the engine's formals.
 #' @return Numeric vector of length \code{ncol(X)} of per-variant weights.
 #' @importFrom stats coef
 #' @examples
@@ -745,21 +955,37 @@ initPriorSd <- function(X, y, n = 30) {
 #' y <- eqtlRegionExample$yRes
 #' glmnetWeights(X, y, alpha = 0.5)
 #' @export
-glmnetWeights <- function(X, y, alpha) {
+glmnetWeights <- function(X, y, alpha, methodArgs = glmnetConfig()) {
     # Check if glmnet is installed
     if (!requireNamespace("glmnet", quietly = TRUE)) {
         abort("Package 'glmnet' is required for this function.")
     }
+    .assertMethodConfig(methodArgs, "glmnetConfig", "methodArgs")
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "glmnetWeights")
-    enet <- glmnet::cv.glmnet(
-        x = X[, keep, drop = FALSE],
-        y = y,
-        alpha = alpha,
-        nfold = 5,
-        intercept = TRUE,
-        standardize = FALSE
+    # `alpha` is the wrapper's own dial -- it is what distinguishes lasso from
+    # enet from ridge -- so it is supplied here rather than settable in
+    # methodArgs. Everything else pecotmr fixed is now overridable.
+    userArgs <- as.list(methodArgs)
+    if (is_in("alpha", names(userArgs))) {
+        abort(glue(
+            "glmnetWeights: `alpha` selects the penalty family and is set by ",
+            "the calling wrapper (lassoWeights = 1, enetWeights = 0.5), so ",
+            "it cannot also be given in `methodArgs`."
+        ))
+    }
+    callArgs <- list_modify(
+        list(
+            x = X[, keep, drop = FALSE],
+            y = y,
+            alpha = alpha,
+            nfold = 5,
+            intercept = TRUE,
+            standardize = FALSE
+        ),
+        !!!userArgs
     )
+    enet <- exec(glmnet::cv.glmnet, !!!callArgs)
     replace(eff.wgt, keep, coef(enet, s = "lambda.min")[2:(sum(keep) + 1)])
 }
 
@@ -774,7 +1000,10 @@ glmnetWeights <- function(X, y, alpha) {
 #' y <- eqtlRegionExample$yRes
 #' enetWeights(X, y)
 #' @export
-enetWeights <- function(X, y) glmnetWeights(X, y, 0.5)
+enetWeights <- function(X, y, methodArgs = glmnetConfig()) {
+    .assertMethodConfig(methodArgs, "glmnetConfig", "methodArgs")
+    glmnetWeights(X, y, 0.5, methodArgs = methodArgs)
+}
 
 #' Compute TWAS weights via lasso (glmnet, alpha = 1)
 #'
@@ -787,7 +1016,10 @@ enetWeights <- function(X, y) glmnetWeights(X, y, 0.5)
 #' y <- eqtlRegionExample$yRes
 #' lassoWeights(X, y)
 #' @export
-lassoWeights <- function(X, y) glmnetWeights(X, y, 1)
+lassoWeights <- function(X, y, methodArgs = glmnetConfig()) {
+    .assertMethodConfig(methodArgs, "glmnetConfig", "methodArgs")
+    glmnetWeights(X, y, 1, methodArgs = methodArgs)
+}
 
 #' Compute Weights Using mr.ash Shrinkage
 #'
@@ -807,30 +1039,41 @@ lassoWeights <- function(X, y) glmnetWeights(X, y, 1)
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param initPriorSd Logical. Initialize the prior standard-deviation grid
 #' from the data. Default \code{TRUE}.
-#' @param retainFit Logical. Attach the full fitted-model object to the result.
+#' @param fitRetention How much of the fit is kept as the \code{"fit"}
+#'   attribute of the returned weights: \code{"none"} (default) attaches
+#'   nothing, \code{"slim"} and \code{"full"} attach the fitted model. This
+#'   engine keeps no trimmable intermediates, so the two retaining levels
+#'   behave alike here.
 #' Default \code{FALSE}.
-#' @param methodArgs Optional named list of options forwarded to \code{mr.ash}.
+#' @param methodArgs Options forwarded to \code{susieR::mr.ash}, built
+#'   with \code{\link{mrashConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of weights, one per variant (column of \code{X});
-#'   zero-variance columns receive weight 0. When \code{retainFit = TRUE} the
-#'   fitted \code{mr.ash} object is attached as attribute \code{"fit"}.
+#'   zero-variance columns receive weight 0. Unless
+#'   \code{fitRetention = "none"} the fitted \code{mr.ash} object is
+#'   attached as attribute \code{"fit"}.
 #' @importFrom checkmate assertFlag
 #' @export
 mrashWeights <- function(
     X,
     y,
     initPriorSd = TRUE,
-    retainFit = FALSE,
-    methodArgs = list()
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = mrashConfig()
 ) {
+    .assertMethodConfig(methodArgs, "mrashConfig", "methodArgs")
     assertFlag(initPriorSd)
-    assertFlag(retainFit)
+    fitRetention <- arg_match(fitRetention)
     keep <- .dropZeroVariance(X, "mrashWeights")
     XKeep <- X[, keep, drop = FALSE]
+    # as.list(): list_assign() rejects a MethodConfig outright as `.x`, the
+    # same S4-SimpleList seam that makes c() append it instead of splicing.
     argsList <- list_assign(
-        methodArgs,
+        as.list(methodArgs),
         !!!.mrashBetaInit(methodArgs, XKeep, y, X, keep)
     )
-    mrashArgs <- c(
+    mrashConfig <- c(
         list(
             X = XKeep,
             y = y,
@@ -838,14 +1081,14 @@ mrashWeights <- function(
         ),
         argsList
     )
-    fit.mr.ash <- exec(mr.ash, !!!mrashArgs)
+    fit.mr.ash <- exec(mr.ash, !!!mrashConfig)
     # Zero-variance columns were never fitted and keep a zero weight.
     eff.wgt <- replace(
         rep(0, ncol(X)),
         keep,
         predict(fit.mr.ash, type = "coefficients")[-1]
     )
-    if (!retainFit) {
+    if (identical(fitRetention, "none")) {
         return(eff.wgt)
     }
     `attr<-`(eff.wgt, "fit", fit.mr.ash)
@@ -867,8 +1110,10 @@ mrashWeights <- function(
 #'   \code{1000}.
 #' @param nthin Integer. Thinning interval for retained MCMC samples. Default
 #'   \code{5}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{qgg::gbayes}.
+#' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
+#'   with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A vector containing the weights to be applied to each genotype in
 #'   predicting the phenotype.
 #' @details This function fits a Bayesian linear regression model with a range
@@ -894,8 +1139,9 @@ bayesAlphabetWeights <- function(
     nit = 5000,
     nburn = 1000,
     nthin = 5,
-    methodArgs = list()
+    methodArgs = qggConfig()
 ) {
+    .assertMethodConfig(methodArgs, "qggConfig", "methodArgs")
     .bayesAlphabetValidate(X, y, Z)
 
     eff.wgt <- rep(0, ncol(X))
@@ -909,7 +1155,8 @@ bayesAlphabetWeights <- function(
             method = method,
             h2 = h2,
             nit = nit,
-            nburn = nburn
+            nburn = nburn,
+            nthin = nthin
         ),
         !!!methodArgs
     )
@@ -934,9 +1181,10 @@ bayesAlphabetWeights <- function(
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{bayesAlphabetWeights} /
-#'   \code{qgg}.
+#' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
+#'   with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of effect-size weights, one per variant (column of
 #'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
@@ -945,7 +1193,8 @@ bayesAlphabetWeights <- function(
 #' y <- eqtlRegionExample$yRes
 #' bayesNWeights(X, y)
 #' @export
-bayesNWeights <- function(X, y, Z = NULL, methodArgs = list()) {
+bayesNWeights <- function(X, y, Z = NULL, methodArgs = qggConfig()) {
+    .assertMethodConfig(methodArgs, "qggConfig", "methodArgs")
     bayesAlphabetWeights(X, y, method = "bayesN", Z, methodArgs = methodArgs)
 }
 #' @title BayesL TWAS weights (Laplace prior, LASSO-equivalent)
@@ -954,9 +1203,10 @@ bayesNWeights <- function(X, y, Z = NULL, methodArgs = list()) {
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{bayesAlphabetWeights} /
-#'   \code{qgg}.
+#' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
+#'   with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of effect-size weights, one per variant (column of
 #'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
@@ -965,7 +1215,8 @@ bayesNWeights <- function(X, y, Z = NULL, methodArgs = list()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesLWeights(X, y)
 #' @export
-bayesLWeights <- function(X, y, Z = NULL, methodArgs = list()) {
+bayesLWeights <- function(X, y, Z = NULL, methodArgs = qggConfig()) {
+    .assertMethodConfig(methodArgs, "qggConfig", "methodArgs")
     bayesAlphabetWeights(X, y, method = "bayesL", Z, methodArgs = methodArgs)
 }
 #' @title BayesA TWAS weights (t-distribution prior)
@@ -973,9 +1224,10 @@ bayesLWeights <- function(X, y, Z = NULL, methodArgs = list()) {
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{bayesAlphabetWeights} /
-#'   \code{qgg}.
+#' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
+#'   with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of effect-size weights, one per variant (column of
 #'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
@@ -984,7 +1236,8 @@ bayesLWeights <- function(X, y, Z = NULL, methodArgs = list()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesAWeights(X, y)
 #' @export
-bayesAWeights <- function(X, y, Z = NULL, methodArgs = list()) {
+bayesAWeights <- function(X, y, Z = NULL, methodArgs = qggConfig()) {
+    .assertMethodConfig(methodArgs, "qggConfig", "methodArgs")
     bayesAlphabetWeights(X, y, method = "bayesA", Z, methodArgs = methodArgs)
 }
 #' @title BayesC TWAS weights (rounded-spike prior)
@@ -994,9 +1247,10 @@ bayesAWeights <- function(X, y, Z = NULL, methodArgs = list()) {
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
 #' @param pi Numeric in (0, 1). Prior proportion of non-null effects for the
 #'   BayesC mixture. Default \code{0.1}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{bayesAlphabetWeights} /
-#'   \code{qgg}.
+#' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
+#'   with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of effect-size weights, one per variant (column of
 #'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
@@ -1005,7 +1259,8 @@ bayesAWeights <- function(X, y, Z = NULL, methodArgs = list()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesCWeights(X, y)
 #' @export
-bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = list()) {
+bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = qggConfig()) {
+    .assertMethodConfig(methodArgs, "qggConfig", "methodArgs")
     # `pi` is a qgg option, not a formal of bayesAlphabetWeights, so it joins
     # the option list rather than the argument list.
     bayesAlphabetWeights(
@@ -1013,7 +1268,7 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = list()) {
         y,
         method = "bayesC",
         Z,
-        methodArgs = c(list(pi = pi), methodArgs)
+        methodArgs = .methodConfigWith(methodArgs, "qggConfig", pi = pi)
     )
 }
 #' @title BayesR TWAS weights (hierarchical mixture prior)
@@ -1022,9 +1277,10 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = list()) {
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{bayesAlphabetWeights} /
-#'   \code{qgg}.
+#' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
+#'   with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of effect-size weights, one per variant (column of
 #'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
@@ -1033,7 +1289,8 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = list()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesRWeights(X, y)
 #' @export
-bayesRWeights <- function(X, y, Z = NULL, methodArgs = list()) {
+bayesRWeights <- function(X, y, Z = NULL, methodArgs = qggConfig()) {
+    .assertMethodConfig(methodArgs, "qggConfig", "methodArgs")
     bayesAlphabetWeights(X, y, method = "bayesR", Z, methodArgs = methodArgs)
 }
 
@@ -1655,7 +1912,10 @@ lassosumRss <- function(
 # lassosum shrinkage path for one s.
 # @noRd
 .rssFitLassosum <- function(solverInput, LDs, n, sVal, config) {
-    lsArgs <- c(list(bhat = solverInput, R = LDs, n = n), config$dotArgs)
+    lsArgs <- c(
+        list(bhat = solverInput, R = LDs, n = n),
+        as.list(config$dotArgs)
+    )
     model <- exec(lassosumRss, !!!lsArgs)
     list(beta = model$beta, meta = .rssPathMeta(sVal, model))
 }
@@ -1674,7 +1934,7 @@ lassosumRss <- function(
             lambda0 = config$lambda0,
             lambda2 = config$lambda2
         ),
-        config$dotArgs
+        as.list(config$dotArgs)
     )
     model <- exec(penalizedRss, !!!penArgs)
     list(beta = model$beta, meta = .rssPathMeta(sVal, model))
@@ -1815,9 +2075,10 @@ lassosumRss <- function(
 #' @param selection Selection strategy. Default \code{"ldQuadratic"} uses
 #'   \eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
 #'   \code{"minFbeta"} is retained as an explicit alternative for debugging.
-#' @param methodArgs Optional named list of options passed to
-#'   \code{lassosumRss()}.
-#'
+#' @param methodArgs Options forwarded to \code{lassosumRss}, built
+#'   with \code{\link{lassosumConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of the posterior SNP coefficients at the best (s,
 #'   lambda).
 #' @examples
@@ -1839,8 +2100,9 @@ lassosumRssWeights <- function(
     LD,
     s = c(0.2, 0.5, 0.9, 1.0),
     selection = c("ldQuadratic", "minFbeta"),
-    methodArgs = list()
+    methodArgs = lassosumConfig()
 ) {
+    .assertMethodConfig(methodArgs, "lassosumConfig", "methodArgs")
     selection <- arg_match(selection)
     .rssShrinkGridWeights(
         stat,
@@ -1958,8 +2220,8 @@ penalizedRss <- function(
 #'
 #' @param stat,LD,s,selection,penalty,gamma,alpha,lambda0,lambda2 See the
 #'   public wrappers for details.
-#' @param methodArgs Optional named list of options forwarded to
-#'   \code{penalizedRss()}.
+#' @param methodArgs Options forwarded to \code{penalizedRss}, built with
+#'   \code{\link{penalizedRssConfig}}.
 #' @return Numeric weight vector of length \code{nrow(LD)}.
 #' @keywords internal
 .penalizedRssWeights <- function(
@@ -1972,8 +2234,9 @@ penalizedRss <- function(
     lambda0 = 0,
     lambda2 = 0,
     selection = c("ldQuadratic", "minFbeta"),
-    methodArgs = list()
+    methodArgs = penalizedRssConfig()
 ) {
+    .assertMethodConfig(methodArgs, "penalizedRssConfig", "methodArgs")
     selection <- arg_match(selection)
     .rssShrinkGridWeights(
         stat,
@@ -2007,8 +2270,10 @@ penalizedRss <- function(
 #' @param alpha Elastic-net mixing (1 = pure L1). Default 1.
 #' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
 #'   \code{"minFbeta"}.
-#' @param methodArgs Optional named list of options passed to
-#'   \code{penalizedRss()}.
+#' @param methodArgs Options forwarded to \code{penalizedRss}, built
+#'   with \code{\link{penalizedRssConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of SNP coefficient weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2032,8 +2297,9 @@ scadRssWeights <- function(
     gamma = 3.7,
     alpha = 1.0,
     selection = c("ldQuadratic", "minFbeta"),
-    methodArgs = list()
+    methodArgs = penalizedRssConfig()
 ) {
+    .assertMethodConfig(methodArgs, "penalizedRssConfig", "methodArgs")
     assertList(stat)
     assertNumeric(s, lower = 0, any.missing = FALSE)
     assertNumber(gamma, finite = TRUE)
@@ -2065,8 +2331,10 @@ scadRssWeights <- function(
 #' @param alpha Elastic-net mixing (1 = pure L1). Default 1.
 #' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
 #'   \code{"minFbeta"}.
-#' @param methodArgs Optional named list of options passed to
-#'   \code{penalizedRss()}.
+#' @param methodArgs Options forwarded to \code{penalizedRss}, built
+#'   with \code{\link{penalizedRssConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of SNP coefficient weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2090,8 +2358,9 @@ mcpRssWeights <- function(
     gamma = 3.0,
     alpha = 1.0,
     selection = c("ldQuadratic", "minFbeta"),
-    methodArgs = list()
+    methodArgs = penalizedRssConfig()
 ) {
+    .assertMethodConfig(methodArgs, "penalizedRssConfig", "methodArgs")
     assertList(stat)
     assertNumeric(s, lower = 0, any.missing = FALSE)
     assertNumber(gamma, finite = TRUE)
@@ -2133,8 +2402,10 @@ mcpRssWeights <- function(
 #' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
 #'   \code{"minFbeta"}.
 #' @param maxSwaps Maximum swap rounds per lambda. Default 100.
-#' @param methodArgs Optional named list of options passed to
-#'   \code{penalizedRss()}.
+#' @param methodArgs Options forwarded to \code{penalizedRss}, built
+#'   with \code{\link{penalizedRssConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of SNP coefficient weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2160,8 +2431,9 @@ l0learnRssWeights <- function(
     lambda2 = 0,
     selection = c("ldQuadratic", "minFbeta"),
     maxSwaps = 100,
-    methodArgs = list()
+    methodArgs = penalizedRssConfig()
 ) {
+    .assertMethodConfig(methodArgs, "penalizedRssConfig", "methodArgs")
     penalty <- arg_match(penalty)
     selection <- arg_match(selection)
 
@@ -2204,13 +2476,22 @@ l0learnRssWeights <- function(
 #' @param y A numeric response vector.
 #' @param penalty Either "SCAD" or "MCP".
 #' @param nfolds Number of cross-validation folds. Default is 5.
-#' @param methodArgs Optional named list of options passed through to
-#'   `ncvreg::cv.ncvreg`.
+#' @param methodArgs Options forwarded to \code{ncvreg::cv.ncvreg}, built
+#'   with \code{\link{ncvregConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @importFrom stats coef
 #' @keywords internal
 #' @importFrom checkmate assertCount
-ncvregWeights <- function(X, y, penalty, nfolds = 5, methodArgs = list()) {
+ncvregWeights <- function(
+    X,
+    y,
+    penalty,
+    nfolds = 5,
+    methodArgs = ncvregConfig()
+) {
+    .assertMethodConfig(methodArgs, "ncvregConfig", "methodArgs")
     assertCount(nfolds, positive = TRUE)
     if (!requireNamespace("ncvreg", quietly = TRUE)) {
         abort("Package 'ncvreg' is required for this function.")
@@ -2238,8 +2519,10 @@ ncvregWeights <- function(X, y, penalty, nfolds = 5, methodArgs = list()) {
 #' @param X A numeric matrix of predictors.
 #' @param y A numeric response vector.
 #' @param nfolds Number of cross-validation folds. Default is 5.
-#' @param methodArgs Optional named list of options passed through to
-#'   `ncvreg::cv.ncvreg`.
+#' @param methodArgs Options forwarded to \code{ncvreg::cv.ncvreg}, built
+#'   with \code{\link{ncvregConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2247,7 +2530,8 @@ ncvregWeights <- function(X, y, penalty, nfolds = 5, methodArgs = list()) {
 #' y <- eqtlRegionExample$yRes
 #' scadWeights(X, y)
 #' @export
-scadWeights <- function(X, y, nfolds = 5, methodArgs = list()) {
+scadWeights <- function(X, y, nfolds = 5, methodArgs = ncvregConfig()) {
+    .assertMethodConfig(methodArgs, "ncvregConfig", "methodArgs")
     ncvregWeights(
         X,
         y,
@@ -2265,8 +2549,10 @@ scadWeights <- function(X, y, nfolds = 5, methodArgs = list()) {
 #' @param X A numeric matrix of predictors.
 #' @param y A numeric response vector.
 #' @param nfolds Number of cross-validation folds. Default is 5.
-#' @param methodArgs Optional named list of options passed through to
-#'   `ncvreg::cv.ncvreg`.
+#' @param methodArgs Options forwarded to \code{ncvreg::cv.ncvreg}, built
+#'   with \code{\link{ncvregConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2274,7 +2560,8 @@ scadWeights <- function(X, y, nfolds = 5, methodArgs = list()) {
 #' y <- eqtlRegionExample$yRes
 #' mcpWeights(X, y)
 #' @export
-mcpWeights <- function(X, y, nfolds = 5, methodArgs = list()) {
+mcpWeights <- function(X, y, nfolds = 5, methodArgs = ncvregConfig()) {
+    .assertMethodConfig(methodArgs, "ncvregConfig", "methodArgs")
     ncvregWeights(
         X,
         y,
@@ -2297,9 +2584,10 @@ mcpWeights <- function(X, y, nfolds = 5, methodArgs = list()) {
 #' @param penalty Type of regularization: "L0", "L0L1", or "L0L2". Default is
 #'   "L0".
 #' @param nFolds Number of cross-validation folds. Default is 5.
-#' @param methodArgs Optional named list of options passed through to
-#'   `L0Learn::L0Learn.cvfit`
-#'   (e.g. `nGamma`, `gammaMin`, `gammaMax`, `algorithm`, `maxSuppSize`).
+#' @param methodArgs Options forwarded to \code{L0Learn::L0Learn.cvfit}, built
+#'   with \code{\link{l0learnConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2312,8 +2600,9 @@ l0learnWeights <- function(
     y,
     penalty = "L0",
     nFolds = 5,
-    methodArgs = list()
+    methodArgs = l0learnConfig()
 ) {
+    .assertMethodConfig(methodArgs, "l0learnConfig", "methodArgs")
     if (!requireNamespace("L0Learn", quietly = TRUE)) {
         abort("Package 'L0Learn' is required for this function.")
     }
@@ -2357,8 +2646,10 @@ l0learnWeights <- function(
 #' @param thin Thinning interval.
 #' @param etaArgs Optional named list of additional arguments included in the
 #'   `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).
-#' @param methodArgs Optional named list of options passed through to
-#'   `BGLR::BGLR`.
+#' @param methodArgs Options forwarded to \code{BGLR::BGLR}, built
+#'   with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @keywords internal
 bglrWeights <- function(
@@ -2369,8 +2660,9 @@ bglrWeights <- function(
     burnIn,
     thin,
     etaArgs = list(),
-    methodArgs = list()
+    methodArgs = bglrConfig()
 ) {
+    .assertMethodConfig(methodArgs, "bglrConfig", "methodArgs")
     if (!requireNamespace("BGLR", quietly = TRUE)) {
         abort("Package 'BGLR' is required for this function.")
     }
@@ -2417,8 +2709,10 @@ bglrWeights <- function(
 #' @param burnIn Number of burn-in iterations. Default is 2000.
 #' @param thin Thinning interval. Default is 5.
 #' @param probIn Prior inclusion probability for each marker. Default is 0.2.
-#' @param methodArgs Optional named list of options passed through to
-#'   `BGLR::BGLR`.
+#' @param methodArgs Options forwarded to \code{BGLR::BGLR}, built
+#'   with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2434,8 +2728,9 @@ bayesBWeights <- function(
     burnIn = 2000,
     thin = 5,
     probIn = 0.2,
-    methodArgs = list()
+    methodArgs = bglrConfig()
 ) {
+    .assertMethodConfig(methodArgs, "bglrConfig", "methodArgs")
     assertCount(nIter, positive = TRUE)
     assertCount(burnIn)
     assertCount(thin, positive = TRUE)
@@ -2469,8 +2764,10 @@ bayesBWeights <- function(
 #' @param nIter Number of MCMC iterations. Default is 10000.
 #' @param burnIn Number of burn-in iterations. Default is 2000.
 #' @param thin Thinning interval. Default is 5.
-#' @param methodArgs Optional named list of options passed through to
-#'   `BGLR::BGLR`.
+#' @param methodArgs Options forwarded to \code{BGLR::BGLR}, built
+#'   with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2485,8 +2782,9 @@ bLassoWeights <- function(
     nIter = 10000,
     burnIn = 2000,
     thin = 5,
-    methodArgs = list()
+    methodArgs = bglrConfig()
 ) {
+    .assertMethodConfig(methodArgs, "bglrConfig", "methodArgs")
     assertCount(nIter, positive = TRUE)
     assertCount(burnIn)
     assertCount(thin, positive = TRUE)
@@ -2518,9 +2816,15 @@ bLassoWeights <- function(
 #' @param y A numeric response vector.
 #' @param fittingMethod One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is
 #'   "VB".
-#' @param methodArgs Optional named list of options passed through to
-#'   `RcppDPR::fit_model`.
-#' @param retainFit Logical. Attach the full fitted-model object to the result.
+#' @param methodArgs Options forwarded to \code{RcppDPR::fit_model}, built
+#'   with \code{\link{dprConfig}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
+#' @param fitRetention How much of the fit is kept as the \code{"fit"}
+#'   attribute of the returned weights: \code{"none"} (default) attaches
+#'   nothing, \code{"slim"} and \code{"full"} attach the fitted model. This
+#'   engine keeps no trimmable intermediates, so the two retaining levels
+#'   behave alike here.
 #'   Default \code{FALSE}.
 #' @param nK Integer. Number of variational mixture components for the VB fit
 #'   (\code{dprVbWeights}). Default \code{8}.
@@ -2537,9 +2841,11 @@ dprWeights <- function(
     X,
     y,
     fittingMethod = "VB",
-    retainFit = FALSE,
-    methodArgs = list()
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = dprConfig()
 ) {
+    fitRetention <- arg_match(fitRetention)
+    .assertMethodConfig(methodArgs, "dprConfig", "methodArgs")
     if (!requireNamespace("RcppDPR", quietly = TRUE)) {
         abort("Package 'RcppDPR' is required for this function.")
     }
@@ -2558,7 +2864,7 @@ dprWeights <- function(
     )
     fit <- exec(RcppDPR::fit_model, !!!callArgs)
     eff.wgt <- replace(zeros, keep, as.numeric(fit$beta + fit$alpha))
-    if (!retainFit) {
+    if (identical(fitRetention, "none")) {
         return(eff.wgt)
     }
     `attr<-`(eff.wgt, "fit", fit)
@@ -2571,13 +2877,21 @@ dprWeights <- function(
 #' y <- eqtlRegionExample$yRes
 #' dprVbWeights(X, y)
 #' @export
-dprVbWeights <- function(X, y, nK = 8, retainFit = FALSE, methodArgs = list()) {
+dprVbWeights <- function(
+    X,
+    y,
+    nK = 8,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = dprConfig()
+) {
+    fitRetention <- arg_match(fitRetention)
+    .assertMethodConfig(methodArgs, "dprConfig", "methodArgs")
     dprWeights(
         X,
         y,
         fittingMethod = "VB",
-        retainFit = retainFit,
-        methodArgs = c(list(n_k = nK), methodArgs)
+        fitRetention = fitRetention,
+        methodArgs = .methodConfigWith(methodArgs, "dprConfig", n_k = nK)
     )
 }
 
@@ -2596,17 +2910,22 @@ dprGibbsWeights <- function(
     X,
     y,
     sStep = 5000,
-    retainFit = FALSE,
-    methodArgs = list()
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = dprConfig()
 ) {
+    .assertMethodConfig(methodArgs, "dprConfig", "methodArgs")
     assertCount(sStep, positive = TRUE)
-    assertFlag(retainFit)
+    fitRetention <- arg_match(fitRetention)
     dprWeights(
         X,
         y,
         fittingMethod = "Gibbs",
-        retainFit = retainFit,
-        methodArgs = c(list(s_step = sStep), methodArgs)
+        fitRetention = fitRetention,
+        methodArgs = .methodConfigWith(
+            methodArgs,
+            "dprConfig",
+            s_step = sStep
+        )
     )
 }
 
@@ -2624,15 +2943,16 @@ dprGibbsWeights <- function(
 dprAdaptiveGibbsWeights <- function(
     X,
     y,
-    retainFit = FALSE,
-    methodArgs = list()
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = dprConfig()
 ) {
-    assertFlag(retainFit)
+    .assertMethodConfig(methodArgs, "dprConfig", "methodArgs")
+    fitRetention <- arg_match(fitRetention)
     dprWeights(
         X,
         y,
         fittingMethod = "Adaptive_Gibbs",
-        retainFit = retainFit,
+        fitRetention = fitRetention,
         methodArgs = methodArgs
     )
 }
@@ -2648,28 +2968,26 @@ dprAdaptiveGibbsWeights <- function(
 #'   (tissue/cell-types).
 #' @param dataDrivenPriorMatrices A list of data-driven covariance matrices.
 #'   Default is NULL.
-#' @param priorGrid A vector of scaling factors to be used in fitting the
-#'   mr.mash model. Default is NULL.
-#' @param nthreads The number of threads to use for parallel computation.
-#'   Default is 2.
-#' @param canonicalPriorMatrices A logical indicating whether to use canonical
-#'   matrices as priors. Default is FALSE.
-#' @param standardize A logical indicating whether to standardize the input
-#'   data. Default is FALSE.
-#' @param updateW0 A logical indicating whether to update the prior mixture
-#'   weights. Default is TRUE.
-#' @param w0Threshold The threshold for updating prior mixture weights. Default
-#'   is 1e-8.
+#' @param prior Prior-covariance construction options, built with
+#'   \code{\link{mrmashPriorConfig}}.
+#' @param bInitMethod The method for initializing the coefficient matrix.
+#'   Default is "enet".
 #' @param updateV A logical indicating whether to update the residual covariance
 #'   matrix. Default is TRUE.
 #' @param updateVMethod The method for updating the residual covariance matrix.
 #'   Default is "full".
-#' @param bInitMethod The method for initializing the coefficient matrix.
-#'   Default is "enet".
-#' @param maxIter The maximum number of iterations. Default is 5000.
-#' @param tol The tolerance for convergence. Default is 0.01.
-#' @param verbose A logical indicating whether to print verbose output. Default
-#'   is FALSE.
+#' @param standardize A logical indicating whether to standardize the input
+#'   data. Default is FALSE. Used by the summary-statistic and initialisation
+#'   steps as well as the fit, so it is set here rather than in
+#'   \code{methodArgs}.
+#' @param numThreads The number of threads to use for parallel computation.
+#'   Default is 1. Used by the same three steps as \code{standardize}.
+#' @param methodArgs Options forwarded to \code{mr.mashr::mr.mash} under its
+#'   own names, built with \code{\link{mrmashConfig}}
+#'   (\code{update_w0}, \code{max_iter}, \code{tol}, \code{w0_threshold},
+#'   \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
+#'   residual covariance, the coefficient initialisation --- cannot be set
+#'   here.
 #'
 #' @param V Optional residual covariance matrix (conditions x conditions), or
 #'   \code{NULL} to estimate it.
@@ -2709,7 +3027,7 @@ dprAdaptiveGibbsWeights <- function(
 #' res <- mrmashWrapper(
 #'   X = multiTraitData$X[, 1:60], Y = multiTraitData$Y,
 #'   dataDrivenPriorMatrices = multiTraitData$priorMatrices,
-#'   canonicalPriorMatrices = TRUE
+#'   prior = mrmashPriorConfig(canonicalPriorMatrices = TRUE)
 #' )
 #'
 #' @export
@@ -2719,39 +3037,37 @@ mrmashWrapper <- function(
     V = NULL,
     sumstats = NULL,
     dataDrivenPriorMatrices = NULL,
-    priorGrid = NULL,
-    nthreads = 1,
-    canonicalPriorMatrices = FALSE,
-    standardize = FALSE,
-    updateW0 = TRUE,
-    w0Threshold = 1e-8,
+    prior = mrmashPriorConfig(),
+    bInitMethod = "enet",
     updateV = TRUE,
     updateVMethod = "full",
-    bInitMethod = "enet",
-    maxIter = 5000,
-    tol = 0.01,
-    verbose = FALSE
+    standardize = FALSE,
+    numThreads = 1,
+    methodArgs = mrmashConfig()
 ) {
     .mrmashRequirePackages()
+    .assertMethodConfig(prior, "mrmashPriorConfig", "prior")
+    .assertMethodConfig(methodArgs, "mrmashConfig", "methodArgs")
+    priorOpts <- as.list(prior)
     .mrmashValidateWrapper(
         X = X,
         Y = Y,
-        priorGrid = priorGrid,
+        priorGrid = priorOpts$priorGrid,
         dataDrivenPriorMatrices = dataDrivenPriorMatrices,
-        canonicalPriorMatrices = canonicalPriorMatrices
+        canonicalPriorMatrices = priorOpts$canonicalPriorMatrices %||% FALSE
     )
     bInitMethod <- .mrmashResolveBInit(Y, bInitMethod)
     if (is.null(sumstats)) {
-        sumstats <- .mrmashComputeSumstats(X, Y, standardize, nthreads)
+        sumstats <- .mrmashComputeSumstats(X, Y, standardize, numThreads)
     }
     # Shared prior-covariance builder (also used by mrmashRssWeights).
-    priorBuilt <- buildMrmashPriorMatrices(
+    priorBuilt <- exec(
+        buildMrmashPriorMatrices,
         Bhat = sumstats$Bhat,
         Shat = sumstats$Shat,
         K = ncol(Y),
         dataDrivenPriorMatrices = dataDrivenPriorMatrices,
-        canonicalPriorMatrices = canonicalPriorMatrices,
-        priorGrid = priorGrid
+        !!!priorOpts
     )
     time1 <- proc.time()
     bInit <- as.matrix(
@@ -2760,7 +3076,7 @@ mrmashWrapper <- function(
             Y,
             bInitMethod,
             standardize,
-            nthreads
+            numThreads
         )$Bhat
     )
     vInit <- .mrmashInitV(X, Y, V, updateV, updateVMethod)
@@ -2770,14 +3086,10 @@ mrmashWrapper <- function(
         vInit,
         X = X,
         Y = Y,
-        updateW0 = updateW0,
-        tol = tol,
-        maxIter = maxIter,
         standardize = standardize,
-        verbose = verbose,
+        numThreads = numThreads,
         updateVMethod = updateVMethod,
-        w0Threshold = w0Threshold,
-        nthreads = nthreads
+        methodArgs = methodArgs
     )
     list_assign(
         fitMrmash,
@@ -2844,25 +3156,31 @@ mrmashWrapper <- function(
 
 # Univariate summary statistics (Bhat/Shat) for the prior + init.
 # @noRd
-.mrmashComputeSumstats <- function(X, Y, standardize, nthreads) {
+.mrmashComputeSumstats <- function(X, Y, standardize, numThreads) {
     mr.mashr::compute_univariate_sumstats(
         X,
         Y,
         standardize = standardize,
         standardize.response = FALSE,
-        mc.cores = nthreads
+        mc.cores = numThreads
     )
 }
 
 # Initial coefficient matrix via graphical-lasso or univariate glmnet.
 # @noRd
-.mrmashInitCoefficients <- function(X, Y, bInitMethod, standardize, nthreads) {
+.mrmashInitCoefficients <- function(
+    X,
+    Y,
+    bInitMethod,
+    standardize,
+    numThreads
+) {
     if (bInitMethod == "glasso") {
         return(computeCoefficientsGlasso(
             X,
             Y,
             standardize = standardize,
-            nthreads = nthreads,
+            numThreads = numThreads,
             Xnew = NULL
         ))
     }
@@ -2871,7 +3189,6 @@ mrmashWrapper <- function(
         Y,
         alpha = 0.5,
         standardize = standardize,
-        nthreads = nthreads,
         Xnew = NULL
     )
 }
@@ -2917,40 +3234,55 @@ mrmashWrapper <- function(
 
 # Run mr.mash with the resolved prior / init / V.
 # @noRd
+# The mr.mash call. Everything pecotmr derives -- the prior, the residual
+# covariance, the coefficient initialisation -- is supplied here and cannot be
+# overridden; the rest of mr.mash's arguments come from `methodArgs` under
+# mr.mash's own names, with pecotmr's defaults underneath.
+# @noRd
 .mrmashFit <- function(
     S0,
     bInit,
     vInit,
     X,
     Y,
-    updateW0,
-    tol,
-    maxIter,
     standardize,
-    verbose,
+    numThreads,
     updateVMethod,
-    w0Threshold,
-    nthreads
+    methodArgs
 ) {
-    mr.mashr::mr.mash(
+    derived <- list(
         X = X,
         Y = Y,
         V = vInit$V,
         S0 = S0,
         w0 = computeW0(bInit, length(S0)),
-        update_w0 = updateW0,
-        tol = tol,
-        max_iter = maxIter,
-        convergence_criterion = "ELBO",
-        compute_ELBO = TRUE,
-        standardize = standardize,
-        verbose = verbose,
         update_V = vInit$updateV,
         update_V_method = updateVMethod,
-        w0_threshold = w0Threshold,
-        nthreads = nthreads,
-        mu1_init = bInit
+        mu1_init = bInit,
+        standardize = standardize,
+        nthreads = numThreads
     )
+    user <- as.list(methodArgs)
+    clash <- intersect(names(user), names(derived))
+    if (length(clash) > 0L) {
+        abort(glue(
+            "mrmashWrapper: {str_flatten(clash, ', ')} ",
+            "{if (length(clash) == 1L) 'is' else 'are'} derived by the ",
+            "wrapper (from the data, the prior and the initialisation), so ",
+            "{if (length(clash) == 1L) 'it' else 'they'} cannot be set in ",
+            "`methodArgs`."
+        ))
+    }
+    defaults <- list(
+        update_w0 = TRUE,
+        tol = 0.01,
+        max_iter = 5000,
+        convergence_criterion = "ELBO",
+        compute_ELBO = TRUE,
+        verbose = FALSE,
+        w0_threshold = 1e-8
+    )
+    exec(mr.mashr::mr.mash, !!!c(derived, list_modify(defaults, !!!user)))
 }
 
 # @noRd
@@ -2967,7 +3299,7 @@ mrmashWrapper <- function(
 #' @param Y Numeric response matrix (samples x conditions).
 #' @param standardize Logical; standardize the columns of \code{X} before
 #'   fitting.
-#' @param nthreads Integer; number of threads for the group-lasso fit.
+#' @param numThreads Integer; number of threads for the group-lasso fit.
 #' @param Xnew Optional new design matrix for prediction; \code{NULL} returns
 #'   in-sample coefficients.
 #' @return A numeric matrix of initial coefficient estimates (variants x
@@ -2977,18 +3309,18 @@ mrmashWrapper <- function(
 #' X <- eqtlRegionExample$X[, 1:30]
 #' Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
 #' computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE,
-#'   nthreads = 1L, Xnew = NULL)
+#'   numThreads = 1L, Xnew = NULL)
 #' @importFrom checkmate assertFlag assertInt
 #' @export
 computeCoefficientsGlasso <- function(
     X,
     Y,
     standardize,
-    nthreads,
+    numThreads,
     Xnew = NULL
 ) {
     assertFlag(standardize)
-    assertInt(nthreads)
+    assertInt(numThreads)
     n <- nrow(X)
     p <- ncol(X)
     r <- ncol(Y)
@@ -3030,7 +3362,7 @@ computeCoefficientsGlasso <- function(
 # Fit a cv.glmnet for outcome column `i` on its non-missing rows and return the
 # lambda.min coefficients (plus predictions on `Xnew` when supplied).
 # @noRd
-.linreg <- function(i, X, Y, alpha, standardize, nthreads, Xnew) {
+.linreg <- function(i, X, Y, alpha, standardize, Xnew) {
     samplesKept <- which(!is.na(Y[, i]))
     Ynomiss <- Y[samplesKept, i, drop = FALSE]
     Xnomiss <- X[samplesKept, , drop = FALSE]
@@ -3067,12 +3399,11 @@ computeCoefficientsUnivGlmnet <- function(
     Y,
     alpha,
     standardize,
-    nthreads,
     Xnew = NULL
 ) {
     r <- ncol(Y)
 
-    out <- map(seq_len(r), .linreg, X, Y, alpha, standardize, nthreads, Xnew)
+    out <- map(seq_len(r), .linreg, X, Y, alpha, standardize, Xnew)
 
     bhatList <- map(out, "bhat")
     Bhat <- exec(cbind, !!!bhatList)
@@ -3146,87 +3477,26 @@ rescaleCovW0 <- function(w0) {
 }
 
 
-### Function to compute grids
+# The prior scaling grid, from mr.mash's own exported grid builder rather
+# than a copy of it. The three helpers this replaces -- gridMin, gridMax,
+# autoselectMixsd -- were ports, and the first had DRIFTED: upstream
+# grid_min() is `min(Shat)/10`, the port was `min(Shat)`. Every grid built
+# here therefore started ten times too high and, since the point count is
+# ceiling(log2(gmax/gmin)/log2(mult)), carried fewer points than mr.mash
+# would have used.
+#
+# `mult = sqrt(2)` (finer than upstream's default 2) and the square are
+# pecotmr's own choices: this grid scales variances, not standard
+# deviations. autoselect.mixsd() drops Shat that is zero or non-finite,
+# which covers NA, so the port's extra is.na() term was redundant.
+# @noRd
 computeGrid <- function(bhat, sbhat) {
-    include <- !(sbhat == 0 | !is.finite(sbhat) | is.na(sbhat) | is.na(bhat))
-    gmax <- gridMax(bhat[include], sbhat[include])
-    gmin <- gridMin(bhat[include], sbhat[include])
-    autoselectMixsd(gmin, gmax, mult = sqrt(2))^2
+    mr.mashr::autoselect.mixsd(
+        list(Bhat = bhat, Shat = sbhat),
+        mult = sqrt(2)
+    )^2
 }
 
-
-### Compute the minimum value for the grid
-gridMin <- function(bhat, sbhat) {
-    min(sbhat)
-}
-
-
-### Compute the maximum value for the grid
-gridMax <- function(bhat, sbhat) {
-    if (all(bhat^2 <= sbhat^2)) {
-        # the unusual case where we don't need much grid
-        8 * gridMin(bhat, sbhat)
-    } else {
-        2 * sqrt(max(bhat^2 - sbhat^2))
-    }
-}
-
-
-### Function to compute the grid
-autoselectMixsd <- function(gmin, gmax, mult = 2) {
-    if (mult == 0) {
-        return(c(0, gmax / 2))
-    } else {
-        npoint <- ceiling(log2(gmax / gmin) / log2(mult))
-        return(mult^((-npoint):0) * gmax)
-    }
-}
-
-
-#' Compute covariance matrix using FLASH
-#'
-#' Estimates a covariance matrix from a data matrix Y using empirical Bayes
-#' matrix factorization (\code{flashier::flash}). When the FLASH fit finds no
-#' shared factors, the returned covariance is diagonal with entries
-#' \code{residuals_sd^2}; otherwise the factor contribution is added. FLASH
-#' errors are not caught; callers should handle them explicitly or supply a
-#' pre-computed prior covariance instead.
-#'
-#' @param Y Numeric matrix (samples x conditions).
-#' @return A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by the
-#'   column standard deviations of Y.
-#' @importFrom stats cov2cor
-#' @examples
-#' data(eqtlRegionExample)
-#' X <- eqtlRegionExample$X[, 1:30]
-#' Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
-#' computeCovFlash(Y = Y)
-#' @export
-computeCovFlash <- function(Y) {
-    # flashier >= 1.0 API: var_type / ebnm_fn / verbose (renamed from var.type
-    # / prior.family / verbose.lvl). Prior families now come from `ebnm`.
-    fl <- flashier::flash(
-        Y,
-        var_type = 2,
-        ebnm_fn = c(ebnm::ebnm_normal, ebnm::ebnm_normal_scale_mixture),
-        backfit = TRUE,
-        verbose = 0
-    )
-    if (fl$n_factors == 0) {
-        covar <- diag(fl$residuals_sd^2)
-    } else {
-        # For each factor's right-side prior, marginal variance for a
-        # mean-zero scale-mixture-of-normals is sum(pi * sd^2).
-        fsd <- map_dbl(fl$F_ghat, .flashFactorSd)
-        covar <- diag(fl$residuals_sd^2) + crossprod(t(fl$F_pm) * fsd)
-    }
-    if (nrow(covar) == 0) {
-        abort("computeCovFlash: FLASH produced an empty covariance matrix.")
-    }
-    sds <- apply(Y, 2, sd, na.rm = TRUE)
-    s <- if (length(sds) > 1) diag(sds) else matrix(sds, 1, 1)
-    s %*% cov2cor(covar) %*% s
-}
 
 #' Compute diagonal covariance matrix
 #'
@@ -3244,6 +3514,63 @@ computeCovDiag <- function(Y) {
     diag(apply(Y, 2, var, na.rm = TRUE))
 }
 
+# Split a flat mr.mash argument bag into the prior-construction names and
+# everything else. mrmashWrapper takes the former as a `prior` record, so a
+# caller who spells them flat -- as the pipeline's per-token kwargs do -- is
+# routed rather than rejected.
+# @noRd
+.mrmashSplitPriorArgs <- function(args) {
+    priorNames <- names(formals(mrmashPriorConfig))
+    isPrior <- is_in(names(args), priorNames)
+    list(prior = args[isPrior], rest = args[!isPrior])
+}
+
+#' @title Prior-Covariance Arguments For mr.mash
+#' @description Options for \code{\link{buildMrmashPriorMatrices}}, the
+#'   shared prior-covariance builder behind \code{\link{mrmashWrapper}} and
+#'   \code{\link{mrmashRssWeights}}. Every field is a formal of that
+#'   function, so an unknown name is rejected by R as an unused argument.
+#'
+#'   \code{dataDrivenPriorMatrices} is \emph{not} set here: it is an input
+#'   computed upstream (typically by \code{\link{mashPriorCovariances}}),
+#'   not a tuning choice, so it stays a parameter of the caller.
+#' @param canonicalPriorMatrices Logical. Include the canonical mixture from
+#'   \code{mr.mashr::compute_canonical_covs()}. Default \code{FALSE}.
+#' @param priorGrid Optional pre-computed scaling grid. \code{NULL} (default)
+#'   derives one from the summary statistics.
+#' @param hetgrid Heterogeneity grid for the canonical mixture. \code{NULL}
+#'   (default) leaves the builder's own grid in place.
+#' @param singletons Logical or \code{NULL}. Include single-condition prior
+#'   components; \code{NULL} (default) leaves the builder's own choice.
+#' @param zeromat Logical or \code{NULL}. Include the all-zero (null)
+#'   component in the expanded mixture; \code{NULL} (default) leaves the
+#'   builder's own choice.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mrmashPriorConfig(canonicalPriorMatrices = TRUE)
+#' @export
+mrmashPriorConfig <- function(
+    canonicalPriorMatrices = FALSE,
+    priorGrid = NULL,
+    hetgrid = NULL,
+    singletons = NULL,
+    zeromat = NULL
+) {
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            canonicalPriorMatrices = canonicalPriorMatrices,
+            priorGrid = priorGrid,
+            hetgrid = hetgrid,
+            singletons = singletons,
+            zeromat = zeromat
+        ),
+        extra = list(),
+        label = "mrmashPriorConfig",
+        engine = "mrmashPrior"
+    )
+}
+
 #' Build mr.mash prior covariance matrices
 #'
 #' Shared helper used by both \code{\link{mrmashWrapper}} (individual-level) and
@@ -3258,8 +3585,9 @@ computeCovDiag <- function(Y) {
 #' @param Shat Numeric matrix of standard errors (variants x conditions).
 #' @param K Number of conditions. When NULL, inferred from \code{ncol(Bhat)}.
 #' @param dataDrivenPriorMatrices Optional list with element \code{U} (list of
-#'   raw covariance matrices) computed e.g. by \code{\link{computeCovFlash}} /
-#'   \code{\link{computeCovDiag}}.
+#'   raw covariance matrices) computed e.g. by
+#'   \code{\link{computeCovDiag}}, or by \code{mashr::cov_flash}, which
+#'   returns such a list directly.
 #' @param canonicalPriorMatrices Logical. When TRUE (default for RSS), include
 #'   the standard canonical mixture from
 #'   \code{mr.mashr::compute_canonical_covs()}. When FALSE,
@@ -3271,6 +3599,10 @@ computeCovDiag <- function(Y) {
 #'   0.75, 1)}, matching the individual-level wrapper.
 #' @param singletons Whether to include single-condition prior components.
 #'   Default TRUE.
+#' @param zeromat Logical. Passed to \code{mr.mashr::expand_covs()}: whether
+#'   the expanded mixture includes the all-zero (null) component. Default
+#'   \code{TRUE}, which is mr.mash's own convention --- a mixture with no
+#'   null component cannot shrink an effect to zero.
 #' @return A list with components \code{S0} (the expanded list of prior
 #'   covariance matrices) and \code{prior_grid} (the scaling grid that was
 #'   used).
@@ -3287,11 +3619,13 @@ buildMrmashPriorMatrices <- function(
     canonicalPriorMatrices = TRUE,
     priorGrid = NULL,
     hetgrid = c(0, 0.25, 0.5, 0.75, 1),
-    singletons = TRUE
+    singletons = TRUE,
+    zeromat = TRUE
 ) {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
         abort("Package 'mr.mashr' is required.")
     }
+    assertFlag(zeromat)
     if (is.null(dataDrivenPriorMatrices) && !isTRUE(canonicalPriorMatrices)) {
         msg <- glue(
             "Supply dataDrivenPriorMatrices or set ",
@@ -3321,7 +3655,7 @@ buildMrmashPriorMatrices <- function(
         S0_raw <- dataDrivenPriorMatrices$U
     }
 
-    S0 <- mr.mashr::expand_covs(S0_raw, priorGrid, zeromat = TRUE)
+    S0 <- mr.mashr::expand_covs(S0_raw, priorGrid, zeromat = zeromat)
     list(S0 = S0, priorGrid = priorGrid)
 }
 
@@ -3383,7 +3717,7 @@ buildMrmashPriorMatrices <- function(
             lambda2 = config$lambda2,
             maxSwaps = config$maxSwaps
         ),
-        config$dotArgs
+        as.list(config$dotArgs)
     )
     model <- exec(penalizedRss, !!!penArgs)
     list(
@@ -3401,10 +3735,4 @@ buildMrmashPriorMatrices <- function(
 # @noRd
 .rssMinNumeric <- function(v) {
     min(as.numeric(v))
-}
-
-# The marginal SD sqrt(sum(pi * sd^2)) of one FLASH factor's right prior.
-# @noRd
-.flashFactorSd <- function(g) {
-    sqrt(sum(g$pi * g$sd^2))
 }

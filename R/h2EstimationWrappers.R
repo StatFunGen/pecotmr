@@ -67,39 +67,6 @@ bplapplyBlocks <- function(blockIndices, FUN, BPPARAM = NULL, ...) {
 # Regression utilities
 # =============================================================================
 
-#' @title Weighted Least Squares
-#' @description Compute WLS estimate with standard errors.
-#' @param y Numeric vector, response.
-#' @param X Numeric matrix, predictors.
-#' @param w Numeric vector, weights (inverse variance).
-#' @return A list with coefficients, SE, residuals, fitted values.
-#' @keywords internal
-weightedLs <- function(y, X, w) {
-    if (is.null(dim(X))) {
-        X <- matrix(X, ncol = 1)
-    }
-    W <- diag(sqrt(w))
-    Xw <- W %*% X
-    yw <- W %*% y
-    XtX <- crossprod(Xw)
-    Xty <- crossprod(Xw, yw)
-    coef <- solve(XtX, Xty)
-    fitted <- X %*% coef
-    resid <- y - fitted
-    # Heteroskedasticity-robust SE (HC0)
-    meat <- crossprod(Xw * as.vector(resid))
-    bread <- solve(XtX)
-    vcov <- bread %*% meat %*% bread
-    se <- sqrt(diag(vcov))
-    list(
-        coef = as.vector(coef),
-        se = se,
-        residuals = as.vector(resid),
-        fitted = as.vector(fitted),
-        vcov = vcov
-    )
-}
-
 #' @title Jackknife Standard Errors by Block
 #' @description Compute jackknife SE estimates using leave-one-block-out.
 #' @param estimatesFull Numeric vector, full-sample parameter estimates.
@@ -118,61 +85,6 @@ jackknifeSe <- function(estimatesFull, estimatesLoo) {
         (nBlocks - 1) * estimatesLoo
     jkVar <- apply(pseudoVals, 2, var) / nBlocks
     sqrt(jkVar)
-}
-
-# =============================================================================
-# Ridge-regularized WLS
-# =============================================================================
-
-#' @title Ridge-Regularized Weighted Least Squares
-#' @description WLS with optional L2 penalty on coefficients.
-#' @param y Numeric vector, response.
-#' @param X Numeric matrix, predictors.
-#' @param w Numeric vector, weights (inverse variance).
-#' @param lambda Numeric, ridge penalty. 0 = no penalty (delegates to
-#'   \code{weightedLs}).
-#' @param penalizeIntercept Logical. If FALSE (default), the last column of X
-#'   (assumed to be the intercept) is not penalized.
-#' @return Same structure as \code{weightedLs}: coef, se, residuals, fitted,
-#'   vcov.
-#' @keywords internal
-weightedLsRidge <- function(y, X, w, lambda = 0, penalizeIntercept = FALSE) {
-    if (lambda == 0) {
-        return(weightedLs(y, X, w))
-    }
-    if (is.null(dim(X))) {
-        X <- matrix(X, ncol = 1)
-    }
-    p <- ncol(X)
-    W <- diag(sqrt(w))
-    Xw <- W %*% X
-    yw <- W %*% y
-    XtX <- crossprod(Xw)
-    Xty <- crossprod(Xw, yw)
-    # Ridge penalty matrix (don't penalize intercept by default)
-    ridge <- diag(lambda, p)
-    # p * p is the linear index of the [p, p] cell (the intercept's own
-    # diagonal entry) in a p x p matrix.
-    penalty <- if (!penalizeIntercept && p > 1) {
-        replace(ridge, p * p, 0)
-    } else {
-        ridge
-    }
-    coef <- solve(XtX + penalty, Xty)
-    fitted <- X %*% coef
-    resid <- y - fitted
-    # Sandwich SE accounting for ridge shrinkage
-    bread <- solve(XtX + penalty)
-    meat <- crossprod(Xw * as.vector(resid))
-    vcov <- bread %*% meat %*% bread
-    se <- sqrt(pmax(diag(vcov), 0))
-    list(
-        coef = as.vector(coef),
-        se = se,
-        residuals = as.vector(resid),
-        fitted = as.vector(fitted),
-        vcov = vcov
-    )
 }
 
 # =============================================================================
@@ -384,21 +296,72 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     NULL
 }
 
+#' @title Options for the Random-Effects Meta-Analysis Engine
+#' @description Build a record of extra arguments for
+#'   \code{metafor::rma()}, the random-effects meta-analysis engine behind
+#'   \code{\link{metaSldscRandom}},
+#'   \code{\link{metaAnalysisPerCondition}} and
+#'   \code{\link{calculateFeatureScores}}.
+#' @param ... Arguments for \code{metafor::rma()}: \code{test} (the
+#'   null-distribution choice -- \code{"knha"} is the small-\eqn{k}
+#'   correction, and these meta-analyses often run on few studies),
+#'   \code{level}, \code{weighted}, \code{tau2} and \code{control}.
+#'   \code{rma()}'s signature ends in \code{...}, so names cannot be
+#'   checked here and a misspelling is passed through. \code{yi} and
+#'   \code{sei} are the estimate/standard-error pair pecotmr assembles and
+#'   are refused, as is \code{method}: that is the caller's
+#'   \code{metaMethod}.
+#'
+#'   These settings apply to the first fit. pecotmr falls back to the
+#'   closed-form DerSimonian-Laird estimator when an iterative one fails, and
+#'   the fallback carries them too.
+#' @return A \code{MethodConfig} record for the \code{metaArgs} argument.
+#' @seealso \code{\link{metaSldscRandom}},
+#'   \code{\link{metaAnalysisPerCondition}}
+#' @examples
+#' rmaConfig(test = "knha")
+#' @export
+rmaConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            yi = "the per-study estimates pecotmr assembles",
+            sei = "the per-study standard errors pecotmr assembles",
+            method = "the caller's `metaMethod`"
+        ),
+        "rmaConfig"
+    )
+    .newMethodConfig(
+        "metafor::rma",
+        defaults = list(),
+        extra = extra,
+        label = "rmaConfig",
+        engine = "rma"
+    )
+}
+
 # tryCatch handler for the iterative estimators (only reached when method !=
 # "DL", so DL is always a real fallback here): they can fail on small /
 # near-homogeneous inputs, so fall back to closed-form DerSimonian-Laird, which
 # never iterates.
-.rmaMetaFallbackToDL <- function(e, means, ses, method) {
+.rmaMetaFallbackToDL <- function(e, means, ses, method, metaArgs = list()) {
     msg <- glue(
         ".rmaMeta: metafor::rma(method = '{method}') failed ",
         "({conditionMessage(e)}); falling back to DL."
     )
     warn(msg)
-    metafor::rma(yi = means, sei = ses, method = "DL")
+    exec(
+        metafor::rma,
+        yi = means,
+        sei = ses,
+        method = "DL",
+        !!!as.list(metaArgs)
+    )
 }
 
 #' @importFrom rlang try_fetch
-.rmaMeta <- function(means, ses, method = "DL") {
+.rmaMeta <- function(means, ses, method = "DL", metaArgs = list()) {
     k <- length(means)
     if (k != length(ses)) {
         abort(".rmaMeta: means and ses must have the same length.")
@@ -412,11 +375,25 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     # directly and let any error propagate. Only the iterative estimators get a
     # tryCatch fallback to DL.
     fit <- if (identical(method, "DL")) {
-        metafor::rma(yi = means, sei = ses, method = "DL")
+        exec(
+            metafor::rma,
+            yi = means,
+            sei = ses,
+            method = "DL",
+            !!!as.list(metaArgs)
+        )
     } else {
         try_fetch(
-            metafor::rma(yi = means, sei = ses, method = method),
-            error = function(cnd) .rmaMetaFallbackToDL(cnd, means, ses, method)
+            exec(
+                metafor::rma,
+                yi = means,
+                sei = ses,
+                method = method,
+                !!!as.list(metaArgs)
+            ),
+            error = function(cnd) {
+                .rmaMetaFallbackToDL(cnd, means, ses, method, metaArgs)
+            }
         )
     }
     list(
@@ -744,8 +721,7 @@ lderUnivariate <- function(
     n,
     eigenRef,
     annotations = NULL,
-    local = FALSE,
-    lambda = 0
+    local = FALSE
 ) {
     rough <- !getInSample(eigenRef)
     baselineMat <- .h2BaselineMat(annotations)
@@ -1065,8 +1041,7 @@ gldscUnivariate <- function(
     n,
     ldRef,
     annotations = NULL,
-    local = FALSE,
-    lambda = 0
+    local = FALSE
 ) {
     ldMatrixList <- getLdMatrixList(ldRef)
     if (length(ldMatrixList) == 0L) {
@@ -1270,7 +1245,7 @@ NULL
         upper = upper
     )
     if (warnOnBound) {
-        .hdlWarnIfAtBound(opt$par, lower, upper, n, nRef)
+        .hdlWarnIfAtBound(opt$par, upper, n, nRef)
     }
     h2a <- opt$par[seq_len(nTau)]
     list(h2a = h2a, int = opt$par[nTau + 1L], h2 = sum(h2a))
@@ -1293,7 +1268,7 @@ NULL
 # legitimate estimate for a null trait. Warning on those would fire on
 # healthy fits and train the reader to ignore the message.
 # @noRd
-.hdlWarnIfAtBound <- function(par, lower, upper, n, nRef) {
+.hdlWarnIfAtBound <- function(par, upper, n, nRef) {
     tol <- 1e-6
     atUpper <- par >= upper - tol
     if (!any(atUpper)) {
@@ -1488,8 +1463,7 @@ hdlUnivariate <- function(
     n,
     eigenRef,
     annotations = NULL,
-    local = FALSE,
-    lambda = 0
+    local = FALSE
 ) {
     eigenList <- getEigenList(eigenRef)
     M <- length(eigenRef)
@@ -1628,7 +1602,7 @@ sldscUnivariate <- function(
     A <- .gldscAnnotMatrix(annotations, M)
     scores <- .sldscScoreMatrix(ldRef, baselineMat, M)
     baseScore <- scores[, 1L]
-    blockIdx <- .sldscBlockIndex(ldRef, M)
+    blockIdx <- .sldscBlockIndex(ldRef)
     fit <- .sldscFit(chi2, scores, baseScore, n, A, nIter)
     jk <- .sldscJackknife(chi2, scores, baseScore, n, A, nIter, blockIdx)
     .sldscResult(fit, jk, annotations, baselineMat, chi2, baseScore, local, M)
@@ -1673,7 +1647,7 @@ sldscUnivariate <- function(
 # by overlapping the reference's variants with its LD blocks. The jackknife
 # leaves one of these out at a time.
 # @noRd
-.sldscBlockIndex <- function(ldRef, M) {
+.sldscBlockIndex <- function(ldRef) {
     ldMatrixList <- getLdMatrixList(ldRef)
     if (length(ldMatrixList) > 0L) {
         return(map(ldMatrixList, "snpIdx"))
@@ -1929,7 +1903,7 @@ sldscUnivariate <- function(
     local,
     M
 ) {
-    localDf <- if (local) .sldscLocal(chi2, baseScore, fit, M) else NULL
+    localDf <- if (local) .sldscLocal(chi2, baseScore, fit) else NULL
     enrichmentDf <- if (is.null(baselineMat)) {
         NULL
     } else {
@@ -1958,7 +1932,7 @@ sldscUnivariate <- function(
 # Per-variant local h2 contribution: the fitted non-intercept signal spread
 # over the variant's own LD score.
 # @noRd
-.sldscLocal <- function(chi2, baseScore, fit, M) {
+.sldscLocal <- function(chi2, baseScore, fit) {
     tibble(
         variantIdx = seq_along(chi2),
         chi2 = chi2,
@@ -1996,10 +1970,12 @@ sldscUnivariate <- function(
     local,
     estimatorArgs = list()
 ) {
-    # `estimatorArgs` rather than `...`: the four estimators take different
-    # trailing arguments (`lambda` for lder/gldsc/hdl, `nIter` for sldsc), so
+    # `estimatorArgs` rather than `...`: the estimators take different
+    # trailing arguments (`nIter` for sldsc; the others take none today), so
     # an unknown name should fail here rather than at whichever estimator the
-    # method token happens to select.
+    # method token happens to select. lder/gldsc/hdl used to advertise a
+    # ridge `lambda` here that nothing read -- upstream LDER and HDL have no
+    # such penalty, and the function behind it had no callers.
     base <- list(z, n, ldRef, annotations, local)
     fn <- switch(
         method,
@@ -2117,8 +2093,7 @@ setMethod(
         annotations = NULL,
         local = FALSE,
         study = NULL,
-        estimatorArgs = list(),
-        ...
+        estimatorArgs = list()
     ) {
         method <- arg_match(method, c("lder", "gldsc", "sldsc", "hdl"))
         .validateMethodRef(method, ldRef)
@@ -2231,7 +2206,7 @@ setMethod(
 setMethod(
     "computeLdScores",
     signature(ldRef = "LdEigen"),
-    function(ldRef, annotations = NULL, ...) {
+    function(ldRef, annotations = NULL) {
         # Reconstruct LD scores from eigendecompositions
         # l2[j] = sum_k r^2_{jk} = sum_b sum_{eigenvalues in b} V[j,.]^2 * d
         nSnps <- length(ldRef)
@@ -2248,7 +2223,7 @@ setMethod(
 setMethod(
     "computeLdScores",
     signature(ldRef = "LdScore"),
-    function(ldRef, annotations = NULL, ...) {
+    function(ldRef, annotations = NULL) {
         if (is.null(annotations)) {
             return(getLdScores(ldRef))
         }

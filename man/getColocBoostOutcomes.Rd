@@ -7,7 +7,7 @@
 \usage{
 getColocBoostOutcomes(x, ...)
 
-\S4method{getColocBoostOutcomes}{ColocBoostResult}(x, ...)
+\S4method{getColocBoostOutcomes}{ColocBoostResult}(x)
 }
 \arguments{
 \item{x}{A \code{\linkS4class{ColocBoostResult}}.}

@@ -4,16 +4,13 @@
 \alias{computeCsCorrelation}
 \alias{computeCsCorrelation,FineMappingResultBase,SumStatsBase-method}
 \alias{computeCsCorrelation,FineMappingResultBase,QtlDataset-method}
-\alias{computeCsCorrelation,FineMappingResultBase,ANY-method}
 \title{Compute Between-Credible-Set Correlation On Demand}
 \usage{
 computeCsCorrelation(x, ldSource, ...)
 
-\S4method{computeCsCorrelation}{FineMappingResultBase,SumStatsBase}(x, ldSource, ...)
+\S4method{computeCsCorrelation}{FineMappingResultBase,SumStatsBase}(x, ldSource)
 
-\S4method{computeCsCorrelation}{FineMappingResultBase,QtlDataset}(x, ldSource, ...)
-
-\S4method{computeCsCorrelation}{FineMappingResultBase,ANY}(x, ldSource, ...)
+\S4method{computeCsCorrelation}{FineMappingResultBase,QtlDataset}(x, ldSource)
 }
 \arguments{
 \item{x}{A \code{\link{fineMappingRow}} carrying the fit (credible-set

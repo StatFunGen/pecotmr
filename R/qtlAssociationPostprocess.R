@@ -19,12 +19,50 @@
 #   perm thresh-> stats::qbeta    (empirical bracketing feeds the beta quantile)
 # =============================================================================
 
+#' @title Options for Storey q-value Estimation
+#' @description Build a record of extra arguments for
+#'   \code{qvalue::qvalue()}, the Storey q-value engine behind
+#'   \code{\link{qtlAssociationPostprocess}}.
+#' @param ... Arguments for \code{qvalue::qvalue()}: \code{pi0}, the
+#'   \code{pi0.method} / \code{lambda} pair that sets how the null
+#'   proportion is estimated, \code{pfdr}, \code{fdr.level} and
+#'   \code{lfdr.out}. \code{qvalue()}'s signature ends in \code{...}, so
+#'   names cannot be checked here and a misspelling is passed through.
+#'   \code{p} is the p-value vector pecotmr assembles and is refused.
+#'
+#'   pecotmr retries \code{qvalue()} on its two documented degenerate cases
+#'   ("missing or infinite" with \code{lambda = 0}, "pi0 <= 0" with a
+#'   bootstrap \code{pi0}); setting \code{lambda} or \code{pi0.method}
+#'   here replaces the first attempt, and the retries still override them
+#'   when that attempt fails.
+#' @return A \code{MethodConfig} record for
+#'   \code{qtlAssociationPostprocess(qvalueArgs =)}.
+#' @seealso \code{\link{qtlAssociationPostprocess}}
+#' @examples
+#' qvalueConfig(pi0.method = "bootstrap")
+#' @export
+qvalueConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(p = "the p-value vector pecotmr assembles"),
+        "qvalueConfig"
+    )
+    .newMethodConfig(
+        "qvalue::qvalue",
+        defaults = list(),
+        extra = extra,
+        label = "qvalueConfig",
+        engine = "qvalue"
+    )
+}
+
 # Storey q-values via the Bioconductor qvalue package, with the qvalue-NATIVE
 # edge-case retries only (never a hand-rolled substitute): lambda=0 for
 # missing/infinite handling, bootstrap pi0 for the "pi0 <= 0" degenerate case.
 # Returns a numeric vector aligned to `p`.
 #' @importFrom rlang try_fetch
-.qapSafeQvalue <- function(p) {
+.qapSafeQvalue <- function(p, qvalueArgs = list()) {
     if (!requireNamespace("qvalue", quietly = TRUE)) {
         # Optional-package guard; qvalue is Suggests-only.
         msg <- glue(
@@ -33,18 +71,27 @@
         )
         abort(msg)
     }
+    extra <- as.list(qvalueArgs)
     try_fetch(
-        qvalue::qvalue(p)$qvalues,
+        exec(qvalue::qvalue, p, !!!extra)$qvalues,
         error = function(cnd) {
             if (str_detect(conditionMessage(cnd), "missing or infinite")) {
-                qvalue::qvalue(p, lambda = 0)$qvalues
+                exec(
+                    qvalue::qvalue,
+                    p,
+                    !!!list_assign(extra, lambda = 0)
+                )$qvalues
             } else if (str_detect(conditionMessage(cnd), "pi0 <= 0")) {
                 maxP <- max(p, na.rm = TRUE)
                 lambdaSeq <- seq(0, min(0.9, maxP * 0.95), length.out = 10)
-                qvalue::qvalue(
+                exec(
+                    qvalue::qvalue,
                     p,
-                    lambda = lambdaSeq,
-                    pi0.method = "bootstrap"
+                    !!!list_assign(
+                        extra,
+                        lambda = lambdaSeq,
+                        pi0.method = "bootstrap"
+                    )
                 )$qvalues
             } else {
                 # The cause is chained via `parent`, so it is no longer
@@ -61,10 +108,10 @@
 
 # Event-level global adjustment of a per-gene p-value vector: Benjamini-Hochberg
 # FDR (stats::p.adjust) and Storey q (qvalue). Returns list(fdr=, q=).
-.qapGlobalAdjust <- function(eventP) {
+.qapGlobalAdjust <- function(eventP, qvalueArgs = list()) {
     list(
         fdr = stats::p.adjust(eventP, method = "fdr"),
-        q = .qapSafeQvalue(eventP)
+        q = .qapSafeQvalue(eventP, qvalueArgs)
     )
 }
 
@@ -353,6 +400,9 @@ setMethod(
 #'   \code{getSignificantQtls}).
 #' @param pvalueCol,afCol Entry mcol names for the per-variant p-value / allele
 #'   frequency (defaults \code{"P"} / \code{"af"}).
+#' @param qvalueArgs Extra arguments for \code{qvalue::qvalue()}, built with
+#'   \code{\link{qvalueConfig}} -- the \code{pi0.method} / \code{lambda}
+#'   pair in particular, which sets how the null proportion is estimated.
 #' @export
 setMethod(
     "qtlAssociationPostprocess",
@@ -364,8 +414,10 @@ setMethod(
         cisWindow = 0,
         methods = c("permutation", "bonferroni"),
         pvalueCol = "P",
-        afCol = "af"
+        afCol = "af",
+        qvalueArgs = qvalueConfig()
     ) {
+        .assertMethodConfig(qvalueArgs, "qvalueConfig", "qvalueArgs")
         methods <- arg_match(
             methods,
             c("permutation", "bonferroni"),
@@ -380,11 +432,12 @@ setMethod(
                     cisWindow,
                     pvalueCol,
                     afCol,
-                    filtering
+                    filtering,
+                    qvalueArgs
                 )
             },
             if (is_in("permutation", methods) && !is.null(x$p_beta)) {
-                .qapPermutationCols(x, fdrThreshold)
+                .qapPermutationCols(x, fdrThreshold, qvalueArgs)
             }
         ) %||%
             list()
@@ -415,7 +468,8 @@ setMethod(
     cisWindow,
     pvalueCol,
     afCol,
-    filtering
+    filtering,
+    qvalueArgs = list()
 ) {
     nVar <- .qapBonferroniNVar(x)
     nVarFilt <- if (!is.null(x$n_variants_filtered)) {
@@ -440,8 +494,12 @@ setMethod(
         cisWindow,
         filtering
     )
-    gaO <- .qapGlobalAdjust(perGene$orig)
-    gaF <- if (filtering) .qapGlobalAdjust(perGene$filt) else NULL
+    gaO <- .qapGlobalAdjust(perGene$orig, qvalueArgs)
+    gaF <- if (filtering) {
+        .qapGlobalAdjust(perGene$filt, qvalueArgs)
+    } else {
+        NULL
+    }
     c(
         list(
             p_bonferroni_min_original = perGene$orig,
@@ -541,12 +599,12 @@ setMethod(
 # Permutation columns: BH-FDR of p_beta, the Storey q-value (q_beta, when
 # absent), and the per-gene nominal p threshold from the beta shape params.
 # @noRd
-.qapPermutationCols <- function(x, fdrThreshold) {
+.qapPermutationCols <- function(x, fdrThreshold, qvalueArgs = list()) {
     pBeta <- as.numeric(x$p_beta)
     qBeta <- if (!is.null(x$q_beta)) {
         as.numeric(x$q_beta)
     } else {
-        .qapSafeQvalue(pBeta)
+        .qapSafeQvalue(pBeta, qvalueArgs)
     }
     c(
         compact(list(q_beta = if (is.null(x$q_beta)) qBeta)),

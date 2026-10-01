@@ -15,7 +15,7 @@ twasWeightsCv(
   variantsToKeep = NULL,
   numThreads = 1,
   verbose = 1,
-  retainFits = FALSE,
+  fitRetention = c("none", "slim", "full"),
   seed = NULL,
   dataDrivenPriorMatricesCv = NULL,
   reweightedMixturePriorCv = NULL,
@@ -58,8 +58,11 @@ is enabled with that many threads.}
 messages, 1 = suppress external package messages (default), 2 = show all
 messages including those from external packages.}
 
-\item{retainFits}{Logical. Retain the per-fold / per-method fitted-model
-objects on the result. Default \code{FALSE}.}
+\item{fitRetention}{How much of each per-method fit is kept on the result:
+\code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
+payload downstream needs, \code{"full"} keeps the whole fitted object.
+Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
+for every other method the two behave alike.}
 
 \item{seed}{Integer or \code{NULL}. When supplied, seeds both the
 main-process RNG (fold partitioning, variant sub-sampling) and the

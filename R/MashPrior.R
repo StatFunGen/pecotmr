@@ -137,11 +137,11 @@ MashPrior <- function(fullFit = NULL, cvFits = NULL) {
 
 #' @rdname getFullFit
 #' @export
-setMethod("getFullFit", "MashPrior", function(x, ...) x@fullFit)
+setMethod("getFullFit", "MashPrior", function(x) x@fullFit)
 
 #' @rdname getCvFits
 #' @export
-setMethod("getCvFits", "MashPrior", function(x, ...) x@cvFits)
+setMethod("getCvFits", "MashPrior", function(x) x@cvFits)
 
 #' @rdname show-methods
 #' @export

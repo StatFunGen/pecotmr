@@ -11,7 +11,7 @@ getDataType(x, ...)
 
 \S4method{getDataType}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 
-\S4method{getDataType}{TwasWeightsRow}(x, ...)
+\S4method{getDataType}{TwasWeightsRow}(x)
 }
 \arguments{
 \item{x}{A \code{TwasWeightsRow} or \code{TwasWeights}.}

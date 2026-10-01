@@ -21,8 +21,7 @@ estimateH2(
   annotations = NULL,
   local = FALSE,
   study = NULL,
-  estimatorArgs = list(),
-  ...
+  estimatorArgs = list()
 )
 }
 \arguments{

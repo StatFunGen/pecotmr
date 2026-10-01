@@ -50,8 +50,9 @@ entries <- lapply(seq_len(G), function(i) {
 })
 qss <- QtlSumStats(study = rep("s", G), context = rep("brain", G),
   trait = paste0("g", seq_len(G)), entry = entries, genome = "hg19",
-  n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),
-  p_beta = pBeta, beta_shape1 = rep(1, G), beta_shape2 = rep(200, G))
+  extraCols = list(
+    n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),
+    p_beta = pBeta, beta_shape1 = rep(1, G), beta_shape2 = rep(200, G)))
 pp <- qtlAssociationPostprocess(qss)
 getSignificantQtls(pp)
 }

@@ -9,7 +9,7 @@
 \usage{
 getSumStats(x, ...)
 
-\S4method{getSumStats}{MultiStudyQtlDataset}(x, ...)
+\S4method{getSumStats}{MultiStudyQtlDataset}(x)
 
 \S4method{getSumStats}{QtlSumStats}(
   x,
@@ -17,8 +17,7 @@ getSumStats(x, ...)
   context = NULL,
   trait = NULL,
   annotateSignificance = NULL,
-  ranges = NULL,
-  ...
+  ranges = NULL
 )
 }
 \arguments{

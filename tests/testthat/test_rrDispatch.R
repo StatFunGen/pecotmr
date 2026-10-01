@@ -40,7 +40,7 @@ test_that("prsCsWeights dispatches to prsCs with correct arguments", {
     result <- prsCsWeights(
         stat = stat,
         LD = R,
-        methodArgs = list(maf = rep(0.3, p), nIter = 17)
+        methodArgs = prsCsConfig(maf = rep(0.3, p), nIter = 17)
     )
     expect_equal(captured$bhat, bhat)
     expect_equal(captured$R, R)
@@ -69,7 +69,7 @@ test_that("sdprWeights dispatches to sdpr with correct arguments", {
     result <- sdprWeights(
         stat = stat,
         LD = R,
-        methodArgs = list(iter = 19, burn = 3)
+        methodArgs = sdprConfig(iter = 19, burn = 3)
     )
     expect_equal(captured$bhat, bhat)
     expect_equal(captured$R, R)
@@ -312,8 +312,9 @@ test_that("lassoWeights and enetWeights dispatch to glmnetWeights with correct a
     for (d in dispatchers) {
         captured <- new.env(parent = emptyenv())
         local_mocked_bindings(
-            glmnetWeights = function(X, y, alpha) {
+            glmnetWeights = function(X, y, alpha, methodArgs = glmnetConfig()) {
                 captured$alpha <- alpha
+                captured$methodArgs <- methodArgs
                 matrix(0, nrow = ncol(X), ncol = 1)
             }
         )

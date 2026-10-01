@@ -8,10 +8,9 @@ mrmashWeights(
   mrmashFit = NULL,
   X = NULL,
   Y = NULL,
-  retainFit = FALSE,
-  fitDetail = c("slim", "full"),
+  fitRetention = c("none", "slim", "full"),
   dataDrivenPriorMatrices = NULL,
-  methodArgs = list()
+  methodArgs = mrmashConfig()
 )
 }
 \arguments{
@@ -21,25 +20,24 @@ mrmashWeights(
 
 \item{Y}{Phenotype matrix. Required when `mrmashFit` is NULL.}
 
-\item{retainFit}{If TRUE, attach (as the `"fit"` attribute of the returned
-weights) the parts of the mr.mash fit that `fineMappingPipeline` needs to
-rebuild the mvSuSiE reweighted mixture prior + residual variance: the
-original data-driven prior matrices (`dataDrivenPriorMatrices`), the fitted
-mixture weights (`w0`) and the residual covariance (`V`). Default FALSE.}
-
-\item{fitDetail}{How much of the fit to retain when `retainFit = TRUE`.
-`"slim"` (default) keeps only the three reconstruction inputs above; the
-heavy coefficient matrix (`mu1`) is already returned as the weights, so it
-is not duplicated. `"full"` additionally retains the complete mr.mash fit
-under `$fit` (consistent with how susie fits are kept), at the cost of a
-larger payload.}
+\item{fitRetention}{How much of the mr.mash fit is kept as the
+\code{"fit"} attribute of the returned weights. \code{"none"} (default)
+attaches nothing. \code{"slim"} keeps what \code{fineMappingPipeline}
+needs to rebuild the mvSuSiE reweighted mixture prior and residual
+variance --- the original \code{dataDrivenPriorMatrices}, the fitted
+\code{w0} and \code{V}; the heavy coefficient matrix \code{mu1} is
+already returned as the weights, so it is not duplicated. \code{"full"}
+additionally retains the complete fit under \code{$fit}, at the cost of
+a larger payload.}
 
 \item{dataDrivenPriorMatrices}{Optional list of data-driven prior
 covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
 and retained in the payload for mvSuSiE prior reconstruction.}
 
-\item{methodArgs}{Optional named list of options passed to
-`mrmashWrapper()` when fitting.}
+\item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash}, built
+with \code{\link{mrmashConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 Matrix of variant weights.
@@ -54,6 +52,6 @@ X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y
 ddpm <- multiTraitData$priorMatrices
 fit <- mrmashWrapper(X = X, Y = Y, dataDrivenPriorMatrices = ddpm,
-  canonicalPriorMatrices = TRUE)
+  prior = mrmashPriorConfig(canonicalPriorMatrices = TRUE))
 mrmashWeights(mrmashFit = fit, X = X, Y = Y)
 }

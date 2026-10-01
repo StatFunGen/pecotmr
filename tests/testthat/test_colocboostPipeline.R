@@ -262,21 +262,26 @@ test_that(".cbBuildLdArgs: empty list returns empty list", {
     expect_equal(pecotmr:::.cbBuildLdArgs(list()), list())
 })
 
-test_that(".cbScreenSpec enforces one metric and threads the right spec", {
-    expect_error(pecotmr:::.cbScreenSpec(0.5, 5, 0, 0), "one signal screen")
+test_that("signalScreenConfig enforces one metric and threads the right spec", {
+    expect_error(
+        signalScreenConfig(pip = 0.5, absZ = 5),
+        "only one screening metric"
+    )
     expect_equal(
-        pecotmr:::.cbScreenSpec(0, 5, 0, 0),
+        pecotmr:::.screenResolve(signalScreenConfig(absZ = 5)),
         list(metric = "absZ", cutoff = 5)
     )
     expect_equal(
-        pecotmr:::.cbScreenSpec(0, 0, 100, 0),
+        pecotmr:::.screenResolve(signalScreenConfig(bf = 100)),
         list(metric = "bf", cutoff = 100)
     )
-    expect_equal(pecotmr:::.cbScreenSpec(0.3, 0, 0, 0), 0.3) # legacy pip scalar
+    # legacy pip scalar passes through as a bare numeric
+    expect_equal(pecotmr:::.screenResolve(signalScreenConfig(pip = 0.3)), 0.3)
     expect_equal(
-        pecotmr:::.cbScreenSpec(c(brain = 0.3), 0, 0, 0),
+        pecotmr:::.screenResolve(signalScreenConfig(pip = c(brain = 0.3))),
         c(brain = 0.3)
     ) # context-named pass-through
+    expect_null(pecotmr:::.screenResolve(signalScreenConfig()))
 })
 
 test_that(".cbResolveCutoff passes a screen object through uniformly", {
@@ -288,12 +293,12 @@ test_that(".cbResolveCutoff passes a screen object through uniformly", {
     expect_equal(pecotmr:::.cbResolveCutoff(0.5, "any"), 0.5)
 })
 
-test_that("colocboostPipeline(QtlDataset): enabling two screen metrics errors", {
-    qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-    # .cbScreenSpec runs before the bundle/engine, so this fails fast.
+test_that("enabling two screen metrics errors where it is written", {
+    # The constructor enforces it, so this fails at the call that builds the
+    # bundle -- before any pipeline runs.
     expect_error(
-        colocboostPipeline(qd, pipCutoffToSkip = 0.5, bfCutoffToSkip = 100),
-        "one signal screen"
+        signalScreenConfig(pip = 0.5, bf = 100),
+        "only one screening metric"
     )
 })
 
@@ -518,23 +523,36 @@ test_that("colocboostPipeline: separateGwas runs once per merged sumstat study",
     )
 })
 
-test_that("colocboostPipeline: no analysis flag set emits a message and returns empty", {
+test_that("colocboostPipeline: no analysis flag set is an error", {
     ss <- .cbp_makeQtlSumStats()
     local_mocked_bindings(
         extractBlockGenotypes = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
-    out <- suppressMessages(
+    # All three FALSE is the one combination that is not a request. It used
+    # to run silently and hand back an empty result.
+    expect_error(
         colocboostPipeline(
             ss,
             xqtlColoc = FALSE,
             jointGwas = FALSE,
             separateGwas = FALSE
-        )
+        ),
+        "no analysis selected"
     )
-    expect_null(out$xqtl_coloc)
-    expect_null(out$joint_gwas)
-    expect_null(out$separate_gwas)
+    # Any single flag is still a valid request -- they are independent, not
+    # a mutually exclusive set.
+    for (flag in c("xqtlColoc", "jointGwas", "separateGwas")) {
+        args <- set_names(
+            list(FALSE, FALSE, FALSE),
+            c("xqtlColoc", "jointGwas", "separateGwas")
+        )
+        args[[flag]] <- TRUE
+        expect_silent(exec(
+            pecotmr:::.cbAssertAnyRun,
+            !!!set_names(unname(args), NULL)
+        ))
+    }
 })
 
 test_that("colocboostPipeline: GWAS ldSketch mismatch errors during the driver", {
@@ -788,7 +806,11 @@ test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcom
         .package = "pecotmr"
     )
     out <- suppressMessages(suppressWarnings(
-        colocboostPipeline(qd, xqtlColoc = TRUE, pipCutoffToSkip = 0.9999)
+        colocboostPipeline(
+            qd,
+            xqtlColoc = TRUE,
+            signalScreenArgs = signalScreenConfig(pip = 0.9999)
+        )
     ))
     expect_null(out$xqtl_coloc) # 249-253 skip -> empty
 })
@@ -965,7 +987,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
 .cbf_n <- function(ss, ...) {
     b <- suppressMessages(.cbQtlSumStatsBundle(
         ss,
-        cutoffs = .panelCutoffs(...)
+        cutoffs = .panelCutoffs(panelFilterConfig(...))
     ))
     if (length(b) == 0L) 0L else length(b[[1L]]$variantIds)
 }
@@ -1001,7 +1023,7 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
             length(.panelVariantFilter(
                 getLdSketch(ss),
                 ids,
-                mafCutoff = cut
+                panelFilterConfig(mafCutoff = cut)
             )),
             label = str_c("mafCutoff ", cut)
         )
@@ -1337,7 +1359,7 @@ test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
         jointGwas = FALSE,
         separateGwas = FALSE,
         focalTrait = NULL,
-        colocboostArgs = list(),
+        methodArgs = colocboostConfig(),
         qtlSumstatBundle = qtlOnly
     ))
     expect_equal(called, "xqtl")
@@ -1365,7 +1387,7 @@ test_that(".cbRunVariants warns instead of silently skipping an analysis", {
             jointGwas = TRUE,
             separateGwas = TRUE,
             focalTrait = NULL,
-            colocboostArgs = list()
+            methodArgs = colocboostConfig()
         ))
     )
     expect_length(warnings, 2L)
@@ -1389,12 +1411,48 @@ test_that(".cbRunVariants warns when xqtlColoc has only GWAS sumstats", {
             jointGwas = FALSE,
             separateGwas = FALSE,
             focalTrait = NULL,
-            colocboostArgs = list(),
+            methodArgs = colocboostConfig(),
             qtlSumstatBundle = pecotmr:::.cbMergeSumstatBundles(list())
         )),
         "xqtlColoc = TRUE was requested"
     )
     expect_null(getComputingTime(out)$Analysis$xqtl_coloc)
+})
+
+test_that("colocboostConfig() options reach the engine by name", {
+    # Regression: the bundle was merged with c(), which appends a MethodConfig
+    # (a SimpleList) as ONE opaque element instead of splicing its entries.
+    # exec() then handed that object to colocboost as a positional argument,
+    # so every option set through colocboostConfig() was silently lost.
+    seen <- NULL
+    local_mocked_bindings(
+        colocboost = function(...) {
+            seen <<- list(...)
+            list(stub = TRUE)
+        },
+        .package = "colocboost"
+    )
+    local_mocked_bindings(
+        .cbOutcomeInfo = function(...) pecotmr:::.cbEmptyOutcomeInfo(),
+        .package = "pecotmr"
+    )
+    qtlOnly <- pecotmr:::.cbMergeSumstatBundles(list(
+        qtlA = list(sumstat = list(z = 1), LD = diag(2))
+    ))
+    suppressMessages(pecotmr:::.cbRunVariants(
+        NULL,
+        qtlOnly,
+        xqtlColoc = TRUE,
+        jointGwas = FALSE,
+        separateGwas = FALSE,
+        focalTrait = NULL,
+        methodArgs = colocboostConfig(M = 3L, stop_thresh = 0.02),
+        qtlSumstatBundle = qtlOnly
+    ))
+    expect_equal(seen$M, 3L)
+    expect_equal(seen$stop_thresh, 0.02)
+    # ...and nothing rode along unnamed, which is how the record used to travel
+    expect_false(any(names(seen) == ""))
 })
 
 test_that(".cbAppendGwasPairs disambiguates a colliding study key", {

@@ -553,7 +553,7 @@ ColocBoostResult <- function(
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocPairs", "ColocBoostResult", function(x, ...) {
+setMethod("getColocPairs", "ColocBoostResult", function(x) {
     # Named "pairs" for symmetry with ColocResult, but a ColocBoost row is a
     # SET, not a pair: `outcomes` holds however many outcomes colocalized.
     md <- mcols(x, use.names = FALSE)
@@ -573,7 +573,7 @@ setMethod("getColocPairs", "ColocBoostResult", function(x, ...) {
 setMethod(
     "getColocVariants",
     "ColocBoostResult",
-    function(x, pooled = FALSE, ...) {
+    function(x, pooled = FALSE) {
         long <- .cbrLongVariants(x)
         if (!isTRUE(pooled) || nrow(long) == 0L) {
             return(long)
@@ -630,7 +630,7 @@ setGeneric("getColocBoostOutcomes", function(x, ...) {
 
 #' @rdname getColocBoostOutcomes
 #' @export
-setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x, ...) {
+setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x) {
     if (length(x) == 0L) {
         return(tibble())
     }
@@ -692,7 +692,7 @@ setGeneric("getComputingTime", function(x, ...) {
 
 #' @rdname getComputingTime
 #' @export
-setMethod("getComputingTime", "ColocBoostResult", function(x, ...) {
+setMethod("getComputingTime", "ColocBoostResult", function(x) {
     x@computingTime
 })
 
@@ -711,4 +711,4 @@ setGeneric("getRegionVcp", function(x, ...) standardGeneric("getRegionVcp"))
 
 #' @rdname getRegionVcp
 #' @export
-setMethod("getRegionVcp", "ColocBoostResult", function(x, ...) x@regionVcp)
+setMethod("getRegionVcp", "ColocBoostResult", function(x) x@regionVcp)

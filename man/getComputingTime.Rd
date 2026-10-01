@@ -7,7 +7,7 @@
 \usage{
 getComputingTime(x, ...)
 
-\S4method{getComputingTime}{ColocBoostResult}(x, ...)
+\S4method{getComputingTime}{ColocBoostResult}(x)
 }
 \arguments{
 \item{x}{A \code{\linkS4class{ColocBoostResult}}.}

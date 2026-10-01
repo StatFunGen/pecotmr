@@ -2700,3 +2700,29 @@ test_that("stochastic inversion is a no-op when no id matches the metadata", {
     )
     expect_identical(out$X, X)
 })
+
+test_that("readGenotypes names its keyword sources, not `...`", {
+    # The sources used to ride `...` into GenotypeHandle(), so a misspelled
+    # one was simply unset and the call failed later with "no source given".
+    expect_error(readGenotypes(plink1Prefx = "x"), "unused argument")
+    # Every GenotypeHandle source is reachable by name: passing one gets past
+    # argument matching and fails (if at all) on the source itself, never on
+    # "unused argument".
+    sources <- setdiff(
+        names(formals(pecotmr:::GenotypeHandle)),
+        c("path", "format", "vcfArgs")
+    )
+    for (nm in sources) {
+        err <- tryCatch(
+            {
+                exec(readGenotypes, !!!set_names(list("nope"), nm))
+                NULL
+            },
+            error = function(e) conditionMessage(e)
+        )
+        expect_false(
+            isTRUE(str_detect(err %||% "", "unused argument")),
+            label = nm
+        )
+    }
+})

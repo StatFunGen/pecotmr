@@ -10,9 +10,10 @@ mashPipeline(
   residualCorrelation = NULL,
   residualCorrelationMethod = c("identity", "simple", "simpleSpecific", "corshrink",
     "mle"),
-  priorCovariances = NULL,
-  nPcs = NULL,
+  prior = mashPriorConfig(),
   inputScale = c("auto", "beta", "z"),
+  mashDataArgs = mashDataConfig(),
+  mashArgs = mashConfig(),
   setSeed = 999
 )
 }
@@ -58,19 +59,12 @@ artefact (the legacy MWE pattern).}
   \code{priorCovariances} to refine against. A named method whose
   requirement is unmet is a hard error, not a silent fallback.}
 
-\item{priorCovariances}{Optional named list of square covariance matrices
-(the \code{Ulist} \code{mashr::mash()} consumes), or a
-\code{\link{mashPriorCovariances}} result, which is unwrapped to its
-\code{U}. When supplied, replaces
-the canonical + PCA + flash + ED chain (\code{cov_canonical} /
-\code{cov_pca} / \code{cov_flash} / \code{cov_ed}) entirely; mash sees only
-the supplied matrices. Every entry must be a \code{ncol(Bhat) x ncol(Bhat)}
-matrix. Useful when \code{U} was learnt on a larger reference and shipped
-as a static artefact (the legacy MWE pattern).}
-
-\item{nPcs}{Optional integer; number of principal components seeded into
-\code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}. Ignored when
-\code{priorCovariances} is supplied.}
+\item{prior}{How the prior covariance matrices are obtained, built with
+\code{\link{mashPriorConfig}}: \code{priorCovariances} supplies them
+outright (short-circuiting the rest), otherwise \code{components}
+chooses which to build, \code{engine} how the data-driven ones are
+refined, and \code{nPcs} parametrises the \code{pca} component.
+Forwarded whole to \code{\link{mashPriorCovariances}}.}
 
 \item{inputScale}{One of \code{"auto"} (default), \code{"beta"},
 \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
@@ -87,6 +81,19 @@ sumstats entry:
 }
 \code{alpha} should be chosen consistently with the resolved scale:
 typically \code{alpha = 0} for beta, \code{alpha = 1} for z.}
+
+\item{mashDataArgs}{Extra arguments for
+\code{mashr::mash_set_data()}, built with
+\code{\link{mashDataConfig}} -- for example
+\code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+\code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+are refused by the constructor.}
+
+\item{mashArgs}{Extra arguments for \code{mashr::mash()}, built with
+\code{\link{mashConfig}} -- for example \code{nullweight},
+\code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+\code{outputlevel} and \code{seed} are owned by pecotmr and are
+refused by the constructor.}
 
 \item{setSeed}{Integer. RNG seed for reproducibility of
 \code{mashr::cov_flash} and \code{mashr::cov_ed}. Default 999.}
@@ -106,5 +113,5 @@ End-to-end driver: from `(strong, random, null)` sumstats
 data(qtlSumStatsMulticontextExample)
 ss <- qtlSumStatsMulticontextExample
 sumStatsList <- list(strong = ss, random = ss)
-mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
+mashPipeline(sumStatsList, alpha = 0, prior = mashPriorConfig(nPcs = 2L))
 }

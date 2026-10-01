@@ -14,7 +14,7 @@ fsusieWrapper(
   covLev,
   minPurity,
   maxScale,
-  methodArgs = list()
+  methodArgs = fsusieConfig()
 )
 }
 \arguments{
@@ -38,8 +38,9 @@ model.}
 \item{maxScale}{numeric, define the maximum of wavelet coefficients used in
 the analysis (2^maxScale). Set 10 true by default.}
 
-\item{methodArgs}{Optional named list of options passed to
-\code{fsusieR::susiF}.}
+\item{methodArgs}{Options forwarded to \code{fsusieR::susiF}, built with
+\code{\link{fsusieConfig}}. A bare list is refused: it cannot be checked
+against the engine, so a misspelled option would be silently ignored.}
 }
 \value{
 A modified fsusie object with the susie sets list, correlations for

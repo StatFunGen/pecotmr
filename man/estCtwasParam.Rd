@@ -6,40 +6,27 @@
 \usage{
 estCtwasParam(
   inputs,
-  thin = 0.1,
-  niterPrefit = 3L,
-  niter = 30L,
-  groupPriorVarStructure = c("shared_type", "shared_context", "shared_nonSNP",
-    "shared_all", "independent"),
-  ncore = 1L,
-  fallbackToPrefit = FALSE,
-  ctwasArgs = list()
+  ctwasPriorArgs = ctwasPriorConfig(),
+  numThreads = 1L,
+  methodArgs = ctwasConfig()
 )
 }
 \arguments{
 \item{inputs}{A list returned by \code{\link{assembleCtwasInputs}}.}
 
-\item{thin, niterPrefit, niter}{Pass-throughs to
-\code{ctwas::assemble_region_data} / \code{ctwas::est_param}.}
+\item{ctwasPriorArgs}{The EM settings, built with
+\code{\link{ctwasPriorConfig}}: \code{thin} (SNP thinning when
+assembling region data), \code{niterPrefit} and \code{niter} (prefit /
+accurate EM iterations), \code{varStructure}, and
+\code{fallbackToPrefit} -- when \code{TRUE}, an accurate EM that fails
+on a degenerate input is recovered by re-running only the prefit step
+and returning those (typically finite) priors.}
 
-\item{groupPriorVarStructure}{Pass-through.}
+\item{numThreads}{Number of cores.}
 
-\item{ncore}{Number of cores.}
-
-\item{fallbackToPrefit}{Logical (length 1). When \code{TRUE} (default
-\code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails for ANY
-reason on a degenerate input, re-run only the prefit step via ctwas's
-internal \code{fit_EM} and return those (typically finite) priors as the
-param. The accurate-EM failure mode is version-dependent (ctwas <= 0.4.x:
-\code{"contains NAs"}; ctwas >= 0.6.0: \code{"No regions selected!"} or a
-NaN-loglik \code{"missing value where TRUE/FALSE needed"}), so the catch is
-deliberately broad; a genuinely broken input still surfaces because the
-prefit re-run will itself error. Mirrors the legacy ctwas_2 workaround on
-toy data where the accurate EM cannot be estimated.}
-
-\item{ctwasArgs}{Optional named list of additional arguments
-forwarded to \code{ctwas::est_param} (e.g.
-\code{min_p_single_effect}, \code{min_group_size}).}
+\item{methodArgs}{Additional arguments forwarded to ctwas, built
+with \code{\link{ctwasConfig}}. Names are checked against what
+the ctwas steps accept between them.}
 }
 \value{
 The \code{inputs} list augmented with \code{region_data},
@@ -54,7 +41,8 @@ Step 2 of the three-step \code{\link{ctwasPipeline}}: assembles
 }
 \examples{
 data(ctwasInputsExample)
-estCtwasParam(ctwasInputsExample, thin = 1, niterPrefit = 3,
-  niter = 10, fallbackToPrefit = TRUE,
-  ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0))
+estCtwasParam(ctwasInputsExample,
+  ctwasPrior = ctwasPriorConfig(thin = 1, niterPrefit = 3, niter = 10,
+    fallbackToPrefit = TRUE),
+  methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0))
 }

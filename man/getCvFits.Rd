@@ -7,7 +7,7 @@
 \usage{
 getCvFits(x, ...)
 
-\S4method{getCvFits}{MashPrior}(x, ...)
+\S4method{getCvFits}{MashPrior}(x)
 }
 \arguments{
 \item{x}{A \code{MashPrior} object.}

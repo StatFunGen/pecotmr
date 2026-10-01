@@ -12,6 +12,7 @@ mashResidualCorrelation(
   nSubset = 6000L,
   maxIter = 6L,
   inputScale = c("auto", "beta", "z"),
+  mashDataArgs = mashDataConfig(),
   setSeed = 999
 )
 }
@@ -43,6 +44,13 @@ EM iterations).}
 
 \item{inputScale}{SumStats -> matrix conversion scale (\code{"auto"} /
 \code{"beta"} / \code{"z"}).}
+
+\item{mashDataArgs}{Extra arguments for
+\code{mashr::mash_set_data()}, built with
+\code{\link{mashDataConfig}} -- for example
+\code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+\code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+are refused by the constructor.}
 
 \item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG stream
 untouched (how \code{mashPipeline} keeps one continuous stream across its

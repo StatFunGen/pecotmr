@@ -14,7 +14,7 @@ NULL
 setMethod(
     "writeSumStatsVcf",
     signature("GwasSumStats"),
-    function(x, outputPath, sampleName = NULL, study = NULL, ...) {
+    function(x, outputPath, sampleName = NULL, study = NULL) {
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(
                 "Package 'VariantAnnotation' is required for writeSumStatsVcf"
@@ -95,8 +95,7 @@ setMethod(
         trait = NULL,
         method = NULL,
         splitByContext = FALSE,
-        splitByTrait = FALSE,
-        ...
+        splitByTrait = FALSE
     ) {
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(

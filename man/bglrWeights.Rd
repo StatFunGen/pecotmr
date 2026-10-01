@@ -12,7 +12,7 @@ bglrWeights(
   burnIn,
   thin,
   etaArgs = list(),
-  methodArgs = list()
+  methodArgs = bglrConfig()
 )
 }
 \arguments{
@@ -31,8 +31,10 @@ bglrWeights(
 \item{etaArgs}{Optional named list of additional arguments included in the
 `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).}
 
-\item{methodArgs}{Optional named list of options passed through to
-`BGLR::BGLR`.}
+\item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
+with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

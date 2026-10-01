@@ -508,7 +508,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(tl) || nrow(tl) == 0L) {
         return(.emptyCsSummary())
     }
-    specs <- .csSummarySpecs(tl, fit, coverage, csCol, purCol)
+    specs <- .csSummarySpecs(tl, fit, coverage, csCol)
     if (length(specs) == 0L) {
         return(.emptyCsSummary())
     }
@@ -534,13 +534,13 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # membership. Falls back to enumerating the per-variant cs_<cov> column (the
 # labelled members only) for a minimal or hand-built fit with no sets.
 # @noRd
-.csSummarySpecs <- function(tl, fit, coverage, csCol, purCol) {
+.csSummarySpecs <- function(tl, fit, coverage, csCol) {
     setsObj <- .csSetsForCoverage(fit, coverage)
     hasSets <- !is.null(setsObj) &&
         !is.null(setsObj$cs) &&
         length(setsObj$cs) > 0L
     if (hasSets) {
-        return(.csSpecsFromFit(setsObj, fit, tl, coverage, csCol))
+        return(.csSpecsFromFit(setsObj, fit, tl, csCol))
     }
     .csSpecsFromColumn(tl, csCol)
 }
@@ -549,7 +549,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # variant ids through the alpha column names; the effect index comes from the
 # sets$cs "L<k>" names.
 # @noRd
-.csSpecsFromFit <- function(setsObj, fit, tl, coverage, csCol) {
+.csSpecsFromFit <- function(setsObj, fit, tl, csCol) {
     vn <- colnames(fit$alpha)
     eff <- .fmEffectIndices(setsObj$cs)
     tag <- .csMethodTag(tl, fit, csCol)
@@ -1517,7 +1517,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 
 #' @rdname adjustPips
 #' @noRd
-setMethod("adjustPips", "FineMappingRow", function(x, keepVariants, ...) {
+setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
     vids <- getVariantIds(x)
     keepIdx <- .adjustPipsKeepIdx(vids, keepVariants)
     common <- vids[keepIdx]
@@ -1543,17 +1543,17 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants, ...) {
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "FineMappingRow", function(x, ...) {
+setMethod("getVariantIds", "FineMappingRow", function(x) {
     .grVariantIds(x@variants)
 })
 
 #' @rdname getSusieFit
 #' @export
-setMethod("getSusieFit", "FineMappingRow", function(x, ...) x@susieFit)
+setMethod("getSusieFit", "FineMappingRow", function(x) x@susieFit)
 
 #' @rdname getCvResult
 #' @export
-setMethod("getCvResult", "FineMappingRow", function(x, ...) x@cvResult)
+setMethod("getCvResult", "FineMappingRow", function(x) x@cvResult)
 
 #' @rdname show-methods
 #' @export
@@ -1583,4 +1583,4 @@ setMethod("show", "FineMappingRow", function(object) {
 setGeneric("rowVariants", function(x, ...) standardGeneric("rowVariants"))
 
 # @noRd
-setMethod("rowVariants", "FineMappingRow", function(x, ...) x@variants)
+setMethod("rowVariants", "FineMappingRow", function(x) x@variants)

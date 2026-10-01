@@ -15,7 +15,7 @@ QtlSumStats(
   nSample = NULL,
   qcInfo = list(),
   traitPos = NULL,
-  ...
+  extraCols = list()
 )
 }
 \arguments{
@@ -55,7 +55,11 @@ record. Fine-mapping / TWAS pipelines reject inputs where
 \code{NULL}), carried forward as provenance; not part of the identity key.
 \code{NULL} (default) omits the column.}
 
-\item{...}{Additional per-tuple columns to attach to the collection.}
+\item{extraCols}{Optional named list of additional per-tuple columns to
+attach to the collection's \code{mcols}. Named rather than variadic
+because the base class's own constructor, \code{GRangesList(...)}, uses
+\code{...} for its \emph{elements}: a bare \code{...} here would read
+as adding an entry rather than a metadata column.}
 }
 \value{
 A \code{QtlSumStats} object.

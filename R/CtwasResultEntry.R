@@ -82,12 +82,12 @@ CtwasResultEntry <- function(
 
 #' @rdname getFinemap
 #' @export
-setMethod("getFinemap", "CtwasResultEntry", function(x, ...) x@finemap)
+setMethod("getFinemap", "CtwasResultEntry", function(x) x@finemap)
 
 #' @rdname getSusieAlpha
 #' @export
-setMethod("getSusieAlpha", "CtwasResultEntry", function(x, ...) x@susieAlpha)
+setMethod("getSusieAlpha", "CtwasResultEntry", function(x) x@susieAlpha)
 
 #' @rdname getCtwasParam
 #' @export
-setMethod("getCtwasParam", "CtwasResultEntry", function(x, ...) x@param)
+setMethod("getCtwasParam", "CtwasResultEntry", function(x) x@param)

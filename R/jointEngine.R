@@ -319,7 +319,8 @@ setMethod(
 # Per-fold fsusie CV slice, or NULL when CV is disabled.
 # @noRd
 .jointFsusieCv <- function(Xc, Yc, group, cfg, args, verbose) {
-    cvFolds <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
+    cv <- cfg$crossValidationArgs %||% list()
+    cvFolds <- cv$folds %||% 0L
     if (cvFolds <= 1L) {
         return(NULL)
     }
@@ -329,11 +330,11 @@ setMethod(
         "fsusie",
         args$methodArgs,
         cvFolds,
-        samplePartition = cfg$samplePartition,
-        coverage = cfg$coverage,
+        samplePartition = cfg$crossValidationArgs$samplePartition,
+        coverage = cfg$credibleSetArgs$coverage,
         pos = .jgTraitPos(group),
         verbose = verbose,
-        numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads,
+        numThreads = cv$threads %||% 1L,
         seed = cfg$seed
     )
     .fmSliceCv(cv, "fsusie")
@@ -341,21 +342,24 @@ setMethod(
 
 # One fsusie per-condition (trait) FineMappingRow, with its CV slice attached.
 # @noRd
-.jointFsusieEntry <- function(r, fit, cvM, Xc, cfg) {
+.jointFsusieEntry <- function(
+    r,
+    fit,
+    cvM,
+    Xc,
+    cfg,
+    credibleSetArgs,
+    fitRetention
+) {
     bare <- .fmPostprocessOne(
         fit = fit,
         method = "fsusie",
         dataX = Xc,
         dataY = NULL,
         conditionIdx = r,
-        coverage = cfg$coverage,
-        secondaryCoverage = cfg$secondaryCoverage,
-        signalCutoff = cfg$signalCutoff,
-        minAbsCorr = cfg$minAbsCorr,
         csInput = "fsusie",
-        fullFit = cfg$fullFit,
-        fullFitAlphaOnly = cfg$fullFitAlphaOnly,
-        includeAllCs = cfg$includeAllCs
+        credibleSetArgs = cfg$credibleSetArgs,
+        fitRetention = cfg$fitRetention
     )
     e <- if (is.null(cvM)) {
         bare
@@ -449,7 +453,7 @@ setMethod(
             X = Xc,
             Y = Ys,
             prior_variance = mvPrior$priorVariance,
-            coverage = cfg$coverage
+            coverage = cfg$credibleSetArgs$coverage
         ),
         compact(list(residual_variance = mvPrior$residualVariance))
     )
@@ -487,11 +491,12 @@ setMethod(
     ddCut,
     verbose
 ) {
-    cvFolds <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
+    cv <- cfg$crossValidationArgs %||% list()
+    cvFolds <- cv$folds %||% 0L
     if (cvFolds <= 1L) {
         return(NULL)
     }
-    sp <- cfg$samplePartition %||% mvCv$samplePartition
+    sp <- cfg$crossValidationArgs$samplePartition %||% mvCv$samplePartition
     mvPriorCv <- .fmBuildMvsusiePriorCv(mvCv, mvFitParts, colnames(Ys), ddCut)
     cv <- .fmWeightsCv(
         Xc,
@@ -500,11 +505,11 @@ setMethod(
         args$methodArgs,
         cvFolds,
         samplePartition = sp,
-        coverage = cfg$coverage,
+        coverage = cfg$credibleSetArgs$coverage,
         verbose = verbose,
         mvPrior = mvPrior,
         mvPriorCv = mvPriorCv,
-        numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads,
+        numThreads = cv$threads %||% 1L,
         seed = cfg$seed
     )
     .fmSliceCv(cv, "mvsusie")
@@ -513,7 +518,16 @@ setMethod(
 # One mvsusie per-condition entry (NULL for a screened-out column), sliced at
 # the condition's position in the fitted survivor set + its CV slice.
 # @noRd
-.jointMvEntry <- function(i, fitted, Xc, keep, survivors, cfg) {
+.jointMvEntry <- function(
+    i,
+    fitted,
+    Xc,
+    keep,
+    survivors,
+    cfg,
+    credibleSetArgs,
+    fitRetention
+) {
     if (!keep[i]) {
         return(NULL)
     }
@@ -524,14 +538,9 @@ setMethod(
         dataX = Xc,
         dataY = NULL,
         conditionIdx = r,
-        coverage = cfg$coverage,
-        secondaryCoverage = cfg$secondaryCoverage,
-        signalCutoff = cfg$signalCutoff,
-        minAbsCorr = cfg$minAbsCorr,
         csInput = "X",
-        fullFit = cfg$fullFit,
-        fullFitAlphaOnly = cfg$fullFitAlphaOnly,
-        includeAllCs = cfg$includeAllCs
+        credibleSetArgs = cfg$credibleSetArgs,
+        fitRetention = cfg$fitRetention
     )
     e <- if (is.null(fitted$cvM)) {
         bare
@@ -570,7 +579,6 @@ setMethod(
             seq_len(ncol(.jgZ(group))),
             .jointRssEntry,
             fit = fit,
-            group = group,
             ldMat = ldMat,
             cfg = cfg
         )
@@ -603,7 +611,7 @@ setMethod(
         R = ldMat,
         N = as.numeric(stats::median(.jgN(group))),
         prior_variance = mvPrior$priorVariance,
-        coverage = cfg$coverage
+        coverage = cfg$credibleSetArgs$coverage
     ) |>
         c(compact(list(residual_variance = mvPrior$residualVariance)))
     fitArgs <- .fmMergeUserArgs(
@@ -620,21 +628,19 @@ setMethod(
 
 # One RSS per-condition FineMappingRow (csInput = "Xcorr").
 # @noRd
-.jointRssEntry <- function(r, fit, group, ldMat, cfg) {
+# `credibleSet` / `fitRetention` come off `cfg`, which is what the caller
+# supplies; they were also declared as formals with no defaults, so nothing
+# could ever have passed them without erroring. `group` was unused too.
+.jointRssEntry <- function(r, fit, ldMat, cfg) {
     .fmPostprocessOne(
         fit = fit,
         method = "mvsusie",
         dataX = ldMat,
         dataY = NULL,
         conditionIdx = r,
-        coverage = cfg$coverage,
-        secondaryCoverage = cfg$secondaryCoverage,
-        signalCutoff = cfg$signalCutoff,
-        minAbsCorr = cfg$minAbsCorr,
         csInput = "Xcorr",
-        fullFit = cfg$fullFit,
-        fullFitAlphaOnly = cfg$fullFitAlphaOnly,
-        includeAllCs = cfg$includeAllCs
+        credibleSetArgs = cfg$credibleSetArgs,
+        fitRetention = cfg$fitRetention
     )
 }
 
@@ -840,7 +846,7 @@ setMethod(
         study = as.character(cond$study[1L]),
         context = as.character(cond$context[1L]),
         trait = as.character(cond$trait[1L]),
-        retainFits = TRUE,
+        fitRetention = "slim",
         standardized = stdz,
         dataType = cfg$dataType,
         verbose = 0,
@@ -854,6 +860,15 @@ setMethod(
             probIn = if (token == "bayesB" && is.null(ma$probIn)) piHat
         ))
     )
+}
+
+# The retention level a joint fit runs at. The engine always keeps its fit --
+# the joint layers downstream read it -- so "none" from the pipeline means
+# "keep the least we can", not "keep nothing".
+# @noRd
+.jointRetentionLevel <- function(cfg) {
+    level <- cfg$fitRetention %||% "slim"
+    if (identical(level, "none")) "slim" else level
 }
 
 # Full-data TWAS weight fit for a joint group. Returns list(W, fitParts, vids);
@@ -877,7 +892,7 @@ setMethod(
     if (!fitFullData) {
         return(list(W = NULL, fitParts = NULL, vids = colnames(Xc)))
     }
-    rfd <- if (is.null(cfg$retainFitDetail)) "slim" else cfg$retainFitDetail
+    retention <- .jointRetentionLevel(cfg)
     verbose <- if (is.null(cfg$verbose)) 1 else cfg$verbose
     tw <- learnTwasWeights(
         Xc,
@@ -887,8 +902,7 @@ setMethod(
         context = as.character(cond$context[1L]),
         trait = as.character(cond$trait[1L]),
         fittedModels = fittedModels,
-        retainFits = TRUE,
-        retainFitDetail = rfd,
+        fitRetention = retention,
         standardized = stdz,
         dataType = cfg$dataType,
         verbose = verbose,
@@ -951,68 +965,83 @@ setMethod(
 }
 
 # @noRd
-.jointTwasCv <- function(Xc, Yc, wm, ma, W, args, cfg, token) {
-    cvFolds <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
-    if (cvFolds <= 1L) {
-        return(NULL)
-    }
-    cvRes <- .twasFmHandoffCv(args$fineMappingCv, token)
-    if (!is.null(cvRes)) {
-        return(cvRes)
-    }
-    if (!.jointTwasCvRequested(cfg$cvWeightMethods, token)) {
-        return(NULL)
+# Whether this token is barred from cross-validation: not requested, or its
+# weights are all zero so there is nothing to validate. A fine-mapping method
+# with no recoverable per-fold fits is an error rather than a silent skip.
+# @noRd
+.jointTwasCvBlocked <- function(W, cfg, token) {
+    if (!.jointTwasCvRequested(cfg$crossValidationArgs$weightMethods, token)) {
+        return(TRUE)
     }
     if (!is.null(W) && all(W == 0)) {
-        # Restored with the notice it used to carry: a method whose weights
-        # are all zero contributes nothing to cross-validation, and dropping
-        # it silently made an empty ensemble look like a modelling result.
-        msg <- glue(
+        # A method whose weights are all zero contributes nothing to
+        # cross-validation, and dropping it silently made an empty ensemble
+        # look like a modelling result.
+        warn(glue(
             "twasWeightsPipeline: method '{token}' is excluded from ",
             "cross-validation because all of its weights are zero."
-        )
-        warn(msg)
-        return(NULL)
+        ))
+        return(TRUE)
     }
     if (is_in(token, names(.twasFineMappingMethodAdapters))) {
-        # No handoff above means this tuple's fine-mapping entry carries no
-        # CV, and nothing here fine-maps -- so the fold fits cannot be
-        # recovered. Refusing beats refitting behind the user's back.
-        msg <- glue(
+        # No handoff means this tuple's fine-mapping entry carries no CV, and
+        # nothing here fine-maps -- so the fold fits cannot be recovered.
+        # Refusing beats refitting behind the user's back.
+        abort(glue(
             "twasWeightsPipeline: cross-validating method '{token}' needs ",
             "each fold's own fine-mapping fit, and the supplied ",
             "fineMappingResult has no cross-validation for this ",
             "(study, context, trait). Run fineMappingPipeline() with ",
             "cvFolds > 1."
-        )
-        abort(msg)
+        ))
     }
-    .jointTwasLeakageWarn(args, ma)
-    verbose <- if (is.null(cfg$verbose)) 1 else cfg$verbose
-    sp <- if (!is.null(args$samplePartition)) {
-        args$samplePartition
-    } else {
-        cfg$samplePartition
-    }
-    mcv <- if (is.null(cfg$maxCvVariants) || cfg$maxCvVariants <= 0) {
+    FALSE
+}
+
+# twasWeightsCv() over this cell, with the CV settings resolved from the
+# per-call args first and the pipeline config as the fallback.
+# @noRd
+.jointTwasRunCv <- function(Xc, Yc, wm, args, cfg, cvFolds) {
+    cv <- cfg$crossValidationArgs %||% list()
+    maxCv <- if ((cv$maxVariants %||% -1) <= 0) {
         Inf
     } else {
-        cfg$maxCvVariants
+        cv$maxVariants
     }
-    cv <- twasWeightsCv(
+    twasWeightsCv(
         Xc,
         Yc,
         fold = cvFolds,
-        samplePartitions = sp,
+        samplePartitions = args$samplePartition %||% cv$samplePartition,
         weightMethods = wm,
-        retainFits = TRUE,
-        maxNumVariants = mcv,
-        numThreads = if (is.null(cfg$cvThreads)) 1 else cfg$cvThreads,
+        fitRetention = "slim",
+        maxNumVariants = maxCv,
+        numThreads = cfg$crossValidationArgs$threads %||% 1,
         dataDrivenPriorMatricesCv = args$dataDrivenPriorMatricesCv,
-        verbose = verbose,
+        verbose = cfg$verbose %||% 1,
         seed = cfg$seed
     )
-    .jointTwasCvResult(cv, token)
+}
+
+.jointTwasCv <- function(Xc, Yc, wm, ma, W, args, cfg, token) {
+    cv <- cfg$crossValidationArgs %||% list()
+    cvFolds <- cv$folds %||% 0L
+    if (cvFolds <= 1L) {
+        return(NULL)
+    }
+    # A fine-mapping handoff already carries this token's per-fold fits.
+    cvRes <- .twasFmHandoffCv(args$fineMappingCv, token)
+    if (!is.null(cvRes)) {
+        return(cvRes)
+    }
+    if (.jointTwasCvBlocked(W, cfg, token)) {
+        return(NULL)
+    }
+    .jointTwasLeakageWarn(args, ma)
+    .jointTwasCvResult(
+        .jointTwasRunCv(Xc, Yc, wm, args, cfg, cvFolds),
+        token
+    )
 }
 
 # One per-condition TwasWeightsRow (empty when there are no full-data weights,
@@ -1050,12 +1079,10 @@ setMethod(
     signature("SumStatsJointGroup", "TwasJointPipeline"),
     function(group, pipeline, token, args) {
         cfg <- .jpConfig(pipeline)
-        rfd <- if (is.null(cfg$retainFitDetail)) "slim" else cfg$retainFitDetail
         weights <- mrmashRssWeights(
             stat = list(z = .jgZ(group), n = .jgN(group)),
             LD = .jgLdMatrix(group),
-            retainFit = TRUE,
-            fitDetail = rfd
+            fitRetention = .jointRetentionLevel(cfg)
         )
         vids <- rownames(weights) %||% rownames(.jgZ(group))
         fitParts <- attr(weights, "fit")
@@ -1103,7 +1130,7 @@ setMethod(
     .rbindCollections(parts, ldSketch = ldSketch)
 }
 
-setMethod("construct", "FmJointPipeline", function(pipeline, records, ...) {
+setMethod("construct", "FmJointPipeline", function(pipeline, records) {
     .buildJointResult(
         QtlFineMappingResult,
         records,
@@ -1111,7 +1138,7 @@ setMethod("construct", "FmJointPipeline", function(pipeline, records, ...) {
     )
 })
 
-setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
+setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     .buildJointResult(TwasWeights, records, .jpConfig(pipeline)$ldSketch)
 })
 
@@ -1158,7 +1185,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         args$cisWindow,
         verbose,
         label = "jointCrossContext",
-        region = args$region
+        region = args$region,
+        residualizationArgs = args$residualizationArgs
     )
     if (is.null(xy)) {
         return(NULL)
@@ -1310,7 +1338,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         verbose,
         label = "jointCrossTrait",
         study = study,
-        region = args$region
+        region = args$region,
+        residualizationArgs = args$residualizationArgs
     )
     if (is.null(xy)) {
         return(NULL)
@@ -1539,7 +1568,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         args$cisWindow,
         verbose,
         label = "composed",
-        region = args$region
+        region = args$region,
+        residualizationArgs = args$residualizationArgs
     )
     if (is.null(xy)) {
         return(list())
@@ -1600,17 +1630,24 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         data,
         contexts = cx,
         traitId = tid,
-        naAction = naAction
+        naAction = naAction,
+        residualizationArgs = args$residualizationArgs
     )
     X <- if (is.null(args$region)) {
         .fmResidGeno(
             data,
             contexts = cx,
             traitId = tid,
-            cisWindow = args$cisWindow
+            cisWindow = args$cisWindow,
+            residualizationArgs = args$residualizationArgs
         )
     } else {
-        .fmResidGeno(data, contexts = cx, region = args$region)
+        .fmResidGeno(
+            data,
+            contexts = cx,
+            region = args$region,
+            residualizationArgs = args$residualizationArgs
+        )
     }
     common <- intersect(rownames(X), rownames(Y))
     if (length(common) < 2L) {
@@ -1688,7 +1725,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     cfg <- .jpConfig(pipeline)
     cond <- .jgConditions(g)
     out <- list_assign(args, !!!.twasGroupFmArgs(args, cond))
-    cvF <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
+    cv <- cfg$crossValidationArgs %||% list()
+    cvF <- cv$folds %||% 0L
     if (cvF <= 1L || !is(g, "IndividualJointGroup")) {
         return(out)
     }
@@ -1696,7 +1734,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         out,
         samplePartition = .jointCvPartition(
             fmCv = out$fineMappingCv,
-            userSp = args$samplePartition %||% cfg$samplePartition,
+            userSp = args$samplePartition %||% cv$samplePartition,
             sampleIds = rownames(.jgX(g)),
             cvFolds = cvF
         )
@@ -1794,7 +1832,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # + trait position. `grp` bundles the per-group invariants list(cond, js, jc,
 # jt).
 # @noRd
-.jointEntryRecords <- function(entries, method, grp, data, cisWindow) {
+.jointEntryRecords <- function(entries, method, grp, data) {
     cond <- grp$cond
     recs <- map(
         seq_len(min(length(entries), nrow(cond))),
@@ -1803,8 +1841,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         cond = cond,
         method = method,
         grp = grp,
-        data = data,
-        cisWindow = cisWindow
+        data = data
     )
     compact(recs)
 }
@@ -1823,7 +1860,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         return(NULL)
     }
     doEnsemble <- is(pipeline, "TwasJointPipeline") &&
-        isTRUE(.jpConfig(pipeline)$ensemble)
+        isTRUE(.jpConfig(pipeline)$ensembleArgs$enabled)
     records <- list_flatten(map(
         groups,
         .jointCellGroup,
@@ -1868,8 +1905,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         .jointTokenRecords,
         perTokenEntries = perTokenEntries,
         grp = grp,
-        data = data,
-        cisWindow = args$cisWindow
+        data = data
     ))
     if (!doEnsemble || length(perTokenEntries) < 2L) {
         return(tokenRecords)
@@ -1880,8 +1916,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             .twasEnsembleLayer(g, perTokenEntries, .jpConfig(pipeline)),
             "ensemble",
             grp,
-            data,
-            args$cisWindow
+            data
         )
     )
 }
@@ -1904,8 +1939,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 }
 
 # @noRd
-.jointTokenRecords <- function(token, perTokenEntries, grp, data, cisWindow) {
-    .jointEntryRecords(perTokenEntries[[token]], token, grp, data, cisWindow)
+.jointTokenRecords <- function(token, perTokenEntries, grp, data) {
+    .jointEntryRecords(perTokenEntries[[token]], token, grp, data)
 }
 
 # Entries for one token on one group: reuse the resume cache when it fully
@@ -1953,17 +1988,17 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 .twasEnsembleLayer <- function(group, perTokenEntries, cfg) {
     tokens <- names(perTokenEntries)
     Y <- .jgY(group)
-    r2Cut <- if (is.null(cfg$ensembleR2Threshold)) {
+    r2Cut <- if (is.null(cfg$ensembleArgs$r2Threshold)) {
         0.01
     } else {
-        cfg$ensembleR2Threshold
+        cfg$ensembleArgs$r2Threshold
     }
-    solver <- if (is.null(cfg$ensembleSolver)) {
+    solver <- if (is.null(cfg$ensembleArgs$solver)) {
         "quadprog"
     } else {
-        cfg$ensembleSolver
+        cfg$ensembleArgs$solver
     }
-    alpha <- if (is.null(cfg$ensembleAlpha)) 1 else cfg$ensembleAlpha
+    alpha <- if (is.null(cfg$ensembleArgs$alpha)) 1 else cfg$ensembleArgs$alpha
     stdz <- cfg$standardized %||% FALSE
     map(
         seq_len(nrow(.jgConditions(group))),
@@ -2090,6 +2125,93 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     )
 }
 
+# Top-PC enumeration: PCA-reduce each context's multi-trait phenotype and make
+# ONE group per top principal component, each a single-column Y named topPCk.
+# Structurally identical to .enumUnivariateIndividual -- same residualization
+# helpers, same IndividualJointGroup -- so everything downstream (CV,
+# ensemble, retention) applies unchanged. It is the TWAS peer of
+# fineMappingPipeline's .fmPcaContextRows, sharing .fmTopPcScores().
+# @noRd
+.enumTopPcIndividual <- function(data, scope, args = list()) {
+    study <- getStudy(data)
+    if (!is_in(study, scope$studies)) {
+        return(list())
+    }
+    naAction <- if (is.null(args$naAction)) "drop" else args$naAction
+    .jeConcat(map(
+        scope$contexts[[study]],
+        .enumTopPcForContext,
+        data = data,
+        scope = scope,
+        args = args,
+        study = study,
+        naAction = naAction
+    ))
+}
+
+# @noRd
+.enumTopPcForContext <- function(cx, data, scope, args, study, naAction) {
+    se <- getPhenotypes(data, contexts = cx)
+    traits <- intersect(scope$traits[[study]], rownames(se))
+    # PCA is undefined for a single trait, matching the fine-mapping rule.
+    if (length(traits) < 2L) {
+        return(list())
+    }
+    Y <- .fmResidPheno(
+        data,
+        contexts = cx,
+        traitId = traits,
+        naAction = naAction,
+        residualizationArgs = args$residualizationArgs
+    )
+    scores <- .fmTopPcScores(Y, args$nPCs %||% 10L)
+    if (is.null(scores)) {
+        return(list())
+    }
+    X <- .enumTopPcX(data, cx, traits, args)
+    common <- intersect(rownames(X), rownames(scores))
+    if (length(common) < 2L) {
+        return(list())
+    }
+    compact(map(
+        colnames(scores),
+        .enumTopPcGroup,
+        X = X[common, , drop = FALSE],
+        scores = scores[common, , drop = FALSE],
+        study = study,
+        cx = cx
+    ))
+}
+
+# @noRd
+.enumTopPcX <- function(data, cx, traits, args) {
+    if (is.null(args$region)) {
+        return(.fmResidGeno(
+            data,
+            contexts = cx,
+            traitId = traits,
+            cisWindow = args$cisWindow,
+            residualizationArgs = args$residualizationArgs
+        ))
+    }
+    .fmResidGeno(
+        data,
+        contexts = cx,
+        region = args$region,
+        residualizationArgs = args$residualizationArgs
+    )
+}
+
+# @noRd
+.enumTopPcGroup <- function(pcName, X, scores, study, cx) {
+    new(
+        "IndividualJointGroup",
+        conditions = tibble(study = study, context = cx, trait = pcName),
+        X = X,
+        Y = scores[, pcName, drop = FALSE]
+    )
+}
+
 # ---- wiring table -----------------------------------------------------------
 # Valid cells are rows; invalid cells are absences (a lookup miss is the error).
 .jointDispatchTable <- list(
@@ -2151,6 +2273,13 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         pattern = "univariate",
         dataForm = "individual",
         enumerate = .enumUnivariateIndividual,
+        minGroup = 1L
+    ),
+    new(
+        "JointDispatchCell",
+        pattern = "topPc",
+        dataForm = "individual",
+        enumerate = .enumTopPcIndividual,
         minGroup = 1L
     )
 )
@@ -2398,15 +2527,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # fine-mapping window is NOT recorded: the element's own span is the region
 # (section 4.4), and a stored window would go stale under subsetRegion().
 # @noRd
-.jointEntryRecordAt <- function(
-    i,
-    entries,
-    cond,
-    method,
-    grp,
-    data,
-    cisWindow
-) {
+.jointEntryRecordAt <- function(i, entries, cond, method, grp, data) {
     e <- entries[[i]]
     if (is.null(e)) {
         return(NULL)

@@ -4,7 +4,14 @@
 \alias{getSumStats,GwasSumStats-method}
 \title{Get a GWAS Study's Summary-Statistic GRanges}
 \usage{
-\S4method{getSumStats}{GwasSumStats}(x, study = NULL, ranges = NULL, ...)
+\S4method{getSumStats}{GwasSumStats}(
+  x,
+  study = NULL,
+  ranges = NULL,
+  context = NULL,
+  trait = NULL,
+  annotateSignificance = NULL
+)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} object.}
@@ -15,7 +22,10 @@ collection has a single row.}
 \item{ranges}{Optional \code{GRanges} restricting the returned variants to
 those it overlaps. \code{NULL} (default) returns the study's full set.}
 
-\item{...}{Additional arguments (currently unused).}
+\item{context, trait, annotateSignificance}{QTL-only selectors, named here so
+that supplying one is an error rather than a silently ignored request. A
+GWAS has no context or trait axis and carries no significance annotation;
+leave them \code{NULL}.}
 }
 \value{
 A \code{GRanges} object.

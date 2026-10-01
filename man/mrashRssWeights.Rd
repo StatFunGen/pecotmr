@@ -12,7 +12,7 @@ mrashRssWeights(
   s0,
   w0,
   z = numeric(0),
-  methodArgs = list()
+  methodArgs = mrashConfig()
 )
 }
 \arguments{
@@ -35,8 +35,10 @@ grid).}
 \item{z}{Optional numeric vector of z-scores; defaults to \code{numeric(0)}
 (derived from \code{stat}).}
 
-\item{methodArgs}{Optional named list of options forwarded to
-\code{mr.ash.rss}.}
+\item{methodArgs}{Options forwarded to \code{susieR::mr.ash.rss}, built
+with \code{\link{mrashConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of the posterior mean of the coefficients.

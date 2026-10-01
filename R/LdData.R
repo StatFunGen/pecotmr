@@ -323,7 +323,7 @@ setMethod("getCorrelation", "LdData", function(x) {
 
 #' @rdname getGenotypes
 #' @export
-setMethod("getGenotypes", "LdData", function(x, ...) {
+setMethod("getGenotypes", "LdData", function(x) {
     if (is.null(x@genotypeHandle)) {
         return(NULL)
     }
@@ -343,7 +343,7 @@ setMethod("hasGenotypes", "LdData", function(x) {
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "LdData", function(x, ...) {
+setMethod("getVariantIds", "LdData", function(x) {
     mcols(x)$variant_id
 })
 

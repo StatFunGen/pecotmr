@@ -279,9 +279,20 @@ test_that("GwasSumStats() attaches extra per-study columns via ...", {
         entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
         genome = "hg19",
         ldSketch = .sh_makeGenotypeHandle(),
-        cohort = c("UKB", "FinnGen")
+        extraCols = list(cohort = c("UKB", "FinnGen"))
     )
     expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
+    # Not variadic: the base class's GRangesList(...) means ELEMENTS,
+    # so a bare `cohort =` here would read as adding an entry.
+    expect_error(
+        GwasSumStats(
+            study = "g1",
+            entry = list(),
+            genome = "hg19",
+            cohort = "UKB"
+        ),
+        "unused argument"
+    )
 })
 
 test_that("getSumStats() errors on an empty GwasSumStats", {
@@ -621,4 +632,26 @@ test_that("combineGwasSumStats() validates its inputs", {
         combineGwasSumStats(makeGwasBlock("chr1_1_1000", 100L), 1L),
         "every input must be a GwasSumStats"
     )
+})
+
+test_that("getSumStats(GwasSumStats) refuses the QtlSumStats selectors", {
+    # The shared SumStatsBase accessors pass the union of both classes'
+    # selectors, so a GWAS sees context / trait / annotateSignificance. It
+    # names them in order to reject them, rather than absorbing them in `...`.
+    gss <- GwasSumStats(
+        study = "g1",
+        entry = list(.gss_entry()),
+        genome = "hg19"
+    )
+    expect_error(getSumStats(gss, context = "brain"), "QtlSumStats selector")
+    expect_error(getSumStats(gss, trait = "G1"), "QtlSumStats selector")
+    expect_error(
+        getSumStats(gss, annotateSignificance = "qvalue"),
+        "QtlSumStats selector"
+    )
+    # and the same through an accessor that forwards them
+    expect_error(getZ(gss, context = "brain"), "QtlSumStats selector")
+    # the supported selectors still work
+    expect_s4_class(getSumStats(gss), "GRanges")
+    expect_type(getZ(gss), "double")
 })

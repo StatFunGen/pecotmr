@@ -7,14 +7,10 @@
 qtlEnrichmentPipeline(
   gwasFineMappingResult,
   qtlFineMappingResult,
-  numGwas = NULL,
-  piQtl = NULL,
-  lambda = 1,
-  impN = 25,
+  methodArgs = qtlEnrichmentConfig(),
   numThreads = 1L,
   seed = NULL,
-  verbose = TRUE,
-  enrichmentArgs = list()
+  verbose = TRUE
 )
 }
 \arguments{
@@ -22,18 +18,11 @@ qtlEnrichmentPipeline(
 
 \item{qtlFineMappingResult}{The annotation side; see above.}
 
-\item{numGwas}{Number of GWAS variants used to estimate \code{piGwas}. When
-\code{NULL} (default) it is estimated from the data -- bias warning applies
-if the input PIP vector is not genome-wide.}
-
-\item{piQtl}{Per-variant prior of being a QTL causal variant. \code{NULL}
-(default) estimates from the data.}
-
-\item{lambda}{Shrinkage parameter for the enrichment estimator. Default
-\code{1.0}.}
-
-\item{impN}{Number of imputed samples used by the estimator. Default
-\code{25}.}
+\item{methodArgs}{The estimator's algorithmic settings, built with
+\code{\link{qtlEnrichmentConfig}}: \code{numGwas}, \code{piQtl},
+\code{lambda}, \code{impN}, \code{doubleShrinkage} and
+\code{besselCorrection}. A bare list is refused, since it cannot be
+checked.}
 
 \item{numThreads}{Number of threads used by \code{qtlEnrichment}. Default
 \code{1}.}
@@ -43,9 +32,6 @@ if the input PIP vector is not genome-wide.}
 \code{NULL} (default) draws a nondeterministic seed.}
 
 \item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
-
-\item{enrichmentArgs}{Optional named list of options forwarded to
-\code{\link{qtlEnrichment}}.}
 }
 \value{
 A tibble with one row per (outcome trait, annotation unit) pair.
@@ -59,15 +45,17 @@ A tibble with one row per (outcome trait, annotation unit) pair.
   The estimates are \code{enrichmentLogOdds}, the enrichment parameter
   \eqn{a_1} on the log-odds scale, with its standard error
   \code{enrichmentSe}; \code{enrichment} is the same quantity as a
-  multiplicative factor, \eqn{e^{a_1} - 1}, which is what
-  \code{colocPipeline} scales \code{p12} by (so \eqn{a_1 = 0} leaves the
-  prior untouched). \code{enrichmentLogOddsNoShrinkage} and
+  multiplicative factor, \eqn{e^{a_1} - 1}, reported for interpretation
+  (so \eqn{a_1 = 0} means no enrichment).
+  \code{enrichmentLogOddsNoShrinkage} and
   \code{enrichmentSeNoShrinkage} are the same estimate before shrinkage,
   \code{intercept} / \code{interceptSe} are \eqn{a_0}, and \code{colocP1},
-  \code{colocP2}, \code{colocP12} are the enrichment-informed coloc priors
-  the estimator derives from \eqn{(a_0, a_1)} -- an alternative to scaling
-  a baseline \code{p12}. \code{effectiveMiRounds} is how many
-  multiple-imputation rounds survived outlier filtering.
+  \code{colocP2}, \code{colocP12} are the enrichment-informed priors the
+  estimator derives from \eqn{(a_0, a_1)} exactly as fastenloc's
+  \code{set_enrich_params} does; those three are what
+  \code{\link{colocPipeline}} scores with when given this table.
+  \code{effectiveMiRounds} is how many multiple-imputation rounds survived
+  outlier filtering.
 }
 \description{
 Genome-wide pipeline that computes per-pair enrichment

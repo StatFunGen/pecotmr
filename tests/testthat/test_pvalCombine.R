@@ -589,3 +589,146 @@ test_that("pvalCombine: argument guards fire", {
         "naRm.*May not be NA"
     )
 })
+
+test_that("the p-value constructors refuse the arguments pecotmr owns", {
+    expect_error(gbjConfig(test_stats = 1), "the caller's `zScores`")
+    expect_error(gbjConfig(cor_mat = diag(2)), "the caller's `R`")
+    expect_error(gbjOmniConfig(test_stats = 1), "the caller's `zScores`")
+    expect_error(aspuConfig(Zs = 1), "the caller's `zScores`")
+    expect_error(aspuConfig(corSNP = diag(2)), "the caller's `R`")
+    expect_error(poolrConfig(p = 0.1), "the caller's `pvals`")
+    expect_error(poolrConfig(R = diag(2)), "the caller's `R`")
+})
+
+test_that("the p-value constructors check what their engines accept", {
+    expect_error(gbjConfig(nosuch = 1), "unknown argument")
+    expect_error(gbjOmniConfig(pairwise_cors = 1), "unknown argument")
+    expect_error(aspuConfig(nosuch = 1), "unknown argument")
+    # poolr's tests all end in `...`, so no name can be rejected.
+    expect_s4_class(poolrConfig(nosuch = 1), "MethodConfig")
+    # The adjustment pecotmr has always used stays the default.
+    expect_equal(poolrConfig()$adjust, "generalized")
+    expect_equal(poolrConfig(adjust = "empirical")$adjust, "empirical")
+})
+
+test_that("pvalMethodsConfig pairs each method with its own constructor", {
+    rec <- pvalMethodsConfig(
+        aspu = aspuConfig(n.perm = 100),
+        gbj = gbjConfig(pairwise_cors = 0.1),
+        fisher = list(side = 1)
+    )
+    expect_setequal(names(rec), c("aspu", "gbj", "fisher"))
+    # A plain list is routed through that method's constructor, so it picks
+    # up the pecotmr default the constructor carries.
+    expect_equal(rec$fisher$adjust, "generalized")
+    expect_error(
+        pvalMethodsConfig(gbj = aspuConfig()),
+        "was built with the constructor for 'aspu'"
+    )
+    # The five GBJ tests share one engine, so one constructor serves them all.
+    expect_s4_class(pvalMethodsConfig(minp = gbjConfig()), "MethodConfig")
+    # Methods with nothing to configure are not valid keys.
+    expect_error(pvalMethodsConfig(acat = list()), "unknown method\\(s\\) acat")
+    expect_error(
+        pvalMethodsConfig(gates = list()),
+        "unknown method\\(s\\) gates"
+    )
+})
+
+test_that("combinePValues refuses options for a method it will not run", {
+    expect_error(
+        combinePValues(
+            pvals = c(0.01, 0.2, 0.5),
+            methods = "fisher",
+            R = diag(3),
+            methodArgs = pvalMethodsConfig(stouffer = poolrConfig(side = 1))
+        ),
+        "configures stouffer, which `methods` does not request"
+    )
+    expect_error(
+        combinePValues(
+            pvals = c(0.01, 0.2),
+            methods = "acat",
+            methodArgs = list(fisher = list())
+        ),
+        "pvalMethodsConfig"
+    )
+})
+
+test_that("combinePValues forwards each method's options to its engine", {
+    skip_if_not_installed("poolr")
+    seen <- NULL
+    real <- poolr::stouffer
+    with_mocked_bindings(
+        combinePValues(
+            pvals = c(0.01, 0.2, 0.5),
+            methods = "stouffer",
+            R = diag(3),
+            methodArgs = pvalMethodsConfig(
+                stouffer = poolrConfig(adjust = "empirical", size = 1000)
+            )
+        ),
+        stouffer = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "poolr"
+    )
+    expect_equal(seen$adjust, "empirical")
+    expect_equal(seen$size, 1000)
+})
+
+test_that("an unconfigured method still gets its constructor's defaults", {
+    skip_if_not_installed("poolr")
+    seen <- NULL
+    real <- poolr::fisher
+    with_mocked_bindings(
+        combinePValues(
+            pvals = c(0.01, 0.2, 0.5),
+            methods = "fisher",
+            R = diag(3)
+        ),
+        fisher = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "poolr"
+    )
+    # The adjustment pecotmr hard-coded before `methodArgs` existed.
+    expect_equal(seen$adjust, "generalized")
+})
+
+test_that("combinePValues forwards GBJ and aSPU options", {
+    skip_if_not_installed("GBJ")
+    skip_if_not_installed("aSPU")
+    gbjSeen <- NULL
+    aspuSeen <- NULL
+    realGbj <- GBJ::GBJ
+    realAspu <- aSPU::aSPUs
+    z <- c(2.5, -0.3, 1.1)
+    suppressWarnings(with_mocked_bindings(
+        with_mocked_bindings(
+            combinePValues(
+                zScores = z,
+                methods = c("gbj", "aspu"),
+                R = diag(3),
+                methodArgs = pvalMethodsConfig(
+                    gbj = gbjConfig(pairwise_cors = rep(0, 3)),
+                    aspu = aspuConfig(n.perm = 200)
+                )
+            ),
+            aSPUs = function(...) {
+                aspuSeen <<- list(...)
+                realAspu(...)
+            },
+            .package = "aSPU"
+        ),
+        GBJ = function(...) {
+            gbjSeen <<- list(...)
+            realGbj(...)
+        },
+        .package = "GBJ"
+    ))
+    expect_equal(gbjSeen$pairwise_cors, rep(0, 3))
+    expect_equal(aspuSeen$n.perm, 200)
+})

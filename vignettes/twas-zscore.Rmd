@@ -47,13 +47,13 @@ library(pecotmr)
 data(qtlDatasetExample, gwasSumStatsS4Example)
 
 # Pre-compute the QTL-side products from the bundled QtlDataset.
-# cvFolds carries the per-fold susie fits through to the weights pipeline,
+# crossValidation carries the per-fold susie fits to the weights pipeline,
 # which never fine-maps for itself.
 fmr <- fineMappingPipeline(
     qtlDatasetExample,
     methods = "susie",
     cisWindow = 1e6,
-    cvFolds = 3
+    crossValidationArgs = crossValidationConfig(folds = 3)
 )
 tw <- twasWeightsPipeline(
     qtlDatasetExample,
@@ -89,8 +89,7 @@ res2 <- causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
-    mrMethod = "ivwPerVariant",
-    mrPipCutoff = 0.5
+    mrArgs = mrConfig(method = "ivwPerVariant", pipCutoff = 0.5)
 )
 S4Vectors::mcols(res2)[, c(
     "twasZ",
@@ -104,18 +103,17 @@ S4Vectors::mcols(res2)[, c(
 
 ## MR variants: per-variant vs CS-aware IVW
 
-| `mrMethod` | What it does | Extra filters |
+| `mrConfig(method=)` | What it does | Extra filters |
 |---|---|---|
-| `"ivwPerVariant"` (default) | Treats every `topLoci` variant with `pip > mrPipCutoff` as an IV; pools their Wald ratios via inverse-variance weighting. | `mrPipCutoff` |
-| `"csAware"` | Groups variants by credible set (column `cs` in `topLoci`), forms a PIP-weighted composite Wald ratio per CS (subject to per-CS cumulative-PIP cutoff `mrCpipCutoff`), then IVW-pools across CSs. Reports Cochran's Q and I-squared. | `mrCpipCutoff` |
+| `"ivwPerVariant"` (default) | Treats every `topLoci` variant with `pip > pipCutoff` as an IV; pools their Wald ratios via inverse-variance weighting. | `pipCutoff` |
+| `"csAware"` | Groups variants by credible set (column `cs` in `topLoci`), forms a PIP-weighted composite Wald ratio per CS (subject to per-CS cumulative-PIP cutoff `cpipCutoff`), then IVW-pools across CSs. Reports Cochran's Q and I-squared. | `cpipCutoff` |
 
 ```{r ci-csaware, eval=FALSE}
 causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
-    mrMethod = "csAware",
-    mrCpipCutoff = 0.5
+    mrArgs = mrConfig(method = "csAware", cpipCutoff = 0.5)
 )
 ```
 
@@ -170,9 +168,10 @@ causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
-    mrPipCutoff = 0.5, # ivwPerVariant
-    mrMethod = "ivwPerVariant",
-    mrCpipCutoff = 0.5, # csAware
+    mrArgs = mrConfig(
+        method = "ivwPerVariant",
+        pipCutoff = 0.5 # cpipCutoff instead, for method = "csAware"
+    ),
     combineMethods = NULL
 ) # e.g. c("acat", "hmp")
 ```

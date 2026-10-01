@@ -99,7 +99,10 @@ gwasSumStats <- loadGwasSumStatsFromManifest(
     region = "chr22:10000000-19000000",
     ldBlocks = blocks
 )
-gwasByRegion <- summaryStatsQc(gwasSumStats, mafCutoff = 0.0025)
+gwasByRegion <- summaryStatsQc(
+    gwasSumStats,
+    panelFilterArgs = panelFilterConfig(mafCutoff = 0.0025)
+)
 
 data(ctwasWeightsExample)
 ```
@@ -110,11 +113,13 @@ data(ctwasWeightsExample)
 res <- ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    thin = 1,
-    niterPrefit = 3,
-    niter = 10,
-    fallbackToPrefit = TRUE,
-    ctwasArgs = list(
+    ctwasPriorArgs = ctwasPriorConfig(
+        thin = 1,
+        niterPrefit = 3,
+        niter = 10,
+        fallbackToPrefit = TRUE
+    ),
+    methodArgs = ctwasConfig(
         min_group_size = 1,
         min_p_single_effect = 0,
         min_nonSNP_PIP = 0
@@ -158,13 +163,13 @@ scales with them. Four arguments trim each gene before cTWAS sees it:
 
 | Argument | Effect |
 |---|---|
-| `twasWeightCutoff` | drop variants with `abs(weight)` below the cutoff |
-| `maxNumVariants` | cap variants per gene |
+| `weightCutoff` | drop variants with `abs(weight)` below the cutoff |
+| `maxVariants` | cap variants per gene |
 | `csMinCor` | keep variants in a credible set with purity at least this |
-| `minPipCutoff` | keep variants with PIP above this |
+| `pipRescue` | keep variants with PIP above this |
 
-`csMinCor` and `minPipCutoff` mark variants as must-keep, so they survive
-the `maxNumVariants` cap. Both need a `fineMappingResult`; without one they
+`csMinCor` and `pipRescue` mark variants as must-keep, so they survive
+the `maxVariants` cap. Both need a `fineMappingResult`; without one they
 are no-ops and the cap falls back to ordering by `abs(weight)`.
 
 ```{r ctwas-filters, eval=FALSE}
@@ -172,10 +177,12 @@ ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
     fineMappingResult = fmr,
-    twasWeightCutoff = 1e-4,
-    maxNumVariants = 1000,
-    csMinCor = 0.8,
-    minPipCutoff = 0.1
+    variantPruningArgs = variantPruningConfig(
+        weightCutoff = 1e-4,
+        maxVariants = 1000,
+        csMinCor = 0.8,
+        pipRescue = 0.1
+    )
 )
 ```
 
@@ -238,13 +245,15 @@ inputs <- assembleCtwasInputs(
 )
 est <- estCtwasParam(
     inputs,
-    thin = 1,
-    niterPrefit = 3,
-    niter = 10,
-    fallbackToPrefit = TRUE,
-    ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0)
+    ctwasPriorArgs = ctwasPriorConfig(
+        thin = 1,
+        niterPrefit = 3,
+        niter = 10,
+        fallbackToPrefit = TRUE
+    ),
+    methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0)
 )
-screened <- screenCtwasRegions(est, ctwasArgs = list(min_nonSNP_PIP = 0))
+screened <- screenCtwasRegions(est, methodArgs = ctwasConfig(min_nonSNP_PIP = 0))
 finemapped <- finemapCtwasRegions(screened)
 nrow(finemapped$finemap_res)
 ```
@@ -286,7 +295,8 @@ merged <- mergeCtwasBoundaryRegions(
 )
 ```
 
-`ctwasPipeline(mergeBoundary = TRUE)` does the same thing inline, with
+`ctwasPipeline(boundaryMergeArgs = boundaryMergeConfig(enabled = TRUE))` does
+the same thing inline, with
 `mergePipThresh` / `mergeFilterCs` / `mergeMaxSNP` forwarding to those
 arguments. It is off by default because it only matters when a
 high-PIP gene actually straddles a boundary.
@@ -298,15 +308,18 @@ ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
     method = NULL, # NULL: "ensemble" if present, else every method
-    thin = 0.1,
-    niterPrefit = 3,
-    niter = 30,
     L = 5,
-    groupPriorVarStructure = "shared_type",
     ncore = 1,
     keepSnps = FALSE,
-    mergeBoundary = FALSE,
-    fallbackToPrefit = FALSE
+    ctwasPriorArgs = ctwasPriorConfig(
+        thin = 0.1,
+        niterPrefit = 3,
+        niter = 30,
+        varStructure = "shared_type",
+        fallbackToPrefit = FALSE
+    ),
+    variantPruningArgs = variantPruningConfig(),
+    boundaryMergeArgs = boundaryMergeConfig(enabled = FALSE)
 )
 ```
 

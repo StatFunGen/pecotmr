@@ -7,7 +7,7 @@
 \usage{
 getQcDiagnostics(x, entry = 1L, ...)
 
-\S4method{getQcDiagnostics}{SumStatsBase}(x, entry = 1L, ...)
+\S4method{getQcDiagnostics}{SumStatsBase}(x, entry = 1L)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}
@@ -27,7 +27,8 @@ A \code{data.frame} of per-variant diagnostics (columns include
 \description{
 Return the per-variant LD-mismatch diagnostics table (SLALOM or
   DENTIST output) attached to a sumstats entry by
-  \code{\link{summaryStatsQc}} when \code{zMismatchQc} was not \code{"none"}.
+  \code{\link{summaryStatsQc}} when \code{ldMismatchQcMethod} was not
+  \code{"none"}.
   Convenience accessor over
   \code{getQcInfo(x)$entryAudit[[entry]]$ldMismatchDiagnostics}.
 }

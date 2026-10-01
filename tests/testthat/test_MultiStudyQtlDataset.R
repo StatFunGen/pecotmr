@@ -154,7 +154,8 @@ test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
     # Bare call returns the embedded QtlSumStats collection ...
     expect_s4_class(getSumStats(mt), "QtlSumStats")
     # ... but any selection argument is rejected.
-    expect_error(getSumStats(mt, study = "s1"), "does not accept selection")
+    # Taking no extra formals is the rejection: R names the argument.
+    expect_error(getSumStats(mt, study = "s1"), "unused argument")
 })
 
 

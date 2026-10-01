@@ -140,8 +140,8 @@ setClass(
 
 # ---- Pipeline markers -------------------------------------------------------
 # Not empty: the `config` list carries the per-pipeline parameter tail
-# (coverage/cvFolds/samplePartition/fitFullData/retainFit/... for fm;
-# retainFit/retainFitDetail/cvFolds/... for twas), and dispatch on the concrete
+# (coverage/cvFolds/samplePartition/fitFullData/fitRetention/... for fm;
+# fitRetention/cvFolds/... for twas), and dispatch on the concrete
 # class selects the result type via `construct()`.
 setClass("JointPipeline", contains = "VIRTUAL", representation(config = "list"))
 

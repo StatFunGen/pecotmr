@@ -54,7 +54,7 @@ test_that("mrashRssWeights forwards arguments to susieR::mr.ash.rss", {
         s0 = c(0, 0.1, 0.2),
         w0 = c(0.5, 0.3, 0.2),
         z = z_vec,
-        methodArgs = list(tol = 1e-6)
+        methodArgs = mrashConfig(tol = 1e-6)
     )
     expect_equal(captured$bhat, bhat)
     expect_equal(captured$shat, shat)

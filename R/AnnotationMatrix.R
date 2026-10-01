@@ -94,7 +94,7 @@ setMethod("show", "AnnotationMatrix", function(object) {
 
 #' @rdname getGenome
 #' @export
-setMethod("getGenome", "AnnotationMatrix", function(x, ...) {
+setMethod("getGenome", "AnnotationMatrix", function(x) {
     build <- discard(
         unique(GenomeInfoDb::genome(SummarizedExperiment::rowRanges(x))),
         is.na

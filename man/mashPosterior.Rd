@@ -11,7 +11,9 @@ mashPosterior(
   vhat = NULL,
   excludeCondition = character(0),
   outputPosteriorCov = TRUE,
-  inputScale = c("auto", "beta", "z")
+  inputScale = c("auto", "beta", "z"),
+  mashDataArgs = mashDataConfig(),
+  posteriorArgs = mashPosteriorConfig()
 )
 }
 \arguments{
@@ -35,6 +37,20 @@ none.}
 by \code{\link{fitMashContrast}}). Default \code{TRUE}.}
 
 \item{inputScale}{SumStats -> matrix conversion scale.}
+
+\item{mashDataArgs}{Extra arguments for
+\code{mashr::mash_set_data()}, built with
+\code{\link{mashDataConfig}} -- for example
+\code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+\code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+are refused by the constructor.}
+
+\item{posteriorArgs}{Extra arguments for
+\code{mashr::mash_compute_posterior_matrices()}, built with
+\code{\link{mashPosteriorConfig}} -- for example
+\code{algorithm.version}. \code{g}, \code{data}, \code{A},
+\code{output_posterior_cov} and \code{seed} are owned by pecotmr
+and are refused by the constructor.}
 }
 \value{
 The \code{mashr::mash_compute_posterior_matrices()} result: a list of

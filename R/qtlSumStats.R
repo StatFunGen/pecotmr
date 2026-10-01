@@ -121,7 +121,11 @@ NULL
 #'   \code{getNSamples()} (the LD-panel sample size). Unlike GWAS, QTL
 #'   collections carry no case/control counts (molecular traits are
 #'   quantitative), so only this total-N fallback is exposed.
-#' @param ... Additional per-tuple columns to attach to the collection.
+#' @param extraCols Optional named list of additional per-tuple columns to
+#'   attach to the collection's \code{mcols}. Named rather than variadic
+#'   because the base class's own constructor, \code{GRangesList(...)}, uses
+#'   \code{...} for its \emph{elements}: a bare \code{...} here would read
+#'   as adding an entry rather than a metadata column.
 #' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record. Fine-mapping / TWAS pipelines reject inputs where
@@ -150,7 +154,7 @@ QtlSumStats <- function(
     nSample = NULL,
     qcInfo = list(),
     traitPos = NULL,
-    ...
+    extraCols = list()
 ) {
     if (
         missing(study) ||
@@ -171,7 +175,7 @@ QtlSumStats <- function(
     cols <- .qssBaseCols(study, context, trait, varY) |>
         .qssAppendNSample(nSample, n) |>
         .appendTraitPosCol(traitPos, n) |>
-        .qssAppendExtras(list(...))
+        .qssAppendExtras(extraCols)
     dfArgs <- c(cols, list(check.names = FALSE))
     # The per-tuple GRanges become the collection's ELEMENTS; the tuple keys
     # and per-tuple scalars go in mcols. There is no `entry` column.
@@ -382,8 +386,7 @@ setMethod(
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
-        ranges = NULL,
-        ...
+        ranges = NULL
     ) {
         idx <- .qtlSumStatsSelectRow(x, study, context, trait)
         stitched <- .ssStitchElements(x, idx, ranges)
@@ -474,7 +477,7 @@ setMethod("getTraits", "QtlSumStats", function(x) unique(as.character(x$trait)))
 # or a scalar NA when no trait position was supplied.
 #' @rdname getTraitPosition
 #' @export
-setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL, ...) {
+setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL) {
     tp <- .getTraitPosColumn(x)
     if (!methods::is(tp, "GRanges") || is.null(traitId)) {
         return(tp)

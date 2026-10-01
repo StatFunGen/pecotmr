@@ -4,7 +4,7 @@
 \alias{bayesLWeights}
 \title{BayesL TWAS weights (Laplace prior, LASSO-equivalent)}
 \usage{
-bayesLWeights(X, y, Z = NULL, methodArgs = list())
+bayesLWeights(X, y, Z = NULL, methodArgs = qggConfig())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -13,9 +13,10 @@ bayesLWeights(X, y, Z = NULL, methodArgs = list())
 
 \item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
 
-\item{methodArgs}{Optional named list of options forwarded to
-\code{bayesAlphabetWeights} /
-\code{qgg}.}
+\item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
+with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of effect-size weights, one per variant (column of

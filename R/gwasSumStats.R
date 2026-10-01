@@ -153,7 +153,11 @@ NULL
 #'   it to carry existing keys through a rebuild; without it a rebuild would
 #'   re-derive them as seqnames and collapse distinct blocks onto one key.
 #'   Mutually exclusive with \code{ldBlocks}.
-#' @param ... Additional per-study columns to attach to the collection.
+#' @param extraCols Optional named list of additional per-study columns to
+#'   attach to the collection's \code{mcols}. Named rather than variadic
+#'   because the base class's own constructor, \code{GRangesList(...)}, uses
+#'   \code{...} for its \emph{elements}: a bare \code{...} here would read
+#'   as adding an entry rather than a metadata column.
 #' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record. Fine-mapping / TWAS pipelines reject inputs where
@@ -180,7 +184,7 @@ GwasSumStats <- function(
     qcInfo = list(),
     ldBlocks = NULL,
     blockId = NULL,
-    ...
+    extraCols = list()
 ) {
     if (missing(study) || missing(entry) || missing(genome)) {
         abort("`study`, `entry`, and `genome` are all required.")
@@ -191,7 +195,7 @@ GwasSumStats <- function(
         varY = varY
     ) |>
         .gwasAppendOptional(nCase, nControl, nSample, study) |>
-        .gwasAppendExtras(list(...))
+        .gwasAppendExtras(extraCols)
     dfArgs <- c(cols, list(check.names = FALSE))
     # The per-study GRanges become the collection's ELEMENTS; everything else
     # is per-study metadata and goes in mcols. There is no `entry` column.
@@ -389,16 +393,49 @@ GwasSumStats <- function(
 #'   collection has a single row.
 #' @param ranges Optional \code{GRanges} restricting the returned variants to
 #'   those it overlaps. \code{NULL} (default) returns the study's full set.
-#' @param ... Additional arguments (currently unused).
+#' @param context,trait,annotateSignificance QTL-only selectors, named here so
+#'   that supplying one is an error rather than a silently ignored request. A
+#'   GWAS has no context or trait axis and carries no significance annotation;
+#'   leave them \code{NULL}.
 #' @return A \code{GRanges} object.
 #' @export
 setMethod(
     "getSumStats",
     signature(x = "GwasSumStats"),
-    function(x, study = NULL, ranges = NULL, ...) {
+    function(
+        x,
+        study = NULL,
+        ranges = NULL,
+        context = NULL,
+        trait = NULL,
+        annotateSignificance = NULL
+    ) {
+        # A GWAS has no context / trait axis and no significance annotation:
+        # those selectors belong to QtlSumStats. They are named here, rather
+        # than absorbed by `...`, so asking for one is an error instead of a
+        # silently ignored request -- the shared SumStatsBase accessors pass
+        # the union of both classes' selectors.
+        .gwasRefuseQtlSelectors(context, trait, annotateSignificance)
         .ssStitchElements(x, .gwasSelectStudy(x, study), ranges)
     }
 )
+
+# @noRd
+.gwasRefuseQtlSelectors <- function(context, trait, annotateSignificance) {
+    given <- c(
+        context = !is.null(context),
+        trait = !is.null(trait),
+        annotateSignificance = !is.null(annotateSignificance)
+    )
+    if (!any(given)) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "getSumStats(GwasSumStats): {str_flatten(names(given)[given], ', ')} ",
+        "{if (sum(given) == 1L) 'is' else 'are'} a QtlSumStats selector. ",
+        "A GWAS is selected by `study` (and narrowed by `ranges`)."
+    ))
+}
 
 # getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R).
 

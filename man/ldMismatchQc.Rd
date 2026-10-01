@@ -10,8 +10,7 @@ ldMismatchQc(
   X = NULL,
   nSample = NULL,
   method = c("slalom", "dentist"),
-  ldMethod = "sample",
-  methodArgs = list()
+  ldMethod = "sample"
 )
 }
 \arguments{
@@ -26,16 +25,16 @@ ldMismatchQc(
 \code{R} is provided and \code{method = "dentist"}; inferred from \code{X}
 when \code{X} is provided.}
 
-\item{method}{Character string specifying the QC method: \code{"slalom"}
-(default) or \code{"dentist"}.}
+\item{method}{Which QC method to run: \code{"slalom"} (default) or
+\code{"dentist"}, or the matching constructor --
+\code{\link{slalomConfig}} / \code{\link{dentistConfig}} -- to configure
+it at the same time. The constructor carries the choice, so there is no
+separate options argument that could disagree with it.}
 
 \item{ldMethod}{Character string specifying the LD computation method when
 \code{X} is provided. One of \code{"sample"} (default),
 \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is provided
 directly.}
-
-\item{methodArgs}{Optional named list of options passed to the
-underlying QC method (\code{slalom} or \code{dentistSingleWindow}).}
 }
 \value{
 A data frame with at least a logical \code{outlier} column indicating

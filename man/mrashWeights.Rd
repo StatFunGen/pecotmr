@@ -4,7 +4,13 @@
 \alias{mrashWeights}
 \title{Compute Weights Using mr.ash Shrinkage}
 \usage{
-mrashWeights(X, y, initPriorSd = TRUE, retainFit = FALSE, methodArgs = list())
+mrashWeights(
+  X,
+  y,
+  initPriorSd = TRUE,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = mrashConfig()
+)
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -14,15 +20,23 @@ mrashWeights(X, y, initPriorSd = TRUE, retainFit = FALSE, methodArgs = list())
 \item{initPriorSd}{Logical. Initialize the prior standard-deviation grid
 from the data. Default \code{TRUE}.}
 
-\item{retainFit}{Logical. Attach the full fitted-model object to the result.
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+  attribute of the returned weights: \code{"none"} (default) attaches
+  nothing, \code{"slim"} and \code{"full"} attach the fitted model. This
+  engine keeps no trimmable intermediates, so the two retaining levels
+  behave alike here.
 Default \code{FALSE}.}
 
-\item{methodArgs}{Optional named list of options forwarded to \code{mr.ash}.}
+\item{methodArgs}{Options forwarded to \code{susieR::mr.ash}, built
+with \code{\link{mrashConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of weights, one per variant (column of \code{X});
-  zero-variance columns receive weight 0. When \code{retainFit = TRUE} the
-  fitted \code{mr.ash} object is attached as attribute \code{"fit"}.
+  zero-variance columns receive weight 0. Unless
+  \code{fitRetention = "none"} the fitted \code{mr.ash} object is
+  attached as attribute \code{"fit"}.
 }
 \description{
 This function fits the `mr.ash` model (adaptive shrinkage regression) to

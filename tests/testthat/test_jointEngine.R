@@ -76,7 +76,13 @@
 test_that(".runJointCell: cross-context FM expands to per-context rows", {
     set.seed(1)
     cell <- .je_synthCell(list(.je_mkGroup("G1"), .je_mkGroup("G2")))
-    pipe <- new("FmJointPipeline", config = list(coverage = 0.95, cvFolds = 0))
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            coverage = 0.95,
+            crossValidationArgs = list(folds = 0, threads = 1, maxVariants = -1)
+        )
+    )
     local_mocked_bindings(
         create_mixture_prior = function(...) "PRIOR",
         .package = "mvsusieR"
@@ -112,11 +118,16 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
     pipe <- new(
         "FmJointPipeline",
         config = list(
-            coverage = 0.95,
-            cvFolds = 0,
-            fullFit = TRUE,
-            fullFitAlphaOnly = FALSE,
-            includeAllCs = TRUE
+            credibleSetArgs = credibleSetConfig(
+                includeAllCs = TRUE,
+                perCsColumns = "full"
+            ),
+            crossValidationArgs = list(
+                folds = 0,
+                threads = 1,
+                maxVariants = -1
+            ),
+            fitRetention = "slim"
         )
     )
     local_mocked_bindings(
@@ -129,31 +140,25 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
         method,
         dataX,
         dataY,
-        coverage,
-        secondaryCoverage,
-        signalCutoff,
-        minAbsCorr,
+        credibleSetArgs,
+        fitRetention,
         csInput = NULL,
         af = NULL,
         region = NULL,
         conditionIdx = NULL,
-        fullFit = NULL,
-        fullFitAlphaOnly = NULL,
-        includeAllCs = NULL,
         ...
     ) {
-        captured$fullFit <- fullFit
-        captured$fullFitAlphaOnly <- fullFitAlphaOnly
-        captured$includeAllCs <- includeAllCs
+        captured$perCsColumns <- credibleSetArgs$perCsColumns
+        captured$includeAllCs <- credibleSetArgs$includeAllCs
         .je_mockPostprocess(
             fit,
             method,
             dataX,
             dataY,
-            coverage,
-            secondaryCoverage,
-            signalCutoff,
-            minAbsCorr,
+            credibleSetArgs$coverage,
+            credibleSetArgs$secondaryCoverage,
+            credibleSetArgs$signalCutoff,
+            credibleSetArgs$minAbsCorr,
             csInput = csInput,
             af = af,
             region = region,
@@ -172,15 +177,21 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
         scope = NULL,
         tokens = "mvsusie"
     )
-    expect_true(isTRUE(captured$fullFit)) # threaded, not the FALSE default
-    expect_false(isTRUE(captured$fullFitAlphaOnly)) # widen all four matrices
+    # "full" widens all four matrices; threaded, not the "none" default.
+    expect_equal(captured$perCsColumns, "full")
     expect_true(isTRUE(captured$includeAllCs)) # keep filtered-out CS
 })
 
 test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", {
     set.seed(2)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
-    pipe <- new("FmJointPipeline", config = list(coverage = 0.95, cvFolds = 2))
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            coverage = 0.95,
+            crossValidationArgs = list(folds = 2, threads = 1, maxVariants = -1)
+        )
+    )
 
     # Prior mr.mash CV payload. Looked up by the FIXED axes (study=S, trait=G1)
     # with context match-any, so a per-context OR a legacy "joint" row both match.
@@ -284,8 +295,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     study,
     context,
     trait,
-    retainFits,
-    retainFitDetail,
+    fitRetention,
     standardized,
     dataType,
     verbose,
@@ -317,7 +327,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     fold,
     samplePartitions = NULL,
     weightMethods,
-    retainFits,
+    fitRetention,
     ...,
     verbose
 ) {
@@ -355,7 +365,12 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
 test_that(".runJointCell: cross-context twas expands to per-context weight vectors", {
     set.seed(3)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
-    pipe <- new("TwasJointPipeline", config = list(cvFolds = 0))
+    pipe <- new(
+        "TwasJointPipeline",
+        config = list(
+            crossValidationArgs = list(folds = 0, threads = 1, maxVariants = -1)
+        )
+    )
     local_mocked_bindings(
         learnTwasWeights = .je_mockLearnTwas,
         .package = "pecotmr"
@@ -384,7 +399,12 @@ test_that(".runJointCell: cross-context twas expands to per-context weight vecto
 test_that(".runJointCell: cross-context twas attaches per-condition CV slices", {
     set.seed(4)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
-    pipe <- new("TwasJointPipeline", config = list(cvFolds = 2))
+    pipe <- new(
+        "TwasJointPipeline",
+        config = list(
+            crossValidationArgs = list(folds = 2, threads = 1, maxVariants = -1)
+        )
+    )
     local_mocked_bindings(
         learnTwasWeights = .je_mockLearnTwas,
         twasWeightsCv = .je_mockTwasCv,
@@ -413,7 +433,14 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new(
         "TwasJointPipeline",
-        config = list(cvFolds = 2, fitFullData = FALSE)
+        config = list(
+            crossValidationArgs = list(
+                folds = 2,
+                threads = 1,
+                maxVariants = -1
+            ),
+            fitFullData = FALSE
+        )
     )
     local_mocked_bindings(twasWeightsCv = .je_mockTwasCv, .package = "pecotmr")
 
@@ -523,7 +550,7 @@ test_that(".runJointCell: cross-context twas sumstats (mr.mash.rss) -> per-conte
     cell <- .je_ssCell(list(.je_mkSsGroup("G1")))
     pipe <- new("TwasJointPipeline", config = list())
     local_mocked_bindings(
-        mrmashRssWeights = function(stat, LD, retainFit, fitDetail) {
+        mrmashRssWeights = function(stat, LD, fitRetention) {
             W <- matrix(
                 0.2,
                 nrow(LD),
@@ -589,7 +616,13 @@ test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regressi
     )
     pipe <- new(
         "TwasJointPipeline",
-        config = list(retainFitDetail = "slim", cvFolds = 0L)
+        config = list(
+            crossValidationArgs = list(
+                folds = 0L,
+                threads = 1,
+                maxVariants = -1
+            )
+        )
     )
     entries <- suppressWarnings(suppressMessages(
         fitJointGroup(group, pipe, "mrmash", list())
@@ -662,7 +695,7 @@ test_that(".runJointCell: cross-study (twas sumstats) -> per-study rows + jointS
     )
     pipe <- new("TwasJointPipeline", config = list())
     local_mocked_bindings(
-        mrmashRssWeights = function(stat, LD, retainFit, fitDetail) {
+        mrmashRssWeights = function(stat, LD, fitRetention) {
             W <- matrix(
                 0.2,
                 nrow(LD),
@@ -724,7 +757,13 @@ test_that(".runJointCell: composed (context + trait vary) -> per-tuple rows", {
         enumerate = function(data, scope, args) list(grp),
         minGroup = 2L
     )
-    pipe <- new("FmJointPipeline", config = list(coverage = 0.95, cvFolds = 0))
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            coverage = 0.95,
+            crossValidationArgs = list(folds = 0, threads = 1, maxVariants = -1)
+        )
+    )
     local_mocked_bindings(
         create_mixture_prior = function(...) "PRIOR",
         .package = "mvsusieR"
@@ -796,7 +835,13 @@ test_that(".runJointCell: composed (context + trait vary) -> per-tuple rows", {
 test_that(".runJointCell: cross-trait FM -> per-trait rows (context fixed)", {
     set.seed(8)
     cell <- .je_traitCell(list(.je_mkTraitGroup("brain")))
-    pipe <- new("FmJointPipeline", config = list(coverage = 0.95, cvFolds = 0))
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            coverage = 0.95,
+            crossValidationArgs = list(folds = 0, threads = 1, maxVariants = -1)
+        )
+    )
     local_mocked_bindings(
         create_mixture_prior = function(...) "PRIOR",
         .package = "mvsusieR"
@@ -824,7 +869,12 @@ test_that(".runJointCell: cross-trait FM -> per-trait rows (context fixed)", {
 test_that(".runJointCell: cross-trait twas -> per-trait weight vectors", {
     set.seed(9)
     cell <- .je_traitCell(list(.je_mkTraitGroup("brain")))
-    pipe <- new("TwasJointPipeline", config = list(cvFolds = 0))
+    pipe <- new(
+        "TwasJointPipeline",
+        config = list(
+            crossValidationArgs = list(folds = 0, threads = 1, maxVariants = -1)
+        )
+    )
     local_mocked_bindings(
         learnTwasWeights = .je_mockLearnTwas,
         .package = "pecotmr"
@@ -963,7 +1013,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
     )
     pipe <- new("TwasJointPipeline", config = list())
     local_mocked_bindings(
-        mrmashRssWeights = function(stat, LD, retainFit, fitDetail) {
+        mrmashRssWeights = function(stat, LD, fitRetention) {
             W <- matrix(
                 0.2,
                 nrow(LD),
@@ -1058,9 +1108,12 @@ test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble en
         g,
         pte,
         list(
-            ensembleR2Threshold = 0.01,
-            ensembleSolver = "quadprog",
-            ensembleAlpha = 1,
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
             standardized = FALSE
         )
     )
@@ -1080,9 +1133,12 @@ test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", 
         g,
         pte,
         list(
-            ensembleR2Threshold = 0.999,
-            ensembleSolver = "quadprog",
-            ensembleAlpha = 1,
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.999,
+                solver = "quadprog",
+                alpha = 1
+            ),
             standardized = FALSE
         )
     )
@@ -1096,7 +1152,14 @@ test_that("fitJointGroup(twas): leakage warning when a full-data mr.mash prior i
     g <- .je_mkGroup("G1")
     pipe <- new(
         "TwasJointPipeline",
-        config = list(cvFolds = 2L, ensemble = FALSE)
+        config = list(
+            crossValidationArgs = list(
+                folds = 2L,
+                threads = 1,
+                maxVariants = -1
+            ),
+            ensembleArgs = list(enabled = FALSE)
+        )
     )
     local_mocked_bindings(
         learnTwasWeights = .je_mockLearnTwas,
@@ -1146,7 +1209,15 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
     )
     pipe <- new(
         "TwasJointPipeline",
-        config = list(cvFolds = 0L, ensemble = FALSE, estimatePi = TRUE)
+        config = list(
+            crossValidationArgs = list(
+                folds = 0L,
+                threads = 1,
+                maxVariants = -1
+            ),
+            ensembleArgs = list(enabled = FALSE),
+            estimatePi = TRUE
+        )
     )
     capturedPi <- NULL
     local_mocked_bindings(
@@ -1176,7 +1247,14 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
     g <- .je_mkGroup("G1") # 2 conditions (c1, c2)
     pipe <- new(
         "TwasJointPipeline",
-        config = list(cvFolds = 2L, ensemble = FALSE)
+        config = list(
+            crossValidationArgs = list(
+                folds = 2L,
+                threads = 1,
+                maxVariants = -1
+            ),
+            ensembleArgs = list(enabled = FALSE)
+        )
     )
     samp <- rownames(.jgX(g))
     fmCv <- list(
@@ -1323,7 +1401,8 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
             cisWindow,
             verbose,
             label,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             if (tid == "G2") {
                 return(NULL)
@@ -1435,7 +1514,8 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
             verbose,
             label,
             study,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             if (cx == "c2") {
                 return(NULL)
@@ -1539,7 +1619,8 @@ test_that(".enumComposedIndividual: one group joining every (context, trait) tup
             cisWindow,
             verbose,
             label,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             Y <- matrix(
                 0,
@@ -1608,7 +1689,13 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
     local_mocked_bindings(
         getStudy = function(data) "S",
         getPhenotypes = function(data, contexts) .je_mkSe(c("G1", "G2")),
-        .fmResidPheno = function(data, contexts, traitId, naAction = "drop") {
+        .fmResidPheno = function(
+            data,
+            contexts,
+            traitId,
+            naAction = "drop",
+            ...
+        ) {
             matrix(0, 5, 1, dimnames = list(samp, traitId))
         },
         .fmResidGeno = function(
@@ -1616,7 +1703,8 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1643,7 +1731,13 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
     local_mocked_bindings(
         getStudy = function(data) "S",
         getPhenotypes = function(data, contexts) .je_mkSe("G1"),
-        .fmResidPheno = function(data, contexts, traitId, naAction = "drop") {
+        .fmResidPheno = function(
+            data,
+            contexts,
+            traitId,
+            naAction = "drop",
+            ...
+        ) {
             matrix(0, 1, 1, dimnames = list("s1", traitId))
         }, # one sample
         .fmResidGeno = function(
@@ -1651,7 +1745,8 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1777,7 +1872,13 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
         Y = Y,
         traitPos = c(100, 200)
     )
-    pipe <- new("FmJointPipeline", config = list(coverage = 0.95, cvFolds = 3))
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            coverage = 0.95,
+            crossValidationArgs = list(folds = 3, threads = 1, maxVariants = -1)
+        )
+    )
     cvCalled <- FALSE
     local_mocked_bindings(
         fitFsusie = function(...) list(),
@@ -1932,7 +2033,15 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
     )
     pipe <- new(
         "TwasJointPipeline",
-        config = list(cvFolds = 0L, ensemble = FALSE, estimatePi = TRUE)
+        config = list(
+            crossValidationArgs = list(
+                folds = 0L,
+                threads = 1,
+                maxVariants = -1
+            ),
+            ensembleArgs = list(enabled = FALSE),
+            estimatePi = TRUE
+        )
     )
     capturedProbIn <- NULL
     local_mocked_bindings(
@@ -1965,7 +2074,7 @@ test_that("fitJointGroup(SumStats, twas): a vector weight without rownames falls
     grp <- .je_mkSsGroup("G1", p = 3L, k = 2L)
     pipe <- new("TwasJointPipeline", config = list())
     local_mocked_bindings(
-        mrmashRssWeights = function(stat, LD, retainFit, fitDetail) {
+        mrmashRssWeights = function(stat, LD, fitRetention) {
             # Return a bare numeric vector (one column collapsed) with no names.
             w <- as.numeric(rep(0.2, nrow(LD) * ncol(stat$z)))
             attr(w, "fit") <- .je_fakeMrmashFit()
@@ -2026,11 +2135,17 @@ test_that(".runJointCell: twas ensemble layer adds 'ensemble' rows on top of >= 
     pipe <- new(
         "TwasJointPipeline",
         config = list(
-            cvFolds = 2L,
-            ensemble = TRUE,
-            ensembleR2Threshold = 0.01,
-            ensembleSolver = "quadprog",
-            ensembleAlpha = 1,
+            crossValidationArgs = list(
+                folds = 2L,
+                threads = 1,
+                maxVariants = -1
+            ),
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
             standardized = FALSE
         )
     )
@@ -2066,9 +2181,12 @@ test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
         g,
         list(a = good, b = noCv, c = NULL),
         list(
-            ensembleR2Threshold = 0.01,
-            ensembleSolver = "quadprog",
-            ensembleAlpha = 1,
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
             standardized = FALSE
         )
     )
@@ -2087,9 +2205,12 @@ test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
         g,
         pte,
         list(
-            ensembleR2Threshold = 0.01,
-            ensembleSolver = "quadprog",
-            ensembleAlpha = 1,
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
             standardized = FALSE
         )
     )
@@ -2121,9 +2242,12 @@ test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's 
         g,
         pte,
         list(
-            ensembleR2Threshold = 0.01,
-            ensembleSolver = "quadprog",
-            ensembleAlpha = 1,
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
             standardized = FALSE
         )
     )
@@ -2212,7 +2336,16 @@ test_that(".runJointSpecs: no methods or no specs -> NULL", {
 
 test_that(".twasGroupArgs: takes the CV partition from the fine-mapping CV when none is set", {
     g <- .je_mkGroup("G1") # IndividualJointGroup
-    pipe <- new("TwasJointPipeline", config = list(cvFolds = 2L))
+    pipe <- new(
+        "TwasJointPipeline",
+        config = list(
+            crossValidationArgs = list(
+                folds = 2L,
+                threads = 1,
+                maxVariants = -1
+            )
+        )
+    )
     sp <- data.frame(
         Sample = rownames(.jgX(g)),
         Fold = rep(1:2, length.out = nrow(.jgX(g))),
@@ -2636,9 +2769,12 @@ test_that(".twasEnsembleLayer falls back to its documented config defaults", {
         "grp",
         list(),
         list(
-            ensembleR2Threshold = 0.2,
-            ensembleSolver = "nnls",
-            ensembleAlpha = 0.5
+            ensembleArgs = list(
+                enabled = TRUE,
+                r2Threshold = 0.2,
+                solver = "nnls",
+                alpha = 0.5
+            )
         )
     )
     expect_length(explicit, 0L)
@@ -2655,7 +2791,7 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
             fold,
             samplePartitions,
             weightMethods,
-            retainFits,
+            fitRetention,
             maxNumVariants,
             numThreads,
             dataDrivenPriorMatricesCv,
@@ -2674,10 +2810,12 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
         dataDrivenPriorMatricesCv = NULL
     )
     cfg <- list(
-        cvFolds = 5L,
-        samplePartition = "CFG_SP",
-        maxCvVariants = 77L,
-        cvThreads = 1,
+        crossValidationArgs = list(
+            folds = 5L,
+            samplePartition = "CFG_SP",
+            maxVariants = 77L,
+            threads = 1
+        ),
         seed = 1L,
         verbose = 0
     )
@@ -2698,7 +2836,7 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
     argsBare <- args
     argsBare$samplePartition <- NULL
     cfgUncapped <- cfg
-    cfgUncapped$maxCvVariants <- 0
+    cfgUncapped$crossValidationArgs$maxVariants <- 0
     pecotmr:::.jointTwasCv(
         NULL,
         NULL,
@@ -2724,7 +2862,7 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
     local_mocked_bindings(
         getStudy = function(data) "S1",
         getPhenotypes = function(data, contexts) phenotypes,
-        .fmResidPheno = function(data, contexts, traitId, naAction) {
+        .fmResidPheno = function(data, contexts, traitId, naAction, ...) {
             matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "t1"))
         },
         .fmResidGeno = function(
@@ -2732,7 +2870,8 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             seen <<- list(
                 traitId = traitId,
@@ -2802,7 +2941,14 @@ test_that(".jointTwasCvRequested accepts tokens and method keys alike", {
 })
 
 test_that(".jointTwasCv skips a method excluded by cvWeightMethods", {
-    cfg <- list(cvFolds = 5L, cvWeightMethods = c("lasso"))
+    cfg <- list(
+        crossValidationArgs = list(
+            folds = 5L,
+            threads = 1,
+            maxVariants = -1,
+            weightMethods = c("lasso")
+        )
+    )
     out <- pecotmr:::.jointTwasCv(
         Xc = NULL,
         Yc = NULL,
@@ -2817,7 +2963,14 @@ test_that(".jointTwasCv skips a method excluded by cvWeightMethods", {
 })
 
 test_that(".jointTwasCv warns when a method is all-zero, not silently", {
-    cfg <- list(cvFolds = 5L, cvWeightMethods = NULL)
+    cfg <- list(
+        crossValidationArgs = list(
+            folds = 5L,
+            threads = 1,
+            maxVariants = -1,
+            weightMethods = NULL
+        )
+    )
     expect_warning(
         out <- pecotmr:::.jointTwasCv(
             Xc = NULL,
@@ -2837,7 +2990,14 @@ test_that(".jointTwasCv warns when a method is all-zero, not silently", {
 test_that(".jointTwasCv refuses a fine-mapping method with no per-fold fits", {
     # Without a CV handoff from the FineMappingResult there is no fold fit,
     # and this layer never fine-maps -- so it refuses rather than re-fitting.
-    cfg <- list(cvFolds = 5L, cvWeightMethods = NULL)
+    cfg <- list(
+        crossValidationArgs = list(
+            folds = 5L,
+            threads = 1,
+            maxVariants = -1,
+            weightMethods = NULL
+        )
+    )
     expect_error(
         pecotmr:::.jointTwasCv(
             Xc = NULL,

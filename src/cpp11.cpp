@@ -6,10 +6,10 @@
 #include <R_ext/Visibility.h>
 
 // dentist_iterative_impute.cpp
-cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int nSample, const doubles& zScoreR, double pValueThreshold, double propSVD, bool gcControl, int nIter, double gPvalueThreshold, int ncpus, bool correctChenEtAlBug, bool verbose, cpp11::sexp seed);
-extern "C" SEXP _pecotmr_dentistIterativeImpute(SEXP ldMatR, SEXP nSample, SEXP zScoreR, SEXP pValueThreshold, SEXP propSVD, SEXP gcControl, SEXP nIter, SEXP gPvalueThreshold, SEXP ncpus, SEXP correctChenEtAlBug, SEXP verbose, SEXP seed) {
+cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int nSample, const doubles& zScoreR, double pValueThreshold, double propSVD, bool gcControl, int nIter, double gPvalueThreshold, int numThreads, bool correctChenEtAlBug, bool verbose, cpp11::sexp seed);
+extern "C" SEXP _pecotmr_dentistIterativeImpute(SEXP ldMatR, SEXP nSample, SEXP zScoreR, SEXP pValueThreshold, SEXP propSVD, SEXP gcControl, SEXP nIter, SEXP gPvalueThreshold, SEXP numThreads, SEXP correctChenEtAlBug, SEXP verbose, SEXP seed) {
   BEGIN_CPP11
-    return cpp11::as_sexp(dentistIterativeImpute(cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(ldMatR), cpp11::as_cpp<cpp11::decay_t<int>>(nSample), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zScoreR), cpp11::as_cpp<cpp11::decay_t<double>>(pValueThreshold), cpp11::as_cpp<cpp11::decay_t<double>>(propSVD), cpp11::as_cpp<cpp11::decay_t<bool>>(gcControl), cpp11::as_cpp<cpp11::decay_t<int>>(nIter), cpp11::as_cpp<cpp11::decay_t<double>>(gPvalueThreshold), cpp11::as_cpp<cpp11::decay_t<int>>(ncpus), cpp11::as_cpp<cpp11::decay_t<bool>>(correctChenEtAlBug), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
+    return cpp11::as_sexp(dentistIterativeImpute(cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(ldMatR), cpp11::as_cpp<cpp11::decay_t<int>>(nSample), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zScoreR), cpp11::as_cpp<cpp11::decay_t<double>>(pValueThreshold), cpp11::as_cpp<cpp11::decay_t<double>>(propSVD), cpp11::as_cpp<cpp11::decay_t<bool>>(gcControl), cpp11::as_cpp<cpp11::decay_t<int>>(nIter), cpp11::as_cpp<cpp11::decay_t<double>>(gPvalueThreshold), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<bool>>(correctChenEtAlBug), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
   END_CPP11
 }
 // lassosum_rss.cpp
@@ -41,10 +41,10 @@ extern "C" SEXP _pecotmr_qtlEnrichmentRcpp(SEXP rGwasPip, SEXP rQtlSusieFit, SEX
   END_CPP11
 }
 // sdpr.cpp
-cpp11::writable::list sdprRcpp(const doubles& bhatR, const list& LD, int n, sexp perVariantSampleSize, sexp array, double a, double c, int M, double a0k, double b0k, int iter, int burn, int thin, int nThreads, int optLlk, bool verbose, sexp seed);
-extern "C" SEXP _pecotmr_sdprRcpp(SEXP bhatR, SEXP LD, SEXP n, SEXP perVariantSampleSize, SEXP array, SEXP a, SEXP c, SEXP M, SEXP a0k, SEXP b0k, SEXP iter, SEXP burn, SEXP thin, SEXP nThreads, SEXP optLlk, SEXP verbose, SEXP seed) {
+cpp11::writable::list sdprRcpp(const doubles& bhatR, const list& LD, int n, sexp perVariantSampleSize, sexp array, double a, double c, int M, double a0k, double b0k, int iter, int burn, int thin, int numThreads, int optLlk, bool verbose, sexp seed);
+extern "C" SEXP _pecotmr_sdprRcpp(SEXP bhatR, SEXP LD, SEXP n, SEXP perVariantSampleSize, SEXP array, SEXP a, SEXP c, SEXP M, SEXP a0k, SEXP b0k, SEXP iter, SEXP burn, SEXP thin, SEXP numThreads, SEXP optLlk, SEXP verbose, SEXP seed) {
   BEGIN_CPP11
-    return cpp11::as_sexp(sdprRcpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(bhatR), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<int>>(n), cpp11::as_cpp<cpp11::decay_t<sexp>>(perVariantSampleSize), cpp11::as_cpp<cpp11::decay_t<sexp>>(array), cpp11::as_cpp<cpp11::decay_t<double>>(a), cpp11::as_cpp<cpp11::decay_t<double>>(c), cpp11::as_cpp<cpp11::decay_t<int>>(M), cpp11::as_cpp<cpp11::decay_t<double>>(a0k), cpp11::as_cpp<cpp11::decay_t<double>>(b0k), cpp11::as_cpp<cpp11::decay_t<int>>(iter), cpp11::as_cpp<cpp11::decay_t<int>>(burn), cpp11::as_cpp<cpp11::decay_t<int>>(thin), cpp11::as_cpp<cpp11::decay_t<int>>(nThreads), cpp11::as_cpp<cpp11::decay_t<int>>(optLlk), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<sexp>>(seed)));
+    return cpp11::as_sexp(sdprRcpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(bhatR), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<int>>(n), cpp11::as_cpp<cpp11::decay_t<sexp>>(perVariantSampleSize), cpp11::as_cpp<cpp11::decay_t<sexp>>(array), cpp11::as_cpp<cpp11::decay_t<double>>(a), cpp11::as_cpp<cpp11::decay_t<double>>(c), cpp11::as_cpp<cpp11::decay_t<int>>(M), cpp11::as_cpp<cpp11::decay_t<double>>(a0k), cpp11::as_cpp<cpp11::decay_t<double>>(b0k), cpp11::as_cpp<cpp11::decay_t<int>>(iter), cpp11::as_cpp<cpp11::decay_t<int>>(burn), cpp11::as_cpp<cpp11::decay_t<int>>(thin), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<int>>(optLlk), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<sexp>>(seed)));
   END_CPP11
 }
 

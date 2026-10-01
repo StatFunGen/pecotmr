@@ -6,65 +6,43 @@
 \usage{
 summaryStatsQc(
   sumstats,
-  removeIndels = FALSE,
-  removeStrandAmbiguous = TRUE,
-  mafCutoff = 0,
-  macCutoff = 0,
-  imissCutoff = 1,
-  infoCutoff = 0,
-  nCutoff = 5,
+  sumstatsFilterArgs = sumstatsFilterConfig(),
+  panelFilterArgs = panelFilterConfig(),
   keepVariants = NULL,
   skipRegion = NULL,
-  pipCutoffToSkip = 0,
-  absZCutoffToSkip = 0,
-  bfCutoffToSkip = 0,
-  logBfCutoffToSkip = 0,
-  zMismatchQc = c("none", "slalom", "dentist"),
+  signalScreenArgs = signalScreenConfig(),
+  ldMismatchQcMethod = c("none", "slalom", "dentist"),
   alleleFlipKriging = FALSE,
   effectiveN = TRUE,
   impute = FALSE,
-  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
+  imputeArgs = raissConfig(),
   matchMinProp = 0,
-  coerceNumeric = TRUE,
-  normalizeChr = TRUE,
-  dropNonstandardChr = TRUE,
-  dropMissData = TRUE,
-  dropPOutOfRange = TRUE,
-  clampSmallP = TRUE,
-  smallPFloor = 4.94065645841247e-324,
-  dropZeroEffect = TRUE,
-  dropNonpositiveSe = TRUE
+  sumstatsCleaningArgs = sumstatsCleaningConfig()
 )
 }
 \arguments{
 \item{sumstats}{A \code{QtlSumStats} or \code{GwasSumStats} collection.}
 
-\item{removeIndels}{Logical (length 1). When \code{TRUE}, drop indels during
-panel harmonization. Default \code{FALSE}.}
+\item{sumstatsFilterArgs}{Row filters applied to the summary statistics
+themselves, built with \code{\link{sumstatsFilterConfig}}:
+\code{removeIndels} drops indels during panel harmonization,
+\code{removeStrandAmbiguous} drops A/T and C/G variants,
+\code{infoCutoff} is an INFO-score floor (requiring an \code{INFO}
+column when non-zero), and \code{nCutoff} drops variants whose \code{N}
+is more than that many median-absolute-deviations from the median (0
+disables it).}
 
-\item{removeStrandAmbiguous}{Logical (length 1). When \code{TRUE}, drop A/T
-and C/G strand-ambiguous variants. Default \code{TRUE}.}
+\item{panelFilterArgs}{LD-reference-panel filters, built with
+  \code{\link{panelFilterConfig}}. \code{macCutoff} is converted to a MAF
+  equivalent using \code{macCutoff / (2 * nSamples)} and the stricter of
+  it and \code{mafCutoff} applies; \code{imissCutoff} is a per-variant
+  missingness ceiling. See the panel-filters section below.
 
-\item{mafCutoff}{Numeric (length 1). Minor-allele-frequency threshold,
-measured wherever it can be: against the summary statistics' own
-\code{AF} / \code{MAF} / \code{FRQ} column when one is present, and
-against the LD reference panel. Default 0 (off). See the panel-filters
-section below.}
-
-\item{macCutoff}{Numeric (length 1). Minor-allele-count threshold for the
-LD reference panel, converted to a MAF equivalent using
-\code{macCutoff / (2 * nSamples)}; the stricter of it and
-\code{mafCutoff} applies. Default 0 (off).}
-
-\item{imissCutoff}{Numeric (length 1). Per-variant missingness-rate ceiling
-for the LD reference panel. Default 1 (off).}
-
-\item{infoCutoff}{Numeric (length 1). INFO score threshold. Default 0.
-Requires \code{INFO} column when non-zero.}
-
-\item{nCutoff}{Numeric (length 1). Sample-size deviation threshold: drop
-variants whose \code{N} is more than \code{nCutoff}
-median-absolute-deviations from the median. Set to 0 to disable. Default 5.}
+  \code{mafCutoff} is the one setting that reaches past the panel: it is
+  measured wherever it can be, against the summary statistics' own
+  \code{AF} / \code{MAF} / \code{FRQ} column when one is present
+  \emph{and} against the panel. It has always been a single knob, so it
+  lives here rather than being split into two that could disagree.}
 
 \item{keepVariants}{Optional character vector of variant IDs (SNP column) to
 retain prior to harmonization.}
@@ -72,29 +50,24 @@ retain prior to harmonization.}
 \item{skipRegion}{Optional character vector of \code{"chr:start-end"}
 strings, or a \code{GRanges}, of regions to drop.}
 
-\item{pipCutoffToSkip}{Numeric (length 1). When \code{!= 0}, run an
-LD-independent single-effect SER screen and skip the entry if no PIP
-exceeds the cutoff. \code{< 0} resolves to \code{3 / nVariants}. Default 0
-(no screen).}
+\item{signalScreenArgs}{Whether to skip an entry before fitting it,
+built with
+\code{\link{signalScreenConfig}} --- the same bundle
+\code{\link{fineMappingPipeline}} and \code{\link{colocboostPipeline}}
+take. \code{pip} runs an LD-independent single-effect SER screen and
+skips the entry if no PIP exceeds the cutoff (\code{< 0} resolves to
+\code{3 / nVariants}); \code{absZ} skips when \code{max(abs(Z))} does
+not exceed the cutoff, with no model fit; \code{bf} and \code{logBf}
+screen the largest per-variant single-effect Bayes factor from that same
+\code{susie_ser} fit, on the raw and log scales respectively. One metric
+at a time --- the constructor rejects a conflicting pair. Unset (the
+default) screens nothing.}
 
-\item{absZCutoffToSkip}{Numeric (length 1). Alternative signal screen: skip
-the entry when \code{max(abs(Z))} does not exceed the cutoff. No model fit.
-Default 0 (off).}
-
-\item{bfCutoffToSkip}{Numeric (length 1). Alternative signal screen: skip the
-entry when the largest per-variant single-effect Bayes factor (from the
-same \code{susie_ser} fit as the PIP screen) does not exceed the cutoff.
-Compared in log space (\code{maxlogBF > log(cutoff)}). Must be \code{> 0}.
-Default 0 (off).}
-
-\item{logBfCutoffToSkip}{Numeric (length 1). As \code{bfCutoffToSkip} but the
-cutoff is on the log Bayes factor scale (\code{maxlogBF > cutoff}). Default
-0 (off). Exactly one of \code{pipCutoffToSkip} / \code{absZCutoffToSkip} /
-\code{bfCutoffToSkip} / \code{logBfCutoffToSkip} may be non-zero (one
-screening metric at a time); enabling more than one is an error.}
-
-\item{zMismatchQc}{One of \code{"none"} (default), \code{"slalom"},
-\code{"dentist"}.}
+\item{ldMismatchQcMethod}{Which LD-mismatch check to run: \code{"none"}
+(default), \code{"slalom"} or \code{"dentist"}, or the matching
+constructor -- \code{\link{slalomConfig}} / \code{\link{dentistConfig}} --
+to configure it at the same time. Exactly one engine is selected either
+way, since the constructor carries the choice.}
 
 \item{alleleFlipKriging}{Logical (length 1). Opt-in kriging LD-consistency
 prefilter run before SLALOM/DENTIST. Default \code{FALSE}.}
@@ -118,18 +91,20 @@ records the setting and each entry's \code{nSource} is one of
 not yet fully wired for the new path; the option is accepted but currently
 emits a warning and is skipped.)}
 
-\item{imputeOpts}{Named list of RAISS parameters. RAISS imputation scopes its
-  reference panel to the analysis-region window (so a per-chromosome /
-  genome-wide \code{ldSketch} does not materialize its full dosage);
-  \code{flank} (default 0) widens that window by the given number of base
-  pairs on each side to retain LD context for edge variants.
+\item{imputeArgs}{RAISS settings, built with \code{\link{raissConfig}}.
+  A bare list is refused, since it cannot be checked.
 
-  \code{mafCutoff} (default 0), \code{macCutoff} (default 0) and
-  \code{imissCutoff} (default 1) bound which panel variants RAISS will
-  attempt to impute. Without them every rare variant in the window of a
-  large LD sketch becomes an imputation target, which is slow and of little
-  value when the study is far smaller than the panel. The stricter of
-  \code{mafCutoff} and \code{macCutoff / (2 * nSamples)} applies, matching
+  RAISS imputation scopes its reference panel to the analysis-region window
+  (so a per-chromosome / genome-wide \code{ldSketch} does not materialize
+  its full dosage); \code{flank} widens that window by the given number of
+  base pairs on each side to retain LD context for edge variants.
+
+  \code{mafCutoff}, \code{macCutoff} and \code{imissCutoff} bound which
+  panel variants RAISS will attempt to impute. Without them every rare
+  variant in the window of a large LD sketch becomes an imputation target,
+  which is slow and of little value when the study is far smaller than the
+  panel. The stricter of \code{mafCutoff} and
+  \code{macCutoff / (2 * nSamples)} applies, matching
   \code{\link{QtlDataset}}.
 
   These are a \strong{further} tightening applied to imputation targets
@@ -137,42 +112,23 @@ emits a warning and is skipped.)}
   the panel handed to RAISS holds nothing below those. Use them to impute
   only common variants from a panel deliberately kept wider than that ---
   e.g. \code{mafCutoff = 0.001} with
-  \code{imputeOpts = list(mafCutoff = 0.01)}. A variant present in the
-  sumstats is never dropped here: RAISS derives its LD basis from those
-  same panel rows.}
+  \code{imputeArgs = raissConfig(mafCutoff = 0.01)}. A variant present in
+  the sumstats is never dropped here: RAISS derives its LD basis from those
+  same panel rows.
+
+  \code{lamb}, \code{svdTol}, \code{r2Threshold} and \code{minimumLd}
+  are forwarded to \code{\link{raiss}} itself.}
 
 \item{matchMinProp}{Minimum proportion of LD panel variants that must be
 matched by the sumstats; default 0.}
 
-\item{coerceNumeric}{Logical. Coerce signed columns
-(Z/BETA/SE/OR/LOG_ODDS/SIGNED_SUMSTAT/P/MAF/FRQ/INFO/N) to numeric. Default
-\code{TRUE}.}
-
-\item{normalizeChr}{Logical. Strip \code{"chr"} prefix, uppercase the
-chromosome label, and map 23->X, 24->Y, M->MT. Default \code{TRUE}.}
-
-\item{dropNonstandardChr}{Logical. Drop variants whose CHR (after
-normalization) is outside 1..22, X, Y, MT. Default \code{TRUE}.}
-
-\item{dropMissData}{Logical. Drop rows with NA in any vital column (chrom,
-pos, A1, A2, and at least one of Z / BETA). Default \code{TRUE}.}
-
-\item{dropPOutOfRange}{Logical. Drop rows where \code{P < 0} or \code{P > 1}.
-Default \code{TRUE}.}
-
-\item{clampSmallP}{Logical. Floor non-negative P values below
-\code{smallPFloor} to \code{smallPFloor} so \code{-log10(P)} stays finite.
-Applied to both input and Z-derived P values. Default \code{TRUE}.}
-
-\item{smallPFloor}{Numeric (length 1). Floor for \code{clampSmallP}. Default
-\code{5e-324} (R's smallest positive double).}
-
-\item{dropZeroEffect}{Logical. Drop rows where any effect column is exactly 0
-(\code{BETA}, \code{LOG_ODDS}, \code{SIGNED_SUMSTAT}) or \code{OR} is
-exactly 1. Default \code{TRUE}.}
-
-\item{dropNonpositiveSe}{Logical. Drop rows where \code{SE <= 0}. Default
-\code{TRUE}.}
+\item{sumstatsCleaningArgs}{What makes a row a well-formed record, built with
+\code{\link{sumstatsCleaningConfig}}: \code{coerceNumeric},
+\code{normalizeChr} / \code{dropNonstandardChr}, \code{dropMissData},
+\code{dropPOutOfRange}, \code{clampSmallP} / \code{smallPFloor},
+\code{dropZeroEffect} and \code{dropNonpositiveSe}. Applied before any
+filter or screen. Distinct from \code{sumstatsFilter}, which applies
+quality thresholds to rows that are already well formed.}
 }
 \value{
 A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries

@@ -4,18 +4,28 @@
 \alias{mvsusieRssWeights}
 \title{Compute mvSuSiE-RSS TWAS weights from summary statistics}
 \usage{
-mvsusieRssWeights(stat, LD, mvsusieRssFit = NULL, retainFit = FALSE)
+mvsusieRssWeights(
+  stat,
+  LD,
+  mvsusieRssFit = NULL,
+  fitRetention = c("none", "slim", "full")
+)
 }
 \arguments{
 \item{stat}{A list with \code{z} (matrix variants x conditions) and \code{n}
-(numeric vector or scalar).}
+(numeric vector or scalar), describing the block the fit came from.}
 
-\item{LD}{LD correlation matrix.}
+\item{LD}{LD correlation matrix for that block. The fit must cover the
+same number of variants; a mismatch is an error, since weights from one
+block are not comparable against another's LD.}
 
 \item{mvsusieRssFit}{A fitted \code{mvsusieRss} object. Required: this
 extracts weights and never runs fine-mapping itself.}
 
-\item{retainFit}{If TRUE, attaches the fitted object as an attribute.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 A numeric matrix of per-variant per-context weights (variants x
@@ -23,13 +33,13 @@ A numeric matrix of per-variant per-context weights (variants x
 }
 \description{
 Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
-extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit, or
-fits one from \code{stat$z} (variants x conditions) and \code{LD}.
+extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit.
+It never runs fine-mapping itself --- \code{mvsusieRssFit} is required.
 }
 \details{
-Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
-\code{stat$z} to be a numeric matrix (variants x conditions) and
-\code{stat$n} a per-context vector or scalar.
+Follows the \code{*_rss_weights(stat, LD, ...)} contract: \code{stat} and
+\code{LD} describe the block the fit is being extracted against, and the
+fit is checked against them rather than refitted.
 }
 \examples{
 data(eqtlRegionExample)

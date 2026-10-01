@@ -11,7 +11,7 @@ getStandardized(x, ...)
 
 \S4method{getStandardized}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 
-\S4method{getStandardized}{TwasWeightsRow}(x, ...)
+\S4method{getStandardized}{TwasWeightsRow}(x)
 }
 \arguments{
 \item{x}{A \code{TwasWeightsRow} or \code{TwasWeights}.}

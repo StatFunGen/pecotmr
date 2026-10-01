@@ -1,3 +1,53 @@
+#' @title mash Prior-Covariance Settings
+#' @description How the prior covariance matrices (the \code{Ulist} mash
+#'   consumes) are obtained: supplied outright, or built from components and
+#'   refined by an engine. Exactly the arguments
+#'   \code{\link{mashPriorCovariances}} takes for that job, so the bundle
+#'   travels there whole.
+#'
+#'   Supplying \code{priorCovariances} short-circuits the rest: the
+#'   components are not built and the engine does not run.
+#' @param priorCovariances Optional named list of square covariance matrices,
+#'   or a \code{\link{MashPrior}}. \code{NULL} (default) builds them.
+#' @param components Which prior-covariance components to build: any of
+#'   \code{"canonical"}, \code{"pca"}, \code{"flash"},
+#'   \code{"flashNonneg"}, or a \code{\link{mashComponentConfig}} record to
+#'   configure them. Ignored when \code{priorCovariances} is supplied.
+#' @param engine How the data-driven components are refined:
+#'   \code{"covEd"} (default), \code{"covUdr"} or \code{"none"}, or the
+#'   matching constructor --- \code{\link{covEdConfig}} /
+#'   \code{\link{covUdrConfig}} --- to configure it at the same time.
+#'   Ignored when \code{priorCovariances} is supplied.
+#' @param nPcs Optional integer; principal components seeded into
+#'   \code{mashr::cov_pca()}. Defaults to \code{ncol} of the data. Read
+#'   only when \code{components} includes \code{"pca"}.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashPriorConfig(components = c("canonical", "pca"), nPcs = 3)
+#' @export
+mashPriorConfig <- function(
+    priorCovariances = NULL,
+    components = c("canonical", "pca", "flash", "flashNonneg"),
+    engine = c("covEd", "covUdr", "none"),
+    nPcs = NULL
+) {
+    # components / engine are NOT arg_match()ed here: both take either a name
+    # or that engine's own constructor, and mashPriorCovariances() resolves
+    # the choice. Collapsing them to a string would drop the options.
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            priorCovariances = priorCovariances,
+            components = components,
+            engine = engine,
+            nPcs = nPcs
+        ),
+        extra = list(),
+        label = "mashPriorConfig",
+        engine = "mashPrior"
+    )
+}
+
 #' @title Run mashr Across Multi-Context QTL or GWAS Summary Statistics
 #' @description End-to-end driver: from `(strong, random, null)` sumstats
 #'   collections, builds the variant x context Bhat / Shat matrices, estimates
@@ -41,18 +91,12 @@
 #'   entry; \code{"mle"} needs \code{"random"} plus a supplied
 #'   \code{priorCovariances} to refine against. A named method whose
 #'   requirement is unmet is a hard error, not a silent fallback.
-#' @param priorCovariances Optional named list of square covariance matrices
-#'   (the \code{Ulist} \code{mashr::mash()} consumes), or a
-#'   \code{\link{mashPriorCovariances}} result, which is unwrapped to its
-#'   \code{U}. When supplied, replaces
-#'   the canonical + PCA + flash + ED chain (\code{cov_canonical} /
-#'   \code{cov_pca} / \code{cov_flash} / \code{cov_ed}) entirely; mash sees only
-#'   the supplied matrices. Every entry must be a \code{ncol(Bhat) x ncol(Bhat)}
-#'   matrix. Useful when \code{U} was learnt on a larger reference and shipped
-#'   as a static artefact (the legacy MWE pattern).
-#' @param nPcs Optional integer; number of principal components seeded into
-#'   \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}. Ignored when
-#'   \code{priorCovariances} is supplied.
+#' @param prior How the prior covariance matrices are obtained, built with
+#'   \code{\link{mashPriorConfig}}: \code{priorCovariances} supplies them
+#'   outright (short-circuiting the rest), otherwise \code{components}
+#'   chooses which to build, \code{engine} how the data-driven ones are
+#'   refined, and \code{nPcs} parametrises the \code{pca} component.
+#'   Forwarded whole to \code{\link{mashPriorCovariances}}.
 #' @param inputScale One of \code{"auto"} (default), \code{"beta"},
 #'   \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
 #'   sumstats entry:
@@ -68,6 +112,17 @@
 #'   }
 #'   \code{alpha} should be chosen consistently with the resolved scale:
 #'   typically \code{alpha = 0} for beta, \code{alpha = 1} for z.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{mashDataConfig}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
+#' @param mashArgs Extra arguments for \code{mashr::mash()}, built with
+#'   \code{\link{mashConfig}} -- for example \code{nullweight},
+#'   \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+#'   \code{outputlevel} and \code{seed} are owned by pecotmr and are
+#'   refused by the constructor.
 #' @param setSeed Integer. RNG seed for reproducibility of
 #'   \code{mashr::cov_flash} and \code{mashr::cov_ed}. Default 999.
 #' @return A list with elements \code{U} (the combined covariance list:
@@ -76,7 +131,7 @@
 #' data(qtlSumStatsMulticontextExample)
 #' ss <- qtlSumStatsMulticontextExample
 #' sumStatsList <- list(strong = ss, random = ss)
-#' mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
+#' mashPipeline(sumStatsList, alpha = 0, prior = mashPriorConfig(nPcs = 2L))
 #' @export
 mashPipeline <- function(
     sumStatsList,
@@ -89,13 +144,24 @@ mashPipeline <- function(
         "corshrink",
         "mle"
     ),
-    priorCovariances = NULL,
-    nPcs = NULL,
+    prior = mashPriorConfig(),
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = mashDataConfig(),
+    mashArgs = mashConfig(),
     setSeed = 999
 ) {
     inputScale <- arg_match(inputScale)
     residualCorrelationMethod <- arg_match(residualCorrelationMethod)
+    .assertMethodConfig(prior, "mashPriorConfig", "prior")
+    .assertMethodConfig(mashDataArgs, "mashDataConfig", "mashDataArgs")
+    .assertMethodConfig(mashArgs, "mashConfig", "mashArgs")
+    # The bundle's terminal: .mashResolveVhat and mashPriorCovariances below
+    # take the four as plain arguments.
+    priorCovariances <- prior$priorCovariances
+    components <- prior$components %||%
+        c("canonical", "pca", "flash", "flashNonneg")
+    engine <- prior$engine %||% c("covEd", "covUdr", "none")
+    nPcs <- prior$nPcs
     .mashRequirePriorPackages()
     # Accept either a base list or a S4Vectors::SimpleList.
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -109,7 +175,8 @@ mashPipeline <- function(
         inputScale,
         residualCorrelation,
         residualCorrelationMethod,
-        priorCovariances
+        priorCovariances,
+        mashDataArgs
     )
     # mashPriorCovariances() owns the cov_* chain, the supplied-prior bypass,
     # and the mash() weight fit; mashPipeline just forwards its arguments.
@@ -117,9 +184,13 @@ mashPipeline <- function(
         sumStatsList,
         alpha,
         vhat = vhat,
+        components = components,
+        engine = engine,
         priorCovariances = priorCovariances,
         nPcs = nPcs,
         inputScale = inputScale,
+        mashDataArgs = mashDataArgs,
+        mashArgs = mashArgs,
         setSeed = NULL
     )
     list(U = prior$U, w = prior$w)
@@ -218,7 +289,8 @@ mashPipeline <- function(
     inputScale,
     residualCorrelation,
     method,
-    priorCovariances
+    priorCovariances,
+    mashDataArgs = mashDataConfig()
 ) {
     if (!is.null(residualCorrelation)) {
         return(residualCorrelation)
@@ -230,6 +302,7 @@ mashPipeline <- function(
         method = method,
         priorCovariances = priorCovariances,
         inputScale = inputScale,
+        mashDataArgs = mashDataArgs,
         setSeed = NULL
     )
 }
@@ -261,6 +334,12 @@ mashPipeline <- function(
 #'   EM iterations).
 #' @param inputScale SumStats -> matrix conversion scale (\code{"auto"} /
 #'   \code{"beta"} / \code{"z"}).
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{mashDataConfig}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
 #' @param setSeed Integer seed, or \code{NULL} to leave the ambient RNG stream
 #'   untouched (how \code{mashPipeline} keeps one continuous stream across its
 #'   delegated calls).
@@ -280,9 +359,19 @@ mashResidualCorrelation <- function(
     nSubset = 6000L,
     maxIter = 6L,
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = mashDataConfig(),
     setSeed = 999
 ) {
-    method <- arg_match(method)
+    # `method` takes a NAME or that estimator's own constructor, the same
+    # character-or-constructor rule mashPriorCovariances(engine =) uses.
+    chosen <- .resolveEngineChoice(
+        if (is.character(method)) method[[1L]] else method,
+        c("simple", "identity", "mle", "corshrink", "simpleSpecific"),
+        "method"
+    )
+    method <- chosen$engine
+    corArgs <- chosen$args
+    .assertMethodConfig(mashDataArgs, "mashDataConfig", "mashDataArgs")
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
@@ -302,7 +391,13 @@ mashResidualCorrelation <- function(
         return(diag(rep(1, ncol(strongMats$b))))
     }
     if (method == "simple") {
-        return(.mashResidCorSimple(sumStatsList, alpha, inputScale))
+        return(.mashResidCorSimple(
+            sumStatsList,
+            alpha,
+            inputScale,
+            mashDataArgs,
+            corArgs
+        ))
     }
     if (method == "mle") {
         return(.mashResidCorMle(
@@ -311,15 +406,23 @@ mashResidualCorrelation <- function(
             inputScale,
             priorCovariances,
             nSubset,
-            maxIter
+            maxIter,
+            mashDataArgs,
+            corArgs
         ))
     }
-    .mashResidCorNullBased(sumStatsList, alpha, inputScale, method)
+    .mashResidCorNullBased(sumStatsList, inputScale, method, corArgs)
 }
 
 # method 'simple': mashr's estimate_null_correlation_simple on the null set.
 # @noRd
-.mashResidCorSimple <- function(sumStatsList, alpha, inputScale) {
+.mashResidCorSimple <- function(
+    sumStatsList,
+    alpha,
+    inputScale,
+    mashDataArgs,
+    corArgs
+) {
     if (is.null(sumStatsList$null)) {
         msg <- glue(
             "mashResidualCorrelation: method 'simple' requires a 'null' entry ",
@@ -332,14 +435,23 @@ mashResidualCorrelation <- function(
         "null",
         inputScale = inputScale
     )
-    mashr::estimate_null_correlation_simple(
-        mashr::mash_set_data(
-            nullMats$b,
-            Shat = nullMats$s,
-            alpha,
-            zero_Bhat_Shat_reset = 1000
-        )
+    exec(
+        mashr::estimate_null_correlation_simple,
+        .mashSetData(nullMats$b, nullMats$s, alpha, NULL, mashDataArgs),
+        !!!as.list(corArgs)
     )
+}
+
+# mash_set_data with the caller's own settings spliced in. V is passed only
+# when supplied: mash_set_data's own default differs from an explicit NULL.
+# @noRd
+.mashSetData <- function(b, s, alpha, vhat, mashDataArgs) {
+    args <- c(
+        list(Bhat = b, Shat = s, alpha = alpha),
+        if (!is.null(vhat)) list(V = vhat),
+        as.list(mashDataArgs)
+    )
+    exec(mashr::mash_set_data, !!!args)
 }
 
 # method 'mle': EM refinement of V against the prior U over a random subset.
@@ -350,7 +462,9 @@ mashResidualCorrelation <- function(
     inputScale,
     priorCovariances,
     nSubset,
-    maxIter
+    maxIter,
+    mashDataArgs,
+    corArgs
 ) {
     if (is.null(sumStatsList$random)) {
         msg <- glue(
@@ -375,17 +489,20 @@ mashResidualCorrelation <- function(
     )
     n <- nrow(randomMats$b)
     idx <- sample(seq_len(n), min(nSubset, n))
-    dsub <- mashr::mash_set_data(
+    dsub <- .mashSetData(
         randomMats$b[idx, , drop = FALSE],
-        Shat = randomMats$s[idx, , drop = FALSE],
+        randomMats$s[idx, , drop = FALSE],
         alpha,
-        zero_Bhat_Shat_reset = 1000
+        NULL,
+        mashDataArgs
     )
-    fit <- mashr::mash_estimate_corr_em(
+    fit <- exec(
+        mashr::mash_estimate_corr_em,
         dsub,
         priorCovariances,
         max_iter = maxIter,
-        details = TRUE
+        details = TRUE,
+        !!!as.list(corArgs)
     )
     fit$V
 }
@@ -394,7 +511,12 @@ mashResidualCorrelation <- function(
 # `null` partition is already the null variants (max|z| < 2), so no
 # re-thresholding is needed.
 # @noRd
-.mashResidCorNullBased <- function(sumStatsList, alpha, inputScale, method) {
+.mashResidCorNullBased <- function(
+    sumStatsList,
+    inputScale,
+    method,
+    corArgs
+) {
     if (is.null(sumStatsList$null)) {
         msg <- glue(
             "mashResidualCorrelation: method '{method}' requires a 'null' ",
@@ -426,11 +548,7 @@ mashResidualCorrelation <- function(
         abort(msg)
     }
     as.matrix(
-        CorShrink::CorShrinkData(
-            nullZ,
-            ash.control = list(mixcompdist = "halfuniform"),
-            image = "null"
-        )$cor
+        exec(CorShrink::CorShrinkData, nullZ, !!!as.list(corArgs))$cor
     )
 }
 
@@ -440,15 +558,43 @@ mashResidualCorrelation <- function(
 # consumed only by cov_flash / cov_flash(nonneg). Shared by mashPriorCovariances
 # and the exported mashCovarianceComponents.
 # @noRd
-.mashBuildComponents <- function(mashData, components, nPcs = NULL) {
+# Build the requested components, keeping the two roles apart: `canonical`
+# are fixed structural hypotheses that go to the mash fit unrefined, while
+# `dataDriven` are the generator output the engine refines. mashr's own eQTL
+# vignette draws exactly this line -- cov_ed sees only the data-driven set.
+# @noRd
+.mashBuildComponents <- function(
+    mashData,
+    components,
+    nPcs = NULL,
+    componentArgs = NULL
+) {
     npc <- nPcs %||% (ncol(mashData$Bhat) - 1)
-    c(
-        if (is_in("canonical", components)) mashr::cov_canonical(mashData),
-        if (is_in("pca", components)) mashr::cov_pca(mashData, npc = npc),
-        if (is_in("flash", components)) mashr::cov_flash(mashData),
-        if (is_in("flashNonneg", components)) {
-            mashr::cov_flash(mashData, factors = "nonneg")
-        }
+    argsFor <- function(key) as.list(componentArgs[[key]] %||% list())
+    canonical <- if (is_in("canonical", components)) {
+        exec(
+            mashr::cov_canonical,
+            mashData,
+            !!!compact(argsFor("canonical"))
+        )
+    }
+    pca <- if (is_in("pca", components)) {
+        exec(mashr::cov_pca, mashData, npc = npc, !!!compact(argsFor("pca")))
+    }
+    flash <- if (is_in("flash", components)) {
+        exec(mashr::cov_flash, mashData, !!!compact(argsFor("flash")))
+    }
+    flashNonneg <- if (is_in("flashNonneg", components)) {
+        exec(
+            mashr::cov_flash,
+            mashData,
+            factors = "nonneg",
+            !!!compact(argsFor("flashNonneg"))
+        )
+    }
+    list(
+        canonical = canonical,
+        dataDriven = c(pca, flash, flashNonneg)
     )
 }
 
@@ -468,6 +614,12 @@ mashResidualCorrelation <- function(
 #'   \code{"flashNonneg"}. Built in that fixed order.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param inputScale SumStats -> matrix conversion scale.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{mashDataConfig}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
 #' @param setSeed Integer seed (\code{cov_flash} is stochastic), or \code{NULL}
 #'   to leave the ambient RNG untouched.
 #' @return A named list of covariance matrices (the concatenated components).
@@ -485,8 +637,10 @@ mashCovarianceComponents <- function(
     components = c("canonical", "pca", "flash", "flashNonneg"),
     nPcs = NULL,
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = mashDataConfig(),
     setSeed = 999
 ) {
+    .assertMethodConfig(mashDataArgs, "mashDataConfig", "mashDataArgs")
     inputScale <- arg_match(inputScale)
     .mashValidateComponents(components, "mashCovarianceComponents")
     .mashRequirePriorPackages()
@@ -501,9 +655,18 @@ mashCovarianceComponents <- function(
         "strong",
         vhat,
         alpha,
-        inputScale
+        inputScale,
+        mashDataArgs
     )
-    .mashBuildComponents(mashData, components = components, nPcs = nPcs)
+    # This function's contract is one flat named list of covariance matrices,
+    # so the role split that .mashBuildComponents keeps for the engine is
+    # collapsed again here, canonical first as before.
+    built <- .mashBuildComponents(
+        mashData,
+        components = components,
+        nPcs = nPcs
+    )
+    c(built$canonical, built$dataDriven)
 }
 
 #' @title Estimate mash Prior Covariances and Mixture Weights
@@ -522,14 +685,18 @@ mashCovarianceComponents <- function(
 #' @param components Data-driven covariance components, any of
 #'   \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
 #'   \code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
-#'   "nonneg")}). Built in that fixed order. Ignored by the \code{"ud"} /
-#'   \code{"ud_ted"} engines.
-#' @param engine Covariance-refinement engine. \code{"cov_ed"} (default; mashr's
-#'   exported \code{cov_ed()} extreme deconvolution, whose default
-#'   \code{algorithm = "bovy"} IS the Bovy et al. 2011 method -- weights from a
-#'   final \code{mash()}); \code{"ud"} / \code{"ud_ted"} (\pkg{udr} ED / TED
-#'   updates, returning weights directly -- OPT-IN, known numerical issues, so
-#'   not the default; \code{"ud_ted"} additionally needs i.i.d. (z-scale) data).
+#'   "nonneg")}). Built in that fixed order. May instead be a
+#'   \code{\link{mashComponentConfig}} record, which names the components and
+#'   carries each one's options.
+#' @param engine Covariance-refinement engine, either a name or the matching
+#'   constructor carrying that engine's settings. \code{"covEd"} (default;
+#'   \code{\link{covEdConfig}} -- mashr's exported \code{cov_ed()} extreme
+#'   deconvolution, whose default \code{algorithm = "bovy"} IS the Bovy et al.
+#'   2011 method, weights from a final \code{mash()}); \code{"covUdr"}
+#'   (\code{\link{covUdrConfig}} -- \pkg{udr} ED / TED updates, returning
+#'   weights directly -- OPT-IN, known numerical issues, so not the default;
+#'   \code{unconstrainedUpdate = "ted"} additionally needs i.i.d. (z-scale)
+#'   data); \code{"none"} to skip refinement.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param priorCovariances Optional caller-supplied prior \code{U}: a non-empty
 #'   named list of \code{nCond x nCond} matrices, or a
@@ -545,12 +712,18 @@ mashCovarianceComponents <- function(
 #'   mixture-prior pipeline where separate steps built the components.
 #'   \code{components} / \code{nPcs} are then ignored. Distinct from
 #'   \code{priorCovariances}, which bypasses the engine entirely.
-#' @param udControl Named list overriding the \pkg{udr} controls for the
-#'   \code{"ud"} / \code{"ud_ted"} engines: \code{n_unconstrained} (data-driven
-#'   matrices to fit; default 50 -- the dominant cost, so reduce it for
-#'   few-condition data), \code{maxiter} (default 1000), \code{tol},
-#'   \code{tol.lik}. Ignored by \code{cov_ed}.
 #' @param inputScale SumStats -> matrix conversion scale.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{mashDataConfig}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
+#' @param mashArgs Extra arguments for \code{mashr::mash()}, built with
+#'   \code{\link{mashConfig}} -- for example \code{nullweight},
+#'   \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+#'   \code{outputlevel} and \code{seed} are owned by pecotmr and are
+#'   refused by the constructor.
 #' @param setSeed Integer seed, or \code{NULL} to leave the ambient RNG
 #'   untouched.
 #' @return \code{list(U, w, loglik)}: the covariance list, the
@@ -568,17 +741,28 @@ mashPriorCovariances <- function(
     alpha,
     vhat = NULL,
     components = c("canonical", "pca", "flash", "flashNonneg"),
-    engine = c("cov_ed", "ud", "ud_ted"),
+    engine = c("covEd", "covUdr", "none"),
     nPcs = NULL,
     priorCovariances = NULL,
     priorComponents = NULL,
-    udControl = list(),
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = mashDataConfig(),
+    mashArgs = mashConfig(),
     setSeed = 999
 ) {
-    engine <- arg_match(engine)
+    .assertMethodConfig(mashDataArgs, "mashDataConfig", "mashDataArgs")
+    .assertMethodConfig(mashArgs, "mashConfig", "mashArgs")
     inputScale <- arg_match(inputScale)
-    .mashValidateComponents(components)
+    resolvedComponents <- .mashResolveComponentChoice(components)
+    components <- resolvedComponents$names
+    componentArgs <- resolvedComponents$args
+    chosenEngine <- .resolveEngineChoice(
+        if (is.character(engine)) engine[[1L]] else engine,
+        c(names(.mashEngineCtors()), "none"),
+        "engine"
+    )
+    engine <- chosenEngine$engine
+    engineArgs <- chosenEngine$args
     .mashRequirePriorPackages()
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -591,7 +775,8 @@ mashPriorCovariances <- function(
         "strong",
         vhat,
         alpha,
-        inputScale
+        inputScale,
+        mashDataArgs
     )
     result <- if (!is.null(priorCovariances)) {
         .mashUserPriorCovariances(priorCovariances, mashData)
@@ -601,19 +786,484 @@ mashPriorCovariances <- function(
             priorComponents,
             components,
             nPcs,
-            udControl,
-            engine
+            engine,
+            engineArgs = engineArgs,
+            componentArgs = componentArgs
         )
     }
     w <- result$w %||%
-        mashr::get_estimated_pi(
-            mashr::mash(mashData, Ulist = result$U, outputlevel = 1)
-        )
+        mashr::get_estimated_pi(exec(
+            mashr::mash,
+            mashData,
+            Ulist = result$U,
+            outputlevel = 1,
+            !!!as.list(mashArgs)
+        ))
     list(U = result$U, w = w, loglik = result$loglik)
+}
+
+# --- prior-covariance constructors ------------------------------------------
+#
+# mashr draws three roles that pecotmr had collapsed into one list. Canonical
+# components are shape-driven -- fixed structural hypotheses built from the
+# condition count. PCA and FLASH are data-driven GENERATORS: data in,
+# covariances out, independent of each other. ED and udr are REFINERS, which
+# consume a generator's output. mashr's own eQTL vignette refines only the
+# data-driven components and passes canonical to mash() untouched.
+
+#' @title Arguments For mashr's Canonical Covariance Components
+#' @description Options for \code{mashr::cov_canonical}, which builds the
+#'   fixed structural hypotheses (identity, singletons, equal effects, simple
+#'   heterogeneity) from the condition count. These are hypotheses about
+#'   shape, so they go to the mash fit unrefined.
+#' @param cov_methods Which canonical components to build. \code{NULL}
+#'   (default) leaves mashr's own selection in place.
+#' @param ... Any other \code{mashr::cov_canonical} argument.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' covCanonicalConfig(cov_methods = c("identity", "equal_effects"))
+#' @export
+covCanonicalConfig <- function(cov_methods = NULL, ...) {
+    .newMethodConfig(
+        "mashr::cov_canonical",
+        defaults = list(cov_methods = cov_methods),
+        extra = list(...),
+        label = "covCanonicalConfig",
+        engine = "canonical"
+    )
+}
+
+#' @title Arguments For mashr's PCA Covariance Components
+#' @description Options for \code{mashr::cov_pca}, a data-driven generator.
+#'   The number of components is not settable here: it comes from
+#'   \code{mashPriorCovariances(nPcs = )}, which the caller also reports on.
+#' @param subset Rows of the data to use. \code{NULL} (default) uses all.
+#' @param ... Any other \code{mashr::cov_pca} argument.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' covPcaConfig(subset = 1:50)
+#' @export
+covPcaConfig <- function(subset = NULL, ...) {
+    .newMethodConfig(
+        "mashr::cov_pca",
+        defaults = list(subset = subset),
+        extra = list(...),
+        label = "covPcaConfig",
+        engine = "pca"
+    )
+}
+
+#' @title Arguments For mashr's FLASH Covariance Components
+#' @description Options for \code{mashr::cov_flash}, a data-driven generator.
+#'   \code{factors} is not settable here: pecotmr sets it to distinguish the
+#'   \code{"flash"} and \code{"flashNonneg"} components.
+#' @param subset Rows of the data to use. \code{NULL} (default) uses all.
+#' @param remove_singleton Drop singleton effect vectors. Default
+#'   \code{FALSE}.
+#' @param tag,output_model Passed through to \code{mashr::cov_flash}.
+#' @param greedy_args,backfit_args Option lists forwarded to flashier's greedy
+#'   and backfit stages; mashr nests these itself.
+#' @param ... Any other \code{mashr::cov_flash} argument.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' covFlashConfig(remove_singleton = TRUE)
+#' @export
+covFlashConfig <- function(
+    subset = NULL,
+    remove_singleton = FALSE,
+    tag = NULL,
+    output_model = NULL,
+    greedy_args = list(),
+    backfit_args = list(),
+    ...
+) {
+    .newMethodConfig(
+        "mashr::cov_flash",
+        defaults = list(
+            subset = subset,
+            remove_singleton = remove_singleton,
+            tag = tag,
+            output_model = output_model,
+            greedy_args = greedy_args,
+            backfit_args = backfit_args
+        ),
+        extra = list(...),
+        label = "covFlashConfig",
+        engine = "flash"
+    )
+}
+
+#' @title Arguments For Extreme Deconvolution Refinement
+#' @description Options for \code{mashr::cov_ed}, which refines the
+#'   data-driven components by Extreme Deconvolution. The components to refine
+#'   are not settable here -- they are whatever \code{components} produced.
+#'
+#'   \code{mashr::cov_ed} takes \code{...}, so argument names \strong{cannot
+#'   be checked} against it; see \code{\link{MethodConfig}}.
+#' @param subset Rows of the data to use. \code{NULL} (default) uses all.
+#' @param algorithm Deconvolution algorithm, \code{"bovy"} (default) or
+#'   \code{"teem"}.
+#' @param ... Any other argument \code{mashr::cov_ed} forwards.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' covEdConfig(algorithm = "teem")
+#' @export
+covEdConfig <- function(subset = NULL, algorithm = "bovy", ...) {
+    .newMethodConfig(
+        "mashr::cov_ed",
+        defaults = list(subset = subset, algorithm = algorithm),
+        extra = list(...),
+        label = "covEdConfig",
+        engine = "covEd"
+    )
+}
+
+# udr's tunables live in a `control` list rather than in ud_fit's formals, so
+# the valid names come from udr::ud_fit_control_default(). Still read live, so
+# the check cannot drift from the installed udr.
+# @noRd
+.udrControlNames <- function() {
+    if (!requireNamespace("udr", quietly = TRUE)) {
+        return(NULL)
+    }
+    names(udr::ud_fit_control_default())
+}
+
+#' @title Arguments For Unconstrained Deconvolution Refinement
+#' @description Options for refining the data-driven components with
+#'   \code{udr}. Names are checked against
+#'   \code{udr::ud_fit_control_default()}, which is where udr's tunables
+#'   live; \code{udr::ud_fit} itself takes an opaque \code{control} list.
+#' @param unconstrainedUpdate How the unconstrained covariances are updated:
+#'   \code{"ed"} (default) or \code{"ted"}. This was previously spelled as
+#'   two separate engines, \code{"ud"} and \code{"ud_ted"}.
+#' @param nUnconstrained Number of unconstrained covariances udr initialises
+#'   when no data-driven components are supplied. Default \code{50}.
+#' @param ... Any \code{udr} control field (\code{maxiter}, \code{tol},
+#'   \code{tol.lik}, \code{penalty.type}, ...).
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' covUdrConfig(unconstrainedUpdate = "ted", maxiter = 500)
+#' @export
+covUdrConfig <- function(
+    unconstrainedUpdate = c("ed", "ted"),
+    nUnconstrained = 50L,
+    ...
+) {
+    unconstrainedUpdate <- arg_match(unconstrainedUpdate)
+    .newMethodConfig(
+        NULL,
+        defaults = list(
+            unconstrainedUpdate = unconstrainedUpdate,
+            nUnconstrained = nUnconstrained
+        ),
+        extra = list(...),
+        label = "covUdrConfig",
+        engine = "covUdr",
+        accepted = c(
+            "unconstrainedUpdate",
+            "nUnconstrained",
+            .udrControlNames()
+        )
+    )
+}
+
+# The generator constructors, keyed by the component name `components`
+# accepts. flashNonneg shares cov_flash's options; pecotmr sets `factors`.
+# @noRd
+.mashComponentCtors <- function() {
+    list(
+        canonical = covCanonicalConfig,
+        pca = covPcaConfig,
+        flash = covFlashConfig,
+        flashNonneg = covFlashConfig
+    )
+}
+
+# The refiner constructors, keyed by the name `engine` accepts.
+# @noRd
+.mashEngineCtors <- function() {
+    list(covEd = covEdConfig, covUdr = covUdrConfig)
+}
+
+# --- mashr fit / data / posterior settings ----------------------------------
+#
+# These three were the audit's top finding: the core mash fit had zero user
+# control. Each names the ONE mashr function it configures, so the accepted
+# set is that function's live formals.
+#
+# `seed` is refused by all of them: pecotmr owns run-to-run reproducibility
+# through `setSeed`, and two seeds that disagree is worse than one that
+# cannot be set.
+
+#' @title Settings For The mash Mixture-Weight Fit
+#' @description Options forwarded to \code{mashr::mash}, the fit that
+#'   estimates the mixture weights over the prior covariances. Checked
+#'   against that function's live formals.
+#'
+#'   \code{data}, \code{Ulist} and \code{outputlevel} are refused: they are
+#'   the inputs pecotmr assembles and the output level it needs.
+#'   \code{seed} is refused too --- use the caller's \code{setSeed}, so one
+#'   setting governs the whole run.
+#' @param ... Arguments for \code{mashr::mash}, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashConfig(nullweight = 10, optmethod = "mixSQP")
+#' @export
+mashConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            data = "the sumstats pecotmr assembles",
+            Ulist = "the prior covariances",
+            outputlevel = "fixed by the calling entry point",
+            seed = "the caller's `setSeed`"
+        ),
+        "mashConfig"
+    )
+    .newMethodConfig(
+        "mashr::mash",
+        defaults = list(),
+        extra = extra,
+        label = "mashConfig",
+        engine = "mash"
+    )
+}
+
+#' @title Settings For mashr Data Assembly
+#' @description Options forwarded to \code{mashr::mash_set_data}, which turns
+#'   the effect-size and standard-error matrices into mashr's data object.
+#'
+#'   \code{Bhat}, \code{Shat}, \code{alpha} and \code{V} are refused: the
+#'   first two are the matrices pecotmr builds, and the last two are the
+#'   caller's own \code{alpha} / \code{vhat} arguments.
+#'
+#'   \code{zero_Bhat_Shat_reset} defaults to \code{1000} here because that
+#'   is the value pecotmr has always passed; it is now a setting rather than
+#'   a literal.
+#' @param ... Arguments for \code{mashr::mash_set_data}, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashDataConfig(zero_Bhat_Shat_reset = 500)
+#' @export
+mashDataConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            Bhat = "the effect-size matrix pecotmr builds",
+            Shat = "the standard-error matrix pecotmr builds",
+            alpha = "the caller's `alpha`",
+            V = "the caller's `vhat`"
+        ),
+        "mashDataConfig"
+    )
+    .newMethodConfig(
+        "mashr::mash_set_data",
+        defaults = list(zero_Bhat_Shat_reset = 1000),
+        extra = extra,
+        label = "mashDataConfig",
+        engine = "mashData"
+    )
+}
+
+#' @title Settings For mashr Posterior Computation
+#' @description Options forwarded to
+#'   \code{mashr::mash_compute_posterior_matrices}.
+#'
+#'   \code{g}, \code{data} and \code{output_posterior_cov} are refused: the
+#'   first two are the fitted model and the data pecotmr assembles, and the
+#'   third is the caller's \code{outputPosteriorCov}. \code{A} is refused as
+#'   well --- the contrast matrix follows from \code{excludeCondition}.
+#'   \code{seed} is refused; use \code{setSeed}.
+#' @param ... Arguments for the posterior computation, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashPosteriorConfig(pi_thresh = 1e-8)
+#' @export
+mashPosteriorConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            g = "the fitted mash model",
+            data = "the sumstats pecotmr assembles",
+            A = "derived from `excludeCondition`",
+            output_posterior_cov = "the caller's `outputPosteriorCov`",
+            seed = "the caller's `setSeed`"
+        ),
+        "mashPosteriorConfig"
+    )
+    .newMethodConfig(
+        "mashr::mash_compute_posterior_matrices",
+        defaults = list(),
+        extra = extra,
+        label = "mashPosteriorConfig",
+        engine = "mashPosterior"
+    )
+}
+
+# --- residual-correlation estimator settings --------------------------------
+#
+# `mashResidualCorrelation(method =)` already picks the estimator, so these
+# follow the character-or-constructor rule the file already uses for
+# `engine =`: the argument takes either the estimator's NAME or that
+# estimator's constructor, which carries the identity in metadata().
+
+#' @title Settings For The Simple Null-Correlation Estimator
+#' @description Options forwarded to
+#'   \code{mashr::estimate_null_correlation_simple}. \code{data} is refused:
+#'   it is the null-partition data object pecotmr assembles.
+#' @param ... Arguments for the estimator, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashCorSimpleConfig(z_thresh = 3)
+#' @export
+mashCorSimpleConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(data = "the null-partition data pecotmr assembles"),
+        "mashCorSimpleConfig"
+    )
+    .newMethodConfig(
+        "mashr::estimate_null_correlation_simple",
+        defaults = list(),
+        extra = extra,
+        label = "mashCorSimpleConfig",
+        engine = "simple"
+    )
+}
+
+#' @title Settings For The EM Null-Correlation Estimator
+#' @description Options forwarded to \code{mashr::mash_estimate_corr_em}, the
+#'   \code{method = "mle"} estimator.
+#'
+#'   \code{data}, \code{Ulist} and \code{max_iter} are refused: the first
+#'   two are what pecotmr assembles, and \code{max_iter} is the caller's
+#'   \code{maxIter}.
+#'
+#'   Not checkable: \code{mash_estimate_corr_em} ends in \code{...}, so any
+#'   name is legal there and nothing can be rejected.
+#' @param ... Arguments for the estimator, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashCorEmConfig(tol = 1e-5)
+#' @export
+mashCorEmConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            data = "the random-subset data pecotmr assembles",
+            Ulist = "the prior covariances",
+            max_iter = "the caller's `maxIter`"
+        ),
+        "mashCorEmConfig"
+    )
+    .newMethodConfig(
+        "mashr::mash_estimate_corr_em",
+        defaults = list(),
+        extra = extra,
+        label = "mashCorEmConfig",
+        engine = "mle"
+    )
+}
+
+#' @title Settings For The CorShrink Null-Correlation Estimator
+#' @description Options forwarded to \code{CorShrink::CorShrinkData}, the
+#'   \code{method = "corshrink"} estimator. \code{data} is refused: it is
+#'   the null z-matrix pecotmr assembles.
+#'
+#'   \code{ash.control} and \code{image} default to what pecotmr has always
+#'   passed, so they are settings now rather than literals.
+#' @param ... Arguments for \code{CorShrinkData}, under its own names.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' corShrinkConfig(nboot = 100)
+#' @export
+corShrinkConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(data = "the null z-matrix pecotmr assembles"),
+        "corShrinkConfig"
+    )
+    .newMethodConfig(
+        "CorShrink::CorShrinkData",
+        defaults = list(
+            ash.control = list(mixcompdist = "halfuniform"),
+            image = "null"
+        ),
+        extra = extra,
+        label = "corShrinkConfig",
+        engine = "corshrink"
+    )
+}
+
+#' @title Per-Component Arguments For mashPriorCovariances
+#' @description Options for each prior-covariance component, keyed by
+#'   component name. Each entry may be a plain list or the matching
+#'   constructor -- a plain list is spliced into that constructor, so it gets
+#'   the same defaults and the same checking either way.
+#'
+#'   Naming a component here also selects it, so \code{components} need not
+#'   be given separately.
+#' @param canonical Options for \code{\link{covCanonicalConfig}}.
+#' @param pca Options for \code{\link{covPcaConfig}}.
+#' @param flash,flashNonneg Options for \code{\link{covFlashConfig}}.
+#' @return A \code{\link{MethodConfig}} object.
+#' @examples
+#' mashComponentConfig(
+#'   pca = list(subset = 1:50),
+#'   canonical = covCanonicalConfig()
+#' )
+#' @export
+mashComponentConfig <- function(
+    canonical = NULL,
+    pca = NULL,
+    flash = NULL,
+    flashNonneg = NULL
+) {
+    # discard(is.null), not compact(): compact() also drops zero-length
+    # elements, and an unconfigured constructor is a legitimately empty
+    # record -- naming a component with default options must still select it.
+    .newNestedConfig(
+        discard(
+            list(
+                canonical = canonical,
+                pca = pca,
+                flash = flash,
+                flashNonneg = flashNonneg
+            ),
+            is.null
+        ),
+        .mashComponentCtors(),
+        "mashComponentConfig"
+    )
 }
 
 # Reject unknown prior-covariance component names.
 # @noRd
+# `components` may be a character vector or a mashComponentConfig() record.
+# Naming a component in the record selects it, so the two forms carry the
+# same information and the record additionally carries per-component options.
+# @noRd
+.mashResolveComponentChoice <- function(components) {
+    if (.isMethodConfig(components)) {
+        return(list(names = names(components), args = components))
+    }
+    if (!is.character(components)) {
+        abort(glue(
+            "mashPriorCovariances: `components` must be a character vector ",
+            "or a mashComponentConfig() record."
+        ))
+    }
+    .mashValidateComponents(components)
+    list(names = components, args = NULL)
+}
+
 .mashValidateComponents <- function(
     components,
     caller = "mashPriorCovariances"
@@ -643,18 +1293,19 @@ mashPriorCovariances <- function(
 
 # mashr mash_set_data over the STRONG effects (V defaults to identity).
 # @noRd
-.mashMakeMashData <- function(partition, label, vhat, alpha, inputScale) {
+.mashMakeMashData <- function(
+    partition,
+    label,
+    vhat,
+    alpha,
+    inputScale,
+    mashDataArgs
+) {
     mats <- .mashSumStatsToMatrices(partition, label, inputScale = inputScale)
     if (is.null(vhat)) {
         vhat <- diag(rep(1, ncol(mats$b)))
     }
-    mashr::mash_set_data(
-        mats$b,
-        Shat = mats$s,
-        V = vhat,
-        alpha,
-        zero_Bhat_Shat_reset = 1000
-    )
+    .mashSetData(mats$b, mats$s, alpha, vhat, mashDataArgs)
 }
 
 # Caller-supplied prior covariance matrices (bypasses the cov_* chain; mashr
@@ -696,20 +1347,37 @@ mashPriorCovariances <- function(
     priorComponents,
     components,
     nPcs,
-    udControl,
-    engine
+    engine,
+    engineArgs = NULL,
+    componentArgs = NULL
 ) {
     comps <- .mashResolveComponents(
         priorComponents,
         mashData,
         components,
-        nPcs
+        nPcs,
+        componentArgs = componentArgs
     )
-    if (engine == "cov_ed") {
-        .mashEngineCovEd(mashData, comps)
+    # Canonical components are fixed structural hypotheses: they go to the
+    # mash fit as they are. Only the data-driven set is refined -- the split
+    # mashr's own eQTL vignette makes.
+    refined <- if (engine == "none" || length(comps$dataDriven) == 0L) {
+        list(U = comps$dataDriven, w = NULL, loglik = NULL)
+    } else if (engine == "covEd") {
+        .mashEngineCovEd(mashData, comps$dataDriven, engineArgs)
     } else {
-        .mashEngineUd(mashData, engine, udControl)
+        .mashEngineUd(
+            mashData,
+            comps$dataDriven,
+            comps$canonical,
+            engineArgs
+        )
     }
+    list(
+        U = c(refined$U, comps$canonical),
+        w = refined$w,
+        loglik = refined$loglik
+    )
 }
 
 # Raw covariance components: caller-supplied `priorComponents` (validated) or
@@ -719,14 +1387,16 @@ mashPriorCovariances <- function(
     priorComponents,
     mashData,
     components,
-    nPcs
+    nPcs,
+    componentArgs = NULL
 ) {
     priorComponents <- .mashAsUlist(priorComponents)
     if (is.null(priorComponents)) {
         return(.mashBuildComponents(
             mashData,
             components = components,
-            nPcs = nPcs
+            nPcs = nPcs,
+            componentArgs = componentArgs
         ))
     }
     if (
@@ -742,30 +1412,48 @@ mashPriorCovariances <- function(
         )
         abort(msg)
     }
-    priorComponents
+    # Caller-supplied components are covariances estimated from data, so they
+    # are the engine's input rather than fixed hypotheses.
+    list(canonical = NULL, dataDriven = priorComponents)
 }
 
 # cov_ed engine: mashr's exported extreme-deconvolution wrapper (default
 # algorithm = bovy) refines the components; mash() (upstream) learns the
 # mixture weights. Returns list(U, w = NULL, loglik = NULL).
 # @noRd
-.mashEngineCovEd <- function(mashData, comps) {
-    U.ed <- mashr::cov_ed(mashData, Ulist_init = comps)
-    list(U = c(comps, U.ed), w = NULL, loglik = NULL)
+.mashEngineCovEd <- function(mashData, dataDriven, engineArgs = NULL) {
+    U.ed <- exec(
+        mashr::cov_ed,
+        mashData,
+        Ulist_init = dataDriven,
+        !!!compact(as.list(engineArgs %||% list()))
+    )
+    list(U = U.ed, w = NULL, loglik = NULL)
 }
 
 # udr control list for the ud / ud_ted engines.
 # @noRd
-.mashUdControl <- function(engine, udControl, nCond) {
-    list(
-        unconstrained.update = if (engine == "ud_ted") "ted" else "ed",
-        scaled.update = "fa",
-        resid.update = "none",
-        lambda = nCond,
-        penalty.type = "iw",
-        maxiter = udControl$maxiter,
-        tol = udControl$tol,
-        tol.lik = udControl$tol.lik
+# pecotmr's udr control settings, overlaid with whatever covUdrConfig() carried.
+# `unconstrainedUpdate` and `nUnconstrained` are pecotmr's spellings for
+# udr's `unconstrained.update` and ud_init's `n_unconstrained`, so they are
+# translated rather than forwarded.
+# @noRd
+.mashUdControl <- function(opts, nCond) {
+    list_modify(
+        list(
+            unconstrained.update = opts$unconstrainedUpdate %||% "ed",
+            scaled.update = "fa",
+            resid.update = "none",
+            lambda = nCond,
+            penalty.type = "iw",
+            maxiter = 1000L,
+            tol = 1e-2,
+            tol.lik = 1e-2
+        ),
+        !!!compact(opts[setdiff(
+            names(opts),
+            c("unconstrainedUpdate", "nUnconstrained")
+        )])
     )
 }
 
@@ -773,24 +1461,25 @@ mashPriorCovariances <- function(
 # incompatibility.
 # @noRd
 #' @importFrom rlang try_fetch
-.mashUdFit <- function(fit0, mashData, engine, udControl) {
-    control <- .mashUdControl(engine, udControl, ncol(mashData$Bhat))
+.mashUdFit <- function(fit0, opts, nCond) {
+    control <- .mashUdControl(opts, nCond)
     try_fetch(
         udr::ud_fit(fit0, control = control, verbose = FALSE),
         error = function(cnd) {
             if (
-                engine == "ud_ted" &&
+                identical(opts$unconstrainedUpdate, "ted") &&
                     str_detect(conditionMessage(cnd), "i.i.d")
             ) {
                 msg <- glue(
-                    "mashPriorCovariances: engine 'ud_ted' (udr TED update) ",
-                    "needs i.i.d. data (a single shared V), which the beta ",
-                    "scale does not provide (per-variant SE). Use engine 'ud' ",
-                    "(ED update), or a z-scale input."
+                    "mashPriorCovariances: the udr TED update needs ",
+                    "i.i.d. data (a single shared V), which the beta scale ",
+                    "does not provide (per-variant SE). Use ",
+                    "covUdrConfig(unconstrainedUpdate = 'ed'), or a z-scale ",
+                    "input."
                 )
                 abort(msg, parent = cnd)
             }
-            # Not the ud_ted i.i.d. case rewrapped above -- re-raise the
+            # Not the TED i.i.d. case rewrapped above -- re-raise the
             # original condition unchanged so unrelated udr failures surface
             # (and aren't swallowed as a NULL fit).
             cnd_signal(cnd)
@@ -802,34 +1491,32 @@ mashPriorCovariances <- function(
 # as the scaled prior and generates n_unconstrained data-driven matrices,
 # returning U + weights + loglik directly. Returns list(U, w, loglik).
 # @noRd
-.mashEngineUd <- function(mashData, engine, udControl) {
+.mashEngineUd <- function(mashData, dataDriven, canonical, engineArgs) {
     if (!requireNamespace("udr", quietly = TRUE)) {
         msg <- glue(
-            "mashPriorCovariances: engine '{engine}' needs the udr package. ",
-            "Install it, or use the default 'cov_ed'."
+            "mashPriorCovariances: engine 'covUdr' needs the udr package. ",
+            "Install it, or use the default 'covEd'."
         )
         abort(msg)
     }
-    # NULL in a user control means "use the default", so drop before merging.
-    udControl <- list_modify(
-        list(
-            n_unconstrained = 50L,
-            maxiter = 1000L,
-            tol = 1e-2,
-            tol.lik = 1e-2
-        ),
-        !!!compact(udControl)
-    )
-    U.can <- mashr::cov_canonical(mashData)
-    fit0 <- udr::ud_init(
-        mashData,
-        n_unconstrained = udControl$n_unconstrained,
-        U_scaled = U.can
-    )
-    fit <- .mashUdFit(fit0, mashData, engine, udControl)
+    opts <- as.list(engineArgs %||% list())
+    # udr distinguishes scaled components from unconstrained ones, which is
+    # the same line mashr draws: the fixed hypotheses initialise `U_scaled`,
+    # the data-driven components `U_unconstrained`. Previously the
+    # data-driven set was discarded here and udr always started from
+    # canonical alone.
+    scaled <- canonical %||% mashr::cov_canonical(mashData)
+    initArgs <- compact(list(
+        U_scaled = scaled,
+        U_unconstrained = if (length(dataDriven) > 0L) dataDriven,
+        n_unconstrained = if (length(dataDriven) == 0L) {
+            opts$nUnconstrained %||% 50L
+        }
+    ))
+    fit0 <- exec(udr::ud_init, mashData, !!!initArgs)
+    fit <- .mashUdFit(fit0, opts, ncol(mashData$Bhat))
     list(U = map(fit$U, "mat"), w = fit$w, loglik = fit$loglik)
 }
-
 
 # =============================================================================
 # Mash model fit + posterior (mash_fit / mash_posterior notebooks)
@@ -857,6 +1544,17 @@ mashPriorCovariances <- function(
 #' @param outputLevel \code{mashr::mash()} \code{outputlevel} (default 4 -- the
 #'   full model \code{\link{mashPosterior}} consumes).
 #' @param inputScale SumStats -> matrix conversion scale.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{mashDataConfig}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
+#' @param mashArgs Extra arguments for \code{mashr::mash()}, built with
+#'   \code{\link{mashConfig}} -- for example \code{nullweight},
+#'   \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+#'   \code{outputlevel} and \code{seed} are owned by pecotmr and are
+#'   refused by the constructor.
 #' @param setSeed Integer seed, or \code{NULL} to leave the ambient RNG
 #'   untouched.
 #' @return The fitted \pkg{mashr} model (the \code{mashr::mash()} object).
@@ -886,8 +1584,12 @@ mashModelFit <- function(
     fitOn = c("random", "strong"),
     outputLevel = 4L,
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = mashDataConfig(),
+    mashArgs = mashConfig(),
     setSeed = 999
 ) {
+    .assertMethodConfig(mashDataArgs, "mashDataConfig", "mashDataArgs")
+    .assertMethodConfig(mashArgs, "mashConfig", "mashArgs")
     fitOn <- arg_match(fitOn)
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
@@ -912,9 +1614,16 @@ mashModelFit <- function(
         fitOn,
         vhat,
         alpha,
-        inputScale
+        inputScale,
+        mashDataArgs
     )
-    mashr::mash(mashData, Ulist = priorCovariances, outputlevel = outputLevel)
+    exec(
+        mashr::mash,
+        mashData,
+        Ulist = priorCovariances,
+        outputlevel = outputLevel,
+        !!!as.list(mashArgs)
+    )
 }
 
 # `priorCovariances` must be a non-empty named list of covariance matrices.
@@ -954,6 +1663,18 @@ mashModelFit <- function(
 #' @param outputPosteriorCov Return the full posterior covariance array (needed
 #'   by \code{\link{fitMashContrast}}). Default \code{TRUE}.
 #' @param inputScale SumStats -> matrix conversion scale.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{mashDataConfig}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
+#' @param posteriorArgs Extra arguments for
+#'   \code{mashr::mash_compute_posterior_matrices()}, built with
+#'   \code{\link{mashPosteriorConfig}} -- for example
+#'   \code{algorithm.version}. \code{g}, \code{data}, \code{A},
+#'   \code{output_posterior_cov} and \code{seed} are owned by pecotmr
+#'   and are refused by the constructor.
 #' @return The \code{mashr::mash_compute_posterior_matrices()} result: a list of
 #'   \code{PosteriorMean} / \code{PosteriorSD} / \code{lfsr} /
 #'   \code{NegativeProb} (+ \code{PosteriorCov} when \code{outputPosteriorCov =
@@ -984,8 +1705,12 @@ mashPosterior <- function(
     vhat = NULL,
     excludeCondition = character(0),
     outputPosteriorCov = TRUE,
-    inputScale = c("auto", "beta", "z")
+    inputScale = c("auto", "beta", "z"),
+    mashDataArgs = mashDataConfig(),
+    posteriorArgs = mashPosteriorConfig()
 ) {
+    .assertMethodConfig(mashDataArgs, "mashDataConfig", "mashDataArgs")
+    .assertMethodConfig(posteriorArgs, "mashPosteriorConfig", "posteriorArgs")
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
@@ -999,17 +1724,13 @@ mashPosterior <- function(
         as.character(excludeCondition)
     )
     vhat <- if (is.null(ex$vhat)) diag(rep(1, ncol(ex$b))) else ex$vhat
-    mashData <- mashr::mash_set_data(
-        ex$b,
-        Shat = ex$s,
-        V = vhat,
-        alpha,
-        zero_Bhat_Shat_reset = 1000
-    )
-    mashr::mash_compute_posterior_matrices(
+    mashData <- .mashSetData(ex$b, ex$s, alpha, vhat, mashDataArgs)
+    exec(
+        mashr::mash_compute_posterior_matrices,
         ex$model,
         mashData,
-        output_posterior_cov = outputPosteriorCov
+        output_posterior_cov = outputPosteriorCov,
+        !!!as.list(posteriorArgs)
     )
 }
 
@@ -1551,6 +2272,9 @@ sanitizeMashData <- function(data) {
 #'   meta-analysis, forwarded to \code{metafor::rma(method = )}. Default
 #'   \code{"DL"} (DerSimonian-Laird); other options include \code{"REML"},
 #'   \code{"ML"}, \code{"EB"}.
+#' @param metaArgs Extra arguments for \code{metafor::rma()}, built with
+#'   \code{\link{rmaConfig}} -- \code{test = "knha"} in particular, the
+#'   small-study correction.
 #' @return A tibble with columns:
 #'   \describe{
 #'     \item{condition}{The condition (context) name.}
@@ -1574,8 +2298,10 @@ metaAnalysisPerCondition <- function(
     effectSizes,
     seValues,
     seCutoff = 0,
-    metaMethod = "DL"
+    metaMethod = "DL",
+    metaArgs = rmaConfig()
 ) {
+    .assertMethodConfig(metaArgs, "rmaConfig", "metaArgs")
     stopifnot(identical(dim(effectSizes), dim(seValues)))
     stopifnot(identical(colnames(effectSizes), colnames(seValues)))
     contrasts <- str_remove(colnames(effectSizes), "^mean_contrast_")
@@ -1590,7 +2316,8 @@ metaAnalysisPerCondition <- function(
         seValues = seValues,
         contrasts = contrasts,
         seCutoff = seCutoff,
-        metaMethod = metaMethod
+        metaMethod = metaMethod,
+        metaArgs = metaArgs
     ))
     bind_rows(rows)
 }
@@ -1603,7 +2330,8 @@ metaAnalysisPerCondition <- function(
     seValues,
     contrasts,
     seCutoff,
-    metaMethod
+    metaMethod,
+    metaArgs = list()
 ) {
     idx <- which(str_detect(colnames(effectSizes), condition))
     if (length(idx) == 0) {
@@ -1620,7 +2348,8 @@ metaAnalysisPerCondition <- function(
         condEffects = condEffects,
         condSes = condSes,
         seCutoff = seCutoff,
-        metaMethod = metaMethod
+        metaMethod = metaMethod,
+        metaArgs = metaArgs
     )
 }
 
@@ -1634,7 +2363,8 @@ metaAnalysisPerCondition <- function(
     es,
     se,
     seCutoff,
-    metaMethod
+    metaMethod,
+    metaArgs = list()
 ) {
     keep <- se > seCutoff & is.finite(es) & is.finite(se)
     es <- es[keep]
@@ -1654,7 +2384,7 @@ metaAnalysisPerCondition <- function(
             I2 = NA_real_
         ))
     }
-    ma <- .rmaMeta(es, se, method = metaMethod)
+    ma <- .rmaMeta(es, se, method = metaMethod, metaArgs = metaArgs)
     tibble(
         condition = condition,
         contrast = contrast,
@@ -1679,6 +2409,9 @@ metaAnalysisPerCondition <- function(
 #'   columns.
 #' @param metaMethod Between-study variance estimator forwarded to
 #'   \code{metafor::rma} (default \code{"REML"}).
+#' @param metaArgs Extra arguments for \code{metafor::rma()}, built with
+#'   \code{\link{rmaConfig}} -- \code{test = "knha"} in particular, the
+#'   small-study correction.
 #' @return A \code{data.frame} with \code{condition} and \code{zScore}.
 #' @seealso \code{\link{nSignificantScore}}, \code{\link{scoreFromCs}}
 #' @examples
@@ -1692,8 +2425,13 @@ metaAnalysisPerCondition <- function(
 #' calculateFeatureScores(cr, metaMethod = "mean")
 #' @importFrom checkmate assertString
 #' @export
-calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
+calculateFeatureScores <- function(
+    contrastResult,
+    metaMethod = "REML",
+    metaArgs = rmaConfig()
+) {
     assertString(metaMethod)
+    .assertMethodConfig(metaArgs, "rmaConfig", "metaArgs")
     cr <- as_tibble(contrastResult)
     effCols <- names(cr)[str_detect(names(cr), "mean_contrast_.*deviation")]
     if (length(effCols) == 0L) {
@@ -1703,7 +2441,8 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
         effCols,
         .metaContrastZScore,
         cr = cr,
-        metaMethod = metaMethod
+        metaMethod = metaMethod,
+        metaArgs = metaArgs
     )
     tibble(
         condition = str_remove(
@@ -1833,7 +2572,8 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
     condEffects,
     condSes,
     seCutoff,
-    metaMethod
+    metaMethod,
+    metaArgs = list()
 ) {
     .metaOneContrast(
         condition,
@@ -1841,13 +2581,14 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
         abs(as.numeric(condEffects[, i])),
         as.numeric(condSes[, i]),
         seCutoff,
-        metaMethod
+        metaMethod,
+        metaArgs
     )
 }
 
 # Meta-analysis z-score (mean/se) for one mean-contrast column, NA when empty.
 # @noRd
-.metaContrastZScore <- function(ec, cr, metaMethod) {
+.metaContrastZScore <- function(ec, cr, metaMethod, metaArgs = list()) {
     seCol <- str_replace(ec, "^mean_contrast", "se_contrast")
     if (!is_in(seCol, names(cr))) {
         return(NA_real_)
@@ -1860,7 +2601,7 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
     if (length(es) < 1L) {
         return(NA_real_)
     }
-    ma <- .rmaMeta(es, se, method = metaMethod)
+    ma <- .rmaMeta(es, se, method = metaMethod, metaArgs = metaArgs)
     ma$mean / ma$se
 }
 

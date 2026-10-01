@@ -484,7 +484,7 @@
     region = NULL,
     perEntry,
     onSingle = perEntry,
-    ...
+    viewArgs = list()
 ) {
     single <- .fmrTrySingle(
         x,
@@ -494,7 +494,7 @@
         method,
         region,
         onSingle,
-        ...
+        viewArgs
     )
     if (single$done) {
         return(single$result)
@@ -517,7 +517,7 @@
         x = x,
         perEntry = perEntry,
         meta = meta,
-        ...
+        viewArgs = viewArgs
     ))
     if (length(parts) == 0L) {
         return(slice(meta, integer(0)))
@@ -549,7 +549,7 @@
     method,
     region,
     onSingle,
-    ...
+    viewArgs
 ) {
     anySelector <- !is.null(study) ||
         !is.null(context) ||
@@ -571,7 +571,7 @@
         error = function(cnd) cnd
     )
     if (!inherits(sel, "error")) {
-        return(list(done = TRUE, result = onSingle(sel, ...)))
+        return(list(done = TRUE, result = exec(onSingle, sel, !!!viewArgs)))
     }
     list(done = FALSE, sel = sel)
 }
@@ -579,11 +579,11 @@
 # Project one entry to its per-entry view with the row's identity metadata
 # prepended; NULL when the entry yields no rows.
 # @noRd
-.fmrEntryPart <- function(i, x, perEntry, meta, ...) {
+.fmrEntryPart <- function(i, x, perEntry, meta, viewArgs) {
     # `perEntry` is an internal per-row function taking the stored payload, not
     # an S4 generic dispatching on a rebuilt entry. That indirection is what
     # the FineMappingRow class existed for.
-    raw <- perEntry(.fmrRowParts(x, i), ...)
+    raw <- exec(perEntry, .fmrRowParts(x, i), !!!viewArgs)
     if (is.null(raw) || nrow(raw) == 0L) {
         return(NULL)
     }

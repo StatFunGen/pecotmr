@@ -338,7 +338,7 @@ test_that("mashPipeline runs end-to-end on qtlSumStatsMulticontextExample", {
         mashPipeline(
             sumStatsList = list(strong = ss, random = ss),
             alpha = 0,
-            nPcs = 2L,
+            prior = mashPriorConfig(nPcs = 2L),
             setSeed = 1L
         )
     ))
@@ -501,7 +501,7 @@ test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
                 list(strong = ss),
                 alpha = 0,
                 residualCorrelation = vhat,
-                priorCovariances = list()
+                prior = mashPriorConfig(priorCovariances = list())
             )
         )),
         "non-empty named"
@@ -513,7 +513,7 @@ test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
                 list(strong = ss),
                 alpha = 0,
                 residualCorrelation = vhat,
-                priorCovariances = list(diag(3))
+                prior = mashPriorConfig(priorCovariances = list(diag(3)))
             )
         )),
         "non-empty named"
@@ -531,7 +531,7 @@ test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
                 list(strong = ss),
                 alpha = 0,
                 residualCorrelation = vhat,
-                priorCovariances = list(myU = diag(2))
+                prior = mashPriorConfig(priorCovariances = list(myU = diag(2)))
             )
         )),
         "3 x 3 matrix"
@@ -549,7 +549,7 @@ test_that("mashPipeline passes supplied residualCorrelation + priorCovariances t
             list(strong = ss),
             alpha = 0,
             residualCorrelation = vhat,
-            priorCovariances = U0
+            prior = mashPriorConfig(priorCovariances = U0)
         )
     ))
     expect_named(res, c("U", "w"))
@@ -609,20 +609,20 @@ test_that("the default is identity regardless of which partitions are given", {
     withNull <- suppressMessages(suppressWarnings(mashPipeline(
         list(strong = ss, random = ss, null = ss),
         alpha = 0,
-        priorCovariances = prior,
+        prior = mashPriorConfig(priorCovariances = prior),
         setSeed = 1L
     )))
     withoutNull <- suppressMessages(suppressWarnings(mashPipeline(
         list(strong = ss, random = ss),
         alpha = 0,
-        priorCovariances = prior,
+        prior = mashPriorConfig(priorCovariances = prior),
         setSeed = 1L
     )))
     explicit <- suppressMessages(suppressWarnings(mashPipeline(
         list(strong = ss, random = ss, null = ss),
         alpha = 0,
         residualCorrelationMethod = "identity",
-        priorCovariances = prior,
+        prior = mashPriorConfig(priorCovariances = prior),
         setSeed = 1L
     )))
     expect_equal(withNull$w, withoutNull$w)
@@ -639,7 +639,7 @@ test_that("an unused null partition is reported", {
         suppressWarnings(mashPipeline(
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
-            priorCovariances = mashTinyPrior(),
+            prior = mashPriorConfig(priorCovariances = mashTinyPrior()),
             setSeed = 1L
         )),
         "does not use it"
@@ -650,7 +650,7 @@ test_that("an unused null partition is reported", {
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
             residualCorrelationMethod = "identity",
-            priorCovariances = mashTinyPrior(),
+            prior = mashPriorConfig(priorCovariances = mashTinyPrior()),
             setSeed = 1L
         )),
         "'null' partition"
@@ -665,7 +665,7 @@ test_that("no unused-null notice when there is nothing to ignore", {
         suppressWarnings(mashPipeline(
             list(strong = ss, random = ss),
             alpha = 0,
-            priorCovariances = mashTinyPrior(),
+            prior = mashPriorConfig(priorCovariances = mashTinyPrior()),
             setSeed = 1L
         ))
     }
@@ -676,7 +676,7 @@ test_that("no unused-null notice when there is nothing to ignore", {
             list(strong = ss, random = ss, null = ss),
             alpha = 0,
             residualCorrelationMethod = "simple",
-            priorCovariances = mashTinyPrior(),
+            prior = mashPriorConfig(priorCovariances = mashTinyPrior()),
             setSeed = 1L
         ))
     }
@@ -693,14 +693,14 @@ test_that("mashPipeline honours a data-driven residualCorrelationMethod", {
         sl,
         alpha = 0,
         residualCorrelationMethod = "identity",
-        priorCovariances = prior,
+        prior = mashPriorConfig(priorCovariances = prior),
         setSeed = 1L
     )))
     simpleFit <- suppressMessages(suppressWarnings(mashPipeline(
         sl,
         alpha = 0,
         residualCorrelationMethod = "simple",
-        priorCovariances = prior,
+        prior = mashPriorConfig(priorCovariances = prior),
         setSeed = 1L
     )))
     # A different V has to move the fit, or the argument is not reaching it.
@@ -743,7 +743,7 @@ test_that("a supplied residualCorrelation wins over the method", {
         alpha = 0,
         residualCorrelation = diag(3),
         residualCorrelationMethod = "simple",
-        priorCovariances = mashTinyPrior(),
+        prior = mashPriorConfig(priorCovariances = mashTinyPrior()),
         setSeed = 1L
     )))
     expect_named(res, c("U", "w"))
@@ -975,8 +975,7 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
             list(strong = ss),
             alpha = 0,
             vhat = diag(3),
-            engine = "ud",
-            udControl = list(n_unconstrained = 2L, maxiter = 20L),
+            engine = covUdrConfig(nUnconstrained = 2L, maxiter = 20L),
             setSeed = 1L
         )
     ))
@@ -988,7 +987,7 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
 })
 
-test_that("mashPriorCovariances engine 'ud_ted' errors clearly on non-i.i.d. data", {
+test_that("mashPriorCovariances TED update errors clearly on non-i.i.d. data", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     skip_if_not_installed("udr")
@@ -999,7 +998,7 @@ test_that("mashPriorCovariances engine 'ud_ted' errors clearly on non-i.i.d. dat
                 list(strong = ss),
                 alpha = 0,
                 vhat = diag(3),
-                engine = "ud_ted",
+                engine = covUdrConfig(unconstrainedUpdate = "ted"),
                 setSeed = 1L
             )
         )),
@@ -1093,8 +1092,28 @@ test_that("mashCovarianceComponents feeds mashPriorCovariances (same components)
             setSeed = 1L
         )
     ))
-    # mashPriorCovariances refines these components, so its U contains them all.
-    expect_true(all(names(comps) %in% names(prior$U)))
+    # Canonical components are structural hypotheses and reach the prior
+    # unrefined, so their names survive verbatim. The data-driven ones are
+    # replaced by their Extreme Deconvolution refinements (mashr names those
+    # "ED_<source>"), rather than appearing twice as they used to.
+    # Derived rather than pattern-matched: mashr names singleton components
+    # after the conditions themselves (brain, blood, ...), so only a
+    # canonical-only build says reliably which names are canonical.
+    canonicalNames <- names(suppressMessages(suppressWarnings(
+        mashCovarianceComponents(
+            list(strong = ss),
+            alpha = 0,
+            vhat = diag(3),
+            components = "canonical",
+            setSeed = 1L
+        )
+    )))
+    expect_true(length(canonicalNames) > 0L)
+    expect_true(all(canonicalNames %in% names(prior$U)))
+    dataDrivenNames <- setdiff(names(comps), canonicalNames)
+    expect_true(length(dataDrivenNames) > 0L)
+    expect_false(any(dataDrivenNames %in% names(prior$U)))
+    expect_true(any(grepl("^ED", names(prior$U))))
 })
 
 test_that("mashCovarianceComponents rejects unknown components", {
@@ -1130,12 +1149,15 @@ test_that("mashPriorCovariances refines supplied priorComponents (pipeline mode)
             alpha = 0,
             vhat = diag(3),
             priorComponents = comps,
-            engine = "cov_ed",
+            engine = "covEd",
             setSeed = 1L
         )
     ))
-    # the supplied components are refined into the returned U (not rebuilt)
-    expect_true(all(names(comps) %in% names(pr$U)))
+    # Supplied components are treated as the engine's input, so what comes
+    # back are their refinements, not the originals.
+    expect_false(any(names(comps) %in% names(pr$U)))
+    expect_true(any(grepl("^ED", names(pr$U))))
+    expect_equal(length(pr$U), length(comps))
     expect_equal(sum(pr$w), 1, tolerance = 1e-6)
 })
 
@@ -1755,15 +1777,14 @@ test_that(".mashUdFit re-raises an unrelated udr failure unchanged", {
         .mashUdControl = function(...) list(),
         .package = "pecotmr"
     )
-    # Only the ud_ted i.i.d. incompatibility is rewrapped; anything else must
+    # Only the TED i.i.d. incompatibility is rewrapped; anything else must
     # surface as itself rather than being swallowed into a NULL fit.
     expect_error(
         with_mocked_bindings(
             pecotmr:::.mashUdFit(
                 NULL,
-                list(Bhat = matrix(0, 2L, 2L)),
-                "ud_ted",
-                list()
+                list(unconstrainedUpdate = "ted"),
+                2L
             ),
             ud_fit = function(...) stop("totally unrelated failure"),
             .package = "udr"
@@ -1803,4 +1824,313 @@ test_that("mashPipeline helpers: argument guards fire", {
         "pair.*Must have length 2"
     )
     expect_error(sanitizeMashData("nope"), "data.*Must be of type 'list'")
+})
+
+test_that("mash covariance constructors validate against their mashr callee", {
+    skip_if_not_installed("mashr")
+    expect_s4_class(covPcaConfig(subset = 1:5), "MethodConfig")
+    expect_equal(covFlashConfig(remove_singleton = TRUE)$remove_singleton, TRUE)
+    expect_error(covPcaConfig(subsett = 1:5), "unknown argument")
+    # A genuinely unmatched name; note `cov_method` would be accepted by R's
+    # partial matching, resolving to `cov_methods`.
+    expect_error(
+        covCanonicalConfig(covMethods = "identity"),
+        "unknown argument"
+    )
+    # mashr::cov_ed takes `...`, so its names cannot be checked; the record
+    # says so rather than pretending otherwise.
+    expect_output(show(covEdConfig()), "NOT checked")
+})
+
+test_that("covUdrConfig validates against udr's control fields", {
+    skip_if_not_installed("udr")
+    a <- covUdrConfig(unconstrainedUpdate = "ted", maxiter = 500)
+    expect_equal(a$unconstrainedUpdate, "ted")
+    expect_equal(a$maxiter, 500)
+    # udr's tunables live in a control list, not in ud_fit's formals.
+    expect_error(covUdrConfig(maxitr = 5), "unknown argument")
+    expect_error(covUdrConfig(unconstrainedUpdate = "nope"), "must be one of")
+})
+
+test_that("mashComponentConfig takes plain lists or constructors per entry", {
+    skip_if_not_installed("mashr")
+    ca <- mashComponentConfig(
+        pca = list(subset = 1:5),
+        canonical = covCanonicalConfig()
+    )
+    expect_s4_class(ca, "MethodConfig")
+    expect_setequal(names(ca), c("canonical", "pca"))
+    expect_equal(ca$pca$subset, 1:5)
+    expect_error(mashComponentConfig(pca = list(nope = 1)), "unknown argument")
+    expect_error(
+        mashComponentConfig(pca = covCanonicalConfig()),
+        "was built with the constructor for 'canonical'"
+    )
+})
+
+test_that("mashPriorCovariances takes components as names or a record", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    ss <- mashFixture()
+    byRecord <- suppressMessages(suppressWarnings(
+        mashPriorCovariances(
+            list(strong = ss),
+            alpha = 0,
+            vhat = diag(3),
+            components = mashComponentConfig(canonical = covCanonicalConfig()),
+            engine = "none",
+            setSeed = 1L
+        )
+    ))
+    # Naming a component in the record selects it, so canonical-only here.
+    expect_true(length(byRecord$U) > 0L)
+    expect_false(any(grepl("^ED", names(byRecord$U))))
+})
+
+test_that("engine 'none' leaves the data-driven components unrefined", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    ss <- mashFixture()
+    raw <- suppressMessages(suppressWarnings(
+        mashPriorCovariances(
+            list(strong = ss),
+            alpha = 0,
+            vhat = diag(3),
+            components = c("pca"),
+            engine = "none",
+            nPcs = 2L,
+            setSeed = 1L
+        )
+    ))
+    # mashr supports using generator output directly as the prior; pecotmr
+    # used to refine unconditionally.
+    expect_true(any(grepl("^PCA", names(raw$U))))
+    expect_false(any(grepl("^ED", names(raw$U))))
+})
+
+test_that("mashPriorCovariances rejects an unknown engine", {
+    skip_if_not_installed("mashr")
+    ss <- mashFixture()
+    expect_error(
+        mashPriorCovariances(
+            list(strong = ss),
+            alpha = 0,
+            vhat = diag(3),
+            engine = "ud_ted"
+        ),
+        "unknown engine 'ud_ted'"
+    )
+})
+
+test_that("the mash constructors refuse the arguments pecotmr owns", {
+    expect_error(mashConfig(seed = 1L), "`seed`")
+    expect_error(mashConfig(data = 1L), "the sumstats pecotmr assembles")
+    expect_error(mashConfig(Ulist = list()), "the prior covariances")
+    expect_error(mashConfig(outputlevel = 2L), "fixed by the calling entry")
+    expect_error(mashDataConfig(Bhat = 1), "the effect-size matrix")
+    expect_error(mashDataConfig(alpha = 0), "the caller's `alpha`")
+    expect_error(mashDataConfig(V = diag(2)), "the caller's `vhat`")
+    expect_error(mashPosteriorConfig(seed = 1L), "`seed`")
+    expect_error(mashPosteriorConfig(g = 1L), "the fitted mash model")
+    expect_error(
+        mashPosteriorConfig(output_posterior_cov = TRUE),
+        "the caller's `outputPosteriorCov`"
+    )
+    expect_error(mashCorSimpleConfig(data = 1L), "the null-partition data")
+    expect_error(mashCorEmConfig(max_iter = 2L), "the caller's `maxIter`")
+    expect_error(corShrinkConfig(data = 1L), "the null z-matrix")
+})
+
+test_that("the mash constructors validate against their engine's formals", {
+    expect_error(mashConfig(nosuch = 1), "unknown argument")
+    expect_error(mashDataConfig(nosuch = 1), "unknown argument")
+    expect_error(mashPosteriorConfig(nosuch = 1), "unknown argument")
+    expect_error(mashCorSimpleConfig(nosuch = 1), "unknown argument")
+    expect_error(corShrinkConfig(nosuch = 1), "unknown argument")
+    # mashr::mash_estimate_corr_em takes dots, so nothing can be checked.
+    expect_s4_class(mashCorEmConfig(nosuch = 1), "MethodConfig")
+})
+
+test_that("the mash constructors carry their pecotmr defaults", {
+    expect_equal(mashDataConfig()$zero_Bhat_Shat_reset, 1000)
+    expect_setequal(names(corShrinkConfig()), c("ash.control", "image"))
+    expect_equal(corShrinkConfig()$image, "null")
+    # An explicit value wins over the default.
+    expect_equal(
+        mashDataConfig(zero_Bhat_Shat_reset = 1)$zero_Bhat_Shat_reset,
+        1
+    )
+    expect_length(mashConfig(), 0L)
+})
+
+test_that("mashDataArgs reaches mashr::mash_set_data", {
+    skip_if_not_installed("mashr")
+    seen <- NULL
+    real <- mashr::mash_set_data
+    ss <- mashFixture(20L)
+    suppressMessages(suppressWarnings(with_mocked_bindings(
+        mashModelFit(
+            list(random = ss),
+            alpha = 0,
+            priorCovariances = mashTinyPrior(),
+            vhat = diag(3),
+            mashDataArgs = mashDataConfig(zero_Shat_reset = 0.5),
+            setSeed = 1L
+        ),
+        mash_set_data = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "mashr"
+    )))
+    expect_equal(seen$zero_Shat_reset, 0.5)
+    # The pecotmr default rides along unless the caller overrides it.
+    expect_equal(seen$zero_Bhat_Shat_reset, 1000)
+})
+
+test_that("mashArgs reaches mashr::mash", {
+    skip_if_not_installed("mashr")
+    seen <- NULL
+    real <- mashr::mash
+    ss <- mashFixture(20L)
+    suppressMessages(suppressWarnings(with_mocked_bindings(
+        mashModelFit(
+            list(random = ss),
+            alpha = 0,
+            priorCovariances = mashTinyPrior(),
+            vhat = diag(3),
+            mashArgs = mashConfig(nullweight = 7, verbose = FALSE),
+            setSeed = 1L
+        ),
+        mash = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "mashr"
+    )))
+    expect_equal(seen$nullweight, 7)
+    expect_false(seen$verbose)
+    # The entry point keeps owning outputlevel and the data/prior pair.
+    expect_equal(seen$outputlevel, 4L)
+})
+
+test_that("mashPipeline forwards mashDataArgs and mashArgs downstream", {
+    skip_if_not_installed("mashr")
+    dataSeen <- list()
+    mashSeen <- list()
+    realData <- mashr::mash_set_data
+    realMash <- mashr::mash
+    ss <- mashFixture(20L)
+    suppressMessages(suppressWarnings(with_mocked_bindings(
+        mashPipeline(
+            list(strong = ss, random = ss, null = ss),
+            alpha = 0,
+            residualCorrelationMethod = "simple",
+            prior = mashPriorConfig(priorCovariances = mashTinyPrior()),
+            mashDataArgs = mashDataConfig(zero_Shat_reset = 0.25),
+            mashArgs = mashConfig(nullweight = 3)
+        ),
+        mash_set_data = function(...) {
+            dataSeen[[length(dataSeen) + 1L]] <<- list(...)
+            realData(...)
+        },
+        mash = function(...) {
+            mashSeen[[length(mashSeen) + 1L]] <<- list(...)
+            realMash(...)
+        },
+        .package = "mashr"
+    )))
+    # Both the Vhat estimator and the prior/weight fit build mash data, and
+    # every one of those calls must carry the caller's settings.
+    expect_gte(length(dataSeen), 2L)
+    expect_true(all(map_dbl(dataSeen, "zero_Shat_reset") == 0.25))
+    expect_gte(length(mashSeen), 1L)
+    expect_true(all(map_dbl(mashSeen, "nullweight") == 3))
+})
+
+test_that("mashPosterior forwards posteriorArgs", {
+    skip_if_not_installed("mashr")
+    seen <- NULL
+    real <- mashr::mash_compute_posterior_matrices
+    ss <- mashFixture(20L)
+    model <- suppressMessages(suppressWarnings(mashModelFit(
+        list(random = ss),
+        alpha = 0,
+        priorCovariances = mashTinyPrior(),
+        vhat = diag(3),
+        setSeed = 1L
+    )))
+    suppressMessages(suppressWarnings(with_mocked_bindings(
+        mashPosterior(
+            model,
+            ss,
+            alpha = 0,
+            vhat = diag(3),
+            posteriorArgs = mashPosteriorConfig(pi_thresh = 1e-8)
+        ),
+        mash_compute_posterior_matrices = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "mashr"
+    )))
+    expect_equal(seen$pi_thresh, 1e-8)
+})
+
+test_that("mashResidualCorrelation takes method as a name or a constructor", {
+    skip_if_not_installed("mashr")
+    seen <- NULL
+    real <- mashr::estimate_null_correlation_simple
+    ss <- mashFixture(20L)
+    byName <- suppressMessages(suppressWarnings(mashResidualCorrelation(
+        list(strong = ss, null = ss),
+        alpha = 0,
+        method = "simple"
+    )))
+    byCtor <- suppressMessages(suppressWarnings(with_mocked_bindings(
+        mashResidualCorrelation(
+            list(strong = ss, null = ss),
+            alpha = 0,
+            method = mashCorSimpleConfig(z_thresh = 1)
+        ),
+        estimate_null_correlation_simple = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "mashr"
+    )))
+    expect_equal(seen$z_thresh, 1)
+    expect_equal(dim(byName), dim(byCtor))
+    expect_error(
+        mashResidualCorrelation(
+            list(strong = ss),
+            alpha = 0,
+            method = mashConfig()
+        ),
+        "unknown engine 'mash'"
+    )
+})
+
+test_that("mashResidualCorrelation routes corShrinkConfig to CorShrink", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("CorShrink")
+    seen <- NULL
+    real <- CorShrink::CorShrinkData
+    ss <- mashFixture(20L)
+    suppressMessages(suppressWarnings(with_mocked_bindings(
+        mashResidualCorrelation(
+            list(strong = ss, null = ss),
+            alpha = 0,
+            method = corShrinkConfig(cor_method = "pearson")
+        ),
+        CorShrinkData = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "CorShrink"
+    )))
+    expect_equal(seen$cor_method, "pearson")
+    # The pecotmr defaults ride along.
+    expect_equal(seen$image, "null")
+    expect_equal(seen$ash.control, list(mixcompdist = "halfuniform"))
 })

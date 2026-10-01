@@ -4,7 +4,12 @@
 \alias{susieAshWeights}
 \title{Compute SuSiE-ASH TWAS weights}
 \usage{
-susieAshWeights(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE)
+susieAshWeights(
+  X = NULL,
+  y = NULL,
+  susieAshFit = NULL,
+  fitRetention = c("none", "slim", "full")
+)
 }
 \arguments{
 \item{X}{Optional genotype matrix; when supplied it is only used to
@@ -14,8 +19,10 @@ check that the fit covers the same number of variants.}
 
 \item{susieAshFit}{Optional fitted SuSiE-ASH object.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute on the
-returned weights.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 Numeric vector of variant weights.

@@ -73,7 +73,7 @@ ctwasEstExample <- estCtwasParam(
     niterPrefit = 3,
     niter = 10,
     fallbackToPrefit = TRUE,
-    ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0)
+    methodArgs = ctwasArgs(min_group_size = 1, min_p_single_effect = 0)
 )
 
 # The toy GWAS carries no genome-wide-significant signal, so the default
@@ -81,7 +81,7 @@ ctwasEstExample <- estCtwasParam(
 # empty result. Keep every region so the finemap payload is populated.
 screened <- screenCtwasRegions(
     ctwasEstExample,
-    ctwasArgs = list(min_nonSNP_PIP = 0)
+    methodArgs = ctwasArgs(min_nonSNP_PIP = 0)
 )
 ctwasFinemapExample <- finemapCtwasRegions(screened)
 
@@ -131,12 +131,12 @@ invisible(estCtwasParam(
     niterPrefit = 3,
     niter = 10,
     fallbackToPrefit = TRUE,
-    ctwasArgs = list(min_group_size = 1, min_p_single_effect = 0)
+    methodArgs = ctwasArgs(min_group_size = 1, min_p_single_effect = 0)
 ))
 invisible(finemapCtwasRegions(
     screenCtwasRegions(
         ctwasEstExample,
-        ctwasArgs = list(min_nonSNP_PIP = 0)
+        methodArgs = ctwasArgs(min_nonSNP_PIP = 0)
     )
 ))
 invisible(asCtwasResult(ctwasFinemapExample))

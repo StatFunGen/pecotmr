@@ -16,13 +16,7 @@ loadMultiStudyQtlDatasetFromManifest(
   formatMapping = NULL,
   transposeCovariates = FALSE,
   scaleResiduals = TRUE,
-  mafCutoff = 0,
-  macCutoff = 0,
-  xvarCutoff = 0,
-  imissCutoff = 0,
-  keepSamples = character(0),
-  keepVariants = character(0),
-  keepIndel = TRUE
+  genotypeFilterArgs = genotypeFilterConfig()
 )
 }
 \arguments{
@@ -41,11 +35,12 @@ loader for \code{sumStatsManifest}.}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout).}
 
-\item{scaleResiduals, mafCutoff, macCutoff, xvarCutoff}{Pass-through
-\code{\link{QtlDataset}} arguments applied to every study.}
+\item{scaleResiduals}{Pass-through \code{\link{QtlDataset}} argument,
+applied to every study.}
 
-\item{imissCutoff, keepSamples, keepVariants, keepIndel}{Pass-through
-\code{\link{QtlDataset}} arguments applied to every study.}
+\item{genotypeFilterArgs}{Pass-through \code{\link{QtlDataset}} filtering
+options, built with \code{\link{genotypeFilterConfig}} and applied to
+every study.}
 }
 \value{
 A \code{MultiStudyQtlDataset} object.

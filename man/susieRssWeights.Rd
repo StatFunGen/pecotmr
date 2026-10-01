@@ -4,7 +4,12 @@
 \alias{susieRssWeights}
 \title{Compute SuSiE-RSS TWAS weights}
 \usage{
-susieRssWeights(stat, LD, susieRssFit = NULL, retainFit = TRUE)
+susieRssWeights(
+  stat,
+  LD,
+  susieRssFit = NULL,
+  fitRetention = c("slim", "none", "full")
+)
 }
 \arguments{
 \item{stat}{List with components \code{z} (z-scores), \code{n} (sample
@@ -15,7 +20,10 @@ sizes).}
 \item{susieRssFit}{A fitted SuSiE-RSS object. Required: these wrappers
 extract weights and never run fine-mapping themselves.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 Numeric vector of variant weights.

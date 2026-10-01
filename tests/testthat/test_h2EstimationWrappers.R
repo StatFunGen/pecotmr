@@ -872,60 +872,6 @@ test_that("computeLdScores LdScore with annotations and ld_matrix_list returns c
 context("h2_utils")
 
 # =============================================================================
-# weightedLs
-# =============================================================================
-
-test_that("weightedLs returns correct structure", {
-    set.seed(42)
-    n <- 50
-    x <- rnorm(n)
-    X <- cbind(x, 1)
-    y <- 2 * x + 1 + rnorm(n, sd = 0.1)
-    w <- rep(1, n)
-    res <- pecotmr:::weightedLs(y, X, w)
-    expect_true(is.list(res))
-    expect_named(res, c("coef", "se", "residuals", "fitted", "vcov"))
-    expect_length(res$coef, 2)
-    expect_length(res$se, 2)
-    expect_length(res$residuals, n)
-    expect_length(res$fitted, n)
-    expect_equal(dim(res$vcov), c(2, 2))
-})
-
-test_that("weightedLs recovers coefficients for simple linear model", {
-    set.seed(42)
-    n <- 200
-    x <- rnorm(n)
-    X <- cbind(x, 1)
-    y <- 2 * x + 1 + rnorm(n, sd = 0.1)
-    w <- rep(1, n)
-    res <- pecotmr:::weightedLs(y, X, w)
-    expect_equal(res$coef[1], 2, tolerance = 0.1)
-    expect_equal(res$coef[2], 1, tolerance = 0.1)
-})
-
-test_that("weightedLs converts vector X to matrix", {
-    set.seed(42)
-    n <- 30
-    x <- rnorm(n)
-    y <- 3 * x + rnorm(n, sd = 0.1)
-    w <- rep(1, n)
-    res <- pecotmr:::weightedLs(y, x, w)
-    expect_length(res$coef, 1)
-    expect_equal(res$coef[1], 3, tolerance = 0.2)
-})
-
-test_that("weightedLs fitted + residuals = y", {
-    set.seed(42)
-    n <- 30
-    X <- cbind(rnorm(n), 1)
-    y <- rnorm(n)
-    w <- rep(1, n)
-    res <- pecotmr:::weightedLs(y, X, w)
-    expect_equal(res$fitted + res$residuals, y)
-})
-
-# =============================================================================
 # jackknifeSe
 # =============================================================================
 
@@ -975,63 +921,6 @@ test_that("jackknifeSe computes known case correctly", {
     pseudo <- n * full_mean - (n - 1) * loo_means
     expected_se <- sqrt(var(pseudo) / n)
     expect_equal(se, expected_se)
-})
-
-# =============================================================================
-# weightedLsRidge
-# =============================================================================
-
-test_that("weightedLsRidge with lambda=0 matches weightedLs", {
-    set.seed(42)
-    n <- 50
-    X <- cbind(rnorm(n), rnorm(n), 1)
-    y <- X %*% c(1, 2, 0.5) + rnorm(n, sd = 0.1)
-    w <- rep(1, n)
-    res_ridge <- pecotmr:::weightedLsRidge(y, X, w, lambda = 0)
-    res_wls <- pecotmr:::weightedLs(y, X, w)
-    expect_equal(res_ridge$coef, res_wls$coef)
-    expect_equal(res_ridge$se, res_wls$se)
-    expect_equal(res_ridge$residuals, res_wls$residuals)
-    expect_equal(res_ridge$fitted, res_wls$fitted)
-})
-
-test_that("weightedLsRidge with lambda>0 shrinks coefficients", {
-    set.seed(42)
-    n <- 50
-    X <- cbind(rnorm(n), rnorm(n), 1)
-    y <- X %*% c(3, 3, 1) + rnorm(n, sd = 0.5)
-    w <- rep(1, n)
-    res_no_ridge <- pecotmr:::weightedLsRidge(y, X, w, lambda = 0)
-    res_ridge <- pecotmr:::weightedLsRidge(y, X, w, lambda = 10)
-    # Non-intercept coefficients should be shrunk toward zero
-    expect_true(abs(res_ridge$coef[1]) < abs(res_no_ridge$coef[1]))
-    expect_true(abs(res_ridge$coef[2]) < abs(res_no_ridge$coef[2]))
-})
-
-test_that("weightedLsRidge penalize_intercept=FALSE leaves last column unpenalized", {
-    set.seed(42)
-    n <- 100
-    X <- cbind(rnorm(n), 1)
-    y <- X %*% c(5, 3) + rnorm(n, sd = 0.5)
-    w <- rep(1, n)
-    # With large lambda but no intercept penalty, intercept should still be reasonable
-    res <- pecotmr:::weightedLsRidge(
-        y,
-        X,
-        w,
-        lambda = 100,
-        penalizeIntercept = FALSE
-    )
-    # Intercept (col 2) should not be shrunk as aggressively as slope (col 1)
-    res_pen <- pecotmr:::weightedLsRidge(
-        y,
-        X,
-        w,
-        lambda = 100,
-        penalizeIntercept = TRUE
-    )
-    # The intercept should differ between the two
-    expect_false(isTRUE(all.equal(res$coef[2], res_pen$coef[2])))
 })
 
 # =============================================================================
@@ -1970,8 +1859,8 @@ test_that("gldscUnivariate with annotations returns scoreStats", {
 # Coverage-gap tests (appended)
 #
 # Targets the specific uncovered branches in R/h2EstimationWrappers.R:
-#   bplapplyBlocks, checkGenomeBuild (unknown type), weightedLsRidge
-#   (vector X ridge path), .rmaMeta (length mismatch), .fglsSolve
+#   bplapplyBlocks, checkGenomeBuild (unknown type), .rmaMeta (length
+#   mismatch), .fglsSolve
 #   (diagonal path), .gldscLocal (fine-grained blocks), .hdlLocal (p<3 and
 #   tau=NULL), .lderLocalH2 (small block + baseline path), .hdlSeFisher-
 #   Stratified / .hdlJackknifeTau (lambda>0 + singular fallback), the
@@ -2061,24 +1950,6 @@ test_that("checkGenomeBuild errors on an unrecognized object type", {
         pecotmr:::checkGenomeBuild(list(genome = "hg19")),
         "Unknown object type"
     )
-})
-
-# ---------------------------------------------------------------------------
-# weightedLsRidge — vector X inside the ridge (lambda > 0) path
-# ---------------------------------------------------------------------------
-
-test_that("weightedLsRidge converts a vector X to a matrix in the ridge path", {
-    set.seed(1)
-    n <- 40
-    x <- rnorm(n)
-    y <- 2 * x + rnorm(n, sd = 0.1)
-    w <- rep(1, n)
-    res <- pecotmr:::weightedLsRidge(y, x, w, lambda = 5)
-    expect_length(res$coef, 1)
-    expect_true(is.finite(res$coef[1]))
-    # single column => penalized (p > 1 is FALSE), so coef is shrunk vs OLS
-    res0 <- pecotmr:::weightedLsRidge(y, x, w, lambda = 0)
-    expect_true(abs(res$coef[1]) < abs(res0$coef[1]))
 })
 
 # ---------------------------------------------------------------------------
@@ -2883,20 +2754,20 @@ test_that("HDL warns only when a parameter sits at its UPPER bound", {
     # Only upper bounds are diagnostic: an intercept resting at 0 just means
     # no confounding and is routine, so a lower bound must not warn.
     f <- pecotmr:::.hdlWarnIfAtBound
-    expect_silent(f(c(0.1, 0.5), c(0, 0), c(1, 2), 1000, 500))
+    expect_silent(f(c(0.1, 0.5), c(1, 2), 1000, 500))
     # At a lower bound: still silent.
-    expect_silent(f(c(0, 0), c(0, 0), c(1, 2), 1000, 500))
+    expect_silent(f(c(0, 0), c(1, 2), 1000, 500))
 })
 
 test_that("the HDL bound warning names which parameter pinned", {
     # The last parameter is the intercept; anything else is heritability.
     f <- pecotmr:::.hdlWarnIfAtBound
     expect_warning(
-        f(c(0.1, 2), c(0, 0), c(1, 2), 1000, 500),
+        f(c(0.1, 2), c(1, 2), 1000, 500),
         "the fitted intercept sits at the top of its range"
     )
     expect_warning(
-        f(c(1, 0.5), c(0, 0), c(1, 2), 1000, 500),
+        f(c(1, 0.5), c(1, 2), 1000, 500),
         "the fitted heritability sits at the top of its range"
     )
 })
@@ -3036,11 +2907,11 @@ test_that(".sldscBlockIndex errors when no block covers a variant", {
         mk(GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000)))
     )
     expect_error(
-        suppressWarnings(pecotmr:::.sldscBlockIndex(disjoint, n)),
+        suppressWarnings(pecotmr:::.sldscBlockIndex(disjoint)),
         "no LD block covers any reference variant"
     )
     covering <- mk(GenomicRanges::GRanges("chr22", IRanges::IRanges(1, 10000)))
-    idx <- pecotmr:::.sldscBlockIndex(covering, n)
+    idx <- pecotmr:::.sldscBlockIndex(covering)
     expect_equal(unname(lengths(idx)), n)
 })
 
@@ -3068,11 +2939,64 @@ test_that(".sldscLocal clamps a negative LD score to zero", {
     out <- pecotmr:::.sldscLocal(
         chi2 = c(1.2, 3.4),
         baseScore = c(10, -2),
-        fit = list(tau = c(1e-5)),
-        M = 1000
+        fit = list(tau = c(1e-5))
     )
     expect_equal(out$variantIdx, 1:2)
     expect_equal(out$ldScore, c(10, -2))
     # A negative LD score cannot contribute negative heritability.
     expect_equal(out$h2Local, c(1e-4, 0))
+})
+
+test_that("rmaConfig refuses the estimates and the estimator choice", {
+    expect_error(rmaConfig(yi = 1), "the per-study estimates")
+    expect_error(rmaConfig(sei = 1), "the per-study standard errors")
+    expect_error(rmaConfig(method = "REML"), "the caller's `metaMethod`")
+    # metafor::rma() takes dots, so nothing else can be rejected.
+    expect_s4_class(rmaConfig(nosuch = 1), "MethodConfig")
+    expect_equal(rmaConfig(test = "knha")$test, "knha")
+})
+
+test_that(".rmaMeta forwards metaArgs to metafor::rma", {
+    seen <- NULL
+    real <- metafor::rma
+    means <- c(0.2, 0.3, 0.25, 0.4)
+    ses <- c(0.1, 0.12, 0.09, 0.15)
+    suppressWarnings(with_mocked_bindings(
+        pecotmr:::.rmaMeta(means, ses, metaArgs = rmaConfig(test = "knha")),
+        rma = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "metafor"
+    ))
+    expect_equal(seen$test, "knha")
+    expect_equal(seen$method, "DL")
+})
+
+test_that("the DL fallback carries metaArgs too", {
+    seen <- list()
+    real <- metafor::rma
+    means <- c(0.2, 0.3, 0.25, 0.4)
+    ses <- c(0.1, 0.12, 0.09, 0.15)
+    suppressWarnings(with_mocked_bindings(
+        pecotmr:::.rmaMeta(
+            means,
+            ses,
+            method = "REML",
+            metaArgs = rmaConfig(level = 90)
+        ),
+        rma = function(...) {
+            args <- list(...)
+            seen[[length(seen) + 1L]] <<- args
+            # Fail the iterative estimator so the DL fallback runs.
+            if (!identical(args$method, "DL")) {
+                stop("forced iterative failure")
+            }
+            real(...)
+        },
+        .package = "metafor"
+    ))
+    expect_length(seen, 2L)
+    expect_equal(seen[[2]]$method, "DL")
+    expect_true(all(map_dbl(seen, "level") == 90))
 })

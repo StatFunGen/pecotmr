@@ -7,7 +7,7 @@
 \usage{
 fsusieAffectedRegions(x, ...)
 
-\S4method{fsusieAffectedRegions}{FineMappingResultBase}(x, ...)
+\S4method{fsusieAffectedRegions}{FineMappingResultBase}(x)
 }
 \arguments{
 \item{x}{A \code{FineMappingRow} or \code{FineMappingResultBase}.}

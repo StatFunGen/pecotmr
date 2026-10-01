@@ -11,13 +11,13 @@ dentist(
   nSample = NULL,
   windowSize = 2e+06,
   windowMode = c("distance", "count"),
-  pValueThreshold = 5.0369e-08,
+  pValueThreshold = 5e-08,
   propSVD = 0.4,
   gcControl = FALSE,
   nIter = 10,
   gPvalueThreshold = 0.05,
   duprThreshold = 0.99,
-  ncpus = 1,
+  numThreads = 1,
   correctChenEtAlBug = TRUE,
   minDim = 2000,
   ldMethod = "sample",
@@ -65,8 +65,8 @@ Default is 0.05.}
 \item{duprThreshold}{The absolute correlation r value threshold to be
 considered duplicate. Default is 0.99.}
 
-\item{ncpus}{The number of CPU cores to use for parallel processing. Default
-is 1.}
+\item{numThreads}{The number of CPU cores to use for parallel processing.
+Default is 1.}
 
 \item{correctChenEtAlBug}{Logical indicating whether to correct the Chen et
 al. bug. Default is TRUE.}

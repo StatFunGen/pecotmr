@@ -56,17 +56,20 @@ context("qtlAssociationPostprocess")
     })
     shape1 <- rep(1, G)
     shape1[naShapeIdx] <- NA_real_
+    extra <- list(
+        n_variants = rep(nVar, G),
+        n_variants_filtered = rep(nVarFilt, G),
+        p_beta = pBeta,
+        beta_shape1 = shape1,
+        beta_shape2 = rep(200, G)
+    )
     args <- list(
         study = rep("s", G),
         context = rep("brain", G),
         trait = paste0("g", seq_len(G)),
         entry = entries,
         genome = "hg19",
-        n_variants = rep(nVar, G),
-        n_variants_filtered = rep(nVarFilt, G),
-        p_beta = pBeta,
-        beta_shape1 = shape1,
-        beta_shape2 = rep(200, G)
+        extraCols = extra[setdiff(names(extra), drop)]
     )
     exec(QtlSumStats, !!!args[setdiff(names(args), drop)])
 }
@@ -523,4 +526,54 @@ test_that(".qapPermutationCols reuses a supplied q_beta", {
     cols <- pecotmr:::.qapPermutationCols(x, 0.05)
     # q_beta is already present, so it is not recomputed or re-added.
     expect_setequal(names(cols), c("fdr_beta", "p_nominal_threshold"))
+})
+
+test_that("qvalueConfig refuses the p-value vector", {
+    expect_error(qvalueConfig(p = 0.1), "the p-value vector")
+    # qvalue::qvalue() takes dots, so nothing else can be rejected.
+    expect_s4_class(qvalueConfig(nosuch = 1), "MethodConfig")
+    expect_equal(qvalueConfig(pi0.method = "bootstrap")$pi0.method, "bootstrap")
+})
+
+test_that(".qapSafeQvalue forwards qvalueArgs to qvalue::qvalue", {
+    skip_if_not_installed("qvalue")
+    seen <- NULL
+    real <- qvalue::qvalue
+    set.seed(4)
+    p <- c(runif(200, 0, 0.05), runif(800))
+    with_mocked_bindings(
+        pecotmr:::.qapSafeQvalue(p, qvalueConfig(pfdr = TRUE)),
+        qvalue = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "qvalue"
+    )
+    expect_true(seen$pfdr)
+})
+
+test_that("the qvalue degenerate-case retries keep the caller's options", {
+    skip_if_not_installed("qvalue")
+    seen <- list()
+    real <- qvalue::qvalue
+    set.seed(5)
+    p <- runif(200)
+    res <- with_mocked_bindings(
+        pecotmr:::.qapSafeQvalue(p, qvalueConfig(pfdr = TRUE)),
+        qvalue = function(...) {
+            args <- list(...)
+            seen[[length(seen) + 1L]] <<- args
+            # Force the first attempt into qvalue's own "pi0 <= 0" case.
+            if (is.null(args$pi0.method)) {
+                stop("ERROR: The estimated pi0 <= 0.")
+            }
+            real(...)
+        },
+        .package = "qvalue"
+    )
+    expect_length(seen, 2L)
+    # The retry sets lambda/pi0.method but must not drop what the caller set.
+    expect_equal(seen[[2]]$pi0.method, "bootstrap")
+    expect_true(seen[[2]]$pfdr)
+    expect_length(res, length(p))
 })

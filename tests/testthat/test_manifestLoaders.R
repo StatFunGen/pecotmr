@@ -1769,12 +1769,26 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     mf <- system.file("extdata", "manifests", package = "pecotmr")
     skip_if(mf == "", "manifest fixtures unavailable")
     expect_error(
-        loadQtlDatasetFromManifest(data.frame(), mafCutoff = -1),
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = genotypeFilterConfig(mafCutoff = -1)
+        ),
         "mafCutoff.*is not >= 0"
     )
     expect_error(
-        loadQtlDatasetFromManifest(data.frame(), keepIndel = NA),
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = genotypeFilterConfig(keepIndel = NA)
+        ),
         "keepIndel.*May not be NA"
+    )
+    # A bare list cannot be checked, so it is refused outright.
+    expect_error(
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = list(mafCutoff = 0.01)
+        ),
+        "must be built with genotypeFilterConfig"
     )
     expect_error(
         loadQtlDatasetFromManifest(
@@ -1797,7 +1811,7 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     expect_error(
         loadMultiStudyQtlDatasetFromManifest(
             data.frame(),
-            xvarCutoff = -1
+            genotypeFilterArgs = genotypeFilterConfig(xvarCutoff = -1)
         ),
         "xvarCutoff.*is not >= 0"
     )

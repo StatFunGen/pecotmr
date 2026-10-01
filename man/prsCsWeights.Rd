@@ -4,7 +4,7 @@
 \alias{prsCsWeights}
 \title{Extract weights from prsCs function}
 \usage{
-prsCsWeights(stat, LD, methodArgs = list())
+prsCsWeights(stat, LD, methodArgs = prsCsConfig())
 }
 \arguments{
 \item{stat}{A list of summary statistics with elements \code{b} (effect
@@ -13,7 +13,10 @@ sizes) and \code{n} (per-variant sample sizes).}
 \item{LD}{Numeric LD (correlation) matrix aligned to the variants in
 \code{stat}.}
 
-\item{methodArgs}{Optional named list of options forwarded to \code{prsCs}.}
+\item{methodArgs}{Options forwarded to \code{prsCs}, built
+with \code{\link{prsCsConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of the posterior SNP coefficients.
@@ -33,5 +36,5 @@ stat <- list(
   n = rep(nrow(X), ncol(X))
 )
 LD <- cor(X)
-prsCsWeights(stat, LD, methodArgs = list(maf = rep(0.3, ncol(X))))
+prsCsWeights(stat, LD, methodArgs = prsCsConfig(maf = rep(0.3, ncol(X))))
 }

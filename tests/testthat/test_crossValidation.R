@@ -233,7 +233,7 @@ test_that("the parallel fold path matches the serial one", {
     expect_equal(r1$prediction, r2$prediction)
 })
 
-test_that("retainFits collects per-fold fits only when requested", {
+test_that("fold fits are collected only when fitRetention asks", {
     d <- mk_xy()
     fit_with_model <- function(Xtr, Ytr, j, ...) {
         list(
@@ -253,7 +253,7 @@ test_that("retainFits collects per-fold fits only when requested", {
         d$Y,
         fold = 3,
         fitFold = fit_with_model,
-        retainFits = FALSE
+        fitRetention = "none"
     ))
     expect_true(all(map_int(r_off$foldFits, length) == 0L))
     r_on <- suppressMessages(cv(
@@ -261,7 +261,7 @@ test_that("retainFits collects per-fold fits only when requested", {
         d$Y,
         fold = 3,
         fitFold = fit_with_model,
-        retainFits = TRUE
+        fitRetention = "slim"
     ))
     expect_equal(r_on$foldFits[["fold_1"]][["mock"]]$fold, 1L)
 })

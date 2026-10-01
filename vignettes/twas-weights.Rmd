@@ -50,7 +50,8 @@ data(qtlDatasetExample, qtlSumStatsExample, multiStudyQtlDatasetExample)
 ## Individual-level weights
 
 The simplest individual-level call learns a single regression-based weight set
-from a `QtlDataset`. Cross-validation is enabled by default (`cvFolds = 5`).
+from a `QtlDataset`. Cross-validation is off by default
+(`crossValidationConfig(folds = 0)`).
 Like `fineMappingPipeline()`, you need to tell it which genotype window to
 extract — `cisWindow` (per trait) is the most common choice.
 
@@ -100,7 +101,8 @@ additional weights row instead of being re-fit.
 
 The same holds under cross-validation: each fold needs a fit trained on that
 fold's rows, and the weights pipeline will not produce one. Run the
-fine-mapping with `cvFolds` so those per-fold fits travel with the result —
+fine-mapping with `crossValidation` so those per-fold fits travel with the
+result —
 requesting a fine-mapping method under cross-validation without them is an
 error. That fold partition then governs the whole run: every other weight
 method is cross-validated on the same folds, which is what makes their
@@ -113,7 +115,7 @@ fmr <- fineMappingPipeline(
     qtlDatasetExample,
     methods = "susie",
     cisWindow = 1e6,
-    cvFolds = 3
+    crossValidationArgs = crossValidationConfig(folds = 3)
 )
 tw2 <- twasWeightsPipeline(
     qtlDatasetExample,
@@ -251,8 +253,10 @@ pipeline consumes, so reach for the raw function when you want the
 diagnostics rather than just the weights.
 
 The mr.mash methods need prior covariance matrices, built by
-`buildMrmashPriorMatrices()` from components like `computeCovDiag()` and
-`computeCovFlash()`.
+`buildMrmashPriorMatrices()`. Pass `dataDrivenPriorMatrices` to add
+data-driven components alongside the canonical mixture --- `computeCovDiag()`
+gives the per-condition diagonal, and `mashr::cov_flash()` returns a list of
+FLASH-derived components in the shape that argument expects.
 
 ## Cross-validation, ensembling and prediction
 
@@ -289,27 +293,33 @@ twasWeightsPipeline(
     traitId = "ENSG_example",
     region = "chr22:25000000-26000000",
     cisWindow = 5e5,
-    cvFolds = 5,
-    # required for a fine-mapping method, and under cvFolds > 1 it must carry
-    # the per-fold fits (fineMappingPipeline(..., cvFolds = 5))
+    crossValidationArgs = crossValidationConfig(
+        folds = 5,
+        numThreads = 1,
+        samplePartition = NULL,
+        maxVariants = -1
+    ),
+    # required for a fine-mapping method, and under folds > 1 it must carry
+    # the per-fold fits (fineMappingPipeline(..., crossValidationArgs = ...))
     fineMappingResult = fmr,
-    samplePartition = NULL,
-    maxCvVariants = -1,
-    cvThreads = 1,
-    ensemble = TRUE,
-    ensembleR2Threshold = 0.01,
-    ensembleSolver = "quadprog",
+    ensembleArgs = ensembleConfig(
+        enabled = TRUE,
+        r2Threshold = 0.01,
+        solver = "quadprog"
+    ),
     estimatePi = TRUE,
-    phenotypeCovariatesToResidualize = NULL,
-    genotypeCovariatesToResidualize = NULL,
+    residualizationArgs = residualizationConfig(
+        phenotypeCovariates = NULL,
+        genotypeCovariates = NULL
+    ),
     dataType = NULL,
     naAction = "drop"
 )
 ```
 
--  `ensemble = TRUE` adds an additional `ensembleWeights` row to the collection
-    — a weighted combination of the individual methods' CV predictions filterd
-    by `ensembleR2Threshold`.
+-  `ensembleConfig(enabled = TRUE)` adds an additional `ensembleWeights` row to
+    the collection — a weighted combination of the individual methods' CV
+    predictions, filtered by that bundle's `r2Threshold`.
 -  `naAction` is forwarded to `getResidualizedPhenotypes()` (see the
     [fine-mapping vignette](fine-mapping.html#common-parameters) for
     semantics).
@@ -353,7 +363,7 @@ do.call(getDataType, c(list(tw), key)) # tag carried through for reporting
 matrix for multivariate ones. The remaining payloads are keyed the same way:
 `getVariantIds()` for the aligned variant set, `getCvResult()` for the
 cross-validation record (`rsq`, `r`, predicted values), and `getFits()` for
-the full fit object when the pipeline was run with `retainFit = TRUE`.
+the full fit object when the pipeline kept fits (`fitRetention != "none"`).
 `resolveWeights()` returns the weights and their variant IDs together, which
 is the form the downstream TWAS and MR steps consume.
 

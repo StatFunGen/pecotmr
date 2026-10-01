@@ -1443,7 +1443,7 @@ test_that("twasWeightsCv: mvsusie per-fold reweighted prior is plumbed (verbose=
     )))
 })
 
-test_that("twasWeightsCv: retainFits forwards retainFit to a multivariate fitter that supports it", {
+test_that("twasWeightsCv forwards fitRetention to a fitter that takes it", {
     set.seed(42)
     n <- 24
     p <- 4
@@ -1456,8 +1456,9 @@ test_that("twasWeightsCv: retainFits forwards retainFit to a multivariate fitter
 
     captured <- list()
     local_mocked_bindings(
-        mrmashWeights = function(X, Y, retainFit = FALSE, ...) {
-            captured[[length(captured) + 1]] <<- list(retainFit = retainFit)
+        mrmashWeights = function(X, Y, fitRetention = "none", ...) {
+            captured[[length(captured) + 1]] <<-
+                list(fitRetention = fitRetention)
             matrix(
                 0,
                 nrow = ncol(X),
@@ -1472,12 +1473,12 @@ test_that("twasWeightsCv: retainFits forwards retainFit to a multivariate fitter
         Y,
         fold = 2,
         weightMethods = list(mrmashWeights = list()),
-        retainFits = TRUE
+        fitRetention = "slim"
     ))
     expect_true("foldFits" %in% names(result))
     expect_true(all(map_lgl(
         captured,
-        function(a) isTRUE(a$retainFit)
+        function(a) identical(a$fitRetention, "slim")
     )))
 })
 
@@ -1504,11 +1505,11 @@ test_that("twasWeightsCv: univariate fitter runs under verbose=2 (no quiet wrapp
 
 # ===========================================================================
 #
-#  learnTwasWeights: retainFits plumbing + verbose=2 + parallel
+#  learnTwasWeights: fitRetention plumbing + verbose=2 + parallel
 #
 # ===========================================================================
 
-test_that("learnTwasWeights: multivariate fitter with retainFits + verbose=2 (fitDetail forwarded)", {
+test_that("learnTwasWeights: multivariate fitter, fitRetention + verbose=2", {
     set.seed(42)
     n <- 24
     p <- 5
@@ -1520,15 +1521,9 @@ test_that("learnTwasWeights: multivariate fitter with retainFits + verbose=2 (fi
 
     captured <- list()
     local_mocked_bindings(
-        mrmashWeights = function(
-            X,
-            Y,
-            retainFit = FALSE,
-            fitDetail = c("slim", "full"),
-            ...
-        ) {
+        mrmashWeights = function(X, Y, fitRetention = "none", ...) {
             captured[[length(captured) + 1]] <<-
-                list(retainFit = retainFit, fitDetail = fitDetail)
+                list(fitRetention = fitRetention)
             matrix(
                 0,
                 nrow = ncol(X),
@@ -1541,20 +1536,21 @@ test_that("learnTwasWeights: multivariate fitter with retainFits + verbose=2 (fi
         X,
         Y,
         weightMethods = list(mrmashWeights = list()),
-        retainFits = TRUE,
+        fitRetention = "slim",
         verbose = 2
     ))
     expect_true(is(result, "TwasWeights"))
-    expect_true(isTRUE(captured[[1]]$retainFit))
-    expect_equal(captured[[1]]$fitDetail, "slim")
+    expect_equal(captured[[1]]$fitRetention, "slim")
 })
 
-test_that("learnTwasWeights: legacy retain_fit alias is forwarded to methods exposing it", {
+test_that("a method that takes no fitRetention is left alone", {
+    # Retention is passed only to a weight function that declares it; one
+    # that does not keeps nothing, and must not be handed the argument.
     d <- make_data(n = 30, p = 6)
-    captured <- list()
+    seen <- NULL
     local_mocked_bindings(
-        bayesRWeights = function(X, y, retain_fit = FALSE, ...) {
-            captured[[length(captured) + 1]] <<- list(retain_fit = retain_fit)
+        bayesRWeights = function(X, y, ...) {
+            seen <<- names(list(...))
             rep(0, ncol(X))
         }
     )
@@ -1562,10 +1558,10 @@ test_that("learnTwasWeights: legacy retain_fit alias is forwarded to methods exp
         d$X,
         d$Y,
         weightMethods = list(bayesRWeights = list()),
-        retainFits = TRUE
+        fitRetention = "slim"
     ))
     expect_true(is(result, "TwasWeights"))
-    expect_true(isTRUE(captured[[1]]$retain_fit))
+    expect_false("fitRetention" %in% seen)
 })
 
 test_that("learnTwasWeights: univariate fitter runs under verbose=2", {
@@ -1705,7 +1701,7 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
             trait = c("t1", "t2"),
             context = contexts,
             study = "s1",
-            retainFits = FALSE,
+            fitRetention = "none",
             standardized = TRUE,
             dataType = "rnaseq"
         )
@@ -1754,8 +1750,11 @@ test_that("twasWeightsCv: argument guards fire", {
         "numThreads.*Must be of type 'single integerish value'"
     )
     expect_error(
-        exec(twasWeightsCv, !!!list_modify(base, !!!list(retainFits = NA))),
-        "retainFits.*May not be NA"
+        exec(
+            twasWeightsCv,
+            !!!list_modify(base, !!!list(fitRetention = "sometimes"))
+        ),
+        "must be one of"
     )
     expect_error(
         exec(twasWeightsCv, !!!list_modify(base, !!!list(seed = "x"))),
@@ -2029,4 +2028,152 @@ test_that(".twasSusieTokensRequested matches both method spellings", {
 test_that("the twas lookup helpers answer NULL when the token is absent", {
     expect_null(pecotmr:::.twasMethodArgsFor(list(), "susie"))
     expect_null(pecotmr:::.twasFoldFitsFor(NULL, "susie"))
+})
+
+# --- per-token argument chains ----------------------------------------------
+#
+# The recorded chains in .twasMethodChains() are the basis for checking a
+# method's arguments, so they must not drift silently. These tests re-derive
+# them by EXECUTION -- tracing which functions a real fit enters -- which is
+# how they were established in the first place; reading the sources hides the
+# forwarding behind list_modify()/exec() and imported-without-:: calls.
+
+# Traces the pecotmr functions entered while `expr` runs, restricted to the
+# ones a chain could name. Returns their names.
+.tw_traceChain <- function(expr) {
+    ns <- asNamespace("pecotmr")
+    watched <- c(
+        "glmnetWeights",
+        "ncvregWeights",
+        "bglrWeights",
+        "bayesAlphabetWeights",
+        "dprWeights",
+        "mrmashWrapper",
+        ".penalizedRssWeights",
+        ".rssShrinkGridWeights",
+        "buildMrmashPriorMatrices",
+        "penalizedRss",
+        "lassosumRss",
+        "sdpr",
+        "prsCs"
+    )
+    hit <- new.env(parent = emptyenv())
+    for (f in watched) {
+        ob <- tryCatch(get(f, envir = ns), error = function(e) NULL)
+        if (!is.function(ob)) {
+            next
+        }
+        suppressMessages(trace(
+            f,
+            where = ns,
+            print = FALSE,
+            tracer = substitute(
+                assign(NM, TRUE, envir = HIT),
+                list(NM = f, HIT = hit)
+            )
+        ))
+    }
+    on.exit(
+        for (f in watched) {
+            try(suppressMessages(untrace(f, where = ns)), silent = TRUE)
+        },
+        add = TRUE
+    )
+    invisible(tryCatch(
+        suppressWarnings(suppressMessages(force(expr))),
+        error = function(e) NULL
+    ))
+    # all.names: the internal hops are dot-prefixed and ls() hides those.
+    sort(ls(hit, all.names = TRUE))
+}
+
+.tw_rssFixture <- function(p = 6L) {
+    set.seed(1)
+    LD <- diag(p)
+    LD[abs(row(LD) - col(LD)) == 1] <- 0.3
+    list(
+        LD = LD,
+        stat = list(bhat = rnorm(p) * 0.1, shat = rep(0.05, p), n = 500L)
+    )
+}
+
+test_that("the recorded individual-path chains match what a fit enters", {
+    skip_if_not_installed("glmnet")
+    skip_if_not_installed("ncvreg")
+    set.seed(1)
+    n <- 60L
+    p <- 5L
+    X <- matrix(rnorm(n * p), n, p)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
+    y <- as.numeric(X %*% rnorm(p) + rnorm(n))
+    recorded <- function(tk) {
+        setdiff(
+            pecotmr:::.twasMethodChainFor(tk, "QtlDataset"),
+            c(paste0(tk, "Weights"), "lassoWeights", "enetWeights")
+        )
+    }
+    expect_true(is_in(
+        "glmnetWeights",
+        .tw_traceChain(lassoWeights(X, y))
+    ))
+    expect_true(is_in("glmnetWeights", recorded("lasso")))
+    expect_true(is_in(
+        "ncvregWeights",
+        .tw_traceChain(scadWeights(X, y))
+    ))
+    expect_true(is_in("ncvregWeights", recorded("scad")))
+})
+
+test_that("the recorded RSS chains match what a fit enters", {
+    fx <- .tw_rssFixture()
+    seen <- .tw_traceChain(scadRssWeights(fx$stat, fx$LD))
+    recorded <- pecotmr:::.twasMethodChainFor("scad", "QtlSumStats")
+    # Every pecotmr hop the run entered must be in the recorded chain.
+    expect_true(all(is_in(seen, recorded)))
+    expect_true(is_in("penalizedRss", seen))
+    expect_true(is_in(".rssShrinkGridWeights", seen))
+})
+
+test_that("every RSS chain yields a checkable argument set", {
+    # The point of the chains: each summary-statistics path ends in one of
+    # pecotmr's own solvers, which enumerate their formals, so the RSS side
+    # is checkable even where the individual side is not.
+    for (tk in c("scad", "mcp", "l0learn", "lasso", "prsCs", "dprGibbs")) {
+        expect_false(
+            is.null(pecotmr:::.twasChainAccepted(tk, "QtlSumStats")),
+            label = paste("accepted set for", tk)
+        )
+    }
+})
+
+test_that("a middle-hop argument is accepted and a typo is not", {
+    skip_if_not_installed("mr.mashr")
+    # canonicalPriorMatrices belongs to buildMrmashPriorMatrices, in the
+    # middle of the mrmash chain -- neither the entry wrapper nor the engine.
+    acc <- pecotmr:::.twasChainAccepted("mrmash", "QtlDataset")
+    expect_true(is_in("canonicalPriorMatrices", acc))
+    expect_true(is_in("max_iter", acc))
+    expect_false(is_in("zzz", acc))
+})
+
+test_that("per-class checking rejects a name only the other path accepts", {
+    skip_if_not_installed("ncvreg")
+    # `s` is a formal of the RSS shrinkage grid, not of the individual path.
+    sumAcc <- pecotmr:::.twasChainAccepted("scad", "QtlSumStats")
+    expect_true(is_in("s", sumAcc))
+    expect_error(
+        pecotmr:::.twasCheckMethodArgsForInput(
+            list(scad = list(zzz = 1)),
+            "QtlSumStats"
+        ),
+        "method 'scad': unknown argument\\(s\\) zzz"
+    )
+    # The individual path reaches ncvreg, which takes `...`, so nothing can
+    # be rejected there.
+    expect_silent(
+        pecotmr:::.twasCheckMethodArgsForInput(
+            list(scad = list(zzz = 1)),
+            "QtlDataset"
+        )
+    )
 })

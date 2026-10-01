@@ -20,6 +20,26 @@ context("sumstats_qc")
 # ldMismatchQc
 # ===========================================================================
 
+# Captures the options slalom was called with, so a test can assert that a
+# constructor's settings actually reached the engine.
+.ssq_captureSlalom <- function(capture) {
+    function(
+        zScore,
+        R = NULL,
+        X = NULL,
+        standardError = rep(1, length(zScore)),
+        abfPriorVariance = 0.04,
+        nlog10pDentistSThreshold = 4.0,
+        r2Threshold = 0.6,
+        leadVariantChoice = "pvalue",
+        ldMethod = "sample"
+    ) {
+        capture$r2Threshold <- r2Threshold
+        capture$abfPriorVariance <- abfPriorVariance
+        list(data = data.frame(outlier = rep(FALSE, length(zScore))))
+    }
+}
+
 test_that("ldMismatchQc dentist returns a data frame with an outlier column", {
     set.seed(42)
     p <- 20
@@ -47,7 +67,7 @@ test_that("ldMismatchQc method argument is validated", {
 })
 
 # ===========================================================================
-# zMismatchQc resolver
+# ldMismatchQcMethod resolver
 # ===========================================================================
 
 # ===========================================================================
@@ -2205,6 +2225,39 @@ test_that("slalom errors on non-square R", {
     expect_error(slalom(zScore = z, R = R), "R.*Must have exactly 10 rows")
 })
 
+test_that("slalom honours ldMethod when given genotypes", {
+    # `ldMethod` is documented as "Passed to computeLd", but slalom used to
+    # correlate the lead column of X with cor() directly, so "population"
+    # and "gcta" were accepted and silently given sample LD. It now resolves
+    # LD the same way dentist does.
+    set.seed(11)
+    X <- matrix(sample(0:2, 100 * 6, replace = TRUE), nrow = 100, ncol = 6)
+    colnames(X) <- paste0("snp", seq_len(6))
+    z <- rnorm(6)
+    seen <- NULL
+    local_mocked_bindings(
+        computeLd = function(X, method = "sample", ...) {
+            seen <<- method
+            stats::cor(X)
+        },
+        .package = "pecotmr"
+    )
+    invisible(slalom(zScore = z, X = X, ldMethod = "gcta"))
+    expect_equal(seen, "gcta")
+    invisible(slalom(zScore = z, X = X))
+    expect_equal(seen, "sample")
+})
+
+test_that("slalom still refuses both or neither of R and X", {
+    # resolveLdInput now carries the exactly-one-of rule that .slalomValidate
+    # used to duplicate; the errors must not have gone with it.
+    z <- rnorm(4)
+    R <- diag(4)
+    X <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    expect_error(slalom(zScore = z), "Either R .* or X .* must be provided")
+    expect_error(slalom(zScore = z, R = R, X = X), "not both")
+})
+
 test_that("slalom accepts X matrix instead of R", {
     set.seed(42)
     n_samples <- 100
@@ -3140,7 +3193,10 @@ test_that("mafCutoff > 0 with no frequency skips the filter, not the run", {
         .package = "pecotmr"
     )
     expect_warning(
-        res <- summaryStatsQc(ss, mafCutoff = 0.05),
+        res <- summaryStatsQc(
+            ss,
+            panelFilterArgs = panelFilterConfig(mafCutoff = 0.05)
+        ),
         "skipping the MAF filter"
     )
     expect_s4_class(res, "GwasSumStats")
@@ -3149,7 +3205,10 @@ test_that("mafCutoff > 0 with no frequency skips the filter, not the run", {
 test_that("summaryStatsQc: infoCutoff > 0 with no INFO column errors", {
     ss <- .ssQ_makeGwasSumStats()
     expect_error(
-        summaryStatsQc(ss, infoCutoff = 0.5),
+        summaryStatsQc(
+            ss,
+            sumstatsFilterArgs = sumstatsFilterConfig(infoCutoff = 0.5)
+        ),
         "infoCutoff > 0 requires every entry to carry an INFO column"
     )
 })
@@ -3174,7 +3233,11 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    out <- summaryStatsQc(ss, pipCutoffToSkip = 0.5, nCutoff = 0)
+    out <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(pip = 0.5),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     snps <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
     expect_false("rsX" %in% snps) # dropped by harmonization
     # screen (post-harmonization) skips the region
@@ -3182,7 +3245,7 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
 })
 
 test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
-    # Same harmonized variants, screen disabled (pipCutoffToSkip = 0): the three
+    # Same harmonized variants, screen disabled (no metric set): the three
     # panel-matched variants survive (behavior-invariance for the screen-off path).
     gr <- .ssQ_makeEntryGr(
         c("rs1", "rs2", "rs3", "rsX"),
@@ -3197,7 +3260,11 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    out <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(pip = 0),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     snps <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
     # SNP is re-keyed to the panel-harmonized id (chr:pos:A2:A1) after
     # harmonization; the panel is A1=A / A2=G, so the surviving three become
@@ -3240,7 +3307,11 @@ test_that("summaryStatsQc: harmonization re-keys SNP and sign-flips Z", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    out <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(pip = 0),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     e <- out[[1L]]
     o <- order(GenomicRanges::start(e))
     snp <- as.character(S4Vectors::mcols(e)$SNP)[o]
@@ -3315,7 +3386,11 @@ test_that("a tag-named panel entry survives the end-to-end sketch subset", {
         genome = "hg19",
         ldSketch = h
     )
-    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    out <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(pip = 0),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     snp <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
     expect_true("chr1:200:G:A" %in% snp)
     # the retained sketch keeps the panel row the QC'd entry still refers to
@@ -3343,7 +3418,11 @@ test_that("the sketch survives a chr:pos:A1:A2 panel (PLINK .bim order)", {
         genome = "hg19",
         ldSketch = h
     )
-    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    out <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(pip = 0),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     kept <- pecotmr:::.ldSketchMatchIds(getLdSketch(out))
     expect_length(kept, 4L)
     expect_setequal(
@@ -3385,9 +3464,9 @@ test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants", {
     expect_no_error(
         out <- summaryStatsQc(
             ss,
-            zMismatchQc = "slalom",
-            pipCutoffToSkip = 0,
-            nCutoff = 0
+            ldMismatchQcMethod = "slalom",
+            signalScreenArgs = signalScreenConfig(pip = 0),
+            sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
         )
     )
     snp <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
@@ -3395,7 +3474,7 @@ test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants", {
     expect_equal(length(out[[1L]]), 3L)
 })
 
-test_that("summaryStatsQc: zMismatchQc reconciles a chr-prefix difference", {
+test_that("summaryStatsQc: ldMismatchQc reconciles a chr-prefix difference", {
     # Panel SNP ids are non-chr-prefixed positional; QC re-keys the entry to the
     # canonical chr-prefixed form, so the opt-in z-mismatch panel match must
     # reconcile the prefix (previously errored "absent from the ldSketch panel").
@@ -3429,9 +3508,9 @@ test_that("summaryStatsQc: zMismatchQc reconciles a chr-prefix difference", {
     expect_no_error(
         out <- summaryStatsQc(
             ss,
-            zMismatchQc = "slalom",
-            pipCutoffToSkip = 0,
-            nCutoff = 0
+            ldMismatchQcMethod = "slalom",
+            signalScreenArgs = signalScreenConfig(pip = 0),
+            sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
         )
     )
     expect_gte(length(out[[1L]]), 1L)
@@ -3526,7 +3605,7 @@ test_that("summaryStatsQc: PIP screen triggers when no variant has signal", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    res <- summaryStatsQc(ss, pipCutoffToSkip = 0.99)
+    res <- summaryStatsQc(ss, signalScreenArgs = signalScreenConfig(pip = 0.99))
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_true(isTRUE(ea$pipScreenSkipped))
     expect_match(ea$pipScreenReason, "no signals above PIP threshold")
@@ -3544,9 +3623,11 @@ test_that("summaryStatsQc: options block records the curated knobs", {
     ss <- .ssQ_makeGwasSumStats()
     res <- summaryStatsQc(
         ss,
-        removeIndels = TRUE,
-        removeStrandAmbiguous = FALSE,
-        nCutoff = 10
+        sumstatsFilterArgs = sumstatsFilterConfig(
+            removeIndels = TRUE,
+            removeStrandAmbiguous = FALSE,
+            nCutoff = 10
+        )
     )
     opts <- getQcInfo(res)$options
     expect_true(opts$removeIndels)
@@ -3822,7 +3903,7 @@ test_that("summaryStatsQc: quantitative QtlSumStats: no effective N", {
 # summaryStatsQc with LD-mismatch QC enabled (mocked extractor)
 # ===========================================================================
 
-test_that("summaryStatsQc: zMismatchQc 'dentist' walks the LD branch", {
+test_that("summaryStatsQc: ldMismatchQcMethod 'dentist' walks the LD branch", {
     # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so the
     # post-harmonization re-keyed SNP resolves against the panel for z-mismatch QC.
     ss <- GwasSumStats(
@@ -3838,7 +3919,7 @@ test_that("summaryStatsQc: zMismatchQc 'dentist' walks the LD branch", {
         extractBlockGenotypes = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
-    res <- suppressWarnings(summaryStatsQc(ss, zMismatchQc = "dentist"))
+    res <- suppressWarnings(summaryStatsQc(ss, ldMismatchQcMethod = "dentist"))
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$ldMismatchMethod, "dentist")
     expect_true("ldMismatchOutliersDropped" %in% names(ea))
@@ -3881,7 +3962,11 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS, records counts", {
     )
     # rs5/rs6 (pos 500/600) sit beyond the observed range (100-400); impute now
     # scopes to the region window, so widen it with a flank to reach them.
-    res <- summaryStatsQc(ss, impute = TRUE, imputeOpts = list(flank = 500))
+    res <- summaryStatsQc(
+        ss,
+        impute = TRUE,
+        imputeArgs = raissConfig(flank = 500)
+    )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$raissTotalVariants, 6L)
     expect_equal(ea$raissImputedVariants, 2L)
@@ -3918,7 +4003,11 @@ test_that("summaryStatsQc: impute scopes panel/dosage to the region", {
         raiss = function(...) NULL,
         .package = "pecotmr"
     )
-    suppressWarnings(summaryStatsQc(ss, impute = TRUE, nCutoff = 0))
+    suppressWarnings(summaryStatsQc(
+        ss,
+        impute = TRUE,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    ))
     expect_gt(length(cap$idx), 0L)
     # No read reaches past the region window's 4 panel variants.
     expect_true(all(map_lgl(cap$idx, function(i) all(i %in% 1:4))))
@@ -4017,7 +4106,7 @@ test_that("summaryStatsQc: skipped steps are omitted from the rollup", {
         summaryStatsQc(
             ss,
             alleleFlipKriging = FALSE,
-            zMismatchQc = "none",
+            ldMismatchQcMethod = "none",
             impute = FALSE
         )
     )
@@ -4386,7 +4475,10 @@ test_that("summaryStatsQc: surfaces the sanity audit, honours the knobs", {
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$sanityChecks$zeroEffectDropped, 2L)
     # Disable the knob: zero-effect rows should remain.
-    res2 <- summaryStatsQc(ss, dropZeroEffect = FALSE)
+    res2 <- summaryStatsQc(
+        ss,
+        sumstatsCleaningArgs = sumstatsCleaningConfig(dropZeroEffect = FALSE)
+    )
     ea2 <- getQcInfo(res2)$entryAudit[[1L]]
     expect_null(ea2$sanityChecks$zeroEffectDropped)
 })
@@ -4643,11 +4735,13 @@ test_that("fine-mapping keeps onMissing='error' for an absent variant", {
 .ssTwin_opts <- function() {
     list(
         matchMinProp = 0,
-        removeIndels = FALSE,
-        removeStrandAmbiguous = TRUE,
+        sumstatsFilterArgs = sumstatsFilterConfig(
+            removeIndels = FALSE,
+            removeStrandAmbiguous = TRUE
+        ),
         alleleFlipKriging = TRUE,
         nForPip = 1000,
-        zMismatchQc = "slalom"
+        ldMismatchQcMethod = "slalom"
     )
 }
 
@@ -4756,41 +4850,6 @@ test_that(".applyLdMismatchQcToEntry: NA slalom outlier flags are kept", {
 # Signal screen: metric resolver + absZ / bf / logBf metrics
 # ===========================================================================
 
-test_that(".resolveScreenMetric enforces one metric and sane cutoffs", {
-    expect_null(pecotmr:::.resolveScreenMetric()) # all 0 -> off
-    expect_equal(
-        pecotmr:::.resolveScreenMetric(pipCutoffToSkip = 0.5),
-        list(metric = "pip", cutoff = 0.5)
-    )
-    expect_equal(
-        pecotmr:::.resolveScreenMetric(absZCutoffToSkip = 5),
-        list(metric = "absZ", cutoff = 5)
-    )
-    expect_equal(
-        pecotmr:::.resolveScreenMetric(bfCutoffToSkip = 100),
-        list(metric = "bf", cutoff = 100)
-    )
-    expect_equal(
-        pecotmr:::.resolveScreenMetric(logBfCutoffToSkip = 3),
-        list(metric = "logBf", cutoff = 3)
-    )
-    expect_error(
-        pecotmr:::.resolveScreenMetric(
-            pipCutoffToSkip = 0.5,
-            absZCutoffToSkip = 5
-        ),
-        "one signal screen"
-    )
-    expect_error(
-        pecotmr:::.resolveScreenMetric(absZCutoffToSkip = -1),
-        "must be > 0"
-    )
-    expect_error(
-        pecotmr:::.resolveScreenMetric(bfCutoffToSkip = -1),
-        "must be > 0"
-    )
-})
-
 test_that(".asScreen canonicalizes screen specs", {
     expect_null(pecotmr:::.asScreen(NULL))
     expect_null(pecotmr:::.asScreen(0))
@@ -4870,11 +4929,16 @@ test_that("summaryStatsQc: absZ / bf / logBf screens skip a no-signal entry", {
         )
     }
     for (arg in list(
-        list(absZCutoffToSkip = 5),
-        list(bfCutoffToSkip = 100),
-        list(logBfCutoffToSkip = 5)
+        list(signalScreenArgs = signalScreenConfig(absZ = 5)),
+        list(signalScreenArgs = signalScreenConfig(bf = 100)),
+        list(signalScreenArgs = signalScreenConfig(logBf = 5))
     )) {
-        res <- exec(summaryStatsQc, !!!c(list(mk()), arg, list(nCutoff = 0)))
+        res <- exec(
+            summaryStatsQc,
+            mk(),
+            !!!arg,
+            sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+        )
         ea <- getQcInfo(res)$entryAudit[[1L]]
         expect_true(isTRUE(ea$pipScreenSkipped))
         expect_equal(length(res[[1L]]), 0L)
@@ -4892,7 +4956,11 @@ test_that("summaryStatsQc: absZ screen keeps a strong marginal Z", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    res <- summaryStatsQc(ss, absZCutoffToSkip = 5, nCutoff = 0)
+    res <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(absZ = 5),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_false(isTRUE(ea$pipScreenSkipped))
     expect_gt(length(res[[1L]]), 0L)
@@ -4901,8 +4969,11 @@ test_that("summaryStatsQc: absZ screen keeps a strong marginal Z", {
 test_that("summaryStatsQc: enabling two screens at once errors", {
     ss <- .ssQ_makeGwasSumStats()
     expect_error(
-        summaryStatsQc(ss, pipCutoffToSkip = 0.5, absZCutoffToSkip = 5),
-        "one signal screen"
+        summaryStatsQc(
+            ss,
+            signalScreenArgs = signalScreenConfig(pip = 0.5, absZ = 5)
+        ),
+        "only one screening metric"
     )
 })
 
@@ -5460,7 +5531,7 @@ test_that("merge_windows returns exactly N rows", {
                 nIter = 10,
                 gPvalueThreshold = 0.05,
                 duprThreshold = 0.99,
-                ncpus = 1,
+                numThreads = 1,
                 correctChenEtAlBug = TRUE
             )
         }
@@ -5836,7 +5907,11 @@ test_that("summaryStatsQc: preserves nCase/nControl columns through QC", {
         nControl = 1500
     )
     expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(ss))))
-    out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+    out <- summaryStatsQc(
+        ss,
+        signalScreenArgs = signalScreenConfig(pip = 0),
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     expect_true(all(
         c("nCase", "nControl") %in% colnames(S4Vectors::mcols(out))
     ))
@@ -6829,7 +6904,10 @@ test_that("summaryStatsQc: emit() drops the label for an empty study id", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    msgs <- capture_messages(summaryStatsQc(ss, nCutoff = 0))
+    msgs <- capture_messages(summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    ))
     joined <- paste(msgs, collapse = "")
     expect_match(joined, "QC summary:")
     # No bracketed label prefix appears on the rollup line.
@@ -6845,7 +6923,12 @@ test_that("summaryStatsQc: the N filter emits its message and rollup", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    msgs <- capture_messages(res <- summaryStatsQc(ss, nCutoff = 3))
+    msgs <- capture_messages(
+        res <- summaryStatsQc(
+            ss,
+            sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 3)
+        )
+    )
     joined <- paste(msgs, collapse = "")
     expect_match(joined, "MAF/INFO/N filters kept")
     expect_match(joined, "nCutoff 1")
@@ -6872,7 +6955,10 @@ test_that("summaryStatsQc: derives BETA/SE from Z+MAF+N, records it", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    res <- summaryStatsQc(ss, nCutoff = 0)
+    res <- summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$betaSeFromZ$nDerived, 4L)
 })
@@ -6886,7 +6972,10 @@ test_that("summaryStatsQc: clamps tiny Z-derived P and audits it", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    res <- summaryStatsQc(ss, nCutoff = 0)
+    res <- summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_true(!is.null(ea$sanityChecks$smallPClamped))
     expect_gte(ea$sanityChecks$smallPClamped, 1L)
@@ -6900,7 +6989,10 @@ test_that("summaryStatsQc: early-exits below two pre-harmonization variants", {
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
-    res <- summaryStatsQc(ss, nCutoff = 0)
+    res <- summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_match(ea$earlyExit, "fewer than two variants")
     expect_equal(length(res[[1L]]), 1L)
@@ -6928,8 +7020,8 @@ test_that("summaryStatsQc: kriging QC records its audit and rollup", {
         res <- summaryStatsQc(
             ss,
             alleleFlipKriging = TRUE,
-            pipCutoffToSkip = 0,
-            nCutoff = 0
+            signalScreenArgs = signalScreenConfig(pip = 0),
+            sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
         )
     )
     joined <- paste(msgs, collapse = "")
@@ -6984,7 +7076,11 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
         .package = "pecotmr"
     )
     # rs5/rs6 (pos 500/600) are beyond the observed range; widen the impute window.
-    res <- summaryStatsQc(ss, impute = TRUE, imputeOpts = list(flank = 500))
+    res <- summaryStatsQc(
+        ss,
+        impute = TRUE,
+        imputeArgs = raissConfig(flank = 500)
+    )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$raissTotalVariants, 6L)
     expect_equal(ea$raissImputedVariants, 2L)
@@ -7121,9 +7217,11 @@ test_that("summaryStatsQc: the rollup enumerates every removed step", {
     msgs <- capture_messages(
         res <- summaryStatsQc(
             ss,
-            mafCutoff = 0.01,
-            infoCutoff = 0.5,
-            nCutoff = 3
+            sumstatsFilterArgs = sumstatsFilterConfig(
+                infoCutoff = 0.5,
+                nCutoff = 3
+            ),
+            panelFilterArgs = panelFilterConfig(mafCutoff = 0.01)
         )
     )
     joined <- paste(msgs, collapse = "")
@@ -7379,8 +7477,8 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
         summaryStatsQc(
             ss,
             alleleFlipKriging = TRUE,
-            pipCutoffToSkip = 0,
-            nCutoff = 0
+            signalScreenArgs = signalScreenConfig(pip = 0),
+            sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
         )
     )
     ea <- getQcInfo(res)$entryAudit[[1L]]
@@ -7556,7 +7654,11 @@ test_that("summaryStatsQc: mafCutoff drops panel-rare observed variants", {
     maf <- .ssqcPanelMaf(h)
     cutoff <- stats::median(maf, na.rm = TRUE)
     ss <- .ssqcPanelSumStats(h)
-    out <- suppressMessages(summaryStatsQc(ss, mafCutoff = cutoff, nCutoff = 0))
+    out <- suppressMessages(summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0),
+        panelFilterArgs = panelFilterConfig(mafCutoff = cutoff)
+    ))
     entry <- pecotmr:::.collectionEntry(out, 1)
     expect_equal(length(entry), sum(!is.na(maf) & maf >= cutoff))
     # ... and the panel carried on the result -- the seed handle every LD
@@ -7577,7 +7679,11 @@ test_that("summaryStatsQc: macCutoff is the stricter of MAF / MAC", {
     # MAC expressed per panel sample: 2 * nSamples * mafEquivalent.
     cutoff <- stats::median(maf, na.rm = TRUE)
     mac <- ceiling(cutoff * 2 * getNSamples(h))
-    out <- suppressMessages(summaryStatsQc(ss, macCutoff = mac, nCutoff = 0))
+    out <- suppressMessages(summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0),
+        panelFilterArgs = panelFilterConfig(macCutoff = mac)
+    ))
     entry <- pecotmr:::.collectionEntry(out, 1)
     expected <- sum(!is.na(maf) & maf >= mac / (2 * getNSamples(h)))
     expect_equal(length(entry), expected)
@@ -7587,7 +7693,10 @@ test_that("summaryStatsQc: the panel filter is off by default", {
     skip_if_not_installed("pgenlibr")
     h <- .ssqcPanelHandle()
     ss <- .ssqcPanelSumStats(h)
-    out <- suppressMessages(summaryStatsQc(ss, nCutoff = 0))
+    out <- suppressMessages(summaryStatsQc(
+        ss,
+        sumstatsFilterArgs = sumstatsFilterConfig(nCutoff = 0)
+    ))
     expect_equal(
         length(pecotmr:::.collectionEntry(out, 1)),
         nrow(getSnpInfo(h))
@@ -7596,10 +7705,34 @@ test_that("summaryStatsQc: the panel filter is off by default", {
 
 test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
     ss <- .ssQ_makeGwasSumStats()
-    expect_error(summaryStatsQc(ss, mafCutoff = -1), "mafCutoff")
-    expect_error(summaryStatsQc(ss, macCutoff = c(1, 2)), "macCutoff")
-    expect_error(summaryStatsQc(ss, imissCutoff = NA_real_), "imissCutoff")
-    expect_error(summaryStatsQc(ss, macCutoff = Inf), "macCutoff")
+    expect_error(
+        summaryStatsQc(
+            ss,
+            panelFilterArgs = panelFilterConfig(mafCutoff = -1)
+        ),
+        "mafCutoff"
+    )
+    expect_error(
+        summaryStatsQc(
+            ss,
+            panelFilterArgs = panelFilterConfig(macCutoff = c(1, 2))
+        ),
+        "macCutoff"
+    )
+    expect_error(
+        summaryStatsQc(
+            ss,
+            panelFilterArgs = panelFilterConfig(imissCutoff = NA_real_)
+        ),
+        "imissCutoff"
+    )
+    expect_error(
+        summaryStatsQc(
+            ss,
+            panelFilterArgs = panelFilterConfig(macCutoff = Inf)
+        ),
+        "macCutoff"
+    )
 })
 
 
@@ -7653,7 +7786,7 @@ test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
         f$refPanel,
         f$knownZ,
         f$dosage,
-        list(imputeOpts = list(...))
+        list(imputeArgs = as.list(raissConfig(...)))
     )
 }
 
@@ -7735,7 +7868,7 @@ test_that(".qcRaissTargetMask drops a target whose MAF is undefined", {
     expect_false(keep[[12]])
 })
 
-test_that("summaryStatsQc imputeOpts cutoffs bound what RAISS imputes", {
+test_that("summaryStatsQc imputeArgs cutoffs bound what RAISS imputes", {
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     variants <- unlist(gss)
@@ -7753,7 +7886,10 @@ test_that("summaryStatsQc imputeOpts cutoffs bound what RAISS imputes", {
         out <- suppressWarnings(suppressMessages(summaryStatsQc(
             thin,
             impute = TRUE,
-            imputeOpts = utils::modifyList(base, list(...))
+            imputeArgs = do.call(
+                raissConfig,
+                utils::modifyList(base, list(...))
+            )
         )))
         sum(lengths(out))
     }
@@ -8228,4 +8364,184 @@ test_that("sumstatsQc: argument guards fire", {
 
 test_that(".entrySnpIds answers character(0) for a NULL entry", {
     expect_identical(pecotmr:::.entrySnpIds(NULL), character(0))
+})
+
+test_that("slalomConfig / dentistConfig carry defaults and reject a typo", {
+    sa <- slalomConfig(r2Threshold = 0.8)
+    expect_s4_class(sa, "MethodConfig")
+    expect_equal(sa$r2Threshold, 0.8)
+    expect_equal(sa$abfPriorVariance, 0.04)
+    da <- dentistConfig(propSVD = 0.5)
+    expect_equal(da$propSVD, 0.5)
+    expect_equal(da$nIter, 10)
+    # Our own engines, so no `...`: R itself rejects an unknown name.
+    expect_error(slalomConfig(zzz = 1), "unused argument")
+    expect_error(dentistConfig(zzz = 1), "unused argument")
+})
+
+test_that("slalomConfig leaves the data-dependent standardError to slalom", {
+    # slalom defaults it to rep(1, length(zScore)), which no static default
+    # can express, so a NULL default is dropped rather than forwarded.
+    expect_false(is_in("standardError", names(slalomConfig())))
+    expect_true(is_in("standardError", names(slalomConfig(standardError = 1))))
+})
+
+test_that("ldMismatchQc takes a name or a constructor for method", {
+    set.seed(1)
+    n <- 60L
+    p <- 8L
+    X <- matrix(rnorm(n * p), n, p)
+    z <- rnorm(p)
+    R <- cor(X)
+    byName <- ldMismatchQc(z, R = R, nSample = n, method = "slalom")
+    byCtor <- ldMismatchQc(z, R = R, nSample = n, method = slalomConfig())
+    # A bare name means the engine with no options set, which is exactly what
+    # an unconfigured constructor produces.
+    expect_identical(byName, byCtor)
+})
+
+test_that("ldMismatchQc forwards the constructor's options to the engine", {
+    set.seed(1)
+    n <- 60L
+    p <- 8L
+    z <- rnorm(p)
+    R <- cor(matrix(rnorm(n * p), n, p))
+    cap <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        slalom = .ssq_captureSlalom(cap),
+        .package = "pecotmr"
+    )
+    ldMismatchQc(
+        z,
+        R = R,
+        nSample = n,
+        method = slalomConfig(r2Threshold = 0.9)
+    )
+    expect_equal(cap$r2Threshold, 0.9)
+})
+
+test_that("ldMismatchQc rejects a constructor for another engine", {
+    set.seed(1)
+    z <- rnorm(4L)
+    R <- diag(4L)
+    expect_error(
+        ldMismatchQc(z, R = R, nSample = 50L, method = plinkQcConfig()),
+        "unknown engine"
+    )
+})
+
+test_that("summaryStatsQc takes a constructor for ldMismatchQcMethod", {
+    expect_error(
+        pecotmr:::.resolveLdMismatchChoice("nope"),
+        "unknown engine 'nope'"
+    )
+    expect_equal(pecotmr:::.resolveLdMismatchChoice("none"), "none")
+    expect_s4_class(
+        pecotmr:::.resolveLdMismatchChoice(dentistConfig()),
+        "MethodConfig"
+    )
+})
+
+# =============================================================================
+# raissConfig()
+# =============================================================================
+
+test_that("raissConfig carries every field the QC imputation path reads", {
+    a <- raissConfig()
+    expect_s4_class(a, "MethodConfig")
+    expect_setequal(
+        names(a),
+        c(
+            "lamb",
+            "svdTol",
+            "r2Threshold",
+            "minimumLd",
+            "mafCutoff",
+            "macCutoff",
+            "imissCutoff",
+            "flank"
+        )
+    )
+})
+
+test_that("raissConfig refuses rcond, which the QC path cannot use", {
+    # summaryStatsQc always hands RAISS a genotype matrix, which solves via
+    # .raissSvdImpute (svdTol). rcond belongs to the LD-matrix path, so it was
+    # advertised in the old imputeOpts default and read by nobody.
+    expect_error(raissConfig(rcond = 0.01), "unused argument")
+    expect_true("rcond" %in% names(formals(raiss)))
+    expect_false("rcond" %in% names(raissConfig()))
+})
+
+test_that("raissConfig fields split into raiss formals and pecotmr's own", {
+    forwarded <- c("lamb", "svdTol", "r2Threshold", "minimumLd")
+    expect_true(all(forwarded %in% names(formals(raiss))))
+    # The rest scope what RAISS is asked to impute; they are not raiss formals
+    # and are consumed before the call.
+    ours <- c("mafCutoff", "macCutoff", "imissCutoff", "flank")
+    expect_false(any(ours %in% names(formals(raiss))))
+})
+
+test_that("summaryStatsQc refuses a bare list for imputeArgs", {
+    data(gwasSumStatsS4Example)
+    expect_error(
+        summaryStatsQc(gwasSumStatsS4Example, imputeArgs = list(flank = 500)),
+        "must be built with raissConfig"
+    )
+})
+
+test_that("an empty imputeArgs resolves to the full default bundle", {
+    resolved <- pecotmr:::.ssqcResolveImputeArgs(list())
+    expect_equal(resolved, as.list(raissConfig()))
+    # Every read site indexes this without a fallback, so a missing field
+    # would surface as NULL rather than a default.
+    expect_false(any(map_lgl(resolved, is.null)))
+})
+
+test_that("the forwarded half of raissConfig is exactly raiss's own formals", {
+    fwd <- pecotmr:::.raissForwardedNames()
+    expect_true(all(fwd %in% names(formals(raiss))))
+    # The other half never reaches raiss; splicing it in would be an error.
+    rest <- setdiff(names(raissConfig()), fwd)
+    expect_false(any(rest %in% names(formals(raiss))))
+    expect_setequal(
+        names(pecotmr:::.raissForwardedArgs(raissConfig())),
+        fwd
+    )
+})
+
+test_that("krigingConfig refuses the inputs pecotmr supplies", {
+    expect_error(krigingConfig(z = 1), "the caller's `zScore`")
+    expect_error(krigingConfig(R = diag(2)), "the caller's `R`")
+    expect_error(krigingConfig(n = 100), "the caller's `n`")
+    expect_error(krigingConfig(nosuch = 1), "unknown argument")
+    expect_setequal(names(krigingConfig(r_tol = 1e-06)), "r_tol")
+})
+
+test_that("krigingOutlierQc forwards methodArgs to susieR::kriging_rss", {
+    skip_if_not_installed("susieR")
+    seen <- NULL
+    real <- susieR::kriging_rss
+    set.seed(1)
+    X <- matrix(rnorm(200), 40, 5)
+    R <- cor(X)
+    with_mocked_bindings(
+        krigingOutlierQc(
+            zScore = rnorm(5),
+            R = R,
+            n = 40,
+            methodArgs = krigingConfig(r_tol = 1e-04)
+        ),
+        kriging_rss = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "susieR"
+    )
+    expect_equal(seen$r_tol, 1e-04)
+    expect_equal(seen$n, 40)
+    expect_error(
+        krigingOutlierQc(rnorm(5), R, 40, methodArgs = list(r_tol = 1)),
+        "krigingConfig"
+    )
 })

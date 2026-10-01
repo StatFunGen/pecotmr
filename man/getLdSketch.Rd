@@ -11,13 +11,13 @@
 \usage{
 getLdSketch(x, ...)
 
-\S4method{getLdSketch}{SumStatsBase}(x, ...)
+\S4method{getLdSketch}{SumStatsBase}(x)
 
-\S4method{getLdSketch}{FineMappingResultBase}(x, ...)
+\S4method{getLdSketch}{FineMappingResultBase}(x)
 
-\S4method{getLdSketch}{ColocResultBase}(x, ...)
+\S4method{getLdSketch}{ColocResultBase}(x)
 
-\S4method{getLdSketch}{TwasWeights}(x, ...)
+\S4method{getLdSketch}{TwasWeights}(x)
 }
 \arguments{
 \item{x}{An S4 object that carries an \code{ldSketch} slot.}

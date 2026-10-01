@@ -60,7 +60,7 @@ setClass(
 
 #' @rdname getLdSketch
 #' @export
-setMethod("getLdSketch", "ColocResultBase", function(x, ...) x@ldSketch)
+setMethod("getLdSketch", "ColocResultBase", function(x) x@ldSketch)
 
 #' @title Colocalization Result
 #' @description A collection of colocalization results, one element per tested
@@ -331,7 +331,7 @@ ColocResult <- function(pairs, variants, ldSketch = NULL) {
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocPairs", "ColocResult", function(x, ...) {
+setMethod("getColocPairs", "ColocResult", function(x) {
     md <- mcols(x, use.names = FALSE)
     if (is.null(md) || length(x) == 0L) {
         return(tibble())
@@ -341,7 +341,7 @@ setMethod("getColocPairs", "ColocResult", function(x, ...) {
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocVariants", "ColocResult", function(x, pooled = FALSE, ...) {
+setMethod("getColocVariants", "ColocResult", function(x, pooled = FALSE) {
     long <- .crLongVariants(x)
     if (!isTRUE(pooled) || nrow(long) == 0L) {
         return(long)
@@ -410,7 +410,7 @@ setMethod("getColocVariants", "ColocResult", function(x, pooled = FALSE, ...) {
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocGenes", "ColocResult", function(x, ...) {
+setMethod("getColocGenes", "ColocResult", function(x) {
     pairs <- getColocPairs(x)
     if (nrow(pairs) == 0L) {
         return(tibble())
@@ -446,8 +446,7 @@ setMethod(
         coverage = 0.95,
         minPp4 = NULL,
         minAbsCorr = 0.8,
-        requireMaxH4 = FALSE,
-        ...
+        requireMaxH4 = FALSE
     ) {
         keep <- .crPairFilter(x, minPp4, requireMaxH4)
         if (length(keep) == 0L) {

@@ -98,8 +98,7 @@ setMethod(
         qtl,
         gwas,
         signalCutoff = 0.025,
-        type = c("data.frame", "GRanges"),
-        ...
+        type = c("data.frame", "GRanges")
     ) {
         type <- arg_match(type)
         keyCols <- c("variant_id", "chrom", "pos", "A1", "A2")

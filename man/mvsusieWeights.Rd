@@ -26,7 +26,7 @@ X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y
 fit <- fitMvsusie(X = X, Y = Y,
   prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
-  methodArgs = list(L = 5))
+  methodArgs = mvsusieConfig(L = 5))
 mvsusieWeights(mvsusieFit = fit)
 }
 }

@@ -16,8 +16,7 @@ getPip(x, ...)
   trait = NULL,
   method = NULL,
   region = NULL,
-  returnList = FALSE,
-  ...
+  returnList = FALSE
 )
 
 \S4method{getPip}{QtlFineMappingResult}(
@@ -26,8 +25,7 @@ getPip(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  returnList = FALSE,
-  ...
+  returnList = FALSE
 )
 }
 \arguments{

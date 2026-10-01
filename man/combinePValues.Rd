@@ -4,7 +4,14 @@
 \alias{combinePValues}
 \title{Combine P-values via Any of a Menu of Methods}
 \usage{
-combinePValues(pvals = NULL, zScores = NULL, methods, R = NULL, naRm = TRUE)
+combinePValues(
+  pvals = NULL,
+  zScores = NULL,
+  methods,
+  R = NULL,
+  naRm = TRUE,
+  methodArgs = pvalMethodsConfig()
+)
 }
 \arguments{
 \item{pvals}{Optional numeric vector of p-values. Required for methods that
@@ -20,6 +27,13 @@ the menu (lowercase).}
 
 \item{naRm}{Logical; if \code{TRUE} (default), drop NA p-values before
 combination.}
+
+\item{methodArgs}{Per-method engine options, built with
+\code{\link{pvalMethodsConfig}} -- for example
+\code{pvalMethodsConfig(aspu = aspuConfig(n.perm = 5000))}. Configuring
+a method that \code{methods} does not request is an error rather than a
+silent no-op. \code{acat}, \code{hmp}, \code{bonferroni} and
+\code{gates} take no options.}
 }
 \value{
 A list with two elements:

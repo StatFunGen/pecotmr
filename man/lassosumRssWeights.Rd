@@ -9,7 +9,7 @@ lassosumRssWeights(
   LD,
   s = c(0.2, 0.5, 0.9, 1),
   selection = c("ldQuadratic", "minFbeta"),
-  methodArgs = list()
+  methodArgs = lassosumConfig()
 )
 }
 \arguments{
@@ -25,8 +25,10 @@ sample sizes).}
 \eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
 \code{"minFbeta"} is retained as an explicit alternative for debugging.}
 
-\item{methodArgs}{Optional named list of options passed to
-\code{lassosumRss()}.}
+\item{methodArgs}{Options forwarded to \code{lassosumRss}, built
+with \code{\link{lassosumConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of the posterior SNP coefficients at the best (s,

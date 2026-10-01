@@ -8,9 +8,9 @@
 \usage{
 computeLdScores(ldRef, annotations = NULL, ...)
 
-\S4method{computeLdScores}{LdEigen}(ldRef, annotations = NULL, ...)
+\S4method{computeLdScores}{LdEigen}(ldRef, annotations = NULL)
 
-\S4method{computeLdScores}{LdScore}(ldRef, annotations = NULL, ...)
+\S4method{computeLdScores}{LdScore}(ldRef, annotations = NULL)
 }
 \arguments{
 \item{ldRef}{An \code{LdStatistic} object.}

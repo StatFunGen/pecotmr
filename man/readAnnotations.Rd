@@ -7,7 +7,7 @@
 \usage{
 readAnnotations(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...)
 
-\S4method{readAnnotations}{character}(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...)
+\S4method{readAnnotations}{character}(paths, snpRanges, annotationMeta = NULL, genome = "hg19")
 }
 \arguments{
 \item{paths}{Named character vector of file paths, or a named list of GRanges

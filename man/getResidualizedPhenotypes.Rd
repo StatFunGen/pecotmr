@@ -22,7 +22,7 @@ getResidualizedPhenotypes(x, ...)
   covariateNaAction = c("impute", "drop"),
   outlierAction = c("keep", "drop"),
   outlierPvalThreshold = 0.001,
-  ...
+  outlierArgs = covMcdConfig()
 )
 }
 \arguments{
@@ -75,6 +75,11 @@ Whether to residualize genotype covariates out of the phenotype;
 
 \item{outlierPvalThreshold}{Numeric. Two-sided p-value threshold for flagging
 phenotype outliers. Default \code{1e-3}.}
+
+\item{outlierArgs}{Extra arguments for \code{robustbase::covMcd()}, the
+robust covariance estimator the outlier rule is built on, supplied with
+\code{\link{covMcdConfig}} -- \code{alpha} in particular. Only
+consulted when \code{outlierAction = "drop"}.}
 }
 \value{
 A named list of numeric matrices keyed by context.

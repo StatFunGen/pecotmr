@@ -4,7 +4,7 @@
 \alias{scadWeights}
 \title{Compute Weights Using SCAD-Penalized Regression}
 \usage{
-scadWeights(X, y, nfolds = 5, methodArgs = list())
+scadWeights(X, y, nfolds = 5, methodArgs = ncvregConfig())
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -13,8 +13,10 @@ scadWeights(X, y, nfolds = 5, methodArgs = list())
 
 \item{nfolds}{Number of cross-validation folds. Default is 5.}
 
-\item{methodArgs}{Optional named list of options passed through to
-`ncvreg::cv.ncvreg`.}
+\item{methodArgs}{Options forwarded to \code{ncvreg::cv.ncvreg}, built
+with \code{\link{ncvregConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

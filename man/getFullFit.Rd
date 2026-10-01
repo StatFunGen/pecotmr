@@ -7,7 +7,7 @@
 \usage{
 getFullFit(x, ...)
 
-\S4method{getFullFit}{MashPrior}(x, ...)
+\S4method{getFullFit}{MashPrior}(x)
 }
 \arguments{
 \item{x}{A \code{MashPrior} object.}

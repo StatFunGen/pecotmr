@@ -8,16 +8,16 @@
 \usage{
 resolveWeights(x, ...)
 
-\S4method{resolveWeights}{FineMappingResultBase}(x, ...)
-
-\S4method{resolveWeights}{TwasWeights}(
+\S4method{resolveWeights}{FineMappingResultBase}(
   x,
   study = NULL,
   context = NULL,
   trait = NULL,
   method = NULL,
-  ...
+  region = NULL
 )
+
+\S4method{resolveWeights}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 }
 \arguments{
 \item{x}{A \code{TwasWeights} or a \code{FineMappingResult}.}
@@ -27,6 +27,10 @@ resolveWeights(x, ...)
 \item{study, context, trait, method}{Optional length-1 selectors pinning one
 row of a collection, as elsewhere; each \code{NULL} (default) leaves that
 part of the tuple unconstrained. Ignored when \code{x} is already a row.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+A further selector for a \code{FineMappingResult}, whose rows also carry
+a region; \code{NULL} (default) leaves it unconstrained.}
 }
 \value{
 A \code{list} with \code{variantIds} (character) and \code{weights}

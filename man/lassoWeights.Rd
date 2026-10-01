@@ -4,12 +4,16 @@
 \alias{lassoWeights}
 \title{Compute TWAS weights via lasso (glmnet, alpha = 1)}
 \usage{
-lassoWeights(X, y)
+lassoWeights(X, y, methodArgs = glmnetConfig())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
 \item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{methodArgs}{Additional arguments forwarded to
+\code{glmnet::cv.glmnet}, built with \code{\link{glmnetConfig}}. A bare
+list is refused, since it cannot be checked against the engine's formals.}
 }
 \value{
 Numeric vector of length \code{ncol(X)} of per-variant weights.

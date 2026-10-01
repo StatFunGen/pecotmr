@@ -9,9 +9,9 @@
 \usage{
 getSusieAlpha(x, ...)
 
-\S4method{getSusieAlpha}{CtwasResult}(x, ...)
+\S4method{getSusieAlpha}{CtwasResult}(x)
 
-\S4method{getSusieAlpha}{CtwasResultEntry}(x, ...)
+\S4method{getSusieAlpha}{CtwasResultEntry}(x)
 }
 \arguments{
 \item{x}{A \code{CtwasResultEntry} or \code{CtwasResult}.}

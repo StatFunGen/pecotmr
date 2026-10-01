@@ -7,7 +7,7 @@
 \usage{
 fsusieCredibleBand(x, ...)
 
-\S4method{fsusieCredibleBand}{FineMappingResultBase}(x, ...)
+\S4method{fsusieCredibleBand}{FineMappingResultBase}(x)
 }
 \arguments{
 \item{x}{A \code{FineMappingRow} or \code{FineMappingResultBase}.}

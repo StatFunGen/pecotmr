@@ -100,7 +100,7 @@ double minusLogPvalueChisq2(double stat) {
 // eigenvalues in ascending order, so the logic is identical.
 void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::vector<size_t>& idx2,
                   const vec& zScore, vec& imputedZ, vec& rsqList, vec& zScore_e,
-                  size_t nSample, float probSVD, int ncpus, bool verbose,
+                  size_t nSample, float probSVD, int numThreads, bool verbose,
                   std::vector<double>& rsqExceed) {
 	if (verbose) {
 		Rprintf("LD_mat: %lux%lu idx: %lu idx2: %lu\n",
@@ -109,7 +109,7 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
 	}
 
 	int nProcessors = omp_get_max_threads();
-	if (ncpus < nProcessors) nProcessors = ncpus;
+	if (numThreads < nProcessors) nProcessors = numThreads;
 	omp_set_num_threads(nProcessors);
 
 	size_t K = std::min(static_cast<size_t>(idx.size()), nSample) * probSVD;
@@ -208,7 +208,7 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
  * @param gcControl A boolean flag to apply genetic control corrections.
  * @param nIter The number of iterations to run the DENTIST algorithm.
  * @param gPvalueThreshold P-value threshold for grouping variants into significant and null categories.
- * @param ncpus The number of CPU cores to use for parallel processing.
+ * @param numThreads The number of CPU cores to use for parallel processing.
  * @param correctChenEtAlBug Whether to correct the original DENTIST bug.
  * @param verbose A boolean flag to enable verbose output for debugging.
  *
@@ -223,7 +223,7 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
 [[cpp11::register]]
 cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int nSample, const doubles& zScoreR,
                               double pValueThreshold, double propSVD, bool gcControl, int nIter,
-                              double gPvalueThreshold, int ncpus, bool correctChenEtAlBug,
+                              double gPvalueThreshold, int numThreads, bool correctChenEtAlBug,
                               bool verbose, cpp11::sexp seed = R_NilValue) {
 	mat LD_mat = as_Mat(ldMatR);
 	vec zScore = as_Col(zScoreR);
@@ -237,13 +237,13 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 		Rprintf("gcControl: %d\n", gcControl);
 		Rprintf("nIter: %d\n", nIter);
 		Rprintf("gPvalueThreshold: %g\n", gPvalueThreshold);
-		Rprintf("ncpus: %d\n", ncpus);
+		Rprintf("numThreads: %d\n", numThreads);
 		Rprintf("correctChenEtAlBug: %d\n", correctChenEtAlBug);
 	}
 
 	// Set number of threads for parallel processing
 	int nProcessors = omp_get_max_threads();
-	if (ncpus < nProcessors) nProcessors = ncpus;
+	if (numThreads < nProcessors) nProcessors = numThreads;
 	omp_set_num_threads(nProcessors);
 
 	size_t markerSize = zScore.size();
@@ -299,7 +299,7 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 			Rprintf("Performing oneIteration()\n");
 		}
 
-		oneIteration(LD_mat, idx, idx2, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose, rsqExceed);
+		oneIteration(LD_mat, idx, idx2, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, numThreads, verbose, rsqExceed);
 
 		diff.resize(idx2.size());
 		grouping_tmp.resize(idx2.size());
@@ -377,7 +377,7 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 			Rprintf("Performing oneIteration() with updated sets of indices\n");
 		}
 
-		oneIteration(LD_mat, idx2_QCed, idx, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose, rsqExceed);
+		oneIteration(LD_mat, idx2_QCed, idx, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, numThreads, verbose, rsqExceed);
 
 		if (verbose) {
 			Rprintf("Recalculating differences and groupings after the iteration\n");

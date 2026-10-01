@@ -7,7 +7,7 @@
 \usage{
 intersectVariants(x, y, oneSided = FALSE, ...)
 
-\S4method{intersectVariants}{FineMappingResultBase,FineMappingResultBase}(x, y, oneSided = FALSE, ...)
+\S4method{intersectVariants}{FineMappingResultBase,FineMappingResultBase}(x, y, oneSided = FALSE)
 }
 \arguments{
 \item{x}{A fine-mapping collection to reconcile.}

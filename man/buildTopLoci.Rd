@@ -17,9 +17,7 @@ buildTopLoci(
   otherQuantities = NULL,
   region = NULL,
   conditionIdx = NULL,
-  fullFit = FALSE,
-  fullFitAlphaOnly = TRUE,
-  includeAllCs = FALSE
+  credibleSetArgs = credibleSetConfig(includeAllCs = FALSE)
 )
 }
 \arguments{
@@ -63,14 +61,10 @@ carries no sample count: \code{n} is left \code{NA} for the per-variant
 \item{conditionIdx}{Integer or \code{NULL}. Index of the conditioned effect
 (per-condition output); \code{NULL} for the unconditioned fit.}
 
-\item{fullFit}{Logical. Retain the full fit object on each entry. Default
-\code{FALSE}.}
-
-\item{fullFitAlphaOnly}{Logical. When retaining the full fit, keep only the
-per-effect alpha matrix. Default \code{TRUE}.}
-
-\item{includeAllCs}{Logical. Include all credible sets rather than only the
-top one. Default \code{FALSE}.}
+\item{credibleSetArgs}{How credible sets are built and reported, built with
+\code{\link{credibleSetConfig}}. \code{perCsColumns} decides which
+per-credible-set variant-level columns this table carries, and
+\code{includeAllCs} their labels.}
 }
 \value{
 A data frame in the fixed 22-column shape for this fit and method, or

@@ -392,16 +392,17 @@ test_that("ctwasPipeline: rejects non-GRanges twasZ", {
     )
 })
 
-test_that("ctwasPipeline: rejects unknown groupPriorVarStructure value", {
-    skip_if_not_installed("ctwas")
-    inp <- .ctp_makeMultiBlockInputs()
+test_that("ctwasPriorConfig rejects an unknown varStructure", {
+    # The check moved to the constructor, so it fires where it is written
+    # rather than part-way into a run -- and needs no ctwas install.
     expect_error(
-        ctwasPipeline(
-            gwasSumStats = inp$gwasSumStats,
-            twasWeights = inp$twasWeights,
-            groupPriorVarStructure = "bogus"
-        ),
-        "groupPriorVarStructure"
+        ctwasPriorConfig(varStructure = "bogus"),
+        "`varStructure` must be one of"
+    )
+    expect_equal(ctwasPriorConfig()$varStructure, "shared_type")
+    expect_equal(
+        ctwasPriorConfig(varStructure = "independent")$varStructure,
+        "independent"
     )
 })
 
@@ -900,9 +901,9 @@ test_that(".ctwasPlaceByAnchor: block interval is half-open [start, stop)", {
 test_that(".ctwasIsPreBucketed / .ctwasCombineWeightSources: dispatch flat vs pre-bucketed", {
     tw <- .ctp_makeTwasWeights()
     grid <- list(block1 = 1, block2 = 2)
-    expect_true(pecotmr:::.ctwasIsPreBucketed(list(block1 = tw), grid)) # named list
-    expect_false(pecotmr:::.ctwasIsPreBucketed(tw, grid)) # flat S4
-    expect_false(pecotmr:::.ctwasIsPreBucketed(list(tw), grid)) # unnamed
+    expect_true(pecotmr:::.ctwasIsPreBucketed(list(block1 = tw))) # named list
+    expect_false(pecotmr:::.ctwasIsPreBucketed(tw)) # flat S4
+    expect_false(pecotmr:::.ctwasIsPreBucketed(list(tw))) # unnamed
     expect_s4_class(pecotmr:::.ctwasCombineWeightSources(tw), "TwasWeights")
     expect_s4_class(
         pecotmr:::.ctwasCombineWeightSources(list(tw)),
@@ -1896,6 +1897,33 @@ test_that("mergeCtwasBoundaryRegions: LD path splices updated_* back + merge_res
     expect_true(!is.null(out$merge_res))
 })
 
+test_that("mergeCtwasBoundaryRegions passes no unnamed argument to ctwas", {
+    skip_if_not_installed("ctwas")
+    # Regression: methodArgs was merged with c(), which appends a MethodConfig
+    # (a SimpleList) as ONE opaque element instead of splicing its entries.
+    # exec() then handed that object to ctwas positionally, binding it to
+    # `combine_PIPs` -- so even the default ctwasConfig() broke the real call.
+    captured <- NULL
+    local_mocked_bindings(
+        postprocess_region_merging = function(...) {
+            captured <<- list(...)
+            .ctp_mergeReturn()
+        },
+        .package = "ctwas"
+    )
+    mergeCtwasBoundaryRegions(.ctp_finemapResult(hasLd = TRUE))
+    expect_false(any(names(captured) == ""))
+    expect_false("combine_PIPs" %in% names(captured))
+
+    # ...and a user option still arrives spliced, by its own name
+    mergeCtwasBoundaryRegions(
+        .ctp_finemapResult(hasLd = TRUE),
+        methodArgs = ctwasConfig(min_abs_corr = 0.1)
+    )
+    expect_equal(captured$min_abs_corr, 0.1)
+    expect_false(any(names(captured) == ""))
+})
+
 test_that("mergeCtwasBoundaryRegions: no-LD path uses postprocess_region_merging_noLD", {
     skip_if_not_installed("ctwas")
     usedNoLd <- FALSE
@@ -1984,7 +2012,7 @@ test_that("ctwasPipeline: mergeBoundary = TRUE re-fine-maps and flows into Ctwas
     out <- ctwasPipeline(
         inp$gwasSumStats,
         inp$twasWeights,
-        mergeBoundary = TRUE
+        boundaryMergeArgs = boundaryMergeConfig(enabled = TRUE)
     )
     expect_true(merged) # merging ran
     expect_s4_class(out, "CtwasResult")
@@ -2075,7 +2103,7 @@ test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN diverge
     expect_error(
         estCtwasParam(
             assembleCtwasInputs(inp$gwasSumStats, inp$twasWeights),
-            fallbackToPrefit = FALSE
+            ctwasPriorArgs = ctwasPriorConfig(fallbackToPrefit = FALSE)
         ),
         "contains NAs"
     )
@@ -2085,7 +2113,7 @@ test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN diverge
     # (default thin = 0.1) → 1e-5. The group_prior_var is not thinned.
     est <- estCtwasParam(
         assembleCtwasInputs(inp$gwasSumStats, inp$twasWeights),
-        fallbackToPrefit = TRUE
+        ctwasPriorArgs = ctwasPriorConfig(fallbackToPrefit = TRUE)
     )
     expect_equal(unname(est$param$group_prior), c(0.05, 1e-5))
     expect_equal(unname(est$param$group_prior_var), c(4.0, 5.0))
@@ -2128,7 +2156,7 @@ test_that("estCtwasParam fallback drops degenerate regions before fit_EM", {
     )
     est <- estCtwasParam(
         assembleCtwasInputs(inp$gwasSumStats, inp$twasWeights),
-        fallbackToPrefit = TRUE
+        ctwasPriorArgs = ctwasPriorConfig(fallbackToPrefit = TRUE)
     )
     # only the qualifying region reached fit_EM; the degenerate region was filtered
     expect_equal(seen, "good")
@@ -2158,7 +2186,7 @@ test_that("(real ctwas) prefit fallback skips a degenerate region fit_EM would r
         niter = 3L,
         groupPriorVarStructure = "shared_all",
         thin = 1,
-        ncore = 1L
+        numThreads = 1L
     )
     # the prefit EM ran on the valid region only and returns finite real group priors
     expect_true("SNP" %in% names(res$group_prior))
@@ -2310,13 +2338,14 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
         ctwasPipeline(
             gwasSumStats = gssTwoBlocks,
             twasWeights = tw,
-            niter = 5L,
-            niterPrefit = 2L,
-            # Toy panel: relax the production filters that gate out tiny inputs.
-            ctwasArgs = list(
+            ctwasPriorArgs = ctwasPriorConfig(niter = 5L, niterPrefit = 2L),
+            # Toy panel: relax the production filters that gate out tiny
+            # inputs. `filter_L = FALSE` used to sit here too; no ctwas
+            # function has ever had such a formal, so .ctwasInvoke dropped it
+            # silently. ctwasConfig() now rejects it.
+            methodArgs = ctwasConfig(
                 min_group_size = 1L,
-                min_p_single_effect = 0,
-                filter_L = FALSE
+                min_p_single_effect = 0
             )
         )
     ))
@@ -2506,6 +2535,55 @@ test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
 # ===========================================================================
 # mergeCtwasBoundaryRegions (step 4: boundary-gene region merging)
 # ===========================================================================
+
+test_that("ctwasConfig now reaches compute_gene_z too", {
+    skip_if_not_installed("ctwas")
+    # compute_gene_z was the one ctwas step methodArgs could not configure:
+    # it was called directly rather than through .ctwasInvoke, so its
+    # `logfile` was unreachable and the name was not in the accepted union.
+    expect_true("ctwas::compute_gene_z" %in% pecotmr:::.ctwasCallees())
+    expect_s4_class(ctwasConfig(logfile = "gene-z.log"), "MethodConfig")
+    seen <- NULL
+    local_mocked_bindings(
+        # The mock must carry the REAL formals: .ctwasInvoke filters the
+        # bundle to the callee's explicit formals, so a `function(...)` mock
+        # would drop `logfile` and hide the thing being tested.
+        compute_gene_z = function(z_snp, weights, ncore = 1L, logfile = NULL) {
+            seen <<- list(ncore = ncore, logfile = logfile)
+            data.frame(id = "t1", z = 1.0)
+        },
+        .package = "ctwas"
+    )
+    inputs <- list(
+        z_snp = data.frame(id = "s1", z = 1),
+        weights = list(t1 = list(wgt = 1)),
+        z_gene = NULL
+    )
+    pecotmr:::.ctwasEnsureZGene(
+        inputs,
+        numThreads = 1L,
+        extra = ctwasConfig(logfile = "gene-z.log")
+    )
+    expect_equal(seen$logfile, "gene-z.log")
+    expect_equal(seen$ncore, 1L)
+    # A supplied z_gene still short-circuits without calling the engine.
+    seen <- NULL
+    inputs$z_gene <- data.frame(id = "t1", z = 2.0)
+    pecotmr:::.ctwasEnsureZGene(inputs, numThreads = 1L)
+    expect_null(seen)
+})
+
+test_that("screenCtwasRegions no longer advertises an L it cannot use", {
+    skip_if_not_installed("ctwas")
+    # ctwas::screen_regions has no `L` formal -- screening is always SER --
+    # so the parameter could never be honoured. It was documented as
+    # "Unused. Retained for call-site compatibility"; a knob that cannot
+    # work is better removed than explained.
+    expect_false("L" %in% names(formals(screenCtwasRegions)))
+    expect_false("L" %in% names(formals(ctwas::screen_regions)))
+    # finemapCtwasRegions is where L genuinely applies, and still takes it.
+    expect_true("L" %in% names(formals(finemapCtwasRegions)))
+})
 
 test_that("mergeCtwasBoundaryRegions: no first-pass finemap_res returns unchanged", {
     fmr <- list(finemap_res = NULL, region_data = "rd")
@@ -3268,7 +3346,7 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
     screened <- suppressMessages(
         screenCtwasRegions(
             ctwasEstExample,
-            ctwasArgs = list(min_nonSNP_PIP = 0)
+            methodArgs = ctwasConfig(min_nonSNP_PIP = 0)
         )
     )
     out <- suppressMessages(finemapCtwasRegions(screened))
@@ -3586,11 +3664,11 @@ test_that(".ctwasBlockGrFromIds places unparseable ids on chrUn", {
 })
 
 test_that(".ctwasCoordField falls back for an unplaced feature", {
-    expect_equal(pecotmr:::.ctwasCoordField(NULL, "chrom", TRUE), "chrUnplaced")
-    expect_equal(pecotmr:::.ctwasCoordField2(NULL, "start", TRUE), 1L)
+    expect_equal(pecotmr:::.ctwasCoordField(NULL, "chrom"), "chrUnplaced")
+    expect_equal(pecotmr:::.ctwasCoordField2(NULL, "start"), 1L)
     co <- list(chrom = "chr7", start = 42L)
-    expect_equal(pecotmr:::.ctwasCoordField(co, "chrom", TRUE), "chr7")
-    expect_equal(pecotmr:::.ctwasCoordField2(co, "start", TRUE), 42L)
+    expect_equal(pecotmr:::.ctwasCoordField(co, "chrom"), "chr7")
+    expect_equal(pecotmr:::.ctwasCoordField2(co, "start"), 42L)
 })
 
 test_that(".ctwasBuildSingleRegionInfo reports an empty block accurately", {
@@ -3763,4 +3841,47 @@ test_that("the ctwas concat helpers answer an empty vector of their own type", {
     expect_identical(pecotmr:::.ctwasConcat(list()), list())
     expect_identical(pecotmr:::.ctwasConcatInt(list()), integer(0))
     expect_identical(pecotmr:::.ctwasConcatChr(list()), character(0))
+})
+
+test_that("ctwasConfig validates against what the ctwas steps accept together", {
+    a <- ctwasConfig(min_group_size = 2L, min_gene = 1L)
+    expect_s4_class(a, "MethodConfig")
+    expect_equal(a$min_group_size, 2L)
+    # A name valid for only ONE of the steps is still accepted here; the
+    # per-step filtering in .ctwasInvoke routes it to the step that takes it.
+    expect_true(is_in("min_nonSNP_PIP", names(ctwasConfig(min_nonSNP_PIP = 0))))
+    expect_true(is_in("min_gene", names(ctwasConfig(min_gene = 1L))))
+})
+
+test_that("ctwasConfig rejects a name no ctwas step accepts", {
+    # `filter_L` is the real case that prompted this: it is not a formal of
+    # any ctwas function, so it was silently dropped for years.
+    expect_error(
+        ctwasConfig(filter_L = FALSE),
+        "unknown argument\\(s\\) filter_L"
+    )
+    expect_error(ctwasConfig(min_genee = 1L), "unknown argument")
+})
+
+test_that("ctwasConfig does not accept pecotmr's own pipeline parameters", {
+    # These ARE real ctwas formals, so the union check would wave them
+    # through -- but .ctwasInvoke drops any name the pipeline already
+    # supplies, so a value set here was silently discarded. The error names
+    # the setting that actually takes effect.
+    expect_error(ctwasConfig(thin = 0.1), "ctwasPriorConfig\\(thin =\\)")
+    expect_error(ctwasConfig(niter = 10L), "ctwasPriorConfig\\(niter =\\)")
+    expect_error(
+        ctwasConfig(group_prior_var_structure = "shared_all"),
+        "ctwasPriorConfig\\(varStructure =\\)"
+    )
+    expect_error(ctwasConfig(L = 5L), "the pipeline's own")
+    expect_error(ctwasConfig(ncore = 4L), "the pipeline's own")
+    expect_error(ctwasConfig(maxSNP = 10L), "boundaryMergeConfig\\(maxSnp =\\)")
+})
+
+test_that("ctwas entry points refuse a bare list for methodArgs", {
+    expect_error(
+        screenCtwasRegions(list(), methodArgs = list(min_nonSNP_PIP = 0)),
+        "must be built with ctwasConfig\\(\\)"
+    )
 })

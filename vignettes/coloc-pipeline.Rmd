@@ -62,14 +62,15 @@ qtlFmr <- fineMappingPipeline(
 
 The recommend approach is to provide `colocPipeline()` a `QtlFineMappingResult`
 and a `GwasSumStats`. The pipeline runs `fineMappingPipeline()` internally on
-the GWAS sumstats (with `finemappingMethods`) over the exact window used in the
+the GWAS sumstats (configured by `gwasFineMappingConfig()`) over the exact
+window used in the
 `QtlFineMappingResult`, then runs `coloc.bf_bf` per (QTL, GWAS) pair.
 
 ```{r coloc-quickstart}
 res <- colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    finemappingMethods = "susie"
+    gwasFineMappingArgs = gwasFineMappingConfig(methods = "susie")
 )
 res
 ```
@@ -112,45 +113,65 @@ included. Two opt-in filters can adjust this:
 
 | Filter | Description | Default |
 |---|---|---|
-| `filterLbfCs` | TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`). | FALSE |
-| `filterLbfCsSecondary` | Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage. | NULL |
-| `filterLbfCsConcentration` | Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants. | 0.5 |
-| `priorTol` | Drop effects whose estimated prior variance is at or below this threshold. | 1e-9 |
+| `colocLbfFilterConfig(filterLbfCs=)` | TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`). | FALSE |
+| `colocLbfFilterConfig(secondary=)` | Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage. | NULL |
+| `colocLbfFilterConfig(concentration=)` | Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants. | 0.5 |
+| `colocLbfFilterConfig(priorTol=)` | Drop effects whose estimated prior variance is at or below this threshold. | 1e-9 |
 
 ```{r coloc-filter-example, eval=FALSE}
 colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    filterLbfCsSecondary = 0.5, # 50% CS concentration filter
-    filterLbfCsConcentration = 0.5
+    lbfFilterArgs = colocLbfFilterConfig(
+        secondary = 0.5, # 50% CS concentration filter
+        concentration = 0.5
+    )
 ) # span < 25% of locus variants
 ```
 
-## Enrichment-aware coloc (enloc mode)
+## Enrichment-aware colocalisation (enloc mode)
 
-Pass a per-`(gwasStudy, qtlContext)` enrichment table (the output of
-`qtlEnrichmentPipeline()`) to scale the shared-signal prior:
+Passing a per-`(gwasStudy, qtlContext)` enrichment table --- the output of
+`qtlEnrichmentPipeline()` --- switches the pair from coloc to enloc. This is
+a port of `fastenloc`, not a reweighting of coloc: the priors are *derived*
+from the enrichment estimate rather than the baseline `p12` being scaled by
+it.
 
-\[ p_{12}^{\text{used}} = \min\bigl(p_{12}\,(1 + \text{enrichment}),\,
-p_{12,\max}\bigr) \]
+The estimator returns the enrichment parameters $(a_0, a_1)$ on the log-odds
+scale, and the priors follow as `fastenloc`'s `set_enrich_params` writes them,
+with $P_{\text{eQTL}}$ the per-variant QTL prior:
 
-Pairs without a matching enrichment row fall back to the baseline
-`p12` with a warning. Two extra columns are added to the output:
-`enrichment` (the lookup) and `p12Used` (what was actually passed to
-`coloc.bf_bf`).
+\[ p_1 = (1 - P_{\text{eQTL}})\,\sigma(a_0), \quad
+p_2 = P_{\text{eQTL}}\,\bigl(1 - \sigma(a_0 + a_1)\bigr), \quad
+p_{12} = P_{\text{eQTL}}\,\sigma(a_0 + a_1) \]
+
+`qtlEnrichmentPipeline()` carries all three out as the `colocP1`, `colocP2`
+and `colocP12` columns, so the table you pass already holds them. Because the
+enrichment determines the priors, supplying `priors` as well is an error
+rather than a silent precedence rule.
+
+What makes the scoring enloc rather than coloc is that the prior depends on
+whether the GWAS hit *is* the causal QTL --- $\sigma(a_0 + a_1)$ when it is,
+$\sigma(a_0)$ when it is not. coloc applies one $p_{12}$ to every shared
+configuration and cannot express that.
+
+Pairs without a matching enrichment row fall back to the baseline priors with
+a warning. Four columns are added: `enrichment` and `p12Used` (the per-pair
+factor and the derived shared-signal prior), plus `RCP` and `LCP`, enloc's
+regional and locus colocalisation probabilities. Those last two are the same
+quantities as `PP.H4.abf` and `PP.H3.abf + PP.H4.abf`, reported under enloc's
+names as well.
 
 ```{r coloc-enloc, eval=FALSE}
-enrichmentTable <- data.frame(
-    gwasStudy = "trait1",
-    qtlContext = "brain",
-    enrichment = 2.5,
-    stringsAsFactors = FALSE
+enrichmentTable <- qtlEnrichmentPipeline(
+    gwasFineMappingResult = gwasFineMappingExample,
+    qtlFineMappingResult = qtlFineMappingExample,
+    verbose = FALSE
 )
 colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    enrichment = enrichmentTable,
-    p12Max = 1e-3
+    enrichment = enrichmentTable
 )
 ```
 
@@ -177,17 +198,19 @@ colocPipeline(
 colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    filterLbfCs = FALSE,
-    filterLbfCsSecondary = NULL, # e.g. 0.5
-    filterLbfCsConcentration = 0.5,
-    priorTol = 1e-9,
-    p1 = 1e-4,
-    p2 = 1e-4,
-    p12 = 5e-6,
-    finemappingMethods = "susie", # inline GWAS FM when needed
+    lbfFilterArgs = colocLbfFilterConfig(
+        filterLbfCs = FALSE,
+        secondary = NULL, # e.g. 0.5
+        concentration = 0.5,
+        priorTol = 1e-9
+    ),
+    priors = colocPriorConfig(p1 = 1e-4, p2 = 1e-4, p12 = 5e-6),
+    gwasFineMappingArgs = gwasFineMappingConfig( # inline GWAS FM when needed
+        methods = "susie",
+        credibleSetArgs = credibleSetConfig(coverage = 0.95)
+    ),
     returnGwasFineMapping = FALSE,
     enrichment = NULL, # data.frame for enloc mode
-    p12Max = 1e-3,
     adjustPips = TRUE
 )
 ```

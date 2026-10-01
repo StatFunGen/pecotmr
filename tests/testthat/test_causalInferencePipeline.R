@@ -301,7 +301,7 @@ test_that("causalInferencePipeline: with both inputs, MR fields are populated", 
         gwasSumStats = .cip_makeGwasSumstats(),
         twasWeights = tw,
         fineMappingResult = fmr,
-        mrPipCutoff = 0.5
+        mrArgs = mrConfig(pipCutoff = 0.5)
     )
     mc <- S4Vectors::mcols(out)
     # MR uses PIP > 0.5 variants from the FMR (v1, v3, v4).
@@ -514,7 +514,7 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
     out <- causalInferencePipeline(
         gwasSumStats = .cip_makeGwasSumstats(),
         twasWeights = tw,
-        rsqCutoff = 0.1
+        weightSelectionArgs = weightSelectionConfig(cutoff = 0.1)
     )
     expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
 })
@@ -547,7 +547,7 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
     out <- causalInferencePipeline(
         gwasSumStats = .cip_makeGwasSumstats(),
         twasWeights = tw,
-        rsqCutoff = 0.1
+        weightSelectionArgs = weightSelectionConfig(cutoff = 0.1)
     )
     expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
     expect_true(is.finite(S4Vectors::mcols(out)$twasZ))
@@ -580,8 +580,10 @@ test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods
     out <- causalInferencePipeline(
         gwasSumStats = .cip_makeGwasSumstats(),
         twasWeights = tw,
-        rsqCutoff = 0.1,
-        rsqPvalCutoff = 0.05
+        weightSelectionArgs = weightSelectionConfig(
+            cutoff = 0.1,
+            pvalCutoff = 0.05
+        )
     )
     expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
 })
@@ -1779,12 +1781,12 @@ test_that(".cipCvSelection errors when no method clears the CV cutoffs", {
         pecotmr:::.cipCvSelection(
             qtlRows = data.frame(a = 1),
             twasWeights = "notNull",
-            rsqCutoff = 0.5,
-            rsqOption = NULL,
-            rsqPvalCutoff = 0.05,
-            rsqPvalOption = NULL
+            weightSelectionArgs = weightSelectionConfig(
+                cutoff = 0.5,
+                pvalCutoff = 0.05
+            )
         ),
-        "rsqCutoff = 0.5 / rsqPvalCutoff = 0.05"
+        "cutoff = 0.5, pvalCutoff = 0.05"
     )
 })
 
@@ -1809,15 +1811,9 @@ test_that(".cipRun errors when no tuple produced a result", {
             twasWeights = NULL,
             fineMappingResult = NULL,
             combineMethods = NULL,
-            rsqCutoff = NULL,
-            rsqOption = NULL,
-            rsqPvalCutoff = NULL,
-            rsqPvalOption = NULL,
+            weightSelectionArgs = weightSelectionConfig(),
             alleleFlip = FALSE,
-            mrMethod = "csAware",
-            mrPipCutoff = 0,
-            mrCpipCutoff = 0,
-            mrPvalCutoff = 1
+            mrArgs = mrConfig(method = "csAware", cpipCutoff = 0)
         ),
         "no \\(qtl, gwas\\) tuples produced a result"
     )
@@ -1860,10 +1856,11 @@ test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
             gwasSumStats = list(study = "G1"),
             gwasLd = NULL,
             alleleFlip = FALSE,
-            mrMethod = "csAware",
-            mrPipCutoff = 0,
-            mrCpipCutoff = 0,
-            mrPvalCutoff = 1
+            mrArgs = mrConfig(
+                method = "csAware",
+                cpipCutoff = 0,
+                pvalCutoff = 1
+            )
         )
     )
 })
@@ -1878,10 +1875,7 @@ test_that(".cipRunMr routes to the CS-aware estimator when asked", {
         gdf = NULL,
         twasOut = list(pval = 0.001),
         alleleFlip = FALSE,
-        mrMethod = "csAware",
-        mrPipCutoff = 0,
-        mrCpipCutoff = 0.5,
-        mrPvalCutoff = 1
+        mrArgs = mrConfig(method = "csAware", cpipCutoff = 0.5, pvalCutoff = 1)
     )
     expect_true(isTRUE(out$SENTINEL))
 })
@@ -1925,4 +1919,35 @@ test_that("twasZ: nSketch / combineMethods guards fire", {
 test_that("the concat helpers answer an empty vector of their own type", {
     expect_identical(pecotmr:::.cipConcatInt(list()), integer(0))
     expect_identical(pecotmr:::.cipConcat(list()), list())
+})
+
+test_that("mrConfig refuses the PIP cutoff its method does not read", {
+    # Each method reads exactly one of the two. Setting the other used to be
+    # silently ignored.
+    expect_error(
+        mrConfig(method = "csAware", pipCutoff = 0.9),
+        "not read by method"
+    )
+    expect_error(
+        mrConfig(method = "ivwPerVariant", cpipCutoff = 0.9),
+        "not read by method"
+    )
+    # Leaving the inapplicable one at its default is not a request.
+    expect_s4_class(
+        mrConfig(method = "csAware", cpipCutoff = 0.9),
+        "MethodConfig"
+    )
+    expect_s4_class(mrConfig(pipCutoff = 0.9), "MethodConfig")
+})
+
+test_that("weightSelectionConfig and mrConfig do not overlap", {
+    expect_length(
+        intersect(
+            names(formals(weightSelectionConfig)),
+            names(formals(mrConfig))
+        ),
+        1L # both carry a pvalCutoff, gating different things
+    )
+    expect_equal(weightSelectionConfig()$cutoff, 0)
+    expect_equal(mrConfig()$method, "ivwPerVariant")
 })

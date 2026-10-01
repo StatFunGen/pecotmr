@@ -12,6 +12,8 @@ mashModelFit(
   fitOn = c("random", "strong"),
   outputLevel = 4L,
   inputScale = c("auto", "beta", "z"),
+  mashDataArgs = mashDataConfig(),
+  mashArgs = mashConfig(),
   setSeed = 999
 )
 }
@@ -37,6 +39,19 @@ carries, which is unwrapped to its \code{U}.}
 full model \code{\link{mashPosterior}} consumes).}
 
 \item{inputScale}{SumStats -> matrix conversion scale.}
+
+\item{mashDataArgs}{Extra arguments for
+\code{mashr::mash_set_data()}, built with
+\code{\link{mashDataConfig}} -- for example
+\code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+\code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+are refused by the constructor.}
+
+\item{mashArgs}{Extra arguments for \code{mashr::mash()}, built with
+\code{\link{mashConfig}} -- for example \code{nullweight},
+\code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+\code{outputlevel} and \code{seed} are owned by pecotmr and are
+refused by the constructor.}
 
 \item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG
 untouched.}

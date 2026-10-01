@@ -7,7 +7,7 @@
 \usage{
 getRegionVcp(x, ...)
 
-\S4method{getRegionVcp}{ColocBoostResult}(x, ...)
+\S4method{getRegionVcp}{ColocBoostResult}(x)
 }
 \arguments{
 \item{x}{A \code{\linkS4class{ColocBoostResult}}.}

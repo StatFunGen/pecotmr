@@ -20,7 +20,7 @@ NULL
 setMethod(
     "readAnnotations",
     signature(paths = "character"),
-    function(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...) {
+    function(paths, snpRanges, annotationMeta = NULL, genome = "hg19") {
         if (is.null(names(paths))) {
             msg <- glue(
                 "'paths' must be a named character vector (names = ",

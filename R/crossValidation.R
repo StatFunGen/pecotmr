@@ -91,7 +91,7 @@
     foldIds <- cv$foldIds
     fitFold <- cv$fitFold
     fitFoldCtx <- cv$fitFoldCtx
-    retainFits <- cv$retainFits
+    fitRetention <- cv$fitRetention
     verbose <- cv$verbose
     if (verbose >= 1) {
         msg <- glue("  CV fold {j}/{length(foldIds)} ...")
@@ -109,7 +109,10 @@
     Xtr <- trainAll[, keep, drop = FALSE]
     ff <- fitFold(Xtr, Ytr, j, fitFoldCtx)
     preds <- map(ff$weights, .cvFoldPrediction, Xte = Xte)
-    list(preds = preds, fits = if (isTRUE(retainFits)) ff$fits else list())
+    list(
+        preds = preds,
+        fits = if (identical(fitRetention, "none")) list() else ff$fits
+    )
 }
 
 # No-op fold fitter: used when the caller only wants the fold partition.
@@ -145,10 +148,11 @@
     numThreads = 1,
     maxNumVariants = NULL,
     variantsToKeep = NULL,
-    retainFits = FALSE,
+    fitRetention = c("none", "slim", "full"),
     verbose = 1,
     seed = NULL
 ) {
+    fitRetention <- arg_match(fitRetention)
     .applySeed(seed)
     prep <- .cvPrepareData(X, Y, fold, verbose)
     X <- .cvSubsampleVariants(prep$X, maxNumVariants, variantsToKeep, verbose)
@@ -169,7 +173,7 @@
         foldIds = foldIds,
         fitFold = fitFold,
         fitFoldCtx = fitFoldCtx,
-        retainFits = retainFits,
+        fitRetention = fitRetention,
         verbose = verbose,
         rngSeed = seed
     )

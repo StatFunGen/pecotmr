@@ -1287,7 +1287,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     cisWindow,
     verbose,
     label,
-    region = NULL
+    region = NULL,
+    residualizationArgs
 ) {
     perTraitContexts <- .crossContextPerTrait(
         data,
@@ -1299,8 +1300,20 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (is.null(perTraitContexts)) {
         return(NULL)
     }
-    X <- .buildResidGeno(data, perTraitContexts, tid, cisWindow, region)
-    Yres <- .fmResidPheno(data, contexts = perTraitContexts, traitId = tid)
+    X <- .buildResidGeno(
+        data,
+        perTraitContexts,
+        tid,
+        cisWindow,
+        region,
+        residualizationArgs
+    )
+    Yres <- .fmResidPheno(
+        data,
+        contexts = perTraitContexts,
+        traitId = tid,
+        residualizationArgs = residualizationArgs
+    )
     .crossContextAssemble(X, Yres, perTraitContexts, verbose, label, tid)
 }
 
@@ -1348,7 +1361,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     verbose,
     label,
     study,
-    region = NULL
+    region = NULL,
+    residualizationArgs
 ) {
     se <- getPhenotypes(data, contexts = cx)
     # scopedTraits is already region-restricted upstream (.runJointSpecs) when
@@ -1357,8 +1371,20 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (.crossTraitTooFew(traitsHere, cx, study, verbose, label)) {
         return(NULL)
     }
-    allX <- .buildResidGeno(data, cx, traitsHere, cisWindow, region)
-    allY <- .fmResidPheno(data, contexts = cx, traitId = traitsHere)
+    allX <- .buildResidGeno(
+        data,
+        cx,
+        traitsHere,
+        cisWindow,
+        region,
+        residualizationArgs
+    )
+    allY <- .fmResidPheno(
+        data,
+        contexts = cx,
+        traitId = traitsHere,
+        residualizationArgs = residualizationArgs
+    )
     common <- intersect(rownames(allX), rownames(allY))
     if (length(common) < 2L) {
         return(NULL)
@@ -1383,16 +1409,29 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 # Residualized genotype for the cross-* / composed builders (cis-window or an
 # explicit region). Shared by the individual multi-axis Xy builders.
-.buildResidGeno <- function(data, contexts, traitId, cisWindow, region) {
+.buildResidGeno <- function(
+    data,
+    contexts,
+    traitId,
+    cisWindow,
+    region,
+    residualizationArgs
+) {
     if (is.null(region)) {
         .fmResidGeno(
             data,
             contexts = contexts,
             traitId = traitId,
-            cisWindow = cisWindow
+            cisWindow = cisWindow,
+            residualizationArgs = residualizationArgs
         )
     } else {
-        .fmResidGeno(data, contexts = contexts, region = region)
+        .fmResidGeno(
+            data,
+            contexts = contexts,
+            region = region,
+            residualizationArgs = residualizationArgs
+        )
     }
 }
 
@@ -1471,7 +1510,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     cisWindow,
     verbose,
     label,
-    region = NULL
+    region = NULL,
+    residualizationArgs
 ) {
     tuples <- .composedTuples(data, scope, study, verbose, label)
     if (is.null(tuples)) {
@@ -1479,8 +1519,20 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     }
     allContexts <- unique(map_chr(tuples, "context"))
     allTraits <- unique(map_chr(tuples, "trait"))
-    allX <- .buildResidGeno(data, allContexts, allTraits, cisWindow, region)
-    resid <- .fmResidPheno(data, contexts = allContexts, traitId = allTraits)
+    allX <- .buildResidGeno(
+        data,
+        allContexts,
+        allTraits,
+        cisWindow,
+        region,
+        residualizationArgs
+    )
+    resid <- .fmResidPheno(
+        data,
+        contexts = allContexts,
+        traitId = allTraits,
+        residualizationArgs = residualizationArgs
+    )
     # A single context returns the bare matrix rather than a named list.
     YresList <- if (length(allContexts) == 1L) {
         set_names(list(resid), allContexts)
@@ -1784,25 +1836,20 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
+    credibleSetArgs = credibleSetConfig(includeAllCs = FALSE),
     verbose,
-    methodArgs = list(),
+    methodArgs = fineMappingMethodsConfig(),
     xRegions = list(NULL),
     twasWeights = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10,
-    cvFolds = 0,
-    cvThreads = 1,
-    samplePartition = NULL,
+    crossValidationArgs = crossValidationConfig(),
+    residualizationArgs = residualizationConfig(),
     pipCutoffToSkip = 0,
     fineMappingResult = NULL,
-    fullFit = FALSE,
-    fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE,
+    fitRetention = c("slim", "none", "full"),
     seed = NULL
 ) {
+    fitRetention <- arg_match(fitRetention)
     # Run the joint dispatch once per region block, then merge per
     # (study, context, trait, method) across regions. A single block (cis or
     # jointRegions=TRUE concatenated) returns its result directly.
@@ -1816,22 +1863,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         verbose = verbose,
         methodArgs = methodArgs,
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        cvFolds = cvFolds,
-        cvThreads = cvThreads,
-        samplePartition = samplePartition,
+        crossValidationArgs = crossValidationArgs,
+        residualizationArgs = residualizationArgs,
         pipCutoffToSkip = pipCutoffToSkip,
         fineMappingResult = fineMappingResult,
-        fullFit = fullFit,
-        fullFitAlphaOnly = fullFitAlphaOnly,
-        includeAllCs = includeAllCs,
+        fitRetention = fitRetention,
         seed = seed
     ) |>
         compact()
@@ -1846,35 +1887,24 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # FmJointPipeline for individual-level fine-mapping, built from the call params.
 .fmJointPipeline <- function(
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
+    credibleSetArgs = credibleSetConfig(includeAllCs = FALSE),
     dataDrivenPriorWeightsCutoff,
-    cvFolds,
-    cvThreads,
-    samplePartition,
+    crossValidationArgs,
+    residualizationArgs,
     verbose,
-    fullFit,
-    fullFitAlphaOnly,
-    includeAllCs,
+    fitRetention = c("slim", "none", "full"),
     seed
 ) {
+    fitRetention <- arg_match(fitRetention)
     new(
         "FmJointPipeline",
         config = list(
-            coverage = coverage,
-            secondaryCoverage = secondaryCoverage,
-            signalCutoff = signalCutoff,
-            minAbsCorr = minAbsCorr,
+            credibleSetArgs = credibleSetArgs,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-            cvFolds = cvFolds,
-            cvThreads = cvThreads,
-            samplePartition = samplePartition,
+            crossValidationArgs = crossValidationArgs,
+            residualizationArgs = residualizationArgs,
             verbose = verbose,
-            fullFit = fullFit,
-            fullFitAlphaOnly = fullFitAlphaOnly,
-            includeAllCs = includeAllCs,
+            fitRetention = fitRetention,
             seed = seed,
             ldSketch = NULL
         )
@@ -1888,41 +1918,29 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
     verbose,
-    methodArgs = list(),
+    methodArgs = fineMappingMethodsConfig(),
     region = NULL,
     twasWeights = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10,
-    cvFolds = 0,
-    cvThreads = 1,
-    samplePartition = NULL,
+    crossValidationArgs = crossValidationConfig(),
+    residualizationArgs = residualizationConfig(),
     pipCutoffToSkip = 0,
     fineMappingResult = NULL,
-    fullFit = FALSE,
-    fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE,
-    seed = NULL
+    seed = NULL,
+    credibleSetArgs,
+    fitRetention
 ) {
     # Engine routing (jointEngine.R); one region block (the caller loops
     # regions).
     .jointRejectStudyOnIndividual(parsedJointSpec)
     pipeline <- .fmJointPipeline(
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        cvFolds = cvFolds,
-        cvThreads = cvThreads,
-        samplePartition = samplePartition,
+        crossValidationArgs = crossValidationArgs,
+        residualizationArgs = residualizationArgs,
         verbose = verbose,
-        fullFit = fullFit,
-        fullFitAlphaOnly = fullFitAlphaOnly,
-        includeAllCs = includeAllCs,
+        fitRetention = fitRetention,
         seed = seed
     )
     .runJointSpecs(
@@ -1953,29 +1971,19 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # LD sketch drawn from the data).
 .fmSumStatsPipeline <- function(
     data,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
+    credibleSetArgs,
     dataDrivenPriorWeightsCutoff,
     verbose,
-    fullFit,
-    fullFitAlphaOnly,
-    includeAllCs
+    fitRetention
 ) {
     new(
         "FmJointPipeline",
         config = list(
-            coverage = coverage,
-            secondaryCoverage = secondaryCoverage,
-            signalCutoff = signalCutoff,
-            minAbsCorr = minAbsCorr,
+            credibleSetArgs = credibleSetArgs,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
             verbose = verbose,
-            fullFit = fullFit,
-            fullFitAlphaOnly = fullFitAlphaOnly,
-            includeAllCs = includeAllCs,
-            cvFolds = 0L,
+            fitRetention = fitRetention,
+            crossValidationArgs = .cvResolve(crossValidationConfig()),
             ldSketch = getLdSketch(data)
         )
     )
@@ -1987,36 +1995,24 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     methods,
     contexts,
     traitIds,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
     verbose,
-    methodArgs = list(),
+    methodArgs = fineMappingMethodsConfig(),
     twasWeights = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10,
     fineMappingResult = NULL,
-    fullFit = FALSE,
-    fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE,
-    mafCutoff = 0,
-    macCutoff = 0,
-    imissCutoff = 1
+    panelFilterArgs = panelFilterConfig(),
+    credibleSetArgs,
+    fitRetention
 ) {
     # Engine routing (jointEngine.R): the dispatch table + .runJointCell replace
     # the per-axis switch + the cross-context/trait/study/composed leaf
     # dispatchers.
     pipeline <- .fmSumStatsPipeline(
         data = data,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         verbose = verbose,
-        fullFit = fullFit,
-        fullFitAlphaOnly = fullFitAlphaOnly,
-        includeAllCs = includeAllCs
+        fitRetention = fitRetention
     )
     .runJointSpecs(
         parsedJointSpec,
@@ -2032,11 +2028,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             methodArgs = methodArgs,
             verbose = verbose,
             cache = fineMappingResult,
-            cutoffs = .panelCutoffs(
-                mafCutoff = mafCutoff,
-                macCutoff = macCutoff,
-                imissCutoff = imissCutoff
-            )
+            cutoffs = .panelCutoffs(panelFilterArgs)
         )
     )
 }
@@ -2081,10 +2073,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
+    credibleSetArgs,
     verbose,
     methodArgs,
     xRegions,
@@ -2103,10 +2092,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             contexts = contexts,
             traitIds = traitIds,
             cisWindow = cisWindow,
-            coverage = coverage,
-            secondaryCoverage = secondaryCoverage,
-            signalCutoff = signalCutoff,
-            minAbsCorr = minAbsCorr,
+            credibleSetArgs = credibleSetArgs,
             verbose = verbose,
             methodArgs = methodArgs,
             xRegions = xRegions,
@@ -2126,15 +2112,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
     verbose,
     methodArgs,
     xRegions,
     twasWeights,
-    dataDrivenPriorWeightsCutoff
+    dataDrivenPriorWeightsCutoff,
+    credibleSetArgs
 ) {
     .fmDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs,
@@ -2143,10 +2126,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         verbose = verbose,
         methodArgs = methodArgs,
         xRegions = xRegions,
@@ -2164,14 +2144,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     methods,
     contexts,
     traitIds,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
     verbose,
     methodArgs,
     twasWeights,
-    dataDrivenPriorWeightsCutoff
+    dataDrivenPriorWeightsCutoff,
+    credibleSetArgs
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
@@ -2189,10 +2166,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         methods = methods,
         contexts = contexts,
         traitIds = traitIds,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         verbose = verbose,
         methodArgs = methodArgs,
         twasWeights = twasWeights,
@@ -2216,12 +2190,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
+    credibleSetArgs,
     verbose,
-    methodArgs = list(),
+    methodArgs = fineMappingMethodsConfig(),
     xRegions = list(NULL),
     twasWeights = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10
@@ -2237,10 +2208,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         verbose = verbose,
         methodArgs = methodArgs,
         xRegions = xRegions,
@@ -2255,10 +2223,6 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         methods = methods,
         contexts = contexts,
         traitIds = traitIds,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
         verbose = verbose,
         methodArgs = methodArgs,
         twasWeights = twasWeights,
@@ -2317,10 +2281,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     xRegions = list(NULL),
-    retainFit = TRUE,
-    retainFitDetail = "slim",
+    fitRetention = c("slim", "none", "full"),
     seed = NULL
 ) {
+    fitRetention <- arg_match(fitRetention)
     # Run the joint dispatch once per region block, then merge per
     # (study, context, trait, method) across regions. A single block (cis or
     # jointRegions=TRUE concatenated) returns its result directly.
@@ -2335,8 +2299,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         cisWindow = cisWindow,
         dataType = dataType,
         verbose = verbose,
-        retainFit = retainFit,
-        retainFitDetail = retainFitDetail,
+        fitRetention = fitRetention,
         seed = seed
     )
     allLabs <- map_chr(xRegions, .twasRegionLabel)
@@ -2362,19 +2325,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     region = NULL,
-    retainFit = TRUE,
-    retainFitDetail = "slim",
+    fitRetention = c("slim", "none", "full"),
     seed = NULL
 ) {
+    fitRetention <- arg_match(fitRetention)
     # Engine routing (jointEngine.R); one region block (the caller loops
     # regions).
     .jointRejectStudyOnIndividual(parsedJointSpec)
     pipeline <- new(
         "TwasJointPipeline",
         config = list(
-            retainFitDetail = retainFitDetail,
             dataType = dataType,
-            cvFolds = 0L,
+            crossValidationArgs = .cvResolve(crossValidationConfig()),
             fitFullData = TRUE,
             standardized = FALSE,
             seed = seed,
@@ -2390,7 +2352,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         args = list(
-            methodArgs = list(),
+            methodArgs = twasWeightsMethodsConfig(),
             cisWindow = cisWindow,
             region = region,
             verbose = verbose
@@ -2409,19 +2371,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     traitIds,
     dataType,
     verbose,
-    retainFit = TRUE,
-    retainFitDetail = "slim",
-    mafCutoff = 0,
-    macCutoff = 0,
-    imissCutoff = 1
+    fitRetention = c("slim", "none", "full"),
+    panelFilterArgs = panelFilterConfig()
 ) {
+    fitRetention <- arg_match(fitRetention)
     # Engine routing (jointEngine.R).
     pipeline <- new(
         "TwasJointPipeline",
         config = list(
-            retainFitDetail = retainFitDetail,
             dataType = dataType,
-            cvFolds = 0L,
+            crossValidationArgs = .cvResolve(crossValidationConfig()),
             fitFullData = TRUE,
             standardized = TRUE,
             ldSketch = getLdSketch(data)
@@ -2436,13 +2395,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         args = list(
-            methodArgs = list(),
+            methodArgs = twasWeightsMethodsConfig(),
             verbose = verbose,
-            cutoffs = .panelCutoffs(
-                mafCutoff = mafCutoff,
-                macCutoff = macCutoff,
-                imissCutoff = imissCutoff
-            )
+            cutoffs = .panelCutoffs(panelFilterArgs)
         )
     )
 }
@@ -2478,8 +2433,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     xRegions,
-    retainFit,
-    retainFitDetail,
+    fitRetention,
     seed
 ) {
     if (length(nonStudyAxisSpecs) == 0L) {
@@ -2497,8 +2451,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             dataType = dataType,
             verbose = verbose,
             xRegions = xRegions,
-            retainFit = retainFit,
-            retainFitDetail = retainFitDetail,
+            fitRetention = fitRetention,
             seed = seed
         ),
         .rbindTwasWeights
@@ -2517,8 +2470,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     xRegions,
-    retainFit,
-    retainFitDetail,
+    fitRetention,
     seed
 ) {
     .twasDispatchJointSpecsQtlDataset(
@@ -2531,8 +2483,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         dataType = dataType,
         verbose = verbose,
         xRegions = xRegions,
-        retainFit = retainFit,
-        retainFitDetail = retainFitDetail,
+        fitRetention = fitRetention,
         seed = seed
     )
 }
@@ -2548,8 +2499,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     traitIds,
     dataType,
     verbose,
-    retainFit,
-    retainFitDetail
+    fitRetention
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
@@ -2569,8 +2519,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         traitIds = traitIds,
         dataType = dataType,
         verbose = verbose,
-        retainFit = retainFit,
-        retainFitDetail = retainFitDetail
+        fitRetention = fitRetention
     )
     if (is.null(ssRes)) {
         return(out)
@@ -2593,10 +2542,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     xRegions = list(NULL),
-    retainFit = TRUE,
-    retainFitDetail = "slim",
+    fitRetention = c("slim", "none", "full"),
     seed = NULL
 ) {
+    fitRetention <- arg_match(fitRetention)
     qtlDatasets <- getQtlDatasets(data)
     sumStats <- getSumStats(data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
@@ -2611,8 +2560,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         dataType = dataType,
         verbose = verbose,
         xRegions = xRegions,
-        retainFit = retainFit,
-        retainFitDetail = retainFitDetail,
+        fitRetention = fitRetention,
         seed = seed
     )
     .twasMultiStudySumStats(
@@ -2625,8 +2573,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         traitIds = traitIds,
         dataType = dataType,
         verbose = verbose,
-        retainFit = retainFit,
-        retainFitDetail = retainFitDetail
+        fitRetention = fitRetention
     )
 }
 
@@ -2712,22 +2659,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    coverage,
-    secondaryCoverage,
-    signalCutoff,
-    minAbsCorr,
+    credibleSetArgs,
     verbose,
     methodArgs,
     twasWeights,
     dataDrivenPriorWeightsCutoff,
-    cvFolds,
-    cvThreads,
-    samplePartition,
+    crossValidationArgs,
+    residualizationArgs,
     pipCutoffToSkip,
     fineMappingResult,
-    fullFit,
-    fullFitAlphaOnly,
-    includeAllCs,
+    fitRetention,
     seed
 ) {
     .fmDispatchJointSpecsQtlDatasetOneRegion(
@@ -2737,22 +2678,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
+        credibleSetArgs = credibleSetArgs,
         verbose = verbose,
         methodArgs = methodArgs,
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        cvFolds = cvFolds,
-        cvThreads = cvThreads,
-        samplePartition = samplePartition,
+        crossValidationArgs = crossValidationArgs,
+        residualizationArgs = residualizationArgs,
         pipCutoffToSkip = pipCutoffToSkip,
         fineMappingResult = fineMappingResult,
-        fullFit = fullFit,
-        fullFitAlphaOnly = fullFitAlphaOnly,
-        includeAllCs = includeAllCs,
+        fitRetention = fitRetention,
         seed = seed,
         region = rg
     )
@@ -2770,8 +2705,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     cisWindow,
     dataType,
     verbose,
-    retainFit,
-    retainFitDetail,
+    fitRetention,
     seed = NULL
 ) {
     .twasDispatchJointSpecsQtlDatasetOneRegion(
@@ -2784,8 +2718,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         dataType,
         verbose,
         region = rg,
-        retainFit = retainFit,
-        retainFitDetail = retainFitDetail,
+        fitRetention = fitRetention,
         seed = seed
     )
 }

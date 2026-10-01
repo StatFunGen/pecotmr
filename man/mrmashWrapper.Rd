@@ -10,18 +10,13 @@ mrmashWrapper(
   V = NULL,
   sumstats = NULL,
   dataDrivenPriorMatrices = NULL,
-  priorGrid = NULL,
-  nthreads = 1,
-  canonicalPriorMatrices = FALSE,
-  standardize = FALSE,
-  updateW0 = TRUE,
-  w0Threshold = 1e-08,
+  prior = mrmashPriorConfig(),
+  bInitMethod = "enet",
   updateV = TRUE,
   updateVMethod = "full",
-  bInitMethod = "enet",
-  maxIter = 5000,
-  tol = 0.01,
-  verbose = FALSE
+  standardize = FALSE,
+  numThreads = 1,
+  methodArgs = mrmashConfig()
 )
 }
 \arguments{
@@ -41,23 +36,11 @@ mr.mash, or \code{NULL} for the individual-data variant.}
 \item{dataDrivenPriorMatrices}{A list of data-driven covariance matrices.
 Default is NULL.}
 
-\item{priorGrid}{A vector of scaling factors to be used in fitting the
-mr.mash model. Default is NULL.}
+\item{prior}{Prior-covariance construction options, built with
+\code{\link{mrmashPriorConfig}}.}
 
-\item{nthreads}{The number of threads to use for parallel computation.
-Default is 2.}
-
-\item{canonicalPriorMatrices}{A logical indicating whether to use canonical
-matrices as priors. Default is FALSE.}
-
-\item{standardize}{A logical indicating whether to standardize the input
-data. Default is FALSE.}
-
-\item{updateW0}{A logical indicating whether to update the prior mixture
-weights. Default is TRUE.}
-
-\item{w0Threshold}{The threshold for updating prior mixture weights. Default
-is 1e-8.}
+\item{bInitMethod}{The method for initializing the coefficient matrix.
+Default is "enet".}
 
 \item{updateV}{A logical indicating whether to update the residual covariance
 matrix. Default is TRUE.}
@@ -65,15 +48,20 @@ matrix. Default is TRUE.}
 \item{updateVMethod}{The method for updating the residual covariance matrix.
 Default is "full".}
 
-\item{bInitMethod}{The method for initializing the coefficient matrix.
-Default is "enet".}
+\item{standardize}{A logical indicating whether to standardize the input
+data. Default is FALSE. Used by the summary-statistic and initialisation
+steps as well as the fit, so it is set here rather than in
+\code{methodArgs}.}
 
-\item{maxIter}{The maximum number of iterations. Default is 5000.}
+\item{numThreads}{The number of threads to use for parallel computation.
+Default is 1. Used by the same three steps as \code{standardize}.}
 
-\item{tol}{The tolerance for convergence. Default is 0.01.}
-
-\item{verbose}{A logical indicating whether to print verbose output. Default
-is FALSE.}
+\item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash} under its
+own names, built with \code{\link{mrmashConfig}}
+(\code{update_w0}, \code{max_iter}, \code{tol}, \code{w0_threshold},
+\code{verbose}, ...). Arguments the wrapper derives --- the prior, the
+residual covariance, the coefficient initialisation --- cannot be set
+here.}
 }
 \value{
 A mr.mash fit, stored as a list with some or all of the following
@@ -114,7 +102,7 @@ data(multiTraitData)
 res <- mrmashWrapper(
   X = multiTraitData$X[, 1:60], Y = multiTraitData$Y,
   dataDrivenPriorMatrices = multiTraitData$priorMatrices,
-  canonicalPriorMatrices = TRUE
+  prior = mrmashPriorConfig(canonicalPriorMatrices = TRUE)
 )
 
 }

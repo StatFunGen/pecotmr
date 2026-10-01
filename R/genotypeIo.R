@@ -33,7 +33,7 @@ NULL
 setMethod(
     "readGenotypes",
     signature(path = "character"),
-    function(path, format = NULL, vcfArgs = list(), ...) {
+    function(path, format = NULL, vcfArgs = list()) {
         .genotypeExperiment(
             .readGenotypeHandle(path, format = format, vcfArgs = vcfArgs)
         )
@@ -45,10 +45,43 @@ setMethod(
 setMethod(
     "readGenotypes",
     signature(path = "missing"),
-    function(path, format = NULL, vcfArgs = list(), ...) {
-        .genotypeExperiment(
-            GenotypeHandle(format = format, vcfArgs = vcfArgs, ...)
-        )
+    function(
+        path,
+        plink1Prefix = NULL,
+        plink2Prefix = NULL,
+        bed = NULL,
+        bim = NULL,
+        fam = NULL,
+        pgen = NULL,
+        pvar = NULL,
+        psam = NULL,
+        ldMeta = NULL,
+        region = NULL,
+        genoMeta = NULL,
+        chroms = NULL,
+        format = NULL,
+        vcfArgs = list()
+    ) {
+        # The keyword sources are declared here rather than absorbed by `...`
+        # and forwarded: GenotypeHandle() is internal, so this signature is
+        # the only place a caller can name them, and a misspelled source
+        # should be an error at the call rather than a silently unset one.
+        .genotypeExperiment(GenotypeHandle(
+            plink1Prefix = plink1Prefix,
+            plink2Prefix = plink2Prefix,
+            bed = bed,
+            bim = bim,
+            fam = fam,
+            pgen = pgen,
+            pvar = pvar,
+            psam = psam,
+            ldMeta = ldMeta,
+            region = region,
+            genoMeta = genoMeta,
+            chroms = chroms,
+            format = format,
+            vcfArgs = vcfArgs
+        ))
     }
 )
 
@@ -640,8 +673,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     .withGds(
         .genotypeReadPath(handle),
         .gdsBlockGeno,
-        handle = handle,
-        snpIdx = snpIdx,
+        fnArgs = list(handle = handle, snpIdx = snpIdx),
         allow.fork = TRUE
     )
 }
@@ -752,14 +784,20 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # Resource bracket: open the GDS at `path`, guarantee it is closed on exit, and
 # run `fn(gds, ...)`. `fn` is a top-level function (not an inline closure); its
 # per-call inputs are threaded through `...`.
-.withGds <- function(path, fn, ..., readonly = TRUE, allow.fork = FALSE) {
+.withGds <- function(
+    path,
+    fn,
+    fnArgs = list(),
+    readonly = TRUE,
+    allow.fork = FALSE
+) {
     gds <- SNPRelate::snpgdsOpen(
         path,
         readonly = readonly,
         allow.fork = allow.fork
     )
     on.exit(SNPRelate::snpgdsClose(gds))
-    fn(gds, ...)
+    exec(fn, gds, !!!fnArgs)
 }
 
 #' @keywords internal
@@ -767,8 +805,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     .withGds(
         .genotypeReadPath(handle),
         .gdsBlockLd,
-        handle = handle,
-        snpIdx = snpIdx,
+        fnArgs = list(handle = handle, snpIdx = snpIdx),
         allow.fork = TRUE
     )
 }
@@ -1124,9 +1161,9 @@ invertMinmaxScaling <- function(X, uMin, uMax) {
 
 # ---------- Internal helpers for PLINK2 format ----------
 
-#' @importFrom checkmate assertFileExists
 #' Resolve and validate PLINK2 file paths for a given prefix.
 #' @return Named list with pgen, pvar, psam paths.
+#' @importFrom checkmate assertFileExists
 #' @noRd
 resolvePlink2Paths <- function(prefix) {
     pgen <- str_c(prefix, ".pgen")

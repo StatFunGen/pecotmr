@@ -83,7 +83,7 @@ test_that("large component pre-pruning removes individuals", {
         relatedness = rel,
         relatednessThreshold = threshold,
         analysisType = "maximizeUnrelated",
-        maxComponentSize = 10,
+        pruning = relatednessPruning(maxComponentSize = 10),
         verbose = TRUE
     )
 
@@ -215,7 +215,7 @@ test_that("iterative cleanup loops and warns when related pairs persist", {
             relatedness = rel,
             relatednessThreshold = 0.125,
             analysisType = "maximizeUnrelated",
-            maxIterations = 2L,
+            pruning = relatednessPruning(maxIterations = 2L),
             verbose = TRUE
         ),
         "related pairs remain"
@@ -235,5 +235,69 @@ test_that(".relatednessLargestComponent guards an empty component list", {
     expect_identical(
         pecotmr:::.relatednessLargestComponent(list(csize = c(3L, 7L))),
         7L
+    )
+})
+
+test_that("relatednessColumns carries the defaults and rejects a typo", {
+    cols <- relatednessColumns()
+    expect_s4_class(cols, "MethodConfig")
+    expect_equal(cols$iid1, "IID1")
+    expect_equal(cols$value, "PI_HAT")
+    # No `...`, so R's own argument matching is the check.
+    expect_error(relatednessColumns(vlaue = "X"), "unused argument")
+})
+
+test_that("relatednessColumns drops NULL family-ID columns", {
+    cols <- relatednessColumns()
+    # A NULL default means "the table has none", so it is not carried as an
+    # explicit NULL into plinkQC's argument list.
+    expect_false(is_in("fid1", names(cols)))
+    expect_null(cols$fid1)
+    expect_true(is_in("fid1", names(relatednessColumns(fid1 = "FID1"))))
+})
+
+test_that("relatednessPruning carries the defaults and rejects a typo", {
+    pr <- relatednessPruning(maxComponentSize = 50L)
+    expect_s4_class(pr, "MethodConfig")
+    expect_equal(pr$maxComponentSize, 50L)
+    expect_equal(pr$maxIterations, 20L)
+    expect_error(relatednessPruning(maxComponents = 5L), "unused argument")
+})
+
+test_that("plinkQcConfig validates extras against plinkQC's live formals", {
+    skip_if_not_installed("plinkQC")
+    pq <- plinkQcConfig(otherCriterionThDirection = "le")
+    expect_s4_class(pq, "MethodConfig")
+    expect_equal(pq$otherCriterionThDirection, "le")
+    # The check comes from names(formals(plinkQC::relatednessFilter)), so it
+    # cannot drift from the upstream signature.
+    expect_error(
+        plinkQcConfig(otherCriterionThreshold = 1),
+        "unknown argument"
+    )
+})
+
+test_that("plinkQcConfig refuses the arguments filterRelatedness derives", {
+    skip_if_not_installed("plinkQC")
+    # relatednessTh is legal for plinkQC, so the constructor accepts it, but
+    # filterRelatedness injects its own and the duplicate is caught there.
+    expect_error(
+        filterRelatedness(
+            data.frame(IID1 = "a", IID2 = "b", PI_HAT = 0.5),
+            plinkQcArgs = plinkQcConfig(relatednessTh = 0.5)
+        ),
+        "derived from `relatednessThreshold` and `columns`"
+    )
+})
+
+test_that("filterRelatedness refuses a bare list where a constructor is due", {
+    rel <- data.frame(IID1 = "a", IID2 = "b", PI_HAT = 0.5)
+    expect_error(
+        filterRelatedness(rel, columns = list(iid1 = "IID1")),
+        "must be built with relatednessColumns\\(\\)"
+    )
+    expect_error(
+        filterRelatedness(rel, pruning = list(maxIterations = 2L)),
+        "must be built with relatednessPruning\\(\\)"
     )
 })

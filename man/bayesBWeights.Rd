@@ -11,7 +11,7 @@ bayesBWeights(
   burnIn = 2000,
   thin = 5,
   probIn = 0.2,
-  methodArgs = list()
+  methodArgs = bglrConfig()
 )
 }
 \arguments{
@@ -27,8 +27,10 @@ bayesBWeights(
 
 \item{probIn}{Prior inclusion probability for each marker. Default is 0.2.}
 
-\item{methodArgs}{Optional named list of options passed through to
-`BGLR::BGLR`.}
+\item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
+with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

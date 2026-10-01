@@ -118,7 +118,7 @@ pvalHmp <- function(pvals) {
     abort(msg)
 }
 
-pvalPoolr <- function(pvals, method, R) {
+pvalPoolr <- function(pvals, method, R, methodArgs = poolrConfig()) {
     if (!requireNamespace("poolr", quietly = TRUE)) {
         abort("Package 'poolr' is required for this method.")
     }
@@ -129,22 +129,28 @@ pvalPoolr <- function(pvals, method, R) {
         invchisq = poolr::invchisq,
         .abortUnknownMethod("poolr", method)
     )
-    fn(pvals, adjust = "generalized", R = R)$p
+    exec(fn, pvals, R = R, !!!as.list(methodArgs))$p
 }
 
-pvalGbj <- function(zScores, R, method) {
+pvalGbj <- function(zScores, R, method, methodArgs = gbjConfig()) {
     if (!requireNamespace("GBJ", quietly = TRUE)) {
         abort("Package 'GBJ' is required for this method.")
     }
-    result <- switch(
+    fn <- switch(
         method,
-        gbj = GBJ::GBJ(test_stats = zScores, cor_mat = R),
-        bj = GBJ::BJ(test_stats = zScores, cor_mat = R),
-        hc = GBJ::HC(test_stats = zScores, cor_mat = R),
-        ghc = GBJ::GHC(test_stats = zScores, cor_mat = R),
-        minp = GBJ::minP(test_stats = zScores, cor_mat = R),
-        gbj_omni = GBJ::OMNI_ss(test_stats = zScores, cor_mat = R),
+        gbj = GBJ::GBJ,
+        bj = GBJ::BJ,
+        hc = GBJ::HC,
+        ghc = GBJ::GHC,
+        minp = GBJ::minP,
+        gbj_omni = GBJ::OMNI_ss,
         .abortUnknownMethod("GBJ", method)
+    )
+    result <- exec(
+        fn,
+        test_stats = zScores,
+        cor_mat = R,
+        !!!as.list(methodArgs)
     )
     pvalName <- switch(
         method,
@@ -158,7 +164,13 @@ pvalGbj <- function(zScores, R, method) {
     result[[pvalName]]
 }
 
-pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
+pvalAspu <- function(
+    zScores = NULL,
+    pvals = NULL,
+    R,
+    method,
+    methodArgs = aspuConfig()
+) {
     if (!requireNamespace("aSPU", quietly = TRUE)) {
         abort(
             "Package 'aSPU' is required for this method."
@@ -166,7 +178,14 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
     }
     switch(
         method,
-        aspu = aSPU::aSPUs(Zs = zScores, corSNP = R)$pvs["aSPUs"],
+        aspu = exec(
+            aSPU::aSPUs,
+            Zs = zScores,
+            corSNP = R,
+            !!!as.list(methodArgs)
+        )$pvs["aSPUs"],
+        # GATES2's only formals are the two pecotmr supplies, so there is
+        # nothing for a caller to configure here.
         gates = aSPU::GATES2(ldmatrix = R, p = pvals)[["Pg"]],
         .abortUnknownMethod("aSPU", method)
     )
@@ -268,7 +287,8 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 
 # Internal: compute one method's combined p-value. Assumes inputs have
 # already been validity-filtered (positive, finite, < 1) and aligned with R.
-.combinePvalSingle <- function(method, pvals, zScores, R) {
+.combinePvalSingle <- function(method, pvals, zScores, R, methodArgs = list()) {
+    args <- .combinePvalMethodArgs(methodArgs, method)
     switch(
         method,
         acat = pvalAcat(pvals),
@@ -276,17 +296,41 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
         bonferroni = min(length(pvals) * min(pvals), 1.0),
         fisher = ,
         stouffer = ,
-        invchisq = pvalPoolr(pvals, method = method, R = R),
+        invchisq = pvalPoolr(pvals, method = method, R = R, methodArgs = args),
         gbj = ,
         bj = ,
         hc = ,
         ghc = ,
         minp = ,
-        gbj_omni = pvalGbj(zScores, R = R, method = method),
-        aspu = pvalAspu(zScores = zScores, R = R, method = "aspu"),
+        gbj_omni = pvalGbj(
+            zScores,
+            R = R,
+            method = method,
+            methodArgs = args
+        ),
+        aspu = pvalAspu(
+            zScores = zScores,
+            R = R,
+            method = "aspu",
+            methodArgs = args
+        ),
         gates = pvalAspu(pvals = pvals, R = R, method = "gates"),
         .abortUnknownMethod("combination", method)
     )
+}
+
+# One method's entry out of the pvalMethodsConfig() record, or that method's
+# own empty record when the caller configured nothing for it. Returning the
+# constructor's result rather than list() keeps each engine's pecotmr
+# defaults -- poolr's `adjust = "generalized"` -- in force either way.
+# @noRd
+.combinePvalMethodArgs <- function(methodArgs, method) {
+    i <- match(method, names(methodArgs))
+    if (!is.na(i)) {
+        return(methodArgs[[i]])
+    }
+    ctors <- .pvalMethodCtors()
+    if (is_in(method, names(ctors))) ctors[[method]]() else list()
 }
 
 #' Combine P-values via Any of a Menu of Methods
@@ -325,6 +369,12 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 #'   \code{zScores}. Required for the correlation-adjusted methods.
 #' @param naRm Logical; if \code{TRUE} (default), drop NA p-values before
 #'   combination.
+#' @param methodArgs Per-method engine options, built with
+#'   \code{\link{pvalMethodsConfig}} -- for example
+#'   \code{pvalMethodsConfig(aspu = aspuConfig(n.perm = 5000))}. Configuring
+#'   a method that \code{methods} does not request is an error rather than a
+#'   silent no-op. \code{acat}, \code{hmp}, \code{bonferroni} and
+#'   \code{gates} take no options.
 #' @return A list with two elements:
 #'   \describe{
 #'     \item{input}{Summary of the call: \code{nPvalsIn},
@@ -342,10 +392,13 @@ combinePValues <- function(
     zScores = NULL,
     methods,
     R = NULL,
-    naRm = TRUE
+    naRm = TRUE,
+    methodArgs = pvalMethodsConfig()
 ) {
     assertFlag(naRm)
+    .assertMethodConfig(methodArgs, "pvalMethodsConfig", "methodArgs")
     methods <- .combinePvalCheckMethods(methods)
+    .combinePvalCheckMethodArgs(methodArgs, methods)
     nPvalsIn <- if (is.null(pvals)) 0L else length(pvals)
     nZScoresIn <- if (is.null(zScores)) 0L else length(zScores)
     .combinePvalCheckPrereqs(methods, zScores, R)
@@ -367,7 +420,8 @@ combinePValues <- function(
         methods,
         filt$pvalsK,
         filt$zScoresK,
-        Raligned
+        Raligned,
+        methodArgs
     )
     .combinePvalResult(perMethod, input)
 }
@@ -389,6 +443,23 @@ combinePValues <- function(
         abort(msg)
     }
     methods
+}
+
+# Options for a method that was not requested would be dropped in silence --
+# exactly the failure the constructors exist to prevent -- so say so instead.
+# @noRd
+.combinePvalCheckMethodArgs <- function(methodArgs, methods) {
+    configured <- names(methodArgs)
+    unused <- setdiff(configured, methods)
+    if (length(unused) == 0L) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "combinePValues: `methodArgs` configures ",
+        "{str_flatten(unused, ', ')}, which `methods` does not request ",
+        "({str_flatten(methods, ', ')}), so those options would be ignored."
+    )
+    abort(msg)
 }
 
 # Method-level prerequisites: z-score-requiring + R-requiring methods.
@@ -494,14 +565,21 @@ combinePValues <- function(
 
 # Run each method, warning + NA on per-method failure.
 # @noRd
-.combinePvalRunMethods <- function(methods, pvalsK, zScoresK, Raligned) {
+.combinePvalRunMethods <- function(
+    methods,
+    pvalsK,
+    zScoresK,
+    Raligned,
+    methodArgs
+) {
     set_names(
         map(
             methods,
             .combinePvalRunOne,
             pvalsK = pvalsK,
             zScoresK = zScoresK,
-            Raligned = Raligned
+            Raligned = Raligned,
+            methodArgs = methodArgs
         ),
         methods
     )
@@ -509,9 +587,15 @@ combinePValues <- function(
 
 # @noRd
 #' @importFrom rlang try_fetch
-.combinePvalRunOne <- function(m, pvalsK, zScoresK, Raligned) {
+.combinePvalRunOne <- function(m, pvalsK, zScoresK, Raligned, methodArgs) {
     p <- try_fetch(
-        .combinePvalSingle(m, pvals = pvalsK, zScores = zScoresK, R = Raligned),
+        .combinePvalSingle(
+            m,
+            pvals = pvalsK,
+            zScores = zScoresK,
+            R = Raligned,
+            methodArgs = methodArgs
+        ),
         error = function(cnd) {
             msg <- glue("combinePValues: method '{m}' failed")
             warn(msg, parent = cnd)
@@ -524,4 +608,189 @@ combinePValues <- function(
 # @noRd
 .combinePvalResult <- function(perMethod, input) {
     list(input = input, results = perMethod)
+}
+
+# =============================================================================
+# Engine option records
+# =============================================================================
+
+#' @title Options for the GBJ Family of Combination Tests
+#' @description Build a checked record of extra arguments for the \pkg{GBJ}
+#'   set-based tests behind \code{\link{combinePValues}} methods
+#'   \code{"gbj"}, \code{"bj"}, \code{"hc"}, \code{"ghc"} and \code{"minp"}.
+#'   All five share one signature, so one constructor covers them.
+#' @param ... Arguments for \code{GBJ::GBJ()} and its siblings -- in practice
+#'   \code{pairwise_cors}, the vector of pairwise correlations the test would
+#'   otherwise derive from \code{cor_mat}. Names are checked against the
+#'   engine's formals, so a misspelling is an error rather than a silent drop.
+#'   \code{test_stats} and \code{cor_mat} are supplied by pecotmr and refused.
+#' @return A \code{MethodConfig} record for
+#'   \code{\link{pvalMethodsConfig}}.
+#' @seealso \code{\link{combinePValues}}, \code{\link{gbjOmniConfig}}
+#' @examples
+#' gbjConfig(pairwise_cors = rep(0.1, 3))
+#' @export
+gbjConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            test_stats = "the caller's `zScores`",
+            cor_mat = "the caller's `R`"
+        ),
+        "gbjConfig"
+    )
+    .newMethodConfig(
+        c("GBJ::GBJ", "GBJ::BJ", "GBJ::HC", "GBJ::GHC", "GBJ::minP"),
+        defaults = list(),
+        extra = extra,
+        label = "gbjConfig",
+        engine = "gbj"
+    )
+}
+
+#' @title Options for the GBJ Omnibus Combination Test
+#' @description Build a checked record of extra arguments for
+#'   \code{GBJ::OMNI_ss()}, the engine behind \code{\link{combinePValues}}
+#'   method \code{"gbj_omni"}. It takes a different option from its siblings
+#'   (\code{num_boots} rather than \code{pairwise_cors}), so it has its own
+#'   constructor.
+#' @param ... Arguments for \code{GBJ::OMNI_ss()} -- in practice
+#'   \code{num_boots}, the bootstrap count the omnibus null is built from.
+#'   \code{test_stats} and \code{cor_mat} are supplied by pecotmr and refused.
+#' @return A \code{MethodConfig} record for
+#'   \code{\link{pvalMethodsConfig}}.
+#' @seealso \code{\link{combinePValues}}, \code{\link{gbjConfig}}
+#' @examples
+#' gbjOmniConfig(num_boots = 200)
+#' @export
+gbjOmniConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            test_stats = "the caller's `zScores`",
+            cor_mat = "the caller's `R`"
+        ),
+        "gbjOmniConfig"
+    )
+    .newMethodConfig(
+        "GBJ::OMNI_ss",
+        defaults = list(),
+        extra = extra,
+        label = "gbjOmniConfig",
+        engine = "gbjOmni"
+    )
+}
+
+#' @title Options for the aSPU Combination Test
+#' @description Build a checked record of extra arguments for
+#'   \code{aSPU::aSPUs()}, the engine behind \code{\link{combinePValues}}
+#'   method \code{"aspu"}.
+#' @param ... Arguments for \code{aSPU::aSPUs()}: \code{pow} (the SPU powers
+#'   the omnibus minimises over), \code{n.perm} (permutation count -- aSPU's
+#'   p-value resolution is bounded by it), \code{Ps} and \code{prune}.
+#'   \code{Zs} and \code{corSNP} are supplied by pecotmr and refused.
+#' @return A \code{MethodConfig} record for
+#'   \code{\link{pvalMethodsConfig}}.
+#' @seealso \code{\link{combinePValues}}
+#' @examples
+#' aspuConfig(n.perm = 5000)
+#' @export
+aspuConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            Zs = "the caller's `zScores`",
+            corSNP = "the caller's `R`"
+        ),
+        "aspuConfig"
+    )
+    .newMethodConfig(
+        "aSPU::aSPUs",
+        defaults = list(),
+        extra = extra,
+        label = "aspuConfig",
+        engine = "aspu"
+    )
+}
+
+#' @title Options for the poolr Combination Tests
+#' @description Build a record of extra arguments for \code{poolr::fisher()},
+#'   \code{poolr::stouffer()} and \code{poolr::invchisq()} -- the engines
+#'   behind \code{\link{combinePValues}} methods \code{"fisher"},
+#'   \code{"stouffer"} and \code{"invchisq"}. All three share one signature.
+#' @param ... Arguments for the chosen \pkg{poolr} test: \code{adjust} (the
+#'   correlation adjustment; pecotmr defaults it to \code{"generalized"}),
+#'   \code{m}, \code{size}, \code{threshold}, \code{side}, \code{batchsize}
+#'   and \code{nearpd}. The \pkg{poolr} signatures end in \code{...}, so
+#'   names cannot be checked here and a misspelling is passed through.
+#'   \code{p} and \code{R} are supplied by pecotmr and refused.
+#' @return A \code{MethodConfig} record for
+#'   \code{\link{pvalMethodsConfig}}.
+#' @seealso \code{\link{combinePValues}}
+#' @examples
+#' poolrConfig(adjust = "empirical", side = 1)
+#' @export
+poolrConfig <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            p = "the caller's `pvals`",
+            R = "the caller's `R`"
+        ),
+        "poolrConfig"
+    )
+    .newMethodConfig(
+        c("poolr::fisher", "poolr::stouffer", "poolr::invchisq"),
+        defaults = list(adjust = "generalized"),
+        extra = extra,
+        label = "poolrConfig",
+        engine = "poolr"
+    )
+}
+
+# Which constructor configures each combinePValues() method. Keys that share
+# an engine share a constructor: the five GBJ set tests have one signature,
+# and so do the three poolr tests. A method absent from this map takes no
+# options -- acat, hmp and bonferroni are pecotmr's own arithmetic, and
+# gates's aSPU::GATES2() has no formal beyond the two pecotmr supplies.
+# @noRd
+.pvalMethodCtors <- function() {
+    list(
+        fisher = poolrConfig,
+        stouffer = poolrConfig,
+        invchisq = poolrConfig,
+        gbj = gbjConfig,
+        bj = gbjConfig,
+        hc = gbjConfig,
+        ghc = gbjConfig,
+        minp = gbjConfig,
+        gbj_omni = gbjOmniConfig,
+        aspu = aspuConfig
+    )
+}
+
+#' @title Per-Method Options for combinePValues
+#' @description Bundle per-method engine options for
+#'   \code{\link{combinePValues}}. Each entry is named for the method it
+#'   configures and built with that method's constructor, so an option meant
+#'   for one engine cannot silently reach another.
+#' @param ... Named entries, one per method: \code{fisher}, \code{stouffer},
+#'   \code{invchisq} (\code{\link{poolrConfig}}); \code{gbj}, \code{bj},
+#'   \code{hc}, \code{ghc}, \code{minp} (\code{\link{gbjConfig}});
+#'   \code{gbj_omni} (\code{\link{gbjOmniConfig}}); \code{aspu}
+#'   (\code{\link{aspuConfig}}). A plain named list is accepted and passed
+#'   through that method's constructor. \code{acat}, \code{hmp},
+#'   \code{bonferroni} and \code{gates} take no options and are not valid
+#'   names here.
+#' @return A \code{MethodConfig} record for \code{combinePValues(methodArgs =)}.
+#' @seealso \code{\link{combinePValues}}
+#' @examples
+#' pvalMethodsConfig(aspu = aspuConfig(n.perm = 5000))
+#' @export
+pvalMethodsConfig <- function(...) {
+    .newNestedConfig(list(...), .pvalMethodCtors(), "pvalMethodsConfig")
 }
