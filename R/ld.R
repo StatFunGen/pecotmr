@@ -2152,7 +2152,7 @@ filterVariantsByLdReference <- function(
 # Drop blocks with invalid/out-of-range indices; renumber the survivors.
 .partitionFilterBlocks <- function(blockMetadata, nVariants) {
     validBlocks <- map_lgl(
-        seq_len(nrow(blockMetadata)),
+        seq_along(blockMetadata),
         .ldBlockValid,
         blockMetadata = blockMetadata,
         nVariants = nVariants
@@ -2171,8 +2171,9 @@ filterVariantsByLdReference <- function(
             "out-of-range indices."
         )
         inform(msg)
-        kept <- filter(blockMetadata, validBlocks)
-        return(mutate(kept, blockId = seq_len(nrow(kept))))
+        kept <- blockMetadata[validBlocks]
+        kept$blockId <- seq_along(kept)
+        return(kept)
     }
     blockMetadata
 }
@@ -2190,24 +2191,42 @@ partitionLdMatrix <- function(
         getCorrelation(ldData),
         variantIds
     )
-    rawBlocks <- getBlockMetadata(ldData)
+    # The slot is always a GRanges now, so no flattening: every consumer
+    # below reads it as one (mcols via `$`, blocks via `[` and length()).
     blocks <- .partitionFilterBlocks(
-        if (is(rawBlocks, "GRanges")) as_tibble(rawBlocks) else rawBlocks,
+        getBlockMetadata(ldData),
         length(variantIds)
     )
     # Validate the block structure of the matrix (skip if only one block).
-    if (nrow(blocks) > 1) {
+    if (length(blocks) > 1) {
         validateBlockStructure(combinedMatrix, blocks, variantIds)
     }
     merging <- mergeSmallBlocks &&
         any(blocks$size < minMergedBlockSize) &&
-        nrow(blocks) > 1
+        length(blocks) > 1
     blockMetadata <- if (merging) {
         mergeBlocks(blocks, minMergedBlockSize, maxMergedBlockSize)
     } else {
         blocks
     }
     extractBlockMatrices(combinedMatrix, blockMetadata, variantIds)
+}
+
+# Blocks must not overlap. The merge logic only ever considers i - 1 and
+# i + 1, so a block's position in the table has to mean its position on the
+# chromosome; that held by convention -- the loaders sort by position -- but
+# nothing checked it, and a violation would silently merge non-neighbours.
+# As a GRanges it is one call. Width-0 blocks are skipped: they mark an
+# out-of-range index range that .partitionFilterBlocks() drops anyway.
+# @noRd
+.ldBlockOrderAssert <- function(blockMetadata) {
+    spanned <- blockMetadata[GenomicRanges::width(blockMetadata) > 0L]
+    if (length(spanned) < 2L || GenomicRanges::isDisjoint(spanned)) {
+        return(invisible(NULL))
+    }
+    abort(
+        "LD blocks overlap: each block must cover a span of its own."
+    )
 }
 
 # Every (i, j) block pair with i < j.
@@ -2248,8 +2267,9 @@ partitionLdMatrix <- function(
 #' Validate that cross-block entries are zero (excluding boundary variants).
 #' @noRd
 validateBlockStructure <- function(matrix, blockMetadata, variantIds) {
+    .ldBlockOrderAssert(blockMetadata)
     n <- length(variantIds)
-    pairs <- .ldUpperPairs(nrow(blockMetadata))
+    pairs <- .ldUpperPairs(length(blockMetadata))
     msgs <- .ldConcatChr(map(
         seq_len(nrow(pairs)),
         .blockPairMessagesAt,
@@ -2309,7 +2329,8 @@ validateBlockStructure <- function(matrix, blockMetadata, variantIds) {
 #' within `maxSize`)? Indexes the columns directly rather than slicing rows.
 #' @noRd
 canMerge <- function(blockMetadata, i, j, maxSize) {
-    blockMetadata$chrom[i] == blockMetadata$chrom[j] &&
+    chrom <- as.character(GenomicRanges::seqnames(blockMetadata))
+    chrom[i] == chrom[j] &&
         (blockMetadata$size[i] + blockMetadata$size[j]) <= maxSize
 }
 
@@ -2320,24 +2341,25 @@ mergeTwoBlocks <- function(blockMetadata, idx1, idx2) {
         idx1 <- idx2
         idx2 <- tmp
     }
-    merged <- mutate(
-        blockMetadata,
-        endIdx = replace(.data$endIdx, idx1, blockMetadata$endIdx[idx2]),
-        size = replace(
-            .data$size,
-            idx1,
-            blockMetadata$size[idx1] + blockMetadata$size[idx2]
-        )
-    ) |>
-        slice(-idx2)
-    mutate(merged, blockId = seq_len(nrow(merged)))
+    merged <- blockMetadata
+    merged$endIdx[idx1] <- blockMetadata$endIdx[idx2]
+    merged$size[idx1] <- blockMetadata$size[idx1] +
+        blockMetadata$size[idx2]
+    # The merged block spans both, so its RANGE has to grow with its index
+    # range. While this was a data.frame the two could drift apart unnoticed,
+    # because nothing read blockStart / blockEnd.
+    GenomicRanges::end(merged)[idx1] <-
+        GenomicRanges::end(blockMetadata)[idx2]
+    merged <- merged[-idx2]
+    merged$blockId <- seq_along(merged)
+    merged
 }
 
 #' Find blocks below minSize and identify the best neighbor to merge with.
 #' @noRd
 findMergeCandidates <- function(blockMetadata, minSize, maxSize) {
     found <- compact(map(
-        seq_len(nrow(blockMetadata)),
+        seq_along(blockMetadata),
         .ldMergeCandidateFor,
         blockMetadata = blockMetadata,
         minSize = minSize,
@@ -2358,7 +2380,7 @@ findMergeCandidates <- function(blockMetadata, minSize, maxSize) {
         return(NULL)
     }
     prevOk <- i > 1 && canMerge(blockMetadata, i, i - 1, maxSize)
-    nextOk <- i < nrow(blockMetadata) &&
+    nextOk <- i < length(blockMetadata) &&
         canMerge(blockMetadata, i, i + 1, maxSize)
     mergeWith <- if (prevOk && nextOk) {
         if (blockMetadata$size[i - 1] <= blockMetadata$size[i + 1]) {
@@ -2379,7 +2401,7 @@ findMergeCandidates <- function(blockMetadata, minSize, maxSize) {
 #' Iteratively merge blocks below minSize with their smallest neighbor.
 #' @noRd
 mergeBlocks <- function(blockMetadata, minSize, maxSize) {
-    if (nrow(blockMetadata) <= 1) {
+    if (length(blockMetadata) <= 1) {
         return(blockMetadata)
     }
     candidates <- findMergeCandidates(blockMetadata, minSize, maxSize)
@@ -2447,7 +2469,7 @@ mergeBlocks <- function(blockMetadata, minSize, maxSize) {
 
 extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
     blocks <- map(
-        seq_len(nrow(blockMetadata)),
+        seq_along(blockMetadata),
         .ldExtractBlockAt,
         matrix = matrix,
         variantIds = variantIds,

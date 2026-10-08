@@ -42,13 +42,19 @@ context("LdData accessors")
 # new("LdData", ...) skips the constructor, so those tests have to supply
 # the block columns the slot now guarantees.
 .ld_makeBlockMetadata <- function(snp_n = 4L) {
-    tibble(
+    # new("LdData", ...) skips the constructor, so these tests supply the
+    # stored shape directly: a GRanges whose mcols carry the index payload.
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(start = 100L, end = 100L * snp_n)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
         blockId = 1L,
-        chrom = "chr1",
         size = snp_n,
         startIdx = 1L,
         endIdx = snp_n
     )
+    gr
 }
 
 .ld_mockExtractor <- function(seed, n_samples = 30L) {
@@ -347,9 +353,10 @@ test_that("getVariantInfo returns the variants verbatim", {
     # blockMetadata is NOT verbatim: the constructor normalises it to the
     # columns consumers read. A column the caller added is carried through.
     got <- getBlockMetadata(ld)
-    expect_true(is.data.frame(got))
+    expect_s4_class(got, "GRanges")
     expect_true(all(
-        c("blockId", "chrom", "size", "startIdx", "endIdx") %in% names(got)
+        c("blockId", "size", "startIdx", "endIdx") %in%
+            names(S4Vectors::mcols(got))
     ))
     expect_equal(got$region, "chr1:100-400")
 })
@@ -398,7 +405,7 @@ test_that("LdData constructor works with correlation matrix", {
     expect_false(hasGenotypes(ld))
     expect_true(is.matrix(getCorrelation(ld)))
     expect_equal(getVariantIds(ld), c("chr1:100:A:G", "chr1:200:C:T"))
-    expect_equal(nrow(getBlockMetadata(ld)), 1L)
+    expect_equal(length(getBlockMetadata(ld)), 1L)
     expect_null(getGenotypes(ld))
 })
 
@@ -895,10 +902,12 @@ test_that("an LdData refuses to be subset", {
 # ---------------------------------------------------------------------------
 # Five construction paths used to emit five different column sets, so
 # consumers read startIdx / size / chrom that were present by luck. The
-# constructor now fills whatever is absent and stores one shape.
+# constructor now fills whatever is absent and stores ONE shape: a GRanges
+# whose seqnames/ranges are the block's chromosome and span, with the index
+# payload the matrix is addressed by in mcols.
 # ===========================================================================
 
-.ld_bmCanonical <- c("blockId", "chrom", "size", "startIdx", "endIdx")
+.ld_bmMcols <- c("blockId", "size", "startIdx", "endIdx")
 
 test_that("blockMetadata: a bare genomic span is completed from variants", {
     ld <- LdData(
@@ -911,15 +920,17 @@ test_that("blockMetadata: a bare genomic span is completed from variants", {
         )
     )
     bm <- getBlockMetadata(ld)
-    expect_true(all(.ld_bmCanonical %in% names(bm)))
-    expect_equal(nrow(bm), 1L)
+    expect_s4_class(bm, "GRanges")
+    expect_true(all(.ld_bmMcols %in% names(S4Vectors::mcols(bm))))
+    expect_equal(length(bm), 1L)
     expect_equal(bm$startIdx, 1L)
     expect_equal(bm$endIdx, 4L)
     expect_equal(bm$size, 4L)
-    # start/end name the BLOCK's span, so they are stored under the
-    # unambiguous names rather than colliding with a variant position.
-    expect_equal(bm$blockStart, 100L)
-    expect_equal(bm$blockEnd, 400L)
+    # start/end name the BLOCK's span, so they become the range itself
+    # rather than colliding with a variant position.
+    expect_equal(as.character(GenomicRanges::seqnames(bm)), "chr1")
+    expect_equal(GenomicRanges::start(bm), 100L)
+    expect_equal(GenomicRanges::end(bm), 400L)
 })
 
 test_that("blockMetadata: a placeholder table means one block, not none", {
@@ -929,8 +940,8 @@ test_that("blockMetadata: a placeholder table means one block, not none", {
         blockMetadata = data.frame()
     )
     bm <- getBlockMetadata(ld)
-    expect_equal(nrow(bm), 1L)
-    expect_true(all(.ld_bmCanonical %in% names(bm)))
+    expect_equal(length(bm), 1L)
+    expect_true(all(.ld_bmMcols %in% names(S4Vectors::mcols(bm))))
     expect_equal(bm$size, 4L)
 })
 
@@ -953,11 +964,12 @@ test_that("blockMetadata: a GRanges keeps its mcols over its ranges", {
         blockMetadata = gr
     )
     bm <- getBlockMetadata(ld)
-    expect_equal(nrow(bm), 2L)
-    # One column per name: binding ranges and mcols both would have left no
-    # column called `chrom` at all.
-    expect_equal(sum(names(bm) == "chrom"), 1L)
-    expect_equal(bm$chrom, c("1", "1"))
+    expect_equal(length(bm), 2L)
+    # chrom is the seqnames now, and must not ALSO linger as an mcol:
+    # binding the ranges and the mcols both would duplicate it.
+    expect_equal(as.character(GenomicRanges::seqnames(bm)), c("1", "1"))
+    expect_false(is_in("chrom", names(S4Vectors::mcols(bm))))
+    expect_equal(as.character(GenomicRanges::seqnames(bm)), c("1", "1"))
     expect_equal(bm$startIdx, c(1L, 3L))
 })
 
@@ -970,7 +982,10 @@ test_that("blockMetadata: several blocks take their ranges from size", {
     bm <- getBlockMetadata(ld)
     expect_equal(bm$startIdx, c(1L, 4L))
     expect_equal(bm$endIdx, c(3L, 4L))
-    expect_equal(bm$chrom, c("chr1", "chr1"))
+    expect_equal(
+        as.character(GenomicRanges::seqnames(bm)),
+        c("chr1", "chr1")
+    )
 })
 
 test_that("blockMetadata: several blocks with no size and no range error", {
@@ -1011,8 +1026,10 @@ test_that("blockMetadata: supplied indices are never replaced", {
     bm <- getBlockMetadata(ld)
     expect_equal(bm$startIdx, 10L)
     expect_equal(bm$endIdx, 20L)
-    # An out-of-range block has no chromosome to derive.
-    expect_true(is.na(bm$chrom))
+    # An out-of-range block has no span to derive, and a GRanges cannot
+    # hold an NA one -- it gets a width-0 range, which is visibly not an
+    # interval. partitionLdMatrix() still rejects it on its indices.
+    expect_equal(GenomicRanges::width(bm), 0L)
 })
 
 test_that("blockMetadata: a caller's own columns are carried through", {
@@ -1024,7 +1041,8 @@ test_that("blockMetadata: a caller's own columns are carried through", {
     bm <- getBlockMetadata(ld)
     expect_equal(bm$region, "chr1:100-400")
     expect_equal(bm$note, "kept")
-    # Canonical columns come first so the table reads the same way whatever
+    # The index payload comes first so the mcols read the same way whatever
     # the caller supplied.
-    expect_equal(names(bm)[seq_along(.ld_bmCanonical)], .ld_bmCanonical)
+    got <- names(S4Vectors::mcols(bm))
+    expect_equal(got[seq_along(.ld_bmMcols)], .ld_bmMcols)
 })

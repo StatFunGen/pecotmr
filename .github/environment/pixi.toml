@@ -25,12 +25,14 @@ dependencies = {"r-base" = "4.5.*"}
 [environments]
 r45 = {features = ["r45"]}
 
+[target.linux-64.dependencies]
+"gcc" = "*"
+
 [dependencies]
 "air" = "*"
 "bioconductor-bioccheck" = "*"
 "bioconductor-plyranges" = "*"
 "bioconductor-tidysummarizedexperiment" = "*"
-"gcc" = "*"
 "r-covr" = "*"
 "r-decor" = "*"
 "r-devtools" = "*"

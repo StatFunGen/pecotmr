@@ -27,10 +27,11 @@ a matrix of already-extracted dosages, or NULL.}
 mcols, plus A1, A2).}
 
 \item{blockMetadata}{Block boundaries: a \code{GRanges}, a
-\code{data.frame} or a \code{DataFrame}. Columns absent for a
-single block are derived from \code{variants}, so a bare genomic
-span -- or nothing at all -- is enough; with several blocks the
-index columns must be supplied.}
+\code{data.frame} or a \code{DataFrame}. Whatever is absent for a
+single block is derived from \code{variants}, so a bare genomic span
+-- or nothing at all -- is enough; with several blocks either the index
+columns or \code{size} must be supplied. Normalised on the way in and
+stored as a \code{GRanges} (see the \code{blockMetadata} slot).}
 
 \item{nRef}{Integer, reference panel sample size.}
 

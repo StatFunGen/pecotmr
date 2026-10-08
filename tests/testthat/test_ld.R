@@ -73,6 +73,39 @@ generateMultiBlockData <- function() {
     return(list(region = region, meta = meta_df))
 }
 
+# LdData stores block metadata as a GRanges, and the block internals read it
+# as one (mcols via `$`, blocks via `[` and length()). The fixtures below are
+# index-only tables, so a span is synthesised from whatever they carry -- the
+# merge and validation logic reads chrom, size and the index range, not the
+# span.
+.ld_bmGr <- function(df) {
+    has <- function(n) n %in% names(df)
+    st <- if (has("blockStart")) {
+        df$blockStart
+    } else if (has("startIdx")) {
+        df$startIdx
+    } else {
+        rep(1L, nrow(df))
+    }
+    en <- if (has("blockEnd")) {
+        df$blockEnd
+    } else if (has("endIdx")) {
+        df$endIdx
+    } else {
+        rep(1L, nrow(df))
+    }
+    gr <- GenomicRanges::GRanges(
+        seqnames = as.character(df$chrom),
+        ranges = IRanges::IRanges(start = as.integer(st), end = as.integer(en))
+    )
+    keep <- intersect(c("blockId", "size", "startIdx", "endIdx"), names(df))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        as.data.frame(df[, keep, drop = FALSE])
+    )
+    gr
+}
+
+
 test_that("Check that we correctly retrieve the names from the matrix", {
     data <- generateDummyData()
     region <- data$region
@@ -323,7 +356,7 @@ test_that("partitionLdMatrix validates block structure properly", {
     ldmat <- getCorrelation(ld_data)
 
     # Assuming we have at least 2 blocks:
-    if (nrow(bm) >= 2) {
+    if (length(bm) >= 2) {
         # Create overlapping blocks with invalid start/end indices
         bm$startIdx[2] <- bm$startIdx[1]
         bm$endIdx[1] <- bm$endIdx[2]
@@ -995,7 +1028,7 @@ test_that("validateBlockStructure passes for proper block structure", {
 
     expect_silent(pecotmr:::validateBlockStructure(
         mat,
-        block_meta,
+        .ld_bmGr(block_meta),
         variant_ids
     ))
 })
@@ -1016,7 +1049,11 @@ test_that("validateBlockStructure errors on non-block structure", {
     )
 
     expect_error(
-        pecotmr:::validateBlockStructure(mat, block_meta, variant_ids),
+        pecotmr:::validateBlockStructure(
+            mat,
+            .ld_bmGr(block_meta),
+            variant_ids
+        ),
         "Matrix lacks expected block structure"
     )
 })
@@ -1090,8 +1127,12 @@ test_that("mergeBlocks merges small adjacent blocks", {
         startIdx = c(1, 51, 101),
         endIdx = c(50, 100, 200)
     )
-    result <- pecotmr:::mergeBlocks(block_meta, minSize = 100, maxSize = 10000)
-    expect_true(nrow(result) < 3)
+    result <- pecotmr:::mergeBlocks(
+        .ld_bmGr(block_meta),
+        minSize = 100,
+        maxSize = 10000
+    )
+    expect_true(length(result) < 3)
 })
 
 test_that("mergeBlocks does not merge cross-chromosome", {
@@ -1102,8 +1143,12 @@ test_that("mergeBlocks does not merge cross-chromosome", {
         startIdx = c(1, 11),
         endIdx = c(10, 20)
     )
-    result <- pecotmr:::mergeBlocks(block_meta, minSize = 50, maxSize = 10000)
-    expect_equal(nrow(result), 2) # Cannot merge across chromosomes
+    result <- pecotmr:::mergeBlocks(
+        .ld_bmGr(block_meta),
+        minSize = 50,
+        maxSize = 10000
+    )
+    expect_equal(length(result), 2) # Cannot merge across chromosomes
 })
 
 test_that("mergeBlocks returns single block unchanged", {
@@ -1114,8 +1159,12 @@ test_that("mergeBlocks returns single block unchanged", {
         startIdx = 1,
         endIdx = 10
     )
-    result <- pecotmr:::mergeBlocks(block_meta, minSize = 100, maxSize = 10000)
-    expect_equal(nrow(result), 1)
+    result <- pecotmr:::mergeBlocks(
+        .ld_bmGr(block_meta),
+        minSize = 100,
+        maxSize = 10000
+    )
+    expect_equal(length(result), 1)
 })
 
 # ---- canMerge ----
@@ -1127,10 +1176,10 @@ test_that("canMerge checks chromosome and size", {
         stringsAsFactors = FALSE
     )
     # rows 1 and 2: same chrom, combined size 300
-    expect_true(pecotmr:::canMerge(bm, 1, 2, maxSize = 500))
-    expect_false(pecotmr:::canMerge(bm, 1, 2, maxSize = 200))
+    expect_true(pecotmr:::canMerge(.ld_bmGr(bm), 1, 2, maxSize = 500))
+    expect_false(pecotmr:::canMerge(.ld_bmGr(bm), 1, 2, maxSize = 200))
     # rows 1 and 3: different chromosome
-    expect_false(pecotmr:::canMerge(bm, 1, 3, maxSize = 500))
+    expect_false(pecotmr:::canMerge(.ld_bmGr(bm), 1, 3, maxSize = 500))
 })
 
 # ===========================================================================
@@ -1230,7 +1279,11 @@ test_that("extractBlockMatrices warns and skips out-of-range blocks", {
         stringsAsFactors = FALSE
     )
     expect_warning(
-        result <- pecotmr:::extractBlockMatrices(mat, blockMetadata, vnames),
+        result <- pecotmr:::extractBlockMatrices(
+            mat,
+            .ld_bmGr(blockMetadata),
+            vnames
+        ),
         "outside the range"
     )
     valid_blocks <- compact(result$ldMatrices)
@@ -1383,8 +1436,8 @@ test_that("loadLdFromGenotype returns LD matrix with .afreq", {
     expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq > 0))
     expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq < 1))
     # blockMetadata
-    expect_true(is.data.frame(getBlockMetadata(result)))
-    expect_equal(nrow(getBlockMetadata(result)), 1L)
+    expect_true(is(getBlockMetadata(result), "GRanges"))
+    expect_equal(length(getBlockMetadata(result)), 1L)
 })
 
 test_that("loadLdFromGenotype returns genotype matrix when requested", {
@@ -1603,7 +1656,7 @@ test_that("loadLdMatrix loads single precomputed block", {
     expect_true(all(grepl("^chr1:", getVariantIds(result))))
     expect_false(hasGenotypes(result))
     # blockMetadata should have one block
-    expect_equal(nrow(getBlockMetadata(result)), 1L)
+    expect_equal(length(getBlockMetadata(result)), 1L)
     # ref_panel (now GRanges) should have variant info via mcols
     ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
     expect_true("variant_id" %in% names(ref_mcols))
@@ -1642,7 +1695,7 @@ test_that("loadLdMatrix loads multiple precomputed blocks", {
     # Should span blocks 1-3: 5 + 5 + 5 = 15 unique variants (no overlap in variant IDs)
     expect_true(nrow(getCorrelation(result)) >= 10)
     expect_true(isSymmetric(getCorrelation(result)))
-    expect_true(nrow(getBlockMetadata(result)) >= 2)
+    expect_true(length(getBlockMetadata(result)) >= 2)
 })
 
 test_that("loadLdMatrix with n_sample for precomputed blocks with freq data", {
@@ -3683,7 +3736,7 @@ test_that("validateBlockStructure flags out-of-range block indices", {
         endIdx = c(2L, 12L)
     )
     expect_error(
-        pecotmr:::validateBlockStructure(mat, bm, vnames),
+        pecotmr:::validateBlockStructure(mat, .ld_bmGr(bm), vnames),
         "Block indices out of range"
     )
 })
@@ -3702,7 +3755,7 @@ test_that("extractBlockMatrices skips blocks where endIdx < startIdx", {
         size = c(2L, 1L),
         stringsAsFactors = FALSE
     )
-    result <- pecotmr:::extractBlockMatrices(mat, bm, vnames)
+    result <- pecotmr:::extractBlockMatrices(mat, .ld_bmGr(bm), vnames)
     valid <- compact(result$ldMatrices)
     expect_length(valid, 1)
     expect_equal(nrow(valid[[1]]), 2L)
@@ -5231,4 +5284,38 @@ test_that(".panelCutoffs answers NULL for a filter that keeps everything", {
         pecotmr:::.panelCutoffs(PanelFilterParam(mafCutoff = 0.01))$mafCutoff,
         0.01
     )
+})
+
+test_that("validateBlockStructure rejects overlapping blocks", {
+    # The merge logic only considers i - 1 / i + 1, so a block's position in
+    # the table has to mean its position on the chromosome. As a data.frame
+    # nothing checked that; as a GRanges isDisjoint() does.
+    mat <- diag(4)
+    vnames <- sprintf("chr1:%d:A:G", 100L * (1:4))
+    rownames(mat) <- colnames(mat) <- vnames
+    overlapping <- data.frame(
+        blockId = c(1L, 2L),
+        chrom = c("1", "1"),
+        blockStart = c(100L, 150L),
+        blockEnd = c(300L, 400L),
+        size = c(2L, 2L),
+        startIdx = c(1L, 3L),
+        endIdx = c(2L, 4L)
+    )
+    expect_error(
+        pecotmr:::validateBlockStructure(
+            mat,
+            .ld_bmGr(overlapping),
+            vnames
+        ),
+        "each block must cover a span of its own"
+    )
+    # The same blocks, made disjoint, pass.
+    disjoint <- overlapping
+    disjoint$blockStart <- c(100L, 301L)
+    expect_silent(pecotmr:::validateBlockStructure(
+        mat,
+        .ld_bmGr(disjoint),
+        vnames
+    ))
 })

@@ -34,11 +34,13 @@ NULL
 #' @slot snpIdx Integer vector of 1-based SNP indices into the handle's
 #'   \code{snpInfo}. NULL when correlation is pre-computed, or when the
 #'   source is a matrix (which is already the subset).
-#' @slot blockMetadata A \code{data.frame} with one row per block,
-#'   carrying at least \code{blockId}, \code{chrom}, \code{size},
-#'   \code{startIdx} and \code{endIdx}. Columns the caller supplied are
-#'   kept, so a block's genomic span travels as \code{blockStart} /
-#'   \code{blockEnd} when the construction path records one.
+#' @slot blockMetadata A \code{GRanges} with one range per block: its
+#'   \code{seqnames} and range are the block's chromosome and genomic span,
+#'   and \code{mcols} carry \code{blockId}, \code{size}, \code{startIdx}
+#'   and \code{endIdx} -- the index range into the correlation matrix the
+#'   block addresses. Extra columns the caller supplied are kept as mcols.
+#'   A block whose index range is out of bounds has no span to derive and
+#'   gets a width-0 range.
 #' @slot nRef Integer, reference panel sample size.
 #' @slot mixtureWeights NULL when \code{genotypeHandle} is a single
 #'   \code{GenotypeHandle}; a numeric vector of mixing proportions (one per
@@ -54,7 +56,7 @@ setClass(
         correlation = "LdCorrelation",
         genotypeHandle = "LdGenotypeSource",
         snpIdx = "LdSnpIndex",
-        blockMetadata = "data.frame",
+        blockMetadata = "GRanges",
         nRef = "integer",
         mixtureWeights = "LdMixtureWeights"
     ),
@@ -202,11 +204,21 @@ setMethod("show", "LdData", function(object) {
 # @noRd
 .ldBlockColumns <- c("blockId", "chrom", "size", "startIdx", "endIdx")
 
+# What survives as mcols once chrom / blockStart / blockEnd become the
+# GRanges itself.
+# @noRd
+.ldBlockMcols <- c("blockId", "size", "startIdx", "endIdx")
+
 # Supplied values are never replaced: a caller handing over deliberately
 # out-of-range indices keeps them, because partitionLdMatrix() still has to
 # reject those and substituting valid ones would hide the error.
 # @noRd
 .ldBlockMetadata <- function(blockMetadata, variants) {
+    if (length(variants) == 0L) {
+        # Nothing to derive a block from. Validity rejects the object for
+        # covering no variant; crashing here would pre-empt that message.
+        return(GenomicRanges::GRanges())
+    }
     tbl <- .ldBlockMetadataTibble(blockMetadata)
     if (nrow(tbl) == 0L) {
         # A placeholder table means "one block", not "no blocks": an LdData
@@ -214,7 +226,74 @@ setMethod("show", "LdData", function(object) {
         tbl <- tibble(blockId = 1L)
     }
     tbl <- .ldBlockMetadataIndices(tbl, length(variants))
-    .ldBlockMetadataOrder(.ldBlockMetadataDerive(tbl, variants))
+    tbl <- .ldBlockMetadataOrder(.ldBlockMetadataDerive(tbl, variants))
+    .ldBlockMetadataGRanges(tbl, variants)
+}
+
+# The stored shape: one range per block, so the invariants the merge logic
+# depends on are the ones GRanges already answers -- isDisjoint() for
+# overlap, sort() for order, seqnames() for the same-chromosome guard. The
+# index payload the matrix is addressed by rides along in mcols.
+# @noRd
+.ldBlockMetadataGRanges <- function(tbl, variants) {
+    span <- .ldBlockSpans(tbl, variants)
+    gr <- GenomicRanges::GRanges(
+        seqnames = tbl$chrom,
+        ranges = IRanges::IRanges(start = span$start, end = span$end)
+    )
+    keep <- c(
+        intersect(.ldBlockMcols, names(tbl)),
+        setdiff(names(tbl), c(.ldBlockColumns, "blockStart", "blockEnd"))
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        as.data.frame(select(tbl, all_of(keep)))
+    )
+    gr
+}
+
+# Each block's genomic span. Supplied blockStart / blockEnd win; otherwise
+# the span is read off the variants the index range covers.
+#
+# A block whose index range is out of bounds has no span to read, and a
+# GRanges cannot hold an NA one (seqnames reject NAs outright). It gets a
+# WIDTH-0 range at the first variant instead: legal, and visibly not an
+# interval, so nothing downstream mistakes it for a real span.
+# partitionLdMatrix() rejects the block on its indices regardless.
+# @noRd
+.ldBlockSpans <- function(tbl, variants) {
+    if (is_in("blockStart", names(tbl)) && is_in("blockEnd", names(tbl))) {
+        return(list(start = tbl$blockStart, end = tbl$blockEnd))
+    }
+    parts <- map(
+        seq_len(nrow(tbl)),
+        .ldBlockSpanAt,
+        tbl = tbl,
+        variants = variants
+    )
+    list(
+        start = map_dbl(parts, "start"),
+        end = map_dbl(parts, "end")
+    )
+}
+
+# @noRd
+.ldBlockSpanAt <- function(i, tbl, variants) {
+    s <- tbl$startIdx[[i]]
+    e <- tbl$endIdx[[i]]
+    if (.ldBlockRangeUsable(s, e, length(variants))) {
+        part <- variants[seq.int(s, e)]
+        return(list(
+            start = min(GenomicRanges::start(part)),
+            end = max(GenomicRanges::end(part))
+        ))
+    }
+    anchor <- GenomicRanges::start(variants)[[1L]]
+    list(start = anchor, end = anchor - 1L)
+}
+
+# @noRd
+.ldBlockRangeUsable <- function(s, e, n) {
+    !is.na(s) && !is.na(e) && s >= 1L && e >= s && e <= n
 }
 
 # Any accepted shape as a tibble. `start`/`end` is how a bare genomic span
@@ -329,16 +408,19 @@ setMethod("show", "LdData", function(object) {
     )
 }
 
-# NA rather than an error for an out-of-range block: partitionLdMatrix()
-# reports those itself, and erroring here would pre-empt its message.
+# An out-of-range block falls back to the data's own chromosome rather than
+# NA: seqnames cannot hold NA, and partitionLdMatrix() rejects the block on
+# its indices anyway. Its range is width 0 (see .ldBlockSpanAt).
 # @noRd
 .ldBlockChromAt <- function(i, tbl, variants) {
     s <- tbl$startIdx[[i]]
     e <- tbl$endIdx[[i]]
-    if (is.na(s) || is.na(e) || s < 1L || e < s || e > length(variants)) {
-        return(NA_character_)
+    part <- if (.ldBlockRangeUsable(s, e, length(variants))) {
+        variants[seq.int(s, e)]
+    } else {
+        variants
     }
-    as.character(GenomicRanges::seqnames(variants[seq.int(s, e)]))[[1L]]
+    as.character(GenomicRanges::seqnames(part))[[1L]]
 }
 
 # Canonical columns first, anything the caller added after.
@@ -353,14 +435,14 @@ setMethod("show", "LdData", function(object) {
 # @noRd
 .ldCheckBlockMetadata <- function(object) {
     bm <- object@blockMetadata
-    absent <- setdiff(.ldBlockColumns, names(bm))
+    absent <- setdiff(.ldBlockMcols, names(S4Vectors::mcols(bm)))
     if (length(absent) > 0L) {
         return(str_c(
             "'blockMetadata' is missing required column(s): ",
             str_flatten(absent, ", ")
         ))
     }
-    if (nrow(bm) == 0L) {
+    if (length(bm) == 0L) {
         return("'blockMetadata' must describe at least one block")
     }
     NULL
@@ -377,10 +459,11 @@ setMethod("show", "LdData", function(object) {
 #' @param variants A GRanges with variant metadata (must have variant_id in
 #'   mcols, plus A1, A2).
 #' @param blockMetadata Block boundaries: a \code{GRanges}, a
-#'   \code{data.frame} or a \code{DataFrame}. Columns absent for a
-#'   single block are derived from \code{variants}, so a bare genomic
-#'   span -- or nothing at all -- is enough; with several blocks the
-#'   index columns must be supplied.
+#'   \code{data.frame} or a \code{DataFrame}. Whatever is absent for a
+#'   single block is derived from \code{variants}, so a bare genomic span
+#'   -- or nothing at all -- is enough; with several blocks either the index
+#'   columns or \code{size} must be supplied. Normalised on the way in and
+#'   stored as a \code{GRanges} (see the \code{blockMetadata} slot).
 #' @param nRef Integer, reference panel sample size.
 #' @param mixtureWeights Optional numeric vector of mixing proportions, one per
 #'   panel in \code{genotypeHandle} when it is a list. Must be non-negative and

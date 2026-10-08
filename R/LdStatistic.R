@@ -181,9 +181,12 @@ setClass(
         ))
     }
     md <- getBlockMetadata(x)
-    hasIdx <- is.data.frame(md) &&
-        all(is_in(c("startIdx", "endIdx"), names(md))) &&
-        nrow(md) == length(R)
+    # blockMetadata is a GRanges: the index payload is in mcols.
+    hasIdx <- all(is_in(
+        c("startIdx", "endIdx"),
+        names(S4Vectors::mcols(md))
+    )) &&
+        length(md) == length(R)
     if (hasIdx) {
         return(map2(as.integer(md$startIdx), as.integer(md$endIdx), seq.int))
     }
