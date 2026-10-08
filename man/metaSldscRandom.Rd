@@ -8,7 +8,7 @@ metaSldscRandom(
   perTraitEstimates,
   category,
   quantity = c("tauStar", "enrichment", "enrichstat"),
-  metaArgs = rmaConfig()
+  metaArgs = RmaOptions()
 )
 }
 \arguments{
@@ -20,7 +20,7 @@ metaSldscRandom(
 \item{quantity}{Character: `"tauStar"`, `"enrichment"`, or `"enrichstat"`.}
 
 \item{metaArgs}{Extra arguments for \code{metafor::rma()}, built with
-\code{\link{rmaConfig}} -- \code{test = "knha"} in particular, the
+\code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
 small-study correction.}
 }
 \value{

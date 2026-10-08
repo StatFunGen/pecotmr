@@ -520,7 +520,7 @@ test_that(".colocExtractLbfFromEntry: entry without trimmedFit returns NULL with
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
             e,
-            colocLbfFilterConfig()
+            ColocLbfFilterParam()
         ),
         "has no trimmedFit"
     )
@@ -559,7 +559,7 @@ test_that(".colocExtractLbfFromEntry: filterLbfCs subsets by cs_index", {
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        lbfFilterArgs = colocLbfFilterConfig(
+        lbfFilterArgs = ColocLbfFilterParam(
             filterLbfCs = TRUE,
             secondary = NULL
         )
@@ -1046,7 +1046,7 @@ test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        lbfFilterArgs = colocLbfFilterConfig(
+        lbfFilterArgs = ColocLbfFilterParam(
             filterLbfCs = FALSE,
             secondary = NULL,
             concentration = 0.5
@@ -1071,7 +1071,7 @@ test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)",
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        lbfFilterArgs = colocLbfFilterConfig(
+        lbfFilterArgs = ColocLbfFilterParam(
             filterLbfCs = FALSE,
             secondary = NULL,
             concentration = 0.5
@@ -1090,7 +1090,7 @@ test_that(".colocExtractLbfFromEntry: warns + NULL when fit carries no LBF slot"
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
             e,
-            lbfFilterArgs = colocLbfFilterConfig(
+            lbfFilterArgs = ColocLbfFilterParam(
                 filterLbfCs = FALSE,
                 secondary = NULL,
                 concentration = 0.5
@@ -1118,7 +1118,7 @@ test_that(".colocExtractLbfFromEntry: warns + NULL on an empty LBF matrix", {
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
             e,
-            lbfFilterArgs = colocLbfFilterConfig(
+            lbfFilterArgs = ColocLbfFilterParam(
                 filterLbfCs = FALSE,
                 secondary = NULL,
                 concentration = 0.5
@@ -1152,7 +1152,7 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        lbfFilterArgs = colocLbfFilterConfig(
+        lbfFilterArgs = ColocLbfFilterParam(
             filterLbfCs = FALSE,
             secondary = 0.95,
             concentration = 0.5
@@ -1171,7 +1171,7 @@ test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit 
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        lbfFilterArgs = colocLbfFilterConfig(
+        lbfFilterArgs = ColocLbfFilterParam(
             filterLbfCs = FALSE,
             secondary = NULL,
             concentration = 0.5
@@ -1198,7 +1198,7 @@ test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
-        lbfFilterArgs = colocLbfFilterConfig(
+        lbfFilterArgs = ColocLbfFilterParam(
             filterLbfCs = FALSE,
             secondary = NULL,
             concentration = 0.5
@@ -1244,8 +1244,7 @@ test_that(".colocSelectLbfRows returns indices into the unfiltered rows", {
         .colocSelectLbfRows(
             lbf,
             fit,
-            colocLbfFilterConfig(filterLbfCs = TRUE),
-            1e-9
+            ColocLbfFilterParam(filterLbfCs = TRUE)
         ),
         c(2L, 4L)
     )
@@ -1253,8 +1252,7 @@ test_that(".colocSelectLbfRows returns indices into the unfiltered rows", {
         .colocSelectLbfRows(
             lbf,
             fit,
-            colocLbfFilterConfig(filterLbfCs = FALSE),
-            1e-9
+            ColocLbfFilterParam(filterLbfCs = FALSE)
         ),
         c(1L, 3L)
     )
@@ -1268,8 +1266,7 @@ test_that(".colocSelectLbfRows does not prefix-match sets_secondary", {
         .colocSelectLbfRows(
             lbf,
             fit,
-            colocLbfFilterConfig(filterLbfCs = TRUE),
-            1e-9
+            ColocLbfFilterParam(filterLbfCs = TRUE)
         ),
         seq_len(3L)
     )
@@ -1323,14 +1320,14 @@ test_that("gwasFineMapping is refused when the GWAS is already fine-mapped", {
         colocPipeline(
             qtlFineMappingExample,
             gwasFineMappingExample,
-            gwasFineMappingArgs = gwasFineMappingConfig(methods = "susieInf")
+            gwasFineMappingArgs = GwasFineMappingParam(methods = "susieInf")
         ),
         "there is no run to configure"
     )
     # The default bundle is not a request, so it passes silently.
     expect_no_error(pecotmr:::.colocResolveGwasFmr(
         gwasFineMappingExample,
-        gwasFineMappingConfig()
+        GwasFineMappingParam()
     ))
     expect_no_error(pecotmr:::.colocResolveGwasFmr(
         gwasFineMappingExample,
@@ -1403,34 +1400,34 @@ test_that("pre-extracting LBF from an empty GWAS result yields no blocks", {
     expect_equal(
         pecotmr:::.colocPreextractGwasLbf(
             gwasFineMappingExample[0],
-            colocLbfFilterConfig()
+            ColocLbfFilterParam()
         ),
         list()
     )
 })
 
-test_that("colocPriorConfig carries the priors and rejects a typo", {
-    pr <- colocPriorConfig(p12 = 1e-5)
-    expect_s4_class(pr, "MethodConfig")
+test_that("ColocPriorParam carries the priors and rejects a typo", {
+    pr <- ColocPriorParam(p12 = 1e-5)
+    expect_s4_class(pr, "ColocPriorParam")
     expect_equal(pr$p12, 1e-5)
     expect_equal(pr$p1, 1e-4)
-    expect_error(colocPriorConfig(p13 = 1e-5), "unused argument")
+    expect_error(ColocPriorParam(p13 = 1e-5), "unused argument")
 })
 
-test_that("colocLbfFilterConfig carries the filter settings", {
-    lf <- colocLbfFilterConfig(filterLbfCs = TRUE, concentration = 0.25)
+test_that("ColocLbfFilterParam carries the filter settings", {
+    lf <- ColocLbfFilterParam(filterLbfCs = TRUE, concentration = 0.25)
     expect_true(lf$filterLbfCs)
     expect_equal(lf$concentration, 0.25)
     # NULL secondary means "primary sets only" and is not forwarded.
-    expect_false(is_in("secondary", names(colocLbfFilterConfig())))
-    expect_error(colocLbfFilterConfig(concentrations = 0.25), "unused argument")
+    expect_false(is_in("secondary", names(ColocLbfFilterParam())))
+    expect_error(ColocLbfFilterParam(concentrations = 0.25), "unused argument")
 })
 
-test_that("colocConfig is checked against coloc.bf_bf", {
+test_that("ColocOptions is checked against coloc.bf_bf", {
     skip_if_not_installed("coloc")
-    expect_s4_class(colocConfig(), "MethodConfig")
-    expect_output(show(colocConfig()), "checked against coloc::coloc.bf_bf")
-    expect_error(colocConfig(overlapMin = 0.5), "unknown argument")
+    expect_s4_class(ColocOptions(), "MethodOptions")
+    expect_output(show(ColocOptions()), "checked against coloc::coloc.bf_bf")
+    expect_error(ColocOptions(overlapMin = 0.5), "unknown argument")
 })
 
 test_that("priors cannot be set twice", {
@@ -1438,11 +1435,11 @@ test_that("priors cannot be set twice", {
     # p1/p2/p12 are read by the enrichment adjustment as well as forwarded,
     # so allowing them in methodArgs would let the two disagree.
     expect_error(
-        pecotmr:::.colocEngineArgs(colocConfig(p12 = 1e-5), colocPriorConfig()),
+        pecotmr:::.colocEngineArgs(ColocOptions(p12 = 1e-5), ColocPriorParam()),
         "set through `priors`"
     )
     expect_silent(
-        pecotmr:::.colocEngineArgs(colocConfig(), colocPriorConfig())
+        pecotmr:::.colocEngineArgs(ColocOptions(), ColocPriorParam())
     )
 })
 
@@ -1450,18 +1447,18 @@ test_that("colocPipeline refuses bare lists where a constructor is due", {
     expect_error(
         pecotmr:::.colocAssertGroups(
             list(p1 = 1e-4),
-            colocLbfFilterConfig(),
-            colocConfig()
+            ColocLbfFilterParam(),
+            ColocOptions()
         ),
-        "must be built with colocPriorConfig\\(\\)"
+        "must be built with ColocPriorParam\\(\\)"
     )
     expect_error(
         pecotmr:::.colocAssertGroups(
-            colocPriorConfig(),
+            ColocPriorParam(),
             list(filterLbfCs = TRUE),
-            colocConfig()
+            ColocOptions()
         ),
-        "must be built with colocLbfFilterConfig\\(\\)"
+        "must be built with ColocLbfFilterParam\\(\\)"
     )
 })
 
@@ -1486,7 +1483,7 @@ test_that("priors and enrichment cannot both be given", {
         colocPipeline(
             qtlFineMappingResult = qfmr,
             gwasInput = gfmr,
-            priors = colocPriorConfig(p12 = 1e-5),
+            priors = ColocPriorParam(p12 = 1e-5),
             enrichment = enr
         ),
         "cannot both be given"
@@ -1495,7 +1492,7 @@ test_that("priors and enrichment cannot both be given", {
     expect_no_error(suppressWarnings(colocPipeline(
         qtlFineMappingResult = qfmr,
         gwasInput = gfmr,
-        priors = colocPriorConfig(p12 = 1e-5)
+        priors = ColocPriorParam(p12 = 1e-5)
     )))
     expect_no_error(suppressWarnings(colocPipeline(
         qtlFineMappingResult = qfmr,
@@ -1504,9 +1501,9 @@ test_that("priors and enrichment cannot both be given", {
     )))
 })
 
-test_that("gwasFineMappingConfig carries only what the inline fit can use", {
-    g <- gwasFineMappingConfig()
-    expect_s4_class(g, "MethodConfig")
+test_that("GwasFineMappingParam carries only what the inline fit can use", {
+    g <- GwasFineMappingParam()
+    expect_s4_class(g, "GwasFineMappingParam")
     expect_setequal(
         names(g),
         c(
@@ -1520,14 +1517,14 @@ test_that("gwasFineMappingConfig carries only what the inline fit can use", {
     )
     # Nested bundles survive: the inline fit gets a real credibleSetArgs.
     expect_s4_class(
-        gwasFineMappingConfig(
-            credibleSetArgs = credibleSetConfig(coverage = 0.9)
+        GwasFineMappingParam(
+            credibleSetArgs = CredibleSetParam(coverage = 0.9)
         )$credibleSetArgs,
-        "MethodConfig"
+        "CredibleSetParam"
     )
     expect_equal(
-        gwasFineMappingConfig(
-            credibleSetArgs = credibleSetConfig(coverage = 0.9)
+        GwasFineMappingParam(
+            credibleSetArgs = CredibleSetParam(coverage = 0.9)
         )$credibleSetArgs$coverage,
         0.9
     )
@@ -1536,7 +1533,7 @@ test_that("gwasFineMappingConfig carries only what the inline fit can use", {
     # resume cache; CV is refused on sumstats; residualization has nothing
     # to regress out.
     for (nm in c("fineMappingResult", "crossValidation", "residualization")) {
-        expect_false(nm %in% names(formals(gwasFineMappingConfig)), label = nm)
+        expect_false(nm %in% names(formals(GwasFineMappingParam)), label = nm)
     }
     # Every field it does carry is a real fineMappingPipeline(GwasSumStats)
     # argument.
@@ -1547,7 +1544,7 @@ test_that("gwasFineMappingConfig carries only what the inline fit can use", {
         )@.Data
     ))
     expect_true(all(is_in(
-        setdiff(names(formals(gwasFineMappingConfig)), "methods"),
+        setdiff(names(formals(GwasFineMappingParam)), "methods"),
         c(
             accepted,
             "credibleSetArgs",
@@ -1557,5 +1554,29 @@ test_that("gwasFineMappingConfig carries only what the inline fit can use", {
             "fitRetention"
         )
     )))
-    expect_error(gwasFineMappingConfig(fitRetention = "none"), "must be one of")
+    expect_error(GwasFineMappingParam(fitRetention = "none"), "must be one of")
+})
+
+test_that("GwasFineMappingParam accessors round-trip a nested bundle", {
+    g <- GwasFineMappingParam()
+    expect_equal(getFineMappingMethods(g), "susie")
+    expect_s4_class(getCredibleSetArgs(g), "CredibleSetParam")
+
+    # Why this class has accessors at all: once CredibleSetParam is
+    # settable, the container must let the edited record back in, or the
+    # nested settings would be readable but not writable.
+    g2 <- setCredibleSetArgs(g, setCoverage(getCredibleSetArgs(g), 0.8))
+    expect_equal(getCoverage(getCredibleSetArgs(g2)), 0.8)
+    expect_equal(getCoverage(getCredibleSetArgs(g)), 0.95)
+
+    # The nested slots are typed, so the wrong Param is refused rather than
+    # surfacing as a missing field somewhere downstream.
+    expect_error(
+        setRssArgs(g, CredibleSetParam()),
+        "not valid for @.+rssArgs"
+    )
+    expect_s4_class(
+        setRssArgs(g, SusieRssParam(serFallback = TRUE)),
+        "GwasFineMappingParam"
+    )
 })

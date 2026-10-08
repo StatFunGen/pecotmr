@@ -12,7 +12,7 @@ dprWeights(
   y,
   fittingMethod = "VB",
   fitRetention = c("none", "slim", "full"),
-  methodArgs = dprConfig()
+  methodArgs = DprOptions()
 )
 
 dprVbWeights(
@@ -20,7 +20,7 @@ dprVbWeights(
   y,
   nK = 8,
   fitRetention = c("none", "slim", "full"),
-  methodArgs = dprConfig()
+  methodArgs = DprOptions()
 )
 
 dprGibbsWeights(
@@ -28,14 +28,14 @@ dprGibbsWeights(
   y,
   sStep = 5000,
   fitRetention = c("none", "slim", "full"),
-  methodArgs = dprConfig()
+  methodArgs = DprOptions()
 )
 
 dprAdaptiveGibbsWeights(
   X,
   y,
   fitRetention = c("none", "slim", "full"),
-  methodArgs = dprConfig()
+  methodArgs = DprOptions()
 )
 }
 \arguments{
@@ -54,7 +54,7 @@ behave alike here.
 Default \code{FALSE}.}
 
 \item{methodArgs}{Options forwarded to \code{RcppDPR::fit_model}, built
-with \code{\link{dprConfig}}. A bare list is refused: it cannot be
+with \code{\link{DprOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 

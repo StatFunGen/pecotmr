@@ -15,7 +15,7 @@ qtlAssociationPostprocess(x, ...)
   methods = c("permutation", "bonferroni"),
   pvalueCol = "P",
   afCol = "af",
-  qvalueArgs = qvalueConfig()
+  qvalueArgs = QvalueOptions()
 )
 }
 \arguments{
@@ -45,7 +45,7 @@ no stored column -- it is a significance query (see
 frequency (defaults \code{"P"} / \code{"af"}).}
 
 \item{qvalueArgs}{Extra arguments for \code{qvalue::qvalue()}, built with
-\code{\link{qvalueConfig}} -- the \code{pi0.method} / \code{lambda}
+\code{\link{QvalueOptions}} -- the \code{pi0.method} / \code{lambda}
 pair in particular, which sets how the null proportion is estimated.}
 }
 \value{

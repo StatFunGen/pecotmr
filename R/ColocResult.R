@@ -54,7 +54,7 @@ NULL
 setClass(
     "ColocResultBase",
     contains = c("VIRTUAL", "RangedTupleList"),
-    representation(ldSketch = "LdSketchOrNULL"),
+    representation(ldSketch = "LdSketch_OR_NULL"),
     prototype(ldSketch = NULL)
 )
 

@@ -10,7 +10,7 @@ fitMvsusieRss(
   N,
   prior_variance,
   coverage = 0.95,
-  methodArgs = mvsusieRssConfig()
+  methodArgs = MvsusieRssOptions()
 )
 }
 \arguments{
@@ -25,7 +25,7 @@ fitMvsusieRss(
 \item{coverage}{Credible set coverage (default 0.95).}
 
 \item{methodArgs}{Options forwarded to \code{mvsusieR::mvsusie_rss},
-built with \code{\link{mvsusieRssConfig}} --- the RSS entry point has
+built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 its own constructor, since it is a different function from
 \code{mvsusie} with different arguments.}
 }

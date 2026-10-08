@@ -82,9 +82,9 @@ NULL
 #' @importFrom checkmate assertLogical assertNumber assertFlag assertCharacter
 .assertQtlPassThrough <- function(scaleResiduals, genotypeFilterArgs) {
     assertLogical(scaleResiduals, len = 1L)
-    .assertMethodConfig(
+    .assertMethodParam(
         genotypeFilterArgs,
-        "genotypeFilterConfig",
+        "GenotypeFilterParam",
         "genotypeFilter"
     )
     # Only what the caller actually set: an unset field defers to QtlDataset's
@@ -1560,7 +1560,7 @@ NULL
 #'   to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.
 #' @param scaleResiduals Pass-through \code{\link{QtlDataset}} argument.
 #' @param genotypeFilterArgs Pass-through \code{\link{QtlDataset}} filtering
-#'   options, built with \code{\link{genotypeFilterConfig}} and stored as lazy
+#'   options, built with \code{\link{GenotypeFilterParam}} and stored as lazy
 #'   QC slots.
 #' @param transposeCovariates Transpose covariate TSVs (QTLtools layout) before
 #'   treating them as samples-as-rows.
@@ -1580,7 +1580,7 @@ loadQtlDatasetFromManifest <- function(
     genotypes = NULL,
     genotypeCovariates = NULL,
     scaleResiduals = TRUE,
-    genotypeFilterArgs = genotypeFilterConfig(),
+    genotypeFilterArgs = GenotypeFilterParam(),
     transposeCovariates = FALSE
 ) {
     assertString(study, null.ok = TRUE)
@@ -1668,6 +1668,25 @@ loadQtlDatasetFromManifest <- function(
     isTRUE(ccOk) || isTRUE(nOk)
 }
 
+# Materialise the LD sketch reading only the chromosomes the sumstats
+# cover, then run the deferred per-study containment checks and trim to
+# range. The checks sit between the two steps because containment is only
+# answerable once the sketch is read, and trimming would hide a miss.
+# @noRd
+.manifestGwasLdSketch <- function(
+    ldSketchSpec,
+    entries,
+    df,
+    minLdOverlapWarn
+) {
+    materialized <- .materializeLdSketch(
+        ldSketchSpec,
+        .entriesChroms(entries)
+    )
+    .checkGwasLdContainment(materialized, entries, df, minLdOverlapWarn)
+    .subsetSketchToRange(materialized, entries)
+}
+
 #' @title Load a GwasSumStats collection from a manifest
 #' @description Build a \code{\link{GwasSumStats}} from a manifest with one row
 #'   per study. No QC is run (the result carries \code{qcInfo = list()}). Each
@@ -1746,14 +1765,12 @@ loadGwasSumStatsFromManifest <- function(
         formatMapping = formatMapping,
         ns = ns
     )
-    # Materialise the LD sketch reading only the chromosomes the sumstats cover,
-    # then run the deferred per-study containment checks and trim to range.
-    materialized <- .materializeLdSketch(
+    ldSketch <- .manifestGwasLdSketch(
         ldSketchSpec,
-        .entriesChroms(entries)
+        entries,
+        df,
+        minLdOverlapWarn
     )
-    .checkGwasLdContainment(materialized, entries, df, minLdOverlapWarn)
-    ldSketch <- .subsetSketchToRange(materialized, entries)
     # Without a block manifest a genome-wide file splits by chromosome, which
     # is too coarse for cTWAS; with one, each study becomes one element per LD
     # block. The constructor does the splitting either way.
@@ -2068,7 +2085,7 @@ loadQtlSumStatsFromManifest <- function(
 #' @param scaleResiduals Pass-through \code{\link{QtlDataset}} argument,
 #'   applied to every study.
 #' @param genotypeFilterArgs Pass-through \code{\link{QtlDataset}} filtering
-#'   options, built with \code{\link{genotypeFilterConfig}} and applied to
+#'   options, built with \code{\link{GenotypeFilterParam}} and applied to
 #'   every study.
 #' @return A \code{MultiStudyQtlDataset} object.
 #' @examples
@@ -2091,7 +2108,7 @@ loadMultiStudyQtlDatasetFromManifest <- function(
     formatMapping = NULL,
     transposeCovariates = FALSE,
     scaleResiduals = TRUE,
-    genotypeFilterArgs = genotypeFilterConfig()
+    genotypeFilterArgs = GenotypeFilterParam()
 ) {
     assertFlag(transposeCovariates)
     assertNumber(minLdOverlapWarn, lower = 0, upper = 1)
@@ -2116,7 +2133,7 @@ loadMultiStudyQtlDatasetFromManifest <- function(
 }
 
 # Bundle the per-study QC / sample-filter arguments into a list. What remains
-# after genotypeFilterConfig() absorbed the seven filter fields: this is what is
+# after GenotypeFilterParam() absorbed the seven filter fields: this is what is
 # spliced into QtlDataset().
 # @noRd
 .msqQcArgs <- function(scaleResiduals, genotypeFilterArgs) {

@@ -15,7 +15,7 @@ mrmashRssWeights(
   V = NULL,
   covY = NULL,
   fitRetention = c("none", "slim", "full"),
-  methodArgs = mrmashConfig()
+  methodArgs = MrmashRssOptions()
 )
 }
 \arguments{
@@ -59,7 +59,7 @@ additionally retains the complete fit under \code{$fit}, at the cost of
 a larger payload.}
 
 \item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash.rss}, built
-with \code{\link{mrmashConfig}}. A bare list is refused: it cannot be
+with \code{\link{MrmashOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

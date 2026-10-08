@@ -325,7 +325,7 @@ test_that("GenotypeHandle constructs and validates correctly", {
         "GenotypeHandle",
         path = "/tmp/test.gds",
         format = "gds",
-        snpInfo = make_test_snp_info(),
+        snpInfo = makeTestSnpInfo(),
         nSamples = 100L,
         sampleIds = paste0("sample_", 1:100),
         pgenPtr = NULL
@@ -741,7 +741,7 @@ test_that("show(GenotypeHandle) does not error", {
         "GenotypeHandle",
         path = "/tmp/test.gds",
         format = "gds",
-        snpInfo = make_test_snp_info(),
+        snpInfo = makeTestSnpInfo(),
         nSamples = 100L,
         sampleIds = paste0("s", 1:100),
         pgenPtr = NULL

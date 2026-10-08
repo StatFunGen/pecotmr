@@ -35,7 +35,7 @@ test_that("GwasSumStats valid object passes with all required mcols", {
 
 
 test_that("makeGwasSumStatsFromDf() constructor creates object from data.frame", {
-    df <- make_test_sumstats_df(20)
+    df <- makeTestSumstatsDf(20)
     obj <- makeGwasSumStatsFromDf(df, traitName = "height", genome = "hg38")
 
     expect_s4_class(obj, "GwasSumStats")
@@ -46,7 +46,7 @@ test_that("makeGwasSumStatsFromDf() constructor creates object from data.frame",
 
 
 test_that("makeGwasSumStatsFromDf() normalizes chr prefix", {
-    df <- make_test_sumstats_df(5)
+    df <- makeTestSumstatsDf(5)
     # Input has CHR = "1" (no prefix)
     obj <- makeGwasSumStatsFromDf(df)
     chrs <- as.character(GenomicRanges::seqnames(getSumStats(obj)))
@@ -70,7 +70,7 @@ test_that("makeGwasSumStatsFromDf() errors on missing columns", {
 
 
 test_that("makeGwasSumStatsFromDf() removes rows with NA in required columns", {
-    df <- make_test_sumstats_df(10)
+    df <- makeTestSumstatsDf(10)
     df$Z[1] <- NA
     df$N[3] <- NA
     expect_message(
@@ -83,7 +83,7 @@ test_that("makeGwasSumStatsFromDf() removes rows with NA in required columns", {
 
 test_that("getz() returns correct Z vector", {
     set.seed(99)
-    df <- make_test_sumstats_df(5)
+    df <- makeTestSumstatsDf(5)
     obj <- makeGwasSumStatsFromDf(df)
     z <- getZ(obj)
     expect_type(z, "double")
@@ -92,7 +92,7 @@ test_that("getz() returns correct Z vector", {
 
 
 test_that("getn() returns correct N vector", {
-    df <- make_test_sumstats_df(5)
+    df <- makeTestSumstatsDf(5)
     obj <- makeGwasSumStatsFromDf(df)
     n <- getN(obj)
     expect_equal(length(n), 5)
@@ -101,7 +101,7 @@ test_that("getn() returns correct N vector", {
 
 
 test_that("getmaf() returns MAF when present, NULL when absent", {
-    df <- make_test_sumstats_df(5)
+    df <- makeTestSumstatsDf(5)
     obj_no_maf <- makeGwasSumStatsFromDf(df)
     expect_null(getMaf(obj_no_maf))
 
@@ -114,14 +114,14 @@ test_that("getmaf() returns MAF when present, NULL when absent", {
 
 
 test_that("nSnps() returns correct count", {
-    df <- make_test_sumstats_df(30)
+    df <- makeTestSumstatsDf(30)
     obj <- makeGwasSumStatsFromDf(df)
     expect_equal(nSnps(obj), 30)
 })
 
 
 test_that("subsetchr() filters correctly", {
-    df <- make_test_sumstats_df(10)
+    df <- makeTestSumstatsDf(10)
     df$CHR <- c(rep("1", 6), rep("2", 4))
     obj <- makeGwasSumStatsFromDf(df)
 
@@ -167,7 +167,7 @@ test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
 
 
 test_that("getvary() returns var_y and NULL cases", {
-    df <- make_test_sumstats_df(5)
+    df <- makeTestSumstatsDf(5)
 
     obj_null <- makeGwasSumStatsFromDf(df, varY = NULL)
     expect_null(getVarY(obj_null))
@@ -178,7 +178,7 @@ test_that("getvary() returns var_y and NULL cases", {
 
 
 test_that("as.data.frame.makeGwasSumStatsFromDf() round-trips", {
-    df_in <- make_test_sumstats_df(15)
+    df_in <- makeTestSumstatsDf(15)
     obj <- makeGwasSumStatsFromDf(df_in)
     df_out <- as.data.frame(obj)
 
@@ -343,7 +343,7 @@ test_that("GwasSumStats: a non-GenotypeHandle ldSketch is rejected", {
 # show() smoke test, moved here from test_showMethods.R so the test
 # tree mirrors R/.
 test_that("show(GwasSumStats) does not error", {
-    ss <- makeGwasSumStatsFromDf(make_test_sumstats_df(10))
+    ss <- makeGwasSumStatsFromDf(makeTestSumstatsDf(10))
     expect_output(show(ss), "GwasSumStats")
 })
 

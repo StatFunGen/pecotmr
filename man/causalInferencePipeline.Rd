@@ -8,8 +8,8 @@ causalInferencePipeline(
   gwasSumStats,
   twasWeights = NULL,
   fineMappingResult = NULL,
-  weightSelectionArgs = weightSelectionConfig(),
-  mrArgs = mrConfig(),
+  weightSelectionArgs = WeightSelectionParam(),
+  mrArgs = MrParam(),
   combineMethods = NULL,
   alleleFlip = TRUE
 )
@@ -29,7 +29,7 @@ the TWAS-Z weights via the SuSiE-style coefficients on each entry's
 
 \item{weightSelectionArgs}{How one TWAS method's weights are picked per
 \code{(study, context, trait, gwasStudy)} tuple, built with
-\code{\link{weightSelectionConfig}}: \code{cutoff} (minimum
+\code{\link{WeightSelectionParam}}: \code{cutoff} (minimum
 cross-validated r-squared, default \code{0}), \code{pvalCutoff} (the
 CV-p-value gate, default \code{Inf}), and \code{metric} /
 \code{pvalMetric} naming which \code{cvResult} metrics those two read.
@@ -40,7 +40,7 @@ carried through. Ports the legacy \code{twas_pipeline}
 \code{pick_best_model} / \code{update_twas_method}.}
 
 \item{mrArgs}{How Mendelian randomization is run, built with
-\code{\link{mrConfig}}: \code{method} (\code{"ivwPerVariant"}, the
+\code{\link{MrParam}}: \code{method} (\code{"ivwPerVariant"}, the
 default, or \code{"csAware"}), the PIP threshold that method reads
 (\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}, the
 TWAS-p-value gate below which MR runs at all (default \code{1}, no

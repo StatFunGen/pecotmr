@@ -3,9 +3,9 @@
 # === Tests migrated from test_h2ClassesSumstats.R (LdScore) ===
 
 test_that("LdScore constructs and validates correctly", {
-    ldblocks <- make_test_ldblocks()
+    ldblocks <- makeTestLdBlocks()
     n <- 10
-    snp_info <- make_test_snp_info(n)
+    snp_info <- makeTestSnpInfo(n)
 
     obj <- LdScore(
         ldBlocks = ldblocks,
@@ -23,8 +23,8 @@ test_that("LdScore constructs and validates correctly", {
 
 
 test_that("LdScore rejects ld_scores row mismatch with snp_info", {
-    ldblocks <- make_test_ldblocks()
-    snp_info <- make_test_snp_info(10)
+    ldblocks <- makeTestLdBlocks()
+    snp_info <- makeTestSnpInfo(10)
 
     expect_error(
         methods::validObject(
@@ -48,8 +48,8 @@ test_that("LdScore rejects ld_scores row mismatch with snp_info", {
 test_that("show(LdScore) does not error", {
     n <- 10
     lsr <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -64,8 +64,8 @@ test_that("LdScore rejects weights that are not parallel to the variants", {
     n <- 10
     expect_error(
         LdScore(
-            ldBlocks = make_test_ldblocks(),
-            snpInfo = make_test_snp_info(n),
+            ldBlocks = makeTestLdBlocks(),
+            snpInfo = makeTestSnpInfo(n),
             nRef = 500L,
             inSample = FALSE,
             genome = "hg19",
@@ -81,8 +81,8 @@ test_that("getLdScoreWeights returns the per-variant weights", {
     n <- 10
     w <- runif(n)
     obj <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -98,8 +98,8 @@ test_that("validity requires the score columns to be present in mcols", {
     # edit rather than a slot edit -- which is exactly why validity checks it.
     n <- 10
     obj <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",

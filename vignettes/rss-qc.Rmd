@@ -57,13 +57,13 @@ make these objects. In this example the object is `GwasSumStats` object called
 ```{r run-qc, eval=FALSE}
 gws_qcd <- summaryStatsQc(
     gws,
-    sumstatsFilterArgs = sumstatsFilterConfig(
+    sumstatsFilterArgs = SumstatsFilterParam(
         removeIndels = FALSE,
         removeStrandAmbiguous = TRUE,
         infoCutoff = 0, # 0 = off; > 0 requires INFO column
         nCutoff = 5
     ),
-    panelFilterArgs = panelFilterConfig(
+    panelFilterArgs = PanelFilterParam(
         mafCutoff = 0 # 0 = off; > 0 requires MAF column
     ),
     skipRegion = NULL, # e.g. MHC "chr6:25000000-35000000"
@@ -267,14 +267,14 @@ LD-regression imputer).
 `summaryStatsQc(ldMismatchQcMethod = "slalom", impute = TRUE)`
 does this for you. The standalone version is exposed as `raiss()`; the
 full set of RAISS knobs lives under the `imputeArgs` argument to
-`summaryStatsQc()`, built with `raissConfig()`:
+`summaryStatsQc()`, built with `RaissParam()`:
 
 ```{r raiss-args, eval=FALSE}
 gws_qcd <- summaryStatsQc(
     gws,
     ldMismatchQcMethod = "slalom",
     impute = TRUE,
-    imputeArgs = raissConfig(
+    imputeArgs = RaissParam(
         r2Threshold = 0.6,
         minimumLd = 5,
         lamb = 0.01,

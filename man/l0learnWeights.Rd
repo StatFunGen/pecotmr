@@ -4,7 +4,7 @@
 \alias{l0learnWeights}
 \title{Compute Weights Using L0Learn}
 \usage{
-l0learnWeights(X, y, penalty = "L0", nFolds = 5, methodArgs = l0learnConfig())
+l0learnWeights(X, y, penalty = "L0", nFolds = 5, methodArgs = L0learnOptions())
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -17,7 +17,7 @@ l0learnWeights(X, y, penalty = "L0", nFolds = 5, methodArgs = l0learnConfig())
 \item{nFolds}{Number of cross-validation folds. Default is 5.}
 
 \item{methodArgs}{Options forwarded to \code{L0Learn::L0Learn.cvfit}, built
-with \code{\link{l0learnConfig}}. A bare list is refused: it cannot be
+with \code{\link{L0learnOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

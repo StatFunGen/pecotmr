@@ -3,7 +3,7 @@ context("twasWeights")
 # ---------------------------------------------------------------------------
 # Shared synthetic data generator
 # ---------------------------------------------------------------------------
-make_data <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
+makeData <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
     set.seed(seed)
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
     colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
@@ -26,7 +26,7 @@ make_data <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
     list(X = X, Y = Y, beta = beta)
 }
 
-make_fake_susie_fit <- function(p = 10, L = 3, inf = FALSE) {
+makeFakeSusieFit <- function(p = 10, L = 3, inf = FALSE) {
     fit <- list(
         alpha = matrix(1 / p, nrow = L, ncol = p),
         mu = matrix(0, nrow = L, ncol = p),
@@ -42,10 +42,10 @@ make_fake_susie_fit <- function(p = 10, L = 3, inf = FALSE) {
     fit
 }
 
-mock_susie <- function(...) {
+mockSusie <- function(...) {
     args <- list(...)
     L <- if (is.null(args$L)) 3 else args$L
-    make_fake_susie_fit(
+    makeFakeSusieFit(
         ncol(args$X),
         L = L,
         inf = identical(args$unmappable_effects, "inf")
@@ -90,6 +90,42 @@ mock_susie <- function(...) {
 #  .twas_method_lookup
 #
 # ===========================================================================
+
+# Simulate a small (X, Y) pair. Local to this file: it was a helper-*.R
+# shared with the causal-inference tests, which never adopted it.
+generateXY <- function(
+    seed = 1,
+    numSamples = 10,
+    numFeatures = 10,
+    xRownames = TRUE,
+    yRownames = TRUE
+) {
+    set.seed(seed)
+    X <- scale(
+        matrix(rnorm(numSamples * numFeatures), nrow = numSamples),
+        center = TRUE,
+        scale = TRUE
+    )
+
+    if (xRownames) {
+        rownames(X) <- paste0("sample", seq_len(numSamples))
+    } else {
+        rownames(X) <- NULL
+    }
+
+    beta <- rep(0, numFeatures)
+    beta[1:4] <- 1
+    y <- X %*% beta + rnorm(numSamples)
+    y <- matrix(y, nrow = numSamples, ncol = 1)
+    if (yRownames) {
+        rownames(y) <- paste0("sample", seq_len(numSamples))
+    } else {
+        rownames(y) <- NULL
+    }
+    colnames(y) <- c("Outcome")
+
+    return(list(X = X, Y = y))
+}
 
 test_that(".twas_method_lookup: 'default' preset returns 10 methods", {
     result <- pecotmr:::.twasMethodLookup("default")
@@ -176,7 +212,7 @@ test_that(".twas_method_lookup: all DPR variants can coexist", {
 # ===========================================================================
 
 test_that("twasPredict: basic matrix multiplication is correct", {
-    d <- make_data(n = 20, p = 5)
+    d <- makeData(n = 20, p = 5)
     set.seed(99)
     w <- matrix(runif(5), ncol = 1)
     rownames(w) <- colnames(d$X)
@@ -188,7 +224,7 @@ test_that("twasPredict: basic matrix multiplication is correct", {
 })
 
 test_that("twasPredict: multiple weight methods in list", {
-    d <- make_data(n = 20, p = 5)
+    d <- makeData(n = 20, p = 5)
     w1 <- matrix(c(1, 0, 0, 0, 0), ncol = 1)
     w2 <- matrix(c(0, 0, 0, 0, 1), ncol = 1)
     wl <- list(method_a_weights = w1, method_b_weights = w2)
@@ -226,7 +262,7 @@ test_that("twasPredict: names without _weights suffix are kept unchanged", {
 })
 
 test_that("twasPredict: single column Y dimension preserved", {
-    d <- make_data(n = 10, p = 4)
+    d <- makeData(n = 10, p = 4)
     w <- matrix(rep(0.25, 4), ncol = 1)
     wl <- list(avg_weights = w)
     res <- twasPredict(d$X, wl)
@@ -263,7 +299,7 @@ test_that("twasPredict: zero weights give zero predictions", {
 # ===========================================================================
 
 test_that("twasWeights: X must be a matrix", {
-    d <- make_data()
+    d <- makeData()
     expect_error(
         learnTwasWeights(as.data.frame(d$X), d$Y, weightMethods = list()),
         "X.*Must be of type 'matrix'"
@@ -271,7 +307,7 @@ test_that("twasWeights: X must be a matrix", {
 })
 
 test_that("twasWeights: Y must be a matrix or vector", {
-    d <- make_data()
+    d <- makeData()
     # In R, is.vector(list(...)) returns TRUE, so a list passes the initial
     # type check and gets converted via matrix(). The resulting matrix has
     # 1 row which mismatches X's 50 rows, triggering the row count error.
@@ -282,7 +318,7 @@ test_that("twasWeights: Y must be a matrix or vector", {
 })
 
 test_that("twasWeights: Y as vector gets converted to matrix internally", {
-    d <- make_data()
+    d <- makeData()
     y_vec <- as.numeric(d$Y)
 
     # Mock lassoWeights (an existing package function) to return trivial weights
@@ -292,7 +328,7 @@ test_that("twasWeights: Y as vector gets converted to matrix internally", {
     result <- learnTwasWeights(
         d$X,
         y_vec,
-        weightMethods = list(lassoWeights = list())
+        weightMethods = list(lasso_weights = list())
     )
     expect_true(is(result, "TwasWeights"))
     expect_equal(length(getMethodNames(result)), 1)
@@ -305,7 +341,7 @@ test_that("twasWeights: Y as vector gets converted to matrix internally", {
 })
 
 test_that("twasWeights: mismatched row counts error", {
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     Y_short <- d$Y[1:30, , drop = FALSE]
     expect_error(
         learnTwasWeights(d$X, Y_short, weightMethods = list()),
@@ -314,7 +350,7 @@ test_that("twasWeights: mismatched row counts error", {
 })
 
 test_that("twasWeights: character weight_methods input is accepted", {
-    d <- make_data()
+    d <- makeData()
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0, ncol(X))
     )
@@ -325,7 +361,7 @@ test_that("twasWeights: character weight_methods input is accepted", {
 })
 
 test_that("twasWeights: zero variance columns are filtered and padded back with zeros", {
-    d <- make_data(n = 50, p = 10, add_zero_var_col = TRUE)
+    d <- makeData(n = 50, p = 10, add_zero_var_col = TRUE)
     p_with_extra <- ncol(d$X) # 11 columns, last is zero-var
 
     local_mocked_bindings(
@@ -338,7 +374,7 @@ test_that("twasWeights: zero variance columns are filtered and padded back with 
     result <- learnTwasWeights(
         d$X,
         d$Y,
-        weightMethods = list(lassoWeights = list())
+        weightMethods = list(lasso_weights = list())
     )
 
     # The returned weight matrix should have rows equal to total columns (including zero-var)
@@ -351,7 +387,7 @@ test_that("twasWeights: zero variance columns are filtered and padded back with 
 })
 
 test_that("twasWeights: rownames of result match colnames of X", {
-    d <- make_data()
+    d <- makeData()
     local_mocked_bindings(
         enetWeights = function(X, y, ...) rep(0.1, ncol(X))
     )
@@ -367,7 +403,7 @@ test_that("twasWeights: rownames of result match colnames of X", {
 })
 
 test_that("twasWeights: result dimensions match ncol(X) x ncol(Y)", {
-    d <- make_data()
+    d <- makeData()
     local_mocked_bindings(
         enetWeights = function(X, y, ...) rep(0, ncol(X))
     )
@@ -383,7 +419,7 @@ test_that("twasWeights: result dimensions match ncol(X) x ncol(Y)", {
 })
 
 test_that("twasWeights: multiple methods return named list with one entry per method", {
-    d <- make_data()
+    d <- makeData()
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0.1, ncol(X)),
         enetWeights = function(X, y, ...) rep(0.2, ncol(X))
@@ -391,7 +427,7 @@ test_that("twasWeights: multiple methods return named list with one entry per me
     result <- learnTwasWeights(
         d$X,
         d$Y,
-        weightMethods = list(lassoWeights = list(), enetWeights = list())
+        weightMethods = list(lasso_weights = list(), enetWeights = list())
     )
     expect_equal(length(getMethodNames(result)), 2)
     expect_true("lasso" %in% getMethodNames(result))
@@ -406,11 +442,11 @@ test_that("twasWeights: multiple methods return named list with one entry per me
 
 test_that("twasWeights: lassoWeights produces correct structure with real glmnet", {
     skip_if_not_installed("glmnet")
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     result <- learnTwasWeights(
         d$X,
         d$Y,
-        weightMethods = list(lassoWeights = list())
+        weightMethods = list(lasso_weights = list())
     )
 
     expect_true(is(result, "TwasWeights"))
@@ -423,7 +459,7 @@ test_that("twasWeights: lassoWeights produces correct structure with real glmnet
 
 test_that("twasWeights: enetWeights produces correct structure with real glmnet", {
     skip_if_not_installed("glmnet")
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     result <- learnTwasWeights(
         d$X,
         d$Y,
@@ -442,14 +478,14 @@ test_that("twasWeights: enetWeights produces correct structure with real glmnet"
 # ===========================================================================
 
 test_that("twasWeightsCv: NULL weight_methods returns only samplePartition", {
-    d <- make_data()
+    d <- makeData()
     result <- twasWeightsCv(d$X, d$Y, fold = 3, weightMethods = NULL)
     expect_equal(names(result), "samplePartition")
     expect_true(is.data.frame(result$samplePartition))
 })
 
 test_that("twasWeightsCv: samplePartition structure is correct", {
-    d <- make_data()
+    d <- makeData()
     result <- twasWeightsCv(d$X, d$Y, fold = 5, weightMethods = NULL)
     sp <- result$samplePartition
 
@@ -462,7 +498,7 @@ test_that("twasWeightsCv: samplePartition structure is correct", {
 })
 
 test_that("twasWeightsCv: character weight_methods are accepted", {
-    d <- make_data()
+    d <- makeData()
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0, ncol(X))
     )
@@ -483,14 +519,14 @@ test_that("twasWeightsCv: character weight_methods are accepted", {
 
 test_that("twasWeightsCv: basic CV with lassoWeights produces correct metrics structure", {
     skip_if_not_installed("glmnet")
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
 
     set.seed(123)
     result <- twasWeightsCv(
         d$X,
         d$Y,
         fold = 3,
-        weightMethods = list(lassoWeights = list())
+        weightMethods = list(lasso_weights = list())
     )
 
     # Structure checks
@@ -522,7 +558,7 @@ test_that("twasWeightsCv: basic CV with lassoWeights produces correct metrics st
 
 test_that("twasWeightsCv: multiple real methods produce per-method metrics", {
     skip_if_not_installed("glmnet")
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
 
     set.seed(99)
     result <- twasWeightsCv(
@@ -550,7 +586,7 @@ test_that("twasWeightsCv: multiple real methods produce per-method metrics", {
 # ===========================================================================
 
 test_that("twasWeightsCv: multivariate Y with multiple columns", {
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     # Create multi-column Y
     set.seed(42)
     Y_multi <- cbind(
@@ -568,7 +604,7 @@ test_that("twasWeightsCv: multivariate Y with multiple columns", {
         d$X,
         Y_multi,
         fold = 2,
-        weightMethods = list(lassoWeights = list())
+        weightMethods = list(lasso_weights = list())
     )
 
     pred <- result$prediction[["lasso_predicted"]]
@@ -590,7 +626,7 @@ test_that("learnTwasWeights refuses the susie + susieInf pair without fits", {
     # The chained susieInf -> susie fit lives in fineMappingPipeline() now;
     # learnTwasWeights never fine-maps, so the pair is an error here.
     # fitSusieInfThenSusie() itself is covered in test_fineMappingWrappers.R.
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     expect_error(
         learnTwasWeights(
             d$X,
@@ -608,7 +644,7 @@ test_that("learnTwasWeights refuses the susie + susieInf pair without fits", {
 test_that("learnTwasWeights resolves fits under camelCase method names", {
     # `susieWeights` and `susie_weights` name the same method; a fit supplied
     # for one spelling must land on the other's arguments too.
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     seen <- NULL
     local_mocked_bindings(
         susieWeights = function(X, y, susieFit = NULL, ...) {
@@ -619,15 +655,15 @@ test_that("learnTwasWeights resolves fits under camelCase method names", {
     learnTwasWeights(
         d$X,
         as.numeric(d$Y),
-        weightMethods = list(susieWeights = list()),
-        fittedModels = list(susie = make_fake_susie_fit(p = 10, L = 5))
+        weightMethods = list(susie_weights = list()),
+        fittedModels = list(susie = makeFakeSusieFit(p = 10, L = 5))
     )
     expect_true("susie" %in% class(seen))
 })
 
 
 test_that("learnTwasWeights runs susie + susieInf from supplied fits", {
-    d <- make_data(n = 50, p = 10)
+    d <- makeData(n = 50, p = 10)
     local_mocked_bindings(
         susieInfWeights = function(X, y, ...) rep(0, ncol(X)),
         susieWeights = function(X, y, ...) rep(0, ncol(X))
@@ -640,8 +676,8 @@ test_that("learnTwasWeights runs susie + susieInf from supplied fits", {
             susie_inf_weights = list()
         ),
         fittedModels = list(
-            susie = make_fake_susie_fit(p = 10, L = 5),
-            susieInf = make_fake_susie_fit(p = 10, L = 7, inf = TRUE)
+            susie = makeFakeSusieFit(p = 10, L = 5),
+            susieInf = makeFakeSusieFit(p = 10, L = 7, inf = TRUE)
         )
     )
     expect_equal(getMethodNames(result), c("susie", "susie_inf"))
@@ -673,7 +709,7 @@ test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", 
         X,
         Y,
         fold = 2,
-        weightMethods = list(lassoWeights = list())
+        weightMethods = list(lasso_weights = list())
     )
     perf <- result$performance[["lasso_performance"]]
     # NA-removal branch ran; metrics should be finite (not all-NA)
@@ -780,7 +816,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
 # ===========================================================================
 
 test_that("twasWeightsCv is reproducible with seed", {
-    sim <- generate_X_Y(seed = 1)
+    sim <- generateXY(seed = 1)
     X <- sim$X
     y <- sim$Y
     local_mocked_bindings(
@@ -809,14 +845,14 @@ test_that("twasWeightsCv is reproducible with seed", {
 
 
 test_that("twasWeightsCv handles errors appropriately", {
-    sim <- generate_X_Y(seed = 1)
+    sim <- generateXY(seed = 1)
     X <- sim$X
     y <- sim$Y
     local_mocked_bindings(
         susieWeights = function(X, y, ...) rnorm(ncol(X)),
         glmnetWeights = function(X, y, ...) runif(ncol(X))
     )
-    weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
+    weight_methods_test <- list(susie = list(), glmnetWeights = list())
     expect_error(twasWeightsCv(X, y, fold = NULL), "fold.*samplePartitions")
     expect_error(
         twasWeightsCv(X, y, fold = "invalid"),
@@ -838,14 +874,14 @@ test_that("twasWeightsCv handles errors appropriately", {
 
 
 test_that("learnTwasWeights handles errors appropriately", {
-    sim <- generate_X_Y(seed = 1)
+    sim <- generateXY(seed = 1)
     X <- sim$X
     y <- sim$Y
     local_mocked_bindings(
         susieWeights = function(X, y, ...) rnorm(ncol(X)),
         glmnetWeights = function(X, y, ...) runif(ncol(X))
     )
-    weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
+    weight_methods_test <- list(susie = list(), glmnetWeights = list())
     expect_error(
         learnTwasWeights(
             matrix(rnorm(4, nrow = 2)),
@@ -1355,8 +1391,8 @@ test_that(".resolveMethodFunction: unresolvable key falls back to the key itself
 # ===========================================================================
 
 test_that(".prepareSusieWeightMethods writes supplied fits onto the method args", {
-    infFit <- make_fake_susie_fit(p = 8, L = 3, inf = TRUE)
-    susieFit <- make_fake_susie_fit(p = 8, L = 5)
+    infFit <- makeFakeSusieFit(p = 8, L = 3, inf = TRUE)
+    susieFit <- makeFakeSusieFit(p = 8, L = 5)
 
     wm <- pecotmr:::.prepareSusieWeightMethods(
         weightMethods = list(
@@ -1381,8 +1417,8 @@ test_that(".prepareSusieWeightMethods writes supplied fits onto the method args"
 # ===========================================================================
 
 test_that("twasWeightsCv: warns when no random seed has been set", {
-    d <- make_data(n = 20, p = 5)
-    # make_data() set a seed; drop it just before the call so the unset-seed
+    d <- makeData(n = 20, p = 5)
+    # makeData() set a seed; drop it just before the call so the unset-seed
     # branch (verbose>=1) is exercised. The fold-sampling at line ~713 restores
     # .Random.seed afterwards, so later tests are unaffected.
     if (exists(".Random.seed", envir = .GlobalEnv)) {
@@ -1483,7 +1519,7 @@ test_that("twasWeightsCv forwards fitRetention to a fitter that takes it", {
 })
 
 test_that("twasWeightsCv: univariate fitter runs under verbose=2 (no quiet wrapper)", {
-    d <- make_data(n = 30, p = 6)
+    d <- makeData(n = 30, p = 6)
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) {
             w <- rep(0, ncol(X))
@@ -1496,7 +1532,7 @@ test_that("twasWeightsCv: univariate fitter runs under verbose=2 (no quiet wrapp
         d$X,
         d$Y,
         fold = 2,
-        weightMethods = list(lassoWeights = list()),
+        weightMethods = list(lasso_weights = list()),
         verbose = 2
     ))
     expect_true("prediction" %in% names(result))
@@ -1546,7 +1582,7 @@ test_that("learnTwasWeights: multivariate fitter, fitRetention + verbose=2", {
 test_that("a method that takes no fitRetention is left alone", {
     # Retention is passed only to a weight function that declares it; one
     # that does not keeps nothing, and must not be handed the argument.
-    d <- make_data(n = 30, p = 6)
+    d <- makeData(n = 30, p = 6)
     seen <- NULL
     local_mocked_bindings(
         bayesRWeights = function(X, y, ...) {
@@ -1565,14 +1601,14 @@ test_that("a method that takes no fitRetention is left alone", {
 })
 
 test_that("learnTwasWeights: univariate fitter runs under verbose=2", {
-    d <- make_data(n = 30, p = 6)
+    d <- makeData(n = 30, p = 6)
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0.2, ncol(X))
     )
     result <- suppressMessages(learnTwasWeights(
         d$X,
         d$Y,
-        weightMethods = list(lassoWeights = list()),
+        weightMethods = list(lasso_weights = list()),
         verbose = 2
     ))
     expect_true(is(result, "TwasWeights"))
@@ -1580,7 +1616,7 @@ test_that("learnTwasWeights: univariate fitter runs under verbose=2", {
 })
 
 test_that("learnTwasWeights: parallel weights path (numThreads = 2)", {
-    d <- make_data(n = 30, p = 6)
+    d <- makeData(n = 30, p = 6)
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0.1, ncol(X)),
         enetWeights = function(X, y, ...) rep(0.2, ncol(X))
@@ -1588,7 +1624,7 @@ test_that("learnTwasWeights: parallel weights path (numThreads = 2)", {
     result <- suppressMessages(learnTwasWeights(
         d$X,
         d$Y,
-        weightMethods = list(lassoWeights = list(), enetWeights = list()),
+        weightMethods = list(lasso_weights = list(), enetWeights = list()),
         numThreads = 2
     ))
     expect_true(is(result, "TwasWeights"))
@@ -1732,7 +1768,7 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
 })
 
 test_that("twasWeightsCv: argument guards fire", {
-    d <- generate_X_Y(seed = 1)
+    d <- generateXY(seed = 1)
     base <- list(X = d$X, Y = d$Y, fold = 2, weightMethods = list())
     expect_error(
         exec(
@@ -1767,7 +1803,7 @@ test_that("twasWeightsCv: argument guards fire", {
 })
 
 test_that("learnTwasWeights: argument guards fire", {
-    d <- generate_X_Y(seed = 1)
+    d <- generateXY(seed = 1)
     base <- list(X = d$X, Y = d$Y, weightMethods = list())
     expect_error(
         exec(learnTwasWeights, !!!list_modify(base, !!!list(study = 1L))),
@@ -1885,7 +1921,7 @@ test_that(".twasFoldFit injects the fold's fit under the adapter's fit arg", {
 test_that("twasWeightsCv refuses fold fits from a different partition", {
     skip_if_not_installed("susieR")
     f <- suppressMessages(.twcv_foldFits())
-    wm <- list(susie_weights = list())
+    wm <- list(susie = list())
 
     # (a) no partition at all: a freshly drawn one would score each fold with
     # a fit that saw its held-out samples.
@@ -2012,7 +2048,7 @@ test_that("twasWeightsCv refuses a susie token with no per-fold fits", {
 
 test_that(".twasSusieTokensRequested matches both method spellings", {
     expect_equal(
-        pecotmr:::.twasSusieTokensRequested(list(susie_weights = list())),
+        pecotmr:::.twasSusieTokensRequested(list(susie = list())),
         "susie"
     )
     expect_equal(
@@ -2176,4 +2212,68 @@ test_that("per-class checking rejects a name only the other path accepts", {
             "QtlDataset"
         )
     )
+})
+
+test_that("the TWAS Options registry is derived from each implementation", {
+    # It used to be 18 hand-written token -> constructor pairs, which had to
+    # restate a pairing the implementation already declares through its own
+    # `methodArgs` default. The two paths of one method often reach different
+    # packages, so a second table is a second thing to keep in step.
+    reg <- pecotmr:::.twasMethodCtors()
+    expect_setequal(names(reg), names(pecotmr:::.twasMethodCapabilities))
+    expect_setequal(names(reg), pecotmr:::.twasConfigurableMethods())
+    expect_true(all(map_lgl(reg, is.function)))
+
+    nameOf <- function(f) {
+        if (is.null(f)) {
+            return(NA_character_)
+        }
+        hit <- keep(
+            grep("Options$", getNamespaceExports("pecotmr"), value = TRUE),
+            function(n) identical(get(n, envir = asNamespace("pecotmr")), f)
+        )
+        if (length(hit) > 0L) hit[[1L]] else "?"
+    }
+    # Spot-check the pairs the derivation must reproduce.
+    expect_equal(nameOf(reg$lasso), "GlmnetOptions")
+    expect_equal(nameOf(reg$mcp), "NcvregOptions")
+    expect_equal(nameOf(reg$bayesB), "BglrOptions")
+    # prsCs has no individual implementation, so the path-blind view falls
+    # back to its summary-statistics constructor rather than dropping it.
+    expect_equal(nameOf(reg$prsCs), "PrsCsOptions")
+})
+
+test_that("each method's Options constructor is resolved per input path", {
+    nameOf <- function(f) {
+        if (is.null(f)) {
+            return(NA_character_)
+        }
+        hit <- keep(
+            grep("Options$", getNamespaceExports("pecotmr"), value = TRUE),
+            function(n) identical(get(n, envir = asNamespace("pecotmr")), f)
+        )
+        if (length(hit) > 0L) hit[[1L]] else "?"
+    }
+    # The two paths of one method can reach different PACKAGES, which is why
+    # one constructor per method was never enough.
+    expect_equal(
+        nameOf(pecotmr:::.twasMethodCtorFor("lasso", "QtlDataset")),
+        "GlmnetOptions"
+    )
+    expect_equal(
+        nameOf(pecotmr:::.twasMethodCtorFor("lasso", "QtlSumStats")),
+        "LassosumOptions"
+    )
+    expect_equal(
+        nameOf(pecotmr:::.twasMethodCtorFor("dprGibbs", "QtlSumStats")),
+        "SdprOptions"
+    )
+    expect_equal(
+        nameOf(pecotmr:::.twasMethodCtorFor("mrmash", "QtlSumStats")),
+        "MrmashRssOptions"
+    )
+    # A method that does not run on a path has no constructor there.
+    expect_null(pecotmr:::.twasMethodCtorFor("enet", "QtlSumStats"))
+    expect_null(pecotmr:::.twasMethodCtorFor("prsCs", "QtlDataset"))
+    expect_null(pecotmr:::.twasMethodCtorFor("nosuch", "QtlDataset"))
 })

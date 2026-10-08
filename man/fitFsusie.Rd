@@ -4,7 +4,7 @@
 \alias{fitFsusie}
 \title{Fit fSuSiE on individual-level (X, Y, pos) data}
 \usage{
-fitFsusie(X, Y, pos, methodArgs = fsusieConfig())
+fitFsusie(X, Y, pos, methodArgs = FsusieOptions())
 }
 \arguments{
 \item{X}{Numeric matrix of genotypes (samples x variants).}
@@ -14,7 +14,7 @@ fitFsusie(X, Y, pos, methodArgs = fsusieConfig())
 \item{pos}{Numeric vector of trait positions (length \code{ncol(Y)}).}
 
 \item{methodArgs}{Options forwarded to \code{fsusieR::susiF}, built with
-\code{\link{fsusieConfig}}. A bare list is refused: it cannot be checked
+\code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
 against the engine, so a misspelled option would be silently ignored.}
 }
 \value{
@@ -32,5 +32,5 @@ base <- sin(seq(0, 2 * pi, length.out = nPos))
 Y <- matrix(rep(base, each = n), n, nPos) +
   X[, 1] \%o\% (0.5 * cos(seq(0, pi, length.out = nPos)))
 pos <- seq_len(nPos)
-fitFsusie(X, Y, pos = pos, methodArgs = fsusieConfig(L = 2))
+fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(L = 2))
 }

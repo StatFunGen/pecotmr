@@ -1,3 +1,6 @@
+#' @include MethodParam.R
+NULL
+
 #' Deduplicate and sort genomic regions by chromosome and start position.
 #' @importFrom dplyr distinct arrange
 #' @noRd
@@ -1555,7 +1558,7 @@ loadLdFromGenotype <- function(
 .panelVariantFilter <- function(
     ldSketch,
     variantIds,
-    panelFilterArgs = panelFilterConfig(),
+    panelFilterArgs = PanelFilterParam(),
     label = ".panelVariantFilter"
 ) {
     # .panelCutoffs answers NULL for a filter that would keep everything,
@@ -1598,7 +1601,7 @@ loadLdFromGenotype <- function(
 # The panel-filter cutoffs a pipeline call carries, or NULL when none is set
 # (so the filter short-circuits without touching the panel).
 # @noRd
-.panelCutoffs <- function(panelFilterArgs = panelFilterConfig()) {
+.panelCutoffs <- function(panelFilterArgs = PanelFilterParam()) {
     # NULL fields are how the pipelines spell "not set"; normalise them to the
     # no-op values so the short-circuit below is the only place that decides
     # whether a filter is worth running.
@@ -2585,6 +2588,8 @@ checkLd <- function(
 
 # hclust (single-linkage) LD pruning: keep one representative per |cor| cluster.
 .ldPruneHclust <- function(X, corThres, verbose) {
+    # Engine-call exception: Rfast::cora is a fast drop-in for base cor(), a
+    # numeric primitive rather than an analysis engine.
     p <- ncol(X)
     if (requireNamespace("Rfast", quietly = TRUE)) {
         cor.X <- Rfast::cora(X, large = TRUE)
@@ -2636,13 +2641,13 @@ checkLd <- function(
 #'   holds every sample and variant of \code{X} on one synthetic chromosome,
 #'   so \code{sample.id}, \code{snp.id} and \code{autosome.only} are not
 #'   meaningful selectors here.
-#' @return A \code{MethodConfig} record for
+#' @return A \code{MethodOptions} record for
 #'   \code{ldPruneByCorrelation(methodArgs =)}.
 #' @seealso \code{\link{ldPruneByCorrelation}}
 #' @examples
-#' ldPruningConfig(slide.max.bp = 1e6)
+#' LdPruningOptions(slide.max.bp = 1e6)
 #' @export
-ldPruningConfig <- function(...) {
+LdPruningOptions <- function(...) {
     extra <- list(...)
     .configRefuseOwned(
         extra,
@@ -2652,13 +2657,13 @@ ldPruningConfig <- function(...) {
             ld.threshold = "the caller's `corThres`",
             verbose = "the caller's `verbose`"
         ),
-        "ldPruningConfig"
+        "LdPruningOptions"
     )
-    .newMethodConfig(
+    .newMethodOptions(
         "SNPRelate::snpgdsLDpruning",
         defaults = list(),
         extra = extra,
-        label = "ldPruningConfig",
+        label = "LdPruningOptions",
         engine = "ldPruning"
     )
 }
@@ -2689,7 +2694,7 @@ ldPruningConfig <- function(...) {
 #' @param verbose Logical. If TRUE, print progress messages. Default FALSE.
 #' @param methodArgs Extra arguments for
 #'   \code{SNPRelate::snpgdsLDpruning()}, built with
-#'   \code{\link{ldPruningConfig}} -- the window controls in particular.
+#'   \code{\link{LdPruningOptions}} -- the window controls in particular.
 #'   Only the \code{"snprelate"} backend has an engine to configure, so
 #'   supplying options alongside \code{backend = "hclust"} is an error
 #'   rather than a silent no-op.
@@ -2715,10 +2720,10 @@ ldPruneByCorrelation <- function(
     corThres = 0.8,
     backend = c("hclust", "snprelate"),
     verbose = FALSE,
-    methodArgs = ldPruningConfig()
+    methodArgs = LdPruningOptions()
 ) {
     backend <- arg_match(backend)
-    .assertMethodConfig(methodArgs, "ldPruningConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "LdPruningOptions", "methodArgs")
     if (backend == "snprelate") {
         return(.ldPruneSnprelate(
             X,
@@ -3191,6 +3196,8 @@ enforceDesignFullRank <- function(
 
 # Wrap X as a bigstatsr FBM (pass through if already one).
 .ldClumpFbm <- function(X) {
+    # Engine-call exception: bigstatsr::FBM.code256 builds a file-backed
+    # matrix -- a data structure the clumping step needs, not an engine.
     if (inherits(X, "FBM")) {
         return(X)
     }
@@ -3250,6 +3257,10 @@ ldClumpByScore <- function(
     windowKb = 100 / r2,
     verbose = FALSE
 ) {
+    # Engine-call exception: bigsnpr::snp_clumping is an LD algorithm, and
+    # ld.R is the LD module that owns it -- neither a pipeline nor a wrapper,
+    # and the call's only consumer. A one-function ldWrapper.R would separate
+    # the call from the module whose job it is.
     .ldClumpCheckDeps()
     .ldClumpValidate(X, score, chr, pos)
     if (ncol(X) == 1L) {
@@ -3439,6 +3450,8 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
 
 # Sample correlation (N-1 denominator) via the requested backend.
 .computeLdSample <- function(X, backend) {
+    # Engine-call exception: Rfast::cora stands in for base cor() (see the
+    # backend note below) -- a numeric primitive, not an analysis engine.
     if (backend == "snprelate") {
         return(.computeLdSnprelate(X))
     }
@@ -3742,4 +3755,49 @@ computeLd <- function(
         s >= 1 &&
         e >= s &&
         e <= nVariants
+}
+
+#' @rdname PanelFilterParam
+#' @aliases PanelFilterParam-class
+#' @exportClass PanelFilterParam
+setClass(
+    "PanelFilterParam",
+    contains = "MethodParam",
+    slots = c(
+        mafCutoff = "numeric",
+        macCutoff = "numeric",
+        imissCutoff = "numeric"
+    )
+)
+
+#' @title LD Reference Panel Filtering Options
+#' @description Which of an LD panel's variants are kept before the panel is
+#'   used, as one checked bundle. Narrower than
+#'   \code{\link{GenotypeFilterParam}}: a panel is not a study's genotypes, so
+#'   there is no sample restriction and no variance cutoff, and the
+#'   missingness default is \code{1} (no filter) rather than \code{0}.
+#' @param mafCutoff Minor-allele-frequency floor. Default \code{0}.
+#' @param macCutoff Minor-allele-count floor; the stricter of this and
+#'   \code{mafCutoff} applies, using the panel's own sample count. Default
+#'   \code{0}.
+#' @param imissCutoff Per-variant missingness ceiling. Default \code{1}, which
+#'   filters nothing and lets the allele-frequency sidecar be read instead of
+#'   materializing dosage.
+#' @return A \code{PanelFilterParam} object, a \code{\link{MethodParam}}.
+#' @seealso \code{\link{GenotypeFilterParam}},
+#'   \code{\link{SumstatsFilterParam}}
+#' @examples
+#' PanelFilterParam(mafCutoff = 0.001)
+#' @export
+PanelFilterParam <- function(
+    mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1
+) {
+    new(
+        "PanelFilterParam",
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff
+    )
 }

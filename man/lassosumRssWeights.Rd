@@ -9,7 +9,7 @@ lassosumRssWeights(
   LD,
   s = c(0.2, 0.5, 0.9, 1),
   selection = c("ldQuadratic", "minFbeta"),
-  methodArgs = lassosumConfig()
+  methodArgs = LassosumOptions()
 )
 }
 \arguments{
@@ -26,7 +26,7 @@ sample sizes).}
 \code{"minFbeta"} is retained as an explicit alternative for debugging.}
 
 \item{methodArgs}{Options forwarded to \code{lassosumRss}, built
-with \code{\link{lassosumConfig}}. A bare list is refused: it cannot be
+with \code{\link{LassosumOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

@@ -7,7 +7,7 @@
 CtwasResultEntry(
   finemap = NULL,
   susieAlpha = NULL,
-  param = NULL,
+  groupPriors = NULL,
   regionInfo = NULL
 )
 }
@@ -20,7 +20,8 @@ summary table (\code{ctwas::finemap_regions} \code{finemap_res} shape), or
 (\code{ctwas::finemap_regions} \code{susie_alpha_res} shape) -- the fuller
 cTWAS output retained so the raw run is reconstructable, or \code{NULL}.}
 
-\item{param}{The estimated \code{group_prior} / \code{group_prior_var} for
+\item{groupPriors}{The estimated \code{group_prior} /
+\code{group_prior_var} for
 this run, or \code{NULL}.}
 
 \item{regionInfo}{Per-region metadata, or \code{NULL}.}

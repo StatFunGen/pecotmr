@@ -118,7 +118,7 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
     pipe <- new(
         "FmJointPipeline",
         config = list(
-            credibleSetArgs = credibleSetConfig(
+            credibleSetArgs = CredibleSetParam(
                 includeAllCs = TRUE,
                 perCsColumns = "full"
             ),
@@ -268,7 +268,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
         data = NULL,
         scope = NULL,
         tokens = "mvsusie",
-        args = list(twasWeights = tw)
+        args = list(mrmashPrior = tw)
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L) # per-context rows
@@ -1103,7 +1103,10 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
 test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble entries", {
     set.seed(1)
     g <- .je_ensGroup()
-    pte <- list(lasso = .je_ensEntries(g, 0.85), enet = .je_ensEntries(g, 0.70))
+    pte <- list(
+        lasso_weights = .je_ensEntries(g, 0.85),
+        enet = .je_ensEntries(g, 0.70)
+    )
     ens <- pecotmr:::.twasEnsembleLayer(
         g,
         pte,
@@ -1128,7 +1131,10 @@ test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble en
 test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", {
     set.seed(2)
     g <- .je_ensGroup()
-    pte <- list(lasso = .je_ensEntries(g, 0.85), enet = .je_ensEntries(g, 0.70))
+    pte <- list(
+        lasso_weights = .je_ensEntries(g, 0.85),
+        enet = .je_ensEntries(g, 0.70)
+    )
     ens <- pecotmr:::.twasEnsembleLayer(
         g,
         pte,
@@ -1306,7 +1312,7 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
         pipe,
         "mvsusie",
         list(
-            methodList = list(mvsusie_weights = list()),
+            methodList = list(mvsusie = list()),
             fittedModels = list(mvsusie = list(dummy = TRUE)),
             fineMappingCv = fmCv
         )
@@ -2196,7 +2202,10 @@ test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
 test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
     set.seed(32)
     g <- .je_ensGroup(nCond = 1L)
-    pte <- list(lasso = .je_ensEntries(g, 0.85), enet = .je_ensEntries(g, 0.70))
+    pte <- list(
+        lasso_weights = .je_ensEntries(g, 0.85),
+        enet = .je_ensEntries(g, 0.70)
+    )
     local_mocked_bindings(
         ensembleWeights = function(...) NULL,
         .package = "pecotmr"
@@ -2220,7 +2229,10 @@ test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
 test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's variant ids", {
     set.seed(33)
     g <- .je_ensGroup(nCond = 1L)
-    pte <- list(lasso = .je_ensEntries(g, 0.85), enet = .je_ensEntries(g, 0.70))
+    pte <- list(
+        lasso_weights = .je_ensEntries(g, 0.85),
+        enet = .je_ensEntries(g, 0.70)
+    )
     local_mocked_bindings(
         ensembleWeights = function(
             cvResults,
@@ -2919,10 +2931,10 @@ test_that(".jointTwasCvRequested accepts tokens and method keys alike", {
     )
     # and a named method list, not just a character vector
     expect_true(
-        pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "lasso")
+        pecotmr:::.jointTwasCvRequested(list(lasso = list()), "lasso")
     )
     expect_false(
-        pecotmr:::.jointTwasCvRequested(list(lasso_weights = list()), "susie")
+        pecotmr:::.jointTwasCvRequested(list(lasso = list()), "susie")
     )
     # a multi-word token: `susie_inf_weights` strips to `susie_inf`, which is
     # not the canonical `susieInf`, so suffix-stripping alone misses it

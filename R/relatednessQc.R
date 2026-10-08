@@ -1,3 +1,21 @@
+#' @include MethodParam.R
+NULL
+
+#' @rdname RelatednessColumnsParam
+#' @aliases RelatednessColumnsParam-class
+#' @exportClass RelatednessColumnsParam
+setClass(
+    "RelatednessColumnsParam",
+    contains = "MethodParam",
+    slots = c(
+        iid1 = "character",
+        iid2 = "character",
+        fid1 = "character_OR_NULL",
+        fid2 = "character_OR_NULL",
+        value = "character"
+    )
+)
+
 #' @title Column Names In A Relatedness Table
 #' @description Which columns of the \code{relatedness} data frame hold the
 #'   pair identifiers and the relatedness measure. Built by this constructor
@@ -9,11 +27,11 @@
 #'   \code{NULL} (default) when the table has none.
 #' @param value Column name for the relatedness measure. Default
 #'   \code{"PI_HAT"}.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{RelatednessColumnsParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' relatednessColumns(value = "KINSHIP")
+#' RelatednessColumnsParam(value = "KINSHIP")
 #' @export
-relatednessColumns <- function(
+RelatednessColumnsParam <- function(
     iid1 = "IID1",
     iid2 = "IID2",
     fid1 = NULL,
@@ -22,19 +40,28 @@ relatednessColumns <- function(
 ) {
     # No `...`: every field is pecotmr's own, so R's argument matching is the
     # check and an unknown name is an "unused argument" error.
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            iid1 = iid1,
-            iid2 = iid2,
-            fid1 = fid1,
-            fid2 = fid2,
-            value = value
-        ),
-        extra = list(),
-        label = "relatednessColumns"
+    new(
+        "RelatednessColumnsParam",
+        iid1 = iid1,
+        iid2 = iid2,
+        fid1 = fid1,
+        fid2 = fid2,
+        value = value
     )
 }
+
+#' @rdname RelatednessPruningParam
+#' @aliases RelatednessPruningParam-class
+#' @exportClass RelatednessPruningParam
+setClass(
+    "RelatednessPruningParam",
+    contains = "MethodParam",
+    slots = c(
+        maxComponentSize = "numeric",
+        reduceFraction = "numeric",
+        maxIterations = "numeric"
+    )
+)
 
 #' @title Graph Pre-Pruning Controls For filterRelatedness
 #' @description Bounds on the graph-based pre-pruning that runs before
@@ -45,24 +72,20 @@ relatednessColumns <- function(
 #'   pre-pruning iteration. Default \code{0.05}.
 #' @param maxIterations Maximum plinkQC iterations used to resolve any
 #'   remaining related pairs. Default \code{20}.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{RelatednessPruningParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' relatednessPruning(maxComponentSize = 50L)
+#' RelatednessPruningParam(maxComponentSize = 50L)
 #' @export
-relatednessPruning <- function(
+RelatednessPruningParam <- function(
     maxComponentSize = 20L,
     reduceFraction = 0.05,
     maxIterations = 20L
 ) {
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            maxComponentSize = maxComponentSize,
-            reduceFraction = reduceFraction,
-            maxIterations = maxIterations
-        ),
-        extra = list(),
-        label = "relatednessPruning"
+    new(
+        "RelatednessPruningParam",
+        maxComponentSize = maxComponentSize,
+        reduceFraction = reduceFraction,
+        maxIterations = maxIterations
     )
 }
 
@@ -72,7 +95,7 @@ relatednessPruning <- function(
 #'   function accepts. Names are plinkQC's own and \strong{are checked}
 #'   against \code{plinkQC::relatednessFilter}'s live formals, so the check
 #'   cannot drift from the upstream signature. See
-#'   \code{\link{MethodConfig}} for when checking is not possible.
+#'   \code{\link{MethodOptions}} for when checking is not possible.
 #'
 #'   The pair identifiers, the relatedness column and the threshold are
 #'   \emph{not} settable here: \code{filterRelatedness} derives those from
@@ -86,11 +109,11 @@ relatednessPruning <- function(
 #'   \code{otherCriterion}. Default \code{"IID"}.
 #' @param otherCriterionMeasure Column name for the criterion measure.
 #' @param ... Any other \code{plinkQC::relatednessFilter} argument.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{\link{MethodOptions}} object.
 #' @examples
-#' plinkQcConfig(otherCriterionThDirection = "le")
+#' PlinkQcOptions(otherCriterionThDirection = "le")
 #' @export
-plinkQcConfig <- function(
+PlinkQcOptions <- function(
     otherCriterion = NULL,
     otherCriterionTh = NULL,
     otherCriterionThDirection = "ge",
@@ -98,7 +121,7 @@ plinkQcConfig <- function(
     otherCriterionMeasure = NULL,
     ...
 ) {
-    .newMethodConfig(
+    .newMethodOptions(
         "plinkQC::relatednessFilter",
         defaults = list(
             otherCriterion = otherCriterion,
@@ -108,8 +131,51 @@ plinkQcConfig <- function(
             otherCriterionMeasure = otherCriterionMeasure
         ),
         extra = list(...),
-        label = "plinkQcConfig",
+        label = "PlinkQcOptions",
         engine = "plinkQC::relatednessFilter"
+    )
+}
+
+# Phases 2 and 3 of filterRelatedness: plinkQC-based filtering (which
+# depends on the analysis type) followed by iterative cleanup. They share
+# the injected plinkQC arguments, which is why they sit together -- the
+# pair columns and the threshold are pecotmr's own, since the graph pruning
+# in phase 1 reads the same values, so they are injected rather than left
+# settable in `plinkQc`.
+# @noRd
+.relatednessFilterAndClean <- function(
+    kin,
+    plinkQcArgs,
+    relatednessThreshold,
+    columns,
+    verbose,
+    analysisType,
+    phenoData,
+    phenoCol,
+    pruning
+) {
+    pqArgs <- .relatednessBuildPlinkQcArgs(
+        plinkQcArgs,
+        relatednessThreshold,
+        columns,
+        verbose
+    )
+    filtered <- .relatednessPhase2(
+        kin,
+        pqArgs,
+        analysisType,
+        phenoData,
+        phenoCol,
+        columns
+    )
+    .relatednessIterativeCleanup(
+        filtered$kin,
+        filtered$allExclude,
+        pqArgs,
+        pruning,
+        verbose,
+        columns,
+        relatednessThreshold
     )
 }
 
@@ -129,39 +195,39 @@ plinkQcConfig <- function(
 #'   studies.
 #' @param columns Which columns of \code{relatedness} hold the pair
 #'   identifiers and the relatedness measure. Build with
-#'   \code{\link{relatednessColumns}}.
+#'   \code{\link{RelatednessColumnsParam}}.
 #' @param phenoData A data.frame with columns \code{IID} and the column named by
 #'   \code{phenoCol}. Required when \code{analysisType = "maximizeCases"}.
 #' @param phenoCol Column name for the phenotype (default "pheno"). Expected to
 #'   be binary (1 = case, 0 = control).
 #' @param pruning Bounds on the graph pre-pruning and the iterative cleanup.
-#'   Build with \code{\link{relatednessPruning}}.
+#'   Build with \code{\link{RelatednessPruningParam}}.
 #' @param plinkQcArgs Additional arguments forwarded to
 #'   \code{plinkQC::relatednessFilter}. Build with
-#'   \code{\link{plinkQcConfig}}.
+#'   \code{\link{PlinkQcOptions}}.
 #' @param verbose Logical, print progress messages (default FALSE).
 #' @return A character vector of individual IDs to exclude.
 #' @examples
 #' rel <- data.frame(IID1 = c("s1", "s2"), IID2 = c("s2", "s3"),
 #'   value = c(0.5, 0.1))
 #' filterRelatedness(rel, relatednessThreshold = 0.2,
-#'   columns = relatednessColumns(value = "value"))
+#'   columns = RelatednessColumnsParam(value = "value"))
 #' @export
 filterRelatedness <- function(
     relatedness,
     relatednessThreshold = 0.0625,
     analysisType = c("maximizeUnrelated", "maximizeCases"),
-    columns = relatednessColumns(),
+    columns = RelatednessColumnsParam(),
     phenoData = NULL,
     phenoCol = "pheno",
-    pruning = relatednessPruning(),
-    plinkQcArgs = plinkQcConfig(),
+    pruning = RelatednessPruningParam(),
+    plinkQcArgs = PlinkQcOptions(),
     verbose = FALSE
 ) {
     .relatednessRequirePackages()
-    .assertMethodConfig(columns, "relatednessColumns", "columns")
-    .assertMethodConfig(pruning, "relatednessPruning", "pruning")
-    .assertMethodConfig(plinkQcArgs, "plinkQcConfig", "plinkQc")
+    .assertMethodParam(columns, "RelatednessColumnsParam", "columns")
+    .assertMethodParam(pruning, "RelatednessPruningParam", "pruning")
+    .assertMethodOptions(plinkQcArgs, "PlinkQcOptions", "plinkQc")
     analysisType <- arg_match(analysisType)
     relatedness <- as_tibble(relatedness)
     if (analysisType == "maximizeCases" && is.null(phenoData)) {
@@ -176,33 +242,16 @@ filterRelatedness <- function(
         verbose
     )
     kin <- .relatednessRemovePruned(relatedness, highRelatedIndiv, columns)
-    # Phase 2: plinkQC-based filtering (analysis-type dependent). The pair
-    # columns and the threshold are pecotmr's own -- the graph pruning above
-    # reads the same values -- so they are injected rather than settable in
-    # `plinkQc`.
-    pqArgs <- .relatednessBuildPlinkQcArgs(
-        plinkQcArgs,
-        relatednessThreshold,
-        columns,
-        verbose
-    )
-    filtered <- .relatednessPhase2(
+    cleaned <- .relatednessFilterAndClean(
         kin,
-        pqArgs,
-        analysisType,
-        phenoData,
-        phenoCol,
-        columns
-    )
-    # Phase 3: iterative cleanup + combine with the graph-pruned individuals.
-    cleaned <- .relatednessIterativeCleanup(
-        filtered$kin,
-        filtered$allExclude,
-        pqArgs,
-        pruning,
-        verbose,
-        columns,
-        relatednessThreshold
+        plinkQcArgs = plinkQcArgs,
+        relatednessThreshold = relatednessThreshold,
+        columns = columns,
+        verbose = verbose,
+        analysisType = analysisType,
+        phenoData = phenoData,
+        phenoCol = phenoCol,
+        pruning = pruning
     )
     allExclude <- unique(c(cleaned, highRelatedIndiv))
     .relatednessReport(allExclude, verbose, relatednessThreshold)
@@ -355,7 +404,7 @@ filterRelatedness <- function(
 ) {
     # pecotmr's own settings translated into plinkQC's spelling, then the
     # user's own plinkQC arguments on top. The user cannot reach the derived
-    # names: plinkQcConfig() would have rejected a duplicate anyway, and these
+    # names: PlinkQcOptions() would have rejected a duplicate anyway, and these
     # must agree with what the graph pruning used.
     derived <- list(
         relatednessTh = relatednessThreshold,
@@ -383,6 +432,17 @@ filterRelatedness <- function(
     c(derived, user)
 }
 
+# The kinship pairs whose BOTH members are in `ids` -- the repeated
+# "restrict the relatedness graph to this set" step.
+# @noRd
+.relatednessKinWithin <- function(kin, ids, columns) {
+    filter(
+        kin,
+        is_in(.data[[columns$iid1]], ids) &
+            is_in(.data[[columns$iid2]], ids)
+    )
+}
+
 # maximizeCases: preserve cases, preferentially remove controls. Returns
 # list(allExclude, kin) (kin is restricted to phenotyped individuals).
 # @noRd
@@ -405,17 +465,9 @@ filterRelatedness <- function(
     relatedControls <- related |>
         filter(.data[[phenoCol]] == 0) |>
         pull("IID")
-    kin <- filter(
-        kin,
-        is_in(.data[[iid1Col]], related$IID) &
-            is_in(.data[[iid2Col]], related$IID)
-    )
+    kin <- .relatednessKinWithin(kin, related$IID, columns)
     # Step 1: filter among cases.
-    caseKin <- filter(
-        kin,
-        is_in(.data[[iid1Col]], relatedCases) &
-            is_in(.data[[iid2Col]], relatedCases)
-    )
+    caseKin <- .relatednessKinWithin(kin, relatedCases, columns)
     relCases <- .relatednessRunPlinkQc(caseKin, pqArgs)
     casesKeep <- setdiff(relatedCases, relCases$IID)
     # Step 2: remove controls related to retained cases.
@@ -427,11 +479,7 @@ filterRelatedness <- function(
     )
     # Step 3: filter among the remaining controls.
     controlsKeep <- setdiff(relatedControls, controlsExclude)
-    controlKin <- filter(
-        kin,
-        is_in(.data[[iid1Col]], controlsKeep) &
-            is_in(.data[[iid2Col]], controlsKeep)
-    )
+    controlKin <- .relatednessKinWithin(kin, controlsKeep, columns)
     relControls <- .relatednessRunPlinkQc(controlKin, pqArgs)
     list(
         allExclude = c(relCases$IID, controlsExclude, relControls$IID),
@@ -568,6 +616,9 @@ filterRelatedness <- function(
 # (`args`), returning its $failIDs.
 # @noRd
 .relatednessRunPlinkQc <- function(relDf, args) {
+    # Engine-call exception: plinkQC::relatednessFilter is the external tool
+    # this module exists to drive. relatednessQc.R is a topical module rather
+    # than a pipeline, and nothing else calls it.
     # plinkQC requires a base data.frame (it sets row names on the input).
     rfArgs <- c(list(relatedness = as.data.frame(relDf)), as.list(args))
     exec(plinkQC::relatednessFilter, !!!rfArgs)$failIDs

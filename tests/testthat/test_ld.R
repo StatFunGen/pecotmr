@@ -2,7 +2,7 @@ context("LD")
 library(tidyverse)
 
 # Helper: build an LdData S4 object from variant IDs and optional correlation matrix
-make_test_ld_data <- function(variant_ids, R = NULL, blockMetadata = NULL) {
+makeTestLdData <- function(variant_ids, R = NULL, blockMetadata = NULL) {
     if (is.null(R)) {
         p <- length(variant_ids)
         R <- diag(p)
@@ -30,7 +30,7 @@ make_test_ld_data <- function(variant_ids, R = NULL, blockMetadata = NULL) {
     )
 }
 
-generate_dummy_data <- function() {
+generateDummyData <- function() {
     region <- data.frame(
         chrom = "chr1",
         start = c(1000),
@@ -52,7 +52,7 @@ generate_dummy_data <- function() {
 }
 
 # Generate a wider region that spans multiple blocks for partition testing
-generate_multi_block_data <- function() {
+generateMultiBlockData <- function() {
     region <- data.frame(
         chrom = "chr1",
         start = c(1000),
@@ -74,7 +74,7 @@ generate_multi_block_data <- function() {
 }
 
 test_that("Check that we correctly retrieve the names from the matrix", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -100,7 +100,7 @@ test_that("Check that we correctly retrieve the names from the matrix", {
 })
 
 test_that("Check that the LD block contains the correct information", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -138,7 +138,7 @@ test_that("Check that the LD block contains the correct information", {
 # ---- partitionLdMatrix ----
 
 test_that("partitionLdMatrix correctly partitions a single block", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -173,7 +173,7 @@ test_that("partitionLdMatrix correctly partitions a single block", {
 })
 
 test_that("partitionLdMatrix correctly partitions multiple blocks", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -209,7 +209,7 @@ test_that("partitionLdMatrix correctly partitions multiple blocks", {
 })
 
 test_that("partitionLdMatrix properly merges small blocks", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -252,7 +252,7 @@ test_that("partitionLdMatrix properly merges small blocks", {
 })
 
 test_that("partitionLdMatrix respects max_merged_block_size", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -305,7 +305,7 @@ test_that("partitionLdMatrix handles empty matrix gracefully", {
 })
 
 test_that("partitionLdMatrix validates block structure properly", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -360,7 +360,7 @@ test_that("partitionLdMatrix validates block structure properly", {
 })
 
 test_that("partitionLdMatrix properly maps variants to blocks", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -393,7 +393,7 @@ test_that("partitionLdMatrix properly maps variants to blocks", {
 })
 
 test_that("partitionLdMatrix handles row/column name mismatches", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -433,7 +433,7 @@ test_that("partitionLdMatrix handles row/column name mismatches", {
 })
 
 test_that("partitionLdMatrix correctly extracts blocks based on metadata", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -508,7 +508,7 @@ test_that("partitionLdMatrix partitions correctly with synthetic data", {
         stringsAsFactors = FALSE
     )
 
-    ld_data <- make_test_ld_data(variant_ids, R = mat, blockMetadata = bm)
+    ld_data <- makeTestLdData(variant_ids, R = mat, blockMetadata = bm)
 
     result <- pecotmr:::partitionLdMatrix(ld_data, mergeSmallBlocks = FALSE)
 
@@ -685,7 +685,7 @@ test_that("partitionLdMatrix handles blocks with different chromosomes", {
         stringsAsFactors = FALSE
     )
 
-    test_ld_data <- make_test_ld_data(
+    test_ld_data <- makeTestLdData(
         variant_ids,
         R = test_matrix,
         blockMetadata = blockMetadata
@@ -760,7 +760,7 @@ test_that("partitionLdMatrix works with edge case block structures", {
         stringsAsFactors = FALSE
     )
 
-    test_ld_data <- make_test_ld_data(
+    test_ld_data <- makeTestLdData(
         variantNames,
         R = test_matrix,
         blockMetadata = blockMetadata
@@ -1049,7 +1049,7 @@ test_that("mergeBlocks properly handles blocks at chromosome boundaries", {
         stringsAsFactors = FALSE
     )
 
-    test_ld_data <- make_test_ld_data(
+    test_ld_data <- makeTestLdData(
         variantNames,
         R = test_matrix,
         blockMetadata = blockMetadata
@@ -4082,12 +4082,12 @@ test_that(".panelVariantFilter drops panel-rare variants", {
     loose <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(mafCutoff = 0.05)
+        PanelFilterParam(mafCutoff = 0.05)
     )
     tight <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(mafCutoff = 0.2)
+        PanelFilterParam(mafCutoff = 0.2)
     )
     expect_lt(length(loose), length(ids))
     expect_lt(length(tight), length(loose))
@@ -4105,12 +4105,12 @@ test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
     byMac <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(macCutoff = 0.1 * 2 * nSamp)
+        PanelFilterParam(macCutoff = 0.1 * 2 * nSamp)
     )
     byMaf <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(mafCutoff = 0.1)
+        PanelFilterParam(mafCutoff = 0.1)
     )
     expect_identical(byMac, byMaf)
     # The stricter of the two wins.
@@ -4118,9 +4118,9 @@ test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
         .panelVariantFilter(
             handle,
             ids,
-            panelFilterConfig(mafCutoff = 0.2, macCutoff = 2)
+            PanelFilterParam(mafCutoff = 0.2, macCutoff = 2)
         ),
-        .panelVariantFilter(handle, ids, panelFilterConfig(mafCutoff = 0.2))
+        .panelVariantFilter(handle, ids, PanelFilterParam(mafCutoff = 0.2))
     )
 })
 
@@ -4131,12 +4131,12 @@ test_that(".panelVariantFilter drops high-missingness variants", {
     strict <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(imissCutoff = 0)
+        PanelFilterParam(imissCutoff = 0)
     )
     expect_lt(length(strict), length(ids))
     # A cutoff above the panel's worst variant keeps everything.
     expect_identical(
-        .panelVariantFilter(handle, ids, panelFilterConfig(imissCutoff = 1)),
+        .panelVariantFilter(handle, ids, PanelFilterParam(imissCutoff = 1)),
         ids
     )
 })
@@ -4154,7 +4154,7 @@ test_that(".panelVariantFilter passes through ids absent from the panel", {
         .panelVariantFilter(
             handle,
             withGhost,
-            panelFilterConfig(mafCutoff = 0.001)
+            PanelFilterParam(mafCutoff = 0.001)
         )
     ))
 })
@@ -4166,7 +4166,7 @@ test_that(".panelVariantFilter handles empty and NULL input", {
         .panelVariantFilter(
             handle,
             character(0),
-            panelFilterConfig(mafCutoff = 0.1)
+            PanelFilterParam(mafCutoff = 0.1)
         ),
         0L
     )
@@ -4174,7 +4174,7 @@ test_that(".panelVariantFilter handles empty and NULL input", {
         .panelVariantFilter(
             NULL,
             "chr1:1:A:G",
-            panelFilterConfig(mafCutoff = 0.1)
+            PanelFilterParam(mafCutoff = 0.1)
         ),
         "chr1:1:A:G"
     )
@@ -4185,17 +4185,17 @@ test_that(".panelCutoffs short-circuits when no cutoff is set", {
     # NULL means the panel is never touched, which is what keeps the default
     # path free of an extra dosage read.
     expect_null(.panelCutoffs())
-    expect_null(.panelCutoffs(panelFilterConfig(
+    expect_null(.panelCutoffs(PanelFilterParam(
         mafCutoff = 0,
         macCutoff = 0,
         imissCutoff = 1
     )))
     expect_equal(
-        .panelCutoffs(panelFilterConfig(mafCutoff = 0.01))$mafCutoff,
+        .panelCutoffs(PanelFilterParam(mafCutoff = 0.01))$mafCutoff,
         0.01
     )
     expect_equal(
-        .panelCutoffs(panelFilterConfig(imissCutoff = 0.5))$imissCutoff,
+        .panelCutoffs(PanelFilterParam(imissCutoff = 0.5))$imissCutoff,
         0.5
     )
 })
@@ -4247,7 +4247,7 @@ test_that(".panelVariantFilter: .afreq and dosage agree on what to drop", {
     viaAfreq <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(mafCutoff = 0.2)
+        PanelFilterParam(mafCutoff = 0.2)
     )
     # Force the dosage path by hiding the sidecar from the fast path.
     local_mocked_bindings(
@@ -4257,7 +4257,7 @@ test_that(".panelVariantFilter: .afreq and dosage agree on what to drop", {
     viaDosage <- .panelVariantFilter(
         handle,
         ids,
-        panelFilterConfig(mafCutoff = 0.2)
+        PanelFilterParam(mafCutoff = 0.2)
     )
     expect_lt(length(viaAfreq), length(ids))
     expect_identical(viaAfreq, viaDosage)
@@ -4279,7 +4279,7 @@ test_that(".panelVariantFilter uses dosage whenever missingness is capped", {
         .panelVariantFilter(
             handle,
             ids,
-            panelFilterConfig(mafCutoff = 0.2, imissCutoff = 0.5)
+            PanelFilterParam(mafCutoff = 0.2, imissCutoff = 0.5)
         )
     )
 })
@@ -4850,7 +4850,7 @@ test_that(".panelVariantFilter is a no-op without a sketch", {
         pecotmr:::.panelVariantFilter(
             NULL,
             v,
-            panelFilterConfig(mafCutoff = 0.01)
+            PanelFilterParam(mafCutoff = 0.01)
         ),
         v
     )
@@ -4858,7 +4858,7 @@ test_that(".panelVariantFilter is a no-op without a sketch", {
         pecotmr:::.panelVariantFilter(
             NULL,
             character(0),
-            panelFilterConfig(mafCutoff = 0.01)
+            PanelFilterParam(mafCutoff = 0.01)
         ),
         character(0)
     )
@@ -4881,7 +4881,7 @@ test_that(".panelVariantFilter is a no-op when nothing matches the panel", {
         pecotmr:::.panelVariantFilter(
             sketch,
             ids,
-            panelFilterConfig(mafCutoff = 0.01)
+            PanelFilterParam(mafCutoff = 0.01)
         ),
         ids
     )
@@ -5168,13 +5168,16 @@ test_that(".ldSketchCheckOverlap is a no-op when a side has no variants", {
     )
 })
 
-test_that("ldPruningConfig refuses what the snprelate backend owns", {
-    expect_error(ldPruningConfig(gdsobj = 1), "the temporary GDS")
-    expect_error(ldPruningConfig(method = "r"), "fixed at 'corr'")
-    expect_error(ldPruningConfig(ld.threshold = 0.5), "the caller's `corThres`")
-    expect_error(ldPruningConfig(verbose = TRUE), "the caller's `verbose`")
-    expect_error(ldPruningConfig(nosuch = 1), "unknown argument")
-    expect_equal(ldPruningConfig(slide.max.bp = 1e6)$slide.max.bp, 1e6)
+test_that("LdPruningOptions refuses what the snprelate backend owns", {
+    expect_error(LdPruningOptions(gdsobj = 1), "the temporary GDS")
+    expect_error(LdPruningOptions(method = "r"), "fixed at 'corr'")
+    expect_error(
+        LdPruningOptions(ld.threshold = 0.5),
+        "the caller's `corThres`"
+    )
+    expect_error(LdPruningOptions(verbose = TRUE), "the caller's `verbose`")
+    expect_error(LdPruningOptions(nosuch = 1), "unknown argument")
+    expect_equal(LdPruningOptions(slide.max.bp = 1e6)$slide.max.bp, 1e6)
 })
 
 test_that("ldPruneByCorrelation refuses options its backend never uses", {
@@ -5184,7 +5187,7 @@ test_that("ldPruneByCorrelation refuses options its backend never uses", {
         ldPruneByCorrelation(
             X,
             backend = "hclust",
-            methodArgs = ldPruningConfig(slide.max.n = 10L)
+            methodArgs = LdPruningOptions(slide.max.n = 10L)
         ),
         "backend 'hclust' does not call"
     )
@@ -5192,7 +5195,7 @@ test_that("ldPruneByCorrelation refuses options its backend never uses", {
     expect_length(ldPruneByCorrelation(X, corThres = 0.9)$filter.id, 5L)
     expect_error(
         ldPruneByCorrelation(X, methodArgs = list(slide.max.n = 10L)),
-        "ldPruningConfig"
+        "LdPruningOptions"
     )
 })
 
@@ -5209,7 +5212,7 @@ test_that("ldPruneByCorrelation forwards methodArgs to SNPRelate", {
             X,
             corThres = 0.9,
             backend = "snprelate",
-            methodArgs = ldPruningConfig(slide.max.n = 3L)
+            methodArgs = LdPruningOptions(slide.max.n = 3L)
         ),
         snpgdsLDpruning = function(...) {
             seen <<- list(...)
@@ -5220,4 +5223,12 @@ test_that("ldPruneByCorrelation forwards methodArgs to SNPRelate", {
     expect_equal(seen$slide.max.n, 3L)
     expect_equal(seen$method, "corr")
     expect_equal(seen$ld.threshold, 0.9)
+})
+
+test_that(".panelCutoffs answers NULL for a filter that keeps everything", {
+    expect_null(pecotmr:::.panelCutoffs(PanelFilterParam()))
+    expect_equal(
+        pecotmr:::.panelCutoffs(PanelFilterParam(mafCutoff = 0.01))$mafCutoff,
+        0.01
+    )
 })

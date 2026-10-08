@@ -192,7 +192,7 @@ test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
         out <- qtlEnrichmentPipeline(
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = qfmr,
-            methodArgs = qtlEnrichmentConfig(impN = 5),
+            methodArgs = QtlEnrichmentParam(impN = 5),
             seed = 1L
         )
     ))
@@ -1071,7 +1071,7 @@ test_that(".enrRunEnrichment turns a stored alignment failure into a warning", {
             gwasPip = NULL,
             k = 1L,
             alignedByTuple = list(cnd),
-            methodArgs = qtlEnrichmentConfig(),
+            methodArgs = QtlEnrichmentParam(),
             numThreads = 1L,
             seed = NULL,
             verbose = FALSE,
@@ -1109,12 +1109,12 @@ test_that(".enrBuildQtlRegionsList reads prior variance under either name", {
 })
 
 # =============================================================================
-# qtlEnrichmentConfig()
+# QtlEnrichmentParam()
 # =============================================================================
 
-test_that("qtlEnrichmentConfig carries the estimator's tunable settings", {
-    a <- qtlEnrichmentConfig()
-    expect_s4_class(a, "MethodConfig")
+test_that("QtlEnrichmentParam carries the estimator's tunable settings", {
+    a <- QtlEnrichmentParam()
+    expect_s4_class(a, "QtlEnrichmentParam")
     # NULL defaults mean "estimate from the data", which qtlEnrichment says by
     # the argument being absent rather than explicitly NULL.
     expect_equal(
@@ -1127,25 +1127,25 @@ test_that("qtlEnrichmentConfig carries the estimator's tunable settings", {
     expect_true(a$besselCorrection)
 })
 
-test_that("qtlEnrichmentConfig forwards numGwas and piQtl once set", {
-    a <- qtlEnrichmentConfig(numGwas = 5000, piQtl = 0.01)
+test_that("QtlEnrichmentParam forwards numGwas and piQtl once set", {
+    a <- QtlEnrichmentParam(numGwas = 5000, piQtl = 0.01)
     expect_equal(a$numGwas, 5000)
     expect_equal(a$piQtl, 0.01)
 })
 
-test_that("qtlEnrichmentConfig rejects a name the estimator has no formal for", {
+test_that("QtlEnrichmentParam rejects a name the estimator has no formal for", {
     # No `...`: R's own argument matching is the check for a bundle pecotmr
     # owns outright.
-    expect_error(qtlEnrichmentConfig(shrinkage = 2), "unused argument")
+    expect_error(QtlEnrichmentParam(shrinkage = 2), "unused argument")
     # alignNames is the pipeline's invariant, not a user setting.
-    expect_error(qtlEnrichmentConfig(alignNames = TRUE), "unused argument")
+    expect_error(QtlEnrichmentParam(alignNames = TRUE), "unused argument")
 })
 
-test_that("every qtlEnrichmentConfig field is a qtlEnrichment formal", {
+test_that("every QtlEnrichmentParam field is a qtlEnrichment formal", {
     # The bundle is spliced straight into qtlEnrichment, so a field it has no
     # formal for would be an error at a call site far from the constructor.
     expect_true(all(
-        names(formals(qtlEnrichmentConfig)) %in% names(formals(qtlEnrichment))
+        names(formals(QtlEnrichmentParam)) %in% names(formals(qtlEnrichment))
     ))
 })
 
@@ -1156,6 +1156,6 @@ test_that("qtlEnrichmentPipeline refuses a bare list for methodArgs", {
             qtlFineMappingResult = NULL,
             methodArgs = list(impN = 5)
         ),
-        "must be built with qtlEnrichmentConfig"
+        "must be built with QtlEnrichmentParam"
     )
 })

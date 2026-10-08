@@ -39,6 +39,18 @@ context("LdData accessors")
     gr
 }
 
+# new("LdData", ...) skips the constructor, so those tests have to supply
+# the block columns the slot now guarantees.
+.ld_makeBlockMetadata <- function(snp_n = 4L) {
+    tibble(
+        blockId = 1L,
+        chrom = "chr1",
+        size = snp_n,
+        startIdx = 1L,
+        endIdx = snp_n
+    )
+}
+
 .ld_mockExtractor <- function(seed, n_samples = 30L) {
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
@@ -171,7 +183,7 @@ test_that("getCorrelation: mixture handles without mixtureWeights errors", {
         correlation = NULL,
         genotypeHandle = list(gh, gh),
         snpIdx = 1:4,
-        blockMetadata = S4Vectors::DataFrame(x = 1),
+        blockMetadata = .ld_makeBlockMetadata(),
         nRef = 0L,
         mixtureWeights = NULL
     )
@@ -190,7 +202,7 @@ test_that("getCorrelation: mixture panels of differing dim error", {
         correlation = NULL,
         genotypeHandle = list(gh_small, gh),
         snpIdx = 1:3,
-        blockMetadata = S4Vectors::DataFrame(x = 1),
+        blockMetadata = .ld_makeBlockMetadata(),
         nRef = 0L,
         mixtureWeights = c(0.5, 0.5)
     )
@@ -243,7 +255,7 @@ test_that("getGenotypes: matrix handle is returned unchanged", {
         correlation = NULL,
         genotypeHandle = X,
         snpIdx = NULL,
-        blockMetadata = S4Vectors::DataFrame(x = 1),
+        blockMetadata = .ld_makeBlockMetadata(),
         nRef = 0L,
         mixtureWeights = NULL
     )
@@ -327,12 +339,19 @@ test_that("getVariantIds returns the variant_id mcol", {
     expect_equal(getVariantIds(ld), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
-test_that("getVariantInfo / getBlockMetadata return slots verbatim", {
+test_that("getVariantInfo returns the variants verbatim", {
     vars <- .ld_makeVariants()
     bm <- S4Vectors::DataFrame(region = "chr1:100-400")
     ld <- LdData(correlation = diag(4), variants = vars, blockMetadata = bm)
     expect_identical(getVariantInfo(ld), vars)
-    expect_identical(getBlockMetadata(ld), bm)
+    # blockMetadata is NOT verbatim: the constructor normalises it to the
+    # columns consumers read. A column the caller added is carried through.
+    got <- getBlockMetadata(ld)
+    expect_true(is.data.frame(got))
+    expect_true(all(
+        c("blockId", "chrom", "size", "startIdx", "endIdx") %in% names(got)
+    ))
+    expect_equal(got$region, "chr1:100-400")
 })
 
 test_that("getRefPanel: assembles the chrom/pos/A1/A2/variant_id data.frame", {
@@ -869,4 +888,143 @@ test_that("an LdData refuses to be subset", {
     ld <- makeTestLdData(n = 3L)
     expect_error(ld[1:2], "an LdData cannot be subset")
     expect_error(ld[1:2, ], "an LdData cannot be subset")
+})
+
+# ===========================================================================
+# blockMetadata normalisation
+# ---------------------------------------------------------------------------
+# Five construction paths used to emit five different column sets, so
+# consumers read startIdx / size / chrom that were present by luck. The
+# constructor now fills whatever is absent and stores one shape.
+# ===========================================================================
+
+.ld_bmCanonical <- c("blockId", "chrom", "size", "startIdx", "endIdx")
+
+test_that("blockMetadata: a bare genomic span is completed from variants", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = S4Vectors::DataFrame(
+            chrom = "chr1",
+            start = 100L,
+            end = 400L
+        )
+    )
+    bm <- getBlockMetadata(ld)
+    expect_true(all(.ld_bmCanonical %in% names(bm)))
+    expect_equal(nrow(bm), 1L)
+    expect_equal(bm$startIdx, 1L)
+    expect_equal(bm$endIdx, 4L)
+    expect_equal(bm$size, 4L)
+    # start/end name the BLOCK's span, so they are stored under the
+    # unambiguous names rather than colliding with a variant position.
+    expect_equal(bm$blockStart, 100L)
+    expect_equal(bm$blockEnd, 400L)
+})
+
+test_that("blockMetadata: a placeholder table means one block, not none", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = data.frame()
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(nrow(bm), 1L)
+    expect_true(all(.ld_bmCanonical %in% names(bm)))
+    expect_equal(bm$size, 4L)
+})
+
+test_that("blockMetadata: a GRanges keeps its mcols over its ranges", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(start = c(100L, 300L), end = c(200L, 400L))
+    )
+    # An LdBlocks-style GRanges carries these in mcols AND in the ranges.
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        blockId = c(1L, 2L),
+        chrom = c("1", "1"),
+        size = c(2L, 2L),
+        startIdx = c(1L, 3L),
+        endIdx = c(2L, 4L)
+    )
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = gr
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(nrow(bm), 2L)
+    # One column per name: binding ranges and mcols both would have left no
+    # column called `chrom` at all.
+    expect_equal(sum(names(bm) == "chrom"), 1L)
+    expect_equal(bm$chrom, c("1", "1"))
+    expect_equal(bm$startIdx, c(1L, 3L))
+})
+
+test_that("blockMetadata: several blocks take their ranges from size", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = tibble(blockId = 1:2, size = c(3L, 1L))
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(bm$startIdx, c(1L, 4L))
+    expect_equal(bm$endIdx, c(3L, 4L))
+    expect_equal(bm$chrom, c("chr1", "chr1"))
+})
+
+test_that("blockMetadata: several blocks with no size and no range error", {
+    expect_error(
+        LdData(
+            correlation = diag(4),
+            variants = .ld_makeVariants(),
+            blockMetadata = tibble(blockId = 1:2)
+        ),
+        "cannot be determined"
+    )
+})
+
+test_that("blockMetadata: half an index range is refused", {
+    expect_error(
+        LdData(
+            correlation = diag(4),
+            variants = .ld_makeVariants(),
+            blockMetadata = tibble(blockId = 1L, startIdx = 1L)
+        ),
+        "both or neither"
+    )
+})
+
+test_that("blockMetadata: supplied indices are never replaced", {
+    # partitionLdMatrix() has to reject an out-of-range block, so the
+    # normaliser must not quietly substitute valid indices.
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = tibble(
+            blockId = 1L,
+            size = 4L,
+            startIdx = 10L,
+            endIdx = 20L
+        )
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(bm$startIdx, 10L)
+    expect_equal(bm$endIdx, 20L)
+    # An out-of-range block has no chromosome to derive.
+    expect_true(is.na(bm$chrom))
+})
+
+test_that("blockMetadata: a caller's own columns are carried through", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = tibble(region = "chr1:100-400", note = "kept")
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(bm$region, "chr1:100-400")
+    expect_equal(bm$note, "kept")
+    # Canonical columns come first so the table reads the same way whatever
+    # the caller supplied.
+    expect_equal(names(bm)[seq_along(.ld_bmCanonical)], .ld_bmCanonical)
 })

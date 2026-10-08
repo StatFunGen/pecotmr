@@ -57,8 +57,11 @@ it is unwrapped to its handle.}
 \code{snpInfo}. NULL when correlation is pre-computed, or when the
 source is a matrix (which is already the subset).}
 
-\item{\code{blockMetadata}}{A \code{GRanges} of blocks or a \code{data.frame} with
-block boundary information.}
+\item{\code{blockMetadata}}{A \code{data.frame} with one row per block,
+carrying at least \code{blockId}, \code{chrom}, \code{size},
+\code{startIdx} and \code{endIdx}. Columns the caller supplied are
+kept, so a block's genomic span travels as \code{blockStart} /
+\code{blockEnd} when the construction path records one.}
 
 \item{\code{nRef}}{Integer, reference panel sample size.}
 

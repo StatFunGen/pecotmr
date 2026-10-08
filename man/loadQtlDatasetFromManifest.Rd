@@ -10,7 +10,7 @@ loadQtlDatasetFromManifest(
   genotypes = NULL,
   genotypeCovariates = NULL,
   scaleResiduals = TRUE,
-  genotypeFilterArgs = genotypeFilterConfig(),
+  genotypeFilterArgs = GenotypeFilterParam(),
   transposeCovariates = FALSE
 )
 }
@@ -33,7 +33,7 @@ to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.}
 \item{scaleResiduals}{Pass-through \code{\link{QtlDataset}} argument.}
 
 \item{genotypeFilterArgs}{Pass-through \code{\link{QtlDataset}} filtering
-options, built with \code{\link{genotypeFilterConfig}} and stored as lazy
+options, built with \code{\link{GenotypeFilterParam}} and stored as lazy
 QC slots.}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout) before

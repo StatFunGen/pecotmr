@@ -868,7 +868,7 @@ setGeneric("getVariantIds", function(x, ...) standardGeneric("getVariantIds"))
 #'   phenotype outliers. Default \code{1e-3}.
 #' @param outlierArgs Extra arguments for \code{robustbase::covMcd()}, the
 #'   robust covariance estimator the outlier rule is built on, supplied with
-#'   \code{\link{covMcdConfig}} -- \code{alpha} in particular. Only
+#'   \code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
 #'   consulted when \code{outlierAction = "drop"}.
 #' @return A named list of phenotype matrices or \code{SummarizedExperiment}
 #'   objects.
@@ -1243,9 +1243,11 @@ setGeneric("getSusieAlpha", function(x, ...) standardGeneric("getSusieAlpha"))
 #' cre <- CtwasResultEntry(
 #'   finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
 #'   susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
-#' getCtwasParam(cre)
+#' getCtwasGroupPriors(cre)
 #' @export
-setGeneric("getCtwasParam", function(x, ...) standardGeneric("getCtwasParam"))
+setGeneric("getCtwasGroupPriors", function(x, ...) {
+    standardGeneric("getCtwasGroupPriors")
+})
 
 #' @title Get Standardized Flag
 #' @description Check whether weights are on the standardized scale.
@@ -1481,23 +1483,13 @@ setGeneric("getTraitPosition", function(x, ...) {
 #'   around the trait; \code{NULL} uses the dataset default.
 #' @param samples Character vector or \code{NULL}. Restrict to these sample IDs;
 #'   \code{NULL} uses all samples.
-#' @param phenotypeCovariatesToResidualize Character vector or \code{NULL}.
-#'   Phenotype covariate names to residualize; \code{NULL} uses the dataset
-#'   default set.
-#' @param genotypeCovariatesToResidualize Character vector or \code{NULL}.
-#'   Genotype covariate names to residualize; \code{NULL} uses the dataset
-#'   default set.
-#' @param residualizePhenotypeCovariates Logical. Whether to residualize the
-#'   phenotype covariates. Default \code{TRUE}.
-#' @param residualizeGenotypeCovariates Logical. Whether to residualize the
-#'   genotype covariates. Default \code{TRUE}.
-#' @param residualizePhenotypeCovariatesFromGenotypes Logical or \code{NULL}.
-#'   Whether to residualize phenotype covariates out of the genotype design;
-#'   \code{NULL} uses the default.
-#' @param residualizeGenotypeCovariatesFromGenotypes Logical or \code{NULL}.
-#'   Whether to residualize genotype covariates out of the genotype design;
-#'   \code{NULL} uses the default.
-#' @param covariateNaAction Character. How to handle missing covariate values.
+#' @param residualizationArgs What the data is residualized on, built with
+#'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
+#'   \code{genotypeCovariates} choose the covariate sets,
+#'   \code{residualizePhenotype} / \code{residualizeGenotype} turn each
+#'   side on or off, and \code{covariateNaAction} says how missing
+#'   covariate values are handled. The same record the pipelines take, so a
+#'   setting means the same thing by either route.
 #' @return A numeric matrix (samples x variants).
 #' @examples
 #' data(qtlDatasetExample)
@@ -1523,32 +1515,22 @@ setGeneric("getResidualizedGenotypes", function(x, ...) {
 #' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
 #'   Restrict variants to this region; \code{NULL} uses the full cis window /
 #'   all regions.
-#' @param phenotypeCovariatesToResidualize Character vector or \code{NULL}.
-#'   Phenotype covariate names to residualize; \code{NULL} uses the dataset
-#'   default set.
-#' @param genotypeCovariatesToResidualize Character vector or \code{NULL}.
-#'   Genotype covariate names to residualize; \code{NULL} uses the dataset
-#'   default set.
-#' @param residualizePhenotypeCovariates Logical. Whether to residualize the
-#'   phenotype covariates. Default \code{TRUE}.
-#' @param residualizeGenotypeCovariates Logical. Whether to residualize the
-#'   genotype covariates. Default \code{TRUE}.
-#' @param residualizePhenotypeCovariatesFromPhenotypes Logical or \code{NULL}.
-#'   Whether to residualize phenotype covariates out of the phenotype;
-#'   \code{NULL} uses the default.
-#' @param residualizeGenotypeCovariatesFromPhenotypes Logical or \code{NULL}.
-#'   Whether to residualize genotype covariates out of the phenotype;
-#'   \code{NULL} uses the default.
+#' @param residualizationArgs What the data is residualized on, built with
+#'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
+#'   \code{genotypeCovariates} choose the covariate sets,
+#'   \code{residualizePhenotype} / \code{residualizeGenotype} turn each
+#'   side on or off, and \code{covariateNaAction} says how missing
+#'   covariate values are handled. The same record the pipelines take, so a
+#'   setting means the same thing by either route.
 #' @param naAction Character. How to handle missing phenotype values: one of
 #'   \code{"keep"}, \code{"drop"}, or \code{"impute"}.
-#' @param covariateNaAction Character. How to handle missing covariate values.
 #' @param outlierAction Character. How to handle phenotype outliers: one of
 #'   \code{"keep"} or \code{"drop"}.
 #' @param outlierPvalThreshold Numeric. Two-sided p-value threshold for flagging
 #'   phenotype outliers. Default \code{1e-3}.
 #' @param outlierArgs Extra arguments for \code{robustbase::covMcd()}, the
 #'   robust covariance estimator the outlier rule is built on, supplied with
-#'   \code{\link{covMcdConfig}} -- \code{alpha} in particular. Only
+#'   \code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
 #'   consulted when \code{outlierAction = "drop"}.
 #' @return A named list of numeric matrices keyed by context.
 #' @examples
@@ -2364,4 +2346,206 @@ setGeneric("fsusieCredibleBand", function(x, ...) {
 #' @export
 setGeneric("fsusieAffectedRegions", function(x, ...) {
     standardGeneric("fsusieAffectedRegions")
+})
+
+# =============================================================================
+# MethodParam accessor generics
+# -----------------------------------------------------------------------------
+# Only two Param classes carry accessors, and both earn them by being records
+# the user HOLDS rather than builds and forgets:
+#
+#   CredibleSetParam     postprocessFinemappingFits() and buildTopLoci() take
+#                        an already-computed fit, so a stored fit is
+#                        re-summarized under changed settings without
+#                        refitting. `L` / `Lgreedy` are deliberately
+#                        get-only: they are seeded onto each SuSiE-family
+#                        token's own arguments, so changing one needs a
+#                        refit and a setter would hand back a record that
+#                        looks applied but is not.
+#   GwasFineMappingParam the only Param nesting others. Once CredibleSetParam
+#                        is settable, the container has to let the nested
+#                        record back in, or it could be read but not written.
+#
+# The other 24 Params are construct-and-pass -- handed to one pipeline
+# argument and never seen again -- and get none, which is what Bioconductor's
+# own PileupParam does with twelve slots.
+#
+# get*/set* rather than Rsamtools' bamWhich()/bamWhich<-() spelling: pecotmr
+# already exports 95 get* accessors, and bare field names are not available
+# anyway -- `coverage` is an IRanges generic for read depth and `methods` is
+# utils::methods.
+# =============================================================================
+
+#' @rdname CredibleSetParam
+#' @param x A \code{CredibleSetParam}.
+#' @param ... Unused, present for generic consistency.
+#' @export
+setGeneric("getCoverage", function(x, ...) {
+    standardGeneric("getCoverage")
+})
+
+#' @rdname CredibleSetParam
+#' @param value The replacement value for that setting.
+#' @export
+setGeneric("setCoverage", function(x, value, ...) {
+    standardGeneric("setCoverage")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getSecondaryCoverage", function(x, ...) {
+    standardGeneric("getSecondaryCoverage")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("setSecondaryCoverage", function(x, value, ...) {
+    standardGeneric("setSecondaryCoverage")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getSignalCutoff", function(x, ...) {
+    standardGeneric("getSignalCutoff")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("setSignalCutoff", function(x, value, ...) {
+    standardGeneric("setSignalCutoff")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getMinAbsCorr", function(x, ...) {
+    standardGeneric("getMinAbsCorr")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("setMinAbsCorr", function(x, value, ...) {
+    standardGeneric("setMinAbsCorr")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getMedianAbsCorr", function(x, ...) {
+    standardGeneric("getMedianAbsCorr")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("setMedianAbsCorr", function(x, value, ...) {
+    standardGeneric("setMedianAbsCorr")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getIncludeAllCs", function(x, ...) {
+    standardGeneric("getIncludeAllCs")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("setIncludeAllCs", function(x, value, ...) {
+    standardGeneric("setIncludeAllCs")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getPerCsColumns", function(x, ...) {
+    standardGeneric("getPerCsColumns")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("setPerCsColumns", function(x, value, ...) {
+    standardGeneric("setPerCsColumns")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getL", function(x, ...) {
+    standardGeneric("getL")
+})
+
+#' @rdname CredibleSetParam
+#' @export
+setGeneric("getLgreedy", function(x, ...) {
+    standardGeneric("getLgreedy")
+})
+
+#' @rdname GwasFineMappingParam
+#' @param x A \code{GwasFineMappingParam}.
+#' @param ... Unused, present for generic consistency.
+#' @export
+setGeneric("getFineMappingMethods", function(x, ...) {
+    standardGeneric("getFineMappingMethods")
+})
+
+#' @rdname GwasFineMappingParam
+#' @param value The replacement value for that setting.
+#' @export
+setGeneric("setFineMappingMethods", function(x, value, ...) {
+    standardGeneric("setFineMappingMethods")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("getCredibleSetArgs", function(x, ...) {
+    standardGeneric("getCredibleSetArgs")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("setCredibleSetArgs", function(x, value, ...) {
+    standardGeneric("setCredibleSetArgs")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("getRssArgs", function(x, ...) {
+    standardGeneric("getRssArgs")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("setRssArgs", function(x, value, ...) {
+    standardGeneric("setRssArgs")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("getPanelFilterArgs", function(x, ...) {
+    standardGeneric("getPanelFilterArgs")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("setPanelFilterArgs", function(x, value, ...) {
+    standardGeneric("setPanelFilterArgs")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("getAddSusieInf", function(x, ...) {
+    standardGeneric("getAddSusieInf")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("setAddSusieInf", function(x, value, ...) {
+    standardGeneric("setAddSusieInf")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("getFitRetention", function(x, ...) {
+    standardGeneric("getFitRetention")
+})
+
+#' @rdname GwasFineMappingParam
+#' @export
+setGeneric("setFitRetention", function(x, value, ...) {
+    standardGeneric("setFitRetention")
 })

@@ -74,7 +74,7 @@ test_that("bayesNWeights dispatches to bayesAlphabetWeights with bayesN", {
     result <- bayesNWeights(
         X,
         y,
-        methodArgs = qggConfig(nit = 50, nburn = 10)
+        methodArgs = QggOptions(nit = 50, nburn = 10)
     )
     expect_equal(length(result), p)
     expect_true(is.numeric(result))

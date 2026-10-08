@@ -252,7 +252,7 @@ test_that("show on an empty ColocBoostResult stops after the header", {
 # fixture built one, leaving the whole ucos_details path unexecuted.
 # ===========================================================================
 
-.cbr_with_ucos <- function(ucosIds = "ucos1:y1", outcome = "t1") {
+.cbrWithUcos <- function(ucosIds = "ucos1:y1", outcome = "t1") {
     res <- .cbr_fake()
     vars <- list("chr1:300:C:T")
     purity <- matrix(
@@ -282,7 +282,7 @@ test_that("show on an empty ColocBoostResult stops after the header", {
 
 test_that("an outcome-specific set becomes its own uncolocalized element", {
     x <- ColocBoostResult(
-        list(.cbr_with_ucos()),
+        list(.cbrWithUcos()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
@@ -295,7 +295,7 @@ test_that("an uncolocalized set carries no colocalization statistics", {
     # cosNpc / vcp describe agreement BETWEEN outcomes, so a single-outcome
     # set has none to report -- NA rather than a misleading zero.
     x <- ColocBoostResult(
-        list(.cbr_with_ucos()),
+        list(.cbrWithUcos()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
@@ -309,7 +309,7 @@ test_that("an uncolocalized set carries no colocalization statistics", {
 
 test_that("show counts colocalized and outcome-only sets separately", {
     x <- ColocBoostResult(
-        list(.cbr_with_ucos()),
+        list(.cbrWithUcos()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )

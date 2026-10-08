@@ -10,7 +10,7 @@ mrmashWeights(
   Y = NULL,
   fitRetention = c("none", "slim", "full"),
   dataDrivenPriorMatrices = NULL,
-  methodArgs = mrmashConfig()
+  methodArgs = MrmashOptions()
 )
 }
 \arguments{
@@ -35,7 +35,7 @@ covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
 and retained in the payload for mvSuSiE prior reconstruction.}
 
 \item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash}, built
-with \code{\link{mrmashConfig}}. A bare list is refused: it cannot be
+with \code{\link{MrmashOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }
@@ -52,6 +52,6 @@ X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y
 ddpm <- multiTraitData$priorMatrices
 fit <- mrmashWrapper(X = X, Y = Y, dataDrivenPriorMatrices = ddpm,
-  prior = mrmashPriorConfig(canonicalPriorMatrices = TRUE))
+  prior = MrmashPriorParam(canonicalPriorMatrices = TRUE))
 mrmashWeights(mrmashFit = fit, X = X, Y = Y)
 }

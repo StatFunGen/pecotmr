@@ -598,9 +598,10 @@ NULL
 #'
 #' @description The assembled cTWAS input list produced by
 #' \code{\link{assembleCtwasInputs}} over a two-LD-block chr22 grid with one
-#' gene, ready for \code{\link{estCtwasParam}}. Self-contained (no external LD
-#' files needed for parameter estimation). Derived from the de-identified
-#' \code{protocol_example} toy data; all identifiers are synthetic.
+#' gene, ready for \code{\link{estCtwasGroupPriors}}. Self-contained (no
+#' external LD files needed for parameter estimation). Derived from the
+#' de-identified \code{protocol_example} toy data; all identifiers are
+#' synthetic.
 #'
 #' @format A list with the cTWAS input components \code{z_snp}, \code{z_gene},
 #'   \code{weights}, \code{region_info}, \code{snp_map}, \code{LD_map}, and the
@@ -622,7 +623,7 @@ NULL
 #' @docType data
 #'
 #' @description The augmented cTWAS state returned by
-#' \code{\link{estCtwasParam}} (the assembled inputs plus estimated
+#' \code{\link{estCtwasGroupPriors}} (the assembled inputs plus estimated
 #' group priors and per-region data), ready for
 #' \code{\link{screenCtwasRegions}}. Derived from the de-identified
 #' \code{protocol_example} toy data; all identifiers are synthetic.

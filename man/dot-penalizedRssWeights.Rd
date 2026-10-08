@@ -14,7 +14,7 @@
   lambda0 = 0,
   lambda2 = 0,
   selection = c("ldQuadratic", "minFbeta"),
-  methodArgs = penalizedRssConfig()
+  methodArgs = PenalizedRssOptions()
 )
 }
 \arguments{
@@ -22,7 +22,7 @@
 public wrappers for details.}
 
 \item{methodArgs}{Options forwarded to \code{penalizedRss}, built with
-\code{\link{penalizedRssConfig}}.}
+\code{\link{PenalizedRssOptions}}.}
 }
 \value{
 Numeric weight vector of length \code{nrow(LD)}.

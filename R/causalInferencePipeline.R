@@ -1,3 +1,6 @@
+#' @include MethodParam.R
+NULL
+
 #' @title Causal Inference Pipeline (TWAS-Z + Mendelian Randomization)
 #' @description Per-region pipeline that pairs QTL-derived weight vectors
 #'   (\code{\link{TwasWeights}} and/or a QTL \code{\link{QtlFineMappingResult}})
@@ -54,7 +57,7 @@
 #'   \code{topLoci}.
 #' @param weightSelectionArgs How one TWAS method's weights are picked per
 #'   \code{(study, context, trait, gwasStudy)} tuple, built with
-#'   \code{\link{weightSelectionConfig}}: \code{cutoff} (minimum
+#'   \code{\link{WeightSelectionParam}}: \code{cutoff} (minimum
 #'   cross-validated r-squared, default \code{0}), \code{pvalCutoff} (the
 #'   CV-p-value gate, default \code{Inf}), and \code{metric} /
 #'   \code{pvalMetric} naming which \code{cvResult} metrics those two read.
@@ -64,7 +67,7 @@
 #'   carried through. Ports the legacy \code{twas_pipeline}
 #'   \code{pick_best_model} / \code{update_twas_method}.
 #' @param mrArgs How Mendelian randomization is run, built with
-#'   \code{\link{mrConfig}}: \code{method} (\code{"ivwPerVariant"}, the
+#'   \code{\link{MrParam}}: \code{method} (\code{"ivwPerVariant"}, the
 #'   default, or \code{"csAware"}), the PIP threshold that method reads
 #'   (\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}, the
 #'   TWAS-p-value gate below which MR runs at all (default \code{1}, no
@@ -90,17 +93,17 @@ causalInferencePipeline <- function(
     gwasSumStats,
     twasWeights = NULL,
     fineMappingResult = NULL,
-    weightSelectionArgs = weightSelectionConfig(),
-    mrArgs = mrConfig(),
+    weightSelectionArgs = WeightSelectionParam(),
+    mrArgs = MrParam(),
     combineMethods = NULL,
     alleleFlip = TRUE
 ) {
-    .assertMethodConfig(
+    .assertMethodParam(
         weightSelectionArgs,
-        "weightSelectionConfig",
+        "WeightSelectionParam",
         "weightSelection"
     )
-    .assertMethodConfig(mrArgs, "mrConfig", "mr")
+    .assertMethodParam(mrArgs, "MrParam", "mr")
     .cipRun(
         gwasSumStats = gwasSumStats,
         twasWeights = twasWeights,
@@ -230,6 +233,22 @@ causalInferencePipeline <- function(
     mutate(qtlRows, useFmrForWeights = is.null(twasWeights))
 }
 
+# CV R-squared keyed by the (study, context, trait, method) tuple. The
+# separator is \\r because it cannot occur in any of the four identifiers.
+# @noRd
+.cipRsqLookup <- function(metricTab) {
+    set_names(
+        metricTab$rsq,
+        str_c(
+            metricTab$qtlStudy,
+            metricTab$context,
+            metricTab$trait,
+            metricTab$method,
+            sep = "\r"
+        )
+    )
+}
+
 # Optional CV weight selection (legacy pick_best_model + update_twas_method):
 # filter to eligible methods now, deferring the final best-method pick to after
 # the TWAS Z. Returns list(qtlRows, rsqLookup, selectionActive).
@@ -260,16 +279,7 @@ causalInferencePipeline <- function(
         rsqOption,
         rsqPvalOption
     )
-    rsqLookup <- set_names(
-        metricTab$rsq,
-        str_c(
-            metricTab$qtlStudy,
-            metricTab$context,
-            metricTab$trait,
-            metricTab$method,
-            sep = "\r"
-        )
-    )
+    rsqLookup <- .cipRsqLookup(metricTab)
     qtlRows <- .cipFilterEligibleMethods(
         qtlRows,
         metricTab,
@@ -279,7 +289,7 @@ causalInferencePipeline <- function(
     if (nrow(qtlRows) == 0L) {
         msg <- glue(
             "causalInferencePipeline: every QTL tuple was filtered out by ",
-            "weightSelectionConfig(cutoff = {rsqCutoff}, ",
+            "WeightSelectionParam(cutoff = {rsqCutoff}, ",
             "pvalCutoff = {rsqPvalCutoff}) ",
             "(no method cleared the CV cutoffs)."
         )
@@ -301,17 +311,19 @@ causalInferencePipeline <- function(
     alleleFlip,
     mrArgs
 ) {
-    qStudy <- qtlRows$qtlStudy[[qi]]
-    qContext <- qtlRows$context[[qi]]
-    qTrait <- qtlRows$trait[[qi]]
-    qMethod <- qtlRows$method[[qi]]
+    tuple <- list(
+        qStudy = qtlRows$qtlStudy[[qi]],
+        qContext = qtlRows$context[[qi]],
+        qTrait = qtlRows$trait[[qi]],
+        qMethod = qtlRows$method[[qi]]
+    )
     weightsInfo <- .cipExtractWeights(
         twasWeights = twasWeights,
         fineMappingResult = fineMappingResult,
-        study = qStudy,
-        context = qContext,
-        trait = qTrait,
-        method = qMethod,
+        study = tuple$qStudy,
+        context = tuple$qContext,
+        trait = tuple$qTrait,
+        method = tuple$qMethod,
         useFmr = qtlRows$useFmrForWeights[[qi]]
     )
     if (is.null(weightsInfo)) {
@@ -319,16 +331,10 @@ causalInferencePipeline <- function(
     }
     fmrEntry <- .cipResolveFmrEntry(
         fineMappingResult,
-        qStudy,
-        qContext,
-        qTrait,
-        qMethod
-    )
-    tuple <- list(
-        qStudy = qStudy,
-        qContext = qContext,
-        qTrait = qTrait,
-        qMethod = qMethod
+        tuple$qStudy,
+        tuple$qContext,
+        tuple$qTrait,
+        tuple$qMethod
     )
     compact(map(
         seq_len(nrow(gwasSumStats)),
@@ -1587,6 +1593,20 @@ twasZ <- function(
     list(method = m, pval = as.numeric(pVec[[1L]]))
 }
 
+#' @rdname WeightSelectionParam
+#' @aliases WeightSelectionParam-class
+#' @exportClass WeightSelectionParam
+setClass(
+    "WeightSelectionParam",
+    contains = "MethodParam",
+    slots = c(
+        cutoff = "numeric",
+        pvalCutoff = "numeric",
+        metric = "character",
+        pvalMetric = "character"
+    )
+)
+
 #' @title TWAS Weight-Selection Settings
 #' @description How \code{\link{causalInferencePipeline}} picks which TWAS
 #'   method's weights to use for each \code{(study, context, trait,
@@ -1604,29 +1624,38 @@ twasZ <- function(
 #' @param pvalMetric Character vector of candidate \code{cvResult} metric
 #'   names for the p-value gate; the first one present in a tuple's metrics
 #'   is used. Default \code{c("adj_rsq_pval", "pval")}.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{WeightSelectionParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' weightSelectionConfig(cutoff = 0.01, metric = "adj_rsq")
+#' WeightSelectionParam(cutoff = 0.01, metric = "adj_rsq")
 #' @export
-weightSelectionConfig <- function(
+WeightSelectionParam <- function(
     cutoff = 0,
     pvalCutoff = Inf,
     metric = "rsq",
     pvalMetric = c("adj_rsq_pval", "pval")
 ) {
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            cutoff = cutoff,
-            pvalCutoff = pvalCutoff,
-            metric = metric,
-            pvalMetric = pvalMetric
-        ),
-        extra = list(),
-        label = "weightSelectionConfig",
-        engine = "weightSelection"
+    new(
+        "WeightSelectionParam",
+        cutoff = cutoff,
+        pvalCutoff = pvalCutoff,
+        metric = metric,
+        pvalMetric = pvalMetric
     )
 }
+
+#' @rdname MrParam
+#' @aliases MrParam-class
+#' @exportClass MrParam
+setClass(
+    "MrParam",
+    contains = "MethodParam",
+    slots = c(
+        method = "character",
+        pipCutoff = "numeric",
+        cpipCutoff = "numeric",
+        pvalCutoff = "numeric"
+    )
+)
 
 #' @title Mendelian-Randomization Settings
 #' @description How \code{\link{causalInferencePipeline}} runs MR from a
@@ -1642,11 +1671,11 @@ weightSelectionConfig <- function(
 #' @param pvalCutoff Numeric. MR runs for a \code{(qtl tuple, gwas)} pair
 #'   only when its \code{twasPval} is below this; otherwise the MR columns
 #'   are \code{NA}. Default \code{1} (no gate).
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{MrParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' mrConfig(method = "csAware", cpipCutoff = 0.8)
+#' MrParam(method = "csAware", cpipCutoff = 0.8)
 #' @export
-mrConfig <- function(
+MrParam <- function(
     method = c("ivwPerVariant", "csAware"),
     pipCutoff = 0.5,
     cpipCutoff = 0.5,
@@ -1654,17 +1683,12 @@ mrConfig <- function(
 ) {
     method <- arg_match(method)
     .mrAssertApplicable(method, pipCutoff, cpipCutoff)
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            method = method,
-            pipCutoff = pipCutoff,
-            cpipCutoff = cpipCutoff,
-            pvalCutoff = pvalCutoff
-        ),
-        extra = list(),
-        label = "mrConfig",
-        engine = "mr"
+    new(
+        "MrParam",
+        method = method,
+        pipCutoff = pipCutoff,
+        cpipCutoff = cpipCutoff,
+        pvalCutoff = pvalCutoff
     )
 }
 
@@ -1683,7 +1707,7 @@ mrConfig <- function(
     }
     other <- if (method == "csAware") "cpipCutoff" else "pipCutoff"
     abort(glue(
-        "mrConfig: `{unused}` is not read by method = \"{method}\"; that ",
+        "MrParam: `{unused}` is not read by method = \"{method}\"; that ",
         "method uses `{other}`. Set the one its method reads, or change ",
         "`method`."
     ))

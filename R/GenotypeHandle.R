@@ -197,26 +197,22 @@ GenotypeHandle <- function(
         chroms = chroms,
         flags = flags
     )
-    if (sources[["path"]]) {
-        return(.readGenotypeHandle(path, format = format, vcfArgs = vcfArgs))
-    }
-    if (sources[["plink1Prefix"]]) {
-        return(.makePlink1Handle(plink1Prefix))
-    }
-    if (sources[["plink2Prefix"]]) {
-        return(.makePlink2Handle(plink2Prefix))
-    }
-    if (sources[["plink1Triplet"]]) {
-        return(.genotypeHandleFromPlink1Triplet(bed, bim, fam))
-    }
-    if (sources[["plink2Triplet"]]) {
-        return(.genotypeHandleFromPlink2Triplet(pgen, pvar, psam))
-    }
-    if (sources[["ldMeta"]]) {
-        return(.genotypeHandleFromLdMeta(ldMeta, region, vcfArgs = vcfArgs))
-    }
-    # nSources == 1 is enforced above, so the only remaining source is genoMeta.
-    .genotypeHandleFromChromMeta(genoMeta, chroms = chroms, format = format)
+    # .ghResolveSources() has already enforced that exactly one is TRUE, so
+    # the chosen name is well defined and the switch is total.
+    switch(
+        names(sources)[which(sources)],
+        path = .readGenotypeHandle(path, format = format, vcfArgs = vcfArgs),
+        plink1Prefix = .makePlink1Handle(plink1Prefix),
+        plink2Prefix = .makePlink2Handle(plink2Prefix),
+        plink1Triplet = .genotypeHandleFromPlink1Triplet(bed, bim, fam),
+        plink2Triplet = .genotypeHandleFromPlink2Triplet(pgen, pvar, psam),
+        ldMeta = .genotypeHandleFromLdMeta(ldMeta, region, vcfArgs = vcfArgs),
+        genoMeta = .genotypeHandleFromChromMeta(
+            genoMeta,
+            chroms = chroms,
+            format = format
+        )
+    )
 }
 
 # Validate the bed/bim/fam + pgen/pvar/psam triplet completeness and the

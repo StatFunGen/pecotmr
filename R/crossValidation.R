@@ -1,3 +1,6 @@
+#' @include MethodParam.R
+NULL
+
 # =============================================================================
 # Cross-validation engine (shared by twasWeightsCv + fine-mapping CV)
 # -----------------------------------------------------------------------------
@@ -513,3 +516,160 @@
         rownames(Xte)
     )
 }
+
+#' @rdname CrossValidationParam
+#' @aliases CrossValidationParam-class
+#' @exportClass CrossValidationParam
+setClass(
+    "CrossValidationParam",
+    contains = "MethodParam",
+    slots = c(
+        folds = "numeric",
+        numThreads = "numeric",
+        samplePartition = "list_OR_NULL",
+        maxVariants = "numeric_OR_NULL",
+        weightMethods = "list_OR_NULL"
+    )
+)
+
+#' @title Cross-Validation Settings
+#' @description How cross-validation runs, shared by
+#'   \code{\link{fineMappingPipeline}} and \code{\link{twasWeightsPipeline}}.
+#'
+#'   \code{folds}, \code{numThreads} and \code{samplePartition} mean the same
+#'   thing in both. \code{maxVariants} and \code{weightMethods} are honoured
+#'   by \code{\link{twasWeightsPipeline}} only and are \strong{ignored} by
+#'   \code{\link{fineMappingPipeline}}, so one bundle can be handed to
+#'   either pipeline unchanged.
+#' @param folds Integer. Number of folds; \code{0} (the default) or
+#'   \code{1} skips cross-validation. The same value in both pipelines ---
+#'   \code{twasWeightsPipeline} used to default to \code{5}, which made an
+#'   unspecified setting mean two different things.
+#' @param numThreads Integer. Parallel workers for the per-fold refits.
+#'   \code{1} (default) is serial; \code{-1} uses all cores. Only consulted
+#'   when \code{folds > 1}.
+#' @param samplePartition Optional pre-defined partition \code{data.frame}
+#'   with columns \code{Sample} and \code{Fold}. When supplied, every method
+#'   reuses this exact partition instead of generating a fresh one.
+#' @param maxVariants Integer. Cap on the number of variants used for CV;
+#'   unset means no limit. \strong{\code{twasWeightsPipeline} only} ---
+#'   \code{fineMappingPipeline} ignores it, because it does not use the
+#'   \code{twasWeightsCv} engine this configures.
+#' @param weightMethods Optional override of which methods are
+#'   cross-validated, as a character vector of tokens or a named method list.
+#'   Unset cross-validates every method that produced non-zero weights.
+#'   \strong{\code{twasWeightsPipeline} only} ---
+#'   \code{fineMappingPipeline} ignores it, because its \code{methods=} are
+#'   fine-mapping methods and its CV refits all of them.
+#' @return A \code{CrossValidationParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' CrossValidationParam(folds = 10, numThreads = 4)
+#' @export
+CrossValidationParam <- function(
+    folds = 0,
+    numThreads = 1,
+    samplePartition = NULL,
+    maxVariants = NULL,
+    weightMethods = NULL
+) {
+    new(
+        "CrossValidationParam",
+        folds = folds,
+        numThreads = numThreads,
+        samplePartition = samplePartition,
+        maxVariants = maxVariants,
+        weightMethods = weightMethods
+    )
+}
+
+# The fields a pipeline reads, as a plain list so call sites index it without
+# caring that the caller passed a constructor result.
+# @noRd
+.cvResolve <- function(crossValidationArgs) {
+    list(
+        folds = crossValidationArgs$folds %||% 0,
+        numThreads = crossValidationArgs$numThreads %||% 1,
+        samplePartition = crossValidationArgs$samplePartition,
+        # -1 is twasWeightsCv()'s "no cap" sentinel. fineMappingPipeline
+        # resolves these two as well but never reads them.
+        maxVariants = crossValidationArgs$maxVariants %||% -1,
+        weightMethods = crossValidationArgs$weightMethods
+    )
+}
+
+# TRUE when cross-validation will actually run. Both 0 and 1 mean "no CV",
+# and anything that needs out-of-fold predictions has to ask this rather than
+# testing `folds` itself.
+# @noRd
+.cvEnabled <- function(crossValidationArgs) {
+    folds <- crossValidationArgs$folds %||% 0
+    !is.null(folds) && length(folds) == 1L && !is.na(folds) && folds >= 2L
+}
+
+# Refuse a cross-validation request on an input that has no samples to hold
+# out. Summary statistics carry no individual-level data, so CV there is not
+# unimplemented but meaningless -- saying so beats running to completion and
+# returning results that were never cross-validated.
+# @noRd
+.cvRefuseOnSumstats <- function(crossValidationArgs, pipeline, cls) {
+    set <- names(crossValidationArgs)[
+        map_lgl(as.list(crossValidationArgs), .cvFieldIsSet)
+    ]
+    if (length(set) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{pipeline}: cross-validation is not possible on {cls} input -- ",
+        "it holds out samples, and summary statistics carry none. ",
+        "Remove CrossValidationParam({str_flatten(set, ', ')})."
+    ))
+}
+
+# A field counts as "set" when it differs from the constructor's own default,
+# so passing CrossValidationParam() unchanged is not mistaken for a request.
+# @noRd
+.cvFieldIsSet <- function(x) {
+    if (is.null(x)) {
+        return(FALSE)
+    }
+    # numThreads = 1 and folds = 0 are the no-op defaults.
+    !(length(x) == 1L && !is.na(x) && is.numeric(x) && (x == 0 || x == 1))
+}
+
+# =============================================================================
+# Cross-validation settings
+# -----------------------------------------------------------------------------
+# One bundle for both fineMappingPipeline() and twasWeightsPipeline(). The two
+# had drifted on a setting that means the same thing in each: `cvFolds`
+# defaulted to 0 in fine-mapping and 5 in TWAS. Folding them into one
+# constructor is the rule the joint specification already follows.
+#
+# `folds` is 0 everywhere. twasWeightsPipeline used to default to 5, so the
+# two pipelines disagreed on what an unspecified `cvFolds` meant; converging
+# on "off unless asked" makes one bundle mean one thing. The knock-on is that
+# the SR-TWAS ensemble, which needs out-of-fold predictions, no longer runs by
+# default -- so `ensemble` defaults to FALSE too, and asking for an ensemble
+# without folds is an error rather than a silently missing row.
+#
+# Two of the five fields are honoured by twasWeightsPipeline() only, and are
+# IGNORED rather than rejected by fineMappingPipeline() -- one bundle the
+# caller can hand to either pipeline without rewriting it:
+#
+#   weightMethods -- selects among TWAS *weight* methods, matching tokens like
+#     `lasso` / `mrmash` and their `<token>_weights` spellings. Fine mapping's
+#     `methods=` are fine-mapping methods and its CV refits all of them, so
+#     there is no weight-method set to select from. It is also the knob that
+#     decides whether .jointTwasCvBlocked() reaches back for a fold's
+#     fine-mapping fit -- a TWAS-to-fine-mapping handoff with no counterpart
+#     in the other direction.
+#   maxVariants -- caps the CV design matrix for twasWeightsCv(). Fine mapping
+#     does not use that engine; .fmWeightsCv() has its own loop and only
+#     mirrors twasWeightsCv()'s output shape.
+#
+# Both are documented as TWAS-only so the silence is stated, not discovered.
+#
+# `seed` is not here either. It seeds the whole call in both pipelines
+# (fine-mapping wraps the call in withr::local_seed; TWAS also seeds the
+# BiocParallel RNG for method fitting), so it is a call-level knob that CV
+# happens to benefit from, not a CV setting.
+# =============================================================================

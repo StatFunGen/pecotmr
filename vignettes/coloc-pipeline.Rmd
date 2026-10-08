@@ -62,7 +62,7 @@ qtlFmr <- fineMappingPipeline(
 
 The recommend approach is to provide `colocPipeline()` a `QtlFineMappingResult`
 and a `GwasSumStats`. The pipeline runs `fineMappingPipeline()` internally on
-the GWAS sumstats (configured by `gwasFineMappingConfig()`) over the exact
+the GWAS sumstats (configured by `GwasFineMappingParam()`) over the exact
 window used in the
 `QtlFineMappingResult`, then runs `coloc.bf_bf` per (QTL, GWAS) pair.
 
@@ -70,7 +70,7 @@ window used in the
 res <- colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    gwasFineMappingArgs = gwasFineMappingConfig(methods = "susie")
+    gwasFineMappingArgs = GwasFineMappingParam(methods = "susie")
 )
 res
 ```
@@ -113,16 +113,16 @@ included. Two opt-in filters can adjust this:
 
 | Filter | Description | Default |
 |---|---|---|
-| `colocLbfFilterConfig(filterLbfCs=)` | TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`). | FALSE |
-| `colocLbfFilterConfig(secondary=)` | Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage. | NULL |
-| `colocLbfFilterConfig(concentration=)` | Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants. | 0.5 |
-| `colocLbfFilterConfig(priorTol=)` | Drop effects whose estimated prior variance is at or below this threshold. | 1e-9 |
+| `ColocLbfFilterParam(filterLbfCs=)` | TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`). | FALSE |
+| `ColocLbfFilterParam(secondary=)` | Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage. | NULL |
+| `ColocLbfFilterParam(concentration=)` | Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants. | 0.5 |
+| `ColocLbfFilterParam(priorTol=)` | Drop effects whose estimated prior variance is at or below this threshold. | 1e-9 |
 
 ```{r coloc-filter-example, eval=FALSE}
 colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    lbfFilterArgs = colocLbfFilterConfig(
+    lbfFilterArgs = ColocLbfFilterParam(
         secondary = 0.5, # 50% CS concentration filter
         concentration = 0.5
     )
@@ -198,16 +198,16 @@ colocPipeline(
 colocPipeline(
     qtlFineMappingResult = qtlFmr,
     gwasInput = gwasSumStatsS4Example,
-    lbfFilterArgs = colocLbfFilterConfig(
+    lbfFilterArgs = ColocLbfFilterParam(
         filterLbfCs = FALSE,
         secondary = NULL, # e.g. 0.5
         concentration = 0.5,
         priorTol = 1e-9
     ),
-    priors = colocPriorConfig(p1 = 1e-4, p2 = 1e-4, p12 = 5e-6),
-    gwasFineMappingArgs = gwasFineMappingConfig( # inline GWAS FM when needed
+    priors = ColocPriorParam(p1 = 1e-4, p2 = 1e-4, p12 = 5e-6),
+    gwasFineMappingArgs = GwasFineMappingParam( # inline GWAS FM when needed
         methods = "susie",
-        credibleSetArgs = credibleSetConfig(coverage = 0.95)
+        credibleSetArgs = CredibleSetParam(coverage = 0.95)
     ),
     returnGwasFineMapping = FALSE,
     enrichment = NULL, # data.frame for enloc mode

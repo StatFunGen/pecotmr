@@ -101,7 +101,7 @@ gwasSumStats <- loadGwasSumStatsFromManifest(
 )
 gwasByRegion <- summaryStatsQc(
     gwasSumStats,
-    panelFilterArgs = panelFilterConfig(mafCutoff = 0.0025)
+    panelFilterArgs = PanelFilterParam(mafCutoff = 0.0025)
 )
 
 data(ctwasWeightsExample)
@@ -113,13 +113,13 @@ data(ctwasWeightsExample)
 res <- ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    ctwasPriorArgs = ctwasPriorConfig(
+    ctwasPriorArgs = CtwasPriorParam(
         thin = 1,
         niterPrefit = 3,
         niter = 10,
         fallbackToPrefit = TRUE
     ),
-    methodArgs = ctwasConfig(
+    methodArgs = CtwasOptions(
         min_group_size = 1,
         min_p_single_effect = 0,
         min_nonSNP_PIP = 0
@@ -177,7 +177,7 @@ ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
     fineMappingResult = fmr,
-    variantPruningArgs = variantPruningConfig(
+    variantPruningArgs = VariantPruningParam(
         weightCutoff = 1e-4,
         maxVariants = 1000,
         csMinCor = 0.8,
@@ -220,7 +220,7 @@ set.
 PIPs, and the EM group priors sit on each row's entry:
 
 ```{r ctwas-param}
-param <- getCtwasParam(res$entry[[1]])
+param <- getCtwasGroupPriors(res$entry[[1]])
 param$group_prior
 param$group_prior_var
 param$converged
@@ -243,17 +243,17 @@ inputs <- assembleCtwasInputs(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample)
 )
-est <- estCtwasParam(
+est <- estCtwasGroupPriors(
     inputs,
-    ctwasPriorArgs = ctwasPriorConfig(
+    ctwasPriorArgs = CtwasPriorParam(
         thin = 1,
         niterPrefit = 3,
         niter = 10,
         fallbackToPrefit = TRUE
     ),
-    methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0)
+    methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0)
 )
-screened <- screenCtwasRegions(est, methodArgs = ctwasConfig(min_nonSNP_PIP = 0))
+screened <- screenCtwasRegions(est, methodArgs = CtwasOptions(min_nonSNP_PIP = 0))
 finemapped <- finemapCtwasRegions(screened)
 nrow(finemapped$finemap_res)
 ```
@@ -271,12 +271,12 @@ Each step's payload is also bundled, so you can enter anywhere:
 
 ```{r ctwas-bundled-payloads, eval=FALSE}
 data(ctwasInputsExample) # after assembleCtwasInputs
-data(ctwasEstExample) # after estCtwasParam
+data(ctwasEstExample) # after estCtwasGroupPriors
 data(ctwasFinemapExample) # after finemapCtwasRegions
 ```
 
 The most common reason to use the granular path is to override the priors.
-`estCtwasParam()`'s accurate-EM step can diverge on underpowered data;
+`estCtwasGroupPriors()`'s accurate-EM step can diverge on underpowered data;
 `fallbackToPrefit = TRUE` handles that automatically, but taking the steps
 apart lets you substitute priors of your own into `screenCtwasRegions()`.
 
@@ -295,7 +295,7 @@ merged <- mergeCtwasBoundaryRegions(
 )
 ```
 
-`ctwasPipeline(boundaryMergeArgs = boundaryMergeConfig(enabled = TRUE))` does
+`ctwasPipeline(boundaryMergeArgs = BoundaryMergeParam(enabled = TRUE))` does
 the same thing inline, with
 `mergePipThresh` / `mergeFilterCs` / `mergeMaxSNP` forwarding to those
 arguments. It is off by default because it only matters when a
@@ -311,15 +311,15 @@ ctwasPipeline(
     L = 5,
     ncore = 1,
     keepSnps = FALSE,
-    ctwasPriorArgs = ctwasPriorConfig(
+    ctwasPriorArgs = CtwasPriorParam(
         thin = 0.1,
         niterPrefit = 3,
         niter = 30,
         varStructure = "shared_type",
         fallbackToPrefit = FALSE
     ),
-    variantPruningArgs = variantPruningConfig(),
-    boundaryMergeArgs = boundaryMergeConfig(enabled = FALSE)
+    variantPruningArgs = VariantPruningParam(),
+    boundaryMergeArgs = BoundaryMergeParam(enabled = FALSE)
 )
 ```
 

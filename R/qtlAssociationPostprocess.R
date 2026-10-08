@@ -35,24 +35,24 @@
 #'   bootstrap \code{pi0}); setting \code{lambda} or \code{pi0.method}
 #'   here replaces the first attempt, and the retries still override them
 #'   when that attempt fails.
-#' @return A \code{MethodConfig} record for
+#' @return A \code{MethodOptions} record for
 #'   \code{qtlAssociationPostprocess(qvalueArgs =)}.
 #' @seealso \code{\link{qtlAssociationPostprocess}}
 #' @examples
-#' qvalueConfig(pi0.method = "bootstrap")
+#' QvalueOptions(pi0.method = "bootstrap")
 #' @export
-qvalueConfig <- function(...) {
+QvalueOptions <- function(...) {
     extra <- list(...)
     .configRefuseOwned(
         extra,
         c(p = "the p-value vector pecotmr assembles"),
-        "qvalueConfig"
+        "QvalueOptions"
     )
-    .newMethodConfig(
+    .newMethodOptions(
         "qvalue::qvalue",
         defaults = list(),
         extra = extra,
-        label = "qvalueConfig",
+        label = "QvalueOptions",
         engine = "qvalue"
     )
 }
@@ -63,6 +63,9 @@ qvalueConfig <- function(...) {
 # Returns a numeric vector aligned to `p`.
 #' @importFrom rlang try_fetch
 .qapSafeQvalue <- function(p, qvalueArgs = list()) {
+    # Engine-call exception: qvalue estimates FDR for this module's own
+    # output. qtlAssociationPostprocess.R is a topical module rather than a
+    # pipeline, and is the only consumer of the call.
     if (!requireNamespace("qvalue", quietly = TRUE)) {
         # Optional-package guard; qvalue is Suggests-only.
         msg <- glue(
@@ -401,7 +404,7 @@ setMethod(
 #' @param pvalueCol,afCol Entry mcol names for the per-variant p-value / allele
 #'   frequency (defaults \code{"P"} / \code{"af"}).
 #' @param qvalueArgs Extra arguments for \code{qvalue::qvalue()}, built with
-#'   \code{\link{qvalueConfig}} -- the \code{pi0.method} / \code{lambda}
+#'   \code{\link{QvalueOptions}} -- the \code{pi0.method} / \code{lambda}
 #'   pair in particular, which sets how the null proportion is estimated.
 #' @export
 setMethod(
@@ -415,49 +418,77 @@ setMethod(
         methods = c("permutation", "bonferroni"),
         pvalueCol = "P",
         afCol = "af",
-        qvalueArgs = qvalueConfig()
+        qvalueArgs = QvalueOptions()
     ) {
-        .assertMethodConfig(qvalueArgs, "qvalueConfig", "qvalueArgs")
+        .assertMethodOptions(qvalueArgs, "QvalueOptions", "qvalueArgs")
         methods <- arg_match(
             methods,
             c("permutation", "bonferroni"),
             multiple = TRUE
         )
         filtering <- (mafCutoff > 0 || cisWindow > 0)
-        newCols <- c(
-            if (is_in("bonferroni", methods)) {
-                .qapBonferroniCols(
-                    x,
-                    mafCutoff,
-                    cisWindow,
-                    pvalueCol,
-                    afCol,
-                    filtering,
-                    qvalueArgs
-                )
-            },
-            if (is_in("permutation", methods) && !is.null(x$p_beta)) {
-                .qapPermutationCols(x, fdrThreshold, qvalueArgs)
-            }
-        ) %||%
-            list()
+        newCols <- .qapNewCols(
+            x,
+            methods = methods,
+            mafCutoff = mafCutoff,
+            cisWindow = cisWindow,
+            pvalueCol = pvalueCol,
+            afCol = afCol,
+            filtering = filtering,
+            fdrThreshold = fdrThreshold,
+            qvalueArgs = qvalueArgs
+        )
         # Stash the correction recipe so getSignificantQtls /
         # annotateSignificance can reproduce significance cheaply (thresholds,
         # not flags).
         qc <- list_assign(
             getQcInfo(x),
-            associationPostprocess = .qapRecipe(
-                fdrThreshold,
-                mafCutoff,
-                cisWindow,
-                methods,
-                pvalueCol,
-                afCol
+            associationPostprocess = list(
+                fdrThreshold = fdrThreshold,
+                mafCutoff = mafCutoff,
+                cisWindow = cisWindow,
+                methods = methods,
+                pvalueCol = pvalueCol,
+                afCol = afCol
             )
         )
         .qapRebuild(x, newCols, qc)
     }
 )
+
+# The corrected-statistic columns for the requested methods. Permutation
+# columns need `p_beta`, which only a permutation run carries, so that half
+# is skipped rather than refused when it is absent.
+# @noRd
+.qapNewCols <- function(
+    x,
+    methods,
+    mafCutoff,
+    cisWindow,
+    pvalueCol,
+    afCol,
+    filtering,
+    fdrThreshold,
+    qvalueArgs
+) {
+    c(
+        if (is_in("bonferroni", methods)) {
+            .qapBonferroniCols(
+                x,
+                mafCutoff,
+                cisWindow,
+                pvalueCol,
+                afCol,
+                filtering,
+                qvalueArgs
+            )
+        },
+        if (is_in("permutation", methods) && !is.null(x$p_beta)) {
+            .qapPermutationCols(x, fdrThreshold, qvalueArgs)
+        }
+    ) %||%
+        list()
+}
 
 # Local Bonferroni correction columns: per-gene min adjusted p (original and,
 # when filtering, filtered) plus their global FDR / q-value adjustments.
@@ -500,6 +531,13 @@ setMethod(
     } else {
         NULL
     }
+    .qapBonferroniResultCols(perGene, gaO, gaF, filtering)
+}
+
+# The Bonferroni column set: always the original-scale trio, plus the
+# filtered trio when a MAF / cis-window filter was applied.
+# @noRd
+.qapBonferroniResultCols <- function(perGene, gaO, gaF, filtering) {
     c(
         list(
             p_bonferroni_min_original = perGene$orig,
@@ -622,26 +660,6 @@ setMethod(
                 )
             }
         ))
-    )
-}
-
-# The significance recipe stashed for cheap downstream re-derivation.
-# @noRd
-.qapRecipe <- function(
-    fdrThreshold,
-    mafCutoff,
-    cisWindow,
-    methods,
-    pvalueCol,
-    afCol
-) {
-    list(
-        fdrThreshold = fdrThreshold,
-        mafCutoff = mafCutoff,
-        cisWindow = cisWindow,
-        methods = methods,
-        pvalueCol = pvalueCol,
-        afCol = afCol
     )
 }
 

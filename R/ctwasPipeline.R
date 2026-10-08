@@ -1,28 +1,29 @@
-# Every ctwas function the pipeline fans `ctwasConfig` out to. The bundle is
-# validated against the union of their explicit formals, which is sound
-# because .ctwasInvoke filters it per callee (see there).
-# @noRd
-.ctwasCallees <- function() {
-    c(
-        "ctwas::compute_gene_z",
-        "ctwas::est_param",
-        "ctwas::screen_regions",
-        "ctwas::finemap_regions",
-        "ctwas::expand_region_data",
-        "ctwas::postprocess_region_merging",
-        "ctwas::postprocess_region_merging_noLD",
-        "ctwas::get_boundary_genes"
+#' @include MethodParam.R
+NULL
+
+#' @rdname CtwasPriorParam
+#' @aliases CtwasPriorParam-class
+#' @exportClass CtwasPriorParam
+setClass(
+    "CtwasPriorParam",
+    contains = "MethodParam",
+    slots = c(
+        thin = "numeric",
+        niterPrefit = "numeric",
+        niter = "numeric",
+        varStructure = "character",
+        fallbackToPrefit = "logical"
     )
-}
+)
 
 #' @title cTWAS Prior-Estimation Settings
 #' @description The EM stage that estimates cTWAS's group priors
 #'   (\code{group_prior} / \code{group_prior_var}). These are exactly the
-#'   settings \code{\link{estCtwasParam}} takes, so the bundle travels from
-#'   \code{\link{ctwasPipeline}} to that function whole.
+#'   settings \code{\link{estCtwasGroupPriors}} takes, so the bundle travels
+#'   from \code{\link{ctwasPipeline}} to that function whole.
 #' @param thin Numeric. Proportion of SNPs retained when assembling region
 #'   data for the EM. Default \code{0.1}. This is stochastic thinning for
-#'   speed, unrelated to \code{\link{variantPruningConfig}}, which decides
+#'   speed, unrelated to \code{\link{VariantPruningParam}}, which decides
 #'   which variants enter a gene's weight matrix.
 #' @param niterPrefit Integer. Iterations for the prefit EM. Default
 #'   \code{3}.
@@ -33,11 +34,11 @@
 #' @param fallbackToPrefit Logical. When the accurate EM returns NaN on
 #'   underpowered data, fall back to the prefit estimates rather than failing.
 #'   Default \code{FALSE}. A pecotmr recovery step, not a cTWAS argument.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{CtwasPriorParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' ctwasPriorConfig(thin = 1, niter = 10, fallbackToPrefit = TRUE)
+#' CtwasPriorParam(thin = 1, niter = 10, fallbackToPrefit = TRUE)
 #' @export
-ctwasPriorConfig <- function(
+CtwasPriorParam <- function(
     thin = 0.1,
     niterPrefit = 3L,
     niter = 30L,
@@ -51,20 +52,29 @@ ctwasPriorConfig <- function(
     fallbackToPrefit = FALSE
 ) {
     varStructure <- arg_match(varStructure)
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            thin = thin,
-            niterPrefit = niterPrefit,
-            niter = niter,
-            varStructure = varStructure,
-            fallbackToPrefit = fallbackToPrefit
-        ),
-        extra = list(),
-        label = "ctwasPriorConfig",
-        engine = "ctwasPrior"
+    new(
+        "CtwasPriorParam",
+        thin = thin,
+        niterPrefit = niterPrefit,
+        niter = niter,
+        varStructure = varStructure,
+        fallbackToPrefit = fallbackToPrefit
     )
 }
+
+#' @rdname VariantPruningParam
+#' @aliases VariantPruningParam-class
+#' @exportClass VariantPruningParam
+setClass(
+    "VariantPruningParam",
+    contains = "MethodParam",
+    slots = c(
+        weightCutoff = "numeric",
+        csMinCor = "numeric",
+        pipRescue = "numeric",
+        maxVariants = "numeric"
+    )
+)
 
 #' @title Per-Gene Variant-Pruning Settings
 #' @description Which variants survive into each gene's weight matrix before
@@ -81,29 +91,38 @@ ctwasPriorConfig <- function(
 #'   all must-keep variants are retained and the remaining slots filled by
 #'   descending PIP (when available) or descending \code{|weight|}. Default
 #'   \code{Inf} (no cap).
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{VariantPruningParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' variantPruningConfig(weightCutoff = 1e-4, maxVariants = 5000)
+#' VariantPruningParam(weightCutoff = 1e-4, maxVariants = 5000)
 #' @export
-variantPruningConfig <- function(
+VariantPruningParam <- function(
     weightCutoff = 0,
     csMinCor = 0.8,
     pipRescue = 0,
     maxVariants = Inf
 ) {
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            weightCutoff = weightCutoff,
-            csMinCor = csMinCor,
-            pipRescue = pipRescue,
-            maxVariants = maxVariants
-        ),
-        extra = list(),
-        label = "variantPruningConfig",
-        engine = "variantPruning"
+    new(
+        "VariantPruningParam",
+        weightCutoff = weightCutoff,
+        csMinCor = csMinCor,
+        pipRescue = pipRescue,
+        maxVariants = maxVariants
     )
 }
+
+#' @rdname BoundaryMergeParam
+#' @aliases BoundaryMergeParam-class
+#' @exportClass BoundaryMergeParam
+setClass(
+    "BoundaryMergeParam",
+    contains = "MethodParam",
+    slots = c(
+        enabled = "logical",
+        pipThreshold = "numeric",
+        filterCs = "logical",
+        maxSnp = "numeric"
+    )
+)
 
 #' @title Boundary-Region Merge Settings
 #' @description Whether a high-PIP gene whose cis window straddles an
@@ -116,80 +135,40 @@ variantPruningConfig <- function(
 #' @param filterCs Logical. Require the boundary gene to be in a credible set
 #'   to be selected. Default \code{FALSE}.
 #' @param maxSnp Numeric. Per-merged-region SNP cap. Default \code{Inf}.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{BoundaryMergeParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' boundaryMergeConfig(enabled = TRUE, pipThreshold = 0.8)
+#' BoundaryMergeParam(enabled = TRUE, pipThreshold = 0.8)
 #' @export
-boundaryMergeConfig <- function(
+BoundaryMergeParam <- function(
     enabled = FALSE,
     pipThreshold = 0.5,
     filterCs = FALSE,
     maxSnp = Inf
 ) {
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            enabled = enabled,
-            pipThreshold = pipThreshold,
-            filterCs = filterCs,
-            maxSnp = maxSnp
-        ),
-        extra = list(),
-        label = "boundaryMergeConfig",
-        engine = "boundaryMerge"
-    )
-}
-
-#' @title Arguments For The ctwas Fitting Steps
-#' @description Options forwarded to ctwas. \code{ctwasPipeline} runs seven
-#'   ctwas functions in sequence and hands this one bundle to each, forwarding
-#'   only the arguments that step actually accepts -- so a setting meant for
-#'   the screening step does not disturb the fitting step. Names are therefore
-#'   checked against what those seven functions accept \emph{between them}.
-#'
-#'   The interface is deliberately flat, matching ctwas's own
-#'   \code{ctwas_sumstats}, which takes forty arguments in one signature and
-#'   distributes them to its internal steps itself.
-#' @param ... Any argument accepted by one of the ctwas steps, under ctwas's
-#'   own names (\code{niter}, \code{min_gene}, \code{min_nonSNP_PIP},
-#'   \code{numThreads}, ...). Note that settings pecotmr exposes as its own
-#'   parameters --- \code{thin}, \code{L}, \code{numThreads} on the pipeline ---
-#'   are passed there, not here.
-#' @return A \code{\link{MethodConfig}} object.
-#' @examples
-#' ctwasConfig(min_group_size = 1, min_gene = 1)
-#' @export
-ctwasConfig <- function(...) {
-    extra <- list(...)
-    .ctwasRefusePipelineOwned(extra)
-    .newMethodConfig(
-        .ctwasCallees(),
-        defaults = list(),
-        extra = extra,
-        label = "ctwasConfig",
-        engine = "ctwas",
-        # .ctwasInvoke intersects the bundle with each step's explicit
-        # formals, so the union check is sound even though three of the seven
-        # take `...`.
-        filtered = TRUE
+    new(
+        "BoundaryMergeParam",
+        enabled = enabled,
+        pipThreshold = pipThreshold,
+        filterCs = filterCs,
+        maxSnp = maxSnp
     )
 }
 
 # cTWAS arguments the pipeline owns as named settings of its own. They are
 # real ctwas formals, so the union check would accept them here -- but
 # .ctwasInvoke drops any name the pipeline already supplies, so a value set
-# through ctwasConfig() was silently discarded. Refuse it and say where the
+# through CtwasOptions() was silently discarded. Refuse it and say where the
 # setting lives instead.
 # @noRd
 .ctwasPipelineOwnedArgs <- function() {
     c(
-        thin = "ctwasPriorConfig(thin =)",
-        niter = "ctwasPriorConfig(niter =)",
-        niter_prefit = "ctwasPriorConfig(niterPrefit =)",
-        group_prior_var_structure = "ctwasPriorConfig(varStructure =)",
+        thin = "CtwasPriorParam(thin =)",
+        niter = "CtwasPriorParam(niter =)",
+        niter_prefit = "CtwasPriorParam(niterPrefit =)",
+        group_prior_var_structure = "CtwasPriorParam(varStructure =)",
         L = "the pipeline's own `L`",
         ncore = "the pipeline's own `numThreads`",
-        maxSNP = "boundaryMergeConfig(maxSnp =)"
+        maxSNP = "BoundaryMergeParam(maxSnp =)"
     )
 }
 
@@ -205,11 +184,34 @@ ctwasConfig <- function(...) {
         collapse = "; "
     )
     abort(glue(
-        "ctwasConfig: {str_flatten(clash, ', ')} ",
+        "CtwasOptions: {str_flatten(clash, ', ')} ",
         "{if (length(clash) == 1L) 'is' else 'are'} set by the pipeline, ",
         "not through methodArgs -- a value given here is dropped. Use: ",
         "{where}."
     ))
+}
+
+# Every bundle ctwasPipeline() takes, checked together. The argument names
+# in the messages are the pipeline's own, which drop the `Args` suffix.
+# @noRd
+.ctwasAssertBundles <- function(
+    ctwasPriorArgs,
+    variantPruningArgs,
+    boundaryMergeArgs,
+    methodArgs
+) {
+    .assertMethodParam(ctwasPriorArgs, "CtwasPriorParam", "ctwasPrior")
+    .assertMethodParam(
+        variantPruningArgs,
+        "VariantPruningParam",
+        "variantPruning"
+    )
+    .assertMethodParam(
+        boundaryMergeArgs,
+        "BoundaryMergeParam",
+        "boundaryMerge"
+    )
+    .assertMethodOptions(methodArgs, "CtwasOptions", "methodArgs")
 }
 
 #' @title Causal TWAS Pipeline (cTWAS, multi LD block)
@@ -277,18 +279,18 @@ ctwasConfig <- function(...) {
 #'   Default \code{5}. Pass-through to \code{ctwas::ctwas_sumstats}.
 #' @param numThreads Number of cores. Default \code{1}.
 #' @param ctwasPriorArgs The EM stage that estimates cTWAS's group priors, built
-#'   with \code{\link{ctwasPriorConfig}}: \code{thin}, \code{niterPrefit},
+#'   with \code{\link{CtwasPriorParam}}: \code{thin}, \code{niterPrefit},
 #'   \code{niter}, \code{varStructure} and \code{fallbackToPrefit}. Handed
-#'   whole to \code{\link{estCtwasParam}}.
+#'   whole to \code{\link{estCtwasGroupPriors}}.
 #' @param variantPruningArgs Which variants survive into each gene's weight
-#'   matrix, built with \code{\link{variantPruningConfig}}:
+#'   matrix, built with \code{\link{VariantPruningParam}}:
 #'   \code{weightCutoff}, \code{csMinCor}, \code{pipRescue} and
 #'   \code{maxVariants}. Handed whole to
 #'   \code{\link{assembleCtwasInputs}}. The \code{csMinCor} /
 #'   \code{pipRescue} rescues need a \code{fineMappingResult}.
 #' @param boundaryMergeArgs Whether a high-PIP gene straddling an LD-block
 #'   boundary has its regions merged and re-fine-mapped, built with
-#'   \code{\link{boundaryMergeConfig}}: \code{enabled} (default
+#'   \code{\link{BoundaryMergeParam}}: \code{enabled} (default
 #'   \code{FALSE}), \code{pipThreshold}, \code{filterCs} and
 #'   \code{maxSnp}.
 #' @param keepSnps Logical (length 1). When \code{TRUE}, retain the
@@ -299,7 +301,7 @@ ctwasConfig <- function(...) {
 #'   the SNP rows are the null background and are dropped from the structured
 #'   gene-level result.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
-#'   with \code{\link{ctwasConfig}}. Names are checked against what
+#'   with \code{\link{CtwasOptions}}. Names are checked against what
 #'   the ctwas steps accept between them.
 #' @return A \code{\link{CtwasResult}} collection: one row per \code{(gwasStudy,
 #'   study, context, method)}. A single-context run is one row per method; a
@@ -309,8 +311,9 @@ ctwasConfig <- function(...) {
 #'   fine-mapping posteriors (\code{finemap}), the run's \code{param}, and its
 #'   \code{regionInfo}. For the raw \code{ctwas::finemap_regions} list (e.g. to
 #'   feed \code{\link{mergeCtwasBoundaryRegions}}), call the granular
-#'   \code{\link{assembleCtwasInputs}} \eqn{\to} \code{\link{estCtwasParam}}
-#'   \eqn{\to} \code{\link{screenCtwasRegions}} \eqn{\to}
+#'   \code{\link{assembleCtwasInputs}} \eqn{\to}
+#'   \code{\link{estCtwasGroupPriors}} \eqn{\to}
+#'   \code{\link{screenCtwasRegions}} \eqn{\to}
 #'   \code{\link{finemapCtwasRegions}} path instead.
 #' @examples
 #' data(ctwasWeightsExample)
@@ -326,12 +329,12 @@ ctwasConfig <- function(...) {
 #' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 #'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
-#'   panelFilter = panelFilterConfig(mafCutoff = 0.0025))
+#'   panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 #' ctwasPipeline(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample),
-#'   ctwasPrior = ctwasPriorConfig(thin = 1, niterPrefit = 3, niter = 10,
+#'   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
-#'   methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0))
+#'   methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
 #' @export
 ctwasPipeline <- function(
     gwasSumStats,
@@ -341,24 +344,18 @@ ctwasPipeline <- function(
     method = NULL,
     L = 5L,
     numThreads = 1L,
-    ctwasPriorArgs = ctwasPriorConfig(),
-    variantPruningArgs = variantPruningConfig(),
-    boundaryMergeArgs = boundaryMergeConfig(),
+    ctwasPriorArgs = CtwasPriorParam(),
+    variantPruningArgs = VariantPruningParam(),
+    boundaryMergeArgs = BoundaryMergeParam(),
     keepSnps = FALSE,
-    methodArgs = ctwasConfig()
+    methodArgs = CtwasOptions()
 ) {
-    .assertMethodConfig(ctwasPriorArgs, "ctwasPriorConfig", "ctwasPrior")
-    .assertMethodConfig(
+    .ctwasAssertBundles(
+        ctwasPriorArgs,
         variantPruningArgs,
-        "variantPruningConfig",
-        "variantPruning"
-    )
-    .assertMethodConfig(
         boundaryMergeArgs,
-        "boundaryMergeConfig",
-        "boundaryMerge"
+        methodArgs
     )
-    .assertMethodConfig(methodArgs, "ctwasConfig", "methodArgs")
     .ctwasRequireNamedLists(gwasSumStats, twasWeights)
     methods <- .ctwasResolveMethods(twasWeights, method)
     gwasStudy <- .ctwasGwasStudy(gwasSumStats)
@@ -389,9 +386,51 @@ ctwasPipeline <- function(
     .ctwasRowsToResult(rows)
 }
 
+# The cTWAS run proper: estimate the group priors, screen regions against
+# them, fine-map what survived, and optionally re-fine-map the merged
+# boundary regions. Each stage takes the ctwas option list as one named
+# argument, so it is passed rather than spliced in as loose top-level args.
+# @noRd
+.ctwasRunStages <- function(
+    inputs,
+    ctwasPriorArgs,
+    boundaryMergeArgs,
+    L,
+    numThreads,
+    methodArgs
+) {
+    est <- estCtwasGroupPriors(
+        inputs,
+        ctwasPriorArgs = ctwasPriorArgs,
+        numThreads = numThreads,
+        methodArgs = methodArgs
+    )
+    screened <- screenCtwasRegions(
+        est,
+        numThreads = numThreads,
+        methodArgs = methodArgs
+    )
+    finemap <- finemapCtwasRegions(
+        screened,
+        L = L,
+        numThreads = numThreads,
+        methodArgs = methodArgs
+    )
+    if (!isTRUE(boundaryMergeArgs$enabled)) {
+        return(finemap)
+    }
+    .ctwasMaybeMerge(
+        finemap,
+        boundaryMergeArgs = boundaryMergeArgs,
+        L = L,
+        numThreads = numThreads,
+        methodArgs = methodArgs
+    )
+}
+
 # One cTWAS run for method `m`: assemble inputs -> estimate params -> screen ->
 # fine-map (optionally boundary-merge) -> per-context row-specs. `cfg` bundles
-# the ctwasPipeline arguments (incl. the `ctwasConfig` option list).
+# the ctwasPipeline arguments (incl. the `CtwasOptions` option list).
 # @noRd
 .ctwasRunMethod <- function(
     m,
@@ -416,36 +455,14 @@ ctwasPipeline <- function(
         method = m,
         variantPruningArgs = variantPruningArgs
     )
-    # The three stages each take the ctwas option list as one named argument
-    # now, so it is passed rather than spliced in as loose top-level args.
-    est <- estCtwasParam(
+    merged <- .ctwasRunStages(
         inputs,
         ctwasPriorArgs = ctwasPriorArgs,
-        numThreads = numThreads,
-        methodArgs = methodArgs
-    )
-    screened <- screenCtwasRegions(
-        est,
-        numThreads = numThreads,
-        methodArgs = methodArgs
-    )
-    finemap <- finemapCtwasRegions(
-        screened,
+        boundaryMergeArgs = boundaryMergeArgs,
         L = L,
         numThreads = numThreads,
         methodArgs = methodArgs
     )
-    merged <- if (isTRUE(boundaryMergeArgs$enabled)) {
-        .ctwasMaybeMerge(
-            finemap,
-            boundaryMergeArgs = boundaryMergeArgs,
-            L = L,
-            numThreads = numThreads,
-            methodArgs = methodArgs
-        )
-    } else {
-        finemap
-    }
     .ctwasRunToRows(
         merged,
         gwasStudy = gwasStudy,
@@ -491,7 +508,7 @@ ctwasPipeline <- function(
 #'   \code{\link{ctwasPipeline}} split.
 #'
 #' @details The returned list is the SHARED STATE threaded through
-#'   \code{\link{estCtwasParam}} -> \code{\link{screenCtwasRegions}} ->
+#'   \code{\link{estCtwasGroupPriors}} -> \code{\link{screenCtwasRegions}} ->
 #'   \code{\link{finemapCtwasRegions}}. Callers can short-circuit at any step
 #'   (e.g. override the estimated priors before fine-mapping) or call
 #'   \code{ctwasPipeline()} for the one-shot path.
@@ -515,7 +532,7 @@ ctwasPipeline <- function(
 #' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 #'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
-#'   panelFilter = panelFilterConfig(mafCutoff = 0.0025))
+#'   panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 #' assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
 #' @export
@@ -525,11 +542,11 @@ assembleCtwasInputs <- function(
     twasZ = NULL,
     fineMappingResult = NULL,
     method = NULL,
-    variantPruningArgs = variantPruningConfig()
+    variantPruningArgs = VariantPruningParam()
 ) {
-    .assertMethodConfig(
+    .assertMethodParam(
         variantPruningArgs,
-        "variantPruningConfig",
+        "VariantPruningParam",
         "variantPruning"
     )
     # The bundle's terminal: .ctwasBuildWeights and below take scalars.
@@ -917,7 +934,7 @@ assembleCtwasInputs <- function(
 #'
 #' @param inputs A list returned by \code{\link{assembleCtwasInputs}}.
 #' @param ctwasPriorArgs The EM settings, built with
-#'   \code{\link{ctwasPriorConfig}}: \code{thin} (SNP thinning when
+#'   \code{\link{CtwasPriorParam}}: \code{thin} (SNP thinning when
 #'   assembling region data), \code{niterPrefit} and \code{niter} (prefit /
 #'   accurate EM iterations), \code{varStructure}, and
 #'   \code{fallbackToPrefit} -- when \code{TRUE}, an accurate EM that fails
@@ -925,33 +942,33 @@ assembleCtwasInputs <- function(
 #'   and returning those (typically finite) priors.
 #' @param numThreads Number of cores.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
-#'   with \code{\link{ctwasConfig}}. Names are checked against what
+#'   with \code{\link{CtwasOptions}}. Names are checked against what
 #'   the ctwas steps accept between them.
 #' @return The \code{inputs} list augmented with \code{region_data},
 #'   \code{boundary_genes}, \code{z_gene}, and \code{param}.
 #' @examples
 #' data(ctwasInputsExample)
-#' estCtwasParam(ctwasInputsExample,
-#'   ctwasPrior = ctwasPriorConfig(thin = 1, niterPrefit = 3, niter = 10,
+#' estCtwasGroupPriors(ctwasInputsExample,
+#'   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
-#'   methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0))
+#'   methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
 #' @export
-estCtwasParam <- function(
+estCtwasGroupPriors <- function(
     inputs,
-    ctwasPriorArgs = ctwasPriorConfig(),
+    ctwasPriorArgs = CtwasPriorParam(),
     numThreads = 1L,
-    methodArgs = ctwasConfig()
+    methodArgs = CtwasOptions()
 ) {
-    .assertMethodConfig(ctwasPriorArgs, "ctwasPriorConfig", "ctwasPrior")
+    .assertMethodParam(ctwasPriorArgs, "CtwasPriorParam", "ctwasPrior")
     # The bundle's terminal: the EM helpers below take plain scalars.
     thin <- ctwasPriorArgs$thin
     niterPrefit <- ctwasPriorArgs$niterPrefit
     niter <- ctwasPriorArgs$niter
     groupPriorVarStructure <- ctwasPriorArgs$varStructure
     fallbackToPrefit <- ctwasPriorArgs$fallbackToPrefit
-    .assertMethodConfig(methodArgs, "ctwasConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "CtwasOptions", "methodArgs")
     if (!requireNamespace("ctwas", quietly = TRUE)) {
-        abort("Package 'ctwas' is required for estCtwasParam.")
+        abort("Package 'ctwas' is required for estCtwasGroupPriors.")
     }
     numThreads <- as.integer(numThreads)
     inputs <- .ctwasResolveLdPaths(inputs)
@@ -984,89 +1001,6 @@ estCtwasParam <- function(
             boundary_genes = boundaryGenes,
             param = paramRes
         )
-    )
-}
-
-# z_gene for assemble_region_data (which requires it non-NULL): use the caller's
-# inputs$z_gene, else compute via ctwas::compute_gene_z (mirrors
-# ctwas_sumstats). Routed through .ctwasInvoke so `methodArgs` reaches it --
-# this was the one ctwas step ctwasConfig() could not configure.
-# @noRd
-.ctwasEnsureZGene <- function(inputs, numThreads, extra = list()) {
-    if (!is.null(inputs$z_gene)) {
-        return(inputs$z_gene)
-    }
-    .ctwasInvoke(
-        ctwas::compute_gene_z,
-        list(
-            z_snp = inputs$z_snp,
-            weights = inputs$weights,
-            ncore = numThreads
-        ),
-        extra = extra
-    )
-}
-
-# assemble_region_data -> the per-region list (keyed by region_id). It does NOT
-# echo z_gene or return boundary genes; both are recovered separately.
-# @noRd
-.ctwasAssembleRegionData <- function(inputs, zGene, thin, numThreads, extra) {
-    .ctwasInvoke(
-        ctwas::assemble_region_data,
-        list(
-            region_info = inputs$region_info,
-            z_snp = inputs$z_snp,
-            z_gene = zGene,
-            weights = inputs$weights,
-            snp_map = inputs$snp_map,
-            thin = thin,
-            ncore = numThreads
-        ),
-        extra = extra
-    )
-}
-
-# Boundary genes (computed internally by assemble_region_data for adjustment but
-# never returned) recovered via ctwas::get_boundary_genes; NULL for one region.
-# @noRd
-.ctwasBoundaryGenes <- function(inputs, numThreads, extra) {
-    if (nrow(inputs$region_info) <= 1L) {
-        return(NULL)
-    }
-    .ctwasInvoke(
-        ctwas::get_boundary_genes,
-        list(
-            region_info = inputs$region_info,
-            weights = inputs$weights,
-            ncore = numThreads
-        ),
-        extra = extra
-    )
-}
-
-# The accurate EM (ctwas::est_param) invocation, split out so
-# .ctwasEstParamOrFallback can run it directly (no fallback) or inside a
-# tryCatch
-# (with fallback) without duplicating the argument assembly.
-# @noRd
-.ctwasEstParamAccurate <- function(
-    regionData,
-    niterPrefit,
-    niter,
-    groupPriorVarStructure,
-    numThreads,
-    extra
-) {
-    .ctwasInvoke(
-        ctwas::est_param,
-        list(
-            region_data = regionData,
-            niter_prefit = as.integer(niterPrefit),
-            niter = as.integer(niter),
-            group_prior_var_structure = groupPriorVarStructure,
-            ncore = numThreads
-        ),
-        extra = extra
     )
 }
 
@@ -1110,7 +1044,7 @@ estCtwasParam <- function(
         ),
         error = function(cnd) {
             msg <- glue(
-                "estCtwasParam: accurate EM unusable; falling back to ",
+                "estCtwasGroupPriors: accurate EM unusable; falling back to ",
                 "prefit estimates."
             )
             inform(msg, parent = cnd)
@@ -1123,74 +1057,6 @@ estCtwasParam <- function(
                 extra = extra
             )
         }
-    )
-}
-
-#' Screen cTWAS regions
-#'
-#' @description Step 3 of the three-step \code{\link{ctwasPipeline}}: runs
-#'   \code{ctwas::screen_regions} on the \code{\link{estCtwasParam}} result and
-#'   returns the screened-region set. Use this entry point to substitute
-#'   hand-tuned priors for the ones estimated in step 2 (e.g. when the accurate
-#'   EM diverges to NaN and you want to recover the prefit values).
-#'
-#' @param estResult A list returned by \code{\link{estCtwasParam}}.
-#' @param numThreads Number of cores.
-#' @param methodArgs Additional arguments forwarded to ctwas, built
-#'   with \code{\link{ctwasConfig}}. Names are checked against what
-#'   the ctwas steps accept between them.
-#' @return The \code{estResult} list augmented with \code{screen_res} (the full
-#'   ctwas output) and \code{screened_region_data}.
-#' @importFrom purrr map compact
-#' @examples
-#' data(ctwasEstExample)
-#' screenCtwasRegions(ctwasEstExample)
-#' @export
-screenCtwasRegions <- function(
-    estResult,
-    numThreads = 1L,
-    methodArgs = ctwasConfig()
-) {
-    .assertMethodConfig(methodArgs, "ctwasConfig", "methodArgs")
-    if (!requireNamespace("ctwas", quietly = TRUE)) {
-        abort("Package 'ctwas' is required for screenCtwasRegions.")
-    }
-    estResult <- .ctwasResolveLdPaths(estResult)
-    # ctwas::screen_regions requires thin = 1 region_data; expand the
-    # thinned set first when assemble_region_data was called with thin < 1
-    # (matches ctwas_sumstats's own expand-before-screen step).
-    thinVals <- compact(map(estResult$region_data, "thin"))
-    needsExpand <- length(thinVals) > 0L && min(list_c(thinVals)) < 1
-    regionDataForScreen <- if (needsExpand) {
-        .ctwasInvoke(
-            ctwas::expand_region_data,
-            list(
-                region_data = estResult$region_data,
-                snp_map = estResult$snp_map,
-                z_snp = estResult$z_snp,
-                ncore = as.integer(numThreads)
-            ),
-            extra = methodArgs
-        )
-    } else {
-        estResult$region_data
-    }
-    screenRes <- .ctwasInvoke(
-        ctwas::screen_regions,
-        list(
-            region_data = regionDataForScreen,
-            group_prior = estResult$param$group_prior,
-            group_prior_var = estResult$param$group_prior_var,
-            ncore = as.integer(numThreads)
-        ),
-        extra = methodArgs
-    )
-    c(
-        estResult,
-        list(
-            screen_res = screenRes,
-            screened_region_data = screenRes$screened_region_data
-        )
     )
 }
 
@@ -1207,7 +1073,7 @@ screenCtwasRegions <- function(
 #' @param L Pass-through.
 #' @param numThreads Number of cores.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
-#'   with \code{\link{ctwasConfig}}. Names are checked against what
+#'   with \code{\link{CtwasOptions}}. Names are checked against what
 #'   the ctwas steps accept between them.
 #' @return A list mirroring \code{ctwas::ctwas_sumstats}'s output:
 #'   \code{z_gene}, \code{param}, \code{finemap_res}, \code{susie_alpha_res},
@@ -1226,13 +1092,13 @@ screenCtwasRegions <- function(
 #' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 #'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
-#'   panelFilter = panelFilterConfig(mafCutoff = 0.0025))
+#'   panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 #' inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
-#' est <- estCtwasParam(inp,
-#'   ctwasPrior = ctwasPriorConfig(thin = 1, niterPrefit = 3, niter = 10,
+#' est <- estCtwasGroupPriors(inp,
+#'   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
-#'   methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0))
+#'   methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
 #' screened <- screenCtwasRegions(est)
 #' finemapCtwasRegions(screened, L = 5L)
 #' @export
@@ -1240,34 +1106,14 @@ finemapCtwasRegions <- function(
     screenResult,
     L = 5L,
     numThreads = 1L,
-    methodArgs = ctwasConfig()
+    methodArgs = CtwasOptions()
 ) {
-    .assertMethodConfig(methodArgs, "ctwasConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "CtwasOptions", "methodArgs")
     if (!requireNamespace("ctwas", quietly = TRUE)) {
         abort("Package 'ctwas' is required for finemapCtwasRegions.")
     }
     screenResult <- .ctwasResolveLdPaths(screenResult)
-    rd <- screenResult$screened_region_data
-    fmRes <- if (length(rd) == 0L) {
-        list(finemap_res = NULL, susie_alpha_res = NULL)
-    } else {
-        .ctwasInvoke(
-            ctwas::finemap_regions,
-            list(
-                region_data = rd,
-                LD_map = screenResult$LD_map,
-                weights = screenResult$weights,
-                group_prior = screenResult$param$group_prior,
-                group_prior_var = screenResult$param$group_prior_var,
-                L = as.integer(L),
-                LD_format = "custom",
-                LD_loader_fun = screenResult$LD_loader_fun,
-                snpinfo_loader_fun = screenResult$snpinfo_loader_fun,
-                ncore = as.integer(numThreads)
-            ),
-            extra = methodArgs
-        )
-    }
+    fmRes <- .ctwasFinemapOrEmpty(screenResult, L, numThreads, methodArgs)
     # Repair cTWAS's molecular_id mislabel (first-"|" split of our composite
     # id).
     list(
@@ -1321,7 +1167,7 @@ finemapCtwasRegions <- function(
 #'   re-fine-mapping (LD path only). Default \code{5}.
 #' @param numThreads Number of cores. Default \code{1}.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
-#'   with \code{\link{ctwasConfig}}. Names are checked against what
+#'   with \code{\link{CtwasOptions}}. Names are checked against what
 #'   the ctwas steps accept between them.
 #' @return The \code{finemapResult} list with \code{finemap_res},
 #'   \code{susie_alpha_res}, \code{region_data}, \code{region_info},
@@ -1340,9 +1186,9 @@ mergeCtwasBoundaryRegions <- function(
     maxSNP = Inf,
     L = 5L,
     numThreads = 1L,
-    methodArgs = ctwasConfig()
+    methodArgs = CtwasOptions()
 ) {
-    .assertMethodConfig(methodArgs, "ctwasConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "CtwasOptions", "methodArgs")
     if (!requireNamespace("ctwas", quietly = TRUE)) {
         abort("Package 'ctwas' is required for mergeCtwasBoundaryRegions.")
     }
@@ -1364,7 +1210,7 @@ mergeCtwasBoundaryRegions <- function(
         numThreads
     )
     fa <- .ctwasMergeDispatch(finemapResult, common, L)
-    # Flatten the record before merging: c() on a list and a MethodConfig (a
+    # Flatten the record before merging: c() on a list and a MethodOptions (a
     # SimpleList) appends the S4 object as ONE unnamed element rather than
     # splicing its entries, and exec() would then hand that object to ctwas
     # as a positional argument.
@@ -1401,30 +1247,6 @@ mergeCtwasBoundaryRegions <- function(
     )
 }
 
-# Pick the LD vs no-LD region-merging fn + args. ctwas's postprocess_*()
-# forward `...` into finemap_regions, so the LD loader closures must ride in the
-# explicit arg list (not filtered through .ctwasInvoke).
-# @noRd
-.ctwasMergeDispatch <- function(finemapResult, common, L) {
-    if (is.null(finemapResult$LD_loader_fun)) {
-        return(list(
-            fn = ctwas::postprocess_region_merging_noLD,
-            args = common
-        ))
-    }
-    args <- c(
-        common,
-        list(
-            LD_map = finemapResult$LD_map,
-            L = as.integer(L),
-            LD_format = "custom",
-            LD_loader_fun = finemapResult$LD_loader_fun,
-            snpinfo_loader_fun = finemapResult$snpinfo_loader_fun
-        )
-    )
-    list(fn = ctwas::postprocess_region_merging, args = args)
-}
-
 # Write region-merging outputs back onto the finemap result (only components
 # ctwas actually returned).
 # @noRd
@@ -1449,7 +1271,7 @@ mergeCtwasBoundaryRegions <- function(
 # arguments always win over caller-supplied `...`.
 # @noRd
 .ctwasInvoke <- function(fn, args, extra = list()) {
-    # The bundle arrives as a MethodConfig record; everything below is ordinary
+    # The bundle arrives as a MethodOptions record; everything below is ordinary
     # list work, so flatten it once at the boundary.
     extra <- as.list(extra)
     if (length(extra) > 0L) {
@@ -2197,7 +2019,7 @@ mergeCtwasBoundaryRegions <- function(
     CtwasResultEntry(
         finemap = .ctwasRangePayload(fm, geneCoords),
         susieAlpha = .ctwasRangePayload(sa, geneCoords),
-        param = runResult$param,
+        groupPriors = runResult$param,
         regionInfo = .ctwasRangeRegionInfo(runResult$region_info)
     )
 }
@@ -2411,7 +2233,7 @@ mergeCtwasBoundaryRegions <- function(
 #'   \code{\link{mergeCtwasBoundaryRegions}}) into the structured, per-(study,
 #'   context) \code{\link{CtwasResult}} -- the same decomposition
 #'   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
-#'   granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasParam}
+#'   granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasGroupPriors}
 #'   \eqn{\to} \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions}
 #'   path. The GWAS study is read from \code{z_snp$study} and the (single)
 #'   weight method from the gene ids.

@@ -10,7 +10,7 @@ context("regularized_regression - signal recovery")
 # ============================================================================
 
 # Helper: simulate a small sparse linear model with binomial genotypes.
-.simulate_sparse_xy <- function(
+.simulateSparseXY <- function(
     n = 200,
     p = 20,
     signal_idx = c(3, 10, 15),
@@ -27,7 +27,7 @@ context("regularized_regression - signal recovery")
 
 test_that("lassoWeights recovers signal direction on simulated data", {
     skip_if_not_installed("glmnet")
-    sim <- .simulate_sparse_xy()
+    sim <- .simulateSparseXY()
     w <- lassoWeights(sim$X, sim$y)
     expect_equal(length(w), ncol(sim$X))
     expect_true(all(is.finite(w)))
@@ -36,7 +36,7 @@ test_that("lassoWeights recovers signal direction on simulated data", {
 
 test_that("scadWeights recovers signal indices on simulated data", {
     skip_if_not_installed("ncvreg")
-    sim <- .simulate_sparse_xy()
+    sim <- .simulateSparseXY()
     w <- scadWeights(sim$X, sim$y, nfolds = 5)
     expect_equal(length(w), ncol(sim$X))
     expect_true(all(is.finite(w)))
@@ -47,7 +47,7 @@ test_that("scadWeights recovers signal indices on simulated data", {
 
 test_that("l0learnWeights with default L0 penalty recovers signal indices", {
     skip_if_not_installed("L0Learn")
-    sim <- .simulate_sparse_xy()
+    sim <- .simulateSparseXY()
     w <- l0learnWeights(sim$X, sim$y, penalty = "L0", nFolds = 5)
     expect_equal(length(w), ncol(sim$X))
     expect_true(all(is.finite(w)))
@@ -57,7 +57,7 @@ test_that("l0learnWeights with default L0 penalty recovers signal indices", {
 
 test_that("l0learnWeights with L0L2 penalty recovers signal direction", {
     skip_if_not_installed("L0Learn")
-    sim <- .simulate_sparse_xy()
+    sim <- .simulateSparseXY()
     w <- l0learnWeights(sim$X, sim$y, penalty = "L0L2", nFolds = 5)
     expect_equal(length(w), ncol(sim$X))
     expect_true(all(is.finite(w)))
@@ -67,7 +67,7 @@ test_that("l0learnWeights with L0L2 penalty recovers signal direction", {
 
 test_that("dprWeights with VB fitting recovers signal direction", {
     skip_if_not_installed("RcppDPR")
-    sim <- .simulate_sparse_xy()
+    sim <- .simulateSparseXY()
     w <- dprWeights(sim$X, sim$y, fittingMethod = "VB")
     expect_equal(length(w), ncol(sim$X))
     expect_true(all(is.finite(w)))

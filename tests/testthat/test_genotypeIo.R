@@ -62,7 +62,7 @@ test_that("findValidFilePath works", {
 })
 
 
-dummy_geno_data <- function(
+dummyGenoData <- function(
     number_of_samples = 10,
     number_of_snps = 10,
     sample_start_id = 1,
@@ -147,7 +147,7 @@ dummy_geno_data <- function(
     return(X)
 }
 
-dummy_pheno_data <- function(
+dummyPhenoData <- function(
     number_of_samples = 10,
     number_of_phenotypes = 10,
     randomize = FALSE,
@@ -186,7 +186,7 @@ dummy_pheno_data <- function(
     return(pheno_data)
 }
 
-dummy_covar_data <- function(
+dummyCovarData <- function(
     number_of_samples = 10,
     number_of_covars = 10,
     row_na = FALSE,
@@ -533,7 +533,7 @@ test_that(".colocFilterCsByConcentration returns numeric index vector", {
     alpha_raw <- matrix(runif(n_L * n_vars), nrow = n_L)
     alpha_norm <- t(apply(alpha_raw, 1, function(x) x / sum(x)))
 
-    mock_susie <- list(
+    mockSusie <- list(
         alpha = alpha_norm,
         V = runif(n_L),
         lbf_variable = matrix(rnorm(n_L * n_vars), nrow = n_L),
@@ -549,7 +549,7 @@ test_that(".colocFilterCsByConcentration returns numeric index vector", {
     )
 
     result <- pecotmr:::.colocFilterCsByConcentration(
-        mock_susie,
+        mockSusie,
         coverage = 0.5,
         concentration = 0.5
     )
@@ -1232,7 +1232,7 @@ test_that("format detection supports dotted PLINK2 prefixes", {
 
 # Shared helper: validate the output structure from loadGenotypeRegion
 # (with returnVariantInfo=TRUE)
-check_genotype_result <- function(
+checkGenotypeResult <- function(
     result,
     expected_nrow = n_samples,
     expected_ncol = n_variants,
@@ -1313,7 +1313,7 @@ test_that("loadGenotypeRegion filters plink2 by region", {
         region = region_sub,
         returnVariantInfo = TRUE
     )
-    check_genotype_result(result, expected_ncol = 134L, label = "plink2 region")
+    checkGenotypeResult(result, expected_ncol = 134L, label = "plink2 region")
     expect_true(all(
         result$variant_info$pos >= 17513228 &
             result$variant_info$pos <= 17550000
@@ -1354,7 +1354,7 @@ test_that("loadGenotypeRegion loads VCF via dispatch", {
         vcf_path,
         returnVariantInfo = TRUE
     ))
-    check_genotype_result(result, label = "dispatch vcf")
+    checkGenotypeResult(result, label = "dispatch vcf")
 })
 
 test_that("loadGenotypeRegion filters VCF by region", {
@@ -1365,7 +1365,7 @@ test_that("loadGenotypeRegion filters VCF by region", {
         region = region_sub,
         returnVariantInfo = TRUE
     ))
-    check_genotype_result(result, expected_ncol = 134L, label = "vcf region")
+    checkGenotypeResult(result, expected_ncol = 134L, label = "vcf region")
     expect_true(all(
         result$variant_info$pos >= 17513228 &
             result$variant_info$pos <= 17550000
@@ -1400,7 +1400,7 @@ test_that("loadGenotypeRegion loads GDS via dispatch", {
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
     result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
-    check_genotype_result(result, label = "dispatch gds")
+    checkGenotypeResult(result, label = "dispatch gds")
 })
 
 test_that("loadGenotypeRegion filters GDS by region", {
@@ -1411,7 +1411,7 @@ test_that("loadGenotypeRegion filters GDS by region", {
         region = region_sub,
         returnVariantInfo = TRUE
     )
-    check_genotype_result(result, expected_ncol = 134L, label = "gds region")
+    checkGenotypeResult(result, expected_ncol = 134L, label = "gds region")
     expect_true(all(
         result$variant_info$pos >= 17513228 &
             result$variant_info$pos <= 17550000
@@ -1479,20 +1479,20 @@ test_that("loadGenotypeRegion dispatches to VCF by extension", {
         vcf_path,
         returnVariantInfo = TRUE
     ))
-    check_genotype_result(result, label = "dispatch vcf")
+    checkGenotypeResult(result, label = "dispatch vcf")
 })
 
 test_that("loadGenotypeRegion dispatches to GDS by extension", {
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
     result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
-    check_genotype_result(result, label = "dispatch gds")
+    checkGenotypeResult(result, label = "dispatch gds")
 })
 
 test_that("loadGenotypeRegion dispatches to PLINK2 by prefix", {
     skip_if_not_installed("pgenlibr")
     result <- loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
-    check_genotype_result(result, label = "dispatch plink2")
+    checkGenotypeResult(result, label = "dispatch plink2")
 })
 
 test_that("loadGenotypeRegion returns matrix when returnVariantInfo=FALSE", {

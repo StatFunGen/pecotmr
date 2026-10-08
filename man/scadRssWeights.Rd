@@ -11,7 +11,7 @@ scadRssWeights(
   gamma = 3.7,
   alpha = 1,
   selection = c("ldQuadratic", "minFbeta"),
-  methodArgs = penalizedRssConfig()
+  methodArgs = PenalizedRssOptions()
 )
 }
 \arguments{
@@ -31,9 +31,9 @@ sample sizes).}
 \code{"minFbeta"}.}
 
 \item{methodArgs}{Options forwarded to \code{penalizedRss}, built
-with \code{\link{penalizedRssConfig}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+with \code{\link{PenalizedRssOptions}}. A bare list is refused: it
+cannot be checked against the engine, so a misspelled option would
+be silently ignored.}
 }
 \value{
 A numeric vector of SNP coefficient weights.

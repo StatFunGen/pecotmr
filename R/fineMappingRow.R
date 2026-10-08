@@ -207,32 +207,6 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         !is.null(fit$alpha)
 }
 
-# Populate `obj$cred_band` via fsusieR's wavethresh/GenW band computation. That
-# function is registered as an S3 method but NOT exported, and the exported
-# affected_reg() depends on cred_band already being populated, so this internal
-# call is the only path that works across all post_processing modes. Guarded so
-# an upstream fsusieR change surfaces as a clear error, not a silent NULL.
-# @noRd
-#' @importFrom rlang try_fetch
-.fsusiePopulateCredibleBand <- function(fit) {
-    fn <- try_fetch(
-        get("update_cal_credible_band.susiF", envir = asNamespace("fsusieR")),
-        error = function(cnd) NULL
-    )
-    if (is.null(fn)) {
-        # Defensive guard against an upstream fsusieR rename; only reachable
-        # if fsusieR drops this unexported S3 method.
-        msg <- glue(
-            "fsusieR's internal update_cal_credible_band.susiF not found; ",
-            "cannot compute the fSuSiE credible band (upstream fsusieR API ",
-            "changed)."
-        )
-        abort(msg)
-    }
-    indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
-    fn(fit, indxLst)
-}
-
 # Chromosome of the fit's variants (matches getTopLoci's `chrom`, no "chr").
 # @noRd
 .fsusieChrom <- function(fit) {
@@ -349,42 +323,6 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         map_dbl(retained[lastWins], .fsusieLabelPurity, topLoci = topLoci)
     )
     list(label = label, purity = purity)
-}
-
-# @noRd
-.fsusieAffectedRegionsFit <- function(fit, topLoci = NULL) {
-    if (!.isFsusieFit(fit)) {
-        return(GenomicRanges::GRanges())
-    }
-    fit <- .fsusiePopulateCredibleBand(fit)
-    raw <- try_fetch(fsusieR::affected_reg(fit), error = function(cnd) NULL)
-    if (is.null(raw) || nrow(raw) == 0L) {
-        return(GenomicRanges::GRanges())
-    }
-    reg <- as_tibble(raw)
-    chrom <- .fsusieChrom(fit)
-    grid <- as.numeric(fit$outing_grid)
-    csMap <- .fsusieCsMapFromTopLoci(fit, topLoci)
-    csKey <- as.character(reg$CS)
-    # Effect direction over each region (sign of the fitted effect curve), which
-    # upstream affected_reg() collapses away.
-    direction <- map_chr(
-        seq_len(nrow(reg)),
-        .fsusieRegionDirection,
-        grid = grid,
-        reg = reg,
-        fit = fit
-    )
-    GenomicRanges::GRanges(
-        seqnames = str_c("chr", str_remove(chrom, "^chr")),
-        ranges = IRanges::IRanges(
-            start = as.integer(reg$Start),
-            end = as.integer(reg$End)
-        ),
-        cs = unname(csMap$label[csKey]),
-        purity = unname(csMap$purity[csKey]),
-        direction = direction
-    )
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------

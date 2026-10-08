@@ -7,14 +7,14 @@
 colocPipeline(
   qtlFineMappingResult,
   gwasInput,
-  priors = colocPriorConfig(),
-  lbfFilterArgs = colocLbfFilterConfig(),
-  gwasFineMappingArgs = gwasFineMappingConfig(),
+  priors = ColocPriorParam(),
+  lbfFilterArgs = ColocLbfFilterParam(),
+  gwasFineMappingArgs = GwasFineMappingParam(),
   returnGwasFineMapping = FALSE,
   enrichment = NULL,
   adjustPips = TRUE,
   alleleFlip = TRUE,
-  methodArgs = colocConfig()
+  methodArgs = ColocOptions()
 )
 }
 \arguments{
@@ -28,13 +28,13 @@ fine-map inline (\code{\link{QtlSumStats}} or
 \code{\link{GwasSumStats}}).}
 
 \item{priors}{Per-variant prior probabilities, built with
-\code{\link{colocPriorConfig}}: \code{p1} (QTL signal), \code{p2} (GWAS
+\code{\link{ColocPriorParam}}: \code{p1} (QTL signal), \code{p2} (GWAS
 signal) and \code{p12} (shared). Mutually exclusive with
 \code{enrichment}, which derives the same three.}
 
 \item{lbfFilterArgs}{Credible-set filtering applied before scoring,
 built with
-\code{\link{colocLbfFilterConfig}}. \code{filterLbfCs} keeps only effects
+\code{\link{ColocLbfFilterParam}}. \code{filterLbfCs} keeps only effects
 that produced a credible set; supplying \code{secondary} instead runs a
 concentration filter at that coverage, where an effect is kept only if
 its credible set spans fewer than
@@ -46,7 +46,7 @@ apply once \code{filterLbfCs} or \code{secondary} selects another.}
 
 \item{gwasFineMappingArgs}{How \code{gwasInput} is fine-mapped when it is
 summary statistics rather than a fine-mapping result, built with
-\code{\link{gwasFineMappingConfig}}: \code{methods},
+\code{\link{GwasFineMappingParam}}: \code{methods},
 \code{credibleSet}, \code{rss}, \code{panelFilter},
 \code{addSusieInf} and \code{fitRetention}. Inert when
 \code{gwasInput} is already fine-mapped. \code{credibleSet} is the one
@@ -93,7 +93,7 @@ is coding-invariant, so no sign change is needed); when FALSE, match on
 exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 
 \item{methodArgs}{Additional arguments forwarded to
-\code{coloc::coloc.bf_bf}, built with \code{\link{colocConfig}}. The
+\code{coloc::coloc.bf_bf}, built with \code{\link{ColocOptions}}. The
 prior probabilities are set through \code{priors} instead, since the
 enrichment adjustment reads them too.}
 }
@@ -170,7 +170,7 @@ This pipeline preserves all three.
     \item \code{gwasInput} is a \code{\link{QtlSumStats}} or a
           \code{\link{GwasSumStats}}: it is fine-mapped inline by
           \code{\link{fineMappingPipeline}} with the supplied
-          \code{gwasFineMappingConfig()} (methods default \code{"susie"}).
+          \code{GwasFineMappingParam()} (methods default \code{"susie"}).
     \item \code{gwasInput} is a fine-mapping result: used directly; no
           inline fine-mapping.
   }

@@ -10,7 +10,7 @@ cv <- function(...) pecotmr:::.crossValidateWeights(...)
 
 # One "mock" method whose weights are all 1s over the training columns, so a
 # held-out prediction is the row sum of that sample's (training-column) dosages.
-mock_fit_fold <- function(Xtr, Ytr, j, ...) {
+mockFitFold <- function(Xtr, Ytr, j, ...) {
     list(
         weights = list(
             mock = matrix(
@@ -24,7 +24,7 @@ mock_fit_fold <- function(Xtr, Ytr, j, ...) {
     )
 }
 
-mk_xy <- function(n = 30, p = 6, k = 1, seed = 1) {
+mkXY <- function(n = 30, p = 6, k = 1, seed = 1) {
     set.seed(seed)
     X <- matrix(
         rnorm(n * p),
@@ -45,37 +45,37 @@ mk_xy <- function(n = 30, p = 6, k = 1, seed = 1) {
 }
 
 test_that("input is validated", {
-    d <- mk_xy()
+    d <- mkXY()
     expect_error(
-        cv(d$X, d$Y, fold = 0, fitFold = mock_fit_fold),
+        cv(d$X, d$Y, fold = 0, fitFold = mockFitFold),
         "Must be >= 1"
     )
     expect_error(
-        cv(d$X, d$Y, fold = "a", fitFold = mock_fit_fold),
+        cv(d$X, d$Y, fold = "a", fitFold = mockFitFold),
         "Must be of type 'count'"
     )
     expect_error(
-        cv(as.data.frame(d$X), d$Y, fold = 2, fitFold = mock_fit_fold),
+        cv(as.data.frame(d$X), d$Y, fold = 2, fitFold = mockFitFold),
         "Must be of type 'matrix'"
     )
     expect_error(
-        cv(d$X, d$Y[1:5, , drop = FALSE], fold = 2, fitFold = mock_fit_fold),
+        cv(d$X, d$Y[1:5, , drop = FALSE], fold = 2, fitFold = mockFitFold),
         "Must have exactly 30 rows"
     )
     expect_error(
-        cv(d$X, d$Y, fitFold = mock_fit_fold),
+        cv(d$X, d$Y, fitFold = mockFitFold),
         "Either 'fold' or 'samplePartitions'"
     )
 })
 
 test_that("Y as a vector is converted to a matrix with a message", {
-    d <- mk_xy(k = 1)
+    d <- mkXY(k = 1)
     expect_message(
         cv(
             d$X,
             as.numeric(d$Y),
             fold = 2,
-            fitFold = mock_fit_fold,
+            fitFold = mockFitFold,
             verbose = 1
         ),
         "Y converted to matrix"
@@ -83,15 +83,15 @@ test_that("Y as a vector is converted to a matrix with a message", {
 })
 
 test_that("output keys use the canonical <method>_predicted / _performance", {
-    d <- mk_xy()
-    r <- suppressMessages(cv(d$X, d$Y, fold = 3, fitFold = mock_fit_fold))
+    d <- mkXY()
+    r <- suppressMessages(cv(d$X, d$Y, fold = 3, fitFold = mockFitFold))
     expect_equal(names(r$prediction), "mock_predicted")
     expect_equal(names(r$performance), "mock_performance")
 })
 
 test_that("performance carries the six metric colnames and outcome rownames", {
-    d <- mk_xy(k = 2)
-    r <- suppressMessages(cv(d$X, d$Y, fold = 3, fitFold = mock_fit_fold))
+    d <- mkXY(k = 2)
+    r <- suppressMessages(cv(d$X, d$Y, fold = 3, fitFold = mockFitFold))
     perf <- r$performance[["mock_performance"]]
     expect_equal(
         colnames(perf),
@@ -101,15 +101,15 @@ test_that("performance carries the six metric colnames and outcome rownames", {
 })
 
 test_that("every sample is predicted exactly once across folds", {
-    d <- mk_xy(n = 30)
-    r <- suppressMessages(cv(d$X, d$Y, fold = 5, fitFold = mock_fit_fold))
+    d <- mkXY(n = 30)
+    r <- suppressMessages(cv(d$X, d$Y, fold = 5, fitFold = mockFitFold))
     pred <- r$prediction[["mock_predicted"]]
     expect_equal(nrow(pred), nrow(d$X))
     expect_false(any(is.na(pred)))
 })
 
 test_that("a provided samplePartition is reused; a fold mismatch warns", {
-    d <- mk_xy(n = 12)
+    d <- mkXY(n = 12)
     sp <- data.frame(
         Sample = rownames(d$X),
         Fold = rep(1:3, each = 4),
@@ -119,7 +119,7 @@ test_that("a provided samplePartition is reused; a fold mismatch warns", {
         d$X,
         d$Y,
         samplePartitions = sp,
-        fitFold = mock_fit_fold
+        fitFold = mockFitFold
     ))
     expect_equal(r$samplePartition, sp)
     expect_message(
@@ -128,7 +128,7 @@ test_that("a provided samplePartition is reused; a fold mismatch warns", {
             d$Y,
             fold = 2,
             samplePartitions = sp,
-            fitFold = mock_fit_fold,
+            fitFold = mockFitFold,
             verbose = 1
         ),
         "does not match"
@@ -136,25 +136,25 @@ test_that("a provided samplePartition is reused; a fold mismatch warns", {
 })
 
 test_that("a samplePartition with unknown samples errors", {
-    d <- mk_xy()
+    d <- mkXY()
     sp <- data.frame(
         Sample = paste0("zzz", 1:5),
         Fold = rep(1:2, length.out = 5)
     )
     expect_error(
-        cv(d$X, d$Y, samplePartitions = sp, fitFold = mock_fit_fold),
+        cv(d$X, d$Y, samplePartitions = sp, fitFold = mockFitFold),
         "do not match"
     )
 })
 
 test_that("maxNumVariants subsamples variants with a message", {
-    d <- mk_xy(p = 20)
+    d <- mkXY(p = 20)
     expect_message(
         cv(
             d$X,
             d$Y,
             fold = 2,
-            fitFold = mock_fit_fold,
+            fitFold = mockFitFold,
             maxNumVariants = 8,
             verbose = 1
         ),
@@ -163,13 +163,13 @@ test_that("maxNumVariants subsamples variants with a message", {
 })
 
 test_that("maxNumVariants with variantsToKeep retains the specified variants", {
-    d <- mk_xy(p = 20)
+    d <- mkXY(p = 20)
     expect_message(
         cv(
             d$X,
             d$Y,
             fold = 2,
-            fitFold = mock_fit_fold,
+            fitFold = mockFitFold,
             maxNumVariants = 8,
             variantsToKeep = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
             verbose = 1
@@ -179,19 +179,19 @@ test_that("maxNumVariants with variantsToKeep retains the specified variants", {
 })
 
 test_that("a degenerate fold (empty train/test) is skipped, not errored", {
-    d <- mk_xy(n = 10)
+    d <- mkXY(n = 10)
     sp <- data.frame(Sample = rownames(d$X), Fold = rep(1L, nrow(d$X)))
     r <- suppressMessages(cv(
         d$X,
         d$Y,
         samplePartitions = sp,
-        fitFold = mock_fit_fold
+        fitFold = mockFitFold
     ))
     expect_true(all(is.na(r$prediction[["mock_predicted"]])))
 })
 
 test_that("zero-variance predictions yield NA metrics with a message", {
-    d <- mk_xy()
+    d <- mkXY()
     zero_fit <- function(Xtr, Ytr, j, ...) {
         list(
             weights = list(
@@ -213,13 +213,13 @@ test_that("zero-variance predictions yield NA metrics with a message", {
 })
 
 test_that("the parallel fold path matches the serial one", {
-    d <- mk_xy(n = 40, seed = 7)
+    d <- mkXY(n = 40, seed = 7)
     set.seed(1)
     r1 <- suppressMessages(cv(
         d$X,
         d$Y,
         fold = 4,
-        fitFold = mock_fit_fold,
+        fitFold = mockFitFold,
         numThreads = 1
     ))
     set.seed(1)
@@ -227,14 +227,14 @@ test_that("the parallel fold path matches the serial one", {
         d$X,
         d$Y,
         fold = 4,
-        fitFold = mock_fit_fold,
+        fitFold = mockFitFold,
         numThreads = 2
     ))
     expect_equal(r1$prediction, r2$prediction)
 })
 
 test_that("fold fits are collected only when fitRetention asks", {
-    d <- mk_xy()
+    d <- mkXY()
     fit_with_model <- function(Xtr, Ytr, j, ...) {
         list(
             weights = list(
@@ -267,21 +267,21 @@ test_that("fold fits are collected only when fitRetention asks", {
 })
 
 test_that("X without rownames inherits the sample names (from Y)", {
-    d <- mk_xy()
+    d <- mkXY()
     X2 <- d$X
     rownames(X2) <- NULL
-    r <- suppressMessages(cv(X2, d$Y, fold = 3, fitFold = mock_fit_fold))
+    r <- suppressMessages(cv(X2, d$Y, fold = 3, fitFold = mockFitFold))
     expect_equal(rownames(r$prediction$mock_predicted), rownames(d$Y))
 })
 
 test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds the cap", {
-    d <- mk_xy(p = 6)
+    d <- mkXY(p = 6)
     expect_message(
         cv(
             d$X,
             d$Y,
             fold = 2,
-            fitFold = mock_fit_fold,
+            fitFold = mockFitFold,
             maxNumVariants = 2,
             variantsToKeep = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
             verbose = 1
@@ -291,7 +291,7 @@ test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds
 })
 
 test_that("a NULL per-method weight matrix yields an all-NA prediction, not an error", {
-    d <- mk_xy()
+    d <- mkXY()
     fit_with_null <- function(Xtr, Ytr, j, ...) {
         list(
             weights = list(
@@ -348,4 +348,44 @@ test_that("a seed makes a CV call reproducible without leaking RNG state", {
 
 test_that(".cvPartitionKey answers NULL when there is no partition to key", {
     expect_null(pecotmr:::.cvPartitionKey(NULL))
+})
+
+test_that("sumstats inputs ignore residualization but refuse crossValidation", {
+    # The asymmetry follows from the defaults, not from taste. CV is off
+    # unless asked for (folds = 0), so a non-default value on a
+    # summary-statistics run is an explicit request for something the input
+    # cannot do -> error. Residualization is ON by default, so refusing a
+    # non-default would reject the DEFAULT bundle and force every sumstats
+    # caller to unset it -> ignore.
+    expect_equal(CrossValidationParam()$folds, 0)
+    # Residualization's flags are NULL = unset, which the accessors read as
+    # "on"; the default bundle therefore pins nothing and is safe to carry
+    # onto an input that cannot residualize.
+    expect_length(ResidualizationParam(), 0L)
+    # CV is refused on a summary-statistics input ...
+    expect_error(
+        pecotmr:::.cvRefuseOnSumstats(
+            CrossValidationParam(folds = 5),
+            "fineMappingPipeline",
+            "QtlSumStats"
+        ),
+        "cross-validation"
+    )
+    # ... while the DEFAULT CV bundle passes, so one bundle still travels to
+    # either input kind.
+    expect_silent(pecotmr:::.cvRefuseOnSumstats(
+        CrossValidationParam(),
+        "fineMappingPipeline",
+        "QtlSumStats"
+    ))
+    # Residualization has no equivalent refusal: the sumstats workers do not
+    # take it at all, so it cannot reach an engine and cannot error.
+    for (fn in c(
+        ".fmPipelineQtlSumStats",
+        ".fmPipelineGwas",
+        ".twasPipelineQtlSumStats"
+    )) {
+        f <- get(fn, envir = asNamespace("pecotmr"))
+        expect_false("residualization" %in% names(formals(f)), label = fn)
+    }
 })

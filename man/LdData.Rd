@@ -26,7 +26,11 @@ a matrix of already-extracted dosages, or NULL.}
 \item{variants}{A GRanges with variant metadata (must have variant_id in
 mcols, plus A1, A2).}
 
-\item{blockMetadata}{GRanges of blocks, or data.frame with block info.}
+\item{blockMetadata}{Block boundaries: a \code{GRanges}, a
+\code{data.frame} or a \code{DataFrame}. Columns absent for a
+single block are derived from \code{variants}, so a bare genomic
+span -- or nothing at all -- is enough; with several blocks the
+index columns must be supplied.}
 
 \item{nRef}{Integer, reference panel sample size.}
 

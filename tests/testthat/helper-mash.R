@@ -28,3 +28,19 @@ mashFixture <- function(n = 60L) {
 mashTinyPrior <- function(k = 3L) {
     list(identity = diag(k), shared = matrix(1, k, k))
 }
+
+# Shared by test_mashPipeline.R and test_mashWrapper.R.
+.mashTestModel <- function(ss) {
+    suppressMessages(suppressWarnings(
+        mashModelFit(
+            list(random = ss),
+            alpha = 0,
+            priorCovariances = list(
+                identity = diag(3),
+                effectA = diag(c(1, 0, 0))
+            ),
+            vhat = diag(3),
+            setSeed = 1L
+        )
+    ))
+}

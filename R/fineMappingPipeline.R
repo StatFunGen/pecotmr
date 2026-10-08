@@ -1,4 +1,4 @@
-#' @include qtlSumStats.R gwasSumStats.R
+#' @include qtlSumStats.R gwasSumStats.R MethodParam.R
 #' @title Fine-Mapping Pipeline
 #' @description S4-dispatched per-region fine-mapping entry point that
 #'   replaces the deprecated \code{univariateAnalysisPipeline},
@@ -91,7 +91,7 @@
 #'         reanalysis on the RSS path): these are not exposed as
 #'         dedicated method tokens. Callers who want a single-effect
 #'         fit can request it via per-method kwargs, e.g.
-#'         \code{methods = fineMappingMethodsConfig(susie = list(L = 1))}
+#'         \code{methods = FineMappingMethodsParam(susie = list(L = 1))}
 #'         \code{methods} parameter).
 #'   \item \code{loadRssData} and explicit
 #'         \code{ldReferenceMetaFile} arguments: the new
@@ -118,10 +118,10 @@
 #'           \code{c("susie", "susieInf", "mvsusie")} (any subset of
 #'           \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
 #'           subject to per-class compatibility).
-#'     \item A \code{\link{fineMappingMethodsConfig}} record keyed by method
+#'     \item A \code{\link{FineMappingMethodsParam}} record keyed by method
 #'           token, where each value is a list of per-method kwargs to
 #'           splice into the underlying fitter, e.g.
-#'           \code{fineMappingMethodsConfig(susie = list(L = 1, refine =
+#'           \code{FineMappingMethodsParam(susie = list(L = 1, refine =
 #'                      FALSE), mvsusie = list(max_iter = 500))}. Each
 #'           entry is checked against the engine that receives it. Mirrors the
 #'           convention of \code{\link{twasWeightsPipeline}}'s
@@ -154,7 +154,7 @@
 #'   A choice between methods rather than a property of the credible sets,
 #'   which is why it stands alone.
 #' @param credibleSetArgs How credible sets are built and reported, built with
-#'   \code{\link{credibleSetConfig}}: \code{coverage} (default \code{0.95}),
+#'   \code{\link{CredibleSetParam}}: \code{coverage} (default \code{0.95}),
 #'   \code{secondaryCoverage} (\code{c(0.7, 0.5)}), \code{signalCutoff}
 #'   (the PIP cutoff for top-loci selection, \code{0.025}),
 #'   \code{minAbsCorr} (\code{0.8}) and \code{medianAbsCorr}
@@ -172,7 +172,7 @@
 #' @param fineMappingResult Optional existing \code{FineMappingResult} to use as
 #'   a resume cache; tuples already present are not refit.
 #' @param crossValidationArgs Cross-validation settings, built with
-#'   \code{\link{crossValidationConfig}}: \code{folds} (default \code{0}, no
+#'   \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
 #'   CV), \code{numThreads} for the per-fold refits, and \code{samplePartition}
 #'   to reuse a fixed partition across methods. When \code{folds > 1} each
 #'   method is refit on every fold's training samples and used to predict the
@@ -193,7 +193,7 @@
 #'   (no seeding).
 #' @param signalScreenArgs Individual-level single-effect (SER) pre-screen
 #'   applied to each residualized \code{(X, y)} block before a full fit,
-#'   built with \code{\link{signalScreenConfig}}. A susie model with
+#'   built with \code{\link{SignalScreenParam}}. A susie model with
 #'   \code{L = 1} is fit and the block is skipped unless the chosen metric
 #'   exceeds its cutoff:
 #'   \itemize{
@@ -205,7 +205,7 @@
 #'       factor or log Bayes factor from the \code{L = 1} fit.
 #'   }
 #'   Only one metric may be enabled, which
-#'   \code{\link{signalScreenConfig}} enforces when you build it. Unset (the
+#'   \code{\link{SignalScreenParam}} enforces when you build it. Unset (the
 #'   default) screens nothing. The summary-statistics analog lives in
 #'   \code{\link{summaryStatsQc}}.
 #' @param usePCA Logical (length 1). \code{QtlDataset} only. When \code{TRUE}
@@ -244,16 +244,19 @@
 #'   rare variant would need.
 #'
 #' @param genotypeFilterArgs Per-call overrides of the \code{QtlDataset}'s own
-#'   filters, built with \code{\link{genotypeFilterConfig}}. A field left unset
+#'   filters, built with \code{\link{GenotypeFilterParam}}. A field left unset
 #'   keeps the dataset's construct-time value, so
-#'   \code{genotypeFilterConfig(mafCutoff = 0)} pins the cutoff at zero while
-#'   \code{genotypeFilterConfig()} changes nothing. Applies to the
+#'   \code{GenotypeFilterParam(mafCutoff = 0)} pins the cutoff at zero while
+#'   \code{GenotypeFilterParam()} changes nothing. Applies to the
 #'   \code{QtlDataset} method only.
 #' @param panelFilterArgs LD-reference-panel filters for the summary-statistics
-#'   and GWAS methods, built with \code{\link{panelFilterConfig}}. See
+#'   and GWAS methods, built with \code{\link{PanelFilterParam}}. See
 #'   \emph{Panel filters on the RSS path} above.
-#' @param twasWeights Optional \code{\link{TwasWeights}} resume cache to reuse
-#'   previously fitted weights; \code{NULL} fits fresh.
+#' @param mrmashPrior Optional \code{\link{TwasWeights}} from a previous
+#'   mr.mash \code{\link{twasWeightsPipeline}} run, mined for the mvSuSiE
+#'   data-driven prior: the retained \code{mrmash} fits supply the prior
+#'   mixture, and their cross-validation payload supplies honest per-fold
+#'   priors. \code{NULL} uses the canonical prior instead.
 #' @param dataDrivenPriorWeightsCutoff Numeric or \code{NULL}. Cutoff below
 #'   which data-driven prior weights are zeroed; \code{NULL} disables the
 #'   cutoff.
@@ -261,7 +264,7 @@
 #'   phenotype/genotype data.
 #' @param verbose Verbosity (0 silent, 1 default). Default \code{1}.
 #' @param residualizationArgs Covariate residualization settings, built with
-#'   \code{\link{residualizationConfig}}: \code{phenotypeCovariates} and
+#'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 #'   \code{genotypeCovariates} name which covariates to regress out
 #'   (\code{NULL}, the default, uses every available one), and
 #'   \code{residualizePhenotype} / \code{residualizeGenotype} turn each side
@@ -286,7 +289,7 @@
 #'   either way --- its per-credible-set columns are governed by
 #'   \code{credibleSet}'s \code{perCsColumns}, not by this.
 #' @param rssArgs Summary-statistics solver settings for \code{QtlSumStats} /
-#'   \code{GwasSumStats} input, built with \code{\link{rssConfig}}:
+#'   \code{GwasSumStats} input, built with \code{\link{SusieRssParam}}:
 #'   \itemize{
 #'     \item \code{serFallback} (default \code{FALSE}) --- after each
 #'       multi-effect SuSiE-RSS fit, read susieR's finite-sample R
@@ -310,7 +313,7 @@
 #'       \code{"eb_mix"}.
 #'     \item \code{control} --- options for
 #'       \code{susieR::susie_rss_control()}, built with
-#'       \code{\link{susieRssControlConfig}}. This was a bare named list,
+#'       \code{\link{SusieRssControlOptions}}. This was a bare named list,
 #'       which meant a misspelled option was dropped silently; the
 #'       constructor checks the names against that function's live formals.
 #'   }
@@ -346,7 +349,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         "inputs first."
     ))
 }
-
 
 # =============================================================================
 # Method capability table -- unified naming, individual vs sumstat dispatch
@@ -432,7 +434,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # them with a clear pointer rather than an "unknown token" error.
 .fmTwasOnlyTokens <- c("mrmash")
 
-
 # Normalize a user-supplied `methods` argument into a character vector of
 # canonical tokens. Mirrors `.twasNormalizeMethods` but the fine-mapping
 # pipeline takes only a character vector (no preset strings, no list form).
@@ -440,7 +441,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # Normalize a user-supplied `methods` argument into `(tokens, methodArgs)`.
 #
 # Accepts: * character vector c("susie", "susieInf") -> empty kwargs per token
-# * a fineMappingMethodsConfig() record -> per-token kwargs, already checked
+# * a FineMappingMethodsParam() record -> per-token kwargs, already checked
 #
 # Names of the returned `methodArgs` always equal `tokens` (one entry per
 # token, empty list when the user supplied none). The fitters then
@@ -449,36 +450,48 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # Mirrors the convention of .twasNormalizeMethods so the two pipelines
 # expose the same shape on the user side.
 # @noRd
-.fmNormalizeMethods <- function(methods, L = 10L, Lgreedy = NULL) {
+.fmNormalizeMethods <- function(
+    methods,
+    inputKind,
+    L = 10L,
+    Lgreedy = NULL
+) {
     if (is.null(methods) || length(methods) == 0L) {
         msg <- glue(
             "fineMappingPipeline: `methods` must be a non-empty character ",
-            "vector or a fineMappingMethodsConfig() record."
+            "vector, a named list of per-method options, or a ",
+            "FineMappingMethodsParam() record."
         )
         abort(msg)
     }
     parsed <- if (is.character(methods)) {
         .fmMethodsFromTokens(methods)
-    } else if (.isMethodConfig(methods)) {
-        # A fineMappingMethodsConfig() record: already validated per token, so
-        # it only needs unpacking into the tokens + kwargs shape below.
+    } else if (is(methods, "MethodsSelectionParam") || is.list(methods)) {
+        # A plain named list is routable HERE even though the constructor
+        # refuses one under `methods`: this call knows its input class, so
+        # the overrides go into that path's slot and are checked against the
+        # engine that will actually receive them.
+        .methodsParamResolve(
+            .methodsParamFor(
+                methods,
+                inputKind,
+                "FineMappingMethodsParam",
+                "fineMappingPipeline"
+            ),
+            inputKind
+        )
+    } else if (.isMethodOptions(methods)) {
+        # The retired FineMappingMethodsParam() record.
         list(
             tokens = names(methods),
             methodArgs = map(as.list(methods), as.list)
         )
-    } else if (is.list(methods)) {
-        msg <- glue(
-            "fineMappingPipeline: a named list of <token> = <kwargs> must be ",
-            "built with fineMappingMethodsConfig(), so each method's options ",
-            "are checked against the engine that receives them. A plain ",
-            "character vector still runs the methods with their defaults."
-        )
-        abort(msg)
     } else {
         cls <- class(methods)[[1L]]
         msg <- glue(
-            "fineMappingPipeline: `methods` must be a character vector or ",
-            "a fineMappingMethodsConfig() record. Got class '{cls}'."
+            "fineMappingPipeline: `methods` must be a character vector, a ",
+            "named list of per-method options, or a ",
+            "FineMappingMethodsParam() record. Got class '{cls}'."
         )
         abort(msg)
     }
@@ -538,7 +551,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         L_greedy = args[["L_greedy"]] %||% Lgreedy
     )
 }
-
 
 # Which engine a token actually reaches for a given input class. A method may
 # have one entry point for individual-level data and another for summary
@@ -699,7 +711,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     }
 }
 
-
 # Reject SumStats inputs that have not been QC'd via summaryStatsQc.
 # @noRd
 .fmAssertQcd <- function(sumstats) {
@@ -713,7 +724,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         abort(msg)
     }
 }
-
 
 # Given a `methods` vector, decide whether the SuSiE-inf chained-init
 # shortcut applies. Returns a list of (chainSusie, chainAsh, runInf,
@@ -736,7 +746,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         keepInf = keepInf
     )
 }
-
 
 # Optional resume-cache lookup. Returns the matching FineMappingRow from
 # `fineMappingResult` for the tuple (study, context, trait, method), or
@@ -792,7 +801,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     }
     .fmrRowParts(fineMappingResult, idx[[1L]])
 }
-
 
 # Build a QtlFineMappingResult collection from per-tuple parallel vectors.
 # `jointStudies`, `jointContexts`, `jointTraits` are optional character
@@ -1016,8 +1024,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     ldSketch,
     addSusieInf,
     methodArgs,
-    rssArgs,
-    rFiniteResolved
+    rssArgs
 ) {
     c(
         common,
@@ -1025,8 +1032,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
             ldSketch = ldSketch,
             addSusieInf = addSusieInf,
             methodArgs = methodArgs,
-            rssArgs = rssArgs,
-            rFiniteResolved = rFiniteResolved
+            rssArgs = rssArgs
         )
     )
 }
@@ -1053,12 +1059,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         nVar = zn$nVar,
         credibleSetArgs = cfg$credibleSetArgs,
         fitRetention = cfg$fitRetention,
-        # the resolved rFinite overrides what the caller asked for: it
-        # falls back to the panel's N when serFallback / rMismatch need one
-        rssArgs = list_assign(
-            as.list(cfg$rssArgs),
-            rFinite = cfg$rFiniteResolved
-        )
+        rssArgs = cfg$rssArgs
     )
 }
 
@@ -1180,31 +1181,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 }
 
 
-# Wrap one finemapping fit into a FineMappingRow via the surviving
-# post-processing helpers (postprocessFinemappingFits +
-# formatFinemappingOutput). Returns a bare FineMappingRow payload, ready
-# to be inserted into a FineMappingResult.
-# @noRd
-# Call `getResidualized{Phenotypes,Genotypes}` with the caller's
-# residualization settings.
-#
-# These used to scrape the four settings out of the call stack with
-# sys.frames() + get(envir = ), taking each from the first frame that
-# happened to define it. That worked only while every intermediate function
-# was a setMethod frame carrying those exact names, and it meant a caller
-# could change the residualization of a fit it never mentioned. The bundle
-# is an ordinary value, so it is passed.
-# @noRd
-.resArgsFor <- function(residualizationArgs) {
-    res <- residualizationArgs %||% residualizationConfig()
-    compact(list(
-        phenotypeCovariatesToResidualize = res$phenotypeCovariates,
-        genotypeCovariatesToResidualize = res$genotypeCovariates,
-        residualizePhenotypeCovariates = res$residualizePhenotype,
-        residualizeGenotypeCovariates = res$residualizeGenotype
-    ))
-}
-
 # The selector arguments are named rather than carried in `...`: an omitted
 # one must still fall through to the extractor's own default, so NULL entries
 # are dropped instead of forwarded. discard(is.null), not compact(): compact()
@@ -1222,7 +1198,14 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
     exec(
         getResidualizedPhenotypes,
-        !!!c(list(x = x), sel, .resArgsFor(residualizationArgs))
+        !!!c(
+            list(
+                x = x,
+                residualizationArgs = residualizationArgs %||%
+                    ResidualizationParam()
+            ),
+            sel
+        )
     )
 }
 
@@ -1247,7 +1230,14 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
     exec(
         getResidualizedGenotypes,
-        !!!c(list(x = x), sel, .resArgsFor(residualizationArgs))
+        !!!c(
+            list(
+                x = x,
+                residualizationArgs = residualizationArgs %||%
+                    ResidualizationParam()
+            ),
+            sel
+        )
     )
 }
 
@@ -1367,7 +1357,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     out$finemappingEntry
 }
 
-
 # --- Multi-region (jointRegions) helpers ------------------------------------
 
 # Resolve the per-trait X windows from a (region, jointRegions) pair. The cis
@@ -1393,93 +1382,25 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     }
 }
 
-# The canonical (non-reweighted) mvSuSiE mixture prior for residual variance
-# `V`:
-# create_mixture_prior(R) restricted to the group's conditions.
-# @noRd
-.fmCanonicalPrior <- function(V, conditionNames, R) {
-    list(
-        priorVariance = mvsusieR::create_mixture_prior(
-            R = R,
-            include_indices = conditionNames
-        ),
-        residualVariance = V
-    )
-}
-
-# Rebuild the mvSuSiE data-driven *reweighted* mixture prior + residual variance
-# from a stored mr.mash fit -- the lean payload
-# (list(dataDrivenPriorMatrices, w0, V)) that mrmashWeights() attaches at
-# fitRetention "slim" and twasWeightsPipeline keeps on the mrmash row. Shared
-# by the fine-mapping mvsusie consumer and the twas mvsusie_weights consumer.
-#
-# Reproduces the deleted multivariate_pipeline.R reweighting bit-identically:
-# rescaleCovW0(w0) collapses the expanded mr.mash weights onto the original
-# data-driven covariance matrices ($U), filters to surviving components, and
-# create_mixture_prior() wraps them, restricted to the fit's conditions
-# (`conditionNames` = colnames(Y)). `V` becomes mvsusie's residual_variance.
-# A NULL fit, NULL matrices, or no surviving component falls back to the
-# canonical create_mixture_prior(R), matching the legacy `else` branch.
-# Returns list(priorVariance, residualVariance) (residualVariance NULL only
-# when no fit was supplied at all).
-# @noRd
-.buildMvsusieReweightedPrior <- function(
-    fitParts,
-    conditionNames,
-    weightsTol = 1e-10,
-    overrideU = NULL
-) {
-    R <- length(conditionNames)
-    if (is.null(fitParts)) {
-        return(.fmCanonicalPrior(NULL, conditionNames, R))
-    }
-    # `overrideU` (mode C / hybrid): reuse this fit's reweighted mixture weights
-    # (w0) and residual variance (V) but swap in a different set of data-driven
-    # covariance matrices -- the per-fold mash prior U. Components are matched
-    # to w0 by name, so the override U must share component names with the fit.
-    ddpm <- if (!is.null(overrideU)) {
-        overrideU
-    } else {
-        fitParts$dataDrivenPriorMatrices
-    }
-    if (is.null(ddpm) || is.null(ddpm$U)) {
-        return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
-    }
-    rescaled <- rescaleCovW0(fitParts$w0)
-    w0Updated <- rescaled[is_in(names(rescaled), names(ddpm$U))]
-    if (length(w0Updated) == 0L) {
-        return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
-    }
-    mixture <- list(matrices = ddpm$U[names(w0Updated)], weights = w0Updated)
-    list(
-        priorVariance = mvsusieR::create_mixture_prior(
-            mixture_prior = mixture,
-            weights_tol = weightsTol,
-            include_indices = conditionNames
-        ),
-        residualVariance = fitParts$V
-    )
-}
-
 # Rows of a TwasWeights whose method is mr.mash and whose identity matches
 # every axis the caller FIXED. A NULL axis means "do not filter on it".
 # @noRd
-.fmMrmashSelector <- function(twasWeights, study, trait, context) {
+.fmMrmashSelector <- function(mrmashPrior, study, trait, context) {
     axes <- compact(list(study = study, trait = trait, context = context))
     reduce(
         names(axes),
         .fmMrmashNarrow,
-        twasWeights = twasWeights,
+        mrmashPrior = mrmashPrior,
         axes = axes,
-        .init = as.character(twasWeights$method) == "mrmash"
+        .init = as.character(mrmashPrior$method) == "mrmash"
     )
 }
 
 # `.tupleColumn()` not `[[`: on a RangedTupleList `[[` extracts an ELEMENT
 # (the variant set), while the identity axes live in mcols.
 # @noRd
-.fmMrmashNarrow <- function(sel, axis, twasWeights, axes) {
-    sel & as.character(.tupleColumn(twasWeights, axis)) == axes[[axis]]
+.fmMrmashNarrow <- function(sel, axis, mrmashPrior, axes) {
+    sel & as.character(.tupleColumn(mrmashPrior, axis)) == axes[[axis]]
 }
 
 # Locate the retained mr.mash fit payload {dataDrivenPriorMatrices, w0, V} for
@@ -1499,20 +1420,20 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # back to the canonical prior).
 # @noRd
 .fmLookupMrmashFit <- function(
-    twasWeights,
+    mrmashPrior,
     study = NULL,
     trait = NULL,
     context = NULL
 ) {
-    if (is.null(twasWeights)) {
+    if (is.null(mrmashPrior)) {
         return(NULL)
     }
     # Each per-context mr.mash row of a joint group carries the SHARED joint
     # fit, so the consumer matches the FIXED axes and leaves the jointed axis
     # NULL (match-any). study/trait/context = NULL means "skip that axis".
-    sel <- .fmMrmashSelector(twasWeights, study, trait, context)
+    sel <- .fmMrmashSelector(mrmashPrior, study, trait, context)
     for (i in which(sel)) {
-        f <- getFits(.twrRowParts(twasWeights, i))
+        f <- getFits(.twrRowParts(mrmashPrior, i))
         if (!is.null(f)) return(f)
     }
     NULL
@@ -1526,17 +1447,17 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # NULL when no TwasWeights / no matching mr.mash CV result with fold fits.
 # @noRd
 .fmLookupMrmashCv <- function(
-    twasWeights,
+    mrmashPrior,
     study = NULL,
     trait = NULL,
     context = NULL
 ) {
-    if (is.null(twasWeights)) {
+    if (is.null(mrmashPrior)) {
         return(NULL)
     }
-    sel <- .fmMrmashSelector(twasWeights, study, trait, context)
+    sel <- .fmMrmashSelector(mrmashPrior, study, trait, context)
     for (i in which(sel)) {
-        cv <- getCvResult(.twrRowParts(twasWeights, i))
+        cv <- getCvResult(.twrRowParts(mrmashPrior, i))
         if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
     }
     NULL
@@ -1648,73 +1569,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         return(NULL)
     }
     `colnames<-`(scores[, seq_len(k), drop = FALSE], str_c("topPC", seq_len(k)))
-}
-
-# Per-column marginal-association z-scores of y on each column of X (univariate
-# regression z = betahat / sebetahat), used by the individual-level absZ screen.
-# @noRd
-.marginalZ <- function(X, y) {
-    ur <- susieR::univariate_regression(X, y)
-    ur$betahat / ur$sebetahat
-}
-
-# Single-effect (SER) pre-screen, individual-level. Reports whether a
-# residualized (X, y) block shows a strong enough signal (by the chosen metric)
-# to be worth a full fit. `screen` is a screen spec (see .asScreen): a legacy
-# PIP cutoff (numeric scalar, 0 = off) OR a resolved list(metric, cutoff) for
-# one of pip / absZ / bf / logBf. Ports the deleted multivariate_pipeline.R
-# `skipConditions` / susie_twas `pip_cutoff_to_skip` logic (the individual-level
-# analog of the sumstat-path `.applyEntryScreen`):
-#   * no screen (NULL / 0 / non-scalar numeric) -> always keep.
-#   * pip cutoff < 0 uses the adaptive 3 / nVariants threshold.
-#   * absZ needs no susie fit; pip/bf/logBf fit susie L = 1 once (its
-#     $lbf_variable gives the per-variant logBF for bf/logBf, $pip for pip).
-#   * NA entries of `y` are dropped before fitting.
-# The screen is advisory: too few samples/variants or a fit failure returns
-# `fallback` -- TRUE (default) keeps the block rather than discard a potentially
-# real signal (fineMapping / joint paths); colocboost passes FALSE to drop an
-# outcome it cannot screen. This is the single L = 1 SuSiE pre-screen shared by
-# .fmSerScreenColumns (joint) and .cbPipSkipOutcomes (colocboost).
-# @noRd
-.fmSerScreen <- function(X, y, screen, fallback = TRUE) {
-    scr <- .asScreen(screen)
-    if (is.null(scr)) {
-        return(TRUE)
-    }
-    ok <- !is.na(y)
-    if (sum(ok) < 2L || ncol(X) < 1L) {
-        return(fallback)
-    }
-    raw <- X[ok, , drop = FALSE]
-    # susieR needs a double X.
-    Xs <- if (is.double(raw)) raw else `storage.mode<-`(raw, "double")
-    ys <- y[ok]
-    metric <- scr$metric
-    cutoff <- scr$cutoff
-    if (metric == "absZ") {
-        z <- try_fetch(.marginalZ(Xs, ys), error = function(cnd) NULL)
-        if (is.null(z)) {
-            return(fallback)
-        }
-        return(any(abs(z) > cutoff, na.rm = TRUE))
-    }
-    fit <- try_fetch(
-        suppressMessages(susieR::susie(Xs, ys, L = 1L)),
-        error = function(cnd) NULL
-    )
-    if (is.null(fit)) {
-        return(fallback)
-    }
-    if (metric == "pip") {
-        thr <- if (cutoff < 0) 3 / ncol(Xs) else cutoff
-        return(any(fit$pip > thr, na.rm = TRUE))
-    }
-    maxLbf <- suppressWarnings(max(as.numeric(fit$lbf_variable), na.rm = TRUE))
-    if (!is.finite(maxLbf)) {
-        return(fallback)
-    }
-    # bf: cutoff on the raw BF scale -> compare in log space; logBf: log scale.
-    maxLbf > (if (metric == "bf") log(cutoff) else cutoff)
 }
 
 # Is a signal screen enabled? Any spec that .asScreen resolves to a screen
@@ -1867,7 +1721,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
 }
 
-
 # Merge per-method user kwargs onto a base arg list. `userArgs` is the
 # per-token kwargs supplied by the caller (e.g. `list(L = 1, refine =
 # FALSE)`); the capability table's `args` default fills in any keys the
@@ -1896,7 +1749,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # Wrap the remainder in the record the target's `methodArgs` expects, so a
 # target that demands a constructor gets one rather than the bare list it
 # would refuse. The constructor is read off the target's own default --
-# `methodArgs = mvsusieConfig()` names it -- so this needs no registry and
+# `methodArgs = MvsusieOptions()` names it -- so this needs no registry and
 # cannot drift from the signature. A target still defaulting to `list()`
 # gets the plain list.
 # @noRd
@@ -1929,7 +1782,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     }
     list_modify(withCaps, !!!compact(userArgs))
 }
-
 
 # .fmFitSusieIndiv / .fmFitSusieRss / .fmFitSusieSer (single SuSiE fits) now
 # live in fineMappingWrappers.R with the other method-fitting wrappers.
@@ -1983,7 +1835,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         }
     list(skipped = isTRUE(screened || empty), reason = reason)
 }
-
 
 # =============================================================================
 # Per-fold cross-validation of fine-mapping methods
@@ -2090,33 +1941,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
     out <- .fmAsMat(set_names(as.numeric(w), colnames(Xtr)))
     `attr<-`(out, "fit", .fmLeanFoldFit(fit, token))
-}
-
-# Per-fold mvsusie weights. Reuses the data-driven reweighted prior + residual
-# covariance from the full-data mr.mash fit on every fold -- the prior is over
-# conditions, identical across folds (only samples are held out). NULL mvPrior
-# -> canonical prior (unchanged behavior).
-# @noRd
-.fmFoldWeightsMv <- function(Xtr, Ytr, coverage, userArgs, mvPrior) {
-    baseArgs <- list(
-        X = Xtr,
-        Y = Ytr,
-        coverage = coverage,
-        prior_variance = if (is.null(mvPrior)) {
-            mvsusieR::create_mixture_prior(R = ncol(Ytr))
-        } else {
-            mvPrior$priorVariance
-        }
-    )
-    withPrior <- list_assign(
-        baseArgs,
-        !!!compact(list(residual_variance = mvPrior$residualVariance))
-    )
-    mvArgs <- .fmMergeUserArgs(withPrior, "mvsusie", userArgs)
-    fit <- exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, mvArgs))
-    raw <- as.matrix(mvsusieWeights(mvsusieFit = fit))
-    W <- `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
-    `attr<-`(W, "fit", .fmLeanFoldFit(fit, "mvsusie"))
 }
 
 # Per-fold fsusie weights.
@@ -2279,9 +2103,15 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         # possible.
         fitRetention = "slim"
     )
-    # Recorded at the producer so a consumer can refuse fits trained on a
-    # different split; without it a mismatched partition would leak held-out
-    # samples into training and inflate the CV metrics.
+    .fmCvResult(res)
+}
+
+# The cross-validation result, with the sample partition recorded on the
+# fold fits. Recorded at the producer so a consumer can refuse fits trained
+# on a different split; without it a mismatched partition would leak
+# held-out samples into training and inflate the CV metrics.
+# @noRd
+.fmCvResult <- function(res) {
     foldFits <- if (is.null(res$foldFits)) {
         NULL
     } else {
@@ -2346,7 +2176,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         cvResult = cvResult
     )
 }
-
 
 # =============================================================================
 # Residualized genotype for one X window: the trait-derived cis block when
@@ -2616,39 +2445,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # QtlDataset method
 # =============================================================================
 
-# The fine-mapping settings the QtlDataset joint phase and the per-tuple
-# dispatch both act on. Named once here so the two records below cannot
-# disagree about the same setting; each extends this with the fields only it
-# needs. Explicitly constructed, not captured from the calling frame.
-# @noRd
-.fmQdsCommonCfg <- function(
-    data,
-    cisWindow,
-    credibleSetArgs,
-    screen,
-    xRegions,
-    crossValidationArgs,
-    residualizationArgs,
-    fineMappingResult,
-    fitRetention,
-    verbose,
-    seed
-) {
-    list(
-        data = data,
-        cisWindow = cisWindow,
-        credibleSetArgs = credibleSetArgs,
-        screen = screen,
-        xRegions = xRegions,
-        crossValidationArgs = crossValidationArgs,
-        residualizationArgs = residualizationArgs,
-        fineMappingResult = fineMappingResult,
-        fitRetention = fitRetention,
-        verbose = verbose,
-        seed = seed
-    )
-}
-
 # The settings every QtlDataset joint-phase function forwards to the shared
 # joint dispatcher: the common fine-mapping record plus the scope and
 # TWAS-weight fields only the joint engine uses.
@@ -2657,7 +2453,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     common,
     contexts,
     traitId,
-    twasWeights,
+    mrmashPrior,
     dataDrivenPriorWeightsCutoff
 ) {
     c(
@@ -2665,7 +2461,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         list(
             contexts = contexts,
             traitId = traitId,
-            twasWeights = twasWeights,
+            mrmashPrior = mrmashPrior,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
         )
     )
@@ -2686,7 +2482,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         cfg$verbose,
         methodArgs = methodArgs,
         xRegions = cfg$xRegions,
-        twasWeights = cfg$twasWeights,
+        mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff,
         crossValidationArgs = cfg$crossValidationArgs,
         residualizationArgs = cfg$residualizationArgs,
@@ -2710,7 +2506,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     cisWindow,
     jointRegions
 ) {
-    .assertMethodConfig(signalScreenArgs, "signalScreenConfig", "signalScreen")
+    .assertMethodParam(signalScreenArgs, "SignalScreenParam", "signalScreen")
     screen <- .screenResolve(signalScreenArgs)
     data <- .qtlApplyFilterOverrides(data, genotypeFilterArgs)
     if (!is.null(region) && !is.null(cisWindow)) {
@@ -2778,7 +2574,12 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 
 .fmQdsResolveTokens <- function(jointSpecification, methods, L, Lgreedy, cfg) {
     parsedJointSpec <- parseJointSpecification(jointSpecification, cfg$data)
-    norm <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
+    norm <- .fmNormalizeMethods(
+        methods,
+        inputKind = "QtlDataset",
+        L = L,
+        Lgreedy = Lgreedy
+    )
     .fmCheckMethodCapabilities(norm$tokens, "QtlDataset")
     .fmCheckMethodArgsForInput(norm$methodArgs, "QtlDataset")
     .fmQdsJointPhase(parsedJointSpec, norm, cfg)
@@ -3017,28 +2818,31 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 .fmPipelineQtlDataset <- function(
     data,
     methods,
-    contexts,
-    traitId,
-    region,
-    cisWindow,
-    genotypeFilterArgs,
-    jointRegions,
-    jointSpecification,
-    addSusieInf,
-    credibleSetArgs,
-    fineMappingResult,
-    twasWeights,
-    dataDrivenPriorWeightsCutoff,
-    verbose,
-    crossValidationArgs,
-    residualizationArgs,
-    seed,
-    naAction,
-    usePCA,
-    nPCs,
-    signalScreenArgs,
-    fitRetention
+    contexts = NULL,
+    traitId = NULL,
+    region = NULL,
+    cisWindow = NULL,
+    # Per-call genotype-filter overrides; NULL = use the QtlDataset's
+    # construct-time slot value (applied lazily at extraction).
+    genotypeFilterArgs = GenotypeFilterParam(),
+    jointRegions = FALSE,
+    jointSpecification = NULL,
+    addSusieInf = TRUE,
+    credibleSetArgs = CredibleSetParam(),
+    fineMappingResult = NULL,
+    crossValidationArgs = CrossValidationParam(),
+    residualizationArgs = ResidualizationParam(),
+    signalScreenArgs = SignalScreenParam(),
+    usePCA = FALSE,
+    nPCs = 10L,
+    seed = NULL,
+    mrmashPrior = NULL,
+    dataDrivenPriorWeightsCutoff = 1e-10,
+    naAction = c("drop", "impute"),
+    verbose = 1,
+    fitRetention = c("slim", "full")
 ) {
+    fitRetention <- arg_match(fitRetention)
     naAction <- arg_match(naAction, c("drop", "impute"))
     if (!is.null(seed)) {
         withr::local_seed(as.integer(seed))
@@ -3061,7 +2865,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     cvCfg <- .cvResolve(crossValidationArgs)
     # The settings the joint phase and the per-tuple dispatch share, named
     # once so the two records built from it cannot disagree.
-    commonCfg <- .fmQdsCommonCfg(
+    commonCfg <- list(
         data = data,
         cisWindow = cisWindow,
         credibleSetArgs = credibleSetArgs,
@@ -3078,7 +2882,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         commonCfg,
         contexts = contexts,
         traitId = traitId,
-        twasWeights = twasWeights,
+        mrmashPrior = mrmashPrior,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
     )
     rt <- .fmQdsResolveTokens(
@@ -3143,62 +2947,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 setMethod(
     "fineMappingPipeline",
     "QtlDataset",
-    function(
-        data,
-        methods,
-        contexts = NULL,
-        traitId = NULL,
-        region = NULL,
-        cisWindow = NULL,
-        # Per-call genotype-filter overrides; NULL = use the QtlDataset's
-        # construct-time slot value (applied lazily at extraction).
-        genotypeFilterArgs = genotypeFilterConfig(),
-        jointRegions = FALSE,
-        jointSpecification = NULL,
-        addSusieInf = TRUE,
-        credibleSetArgs = credibleSetConfig(),
-        fineMappingResult = NULL,
-        crossValidationArgs = crossValidationConfig(),
-        residualizationArgs = residualizationConfig(),
-        signalScreenArgs = signalScreenConfig(),
-        usePCA = FALSE,
-        nPCs = 10L,
-        seed = NULL,
-        twasWeights = NULL,
-        dataDrivenPriorWeightsCutoff = 1e-10,
-        naAction = c("drop", "impute"),
-        verbose = 1,
-        fitRetention = c("slim", "full")
-    ) {
-        fitRetention <- arg_match(fitRetention)
-        .fmPipelineQtlDataset(
-            data = data,
-            methods = methods,
-            contexts = contexts,
-            traitId = traitId,
-            region = region,
-            cisWindow = cisWindow,
-            genotypeFilterArgs = genotypeFilterArgs,
-            jointRegions = jointRegions,
-            jointSpecification = jointSpecification,
-            addSusieInf = addSusieInf,
-            credibleSetArgs = credibleSetArgs,
-            fineMappingResult = fineMappingResult,
-            twasWeights = twasWeights,
-            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-            verbose = verbose,
-            crossValidationArgs = crossValidationArgs,
-            residualizationArgs = residualizationArgs,
-            seed = seed,
-            naAction = naAction,
-            usePCA = usePCA,
-            nPCs = nPCs,
-            signalScreenArgs = signalScreenArgs,
-            fitRetention = fitRetention
-        )
-    }
+    .fmPipelineQtlDataset
 )
-
 
 # =============================================================================
 # MultiStudyQtlDataset method
@@ -3213,32 +2963,37 @@ setMethod(
     if (length(m) == 0L) {
         return(NULL)
     }
-    fmArgs <- list(
+    # Every setting is named. `cfg` also carries panelFilterArgs and rssArgs,
+    # which belong to the summary-statistics path: a study's own genotypes
+    # are filtered by genotypeFilterArgs, so those two are deliberately not
+    # forwarded here. A name this entry point does not accept would be an
+    # "unused argument" error, so the only way this can go wrong is by
+    # OMITTING a setting -- which test_fineMappingPipeline.R pins.
+    fineMappingPipeline(
         data = qd,
         methods = m,
+        jointSpecification = NULL,
         contexts = cfg$contexts,
         traitId = cfg$traitId,
         region = cfg$region,
         cisWindow = cfg$cisWindow,
         jointRegions = cfg$jointRegions,
-        jointSpecification = NULL,
         addSusieInf = cfg$addSusieInf,
         credibleSetArgs = cfg$credibleSetArgs,
         fineMappingResult = cfg$fineMappingResult,
+        verbose = cfg$verbose,
         crossValidationArgs = cfg$crossValidationArgs,
         residualizationArgs = cfg$residualizationArgs,
-        signalScreenArgs = cfg$signalScreenArgs,
         seed = cfg$seed,
         naAction = cfg$naAction,
-        verbose = cfg$verbose,
+        signalScreenArgs = cfg$signalScreenArgs,
         genotypeFilterArgs = cfg$genotypeFilterArgs,
         usePCA = cfg$usePCA,
         nPCs = cfg$nPCs,
         fitRetention = cfg$fitRetention,
-        twasWeights = cfg$twasWeights,
+        mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
     )
-    exec(fineMappingPipeline, !!!fmArgs)
 }
 
 # Embedded-sumstats fine-mapping worker for .multiStudyPipelineDriver: recurse
@@ -3249,23 +3004,27 @@ setMethod(
     if (length(m) == 0L) {
         return(NULL)
     }
-    fmArgs <- list(
+    # Summary statistics carry no genotypes and no per-study region
+    # selection: the region is already baked into the input, and there is
+    # nothing to residualize, screen, cross-validate or PCA. `cfg` carries
+    # those settings for the individual-level sibling and they are not
+    # forwarded here.
+    fineMappingPipeline(
         data = ss,
         methods = m,
+        jointSpecification = NULL,
         contexts = cfg$contexts,
         traitId = cfg$traitId,
-        jointSpecification = NULL,
         addSusieInf = cfg$addSusieInf,
+        credibleSetArgs = cfg$credibleSetArgs,
         fineMappingResult = cfg$fineMappingResult,
         verbose = cfg$verbose,
-        credibleSetArgs = cfg$credibleSetArgs,
-        fitRetention = cfg$fitRetention,
-        rssArgs = cfg$rssArgs,
         panelFilterArgs = cfg$panelFilterArgs,
-        twasWeights = cfg$twasWeights,
+        rssArgs = cfg$rssArgs,
+        fitRetention = cfg$fitRetention,
+        mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
     )
-    exec(fineMappingPipeline, !!!fmArgs)
 }
 
 # Validate the naAction choice and the region + cisWindow combination, then
@@ -3286,35 +3045,6 @@ setMethod(
     )
 }
 
-# The settings every MultiStudyQtlDataset joint-phase function forwards to
-# the shared joint dispatcher. Gathered once so the phase and the dispatcher
-# each name them a single time. Explicitly constructed, not captured from the
-# calling frame.
-# @noRd
-.fmMsJointCfg <- function(
-    data,
-    contexts,
-    traitId,
-    cisWindow,
-    credibleSetArgs,
-    verbose,
-    xRegions,
-    twasWeights,
-    dataDrivenPriorWeightsCutoff
-) {
-    list(
-        data = data,
-        contexts = contexts,
-        traitId = traitId,
-        cisWindow = cisWindow,
-        credibleSetArgs = credibleSetArgs,
-        verbose = verbose,
-        xRegions = xRegions,
-        twasWeights = twasWeights,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
-    )
-}
-
 # Run the joint engine for a MultiStudyQtlDataset with the given spec + token
 # set.
 # @noRd
@@ -3329,7 +3059,7 @@ setMethod(
         cfg$verbose,
         methodArgs = methodArgs,
         xRegions = cfg$xRegions,
-        twasWeights = cfg$twasWeights,
+        mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
     )
 }
@@ -3385,7 +3115,23 @@ setMethod(
 # @noRd
 .fmMsResolveTokens <- function(jointSpecification, methods, L, Lgreedy, cfg) {
     parsedJointSpec <- parseJointSpecification(jointSpecification, cfg$data)
-    norm <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
+    # A MultiStudyQtlDataset may hold individual-level studies AND summary
+    # statistics, so `methods` is translated here -- where the dataset is in
+    # hand -- and the Param is what travels into the per-component
+    # recursion. Each component then dispatches on its own class and reads
+    # the slot for its own path.
+    methods <- .methodsParamForMulti(
+        methods,
+        "FineMappingMethodsParam",
+        "fineMappingPipeline",
+        !is.null(getSumStats(cfg$data))
+    )
+    norm <- .fmNormalizeMethods(
+        methods,
+        inputKind = "QtlDataset",
+        L = L,
+        Lgreedy = Lgreedy
+    )
     .fmCheckMethodCapabilities(norm$tokens, "MultiStudyQtlDataset")
     .fmCheckMethodArgsForInput(norm$methodArgs, "MultiStudyQtlDataset")
     phase <- .fmMsJointPhase(parsedJointSpec, norm, cfg)
@@ -3409,67 +3155,6 @@ setMethod(
     )
 }
 
-# Assemble the per-component driver config for a MultiStudyQtlDataset run:
-# individual-capable methods route to the per-study QtlDatasets, sumstat-capable
-# methods (incl. the sumstat-only `ser`) to the embedded QtlSumStats.
-# @noRd
-.fmMsConfig <- function(
-    methods,
-    contexts,
-    traitId,
-    region,
-    cisWindow,
-    jointRegions,
-    addSusieInf,
-    credibleSetArgs,
-    fineMappingResult,
-    verbose,
-    crossValidationArgs,
-    residualizationArgs,
-    seed,
-    naAction,
-    signalScreenArgs,
-    genotypeFilterArgs,
-    panelFilterArgs,
-    rssArgs,
-    usePCA,
-    nPCs,
-    fitRetention,
-    twasWeights,
-    dataDrivenPriorWeightsCutoff
-) {
-    list(
-        methods = methods,
-        contexts = contexts,
-        traitId = traitId,
-        region = region,
-        cisWindow = cisWindow,
-        jointRegions = jointRegions,
-        addSusieInf = addSusieInf,
-        credibleSetArgs = credibleSetArgs,
-        fineMappingResult = fineMappingResult,
-        crossValidationArgs = crossValidationArgs,
-        residualizationArgs = residualizationArgs,
-        signalScreenArgs = signalScreenArgs,
-        seed = seed,
-        naAction = naAction,
-        verbose = verbose,
-        genotypeFilterArgs = genotypeFilterArgs,
-        panelFilterArgs = panelFilterArgs,
-        rssArgs = rssArgs,
-        usePCA = usePCA,
-        nPCs = nPCs,
-        fitRetention = fitRetention,
-        # The mvsusie reweighted-prior settings. They configure the prior
-        # wherever mvsusie runs, so the per-study recursions need them too --
-        # not only the cross-study joint phase, which reads them from
-        # jointCfg. Left out, a per-study mvsusie silently refit mr.mash and
-        # used the default cutoff.
-        twasWeights = twasWeights,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
-    )
-}
-
 # MultiStudyQtlDataset fine-mapping worker. `p` is the setMethod's captured
 # arguments; after resolving the explicit joint spec it routes
 # each remaining method to the components it supports via the shared
@@ -3478,35 +3163,36 @@ setMethod(
 .fmPipelineMultiStudy <- function(
     data,
     methods,
-    contexts,
-    traitId,
-    region,
-    cisWindow,
-    jointRegions,
-    jointSpecification,
-    addSusieInf,
-    credibleSetArgs,
-    fineMappingResult,
-    twasWeights,
-    dataDrivenPriorWeightsCutoff,
-    verbose,
-    crossValidationArgs,
-    residualizationArgs,
-    seed,
-    naAction,
-    signalScreenArgs,
-    genotypeFilterArgs,
-    panelFilterArgs,
-    rssArgs,
-    usePCA,
-    nPCs,
-    fitRetention
+    contexts = NULL,
+    traitId = NULL,
+    region = NULL,
+    cisWindow = NULL,
+    genotypeFilterArgs = GenotypeFilterParam(),
+    panelFilterArgs = PanelFilterParam(),
+    jointRegions = FALSE,
+    jointSpecification = NULL,
+    addSusieInf = TRUE,
+    credibleSetArgs = CredibleSetParam(),
+    fineMappingResult = NULL,
+    mrmashPrior = NULL,
+    dataDrivenPriorWeightsCutoff = 1e-10,
+    crossValidationArgs = CrossValidationParam(),
+    residualizationArgs = ResidualizationParam(),
+    signalScreenArgs = SignalScreenParam(),
+    rssArgs = SusieRssParam(),
+    usePCA = FALSE,
+    nPCs = 10L,
+    seed = NULL,
+    naAction = c("drop", "impute"),
+    verbose = 1,
+    fitRetention = c("slim", "full")
 ) {
+    fitRetention <- arg_match(fitRetention)
     inputs <- .fmMsResolveInputs(naAction, region, cisWindow, jointRegions)
     naAction <- inputs$naAction
     # One record of the settings the joint phase and the shared dispatcher
     # both need, so each names them once.
-    jointCfg <- .fmMsJointCfg(
+    jointCfg <- list(
         data = data,
         contexts = contexts,
         traitId = traitId,
@@ -3514,7 +3200,7 @@ setMethod(
         credibleSetArgs = credibleSetArgs,
         verbose = verbose,
         xRegions = inputs$xRegions,
-        twasWeights = twasWeights,
+        mrmashPrior = mrmashPrior,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
     )
     rt <- .fmMsResolveTokens(
@@ -3533,7 +3219,7 @@ setMethod(
         rt$result,
         .fmPerStudy,
         .fmSumStats,
-        .fmMsConfig(
+        list(
             methods = methods,
             contexts = contexts,
             traitId = traitId,
@@ -3555,7 +3241,7 @@ setMethod(
             usePCA = usePCA,
             nPCs = nPCs,
             fitRetention = fitRetention,
-            twasWeights = twasWeights,
+            mrmashPrior = mrmashPrior,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
         ),
         .rbindFineMappingResult,
@@ -3569,64 +3255,8 @@ setMethod(
 setMethod(
     "fineMappingPipeline",
     "MultiStudyQtlDataset",
-    function(
-        data,
-        methods,
-        contexts = NULL,
-        traitId = NULL,
-        region = NULL,
-        cisWindow = NULL,
-        genotypeFilterArgs = genotypeFilterConfig(),
-        panelFilterArgs = panelFilterConfig(),
-        jointRegions = FALSE,
-        jointSpecification = NULL,
-        addSusieInf = TRUE,
-        credibleSetArgs = credibleSetConfig(),
-        fineMappingResult = NULL,
-        twasWeights = NULL,
-        dataDrivenPriorWeightsCutoff = 1e-10,
-        crossValidationArgs = crossValidationConfig(),
-        residualizationArgs = residualizationConfig(),
-        signalScreenArgs = signalScreenConfig(),
-        rssArgs = rssConfig(),
-        usePCA = FALSE,
-        nPCs = 10L,
-        seed = NULL,
-        naAction = c("drop", "impute"),
-        verbose = 1,
-        fitRetention = c("slim", "full")
-    ) {
-        fitRetention <- arg_match(fitRetention)
-        .fmPipelineMultiStudy(
-            data = data,
-            methods = methods,
-            contexts = contexts,
-            traitId = traitId,
-            region = region,
-            cisWindow = cisWindow,
-            jointRegions = jointRegions,
-            jointSpecification = jointSpecification,
-            addSusieInf = addSusieInf,
-            credibleSetArgs = credibleSetArgs,
-            fineMappingResult = fineMappingResult,
-            twasWeights = twasWeights,
-            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-            verbose = verbose,
-            crossValidationArgs = crossValidationArgs,
-            residualizationArgs = residualizationArgs,
-            seed = seed,
-            naAction = naAction,
-            signalScreenArgs = signalScreenArgs,
-            genotypeFilterArgs = genotypeFilterArgs,
-            panelFilterArgs = panelFilterArgs,
-            rssArgs = rssArgs,
-            usePCA = usePCA,
-            nPCs = nPCs,
-            fitRetention = fitRetention
-        )
-    }
+    .fmPipelineMultiStudy
 )
-
 
 # =============================================================================
 # QtlSumStats method
@@ -3640,7 +3270,7 @@ setMethod(
     common,
     contexts,
     traitId,
-    twasWeights,
+    mrmashPrior,
     dataDrivenPriorWeightsCutoff
 ) {
     c(
@@ -3648,7 +3278,7 @@ setMethod(
         list(
             contexts = contexts,
             traitId = traitId,
-            twasWeights = twasWeights,
+            mrmashPrior = mrmashPrior,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
         )
     )
@@ -3667,12 +3297,12 @@ setMethod(
         cfg$traitId,
         cfg$verbose,
         methodArgs = methodArgs,
-        twasWeights = cfg$twasWeights,
+        mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff,
         fineMappingResult = cfg$fineMappingResult,
         credibleSetArgs = cfg$credibleSetArgs,
         fitRetention = cfg$fitRetention,
-        panelFilterArgs = cfg$panelFilterArgs %||% panelFilterConfig()
+        panelFilterArgs = cfg$panelFilterArgs %||% PanelFilterParam()
     )
 }
 
@@ -3743,8 +3373,8 @@ setMethod(
 # and mvsusie could not be checked at all, since mvsusie_rss takes `...` and
 # a union containing it accepts anything.
 # @noRd
-.fmMethodConfig <- function(callee, label, engine, extra) {
-    .newMethodConfig(
+.fmMethodOptions <- function(callee, label, engine, extra) {
+    .newMethodOptions(
         callee,
         defaults = list(),
         extra = extra,
@@ -3758,17 +3388,125 @@ setMethod(
 # not known yet, so it must stay acceptable for either path; the per-input
 # check in .fmCheckMethodArgsForInput narrows it once the class is known.
 # @noRd
-.fmTokenUnionConfig <- function(token) {
+#' @rdname FineMappingMethodsParam
+#' @aliases FineMappingMethodsParam-class
+#' @exportClass FineMappingMethodsParam
+setClass("FineMappingMethodsParam", contains = "MethodsSelectionParam")
+
+#' @title Which Fine-Mapping Methods To Run, And How
+#' @description Selects the methods \code{\link{fineMappingPipeline}} runs and
+#'   carries each one's engine arguments.
+#'
+#'   A method that runs on both individual-level and summary-statistic data
+#'   reaches a different engine on each path, so for a
+#'   \code{MultiStudyQtlDataset} carrying both there is no single set of
+#'   arguments per method. Name such a method under
+#'   \code{qtlDatasetMethods} or \code{qtlSumStatsMethods} to say which
+#'   path its options are for; name it under \code{methods} when the path
+#'   need not be stated --- a single-type run, or a method with nothing
+#'   path-specific to configure.
+#'
+#'   Naming a method selects it. A method belongs in exactly one of the
+#'   three slots.
+#' @param methods Named list of per-method options whose input path need not
+#'   be stated. Each entry is that method's \code{*Options()} record, or
+#'   \code{list()} to run it with its defaults.
+#' @param qtlDatasetMethods Named list of per-method options for the
+#'   individual-level path.
+#' @param qtlSumStatsMethods Named list of per-method options for the
+#'   summary-statistics path.
+#' @return A \code{FineMappingMethodsParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' FineMappingMethodsParam(methods = "susie")
+#' FineMappingMethodsParam(methods = list(susie = SusieOptions(L = 20)))
+#' FineMappingMethodsParam(
+#'     qtlDatasetMethods = list(susie = SusieOptions(L = 20)),
+#'     qtlSumStatsMethods = list(susie = SusieRssOptions(L = 20))
+#' )
+#' @export
+FineMappingMethodsParam <- function(
+    methods = NULL,
+    qtlDatasetMethods = NULL,
+    qtlSumStatsMethods = NULL
+) {
+    new(
+        "FineMappingMethodsParam",
+        methods = .methodsNormalizeSlot(
+            methods,
+            "methods",
+            "FineMappingMethodsParam"
+        ),
+        qtlDatasetMethods = .methodsNormalizeSlot(
+            qtlDatasetMethods,
+            "qtlDatasetMethods",
+            "FineMappingMethodsParam"
+        ),
+        qtlSumStatsMethods = .methodsNormalizeSlot(
+            qtlSumStatsMethods,
+            "qtlSumStatsMethods",
+            "FineMappingMethodsParam"
+        )
+    )
+}
+
+# Every fine-mapping method that runs on one input path. GwasSumStats is a
+# summary-statistics class, narrowed to the methods that accept one trait.
+# @noRd
+.fmMethodsFor <- function(inputKind) {
+    caps <- .fineMappingMethodCapabilities
+    keep(names(caps), .fmMethodRunsOn, caps = caps, inputKind = inputKind)
+}
+
+# @noRd
+.fmMethodRunsOn <- function(token, caps, inputKind) {
+    info <- caps[[token]]
+    if (identical(inputKind, "QtlDataset")) {
+        return(!is.null(info$individualImpl))
+    }
+    if (is.null(info$sumstatImpl)) {
+        return(FALSE)
+    }
+    !identical(inputKind, "GwasSumStats") || isTRUE(info$gwasAllowed)
+}
+
+# One method's Options constructor for ONE input path, validating against
+# just that path's callee.
+#
+# Deliberately not the union of both callees: validating against the union
+# would accept a name valid on only one of them -- `susie` takes 41
+# arguments on individual data and 49 on summary statistics, sharing 37, so
+# the union admits 16 names that are wrong for whichever path actually runs.
+# Once the caller knows its input class there is no reason to be that
+# lenient.
+# @noRd
+.fmTokenPathConfig <- function(token, inputKind) {
     force(token)
+    force(inputKind)
+    callee <- .fmMethodCalleeFor(token, inputKind)
+    if (is.null(callee)) {
+        return(NULL)
+    }
     function(...) {
-        .newMethodConfig(
-            list_c(.fmMethodCallees(token)),
+        .newMethodOptions(
+            callee,
             defaults = list(),
             extra = list(...),
-            label = glue("fineMappingMethodsConfig: method '{token}'"),
+            label = glue("method '{token}' on {inputKind}"),
             engine = token
         )
     }
+}
+
+# Every method's constructor for one input path, omitting the methods that
+# do not run on it -- `fsusie` has no summary-statistics implementation,
+# `ser` no individual one.
+# @noRd
+.fmMethodCtorsFor <- function(inputKind) {
+    toks <- names(.fineMappingMethodCapabilities)
+    compact(set_names(
+        map(toks, .fmTokenPathConfig, inputKind = inputKind),
+        toks
+    ))
 }
 
 #' @title Arguments For A Fine-Mapping Engine
@@ -3777,18 +3515,18 @@ setMethod(
 #'
 #'   There is one constructor per ENGINE, not per method. A method whose
 #'   individual-level and summary-statistic paths run different functions
-#'   has one for each --- \code{susieConfig} for \code{susieR::susie} and
-#'   \code{susieRssConfig} for \code{susieR::susie_rss}, \code{mvsusieConfig}
-#'   and \code{mvsusieRssConfig} likewise. Checking the union of the two
+#'   has one for each --- \code{SusieOptions} for \code{susieR::susie} and
+#'   \code{SusieRssOptions} for \code{susieR::susie_rss}, \code{MvsusieOptions}
+#'   and \code{MvsusieRssOptions} likewise. Checking the union of the two
 #'   instead would accept an \code{susie_rss}-only name on an
 #'   individual-level run and then silently drop it, and would leave
 #'   mvsusie unchecked entirely, since \code{mvsusie_rss} takes \code{...}
 #'   and a union containing it accepts any name at all.
 #'
-#'   \code{serConfig} and \code{fsusieConfig} have no sibling: SER is
+#'   \code{SerOptions} and \code{FsusieOptions} have no sibling: SER is
 #'   summary-statistics-only and fSuSiE individual-only.
 #'
-#'   Pass the result as an element of \code{\link{fineMappingMethodsConfig}},
+#'   Pass the result as an element of \code{\link{FineMappingMethodsParam}},
 #'   or directly to the matching single-engine function. In the aggregator a
 #'   method accepts either of its engines' constructors, since the input
 #'   class is not known at that point. A plain list works there too and
@@ -3796,104 +3534,13 @@ setMethod(
 #'   input class is known.
 #' @param ... Arguments for the engine, under its own names (\code{L},
 #'   \code{coverage}, \code{max_iter}, ...).
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{\link{MethodOptions}} object.
 #' @examples
-#' susieConfig(L = 5)
-#' susieRssConfig(maf_thresh = 0.01)
-#' mvsusieConfig(prior_tol = 1e-9)
-#' @name fineMappingMethodConfig
+#' SusieOptions(L = 5)
+#' SusieRssOptions(maf_thresh = 0.01)
+#' MvsusieOptions(prior_tol = 1e-9)
+#' @name fineMappingMethodOptions
 NULL
-
-#' @rdname fineMappingMethodConfig
-#' @export
-susieConfig <- function(...) {
-    .fmMethodConfig("susieR::susie", "susieConfig", "susie", list(...))
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-susieRssConfig <- function(...) {
-    .fmMethodConfig(
-        "susieR::susie_rss",
-        "susieRssConfig",
-        "susieRss",
-        list(...)
-    )
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-susieInfConfig <- function(...) {
-    .fmMethodConfig("susieR::susie", "susieInfConfig", "susieInf", list(...))
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-susieInfRssConfig <- function(...) {
-    .fmMethodConfig(
-        "susieR::susie_rss",
-        "susieInfRssConfig",
-        "susieInfRss",
-        list(...)
-    )
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-susieAshConfig <- function(...) {
-    .fmMethodConfig("susieR::susie", "susieAshConfig", "susieAsh", list(...))
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-susieAshRssConfig <- function(...) {
-    .fmMethodConfig(
-        "susieR::susie_rss",
-        "susieAshRssConfig",
-        "susieAshRss",
-        list(...)
-    )
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-serConfig <- function(...) {
-    .fmMethodConfig("susieR::susie_ser", "serConfig", "ser", list(...))
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-mvsusieConfig <- function(...) {
-    .fmMethodConfig("mvsusieR::mvsusie", "mvsusieConfig", "mvsusie", list(...))
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-mvsusieRssConfig <- function(...) {
-    .fmMethodConfig(
-        "mvsusieR::mvsusie_rss",
-        "mvsusieRssConfig",
-        "mvsusieRss",
-        list(...)
-    )
-}
-
-#' @rdname fineMappingMethodConfig
-#' @export
-fsusieConfig <- function(...) {
-    .fmMethodConfig("fsusieR::susiF", "fsusieConfig", "fsusie", list(...))
-}
-
-# Token -> the union constructor a PLAIN LIST entry is spliced into. The
-# exported per-engine constructors are what a caller passes explicitly; the
-# engine labels each token accepts are in .fmTokenEngineLabels().
-# @noRd
-.fmMethodCtors <- function() {
-    set_names(
-        map(names(.fineMappingMethodCapabilities), .fmTokenUnionConfig),
-        names(.fineMappingMethodCapabilities)
-    )
-}
 
 # Token -> the engine constructor for each of its input paths. A method with
 # both an individual-level and a summary-statistic engine accepts either
@@ -3901,61 +3548,12 @@ fsusieConfig <- function(...) {
 # @noRd
 .fmTokenCtorsByPath <- function() {
     list(
-        susie = list(susieConfig, susieRssConfig),
-        susieInf = list(susieInfConfig, susieInfRssConfig),
-        susieAsh = list(susieAshConfig, susieAshRssConfig),
-        ser = list(serConfig),
-        mvsusie = list(mvsusieConfig, mvsusieRssConfig),
-        fsusie = list(fsusieConfig)
-    )
-}
-
-# The engine labels a token's entry may declare.
-# @noRd
-.fmTokenEngineLabels <- function(token) {
-    ctors <- .fmTokenCtorsByPath()[[token]]
-    if (is.null(ctors)) {
-        return(token)
-    }
-    map_chr(ctors, .fmCtorEngineLabel, token = token)
-}
-
-# @noRd
-.fmCtorEngineLabel <- function(ctor, token) {
-    rec <- tryCatch(ctor(), error = function(cnd) NULL)
-    if (is.null(rec)) {
-        return(token)
-    }
-    metadata(rec)$engine %||% token
-}
-
-#' @title Per-Method Arguments For fineMappingPipeline
-#' @description Options for each fine-mapping method, keyed by method token.
-#'   Naming a method here also selects it, so this is what
-#'   \code{fineMappingPipeline(methods = )} takes when you want to configure
-#'   the fit; a plain character vector remains the shorthand for running
-#'   methods with their defaults.
-#'
-#'   Each entry may be a plain list or the method's own constructor --- a
-#'   plain list is spliced into that constructor, so it gets the same
-#'   checking either way.
-#' @param ... Named entries, one per method token (\code{susie},
-#'   \code{susieInf}, \code{susieAsh}, \code{ser}, \code{mvsusie},
-#'   \code{fsusie}).
-#' @return A \code{\link{MethodConfig}} object.
-#' @examples
-#' fineMappingMethodsConfig(susie = list(L = 5), mvsusie = mvsusieConfig())
-#' @export
-fineMappingMethodsConfig <- function(...) {
-    ctors <- .fmMethodCtors()
-    .newNestedConfig(
-        list(...),
-        ctors,
-        "fineMappingMethodsConfig",
-        engines = set_names(
-            map(names(ctors), .fmTokenEngineLabels),
-            names(ctors)
-        )
+        susie = list(SusieOptions, SusieRssOptions),
+        susieInf = list(SusieInfOptions, SusieInfRssOptions),
+        susieAsh = list(SusieAshOptions, SusieAshRssOptions),
+        ser = list(SerOptions),
+        mvsusie = list(MvsusieOptions, MvsusieRssOptions),
+        fsusie = list(FsusieOptions)
     )
 }
 
@@ -3967,7 +3565,12 @@ fineMappingMethodsConfig <- function(...) {
 # @noRd
 .fmQssResolveTokens <- function(jointSpecification, methods, L, Lgreedy, cfg) {
     parsedJointSpec <- parseJointSpecification(jointSpecification, cfg$data)
-    norm <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
+    norm <- .fmNormalizeMethods(
+        methods,
+        inputKind = "QtlSumStats",
+        L = L,
+        Lgreedy = Lgreedy
+    )
     .fmCheckMethodCapabilities(norm$tokens, "QtlSumStats")
     .fmCheckMethodArgsForInput(norm$methodArgs, "QtlSumStats")
     .fmQssJointPhase(parsedJointSpec, norm, cfg)
@@ -4116,6 +3719,41 @@ fineMappingMethodsConfig <- function(...) {
     .rbindFineMappingResult(perTupleResult, jointResult, ldSketch = ldSketch)
 }
 
+# The settings the joint phase and the RSS row builders share, named once
+# so the two records built from them cannot disagree.
+# @noRd
+.fmQssConfigs <- function(
+    data,
+    credibleSetArgs,
+    fineMappingResult,
+    fitRetention,
+    verbose,
+    panelFilterArgs,
+    contexts,
+    traitId,
+    mrmashPrior,
+    dataDrivenPriorWeightsCutoff
+) {
+    common <- .fmSsCommonCfg(
+        data = data,
+        credibleSetArgs = credibleSetArgs,
+        fineMappingResult = fineMappingResult,
+        fitRetention = fitRetention,
+        verbose = verbose,
+        panelFilterArgs = panelFilterArgs
+    )
+    list(
+        common = common,
+        joint = .fmQssJointCfg(
+            common,
+            contexts = contexts,
+            traitId = traitId,
+            mrmashPrior = mrmashPrior,
+            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        )
+    )
+}
+
 # QtlSumStats fine-mapping worker. `p` is the setMethod's captured arguments;
 # it is extended via list_modify with the resolved tokens / row selection / LD
 # sketch so the per-entry dispatch helpers read everything from one bundle.
@@ -4129,7 +3767,7 @@ fineMappingMethodsConfig <- function(...) {
     jointSpecification,
     credibleSetArgs,
     fineMappingResult,
-    twasWeights,
+    mrmashPrior,
     dataDrivenPriorWeightsCutoff,
     verbose,
     fitRetention,
@@ -4137,23 +3775,20 @@ fineMappingMethodsConfig <- function(...) {
     panelFilterArgs
 ) {
     .fmAssertQcd(data)
-    # The settings the joint phase and the RSS row builders share, named once
-    # so the two records built from it cannot disagree.
-    commonCfg <- .fmSsCommonCfg(
+    cfgs <- .fmQssConfigs(
         data = data,
         credibleSetArgs = credibleSetArgs,
         fineMappingResult = fineMappingResult,
         fitRetention = fitRetention,
         verbose = verbose,
-        panelFilterArgs = panelFilterArgs
-    )
-    jointCfg <- .fmQssJointCfg(
-        commonCfg,
+        panelFilterArgs = panelFilterArgs,
         contexts = contexts,
         traitId = traitId,
-        twasWeights = twasWeights,
+        mrmashPrior = mrmashPrior,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
     )
+    commonCfg <- cfgs$common
+    jointCfg <- cfgs$joint
     rt <- .fmQssResolveTokens(
         jointSpecification,
         methods,
@@ -4164,55 +3799,90 @@ fineMappingMethodsConfig <- function(...) {
     if (rt$done) {
         return(rt$result)
     }
-    sel <- .fmQssSelectRows(data = data, contexts = contexts, traitId = traitId)
-    split <- .fmQssSplitTokens(rt$tokens, sel)
-    ldSketch <- getLdSketch(data)
-    # Derived values are locals, not fields grafted onto a parameter pack.
-    methodArgs <- rt$methodArgs
-    jointResult <- rt$result
-    studyCol <- sel$studyCol
-    contextCol <- sel$contextCol
-    traitCol <- sel$traitCol
-    selRows <- sel$selRows
-    univTokens <- split$univTokens
-    mvTokens <- split$mvTokens
-    rFiniteResolved <- .fmResolveRFinite(
-        rssArgs$rFinite,
-        rssArgs$serFallback,
-        rssArgs$rMismatch,
-        ldSketch
+    .fmQssAfterJoint(
+        data,
+        rt = rt,
+        commonCfg = commonCfg,
+        jointCfg = jointCfg,
+        contexts = contexts,
+        traitId = traitId,
+        addSusieInf = addSusieInf,
+        rssArgs = rssArgs
     )
+}
+
+# Everything after the joint phase has had its say: select the rows the
+# univariate tokens run on, resolve the LD-finiteness setting against the
+# sketch, and fit. `rt` is .fmQssResolveTokens()'s record -- it carries the
+# remaining tokens, their options, and whatever the joint phase produced.
+# @noRd
+.fmQssAfterJoint <- function(
+    data,
+    rt,
+    commonCfg,
+    jointCfg,
+    contexts,
+    traitId,
+    addSusieInf,
+    rssArgs
+) {
+    sel <- .fmQssSelectRows(data = data, contexts = contexts, traitId = traitId)
+    ldSketch <- getLdSketch(data)
     cfg <- .fmRssRunCfg(
         commonCfg,
         ldSketch = ldSketch,
         addSusieInf = addSusieInf,
-        methodArgs = methodArgs,
-        rssArgs = rssArgs,
-        rFiniteResolved = rFiniteResolved
+        methodArgs = rt$methodArgs,
+        rssArgs = .fmRssArgsResolved(rssArgs, ldSketch)
     )
-    univOut <- if (length(univTokens) > 0L) {
+    .fmQssRunRows(
+        data,
+        sel = sel,
+        split = .fmQssSplitTokens(rt$tokens, sel),
+        cfg = cfg,
+        jointCfg = jointCfg,
+        ldSketch = ldSketch,
+        methodArgs = rt$methodArgs,
+        jointResult = rt$result
+    )
+}
+
+# Fine-map the selected rows with the univariate tokens, then assemble that
+# with whatever the joint phase produced. `sel` and `split` travel whole:
+# the row selection and the token split are each one answer, and splitting
+# them back into loose columns here is what this function exists to avoid.
+# @noRd
+.fmQssRunRows <- function(
+    data,
+    sel,
+    split,
+    cfg,
+    jointCfg,
+    ldSketch,
+    methodArgs,
+    jointResult
+) {
+    univOut <- if (length(split$univTokens) > 0L) {
         map(
-            selRows,
+            sel$selRows,
             .fmRssEntryRows,
-            studyCol = studyCol,
-            contextCol = contextCol,
-            traitCol = traitCol,
-            univTokens = univTokens,
+            studyCol = sel$studyCol,
+            contextCol = sel$contextCol,
+            traitCol = sel$traitCol,
+            univTokens = split$univTokens,
             cfg = cfg
         )
     } else {
         list()
     }
-    rows <- list_flatten(map(univOut, "rows"))
-    nSkipped <- sum(map_lgl(univOut, "skipped"))
     .fmQssAssemble(
         data = data,
         ldSketch = ldSketch,
-        rows = rows,
-        nSkipped = nSkipped,
+        rows = list_flatten(map(univOut, "rows")),
+        nSkipped = sum(map_lgl(univOut, "skipped")),
         jointResult = .fmQssAutoJoint(
             cfg = jointCfg,
-            mvTokens = mvTokens,
+            mvTokens = split$mvTokens,
             methodArgs = methodArgs,
             jointResult = jointResult,
             ldSketch = ldSketch
@@ -4232,16 +3902,16 @@ setMethod(
         traitId = NULL,
         jointSpecification = NULL,
         addSusieInf = TRUE,
-        credibleSetArgs = credibleSetConfig(),
+        credibleSetArgs = CredibleSetParam(),
         fineMappingResult = NULL,
-        twasWeights = NULL,
+        mrmashPrior = NULL,
         dataDrivenPriorWeightsCutoff = 1e-10,
         verbose = 1,
         fitRetention = c("slim", "full"),
-        rssArgs = rssConfig(),
-        panelFilterArgs = panelFilterConfig(),
-        crossValidationArgs = crossValidationConfig(),
-        residualizationArgs = residualizationConfig()
+        rssArgs = SusieRssParam(),
+        panelFilterArgs = PanelFilterParam(),
+        crossValidationArgs = CrossValidationParam(),
+        residualizationArgs = ResidualizationParam()
     ) {
         fitRetention <- arg_match(fitRetention)
         .cvRefuseOnSumstats(
@@ -4258,7 +3928,7 @@ setMethod(
             jointSpecification = jointSpecification,
             credibleSetArgs = credibleSetArgs,
             fineMappingResult = fineMappingResult,
-            twasWeights = twasWeights,
+            mrmashPrior = mrmashPrior,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
             verbose = verbose,
             fitRetention = fitRetention,
@@ -4267,7 +3937,6 @@ setMethod(
         )
     }
 )
-
 
 # =============================================================================
 # GwasSumStats method
@@ -4278,6 +3947,24 @@ setMethod(
 # rFinite is unset: use the LD-panel sample size (the notebook's `B`). Shared by
 # the QtlSumStats and GwasSumStats workers.
 # @noRd
+# The resolved record, still a SusieRssParam. Previously the resolved value was
+# carried alongside the record as a second cfg field and spliced in with
+# list_assign(as.list(...)) at the point of use, which handed everything
+# downstream a bare list exactly where the value became concrete.
+# @noRd
+.fmRssArgsResolved <- function(rssArgs, ldSketch) {
+    resolved <- .fmResolveRFinite(
+        rssArgs$rFinite,
+        rssArgs$serFallback,
+        rssArgs$rMismatch,
+        ldSketch
+    )
+    if (identical(resolved, rssArgs$rFinite)) {
+        return(rssArgs)
+    }
+    .rssParamWithRFinite(rssArgs, resolved)
+}
+
 .fmResolveRFinite <- function(rFinite, serFallback, rMismatch, ldSketch) {
     if (
         is.null(rFinite) &&
@@ -4320,12 +4007,7 @@ setMethod(
     # Derived values are ordinary locals now, not fields grafted onto a bundle.
     tokens <- norm$tokens
     methodArgs <- norm$methodArgs
-    rFiniteResolved <- .fmResolveRFinite(
-        rssArgs$rFinite,
-        rssArgs$serFallback,
-        rssArgs$rMismatch,
-        ldSketch
-    )
+    rssArgs <- .fmRssArgsResolved(rssArgs, ldSketch)
     studyCol <- as.character(data$study)
     commonCfg <- .fmSsCommonCfg(
         data = data,
@@ -4335,6 +4017,30 @@ setMethod(
         verbose = verbose,
         panelFilterArgs = panelFilterArgs
     )
+    .fmGwasRunEntries(
+        data,
+        studyCol = studyCol,
+        tokens = tokens,
+        commonCfg = commonCfg,
+        ldSketch = ldSketch,
+        addSusieInf = addSusieInf,
+        methodArgs = methodArgs,
+        rssArgs = rssArgs
+    )
+}
+
+# Fine-map every row of the GWAS collection and assemble the result.
+# @noRd
+.fmGwasRunEntries <- function(
+    data,
+    studyCol,
+    tokens,
+    commonCfg,
+    ldSketch,
+    addSusieInf,
+    methodArgs,
+    rssArgs
+) {
     entryOut <- map(
         seq_len(nrow(data)),
         .fmGwasEntryRows,
@@ -4345,8 +4051,7 @@ setMethod(
             ldSketch = ldSketch,
             addSusieInf = addSusieInf,
             methodArgs = methodArgs,
-            rssArgs = rssArgs,
-            rFiniteResolved = rFiniteResolved
+            rssArgs = rssArgs
         )
     )
     rows <- list_flatten(map(entryOut, "rows"))
@@ -4372,14 +4077,14 @@ setMethod(
         data,
         methods,
         addSusieInf = TRUE,
-        credibleSetArgs = credibleSetConfig(),
+        credibleSetArgs = CredibleSetParam(),
         fineMappingResult = NULL,
         verbose = 1,
         fitRetention = c("slim", "full"),
-        rssArgs = rssConfig(),
-        panelFilterArgs = panelFilterConfig(),
-        crossValidationArgs = crossValidationConfig(),
-        residualizationArgs = residualizationConfig()
+        rssArgs = SusieRssParam(),
+        panelFilterArgs = PanelFilterParam(),
+        crossValidationArgs = CrossValidationParam(),
+        residualizationArgs = ResidualizationParam()
     ) {
         fitRetention <- arg_match(fitRetention)
         .cvRefuseOnSumstats(
@@ -4400,7 +4105,6 @@ setMethod(
         )
     }
 )
-
 
 # =============================================================================
 # Named helpers for map/apply call sites (no inline lambdas)
@@ -4544,4 +4248,377 @@ setMethod(
         ctx = ctx,
         cfg = cfg
     ))
+}
+
+# =============================================================================
+# Fine-mapping Param bundles
+# -----------------------------------------------------------------------------
+# Moved here from the former pipelineParams.R: these describe fine-mapping
+# stages, and are read here and in fineMappingWrappers.R / jointEngine.R even
+# when another pipeline forwards them.
+#
+# `L` / `Lgreedy` are CredibleSetParam fields: they bound how many credible
+# sets can exist. They reach the engine by a different route from the rest of
+# the bundle -- .fmSeededArgNames() is c("L", "L_greedy"), seeded onto each
+# SuSiE-family token's own arguments, whereas the other fields are read by
+# postprocessFinemappingFits() -- so changing them needs a refit while a
+# stored fit can be re-post-processed under a different coverage.
+#
+# `addSusieInf` is a standalone argument, not a bundle field: it selects a
+# chained initialisation between methods rather than describing credible sets.
+#
+# `fitRetention` is a plain arg_match() enum on each pipeline, not a bundle:
+# see colocPipeline(), crossValidation() and fineMappingPipeline().
+# =============================================================================
+
+# --- CredibleSetParam accessors --------------------------------------------
+# Setters revalidate: slot assignment checks the declared type on its own but
+# does not re-run a validity method, and this package does write those (see
+# SignalScreenParam).
+
+#' @rdname CredibleSetParam
+setMethod("getCoverage", "CredibleSetParam", function(x) x@coverage)
+
+#' @rdname CredibleSetParam
+setMethod("setCoverage", "CredibleSetParam", function(x, value) {
+    x@coverage <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getSecondaryCoverage", "CredibleSetParam", function(x) {
+    x@secondaryCoverage
+})
+
+#' @rdname CredibleSetParam
+setMethod("setSecondaryCoverage", "CredibleSetParam", function(x, value) {
+    x@secondaryCoverage <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getSignalCutoff", "CredibleSetParam", function(x) x@signalCutoff)
+
+#' @rdname CredibleSetParam
+setMethod("setSignalCutoff", "CredibleSetParam", function(x, value) {
+    x@signalCutoff <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getMinAbsCorr", "CredibleSetParam", function(x) x@minAbsCorr)
+
+#' @rdname CredibleSetParam
+setMethod("setMinAbsCorr", "CredibleSetParam", function(x, value) {
+    x@minAbsCorr <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getMedianAbsCorr", "CredibleSetParam", function(x) x@medianAbsCorr)
+
+#' @rdname CredibleSetParam
+setMethod("setMedianAbsCorr", "CredibleSetParam", function(x, value) {
+    x@medianAbsCorr <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getIncludeAllCs", "CredibleSetParam", function(x) x@includeAllCs)
+
+#' @rdname CredibleSetParam
+setMethod("setIncludeAllCs", "CredibleSetParam", function(x, value) {
+    x@includeAllCs <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getPerCsColumns", "CredibleSetParam", function(x) x@perCsColumns)
+
+#' @rdname CredibleSetParam
+setMethod("setPerCsColumns", "CredibleSetParam", function(x, value) {
+    x@perCsColumns <- value
+    validObject(x)
+    x
+})
+
+#' @rdname CredibleSetParam
+setMethod("getL", "CredibleSetParam", function(x) x@L)
+
+#' @rdname CredibleSetParam
+setMethod("getLgreedy", "CredibleSetParam", function(x) x@Lgreedy)
+
+#' @rdname SignalScreenParam
+#' @aliases SignalScreenParam-class
+#' @exportClass SignalScreenParam
+setClass(
+    "SignalScreenParam",
+    contains = "MethodParam",
+    slots = c(
+        pip = "numeric_OR_NULL",
+        absZ = "numeric_OR_NULL",
+        bf = "numeric_OR_NULL",
+        logBf = "numeric_OR_NULL"
+    )
+)
+
+#' @title Signal Pre-Screen Settings
+#' @description Whether to skip a block before fitting it, and on which
+#'   metric. Shared by \code{\link{fineMappingPipeline}} and
+#'   \code{\link{colocboostPipeline}}.
+#' @section One metric at a time:
+#'   The four metrics are mutually exclusive and the constructor enforces it,
+#'   so a conflicting pair fails where it is written rather than part-way
+#'   into a pipeline run. Leave them all unset (the default) to screen
+#'   nothing.
+#' @param pip Posterior-inclusion-probability cutoff. A negative value uses
+#'   the adaptive \code{3 / nVariants} threshold.
+#' @param absZ Cutoff on the maximum absolute z-score.
+#' @param bf Cutoff on the maximum per-variant Bayes factor.
+#' @param logBf Cutoff on the maximum per-variant log Bayes factor.
+#' @return A \code{SignalScreenParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' SignalScreenParam(absZ = 5)
+#' @export
+SignalScreenParam <- function(
+    pip = NULL,
+    absZ = NULL,
+    bf = NULL,
+    logBf = NULL
+) {
+    new("SignalScreenParam", pip = pip, absZ = absZ, bf = bf, logBf = logBf)
+}
+
+# absZ and bf have no meaningful negative cutoff: absZ screens on max|Z| and
+# a Bayes factor is positive. (pip keeps `< 0 => 3 / nVariants`, and logBf is
+# a log, so both may legitimately be negative.)
+# @noRd
+.screenPositiveProblem <- function(screen) {
+    bad <- keep(c("absZ", "bf"), .screenIsNegative, screen = screen)
+    if (length(bad) == 0L) {
+        return(character(0))
+    }
+    m <- bad[[1L]]
+    glue(
+        "`{m}` must be > 0, got {screen[[m]]}. ",
+        "absZ screens on max|Z| and Bayes factors are positive."
+    )
+}
+
+# @noRd
+.screenIsNegative <- function(m, screen) {
+    v <- screen[[m]]
+    !is.null(v) && length(v) == 1L && !is.na(v) && v < 0
+}
+
+# Refuse more than one enabled metric. Enabled means set AND non-zero: 0 is
+# the long-standing "off" spelling for these cutoffs, so SignalScreenParam(pip
+# = 0, absZ = 5) is one screen, not two.
+# @noRd
+.screenOneMetricProblem <- function(screen) {
+    on <- names(screen)[map_lgl(as.list(screen), .screenIsOn)]
+    if (length(on) <= 1L) {
+        return(character(0))
+    }
+    glue(
+        "only one screening metric may be enabled at a time; ",
+        "got {str_flatten(on, ', ')}."
+    )
+}
+
+setValidity("SignalScreenParam", function(object) {
+    problems <- c(
+        .screenOneMetricProblem(object),
+        .screenPositiveProblem(object)
+    )
+    if (length(problems) == 0L) TRUE else as.character(problems)
+})
+
+# @noRd
+.screenIsOn <- function(x) {
+    !is.null(x) && length(x) > 0L && any(as.numeric(x) != 0, na.rm = TRUE)
+}
+
+# The one enabled metric as the polymorphic screen spec the pipelines already
+# understand (see .asScreen): a bare numeric for `pip`, a list(metric, cutoff)
+# for the others, NULL when nothing is enabled. A field set to 0 is off, so
+# SignalScreenParam(pip = 0, absZ = 5) resolves to the absZ screen.
+# @noRd
+.screenResolve <- function(screen) {
+    on <- names(screen)[map_lgl(as.list(screen), .screenIsOn)]
+    if (length(on) == 0L) {
+        return(NULL)
+    }
+    metric <- on[[1L]]
+    if (metric == "pip") {
+        return(screen$pip)
+    }
+    list(metric = metric, cutoff = screen[[metric]])
+}
+
+#' @rdname CredibleSetParam
+#' @aliases CredibleSetParam-class
+#' @exportClass CredibleSetParam
+setClass(
+    "CredibleSetParam",
+    contains = "MethodParam",
+    slots = c(
+        coverage = "numeric",
+        secondaryCoverage = "numeric",
+        signalCutoff = "numeric",
+        minAbsCorr = "numeric",
+        medianAbsCorr = "numeric_OR_NULL",
+        includeAllCs = "logical",
+        perCsColumns = "character",
+        L = "numeric",
+        Lgreedy = "numeric_OR_NULL"
+    )
+)
+
+#' @title Credible-Set Construction And Reporting
+#' @description How credible sets are built from a fit and which of them are
+#'   reported. Every field is read by
+#'   \code{\link{postprocessFinemappingFits}}, so these can be changed and a
+#'   stored fit re-summarized without refitting.
+#' @param coverage Primary credible-set coverage. Default \code{0.95}.
+#' @param secondaryCoverage Additional coverages to report credible sets at.
+#'   Default \code{c(0.7, 0.5)}.
+#' @param signalCutoff PIP cutoff for including a non-credible-set variant in
+#'   the top-loci table. Default \code{0.025}.
+#' @param minAbsCorr Minimum absolute within-set correlation for purity.
+#'   Default \code{0.8}.
+#' @param medianAbsCorr Median absolute within-set correlation threshold, or
+#'   \code{NULL} (default) to judge purity on \code{minAbsCorr} alone.
+#' @param includeAllCs Logical. Report every credible set rather than only the
+#'   top one. Default \code{FALSE}.
+#' @param perCsColumns Which per-credible-set variant-level columns are added
+#'   to the \code{topLoci} table. \code{"none"} (default) adds only the
+#'   always-on scalar \code{within_cs_pip}; \code{"alpha"} also widens
+#'   \code{alpha} into one \code{within_cs_pip_<lab>} column per set;
+#'   \code{"full"} additionally widens \code{cs_logbf_}, \code{cs_effect_}
+#'   and \code{cs_effect_var_}. \code{includeAllCs} decides the \code{<lab>}
+#'   in those names. This governs the \emph{table}; the stored fit is
+#'   governed by \code{fitRetention}.
+#' @param L Integer. Maximum number of single effects the fit may carry, and
+#'   so the maximum number of credible sets that can exist. Default
+#'   \code{10}. Seeded onto every SuSiE-family token in \code{methods} that
+#'   did not set it through \code{\link{FineMappingMethodsParam}}.
+#' @param Lgreedy Integer or \code{NULL}. Maximum number of single effects
+#'   for the greedy initialization stage, where the engine has one.
+#'   \code{NULL} (the default) leaves the engine's own default in place.
+#' @return \code{CredibleSetParam} returns a \code{CredibleSetParam}
+#'   object, a \code{\link{MethodParam}}. Each \code{get*} returns that
+#'   setting's value; each \code{set*} returns a modified copy. \code{L}
+#'   and \code{Lgreedy} have no setter: they are seeded onto the fitting
+#'   tokens, so changing one needs a refit rather than a re-summary.
+#' @examples
+#' CredibleSetParam(coverage = 0.9, includeAllCs = TRUE)
+#' @export
+CredibleSetParam <- function(
+    coverage = 0.95,
+    secondaryCoverage = c(0.7, 0.5),
+    signalCutoff = 0.025,
+    minAbsCorr = 0.8,
+    medianAbsCorr = NULL,
+    includeAllCs = FALSE,
+    perCsColumns = c("none", "alpha", "full"),
+    L = 10L,
+    Lgreedy = NULL
+) {
+    perCsColumns <- arg_match(perCsColumns)
+    new(
+        "CredibleSetParam",
+        coverage = coverage,
+        secondaryCoverage = secondaryCoverage,
+        signalCutoff = signalCutoff,
+        minAbsCorr = minAbsCorr,
+        medianAbsCorr = medianAbsCorr,
+        includeAllCs = includeAllCs,
+        perCsColumns = perCsColumns,
+        L = L,
+        Lgreedy = Lgreedy
+    )
+}
+
+#' @rdname SusieRssParam
+#' @aliases SusieRssParam-class
+#' @exportClass SusieRssParam
+setClass(
+    "SusieRssParam",
+    contains = "MethodParam",
+    slots = c(
+        serFallback = "logical",
+        keepFullFit = "character",
+        rFinite = "numeric_OR_NULL",
+        rMismatch = "character_OR_NULL",
+        control = "MethodOptions_OR_NULL"
+    )
+)
+
+#' @title SuSiE-RSS Solver Settings
+#' @description How the SuSiE-RSS fit is conditioned and what it falls back
+#'   to, on \code{QtlSumStats} / \code{GwasSumStats} input.
+#'
+#'   SuSiE-family only, which is what the name says: every field is a
+#'   \code{susieR} concept --- \code{serFallback} drops to
+#'   \code{susie_ser}, \code{rFinite} / \code{rMismatch} are
+#'   \code{susie_rss}'s \code{R_finite} / \code{R_mismatch}, and
+#'   \code{control} is \code{susie_rss_control}. The other
+#'   summary-statistics engine, \code{mvsusieR::mvsusie_rss}, has none of
+#'   these formals and is not configured by this.
+#' @param serFallback Logical. Fall back to a single-effect fit when the
+#'   multi-effect fit is judged unreliable. Default \code{FALSE}.
+#' @param keepFullFit Which pre-fallback multi-effect fits to retain:
+#'   \code{"fallback"} (default) keeps them only for regions that fell back,
+#'   \code{"all"} for every region, \code{"none"} for none. Only meaningful
+#'   when \code{serFallback} is \code{TRUE}.
+#' @param rFinite Sample size used for the LD matrix's finiteness check, or
+#'   \code{NULL} (default) to use the panel's own.
+#' @param rMismatch How to treat an LD / z-score mismatch. Default
+#'   \code{"none"}.
+#' @param control Options for \code{susieR::susie_rss_control()}, forwarded as
+#'   \code{susie_rss()}'s \code{control} argument. Built with
+#'   \code{\link{SusieRssControlOptions}}; \code{NULL} (default) leaves that
+#'   function's own defaults in place.
+#' @return A \code{SusieRssParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' SusieRssParam(serFallback = TRUE, keepFullFit = "all")
+#' @export
+SusieRssParam <- function(
+    serFallback = FALSE,
+    keepFullFit = c("fallback", "all", "none"),
+    rFinite = NULL,
+    rMismatch = "none",
+    control = NULL
+) {
+    keepFullFit <- arg_match(keepFullFit)
+    if (!is.null(control)) {
+        .assertMethodOptions(control, "SusieRssControlOptions", "control")
+    }
+    new(
+        "SusieRssParam",
+        serFallback = serFallback,
+        keepFullFit = keepFullFit,
+        rFinite = rFinite,
+        rMismatch = rMismatch,
+        control = control
+    )
+}
+
+# `rFinite` is the one field pecotmr itself fills in: it defaults to NULL
+# meaning "use the LD panel's sample size", which is not knowable when the
+# caller builds the record. Resolution happens once the sketch is in hand
+# (see .fmRssArgsResolved). Internal, not an exported setter -- no user sets
+# this, it is derived.
+# @noRd
+.rssParamWithRFinite <- function(x, value) {
+    x@rFinite <- value
+    validObject(x)
+    x
 }

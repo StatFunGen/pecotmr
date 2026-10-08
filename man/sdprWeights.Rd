@@ -4,7 +4,7 @@
 \alias{sdprWeights}
 \title{Extract weights from sdpr function}
 \usage{
-sdprWeights(stat, LD, methodArgs = sdprConfig())
+sdprWeights(stat, LD, methodArgs = SdprOptions())
 }
 \arguments{
 \item{stat}{A list of summary statistics with elements \code{b} (effect
@@ -14,7 +14,7 @@ sizes) and \code{n} (per-variant sample sizes).}
 \code{stat}.}
 
 \item{methodArgs}{Options forwarded to \code{sdpr}, built
-with \code{\link{sdprConfig}}. A bare list is refused: it cannot be
+with \code{\link{SdprOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

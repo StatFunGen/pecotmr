@@ -12,7 +12,7 @@ postprocessFinemappingFits(
   yScalar = 1,
   af = NULL,
   n = NULL,
-  credibleSetArgs = credibleSetConfig(),
+  credibleSetArgs = CredibleSetParam(),
   fitRetention = "slim",
   otherQuantities = NULL,
   region = NULL,
@@ -42,7 +42,7 @@ MAF). Default NULL.}
 Default NULL -> \code{N} falls back to the fit's own scalar sample size.}
 
 \item{credibleSetArgs}{How credible sets are built and reported, built with
-\code{\link{credibleSetConfig}}: \code{coverage},
+\code{\link{CredibleSetParam}}: \code{coverage},
 \code{secondaryCoverage}, \code{signalCutoff} (the PIP cutoff for
 including non-credible-set variants in top loci), \code{minAbsCorr} and
 \code{medianAbsCorr} for purity, and \code{includeAllCs}.}

@@ -405,6 +405,22 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region) {
 # Construction helper: enforce one seqname per element
 # -----------------------------------------------------------------------------
 
+# Each entry's variants become one ELEMENT of the GRangesList, with that
+# entry's metadata row as the element's outer mcols. A multi-seqname entry
+# splits into one element per chromosome, its metadata row replicated
+# alongside -- which is why the metadata is indexed by `fromIdx` rather
+# than used as-is. Shared by the TwasWeights and *FineMappingResult
+# constructors, whose assembly differs only in the columns handed in.
+# @noRd
+.rtlGrlWithMetadata <- function(payloads, cols) {
+    split <- .rtlSplitBySeqname(map(payloads, rowVariants))
+    md <- exec(S4Vectors::DataFrame, !!!c(cols, list(check.names = FALSE)))
+    S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md[split$fromIdx, , drop = FALSE]
+    )
+}
+
 # Split any multi-seqname element into one element per seqname, and report the
 # index each piece came from so the caller can replicate that element's
 # metadata row alongside it.

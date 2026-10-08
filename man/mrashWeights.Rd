@@ -9,7 +9,7 @@ mrashWeights(
   y,
   initPriorSd = TRUE,
   fitRetention = c("none", "slim", "full"),
-  methodArgs = mrashConfig()
+  methodArgs = MrashOptions()
 )
 }
 \arguments{
@@ -28,7 +28,7 @@ from the data. Default \code{TRUE}.}
 Default \code{FALSE}.}
 
 \item{methodArgs}{Options forwarded to \code{susieR::mr.ash}, built
-with \code{\link{mrashConfig}}. A bare list is refused: it cannot be
+with \code{\link{MrashOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

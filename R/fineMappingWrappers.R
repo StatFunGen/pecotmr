@@ -213,19 +213,19 @@ prepareSusieFromInfArgs <- function(
 
 # The three argument bundles of a two-stage chain, each checked against the
 # engine it reaches. `susie` and `susieInf` forward to the same two susieR
-# entry points, so all three accept the same names and susieConfig() names them
+# entry points, so all three accept the same names and SusieOptions() names them
 # in the error whichever bundle was at fault.
 #
-# The bundles default to list() rather than to susieConfig(): a formal cannot
-# default to a call on its own name -- `susieConfig = susieConfig()` is a
+# The bundles default to list() rather than to SusieOptions(): a formal cannot
+# default to a call on its own name -- `SusieOptions = SusieOptions()` is a
 # recursive default argument reference and errors when forced. An empty list
-# already means "no options" to .assertMethodConfig, so nothing is lost but the
+# already means "no options" to .assertMethodOptions, so nothing is lost but the
 # self-documenting signature.
 # @noRd
-.fmAssertChainArgs <- function(args, susieInfConfig, susieConfig) {
-    .assertMethodConfig(args, "susieConfig", "args")
-    .assertMethodConfig(susieInfConfig, "susieInfConfig", "susieInfConfig")
-    .assertMethodConfig(susieConfig, "susieConfig", "susieConfig")
+.fmAssertChainArgs <- function(args, SusieInfOptions, SusieOptions) {
+    .assertMethodOptions(args, "SusieOptions", "args")
+    .assertMethodOptions(SusieInfOptions, "SusieInfOptions", "SusieInfOptions")
+    .assertMethodOptions(SusieOptions, "SusieOptions", "SusieOptions")
     invisible(NULL)
 }
 
@@ -234,11 +234,11 @@ fitSusieInfThenSusie <- function(
     X,
     y,
     args = list(),
-    susieInfConfig = list(),
-    susieConfig = list(),
+    SusieInfOptions = list(),
+    SusieOptions = list(),
     fittedModels = NULL
 ) {
-    .fmAssertChainArgs(args, susieInfConfig, susieConfig)
+    .fmAssertChainArgs(args, SusieInfOptions, SusieOptions)
     # Two-stage chain built from the shared per-token fitter (.fmFitSusieIndiv),
     # so the susieInf fit arguments and the susieInf -> susie initialisation
     # live in one place rather than being duplicated here and in the pipeline.
@@ -248,7 +248,7 @@ fitSusieInfThenSusie <- function(
             X,
             y,
             "susieInf",
-            userArgs = .fmChainStageArgs(args, susieInfConfig)
+            userArgs = .fmChainStageArgs(args, SusieInfOptions)
         )
     } else {
         .setFinemappingFitClass(cached[["susieInf"]], "susieInf")
@@ -259,7 +259,7 @@ fitSusieInfThenSusie <- function(
             y,
             "susie",
             chainFromInf = susieInfFit,
-            userArgs = .fmChainStageArgs(args, susieConfig)
+            userArgs = .fmChainStageArgs(args, SusieOptions)
         )
     } else {
         .setFinemappingFitClass(cached[["susie"]], "susie")
@@ -278,12 +278,12 @@ fitSusieInfThenSusie <- function(
 #' @param R LD correlation matrix.
 #' @param n Sample size (scalar).
 #' @param args Defaults forwarded to both fits, built with
-#'   \code{\link{susieConfig}}. A bare list is refused, since it cannot be
+#'   \code{\link{SusieOptions}}. A bare list is refused, since it cannot be
 #'   checked; \code{list()} (the default) means no options.
-#' @param susieInfConfig SuSiE-inf-specific overrides, built with
-#'   \code{\link{susieInfConfig}}; they take precedence over \code{args}.
-#' @param susieConfig Standard SuSiE-RSS-specific overrides, built with
-#'   \code{\link{susieConfig}}; they take precedence over \code{args}.
+#' @param SusieInfOptions SuSiE-inf-specific overrides, built with
+#'   \code{\link{SusieInfOptions}}; they take precedence over \code{args}.
+#' @param SusieOptions Standard SuSiE-RSS-specific overrides, built with
+#'   \code{\link{SusieOptions}}; they take precedence over \code{args}.
 #' @param fittedModels Optional list with pre-fitted \code{$susie} and/or
 #'   \code{$susieInf} objects to skip re-fitting.
 #' @return A list with \code{susie} and \code{susieInf} fit objects.
@@ -309,13 +309,13 @@ fitSusieInfThenSusieRss <- function(
     R,
     n,
     args = list(),
-    susieInfConfig = list(),
-    susieConfig = list(),
+    SusieInfOptions = list(),
+    SusieOptions = list(),
     fittedModels = NULL
 ) {
     assertNumeric(z)
     assertNumber(n, lower = 0, finite = TRUE)
-    .fmAssertChainArgs(args, susieInfConfig, susieConfig)
+    .fmAssertChainArgs(args, SusieInfOptions, SusieOptions)
     assertList(fittedModels, null.ok = TRUE)
     # RSS analog of fitSusieInfThenSusie, built from the shared per-token RSS
     # fitter (.fmFitSusieRss). .fmFitSusieRss tags every fit "susieRss", so the
@@ -327,7 +327,7 @@ fitSusieInfThenSusieRss <- function(
             R,
             n,
             "susieInf",
-            userArgs = .fmChainStageArgs(args, susieInfConfig)
+            userArgs = .fmChainStageArgs(args, SusieInfOptions)
         )
     susieInfFit <- .setFinemappingFitClass(infRaw, "susieInf")
     susieRaw <- cached[["susie"]] %||%
@@ -337,7 +337,7 @@ fitSusieInfThenSusieRss <- function(
             n,
             "susie",
             chainFromInf = susieInfFit,
-            userArgs = .fmChainStageArgs(args, susieConfig)
+            userArgs = .fmChainStageArgs(args, SusieOptions)
         )
     susieFit <- .setFinemappingFitClass(susieRaw, "susieRss")
     list(susie = susieFit, susieInf = susieInfFit)
@@ -361,7 +361,7 @@ fitSusieInfThenSusieRss <- function(
 #' @param n Optional per-variant sample size, exported as the \code{N} column.
 #'   Default NULL -> \code{N} falls back to the fit's own scalar sample size.
 #' @param credibleSetArgs How credible sets are built and reported, built with
-#'   \code{\link{credibleSetConfig}}: \code{coverage},
+#'   \code{\link{CredibleSetParam}}: \code{coverage},
 #'   \code{secondaryCoverage}, \code{signalCutoff} (the PIP cutoff for
 #'   including non-credible-set variants in top loci), \code{minAbsCorr} and
 #'   \code{medianAbsCorr} for purity, and \code{includeAllCs}.
@@ -404,7 +404,7 @@ postprocessFinemappingFits <- function(
     yScalar = 1,
     af = NULL,
     n = NULL,
-    credibleSetArgs = credibleSetConfig(),
+    credibleSetArgs = CredibleSetParam(),
     fitRetention = "slim",
     otherQuantities = NULL,
     region = NULL,
@@ -592,7 +592,7 @@ postprocessFinemappingFit.susiF <- function(
     yScalar = 1,
     af = NULL,
     n = NULL,
-    credibleSetArgs = credibleSetConfig(),
+    credibleSetArgs = CredibleSetParam(),
     fitRetention = "slim",
     otherQuantities = NULL,
     region = NULL,
@@ -601,22 +601,10 @@ postprocessFinemappingFit.susiF <- function(
     csInput = c("X", "Xcorr", "fsusie")
 ) {
     csInput <- arg_match(csInput)
-    # The terminal consumer of both bundles: below here the focused helpers
-    # (.ppCsTables, .ppTopLoci, buildTopLoci, computeCsTables) each take only
-    # the slice they use, so the fields are read out once, here.
-    coverage <- credibleSetArgs$coverage
-    secondaryCoverage <- credibleSetArgs$secondaryCoverage
-    signalCutoff <- credibleSetArgs$signalCutoff
-    minAbsCorr <- credibleSetArgs$minAbsCorr
-    medianAbsCorr <- credibleSetArgs$medianAbsCorr
-    includeAllCs <- credibleSetArgs$includeAllCs
-    # "slim" keeps a trimmed view of the fit; "full" the whole
-    # susie() return, so getSusieFit() and non-default-coverage getCs()
-    # can read the full posterior matrices.
-    trim <- identical(
-        arg_match(fitRetention, c("slim", "full")),
-        "slim"
-    )
+    # "slim" keeps a trimmed view of the fit; "full" the whole susie()
+    # return, so getSusieFit() and non-default-coverage getCs() can read
+    # the full posterior matrices.
+    trim <- identical(arg_match(fitRetention, c("slim", "full")), "slim")
     variantNames <- extractVariantNames(fit)
     sumstats <- extractSumstats(dataX, dataY, xScalar, yScalar, method)
     csTables <- .ppCsTables(
@@ -626,8 +614,45 @@ postprocessFinemappingFit.susiF <- function(
         credibleSetArgs = credibleSetArgs,
         method = method
     )
-    # Always build the canonical unfiltered table; the FineMappingRow stores
-    # it as-is so accessors can filter by PIP at query time.
+    .ppFinish(
+        csTables,
+        variantNames,
+        sumstats,
+        fit = fit,
+        method = method,
+        af = af,
+        n = n,
+        dataY = dataY,
+        otherQuantities = otherQuantities,
+        region = region,
+        conditionIdx = conditionIdx,
+        credibleSetArgs = credibleSetArgs,
+        trim = trim,
+        priorEffTol = priorEffTol
+    )
+}
+
+# Build the canonical top-loci table and wrap it into the postprocess
+# result. The table is always built unfiltered -- the FineMappingRow stores
+# it as-is so accessors can filter by PIP at query time -- which is why
+# `signalCutoff` is read here for the RESULT only, not for the table.
+# @noRd
+.ppFinish <- function(
+    csTables,
+    variantNames,
+    sumstats,
+    fit,
+    method,
+    af,
+    n,
+    dataY,
+    otherQuantities,
+    region,
+    conditionIdx,
+    credibleSetArgs,
+    trim,
+    priorEffTol
+) {
     topLociFull <- .ppTopLoci(
         csTables,
         variantNames,
@@ -636,13 +661,44 @@ postprocessFinemappingFit.susiF <- function(
         method = method,
         af = af,
         n = n,
-        signalCutoff = signalCutoff,
         dataY = dataY,
         otherQuantities = otherQuantities,
         region = region,
         conditionIdx = conditionIdx,
         credibleSetArgs = credibleSetArgs
     )
+    .ppEntryAndResult(
+        topLociFull,
+        csTables,
+        variantNames,
+        sumstats,
+        fit = fit,
+        method = method,
+        dataY = dataY,
+        otherQuantities = otherQuantities,
+        signalCutoff = credibleSetArgs$signalCutoff,
+        trim = trim,
+        priorEffTol = priorEffTol
+    )
+}
+
+# Wrap the finished tables into a FineMappingRow and the postprocess result
+# around it. The stored fit is built here rather than earlier because `trim`
+# decides how much of it survives, and nothing above this point reads it.
+# @noRd
+.ppEntryAndResult <- function(
+    topLociFull,
+    csTables,
+    variantNames,
+    sumstats,
+    fit,
+    method,
+    dataY,
+    otherQuantities,
+    signalCutoff,
+    trim,
+    priorEffTol
+) {
     fmEntry <- fineMappingRow(
         variantIds = variantNames,
         susieFit = .ppStoredFit(
@@ -716,7 +772,6 @@ postprocessFinemappingFit.susiF <- function(
     method,
     af,
     n,
-    signalCutoff,
     dataY,
     otherQuantities,
     region,
@@ -1147,7 +1202,7 @@ setMethod(
     scale,
     primaryCsPos,
     effectOf,
-    credibleSetArgs = credibleSetConfig(includeAllCs = FALSE)
+    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE)
 ) {
     perCs <- credibleSetArgs$perCsColumns %||% "none"
     nV <- if (is.null(alpha) || length(dim(alpha)) < 2L) {
@@ -1497,7 +1552,7 @@ setMethod(
 #' @param conditionIdx Integer or \code{NULL}. Index of the conditioned effect
 #'   (per-condition output); \code{NULL} for the unconditioned fit.
 #' @param credibleSetArgs How credible sets are built and reported, built with
-#'   \code{\link{credibleSetConfig}}. \code{perCsColumns} decides which
+#'   \code{\link{CredibleSetParam}}. \code{perCsColumns} decides which
 #'   per-credible-set variant-level columns this table carries, and
 #'   \code{includeAllCs} their labels.
 #' @return A data frame in the fixed 22-column shape for this fit and method, or
@@ -1524,7 +1579,7 @@ buildTopLoci <- function(
     otherQuantities = NULL,
     region = NULL,
     conditionIdx = NULL,
-    credibleSetArgs = credibleSetConfig(includeAllCs = FALSE)
+    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE)
 ) {
     if (missing(method)) {
         method <- NULL
@@ -1581,6 +1636,46 @@ buildTopLoci <- function(
         nV,
         list(credibleSetArgs = credibleSetArgs)
     )
+    .btlAssembleFinal(
+        variantNames,
+        fc = fc,
+        marg = marg,
+        post = post,
+        fit = fit,
+        af = af,
+        n = n,
+        method = method,
+        cs = cs,
+        cov = cov,
+        csTables = csTables,
+        fullFitBlock = fullFitBlock,
+        nV = nV,
+        conditionIdx = conditionIdx,
+        signalCutoff = signalCutoff
+    )
+}
+
+# Assemble the per-variant table, add the conditional columns, and apply
+# the signal cutoff. Split from .btlBuild() so that function reads as the
+# list of pieces it derives, and this one as what is done with them.
+# @noRd
+.btlAssembleFinal <- function(
+    variantNames,
+    fc,
+    marg,
+    post,
+    fit,
+    af,
+    n,
+    method,
+    cs,
+    cov,
+    csTables,
+    fullFitBlock,
+    nV,
+    conditionIdx,
+    signalCutoff
+) {
     out <- .btlAssemble(
         variantNames,
         .btlParseVariants(variantNames),
@@ -2476,7 +2571,7 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #'   the analysis (2^maxScale). Set 10 true by default.
 #' @param minPurity Minimum purity threshold for credible sets to be retained.
 #' @param methodArgs Options forwarded to \code{fsusieR::susiF}, built with
-#'   \code{\link{fsusieConfig}}. A bare list is refused: it cannot be checked
+#'   \code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
 #'   against the engine, so a misspelled option would be silently ignored.
 #' @return A modified fsusie object with the susie sets list, correlations for
 #'   cs, alpha as df like susie, and without the dummy cs that do not meet the
@@ -2504,9 +2599,9 @@ fsusieWrapper <- function(
     covLev,
     minPurity,
     maxScale,
-    methodArgs = fsusieConfig()
+    methodArgs = FsusieOptions()
 ) {
-    .assertMethodConfig(methodArgs, "fsusieConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "FsusieOptions", "methodArgs")
     if (!requireNamespace("fsusieR", quietly = TRUE)) {
         abort("Package 'fsusieR' is required for this function.")
     }
@@ -2572,7 +2667,7 @@ fsusieWrapper <- function(
 #'   domain-specific prior.
 #' @param coverage Credible set coverage (default 0.95).
 #' @param methodArgs Options forwarded to \code{mvsusieR::mvsusie}, built
-#'   with \code{\link{mvsusieConfig}}. A bare list is refused: it cannot be
+#'   with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be silently
 #'   ignored.
 #' @return The fit object returned by \code{mvsusieR::mvsusie}.
@@ -2594,9 +2689,9 @@ fitMvsusie <- function(
     Y,
     prior_variance,
     coverage = 0.95,
-    methodArgs = mvsusieConfig()
+    methodArgs = MvsusieOptions()
 ) {
-    .assertMethodConfig(methodArgs, "mvsusieConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "MvsusieOptions", "methodArgs")
     assertNumber(coverage, lower = 0, upper = 1)
     callArgs <- list_modify(
         list(
@@ -2622,7 +2717,7 @@ fitMvsusie <- function(
 #' @param prior_variance Prior variance matrix.
 #' @param coverage Credible set coverage (default 0.95).
 #' @param methodArgs Options forwarded to \code{mvsusieR::mvsusie_rss},
-#'   built with \code{\link{mvsusieRssConfig}} --- the RSS entry point has
+#'   built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 #'   its own constructor, since it is a different function from
 #'   \code{mvsusie} with different arguments.
 #' @return The fit object returned by \code{mvsusieR::mvsusie_rss}.
@@ -2648,9 +2743,9 @@ fitMvsusieRss <- function(
     N,
     prior_variance,
     coverage = 0.95,
-    methodArgs = mvsusieRssConfig()
+    methodArgs = MvsusieRssOptions()
 ) {
-    .assertMethodConfig(methodArgs, "mvsusieRssConfig", "methodArgs")
+    .assertMethodOptions(methodArgs, "MvsusieRssOptions", "methodArgs")
     assertNumber(N, lower = 0, finite = TRUE)
     assertNumber(coverage, lower = 0, upper = 1)
     callArgs <- list_modify(
@@ -2674,7 +2769,7 @@ fitMvsusieRss <- function(
 #' @param Y Numeric matrix of multi-trait outcomes (samples x traits).
 #' @param pos Numeric vector of trait positions (length \code{ncol(Y)}).
 #' @param methodArgs Options forwarded to \code{fsusieR::susiF}, built with
-#'   \code{\link{fsusieConfig}}. A bare list is refused: it cannot be checked
+#'   \code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
 #'   against the engine, so a misspelled option would be silently ignored.
 #' @return The fit object returned by \code{fsusieR::susiF}.
 #' @examples
@@ -2686,10 +2781,10 @@ fitMvsusieRss <- function(
 #' Y <- matrix(rep(base, each = n), n, nPos) +
 #'   X[, 1] %o% (0.5 * cos(seq(0, pi, length.out = nPos)))
 #' pos <- seq_len(nPos)
-#' fitFsusie(X, Y, pos = pos, methodArgs = fsusieConfig(L = 2))
+#' fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(L = 2))
 #' @export
-fitFsusie <- function(X, Y, pos, methodArgs = fsusieConfig()) {
-    .assertMethodConfig(methodArgs, "fsusieConfig", "methodArgs")
+fitFsusie <- function(X, Y, pos, methodArgs = FsusieOptions()) {
+    .assertMethodOptions(methodArgs, "FsusieOptions", "methodArgs")
     callArgs <- list_modify(list(X = X, Y = Y, pos = pos), !!!methodArgs)
     exec(fsusieR::susiF, !!!callArgs)
 }
@@ -2755,6 +2850,53 @@ fitFsusie <- function(X, Y, pos, methodArgs = fsusieConfig()) {
         return(weights)
     }
     `attr<-`(weights, "fit", fit)
+}
+
+#' Compute single-effect (SER) TWAS weights
+#'
+#' Extracts coefficients from an existing single-effect fit, as produced by
+#' \code{fineMappingPipeline(..., methods = "ser")} on summary statistics.
+#' The SER model carries the same \code{alpha} / \code{mu} /
+#' \code{X_column_scale_factors} structure as a SuSiE fit --- with a single
+#' effect, so \code{alpha} has one row --- so extraction is identical.
+#'
+#' SER fits only exist on the summary-statistics path, because
+#' \code{susieR::susie_ser} is the only implementation
+#' \code{\link{fineMappingPipeline}} has for the \code{"ser"} method. That
+#' does not restrict the weights: a fit is a fit, and weights read off an
+#' RSS fit are as usable for TWAS as any from penalized regression.
+#'
+#' @param X Optional genotype matrix; when supplied it is only used to
+#'   check that the fit covers the same number of variants.
+#' @param y Unused; retained for signature compatibility.
+#' @param serFit Optional fitted SER object.
+#' @param fitRetention How much of the fit is kept on the returned weights:
+#'   \code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+#'   it as the \code{"fit"} attribute. These extractors hold no trimmable
+#'   intermediates, so the two retaining levels behave alike here.
+#' @return Numeric vector of variant weights.
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' z <- apply(X, 2, function(g) summary(stats::lm(y ~ g))$coefficients[2, 3])
+#' fit <- suppressWarnings(susieR::susie_ser(z = z, n = nrow(X)))
+#' serWeights(serFit = fit)
+#' @export
+serWeights <- function(
+    X = NULL,
+    y = NULL,
+    serFit = NULL,
+    fitRetention = c("none", "slim", "full")
+) {
+    fitRetention <- arg_match(fitRetention)
+    .susieExtractWeights(
+        serFit,
+        X,
+        requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+        token = "ser",
+        fitRetention = fitRetention
+    )
 }
 
 #' Compute SuSiE TWAS weights
@@ -3071,7 +3213,7 @@ susieAshRssWeights <- function(
 #' Y <- multiTraitData$Y
 #' fit <- fitMvsusie(X = X, Y = Y,
 #'   prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
-#'   methodArgs = mvsusieConfig(L = 5))
+#'   methodArgs = MvsusieOptions(L = 5))
 #' mvsusieWeights(mvsusieFit = fit)
 #' }
 #' @export
@@ -4159,22 +4301,22 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     )
 }
 
-.fmFitXBlock <- function(
-    X,
-    y,
+# Fit every requested method on one individual-level block. The susie-inf
+# pre-fit is built first because the chained methods take it as their
+# starting point; `chainLocal` says which of them actually chain.
+# @noRd
+.fmXFitAll <- function(
     toRun,
     addSusieInf,
-    credibleSetArgs = credibleSetConfig(includeAllCs = FALSE),
+    X,
+    y,
+    credibleSetArgs,
     methodArgs,
     verbose,
     ctx,
     tid,
-    cvFolds = 0,
-    cvThreads = 1,
-    samplePartition = NULL,
-    af = NULL,
-    fitRetention = "slim",
-    seed = NULL
+    af,
+    fitRetention
 ) {
     chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
     infFit <- .fmXInfFit(
@@ -4187,7 +4329,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         ctx = ctx,
         tid = tid
     )
-    out <- compact(set_names(
+    compact(set_names(
         map(
             toRun,
             .fmXFitAndPostprocess,
@@ -4205,6 +4347,38 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         ),
         toRun
     ))
+}
+
+.fmFitXBlock <- function(
+    X,
+    y,
+    toRun,
+    addSusieInf,
+    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE),
+    methodArgs,
+    verbose,
+    ctx,
+    tid,
+    cvFolds = 0,
+    cvThreads = 1,
+    samplePartition = NULL,
+    af = NULL,
+    fitRetention = "slim",
+    seed = NULL
+) {
+    out <- .fmXFitAll(
+        toRun,
+        addSusieInf = addSusieInf,
+        X = X,
+        y = y,
+        credibleSetArgs = credibleSetArgs,
+        methodArgs = methodArgs,
+        verbose = verbose,
+        ctx = ctx,
+        tid = tid,
+        af = af,
+        fitRetention = fitRetention
+    )
     .fmXCrossValidate(
         out,
         X = X,
@@ -4374,7 +4548,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     n,
     toRun,
     addSusieInf,
-    credibleSetArgs = credibleSetConfig(includeAllCs = FALSE),
+    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE),
     methodArgs,
     verbose,
     label,
@@ -4538,6 +4712,15 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         rMismatch = rssArgs$rMismatch,
         rssControl = .rssControlList(rssArgs$control)
     )
+    .fmRssSerFallback(fit, rssArgs)
+}
+
+# An unreliable LD matrix makes the multi-effect fit untrustworthy, so with
+# `serFallback` the single-effect model susie_rss already produced is
+# returned instead -- with the multi-effect fit kept alongside it, since
+# the caller may still want to inspect what was rejected.
+# @noRd
+.fmRssSerFallback <- function(fit, rssArgs) {
     rfd <- fit$R_finite_diagnostics
     flag <- if (!is.null(rfd) && !is.null(rfd$R_reliability_flag)) {
         isTRUE(rfd$R_reliability_flag)
@@ -4915,4 +5098,539 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         "GwasSumStats as `ldSource`: the between-credible-set correlation ",
         "is derived from that object's LD and is never stored on the fit."
     ))
+}
+
+# The canonical (non-reweighted) mvSuSiE mixture prior for residual variance
+# `V`:
+# create_mixture_prior(R) restricted to the group's conditions.
+# @noRd
+.fmCanonicalPrior <- function(V, conditionNames, R) {
+    list(
+        priorVariance = mvsusieR::create_mixture_prior(
+            R = R,
+            include_indices = conditionNames
+        ),
+        residualVariance = V
+    )
+}
+
+# Rebuild the mvSuSiE data-driven *reweighted* mixture prior + residual variance
+# from a stored mr.mash fit -- the lean payload
+# (list(dataDrivenPriorMatrices, w0, V)) that mrmashWeights() attaches at
+# fitRetention "slim" and twasWeightsPipeline keeps on the mrmash row. Shared
+# by the fine-mapping mvsusie consumer and the twas mvsusie_weights consumer.
+#
+# Reproduces the deleted multivariate_pipeline.R reweighting bit-identically:
+# rescaleCovW0(w0) collapses the expanded mr.mash weights onto the original
+# data-driven covariance matrices ($U), filters to surviving components, and
+# create_mixture_prior() wraps them, restricted to the fit's conditions
+# (`conditionNames` = colnames(Y)). `V` becomes mvsusie's residual_variance.
+# A NULL fit, NULL matrices, or no surviving component falls back to the
+# canonical create_mixture_prior(R), matching the legacy `else` branch.
+# Returns list(priorVariance, residualVariance) (residualVariance NULL only
+# when no fit was supplied at all).
+# @noRd
+.buildMvsusieReweightedPrior <- function(
+    fitParts,
+    conditionNames,
+    weightsTol = 1e-10,
+    overrideU = NULL
+) {
+    R <- length(conditionNames)
+    if (is.null(fitParts)) {
+        return(.fmCanonicalPrior(NULL, conditionNames, R))
+    }
+    # `overrideU` (mode C / hybrid): reuse this fit's reweighted mixture weights
+    # (w0) and residual variance (V) but swap in a different set of data-driven
+    # covariance matrices -- the per-fold mash prior U. Components are matched
+    # to w0 by name, so the override U must share component names with the fit.
+    ddpm <- if (!is.null(overrideU)) {
+        overrideU
+    } else {
+        fitParts$dataDrivenPriorMatrices
+    }
+    if (is.null(ddpm) || is.null(ddpm$U)) {
+        return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
+    }
+    rescaled <- rescaleCovW0(fitParts$w0)
+    w0Updated <- rescaled[is_in(names(rescaled), names(ddpm$U))]
+    if (length(w0Updated) == 0L) {
+        return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
+    }
+    mixture <- list(matrices = ddpm$U[names(w0Updated)], weights = w0Updated)
+    list(
+        priorVariance = mvsusieR::create_mixture_prior(
+            mixture_prior = mixture,
+            weights_tol = weightsTol,
+            include_indices = conditionNames
+        ),
+        residualVariance = fitParts$V
+    )
+}
+
+# Per-column marginal-association z-scores of y on each column of X (univariate
+# regression z = betahat / sebetahat), used by the individual-level absZ screen.
+# @noRd
+.marginalZ <- function(X, y) {
+    ur <- susieR::univariate_regression(X, y)
+    ur$betahat / ur$sebetahat
+}
+
+# Single-effect (SER) pre-screen, individual-level. Reports whether a
+# residualized (X, y) block shows a strong enough signal (by the chosen metric)
+# to be worth a full fit. `screen` is a screen spec (see .asScreen): a legacy
+# PIP cutoff (numeric scalar, 0 = off) OR a resolved list(metric, cutoff) for
+# one of pip / absZ / bf / logBf. Ports the deleted multivariate_pipeline.R
+# `skipConditions` / susie_twas `pip_cutoff_to_skip` logic (the individual-level
+# analog of the sumstat-path `.applyEntryScreen`):
+#   * no screen (NULL / 0 / non-scalar numeric) -> always keep.
+#   * pip cutoff < 0 uses the adaptive 3 / nVariants threshold.
+#   * absZ needs no susie fit; pip/bf/logBf fit susie L = 1 once (its
+#     $lbf_variable gives the per-variant logBF for bf/logBf, $pip for pip).
+#   * NA entries of `y` are dropped before fitting.
+# The screen is advisory: too few samples/variants or a fit failure returns
+# `fallback` -- TRUE (default) keeps the block rather than discard a potentially
+# real signal (fineMapping / joint paths); colocboost passes FALSE to drop an
+# outcome it cannot screen. This is the single L = 1 SuSiE pre-screen shared by
+# .fmSerScreenColumns (joint) and .cbPipSkipOutcomes (colocboost).
+# @noRd
+.fmSerScreen <- function(X, y, screen, fallback = TRUE) {
+    scr <- .asScreen(screen)
+    if (is.null(scr)) {
+        return(TRUE)
+    }
+    ok <- !is.na(y)
+    if (sum(ok) < 2L || ncol(X) < 1L) {
+        return(fallback)
+    }
+    raw <- X[ok, , drop = FALSE]
+    # susieR needs a double X.
+    Xs <- if (is.double(raw)) raw else `storage.mode<-`(raw, "double")
+    ys <- y[ok]
+    metric <- scr$metric
+    cutoff <- scr$cutoff
+    if (metric == "absZ") {
+        z <- try_fetch(.marginalZ(Xs, ys), error = function(cnd) NULL)
+        if (is.null(z)) {
+            return(fallback)
+        }
+        return(any(abs(z) > cutoff, na.rm = TRUE))
+    }
+    fit <- try_fetch(
+        suppressMessages(susieR::susie(Xs, ys, L = 1L)),
+        error = function(cnd) NULL
+    )
+    if (is.null(fit)) {
+        return(fallback)
+    }
+    if (metric == "pip") {
+        thr <- if (cutoff < 0) 3 / ncol(Xs) else cutoff
+        return(any(fit$pip > thr, na.rm = TRUE))
+    }
+    maxLbf <- suppressWarnings(max(as.numeric(fit$lbf_variable), na.rm = TRUE))
+    if (!is.finite(maxLbf)) {
+        return(fallback)
+    }
+    # bf: cutoff on the raw BF scale -> compare in log space; logBf: log scale.
+    maxLbf > (if (metric == "bf") log(cutoff) else cutoff)
+}
+
+# Per-fold mvsusie weights. Reuses the data-driven reweighted prior + residual
+# covariance from the full-data mr.mash fit on every fold -- the prior is over
+# conditions, identical across folds (only samples are held out). NULL mvPrior
+# -> canonical prior (unchanged behavior).
+# @noRd
+.fmFoldWeightsMv <- function(Xtr, Ytr, coverage, userArgs, mvPrior) {
+    baseArgs <- list(
+        X = Xtr,
+        Y = Ytr,
+        coverage = coverage,
+        prior_variance = if (is.null(mvPrior)) {
+            mvsusieR::create_mixture_prior(R = ncol(Ytr))
+        } else {
+            mvPrior$priorVariance
+        }
+    )
+    withPrior <- list_assign(
+        baseArgs,
+        !!!compact(list(residual_variance = mvPrior$residualVariance))
+    )
+    mvArgs <- .fmMergeUserArgs(withPrior, "mvsusie", userArgs)
+    fit <- exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, mvArgs))
+    raw <- as.matrix(mvsusieWeights(mvsusieFit = fit))
+    W <- `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
+    `attr<-`(W, "fit", .fmLeanFoldFit(fit, "mvsusie"))
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SusieOptions <- function(...) {
+    .fmMethodOptions("susieR::susie", "SusieOptions", "susie", list(...))
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SusieRssOptions <- function(...) {
+    .fmMethodOptions(
+        "susieR::susie_rss",
+        "SusieRssOptions",
+        "susieRss",
+        list(...)
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SusieInfOptions <- function(...) {
+    .fmMethodOptions("susieR::susie", "SusieInfOptions", "susieInf", list(...))
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SusieInfRssOptions <- function(...) {
+    .fmMethodOptions(
+        "susieR::susie_rss",
+        "SusieInfRssOptions",
+        "susieInfRss",
+        list(...)
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SusieAshOptions <- function(...) {
+    .fmMethodOptions("susieR::susie", "SusieAshOptions", "susieAsh", list(...))
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SusieAshRssOptions <- function(...) {
+    .fmMethodOptions(
+        "susieR::susie_rss",
+        "SusieAshRssOptions",
+        "susieAshRss",
+        list(...)
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+SerOptions <- function(...) {
+    .fmMethodOptions("susieR::susie_ser", "SerOptions", "ser", list(...))
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+MvsusieOptions <- function(...) {
+    .fmMethodOptions(
+        "mvsusieR::mvsusie",
+        "MvsusieOptions",
+        "mvsusie",
+        list(...)
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+MvsusieRssOptions <- function(...) {
+    .fmMethodOptions(
+        "mvsusieR::mvsusie_rss",
+        "MvsusieRssOptions",
+        "mvsusieRss",
+        list(...)
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+FsusieOptions <- function(...) {
+    .fmMethodOptions("fsusieR::susiF", "FsusieOptions", "fsusie", list(...))
+}
+
+#' @title Arguments For susieR's RSS Control Block
+#' @description Options forwarded to \code{susieR::susie_rss_control()} and
+#'   from there to \code{susie_rss()}'s \code{control} argument. Names are
+#'   checked against that function's live formals, so a misspelling fails at
+#'   the call site rather than being dropped into an ignored list --- which is
+#'   what a bare named list here used to do.
+#' @param ... Arguments for \code{susieR::susie_rss_control()}, under its own
+#'   names (\code{check_prior}, \code{mismatch_estimator}, ...).
+#' @return A \code{\link{MethodOptions}} object.
+#' @examples
+#' SusieRssControlOptions(check_prior = TRUE)
+#' @export
+SusieRssControlOptions <- function(...) {
+    .newMethodOptions(
+        "susieR::susie_rss_control",
+        defaults = list(),
+        extra = list(...),
+        label = "SusieRssControlOptions",
+        engine = "susieRssControl"
+    )
+}
+
+#' @title Options for the susieR Kriging RSS Diagnostic
+#' @description Build a checked record of extra arguments for
+#'   \code{susieR::kriging_rss()}, the engine behind
+#'   \code{\link{krigingOutlierQc}}.
+#' @param ... Arguments for \code{susieR::kriging_rss()}: \code{r_tol} (the
+#'   eigenvalue tolerance below which an LD eigenvalue is treated as zero) and
+#'   \code{s} (the estimated proportion of LD/sumstats mismatch, which
+#'   defaults to \code{susieR::estimate_s_rss()}). \code{z}, \code{R} and
+#'   \code{n} are supplied by pecotmr and refused.
+#' @return A \code{MethodOptions} record for
+#'   \code{krigingOutlierQc(methodArgs =)}.
+#' @seealso \code{\link{krigingOutlierQc}}
+#' @examples
+#' KrigingOptions(r_tol = 1e-06)
+#' @export
+KrigingOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            z = "the caller's `zScore`",
+            R = "the caller's `R`",
+            n = "the caller's `n`"
+        ),
+        "KrigingOptions"
+    )
+    .newMethodOptions(
+        "susieR::kriging_rss",
+        defaults = list(),
+        extra = extra,
+        label = "KrigingOptions",
+        engine = "kriging"
+    )
+}
+
+#' Kriging-style LD-consistency outlier QC
+#'
+#' Flags variants whose observed z-score is inconsistent with the value
+#' predicted from its LD neighbours, using susieR's kriging diagnostic.
+#' \code{susieR::kriging_rss()} computes the leave-one-out conditional
+#' distribution of each \code{z_i} given the rest (with the LD-mismatch scale
+#' \code{s} defaulting to \code{susieR::estimate_s_rss()}) and a per-variant
+#' \code{logLR} for the allele-switch hypothesis. This helper reuses susieR's
+#' own allele-switch rule --- \code{logLR > logLRThreshold & abs(z) >
+#' zThreshold} (the same \code{logLR > 2 & |z| > 2} used in
+#' \code{susie_rss_utils}) --- to flag variants whose sign should be flipped.
+#' RSS-only helper, opt-in via \code{alleleFlipKriging}; never wired into
+#' \code{alleleQc()} / \code{matchRefPanel()}. Requires a susieR that provides
+#' \code{kriging_rss()} and \code{estimate_s_rss()}.
+#'
+#' @param zScore Numeric vector of harmonized z-scores.
+#' @param R Square LD correlation matrix aligned to \code{zScore}.
+#' @param n Sample size, forwarded to \code{susieR::kriging_rss()} (whose
+#'   default \code{s} is \code{susieR::estimate_s_rss()}).
+#' @param variantIds Optional variant IDs for the diagnostics table.
+#' @param zThreshold Absolute-z cutoff for the allele-switch rule (default
+#'   \code{2}, matching susieR).
+#' @param logLRThreshold Log-likelihood-ratio cutoff for the allele-switch rule
+#'   (default \code{2}, matching susieR).
+#' @param methodArgs Extra arguments for \code{susieR::kriging_rss()}, built
+#'   with \code{\link{KrigingOptions}} -- \code{r_tol} and \code{s}.
+#' @return A list with \code{flip} (logical vector; \code{TRUE} = allele switch,
+#'   z-score should be sign-flipped) and \code{diagnostics} (data frame of
+#'   per-variant \code{z}, \code{condmean}, \code{z_std_diff}, \code{logLR}, and
+#'   the \code{flipped} flag).
+#' @importFrom stats pnorm
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:20]
+#' R <- cor(X)
+#' krigingOutlierQc(
+#'   zScore = rnorm(20), R = R, n = 415, variantIds = colnames(X))
+#' @export
+#' @importFrom checkmate assertMatrix
+krigingOutlierQc <- function(
+    zScore,
+    R,
+    n,
+    variantIds = NULL,
+    zThreshold = 2,
+    logLRThreshold = 2,
+    methodArgs = KrigingOptions()
+) {
+    .assertMethodOptions(methodArgs, "KrigingOptions", "methodArgs")
+    zScore <- as.numeric(zScore)
+    m <- length(zScore)
+    assertMatrix(R, nrows = m, ncols = m, .var.name = "R (LD matrix)")
+    if (missing(n) || length(n) != 1L || is.na(n) || !is.finite(n) || n <= 0) {
+        abort("krigingOutlierQc requires a single positive sample size 'n'.")
+    }
+    .krigingCheckSusie()
+    if (is.null(variantIds)) {
+        variantIds <- rownames(R)
+    }
+    # susieR kriging RSS diagnostic (kriging_rss(z, R, n)): s defaults to
+    # estimate_s_rss(); logLR matches susieR's allele-switch selection.
+    cd <- exec(
+        susieR::kriging_rss,
+        z = zScore,
+        R = R,
+        n = n,
+        !!!as.list(methodArgs)
+    )$conditional_dist
+    condMean <- as.numeric(cd$condmean)
+    zStdDiff <- as.numeric(cd$z_std_diff)
+    logLR <- as.numeric(cd$logLR)
+    # susieR's allele-switch rule (susie_rss_utils.R): logLR > 2 & |z| > 2.
+    flip <- !is.na(logLR) &
+        !is.na(zScore) &
+        logLR > logLRThreshold &
+        abs(zScore) > zThreshold
+    list(
+        flip = flip,
+        diagnostics = tibble(
+            variant_id = if (is.null(variantIds)) seq_len(m) else variantIds,
+            z = zScore,
+            condmean = condMean,
+            z_std_diff = zStdDiff,
+            logLR = logLR,
+            flipped = flip
+        )
+    )
+}
+
+# Decide whether the z-scores of one entry clear the chosen screen. Returns
+# list(ok = logical, reason = character). susie_ser is fit at most once, and
+# only for the metrics that need it (absZ stays model-free).
+.entryScreenPass <- function(z, n, nVar, scr) {
+    metric <- scr$metric
+    cutoff <- scr$cutoff
+    if (metric == "absZ") {
+        m <- suppressWarnings(max(abs(as.numeric(z)), na.rm = TRUE))
+        return(list(
+            ok = is.finite(m) && m > cutoff,
+            reason = sprintf(
+                "no variant with |Z| above %g (max |Z| = %g)",
+                cutoff,
+                m
+            )
+        ))
+    }
+    ser <- susieR::susie_ser(z = z, n = n, coverage = NULL)
+    if (metric == "pip") {
+        eff <- if (cutoff < 0) 3 / nVar else cutoff
+        return(list(
+            ok = any(ser$pip > eff),
+            reason = sprintf("no signals above PIP threshold %g", eff)
+        ))
+    }
+    maxLbf <- suppressWarnings(max(as.numeric(ser$lbf_variable), na.rm = TRUE))
+    if (metric == "logBf") {
+        return(list(
+            ok = is.finite(maxLbf) && maxLbf > cutoff,
+            reason = sprintf(
+                "no variant with logBF above %g (max logBF = %g)",
+                cutoff,
+                maxLbf
+            )
+        ))
+    }
+    # metric == "bf": compare in log space to avoid overflow of exp(maxLbf).
+    list(
+        ok = is.finite(maxLbf) && maxLbf > log(cutoff),
+        reason = sprintf(
+            "no variant with BF above %g (max BF = %g)",
+            cutoff,
+            exp(maxLbf)
+        )
+    )
+}
+
+# Populate `obj$cred_band` via fsusieR's wavethresh/GenW band computation. That
+# function is registered as an S3 method but NOT exported, and the exported
+# affected_reg() depends on cred_band already being populated, so this internal
+# call is the only path that works across all post_processing modes. Guarded so
+# an upstream fsusieR change surfaces as a clear error, not a silent NULL.
+# @noRd
+#' @importFrom rlang try_fetch
+.fsusiePopulateCredibleBand <- function(fit) {
+    fn <- try_fetch(
+        get("update_cal_credible_band.susiF", envir = asNamespace("fsusieR")),
+        error = function(cnd) NULL
+    )
+    if (is.null(fn)) {
+        # Defensive guard against an upstream fsusieR rename; only reachable
+        # if fsusieR drops this unexported S3 method.
+        msg <- glue(
+            "fsusieR's internal update_cal_credible_band.susiF not found; ",
+            "cannot compute the fSuSiE credible band (upstream fsusieR API ",
+            "changed)."
+        )
+        abort(msg)
+    }
+    indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
+    fn(fit, indxLst)
+}
+
+# @noRd
+.fsusieAffectedRegionsFit <- function(fit, topLoci = NULL) {
+    if (!.isFsusieFit(fit)) {
+        return(GenomicRanges::GRanges())
+    }
+    fit <- .fsusiePopulateCredibleBand(fit)
+    raw <- try_fetch(fsusieR::affected_reg(fit), error = function(cnd) NULL)
+    if (is.null(raw) || nrow(raw) == 0L) {
+        return(GenomicRanges::GRanges())
+    }
+    reg <- as_tibble(raw)
+    chrom <- .fsusieChrom(fit)
+    grid <- as.numeric(fit$outing_grid)
+    csMap <- .fsusieCsMapFromTopLoci(fit, topLoci)
+    csKey <- as.character(reg$CS)
+    # Effect direction over each region (sign of the fitted effect curve), which
+    # upstream affected_reg() collapses away.
+    direction <- map_chr(
+        seq_len(nrow(reg)),
+        .fsusieRegionDirection,
+        grid = grid,
+        reg = reg,
+        fit = fit
+    )
+    GenomicRanges::GRanges(
+        seqnames = str_c("chr", str_remove(chrom, "^chr")),
+        ranges = IRanges::IRanges(
+            start = as.integer(reg$Start),
+            end = as.integer(reg$End)
+        ),
+        cs = unname(csMap$label[csKey]),
+        purity = unname(csMap$purity[csKey]),
+        direction = direction
+    )
+}
+
+# Require a susieR that provides the kriging RSS diagnostic.
+.krigingCheckSusie <- function() {
+    if (
+        !requireNamespace("susieR", quietly = TRUE) ||
+            !all(
+                is_in(
+                    c("estimate_s_rss", "kriging_rss"),
+                    getNamespaceExports("susieR")
+                )
+            )
+    ) {
+        msg <- glue(
+            "krigingOutlierQc requires a susieR that provides ",
+            "estimate_s_rss() and kriging_rss(); the installed susieR does ",
+            "not. Install a susieR with the kriging RSS diagnostic, or ",
+            "disable alleleFlipKriging."
+        )
+        abort(msg)
+    }
+}
+
+# susieR's `control` argument is a plain named list, so the constructor
+# result is flattened on the way out. NULL is preserved rather than becoming
+# list(): to susie_rss() an absent control means "use susie_rss_control()'s
+# own defaults", which an empty list does not.
+# @noRd
+.rssControlList <- function(control) {
+    if (is.null(control) || length(control) == 0L) {
+        return(NULL)
+    }
+    as.list(control)
 }

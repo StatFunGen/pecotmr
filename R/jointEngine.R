@@ -436,13 +436,13 @@ setMethod(
 .jointMvFit <- function(group, Xc, Ys, cfg, args, ddCut, verbose) {
     key <- .jointPriorKey(.jgConditions(group))
     mvFitParts <- .fmLookupMrmashFit(
-        args$twasWeights,
+        args$mrmashPrior,
         key$study,
         key$trait,
         context = key$context
     )
     mvCv <- .fmLookupMrmashCv(
-        args$twasWeights,
+        args$mrmashPrior,
         key$study,
         key$trait,
         context = key$context
@@ -596,7 +596,7 @@ setMethod(
     }
     key <- .jointPriorKey(.jgConditions(group))
     mvFitParts <- .fmLookupMrmashFit(
-        args$twasWeights,
+        args$mrmashPrior,
         key$study,
         key$trait,
         context = key$context
@@ -2301,7 +2301,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # joint method (token) through `.runJointCell`, rbinding the per-spec results.
 # Shared by the fm + twas QtlDataset / QtlSumStats / MultiStudy dispatchers --
 # the marker (pipeline) selects the result type and the rbind. `args` is the
-# per-run engine payload (twasWeights, methodArgs, cisWindow, region, ...).
+# per-run engine payload (mrmashPrior, methodArgs, cisWindow, region, ...).
 .runJointSpecs <- function(
     parsedJointSpec,
     data,

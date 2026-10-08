@@ -1771,14 +1771,14 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     expect_error(
         loadQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = genotypeFilterConfig(mafCutoff = -1)
+            genotypeFilterArgs = GenotypeFilterParam(mafCutoff = -1)
         ),
         "mafCutoff.*is not >= 0"
     )
     expect_error(
         loadQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = genotypeFilterConfig(keepIndel = NA)
+            genotypeFilterArgs = GenotypeFilterParam(keepIndel = NA)
         ),
         "keepIndel.*May not be NA"
     )
@@ -1788,7 +1788,7 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
             data.frame(),
             genotypeFilterArgs = list(mafCutoff = 0.01)
         ),
-        "must be built with genotypeFilterConfig"
+        "must be built with GenotypeFilterParam"
     )
     expect_error(
         loadQtlDatasetFromManifest(
@@ -1811,7 +1811,7 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     expect_error(
         loadMultiStudyQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = genotypeFilterConfig(xvarCutoff = -1)
+            genotypeFilterArgs = GenotypeFilterParam(xvarCutoff = -1)
         ),
         "xvarCutoff.*is not >= 0"
     )

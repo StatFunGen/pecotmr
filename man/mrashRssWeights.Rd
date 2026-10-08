@@ -12,7 +12,7 @@ mrashRssWeights(
   s0,
   w0,
   z = numeric(0),
-  methodArgs = mrashConfig()
+  methodArgs = MrashRssOptions()
 )
 }
 \arguments{
@@ -36,7 +36,7 @@ grid).}
 (derived from \code{stat}).}
 
 \item{methodArgs}{Options forwarded to \code{susieR::mr.ash.rss}, built
-with \code{\link{mrashConfig}}. A bare list is refused: it cannot be
+with \code{\link{MrashOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

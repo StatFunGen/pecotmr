@@ -25,7 +25,7 @@ NULL
 # is only true until someone puts something else in it.
 #' @importClassesFrom SummarizedExperiment RangedSummarizedExperiment
 setClassUnion(
-    "LdSketchOrNULL",
+    "LdSketch_OR_NULL",
     c("RangedSummarizedExperiment", "NULL")
 )
 
@@ -65,13 +65,9 @@ setClassUnion("LdCorrelation", c("matrix", "list", "NULL"))
 # constructor coerces to integer, so a caller may pass doubles.
 setClassUnion("LdSnpIndex", c("integer", "NULL"))
 
-# Block boundaries, as ranges or as a table. Not nullable: every LdData is
-# built for some block, and the constructor has always required it.
+# Mixing proportions, one per panel, when `genotypeHandle` is a list.
 #' @importClassesFrom GenomicRanges GRanges
 #' @importClassesFrom S4Vectors DataFrame
-setClassUnion("LdBlockMetadata", c("GRanges", "data.frame", "DataFrame"))
-
-# Mixing proportions, one per panel, when `genotypeHandle` is a list.
 setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 
 # =============================================================================
@@ -115,7 +111,7 @@ setClass(
     "SumStatsBase",
     contains = c("VIRTUAL", "RangedTupleList"),
     representation(
-        ldSketch = "LdSketchOrNULL",
+        ldSketch = "LdSketch_OR_NULL",
         qcInfo = "list"
     )
 )
@@ -501,7 +497,7 @@ setMethod(
 setClass(
     "FineMappingResultBase",
     contains = c("VIRTUAL", "RangedTupleList"),
-    representation(ldSketch = "LdSketchOrNULL")
+    representation(ldSketch = "LdSketch_OR_NULL")
 )
 
 #' @rdname getStudy
@@ -865,52 +861,36 @@ setMethod(
         raw = FALSE
     ) {
         type <- arg_match(type)
-        # raw = TRUE hands back the stored canonical table verbatim, so the
-        # posterior-view projection and the type switch do not apply.
+        # The five selectors travel together to every branch, so they are
+        # named once and spliced rather than relisted three times.
+        sel <- list(
+            study = study,
+            context = context,
+            trait = trait,
+            method = method,
+            region = region
+        )
         if (isTRUE(raw)) {
-            if (type == "GRanges") {
-                abort(glue(
-                    "getTopLoci: `raw = TRUE` returns the stored table ",
-                    "verbatim, which has no GRanges form. Use ",
-                    "type = \"data.frame\"."
-                ))
-            }
-            return(.fmrAggregateView(
-                x,
-                study = study,
-                context = context,
-                trait = trait,
-                method = method,
-                region = region,
-                perEntry = .fmrRowTopLoci,
-                viewArgs = list(raw = TRUE)
-            ))
+            return(.fmrbTopLociRaw(x, sel, type))
         }
         # type = "GRanges" is honored only for a single pinned entry; the
         # aggregate (identity-prefixed) form is data.frame-only.
         if (type == "GRanges") {
-            return(.fmrbTopLociGranges(
+            return(exec(
+                .fmrbTopLociGranges,
                 x,
-                study,
-                context,
-                trait,
-                method,
-                region,
+                !!!sel,
                 signalCutoff,
                 minPurity
             ))
         }
         # data.frame: bare per-variant table when selectors pin one entry, else
         # the matching rows' per-variant tables stacked with row-identity cols.
-        .fmrAggregateView(
+        exec(
+            .fmrbTopLociTable,
             x,
-            study = study,
-            context = context,
-            trait = trait,
-            method = method,
-            region = region,
-            perEntry = .fmrRowTopLoci,
-            viewArgs = list(
+            !!!sel,
+            list(
                 type = "data.frame",
                 signalCutoff = signalCutoff,
                 minPurity = minPurity
@@ -918,6 +898,47 @@ setMethod(
         )
     }
 )
+
+# raw = TRUE hands back the stored canonical table verbatim, so the
+# posterior-view projection and the type switch do not apply -- and there
+# is no GRanges form of it to hand back.
+# @noRd
+.fmrbTopLociRaw <- function(x, sel, type) {
+    if (type == "GRanges") {
+        abort(glue(
+            "getTopLoci: `raw = TRUE` returns the stored table ",
+            "verbatim, which has no GRanges form. Use ",
+            "type = \"data.frame\"."
+        ))
+    }
+    exec(.fmrbTopLociTable, x, !!!sel, list(raw = TRUE))
+}
+
+# The per-variant top-loci table, in whichever of its two table forms the
+# caller asked for: the stored table verbatim (raw) or the projected
+# data.frame view. Both stack with row-identity columns when the selectors
+# match more than one entry, so they differ only in `viewArgs`.
+# @noRd
+.fmrbTopLociTable <- function(
+    x,
+    study,
+    context,
+    trait,
+    method,
+    region,
+    viewArgs
+) {
+    .fmrAggregateView(
+        x,
+        study = study,
+        context = context,
+        trait = trait,
+        method = method,
+        region = region,
+        perEntry = .fmrRowTopLoci,
+        viewArgs = viewArgs
+    )
+}
 
 # Resolve the single pinned entry and return its GRanges view (aggregating
 # across multiple entries requires type = "data.frame").

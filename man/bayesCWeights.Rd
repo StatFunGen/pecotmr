@@ -4,7 +4,7 @@
 \alias{bayesCWeights}
 \title{BayesC TWAS weights (rounded-spike prior)}
 \usage{
-bayesCWeights(X, y, Z = NULL, pi = 0.1, methodArgs = qggConfig())
+bayesCWeights(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -17,7 +17,7 @@ bayesCWeights(X, y, Z = NULL, pi = 0.1, methodArgs = qggConfig())
 BayesC mixture. Default \code{0.1}.}
 
 \item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
-with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

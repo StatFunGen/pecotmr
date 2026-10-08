@@ -4,7 +4,7 @@
 \alias{prsCsWeights}
 \title{Extract weights from prsCs function}
 \usage{
-prsCsWeights(stat, LD, methodArgs = prsCsConfig())
+prsCsWeights(stat, LD, methodArgs = PrsCsOptions())
 }
 \arguments{
 \item{stat}{A list of summary statistics with elements \code{b} (effect
@@ -14,7 +14,7 @@ sizes) and \code{n} (per-variant sample sizes).}
 \code{stat}.}
 
 \item{methodArgs}{Options forwarded to \code{prsCs}, built
-with \code{\link{prsCsConfig}}. A bare list is refused: it cannot be
+with \code{\link{PrsCsOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }
@@ -36,5 +36,5 @@ stat <- list(
   n = rep(nrow(X), ncol(X))
 )
 LD <- cor(X)
-prsCsWeights(stat, LD, methodArgs = prsCsConfig(maf = rep(0.3, ncol(X))))
+prsCsWeights(stat, LD, methodArgs = PrsCsOptions(maf = rep(0.3, ncol(X))))
 }

@@ -16,20 +16,20 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = genotypeFilterConfig(),
+  genotypeFilterArgs = GenotypeFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
   mashPrior = NULL,
-  crossValidationArgs = crossValidationConfig(),
+  crossValidationArgs = CrossValidationParam(),
   fitFullData = TRUE,
-  ensembleArgs = ensembleConfig(),
+  ensembleArgs = EnsembleParam(),
   estimatePi = TRUE,
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
-  residualizationArgs = residualizationConfig(),
+  residualizationArgs = ResidualizationParam(),
   dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
@@ -47,8 +47,8 @@ twasWeightsPipeline(data, ...)
   fitRetention = c("slim", "none", "full"),
   dataType = NULL,
   verbose = 1L,
-  panelFilterArgs = panelFilterConfig(),
-  crossValidationArgs = crossValidationConfig()
+  panelFilterArgs = PanelFilterParam(),
+  crossValidationArgs = CrossValidationParam()
 )
 
 \S4method{twasWeightsPipeline}{MultiStudyQtlDataset}(
@@ -58,8 +58,8 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = genotypeFilterConfig(),
-  panelFilterArgs = panelFilterConfig(),
+  genotypeFilterArgs = GenotypeFilterParam(),
+  panelFilterArgs = PanelFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
@@ -71,9 +71,9 @@ twasWeightsPipeline(data, ...)
   dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
-  residualizationArgs = residualizationConfig(),
-  crossValidationArgs = crossValidationConfig(),
-  ensembleArgs = ensembleConfig(),
+  residualizationArgs = ResidualizationParam(),
+  crossValidationArgs = CrossValidationParam(),
+  ensembleArgs = EnsembleParam(),
   seed = NULL
 )
 }
@@ -108,7 +108,7 @@ position when extracting variants. Required when \code{traitId} is
 supplied. Mutually exclusive with \code{region}.}
 
 \item{genotypeFilterArgs}{For QtlDataset: per-call genotype-filter overrides,
-built with \code{\link{genotypeFilterConfig}}. Each field that is set
+built with \code{\link{GenotypeFilterParam}}. Each field that is set
 replaces the corresponding construct-time \code{\link{QtlDataset}} slot
 for this call only (applied to a validated copy); a field left unset
 leaves the stored value in place. Variant QC is a property of the data,
@@ -152,7 +152,7 @@ produce one fit jointly across multiple \code{(context, trait)} columns.}
 data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
 
 \item{crossValidationArgs}{Cross-validation settings, built with
-  \code{\link{crossValidationConfig}}: \code{folds} (default \code{0}, no
+  \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
   CV), \code{threads}, \code{samplePartition}, \code{maxVariants} (cap
   on the CV design matrix) and \code{weightMethods} (which methods to
   cross-validate; unset means every method with non-zero weights).
@@ -169,7 +169,7 @@ data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
 data after cross-validation. Default \code{TRUE}.}
 
 \item{ensembleArgs}{SR-TWAS ensemble settings, built with
-\code{\link{ensembleConfig}}: \code{enabled} (default \code{FALSE}),
+\code{\link{EnsembleParam}}: \code{enabled} (default \code{FALSE}),
 \code{r2Threshold}, \code{solver} and \code{alpha}. Stacking reads
 out-of-fold predictions, so \code{enabled = TRUE} requires
 \code{crossValidation} with \code{folds >= 2} and is an error
@@ -205,7 +205,7 @@ components fitted per context when \code{usePCA = TRUE} (default
   dropping it in silence.}
 
 \item{residualizationArgs}{Covariate residualization settings, built with
-  \code{\link{residualizationConfig}} and forwarded to
+  \code{\link{ResidualizationParam}} and forwarded to
   \code{\link{getResidualizedPhenotypes}} /
   \code{\link{getResidualizedGenotypes}}: \code{phenotypeCovariates} and
   \code{genotypeCovariates} name which covariates to regress out
@@ -240,7 +240,7 @@ governs the main-process draws.}
 
 \item{panelFilterArgs}{For QtlSumStats: LD-reference-panel filters,
 built with
-\code{\link{panelFilterConfig}}. See \emph{Panel filters on the RSS path}
+\code{\link{PanelFilterParam}}. See \emph{Panel filters on the RSS path}
 above.}
 }
 \value{

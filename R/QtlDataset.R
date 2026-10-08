@@ -12,6 +12,7 @@
 # =============================================================================
 
 #' @include AllGenerics.R
+#' @include MethodParam.R
 NULL
 
 #' @title QTL Dataset (individual-level data for one study)
@@ -390,7 +391,7 @@ setClass(
 #'   genotype experiment.
 #' @param scaleResiduals Logical (length 1). Default \code{TRUE}.
 #' @param genotypeFilterArgs Which variants and samples to keep, built with
-#'   \code{\link{genotypeFilterConfig}}. A bare list is refused, since it
+#'   \code{\link{GenotypeFilterParam}}. A bare list is refused, since it
 #'   cannot be checked. Each field is recorded on the object and applied
 #'   lazily, at extraction time inside \code{getGenotypes()} /
 #'   \code{getResidualizedGenotypes()}:
@@ -438,11 +439,11 @@ QtlDataset <- function(
     phenotypes,
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
     scaleResiduals = TRUE,
-    genotypeFilterArgs = genotypeFilterConfig()
+    genotypeFilterArgs = GenotypeFilterParam()
 ) {
-    .assertMethodConfig(
+    .assertMethodParam(
         genotypeFilterArgs,
-        "genotypeFilterConfig",
+        "GenotypeFilterParam",
         "genotypeFilter"
     )
     filt <- .qtlResolveFilter(genotypeFilterArgs)
@@ -985,7 +986,7 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL) {
     isTRUE(possibly(getKeepIndel, otherwise = TRUE)(x))
 }
 
-# A genotypeFilterConfig() bundle with every field resolved. Unset fields
+# A GenotypeFilterParam() bundle with every field resolved. Unset fields
 # (absent from the bundle) take this constructor's documented defaults --
 # which is what makes the same bundle usable as a specification here and as an
 # override in .qtlApplyFilterOverrides, where unset means "leave the slot".
@@ -1026,9 +1027,9 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL) {
 # arguments instead of forcing callers to mutate @slots directly (which bypasses
 # the class's validity checks). Applied against a validated copy.
 .qtlApplyFilterOverrides <- function(data, genotypeFilterArgs) {
-    .assertMethodConfig(
+    .assertMethodParam(
         genotypeFilterArgs,
-        "genotypeFilterConfig",
+        "GenotypeFilterParam",
         "genotypeFilter"
     )
     # discard(is.null), not compact(): a keepVariants of character(0) is a
@@ -1347,11 +1348,11 @@ setMethod(
         naAction = c("keep", "drop", "impute"),
         outlierAction = c("keep", "drop"),
         outlierPvalThreshold = 1e-3,
-        outlierArgs = covMcdConfig()
+        outlierArgs = CovMcdOptions()
     ) {
         naAction <- arg_match(naAction)
         outlierAction <- arg_match(outlierAction)
-        .assertMethodConfig(outlierArgs, "covMcdConfig", "outlierArgs")
+        .assertMethodOptions(outlierArgs, "CovMcdOptions", "outlierArgs")
         .qtlValidateContexts(x, contexts)
         out <- .qtlPhenotypeList(x)[contexts] |>
             .qtlFilterPhenotypes(
@@ -1511,13 +1512,13 @@ setMethod(
 #'   reproducibility, and \code{covMcd()}'s \code{seed} restores the ambient
 #'   \code{.Random.seed} on exit, which would silently undo the caller's
 #'   stream.
-#' @return A \code{MethodConfig} record for the \code{outlierArgs} argument.
+#' @return A \code{MethodOptions} record for the \code{outlierArgs} argument.
 #' @seealso \code{\link{getPhenotypes}},
 #'   \code{\link{getResidualizedPhenotypes}}
 #' @examples
-#' covMcdConfig(alpha = 0.75)
+#' CovMcdOptions(alpha = 0.75)
 #' @export
-covMcdConfig <- function(...) {
+CovMcdOptions <- function(...) {
     extra <- list(...)
     .configRefuseOwned(
         extra,
@@ -1525,15 +1526,44 @@ covMcdConfig <- function(...) {
             x = "the trait matrix pecotmr assembles",
             seed = "pecotmr's own RNG handling"
         ),
-        "covMcdConfig"
+        "CovMcdOptions"
     )
-    .newMethodConfig(
+    .newMethodOptions(
         "robustbase::covMcd",
         defaults = list(),
         extra = extra,
-        label = "covMcdConfig",
+        label = "CovMcdOptions",
         engine = "covMcd"
     )
+}
+
+# The centre and covariance the Mahalanobis distance is measured against:
+# robustbase's MCD when it is installed and converges, else the non-robust
+# colMeans/cov pair. Both fallbacks are announced -- a silently non-robust
+# estimate would make the outlier rule mean something different from what
+# the caller asked for.
+# @noRd
+#' @importFrom rlang try_fetch
+.qtlOutlierCenterCov <- function(Y, outlierArgs = list()) {
+    # Engine-call exception: robustbase::covMcd is a covariance estimator,
+    # interchangeable with the colMeans/stats::cov fallback above -- a numeric
+    # primitive for outlier detection while a QtlDataset is built.
+    if (!requireNamespace("robustbase", quietly = TRUE)) {
+        msg <- glue(
+            "outlier detection: install 'robustbase' for an MCD-based ",
+            "estimator; falling back to non-robust colMeans/cov."
+        )
+        inform(msg)
+        return(list(center = colMeans(Y), cov = stats::cov(Y)))
+    }
+    mcd <- try_fetch(
+        exec(robustbase::covMcd, Y, !!!as.list(outlierArgs)),
+        error = function(cnd) NULL
+    )
+    if (is.null(mcd)) {
+        return(list(center = colMeans(Y), cov = stats::cov(Y)))
+    }
+    list(center = mcd$center, cov = mcd$cov)
 }
 
 # Significance: per-sample chi-squared(p) p-value with Bonferroni
@@ -1559,27 +1589,9 @@ covMcdConfig <- function(...) {
         warn(msg)
         return(rep(TRUE, n))
     }
-    if (requireNamespace("robustbase", quietly = TRUE)) {
-        mcd <- try_fetch(
-            exec(robustbase::covMcd, Y, !!!as.list(outlierArgs)),
-            error = function(cnd) NULL
-        )
-        if (!is.null(mcd)) {
-            ctr <- mcd$center
-            covMat <- mcd$cov
-        } else {
-            ctr <- colMeans(Y)
-            covMat <- stats::cov(Y)
-        }
-    } else {
-        msg <- glue(
-            "outlier detection: install 'robustbase' for an MCD-based ",
-            "estimator; falling back to non-robust colMeans/cov."
-        )
-        inform(msg)
-        ctr <- colMeans(Y)
-        covMat <- stats::cov(Y)
-    }
+    est <- .qtlOutlierCenterCov(Y, outlierArgs)
+    ctr <- est$center
+    covMat <- est$cov
     invCov <- try_fetch(
         solve(covMat),
         error = function(cnd) {
@@ -1686,7 +1698,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (length(keep) != length(requested)) {
         missingNames <- setdiff(requested, avail)
         msg <- glue(
-            "phenotypeCovariatesToResidualize: context '{ctx}' has no ",
+            "residualizationArgs$phenotypeCovariates: context '{ctx}' has no ",
             "covariate(s) named: {str_flatten(missingNames, ', ')}"
         )
         abort(msg)
@@ -1694,7 +1706,8 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     keep
 }
 
-# Internal: validate and resolve the `*ToResidualize` argument against a
+# Internal: validate and resolve a covariate-selection field of
+# ResidualizationParam() against a
 # set of contexts and the covariates actually present in those contexts'
 # colData. Accepts either NULL (use all), a character vector (apply to all
 # listed contexts), or a named list keyed by context. Returns a named list
@@ -1721,13 +1734,13 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         ))
     }
     msg <- glue(
-        "phenotypeCovariatesToResidualize must be NULL, a character vector, ",
+        "`phenotypeCovariates` must be NULL, a character vector, ",
         "or a named list keyed by context."
     )
     abort(msg)
 }
 
-# List-form phenotypeCovariatesToResidualize: must be named with EXACTLY the
+# List-form `phenotypeCovariates`: must be named with EXACTLY the
 # `contexts` set. Resolves each context's selection.
 # @noRd
 .qtlPhenoSelectionList <- function(x, contexts, toResidualize) {
@@ -1736,7 +1749,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         is.null(toResNames) || any(str_length(toResNames) == 0L, na.rm = TRUE)
     ) {
         msg <- glue(
-            "phenotypeCovariatesToResidualize: when supplied as a list, it ",
+            "`phenotypeCovariates`: when supplied as a list, it ",
             "must be named with context names."
         )
         abort(msg)
@@ -1744,7 +1757,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     badKeys <- setdiff(names(toResidualize), contexts)
     if (length(badKeys) > 0L) {
         msg <- glue(
-            "phenotypeCovariatesToResidualize: list key(s) not in ",
+            "`phenotypeCovariates`: list key(s) not in ",
             "`contexts`: {str_flatten(badKeys, ', ')}"
         )
         abort(msg)
@@ -1752,7 +1765,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     missingKeys <- setdiff(contexts, names(toResidualize))
     if (length(missingKeys) > 0L) {
         msg <- glue(
-            "phenotypeCovariatesToResidualize: list does not cover all ",
+            "`phenotypeCovariates`: list does not cover all ",
             "`contexts`. Per-context lists must have exactly the same context ",
             "set as `contexts`. Missing keys: ",
             "{str_flatten(missingKeys, ', ')}"
@@ -1776,7 +1789,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (length(keep) != length(toResidualize)) {
         missingNames <- setdiff(toResidualize, avail)
         msg <- glue(
-            "genotypeCovariatesToResidualize: no covariate(s) named: ",
+            "`genotypeCovariates`: no covariate(s) named: ",
             "{str_flatten(missingNames, ', ')}"
         )
         abort(msg)
@@ -1938,105 +1951,6 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     replace(C, naMask, filled[col(C)[naMask]])
 }
 
-# Internal: resolve a (convenience, precise) flag pair to a single boolean.
-# `missing*` arguments are passed as the result of `missing()` evaluated in
-# the calling method to detect whether the user explicitly set the value.
-# Rules:
-#   - both missing: returns TRUE (the documented default)
-#   - only convenience set: returns convenience
-#   - only precise set: returns precise
-#   - both set: must agree, else error
-.qtlResolveResidualizationFlag <- function(
-    conveniencePassed,
-    convenienceMissing,
-    precisePassed,
-    preciseMissing,
-    convenienceName,
-    preciseName
-) {
-    if (preciseMissing && convenienceMissing) {
-        return(TRUE)
-    }
-    if (preciseMissing) {
-        return(isTRUE(conveniencePassed))
-    }
-    if (convenienceMissing) {
-        return(isTRUE(precisePassed))
-    }
-    if (isTRUE(conveniencePassed) != isTRUE(precisePassed)) {
-        msg <- glue(
-            "Conflicting values: `{convenienceName}` = {conveniencePassed} ",
-            "and `{preciseName}` = {precisePassed}. ",
-            "Set only one, or pass consistent values."
-        )
-        abort(msg)
-    }
-    isTRUE(precisePassed)
-}
-
-#' @rdname getResidualizedGenotypes
-#' @export
-setMethod(
-    "getResidualizedGenotypes",
-    "QtlDataset",
-    function(
-        x,
-        contexts,
-        traitId = NULL,
-        region = NULL,
-        cisWindow = NULL,
-        samples = NULL,
-        phenotypeCovariatesToResidualize = NULL,
-        genotypeCovariatesToResidualize = NULL,
-        residualizePhenotypeCovariates = TRUE,
-        residualizeGenotypeCovariates = TRUE,
-        residualizePhenotypeCovariatesFromGenotypes = NULL,
-        residualizeGenotypeCovariatesFromGenotypes = NULL,
-        covariateNaAction = c("impute", "drop")
-    ) {
-        if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
-            msg <- glue(
-                "`contexts` is required for ",
-                "getResidualizedGenotypes(QtlDataset). ",
-                "Use getContexts(x) to list the available contexts. ",
-                "Pass a single context for per-context mode or multiple ",
-                "contexts for joint mode (sample intersection)."
-            )
-            abort(msg)
-        }
-        covariateNaAction <- arg_match(covariateNaAction)
-        convPhenoMissing <- missing(residualizePhenotypeCovariates)
-        convGenoMissing <- missing(residualizeGenotypeCovariates)
-        precPhenoMissing <- missing(
-            residualizePhenotypeCovariatesFromGenotypes
-        ) ||
-            is.null(residualizePhenotypeCovariatesFromGenotypes)
-        precGenoMissing <- missing(
-            residualizeGenotypeCovariatesFromGenotypes
-        ) ||
-            is.null(residualizeGenotypeCovariatesFromGenotypes)
-        .qtlResidualizedGenotypesImpl(
-            x = x,
-            contexts = contexts,
-            traitId = traitId,
-            region = region,
-            cisWindow = cisWindow,
-            samples = samples,
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize = genotypeCovariatesToResidualize,
-            covariateNaAction = covariateNaAction,
-            convPheno = residualizePhenotypeCovariates,
-            convPhenoMissing = convPhenoMissing,
-            precPheno = residualizePhenotypeCovariatesFromGenotypes,
-            precPhenoMissing = precPhenoMissing,
-            convGeno = residualizeGenotypeCovariates,
-            convGenoMissing = convGenoMissing,
-            precGeno = residualizeGenotypeCovariatesFromGenotypes,
-            precGenoMissing = precGenoMissing
-        )
-    }
-)
-
 # Intersect a genotype matrix G and covariate design C to their common samples
 # (no-op when C is NULL); errors if they share none.
 # @noRd
@@ -2056,87 +1970,35 @@ setMethod(
     list(G = G[common, , drop = FALSE], C = C[common, , drop = FALSE])
 }
 
-# getResidualizedGenotypes worker: resolve the covariate inclusion flags +
-# selections, extract genotypes, build + NA-handle the covariate design, and
-# QR-residualize. `p` holds the setMethod args + the precomputed `missing()`
-# booleans.
-# @noRd
-# The two residualization flags, each reconciled against its convenience and
-# precision spellings. Paired here because the reconciliation rule is the same
-# for both and only the argument names differ.
-# @noRd
-.qtlResidualizationFlags <- function(
-    convPheno,
-    convPhenoMissing,
-    precPheno,
-    precPhenoMissing,
-    convGeno,
-    convGenoMissing,
-    precGeno,
-    precGenoMissing
-) {
-    list(
-        pheno = .qtlResolveResidualizationFlag(
-            convPheno,
-            convPhenoMissing,
-            precPheno,
-            precPhenoMissing,
-            "convPheno",
-            "precPheno"
-        ),
-        geno = .qtlResolveResidualizationFlag(
-            convGeno,
-            convGenoMissing,
-            precGeno,
-            precGenoMissing,
-            "convGeno",
-            "precGeno"
-        )
-    )
-}
-
 .qtlResidualizedGenotypesImpl <- function(
     x,
     contexts,
-    traitId,
-    region,
-    cisWindow,
-    samples,
-    phenotypeCovariatesToResidualize,
-    genotypeCovariatesToResidualize,
-    covariateNaAction,
-    convPheno,
-    convPhenoMissing,
-    precPheno,
-    precPhenoMissing,
-    convGeno,
-    convGenoMissing,
-    precGeno,
-    precGenoMissing
+    traitId = NULL,
+    region = NULL,
+    cisWindow = NULL,
+    samples = NULL,
+    residualizationArgs = ResidualizationParam()
 ) {
-    bad <- setdiff(contexts, getContexts(x))
-    if (length(bad) > 0L) {
-        msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
+    if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
+        msg <- glue(
+            "`contexts` is required for ",
+            "getResidualizedGenotypes(QtlDataset). ",
+            "Use getContexts(x) to list the available contexts. ",
+            "Pass a single context for per-context mode or multiple ",
+            "contexts for joint mode (sample intersection)."
+        )
         abort(msg)
     }
-    include <- .qtlResidualizationFlags(
-        convPheno = convPheno,
-        convPhenoMissing = convPhenoMissing,
-        precPheno = precPheno,
-        precPhenoMissing = precPhenoMissing,
-        convGeno = convGeno,
-        convGenoMissing = convGenoMissing,
-        precGeno = precGeno,
-        precGenoMissing = precGenoMissing
+    .assertMethodParam(
+        residualizationArgs,
+        "ResidualizationParam",
+        "residualizationArgs"
     )
-    includePheno <- include$pheno
-    includeGeno <- include$geno
-    phenoSel <- .qtlResolvePhenoSelection(
-        x,
-        contexts,
-        phenotypeCovariatesToResidualize
-    )
-    genoSel <- .qtlResolveGenoSelection(x, genotypeCovariatesToResidualize)
+    bad <- setdiff(contexts, getContexts(x))
+    if (length(bad) > 0L) {
+        msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
+        abort(msg)
+    }
     G <- getGenotypes(
         x,
         traitId = traitId,
@@ -2147,15 +2009,7 @@ setMethod(
     if (ncol(G) == 0L) {
         return(G)
     }
-    design <- .qtlBuildResidualizationDesign(
-        x,
-        contexts = contexts,
-        phenoSelection = phenoSel,
-        genoSelection = genoSel,
-        includePheno = includePheno,
-        includeGeno = includeGeno
-    )
-    C <- .qtlHandleCovariateNa(design, covariateNaAction)
+    C <- .qtlResidCovariateMatrix(x, contexts, residualizationArgs)
     aligned <- .qtlAlignGC(G, C, contexts)
     .qtlResidualizeQr(
         aligned$G,
@@ -2164,67 +2018,12 @@ setMethod(
     )
 }
 
-#' @rdname getResidualizedPhenotypes
+#' @rdname getResidualizedGenotypes
 #' @export
 setMethod(
-    "getResidualizedPhenotypes",
+    "getResidualizedGenotypes",
     "QtlDataset",
-    function(
-        x,
-        contexts,
-        traitId = NULL,
-        region = NULL,
-        phenotypeCovariatesToResidualize = NULL,
-        genotypeCovariatesToResidualize = NULL,
-        residualizePhenotypeCovariates = TRUE,
-        residualizeGenotypeCovariates = TRUE,
-        residualizePhenotypeCovariatesFromPhenotypes = NULL,
-        residualizeGenotypeCovariatesFromPhenotypes = NULL,
-        naAction = c("keep", "drop", "impute"),
-        covariateNaAction = c("impute", "drop"),
-        outlierAction = c("keep", "drop"),
-        outlierPvalThreshold = 1e-3,
-        outlierArgs = covMcdConfig()
-    ) {
-        if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
-            abort("`contexts` is required for getResidualizedPhenotypes().")
-        }
-        naAction <- arg_match(naAction)
-        covariateNaAction <- arg_match(covariateNaAction)
-        outlierAction <- arg_match(outlierAction)
-        .assertMethodConfig(outlierArgs, "covMcdConfig", "outlierArgs")
-        convPhenoMissing <- missing(residualizePhenotypeCovariates)
-        convGenoMissing <- missing(residualizeGenotypeCovariates)
-        precPhenoMissing <- missing(
-            residualizePhenotypeCovariatesFromPhenotypes
-        ) ||
-            is.null(residualizePhenotypeCovariatesFromPhenotypes)
-        precGenoMissing <- missing(
-            residualizeGenotypeCovariatesFromPhenotypes
-        ) ||
-            is.null(residualizeGenotypeCovariatesFromPhenotypes)
-        .qtlResidualizedPhenotypesImpl(
-            x = x,
-            contexts = contexts,
-            traitId = traitId,
-            region = region,
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize = genotypeCovariatesToResidualize,
-            naAction = naAction,
-            covariateNaAction = covariateNaAction,
-            outlierAction = outlierAction,
-            outlierPvalThreshold = outlierPvalThreshold,
-            outlierArgs = outlierArgs,
-            convPheno = residualizePhenotypeCovariates,
-            convPhenoMissing = convPhenoMissing,
-            precPheno = residualizePhenotypeCovariatesFromPhenotypes,
-            precPhenoMissing = precPhenoMissing,
-            convGeno = residualizeGenotypeCovariates,
-            convGenoMissing = convGenoMissing,
-            precGeno = residualizeGenotypeCovariatesFromPhenotypes,
-            precGenoMissing = precGenoMissing
-        )
-    }
+    .qtlResidualizedGenotypesImpl
 )
 
 # NA-handled raw phenotypes per context (re-wrapped to a list so single- and
@@ -2297,39 +2096,6 @@ setMethod(
     allRes[keep, , drop = FALSE]
 }
 
-# Resolve the phenotype/genotype covariate inclusion flags (convenience vs
-# precise `*FromPhenotypes`) for getResidualizedPhenotypes.
-# @noRd
-.qtlResidPhenoFlags <- function(
-    convPheno,
-    convPhenoMissing,
-    precPheno,
-    precPhenoMissing,
-    convGeno,
-    convGenoMissing,
-    precGeno,
-    precGenoMissing
-) {
-    list(
-        includePheno = .qtlResolveResidualizationFlag(
-            convPheno,
-            convPhenoMissing,
-            precPheno,
-            precPhenoMissing,
-            "convPheno",
-            "precPheno"
-        ),
-        includeGeno = .qtlResolveResidualizationFlag(
-            convGeno,
-            convGenoMissing,
-            precGeno,
-            precGenoMissing,
-            "convGeno",
-            "precGeno"
-        )
-    )
-}
-
 # getResidualizedPhenotypes worker: resolve covariate inclusion + selections,
 # NA-handle Y, build the covariate design, and per-context residualize +
 # outlier-filter. `p` holds the setMethod args + precomputed missing() flags.
@@ -2337,47 +2103,31 @@ setMethod(
 .qtlResidualizedPhenotypesImpl <- function(
     x,
     contexts,
-    traitId,
-    region,
-    phenotypeCovariatesToResidualize,
-    genotypeCovariatesToResidualize,
-    naAction,
-    covariateNaAction,
-    outlierAction,
-    outlierPvalThreshold,
-    outlierArgs,
-    convPheno,
-    convPhenoMissing,
-    precPheno,
-    precPhenoMissing,
-    convGeno,
-    convGenoMissing,
-    precGeno,
-    precGenoMissing
+    traitId = NULL,
+    region = NULL,
+    naAction = c("keep", "drop", "impute"),
+    outlierAction = c("keep", "drop"),
+    outlierPvalThreshold = 1e-3,
+    outlierArgs = CovMcdOptions(),
+    residualizationArgs = ResidualizationParam()
 ) {
+    if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
+        abort("`contexts` is required for getResidualizedPhenotypes().")
+    }
+    naAction <- arg_match(naAction)
+    outlierAction <- arg_match(outlierAction)
+    .assertMethodOptions(outlierArgs, "CovMcdOptions", "outlierArgs")
+    .assertMethodParam(
+        residualizationArgs,
+        "ResidualizationParam",
+        "residualizationArgs"
+    )
     bad <- setdiff(contexts, getContexts(x))
     if (length(bad) > 0L) {
-        msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
+        msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
         abort(msg)
     }
-    flags <- .qtlResidPhenoFlags(
-        convPheno = convPheno,
-        convPhenoMissing = convPhenoMissing,
-        precPheno = precPheno,
-        precPhenoMissing = precPhenoMissing,
-        convGeno = convGeno,
-        convGenoMissing = convGenoMissing,
-        precGeno = precGeno,
-        precGenoMissing = precGenoMissing
-    )
-    includePheno <- flags$includePheno
-    includeGeno <- flags$includeGeno
-    phenoSel <- .qtlResolvePhenoSelection(
-        x,
-        contexts,
-        phenotypeCovariatesToResidualize
-    )
-    genoSel <- .qtlResolveGenoSelection(x, genotypeCovariatesToResidualize)
+    C <- .qtlResidCovariateMatrix(x, contexts, residualizationArgs)
     Yraw <- .qtlResidPhenoY(
         x,
         contexts,
@@ -2385,15 +2135,69 @@ setMethod(
         region,
         naAction
     )
+    .qtlResidPerContext(
+        contexts,
+        Yraw = Yraw,
+        C = C,
+        x = x,
+        outlierAction = outlierAction,
+        outlierPvalThreshold = outlierPvalThreshold,
+        outlierArgs = outlierArgs
+    )
+}
+
+#' @rdname getResidualizedPhenotypes
+#' @export
+setMethod(
+    "getResidualizedPhenotypes",
+    "QtlDataset",
+    .qtlResidualizedPhenotypesImpl
+)
+
+# What the phenotypes are regressed against: resolve the convenience vs
+# precise inclusion flags, pick the phenotype- and genotype-covariate sets
+# they select, build the design, and apply the NA policy to it. One step,
+# because none of the four halves means anything without the others.
+# @noRd
+.qtlResidCovariateMatrix <- function(x, contexts, residualizationArgs) {
+    # arg_match() reports on its argument by name, so it must be handed a
+    # symbol: resolve the bundle field first, then validate it.
+    covariateNaAction <- residualizationArgs$covariateNaAction %||% "impute"
+    covariateNaAction <- arg_match(covariateNaAction, c("impute", "drop"))
+    phenoSel <- .qtlResolvePhenoSelection(
+        x,
+        contexts,
+        residualizationArgs$phenotypeCovariates
+    )
     design <- .qtlBuildResidualizationDesign(
         x,
         contexts = contexts,
         phenoSelection = phenoSel,
-        genoSelection = genoSel,
-        includePheno = includePheno,
-        includeGeno = includeGeno
+        genoSelection = .qtlResolveGenoSelection(
+            x,
+            residualizationArgs$genotypeCovariates
+        ),
+        # Unset means "residualize on this side": the accessors' own
+        # historical default, now expressed as the absence of a value
+        # rather than as a formal defaulting to TRUE.
+        includePheno = residualizationArgs$residualizePhenotype %||% TRUE,
+        includeGeno = residualizationArgs$residualizeGenotype %||% TRUE
     )
-    C <- .qtlHandleCovariateNa(design, covariateNaAction)
+    .qtlHandleCovariateNa(design, covariateNaAction)
+}
+
+# Residualize every requested context, unwrapping a single-context request
+# the way the rest of the QtlDataset accessors do.
+# @noRd
+.qtlResidPerContext <- function(
+    contexts,
+    Yraw,
+    C,
+    x,
+    outlierAction,
+    outlierPvalThreshold,
+    outlierArgs
+) {
     out <- set_names(
         map(
             contexts,
@@ -2409,7 +2213,6 @@ setMethod(
     )
     if (length(contexts) == 1L) out[[1L]] else out
 }
-
 
 #' @rdname show-methods
 #' @export
@@ -2502,3 +2305,191 @@ setMethod("show", "QtlDataset", function(object) {
         outlierArgs
     )
 }
+
+# Which covariates to residualize on: a character vector of names applied to
+# every context, a list keyed by context name, or NULL to take each context's
+# own. .qtlResolvePhenoSelection() branches on exactly these three.
+setClassUnion("CovariateSelection", c("character", "list", "NULL"))
+
+#' @rdname ResidualizationParam
+#' @aliases ResidualizationParam-class
+#' @exportClass ResidualizationParam
+setClass(
+    "ResidualizationParam",
+    contains = "MethodParam",
+    slots = c(
+        phenotypeCovariates = "CovariateSelection",
+        genotypeCovariates = "CovariateSelection",
+        residualizePhenotype = "logical_OR_NULL",
+        residualizeGenotype = "logical_OR_NULL",
+        covariateNaAction = "character_OR_NULL"
+    )
+)
+
+#' @title Covariate Residualization Settings
+#' @description What is regressed out of the phenotype and genotype before
+#'   fitting. Shared by \code{\link{fineMappingPipeline}} and
+#'   \code{\link{twasWeightsPipeline}}, which hold the same four settings.
+#'
+#'   \code{fineMappingPipeline}'s \code{usePCA} / \code{nPCs} are
+#'   \strong{not} here. They do not residualize anything: they PCA-reduce a
+#'   multi-trait context's phenotype matrix and fine-map each top principal
+#'   component \emph{as a trait}. That is an analysis mode, a sibling of the
+#'   univariate and multivariate dispatch paths, not a covariate setting.
+#' @section Summary-statistics inputs:
+#'   A \code{QtlSumStats} / \code{GwasSumStats} input carries no genotypes
+#'   or covariates, so nothing here applies and the whole bundle is
+#'   \strong{ignored} --- not refused.
+#'
+#'   That is the opposite of \code{\link{CrossValidationParam}}, which
+#'   \emph{is} refused on those inputs
+#'   (\code{fineMappingPipeline(QtlSumStats, crossValidation = ...)} errors).
+#'   The difference is the default: CV is off unless asked for
+#'   (\code{folds = 0}), so a non-default value on a summary-statistics run
+#'   is an explicit request for something impossible. Residualization is on
+#'   by default (\code{residualizePhenotype} and \code{residualizeGenotype}
+#'   are both \code{TRUE}), so refusing a non-default would reject the
+#'   \emph{default} bundle and force every sumstats caller to unset it.
+#'
+#'   One bundle therefore travels to either input kind unchanged, the same
+#'   way \code{CrossValidationParam}'s \code{weightMethods} /
+#'   \code{maxVariants} are carried but ignored by
+#'   \code{fineMappingPipeline}.
+#' @param phenotypeCovariates Covariates to residualize the phenotype on, or
+#'   \code{NULL} (default) for the dataset's own.
+#' @param genotypeCovariates Covariates to residualize the genotype on, or
+#'   \code{NULL} (default) for the dataset's own.
+#' @param residualizePhenotype Logical. Residualize on the phenotype
+#'   covariates. \code{NULL} (default) means unset, which the accessors
+#'   read as \code{TRUE}.
+#' @param residualizeGenotype Logical. Residualize on the genotype
+#'   covariates. \code{NULL} (default) means unset, read as \code{TRUE}.
+#' @param covariateNaAction How missing covariate values are handled when the
+#'   design is assembled: \code{"impute"} or \code{"drop"}. \code{NULL}
+#'   (default) leaves the accessor's own default in place.
+#' @return A \code{ResidualizationParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' ResidualizationParam(residualizeGenotype = FALSE)
+#' @export
+ResidualizationParam <- function(
+    phenotypeCovariates = NULL,
+    genotypeCovariates = NULL,
+    residualizePhenotype = NULL,
+    residualizeGenotype = NULL,
+    covariateNaAction = NULL
+) {
+    # NULL means "unset", which is why the accessors no longer need a
+    # `missing()` companion for each flag: FALSE and "not given" are both
+    # falsy, so a flat formal defaulting to TRUE could not tell them apart,
+    # and each needed a second formal recording whether it was supplied.
+    new(
+        "ResidualizationParam",
+        phenotypeCovariates = phenotypeCovariates,
+        genotypeCovariates = genotypeCovariates,
+        residualizePhenotype = residualizePhenotype,
+        residualizeGenotype = residualizeGenotype,
+        covariateNaAction = covariateNaAction
+    )
+}
+
+#' @rdname GenotypeFilterParam
+#' @aliases GenotypeFilterParam-class
+#' @exportClass GenotypeFilterParam
+setClass(
+    "GenotypeFilterParam",
+    contains = "MethodParam",
+    slots = c(
+        mafCutoff = "numeric_OR_NULL",
+        macCutoff = "numeric_OR_NULL",
+        xvarCutoff = "numeric_OR_NULL",
+        imissCutoff = "numeric_OR_NULL",
+        keepSamples = "character_OR_NULL",
+        keepVariants = "character_OR_NULL",
+        keepIndel = "logical_OR_NULL"
+    )
+)
+
+#' @title Genotype Filtering Options
+#' @description Which variants and samples survive when a genotype matrix is
+#'   assembled, as one checked bundle. Used by \code{\link{QtlDataset}}, the
+#'   manifest loaders, and the pipelines that build a dataset.
+#' @section Unset versus set:
+#'   Every field defaults to \code{NULL}, meaning \strong{not set}, and an
+#'   unset field is absent from the result rather than carried as \code{NULL}.
+#'   That is what lets one bundle serve two roles:
+#'   \itemize{
+#'     \item to \code{\link{QtlDataset}} it is a \emph{specification}, and
+#'       an unset field takes that constructor's own default --- \code{0} for
+#'       each cutoff, \code{character(0)} for each \code{keep}, \code{TRUE}
+#'       for \code{keepIndel}.
+#'     \item to a pipeline it is an \emph{override}, and an unset field
+#'       leaves the dataset's construct-time value alone.
+#'   }
+#'   So \code{GenotypeFilterParam(mafCutoff = 0)} and
+#'   \code{GenotypeFilterParam()} differ: the first pins the cutoff at zero,
+#'   the second defers. \code{\link{PanelFilterParam}} needs no such
+#'   distinction and keeps ordinary defaults.
+#' @param mafCutoff Minor-allele-frequency floor.
+#' @param macCutoff Minor-allele-count floor; the stricter of this and
+#'   \code{mafCutoff} applies.
+#' @param xvarCutoff Genotype-variance floor.
+#' @param imissCutoff Per-variant missingness ceiling.
+#' @param keepSamples Sample ids to restrict to; \code{character(0)} keeps
+#'   all samples.
+#' @param keepVariants Variant ids to restrict to; \code{character(0)} keeps
+#'   all variants.
+#' @param keepIndel Logical. Retain insertions and deletions.
+#' @return A \code{GenotypeFilterParam} object, a \code{\link{MethodParam}}.
+#' @seealso \code{\link{PanelFilterParam}}, \code{\link{SumstatsFilterParam}}
+#' @examples
+#' GenotypeFilterParam(mafCutoff = 0.01, keepIndel = FALSE)
+#' @export
+GenotypeFilterParam <- function(
+    mafCutoff = NULL,
+    macCutoff = NULL,
+    xvarCutoff = NULL,
+    imissCutoff = NULL,
+    keepSamples = NULL,
+    keepVariants = NULL,
+    keepIndel = NULL
+) {
+    new(
+        "GenotypeFilterParam",
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        xvarCutoff = xvarCutoff,
+        imissCutoff = imissCutoff,
+        keepSamples = keepSamples,
+        keepVariants = keepVariants,
+        keepIndel = keepIndel
+    )
+}
+
+# =============================================================================
+# Variant / sample filtering bundles
+# -----------------------------------------------------------------------------
+# Which rows and columns of the DATA survive, as opposed to the stage bundles
+# above, which describe how a stage behaves. Three filters run in this
+# package, on three different objects, and they are deliberately three
+# constructors rather than one:
+#
+#   GenotypeFilterParam  -- a study's own genotype matrix (QtlDataset and the
+#                          pipelines that build one)
+#   PanelFilterParam     -- an LD reference panel's variants
+#   SumstatsFilterParam  -- rows of a summary-statistics table
+#
+# Their fields overlap without meaning the same thing, and their defaults
+# genuinely differ: `imissCutoff` resolves to 0 on the genotype path and 1 on
+# the panel path. One union bundle would have to pick one of those, and would
+# accept `removeIndels` where nothing reads it -- the failure mode these
+# constructors exist to prevent.
+#
+# GenotypeFilterParam defaults every field to NULL ("not set") because its
+# fields are a SPECIFICATION to QtlDataset and an OVERRIDE to the pipelines;
+# absence is what distinguishes "pin this value" from "leave it alone". The
+# other two have one meaning each and keep ordinary defaults.
+#
+# SumstatsCleaningParam sits with them because it runs on the same pass over
+# the same table, but it is coercion and normalisation (coerceNumeric,
+# normalizeChr, clampSmallP) that also drops rows -- not a filter.
+# =============================================================================

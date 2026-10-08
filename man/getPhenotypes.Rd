@@ -15,7 +15,7 @@ getPhenotypes(x, ...)
   naAction = c("keep", "drop", "impute"),
   outlierAction = c("keep", "drop"),
   outlierPvalThreshold = 0.001,
-  outlierArgs = covMcdConfig()
+  outlierArgs = CovMcdOptions()
 )
 }
 \arguments{
@@ -44,7 +44,7 @@ phenotype outliers. Default \code{1e-3}.}
 
 \item{outlierArgs}{Extra arguments for \code{robustbase::covMcd()}, the
 robust covariance estimator the outlier rule is built on, supplied with
-\code{\link{covMcdConfig}} -- \code{alpha} in particular. Only
+\code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
 consulted when \code{outlierAction = "drop"}.}
 }
 \value{

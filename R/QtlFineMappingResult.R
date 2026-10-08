@@ -236,19 +236,9 @@ QtlFineMappingResult <- function(
         traitPos,
         n
     )
-    dfArgs <- c(cols, list(check.names = FALSE))
-    # Each entry's variants become one ELEMENT, its topLoci that element's
-    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
-    # splits by chromosome with its metadata row replicated.
-    split <- .rtlSplitBySeqname(map(payloads, rowVariants))
-    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    grl <- S4Vectors::`mcols<-`(
-        GenomicRanges::GRangesList(split$entry),
-        value = md[split$fromIdx, , drop = FALSE]
-    )
     obj <- new(
         "QtlFineMappingResult",
-        grl,
+        .rtlGrlWithMetadata(payloads, cols),
         ldSketch = .asLdSketch(ldSketch)
     )
     validObject(obj)

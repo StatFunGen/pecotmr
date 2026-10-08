@@ -528,11 +528,14 @@ test_that(".qapPermutationCols reuses a supplied q_beta", {
     expect_setequal(names(cols), c("fdr_beta", "p_nominal_threshold"))
 })
 
-test_that("qvalueConfig refuses the p-value vector", {
-    expect_error(qvalueConfig(p = 0.1), "the p-value vector")
+test_that("QvalueOptions refuses the p-value vector", {
+    expect_error(QvalueOptions(p = 0.1), "the p-value vector")
     # qvalue::qvalue() takes dots, so nothing else can be rejected.
-    expect_s4_class(qvalueConfig(nosuch = 1), "MethodConfig")
-    expect_equal(qvalueConfig(pi0.method = "bootstrap")$pi0.method, "bootstrap")
+    expect_s4_class(QvalueOptions(nosuch = 1), "MethodOptions")
+    expect_equal(
+        QvalueOptions(pi0.method = "bootstrap")$pi0.method,
+        "bootstrap"
+    )
 })
 
 test_that(".qapSafeQvalue forwards qvalueArgs to qvalue::qvalue", {
@@ -542,7 +545,7 @@ test_that(".qapSafeQvalue forwards qvalueArgs to qvalue::qvalue", {
     set.seed(4)
     p <- c(runif(200, 0, 0.05), runif(800))
     with_mocked_bindings(
-        pecotmr:::.qapSafeQvalue(p, qvalueConfig(pfdr = TRUE)),
+        pecotmr:::.qapSafeQvalue(p, QvalueOptions(pfdr = TRUE)),
         qvalue = function(...) {
             seen <<- list(...)
             real(...)
@@ -559,7 +562,7 @@ test_that("the qvalue degenerate-case retries keep the caller's options", {
     set.seed(5)
     p <- runif(200)
     res <- with_mocked_bindings(
-        pecotmr:::.qapSafeQvalue(p, qvalueConfig(pfdr = TRUE)),
+        pecotmr:::.qapSafeQvalue(p, QvalueOptions(pfdr = TRUE)),
         qvalue = function(...) {
             args <- list(...)
             seen[[length(seen) + 1L]] <<- args

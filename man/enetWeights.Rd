@@ -4,7 +4,7 @@
 \alias{enetWeights}
 \title{Compute TWAS weights via elastic net (glmnet, alpha = 0.5)}
 \usage{
-enetWeights(X, y, methodArgs = glmnetConfig())
+enetWeights(X, y, methodArgs = GlmnetOptions())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -12,7 +12,7 @@ enetWeights(X, y, methodArgs = glmnetConfig())
 \item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
 
 \item{methodArgs}{Additional arguments forwarded to
-\code{glmnet::cv.glmnet}, built with \code{\link{glmnetConfig}}. A bare
+\code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
 list is refused, since it cannot be checked against the engine's formals.}
 }
 \value{

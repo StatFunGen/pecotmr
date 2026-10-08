@@ -53,7 +53,7 @@ fmr <- fineMappingPipeline(
     qtlDatasetExample,
     methods = "susie",
     cisWindow = 1e6,
-    crossValidationArgs = crossValidationConfig(folds = 3)
+    crossValidationArgs = CrossValidationParam(folds = 3)
 )
 tw <- twasWeightsPipeline(
     qtlDatasetExample,
@@ -89,7 +89,7 @@ res2 <- causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
-    mrArgs = mrConfig(method = "ivwPerVariant", pipCutoff = 0.5)
+    mrArgs = MrParam(method = "ivwPerVariant", pipCutoff = 0.5)
 )
 S4Vectors::mcols(res2)[, c(
     "twasZ",
@@ -103,7 +103,7 @@ S4Vectors::mcols(res2)[, c(
 
 ## MR variants: per-variant vs CS-aware IVW
 
-| `mrConfig(method=)` | What it does | Extra filters |
+| `MrParam(method=)` | What it does | Extra filters |
 |---|---|---|
 | `"ivwPerVariant"` (default) | Treats every `topLoci` variant with `pip > pipCutoff` as an IV; pools their Wald ratios via inverse-variance weighting. | `pipCutoff` |
 | `"csAware"` | Groups variants by credible set (column `cs` in `topLoci`), forms a PIP-weighted composite Wald ratio per CS (subject to per-CS cumulative-PIP cutoff `cpipCutoff`), then IVW-pools across CSs. Reports Cochran's Q and I-squared. | `cpipCutoff` |
@@ -113,7 +113,7 @@ causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
-    mrArgs = mrConfig(method = "csAware", cpipCutoff = 0.5)
+    mrArgs = MrParam(method = "csAware", cpipCutoff = 0.5)
 )
 ```
 
@@ -168,7 +168,7 @@ causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
-    mrArgs = mrConfig(
+    mrArgs = MrParam(
         method = "ivwPerVariant",
         pipCutoff = 0.5 # cpipCutoff instead, for method = "csAware"
     ),

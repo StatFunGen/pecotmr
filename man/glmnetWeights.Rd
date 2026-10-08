@@ -4,7 +4,7 @@
 \alias{glmnetWeights}
 \title{Compute TWAS weights via penalized regression (glmnet)}
 \usage{
-glmnetWeights(X, y, alpha, methodArgs = glmnetConfig())
+glmnetWeights(X, y, alpha, methodArgs = GlmnetOptions())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -15,7 +15,7 @@ glmnetWeights(X, y, alpha, methodArgs = glmnetConfig())
 \code{0} = ridge, \code{0.5} = elastic net.}
 
 \item{methodArgs}{Additional arguments forwarded to
-\code{glmnet::cv.glmnet}, built with \code{\link{glmnetConfig}}. A bare
+\code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
 list is refused, since it cannot be checked against the engine's formals.}
 }
 \value{

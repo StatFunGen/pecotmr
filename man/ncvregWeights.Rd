@@ -4,7 +4,7 @@
 \alias{ncvregWeights}
 \title{Compute Weights Using ncvreg with SCAD or MCP Penalty}
 \usage{
-ncvregWeights(X, y, penalty, nfolds = 5, methodArgs = ncvregConfig())
+ncvregWeights(X, y, penalty, nfolds = 5, methodArgs = NcvregOptions())
 }
 \arguments{
 \item{X}{A numeric matrix of predictors (no intercept column; `ncvreg`
@@ -17,7 +17,7 @@ standardizes internally and adds its own intercept).}
 \item{nfolds}{Number of cross-validation folds. Default is 5.}
 
 \item{methodArgs}{Options forwarded to \code{ncvreg::cv.ncvreg}, built
-with \code{\link{ncvregConfig}}. A bare list is refused: it cannot be
+with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

@@ -315,13 +315,13 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
 #'   These settings apply to the first fit. pecotmr falls back to the
 #'   closed-form DerSimonian-Laird estimator when an iterative one fails, and
 #'   the fallback carries them too.
-#' @return A \code{MethodConfig} record for the \code{metaArgs} argument.
+#' @return A \code{MethodOptions} record for the \code{metaArgs} argument.
 #' @seealso \code{\link{metaSldscRandom}},
 #'   \code{\link{metaAnalysisPerCondition}}
 #' @examples
-#' rmaConfig(test = "knha")
+#' RmaOptions(test = "knha")
 #' @export
-rmaConfig <- function(...) {
+RmaOptions <- function(...) {
     extra <- list(...)
     .configRefuseOwned(
         extra,
@@ -330,13 +330,13 @@ rmaConfig <- function(...) {
             sei = "the per-study standard errors pecotmr assembles",
             method = "the caller's `metaMethod`"
         ),
-        "rmaConfig"
+        "RmaOptions"
     )
-    .newMethodConfig(
+    .newMethodOptions(
         "metafor::rma",
         defaults = list(),
         extra = extra,
-        label = "rmaConfig",
+        label = "RmaOptions",
         engine = "rma"
     )
 }

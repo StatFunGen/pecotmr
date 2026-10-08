@@ -7,7 +7,7 @@
 calculateFeatureScores(
   contrastResult,
   metaMethod = "REML",
-  metaArgs = rmaConfig()
+  metaArgs = RmaOptions()
 )
 }
 \arguments{
@@ -20,7 +20,7 @@ columns.}
 \code{metafor::rma} (default \code{"REML"}).}
 
 \item{metaArgs}{Extra arguments for \code{metafor::rma()}, built with
-\code{\link{rmaConfig}} -- \code{test = "knha"} in particular, the
+\code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
 small-study correction.}
 }
 \value{

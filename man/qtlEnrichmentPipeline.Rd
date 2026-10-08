@@ -7,7 +7,7 @@
 qtlEnrichmentPipeline(
   gwasFineMappingResult,
   qtlFineMappingResult,
-  methodArgs = qtlEnrichmentConfig(),
+  methodArgs = QtlEnrichmentParam(),
   numThreads = 1L,
   seed = NULL,
   verbose = TRUE
@@ -19,7 +19,7 @@ qtlEnrichmentPipeline(
 \item{qtlFineMappingResult}{The annotation side; see above.}
 
 \item{methodArgs}{The estimator's algorithmic settings, built with
-\code{\link{qtlEnrichmentConfig}}: \code{numGwas}, \code{piQtl},
+\code{\link{QtlEnrichmentParam}}: \code{numGwas}, \code{piQtl},
 \code{lambda}, \code{impN}, \code{doubleShrinkage} and
 \code{besselCorrection}. A bare list is refused, since it cannot be
 checked.}

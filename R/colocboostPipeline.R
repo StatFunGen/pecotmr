@@ -98,7 +98,7 @@
 #'   colocboost variants to run.
 #' @param signalScreenArgs Individual-level pre-filter (ports the legacy
 #'   \code{pip_cutoff_to_skip_ind}), built with
-#'   \code{\link{signalScreenConfig}}. For each context every outcome is fit
+#'   \code{\link{SignalScreenParam}}. For each context every outcome is fit
 #'   with a single-effect SuSiE (\code{L = 1}) and dropped unless the chosen
 #'   metric exceeds its cutoff; a context with no surviving outcome is
 #'   skipped:
@@ -112,12 +112,12 @@
 #'       factor or log Bayes factor from the \code{L = 1} fit.
 #'   }
 #'   Only one metric may be enabled, which
-#'   \code{\link{signalScreenConfig}} enforces when you build it. Unset (the
+#'   \code{\link{SignalScreenParam}} enforces when you build it. Unset (the
 #'   default) screens nothing. Summary-statistic skipping is handled upstream
 #'   by \code{\link{summaryStatsQc}}.
 #' @param panelFilterArgs Analysis-time filters applied to the summary-statistic
 #'   sides against the LD reference panel, built with
-#'   \code{\link{panelFilterConfig}}: a variant whose panel genotypes fall
+#'   \code{\link{PanelFilterParam}}: a variant whose panel genotypes fall
 #'   below its cutoffs is dropped before the LD matrix is built. The defaults
 #'   filter nothing. See the Details section for how these relate to the
 #'   individual-level cutoffs recorded on a \code{QtlDataset}.
@@ -128,7 +128,7 @@
 #'   swap is treated as a distinct variant.
 #' @param methodArgs Additional arguments forwarded to
 #'   \code{colocboost::colocboost}, built with
-#'   \code{\link{colocboostConfig}}. Names are checked against that
+#'   \code{\link{ColocboostOptions}}. Names are checked against that
 #'   function's formals, so a misspelled option errors instead of being
 #'   dropped inside the run. The data slots the pipeline assembles itself
 #'   (\code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
@@ -198,32 +198,6 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ))
 }
 
-#' @title colocboost Engine Settings
-#' @description Additional arguments forwarded to
-#'   \code{colocboost::colocboost}. Names are checked against that
-#'   function's own formals, so a misspelled option is an error here rather
-#'   than a setting silently dropped inside the run.
-#'
-#'   The data arguments \code{colocboostPipeline} assembles itself ---
-#'   \code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
-#'   \code{focal_outcome_idx} --- are not settable here.
-#' @param ... Named \code{colocboost::colocboost} arguments.
-#' @return A \code{\link{MethodConfig}} object.
-#' @examples
-#' colocboostConfig(M = 5)
-#' @export
-colocboostConfig <- function(...) {
-    extra <- list(...)
-    .cbRefusePipelineOwned(extra)
-    .newMethodConfig(
-        "colocboost::colocboost",
-        defaults = list(),
-        extra = extra,
-        label = "colocboostConfig",
-        engine = "colocboost"
-    )
-}
-
 # The data slots the pipeline builds from its inputs. They are real
 # colocboost formals, so the union check would accept them -- but the
 # pipeline supplies them, so a value given here would be overwritten.
@@ -248,7 +222,7 @@ colocboostConfig <- function(...) {
         return(invisible(NULL))
     }
     abort(glue(
-        "colocboostConfig: {str_flatten(clash, ', ')} ",
+        "ColocboostOptions: {str_flatten(clash, ', ')} ",
         "{if (length(clash) == 1L) 'is' else 'are'} assembled by ",
         "colocboostPipeline() from its inputs, so a value set here would be ",
         "overwritten. Use the pipeline's own arguments instead."
@@ -258,27 +232,6 @@ colocboostConfig <- function(...) {
 # =============================================================================
 # Helpers (private)
 # =============================================================================
-
-# Run colocboost() with tryCatch + timing.
-#' @importFrom rlang try_fetch
-.cbRun <- function(label, args) {
-    if (!requireNamespace("colocboost", quietly = TRUE)) {
-        abort("The colocboost package is required for colocboostPipeline().")
-    }
-    t1 <- Sys.time()
-    # Callers splice the flattened bundle in with the assembled data slots;
-    # drop the slots that resolved to NULL before handing them over.
-    args <- compact(args)
-    res <- try_fetch(
-        exec(colocboost::colocboost, !!!args),
-        error = function(cnd) {
-            msg <- glue("{label} failed")
-            inform(msg, parent = cnd)
-            NULL
-        }
-    )
-    list(result = res, time = Sys.time() - t1)
-}
 
 # Build the LD / X_ref slot of the colocboost call from a list of LD
 # matrices. When any matrix is non-square it is treated as a samples x
@@ -958,10 +911,20 @@ colocboostConfig <- function(...) {
     focalTrait,
     methodArgs
 ) {
+    # Resolved first, in the order the runs are listed: .cbCanRun() warns
+    # when a requested analysis has no data for it, and hoisting keeps those
+    # warnings in the same order they were emitted inline.
+    ssNeeded <- "summary-statistic data"
+    runXqtl <- .cbCanRun(
+        xqtlColoc,
+        hasInd || hasQtlSs,
+        "xqtlColoc",
+        "QTL data"
+    )
+    runJoint <- .cbCanRun(jointGwas, hasSs, "jointGwas", ssNeeded)
+    runSeparate <- .cbCanRun(separateGwas, hasSs, "separateGwas", ssNeeded)
     compact(list(
-        xqtl_coloc = if (
-            .cbCanRun(xqtlColoc, hasInd || hasQtlSs, "xqtlColoc", "QTL data")
-        ) {
+        xqtl_coloc = if (runXqtl) {
             .cbRunXqtlOnly(
                 individualBundle,
                 qtlSumstatBundle,
@@ -970,24 +933,10 @@ colocboostConfig <- function(...) {
                 methodArgs
             )
         },
-        joint_gwas = if (
-            .cbCanRun(jointGwas, hasSs, "jointGwas", "summary-statistic data")
-        ) {
-            .cbRunJointGwas(
-                individualBundle,
-                sumstatBundle,
-                hasInd,
-                methodArgs
-            )
+        joint_gwas = if (runJoint) {
+            .cbRunJointGwas(individualBundle, sumstatBundle, hasInd, methodArgs)
         },
-        separate_gwas = if (
-            .cbCanRun(
-                separateGwas,
-                hasSs,
-                "separateGwas",
-                "summary-statistic data"
-            )
-        ) {
+        separate_gwas = if (runSeparate) {
             .cbRunSeparateGwas(
                 individualBundle,
                 sumstatBundle,
@@ -1163,6 +1112,23 @@ colocboostConfig <- function(...) {
     )
 }
 
+# The xQTL-only run's progress line, which names the summary-statistic
+# studies only when there are any.
+# @noRd
+.cbAnnounceXqtl <- function(nCtx, nSs) {
+    msg <- if (nSs > 0L) {
+        glue(
+            "====== Performing xQTL-only ColocBoost on {nCtx} contexts ",
+            "and {nSs} summary-statistic studies. ====="
+        )
+    } else {
+        glue(
+            "====== Performing xQTL-only ColocBoost on {nCtx} contexts. ====="
+        )
+    }
+    inform(msg)
+}
+
 # xQTL-only ColocBoost run -> list(result, time).
 #
 # Either side may be absent: `individualBundle` is NULL for a summary-level
@@ -1189,17 +1155,7 @@ colocboostConfig <- function(...) {
     }
     nCtx <- if (hasInd) length(individualBundle$Y) else 0L
     nSs <- length(sumstatBundle$sumstat)
-    msg <- if (nSs > 0L) {
-        glue(
-            "====== Performing xQTL-only ColocBoost on {nCtx} contexts ",
-            "and {nSs} summary-statistic studies. ====="
-        )
-    } else {
-        glue(
-            "====== Performing xQTL-only ColocBoost on {nCtx} contexts. ====="
-        )
-    }
-    inform(msg)
+    .cbAnnounceXqtl(nCtx, nSs)
     ldArgs <- if (nSs > 0L) .cbBuildLdArgs(sumstatBundle$LD) else list()
     args <- c(
         list(
@@ -1217,7 +1173,7 @@ colocboostConfig <- function(...) {
             output_level = 2
         ),
         ldArgs,
-        # as.list(): c() would append the MethodConfig record as one opaque
+        # as.list(): c() would append the MethodOptions record as one opaque
         # element instead of splicing its entries, and exec() would then hand
         # that object to colocboost as a positional argument.
         as.list(methodArgs)
@@ -1297,7 +1253,7 @@ colocboostConfig <- function(...) {
             output_level = 2
         ),
         ldArgs,
-        # as.list(): c() would append the MethodConfig record as one opaque
+        # as.list(): c() would append the MethodOptions record as one opaque
         # element instead of splicing its entries, and exec() would then hand
         # that object to colocboost as a positional argument.
         as.list(methodArgs)
@@ -1376,7 +1332,7 @@ colocboostConfig <- function(...) {
             output_level = 2
         ),
         ldArgs,
-        # as.list(): c() would append the MethodConfig record as one opaque
+        # as.list(): c() would append the MethodOptions record as one opaque
         # element instead of splicing its entries, and exec() would then hand
         # that object to colocboost as a positional argument.
         as.list(methodArgs)
@@ -1478,6 +1434,19 @@ colocboostConfig <- function(...) {
     )
 }
 
+# Harmonize allele coding across all sources to a shared per-locus
+# canonical so swapped variants are combined with a consistent sign
+# (alleleFlip = TRUE); alleleFlip = FALSE leaves the names-only
+# canonicalization done at the source builders, which keeps swapped
+# variants distinct.
+# @noRd
+.cbMaybeHarmonize <- function(individualBundle, combinedPairs, alleleFlip) {
+    if (!isTRUE(alleleFlip)) {
+        return(list(individualBundle = individualBundle, pairs = combinedPairs))
+    }
+    .cbHarmonizeAlleles(individualBundle, combinedPairs)
+}
+
 # Top-level driver shared by all input methods. qtlPairs and gwasPairs
 # are per-tuple lists of `list(sumstat, LD)` produced by the per-class
 # bundle helpers; they are merged here so dict_sumstatLD can dedupe
@@ -1505,15 +1474,11 @@ colocboostConfig <- function(...) {
         qtlLdSketch,
         cutoffs = cutoffs
     )
-    # Harmonize allele coding across all sources to a shared per-locus canonical
-    # so swapped variants are combined with a consistent sign (alleleFlip =
-    # TRUE); alleleFlip = FALSE leaves the names-only canonicalization done at
-    # the source builders, which keeps swapped variants distinct.
-    harmonized <- if (isTRUE(alleleFlip)) {
-        .cbHarmonizeAlleles(individualBundle, combinedPairs)
-    } else {
-        list(individualBundle = individualBundle, pairs = combinedPairs)
-    }
+    harmonized <- .cbMaybeHarmonize(
+        individualBundle,
+        combinedPairs,
+        alleleFlip
+    )
     sumstatBundle <- .cbMergeSumstatBundles(harmonized$pairs)
     # The xQTL-only run gets its own bundle over just the QTL-side pairs, so
     # a GWAS study is never treated as an xQTL outcome. Rebuilding it through
@@ -1635,16 +1600,16 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         samples = NULL,
-        panelFilterArgs = panelFilterConfig(),
-        signalScreenArgs = signalScreenConfig(),
+        panelFilterArgs = PanelFilterParam(),
+        signalScreenArgs = SignalScreenParam(),
         alleleFlip = TRUE,
-        # `list()`, not colocboostConfig(): the formal shadows the
+        # `list()`, not ColocboostOptions(): the formal shadows the
         # constructor, so a constructor-call default is a recursive
         # reference. An empty list is the "no options" spelling
-        # .assertMethodConfig already accepts; anything else must be built.
-        methodArgs = colocboostConfig()
+        # .assertMethodOptions already accepts; anything else must be built.
+        methodArgs = ColocboostOptions()
     ) {
-        .assertMethodConfig(methodArgs, "colocboostConfig", "methodArgs")
+        .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbQtlDatasetDrive(
             qtlData = qtlData,
@@ -1681,10 +1646,10 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         alleleFlip = TRUE,
-        panelFilterArgs = panelFilterConfig(),
-        methodArgs = colocboostConfig()
+        panelFilterArgs = PanelFilterParam(),
+        methodArgs = ColocboostOptions()
     ) {
-        .assertMethodConfig(methodArgs, "colocboostConfig", "methodArgs")
+        .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbRequireSumStatsQc(qtlData, "qtlData")
         cutoffs <- .panelCutoffs(panelFilterArgs)
@@ -1727,16 +1692,16 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         samples = NULL,
-        panelFilterArgs = panelFilterConfig(),
-        signalScreenArgs = signalScreenConfig(),
+        panelFilterArgs = PanelFilterParam(),
+        signalScreenArgs = SignalScreenParam(),
         alleleFlip = TRUE,
-        # `list()`, not colocboostConfig(): the formal shadows the
+        # `list()`, not ColocboostOptions(): the formal shadows the
         # constructor, so a constructor-call default is a recursive
         # reference. An empty list is the "no options" spelling
-        # .assertMethodConfig already accepts; anything else must be built.
-        methodArgs = colocboostConfig()
+        # .assertMethodOptions already accepts; anything else must be built.
+        methodArgs = ColocboostOptions()
     ) {
-        .assertMethodConfig(methodArgs, "colocboostConfig", "methodArgs")
+        .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbPipelineMultiStudy(
             qtlData = qtlData,
@@ -1998,4 +1963,54 @@ setMethod(
         hasInd,
         methodArgs
     )
+}
+
+#' @title colocboost Engine Settings
+#' @description Additional arguments forwarded to
+#'   \code{colocboost::colocboost}. Names are checked against that
+#'   function's own formals, so a misspelled option is an error here rather
+#'   than a setting silently dropped inside the run.
+#'
+#'   The data arguments \code{colocboostPipeline} assembles itself ---
+#'   \code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
+#'   \code{focal_outcome_idx} --- are not settable here.
+#' @param ... Named \code{colocboost::colocboost} arguments.
+#' @return A \code{\link{MethodOptions}} object.
+#' @examples
+#' ColocboostOptions(M = 5)
+#' @export
+ColocboostOptions <- function(...) {
+    extra <- list(...)
+    .cbRefusePipelineOwned(extra)
+    .newMethodOptions(
+        "colocboost::colocboost",
+        defaults = list(),
+        extra = extra,
+        label = "ColocboostOptions",
+        engine = "colocboost"
+    )
+}
+
+# Run colocboost() with tryCatch + timing.
+#' @importFrom rlang try_fetch
+.cbRun <- function(label, args) {
+    # Engine-call exception: colocboost's whole interface is two blocks --
+    # this and ColocboostOptions -- so a colocboostWrapper.R would hold ~50
+    # lines against this file's 1900. Kept inline deliberately.
+    if (!requireNamespace("colocboost", quietly = TRUE)) {
+        abort("The colocboost package is required for colocboostPipeline().")
+    }
+    t1 <- Sys.time()
+    # Callers splice the flattened bundle in with the assembled data slots;
+    # drop the slots that resolved to NULL before handing them over.
+    args <- compact(args)
+    res <- try_fetch(
+        exec(colocboost::colocboost, !!!args),
+        error = function(cnd) {
+            msg <- glue("{label} failed")
+            inform(msg, parent = cnd)
+            NULL
+        }
+    )
+    list(result = res, time = Sys.time() - t1)
 }

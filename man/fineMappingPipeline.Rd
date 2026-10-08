@@ -17,19 +17,19 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = genotypeFilterConfig(),
+  genotypeFilterArgs = GenotypeFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   addSusieInf = TRUE,
-  credibleSetArgs = credibleSetConfig(),
+  credibleSetArgs = CredibleSetParam(),
   fineMappingResult = NULL,
-  crossValidationArgs = crossValidationConfig(),
-  residualizationArgs = residualizationConfig(),
-  signalScreenArgs = signalScreenConfig(),
+  crossValidationArgs = CrossValidationParam(),
+  residualizationArgs = ResidualizationParam(),
+  signalScreenArgs = SignalScreenParam(),
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
-  twasWeights = NULL,
+  mrmashPrior = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
   naAction = c("drop", "impute"),
   verbose = 1,
@@ -43,19 +43,19 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = genotypeFilterConfig(),
-  panelFilterArgs = panelFilterConfig(),
+  genotypeFilterArgs = GenotypeFilterParam(),
+  panelFilterArgs = PanelFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   addSusieInf = TRUE,
-  credibleSetArgs = credibleSetConfig(),
+  credibleSetArgs = CredibleSetParam(),
   fineMappingResult = NULL,
-  twasWeights = NULL,
+  mrmashPrior = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
-  crossValidationArgs = crossValidationConfig(),
-  residualizationArgs = residualizationConfig(),
-  signalScreenArgs = signalScreenConfig(),
-  rssArgs = rssConfig(),
+  crossValidationArgs = CrossValidationParam(),
+  residualizationArgs = ResidualizationParam(),
+  signalScreenArgs = SignalScreenParam(),
+  rssArgs = SusieRssParam(),
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
@@ -71,30 +71,30 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   jointSpecification = NULL,
   addSusieInf = TRUE,
-  credibleSetArgs = credibleSetConfig(),
+  credibleSetArgs = CredibleSetParam(),
   fineMappingResult = NULL,
-  twasWeights = NULL,
+  mrmashPrior = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
   verbose = 1,
   fitRetention = c("slim", "full"),
-  rssArgs = rssConfig(),
-  panelFilterArgs = panelFilterConfig(),
-  crossValidationArgs = crossValidationConfig(),
-  residualizationArgs = residualizationConfig()
+  rssArgs = SusieRssParam(),
+  panelFilterArgs = PanelFilterParam(),
+  crossValidationArgs = CrossValidationParam(),
+  residualizationArgs = ResidualizationParam()
 )
 
 \S4method{fineMappingPipeline}{GwasSumStats}(
   data,
   methods,
   addSusieInf = TRUE,
-  credibleSetArgs = credibleSetConfig(),
+  credibleSetArgs = CredibleSetParam(),
   fineMappingResult = NULL,
   verbose = 1,
   fitRetention = c("slim", "full"),
-  rssArgs = rssConfig(),
-  panelFilterArgs = panelFilterConfig(),
-  crossValidationArgs = crossValidationConfig(),
-  residualizationArgs = residualizationConfig()
+  rssArgs = SusieRssParam(),
+  panelFilterArgs = PanelFilterParam(),
+  crossValidationArgs = CrossValidationParam(),
+  residualizationArgs = ResidualizationParam()
 )
 }
 \arguments{
@@ -109,10 +109,10 @@ fineMappingPipeline(data, ...)
         \code{c("susie", "susieInf", "mvsusie")} (any subset of
         \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
         subject to per-class compatibility).
-  \item A \code{\link{fineMappingMethodsConfig}} record keyed by method
+  \item A \code{\link{FineMappingMethodsParam}} record keyed by method
         token, where each value is a list of per-method kwargs to
         splice into the underlying fitter, e.g.
-        \code{fineMappingMethodsConfig(susie = list(L = 1, refine =
+        \code{FineMappingMethodsParam(susie = list(L = 1, refine =
                    FALSE), mvsusie = list(max_iter = 500))}. Each
         entry is checked against the engine that receives it. Mirrors the
         convention of \code{\link{twasWeightsPipeline}}'s
@@ -138,10 +138,10 @@ position when extracting variants. Required when \code{traitId} is
 supplied. Mutually exclusive with \code{region}.}
 
 \item{genotypeFilterArgs}{Per-call overrides of the \code{QtlDataset}'s own
-filters, built with \code{\link{genotypeFilterConfig}}. A field left unset
+filters, built with \code{\link{GenotypeFilterParam}}. A field left unset
 keeps the dataset's construct-time value, so
-\code{genotypeFilterConfig(mafCutoff = 0)} pins the cutoff at zero while
-\code{genotypeFilterConfig()} changes nothing. Applies to the
+\code{GenotypeFilterParam(mafCutoff = 0)} pins the cutoff at zero while
+\code{GenotypeFilterParam()} changes nothing. Applies to the
 \code{QtlDataset} method only.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
@@ -169,7 +169,7 @@ A choice between methods rather than a property of the credible sets,
 which is why it stands alone.}
 
 \item{credibleSetArgs}{How credible sets are built and reported, built with
-  \code{\link{credibleSetConfig}}: \code{coverage} (default \code{0.95}),
+  \code{\link{CredibleSetParam}}: \code{coverage} (default \code{0.95}),
   \code{secondaryCoverage} (\code{c(0.7, 0.5)}), \code{signalCutoff}
   (the PIP cutoff for top-loci selection, \code{0.025}),
   \code{minAbsCorr} (\code{0.8}) and \code{medianAbsCorr}
@@ -189,7 +189,7 @@ which is why it stands alone.}
 a resume cache; tuples already present are not refit.}
 
 \item{crossValidationArgs}{Cross-validation settings, built with
-  \code{\link{crossValidationConfig}}: \code{folds} (default \code{0}, no
+  \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
   CV), \code{numThreads} for the per-fold refits, and \code{samplePartition}
   to reuse a fixed partition across methods. When \code{folds > 1} each
   method is refit on every fold's training samples and used to predict the
@@ -205,7 +205,7 @@ a resume cache; tuples already present are not refit.}
   \code{\link{twasWeightsPipeline}} only and are ignored here.}
 
 \item{residualizationArgs}{Covariate residualization settings, built with
-  \code{\link{residualizationConfig}}: \code{phenotypeCovariates} and
+  \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
   \code{genotypeCovariates} name which covariates to regress out
   (\code{NULL}, the default, uses every available one), and
   \code{residualizePhenotype} / \code{residualizeGenotype} turn each side
@@ -225,7 +225,7 @@ a resume cache; tuples already present are not refit.}
 
 \item{signalScreenArgs}{Individual-level single-effect (SER) pre-screen
 applied to each residualized \code{(X, y)} block before a full fit,
-built with \code{\link{signalScreenConfig}}. A susie model with
+built with \code{\link{SignalScreenParam}}. A susie model with
 \code{L = 1} is fit and the block is skipped unless the chosen metric
 exceeds its cutoff:
 \itemize{
@@ -237,7 +237,7 @@ exceeds its cutoff:
     factor or log Bayes factor from the \code{L = 1} fit.
 }
 Only one metric may be enabled, which
-\code{\link{signalScreenConfig}} enforces when you build it. Unset (the
+\code{\link{SignalScreenParam}} enforces when you build it. Unset (the
 default) screens nothing. The summary-statistics analog lives in
 \code{\link{summaryStatsQc}}.}
 
@@ -259,8 +259,11 @@ reproducible fits; the global RNG state is restored on return. Default
 \code{NULL}
 (no seeding).}
 
-\item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache to reuse
-previously fitted weights; \code{NULL} fits fresh.}
+\item{mrmashPrior}{Optional \code{\link{TwasWeights}} from a previous
+mr.mash \code{\link{twasWeightsPipeline}} run, mined for the mvSuSiE
+data-driven prior: the retained \code{mrmash} fits supply the prior
+mixture, and their cross-validation payload supplies honest per-fold
+priors. \code{NULL} uses the canonical prior instead.}
 
 \item{dataDrivenPriorWeightsCutoff}{Numeric or \code{NULL}. Cutoff below
 which data-driven prior weights are zeroed; \code{NULL} disables the
@@ -280,11 +283,11 @@ either way --- its per-credible-set columns are governed by
 \code{credibleSet}'s \code{perCsColumns}, not by this.}
 
 \item{panelFilterArgs}{LD-reference-panel filters for the summary-statistics
-and GWAS methods, built with \code{\link{panelFilterConfig}}. See
+and GWAS methods, built with \code{\link{PanelFilterParam}}. See
 \emph{Panel filters on the RSS path} above.}
 
 \item{rssArgs}{Summary-statistics solver settings for \code{QtlSumStats} /
-\code{GwasSumStats} input, built with \code{\link{rssConfig}}:
+\code{GwasSumStats} input, built with \code{\link{SusieRssParam}}:
 \itemize{
   \item \code{serFallback} (default \code{FALSE}) --- after each
     multi-effect SuSiE-RSS fit, read susieR's finite-sample R
@@ -308,7 +311,7 @@ and GWAS methods, built with \code{\link{panelFilterConfig}}. See
     \code{"eb_mix"}.
   \item \code{control} --- options for
     \code{susieR::susie_rss_control()}, built with
-    \code{\link{susieRssControlConfig}}. This was a bare named list,
+    \code{\link{SusieRssControlOptions}}. This was a bare named list,
     which meant a misspelled option was dropped silently; the
     constructor checks the names against that function's live formals.
 }}
@@ -419,7 +422,7 @@ deliberately not ported here:
         reanalysis on the RSS path): these are not exposed as
         dedicated method tokens. Callers who want a single-effect
         fit can request it via per-method kwargs, e.g.
-        \code{methods = fineMappingMethodsConfig(susie = list(L = 1))}
+        \code{methods = FineMappingMethodsParam(susie = list(L = 1))}
         \code{methods} parameter).
   \item \code{loadRssData} and explicit
         \code{ldReferenceMetaFile} arguments: the new

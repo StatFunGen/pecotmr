@@ -10,8 +10,8 @@ context("AnnotationMatrix")
 # helper-h2Classes.R.
 
 test_that("AnnotationMatrix validates dimensions and meta", {
-    gr <- make_test_granges(10)
-    meta <- make_test_annotation_meta()
+    gr <- makeTestGRanges(10)
+    meta <- makeTestAnnotationMeta()
     mat <- matrix(0, nrow = 10, ncol = 3)
 
     obj <- AnnotationMatrix(mat, gr, meta)
@@ -20,16 +20,16 @@ test_that("AnnotationMatrix validates dimensions and meta", {
 })
 
 test_that("AnnotationMatrix rejects row mismatch", {
-    gr <- make_test_granges(10)
-    meta <- make_test_annotation_meta()
+    gr <- makeTestGRanges(10)
+    meta <- makeTestAnnotationMeta()
     mat <- matrix(0, nrow = 5, ncol = 3) # wrong number of rows
 
     expect_error(AnnotationMatrix(mat, gr, meta), "rows.*must match")
 })
 
 test_that("AnnotationMatrix rejects column mismatch with meta", {
-    gr <- make_test_granges(10)
-    meta <- make_test_annotation_meta() # 3 annotations
+    gr <- makeTestGRanges(10)
+    meta <- makeTestAnnotationMeta() # 3 annotations
     mat <- matrix(0, nrow = 10, ncol = 2) # only 2 columns
 
     # Constructor errors when colnames assignment fails (dimnames mismatch)
@@ -37,7 +37,7 @@ test_that("AnnotationMatrix rejects column mismatch with meta", {
 })
 
 test_that("AnnotationMatrix rejects invalid tier values", {
-    gr <- make_test_granges(10)
+    gr <- makeTestGRanges(10)
     meta <- data.frame(
         name = "x",
         tier = "invalid_tier",
@@ -50,7 +50,7 @@ test_that("AnnotationMatrix rejects invalid tier values", {
 })
 
 test_that("AnnotationMatrix rejects invalid type values", {
-    gr <- make_test_granges(10)
+    gr <- makeTestGRanges(10)
     meta <- data.frame(
         name = "x",
         tier = "baseline",
@@ -64,8 +64,8 @@ test_that("AnnotationMatrix rejects invalid type values", {
 
 test_that("AnnotationMatrix() constructor creates object from matrix", {
     n <- 10
-    gr <- make_test_granges(n)
-    meta <- make_test_annotation_meta()
+    gr <- makeTestGRanges(n)
+    meta <- makeTestAnnotationMeta()
     mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
 
     obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
@@ -77,8 +77,8 @@ test_that("AnnotationMatrix() constructor creates object from matrix", {
 
 test_that("AnnotationMatrix() sets column names from annotation_meta", {
     n <- 10
-    gr <- make_test_granges(n)
-    meta <- make_test_annotation_meta()
+    gr <- makeTestGRanges(n)
+    meta <- makeTestAnnotationMeta()
     mat <- matrix(0, nrow = n, ncol = 3) # No colnames set on mat
 
     obj <- AnnotationMatrix(mat, gr, meta)
@@ -89,7 +89,7 @@ test_that("AnnotationMatrix() sets column names from annotation_meta", {
 })
 
 test_that("AnnotationMatrix rejects a non-data.frame annotationMeta", {
-    gr <- make_test_granges(10)
+    gr <- makeTestGRanges(10)
     expect_error(
         AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = list(a = 1)),
         "annotationMeta must be a data.frame"
@@ -97,7 +97,7 @@ test_that("AnnotationMatrix rejects a non-data.frame annotationMeta", {
 })
 
 test_that("AnnotationMatrix rejects annotationMeta missing required columns", {
-    gr <- make_test_granges(10)
+    gr <- makeTestGRanges(10)
     bad_meta <- data.frame(foo = c("a", "b", "c"), stringsAsFactors = FALSE)
     expect_error(
         AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = bad_meta),
@@ -107,8 +107,8 @@ test_that("AnnotationMatrix rejects annotationMeta missing required columns", {
 
 test_that("AnnotationMatrix accessors round-trip the stored slots", {
     n <- 10
-    gr <- make_test_granges(n)
-    meta <- make_test_annotation_meta()
+    gr <- makeTestGRanges(n)
+    meta <- makeTestAnnotationMeta()
     mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
     obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
 
@@ -130,8 +130,8 @@ test_that("AnnotationMatrix accessors round-trip the stored slots", {
 
 test_that("getBaseline() subsets to baseline-tier only", {
     n <- 10
-    gr <- make_test_granges(n)
-    meta <- make_test_annotation_meta() # 1 baseline, 2 candidate
+    gr <- makeTestGRanges(n)
+    meta <- makeTestAnnotationMeta() # 1 baseline, 2 candidate
     mat <- matrix(0, nrow = n, ncol = 3)
 
     obj <- AnnotationMatrix(mat, gr, meta)
@@ -144,8 +144,8 @@ test_that("getBaseline() subsets to baseline-tier only", {
 
 test_that("getCandidates() subsets to candidate-tier only", {
     n <- 10
-    gr <- make_test_granges(n)
-    meta <- make_test_annotation_meta() # 1 baseline, 2 candidate
+    gr <- makeTestGRanges(n)
+    meta <- makeTestAnnotationMeta() # 1 baseline, 2 candidate
     mat <- matrix(0, nrow = n, ncol = 3)
 
     obj <- AnnotationMatrix(mat, gr, meta)
@@ -161,7 +161,7 @@ test_that("getCandidates() subsets to candidate-tier only", {
 test_that("show(AnnotationMatrix) does not error", {
     am <- AnnotationMatrix(
         matrix(0, nrow = 10, ncol = 1),
-        make_test_granges(10),
+        makeTestGRanges(10),
         data.frame(
             name = "base",
             tier = "baseline",
@@ -176,10 +176,10 @@ test_that("the constructor rejects a column/metadata-row mismatch", {
     # Rows-vs-ranges is checked above; this is the other axis -- one metadata
     # row per annotation COLUMN.
     n <- 10
-    gr <- make_test_granges(n)
+    gr <- makeTestGRanges(n)
     mat <- matrix(runif(n * 4), nrow = n, ncol = 4)
     expect_error(
-        AnnotationMatrix(mat, gr, make_test_annotation_meta()),
+        AnnotationMatrix(mat, gr, makeTestAnnotationMeta()),
         "column\\(s\\) for 3 metadata row\\(s\\)"
     )
 })
@@ -188,8 +188,8 @@ test_that("validity names the metadata columns it requires", {
     n <- 10
     obj <- AnnotationMatrix(
         matrix(runif(n * 3), nrow = n, ncol = 3),
-        make_test_granges(n),
-        make_test_annotation_meta()
+        makeTestGRanges(n),
+        makeTestAnnotationMeta()
     )
     bad <- obj
     SummarizedExperiment::colData(bad)$tier <- NULL
@@ -201,8 +201,8 @@ test_that("validity names the metadata columns it requires", {
 
 test_that("AnnotationMatrix keeps the ranges as given when genome is absent", {
     # A NULL genome leaves the ranges' seqinfo alone rather than setting it.
-    gr <- make_test_granges(10)
-    meta <- make_test_annotation_meta()
+    gr <- makeTestGRanges(10)
+    meta <- makeTestAnnotationMeta()
     mat <- matrix(0, nrow = 10, ncol = 3)
     am <- AnnotationMatrix(mat, gr, meta, genome = NULL)
     expect_s4_class(am, "AnnotationMatrix")

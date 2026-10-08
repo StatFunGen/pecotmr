@@ -3,8 +3,8 @@
 # === Tests migrated from test_h2ClassesSumstats.R (LdEigen) ===
 
 test_that("LdEigen constructs and validates correctly", {
-    ldblocks <- make_test_ldblocks()
-    snp_info <- make_test_snp_info()
+    ldblocks <- makeTestLdBlocks()
+    snp_info <- makeTestSnpInfo()
     eigen_list <- list(
         list(
             values = c(1, 0.5),
@@ -29,13 +29,13 @@ test_that("LdEigen constructs and validates correctly", {
 
 
 test_that("LdEigen rejects eigen_list length mismatch", {
-    ldblocks <- make_test_ldblocks() # 2 blocks
+    ldblocks <- makeTestLdBlocks() # 2 blocks
     # Only 1 element in eigen_list
     expect_error(
         methods::validObject(
             LdEigen(
                 ldBlocks = ldblocks,
-                snpInfo = make_test_snp_info(),
+                snpInfo = makeTestSnpInfo(),
                 nRef = 500L,
                 inSample = FALSE,
                 genome = "hg19",
@@ -49,12 +49,12 @@ test_that("LdEigen rejects eigen_list length mismatch", {
 
 
 test_that("LdEigen rejects invalid eigenvalue_truncation", {
-    ldblocks <- make_test_ldblocks()
+    ldblocks <- makeTestLdBlocks()
     expect_error(
         methods::validObject(
             LdEigen(
                 ldBlocks = ldblocks,
-                snpInfo = make_test_snp_info(),
+                snpInfo = makeTestSnpInfo(),
                 nRef = 500L,
                 inSample = FALSE,
                 genome = "hg19",
@@ -70,8 +70,8 @@ test_that("LdEigen rejects invalid eigenvalue_truncation", {
 # tree mirrors R/.
 test_that("show(LdEigen) does not error", {
     eig <- LdEigen(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -86,8 +86,8 @@ test_that("subsetting an LdEigen is refused, not silently allowed", {
     # per variant: narrowing the ranges would leave decompositions describing
     # variants the object no longer carries.
     obj <- LdEigen(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -195,8 +195,8 @@ test_that("eigenvalue truncation keeps everything when there is no mass", {
 })
 
 test_that("LdEigen: argument guards fire", {
-    ldblocks <- make_test_ldblocks()
-    snp_info <- make_test_snp_info(10)
+    ldblocks <- makeTestLdBlocks()
+    snp_info <- makeTestSnpInfo(10)
     eigen_list <- list(
         list(values = c(1, 0.5), vectors = matrix(0, 10, 2), snpIdx = 1:10),
         list(values = 0.8, vectors = matrix(0, 10, 1), snpIdx = 1:10)

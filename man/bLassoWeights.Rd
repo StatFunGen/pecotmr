@@ -10,7 +10,7 @@ bLassoWeights(
   nIter = 10000,
   burnIn = 2000,
   thin = 5,
-  methodArgs = bglrConfig()
+  methodArgs = BglrOptions()
 )
 }
 \arguments{
@@ -25,7 +25,7 @@ bLassoWeights(
 \item{thin}{Thinning interval. Default is 5.}
 
 \item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
-with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

@@ -21,10 +21,10 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
-  panelFilterArgs = panelFilterConfig(),
-  signalScreenArgs = signalScreenConfig(),
+  panelFilterArgs = PanelFilterParam(),
+  signalScreenArgs = SignalScreenParam(),
   alleleFlip = TRUE,
-  methodArgs = colocboostConfig()
+  methodArgs = ColocboostOptions()
 )
 
 \S4method{colocboostPipeline}{QtlSumStats}(
@@ -37,8 +37,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   alleleFlip = TRUE,
-  panelFilterArgs = panelFilterConfig(),
-  methodArgs = colocboostConfig()
+  panelFilterArgs = PanelFilterParam(),
+  methodArgs = ColocboostOptions()
 )
 
 \S4method{colocboostPipeline}{MultiStudyQtlDataset}(
@@ -53,10 +53,10 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
-  panelFilterArgs = panelFilterConfig(),
-  signalScreenArgs = signalScreenConfig(),
+  panelFilterArgs = PanelFilterParam(),
+  signalScreenArgs = SignalScreenParam(),
   alleleFlip = TRUE,
-  methodArgs = colocboostConfig()
+  methodArgs = ColocboostOptions()
 )
 }
 \arguments{
@@ -103,14 +103,14 @@ analysis to; \code{NULL} (default) uses all samples.}
 
 \item{panelFilterArgs}{Analysis-time filters applied to the summary-statistic
 sides against the LD reference panel, built with
-\code{\link{panelFilterConfig}}: a variant whose panel genotypes fall
+\code{\link{PanelFilterParam}}: a variant whose panel genotypes fall
 below its cutoffs is dropped before the LD matrix is built. The defaults
 filter nothing. See the Details section for how these relate to the
 individual-level cutoffs recorded on a \code{QtlDataset}.}
 
 \item{signalScreenArgs}{Individual-level pre-filter (ports the legacy
 \code{pip_cutoff_to_skip_ind}), built with
-\code{\link{signalScreenConfig}}. For each context every outcome is fit
+\code{\link{SignalScreenParam}}. For each context every outcome is fit
 with a single-effect SuSiE (\code{L = 1}) and dropped unless the chosen
 metric exceeds its cutoff; a context with no surviving outcome is
 skipped:
@@ -124,7 +124,7 @@ skipped:
     factor or log Bayes factor from the \code{L = 1} fit.
 }
 Only one metric may be enabled, which
-\code{\link{signalScreenConfig}} enforces when you build it. Unset (the
+\code{\link{SignalScreenParam}} enforces when you build it. Unset (the
 default) screens nothing. Summary-statistic skipping is handled upstream
 by \code{\link{summaryStatsQc}}.}
 
@@ -136,7 +136,7 @@ swap is treated as a distinct variant.}
 
 \item{methodArgs}{Additional arguments forwarded to
 \code{colocboost::colocboost}, built with
-\code{\link{colocboostConfig}}. Names are checked against that
+\code{\link{ColocboostOptions}}. Names are checked against that
 function's formals, so a misspelled option errors instead of being
 dropped inside the run. The data slots the pipeline assembles itself
 (\code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},

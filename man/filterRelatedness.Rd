@@ -8,11 +8,11 @@ filterRelatedness(
   relatedness,
   relatednessThreshold = 0.0625,
   analysisType = c("maximizeUnrelated", "maximizeCases"),
-  columns = relatednessColumns(),
+  columns = RelatednessColumnsParam(),
   phenoData = NULL,
   phenoCol = "pheno",
-  pruning = relatednessPruning(),
-  plinkQcArgs = plinkQcConfig(),
+  pruning = RelatednessPruningParam(),
+  plinkQcArgs = PlinkQcOptions(),
   verbose = FALSE
 )
 }
@@ -29,7 +29,7 @@ studies.}
 
 \item{columns}{Which columns of \code{relatedness} hold the pair
 identifiers and the relatedness measure. Build with
-\code{\link{relatednessColumns}}.}
+\code{\link{RelatednessColumnsParam}}.}
 
 \item{phenoData}{A data.frame with columns \code{IID} and the column named by
 \code{phenoCol}. Required when \code{analysisType = "maximizeCases"}.}
@@ -38,11 +38,11 @@ identifiers and the relatedness measure. Build with
 be binary (1 = case, 0 = control).}
 
 \item{pruning}{Bounds on the graph pre-pruning and the iterative cleanup.
-Build with \code{\link{relatednessPruning}}.}
+Build with \code{\link{RelatednessPruningParam}}.}
 
 \item{plinkQcArgs}{Additional arguments forwarded to
 \code{plinkQC::relatednessFilter}. Build with
-\code{\link{plinkQcConfig}}.}
+\code{\link{PlinkQcOptions}}.}
 
 \item{verbose}{Logical, print progress messages (default FALSE).}
 }
@@ -59,5 +59,5 @@ pruning (removing highest-degree nodes), then applies
 rel <- data.frame(IID1 = c("s1", "s2"), IID2 = c("s2", "s3"),
   value = c(0.5, 0.1))
 filterRelatedness(rel, relatednessThreshold = 0.2,
-  columns = relatednessColumns(value = "value"))
+  columns = RelatednessColumnsParam(value = "value"))
 }

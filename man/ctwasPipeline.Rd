@@ -12,11 +12,11 @@ ctwasPipeline(
   method = NULL,
   L = 5L,
   numThreads = 1L,
-  ctwasPriorArgs = ctwasPriorConfig(),
-  variantPruningArgs = variantPruningConfig(),
-  boundaryMergeArgs = boundaryMergeConfig(),
+  ctwasPriorArgs = CtwasPriorParam(),
+  variantPruningArgs = VariantPruningParam(),
+  boundaryMergeArgs = BoundaryMergeParam(),
   keepSnps = FALSE,
-  methodArgs = ctwasConfig()
+  methodArgs = CtwasOptions()
 )
 }
 \arguments{
@@ -65,12 +65,12 @@ Default \code{5}. Pass-through to \code{ctwas::ctwas_sumstats}.}
 \item{numThreads}{Number of cores. Default \code{1}.}
 
 \item{ctwasPriorArgs}{The EM stage that estimates cTWAS's group priors, built
-with \code{\link{ctwasPriorConfig}}: \code{thin}, \code{niterPrefit},
+with \code{\link{CtwasPriorParam}}: \code{thin}, \code{niterPrefit},
 \code{niter}, \code{varStructure} and \code{fallbackToPrefit}. Handed
-whole to \code{\link{estCtwasParam}}.}
+whole to \code{\link{estCtwasGroupPriors}}.}
 
 \item{variantPruningArgs}{Which variants survive into each gene's weight
-matrix, built with \code{\link{variantPruningConfig}}:
+matrix, built with \code{\link{VariantPruningParam}}:
 \code{weightCutoff}, \code{csMinCor}, \code{pipRescue} and
 \code{maxVariants}. Handed whole to
 \code{\link{assembleCtwasInputs}}. The \code{csMinCor} /
@@ -78,7 +78,7 @@ matrix, built with \code{\link{variantPruningConfig}}:
 
 \item{boundaryMergeArgs}{Whether a high-PIP gene straddling an LD-block
 boundary has its regions merged and re-fine-mapped, built with
-\code{\link{boundaryMergeConfig}}: \code{enabled} (default
+\code{\link{BoundaryMergeParam}}: \code{enabled} (default
 \code{FALSE}), \code{pipThreshold}, \code{filterCs} and
 \code{maxSnp}.}
 
@@ -91,7 +91,7 @@ the SNP rows are the null background and are dropped from the structured
 gene-level result.}
 
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
-with \code{\link{ctwasConfig}}. Names are checked against what
+with \code{\link{CtwasOptions}}. Names are checked against what
 the ctwas steps accept between them.}
 }
 \value{
@@ -103,8 +103,9 @@ A \code{\link{CtwasResult}} collection: one row per \code{(gwasStudy,
   fine-mapping posteriors (\code{finemap}), the run's \code{param}, and its
   \code{regionInfo}. For the raw \code{ctwas::finemap_regions} list (e.g. to
   feed \code{\link{mergeCtwasBoundaryRegions}}), call the granular
-  \code{\link{assembleCtwasInputs}} \eqn{\to} \code{\link{estCtwasParam}}
-  \eqn{\to} \code{\link{screenCtwasRegions}} \eqn{\to}
+  \code{\link{assembleCtwasInputs}} \eqn{\to}
+  \code{\link{estCtwasGroupPriors}} \eqn{\to}
+  \code{\link{screenCtwasRegions}} \eqn{\to}
   \code{\link{finemapCtwasRegions}} path instead.
 }
 \description{
@@ -152,10 +153,10 @@ blocks <- GenomicRanges::GRanges("chr22",
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 gwasByRegion <- summaryStatsQc(gss,
-  panelFilter = panelFilterConfig(mafCutoff = 0.0025))
+  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 ctwasPipeline(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample),
-  ctwasPrior = ctwasPriorConfig(thin = 1, niterPrefit = 3, niter = 10,
+  ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
-  methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0))
+  methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
 }

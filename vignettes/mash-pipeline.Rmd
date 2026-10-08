@@ -72,7 +72,7 @@ sumStatsList <- list(strong = ss, random = ss, null = ss)
 fit <- mashPipeline(
     sumStatsList,
     alpha = 0,
-    prior = mashPriorConfig(nPcs = 2L)
+    prior = MashPriorParam(nPcs = 2L)
 )
 ```
 
@@ -115,7 +115,7 @@ fitSimple <- mashPipeline(
     sumStatsList,
     alpha = 0,
     residualCorrelationMethod = "simple",
-    prior = mashPriorConfig(priorCovariances = fit$U)
+    prior = MashPriorParam(priorCovariances = fit$U)
 )
 ```
 
@@ -221,8 +221,11 @@ mashPriorCovariances(
 `"covEd"` is the default and is mashr's own extreme deconvolution. `"covUdr"`
 is opt-in and has known numerical issues; its TED update additionally assumes
 i.i.d. (Z-scale) data, so it is requested as
-`covUdrConfig(unconstrainedUpdate = "ted")` rather than as a separate engine
-name. Its dominant cost is `covUdrConfig(nUnconstrained = )` (default 50),
+`CovUdrOptions(fit = UdFitOptions(unconstrained.update = "ted"))` rather than
+as a separate engine name. udr is two functions -- `ud_init()` then
+`ud_fit()` -- so each one's arguments travel in their own bundle and are
+checked against their own source. Its dominant cost is
+`CovUdrOptions(init = UdInitOptions(n_unconstrained = ))` (default 50),
 which is worth cutting sharply when you have few conditions.
 
 The engine refines only the *data-driven* components. Canonical components

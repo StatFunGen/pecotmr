@@ -12,9 +12,10 @@ A list with the cTWAS input components \code{z_snp}, \code{z_gene},
 \description{
 The assembled cTWAS input list produced by
 \code{\link{assembleCtwasInputs}} over a two-LD-block chr22 grid with one
-gene, ready for \code{\link{estCtwasParam}}. Self-contained (no external LD
-files needed for parameter estimation). Derived from the de-identified
-\code{protocol_example} toy data; all identifiers are synthetic.
+gene, ready for \code{\link{estCtwasGroupPriors}}. Self-contained (no
+external LD files needed for parameter estimation). Derived from the
+de-identified \code{protocol_example} toy data; all identifiers are
+synthetic.
 }
 \examples{
 data(ctwasInputsExample)

@@ -11,7 +11,7 @@ A list carrying the \code{\link{ctwasInputsExample}} components plus
 }
 \description{
 The augmented cTWAS state returned by
-\code{\link{estCtwasParam}} (the assembled inputs plus estimated
+\code{\link{estCtwasGroupPriors}} (the assembled inputs plus estimated
 group priors and per-region data), ready for
 \code{\link{screenCtwasRegions}}. Derived from the de-identified
 \code{protocol_example} toy data; all identifiers are synthetic.

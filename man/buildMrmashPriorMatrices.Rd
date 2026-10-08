@@ -11,9 +11,8 @@ buildMrmashPriorMatrices(
   dataDrivenPriorMatrices = NULL,
   canonicalPriorMatrices = TRUE,
   priorGrid = NULL,
-  hetgrid = c(0, 0.25, 0.5, 0.75, 1),
-  singletons = TRUE,
-  zeromat = TRUE
+  canonicalCovs = MrmashCanonicalCovsOptions(),
+  expandCovs = MrmashExpandCovsOptions()
 )
 }
 \arguments{
@@ -36,17 +35,15 @@ the standard canonical mixture from
 \item{priorGrid}{Optional pre-computed scaling grid (numeric vector). When
 NULL, derived from \code{Bhat}, \code{Shat} via \code{computeGrid()}.}
 
-\item{hetgrid}{Heterogeneity grid passed to
-\code{mr.mashr::compute_canonical_covs()}. Default \code{c(0, 0.25, 0.5,
-0.75, 1)}, matching the individual-level wrapper.}
+\item{canonicalCovs}{Arguments for
+\code{mr.mashr::compute_canonical_covs()} --- \code{singletons},
+\code{hetgrid} --- built with
+\code{\link{MrmashCanonicalCovsOptions}}. Empty by default, which
+leaves that function's own defaults in place.}
 
-\item{singletons}{Whether to include single-condition prior components.
-Default TRUE.}
-
-\item{zeromat}{Logical. Passed to \code{mr.mashr::expand_covs()}: whether
-the expanded mixture includes the all-zero (null) component. Default
-\code{TRUE}, which is mr.mash's own convention --- a mixture with no
-null component cannot shrink an effect to zero.}
+\item{expandCovs}{Arguments for \code{mr.mashr::expand_covs()} ---
+\code{zeromat} --- built with \code{\link{MrmashExpandCovsOptions}}.
+Empty by default, which leaves that function's own defaults in place.}
 }
 \value{
 A list with components \code{S0} (the expanded list of prior

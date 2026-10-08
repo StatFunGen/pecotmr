@@ -1,3 +1,22 @@
+#' @include MethodParam.R
+NULL
+
+#' @rdname QtlEnrichmentParam
+#' @aliases QtlEnrichmentParam-class
+#' @exportClass QtlEnrichmentParam
+setClass(
+    "QtlEnrichmentParam",
+    contains = "MethodParam",
+    slots = c(
+        numGwas = "numeric_OR_NULL",
+        piQtl = "numeric_OR_NULL",
+        lambda = "numeric",
+        impN = "numeric",
+        doubleShrinkage = "logical",
+        besselCorrection = "logical"
+    )
+)
+
 #' @title Arguments For The QTL Enrichment Estimator
 #' @description The algorithmic settings \code{\link{qtlEnrichment}} takes,
 #'   as one checked bundle. Everything else that function accepts --- the two
@@ -18,11 +37,11 @@
 #'   the enrichment estimate. Default \code{FALSE}.
 #' @param besselCorrection Logical. Apply Bessel's correction when estimating
 #'   the sampling variance. Default \code{TRUE}.
-#' @return A \code{\link{MethodConfig}} object.
+#' @return A \code{QtlEnrichmentParam} object, a \code{\link{MethodParam}}.
 #' @examples
-#' qtlEnrichmentConfig(lambda = 0, impN = 50)
+#' QtlEnrichmentParam(lambda = 0, impN = 50)
 #' @export
-qtlEnrichmentConfig <- function(
+QtlEnrichmentParam <- function(
     numGwas = NULL,
     piQtl = NULL,
     lambda = 1.0,
@@ -30,19 +49,14 @@ qtlEnrichmentConfig <- function(
     doubleShrinkage = FALSE,
     besselCorrection = TRUE
 ) {
-    .newMethodConfig(
-        NULL,
-        defaults = list(
-            numGwas = numGwas,
-            piQtl = piQtl,
-            lambda = lambda,
-            impN = impN,
-            doubleShrinkage = doubleShrinkage,
-            besselCorrection = besselCorrection
-        ),
-        extra = list(),
-        label = "qtlEnrichmentConfig",
-        engine = "qtlEnrichment"
+    new(
+        "QtlEnrichmentParam",
+        numGwas = numGwas,
+        piQtl = piQtl,
+        lambda = lambda,
+        impN = impN,
+        doubleShrinkage = doubleShrinkage,
+        besselCorrection = besselCorrection
     )
 }
 
@@ -90,7 +104,7 @@ qtlEnrichmentConfig <- function(
 #' @param gwasFineMappingResult The outcome side; see above.
 #' @param qtlFineMappingResult The annotation side; see above.
 #' @param methodArgs The estimator's algorithmic settings, built with
-#'   \code{\link{qtlEnrichmentConfig}}: \code{numGwas}, \code{piQtl},
+#'   \code{\link{QtlEnrichmentParam}}: \code{numGwas}, \code{piQtl},
 #'   \code{lambda}, \code{impN}, \code{doubleShrinkage} and
 #'   \code{besselCorrection}. A bare list is refused, since it cannot be
 #'   checked.
@@ -133,12 +147,12 @@ qtlEnrichmentConfig <- function(
 qtlEnrichmentPipeline <- function(
     gwasFineMappingResult,
     qtlFineMappingResult,
-    methodArgs = qtlEnrichmentConfig(),
+    methodArgs = QtlEnrichmentParam(),
     numThreads = 1L,
     seed = NULL,
     verbose = TRUE
 ) {
-    .assertMethodConfig(methodArgs, "qtlEnrichmentConfig", "methodArgs")
+    .assertMethodParam(methodArgs, "QtlEnrichmentParam", "methodArgs")
     .enrValidateInputs(gwasFineMappingResult, qtlFineMappingResult)
     prep <- .enrPrepare(gwasFineMappingResult, qtlFineMappingResult)
     gwasTuples <- prep$gwasTuples
@@ -460,7 +474,7 @@ qtlEnrichmentPipeline <- function(
             }
             # alignNames = FALSE reuses the per-tuple alignment; it is the
             # pipeline's own invariant, which is why `methodArgs` cannot
-            # carry it -- qtlEnrichmentConfig() has no such formal.
+            # carry it -- QtlEnrichmentParam() has no such formal.
             exec(
                 qtlEnrichment,
                 gwasPip = gwasPip,

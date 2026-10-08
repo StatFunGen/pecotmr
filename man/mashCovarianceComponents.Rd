@@ -11,7 +11,7 @@ mashCovarianceComponents(
   components = c("canonical", "pca", "flash", "flashNonneg"),
   nPcs = NULL,
   inputScale = c("auto", "beta", "z"),
-  mashDataArgs = mashDataConfig(),
+  mashDataArgs = MashDataOptions(),
   setSeed = 999
 )
 }
@@ -32,7 +32,7 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with
-\code{\link{mashDataConfig}} -- for example
+\code{\link{MashDataOptions}} -- for example
 \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
 \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
 are refused by the constructor.}

@@ -14,8 +14,8 @@ mashPriorCovariances(
   priorCovariances = NULL,
   priorComponents = NULL,
   inputScale = c("auto", "beta", "z"),
-  mashDataArgs = mashDataConfig(),
-  mashArgs = mashConfig(),
+  mashDataArgs = MashDataOptions(),
+  mashArgs = MashOptions(),
   setSeed = 999
 )
 }
@@ -32,18 +32,18 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
 \code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
 "nonneg")}). Built in that fixed order. May instead be a
-\code{\link{mashComponentConfig}} record, which names the components and
+\code{\link{MashComponentParam}} record, which names the components and
 carries each one's options.}
 
 \item{engine}{Covariance-refinement engine, either a name or the matching
 constructor carrying that engine's settings. \code{"covEd"} (default;
-\code{\link{covEdConfig}} -- mashr's exported \code{cov_ed()} extreme
+\code{\link{CovEdOptions}} -- mashr's exported \code{cov_ed()} extreme
 deconvolution, whose default \code{algorithm = "bovy"} IS the Bovy et al.
 2011 method, weights from a final \code{mash()}); \code{"covUdr"}
-(\code{\link{covUdrConfig}} -- \pkg{udr} ED / TED updates, returning
+(\code{\link{CovUdrOptions}} -- \pkg{udr} ED / TED updates, returning
 weights directly -- OPT-IN, known numerical issues, so not the default;
-\code{unconstrainedUpdate = "ted"} additionally needs i.i.d. (z-scale)
-data); \code{"none"} to skip refinement.}
+\code{UdFitOptions(unconstrained.update = "ted")} additionally needs
+i.i.d. (z-scale) data); \code{"none"} to skip refinement.}
 
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 
@@ -67,13 +67,13 @@ mixture-prior pipeline where separate steps built the components.
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with
-\code{\link{mashDataConfig}} -- for example
+\code{\link{MashDataOptions}} -- for example
 \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
 \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
 are refused by the constructor.}
 
 \item{mashArgs}{Extra arguments for \code{mashr::mash()}, built with
-\code{\link{mashConfig}} -- for example \code{nullweight},
+\code{\link{MashOptions}} -- for example \code{nullweight},
 \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
 \code{outputlevel} and \code{seed} are owned by pecotmr and are
 refused by the constructor.}

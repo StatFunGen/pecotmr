@@ -9,7 +9,7 @@ metaAnalysisPerCondition(
   seValues,
   seCutoff = 0,
   metaMethod = "DL",
-  metaArgs = rmaConfig()
+  metaArgs = RmaOptions()
 )
 }
 \arguments{
@@ -30,7 +30,7 @@ meta-analysis, forwarded to \code{metafor::rma(method = )}. Default
 \code{"ML"}, \code{"EB"}.}
 
 \item{metaArgs}{Extra arguments for \code{metafor::rma()}, built with
-\code{\link{rmaConfig}} -- \code{test = "knha"} in particular, the
+\code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
 small-study correction.}
 }
 \value{

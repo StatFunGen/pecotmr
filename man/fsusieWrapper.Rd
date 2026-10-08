@@ -14,7 +14,7 @@ fsusieWrapper(
   covLev,
   minPurity,
   maxScale,
-  methodArgs = fsusieConfig()
+  methodArgs = FsusieOptions()
 )
 }
 \arguments{
@@ -39,7 +39,7 @@ model.}
 the analysis (2^maxScale). Set 10 true by default.}
 
 \item{methodArgs}{Options forwarded to \code{fsusieR::susiF}, built with
-\code{\link{fsusieConfig}}. A bare list is refused: it cannot be checked
+\code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
 against the engine, so a misspelled option would be silently ignored.}
 }
 \value{

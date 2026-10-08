@@ -181,7 +181,7 @@ applied at load), for example:
 ```{r qtl-manifest-qc}
 qdFiltered <- loadQtlDatasetFromManifest(
     manifest,
-    genotypeFilterArgs = genotypeFilterConfig(
+    genotypeFilterArgs = GenotypeFilterParam(
         mafCutoff = 0.01,
         imissCutoff = 0.05,
         keepIndel = FALSE
@@ -308,12 +308,12 @@ which is third-degree relatives; raise it to 0.125 to keep everyone but
 second-degree and closer.
 
 The column names above are the defaults. A table that spells them differently
-is described with `relatednessColumns()`:
+is described with `RelatednessColumnsParam()`:
 
 ```r
 filterRelatedness(
     relatedness,
-    columns = relatednessColumns(iid1 = "ID1", iid2 = "ID2", value = "KINSHIP")
+    columns = RelatednessColumnsParam(iid1 = "ID1", iid2 = "ID2", value = "KINSHIP")
 )
 ```
 

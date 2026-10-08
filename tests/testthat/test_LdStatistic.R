@@ -1,14 +1,14 @@
 # Tests for R/LdStatistic.R (virtual base class)
 # getGenome() is defined on the virtual LdStatistic and inherited by its
 # concrete subclasses (LdEigen / LdScore); exercise it through a concrete
-# LdScore instance. Fixtures (make_test_ldblocks / make_test_snp_info) come
+# LdScore instance. Fixtures (makeTestLdBlocks / makeTestSnpInfo) come
 # from helper-h2Classes.R.
 
 test_that("getGenome returns the genome build string (via an LdScore subclass)", {
     n <- 10
     obj <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -32,8 +32,8 @@ test_that("getGenome returns the genome build string (via an LdScore subclass)",
 # expect_error(., "nRef") happily matches without ever reaching validity.
 .lds_score <- function(n = 10, ...) {
     args <- list(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -67,7 +67,7 @@ test_that("validity rejects an inSample that is not a single flag", {
         methods::new(
             "LdScore",
             gr,
-            ldBlocks = make_test_ldblocks(),
+            ldBlocks = makeTestLdBlocks(),
             nRef = 500L,
             inSample = flag,
             ldMatrixList = list()
@@ -95,7 +95,7 @@ test_that("validity rejects a statistic carrying no variants", {
         methods::new(
             "LdScore",
             gr,
-            ldBlocks = make_test_ldblocks(),
+            ldBlocks = makeTestLdBlocks(),
             nRef = 500L,
             inSample = FALSE,
             ldMatrixList = list()
@@ -105,10 +105,10 @@ test_that("validity rejects a statistic carrying no variants", {
 })
 
 test_that(".ldStatRanges names the snpInfo columns it is missing", {
-    si <- make_test_snp_info(4)
+    si <- makeTestSnpInfo(4)
     expect_error(
         LdScore(
-            ldBlocks = make_test_ldblocks(),
+            ldBlocks = makeTestLdBlocks(),
             snpInfo = si[, setdiff(colnames(si), c("A1", "A2"))],
             nRef = 500L,
             inSample = FALSE,

@@ -714,17 +714,17 @@ standardizeSldscTrait <- function(
 #' metaSldscRandom(pp$per_trait, category = "annot_A_0",
 #'   quantity = "enrichment")
 #' @param metaArgs Extra arguments for \code{metafor::rma()}, built with
-#'   \code{\link{rmaConfig}} -- \code{test = "knha"} in particular, the
+#'   \code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
 #'   small-study correction.
 #' @export
 metaSldscRandom <- function(
     perTraitEstimates,
     category,
     quantity = c("tauStar", "enrichment", "enrichstat"),
-    metaArgs = rmaConfig()
+    metaArgs = RmaOptions()
 ) {
     quantity <- arg_match(quantity)
-    .assertMethodConfig(metaArgs, "rmaConfig", "metaArgs")
+    .assertMethodOptions(metaArgs, "RmaOptions", "metaArgs")
     cols <- .metaColPair(quantity)
     traitNames <- names(perTraitEstimates) %||%
         as.character(seq_along(perTraitEstimates))

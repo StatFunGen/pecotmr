@@ -13,7 +13,7 @@ bayesAlphabetWeights(
   nit = 5000,
   nburn = 1000,
   nthin = 5,
-  methodArgs = qggConfig()
+  methodArgs = QggOptions()
 )
 }
 \arguments{
@@ -38,7 +38,7 @@ Options are bayesN, bayesL, bayesA, bayesC, or bayesR.}
 \code{5}.}
 
 \item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
-with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

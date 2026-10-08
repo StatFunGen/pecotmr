@@ -9,7 +9,7 @@ ldPruneByCorrelation(
   corThres = 0.8,
   backend = c("hclust", "snprelate"),
   verbose = FALSE,
-  methodArgs = ldPruningConfig()
+  methodArgs = LdPruningOptions()
 )
 }
 \arguments{
@@ -34,7 +34,7 @@ group. Default 0.8.}
 
 \item{methodArgs}{Extra arguments for
 \code{SNPRelate::snpgdsLDpruning()}, built with
-\code{\link{ldPruningConfig}} -- the window controls in particular.
+\code{\link{LdPruningOptions}} -- the window controls in particular.
 Only the \code{"snprelate"} backend has an engine to configure, so
 supplying options alongside \code{backend = "hclust"} is an error
 rather than a silent no-op.}

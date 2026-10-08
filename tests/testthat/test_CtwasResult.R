@@ -15,7 +15,7 @@ context("CtwasResult")
             susie_alpha = pip,
             stringsAsFactors = FALSE
         ),
-        param = prior,
+        groupPriors = prior,
         regionInfo = data.frame(region_id = "r1", stringsAsFactors = FALSE)
     )
 }

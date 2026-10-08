@@ -8,7 +8,7 @@ finemapCtwasRegions(
   screenResult,
   L = 5L,
   numThreads = 1L,
-  methodArgs = ctwasConfig()
+  methodArgs = CtwasOptions()
 )
 }
 \arguments{
@@ -19,7 +19,7 @@ finemapCtwasRegions(
 \item{numThreads}{Number of cores.}
 
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
-with \code{\link{ctwasConfig}}. Names are checked against what
+with \code{\link{CtwasOptions}}. Names are checked against what
 the ctwas steps accept between them.}
 }
 \value{
@@ -49,13 +49,13 @@ blocks <- GenomicRanges::GRanges("chr22",
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 gwasByRegion <- summaryStatsQc(gss,
-  panelFilter = panelFilterConfig(mafCutoff = 0.0025))
+  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
-est <- estCtwasParam(inp,
-  ctwasPrior = ctwasPriorConfig(thin = 1, niterPrefit = 3, niter = 10,
+est <- estCtwasGroupPriors(inp,
+  ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
-  methodArgs = ctwasConfig(min_group_size = 1, min_p_single_effect = 0))
+  methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
 screened <- screenCtwasRegions(est)
 finemapCtwasRegions(screened, L = 5L)
 }

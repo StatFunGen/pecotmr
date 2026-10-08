@@ -4,7 +4,7 @@
 \alias{bayesLWeights}
 \title{BayesL TWAS weights (Laplace prior, LASSO-equivalent)}
 \usage{
-bayesLWeights(X, y, Z = NULL, methodArgs = qggConfig())
+bayesLWeights(X, y, Z = NULL, methodArgs = QggOptions())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -14,7 +14,7 @@ bayesLWeights(X, y, Z = NULL, methodArgs = qggConfig())
 \item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
 
 \item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
-with \code{\link{qggConfig}}. A bare list is refused: it cannot be
+with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

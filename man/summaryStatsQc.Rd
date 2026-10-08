@@ -6,25 +6,25 @@
 \usage{
 summaryStatsQc(
   sumstats,
-  sumstatsFilterArgs = sumstatsFilterConfig(),
-  panelFilterArgs = panelFilterConfig(),
+  sumstatsFilterArgs = SumstatsFilterParam(),
+  panelFilterArgs = PanelFilterParam(),
   keepVariants = NULL,
   skipRegion = NULL,
-  signalScreenArgs = signalScreenConfig(),
+  signalScreenArgs = SignalScreenParam(),
   ldMismatchQcMethod = c("none", "slalom", "dentist"),
   alleleFlipKriging = FALSE,
   effectiveN = TRUE,
   impute = FALSE,
-  imputeArgs = raissConfig(),
+  imputeArgs = RaissParam(),
   matchMinProp = 0,
-  sumstatsCleaningArgs = sumstatsCleaningConfig()
+  sumstatsCleaningArgs = SumstatsCleaningParam()
 )
 }
 \arguments{
 \item{sumstats}{A \code{QtlSumStats} or \code{GwasSumStats} collection.}
 
 \item{sumstatsFilterArgs}{Row filters applied to the summary statistics
-themselves, built with \code{\link{sumstatsFilterConfig}}:
+themselves, built with \code{\link{SumstatsFilterParam}}:
 \code{removeIndels} drops indels during panel harmonization,
 \code{removeStrandAmbiguous} drops A/T and C/G variants,
 \code{infoCutoff} is an INFO-score floor (requiring an \code{INFO}
@@ -33,7 +33,7 @@ is more than that many median-absolute-deviations from the median (0
 disables it).}
 
 \item{panelFilterArgs}{LD-reference-panel filters, built with
-  \code{\link{panelFilterConfig}}. \code{macCutoff} is converted to a MAF
+  \code{\link{PanelFilterParam}}. \code{macCutoff} is converted to a MAF
   equivalent using \code{macCutoff / (2 * nSamples)} and the stricter of
   it and \code{mafCutoff} applies; \code{imissCutoff} is a per-variant
   missingness ceiling. See the panel-filters section below.
@@ -52,7 +52,7 @@ strings, or a \code{GRanges}, of regions to drop.}
 
 \item{signalScreenArgs}{Whether to skip an entry before fitting it,
 built with
-\code{\link{signalScreenConfig}} --- the same bundle
+\code{\link{SignalScreenParam}} --- the same bundle
 \code{\link{fineMappingPipeline}} and \code{\link{colocboostPipeline}}
 take. \code{pip} runs an LD-independent single-effect SER screen and
 skips the entry if no PIP exceeds the cutoff (\code{< 0} resolves to
@@ -65,7 +65,7 @@ default) screens nothing.}
 
 \item{ldMismatchQcMethod}{Which LD-mismatch check to run: \code{"none"}
 (default), \code{"slalom"} or \code{"dentist"}, or the matching
-constructor -- \code{\link{slalomConfig}} / \code{\link{dentistConfig}} --
+constructor -- \code{\link{SlalomParam}} / \code{\link{DentistParam}} --
 to configure it at the same time. Exactly one engine is selected either
 way, since the constructor carries the choice.}
 
@@ -91,7 +91,7 @@ records the setting and each entry's \code{nSource} is one of
 not yet fully wired for the new path; the option is accepted but currently
 emits a warning and is skipped.)}
 
-\item{imputeArgs}{RAISS settings, built with \code{\link{raissConfig}}.
+\item{imputeArgs}{RAISS settings, built with \code{\link{RaissParam}}.
   A bare list is refused, since it cannot be checked.
 
   RAISS imputation scopes its reference panel to the analysis-region window
@@ -112,7 +112,7 @@ emits a warning and is skipped.)}
   the panel handed to RAISS holds nothing below those. Use them to impute
   only common variants from a panel deliberately kept wider than that ---
   e.g. \code{mafCutoff = 0.001} with
-  \code{imputeArgs = raissConfig(mafCutoff = 0.01)}. A variant present in
+  \code{imputeArgs = RaissParam(mafCutoff = 0.01)}. A variant present in
   the sumstats is never dropped here: RAISS derives its LD basis from those
   same panel rows.
 
@@ -123,7 +123,7 @@ emits a warning and is skipped.)}
 matched by the sumstats; default 0.}
 
 \item{sumstatsCleaningArgs}{What makes a row a well-formed record, built with
-\code{\link{sumstatsCleaningConfig}}: \code{coerceNumeric},
+\code{\link{SumstatsCleaningParam}}: \code{coerceNumeric},
 \code{normalizeChr} / \code{dropNonstandardChr}, \code{dropMissData},
 \code{dropPOutOfRange}, \code{clampSmallP} / \code{smallPFloor},
 \code{dropZeroEffect} and \code{dropNonpositiveSe}. Applied before any

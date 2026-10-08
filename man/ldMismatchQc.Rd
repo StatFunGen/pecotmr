@@ -27,7 +27,7 @@ when \code{X} is provided.}
 
 \item{method}{Which QC method to run: \code{"slalom"} (default) or
 \code{"dentist"}, or the matching constructor --
-\code{\link{slalomConfig}} / \code{\link{dentistConfig}} -- to configure
+\code{\link{SlalomParam}} / \code{\link{DentistParam}} -- to configure
 it at the same time. The constructor carries the choice, so there is no
 separate options argument that could disagree with it.}
 

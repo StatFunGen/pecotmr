@@ -10,13 +10,13 @@ mrmashWrapper(
   V = NULL,
   sumstats = NULL,
   dataDrivenPriorMatrices = NULL,
-  prior = mrmashPriorConfig(),
+  prior = MrmashPriorParam(),
   bInitMethod = "enet",
   updateV = TRUE,
   updateVMethod = "full",
   standardize = FALSE,
   numThreads = 1,
-  methodArgs = mrmashConfig()
+  methodArgs = MrmashOptions()
 )
 }
 \arguments{
@@ -37,7 +37,7 @@ mr.mash, or \code{NULL} for the individual-data variant.}
 Default is NULL.}
 
 \item{prior}{Prior-covariance construction options, built with
-\code{\link{mrmashPriorConfig}}.}
+\code{\link{MrmashPriorParam}}.}
 
 \item{bInitMethod}{The method for initializing the coefficient matrix.
 Default is "enet".}
@@ -57,7 +57,7 @@ steps as well as the fit, so it is set here rather than in
 Default is 1. Used by the same three steps as \code{standardize}.}
 
 \item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash} under its
-own names, built with \code{\link{mrmashConfig}}
+own names, built with \code{\link{MrmashOptions}}
 (\code{update_w0}, \code{max_iter}, \code{tol}, \code{w0_threshold},
 \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
 residual covariance, the coefficient initialisation --- cannot be set
@@ -102,7 +102,7 @@ data(multiTraitData)
 res <- mrmashWrapper(
   X = multiTraitData$X[, 1:60], Y = multiTraitData$Y,
   dataDrivenPriorMatrices = multiTraitData$priorMatrices,
-  prior = mrmashPriorConfig(canonicalPriorMatrices = TRUE)
+  prior = MrmashPriorParam(canonicalPriorMatrices = TRUE)
 )
 
 }

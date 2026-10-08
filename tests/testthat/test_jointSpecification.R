@@ -2121,7 +2121,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
         traitIds = NULL,
         cisWindow = NULL,
         verbose = 1,
-        credibleSetArgs = credibleSetConfig(
+        credibleSetArgs = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2154,7 +2154,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
             traitIds = NULL,
             cisWindow = NULL,
             verbose = 1,
-            credibleSetArgs = credibleSetConfig(
+            credibleSetArgs = CredibleSetParam(
                 coverage = 0.95,
                 secondaryCoverage = 0.5,
                 signalCutoff = 0.1,
@@ -2496,7 +2496,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
         cisWindow = NULL,
         verbose = 0,
         xRegions = list(r1, r2),
-        credibleSetArgs = credibleSetConfig(
+        credibleSetArgs = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2532,7 +2532,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         traitIds = NULL,
         cisWindow = 1000L,
         verbose = 0,
-        credibleSetArgs = credibleSetConfig(
+        credibleSetArgs = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2552,7 +2552,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         traitIds = NULL,
         cisWindow = 1000L,
         verbose = 0,
-        credibleSetArgs = credibleSetConfig(
+        credibleSetArgs = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2611,7 +2611,7 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         as.character(ss$context),
         "probe",
         ldSketch = getLdSketch(ss),
-        cutoffs = .panelCutoffs(panelFilterConfig(...))
+        cutoffs = .panelCutoffs(PanelFilterParam(...))
     ))
 }
 
@@ -2642,7 +2642,7 @@ test_that(".buildJointSumstatZMatrix agrees with .panelVariantFilter", {
             length(.panelVariantFilter(
                 getLdSketch(ss),
                 ids,
-                panelFilterConfig(mafCutoff = cut)
+                PanelFilterParam(mafCutoff = cut)
             )),
             label = str_c("mafCutoff ", cut)
         )

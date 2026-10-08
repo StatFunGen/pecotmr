@@ -71,7 +71,7 @@ test_that("fitSusieInfThenSusieRss returns two fits", {
     n <- 500
     R <- diag(p)
     z <- rnorm(p)
-    fits <- fitSusieInfThenSusieRss(z, R, n, args = susieConfig(L = 5))
+    fits <- fitSusieInfThenSusieRss(z, R, n, args = SusieOptions(L = 5))
     expect_true(is.list(fits))
     expect_true("susie" %in% names(fits))
     expect_true("susieInf" %in% names(fits))
@@ -227,18 +227,16 @@ test_that("mrmashWrapper errors when X and Y row counts differ", {
 })
 
 
-test_that("mrmashWrapper errors when prior_grid is not a vector", {
-    skip_if_not_installed("glmnet")
-    skip_if_not_installed("mr.mashr")
-    X <- matrix(rnorm(12), nrow = 3, ncol = 4)
-    Y <- matrix(rnorm(6), nrow = 3, ncol = 2)
+test_that("MrmashPriorParam refuses a priorGrid that is not a vector", {
+    # The typed slot catches this when the record is built, so the wrapper's
+    # own is.vector() guard became unreachable and was deleted.
     expect_error(
-        mrmashWrapper(
-            X,
-            Y,
-            prior = mrmashPriorConfig(priorGrid = matrix(1:4, nrow = 2))
-        ),
-        "priorGrid must be a vector"
+        MrmashPriorParam(priorGrid = matrix(1:4, nrow = 2)),
+        'invalid object for slot "priorGrid"'
+    )
+    expect_equal(
+        MrmashPriorParam(priorGrid = c(0.1, 0.2))$priorGrid,
+        c(0.1, 0.2)
     )
 })
 
@@ -253,7 +251,7 @@ test_that("mrmashWrapper errors when no prior matrices and canonical_priorMatric
             X,
             Y,
             dataDrivenPriorMatrices = NULL,
-            prior = mrmashPriorConfig(canonicalPriorMatrices = FALSE)
+            prior = MrmashPriorParam(canonicalPriorMatrices = FALSE)
         ),
         "dataDrivenPriorMatrices"
     )
@@ -281,7 +279,7 @@ test_that("mrmashWrapper warns when Y has missing and B_init_method is glasso", 
                 Y,
                 bInitMethod = "glasso",
                 dataDrivenPriorMatrices = list(U = list(matrix(1, 2, 2))),
-                prior = mrmashPriorConfig(canonicalPriorMatrices = FALSE)
+                prior = MrmashPriorParam(canonicalPriorMatrices = FALSE)
             ),
             error = function(e) NULL
         ),
@@ -469,7 +467,7 @@ test_that("mrashWeights returns length-p weights and can retain the fit", {
 test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
-    mc <- list(methodArgs = qggConfig(nit = 200, nburn = 20, nthin = 1))
+    mc <- list(methodArgs = QggOptions(nit = 200, nburn = 20, nthin = 1))
     expect_length(exec(bayesNWeights, !!!c(list(f$X, f$y), mc)), f$p)
     expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
     expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
@@ -483,8 +481,11 @@ test_that("buildMrmashPriorMatrices exposes expand_covs' zeromat", {
     # hetgrid) but expand_covs()'s `zeromat` was hardcoded TRUE, so the
     # null component could not be dropped.
     seen <- NULL
+    # The default must match the real expand_covs(): pecotmr no longer
+    # passes zeromat unless the caller set it, so an omitted argument has to
+    # fall through to the engine's own default here too.
     local_mocked_bindings(
-        expand_covs = function(mats, grid, zeromat) {
+        expand_covs = function(mats, grid, zeromat = TRUE) {
             seen <<- zeromat
             mats
         },
@@ -493,7 +494,11 @@ test_that("buildMrmashPriorMatrices exposes expand_covs' zeromat", {
     set.seed(5)
     Bhat <- matrix(rnorm(12), 6, 2)
     Shat <- matrix(abs(rnorm(12, 0.5, 0.1)), 6, 2)
-    invisible(buildMrmashPriorMatrices(Bhat, Shat, zeromat = FALSE))
+    invisible(buildMrmashPriorMatrices(
+        Bhat,
+        Shat,
+        expandCovs = MrmashExpandCovsOptions(zeromat = FALSE)
+    ))
     expect_false(seen)
     invisible(buildMrmashPriorMatrices(Bhat, Shat))
     expect_true(seen)
@@ -578,7 +583,7 @@ test_that("dprAdaptiveGibbsWeights returns length-p weights", {
         w <- dprAdaptiveGibbsWeights(
             f$X,
             f$y,
-            methodArgs = dprConfig(s_step = 100)
+            methodArgs = DprOptions(s_step = 100)
         )
     ))
     expect_length(w, f$p)
@@ -592,7 +597,7 @@ test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
     w <- suppressMessages(mrmashWeights(
         X = m$X,
         Y = m$Y,
-        methodArgs = mrmashConfig(canonicalPriorMatrices = TRUE)
+        methodArgs = MrmashOptions(canonicalPriorMatrices = TRUE)
     ))
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
@@ -685,7 +690,7 @@ test_that("prsCsWeights and sdprWeights follow the (stat, LD) contract", {
         prsCsWeights(
             f$stat,
             f$LD,
-            methodArgs = prsCsConfig(nIter = 100, nBurnin = 20, thin = 1)
+            methodArgs = PrsCsOptions(nIter = 100, nBurnin = 20, thin = 1)
         ),
         f$p
     )
@@ -693,7 +698,7 @@ test_that("prsCsWeights and sdprWeights follow the (stat, LD) contract", {
         sdprWeights(
             f$stat,
             f$LD,
-            methodArgs = sdprConfig(
+            methodArgs = SdprOptions(
                 iter = 100,
                 burn = 20,
                 thin = 1,
@@ -987,34 +992,54 @@ test_that("RSS solver control arguments are guarded", {
     )
 })
 
-test_that("mrmashPriorConfig carries prior options and rejects a typo", {
-    pa <- mrmashPriorConfig(canonicalPriorMatrices = TRUE)
-    expect_s4_class(pa, "MethodConfig")
+test_that("MrmashPriorParam carries prior options and rejects a typo", {
+    pa <- MrmashPriorParam(canonicalPriorMatrices = TRUE)
+    expect_s4_class(pa, "MrmashPriorParam")
     expect_true(pa$canonicalPriorMatrices)
     # pecotmr's own builder, so no `...`: R rejects an unknown name. Note
     # `canonicalPrior` would be ACCEPTED, by R's partial matching.
     expect_error(
-        mrmashPriorConfig(canonicalPriorMatrix = TRUE),
+        MrmashPriorParam(canonicalPriorMatrix = TRUE),
         "unused argument"
     )
-    expect_true(mrmashPriorConfig(canonicalPrior = TRUE)$canonicalPriorMatrices)
+    expect_true(MrmashPriorParam(canonicalPrior = TRUE)$canonicalPriorMatrices)
 })
 
-test_that("mrmashPriorConfig opens options the wrapper never exposed", {
+test_that("MrmashPriorParam nests each engine function's own arguments", {
     skip_if_not_installed("mr.mashr")
-    # hetgrid and singletons are formals of buildMrmashPriorMatrices but were
-    # unreachable from mrmashWrapper before.
-    pa <- mrmashPriorConfig(hetgrid = c(0, 0.5), singletons = FALSE)
-    expect_equal(pa$hetgrid, c(0, 0.5))
-    expect_false(pa$singletons)
+    # hetgrid and singletons belong to compute_canonical_covs, zeromat to
+    # expand_covs. Nesting them says where each goes AND gets each checked
+    # against that function's live formals rather than a transcribed list.
+    pa <- MrmashPriorParam(
+        canonicalCovs = MrmashCanonicalCovsOptions(
+            hetgrid = c(0, 0.5),
+            singletons = FALSE
+        ),
+        expandCovs = MrmashExpandCovsOptions(zeromat = FALSE)
+    )
+    expect_equal(pa$canonicalCovs$hetgrid, c(0, 0.5))
+    expect_false(pa$canonicalCovs$singletons)
+    expect_false(pa$expandCovs$zeromat)
+    # Each bundle rejects the other's name, which a single flat bag could not.
+    expect_error(
+        MrmashCanonicalCovsOptions(zeromat = FALSE),
+        "unknown argument"
+    )
+    expect_error(
+        MrmashExpandCovsOptions(singletons = FALSE),
+        "unknown argument"
+    )
+    # Neither carries a default: pecotmr used to copy the engine's own.
+    expect_length(MrmashCanonicalCovsOptions(), 0L)
+    expect_length(MrmashExpandCovsOptions(), 0L)
 })
 
 test_that("mrmashWrapper forwards methodArgs under mr.mash's own names", {
     skip_if_not_installed("mr.mashr")
-    ma <- mrmashConfig(max_iter = 10, tol = 0.5)
+    ma <- MrmashOptions(max_iter = 10, tol = 0.5)
     expect_equal(ma$max_iter, 10)
     # The renamed pecotmr spellings are gone; mr.mash's names are the contract.
-    expect_error(mrmashConfig(maxIter = 10), "unknown argument")
+    expect_error(MrmashOptions(maxIter = 10), "unknown argument")
 })
 
 test_that("mrmashWrapper refuses to let methodArgs override derived values", {
@@ -1028,7 +1053,7 @@ test_that("mrmashWrapper refuses to let methodArgs override derived values", {
             X,
             Y,
             dataDrivenPriorMatrices = list(U = list(diag(2))),
-            methodArgs = mrmashConfig(S0 = list(diag(2)))
+            methodArgs = MrmashOptions(S0 = list(diag(2)))
         ),
         "derived by the wrapper"
     )

@@ -10,7 +10,7 @@ QtlDataset(
   phenotypes,
   genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
   scaleResiduals = TRUE,
-  genotypeFilterArgs = genotypeFilterConfig()
+  genotypeFilterArgs = GenotypeFilterParam()
 )
 }
 \arguments{
@@ -30,7 +30,7 @@ genotype experiment.}
 \item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
 
 \item{genotypeFilterArgs}{Which variants and samples to keep, built with
-\code{\link{genotypeFilterConfig}}. A bare list is refused, since it
+\code{\link{GenotypeFilterParam}}. A bare list is refused, since it
 cannot be checked. Each field is recorded on the object and applied
 lazily, at extraction time inside \code{getGenotypes()} /
 \code{getResidualizedGenotypes()}:

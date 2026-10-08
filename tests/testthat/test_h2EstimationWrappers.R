@@ -4,7 +4,7 @@ context("h2_estimate_wrappers")
 # Helper functions to build test S4 objects
 # ===========================================================================
 
-make_test_eigen_ref <- function(nSnps = 20, nBlocks = 2) {
+makeTestEigenRef <- function(nSnps = 20, nBlocks = 2) {
     snps_per_block <- nSnps / nBlocks
     blocks_gr <- GenomicRanges::GRanges(
         seqnames = rep("chr1", nBlocks),
@@ -45,7 +45,7 @@ make_test_eigen_ref <- function(nSnps = 20, nBlocks = 2) {
     )
 }
 
-make_test_score_ref <- function(
+makeTestScoreRef <- function(
     nSnps = 20,
     nBlocks = 2,
     with_ld_matrices = FALSE
@@ -102,7 +102,7 @@ make_test_score_ref <- function(
     )
 }
 
-make_test_annotations <- function(nSnps = 20) {
+makeTestAnnotations <- function(nSnps = 20) {
     set.seed(77)
     snp_ranges <- GenomicRanges::GRanges(
         seqnames = rep("chr1", nSnps),
@@ -126,7 +126,7 @@ make_test_annotations <- function(nSnps = 20) {
     AnnotationMatrix(annot_mat, snp_ranges, annotation_meta, genome = "hg19")
 }
 
-make_test_h2estimate <- function(with_enrichment = TRUE) {
+makeTestH2Estimate <- function(with_enrichment = TRUE) {
     enrich <- if (with_enrichment) {
         data.frame(
             annotation = c("annot1", "annot2"),
@@ -176,7 +176,7 @@ make_test_h2estimate <- function(with_enrichment = TRUE) {
 # ===========================================================================
 
 test_that(".validate_method_ref errors when method='lder' but ref is LdScore", {
-    score_ref <- make_test_score_ref()
+    score_ref <- makeTestScoreRef()
     expect_error(
         pecotmr:::.validateMethodRef("lder", score_ref),
         "requires an LdEigen"
@@ -184,7 +184,7 @@ test_that(".validate_method_ref errors when method='lder' but ref is LdScore", {
 })
 
 test_that(".validate_method_ref errors when method='hdl' but ref is LdScore", {
-    score_ref <- make_test_score_ref()
+    score_ref <- makeTestScoreRef()
     expect_error(
         pecotmr:::.validateMethodRef("hdl", score_ref),
         "requires an LdEigen"
@@ -192,7 +192,7 @@ test_that(".validate_method_ref errors when method='hdl' but ref is LdScore", {
 })
 
 test_that(".validate_method_ref errors when method='gldsc' but ref is LdEigen", {
-    eigen_ref <- make_test_eigen_ref()
+    eigen_ref <- makeTestEigenRef()
     expect_error(
         pecotmr:::.validateMethodRef("gldsc", eigen_ref),
         "requires an LdScore"
@@ -200,8 +200,8 @@ test_that(".validate_method_ref errors when method='gldsc' but ref is LdEigen", 
 })
 
 test_that(".validate_method_ref returns TRUE for valid combinations", {
-    eigen_ref <- make_test_eigen_ref()
-    score_ref <- make_test_score_ref()
+    eigen_ref <- makeTestEigenRef()
+    score_ref <- makeTestScoreRef()
 
     expect_true(pecotmr:::.validateMethodRef("lder", eigen_ref))
     expect_true(pecotmr:::.validateMethodRef("hdl", eigen_ref))
@@ -213,7 +213,7 @@ test_that(".validate_method_ref returns TRUE for valid combinations", {
 # ===========================================================================
 
 test_that("computeLdScores LdEigen returns matrix with base_l2 column", {
-    eigen_ref <- make_test_eigen_ref()
+    eigen_ref <- makeTestEigenRef()
     result <- computeLdScores(eigen_ref)
     expect_true(is.matrix(result))
     expect_equal(ncol(result), 1)
@@ -222,14 +222,14 @@ test_that("computeLdScores LdEigen returns matrix with base_l2 column", {
 })
 
 test_that("computeLdScores LdEigen base LD scores are non-negative", {
-    eigen_ref <- make_test_eigen_ref()
+    eigen_ref <- makeTestEigenRef()
     result <- computeLdScores(eigen_ref)
     expect_true(all(result[, "base_l2"] >= 0))
 })
 
 test_that("computeLdScores LdEigen with annotations returns base + annotation columns", {
-    eigen_ref <- make_test_eigen_ref()
-    annot <- make_test_annotations()
+    eigen_ref <- makeTestEigenRef()
+    annot <- makeTestAnnotations()
     result <- computeLdScores(eigen_ref, annotations = annot)
     expect_true(is.matrix(result))
     # base_l2 + 2 annotation columns
@@ -239,8 +239,8 @@ test_that("computeLdScores LdEigen with annotations returns base + annotation co
 })
 
 test_that("computeLdScores LdEigen annotation column names match", {
-    eigen_ref <- make_test_eigen_ref()
-    annot <- make_test_annotations()
+    eigen_ref <- makeTestEigenRef()
+    annot <- makeTestAnnotations()
     result <- computeLdScores(eigen_ref, annotations = annot)
     expect_equal(colnames(result), c("base_l2", "annot_A", "annot_B"))
 })
@@ -250,14 +250,14 @@ test_that("computeLdScores LdEigen annotation column names match", {
 # ===========================================================================
 
 test_that("computeLdScores LdScore without annotations returns stored ld_scores", {
-    score_ref <- make_test_score_ref()
+    score_ref <- makeTestScoreRef()
     result <- computeLdScores(score_ref)
     expect_identical(result, getLdScores(score_ref))
 })
 
 test_that("computeLdScores LdScore with annotations but no ld_matrix_list errors", {
-    score_ref <- make_test_score_ref(with_ld_matrices = FALSE)
-    annot <- make_test_annotations()
+    score_ref <- makeTestScoreRef(with_ld_matrices = FALSE)
+    annot <- makeTestAnnotations()
     expect_error(
         computeLdScores(score_ref, annotations = annot),
         "ldMatrixList"
@@ -293,7 +293,7 @@ test_that("getlocal returns the local slot", {
 })
 
 test_that("getenrichment returns the enrichment slot", {
-    h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
+    h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
     result <- getEnrichment(h2_obj)
     expect_true(is.data.frame(result))
     expect_equal(result$annotation, c("annot1", "annot2"))
@@ -347,7 +347,7 @@ test_that("accessors return NULL when slots are NULL", {
 # ===========================================================================
 
 test_that("h2EstimateToSldscTrait returns correct list structure", {
-    h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
+    h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
     result <- h2EstimateToSldscTrait(h2_obj)
 
     expected_names <- c(
@@ -382,7 +382,7 @@ test_that("h2EstimateToSldscTrait errors on non-H2Estimate input", {
 })
 
 test_that("h2EstimateToSldscTrait errors when enrichment is NULL", {
-    h2_obj <- make_test_h2estimate(with_enrichment = FALSE)
+    h2_obj <- makeTestH2Estimate(with_enrichment = FALSE)
     expect_error(
         h2EstimateToSldscTrait(h2_obj),
         "no enrichment"
@@ -390,7 +390,7 @@ test_that("h2EstimateToSldscTrait errors when enrichment is NULL", {
 })
 
 test_that("h2EstimateToSldscTrait creates 1-row dummy when tauBlocks is NULL", {
-    h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
+    h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
     h2_obj@tauBlocks <- NULL
     result <- h2EstimateToSldscTrait(h2_obj)
     expect_equal(nrow(result$tauBlocks), 1)
@@ -402,7 +402,7 @@ test_that("h2EstimateToSldscTrait creates 1-row dummy when tauBlocks is NULL", {
 # Helper: GwasSumStats matched to a reference panel
 # ===========================================================================
 
-make_test_gwas_genotype_handle <- function() {
+makeTestGwasGenotypeHandle <- function() {
     new(
         "GenotypeHandle",
         path = "/tmp/test.gds",
@@ -429,7 +429,7 @@ make_test_gwas_genotype_handle <- function() {
     gr
 }
 
-make_test_sumstats_for_ref <- function(
+makeTestSumstatsForRef <- function(
     ref,
     traitName = "test",
     varY = NA_real_
@@ -453,7 +453,7 @@ make_test_sumstats_for_ref <- function(
         study = traitName,
         entry = list(.dfToGwasGr(df)),
         genome = "hg19",
-        ldSketch = make_test_gwas_genotype_handle(),
+        ldSketch = makeTestGwasGenotypeHandle(),
         varY = varY
     )
 }
@@ -463,8 +463,8 @@ make_test_sumstats_for_ref <- function(
 # ===========================================================================
 
 test_that("estimateh2 with method='lder' returns H2Estimate with correct slots", {
-    eigen_ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(eigen_ref)
+    eigen_ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(eigen_ref)
     result <- estimateH2(ss, eigen_ref, method = "lder")
 
     expect_s4_class(result, "H2Estimate")
@@ -493,18 +493,18 @@ test_that("estimateh2 with method='lder' returns H2Estimate with correct slots",
         study = "test",
         entry = list(gr),
         genome = "hg19",
-        ldSketch = make_test_gwas_genotype_handle()
+        ldSketch = makeTestGwasGenotypeHandle()
     )
 }
 
 test_that("estimateH2 rejects a sumstats with a different variant count", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
     short <- GwasSumStats(
         study = "test",
         entry = list(getSumStats(ss)[1:10]),
         genome = "hg19",
-        ldSketch = make_test_gwas_genotype_handle()
+        ldSketch = makeTestGwasGenotypeHandle()
     )
     expect_error(
         estimateH2(short, ref, method = "lder"),
@@ -513,8 +513,8 @@ test_that("estimateH2 rejects a sumstats with a different variant count", {
 })
 
 test_that("estimateH2 rejects a sumstats at different coordinates", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
     shifted <- .reposition(
         ss,
         GenomicRanges::GRanges(
@@ -529,8 +529,8 @@ test_that("estimateH2 rejects a sumstats at different coordinates", {
 })
 
 test_that("estimateH2 rejects a sumstats holding the right variants in the wrong order", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
     reordered <- .reposition(
         ss,
         GenomicRanges::GRanges(
@@ -545,9 +545,9 @@ test_that("estimateH2 rejects a sumstats holding the right variants in the wrong
 })
 
 test_that("estimateH2 rejects annotations that do not cover the reference", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
-    annot <- make_test_annotations(nSnps = 10)
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
+    annot <- makeTestAnnotations(nSnps = 10)
     expect_error(
         estimateH2(ss, ref, method = "lder", annotations = annot),
         "`annotations` carries 10 variant\\(s\\)"
@@ -555,20 +555,20 @@ test_that("estimateH2 rejects annotations that do not cover the reference", {
 })
 
 test_that("estimateH2 rejects a genome build mismatch", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
     hg38 <- GwasSumStats(
         study = "test",
         entry = list(getSumStats(ss)),
         genome = "hg38",
-        ldSketch = make_test_gwas_genotype_handle()
+        ldSketch = makeTestGwasGenotypeHandle()
     )
     expect_error(estimateH2(hg38, ref, method = "lder"), "build mismatch")
 })
 
 test_that("estimateH2 accepts an LD reference that records no genome build", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
     # loadLdMatrix() leaves the build unset, so a reference built from it
     # names none. An unknown build must not read as a mismatch.
     GenomeInfoDb::genome(ref) <- NA_character_
@@ -587,8 +587,8 @@ test_that("estimateH2 accepts an LD reference that records no genome build", {
 test_that("unstratified S-LDSC runs without the per-block LD matrices", {
     # This is the property that separates it from g-LDSC: a scores-only
     # LdScore is enough, which is why it is the cheap option.
-    noMat <- make_test_score_ref(with_ld_matrices = FALSE)
-    ss <- make_test_sumstats_for_ref(noMat)
+    noMat <- makeTestScoreRef(with_ld_matrices = FALSE)
+    ss <- makeTestSumstatsForRef(noMat)
     expect_error(estimateH2(ss, noMat, method = "gldsc"), "per-block LD")
     res <- estimateH2(ss, noMat, method = "sldsc")
     expect_s4_class(res, "H2Estimate")
@@ -597,9 +597,9 @@ test_that("unstratified S-LDSC runs without the per-block LD matrices", {
 })
 
 test_that("stratified S-LDSC needs the per-block LD matrices", {
-    noMat <- make_test_score_ref(with_ld_matrices = FALSE)
-    ss <- make_test_sumstats_for_ref(noMat)
-    annot <- make_test_annotations(nSnps = length(noMat))
+    noMat <- makeTestScoreRef(with_ld_matrices = FALSE)
+    ss <- makeTestSumstatsForRef(noMat)
+    annot <- makeTestAnnotations(nSnps = length(noMat))
     expect_error(
         estimateH2(ss, noMat, method = "sldsc", annotations = annot),
         "stratified S-LDSC requires full per-block LD matrices"
@@ -607,9 +607,9 @@ test_that("stratified S-LDSC needs the per-block LD matrices", {
 })
 
 test_that("S-LDSC reports an enrichment table when stratified", {
-    ref <- make_test_score_ref(with_ld_matrices = TRUE)
-    ss <- make_test_sumstats_for_ref(ref)
-    annot <- make_test_annotations(nSnps = length(ref))
+    ref <- makeTestScoreRef(with_ld_matrices = TRUE)
+    ss <- makeTestSumstatsForRef(ref)
+    annot <- makeTestAnnotations(nSnps = length(ref))
     res <- estimateH2(ss, ref, method = "sldsc", annotations = annot)
 
     enr <- getEnrichment(res)
@@ -632,8 +632,8 @@ test_that("S-LDSC reports an enrichment table when stratified", {
 })
 
 test_that("S-LDSC requires an LdScore, not an LdEigen", {
-    eigenRef <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(eigenRef)
+    eigenRef <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(eigenRef)
     expect_error(
         estimateH2(ss, eigenRef, method = "sldsc"),
         "requires an LdScore"
@@ -725,7 +725,7 @@ test_that("a rank-deficient LD block really does yield negative eigenvalues", {
 
 test_that("estimateH2 survives negative eigenvalues from rank-deficient LD", {
     ref <- .rankDeficientEigenRef()
-    ss <- make_test_sumstats_for_ref(ref)
+    ss <- makeTestSumstatsForRef(ref)
     res <- estimateH2(ss, ref, method = "lder")
     expect_s4_class(res, "H2Estimate")
     expect_false(is.na(getH2(res)))
@@ -759,7 +759,7 @@ test_that("estimateH2 runs on references built by buildLdEigen/buildLdScore", {
     ld <- makeTestLdDataMultiBlock(sizes = rep(10L, 5), rho = 0.6)
     eigenRef <- buildLdEigen(ld, genome = "hg19")
     scoreRef <- buildLdScore(ld, genome = "hg19")
-    ss <- make_test_sumstats_for_ref(eigenRef)
+    ss <- makeTestSumstatsForRef(eigenRef)
 
     expect_s4_class(estimateH2(ss, eigenRef, method = "lder"), "H2Estimate")
     suppressWarnings(
@@ -773,7 +773,7 @@ test_that("estimateH2 rejects a single-block LD reference", {
     # a matrix" (LDER, g-LDSC) or return an SE of exactly 0 (HDL).
     ld <- makeTestLdData(n = 30L, rho = 0.6)
     eigenRef <- buildLdEigen(ld, genome = "hg19")
-    ss <- make_test_sumstats_for_ref(eigenRef)
+    ss <- makeTestSumstatsForRef(eigenRef)
     expect_error(
         estimateH2(ss, eigenRef, method = "lder"),
         "delete-one-block jackknife"
@@ -787,7 +787,7 @@ test_that("estimateH2 rejects a single-block LD reference", {
 test_that("buildLdScore(keepLdMatrices = FALSE) is rejected by g-LDSC", {
     ld <- makeTestLdDataMultiBlock(sizes = rep(10L, 5))
     scoreRef <- buildLdScore(ld, genome = "hg19", keepLdMatrices = FALSE)
-    ss <- make_test_sumstats_for_ref(scoreRef)
+    ss <- makeTestSumstatsForRef(scoreRef)
     expect_error(
         estimateH2(ss, scoreRef, method = "gldsc"),
         "requires full per-block LD matrices"
@@ -795,9 +795,9 @@ test_that("buildLdScore(keepLdMatrices = FALSE) is rejected by g-LDSC", {
 })
 
 test_that("estimateH2 accepts a chr-prefix difference between the two sides", {
-    ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(ref)
-    # make_test_sumstats_for_ref already strips the prefix ("1" vs "chr1"),
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
+    # makeTestSumstatsForRef already strips the prefix ("1" vs "chr1"),
     # so this pins that the check normalizes rather than rejects it.
     expect_equal(
         as.character(GenomicRanges::seqnames(getSumStats(ss)))[[1]],
@@ -807,8 +807,8 @@ test_that("estimateH2 accepts a chr-prefix difference between the two sides", {
 })
 
 test_that("estimateh2 with var_y correction runs without error", {
-    eigen_ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(
+    eigen_ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(
         eigen_ref,
         traitName = "cc_trait",
         varY = 4.0
@@ -821,8 +821,8 @@ test_that("estimateh2 with var_y correction runs without error", {
 })
 
 test_that("estimateh2 with method='gldsc' returns H2Estimate", {
-    score_ref <- make_test_score_ref(with_ld_matrices = TRUE)
-    ss <- make_test_sumstats_for_ref(score_ref)
+    score_ref <- makeTestScoreRef(with_ld_matrices = TRUE)
+    ss <- makeTestSumstatsForRef(score_ref)
     result <- estimateH2(ss, score_ref, method = "gldsc")
 
     expect_s4_class(result, "H2Estimate")
@@ -834,8 +834,8 @@ test_that("estimateh2 with method='gldsc' returns H2Estimate", {
 })
 
 test_that("estimateh2 with method='hdl' returns H2Estimate", {
-    eigen_ref <- make_test_eigen_ref()
-    ss <- make_test_sumstats_for_ref(eigen_ref)
+    eigen_ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(eigen_ref)
     # HDL likelihood optimization on tiny test data produces NaN warnings
     # from log() on negative sigma2 during search; these are harmless.
     suppressWarnings(
@@ -855,8 +855,8 @@ test_that("estimateh2 with method='hdl' returns H2Estimate", {
 # ===========================================================================
 
 test_that("computeLdScores LdScore with annotations and ld_matrix_list returns correct matrix", {
-    score_ref <- make_test_score_ref(with_ld_matrices = TRUE)
-    annot <- make_test_annotations()
+    score_ref <- makeTestScoreRef(with_ld_matrices = TRUE)
+    annot <- makeTestAnnotations()
     result <- computeLdScores(score_ref, annotations = annot)
 
     expect_true(is.matrix(result))
@@ -1332,7 +1332,7 @@ set.seed(42)
 # Helpers: simulate test data
 # =============================================================================
 
-simulate_h2_data <- function(
+simulateH2Data <- function(
     n_snps = 100,
     nBlocks = 2,
     n_gwas = 50000,
@@ -1436,7 +1436,7 @@ simulate_h2_data <- function(
 # Annotation helper: all-ones baseline so the eigenvalue-score column is
 # simply the eigenvalue itself (avoids singularity with few blocks), plus
 # one candidate annotation for score-statistic testing.
-make_test_annotations <- function(n_snps) {
+makeTestAnnotations <- function(n_snps) {
     set.seed(99)
     snp_gr <- GenomicRanges::GRanges(
         seqnames = rep("chr1", n_snps),
@@ -1460,7 +1460,7 @@ make_test_annotations <- function(n_snps) {
 }
 
 # Pre-compute shared test data
-dat <- simulate_h2_data()
+dat <- simulateH2Data()
 
 # =============================================================================
 # LDER tests (h2Lder.R)
@@ -1606,10 +1606,10 @@ test_that("hdlUnivariate with local = TRUE returns local data.frame", {
 # =============================================================================
 
 # Use 5 blocks and 500 SNPs for annotation tests to avoid singular matrices
-dat_annot <- simulate_h2_data(n_snps = 500, nBlocks = 5)
+dat_annot <- simulateH2Data(n_snps = 500, nBlocks = 5)
 
 test_that("lderUnivariate with annotations returns enrichment data.frame", {
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::lderUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1620,7 +1620,7 @@ test_that("lderUnivariate with annotations returns enrichment data.frame", {
 })
 
 test_that("lder enrichment has correct columns", {
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::lderUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1641,7 +1641,7 @@ test_that("lder enrichment has correct columns", {
 })
 
 test_that("lder with annotations returns tauBlocks matrix", {
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::lderUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1654,7 +1654,7 @@ test_that("lder with annotations returns tauBlocks matrix", {
 })
 
 test_that("lder with annotations returns scoreStats list", {
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::lderUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1671,7 +1671,7 @@ test_that("lder with annotations returns scoreStats list", {
 
 test_that("hdlUnivariate with annotations returns enrichment data.frame with correct columns", {
     set.seed(123)
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::hdlUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1699,7 +1699,7 @@ test_that("hdlUnivariate with annotations returns enrichment data.frame with cor
 
 test_that("hdlUnivariate with annotations returns tauBlocks matrix", {
     set.seed(124)
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::hdlUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1717,7 +1717,7 @@ test_that("hdlUnivariate with annotations returns tauBlocks matrix", {
 
 test_that("hdlUnivariate with annotations and local = TRUE returns local data.frame", {
     set.seed(125)
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::hdlUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1735,7 +1735,7 @@ test_that("hdlUnivariate with annotations and local = TRUE returns local data.fr
 
 test_that("hdlUnivariate with annotations returns scoreStats with z and R", {
     set.seed(126)
-    annot <- make_test_annotations(dat_annot$n_snps)
+    annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::hdlUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1763,7 +1763,7 @@ test_that("hdlUnivariate with annotations returns scoreStats with z and R", {
 # all-ones, because computeldscores with an all-ones baseline produces
 # LD scores identical to the base L2 column, making the design matrix
 # singular. A half-on/half-off baseline avoids collinearity.
-make_gldsc_annotations <- function(n_snps) {
+makeGldscAnnotations <- function(n_snps) {
     set.seed(77)
     snp_gr <- GenomicRanges::GRanges(
         seqnames = rep("chr1", n_snps),
@@ -1788,7 +1788,7 @@ make_gldsc_annotations <- function(n_snps) {
 
 test_that("gldscUnivariate with annotations returns enrichment data.frame", {
     set.seed(200)
-    annot <- make_gldsc_annotations(dat_annot$n_snps)
+    annot <- makeGldscAnnotations(dat_annot$n_snps)
     res <- pecotmr:::gldscUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1816,7 +1816,7 @@ test_that("gldscUnivariate with annotations returns enrichment data.frame", {
 
 test_that("gldscUnivariate with annotations returns tauBlocks matrix", {
     set.seed(201)
-    annot <- make_gldsc_annotations(dat_annot$n_snps)
+    annot <- makeGldscAnnotations(dat_annot$n_snps)
     res <- pecotmr:::gldscUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -1835,7 +1835,7 @@ test_that("gldscUnivariate with annotations returns tauBlocks matrix", {
 
 test_that("gldscUnivariate with annotations returns scoreStats", {
     set.seed(202)
-    annot <- make_gldsc_annotations(dat_annot$n_snps)
+    annot <- makeGldscAnnotations(dat_annot$n_snps)
     res <- pecotmr:::gldscUnivariate(
         dat_annot$z,
         dat_annot$n,
@@ -2072,7 +2072,7 @@ test_that("gldscUnivariate with baseline-only annotations yields NULL scoreStats
 # ---------------------------------------------------------------------------
 
 test_that("h2EstimateToSldscTrait assigns category names to unnamed tauBlocks", {
-    h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
+    h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
     tb <- getTauBlocks(h2_obj)
     colnames(tb) <- NULL
     h2_obj@tauBlocks <- tb
@@ -2086,7 +2086,7 @@ test_that("h2EstimateToSldscTrait assigns category names to unnamed tauBlocks", 
 # ---------------------------------------------------------------------------
 
 test_that("estimateH2 errors when study is omitted for a multi-study collection", {
-    eigen_ref <- make_test_eigen_ref()
+    eigen_ref <- makeTestEigenRef()
     n_snps <- length(eigen_ref)
     set.seed(321)
     df <- data.frame(
@@ -2108,7 +2108,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
         study = c("studyA", "studyB"),
         entry = list(gr, gr),
         genome = "hg19",
-        ldSketch = make_test_gwas_genotype_handle(),
+        ldSketch = makeTestGwasGenotypeHandle(),
         varY = NA_real_
     )
     expect_error(
@@ -2304,8 +2304,8 @@ test_that("LDER uses the in-sample vs out-of-sample weight switch", {
 })
 
 test_that("gLDSC requires full LD matrices and gives a positive jackknife SE", {
-    noMat <- make_test_score_ref(with_ld_matrices = FALSE)
-    ss <- make_test_sumstats_for_ref(noMat)
+    noMat <- makeTestScoreRef(with_ld_matrices = FALSE)
+    ss <- makeTestSumstatsForRef(noMat)
     expect_error(
         estimateH2(ss, noMat, method = "gldsc"),
         "requires full per-block LD matrices"
@@ -2947,13 +2947,13 @@ test_that(".sldscLocal clamps a negative LD score to zero", {
     expect_equal(out$h2Local, c(1e-4, 0))
 })
 
-test_that("rmaConfig refuses the estimates and the estimator choice", {
-    expect_error(rmaConfig(yi = 1), "the per-study estimates")
-    expect_error(rmaConfig(sei = 1), "the per-study standard errors")
-    expect_error(rmaConfig(method = "REML"), "the caller's `metaMethod`")
+test_that("RmaOptions refuses the estimates and the estimator choice", {
+    expect_error(RmaOptions(yi = 1), "the per-study estimates")
+    expect_error(RmaOptions(sei = 1), "the per-study standard errors")
+    expect_error(RmaOptions(method = "REML"), "the caller's `metaMethod`")
     # metafor::rma() takes dots, so nothing else can be rejected.
-    expect_s4_class(rmaConfig(nosuch = 1), "MethodConfig")
-    expect_equal(rmaConfig(test = "knha")$test, "knha")
+    expect_s4_class(RmaOptions(nosuch = 1), "MethodOptions")
+    expect_equal(RmaOptions(test = "knha")$test, "knha")
 })
 
 test_that(".rmaMeta forwards metaArgs to metafor::rma", {
@@ -2962,7 +2962,7 @@ test_that(".rmaMeta forwards metaArgs to metafor::rma", {
     means <- c(0.2, 0.3, 0.25, 0.4)
     ses <- c(0.1, 0.12, 0.09, 0.15)
     suppressWarnings(with_mocked_bindings(
-        pecotmr:::.rmaMeta(means, ses, metaArgs = rmaConfig(test = "knha")),
+        pecotmr:::.rmaMeta(means, ses, metaArgs = RmaOptions(test = "knha")),
         rma = function(...) {
             seen <<- list(...)
             real(...)
@@ -2983,7 +2983,7 @@ test_that("the DL fallback carries metaArgs too", {
             means,
             ses,
             method = "REML",
-            metaArgs = rmaConfig(level = 90)
+            metaArgs = RmaOptions(level = 90)
         ),
         rma = function(...) {
             args <- list(...)

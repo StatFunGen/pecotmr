@@ -12,7 +12,7 @@ bglrWeights(
   burnIn,
   thin,
   etaArgs = list(),
-  methodArgs = bglrConfig()
+  methodArgs = BglrOptions()
 )
 }
 \arguments{
@@ -32,7 +32,7 @@ bglrWeights(
 `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).}
 
 \item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
-with \code{\link{bglrConfig}}. A bare list is refused: it cannot be
+with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }

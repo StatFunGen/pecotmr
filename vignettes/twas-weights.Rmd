@@ -51,7 +51,7 @@ data(qtlDatasetExample, qtlSumStatsExample, multiStudyQtlDatasetExample)
 
 The simplest individual-level call learns a single regression-based weight set
 from a `QtlDataset`. Cross-validation is off by default
-(`crossValidationConfig(folds = 0)`).
+(`CrossValidationParam(folds = 0)`).
 Like `fineMappingPipeline()`, you need to tell it which genotype window to
 extract — `cisWindow` (per trait) is the most common choice.
 
@@ -115,7 +115,7 @@ fmr <- fineMappingPipeline(
     qtlDatasetExample,
     methods = "susie",
     cisWindow = 1e6,
-    crossValidationArgs = crossValidationConfig(folds = 3)
+    crossValidationArgs = CrossValidationParam(folds = 3)
 )
 tw2 <- twasWeightsPipeline(
     qtlDatasetExample,
@@ -293,7 +293,7 @@ twasWeightsPipeline(
     traitId = "ENSG_example",
     region = "chr22:25000000-26000000",
     cisWindow = 5e5,
-    crossValidationArgs = crossValidationConfig(
+    crossValidationArgs = CrossValidationParam(
         folds = 5,
         numThreads = 1,
         samplePartition = NULL,
@@ -302,13 +302,13 @@ twasWeightsPipeline(
     # required for a fine-mapping method, and under folds > 1 it must carry
     # the per-fold fits (fineMappingPipeline(..., crossValidationArgs = ...))
     fineMappingResult = fmr,
-    ensembleArgs = ensembleConfig(
+    ensembleArgs = EnsembleParam(
         enabled = TRUE,
         r2Threshold = 0.01,
         solver = "quadprog"
     ),
     estimatePi = TRUE,
-    residualizationArgs = residualizationConfig(
+    residualizationArgs = ResidualizationParam(
         phenotypeCovariates = NULL,
         genotypeCovariates = NULL
     ),
@@ -317,7 +317,7 @@ twasWeightsPipeline(
 )
 ```
 
--  `ensembleConfig(enabled = TRUE)` adds an additional `ensembleWeights` row to
+-  `EnsembleParam(enabled = TRUE)` adds an additional `ensembleWeights` row to
     the collection — a weighted combination of the individual methods' CV
     predictions, filtered by that bundle's `r2Threshold`.
 -  `naAction` is forwarded to `getResidualizedPhenotypes()` (see the

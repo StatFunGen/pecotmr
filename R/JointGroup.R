@@ -95,7 +95,7 @@ setClass(
     # any of them is fitted. The sketch is a lazy panel, so the matrix is
     # derived once per group at fit time -- which is what the univariate RSS
     # path in fineMappingPipeline already does.
-    representation(Z = "matrix", ldSketch = "LdSketchOrNULL", N = "numeric"),
+    representation(Z = "matrix", ldSketch = "LdSketch_OR_NULL", N = "numeric"),
     validity = function(object) {
         errors <- c(
             if (ncol(object@Z) != nrow(object@conditions)) {

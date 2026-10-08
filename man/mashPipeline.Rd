@@ -10,10 +10,10 @@ mashPipeline(
   residualCorrelation = NULL,
   residualCorrelationMethod = c("identity", "simple", "simpleSpecific", "corshrink",
     "mle"),
-  prior = mashPriorConfig(),
+  prior = MashPriorParam(),
   inputScale = c("auto", "beta", "z"),
-  mashDataArgs = mashDataConfig(),
-  mashArgs = mashConfig(),
+  mashDataArgs = MashDataOptions(),
+  mashArgs = MashOptions(),
   setSeed = 999
 )
 }
@@ -60,7 +60,7 @@ artefact (the legacy MWE pattern).}
   requirement is unmet is a hard error, not a silent fallback.}
 
 \item{prior}{How the prior covariance matrices are obtained, built with
-\code{\link{mashPriorConfig}}: \code{priorCovariances} supplies them
+\code{\link{MashPriorParam}}: \code{priorCovariances} supplies them
 outright (short-circuiting the rest), otherwise \code{components}
 chooses which to build, \code{engine} how the data-driven ones are
 refined, and \code{nPcs} parametrises the \code{pca} component.
@@ -84,13 +84,13 @@ typically \code{alpha = 0} for beta, \code{alpha = 1} for z.}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with
-\code{\link{mashDataConfig}} -- for example
+\code{\link{MashDataOptions}} -- for example
 \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
 \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
 are refused by the constructor.}
 
 \item{mashArgs}{Extra arguments for \code{mashr::mash()}, built with
-\code{\link{mashConfig}} -- for example \code{nullweight},
+\code{\link{MashOptions}} -- for example \code{nullweight},
 \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
 \code{outputlevel} and \code{seed} are owned by pecotmr and are
 refused by the constructor.}
@@ -113,5 +113,5 @@ End-to-end driver: from `(strong, random, null)` sumstats
 data(qtlSumStatsMulticontextExample)
 ss <- qtlSumStatsMulticontextExample
 sumStatsList <- list(strong = ss, random = ss)
-mashPipeline(sumStatsList, alpha = 0, prior = mashPriorConfig(nPcs = 2L))
+mashPipeline(sumStatsList, alpha = 0, prior = MashPriorParam(nPcs = 2L))
 }

@@ -22,7 +22,8 @@ NULL
 #'   (\code{ctwas::finemap_regions} \code{susie_alpha_res} shape) -- the
 #'   fuller cTWAS output retained so the raw run is reconstructable, or
 #'   \code{NULL}.
-#' @slot param The estimated \code{group_prior} / \code{group_prior_var} for
+#' @slot groupPriors The estimated \code{group_prior} /
+#'   \code{group_prior_var} for
 #'   this run, or \code{NULL}.
 #' @slot regionInfo Per-region metadata, or \code{NULL}.
 #' @seealso \code{\link{CtwasResultEntry}} for the constructor.
@@ -33,13 +34,13 @@ setClass(
         finemap = "ANY", # per-gene/SNP posterior summary (ctwas finemap_res)
         # per-effect susie alpha table (ctwas susie_alpha_res)
         susieAlpha = "ANY",
-        param = "ANY", # group_prior / group_prior_var for this run
+        groupPriors = "ANY", # group_prior / group_prior_var for this run
         regionInfo = "ANY" # per-region metadata (optional)
     ),
     prototype = prototype(
         finemap = NULL,
         susieAlpha = NULL,
-        param = NULL,
+        groupPriors = NULL,
         regionInfo = NULL
     )
 )
@@ -55,7 +56,8 @@ setClass(
 #' @param susieAlpha The per-effect susie alpha table
 #'   (\code{ctwas::finemap_regions} \code{susie_alpha_res} shape) -- the fuller
 #'   cTWAS output retained so the raw run is reconstructable, or \code{NULL}.
-#' @param param The estimated \code{group_prior} / \code{group_prior_var} for
+#' @param groupPriors The estimated \code{group_prior} /
+#'   \code{group_prior_var} for
 #'   this run, or \code{NULL}.
 #' @param regionInfo Per-region metadata, or \code{NULL}.
 #' @return A \code{CtwasResultEntry} object.
@@ -68,14 +70,14 @@ setClass(
 CtwasResultEntry <- function(
     finemap = NULL,
     susieAlpha = NULL,
-    param = NULL,
+    groupPriors = NULL,
     regionInfo = NULL
 ) {
     new(
         "CtwasResultEntry",
         finemap = finemap,
         susieAlpha = susieAlpha,
-        param = param,
+        groupPriors = groupPriors,
         regionInfo = regionInfo
     )
 }
@@ -88,6 +90,10 @@ setMethod("getFinemap", "CtwasResultEntry", function(x) x@finemap)
 #' @export
 setMethod("getSusieAlpha", "CtwasResultEntry", function(x) x@susieAlpha)
 
-#' @rdname getCtwasParam
+#' @rdname getCtwasGroupPriors
 #' @export
-setMethod("getCtwasParam", "CtwasResultEntry", function(x) x@param)
+setMethod(
+    "getCtwasGroupPriors",
+    "CtwasResultEntry",
+    function(x) x@groupPriors
+)
