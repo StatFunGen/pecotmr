@@ -169,6 +169,86 @@ reference:
       - TwasWeights
       - twasWeightsRow
 
+  - title: "Engine options and method parameters"
+    desc: >
+      Two disjoint families of argument record. An `*Options()` bundle
+      carries arguments bound for an external engine and is validated
+      against that engine's own formals, so an unknown name is refused at
+      construction. A `*Param()` record is pecotmr-internal and typed,
+      built on the `MethodParam` virtual base, and reports only the
+      fields that have actually been set.
+    contents:
+      - MethodOptions
+      - MethodParam
+
+  - subtitle: "Engine options"
+    contents:
+      - AspuOptions
+      - ColocOptions
+      - ColocboostOptions
+      - CorShrinkOptions
+      - CovCanonicalOptions
+      - CovEdOptions
+      - CovFlashOptions
+      - CovMcdOptions
+      - CovPcaOptions
+      - CovUdrOptions
+      - CtwasOptions
+      - fineMappingMethodOptions
+      - GbjOptions
+      - GbjOmniOptions
+      - KrigingOptions
+      - LdPruningOptions
+      - MashCorEmOptions
+      - MashCorSimpleOptions
+      - MashDataOptions
+      - MashOptions
+      - MashPosteriorOptions
+      - MrmashCanonicalCovsOptions
+      - MrmashExpandCovsOptions
+      - PlinkQcOptions
+      - PoolrOptions
+      - QvalueOptions
+      - RmaOptions
+      - SusieRssControlOptions
+      - twasEngineOptions
+      - UdFitOptions
+      - UdInitOptions
+
+  - subtitle: "Method parameters"
+    contents:
+      - BoundaryMergeParam
+      - ColocLbfFilterParam
+      - ColocPriorParam
+      - CredibleSetParam
+      - CrossValidationParam
+      - CtwasPriorParam
+      - DentistParam
+      - EnsembleParam
+      - FineMappingMethodsParam
+      - GenotypeFilterParam
+      - GwasFineMappingParam
+      - MashComponentParam
+      - MashPriorParam
+      - MethodsSelectionParam-class
+      - MrmashPriorParam
+      - MrParam
+      - PanelFilterParam
+      - PvalMethodsParam
+      - QtlEnrichmentParam
+      - RaissParam
+      - RelatednessColumnsParam
+      - RelatednessPruningParam
+      - ResidualizationParam
+      - SignalScreenParam
+      - SlalomParam
+      - SumstatsCleaningParam
+      - SumstatsFilterParam
+      - SusieRssParam
+      - TwasWeightsMethodsParam
+      - VariantPruningParam
+      - WeightSelectionParam
+
   - title: "Manifest loaders"
     desc: >
       Build the individual-level and summary-statistic containers from a
@@ -332,7 +412,7 @@ reference:
   - subtitle: "CtwasResult / CtwasResultEntry"
     contents:
       - getContexts
-      - getCtwasParam
+      - getCtwasGroupPriors
       - getFinemap
       - getMethodNames
       - getStudy
@@ -436,14 +516,15 @@ reference:
   - title: "cTWAS"
     desc: >
       The four chainable steps that `ctwasPipeline` is built from:
-      `assembleCtwasInputs` → `estCtwasParam` → `screenCtwasRegions`
-      → `finemapCtwasRegions`. Use the steps directly when you want
-      to override the estimated priors (e.g. fall back to the prefit
-      EM values after an accurate-EM divergence), inspect the assembled
-      region data, or run only part of the pipeline.
+      `assembleCtwasInputs` → `estCtwasGroupPriors` →
+      `screenCtwasRegions` → `finemapCtwasRegions`. Use the steps
+      directly when you want to override the estimated priors (e.g.
+      fall back to the prefit EM values after an accurate-EM
+      divergence), inspect the assembled region data, or run only
+      part of the pipeline.
     contents:
       - assembleCtwasInputs
-      - estCtwasParam
+      - estCtwasGroupPriors
       - screenCtwasRegions
       - finemapCtwasRegions
       - mergeCtwasBoundaryRegions
@@ -512,6 +593,7 @@ reference:
       results is documented under
       \code{FineMappingResultBase} in the Class methods section above.
     contents:
+      - serWeights
       - susieWeights
       - susieRssWeights
       - susieInfWeights
@@ -589,7 +671,6 @@ reference:
       - buildMrmashPriorMatrices
       - computeCoefficientsGlasso
       - computeCovDiag
-      - computeCovFlash
 
   - subtitle: "Ensembling / cross-validation / prediction"
     contents:
@@ -663,6 +744,7 @@ reference:
       - metaSldscRandom
       - sldscSubsetMeta
       - qtlEnrichment
+      - enlocClusterProbabilities
 
   - title: "Bundled example datasets"
     desc: >
