@@ -18,7 +18,8 @@ GenotypeHandle(
   region = NULL,
   genoMeta = NULL,
   chroms = NULL,
-  ...
+  format = NULL,
+  vcfArgs = list()
 )
 }
 \arguments{
@@ -62,7 +63,8 @@ shard is read (so the caller's own absence check can report the mismatch).
 Only meaningful with \code{genoMeta}; supplying it with any other source is
 an error (a single-file panel has no per-chromosome shards to skip).}
 
-\item{...}{Additional arguments forwarded to the format-specific reader.}
+\item{vcfArgs}{Optional named list of arguments forwarded to
+\code{VariantAnnotation::readVcf} when the source is a VCF.}
 }
 \value{
 A \code{GenotypeHandle} object.

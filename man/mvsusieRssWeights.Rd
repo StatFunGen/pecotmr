@@ -8,38 +8,24 @@ mvsusieRssWeights(
   stat,
   LD,
   mvsusieRssFit = NULL,
-  priorVariance = NULL,
-  residualVariance = NULL,
-  L = 10,
-  LGreedy = NULL,
-  retainFit = FALSE,
-  ...
+  fitRetention = c("none", "slim", "full")
 )
 }
 \arguments{
 \item{stat}{A list with \code{z} (matrix variants x conditions) and \code{n}
-(numeric vector or scalar).}
+(numeric vector or scalar), describing the block the fit came from.}
 
-\item{LD}{LD correlation matrix.}
+\item{LD}{LD correlation matrix for that block. The fit must cover the
+same number of variants; a mismatch is an error, since weights from one
+block are not comparable against another's LD.}
 
-\item{mvsusieRssFit}{Optional pre-fitted \code{mvsusieRss} object.}
+\item{mvsusieRssFit}{A fitted \code{mvsusieRss} object. Required: this
+extracts weights and never runs fine-mapping itself.}
 
-\item{priorVariance}{Optional mvSuSiE prior variance specification. When
-NULL, \code{mvsusieR::create_mixture_prior()} is used with \code{R =
-ncol(stat$z)}.}
-
-\item{residualVariance}{Optional residual covariance matrix.}
-
-\item{L}{Maximum number of single effects. Default \code{10}, matching
-\code{mvsusieR::mvsusie}.}
-
-\item{LGreedy}{Integer or \code{NULL}. Number of greedily-added effects.
-\code{NULL} (default) disables the greedy loop and fits \code{L}
-directly.}
-
-\item{retainFit}{If TRUE, attaches the fitted object as an attribute.}
-
-\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 A numeric matrix of per-variant per-context weights (variants x
@@ -47,13 +33,13 @@ A numeric matrix of per-variant per-context weights (variants x
 }
 \description{
 Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
-extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit, or
-fits one from \code{stat$z} (variants x conditions) and \code{LD}.
+extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit.
+It never runs fine-mapping itself --- \code{mvsusieRssFit} is required.
 }
 \details{
-Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
-\code{stat$z} to be a numeric matrix (variants x conditions) and
-\code{stat$n} a per-context vector or scalar.
+Follows the \code{*_rss_weights(stat, LD, ...)} contract: \code{stat} and
+\code{LD} describe the block the fit is being extracted against, and the
+fit is checked against them rather than refitted.
 }
 \examples{
 data(eqtlRegionExample)

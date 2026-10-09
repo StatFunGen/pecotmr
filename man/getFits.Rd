@@ -9,9 +9,9 @@
 \usage{
 getFits(x, ...)
 
-\S4method{getFits}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+\S4method{getFits}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 
-\S4method{getFits}{TwasWeightsRow}(x, ...)
+\S4method{getFits}{TwasWeightsRow}(x)
 }
 \arguments{
 \item{x}{A \code{TwasWeightsRow} or \code{TwasWeights}.}
@@ -38,6 +38,6 @@ Extract fitted model objects.
 }
 \examples{
 data(ctwasWeightsExample)
-# NULL unless the pipeline was run with `retainFit = TRUE`
+# NULL unless the pipeline kept fits (fitRetention != "none")
 getFits(ctwasWeightsExample)
 }

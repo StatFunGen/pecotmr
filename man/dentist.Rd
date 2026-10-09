@@ -11,17 +11,9 @@ dentist(
   nSample = NULL,
   windowSize = 2e+06,
   windowMode = c("distance", "count"),
-  pValueThreshold = 5.0369e-08,
-  propSVD = 0.4,
-  gcControl = FALSE,
-  nIter = 10,
-  gPvalueThreshold = 0.05,
-  duprThreshold = 0.99,
-  ncpus = 1,
-  correctChenEtAlBug = TRUE,
   minDim = 2000,
   ldMethod = "sample",
-  seed = NULL
+  methodArgs = DentistParam()
 )
 }
 \arguments{
@@ -47,30 +39,6 @@ distance mode (base pairs). Default is 2000000 (2 Mb). Only used when
 \code{segmentByDist} (C++ \code{--wind-dist}), and \code{"count"} creates
 windows by variant count using \code{segmentByCount} (C++ \code{--wind}).}
 
-\item{pValueThreshold}{The p-value threshold for significance. Default is
-5e-8.}
-
-\item{propSVD}{The proportion of singular value decomposition (SVD) to use.
-Default is 0.4.}
-
-\item{gcControl}{Logical indicating whether genomic control should be
-applied. Default is FALSE.}
-
-\item{nIter}{The number of iterations for the Dentist algorithm. Default is
-10.}
-
-\item{gPvalueThreshold}{The genomic p-value threshold for significance.
-Default is 0.05.}
-
-\item{duprThreshold}{The absolute correlation r value threshold to be
-considered duplicate. Default is 0.99.}
-
-\item{ncpus}{The number of CPU cores to use for parallel processing. Default
-is 1.}
-
-\item{correctChenEtAlBug}{Logical indicating whether to correct the Chen et
-al. bug. Default is TRUE.}
-
 \item{minDim}{In distance mode: minimum number of SNPs per block (default
 2000). In count mode: the number of variants per window (i.e., the window
 size).}
@@ -80,12 +48,14 @@ size).}
 (default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
 provided directly.}
 
-\item{seed}{Integer or \code{NULL}. Random seed for the iterative
-variant-partitioning RNG. \code{NULL} (default) preserves the original
-DENTIST hard-coded seeds (\code{10} for the initial partition,
-\code{20000 + t * 20000} per iteration) for exact fidelity with the
-reference binary; a provided seed makes the partitioning reproducible under
-a value of your choosing.}
+\item{methodArgs}{The DENTIST algorithm settings, built with
+\code{\link{DentistParam}}: \code{pValueThreshold}, \code{propSVD},
+\code{gcControl}, \code{nIter}, \code{gPvalueThreshold},
+\code{duprThreshold}, \code{numThreads}, \code{correctChenEtAlBug}
+and \code{seed}. This is the same record
+\code{\link{ldMismatchQc}} takes as
+\code{method = DentistParam(...)}, so a setting means the same thing
+and carries the same default whichever entry point reaches it.}
 }
 \value{
 A data frame containing the imputed result and detected outliers.

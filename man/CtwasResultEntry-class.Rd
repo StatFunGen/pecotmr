@@ -22,7 +22,8 @@ or \code{NULL}.}
 fuller cTWAS output retained so the raw run is reconstructable, or
 \code{NULL}.}
 
-\item{\code{param}}{The estimated \code{group_prior} / \code{group_prior_var} for
+\item{\code{groupPriors}}{The estimated \code{group_prior} /
+\code{group_prior_var} for
 this run, or \code{NULL}.}
 
 \item{\code{regionInfo}}{Per-region metadata, or \code{NULL}.}

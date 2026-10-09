@@ -5,7 +5,7 @@
 # Test data helpers
 # =============================================================================
 
-make_test_granges <- function(n = 10) {
+makeTestGRanges <- function(n = 10) {
     GenomicRanges::GRanges(
         seqnames = rep("chr1", n),
         ranges = IRanges::IRanges(
@@ -15,7 +15,7 @@ make_test_granges <- function(n = 10) {
     )
 }
 
-make_test_sumstats_df <- function(n = 50) {
+makeTestSumstatsDf <- function(n = 50) {
     set.seed(42)
     data.frame(
         SNP = paste0("rs", seq_len(n)),
@@ -29,7 +29,7 @@ make_test_sumstats_df <- function(n = 50) {
     )
 }
 
-make_test_ldblocks <- function() {
+makeTestLdBlocks <- function() {
     blocks_gr <- GenomicRanges::GRanges(
         seqnames = c("chr1", "chr1"),
         ranges = IRanges::IRanges(start = c(1, 5001), end = c(5000, 10000))
@@ -37,7 +37,7 @@ make_test_ldblocks <- function() {
     blocks_gr
 }
 
-make_test_snp_info <- function(n = 10) {
+makeTestSnpInfo <- function(n = 10) {
     data.frame(
         SNP = paste0("rs", seq_len(n)),
         CHR = rep("1", n),
@@ -48,7 +48,7 @@ make_test_snp_info <- function(n = 10) {
     )
 }
 
-make_test_annotation_meta <- function() {
+makeTestAnnotationMeta <- function() {
     data.frame(
         name = c("base", "enhancer", "promoter"),
         tier = c("baseline", "candidate", "candidate"),
@@ -249,7 +249,7 @@ makeTestLdDataMultiBlock <- function(
 ) {
     gr <- .testLdVariants(sum(sizes), chrom, startBp)
     LdData(
-        correlation = lapply(sizes, .testArBlock, rho = rho),
+        correlation = map(sizes, .testArBlock, rho = rho),
         variants = gr,
         blockMetadata = .testBlockMetadata(sizes, chrom, gr),
         nRef = nRef

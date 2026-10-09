@@ -29,7 +29,7 @@ context("qtlEnrichmentPipeline")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -192,7 +192,7 @@ test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
         out <- qtlEnrichmentPipeline(
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = qfmr,
-            impN = 5,
+            methodArgs = QtlEnrichmentParam(impN = 5),
             seed = 1L
         )
     ))
@@ -282,7 +282,7 @@ test_that("qtlEnrichmentPipeline: rejects non-GwasFineMappingResult gwasFmr", {
             gwasFineMappingResult = "no",
             qtlFineMappingResult = qfmr
         ),
-        "must be a GwasFineMappingResult"
+        "Must inherit from class 'GwasFineMappingResult'"
     )
 })
 
@@ -293,7 +293,7 @@ test_that("qtlEnrichmentPipeline: rejects non-QtlFineMappingResult qtlFmr", {
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = "no"
         ),
-        "must be a QtlFineMappingResult"
+        "Must inherit from class 'GwasFineMappingResult'"
     )
 })
 
@@ -556,7 +556,9 @@ test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context)
     seed = 42,
     nSnps = 50,
     causalIdx = c(5, 20, 35),
-    causalPips = c(0.8, 0.6, 0.9),
+    # Trimmed to the number of causal variants actually asked for; callers
+    # that pass a shorter causalIdx would otherwise warn on the assignment.
+    causalPips = c(0.8, 0.6, 0.9)[seq_along(causalIdx)],
     L = 2L
 ) {
     set.seed(seed)
@@ -1068,7 +1070,15 @@ test_that(".enrRunEnrichment turns a stored alignment failure into a warning", {
             1L,
             gwasPip = NULL,
             k = 1L,
-            p = list(alignedByTuple = list(cnd))
+            alignedByTuple = list(cnd),
+            methodArgs = QtlEnrichmentParam(),
+            numThreads = 1L,
+            seed = NULL,
+            verbose = FALSE,
+            gwasFineMappingResult = NULL,
+            gwasTuples = data.frame(study = "g"),
+            qtlFineMappingResult = NULL,
+            qtlTuples = data.frame(study = "q")
         ),
         "qtlEnrichment failed"
     )
@@ -1096,4 +1106,56 @@ test_that(".enrBuildQtlRegionsList reads prior variance under either name", {
         0.3
     )
     expect_length(run(base), 0L)
+})
+
+# =============================================================================
+# QtlEnrichmentParam()
+# =============================================================================
+
+test_that("QtlEnrichmentParam carries the estimator's tunable settings", {
+    a <- QtlEnrichmentParam()
+    expect_s4_class(a, "QtlEnrichmentParam")
+    # NULL defaults mean "estimate from the data", which qtlEnrichment says by
+    # the argument being absent rather than explicitly NULL.
+    expect_equal(
+        names(a),
+        c("lambda", "impN", "doubleShrinkage", "besselCorrection")
+    )
+    expect_equal(a$lambda, 1.0)
+    expect_equal(a$impN, 25)
+    expect_false(a$doubleShrinkage)
+    expect_true(a$besselCorrection)
+})
+
+test_that("QtlEnrichmentParam forwards numGwas and piQtl once set", {
+    a <- QtlEnrichmentParam(numGwas = 5000, piQtl = 0.01)
+    expect_equal(a$numGwas, 5000)
+    expect_equal(a$piQtl, 0.01)
+})
+
+test_that("QtlEnrichmentParam rejects a name the estimator has no formal for", {
+    # No `...`: R's own argument matching is the check for a bundle pecotmr
+    # owns outright.
+    expect_error(QtlEnrichmentParam(shrinkage = 2), "unused argument")
+    # alignNames is the pipeline's invariant, not a user setting.
+    expect_error(QtlEnrichmentParam(alignNames = TRUE), "unused argument")
+})
+
+test_that("every QtlEnrichmentParam field is a qtlEnrichment formal", {
+    # The bundle is spliced straight into qtlEnrichment, so a field it has no
+    # formal for would be an error at a call site far from the constructor.
+    expect_true(all(
+        names(formals(QtlEnrichmentParam)) %in% names(formals(qtlEnrichment))
+    ))
+})
+
+test_that("qtlEnrichmentPipeline refuses a bare list for methodArgs", {
+    expect_error(
+        qtlEnrichmentPipeline(
+            gwasFineMappingResult = NULL,
+            qtlFineMappingResult = NULL,
+            methodArgs = list(impN = 5)
+        ),
+        "must be built with QtlEnrichmentParam"
+    )
 })

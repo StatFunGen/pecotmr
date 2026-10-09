@@ -14,14 +14,7 @@ getResidualizedGenotypes(x, ...)
   region = NULL,
   cisWindow = NULL,
   samples = NULL,
-  phenotypeCovariatesToResidualize = NULL,
-  genotypeCovariatesToResidualize = NULL,
-  residualizePhenotypeCovariates = TRUE,
-  residualizeGenotypeCovariates = TRUE,
-  residualizePhenotypeCovariatesFromGenotypes = NULL,
-  residualizeGenotypeCovariatesFromGenotypes = NULL,
-  covariateNaAction = c("impute", "drop"),
-  ...
+  residualizationArgs = ResidualizationParam()
 )
 }
 \arguments{
@@ -48,29 +41,13 @@ around the trait; \code{NULL} uses the dataset default.}
 \item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
 \code{NULL} uses all samples.}
 
-\item{phenotypeCovariatesToResidualize}{Character vector or \code{NULL}.
-Phenotype covariate names to residualize; \code{NULL} uses the dataset
-default set.}
-
-\item{genotypeCovariatesToResidualize}{Character vector or \code{NULL}.
-Genotype covariate names to residualize; \code{NULL} uses the dataset
-default set.}
-
-\item{residualizePhenotypeCovariates}{Logical. Whether to residualize the
-phenotype covariates. Default \code{TRUE}.}
-
-\item{residualizeGenotypeCovariates}{Logical. Whether to residualize the
-genotype covariates. Default \code{TRUE}.}
-
-\item{residualizePhenotypeCovariatesFromGenotypes}{Logical or \code{NULL}.
-Whether to residualize phenotype covariates out of the genotype design;
-\code{NULL} uses the default.}
-
-\item{residualizeGenotypeCovariatesFromGenotypes}{Logical or \code{NULL}.
-Whether to residualize genotype covariates out of the genotype design;
-\code{NULL} uses the default.}
-
-\item{covariateNaAction}{Character. How to handle missing covariate values.}
+\item{residualizationArgs}{What the data is residualized on, built with
+\code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
+\code{genotypeCovariates} choose the covariate sets,
+\code{residualizePhenotype} / \code{residualizeGenotype} turn each
+side on or off, and \code{covariateNaAction} says how missing
+covariate values are handled. The same record the pipelines take, so a
+setting means the same thing by either route.}
 }
 \value{
 A numeric matrix (samples x variants).

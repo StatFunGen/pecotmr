@@ -181,9 +181,11 @@ applied at load), for example:
 ```{r qtl-manifest-qc}
 qdFiltered <- loadQtlDatasetFromManifest(
     manifest,
-    mafCutoff = 0.01,
-    imissCutoff = 0.05,
-    keepIndel = FALSE
+    genotypeFilterArgs = GenotypeFilterParam(
+        mafCutoff = 0.01,
+        imissCutoff = 0.05,
+        keepIndel = FALSE
+    )
 )
 ```
 
@@ -304,6 +306,20 @@ One member of each related pair comes back, chosen so that what remains is as
 large an unrelated set as possible. `relatednessThreshold` defaults to 0.0625,
 which is third-degree relatives; raise it to 0.125 to keep everyone but
 second-degree and closer.
+
+The column names above are the defaults. A table that spells them differently
+is described with `RelatednessColumnsParam()`:
+
+```r
+filterRelatedness(
+    relatedness,
+    columns = RelatednessColumnsParam(iid1 = "ID1", iid2 = "ID2", value = "KINSHIP")
+)
+```
+
+Building the description rather than passing a bare list means a misspelled
+field is an error at the call site instead of a default silently left in
+place.
 
 The exclusion list is not applied for you — feed it to `keepSamples`, the
 constructor argument this vignette introduced above, or subset an existing

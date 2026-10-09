@@ -14,22 +14,105 @@ S3method(postprocessFinemappingFit,susie)
 S3method(postprocessFinemappingFit,susieInf)
 S3method(postprocessFinemappingFit,susieRss)
 export(AnnotationMatrix)
+export(AspuOptions)
+export(BglrOptions)
+export(BoundaryMergeParam)
 export(ColocBoostResult)
+export(ColocLbfFilterParam)
+export(ColocOptions)
+export(ColocPriorParam)
 export(ColocResult)
+export(ColocboostOptions)
+export(CorShrinkOptions)
+export(CovCanonicalOptions)
+export(CovEdOptions)
+export(CovFlashOptions)
+export(CovMcdOptions)
+export(CovPcaOptions)
+export(CovUdrOptions)
+export(CredibleSetParam)
+export(CrossValidationParam)
+export(CtwasOptions)
+export(CtwasPriorParam)
 export(CtwasResult)
 export(CtwasResultEntry)
+export(DentistParam)
+export(DprOptions)
+export(EnsembleParam)
+export(FineMappingMethodsParam)
+export(FsusieOptions)
+export(GbjOmniOptions)
+export(GbjOptions)
+export(GenotypeFilterParam)
+export(GlmnetOptions)
+export(GwasFineMappingParam)
 export(GwasFineMappingResult)
 export(GwasSumStats)
+export(KrigingOptions)
+export(L0learnOptions)
+export(LassosumOptions)
 export(LdData)
 export(LdEigen)
+export(LdPruningOptions)
 export(LdScore)
+export(MashComponentParam)
+export(MashCorEmOptions)
+export(MashCorSimpleOptions)
+export(MashDataOptions)
+export(MashOptions)
+export(MashPosteriorOptions)
 export(MashPrior)
+export(MashPriorParam)
+export(MrParam)
+export(MrashOptions)
+export(MrashRssOptions)
+export(MrmashCanonicalCovsOptions)
+export(MrmashExpandCovsOptions)
+export(MrmashOptions)
+export(MrmashPriorParam)
+export(MrmashRssOptions)
 export(MultiStudyQtlDataset)
+export(MvsusieOptions)
+export(MvsusieRssOptions)
+export(NcvregOptions)
+export(PanelFilterParam)
+export(PenalizedRssOptions)
+export(PlinkQcOptions)
+export(PoolrOptions)
+export(PrsCsOptions)
+export(PvalMethodsParam)
+export(QggOptions)
 export(QtlDataset)
+export(QtlEnrichmentParam)
 export(QtlFineMappingResult)
 export(QtlSumStats)
+export(QvalueOptions)
+export(RaissParam)
+export(RelatednessColumnsParam)
+export(RelatednessPruningParam)
+export(ResidualizationParam)
+export(RmaOptions)
+export(SdprOptions)
+export(SerOptions)
+export(SignalScreenParam)
+export(SlalomParam)
 export(SldscData)
+export(SumstatsCleaningParam)
+export(SumstatsFilterParam)
+export(SusieAshOptions)
+export(SusieAshRssOptions)
+export(SusieInfOptions)
+export(SusieInfRssOptions)
+export(SusieOptions)
+export(SusieRssControlOptions)
+export(SusieRssOptions)
+export(SusieRssParam)
 export(TwasWeights)
+export(TwasWeightsMethodsParam)
+export(UdFitOptions)
+export(UdInitOptions)
+export(VariantPruningParam)
+export(WeightSelectionParam)
 export(asCtwasResult)
 export(asGranges)
 export(assembleCtwasInputs)
@@ -59,7 +142,6 @@ export(combineQtlSumStats)
 export(combineTwasWeights)
 export(computeCoefficientsGlasso)
 export(computeCovDiag)
-export(computeCovFlash)
 export(computeCsCorrelation)
 export(computeCsTables)
 export(computeLd)
@@ -76,8 +158,9 @@ export(dprWeights)
 export(effectiveN)
 export(enetWeights)
 export(enforceDesignFullRank)
+export(enlocClusterProbabilities)
 export(ensembleWeights)
-export(estCtwasParam)
+export(estCtwasGroupPriors)
 export(estimateH2)
 export(estimateSparsity)
 export(extractCsInfo)
@@ -101,6 +184,7 @@ export(fsusieCredibleBand)
 export(fsusieGetCs)
 export(fsusieWeights)
 export(fsusieWrapper)
+export(getAddSusieInf)
 export(getAf)
 export(getAnnotCols)
 export(getAnnotData)
@@ -116,16 +200,20 @@ export(getColocVariants)
 export(getComputingTime)
 export(getContexts)
 export(getCorrelation)
+export(getCoverage)
+export(getCredibleSetArgs)
 export(getCredibleSetSummary)
 export(getCs)
-export(getCtwasParam)
+export(getCtwasGroupPriors)
 export(getCvFits)
 export(getCvResult)
 export(getDataType)
 export(getEigenList)
 export(getEnrichment)
+export(getFineMappingMethods)
 export(getFineMappingResult)
 export(getFinemap)
+export(getFitRetention)
 export(getFits)
 export(getFrqData)
 export(getFullFit)
@@ -136,27 +224,34 @@ export(getH2)
 export(getH2Se)
 export(getImissCutoff)
 export(getInSample)
+export(getIncludeAllCs)
 export(getIntercept)
 export(getInterceptSe)
 export(getKeepIndel)
 export(getKeepVariants)
+export(getL)
 export(getLbf)
 export(getLdBlocks)
 export(getLdMatrixList)
 export(getLdScoreWeights)
 export(getLdScores)
 export(getLdSketch)
+export(getLgreedy)
 export(getLocal)
 export(getMacCutoff)
 export(getMaf)
 export(getMafCutoff)
 export(getMarginalEffects)
+export(getMedianAbsCorr)
 export(getMethodNames)
+export(getMinAbsCorr)
 export(getMixtureWeights)
 export(getN)
 export(getNRef)
 export(getNSnps)
 export(getP)
+export(getPanelFilterArgs)
+export(getPerCsColumns)
 export(getPhenotypeCovariates)
 export(getPhenotypes)
 export(getPip)
@@ -170,9 +265,12 @@ export(getRegionVcp)
 export(getResidualizedGenotypes)
 export(getResidualizedPhenotypes)
 export(getRetainedMass)
+export(getRssArgs)
 export(getScaleResiduals)
 export(getScoreStats)
 export(getSe)
+export(getSecondaryCoverage)
+export(getSignalCutoff)
 export(getSignificantQtls)
 export(getSnpIdx)
 export(getStandardized)
@@ -276,6 +374,20 @@ export(scoreFromCs)
 export(screenCtwasRegions)
 export(sdpr)
 export(sdprWeights)
+export(serWeights)
+export(setAddSusieInf)
+export(setCoverage)
+export(setCredibleSetArgs)
+export(setFineMappingMethods)
+export(setFitRetention)
+export(setIncludeAllCs)
+export(setMedianAbsCorr)
+export(setMinAbsCorr)
+export(setPanelFilterArgs)
+export(setPerCsColumns)
+export(setRssArgs)
+export(setSecondaryCoverage)
+export(setSignalCutoff)
 export(slalom)
 export(sldscPostprocessingPipeline)
 export(sldscSubsetMeta)
@@ -299,13 +411,24 @@ export(updateMashModelCov)
 export(waldTestPval)
 export(writeSumStatsVcf)
 exportClasses(AnnotationMatrix)
+exportClasses(BoundaryMergeParam)
 exportClasses(ColocBoostResult)
+exportClasses(ColocLbfFilterParam)
+exportClasses(ColocPriorParam)
 exportClasses(ColocResult)
 exportClasses(ColocResultBase)
+exportClasses(CredibleSetParam)
+exportClasses(CrossValidationParam)
+exportClasses(CtwasPriorParam)
 exportClasses(CtwasResult)
 exportClasses(CtwasResultEntry)
+exportClasses(DentistParam)
+exportClasses(EnsembleParam)
+exportClasses(FineMappingMethodsParam)
 exportClasses(FineMappingResultBase)
 exportClasses(FineMappingRow)
+exportClasses(GenotypeFilterParam)
+exportClasses(GwasFineMappingParam)
 exportClasses(GwasFineMappingResult)
 exportClasses(GwasSumStats)
 exportClasses(H2Estimate)
@@ -313,21 +436,45 @@ exportClasses(LdData)
 exportClasses(LdEigen)
 exportClasses(LdScore)
 exportClasses(LdStatistic)
+exportClasses(MashComponentParam)
 exportClasses(MashPrior)
+exportClasses(MashPriorParam)
+exportClasses(MethodOptions)
+exportClasses(MethodParam)
+exportClasses(MethodsSelectionParam)
+exportClasses(MrParam)
+exportClasses(MrmashPriorParam)
 exportClasses(MultiStudyQtlDataset)
+exportClasses(PanelFilterParam)
+exportClasses(PvalMethodsParam)
 exportClasses(QtlDataset)
+exportClasses(QtlEnrichmentParam)
 exportClasses(QtlFineMappingResult)
 exportClasses(QtlSumStats)
+exportClasses(RaissParam)
 exportClasses(RangedTupleList)
+exportClasses(RelatednessColumnsParam)
+exportClasses(RelatednessPruningParam)
+exportClasses(ResidualizationParam)
+exportClasses(SignalScreenParam)
+exportClasses(SlalomParam)
 exportClasses(SldscData)
 exportClasses(SumStatsBase)
+exportClasses(SumstatsCleaningParam)
+exportClasses(SumstatsFilterParam)
+exportClasses(SusieRssParam)
 exportClasses(TwasWeights)
+exportClasses(TwasWeightsMethodsParam)
 exportClasses(TwasWeightsRow)
+exportClasses(VariantPruningParam)
+exportClasses(WeightSelectionParam)
 exportMethods("$")
 exportMethods("$<-")
 exportMethods("[")
+exportMethods("[[")
 exportMethods("[[<-")
 exportMethods(as.data.frame)
+exportMethods(as.list)
 exportMethods(bindROWS)
 exportMethods(colnames)
 exportMethods(colocboostPipeline)
@@ -352,7 +499,7 @@ exportMethods(getContexts)
 exportMethods(getCorrelation)
 exportMethods(getCredibleSetSummary)
 exportMethods(getCs)
-exportMethods(getCtwasParam)
+exportMethods(getCtwasGroupPriors)
 exportMethods(getCvFits)
 exportMethods(getCvResult)
 exportMethods(getDataType)
@@ -430,8 +577,10 @@ exportMethods(getXvarCutoff)
 exportMethods(getZ)
 exportMethods(hasGenotypes)
 exportMethods(intersectVariants)
+exportMethods(length)
 exportMethods(longForm)
 exportMethods(nSnps)
+exportMethods(names)
 exportMethods(ncol)
 exportMethods(nrow)
 exportMethods(overlapTopLoci)
@@ -447,6 +596,8 @@ exportMethods(writeSumStatsVcf)
 importClassesFrom(GenomicRanges,GRanges)
 importClassesFrom(MultiAssayExperiment,MultiAssayExperiment)
 importClassesFrom(S4Vectors,DataFrame)
+importClassesFrom(S4Vectors,SimpleList)
+importClassesFrom(S4Vectors,character_OR_NULL)
 importClassesFrom(SummarizedExperiment,RangedSummarizedExperiment)
 importFrom(BiocGenerics,
   colnames,
@@ -457,7 +608,7 @@ importFrom(BiocParallel,
   MulticoreParam,
   bplapply,
   bpparam,
-  bpworkers
+  multicoreWorkers
 )
 importFrom(Biostrings,
   DNAStringSet,
@@ -486,11 +637,13 @@ importFrom(Rsamtools,
 importFrom(S4Arrays,extract_array)
 importFrom(S4Vectors,
   "mcols<-",
+  "metadata<-",
   DataFrame,
   SimpleList,
   bindROWS,
   endoapply,
   mcols,
+  metadata,
   queryHits,
   subjectHits
 )
@@ -500,6 +653,41 @@ importFrom(SummarizedExperiment,
   rowRanges
 )
 importFrom(archive,archive_read)
+importFrom(checkmate,
+  assert,
+  assertCharacter,
+  assertClass,
+  assertCount,
+  assertDataFrame,
+  assertDirectoryExists,
+  assertFileExists,
+  assertFlag,
+  assertInt,
+  assertList,
+  assertLogical,
+  assertMatrix,
+  assertMultiClass,
+  assertNames,
+  assertNumber,
+  assertNumeric,
+  assertScalar,
+  assertString,
+  assertSubset,
+  assertVector,
+  checkAtomicVector,
+  checkCharacter,
+  checkClass,
+  checkDataFrame,
+  checkFileExists,
+  checkList,
+  checkMatrix,
+  checkNames,
+  checkNull,
+  checkNumeric,
+  checkString,
+  checkSubset,
+  makeAssertCollection
+)
 importFrom(dplyr,
   across,
   add_count,
@@ -533,6 +721,7 @@ importFrom(magrittr,is_in)
 importFrom(matrixStats,colSds)
 importFrom(metafor,rma)
 importFrom(methods,
+  "slot<-",
   as,
   is,
   new,
@@ -540,27 +729,37 @@ importFrom(methods,
   setGeneric,
   setMethod,
   show,
+  slot,
+  slotNames,
   validObject
 )
 importFrom(purrr,
   compact,
+  detect,
+  discard,
   exec,
   imap,
   keep,
+  list_assign,
   list_c,
   list_flatten,
   list_modify,
   list_rbind,
   map,
   map2,
+  map2_lgl,
   map_chr,
   map_dbl,
   map_dfr,
   map_int,
   map_lgl,
   partial,
+  possibly,
   reduce,
-  set_names
+  set_names,
+  walk,
+  walk2,
+  zap
 )
 importFrom(quadprog,solve.QP)
 importFrom(readr,
@@ -574,8 +773,11 @@ importFrom(rlang,
   .data,
   abort,
   arg_match,
+  arg_match0,
   cnd_signal,
   inform,
+  is_named,
+  try_fetch,
   warn
 )
 importFrom(stats,
@@ -583,7 +785,6 @@ importFrom(stats,
   coef,
   complete.cases,
   cor,
-  cov2cor,
   cutree,
   hclust,
   lm,
@@ -653,7 +854,6 @@ importFrom(tools,
 importFrom(utils,
   combn,
   head,
-  modifyList,
   read.table,
   tail
 )

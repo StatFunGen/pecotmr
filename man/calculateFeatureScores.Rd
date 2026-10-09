@@ -4,7 +4,11 @@
 \alias{calculateFeatureScores}
 \title{Feature score from deviation contrasts (random-effects meta per condition)}
 \usage{
-calculateFeatureScores(contrastResult, metaMethod = "REML")
+calculateFeatureScores(
+  contrastResult,
+  metaMethod = "REML",
+  metaArgs = RmaOptions()
+)
 }
 \arguments{
 \item{contrastResult}{A contrast table from
@@ -14,6 +18,10 @@ columns.}
 
 \item{metaMethod}{Between-study variance estimator forwarded to
 \code{metafor::rma} (default \code{"REML"}).}
+
+\item{metaArgs}{Extra arguments for \code{metafor::rma()}, built with
+\code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
+small-study correction.}
 }
 \value{
 A \code{data.frame} with \code{condition} and \code{zScore}.

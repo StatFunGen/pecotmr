@@ -36,24 +36,25 @@ NULL
 # One block per row. `blockId` is carried into mcols when present so the key
 # survives; without it the splitter falls back to the block's coordinates.
 # @noRd
+#' @importFrom checkmate assertNames
 .ldBlockTableToRanges <- function(df) {
-    missingCols <- setdiff(c("chrom", "start", "end"), colnames(df))
-    if (length(missingCols) > 0L) {
-        msg <- glue(
-            "`ldBlocks` table is missing required column(s): ",
-            "{str_flatten(missingCols, ', ')}."
-        )
-        abort(msg)
-    }
-    gr <- GenomicRanges::GRanges(
+    assertNames(
+        colnames(df),
+        must.include = c("chrom", "start", "end"),
+        what = "colnames",
+        .var.name = "ldBlocks table"
+    )
+    exec(
+        GenomicRanges::GRanges,
         seqnames = as.character(df$chrom),
         ranges = IRanges::IRanges(
             start = as.integer(df$start),
             end = as.integer(df$end)
-        )
+        ),
+        !!!compact(list(
+            blockId = if (is_in("blockId", colnames(df))) {
+                as.character(df$blockId)
+            }
+        ))
     )
-    if (is_in("blockId", colnames(df))) {
-        mcols(gr)$blockId <- as.character(df$blockId)
-    }
-    gr
 }

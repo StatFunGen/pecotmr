@@ -17,7 +17,7 @@ getTopLoci(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025, ...)
   method = NULL,
   region = NULL,
   minPurity = NULL,
-  ...
+  raw = FALSE
 )
 }
 \arguments{
@@ -49,6 +49,11 @@ all regions.}
 
 \item{minPurity}{Numeric or \code{NULL}. Minimum credible-set purity to
 retain; \code{NULL} applies no purity filter.}
+
+\item{raw}{Logical (length 1). \code{FALSE} (default) returns the posterior
+view described above. \code{TRUE} hands back the stored canonical table
+verbatim, so neither the projection nor \code{signalCutoff} applies and
+\code{type = "GRanges"} is an error.}
 }
 \value{
 A \code{data.frame} or a \code{GRanges}.

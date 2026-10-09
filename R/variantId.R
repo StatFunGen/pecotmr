@@ -31,15 +31,22 @@ stripChrPrefix <- function(x) str_remove(x, "^chr")
 #' @return Character vector of normalized chromosome names.
 #' @noRd
 canonChrom <- function(x) {
-    x <- as.character(x)
-    x <- str_remove(x, regex("^chr", ignore_case = TRUE))
-    x <- str_remove(x, regex("^ch", ignore_case = TRUE))
-    x <- str_to_upper(x)
+    bare <- as.character(x) |>
+        str_remove(regex("^chr", ignore_case = TRUE)) |>
+        str_remove(regex("^ch", ignore_case = TRUE)) |>
+        str_to_upper()
+    canonChromLabel(bare)
+}
+
+# Fold the numeric / abbreviated synonyms of the non-autosomes onto their
+# canonical labels. NA passes through as NA.
+# @noRd
+canonChromLabel <- function(x) {
     ok <- !is.na(x)
-    x[ok & x == "23"] <- "X"
-    x[ok & x == "24"] <- "Y"
-    x[ok & x == "M"] <- "MT"
-    x
+    x |>
+        replace(ok & x == "23", "X") |>
+        replace(ok & x == "24", "Y") |>
+        replace(ok & x == "M", "MT")
 }
 
 #' Ensure a leading chr prefix on a chromosome identifier.
@@ -139,14 +146,17 @@ isSnpAlleles <- function(a1, a2) {
     if (!any(repair)) {
         return(ids)
     }
-    ids[repair] <- formatVariantId(
-        p$chrom[repair],
-        p$pos[repair],
-        A2[repair],
-        A1[repair],
-        convention = attr(p, "convention")
+    replace(
+        ids,
+        repair,
+        formatVariantId(
+            p$chrom[repair],
+            p$pos[repair],
+            A2[repair],
+            A1[repair],
+            convention = attr(p, "convention")
+        )
     )
-    ids
 }
 
 # Backwards-compat alias
@@ -227,8 +237,15 @@ detectVariantConvention <- function(ids) {
 #'   stored as \code{attr(result, "convention")}.
 #' @examples
 #' parseVariantId(c("chr1:100:A:G", "chr2:200:T:C"))
+#' @importFrom checkmate assert checkCharacter checkDataFrame
 #' @export
 parseVariantId <- function(ids) {
+    # `ids` is documented as a character vector OR a data.frame.
+    assert(
+        checkCharacter(ids),
+        checkDataFrame(ids),
+        .var.name = "ids"
+    )
     if (is.data.frame(ids)) {
         return(.parseVariantIdDf(ids))
     }
@@ -244,8 +261,18 @@ parseVariantId <- function(ids) {
         A2 = m[, 4L],
         A1 = m[, 5L]
     )
-    attr(data, "convention") <- convention
-    data
+    `attr<-`(data, "convention", convention)
+}
+
+# `[[<-` rather than mutate(): callers hand this frame straight through from
+# a user-supplied table, which may carry NA or "" column names -- and
+# dplyr refuses to transform such a frame at all.
+# @noRd
+.withCanonicalCoords <- function(ids) {
+    # `value =` named: tibble's `[[<-` method carries an extra `j` formal, so a
+    # third POSITIONAL argument binds to `j` and the write silently misfires.
+    coerced <- `[[<-`(ids, "chrom", value = canonChrom(ids$chrom))
+    `[[<-`(coerced, "pos", value = as.integer(ids$pos))
 }
 
 # Parse a data.frame of already-split ids: resolve the 4 identity columns
@@ -255,22 +282,26 @@ parseVariantId <- function(ids) {
 .parseVariantIdDf <- function(ids) {
     # minimal repair: preserve any empty/duplicate extra-column names (e.g. an
     # unnamed passthrough column) for .sanitizeNames() to canonicalize later.
-    ids <- as_tibble(ids, .name_repair = "minimal")
-    hasA2A1 <- all(is_in(c("chrom", "pos", "A2", "A1"), names(ids)))
-    hasA1A2 <- all(is_in(c("chrom", "pos", "A1", "A2"), names(ids)))
-    if (!hasA2A1 && !hasA1A2 && ncol(ids) >= 4) {
-        names(ids)[seq_len(4)] <- c("chrom", "pos", "A2", "A1")
+    tbl <- as_tibble(ids, .name_repair = "minimal")
+    hasA2A1 <- all(is_in(c("chrom", "pos", "A2", "A1"), names(tbl)))
+    hasA1A2 <- all(is_in(c("chrom", "pos", "A1", "A2"), names(tbl)))
+    # With neither allele naming present the frame is positional: its first
+    # four columns are the variant key.
+    named <- if (!hasA2A1 && !hasA1A2 && ncol(tbl) >= 4) {
+        `names<-`(
+            tbl,
+            replace(names(tbl), seq_len(4), c("chrom", "pos", "A2", "A1"))
+        )
+    } else {
+        tbl
     }
     conv <- list(
-        hasChr = any(str_detect(as.character(ids$chrom), "^chr")),
+        hasChr = any(str_detect(as.character(named$chrom), "^chr")),
         alleleSep = ":",
         hasBuild = FALSE,
         example = NA_character_
     )
-    ids$chrom <- canonChrom(ids$chrom)
-    ids$pos <- as.integer(ids$pos)
-    attr(ids, "convention") <- conv
-    ids
+    `attr<-`(.withCanonicalCoords(named), "convention", conv)
 }
 
 #' Format variant ID strings from component columns
@@ -355,33 +386,38 @@ formatVariantId <- function(
 #'   rsIDs) are returned unchanged.
 #' @examples
 #' normalizeVariantId(c("1:100:A:G", "2:200:T:C"))
+#' @importFrom checkmate assertCharacter assertFlag assertList
 #' @export
 normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
+    assertCharacter(ids)
+    assertFlag(chrPrefix)
+    assertList(convention, null.ok = TRUE)
     parsed <- parseVariantId(ids)
     out <- as.character(ids)
     # Only re-format ids that parsed into a chrom + pos; leave unparseable ids
     # (e.g. rsIDs) unchanged rather than emitting "chrNA:..." garbage.
     ok <- !is.na(parsed$chrom) & !is.na(parsed$pos)
-    if (any(ok)) {
-        out[ok] <- if (!is.null(convention)) {
-            formatVariantId(
-                parsed$chrom[ok],
-                parsed$pos[ok],
-                parsed$A2[ok],
-                parsed$A1[ok],
-                convention = convention
-            )
-        } else {
-            formatVariantId(
-                parsed$chrom[ok],
-                parsed$pos[ok],
-                parsed$A2[ok],
-                parsed$A1[ok],
-                chrPrefix = chrPrefix
-            )
-        }
+    if (!any(ok)) {
+        return(out)
     }
-    out
+    reformatted <- if (!is.null(convention)) {
+        formatVariantId(
+            parsed$chrom[ok],
+            parsed$pos[ok],
+            parsed$A2[ok],
+            parsed$A1[ok],
+            convention = convention
+        )
+    } else {
+        formatVariantId(
+            parsed$chrom[ok],
+            parsed$pos[ok],
+            parsed$A2[ok],
+            parsed$A1[ok],
+            chrPrefix = chrPrefix
+        )
+    }
+    replace(out, ok, reformatted)
 }
 
 # Complement a DNA allele string (A<->T, C<->G) for strand flipping.
@@ -392,16 +428,10 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
 # `unnamed_<i>`, duplicates de-duplicated with make.unique).
 # @noRd
 .sanitizeNames <- function(df) {
-    nm <- colnames(df)
-    if (is.null(nm)) {
-        nm <- rep("unnamed", ncol(df))
-    }
+    nm <- colnames(df) %||% rep("unnamed", ncol(df))
     emptyIdx <- is.na(nm) | nm == ""
-    if (any(emptyIdx)) {
-        nm[emptyIdx] <- str_c("unnamed_", seq_len(sum(emptyIdx)))
-    }
-    colnames(df) <- make.unique(nm, sep = "_")
-    df
+    named <- replace(nm, emptyIdx, str_c("unnamed_", seq_len(sum(emptyIdx))))
+    `colnames<-`(df, make.unique(named, sep = "_"))
 }
 
 #' Harmonize variant alleles against a reference
@@ -468,21 +498,20 @@ harmonizeAlleles <- function(
     removeIndels = FALSE,
     removeStrandAmbiguous = TRUE,
     removeDups = FALSE,
-    colToComplement = character(),
-    ...
+    colToComplement = character()
 ) {
     coerced <- .harmonizeCoerceInputs(targetData, refVariants)
-    targetData <- coerced$targetData
-    refVariants <- coerced$refVariants
+    target <- coerced$targetData
+    panel <- coerced$refVariants
     # The index rides along on the join copy only: the restore path below
-    # re-reads `targetData`, and a sentinel column there would bind_rows its
+    # re-reads `target`, and a sentinel column there would bind_rows its
     # way into the returned frame.
-    matchResult <- .harmonizeJoin(.haIndexTargets(targetData), refVariants)
-    if (nrow(matchResult) == 0) {
-        return(.harmonizeEmptyResult(matchResult))
+    joined <- .harmonizeJoin(.haIndexTargets(target), panel)
+    if (nrow(joined) == 0) {
+        return(.harmonizeEmptyResult(joined))
     }
     matchResult <- .harmonizeDecideMatches(
-        matchResult,
+        joined,
         colToFlip,
         colToComplement,
         flipStrand,
@@ -490,20 +519,18 @@ harmonizeAlleles <- function(
         removeStrandAmbiguous
     )
     qcCounts <- .harmonizeQcCounts(matchResult)
-    qcSummary <- matchResult
-    result <- .harmonizeCleanResult(matchResult)
-    if (removeDups) {
-        result <- .harmonizeRemoveDups(result)
+    cleaned <- .harmonizeCleanResult(matchResult)
+    deduped <- if (removeDups) .harmonizeRemoveDups(cleaned) else cleaned
+    # Putting the unmatched rows back also re-derives the QC summary over
+    # them, so the two travel together.
+    final <- if (removeUnmatched) {
+        list(result = deduped, qcSummary = matchResult)
+    } else {
+        .harmonizeRestoreUnmatched(deduped, matchResult, target)
     }
-    if (!removeUnmatched) {
-        restored <- .harmonizeRestoreUnmatched(result, matchResult, targetData)
-        result <- restored$result
-        qcSummary <- restored$qcSummary
-    }
-    .harmonizeFinalChecks(result, refVariants, matchMinProp)
-    out <- list(harmonizedData = result, qcSummary = qcSummary)
-    attr(out, "qcCounts") <- qcCounts
-    out
+    .harmonizeFinalChecks(final$result, panel, matchMinProp)
+    out <- list(harmonizedData = final$result, qcSummary = final$qcSummary)
+    `attr<-`(out, "qcCounts", qcCounts)
 }
 
 # Turn the raw (chrom, pos) join into a decided match table: classify each
@@ -520,15 +547,12 @@ harmonizeAlleles <- function(
     removeIndels,
     removeStrandAmbiguous
 ) {
-    matchResult <- .harmonizeFlags(matchResult)
-    matchResult <- .harmonizeResolveAmbiguity(
-        matchResult,
-        removeStrandAmbiguous
-    )
-    matchResult <- .harmonizeKeepRule(matchResult, removeIndels)
-    matchResult <- .harmonizeResolveTargets(matchResult)
+    decided <- .harmonizeFlags(matchResult) |>
+        .harmonizeResolveAmbiguity(removeStrandAmbiguous) |>
+        .harmonizeKeepRule(removeIndels) |>
+        .harmonizeResolveTargets()
     .harmonizeApplyFlips(
-        matchResult,
+        decided,
         colToFlip,
         colToComplement,
         flipStrand
@@ -544,8 +568,7 @@ harmonizeAlleles <- function(
 # a frame carrying an NA or empty column name.
 # @noRd
 .haIndexTargets <- function(targetData) {
-    targetData[[.haTargetIdx]] <- seq_len(nrow(targetData))
-    targetData
+    `[[<-`(targetData, .haTargetIdx, value = seq_len(nrow(targetData)))
 }
 
 # QC / flag columns stripped from the harmonized result before it is returned.
@@ -567,7 +590,7 @@ harmonizeAlleles <- function(
 # QC'd alleles below; leaving it in collides on the final rename).
 # @noRd
 .harmonizeCoerceInputs <- function(targetData, refVariants) {
-    if (
+    parsedTarget <- if (
         is.data.frame(targetData) &&
             ncol(targetData) > 4 &&
             all(is_in(c("chrom", "pos", "A2", "A1"), names(targetData)))
@@ -575,23 +598,30 @@ harmonizeAlleles <- function(
         variantCols <- c("chrom", "pos", "A2", "A1")
         variantDf <- targetData |> select(all_of(variantCols))
         otherCols <- targetData |> select(-all_of(variantCols))
-        targetData <- bind_cols(
+        bind_cols(
             parseVariantId(variantDf),
             otherCols,
             .name_repair = "minimal"
         )
     } else {
-        targetData <- parseVariantId(targetData)
+        parseVariantId(targetData)
     }
-    refVariants <- parseVariantId(refVariants)
+    parsedRef <- parseVariantId(refVariants)
     dropCols <- c("chromosome", "position", "ref", "alt", "variant_id")
-    if (any(is_in(dropCols, colnames(targetData)))) {
-        targetData <- select(targetData, -any_of(dropCols))
+    # select() rejects a frame with an empty column name, which a passthrough
+    # column legitimately has, so only touch a frame that has something to
+    # drop.
+    trimmedTarget <- if (any(is_in(dropCols, colnames(parsedTarget)))) {
+        select(parsedTarget, -any_of(dropCols))
+    } else {
+        parsedTarget
     }
-    if (is_in("variant_id", colnames(refVariants))) {
-        refVariants <- select(refVariants, -any_of("variant_id"))
+    trimmedRef <- if (is_in("variant_id", colnames(parsedRef))) {
+        select(parsedRef, -any_of("variant_id"))
+    } else {
+        parsedRef
     }
-    list(targetData = targetData, refVariants = refVariants)
+    list(targetData = trimmedTarget, refVariants = trimmedRef)
 }
 
 # Inner-join target + reference on (chrom, pos).
@@ -616,17 +646,20 @@ harmonizeAlleles <- function(
     )
     warn(msg)
     emptyOut <- list(harmonizedData = matchResult, qcSummary = matchResult)
-    attr(emptyOut, "qcCounts") <- list(
-        considered = 0L,
-        signFlip = 0L,
-        strandFlip = 0L,
-        kept = 0L,
-        dropped = 0L,
-        droppedIndel = 0L,
-        droppedAmbiguous = 0L,
-        droppedOther = 0L
+    `attr<-`(
+        emptyOut,
+        "qcCounts",
+        list(
+            considered = 0L,
+            signFlip = 0L,
+            strandFlip = 0L,
+            kept = 0L,
+            dropped = 0L,
+            droppedIndel = 0L,
+            droppedAmbiguous = 0L,
+            droppedOther = 0L
+        )
     )
-    emptyOut
 }
 
 # Per-variant harmonization flags: original/QC'd ids, uppercased alleles, strand
@@ -712,20 +745,22 @@ harmonizeAlleles <- function(
 # fall through as exact / sign-flip cases rather than being dropped).
 # @noRd
 .harmonizeResolveAmbiguity <- function(matchResult, removeStrandAmbiguous) {
-    if (!removeStrandAmbiguous) {
-        matchResult$strand_unambiguous <- TRUE
+    relaxed <- if (removeStrandAmbiguous) {
+        matchResult
+    } else {
+        mutate(matchResult, strand_unambiguous = TRUE)
     }
-    if (!any(matchResult$strand_flip & matchResult$strand_unambiguous)) {
-        matchResult$strand_unambiguous <- TRUE
+    if (any(relaxed$strand_flip & relaxed$strand_unambiguous)) {
+        return(relaxed)
     }
-    matchResult
+    mutate(relaxed, strand_unambiguous = TRUE)
 }
 
 # Compute the keep flag (strand-flip vs non-strand-flip rules); drop indels when
 # requested.
 # @noRd
 .harmonizeKeepRule <- function(matchResult, removeIndels) {
-    matchResult <- matchResult |>
+    ruled <- matchResult |>
         mutate(
             keep = if_else(
                 .data$strand_flip,
@@ -737,11 +772,10 @@ harmonizeAlleles <- function(
                     .data$ID_match
             )
         )
-    if (removeIndels) {
-        matchResult <- matchResult |>
-            mutate(keep = if_else(.data$INDEL, FALSE, .data$keep))
+    if (!removeIndels) {
+        return(ruled)
     }
-    matchResult
+    mutate(ruled, keep = if_else(.data$INDEL, FALSE, .data$keep))
 }
 
 # Reduce the join to at most one reference row per TARGET variant.
@@ -782,8 +816,7 @@ harmonizeAlleles <- function(
     ]
     # Named apart from the column it replaces: `keep = keep` inside mutate()
     # reads the column, not this vector, and silently changes nothing.
-    resolvedKeep <- rep(FALSE, nrow(matchResult))
-    resolvedKeep[resolved] <- TRUE
+    resolvedKeep <- replace(rep(FALSE, nrow(matchResult)), resolved, TRUE)
     mutate(matchResult, keep = resolvedKeep)
 }
 
@@ -821,26 +854,30 @@ harmonizeAlleles <- function(
     flipStrand
 ) {
     signFlip <- matchResult$sign_flip
-    if (!is.null(colToFlip)) {
+    negated <- if (is.null(colToFlip)) {
+        matchResult
+    } else {
         .harmonizeCheckCols(colToFlip, matchResult)
-        matchResult <- matchResult |>
+        matchResult |>
             mutate(across(
                 all_of(colToFlip),
                 partial(.negateWhere, flip = signFlip)
             ))
     }
-    if (length(colToComplement) > 0L) {
-        .harmonizeCheckCols(colToComplement, matchResult)
-        matchResult <- matchResult |>
+    complemented <- if (length(colToComplement) == 0L) {
+        negated
+    } else {
+        .harmonizeCheckCols(colToComplement, negated)
+        negated |>
             mutate(across(
                 all_of(colToComplement),
                 partial(.complementWhere, flip = signFlip)
             ))
     }
-    if (flipStrand) {
-        matchResult <- .harmonizeFlipStrandCols(matchResult)
+    if (!flipStrand) {
+        return(complemented)
     }
-    matchResult
+    .harmonizeFlipStrandCols(complemented)
 }
 
 # Assert the named columns exist in matchResult.
@@ -886,17 +923,20 @@ harmonizeAlleles <- function(
             0L
         }
     )
-    qcCounts$droppedAmbiguous <- sum(
+    droppedAmbiguous <- sum(
         !matchResult$keep &
             matchResult$strand_flip &
             !matchResult$strand_unambiguous &
             if (hasIndel) !matchResult$INDEL else TRUE,
         na.rm = TRUE
     )
-    qcCounts$droppedOther <- qcCounts$dropped -
-        qcCounts$droppedIndel -
-        qcCounts$droppedAmbiguous
-    qcCounts
+    list_assign(
+        qcCounts,
+        droppedAmbiguous = droppedAmbiguous,
+        droppedOther = qcCounts$dropped -
+            qcCounts$droppedIndel -
+            droppedAmbiguous
+    )
 }
 
 # Kept rows with QC/flag + target-allele columns stripped and ref alleles /
@@ -966,14 +1006,16 @@ harmonizeAlleles <- function(
         return(list(result = result, qcSummary = qcSummary))
     }
     unmatchData <- targetData |> filter(!is_in(.data$variant_id, matchVariant))
-    result <- bind_rows(
+    withUnmatched <- bind_rows(
         result,
         unmatchData |> mutate(variants_id_original = .data$variant_id)
     )
-    result <- result |>
+    # Restore the caller's input order, which bind_rows put the unmatched
+    # rows behind.
+    restored <- withUnmatched |>
         slice(match(targetData$variant_id, .data$variants_id_original)) |>
         select(-any_of("variants_id_original"))
-    list(result = result, qcSummary = qcSummary)
+    list(result = restored, qcSummary = qcSummary)
 }
 
 # Final guards: enough variants matched, and no duplicate ids remain.
@@ -1108,12 +1150,11 @@ matchVariants <- function(
     # Inject sentinel index/sign columns so the matched pairs and the swap sign
     # can be read straight back out of harmonizeAlleles without re-deriving
     # them.
-    dfA$.mvTidx <- seq_len(nrow(dfA))
-    dfA$.mvSign <- 1
-    dfB$.mvRidx <- seq_len(nrow(dfB))
+    tagA <- mutate(dfA, .mvTidx = seq_len(nrow(dfA)), .mvSign = 1)
+    tagB <- mutate(dfB, .mvRidx = seq_len(nrow(dfB)))
     res <- suppressWarnings(harmonizeAlleles(
-        targetData = dfA,
-        refVariants = dfB,
+        targetData = tagA,
+        refVariants = tagB,
         colToFlip = ".mvSign",
         matchMinProp = 0,
         removeDups = TRUE,
@@ -1179,11 +1220,18 @@ parseRegion <- function(region) {
 #'   \code{colnames}: a normalized character chromosome plus integer start/end.
 #' @examples
 #' regionToDf(c("1_100_200", "2_300_400"))
+#' @importFrom checkmate assertCharacter
 #' @export
 regionToDf <- function(ldRegionId, colnames = c("chrom", "start", "end")) {
+    # @param says "A string", but the function is vectorised and callers pass
+    # a character vector -- assert what it actually accepts, not the prose.
+    assertCharacter(ldRegionId, any.missing = FALSE)
+    assertCharacter(colnames, len = 3L, any.missing = FALSE)
     parts <- str_split(ldRegionId, "[_:-]", simplify = TRUE)
-    regionOfInterest <- as_tibble(parts, .name_repair = "minimal")
-    colnames(regionOfInterest) <- colnames
+    regionOfInterest <- `colnames<-`(
+        as_tibble(parts, .name_repair = "minimal"),
+        colnames
+    )
     regionOfInterest |>
         mutate(
             across(all_of(colnames[1]), canonChrom),
@@ -1222,9 +1270,11 @@ asGranges <- function(regions) {
         abort(msg)
     }
     # GRanges expects character seqnames; prefix with "chr" if numeric
-    seqnames <- as.character(df$chrom)
-    if (!any(str_detect(seqnames, "^chr"))) {
-        seqnames <- str_c("chr", seqnames)
+    rawChrom <- as.character(df$chrom)
+    seqnames <- if (any(str_detect(rawChrom, "^chr"))) {
+        rawChrom
+    } else {
+        str_c("chr", rawChrom)
     }
     GenomicRanges::GRanges(
         seqnames = seqnames,
@@ -1306,10 +1356,12 @@ classifyVariantType <- function(ids) {
 .variantIdsToGRanges <- function(ids, what = "variant ids") {
     ids <- as.character(ids)
     if (length(ids) == 0L) {
-        gr <- GenomicRanges::GRanges()
-        mcols(gr) <- S4Vectors::DataFrame(
-            A1 = character(0),
-            A2 = character(0)
+        gr <- S4Vectors::`mcols<-`(
+            GenomicRanges::GRanges(),
+            value = S4Vectors::DataFrame(
+                A1 = character(0),
+                A2 = character(0)
+            )
         )
         return(gr)
     }
@@ -1326,13 +1378,15 @@ classifyVariantType <- function(ids) {
         )
         abort(msg)
     }
-    gr <- GenomicRanges::GRanges(
-        withChrPrefix(parsed$chrom),
-        IRanges::IRanges(start = parsed$pos, width = 1L)
-    )
-    mcols(gr) <- S4Vectors::DataFrame(
-        A1 = as.character(parsed$A1),
-        A2 = as.character(parsed$A2)
+    gr <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRanges(
+            withChrPrefix(parsed$chrom),
+            IRanges::IRanges(start = parsed$pos, width = 1L)
+        ),
+        value = S4Vectors::DataFrame(
+            A1 = as.character(parsed$A1),
+            A2 = as.character(parsed$A2)
+        )
     )
     gr
 }

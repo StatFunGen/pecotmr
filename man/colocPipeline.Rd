@@ -7,20 +7,14 @@
 colocPipeline(
   qtlFineMappingResult,
   gwasInput,
-  filterLbfCs = FALSE,
-  filterLbfCsSecondary = NULL,
-  filterLbfCsConcentration = 0.5,
-  priorTol = 1e-09,
-  p1 = 1e-04,
-  p2 = 1e-04,
-  p12 = 5e-06,
-  finemappingMethods = "susie",
+  priors = ColocPriorParam(),
+  lbfFilterArgs = ColocLbfFilterParam(),
+  gwasFineMappingArgs = GwasFineMappingParam(),
   returnGwasFineMapping = FALSE,
   enrichment = NULL,
-  p12Max = 0.001,
   adjustPips = TRUE,
   alleleFlip = TRUE,
-  ...
+  methodArgs = ColocOptions()
 )
 }
 \arguments{
@@ -33,37 +27,32 @@ colocPipeline(
 fine-map inline (\code{\link{QtlSumStats}} or
 \code{\link{GwasSumStats}}).}
 
-\item{filterLbfCs}{Logical. When \code{TRUE} (and \code{filterLbfCsSecondary}
-is \code{NULL}), keep only effects that produced a credible set
-(\code{trimmedFit$sets$cs_index}). Default \code{FALSE}.}
+\item{priors}{Per-variant prior probabilities, built with
+\code{\link{ColocPriorParam}}: \code{p1} (QTL signal), \code{p2} (GWAS
+signal) and \code{p12} (shared). Mutually exclusive with
+\code{enrichment}, which derives the same three.}
 
-\item{filterLbfCsSecondary}{Optional secondary coverage (numeric in \eqn{(0,
-1)}). When supplied, run a credible-set concentration filter at this
-coverage level instead of \code{filterLbfCs}: each L-effect's credible set
-must span fewer than \code{nVariants * filterLbfCsSecondary *
-filterLbfCsConcentration} variants to be kept. Effects with diffuse
-credible sets are dropped before the LBF matrix is passed to
-\code{coloc::coloc.bf_bf}. Overrides \code{filterLbfCs} when set.}
+\item{lbfFilterArgs}{Credible-set filtering applied before scoring,
+built with
+\code{\link{ColocLbfFilterParam}}. \code{filterLbfCs} keeps only effects
+that produced a credible set; supplying \code{secondary} instead runs a
+concentration filter at that coverage, where an effect is kept only if
+its credible set spans fewer than
+\code{nVariants * secondary * concentration} variants. Diffuse effects
+are dropped before the LBF matrix reaches
+\code{coloc::coloc.bf_bf}. \code{priorTol} is the default filter's own
+cutoff (effects with \code{V <= priorTol} are dropped) and does not
+apply once \code{filterLbfCs} or \code{secondary} selects another.}
 
-\item{filterLbfCsConcentration}{Numeric in \eqn{(0, 1)}; the concentration
-factor in the cutoff above. With the default \code{0.5} a 50\% credible set
-is kept only if it spans fewer than 25\% of the locus's variants. Only
-consulted when \code{filterLbfCsSecondary} is non-NULL. Default \code{0.5}.}
-
-\item{priorTol}{Prior-variance cutoff for the default filter: effects with
-\code{V <= priorTol} are dropped. Ignored when either \code{filterLbfCs} or
-\code{filterLbfCsSecondary} is in use. Default \code{1e-9}.}
-
-\item{p1}{Prior probability of QTL signal per variant. Default \code{1e-4}.}
-
-\item{p2}{Prior probability of GWAS signal per variant. Default \code{1e-4}.}
-
-\item{p12}{Prior probability of shared signal per variant. Default
-\code{5e-6}.}
-
-\item{finemappingMethods}{Character vector forwarded to
-\code{\link{fineMappingPipeline}} when \code{gwasInput} is summary
-statistics rather than a fine-mapping result. Default \code{"susie"}.}
+\item{gwasFineMappingArgs}{How \code{gwasInput} is fine-mapped when it is
+summary statistics rather than a fine-mapping result, built with
+\code{\link{GwasFineMappingParam}}: \code{methods},
+\code{credibleSet}, \code{rss}, \code{panelFilter},
+\code{addSusieInf} and \code{fitRetention}. Inert when
+\code{gwasInput} is already fine-mapped. \code{credibleSet} is the one
+to check: its \code{coverage} / \code{L} decide the sets whose LBFs are
+scored, so defaults here against a differently-built QTL side compare
+two different things.}
 
 \item{returnGwasFineMapping}{Logical. When \code{TRUE}, attach the
 fine-mapping result computed from \code{gwasInput} on the returned object
@@ -74,15 +63,12 @@ columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
 \code{enrichment}, and optionally \code{gwasContext} / \code{gwasTrait}
 (which the join uses when present, and which
 \code{\link{qtlEnrichmentPipeline}} emits for a QTL outcome side). Output
-of \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL}, each pair's
-\code{p12} prior is scaled to \code{min(p12 * (1 + enrichment), p12Max)}
-(the enrichment-informed colocalization variant, "enloc"). Pairs without a
-matching enrichment row fall back to the baseline \code{p12} with a
-warning. Default \code{NULL} (baseline coloc).}
-
-\item{p12Max}{Numeric scalar. Maximum value for the enrichment-adjusted
-\code{p12} prior. Default \code{1e-3}. Ignored when \code{enrichment =
-NULL}.}
+of \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
+scored by enloc rather than coloc: the priors come from that table's
+\code{colocP1} / \code{colocP2} / \code{colocP12} columns, and the
+report gains \code{RCP} and \code{LCP}. Pairs without a matching
+enrichment row fall back to the baseline priors with a warning. Default
+\code{NULL} (baseline coloc).}
 
 \item{adjustPips}{Logical, default \code{TRUE}. When TRUE, before any
   per-pair inference the QTL and GWAS fine-mapping result collections are
@@ -106,7 +92,10 @@ between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized (LBF
 is coding-invariant, so no sign change is needed); when FALSE, match on
 exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 
-\item{...}{Additional arguments forwarded to \code{coloc::coloc.bf_bf}.}
+\item{methodArgs}{Additional arguments forwarded to
+\code{coloc::coloc.bf_bf}, built with \code{\link{ColocOptions}}. The
+prior probabilities are set through \code{priors} instead, since the
+enrichment adjustment reads them too.}
 }
 \value{
 A \code{\linkS4class{ColocResult}}: one element per tested
@@ -119,10 +108,14 @@ A \code{\linkS4class{ColocResult}}: one element per tested
   standard coloc fields (\code{idx1}, \code{idx2}, \code{nSnps},
   \code{hit1}, \code{hit2}, \code{PP.H0.abf} \ldots \code{PP.H4.abf}) and
   the reconciliation diagnostics \code{qtlRetainedMass} /
-  \code{gwasRetainedMass}. When \code{enrichment} is supplied, two
-  additional columns \code{enrichment} and \code{p12Used} report the
-  per-pair factor and the prior actually passed to
-  \code{coloc::coloc.bf_bf}.
+  \code{gwasRetainedMass}. When \code{enrichment} is supplied the pair is
+  scored by enloc instead, and four further columns appear:
+  \code{enrichment} and \code{p12Used} report the per-pair factor and the
+  shared-signal prior enloc derived, while \code{RCP} and \code{LCP} are
+  enloc's regional and locus colocalisation probabilities. Those two are
+  the same numbers as \code{PP.H4.abf} and
+  \code{PP.H3.abf + PP.H4.abf}, reported under enloc's names because that
+  is what readers of enloc output expect to find.
 
   Project it with \code{\link{getColocPairs}} (the flat table this
   pipeline used to return, also available as \code{as.data.frame}),
@@ -160,11 +153,11 @@ directly. That choice carries three behaviours that
   \item \strong{fSuSiE support}: the LBF matrix lives at a different
     slot for fSuSiE fits (\code{fsusie_result$lBF}) and gets stacked
     into a single matrix.
-  \item \strong{Effect filtering}: \code{filterLbfCs} keeps only
-    effects that produced a credible set; \code{filterLbfCsSecondary}
-    keeps effects at a secondary coverage; otherwise the default
-    filter drops effects whose prior variance is below
-    \code{priorTol}.
+  \item \strong{Effect filtering}: \code{lbfFilter}'s
+    \code{filterLbfCs} keeps only effects that produced a credible
+    set, its \code{secondary} keeps effects at a secondary coverage;
+    otherwise the default filter drops effects whose prior variance is
+    below \code{priorTol}.
   \item \strong{Per-tuple LBF reuse}: each second-side tuple's LBF
     matrix is extracted once and scored against every first-side
     tuple, so the filtering above is applied once per tuple rather
@@ -177,7 +170,7 @@ This pipeline preserves all three.
     \item \code{gwasInput} is a \code{\link{QtlSumStats}} or a
           \code{\link{GwasSumStats}}: it is fine-mapped inline by
           \code{\link{fineMappingPipeline}} with the supplied
-          \code{finemappingMethods} (default \code{"susie"}).
+          \code{GwasFineMappingParam()} (methods default \code{"susie"}).
     \item \code{gwasInput} is a fine-mapping result: used directly; no
           inline fine-mapping.
   }

@@ -41,30 +41,25 @@ setClass(
     )
 )
 
+#' @importFrom checkmate makeAssertCollection assert assertFlag
+#' @importFrom checkmate checkNumeric checkMatrix
 methods::setValidity("TwasWeightsRow", function(object) {
-    errors <- character(0)
+    coll <- makeAssertCollection()
     w <- object@weights
     n <- length(object@variants)
     if (!is.null(w)) {
         # A matrix carries one ROW per variant (columns are conditions), so
         # the two shapes need separate checks -- validating only the vector
         # case would let a mis-sized matrix through.
-        if (is.null(dim(w)) && length(w) != n) {
-            errors <- c(
-                errors,
-                "length(weights) must equal length(variantIds)"
-            )
-        } else if (!is.null(dim(w)) && nrow(w) != n) {
-            errors <- c(
-                errors,
-                "nrow(weights) must equal length(variantIds)"
-            )
-        }
+        assert(
+            checkNumeric(w, len = n),
+            checkMatrix(w, nrows = n),
+            .var.name = "weights",
+            add = coll
+        )
     }
-    if (length(object@standardized) != 1L || is.na(object@standardized)) {
-        errors <- c(errors, "'standardized' must be a single logical value")
-    }
-    if (length(errors) == 0L) TRUE else errors
+    assertFlag(object@standardized, .var.name = "standardized", add = coll)
+    coll$getMessages()
 })
 
 #' @title Build One TWAS-Weight Row
@@ -117,10 +112,13 @@ twasWeightsRow <- function(
         )
         abort(msg)
     }
-    mcols(gr)$weight <- w
+    withWeight <- S4Vectors::`mcols<-`(
+        gr,
+        value = `[[<-`(mcols(gr, use.names = FALSE), "weight", value = w)
+    )
     obj <- new(
         "TwasWeightsRow",
-        variants = gr,
+        variants = withWeight,
         weights = w,
         fits = fits,
         cvResult = cvResult,
@@ -136,34 +134,34 @@ twasWeightsRow <- function(
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "TwasWeightsRow", function(x, ...) {
+setMethod("getVariantIds", "TwasWeightsRow", function(x) {
     .grVariantIds(x@variants)
 })
 
 #' @rdname getWeights
 #' @export
-setMethod("getWeights", "TwasWeightsRow", function(x, ...) x@weights)
+setMethod("getWeights", "TwasWeightsRow", function(x) x@weights)
 
 #' @rdname getFits
 #' @export
-setMethod("getFits", "TwasWeightsRow", function(x, ...) x@fits)
+setMethod("getFits", "TwasWeightsRow", function(x) x@fits)
 
 #' @rdname getCvResult
 #' @export
-setMethod("getCvResult", "TwasWeightsRow", function(x, ...) x@cvResult)
+setMethod("getCvResult", "TwasWeightsRow", function(x) x@cvResult)
 
 #' @rdname getStandardized
 #' @export
-setMethod("getStandardized", "TwasWeightsRow", function(x, ...) {
+setMethod("getStandardized", "TwasWeightsRow", function(x) {
     isTRUE(x@standardized)
 })
 
 #' @rdname getDataType
 #' @export
-setMethod("getDataType", "TwasWeightsRow", function(x, ...) x@dataType)
+setMethod("getDataType", "TwasWeightsRow", function(x) x@dataType)
 
 # @noRd
-setMethod("rowVariants", "TwasWeightsRow", function(x, ...) x@variants)
+setMethod("rowVariants", "TwasWeightsRow", function(x) x@variants)
 
 #' @rdname show-methods
 #' @export

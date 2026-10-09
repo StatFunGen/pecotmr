@@ -19,7 +19,7 @@ sdpr(
   iter = 1000,
   burn = 200,
   thin = 5,
-  nThreads = 1,
+  numThreads = 1,
   optLlk = 1,
   verbose = TRUE,
   seed = NULL
@@ -57,7 +57,7 @@ length equal to `bhat`.}
 
 \item{thin}{Thinning interval for MCMC. Default is 5.}
 
-\item{nThreads}{Number of threads to use. Default is 1.}
+\item{numThreads}{Number of threads to use. Default is 1.}
 
 \item{optLlk}{Which likelihood to evaluate. 1 for equation 6 (slightly shrink
 the correlation of SNPs) and 2 for equation 5 (SNPs genotyped on different

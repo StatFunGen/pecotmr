@@ -8,15 +8,37 @@
 \usage{
 getMaf(x, ...)
 
-\S4method{getMaf}{SumStatsBase}(x, ...)
+\S4method{getMaf}{SumStatsBase}(
+  x,
+  study = NULL,
+  context = NULL,
+  trait = NULL,
+  annotateSignificance = NULL,
+  ranges = NULL
+)
 
-\S4method{getMaf}{QtlDataset}(x, region = NULL, cisWindow = NULL, samples = NULL, ...)
+\S4method{getMaf}{QtlDataset}(x, region = NULL, cisWindow = NULL, samples = NULL)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlDataset} object.}
 
 \item{...}{Class-specific selection arguments (e.g., \code{region},
 \code{cisWindow} for \code{QtlDataset}).}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{annotateSignificance}{Optional correction-method name passed through to
+\code{\link{getSumStats}} (QTL only); \code{NULL} applies none.}
+
+\item{ranges}{A \code{GRanges} or \code{NULL} (default). Return only the
+variants overlapping these ranges; \code{NULL} returns everything.}
 
 \item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
 Restrict variants to this region; \code{NULL} uses the full cis window /

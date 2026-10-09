@@ -9,12 +9,13 @@ mashPriorCovariances(
   alpha,
   vhat = NULL,
   components = c("canonical", "pca", "flash", "flashNonneg"),
-  engine = c("cov_ed", "ud", "ud_ted"),
+  engine = c("covEd", "covUdr", "none"),
   nPcs = NULL,
   priorCovariances = NULL,
   priorComponents = NULL,
-  udControl = list(),
   inputScale = c("auto", "beta", "z"),
+  mashDataArgs = MashDataOptions(),
+  mashArgs = MashOptions(),
   setSeed = 999
 )
 }
@@ -30,15 +31,19 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 \item{components}{Data-driven covariance components, any of
 \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
 \code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
-"nonneg")}). Built in that fixed order. Ignored by the \code{"ud"} /
-\code{"ud_ted"} engines.}
+"nonneg")}). Built in that fixed order. May instead be a
+\code{\link{MashComponentParam}} record, which names the components and
+carries each one's options.}
 
-\item{engine}{Covariance-refinement engine. \code{"cov_ed"} (default; mashr's
-exported \code{cov_ed()} extreme deconvolution, whose default
-\code{algorithm = "bovy"} IS the Bovy et al. 2011 method -- weights from a
-final \code{mash()}); \code{"ud"} / \code{"ud_ted"} (\pkg{udr} ED / TED
-updates, returning weights directly -- OPT-IN, known numerical issues, so
-not the default; \code{"ud_ted"} additionally needs i.i.d. (z-scale) data).}
+\item{engine}{Covariance-refinement engine, either a name or the matching
+constructor carrying that engine's settings. \code{"covEd"} (default;
+\code{\link{CovEdOptions}} -- mashr's exported \code{cov_ed()} extreme
+deconvolution, whose default \code{algorithm = "bovy"} IS the Bovy et al.
+2011 method, weights from a final \code{mash()}); \code{"covUdr"}
+(\code{\link{CovUdrOptions}} -- \pkg{udr} ED / TED updates, returning
+weights directly -- OPT-IN, known numerical issues, so not the default;
+\code{UdFitOptions(unconstrained.update = "ted")} additionally needs
+i.i.d. (z-scale) data); \code{"none"} to skip refinement.}
 
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 
@@ -58,13 +63,20 @@ mixture-prior pipeline where separate steps built the components.
 \code{components} / \code{nPcs} are then ignored. Distinct from
 \code{priorCovariances}, which bypasses the engine entirely.}
 
-\item{udControl}{Named list overriding the \pkg{udr} controls for the
-\code{"ud"} / \code{"ud_ted"} engines: \code{n_unconstrained} (data-driven
-matrices to fit; default 50 -- the dominant cost, so reduce it for
-few-condition data), \code{maxiter} (default 1000), \code{tol},
-\code{tol.lik}. Ignored by \code{cov_ed}.}
-
 \item{inputScale}{SumStats -> matrix conversion scale.}
+
+\item{mashDataArgs}{Extra arguments for
+\code{mashr::mash_set_data()}, built with
+\code{\link{MashDataOptions}} -- for example
+\code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+\code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+are refused by the constructor.}
+
+\item{mashArgs}{Extra arguments for \code{mashr::mash()}, built with
+\code{\link{MashOptions}} -- for example \code{nullweight},
+\code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+\code{outputlevel} and \code{seed} are owned by pecotmr and are
+refused by the constructor.}
 
 \item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG
 untouched.}

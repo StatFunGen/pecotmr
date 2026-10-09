@@ -10,7 +10,7 @@ context("LdData accessors")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -34,7 +34,25 @@ context("LdData accessors")
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
         A1 = rep("A", snp_n),
         A2 = rep("G", snp_n),
-        variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n)))
+        variant_id = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n))
+    )
+    gr
+}
+
+# new("LdData", ...) skips the constructor, so those tests have to supply
+# the block columns the slot now guarantees.
+.ld_makeBlockMetadata <- function(snp_n = 4L) {
+    # new("LdData", ...) skips the constructor, so these tests supply the
+    # stored shape directly: a GRanges whose mcols carry the index payload.
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(start = 100L, end = 100L * snp_n)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        blockId = 1L,
+        size = snp_n,
+        startIdx = 1L,
+        endIdx = snp_n
     )
     gr
 }
@@ -153,7 +171,7 @@ test_that("getCorrelation: mixture handles produce a weighted-average R", {
         },
         .package = "pecotmr"
     )
-    R_each <- lapply(list(gh1, gh2), function(h) {
+    R_each <- map(list(gh1, gh2), function(h) {
         geno <- extractBlockGenotypes(h, 1:4)
         Xt <- t(SummarizedExperiment::assay(geno, "dosage"))
         computeLd(Xt, method = "sample")
@@ -171,7 +189,7 @@ test_that("getCorrelation: mixture handles without mixtureWeights errors", {
         correlation = NULL,
         genotypeHandle = list(gh, gh),
         snpIdx = 1:4,
-        blockMetadata = S4Vectors::DataFrame(x = 1),
+        blockMetadata = .ld_makeBlockMetadata(),
         nRef = 0L,
         mixtureWeights = NULL
     )
@@ -190,7 +208,7 @@ test_that("getCorrelation: mixture panels of differing dim error", {
         correlation = NULL,
         genotypeHandle = list(gh_small, gh),
         snpIdx = 1:3,
-        blockMetadata = S4Vectors::DataFrame(x = 1),
+        blockMetadata = .ld_makeBlockMetadata(),
         nRef = 0L,
         mixtureWeights = c(0.5, 0.5)
     )
@@ -243,7 +261,7 @@ test_that("getGenotypes: matrix handle is returned unchanged", {
         correlation = NULL,
         genotypeHandle = X,
         snpIdx = NULL,
-        blockMetadata = S4Vectors::DataFrame(x = 1),
+        blockMetadata = .ld_makeBlockMetadata(),
         nRef = 0L,
         mixtureWeights = NULL
     )
@@ -327,12 +345,20 @@ test_that("getVariantIds returns the variant_id mcol", {
     expect_equal(getVariantIds(ld), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
-test_that("getVariantInfo / getBlockMetadata return slots verbatim", {
+test_that("getVariantInfo returns the variants verbatim", {
     vars <- .ld_makeVariants()
     bm <- S4Vectors::DataFrame(region = "chr1:100-400")
     ld <- LdData(correlation = diag(4), variants = vars, blockMetadata = bm)
     expect_identical(getVariantInfo(ld), vars)
-    expect_identical(getBlockMetadata(ld), bm)
+    # blockMetadata is NOT verbatim: the constructor normalises it to the
+    # columns consumers read. A column the caller added is carried through.
+    got <- getBlockMetadata(ld)
+    expect_s4_class(got, "GRanges")
+    expect_true(all(
+        c("blockId", "size", "startIdx", "endIdx") %in%
+            names(S4Vectors::mcols(got))
+    ))
+    expect_equal(got$region, "chr1:100-400")
 })
 
 test_that("getRefPanel: assembles the chrom/pos/A1/A2/variant_id data.frame", {
@@ -379,7 +405,7 @@ test_that("LdData constructor works with correlation matrix", {
     expect_false(hasGenotypes(ld))
     expect_true(is.matrix(getCorrelation(ld)))
     expect_equal(getVariantIds(ld), c("chr1:100:A:G", "chr1:200:C:T"))
-    expect_equal(nrow(getBlockMetadata(ld)), 1L)
+    expect_equal(length(getBlockMetadata(ld)), 1L)
     expect_null(getGenotypes(ld))
 })
 
@@ -869,4 +895,154 @@ test_that("an LdData refuses to be subset", {
     ld <- makeTestLdData(n = 3L)
     expect_error(ld[1:2], "an LdData cannot be subset")
     expect_error(ld[1:2, ], "an LdData cannot be subset")
+})
+
+# ===========================================================================
+# blockMetadata normalisation
+# ---------------------------------------------------------------------------
+# Five construction paths used to emit five different column sets, so
+# consumers read startIdx / size / chrom that were present by luck. The
+# constructor now fills whatever is absent and stores ONE shape: a GRanges
+# whose seqnames/ranges are the block's chromosome and span, with the index
+# payload the matrix is addressed by in mcols.
+# ===========================================================================
+
+.ld_bmMcols <- c("blockId", "size", "startIdx", "endIdx")
+
+test_that("blockMetadata: a bare genomic span is completed from variants", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = S4Vectors::DataFrame(
+            chrom = "chr1",
+            start = 100L,
+            end = 400L
+        )
+    )
+    bm <- getBlockMetadata(ld)
+    expect_s4_class(bm, "GRanges")
+    expect_true(all(.ld_bmMcols %in% names(S4Vectors::mcols(bm))))
+    expect_equal(length(bm), 1L)
+    expect_equal(bm$startIdx, 1L)
+    expect_equal(bm$endIdx, 4L)
+    expect_equal(bm$size, 4L)
+    # start/end name the BLOCK's span, so they become the range itself
+    # rather than colliding with a variant position.
+    expect_equal(as.character(GenomicRanges::seqnames(bm)), "chr1")
+    expect_equal(GenomicRanges::start(bm), 100L)
+    expect_equal(GenomicRanges::end(bm), 400L)
+})
+
+test_that("blockMetadata: a placeholder table means one block, not none", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = data.frame()
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(length(bm), 1L)
+    expect_true(all(.ld_bmMcols %in% names(S4Vectors::mcols(bm))))
+    expect_equal(bm$size, 4L)
+})
+
+test_that("blockMetadata: a GRanges keeps its mcols over its ranges", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(start = c(100L, 300L), end = c(200L, 400L))
+    )
+    # An LdBlocks-style GRanges carries these in mcols AND in the ranges.
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        blockId = c(1L, 2L),
+        chrom = c("1", "1"),
+        size = c(2L, 2L),
+        startIdx = c(1L, 3L),
+        endIdx = c(2L, 4L)
+    )
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = gr
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(length(bm), 2L)
+    # chrom is the seqnames now, and must not ALSO linger as an mcol:
+    # binding the ranges and the mcols both would duplicate it.
+    expect_equal(as.character(GenomicRanges::seqnames(bm)), c("1", "1"))
+    expect_false(is_in("chrom", names(S4Vectors::mcols(bm))))
+    expect_equal(as.character(GenomicRanges::seqnames(bm)), c("1", "1"))
+    expect_equal(bm$startIdx, c(1L, 3L))
+})
+
+test_that("blockMetadata: several blocks take their ranges from size", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = tibble(blockId = 1:2, size = c(3L, 1L))
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(bm$startIdx, c(1L, 4L))
+    expect_equal(bm$endIdx, c(3L, 4L))
+    expect_equal(
+        as.character(GenomicRanges::seqnames(bm)),
+        c("chr1", "chr1")
+    )
+})
+
+test_that("blockMetadata: several blocks with no size and no range error", {
+    expect_error(
+        LdData(
+            correlation = diag(4),
+            variants = .ld_makeVariants(),
+            blockMetadata = tibble(blockId = 1:2)
+        ),
+        "cannot be determined"
+    )
+})
+
+test_that("blockMetadata: half an index range is refused", {
+    expect_error(
+        LdData(
+            correlation = diag(4),
+            variants = .ld_makeVariants(),
+            blockMetadata = tibble(blockId = 1L, startIdx = 1L)
+        ),
+        "both or neither"
+    )
+})
+
+test_that("blockMetadata: supplied indices are never replaced", {
+    # partitionLdMatrix() has to reject an out-of-range block, so the
+    # normaliser must not quietly substitute valid indices.
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = tibble(
+            blockId = 1L,
+            size = 4L,
+            startIdx = 10L,
+            endIdx = 20L
+        )
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(bm$startIdx, 10L)
+    expect_equal(bm$endIdx, 20L)
+    # An out-of-range block has no span to derive, and a GRanges cannot
+    # hold an NA one -- it gets a width-0 range, which is visibly not an
+    # interval. partitionLdMatrix() still rejects it on its indices.
+    expect_equal(GenomicRanges::width(bm), 0L)
+})
+
+test_that("blockMetadata: a caller's own columns are carried through", {
+    ld <- LdData(
+        correlation = diag(4),
+        variants = .ld_makeVariants(),
+        blockMetadata = tibble(region = "chr1:100-400", note = "kept")
+    )
+    bm <- getBlockMetadata(ld)
+    expect_equal(bm$region, "chr1:100-400")
+    expect_equal(bm$note, "kept")
+    # The index payload comes first so the mcols read the same way whatever
+    # the caller supplied.
+    got <- names(S4Vectors::mcols(bm))
+    expect_equal(got[seq_along(.ld_bmMcols)], .ld_bmMcols)
 })

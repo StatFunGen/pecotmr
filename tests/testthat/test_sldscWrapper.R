@@ -1,7 +1,7 @@
 # Tests for R/sldscWrapper.R
 #
-# File-based fixture builders (.make_annot_gz / .make_frq / .make_polyfun_single
-# / .make_polyfun_joint / .make_sldsc_fixtures) and the in-memory SldscData
+# File-based fixture builders (.makeAnnotGz / .make_frq / .makePolyfunSingle
+# / .makePolyfunJoint / .makeSldscFixtures) and the in-memory SldscData
 # builders (.sldscMkRun / .sldscMkData) live in helper-sldsc.R.
 #
 # The reader functions (readSldscTrait/readSldscAnnot/readSldscFrq) do file I/O
@@ -15,7 +15,7 @@
 
 test_that(".sldscDetectAnnotCols finds non-standard columns", {
     dir <- withr::local_tempdir()
-    .make_annot_gz(dir, 1)
+    .makeAnnotGz(dir, 1)
     f <- file.path(dir, "target.1.annot.gz")
     cols <- pecotmr:::.sldscDetectAnnotCols(f)
     expect_true("annot_A" %in% cols)
@@ -32,7 +32,7 @@ test_that(".sldscDetectAnnotCols finds non-standard columns", {
 test_that("readSldscTrait reads polyfun outputs correctly", {
     dir <- withr::local_tempdir()
     prefix <- file.path(dir, "test_trait")
-    .make_polyfun_single(dir, prefix, "myannot", nBlocks = 5, h2g = 0.25)
+    .makePolyfunSingle(dir, prefix, "myannot", nBlocks = 5, h2g = 0.25)
 
     result <- readSldscTrait(prefix)
     expect_true(is.list(result))
@@ -47,13 +47,16 @@ test_that("readSldscTrait reads polyfun outputs correctly", {
 })
 
 test_that("readSldscTrait errors on missing files", {
-    expect_error(readSldscTrait("/nonexistent/prefix"), "missing file")
+    expect_error(
+        readSldscTrait("/nonexistent/prefix"),
+        "File does not exist"
+    )
 })
 
 test_that("readSldscTrait errors when h2 not in log", {
     dir <- withr::local_tempdir()
     prefix <- file.path(dir, "bad_log")
-    .make_polyfun_single(dir, prefix, "a", nBlocks = 3)
+    .makePolyfunSingle(dir, prefix, "a", nBlocks = 3)
     writeLines("No heritability here", paste0(prefix, ".log"))
     expect_error(readSldscTrait(prefix), "Total Observed scale h2")
 })
@@ -61,7 +64,7 @@ test_that("readSldscTrait errors when h2 not in log", {
 test_that("readSldscTrait errors on column mismatch in part_delete", {
     dir <- withr::local_tempdir()
     prefix <- file.path(dir, "bad_delete")
-    .make_polyfun_single(dir, prefix, "a", nBlocks = 3)
+    .makePolyfunSingle(dir, prefix, "a", nBlocks = 3)
     vroom::vroom_write(
         data.frame(x = 1:3, y = 4:6, z = 7:9, w = 10:12),
         paste0(prefix, ".part_delete"),
@@ -73,7 +76,7 @@ test_that("readSldscTrait errors on column mismatch in part_delete", {
 test_that("readSldscTrait errors when the h2g value is non-numeric", {
     dir <- withr::local_tempdir()
     prefix <- file.path(dir, "bad_h2")
-    .make_polyfun_single(dir, prefix, "a", nBlocks = 3)
+    .makePolyfunSingle(dir, prefix, "a", nBlocks = 3)
     writeLines(
         c("start", "Total Observed scale h2: abc (0.05)", "end"),
         paste0(prefix, ".log")
@@ -89,7 +92,7 @@ test_that("readSldscTrait errors when the h2g value is non-numeric", {
 test_that("readSldscAnnot stacks per-chromosome .annot.gz into one table", {
     dir <- withr::local_tempdir()
     for (chr in 1:2) {
-        .make_annot_gz(dir, chr)
+        .makeAnnotGz(dir, chr)
     }
     df <- readSldscAnnot(dir)
     expect_s3_class(df, "data.frame")
@@ -101,7 +104,7 @@ test_that("readSldscAnnot stacks per-chromosome .annot.gz into one table", {
 test_that("readSldscAnnot respects annotCols", {
     dir <- withr::local_tempdir()
     for (chr in 1:2) {
-        .make_annot_gz(dir, chr)
+        .makeAnnotGz(dir, chr)
     }
     df <- readSldscAnnot(dir, annotCols = "annot_A")
     expect_true("annot_A" %in% names(df))
@@ -116,7 +119,7 @@ test_that("readSldscAnnot errors on missing dir / no files", {
 
 test_that("readSldscAnnot errors when annotCols resolves to nothing", {
     dir <- withr::local_tempdir()
-    .make_annot_gz(dir, 1)
+    .makeAnnotGz(dir, 1)
     expect_error(
         readSldscAnnot(dir, annotCols = character(0)),
         "no annotation columns"
@@ -225,7 +228,10 @@ test_that("computeSldscAnnotSd errors when there are no annotation columns", {
 })
 
 test_that("computeSldscAnnotSd errors on non-SldscData input", {
-    expect_error(computeSldscAnnotSd(list(a = 1)), "must be an SldscData")
+    expect_error(
+        computeSldscAnnotSd(list(a = 1)),
+        "Must inherit from class 'SldscData'"
+    )
 })
 
 test_that("computeSldscAnnotSd errors with zero degrees of freedom", {
@@ -298,7 +304,10 @@ test_that("computeSldscMRef errors when mafCutoff > 0 but no frq data", {
 })
 
 test_that("computeSldscMRef errors on non-SldscData input", {
-    expect_error(computeSldscMRef(list(a = 1)), "must be an SldscData")
+    expect_error(
+        computeSldscMRef(list(a = 1)),
+        "Must inherit from class 'SldscData'"
+    )
 })
 
 
@@ -327,7 +336,10 @@ test_that("isBinarySldscAnnot respects annotCols (numeric)", {
 })
 
 test_that("isBinarySldscAnnot errors on non-SldscData input", {
-    expect_error(isBinarySldscAnnot(list(a = 1)), "must be an SldscData")
+    expect_error(
+        isBinarySldscAnnot(list(a = 1)),
+        "Must inherit from class 'SldscData'"
+    )
 })
 
 
@@ -336,7 +348,7 @@ test_that("isBinarySldscAnnot errors on non-SldscData input", {
 # =============================================================================
 
 # Build a readSldscTrait-shaped run with specific values the tests assert on.
-.make_trait_data <- function(cats = c("A_0", "B_0"), nBlocks = 10, h2g = 0.3) {
+.makeTraitData <- function(cats = c("A_0", "B_0"), nBlocks = 10, h2g = 0.3) {
     n <- length(cats)
     taus <- rep(1e-7, n)
     blocks <- matrix(
@@ -375,7 +387,7 @@ test_that("isBinarySldscAnnot errors on non-SldscData input", {
 }
 
 test_that("standardizeSldscTrait works in single mode", {
-    td <- .make_trait_data()
+    td <- .makeTraitData()
     result <- standardizeSldscTrait(
         .wrapRun(td),
         "t",
@@ -411,7 +423,7 @@ test_that("standardizeSldscTrait works in single mode", {
 })
 
 test_that("standardizeSldscTrait works in joint mode", {
-    td <- .make_trait_data()
+    td <- .makeTraitData()
     result <- standardizeSldscTrait(
         .wrapRun(td),
         "t",
@@ -425,7 +437,7 @@ test_that("standardizeSldscTrait works in joint mode", {
 })
 
 test_that("standardizeSldscTrait auto-detects target categories", {
-    td <- .make_trait_data()
+    td <- .makeTraitData()
     result <- standardizeSldscTrait(
         .wrapRun(td),
         "t",
@@ -438,7 +450,7 @@ test_that("standardizeSldscTrait auto-detects target categories", {
 })
 
 test_that("standardizeSldscTrait errors on empty categories", {
-    td <- .make_trait_data()
+    td <- .makeTraitData()
     expect_error(
         standardizeSldscTrait(
             .wrapRun(td),
@@ -453,7 +465,7 @@ test_that("standardizeSldscTrait errors on empty categories", {
 })
 
 test_that("standardizeSldscTrait errors on missing categories", {
-    td <- .make_trait_data(cats = "A_0")
+    td <- .makeTraitData(cats = "A_0")
     expect_error(
         standardizeSldscTrait(
             .wrapRun(td),
@@ -469,7 +481,7 @@ test_that("standardizeSldscTrait errors on missing categories", {
 })
 
 test_that("standardizeSldscTrait warns on zero sd", {
-    td <- .make_trait_data(cats = "A_0")
+    td <- .makeTraitData(cats = "A_0")
     expect_warning(
         standardizeSldscTrait(
             .wrapRun(td),
@@ -483,7 +495,7 @@ test_that("standardizeSldscTrait warns on zero sd", {
 })
 
 test_that("standardizeSldscTrait enrichstatSe handles p = 0", {
-    td <- .make_trait_data(cats = "A_0")
+    td <- .makeTraitData(cats = "A_0")
     td$enrichmentP <- c(A_0 = 0) # p = 0 -> abs_z = Inf -> SE = NA
     result <- standardizeSldscTrait(
         .wrapRun(td),
@@ -497,7 +509,7 @@ test_that("standardizeSldscTrait enrichstatSe handles p = 0", {
 })
 
 test_that("standardizeSldscTrait errors when the requested run is absent", {
-    td <- .make_trait_data()
+    td <- .makeTraitData()
     expect_error(
         standardizeSldscTrait(
             .wrapRun(td),
@@ -521,7 +533,7 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
             sdAnnot = c(A_0 = 0.5),
             MRef = 1000L
         ),
-        "must be an SldscData"
+        "Must inherit from class 'SldscData'"
     )
 })
 
@@ -530,7 +542,7 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
 # metaSldscRandom  (unchanged: operates on standardized per-trait estimates)
 # =============================================================================
 
-.make_per_trait_meta <- function(
+.makePerTraitMeta <- function(
     nTraits = 3,
     category = "A_0",
     means = NULL,
@@ -561,7 +573,7 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
 }
 
 test_that("metaSldscRandom works for tauStar", {
-    pt <- .make_per_trait_meta(nTraits = 4)
+    pt <- .makePerTraitMeta(nTraits = 4)
     result <- metaSldscRandom(pt, "A_0", quantity = "tauStar")
     expect_true(is.list(result))
     expect_equal(result$nTraits, 4L)
@@ -573,14 +585,14 @@ test_that("metaSldscRandom works for tauStar", {
 })
 
 test_that("metaSldscRandom works for enrichment", {
-    pt <- .make_per_trait_meta(nTraits = 3)
+    pt <- .makePerTraitMeta(nTraits = 3)
     result <- metaSldscRandom(pt, "A_0", quantity = "enrichment")
     expect_equal(result$nTraits, 3L)
     expect_true(is.finite(result$mean))
 })
 
 test_that("metaSldscRandom works for enrichstat", {
-    pt <- .make_per_trait_meta(nTraits = 3)
+    pt <- .makePerTraitMeta(nTraits = 3)
     result <- metaSldscRandom(pt, "A_0", quantity = "enrichstat")
     expect_equal(result$nTraits, 3L)
     expect_true(is.finite(result$mean))
@@ -645,7 +657,7 @@ test_that("sldscSubsetMeta defaults categories from params and validates traits"
 })
 
 test_that("metaSldscRandom returns NA with < 2 traits", {
-    pt <- .make_per_trait_meta(nTraits = 1)
+    pt <- .makePerTraitMeta(nTraits = 1)
     result <- metaSldscRandom(pt, "A_0", "tauStar")
     expect_true(is.na(result$mean))
     expect_true(is.na(result$se))
@@ -654,7 +666,7 @@ test_that("metaSldscRandom returns NA with < 2 traits", {
 })
 
 test_that("metaSldscRandom skips traits with missing category", {
-    pt <- .make_per_trait_meta(nTraits = 3)
+    pt <- .makePerTraitMeta(nTraits = 3)
     pt$trait2$summary$target <- "other"
     result <- metaSldscRandom(pt, "A_0", "tauStar")
     expect_equal(result$nTraits, 2L)
@@ -662,7 +674,7 @@ test_that("metaSldscRandom skips traits with missing category", {
 })
 
 test_that("metaSldscRandom skips traits with NA or zero SE", {
-    pt <- .make_per_trait_meta(nTraits = 3)
+    pt <- .makePerTraitMeta(nTraits = 3)
     pt$trait2$summary$tauStarSe <- NA
     pt$trait3$summary$tauStarSe <- 0
     result <- metaSldscRandom(pt, "A_0", "tauStar")
@@ -671,21 +683,21 @@ test_that("metaSldscRandom skips traits with NA or zero SE", {
 })
 
 test_that("metaSldscRandom skips NULL entries", {
-    pt <- .make_per_trait_meta(nTraits = 3)
+    pt <- .makePerTraitMeta(nTraits = 3)
     pt$trait2 <- NULL
     result <- metaSldscRandom(pt, "A_0", "tauStar")
     expect_equal(result$nTraits, 2L)
 })
 
 test_that("metaSldscRandom generates names for unnamed list", {
-    pt <- .make_per_trait_meta(nTraits = 2)
+    pt <- .makePerTraitMeta(nTraits = 2)
     names(pt) <- NULL
     result <- metaSldscRandom(pt, "A_0", "tauStar")
     expect_equal(result$traitsUsed, c("1", "2"))
 })
 
 test_that("metaSldscRandom skips NULL entries and NULL summaries", {
-    valid <- .make_per_trait_meta(
+    valid <- .makePerTraitMeta(
         nTraits = 2,
         means = c(1e-5, 2e-5),
         ses = c(1e-6, 1e-6)
@@ -698,7 +710,7 @@ test_that("metaSldscRandom skips NULL entries and NULL summaries", {
 })
 
 test_that("metaSldscRandom skips a trait whose summary lacks the quantity columns", {
-    valid <- .make_per_trait_meta(
+    valid <- .makePerTraitMeta(
         nTraits = 2,
         means = c(1e-5, 2e-5),
         ses = c(1e-6, 1e-6)
@@ -865,7 +877,7 @@ test_that("a constant annotation column contributes no variance", {
 test_that("readSldscAnnot accepts annotCols by position", {
     dir <- withr::local_tempdir()
     for (chr in 1:2) {
-        .make_annot_gz(dir, chr)
+        .makeAnnotGz(dir, chr)
     }
     # A numeric annotCols indexes into the DETECTED columns, so 1 is the
     # first annotation rather than the first column of the file.
@@ -881,4 +893,37 @@ test_that("sldscSubsetMeta requires a per_trait element", {
         sldscSubsetMeta(list(other = 1), subsetTraits = "t1"),
         "has no `per_trait` element"
     )
+})
+
+test_that("metaSldscRandom forwards metaArgs to metafor::rma", {
+    seen <- NULL
+    real <- metafor::rma
+    mkEst <- function(m, s) {
+        list(
+            summary = data.frame(
+                target = "annot_A_0",
+                enrichment = m,
+                enrichmentSe = s
+            )
+        )
+    }
+    perTrait <- list(
+        traitX = mkEst(1.5, 0.3),
+        traitY = mkEst(1.8, 0.4),
+        traitZ = mkEst(1.2, 0.25)
+    )
+    suppressWarnings(with_mocked_bindings(
+        metaSldscRandom(
+            perTrait,
+            category = "annot_A_0",
+            quantity = "enrichment",
+            metaArgs = RmaOptions(test = "knha")
+        ),
+        rma = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "metafor"
+    ))
+    expect_equal(seen$test, "knha")
 })

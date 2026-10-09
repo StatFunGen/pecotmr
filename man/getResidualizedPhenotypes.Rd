@@ -12,17 +12,11 @@ getResidualizedPhenotypes(x, ...)
   contexts,
   traitId = NULL,
   region = NULL,
-  phenotypeCovariatesToResidualize = NULL,
-  genotypeCovariatesToResidualize = NULL,
-  residualizePhenotypeCovariates = TRUE,
-  residualizeGenotypeCovariates = TRUE,
-  residualizePhenotypeCovariatesFromPhenotypes = NULL,
-  residualizeGenotypeCovariatesFromPhenotypes = NULL,
   naAction = c("keep", "drop", "impute"),
-  covariateNaAction = c("impute", "drop"),
   outlierAction = c("keep", "drop"),
   outlierPvalThreshold = 0.001,
-  ...
+  outlierArgs = CovMcdOptions(),
+  residualizationArgs = ResidualizationParam()
 )
 }
 \arguments{
@@ -43,38 +37,27 @@ to select; \code{NULL} matches all traits in the dataset.}
 Restrict variants to this region; \code{NULL} uses the full cis window /
 all regions.}
 
-\item{phenotypeCovariatesToResidualize}{Character vector or \code{NULL}.
-Phenotype covariate names to residualize; \code{NULL} uses the dataset
-default set.}
-
-\item{genotypeCovariatesToResidualize}{Character vector or \code{NULL}.
-Genotype covariate names to residualize; \code{NULL} uses the dataset
-default set.}
-
-\item{residualizePhenotypeCovariates}{Logical. Whether to residualize the
-phenotype covariates. Default \code{TRUE}.}
-
-\item{residualizeGenotypeCovariates}{Logical. Whether to residualize the
-genotype covariates. Default \code{TRUE}.}
-
-\item{residualizePhenotypeCovariatesFromPhenotypes}{Logical or \code{NULL}.
-Whether to residualize phenotype covariates out of the phenotype;
-\code{NULL} uses the default.}
-
-\item{residualizeGenotypeCovariatesFromPhenotypes}{Logical or \code{NULL}.
-Whether to residualize genotype covariates out of the phenotype;
-\code{NULL} uses the default.}
-
 \item{naAction}{Character. How to handle missing phenotype values: one of
 \code{"keep"}, \code{"drop"}, or \code{"impute"}.}
-
-\item{covariateNaAction}{Character. How to handle missing covariate values.}
 
 \item{outlierAction}{Character. How to handle phenotype outliers: one of
 \code{"keep"} or \code{"drop"}.}
 
 \item{outlierPvalThreshold}{Numeric. Two-sided p-value threshold for flagging
 phenotype outliers. Default \code{1e-3}.}
+
+\item{outlierArgs}{Extra arguments for \code{robustbase::covMcd()}, the
+robust covariance estimator the outlier rule is built on, supplied with
+\code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
+consulted when \code{outlierAction = "drop"}.}
+
+\item{residualizationArgs}{What the data is residualized on, built with
+\code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
+\code{genotypeCovariates} choose the covariate sets,
+\code{residualizePhenotype} / \code{residualizeGenotype} turn each
+side on or off, and \code{covariateNaAction} says how missing
+covariate values are handled. The same record the pipelines take, so a
+setting means the same thing by either route.}
 }
 \value{
 A named list of numeric matrices keyed by context.

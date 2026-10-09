@@ -302,7 +302,7 @@ test_that("GwasFineMappingResult: .tupleSelectRowGwasFmr requires both selectors
     expect_error(getPip(res), "Pass `study` and `method`")
     expect_error(
         getPip(res, study = c("g1", "g2"), method = "susie"),
-        "must each be length 1"
+        "Must have length 1"
     )
     expect_error(getPip(res, study = "ghost", method = "susie"), "No entry for")
 })
@@ -352,7 +352,10 @@ test_that("validity names a missing identity column", {
     )
     bad <- res
     mcols(bad)$method <- NULL
-    expect_error(methods::validObject(bad), "missing columns: method")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'method'\\}"
+    )
 })
 
 test_that("validity names a missing entry payload column", {
@@ -365,6 +368,69 @@ test_that("validity names a missing entry payload column", {
     mcols(bad)$cvResult <- NULL
     expect_error(
         methods::validObject(bad),
-        "missing entry payload columns: cvResult"
+        "missing entry payload columns: .*missing elements \\{'cvResult'\\}"
+    )
+})
+
+test_that("GwasFineMappingResult: getPip(returnList) keys by study|method", {
+    # Documented as "a per-entry list keyed by identity tuple". The QTL
+    # method always honoured it; this one used to ignore the flag and hand
+    # back the flat vector, so the list branch had no test.
+    res <- GwasFineMappingResult(
+        study = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(.ca_makeFmEntry(3), .ca_makeFmEntry(4))
+    )
+    got <- getPip(res, study = "g2", method = "susie", returnList = TRUE)
+    expect_type(got, "list")
+    expect_named(got, "g2|susie")
+    expect_equal(length(got[["g2|susie"]]), 4L)
+    # The flat vector is still what you get without the flag.
+    expect_false(is.list(getPip(res, study = "g2", method = "susie")))
+})
+
+test_that("GwasFineMappingResult: context / trait selectors are refused", {
+    # They belong to the QTL axis. The shared accessor signature keeps them,
+    # but a GWAS collection has no such axis, so asking is a mistake rather
+    # than a silent no-op.
+    res <- GwasFineMappingResult(
+        study = "g1",
+        method = "susie",
+        entry = list(.ca_makeFmEntry(3))
+    )
+    expect_error(
+        getPip(res, study = "g1", method = "susie", context = "brain"),
+        "has no context or trait axis"
+    )
+    expect_error(
+        getPip(res, study = "g1", method = "susie", context = "brain"),
+        "`context` does not select anything"
+    )
+    expect_error(
+        getPip(res, study = "g1", method = "susie", trait = "ENSG_A"),
+        "`trait` does not select anything"
+    )
+    # Both at once: the message pluralises rather than naming one.
+    expect_error(
+        getPip(
+            res,
+            study = "g1",
+            method = "susie",
+            context = "brain",
+            trait = "ENSG_A"
+        ),
+        "`context` and `trait` do not select anything"
+    )
+    # NA is an absence, not a request: callers threading a whole
+    # (study, context, trait, method) record fill absent axes with NA.
+    expect_equal(
+        length(getPip(
+            res,
+            study = "g1",
+            method = "susie",
+            context = NA,
+            trait = NA
+        )),
+        3L
     )
 })

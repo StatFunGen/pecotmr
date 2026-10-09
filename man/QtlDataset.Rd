@@ -10,13 +10,7 @@ QtlDataset(
   phenotypes,
   genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
   scaleResiduals = TRUE,
-  mafCutoff = 0,
-  macCutoff = 0,
-  xvarCutoff = 0,
-  imissCutoff = 0,
-  keepSamples = character(0),
-  keepVariants = character(0),
-  keepIndel = TRUE
+  genotypeFilterArgs = GenotypeFilterParam()
 )
 }
 \arguments{
@@ -35,35 +29,31 @@ genotype experiment.}
 
 \item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
 
-\item{mafCutoff}{Numeric (length 1). Minor allele frequency threshold;
-variants with \code{MAF < mafCutoff} are dropped at extraction time inside
-\code{getGenotypes()} / \code{getResidualizedGenotypes()}. Default 0 (no
-filter).}
-
-\item{macCutoff}{Numeric (length 1). Minor allele count threshold; converted
-to a MAF threshold using \code{max(mafCutoff, macCutoff / (2 * n))} where
-\code{n} is the post-narrowing sample count of the extracted block. Default
-0 (no filter).}
-
-\item{xvarCutoff}{Numeric (length 1). Per-variant genotype variance
-threshold; variants with column variance below this are dropped at
-extraction time. Default 0 (no filter).}
-
-\item{imissCutoff}{Numeric (length 1). Per-sample genotype-missingness
-threshold; samples with a missing-genotype rate above this are dropped at
-extraction time. Default 0 (no filter).}
-
-\item{keepSamples}{Character vector of sample identifiers to retain. The
-dataset is subset to them, narrowing \code{colData} and
-\code{sampleMap} together, so the sample set has one home rather than
-two. Length 0 means no restriction.}
-
-\item{keepVariants}{Character vector of variant identifiers to retain prior
-to per-block QC. Length 0 means no restriction.}
-
-\item{keepIndel}{Logical (length 1). When \code{FALSE}, variants whose
-alleles are not single nucleotides (indels) are dropped at extraction.
-Default \code{TRUE} (keep all variants).}
+\item{genotypeFilterArgs}{Which variants and samples to keep, built with
+\code{\link{GenotypeFilterParam}}. A bare list is refused, since it
+cannot be checked. Each field is recorded on the object and applied
+lazily, at extraction time inside \code{getGenotypes()} /
+\code{getResidualizedGenotypes()}:
+\itemize{
+  \item \code{mafCutoff} --- drop variants with
+    \code{MAF < mafCutoff}. Unset means 0 (no filter).
+  \item \code{macCutoff} --- a minor-allele-count threshold, converted
+    to a MAF threshold as \code{max(mafCutoff, macCutoff / (2 * n))}
+    with \code{n} the post-narrowing sample count of the extracted
+    block. Unset means 0.
+  \item \code{xvarCutoff} --- drop variants whose column variance is
+    below this. Unset means 0.
+  \item \code{imissCutoff} --- drop samples whose missing-genotype rate
+    exceeds this. Unset means 0.
+  \item \code{keepSamples} --- subset the dataset to these samples,
+    narrowing \code{colData} and \code{sampleMap} together so the
+    sample set has one home rather than two. Unset, or
+    \code{character(0)}, means no restriction.
+  \item \code{keepVariants} --- retain only these variants, before
+    per-block QC. Unset, or \code{character(0)}, means no restriction.
+  \item \code{keepIndel} --- when \code{FALSE}, drop variants whose
+    alleles are not single nucleotides. Unset means \code{TRUE}.
+}}
 }
 \value{
 A \code{QtlDataset} object.

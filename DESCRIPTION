@@ -28,6 +28,7 @@ Imports:
     BiocGenerics,
     BiocParallel,
     Biostrings,
+    checkmate,
     coloc,
     colocboost,
     DelayedArray,
@@ -136,20 +137,25 @@ Collate:
     'LdEigen.R'
     'LdScore.R'
     'MashPrior.R'
+    'MethodOptions.R'
+    'MethodParam.R'
     'QtlDataset.R'
     'MultiStudyQtlDataset.R'
     'QtlFineMappingResult.R'
     'SldscData.R'
     'causalInferencePipeline.R'
-    'colocPipeline.R'
+    'gwasSumStats.R'
     'qtlSumStats.R'
+    'fineMappingPipeline.R'
+    'ld.R'
+    'colocPipeline.R'
     'colocboostPipeline.R'
     'cpp11.R'
     'crossValidation.R'
     'ctwasPipeline.R'
+    'ctwasWrapper.R'
+    'enloc.R'
     'exampleData.R'
-    'gwasSumStats.R'
-    'fineMappingPipeline.R'
     'fineMappingRow.R'
     'fineMappingWrappers.R'
     'genotypeIo.R'
@@ -157,14 +163,13 @@ Collate:
     'h2EstimationWrappers.R'
     'jointEngine.R'
     'jointSpecification.R'
-    'ld.R'
     'sumstatsQc.R'
     'variantId.R'
     'manifestLoaders.R'
     'mashPipeline.R'
     'mashWrapper.R'
     'overlapTopLoci.R'
-    'pvalCombine.R'
+    'pvalCombineWrappers.R'
     'qtlAssociationPostprocess.R'
     'qtlEnrichmentPipeline.R'
     'regularizedRegressionWrappers.R'

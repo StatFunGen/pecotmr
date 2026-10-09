@@ -14,9 +14,8 @@ mrmashRssWeights(
   w0 = NULL,
   V = NULL,
   covY = NULL,
-  retainFit = FALSE,
-  fitDetail = c("slim", "full"),
-  ...
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = MrmashRssOptions()
 )
 }
 \arguments{
@@ -49,18 +48,20 @@ the identity matrix of size K.}
 \item{covY}{Optional response covariance matrix (K x K). When NULL, defaults
 to the identity matrix of size K.}
 
-\item{retainFit}{If TRUE, attaches (as the \code{"fit"} attribute on the
-returned weights) the inputs \code{fineMappingPipeline} needs to rebuild
-the mvSuSiE reweighted prior: \code{dataDrivenPriorMatrices}, the fitted
-\code{w0}, and the fitted \code{V}. Default FALSE.}
+\item{fitRetention}{How much of the mr.mash fit is kept as the
+\code{"fit"} attribute of the returned weights. \code{"none"} (default)
+attaches nothing. \code{"slim"} keeps what \code{fineMappingPipeline}
+needs to rebuild the mvSuSiE reweighted mixture prior and residual
+variance --- the original \code{dataDrivenPriorMatrices}, the fitted
+\code{w0} and \code{V}; the heavy coefficient matrix \code{mu1} is
+already returned as the weights, so it is not duplicated. \code{"full"}
+additionally retains the complete fit under \code{$fit}, at the cost of
+a larger payload.}
 
-\item{fitDetail}{How much to retain when \code{retainFit = TRUE}.
-\code{"slim"} (default) keeps only those reconstruction inputs (the
-coefficients are already the returned weights); \code{"full"} additionally
-keeps the complete \code{mr.mash.rss} fit under \code{$fit}. Mirrors
-\code{\link{mrmashWeights}}.}
-
-\item{...}{Additional arguments forwarded to \code{mr.mashr::mr.mash.rss}.}
+\item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash.rss}, built
+with \code{\link{MrmashOptions}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric matrix of per-variant per-context weights (variants x
@@ -81,9 +82,9 @@ Prior construction reuses the same infrastructure as the individual-level
 \code{\link{mrmashWrapper}}: \code{computeGrid} +
 \code{mr.mashr::compute_canonical_covs()} + \code{mr.mashr::expand_covs()}
 for \code{S0}, and \code{computeW0} for the mixture weights. Supply
-\code{dataDrivenPriorMatrices} (e.g. from \code{\link{computeCovFlash}} /
-\code{\link{computeCovDiag}}) to add data-driven covariance components
-alongside the canonical mixture.
+\code{dataDrivenPriorMatrices} (e.g. from
+\code{\link{computeCovDiag}}, or \code{mashr::cov_flash}) to add
+data-driven covariance components alongside the canonical mixture.
 }
 \examples{
 data(eqtlRegionExample)

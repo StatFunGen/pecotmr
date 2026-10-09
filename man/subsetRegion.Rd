@@ -7,7 +7,7 @@
 \usage{
 subsetRegion(x, region, ...)
 
-\S4method{subsetRegion}{RangedTupleList}(x, region, ...)
+\S4method{subsetRegion}{RangedTupleList}(x, region)
 }
 \arguments{
 \item{x}{A \code{RangedTupleList} collection.}

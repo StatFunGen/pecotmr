@@ -23,7 +23,7 @@ cpp11::writable::list sdprRcpp(
 	int iter = 1000,
 	int burn = 200,
 	int thin = 5,
-	int nThreads = 1,
+	int numThreads = 1,
 	int optLlk = 1,
 	bool verbose = true,
 	sexp seed = R_NilValue
@@ -64,7 +64,7 @@ cpp11::writable::list sdprRcpp(
 
 	// Call the mcmc function
 	std::unordered_map<std::string, vec> results = mcmc(
-		data, n, a, c, M, a0k, b0k, iter, burn, thin, nThreads, optLlk, verbose, seed_val
+		data, n, a, c, M, a0k, b0k, iter, burn, thin, numThreads, optLlk, verbose, seed_val
 		);
 
 	// Convert results to list

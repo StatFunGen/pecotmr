@@ -57,8 +57,13 @@ it is unwrapped to its handle.}
 \code{snpInfo}. NULL when correlation is pre-computed, or when the
 source is a matrix (which is already the subset).}
 
-\item{\code{blockMetadata}}{A \code{GRanges} of blocks or a \code{data.frame} with
-block boundary information.}
+\item{\code{blockMetadata}}{A \code{GRanges} with one range per block: its
+\code{seqnames} and range are the block's chromosome and genomic span,
+and \code{mcols} carry \code{blockId}, \code{size}, \code{startIdx}
+and \code{endIdx} -- the index range into the correlation matrix the
+block addresses. Extra columns the caller supplied are kept as mcols.
+A block whose index range is out of bounds has no span to derive and
+gets a width-0 range.}
 
 \item{\code{nRef}}{Integer, reference panel sample size.}
 

@@ -55,7 +55,7 @@ test_that("glmnetWeights errors when all columns are constant", {
     set.seed(42)
     n <- 50
     p <- 5
-    X <- matrix(rep(1:p, each = n), nrow = n, ncol = p)
+    X <- matrix(rep(seq_len(p), each = n), nrow = n, ncol = p)
     y <- rnorm(n)
 
     expect_error(

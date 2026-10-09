@@ -18,6 +18,7 @@
 # =============================================================================
 
 devtools::load_all(".", quiet = TRUE)
+library(purrr)
 
 mweDir <- Sys.getenv(
     "MWE_DIR",
@@ -46,10 +47,10 @@ message("Loading ", length(regions), " chr22 LD blocks...")
 # One LdData per block: buildLd*() takes the list and gives one LD block per
 # element. Loading the whole span at once would instead return a single dense
 # matrix, i.e. one block, which no jackknife can work with.
-ldList <- lapply(regions, function(r) loadLdMatrix(metaPath, region = r))
+ldList <- map(regions, function(r) loadLdMatrix(metaPath, region = r))
 message(
     "  ",
-    sum(vapply(ldList, length, integer(1))),
+    sum(map_int(ldList, length)),
     " variants across ",
     length(ldList),
     " blocks"

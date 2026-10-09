@@ -67,39 +67,6 @@ bplapplyBlocks <- function(blockIndices, FUN, BPPARAM = NULL, ...) {
 # Regression utilities
 # =============================================================================
 
-#' @title Weighted Least Squares
-#' @description Compute WLS estimate with standard errors.
-#' @param y Numeric vector, response.
-#' @param X Numeric matrix, predictors.
-#' @param w Numeric vector, weights (inverse variance).
-#' @return A list with coefficients, SE, residuals, fitted values.
-#' @keywords internal
-weightedLs <- function(y, X, w) {
-    if (is.null(dim(X))) {
-        X <- matrix(X, ncol = 1)
-    }
-    W <- diag(sqrt(w))
-    Xw <- W %*% X
-    yw <- W %*% y
-    XtX <- crossprod(Xw)
-    Xty <- crossprod(Xw, yw)
-    coef <- solve(XtX, Xty)
-    fitted <- X %*% coef
-    resid <- y - fitted
-    # Heteroskedasticity-robust SE (HC0)
-    meat <- crossprod(Xw * as.vector(resid))
-    bread <- solve(XtX)
-    vcov <- bread %*% meat %*% bread
-    se <- sqrt(diag(vcov))
-    list(
-        coef = as.vector(coef),
-        se = se,
-        residuals = as.vector(resid),
-        fitted = as.vector(fitted),
-        vcov = vcov
-    )
-}
-
 #' @title Jackknife Standard Errors by Block
 #' @description Compute jackknife SE estimates using leave-one-block-out.
 #' @param estimatesFull Numeric vector, full-sample parameter estimates.
@@ -121,57 +88,6 @@ jackknifeSe <- function(estimatesFull, estimatesLoo) {
 }
 
 # =============================================================================
-# Ridge-regularized WLS
-# =============================================================================
-
-#' @title Ridge-Regularized Weighted Least Squares
-#' @description WLS with optional L2 penalty on coefficients.
-#' @param y Numeric vector, response.
-#' @param X Numeric matrix, predictors.
-#' @param w Numeric vector, weights (inverse variance).
-#' @param lambda Numeric, ridge penalty. 0 = no penalty (delegates to
-#'   \code{weightedLs}).
-#' @param penalizeIntercept Logical. If FALSE (default), the last column of X
-#'   (assumed to be the intercept) is not penalized.
-#' @return Same structure as \code{weightedLs}: coef, se, residuals, fitted,
-#'   vcov.
-#' @keywords internal
-weightedLsRidge <- function(y, X, w, lambda = 0, penalizeIntercept = FALSE) {
-    if (lambda == 0) {
-        return(weightedLs(y, X, w))
-    }
-    if (is.null(dim(X))) {
-        X <- matrix(X, ncol = 1)
-    }
-    p <- ncol(X)
-    W <- diag(sqrt(w))
-    Xw <- W %*% X
-    yw <- W %*% y
-    XtX <- crossprod(Xw)
-    Xty <- crossprod(Xw, yw)
-    # Ridge penalty matrix (don't penalize intercept by default)
-    penalty <- diag(lambda, p)
-    if (!penalizeIntercept && p > 1) {
-        penalty[p, p] <- 0
-    }
-    coef <- solve(XtX + penalty, Xty)
-    fitted <- X %*% coef
-    resid <- y - fitted
-    # Sandwich SE accounting for ridge shrinkage
-    bread <- solve(XtX + penalty)
-    meat <- crossprod(Xw * as.vector(resid))
-    vcov <- bread %*% meat %*% bread
-    se <- sqrt(pmax(diag(vcov), 0))
-    list(
-        coef = as.vector(coef),
-        se = se,
-        residuals = as.vector(resid),
-        fitted = as.vector(fitted),
-        vcov = vcov
-    )
-}
-
-# =============================================================================
 # Baseline enrichment computation
 # =============================================================================
 
@@ -183,8 +99,10 @@ weightedLsRidge <- function(y, X, w, lambda = 0, penalizeIntercept = FALSE) {
         return(tauSe * M / abs(h2))
     }
     nBlocks <- nrow(tauBlocks)
-    h2Blocks <- as.vector(tauBlocks %*% M_a)
-    h2Blocks[h2Blocks == 0] <- NA
+    rawH2 <- as.vector(tauBlocks %*% M_a)
+    # A zero block h2 would divide the enrichment to Inf; NA drops the block
+    # from the jackknife mean instead.
+    h2Blocks <- replace(rawH2, rawH2 == 0, NA)
     enrichmentBlocks <- sweep(tauBlocks, 1, h2Blocks, FUN = "/") * M
     enrichmentMean <- colMeans(enrichmentBlocks, na.rm = TRUE)
     enrichmentVar <- (nBlocks - 1) /
@@ -260,8 +178,7 @@ shrinkLd <- function(
         theta <- 2 * nRef / (22 * nRef + 16) # effective recombination
         distCm <- abs(outer(geneticMap, geneticMap, "-"))
         shrinkFactor <- exp(-4 * nRef * distCm / (100 * (2 * nRef + 16)))
-        RShrunk <- R * shrinkFactor
-        diag(RShrunk) <- 1
+        RShrunk <- `diag<-`(R * shrinkFactor, 1)
     } else {
         # Simple constant shrinkage
         lambda <- 1 / sqrt(nRef)
@@ -286,8 +203,7 @@ shrinkLd <- function(
 #' @keywords internal
 checkGenomeBuild <- function(...) {
     objects <- list(...)
-    genomes <- map_chr(objects, .h2GenomeOfObject)
-    genomes <- genomes[!is.na(genomes)]
+    genomes <- discard(map_chr(objects, .h2GenomeOfObject), is.na)
     if (n_distinct(genomes) > 1L) {
         msg <- glue(
             "Genome build mismatch: {str_flatten(genomes, ', ')}"
@@ -380,20 +296,72 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     NULL
 }
 
+#' @title Options for the Random-Effects Meta-Analysis Engine
+#' @description Build a record of extra arguments for
+#'   \code{metafor::rma()}, the random-effects meta-analysis engine behind
+#'   \code{\link{metaSldscRandom}},
+#'   \code{\link{metaAnalysisPerCondition}} and
+#'   \code{\link{calculateFeatureScores}}.
+#' @param ... Arguments for \code{metafor::rma()}: \code{test} (the
+#'   null-distribution choice -- \code{"knha"} is the small-\eqn{k}
+#'   correction, and these meta-analyses often run on few studies),
+#'   \code{level}, \code{weighted}, \code{tau2} and \code{control}.
+#'   \code{rma()}'s signature ends in \code{...}, so names cannot be
+#'   checked here and a misspelling is passed through. \code{yi} and
+#'   \code{sei} are the estimate/standard-error pair pecotmr assembles and
+#'   are refused, as is \code{method}: that is the caller's
+#'   \code{metaMethod}.
+#'
+#'   These settings apply to the first fit. pecotmr falls back to the
+#'   closed-form DerSimonian-Laird estimator when an iterative one fails, and
+#'   the fallback carries them too.
+#' @return A \code{MethodOptions} record for the \code{metaArgs} argument.
+#' @seealso \code{\link{metaSldscRandom}},
+#'   \code{\link{metaAnalysisPerCondition}}
+#' @examples
+#' RmaOptions(test = "knha")
+#' @export
+RmaOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            yi = "the per-study estimates pecotmr assembles",
+            sei = "the per-study standard errors pecotmr assembles",
+            method = "the caller's `metaMethod`"
+        ),
+        "RmaOptions"
+    )
+    .newMethodOptions(
+        "metafor::rma",
+        defaults = list(),
+        extra = extra,
+        label = "RmaOptions",
+        engine = "rma"
+    )
+}
+
 # tryCatch handler for the iterative estimators (only reached when method !=
 # "DL", so DL is always a real fallback here): they can fail on small /
 # near-homogeneous inputs, so fall back to closed-form DerSimonian-Laird, which
 # never iterates.
-.rmaMetaFallbackToDL <- function(e, means, ses, method) {
+.rmaMetaFallbackToDL <- function(e, means, ses, method, metaArgs = list()) {
     msg <- glue(
         ".rmaMeta: metafor::rma(method = '{method}') failed ",
         "({conditionMessage(e)}); falling back to DL."
     )
     warn(msg)
-    metafor::rma(yi = means, sei = ses, method = "DL")
+    exec(
+        metafor::rma,
+        yi = means,
+        sei = ses,
+        method = "DL",
+        !!!as.list(metaArgs)
+    )
 }
 
-.rmaMeta <- function(means, ses, method = "DL") {
+#' @importFrom rlang try_fetch
+.rmaMeta <- function(means, ses, method = "DL", metaArgs = list()) {
     k <- length(means)
     if (k != length(ses)) {
         abort(".rmaMeta: means and ses must have the same length.")
@@ -407,11 +375,25 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     # directly and let any error propagate. Only the iterative estimators get a
     # tryCatch fallback to DL.
     fit <- if (identical(method, "DL")) {
-        metafor::rma(yi = means, sei = ses, method = "DL")
+        exec(
+            metafor::rma,
+            yi = means,
+            sei = ses,
+            method = "DL",
+            !!!as.list(metaArgs)
+        )
     } else {
-        tryCatch(
-            metafor::rma(yi = means, sei = ses, method = method),
-            error = function(e) .rmaMetaFallbackToDL(e, means, ses, method)
+        try_fetch(
+            exec(
+                metafor::rma,
+                yi = means,
+                sei = ses,
+                method = method,
+                !!!as.list(metaArgs)
+            ),
+            error = function(cnd) {
+                .rmaMetaFallbackToDL(cnd, means, ses, method, metaArgs)
+            }
         )
     }
     list(
@@ -483,8 +465,8 @@ NULL
 .lderBlockStats <- function(block, z, baselineMat) {
     V <- block$vectors
     lam <- block$values
-    x <- as.vector(crossprod(V, z[block$snpIdx]) / sqrt(pmax(lam, 1e-12)))
-    x[lam < 1e-6] <- 0
+    raw <- as.vector(crossprod(V, z[block$snpIdx]) / sqrt(pmax(lam, 1e-12)))
+    x <- replace(raw, lam < 1e-6, 0)
     ldAnnot <- if (is.null(baselineMat)) {
         matrix(1, length(lam), 1)
     } else {
@@ -496,11 +478,11 @@ NULL
 # Concatenate per-block stats into the genome-wide regression design. M_a is
 # the annotation SNP counts (univariate: total number of directions).
 .lderDesign <- function(blockStats, baselineMat) {
-    x <- unlist(map(blockStats, "x"))
+    x <- list_c(map(blockStats, "x"))
     ldAnnotList <- map(blockStats, "ldAnnot")
     list(
         x = x,
-        lam = unlist(map(blockStats, "lam")),
+        lam = list_c(map(blockStats, "lam")),
         ldAnnot = exec(rbind, !!!ldAnnotList),
         blockId = rep(
             seq_along(blockStats),
@@ -614,8 +596,8 @@ NULL
         rough = rough,
         twostage = twostage
     )
-    h2Loo <- unlist(map(loo, "h2"))
-    aLoo <- unlist(map(loo, "a"))
+    h2Loo <- map_dbl(loo, "h2")
+    aLoo <- map_dbl(loo, "a")
     tauList <- map(loo, "tau")
     tauBlocks <- exec(rbind, !!!tauList)
     jkSe <- function(v) sqrt((nB - 1) / nB * sum((v - mean(v))^2))
@@ -695,8 +677,7 @@ NULL
     )
     looZ <- exec(rbind, !!!looRows)
     R <- cor(looZ)
-    R[is.na(R)] <- 0
-    R
+    replace(R, is.na(R), 0)
 }
 
 # LDER candidate-annotation score statistics against the fitted baseline.
@@ -740,8 +721,7 @@ lderUnivariate <- function(
     n,
     eigenRef,
     annotations = NULL,
-    local = FALSE,
-    lambda = 0
+    local = FALSE
 ) {
     rough <- !getInSample(eigenRef)
     baselineMat <- .h2BaselineMat(annotations)
@@ -941,7 +921,7 @@ NULL
     estHBlocks <- exec(rbind, !!!estHList)
     tauList <- map(loo, "tau")
     tauBlocks <- exec(rbind, !!!tauList)
-    intLoo <- unlist(map(loo, "intercept"))
+    intLoo <- map_dbl(loo, "intercept")
     jkSe <- function(v) sqrt(var(v) * (nB - 1)^2 / nB)
     list(
         h2Se = jkSe(estHBlocks[, 1]),
@@ -1051,8 +1031,7 @@ NULL
         )
         looZ <- exec(rbind, !!!looRows)
         Rc <- cor(looZ)
-        Rc[is.na(Rc)] <- 0
-        Rc
+        replace(Rc, is.na(Rc), 0)
     }
     list(scoreZ = scoreZ, R = R)
 }
@@ -1062,8 +1041,7 @@ gldscUnivariate <- function(
     n,
     ldRef,
     annotations = NULL,
-    local = FALSE,
-    lambda = 0
+    local = FALSE
 ) {
     ldMatrixList <- getLdMatrixList(ldRef)
     if (length(ldMatrixList) == 0L) {
@@ -1076,8 +1054,8 @@ gldscUnivariate <- function(
     M <- length(ldRef)
     A <- .gldscAnnotMatrix(annotations, M)
     preps <- map(ldMatrixList, .gldscBlockPrep, z = z, A = A)
-    rawNtau <- sum(unlist(map(preps, "y"))) /
-        sum(unlist(map(preps, "ldsc")))
+    rawNtau <- sum(list_c(map(preps, "y"))) /
+        sum(list_c(map(preps, "ldsc")))
     contrib <- map(preps, .gldscBlockGls, rawNtau = rawNtau)
     left <- reduce(map(contrib, "L"), `+`)
     right <- reduce(map(contrib, "R"), `+`)
@@ -1086,24 +1064,43 @@ gldscUnivariate <- function(
     .gldscResult(fit, jk, annotations, preps, rawNtau, local, n, M)
 }
 
+# The candidate-annotation score statistics, when candidates were supplied and
+# the score test could be formed for them. NULL otherwise.
+# @noRd
+.gldscCandidateScores <- function(annotations, preps, rawNtau, fit) {
+    if (is.null(annotations)) {
+        return(NULL)
+    }
+    candMat <- assay(getCandidates(annotations), "annotations")
+    sc <- .gldscScoreStats(preps, candMat, rawNtau, fit$coef)
+    if (is.null(sc)) {
+        return(NULL)
+    }
+    list(
+        z = sc$scoreZ,
+        R = sc$R,
+        annotationNames = SummarizedExperiment::colData(
+            getCandidates(annotations)
+        )$name
+    )
+}
+
 # Assemble the gldscUnivariate return (enrichment, local, candidate scores).
 .gldscResult <- function(fit, jk, annotations, preps, rawNtau, local, n, M) {
     baselineMat <- .h2BaselineMat(annotations)
     localDf <- if (local) .gldscLocal(preps, rawNtau, n) else NULL
-    enrichmentDf <- NULL
-    scoreStats <- NULL
-    if (!is.null(baselineMat)) {
-        nm <- SummarizedExperiment::colData(getBaseline(annotations))$name
-        enrichmentDf <- .gldscEnrichmentDf(fit, jk, baselineMat, nm, M)
+    enrichmentDf <- if (is.null(baselineMat)) {
+        NULL
+    } else {
+        .gldscEnrichmentDf(
+            fit,
+            jk,
+            baselineMat,
+            SummarizedExperiment::colData(getBaseline(annotations))$name,
+            M
+        )
     }
-    if (!is.null(annotations)) {
-        candMat <- assay(getCandidates(annotations), "annotations")
-        sc <- .gldscScoreStats(preps, candMat, rawNtau, fit$coef)
-        if (!is.null(sc)) {
-            cn <- SummarizedExperiment::colData(getCandidates(annotations))$name
-            scoreStats <- list(z = sc$scoreZ, R = sc$R, annotationNames = cn)
-        }
-    }
+    scoreStats <- .gldscCandidateScores(annotations, preps, rawNtau, fit)
     tau <- if (is.null(baselineMat)) fit$h2 else fit$tau[-1]
     tauSe <- if (is.null(baselineMat)) jk$h2Se else jk$tauSe[-1]
     jkRes <- list(
@@ -1169,11 +1166,13 @@ NULL
     nTau <- ncol(ldAnnotScaled)
     h2a <- param[seq_len(nTau)]
     int <- param[nTau + 1L]
-    lamh2 <- as.vector(ldAnnotScaled %*% h2a) *
-        lam^2 -
-        lam * sum(h2a) / nRef +
-        int * lam / n
-    lamh2 <- pmax(lamh2, lim)
+    lamh2 <- pmax(
+        as.vector(ldAnnotScaled %*% h2a) *
+            lam^2 -
+            lam * sum(h2a) / nRef +
+            int * lam / n,
+        lim
+    )
     sum(log(lamh2)) + sum(bstar^2 / lamh2)
 }
 
@@ -1199,8 +1198,8 @@ NULL
 # eigenvalue-score matrix, and M_a. Univariate uses a single all-ones score
 # column (l_{i,base} = 1) scaled by total M.
 .hdlDesign <- function(blockData, M, baselineMat) {
-    lam <- unlist(map(blockData, "lam"))
-    bstar <- unlist(map(blockData, "bstar"))
+    lam <- list_c(map(blockData, "lam"))
+    bstar <- list_c(map(blockData, "bstar"))
     blockId <- rep(
         seq_along(blockData),
         lengths(map(blockData, "lam"))
@@ -1246,7 +1245,7 @@ NULL
         upper = upper
     )
     if (warnOnBound) {
-        .hdlWarnIfAtBound(opt$par, lower, upper, n, nRef)
+        .hdlWarnIfAtBound(opt$par, upper, n, nRef)
     }
     h2a <- opt$par[seq_len(nTau)]
     list(h2a = h2a, int = opt$par[nTau + 1L], h2 = sum(h2a))
@@ -1269,7 +1268,7 @@ NULL
 # legitimate estimate for a null trait. Warning on those would fire on
 # healthy fits and train the reader to ignore the message.
 # @noRd
-.hdlWarnIfAtBound <- function(par, lower, upper, n, nRef) {
+.hdlWarnIfAtBound <- function(par, upper, n, nRef) {
     tol <- 1e-6
     atUpper <- par >= upper - tol
     if (!any(atUpper)) {
@@ -1321,7 +1320,7 @@ NULL
     )
     h2aList <- map(loo, "h2a")
     h2aBlocks <- exec(rbind, !!!h2aList)
-    intLoo <- unlist(map(loo, "int"))
+    intLoo <- map_dbl(loo, "int")
     jkSe <- function(x) sqrt(mean((x - mean(x))^2) * (nBlocks - 1))
     list(
         h2aSe = apply(h2aBlocks, 2, jkSe),
@@ -1452,8 +1451,7 @@ NULL
     )
     looZ <- exec(rbind, !!!looRows)
     R <- cor(looZ)
-    R[is.na(R)] <- 0
-    R
+    replace(R, is.na(R), 0)
 }
 
 # =============================================================================
@@ -1465,8 +1463,7 @@ hdlUnivariate <- function(
     n,
     eigenRef,
     annotations = NULL,
-    local = FALSE,
-    lambda = 0
+    local = FALSE
 ) {
     eigenList <- getEigenList(eigenRef)
     M <- length(eigenRef)
@@ -1605,7 +1602,7 @@ sldscUnivariate <- function(
     A <- .gldscAnnotMatrix(annotations, M)
     scores <- .sldscScoreMatrix(ldRef, baselineMat, M)
     baseScore <- scores[, 1L]
-    blockIdx <- .sldscBlockIndex(ldRef, M)
+    blockIdx <- .sldscBlockIndex(ldRef)
     fit <- .sldscFit(chi2, scores, baseScore, n, A, nIter)
     jk <- .sldscJackknife(chi2, scores, baseScore, n, A, nIter, blockIdx)
     .sldscResult(fit, jk, annotations, baselineMat, chi2, baseScore, local, M)
@@ -1629,19 +1626,28 @@ sldscUnivariate <- function(
         )
         abort(msg)
     }
-    strat <- matrix(0, M, ncol(baselineMat))
-    for (block in ldMatrixList) {
-        idx <- block$snpIdx
-        strat[idx, ] <- (block$R^2) %*% baselineMat[idx, , drop = FALSE]
-    }
+    strat <- .h2ScatterBlockRows(
+        matrix(0, M, ncol(baselineMat)),
+        map(ldMatrixList, .h2BlockAnnotScores, baselineMat = baselineMat)
+    )
     cbind(base_l2 = base, strat)
+}
+
+# One block's per-annotation LD scores from its full LD matrix.
+# @noRd
+.h2BlockAnnotScores <- function(block, baselineMat) {
+    idx <- block$snpIdx
+    list(
+        idx = idx,
+        values = (block$R^2) %*% baselineMat[idx, , drop = FALSE]
+    )
 }
 
 # Per-block variant indices, from the LD matrices when present and otherwise
 # by overlapping the reference's variants with its LD blocks. The jackknife
 # leaves one of these out at a time.
 # @noRd
-.sldscBlockIndex <- function(ldRef, M) {
+.sldscBlockIndex <- function(ldRef) {
     ldMatrixList <- getLdMatrixList(ldRef)
     if (length(ldMatrixList) > 0L) {
         return(map(ldMatrixList, "snpIdx"))
@@ -1707,10 +1713,10 @@ sldscUnivariate <- function(
 # @noRd
 .sldscFitUnivariate <- function(chi2, scores, baseScore, n, A, nIter) {
     M <- nrow(A)
-    keep <- chi2 < 30
-    if (sum(keep) < 4L) {
-        keep <- rep(TRUE, length(chi2))
-    }
+    # Too few variants survive the chi2 cap to fit on: keep everything rather
+    # than fit on a handful.
+    capped <- chi2 < 30
+    keep <- if (sum(capped) < 4L) rep(TRUE, length(chi2)) else capped
     # One set of initial weights, formed on the full data, reused by both
     # steps -- upstream computes `initial_w` once and subsets it for step 1.
     xTot <- rowSums(scores)
@@ -1748,9 +1754,13 @@ sldscUnivariate <- function(
 # @noRd
 .sldscFitPartitioned <- function(chi2, scores, baseScore, n, A) {
     M <- nrow(A)
-    keep <- chi2 < max(0.001 * n, 80)
-    if (sum(keep) < ncol(scores) + 2L) {
-        keep <- rep(TRUE, length(chi2))
+    # Too few variants survive the chi2 cap for the design's width: keep
+    # everything rather than fit an underdetermined system.
+    capped <- chi2 < max(0.001 * n, 80)
+    keep <- if (sum(capped) < ncol(scores) + 2L) {
+        rep(TRUE, length(chi2))
+    } else {
+        capped
     }
     chi2 <- chi2[keep]
     scores <- scores[keep, , drop = FALSE]
@@ -1893,11 +1903,17 @@ sldscUnivariate <- function(
     local,
     M
 ) {
-    localDf <- if (local) .sldscLocal(chi2, baseScore, fit, M) else NULL
-    enrichmentDf <- NULL
-    if (!is.null(baselineMat)) {
-        nm <- SummarizedExperiment::colData(getBaseline(annotations))$name
-        enrichmentDf <- .gldscEnrichmentDf(fit, jk, baselineMat, nm, M)
+    localDf <- if (local) .sldscLocal(chi2, baseScore, fit) else NULL
+    enrichmentDf <- if (is.null(baselineMat)) {
+        NULL
+    } else {
+        .gldscEnrichmentDf(
+            fit,
+            jk,
+            baselineMat,
+            SummarizedExperiment::colData(getBaseline(annotations))$name,
+            M
+        )
     }
     tau <- if (is.null(baselineMat)) fit$h2 else fit$tau[-1]
     tauSe <- if (is.null(baselineMat)) jk$h2Se else jk$tauSe[-1]
@@ -1916,7 +1932,7 @@ sldscUnivariate <- function(
 # Per-variant local h2 contribution: the fitted non-intercept signal spread
 # over the variant's own LD score.
 # @noRd
-.sldscLocal <- function(chi2, baseScore, fit, M) {
+.sldscLocal <- function(chi2, baseScore, fit) {
     tibble(
         variantIdx = seq_along(chi2),
         chi2 = chi2,
@@ -1952,15 +1968,23 @@ sldscUnivariate <- function(
     ldRef,
     annotations,
     local,
-    ...
+    estimatorArgs = list()
 ) {
-    switch(
+    # `estimatorArgs` rather than `...`: the estimators take different
+    # trailing arguments (`nIter` for sldsc; the others take none today), so
+    # an unknown name should fail here rather than at whichever estimator the
+    # method token happens to select. lder/gldsc/hdl used to advertise a
+    # ridge `lambda` here that nothing read -- upstream LDER and HDL have no
+    # such penalty, and the function behind it had no callers.
+    base <- list(z, n, ldRef, annotations, local)
+    fn <- switch(
         method,
-        "lder" = lderUnivariate(z, n, ldRef, annotations, local, ...),
-        "gldsc" = gldscUnivariate(z, n, ldRef, annotations, local, ...),
-        "sldsc" = sldscUnivariate(z, n, ldRef, annotations, local, ...),
-        "hdl" = hdlUnivariate(z, n, ldRef, annotations, local, ...)
+        "lder" = lderUnivariate,
+        "gldsc" = gldscUnivariate,
+        "sldsc" = sldscUnivariate,
+        "hdl" = hdlUnivariate
     )
+    exec(fn, !!!base, !!!estimatorArgs)
 }
 
 # The estimators read `z` and the annotation rows positionally, by each LD
@@ -2069,21 +2093,19 @@ setMethod(
         annotations = NULL,
         local = FALSE,
         study = NULL,
-        ...
+        estimatorArgs = list()
     ) {
         method <- arg_match(method, c("lder", "gldsc", "sldsc", "hdl"))
         .validateMethodRef(method, ldRef)
         study <- .estimateH2ResolveStudy(sumstats, study)
         .h2ValidateInputs(sumstats, study, ldRef, annotations)
         z <- getZ(sumstats, study = study)
-        n <- median(getN(sumstats, study = study))
+        rawN <- median(getN(sumstats, study = study))
         M <- nSnps(sumstats, study = study)
         # Legacy heritability-wrapper correction (separate from the SuSiE RSS
         # binaryTraitModel handling in the fine-mapping pipeline).
         varY <- getVarY(sumstats, study = study)
-        if (!is.null(varY)) {
-            n <- n / varY
-        }
+        n <- if (is.null(varY)) rawN else rawN / varY
         result <- .estimateH2Dispatch(
             method,
             z,
@@ -2091,7 +2113,7 @@ setMethod(
             ldRef,
             annotations,
             local,
-            ...
+            estimatorArgs = estimatorArgs
         )
         .h2EstimateFromResult(result, method, M, study)
     }
@@ -2120,37 +2142,63 @@ setMethod(
 # computeLdScores -- LD score computation
 # =============================================================================
 
+# Write each block's rows into `base`. Deliberate scatter: the score matrices
+# are variants-long and the blocks partition the rows, so every block writes
+# its own slice exactly once and rows in no block keep their initial value.
+# Rebuilding by rbind would require the blocks to cover every variant.
+# @noRd
+.h2ScatterBlockRows <- function(base, blocks) {
+    for (b in blocks) {
+        base[b$idx, ] <- b$values
+    }
+    base
+}
+
+# One block's base LD scores.
+# @noRd
+.h2BlockBaseScores <- function(block) {
+    Vd <- sweep(block$vectors, 2, block$values, "*")
+    list(idx = block$snpIdx, values = rowSums(Vd^2))
+}
+
 # Base LD scores l2[j] = sum_i (V[j,i] * d[i])^2 (since R = V D V').
 .computeLdScoresBase <- function(eigenList, nSnps) {
-    l2 <- numeric(nSnps)
-    for (b in seq_along(eigenList)) {
-        block <- eigenList[[b]]
-        Vd <- sweep(block$vectors, 2, block$values, "*")
-        l2[block$snpIdx] <- rowSums(Vd^2)
-    }
-    matrix(l2, ncol = 1, dimnames = list(NULL, "base_l2"))
+    .h2ScatterBlockRows(
+        matrix(0, nrow = nSnps, ncol = 1, dimnames = list(NULL, "base_l2")),
+        map(eigenList, .h2BlockBaseScores)
+    )
 }
 
 # Base + annotation-stratified LD scores. Stratified column a:
 # l2_a[j] = sum_i (V[j,i] d[i])^2 * (sum_k V[k,i]^2 annot[k,a]).
 .computeLdScoresStratified <- function(eigenList, annotations, nSnps) {
     annotMat <- assay(annotations, "annotations")
-    nAnnot <- ncol(annotMat)
-    l2Strat <- matrix(0, nrow = nSnps, ncol = 1 + nAnnot)
-    for (b in seq_along(eigenList)) {
-        block <- eigenList[[b]]
-        idx <- block$snpIdx
-        V <- block$vectors
-        Vd2 <- sweep(V, 2, block$values, "*")^2
-        l2Strat[idx, 1] <- rowSums(Vd2)
-        for (a in seq_len(nAnnot)) {
-            annotWeights <- as.vector(crossprod(V^2, annotMat[idx, a]))
-            l2Strat[idx, 1 + a] <- as.vector(Vd2 %*% annotWeights)
-        }
-    }
     annotNames <- SummarizedExperiment::colData(annotations)$name
-    colnames(l2Strat) <- c("base_l2", annotNames)
-    l2Strat
+    .h2ScatterBlockRows(
+        matrix(
+            0,
+            nrow = nSnps,
+            ncol = 1 + ncol(annotMat),
+            dimnames = list(NULL, c("base_l2", annotNames))
+        ),
+        map(eigenList, .h2BlockStratScores, annotMat = annotMat)
+    )
+}
+
+# One block's base + annotation-stratified scores. All annotations are taken
+# in a single matrix product rather than one column at a time.
+# @noRd
+.h2BlockStratScores <- function(block, annotMat) {
+    idx <- block$snpIdx
+    V <- block$vectors
+    Vd2 <- sweep(V, 2, block$values, "*")^2
+    list(
+        idx = idx,
+        values = cbind(
+            rowSums(Vd2),
+            Vd2 %*% crossprod(V^2, annotMat[idx, , drop = FALSE])
+        )
+    )
 }
 
 #' @rdname computeLdScores
@@ -2158,7 +2206,7 @@ setMethod(
 setMethod(
     "computeLdScores",
     signature(ldRef = "LdEigen"),
-    function(ldRef, annotations = NULL, ...) {
+    function(ldRef, annotations = NULL) {
         # Reconstruct LD scores from eigendecompositions
         # l2[j] = sum_k r^2_{jk} = sum_b sum_{eigenvalues in b} V[j,.]^2 * d
         nSnps <- length(ldRef)
@@ -2175,7 +2223,7 @@ setMethod(
 setMethod(
     "computeLdScores",
     signature(ldRef = "LdScore"),
-    function(ldRef, annotations = NULL, ...) {
+    function(ldRef, annotations = NULL) {
         if (is.null(annotations)) {
             return(getLdScores(ldRef))
         }
@@ -2191,29 +2239,18 @@ setMethod(
             abort(msg)
         }
 
-        nSnps <- length(ldRef)
         annotMat <- assay(annotations, "annotations")
-        nAnnot <- ncol(annotMat)
-
-        # Base L2 + annotation-stratified columns
-        l2Strat <- matrix(0, nrow = nSnps, ncol = 1 + nAnnot)
-        l2Strat[, 1] <- getLdScores(ldRef)[, 1]
-
-        for (b in seq_along(ldMatrixList)) {
-            block <- ldMatrixList[[b]]
-            R <- block$R
-            idx <- block$snpIdx
-            R2 <- R^2
-            for (a in seq_len(nAnnot)) {
-                # l2_a[j] = sum_k R^2_{jk} * annot[k, a]
-                l2Strat[idx, 1 + a] <- as.vector(R2 %*% annotMat[idx, a])
-            }
-        }
-
-        annotNames <- SummarizedExperiment::colData(annotations)$name
-        colNames <- c("base_l2", annotNames)
-        colnames(l2Strat) <- colNames
-        l2Strat
+        # The stratified columns l2_a[j] = sum_k R^2_{jk} annot[k, a] are
+        # scattered per block; the base column comes from the reference and
+        # is joined on afterwards, so the scatter never touches it.
+        strat <- .h2ScatterBlockRows(
+            matrix(0, nrow = length(ldRef), ncol = ncol(annotMat)),
+            map(ldMatrixList, .h2BlockAnnotScores, baselineMat = annotMat)
+        )
+        `colnames<-`(
+            cbind(getLdScores(ldRef)[, 1], strat),
+            c("base_l2", SummarizedExperiment::colData(annotations)$name)
+        )
     }
 )
 
@@ -2224,6 +2261,7 @@ setMethod(
 # Converter: H2Estimate -> sldsc_wrapper list format
 # =============================================================================
 
+#' @importFrom checkmate assertClass
 #' @title Convert H2Estimate to S-LDSC Trait Format
 #' @description Convert an \code{H2Estimate} object into the list format
 #'   expected by \code{\link{standardizeSldscTrait}} and
@@ -2249,9 +2287,7 @@ setMethod(
 #' h2EstimateToSldscTrait(h2EstimateExample)
 #' @export
 h2EstimateToSldscTrait <- function(h2Est) {
-    if (!is(h2Est, "H2Estimate")) {
-        abort("h2Est must be an H2Estimate object")
-    }
+    assertClass(h2Est, "H2Estimate")
 
     enrichDf <- getEnrichment(h2Est)
     if (is.null(enrichDf)) {
@@ -2265,18 +2301,13 @@ h2EstimateToSldscTrait <- function(h2Est) {
     cats <- as.character(enrichDf$annotation)
     nCats <- length(cats)
 
-    tauBlocks <- getTauBlocks(h2Est)
-    if (is.null(tauBlocks)) {
-        # Create a dummy single-block matrix from the point estimates
-        tauBlocks <- matrix(enrichDf$tau, nrow = 1)
-        colnames(tauBlocks) <- cats
-        nBlocks <- 1L
-    } else {
-        nBlocks <- nrow(tauBlocks)
-        if (is.null(colnames(tauBlocks))) {
-            colnames(tauBlocks) <- cats
-        }
-    }
+    rawTau <- getTauBlocks(h2Est)
+    # Without per-block estimates the point estimates stand in as one block.
+    tauBlocks <- `colnames<-`(
+        rawTau %||% matrix(enrichDf$tau, nrow = 1),
+        colnames(rawTau) %||% cats
+    )
+    nBlocks <- nrow(tauBlocks)
 
     list(
         categories = cats,
@@ -2325,8 +2356,7 @@ h2EstimateToSldscTrait <- function(h2Est) {
 # coordinate check in .h2CheckPositions() is the stronger guard regardless.
 # @noRd
 .h2GenomeOfRanges <- function(x) {
-    g <- unique(GenomeInfoDb::genome(x))
-    g <- g[!is.na(g)]
+    g <- discard(unique(GenomeInfoDb::genome(x)), is.na)
     if (length(g) == 0L) {
         return(NA_character_)
     }
@@ -2370,10 +2400,11 @@ h2EstimateToSldscTrait <- function(h2Est) {
     .lderLocalBlock(blockStats[[b]], b, N, a)
 }
 
-# LDER weighted score z for candidate column `c` under the `keep` block mask.
+# LDER weighted score z for candidate column `cand` under the `keep` block
+# mask.
 # @noRd
-.lderScoreForCand <- function(c, ldCand, lam, w, resid, N, keep) {
-    .lderCandidateScore(ldCand[, c], lam, w, resid, N, keep)
+.lderScoreForCand <- function(cand, ldCand, lam, w, resid, N, keep) {
+    .lderCandidateScore(ldCand[, cand], lam, w, resid, N, keep)
 }
 
 # LDER leave-one-block-out candidate score z's for block `b`.

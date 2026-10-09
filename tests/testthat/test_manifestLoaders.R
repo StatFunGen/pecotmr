@@ -87,7 +87,7 @@ test_that(".canonManifestCols errors on missing required columns", {
             required = c("study", "sumStatsPath"),
             label = "GwasSumStats"
         ),
-        "missing required column"
+        "manifest.*Colnames must include the elements"
     )
 })
 
@@ -829,10 +829,13 @@ test_that(".readManifest handles CSV, missing files, and bad input", {
     readr::write_csv(data.frame(study = "s1", sumStatsPath = ssPath), csv)
     m <- pecotmr:::.readManifest(csv)
     expect_true(is.data.frame(m) && m$study == "s1")
-    expect_error(pecotmr:::.readManifest("/no/such/manifest.tsv"), "not found")
+    expect_error(
+        pecotmr:::.readManifest("/no/such/manifest.tsv"),
+        "File does not exist"
+    )
     expect_error(
         pecotmr:::.readManifest(42L),
-        "data.frame or a single file path"
+        "Must be of type 'string'"
     )
 })
 
@@ -1041,7 +1044,10 @@ test_that(".asGRegion coerces strings, GRanges, and data.frames", {
 
 test_that(".readColumnMapping errors on bad inputs", {
     tmp <- withr::local_tempdir()
-    expect_error(pecotmr:::.readColumnMapping("/no/map.yaml"), "not found")
+    expect_error(
+        pecotmr:::.readColumnMapping("/no/map.yaml"),
+        "File does not exist"
+    )
     bad <- file.path(tmp, "bad.yaml")
     yaml::write_yaml(list("a", "b"), bad) # unnamed sequence
     expect_error(pecotmr:::.readColumnMapping(bad), "standardName: sourceName")
@@ -1264,7 +1270,7 @@ test_that("QtlDataset builder errors on inconsistent per-context paths", {
             collapse = "\t"
         )
     )
-    rows <- vapply(
+    rows <- map_chr(
         seq_len(n),
         function(i) {
             vals <- c(
@@ -1291,8 +1297,7 @@ test_that("QtlDataset builder errors on inconsistent per-context paths", {
                 ),
                 collapse = "\t"
             )
-        },
-        character(1)
+        }
     )
     writeLines(c(meta, rows), path)
     path
@@ -1745,8 +1750,11 @@ test_that(".readTabixRegion returns a bare tibble for a headerless file", {
     dir <- withr::local_tempdir()
     plain <- file.path(dir, "noheader.tsv")
     writeLines(c("chr1\t100\t200\tA", "chr1\t300\t400\tB"), plain)
-    bgz <- Rsamtools::bgzip(plain, file.path(dir, "noheader.tsv.bgz"),
-        overwrite = TRUE)
+    bgz <- Rsamtools::bgzip(
+        plain,
+        file.path(dir, "noheader.tsv.bgz"),
+        overwrite = TRUE
+    )
     Rsamtools::indexTabix(bgz, seq = 1L, start = 2L, end = 3L)
     # With no "#" header line there are no column names to build an empty
     # frame from, so the miss returns a column-less tibble.
@@ -1755,4 +1763,56 @@ test_that(".readTabixRegion returns a bare tibble for a headerless file", {
     expect_s3_class(out, "tbl_df")
     expect_equal(nrow(out), 0L)
     expect_equal(ncol(out), 0L)
+})
+
+test_that("manifest loaders guard the QtlDataset pass-through arguments", {
+    mf <- system.file("extdata", "manifests", package = "pecotmr")
+    skip_if(mf == "", "manifest fixtures unavailable")
+    expect_error(
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = GenotypeFilterParam(mafCutoff = -1)
+        ),
+        "mafCutoff.*is not >= 0"
+    )
+    expect_error(
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = GenotypeFilterParam(keepIndel = NA)
+        ),
+        "keepIndel.*May not be NA"
+    )
+    # A bare list cannot be checked, so it is refused outright.
+    expect_error(
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = list(mafCutoff = 0.01)
+        ),
+        "must be built with GenotypeFilterParam"
+    )
+    expect_error(
+        loadQtlDatasetFromManifest(
+            data.frame(),
+            scaleResiduals = c(TRUE, TRUE)
+        ),
+        "scaleResiduals.*Must have length 1"
+    )
+    expect_error(
+        loadQtlDatasetFromManifest(data.frame(), study = 1L),
+        "study.*Must be of type 'string'"
+    )
+    expect_error(
+        loadMultiStudyQtlDatasetFromManifest(
+            data.frame(),
+            minLdOverlapWarn = 2
+        ),
+        "minLdOverlapWarn.*is not <= 1"
+    )
+    expect_error(
+        loadMultiStudyQtlDatasetFromManifest(
+            data.frame(),
+            genotypeFilterArgs = GenotypeFilterParam(xvarCutoff = -1)
+        ),
+        "xvarCutoff.*is not >= 0"
+    )
 })

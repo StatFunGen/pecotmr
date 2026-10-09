@@ -7,7 +7,7 @@ test_that("bayesAlphabetWeights errors on dimension mismatch", {
     y <- rnorm(5)
     expect_error(
         bayesAlphabetWeights(X, y, method = "bayesN"),
-        "same number of rows"
+        "y.*Must have length 10"
     )
 })
 
@@ -18,7 +18,7 @@ test_that("bayesAlphabetWeights errors on covariate dimension mismatch", {
     Z <- matrix(rnorm(15), nrow = 5)
     expect_error(
         bayesAlphabetWeights(X, y, method = "bayesN", Z = Z),
-        "same number of rows"
+        "Z.*Must have exactly 10 rows"
     )
 })
 
@@ -71,7 +71,11 @@ test_that("bayesNWeights dispatches to bayesAlphabetWeights with bayesN", {
     p <- 10
     X <- matrix(rnorm(n * p), nrow = n)
     y <- X[, 1] * 0.5 + rnorm(n)
-    result <- bayesNWeights(X, y, nit = 50, nburn = 10)
+    result <- bayesNWeights(
+        X,
+        y,
+        methodArgs = QggOptions(nit = 50, nburn = 10)
+    )
     expect_equal(length(result), p)
     expect_true(is.numeric(result))
     expect_true(all(is.finite(result)))

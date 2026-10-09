@@ -6,6 +6,18 @@ context("regularized_regression - dispatch verification")
 # correct values. They catch silent dispatch bugs (wrong method, wrong penalty,
 # dropped argument) that the shape-only tests above would not.
 
+test_that("susie-family weight wrappers never fit; they demand the fit", {
+    # Fitting belongs to fineMappingPipeline(); these wrappers extract only.
+    # The susie dispatch arguments they used to build are covered in
+    # test_fineMappingWrappers.R and test_fineMappingPipeline.R.
+    data(eqtlRegionExample)
+    X <- eqtlRegionExample$X[, 1:20]
+    y <- eqtlRegionExample$yRes
+    expect_error(susieWeights(X = X, y = y), "no 'susie' fit supplied")
+    expect_error(susieAshWeights(X = X, y = y), "no 'susieAsh' fit supplied")
+    expect_error(susieInfWeights(X = X, y = y), "no 'susieInf' fit supplied")
+})
+
 test_that("prsCsWeights dispatches to prsCs with correct arguments", {
     set.seed(42)
     p <- 10
@@ -25,7 +37,11 @@ test_that("prsCsWeights dispatches to prsCs with correct arguments", {
             list(betaEst = seq_len(length(bhat)) * 0.01)
         }
     )
-    result <- prsCsWeights(stat = stat, LD = R, maf = rep(0.3, p), nIter = 17)
+    result <- prsCsWeights(
+        stat = stat,
+        LD = R,
+        methodArgs = PrsCsOptions(maf = rep(0.3, p), nIter = 17)
+    )
     expect_equal(captured$bhat, bhat)
     expect_equal(captured$R, R)
     expect_equal(captured$n, 55) # median of stat$n, NOT mean (145)
@@ -50,7 +66,11 @@ test_that("sdprWeights dispatches to sdpr with correct arguments", {
             list(betaEst = seq_len(length(bhat)) * 0.02)
         }
     )
-    result <- sdprWeights(stat = stat, LD = R, iter = 19, burn = 3)
+    result <- sdprWeights(
+        stat = stat,
+        LD = R,
+        methodArgs = SdprOptions(iter = 19, burn = 3)
+    )
     expect_equal(captured$bhat, bhat)
     expect_equal(captured$R, R)
     expect_equal(captured$n, 456)
@@ -64,7 +84,7 @@ test_that("lassosumRssWeights dispatches to lassosumRss once per s value", {
     p <- 10
     bhat <- rnorm(p, sd = 0.1)
     R <- diag(p)
-    for (i in 1:(p - 1)) {
+    for (i in seq_len(p - 1)) {
         R[i, i + 1] <- 0.4
         R[i + 1, i] <- 0.4
     }
@@ -292,8 +312,14 @@ test_that("lassoWeights and enetWeights dispatch to glmnetWeights with correct a
     for (d in dispatchers) {
         captured <- new.env(parent = emptyenv())
         local_mocked_bindings(
-            glmnetWeights = function(X, y, alpha) {
+            glmnetWeights = function(
+                X,
+                y,
+                alpha,
+                methodArgs = GlmnetOptions()
+            ) {
                 captured$alpha <- alpha
+                captured$methodArgs <- methodArgs
                 matrix(0, nrow = ncol(X), ncol = 1)
             }
         )
@@ -306,83 +332,6 @@ test_that("lassoWeights and enetWeights dispatch to glmnetWeights with correct a
     }
 })
 
-test_that("susieWeights actually calls susie when fit is NULL", {
-    set.seed(42)
-    p <- 5
-    X <- matrix(rnorm(10 * p), nrow = 10)
-    y <- rnorm(10)
-    captured <- new.env(parent = emptyenv())
-    captured$called <- FALSE
-    local_mocked_bindings(
-        susie = function(X, y, ...) {
-            captured$called <- TRUE
-            captured$X <- X
-            captured$y <- y
-            list(pip = rep(0.1, ncol(X)))
-        },
-        .package = "susieR"
-    )
-    susieWeights(X = X, y = y)
-    expect_true(captured$called)
-    expect_identical(captured$X, X)
-    expect_identical(captured$y, y)
-})
-
-test_that("susieAshWeights calls susie with ash dispatch arguments", {
-    set.seed(42)
-    p <- 5
-    X <- matrix(rnorm(10 * p), nrow = 10)
-    y <- rnorm(10)
-    captured <- new.env(parent = emptyenv())
-    captured$called <- FALSE
-    local_mocked_bindings(
-        susie = function(
-            X,
-            y,
-            unmappable_effects = NULL,
-            convergence_method = NULL,
-            ...
-        ) {
-            captured$called <- TRUE
-            captured$unmappable_effects <- unmappable_effects
-            captured$convergence_method <- convergence_method
-            list(pip = rep(0.1, ncol(X)))
-        },
-        .package = "susieR"
-    )
-    susieAshWeights(X = X, y = y)
-    expect_true(captured$called)
-    expect_equal(captured$unmappable_effects, "ash")
-    expect_equal(captured$convergence_method, "pip")
-})
-
-test_that("susieInfWeights calls susie with inf dispatch arguments", {
-    set.seed(42)
-    p <- 5
-    X <- matrix(rnorm(10 * p), nrow = 10)
-    y <- rnorm(10)
-    captured <- new.env(parent = emptyenv())
-    captured$called <- FALSE
-    local_mocked_bindings(
-        susie = function(
-            X,
-            y,
-            unmappable_effects = NULL,
-            convergence_method = NULL,
-            ...
-        ) {
-            captured$called <- TRUE
-            captured$unmappable_effects <- unmappable_effects
-            captured$convergence_method <- convergence_method
-            list(pip = rep(0.1, ncol(X)))
-        },
-        .package = "susieR"
-    )
-    susieInfWeights(X = X, y = y)
-    expect_true(captured$called)
-    expect_equal(captured$unmappable_effects, "inf")
-    expect_equal(captured$convergence_method, "pip")
-})
 
 test_that("mrashWeights actually calls lassoWeights for default beta.init", {
     skip_if_not_installed("glmnet")

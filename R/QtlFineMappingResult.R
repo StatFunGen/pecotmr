@@ -42,24 +42,23 @@ setClass(
 # run only once the required columns are present; the ldSketch check always
 # runs.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
 .validateQtlFineMappingResult <- function(object) {
-    errors <- .qfmrCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- .qfmrCheckEntries(object)
+    coll <- makeAssertCollection()
+    assertNames(
+        .tupleColumnNames(object),
+        must.include = c("study", "context", "trait", "method"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    errors <- c(errors, .qfmrCheckLdSketch(object))
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# The study/context/trait/method/entry columns must be present.
-# @noRd
-.qfmrCheckRequiredCols <- function(object) {
-    required <- c("study", "context", "trait", "method")
-    missingCols <- setdiff(required, .tupleColumnNames(object))
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.qfmrCheckEntries(object))
+    coll$getMessages()
 }
 
 # Entry-column + region/traitPos + joint-column + tuple-uniqueness contract.
@@ -81,17 +80,15 @@ setClass(
 # to check is that the fit payload columns are present and parallel.
 # @noRd
 .qfmrCheckEntryLength <- function(object) {
-    missingCols <- setdiff(
-        c("susieFit", "cvResult"),
-        .tupleColumnNames(object)
+    res <- checkNames(
+        .tupleColumnNames(object),
+        must.include = c("susieFit", "cvResult"),
+        what = "colnames"
     )
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "missing entry payload columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    if (isTRUE(res)) {
+        return(NULL)
     }
-    NULL
+    str_c("missing entry payload columns: ", res)
 }
 
 # @noRd
@@ -101,7 +98,7 @@ setClass(
 # Each present joint* column must be character.
 # @noRd
 .qfmrCheckJointCols <- function(object, jointCols) {
-    unlist(compact(map(jointCols, .qfmrJointColError, object = object)))
+    list_c(compact(map(jointCols, .qfmrJointColError, object = object)))
 }
 
 # @noRd
@@ -141,12 +138,6 @@ setClass(
 }
 
 # ldSketch must be a GenotypeHandle or NULL.
-# @noRd
-.qfmrCheckLdSketch <- function(object) {
-    # The slot's class union enforces the type; nothing to check.
-    NULL
-}
-
 
 # The identity-tuple vectors and the payload list are parallel: one entry per
 # (study, context, trait, method). A length mismatch would otherwise surface as
@@ -204,6 +195,8 @@ setClass(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 #' QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(fe))
+#' @importFrom checkmate assertCharacter assert checkList
+#' @importFrom checkmate checkClass
 #' @export
 QtlFineMappingResult <- function(
     study,
@@ -217,44 +210,114 @@ QtlFineMappingResult <- function(
     traitPos = NULL,
     ldSketch = NULL
 ) {
+    .qfmrAssertArgs(
+        study,
+        context,
+        trait,
+        method,
+        entry,
+        jointStudies,
+        jointContexts,
+        jointTraits
+    )
     n <- length(study)
     .qfmrCheckTupleLengths(study, context, trait, method, entry)
-    entry <- map(entry, .asFmRowPayload)
-    .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
-    cols <- list(
-        study = as.character(study),
-        context = as.character(context),
-        trait = as.character(trait),
-        method = as.character(method),
-        susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
-        cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
-    )
-    cols <- .qfmrAppendJointCols(
-        cols,
+    payloads <- map(entry, .asFmRowPayload)
+    .checkRowPayloads(payloads, "FineMappingRow", "fine-mapping")
+    cols <- .qfmrMetadataCols(
+        study,
+        context,
+        trait,
+        method,
+        payloads,
         jointStudies,
         jointContexts,
         jointTraits,
+        traitPos,
         n
     )
-    cols <- .appendTraitPosCol(cols, traitPos, n)
-    dfArgs <- c(cols, list(check.names = FALSE))
-    # Each entry's variants become one ELEMENT, its topLoci that element's
-    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
-    # splits by chromosome with its metadata row replicated.
-    split <- .rtlSplitBySeqname(map(entry, rowVariants))
-    grl <- GenomicRanges::GRangesList(split$entry)
-    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
     obj <- new(
         "QtlFineMappingResult",
-        grl,
+        .rtlGrlWithMetadata(payloads, cols),
         ldSketch = .asLdSketch(ldSketch)
     )
     validObject(obj)
     obj
 }
 
-# Append any supplied joint* provenance columns (each must match length(study)).
+# Every argument's type contract, checked before anything is built.
+# @noRd
+.qfmrAssertArgs <- function(
+    study,
+    context,
+    trait,
+    method,
+    entry,
+    jointStudies,
+    jointContexts,
+    jointTraits
+) {
+    assertCharacter(study, any.missing = FALSE)
+    assertCharacter(context, any.missing = FALSE)
+    assertCharacter(trait, any.missing = FALSE)
+    assertCharacter(method, any.missing = FALSE)
+    # `entry` is documented as "List / SimpleList"; SimpleList is S4 and
+    # fails checkList, so this must be an or-combination.
+    assert(
+        checkList(entry),
+        checkClass(entry, "SimpleList"),
+        .var.name = "entry"
+    )
+    assertCharacter(jointStudies, null.ok = TRUE)
+    assertCharacter(jointContexts, null.ok = TRUE)
+    assertCharacter(jointTraits, null.ok = TRUE)
+}
+
+# The collection's outer mcols: the identity tuple, each entry's fit / cv
+# payload, and any joint-provenance or trait-position columns.
+# @noRd
+.qfmrMetadataCols <- function(
+    study,
+    context,
+    trait,
+    method,
+    payloads,
+    jointStudies,
+    jointContexts,
+    jointTraits,
+    traitPos,
+    n
+) {
+    baseCols <- list(
+        study = as.character(study),
+        context = as.character(context),
+        trait = as.character(trait),
+        method = as.character(method),
+        susieFit = S4Vectors::SimpleList(map(payloads, getSusieFit)),
+        cvResult = S4Vectors::SimpleList(map(payloads, getCvResult))
+    )
+    withJoint <- .qfmrAppendJointCols(
+        baseCols,
+        jointStudies,
+        jointContexts,
+        jointTraits,
+        n
+    )
+    .appendTraitPosCol(withJoint, traitPos, n)
+}
+
+# Each joint-provenance column must be one value per row.
+# @noRd
+.qfmrCheckJointColLength <- function(nm, val, n) {
+    if (length(val) == n) {
+        return(invisible(NULL))
+    }
+    msg <- glue("`{nm}` must have the same length as `study`.")
+    abort(msg)
+}
+
+# Append any supplied joint* provenance columns (each must match
+# length(study)).
 # @noRd
 .qfmrAppendJointCols <- function(
     cols,
@@ -263,23 +326,13 @@ QtlFineMappingResult <- function(
     jointTraits,
     n
 ) {
-    joints <- list(
+    supplied <- compact(list(
         jointStudies = jointStudies,
         jointContexts = jointContexts,
         jointTraits = jointTraits
-    )
-    for (nm in names(joints)) {
-        val <- joints[[nm]]
-        if (is.null(val)) {
-            next
-        }
-        if (length(val) != n) {
-            msg <- glue("`{nm}` must have the same length as `study`.")
-            abort(msg)
-        }
-        cols[[nm]] <- as.character(val)
-    }
-    cols
+    ))
+    walk2(names(supplied), supplied, .qfmrCheckJointColLength, n = n)
+    c(cols, map(supplied, as.character))
 }
 
 # The single row a (study, context, trait, method) selector pins.
@@ -317,8 +370,7 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        returnList = FALSE,
-        ...
+        returnList = FALSE
     ) {
         pip <- .fmrRowPip(
             .fmrRowParts(
@@ -331,9 +383,7 @@ setMethod(
                 "{as.character(x$study)[1L]}|{as.character(x$context)[1L]}|",
                 "{as.character(x$trait)[1L]}|{as.character(x$method)[1L]}"
             )
-            out <- list()
-            out[[nm]] <- pip
-            return(out)
+            return(set_names(list(pip), nm))
         }
         pip
     }
@@ -351,8 +401,19 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        ...
+        region = NULL
     ) {
+        # The shared FineMappingResultBase accessors pass the whole selector
+        # set, and only GwasFineMappingResult is region-indexed. Refusing a
+        # non-NULL `region` is the point of naming it: it used to vanish into
+        # `...` and silently return the study/context/trait/method match.
+        if (!is.null(region)) {
+            abort(glue(
+                "QtlFineMappingResult is not region-indexed: select with ",
+                "study / context / trait / method. `region` applies to ",
+                "GwasFineMappingResult only."
+            ))
+        }
         .fmrRowParts(
             x,
             .qfmrSelectRowIndex(x, study, context, trait, method)
@@ -370,8 +431,7 @@ setMethod(
         study = NULL,
         context = NULL,
         trait = NULL,
-        method = NULL,
-        ...
+        method = NULL
     ) {
         getCvResult(.fmrRowParts(
             x,

@@ -126,8 +126,10 @@ setClass(
 #' U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
 #' mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
 #' mp
+#' @importFrom checkmate assertList
 #' @export
 MashPrior <- function(fullFit = NULL, cvFits = NULL) {
+    assertList(cvFits, null.ok = TRUE)
     obj <- new("MashPrior", fullFit = fullFit, cvFits = cvFits)
     validObject(obj)
     obj
@@ -135,11 +137,11 @@ MashPrior <- function(fullFit = NULL, cvFits = NULL) {
 
 #' @rdname getFullFit
 #' @export
-setMethod("getFullFit", "MashPrior", function(x, ...) x@fullFit)
+setMethod("getFullFit", "MashPrior", function(x) x@fullFit)
 
 #' @rdname getCvFits
 #' @export
-setMethod("getCvFits", "MashPrior", function(x, ...) x@cvFits)
+setMethod("getCvFits", "MashPrior", function(x) x@cvFits)
 
 #' @rdname show-methods
 #' @export

@@ -10,5 +10,6 @@
 ^.claude
 ^data-raw$
 ^docs$
+^dev$
 ^air.toml
 ^inst/prototype

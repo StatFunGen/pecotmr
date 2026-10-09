@@ -5,7 +5,6 @@
 \alias{colocboostPipeline,QtlDataset-method}
 \alias{colocboostPipeline,QtlSumStats-method}
 \alias{colocboostPipeline,MultiStudyQtlDataset-method}
-\alias{colocboostPipeline,ANY-method}
 \title{ColocBoost multi-trait colocalization pipeline (S4)}
 \usage{
 colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
@@ -22,15 +21,10 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
-  mafCutoff = 0,
-  macCutoff = 0,
-  imissCutoff = 1,
-  pipCutoffToSkip = 0,
-  absZCutoffToSkip = 0,
-  bfCutoffToSkip = 0,
-  logBfCutoffToSkip = 0,
+  panelFilterArgs = PanelFilterParam(),
+  signalScreenArgs = SignalScreenParam(),
   alleleFlip = TRUE,
-  ...
+  methodArgs = ColocboostOptions()
 )
 
 \S4method{colocboostPipeline}{QtlSumStats}(
@@ -38,17 +32,13 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   gwasSumStats = NULL,
   contexts = NULL,
   traitId = NULL,
-  region = NULL,
-  cisWindow = NULL,
   focalTrait = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
   alleleFlip = TRUE,
-  mafCutoff = 0,
-  macCutoff = 0,
-  imissCutoff = 1,
-  ...
+  panelFilterArgs = PanelFilterParam(),
+  methodArgs = ColocboostOptions()
 )
 
 \S4method{colocboostPipeline}{MultiStudyQtlDataset}(
@@ -63,18 +53,11 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
-  mafCutoff = 0,
-  macCutoff = 0,
-  imissCutoff = 1,
-  pipCutoffToSkip = 0,
-  absZCutoffToSkip = 0,
-  bfCutoffToSkip = 0,
-  logBfCutoffToSkip = 0,
+  panelFilterArgs = PanelFilterParam(),
+  signalScreenArgs = SignalScreenParam(),
   alleleFlip = TRUE,
-  ...
+  methodArgs = ColocboostOptions()
 )
-
-\S4method{colocboostPipeline}{ANY}(qtlData, gwasSumStats = NULL, ...)
 }
 \arguments{
 \item{qtlData}{One of \code{QtlDataset}, \code{QtlSumStats}, or
@@ -83,9 +66,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
 \item{gwasSumStats}{Optional \code{GwasSumStats} with the GWAS studies to
 colocalize against. \code{NULL} to skip GWAS colocalization.}
 
-\item{...}{Additional arguments forwarded to
-\code{\link[colocboost]{colocboost}} (e.g., \code{M}, \code{L},
-\code{output_level}).}
+\item{...}{Required by the generic; the methods take no further arguments.}
 
 \item{contexts}{Optional character vector of context names to restrict the
 individual-level / QtlSumStats QTL analysis to. When \code{NULL} (default),
@@ -99,10 +80,14 @@ variant-window selection).}
 
 \item{region}{Optional single-range \code{GRanges} describing the analysis
 window. Mutually exclusive with \code{traitId} (see the \code{QtlDataset}
-accessors).}
+accessors). Individual-level input only: summary statistics carry no
+genotypes to window, so the \code{QtlSumStats} method does not take it
+--- matching \code{\link{fineMappingPipeline}} and
+\code{\link{twasWeightsPipeline}}.}
 
 \item{cisWindow}{Optional cis window in basepairs; required with
-\code{traitId}, optional with \code{region}.}
+\code{traitId}, optional with \code{region}. Individual-level input
+only, as for \code{region}.}
 
 \item{focalTrait}{Optional trait name; when supplied and present in the
 assembled outcome list, the colocboost xQTL-only run uses it as the focal
@@ -116,36 +101,46 @@ colocboost variants to run.}
 \item{samples}{Optional character vector of sample IDs to restrict the
 analysis to; \code{NULL} (default) uses all samples.}
 
-\item{mafCutoff, macCutoff, imissCutoff}{Analysis-time filters applied to the
-summary-statistic sides against the LD reference panel: a variant whose
-panel genotypes fall below the cutoffs is dropped before the LD matrix is
-built. Defaults (\code{0}, \code{0}, \code{1}) filter nothing. See the
-Details section for how these relate to the individual-level cutoffs
-recorded on a \code{QtlDataset}.}
+\item{panelFilterArgs}{Analysis-time filters applied to the summary-statistic
+sides against the LD reference panel, built with
+\code{\link{PanelFilterParam}}: a variant whose panel genotypes fall
+below its cutoffs is dropped before the LD matrix is built. The defaults
+filter nothing. See the Details section for how these relate to the
+individual-level cutoffs recorded on a \code{QtlDataset}.}
 
-\item{pipCutoffToSkip}{Individual-level pre-filter (ports the legacy
-\code{pip_cutoff_to_skip_ind}). Scalar (applied to every context) or a
-context-named numeric vector. For each context, every outcome is fit with a
-single-effect SuSiE (\code{L = 1}) and dropped unless some variant's PIP
-exceeds the cutoff; a context with no surviving outcome is skipped.
-\code{0} (default) disables it; a negative value uses \code{3 /
-n_variants}. (Summary-statistic skipping is handled upstream by
-\code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)}
-
-\item{absZCutoffToSkip, bfCutoffToSkip, logBfCutoffToSkip}{Alternative
-individual-level pre-filter metrics used in place of
-\code{pipCutoffToSkip}: drop an outcome unless its maximum marginal
-\code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
-single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
-(\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
-Scalars, each defaulting to 0 (off). Exactly one screening metric may be
-enabled: setting any of these requires \code{pipCutoffToSkip = 0}.}
+\item{signalScreenArgs}{Individual-level pre-filter (ports the legacy
+\code{pip_cutoff_to_skip_ind}), built with
+\code{\link{SignalScreenParam}}. For each context every outcome is fit
+with a single-effect SuSiE (\code{L = 1}) and dropped unless the chosen
+metric exceeds its cutoff; a context with no surviving outcome is
+skipped:
+\itemize{
+  \item \code{pip} --- the maximum PIP. A negative cutoff uses
+    \code{3 / n_variants}. Uniquely here it may also be a
+    \strong{context-named} numeric vector rather than a scalar,
+    applying a different cutoff per context.
+  \item \code{absZ} --- the maximum marginal \code{|z|}.
+  \item \code{bf} / \code{logBf} --- the maximum per-variant Bayes
+    factor or log Bayes factor from the \code{L = 1} fit.
+}
+Only one metric may be enabled, which
+\code{\link{SignalScreenParam}} enforces when you build it. Unset (the
+default) screens nothing. Summary-statistic skipping is handled upstream
+by \code{\link{summaryStatsQc}}.}
 
 \item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, harmonize variants
 across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
 swaps recognized (flipping z / residualized dosage / LD to a shared
 coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
 swap is treated as a distinct variant.}
+
+\item{methodArgs}{Additional arguments forwarded to
+\code{colocboost::colocboost}, built with
+\code{\link{ColocboostOptions}}. Names are checked against that
+function's formals, so a misspelled option errors instead of being
+dropped inside the run. The data slots the pipeline assembles itself
+(\code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
+\code{focal_outcome_idx}) are refused.}
 }
 \value{
 A \code{\linkS4class{ColocBoostResult}}: one element per
@@ -196,15 +191,14 @@ for either side; colocboost has its own variable-selection algorithm.
           \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
           The pipeline does \emph{not} run a separate
           individual-level QC pass.
-    \item \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} act
-          at ANALYSIS time on the sumstat sides, measured against the
-          \strong{LD reference panel}: a variant whose panel genotypes fall
-          below the cutoffs is dropped before the LD matrix is built. They
-          apply to a \code{QtlSumStats} QTL side and to a
-          \code{GwasSumStats} GWAS side (so they still bite when the QTL
-          side is individual-level). Defaults (\code{0}, \code{0},
-          \code{1}) filter nothing. Unlike
-          \code{summaryStatsQc(imputeOpts = ...)}, which only bounds what
+    \item \code{panelFilter} acts at ANALYSIS time on the sumstat
+          sides, measured against the \strong{LD reference panel}: a
+          variant whose panel genotypes fall below its cutoffs is dropped
+          before the LD matrix is built. It applies to a
+          \code{QtlSumStats} QTL side and to a \code{GwasSumStats} GWAS
+          side (so it still bites when the QTL side is
+          individual-level). Its defaults filter nothing. Unlike
+          \code{summaryStatsQc(imputeArgs = ...)}, which only bounds what
           RAISS will impute, these discard \emph{observed} variants.
     \item All summary-statistic QC (variant filters, harmonization
           against the \code{ldSketch}, LD-mismatch detection, RAISS

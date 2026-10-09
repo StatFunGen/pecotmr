@@ -41,19 +41,22 @@ setClass(
     prototype(susieFit = NULL, cvResult = NULL)
 )
 
+#' @importFrom checkmate makeAssertCollection assertList
 methods::setValidity("FineMappingRow", function(object) {
-    errors <- character(0)
-    if (!is.null(object@cvResult) && !is.list(object@cvResult)) {
-        errors <- c(errors, "cvResult must be NULL or a list")
-    }
+    coll <- makeAssertCollection()
+    assertList(
+        object@cvResult,
+        null.ok = TRUE,
+        .var.name = "cvResult",
+        add = coll
+    )
+    # mcols() is an S4 DataFrame, not a data.frame, so checkDataFrame does not
+    # apply; the row-count contract stays a plain check.
     md <- mcols(object@variants, use.names = FALSE)
     if (!is.null(md) && nrow(md) != length(object@variants)) {
-        errors <- c(
-            errors,
-            "variants' metadata columns must have one row per variant"
-        )
+        coll$push("variants' metadata columns must have one row per variant")
     }
-    if (length(errors) == 0L) TRUE else errors
+    coll$getMessages()
 })
 
 #' @title Build One Fine-Mapping Row
@@ -89,7 +92,7 @@ methods::setValidity("FineMappingRow", function(object) {
 #' @export
 fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     vids <- as.character(variantIds)
-    gr <- .variantIdsToGRanges(vids, "variantIds")
+    bare <- .variantIdsToGRanges(vids, "variantIds")
     tl <- as_tibble(topLoci)
     missingCols <- setdiff(c("variant_id", "pip"), colnames(tl))
     if (nrow(tl) > 0L && length(missingCols) > 0L) {
@@ -99,9 +102,9 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         )
         abort(msg)
     }
-    if (nrow(tl) != length(gr)) {
+    if (nrow(tl) != length(bare)) {
         msg <- glue(
-            "topLoci has {nrow(tl)} rows but {length(gr)} variants were ",
+            "topLoci has {nrow(tl)} rows but {length(bare)} variants were ",
             "supplied; they must be aligned row-for-row."
         )
         abort(msg)
@@ -109,9 +112,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (nrow(tl) > 0L && is_in("variant_id", names(tl))) {
         .fmRowCheckIdOrder(vids, as.character(tl$variant_id))
     }
-    for (nm in setdiff(names(tl), .fmeIdentityCols)) {
-        mcols(gr)[[nm]] <- tl[[nm]]
-    }
+    gr <- .fmRowAttachPayload(bare, tl)
     obj <- new(
         "FineMappingRow",
         variants = gr,
@@ -120,6 +121,27 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     )
     validObject(obj)
     obj
+}
+
+# Attach topLoci's payload columns to the variant GRanges, keeping the
+# identity columns `.variantIdsToGRanges()` already put in mcols. Replacing
+# mcols wholesale would drop those, and the variant ids could no longer be
+# rebuilt from the row.
+# @noRd
+.fmRowAttachPayload <- function(gr, tl) {
+    payload <- setdiff(names(tl), .fmeIdentityCols)
+    if (length(payload) == 0L) {
+        return(gr)
+    }
+    existing <- S4Vectors::mcols(gr)
+    kept <- existing[, setdiff(colnames(existing), payload), drop = FALSE]
+    `mcols<-`(
+        gr,
+        value = cbind(
+            kept,
+            S4Vectors::DataFrame(tl[payload], check.names = FALSE)
+        )
+    )
 }
 
 
@@ -185,31 +207,6 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         !is.null(fit$alpha)
 }
 
-# Populate `obj$cred_band` via fsusieR's wavethresh/GenW band computation. That
-# function is registered as an S3 method but NOT exported, and the exported
-# affected_reg() depends on cred_band already being populated, so this internal
-# call is the only path that works across all post_processing modes. Guarded so
-# an upstream fsusieR change surfaces as a clear error, not a silent NULL.
-# @noRd
-.fsusiePopulateCredibleBand <- function(fit) {
-    fn <- tryCatch(
-        get("update_cal_credible_band.susiF", envir = asNamespace("fsusieR")),
-        error = function(e) NULL
-    )
-    if (is.null(fn)) {
-        # Defensive guard against an upstream fsusieR rename; only reachable
-        # if fsusieR drops this unexported S3 method.
-        msg <- glue(
-            "fsusieR's internal update_cal_credible_band.susiF not found; ",
-            "cannot compute the fSuSiE credible band (upstream fsusieR API ",
-            "changed)."
-        )
-        abort(msg)
-    }
-    indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
-    fn(fit, indxLst)
-}
-
 # Chromosome of the fit's variants (matches getTopLoci's `chrom`, no "chr").
 # @noRd
 .fsusieChrom <- function(fit) {
@@ -217,7 +214,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(vid) || length(vid) == 0L) {
         return(NA_character_)
     }
-    tryCatch(parseVariantId(vid[1])$chrom, error = function(e) NA_character_)
+    try_fetch(parseVariantId(vid[1])$chrom, error = function(cnd) NA_character_)
 }
 
 .emptyCredibleBand <- function() {
@@ -239,14 +236,13 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     fit <- .fsusiePopulateCredibleBand(fit)
     grid <- as.numeric(fit$outing_grid)
     chrom <- .fsusieChrom(fit)
-    parts <- map(
+    parts <- compact(map(
         seq_along(fit$cred_band),
         .fsusieBandRow,
         fit = fit,
         chrom = chrom,
         grid = grid
-    )
-    parts <- compact(parts)
+    ))
     if (length(parts) == 0L) {
         return(.emptyCredibleBand())
     }
@@ -261,10 +257,40 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # MEMBERSHIP (not by index), which is robust to pecotmr's CS
 # filtering/renumbering.
 # @noRd
+# One fit effect's variant ids, resolving positional membership through the
+# fit's own variant order.
+# @noRd
+.fsusieEffectVariants <- function(l, fit, vids) {
+    raw <- fit$cs[[l]]
+    fv <- if (is.numeric(raw)) vids[as.integer(raw)] else raw
+    as.character(fv)
+}
+
+# @noRd
+.fsusieSetMatches <- function(fv, kVars) {
+    length(fv) > 0L && setequal(fv, kVars)
+}
+
+# The first fit effect whose membership equals label `lab`'s, or NA.
+# @noRd
+.fsusieFirstMatchingEffect <- function(lab, fitSets, topLoci) {
+    kVars <- as.character(topLoci$variant_id[topLoci$cs_95 == lab])
+    hit <- which(map_lgl(fitSets, .fsusieSetMatches, kVars = kVars))
+    if (length(hit) == 0L) {
+        return(NA_integer_)
+    }
+    hit[[1L]]
+}
+
+# @noRd
+.fsusieLabelPurity <- function(lab, topLoci) {
+    as.numeric(topLoci$cs_95_purity[topLoci$cs_95 == lab][1])
+}
+
 .fsusieCsMapFromTopLoci <- function(fit, topLoci) {
     L <- length(fit$cs)
-    label <- set_names(str_c("fsusie_", seq_len(L)), seq_len(L))
-    purity <- set_names(rep(NA_real_, L), seq_len(L))
+    defaultLabel <- set_names(str_c("fsusie_", seq_len(L)), seq_len(L))
+    defaultPurity <- set_names(rep(NA_real_, L), seq_len(L))
     vids <- names(fit$csd_X)
     if (
         is.null(topLoci) ||
@@ -274,63 +300,29 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
                 names(topLoci)
             ))
     ) {
-        return(list(label = label, purity = purity))
+        return(list(label = defaultLabel, purity = defaultPurity))
     }
     retained <- unique(topLoci$cs_95[!str_detect(topLoci$cs_95, "_0$")])
-    for (lab in retained) {
-        inLab <- topLoci$cs_95 == lab
-        kVars <- as.character(topLoci$variant_id[inLab])
-        kPurit <- as.numeric(topLoci$cs_95_purity[inLab][1])
-        for (l in seq_len(L)) {
-            fv <- fit$cs[[l]]
-            if (is.numeric(fv)) {
-                fv <- vids[as.integer(fv)]
-            }
-            fv <- as.character(fv)
-            if (length(fv) > 0L && setequal(fv, kVars)) {
-                label[[as.character(l)]] <- lab
-                purity[[as.character(l)]] <- kPurit
-                break
-            }
-        }
-    }
+    fitSets <- map(seq_len(L), .fsusieEffectVariants, fit = fit, vids = vids)
+    # Each retained label claims the first effect whose membership it matches;
+    # labels are applied in order, so a later one wins a shared effect, which
+    # is what the repeated assignment did.
+    targets <- map_int(
+        retained,
+        .fsusieFirstMatchingEffect,
+        fitSets = fitSets,
+        topLoci = topLoci
+    )
+    matched <- !is.na(targets)
+    lastWins <- matched & !duplicated(targets, fromLast = TRUE)
+    at <- targets[lastWins]
+    label <- replace(defaultLabel, at, retained[lastWins])
+    purity <- replace(
+        defaultPurity,
+        at,
+        map_dbl(retained[lastWins], .fsusieLabelPurity, topLoci = topLoci)
+    )
     list(label = label, purity = purity)
-}
-
-# @noRd
-.fsusieAffectedRegionsFit <- function(fit, topLoci = NULL) {
-    if (!.isFsusieFit(fit)) {
-        return(GenomicRanges::GRanges())
-    }
-    fit <- .fsusiePopulateCredibleBand(fit)
-    reg <- tryCatch(fsusieR::affected_reg(fit), error = function(e) NULL)
-    if (is.null(reg) || nrow(reg) == 0L) {
-        return(GenomicRanges::GRanges())
-    }
-    reg <- as_tibble(reg)
-    chrom <- .fsusieChrom(fit)
-    grid <- as.numeric(fit$outing_grid)
-    csMap <- .fsusieCsMapFromTopLoci(fit, topLoci)
-    csKey <- as.character(reg$CS)
-    # Effect direction over each region (sign of the fitted effect curve), which
-    # upstream affected_reg() collapses away.
-    direction <- map_chr(
-        seq_len(nrow(reg)),
-        .fsusieRegionDirection,
-        grid = grid,
-        reg = reg,
-        fit = fit
-    )
-    GenomicRanges::GRanges(
-        seqnames = str_c("chr", str_remove(chrom, "^chr")),
-        ranges = IRanges::IRanges(
-            start = as.integer(reg$Start),
-            end = as.integer(reg$End)
-        ),
-        cs = unname(csMap$label[csKey]),
-        purity = unname(csMap$purity[csKey]),
-        direction = direction
-    )
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
@@ -378,16 +370,26 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # @noRd
 .fsusieEntryAffectedRegions <- function(i, x) {
     gr <- .fmrRowFsusieAffectedRegions(.fmrRowParts(x, i))
-    if (length(gr) > 0L) {
-        S4Vectors::mcols(gr)$study <- as.character(x$study[[i]])
-        if (is_in("context", .tupleColumnNames(x))) {
-            S4Vectors::mcols(gr)$context <- as.character(x$context[[i]])
-        }
-        if (is_in("trait", .tupleColumnNames(x))) {
-            S4Vectors::mcols(gr)$trait <- as.character(x$trait[[i]])
-        }
+    if (length(gr) == 0L) {
+        return(gr)
     }
-    gr
+    cols <- .tupleColumnNames(x)
+    labels <- c(
+        list(study = as.character(x$study[[i]])),
+        compact(list(
+            context = if (is_in("context", cols)) {
+                as.character(x$context[[i]])
+            },
+            trait = if (is_in("trait", cols)) as.character(x$trait[[i]])
+        ))
+    )
+    S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(
+            S4Vectors::mcols(gr, use.names = FALSE),
+            exec(S4Vectors::DataFrame, !!!labels)
+        )
+    )
 }
 
 
@@ -421,8 +423,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(lbf) || !is.matrix(lbf) || is.na(Lidx) || Lidx > nrow(lbf)) {
         return(NA_real_)
     }
-    lv <- as.numeric(lbf[Lidx, ])
-    lv <- lv[is.finite(lv)]
+    lv <- keep(as.numeric(lbf[Lidx, ]), is.finite)
     if (length(lv) == 0L) {
         return(NA_real_)
     }
@@ -445,7 +446,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(tl) || nrow(tl) == 0L) {
         return(.emptyCsSummary())
     }
-    specs <- .csSummarySpecs(tl, fit, coverage, csCol, purCol)
+    specs <- .csSummarySpecs(tl, fit, coverage, csCol)
     if (length(specs) == 0L) {
         return(.emptyCsSummary())
     }
@@ -471,13 +472,13 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # membership. Falls back to enumerating the per-variant cs_<cov> column (the
 # labelled members only) for a minimal or hand-built fit with no sets.
 # @noRd
-.csSummarySpecs <- function(tl, fit, coverage, csCol, purCol) {
+.csSummarySpecs <- function(tl, fit, coverage, csCol) {
     setsObj <- .csSetsForCoverage(fit, coverage)
     hasSets <- !is.null(setsObj) &&
         !is.null(setsObj$cs) &&
         length(setsObj$cs) > 0L
     if (hasSets) {
-        return(.csSpecsFromFit(setsObj, fit, tl, coverage, csCol))
+        return(.csSpecsFromFit(setsObj, fit, tl, csCol))
     }
     .csSpecsFromColumn(tl, csCol)
 }
@@ -486,7 +487,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # variant ids through the alpha column names; the effect index comes from the
 # sets$cs "L<k>" names.
 # @noRd
-.csSpecsFromFit <- function(setsObj, fit, tl, coverage, csCol) {
+.csSpecsFromFit <- function(setsObj, fit, tl, csCol) {
     vn <- colnames(fit$alpha)
     eff <- .fmEffectIndices(setsObj$cs)
     tag <- .csMethodTag(tl, fit, csCol)
@@ -567,8 +568,8 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # @noRd
 .csMethodTag <- function(tl, fit, csCol) {
     if (!is.null(tl) && is_in(csCol, names(tl))) {
-        v <- tl[[csCol]]
-        v <- v[!is.na(v) & str_length(v) > 0L & !str_detect(v, "_0$")]
+        raw <- tl[[csCol]]
+        v <- raw[!is.na(raw) & str_length(raw) > 0L & !str_detect(raw, "_0$")]
         if (length(v) > 0L) {
             return(str_remove(v[1L], "_[0-9]+$"))
         }
@@ -581,13 +582,16 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # @noRd
 .csSummaryContext <- function(tl, fit, coverage, csCol, purCol) {
     Vvec <- if (!is.null(fit$V)) as.numeric(fit$V) else NULL
-    meanPur <- NULL
     sp <- fit$sets$purity
-    if (!is.null(sp)) {
-        mc <- intersect(c("meanAbsCorr", "mean.abs.corr"), names(sp))
-        if (length(mc) > 0L) {
-            meanPur <- set_names(as.numeric(sp[[mc[1L]]]), rownames(sp))
-        }
+    mc <- if (is.null(sp)) {
+        character(0)
+    } else {
+        intersect(c("meanAbsCorr", "mean.abs.corr"), names(sp))
+    }
+    meanPur <- if (length(mc) == 0L) {
+        NULL
+    } else {
+        set_names(as.numeric(sp[[mc[1L]]]), rownames(sp))
     }
     list(
         tl = tl,
@@ -668,21 +672,29 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # cs_log10bf: strongest member logBF (NA when the column is absent).
 # @noRd
 .csLog10Bf <- function(m) {
-    if (is_in("logBF", names(m))) {
-        suppressWarnings(max(m$logBF, na.rm = TRUE))
-    } else {
-        NA_real_
+    if (!is_in("logBF", names(m))) {
+        return(NA_real_)
     }
+    # Filtering first avoids max()'s empty-input warning entirely, and keeps
+    # this branch agreeing with the NA_real_ returned above: an empty or
+    # all-NA column previously yielded -Inf.
+    v <- m$logBF[is.finite(m$logBF)]
+    if (length(v) == 0L) NA_real_ else max(v)
 }
 
 # cs_mean_effect: mean conditional effect over the CS (NA when absent).
 # @noRd
 .csMeanEffect <- function(m) {
-    if (is_in("conditional_effect", names(m))) {
-        suppressWarnings(mean(as.numeric(m$conditional_effect), na.rm = TRUE))
-    } else {
-        NA_real_
+    if (!is_in("conditional_effect", names(m))) {
+        return(NA_real_)
     }
+    # suppressWarnings covers only the coercion; the empty case is handled
+    # explicitly so it returns NA_real_ rather than NaN.
+    v <- keep(
+        suppressWarnings(as.numeric(m$conditional_effect)),
+        is.finite
+    )
+    if (length(v) == 0L) NA_real_ else mean(v)
 }
 
 
@@ -693,13 +705,15 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (nrow(tl) == 0L) {
         return(tl)
     }
-    keep <- if (is.null(signalCutoff) || signalCutoff <= 0) {
+    aboveCutoff <- if (is.null(signalCutoff) || signalCutoff <= 0) {
         rep(TRUE, nrow(tl))
     } else {
         !is.na(tl$pip) & tl$pip > signalCutoff
     }
-    if (!is.null(minPurity)) {
-        keep <- keep & .fmePurityKeep(tl, minPurity)
+    keep <- if (is.null(minPurity)) {
+        aboveCutoff
+    } else {
+        aboveCutoff & .fmePurityKeep(tl, minPurity)
     }
     .projectPosteriorView(tl[keep, , drop = FALSE])
 }
@@ -739,8 +753,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         seqnames = str_c("chr", parsed$chrom),
         ranges = IRanges::IRanges(start = parsed$pos, width = 1L)
     )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(out)
-    gr
+    S4Vectors::`mcols<-`(gr, value = S4Vectors::DataFrame(out))
 }
 
 
@@ -771,17 +784,22 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     alpha <- .adjustPipsRenormAlpha(spec$alpha, cols)
     nKeep <- length(keepIdx)
     varAlpha <- alpha[, seq_len(nKeep), drop = FALSE]
-    fit$alpha <- alpha
-    fit$pip <- as.numeric(1 - apply(1 - varAlpha, 2L, prod))
-    if (length(spec$nullIdx) > 0L) {
-        fit$null_index <- nKeep + 1L
-    }
-    # Recorded BEFORE renormalization: after it every row sums to 1, so the
-    # share that survived is only knowable at this point. This is the §3.6
-    # diagnostic -- always reported, never a filter.
-    fit$retained_mass <- .adjustPipsRetainedMass(spec$alpha, cols)
-    fit <- .adjustPipsSubsetVariantSlots(fit, keepIdx, cols, nVariants)
-    .adjustPipsRebuildAllSets(fit, varAlpha)
+    subset <- list_assign(
+        fit,
+        !!!compact(list(
+            alpha = alpha,
+            pip = as.numeric(1 - apply(1 - varAlpha, 2L, prod)),
+            null_index = if (length(spec$nullIdx) > 0L) nKeep + 1L,
+            # Recorded BEFORE renormalization: after it every row sums to 1,
+            # so the share that survived is only knowable at this point. This
+            # is the §3.6 diagnostic -- always reported, never a filter.
+            retained_mass = .adjustPipsRetainedMass(spec$alpha, cols)
+        ))
+    )
+    .adjustPipsRebuildAllSets(
+        .adjustPipsSubsetVariantSlots(subset, keepIdx, cols, nVariants),
+        varAlpha
+    )
 }
 
 # susieInf / susieAsh carry Omega-weighted per-variant terms whose posterior
@@ -903,24 +921,30 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # @noRd
 .adjustPipsSubsetVariantSlots <- function(fit, keepIdx, cols, nVariants) {
     p <- list(keepIdx = keepIdx, cols = cols, nVariants = nVariants)
-    fit$lbf_variable <- .adjustPipsCols(
-        fit[["lbf_variable"]],
-        p,
-        "lbf_variable"
+    # compact(): a slot the fit never carried subsets to NULL, and adding it
+    # back as an explicit NULL element is not the same as leaving it out.
+    list_assign(
+        fit,
+        !!!compact(list(
+            lbf_variable = .adjustPipsCols(
+                fit[["lbf_variable"]],
+                p,
+                "lbf_variable"
+            ),
+            mu = .adjustPipsCols(fit[["mu"]], p, "mu"),
+            mu2 = .adjustPipsCols(fit[["mu2"]], p, "mu2"),
+            mu2_diag = .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag"),
+            clfsr = .adjustPipsCols(fit[["clfsr"]], p, "clfsr"),
+            coef = .adjustPipsRows(fit[["coef"]], p, "coef"),
+            X_column_scale_factors = .adjustPipsVec(
+                fit[["X_column_scale_factors"]],
+                p,
+                "X_column_scale_factors"
+            ),
+            XtXr = .adjustPipsVec(fit[["XtXr"]], p, "XtXr"),
+            pi = .adjustPipsVec(fit[["pi"]], p, "pi")
+        ))
     )
-    fit$mu <- .adjustPipsCols(fit[["mu"]], p, "mu")
-    fit$mu2 <- .adjustPipsCols(fit[["mu2"]], p, "mu2")
-    fit$mu2_diag <- .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag")
-    fit$clfsr <- .adjustPipsCols(fit[["clfsr"]], p, "clfsr")
-    fit$coef <- .adjustPipsRows(fit[["coef"]], p, "coef")
-    fit$X_column_scale_factors <- .adjustPipsVec(
-        fit[["X_column_scale_factors"]],
-        p,
-        "X_column_scale_factors"
-    )
-    fit$XtXr <- .adjustPipsVec(fit[["XtXr"]], p, "XtXr")
-    fit$pi <- .adjustPipsVec(fit[["pi"]], p, "pi")
-    fit
 }
 
 # Index set for a slot measured along its variant axis: `nVariants` selects the
@@ -985,22 +1009,26 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # stale.
 # @noRd
 .adjustPipsRebuildAllSets <- function(fit, varAlpha) {
-    if (!is.null(fit[["sets"]])) {
-        fit$sets <- .adjustPipsCsAtCoverage(
-            varAlpha,
-            fit[["V"]],
-            .adjustPipsCoverage(fit[["sets"]])
-        )
-    }
-    if (!is.null(fit[["sets_secondary"]])) {
-        fit$sets_secondary <- map(
-            fit[["sets_secondary"]],
-            .adjustPipsRebuildSecondary,
-            varAlpha = varAlpha,
-            V = fit[["V"]]
-        )
-    }
-    fit
+    list_assign(
+        fit,
+        !!!compact(list(
+            sets = if (!is.null(fit[["sets"]])) {
+                .adjustPipsCsAtCoverage(
+                    varAlpha,
+                    fit[["V"]],
+                    .adjustPipsCoverage(fit[["sets"]])
+                )
+            },
+            sets_secondary = if (!is.null(fit[["sets_secondary"]])) {
+                map(
+                    fit[["sets_secondary"]],
+                    .adjustPipsRebuildSecondary,
+                    varAlpha = varAlpha,
+                    V = fit[["V"]]
+                )
+            }
+        ))
+    )
 }
 
 # Rebuild one secondary-coverage credible-set table at its own coverage.
@@ -1009,12 +1037,14 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(entry$sets)) {
         return(entry)
     }
-    entry$sets <- .adjustPipsCsAtCoverage(
-        varAlpha,
-        V,
-        .adjustPipsCoverage(entry$sets)
+    list_assign(
+        entry,
+        sets = .adjustPipsCsAtCoverage(
+            varAlpha,
+            V,
+            .adjustPipsCoverage(entry$sets)
+        )
     )
-    entry
 }
 
 # Requested coverage recorded on a susie_get_cs() result (0.95 when absent).
@@ -1095,8 +1125,10 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (nrow(topLoci) == 0L) {
         return(topLoci)
     }
-    newTopLoci <- filter(topLoci, is_in(.data$variant_id, common))
-    newTopLoci$pip <- as.numeric(fit[["pip"]])
+    newTopLoci <- mutate(
+        filter(topLoci, is_in(.data$variant_id, common)),
+        pip = as.numeric(fit[["pip"]])
+    )
     .adjustPipsRelabelCs(.adjustPipsPosterior(newTopLoci, fit), fit)
 }
 
@@ -1111,20 +1143,35 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     }
     varAlpha <- .adjustPipsVariantAlpha(fit)
     label <- .adjustPipsMethodLabel(tl)
-    for (csCol in csCols) {
-        tl[[csCol]] <- .adjustPipsCsLabels(
-            varAlpha,
-            fit[["V"]],
-            csCol,
-            label,
-            nrow(tl)
-        )
-        purCol <- str_c(csCol, "_purity")
-        if (is_in(purCol, names(tl))) {
-            tl[[purCol]] <- NA_real_
-        }
-    }
-    tl
+    relabelled <- set_names(
+        map(
+            csCols,
+            .adjustPipsRelabelColumn,
+            varAlpha = varAlpha,
+            fit = fit,
+            label = label,
+            nRow = nrow(tl)
+        ),
+        csCols
+    )
+    # Purity no longer describes the recomputed sets, so every purity column
+    # that exists alongside a relabelled one is blanked.
+    purCols <- intersect(str_c(csCols, "_purity"), names(tl))
+    blanked <- set_names(
+        map(purCols, .adjustPipsBlankPurity, nRow = nrow(tl)),
+        purCols
+    )
+    mutate(tl, !!!relabelled, !!!blanked)
+}
+
+# @noRd
+.adjustPipsRelabelColumn <- function(csCol, varAlpha, fit, label, nRow) {
+    .adjustPipsCsLabels(varAlpha, fit[["V"]], csCol, label, nRow)
+}
+
+# @noRd
+.adjustPipsBlankPurity <- function(purCol, nRow) {
+    rep(NA_real_, nRow)
 }
 
 # Membership labels at the coverage encoded in the column name: "<method>_<k>"
@@ -1133,11 +1180,28 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 .adjustPipsCsLabels <- function(varAlpha, V, csCol, label, n) {
     coverage <- as.numeric(str_remove(csCol, "^cs_")) / 100
     sets <- .adjustPipsCsAtCoverage(varAlpha, V, coverage)
-    out <- rep(str_c(label, "_0"), n)
-    for (k in seq_along(sets$cs)) {
-        out[sets$cs[[k]]] <- str_c(label, "_", sets$cs_index[[k]])
+    if (length(sets$cs) == 0L) {
+        return(rep(str_c(label, "_0"), n))
     }
-    out
+    # Later sets overwrite earlier ones at a shared variant, as the running
+    # assignment did; one scatter replaces the per-set writes.
+    at <- list_c(sets$cs)
+    names <- list_c(map(
+        seq_along(sets$cs),
+        .adjustPipsSetLabels,
+        sets = sets,
+        label = label
+    ))
+    replace(rep(str_c(label, "_0"), n), at, names)
+}
+
+# One set's label, repeated across its members.
+# @noRd
+.adjustPipsSetLabels <- function(k, sets, label) {
+    rep(
+        str_c(label, "_", sets$cs_index[[k]]),
+        length(sets$cs[[k]])
+    )
 }
 
 # The method label topLoci uses to prefix credible-set names.
@@ -1146,8 +1210,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (!is_in("method", names(tl))) {
         return("cs")
     }
-    labels <- unique(as.character(tl$method))
-    labels <- labels[!is.na(labels)]
+    labels <- discard(unique(as.character(tl$method)), is.na)
     if (length(labels) == 0L) {
         return("cs")
     }
@@ -1171,15 +1234,22 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     ) {
         return(newTopLoci)
     }
-    newTopLoci$posterior_mean <- as.numeric(colSums(alphaMat * muMat))
+    posteriorMean <- as.numeric(colSums(alphaMat * muMat))
     mu2Mat <- if (!is.null(fit[["mu2"]])) as.matrix(fit[["mu2"]]) else NULL
-    if (!is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))) {
-        newTopLoci$posterior_sd <- as.numeric(sqrt(pmax(
-            colSums(alphaMat * mu2Mat) - newTopLoci$posterior_mean^2,
-            0
-        )))
-    }
-    newTopLoci
+    mutate(
+        newTopLoci,
+        posterior_mean = posteriorMean,
+        !!!compact(list(
+            posterior_sd = if (
+                !is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))
+            ) {
+                as.numeric(sqrt(pmax(
+                    colSums(alphaMat * mu2Mat) - posteriorMean^2,
+                    0
+                )))
+            }
+        ))
+    )
 }
 
 
@@ -1233,10 +1303,13 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         pip = .tlCol(tl, "pip", "numeric"),
         logBF = .tlCol(tl, "logBF", "numeric")
     )
-    for (cc in .projectPosteriorExtraCols(tl)) {
-        out[[cc]] <- tl[[cc]]
-    }
-    out
+    extras <- .projectPosteriorExtraCols(tl)
+    mutate(out, !!!set_names(map(extras, .tlColumnOf, tl = tl), extras))
+}
+
+# @noRd
+.tlColumnOf <- function(cc, tl) {
+    tl[[cc]]
 }
 
 # Empty posterior-view frame (canonical columns, zero rows).
@@ -1382,7 +1455,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 
 #' @rdname adjustPips
 #' @noRd
-setMethod("adjustPips", "FineMappingRow", function(x, keepVariants, ...) {
+setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
     vids <- getVariantIds(x)
     keepIdx <- .adjustPipsKeepIdx(vids, keepVariants)
     common <- vids[keepIdx]
@@ -1408,17 +1481,17 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants, ...) {
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "FineMappingRow", function(x, ...) {
+setMethod("getVariantIds", "FineMappingRow", function(x) {
     .grVariantIds(x@variants)
 })
 
 #' @rdname getSusieFit
 #' @export
-setMethod("getSusieFit", "FineMappingRow", function(x, ...) x@susieFit)
+setMethod("getSusieFit", "FineMappingRow", function(x) x@susieFit)
 
 #' @rdname getCvResult
 #' @export
-setMethod("getCvResult", "FineMappingRow", function(x, ...) x@cvResult)
+setMethod("getCvResult", "FineMappingRow", function(x) x@cvResult)
 
 #' @rdname show-methods
 #' @export
@@ -1427,7 +1500,7 @@ setMethod("show", "FineMappingRow", function(object) {
     nCs <- if (nrow(tl) > 0L) {
         csCols <- names(tl)[str_detect(names(tl), "^cs_[0-9]+$")]
         if (length(csCols) > 0L) {
-            length(unique(unlist(map(csCols, .fmeNonNullCsLabels, tl = tl))))
+            length(unique(list_c(map(csCols, .fmeNonNullCsLabels, tl = tl))))
         } else {
             0L
         }
@@ -1448,4 +1521,4 @@ setMethod("show", "FineMappingRow", function(object) {
 setGeneric("rowVariants", function(x, ...) standardGeneric("rowVariants"))
 
 # @noRd
-setMethod("rowVariants", "FineMappingRow", function(x, ...) x@variants)
+setMethod("rowVariants", "FineMappingRow", function(x) x@variants)

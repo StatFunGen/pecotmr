@@ -4,7 +4,7 @@
 \alias{mcpWeights}
 \title{Compute Weights Using MCP-Penalized Regression}
 \usage{
-mcpWeights(X, y, nfolds = 5, ...)
+mcpWeights(X, y, nfolds = 5, methodArgs = NcvregOptions())
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -13,7 +13,10 @@ mcpWeights(X, y, nfolds = 5, ...)
 
 \item{nfolds}{Number of cross-validation folds. Default is 5.}
 
-\item{...}{Additional arguments passed through to `ncvreg::cv.ncvreg`.}
+\item{methodArgs}{Options forwarded to \code{ncvreg::cv.ncvreg}, built
+with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

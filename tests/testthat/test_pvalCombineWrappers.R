@@ -143,10 +143,9 @@ test_that("combinePValues: runs multiple methods at once", {
     p <- c(0.01, 0.1, 0.4)
     res <- combinePValues(pvals = p, methods = c("acat", "bonferroni"))
     expect_equal(names(res$results), c("acat", "bonferroni"))
-    expect_true(all(vapply(
+    expect_true(all(map_lgl(
         res$results,
-        function(r) is.finite(r$pval),
-        logical(1)
+        function(r) is.finite(r$pval)
     )))
 })
 
@@ -234,7 +233,7 @@ test_that("pvalAcat returns NA when the Cauchy statistic is non-finite", {
 test_that(".combinePvalAlignR rejects a non-matrix R", {
     expect_error(
         pecotmr:::.combinePvalAlignR(5, c("a", "b")),
-        "must be a matrix"
+        "Must be of type 'matrix'"
     )
 })
 
@@ -580,3 +579,194 @@ test_that("waldTestPval with very large se gives p near 1", {
 # =============================================================================
 # parseRegion
 # =============================================================================
+
+test_that("pvalCombine: argument guards fire", {
+    expect_error(waldTestPval("a", 1, 10), "beta.*Must be of type 'numeric'")
+    expect_error(waldTestPval(1, "a", 10), "se.*Must be of type 'numeric'")
+    expect_error(waldTestPval(1, 1, "a"), "n.*Must be of type 'numeric'")
+    expect_error(
+        combinePValues(pvals = 0.5, methods = "fisher", naRm = NA),
+        "naRm.*May not be NA"
+    )
+})
+
+test_that("the p-value constructors refuse the arguments pecotmr owns", {
+    expect_error(GbjOptions(test_stats = 1), "the caller's `zScores`")
+    expect_error(GbjOptions(cor_mat = diag(2)), "the caller's `R`")
+    expect_error(GbjOmniOptions(test_stats = 1), "the caller's `zScores`")
+    expect_error(AspuOptions(Zs = 1), "the caller's `zScores`")
+    expect_error(AspuOptions(corSNP = diag(2)), "the caller's `R`")
+    expect_error(PoolrOptions(p = 0.1), "the caller's `pvals`")
+    expect_error(PoolrOptions(R = diag(2)), "the caller's `R`")
+})
+
+test_that("the p-value constructors check what their engines accept", {
+    expect_error(GbjOptions(nosuch = 1), "unknown argument")
+    expect_error(GbjOmniOptions(pairwise_cors = 1), "unknown argument")
+    expect_error(AspuOptions(nosuch = 1), "unknown argument")
+    # poolr's tests all end in `...`, so no name can be rejected.
+    expect_s4_class(PoolrOptions(nosuch = 1), "MethodOptions")
+    # The adjustment pecotmr has always used stays the default.
+    expect_equal(PoolrOptions()$adjust, "generalized")
+    expect_equal(PoolrOptions(adjust = "empirical")$adjust, "empirical")
+})
+
+test_that("PvalMethodsParam pairs each method with its own constructor", {
+    rec <- PvalMethodsParam(
+        aspu = AspuOptions(n.perm = 100),
+        gbj = GbjOptions(pairwise_cors = 0.1),
+        fisher = list(side = 1)
+    )
+    # The entries live in one named-list slot rather than ten nullable
+    # ones: a record configuring aspu used to show nine NULL slots.
+    expect_setequal(names(rec$methods), c("aspu", "gbj", "fisher"))
+    expect_setequal(names(rec), "methods")
+    # A plain list is routed through that method's constructor, so it picks
+    # up the pecotmr default the constructor carries.
+    expect_equal(rec$methods$fisher$adjust, "generalized")
+    expect_error(
+        PvalMethodsParam(gbj = AspuOptions()),
+        "was built with the constructor for 'aspu'"
+    )
+    # The five GBJ tests share one engine, so one constructor serves them all.
+    expect_s4_class(PvalMethodsParam(minp = GbjOptions()), "PvalMethodsParam")
+    expect_s4_class(PvalMethodsParam(minp = GbjOptions()), "MethodParam")
+    # Each entry is still an engine argument bag; only the container changed.
+    expect_s4_class(rec$methods$aspu, "MethodOptions")
+    expect_null(rec$methods$minp)
+    # acat / hmp / bonferroni / gates are real combinePValues methods but
+    # take no options, so they are not formals. The ten that do are, which
+    # is why R rejects these before the constructor body runs -- the
+    # hand-rolled "unknown method" check is no longer reachable.
+    expect_error(PvalMethodsParam(acat = list()), "unused argument")
+    expect_error(PvalMethodsParam(gates = list()), "unused argument")
+    expect_setequal(
+        names(formals(PvalMethodsParam)),
+        names(pecotmr:::.pvalMethodCtors())
+    )
+})
+
+test_that("combinePValues finds a configured method by name, not position", {
+    # .combinePvalMethodArgs reads the entries out of the `methods` slot
+    # and matches by name, so every configured method must resolve to its
+    # own entry -- and a plain list() must still work as "no settings".
+    rec <- PvalMethodsParam(
+        aspu = AspuOptions(n.perm = 100),
+        fisher = PoolrOptions(side = 1)
+    )
+    for (m in names(rec$methods)) {
+        expect_identical(
+            pecotmr:::.combinePvalMethodArgs(rec, m),
+            rec$methods[[m]],
+            info = m
+        )
+    }
+    expect_equal(
+        pecotmr:::.combinePvalMethodArgs(list(), "fisher")$adjust,
+        "generalized"
+    )
+    # An unconfigured method falls back to its own constructor's defaults,
+    # not to an empty list.
+    expect_equal(
+        pecotmr:::.combinePvalMethodArgs(rec, "stouffer")$adjust,
+        "generalized"
+    )
+})
+
+test_that("combinePValues refuses options for a method it will not run", {
+    expect_error(
+        combinePValues(
+            pvals = c(0.01, 0.2, 0.5),
+            methods = "fisher",
+            R = diag(3),
+            methodArgs = PvalMethodsParam(stouffer = PoolrOptions(side = 1))
+        ),
+        "configures stouffer, which `methods` does not request"
+    )
+    expect_error(
+        combinePValues(
+            pvals = c(0.01, 0.2),
+            methods = "acat",
+            methodArgs = list(fisher = list())
+        ),
+        "PvalMethodsParam"
+    )
+})
+
+test_that("combinePValues forwards each method's options to its engine", {
+    skip_if_not_installed("poolr")
+    seen <- NULL
+    real <- poolr::stouffer
+    with_mocked_bindings(
+        combinePValues(
+            pvals = c(0.01, 0.2, 0.5),
+            methods = "stouffer",
+            R = diag(3),
+            methodArgs = PvalMethodsParam(
+                stouffer = PoolrOptions(adjust = "empirical", size = 1000)
+            )
+        ),
+        stouffer = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "poolr"
+    )
+    expect_equal(seen$adjust, "empirical")
+    expect_equal(seen$size, 1000)
+})
+
+test_that("an unconfigured method still gets its constructor's defaults", {
+    skip_if_not_installed("poolr")
+    seen <- NULL
+    real <- poolr::fisher
+    with_mocked_bindings(
+        combinePValues(
+            pvals = c(0.01, 0.2, 0.5),
+            methods = "fisher",
+            R = diag(3)
+        ),
+        fisher = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "poolr"
+    )
+    # The adjustment pecotmr hard-coded before `methodArgs` existed.
+    expect_equal(seen$adjust, "generalized")
+})
+
+test_that("combinePValues forwards GBJ and aSPU options", {
+    skip_if_not_installed("GBJ")
+    skip_if_not_installed("aSPU")
+    gbjSeen <- NULL
+    aspuSeen <- NULL
+    realGbj <- GBJ::GBJ
+    realAspu <- aSPU::aSPUs
+    z <- c(2.5, -0.3, 1.1)
+    suppressWarnings(with_mocked_bindings(
+        with_mocked_bindings(
+            combinePValues(
+                zScores = z,
+                methods = c("gbj", "aspu"),
+                R = diag(3),
+                methodArgs = PvalMethodsParam(
+                    gbj = GbjOptions(pairwise_cors = rep(0, 3)),
+                    aspu = AspuOptions(n.perm = 200)
+                )
+            ),
+            aSPUs = function(...) {
+                aspuSeen <<- list(...)
+                realAspu(...)
+            },
+            .package = "aSPU"
+        ),
+        GBJ = function(...) {
+            gbjSeen <<- list(...)
+            realGbj(...)
+        },
+        .package = "GBJ"
+    ))
+    expect_equal(gbjSeen$pairwise_cors, rep(0, 3))
+    expect_equal(aspuSeen$n.perm, 200)
+})

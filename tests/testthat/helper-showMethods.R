@@ -53,7 +53,7 @@ context("show methods")
 
 .sh_makeTwEntry <- function(p = 4, standardized = FALSE) {
     twasWeightsRow(
-        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = rep(0.1, p),
         cvResult = list(rsq = 0.5),
         standardized = standardized

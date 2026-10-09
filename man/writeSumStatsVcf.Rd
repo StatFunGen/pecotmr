@@ -8,7 +8,7 @@
 \usage{
 writeSumStatsVcf(x, outputPath, sampleName = NULL, ...)
 
-\S4method{writeSumStatsVcf}{GwasSumStats}(x, outputPath, sampleName = NULL, study = NULL, ...)
+\S4method{writeSumStatsVcf}{GwasSumStats}(x, outputPath, sampleName = NULL, study = NULL)
 
 \S4method{writeSumStatsVcf}{FineMappingResultBase}(
   x,
@@ -19,8 +19,7 @@ writeSumStatsVcf(x, outputPath, sampleName = NULL, ...)
   trait = NULL,
   method = NULL,
   splitByContext = FALSE,
-  splitByTrait = FALSE,
-  ...
+  splitByTrait = FALSE
 )
 }
 \arguments{

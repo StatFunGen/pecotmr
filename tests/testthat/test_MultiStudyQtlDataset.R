@@ -40,7 +40,7 @@ test_that("MultiStudyQtlDataset: rejects unnamed qtlDatasets list", {
     )
     expect_error(
         MultiStudyQtlDataset(qtlDatasets = list(qd, qd)),
-        "named list"
+        "Must have names"
     )
 })
 
@@ -154,7 +154,8 @@ test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
     # Bare call returns the embedded QtlSumStats collection ...
     expect_s4_class(getSumStats(mt), "QtlSumStats")
     # ... but any selection argument is rejected.
-    expect_error(getSumStats(mt, study = "s1"), "does not accept selection")
+    # Taking no extra formals is the rejection: R names the argument.
+    expect_error(getSumStats(mt, study = "s1"), "unused argument")
 })
 
 
@@ -168,7 +169,7 @@ test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
 test_that("MultiStudyQtlDataset: rejects an empty qtlDatasets list", {
     expect_error(
         MultiStudyQtlDataset(qtlDatasets = list()),
-        "'qtlDatasets' must be a non-empty named list"
+        "qtlDatasets.*Must have length >= 1"
     )
 })
 
@@ -180,7 +181,7 @@ test_that("MultiStudyQtlDataset: rejects duplicated study names", {
     )
     expect_error(
         MultiStudyQtlDataset(qtlDatasets = list(s1 = qd, s1 = qd)),
-        "names of 'qtlDatasets' must be unique"
+        "qtlDatasets.*Must have unique names"
     )
 })
 
@@ -214,4 +215,15 @@ test_that("getStudy unions the individual-level and summary-only studies", {
         sumStats = qtlSumStatsExample
     )
     expect_setequal(getStudy(mt), c("s1", "study1"))
+})
+
+test_that("MultiStudyQtlDataset: qtlDatasets guard fires on a non-list", {
+    expect_error(
+        MultiStudyQtlDataset(qtlDatasets = "not-a-list"),
+        "qtlDatasets.*Must be of type 'list'"
+    )
+})
+
+test_that(".msqdConcat answers an empty list for no pieces", {
+    expect_identical(pecotmr:::.msqdConcat(list()), list())
 })

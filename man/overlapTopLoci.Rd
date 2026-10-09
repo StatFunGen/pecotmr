@@ -11,8 +11,7 @@ overlapTopLoci(qtl, gwas, ...)
   qtl,
   gwas,
   signalCutoff = 0.025,
-  type = c("data.frame", "GRanges"),
-  ...
+  type = c("data.frame", "GRanges")
 )
 }
 \arguments{

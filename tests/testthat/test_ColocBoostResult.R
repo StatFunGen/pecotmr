@@ -5,7 +5,6 @@
 # pair, and it computes no PP.H0-PP.H4 decomposition at all. Several tests
 # below guard exactly that boundary.
 
-
 test_that("ColocBoostResult: one element per confidence set", {
     x <- ColocBoostResult(
         list(.cbr_fake()),
@@ -253,7 +252,7 @@ test_that("show on an empty ColocBoostResult stops after the header", {
 # fixture built one, leaving the whole ucos_details path unexecuted.
 # ===========================================================================
 
-.cbr_with_ucos <- function(ucosIds = "ucos1:y1", outcome = "t1") {
+.cbrWithUcos <- function(ucosIds = "ucos1:y1", outcome = "t1") {
     res <- .cbr_fake()
     vars <- list("chr1:300:C:T")
     purity <- matrix(
@@ -283,7 +282,7 @@ test_that("show on an empty ColocBoostResult stops after the header", {
 
 test_that("an outcome-specific set becomes its own uncolocalized element", {
     x <- ColocBoostResult(
-        list(.cbr_with_ucos()),
+        list(.cbrWithUcos()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
@@ -296,7 +295,7 @@ test_that("an uncolocalized set carries no colocalization statistics", {
     # cosNpc / vcp describe agreement BETWEEN outcomes, so a single-outcome
     # set has none to report -- NA rather than a misleading zero.
     x <- ColocBoostResult(
-        list(.cbr_with_ucos()),
+        list(.cbrWithUcos()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
@@ -310,7 +309,7 @@ test_that("an uncolocalized set carries no colocalization statistics", {
 
 test_that("show counts colocalized and outcome-only sets separately", {
     x <- ColocBoostResult(
-        list(.cbr_with_ucos()),
+        list(.cbrWithUcos()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
@@ -374,7 +373,10 @@ test_that("validity names missing identity and outcomeInfo columns", {
     )
     bad <- x
     mcols(bad)$analysis <- NULL
-    expect_error(methods::validObject(bad), "missing columns: analysis")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'analysis'\\}"
+    )
 })
 
 
@@ -434,7 +436,10 @@ test_that("validity names the outcomeInfo columns that are missing", {
     cb@outcomeInfo <- data.frame(name = "t1")
     expect_match(
         .cbrCheckOutcomeInfo(cb),
-        "outcomeInfo is missing columns: study, context, trait, dataForm"
+        paste0(
+            "outcomeInfo is missing columns: .*",
+            "missing elements \\{'study','context','trait','dataForm'\\}"
+        )
     )
 })
 

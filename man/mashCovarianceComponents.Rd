@@ -11,6 +11,7 @@ mashCovarianceComponents(
   components = c("canonical", "pca", "flash", "flashNonneg"),
   nPcs = NULL,
   inputScale = c("auto", "beta", "z"),
+  mashDataArgs = MashDataOptions(),
   setSeed = 999
 )
 }
@@ -28,6 +29,13 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 
 \item{inputScale}{SumStats -> matrix conversion scale.}
+
+\item{mashDataArgs}{Extra arguments for
+\code{mashr::mash_set_data()}, built with
+\code{\link{MashDataOptions}} -- for example
+\code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+\code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+are refused by the constructor.}
 
 \item{setSeed}{Integer seed (\code{cov_flash} is stochastic), or \code{NULL}
 to leave the ambient RNG untouched.}

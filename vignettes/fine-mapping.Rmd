@@ -160,12 +160,14 @@ fineMappingPipeline(
     methods = c("susie", "susieInf"),
     contexts = "brain",
     traitId = "ENSG_example",
-    region = "chr22:25000000-26000000",
     cisWindow = 5e5,
-    coverage = 0.95,
-    secondaryCoverage = c(0.7, 0.5),
-    signalCutoff = 0.025,
-    minAbsCorr = 0.8,
+    credibleSetArgs = CredibleSetParam(
+        coverage = 0.95,
+        secondaryCoverage = c(0.7, 0.5),
+        signalCutoff = 0.025,
+        minAbsCorr = 0.8,
+        L = 10L
+    ),
     addSusieInf = TRUE,
     naAction = "drop", # "drop" (default) or "impute"
     verbose = 1
@@ -175,12 +177,16 @@ fineMappingPipeline(
 -  `naAction` controls how phenotype NAs are handled by
     `getResidualizedPhenotypes()`: `"drop"` removes samples with any NA across
     the requested traits, `"impute"` mean-imputes each trait independently.
--  `addSusieInf = TRUE` runs SuSiE-inf first and uses its result to initialise
-    the susie fit, which improves credible-set purity in regions with
-    background polygenic signal.
--  `secondaryCoverage` adds secondary CS columns at the requested coverages
-    (alongside the primary `coverage`); useful when you want both narrow and
-    broad CS reports.
+-  `addSusieInf = TRUE` runs SuSiE-inf first and uses its result to
+    initialise the susie fit, which improves credible-set purity in regions
+    with background polygenic signal.
+-  `CredibleSetParam(L = ...)` bounds how many single effects the fit may
+    carry, and so how many credible sets can exist.
+-  `CredibleSetParam(secondaryCoverage = ...)` adds secondary CS columns at the
+    requested coverages (alongside the primary `coverage`); useful when you
+    want both narrow and broad CS reports.
+-  Each of these settings is a constructor rather than a loose argument, so a
+    misspelled option is an error instead of being silently ignored.
 
 ## Joint multi-context / multi-trait fits
 

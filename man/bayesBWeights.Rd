@@ -4,7 +4,15 @@
 \alias{bayesBWeights}
 \title{Compute Weights Using BayesB}
 \usage{
-bayesBWeights(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.2, ...)
+bayesBWeights(
+  X,
+  y,
+  nIter = 10000,
+  burnIn = 2000,
+  thin = 5,
+  probIn = 0.2,
+  methodArgs = BglrOptions()
+)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -19,7 +27,10 @@ bayesBWeights(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.2, ...)
 
 \item{probIn}{Prior inclusion probability for each marker. Default is 0.2.}
 
-\item{...}{Additional arguments passed through to `BGLR::BGLR`.}
+\item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
+with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.

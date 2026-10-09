@@ -15,11 +15,10 @@ getSusieFit(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL,
-  ...
+  region = NULL
 )
 
-\S4method{getSusieFit}{FineMappingRow}(x, ...)
+\S4method{getSusieFit}{FineMappingRow}(x)
 }
 \arguments{
 \item{x}{A \code{FineMappingRow} or \code{FineMappingResult}.}

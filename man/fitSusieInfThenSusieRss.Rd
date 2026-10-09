@@ -9,8 +9,8 @@ fitSusieInfThenSusieRss(
   R,
   n,
   args = list(),
-  susieInfArgs = list(),
-  susieArgs = list(),
+  SusieInfOptions = list(),
+  SusieOptions = list(),
   fittedModels = NULL
 )
 }
@@ -21,11 +21,15 @@ fitSusieInfThenSusieRss(
 
 \item{n}{Sample size (scalar).}
 
-\item{args}{Default arguments forwarded to both fits.}
+\item{args}{Defaults forwarded to both fits, built with
+\code{\link{SusieOptions}}. A bare list is refused, since it cannot be
+checked; \code{list()} (the default) means no options.}
 
-\item{susieInfArgs}{SuSiE-inf-specific overrides.}
+\item{SusieInfOptions}{SuSiE-inf-specific overrides, built with
+\code{\link{SusieInfOptions}}; they take precedence over \code{args}.}
 
-\item{susieArgs}{Standard SuSiE-RSS-specific overrides.}
+\item{SusieOptions}{Standard SuSiE-RSS-specific overrides, built with
+\code{\link{SusieOptions}}; they take precedence over \code{args}.}
 
 \item{fittedModels}{Optional list with pre-fitted \code{$susie} and/or
 \code{$susieInf} objects to skip re-fitting.}

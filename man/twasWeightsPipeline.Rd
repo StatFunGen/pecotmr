@@ -5,7 +5,6 @@
 \alias{twasWeightsPipeline,QtlDataset-method}
 \alias{twasWeightsPipeline,QtlSumStats-method}
 \alias{twasWeightsPipeline,MultiStudyQtlDataset-method}
-\alias{twasWeightsPipeline,ANY-method}
 \title{TWAS Weights Pipeline}
 \usage{
 twasWeightsPipeline(data, ...)
@@ -17,40 +16,24 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  mafCutoff = NULL,
-  macCutoff = NULL,
-  xvarCutoff = NULL,
-  imissCutoff = NULL,
-  keepIndel = NULL,
-  keepSamples = NULL,
-  keepVariants = NULL,
+  genotypeFilterArgs = GenotypeFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
   mashPrior = NULL,
-  cvFolds = 5,
-  samplePartition = NULL,
+  crossValidationArgs = CrossValidationParam(),
   fitFullData = TRUE,
-  maxCvVariants = -1,
-  cvThreads = 1,
-  cvWeightMethods = NULL,
-  ensemble = TRUE,
-  ensembleR2Threshold = 0.01,
-  ensembleSolver = "quadprog",
-  ensembleAlpha = 1,
+  ensembleArgs = EnsembleParam(),
   estimatePi = TRUE,
-  retainFit = TRUE,
-  retainFitDetail = c("slim", "full"),
-  phenotypeCovariatesToResidualize = NULL,
-  genotypeCovariatesToResidualize = NULL,
-  residualizePhenotypeCovariates = TRUE,
-  residualizeGenotypeCovariates = TRUE,
+  usePCA = FALSE,
+  nPCs = 10L,
+  fitRetention = c("slim", "none", "full"),
+  residualizationArgs = ResidualizationParam(),
   dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
-  seed = NULL,
-  ...
+  seed = NULL
 )
 
 \S4method{twasWeightsPipeline}{QtlSumStats}(
@@ -61,14 +44,11 @@ twasWeightsPipeline(data, ...)
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
-  retainFit = TRUE,
-  retainFitDetail = c("slim", "full"),
+  fitRetention = c("slim", "none", "full"),
   dataType = NULL,
   verbose = 1L,
-  mafCutoff = 0,
-  macCutoff = 0,
-  imissCutoff = 1,
-  ...
+  panelFilterArgs = PanelFilterParam(),
+  crossValidationArgs = CrossValidationParam()
 )
 
 \S4method{twasWeightsPipeline}{MultiStudyQtlDataset}(
@@ -78,23 +58,24 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  genotypeFilterArgs = GenotypeFilterParam(),
+  panelFilterArgs = PanelFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
-  retainFit = TRUE,
-  retainFitDetail = c("slim", "full"),
+  mashPrior = NULL,
+  fitFullData = TRUE,
+  estimatePi = TRUE,
+  fitRetention = c("slim", "none", "full"),
+  dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
-  phenotypeCovariatesToResidualize = NULL,
-  genotypeCovariatesToResidualize = NULL,
-  residualizePhenotypeCovariates = TRUE,
-  residualizeGenotypeCovariates = TRUE,
-  seed = NULL,
-  ...
+  residualizationArgs = ResidualizationParam(),
+  crossValidationArgs = CrossValidationParam(),
+  ensembleArgs = EnsembleParam(),
+  seed = NULL
 )
-
-\S4method{twasWeightsPipeline}{ANY}(data, ...)
 }
 \arguments{
 \item{data}{A \code{QtlDataset}, \code{MultiStudyQtlDataset}, or
@@ -126,16 +107,14 @@ with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
 position when extracting variants. Required when \code{traitId} is
 supplied. Mutually exclusive with \code{region}.}
 
-\item{mafCutoff, macCutoff, xvarCutoff, imissCutoff}{For QtlDataset: optional
-per-call genotype-filter overrides. Each replaces the corresponding
-construct-time \code{\link{QtlDataset}} slot for this call only (applied to
-a validated copy); \code{NULL} (default) leaves the stored value in place.
-Variant QC is a property of the data, so these are applied identically here
-and in \code{\link{fineMappingPipeline}} -- there is deliberately no
+\item{genotypeFilterArgs}{For QtlDataset: per-call genotype-filter overrides,
+built with \code{\link{GenotypeFilterParam}}. Each field that is set
+replaces the corresponding construct-time \code{\link{QtlDataset}} slot
+for this call only (applied to a validated copy); a field left unset
+leaves the stored value in place. Variant QC is a property of the data,
+so these are applied identically here and in
+\code{\link{fineMappingPipeline}} --- there is deliberately no
 TWAS-specific variant filter.}
-
-\item{keepIndel, keepSamples, keepVariants}{As above: per-call
-\code{\link{QtlDataset}} genotype-filter overrides.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
 \code{FALSE} (default) learns weights for each range independently and
@@ -172,55 +151,75 @@ produce one fit jointly across multiple \code{(context, trait)} columns.}
 \item{mashPrior}{Optional \code{\link{MashPrior}} (or coercible) supplying
 data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
 
-\item{cvFolds}{Integer. Cross-validation folds. Default 5. Set to 0 to skip
-CV (and ensemble).}
+\item{crossValidationArgs}{Cross-validation settings, built with
+  \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
+  CV), \code{threads}, \code{samplePartition}, \code{maxVariants} (cap
+  on the CV design matrix) and \code{weightMethods} (which methods to
+  cross-validate; unset means every method with non-zero weights).
 
-\item{samplePartition}{Optional pre-defined CV partition data.frame.}
+  \code{folds} defaulted to \code{5} before, while
+  \code{\link{fineMappingPipeline}}'s defaulted to \code{0}. The two now
+  agree on \code{0}, so an unspecified setting means one thing.
+
+  Cross-validation holds out \strong{samples}, so it is not possible on
+  \code{QtlSumStats} input; that method \strong{errors} if it is set
+  rather than returning results that were never cross-validated.}
 
 \item{fitFullData}{Logical. If \code{TRUE}, fit final weights on the full
 data after cross-validation. Default \code{TRUE}.}
 
-\item{maxCvVariants}{Maximum number of variants for CV. Default -1 (no
-limit).}
-
-\item{cvThreads}{Threads for CV parallelism. Default 1.}
-
-\item{cvWeightMethods}{Optional override of methods used for CV.}
-
-\item{ensemble}{Logical. Compute SR-TWAS ensemble weights. Default
-\code{TRUE}.}
-
-\item{ensembleR2Threshold}{Minimum CV R-squared for ensemble inclusion.
-Default 0.01.}
-
-\item{ensembleSolver}{Solver for ensemble stacking. Default
-\code{"quadprog"}.}
-
-\item{ensembleAlpha}{Elastic-net mixing parameter (only when
-\code{ensembleSolver = "glmnet"}). Default 1.}
+\item{ensembleArgs}{SR-TWAS ensemble settings, built with
+\code{\link{EnsembleParam}}: \code{enabled} (default \code{FALSE}),
+\code{r2Threshold}, \code{solver} and \code{alpha}. Stacking reads
+out-of-fold predictions, so \code{enabled = TRUE} requires
+\code{crossValidation} with \code{folds >= 2} and is an error
+otherwise --- it previously returned a result quietly missing its
+ensemble row.}
 
 \item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from mr.ash
 before BGLR / qgg spike-and-slab methods that consume it.}
 
-\item{retainFit}{Logical. Retain the fitted-model object on each entry.
-Default \code{FALSE}.}
+\item{usePCA}{Logical (length 1). \code{QtlDataset} only. When
+\code{TRUE}, each multi-trait context is additionally PCA-reduced and
+weights are fitted for each top principal component \emph{as a trait}
+(\code{topPC1}, \code{topPC2}, ...), alongside the per-trait rows. The
+same reduction \code{\link{fineMappingPipeline}} applies, sharing its
+scores helper and producing groups the ordinary CV / ensemble /
+retention machinery handles unchanged. A single-trait context, or one
+with no usable component, contributes nothing.}
 
-\item{retainFitDetail}{Character. Level of fit detail to retain:
-\code{"slim"} (default) or \code{"full"}.}
+\item{nPCs}{Integer (length 1). Caps the number of top principal
+components fitted per context when \code{usePCA = TRUE} (default
+\code{10}). The effective count is \code{min(nPCs, usable traits)}.}
 
-\item{phenotypeCovariatesToResidualize, genotypeCovariatesToResidualize}{Character vector (or \code{NULL}) of covariate column names to residualize
-against. Forwarded to \code{\link{getResidualizedPhenotypes}} /
-\code{\link{getResidualizedGenotypes}} for \code{QtlDataset} /
-\code{MultiStudyQtlDataset} input. Default \code{NULL} (use all available
-covariates). Ignored for sumstat inputs.}
+\item{fitRetention}{How much of each fit is kept on the entry:
+  \code{"slim"} (default), \code{"none"} to keep no fit at all, or
+  \code{"full"}. The same setting \code{\link{fineMappingPipeline}}
+  takes, which has no \code{"none"} --- its \code{susieFit} slot is part
+  of the returned object's contract.
 
-\item{residualizePhenotypeCovariates}{Logical (length 1). When \code{TRUE}
-(default) residualize against the phenotype-side covariates listed in
-\code{phenotypeCovariatesToResidualize}; set \code{FALSE} to disable.}
+  \code{"full"} is honoured only by the mr.mash engines, the only ones
+  that distinguish the two retaining levels; every other method keeps its
+  fit whole or not at all. Requesting \code{"full"} for a run where no
+  method can honour it is an error, and a mixed run warns rather than
+  dropping it in silence.}
 
-\item{residualizeGenotypeCovariates}{Logical (length 1). When \code{TRUE}
-(default) residualize against the genotype-side covariates listed in
-\code{genotypeCovariatesToResidualize}; set \code{FALSE} to disable.}
+\item{residualizationArgs}{Covariate residualization settings, built with
+  \code{\link{ResidualizationParam}} and forwarded to
+  \code{\link{getResidualizedPhenotypes}} /
+  \code{\link{getResidualizedGenotypes}}: \code{phenotypeCovariates} and
+  \code{genotypeCovariates} name which covariates to regress out
+  (\code{NULL}, the default, uses every available one), and
+  \code{residualizePhenotype} / \code{residualizeGenotype} turn each side
+  off.
+
+  \code{QtlDataset} / \code{MultiStudyQtlDataset} input only. A
+  \code{QtlSumStats} run has no covariates to regress out, so the bundle
+  is \strong{ignored} there rather than refused --- unlike
+  \code{crossValidation}, which errors. Residualization is on by default,
+  so refusing a non-default value would reject the default bundle; CV is
+  off by default, so a non-default value there is an explicit request for
+  something the input cannot do.}
 
 \item{dataType}{Optional data-type label recorded on every
 \code{TwasWeightsRow$dataType} (e.g. \code{"expression"}).}
@@ -238,6 +237,11 @@ reproducibility under multi-threading. The main-process seed is scoped to
 the call, so the session RNG is left as it was found. \code{NULL}
 (default) does not seed at all, so an outer \code{set.seed()} still
 governs the main-process draws.}
+
+\item{panelFilterArgs}{For QtlSumStats: LD-reference-panel filters,
+built with
+\code{\link{PanelFilterParam}}. See \emph{Panel filters on the RSS path}
+above.}
 }
 \value{
 A \code{\link{TwasWeights}} collection keyed by \code{(study,
@@ -293,17 +297,17 @@ same shared partition.
 }
 \section{Panel filters on the RSS path}{
  On \code{QtlSumStats} input there
-  is no genotype matrix to filter, so \code{mafCutoff} / \code{macCutoff} /
-  \code{imissCutoff} are measured against the \strong{LD reference panel}
-  instead: a variant whose panel genotypes fall below the cutoffs is dropped
-  before the z-scores and LD matrix are built. The thresholds mean the same
-  thing as on the \code{QtlDataset} path (MAC is converted to a MAF
-  equivalent and the stricter of the two applies), so one number carries
-  across input types. Defaults (\code{0}, \code{0}, \code{1}) filter
-  nothing.
+  is no genotype matrix to filter, so \code{panelFilter}'s
+  \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} are measured
+  against the \strong{LD reference panel} instead: a variant whose panel
+  genotypes fall below the cutoffs is dropped before the z-scores and LD
+  matrix are built. The thresholds mean the same thing as
+  \code{genotypeFilter}'s on the \code{QtlDataset} path (MAC is converted
+  to a MAF equivalent and the stricter of the two applies), so one number
+  carries across input types. The defaults filter nothing.
 
   This discards \emph{observed} variants, unlike
-  \code{summaryStatsQc(imputeOpts = ...)}, which only bounds which variants
+  \code{summaryStatsQc(imputeArgs = ...)}, which only bounds which variants
   RAISS will impute.
 }
 

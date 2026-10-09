@@ -8,9 +8,25 @@
 \usage{
 readGenotypes(path, format = NULL, ...)
 
-\S4method{readGenotypes}{character}(path, format = NULL, ...)
+\S4method{readGenotypes}{character}(path, format = NULL, vcfArgs = list())
 
-\S4method{readGenotypes}{missing}(path, format = NULL, ...)
+\S4method{readGenotypes}{missing}(
+  path,
+  plink1Prefix = NULL,
+  plink2Prefix = NULL,
+  bed = NULL,
+  bim = NULL,
+  fam = NULL,
+  pgen = NULL,
+  pvar = NULL,
+  psam = NULL,
+  ldMeta = NULL,
+  region = NULL,
+  genoMeta = NULL,
+  chroms = NULL,
+  format = NULL,
+  vcfArgs = list()
+)
 }
 \arguments{
 \item{path}{Character, path to a single self-describing genotype file
@@ -23,6 +39,35 @@ inferred from file extension.}
 
 \item{...}{The keyword source arguments described above, plus any further
 arguments forwarded to the format-specific reader.}
+
+\item{vcfArgs}{Optional named list of arguments forwarded to
+\code{VariantAnnotation::readVcf} when the source is a VCF.}
+
+\item{plink1Prefix, plink2Prefix}{Character. Stem of a plink1
+(\code{.bed}/\code{.bim}/\code{.fam}) or plink2
+(\code{.pgen}/\code{.pvar}/\code{.psam}) triplet, without the extension.}
+
+\item{bed, bim, fam}{Character. Explicit paths to the three files of a plink1
+triplet, when they do not share a stem.}
+
+\item{pgen, pvar, psam}{Character. Explicit paths to the three files of a
+plink2 triplet, when they do not share a stem.}
+
+\item{ldMeta}{Path to an LD-meta TSV (columns \code{chrom}, \code{start},
+\code{end}, \code{path}). Requires \code{region}: the row covering it is
+resolved and the file it names is read with the matching backend.}
+
+\item{region}{Region to resolve out of \code{ldMeta}: a
+\code{"chr:start-end"} string, or a one-row data.frame with
+\code{chrom}, \code{start}, \code{end}.}
+
+\item{genoMeta}{One-file-per-chromosome specification: a path to a
+\code{#chr,path} meta file, or a named character vector (names =
+chromosomes, values = payload paths / prefixes).}
+
+\item{chroms}{Optional character vector of chromosomes. Only the
+\code{genoMeta} shards whose chromosome is listed are read; chromosome
+labels are compared canonically. Meaningful only with \code{genoMeta}.}
 }
 \value{
 A \code{RangedSummarizedExperiment} of variants x samples.

@@ -69,7 +69,11 @@ ss
 
 ```{r mash-pipeline, results="hide"}
 sumStatsList <- list(strong = ss, random = ss, null = ss)
-fit <- mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
+fit <- mashPipeline(
+    sumStatsList,
+    alpha = 0,
+    prior = MashPriorParam(nPcs = 2L)
+)
 ```
 
 ```{r mash-pipeline-show}
@@ -110,14 +114,19 @@ a null set:
 fitSimple <- mashPipeline(
     sumStatsList,
     alpha = 0,
-    nPcs = 2L,
-    residualCorrelationMethod = "simple"
+    residualCorrelationMethod = "simple",
+    prior = MashPriorParam(priorCovariances = fit$U)
 )
 ```
 
 ```{r mash-vhat-show}
 round(head(sort(fitSimple$w, decreasing = TRUE), 5), 4)
 ```
+
+Passing `fit$U` back in holds the prior fixed, so `Vhat` is the only thing
+that differs from the fit above and the shift in the weights is attributable
+to it alone. Re-estimating the prior here would confound the comparison --
+and cost a second data-driven estimate for a prior you already have.
 
 Supplying a `null` partition while leaving the default in place reports that
 the partition is going unused, since that combination is more often an
@@ -204,16 +213,25 @@ mashPriorCovariances(
     alpha = 0,
     vhat = vhat,
     components = c("canonical", "pca", "flash", "flashNonneg"),
-    engine = "cov_ed", # or "ud" / "ud_ted" (udr)
+    engine = "covEd", # or "covUdr", or "none"
     nPcs = 2L
 )
 ```
 
-`"cov_ed"` is the default and is mashr's own extreme deconvolution. The
-`udr` engines are opt-in and have known numerical issues; `"ud_ted"`
-additionally assumes i.i.d. (Z-scale) data. Their dominant cost is
-`udControl$n_unconstrained` (default 50), which is worth cutting sharply
-when you have few conditions.
+`"covEd"` is the default and is mashr's own extreme deconvolution. `"covUdr"`
+is opt-in and has known numerical issues; its TED update additionally assumes
+i.i.d. (Z-scale) data, so it is requested as
+`CovUdrOptions(fit = UdFitOptions(unconstrained.update = "ted"))` rather than
+as a separate engine name. udr is two functions -- `ud_init()` then
+`ud_fit()` -- so each one's arguments travel in their own bundle and are
+checked against their own source. Its dominant cost is
+`CovUdrOptions(init = UdInitOptions(n_unconstrained = ))` (default 50),
+which is worth cutting sharply when you have few conditions.
+
+The engine refines only the *data-driven* components. Canonical components
+are fixed structural hypotheses -- identity, singletons, equal effects -- and
+reach the prior unmodified, matching mashr's own workflow. `engine = "none"`
+uses the data-driven components as generated, without refinement.
 
 To bypass the covariance chain entirely and fit weights against a prior you
 already have:

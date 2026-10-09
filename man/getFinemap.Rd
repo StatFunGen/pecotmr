@@ -9,9 +9,9 @@
 \usage{
 getFinemap(x, ...)
 
-\S4method{getFinemap}{CtwasResult}(x, ...)
+\S4method{getFinemap}{CtwasResult}(x)
 
-\S4method{getFinemap}{CtwasResultEntry}(x, ...)
+\S4method{getFinemap}{CtwasResultEntry}(x)
 }
 \arguments{
 \item{x}{A \code{CtwasResultEntry} or \code{CtwasResult}.}

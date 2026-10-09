@@ -7,7 +7,7 @@
 \usage{
 getLbf(x, ...)
 
-\S4method{getLbf}{FineMappingResultBase}(x, ...)
+\S4method{getLbf}{FineMappingResultBase}(x)
 }
 \arguments{
 \item{x}{A \code{FineMappingRow} or \code{FineMappingResultBase}.}

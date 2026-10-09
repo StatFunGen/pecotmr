@@ -11,13 +11,13 @@
 \usage{
 getTraitPosition(x, ...)
 
-\S4method{getTraitPosition}{FineMappingResultBase}(x, ...)
+\S4method{getTraitPosition}{FineMappingResultBase}(x)
 
-\S4method{getTraitPosition}{QtlDataset}(x, traitId = NULL, ...)
+\S4method{getTraitPosition}{QtlDataset}(x, traitId = NULL)
 
-\S4method{getTraitPosition}{QtlSumStats}(x, traitId = NULL, ...)
+\S4method{getTraitPosition}{QtlSumStats}(x, traitId = NULL)
 
-\S4method{getTraitPosition}{TwasWeights}(x, ...)
+\S4method{getTraitPosition}{TwasWeights}(x)
 }
 \arguments{
 \item{x}{The object.}

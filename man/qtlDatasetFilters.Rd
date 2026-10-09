@@ -28,17 +28,17 @@ getKeepVariants(x, ...)
 
 getKeepIndel(x, ...)
 
-\S4method{getMafCutoff}{QtlDataset}(x, ...)
+\S4method{getMafCutoff}{QtlDataset}(x)
 
-\S4method{getMacCutoff}{QtlDataset}(x, ...)
+\S4method{getMacCutoff}{QtlDataset}(x)
 
-\S4method{getXvarCutoff}{QtlDataset}(x, ...)
+\S4method{getXvarCutoff}{QtlDataset}(x)
 
-\S4method{getImissCutoff}{QtlDataset}(x, ...)
+\S4method{getImissCutoff}{QtlDataset}(x)
 
-\S4method{getKeepVariants}{QtlDataset}(x, ...)
+\S4method{getKeepVariants}{QtlDataset}(x)
 
-\S4method{getKeepIndel}{QtlDataset}(x, ...)
+\S4method{getKeepIndel}{QtlDataset}(x)
 }
 \arguments{
 \item{x}{A \code{QtlDataset}.}

@@ -25,6 +25,7 @@
 # =============================================================================
 
 devtools::load_all(".", quiet = TRUE)
+library(purrr)
 
 # -----------------------------------------------------------------------------
 # 1. Inputs: the bundled chr22 LD panel, GWAS sumstats, and TWAS weights.
@@ -71,15 +72,17 @@ ctwasEstExample <- estCtwasParam(
     thin = 1,
     niterPrefit = 3,
     niter = 10,
-    min_group_size = 1,
-    min_p_single_effect = 0,
-    fallbackToPrefit = TRUE
+    fallbackToPrefit = TRUE,
+    methodArgs = ctwasArgs(min_group_size = 1, min_p_single_effect = 0)
 )
 
 # The toy GWAS carries no genome-wide-significant signal, so the default
 # screen (min_nonSNP_PIP = 0.5) selects nothing and the example would be an
 # empty result. Keep every region so the finemap payload is populated.
-screened <- screenCtwasRegions(ctwasEstExample, min_nonSNP_PIP = 0)
+screened <- screenCtwasRegions(
+    ctwasEstExample,
+    methodArgs = ctwasArgs(min_nonSNP_PIP = 0)
+)
 ctwasFinemapExample <- finemapCtwasRegions(screened)
 
 # -----------------------------------------------------------------------------
@@ -99,7 +102,7 @@ repointLd <- function(payload) {
         return(payload)
     }
     stored <- as.character(payload$LD_map$LD_file)
-    portable <- vapply(stored, asResource, character(1), USE.NAMES = FALSE)
+    portable <- map_chr(stored, asResource)
     keyMap <- setNames(portable, stored)
     payload$LD_map$LD_file <- portable
     payload$LD_map$SNP_file <- portable
@@ -127,12 +130,14 @@ invisible(estCtwasParam(
     thin = 1,
     niterPrefit = 3,
     niter = 10,
-    min_group_size = 1,
-    min_p_single_effect = 0,
-    fallbackToPrefit = TRUE
+    fallbackToPrefit = TRUE,
+    methodArgs = ctwasArgs(min_group_size = 1, min_p_single_effect = 0)
 ))
 invisible(finemapCtwasRegions(
-    screenCtwasRegions(ctwasEstExample, min_nonSNP_PIP = 0)
+    screenCtwasRegions(
+        ctwasEstExample,
+        methodArgs = ctwasArgs(min_nonSNP_PIP = 0)
+    )
 ))
 invisible(asCtwasResult(ctwasFinemapExample))
 invisible(mergeCtwasBoundaryRegions(ctwasFinemapExample))

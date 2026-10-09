@@ -43,40 +43,33 @@ setClass(
 
 # @noRd
 .validateMultiStudyQtlDataset <- function(object) {
-    errors <- c(
+    # Each stage only makes sense once the previous one holds: the study count
+    # reads slots the type checks just validated, and trait consistency reads
+    # across the studies the count check just confirmed.
+    slotErrors <- c(
         .msqdCheckDatasets(object@qtlDatasets),
         .msqdCheckSumStats(object@sumStats)
     )
-    if (length(errors) == 0L) {
-        errors <- .msqdCheckStudyCount(object)
+    if (length(slotErrors) > 0L) {
+        return(slotErrors)
     }
-    if (length(errors) == 0L) {
-        errors <- .msqdCheckTraitConsistency(object)
+    countErrors <- .msqdCheckStudyCount(object)
+    if (length(countErrors) > 0L) {
+        return(countErrors)
     }
-    if (length(errors) == 0L) TRUE else errors
+    traitErrors <- .msqdCheckTraitConsistency(object)
+    if (length(traitErrors) == 0L) TRUE else traitErrors
 }
 
 # @noRd
+#' @importFrom checkmate checkList
 .msqdCheckDatasets <- function(qtlDatasets) {
-    if (!is.list(qtlDatasets) || length(qtlDatasets) == 0L) {
-        return("'qtlDatasets' must be a non-empty named list")
+    # names = "unique" subsumes the old named/non-empty/non-NA/unique checks.
+    res <- checkList(qtlDatasets, min.len = 1L, names = "unique")
+    if (!isTRUE(res)) {
+        return(str_c("'qtlDatasets' ", res))
     }
-    c(
-        .msqdCheckDatasetNames(names(qtlDatasets)),
-        .msqdCheckDatasetTypes(qtlDatasets)
-    )
-}
-
-# @noRd
-.msqdCheckDatasetNames <- function(nm) {
-    isEmpty <- any(str_length(nm) == 0L, na.rm = TRUE)
-    if (is.null(nm) || isEmpty || any(is.na(nm))) {
-        return("'qtlDatasets' must be a named list with non-empty names")
-    }
-    if (n_distinct(nm) < length(nm)) {
-        return("names of 'qtlDatasets' must be unique")
-    }
-    NULL
+    .msqdCheckDatasetTypes(qtlDatasets)
 }
 
 # @noRd
@@ -129,7 +122,7 @@ setClass(
     traitRanges <- map(object@qtlDatasets, .msqdTraitRanges)
     pairs <- utils::combn(seq_along(traitRanges), 2L)
     dsNames <- names(object@qtlDatasets)
-    unlist(compact(map(
+    list_c(compact(map(
         seq_len(ncol(pairs)),
         .msqdPairErrors,
         pairs = pairs,
@@ -141,19 +134,40 @@ setClass(
 # Per-dataset trait -> rowRanges map (first occurrence of each trait id).
 # @noRd
 .msqdTraitRanges <- function(qd) {
-    out <- list()
-    for (ctx in getContexts(qd)) {
-        se <- getPhenotypes(qd, ctx)
-        rr <- SummarizedExperiment::rowRanges(se)
-        ids <- rownames(se)
-        for (i in seq_along(ids)) {
-            tid <- ids[[i]]
-            if (is.null(out[[tid]])) {
-                out[[tid]] <- rr[i]
-            }
-        }
+    pairs <- .msqdConcat(map(getContexts(qd), .msqdContextTraitRanges, qd = qd))
+    if (length(pairs) == 0L) {
+        return(list())
     }
-    out
+    # First occurrence of each trait id wins, as the "only set it while still
+    # NULL" assignment did.
+    tids <- map_chr(pairs, "tid")
+    keep <- !duplicated(tids)
+    set_names(map(pairs[keep], "range"), tids[keep])
+}
+
+# @noRd
+.msqdConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
+    }
+    list_c(pieces)
+}
+
+# @noRd
+.msqdTraitRangePair <- function(i, ids, rr) {
+    list(tid = ids[[i]], range = rr[i])
+}
+
+# One context's (trait, range) pairs in row order.
+# @noRd
+.msqdContextTraitRanges <- function(ctx, qd) {
+    se <- getPhenotypes(qd, ctx)
+    map(
+        seq_along(rownames(se)),
+        .msqdTraitRangePair,
+        ids = rownames(se),
+        rr = SummarizedExperiment::rowRanges(se)
+    )
 }
 
 # Inconsistency errors for the k-th dataset pair.
@@ -231,8 +245,10 @@ setClass(
 #'   study = "s2", genotypes = panel, phenotypes = list(brain = se)
 #' )
 #' MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+#' @importFrom checkmate assertList
 #' @export
 MultiStudyQtlDataset <- function(qtlDatasets, sumStats = NULL) {
+    assertList(qtlDatasets, min.len = 1L, names = "unique")
     obj <- new(
         "MultiStudyQtlDataset",
         qtlDatasets = qtlDatasets,
@@ -248,17 +264,11 @@ setMethod("getQtlDatasets", "MultiStudyQtlDataset", function(x) x@qtlDatasets)
 
 #' @rdname getSumStats
 #' @export
-setMethod("getSumStats", "MultiStudyQtlDataset", function(x, ...) {
-    if (length(list(...)) > 0L) {
-        msg <- glue(
-            "getSumStats(MultiStudyQtlDataset) does not accept selection ",
-            "arguments; it returns the embedded QtlSumStats collection ",
-            "(use getSumStats() on that result to fetch one entry)."
-        )
-        abort(msg)
-    }
-    x@sumStats
-})
+# No selectors: this returns the embedded QtlSumStats collection whole, and
+# one entry is fetched by calling getSumStats() on that result. Taking no
+# extra formals is what refuses a selector -- R reports the unused argument
+# by name.
+setMethod("getSumStats", "MultiStudyQtlDataset", function(x) x@sumStats)
 
 #' @rdname getStudy
 #' @export

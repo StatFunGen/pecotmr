@@ -15,7 +15,7 @@ context("CtwasResult")
             susie_alpha = pip,
             stringsAsFactors = FALSE
         ),
-        param = prior,
+        groupPriors = prior,
         regionInfo = data.frame(region_id = "r1", stringsAsFactors = FALSE)
     )
 }
@@ -194,7 +194,10 @@ test_that("CtwasResult: show() prints a one-line-per-run summary", {
 test_that("validity names a missing required column", {
     bad <- .ctr_res()
     bad$context <- NULL
-    expect_error(methods::validObject(bad), "missing columns: context")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'context'\\}"
+    )
 })
 
 test_that("validity requires one entry payload per row", {

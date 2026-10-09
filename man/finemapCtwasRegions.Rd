@@ -4,16 +4,23 @@
 \alias{finemapCtwasRegions}
 \title{Fine-map cTWAS regions}
 \usage{
-finemapCtwasRegions(screenResult, L = 5L, ncore = 1L, ...)
+finemapCtwasRegions(
+  screenResult,
+  L = 5L,
+  numThreads = 1L,
+  methodArgs = CtwasOptions()
+)
 }
 \arguments{
 \item{screenResult}{A list returned by \code{\link{screenCtwasRegions}}.}
 
 \item{L}{Pass-through.}
 
-\item{ncore}{Number of cores.}
+\item{numThreads}{Number of cores.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::finemap_regions}.}
+\item{methodArgs}{Additional arguments forwarded to ctwas, built
+with \code{\link{CtwasOptions}}. Names are checked against what
+the ctwas steps accept between them.}
 }
 \value{
 A list mirroring \code{ctwas::ctwas_sumstats}'s output:
@@ -41,11 +48,14 @@ blocks <- GenomicRanges::GRanges("chr22",
   blockId = c("chr22_1", "chr22_2"))
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
-gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
+gwasByRegion <- summaryStatsQc(gss,
+  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
-est <- estCtwasParam(inp, thin = 1, niterPrefit = 3, niter = 10,
-  min_group_size = 1, min_p_single_effect = 0, fallbackToPrefit = TRUE)
-screened <- screenCtwasRegions(est, L = 5L)
+est <- estCtwasGroupPriors(inp,
+  ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
+    fallbackToPrefit = TRUE),
+  methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+screened <- screenCtwasRegions(est)
 finemapCtwasRegions(screened, L = 5L)
 }

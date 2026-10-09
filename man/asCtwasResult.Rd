@@ -23,7 +23,7 @@ Decompose the raw list returned by
   \code{\link{mergeCtwasBoundaryRegions}}) into the structured, per-(study,
   context) \code{\link{CtwasResult}} -- the same decomposition
   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
-  granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasParam}
+  granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasGroupPriors}
   \eqn{\to} \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions}
   path. The GWAS study is read from \code{z_snp$study} and the (single)
   weight method from the gene ids.

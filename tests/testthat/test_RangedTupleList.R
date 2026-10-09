@@ -308,7 +308,10 @@ test_that("subsetRegion differs from subsetByOverlaps and restrict", {
 
 test_that(".rtlSplitByBlocks splits one element into per-block pieces", {
     r <- .rtlSplitByBlocks(list(.rtl_variants()), .rtl_blocks())
-    expect_equal(names(r$entry), c("b1", "b2"))
+    # `blockId` is the documented channel for which block a piece came from;
+    # the flattened entry list is deliberately unnamed (base unlist()'s
+    # `outer.inner` mangling was an artifact, and inconsistent at that).
+    expect_null(names(r$entry))
     expect_equal(r$blockId, c("b1", "b2"))
     expect_equal(unname(lengths(r$entry)), c(2L, 1L))
     # Both pieces came from the one input element, so its metadata row is
@@ -816,8 +819,8 @@ test_that(".rtlTupleKeyCols is empty when there are no mcols", {
 
 test_that("`[[<-` rejects a non-scalar or NA index", {
     x <- .rtl_makeKid()
-    expect_error(x[[c(1L, 2L)]] <- x[[1L]], "takes a single non-NA index")
-    expect_error(x[[NA_integer_]] <- x[[1L]], "takes a single non-NA index")
+    expect_error(x[[c(1L, 2L)]] <- x[[1L]], "Must have length 1")
+    expect_error(x[[NA_integer_]] <- x[[1L]], "May not be NA")
 })
 
 

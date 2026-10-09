@@ -7,7 +7,7 @@
 \usage{
 getChromPaths(x, ...)
 
-\S4method{getChromPaths}{GenotypeHandle}(x, ...)
+\S4method{getChromPaths}{GenotypeHandle}(x)
 }
 \arguments{
 \item{x}{A \code{GenotypeHandle}.}

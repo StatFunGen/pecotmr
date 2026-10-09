@@ -1,3 +1,151 @@
+#' @include MethodParam.R
+NULL
+
+# Declared here rather than beside its constructor (far below) because
+# MashComponentSelection references it and MashPriorParam needs that union.
+#' @rdname MashComponentParam
+#' @aliases MashComponentParam-class
+#' @exportClass MashComponentParam
+setClass(
+    "MashComponentParam",
+    contains = "MethodParam",
+    slots = c(components = "list_OR_NULL")
+)
+
+# Both take either a name or that component/engine's own record, which is why
+# neither is arg_match()ed in the constructor: collapsing one to a string
+# would discard the options travelling with it.
+#
+# `components` is now exact -- only a MashComponentParam, not any
+# MethodOptions. `engine` stays open to MethodOptions and always will:
+# CovEdOptions() and CovUdrOptions() are external-engine argument bags, not
+# pecotmr settings, so they never become Params.
+# No character arm: a name is translated to the record it stands for by the
+# constructor, so each slot has ONE shape.
+
+# A name is a user-facing convenience, so it is translated to the record it
+# stands for at the boundary rather than carried as a second slot shape.
+# Both entry points use these: MashPriorParam() and mashPriorCovariances(),
+# which is exported with the same convenience arguments.
+#
+# The alternative -- storing the string and resolving at use -- is what this
+# replaced, and it made every consumer handle two shapes for one setting.
+# @noRd
+.mashNormalizeComponents <- function(v) {
+    if (is(v, "MashComponentParam")) {
+        return(v)
+    }
+    if (!is.character(v)) {
+        abort(glue(
+            "`components` must be component names or a ",
+            "MashComponentParam() record; got {class(v)[[1L]]}"
+        ))
+    }
+    .mashValidateComponents(v, "MashPriorParam")
+    exec(
+        MashComponentParam,
+        !!!set_names(rep(list(list()), length(v)), v)
+    )
+}
+
+# "none" has no constructor, so it is the absent engine: NULL. The default
+# resolves to CovEdOptions(), so NULL in the slot is unambiguous.
+# @noRd
+.mashNormalizeEngine <- function(v) {
+    if (.isMethodOptions(v)) {
+        return(.mashAssertEngineRecord(v))
+    }
+    if (!is.character(v)) {
+        abort(glue(
+            "`engine` must be 'covEd', 'covUdr', 'none', or that engine's ",
+            "Options record; got {class(v)[[1L]]}"
+        ))
+    }
+    # arg_match() needs a symbol and would then report on the local name;
+    # arg_match0() takes the user-facing name explicitly, so the message
+    # says `engine` rather than whatever this binding is called.
+    nm <- arg_match0(
+        v[[1L]],
+        c(names(.mashEngineCtors()), "none"),
+        arg_nm = "engine"
+    )
+    if (identical(nm, "none")) {
+        return(NULL)
+    }
+    .mashEngineCtors()[[nm]]()
+}
+
+# @noRd
+.mashAssertEngineRecord <- function(v) {
+    known <- names(.mashEngineCtors())
+    got <- metadata(v)$engine
+    if (is.null(got) || !is_in(got, known)) {
+        abort(glue(
+            "`engine`: these options are for '{got %||% 'unknown'}', which ",
+            "does not refine mash prior covariances. Use ",
+            "{str_flatten(str_c(known, 'Options()'), ' or ')}."
+        ))
+    }
+    v
+}
+
+#' @rdname MashPriorParam
+#' @aliases MashPriorParam-class
+#' @exportClass MashPriorParam
+setClass(
+    "MashPriorParam",
+    contains = "MethodParam",
+    slots = c(
+        priorCovariances = "list_OR_NULL",
+        components = "MashComponentParam",
+        engine = "MethodOptions_OR_NULL",
+        nPcs = "numeric_OR_NULL"
+    )
+)
+
+#' @title mash Prior-Covariance Settings
+#' @description How the prior covariance matrices (the \code{Ulist} mash
+#'   consumes) are obtained: supplied outright, or built from components and
+#'   refined by an engine. Exactly the arguments
+#'   \code{\link{mashPriorCovariances}} takes for that job, so the bundle
+#'   travels there whole.
+#'
+#'   Supplying \code{priorCovariances} short-circuits the rest: the
+#'   components are not built and the engine does not run.
+#' @param priorCovariances Optional named list of square covariance matrices,
+#'   or a \code{\link{MashPrior}}. \code{NULL} (default) builds them.
+#' @param components Which prior-covariance components to build: any of
+#'   \code{"canonical"}, \code{"pca"}, \code{"flash"},
+#'   \code{"flashNonneg"}, or a \code{\link{MashComponentParam}} record to
+#'   configure them. Ignored when \code{priorCovariances} is supplied.
+#' @param engine How the data-driven components are refined:
+#'   \code{"covEd"} (default), \code{"covUdr"} or \code{"none"}, or the
+#'   matching constructor --- \code{\link{CovEdOptions}} /
+#'   \code{\link{CovUdrOptions}} --- to configure it at the same time.
+#'   Ignored when \code{priorCovariances} is supplied.
+#' @param nPcs Optional integer; principal components seeded into
+#'   \code{mashr::cov_pca()}. Defaults to \code{ncol} of the data. Read
+#'   only when \code{components} includes \code{"pca"}.
+#' @return A \code{MashPriorParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' MashPriorParam(components = c("canonical", "pca"), nPcs = 3)
+#' @importFrom rlang arg_match0
+#' @export
+MashPriorParam <- function(
+    priorCovariances = NULL,
+    components = c("canonical", "pca", "flash", "flashNonneg"),
+    engine = c("covEd", "covUdr", "none"),
+    nPcs = NULL
+) {
+    new(
+        "MashPriorParam",
+        priorCovariances = priorCovariances,
+        components = .mashNormalizeComponents(components),
+        engine = .mashNormalizeEngine(engine),
+        nPcs = nPcs
+    )
+}
+
 #' @title Run mashr Across Multi-Context QTL or GWAS Summary Statistics
 #' @description End-to-end driver: from `(strong, random, null)` sumstats
 #'   collections, builds the variant x context Bhat / Shat matrices, estimates
@@ -41,18 +189,12 @@
 #'   entry; \code{"mle"} needs \code{"random"} plus a supplied
 #'   \code{priorCovariances} to refine against. A named method whose
 #'   requirement is unmet is a hard error, not a silent fallback.
-#' @param priorCovariances Optional named list of square covariance matrices
-#'   (the \code{Ulist} \code{mashr::mash()} consumes), or a
-#'   \code{\link{mashPriorCovariances}} result, which is unwrapped to its
-#'   \code{U}. When supplied, replaces
-#'   the canonical + PCA + flash + ED chain (\code{cov_canonical} /
-#'   \code{cov_pca} / \code{cov_flash} / \code{cov_ed}) entirely; mash sees only
-#'   the supplied matrices. Every entry must be a \code{ncol(Bhat) x ncol(Bhat)}
-#'   matrix. Useful when \code{U} was learnt on a larger reference and shipped
-#'   as a static artefact (the legacy MWE pattern).
-#' @param nPcs Optional integer; number of principal components seeded into
-#'   \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}. Ignored when
-#'   \code{priorCovariances} is supplied.
+#' @param prior How the prior covariance matrices are obtained, built with
+#'   \code{\link{MashPriorParam}}: \code{priorCovariances} supplies them
+#'   outright (short-circuiting the rest), otherwise \code{components}
+#'   chooses which to build, \code{engine} how the data-driven ones are
+#'   refined, and \code{nPcs} parametrises the \code{pca} component.
+#'   Forwarded whole to \code{\link{mashPriorCovariances}}.
 #' @param inputScale One of \code{"auto"} (default), \code{"beta"},
 #'   \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
 #'   sumstats entry:
@@ -68,6 +210,17 @@
 #'   }
 #'   \code{alpha} should be chosen consistently with the resolved scale:
 #'   typically \code{alpha = 0} for beta, \code{alpha = 1} for z.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{MashDataOptions}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
+#' @param mashArgs Extra arguments for \code{mashr::mash()}, built with
+#'   \code{\link{MashOptions}} -- for example \code{nullweight},
+#'   \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+#'   \code{outputlevel} and \code{seed} are owned by pecotmr and are
+#'   refused by the constructor.
 #' @param setSeed Integer. RNG seed for reproducibility of
 #'   \code{mashr::cov_flash} and \code{mashr::cov_ed}. Default 999.
 #' @return A list with elements \code{U} (the combined covariance list:
@@ -76,7 +229,7 @@
 #' data(qtlSumStatsMulticontextExample)
 #' ss <- qtlSumStatsMulticontextExample
 #' sumStatsList <- list(strong = ss, random = ss)
-#' mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
+#' mashPipeline(sumStatsList, alpha = 0, prior = MashPriorParam(nPcs = 2L))
 #' @export
 mashPipeline <- function(
     sumStatsList,
@@ -89,13 +242,18 @@ mashPipeline <- function(
         "corshrink",
         "mle"
     ),
-    priorCovariances = NULL,
-    nPcs = NULL,
+    prior = MashPriorParam(),
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = MashDataOptions(),
+    mashArgs = MashOptions(),
     setSeed = 999
 ) {
     inputScale <- arg_match(inputScale)
     residualCorrelationMethod <- arg_match(residualCorrelationMethod)
+    .mashPipelineAssert(prior, mashDataArgs, mashArgs)
+    # Needed here as well as in the prior fit: the 'mle' Vhat estimator
+    # refines against the supplied prior.
+    priorCovariances <- prior$priorCovariances
     .mashRequirePriorPackages()
     # Accept either a base list or a S4Vectors::SimpleList.
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -109,20 +267,60 @@ mashPipeline <- function(
         inputScale,
         residualCorrelation,
         residualCorrelationMethod,
-        priorCovariances
+        priorCovariances,
+        mashDataArgs
     )
-    # mashPriorCovariances() owns the cov_* chain, the supplied-prior bypass,
-    # and the mash() weight fit; mashPipeline just forwards its arguments.
-    prior <- mashPriorCovariances(
+    fitted <- .mashPipelinePrior(
         sumStatsList,
         alpha,
         vhat = vhat,
-        priorCovariances = priorCovariances,
-        nPcs = nPcs,
+        prior = prior,
         inputScale = inputScale,
+        mashDataArgs = mashDataArgs,
+        mashArgs = mashArgs
+    )
+    list(U = fitted$U, w = fitted$w)
+}
+
+# Every bundle mashPipeline() takes, checked together.
+# @noRd
+.mashPipelineAssert <- function(prior, mashDataArgs, mashArgs) {
+    .assertMethodParam(prior, "MashPriorParam", "prior")
+    .assertMethodOptions(mashDataArgs, "MashDataOptions", "mashDataArgs")
+    .assertMethodOptions(mashArgs, "MashOptions", "mashArgs")
+}
+
+# mashPriorCovariances() owns the cov_* chain, the supplied-prior bypass and
+# the mash() weight fit; it takes the prior settings as plain arguments, so
+# the bundle is unrolled here -- the one place that knows MashPriorParam()'s
+# defaults for an unset field.
+# @noRd
+.mashPipelinePrior <- function(
+    sumStatsList,
+    alpha,
+    vhat,
+    prior,
+    inputScale,
+    mashDataArgs,
+    mashArgs
+) {
+    # Normalized to a Param first: `prior` may be list() for "no settings",
+    # and reading $engine off that would give NULL -- which now MEANS
+    # "none" -- rather than the default engine.
+    prior <- if (is(prior, "MashPriorParam")) prior else MashPriorParam()
+    mashPriorCovariances(
+        sumStatsList,
+        alpha,
+        vhat = vhat,
+        components = prior$components,
+        engine = prior$engine,
+        priorCovariances = prior$priorCovariances,
+        nPcs = prior$nPcs,
+        inputScale = inputScale,
+        mashDataArgs = mashDataArgs,
+        mashArgs = mashArgs,
         setSeed = NULL
     )
-    list(U = prior$U, w = prior$w)
 }
 
 # `sumStatsList` must be a named list of strong[/random/null] partitions;
@@ -218,7 +416,8 @@ mashPipeline <- function(
     inputScale,
     residualCorrelation,
     method,
-    priorCovariances
+    priorCovariances,
+    mashDataArgs = MashDataOptions()
 ) {
     if (!is.null(residualCorrelation)) {
         return(residualCorrelation)
@@ -230,6 +429,7 @@ mashPipeline <- function(
         method = method,
         priorCovariances = priorCovariances,
         inputScale = inputScale,
+        mashDataArgs = mashDataArgs,
         setSeed = NULL
     )
 }
@@ -261,6 +461,12 @@ mashPipeline <- function(
 #'   EM iterations).
 #' @param inputScale SumStats -> matrix conversion scale (\code{"auto"} /
 #'   \code{"beta"} / \code{"z"}).
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{MashDataOptions}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
 #' @param setSeed Integer seed, or \code{NULL} to leave the ambient RNG stream
 #'   untouched (how \code{mashPipeline} keeps one continuous stream across its
 #'   delegated calls).
@@ -280,16 +486,22 @@ mashResidualCorrelation <- function(
     nSubset = 6000L,
     maxIter = 6L,
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = MashDataOptions(),
     setSeed = 999
 ) {
-    method <- arg_match(method)
+    # `method` takes a NAME or that estimator's own constructor, the same
+    # character-or-constructor rule mashPriorCovariances(engine =) uses.
+    chosen <- .resolveEngineChoice(
+        if (is.character(method)) method[[1L]] else method,
+        c("simple", "identity", "mle", "corshrink", "simpleSpecific"),
+        "method"
+    )
+    method <- chosen$engine
+    corArgs <- chosen$args
+    .assertMethodOptions(mashDataArgs, "MashDataOptions", "mashDataArgs")
     inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -297,6 +509,35 @@ mashResidualCorrelation <- function(
     if (!is.null(setSeed)) {
         withr::local_seed(setSeed)
     }
+    .mashResidCorDispatch(
+        method,
+        sumStatsList,
+        alpha,
+        inputScale,
+        priorCovariances,
+        nSubset,
+        maxIter,
+        mashDataArgs,
+        corArgs
+    )
+}
+
+# Run the chosen estimator. Split from mashResidualCorrelation() so that
+# function is only the resolve-and-validate preamble: the five estimators
+# share nothing but their return shape, so the choice reads as one table
+# rather than as the tail of a longer function.
+# @noRd
+.mashResidCorDispatch <- function(
+    method,
+    sumStatsList,
+    alpha,
+    inputScale,
+    priorCovariances,
+    nSubset,
+    maxIter,
+    mashDataArgs,
+    corArgs
+) {
     if (method == "identity") {
         strongMats <- .mashSumStatsToMatrices(
             sumStatsList$strong,
@@ -306,7 +547,13 @@ mashResidualCorrelation <- function(
         return(diag(rep(1, ncol(strongMats$b))))
     }
     if (method == "simple") {
-        return(.mashResidCorSimple(sumStatsList, alpha, inputScale))
+        return(.mashResidCorSimple(
+            sumStatsList,
+            alpha,
+            inputScale,
+            mashDataArgs,
+            corArgs
+        ))
     }
     if (method == "mle") {
         return(.mashResidCorMle(
@@ -315,153 +562,12 @@ mashResidualCorrelation <- function(
             inputScale,
             priorCovariances,
             nSubset,
-            maxIter
+            maxIter,
+            mashDataArgs,
+            corArgs
         ))
     }
-    .mashResidCorNullBased(sumStatsList, alpha, inputScale, method)
-}
-
-# method 'simple': mashr's estimate_null_correlation_simple on the null set.
-# @noRd
-.mashResidCorSimple <- function(sumStatsList, alpha, inputScale) {
-    if (is.null(sumStatsList$null)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'simple' requires a 'null' entry ",
-            "in `sumStatsList`."
-        )
-        abort(msg)
-    }
-    nullMats <- .mashSumStatsToMatrices(
-        sumStatsList$null,
-        "null",
-        inputScale = inputScale
-    )
-    mashr::estimate_null_correlation_simple(
-        mashr::mash_set_data(
-            nullMats$b,
-            Shat = nullMats$s,
-            alpha,
-            zero_Bhat_Shat_reset = 1000
-        )
-    )
-}
-
-# method 'mle': EM refinement of V against the prior U over a random subset.
-# @noRd
-.mashResidCorMle <- function(
-    sumStatsList,
-    alpha,
-    inputScale,
-    priorCovariances,
-    nSubset,
-    maxIter
-) {
-    if (is.null(sumStatsList$random)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'mle' requires a 'random' entry ",
-            "in `sumStatsList`."
-        )
-        abort(msg)
-    }
-    if (is.null(priorCovariances)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'mle' requires ",
-            "`priorCovariances` ",
-            "(the prior U the EM refines V against)."
-        )
-        abort(msg)
-    }
-    priorCovariances <- .mashAsUlist(priorCovariances)
-    randomMats <- .mashSumStatsToMatrices(
-        sumStatsList$random,
-        "random",
-        inputScale = inputScale
-    )
-    n <- nrow(randomMats$b)
-    idx <- sample(seq_len(n), min(nSubset, n))
-    dsub <- mashr::mash_set_data(
-        randomMats$b[idx, , drop = FALSE],
-        Shat = randomMats$s[idx, , drop = FALSE],
-        alpha,
-        zero_Bhat_Shat_reset = 1000
-    )
-    fit <- mashr::mash_estimate_corr_em(
-        dsub,
-        priorCovariances,
-        max_iter = maxIter,
-        details = TRUE
-    )
-    fit$V
-}
-
-# methods 'corshrink' / 'simpleSpecific': estimate V on the null z-matrix. The
-# `null` partition is already the null variants (max|z| < 2), so no
-# re-thresholding is needed.
-# @noRd
-.mashResidCorNullBased <- function(sumStatsList, alpha, inputScale, method) {
-    if (is.null(sumStatsList$null)) {
-        msg <- glue(
-            "mashResidualCorrelation: method '{method}' requires a 'null' ",
-            "entry in `sumStatsList` (the null variants V is estimated on)."
-        )
-        abort(msg)
-    }
-    nullMats <- .mashSumStatsToMatrices(
-        sumStatsList$null,
-        "null",
-        inputScale = inputScale
-    )
-    nullZ <- nullMats$b / nullMats$s
-    if (method == "simpleSpecific") {
-        return(as.matrix(
-            Matrix::nearPD(
-                stats::cov(nullZ),
-                conv.tol = 1e-06,
-                doSym = TRUE,
-                corr = TRUE
-            )$mat
-        ))
-    }
-    if (!requireNamespace("CorShrink", quietly = TRUE)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'corshrink' needs the CorShrink ",
-            "package. Install it, or use 'simple' / 'simpleSpecific'."
-        )
-        abort(msg)
-    }
-    as.matrix(
-        CorShrink::CorShrinkData(
-            nullZ,
-            ash.control = list(mixcompdist = "halfuniform"),
-            image = "null"
-        )$cor
-    )
-}
-
-# Internal: build the requested data-driven covariance components off a prepared
-# mashr data object, in a fixed order (canonical, pca, flash, flashNonneg) so a
-# given `components` set reproduces the same ordering everywhere. RNG is
-# consumed only by cov_flash / cov_flash(nonneg). Shared by mashPriorCovariances
-# and the exported mashCovarianceComponents.
-# @noRd
-.mashBuildComponents <- function(mashData, components, nPcs = NULL) {
-    comps <- list()
-    if (is_in("canonical", components)) {
-        comps <- c(comps, mashr::cov_canonical(mashData))
-    }
-    if (is_in("pca", components)) {
-        if (is.null(nPcs)) {
-            nPcs <- ncol(mashData$Bhat) - 1
-        }
-        comps <- c(comps, mashr::cov_pca(mashData, npc = nPcs))
-    }
-    if (is_in("flash", components)) {
-        comps <- c(comps, mashr::cov_flash(mashData))
-    }
-    if (is_in("flashNonneg", components)) {
-        comps <- c(comps, mashr::cov_flash(mashData, factors = "nonneg"))
-    }
-    comps
+    .mashResidCorNullBased(sumStatsList, inputScale, method, corArgs)
 }
 
 #' @title Build mash Data-Driven Covariance Components
@@ -480,6 +586,12 @@ mashResidualCorrelation <- function(
 #'   \code{"flashNonneg"}. Built in that fixed order.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param inputScale SumStats -> matrix conversion scale.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{MashDataOptions}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
 #' @param setSeed Integer seed (\code{cov_flash} is stochastic), or \code{NULL}
 #'   to leave the ambient RNG untouched.
 #' @return A named list of covariance matrices (the concatenated components).
@@ -497,8 +609,10 @@ mashCovarianceComponents <- function(
     components = c("canonical", "pca", "flash", "flashNonneg"),
     nPcs = NULL,
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = MashDataOptions(),
     setSeed = 999
 ) {
+    .assertMethodOptions(mashDataArgs, "MashDataOptions", "mashDataArgs")
     inputScale <- arg_match(inputScale)
     .mashValidateComponents(components, "mashCovarianceComponents")
     .mashRequirePriorPackages()
@@ -513,9 +627,35 @@ mashCovarianceComponents <- function(
         "strong",
         vhat,
         alpha,
-        inputScale
+        inputScale,
+        mashDataArgs
     )
-    .mashBuildComponents(mashData, components = components, nPcs = nPcs)
+    # This function's contract is one flat named list of covariance matrices,
+    # so the role split that .mashBuildComponents keeps for the engine is
+    # collapsed again here, canonical first as before.
+    built <- .mashBuildComponents(
+        mashData,
+        components = components,
+        nPcs = nPcs
+    )
+    c(built$canonical, built$dataDriven)
+}
+
+# `components` and `engine` each take a name or that choice's own
+# constructor, so both resolve to a (name, options) pair the same way.
+# @noRd
+# Both arguments arrive already normalized -- a MashComponentParam and an
+# Options record or NULL -- so this only splits them into the shapes the
+# cov_* chain downstream expects. NULL engine is "none": no refinement.
+# @noRd
+.mashResolvePriorChoice <- function(components, engine) {
+    entries <- slot(components, "components") %||% list()
+    list(
+        components = names(entries),
+        componentArgs = entries,
+        engine = if (is.null(engine)) "none" else metadata(engine)$engine,
+        engineArgs = engine
+    )
 }
 
 #' @title Estimate mash Prior Covariances and Mixture Weights
@@ -534,14 +674,18 @@ mashCovarianceComponents <- function(
 #' @param components Data-driven covariance components, any of
 #'   \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
 #'   \code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
-#'   "nonneg")}). Built in that fixed order. Ignored by the \code{"ud"} /
-#'   \code{"ud_ted"} engines.
-#' @param engine Covariance-refinement engine. \code{"cov_ed"} (default; mashr's
-#'   exported \code{cov_ed()} extreme deconvolution, whose default
-#'   \code{algorithm = "bovy"} IS the Bovy et al. 2011 method -- weights from a
-#'   final \code{mash()}); \code{"ud"} / \code{"ud_ted"} (\pkg{udr} ED / TED
-#'   updates, returning weights directly -- OPT-IN, known numerical issues, so
-#'   not the default; \code{"ud_ted"} additionally needs i.i.d. (z-scale) data).
+#'   "nonneg")}). Built in that fixed order. May instead be a
+#'   \code{\link{MashComponentParam}} record, which names the components and
+#'   carries each one's options.
+#' @param engine Covariance-refinement engine, either a name or the matching
+#'   constructor carrying that engine's settings. \code{"covEd"} (default;
+#'   \code{\link{CovEdOptions}} -- mashr's exported \code{cov_ed()} extreme
+#'   deconvolution, whose default \code{algorithm = "bovy"} IS the Bovy et al.
+#'   2011 method, weights from a final \code{mash()}); \code{"covUdr"}
+#'   (\code{\link{CovUdrOptions}} -- \pkg{udr} ED / TED updates, returning
+#'   weights directly -- OPT-IN, known numerical issues, so not the default;
+#'   \code{UdFitOptions(unconstrained.update = "ted")} additionally needs
+#'   i.i.d. (z-scale) data); \code{"none"} to skip refinement.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param priorCovariances Optional caller-supplied prior \code{U}: a non-empty
 #'   named list of \code{nCond x nCond} matrices, or a
@@ -557,12 +701,18 @@ mashCovarianceComponents <- function(
 #'   mixture-prior pipeline where separate steps built the components.
 #'   \code{components} / \code{nPcs} are then ignored. Distinct from
 #'   \code{priorCovariances}, which bypasses the engine entirely.
-#' @param udControl Named list overriding the \pkg{udr} controls for the
-#'   \code{"ud"} / \code{"ud_ted"} engines: \code{n_unconstrained} (data-driven
-#'   matrices to fit; default 50 -- the dominant cost, so reduce it for
-#'   few-condition data), \code{maxiter} (default 1000), \code{tol},
-#'   \code{tol.lik}. Ignored by \code{cov_ed}.
 #' @param inputScale SumStats -> matrix conversion scale.
+#' @param mashDataArgs Extra arguments for
+#'   \code{mashr::mash_set_data()}, built with
+#'   \code{\link{MashDataOptions}} -- for example
+#'   \code{zero_Bhat_Shat_reset} or \code{zero_Shat_reset}. \code{Bhat},
+#'   \code{Shat}, \code{alpha} and \code{V} are supplied by pecotmr and
+#'   are refused by the constructor.
+#' @param mashArgs Extra arguments for \code{mashr::mash()}, built with
+#'   \code{\link{MashOptions}} -- for example \code{nullweight},
+#'   \code{optmethod} or \code{verbose}. \code{data}, \code{Ulist},
+#'   \code{outputlevel} and \code{seed} are owned by pecotmr and are
+#'   refused by the constructor.
 #' @param setSeed Integer seed, or \code{NULL} to leave the ambient RNG
 #'   untouched.
 #' @return \code{list(U, w, loglik)}: the covariance list, the
@@ -580,17 +730,29 @@ mashPriorCovariances <- function(
     alpha,
     vhat = NULL,
     components = c("canonical", "pca", "flash", "flashNonneg"),
-    engine = c("cov_ed", "ud", "ud_ted"),
+    engine = c("covEd", "covUdr", "none"),
     nPcs = NULL,
     priorCovariances = NULL,
     priorComponents = NULL,
-    udControl = list(),
     inputScale = c("auto", "beta", "z"),
+    mashDataArgs = MashDataOptions(),
+    mashArgs = MashOptions(),
     setSeed = 999
 ) {
-    engine <- arg_match(engine)
+    .assertMethodOptions(mashDataArgs, "MashDataOptions", "mashDataArgs")
+    .assertMethodOptions(mashArgs, "MashOptions", "mashArgs")
     inputScale <- arg_match(inputScale)
-    .mashValidateComponents(components)
+    # Exported with the same convenience arguments as MashPriorParam(), so
+    # it normalizes through the same helpers rather than resolving a second
+    # time in its own way.
+    choice <- .mashResolvePriorChoice(
+        .mashNormalizeComponents(components),
+        .mashNormalizeEngine(engine)
+    )
+    components <- choice$components
+    componentArgs <- choice$componentArgs
+    engine <- choice$engine
+    engineArgs <- choice$engineArgs
     .mashRequirePriorPackages()
     if (methods::is(sumStatsList, "SimpleList")) {
         sumStatsList <- as.list(sumStatsList)
@@ -603,29 +765,188 @@ mashPriorCovariances <- function(
         "strong",
         vhat,
         alpha,
-        inputScale
+        inputScale,
+        mashDataArgs
     )
-    result <- if (!is.null(priorCovariances)) {
-        .mashUserPriorCovariances(priorCovariances, mashData)
-    } else {
-        .mashDataDrivenCovariances(
-            mashData,
-            priorComponents,
-            components,
-            nPcs,
-            udControl,
-            engine
-        )
+    .mashPriorFit(
+        mashData,
+        priorCovariances = priorCovariances,
+        priorComponents = priorComponents,
+        components = components,
+        nPcs = nPcs,
+        engine = engine,
+        engineArgs = engineArgs,
+        componentArgs = componentArgs,
+        mashArgs = mashArgs
+    )
+}
+
+# --- prior-covariance constructors ------------------------------------------
+#
+# mashr draws three roles that pecotmr had collapsed into one list. Canonical
+# components are shape-driven -- fixed structural hypotheses built from the
+# condition count. PCA and FLASH are data-driven GENERATORS: data in,
+# covariances out, independent of each other. ED and udr are REFINERS, which
+# consume a generator's output. mashr's own eQTL vignette refines only the
+# data-driven components and passes canonical to mash() untouched.
+
+# udr checks these names but not their VALUES, and a bad one fails deep and
+# obscurely: udr::compute_penalty is two `if (update.type == ...)` branches
+# with no else, so an unrecognised value assigns nothing and the function
+# dies on `object 'log_penalty' not found` -- a variable the caller has
+# never heard of. It is reached whenever `lambda` is non-zero, which
+# .mashUdControl always sets.
+#
+# The vocabulary is transcribed, which this design normally refuses to do.
+# The trade is three stable values against an error naming an internal
+# variable: "ed" and "ted" are compute_penalty's own two branches, and
+# "none" plus NA are resolved by udr::assign_prior_covariance_updates.
+#
+# ONLY this field. The sibling updates have their OWN vocabularies --
+# scaled.update is "fa"/"none", rank1.update "ted"/"fa"/"none" -- and I have
+# not traced their failure modes, so guessing at them would risk rejecting
+# something udr accepts.
+# @noRd
+.udAssertUnconstrainedUpdate <- function(extra) {
+    v <- extra[["unconstrained.update"]]
+    if (is.null(v) || length(v) != 1L) {
+        return(invisible(NULL))
     }
-    if (is.null(result$w)) {
-        m <- mashr::mash(mashData, Ulist = result$U, outputlevel = 1)
-        result$w <- mashr::get_estimated_pi(m)
+    if (is.logical(v) && is.na(v)) {
+        return(invisible(NULL))
     }
-    list(U = result$U, w = result$w, loglik = result$loglik)
+    if (is.character(v) && is_in(v, c("ed", "ted", "none"))) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "UdFitOptions: `unconstrained.update` must be 'ed', 'ted', 'none' ",
+        "or NA (NA lets udr choose from the data); got ",
+        "'{as.character(v)[[1L]]}'. udr accepts the name but not the ",
+        "value, and fails later inside compute_penalty()."
+    ))
+}
+
+# The generator constructors, keyed by the component name `components`
+# accepts. flashNonneg shares cov_flash's options; pecotmr sets `factors`.
+# @noRd
+.mashComponentCtors <- function() {
+    list(
+        canonical = CovCanonicalOptions,
+        pca = CovPcaOptions,
+        flash = CovFlashOptions,
+        flashNonneg = CovFlashOptions
+    )
+}
+
+# The refiner constructors, keyed by the name `engine` accepts.
+# @noRd
+.mashEngineCtors <- function() {
+    list(covEd = CovEdOptions, covUdr = CovUdrOptions)
+}
+
+# --- mashr fit / data / posterior settings ----------------------------------
+#
+# These three were the audit's top finding: the core mash fit had zero user
+# control. Each names the ONE mashr function it configures, so the accepted
+# set is that function's live formals.
+#
+# `seed` is refused by all of them: pecotmr owns run-to-run reproducibility
+# through `setSeed`, and two seeds that disagree is worse than one that
+# cannot be set.
+
+# --- residual-correlation estimator settings --------------------------------
+#
+# `mashResidualCorrelation(method =)` already picks the estimator, so these
+# follow the character-or-constructor rule the file already uses for
+# `engine =`: the argument takes either the estimator's NAME or that
+# estimator's constructor, which carries the identity in metadata().
+
+#' @title Per-Component Arguments For mashPriorCovariances
+#' @description Options for each prior-covariance component, keyed by
+#'   component name. Each entry may be a plain list or the matching
+#'   constructor -- a plain list is spliced into that constructor, so it gets
+#'   the same defaults and the same checking either way.
+#'
+#'   Naming a component here also selects it, so \code{components} need not
+#'   be given separately.
+#' @param canonical Options for \code{\link{CovCanonicalOptions}}.
+#' @param pca Options for \code{\link{CovPcaOptions}}.
+#' @param flash,flashNonneg Options for \code{\link{CovFlashOptions}}.
+#' @return A \code{MashComponentParam} object, a \code{\link{MethodParam}}.
+#'   \code{names()} lists the components that were named, which is also the
+#'   set that was selected.
+#' @examples
+#' MashComponentParam(
+#'   pca = list(subset = 1:50),
+#'   canonical = CovCanonicalOptions()
+#' )
+#' @export
+MashComponentParam <- function(
+    canonical = NULL,
+    pca = NULL,
+    flash = NULL,
+    flashNonneg = NULL
+) {
+    # discard(is.null), not compact(): compact() also drops zero-length
+    # elements, and an unconfigured constructor is a legitimately empty
+    # record -- naming a component with default options must still select it.
+    given <- discard(
+        list(
+            canonical = canonical,
+            pca = pca,
+            flash = flash,
+            flashNonneg = flashNonneg
+        ),
+        is.null
+    )
+    # One named-list slot rather than one nullable slot per component, so a
+    # record selecting pca shows that and not three NULLs. The formals stay
+    # named, so R still rejects a misspelled component.
+    entries <- .mashComponentEntries(given)
+    new(
+        "MashComponentParam",
+        components = if (length(entries) == 0L) NULL else entries
+    )
+}
+
+# Each entry validated and built the same way: a plain list is spliced into
+# that component's constructor, an already-built record passes through, and
+# one built by the WRONG constructor is refused.
+#
+# There is no "unknown component" check because it cannot fail any more: the
+# four components are now formals, so R rejects a misspelled one as an
+# unused argument before this is reached.
+# @noRd
+.mashComponentEntries <- function(given) {
+    if (length(given) == 0L) {
+        return(list())
+    }
+    ctors <- .mashComponentCtors()
+    .nestedAssertEngines(given, ctors, NULL, "MashComponentParam")
+    imap(given, .nestedElement, ctors = ctors, label = "MashComponentParam")
 }
 
 # Reject unknown prior-covariance component names.
 # @noRd
+# `components` may be a character vector or a MashComponentParam() record.
+# Naming a component in the record selects it, so the two forms carry the
+# same information and the record additionally carries per-component options.
+# @noRd
+.mashResolveComponentChoice <- function(components) {
+    if (is(components, "MashComponentParam")) {
+        entries <- slot(components, "components") %||% list()
+        return(list(names = names(entries), args = entries))
+    }
+    if (!is.character(components)) {
+        abort(glue(
+            "mashPriorCovariances: `components` must be a character vector ",
+            "or a MashComponentParam() record."
+        ))
+    }
+    .mashValidateComponents(components)
+    list(names = components, args = NULL)
+}
+
 .mashValidateComponents <- function(
     components,
     caller = "mashPriorCovariances"
@@ -646,35 +967,28 @@ mashPriorCovariances <- function(
 # @noRd
 .mashRequirePriorPackages <- function() {
     if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
+        abort("Package 'mashr' is required for this function.")
     }
     if (!requireNamespace("flashier", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install flashier: ",
-            "https://github.com/willwerscheid/flashier"
-        )
-        abort(msg)
+        abort("Package 'flashier' is required for this function.")
     }
 }
 
 # mashr mash_set_data over the STRONG effects (V defaults to identity).
 # @noRd
-.mashMakeMashData <- function(partition, label, vhat, alpha, inputScale) {
+.mashMakeMashData <- function(
+    partition,
+    label,
+    vhat,
+    alpha,
+    inputScale,
+    mashDataArgs
+) {
     mats <- .mashSumStatsToMatrices(partition, label, inputScale = inputScale)
     if (is.null(vhat)) {
         vhat <- diag(rep(1, ncol(mats$b)))
     }
-    mashr::mash_set_data(
-        mats$b,
-        Shat = mats$s,
-        V = vhat,
-        alpha,
-        zero_Bhat_Shat_reset = 1000
-    )
+    .mashSetData(mats$b, mats$s, alpha, vhat, mashDataArgs)
 }
 
 # Caller-supplied prior covariance matrices (bypasses the cov_* chain; mashr
@@ -716,20 +1030,37 @@ mashPriorCovariances <- function(
     priorComponents,
     components,
     nPcs,
-    udControl,
-    engine
+    engine,
+    engineArgs = NULL,
+    componentArgs = NULL
 ) {
     comps <- .mashResolveComponents(
         priorComponents,
         mashData,
         components,
-        nPcs
+        nPcs,
+        componentArgs = componentArgs
     )
-    if (engine == "cov_ed") {
-        .mashEngineCovEd(mashData, comps)
+    # Canonical components are fixed structural hypotheses: they go to the
+    # mash fit as they are. Only the data-driven set is refined -- the split
+    # mashr's own eQTL vignette makes.
+    refined <- if (engine == "none" || length(comps$dataDriven) == 0L) {
+        list(U = comps$dataDriven, w = NULL, loglik = NULL)
+    } else if (engine == "covEd") {
+        .mashEngineCovEd(mashData, comps$dataDriven, engineArgs)
     } else {
-        .mashEngineUd(mashData, engine, udControl)
+        .mashEngineUd(
+            mashData,
+            comps$dataDriven,
+            comps$canonical,
+            engineArgs
+        )
     }
+    list(
+        U = c(refined$U, comps$canonical),
+        w = refined$w,
+        loglik = refined$loglik
+    )
 }
 
 # Raw covariance components: caller-supplied `priorComponents` (validated) or
@@ -739,14 +1070,16 @@ mashPriorCovariances <- function(
     priorComponents,
     mashData,
     components,
-    nPcs
+    nPcs,
+    componentArgs = NULL
 ) {
     priorComponents <- .mashAsUlist(priorComponents)
     if (is.null(priorComponents)) {
         return(.mashBuildComponents(
             mashData,
             components = components,
-            nPcs = nPcs
+            nPcs = nPcs,
+            componentArgs = componentArgs
         ))
     }
     if (
@@ -762,181 +1095,62 @@ mashPriorCovariances <- function(
         )
         abort(msg)
     }
-    priorComponents
+    # Caller-supplied components are covariances estimated from data, so they
+    # are the engine's input rather than fixed hypotheses.
+    list(canonical = NULL, dataDriven = priorComponents)
 }
 
-# cov_ed engine: mashr's exported extreme-deconvolution wrapper (default
-# algorithm = bovy) refines the components; mash() (upstream) learns the
-# mixture weights. Returns list(U, w = NULL, loglik = NULL).
+# udr control list for the ud / ud_ted engines: pecotmr's own settings,
+# overlaid with whatever UdFitOptions() carried. No name translation --
+# `fitOpts` is already spelled the way udr spells it, which is the point of
+# splitting ud_init's arguments out of this bundle.
+#
+# `unconstrained.update` is left to udr where udr chooses well, and pinned
+# where it does not. udr defaults it to NA and resolves that in
+# assign_prior_covariance_updates() as
+# `ifelse(is.matrix(fit$V), "ted", "none")`:
+#
+#   z scale (alpha = 1)    fit$V stays a single shared matrix, so udr picks
+#                          TED -- its own and the better estimator. Omit the
+#                          field and let it.
+#   beta scale (alpha = 0) ud_init() expands the shared V into a per-variant
+#                          one, so udr would pick "none" and leave the
+#                          n_unconstrained components .mashEngineUd
+#                          generated at their initialisation -- handing mash
+#                          an unrefined prior with no error. Pin "ed", which
+#                          does not need i.i.d. data.
+#
+# A caller overrides either way through UdFitOptions(), NA included.
 # @noRd
-.mashEngineCovEd <- function(mashData, comps) {
-    U.ed <- mashr::cov_ed(mashData, Ulist_init = comps)
-    list(U = c(comps, U.ed), w = NULL, loglik = NULL)
-}
-
-# udr control list for the ud / ud_ted engines.
-# @noRd
-.mashUdControl <- function(engine, udControl, nCond) {
-    list(
-        unconstrained.update = if (engine == "ud_ted") "ted" else "ed",
+.mashUdControl <- function(fitOpts, nCond, iid) {
+    defaults <- list(
         scaled.update = "fa",
         resid.update = "none",
         lambda = nCond,
         penalty.type = "iw",
-        maxiter = udControl$maxiter,
-        tol = udControl$tol,
-        tol.lik = udControl$tol.lik
+        maxiter = 1000L,
+        tol = 1e-2,
+        tol.lik = 1e-2
     )
-}
-
-# ud_fit with a directed error for the ud_ted / non-i.i.d. (per-variant SE)
-# incompatibility.
-# @noRd
-.mashUdFit <- function(fit0, mashData, engine, udControl) {
-    control <- .mashUdControl(engine, udControl, ncol(mashData$Bhat))
-    tryCatch(
-        udr::ud_fit(fit0, control = control, verbose = FALSE),
-        error = function(e) {
-            if (
-                engine == "ud_ted" && str_detect(conditionMessage(e), "i.i.d")
-            ) {
-                msg <- glue(
-                    "mashPriorCovariances: engine 'ud_ted' (udr TED update) ",
-                    "needs i.i.d. data (a single shared V), which the beta ",
-                    "scale does not provide (per-variant SE). Use engine 'ud' ",
-                    "(ED update), or a z-scale input."
-                )
-                abort(msg)
-            }
-            # Not the ud_ted i.i.d. case rewrapped above -- re-raise the
-            # original condition unchanged so unrelated udr failures surface
-            # (and aren't swallowed as a NULL fit).
-            cnd_signal(e)
-        }
-    )
-}
-
-# ud / ud_ted engine (OPT-IN; udr with known numerical issues). Seeds canonical
-# as the scaled prior and generates n_unconstrained data-driven matrices,
-# returning U + weights + loglik directly. Returns list(U, w, loglik).
-# @noRd
-.mashEngineUd <- function(mashData, engine, udControl) {
-    if (!requireNamespace("udr", quietly = TRUE)) {
-        msg <- glue(
-            "mashPriorCovariances: engine '{engine}' needs the udr package. ",
-            "Install it, or use the default 'cov_ed'."
-        )
-        abort(msg)
+    if (!iid) {
+        defaults$unconstrained.update <- "ed"
     }
-    udControl <- utils::modifyList(
-        list(
-            n_unconstrained = 50L,
-            maxiter = 1000L,
-            tol = 1e-2,
-            tol.lik = 1e-2
-        ),
-        udControl
-    )
-    U.can <- mashr::cov_canonical(mashData)
-    fit0 <- udr::ud_init(
-        mashData,
-        n_unconstrained = udControl$n_unconstrained,
-        U_scaled = U.can
-    )
-    fit <- .mashUdFit(fit0, mashData, engine, udControl)
-    list(U = map(fit$U, "mat"), w = fit$w, loglik = fit$loglik)
+    list_modify(defaults, !!!compact(as.list(fitOpts)))
 }
 
+# One half of a covUdr selection, defaulting to that half's empty bundle:
+# `engine = "covUdr"` as a bare string carries no options at all.
+# @noRd
+.mashUdHalf <- function(engineArgs, key, ctor) {
+    if (is.null(engineArgs)) {
+        return(ctor())
+    }
+    (engineArgs[[key]] %||% ctor())
+}
 
 # =============================================================================
 # Mash model fit + posterior (mash_fit / mash_posterior notebooks)
 # =============================================================================
-
-#' @title Fit a mash Model for Posterior Computation
-#' @description Fit a \pkg{mashr} model on a chosen partition using a supplied
-#'   prior covariance list and residual correlation, returning the fitted model.
-#'   This is the fit step (\code{mash_fit}'s first step): following Urbut et al.
-#'   2019 the mixture weights are learned on the representative \code{"random"}
-#'   partition, and the resulting model is then applied to the strong / target
-#'   set by \code{\link{mashPosterior}}.
-#' @param sumStatsList Named list (or \code{S4Vectors::SimpleList}) of
-#'   \code{\link{QtlSumStats}} / \code{\link{GwasSumStats}}; must contain the
-#'   \code{fitOn} entry.
-#' @param alpha mash \code{alpha} (forwarded to \code{mashr::mash_set_data()}).
-#' @param priorCovariances The prior covariance list (\code{U}) to fit with.
-#'   Either shape the producers return is accepted: a bare named list of
-#'   covariance matrices (\code{\link{mashCovarianceComponents}}) or the
-#'   \code{list(U, w, loglik)} a \code{\link{mashPriorCovariances}} result
-#'   carries, which is unwrapped to its \code{U}.
-#' @param vhat Residual correlation matrix (\code{V}); \code{NULL} -> identity.
-#' @param fitOn Partition to learn the mixture weights on: \code{"random"}
-#'   (default, the standard unbiased choice) or \code{"strong"}.
-#' @param outputLevel \code{mashr::mash()} \code{outputlevel} (default 4 -- the
-#'   full model \code{\link{mashPosterior}} consumes).
-#' @param inputScale SumStats -> matrix conversion scale.
-#' @param setSeed Integer seed, or \code{NULL} to leave the ambient RNG
-#'   untouched.
-#' @return The fitted \pkg{mashr} model (the \code{mashr::mash()} object).
-#' @seealso \code{\link{mashPosterior}}, \code{\link{mashPriorCovariances}}
-#' @examples
-#' data(mashInputExample)
-#' mi <- mashInputExample
-#' mk <- function(b, s) {
-#'   qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
-#'     study = "mash")
-#' }
-#' ssl <- list(strong = mk("strong.b", "strong.s"),
-#'   random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
-#' conds <- colnames(mi$strong.b)
-#' vhat <- diag(length(conds))
-#' dimnames(vhat) <- list(conds, conds)
-#' prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
-#'   components = "canonical")
-#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
-#'   vhat = vhat)
-#' @export
-mashModelFit <- function(
-    sumStatsList,
-    alpha,
-    priorCovariances,
-    vhat = NULL,
-    fitOn = c("random", "strong"),
-    outputLevel = 4L,
-    inputScale = c("auto", "beta", "z"),
-    setSeed = 999
-) {
-    fitOn <- arg_match(fitOn)
-    inputScale <- arg_match(inputScale)
-    if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
-    }
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
-    }
-    priorCovariances <- .mashAsUlist(priorCovariances)
-    .mashValidatePriorCovList(priorCovariances)
-    if (is.null(sumStatsList[[fitOn]])) {
-        msg <- glue(
-            "mashModelFit: `sumStatsList` has no '{fitOn}' entry to fit on."
-        )
-        abort(msg)
-    }
-    if (!is.null(setSeed)) {
-        withr::local_seed(setSeed)
-    }
-    mashData <- .mashMakeMashData(
-        sumStatsList[[fitOn]],
-        fitOn,
-        vhat,
-        alpha,
-        inputScale
-    )
-    mashr::mash(mashData, Ulist = priorCovariances, outputlevel = outputLevel)
-}
 
 # `priorCovariances` must be a non-empty named list of covariance matrices.
 # @noRd
@@ -953,89 +1167,6 @@ mashModelFit <- function(
         )
         abort(msg)
     }
-}
-
-#' @title Compute mash Posterior Matrices for a Target Set
-#' @description Apply a fitted \pkg{mashr} model (from
-#'   \code{\link{mashModelFit}}) to a target SumStats set, returning the
-#'   posterior matrices (\code{PosteriorMean}, \code{PosteriorSD}, \code{lfsr},
-#'   ...). This is the posterior step of the mash workflow -- \code{mash_fit}'s
-#'   second step and \code{mash_posterior}'s per-analysis-unit computation.
-#' @param model A fitted \pkg{mashr} model (the \code{\link{mashModelFit}}
-#'   output).
-#' @param sumStats A single \code{\link{QtlSumStats}} /
-#'   \code{\link{GwasSumStats}} -- the target (e.g. strong) set to compute
-#'   posteriors on.
-#' @param alpha mash \code{alpha} (match the fit).
-#' @param vhat Residual correlation matrix (\code{V}); \code{NULL} -> identity.
-#' @param excludeCondition Character vector of condition (column) names to drop
-#'   from the target AND the model before computing posteriors (the model's
-#'   covariances are resized via \code{\link{updateMashModelCov}}). Default
-#'   none.
-#' @param outputPosteriorCov Return the full posterior covariance array (needed
-#'   by \code{\link{fitMashContrast}}). Default \code{TRUE}.
-#' @param inputScale SumStats -> matrix conversion scale.
-#' @return The \code{mashr::mash_compute_posterior_matrices()} result: a list of
-#'   \code{PosteriorMean} / \code{PosteriorSD} / \code{lfsr} /
-#'   \code{NegativeProb} (+ \code{PosteriorCov} when \code{outputPosteriorCov =
-#'   TRUE}).
-#' @seealso \code{\link{mashModelFit}}, \code{\link{fitMashContrast}}
-#' @examples
-#' data(mashInputExample)
-#' mi <- mashInputExample
-#' mk <- function(b, s) {
-#'   qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
-#'     study = "mash")
-#' }
-#' ssl <- list(strong = mk("strong.b", "strong.s"),
-#'   random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
-#' conds <- colnames(mi$strong.b)
-#' vhat <- diag(length(conds))
-#' dimnames(vhat) <- list(conds, conds)
-#' prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
-#'   components = "canonical")
-#' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
-#'   vhat = vhat)
-#' mashPosterior(model, mk("strong.b", "strong.s"), alpha = 0, vhat = vhat)
-#' @export
-mashPosterior <- function(
-    model,
-    sumStats,
-    alpha,
-    vhat = NULL,
-    excludeCondition = character(0),
-    outputPosteriorCov = TRUE,
-    inputScale = c("auto", "beta", "z")
-) {
-    inputScale <- arg_match(inputScale)
-    if (!requireNamespace("mashr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install mashr: ",
-            "https://cran.r-project.org/web/packages/mashr/index.html"
-        )
-        abort(msg)
-    }
-    mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
-    ex <- .mashExcludeConditions(
-        mats$b,
-        mats$s,
-        vhat,
-        model,
-        as.character(excludeCondition)
-    )
-    vhat <- if (is.null(ex$vhat)) diag(rep(1, ncol(ex$b))) else ex$vhat
-    mashData <- mashr::mash_set_data(
-        ex$b,
-        Shat = ex$s,
-        V = vhat,
-        alpha,
-        zero_Bhat_Shat_reset = 1000
-    )
-    mashr::mash_compute_posterior_matrices(
-        ex$model,
-        mashData,
-        output_posterior_cov = outputPosteriorCov
-    )
 }
 
 # Drop `excludeCondition` columns from the target b/s (positionally, since a
@@ -1088,11 +1219,11 @@ mashPosterior <- function(
 #'   \code{pair[2]}.
 #' @examples
 #' makePairwiseContrastCol(c("a", "b"), "mean_contrast_")
+#' @importFrom checkmate assertCharacter
 #' @export
 makePairwiseContrastCol <- function(pair, template) {
-    template[pair[1]] <- 1
-    template[pair[2]] <- -1
-    template
+    assertCharacter(pair, len = 2L, any.missing = FALSE)
+    replace(template, pair, c(1, -1))
 }
 
 #' Compute pairwise contrasts from mash posterior
@@ -1124,6 +1255,7 @@ makePairwiseContrastCol <- function(pair, template) {
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' fitMashContrast(1L, om, pm, pv)
+#' @importFrom checkmate assertCount assertNumeric
 #' @export
 fitMashContrast <- function(
     index,
@@ -1132,12 +1264,15 @@ fitMashContrast <- function(
     posteriorVcov,
     grouping = NULL
 ) {
-    populationNames <- colnames(posteriorMean)
-    if (!is.null(populationNames)) {
-        populationNames <- str_remove_all(populationNames, "BETA_")
+    assertCount(index, positive = TRUE)
+    assertNumeric(grouping, null.ok = TRUE)
+    rawNames <- colnames(posteriorMean)
+    populationNames <- if (is.null(rawNames)) {
+        NULL
+    } else {
+        str_remove_all(rawNames, "BETA_")
     }
-    origMeanVector <- origMean[index, ]
-    names(origMeanVector) <- populationNames
+    origMeanVector <- set_names(origMean[index, ], populationNames)
     tested <- names(origMeanVector[origMeanVector != 0])
     if (length(tested) < 2) {
         return(NULL)
@@ -1171,10 +1306,9 @@ fitMashContrast <- function(
 .mashContrastDesign <- function(tested, nPop, grouping) {
     pairwiseVector <- set_names(rep(0, nPop), tested)
     if (nPop <= 2) {
-        pairwiseVector[tested[1]] <- 1
-        pairwiseVector[tested[2]] <- -1
+        contrast <- replace(pairwiseVector, tested[1:2], c(1, -1))
         return(matrix(
-            pairwiseVector,
+            contrast,
             ncol = 1,
             dimnames = list(tested, str_c(tested[1], "_vs_", tested[2]))
         ))
@@ -1188,43 +1322,82 @@ fitMashContrast <- function(
 # conditions sharing their deviation weight.
 # @noRd
 .mashDeviationContrast <- function(tested, nPop, grouping) {
-    dev <- matrix(-1, nPop, nPop, dimnames = list(tested, tested))
-    diag(dev) <- nPop - 1
-    uniqueGroups <- unique(grouping)
-    for (grp in uniqueGroups[uniqueGroups > 0]) {
-        grpMask <- grouping == grp
-        grpSize <- sum(grpMask)
-        diag(dev)[grpMask] <- (nPop - 1) / grpSize
-        dev[grpMask, grpMask] <- (nPop - 1) / grpSize
-    }
-    colnames(dev) <- str_c(tested, "_deviation")
-    dev
+    # Three cases, stated directly: conditions sharing a group split the
+    # deviation weight between them, the diagonal carries the full weight,
+    # and everything else contributes -1.
+    sameAll <- outer(grouping, grouping, "==")
+    # Group sizes are counted off `sameAll`, not looked up in
+    # table(grouping) by as.character(grouping): that round-tripped every
+    # grouping code through its string form to find its own count.
+    groupSize <- as.integer(colSums(sameAll))
+    sameGroup <- sameAll & matrix(grouping > 0, nPop, nPop)
+    matrix(
+        ifelse(
+            sameGroup,
+            matrix((nPop - 1) / groupSize, nPop, nPop),
+            ifelse(diag(TRUE, nPop), nPop - 1, -1)
+        ),
+        nPop,
+        nPop,
+        dimnames = list(tested, str_c(tested, "_deviation"))
+    )
 }
 
 # Pairwise (all-pairs) contrasts, with grouped conditions' contributions split
 # evenly across the group.
 # @noRd
+# One grouped condition's share of a pairwise column: the group's matched
+# contribution split evenly across its members.
+# @noRd
+.mashSplitGroupShare <- function(column, dg, grouping, groups, pwCol) {
+    rowsInGroup <- names(grouping[grouping == dg])
+    matchedRow <- rowsInGroup[is_in(rowsInGroup, groups)]
+    if (length(matchedRow) == 0) {
+        return(column)
+    }
+    replace(column, rowsInGroup, pwCol[matchedRow] / length(rowsInGroup))
+}
+
+# One pairwise column, with each grouped condition's contribution split
+# across its group. A column whose two sides share a grouping (or that
+# involves no grouped condition) is left as it is.
+# @noRd
+.mashAdjustPairwiseColumn <- function(col, pw, grouping) {
+    column <- pw[, col]
+    groups <- str_split(col, "_vs_")[[1]]
+    groupValues <- grouping[is_in(names(grouping), groups)]
+    relevant <- names(groupValues[groupValues > 0])
+    if (n_distinct(groupValues) <= 1 || length(relevant) == 0) {
+        return(column)
+    }
+    reduce(
+        unique(groupValues[groupValues > 0]),
+        .mashSplitGroupShare,
+        grouping = grouping,
+        groups = groups,
+        pwCol = column,
+        .init = column
+    )
+}
+
 .mashPairwiseContrast <- function(tested, grouping, pairwiseVector) {
     twoCombn <- combn(tested, 2)
     pwNames <- apply(twoCombn, 2, str_flatten, collapse = "_vs_")
-    pw <- apply(twoCombn, 2, makePairwiseContrastCol, pairwiseVector)
-    colnames(pw) <- pwNames
-    pwAdj <- pw
-    for (col in colnames(pw)) {
-        groups <- str_split(col, "_vs_")[[1]]
-        groupValues <- grouping[is_in(names(grouping), groups)]
-        relevant <- names(groupValues[groupValues > 0])
-        if (n_distinct(groupValues) > 1 && length(relevant) > 0) {
-            for (dg in unique(groupValues[groupValues > 0])) {
-                rowsInGroup <- names(grouping[grouping == dg])
-                matchedRow <- rowsInGroup[is_in(rowsInGroup, groups)]
-                if (length(matchedRow) > 0) {
-                    pwAdj[rowsInGroup, col] <- pw[matchedRow, col] /
-                        length(rowsInGroup)
-                }
-            }
-        }
-    }
+    pw <- `colnames<-`(
+        apply(twoCombn, 2, makePairwiseContrastCol, pairwiseVector),
+        pwNames
+    )
+    pwAdj <- matrix(
+        unname(list_c(map(
+            colnames(pw),
+            .mashAdjustPairwiseColumn,
+            pw = pw,
+            grouping = grouping
+        ))),
+        nrow = nrow(pw),
+        ncol = ncol(pw),
+        dimnames = dimnames(pw)
+    )
     pwAdj
 }
 
@@ -1238,19 +1411,38 @@ fitMashContrast <- function(
     contrastSe,
     contrastP
 ) {
-    fid <- rownames(posteriorMean)[index]
-    if (is.null(fid)) {
-        fid <- as.character(index)
-    }
-    df <- tibble(feature_id = fid)
+    fid <- rownames(posteriorMean)[index] %||% as.character(index)
     # unname: contrast* carry contrastDesign colnames; tibble (unlike
-    # data.frame) preserves a named scalar's name on the column.
-    for (i in seq_along(cnames)) {
-        df[[str_c("mean_contrast_", cnames[i])]] <- unname(contrastDiff[i])
-        df[[str_c("se_contrast_", cnames[i])]] <- unname(contrastSe[i])
-        df[[str_c("p_contrast_", cnames[i])]] <- unname(contrastP[i])
-    }
-    df
+    # data.frame) preserves a named scalar's name on the column. Columns are
+    # interleaved mean/se/p per contrast, which is the order the loop built.
+    cols <- list_c(map(
+        seq_along(cnames),
+        .mashContrastColumns,
+        cnames = cnames,
+        contrastDiff = contrastDiff,
+        contrastSe = contrastSe,
+        contrastP = contrastP
+    ))
+    tibble(feature_id = fid, !!!cols)
+}
+
+# One contrast's three columns, named for it.
+# @noRd
+.mashContrastColumns <- function(
+    i,
+    cnames,
+    contrastDiff,
+    contrastSe,
+    contrastP
+) {
+    set_names(
+        list(
+            unname(contrastDiff[i]),
+            unname(contrastSe[i]),
+            unname(contrastP[i])
+        ),
+        str_c(c("mean_contrast_", "se_contrast_", "p_contrast_"), cnames[i])
+    )
 }
 
 #' Posterior contrast table over an entire mash posterior
@@ -1287,6 +1479,7 @@ fitMashContrast <- function(
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' mashPosteriorContrast(pm, pv, om)
+#' @importFrom checkmate assertNumeric
 #' @export
 mashPosteriorContrast <- function(
     posteriorMean,
@@ -1294,18 +1487,18 @@ mashPosteriorContrast <- function(
     origMean,
     grouping = NULL
 ) {
-    origMean <- origMean[, colnames(posteriorMean), drop = FALSE]
-    origMean[is.nan(origMean)] <- 0
+    assertNumeric(grouping, null.ok = TRUE)
+    aligned <- origMean[, colnames(posteriorMean), drop = FALSE]
+    origMean <- replace(aligned, is.nan(aligned), 0)
 
-    parts <- map(
+    parts <- compact(map(
         seq_len(nrow(posteriorMean)),
         fitMashContrast,
         origMean = origMean,
         posteriorMean = posteriorMean,
         posteriorVcov = posteriorVcov,
         grouping = grouping
-    )
-    parts <- compact(parts)
+    ))
     if (length(parts) == 0L) {
         return(tibble())
     }
@@ -1358,51 +1551,76 @@ mashPosteriorContrast <- function(
 #' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
 #' updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
+#' @importFrom checkmate assertCharacter
 #' @export
 updateMashModelCov <- function(mashModel, allSamples, samples) {
-    cov <- mashModel$fitted_g$Ulist
-
-    # Remove matrices for dropped conditions
+    assertCharacter(allSamples, any.missing = FALSE)
+    assertCharacter(samples, any.missing = FALSE)
     unwanted <- setdiff(allSamples, samples)
-    for (d in names(cov)) {
-        if (is_in(d, unwanted) || is_in(d, str_c("ED_", unwanted))) {
-            cov[[d]] <- NULL
-        }
+    cov <- mashModel$fitted_g$Ulist
+    retained <- discard(names(cov), .mashCovIsDropped, unwanted = unwanted)
+    resized <- set_names(
+        map(retained, .mashResizeCov, cov = cov, samples = samples),
+        retained
+    )
+    keptPi <- discard(
+        names(mashModel$fitted_g$pi),
+        .mashPiMentionsDropped,
+        unwanted = unwanted
+    )
+    list_assign(
+        mashModel,
+        fitted_g = list_assign(
+            mashModel$fitted_g,
+            Ulist = resized,
+            pi = mashModel$fitted_g$pi[keptPi]
+        )
+    )
+}
+
+# A covariance component belongs to a dropped condition, under either its
+# bare name or its ED_ prefixed one.
+# @noRd
+.mashCovIsDropped <- function(d, unwanted) {
+    is_in(d, unwanted) || is_in(d, str_c("ED_", unwanted))
+}
+
+# A mixture-weight name mentioning any dropped condition.
+# @noRd
+.mashPiMentionsDropped <- function(nm, unwanted) {
+    any(map_lgl(unwanted, .mashNameMentions, nm = nm))
+}
+
+# @noRd
+.mashNameMentions <- function(s, nm) {
+    str_detect(nm, fixed(s))
+}
+
+# One covariance component resized to the retained conditions. A
+# condition-specific component is a single 1 on its own diagonal entry;
+# `identity` is a single 1 in the first cell; anything else is subset by
+# name when it has one, else positionally.
+# @noRd
+.mashResizeCov <- function(d, cov, samples) {
+    n <- length(samples)
+    if (is_in(d, samples)) {
+        at <- which(samples == d)
+        return(replace(matrix(0, n, n), (at - 1L) * n + at, 1))
     }
-
-    # Resize remaining matrices to match retained conditions
-    for (d in names(cov)) {
-        if (is_in(d, samples)) {
-            # Condition-specific: single 1 on diagonal
-            m <- matrix(0, length(samples), length(samples))
-            m[which(samples == d), which(samples == d)] <- 1
-            cov[[d]] <- m
-        } else if (d == "identity") {
-            m <- matrix(0, length(samples), length(samples))
-            m[1, 1] <- 1
-            cov[[d]] <- m
-        } else if (is.null(colnames(cov[[d]]))) {
-            cov[[d]] <- cov[[d]][
-                seq_along(samples),
-                seq_along(samples)
-            ]
-        } else {
-            cov[[d]] <- cov[[d]][samples, samples]
-        }
-        cov[[d]] <- as.matrix(cov[[d]])
+    if (d == "identity") {
+        return(replace(matrix(0, n, n), 1L, 1))
     }
-
-    mashModel$fitted_g$Ulist <- cov
-
-    # Prune mixture weights for removed conditions
-    for (s in unwanted) {
-        dropIdx <- which(str_detect(names(mashModel$fitted_g$pi), fixed(s)))
-        if (length(dropIdx) > 0) {
-            mashModel$fitted_g$pi <- mashModel$fitted_g$pi[-dropIdx]
-        }
+    if (is.null(colnames(cov[[d]]))) {
+        return(as.matrix(cov[[d]][seq_along(samples), seq_along(samples)]))
     }
+    as.matrix(cov[[d]][samples, samples])
+}
 
-    mashModel
+# One matrix sliced to (snps, samples), relabelled with the retained
+# condition names. `snps` / `samples` are subscripts, so NULL is meaningful.
+# @noRd
+.mashSliceMatrix <- function(m, rows, cols) {
+    `colnames<-`(as.matrix(m[rows, cols]), cols)
 }
 
 #' Subset mash data matrices to specific SNPs and conditions
@@ -1430,17 +1648,22 @@ updateMashModelCov <- function(mashModel, allSamples, samples) {
 #' vhat <- diag(3)
 #' dimnames(vhat) <- list(cond, cond)
 #' sliceMashData(dat, vhat = vhat, snps = 1:4, samples = NULL)
+#' @importFrom checkmate assertList assertCharacter
 #' @export
 sliceMashData <- function(data, vhat, snps, samples) {
-    data$bhat <- as.matrix(data$bhat[snps, samples])
-    data$sbhat <- as.matrix(data$sbhat[snps, samples])
-    data$Z <- as.matrix(data$Z[snps, samples])
-    vhat <- as.matrix(vhat[samples, samples])
-    data$snp <- data$snp[is_in(data$snp, snps)]
-    colnames(data$bhat) <- colnames(data$sbhat) <- colnames(data$Z) <- colnames(
-        vhat
-    ) <- samples
-    list(data = data, vhat = vhat)
+    assertList(data)
+    # `snps` and `samples` are SUBSCRIPTS -- `data$bhat[snps, samples]` -- so
+    # character names, integer indices and NULL are all valid. No type
+    # assertion is correct here (the @example passes snps = 1:4 and
+    # samples = NULL).
+    sliced <- list_assign(
+        data,
+        bhat = .mashSliceMatrix(data$bhat, snps, samples),
+        sbhat = .mashSliceMatrix(data$sbhat, snps, samples),
+        Z = .mashSliceMatrix(data$Z, snps, samples),
+        snp = data$snp[is_in(data$snp, snps)]
+    )
+    list(data = sliced, vhat = .mashSliceMatrix(vhat, samples, samples))
 }
 
 #' Sanitize NaN/Inf values in mash data
@@ -1452,11 +1675,19 @@ sliceMashData <- function(data, vhat, snps, samples) {
 #' @return The data list with sanitized values.
 #' @examples
 #' sanitizeMashData(list(strong = list(z = matrix(rnorm(9), 3, 3))))
+#' @importFrom checkmate assertList
 #' @export
 sanitizeMashData <- function(data) {
-    data$bhat[is.nan(data$bhat)] <- 0
-    data$sbhat[is.nan(data$sbhat) | is.infinite(data$sbhat)] <- 1e3
-    data
+    assertList(data)
+    list_assign(
+        data,
+        bhat = replace(data$bhat, is.nan(data$bhat), 0),
+        sbhat = replace(
+            data$sbhat,
+            is.nan(data$sbhat) | is.infinite(data$sbhat),
+            1e3
+        )
+    )
 }
 
 #' Random-Effects Meta-Analysis of Mash Pairwise Contrasts, per Condition
@@ -1479,6 +1710,9 @@ sanitizeMashData <- function(data) {
 #'   meta-analysis, forwarded to \code{metafor::rma(method = )}. Default
 #'   \code{"DL"} (DerSimonian-Laird); other options include \code{"REML"},
 #'   \code{"ML"}, \code{"EB"}.
+#' @param metaArgs Extra arguments for \code{metafor::rma()}, built with
+#'   \code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
+#'   small-study correction.
 #' @return A tibble with columns:
 #'   \describe{
 #'     \item{condition}{The condition (context) name.}
@@ -1502,8 +1736,10 @@ metaAnalysisPerCondition <- function(
     effectSizes,
     seValues,
     seCutoff = 0,
-    metaMethod = "DL"
+    metaMethod = "DL",
+    metaArgs = RmaOptions()
 ) {
+    .assertMethodOptions(metaArgs, "RmaOptions", "metaArgs")
     stopifnot(identical(dim(effectSizes), dim(seValues)))
     stopifnot(identical(colnames(effectSizes), colnames(seValues)))
     contrasts <- str_remove(colnames(effectSizes), "^mean_contrast_")
@@ -1518,7 +1754,8 @@ metaAnalysisPerCondition <- function(
         seValues = seValues,
         contrasts = contrasts,
         seCutoff = seCutoff,
-        metaMethod = metaMethod
+        metaMethod = metaMethod,
+        metaArgs = metaArgs
     ))
     bind_rows(rows)
 }
@@ -1531,7 +1768,8 @@ metaAnalysisPerCondition <- function(
     seValues,
     contrasts,
     seCutoff,
-    metaMethod
+    metaMethod,
+    metaArgs = list()
 ) {
     idx <- which(str_detect(colnames(effectSizes), condition))
     if (length(idx) == 0) {
@@ -1548,7 +1786,8 @@ metaAnalysisPerCondition <- function(
         condEffects = condEffects,
         condSes = condSes,
         seCutoff = seCutoff,
-        metaMethod = metaMethod
+        metaMethod = metaMethod,
+        metaArgs = metaArgs
     )
 }
 
@@ -1562,7 +1801,8 @@ metaAnalysisPerCondition <- function(
     es,
     se,
     seCutoff,
-    metaMethod
+    metaMethod,
+    metaArgs = list()
 ) {
     keep <- se > seCutoff & is.finite(es) & is.finite(se)
     es <- es[keep]
@@ -1582,7 +1822,7 @@ metaAnalysisPerCondition <- function(
             I2 = NA_real_
         ))
     }
-    ma <- .rmaMeta(es, se, method = metaMethod)
+    ma <- .rmaMeta(es, se, method = metaMethod, metaArgs = metaArgs)
     tibble(
         condition = condition,
         contrast = contrast,
@@ -1607,6 +1847,9 @@ metaAnalysisPerCondition <- function(
 #'   columns.
 #' @param metaMethod Between-study variance estimator forwarded to
 #'   \code{metafor::rma} (default \code{"REML"}).
+#' @param metaArgs Extra arguments for \code{metafor::rma()}, built with
+#'   \code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
+#'   small-study correction.
 #' @return A \code{data.frame} with \code{condition} and \code{zScore}.
 #' @seealso \code{\link{nSignificantScore}}, \code{\link{scoreFromCs}}
 #' @examples
@@ -1618,8 +1861,15 @@ metaAnalysisPerCondition <- function(
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
 #' calculateFeatureScores(cr, metaMethod = "mean")
+#' @importFrom checkmate assertString
 #' @export
-calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
+calculateFeatureScores <- function(
+    contrastResult,
+    metaMethod = "REML",
+    metaArgs = RmaOptions()
+) {
+    assertString(metaMethod)
+    .assertMethodOptions(metaArgs, "RmaOptions", "metaArgs")
     cr <- as_tibble(contrastResult)
     effCols <- names(cr)[str_detect(names(cr), "mean_contrast_.*deviation")]
     if (length(effCols) == 0L) {
@@ -1629,7 +1879,8 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
         effCols,
         .metaContrastZScore,
         cr = cr,
-        metaMethod = metaMethod
+        metaMethod = metaMethod,
+        metaArgs = metaArgs
     )
     tibble(
         condition = str_remove(
@@ -1661,8 +1912,10 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
 #' nSignificantScore(cr, pCutoff = 0.05)
+#' @importFrom checkmate assertNumber
 #' @export
 nSignificantScore <- function(contrastResult, pCutoff = 1e-5) {
+    assertNumber(pCutoff, lower = 0, upper = 1)
     cr <- as_tibble(contrastResult)
     pCols <- names(cr)[str_detect(names(cr), "p_contrast_.*deviation")]
     if (length(pCols) == 0L) {
@@ -1713,8 +1966,8 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
         return(NA_real_)
     }
     leadRows <- bind_rows(map(css, .csLeadRow, fineMapping = fineMapping))
-    cr <- as_tibble(contrastResults)
-    cr <- filter(cr, is_in(.data$feature_id, leadRows$variants))
+    cr <- as_tibble(contrastResults) |>
+        filter(is_in(.data$feature_id, leadRows$variants))
     if (nrow(cr) == 0L) {
         return(NA_real_)
     }
@@ -1757,7 +2010,8 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
     condEffects,
     condSes,
     seCutoff,
-    metaMethod
+    metaMethod,
+    metaArgs = list()
 ) {
     .metaOneContrast(
         condition,
@@ -1765,26 +2019,27 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
         abs(as.numeric(condEffects[, i])),
         as.numeric(condSes[, i]),
         seCutoff,
-        metaMethod
+        metaMethod,
+        metaArgs
     )
 }
 
 # Meta-analysis z-score (mean/se) for one mean-contrast column, NA when empty.
 # @noRd
-.metaContrastZScore <- function(ec, cr, metaMethod) {
+.metaContrastZScore <- function(ec, cr, metaMethod, metaArgs = list()) {
     seCol <- str_replace(ec, "^mean_contrast", "se_contrast")
     if (!is_in(seCol, names(cr))) {
         return(NA_real_)
     }
-    es <- abs(as.numeric(cr[[ec]]))
-    se <- as.numeric(cr[[seCol]])
-    keep <- is.finite(es) & is.finite(se) & se > 0
-    es <- es[keep]
-    se <- se[keep]
+    esAll <- abs(as.numeric(cr[[ec]]))
+    seAll <- as.numeric(cr[[seCol]])
+    keep <- is.finite(esAll) & is.finite(seAll) & seAll > 0
+    es <- esAll[keep]
+    se <- seAll[keep]
     if (length(es) < 1L) {
         return(NA_real_)
     }
-    ma <- .rmaMeta(es, se, method = metaMethod)
+    ma <- .rmaMeta(es, se, method = metaMethod, metaArgs = metaArgs)
     ma$mean / ma$se
 }
 
@@ -1801,4 +2056,1592 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
 .csLeadRow <- function(cs, fineMapping) {
     tmp <- filter(fineMapping, .data$cs_order == cs)
     filter(tmp, .data$pip == max(.data$pip))
+}
+
+
+# =============================================================================
+# Input preparation
+# -----------------------------------------------------------------------------
+# Assembling and filtering the matrices mash is fitted on. This is a
+# preparatory step of the pipeline, not an engine interface -- nothing here
+# calls mashr; the engine calls live in mashWrapper.R.
+# =============================================================================
+
+# Filter rows of a z-score matrix by significance p-value cutoff.
+# Returns integer indices of rows where any |z| exceeds the threshold.
+# @noRd
+filterBySignificance <- function(zMatrix, sigPCutoff) {
+    zThreshold <- sqrt(stats::qchisq(sigPCutoff, df = 1, lower.tail = FALSE))
+    which(apply(zMatrix, 1, .mashRowExceeds, zThreshold = zThreshold))
+}
+
+# Coerce to a numeric matrix and replace every NaN / Inf / NA cell with
+# `replaceWith`. Accepts a data.frame or a matrix and always returns a matrix:
+# mash operates on matrices, so the cleaning is a direct matrix op rather than a
+# data.frame round-trip.
+# @noRd
+.mashReplaceValues <- function(x, replaceWith) {
+    m <- `storage.mode<-`(as.matrix(x), "double")
+    replace(m, is.nan(m) | is.infinite(m) | is.na(m), replaceWith)
+}
+
+# Coerce z-scores to a matrix (NaN/Inf/NA -> 0) and, when a missing-rate
+# threshold is given, drop rows falling below it.
+# @noRd
+.mashProcessZ <- function(zData, filterByMissingRate) {
+    cleaned <- .mashReplaceValues(zData, 0)
+    if (is.null(filterByMissingRate)) {
+        return(cleaned)
+    }
+    proportionNonzero <- apply(cleaned, 1, .mashRowNonzeroRate)
+    cleaned[proportionNonzero >= filterByMissingRate, , drop = FALSE]
+}
+
+#' Filter invalid summary statistics for mash input
+#'
+#' Assemble and clean a per-condition effect-size / z-score matrix for
+#' \code{mashr}, dropping variants with invalid or insufficiently-observed
+#' statistics.
+#'
+#' @param datList A named list of summary-statistic data frames / matrices.
+#' @param bhat Optional name of the effect-size element in \code{datList}.
+#' @param sbhat Optional name of the standard-error element in \code{datList}.
+#' @param z Optional name of the z-score element in \code{datList}.
+#' @param btoz Logical. If \code{TRUE}, derive z-scores from
+#'   \code{bhat}/\code{sbhat}.
+#' @param sigPCutoff Numeric. Significance p-value cutoff for selecting strong
+#'   signals. Default \code{1e-6}.
+#' @param filterByMissingRate Numeric in [0, 1]. Drop variants observed in fewer
+#'   than this fraction of conditions. Default \code{0.2}.
+#' @return A cleaned list of summary-statistic matrices suitable for mash.
+#' @importFrom vroom vroom
+#' @examples
+#' datList <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
+#' filterInvalidSummaryStat(datList)
+#' @export
+#' @importFrom checkmate assertFlag assertList assertNumber
+filterInvalidSummaryStat <- function(
+    datList,
+    bhat = NULL,
+    sbhat = NULL,
+    z = NULL,
+    btoz = FALSE,
+    sigPCutoff = 1E-6,
+    filterByMissingRate = 0.2
+) {
+    assertList(datList)
+    assertFlag(btoz)
+    # NULL is how callers disable each filter.
+    assertNumber(sigPCutoff, lower = 0, upper = 1, null.ok = TRUE)
+    assertNumber(
+        filterByMissingRate,
+        lower = 0,
+        upper = 1,
+        null.ok = TRUE
+    )
+    reset <- if (
+        !is.null(bhat) &&
+            !is.null(sbhat) &&
+            all(is_in(c(bhat, sbhat), names(datList)))
+    ) {
+        .mashFilterBhatSbhat(datList, bhat, sbhat, filterByMissingRate)
+    } else {
+        datList
+    }
+    withZ <- if (btoz) {
+        .mashFilterBtoz(reset, bhat, sbhat, sigPCutoff)
+    } else {
+        reset
+    }
+    if (is.null(z)) {
+        return(withZ)
+    }
+    .mashFilterZ(withZ, filterByMissingRate, sigPCutoff)
+}
+
+# Reset invalid bhat/sbhat cells (bhat -> 0, sbhat -> 1000) and, when a
+# null/random partition is present, drop variants below `filterByMissingRate`
+# non-missing.
+# @noRd
+.mashFilterBhatSbhat <- function(datList, bhat, sbhat, filterByMissingRate) {
+    if (is.null(datList[[bhat]]) || is.null(datList[[sbhat]])) {
+        return(datList)
+    }
+    reset <- list_assign(
+        datList,
+        !!!set_names(
+            list(
+                .mashReplaceValues(datList[[bhat]], 0),
+                .mashReplaceValues(datList[[sbhat]], 1000)
+            ),
+            c(bhat, sbhat)
+        )
+    )
+    hasNullOrRandom <- is_in("null.b", names(reset)) ||
+        is_in("random.b", names(reset))
+    if (!hasNullOrRandom || is.null(filterByMissingRate)) {
+        return(reset)
+    }
+    proportionNonzero <- apply(reset[[bhat]], 1, .mashRowNonzeroRate)
+    keep <- proportionNonzero >= filterByMissingRate
+    list_assign(
+        reset,
+        !!!set_names(
+            # `drop = FALSE`: one surviving variant would collapse these
+            # to vectors, and they go back into the mash data list where
+            # mashr expects an N x R matrix.
+            list(
+                reset[[bhat]][keep, , drop = FALSE],
+                reset[[sbhat]][keep, , drop = FALSE]
+            ),
+            c(bhat, sbhat)
+        )
+    )
+}
+
+# Derive z = bhat / sbhat (into a `<condition>.z` or `z` slot) and apply the
+# significance cutoff to strong signals.
+# @noRd
+.mashFilterBtoz <- function(datList, bhat, sbhat, sigPCutoff) {
+    perCondition <- any(str_detect(bhat, "\\.b$")) ||
+        any(str_detect(sbhat, "\\.s$"))
+    zName <- if (perCondition) {
+        str_c(str_remove(bhat, "\\.b$"), ".z")
+    } else {
+        "z"
+    }
+    # list(NULL) not NULL: the z slot must EXIST and be empty, where assigning
+    # NULL would delete it.
+    zValue <- if (!is.null(datList[[bhat]]) && !is.null(datList[[sbhat]])) {
+        list(as.matrix(datList[[bhat]] / datList[[sbhat]]))
+    } else {
+        list(NULL)
+    }
+    withZ <- list_assign(datList, !!!set_names(zValue, zName))
+    if (!is_in("strong.z", names(withZ)) || is.null(sigPCutoff)) {
+        return(withZ)
+    }
+    keepIndex <- filterBySignificance(withZ$strong.z, sigPCutoff)
+    list_assign(
+        withZ,
+        # `drop = FALSE`: exactly one significant variant is a common
+        # outcome, and a vector here would reach mashr as the strong set.
+        strong.z = withZ$strong.z[keepIndex, , drop = FALSE],
+        strong.b = withZ$strong.b[keepIndex, , drop = FALSE],
+        strong.s = withZ$strong.s[keepIndex, , drop = FALSE]
+    )
+}
+
+# Process each partition's z-matrix (missing-rate filter) and apply the
+# significance cutoff to strong z-scores.
+# @noRd
+.mashFilterZ <- function(datList, filterByMissingRate, sigPCutoff) {
+    # Only partitions that are present and carry a z get rewritten:
+    # `list_assign()` would otherwise CREATE an absent component as NULL.
+    components <- keep(
+        intersect(c("strong", "random", "null"), names(datList)),
+        .mashPartitionHasZ,
+        datList = datList
+    )
+    processed <- if (length(components) == 0L) {
+        datList
+    } else {
+        list_assign(
+            datList,
+            !!!set_names(
+                map(
+                    components,
+                    .mashProcessPartition,
+                    datList = datList,
+                    filterByMissingRate = filterByMissingRate
+                ),
+                components
+            )
+        )
+    }
+    if (
+        is.null(processed$strong) ||
+            is.null(processed$strong$z) ||
+            is.null(sigPCutoff)
+    ) {
+        return(processed)
+    }
+    keepIndex <- filterBySignificance(processed$strong$z, sigPCutoff)
+    list_assign(
+        processed,
+        strong = list_assign(
+            processed$strong,
+            z = processed$strong$z[keepIndex, , drop = FALSE]
+        )
+    )
+}
+
+# @noRd
+.mashPartitionHasZ <- function(comp, datList) {
+    !is.null(datList[[comp]]) && !is.null(datList[[comp]]$z)
+}
+
+# One partition with its z-matrix missing-rate filtered.
+# @noRd
+.mashProcessPartition <- function(comp, datList, filterByMissingRate) {
+    part <- datList[[comp]]
+    list_assign(part, z = .mashProcessZ(part$z, filterByMissingRate))
+}
+
+#' Filter conditions from mash prior mixture components
+#'
+#' Drop the conditions not in \code{conditionsToKeep} from each prior covariance
+#' matrix in \code{U}, optionally removing components whose weight is below
+#' \code{wCutoff}.
+#'
+#' @param conditionsToKeep Character vector of condition names to retain.
+#' @param U Named list of prior covariance matrices (one per mixture component).
+#' @param w Optional numeric vector of mixture weights aligned to \code{U}.
+#' @param wCutoff Numeric. Drop components with weight below this. Default
+#'   \code{1e-4}.
+#' @return A list with the filtered \code{U} (and \code{w} when supplied).
+#' @importFrom purrr keep
+#' @examples
+#' conditionsToKeep <- c("cond1", "cond2")
+#' cn <- c("cond1", "cond2", "cond3")
+#' U <- list(shared = diag(3), corr = matrix(0.3, 3, 3) + diag(0.7, 3))
+#' U <- lapply(U, function(m) {
+#'   dimnames(m) <- list(cn, cn)
+#'   m
+#' })
+#' filterMixtureComponents(conditionsToKeep = conditionsToKeep, U = U)
+#' @export
+#' @importFrom checkmate assertCharacter assertNumber
+filterMixtureComponents <- function(
+    conditionsToKeep,
+    U,
+    w = NULL,
+    wCutoff = 1e-04
+) {
+    assertCharacter(conditionsToKeep, any.missing = FALSE)
+    assertNumber(wCutoff, lower = 0, finite = TRUE)
+    conditionsToFilter <- setdiff(colnames(U[[1]]), conditionsToKeep)
+    sumW <- sum(w)
+    subsetU <- .mashSubsetU(U, conditionsToKeep)
+    # Drop all-zero matrices, then those below the weight cutoff.
+    nonzero <- names(keep(subsetU, .mashMatrixNonzero))
+    keepNames <- if (is.null(w)) {
+        nonzero
+    } else {
+        intersect(nonzero, names(w[w >= wCutoff]))
+    }
+    # Also drop the U components driven by non-relevant contexts: the EM can
+    # leave tiny non-zero diagonals, so all-zero removal alone won't drop them,
+    # yet real diagonal signal must be kept.
+    keptU <- subsetU[setdiff(keepNames, conditionsToFilter)]
+    keptW <- w[keepNames]
+    survivors <- keptW[!is_in(names(keptW), conditionsToFilter)]
+    # Rescale the surviving weights back to the original total.
+    rescaled <- (survivors / sum(survivors)) * sumW
+    msg <- glue(
+        "{length(keptU)} components of matrices remained after filtering."
+    )
+    inform(msg)
+    list(U = keptU, w = rescaled)
+}
+
+# Subset every U matrix to the kept conditions (erroring if a matrix lacks one).
+# @noRd
+.mashSubsetU <- function(U, conditionsToKeep) {
+    map(U, .mashSubsetMatrix, conditionsToKeep = conditionsToKeep)
+}
+
+
+# Draw the random + null sub-samples used to estimate the null correlation.
+# @noRd
+.mashExtractOneData <- function(dat, nRandom, nNull) {
+    if (is.null(dat)) {
+        return(NULL)
+    }
+    if (is_in("z", names(dat))) {
+        absZ <- abs(dat$z)
+        zData <- dat$z
+    } else {
+        absZ <- abs(dat$bhat / dat$sbhat)
+        zData <- NULL
+    }
+    random <- .mashSampleSubset(dat, zData, seq_len(nrow(absZ)), nRandom)
+    null <- .mashSampleNull(dat, zData, absZ, nNull)
+    list(random = random, null = null)
+}
+
+# Sample up to `n` rows from `poolIdx` and return them as a z (or bhat/sbhat)
+# list, matching the source scale.
+# @noRd
+.mashSampleSubset <- function(dat, zData, poolIdx, n) {
+    idx <- sample(poolIdx, min(n, length(poolIdx)), replace = FALSE)
+    if (!is.null(zData)) {
+        list(z = zData[idx, , drop = FALSE])
+    } else {
+        list(
+            bhat = dat$bhat[idx, , drop = FALSE],
+            sbhat = dat$sbhat[idx, , drop = FALSE]
+        )
+    }
+}
+
+# Null subset: variants with max|z| < 2. Empty (with a warning) when there are
+# none, or too few to estimate the null correlation.
+# @noRd
+.mashSampleNull <- function(dat, zData, absZ, nNull) {
+    nullId <- which(apply(absZ, 1, max) < 2)
+    if (length(nullId) == 0) {
+        msg <- glue(
+            "no variants are included in the null dataset because absZ > 2 ",
+            "for all variants in {dat$region %||% ''}"
+        )
+        warn(msg)
+        return(list())
+    }
+    if (length(nullId) < ncol(absZ)) {
+        msg <- glue(
+            "not enough null data to estimate null correlation in ",
+            "{dat$region %||% ''}"
+        )
+        warn(msg)
+        return(list())
+    }
+    .mashSampleSubset(dat, zData, nullId, nNull)
+}
+
+#' Sample random and null variant subsets for mash
+#'
+#' Draw a random subset and a null (non-significant) subset of rows from a mash
+#' data list, used to fit the mash prior and estimate the null correlation.
+#'
+#' @param dat A mash data list with \code{random} and \code{null} components.
+#' @param nRandom Integer. Number of random rows to sample.
+#' @param nNull Integer. Number of null rows to sample.
+#' @param excludeCondition Optional character vector of conditions to exclude.
+#' @param seed Optional integer random seed; \code{NULL} leaves the RNG
+#'   unchanged.
+#' @return A list with sampled \code{random} and \code{null} matrices.
+#' @examples
+#' cond <- c("brain", "blood", "muscle")
+#' p <- 8
+#' bhat <- matrix(rnorm(p * 3), p, 3,
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
+#' sbhat <- matrix(abs(rnorm(p * 3)) + 0.1, p, 3,
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
+#' dat <- list(bhat = bhat, sbhat = sbhat, Z = bhat / sbhat,
+#'   snp = sprintf("chr1:%d:A:G", 100L * (1:p)))
+#' mashRandNullSample(dat, nRandom = 2L, nNull = 2L,
+#'   excludeCondition = character())
+#' @export
+mashRandNullSample <- function(
+    dat,
+    nRandom,
+    nNull,
+    excludeCondition,
+    seed = NULL
+) {
+    if (!is.null(seed)) {
+        withr::local_seed(seed)
+    }
+
+    if (length(excludeCondition) > 0) {
+        colsToCheck <- if (is_in("z", names(dat))) "z" else "bhat"
+        if (!all(is_in(excludeCondition, colnames(dat[[colsToCheck]])))) {
+            msg <- glue(
+                "Error: excludeCondition are not present in ",
+                "{dat$region %||% ''}"
+            )
+            abort(msg)
+        }
+        keys <- intersect(names(dat), c("z", "bhat", "sbhat"))
+        dat <- list_assign(
+            dat,
+            !!!set_names(
+                map(dat[keys], .mashDropConditions, drop = excludeCondition),
+                keys
+            )
+        )
+    }
+    .mashExtractOneData(dat, nRandom, nNull)
+}
+
+# One matrix without the excluded condition columns.
+# @noRd
+.mashDropConditions <- function(m, drop) {
+    m[, setdiff(colnames(m), drop), drop = FALSE]
+}
+
+#' Merge two mash data lists
+#'
+#' Row-bind the components of two mash data lists, returning the non-empty one
+#' when the other is empty.
+#'
+#' @param resData The accumulated mash data list (may be empty).
+#' @param oneData The mash data list to merge in.
+#' @return The merged mash data list.
+#' @examples
+#' # Each object's variants must be uniquely keyed (row names); the two
+#' # objects share the same conditions (columns), which are aligned by name.
+#' a <- list(strong = list(z = matrix(rnorm(9), 3, 3,
+#'   dimnames = list(
+#'     c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
+#'     c("t1", "t2", "t3")))))
+#' b <- list(strong = list(z = matrix(rnorm(9), 3, 3,
+#'   dimnames = list(
+#'     c("chr1:400:A:G", "chr1:500:A:G", "chr1:600:A:G"),
+#'     c("t1", "t2", "t3")))))
+#' mergeMashData(a, b)
+#' @importFrom checkmate assertList
+#' @export
+mergeMashData <- function(resData, oneData) {
+    assertList(resData, null.ok = TRUE)
+    assertList(oneData, null.ok = TRUE)
+    if (length(resData) == 0 || is.null(resData)) {
+        return(oneData)
+    }
+    if (length(oneData) == 0 || is.null(oneData)) {
+        return(resData)
+    }
+
+    set_names(
+        map(
+            names(oneData),
+            .mashCombineDatum,
+            oneData = oneData,
+            resData = resData
+        ),
+        names(oneData)
+    )
+}
+
+# Build variants x conditions (Bhat, Shat) matrices for ONE object plus the
+# row indices of its "strong" variants. Class dispatch:
+#   QtlSumStats / GwasSumStats -> .mashSumStatsToMatrices; strong = the single
+#       most significant variant (max|z|) per condition, unioned.
+#   FineMappingResultBase      -> pivot getMarginalEffects() into a
+#       variants x context (beta, se) pair; strong = the lead (max PIP) variant
+#       of each credible set in each condition (getCs()), unioned. Conditions
+#       with no credible set contribute no strong variant.
+# For z-scale QtlSumStats the returned Shat is 1, so downstream code that forms
+# z = b / s recovers the z-scores uniformly across both scales.
+# @noRd
+.mashObjectMatrices <- function(obj, inputScale, coverage) {
+    if (methods::is(obj, "QtlSumStats") || methods::is(obj, "GwasSumStats")) {
+        return(.mashSumStatsMatrices(obj, inputScale))
+    }
+    if (methods::is(obj, "FineMappingResultBase")) {
+        return(.mashFmrMatrices(obj, coverage))
+    }
+    msg <- glue(
+        "mashInput: each element of `objects` must be a QtlSumStats, ",
+        "GwasSumStats, or FineMappingResult; got ",
+        "{str_flatten(class(obj), '/')}."
+    )
+    abort(msg)
+}
+
+# (Bhat, Shat, strongRows) from a SumStats object; strong = the max|z| variant
+# per condition column, unioned.
+# @noRd
+.mashSumStatsMatrices <- function(obj, inputScale) {
+    mats <- .mashSumStatsToMatrices(obj, "mash input", inputScale = inputScale)
+    z <- mats$b / mats$s
+    strongRows <- sort(unique(apply(abs(z), 2L, which.max)))
+    list(b = mats$b, s = mats$s, strongRows = strongRows)
+}
+
+# (Bhat, Shat, strongRows) from a FineMappingResult: pivot the marginal effects
+# to a variants x contexts matrix pair; strong = each credible set's lead (max
+# PIP) variant.
+# @noRd
+.mashFmrMatrices <- function(obj, coverage) {
+    rawMe <- getMarginalEffects(obj)
+    rawCs <- getCs(obj, coverage = coverage)
+    if (!all(is_in(c("variant_id", "context", "beta", "se"), names(rawMe)))) {
+        msg <- glue(
+            "mashInput: getMarginalEffects() must return variant_id/context/",
+            "beta/se columns; a FineMappingResult with >= 2 contexts is ",
+            "required."
+        )
+        abort(msg)
+    }
+    pinned <- .mashFmrMethodPin(rawMe, rawCs)
+    me <- pinned$me
+    cs <- pinned$cs
+    contexts <- unique(me$context)
+    variants <- unique(me$variant_id)
+    empty <- matrix(
+        NA_real_,
+        length(variants),
+        length(contexts),
+        dimnames = list(variants, contexts)
+    )
+    # One (variant, context) cell per long-format row; the rest stay NA.
+    cell <- cbind(match(me$variant_id, variants), match(me$context, contexts))
+    list(
+        b = replace(empty, cell, me$beta),
+        s = replace(empty, cell, me$se),
+        strongRows = .mashFmrStrongRows(cs, variants)
+    )
+}
+
+# A multi-method FineMappingResult would duplicate (variant, context) cells;
+# pin the first method so the pivot is unambiguous.
+# @noRd
+.mashFmrMethodPin <- function(me, cs) {
+    if (!is_in("method", names(me)) || n_distinct(me$method) <= 1L) {
+        return(list(me = me, cs = cs))
+    }
+    m1 <- me$method[[1L]]
+    msg <- glue(
+        "mashInput: FineMappingResult carries multiple methods; using ",
+        "'{m1}'."
+    )
+    warn(msg)
+    me <- filter(me, .data$method == m1)
+    if (is_in("method", names(cs))) {
+        cs <- filter(cs, .data$method == m1)
+    }
+    list(me = me, cs = cs)
+}
+
+# The max-PIP variant among one credible set's rows.
+# @noRd
+.mashLeadVariant <- function(rows, cs) {
+    cs$variant_id[[rows[[which.max(cs$pip[rows])]]]]
+}
+
+# Row indices (into `variants`) of each credible set's lead (max PIP) variant.
+# @noRd
+.mashFmrStrongRows <- function(cs, variants) {
+    csCol <- names(cs)[str_detect(names(cs), "^cs_")]
+    strongVar <- if (
+        nrow(cs) > 0L && length(csCol) > 0L && is_in("pip", names(cs))
+    ) {
+        grp <- interaction(cs$context, cs[[csCol[[1L]]]], drop = TRUE)
+        map_chr(split(seq_len(nrow(cs)), grp), .mashLeadVariant, cs = cs)
+    } else {
+        character(0)
+    }
+    strongRows <- sort(match(unique(strongVar), variants))
+    strongRows[!is.na(strongRows)]
+}
+
+# Extract the strong / random / null partitions from ONE object as a flat
+# list(strong.b, strong.s, random.b, random.s, null.b, null.s) of
+# variants x conditions matrices. Random / null are drawn by the shared
+# mashRandNullSample() over the object's (Bhat, Shat); strong is the
+# deterministic class-specific selection from .mashObjectMatrices().
+# @noRd
+.mashObjectPartitions <- function(
+    obj,
+    nRandom,
+    nNull,
+    excludeCondition,
+    coverage,
+    inputScale,
+    seed,
+    independentVariants = NULL
+) {
+    mats <- .mashObjectMatrices(
+        obj,
+        inputScale = inputScale,
+        coverage = coverage
+    )
+    keepCols <- setdiff(colnames(mats$b), excludeCondition)
+    if (length(keepCols) < 2L) {
+        msg <- glue(
+            "mashInput: fewer than 2 conditions remain for an object (after ",
+            "excludeCondition); mash operates across conditions and needs >= 2."
+        )
+        abort(msg)
+    }
+    pool <- .mashIndependentPool(mats, independentVariants)
+    rn <- mashRandNullSample(
+        list(bhat = pool$poolB, sbhat = pool$poolS),
+        nRandom = nRandom,
+        nNull = nNull,
+        excludeCondition = excludeCondition,
+        seed = seed
+    )
+    .mashPartitionOut(mats, keepCols, rn)
+}
+
+# Random / null candidate pool, optionally restricted to LD-independent
+# variants (so the background carries no LD-correlated SNPs, which would bias
+# Vhat / weights). Strong is always drawn from the full set elsewhere.
+# @noRd
+.mashIndependentPool <- function(mats, independentVariants) {
+    if (is.null(independentVariants) || length(independentVariants) == 0L) {
+        return(list(poolB = mats$b, poolS = mats$s))
+    }
+    # Rownames carry a "study::trait::" block prefix; strip to the bare variant
+    # id before matching (proper chrom/pos/allele via matchVariants).
+    rawIds <- str_remove(rownames(mats$b), ".*::")
+    keepIdx <- matchVariants(
+        rawIds,
+        independentVariants,
+        allowFlip = TRUE,
+        removeStrandAmbiguous = FALSE
+    )$idxA
+    if (length(keepIdx) == 0L) {
+        msg <- glue(
+            "mashInput: no variants matched the independent-variant list; ",
+            "the random/null background is empty for this object."
+        )
+        warn(msg)
+    }
+    list(
+        poolB = mats$b[keepIdx, , drop = FALSE],
+        poolS = mats$s[keepIdx, , drop = FALSE]
+    )
+}
+
+# Assemble the flat strong/random/null (.b/.s) partition list, omitting any
+# empty partition.
+# @noRd
+.mashPartitionOut <- function(mats, keepCols, rn) {
+    hasStrong <- length(mats$strongRows) > 0L
+    hasRandom <- !is.null(rn$random) && length(rn$random) > 0L
+    hasNull <- !is.null(rn$null) && length(rn$null) > 0L
+    compact(list(
+        strong.b = if (hasStrong) {
+            mats$b[mats$strongRows, keepCols, drop = FALSE]
+        },
+        strong.s = if (hasStrong) {
+            mats$s[mats$strongRows, keepCols, drop = FALSE]
+        },
+        random.b = if (hasRandom) rn$random$bhat,
+        random.s = if (hasRandom) rn$random$sbhat,
+        null.b = if (hasNull) rn$null$bhat,
+        null.s = if (hasNull) rn$null$sbhat
+    ))
+}
+
+#' Assemble MASH strong / random / null input from S4 objects
+#'
+#' Unified, S4-native replacement for the legacy
+#' \code{load_multitrait_*_sumstat} + \code{mash_ran_null_sample} assembly.
+#' Consumes a list of already-constructed objects (one per region) and returns
+#' the flat \code{variants x conditions} matrix list consumed by the MASH
+#' mixture-prior / fit / posterior steps.
+#'
+#' For EACH object three partitions are extracted:
+#' \describe{
+#'   \item{strong}{The high-signal variants (deterministic, class-specific).
+#'     \code{QtlSumStats}: the single most significant variant (\eqn{\max|z|})
+#'     per condition, unioned. \code{FineMappingResult}: the lead variant
+#'     (\eqn{\max} PIP) of each credible set in each condition, unioned
+#'     (conditions with no credible set contribute nothing).}
+#'   \item{random}{\code{nRandom} variants sampled uniformly at random --
+#'     represents the genome-wide mixture of effects and drives the mixture
+#'     weights.}
+#'   \item{null}{\code{nNull} variants sampled from those with \eqn{\max|z|<2}
+#'     -- the noise floor used to estimate the residual correlation (Vhat).}
+#' }
+#' Random and null are selected identically for both classes
+#' (\code{\link{mashRandNullSample}} over the object's \code{Bhat}/\code{Shat}).
+#' Partitions are merged across objects (rownames disambiguated by region name),
+#' cleaned + z-derived by \code{\link{filterInvalidSummaryStat}} (\code{btoz}),
+#' and the strong \code{XtX} cross-product appended.
+#'
+#' @param objects A named \code{list} of \code{\link{QtlSumStats}} and/or
+#'   \code{FineMappingResult} objects, one per region. Names disambiguate
+#'   rownames across regions (defaults to \code{region1}, \code{region2}, ...).
+#'   For \code{QtlSumStats} inputs \code{\link{summaryStatsQc}} must have been
+#'   run (the matrix builder rejects un-QC'd SumStats).
+#' @param nRandom,nNull Per-object random / null sample sizes (default 10 each).
+#' @param excludeCondition Character vector of condition (column) names to drop.
+#' @param coverage Credible-set coverage for \code{FineMappingResult} strong
+#'   selection (default 0.95).
+#' @param zOnly When \code{TRUE} the returned partitions carry only \code{.z}
+#'   (the \code{.b}/\code{.s} matrices are dropped after z is derived).
+#' @param sigPCutoff Significance cutoff applied to the strong partition
+#'   (default 1e-6).
+#' @param inputScale Matrix scale for \code{QtlSumStats} inputs
+#'   (\code{"auto"}/\code{"beta"}/\code{"z"}); ignored for
+#'   \code{FineMappingResult} (always effect-size scale).
+#' @param independentVariants Optional character vector of variant ids (e.g. an
+#'   LD-pruned independent SNP list). When supplied, the \emph{random} and
+#'   \emph{null} background of every object is restricted to variants that match
+#'   this set, so the background carries no LD-correlated SNPs (which would bias
+#'   the residual correlation and the mixture weights). Matching is delegated to
+#'   \code{matchVariants()} (chrom/pos/allele aware, ref/alt flips tolerated),
+#'   \emph{not} a raw string compare, so a chr-prefix / separator / allele-order
+#'   difference still matches. The \emph{strong} partition is never filtered.
+#' @param seed RNG seed for the random / null sampling (default 999).
+#'
+#' @return A flat \code{list}: \code{strong.b}, \code{strong.s},
+#'   \code{strong.z}, \code{random.*}, \code{null.*} (each a \code{variants x
+#'   conditions} matrix) and \code{XtX} (a \code{conditions x conditions}
+#'   matrix). The \code{.b} / \code{.s} matrices are omitted when \code{zOnly =
+#'   TRUE}.
+#' @seealso \code{\link{mashRandNullSample}}, \code{\link{mergeMashData}},
+#'   \code{\link{filterInvalidSummaryStat}}
+#' @examples
+#' data(qtlSumStatsMulticontextExample)
+#' ss <- qtlSumStatsMulticontextExample
+#' mashInput(objects = list(strong = ss, random = ss))
+#' @export
+mashInput <- function(
+    objects,
+    nRandom = 10L,
+    nNull = 10L,
+    excludeCondition = character(0),
+    coverage = 0.95,
+    zOnly = FALSE,
+    sigPCutoff = 1e-6,
+    inputScale = c("auto", "beta", "z"),
+    independentVariants = NULL,
+    seed = 999L
+) {
+    inputScale <- arg_match(inputScale)
+    if (!is.null(independentVariants)) {
+        independentVariants <- as.character(independentVariants)
+    }
+    objects <- .mashPrepObjects(objects)
+    cfg <- list(
+        nRandom = nRandom,
+        nNull = nNull,
+        excludeCondition = excludeCondition,
+        coverage = coverage,
+        inputScale = inputScale,
+        seed = seed,
+        independentVariants = independentVariants
+    )
+    combined <- .mashCombinePartitions(objects, cfg)
+    .mashFinalizeCombined(combined, sigPCutoff, zOnly)
+}
+
+# `objects` must be a non-empty list; unnamed lists get synthetic region names.
+# @noRd
+.mashPrepObjects <- function(objects) {
+    if (!is.list(objects) || length(objects) == 0L) {
+        msg <- glue(
+            "mashInput: `objects` must be a non-empty list of QtlSumStats ",
+            "and/or FineMappingResult objects."
+        )
+        abort(msg)
+    }
+    if (is.null(names(objects)) || any(str_length(names(objects)) == 0L)) {
+        return(set_names(objects, str_c("region", seq_along(objects))))
+    }
+    objects
+}
+
+# Extract + merge each object's strong/random/null partitions, disambiguating
+# rownames by region before accumulating.
+# @noRd
+.mashCombinePartitions <- function(objects, cfg) {
+    reduce(
+        map(
+            names(objects),
+            .mashRegionPartitions,
+            objects = objects,
+            cfg = cfg
+        ),
+        mergeMashData,
+        .init = list()
+    )
+}
+
+# One region's partitions, with its rownames region-prefixed so the merge can
+# tell same-named variants from different regions apart.
+# @noRd
+.mashRegionPartitions <- function(nm, objects, cfg) {
+    part <- .mashObjectPartitions(
+        objects[[nm]],
+        nRandom = cfg$nRandom,
+        nNull = cfg$nNull,
+        excludeCondition = cfg$excludeCondition,
+        coverage = cfg$coverage,
+        inputScale = cfg$inputScale,
+        seed = cfg$seed,
+        independentVariants = cfg$independentVariants
+    )
+    map(part, .mashPrefixRownames, nm = nm)
+}
+
+# Coerce to data.frame, clean each partition + derive z (random/null before
+# strong so the strong significance filter runs once), restore the strong
+# 1-row matrix shape, add the strong XtX, and optionally drop b/s slots.
+# @noRd
+.mashFinalizeCombined <- function(combined, sigPCutoff, zOnly) {
+    # Each condition's z derivation sees the frame the previous one produced,
+    # so the sweep is a fold rather than a variable rewritten three times.
+    withZ <- reduce(
+        c("random", "null", "strong"),
+        .mashDeriveZFor,
+        sigPCutoff = sigPCutoff,
+        .init = map(combined, .mashAsDataFrameOrNull)
+    )
+    shaped <- .mashAddXtX(.mashRestoreStrongShape(withZ))
+    if (!zOnly) {
+        return(shaped)
+    }
+    shaped[!str_detect(names(shaped), "\\.(b|s)$")]
+}
+
+# Derive z for one condition, when it carries both b and s.
+# @noRd
+.mashDeriveZFor <- function(combined, cond, sigPCutoff) {
+    bKey <- str_c(cond, ".b")
+    sKey <- str_c(cond, ".s")
+    if (is.null(combined[[bKey]]) || is.null(combined[[sKey]])) {
+        return(combined)
+    }
+    filterInvalidSummaryStat(
+        combined,
+        bhat = bKey,
+        sbhat = sKey,
+        btoz = TRUE,
+        sigPCutoff = sigPCutoff
+    )
+}
+
+# filterInvalidSummaryStat subsets strong without drop = FALSE, so a single
+# surviving strong variant degrades to a vector; restore the 1-row matrix.
+# @noRd
+.mashRestoreStrongShape <- function(combined) {
+    # Only keys that exist AND lost their dim are rewritten; `list_assign()`
+    # would otherwise create an absent key as NULL.
+    needs <- keep(
+        intersect(c("strong.b", "strong.s", "strong.z"), names(combined)),
+        .mashLostDim,
+        combined = combined
+    )
+    if (length(needs) == 0L) {
+        return(combined)
+    }
+    list_assign(
+        combined,
+        !!!set_names(map(combined[needs], .mashAsOneRow), needs)
+    )
+}
+
+# @noRd
+.mashLostDim <- function(k, combined) {
+    !is.null(combined[[k]]) && is.null(dim(combined[[k]]))
+}
+
+# @noRd
+.mashAsOneRow <- function(v) {
+    matrix(v, nrow = 1L, dimnames = list(NULL, names(v)))
+}
+
+# Strong XtX cross-product (conditions x conditions), when strong.z is present.
+# @noRd
+.mashAddXtX <- function(combined) {
+    if (
+        is.null(combined$strong.z) || nrow(as.matrix(combined$strong.z)) == 0L
+    ) {
+        return(combined)
+    }
+    sz <- as.matrix(combined$strong.z)
+    list_assign(combined, XtX = crossprod(sz) / nrow(sz))
+}
+
+#' @title Build a QtlSumStats from a Z-score matrix
+#' @description Assemble a per-condition \code{\link{QtlSumStats}} from a
+#'   \code{variants x conditions} Z-score matrix -- the input shape the mash
+#'   pipeline uses when only Z is available. Each column is one condition, and
+#'   conditions are distinguished by \code{context}, \code{trait}, or both: the
+#'   columns may be different cell types / tissues (contexts), different
+#'   molecular phenotypes (traits), or arbitrary context x trait pairs.
+#'   Chromosome / position are decoded from the row (variant) identifiers via
+#'   \code{\link{parseVariantId}} (with a synthetic-position fallback for ids
+#'   that do not encode coordinates); \code{A1} / \code{A2} / \code{N} are
+#'   placeholders because a Z-only input carries no alleles or sample sizes
+#'   (mash reads only Z). A pass-through \code{qcInfo} record is set so the
+#'   result clears the mash QC gate.
+#' @param z Numeric matrix (variants x conditions). \code{rownames(z)} are
+#'   variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
+#'   conditions.
+#' @param study Study identifier (recycled across conditions).
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   embedded in the collection, or \code{NULL} (default) -- mash operates
+#'   across
+#'   conditions per variant and needs no LD reference.
+#' @param context Condition context label(s): a single value recycled across
+#'   every column, or a length-\code{ncol(z)} vector (one per condition).
+#'   Defaults to \code{colnames(z)} -- one context per column.
+#' @param trait Condition trait label(s): a single value recycled across every
+#'   column, or a length-\code{ncol(z)} vector. Default \code{"mash"}. Pass
+#'   \code{colnames(z)} here (with a constant \code{context}) when the columns
+#'   are traits rather than contexts.
+#' @param genome Genome build. Default \code{"GRCh38"}.
+#' @param n Placeholder per-variant sample size. Default \code{1000}.
+#' @param a1,a2 Placeholder alleles. Defaults \code{"A"} / \code{"G"}.
+#' @param role Tag stored in the \code{qcInfo} record. Default \code{"mash"}.
+#' @return A \code{\link{QtlSumStats}} with one entry per condition (column).
+#' @importFrom GenomicRanges GRanges
+#' @importFrom IRanges IRanges
+#' @examples
+#' panel <- readGenotypes(
+#'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+#' z <- matrix(rnorm(6), 2, 3, dimnames = list(
+#'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
+#' qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = panel,
+#'   context = colnames(z), trait = "g1", genome = "hg38", n = 100)
+#' @export
+qtlSumStatsFromZMatrix <- function(
+    z,
+    study,
+    ldSketch = NULL,
+    context = colnames(z),
+    trait = "mash",
+    genome = "GRCh38",
+    n = 1000L,
+    a1 = "A",
+    a2 = "G",
+    role = "mash"
+) {
+    if (!is.matrix(z) || !is.numeric(z)) {
+        msg <- glue(
+            "qtlSumStatsFromZMatrix: `z` must be a numeric variants x ",
+            "conditions matrix."
+        )
+        abort(msg)
+    }
+    vids <- rownames(z) %||% str_c("var", seq_len(nrow(z)))
+    .qtlSumStatsFromMatrix(
+        vids = vids,
+        nCond = ncol(z),
+        study = study,
+        ldSketch = ldSketch,
+        context = context,
+        trait = trait,
+        genome = genome,
+        role = role,
+        mcolFn = .mashZMcolFn,
+        mcolArgs = list(a1 = a1, a2 = a2, z = z, n = n)
+    )
+}
+
+#' @title Build a QtlSumStats from Bhat / Shat (effect-size) Matrices
+#' @description Assemble a per-condition \code{\link{QtlSumStats}} from an
+#'   aligned pair of \code{variants x conditions} effect-size (\code{Bhat}) and
+#'   standard-error (\code{Shat}) matrices -- the beta-scale (EE) counterpart of
+#'   \code{\link{qtlSumStatsFromZMatrix}}. Each entry carries \code{BETA},
+#'   \code{SE}, and (derived) \code{Z = BETA / SE} mcols, so the result feeds
+#'   \code{\link{mashPipeline}} / \code{\link{mashModelFit}} on either scale
+#'   (\code{inputScale = "beta"} or \code{"z"}). Chromosome / position are
+#'   decoded from the row (variant) ids exactly as in
+#'   \code{\link{qtlSumStatsFromZMatrix}}.
+#' @param bhat Numeric matrix (variants x conditions) of effect sizes.
+#'   \code{rownames(bhat)} are variant ids; \code{colnames(bhat)} label the
+#'   conditions.
+#' @param shat Numeric matrix of standard errors, aligned with \code{bhat}
+#'   (identical dimensions and row/column order).
+#' @param study Study identifier (recycled across conditions).
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   embedded in the collection, or \code{NULL} (default) -- mash operates
+#'   across
+#'   conditions per variant and needs no LD reference.
+#' @param context,trait Condition labels; see
+#'   \code{\link{qtlSumStatsFromZMatrix}}. Defaults \code{context =
+#'   colnames(bhat)}, \code{trait = "mash"}.
+#' @param genome Genome build. Default \code{"GRCh38"}.
+#' @param n Placeholder per-variant sample size. Default \code{1000}.
+#' @param a1,a2 Placeholder alleles. Defaults \code{"A"} / \code{"G"}.
+#' @param role Tag stored in the \code{qcInfo} record. Default \code{"mash"}.
+#' @return A \code{\link{QtlSumStats}} with one entry per condition (column).
+#' @seealso \code{\link{qtlSumStatsFromZMatrix}}, \code{\link{mashModelFit}}
+#' @importFrom GenomicRanges GRanges
+#' @importFrom IRanges IRanges
+#' @examples
+#' panel <- readGenotypes(
+#'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+#' bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
+#'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
+#' shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
+#' qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, study = "s1",
+#'   ldSketch = panel, context = colnames(bhat), trait = "g1",
+#'     genome = "hg38", n = 100)
+#' @export
+qtlSumStatsFromBetaMatrix <- function(
+    bhat,
+    shat,
+    study,
+    ldSketch = NULL,
+    context = colnames(bhat),
+    trait = "mash",
+    genome = "GRCh38",
+    n = 1000L,
+    a1 = "A",
+    a2 = "G",
+    role = "mash"
+) {
+    .mashValidateBetaMatrix(bhat, shat)
+    vids <- rownames(bhat) %||% str_c("var", seq_len(nrow(bhat)))
+    .qtlSumStatsFromMatrix(
+        vids = vids,
+        nCond = ncol(bhat),
+        study = study,
+        ldSketch = ldSketch,
+        context = context,
+        trait = trait,
+        genome = genome,
+        role = role,
+        mcolFn = .mashBetaMcolFn,
+        mcolArgs = list(a1 = a1, a2 = a2, bhat = bhat, shat = shat, n = n)
+    )
+}
+
+# `bhat` / `shat` must be numeric variants x conditions matrices of identical
+# dimension.
+# @noRd
+.mashValidateBetaMatrix <- function(bhat, shat) {
+    if (!is.matrix(bhat) || !is.numeric(bhat)) {
+        msg <- glue(
+            "qtlSumStatsFromBetaMatrix: `bhat` must be a numeric ",
+            "variants x conditions matrix."
+        )
+        abort(msg)
+    }
+    if (!is.matrix(shat) || !is.numeric(shat)) {
+        msg <- glue(
+            "qtlSumStatsFromBetaMatrix: `shat` must be a numeric ",
+            "variants x conditions matrix."
+        )
+        abort(msg)
+    }
+    if (!identical(dim(bhat), dim(shat))) {
+        msg <- glue(
+            "qtlSumStatsFromBetaMatrix: ",
+            "`bhat` ({str_flatten(dim(bhat), 'x')}) and ",
+            "`shat` ({str_flatten(dim(shat), 'x')}) ",
+            "must have identical dimensions."
+        )
+        abort(msg)
+    }
+}
+
+# Decode chrom/pos from the variant ids, synthesising where they do not
+# parse. An unparseable id still needs a placeable coordinate: the GRanges
+# is keyed by the variant id, so the range only has to be unique and
+# ordered, not correct.
+# @noRd
+#' @importFrom rlang try_fetch
+.qszmCoords <- function(vids) {
+    parsed <- try_fetch(
+        suppressWarnings(parseVariantId(vids)),
+        error = function(cnd) NULL
+    )
+    rawChrom <- if (!is.null(parsed)) {
+        as.character(parsed$chrom)
+    } else {
+        rep(NA_character_, length(vids))
+    }
+    rawPos <- if (!is.null(parsed)) {
+        suppressWarnings(as.integer(parsed$pos))
+    } else {
+        rep(NA_integer_, length(vids))
+    }
+    list(
+        chrom = replace(
+            rawChrom,
+            is.na(rawChrom) | str_length(rawChrom) == 0L,
+            "chr1"
+        ),
+        pos = replace(rawPos, is.na(rawPos), seq_along(rawPos)[is.na(rawPos)])
+    )
+}
+
+# Internal: shared assembly for the z / beta matrix constructors. Recycles the
+# context / trait labels, decodes chrom/pos from the variant ids (synthesising
+# where they don't parse), builds one GRanges entry per condition with mcols
+# from `mcolFn(j)`, and wraps the entries as a QtlSumStats.
+# @noRd
+#' @importFrom rlang try_fetch
+.qtlSumStatsFromMatrix <- function(
+    vids,
+    nCond,
+    study,
+    ldSketch,
+    context,
+    trait,
+    genome,
+    role,
+    mcolFn,
+    mcolArgs = list()
+) {
+    context <- .qszmRecycle(context, nCond, "context")
+    trait <- .qszmRecycle(trait, nCond, "trait")
+    coords <- .qszmCoords(vids)
+    chrom <- coords$chrom
+    pos <- coords$pos
+    entries <- map(
+        seq_len(nCond),
+        .qszmEntry,
+        chrom = chrom,
+        pos = pos,
+        vids = vids,
+        mcolFn = mcolFn,
+        mcolArgs = mcolArgs
+    )
+    QtlSumStats(
+        study = rep(as.character(study), nCond),
+        context = context,
+        trait = trait,
+        entry = entries,
+        genome = genome,
+        ldSketch = ldSketch,
+        qcInfo = list(role = role, entryAudit = vector("list", nCond))
+    )
+}
+
+# Internal: recycle a condition-label argument (context / trait) to one value
+# per matrix column. Accepts a single value (recycled to every column) or a
+# vector of length ncol; errors otherwise -- including NULL, which is how
+# `context = colnames(x)` arrives when the matrix has no column names.
+.qszmRecycle <- function(v, n, what) {
+    if (is.null(v)) {
+        msg <- glue(
+            "qtlSumStats matrix constructor: `{what}` is NULL; pass a ",
+            "length-1 or length-{n} value (or give the matrix column ",
+            "names)."
+        )
+        abort(msg)
+    }
+    v <- as.character(v)
+    if (length(v) == 1L) {
+        return(rep(v, n))
+    }
+    if (length(v) == n) {
+        return(v)
+    }
+    msg <- glue(
+        "qtlSumStats matrix constructor: `{what}` must be length 1 or ",
+        "ncol={n}, got {length(v)}."
+    )
+    abort(msg)
+}
+
+# Internal: convert a single SumStats object (post-QC) into a (Bhat, Shat)
+# pair of matrices keyed by context. Each row of the matrix corresponds to
+# one (variantId x (study, trait)) cell from the SumStats entries; each
+# column corresponds to a context (from QtlSumStats $context; from
+# GwasSumStats $study, which is the per-study mash column).
+#
+# For QtlSumStats:
+#   * Pivots entries on (study, trait) so each (study, trait) becomes a
+#     block of rows and each context becomes a column. Missing
+#     (study, trait, context) cells are filled with NA.
+# For GwasSumStats:
+#   * Each row of the collection is one study; we treat each study as a
+#     mash "context" (single block of rows per study, columns = studies).
+#     This is rarely used on its own but lets a flat GwasSumStats pass
+#     through alongside (or instead of) a QtlSumStats without special
+#     casing further upstream.
+#
+# Variant alignment within a (study, trait) block uses the entry's
+# variant order; missing variants in any one context are filled with NA.
+# NA in Bhat is mapped to 0 and NA in Shat is mapped to a large value
+# (1000) inside mashr::mash_set_data via its `zero_Bhat_Shat_reset`
+# pathway, matching the prior pipeline's handling of incomplete cells.
+# @noRd
+.mashSumStatsToMatrices <- function(
+    x,
+    role,
+    inputScale = c("auto", "beta", "z")
+) {
+    inputScale <- arg_match(inputScale)
+    .mashValidateInput(x, role)
+    setup <- .mashBlockSetup(x)
+    resolvedScale <- .mashResolveScale(x, role, inputScale)
+    blocks <- .mashBuildBlockMatrices(x, setup, resolvedScale)
+    bhat <- exec(rbind, !!!blocks$bhat)
+    shat <- exec(rbind, !!!blocks$shat)
+    # bhat NA -> 0, shat NA / <= 0 -> 1000 (the mash_set_data
+    # zero_Bhat_Shat_reset convention; missing-cell variants do not drive the
+    # fit).
+    list(
+        b = replace(bhat, is.na(bhat), 0),
+        s = replace(shat, is.na(shat) | shat <= 0, 1000)
+    )
+}
+
+# The SumStats input must be a QC'd, non-empty QtlSumStats / GwasSumStats.
+# @noRd
+.mashValidateInput <- function(x, role) {
+    if (!methods::is(x, "QtlSumStats") && !methods::is(x, "GwasSumStats")) {
+        msg <- glue(
+            "mashPipeline: '{role}' input must be a QtlSumStats or ",
+            "GwasSumStats; got {str_flatten(class(x), '/')}."
+        )
+        abort(msg)
+    }
+    if (length(getQcInfo(x)) == 0L) {
+        msg <- glue(
+            "mashPipeline: '{role}' SumStats has no QC info ",
+            "(length(getQcInfo(x)) == 0L). ",
+            "Run summaryStatsQc() on the SumStats before passing it to ",
+            "mashPipeline()."
+        )
+        abort(msg)
+    }
+    if (nrow(x) == 0L) {
+        msg <- glue(
+            "mashPipeline: '{role}' SumStats has no entries (nrow == 0)."
+        )
+        abort(msg)
+    }
+}
+
+# Block / column layout: QtlSumStats blocks by (study, trait) with context
+# columns; GwasSumStats blocks by study with study columns.
+# @noRd
+.mashBlockSetup <- function(x) {
+    isQtl <- methods::is(x, "QtlSumStats")
+    studyCol <- as.character(x$study)
+    if (isQtl) {
+        traitCol <- as.character(x$trait)
+        contextCol <- as.character(x$context)
+        blockKeys <- str_c(studyCol, traitCol, sep = "::")
+        columnLabels <- unique(contextCol)
+    } else {
+        traitCol <- NULL
+        contextCol <- studyCol
+        blockKeys <- studyCol
+        columnLabels <- unique(studyCol)
+    }
+    list(
+        isQtl = isQtl,
+        studyCol = studyCol,
+        traitCol = traitCol,
+        contextCol = contextCol,
+        blockKeys = blockKeys,
+        columnLabels = columnLabels
+    )
+}
+
+# Resolve which (Bhat, Shat) source to pull: "beta" (BETA/SE) or "z"
+# (Z, Shat=1).
+# "auto" picks beta when every entry has BETA+SE, else z; mixed inputs error.
+# @noRd
+.mashResolveScale <- function(x, role, inputScale) {
+    entries <- .collectionEntries(x)
+    caps <- map(entries, .mashEntryCaps)
+    allHaveBetaSe <- all(map_lgl(caps, "hasBetaSe"))
+    allHaveZ <- all(map_lgl(caps, "hasZ"))
+    switch(
+        inputScale,
+        beta = .mashScaleBeta(allHaveBetaSe, role),
+        z = .mashScaleZ(allHaveZ, role),
+        auto = .mashScaleAuto(allHaveBetaSe, allHaveZ, role)
+    )
+}
+
+# @noRd
+.mashScaleBeta <- function(allHaveBetaSe, role) {
+    if (!allHaveBetaSe) {
+        msg <- glue(
+            "mashPipeline: inputScale = 'beta' requires every '{role}' ",
+            "entry to carry both BETA and SE mcols."
+        )
+        abort(msg)
+    }
+    "beta"
+}
+
+# @noRd
+.mashScaleZ <- function(allHaveZ, role) {
+    if (!allHaveZ) {
+        msg <- glue(
+            "mashPipeline: inputScale = 'z' requires every '{role}' entry ",
+            "to carry a Z mcol."
+        )
+        abort(msg)
+    }
+    "z"
+}
+
+# @noRd
+.mashScaleAuto <- function(allHaveBetaSe, allHaveZ, role) {
+    if (allHaveBetaSe) {
+        return("beta")
+    }
+    if (allHaveZ) {
+        return("z")
+    }
+    msg <- glue(
+        "mashPipeline: '{role}' SumStats has no usable scale - every ",
+        "entry must carry (BETA, SE) or Z mcols."
+    )
+    abort(msg)
+}
+
+# Per (study, trait) block, a variant x context Bhat / Shat matrix pair.
+# @noRd
+.mashBuildBlockMatrices <- function(x, setup, resolvedScale) {
+    blocks <- map(
+        unique(setup$blockKeys),
+        .mashBlockMatrix,
+        x = x,
+        setup = setup,
+        resolvedScale = resolvedScale
+    )
+    list(bhat = map(blocks, "b"), shat = map(blocks, "s"))
+}
+
+# The per-context (Bhat, Shat) vectors for one block: the variant universe is
+# the first-seen union of SNP ids across the block's contexts.
+# @noRd
+.mashBlockPerContext <- function(x, rowsInBlock, setup, resolvedScale) {
+    requireCols <- if (resolvedScale == "beta") {
+        c("SNP", "BETA", "SE")
+    } else {
+        c("SNP", "Z")
+    }
+    rows <- map(
+        rowsInBlock,
+        .mashContextRow,
+        x = x,
+        setup = setup,
+        requireCols = requireCols,
+        resolvedScale = resolvedScale
+    )
+    contexts <- map_chr(rows, "context")
+    # A later row overwrites an earlier one sharing a context, as the keyed
+    # assignment did; the variant order is first-seen across all rows.
+    lastPerContext <- !duplicated(contexts, fromLast = TRUE)
+    list(
+        variantOrder = unique(.mashConcatChr(map(rows, "snps"))),
+        perContextB = set_names(
+            map(rows[lastPerContext], "b"),
+            contexts[lastPerContext]
+        ),
+        perContextSe = set_names(
+            map(rows[lastPerContext], "se"),
+            contexts[lastPerContext]
+        )
+    )
+}
+
+# @noRd
+.mashConcatChr <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(character(0))
+    }
+    as.character(list_c(pieces))
+}
+
+# One row's effect / standard-error vectors for its context. On the z scale
+# the standard errors are unit by construction.
+# @noRd
+.mashContextRow <- function(rIdx, x, setup, requireCols, resolvedScale) {
+    df <- .mashRowDf(x, rIdx, setup, requireCols)
+    snps <- df$variant_id
+    onBeta <- resolvedScale == "beta"
+    list(
+        context = setup$contextCol[[rIdx]],
+        snps = snps,
+        b = set_names(if (onBeta) df$beta else df$z, snps),
+        se = set_names(
+            if (onBeta) df$se else rep(1, length(snps)),
+            snps
+        )
+    )
+}
+
+# One row's sumstat data.frame (QtlSumStats keyed by study/context/trait;
+# GwasSumStats by study).
+# @noRd
+.mashRowDf <- function(x, rIdx, setup, requireCols) {
+    if (setup$isQtl) {
+        getSumStatsDf(
+            x,
+            study = setup$studyCol[[rIdx]],
+            context = setup$contextCol[[rIdx]],
+            trait = setup$traitCol[[rIdx]],
+            require = requireCols
+        )
+    } else {
+        getSumStatsDf(x, study = setup$studyCol[[rIdx]], require = requireCols)
+    }
+}
+
+# Assemble one block's (variant x context) Bhat / Shat matrices, disambiguating
+# rownames by block key to avoid silent cross-block dedup.
+# @noRd
+.mashBlockMatrix <- function(bkey, x, setup, resolvedScale) {
+    rowsInBlock <- which(setup$blockKeys == bkey)
+    pc <- .mashBlockPerContext(x, rowsInBlock, setup, resolvedScale)
+    # Every context owns one column, so each is built whole and the columns
+    # are laid side by side -- no scatter into a preallocated matrix, and the
+    # block-qualified rownames go on at construction.
+    dims <- list(
+        str_c(bkey, pc$variantOrder, sep = "::"),
+        setup$columnLabels
+    )
+    list(
+        b = .mashContextMatrix(pc$perContextB, pc$variantOrder, dims),
+        s = .mashContextMatrix(pc$perContextSe, pc$variantOrder, dims)
+    )
+}
+
+# One context's column, aligned to `variantOrder`. Indexing a named vector by
+# a variant it lacks yields NA, which is the unfilled cell.
+# @noRd
+.mashContextColumn <- function(ctx, perContext, variantOrder) {
+    v <- perContext[[ctx]]
+    if (is.null(v)) {
+        return(rep(NA_real_, length(variantOrder)))
+    }
+    unname(v[variantOrder])
+}
+
+# @noRd
+.mashContextMatrix <- function(perContext, variantOrder, dims) {
+    cols <- map(
+        dims[[2L]],
+        .mashContextColumn,
+        perContext = perContext,
+        variantOrder = variantOrder
+    )
+    matrix(
+        unname(list_c(cols)),
+        nrow = length(variantOrder),
+        ncol = length(dims[[2L]]),
+        dimnames = dims
+    )
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# TRUE when any |z| in a matrix row reaches the significance threshold.
+# @noRd
+.mashRowExceeds <- function(row, zThreshold) {
+    any(abs(row) >= zThreshold)
+}
+
+# The fraction of non-zero entries in a matrix row.
+# @noRd
+.mashRowNonzeroRate <- function(row) {
+    mean(row != 0)
+}
+
+# TRUE when a covariance matrix is not identically zero.
+# @noRd
+.mashMatrixNonzero <- function(mat) {
+    !all(mat == 0)
+}
+
+# Subset one U matrix to the kept conditions (erroring if any is absent).
+# @noRd
+.mashSubsetMatrix <- function(mat, conditionsToKeep) {
+    missingConditions <- setdiff(conditionsToKeep, colnames(mat))
+    if (length(missingConditions) > 0) {
+        msg <- glue(
+            "Condition(s) {str_flatten(missingConditions, ', ')} ",
+            "not found in matrix"
+        )
+        abort(msg)
+    }
+    mat[conditionsToKeep, conditionsToKeep]
+}
+
+# Merge partition `d` of two mash data lists: a column-aligned row-bind (the two
+# objects may measure different condition sets). bind_rows unions the columns,
+# filling gaps with NA -> NaN. Returns a base data.frame because this backs the
+# exported mergeMashData(), whose result is column-accessed (`$cond`); the
+# mashInput pipeline then coerces these frames back to matrices. The variant-id
+# rownames are load-bearing -- they survive (via as.matrix) as the output
+# matrices' dimnames (tested, e.g. rownames(mashInput(...)$strong.z)), which a
+# tibble (no rownames) would drop. Rows are APPENDED (each object's variants are
+# distinct, disambiguated by the region prefix), so the row keys must be unique
+# across the two sides -- a collision means the prefix invariant broke, and we
+# error loudly rather than silently stack.
+# @noRd
+.mashCombineDatum <- function(d, oneData, resData) {
+    od <- oneData[[d]]
+    rd <- resData[[d]]
+    if (length(od) == 0 || is.null(od)) {
+        return(rd)
+    }
+    if (is.null(rd) || length(rd) == 0) {
+        return(od)
+    }
+    rnRes <- rownames(as.data.frame(rd))
+    rnOne <- rownames(as.data.frame(od))
+    if (anyDuplicated(c(rnRes, rnOne)) > 0L) {
+        abort(glue(
+            "mergeMashData: duplicate variant ids across the merged ",
+            "partitions -- each object's variants must be uniquely keyed ",
+            "(the mashInput region prefix guarantees this). A collision ",
+            "means two objects share a name or the prefix invariant broke."
+        ))
+    }
+    joined <- bind_rows(as.data.frame(rd), as.data.frame(od))
+    # NaN, not NA: mash reads a missing cell as NaN.
+    combined <- replace(joined, is.na(joined), NaN)
+    `rownames<-`(combined, c(rnRes, rnOne))
+}
+
+# Region-prefix one partition matrix's rownames (no-op for empty/NULL).
+# @noRd
+.mashPrefixRownames <- function(m, nm) {
+    if (is.null(m) || nrow(m) == 0L) {
+        return(m)
+    }
+    `rownames<-`(m, str_c(rownames(m), nm, sep = "_"))
+}
+
+# Coerce one partition to a data.frame (NULL passes through). Kept as a base
+# data.frame (not a tibble) so the variant-id rownames survive to the output
+# matrices -- see .mashCombineDatum.
+# @noRd
+.mashAsDataFrameOrNull <- function(m) {
+    if (is.null(m)) {
+        return(NULL)
+    }
+    as.data.frame(m)
+}
+
+# One condition's GRanges entry, mcols from `mcolFn(j, vids, <mcolArgs>)`.
+# @noRd
+.qszmEntry <- function(j, chrom, pos, vids, mcolFn, mcolArgs) {
+    gr <- GenomicRanges::GRanges(
+        seqnames = chrom,
+        ranges = IRanges::IRanges(start = pos, width = 1L)
+    )
+    mcolCallArgs <- c(list(j, vids), mcolArgs)
+    S4Vectors::`mcols<-`(gr, value = exec(mcolFn, !!!mcolCallArgs))
+}
+
+# mcols for condition `j` of a z-scale matrix (Z + placeholder N/alleles).
+# @noRd
+.mashZMcolFn <- function(j, vids, a1, a2, z, n) {
+    S4Vectors::DataFrame(
+        SNP = vids,
+        A1 = rep(a1, length(vids)),
+        A2 = rep(a2, length(vids)),
+        Z = as.numeric(z[, j]),
+        N = rep(as.integer(n), length(vids))
+    )
+}
+
+# mcols for condition `j` of a beta-scale pair (BETA/SE + derived Z).
+# @noRd
+.mashBetaMcolFn <- function(j, vids, a1, a2, bhat, shat, n) {
+    S4Vectors::DataFrame(
+        SNP = vids,
+        A1 = rep(a1, length(vids)),
+        A2 = rep(a2, length(vids)),
+        BETA = as.numeric(bhat[, j]),
+        SE = as.numeric(shat[, j]),
+        Z = as.numeric(bhat[, j] / shat[, j]),
+        N = rep(as.integer(n), length(vids))
+    )
+}
+
+# The (hasBetaSe, hasZ) scale capabilities of one sumstats entry.
+# @noRd
+.mashEntryCaps <- function(e) {
+    mc <- S4Vectors::mcols(e)
+    list(
+        hasBetaSe = all(is_in(c("BETA", "SE"), colnames(mc))),
+        hasZ = is_in("Z", colnames(mc))
+    )
 }

@@ -9,9 +9,9 @@
 \usage{
 getWeights(x, ...)
 
-\S4method{getWeights}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+\S4method{getWeights}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 
-\S4method{getWeights}{TwasWeightsRow}(x, ...)
+\S4method{getWeights}{TwasWeightsRow}(x)
 }
 \arguments{
 \item{x}{A \code{TwasWeightsRow} or \code{TwasWeights}.}

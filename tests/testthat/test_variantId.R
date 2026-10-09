@@ -1199,12 +1199,61 @@ test_that(".harmonizeRestoreUnmatched is a no-op when nothing is unmatched", {
     withExtra <- rbind(
         targetData,
         data.frame(
-            chrom = "chr1", pos = 300L, A1 = "A", A2 = "G",
+            chrom = "chr1",
+            pos = 300L,
+            A1 = "A",
+            A2 = "G",
             stringsAsFactors = FALSE
         )
     )
     appended <- pecotmr:::.harmonizeRestoreUnmatched(
-        result, matchResult, withExtra
+        result,
+        matchResult,
+        withExtra
     )
     expect_equal(nrow(appended$result), 3L)
+})
+
+test_that("parseVariantId: rejects input that is neither character nor df", {
+    expect_error(parseVariantId(1:3), "One of the following must apply")
+})
+
+test_that("normalizeVariantId: argument guards fire", {
+    ids <- "chr1:100:A:G"
+    expect_error(normalizeVariantId(1:3), "Must be of type 'character'")
+    expect_error(
+        normalizeVariantId(ids, chrPrefix = NA),
+        "chrPrefix.*May not be NA"
+    )
+    expect_error(
+        normalizeVariantId(ids, chrPrefix = c(TRUE, FALSE)),
+        "chrPrefix.*Must have length 1"
+    )
+    expect_error(
+        normalizeVariantId(ids, convention = "nope"),
+        "convention.*Must be of type 'list'"
+    )
+})
+
+test_that("regionToDf: argument guards fire", {
+    expect_error(regionToDf(1L), "Must be of type 'character'")
+    expect_error(
+        regionToDf("1_100_200", colnames = c("a", "b")),
+        "colnames.*Must have length 3"
+    )
+})
+
+test_that("asGranges leaves an already chr-prefixed chromosome alone", {
+    # The prefix is added only when absent; a frame that already carries it
+    # must not become "chrchr1".
+    gr <- asGranges(data.frame(
+        chrom = c("chr1", "chr2"),
+        start = c(100L, 200L),
+        end = c(150L, 250L),
+        stringsAsFactors = FALSE
+    ))
+    expect_identical(
+        as.character(GenomicRanges::seqnames(gr)),
+        c("chr1", "chr2")
+    )
 })

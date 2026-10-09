@@ -7,8 +7,10 @@
 extractTopPipInfo(fmRow, sumstats)
 }
 \arguments{
-\item{fmRow}{A \code{\link{fineMappingRow}} carrying the SuSiE
-fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).}
+\item{fmRow}{A \code{\link{fineMappingRow}}, or a single-row
+fine-mapping collection as returned by
+\code{\link{getFineMappingResult}}, carrying the SuSiE fit and
+variant ids.}
 
 \item{sumstats}{A list or data frame carrying a \code{z} element aligned to
 the fit's variants (\code{sumstats$z}).}

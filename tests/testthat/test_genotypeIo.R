@@ -62,7 +62,7 @@ test_that("findValidFilePath works", {
 })
 
 
-dummy_geno_data <- function(
+dummyGenoData <- function(
     number_of_samples = 10,
     number_of_snps = 10,
     sample_start_id = 1,
@@ -147,7 +147,7 @@ dummy_geno_data <- function(
     return(X)
 }
 
-dummy_pheno_data <- function(
+dummyPhenoData <- function(
     number_of_samples = 10,
     number_of_phenotypes = 10,
     randomize = FALSE,
@@ -180,13 +180,13 @@ dummy_pheno_data <- function(
         end_matrix <- end_matrix[sample(nrow(end_matrix)), ]
     }
     pheno_data <- t(pheno_data)
-    pheno_data <- lapply(seq_len(ncol(pheno_data)), function(i) {
+    pheno_data <- map(seq_len(ncol(pheno_data)), function(i) {
         pheno_data[, i, drop = FALSE]
     })
     return(pheno_data)
 }
 
-dummy_covar_data <- function(
+dummyCovarData <- function(
     number_of_samples = 10,
     number_of_covars = 10,
     row_na = FALSE,
@@ -207,7 +207,7 @@ dummy_covar_data <- function(
         covar <- covar[sample(nrow(covar)), ]
     }
     if (row_na) {
-        covar[sample(length(covar), 1), 1:number_of_covars] <- NA
+        covar[sample(length(covar), 1), seq_len(number_of_covars)] <- NA
     }
     return(covar)
 }
@@ -533,7 +533,7 @@ test_that(".colocFilterCsByConcentration returns numeric index vector", {
     alpha_raw <- matrix(runif(n_L * n_vars), nrow = n_L)
     alpha_norm <- t(apply(alpha_raw, 1, function(x) x / sum(x)))
 
-    mock_susie <- list(
+    mockSusie <- list(
         alpha = alpha_norm,
         V = runif(n_L),
         lbf_variable = matrix(rnorm(n_L * n_vars), nrow = n_L),
@@ -549,7 +549,7 @@ test_that(".colocFilterCsByConcentration returns numeric index vector", {
     )
 
     result <- pecotmr:::.colocFilterCsByConcentration(
-        mock_susie,
+        mockSusie,
         coverage = 0.5,
         concentration = 0.5
     )
@@ -648,7 +648,7 @@ test_that("invertMinmaxScaling preserves correlation structure", {
     n <- 200
     k <- 3
     # Simulate U = W'G (G is raw, not standardized, matching rss_ld_sketch)
-    G <- sapply(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p))
+    G <- exec(cbind, !!!map(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p)))
     W <- matrix(rnorm(n * n, 0, 1 / sqrt(n)), n, n)
     U_original <- crossprod(W, G)
 
@@ -1232,7 +1232,7 @@ test_that("format detection supports dotted PLINK2 prefixes", {
 
 # Shared helper: validate the output structure from loadGenotypeRegion
 # (with returnVariantInfo=TRUE)
-check_genotype_result <- function(
+checkGenotypeResult <- function(
     result,
     expected_nrow = n_samples,
     expected_ncol = n_variants,
@@ -1313,7 +1313,7 @@ test_that("loadGenotypeRegion filters plink2 by region", {
         region = region_sub,
         returnVariantInfo = TRUE
     )
-    check_genotype_result(result, expected_ncol = 134L, label = "plink2 region")
+    checkGenotypeResult(result, expected_ncol = 134L, label = "plink2 region")
     expect_true(all(
         result$variant_info$pos >= 17513228 &
             result$variant_info$pos <= 17550000
@@ -1354,7 +1354,7 @@ test_that("loadGenotypeRegion loads VCF via dispatch", {
         vcf_path,
         returnVariantInfo = TRUE
     ))
-    check_genotype_result(result, label = "dispatch vcf")
+    checkGenotypeResult(result, label = "dispatch vcf")
 })
 
 test_that("loadGenotypeRegion filters VCF by region", {
@@ -1365,7 +1365,7 @@ test_that("loadGenotypeRegion filters VCF by region", {
         region = region_sub,
         returnVariantInfo = TRUE
     ))
-    check_genotype_result(result, expected_ncol = 134L, label = "vcf region")
+    checkGenotypeResult(result, expected_ncol = 134L, label = "vcf region")
     expect_true(all(
         result$variant_info$pos >= 17513228 &
             result$variant_info$pos <= 17550000
@@ -1400,7 +1400,7 @@ test_that("loadGenotypeRegion loads GDS via dispatch", {
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
     result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
-    check_genotype_result(result, label = "dispatch gds")
+    checkGenotypeResult(result, label = "dispatch gds")
 })
 
 test_that("loadGenotypeRegion filters GDS by region", {
@@ -1411,7 +1411,7 @@ test_that("loadGenotypeRegion filters GDS by region", {
         region = region_sub,
         returnVariantInfo = TRUE
     )
-    check_genotype_result(result, expected_ncol = 134L, label = "gds region")
+    checkGenotypeResult(result, expected_ncol = 134L, label = "gds region")
     expect_true(all(
         result$variant_info$pos >= 17513228 &
             result$variant_info$pos <= 17550000
@@ -1479,20 +1479,20 @@ test_that("loadGenotypeRegion dispatches to VCF by extension", {
         vcf_path,
         returnVariantInfo = TRUE
     ))
-    check_genotype_result(result, label = "dispatch vcf")
+    checkGenotypeResult(result, label = "dispatch vcf")
 })
 
 test_that("loadGenotypeRegion dispatches to GDS by extension", {
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
     result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
-    check_genotype_result(result, label = "dispatch gds")
+    checkGenotypeResult(result, label = "dispatch gds")
 })
 
 test_that("loadGenotypeRegion dispatches to PLINK2 by prefix", {
     skip_if_not_installed("pgenlibr")
     result <- loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
-    check_genotype_result(result, label = "dispatch plink2")
+    checkGenotypeResult(result, label = "dispatch plink2")
 })
 
 test_that("loadGenotypeRegion returns matrix when returnVariantInfo=FALSE", {
@@ -1712,6 +1712,27 @@ test_that("single-shard sharded handle equals the single-file handle", {
     expect_equal(.shardDose(sh, 1:10), .shardDose(ref, 1:10))
 })
 
+test_that("readGenotypes(genoMeta=) forwards `format` to the shard reader", {
+    skip_if_not_installed("snpStats")
+    # Regression: the path = "missing" method bound `format` to its own formal
+    # and then called GenotypeHandle(...) without it, so an explicit format was
+    # silently dropped and every shard fell back to extension probing.
+    seen <- new.env(parent = emptyenv())
+    seen$fmt <- NA_character_
+    local_mocked_bindings(
+        .resolveGenotypeShard = function(p, format = NULL) {
+            seen$fmt <- if (is.null(format)) "<NULL>" else format
+            pecotmr:::.makePlink1Handle(p)
+        },
+        .package = "pecotmr"
+    )
+    readGenotypes(
+        genoMeta = c("21" = file.path(test_data_dir, "test_variants")),
+        format = "plink1"
+    )
+    expect_identical(seen$fmt, "plink1")
+})
+
 test_that("genoMeta meta-file form matches the named-vector form", {
     skip_if_not_installed("snpStats")
     td_abs <- normalizePath(test_data_dir)
@@ -1762,7 +1783,7 @@ test_that(".makeGdsHandle errors when GDS file is absent", {
     skip_if_not_installed("gdsfmt")
     expect_error(
         pecotmr:::.makeGdsHandle("/no/such/file.gds"),
-        "GDS file not found"
+        "GDS file.*File does not exist"
     )
 })
 
@@ -1770,7 +1791,7 @@ test_that(".makeVcfHandle errors when VCF file is absent", {
     skip_if_not_installed("VariantAnnotation")
     expect_error(
         pecotmr:::.makeVcfHandle("/no/such/file.vcf.gz"),
-        "VCF file not found"
+        "VCF file.*File does not exist"
     )
 })
 
@@ -1781,7 +1802,7 @@ test_that(".makePlink1Handle errors when plink1 trio is absent", {
             tempdir(),
             "missingPlink1Prefix"
         )),
-        "Plink file not found"
+        "Plink file.*File does not exist"
     )
 })
 
@@ -2108,7 +2129,7 @@ test_that("resolvePlink2Paths errors when .psam is missing", {
     prefix <- .gioMakePlink2Stub(c("pgen", "pvar"))
     expect_error(
         pecotmr:::resolvePlink2Paths(prefix),
-        "PLINK2 .psam file not found"
+        "PLINK2 .psam file.*File does not exist"
     )
 })
 
@@ -2678,4 +2699,30 @@ test_that("stochastic inversion is a no-op when no id matches the metadata", {
         stochasticMetaFormat = "generic"
     )
     expect_identical(out$X, X)
+})
+
+test_that("readGenotypes names its keyword sources, not `...`", {
+    # The sources used to ride `...` into GenotypeHandle(), so a misspelled
+    # one was simply unset and the call failed later with "no source given".
+    expect_error(readGenotypes(plink1Prefx = "x"), "unused argument")
+    # Every GenotypeHandle source is reachable by name: passing one gets past
+    # argument matching and fails (if at all) on the source itself, never on
+    # "unused argument".
+    sources <- setdiff(
+        names(formals(pecotmr:::GenotypeHandle)),
+        c("path", "format", "vcfArgs")
+    )
+    for (nm in sources) {
+        err <- tryCatch(
+            {
+                exec(readGenotypes, !!!set_names(list("nope"), nm))
+                NULL
+            },
+            error = function(e) conditionMessage(e)
+        )
+        expect_false(
+            isTRUE(str_detect(err %||% "", "unused argument")),
+            label = nm
+        )
+    }
 })

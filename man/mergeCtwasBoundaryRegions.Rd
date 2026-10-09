@@ -10,8 +10,8 @@ mergeCtwasBoundaryRegions(
   filterCs = FALSE,
   maxSNP = Inf,
   L = 5L,
-  ncore = 1L,
-  ...
+  numThreads = 1L,
+  methodArgs = CtwasOptions()
 )
 }
 \arguments{
@@ -36,9 +36,11 @@ to be selected (\code{select_boundary_genes} \code{filter_cs}). Default
 \item{L}{Integer. Max number of single effects for the merged-region
 re-fine-mapping (LD path only). Default \code{5}.}
 
-\item{ncore}{Number of cores. Default \code{1}.}
+\item{numThreads}{Number of cores. Default \code{1}.}
 
-\item{...}{Forwarded to the underlying ctwas postprocess function.}
+\item{methodArgs}{Additional arguments forwarded to ctwas, built
+with \code{\link{CtwasOptions}}. Names are checked against what
+the ctwas steps accept between them.}
 }
 \value{
 The \code{finemapResult} list with \code{finemap_res},

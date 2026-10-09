@@ -59,7 +59,7 @@
     traits = c("ENSG1", "ENSG2")
 ) {
     phenos <- setNames(
-        lapply(contexts, function(cx) .js_makeSe(traits = traits)),
+        map(contexts, function(cx) .js_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -81,7 +81,7 @@
         trait = traits,
         stringsAsFactors = FALSE
     )
-    entries <- lapply(seq_len(nrow(rows)), function(i) {
+    entries <- map(seq_len(nrow(rows)), function(i) {
         gr <- GenomicRanges::GRanges(
             seqnames = "chr1",
             ranges = IRanges::IRanges(start = c(100L, 200L), width = 1L)
@@ -718,7 +718,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         path = "/tmp/jd.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -803,7 +803,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         study = rows$study,
         context = rows$context,
         trait = rows$trait,
-        entry = lapply(seq_len(nrow(rows)), function(.) makeGr()),
+        entry = map(seq_len(nrow(rows)), function(.) makeGr()),
         genome = "hg19",
         ldSketch = .jd_makeHandle(),
         qcInfo = list(step1 = "ok")
@@ -1113,7 +1113,7 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie",
     traits = c("t1", "t2")
 ) {
     phen <- setNames(
-        lapply(contexts, function(.) .jd_makeSe(traits = traits)),
+        map(contexts, function(.) .jd_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -1573,7 +1573,7 @@ test_that("parseMethods: split-form and leaf validation errors", {
             caps = caps,
             multivariateMethods = "mrmash"
         ),
-        "non-empty character vector"
+        "Must have length >= 1"
     )
     expect_error(
         pecotmr:::parseMethods(
@@ -1584,7 +1584,7 @@ test_that("parseMethods: split-form and leaf validation errors", {
             caps = caps,
             multivariateMethods = "mrmash"
         ),
-        "non-empty character vector"
+        "Must have length >= 1"
     )
     expect_error(
         pecotmr:::parseMethods(
@@ -1731,7 +1731,8 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1769,7 +1770,8 @@ test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1831,7 +1833,8 @@ test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, comp
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -1870,7 +1873,8 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2116,11 +2120,13 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
         contexts = NULL,
         traitIds = NULL,
         cisWindow = NULL,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        verbose = 1
+        verbose = 1,
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     ))
     expect_s4_class(out, "QtlFineMappingResult")
     expect_equal(nrow(out), 2L) # indA row + ssC row
@@ -2147,11 +2153,13 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
             contexts = NULL,
             traitIds = NULL,
             cisWindow = NULL,
-            coverage = 0.95,
-            secondaryCoverage = 0.5,
-            signalCutoff = 0.1,
-            minAbsCorr = 0.5,
-            verbose = 1
+            verbose = 1,
+            credibleSetArgs = CredibleSetParam(
+                coverage = 0.95,
+                secondaryCoverage = 0.5,
+                signalCutoff = 0.1,
+                minAbsCorr = 0.5
+            )
         ),
         "no sumStats slot"
     )
@@ -2272,7 +2280,8 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context",
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2312,7 +2321,8 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2323,7 +2333,7 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             setNames(
-                lapply(c("c1", "c2"), function(.) {
+                map(c("c1", "c2"), function(.) {
                     matrix(
                         rnorm(12),
                         6,
@@ -2352,7 +2362,8 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2385,7 +2396,8 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             contexts,
             traitId = NULL,
             cisWindow = NULL,
-            region = NULL
+            region = NULL,
+            ...
         ) {
             matrix(
                 0,
@@ -2482,12 +2494,14 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
         contexts = NULL,
         traitIds = NULL,
         cisWindow = NULL,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
         verbose = 0,
-        xRegions = list(r1, r2)
+        xRegions = list(r1, r2),
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L) # 907-910
@@ -2517,11 +2531,13 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         contexts = NULL,
         traitIds = NULL,
         cisWindow = 1000L,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        verbose = 0
+        verbose = 0,
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )
     expect_identical(out, res1) # length-1 short-circuit (909)
     local_mocked_bindings(
@@ -2535,11 +2551,13 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         contexts = NULL,
         traitIds = NULL,
         cisWindow = 1000L,
-        coverage = 0.95,
-        secondaryCoverage = 0.5,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        verbose = 0
+        verbose = 0,
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = 0.5,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )) # all-NULL (908)
 })
 
@@ -2593,7 +2611,7 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         as.character(ss$context),
         "probe",
         ldSketch = getLdSketch(ss),
-        cutoffs = .panelCutoffs(list(...))
+        cutoffs = .panelCutoffs(PanelFilterParam(...))
     ))
 }
 
@@ -2624,7 +2642,7 @@ test_that(".buildJointSumstatZMatrix agrees with .panelVariantFilter", {
             length(.panelVariantFilter(
                 getLdSketch(ss),
                 ids,
-                mafCutoff = cut
+                PanelFilterParam(mafCutoff = cut)
             )),
             label = str_c("mafCutoff ", cut)
         )
@@ -2650,4 +2668,13 @@ test_that(".buildJointSumstatZMatrix honours a missingness cutoff", {
         length(.bjz_build(ss, imissCutoff = 0)$variantIds),
         length(.bjz_build(ss)$variantIds)
     )
+})
+
+test_that(".fmScopeUserLimit answers NULL for an absent limit", {
+    expect_null(pecotmr:::.fmScopeUserLimit(NULL, "s1", TRUE))
+})
+
+test_that(".msFoldStudyResults answers NULL when every fold is empty", {
+    expect_null(pecotmr:::.msFoldStudyResults(list(), NULL))
+    expect_null(pecotmr:::.msFoldStudyResults(list(NULL, NULL), NULL))
 })

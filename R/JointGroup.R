@@ -39,19 +39,17 @@ setClass(
     # one row per condition (Y/Z column)
     representation(conditions = "data.frame"),
     validity = function(object) {
-        errors <- character()
-        if (
+        errors <- if (
             !all(is_in(
                 c("study", "context", "trait"),
                 names(object@conditions)
             ))
         ) {
-            errors <- c(
-                errors,
-                "'conditions' must have columns 'study', 'context', 'trait'"
-            )
+            "'conditions' must have columns 'study', 'context', 'trait'"
         } else if (nrow(object@conditions) < 1L) {
-            errors <- c(errors, "a group needs >= 1 condition (Y/Z column)")
+            "a group needs >= 1 condition (Y/Z column)"
+        } else {
+            character()
         }
         if (length(errors) == 0L) TRUE else errors
     }
@@ -67,25 +65,23 @@ setClass(
     contains = "JointGroup",
     representation(X = "matrix", Y = "matrix", traitPos = "numeric"),
     validity = function(object) {
-        errors <- character()
-        if (nrow(object@X) != nrow(object@Y)) {
-            errors <- c(errors, "X and Y must share the sample (row) dimension")
-        }
-        if (ncol(object@Y) != nrow(object@conditions)) {
-            errors <- c(errors, "ncol(Y) must equal nrow(conditions)")
-        }
-        if (
-            length(object@traitPos) > 0L &&
-                length(object@traitPos) != ncol(object@Y)
-        ) {
-            errors <- c(
-                errors,
+        errors <- c(
+            if (nrow(object@X) != nrow(object@Y)) {
+                "X and Y must share the sample (row) dimension"
+            },
+            if (ncol(object@Y) != nrow(object@conditions)) {
+                "ncol(Y) must equal nrow(conditions)"
+            },
+            if (
+                length(object@traitPos) > 0L &&
+                    length(object@traitPos) != ncol(object@Y)
+            ) {
                 str_c(
                     "when set, 'traitPos' must have one entry per TRAIT ",
                     "(Y column), not per variant"
                 )
-            )
-        }
+            }
+        )
         if (length(errors) == 0L) TRUE else errors
     }
 )
@@ -99,21 +95,19 @@ setClass(
     # any of them is fitted. The sketch is a lazy panel, so the matrix is
     # derived once per group at fit time -- which is what the univariate RSS
     # path in fineMappingPipeline already does.
-    representation(Z = "matrix", ldSketch = "LdSketchOrNULL", N = "numeric"),
+    representation(Z = "matrix", ldSketch = "LdSketch_OR_NULL", N = "numeric"),
     validity = function(object) {
-        errors <- character()
-        if (ncol(object@Z) != nrow(object@conditions)) {
-            errors <- c(errors, "ncol(Z) must equal nrow(conditions)")
-        }
-        if (is.null(rownames(object@Z))) {
-            errors <- c(
-                errors,
+        errors <- c(
+            if (ncol(object@Z) != nrow(object@conditions)) {
+                "ncol(Z) must equal nrow(conditions)"
+            },
+            if (is.null(rownames(object@Z))) {
                 str_c(
                     "'Z' must carry the variant ids as rownames: they are ",
                     "what the LD matrix is derived over"
                 )
-            )
-        }
+            }
+        )
         if (length(errors) == 0L) TRUE else errors
     }
 )
@@ -129,24 +123,25 @@ setClass(
     ), # smallest fittable condition count (joint cells
     # use >= 2; the univariate cell uses 1)
     validity = function(object) {
-        errors <- character()
-        if (
-            length(object@dataForm) != 1L ||
-                !is_in(object@dataForm, c("individual", "sumstats"))
-        ) {
-            errors <- c(errors, "'dataForm' must be 'individual' or 'sumstats'")
-        }
-        if (length(object@minGroup) != 1L || object@minGroup < 1L) {
-            errors <- c(errors, "'minGroup' must be a single integer >= 1")
-        }
+        errors <- c(
+            if (
+                length(object@dataForm) != 1L ||
+                    !is_in(object@dataForm, c("individual", "sumstats"))
+            ) {
+                "'dataForm' must be 'individual' or 'sumstats'"
+            },
+            if (length(object@minGroup) != 1L || object@minGroup < 1L) {
+                "'minGroup' must be a single integer >= 1"
+            }
+        )
         if (length(errors) == 0L) TRUE else errors
     }
 )
 
 # ---- Pipeline markers -------------------------------------------------------
 # Not empty: the `config` list carries the per-pipeline parameter tail
-# (coverage/cvFolds/samplePartition/fitFullData/retainFit/... for fm;
-# retainFit/retainFitDetail/cvFolds/... for twas), and dispatch on the concrete
+# (coverage/cvFolds/samplePartition/fitFullData/fitRetention/... for fm;
+# fitRetention/cvFolds/... for twas), and dispatch on the concrete
 # class selects the result type via `construct()`.
 setClass("JointPipeline", contains = "VIRTUAL", representation(config = "list"))
 

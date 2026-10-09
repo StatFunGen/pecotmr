@@ -28,16 +28,21 @@ setClass(
 )
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames
 .validateLdScore <- function(object) {
+    coll <- makeAssertCollection()
     parentCheck <- .validateLdStatistic(object)
-    errors <- if (isTRUE(parentCheck)) character() else parentCheck
-    md <- S4Vectors::mcols(object, use.names = FALSE)
-    for (col in c("ldScores", "ldScoreWeights")) {
-        if (!is_in(col, colnames(md))) {
-            errors <- c(errors, glue("mcols must carry an '{col}' column"))
-        }
+    if (!isTRUE(parentCheck)) {
+        coll$push(parentCheck)
     }
-    if (length(errors) == 0) TRUE else errors
+    assertNames(
+        colnames(S4Vectors::mcols(object, use.names = FALSE)),
+        must.include = c("ldScores", "ldScoreWeights"),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    coll$getMessages()
 }
 
 #' @title Create an LdScore
@@ -65,6 +70,7 @@ setClass(
 #'   inSample = FALSE, genome = "hg19")
 #' length(ls)
 #' head(getLdScores(ls))
+#' @importFrom checkmate assertMatrix assertNumeric
 #' @export
 LdScore <- function(
     snpInfo,
@@ -78,25 +84,21 @@ LdScore <- function(
 ) {
     gr <- .ldStatRanges(snpInfo, genome)
     ldScores <- as.matrix(ldScores)
-    if (nrow(ldScores) != length(gr)) {
-        abort(glue(
-            "`ldScores` has {nrow(ldScores)} row(s) for {length(gr)} ",
-            "variant(s); they must be parallel."
-        ))
-    }
-    if (length(ldScoreWeights) != length(gr)) {
-        abort(glue(
-            "`ldScoreWeights` has {length(ldScoreWeights)} value(s) for ",
-            "{length(gr)} variant(s); they must be parallel."
-        ))
-    }
-    md <- S4Vectors::mcols(gr, use.names = FALSE)
-    md$ldScores <- ldScores
-    md$ldScoreWeights <- as.numeric(ldScoreWeights)
-    S4Vectors::mcols(gr) <- md
+    assertMatrix(ldScores, nrows = length(gr))
+    assertNumeric(ldScoreWeights, len = length(gr))
+    scored <- S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(
+            S4Vectors::mcols(gr, use.names = FALSE),
+            S4Vectors::DataFrame(
+                ldScores = I(ldScores),
+                ldScoreWeights = as.numeric(ldScoreWeights)
+            )
+        )
+    )
     obj <- methods::new(
         "LdScore",
-        gr,
+        scored,
         ldBlocks = .asLdBlockRanges(ldBlocks),
         nRef = as.integer(nRef),
         inSample = isTRUE(inSample),
@@ -106,6 +108,7 @@ LdScore <- function(
     obj
 }
 
+#' @importFrom checkmate assertCount assertFlag
 #' @title Build an LdScore from loaded LD
 #' @description Compute per-variant LD scores from already-loaded LD, block by
 #'   block, into the \code{LdScore} that \code{\link{estimateH2}} consumes
@@ -162,6 +165,9 @@ buildLdScore <- function(
     ldScoreWeights = NULL,
     keepLdMatrices = TRUE
 ) {
+    assertCount(nRef, positive = TRUE, null.ok = TRUE)
+    assertFlag(inSample)
+    assertFlag(keepLdMatrices)
     prep <- .ldRefPrepare(ldBlockData, nRef, genome)
     l2 <- .ldScoreVector(prep$blocks, prep$snpIdx, nrow(prep$snpInfo))
     ldMatrixList <- if (isTRUE(keepLdMatrices)) {
@@ -185,11 +191,21 @@ buildLdScore <- function(
 # reference order.
 # @noRd
 .ldScoreVector <- function(blocks, snpIdx, nVariants) {
-    l2 <- numeric(nVariants)
-    for (b in seq_along(blocks)) {
-        l2[snpIdx[[b]]] <- rowSums(blocks[[b]]$R^2)
+    if (length(blocks) == 0L) {
+        return(numeric(nVariants))
     }
-    l2
+    # The blocks partition the variants, so each variant's score lands in
+    # exactly one place; variants in no block stay zero.
+    replace(
+        numeric(nVariants),
+        list_c(snpIdx),
+        list_c(map(blocks, .ldScoreBlockSums))
+    )
+}
+
+# @noRd
+.ldScoreBlockSums <- function(block) {
+    rowSums(block$R^2)
 }
 
 # @noRd
@@ -204,12 +220,7 @@ buildLdScore <- function(
     if (is.null(ldScoreWeights)) {
         return(1 / pmax(l2, 1))
     }
-    if (length(ldScoreWeights) != length(l2)) {
-        abort(glue(
-            "`ldScoreWeights` has {length(ldScoreWeights)} value(s) for ",
-            "{length(l2)} variant(s)."
-        ))
-    }
+    assertNumeric(ldScoreWeights, len = length(l2))
     as.numeric(ldScoreWeights)
 }
 

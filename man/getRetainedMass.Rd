@@ -7,7 +7,7 @@
 \usage{
 getRetainedMass(x, ...)
 
-\S4method{getRetainedMass}{FineMappingResultBase}(x, ...)
+\S4method{getRetainedMass}{FineMappingResultBase}(x)
 }
 \arguments{
 \item{x}{A fine-mapping collection.}

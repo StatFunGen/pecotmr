@@ -8,9 +8,9 @@
 \usage{
 getRegion(x, ...)
 
-\S4method{getRegion}{FineMappingResultBase}(x, ...)
+\S4method{getRegion}{FineMappingResultBase}(x)
 
-\S4method{getRegion}{TwasWeights}(x, ...)
+\S4method{getRegion}{TwasWeights}(x)
 }
 \arguments{
 \item{x}{The object.}

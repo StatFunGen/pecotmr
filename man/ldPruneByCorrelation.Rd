@@ -8,7 +8,8 @@ ldPruneByCorrelation(
   X,
   corThres = 0.8,
   backend = c("hclust", "snprelate"),
-  verbose = FALSE
+  verbose = FALSE,
+  methodArgs = LdPruningOptions()
 )
 }
 \arguments{
@@ -30,6 +31,13 @@ group. Default 0.8.}
 }}
 
 \item{verbose}{Logical. If TRUE, print progress messages. Default FALSE.}
+
+\item{methodArgs}{Extra arguments for
+\code{SNPRelate::snpgdsLDpruning()}, built with
+\code{\link{LdPruningOptions}} -- the window controls in particular.
+Only the \code{"snprelate"} backend has an engine to configure, so
+supplying options alongside \code{backend = "hclust"} is an error
+rather than a silent no-op.}
 }
 \value{
 A list with:

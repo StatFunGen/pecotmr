@@ -20,6 +20,7 @@
 # =============================================================================
 
 suppressMessages(devtools::load_all(".", quiet = TRUE, export_all = FALSE))
+library(purrr)
 data(ldScoreExample)
 
 # EXACT copy of the in-test generator, so the captured z is the one the
@@ -43,11 +44,15 @@ simZ <- function(ref, h2, n, seed) {
 # entry is a hard error there, not a silent re-simulation.
 cases <- c(
     list(
-        c(0.4, 1e4, 42), c(0.15, 4e3, 7), c(0.6, 2.5e4, 99),
-        c(0.3, 1e4, 5), c(0.6, 5e4, 9), c(0.4, 5e4, 3)
+        c(0.4, 1e4, 42),
+        c(0.15, 4e3, 7),
+        c(0.6, 2.5e4, 99),
+        c(0.3, 1e4, 5),
+        c(0.6, 5e4, 9),
+        c(0.4, 5e4, 3)
     ),
     # the HDL recovery test sweeps seeds 1:5 at (h2 = 0.4, n = 1e5)
-    lapply(1:5, function(s) c(0.4, 1e5, s))
+    map(1:5, function(s) c(0.4, 1e5, s))
 )
 out <- list()
 for (cs in cases) {
@@ -57,5 +62,8 @@ for (cs in cases) {
 saveRDS(out, "tests/testthat/test_data/sldscUpstreamZ.rds", compress = "xz")
 cat("keys:", paste(names(out), collapse = " | "), "\n")
 cat("length each:", unique(lengths(out)), "\n")
-cat("file size:",
-    file.size("tests/testthat/test_data/sldscUpstreamZ.rds"), "bytes\n")
+cat(
+    "file size:",
+    file.size("tests/testthat/test_data/sldscUpstreamZ.rds"),
+    "bytes\n"
+)

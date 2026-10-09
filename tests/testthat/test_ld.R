@@ -2,7 +2,7 @@ context("LD")
 library(tidyverse)
 
 # Helper: build an LdData S4 object from variant IDs and optional correlation matrix
-make_test_ld_data <- function(variant_ids, R = NULL, blockMetadata = NULL) {
+makeTestLdData <- function(variant_ids, R = NULL, blockMetadata = NULL) {
     if (is.null(R)) {
         p <- length(variant_ids)
         R <- diag(p)
@@ -30,7 +30,7 @@ make_test_ld_data <- function(variant_ids, R = NULL, blockMetadata = NULL) {
     )
 }
 
-generate_dummy_data <- function() {
+generateDummyData <- function() {
     region <- data.frame(
         chrom = "chr1",
         start = c(1000),
@@ -52,7 +52,7 @@ generate_dummy_data <- function() {
 }
 
 # Generate a wider region that spans multiple blocks for partition testing
-generate_multi_block_data <- function() {
+generateMultiBlockData <- function() {
     region <- data.frame(
         chrom = "chr1",
         start = c(1000),
@@ -73,8 +73,41 @@ generate_multi_block_data <- function() {
     return(list(region = region, meta = meta_df))
 }
 
+# LdData stores block metadata as a GRanges, and the block internals read it
+# as one (mcols via `$`, blocks via `[` and length()). The fixtures below are
+# index-only tables, so a span is synthesised from whatever they carry -- the
+# merge and validation logic reads chrom, size and the index range, not the
+# span.
+.ld_bmGr <- function(df) {
+    has <- function(n) n %in% names(df)
+    st <- if (has("blockStart")) {
+        df$blockStart
+    } else if (has("startIdx")) {
+        df$startIdx
+    } else {
+        rep(1L, nrow(df))
+    }
+    en <- if (has("blockEnd")) {
+        df$blockEnd
+    } else if (has("endIdx")) {
+        df$endIdx
+    } else {
+        rep(1L, nrow(df))
+    }
+    gr <- GenomicRanges::GRanges(
+        seqnames = as.character(df$chrom),
+        ranges = IRanges::IRanges(start = as.integer(st), end = as.integer(en))
+    )
+    keep <- intersect(c("blockId", "size", "startIdx", "endIdx"), names(df))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        as.data.frame(df[, keep, drop = FALSE])
+    )
+    gr
+}
+
+
 test_that("Check that we correctly retrieve the names from the matrix", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -100,7 +133,7 @@ test_that("Check that we correctly retrieve the names from the matrix", {
 })
 
 test_that("Check that the LD block contains the correct information", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -138,7 +171,7 @@ test_that("Check that the LD block contains the correct information", {
 # ---- partitionLdMatrix ----
 
 test_that("partitionLdMatrix correctly partitions a single block", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -173,7 +206,7 @@ test_that("partitionLdMatrix correctly partitions a single block", {
 })
 
 test_that("partitionLdMatrix correctly partitions multiple blocks", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -202,14 +235,14 @@ test_that("partitionLdMatrix correctly partitions multiple blocks", {
     # Check if block IDs are correct
     expect_setequal(
         unique(partitioned$variantIndices$blockId),
-        1:expected_block_count
+        seq_len(expected_block_count)
     )
 
     file.remove(LD_meta_file_path)
 })
 
 test_that("partitionLdMatrix properly merges small blocks", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -242,7 +275,7 @@ test_that("partitionLdMatrix properly merges small blocks", {
     )
 
     # Check if merged blocks are larger than min_block_size
-    block_sizes <- sapply(partitioned$ldMatrices, nrow)
+    block_sizes <- map_int(partitioned$ldMatrices, nrow)
     expect_true(all(
         block_sizes >= min_block_size |
             block_sizes == length(getVariantIds(ld_data))
@@ -252,7 +285,7 @@ test_that("partitionLdMatrix properly merges small blocks", {
 })
 
 test_that("partitionLdMatrix respects max_merged_block_size", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -277,7 +310,7 @@ test_that("partitionLdMatrix respects max_merged_block_size", {
     )
 
     # Check if no block exceeds max_block_size
-    block_sizes <- sapply(partitioned$ldMatrices, nrow)
+    block_sizes <- map_int(partitioned$ldMatrices, nrow)
     expect_true(all(block_sizes <= max_block_size))
 
     file.remove(LD_meta_file_path)
@@ -300,12 +333,12 @@ test_that("partitionLdMatrix handles empty matrix gracefully", {
     # Expect the S4 type-check error
     expect_error(
         partitionLdMatrix(empty_ld_data),
-        "ldData must be an LdData object"
+        "Assertion on 'ldData'.*Must inherit from class 'LdData'"
     )
 })
 
 test_that("partitionLdMatrix validates block structure properly", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -323,7 +356,7 @@ test_that("partitionLdMatrix validates block structure properly", {
     ldmat <- getCorrelation(ld_data)
 
     # Assuming we have at least 2 blocks:
-    if (nrow(bm) >= 2) {
+    if (length(bm) >= 2) {
         # Create overlapping blocks with invalid start/end indices
         bm$startIdx[2] <- bm$startIdx[1]
         bm$endIdx[1] <- bm$endIdx[2]
@@ -360,7 +393,7 @@ test_that("partitionLdMatrix validates block structure properly", {
 })
 
 test_that("partitionLdMatrix properly maps variants to blocks", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -393,7 +426,7 @@ test_that("partitionLdMatrix properly maps variants to blocks", {
 })
 
 test_that("partitionLdMatrix handles row/column name mismatches", {
-    data <- generate_dummy_data()
+    data <- generateDummyData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -433,7 +466,7 @@ test_that("partitionLdMatrix handles row/column name mismatches", {
 })
 
 test_that("partitionLdMatrix correctly extracts blocks based on metadata", {
-    data <- generate_multi_block_data()
+    data <- generateMultiBlockData()
     region <- data$region
     LD_meta_file_path <- gsub(
         "//",
@@ -508,7 +541,7 @@ test_that("partitionLdMatrix partitions correctly with synthetic data", {
         stringsAsFactors = FALSE
     )
 
-    ld_data <- make_test_ld_data(variant_ids, R = mat, blockMetadata = bm)
+    ld_data <- makeTestLdData(variant_ids, R = mat, blockMetadata = bm)
 
     result <- pecotmr:::partitionLdMatrix(ld_data, mergeSmallBlocks = FALSE)
 
@@ -685,7 +718,7 @@ test_that("partitionLdMatrix handles blocks with different chromosomes", {
         stringsAsFactors = FALSE
     )
 
-    test_ld_data <- make_test_ld_data(
+    test_ld_data <- makeTestLdData(
         variant_ids,
         R = test_matrix,
         blockMetadata = blockMetadata
@@ -760,7 +793,7 @@ test_that("partitionLdMatrix works with edge case block structures", {
         stringsAsFactors = FALSE
     )
 
-    test_ld_data <- make_test_ld_data(
+    test_ld_data <- makeTestLdData(
         variantNames,
         R = test_matrix,
         blockMetadata = blockMetadata
@@ -995,7 +1028,7 @@ test_that("validateBlockStructure passes for proper block structure", {
 
     expect_silent(pecotmr:::validateBlockStructure(
         mat,
-        block_meta,
+        .ld_bmGr(block_meta),
         variant_ids
     ))
 })
@@ -1016,7 +1049,11 @@ test_that("validateBlockStructure errors on non-block structure", {
     )
 
     expect_error(
-        pecotmr:::validateBlockStructure(mat, block_meta, variant_ids),
+        pecotmr:::validateBlockStructure(
+            mat,
+            .ld_bmGr(block_meta),
+            variant_ids
+        ),
         "Matrix lacks expected block structure"
     )
 })
@@ -1049,7 +1086,7 @@ test_that("mergeBlocks properly handles blocks at chromosome boundaries", {
         stringsAsFactors = FALSE
     )
 
-    test_ld_data <- make_test_ld_data(
+    test_ld_data <- makeTestLdData(
         variantNames,
         R = test_matrix,
         blockMetadata = blockMetadata
@@ -1090,8 +1127,12 @@ test_that("mergeBlocks merges small adjacent blocks", {
         startIdx = c(1, 51, 101),
         endIdx = c(50, 100, 200)
     )
-    result <- pecotmr:::mergeBlocks(block_meta, minSize = 100, maxSize = 10000)
-    expect_true(nrow(result) < 3)
+    result <- pecotmr:::mergeBlocks(
+        .ld_bmGr(block_meta),
+        minSize = 100,
+        maxSize = 10000
+    )
+    expect_true(length(result) < 3)
 })
 
 test_that("mergeBlocks does not merge cross-chromosome", {
@@ -1102,8 +1143,12 @@ test_that("mergeBlocks does not merge cross-chromosome", {
         startIdx = c(1, 11),
         endIdx = c(10, 20)
     )
-    result <- pecotmr:::mergeBlocks(block_meta, minSize = 50, maxSize = 10000)
-    expect_equal(nrow(result), 2) # Cannot merge across chromosomes
+    result <- pecotmr:::mergeBlocks(
+        .ld_bmGr(block_meta),
+        minSize = 50,
+        maxSize = 10000
+    )
+    expect_equal(length(result), 2) # Cannot merge across chromosomes
 })
 
 test_that("mergeBlocks returns single block unchanged", {
@@ -1114,8 +1159,12 @@ test_that("mergeBlocks returns single block unchanged", {
         startIdx = 1,
         endIdx = 10
     )
-    result <- pecotmr:::mergeBlocks(block_meta, minSize = 100, maxSize = 10000)
-    expect_equal(nrow(result), 1)
+    result <- pecotmr:::mergeBlocks(
+        .ld_bmGr(block_meta),
+        minSize = 100,
+        maxSize = 10000
+    )
+    expect_equal(length(result), 1)
 })
 
 # ---- canMerge ----
@@ -1127,10 +1176,10 @@ test_that("canMerge checks chromosome and size", {
         stringsAsFactors = FALSE
     )
     # rows 1 and 2: same chrom, combined size 300
-    expect_true(pecotmr:::canMerge(bm, 1, 2, maxSize = 500))
-    expect_false(pecotmr:::canMerge(bm, 1, 2, maxSize = 200))
+    expect_true(pecotmr:::canMerge(.ld_bmGr(bm), 1, 2, maxSize = 500))
+    expect_false(pecotmr:::canMerge(.ld_bmGr(bm), 1, 2, maxSize = 200))
     # rows 1 and 3: different chromosome
-    expect_false(pecotmr:::canMerge(bm, 1, 3, maxSize = 500))
+    expect_false(pecotmr:::canMerge(.ld_bmGr(bm), 1, 3, maxSize = 500))
 })
 
 # ===========================================================================
@@ -1230,10 +1279,14 @@ test_that("extractBlockMatrices warns and skips out-of-range blocks", {
         stringsAsFactors = FALSE
     )
     expect_warning(
-        result <- pecotmr:::extractBlockMatrices(mat, blockMetadata, vnames),
+        result <- pecotmr:::extractBlockMatrices(
+            mat,
+            .ld_bmGr(blockMetadata),
+            vnames
+        ),
         "outside the range"
     )
-    valid_blocks <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+    valid_blocks <- compact(result$ldMatrices)
     expect_equal(length(valid_blocks), 1)
     expect_equal(nrow(valid_blocks[[1]]), 2)
 })
@@ -1312,7 +1365,7 @@ test_that("resolveLdSource detects precomputed from metadata", {
 test_that("resolveLdSource errors on missing file", {
     expect_error(
         pecotmr:::resolveLdSource("/nonexistent/file.tsv"),
-        "not found"
+        "LD metadata file: File does not exist"
     )
 })
 
@@ -1383,8 +1436,8 @@ test_that("loadLdFromGenotype returns LD matrix with .afreq", {
     expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq > 0))
     expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq < 1))
     # blockMetadata
-    expect_true(is.data.frame(getBlockMetadata(result)))
-    expect_equal(nrow(getBlockMetadata(result)), 1L)
+    expect_true(is(getBlockMetadata(result), "GRanges"))
+    expect_equal(length(getBlockMetadata(result)), 1L)
 })
 
 test_that("loadLdFromGenotype returns genotype matrix when requested", {
@@ -1603,7 +1656,7 @@ test_that("loadLdMatrix loads single precomputed block", {
     expect_true(all(grepl("^chr1:", getVariantIds(result))))
     expect_false(hasGenotypes(result))
     # blockMetadata should have one block
-    expect_equal(nrow(getBlockMetadata(result)), 1L)
+    expect_equal(length(getBlockMetadata(result)), 1L)
     # ref_panel (now GRanges) should have variant info via mcols
     ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
     expect_true("variant_id" %in% names(ref_mcols))
@@ -1642,7 +1695,7 @@ test_that("loadLdMatrix loads multiple precomputed blocks", {
     # Should span blocks 1-3: 5 + 5 + 5 = 15 unique variants (no overlap in variant IDs)
     expect_true(nrow(getCorrelation(result)) >= 10)
     expect_true(isSymmetric(getCorrelation(result)))
-    expect_true(nrow(getBlockMetadata(result)) >= 2)
+    expect_true(length(getBlockMetadata(result)) >= 2)
 })
 
 test_that("loadLdMatrix with n_sample for precomputed blocks with freq data", {
@@ -1949,7 +2002,7 @@ test_that("enforceDesignFullRank fallback to correlation pruning works", {
         X[, 3] + rnorm(n, sd = 1e-10),
         X[, 1] + X[, 2] + rnorm(n, sd = 1e-10)
     )
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(ncol(X))))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(ncol(X)))
     C <- matrix(rnorm(n), n, 1)
     result <- enforceDesignFullRank(
         X,
@@ -1994,7 +2047,7 @@ test_that("ldClumpByScore errors on mismatched score length", {
     X <- matrix(rnorm(20), 5, 4)
     expect_error(
         ldClumpByScore(X, score = c(1, 2), chr = rep(1L, 4), pos = 1:4),
-        "length\\(score\\)"
+        "score.*Must have length 4"
     )
 })
 
@@ -2004,7 +2057,7 @@ test_that("ldClumpByScore errors on mismatched chr/pos length", {
     X <- matrix(rnorm(20), 5, 4)
     expect_error(
         ldClumpByScore(X, score = runif(4), chr = rep(1L, 2), pos = 1:4),
-        "chr and pos"
+        "chr.*Must have length 4"
     )
 })
 
@@ -2096,7 +2149,7 @@ test_that("ldPruneByCorrelation removes highly correlated columns", {
     n <- 50
     p <- 10
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
     result <- ldPruneByCorrelation(X, corThres = 0.9)
     expect_true(ncol(result$X.new) < p)
@@ -2108,10 +2161,10 @@ test_that("ldPruneByCorrelation keeps all columns when uncorrelated", {
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     result <- ldPruneByCorrelation(X, corThres = 0.99)
     expect_equal(ncol(result$X.new), p)
-    expect_equal(result$filter.id, 1:p)
+    expect_equal(result$filter.id, seq_len(p))
 })
 
 test_that("ldPruneByCorrelation preserves colnames for single remaining column", {
@@ -2139,7 +2192,7 @@ test_that("ldPruneByCorrelation strict threshold removes at least as many as len
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 3] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 5] <- X[, 4] + rnorm(n, sd = 0.1)
@@ -2391,7 +2444,7 @@ test_that("ldClumpByScore validates input lengths", {
             chr = rep(1L, 2),
             pos = seq_len(3) * 1000L
         ),
-        "chr and pos"
+        "chr.*Must have length 3"
     )
 })
 
@@ -3683,7 +3736,7 @@ test_that("validateBlockStructure flags out-of-range block indices", {
         endIdx = c(2L, 12L)
     )
     expect_error(
-        pecotmr:::validateBlockStructure(mat, bm, vnames),
+        pecotmr:::validateBlockStructure(mat, .ld_bmGr(bm), vnames),
         "Block indices out of range"
     )
 })
@@ -3702,8 +3755,8 @@ test_that("extractBlockMatrices skips blocks where endIdx < startIdx", {
         size = c(2L, 1L),
         stringsAsFactors = FALSE
     )
-    result <- pecotmr:::extractBlockMatrices(mat, bm, vnames)
-    valid <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+    result <- pecotmr:::extractBlockMatrices(mat, .ld_bmGr(bm), vnames)
+    valid <- compact(result$ldMatrices)
     expect_length(valid, 1)
     expect_equal(nrow(valid[[1]]), 2L)
 })
@@ -3720,7 +3773,7 @@ test_that("ldPruneByCorrelation snprelate backend prunes correlated columns", {
     p <- 6
     X <- matrix(rbinom(n * p, 2, 0.3), n, p)
     X[, 2] <- X[, 1] # perfect LD between columns 1 and 2
-    colnames(X) <- paste0("snp", 1:p)
+    colnames(X) <- paste0("snp", seq_len(p))
     result <- suppressMessages(
         ldPruneByCorrelation(
             X,
@@ -3906,7 +3959,10 @@ test_that("ldClumpByScore accepts a pre-built FBM and reports retained count (ve
 # =============================================================================
 
 test_that("extractLdMatrix errors on non-LdData input", {
-    expect_error(pecotmr:::extractLdMatrix(list()), "must be an LdData object")
+    expect_error(
+        pecotmr:::extractLdMatrix(list()),
+        "Must inherit from class 'LdData'"
+    )
 })
 
 test_that("extractLdMatrix returns the genotype matrix when wantGenotype=TRUE", {
@@ -3982,6 +4038,9 @@ test_that("computeLd errors when a non-internal backend is paired with non-sampl
 # ldPruneByCorrelation's `cor.X <- cor(X)`) are reachable by mocking the *base*
 # `requireNamespace` (so it reports Rfast missing) for the duration of the call.
 test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast is absent", {
+    # Captured BEFORE the rebinding: inside the mock, `base::requireNamespace`
+    # resolves to the mock itself, so delegating through it recurses.
+    realRequireNamespace <- base::requireNamespace
     with_mocked_bindings(
         {
             set.seed(1)
@@ -4001,7 +4060,7 @@ test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast
             if (identical(package, "Rfast")) {
                 FALSE
             } else {
-                base::requireNamespace(package, ...)
+                realRequireNamespace(package, ...)
             }
         },
         .package = "base"
@@ -4026,7 +4085,7 @@ test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast
     set.seed(11)
     nS <- 100L
     af <- c(rep(0.35, 5L), rep(0.004, 5L))
-    d <- vapply(af, function(f) rbinom(nS, 2L, f), numeric(nS))
+    d <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
     colnames(d) <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     d[1:80, 2] <- NA
     d
@@ -4073,8 +4132,16 @@ test_that(".panelVariantFilter drops panel-rare variants", {
     data(qtlDatasetExample)
     handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
-    loose <- .panelVariantFilter(handle, ids, mafCutoff = 0.05)
-    tight <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    loose <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(mafCutoff = 0.05)
+    )
+    tight <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(mafCutoff = 0.2)
+    )
     expect_lt(length(loose), length(ids))
     expect_lt(length(tight), length(loose))
     # Kept sets are nested as the cutoff rises, and order is the caller's.
@@ -4088,13 +4155,25 @@ test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
     nSamp <- getNSamples(handle)
     # macCutoff / (2 * nSamples) is the same threshold as mafCutoff.
-    byMac <- .panelVariantFilter(handle, ids, macCutoff = 0.1 * 2 * nSamp)
-    byMaf <- .panelVariantFilter(handle, ids, mafCutoff = 0.1)
+    byMac <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(macCutoff = 0.1 * 2 * nSamp)
+    )
+    byMaf <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(mafCutoff = 0.1)
+    )
     expect_identical(byMac, byMaf)
     # The stricter of the two wins.
     expect_identical(
-        .panelVariantFilter(handle, ids, mafCutoff = 0.2, macCutoff = 2),
-        .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+        .panelVariantFilter(
+            handle,
+            ids,
+            PanelFilterParam(mafCutoff = 0.2, macCutoff = 2)
+        ),
+        .panelVariantFilter(handle, ids, PanelFilterParam(mafCutoff = 0.2))
     )
 })
 
@@ -4102,10 +4181,17 @@ test_that(".panelVariantFilter drops high-missingness variants", {
     data(qtlDatasetExample)
     handle <- getGenotypeHandle(qtlDatasetExample)
     ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
-    strict <- .panelVariantFilter(handle, ids, imissCutoff = 0)
+    strict <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(imissCutoff = 0)
+    )
     expect_lt(length(strict), length(ids))
     # A cutoff above the panel's worst variant keeps everything.
-    expect_identical(.panelVariantFilter(handle, ids, imissCutoff = 1), ids)
+    expect_identical(
+        .panelVariantFilter(handle, ids, PanelFilterParam(imissCutoff = 1)),
+        ids
+    )
 })
 
 test_that(".panelVariantFilter passes through ids absent from the panel", {
@@ -4118,7 +4204,11 @@ test_that(".panelVariantFilter passes through ids absent from the panel", {
     withGhost <- c("chr9:999:A:G", ids)
     expect_true(is_in(
         "chr9:999:A:G",
-        .panelVariantFilter(handle, withGhost, mafCutoff = 0.001)
+        .panelVariantFilter(
+            handle,
+            withGhost,
+            PanelFilterParam(mafCutoff = 0.001)
+        )
     ))
 })
 
@@ -4126,11 +4216,19 @@ test_that(".panelVariantFilter handles empty and NULL input", {
     data(qtlDatasetExample)
     handle <- getGenotypeHandle(qtlDatasetExample)
     expect_length(
-        .panelVariantFilter(handle, character(0), mafCutoff = 0.1),
+        .panelVariantFilter(
+            handle,
+            character(0),
+            PanelFilterParam(mafCutoff = 0.1)
+        ),
         0L
     )
     expect_identical(
-        .panelVariantFilter(NULL, "chr1:1:A:G", mafCutoff = 0.1),
+        .panelVariantFilter(
+            NULL,
+            "chr1:1:A:G",
+            PanelFilterParam(mafCutoff = 0.1)
+        ),
         "chr1:1:A:G"
     )
 })
@@ -4139,14 +4237,20 @@ test_that(".panelVariantFilter handles empty and NULL input", {
 test_that(".panelCutoffs short-circuits when no cutoff is set", {
     # NULL means the panel is never touched, which is what keeps the default
     # path free of an extra dosage read.
-    expect_null(.panelCutoffs(list()))
-    expect_null(.panelCutoffs(list(
+    expect_null(.panelCutoffs())
+    expect_null(.panelCutoffs(PanelFilterParam(
         mafCutoff = 0,
         macCutoff = 0,
         imissCutoff = 1
     )))
-    expect_equal(.panelCutoffs(list(mafCutoff = 0.01))$mafCutoff, 0.01)
-    expect_equal(.panelCutoffs(list(imissCutoff = 0.5))$imissCutoff, 0.5)
+    expect_equal(
+        .panelCutoffs(PanelFilterParam(mafCutoff = 0.01))$mafCutoff,
+        0.01
+    )
+    expect_equal(
+        .panelCutoffs(PanelFilterParam(imissCutoff = 0.5))$imissCutoff,
+        0.5
+    )
 })
 
 
@@ -4193,13 +4297,21 @@ test_that(".panelVariantFilter: .afreq and dosage agree on what to drop", {
     skip_if_not_installed("pgenlibr")
     handle <- .pvfAfreqHandle()
     ids <- as.character(getSnpInfo(handle)$SNP)
-    viaAfreq <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    viaAfreq <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(mafCutoff = 0.2)
+    )
     # Force the dosage path by hiding the sidecar from the fast path.
     local_mocked_bindings(
         .panelAfreqMaf = function(handle, variantIds) NULL,
         .package = "pecotmr"
     )
-    viaDosage <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    viaDosage <- .panelVariantFilter(
+        handle,
+        ids,
+        PanelFilterParam(mafCutoff = 0.2)
+    )
     expect_lt(length(viaAfreq), length(ids))
     expect_identical(viaAfreq, viaDosage)
 })
@@ -4217,7 +4329,11 @@ test_that(".panelVariantFilter uses dosage whenever missingness is capped", {
         .package = "pecotmr"
     )
     expect_no_error(
-        .panelVariantFilter(handle, ids, mafCutoff = 0.2, imissCutoff = 0.5)
+        .panelVariantFilter(
+            handle,
+            ids,
+            PanelFilterParam(mafCutoff = 0.2, imissCutoff = 0.5)
+        )
     )
 })
 
@@ -4588,7 +4704,7 @@ test_that("a block-indexed source must be addressable by block", {
     # or a list of them; anything else is refused rather than silently
     # returning the wrong block.
     expect_error(
-        pecotmr:::.loadLdFromIndexed("a string", 1L, FALSE),
+        pecotmr:::.loadLdFromIndexed("a string", 1L),
         "cannot address a character by block"
     )
 })
@@ -4596,9 +4712,9 @@ test_that("a block-indexed source must be addressable by block", {
 test_that("a matrix and a list of matrices both address by block", {
     R <- diag(3)
     dimnames(R) <- list(c("v1", "v2", "v3"), c("v1", "v2", "v3"))
-    expect_s4_class(pecotmr:::.loadLdFromIndexed(R, 1L, FALSE), "LdData")
+    expect_s4_class(pecotmr:::.loadLdFromIndexed(R, 1L), "LdData")
     # The list form picks the requested element.
-    both <- pecotmr:::.loadLdFromIndexed(list(R, R), 2L, FALSE)
+    both <- pecotmr:::.loadLdFromIndexed(list(R, R), 2L)
     expect_s4_class(both, "LdData")
     expect_equal(length(both), 3L)
 })
@@ -4784,11 +4900,19 @@ test_that(".panelVariantFilter is a no-op without a sketch", {
     # An active cutoff still cannot filter anything with no panel to read
     # frequencies from.
     expect_equal(
-        pecotmr:::.panelVariantFilter(NULL, v, mafCutoff = 0.01),
+        pecotmr:::.panelVariantFilter(
+            NULL,
+            v,
+            PanelFilterParam(mafCutoff = 0.01)
+        ),
         v
     )
     expect_equal(
-        pecotmr:::.panelVariantFilter(NULL, character(0), mafCutoff = 0.01),
+        pecotmr:::.panelVariantFilter(
+            NULL,
+            character(0),
+            PanelFilterParam(mafCutoff = 0.01)
+        ),
         character(0)
     )
 })
@@ -4807,7 +4931,11 @@ test_that(".panelVariantFilter is a no-op when nothing matches the panel", {
     # The sketch exists but shares no variant with the request, so there is
     # no frequency to filter on and the ids pass through untouched.
     expect_equal(
-        pecotmr:::.panelVariantFilter(sketch, ids, mafCutoff = 0.01),
+        pecotmr:::.panelVariantFilter(
+            sketch,
+            ids,
+            PanelFilterParam(mafCutoff = 0.01)
+        ),
         ids
     )
 })
@@ -4925,10 +5053,19 @@ test_that("computeLd(onDisk) applies shrinkage toward the identity", {
         format = "gds"
     )
     idx <- 1:6
-    plain <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE)
-    shrunk <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE, shrinkage = 0.5)
+    plain <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE
+    )
+    shrunk <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE,
+        shrinkage = 0.5
+    )
     # (1 - s) * R + s * I: off-diagonals halve, the diagonal stays 1.
     expect_equal(unname(diag(shrunk)), rep(1, length(idx)))
     expect_equal(
@@ -5053,4 +5190,132 @@ test_that(".panelAfreqMaf returns NULL when no sidecar exists at all", {
             as.character(pecotmr:::getSnpInfo(handle)$SNP)
         )
     )
+})
+
+test_that(".ldConcatChr answers character(0) for no pieces", {
+    expect_identical(pecotmr:::.ldConcatChr(list()), character(0))
+})
+
+test_that(".ldTrimTrailingNull answers an empty list when nothing is filled", {
+    expect_identical(pecotmr:::.ldTrimTrailingNull(list(NULL, NULL)), list())
+})
+
+test_that("the ldSketch cross-checks are no-ops when a side has no variants", {
+    # A zero-variant panel -- what an emptied object carries -- contradicts
+    # nothing, so there is nothing to compare and the check returns quietly.
+    local_mocked_bindings(.ldSketchA1 = function(x) character(0))
+    expect_null(pecotmr:::.ldSketchCheckAlleleCoding(
+        NULL,
+        NULL,
+        integer(0),
+        integer(0),
+        "testPipeline",
+        ""
+    ))
+})
+
+test_that(".ldSketchCheckOverlap is a no-op when a side has no variants", {
+    local_mocked_bindings(.ldSketchVariantKeys = function(x) character(0))
+    expect_null(
+        pecotmr:::.ldSketchCheckOverlap(NULL, NULL, "testPipeline", "")
+    )
+})
+
+test_that("LdPruningOptions refuses what the snprelate backend owns", {
+    expect_error(LdPruningOptions(gdsobj = 1), "the temporary GDS")
+    expect_error(LdPruningOptions(method = "r"), "fixed at 'corr'")
+    expect_error(
+        LdPruningOptions(ld.threshold = 0.5),
+        "the caller's `corThres`"
+    )
+    expect_error(LdPruningOptions(verbose = TRUE), "the caller's `verbose`")
+    expect_error(LdPruningOptions(nosuch = 1), "unknown argument")
+    expect_equal(LdPruningOptions(slide.max.bp = 1e6)$slide.max.bp, 1e6)
+})
+
+test_that("ldPruneByCorrelation refuses options its backend never uses", {
+    set.seed(1)
+    X <- matrix(rnorm(100 * 5), 100, 5)
+    expect_error(
+        ldPruneByCorrelation(
+            X,
+            backend = "hclust",
+            methodArgs = LdPruningOptions(slide.max.n = 10L)
+        ),
+        "backend 'hclust' does not call"
+    )
+    # No options is the default, so the hclust path still works untouched.
+    expect_length(ldPruneByCorrelation(X, corThres = 0.9)$filter.id, 5L)
+    expect_error(
+        ldPruneByCorrelation(X, methodArgs = list(slide.max.n = 10L)),
+        "LdPruningOptions"
+    )
+})
+
+test_that("ldPruneByCorrelation forwards methodArgs to SNPRelate", {
+    skip_if_not_installed("SNPRelate")
+    skip_if_not_installed("gdsfmt")
+    seen <- NULL
+    real <- SNPRelate::snpgdsLDpruning
+    set.seed(2)
+    X <- matrix(sample(0:2, 100 * 6, replace = TRUE), 100, 6)
+    colnames(X) <- str_c("snp", seq_len(6))
+    suppressMessages(with_mocked_bindings(
+        ldPruneByCorrelation(
+            X,
+            corThres = 0.9,
+            backend = "snprelate",
+            methodArgs = LdPruningOptions(slide.max.n = 3L)
+        ),
+        snpgdsLDpruning = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "SNPRelate"
+    ))
+    expect_equal(seen$slide.max.n, 3L)
+    expect_equal(seen$method, "corr")
+    expect_equal(seen$ld.threshold, 0.9)
+})
+
+test_that(".panelCutoffs answers NULL for a filter that keeps everything", {
+    expect_null(pecotmr:::.panelCutoffs(PanelFilterParam()))
+    expect_equal(
+        pecotmr:::.panelCutoffs(PanelFilterParam(mafCutoff = 0.01))$mafCutoff,
+        0.01
+    )
+})
+
+test_that("validateBlockStructure rejects overlapping blocks", {
+    # The merge logic only considers i - 1 / i + 1, so a block's position in
+    # the table has to mean its position on the chromosome. As a data.frame
+    # nothing checked that; as a GRanges isDisjoint() does.
+    mat <- diag(4)
+    vnames <- sprintf("chr1:%d:A:G", 100L * (1:4))
+    rownames(mat) <- colnames(mat) <- vnames
+    overlapping <- data.frame(
+        blockId = c(1L, 2L),
+        chrom = c("1", "1"),
+        blockStart = c(100L, 150L),
+        blockEnd = c(300L, 400L),
+        size = c(2L, 2L),
+        startIdx = c(1L, 3L),
+        endIdx = c(2L, 4L)
+    )
+    expect_error(
+        pecotmr:::validateBlockStructure(
+            mat,
+            .ld_bmGr(overlapping),
+            vnames
+        ),
+        "each block must cover a span of its own"
+    )
+    # The same blocks, made disjoint, pass.
+    disjoint <- overlapping
+    disjoint$blockStart <- c(100L, 301L)
+    expect_silent(pecotmr:::validateBlockStructure(
+        mat,
+        .ld_bmGr(disjoint),
+        vnames
+    ))
 })

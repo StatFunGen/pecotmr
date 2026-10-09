@@ -1,4 +1,4 @@
-context("regularized_regression - mr_ash_rss")
+context("regularized_regression - mrashRss")
 
 # ============================================================================
 # mrashRssWeights - dispatch + smoke test
@@ -54,7 +54,7 @@ test_that("mrashRssWeights forwards arguments to susieR::mr.ash.rss", {
         s0 = c(0, 0.1, 0.2),
         w0 = c(0.5, 0.3, 0.2),
         z = z_vec,
-        tol = 1e-6
+        methodArgs = MrashOptions(tol = 1e-6)
     )
     expect_equal(captured$bhat, bhat)
     expect_equal(captured$shat, shat)

@@ -15,8 +15,7 @@ getCs(x, ...)
   method = NULL,
   region = NULL,
   coverage = 0.95,
-  minPurity = NULL,
-  ...
+  minPurity = NULL
 )
 }
 \arguments{

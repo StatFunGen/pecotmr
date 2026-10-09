@@ -15,9 +15,11 @@ twasWeightsCv(
   variantsToKeep = NULL,
   numThreads = 1,
   verbose = 1,
-  retainFits = FALSE,
+  fitRetention = c("none", "slim", "full"),
   seed = NULL,
-  ...
+  dataDrivenPriorMatricesCv = NULL,
+  reweightedMixturePriorCv = NULL,
+  fittedModelsCv = NULL
 )
 }
 \arguments{
@@ -56,8 +58,11 @@ is enabled with that many threads.}
 messages, 1 = suppress external package messages (default), 2 = show all
 messages including those from external packages.}
 
-\item{retainFits}{Logical. Retain the per-fold / per-method fitted-model
-objects on the result. Default \code{FALSE}.}
+\item{fitRetention}{How much of each per-method fit is kept on the result:
+\code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
+payload downstream needs, \code{"full"} keeps the whole fitted object.
+Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
+for every other method the two behave alike.}
 
 \item{seed}{Integer or \code{NULL}. When supplied, seeds both the
 main-process RNG (fold partitioning, variant sub-sampling) and the
@@ -67,7 +72,18 @@ seed is scoped to the call, so the session RNG is left as it was found.
 \code{NULL} (default) does not seed at all and uses the historical
 parallel default.}
 
-\item{...}{Additional arguments forwarded to the per-method weight learners.}
+\item{dataDrivenPriorMatricesCv}{Optional list, one element per fold, of
+data-driven prior matrices for the mr.mash learner.}
+
+\item{reweightedMixturePriorCv}{Optional list, one element per fold, of
+reweighted mixture priors for the mvSuSiE learner.}
+
+\item{fittedModelsCv}{Optional per-fold fine-mapping fits, as
+\code{method -> fold_<j> -> fit}, from a \code{fineMappingPipeline()}
+run with \code{cvFolds > 1}. SuSiE-family weight wrappers extract from a
+supplied fit and never fine-map, so this is what makes cross-validating
+them possible; it must have been produced on \code{samplePartitions},
+since a fit trained on different folds would leak held-out samples.}
 }
 \value{
 A list with the following components:
@@ -105,6 +121,9 @@ method to the entire Y matrix for each fold.
 data(multiTraitData)
 X <- multiTraitData$X[, 1:80]
 Y <- multiTraitData$Y
+# A cross-validated method is refit on each fold's training rows. The
+# SuSiE family never fine-maps, so it needs each fold's own fit, passed
+# as `fittedModelsCv` from a fineMappingPipeline() run with cvFolds > 1.
 twasWeightsCv(X, Y[, 1, drop = FALSE], fold = 3,
-  weightMethods = list(susie_weights = list()))
+  weightMethods = list(lasso_weights = list()))
 }

@@ -8,7 +8,8 @@ metaAnalysisPerCondition(
   effectSizes,
   seValues,
   seCutoff = 0,
-  metaMethod = "DL"
+  metaMethod = "DL",
+  metaArgs = RmaOptions()
 )
 }
 \arguments{
@@ -27,6 +28,10 @@ the meta-analysis for a given feature (default 0).}
 meta-analysis, forwarded to \code{metafor::rma(method = )}. Default
 \code{"DL"} (DerSimonian-Laird); other options include \code{"REML"},
 \code{"ML"}, \code{"EB"}.}
+
+\item{metaArgs}{Extra arguments for \code{metafor::rma()}, built with
+\code{\link{RmaOptions}} -- \code{test = "knha"} in particular, the
+small-study correction.}
 }
 \value{
 A tibble with columns:

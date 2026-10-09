@@ -18,11 +18,16 @@
     if (length(keys) == 0L) {
         return(seq_len(nrow(x)))
     }
-    ok <- rep(TRUE, nrow(x))
-    for (k in names(keys)) {
-        ok <- ok & as.character(.tupleColumn(x, k)) == keys[[k]]
-    }
-    which(ok)
+    which(reduce(
+        map(names(keys), .tupleKeyEquals, x = x, keys = keys),
+        `&`,
+        .init = rep(TRUE, nrow(x))
+    ))
+}
+
+# @noRd
+.tupleKeyEquals <- function(k, x, keys) {
+    as.character(.tupleColumn(x, k)) == keys[[k]]
 }
 
 # Read an identity column by name. Every collection keeps its identity
@@ -72,9 +77,9 @@
 # rather than reported as NA).
 # @noRd
 .fmrTupleLabel <- function(side, ident, block = NULL) {
-    fields <- compact(c(ident, list(block = block)))
-    fields <- fields[!map_lgl(fields, is.na)]
-    shown <- str_c(names(fields), "='", unlist(fields), "'")
+    supplied <- compact(c(ident, list(block = block)))
+    fields <- discard(supplied, is.na)
+    shown <- str_c(names(fields), "='", map_chr(fields, as.character), "'")
     glue("{side} ({str_flatten(shown, ', ')})")
 }
 
@@ -119,6 +124,7 @@
 # TwasWeights accessors. Returns an error when no row matches; returns
 # the single row index when the collection has exactly one row and any
 # selector argument was omitted.
+#' @importFrom checkmate assertVector
 .tupleSelectRow <- function(
     x,
     study,
@@ -149,16 +155,10 @@
         )
         abort(msg)
     }
-    if (
-        length(study) != 1L ||
-            length(context) != 1L ||
-            length(trait) != 1L ||
-            length(method) != 1L
-    ) {
-        abort(
-            "`study`, `context`, `trait`, and `method` must each be length 1."
-        )
-    }
+    assertVector(study, len = 1L)
+    assertVector(context, len = 1L)
+    assertVector(trait, len = 1L)
+    assertVector(method, len = 1L)
     .tupleMatchQtl(x, study, context, trait, method)
 }
 
@@ -183,6 +183,7 @@
 # index of a GwasFineMappingResult collection. `region` may be NULL when
 # the (study, method) pair maps to a single row; otherwise it disambiguates
 # among per-block rows of a genome-wide collection.
+#' @importFrom checkmate assertVector
 .tupleSelectRowGwasFmr <- function(x, study, method, region = NULL) {
     if (nrow(x) == 0L) {
         abort("GwasFineMappingResult has no rows.")
@@ -201,22 +202,19 @@
         )
         abort(msg)
     }
-    if (length(study) != 1L || length(method) != 1L) {
-        abort("`study` and `method` must each be length 1.")
-    }
-    if (!is.null(region) && length(region) != 1L) {
-        abort("`region` must be length 1 when supplied.")
-    }
+    assertVector(study, len = 1L)
+    assertVector(method, len = 1L)
+    assertVector(region, len = 1L, null.ok = TRUE)
     .tupleMatchGwas(x, study, method, region)
 }
 
 # Resolve a (study, method[, blockId]) tuple to a single row index.
 # @noRd
 .tupleMatchGwas <- function(x, study, method, region) {
-    keys <- list(study = study, method = method)
-    if (!is.null(region)) {
-        keys$blockId <- region
-    }
+    keys <- c(
+        list(study = study, method = method),
+        compact(list(blockId = region))
+    )
     idx <- .matchTupleRows(x, keys)
     if (length(idx) == 0L) {
         regionPart <- if (is.null(region)) {
@@ -265,24 +263,27 @@
     method = NULL,
     region = NULL
 ) {
-    keys <- list(
+    supplied <- compact(list(
         study = study,
         context = context,
         trait = trait,
         method = method,
         blockId = region
-    )
-    keys <- keys[!map_lgl(keys, is.null)]
-    keys <- keys[is_in(names(keys), .tupleColumnNames(x))]
+    ))
+    keys <- supplied[is_in(names(supplied), .tupleColumnNames(x))]
     if (length(keys) == 0L) {
         return(seq_len(nrow(x)))
     }
-    ok <- rep(TRUE, nrow(x))
-    for (k in names(keys)) {
-        ok <- ok &
-            is_in(as.character(.tupleColumn(x, k)), as.character(keys[[k]]))
-    }
-    which(ok)
+    which(reduce(
+        map(names(keys), .tupleKeyIsIn, x = x, keys = keys),
+        `&`,
+        .init = rep(TRUE, nrow(x))
+    ))
+}
+
+# @noRd
+.tupleKeyIsIn <- function(k, x, keys) {
+    is_in(as.character(.tupleColumn(x, k)), as.character(keys[[k]]))
 }
 
 # Internal: per-row identity metadata for a FineMappingResultBase collection,
@@ -292,9 +293,7 @@
 .fmrRowMetadata <- function(x) {
     cols <- c("study", "context", "trait", "blockId", "method")
     n <- nrow(x)
-    vals <- map(cols, .fmrMetadataCol, x = x, n = n)
-    names(vals) <- cols
-    as_tibble(vals)
+    as_tibble(set_names(map(cols, .fmrMetadataCol, x = x, n = n), cols))
 }
 
 # Internal: row-bind view tibbles whose column sets may differ; bind_rows
@@ -342,8 +341,7 @@
         )
         abort(msg)
     }
-    cols[["blockId"]] <- as.character(blockId)
-    cols
+    c(cols, list(blockId = as.character(blockId)))
 }
 
 # Internal: append a validated `region` GRanges to a constructor's column list
@@ -383,17 +381,18 @@
     if (length(traitPos) != n) {
         abort("`traitPos` must have the same length as `study`.")
     }
-    cols[["traitPos"]] <- traitPos
-    cols
+    c(cols, list(traitPos = traitPos))
 }
 
+#' @importFrom checkmate checkClass
 .validateTraitPosColumn <- function(object) {
     if (!is_in("traitPos", .tupleColumnNames(object))) {
         return(character(0))
     }
     traitPos <- .tupleColumn(object, "traitPos")
-    if (!methods::is(traitPos, "GRanges")) {
-        return("'traitPos' column must be a GRanges")
+    res <- checkClass(traitPos, "GRanges")
+    if (!isTRUE(res)) {
+        return(str_c("'traitPos' column ", res))
     }
     if (length(traitPos) != nrow(object)) {
         return("'traitPos' column must have one range per row")
@@ -485,7 +484,7 @@
     region = NULL,
     perEntry,
     onSingle = perEntry,
-    ...
+    viewArgs = list()
 ) {
     single <- .fmrTrySingle(
         x,
@@ -495,7 +494,7 @@
         method,
         region,
         onSingle,
-        ...
+        viewArgs
     )
     if (single$done) {
         return(single$result)
@@ -518,7 +517,7 @@
         x = x,
         perEntry = perEntry,
         meta = meta,
-        ...
+        viewArgs = viewArgs
     ))
     if (length(parts) == 0L) {
         return(slice(meta, integer(0)))
@@ -541,6 +540,7 @@
 # list(done, result) on a successful single-select, else list(done = FALSE, sel)
 # carrying the selection error (or NULL when no selector was given).
 # @noRd
+#' @importFrom rlang try_fetch
 .fmrTrySingle <- function(
     x,
     study,
@@ -549,7 +549,7 @@
     method,
     region,
     onSingle,
-    ...
+    viewArgs
 ) {
     anySelector <- !is.null(study) ||
         !is.null(context) ||
@@ -559,7 +559,7 @@
     if (!anySelector) {
         return(list(done = FALSE, sel = NULL))
     }
-    sel <- tryCatch(
+    sel <- try_fetch(
         .fmrSelectEntry(
             x,
             study = study,
@@ -568,10 +568,10 @@
             method = method,
             region = region
         ),
-        error = function(e) e
+        error = function(cnd) cnd
     )
     if (!inherits(sel, "error")) {
-        return(list(done = TRUE, result = onSingle(sel, ...)))
+        return(list(done = TRUE, result = exec(onSingle, sel, !!!viewArgs)))
     }
     list(done = FALSE, sel = sel)
 }
@@ -579,15 +579,15 @@
 # Project one entry to its per-entry view with the row's identity metadata
 # prepended; NULL when the entry yields no rows.
 # @noRd
-.fmrEntryPart <- function(i, x, perEntry, meta, ...) {
+.fmrEntryPart <- function(i, x, perEntry, meta, viewArgs) {
     # `perEntry` is an internal per-row function taking the stored payload, not
     # an S4 generic dispatching on a rebuilt entry. That indirection is what
     # the FineMappingRow class existed for.
-    v <- perEntry(.fmrRowParts(x, i), ...)
-    if (is.null(v) || nrow(v) == 0L) {
+    raw <- exec(perEntry, .fmrRowParts(x, i), !!!viewArgs)
+    if (is.null(raw) || nrow(raw) == 0L) {
         return(NULL)
     }
-    v <- select(v, all_of(setdiff(names(v), names(meta))))
+    v <- select(raw, all_of(setdiff(names(raw), names(meta))))
     bind_cols(slice(meta, rep(i, nrow(v))), v)
 }
 
@@ -637,15 +637,16 @@
         !!!c(combined, list(check.names = FALSE))
     )
     elements <- list_flatten(map(parts, as.list))
-    grl <- GenomicRanges::GRangesList(elements)
     # Rebuilding from as.list() merges each part's seqinfo, so a part whose
     # elements never had a build set would leave the result carrying both the
     # real build and NA. The agreed build is written back explicitly to keep
     # seqinfo single-valued, which validity requires.
-    if (!is.null(genome)) {
-        GenomeInfoDb::genome(grl) <- genome
-    }
-    mcols(grl) <- md
+    built <- .withGenomeBuild(
+        GenomicRanges::GRangesList(elements),
+        !is.null(genome),
+        genome
+    )
+    grl <- S4Vectors::`mcols<-`(built, value = md)
     out <- exec(
         methods::new,
         cls,
@@ -730,8 +731,7 @@
     type = c("data.frame", "GRanges"),
     signalCutoff = 0.025,
     minPurity = NULL,
-    raw = FALSE,
-    ...
+    raw = FALSE
 ) {
     tl <- .fmrPartsTopLoci(parts)
     # raw = TRUE returns the stored canonical table verbatim: every variant,
@@ -748,7 +748,7 @@
 }
 
 # @noRd
-.fmrRowPip <- function(parts, ...) {
+.fmrRowPip <- function(parts) {
     tl <- .fmrPartsTopLoci(parts)
     if (nrow(tl) == 0L || !is_in("pip", names(tl))) {
         return(numeric(0))
@@ -757,21 +757,22 @@
 }
 
 # @noRd
-.fmrRowMarginalEffects <- function(parts, maxPval = NULL, ...) {
+.fmrRowMarginalEffects <- function(parts, maxPval = NULL) {
     tl <- .fmrPartsTopLoci(parts)
     if (nrow(tl) == 0L) {
         return(.projectMarginalView(tl))
     }
-    out <- .projectMarginalView(tl)
-    if (!is.null(maxPval) && nrow(out) > 0L) {
-        keep <- !is.na(out$p) & out$p <= maxPval
-        out <- filter(out, keep)
+    allRows <- .projectMarginalView(tl)
+    out <- if (is.null(maxPval) || nrow(allRows) == 0L) {
+        allRows
+    } else {
+        filter(allRows, !is.na(.data$p) & .data$p <= maxPval)
     }
     out
 }
 
 # @noRd
-.fmrRowCs <- function(parts, coverage = 0.95, minPurity = NULL, ...) {
+.fmrRowCs <- function(parts, coverage = 0.95, minPurity = NULL) {
     tl <- .fmrPartsTopLoci(parts)
     if (nrow(tl) == 0L) {
         return(.projectPosteriorView(tl))
@@ -783,51 +784,53 @@
     if (length(csCol) == 0L) {
         return(.projectPosteriorView(slice(tl, 0)))
     }
-    keep <- !is.na(tl[[csCol[1L]]]) &
+    inCs <- !is.na(tl[[csCol[1L]]]) &
         str_length(tl[[csCol[1L]]]) > 0L &
         !str_detect(tl[[csCol[1L]]], "_0$")
     # Independent purity filter (min.abs.corr), orthogonal to `coverage`: drop
     # CS members whose credible set at THIS coverage is below `minPurity`.
-    if (!is.null(minPurity)) {
-        purCol <- str_c(csCol[1L], "_purity")
-        if (is_in(purCol, names(tl))) {
-            pur <- as.numeric(tl[[purCol]])
-            keep <- keep & !is.na(pur) & pur >= minPurity
-        } else {
-            msg <- glue(
-                "getCs: no purity column '{purCol}' for coverage ",
-                "{coverage}; minPurity filter skipped."
-            )
-            warn(msg)
-        }
+    purCol <- str_c(csCol[1L], "_purity")
+    hasPurity <- is_in(purCol, names(tl))
+    if (!is.null(minPurity) && !hasPurity) {
+        msg <- glue(
+            "getCs: no purity column '{purCol}' for coverage ",
+            "{coverage}; minPurity filter skipped."
+        )
+        warn(msg)
+    }
+    keep <- if (is.null(minPurity) || !hasPurity) {
+        inCs
+    } else {
+        pur <- as.numeric(tl[[purCol]])
+        inCs & !is.na(pur) & pur >= minPurity
     }
     .projectPosteriorView(tl[keep, , drop = FALSE])
 }
 
 # @noRd
-.fmrRowLbf <- function(parts, ...) {
+.fmrRowLbf <- function(parts) {
     lbf <- .asLbfMatrix(getSusieFit(parts))
     vids <- .fmrPartsVariantIds(parts)
     if (is.null(lbf) || ncol(lbf) != length(vids)) {
         return(tibble(variant_id = character(0)))
     }
-    w <- as_tibble(t(as.matrix(lbf)), .name_repair = "minimal")
-    names(w) <- str_c("lbf_L", seq_len(ncol(w)))
+    wide <- as_tibble(t(as.matrix(lbf)), .name_repair = "minimal")
+    w <- `names<-`(wide, str_c("lbf_L", seq_len(ncol(wide))))
     bind_cols(tibble(variant_id = as.character(vids)), w)
 }
 
 # @noRd
-.fmrRowCredibleSetSummary <- function(parts, coverage = 0.95, ...) {
+.fmrRowCredibleSetSummary <- function(parts, coverage = 0.95) {
     .csSummaryFit(.fmrPartsTopLoci(parts), getSusieFit(parts), coverage)
 }
 
 # @noRd
-.fmrRowFsusieCredibleBand <- function(parts, ...) {
+.fmrRowFsusieCredibleBand <- function(parts) {
     .fsusieCredibleBandFit(getSusieFit(parts))
 }
 
 # @noRd
-.fmrRowFsusieAffectedRegions <- function(parts, ...) {
+.fmrRowFsusieAffectedRegions <- function(parts) {
     .fsusieAffectedRegionsFit(
         getSusieFit(parts),
         topLoci = .fmrPartsTopLoci(parts)
@@ -835,7 +838,7 @@
 }
 
 # @noRd
-.fmrRowResolveWeights <- function(parts, ...) {
+.fmrRowResolveWeights <- function(parts) {
     empty <- list(variantIds = character(0), weights = numeric(0))
     # The topLoci posterior view projects the effect to `beta`; use it as the
     # per-variant weight, aligned with variant_id.
@@ -882,14 +885,14 @@
 # The weight vector aligned to the row's variant ids -- what resolveWeights
 # produced from a TwasWeightsRow.
 # @noRd
-.twrRowResolveWeights <- function(parts, ...) {
+.twrRowResolveWeights <- function(parts) {
     empty <- list(variantIds = character(0), weights = numeric(0))
     vids <- .twrPartsVariantIds(parts)
-    w <- getWeights(parts)
-    if (length(vids) == 0L || is.null(w)) {
+    raw <- getWeights(parts)
+    if (length(vids) == 0L || is.null(raw)) {
         return(empty)
     }
-    w <- as.numeric(w)
+    w <- as.numeric(raw)
     if (length(w) != length(vids)) {
         return(empty)
     }
@@ -914,11 +917,11 @@
 # The per-variant weight vector of one row, whichever weight source it came
 # from.
 # @noRd
-.rowResolveWeights <- function(parts, ...) {
+.rowResolveWeights <- function(parts) {
     if (methods::is(parts, "TwasWeightsRow")) {
-        return(.twrRowResolveWeights(parts, ...))
+        return(.twrRowResolveWeights(parts))
     }
-    .fmrRowResolveWeights(parts, ...)
+    .fmrRowResolveWeights(parts)
 }
 
 # The cross-validated / per-method fits of one row, or NULL for a
@@ -1076,10 +1079,9 @@
 # @noRd
 .rtlExtraSlots <- function(parts, fn) {
     own <- setdiff(.rtlOwnSlots(parts[[1L]]), "ldSketch")
-    out <- list()
-    if (is_in("qcInfo", own)) {
-        out$qcInfo <- .ssCombineQcInfo(parts, fn)
-    }
+    out <- compact(list(
+        qcInfo = if (is_in("qcInfo", own)) .ssCombineQcInfo(parts, fn)
+    ))
     unknown <- setdiff(own, names(out))
     if (length(unknown) > 0L) {
         cls <- class(parts[[1L]])[[1L]]
@@ -1163,9 +1165,10 @@
         abort(msg)
     }
     .ssCheckQcOptions(populated, fn)
-    out <- getQcInfo(populated[[1L]])
-    out$entryAudit <- list_flatten(map(parts, .ssEntryAudit))
-    out
+    list_assign(
+        getQcInfo(populated[[1L]]),
+        entryAudit = list_flatten(map(parts, .ssEntryAudit))
+    )
 }
 
 # @noRd
@@ -1226,9 +1229,11 @@
     }
     handles <- map(sketches, .ldSketchHandle)
     .ssCheckSameSource(handles, fn)
-    handle <- handles[[1L]]
-    handle@snpInfo <- .ssUnionSnpInfo(handles)
-    handle@chromPaths <- .ssUnionChromPaths(handles, fn)
+    handle <- methods::initialize(
+        handles[[1L]],
+        snpInfo = .ssUnionSnpInfo(handles),
+        chromPaths = .ssUnionChromPaths(handles, fn)
+    )
     .asLdSketch(handle)
 }
 
@@ -1239,22 +1244,39 @@
 # two different files means the parts are not the same panel after all.
 # @noRd
 .ssUnionChromPaths <- function(handles, fn) {
-    out <- character(0)
-    for (h in handles) {
-        cp <- h@chromPaths
-        for (ch in names(cp)) {
-            if (is_in(ch, names(out)) && !identical(out[[ch]], cp[[ch]])) {
-                msg <- glue(
-                    "{fn}: chromosome '{ch}' maps to two different genotype ",
-                    "files across the inputs, so their LD sketches cannot ",
-                    "be unioned."
-                )
-                abort(msg)
-            }
-            out[[ch]] <- cp[[ch]]
-        }
+    combined <- .ssConcatChr(map(handles, .ssHandleChromPaths))
+    byChrom <- split(unname(combined), names(combined))
+    walk2(names(byChrom), byChrom, .ssCheckOneFilePerChrom, fn = fn)
+    # Every chromosome agrees, so the first mapping stands for all of them.
+    combined[!duplicated(names(combined))]
+}
+
+# @noRd
+.ssHandleChromPaths <- function(h) {
+    h@chromPaths
+}
+
+# @noRd
+.ssConcatChr <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(character(0))
     }
-    out
+    list_c(pieces)
+}
+
+# A chromosome resolving to two different files means the inputs are not the
+# same panel, so their sketches cannot be unioned.
+# @noRd
+.ssCheckOneFilePerChrom <- function(ch, paths, fn) {
+    if (n_distinct(paths) <= 1L) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "{fn}: chromosome '{ch}' maps to two different genotype ",
+        "files across the inputs, so their LD sketches cannot ",
+        "be unioned."
+    )
+    abort(msg)
 }
 
 # Every panel must read from the same file(s): the union keeps the first
@@ -1296,10 +1318,17 @@
 # @noRd
 .ssUnionSnpInfo <- function(handles) {
     first <- getSnpInfo(handles[[1L]])
-    si <- list_rbind(map(handles, .ssHandleSnpInfo))
-    if (nrow(si) > 0L && all(is_in(c("SNP", "CHR", "BP"), names(si)))) {
-        si <- si[!duplicated(si$SNP), , drop = FALSE]
-        si <- si[order(canonChrom(si$CHR), as.integer(si$BP)), , drop = FALSE]
+    combined <- list_rbind(map(handles, .ssHandleSnpInfo))
+    keyed <- all(is_in(c("SNP", "CHR", "BP"), names(combined)))
+    si <- if (nrow(combined) > 0L && keyed) {
+        deduped <- combined[!duplicated(combined$SNP), , drop = FALSE]
+        deduped[
+            order(canonChrom(deduped$CHR), as.integer(deduped$BP)),
+            ,
+            drop = FALSE
+        ]
+    } else {
+        combined
     }
     if (inherits(first, "tbl_df")) si else as.data.frame(si)
 }

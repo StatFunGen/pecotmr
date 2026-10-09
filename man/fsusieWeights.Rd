@@ -10,7 +10,7 @@ fsusieWeights(
   Y = NULL,
   variantIds = NULL,
   featureNames = NULL,
-  retainFit = FALSE
+  fitRetention = c("none", "slim", "full")
 )
 }
 \arguments{
@@ -32,7 +32,10 @@ of SNPs in the fit) for the matrix row names. Defaults to
 \item{featureNames}{Optional character vector of feature (outcome) names for
 the matrix column names. Defaults to the fit's \code{outing_grid}.}
 
-\item{retainFit}{If TRUE, stores the fit as an attribute on the result.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 A numeric matrix of variant (rows) by feature (columns) weights.

@@ -8,15 +8,14 @@
 \usage{
 getGenotypes(x, ...)
 
-\S4method{getGenotypes}{LdData}(x, ...)
+\S4method{getGenotypes}{LdData}(x)
 
 \S4method{getGenotypes}{QtlDataset}(
   x,
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  samples = NULL,
-  ...
+  samples = NULL
 )
 }
 \arguments{

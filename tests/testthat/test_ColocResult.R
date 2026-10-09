@@ -345,7 +345,10 @@ test_that("purity is computed per set when an LD reference is supplied", {
 test_that("validity names missing pair columns", {
     bad <- ColocResult(.cr_pairs(), .cr_variants())
     mcols(bad)$gwasStudy <- NULL
-    expect_error(methods::validObject(bad), "missing columns: gwasStudy")
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'gwasStudy'\\}"
+    )
 })
 
 test_that("validity names missing posterior columns", {
@@ -353,7 +356,7 @@ test_that("validity names missing posterior columns", {
     mcols(bad)$PP.H4.abf <- NULL
     expect_error(
         methods::validObject(bad),
-        "missing posterior columns: PP.H4.abf"
+        "missing posterior columns: .*missing elements \\{'PP.H4.abf'\\}"
     )
 })
 

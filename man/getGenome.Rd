@@ -10,11 +10,11 @@
 \usage{
 getGenome(x, ...)
 
-\S4method{getGenome}{SumStatsBase}(x, ...)
+\S4method{getGenome}{SumStatsBase}(x)
 
-\S4method{getGenome}{AnnotationMatrix}(x, ...)
+\S4method{getGenome}{AnnotationMatrix}(x)
 
-\S4method{getGenome}{LdStatistic}(x, ...)
+\S4method{getGenome}{LdStatistic}(x)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}

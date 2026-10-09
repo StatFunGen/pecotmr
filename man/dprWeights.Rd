@@ -7,13 +7,36 @@
 \alias{dprAdaptiveGibbsWeights}
 \title{Compute Weights Using Dirichlet Process Regression (RcppDPR)}
 \usage{
-dprWeights(X, y, fittingMethod = "VB", retainFit = FALSE, ...)
+dprWeights(
+  X,
+  y,
+  fittingMethod = "VB",
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = DprOptions()
+)
 
-dprVbWeights(X, y, nK = 8, retainFit = FALSE, ...)
+dprVbWeights(
+  X,
+  y,
+  nK = 8,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = DprOptions()
+)
 
-dprGibbsWeights(X, y, sStep = 5000, retainFit = FALSE, ...)
+dprGibbsWeights(
+  X,
+  y,
+  sStep = 5000,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = DprOptions()
+)
 
-dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, ...)
+dprAdaptiveGibbsWeights(
+  X,
+  y,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = DprOptions()
+)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -23,10 +46,17 @@ dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, ...)
 \item{fittingMethod}{One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is
 "VB".}
 
-\item{retainFit}{Logical. Attach the full fitted-model object to the result.
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing, \code{"slim"} and \code{"full"} attach the fitted model. This
+engine keeps no trimmable intermediates, so the two retaining levels
+behave alike here.
 Default \code{FALSE}.}
 
-\item{...}{Additional arguments passed through to `RcppDPR::fit_model`.}
+\item{methodArgs}{Options forwarded to \code{RcppDPR::fit_model}, built
+with \code{\link{DprOptions}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 
 \item{nK}{Integer. Number of variational mixture components for the VB fit
 (\code{dprVbWeights}). Default \code{8}.}

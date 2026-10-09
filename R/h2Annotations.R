@@ -20,7 +20,7 @@ NULL
 setMethod(
     "readAnnotations",
     signature(paths = "character"),
-    function(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...) {
+    function(paths, snpRanges, annotationMeta = NULL, genome = "hg19") {
         if (is.null(names(paths))) {
             msg <- glue(
                 "'paths' must be a named character vector (names = ",
@@ -61,19 +61,26 @@ setMethod(
     if (.annotDetectFormat(p) == "bigwig") "continuous" else "binary"
 }
 
+# @noRd
+.readAnnotColumnAt <- function(i, paths, snpRanges, annotNames) {
+    .readAnnotColumn(paths[i], snpRanges, annotNames[i])
+}
+
 # Build the (SNP x annotation) matrix by reading each annotation column.
 # @noRd
 .readAnnotMatrix <- function(paths, snpRanges, annotNames, nSnps, nAnnots) {
-    annotMat <- matrix(0, nrow = nSnps, ncol = nAnnots)
-    colnames(annotMat) <- annotNames
-    for (i in seq_along(paths)) {
-        annotMat[, i] <- .readAnnotColumn(
-            paths[i],
-            snpRanges,
-            annotNames[i]
-        )
-    }
-    annotMat
+    matrix(
+        unname(list_c(map(
+            seq_along(paths),
+            .readAnnotColumnAt,
+            paths = paths,
+            snpRanges = snpRanges,
+            annotNames = annotNames
+        ))),
+        nrow = nSnps,
+        ncol = nAnnots,
+        dimnames = list(NULL, annotNames)
+    )
 }
 
 # One annotation column, dispatched by detected format (BigWig / .annot / BED).
@@ -139,8 +146,7 @@ setMethod(
 .readBedAnnotation <- function(bedPath, snpRanges) {
     regions <- rtracklayer::import(bedPath)
     hits <- findOverlaps(snpRanges, regions)
-    result <- rep(0L, length(snpRanges))
-    result[queryHits(hits)] <- 1L
+    result <- replace(rep(0L, length(snpRanges)), queryHits(hits), 1L)
     as.numeric(result)
 }
 
@@ -174,12 +180,12 @@ setMethod(
     # Match SNPs by genomic position
     hits <- findOverlaps(snpRanges, annotGr)
 
-    # Initialize result with default 0
-    result <- rep(0, length(snpRanges))
-    result[queryHits(hits)] <-
+    # Unmatched SNPs keep the default 0.
+    replace(
+        rep(0, length(snpRanges)),
+        queryHits(hits),
         as.numeric(dt[[annotName]][subjectHits(hits)])
-
-    result
+    )
 }
 
 # (The AnnotationMatrix() constructor and the getBaseline / getCandidates tier

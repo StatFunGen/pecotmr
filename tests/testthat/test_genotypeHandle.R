@@ -125,7 +125,7 @@ test_that(".genotypeHandleFromPlink1Triplet: errors on non-character input", {
             bim = "x.bim",
             fam = "x.fam"
         ),
-        "must be a single file path"
+        "Must be of type 'string'"
     )
 })
 
@@ -325,7 +325,7 @@ test_that("GenotypeHandle constructs and validates correctly", {
         "GenotypeHandle",
         path = "/tmp/test.gds",
         format = "gds",
-        snpInfo = make_test_snp_info(),
+        snpInfo = makeTestSnpInfo(),
         nSamples = 100L,
         sampleIds = paste0("sample_", 1:100),
         pgenPtr = NULL
@@ -741,7 +741,7 @@ test_that("show(GenotypeHandle) does not error", {
         "GenotypeHandle",
         path = "/tmp/test.gds",
         format = "gds",
-        snpInfo = make_test_snp_info(),
+        snpInfo = makeTestSnpInfo(),
         nSamples = 100L,
         sampleIds = paste0("s", 1:100),
         pgenPtr = NULL
@@ -918,4 +918,23 @@ test_that("an unresolvable bundled resource reference is an error", {
         ),
         "cannot resolve bundled genotype resource"
     )
+})
+
+test_that(".chromMetaPaths answers character(0) for no shards", {
+    expect_identical(pecotmr:::.chromMetaPaths(list()), character(0))
+})
+
+test_that("getPgenPtr returns the handle's pgen pointer", {
+    # NULL for every non-pgen format: the pointer is opened lazily and only
+    # by the pgen reader, so the accessor's job is to report its absence.
+    h <- new(
+        "GenotypeHandle",
+        path = "/tmp/test.gds",
+        format = "gds",
+        snpInfo = makeTestSnpInfo(),
+        nSamples = 100L,
+        sampleIds = paste0("sample_", 1:100),
+        pgenPtr = NULL
+    )
+    expect_null(getPgenPtr(h))
 })

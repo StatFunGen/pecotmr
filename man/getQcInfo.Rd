@@ -7,7 +7,7 @@
 \usage{
 getQcInfo(x, ...)
 
-\S4method{getQcInfo}{SumStatsBase}(x, ...)
+\S4method{getQcInfo}{SumStatsBase}(x)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}

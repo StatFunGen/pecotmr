@@ -4,6 +4,43 @@ context("susie_finemapping")
 # lbf_to_alpha_vector (internal)
 # =============================================================================
 
+# Fixtures moved here with the tests that use them.
+
+# Capture the args passed to susieR::susie / susie_rss by mocking each to
+# stash its first invocation's args into a global. The captured args let
+# us assert which code path was taken.
+.fmp_capturingSusie <- function(captured) {
+    function(X, y, ...) {
+        captured$lastArgs <<- list(X = X, y = y, ...)
+        # Return a minimal "fit" shape downstream cares about; .setFinemappingFitClass
+        # only attaches an S3 class, so any list works.
+        list(token = "test", V = 0.1)
+    }
+}
+
+.fmp_capturingSusieRss <- function(captured) {
+    function(z, R, n, ...) {
+        captured$lastArgs <<- list(z = z, R = R, n = n, ...)
+        list(token = "test_rss", V = 0.1)
+    }
+}
+
+# An allele switch (what the flip rule targets) is an LD-CONSISTENT z with one
+# entry's sign reversed -- not a magnitude outlier. Build z = R %*% b (a single
+# causal SNP) then negate a strongly-tagged neighbour, so susieR's logLR fires.
+.kr_switchScenario <- function() {
+    m <- 10
+    rho <- 0.9
+    R <- outer(seq_len(m), seq_len(m), function(i, j) rho^abs(i - j))
+    ids <- paste0("1:", seq_len(m) * 100, ":A:G")
+    rownames(R) <- colnames(R) <- ids
+    b <- numeric(m)
+    b[5] <- 6
+    z <- as.numeric(R %*% b)
+    z[6] <- -z[6] # flip a strongly-tagged neighbour of the causal
+    list(z = z, R = R, ids = ids, flipped = 6L)
+}
+
 test_that("lbf_to_alpha_vector converts correctly", {
     lbf <- c(a = -0.5, b = 1.2, c = 0.3)
     alpha <- pecotmr:::lbfToAlphaVector(lbf)
@@ -257,6 +294,18 @@ test_that("get_cs_info reports variant in multiple CSs as multiple rows", {
 # susieWeights
 # =============================================================================
 
+test_that("susie*Weights refuse to fine-map when no fit is supplied", {
+    # These extract weights from an existing fit; twasWeightsPipeline gates
+    # susie-family tokens up front, so a NULL fit here is a caller error, not
+    # an invitation to run susie.
+    data(eqtlRegionExample)
+    X <- eqtlRegionExample$X[, 1:30]
+    y <- eqtlRegionExample$yRes
+    expect_error(susieWeights(X, y), "no 'susie' fit supplied")
+    expect_error(susieAshWeights(X, y), "no 'susieAsh' fit supplied")
+    expect_error(susieInfWeights(X, y), "no 'susieInf' fit supplied")
+})
+
 test_that("susieWeights returns zeros when fit lacks alpha/mu", {
     fake_fit <- list(pip = rep(0.01, 5))
     result <- susieWeights(susieFit = fake_fit)
@@ -345,8 +394,8 @@ test_that("init_prior_sd returns n standard deviations", {
 # =============================================================================
 
 # Helper: build a minimal synthetic SuSiE-family output for post-processing
-make_fake_susie_output <- function(p = 5, L = 3, has_V = TRUE) {
-    vnames <- paste0("chr1:", 1:p, ":A:G")
+makeFakeSusieOutput <- function(p = 5, L = 3, has_V = TRUE) {
+    vnames <- paste0("chr1:", seq_len(p), ":A:G")
     out <- list(
         pip = setNames(rep(0.01, p), vnames),
         alpha = matrix(1 / p, nrow = L, ncol = p),
@@ -367,7 +416,7 @@ test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
     skip_if_not_installed("susieR")
     p <- 5
     L <- 3
-    fake_output <- make_fake_susie_output(p, L = L, has_V = FALSE)
+    fake_output <- makeFakeSusieOutput(p, L = L, has_V = FALSE)
     R <- diag(p)
     colnames(R) <- rownames(R) <- names(fake_output$pip)
     post <- postprocessFinemappingFits(
@@ -379,7 +428,9 @@ test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
         ),
         dataX = R,
         dataY = list(z = rnorm(p)),
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     result <- formatFinemappingOutput(post, primaryMethod = "susieRss")
     trimmed <- pecotmr:::.fmrPartsSusieFit(result$finemappingEntry)
@@ -399,8 +450,8 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
     p <- 5
     L <- 3
     R <- 2
-    vnames <- paste0("chr1:", 1:p, ":A:G")
-    cnames <- paste0("cond_", 1:R)
+    vnames <- paste0("chr1:", seq_len(p), ":A:G")
+    cnames <- paste0("cond_", seq_len(R))
     fake_coef <- matrix(rnorm((p + 1) * R), nrow = p + 1, ncol = R)
 
     fake_output <- list(
@@ -431,7 +482,9 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
         dataY = NULL,
         xScalar = 1,
         yScalar = 1,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     result <- formatFinemappingOutput(post, primaryMethod = "mvsusie")
 
@@ -477,7 +530,7 @@ test_that("formatFinemappingOutput does not duplicate top loci variants", {
     )
 })
 
-.make_univariate_data <- function(
+.makeUnivariateData <- function(
     seed = 42,
     n = 300,
     p = 50,
@@ -540,8 +593,8 @@ test_that(".translate_legacy_top_loci_cs_columns leaves existing pip column alon
 # Reuse the existing local helper. Re-declared inside this block so the file
 # remains correct whether the unified-section tests are run alone or as part of
 # the full file.
-if (!exists(".make_univariate_data", inherits = FALSE)) {
-    .make_univariate_data <- function(
+if (!exists(".makeUnivariateData", inherits = FALSE)) {
+    .makeUnivariateData <- function(
         seed = 42,
         n = 300,
         p = 50,
@@ -602,7 +655,7 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
 # coverage. The CS numbering is 1-based per coverage. PIP values are filled
 # from `pip` (variants outside the CS get small non-zero PIP so they can be
 # retained or dropped via `signal_cutoff`).
-.fake_fit_and_cs <- function(
+.fakeFitAndCs <- function(
     variant_ids,
     cs_at_cov,
     cs_purity_value = 0.85,
@@ -630,7 +683,7 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
         mu2 = mu2
     )
 
-    cs_tables <- lapply(names(cs_at_cov), function(cov_str) {
+    cs_tables <- map(names(cs_at_cov), function(cov_str) {
         cs_list <- cs_at_cov[[cov_str]]
         if (is.null(cs_list)) {
             cs_list <- list()
@@ -660,7 +713,7 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
                 purity = purity_df
             ),
             cs_corr = if (n_cs > 0L) {
-                lapply(seq_len(n_cs), function(i) {
+                map(seq_len(n_cs), function(i) {
                     matrix(c(1, cs_purity_value, cs_purity_value, 1), nrow = 2)
                 })
             } else {
@@ -707,10 +760,12 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
         sumstats = sumstats,
         af = af,
         method = method,
-        signalCutoff = signalCutoff,
         dataY = inp$data_y,
         otherQuantities = otherQuantities,
-        region = region
+        region = region,
+        credibleSetArgs = CredibleSetParam(
+            signalCutoff = signalCutoff
+        )
     )
 }
 
@@ -972,7 +1027,7 @@ test_that("buildTopLoci: per-variant logBF is the max single-effect lbf", {
 
 test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit", {
     variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov = list(
             "0.95" = list(c(1L, 2L)),
@@ -1005,7 +1060,7 @@ test_that("buildTopLoci: RSS per-variant N threads; list dataY isn't 1", {
     # as.matrix() collapse to a 1x1 cell, so nrow (and every N) was 1. The
     # per-variant effective N must instead be threaded into the N column.
     variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:A:T")
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov = list(
             "0.95" = list(c(1L, 2L, 3L)),
@@ -1025,8 +1080,10 @@ test_that("buildTopLoci: RSS per-variant N threads; list dataY isn't 1", {
         af = NULL,
         n = perVarN,
         method = "susie",
-        signalCutoff = 0,
-        dataY = list(z = rnorm(length(variant_ids)))
+        dataY = list(z = rnorm(length(variant_ids))),
+        credibleSetArgs = CredibleSetParam(
+            signalCutoff = 0
+        )
     )
     ord <- match(variant_ids, out$variant_id)
     expect_equal(out$N[ord], perVarN)
@@ -1039,8 +1096,10 @@ test_that("buildTopLoci: RSS per-variant N threads; list dataY isn't 1", {
         variantNames = inp$variantNames,
         af = NULL,
         method = "susie",
-        signalCutoff = 0,
-        dataY = list(z = rnorm(length(variant_ids)))
+        dataY = list(z = rnorm(length(variant_ids))),
+        credibleSetArgs = CredibleSetParam(
+            signalCutoff = 0
+        )
     )
     expect_true(is.numeric(out_na$N))
     expect_true(all(is.na(out_na$N)))
@@ -1052,7 +1111,7 @@ test_that("buildTopLoci: individual-level vector dataY fills N with nSamples", {
     # excluded the individual-level path's bare numeric outcome vector -- so
     # every top_loci N there silently became NA instead of the sample count.
     variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:A:T")
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov = list(
             "0.95" = list(c(1L, 2L, 3L)),
@@ -1069,8 +1128,10 @@ test_that("buildTopLoci: individual-level vector dataY fills N with nSamples", {
             variantNames = inp$variantNames,
             af = NULL,
             method = "susie",
-            signalCutoff = 0,
-            dataY = y
+            dataY = y,
+            credibleSetArgs = CredibleSetParam(
+                signalCutoff = 0
+            )
         )
     }
     nSamp <- 49L
@@ -1142,21 +1203,20 @@ test_that("buildTopLoci fullFit: within_cs_pip default + wide per-CS matrices", 
         cst,
         variantNames = vn,
         method = "susie",
-        fullFit = TRUE,
-        fullFitAlphaOnly = FALSE
+        credibleSetArgs = CredibleSetParam(perCsColumns = "full")
     )
     expect_equal(tl1$within_cs_pip_cs1, alpha[1, ])
     expect_equal(tl1$cs_logbf_cs1, lbf[1, ])
     expect_equal(tl1$cs_effect_cs1, 0.3 / scale) # mu / scale
     expect_equal(tl1$cs_effect_var_cs1, (1.2 - 0.09) / scale^2) # (mu2 - mu^2) / scale^2
 
-    # fullFitAlphaOnly (default TRUE): only alpha widened, both passing CS.
+    # perCsColumns = "alpha": only alpha widened, both passing CS.
     tl2 <- buildTopLoci(
         fit,
         cst,
         variantNames = vn,
         method = "susie",
-        fullFit = TRUE
+        credibleSetArgs = CredibleSetParam(perCsColumns = "alpha")
     )
     expect_false(any(grepl("^cs_logbf_|^cs_effect_", names(tl2))))
     expect_setequal(
@@ -1189,9 +1249,10 @@ test_that("buildTopLoci fullFit on the committed qtlFineMappingExample (real CS)
         csTables,
         variantNames = vn,
         method = "susie",
-        signalCutoff = 0,
-        fullFit = TRUE,
-        fullFitAlphaOnly = TRUE
+        credibleSetArgs = CredibleSetParam(
+            signalCutoff = 0,
+            perCsColumns = "alpha"
+        )
     ))
     # within_cs_pip is populated for exactly the CS members, = their L1 alpha.
     expect_equal(sum(!is.na(tl$within_cs_pip)), length(member))
@@ -1209,9 +1270,10 @@ test_that("buildTopLoci fullFit on the committed qtlFineMappingExample (real CS)
         csTables,
         variantNames = vn,
         method = "susie",
-        signalCutoff = 0,
-        fullFit = TRUE,
-        fullFitAlphaOnly = FALSE
+        credibleSetArgs = CredibleSetParam(
+            signalCutoff = 0,
+            perCsColumns = "full"
+        )
     ))
     expect_true(any(grepl("^cs_logbf_|^cs_effect_", names(tlFull))))
 
@@ -1226,9 +1288,10 @@ test_that("buildTopLoci fullFit on the committed qtlFineMappingExample (real CS)
         csTables,
         variantNames = vn,
         method = "susie",
-        signalCutoff = 0,
-        fullFit = TRUE,
-        fullFitAlphaOnly = FALSE
+        credibleSetArgs = CredibleSetParam(
+            signalCutoff = 0,
+            perCsColumns = "full"
+        )
     ))
     expect_false(any(grepl("^cs_logbf_|^cs_effect_", names(tlF))))
     expect_true("within_cs_pip_cs1" %in% names(tlF))
@@ -1236,7 +1299,7 @@ test_that("buildTopLoci fullFit on the committed qtlFineMappingExample (real CS)
 
 test_that("buildTopLoci exports af (not MAF) and carries the supplied af values", {
     variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov = list(
             "0.95" = list(c(1L, 2L)),
@@ -1255,7 +1318,7 @@ test_that("buildTopLoci exports af (not MAF) and carries the supplied af values"
 
 test_that("buildTopLoci sets af = NA when no af is supplied (no silent coercion)", {
     variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov = list(
             "0.95" = list(c(1L, 2L)),
@@ -1281,7 +1344,7 @@ test_that("postprocessFinemappingFits forwards medianAbsCorr to susie_get_cs (OR
         "median_abs_corr" %in% names(formals(susieR::susie_get_cs)),
         "installed susieR has no median_abs_corr support"
     )
-    d <- .make_univariate_data(seed = 11, effect_idx = c(10, 35))
+    d <- .makeUnivariateData(seed = 11, effect_idx = c(10, 35))
     fit <- susieR::susie(d$X, d$y, L = 5)
     # A very strict min_abs_corr alone vs the same min_abs_corr OR a lenient
     # median_abs_corr: OR-logic keeps at least as many credible sets.
@@ -1289,36 +1352,44 @@ test_that("postprocessFinemappingFits forwards medianAbsCorr to susie_get_cs (OR
         list(susie = fit),
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95,
-        minAbsCorr = 0.999,
-        medianAbsCorr = NULL
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            minAbsCorr = 0.999,
+            medianAbsCorr = NULL
+        )
     )
     pOr <- postprocessFinemappingFits(
         list(susie = fit),
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95,
-        minAbsCorr = 0.999,
-        medianAbsCorr = 0.1
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            minAbsCorr = 0.999,
+            medianAbsCorr = 0.1
+        )
     )
     expect_gte(.n_cs95(pOr), .n_cs95(pStrict))
 })
 
 test_that("postprocessFinemappingFits with medianAbsCorr = NULL is a no-op", {
-    d <- .make_univariate_data(seed = 7, effect_idx = c(20))
+    d <- .makeUnivariateData(seed = 7, effect_idx = c(20))
     fit <- susieR::susie(d$X, d$y, L = 5)
     p1 <- postprocessFinemappingFits(
         list(susie = fit),
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     p2 <- postprocessFinemappingFits(
         list(susie = fit),
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95,
-        medianAbsCorr = NULL
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            medianAbsCorr = NULL
+        )
     )
     expect_equal(p1$top_loci$cs_95, p2$top_loci$cs_95)
     expect_equal(p1$top_loci$af, p2$top_loci$af)
@@ -1333,7 +1404,7 @@ test_that("cs_95 / cs_70 / cs_50 are character strings of the form '<method>_<id
         "0.7" = list(c(1L, 2L), 3L),
         "0.5" = list(c(1L, 2L), 3L)
     )
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = c(0.9, 0.9, 0.9))
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = c(0.9, 0.9, 0.9))
     out <- .runBuildTopLoci(inp, method = "susie")
     expect_true(all(grepl("^susie_\\d+$", out$cs_95)))
     expect_true(all(grepl("^susie_\\d+$", out$cs_70)))
@@ -1347,7 +1418,7 @@ test_that("PIP-only retained variants carry '<method>_0' at every coverage and c
     # No CS at any coverage; variant 2 has high PIP so it is retained via
     # signal_cutoff and produces a "<method>_0" row.
     cs_at_cov <- list("0.95" = list(), "0.7" = list(), "0.5" = list())
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = c(0.02, 0.95))
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = c(0.02, 0.95))
     out <- .runBuildTopLoci(inp, method = "susie", signalCutoff = 0.5)
     expect_gte(nrow(out), 1L)
     # Every row must have <method>_0 at every coverage and cs_95_purity = 0.
@@ -1358,14 +1429,16 @@ test_that("PIP-only retained variants carry '<method>_0' at every coverage and c
 })
 
 test_that("per-method CS indices are independent across susie and susieInf (postprocessFinemappingFits)", {
-    d <- .make_univariate_data(seed = 21, effect_idx = c(15, 35))
+    d <- .makeUnivariateData(seed = 21, effect_idx = c(15, 35))
     fits <- fitSusieInfThenSusie(d$X, d$y)
     post <- postprocessFinemappingFits(
         fits,
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95,
-        secondaryCoverage = c(0.7, 0.5)
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = c(0.7, 0.5)
+        )
     )
     tl <- post$top_loci
     expect_setequal(unique(tl$method), c("susie", "susieInf"))
@@ -1397,7 +1470,7 @@ test_that("cs_95_purity = 0 when cs_95 is '<method>_0', and in (0, 1] otherwise"
     # Variant 1 in CS 1 at 95-cov; variant 2 PIP-only retained; variant 3
     # PIP-only retained.
     cs_at_cov <- list("0.95" = list(1L), "0.7" = list(1L), "0.5" = list(1L))
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov,
         cs_purity_value = 0.85,
@@ -1420,7 +1493,7 @@ test_that("overlapping CS within one method: one row per variant; smallest cs_id
         "0.7" = list(1L, 1L),
         "0.5" = list(1L, 1L)
     )
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = 0.9)
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = 0.9)
     out <- .runBuildTopLoci(inp, method = "susie")
     # Canonical schema is one row per variant. When a variant is in
     # multiple CSs at a coverage, the smallest cs_idx is reported.
@@ -1431,14 +1504,16 @@ test_that("overlapping CS within one method: one row per variant; smallest cs_id
 })
 
 test_that("overlapping CS across methods produces one row per method", {
-    d <- .make_univariate_data(seed = 22, effect_idx = c(12, 32))
+    d <- .makeUnivariateData(seed = 22, effect_idx = c(12, 32))
     fits <- fitSusieInfThenSusie(d$X, d$y)
     post <- postprocessFinemappingFits(
         fits,
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95,
-        secondaryCoverage = c(0.7, 0.5)
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = c(0.7, 0.5)
+        )
     )
     tl <- post$top_loci
     if (nrow(tl) > 0L) {
@@ -1463,13 +1538,15 @@ test_that("overlapping CS across methods produces one row per method", {
 })
 
 test_that("formatFinemappingOutput exposes exactly one top_loci field; no top_loci_long, no wide top_loci, no top_loci_export", {
-    d <- .make_univariate_data(seed = 23, effect_idx = c(15, 40))
+    d <- .makeUnivariateData(seed = 23, effect_idx = c(15, 40))
     fits <- fitSusieInfThenSusie(d$X, d$y)
     post <- postprocessFinemappingFits(
         fits,
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     out <- formatFinemappingOutput(post, primaryMethod = "susie")
     expect_true("top_loci" %in% names(out))
@@ -1480,13 +1557,15 @@ test_that("formatFinemappingOutput exposes exactly one top_loci field; no top_lo
 })
 
 test_that("postprocessFinemappingFits does not return top_loci_long anywhere", {
-    d <- .make_univariate_data(seed = 24, effect_idx = c(25))
+    d <- .makeUnivariateData(seed = 24, effect_idx = c(25))
     fit <- susieR::susie(d$X, d$y, L = 5)
     post <- postprocessFinemappingFits(
         list(susie = fit),
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     expect_true("top_loci" %in% names(post))
     expect_false("top_loci_long" %in% names(post))
@@ -1554,14 +1633,14 @@ test_that("build_top_loci_long / build_top_loci_wide / build_top_loci_export are
 test_that("buildTopLoci raises an explicit error on invalid variant_id rather than silently filling NA", {
     variant_ids <- c("not_a_valid_id")
     cs_at_cov <- list("0.95" = list(1L), "0.7" = list(1L), "0.5" = list(1L))
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = 0.9)
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = 0.9)
     expect_error(.runBuildTopLoci(inp, method = "susie"), "parseVariantId")
 })
 
 test_that("buildTopLoci requires `method`", {
     variant_ids <- c("chr1:100:A:G")
     cs_at_cov <- list("0.95" = list(1L), "0.7" = list(1L), "0.5" = list(1L))
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = 0.9)
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = 0.9)
     expect_error(
         buildTopLoci(
             fit = inp$fit,
@@ -1573,13 +1652,15 @@ test_that("buildTopLoci requires `method`", {
 })
 
 test_that("formatFinemappingOutput exposes finemappingEntry with S4 accessors", {
-    d <- .make_univariate_data(seed = 25, effect_idx = c(20))
+    d <- .makeUnivariateData(seed = 25, effect_idx = c(20))
     fit <- susieR::susie(d$X, d$y, L = 5)
     post <- postprocessFinemappingFits(
         list(susie = fit),
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     out <- formatFinemappingOutput(post, primaryMethod = "susie")
     expect_true("finemappingEntry" %in% names(out))
@@ -1595,7 +1676,7 @@ test_that("formatFinemappingOutput exposes finemappingEntry with S4 accessors", 
 test_that("missing region produces NA grange columns rather than silent omission", {
     variant_ids <- c("chr1:100:A:G")
     cs_at_cov <- list("0.95" = list(1L), "0.7" = list(1L), "0.5" = list(1L))
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = 0.9)
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = 0.9)
     out <- .runBuildTopLoci(
         inp,
         method = "susie",
@@ -1616,7 +1697,7 @@ test_that("posterior_mean equals colSums(alpha*mu); posterior_sd equals sqrt(pma
         "0.7" = list(c(1L, 2L)),
         "0.5" = list(c(1L, 2L))
     )
-    inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = c(0.8, 0.6))
+    inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = c(0.8, 0.6))
     out <- .runBuildTopLoci(inp, method = "susie")
     expected_mean <- colSums(inp$fit$alpha * inp$fit$mu)
     expected_se <- sqrt(pmax(
@@ -2109,10 +2190,9 @@ test_that("extractVariantNames reads pip names, then alpha colnames, then a fall
 
 # ---- extractSumstats ----
 test_that("extractSumstats returns NULL / passthrough across non-regression branches", {
-    expect_null(pecotmr:::extractSumstats(list(), NULL, NULL))
+    expect_null(pecotmr:::extractSumstats(NULL, NULL))
     expect_equal(
         pecotmr:::extractSumstats(
-            list(),
             NULL,
             list(z = c(1, 2)),
             method = "susieRss"
@@ -2121,13 +2201,12 @@ test_that("extractSumstats returns NULL / passthrough across non-regression bran
     )
     expect_equal(
         pecotmr:::extractSumstats(
-            list(),
             NULL,
             list(betahat = c(1, 2), sebetahat = c(0.1, 0.2))
         ),
         list(betahat = c(1, 2), sebetahat = c(0.1, 0.2))
     )
-    expect_null(pecotmr:::extractSumstats(list(), NULL, c(1, 2, 3))) # dataX NULL
+    expect_null(pecotmr:::extractSumstats(NULL, c(1, 2, 3))) # dataX NULL
     expect_null(pecotmr:::extractSumstats(
         list(),
         matrix(0, 3, 2),
@@ -2141,9 +2220,9 @@ test_that("extractSumstats runs univariate regression and applies x/y scalars", 
     X <- matrix(rnorm(60), 20, 3)
     colnames(X) <- c("chr1:1:A:G", "chr1:2:A:G", "chr1:3:A:G")
     y <- X[, 1] * 2 + rnorm(20)
-    s1 <- pecotmr:::extractSumstats(list(), X, y)
+    s1 <- pecotmr:::extractSumstats(X, y)
     expect_named(s1, c("betahat", "sebetahat"))
-    s2 <- pecotmr:::extractSumstats(list(), X, y, yScalar = 2, xScalar = 1)
+    s2 <- pecotmr:::extractSumstats(X, y, yScalar = 2, xScalar = 1)
     expect_equal(s2$betahat, s1$betahat * 2)
     expect_equal(s2$sebetahat, s1$sebetahat * 2)
 })
@@ -2163,7 +2242,7 @@ test_that("computeCsTable fsusie branch returns empty sets when no CS", {
 
 test_that("computeCsTable X and Xcorr branches return sets/pip", {
     skip_if_not_installed("susieR")
-    d <- .make_univariate_data(seed = 7, n = 200, p = 8, effect_idx = c(2))
+    d <- .makeUnivariateData(seed = 7, n = 200, p = 8, effect_idx = c(2))
     fit <- susieR::susie(d$X, d$y, L = 4)
     ctx <- pecotmr:::computeCsTable(fit, d$X, coverage = 0.95, csInput = "X")
     expect_true(all(c("sets", "pip") %in% names(ctx)))
@@ -2178,7 +2257,7 @@ test_that("computeCsTable X and Xcorr branches return sets/pip", {
 
 test_that("computeCsTables names tables, sets coverage attr, defaults coverage from fit", {
     skip_if_not_installed("susieR")
-    d <- .make_univariate_data(seed = 7, n = 200, p = 8, effect_idx = c(2))
+    d <- .makeUnivariateData(seed = 7, n = 200, p = 8, effect_idx = c(2))
     fit <- susieR::susie(d$X, d$y, L = 4)
     cts <- pecotmr:::computeCsTables(
         fit,
@@ -2373,8 +2452,10 @@ test_that("postprocessFinemappingFit.susiF post-processes an fsusie fit (empty-C
             dimnames = list(NULL, c("chr1:100:A:G", "chr1:200:C:T"))
         ),
         dataY = NULL,
-        coverage = 0.95,
-        otherQuantities = list(condition_id = "ctx")
+        otherQuantities = list(condition_id = "ctx"),
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     expect_equal(res$method, "fsusie")
     expect_equal(unique(res$top_loci$method), "fsusie")
@@ -2387,14 +2468,16 @@ test_that("postprocessFinemappingFit.susiF post-processes an fsusie fit (empty-C
 
 test_that("postprocessFinemappingFit.susieInf labels credible sets with the susie_inf_ prefix", {
     skip_if_not_installed("susieR")
-    d <- .make_univariate_data(seed = 7, n = 200, p = 8, effect_idx = c(2))
+    d <- .makeUnivariateData(seed = 7, n = 200, p = 8, effect_idx = c(2))
     fits <- fitSusieInfThenSusie(d$X, d$y)
     res <- pecotmr:::postprocessFinemappingFit(
         fits$susieInf,
         method = "susieInf",
         dataX = d$X,
         dataY = d$y,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        )
     )
     expect_equal(res$method, "susieInf")
     expect_gt(nrow(res$top_loci), 0L)
@@ -2417,7 +2500,6 @@ test_that(".postprocessFinemappingFitCommon trim=FALSE stores the untrimmed fit"
     res <- pecotmr:::postprocessFinemappingFit(
         fit,
         method = "fsusie",
-        trim = FALSE,
         dataX = matrix(
             0,
             5,
@@ -2425,7 +2507,10 @@ test_that(".postprocessFinemappingFitCommon trim=FALSE stores the untrimmed fit"
             dimnames = list(NULL, c("chr1:100:A:G", "chr1:200:C:T"))
         ),
         dataY = NULL,
-        coverage = 0.95
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95
+        ),
+        fitRetention = "full"
     )
     expect_equal(
         pecotmr:::.fmrPartsSusieFit(res$finemappingEntry)$extra_slot,
@@ -2466,7 +2551,7 @@ test_that("formatFinemappingOutput errors when primaryMethod is absent", {
 # ---- buildTopLoci: marginal z/p passthrough ----
 test_that("buildTopLoci passes through marginal z and p supplied in sumstats", {
     variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
-    inp <- .fake_fit_and_cs(
+    inp <- .fakeFitAndCs(
         variant_ids,
         cs_at_cov = list(
             "0.95" = list(c(1L, 2L)),
@@ -2496,7 +2581,7 @@ test_that("lbfToAlpha handles a single-column matrix", {
 # ---- fitSusieInfThenSusie ----
 test_that("fitSusieInfThenSusie returns classed susie and susieInf fits", {
     skip_if_not_installed("susieR")
-    d <- .make_univariate_data(seed = 3, n = 200, p = 8, effect_idx = c(4))
+    d <- .makeUnivariateData(seed = 3, n = 200, p = 8, effect_idx = c(4))
     fits <- fitSusieInfThenSusie(d$X, d$y)
     expect_named(fits, c("susie", "susieInf"))
     expect_true("susie" %in% class(fits$susie))
@@ -2506,7 +2591,7 @@ test_that("fitSusieInfThenSusie returns classed susie and susieInf fits", {
 
 test_that("fitSusieInfThenSusie reuses fittedModels without refitting", {
     skip_if_not_installed("susieR")
-    d <- .make_univariate_data(seed = 3, n = 200, p = 8, effect_idx = c(4))
+    d <- .makeUnivariateData(seed = 3, n = 200, p = 8, effect_idx = c(4))
     fits <- fitSusieInfThenSusie(d$X, d$y)
     again <- fitSusieInfThenSusie(
         d$X,
@@ -2641,13 +2726,11 @@ test_that(".susie_rss_extract_weights returns correct-length vector", {
     n <- 500
     R <- diag(p)
     z <- rnorm(p)
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
     w <- pecotmr:::.susieRssExtractWeights(
-        fit = NULL,
-        z = z,
+        fit = fit,
         R = R,
-        n = n,
-        requiredFields = c("alpha", "mu", "X_column_scale_factors"),
-        userArgs = list(L = 5)
+        requiredFields = c("alpha", "mu", "X_column_scale_factors")
     )
     expect_equal(length(w), p)
     expect_true(all(is.finite(w)))
@@ -2661,12 +2744,13 @@ test_that("susieRssWeights follows (stat, LD) convention", {
     R <- diag(p)
     z <- rnorm(p)
     stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-    w <- susieRssWeights(stat, R, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
+    w <- susieRssWeights(stat, R, susieRssFit = fit)
     expect_equal(length(w), p)
     expect_true(all(is.finite(w)))
 })
 
-test_that("susieRssWeights retains fit when retainFit = TRUE", {
+test_that("susieRssWeights retains fit unless fitRetention is none", {
     skip_if_not_installed("susieR")
     set.seed(42)
     p <- 20
@@ -2674,7 +2758,8 @@ test_that("susieRssWeights retains fit when retainFit = TRUE", {
     R <- diag(p)
     z <- rnorm(p)
     stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-    w <- susieRssWeights(stat, R, retainFit = TRUE, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
+    w <- susieRssWeights(stat, R, susieRssFit = fit, fitRetention = "slim")
     expect_false(is.null(attr(w, "fit")))
 })
 
@@ -2686,7 +2771,8 @@ test_that("susieInfRssWeights works", {
     R <- diag(p)
     z <- rnorm(p)
     stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-    w <- susieInfRssWeights(stat, R, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(z = z, R = R, n = n, L = 5)
+    w <- susieInfRssWeights(stat, R, susieInfRssFit = fit)
     expect_equal(length(w), p)
     expect_true(all(is.finite(w)))
 })
@@ -2712,47 +2798,77 @@ test_that("mvsusieWeights real fit returns p x K weights or errors on unstable s
 test_that("susieAshRssWeights returns weights of length p", {
     skip_if_not_installed("susieR")
     f <- .rrwStatLd()
-    w <- susieAshRssWeights(f$stat, f$LD, methodArgs = list(L = 5))
+    fit <- susieR::susie_rss(
+        z = f$stat$z,
+        R = f$LD,
+        n = median(f$stat$n),
+        L = 5
+    )
+    w <- susieAshRssWeights(f$stat, f$LD, susieAshRssFit = fit)
     expect_length(w, f$p)
     expect_true(all(is.finite(w)))
 })
 
-test_that("mvsusieRssWeights fits mvsusie_rss and returns p x K weights", {
+test_that("mvsusieRssWeights returns p x K weights from a supplied fit", {
     skip_if_not_installed("mvsusieR")
     m <- .rrwMulti(n = 80, p = 8, K = 2)
-    # LGreedy stays at its NULL default: mvsusieR's greedy-L loop errors on
-    # small data ("Values and their weights should have equal length"), which
-    # is why the greedy loop is off unless a caller asks for it.
-    w <- mvsusieRssWeights(m$stat, m$LD, L = 5)
+    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
+    local_mocked_bindings(
+        coef.mvsusie = function(...) fakeCoef,
+        .package = "mvsusieR"
+    )
+    w <- mvsusieRssWeights(m$stat, m$LD, mvsusieRssFit = "precomputed_fit")
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
 })
 
-test_that("mvsusieRssWeights forwards L / clamped LGreedy to mvsusie_rss", {
+test_that("mvsusieRssWeights checks the fit against the LD block", {
     skip_if_not_installed("mvsusieR")
+    # It takes (stat, LD) like every other *RssWeights wrapper, and used to
+    # read NEITHER -- a fit from a different block was extracted without
+    # complaint. The susie siblings have always checked this.
     m <- .rrwMulti(n = 80, p = 8, K = 2)
     fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
-    captured <- list()
     local_mocked_bindings(
-        create_mixture_prior = function(...) list(),
-        mvsusie_rss = function(...) {
-            captured <<- list(...)
-            "mock_fit"
-        },
         coef.mvsusie = function(...) fakeCoef,
         .package = "mvsusieR"
     )
-    w <- mvsusieRssWeights(m$stat, m$LD, L = 3, LGreedy = 7)
-    expect_equal(dim(w), c(m$p, m$K))
-    expect_equal(captured$L, 3)
-    expect_equal(captured$L_greedy, 3) # clamped to min(LGreedy, L)
+    # An LD block of the wrong size cannot belong to this fit.
+    expect_error(
+        mvsusieRssWeights(
+            m$stat,
+            m$LD[seq_len(m$p - 1), seq_len(m$p - 1), drop = FALSE],
+            mvsusieRssFit = "precomputed_fit"
+        ),
+        "Dimension mismatch: mvsusieRss fit has 8 variants but LD has 7"
+    )
+    # `stat` is validated as the list the contract says it is.
+    expect_error(
+        mvsusieRssWeights("not-a-list", m$LD, mvsusieRssFit = "f"),
+        "stat"
+    )
 })
 
-test_that("mvsusieRssWeights errors on single-context stat$z", {
+test_that("mvsusieRssWeights refuses to fine-map when no fit is supplied", {
+    skip_if_not_installed("mvsusieR")
+    m <- .rrwMulti(n = 80, p = 8, K = 2)
+    expect_error(
+        mvsusieRssWeights(m$stat, m$LD),
+        "`mvsusieRssFit` is required"
+    )
+})
+
+test_that("mvsusieRssWeights demands a fit before anything else", {
     skip_if_not_installed("mvsusieR")
     f <- .rrwStatLd()
     oneCol <- list(z = matrix(f$stat$z, ncol = 1), n = f$n)
-    expect_error(mvsusieRssWeights(oneCol, f$LD), ">= 2 columns")
+    # The old ">= 2 columns" guard validated *fitting* inputs and left with
+    # the fitting branch; with no fit supplied, the missing fit is the
+    # fundamental problem and `stat` is not read at all.
+    expect_error(
+        mvsusieRssWeights(oneCol, f$LD),
+        "`mvsusieRssFit` is required"
+    )
 })
 
 # ---- mvsusieWeights ----
@@ -2762,60 +2878,20 @@ test_that("mvsusieWeights errors when mvsusieR package is not available", {
         "mvsusieR is installed; skipping missing-package test"
     )
 
-    expect_error(
-        mvsusieWeights(
-            mvsusieFit = NULL,
-            X = matrix(1, 10, 5),
-            Y = matrix(1, 10, 3)
-        ),
-        "mvsusieR"
-    )
+    expect_error(mvsusieWeights(mvsusieFit = NULL), "mvsusieR")
 })
 
-test_that("mvsusieWeights errors when X and Y are NULL and fit is NULL", {
+test_that("mvsusieWeights refuses to fine-map when no fit is supplied", {
     skip_if_not(
         requireNamespace("mvsusieR", quietly = TRUE),
         "mvsusieR not installed"
     )
+    # mvSuSiE fitting belongs to fineMappingPipeline(); this extractor must
+    # not silently refit when the caller forgets the fit.
     expect_error(
-        mvsusieWeights(mvsusieFit = NULL, X = NULL, Y = NULL),
-        "Both X and Y must be provided"
+        mvsusieWeights(mvsusieFit = NULL),
+        "`mvsusieFit` is required"
     )
-})
-
-test_that("mvsusieWeights fits model and returns coefficients when fit is NULL", {
-    skip_if_not(
-        requireNamespace("mvsusieR", quietly = TRUE),
-        "mvsusieR not installed"
-    )
-    set.seed(42)
-    n <- 30
-    p <- 5
-    R <- 3
-    X <- matrix(rnorm(n * p), n, p)
-    Y <- matrix(rnorm(n * R), n, R)
-    fake_coef <- matrix(rnorm((p + 1) * R), nrow = p + 1, ncol = R)
-    captured <- list()
-
-    local_mocked_bindings(
-        create_mixture_prior = function(...) list(),
-        mvsusie = function(...) {
-            captured <<- list(...)
-            "mock_fit"
-        },
-        coef.mvsusie = function(...) fake_coef,
-        .package = "mvsusieR"
-    )
-
-    result <- expect_message(
-        mvsusieWeights(X = X, Y = Y, L = 12, LGreedy = 4),
-        "mvsusieFit is not provided"
-    )
-    # Should return coef without intercept row
-    expect_equal(dim(result), c(p, R))
-    expect_equal(result, fake_coef[-1, ])
-    expect_equal(captured$L, 12)
-    expect_equal(captured$L_greedy, 4)
 })
 
 test_that("mvsusieWeights returns coefficients from provided fit", {
@@ -2837,8 +2913,13 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
     expect_equal(result, fake_coef[-1, ])
 })
 
-.fw_makeFsusieFit <- function(seed = 1, n = 150L, p = 24L, J = 16L,
-                              prior = "mixture_normal_per_scale") {
+.fw_makeFsusieFit <- function(
+    seed = 1,
+    n = 150L,
+    p = 24L,
+    J = 16L,
+    prior = "mixture_normal_per_scale"
+) {
     set.seed(seed)
     X <- matrix(
         rnorm(n * p),
@@ -2846,7 +2927,7 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     b1 <- sin(seq(0, 2 * pi, length.out = J))
@@ -3476,9 +3557,7 @@ test_that("susieRss weight extraction rejects a fit that does not match R", {
     expect_error(
         pecotmr:::.susieRssExtractWeights(
             fit = list(pip = c(0.1, 0.2)),
-            z = c(1, 2, 3),
             R = diag(3),
-            n = 100,
             requiredFields = c("alpha", "mu")
         ),
         "Dimension mismatch: susieRss fit has 2 variants but R has 3 rows"
@@ -3490,9 +3569,7 @@ test_that("susieRss weights are zero when the fit lacks the coefficient fields",
     # contribution is zero rather than an error or a partial answer.
     w <- pecotmr:::.susieRssExtractWeights(
         fit = list(pip = c(0.1, 0.2, 0.3)),
-        z = c(1, 2, 3),
         R = diag(3),
-        n = 100,
         requiredFields = c("alpha", "mu", "X_column_scale_factors")
     )
     expect_equal(w, c(0, 0, 0))
@@ -3501,11 +3578,9 @@ test_that("susieRss weights are zero when the fit lacks the coefficient fields",
 test_that("susieRss weights carry the fit when asked to retain it", {
     w <- pecotmr:::.susieRssExtractWeights(
         fit = list(pip = c(0.1, 0.2, 0.3)),
-        z = c(1, 2, 3),
         R = diag(3),
-        n = 100,
         requiredFields = "absentField",
-        retainFit = TRUE
+        fitRetention = "slim"
     )
     expect_false(is.null(attr(w, "fit")))
     expect_equal(attr(w, "fit")$pip, c(0.1, 0.2, 0.3))
@@ -3817,7 +3892,7 @@ test_that("the fsusie fast path uses a trimmed fit's precomputed coef", {
     W <- pecotmr:::.fsusieWeightsFastPath(
         list(coef = cf, fitted_wc = NULL),
         c("a", "b", "c"),
-        retainFit = TRUE
+        fitRetention = "slim"
     )
     expect_equal(rownames(W), c("a", "b", "c"))
     expect_false(is.null(attr(W, "fit")))
@@ -3825,7 +3900,7 @@ test_that("the fsusie fast path uses a trimmed fit's precomputed coef", {
     expect_null(pecotmr:::.fsusieWeightsFastPath(
         list(coef = cf, fitted_wc = list(1)),
         c("a", "b", "c"),
-        retainFit = FALSE
+        fitRetention = "none"
     ))
 })
 
@@ -3843,20 +3918,76 @@ test_that("susieInf is skipped as a result when it was only a chain input", {
     # from, but keepInf is FALSE so it must not surface as its own method.
     chainOnly <- pecotmr:::.fmResolveSusieChain("susie", TRUE)
     expect_false(chainOnly$keepInf)
-    expect_null(pecotmr:::.fmXFitOne("susieInf", list(), chainOnly, "INFFIT"))
-    expect_null(pecotmr:::.fmRssFitOne("susieInf", list(), chainOnly, "INFFIT"))
+    expect_null(pecotmr:::.fmXFitOne(
+        "susieInf",
+        chainOnly,
+        "INFFIT",
+        X = NULL,
+        y = NULL,
+        coverage = 0.95,
+        methodArgs = list(),
+        verbose = 0,
+        ctx = "c1",
+        tid = "t1"
+    ))
+    expect_null(pecotmr:::.fmRssFitOne(
+        "susieInf",
+        chainOnly,
+        "INFFIT",
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        coverage = 0.95,
+        methodArgs = list(),
+        verbose = 0,
+        label = "lab",
+        rssArgs = SusieRssParam(
+            rFinite = NULL,
+            rMismatch = NULL,
+            control = NULL,
+            serFallback = FALSE
+        )
+    ))
 })
 
 test_that("susieInf is returned as its own fit when it was requested", {
     asked <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
     expect_true(asked$keepInf)
     expect_equal(
-        pecotmr:::.fmXFitOne("susieInf", list(), asked, "INFFIT"),
+        pecotmr:::.fmXFitOne(
+            "susieInf",
+            asked,
+            "INFFIT",
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        ),
         "INFFIT"
     )
-    rss <- pecotmr:::.fmRssFitOne("susieInf", list(), asked, "INFFIT")
-    expect_equal(rss$fit, "INFFIT")
-    expect_false(rss$isStd)
+    rssArgs <- pecotmr:::.fmRssFitOne(
+        "susieInf",
+        asked,
+        "INFFIT",
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        coverage = 0.95,
+        methodArgs = list(),
+        verbose = 0,
+        label = "lab",
+        rssArgs = SusieRssParam(
+            rFinite = NULL,
+            rMismatch = NULL,
+            control = NULL,
+            serFallback = FALSE
+        )
+    )
+    expect_equal(rssArgs$fit, "INFFIT")
+    expect_false(rssArgs$isStd)
 })
 
 
@@ -3901,8 +4032,10 @@ test_that("includeAllCs widens to every effect rather than the kept ones", {
         scale = c(1, 1),
         primaryCsPos = c(0L, 1L),
         effectOf = c(1L, 2L),
-        fullFit = TRUE,
-        includeAllCs = TRUE
+        credibleSetArgs = CredibleSetParam(
+            includeAllCs = TRUE,
+            perCsColumns = "alpha"
+        )
     )
     expect_equal(nrow(out), 2L)
     expect_gt(ncol(out), 1L)
@@ -3912,9 +4045,8 @@ test_that("susie weight extraction can carry the fit alongside the weights", {
     w <- pecotmr:::.susieExtractWeights(
         fit = list(pip = c(0.1, 0.2)),
         X = NULL,
-        y = NULL,
         requiredFields = "absentField",
-        retainFit = TRUE
+        fitRetention = "slim"
     )
     expect_equal(attr(w, "fit")$pip, c(0.1, 0.2))
     # Without the required fields the weights are zero, not an error.
@@ -3980,37 +4112,74 @@ test_that("no credible sets leaves the conditional lfsr untouched", {
 
 test_that(".fmXFitOne threads the shared susieInf fit into chained tokens", {
     local_mocked_bindings(
-        .fmFitSusieIndiv = function(X, y, tk, chainFromInf, coverage,
-                                    userArgs) {
+        .fmFitSusieIndiv = function(
+            X,
+            y,
+            tk,
+            chainFromInf,
+            coverage,
+            userArgs
+        ) {
             list(tk = tk, chained = !is.null(chainFromInf))
         },
         .package = "pecotmr"
     )
-    p <- list(
-        X = NULL, y = NULL, verbose = 0, coverage = 0.95,
-        methodArgs = list(), ctx = "c1", tid = "t1"
-    )
     chain <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
     expect_true(chain$chainSusie)
-    expect_true(pecotmr:::.fmXFitOne("susie", p, chain, list(S = TRUE))$chained)
+    expect_true(
+        pecotmr:::.fmXFitOne(
+            "susie",
+            chain,
+            list(S = TRUE),
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        )$chained
+    )
     # susieAsh is not in this chain, so it fits from scratch.
     expect_false(
-        pecotmr:::.fmXFitOne("susieAsh", p, chain, list(S = TRUE))$chained
+        pecotmr:::.fmXFitOne(
+            "susieAsh",
+            chain,
+            list(S = TRUE),
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        )$chained
     )
     chainAsh <- pecotmr:::.fmResolveSusieChain(c("susieAsh", "susieInf"), TRUE)
     expect_true(
-        pecotmr:::.fmXFitOne("susieAsh", p, chainAsh, list(S = TRUE))$chained
+        pecotmr:::.fmXFitOne(
+            "susieAsh",
+            chainAsh,
+            list(S = TRUE),
+            X = NULL,
+            y = NULL,
+            coverage = 0.95,
+            methodArgs = list(),
+            verbose = 0,
+            ctx = "c1",
+            tid = "t1"
+        )$chained
     )
 })
 
 test_that(".fmFitXBlock skips a token that produced no fit", {
     local_mocked_bindings(
-        .fmXInfFit = function(p, chainLocal) NULL,
-        .fmXFitOne = function(tk, p, chainLocal, infFit) {
+        .fmXInfFit = function(chainLocal, ...) NULL,
+        .fmXFitOne = function(tk, chainLocal, infFit, ...) {
             if (tk == "susie") NULL else list(tk = tk)
         },
-        .fmXPostprocess = function(fit, tk, p) list(done = tk),
-        .fmXCrossValidate = function(out, p) out,
+        .fmXPostprocess = function(fit, tk, ...) list(done = tk),
+        .fmXCrossValidate = function(out, ...) out,
         .package = "pecotmr"
     )
     out <- pecotmr:::.fmFitXBlock(
@@ -4025,33 +4194,56 @@ test_that(".fmFitXBlock skips a token that produced no fit", {
 
 test_that(".fmRssFitStd threads the shared susieInf fit when chained", {
     local_mocked_bindings(
-        .fmFitSusieRss = function(z, R, n, tk, chainFromInf, coverage,
-                                  userArgs, rFinite, rMismatch, rssControl) {
+        .fmFitSusieRss = function(
+            z,
+            R,
+            n,
+            tk,
+            chainFromInf,
+            coverage,
+            userArgs,
+            rFinite,
+            rMismatch,
+            rssControl,
+            ...
+        ) {
             list(tk = tk, chained = !is.null(chainFromInf))
         },
         .package = "pecotmr"
     )
-    p <- list(
-        z = NULL, R = NULL, n = 100L, verbose = 0, coverage = 0.95,
-        methodArgs = list(), label = "lab", rFinite = NULL,
-        rMismatch = NULL, rssControl = NULL
-    )
     chain <- pecotmr:::.fmResolveSusieChain(c("susie", "susieInf"), TRUE)
-    out <- pecotmr:::.fmRssFitStd("susie", p, chain, list(S = TRUE))
+    out <- pecotmr:::.fmRssFitStd(
+        "susie",
+        chain,
+        list(S = TRUE),
+        z = NULL,
+        R = NULL,
+        n = 100L,
+        coverage = 0.95,
+        methodArgs = list(),
+        verbose = 0,
+        label = "lab",
+        rssArgs = SusieRssParam(
+            rFinite = NULL,
+            rMismatch = NULL,
+            control = NULL,
+            serFallback = FALSE
+        )
+    )
     expect_true(out$fit$chained)
 })
 
 test_that(".fmFitRssBlock skips a token that produced no fit", {
     local_mocked_bindings(
-        .fmRssInfFit = function(p, chainLocal) NULL,
-        .fmRssFitOne = function(tk, p, chainLocal, infFit) {
+        .fmRssInfFit = function(chainLocal, ...) NULL,
+        .fmRssFitOne = function(tk, chainLocal, infFit, ...) {
             if (tk == "susie") {
                 NULL
             } else {
                 list(fit = list(tk = tk), isStd = FALSE)
             }
         },
-        .fmRssPostprocess = function(fit, p) list(done = fit$tk),
+        .fmRssPostprocess = function(fit, ...) list(done = fit$tk),
         .package = "pecotmr"
     )
     out <- pecotmr:::.fmFitRssBlock(
@@ -4066,7 +4258,7 @@ test_that(".fmFitRssBlock skips a token that produced no fit", {
 
 test_that("computeCsTables falls back to 0.95 when nothing supplies coverage", {
     skip_if_not_installed("susieR")
-    d <- .make_univariate_data(seed = 7, n = 200, p = 8, effect_idx = c(2))
+    d <- .makeUnivariateData(seed = 7, n = 200, p = 8, effect_idx = c(2))
     fit <- susieR::susie(d$X, d$y, L = 4)
     # Neither the argument nor the fit names a coverage.
     fit$sets$requested_coverage <- NULL
@@ -4088,30 +4280,39 @@ test_that(".ppAssembleRes records sample names from a matrix dataY", {
         nrow = 3L,
         dimnames = list(c("s1", "s2", "s3"), c("a", "b"))
     )
-    p <- list(
-        signalCutoff = 0, method = "susie", dataY = Y,
-        fit = list(), otherQuantities = NULL
-    )
     topLoci <- data.frame(
         variant_id = "chr1:1:A:G",
         pip = 0.9,
         stringsAsFactors = FALSE
     )
-    res <- pecotmr:::.ppAssembleRes(p, topLoci, NULL, NULL)
+    res <- pecotmr:::.ppAssembleRes(
+        topLoci,
+        NULL,
+        NULL,
+        fit = list(),
+        method = "susie",
+        dataY = Y,
+        otherQuantities = NULL,
+        signalCutoff = 0
+    )
     expect_equal(res$sampleNames, c("s1", "s2", "s3"))
     # A list dataY (multi-context) has no single sample vector to record.
     expect_null(pecotmr:::.sampleNamesFromDataY(list(Y)))
 })
 
-test_that(".btlParseVariants surfaces a parse failure as an error", {
+test_that(".btlParseVariants surfaces a parse failure as a chained error", {
     local_mocked_bindings(
         parseVariantId = function(...) stop("boom"),
         .package = "pecotmr"
     )
-    expect_error(
+    cnd <- expect_error(
         pecotmr:::.btlParseVariants("chr1:1:A:G"),
-        "buildTopLoci: parseVariantId failed: boom"
+        "buildTopLoci: parseVariantId failed"
     )
+    # try_fetch(parent = cnd) keeps the cause as a real condition rather than
+    # flattening it into the message, so the original is still reachable.
+    expect_s3_class(cnd$parent, "condition")
+    expect_match(conditionMessage(cnd$parent), "boom")
 })
 
 test_that(".btlParseVariants requires one parsed row per variant", {
@@ -4242,7 +4443,7 @@ test_that("fsusieWeights attaches the fit only when asked", {
     kept <- fsusieWeights(
         fsusieFit = obj$fit,
         variantIds = colnames(obj$X),
-        retainFit = TRUE
+        fitRetention = "slim"
     )
     expect_false(is.null(attr(kept, "fit")))
     plain <- fsusieWeights(fsusieFit = obj$fit, variantIds = colnames(obj$X))
@@ -4252,8 +4453,16 @@ test_that("fsusieWeights attaches the fit only when asked", {
 test_that("mvsusieRssWeights attaches the fit only when asked", {
     skip_if_not_installed("mvsusieR")
     m <- .rrwMulti(n = 80, p = 8, K = 2)
-    kept <- suppressMessages(
-        mvsusieRssWeights(m$stat, m$LD, L = 5, retainFit = TRUE)
+    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
+    local_mocked_bindings(
+        coef.mvsusie = function(...) fakeCoef,
+        .package = "mvsusieR"
+    )
+    kept <- mvsusieRssWeights(
+        m$stat,
+        m$LD,
+        mvsusieRssFit = "precomputed_fit",
+        fitRetention = "slim"
     )
     expect_false(is.null(attr(kept, "fit")))
     expect_equal(dim(kept), c(m$p, m$K))
@@ -4313,3 +4522,753 @@ test_that("mergeSusieCs returns NULL when the combined table is empty", {
     # Rows were extracted, but combining them produced nothing to merge.
     expect_null(mergeSusieCs(res, coverage = 0.95))
 })
+
+test_that("susie*Weights: fitRetention / stat / methodArgs guards fire", {
+    # Each guard is the first statement, so the remaining arguments stay
+    # unforced and can be left as placeholders.
+    expect_error(
+        susieWeights(fitRetention = NA),
+        "must be a character vector"
+    )
+    expect_error(
+        susieAshWeights(fitRetention = 1L),
+        "must be a character vector"
+    )
+    expect_error(
+        susieInfWeights(fitRetention = "sometimes"),
+        "must be one of"
+    )
+    expect_error(
+        susieRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        susieInfRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+    expect_error(
+        susieAshRssWeights(stat = "nope", LD = NULL),
+        "stat.*Must be of type 'list'"
+    )
+})
+
+test_that("mvsusie / fsusie wrappers: numeric guards fire", {
+    expect_error(
+        fitMvsusie(NULL, NULL, NULL, coverage = 2),
+        "coverage.*is not <= 1"
+    )
+    expect_error(
+        fitMvsusieRss(NULL, NULL, N = -1, NULL),
+        "N.*is not >= 0"
+    )
+    expect_error(
+        fitMvsusieRss(NULL, NULL, N = 100, NULL, coverage = -1),
+        "coverage.*is not >= 0"
+    )
+    expect_error(
+        fsusieGetCs(NULL, NULL, requestedCoverage = 2),
+        "requestedCoverage.*is not <= 1"
+    )
+})
+
+test_that("fitSusieInfThenSusieRss: argument guards fire", {
+    expect_error(
+        fitSusieInfThenSusieRss(z = "nope", R = NULL, n = 100),
+        "z.*Must be of type 'numeric'"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(z = 1, R = NULL, n = -1),
+        "n.*is not >= 0"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(z = 1, R = NULL, n = 1, args = 1L),
+        "must be built with SusieOptions"
+    )
+    # A bare list is the case the constructors exist to refuse: it cannot be
+    # checked, so a misspelling would reach susieR and be ignored.
+    expect_error(
+        fitSusieInfThenSusieRss(
+            z = 1,
+            R = NULL,
+            n = 1,
+            SusieInfOptions = list(L = 5)
+        ),
+        "must be built with SusieInfOptions"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(
+            z = 1,
+            R = NULL,
+            n = 1,
+            SusieOptions = SusieOptions(nope = 1)
+        ),
+        "unknown argument"
+    )
+    expect_error(
+        fitSusieInfThenSusieRss(
+            z = 1,
+            R = NULL,
+            n = 1,
+            fittedModels = 1L
+        ),
+        "fittedModels.*Must be of type 'list'"
+    )
+})
+
+test_that(".fmwConcat answers an empty list for no pieces", {
+    expect_identical(pecotmr:::.fmwConcat(list()), list())
+})
+
+test_that(".ufOverlapPairs needs at least two sets to form a pair", {
+    expect_identical(pecotmr:::.ufOverlapPairs(list()), list())
+    expect_identical(pecotmr:::.ufOverlapPairs(list(1L)), list())
+})
+
+test_that(".btlPrimaryEffects answers integer(0) with no primary CS", {
+    # No coverage values at all, and a coverage that matches no CS: both mean
+    # there is no primary set whose effects could be named.
+    expect_identical(
+        pecotmr:::.btlPrimaryEffects(
+            c(0.95),
+            list(covSorted = numeric(0)),
+            list()
+        ),
+        integer(0)
+    )
+    expect_identical(
+        pecotmr:::.btlPrimaryEffects(c(0.95), list(covSorted = 0.5), list()),
+        integer(0)
+    )
+})
+
+test_that(".btlCondLfsrForSet answers NULL for an unusable effect index", {
+    clf <- array(0, dim = c(1L, 2L, 1L))
+    # effect index out of range for clf's first dimension
+    expect_null(
+        pecotmr:::.btlCondLfsrForSet(1L, list(1L), c(99L), clf, 1L, 2L)
+    )
+    # in range, but the set names no variant inside 1..nV
+    expect_null(
+        pecotmr:::.btlCondLfsrForSet(1L, list(integer(0)), c(1L), clf, 1L, 2L)
+    )
+})
+
+test_that("serWeights extracts weights from a single-effect fit", {
+    skip_if_not_installed("susieR")
+    # `ser` was listed in .twasFineMappingTokens() but had no implementation
+    # and no .twasMethodMap entry, so requesting it produced a stub that
+    # dispatch could not satisfy. The SER model carries the same
+    # alpha/mu/X_column_scale_factors structure as a SuSiE fit -- with one
+    # row of alpha -- so extraction is the same operation.
+    set.seed(1)
+    nObs <- 200L
+    nVar <- 20L
+    X <- matrix(rnorm(nObs * nVar), nObs, nVar)
+    y <- X[, 3] * 0.5 + rnorm(nObs)
+    z <- map_dbl(
+        seq_len(nVar),
+        function(j) summary(stats::lm(y ~ X[, j]))$coefficients[2, 3]
+    )
+    fit <- suppressWarnings(susieR::susie_ser(z = z, n = nObs))
+    expect_true(all(
+        is_in(c("alpha", "mu", "X_column_scale_factors"), names(fit))
+    ))
+    expect_equal(nrow(fit$alpha), 1L)
+
+    w <- serWeights(serFit = fit)
+    expect_length(w, nVar)
+    expect_false(all(w == 0))
+    expect_equal(which.max(abs(w)), 3L)
+
+    # X is only a dimension cross-check, and optional.
+    expect_equal(serWeights(X = X, serFit = fit), w)
+    expect_error(
+        serWeights(X = X[, 1:5], serFit = fit),
+        "Dimension mismatch"
+    )
+    # Shares the fit-derived extractors' message, naming its own token.
+    expect_error(serWeights(), "no 'ser' fit supplied")
+})
+
+test_that("ser is reachable as a TWAS method", {
+    # It is fit-derived like susie/mvsusie, so it carries no learner
+    # arguments and its entry is an empty stub.
+    expect_true(is_in("ser", names(pecotmr:::.twasMethodMap)))
+    expect_equal(pecotmr:::.twasMethodMap$ser$impl, "serWeights")
+    expect_length(pecotmr:::.twasMethodMap$ser$args, 0L)
+    expect_setequal(
+        pecotmr:::.twasNormalizeMethods(c("ser", "lasso"))$tokens,
+        c("ser", "lasso")
+    )
+    # Nothing to configure, same as the other fit-derived methods.
+    expect_error(
+        TwasWeightsMethodsParam(
+            qtlSumStatsMethods = list(ser = list(nope = 1))
+        ),
+        "nothing to configure here"
+    )
+})
+
+test_that(".fmSerScreen: disables on 0, skips no-signal, keeps signal + adaptive", {
+    skip_if_not_installed("susieR")
+    set.seed(1)
+    n <- 150L
+    p <- 25L
+    X <- matrix(rnorm(n * p), n, p)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
+    yNull <- rnorm(n) # no association
+    ySig <- X[, 1] * 2 + rnorm(n, sd = 0.3) # strong single effect at v1
+    fn <- function(...) suppressMessages(pecotmr:::.fmSerScreen(...))
+    expect_true(fn(X, yNull, 0)) # cutoff 0 disables -> always keep
+    expect_false(fn(X, yNull, 0.5)) # no PIP that high -> skip
+    expect_true(fn(X, ySig, 0.5)) # strong signal clears 0.5 -> keep
+    expect_true(fn(X, ySig, -1)) # adaptive 3/p: signal keeps
+    expect_false(fn(X, yNull, -1)) # adaptive 3/p: null skips
+    expect_true(fn(X, yNull, NA)) # malformed cutoff -> advisory keep
+})
+
+test_that(".buildMvsusieReweightedPrior: canonical fallback when no usable fit", {
+    bp <- function(...) pecotmr:::.buildMvsusieReweightedPrior(...)
+    # No fit at all -> canonical prior, residualVariance NULL.
+    p1 <- bp(NULL, c("c1", "c2"))
+    expect_false(is.null(p1$priorVariance))
+    expect_null(p1$residualVariance)
+    # Fit with no data-driven matrices -> canonical prior, but V carried through.
+    p2 <- bp(list(dataDrivenPriorMatrices = NULL, V = diag(2)), c("c1", "c2"))
+    expect_equal(p2$residualVariance, diag(2))
+})
+
+test_that(".buildMvsusieReweightedPrior: reweights matrices by rescaleCovW0(w0)", {
+    ddpm <- list(
+        U = list(compA = diag(2), compB = diag(2) * 2),
+        w = c(compA = 0.5, compB = 0.5)
+    )
+    fit <- list(
+        dataDrivenPriorMatrices = ddpm,
+        w0 = c(compA_grid1 = 0.3, compB_grid1 = 0.7),
+        V = diag(2) * 3
+    )
+    captured <- NULL
+    # rescaleCovW0 collapses expanded w0 onto the original matrix names; mock it
+    # so the test asserts the wiring, not rescaleCovW0's internals.
+    local_mocked_bindings(
+        rescaleCovW0 = function(w0) c(compA = 0.4, compB = 0.6),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        create_mixture_prior = function(...) {
+            captured <<- list(...)
+            "PRIOR"
+        },
+        .package = "mvsusieR"
+    )
+    res <- pecotmr:::.buildMvsusieReweightedPrior(
+        fit,
+        c("c1", "c2"),
+        weightsTol = 1e-8
+    )
+    expect_identical(res$priorVariance, "PRIOR")
+    expect_equal(res$residualVariance, diag(2) * 3)
+    expect_equal(captured$mixture_prior$weights, c(compA = 0.4, compB = 0.6))
+    expect_equal(names(captured$mixture_prior$matrices), c("compA", "compB"))
+    expect_equal(captured$include_indices, c("c1", "c2"))
+    expect_equal(captured$weights_tol, 1e-8)
+})
+
+test_that(".buildMvsusieReweightedPrior: overrideU swaps matrices, keeps fit w0/V", {
+    fit <- list(
+        dataDrivenPriorMatrices = list(U = list(K = diag(2)), w = c(K = 1)),
+        w0 = c(K_grid1 = 1),
+        V = diag(2) * 7
+    )
+    override <- list(U = list(K = diag(2) * 5))
+    captured <- NULL
+    local_mocked_bindings(
+        rescaleCovW0 = function(w0) c(K = 1),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        create_mixture_prior = function(...) {
+            captured <<- list(...)
+            "PRIOR"
+        },
+        .package = "mvsusieR"
+    )
+    res <- pecotmr:::.buildMvsusieReweightedPrior(
+        fit,
+        c("c1", "c2"),
+        overrideU = override
+    )
+    expect_equal(captured$mixture_prior$matrices$K, diag(2) * 5) # the override U
+    expect_equal(res$residualVariance, diag(2) * 7) # the fit's own V
+})
+
+test_that(".fmSerScreen supports absZ / bf / logBf metrics and the legacy pip scalar", {
+    skip_if_not_installed("susieR")
+    set.seed(11)
+    n <- 200L
+    p <- 6L
+    X <- matrix(stats::rnorm(n * p), n, p)
+    yStrong <- X[, 2] * 0.6 + stats::rnorm(n) # column 2 strongly associated
+    yNull <- stats::rnorm(n) # no association
+
+    # absZ: max marginal |z| (no susie fit).
+    expect_true(pecotmr:::.fmSerScreen(
+        X,
+        yStrong,
+        list(metric = "absZ", cutoff = 3)
+    ))
+    expect_false(pecotmr:::.fmSerScreen(
+        X,
+        yNull,
+        list(metric = "absZ", cutoff = 3)
+    ))
+    # bf / logBf from the L = 1 susie lbf_variable.
+    expect_true(pecotmr:::.fmSerScreen(
+        X,
+        yStrong,
+        list(metric = "logBf", cutoff = 2)
+    ))
+    expect_false(pecotmr:::.fmSerScreen(
+        X,
+        yNull,
+        list(metric = "logBf", cutoff = 5)
+    ))
+    expect_true(pecotmr:::.fmSerScreen(
+        X,
+        yStrong,
+        list(metric = "bf", cutoff = 10)
+    ))
+    # Legacy scalar spec still screens on PIP; 0 disables (always keep).
+    expect_true(pecotmr:::.fmSerScreen(X, yStrong, 0.5))
+    expect_true(pecotmr:::.fmSerScreen(X, yNull, 0))
+    # Too few samples -> advisory fallback (keep by default).
+    expect_true(pecotmr:::.fmSerScreen(
+        X[1, , drop = FALSE],
+        yStrong[1],
+        list(metric = "absZ", cutoff = 3)
+    ))
+})
+
+test_that(".fmFitSusieSer calls susieR::susie_ser with z + n and no R / L", {
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        susie_ser = function(z, n, coverage = 0.95, ...) {
+            captured$args <- list(
+                z = z,
+                n = n,
+                coverage = coverage,
+                dots = list(...)
+            )
+            list(pip = rep(0.1, length(z)))
+        },
+        .package = "susieR"
+    )
+    fit <- pecotmr:::.fmFitSusieSer(z = rnorm(5), n = 1000)
+    expect_equal(captured$args$n, 1000)
+    expect_length(captured$args$z, 5)
+    expect_null(captured$args$dots$R)
+    expect_null(captured$args$dots$L)
+    expect_true("susieRss" %in% class(fit))
+})
+
+test_that(".fmFitSusieIndiv: susieInf branch passes convergence_method='pip', refine=FALSE, model_init=NULL", {
+    captured <- new.env(parent = emptyenv())
+    X <- matrix(rnorm(20), 10, 2)
+    y <- rnorm(10)
+    local_mocked_bindings(
+        susie = .fmp_capturingSusie(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieIndiv(X, y, "susieInf")
+    expect_equal(captured$lastArgs$convergence_method, "pip")
+    expect_false(captured$lastArgs$refine)
+    expect_null(captured$lastArgs$model_init)
+    expect_equal(captured$lastArgs$unmappable_effects, "inf")
+})
+
+test_that(".fmFitSusieIndiv: chained branch (chainFromInf) propagates susieInf fit as model_init", {
+    captured <- new.env(parent = emptyenv())
+    X <- matrix(rnorm(20), 10, 2)
+    y <- rnorm(10)
+    # Build a stub susieInf fit with a V slot so prepareSusieFromInfArgs can read L.
+    infFit <- list(V = c(0.1, 0.2))
+    local_mocked_bindings(
+        susie = .fmp_capturingSusie(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieIndiv(X, y, "susie", chainFromInf = infFit)
+    # prepareSusieFromInfArgs writes the susieInf fit into model_init and
+    # sets unmappable_effects to "none" for the `susie` token.
+    expect_identical(captured$lastArgs$model_init, infFit)
+    expect_equal(captured$lastArgs$unmappable_effects, "none")
+})
+
+test_that(".fmFitSusieIndiv: chained susieAsh branch sets unmappable_effects='ash'", {
+    captured <- new.env(parent = emptyenv())
+    X <- matrix(rnorm(20), 10, 2)
+    y <- rnorm(10)
+    infFit <- list(V = c(0.1, 0.2))
+    local_mocked_bindings(
+        susie = .fmp_capturingSusie(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieIndiv(X, y, "susieAsh", chainFromInf = infFit)
+    expect_equal(captured$lastArgs$unmappable_effects, "ash")
+    expect_identical(captured$lastArgs$model_init, infFit)
+})
+
+test_that(".fmFitSusieIndiv: unchained susieAsh branch sets convergence_method='pip'", {
+    captured <- new.env(parent = emptyenv())
+    X <- matrix(rnorm(20), 10, 2)
+    y <- rnorm(10)
+    local_mocked_bindings(
+        susie = .fmp_capturingSusie(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieIndiv(X, y, "susieAsh")
+    expect_equal(captured$lastArgs$convergence_method, "pip")
+    expect_equal(captured$lastArgs$unmappable_effects, "ash")
+})
+
+test_that(".fmFitSusieIndiv: rejects non-SuSiE-family token", {
+    expect_error(
+        pecotmr:::.fmFitSusieIndiv(matrix(0, 2, 2), c(0, 0), "mvsusie"),
+        "not a SuSiE-family method"
+    )
+    expect_error(
+        pecotmr:::.fmFitSusieIndiv(matrix(0, 2, 2), c(0, 0), "ghost"),
+        "not a SuSiE-family method"
+    )
+})
+
+test_that(".fmFitSusieRss: susieInf branch passes convergence_method='pip', refine=FALSE, model_init=NULL", {
+    captured <- new.env(parent = emptyenv())
+    z <- rnorm(3)
+    R <- diag(3)
+    n <- 1000
+    local_mocked_bindings(
+        susie_rss = .fmp_capturingSusieRss(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieRss(z, R, n, "susieInf")
+    expect_equal(captured$lastArgs$convergence_method, "pip")
+    expect_false(captured$lastArgs$refine)
+    expect_null(captured$lastArgs$model_init)
+    expect_equal(captured$lastArgs$unmappable_effects, "inf")
+})
+
+test_that(".fmFitSusieRss: chained branch (chainFromInf) propagates susieInf fit as model_init", {
+    captured <- new.env(parent = emptyenv())
+    z <- rnorm(3)
+    R <- diag(3)
+    n <- 1000
+    infFit <- list(V = c(0.1, 0.2))
+    local_mocked_bindings(
+        susie_rss = .fmp_capturingSusieRss(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieRss(z, R, n, "susie", chainFromInf = infFit)
+    expect_identical(captured$lastArgs$model_init, infFit)
+    expect_equal(captured$lastArgs$unmappable_effects, "none")
+})
+
+test_that(".fmFitSusieRss: chained susieAsh branch sets unmappable_effects='ash'", {
+    captured <- new.env(parent = emptyenv())
+    z <- rnorm(3)
+    R <- diag(3)
+    n <- 1000
+    infFit <- list(V = c(0.1, 0.2))
+    local_mocked_bindings(
+        susie_rss = .fmp_capturingSusieRss(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieRss(z, R, n, "susieAsh", chainFromInf = infFit)
+    expect_equal(captured$lastArgs$unmappable_effects, "ash")
+    expect_identical(captured$lastArgs$model_init, infFit)
+})
+
+test_that(".fmFitSusieRss: unchained susieAsh branch sets convergence_method='pip'", {
+    captured <- new.env(parent = emptyenv())
+    z <- rnorm(3)
+    R <- diag(3)
+    n <- 1000
+    local_mocked_bindings(
+        susie_rss = .fmp_capturingSusieRss(captured),
+        .package = "susieR"
+    )
+    pecotmr:::.fmFitSusieRss(z, R, n, "susieAsh")
+    expect_equal(captured$lastArgs$convergence_method, "pip")
+    expect_equal(captured$lastArgs$unmappable_effects, "ash")
+})
+
+test_that(".fmFitSusieRss: rejects non-SuSiE-family token", {
+    expect_error(
+        pecotmr:::.fmFitSusieRss(c(0, 0), diag(2), 1000, "mvsusie"),
+        "not a SuSiE-family method"
+    )
+})
+
+test_that(".buildMvsusieReweightedPrior: empty reweighted w0 -> canonical(V)", {
+    local_mocked_bindings(
+        rescaleCovW0 = function(w0) c(zzz = 1),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        create_mixture_prior = function(...) "PV",
+        .package = "mvsusieR"
+    )
+    fp <- list(
+        dataDrivenPriorMatrices = list(U = list(compA = diag(2))),
+        w0 = c(compA_grid1 = 1),
+        V = diag(2)
+    )
+    res <- pecotmr:::.buildMvsusieReweightedPrior(fp, c("c1", "c2"))
+    expect_equal(res$residualVariance, diag(2)) # w0 names disjoint from U (749)
+})
+
+test_that(".fmSerScreen / .fmScreenActive / .fmSerScreenColumns", {
+    set.seed(2)
+    X <- matrix(
+        rnorm(40),
+        20,
+        2,
+        dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
+    )
+    y <- rnorm(20)
+    expect_true(pecotmr:::.fmSerScreen(X, y, 0)) # disabled
+    expect_true(pecotmr:::.fmSerScreen(X, c(1, rep(NA, 19)), 0.5)) # < 2 obs (880)
+    expect_type(pecotmr:::.fmSerScreen(X, y, 0.5), "logical") # real susie fit
+    local_mocked_bindings(
+        susie = function(...) stop("boom"),
+        .package = "susieR"
+    )
+    expect_true(pecotmr:::.fmSerScreen(X, y, 0.5)) # fit fails -> keep (886)
+    expect_false(pecotmr:::.fmScreenActive(0))
+    expect_true(pecotmr:::.fmScreenActive(0.5))
+    expect_length(
+        pecotmr:::.fmSerScreenColumns(X, matrix(rnorm(40), 20, 2), 0),
+        2L
+    )
+})
+
+test_that(".fmFitXBlock fits the susieInf indiv chain + cross-validates (mocked)", {
+    local_mocked_bindings(
+        .fmFitSusieIndiv = function(...) list(),
+        .fmPostprocessOne = function(fit, method, dataX, dataY, ...) {
+            fineMappingRow(
+                colnames(dataX),
+                list(),
+                data.frame(variant_id = colnames(dataX), pip = 0.5)
+            )
+        },
+        .fmFoldWeights = function(token, Xtr, Ytr, ...) {
+            matrix(0.01, ncol(Xtr), 1L, dimnames = list(colnames(Xtr), NULL))
+        },
+        .package = "pecotmr"
+    )
+    set.seed(1)
+    X <- matrix(
+        rbinom(60, 2, 0.4),
+        20,
+        3,
+        dimnames = list(
+            paste0("s", 1:20),
+            c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
+        )
+    )
+    y <- rnorm(20)
+    out <- pecotmr:::.fmFitXBlock(
+        X,
+        y,
+        toRun = "susieInf",
+        addSusieInf = FALSE,
+        methodArgs = list(susieInf = list()),
+        verbose = 1,
+        ctx = "brain",
+        tid = "ENSG_A",
+        cvFolds = 3L,
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = 0.7,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
+    )
+    expect_named(out, "susieInf")
+    expect_s4_class(out$susieInf, "FineMappingRow")
+})
+
+test_that("each fine-mapping constructor checks ONE engine entry point", {
+    skip_if_not_installed("susieR")
+    # susie runs susieR::susie on individual data and susieR::susie_rss on
+    # summary statistics. One constructor each, so a name valid only for the
+    # other path is rejected where it would have been dropped in silence.
+    expect_s4_class(SusieOptions(L = 5), "MethodOptions")
+    expect_equal(SusieOptions(L = 5)$L, 5)
+    expect_error(SusieOptions(LL = 5), "unknown argument\\(s\\) LL")
+    expect_output(show(SusieOptions()), "susieR::susie")
+    expect_output(show(SusieRssOptions()), "susieR::susie_rss")
+    # `z` belongs to susie_rss alone.
+    expect_error(SusieOptions(z = 1), "unknown argument\\(s\\) z")
+    expect_s4_class(SusieRssOptions(z = 1), "MethodOptions")
+})
+
+test_that("splitting the paths makes the individual mvsusie engine checkable", {
+    skip_if_not_installed("mvsusieR")
+    # mvsusieR::mvsusie enumerates its arguments; mvsusieR::mvsusie_rss still
+    # takes `...`, so only the RSS side goes unchecked. Checking the union of
+    # the two -- as one MvsusieOptions() used to -- left BOTH unchecked.
+    expect_error(
+        MvsusieOptions(nosuchopt = 1),
+        "unknown argument\\(s\\) nosuchopt"
+    )
+    expect_failure(expect_output(show(MvsusieOptions()), "NOT checked"))
+    expect_output(show(MvsusieRssOptions()), "NOT checked")
+    expect_true(is_in("anything", names(MvsusieRssOptions(anything = 1))))
+})
+
+test_that("krigingOutlierQc flags an allele switch and spares the rest", {
+    skip_if_not(
+        "kriging_rss" %in% getNamespaceExports("susieR"),
+        "installed susieR has no kriging_rss"
+    )
+    s <- .kr_switchScenario()
+    kr <- krigingOutlierQc(s$z, s$R, n = 1000, variantIds = s$ids)
+    expect_true(kr$flip[s$flipped])
+    expect_equal(sum(kr$flip), 1L)
+    expect_equal(nrow(kr$diagnostics), length(s$z))
+    expect_true(all(
+        c("z", "condmean", "z_std_diff", "logLR", "flipped") %in%
+            colnames(kr$diagnostics)
+    ))
+    expect_identical(kr$diagnostics$flipped, kr$flip)
+})
+
+test_that("krigingOutlierQc flip == susieR's logLR>2 & |z|>2 selection", {
+    skip_if_not(
+        "kriging_rss" %in% getNamespaceExports("susieR"),
+        "installed susieR has no kriging_rss"
+    )
+    set.seed(7)
+    m <- 10
+    R <- cov2cor(crossprod(matrix(rnorm(m * m), m)))
+    ids <- paste0("1:", seq_len(m) * 100, ":A:G")
+    rownames(R) <- colnames(R) <- ids
+    z <- as.numeric(R %*% rnorm(m))
+    z[4] <- 9
+    kr <- krigingOutlierQc(z, R, n = 5000, variantIds = ids)
+    ref <- susieR::kriging_rss(z = z, R = R, n = 5000)$conditional_dist
+    # susieR's own allele-switch rule (susie_rss_utils.R): logLR > 2 & |z| > 2.
+    expected <- as.numeric(ref$logLR) > 2 & abs(z) > 2
+    expect_identical(kr$flip, expected)
+    expect_equal(kr$diagnostics$logLR, as.numeric(ref$logLR), tolerance = 1e-8)
+    expect_equal(
+        kr$diagnostics$z_std_diff,
+        as.numeric(ref$z_std_diff),
+        tolerance = 1e-8
+    )
+    expect_equal(
+        kr$diagnostics$condmean,
+        as.numeric(ref$condmean),
+        tolerance = 1e-8
+    )
+})
+
+test_that("krigingOutlierQc thresholds are configurable", {
+    skip_if_not(
+        "kriging_rss" %in% getNamespaceExports("susieR"),
+        "installed susieR has no kriging_rss"
+    )
+    s <- .kr_switchScenario()
+    # The switch fires at the default logLRThreshold = 2 ...
+    expect_true(krigingOutlierQc(s$z, s$R, n = 1000, variantIds = s$ids)$flip[
+        s$flipped
+    ])
+    # ... and an impossibly high logLR threshold suppresses every flip.
+    expect_false(any(
+        krigingOutlierQc(
+            s$z,
+            s$R,
+            n = 1000,
+            variantIds = s$ids,
+            logLRThreshold = 1e6
+        )$flip
+    ))
+    # A |z| threshold above the switched z also suppresses it.
+    expect_false(any(
+        krigingOutlierQc(
+            s$z,
+            s$R,
+            n = 1000,
+            variantIds = s$ids,
+            zThreshold = 1e6
+        )$flip
+    ))
+})
+
+test_that("krigingOutlierQc requires a positive sample size n", {
+    expect_error(krigingOutlierQc(c(1, 2, 3), diag(3)), "positive sample size")
+})
+
+test_that("krigingOutlierQc requires a square LD matrix aligned to zScore", {
+    expect_error(
+        krigingOutlierQc(c(1, 2, 3), diag(2), n = 100),
+        "R \\(LD matrix\\).*Must have exactly 3 rows"
+    )
+})
+
+test_that("krigingOutlierQc defaults variantIds to rownames(R)", {
+    skip_if_not(
+        "kriging_rss" %in% getNamespaceExports("susieR"),
+        "installed susieR has no kriging_rss"
+    )
+    m <- 6
+    R <- matrix(0.6, m, m)
+    diag(R) <- 1
+    ids <- paste0("1:", seq_len(m) * 100, ":A:G")
+    rownames(R) <- colnames(R) <- ids
+    z <- rep(2, m)
+    kr <- krigingOutlierQc(z, R, n = 1000) # no variantIds passed
+    expect_equal(kr$diagnostics$variant_id, ids)
+})
+
+test_that("KrigingOptions refuses the inputs pecotmr supplies", {
+    expect_error(KrigingOptions(z = 1), "the caller's `zScore`")
+    expect_error(KrigingOptions(R = diag(2)), "the caller's `R`")
+    expect_error(KrigingOptions(n = 100), "the caller's `n`")
+    expect_error(KrigingOptions(nosuch = 1), "unknown argument")
+    expect_setequal(names(KrigingOptions(r_tol = 1e-06)), "r_tol")
+})
+
+test_that("krigingOutlierQc forwards methodArgs to susieR::kriging_rss", {
+    skip_if_not_installed("susieR")
+    seen <- NULL
+    real <- susieR::kriging_rss
+    set.seed(1)
+    X <- matrix(rnorm(200), 40, 5)
+    R <- cor(X)
+    with_mocked_bindings(
+        krigingOutlierQc(
+            zScore = rnorm(5),
+            R = R,
+            n = 40,
+            methodArgs = KrigingOptions(r_tol = 1e-04)
+        ),
+        kriging_rss = function(...) {
+            seen <<- list(...)
+            real(...)
+        },
+        .package = "susieR"
+    )
+    expect_equal(seen$r_tol, 1e-04)
+    expect_equal(seen$n, 40)
+    expect_error(
+        krigingOutlierQc(rnorm(5), R, 40, methodArgs = list(r_tol = 1)),
+        "KrigingOptions"
+    )
+})
+
+# Fixtures moved here with the tests that use them.
+
+# Fixtures moved here with the tests that use them.

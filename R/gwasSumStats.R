@@ -22,41 +22,38 @@ NULL
 #'   every row.
 #' @seealso \code{\link{GwasSumStats}} for the constructor and
 #'   \code{\linkS4class{QtlSumStats}} for the QTL counterpart.
+#' @importFrom checkmate makeAssertCollection assertNames assertList
 #' @export
 setClass(
     "GwasSumStats",
     contains = "SumStatsBase",
     validity = function(object) {
         # The ldSketch slot's class union enforces its type.
-        errors <- character()
-        required <- "study"
-        missingCols <- setdiff(required, colnames(mcols(object)))
-        if (length(missingCols) > 0L) {
-            errors <- c(
-                errors,
-                str_c("missing columns: ", str_flatten(missingCols, ", "))
-            )
+        coll <- makeAssertCollection()
+        assertNames(
+            colnames(mcols(object)) %||% character(0),
+            must.include = "study",
+            what = "colnames",
+            .var.name = "mcols",
+            add = coll
+        )
+        coll$push(.sumStatsCheckGenome(object))
+        assertList(object@qcInfo, .var.name = "qcInfo", add = coll)
+        slotErrors <- coll$getMessages()
+        if (length(slotErrors) > 0L) {
+            return(slotErrors)
         }
-        errors <- c(errors, .sumStatsCheckGenome(object))
-        if (!is.list(object@qcInfo)) {
-            errors <- c(errors, "'qcInfo' slot must be a list")
+        # The elements ARE GRanges by construction now -- the container is
+        # a GRangesList -- so the old per-element type and length checks
+        # are gone. The one-seqname/one-strand invariant is enforced by
+        # RangedTupleList's own validity.
+        # Keyed on (study, range), not study alone: a study split across
+        # chromosomes contributes one element per seqname, so the study
+        # label legitimately repeats.
+        if (.ssHasDuplicateKeys(object, "study")) {
+            return("(study, range) must be unique")
         }
-        if (length(errors) == 0L) {
-            # The elements ARE GRanges by construction now -- the container is
-            # a GRangesList -- so the old per-element type and length checks
-            # are gone. The one-seqname/one-strand invariant is enforced by
-            # RangedTupleList's own validity.
-            # Keyed on (study, range), not study alone: a study split across
-            # chromosomes contributes one element per seqname, so the study
-            # label legitimately repeats.
-            if (.ssHasDuplicateKeys(object, "study")) {
-                errors <- c(
-                    errors,
-                    "(study, range) must be unique"
-                )
-            }
-        }
-        if (length(errors) == 0L) TRUE else errors
+        TRUE
     }
 )
 
@@ -156,7 +153,11 @@ NULL
 #'   it to carry existing keys through a rebuild; without it a rebuild would
 #'   re-derive them as seqnames and collapse distinct blocks onto one key.
 #'   Mutually exclusive with \code{ldBlocks}.
-#' @param ... Additional per-study columns to attach to the collection.
+#' @param extraCols Optional named list of additional per-study columns to
+#'   attach to the collection's \code{mcols}. Named rather than variadic
+#'   because the base class's own constructor, \code{GRangesList(...)}, uses
+#'   \code{...} for its \emph{elements}: a bare \code{...} here would read
+#'   as adding an entry rather than a metadata column.
 #' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record. Fine-mapping / TWAS pipelines reject inputs where
@@ -183,7 +184,7 @@ GwasSumStats <- function(
     qcInfo = list(),
     ldBlocks = NULL,
     blockId = NULL,
-    ...
+    extraCols = list()
 ) {
     if (missing(study) || missing(entry) || missing(genome)) {
         abort("`study`, `entry`, and `genome` are all required.")
@@ -192,9 +193,9 @@ GwasSumStats <- function(
     cols <- list(
         study = as.character(study),
         varY = varY
-    )
-    cols <- .gwasAppendOptional(cols, nCase, nControl, nSample, study)
-    cols <- .gwasAppendExtras(cols, list(...))
+    ) |>
+        .gwasAppendOptional(nCase, nControl, nSample, study) |>
+        .gwasAppendExtras(extraCols)
     dfArgs <- c(cols, list(check.names = FALSE))
     # The per-study GRanges become the collection's ELEMENTS; everything else
     # is per-study metadata and goes in mcols. There is no `entry` column.
@@ -206,13 +207,16 @@ GwasSumStats <- function(
     # with its metadata row replicated alongside. Splitting is unconditional:
     # a stored element always spans exactly one seqname.
     split <- .gwasSplitEntry(entry, ldBlocks, blockId, length(entry))
-    grl <- GenomicRanges::GRangesList(split$entry)
-    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    md <- md[split$fromIdx, , drop = FALSE]
     # `blockId` is always present, so downstream code (cTWAS in particular) can
     # key regions without first asking how the collection was built.
-    md$blockId <- split$blockId
-    mcols(grl) <- md
+    md <- cbind(
+        exec(S4Vectors::DataFrame, !!!dfArgs)[split$fromIdx, , drop = FALSE],
+        S4Vectors::DataFrame(blockId = split$blockId)
+    )
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(split$entry),
+        value = md
+    )
     .sumStatsNewValidated("GwasSumStats", grl, ldSketch, genome, qcInfo)
 }
 
@@ -225,10 +229,10 @@ GwasSumStats <- function(
     # The build goes into seqinfo, which is where a GRangesList keeps it and
     # where every Bioconductor consumer reads it from. Assigned before new()
     # so validity sees the finished object.
-    GenomeInfoDb::genome(grl) <- as.character(genome)
+    built <- GenomeInfoDb::`genome<-`(grl, value = as.character(genome))
     obj <- methods::new(
         Class,
-        grl,
+        built,
         ldSketch = .asLdSketch(ldSketch),
         qcInfo = as.list(qcInfo)
     )
@@ -256,15 +260,18 @@ GwasSumStats <- function(
     # columns, so an entry that still splits further replicates its id rather
     # than falling out of alignment. This is what lets a rebuild (QC) carry
     # block keys through instead of silently re-deriving them as seqnames.
-    split$blockId <- if (!is.null(blockId)) {
-        .gwasCheckBlockId(blockId, n)[split$fromIdx]
-    } else {
-        # unname(): the seqname splitter names its pieces, and those names
-        # would otherwise ride into the mcols column and make it inconsistent
-        # with the block path, which produces a bare character vector.
-        unname(map_chr(split$entry, .gwasElementSeqname))
-    }
-    split
+    list_assign(
+        split,
+        blockId = if (!is.null(blockId)) {
+            .gwasCheckBlockId(blockId, n)[split$fromIdx]
+        } else {
+            # unname(): the seqname splitter names its pieces, and those names
+            # would otherwise ride into the mcols column and make it
+            # inconsistent with the block path, which produces a bare
+            # character vector.
+            unname(map_chr(split$entry, .gwasElementSeqname))
+        }
+    )
 }
 
 # @noRd
@@ -318,25 +325,26 @@ GwasSumStats <- function(
 # when supplied; NA for the non-case/control studies in a mixed collection).
 # @noRd
 .gwasAppendOptional <- function(cols, nCase, nControl, nSample, study) {
-    if (!is.null(nCase)) {
-        cols$nCase <- .recyclePerStudy(nCase, "nCase", study)
-    }
-    if (!is.null(nControl)) {
-        cols$nControl <- .recyclePerStudy(nControl, "nControl", study)
-    }
-    if (!is.null(nSample)) {
-        cols$nSample <- .recyclePerStudy(nSample, "nSample", study)
-    }
-    cols
+    c(
+        cols,
+        compact(list(
+            nCase = if (!is.null(nCase)) {
+                .recyclePerStudy(nCase, "nCase", study)
+            },
+            nControl = if (!is.null(nControl)) {
+                .recyclePerStudy(nControl, "nControl", study)
+            },
+            nSample = if (!is.null(nSample)) {
+                .recyclePerStudy(nSample, "nSample", study)
+            }
+        ))
+    )
 }
 
 # Append any user-supplied extra columns (from `...`).
 # @noRd
 .gwasAppendExtras <- function(cols, extras) {
-    for (nm in names(extras)) {
-        cols[[nm]] <- extras[[nm]]
-    }
-    cols
+    c(cols, extras)
 }
 
 
@@ -385,16 +393,49 @@ GwasSumStats <- function(
 #'   collection has a single row.
 #' @param ranges Optional \code{GRanges} restricting the returned variants to
 #'   those it overlaps. \code{NULL} (default) returns the study's full set.
-#' @param ... Additional arguments (currently unused).
+#' @param context,trait,annotateSignificance QTL-only selectors, named here so
+#'   that supplying one is an error rather than a silently ignored request. A
+#'   GWAS has no context or trait axis and carries no significance annotation;
+#'   leave them \code{NULL}.
 #' @return A \code{GRanges} object.
 #' @export
 setMethod(
     "getSumStats",
     signature(x = "GwasSumStats"),
-    function(x, study = NULL, ranges = NULL, ...) {
+    function(
+        x,
+        study = NULL,
+        ranges = NULL,
+        context = NULL,
+        trait = NULL,
+        annotateSignificance = NULL
+    ) {
+        # A GWAS has no context / trait axis and no significance annotation:
+        # those selectors belong to QtlSumStats. They are named here, rather
+        # than absorbed by `...`, so asking for one is an error instead of a
+        # silently ignored request -- the shared SumStatsBase accessors pass
+        # the union of both classes' selectors.
+        .gwasRefuseQtlSelectors(context, trait, annotateSignificance)
         .ssStitchElements(x, .gwasSelectStudy(x, study), ranges)
     }
 )
+
+# @noRd
+.gwasRefuseQtlSelectors <- function(context, trait, annotateSignificance) {
+    given <- c(
+        context = !is.null(context),
+        trait = !is.null(trait),
+        annotateSignificance = !is.null(annotateSignificance)
+    )
+    if (!any(given)) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "getSumStats(GwasSumStats): {str_flatten(names(given)[given], ', ')} ",
+        "{if (sum(given) == 1L) 'is' else 'are'} a QtlSumStats selector. ",
+        "A GWAS is selected by `study` (and narrowed by `ranges`)."
+    ))
+}
 
 # getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R).
 
@@ -458,9 +499,11 @@ as.data.frame.GwasSumStats <- function(
     ...
 ) {
     gr <- getSumStats(x, study = study)
-    mc <- as.data.frame(mcols(gr))
-    mc$CHR <- as.character(seqnames(gr))
-    mc$BP <- start(gr)
+    mc <- mutate(
+        as.data.frame(mcols(gr)),
+        CHR = as.character(seqnames(gr)),
+        BP = start(gr)
+    )
     firstCols <- c("SNP", "CHR", "BP")
     restCols <- setdiff(names(mc), firstCols)
     select(mc, all_of(c(firstCols, restCols)))

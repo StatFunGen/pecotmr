@@ -90,26 +90,25 @@ methods::setValidity("ColocBoostResult", function(object) {
 }
 
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertNames checkNames
+#' @importFrom checkmate checkSubset
 .validateColocBoostResult <- function(object) {
-    errors <- .cbrCheckRequiredCols(object)
-    if (length(errors) == 0L) {
-        errors <- c(
-            .cbrCheckVcpColumn(object),
-            .cbrCheckOutcomeInfo(object)
-        )
+    coll <- makeAssertCollection()
+    assertNames(
+        colnames(mcols(object, use.names = FALSE)) %||% character(0),
+        must.include = .cbrRequiredCols(),
+        what = "colnames",
+        .var.name = "mcols",
+        add = coll
+    )
+    # The checks below read those columns; running them on an object missing
+    # them reports the consequence rather than the cause.
+    if (!coll$isEmpty()) {
+        return(coll$getMessages())
     }
-    if (length(errors) == 0L) TRUE else errors
-}
-
-# @noRd
-.cbrCheckRequiredCols <- function(object) {
-    md <- mcols(object, use.names = FALSE)
-    have <- if (is.null(md)) character(0) else colnames(md)
-    missingCols <- setdiff(.cbrRequiredCols(), have)
-    if (length(missingCols) > 0L) {
-        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
-    }
-    NULL
+    coll$push(.cbrCheckVcpColumn(object))
+    coll$push(.cbrCheckOutcomeInfo(object))
+    coll$getMessages()
 }
 
 # The per-variant layer is the point of the class, exactly as SNP.PP.H4 is for
@@ -145,28 +144,23 @@ methods::setValidity("ColocBoostResult", function(object) {
     if (nrow(info) == 0L) {
         return(NULL)
     }
-    missingCols <- setdiff(
-        c("name", "study", "context", "trait", "dataForm"),
-        colnames(info)
+    cols <- checkNames(
+        colnames(info),
+        must.include = c("name", "study", "context", "trait", "dataForm"),
+        what = "colnames"
     )
-    if (length(missingCols) > 0L) {
-        return(str_c(
-            "outcomeInfo is missing columns: ",
-            str_flatten(missingCols, ", ")
-        ))
+    if (!isTRUE(cols)) {
+        return(str_c("outcomeInfo is missing columns: ", cols))
     }
     if (length(object) == 0L) {
         return(NULL)
     }
     named <- unique(unlist(mcols(object, use.names = FALSE)$outcomes))
-    unknown <- setdiff(named, as.character(info$name))
-    if (length(unknown) == 0L) {
+    resolved <- checkSubset(named, as.character(info$name))
+    if (isTRUE(resolved)) {
         return(NULL)
     }
-    str_c(
-        "outcome(s) not present in outcomeInfo: ",
-        str_flatten(utils::head(unknown, 5L), ", ")
-    )
+    str_c("outcome(s) not in outcomeInfo: ", resolved)
 }
 
 # ---- accessors --------------------------------------------------------------
@@ -256,8 +250,9 @@ ColocBoostResult <- function(
         analysis = analysis,
         gwasStudy = gwasStudy,
         includeUncolocalized = includeUncolocalized
-    )
-    rows <- unlist(rows, recursive = FALSE, use.names = FALSE)
+    ) |>
+        list_flatten() |>
+        unname()
     .cbrAssemble(
         rows,
         outcomeInfo = as.data.frame(outcomeInfo),
@@ -275,10 +270,12 @@ ColocBoostResult <- function(
     if (is.null(res)) {
         return(list())
     }
-    out <- .cbrColocalizedRows(res, analysis[[i]], gwasStudy[[i]])
-    if (isTRUE(includeUncolocalized)) {
-        out <- c(out, .cbrUncolocalizedRows(res, analysis[[i]], gwasStudy[[i]]))
-    }
+    out <- c(
+        .cbrColocalizedRows(res, analysis[[i]], gwasStudy[[i]]),
+        if (isTRUE(includeUncolocalized)) {
+            .cbrUncolocalizedRows(res, analysis[[i]], gwasStudy[[i]])
+        }
+    )
     out
 }
 
@@ -381,15 +378,15 @@ ColocBoostResult <- function(
 # The cos_summary row for one set, or an empty tibble when absent.
 # @noRd
 .cbrSummaryFor <- function(res, id) {
-    s <- res$cos_summary
-    if (is.null(s) || nrow(s) == 0L || !is_in("cos_id", colnames(s))) {
+    raw <- res$cos_summary
+    if (is.null(raw) || nrow(raw) == 0L || !is_in("cos_id", colnames(raw))) {
         return(tibble(
             top_variable = NA_character_,
             top_variable_vcp = NA_real_,
             focal_outcome = NA
         ))
     }
-    s <- as.data.frame(s, stringsAsFactors = FALSE)
+    s <- as.data.frame(raw, stringsAsFactors = FALSE)
     hit <- which(as.character(s$cos_id) == id)
     if (length(hit) == 0L) {
         return(tibble(
@@ -456,10 +453,13 @@ ColocBoostResult <- function(
         if (is.null(ids)) {
             next
         }
-        gr <- .variantIdsToGRanges(ids, what = "colocboost vcp names")
-        mcols(gr) <- cbind(
-            mcols(gr, use.names = FALSE),
-            S4Vectors::DataFrame(vcp = as.numeric(res$vcp))
+        bare <- .variantIdsToGRanges(ids, what = "colocboost vcp names")
+        gr <- S4Vectors::`mcols<-`(
+            bare,
+            value = cbind(
+                mcols(bare, use.names = FALSE),
+                S4Vectors::DataFrame(vcp = as.numeric(res$vcp))
+            )
         )
         return(gr)
     }
@@ -475,8 +475,10 @@ ColocBoostResult <- function(
     computingTime
 ) {
     elements <- map(rows, .cbrElementFor)
-    grl <- GenomicRanges::GRangesList(elements)
-    mcols(grl) <- .cbrMcolsFor(rows)
+    grl <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRangesList(elements),
+        value = .cbrMcolsFor(rows)
+    )
     obj <- new(
         "ColocBoostResult",
         grl,
@@ -492,33 +494,42 @@ ColocBoostResult <- function(
 # @noRd
 .cbrElementFor <- function(row) {
     v <- row$variants
-    gr <- .variantIdsToGRanges(
+    bare <- .variantIdsToGRanges(
         as.character(v$variant_id),
         what = "colocboost variant name"
     )
     # Appended, not assigned: the A1 / A2 columns .variantIdsToGRanges()
     # attaches are the variant identity, and overwriting mcols would leave the
     # element unable to name its own variants.
-    mcols(gr) <- cbind(
-        mcols(gr, use.names = FALSE),
-        S4Vectors::DataFrame(vcp = as.numeric(v$vcp))
+    gr <- S4Vectors::`mcols<-`(
+        bare,
+        value = cbind(
+            mcols(bare, use.names = FALSE),
+            S4Vectors::DataFrame(vcp = as.numeric(v$vcp))
+        )
     )
     gr
 }
 
 # @noRd
 .cbrMcolsFor <- function(rows) {
-    if (length(rows) == 0L) {
-        md <- S4Vectors::DataFrame(.cbrEmptyMeta())
-        md$outcomes <- IRanges::CharacterList()
-        return(md)
-    }
-    meta <- bind_rows(map(rows, "meta"))
-    md <- S4Vectors::DataFrame(meta, check.names = FALSE)
     # A CharacterList column, so a set of any size lives in one row instead of
     # being flattened to a delimited string a caller has to re-split.
-    md$outcomes <- IRanges::CharacterList(map(rows, "outcomes"))
-    md
+    if (length(rows) == 0L) {
+        return(cbind(
+            S4Vectors::DataFrame(.cbrEmptyMeta()),
+            S4Vectors::DataFrame(outcomes = IRanges::CharacterList())
+        ))
+    }
+    cbind(
+        S4Vectors::DataFrame(
+            bind_rows(map(rows, "meta")),
+            check.names = FALSE
+        ),
+        S4Vectors::DataFrame(
+            outcomes = IRanges::CharacterList(map(rows, "outcomes"))
+        )
+    )
 }
 
 # @noRd
@@ -542,18 +553,23 @@ ColocBoostResult <- function(
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocPairs", "ColocBoostResult", function(x, ...) {
+setMethod("getColocPairs", "ColocBoostResult", function(x) {
     # Named "pairs" for symmetry with ColocResult, but a ColocBoost row is a
     # SET, not a pair: `outcomes` holds however many outcomes colocalized.
     md <- mcols(x, use.names = FALSE)
     if (is.null(md) || length(x) == 0L) {
         return(tibble())
     }
-    flat <- as.data.frame(md[, setdiff(colnames(md), "outcomes")])
-    out <- as_tibble(flat, .name_repair = "minimal")
-    out$outcomes <- map_chr(as.list(md$outcomes), str_flatten, collapse = "; ")
-    out$nOutcomes <- lengths(md$outcomes)
-    out
+    # `drop = FALSE` as in the sibling views: a single kept column would
+    # arrive as a vector and be named after the subscript text.
+    flat <- as.data.frame(
+        md[, setdiff(colnames(md), "outcomes"), drop = FALSE]
+    )
+    mutate(
+        as_tibble(flat, .name_repair = "minimal"),
+        outcomes = map_chr(as.list(md$outcomes), str_flatten, collapse = "; "),
+        nOutcomes = lengths(md$outcomes)
+    )
 })
 
 #' @rdname colocViews
@@ -561,7 +577,7 @@ setMethod("getColocPairs", "ColocBoostResult", function(x, ...) {
 setMethod(
     "getColocVariants",
     "ColocBoostResult",
-    function(x, pooled = FALSE, ...) {
+    function(x, pooled = FALSE) {
         long <- .cbrLongVariants(x)
         if (!isTRUE(pooled) || nrow(long) == 0L) {
             return(long)
@@ -590,10 +606,11 @@ setMethod(
     n <- lengths(x)
     setIdx <- rep(seq_len(length(x)), n)
     flat <- unlist(x, use.names = FALSE)
-    out <- as_tibble(md[setIdx, , drop = FALSE], .name_repair = "minimal")
-    out$variant_id <- .grVariantIds(flat)
-    out$vcp <- as.numeric(mcols(flat, use.names = FALSE)$vcp)
-    out
+    mutate(
+        as_tibble(md[setIdx, , drop = FALSE], .name_repair = "minimal"),
+        variant_id = .grVariantIds(flat),
+        vcp = as.numeric(mcols(flat, use.names = FALSE)$vcp)
+    )
 }
 
 #' @title ColocBoost Outcome View
@@ -617,7 +634,7 @@ setGeneric("getColocBoostOutcomes", function(x, ...) {
 
 #' @rdname getColocBoostOutcomes
 #' @export
-setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x, ...) {
+setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x) {
     if (length(x) == 0L) {
         return(tibble())
     }
@@ -625,11 +642,13 @@ setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x, ...) {
     outcomes <- as.list(md$outcomes)
     reps <- lengths(outcomes)
     flat <- as.data.frame(md[, setdiff(colnames(md), "outcomes"), drop = FALSE])
-    out <- as_tibble(
-        flat[rep(seq_len(nrow(flat)), reps), , drop = FALSE],
-        .name_repair = "minimal"
+    out <- mutate(
+        as_tibble(
+            flat[rep(seq_len(nrow(flat)), reps), , drop = FALSE],
+            .name_repair = "minimal"
+        ),
+        outcome = unlist(outcomes, use.names = FALSE)
     )
-    out$outcome <- unlist(outcomes, use.names = FALSE)
     info <- x@outcomeInfo
     if (nrow(info) == 0L) {
         return(out)
@@ -677,7 +696,7 @@ setGeneric("getComputingTime", function(x, ...) {
 
 #' @rdname getComputingTime
 #' @export
-setMethod("getComputingTime", "ColocBoostResult", function(x, ...) {
+setMethod("getComputingTime", "ColocBoostResult", function(x) {
     x@computingTime
 })
 
@@ -696,4 +715,4 @@ setGeneric("getRegionVcp", function(x, ...) standardGeneric("getRegionVcp"))
 
 #' @rdname getRegionVcp
 #' @export
-setMethod("getRegionVcp", "ColocBoostResult", function(x, ...) x@regionVcp)
+setMethod("getRegionVcp", "ColocBoostResult", function(x) x@regionVcp)

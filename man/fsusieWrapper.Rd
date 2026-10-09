@@ -4,7 +4,18 @@
 \alias{fsusieWrapper}
 \title{Wrapper for fsusie Function with Automatic Post-Processing}
 \usage{
-fsusieWrapper(X, Y, pos, L, prior, maxSnpEm, covLev, minPurity, maxScale, ...)
+fsusieWrapper(
+  X,
+  Y,
+  pos,
+  L,
+  prior,
+  maxSnpEm,
+  covLev,
+  minPurity,
+  maxScale,
+  methodArgs = FsusieOptions()
+)
 }
 \arguments{
 \item{X}{Residual genotype matrix.}
@@ -27,7 +38,9 @@ model.}
 \item{maxScale}{numeric, define the maximum of wavelet coefficients used in
 the analysis (2^maxScale). Set 10 true by default.}
 
-\item{...}{Additional arguments passed to the fsusie function.}
+\item{methodArgs}{Options forwarded to \code{fsusieR::susiF}, built with
+\code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
+against the engine, so a misspelled option would be silently ignored.}
 }
 \value{
 A modified fsusie object with the susie sets list, correlations for

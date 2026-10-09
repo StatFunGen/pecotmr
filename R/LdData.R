@@ -34,8 +34,13 @@ NULL
 #' @slot snpIdx Integer vector of 1-based SNP indices into the handle's
 #'   \code{snpInfo}. NULL when correlation is pre-computed, or when the
 #'   source is a matrix (which is already the subset).
-#' @slot blockMetadata A \code{GRanges} of blocks or a \code{data.frame} with
-#'   block boundary information.
+#' @slot blockMetadata A \code{GRanges} with one range per block: its
+#'   \code{seqnames} and range are the block's chromosome and genomic span,
+#'   and \code{mcols} carry \code{blockId}, \code{size}, \code{startIdx}
+#'   and \code{endIdx} -- the index range into the correlation matrix the
+#'   block addresses. Extra columns the caller supplied are kept as mcols.
+#'   A block whose index range is out of bounds has no span to derive and
+#'   gets a width-0 range.
 #' @slot nRef Integer, reference panel sample size.
 #' @slot mixtureWeights NULL when \code{genotypeHandle} is a single
 #'   \code{GenotypeHandle}; a numeric vector of mixing proportions (one per
@@ -51,58 +56,53 @@ setClass(
         correlation = "LdCorrelation",
         genotypeHandle = "LdGenotypeSource",
         snpIdx = "LdSnpIndex",
-        blockMetadata = "LdBlockMetadata",
+        blockMetadata = "GRanges",
         nRef = "integer",
         mixtureWeights = "LdMixtureWeights"
     ),
     validity = function(object) {
-        errors <- character()
-        if (is.null(object@correlation) && is.null(object@genotypeHandle)) {
-            errors <- c(
-                errors,
+        errors <- c(
+            if (is.null(object@correlation) && is.null(object@genotypeHandle)) {
                 str_c(
                     "At least one of 'correlation' or ",
                     "'genotypeHandle' must be non-NULL"
                 )
-            )
-        }
-        if (length(object) == 0) {
-            errors <- c(errors, "an LdData must cover >= 1 variant")
-        }
-        errors <- c(errors, .ldCheckGenotypeSource(object@genotypeHandle))
-        errors <- c(errors, .ldCheckCorrelation(object@correlation))
-        if (!is.null(object@mixtureWeights)) {
-            if (!is.list(object@genotypeHandle)) {
-                errors <- c(
-                    errors,
-                    str_c(
-                        "'mixtureWeights' may only be set when ",
-                        "'genotypeHandle' is a list of panels"
-                    )
-                )
-            } else {
-                w <- object@mixtureWeights
-                if (
-                    !is.numeric(w) || length(w) != length(object@genotypeHandle)
-                ) {
-                    errors <- c(
-                        errors,
-                        str_c(
-                            "'mixtureWeights' must be numeric of length ",
-                            "equal to the genotypeHandle list"
-                        )
-                    )
-                } else if (any(w < 0) || abs(sum(w) - 1) > 1e-6) {
-                    errors <- c(
-                        errors,
-                        "'mixtureWeights' must be non-negative and sum to 1"
-                    )
-                }
-            }
-        }
+            },
+            if (length(object) == 0) "an LdData must cover >= 1 variant",
+            .ldCheckGenotypeSource(object@genotypeHandle),
+            .ldCheckCorrelation(object@correlation),
+            .ldCheckMixtureWeights(object),
+            .ldCheckBlockMetadata(object)
+        )
         if (length(errors) == 0) TRUE else errors
     }
 )
+
+# Mixture weights are only meaningful over a LIST of panels, and must then be
+# a proper simplex over them. NULL weights are always valid.
+# @noRd
+.ldCheckMixtureWeights <- function(object) {
+    if (is.null(object@mixtureWeights)) {
+        return(NULL)
+    }
+    if (!is.list(object@genotypeHandle)) {
+        return(str_c(
+            "'mixtureWeights' may only be set when ",
+            "'genotypeHandle' is a list of panels"
+        ))
+    }
+    w <- object@mixtureWeights
+    if (!is.numeric(w) || length(w) != length(object@genotypeHandle)) {
+        return(str_c(
+            "'mixtureWeights' must be numeric of length ",
+            "equal to the genotypeHandle list"
+        ))
+    }
+    if (any(w < 0) || abs(sum(w) - 1) > 1e-6) {
+        return("'mixtureWeights' must be non-negative and sum to 1")
+    }
+    NULL
+}
 
 #' @describeIn LdData-class Refused. Subsetting would narrow the variants
 #'   while \code{correlation} -- variant-by-variant, and \code{snpIdx}, which
@@ -188,6 +188,266 @@ setMethod("show", "LdData", function(object) {
     ))
 }
 
+# --- block metadata --------------------------------------------------------
+#
+# Five paths used to build this table -- the two region loaders, the two
+# bare-matrix wrappers, and callers handing over a bare genomic span -- and
+# each emitted a different set of columns, so consumers read `startIdx`,
+# `size` and `chrom` that were there by luck rather than by contract. One
+# normaliser at the only door (LdData()) fills whatever is absent and stores
+# a single shape, the way .ldDataGenotypeSource() does for the handle.
+#
+# These are the columns consumers actually read. `blockStart` / `blockEnd`
+# are deliberately NOT required: the two region loaders record a block's
+# genomic span, nothing reads it, and demanding it would reject every
+# multi-block table built without it. Supplied columns are carried through.
+# @noRd
+.ldBlockColumns <- c("blockId", "chrom", "size", "startIdx", "endIdx")
+
+# What survives as mcols once chrom / blockStart / blockEnd become the
+# GRanges itself.
+# @noRd
+.ldBlockMcols <- c("blockId", "size", "startIdx", "endIdx")
+
+# Supplied values are never replaced: a caller handing over deliberately
+# out-of-range indices keeps them, because partitionLdMatrix() still has to
+# reject those and substituting valid ones would hide the error.
+# @noRd
+.ldBlockMetadata <- function(blockMetadata, variants) {
+    if (length(variants) == 0L) {
+        # Nothing to derive a block from. Validity rejects the object for
+        # covering no variant; crashing here would pre-empt that message.
+        return(GenomicRanges::GRanges())
+    }
+    tbl <- .ldBlockMetadataTibble(blockMetadata)
+    if (nrow(tbl) == 0L) {
+        # A placeholder table means "one block", not "no blocks": an LdData
+        # always covers at least one variant.
+        tbl <- tibble(blockId = 1L)
+    }
+    tbl <- .ldBlockMetadataIndices(tbl, length(variants))
+    tbl <- .ldBlockMetadataOrder(.ldBlockMetadataDerive(tbl, variants))
+    .ldBlockMetadataGRanges(tbl, variants)
+}
+
+# The stored shape: one range per block, so the invariants the merge logic
+# depends on are the ones GRanges already answers -- isDisjoint() for
+# overlap, sort() for order, seqnames() for the same-chromosome guard. The
+# index payload the matrix is addressed by rides along in mcols.
+# @noRd
+.ldBlockMetadataGRanges <- function(tbl, variants) {
+    span <- .ldBlockSpans(tbl, variants)
+    gr <- GenomicRanges::GRanges(
+        seqnames = tbl$chrom,
+        ranges = IRanges::IRanges(start = span$start, end = span$end)
+    )
+    keep <- c(
+        intersect(.ldBlockMcols, names(tbl)),
+        setdiff(names(tbl), c(.ldBlockColumns, "blockStart", "blockEnd"))
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        as.data.frame(select(tbl, all_of(keep)))
+    )
+    gr
+}
+
+# Each block's genomic span. Supplied blockStart / blockEnd win; otherwise
+# the span is read off the variants the index range covers.
+#
+# A block whose index range is out of bounds has no span to read, and a
+# GRanges cannot hold an NA one (seqnames reject NAs outright). It gets a
+# WIDTH-0 range at the first variant instead: legal, and visibly not an
+# interval, so nothing downstream mistakes it for a real span.
+# partitionLdMatrix() rejects the block on its indices regardless.
+# @noRd
+.ldBlockSpans <- function(tbl, variants) {
+    if (is_in("blockStart", names(tbl)) && is_in("blockEnd", names(tbl))) {
+        return(list(start = tbl$blockStart, end = tbl$blockEnd))
+    }
+    parts <- map(
+        seq_len(nrow(tbl)),
+        .ldBlockSpanAt,
+        tbl = tbl,
+        variants = variants
+    )
+    list(
+        start = map_dbl(parts, "start"),
+        end = map_dbl(parts, "end")
+    )
+}
+
+# @noRd
+.ldBlockSpanAt <- function(i, tbl, variants) {
+    s <- tbl$startIdx[[i]]
+    e <- tbl$endIdx[[i]]
+    if (.ldBlockRangeUsable(s, e, length(variants))) {
+        part <- variants[seq.int(s, e)]
+        return(list(
+            start = min(GenomicRanges::start(part)),
+            end = max(GenomicRanges::end(part))
+        ))
+    }
+    anchor <- GenomicRanges::start(variants)[[1L]]
+    list(start = anchor, end = anchor - 1L)
+}
+
+# @noRd
+.ldBlockRangeUsable <- function(s, e, n) {
+    !is.na(s) && !is.na(e) && s >= 1L && e >= s && e <= n
+}
+
+# Any accepted shape as a tibble. `start`/`end` is how a bare genomic span
+# arrives; they name the BLOCK's span, so they become blockStart/blockEnd.
+# @noRd
+.ldBlockMetadataTibble <- function(x) {
+    if (!is(x, "GRanges") && !is.data.frame(x) && !is(x, "DataFrame")) {
+        # as.data.frame() would happily turn a string into a one-column
+        # table, so the shapes have to be named rather than coerced blindly.
+        abort(glue(
+            "`blockMetadata` must be a GRanges, a data.frame or a ",
+            "DataFrame; got {class(x)[[1L]]}"
+        ))
+    }
+    tbl <- if (is(x, "GRanges")) {
+        .ldBlockMetadataFromGranges(x)
+    } else {
+        as_tibble(as.data.frame(x))
+    }
+    .ldBlockMetadataRenameSpan(tbl)
+}
+
+# @noRd
+.ldBlockMetadataFromGranges <- function(x) {
+    md <- as_tibble(as.data.frame(S4Vectors::mcols(x)))
+    # An LdBlocks-style GRanges carries chrom / blockStart / blockEnd in its
+    # mcols as well as in its ranges. The mcols win: binding both would
+    # duplicate the names and leave no column called `chrom` at all.
+    fromRanges <- tibble(
+        chrom = as.character(GenomicRanges::seqnames(x)),
+        blockStart = GenomicRanges::start(x),
+        blockEnd = GenomicRanges::end(x)
+    )
+    bind_cols(
+        md,
+        select(
+            fromRanges,
+            all_of(setdiff(names(fromRanges), names(md)))
+        )
+    )
+}
+
+# @noRd
+.ldBlockMetadataRenameSpan <- function(tbl) {
+    if (!is_in("blockStart", names(tbl)) && is_in("start", names(tbl))) {
+        tbl <- rename(tbl, blockStart = "start")
+    }
+    if (!is_in("blockEnd", names(tbl)) && is_in("end", names(tbl))) {
+        tbl <- rename(tbl, blockEnd = "end")
+    }
+    tbl
+}
+
+# The index range is the one thing that cannot be derived for several
+# blocks: only the caller knows which variants each covers. A single block
+# covers all of them.
+# @noRd
+.ldBlockMetadataIndices <- function(tbl, n) {
+    absent <- setdiff(c("startIdx", "endIdx"), names(tbl))
+    if (length(absent) == 0L) {
+        return(tbl)
+    }
+    if (length(absent) == 1L) {
+        abort(glue(
+            "`blockMetadata` gives one of startIdx / endIdx but not the ",
+            "other; supply both or neither."
+        ))
+    }
+    if (is_in("size", names(tbl))) {
+        # Blocks are taken in order, so the sizes give the ranges. This is
+        # the LdBlocks shape: a block table that says how many variants each
+        # block holds but not where they sit in the matrix.
+        sizes <- as.integer(tbl$size)
+        ends <- cumsum(sizes)
+        return(mutate(tbl, startIdx = ends - sizes + 1L, endIdx = ends))
+    }
+    if (nrow(tbl) > 1L) {
+        abort(glue(
+            "`blockMetadata` describes {nrow(tbl)} blocks but gives neither ",
+            "an index range nor `size`, so which variants each block covers ",
+            "cannot be determined."
+        ))
+    }
+    mutate(tbl, startIdx = 1L, endIdx = n)
+}
+
+# `blockId`, `chrom` and `size` all follow from the index range, for one
+# block or many.
+# @noRd
+.ldBlockMetadataDerive <- function(tbl, variants) {
+    absent <- setdiff(.ldBlockColumns, names(tbl))
+    if (length(absent) == 0L) {
+        return(tbl)
+    }
+    derived <- tibble(
+        blockId = seq_len(nrow(tbl)),
+        chrom = .ldBlockChroms(tbl, variants),
+        size = as.integer(tbl$endIdx - tbl$startIdx + 1L),
+        startIdx = tbl$startIdx,
+        endIdx = tbl$endIdx
+    )
+    bind_cols(tbl, select(derived, all_of(absent)))
+}
+
+# @noRd
+.ldBlockChroms <- function(tbl, variants) {
+    map_chr(
+        seq_len(nrow(tbl)),
+        .ldBlockChromAt,
+        tbl = tbl,
+        variants = variants
+    )
+}
+
+# An out-of-range block falls back to the data's own chromosome rather than
+# NA: seqnames cannot hold NA, and partitionLdMatrix() rejects the block on
+# its indices anyway. Its range is width 0 (see .ldBlockSpanAt).
+# @noRd
+.ldBlockChromAt <- function(i, tbl, variants) {
+    s <- tbl$startIdx[[i]]
+    e <- tbl$endIdx[[i]]
+    part <- if (.ldBlockRangeUsable(s, e, length(variants))) {
+        variants[seq.int(s, e)]
+    } else {
+        variants
+    }
+    as.character(GenomicRanges::seqnames(part))[[1L]]
+}
+
+# Canonical columns first, anything the caller added after.
+# @noRd
+.ldBlockMetadataOrder <- function(tbl) {
+    select(tbl, all_of(.ldBlockColumns), everything())
+}
+
+# Every LdData describes at least one block, with the columns its consumers
+# read. The normaliser guarantees both; this is the backstop that keeps a
+# future construction path from quietly dropping one.
+# @noRd
+.ldCheckBlockMetadata <- function(object) {
+    bm <- object@blockMetadata
+    absent <- setdiff(.ldBlockMcols, names(S4Vectors::mcols(bm)))
+    if (length(absent) > 0L) {
+        return(str_c(
+            "'blockMetadata' is missing required column(s): ",
+            str_flatten(absent, ", ")
+        ))
+    }
+    if (length(bm) == 0L) {
+        return("'blockMetadata' must describe at least one block")
+    }
+    NULL
+}
+
 #' @title Create an LdData Object
 #' @description Construct an \code{LdData} from a correlation matrix and/or
 #'   genotype handle, plus variant metadata as a GRanges.
@@ -198,7 +458,12 @@ setMethod("show", "LdData", function(object) {
 #' @param snpIdx Vector of 1-based SNP indices, coerced to integer, or NULL.
 #' @param variants A GRanges with variant metadata (must have variant_id in
 #'   mcols, plus A1, A2).
-#' @param blockMetadata GRanges of blocks, or data.frame with block info.
+#' @param blockMetadata Block boundaries: a \code{GRanges}, a
+#'   \code{data.frame} or a \code{DataFrame}. Whatever is absent for a
+#'   single block is derived from \code{variants}, so a bare genomic span
+#'   -- or nothing at all -- is enough; with several blocks either the index
+#'   columns or \code{size} must be supplied. Normalised on the way in and
+#'   stored as a \code{GRanges} (see the \code{blockMetadata} slot).
 #' @param nRef Integer, reference panel sample size.
 #' @param mixtureWeights Optional numeric vector of mixing proportions, one per
 #'   panel in \code{genotypeHandle} when it is a list. Must be non-negative and
@@ -214,6 +479,8 @@ setMethod("show", "LdData", function(object) {
 #'   blockMetadata = S4Vectors::DataFrame(
 #'     chrom = "22", start = 1L, end = 1000L))
 #' ld
+#' @importFrom checkmate assert checkMatrix checkList checkNull
+#' @importFrom checkmate assertNumeric
 #' @export
 LdData <- function(
     correlation = NULL,
@@ -224,13 +491,22 @@ LdData <- function(
     nRef = 0L,
     mixtureWeights = NULL
 ) {
+    # correlation is documented as a matrix OR a list of matrices OR NULL,
+    # so this must be an or-combination, not assertMatrix.
+    assert(
+        checkMatrix(correlation),
+        checkList(correlation),
+        checkNull(correlation),
+        .var.name = "correlation"
+    )
+    assertNumeric(mixtureWeights, null.ok = TRUE)
     obj <- new(
         "LdData",
         variants,
         correlation = correlation,
         genotypeHandle = .ldDataGenotypeSource(genotypeHandle),
         snpIdx = if (is.null(snpIdx)) NULL else as.integer(snpIdx),
-        blockMetadata = blockMetadata,
+        blockMetadata = .ldBlockMetadata(blockMetadata, variants),
         nRef = as.integer(nRef),
         mixtureWeights = mixtureWeights
     )
@@ -255,14 +531,23 @@ LdData <- function(
         A2 = refPanel$A2
     )
 
-    optional <- c("allele_freq", "variance", "n_nomiss")
-    for (col in optional) {
-        if (is_in(col, names(refPanel))) {
-            mcolsData[[col]] <- refPanel[[col]]
-        }
-    }
-    mcols(gr) <- mcolsData
-    gr
+    optional <- intersect(
+        c("allele_freq", "variance", "n_nomiss"),
+        names(refPanel)
+    )
+    `mcols<-`(
+        gr,
+        value = cbind(
+            mcolsData,
+            DataFrame(refPanel[optional], check.names = FALSE)
+        )
+    )
+}
+
+# One panel scaled by its mixture weight.
+# @noRd
+.ldScalePanel <- function(w, panel) {
+    w * panel
 }
 
 #' @rdname getCorrelation
@@ -293,20 +578,23 @@ setMethod("getCorrelation", "LdData", function(x) {
             )
             abort(msg)
         }
-        w <- x@mixtureWeights
-        R <- matrix(0, nrow = dims[[1L]], ncol = dims[[1L]])
-        for (k in seq_along(perPanel)) {
-            R <- R + w[[k]] * perPanel[[k]]
-        }
-        dimnames(R) <- dimnames(perPanel[[1L]])
-        return(R)
+        # The mixture is a weighted sum over the panels, so it is a fold.
+        weighted <- map2(x@mixtureWeights, perPanel, .ldScalePanel)
+        return(`dimnames<-`(
+            reduce(
+                weighted,
+                `+`,
+                .init = matrix(0, nrow = dims[[1L]], ncol = dims[[1L]])
+            ),
+            dimnames(perPanel[[1L]])
+        ))
     }
     computeLd(.ldSourceDosages(x@genotypeHandle, x@snpIdx), method = "sample")
 })
 
 #' @rdname getGenotypes
 #' @export
-setMethod("getGenotypes", "LdData", function(x, ...) {
+setMethod("getGenotypes", "LdData", function(x) {
     if (is.null(x@genotypeHandle)) {
         return(NULL)
     }
@@ -326,7 +614,7 @@ setMethod("hasGenotypes", "LdData", function(x) {
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "LdData", function(x, ...) {
+setMethod("getVariantIds", "LdData", function(x) {
     mcols(x)$variant_id
 })
 
@@ -347,10 +635,11 @@ setMethod("getBlockMetadata", "LdData", function(x) {
 #' @rdname getRefPanel
 #' @export
 setMethod("getRefPanel", "LdData", function(x) {
-    mc <- as_tibble(as.data.frame(mcols(x)))
-    mc$chrom <- as.character(seqnames(x))
-    mc$pos <- start(x)
-    mc
+    mutate(
+        as_tibble(as.data.frame(mcols(x))),
+        chrom = as.character(seqnames(x)),
+        pos = start(x)
+    )
 })
 
 #' @rdname getGenotypeHandle

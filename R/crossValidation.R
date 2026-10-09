@@ -1,3 +1,6 @@
+#' @include MethodParam.R
+NULL
+
 # =============================================================================
 # Cross-validation engine (shared by twasWeightsCv + fine-mapping CV)
 # -----------------------------------------------------------------------------
@@ -49,18 +52,35 @@
     }
     lmFit <- stats::lm(actual ~ pred)
     s <- summary(lmFit)
-    out["corr"] <- stats::cor(actual, pred)
-    out["rsq"] <- s$r.squared
-    out["adj_rsq"] <- s$adj.r.squared
-    out["pval"] <- if (nrow(s$coefficients) >= 2L) {
-        s$coefficients[2L, 4L]
-    } else {
-        NA_real_
-    }
     res <- actual - pred
-    out["RMSE"] <- sqrt(mean(res^2))
-    out["MAE"] <- mean(abs(res))
-    out
+    c(
+        corr = stats::cor(actual, pred),
+        rsq = s$r.squared,
+        adj_rsq = s$adj.r.squared,
+        pval = if (nrow(s$coefficients) >= 2L) {
+            s$coefficients[2L, 4L]
+        } else {
+            NA_real_
+        },
+        RMSE = sqrt(mean(res^2)),
+        MAE = mean(abs(res))
+    )
+}
+
+# A canonical fingerprint of a Sample/Fold partition, used to prove that
+# per-fold fits handed to twasWeightsCv were trained on the same folds it is
+# scoring. Sample order is normalised first, so two partitions that assign the
+# same samples to the same folds agree regardless of row order.
+# @noRd
+.cvPartitionKey <- function(samplePartition) {
+    if (is.null(samplePartition)) {
+        return(NULL)
+    }
+    tbl <- samplePartition |>
+        arrange(.data$Sample, .data$Fold) |>
+        mutate(.key = str_c(.data$Sample, "=", .data$Fold)) |>
+        pull(".key")
+    rlang::hash(tbl)
 }
 
 # One CV fold: split train/test by fold `j`, drop zero-variance training
@@ -74,7 +94,7 @@
     foldIds <- cv$foldIds
     fitFold <- cv$fitFold
     fitFoldCtx <- cv$fitFoldCtx
-    retainFits <- cv$retainFits
+    fitRetention <- cv$fitRetention
     verbose <- cv$verbose
     if (verbose >= 1) {
         msg <- glue("  CV fold {j}/{length(foldIds)} ...")
@@ -85,14 +105,17 @@
     if (all(isTest) || !any(isTest)) {
         return(list(preds = list(), fits = list()))
     }
-    Xtr <- X[!isTest, , drop = FALSE]
+    trainAll <- X[!isTest, , drop = FALSE]
     Xte <- X[isTest, , drop = FALSE]
     Ytr <- Y[!isTest, , drop = FALSE]
-    keep <- .nonzeroVarColumns(Xtr)
-    Xtr <- Xtr[, keep, drop = FALSE]
+    keep <- .nonzeroVarColumns(trainAll)
+    Xtr <- trainAll[, keep, drop = FALSE]
     ff <- fitFold(Xtr, Ytr, j, fitFoldCtx)
     preds <- map(ff$weights, .cvFoldPrediction, Xte = Xte)
-    list(preds = preds, fits = if (isTRUE(retainFits)) ff$fits else list())
+    list(
+        preds = preds,
+        fits = if (identical(fitRetention, "none")) list() else ff$fits
+    )
 }
 
 # No-op fold fitter: used when the caller only wants the fold partition.
@@ -114,7 +137,7 @@
 # and keys the output via .cvOutputKey(). `maxNumVariants` (optional) randomly
 # subsamples variants up front to bound compute; `numThreads` parallelises the
 # fold loop (-1 = all cores, 0/1 = serial).
-#' @importFrom BiocParallel bplapply bpworkers MulticoreParam
+#' @importFrom BiocParallel bplapply multicoreWorkers MulticoreParam
 #' @importFrom stats sd lm cor
 #' @importFrom dplyr n_distinct
 #' @noRd
@@ -128,10 +151,11 @@
     numThreads = 1,
     maxNumVariants = NULL,
     variantsToKeep = NULL,
-    retainFits = FALSE,
+    fitRetention = c("none", "slim", "full"),
     verbose = 1,
     seed = NULL
 ) {
+    fitRetention <- arg_match(fitRetention)
     .applySeed(seed)
     prep <- .cvPrepareData(X, Y, fold, verbose)
     X <- .cvSubsampleVariants(prep$X, maxNumVariants, variantsToKeep, verbose)
@@ -152,7 +176,7 @@
         foldIds = foldIds,
         fitFold = fitFold,
         fitFoldCtx = fitFoldCtx,
-        retainFits = retainFits,
+        fitRetention = fitRetention,
         verbose = verbose,
         rngSeed = seed
     )
@@ -170,13 +194,12 @@
 # Validate inputs, coerce a vector Y to a one-column matrix, and set stable
 # row/column dimnames on X and Y. Returns list(X, Y).
 # @noRd
+#' @importFrom checkmate assert assertCount assertMatrix
+#' @importFrom checkmate checkAtomicVector checkMatrix
 .cvPrepareData <- function(X, Y, fold, verbose) {
-    if (!is.null(fold) && (!is.numeric(fold) || fold <= 0)) {
-        abort("Invalid value for 'fold'. It must be a positive integer.")
-    }
-    if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
-        abort("X must be a matrix and Y must be a matrix or a vector.")
-    }
+    assertCount(fold, positive = TRUE, null.ok = TRUE)
+    assertMatrix(X)
+    assert(checkMatrix(Y), checkAtomicVector(Y), .var.name = "Y")
     if (is.vector(Y)) {
         Y <- matrix(Y, ncol = 1)
         if (verbose >= 1) {
@@ -187,9 +210,7 @@
             inform(msg)
         }
     }
-    if (nrow(X) != nrow(Y)) {
-        abort("The number of rows in X and Y must be the same.")
-    }
+    assertMatrix(Y, nrows = nrow(X))
     .cvSetDimnames(X, Y)
 }
 
@@ -202,19 +223,22 @@
     } else {
         str_c("sample_", seq_len(nrow(X)))
     }
-    if (is.null(rownames(X))) {
-        rownames(X) <- sampleNames
-    }
-    if (is.null(rownames(Y))) {
-        rownames(Y) <- sampleNames
-    }
-    if (is.null(colnames(X))) {
-        colnames(X) <- str_c("variable_", seq_len(ncol(X)))
-    }
-    if (is.null(colnames(Y))) {
-        colnames(Y) <- str_c("context_", seq_len(ncol(Y)))
-    }
-    list(X = X, Y = Y)
+    list(
+        X = `dimnames<-`(
+            X,
+            list(
+                rownames(X) %||% sampleNames,
+                colnames(X) %||% str_c("variable_", seq_len(ncol(X)))
+            )
+        ),
+        Y = `dimnames<-`(
+            Y,
+            list(
+                rownames(Y) %||% sampleNames,
+                colnames(Y) %||% str_c("context_", seq_len(ncol(Y)))
+            )
+        )
+    )
 }
 
 # Optional variant subsample (compute saver; e.g. TWAS weight CV).
@@ -324,13 +348,12 @@
 }
 
 # @noRd
+# multicoreWorkers() rather than bpworkers(MulticoreParam()): the two answer
+# the same number, but constructing a MulticoreParam costs ~0.6s (almost all
+# of it garbage collection) and this runs on every fit.
 .cvNumCores <- function(numThreads) {
-    numCores <- if (numThreads == -1) {
-        bpworkers(MulticoreParam())
-    } else {
-        numThreads
-    }
-    min(numCores, bpworkers(MulticoreParam()))
+    avail <- multicoreWorkers()
+    min(if (numThreads == -1) avail else numThreads, avail)
 }
 
 # Run each fold (parallel via BiocParallel when >= 2 cores).
@@ -377,21 +400,30 @@
 # @noRd
 .cvAggregate <- function(foldResults, Y, verbose) {
     metricNames <- c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
-    methodKeys <- unique(unlist(map(foldResults, .cvPredNames)))
-    prediction <- list()
-    performance <- list()
-    for (mk in methodKeys) {
-        predMat <- .cvPredMatrix(foldResults, mk, Y)
-        prediction[[.cvOutputKey(mk, "predicted")]] <- predMat
-        performance[[.cvOutputKey(mk, "performance")]] <- .cvPerformance(
-            predMat,
-            Y,
-            mk,
-            verbose,
-            metricNames
+    methodKeys <- unique(list_c(map(foldResults, .cvPredNames)))
+    predMats <- map(methodKeys, .cvPredMatrix, foldResults = foldResults, Y = Y)
+    list(
+        prediction = set_names(
+            predMats,
+            map_chr(methodKeys, .cvOutputKey, suffix = "predicted")
+        ),
+        performance = set_names(
+            map2(
+                predMats,
+                methodKeys,
+                .cvPerformanceFor,
+                Y = Y,
+                verbose = verbose,
+                metricNames = metricNames
+            ),
+            map_chr(methodKeys, .cvOutputKey, suffix = "performance")
         )
-    }
-    list(prediction = prediction, performance = performance)
+    )
+}
+
+# @noRd
+.cvPerformanceFor <- function(predMat, mk, Y, verbose, metricNames) {
+    .cvPerformance(predMat, Y, mk, verbose, metricNames)
 }
 
 # @noRd
@@ -402,15 +434,19 @@
 # Assemble the (samples x conditions) prediction matrix for a method, scattering
 # each fold's held-out predictions by row name.
 # @noRd
-.cvPredMatrix <- function(foldResults, mk, Y) {
+.cvPredMatrix <- function(mk, foldResults, Y) {
+    # Deliberate scatter: the folds partition the samples, so each writes its
+    # own held-out rows once and samples in no fold stay NA.
     predMat <- matrix(NA_real_, nrow(Y), ncol(Y), dimnames = dimnames(Y))
-    for (fr in foldResults) {
-        yh <- fr$preds[[mk]]
-        if (!is.null(yh)) {
-            predMat[rownames(yh), ] <- yh
-        }
+    for (yh in compact(map(foldResults, .cvFoldPreds, mk = mk))) {
+        predMat[rownames(yh), ] <- yh
     }
     predMat
+}
+
+# @noRd
+.cvFoldPreds <- function(fr, mk) {
+    fr$preds[[mk]]
 }
 
 # Per-condition performance metrics (conditions x metrics).
@@ -424,10 +460,10 @@
         mk = mk,
         verbose = verbose
     )
-    perf <- exec(rbind, !!!metricRows)
-    colnames(perf) <- metricNames
-    rownames(perf) <- colnames(Y)
-    perf
+    `dimnames<-`(
+        exec(rbind, !!!metricRows),
+        list(colnames(Y), metricNames)
+    )
 }
 
 # @noRd
@@ -470,12 +506,170 @@
     if (is.null(W)) {
         return(NULL)
     }
-    W[is.na(W)] <- 0
+    W <- replace(W, is.na(W), 0)
     common <- intersect(colnames(Xte), rownames(W))
     if (length(common) == 0L) {
         return(NULL)
     }
-    yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
-    rownames(yhat) <- rownames(Xte)
-    yhat
+    `rownames<-`(
+        Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE],
+        rownames(Xte)
+    )
 }
+
+#' @rdname CrossValidationParam
+#' @aliases CrossValidationParam-class
+#' @exportClass CrossValidationParam
+setClass(
+    "CrossValidationParam",
+    contains = "MethodParam",
+    slots = c(
+        folds = "numeric",
+        numThreads = "numeric",
+        samplePartition = "list_OR_NULL",
+        maxVariants = "numeric_OR_NULL",
+        weightMethods = "list_OR_NULL"
+    )
+)
+
+#' @title Cross-Validation Settings
+#' @description How cross-validation runs, shared by
+#'   \code{\link{fineMappingPipeline}} and \code{\link{twasWeightsPipeline}}.
+#'
+#'   \code{folds}, \code{numThreads} and \code{samplePartition} mean the same
+#'   thing in both. \code{maxVariants} and \code{weightMethods} are honoured
+#'   by \code{\link{twasWeightsPipeline}} only and are \strong{ignored} by
+#'   \code{\link{fineMappingPipeline}}, so one bundle can be handed to
+#'   either pipeline unchanged.
+#' @param folds Integer. Number of folds; \code{0} (the default) or
+#'   \code{1} skips cross-validation. The same value in both pipelines ---
+#'   \code{twasWeightsPipeline} used to default to \code{5}, which made an
+#'   unspecified setting mean two different things.
+#' @param numThreads Integer. Parallel workers for the per-fold refits.
+#'   \code{1} (default) is serial; \code{-1} uses all cores. Only consulted
+#'   when \code{folds > 1}.
+#' @param samplePartition Optional pre-defined partition \code{data.frame}
+#'   with columns \code{Sample} and \code{Fold}. When supplied, every method
+#'   reuses this exact partition instead of generating a fresh one.
+#' @param maxVariants Integer. Cap on the number of variants used for CV;
+#'   unset means no limit. \strong{\code{twasWeightsPipeline} only} ---
+#'   \code{fineMappingPipeline} ignores it, because it does not use the
+#'   \code{twasWeightsCv} engine this configures.
+#' @param weightMethods Optional override of which methods are
+#'   cross-validated, as a character vector of tokens or a named method list.
+#'   Unset cross-validates every method that produced non-zero weights.
+#'   \strong{\code{twasWeightsPipeline} only} ---
+#'   \code{fineMappingPipeline} ignores it, because its \code{methods=} are
+#'   fine-mapping methods and its CV refits all of them.
+#' @return A \code{CrossValidationParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' CrossValidationParam(folds = 10, numThreads = 4)
+#' @export
+CrossValidationParam <- function(
+    folds = 0,
+    numThreads = 1,
+    samplePartition = NULL,
+    maxVariants = NULL,
+    weightMethods = NULL
+) {
+    new(
+        "CrossValidationParam",
+        folds = folds,
+        numThreads = numThreads,
+        samplePartition = samplePartition,
+        maxVariants = maxVariants,
+        weightMethods = weightMethods
+    )
+}
+
+# The fields a pipeline reads, as a plain list so call sites index it without
+# caring that the caller passed a constructor result.
+# @noRd
+.cvResolve <- function(crossValidationArgs) {
+    list(
+        folds = crossValidationArgs$folds %||% 0,
+        numThreads = crossValidationArgs$numThreads %||% 1,
+        samplePartition = crossValidationArgs$samplePartition,
+        # -1 is twasWeightsCv()'s "no cap" sentinel. fineMappingPipeline
+        # resolves these two as well but never reads them.
+        maxVariants = crossValidationArgs$maxVariants %||% -1,
+        weightMethods = crossValidationArgs$weightMethods
+    )
+}
+
+# TRUE when cross-validation will actually run. Both 0 and 1 mean "no CV",
+# and anything that needs out-of-fold predictions has to ask this rather than
+# testing `folds` itself.
+# @noRd
+.cvEnabled <- function(crossValidationArgs) {
+    folds <- crossValidationArgs$folds %||% 0
+    !is.null(folds) && length(folds) == 1L && !is.na(folds) && folds >= 2L
+}
+
+# Refuse a cross-validation request on an input that has no samples to hold
+# out. Summary statistics carry no individual-level data, so CV there is not
+# unimplemented but meaningless -- saying so beats running to completion and
+# returning results that were never cross-validated.
+# @noRd
+.cvRefuseOnSumstats <- function(crossValidationArgs, pipeline, cls) {
+    set <- names(crossValidationArgs)[
+        map_lgl(as.list(crossValidationArgs), .cvFieldIsSet)
+    ]
+    if (length(set) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{pipeline}: cross-validation is not possible on {cls} input -- ",
+        "it holds out samples, and summary statistics carry none. ",
+        "Remove CrossValidationParam({str_flatten(set, ', ')})."
+    ))
+}
+
+# A field counts as "set" when it differs from the constructor's own default,
+# so passing CrossValidationParam() unchanged is not mistaken for a request.
+# @noRd
+.cvFieldIsSet <- function(x) {
+    if (is.null(x)) {
+        return(FALSE)
+    }
+    # numThreads = 1 and folds = 0 are the no-op defaults.
+    !(length(x) == 1L && !is.na(x) && is.numeric(x) && (x == 0 || x == 1))
+}
+
+# =============================================================================
+# Cross-validation settings
+# -----------------------------------------------------------------------------
+# One bundle for both fineMappingPipeline() and twasWeightsPipeline(). The two
+# had drifted on a setting that means the same thing in each: `cvFolds`
+# defaulted to 0 in fine-mapping and 5 in TWAS. Folding them into one
+# constructor is the rule the joint specification already follows.
+#
+# `folds` is 0 everywhere. twasWeightsPipeline used to default to 5, so the
+# two pipelines disagreed on what an unspecified `cvFolds` meant; converging
+# on "off unless asked" makes one bundle mean one thing. The knock-on is that
+# the SR-TWAS ensemble, which needs out-of-fold predictions, no longer runs by
+# default -- so `ensemble` defaults to FALSE too, and asking for an ensemble
+# without folds is an error rather than a silently missing row.
+#
+# Two of the five fields are honoured by twasWeightsPipeline() only, and are
+# IGNORED rather than rejected by fineMappingPipeline() -- one bundle the
+# caller can hand to either pipeline without rewriting it:
+#
+#   weightMethods -- selects among TWAS *weight* methods, matching tokens like
+#     `lasso` / `mrmash` and their `<token>_weights` spellings. Fine mapping's
+#     `methods=` are fine-mapping methods and its CV refits all of them, so
+#     there is no weight-method set to select from. It is also the knob that
+#     decides whether .jointTwasCvBlocked() reaches back for a fold's
+#     fine-mapping fit -- a TWAS-to-fine-mapping handoff with no counterpart
+#     in the other direction.
+#   maxVariants -- caps the CV design matrix for twasWeightsCv(). Fine mapping
+#     does not use that engine; .fmWeightsCv() has its own loop and only
+#     mirrors twasWeightsCv()'s output shape.
+#
+# Both are documented as TWAS-only so the silence is stated, not discovered.
+#
+# `seed` is not here either. It seeds the whole call in both pipelines
+# (fine-mapping wraps the call in withr::local_seed; TWAS also seeds the
+# BiocParallel RNG for method fitting), so it is a call-level knob that CV
+# happens to benefit from, not a CV setting.
+# =============================================================================

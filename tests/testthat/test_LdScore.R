@@ -3,9 +3,9 @@
 # === Tests migrated from test_h2ClassesSumstats.R (LdScore) ===
 
 test_that("LdScore constructs and validates correctly", {
-    ldblocks <- make_test_ldblocks()
+    ldblocks <- makeTestLdBlocks()
     n <- 10
-    snp_info <- make_test_snp_info(n)
+    snp_info <- makeTestSnpInfo(n)
 
     obj <- LdScore(
         ldBlocks = ldblocks,
@@ -23,8 +23,8 @@ test_that("LdScore constructs and validates correctly", {
 
 
 test_that("LdScore rejects ld_scores row mismatch with snp_info", {
-    ldblocks <- make_test_ldblocks()
-    snp_info <- make_test_snp_info(10)
+    ldblocks <- makeTestLdBlocks()
+    snp_info <- makeTestSnpInfo(10)
 
     expect_error(
         methods::validObject(
@@ -39,7 +39,7 @@ test_that("LdScore rejects ld_scores row mismatch with snp_info", {
                 ldMatrixList = list()
             )
         ),
-        "ldScores.*must be parallel"
+        "ldScores.*Must have exactly 10 rows, but has 5 rows"
     )
 })
 
@@ -48,8 +48,8 @@ test_that("LdScore rejects ld_scores row mismatch with snp_info", {
 test_that("show(LdScore) does not error", {
     n <- 10
     lsr <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -64,8 +64,8 @@ test_that("LdScore rejects weights that are not parallel to the variants", {
     n <- 10
     expect_error(
         LdScore(
-            ldBlocks = make_test_ldblocks(),
-            snpInfo = make_test_snp_info(n),
+            ldBlocks = makeTestLdBlocks(),
+            snpInfo = makeTestSnpInfo(n),
             nRef = 500L,
             inSample = FALSE,
             genome = "hg19",
@@ -73,7 +73,7 @@ test_that("LdScore rejects weights that are not parallel to the variants", {
             ldScoreWeights = runif(n - 1L),
             ldMatrixList = list()
         ),
-        "they must be parallel"
+        "ldScoreWeights.*Must have length 10, but has length 9"
     )
 })
 
@@ -81,8 +81,8 @@ test_that("getLdScoreWeights returns the per-variant weights", {
     n <- 10
     w <- runif(n)
     obj <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -98,8 +98,8 @@ test_that("validity requires the score columns to be present in mcols", {
     # edit rather than a slot edit -- which is exactly why validity checks it.
     n <- 10
     obj <- LdScore(
-        ldBlocks = make_test_ldblocks(),
-        snpInfo = make_test_snp_info(n),
+        ldBlocks = makeTestLdBlocks(),
+        snpInfo = makeTestSnpInfo(n),
         nRef = 500L,
         inSample = FALSE,
         genome = "hg19",
@@ -133,7 +133,7 @@ test_that("buildLdScore computes per-block sums of r^2", {
 test_that("buildLdScore scores each block against only its own variants", {
     ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
     scores <- as.vector(getLdScores(buildLdScore(ld))[, 1])
-    perBlock <- unlist(lapply(getCorrelation(ld), function(R) rowSums(R^2)))
+    perBlock <- unlist(map(getCorrelation(ld), function(R) rowSums(R^2)))
 
     expect_equal(length(scores), 7L)
     expect_equal(scores, perBlock)
@@ -175,6 +175,28 @@ test_that("buildLdScore defaults weights to 1/max(l2, 1)", {
     expect_equal(getLdScoreWeights(custom), rep(2, 6))
     expect_error(
         buildLdScore(ld, ldScoreWeights = rep(2, 3)),
-        "3 value\\(s\\) for 6 variant\\(s\\)"
+        "ldScoreWeights.*Must have length 6, but has length 3"
     )
+})
+
+test_that("buildLdScore: argument guards fire", {
+    meta <- system.file(
+        "extdata",
+        "ld_reference",
+        "ld_meta_file.tsv",
+        package = "pecotmr"
+    )
+    ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
+    expect_error(buildLdScore(ld, nRef = 0L), "nRef.*Must be >= 1")
+    expect_error(buildLdScore(ld, inSample = NA), "inSample.*May not be NA")
+    expect_error(
+        buildLdScore(ld, keepLdMatrices = NA),
+        "keepLdMatrices.*May not be NA"
+    )
+})
+
+test_that(".ldScoreVector answers all-zero scores when there are no blocks", {
+    # Variants in no block keep a zero score, so no blocks at all is a
+    # zero vector of the full variant length rather than an error.
+    expect_identical(pecotmr:::.ldScoreVector(list(), NULL, 3L), numeric(3))
 })

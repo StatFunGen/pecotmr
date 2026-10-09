@@ -143,7 +143,7 @@ test_that("JointDispatchCell + pipeline markers validate at construction", {
     )
 
     fm <- new("FmJointPipeline", config = list(coverage = 0.95))
-    tw <- new("TwasJointPipeline", config = list(retainFit = TRUE))
+    tw <- new("TwasJointPipeline", config = list(fitRetention = "slim"))
     expect_s4_class(fm, "JointPipeline")
     expect_s4_class(tw, "JointPipeline")
     expect_equal(fm@config$coverage, 0.95)

@@ -1,3 +1,6 @@
+#' @include MethodParam.R
+NULL
+
 #' @title P-value Combination Methods
 #' @description Functions for combining p-values across multiple tests or
 #'   methods: Cauchy combination (ACAT), harmonic mean p-value (HMP), poolr,
@@ -38,8 +41,12 @@ NULL
 #' @return Numeric vector of two-sided p-values.
 #' @examples
 #' waldTestPval(beta = 0.3, se = 0.1, n = 1000)
+#' @importFrom checkmate assertNumeric
 #' @export
 waldTestPval <- function(beta, se, n) {
+    assertNumeric(beta)
+    assertNumeric(se)
+    assertNumeric(n)
     # Calculate the t statistic
     tValue <- beta / se
     # Degrees of freedom
@@ -61,20 +68,20 @@ pvalAcat <- function(pvals, naRm = TRUE) {
     #     avoid Inf from floating-point precision loss in pi*0.5
     #   - large-stat asymptotic: when the mean Cauchy variate is > 1e15 the
     #     CDF tail collapses to (1/T) / pi (Cauchy survival expansion)
-    if (naRm) {
-        pvals <- pvals[!is.na(pvals)]
-    }
-    if (length(pvals) == 0L) {
+    present <- if (naRm) pvals[!is.na(pvals)] else pvals
+    if (length(present) == 0L) {
         return(NA_real_)
     }
-    if (length(pvals) == 1L) {
-        return(pvals[[1]])
+    if (length(present) == 1L) {
+        return(present[[1]])
     }
-    pvals <- pmin(pvals, 0.99)
+    # Capped below 1: tan(pi * (0.5 - 1)) is -Inf, which would sink the
+    # combined statistic regardless of the other p-values.
+    capped <- pmin(present, 0.99)
     cauchyVals <- if_else(
-        pvals < 1e-15,
-        1 / (pvals * pi),
-        tan(pi * (0.5 - pvals))
+        capped < 1e-15,
+        1 / (capped * pi),
+        tan(pi * (0.5 - capped))
     )
     stat <- mean(cauchyVals)
     if (!is.finite(stat)) {
@@ -89,11 +96,7 @@ pvalAcat <- function(pvals, naRm = TRUE) {
 pvalHmp <- function(pvals) {
     # Make sure harmonicmeanp is installed
     if (!requireNamespace("harmonicmeanp", quietly = TRUE)) {
-        msg <- glue(
-            "To use this function, please install harmonicmeanp: ",
-            "https://cran.r-project.org/web/packages/harmonicmeanp/index.html"
-        )
-        abort(msg)
+        abort("Package 'harmonicmeanp' is required for this function.")
     }
     # https://search.r-project.org/CRAN/refmans/harmonicmeanp/html/pLandau.html
     L <- length(pvals)
@@ -118,13 +121,9 @@ pvalHmp <- function(pvals) {
     abort(msg)
 }
 
-pvalPoolr <- function(pvals, method, R) {
+pvalPoolr <- function(pvals, method, R, methodArgs = PoolrOptions()) {
     if (!requireNamespace("poolr", quietly = TRUE)) {
-        msg <- glue(
-            "To use this method, please install poolr: ",
-            "install.packages('poolr')"
-        )
-        abort(msg)
+        abort("Package 'poolr' is required for this method.")
     }
     fn <- switch(
         method,
@@ -133,22 +132,28 @@ pvalPoolr <- function(pvals, method, R) {
         invchisq = poolr::invchisq,
         .abortUnknownMethod("poolr", method)
     )
-    fn(pvals, adjust = "generalized", R = R)$p
+    exec(fn, pvals, R = R, !!!as.list(methodArgs))$p
 }
 
-pvalGbj <- function(zScores, R, method) {
+pvalGbj <- function(zScores, R, method, methodArgs = GbjOptions()) {
     if (!requireNamespace("GBJ", quietly = TRUE)) {
-        abort("To use this method, please install GBJ: install.packages('GBJ')")
+        abort("Package 'GBJ' is required for this method.")
     }
-    result <- switch(
+    fn <- switch(
         method,
-        gbj = GBJ::GBJ(test_stats = zScores, cor_mat = R),
-        bj = GBJ::BJ(test_stats = zScores, cor_mat = R),
-        hc = GBJ::HC(test_stats = zScores, cor_mat = R),
-        ghc = GBJ::GHC(test_stats = zScores, cor_mat = R),
-        minp = GBJ::minP(test_stats = zScores, cor_mat = R),
-        gbj_omni = GBJ::OMNI_ss(test_stats = zScores, cor_mat = R),
+        gbj = GBJ::GBJ,
+        bj = GBJ::BJ,
+        hc = GBJ::HC,
+        ghc = GBJ::GHC,
+        minp = GBJ::minP,
+        gbj_omni = GBJ::OMNI_ss,
         .abortUnknownMethod("GBJ", method)
+    )
+    result <- exec(
+        fn,
+        test_stats = zScores,
+        cor_mat = R,
+        !!!as.list(methodArgs)
     )
     pvalName <- switch(
         method,
@@ -162,22 +167,29 @@ pvalGbj <- function(zScores, R, method) {
     result[[pvalName]]
 }
 
-pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
+pvalAspu <- function(
+    zScores = NULL,
+    pvals = NULL,
+    R,
+    method,
+    methodArgs = AspuOptions()
+) {
     if (!requireNamespace("aSPU", quietly = TRUE)) {
         abort(
-            "To use this method, please install aSPU: install.packages('aSPU')"
+            "Package 'aSPU' is required for this method."
         )
     }
     switch(
         method,
-        aspu = {
-            result <- aSPU::aSPUs(Zs = zScores, corSNP = R)
-            result$pvs["aSPUs"]
-        },
-        gates = {
-            result <- aSPU::GATES2(ldmatrix = R, p = pvals)
-            result[["Pg"]]
-        },
+        aspu = exec(
+            aSPU::aSPUs,
+            Zs = zScores,
+            corSNP = R,
+            !!!as.list(methodArgs)
+        )$pvs["aSPUs"],
+        # GATES2's only formals are the two pecotmr supplies, so there is
+        # nothing for a caller to configure here.
+        gates = aSPU::GATES2(ldmatrix = R, p = pvals)[["Pg"]],
         .abortUnknownMethod("aSPU", method)
     )
 }
@@ -233,13 +245,12 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 # Internal: align an R correlation matrix to a target order. If R has
 # rownames/colnames, reorder to match `targetNames`; require every target
 # name to be present. If R is unnamed, only length check.
+#' @importFrom checkmate assertMatrix
 .combinePvalAlignR <- function(R, targetNames) {
     if (is.null(R)) {
         return(NULL)
     }
-    if (!is.matrix(R)) {
-        abort("`R` must be a matrix.")
-    }
+    assertMatrix(R)
     if (nrow(R) != ncol(R)) {
         abort("`R` must be square.")
     }
@@ -279,7 +290,8 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 
 # Internal: compute one method's combined p-value. Assumes inputs have
 # already been validity-filtered (positive, finite, < 1) and aligned with R.
-.combinePvalSingle <- function(method, pvals, zScores, R) {
+.combinePvalSingle <- function(method, pvals, zScores, R, methodArgs = list()) {
+    args <- .combinePvalMethodArgs(methodArgs, method)
     switch(
         method,
         acat = pvalAcat(pvals),
@@ -287,17 +299,52 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
         bonferroni = min(length(pvals) * min(pvals), 1.0),
         fisher = ,
         stouffer = ,
-        invchisq = pvalPoolr(pvals, method = method, R = R),
+        invchisq = pvalPoolr(pvals, method = method, R = R, methodArgs = args),
         gbj = ,
         bj = ,
         hc = ,
         ghc = ,
         minp = ,
-        gbj_omni = pvalGbj(zScores, R = R, method = method),
-        aspu = pvalAspu(zScores = zScores, R = R, method = "aspu"),
+        gbj_omni = pvalGbj(
+            zScores,
+            R = R,
+            method = method,
+            methodArgs = args
+        ),
+        aspu = pvalAspu(
+            zScores = zScores,
+            R = R,
+            method = "aspu",
+            methodArgs = args
+        ),
         gates = pvalAspu(pvals = pvals, R = R, method = "gates"),
         .abortUnknownMethod("combination", method)
     )
+}
+
+# One method's entry out of the PvalMethodsParam() record, or that method's
+# own empty record when the caller configured nothing for it. Returning the
+# constructor's result rather than list() keeps each engine's pecotmr
+# defaults -- poolr's `adjust = "generalized"` -- in force either way.
+# @noRd
+.combinePvalMethodArgs <- function(methodArgs, method) {
+    entries <- .pvalMethodEntriesOf(methodArgs)
+    i <- match(method, names(entries))
+    if (!is.na(i)) {
+        return(entries[[i]])
+    }
+    ctors <- .pvalMethodCtors()
+    if (is_in(method, names(ctors))) ctors[[method]]() else list()
+}
+
+# The per-method entries, whether they arrived in a PvalMethodsParam or as
+# the bare list() that still means "no settings".
+# @noRd
+.pvalMethodEntriesOf <- function(methodArgs) {
+    if (is(methodArgs, "PvalMethodsParam")) {
+        return(slot(methodArgs, "methods") %||% list())
+    }
+    methodArgs %||% list()
 }
 
 #' Combine P-values via Any of a Menu of Methods
@@ -336,6 +383,12 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 #'   \code{zScores}. Required for the correlation-adjusted methods.
 #' @param naRm Logical; if \code{TRUE} (default), drop NA p-values before
 #'   combination.
+#' @param methodArgs Per-method engine options, built with
+#'   \code{\link{PvalMethodsParam}} -- for example
+#'   \code{PvalMethodsParam(aspu = AspuOptions(n.perm = 5000))}. Configuring
+#'   a method that \code{methods} does not request is an error rather than a
+#'   silent no-op. \code{acat}, \code{hmp}, \code{bonferroni} and
+#'   \code{gates} take no options.
 #' @return A list with two elements:
 #'   \describe{
 #'     \item{input}{Summary of the call: \code{nPvalsIn},
@@ -347,14 +400,19 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
 #' @examples
 #' combinePValues(pvals = c(0.01, 0.2, 0.5), methods = "fisher", R = diag(3))
 #' @export
+#' @importFrom checkmate assertFlag
 combinePValues <- function(
     pvals = NULL,
     zScores = NULL,
     methods,
     R = NULL,
-    naRm = TRUE
+    naRm = TRUE,
+    methodArgs = PvalMethodsParam()
 ) {
+    assertFlag(naRm)
+    .assertMethodParam(methodArgs, "PvalMethodsParam", "methodArgs")
     methods <- .combinePvalCheckMethods(methods)
+    .combinePvalCheckMethodArgs(methodArgs, methods)
     nPvalsIn <- if (is.null(pvals)) 0L else length(pvals)
     nZScoresIn <- if (is.null(zScores)) 0L else length(zScores)
     .combinePvalCheckPrereqs(methods, zScores, R)
@@ -376,7 +434,8 @@ combinePValues <- function(
         methods,
         filt$pvalsK,
         filt$zScoresK,
-        Raligned
+        Raligned,
+        methodArgs
     )
     .combinePvalResult(perMethod, input)
 }
@@ -398,6 +457,23 @@ combinePValues <- function(
         abort(msg)
     }
     methods
+}
+
+# Options for a method that was not requested would be dropped in silence --
+# exactly the failure the constructors exist to prevent -- so say so instead.
+# @noRd
+.combinePvalCheckMethodArgs <- function(methodArgs, methods) {
+    configured <- names(.pvalMethodEntriesOf(methodArgs))
+    unused <- setdiff(configured, methods)
+    if (length(unused) == 0L) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "combinePValues: `methodArgs` configures ",
+        "{str_flatten(unused, ', ')}, which `methods` does not request ",
+        "({str_flatten(methods, ', ')}), so those options would be ignored."
+    )
+    abort(msg)
 }
 
 # Method-level prerequisites: z-score-requiring + R-requiring methods.
@@ -503,27 +579,40 @@ combinePValues <- function(
 
 # Run each method, warning + NA on per-method failure.
 # @noRd
-.combinePvalRunMethods <- function(methods, pvalsK, zScoresK, Raligned) {
+.combinePvalRunMethods <- function(
+    methods,
+    pvalsK,
+    zScoresK,
+    Raligned,
+    methodArgs
+) {
     set_names(
         map(
             methods,
             .combinePvalRunOne,
             pvalsK = pvalsK,
             zScoresK = zScoresK,
-            Raligned = Raligned
+            Raligned = Raligned,
+            methodArgs = methodArgs
         ),
         methods
     )
 }
 
 # @noRd
-.combinePvalRunOne <- function(m, pvalsK, zScoresK, Raligned) {
-    p <- tryCatch(
-        .combinePvalSingle(m, pvals = pvalsK, zScores = zScoresK, R = Raligned),
-        error = function(e) {
-            eMsg <- conditionMessage(e)
-            msg <- glue("combinePValues: method '{m}' failed: {eMsg}")
-            warn(msg)
+#' @importFrom rlang try_fetch
+.combinePvalRunOne <- function(m, pvalsK, zScoresK, Raligned, methodArgs) {
+    p <- try_fetch(
+        .combinePvalSingle(
+            m,
+            pvals = pvalsK,
+            zScores = zScoresK,
+            R = Raligned,
+            methodArgs = methodArgs
+        ),
+        error = function(cnd) {
+            msg <- glue("combinePValues: method '{m}' failed")
+            warn(msg, parent = cnd)
             NA_real_
         }
     )
@@ -533,4 +622,257 @@ combinePValues <- function(
 # @noRd
 .combinePvalResult <- function(perMethod, input) {
     list(input = input, results = perMethod)
+}
+
+# =============================================================================
+# Engine option records
+# =============================================================================
+
+#' @title Options for the GBJ Family of Combination Tests
+#' @description Build a checked record of extra arguments for the \pkg{GBJ}
+#'   set-based tests behind \code{\link{combinePValues}} methods
+#'   \code{"gbj"}, \code{"bj"}, \code{"hc"}, \code{"ghc"} and \code{"minp"}.
+#'   All five share one signature, so one constructor covers them.
+#' @param ... Arguments for \code{GBJ::GBJ()} and its siblings -- in practice
+#'   \code{pairwise_cors}, the vector of pairwise correlations the test would
+#'   otherwise derive from \code{cor_mat}. Names are checked against the
+#'   engine's formals, so a misspelling is an error rather than a silent drop.
+#'   \code{test_stats} and \code{cor_mat} are supplied by pecotmr and refused.
+#' @return A \code{MethodOptions} record for
+#'   \code{\link{PvalMethodsParam}}.
+#' @seealso \code{\link{combinePValues}}, \code{\link{GbjOmniOptions}}
+#' @examples
+#' GbjOptions(pairwise_cors = rep(0.1, 3))
+#' @export
+GbjOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            test_stats = "the caller's `zScores`",
+            cor_mat = "the caller's `R`"
+        ),
+        "GbjOptions"
+    )
+    .newMethodOptions(
+        c("GBJ::GBJ", "GBJ::BJ", "GBJ::HC", "GBJ::GHC", "GBJ::minP"),
+        defaults = list(),
+        extra = extra,
+        label = "GbjOptions",
+        engine = "gbj"
+    )
+}
+
+#' @title Options for the GBJ Omnibus Combination Test
+#' @description Build a checked record of extra arguments for
+#'   \code{GBJ::OMNI_ss()}, the engine behind \code{\link{combinePValues}}
+#'   method \code{"gbj_omni"}. It takes a different option from its siblings
+#'   (\code{num_boots} rather than \code{pairwise_cors}), so it has its own
+#'   constructor.
+#' @param ... Arguments for \code{GBJ::OMNI_ss()} -- in practice
+#'   \code{num_boots}, the bootstrap count the omnibus null is built from.
+#'   \code{test_stats} and \code{cor_mat} are supplied by pecotmr and refused.
+#' @return A \code{MethodOptions} record for
+#'   \code{\link{PvalMethodsParam}}.
+#' @seealso \code{\link{combinePValues}}, \code{\link{GbjOptions}}
+#' @examples
+#' GbjOmniOptions(num_boots = 200)
+#' @export
+GbjOmniOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            test_stats = "the caller's `zScores`",
+            cor_mat = "the caller's `R`"
+        ),
+        "GbjOmniOptions"
+    )
+    .newMethodOptions(
+        "GBJ::OMNI_ss",
+        defaults = list(),
+        extra = extra,
+        label = "GbjOmniOptions",
+        engine = "gbjOmni"
+    )
+}
+
+#' @title Options for the aSPU Combination Test
+#' @description Build a checked record of extra arguments for
+#'   \code{aSPU::aSPUs()}, the engine behind \code{\link{combinePValues}}
+#'   method \code{"aspu"}.
+#' @param ... Arguments for \code{aSPU::aSPUs()}: \code{pow} (the SPU powers
+#'   the omnibus minimises over), \code{n.perm} (permutation count -- aSPU's
+#'   p-value resolution is bounded by it), \code{Ps} and \code{prune}.
+#'   \code{Zs} and \code{corSNP} are supplied by pecotmr and refused.
+#' @return A \code{MethodOptions} record for
+#'   \code{\link{PvalMethodsParam}}.
+#' @seealso \code{\link{combinePValues}}
+#' @examples
+#' AspuOptions(n.perm = 5000)
+#' @export
+AspuOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            Zs = "the caller's `zScores`",
+            corSNP = "the caller's `R`"
+        ),
+        "AspuOptions"
+    )
+    .newMethodOptions(
+        "aSPU::aSPUs",
+        defaults = list(),
+        extra = extra,
+        label = "AspuOptions",
+        engine = "aspu"
+    )
+}
+
+#' @title Options for the poolr Combination Tests
+#' @description Build a record of extra arguments for \code{poolr::fisher()},
+#'   \code{poolr::stouffer()} and \code{poolr::invchisq()} -- the engines
+#'   behind \code{\link{combinePValues}} methods \code{"fisher"},
+#'   \code{"stouffer"} and \code{"invchisq"}. All three share one signature.
+#' @param ... Arguments for the chosen \pkg{poolr} test: \code{adjust} (the
+#'   correlation adjustment; pecotmr defaults it to \code{"generalized"}),
+#'   \code{m}, \code{size}, \code{threshold}, \code{side}, \code{batchsize}
+#'   and \code{nearpd}. The \pkg{poolr} signatures end in \code{...}, so
+#'   names cannot be checked here and a misspelling is passed through.
+#'   \code{p} and \code{R} are supplied by pecotmr and refused.
+#' @return A \code{MethodOptions} record for
+#'   \code{\link{PvalMethodsParam}}.
+#' @seealso \code{\link{combinePValues}}
+#' @examples
+#' PoolrOptions(adjust = "empirical", side = 1)
+#' @export
+PoolrOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            p = "the caller's `pvals`",
+            R = "the caller's `R`"
+        ),
+        "PoolrOptions"
+    )
+    .newMethodOptions(
+        c("poolr::fisher", "poolr::stouffer", "poolr::invchisq"),
+        defaults = list(adjust = "generalized"),
+        extra = extra,
+        label = "PoolrOptions",
+        engine = "poolr"
+    )
+}
+
+# Which constructor configures each combinePValues() method. Keys that share
+# an engine share a constructor: the five GBJ set tests have one signature,
+# and so do the three poolr tests. A method absent from this map takes no
+# options -- acat, hmp and bonferroni are pecotmr's own arithmetic, and
+# gates's aSPU::GATES2() has no formal beyond the two pecotmr supplies.
+# @noRd
+.pvalMethodCtors <- function() {
+    list(
+        fisher = PoolrOptions,
+        stouffer = PoolrOptions,
+        invchisq = PoolrOptions,
+        gbj = GbjOptions,
+        bj = GbjOptions,
+        hc = GbjOptions,
+        ghc = GbjOptions,
+        minp = GbjOptions,
+        gbj_omni = GbjOmniOptions,
+        aspu = AspuOptions
+    )
+}
+
+#' @rdname PvalMethodsParam
+#' @aliases PvalMethodsParam-class
+#' @exportClass PvalMethodsParam
+setClass(
+    "PvalMethodsParam",
+    contains = "MethodParam",
+    slots = c(methods = "list_OR_NULL")
+)
+
+#' @title Per-Method Options for combinePValues
+#' @description Bundle per-method engine options for
+#'   \code{\link{combinePValues}}. Each entry is named for the method it
+#'   configures and built with that method's constructor, so an option meant
+#'   for one engine cannot silently reach another.
+#' @param fisher,stouffer,invchisq Options for those poolr tests, built with
+#'   \code{\link{PoolrOptions}}.
+#' @param gbj,bj,hc,ghc,minp Options for those GBJ tests, built with
+#'   \code{\link{GbjOptions}}.
+#' @param gbj_omni Options for the GBJ omnibus test, built with
+#'   \code{\link{GbjOmniOptions}}.
+#' @param aspu Options for aSPU, built with \code{\link{AspuOptions}}.
+#' @details Each entry may be given as a plain named list instead, which is
+#'   spliced into that method's constructor and so gets the same defaults and
+#'   the same checking.
+#'
+#'   \code{acat}, \code{hmp}, \code{bonferroni} and \code{gates} are valid
+#'   \code{combinePValues} methods but take no options, so they are not
+#'   arguments here --- naming one is an unused-argument error.
+#' @return A \code{PvalMethodsParam} object, a \code{\link{MethodParam}},
+#'   for \code{combinePValues(methodArgs =)}. \code{names()} lists the
+#'   methods that were configured.
+#' @seealso \code{\link{combinePValues}}
+#' @examples
+#' PvalMethodsParam(aspu = AspuOptions(n.perm = 5000))
+#' @export
+PvalMethodsParam <- function(
+    fisher = NULL,
+    stouffer = NULL,
+    invchisq = NULL,
+    gbj = NULL,
+    bj = NULL,
+    hc = NULL,
+    ghc = NULL,
+    minp = NULL,
+    gbj_omni = NULL,
+    aspu = NULL
+) {
+    # discard(is.null), not compact(): naming a method with default options
+    # must still configure it, and compact() would drop an empty record.
+    given <- discard(
+        list(
+            fisher = fisher,
+            stouffer = stouffer,
+            invchisq = invchisq,
+            gbj = gbj,
+            bj = bj,
+            hc = hc,
+            ghc = ghc,
+            minp = minp,
+            gbj_omni = gbj_omni,
+            aspu = aspu
+        ),
+        is.null
+    )
+    # One named-list slot rather than one nullable slot per method: a
+    # record configuring aspu showed eight NULL slots and one set, which
+    # tells a reader nothing. The formals stay named, so R still rejects a
+    # misspelled method before the body runs.
+    entries <- .pvalMethodEntries(given)
+    new(
+        "PvalMethodsParam",
+        methods = if (length(entries) == 0L) NULL else entries
+    )
+}
+
+# Each entry validated and built the same way: a plain list is spliced into
+# that method's constructor, a built record passes through, and one built by
+# the WRONG constructor is refused -- several methods share an engine (poolr
+# covers three, GBJ five), so the check is on the engine the key's own
+# constructor produces, not on the key.
+# @noRd
+.pvalMethodEntries <- function(given) {
+    if (length(given) == 0L) {
+        return(list())
+    }
+    ctors <- .pvalMethodCtors()
+    .nestedAssertEngines(given, ctors, NULL, "PvalMethodsParam")
+    imap(given, .nestedElement, ctors = ctors, label = "PvalMethodsParam")
 }

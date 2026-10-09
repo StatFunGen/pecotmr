@@ -15,7 +15,7 @@ dentistSingleWindow(
   nIter = 10,
   gPvalueThreshold = 0.05,
   duprThreshold = 0.99,
-  ncpus = 1,
+  numThreads = 1,
   correctChenEtAlBug = TRUE,
   ldMethod = "sample",
   seed = NULL
@@ -46,7 +46,7 @@ provided; inferred from \code{X} when \code{X} is provided.}
 
 \item{duprThreshold}{Duplicate r-squared threshold. Default is 0.99.}
 
-\item{ncpus}{Number of CPU cores. Default is 1.}
+\item{numThreads}{Number of CPU cores. Default is 1.}
 
 \item{correctChenEtAlBug}{Correct the original DENTIST operator! bug. Default
 is TRUE.}

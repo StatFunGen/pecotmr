@@ -10,10 +10,7 @@ assembleCtwasInputs(
   twasZ = NULL,
   fineMappingResult = NULL,
   method = NULL,
-  twasWeightCutoff = 0,
-  csMinCor = 0.8,
-  minPipCutoff = 0,
-  maxNumVariants = Inf
+  variantPruningArgs = VariantPruningParam()
 )
 }
 \arguments{
@@ -56,25 +53,12 @@ present; otherwise run \strong{every} method as an independent cTWAS run
 (one \code{CtwasResult} row-set per method). Passing the name explicitly
 (e.g. \code{"mrash"}) restricts the run to that single method.}
 
-\item{twasWeightCutoff}{Numeric (length 1). Drop variants with \code{|weight|
-< twasWeightCutoff} from each gene's weight matrix before ctwas sees it.
-Default \code{0} (no filter).}
-
-\item{csMinCor}{Numeric (length 1). When \code{fineMappingResult} is
-provided, variants belonging to any 95\% credible set with purity
-(\code{min_abs_corr}) \code{>= csMinCor} are marked as must-keep and
-survive the per-gene cap. Default \code{0.8}. Ignored without a
-\code{fineMappingResult}.}
-
-\item{minPipCutoff}{Numeric (length 1). When \code{fineMappingResult} is
-provided, variants with PIP greater than \code{minPipCutoff} are marked as
-must-keep and survive the per-gene cap. Default \code{0} (no PIP rescue).
-Ignored without a \code{fineMappingResult}.}
-
-\item{maxNumVariants}{Numeric (length 1). Cap on per-gene variant count. When
-the gene has more variants than this, keep all must-keep variants and fill
-remaining slots by descending PIP (when available) or descending
-\code{|weight|}. Default \code{Inf} (no cap).}
+\item{variantPruningArgs}{Which variants survive into each gene's weight
+matrix, built with \code{\link{VariantPruningParam}}:
+\code{weightCutoff}, \code{csMinCor}, \code{pipRescue} and
+\code{maxVariants}. Handed whole to
+\code{\link{assembleCtwasInputs}}. The \code{csMinCor} /
+\code{pipRescue} rescues need a \code{fineMappingResult}.}
 }
 \value{
 A list with elements \code{z_snp}, \code{z_gene} (NULL when no
@@ -91,7 +75,7 @@ Builds the per-block ctwas-shape input set (\code{z_snp},
 }
 \details{
 The returned list is the SHARED STATE threaded through
-  \code{\link{estCtwasParam}} -> \code{\link{screenCtwasRegions}} ->
+  \code{\link{estCtwasGroupPriors}} -> \code{\link{screenCtwasRegions}} ->
   \code{\link{finemapCtwasRegions}}. Callers can short-circuit at any step
   (e.g. override the estimated priors before fine-mapping) or call
   \code{ctwasPipeline()} for the one-shot path.
@@ -109,7 +93,8 @@ blocks <- GenomicRanges::GRanges("chr22",
   blockId = c("chr22_1", "chr22_2"))
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
-gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
+gwasByRegion <- summaryStatsQc(gss,
+  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
 assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
 }

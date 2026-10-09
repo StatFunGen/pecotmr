@@ -8,8 +8,7 @@ susieAshRssWeights(
   stat,
   LD,
   susieAshRssFit = NULL,
-  retainFit = TRUE,
-  methodArgs = list()
+  fitRetention = c("slim", "none", "full")
 )
 }
 \arguments{
@@ -20,12 +19,10 @@ sizes).}
 
 \item{susieAshRssFit}{Optional pre-fitted SuSiE-ASH-RSS object.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute.}
-
-\item{methodArgs}{Named list of additional arguments passed to
-\code{susieR::susie_rss()}. Use this instead of \code{...} to avoid partial
-matching of short argument names (e.g. \code{L}) to the \code{LD}
-parameter.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 Numeric vector of variant weights.
@@ -47,5 +44,6 @@ stat <- list(
   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
   n = rep(nrow(X), ncol(X)))
 LD <- cor(X)
-susieAshRssWeights(stat, LD)
+fit <- susieR::susie_rss(z = stat$z, R = LD, n = nrow(X), L = 5)
+susieAshRssWeights(stat, LD, susieAshRssFit = fit)
 }

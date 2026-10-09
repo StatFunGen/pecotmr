@@ -4,7 +4,7 @@
 \alias{bayesAWeights}
 \title{BayesA TWAS weights (t-distribution prior)}
 \usage{
-bayesAWeights(X, y, Z = NULL, ...)
+bayesAWeights(X, y, Z = NULL, methodArgs = QggOptions())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -13,8 +13,10 @@ bayesAWeights(X, y, Z = NULL, ...)
 
 \item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
 
-\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
-\code{qgg}.}
+\item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
+with \code{\link{QggOptions}}. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be
+silently ignored.}
 }
 \value{
 A numeric vector of effect-size weights, one per variant (column of

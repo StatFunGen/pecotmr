@@ -19,26 +19,25 @@ getVariantIds(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL,
-  ...
+  region = NULL
 )
 
-\S4method{getVariantIds}{SumStatsBase}(x, ...)
-
-\S4method{getVariantIds}{LdData}(x, ...)
-
-\S4method{getVariantIds}{FineMappingRow}(x, ...)
-
-\S4method{getVariantIds}{TwasWeights}(
+\S4method{getVariantIds}{SumStatsBase}(
   x,
   study = NULL,
   context = NULL,
   trait = NULL,
-  method = NULL,
-  ...
+  annotateSignificance = NULL,
+  ranges = NULL
 )
 
-\S4method{getVariantIds}{TwasWeightsRow}(x, ...)
+\S4method{getVariantIds}{LdData}(x)
+
+\S4method{getVariantIds}{FineMappingRow}(x)
+
+\S4method{getVariantIds}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
+
+\S4method{getVariantIds}{TwasWeightsRow}(x)
 }
 \arguments{
 \item{x}{The object.}
@@ -60,6 +59,12 @@ this fine-mapping / weight method; \code{NULL} matches all methods.}
 \item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
 Restrict variants to this region; \code{NULL} uses the full cis window /
 all regions.}
+
+\item{annotateSignificance}{Optional correction-method name passed through to
+\code{\link{getSumStats}} (QTL only); \code{NULL} applies none.}
+
+\item{ranges}{A \code{GRanges} or \code{NULL} (default). Return only the
+variants overlapping these ranges; \code{NULL} returns everything.}
 }
 \value{
 Character vector of variant IDs.

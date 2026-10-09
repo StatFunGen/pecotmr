@@ -279,9 +279,22 @@ test_that("QtlSumStats: accepts and stores extra per-tuple columns via ...", {
         entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
         genome = "hg19",
         ldSketch = .qtlMakeGenotypeHandle(),
-        cohort = c("UKB", "FinnGen")
+        extraCols = list(cohort = c("UKB", "FinnGen"))
     )
     expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
+    # Not variadic: the base class's GRangesList(...) means ELEMENTS,
+    # so a bare `cohort =` here would read as adding an entry.
+    expect_error(
+        QtlSumStats(
+            study = "s1",
+            context = "c1",
+            trait = "t1",
+            entry = list(),
+            genome = "hg19",
+            cohort = "UKB"
+        ),
+        "unused argument"
+    )
 })
 
 # ===========================================================================
@@ -366,7 +379,7 @@ test_that("accessors require length-1 selection args", {
     obj <- .qtlMakeOne()
     expect_error(
         getSumStats(obj, study = c("s1", "s2"), context = "c1", trait = "t1"),
-        "must each be length 1"
+        "Must have length 1"
     )
 })
 
@@ -649,11 +662,11 @@ test_that("validity names the identity columns that are missing", {
     data(qtlSumStatsExample)
     bad <- qtlSumStatsExample
     S4Vectors::mcols(bad)$trait <- NULL
-    expect_equal(
-        pecotmr:::.qssCheckRequiredCols(bad),
-        "missing columns: trait"
+    expect_error(
+        methods::validObject(bad),
+        "missing elements \\{'trait'\\}"
     )
-    expect_null(pecotmr:::.qssCheckRequiredCols(qtlSumStatsExample))
+    expect_true(methods::validObject(qtlSumStatsExample))
 })
 
 test_that(".appendTraitDistances is a no-op without a trait position", {
@@ -662,4 +675,12 @@ test_that(".appendTraitDistances is a no-op without a trait position", {
     )
     # No anchor to measure TSS/TES distance from, so entries pass through.
     expect_identical(pecotmr:::.appendTraitDistances(entry, NULL), entry)
+})
+
+test_that(".qssAppendTraitDist returns an empty entry untouched", {
+    # A variant set with no ranges has no positions to take a distance from.
+    empty <- GenomicRanges::GRanges()
+    out <- pecotmr:::.qssAppendTraitDist(1L, list(empty), NULL)
+    expect_s4_class(out, "GRanges")
+    expect_length(out, 0L)
 })

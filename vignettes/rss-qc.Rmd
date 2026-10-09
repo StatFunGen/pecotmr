@@ -57,14 +57,17 @@ make these objects. In this example the object is `GwasSumStats` object called
 ```{r run-qc, eval=FALSE}
 gws_qcd <- summaryStatsQc(
     gws,
-    useDbsnpRefCheck = FALSE, # opt-in to MungeSumstats dbSNP checks
-    removeIndels = FALSE,
-    removeStrandAmbiguous = TRUE,
-    mafCutoff = 0, # 0 = off; > 0 requires MAF column
-    infoCutoff = 0, # 0 = off; > 0 requires INFO column
-    nCutoff = 5,
+    sumstatsFilterArgs = SumstatsFilterParam(
+        removeIndels = FALSE,
+        removeStrandAmbiguous = TRUE,
+        infoCutoff = 0, # 0 = off; > 0 requires INFO column
+        nCutoff = 5
+    ),
+    panelFilterArgs = PanelFilterParam(
+        mafCutoff = 0 # 0 = off; > 0 requires MAF column
+    ),
     skipRegion = NULL, # e.g. MHC "chr6:25000000-35000000"
-    zMismatchQc = "slalom", # "none", "slalom", "dentist"
+    ldMismatchQcMethod = "slalom", # "none", "slalom", "dentist"
     alleleFlipKriging = FALSE, # opt-in pre-SLALOM LD-consistency check
     impute = FALSE, # RAISS imputation against ldSketch
     matchMinProp = 0
@@ -209,17 +212,17 @@ head(kr$diagnostics) # variant_id, z, predicted, residual, statistic,
 ```
 
 Kriging and SLALOM/DENTIST are complementary and can be combined: the kriging
-prefilter removes allele-flip outliers up front, then `zMismatchQc` handles the
-remaining LD-mismatch variants.
+prefilter removes allele-flip outliers up front, then `ldMismatchQcMethod`
+handles the remaining LD-mismatch variants.
 
 ## LD mismatch correction with SLALOM and DENTIST
 
-`summaryStatsQc(zMismatchQc = ...)` dispatches to one of two
+`summaryStatsQc(ldMismatchQcMethod = ...)` dispatches to one of two
 LD-mismatch detectors. They differ in how they decide whether a
 variant's z-score is inconsistent with the LD pattern around it.
 
 **SLALOM** (Kanai et al. 2022, the recommended default once you turn
-zMismatchQc on):
+ldMismatchQcMethod on):
 
 -  For each variant, compares its z-score against the *lead* variant's z-score
     scaled by their LD: a large `(z_i − r_{i,lead} · z_lead)` flags the variant
@@ -252,7 +255,7 @@ DENTIST's outlier rate is sensitive to its window size. On a typical
 | 20,000 | ∼0.6 % |
 
 For this reason SLALOM is the recommended default when you turn
-zMismatchQc on. Use DENTIST when you specifically want its iterative
+ldMismatchQcMethod on. Use DENTIST when you specifically want its iterative
 imputation output, or when you are reproducing a DENTIST-based
 pipeline.
 
@@ -260,24 +263,31 @@ pipeline.
 
 SLALOM only *flags* outliers; it does not impute them. To re-impute the
 flagged variants from the surviving ones, pair SLALOM with **RAISS** (a
-LD-regression imputer). `summaryStatsQc(zMismatchQc = "slalom", impute = TRUE)`
+LD-regression imputer).
+`summaryStatsQc(ldMismatchQcMethod = "slalom", impute = TRUE)`
 does this for you. The standalone version is exposed as `raiss()`; the
-full set of RAISS knobs lives under the `imputeOpts` argument to
-`summaryStatsQc()`:
+full set of RAISS knobs lives under the `imputeArgs` argument to
+`summaryStatsQc()`, built with `RaissParam()`:
 
 ```{r raiss-args, eval=FALSE}
 gws_qcd <- summaryStatsQc(
     gws,
-    zMismatchQc = "slalom",
+    ldMismatchQcMethod = "slalom",
     impute = TRUE,
-    imputeOpts = list(
-        rcond = 0.01,
+    imputeArgs = RaissParam(
         r2Threshold = 0.6,
         minimumLd = 5,
-        lamb = 0.01
+        lamb = 0.01,
+        # Bound what RAISS is asked to impute, and widen the window it reads.
+        mafCutoff = 0.01,
+        flank = 5e5
     )
 )
 ```
+
+QC always hands RAISS a genotype matrix, so it solves through the SVD path
+and takes `svdTol`; `raiss()`'s `rcond` belongs to its LD-matrix path and is
+deliberately not offered here.
 
 
 ## Next steps

@@ -11,7 +11,7 @@
 # Create a single .annot.gz file for one chromosome.
 # Real polyfun .annot.gz files have CHR, SNP, BP, CM + annotation columns only
 # (no MAF/A1/A2 -- those come from the .frq / PLINK files).
-.make_annot_gz <- function(dir, chrom, nSnps = 50) {
+.makeAnnotGz <- function(dir, chrom, nSnps = 50) {
     df <- data.frame(
         CHR = chrom,
         SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(nSnps)),
@@ -47,7 +47,7 @@
 # Create the three polyfun output files (.results, .log, .part_delete)
 # for a single-target run. Real polyfun output includes baseline categories
 # even in single-target mode, so we add 2 dummy baseline categories.
-.make_polyfun_single <- function(
+.makePolyfunSingle <- function(
     dir,
     prefix,
     target_name,
@@ -107,7 +107,7 @@
 }
 
 # Create polyfun output files for a joint run (target + baseline annotations)
-.make_polyfun_joint <- function(
+.makePolyfunJoint <- function(
     dir,
     prefix,
     target_names,
@@ -165,7 +165,7 @@
 }
 
 # Build a complete fixture directory for the full pipeline
-.make_sldsc_fixtures <- function(envir = parent.frame()) {
+.makeSldscFixtures <- function(envir = parent.frame()) {
     base_dir <- withr::local_tempdir(.local_envir = envir)
 
     anno_dir <- file.path(base_dir, "annot")
@@ -179,7 +179,7 @@
 
     # Annotation + freq files for 2 chromosomes
     for (chr in 1:2) {
-        .make_annot_gz(anno_dir, chr)
+        .makeAnnotGz(anno_dir, chr)
         .make_frq(frq_dir, chr, plinkName = plink_name)
     }
 
@@ -192,7 +192,7 @@
                 out_dir,
                 sprintf("%s_single_%s", trait, targets[i])
             )
-            .make_polyfun_single(
+            .makePolyfunSingle(
                 out_dir,
                 pref,
                 targets[i],
@@ -204,7 +204,7 @@
     # Joint runs: 1 per trait
     for (trait in c("traitX", "traitY")) {
         pref <- file.path(out_dir, sprintf("%s_joint", trait))
-        .make_polyfun_joint(out_dir, pref, targets, h2g = 0.3)
+        .makePolyfunJoint(out_dir, pref, targets, h2g = 0.3)
     }
 
     list(
@@ -294,6 +294,6 @@
         }
         tr
     }
-    traits <- setNames(lapply(traitNames, function(.) mkTrait()), traitNames)
+    traits <- setNames(map(traitNames, function(.) mkTrait()), traitNames)
     SldscData(annot = annot, frq = frq, traits = traits)
 }

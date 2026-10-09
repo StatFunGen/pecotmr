@@ -17,7 +17,7 @@ context("fineMappingPipeline")
         path = "/tmp/fmsketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -105,7 +105,7 @@ context("fineMappingPipeline")
 ) {
     gh <- .fmp_makeHandle()
     phen <- setNames(
-        lapply(contexts, function(.) .fmp_makeSe(traits = traits)),
+        map(contexts, function(.) .fmp_makeSe(traits = traits)),
         contexts
     )
     QtlDataset(
@@ -162,7 +162,7 @@ context("fineMappingPipeline")
 # only by the token so post-process knows what to wrap. The `userArgs`
 # parameter (per-method kwargs merged in by .fmMergeUserArgs) is accepted
 # but ignored — the mocks don't simulate downstream susie behaviour.
-.fmp_mockFitIndiv <- function() {
+.fmp_mockFitIndiv <- function(capture = NULL) {
     function(
         X,
         y,
@@ -171,6 +171,9 @@ context("fineMappingPipeline")
         coverage = 0.95,
         userArgs = NULL
     ) {
+        if (!is.null(capture)) {
+            capture$userArgs <- userArgs
+        }
         list(token = token, X_cols = ncol(X))
     }
 }
@@ -186,7 +189,8 @@ context("fineMappingPipeline")
         userArgs = NULL,
         rFinite = NULL,
         rMismatch = "none",
-        rssControl = NULL
+        rssControl = NULL,
+        ...
     ) {
         list(token = token, n_variants = length(z))
     }
@@ -207,12 +211,14 @@ context("fineMappingPipeline")
         userArgs = NULL,
         rFinite = NULL,
         rMismatch = "none",
-        rssControl = NULL
+        rssControl = NULL,
+        ...
     ) {
         if (!is.null(capture)) {
             capture$rFinite <- rFinite
             capture$rMismatch <- rMismatch
             capture$rssControl <- rssControl
+            capture$userArgs <- userArgs
         }
         fit <- list(token = token, n_variants = length(z), multiTag = "multi")
         fit$R_finite_diagnostics <- list(
@@ -275,16 +281,25 @@ context("fineMappingPipeline")
 # ===========================================================================
 
 test_that(".fmNormalizeMethods: rejects NULL / empty / non-character/list", {
-    expect_error(pecotmr:::.fmNormalizeMethods(NULL), "non-empty character")
     expect_error(
-        pecotmr:::.fmNormalizeMethods(character(0)),
+        pecotmr:::.fmNormalizeMethods(NULL, inputKind = "QtlDataset"),
         "non-empty character"
     )
-    expect_error(pecotmr:::.fmNormalizeMethods(42L), "character vector or")
+    expect_error(
+        pecotmr:::.fmNormalizeMethods(character(0), inputKind = "QtlDataset"),
+        "non-empty character"
+    )
+    expect_error(
+        pecotmr:::.fmNormalizeMethods(42L, inputKind = "QtlDataset"),
+        "must be a character vector, a named list"
+    )
 })
 
 test_that(".fmNormalizeMethods: char-vector form deduplicates + seeds susie L defaults", {
-    res <- pecotmr:::.fmNormalizeMethods(c("susie", "susie", "susieInf"))
+    res <- pecotmr:::.fmNormalizeMethods(
+        c("susie", "susie", "susieInf"),
+        inputKind = "QtlDataset"
+    )
     expect_equal(res$tokens, c("susie", "susieInf"))
     expect_equal(names(res$methodArgs), c("susie", "susieInf"))
     # SuSiE-family tokens get the pipeline L default (pecotmr owns these, not the
@@ -294,14 +309,23 @@ test_that(".fmNormalizeMethods: char-vector form deduplicates + seeds susie L de
     expect_equal(res$methodArgs$susieInf$L, 10L)
     # Non-susie-family tokens are left untouched.
     expect_length(
-        pecotmr:::.fmNormalizeMethods("mvsusie")$methodArgs$mvsusie,
+        pecotmr:::.fmNormalizeMethods(
+            "mvsusie",
+            inputKind = "QtlDataset"
+        )$methodArgs$mvsusie,
         0L
     )
 })
 
-test_that(".fmNormalizeMethods: named-list keeps kwargs + fills missing susie L", {
+test_that(".fmNormalizeMethods: a methods record keeps kwargs + fills susie L", {
     res <- pecotmr:::.fmNormalizeMethods(
-        list(susie = list(L = 1, refine = FALSE), susieInf = list())
+        FineMappingMethodsParam(
+            qtlDatasetMethods = list(
+                susie = list(L = 1, refine = FALSE),
+                susieInf = list()
+            )
+        ),
+        inputKind = "QtlDataset"
     )
     expect_equal(res$tokens, c("susie", "susieInf"))
     expect_equal(res$methodArgs$susie$L, 1) # explicit kwarg wins
@@ -311,22 +335,54 @@ test_that(".fmNormalizeMethods: named-list keeps kwargs + fills missing susie L"
 })
 
 test_that(".fmNormalizeMethods: L / Lgreedy args override the susie defaults", {
-    res <- pecotmr:::.fmNormalizeMethods(c("susie"), L = 30L, Lgreedy = 7L)
+    res <- pecotmr:::.fmNormalizeMethods(
+        c("susie"),
+        L = 30L,
+        Lgreedy = 7L,
+        inputKind = "QtlDataset"
+    )
     expect_equal(res$methodArgs$susie$L, 30L)
     expect_equal(res$methodArgs$susie$L_greedy, 7L)
 })
 
-test_that(".fmNormalizeMethods: list without names errors", {
+test_that(".fmNormalizeMethods: a bare named list is routed by input class", {
+    # It used to be refused, on the grounds that options must be checked
+    # against the engine receiving them. They still are -- but this call
+    # knows its input class, so the overrides go into that path's slot and
+    # are checked there. The constructor, which knows no path, still
+    # refuses a plain list under `methods`.
+    ind <- pecotmr:::.fmNormalizeMethods(
+        list(susie = list(L = 1)),
+        inputKind = "QtlDataset"
+    )
+    expect_equal(ind$tokens, "susie")
+    expect_equal(ind$methodArgs$susie$L, 1)
+    # And an argument belonging to the other path is caught, which neither
+    # the old refusal nor the union-validated constructor managed.
     expect_error(
-        pecotmr:::.fmNormalizeMethods(list(list(L = 1), list())),
-        "must be named"
+        pecotmr:::.fmNormalizeMethods(
+            list(susie = list(z = 1)),
+            inputKind = "QtlDataset"
+        ),
+        "unknown argument"
+    )
+    expect_equal(
+        pecotmr:::.fmNormalizeMethods(
+            list(susie = list(z = 1)),
+            inputKind = "QtlSumStats"
+        )$methodArgs$susie$z,
+        1
     )
 })
 
-test_that(".fmNormalizeMethods: list with non-list child errors", {
+test_that("FineMappingMethodsParam rejects unnamed and non-list entries", {
     expect_error(
-        pecotmr:::.fmNormalizeMethods(list(susie = 42, susieInf = list())),
-        "list of named kwargs"
+        FineMappingMethodsParam(qtlDatasetMethods = list(list(L = 1), list())),
+        "must be named for its method"
+    )
+    expect_error(
+        FineMappingMethodsParam(qtlDatasetMethods = list(susie = 42)),
+        "must be that method's Options record or a list of its arguments"
     )
 })
 
@@ -599,11 +655,11 @@ test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
     )
     expect_error(
         pecotmr:::.rbindFineMappingResult(fmr, "not_an_fmr"),
-        "expects two FineMappingResultBase inputs"
+        "Must inherit from class 'FineMappingResultBase'"
     )
     expect_error(
         pecotmr:::.rbindFineMappingResult("not_an_fmr", fmr),
-        "expects two FineMappingResultBase inputs"
+        "Must inherit from class 'FineMappingResultBase'"
     )
 })
 
@@ -900,24 +956,6 @@ test_that("fineMappingPipeline(QtlDataset): seed argument is accepted and runs",
     expect_equal(nrow(res), 1L)
 })
 
-test_that(".fmSerScreen: disables on 0, skips no-signal, keeps signal + adaptive", {
-    skip_if_not_installed("susieR")
-    set.seed(1)
-    n <- 150L
-    p <- 25L
-    X <- matrix(rnorm(n * p), n, p)
-    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
-    yNull <- rnorm(n) # no association
-    ySig <- X[, 1] * 2 + rnorm(n, sd = 0.3) # strong single effect at v1
-    fn <- function(...) suppressMessages(pecotmr:::.fmSerScreen(...))
-    expect_true(fn(X, yNull, 0)) # cutoff 0 disables -> always keep
-    expect_false(fn(X, yNull, 0.5)) # no PIP that high -> skip
-    expect_true(fn(X, ySig, 0.5)) # strong signal clears 0.5 -> keep
-    expect_true(fn(X, ySig, -1)) # adaptive 3/p: signal keeps
-    expect_false(fn(X, yNull, -1)) # adaptive 3/p: null skips
-    expect_true(fn(X, yNull, NA)) # malformed cutoff -> advisory keep
-})
-
 test_that(".fmTopPcScores: clean matrix -> samples x min(nPCs, traits) topPC scores", {
     set.seed(7)
     n <- 30L
@@ -954,7 +992,10 @@ test_that(".fmTopPcScores: clean matrix -> samples x min(nPCs, traits) topPC sco
     expect_false(any(c("s1", "s2") %in% rownames(scn)))
 })
 
-test_that("fineMappingPipeline(QtlDataset, usePCA): top-PC susie rows keyed topPC{i}", {
+test_that("fineMappingPipeline(
+    QtlDataset,
+    usePCA
+): top-PC susie rows keyed topPC{i}", {
     qd <- .fmp_makeQtlDataset(
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B", "ENSG_C")
@@ -982,54 +1023,6 @@ test_that("fineMappingPipeline(QtlDataset, usePCA): top-PC susie rows keyed topP
     expect_equal(sum(pcRows), 2L)
     expect_setequal(as.character(res$trait)[pcRows], c("topPC1", "topPC2"))
     expect_setequal(as.character(res$method)[pcRows], "susie")
-})
-
-test_that(".buildMvsusieReweightedPrior: canonical fallback when no usable fit", {
-    bp <- function(...) pecotmr:::.buildMvsusieReweightedPrior(...)
-    # No fit at all -> canonical prior, residualVariance NULL.
-    p1 <- bp(NULL, c("c1", "c2"))
-    expect_false(is.null(p1$priorVariance))
-    expect_null(p1$residualVariance)
-    # Fit with no data-driven matrices -> canonical prior, but V carried through.
-    p2 <- bp(list(dataDrivenPriorMatrices = NULL, V = diag(2)), c("c1", "c2"))
-    expect_equal(p2$residualVariance, diag(2))
-})
-
-test_that(".buildMvsusieReweightedPrior: reweights matrices by rescaleCovW0(w0)", {
-    ddpm <- list(
-        U = list(compA = diag(2), compB = diag(2) * 2),
-        w = c(compA = 0.5, compB = 0.5)
-    )
-    fit <- list(
-        dataDrivenPriorMatrices = ddpm,
-        w0 = c(compA_grid1 = 0.3, compB_grid1 = 0.7),
-        V = diag(2) * 3
-    )
-    captured <- NULL
-    # rescaleCovW0 collapses expanded w0 onto the original matrix names; mock it
-    # so the test asserts the wiring, not rescaleCovW0's internals.
-    local_mocked_bindings(
-        rescaleCovW0 = function(w0) c(compA = 0.4, compB = 0.6),
-        .package = "pecotmr"
-    )
-    local_mocked_bindings(
-        create_mixture_prior = function(...) {
-            captured <<- list(...)
-            "PRIOR"
-        },
-        .package = "mvsusieR"
-    )
-    res <- pecotmr:::.buildMvsusieReweightedPrior(
-        fit,
-        c("c1", "c2"),
-        weightsTol = 1e-8
-    )
-    expect_identical(res$priorVariance, "PRIOR")
-    expect_equal(res$residualVariance, diag(2) * 3)
-    expect_equal(captured$mixture_prior$weights, c(compA = 0.4, compB = 0.6))
-    expect_equal(names(captured$mixture_prior$matrices), c("compA", "compB"))
-    expect_equal(captured$include_indices, c("c1", "c2"))
-    expect_equal(captured$weights_tol, 1e-8)
 })
 
 test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
@@ -1093,34 +1086,6 @@ test_that(".fmLookupMrmashCv: finds the per-fold CV payload by (study, trait)", 
         entry = list(mkEntry(list(predictions = 1)))
     )
     expect_null(lk(tw2, "S", "G"))
-})
-
-test_that(".buildMvsusieReweightedPrior: overrideU swaps matrices, keeps fit w0/V", {
-    fit <- list(
-        dataDrivenPriorMatrices = list(U = list(K = diag(2)), w = c(K = 1)),
-        w0 = c(K_grid1 = 1),
-        V = diag(2) * 7
-    )
-    override <- list(U = list(K = diag(2) * 5))
-    captured <- NULL
-    local_mocked_bindings(
-        rescaleCovW0 = function(w0) c(K = 1),
-        .package = "pecotmr"
-    )
-    local_mocked_bindings(
-        create_mixture_prior = function(...) {
-            captured <<- list(...)
-            "PRIOR"
-        },
-        .package = "mvsusieR"
-    )
-    res <- pecotmr:::.buildMvsusieReweightedPrior(
-        fit,
-        c("c1", "c2"),
-        overrideU = override
-    )
-    expect_equal(captured$mixture_prior$matrices$K, diag(2) * 5) # the override U
-    expect_equal(res$residualVariance, diag(2) * 7) # the fit's own V
 })
 
 test_that(".fmBuildMvsusiePriorCv: mode B reweights each fold's own fit", {
@@ -1211,65 +1176,17 @@ test_that(".fmBuildMvsusiePriorCv: mode C reuses full-fit w0/V with per-fold U",
     expect_equal(captured[[2]]$mixture_prior$matrices$Z, diag(2) * 3) # fold 2's U
 })
 
-test_that(".fmSerScreen supports absZ / bf / logBf metrics and the legacy pip scalar", {
-    skip_if_not_installed("susieR")
-    set.seed(11)
-    n <- 200L
-    p <- 6L
-    X <- matrix(stats::rnorm(n * p), n, p)
-    yStrong <- X[, 2] * 0.6 + stats::rnorm(n) # column 2 strongly associated
-    yNull <- stats::rnorm(n) # no association
-
-    # absZ: max marginal |z| (no susie fit).
-    expect_true(pecotmr:::.fmSerScreen(
-        X,
-        yStrong,
-        list(metric = "absZ", cutoff = 3)
-    ))
-    expect_false(pecotmr:::.fmSerScreen(
-        X,
-        yNull,
-        list(metric = "absZ", cutoff = 3)
-    ))
-    # bf / logBf from the L = 1 susie lbf_variable.
-    expect_true(pecotmr:::.fmSerScreen(
-        X,
-        yStrong,
-        list(metric = "logBf", cutoff = 2)
-    ))
-    expect_false(pecotmr:::.fmSerScreen(
-        X,
-        yNull,
-        list(metric = "logBf", cutoff = 5)
-    ))
-    expect_true(pecotmr:::.fmSerScreen(
-        X,
-        yStrong,
-        list(metric = "bf", cutoff = 10)
-    ))
-    # Legacy scalar spec still screens on PIP; 0 disables (always keep).
-    expect_true(pecotmr:::.fmSerScreen(X, yStrong, 0.5))
-    expect_true(pecotmr:::.fmSerScreen(X, yNull, 0))
-    # Too few samples -> advisory fallback (keep by default).
-    expect_true(pecotmr:::.fmSerScreen(
-        X[1, , drop = FALSE],
-        yStrong[1],
-        list(metric = "absZ", cutoff = 3)
-    ))
-})
-
-test_that("fineMappingPipeline(QtlDataset): enabling two screen metrics errors", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-    # The resolver runs before any fitting, so this fails fast on the public call.
+test_that("enabling two screen metrics errors at the constructor", {
+    # It used to take a pipeline call to find this out; now the bundle
+    # refuses to be built, so the mistake is caught where it is written.
     expect_error(
-        fineMappingPipeline(
-            qd,
-            methods = "susie",
-            cisWindow = 1000L,
-            pipCutoffToSkip = 0.5,
-            absZCutoffToSkip = 5
-        ),
-        "one signal screen"
+        SignalScreenParam(pip = 0.5, absZ = 5),
+        "only one screening metric"
+    )
+    # 0 is the long-standing "off" spelling, so this is one screen, not two.
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(pip = 0, absZ = 5)),
+        list(metric = "absZ", cutoff = 5)
     )
 })
 
@@ -1296,7 +1213,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univ
             methods = "susie",
             cisWindow = 1000L,
             addSusieInf = FALSE,
-            pipCutoffToSkip = -1
+            signalScreenArgs = SignalScreenParam(pip = -1)
         )
     )
     # ENSG_A screened out, ENSG_B kept -> a single row.
@@ -1304,7 +1221,10 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univ
     expect_setequal(getTraits(res), "ENSG_B")
 })
 
-test_that("fineMappingPipeline(QtlDataset, cvFolds>1): attaches cvResult end to end", {
+test_that("fineMappingPipeline(
+    QtlDataset,
+    cvFolds>1
+): attaches cvResult end to end", {
     skip_if_not_installed("susieR")
     qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     # Real susie fits drive CV; the genotype extraction and the full-data
@@ -1322,7 +1242,7 @@ test_that("fineMappingPipeline(QtlDataset, cvFolds>1): attaches cvResult end to 
             methods = "susie",
             cisWindow = 1000L,
             addSusieInf = FALSE,
-            cvFolds = 3,
+            crossValidationArgs = CrossValidationParam(folds = 3),
             verbose = 0
         )
     )
@@ -1342,7 +1262,10 @@ test_that("fineMappingPipeline(QtlDataset, cvFolds>1): attaches cvResult end to 
     expect_false(anyNA(cv$prediction[["susie_predicted"]]))
 })
 
-test_that("fineMappingPipeline(QtlDataset, cvFolds=0): leaves cvResult NULL", {
+test_that("fineMappingPipeline(
+    QtlDataset,
+    crossValidation = CrossValidationParam(folds = 0)
+): leaves cvResult NULL", {
     qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
@@ -1391,7 +1314,7 @@ test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake metho
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     y <- X[, 2] * 1.5 + rnorm(n, sd = 0.5)
@@ -1405,7 +1328,10 @@ test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake metho
         coverage = 0.95,
         verbose = 0
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
     expect_setequal(colnames(cv$samplePartition), c("Sample", "Fold"))
     # Keyed by the TWAS snake method name (adapter methodKey base).
     expect_true("susie_predicted" %in% names(cv$prediction))
@@ -1434,7 +1360,7 @@ test_that(".fmWeightsCv reuses a supplied samplePartition verbatim", {
         p,
         dimnames = list(
             paste0("s", seq_len(n)),
-            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
         )
     )
     y <- X[, 1] + rnorm(n, sd = 0.5)
@@ -1634,7 +1560,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip drops null contexts 
             qd,
             methods = "mvsusie",
             cisWindow = 1000L,
-            pipCutoffToSkip = -1
+            signalScreenArgs = SignalScreenParam(pip = -1)
         )
     )
     # liver screened out -> the joint fit runs on brain + heart only.
@@ -1664,7 +1590,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips mvsusie when <
             methods = c("susie", "mvsusie"),
             cisWindow = 1000L,
             addSusieInf = FALSE,
-            pipCutoffToSkip = -1
+            signalScreenArgs = SignalScreenParam(pip = -1)
         )
     )
     # mvsusie skipped (only 1 context survives); susie still produced per-context.
@@ -1755,14 +1681,14 @@ test_that("fineMappingPipeline(QtlDataset): multi-trait auto-detection USES the 
             qd,
             methods = "mvsusie",
             cisWindow = 1000L,
-            twasWeights = tw
+            mrmashPrior = tw
         )
     )
     expect_equal(nrow(res), 2L)
     expect_true(sawMixturePrior) # data-driven prior built, not canonical
 })
 
-test_that("fineMappingPipeline(QtlDataset): multi-trait without twasWeights keeps the canonical prior", {
+test_that("fineMappingPipeline(QtlDataset): multi-trait without mrmashPrior keeps the canonical prior", {
     qd <- .fmp_makeQtlDataset(
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B")
@@ -2067,6 +1993,110 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across 
     expect_null(getLdSketch(res))
 })
 
+test_that("fineMappingPipeline(MultiStudyQtlDataset): per-study options are not dropped", {
+    # fitRetention was declared on the multi-study method and passed nowhere;
+    # genotypeFilter / usePCA / nPCs were reachable only through `...`.
+    capX <- new.env(parent = emptyenv())
+    capSs <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .fmPerStudy = function(qd, cfg) {
+            capX$cfg <- cfg
+            NULL
+        },
+        .fmSumStats = function(ss, cfg) {
+            capSs$cfg <- cfg
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        suppressMessages(fineMappingPipeline(
+            MultiStudyQtlDataset(
+                qtlDatasets = list(
+                    study1 = .fmp_makeQtlDataset(
+                        contexts = "brain",
+                        traits = "ENSG_A"
+                    )
+                ),
+                sumStats = .fmp_makeQtlSumStats()
+            ),
+            methods = "susie",
+            cisWindow = 1000L,
+            credibleSetArgs = CredibleSetParam(coverage = 0.9),
+            fitRetention = "full",
+            genotypeFilterArgs = GenotypeFilterParam(mafCutoff = 0.05),
+            usePCA = TRUE,
+            nPCs = 3L
+        )),
+        "no entries produced"
+    )
+    expect_equal(capX$cfg$fitRetention, "full")
+    expect_equal(capX$cfg$genotypeFilterArgs$mafCutoff, 0.05)
+    expect_true(capX$cfg$usePCA)
+    expect_equal(capX$cfg$nPCs, 3L)
+    # The embedded QtlSumStats used to be post-processed at the default
+    # coverage while its sibling QtlDatasets used the caller's.
+    expect_equal(capSs$cfg$credibleSetArgs$coverage, 0.9)
+    expect_equal(capSs$cfg$fitRetention, "full")
+})
+
+test_that("fineMappingPipeline(MultiStudyQtlDataset): a misspelled option errors", {
+    # The method no longer takes `...`, so a typo cannot be swallowed.
+    expect_error(
+        fineMappingPipeline(
+            MultiStudyQtlDataset(
+                qtlDatasets = list(
+                    study1 = .fmp_makeQtlDataset(
+                        contexts = "brain",
+                        traits = "ENSG_A"
+                    )
+                ),
+                sumStats = .fmp_makeQtlSumStats()
+            ),
+            methods = "susie",
+            credibelSet = CredibleSetParam()
+        ),
+        "unused argument"
+    )
+})
+
+test_that("fineMappingPipeline(MSQD): L / Lgreedy reach the per-study fit", {
+    # One individual-level study and one embedded QtlSumStats, so both
+    # per-study workers (.fmPerStudy and .fmSumStats) are exercised.
+    mt <- MultiStudyQtlDataset(
+        qtlDatasets = list(
+            study1 = .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+        ),
+        sumStats = .fmp_makeQtlSumStats()
+    )
+    capX <- new.env(parent = emptyenv())
+    capRss <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieIndiv = .fmp_mockFitIndiv(capture = capX),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(capture = capRss),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    suppressMessages(
+        fineMappingPipeline(
+            mt,
+            methods = "susie",
+            cisWindow = 1000L,
+            addSusieInf = FALSE,
+            credibleSetArgs = CredibleSetParam(L = 4L, Lgreedy = 2L)
+        )
+    )
+    # The multi-study method had no L / Lgreedy formals of its own before the
+    # bundle: they rode `...` into the per-study recursion, so a misspelling
+    # was silently discarded and .fmMsResolveTokens -- which seeds the joint
+    # phase -- never saw them at all. They are checked formals instead.
+    expect_equal(capX$userArgs$L, 4L)
+    expect_equal(capX$userArgs$L_greedy, 2L)
+    expect_equal(capRss$userArgs$L, 4L)
+    expect_equal(capRss$userArgs$L_greedy, 2L)
+})
+
 test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges per region in each study", {
     qd1 <- QtlDataset(
         study = "s1",
@@ -2156,7 +2186,11 @@ test_that("fineMappingPipeline(QtlSumStats): runs end-to-end with mocked RSS fit
         .package = "pecotmr"
     )
     res <- suppressMessages(
-        fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            ss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 1L)
@@ -2191,7 +2225,11 @@ test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fi
         .package = "pecotmr"
     )
     res <- suppressMessages(
-        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_s4_class(res, "GwasFineMappingResult")
     expect_equal(nrow(res), 1L)
@@ -2265,7 +2303,11 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
         .package = "pecotmr"
     )
     suppressMessages(
-        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     # per-variant N forwarded (all 5 distinct), not the scalar median, not 1.
     expect_false(identical(captured$n, "UNSET"))
@@ -2297,7 +2339,11 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
 test_that("fineMappingPipeline(GwasSumStats): a PIP-screened region yields an empty result, not an error", {
     gss <- .fmp_makeScreenedGwas()
     expect_message(
-        res <- fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE),
+        res <- fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        ),
         "region skipped"
     )
     expect_s4_class(res, "GwasFineMappingResult")
@@ -2324,7 +2370,11 @@ test_that("fineMappingPipeline(GwasSumStats): mixed screened + real keeps only t
         .package = "pecotmr"
     )
     res <- suppressMessages(
-        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_equal(unique(as.character(res$study)), "Greal") # screened study absent
     expect_gt(nrow(res), 0L)
@@ -2339,7 +2389,11 @@ test_that("fineMappingPipeline(GwasSumStats): a 0-variant entry is skipped even 
         qcInfo = list(step1 = "ok")
     )
     res <- suppressMessages(
-        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_s4_class(res, "GwasFineMappingResult")
     expect_equal(nrow(res), 0L)
@@ -2361,7 +2415,11 @@ test_that("fineMappingPipeline(QtlSumStats): a screened trait is skipped gracefu
         )
     )
     res <- suppressMessages(
-        fineMappingPipeline(qss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            qss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 0L)
@@ -2382,8 +2440,10 @@ test_that("fineMappingPipeline(GwasSumStats): serFallback + reliable R keeps mul
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb"
+            )
         )
     )
     sf <- getSusieFit(res, study = "G1", method = "susie")
@@ -2408,8 +2468,10 @@ test_that("fineMappingPipeline(GwasSumStats): serFallback + unreliable R falls b
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb"
+            )
         )
     )
     sf <- getSusieFit(res, study = "G1", method = "susie")
@@ -2431,7 +2493,11 @@ test_that("fineMappingPipeline(GwasSumStats): serFallback=FALSE default is behav
         .package = "pecotmr"
     )
     res <- suppressMessages(
-        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     sf <- getSusieFit(res, study = "G1", method = "susie")
     # No fallback even though flag=TRUE; multi-effect result kept.
@@ -2457,8 +2523,10 @@ test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFini
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb"
+            )
         )
     )
     # rFinite defaulted to the LD-panel sample size (40 in .fmp_makeHandle).
@@ -2478,9 +2546,11 @@ test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFini
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rFinite = 12345,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rFinite = 12345,
+                rMismatch = "eb"
+            )
         )
     )
     expect_equal(cap2$rFinite, 12345)
@@ -2498,8 +2568,10 @@ test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFini
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb_mix"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb_mix"
+            )
         )
     )
     expect_equal(cap3$rMismatch, "eb_mix")
@@ -2517,7 +2589,12 @@ test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFini
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            rssControl = list(check_prior = TRUE, mismatch_estimator = "map")
+            rssArgs = SusieRssParam(
+                control = SusieRssControlOptions(
+                    check_prior = TRUE,
+                    mismatch_estimator = "map"
+                )
+            )
         )
     )
     expect_equal(
@@ -2533,7 +2610,11 @@ test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFini
         .package = "pecotmr"
     )
     suppressMessages(
-        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            gss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_null(cap5$rssControl)
 })
@@ -2551,14 +2632,59 @@ test_that("fineMappingPipeline(GwasSumStats): keepFullFit='all' retains fit on n
             gss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb",
-            keepFullFit = "all"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb",
+                keepFullFit = "all"
+            )
         )
     )
     sf <- getSusieFit(res, study = "G1", method = "susie")
     expect_false(is.null(sf$multiEffectFit))
     expect_equal(sf$multiEffectFit$multiTag, "multi")
+})
+
+test_that("fineMappingPipeline(QtlSumStats): top-level L / Lgreedy reach the susie fit", {
+    ss <- .fmp_makeQtlSumStats()
+    cap <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(capture = cap),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    suppressMessages(
+        fineMappingPipeline(
+            ss,
+            methods = "susie",
+            addSusieInf = FALSE,
+            credibleSetArgs = CredibleSetParam(L = 4L, Lgreedy = 2L)
+        )
+    )
+    # QtlDataset and GwasSumStats have always taken these; QtlSumStats did not,
+    # so its susie fits were pinned to the L = 10 default.
+    expect_equal(cap$userArgs$L, 4L)
+    expect_equal(cap$userArgs$L_greedy, 2L)
+})
+
+test_that("fineMappingPipeline(QtlSumStats): per-method L beats the top-level L", {
+    ss <- .fmp_makeQtlSumStats()
+    cap <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(capture = cap),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    suppressMessages(
+        fineMappingPipeline(
+            ss,
+            methods = list(susie = list(L = 7L)),
+            addSusieInf = FALSE,
+            credibleSetArgs = CredibleSetParam(L = 4L)
+        )
+    )
+    expect_equal(cap$userArgs$L, 7L)
 })
 
 test_that("fineMappingPipeline(QtlSumStats): serFallback=FALSE default leaves the QTL path unchanged", {
@@ -2571,7 +2697,11 @@ test_that("fineMappingPipeline(QtlSumStats): serFallback=FALSE default leaves th
         .package = "pecotmr"
     )
     res <- suppressMessages(
-        fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE)
+        fineMappingPipeline(
+            ss,
+            methods = "susie",
+            addSusieInf = FALSE
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     # With serFallback off (the default), the shared block never fires the
@@ -2604,8 +2734,10 @@ test_that("fineMappingPipeline(QtlSumStats): serFallback + reliable R keeps mult
             ss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb"
+            )
         )
     )
     sf <- getSusieFit(
@@ -2636,8 +2768,10 @@ test_that("fineMappingPipeline(QtlSumStats): serFallback + unreliable R falls ba
             ss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb"
+            )
         )
     )
     sf <- getSusieFit(
@@ -2670,8 +2804,10 @@ test_that("fineMappingPipeline(QtlSumStats): rFinite/rMismatch forwarded; rFinit
             ss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb"
+            )
         )
     )
     # rFinite defaulted to the LD-panel sample size (40 in .fmp_makeHandle).
@@ -2691,9 +2827,11 @@ test_that("fineMappingPipeline(QtlSumStats): rFinite/rMismatch forwarded; rFinit
             ss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rFinite = 12345,
-            rMismatch = "eb"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rFinite = 12345,
+                rMismatch = "eb"
+            )
         )
     )
     expect_equal(cap2$rFinite, 12345)
@@ -2712,9 +2850,11 @@ test_that("fineMappingPipeline(QtlSumStats): keepFullFit='all' retains fit on no
             ss,
             methods = "susie",
             addSusieInf = FALSE,
-            serFallback = TRUE,
-            rMismatch = "eb",
-            keepFullFit = "all"
+            rssArgs = SusieRssParam(
+                serFallback = TRUE,
+                rMismatch = "eb",
+                keepFullFit = "all"
+            )
         )
     )
     sf <- getSusieFit(
@@ -2785,30 +2925,13 @@ test_that("ser is sumstat-only: rejected on QtlDataset, allowed on all sumstat k
     ))
 })
 
-test_that(".fmFitSusieSer calls susieR::susie_ser with z + n and no R / L", {
-    captured <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        susie_ser = function(z, n, coverage = 0.95, ...) {
-            captured$args <- list(
-                z = z,
-                n = n,
-                coverage = coverage,
-                dots = list(...)
-            )
-            list(pip = rep(0.1, length(z)))
-        },
-        .package = "susieR"
-    )
-    fit <- pecotmr:::.fmFitSusieSer(z = rnorm(5), n = 1000)
-    expect_equal(captured$args$n, 1000)
-    expect_length(captured$args$z, 5)
-    expect_null(captured$args$dots$R)
-    expect_null(captured$args$dots$L)
-    expect_true("susieRss" %in% class(fit))
-})
-
 test_that(".fmNormalizeMethods does not inject L / L_greedy for ser", {
-    norm <- pecotmr:::.fmNormalizeMethods("ser", L = 20L, Lgreedy = 5L)
+    norm <- pecotmr:::.fmNormalizeMethods(
+        "ser",
+        L = 20L,
+        Lgreedy = 5L,
+        inputKind = "QtlDataset"
+    )
     expect_null(norm$methodArgs[["ser"]][["L"]])
     expect_null(norm$methodArgs[["ser"]][["L_greedy"]])
 })
@@ -2831,162 +2954,6 @@ test_that("fineMappingPipeline(ANY): unsupported input class errors", {
 # ===========================================================================
 # .fmFitSusieIndiv / .fmFitSusieRss — chained-init and branch coverage
 # ===========================================================================
-
-# Capture the args passed to susieR::susie / susie_rss by mocking each to
-# stash its first invocation's args into a global. The captured args let
-# us assert which code path was taken.
-.fmp_capturingSusie <- function(captured) {
-    function(X, y, ...) {
-        captured$lastArgs <<- list(X = X, y = y, ...)
-        # Return a minimal "fit" shape downstream cares about; .setFinemappingFitClass
-        # only attaches an S3 class, so any list works.
-        list(token = "test", V = 0.1)
-    }
-}
-
-.fmp_capturingSusieRss <- function(captured) {
-    function(z, R, n, ...) {
-        captured$lastArgs <<- list(z = z, R = R, n = n, ...)
-        list(token = "test_rss", V = 0.1)
-    }
-}
-
-test_that(".fmFitSusieIndiv: susieInf branch passes convergence_method='pip', refine=FALSE, model_init=NULL", {
-    captured <- new.env(parent = emptyenv())
-    X <- matrix(rnorm(20), 10, 2)
-    y <- rnorm(10)
-    local_mocked_bindings(
-        susie = .fmp_capturingSusie(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieIndiv(X, y, "susieInf")
-    expect_equal(captured$lastArgs$convergence_method, "pip")
-    expect_false(captured$lastArgs$refine)
-    expect_null(captured$lastArgs$model_init)
-    expect_equal(captured$lastArgs$unmappable_effects, "inf")
-})
-
-test_that(".fmFitSusieIndiv: chained branch (chainFromInf) propagates susieInf fit as model_init", {
-    captured <- new.env(parent = emptyenv())
-    X <- matrix(rnorm(20), 10, 2)
-    y <- rnorm(10)
-    # Build a stub susieInf fit with a V slot so prepareSusieFromInfArgs can read L.
-    infFit <- list(V = c(0.1, 0.2))
-    local_mocked_bindings(
-        susie = .fmp_capturingSusie(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieIndiv(X, y, "susie", chainFromInf = infFit)
-    # prepareSusieFromInfArgs writes the susieInf fit into model_init and
-    # sets unmappable_effects to "none" for the `susie` token.
-    expect_identical(captured$lastArgs$model_init, infFit)
-    expect_equal(captured$lastArgs$unmappable_effects, "none")
-})
-
-test_that(".fmFitSusieIndiv: chained susieAsh branch sets unmappable_effects='ash'", {
-    captured <- new.env(parent = emptyenv())
-    X <- matrix(rnorm(20), 10, 2)
-    y <- rnorm(10)
-    infFit <- list(V = c(0.1, 0.2))
-    local_mocked_bindings(
-        susie = .fmp_capturingSusie(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieIndiv(X, y, "susieAsh", chainFromInf = infFit)
-    expect_equal(captured$lastArgs$unmappable_effects, "ash")
-    expect_identical(captured$lastArgs$model_init, infFit)
-})
-
-test_that(".fmFitSusieIndiv: unchained susieAsh branch sets convergence_method='pip'", {
-    captured <- new.env(parent = emptyenv())
-    X <- matrix(rnorm(20), 10, 2)
-    y <- rnorm(10)
-    local_mocked_bindings(
-        susie = .fmp_capturingSusie(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieIndiv(X, y, "susieAsh")
-    expect_equal(captured$lastArgs$convergence_method, "pip")
-    expect_equal(captured$lastArgs$unmappable_effects, "ash")
-})
-
-test_that(".fmFitSusieIndiv: rejects non-SuSiE-family token", {
-    expect_error(
-        pecotmr:::.fmFitSusieIndiv(matrix(0, 2, 2), c(0, 0), "mvsusie"),
-        "not a SuSiE-family method"
-    )
-    expect_error(
-        pecotmr:::.fmFitSusieIndiv(matrix(0, 2, 2), c(0, 0), "ghost"),
-        "not a SuSiE-family method"
-    )
-})
-
-test_that(".fmFitSusieRss: susieInf branch passes convergence_method='pip', refine=FALSE, model_init=NULL", {
-    captured <- new.env(parent = emptyenv())
-    z <- rnorm(3)
-    R <- diag(3)
-    n <- 1000
-    local_mocked_bindings(
-        susie_rss = .fmp_capturingSusieRss(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieRss(z, R, n, "susieInf")
-    expect_equal(captured$lastArgs$convergence_method, "pip")
-    expect_false(captured$lastArgs$refine)
-    expect_null(captured$lastArgs$model_init)
-    expect_equal(captured$lastArgs$unmappable_effects, "inf")
-})
-
-test_that(".fmFitSusieRss: chained branch (chainFromInf) propagates susieInf fit as model_init", {
-    captured <- new.env(parent = emptyenv())
-    z <- rnorm(3)
-    R <- diag(3)
-    n <- 1000
-    infFit <- list(V = c(0.1, 0.2))
-    local_mocked_bindings(
-        susie_rss = .fmp_capturingSusieRss(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieRss(z, R, n, "susie", chainFromInf = infFit)
-    expect_identical(captured$lastArgs$model_init, infFit)
-    expect_equal(captured$lastArgs$unmappable_effects, "none")
-})
-
-test_that(".fmFitSusieRss: chained susieAsh branch sets unmappable_effects='ash'", {
-    captured <- new.env(parent = emptyenv())
-    z <- rnorm(3)
-    R <- diag(3)
-    n <- 1000
-    infFit <- list(V = c(0.1, 0.2))
-    local_mocked_bindings(
-        susie_rss = .fmp_capturingSusieRss(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieRss(z, R, n, "susieAsh", chainFromInf = infFit)
-    expect_equal(captured$lastArgs$unmappable_effects, "ash")
-    expect_identical(captured$lastArgs$model_init, infFit)
-})
-
-test_that(".fmFitSusieRss: unchained susieAsh branch sets convergence_method='pip'", {
-    captured <- new.env(parent = emptyenv())
-    z <- rnorm(3)
-    R <- diag(3)
-    n <- 1000
-    local_mocked_bindings(
-        susie_rss = .fmp_capturingSusieRss(captured),
-        .package = "susieR"
-    )
-    pecotmr:::.fmFitSusieRss(z, R, n, "susieAsh")
-    expect_equal(captured$lastArgs$convergence_method, "pip")
-    expect_equal(captured$lastArgs$unmappable_effects, "ash")
-})
-
-test_that(".fmFitSusieRss: rejects non-SuSiE-family token", {
-    expect_error(
-        pecotmr:::.fmFitSusieRss(c(0, 0), diag(2), 1000, "mvsusie"),
-        "not a SuSiE-family method"
-    )
-})
 
 # ===========================================================================
 # QtlSumStats: empty selection, mvsusie single-context rejection, cache hits
@@ -3016,7 +2983,10 @@ test_that("fineMappingPipeline(QtlSumStats): traitId filter that selects no rows
     )
 })
 
-test_that("fineMappingPipeline(QtlSumStats): mvsusie rejected when every (study, trait) has only one context", {
+test_that("fineMappingPipeline(
+    QtlSumStats): mvsusie rejected when every (study,
+    trait
+) has only one context", {
     # Build a single-context-per-(study, trait) collection. Mvsusie requires
     # at least two contexts per (study, trait) group.
     ss <- QtlSumStats(
@@ -3034,7 +3004,10 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie rejected when every (study,
     )
 })
 
-test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-detection fits cross-context per (study, trait)", {
+test_that("fineMappingPipeline(
+    QtlSumStats): mvsusie auto-detection fits cross-context per (study,
+    trait
+)", {
     # Multi-context (c1, c2) single-trait collection: mvsusie without an explicit
     # jointSpecification routes through the joint engine -> per-context rows that
     # share the cross-context RSS fit, each tagged with the co-fit membership.
@@ -3307,48 +3280,15 @@ test_that("resolveLdInput does not error when nSample not needed", {
     expect_null(result$nSample)
 })
 # ===========================================================================
-# Residualization flag propagation
+# Residualization settings propagation
 # ===========================================================================
-# .resPickFlags() walks up the call stack and harvests the four
-# residualization flags from whichever frame defines them. The
-# fineMappingPipeline / twasWeightsPipeline setMethod signatures
-# define these flags so they reach `getResidualized{Phenotypes,
-# Genotypes}` via the .fmResid* wrappers without per-call-site
-# threading.
+# These used to be four loose flags scraped off the call stack by
+# .resPickFlags() (sys.frames() + get(envir = )), then four translated
+# argument names via .resArgsFor(). The accessors now take the bundle
+# itself, so there is no translation left to test -- only that the bundle
+# travels intact.
 
-test_that(".resPickFlags picks up flags from the enclosing frame", {
-    outerFn <- function() {
-        # Mirror the QtlDataset setMethod's residualization signature.
-        residualizePhenotypeCovariates <- FALSE
-        residualizeGenotypeCovariates <- TRUE
-        phenotypeCovariatesToResidualize <- c("age", "sex")
-        genotypeCovariatesToResidualize <- NULL
-        innerFn <- function() {
-            pecotmr:::.resPickFlags()
-        }
-        innerFn()
-    }
-    flags <- outerFn()
-    expect_false(flags$residualizePhenotypeCovariates)
-    expect_true(flags$residualizeGenotypeCovariates)
-    expect_equal(flags$phenotypeCovariatesToResidualize, c("age", "sex"))
-    expect_null(flags$genotypeCovariatesToResidualize)
-})
-
-test_that(".resPickFlags returns an empty list when nothing is in scope", {
-    flags <- pecotmr:::.resPickFlags()
-    # Top-level call should not pick up any of the flags (the names are
-    # not defined here).
-    expect_false(any(
-        c(
-            "residualizePhenotypeCovariates",
-            "residualizeGenotypeCovariates"
-        ) %in%
-            names(flags)
-    ))
-})
-
-test_that(".fmResidGeno / .fmResidPheno forward picked-up flags to the real accessors", {
+test_that(".fmResidGeno / .fmResidPheno forward the bundle to the accessors", {
     capturedGeno <- NULL
     capturedPheno <- NULL
     fakeGeno <- function(x, ...) {
@@ -3364,23 +3304,37 @@ test_that(".fmResidGeno / .fmResidPheno forward picked-up flags to the real acce
         getResidualizedPhenotypes = fakePheno,
         .package = "pecotmr"
     )
-
-    # Emulate the setMethod frame: define the four flags then call the
-    # wrappers.
-    outerFn <- function() {
-        residualizePhenotypeCovariates <- FALSE
-        residualizeGenotypeCovariates <- TRUE
-        phenotypeCovariatesToResidualize <- "age"
-        genotypeCovariatesToResidualize <- NULL
-        pecotmr:::.fmResidGeno(NULL, contexts = "c1")
-        pecotmr:::.fmResidPheno(NULL, contexts = "c1")
+    res <- ResidualizationParam(
+        phenotypeCovariates = "age",
+        residualizePhenotype = FALSE,
+        residualizeGenotype = TRUE
+    )
+    # Passed, not scraped: the settings reach the accessors because the
+    # caller hands them over, with no enclosing frame involved.
+    pecotmr:::.fmResidGeno(NULL, contexts = "c1", residualizationArgs = res)
+    pecotmr:::.fmResidPheno(NULL, contexts = "c1", residualizationArgs = res)
+    for (captured in list(capturedGeno, capturedPheno)) {
+        got <- captured$residualizationArgs
+        expect_s4_class(got, "ResidualizationParam")
+        expect_equal(got$phenotypeCovariates, "age")
+        expect_false(got$residualizePhenotype)
+        expect_true(got$residualizeGenotype)
     }
-    outerFn()
-    expect_false(capturedGeno$residualizePhenotypeCovariates)
-    expect_true(capturedGeno$residualizeGenotypeCovariates)
-    expect_equal(capturedGeno$phenotypeCovariatesToResidualize, "age")
-    expect_false(capturedPheno$residualizePhenotypeCovariates)
-    expect_true(capturedPheno$residualizeGenotypeCovariates)
+})
+
+test_that("an absent bundle becomes the constructor's own defaults", {
+    captured <- NULL
+    local_mocked_bindings(
+        getResidualizedPhenotypes = function(x, ...) {
+            captured <<- list(...)
+            matrix(0, 0, 0)
+        },
+        .package = "pecotmr"
+    )
+    pecotmr:::.fmResidPheno(NULL, contexts = "c1", residualizationArgs = NULL)
+    expect_s4_class(captured$residualizationArgs, "ResidualizationParam")
+    # Nothing pinned: every flag is unset, which the accessors read as "on".
+    expect_length(captured$residualizationArgs, 0L)
 })
 
 # ===========================================================================
@@ -3407,7 +3361,7 @@ test_that(".fmResidGeno / .fmResidPheno forward picked-up flags to the real acce
 #   * input-file validation; empty sumstats branches; pip_cutoff_to_skip
 #     branches; full QC + imputation + fine-mapping; method-name
 #     conventions (NO_QC / SLALOM / DENTIST / RAISS); outlierNumber
-#     plumbing; finemappingMethod = NULL skip; zMismatchQc = NULL;
+#     plumbing; finemappingMethod = NULL skip; ldMismatchQcMethod = NULL;
 #     impute = FALSE; diagnostics branches (BCR + SER re-analysis);
 #     finemappingOpts passthrough; mafCutoff (af single source);
 #     finemapping-defaults passthrough; X-as-LD genotype path;
@@ -3710,24 +3664,6 @@ test_that(".fmCacheLookupGwas: NULL / non-GwasFineMappingResult -> NULL", {
     expect_null(pecotmr:::.fmCacheLookupGwas(fmr, "S", "susie", "chr1:1-100"))
 })
 
-test_that(".buildMvsusieReweightedPrior: empty reweighted w0 -> canonical(V)", {
-    local_mocked_bindings(
-        rescaleCovW0 = function(w0) c(zzz = 1),
-        .package = "pecotmr"
-    )
-    local_mocked_bindings(
-        create_mixture_prior = function(...) "PV",
-        .package = "mvsusieR"
-    )
-    fp <- list(
-        dataDrivenPriorMatrices = list(U = list(compA = diag(2))),
-        w0 = c(compA_grid1 = 1),
-        V = diag(2)
-    )
-    res <- pecotmr:::.buildMvsusieReweightedPrior(fp, c("c1", "c2"))
-    expect_equal(res$residualVariance, diag(2)) # w0 names disjoint from U (749)
-})
-
 test_that(".fmBuildMvsusiePriorCv: NULL CV -> NULL; NULL fold fits are skipped", {
     expect_null(pecotmr:::.fmBuildMvsusiePriorCv(NULL, NULL, c("c1", "c2")))
     local_mocked_bindings(
@@ -3767,31 +3703,6 @@ test_that(".fmTopPcScores: PCA scores for multi-trait Y; degenerate inputs -> NU
     sc <- pecotmr:::.fmTopPcScores(Y, 2L)
     expect_equal(dim(sc), c(10L, 2L))
     expect_equal(colnames(sc), c("topPC1", "topPC2"))
-})
-
-test_that(".fmSerScreen / .fmScreenActive / .fmSerScreenColumns", {
-    set.seed(2)
-    X <- matrix(
-        rnorm(40),
-        20,
-        2,
-        dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
-    )
-    y <- rnorm(20)
-    expect_true(pecotmr:::.fmSerScreen(X, y, 0)) # disabled
-    expect_true(pecotmr:::.fmSerScreen(X, c(1, rep(NA, 19)), 0.5)) # < 2 obs (880)
-    expect_type(pecotmr:::.fmSerScreen(X, y, 0.5), "logical") # real susie fit
-    local_mocked_bindings(
-        susie = function(...) stop("boom"),
-        .package = "susieR"
-    )
-    expect_true(pecotmr:::.fmSerScreen(X, y, 0.5)) # fit fails -> keep (886)
-    expect_false(pecotmr:::.fmScreenActive(0))
-    expect_true(pecotmr:::.fmScreenActive(0.5))
-    expect_length(
-        pecotmr:::.fmSerScreenColumns(X, matrix(rnorm(40), 20, 2), 0),
-        2L
-    )
 })
 
 test_that(".fmMergeEntries: empty -> NULL; merges per-region entries + relabels CS", {
@@ -3929,6 +3840,44 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie-only jointSpec with no fits
     )
 }
 
+test_that("MultiStudyQtlDataset forwards the mvsusie prior settings", {
+    # `mrmashPrior` and `dataDrivenPriorWeightsCutoff` configure the mvsusie
+    # data-driven reweighted prior. They used to reach ONLY jointCfg (the
+    # cross-study joint phase); the per-study config omitted them, so every
+    # per-study recursion silently refit mr.mash and used the 1e-10 cutoff.
+    mt <- .fmp_makeMultiStudy()
+    seen <- new.env(parent = emptyenv())
+    seen$perStudy <- NULL
+    seen$sumStats <- NULL
+    local_mocked_bindings(
+        .fmPerStudy = function(qd, cfg) {
+            seen$perStudy <- cfg
+            NULL
+        },
+        .fmSumStats = function(ss, cfg) {
+            seen$sumStats <- cfg
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    # Both workers are stubbed, so the driver rbinds nothing -- the configs
+    # they were handed are what this test is about.
+    try(
+        suppressMessages(suppressWarnings(fineMappingPipeline(
+            mt,
+            methods = "susie",
+            verbose = 0,
+            mrmashPrior = "cache-sentinel",
+            dataDrivenPriorWeightsCutoff = 0.5
+        ))),
+        silent = TRUE
+    )
+    for (cfg in list(seen$perStudy, seen$sumStats)) {
+        expect_equal(cfg$mrmashPrior, "cache-sentinel")
+        expect_equal(cfg$dataDrivenPriorWeightsCutoff, 0.5)
+    }
+})
+
 test_that("fineMappingPipeline(MultiStudyQtlDataset): region + cisWindow is rejected", {
     expect_error(
         fineMappingPipeline(
@@ -4007,7 +3956,10 @@ test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitte
         rbinom(n * p, 2, 0.4),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
+        )
     )
     Y <- matrix(rnorm(n * R), n, R, dimnames = list(rownames(X), c("c1", "c2")))
     cv <- pecotmr:::.fmWeightsCv(
@@ -4019,7 +3971,10 @@ test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitte
         coverage = 0.95,
         verbose = 0
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
     expect_true("mvsusie_performance" %in% names(cv$performance))
     expect_equal(dim(cv$prediction[["mvsusie_predicted"]]), c(n, R))
 })
@@ -4044,7 +3999,10 @@ test_that(".fmFoldWeights covers the fSuSiE branch (mocked fitter)", {
         rbinom(n * p, 2, 0.4),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * seq_len(p))
+        )
     )
     Y <- matrix(rnorm(n * 4L), n, 4L, dimnames = list(rownames(X), NULL))
     W <- pecotmr:::.fmFoldWeights(
@@ -4057,51 +4015,6 @@ test_that(".fmFoldWeights covers the fSuSiE branch (mocked fitter)", {
     )
     expect_true(is.matrix(W))
     expect_equal(rownames(W), colnames(X))
-})
-
-test_that(".fmFitXBlock fits the susieInf indiv chain + cross-validates (mocked)", {
-    local_mocked_bindings(
-        .fmFitSusieIndiv = function(...) list(),
-        .fmPostprocessOne = function(fit, method, dataX, dataY, ...) {
-            fineMappingRow(
-                colnames(dataX),
-                list(),
-                data.frame(variant_id = colnames(dataX), pip = 0.5)
-            )
-        },
-        .fmFoldWeights = function(token, Xtr, Ytr, ...) {
-            matrix(0.01, ncol(Xtr), 1L, dimnames = list(colnames(Xtr), NULL))
-        },
-        .package = "pecotmr"
-    )
-    set.seed(1)
-    X <- matrix(
-        rbinom(60, 2, 0.4),
-        20,
-        3,
-        dimnames = list(
-            paste0("s", 1:20),
-            c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
-        )
-    )
-    y <- rnorm(20)
-    out <- pecotmr:::.fmFitXBlock(
-        X,
-        y,
-        toRun = "susieInf",
-        addSusieInf = FALSE,
-        coverage = 0.95,
-        secondaryCoverage = 0.7,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5,
-        methodArgs = list(susieInf = list()),
-        verbose = 1,
-        ctx = "brain",
-        tid = "ENSG_A",
-        cvFolds = 3L
-    )
-    expect_named(out, "susieInf")
-    expect_s4_class(out$susieInf, "FineMappingRow")
 })
 
 test_that(".fmPostprocessOne wraps a fit into a FineMappingRow", {
@@ -4123,10 +4036,12 @@ test_that(".fmPostprocessOne wraps a fit into a FineMappingRow", {
         method = "susie",
         dataX = matrix(0, 2, 1, dimnames = list(NULL, "chr1:100:A:G")),
         dataY = c(1, 2),
-        coverage = 0.95,
-        secondaryCoverage = 0.7,
-        signalCutoff = 0.1,
-        minAbsCorr = 0.5
+        credibleSetArgs = CredibleSetParam(
+            coverage = 0.95,
+            secondaryCoverage = 0.7,
+            signalCutoff = 0.1,
+            minAbsCorr = 0.5
+        )
     )
     expect_s4_class(ent, "FineMappingRow")
 })
@@ -4192,7 +4107,10 @@ test_that(".fmWeightsCv covers per-fold prior, NULL-weights, and no-overlap bran
         verbose = 0,
         mvPriorCv = list("1" = list(priorVariance = diag(2)))
     )
-    expect_named(cv, c("samplePartition", "prediction", "performance"))
+    expect_named(
+        cv,
+        c("samplePartition", "prediction", "performance", "foldFits")
+    )
 })
 
 test_that("fineMappingPipeline(QtlSumStats): susieInf RSS chain (mocked)", {
@@ -4677,8 +4595,13 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out
 
 # @noRd
 .rssf_n <- function(ss, ...) {
+    # `...` is the panel filter: every caller passes only its fields.
     sum(lengths(suppressWarnings(suppressMessages(
-        fineMappingPipeline(ss, methods = "susie", ...)
+        fineMappingPipeline(
+            ss,
+            methods = "susie",
+            panelFilterArgs = PanelFilterParam(...)
+        )
     ))))
 }
 
@@ -4706,7 +4629,7 @@ test_that("fineMappingPipeline RSS cutoffs agree with .panelVariantFilter", {
         expected <- length(.panelVariantFilter(
             getLdSketch(ss),
             ids,
-            mafCutoff = cut
+            PanelFilterParam(mafCutoff = cut)
         ))
         expect_equal(
             .rssf_n(ss, mafCutoff = cut),
@@ -4749,4 +4672,431 @@ test_that(".fmExtractZn keeps z, ids and n aligned after filtering", {
     keep <- is_in(unfiltered$variantIds, filtered$variantIds)
     expect_equal(filtered$z, unfiltered$z[keep])
     expect_equal(filtered$variantIds, unfiltered$variantIds[keep])
+})
+
+test_that(".fmLeanFoldFit passes a NULL fit straight through", {
+    expect_null(pecotmr:::.fmLeanFoldFit(NULL, "susie"))
+})
+
+test_that(".fmPerStudy / .fmSumStats answer NULL when no method fits the kind", {
+    # No individual / sumstat method in the list means there is nothing for
+    # that route to run, which is a NULL rather than an empty result object.
+    expect_null(pecotmr:::.fmPerStudy(NULL, list(methods = list())))
+    expect_null(pecotmr:::.fmSumStats(NULL, list(methods = list())))
+})
+
+test_that("a method takes its own constructor for the slot's own path", {
+    skip_if_not_installed("susieR")
+    skip_if_not_installed("mvsusieR")
+    expect_s4_class(
+        FineMappingMethodsParam(
+            qtlSumStatsMethods = list(
+                susie = SusieRssOptions(),
+                mvsusie = MvsusieRssOptions()
+            )
+        ),
+        "FineMappingMethodsParam"
+    )
+    expect_error(
+        FineMappingMethodsParam(
+            qtlDatasetMethods = list(susie = MvsusieOptions())
+        ),
+        "uses the 'susie' constructor"
+    )
+    # susieInf shares susie's ENGINE -- both run susieR::susie on
+    # individual data -- so only the token's own constructor pair tells
+    # them apart.
+    expect_error(
+        FineMappingMethodsParam(
+            qtlDatasetMethods = list(susieInf = SusieOptions())
+        ),
+        "uses the 'susieInf' constructor"
+    )
+    # A plain list declares no engine, so it is judged by its NAMES against
+    # the path the slot names -- `z` belongs to susie_rss.
+    expect_s4_class(
+        FineMappingMethodsParam(qtlSumStatsMethods = list(susie = list(z = 1))),
+        "FineMappingMethodsParam"
+    )
+    expect_error(
+        FineMappingMethodsParam(qtlDatasetMethods = list(susie = list(z = 1))),
+        "unknown argument"
+    )
+})
+
+test_that("FineMappingMethodsParam takes lists or constructors per entry", {
+    skip_if_not_installed("susieR")
+    a <- FineMappingMethodsParam(
+        qtlDatasetMethods = list(
+            susie = list(L = 5),
+            susieInf = SusieInfOptions()
+        )
+    )
+    expect_s4_class(a, "FineMappingMethodsParam")
+    expect_setequal(names(a$qtlDatasetMethods), c("susie", "susieInf"))
+    expect_equal(a$qtlDatasetMethods$susie$L, 5)
+    expect_error(
+        FineMappingMethodsParam(qtlDatasetMethods = list(susie = list(LL = 5))),
+        "unknown argument"
+    )
+    expect_error(
+        FineMappingMethodsParam(
+            qtlDatasetMethods = list(susie = SusieInfOptions())
+        ),
+        "built with the constructor for 'susieInf'"
+    )
+    expect_error(
+        FineMappingMethodsParam(qtlDatasetMethods = list(nope = list())),
+        "not a method this pipeline runs"
+    )
+})
+
+test_that("fineMappingPipeline accepts the record and the character form", {
+    skip_if_not_installed("susieR")
+    byName <- pecotmr:::.fmNormalizeMethods(
+        c("susie", "susieInf"),
+        inputKind = "QtlDataset"
+    )
+    expect_equal(byName$tokens, c("susie", "susieInf"))
+    byRecord <- pecotmr:::.fmNormalizeMethods(
+        FineMappingMethodsParam(qtlDatasetMethods = list(susie = list(L = 3))),
+        inputKind = "QtlDataset"
+    )
+    expect_equal(byRecord$tokens, "susie")
+    expect_equal(byRecord$methodArgs$susie$L, 3)
+})
+
+test_that("argument checking narrows to the engine the input class reaches", {
+    skip_if_not_installed("susieR")
+    skip_if_not_installed("mvsusieR")
+    # A constructor cannot know the input class, so it checks against both
+    # entry points. The pipeline knows, so it checks against the one.
+    expect_equal(
+        pecotmr:::.fmMethodCalleeFor("susie", "QtlDataset"),
+        "susieR::susie"
+    )
+    expect_equal(
+        pecotmr:::.fmMethodCalleeFor("susie", "QtlSumStats"),
+        "susieR::susie_rss"
+    )
+})
+
+test_that("an argument for the other entry point is caught per input class", {
+    skip_if_not_installed("susieR")
+    # `z` is a formal of susie_rss but not of susie, so it is legal on a
+    # summary-statistics run and a mistake on an individual-level one. The
+    # union check the constructor applies cannot tell these apart.
+    norm <- pecotmr:::.fmNormalizeMethods(
+        FineMappingMethodsParam(qtlSumStatsMethods = list(susie = list(z = 1))),
+        inputKind = "QtlSumStats"
+    )
+    expect_error(
+        pecotmr:::.fmCheckMethodArgsForInput(norm$methodArgs, "QtlDataset"),
+        "method 'susie': unknown argument\\(s\\) z"
+    )
+    expect_silent(
+        pecotmr:::.fmCheckMethodArgsForInput(norm$methodArgs, "QtlSumStats")
+    )
+})
+
+test_that("mvsusie becomes checkable on the individual-level path", {
+    skip_if_not_installed("mvsusieR")
+    norm <- pecotmr:::.fmNormalizeMethods(
+        FineMappingMethodsParam(
+            qtlSumStatsMethods = list(mvsusie = list(nope = 1))
+        ),
+        inputKind = "QtlSumStats"
+    )
+    # mvsusieR::mvsusie_rss takes `...`, so nothing can be rejected on the
+    # RSS path; mvsusieR::mvsusie enumerates its formals, so the QtlDataset
+    # path rejects the same argument.
+    expect_error(
+        pecotmr:::.fmCheckMethodArgsForInput(norm$methodArgs, "QtlDataset"),
+        "method 'mvsusie': unknown argument\\(s\\) nope"
+    )
+    expect_silent(
+        pecotmr:::.fmCheckMethodArgsForInput(norm$methodArgs, "QtlSumStats")
+    )
+})
+
+test_that("pecotmr's own seeded arguments are not checked against the engine", {
+    skip_if_not_installed("susieR")
+    # L_greedy is a pecotmr concept seeded onto susie-family tokens; it is not
+    # a susieR formal and must not be reported as a user mistake.
+    norm <- pecotmr:::.fmNormalizeMethods(
+        "susieInf",
+        L = 5L,
+        Lgreedy = 2L,
+        inputKind = "QtlDataset"
+    )
+    expect_true(is_in("L_greedy", names(norm$methodArgs$susieInf)))
+    expect_silent(
+        pecotmr:::.fmCheckMethodArgsForInput(norm$methodArgs, "QtlDataset")
+    )
+})
+
+test_that(".fmRssArgsResolved fills rFinite without leaving the class", {
+    # `rFinite` defaults to NULL meaning "use the LD panel's N", which is not
+    # knowable when the caller builds the record. It is resolved here, and
+    # the result must still be an SusieRssParam: the previous code spliced the
+    # value in with list_assign(as.list(...)), handing everything downstream
+    # a bare list at exactly the point the value became concrete.
+    with_mocked_bindings(
+        {
+            # Nothing needs an N, so the record comes back untouched.
+            plain <- SusieRssParam()
+            expect_identical(
+                pecotmr:::.fmRssArgsResolved(plain, "sketch"),
+                plain
+            )
+            # serFallback needs one, so it is taken from the panel.
+            got <- pecotmr:::.fmRssArgsResolved(
+                SusieRssParam(serFallback = TRUE),
+                "sketch"
+            )
+            expect_s4_class(got, "SusieRssParam")
+            expect_equal(got$rFinite, 4321L)
+            expect_true(got$serFallback)
+            expect_equal(got$keepFullFit, "fallback")
+            # An rMismatch policy needs one too.
+            expect_equal(
+                pecotmr:::.fmRssArgsResolved(
+                    SusieRssParam(rMismatch = "drop"),
+                    "sketch"
+                )$rFinite,
+                4321L
+            )
+            # A value the caller gave is never overwritten.
+            expect_equal(
+                pecotmr:::.fmRssArgsResolved(
+                    SusieRssParam(rFinite = 99, serFallback = TRUE),
+                    "sketch"
+                )$rFinite,
+                99
+            )
+        },
+        .ldSketchNSamples = function(x) 4321L,
+        .package = "pecotmr"
+    )
+})
+
+test_that("a path-exact method constructor refuses the other path's names", {
+    skip_if_not_installed("susieR")
+    indiv <- pecotmr:::.fmTokenPathConfig("susie", "QtlDataset")
+    sumst <- pecotmr:::.fmTokenPathConfig("susie", "QtlSumStats")
+    # `z` is a susie_rss argument and not a susie one.
+    expect_error(indiv(z = 1), "unknown argument")
+    expect_no_error(sumst(z = 1))
+    # `y` is susie-only, so the mirror image holds.
+    expect_no_error(indiv(y = 1))
+    expect_error(sumst(y = 1), "unknown argument")
+    # A name both callees accept is fine either way.
+    expect_no_error(indiv(L = 5))
+    expect_no_error(sumst(L = 5))
+    # Why this matters: the retired aggregator validated against the UNION
+    # of both callees, so it accepted `z` even for an individual-level run
+    # and the setting reached an engine that never reads it.
+    both <- pecotmr:::.engineAcceptedNames(
+        c("susieR::susie", "susieR::susie_rss")
+    )
+    expect_true(is_in("z", both))
+    expect_false(is_in("z", pecotmr:::.engineAcceptedNames("susieR::susie")))
+})
+
+test_that("each input path offers only the methods it implements", {
+    expect_setequal(
+        names(pecotmr:::.fmMethodCtorsFor("QtlDataset")),
+        c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")
+    )
+    expect_setequal(
+        names(pecotmr:::.fmMethodCtorsFor("QtlSumStats")),
+        c("susie", "susieInf", "susieAsh", "ser", "mvsusie")
+    )
+    # fsusie has no summary-statistics implementation; ser no individual one.
+    expect_null(pecotmr:::.fmTokenPathConfig("fsusie", "QtlSumStats"))
+    expect_null(pecotmr:::.fmTokenPathConfig("ser", "QtlDataset"))
+})
+
+test_that("CredibleSetParam owns L / Lgreedy", {
+    # They bound how many credible sets can exist. They reach the engine by a
+    # different route from the rest of the bundle -- seeded onto each
+    # SuSiE-family token rather than read by postprocessFinemappingFits() --
+    # but that is a plumbing difference, not a different setting.
+    expect_equal(CredibleSetParam()$L, 10L)
+    expect_false("Lgreedy" %in% names(CredibleSetParam()))
+    expect_equal(CredibleSetParam(Lgreedy = 3L)$Lgreedy, 3L)
+    # addSusieInf stands alone: it selects a chained initialisation between
+    # methods rather than describing credible sets.
+    expect_false("addSusieInf" %in% names(formals(CredibleSetParam)))
+    expect_false("fitStructureArgs" %in% getNamespaceExports("pecotmr"))
+})
+
+test_that("CredibleSetParam owns the topLoci per-CS columns", {
+    # perCsColumns used to be two booleans on fitRetentionArgs -- `fullFit`
+    # and `fullFitAlphaOnly`, the second a documented no-op unless the first.
+    # They govern the topLoci TABLE, next to includeAllCs which decides the
+    # column labels, not the stored fit.
+    expect_equal(CredibleSetParam()$perCsColumns, "none")
+    expect_equal(CredibleSetParam(perCsColumns = "full")$perCsColumns, "full")
+    expect_error(CredibleSetParam(perCsColumns = "yes"), "must be one of")
+    # fitRetentionArgs() is retired: one axis is not a bundle.
+    expect_false("fitRetentionArgs" %in% getNamespaceExports("pecotmr"))
+})
+
+test_that("SignalScreenParam resolves each metric to a pipeline spec", {
+    # pip keeps the legacy bare-numeric spelling; the other three resolve to
+    # list(metric, cutoff). .asScreen() canonicalizes either.
+    expect_null(pecotmr:::.screenResolve(SignalScreenParam()))
+    expect_equal(pecotmr:::.screenResolve(SignalScreenParam(pip = 0.5)), 0.5)
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(absZ = 5)),
+        list(metric = "absZ", cutoff = 5)
+    )
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(bf = 100)),
+        list(metric = "bf", cutoff = 100)
+    )
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(logBf = 3)),
+        list(metric = "logBf", cutoff = 3)
+    )
+})
+
+test_that("SignalScreenParam rejects two metrics and negative absZ / bf", {
+    expect_error(
+        SignalScreenParam(pip = 0.5, absZ = 5),
+        "only one screening metric"
+    )
+    # 0 is the long-standing "off" spelling, so it is not a second metric.
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(pip = 0, absZ = 5)),
+        list(metric = "absZ", cutoff = 5)
+    )
+    expect_error(SignalScreenParam(absZ = -1), "must be > 0")
+    expect_error(SignalScreenParam(bf = -1), "must be > 0")
+    # pip < 0 is the adaptive 3 / nVariants convention, and logBf is a log.
+    expect_equal(pecotmr:::.screenResolve(SignalScreenParam(pip = -1)), -1)
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(logBf = -2)),
+        list(metric = "logBf", cutoff = -2)
+    )
+})
+
+test_that("every recursion forwards each cfg field its callee accepts", {
+    ns <- asNamespace("pecotmr")
+    cases <- list(
+        list(
+            site = ".fmPerStudy",
+            builder = ".fmPipelineMultiStudy",
+            callee = ".fmPipelineQtlDataset"
+        ),
+        list(
+            site = ".fmSumStats",
+            builder = ".fmPipelineMultiStudy",
+            callee = ".fmPipelineQtlSumStats"
+        ),
+        list(
+            site = ".twasPerStudy",
+            builder = ".twasMsDriver",
+            callee = ".twasPipelineQtlDataset"
+        ),
+        list(
+            site = ".twasSumStats",
+            builder = ".twasMsDriver",
+            callee = ".twasPipelineQtlSumStats"
+        )
+    )
+    for (cs in cases) {
+        fields <- .cfgFieldNames(cs$builder)
+        accepted <- setdiff(
+            names(formals(get(cs$callee, envir = ns))),
+            "..."
+        )
+        passed <- .argNamesPassed(cs$site)
+        # A field the record carries AND the callee accepts must be passed.
+        dropped <- setdiff(intersect(fields, accepted), passed)
+        expect_equal(
+            dropped,
+            character(0),
+            info = paste0(
+                cs$site,
+                " never forwards: ",
+                paste(dropped, collapse = ", "),
+                " -- the callee accepts them and the record carries them, so ",
+                "they silently fall back to ",
+                cs$callee,
+                "'s defaults."
+            )
+        )
+    }
+})
+
+test_that("CredibleSetParam accessors read and replace, L is get-only", {
+    cs <- CredibleSetParam(coverage = 0.95)
+    expect_equal(getCoverage(cs), 0.95)
+    expect_equal(getL(cs), 10L)
+    expect_null(getMedianAbsCorr(cs))
+
+    # Copy semantics: the setter returns a new record, the original stands.
+    cs2 <- setCoverage(cs, 0.9)
+    expect_equal(getCoverage(cs2), 0.9)
+    expect_equal(getCoverage(cs), 0.95)
+    expect_s4_class(cs2, "CredibleSetParam")
+
+    # The slot's declared type still holds through a setter.
+    expect_error(setCoverage(cs, "wide"), "not valid for @.+coverage")
+
+    # L / Lgreedy are deliberately get-only: they are seeded onto each
+    # SuSiE-family token's own arguments, so changing one needs a refit, not
+    # a re-summary. A setter would hand back a record that looks applied.
+    ns <- asNamespace("pecotmr")
+    expect_false(exists("setL", envir = ns, inherits = FALSE))
+    expect_false(exists("setLgreedy", envir = ns, inherits = FALSE))
+    expect_true(is.function(getLgreedy))
+})
+
+test_that("every settable CredibleSetParam field has both accessors", {
+    # The pairing is the contract: a field you can read and not write is a
+    # deliberate exception, so it must be one of exactly these two.
+    getOnly <- c("L", "Lgreedy")
+    ns <- asNamespace("pecotmr")
+    for (f in names(formals(CredibleSetParam))) {
+        stem <- str_c(str_to_upper(str_sub(f, 1L, 1L)), str_sub(f, 2L))
+        expect_true(
+            exists(str_c("get", stem), envir = ns, inherits = FALSE),
+            info = paste("no getter for", f)
+        )
+        expect_equal(
+            exists(str_c("set", stem), envir = ns, inherits = FALSE),
+            !is_in(f, getOnly),
+            info = paste("setter presence wrong for", f)
+        )
+    }
+})
+
+test_that("CredibleSetParam accessors read and replace every field", {
+    # The pairing test above asserts the accessors EXIST; this one dispatches
+    # them. Existence is checked with exists(), which never reaches the
+    # generic, so without this the setGeneric bodies in AllGenerics.R and the
+    # copy semantics of each setter go unexercised.
+    cs <- CredibleSetParam()
+    expect_equal(getSecondaryCoverage(cs), c(0.7, 0.5))
+    expect_equal(getSignalCutoff(cs), 0.025)
+    expect_equal(getMinAbsCorr(cs), 0.8)
+    expect_false(getIncludeAllCs(cs))
+    expect_equal(getPerCsColumns(cs), "none")
+    expect_null(getLgreedy(cs))
+
+    # Each setter hands back a new record; the original is untouched.
+    expect_equal(getSecondaryCoverage(setSecondaryCoverage(cs, 0.6)), 0.6)
+    expect_equal(getSignalCutoff(setSignalCutoff(cs, 0.1)), 0.1)
+    expect_equal(getMinAbsCorr(setMinAbsCorr(cs, 0.5)), 0.5)
+    expect_equal(getMedianAbsCorr(setMedianAbsCorr(cs, 0.4)), 0.4)
+    expect_true(getIncludeAllCs(setIncludeAllCs(cs, TRUE)))
+    expect_equal(getPerCsColumns(setPerCsColumns(cs, "alpha")), "alpha")
+    expect_equal(getSecondaryCoverage(cs), c(0.7, 0.5))
+    expect_false(getIncludeAllCs(cs))
+
+    # Setters revalidate, so a wrong-typed replacement is refused.
+    expect_error(setIncludeAllCs(cs, "yes"), "includeAllCs")
 })

@@ -7,7 +7,7 @@
 \usage{
 getCredibleSetSummary(x, ...)
 
-\S4method{getCredibleSetSummary}{FineMappingResultBase}(x, coverage = 0.95, ...)
+\S4method{getCredibleSetSummary}{FineMappingResultBase}(x, coverage = 0.95)
 }
 \arguments{
 \item{x}{A \code{FineMappingRow} or \code{FineMappingResultBase}.}

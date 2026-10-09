@@ -1,3 +1,65 @@
+#' @include MethodParam.R
+NULL
+
+#' @rdname QtlEnrichmentParam
+#' @aliases QtlEnrichmentParam-class
+#' @exportClass QtlEnrichmentParam
+setClass(
+    "QtlEnrichmentParam",
+    contains = "MethodParam",
+    slots = c(
+        numGwas = "numeric_OR_NULL",
+        piQtl = "numeric_OR_NULL",
+        lambda = "numeric",
+        impN = "numeric",
+        doubleShrinkage = "logical",
+        besselCorrection = "logical"
+    )
+)
+
+#' @title Arguments For The QTL Enrichment Estimator
+#' @description The algorithmic settings \code{\link{qtlEnrichment}} takes,
+#'   as one checked bundle. Everything else that function accepts --- the two
+#'   data arguments, \code{numThreads}, \code{seed}, \code{verbose}, and the
+#'   \code{alignNames} switch --- is the pipeline's own business and is not
+#'   settable here.
+#' @param numGwas Number of GWAS variants used to estimate \code{piGwas}.
+#'   \code{NULL} (default) estimates it from the data, which is biased unless
+#'   the outcome PIP vector really is genome-wide.
+#' @param piQtl Per-variant prior of being a causal QTL variant. \code{NULL}
+#'   (default) estimates it from the data.
+#' @param lambda Shrinkage parameter, shrinking the enrichment estimate
+#'   towards zero as in ridge regression. \code{0} applies no shrinkage.
+#'   Default \code{1.0}.
+#' @param impN Rounds of multiple imputation to draw QTL from. Default
+#'   \code{25}.
+#' @param doubleShrinkage Logical. Apply the double-shrinkage correction to
+#'   the enrichment estimate. Default \code{FALSE}.
+#' @param besselCorrection Logical. Apply Bessel's correction when estimating
+#'   the sampling variance. Default \code{TRUE}.
+#' @return A \code{QtlEnrichmentParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' QtlEnrichmentParam(lambda = 0, impN = 50)
+#' @export
+QtlEnrichmentParam <- function(
+    numGwas = NULL,
+    piQtl = NULL,
+    lambda = 1.0,
+    impN = 25,
+    doubleShrinkage = FALSE,
+    besselCorrection = TRUE
+) {
+    new(
+        "QtlEnrichmentParam",
+        numGwas = numGwas,
+        piQtl = piQtl,
+        lambda = lambda,
+        impN = impN,
+        doubleShrinkage = doubleShrinkage,
+        besselCorrection = besselCorrection
+    )
+}
+
 #' @title QTL Enrichment Pipeline (Genome-Wide)
 #' @description Genome-wide pipeline that computes per-pair enrichment
 #'   estimates by passing an outcome PIP vector and a set of annotation
@@ -41,21 +103,17 @@
 #'
 #' @param gwasFineMappingResult The outcome side; see above.
 #' @param qtlFineMappingResult The annotation side; see above.
-#' @param numGwas Number of GWAS variants used to estimate \code{piGwas}. When
-#'   \code{NULL} (default) it is estimated from the data -- bias warning applies
-#'   if the input PIP vector is not genome-wide.
-#' @param piQtl Per-variant prior of being a QTL causal variant. \code{NULL}
-#'   (default) estimates from the data.
-#' @param lambda Shrinkage parameter for the enrichment estimator. Default
-#'   \code{1.0}.
-#' @param impN Number of imputed samples used by the estimator. Default
-#'   \code{25}.
+#' @param methodArgs The estimator's algorithmic settings, built with
+#'   \code{\link{QtlEnrichmentParam}}: \code{numGwas}, \code{piQtl},
+#'   \code{lambda}, \code{impN}, \code{doubleShrinkage} and
+#'   \code{besselCorrection}. A bare list is refused, since it cannot be
+#'   checked.
 #' @param numThreads Number of threads used by \code{qtlEnrichment}. Default
 #'   \code{1}.
 #' @param seed Integer or \code{NULL}. Base random seed forwarded to
 #'   \code{\link{qtlEnrichment}} for reproducible multiple imputation.
 #'   \code{NULL} (default) draws a nondeterministic seed.
-#' @param ... Additional arguments forwarded to \code{\link{qtlEnrichment}}.
+#' @param verbose Logical. Print progress messages. Default \code{TRUE}.
 #' @return A tibble with one row per (outcome trait, annotation unit) pair.
 #'   The identity columns are \code{gwasStudy}, \code{gwasContext},
 #'   \code{gwasTrait}, \code{qtlStudy}, \code{qtlContext}; the axes a side does
@@ -67,15 +125,17 @@
 #'   The estimates are \code{enrichmentLogOdds}, the enrichment parameter
 #'   \eqn{a_1} on the log-odds scale, with its standard error
 #'   \code{enrichmentSe}; \code{enrichment} is the same quantity as a
-#'   multiplicative factor, \eqn{e^{a_1} - 1}, which is what
-#'   \code{colocPipeline} scales \code{p12} by (so \eqn{a_1 = 0} leaves the
-#'   prior untouched). \code{enrichmentLogOddsNoShrinkage} and
+#'   multiplicative factor, \eqn{e^{a_1} - 1}, reported for interpretation
+#'   (so \eqn{a_1 = 0} means no enrichment).
+#'   \code{enrichmentLogOddsNoShrinkage} and
 #'   \code{enrichmentSeNoShrinkage} are the same estimate before shrinkage,
 #'   \code{intercept} / \code{interceptSe} are \eqn{a_0}, and \code{colocP1},
-#'   \code{colocP2}, \code{colocP12} are the enrichment-informed coloc priors
-#'   the estimator derives from \eqn{(a_0, a_1)} -- an alternative to scaling
-#'   a baseline \code{p12}. \code{effectiveMiRounds} is how many
-#'   multiple-imputation rounds survived outlier filtering.
+#'   \code{colocP2}, \code{colocP12} are the enrichment-informed priors the
+#'   estimator derives from \eqn{(a_0, a_1)} exactly as fastenloc's
+#'   \code{set_enrich_params} does; those three are what
+#'   \code{\link{colocPipeline}} scores with when given this table.
+#'   \code{effectiveMiRounds} is how many multiple-imputation rounds survived
+#'   outlier filtering.
 #' @examples
 #' data(gwasFineMappingExample)
 #' data(qtlFineMappingExample)
@@ -87,45 +147,45 @@
 qtlEnrichmentPipeline <- function(
     gwasFineMappingResult,
     qtlFineMappingResult,
-    numGwas = NULL,
-    piQtl = NULL,
-    lambda = 1.0,
-    impN = 25,
+    methodArgs = QtlEnrichmentParam(),
     numThreads = 1L,
     seed = NULL,
-    ...
+    verbose = TRUE
 ) {
+    .assertMethodParam(methodArgs, "QtlEnrichmentParam", "methodArgs")
     .enrValidateInputs(gwasFineMappingResult, qtlFineMappingResult)
-    p <- as.list(environment())
-    p$dots <- list(...)
-    p <- .enrPrepare(p)
+    prep <- .enrPrepare(gwasFineMappingResult, qtlFineMappingResult)
+    gwasTuples <- prep$gwasTuples
+    qtlTuples <- prep$qtlTuples
+    alignedByTuple <- prep$alignedByTuple
     results <- list_flatten(map(
-        seq_len(nrow(p$gwasTuples)),
+        seq_len(nrow(gwasTuples)),
         .enrScoreOutcomeTuple,
-        p = p
+        gwasPipByTuple = prep$gwasPipByTuple,
+        qtlRegionsByTuple = prep$qtlRegionsByTuple,
+        alignedByTuple = alignedByTuple,
+        methodArgs = methodArgs,
+        numThreads = numThreads,
+        seed = seed,
+        verbose = verbose,
+        gwasFineMappingResult = gwasFineMappingResult,
+        gwasTuples = gwasTuples,
+        qtlFineMappingResult = qtlFineMappingResult,
+        qtlTuples = qtlTuples
     ))
     .enrAssemble(results)
 }
 
 # Validate the input classes + LD-sketch presence / identity.
 # @noRd
+#' @importFrom checkmate assertMultiClass
 .enrValidateInputs <- function(gwasFineMappingResult, qtlFineMappingResult) {
-    if (!methods::is(gwasFineMappingResult, "FineMappingResultBase")) {
-        msg <- glue(
-            "`gwasFineMappingResult` must be a GwasFineMappingResult or a ",
-            "QtlFineMappingResult ",
-            "(got class '{class(gwasFineMappingResult)[[1L]]}')."
-        )
-        abort(msg)
-    }
-    if (!methods::is(qtlFineMappingResult, "FineMappingResultBase")) {
-        msg <- glue(
-            "`qtlFineMappingResult` must be a QtlFineMappingResult or a ",
-            "GwasFineMappingResult ",
-            "(got class '{class(qtlFineMappingResult)[[1L]]}')."
-        )
-        abort(msg)
-    }
+    # assertMultiClass rather than assertClass on the virtual parent: naming
+    # both concrete subclasses is more use to a caller than
+    # "FineMappingResultBase", and these two are its only subclasses.
+    fmrClasses <- c("GwasFineMappingResult", "QtlFineMappingResult")
+    assertMultiClass(gwasFineMappingResult, fmrClasses)
+    assertMultiClass(qtlFineMappingResult, fmrClasses)
     outcomeLd <- getLdSketch(gwasFineMappingResult)
     if (
         is.null(outcomeLd) &&
@@ -154,38 +214,41 @@ qtlEnrichmentPipeline <- function(
 # each tuple's one-time alignment to the union panel (errors captured as
 # values).
 # @noRd
-.enrPrepare <- function(p) {
-    p$gwasTuples <- .enrOutcomeTuples(p$gwasFineMappingResult)
-    p$qtlTuples <- .enrAnnotationTuples(p$qtlFineMappingResult)
-    if (nrow(p$gwasTuples) == 0L || nrow(p$qtlTuples) == 0L) {
+.enrPrepare <- function(gwasFineMappingResult, qtlFineMappingResult) {
+    gwasTuples <- .enrOutcomeTuples(gwasFineMappingResult)
+    qtlTuples <- .enrAnnotationTuples(qtlFineMappingResult)
+    if (nrow(gwasTuples) == 0L || nrow(qtlTuples) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no (outcome, annotation) pairs to ",
             "compute (one of the inputs has zero rows)."
         )
         abort(msg)
     }
-    p$gwasPipByTuple <- map(
-        seq_len(nrow(p$gwasTuples)),
+    gwasPipByTuple <- map(
+        seq_len(nrow(gwasTuples)),
         .enrGwasPipForRow,
-        gwasTuples = p$gwasTuples,
-        fmr = p$gwasFineMappingResult
+        gwasTuples = gwasTuples,
+        fmr = gwasFineMappingResult
     )
-    unionGwasNames <- unique(unlist(
-        map(p$gwasPipByTuple, names),
-        use.names = FALSE
-    ))
-    p$qtlRegionsByTuple <- map(
-        seq_len(nrow(p$qtlTuples)),
+    unionGwasNames <- unique(unname(list_c(map(gwasPipByTuple, names))))
+    qtlRegionsByTuple <- map(
+        seq_len(nrow(qtlTuples)),
         .enrQtlRegionsForRow,
-        qtlTuples = p$qtlTuples,
-        fmr = p$qtlFineMappingResult
+        qtlTuples = qtlTuples,
+        fmr = qtlFineMappingResult
     )
-    p$alignedByTuple <- map(
-        p$qtlRegionsByTuple,
+    alignedByTuple <- map(
+        qtlRegionsByTuple,
         .enrAlignRegionsSafe,
         unionGwasNames = unionGwasNames
     )
-    p
+    list(
+        gwasTuples = gwasTuples,
+        qtlTuples = qtlTuples,
+        gwasPipByTuple = gwasPipByTuple,
+        qtlRegionsByTuple = qtlRegionsByTuple,
+        alignedByTuple = alignedByTuple
+    )
 }
 
 # The outcome side's per-trait keys: one PIP vector is built per key. A GWAS
@@ -264,108 +327,172 @@ qtlEnrichmentPipeline <- function(
 # Align one tuple's regions to the union GWAS panel, capturing any error as a
 # value (re-raised + skipped per (gwas, tuple) below, never aborting).
 # @noRd
+#' @importFrom rlang try_fetch
 .enrAlignRegionsSafe <- function(regions, unionGwasNames) {
-    tryCatch(
+    try_fetch(
         .enrAlignRegions(regions, unionGwasNames),
-        error = function(e) e
+        error = function(cnd) cnd
     )
 }
 
 # Score one outcome trait against every annotation tuple -> enrichment records
 # (empty when the outcome has no usable PIPs).
 # @noRd
-.enrScoreOutcomeTuple <- function(gi, p) {
-    gwasPip <- p$gwasPipByTuple[[gi]]
+.enrScoreOutcomeTuple <- function(
+    gi,
+    gwasPipByTuple,
+    qtlRegionsByTuple,
+    alignedByTuple = alignedByTuple,
+    methodArgs,
+    numThreads,
+    seed,
+    verbose,
+    gwasFineMappingResult = gwasFineMappingResult,
+    gwasTuples = gwasTuples,
+    qtlFineMappingResult = qtlFineMappingResult,
+    qtlTuples = qtlTuples
+) {
+    gwasPip <- gwasPipByTuple[[gi]]
     if (length(gwasPip) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no usable PIPs for ",
-            "{.enrOutcomeLabel(p, gi)}; skipping."
+            "{.enrOutcomeLabel(gwasFineMappingResult, gwasTuples, gi)}; ",
+            "skipping."
         )
         warn(msg)
         return(list())
     }
     compact(map(
-        seq_len(nrow(p$qtlTuples)),
+        seq_len(nrow(qtlTuples)),
         .enrScoreTuple,
         gi = gi,
         gwasPip = gwasPip,
-        p = p
+        qtlRegionsByTuple = qtlRegionsByTuple,
+        alignedByTuple = alignedByTuple,
+        methodArgs = methodArgs,
+        numThreads = numThreads,
+        seed = seed,
+        verbose = verbose,
+        gwasFineMappingResult = gwasFineMappingResult,
+        gwasTuples = gwasTuples,
+        qtlFineMappingResult = qtlFineMappingResult,
+        qtlTuples = qtlTuples
     ))
 }
 
 # Score one (outcome trait, annotation tuple) pair -> an enrichment record, or
 # NULL when the tuple has no regions or qtlEnrichment fails.
 # @noRd
-.enrScoreTuple <- function(k, gi, gwasPip, p) {
-    if (length(p$qtlRegionsByTuple[[k]]) == 0L) {
+.enrScoreTuple <- function(
+    k,
+    gi,
+    gwasPip,
+    qtlRegionsByTuple,
+    alignedByTuple = alignedByTuple,
+    methodArgs,
+    numThreads,
+    seed,
+    verbose,
+    gwasFineMappingResult = gwasFineMappingResult,
+    gwasTuples = gwasTuples,
+    qtlFineMappingResult = qtlFineMappingResult,
+    qtlTuples = qtlTuples
+) {
+    if (length(qtlRegionsByTuple[[k]]) == 0L) {
         msg <- glue(
             "qtlEnrichmentPipeline: no usable regions for ",
-            "{.enrAnnotationLabel(p, k)}; skipping."
+            "{.enrAnnotationLabel(qtlFineMappingResult, qtlTuples, k)}; ",
+            "skipping."
         )
         warn(msg)
         return(NULL)
     }
-    enr <- .enrRunEnrichment(gi, gwasPip, k, p)
+    enr <- .enrRunEnrichment(
+        gi,
+        gwasPip,
+        k,
+        alignedByTuple = alignedByTuple,
+        methodArgs = methodArgs,
+        numThreads = numThreads,
+        seed = seed,
+        verbose = verbose,
+        gwasFineMappingResult = gwasFineMappingResult,
+        gwasTuples = gwasTuples,
+        qtlFineMappingResult = qtlFineMappingResult,
+        qtlTuples = qtlTuples
+    )
     if (is.null(enr)) {
         return(NULL)
     }
     c(
         .enrFlattenEnrichment(enr),
-        as.list(p$gwasTuples[gi, , drop = FALSE]),
-        as.list(p$qtlTuples[k, , drop = FALSE])
+        as.list(gwasTuples[gi, , drop = FALSE]),
+        as.list(qtlTuples[k, , drop = FALSE])
     )
 }
 
 # Human-readable identities for the warnings above, naming each side by its own
 # flavour and only the axes it has.
 # @noRd
-.enrOutcomeLabel <- function(p, gi) {
+.enrOutcomeLabel <- function(gwasFineMappingResult, gwasTuples, gi) {
     .fmrTupleLabel(
-        .fmrSideName(p$gwasFineMappingResult),
-        .enrOutcomeIdent(p$gwasTuples, gi)
+        .fmrSideName(gwasFineMappingResult),
+        .enrOutcomeIdent(gwasTuples, gi)
     )
 }
 
 # @noRd
-.enrAnnotationLabel <- function(p, k) {
+.enrAnnotationLabel <- function(qtlFineMappingResult, qtlTuples, k) {
     .fmrTupleLabel(
-        .fmrSideName(p$qtlFineMappingResult),
-        .enrAnnotationIdent(p$qtlTuples, k)
+        .fmrSideName(qtlFineMappingResult),
+        .enrAnnotationIdent(qtlTuples, k)
     )
 }
 
 # Run qtlEnrichment for a pair (with the pre-aligned regions), warning + NULL on
-# failure. alignNames = FALSE reuses the shared per-tuple alignment.
+# failure.
 # @noRd
-.enrRunEnrichment <- function(gi, gwasPip, k, p) {
-    aligned <- p$alignedByTuple[[k]]
-    tryCatch(
+.enrRunEnrichment <- function(
+    gi,
+    gwasPip,
+    k,
+    alignedByTuple,
+    methodArgs,
+    numThreads,
+    seed,
+    verbose,
+    gwasFineMappingResult,
+    gwasTuples,
+    qtlFineMappingResult,
+    qtlTuples
+) {
+    aligned <- alignedByTuple[[k]]
+    try_fetch(
         {
             if (inherits(aligned, "condition")) {
                 cnd_signal(aligned)
             }
-            enrichArgs <- c(
-                list(
-                    gwasPip = gwasPip,
-                    susieQtlRegions = aligned,
-                    numGwas = p$numGwas,
-                    piQtl = p$piQtl,
-                    lambda = p$lambda,
-                    impN = p$impN,
-                    numThreads = p$numThreads,
-                    seed = p$seed,
-                    alignNames = FALSE
-                ),
-                p$dots
+            # alignNames = FALSE reuses the per-tuple alignment; it is the
+            # pipeline's own invariant, which is why `methodArgs` cannot
+            # carry it -- QtlEnrichmentParam() has no such formal.
+            exec(
+                qtlEnrichment,
+                gwasPip = gwasPip,
+                susieQtlRegions = aligned,
+                numThreads = numThreads,
+                seed = seed,
+                verbose = verbose,
+                alignNames = FALSE,
+                !!!methodArgs
             )
-            exec(qtlEnrichment, !!!enrichArgs)
         },
-        error = function(e) {
-            eMsg <- conditionMessage(e)
+        error = function(cnd) {
+            eMsg <- conditionMessage(cnd)
             msg <- glue(
                 "qtlEnrichmentPipeline: qtlEnrichment failed for ",
-                "{.enrOutcomeLabel(p, gi)} x ",
-                "{.enrAnnotationLabel(p, k)}: {eMsg}"
+                "{.enrOutcomeLabel(gwasFineMappingResult, gwasTuples, gi)} x ",
+                "{.enrAnnotationLabel(qtlFineMappingResult, qtlTuples, k)}: ",
+                "{eMsg}"
             )
             warn(msg)
             NULL
@@ -426,38 +553,37 @@ qtlEnrichmentPipeline <- function(
 # would collide on every variant they share.
 #' @importFrom dplyr add_count
 #' @noRd
+# One row's PIP vector keyed by variant id, or NULL when the row carries no
+# fit, no PIPs, or ids that do not line up with them.
+# @noRd
+.enrRowPipVector <- function(i, gwasFmr) {
+    parts <- .fmrRowParts(gwasFmr, i)
+    fit <- getSusieFit(parts)
+    if (is.null(fit) || is.null(fit$pip)) {
+        return(NULL)
+    }
+    pip <- as.numeric(fit$pip)
+    ids <- names(fit$pip) %||% .fmrPartsVariantIds(parts)
+    if (length(ids) != length(pip)) {
+        return(NULL)
+    }
+    set_names(pip, as.character(ids))
+}
+
 .enrBuildGwasPipVector <- function(gwasFmr, ident) {
     idx <- .enrMatchRows(gwasFmr, ident)
     if (length(idx) == 0L) {
         return(numeric(0))
     }
-    pieces <- list()
-    for (i in idx) {
-        parts <- .fmrRowParts(gwasFmr, i)
-        fit <- getSusieFit(parts)
-        if (is.null(fit) || is.null(fit$pip)) {
-            next
-        }
-        pip <- as.numeric(fit$pip)
-        ids <- if (!is.null(names(fit$pip))) {
-            names(fit$pip)
-        } else {
-            .fmrPartsVariantIds(parts)
-        }
-        if (length(ids) != length(pip)) {
-            next
-        }
-        pieces[[length(pieces) + 1L]] <-
-            set_names(pip, as.character(ids))
-    }
+    pieces <- compact(map(idx, .enrRowPipVector, gwasFmr = gwasFmr))
     if (length(pieces) == 0L) {
         return(numeric(0))
     }
-    all <- unlist(pieces)
-    if (n_distinct(names(all)) < length(all)) {
-        all <- .enrCollapseDuplicatePips(all)
+    combined <- list_c(pieces)
+    if (n_distinct(names(combined)) == length(combined)) {
+        return(combined)
     }
-    all
+    .enrCollapseDuplicatePips(combined)
 }
 
 # Collapse duplicate variant ids across GWAS blocks: agreeing PIPs (rounded to
@@ -465,8 +591,8 @@ qtlEnrichmentPipeline <- function(
 # row per (id, rounded-pip), so a conflicting variant survives with >1 row for
 # add_count() to flag.
 # @noRd
-.enrCollapseDuplicatePips <- function(all) {
-    byId <- tibble(id = names(all), pip = as.numeric(all)) |>
+.enrCollapseDuplicatePips <- function(pips) {
+    byId <- tibble(id = names(pips), pip = as.numeric(pips)) |>
         mutate(pipR = round(.data$pip, 12)) |>
         distinct(.data$id, .data$pipR, .keep_all = TRUE) |>
         add_count(.data$id)
@@ -494,33 +620,31 @@ qtlEnrichmentPipeline <- function(
     if (length(idx) == 0L) {
         return(list())
     }
-    out <- list()
-    for (i in idx) {
-        parts <- .fmrRowParts(qtlFmr, i)
-        fit <- getSusieFit(parts)
-        if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) {
-            next
-        }
-        pV <- if (!is.null(fit$V)) {
-            fit$V
-        } else if (!is.null(fit$prior_variance)) {
-            fit$prior_variance
-        } else {
-            NULL
-        }
-        if (is.null(pV)) {
-            next
-        }
-        if (is.null(names(fit$pip))) {
-            names(fit$pip) <- .fmrPartsVariantIds(parts)
-        }
-        out[[length(out) + 1L]] <- list(
-            alpha = fit$alpha,
-            pip = fit$pip,
-            prior_variance = pV
-        )
+    compact(map(idx, .enrRowRegion, qtlFmr = qtlFmr))
+}
+
+# One row's region payload for qtlEnrichment, or NULL when the row lacks a
+# fit, an alpha, PIPs, or a prior variance. The PIP names fall back to the
+# row's own variant ids when the fit did not carry any.
+# @noRd
+.enrRowRegion <- function(i, qtlFmr) {
+    parts <- .fmrRowParts(qtlFmr, i)
+    fit <- getSusieFit(parts)
+    if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) {
+        return(NULL)
     }
-    out
+    priorVariance <- fit$V %||% fit$prior_variance
+    if (is.null(priorVariance)) {
+        return(NULL)
+    }
+    list(
+        alpha = fit$alpha,
+        pip = set_names(
+            fit$pip,
+            names(fit$pip) %||% .fmrPartsVariantIds(parts)
+        ),
+        prior_variance = priorVariance
+    )
 }
 
 # Pull one enrichment field from qtlEnrichment's list output as a scalar numeric
@@ -736,8 +860,7 @@ qtlEnrichment <- function(
         numThreads = as.integer(numThreads),
         seed = if (is.null(seed)) NULL else as.integer(seed)
     )
-    en$unused_xqtl_variants <- unmatchedVariants
-    en
+    list_assign(en, unused_xqtl_variants = unmatchedVariants)
 }
 
 # piGwas = sum(gwasPip) / numGwas (estimated from the data, with a warning, when
@@ -747,17 +870,15 @@ qtlEnrichment <- function(
     if (!is.null(numGwas)) {
         return(sum(gwasPip) / numGwas)
     }
-    msg <- glue(
+    warn(glue(
         "numGwas is not provided. Estimating piGwas from the data. Note ",
         "that this estimate may be biased if the input gwasPip does not ",
         "contain genome-wide variants."
-    )
-    warn(msg)
+    ))
     piGwas <- sum(gwasPip) / length(gwasPip)
     if (verbose) {
         piGwasR <- round(piGwas, 5)
-        msg <- glue("Estimated piGwas: {piGwasR}\n", .trim = FALSE)
-        inform(msg)
+        inform(glue("Estimated piGwas: {piGwasR}\n", .trim = FALSE))
     }
     piGwas
 }
@@ -776,12 +897,11 @@ qtlEnrichment <- function(
         "variables inside of credible sets or signal clusters."
     )
     warn(msg)
-    allPips <- unlist(map(susieQtlRegions, "pip"))
+    allPips <- list_c(map(susieQtlRegions, "pip"))
     piQtl <- sum(allPips) / length(allPips)
     if (verbose) {
         piQtlR <- round(piQtl, 5)
-        msg <- glue("Estimated piQtl: {piQtlR}\n", .trim = FALSE)
-        inform(msg)
+        inform(glue("Estimated piQtl: {piQtlR}\n", .trim = FALSE))
     }
     piQtl
 }
@@ -848,14 +968,17 @@ qtlEnrichment <- function(
 # @noRd
 .enrAlignRegionByMatch <- function(x, gwasPip) {
     mm <- matchVariants(names(x$pip), names(gwasPip))
-    nm <- names(x$pip)
-    nm[mm$idxA] <- names(gwasPip)[mm$idxB]
-    names(x$pip) <- nm
-    unmatchedIdx <- setdiff(seq_along(x$pip), mm$idxA)
-    if (length(unmatchedIdx) > 0) {
-        x$unmatched_variants <- names(x$pip)[unmatchedIdx]
-    }
-    x
+    nm <- replace(names(x$pip), mm$idxA, names(gwasPip)[mm$idxB])
+    aligned <- list_assign(x, pip = set_names(x$pip, nm))
+    unmatchedIdx <- setdiff(seq_along(aligned$pip), mm$idxA)
+    list_assign(
+        aligned,
+        !!!compact(list(
+            unmatched_variants = if (length(unmatchedIdx) > 0) {
+                names(aligned$pip)[unmatchedIdx]
+            }
+        ))
+    )
 }
 
 # Record the region's variants absent from the GWAS name set (cheap membership
@@ -863,17 +986,20 @@ qtlEnrichment <- function(
 # @noRd
 .enrMarkUnmatched <- function(x, gwasNameSet) {
     unmatchedIdx <- which(!is_in(names(x$pip), gwasNameSet))
-    if (length(unmatchedIdx) > 0) {
-        x$unmatched_variants <- names(x$pip)[unmatchedIdx]
-    }
-    x
+    list_assign(
+        x,
+        !!!compact(list(
+            unmatched_variants = if (length(unmatchedIdx) > 0) {
+                names(x$pip)[unmatchedIdx]
+            }
+        ))
+    )
 }
 
 # Drop the transient unmatched_variants field from a region.
 # @noRd
 .enrStripUnmatched <- function(x) {
-    x$unmatched_variants <- NULL
-    x
+    list_modify(x, unmatched_variants = zap())
 }
 
 # Relabel one region's matched pip names to the union GWAS panel (unmatched
@@ -882,9 +1008,8 @@ qtlEnrichment <- function(
 .enrAlignRegion <- function(x, unionGwasNames) {
     if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
         mm <- matchVariants(names(x$pip), unionGwasNames)
-        nm <- names(x$pip)
-        nm[mm$idxA] <- unionGwasNames[mm$idxB]
-        names(x$pip) <- nm
+        nm <- replace(names(x$pip), mm$idxA, unionGwasNames[mm$idxB])
+        return(list_assign(x, pip = set_names(x$pip, nm)))
     }
     x
 }

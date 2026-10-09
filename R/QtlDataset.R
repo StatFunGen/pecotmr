@@ -12,6 +12,7 @@
 # =============================================================================
 
 #' @include AllGenerics.R
+#' @include MethodParam.R
 NULL
 
 #' @title QTL Dataset (individual-level data for one study)
@@ -118,30 +119,39 @@ setClass(
 
 # study / scaleResiduals / keepIndel scalars + the four non-negative cutoffs.
 # @noRd
+#' @importFrom checkmate makeAssertCollection assertString assertLogical
+#' @importFrom checkmate assertFlag assertNumber
+#' @importFrom purrr walk
 .qtlValidateScalars <- function(object) {
-    errors <- character()
-    if (length(object@study) != 1L || str_length(object@study) == 0L) {
-        errors <- c(
-            errors,
-            "'study' must be a single non-empty character string"
-        )
-    }
-    if (length(object@scaleResiduals) != 1L) {
-        errors <- c(errors, "'scaleResiduals' must be a single logical value")
-    }
-    if (length(object@keepIndel) != 1L || is.na(object@keepIndel)) {
-        errors <- c(errors, "'keepIndel' must be a single logical value")
-    }
-    for (nm in c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff")) {
-        v <- methods::slot(object, nm)
-        if (length(v) != 1L || is.na(v) || !is.finite(v) || v < 0) {
-            errors <- c(
-                errors,
-                glue("'{nm}' must be a single finite non-negative numeric")
-            )
-        }
-    }
-    errors
+    coll <- makeAssertCollection()
+    assertString(object@study, min.chars = 1L, .var.name = "study", add = coll)
+    assertLogical(
+        object@scaleResiduals,
+        len = 1L,
+        .var.name = "scaleResiduals",
+        add = coll
+    )
+    assertFlag(object@keepIndel, .var.name = "keepIndel", add = coll)
+    walk(
+        c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff"),
+        .qtlValidateCutoff,
+        object = object,
+        coll = coll
+    )
+    coll$getMessages()
+}
+
+# Each cutoff slot must be a single finite non-negative number.
+# @noRd
+#' @importFrom checkmate assertNumber
+.qtlValidateCutoff <- function(nm, object, coll) {
+    assertNumber(
+        methods::slot(object, nm),
+        lower = 0,
+        finite = TRUE,
+        .var.name = nm,
+        add = coll
+    )
 }
 
 # Shape checks on the phenotype list handed to the constructor. Run before
@@ -149,71 +159,93 @@ setClass(
 # ExperimentList fail first with a message about experiments rather than
 # about contexts. Returns an error vector.
 # @noRd
-.qtlCheckPhenotypeList <- function(phenotypes) {
-    errors <- character()
-    if (length(phenotypes) == 0L) {
-        errors <- c(errors, "'phenotypes' must not be empty")
-    }
-    contextNames <- names(phenotypes)
+# What is wrong with the context names, if anything. The checks are ordered:
+# a list with no usable names is not also reported as having duplicates.
+# @noRd
+.qtlContextNameErrors <- function(contextNames) {
     if (
         is.null(contextNames) ||
             any(str_length(contextNames) == 0L, na.rm = TRUE) ||
             any(is.na(contextNames))
     ) {
-        errors <- c(
-            errors,
-            "'phenotypes' must be a named list with non-empty names"
-        )
-    } else if (n_distinct(contextNames) < length(contextNames)) {
-        errors <- c(errors, "context names in 'phenotypes' must be unique")
-    } else if (is_in(.QTL_GENO_EXPERIMENT, contextNames)) {
-        errors <- c(
-            errors,
-            glue(
-                "'{.QTL_GENO_EXPERIMENT}' is reserved for the genotype ",
-                "experiment and cannot name a context"
-            )
-        )
+        return("'phenotypes' must be a named list with non-empty names")
     }
-    for (ctx in seq_along(phenotypes)) {
-        se <- phenotypes[[ctx]]
-        if (!methods::is(se, "SummarizedExperiment")) {
-            errors <- c(
-                errors,
-                glue(
-                    "phenotypes[[{ctx}]] must be a SummarizedExperiment ",
-                    "(got {class(se)[[1L]]})"
-                )
-            )
-        } else if (is.null(colnames(se))) {
-            errors <- c(
-                errors,
-                glue(
-                    "phenotypes[[{ctx}]] has no column names. Which samples ",
-                    "a context observes is recorded in the sampleMap, so ",
-                    "every context must name its samples"
-                )
-            )
-        }
+    if (n_distinct(contextNames) < length(contextNames)) {
+        return("context names in 'phenotypes' must be unique")
     }
-    errors
+    if (is_in(.QTL_GENO_EXPERIMENT, contextNames)) {
+        return(glue(
+            "'{.QTL_GENO_EXPERIMENT}' is reserved for the genotype ",
+            "experiment and cannot name a context"
+        ))
+    }
+    character(0)
+}
+
+# What is wrong with one context's SummarizedExperiment, if anything.
+# @noRd
+.qtlPhenotypeEntryErrors <- function(ctx, phenotypes) {
+    se <- phenotypes[[ctx]]
+    if (!methods::is(se, "SummarizedExperiment")) {
+        return(glue(
+            "phenotypes[[{ctx}]] must be a SummarizedExperiment ",
+            "(got {class(se)[[1L]]})"
+        ))
+    }
+    if (is.null(colnames(se))) {
+        return(glue(
+            "phenotypes[[{ctx}]] has no column names. Which samples ",
+            "a context observes is recorded in the sampleMap, so ",
+            "every context must name its samples"
+        ))
+    }
+    character(0)
+}
+
+.qtlCheckPhenotypeList <- function(phenotypes) {
+    emptyError <- if (length(phenotypes) == 0L) {
+        "'phenotypes' must not be empty"
+    } else {
+        character(0)
+    }
+    # Each check answers with its own message or nothing, so the report is a
+    # concatenation rather than a vector appended to in place.
+    entryErrors <- map(
+        seq_along(phenotypes),
+        .qtlPhenotypeEntryErrors,
+        phenotypes = phenotypes
+    )
+    as.character(c(
+        emptyError,
+        .qtlContextNameErrors(names(phenotypes)),
+        .qtlConcatChr(entryErrors)
+    ))
+}
+
+# Concatenate per-item message vectors, empty-safe.
+# @noRd
+.qtlConcatChr <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(character(0))
+    }
+    as.character(list_c(pieces))
 }
 
 # The MAE must carry the genotype experiment plus at least one context.
 # @noRd
 .qtlValidatePhenotypes <- function(object) {
     exps <- MultiAssayExperiment::experiments(object)
-    errors <- character()
-    if (!is_in(.QTL_GENO_EXPERIMENT, names(exps))) {
-        errors <- c(
-            errors,
-            glue("experiment '{.QTL_GENO_EXPERIMENT}' is missing")
-        )
+    missingGeno <- if (is_in(.QTL_GENO_EXPERIMENT, names(exps))) {
+        character(0)
+    } else {
+        glue("experiment '{.QTL_GENO_EXPERIMENT}' is missing")
     }
-    if (length(.qtlPhenotypeList(object)) == 0L) {
-        errors <- c(errors, "'phenotypes' must not be empty")
+    noContexts <- if (length(.qtlPhenotypeList(object)) == 0L) {
+        "'phenotypes' must not be empty"
+    } else {
+        character(0)
     }
-    errors
+    as.character(c(missingGeno, noContexts))
 }
 
 # TRUE when two GRanges share canonical chrom + start + end.
@@ -236,32 +268,61 @@ setClass(
     if (!allSe) {
         return(character())
     }
-    errors <- character()
-    traitToRange <- list()
-    for (ctx in seq_along(pheno)) {
-        se <- pheno[[ctx]]
-        rr <- SummarizedExperiment::rowRanges(se)
-        ids <- rownames(se)
-        if (length(rr) != length(ids)) {
-            next
-        }
-        for (i in seq_along(ids)) {
-            tid <- ids[[i]]
-            prev <- traitToRange[[tid]]
-            if (is.null(prev)) {
-                traitToRange[[tid]] <- rr[i]
-            } else if (!.qtlSameRange(prev, rr[i])) {
-                errors <- c(
-                    errors,
-                    glue(
-                        "trait '{tid}' has inconsistent rowRanges across ",
-                        "contexts"
-                    )
-                )
-            }
-        }
+    # Every (trait, range) observation in context order, so each one can be
+    # compared against the first sighting of its trait without a running map.
+    pairs <- .qtlConcat(map(
+        seq_along(pheno),
+        .qtlTraitRangePairs,
+        pheno = pheno
+    ))
+    tids <- map_chr(pairs, "tid")
+    .qtlConcatChr(map(
+        seq_along(pairs),
+        .qtlTraitRangeError,
+        tids = tids,
+        ranges = map(pairs, "range")
+    ))
+}
+
+# Concatenate per-item lists, empty-safe.
+# @noRd
+.qtlConcat <- function(pieces) {
+    if (length(pieces) == 0L) {
+        return(list())
     }
-    errors
+    list_c(pieces)
+}
+
+# @noRd
+.qtlTraitRangePair <- function(i, ids, rr) {
+    list(tid = ids[[i]], range = rr[i])
+}
+
+# One context's (trait, range) observations, or none when the rowRanges and
+# the rownames disagree on length.
+# @noRd
+.qtlTraitRangePairs <- function(ctx, pheno) {
+    se <- pheno[[ctx]]
+    rr <- SummarizedExperiment::rowRanges(se)
+    ids <- rownames(se)
+    if (length(rr) != length(ids)) {
+        return(list())
+    }
+    map(seq_along(ids), .qtlTraitRangePair, ids = ids, rr = rr)
+}
+
+# Observation `i` disagrees with the first sighting of the same trait. Earlier
+# sightings are the reference, so the first one never reports.
+# @noRd
+.qtlTraitRangeError <- function(i, tids, ranges) {
+    earlier <- which(tids[seq_len(i - 1L)] == tids[[i]])
+    if (length(earlier) == 0L) {
+        return(character(0))
+    }
+    if (.qtlSameRange(ranges[[earlier[[1L]]]], ranges[[i]])) {
+        return(character(0))
+    }
+    glue("trait '{tids[[i]]}' has inconsistent rowRanges across contexts")
 }
 
 # =============================================================================
@@ -329,29 +390,31 @@ setClass(
 #'   (e.g., ancestry PCs); rows are samples. Becomes the \code{colData} of the
 #'   genotype experiment.
 #' @param scaleResiduals Logical (length 1). Default \code{TRUE}.
-#' @param mafCutoff Numeric (length 1). Minor allele frequency threshold;
-#'   variants with \code{MAF < mafCutoff} are dropped at extraction time inside
-#'   \code{getGenotypes()} / \code{getResidualizedGenotypes()}. Default 0 (no
-#'   filter).
-#' @param macCutoff Numeric (length 1). Minor allele count threshold; converted
-#'   to a MAF threshold using \code{max(mafCutoff, macCutoff / (2 * n))} where
-#'   \code{n} is the post-narrowing sample count of the extracted block. Default
-#'   0 (no filter).
-#' @param xvarCutoff Numeric (length 1). Per-variant genotype variance
-#'   threshold; variants with column variance below this are dropped at
-#'   extraction time. Default 0 (no filter).
-#' @param imissCutoff Numeric (length 1). Per-sample genotype-missingness
-#'   threshold; samples with a missing-genotype rate above this are dropped at
-#'   extraction time. Default 0 (no filter).
-#' @param keepSamples Character vector of sample identifiers to retain. The
-#'   dataset is subset to them, narrowing \code{colData} and
-#'   \code{sampleMap} together, so the sample set has one home rather than
-#'   two. Length 0 means no restriction.
-#' @param keepVariants Character vector of variant identifiers to retain prior
-#'   to per-block QC. Length 0 means no restriction.
-#' @param keepIndel Logical (length 1). When \code{FALSE}, variants whose
-#'   alleles are not single nucleotides (indels) are dropped at extraction.
-#'   Default \code{TRUE} (keep all variants).
+#' @param genotypeFilterArgs Which variants and samples to keep, built with
+#'   \code{\link{GenotypeFilterParam}}. A bare list is refused, since it
+#'   cannot be checked. Each field is recorded on the object and applied
+#'   lazily, at extraction time inside \code{getGenotypes()} /
+#'   \code{getResidualizedGenotypes()}:
+#'   \itemize{
+#'     \item \code{mafCutoff} --- drop variants with
+#'       \code{MAF < mafCutoff}. Unset means 0 (no filter).
+#'     \item \code{macCutoff} --- a minor-allele-count threshold, converted
+#'       to a MAF threshold as \code{max(mafCutoff, macCutoff / (2 * n))}
+#'       with \code{n} the post-narrowing sample count of the extracted
+#'       block. Unset means 0.
+#'     \item \code{xvarCutoff} --- drop variants whose column variance is
+#'       below this. Unset means 0.
+#'     \item \code{imissCutoff} --- drop samples whose missing-genotype rate
+#'       exceeds this. Unset means 0.
+#'     \item \code{keepSamples} --- subset the dataset to these samples,
+#'       narrowing \code{colData} and \code{sampleMap} together so the
+#'       sample set has one home rather than two. Unset, or
+#'       \code{character(0)}, means no restriction.
+#'     \item \code{keepVariants} --- retain only these variants, before
+#'       per-block QC. Unset, or \code{character(0)}, means no restriction.
+#'     \item \code{keepIndel} --- when \code{FALSE}, drop variants whose
+#'       alleles are not single nucleotides. Unset means \code{TRUE}.
+#'   }
 #' @return A \code{QtlDataset} object.
 #' @examples
 #' panel <- readGenotypes(
@@ -376,14 +439,14 @@ QtlDataset <- function(
     phenotypes,
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
     scaleResiduals = TRUE,
-    mafCutoff = 0,
-    macCutoff = 0,
-    xvarCutoff = 0,
-    imissCutoff = 0,
-    keepSamples = character(0),
-    keepVariants = character(0),
-    keepIndel = TRUE
+    genotypeFilterArgs = GenotypeFilterParam()
 ) {
+    .assertMethodParam(
+        genotypeFilterArgs,
+        "GenotypeFilterParam",
+        "genotypeFilter"
+    )
+    filt <- .qtlResolveFilter(genotypeFilterArgs)
     handle <- .qtlValidateInputs(phenotypes, genotypes)
     experiments <- c(
         set_names(
@@ -399,15 +462,15 @@ QtlDataset <- function(
     )
     obj <- methods::new(
         "QtlDataset",
-        .qtlRestrictSamples(mae, keepSamples),
+        .qtlRestrictSamples(mae, filt$keepSamples),
         study = as.character(study),
         scaleResiduals = isTRUE(scaleResiduals),
-        mafCutoff = as.numeric(mafCutoff),
-        macCutoff = as.numeric(macCutoff),
-        xvarCutoff = as.numeric(xvarCutoff),
-        imissCutoff = as.numeric(imissCutoff),
-        keepVariants = as.character(keepVariants),
-        keepIndel = isTRUE(keepIndel)
+        mafCutoff = as.numeric(filt$mafCutoff),
+        macCutoff = as.numeric(filt$macCutoff),
+        xvarCutoff = as.numeric(filt$xvarCutoff),
+        imissCutoff = as.numeric(filt$imissCutoff),
+        keepVariants = as.character(filt$keepVariants),
+        keepIndel = isTRUE(filt$keepIndel)
     )
     validObject(obj)
     obj
@@ -516,14 +579,15 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
 # Read the dosages into memory so the reshape can see them.
 # @noRd
 .qtlRealizeDosages <- function(mae) {
-    exps <- MultiAssayExperiment::experiments(mae)
-    se <- exps[[.QTL_GENO_EXPERIMENT]]
-    SummarizedExperiment::assay(se, "dosage") <- as.matrix(
-        SummarizedExperiment::assay(se, "dosage")
+    lazy <- MultiAssayExperiment::experiments(mae)
+    bare <- lazy[[.QTL_GENO_EXPERIMENT]]
+    se <- SummarizedExperiment::`assay<-`(
+        bare,
+        "dosage",
+        value = as.matrix(SummarizedExperiment::assay(bare, "dosage"))
     )
-    exps[[.QTL_GENO_EXPERIMENT]] <- se
-    MultiAssayExperiment::experiments(mae) <- exps
-    mae
+    exps <- `[[<-`(lazy, .QTL_GENO_EXPERIMENT, value = se)
+    MultiAssayExperiment::`experiments<-`(mae, value = exps)
 }
 
 # Resolve an experiment subscript to names, always keeping the genotype
@@ -579,10 +643,14 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
 .qtlWithGenotypeHandle <- function(x, handle) {
     exps <- MultiAssayExperiment::experiments(x)
     gCov <- .qtlColDataMatrix(exps[[.QTL_GENO_EXPERIMENT]])
-    exps[[.QTL_GENO_EXPERIMENT]] <- .genotypeExperiment(handle, gCov)
-    MultiAssayExperiment::experiments(x) <- exps
-    validObject(x)
-    x
+    withHandle <- `[[<-`(
+        exps,
+        .QTL_GENO_EXPERIMENT,
+        value = .genotypeExperiment(handle, gCov)
+    )
+    rebuilt <- MultiAssayExperiment::`experiments<-`(x, value = withHandle)
+    validObject(rebuilt)
+    rebuilt
 }
 
 # The primary sample table: every sample any experiment observes, in
@@ -655,9 +723,7 @@ setMethod("getGenotypeCovariates", "QtlDataset", function(x) {
 # @noRd
 .qtlColDataMatrix <- function(se) {
     cd <- SummarizedExperiment::colData(se)
-    out <- as.matrix(as.data.frame(cd))
-    rownames(out) <- rownames(cd)
-    out
+    `rownames<-`(as.matrix(as.data.frame(cd)), rownames(cd))
 }
 
 #' @rdname getScaleResiduals
@@ -678,27 +744,27 @@ setMethod("getGenotypeHandle", "QtlDataset", function(x) {
 
 #' @rdname qtlDatasetFilters
 #' @export
-setMethod("getMafCutoff", "QtlDataset", function(x, ...) x@mafCutoff)
+setMethod("getMafCutoff", "QtlDataset", function(x) x@mafCutoff)
 
 #' @rdname qtlDatasetFilters
 #' @export
-setMethod("getMacCutoff", "QtlDataset", function(x, ...) x@macCutoff)
+setMethod("getMacCutoff", "QtlDataset", function(x) x@macCutoff)
 
 #' @rdname qtlDatasetFilters
 #' @export
-setMethod("getXvarCutoff", "QtlDataset", function(x, ...) x@xvarCutoff)
+setMethod("getXvarCutoff", "QtlDataset", function(x) x@xvarCutoff)
 
 #' @rdname qtlDatasetFilters
 #' @export
-setMethod("getImissCutoff", "QtlDataset", function(x, ...) x@imissCutoff)
+setMethod("getImissCutoff", "QtlDataset", function(x) x@imissCutoff)
 
 #' @rdname qtlDatasetFilters
 #' @export
-setMethod("getKeepVariants", "QtlDataset", function(x, ...) x@keepVariants)
+setMethod("getKeepVariants", "QtlDataset", function(x) x@keepVariants)
 
 #' @rdname qtlDatasetFilters
 #' @export
-setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
+setMethod("getKeepIndel", "QtlDataset", function(x) x@keepIndel)
 
 # --- Internal: resolve the variant-selection region for the genotype handle.
 # Returns a GRanges (one or more ranges). When `traitId` is supplied, expand
@@ -729,6 +795,25 @@ setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
 # The union span (+/- cisWindow) of a trait's rowRanges across all contexts.
 # Requires cisWindow and a single shared chromosome.
 # @noRd
+# The requested traits' ranges within one context, or NULL when it carries
+# none of them.
+# @noRd
+.qtlTraitRangesInContext <- function(ctx, x, traitId) {
+    se <- getPhenotypes(x, ctx)
+    hits <- .qtlPresentIndices(traitId, rownames(se))
+    if (length(hits) == 0L) {
+        return(NULL)
+    }
+    SummarizedExperiment::rowRanges(se)[hits]
+}
+
+# Positions of `wanted` in `available`, dropping the ones not present.
+# @noRd
+.qtlPresentIndices <- function(wanted, available) {
+    hits <- match(wanted, available)
+    hits[!is.na(hits)]
+}
+
 .qtlTraitRegion <- function(x, traitId, cisWindow) {
     if (is.null(cisWindow) || length(cisWindow) != 1L || cisWindow < 0) {
         msg <- glue(
@@ -737,16 +822,12 @@ setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
         )
         abort(msg)
     }
-    perTraitRanges <- list()
-    for (ctx in getContexts(x)) {
-        se <- getPhenotypes(x, ctx)
-        hits <- match(traitId, rownames(se))
-        hits <- hits[!is.na(hits)]
-        if (length(hits) > 0) {
-            rr <- SummarizedExperiment::rowRanges(se)
-            perTraitRanges[[length(perTraitRanges) + 1L]] <- rr[hits]
-        }
-    }
+    perTraitRanges <- compact(map(
+        getContexts(x),
+        .qtlTraitRangesInContext,
+        x = x,
+        traitId = traitId
+    ))
     if (length(perTraitRanges) == 0L) {
         abort("None of the requested traitId values were found in any context.")
     }
@@ -770,19 +851,17 @@ setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
 
 # A literal `region` GRanges, each range optionally extended by cisWindow.
 # @noRd
+#' @importFrom checkmate assertNumber
+#' @importFrom checkmate assertClass
 .qtlLiteralRegion <- function(region, cisWindow) {
-    if (!methods::is(region, "GRanges")) {
-        abort("`region` must be a GRanges object.")
-    }
+    assertClass(region, "GRanges")
     if (length(region) == 0L) {
         abort("`region` must contain at least one range.")
     }
     if (is.null(cisWindow)) {
         return(region)
     }
-    if (length(cisWindow) != 1L || cisWindow < 0) {
-        abort("`cisWindow` must be a single non-negative value.")
-    }
+    assertNumber(cisWindow, lower = 0)
     GenomicRanges::GRanges(
         seqnames = GenomicRanges::seqnames(region),
         ranges = IRanges::IRanges(
@@ -802,46 +881,64 @@ setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
     # contexts), then build ONE fresh GRanges at the end. Combining per-context
     # GRanges with do.call(c, .) can trip S4 seqinfo reconciliation in some
     # GenomeInfoDb builds, so we avoid it entirely.
-    n <- length(traitIds)
-    chrs <- rep("chrUn", n)
-    starts <- rep(1L, n)
-    ends <- rep(1L, n)
-    for (i in seq_len(n)) {
-        tid <- traitIds[[i]]
-        st <- Inf
-        en <- -Inf
-        ch <- NA_character_
-        for (ctx in getContexts(x)) {
-            se <- getPhenotypes(x, ctx)
-            h <- match(tid, rownames(se))
-            h <- h[!is.na(h)]
-            if (length(h) == 0L) {
-                next
-            }
-            rr <- SummarizedExperiment::rowRanges(se)[h]
-            ch <- as.character(GenomicRanges::seqnames(rr))[1L]
-            st <- min(st, GenomicRanges::start(rr))
-            en <- max(en, GenomicRanges::end(rr))
-        }
-        if (!is.na(ch)) {
-            chrs[i] <- ch
-            starts[i] <- as.integer(st)
-            ends[i] <- as.integer(en)
-        }
-    }
-    gr <- GenomicRanges::GRanges(
-        chrs,
-        IRanges::IRanges(start = starts, end = pmax(ends, starts))
+    spans <- map(traitIds, .qtlTraitSpan, x = x, contexts = getContexts(x))
+    starts <- map_int(spans, "start")
+    # `set_names()` is vector-only, so name the GRanges through `names<-`
+    # applied as a function -- still a copy, no binding rewritten.
+    `names<-`(
+        GenomicRanges::GRanges(
+            map_chr(spans, "chr"),
+            IRanges::IRanges(
+                start = starts,
+                end = pmax(map_int(spans, "end"), starts)
+            )
+        ),
+        traitIds
     )
-    names(gr) <- traitIds
-    gr
+}
+
+# @noRd
+.qtlFirstSeqname <- function(rr) {
+    as.character(GenomicRanges::seqnames(rr))[[1L]]
+}
+
+# One trait's union span across every context that carries it. The chromosome
+# is the last matching context's, which is what the running assignment left
+# behind; the span is the widest across all of them.
+# @noRd
+.qtlTraitSpan <- function(tid, x, contexts) {
+    ranges <- compact(map(
+        contexts,
+        .qtlTraitRangesInContext,
+        x = x,
+        traitId = tid
+    ))
+    if (length(ranges) == 0L) {
+        return(list(chr = "chrUn", start = 1L, end = 1L))
+    }
+    chrs <- map_chr(ranges, .qtlFirstSeqname)
+    list(
+        chr = chrs[[length(chrs)]],
+        start = as.integer(min(map_dbl(ranges, .qtlRangeMinStart))),
+        end = as.integer(max(map_dbl(ranges, .qtlRangeMaxEnd)))
+    )
+}
+
+# @noRd
+.qtlRangeMinStart <- function(rr) {
+    min(GenomicRanges::start(rr))
+}
+
+# @noRd
+.qtlRangeMaxEnd <- function(rr) {
+    max(GenomicRanges::end(rr))
 }
 
 #' @rdname getTraitPosition
 #' @export
-setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
+setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL) {
     tids <- if (is.null(traitId)) {
-        unique(unlist(map(.qtlPhenotypeList(x), rownames)))
+        unique(list_c(map(.qtlPhenotypeList(x), rownames)))
     } else {
         as.character(traitId)
     }
@@ -862,17 +959,66 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     rChr <- canonChrom(GenomicRanges::seqnames(region))
     rStart <- GenomicRanges::start(region)
     rEnd <- GenomicRanges::end(region)
-    idx <- integer(0)
-    for (i in seq_along(region)) {
-        idx <- c(idx, which(siChr == rChr[i] & bp >= rStart[i] & bp <= rEnd[i]))
+    if (length(region) == 0L) {
+        return(integer(0))
     }
-    unique(idx)
+    unique(list_c(map(
+        seq_along(region),
+        .qtlRegionHitIndices,
+        siChr = siChr,
+        bp = bp,
+        rChr = rChr,
+        rStart = rStart,
+        rEnd = rEnd
+    )))
+}
+
+# Rows of the SNP table falling inside region `i`.
+# @noRd
+.qtlRegionHitIndices <- function(i, siChr, bp, rChr, rStart, rEnd) {
+    which(siChr == rChr[i] & bp >= rStart[i] & bp <= rEnd[i])
 }
 
 # Internal: keepIndel slot read, tolerant of QtlDataset objects serialized
 # before the slot existed (treat a missing slot as TRUE = keep indels).
+#' @importFrom purrr possibly
 .qtlKeepIndel <- function(x) {
-    isTRUE(tryCatch(getKeepIndel(x), error = function(e) TRUE))
+    isTRUE(possibly(getKeepIndel, otherwise = TRUE)(x))
+}
+
+# A GenotypeFilterParam() bundle with every field resolved. Unset fields
+# (absent from the bundle) take this constructor's documented defaults --
+# which is what makes the same bundle usable as a specification here and as an
+# override in .qtlApplyFilterOverrides, where unset means "leave the slot".
+# @noRd
+.qtlResolveFilter <- function(genotypeFilterArgs) {
+    list(
+        mafCutoff = genotypeFilterArgs$mafCutoff %||% 0,
+        macCutoff = genotypeFilterArgs$macCutoff %||% 0,
+        xvarCutoff = genotypeFilterArgs$xvarCutoff %||% 0,
+        imissCutoff = genotypeFilterArgs$imissCutoff %||% 0,
+        keepSamples = genotypeFilterArgs$keepSamples %||% character(0),
+        keepVariants = genotypeFilterArgs$keepVariants %||% character(0),
+        keepIndel = genotypeFilterArgs$keepIndel %||% TRUE
+    )
+}
+
+# Coerce an override, preserving "unset" as NULL. Hoisted rather than written
+# inline three times, and not nested, per the package's no-nested-functions
+# rule.
+# @noRd
+.qtlNumOverride <- function(x) {
+    if (is.null(x)) NULL else as.numeric(x)
+}
+
+# @noRd
+.qtlLglOverride <- function(x) {
+    if (is.null(x)) NULL else as.logical(x)
+}
+
+# @noRd
+.qtlChrOverride <- function(x) {
+    if (is.null(x)) NULL else as.character(x)
 }
 
 # Internal: return a copy of a QtlDataset with the supplied filter cutoffs /
@@ -880,39 +1026,48 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # untouched). This lets a pipeline accept per-call filter overrides as ordinary
 # arguments instead of forcing callers to mutate @slots directly (which bypasses
 # the class's validity checks). Applied against a validated copy.
-.qtlApplyFilterOverrides <- function(
-    data,
-    mafCutoff = NULL,
-    macCutoff = NULL,
-    xvarCutoff = NULL,
-    imissCutoff = NULL,
-    keepIndel = NULL,
-    keepSamples = NULL,
-    keepVariants = NULL
-) {
-    if (!is.null(mafCutoff)) {
-        data@mafCutoff <- as.numeric(mafCutoff)
+.qtlApplyFilterOverrides <- function(data, genotypeFilterArgs) {
+    .assertMethodParam(
+        genotypeFilterArgs,
+        "GenotypeFilterParam",
+        "genotypeFilter"
+    )
+    # discard(is.null), not compact(): a keepVariants of character(0) is a
+    # real instruction ("restrict to nothing was not asked, keep all"), and
+    # compact() would drop it along with the unset fields.
+    overridden <- exec(
+        methods::initialize,
+        data,
+        !!!discard(
+            list(
+                mafCutoff = .qtlNumOverride(genotypeFilterArgs$mafCutoff),
+                macCutoff = .qtlNumOverride(genotypeFilterArgs$macCutoff),
+                xvarCutoff = .qtlNumOverride(genotypeFilterArgs$xvarCutoff),
+                imissCutoff = .qtlNumOverride(genotypeFilterArgs$imissCutoff),
+                keepIndel = .qtlLglOverride(genotypeFilterArgs$keepIndel),
+                keepVariants = .qtlChrOverride(genotypeFilterArgs$keepVariants)
+            ),
+            is.null
+        )
+    )
+    keepSamples <- genotypeFilterArgs$keepSamples
+    restricted <- if (is.null(keepSamples)) {
+        overridden
+    } else {
+        .qtlRestrictSamples(overridden, keepSamples)
     }
-    if (!is.null(macCutoff)) {
-        data@macCutoff <- as.numeric(macCutoff)
+    methods::validObject(restricted)
+    restricted
+}
+
+# Drop samples whose missingness across the block exceeds the dataset's
+# imissCutoff. A cutoff of 0 (or an empty block) keeps every sample.
+# @noRd
+.qtlDropMissingSamples <- function(dosage, x) {
+    if (getImissCutoff(x) <= 0 || nrow(dosage) == 0L || ncol(dosage) == 0L) {
+        return(dosage)
     }
-    if (!is.null(xvarCutoff)) {
-        data@xvarCutoff <- as.numeric(xvarCutoff)
-    }
-    if (!is.null(imissCutoff)) {
-        data@imissCutoff <- as.numeric(imissCutoff)
-    }
-    if (!is.null(keepIndel)) {
-        data@keepIndel <- as.logical(keepIndel)
-    }
-    if (!is.null(keepSamples)) {
-        data <- .qtlRestrictSamples(data, keepSamples)
-    }
-    if (!is.null(keepVariants)) {
-        data@keepVariants <- as.character(keepVariants)
-    }
-    methods::validObject(data)
-    data
+    dosage[rowMeans(is.na(dosage)) <= getImissCutoff(x), , drop = FALSE]
 }
 
 # Internal: extract the panel dosage block (samples x variants) for the
@@ -945,13 +1100,13 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
         region = region,
         cisWindow = cisWindow
     )
-    snpIdx <- .qtlVariantIndices(x, gr)
-    if (length(snpIdx) == 0L) {
+    inRegion <- .qtlVariantIndices(x, gr)
+    if (length(inRegion) == 0L) {
         return(.qtlEmptyBlockAllSamples(x))
     }
     # Apply keepVariants + indel restrictions before materialization so we do
     # not extract dosage we would immediately drop.
-    snpIdx <- .qtlNarrowSnpIdx(x, snpIdx)
+    snpIdx <- .qtlNarrowSnpIdx(x, inRegion)
     if (length(snpIdx) == 0L) {
         return(.qtlEmptyBlock())
     }
@@ -961,21 +1116,13 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     if (length(keep) == 0L) {
         return(.qtlEmptyBlockNoSamples(dosage))
     }
-    dosage <- dosage[keep, , drop = FALSE]
-    # Per-sample missingness filter.
-    if (getImissCutoff(x) > 0 && nrow(dosage) > 0L && ncol(dosage) > 0L) {
-        dosage <- dosage[
-            rowMeans(is.na(dosage)) <= getImissCutoff(x),
-            ,
-            drop = FALSE
-        ]
-    }
-    filtered <- .qtlVariantFilters(dosage, x)
-    dosage <- .qtlMeanImpute(filtered$dosage)
+    kept <- dosage[keep, , drop = FALSE]
+    filtered <- .qtlVariantFilters(.qtlDropMissingSamples(kept, x), x)
+    imputed <- .qtlMeanImpute(filtered$dosage)
     list(
-        geno = dosage,
-        variantIds = colnames(dosage),
-        sampleIds = rownames(dosage),
+        geno = imputed,
+        variantIds = colnames(imputed),
+        sampleIds = rownames(imputed),
         maf = filtered$maf,
         af = filtered$af
     )
@@ -1033,22 +1180,22 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # @noRd
 .qtlNarrowSnpIdx <- function(x, snpIdx) {
     handle <- getGenotypeHandle(x)
-    if (length(getKeepVariants(x)) > 0L) {
+    kept <- if (length(getKeepVariants(x)) == 0L) {
+        snpIdx
+    } else {
         snpAll <- as.character(getSnpInfo(handle)$SNP[snpIdx])
         km <- matchVariants(snpAll, as.character(getKeepVariants(x)))
-        keepMask <- logical(length(snpAll))
-        keepMask[km$idxA] <- TRUE
-        snpIdx <- snpIdx[keepMask]
+        snpIdx[replace(logical(length(snpAll)), km$idxA, TRUE)]
     }
-    if (length(snpIdx) > 0L && !.qtlKeepIndel(x)) {
-        si <- getSnpInfo(handle)
-        # which() (not the mask) so an NA mask drops the variant rather than
-        # injecting an NA index.
-        snpMask <- str_length(as.character(si$A1[snpIdx])) == 1L &
-            str_length(as.character(si$A2[snpIdx])) == 1L
-        snpIdx <- snpIdx[which(snpMask)]
+    if (length(kept) == 0L || .qtlKeepIndel(x)) {
+        return(kept)
     }
-    snpIdx
+    si <- getSnpInfo(handle)
+    # which() (not the mask) so an NA mask drops the variant rather than
+    # injecting an NA index.
+    snpMask <- str_length(as.character(si$A1[kept])) == 1L &
+        str_length(as.character(si$A2[kept])) == 1L
+    kept[which(snpMask)]
 }
 
 # Resolve the sample set: panel samples intersected with the dataset's
@@ -1056,12 +1203,14 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # per-call `samples` arg.
 # @noRd
 .qtlResolveSamples <- function(dosage, x, samples) {
-    keep <- intersect(
+    inDataset <- intersect(
         rownames(dosage),
         rownames(MultiAssayExperiment::colData(x))
     )
-    if (!is.null(samples)) {
-        keep <- intersect(keep, as.character(samples))
+    keep <- if (is.null(samples)) {
+        inDataset
+    } else {
+        intersect(inDataset, as.character(samples))
     }
     keep
 }
@@ -1086,13 +1235,20 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
         getMafCutoff(x),
         if (nSamp > 0L) getMacCutoff(x) / (2 * nSamp) else 0
     )
-    keepVarMask <- !is.na(mafVec) & mafVec >= effectiveMaf
-    if (getXvarCutoff(x) > 0 && nSamp > 1L) {
+    byMaf <- !is.na(mafVec) & mafVec >= effectiveMaf
+    keepVarMask <- if (getXvarCutoff(x) <= 0 || nSamp <= 1L) {
+        byMaf
+    } else {
         mu <- if_else(nObs > 0L, sumD / nObs, 0)
-        centered <- sweep(dosage, 2L, mu, FUN = "-")
-        centered[is.na(centered)] <- 0
+        # mu is finite everywhere, so the centered NAs are exactly the
+        # dosage NAs; they contribute nothing to the variance.
+        centered <- replace(
+            sweep(dosage, 2L, mu, FUN = "-"),
+            is.na(dosage),
+            0
+        )
         varVec <- colSums(centered * centered) / (nSamp - 1L)
-        keepVarMask <- keepVarMask & varVec >= getXvarCutoff(x)
+        byMaf & varVec >= getXvarCutoff(x)
     }
     list(
         dosage = dosage[, keepVarMask, drop = FALSE],
@@ -1108,15 +1264,13 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     if (!anyNA(dosage)) {
         return(dosage)
     }
-    for (j in seq_len(ncol(dosage))) {
-        col <- dosage[, j]
-        na <- is.na(col)
-        if (any(na)) {
-            col[na] <- mean(col[!na])
-            dosage[, j] <- col
-        }
-    }
-    dosage
+    naMask <- is.na(dosage)
+    # An all-NA column means NaN either way, matching mean(numeric(0)).
+    means <- colMeans(dosage, na.rm = TRUE)
+    # One fill over the whole matrix instead of a copy per column: dosage is
+    # variants x samples, so rebuilding it column by column is the expensive
+    # way to say this.
+    replace(dosage, naMask, means[col(dosage)[naMask]])
 }
 
 #' @rdname getGenotypes
@@ -1129,8 +1283,7 @@ setMethod(
         traitId = NULL,
         region = NULL,
         cisWindow = NULL,
-        samples = NULL,
-        ...
+        samples = NULL
     ) {
         .qtlExtractBlock(
             x,
@@ -1147,7 +1300,7 @@ setMethod(
 setMethod(
     "getMaf",
     "QtlDataset",
-    function(x, region = NULL, cisWindow = NULL, samples = NULL, ...) {
+    function(x, region = NULL, cisWindow = NULL, samples = NULL) {
         block <- .qtlExtractBlock(
             x,
             traitId = NULL,
@@ -1155,9 +1308,7 @@ setMethod(
             cisWindow = cisWindow,
             samples = samples
         )
-        out <- block$maf
-        names(out) <- block$variantIds
-        out
+        set_names(block$maf, block$variantIds)
     }
 )
 
@@ -1171,8 +1322,7 @@ setMethod(
         traitId = NULL,
         region = NULL,
         cisWindow = NULL,
-        samples = NULL,
-        ...
+        samples = NULL
     ) {
         block <- .qtlExtractBlock(
             x,
@@ -1181,9 +1331,7 @@ setMethod(
             cisWindow = cisWindow,
             samples = samples
         )
-        out <- block$af
-        names(out) <- block$variantIds
-        out
+        set_names(block$af, block$variantIds)
     }
 )
 
@@ -1200,21 +1348,22 @@ setMethod(
         naAction = c("keep", "drop", "impute"),
         outlierAction = c("keep", "drop"),
         outlierPvalThreshold = 1e-3,
-        ...
+        outlierArgs = CovMcdOptions()
     ) {
         naAction <- arg_match(naAction)
         outlierAction <- arg_match(outlierAction)
+        .assertMethodOptions(outlierArgs, "CovMcdOptions", "outlierArgs")
         .qtlValidateContexts(x, contexts)
-        out <- .qtlPhenotypeList(x)[contexts]
-        out <- .qtlFilterPhenotypes(
-            out,
-            contexts,
-            traitId,
-            region,
-            naAction,
-            outlierAction,
-            outlierPvalThreshold
-        )
+        out <- .qtlPhenotypeList(x)[contexts] |>
+            .qtlFilterPhenotypes(
+                contexts,
+                traitId,
+                region,
+                naAction,
+                outlierAction,
+                outlierPvalThreshold,
+                outlierArgs
+            )
         if (length(contexts) == 1L) out[[1L]] else out
     }
 )
@@ -1264,35 +1413,40 @@ setMethod(
     region,
     naAction,
     outlierAction,
-    outlierPvalThreshold
+    outlierPvalThreshold,
+    outlierArgs = list()
 ) {
-    if (!is.null(traitId)) {
-        out <- .qtlFilterTraits(out, contexts, traitId)
+    byTrait <- if (is.null(traitId)) {
+        out
+    } else {
+        .qtlFilterTraits(out, contexts, traitId)
     }
-    if (!is.null(region)) {
-        out <- set_names(
-            map(out, .qtlSeInRegion, region = region),
+    inRegion <- if (is.null(region)) {
+        byTrait
+    } else {
+        set_names(map(byTrait, .qtlSeInRegion, region = region), contexts)
+    }
+    naHandled <- if (naAction == "keep") {
+        inRegion
+    } else {
+        set_names(
+            map(inRegion, .qtlApplyPhenoNaAction, naAction = naAction),
             contexts
         )
     }
-    if (naAction != "keep") {
-        out <- set_names(
-            map(out, .qtlApplyPhenoNaAction, naAction = naAction),
-            contexts
-        )
+    if (outlierAction == "keep") {
+        return(naHandled)
     }
-    if (outlierAction != "keep") {
-        out <- set_names(
-            map(
-                out,
-                .qtlApplyPhenoOutliers,
-                action = outlierAction,
-                pvalThreshold = outlierPvalThreshold
-            ),
-            contexts
-        )
-    }
-    out
+    set_names(
+        map(
+            naHandled,
+            .qtlApplyPhenoOutliers,
+            action = outlierAction,
+            pvalThreshold = outlierPvalThreshold,
+            outlierArgs = outlierArgs
+        ),
+        contexts
+    )
 }
 
 # Internal: apply naAction to a SummarizedExperiment slice. SE assay rows
@@ -1310,23 +1464,27 @@ setMethod(
         return(se)
     }
     if (naAction == "drop") {
-        keepSamp <- colSums(is.na(Y)) == 0L
-        se <- se[, keepSamp, drop = FALSE]
-    } else if (naAction == "impute") {
-        if (anyNA(Y)) {
-            for (j in seq_len(nrow(Y))) {
-                row <- Y[j, ]
-                na <- is.na(row)
-                if (any(na)) {
-                    obs <- row[!na]
-                    row[na] <- if (length(obs) > 0L) mean(obs) else 0
-                    Y[j, ] <- row
-                }
-            }
-            SummarizedExperiment::assay(se, assayName) <- Y
-        }
+        return(se[, colSums(is.na(Y)) == 0L, drop = FALSE])
     }
-    se
+    if (naAction != "impute" || !anyNA(Y)) {
+        return(se)
+    }
+    SummarizedExperiment::`assay<-`(
+        se,
+        assayName,
+        value = .qtlRowMeanImpute(Y)
+    )
+}
+
+# Fill each row's missing values with that row's mean, or 0 when the row has
+# nothing observed. One fill over the whole matrix rather than a copy per row.
+# @noRd
+.qtlRowMeanImpute <- function(Y) {
+    naMask <- is.na(Y)
+    # rowMeans of an all-NA row is NaN, which is the `else 0` case.
+    means <- rowMeans(Y, na.rm = TRUE)
+    filled <- if_else(is.nan(means), 0, means)
+    replace(Y, naMask, filled[row(Y)[naMask]])
 }
 
 # Multivariate-outlier keep mask via Mahalanobis distance against a
@@ -1340,6 +1498,74 @@ setMethod(
 # message; the test then still works but its estimates are pulled by
 # the very outliers it should be flagging.
 #
+#' @title Options for the Robust Outlier Covariance Estimator
+#' @description Build a checked record of extra arguments for
+#'   \code{robustbase::covMcd()}, the minimum-covariance-determinant
+#'   estimator behind \code{outlierAction = "drop"} on
+#'   \code{\link{getPhenotypes}} and
+#'   \code{\link{getResidualizedPhenotypes}}.
+#' @param ... Arguments for \code{robustbase::covMcd()} -- in practice
+#'   \code{alpha} (the subset fraction the determinant is minimised over,
+#'   which sets the breakdown point), \code{nsamp}, \code{use.correction}
+#'   and \code{nmini} / \code{kmini}. \code{x} is the trait matrix pecotmr
+#'   assembles and is refused, as is \code{seed}: pecotmr owns RNG
+#'   reproducibility, and \code{covMcd()}'s \code{seed} restores the ambient
+#'   \code{.Random.seed} on exit, which would silently undo the caller's
+#'   stream.
+#' @return A \code{MethodOptions} record for the \code{outlierArgs} argument.
+#' @seealso \code{\link{getPhenotypes}},
+#'   \code{\link{getResidualizedPhenotypes}}
+#' @examples
+#' CovMcdOptions(alpha = 0.75)
+#' @export
+CovMcdOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            x = "the trait matrix pecotmr assembles",
+            seed = "pecotmr's own RNG handling"
+        ),
+        "CovMcdOptions"
+    )
+    .newMethodOptions(
+        "robustbase::covMcd",
+        defaults = list(),
+        extra = extra,
+        label = "CovMcdOptions",
+        engine = "covMcd"
+    )
+}
+
+# The centre and covariance the Mahalanobis distance is measured against:
+# robustbase's MCD when it is installed and converges, else the non-robust
+# colMeans/cov pair. Both fallbacks are announced -- a silently non-robust
+# estimate would make the outlier rule mean something different from what
+# the caller asked for.
+# @noRd
+#' @importFrom rlang try_fetch
+.qtlOutlierCenterCov <- function(Y, outlierArgs = list()) {
+    # Engine-call exception: robustbase::covMcd is a covariance estimator,
+    # interchangeable with the colMeans/stats::cov fallback above -- a numeric
+    # primitive for outlier detection while a QtlDataset is built.
+    if (!requireNamespace("robustbase", quietly = TRUE)) {
+        msg <- glue(
+            "outlier detection: install 'robustbase' for an MCD-based ",
+            "estimator; falling back to non-robust colMeans/cov."
+        )
+        inform(msg)
+        return(list(center = colMeans(Y), cov = stats::cov(Y)))
+    }
+    mcd <- try_fetch(
+        exec(robustbase::covMcd, Y, !!!as.list(outlierArgs)),
+        error = function(cnd) NULL
+    )
+    if (is.null(mcd)) {
+        return(list(center = colMeans(Y), cov = stats::cov(Y)))
+    }
+    list(center = mcd$center, cov = mcd$cov)
+}
+
 # Significance: per-sample chi-squared(p) p-value with Bonferroni
 # correction over the sample count. A sample is flagged when its
 # corrected p-value falls below `pvalThreshold`. With single-trait Y
@@ -1347,7 +1573,8 @@ setMethod(
 #
 # Returns all-TRUE (no-op) when there are too few samples to support
 # a covariance estimate (n < p + 2).
-.qtlOutlierKeepMask <- function(Y, pvalThreshold) {
+#' @importFrom rlang try_fetch
+.qtlOutlierKeepMask <- function(Y, pvalThreshold, outlierArgs = list()) {
     Y <- as.matrix(Y)
     n <- nrow(Y)
     p <- ncol(Y)
@@ -1362,25 +1589,20 @@ setMethod(
         warn(msg)
         return(rep(TRUE, n))
     }
-    if (requireNamespace("robustbase", quietly = TRUE)) {
-        mcd <- tryCatch(robustbase::covMcd(Y), error = function(e) NULL)
-        if (!is.null(mcd)) {
-            ctr <- mcd$center
-            covMat <- mcd$cov
-        } else {
-            ctr <- colMeans(Y)
-            covMat <- stats::cov(Y)
+    est <- .qtlOutlierCenterCov(Y, outlierArgs)
+    ctr <- est$center
+    covMat <- est$cov
+    invCov <- try_fetch(
+        solve(covMat),
+        error = function(cnd) {
+            msg <- glue(
+                "outlier detection: the trait covariance is singular; ",
+                "using a Moore-Penrose pseudo-inverse instead."
+            )
+            inform(msg, parent = cnd)
+            MASS::ginv(covMat)
         }
-    } else {
-        msg <- glue(
-            "outlier detection: install 'robustbase' for an MCD-based ",
-            "estimator; falling back to non-robust colMeans/cov."
-        )
-        inform(msg)
-        ctr <- colMeans(Y)
-        covMat <- stats::cov(Y)
-    }
-    invCov <- tryCatch(solve(covMat), error = function(e) MASS::ginv(covMat))
+    )
     Yc <- sweep(Y, 2L, ctr)
     d2 <- rowSums((Yc %*% invCov) * Yc)
     raw <- stats::pchisq(d2, df = p, lower.tail = FALSE)
@@ -1390,13 +1612,18 @@ setMethod(
 # Wrapper: apply the keep-mask to a SummarizedExperiment slice. SE
 # columns are samples; transpose the assay (traits x samples) before
 # calling .qtlOutlierKeepMask which expects samples x traits.
-.qtlApplyPhenoOutliers <- function(se, action, pvalThreshold) {
+.qtlApplyPhenoOutliers <- function(
+    se,
+    action,
+    pvalThreshold,
+    outlierArgs = list()
+) {
     if (action == "keep") {
         return(se)
     }
     assayName <- SummarizedExperiment::assayNames(se)[[1L]]
     Y <- t(SummarizedExperiment::assay(se, assayName))
-    keep <- .qtlOutlierKeepMask(Y, pvalThreshold)
+    keep <- .qtlOutlierKeepMask(Y, pvalThreshold, outlierArgs)
     if (all(keep)) {
         return(se)
     }
@@ -1415,9 +1642,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
         abort(msg)
     }
-    out <- map(contexts, .qtlContextColData, x = x)
-    names(out) <- contexts
-    out
+    set_names(map(contexts, .qtlContextColData, x = x), contexts)
 })
 
 # Internal: residualize a numeric matrix Y (n x k) against a covariate
@@ -1441,21 +1666,21 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     # `qr.resid` does not support LAPACK pivoted QR, so use `lm.fit`. It
     # handles rank-deficient designs gracefully via base-R's pivoted QR
     # internally -- same effect the LAPACK path was meant to deliver.
-    res <- stats::lm.fit(x = X, y = Y)$residuals
-    res <- as.matrix(res)
-    rownames(res) <- rownames(Y)
-    colnames(res) <- colnames(Y)
+    res <- `dimnames<-`(
+        as.matrix(stats::lm.fit(x = X, y = Y)$residuals),
+        list(rownames(Y), colnames(Y))
+    )
     if (isTRUE(scaleResiduals)) {
-        sds <- apply(res, 2L, stats::sd, na.rm = TRUE)
         # `sds == 0` exact-zero test is unreliable for residuals coming out of
         # lm.fit on a constant Y: roundoff gives sd ~ 1e-16 instead of 0, and
         # dividing the (also-tiny) residuals by it amplifies floating-point
         # noise to unit-scale. Treat anything below sqrt(.Machine$double.eps)
         # as effectively zero (column is constant) and skip rescaling.
-        nearZero <- !is.finite(sds) | sds < sqrt(.Machine$double.eps)
-        sds[nearZero] <- 1
-        res[, nearZero] <- 0
-        res <- sweep(res, 2L, sds, FUN = "/")
+        rawSds <- apply(res, 2L, stats::sd, na.rm = TRUE)
+        nearZero <- !is.finite(rawSds) | rawSds < sqrt(.Machine$double.eps)
+        # One multiplier per column: 1/sd where it is meaningful, 0 where the
+        # column is constant, which zeroes that column outright.
+        return(sweep(res, 2L, if_else(nearZero, 0, 1 / rawSds), FUN = "*"))
     }
     res
 }
@@ -1473,7 +1698,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (length(keep) != length(requested)) {
         missingNames <- setdiff(requested, avail)
         msg <- glue(
-            "phenotypeCovariatesToResidualize: context '{ctx}' has no ",
+            "residualizationArgs$phenotypeCovariates: context '{ctx}' has no ",
             "covariate(s) named: {str_flatten(missingNames, ', ')}"
         )
         abort(msg)
@@ -1481,7 +1706,8 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     keep
 }
 
-# Internal: validate and resolve the `*ToResidualize` argument against a
+# Internal: validate and resolve a covariate-selection field of
+# ResidualizationParam() against a
 # set of contexts and the covariates actually present in those contexts'
 # colData. Accepts either NULL (use all), a character vector (apply to all
 # listed contexts), or a named list keyed by context. Returns a named list
@@ -1508,13 +1734,13 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         ))
     }
     msg <- glue(
-        "phenotypeCovariatesToResidualize must be NULL, a character vector, ",
+        "`phenotypeCovariates` must be NULL, a character vector, ",
         "or a named list keyed by context."
     )
     abort(msg)
 }
 
-# List-form phenotypeCovariatesToResidualize: must be named with EXACTLY the
+# List-form `phenotypeCovariates`: must be named with EXACTLY the
 # `contexts` set. Resolves each context's selection.
 # @noRd
 .qtlPhenoSelectionList <- function(x, contexts, toResidualize) {
@@ -1523,7 +1749,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         is.null(toResNames) || any(str_length(toResNames) == 0L, na.rm = TRUE)
     ) {
         msg <- glue(
-            "phenotypeCovariatesToResidualize: when supplied as a list, it ",
+            "`phenotypeCovariates`: when supplied as a list, it ",
             "must be named with context names."
         )
         abort(msg)
@@ -1531,7 +1757,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     badKeys <- setdiff(names(toResidualize), contexts)
     if (length(badKeys) > 0L) {
         msg <- glue(
-            "phenotypeCovariatesToResidualize: list key(s) not in ",
+            "`phenotypeCovariates`: list key(s) not in ",
             "`contexts`: {str_flatten(badKeys, ', ')}"
         )
         abort(msg)
@@ -1539,7 +1765,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     missingKeys <- setdiff(contexts, names(toResidualize))
     if (length(missingKeys) > 0L) {
         msg <- glue(
-            "phenotypeCovariatesToResidualize: list does not cover all ",
+            "`phenotypeCovariates`: list does not cover all ",
             "`contexts`. Per-context lists must have exactly the same context ",
             "set as `contexts`. Missing keys: ",
             "{str_flatten(missingKeys, ', ')}"
@@ -1555,10 +1781,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
 # Internal: validate the genotype-covariate selection vector. Returns
 # character(0) when nothing selected, the resolved set otherwise.
 .qtlResolveGenoSelection <- function(x, toResidualize) {
-    avail <- colnames(getGenotypeCovariates(x))
-    if (is.null(avail)) {
-        avail <- character(0)
-    }
+    avail <- colnames(getGenotypeCovariates(x)) %||% character(0)
     if (is.null(toResidualize)) {
         return(avail)
     }
@@ -1566,7 +1789,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (length(keep) != length(toResidualize)) {
         missingNames <- setdiff(toResidualize, avail)
         msg <- glue(
-            "genotypeCovariatesToResidualize: no covariate(s) named: ",
+            "`genotypeCovariates`: no covariate(s) named: ",
             "{str_flatten(missingNames, ', ')}"
         )
         abort(msg)
@@ -1627,29 +1850,41 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
 # rownames(colData(se)).
 # @noRd
 .qtlPhenoCovBlocks <- function(x, contexts, phenoSelection) {
-    perContext <- list()
-    for (ctx in contexts) {
-        keep <- phenoSelection[[ctx]]
-        if (length(keep) == 0L) {
-            next
-        }
-        se <- getPhenotypes(x, ctx)
-        cd <- as.matrix(as.data.frame(SummarizedExperiment::colData(se)))
-        cdMat <- cd[, keep, drop = FALSE]
-        colnames(cdMat) <- str_c(ctx, ".", colnames(cdMat))
-        perContext[[ctx]] <- cdMat
+    compact(set_names(
+        map(
+            contexts,
+            .qtlPhenoCovBlock,
+            x = x,
+            phenoSelection = phenoSelection
+        ),
+        contexts
+    ))
+}
+
+# One context's selected covariate columns, context-qualified, or NULL when
+# nothing is selected there.
+# @noRd
+.qtlPhenoCovBlock <- function(ctx, x, phenoSelection) {
+    keep <- phenoSelection[[ctx]]
+    if (length(keep) == 0L) {
+        return(NULL)
     }
-    perContext
+    se <- getPhenotypes(x, ctx)
+    cd <- as.matrix(as.data.frame(SummarizedExperiment::colData(se)))
+    block <- cd[, keep, drop = FALSE]
+    `colnames<-`(block, str_c(ctx, ".", colnames(block)))
 }
 
 # Intersect the covariate blocks to their common samples and column-bind them
 # into one design matrix; NULL when no samples are shared.
 # @noRd
 .qtlAlignCovariates <- function(perContext, gCov) {
-    sampleSets <- map(perContext, .qtlBlockSamples)
-    if (!is.null(gCov) && ncol(gCov) > 0L) {
-        sampleSets <- c(sampleSets, list(.qtlBlockSamples(gCov)))
-    }
+    sampleSets <- c(
+        map(perContext, .qtlBlockSamples),
+        if (!is.null(gCov) && ncol(gCov) > 0L) {
+            list(.qtlBlockSamples(gCov))
+        }
+    )
     common <- if (length(sampleSets) == 0L) {
         character(0)
     } else {
@@ -1658,14 +1893,21 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (length(common) == 0L) {
         return(NULL)
     }
-    blocks <- list()
-    for (mat in perContext) {
-        blocks[[length(blocks) + 1L]] <- mat[common, , drop = FALSE]
+    genoBlock <- if (!is.null(gCov) && ncol(gCov) > 0L) {
+        list(gCov[common, , drop = FALSE])
+    } else {
+        list()
     }
-    if (!is.null(gCov) && ncol(gCov) > 0L) {
-        blocks[[length(blocks) + 1L]] <- gCov[common, , drop = FALSE]
-    }
+    blocks <- c(
+        map(perContext, .qtlRestrictToSamples, common = common),
+        genoBlock
+    )
     exec(cbind, !!!blocks)
+}
+
+# @noRd
+.qtlRestrictToSamples <- function(mat, common) {
+    mat[common, , drop = FALSE]
 }
 
 # The samples a covariate block covers, or NULL when it does not say. A block
@@ -1702,101 +1944,12 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         keep <- rowSums(is.na(C)) == 0L
         return(C[keep, , drop = FALSE])
     }
-    for (j in seq_len(ncol(C))) {
-        col <- C[, j]
-        na <- is.na(col)
-        if (any(na)) {
-            mu <- mean(col[!na])
-            col[na] <- if (is.finite(mu)) mu else 0
-            C[, j] <- col
-        }
-    }
-    C
+    naMask <- is.na(C)
+    # colMeans of an all-NA column is NaN, which is the non-finite `else 0`.
+    means <- colMeans(C, na.rm = TRUE)
+    filled <- if_else(is.finite(means), means, 0)
+    replace(C, naMask, filled[col(C)[naMask]])
 }
-
-# Internal: resolve a (convenience, precise) flag pair to a single boolean.
-# `missing*` arguments are passed as the result of `missing()` evaluated in
-# the calling method to detect whether the user explicitly set the value.
-# Rules:
-#   - both missing: returns TRUE (the documented default)
-#   - only convenience set: returns convenience
-#   - only precise set: returns precise
-#   - both set: must agree, else error
-.qtlResolveResidualizationFlag <- function(
-    conveniencePassed,
-    convenienceMissing,
-    precisePassed,
-    preciseMissing,
-    convenienceName,
-    preciseName
-) {
-    if (preciseMissing && convenienceMissing) {
-        return(TRUE)
-    }
-    if (preciseMissing) {
-        return(isTRUE(conveniencePassed))
-    }
-    if (convenienceMissing) {
-        return(isTRUE(precisePassed))
-    }
-    if (isTRUE(conveniencePassed) != isTRUE(precisePassed)) {
-        msg <- glue(
-            "Conflicting values: `{convenienceName}` = {conveniencePassed} ",
-            "and `{preciseName}` = {precisePassed}. ",
-            "Set only one, or pass consistent values."
-        )
-        abort(msg)
-    }
-    isTRUE(precisePassed)
-}
-
-#' @rdname getResidualizedGenotypes
-#' @export
-setMethod(
-    "getResidualizedGenotypes",
-    "QtlDataset",
-    function(
-        x,
-        contexts,
-        traitId = NULL,
-        region = NULL,
-        cisWindow = NULL,
-        samples = NULL,
-        phenotypeCovariatesToResidualize = NULL,
-        genotypeCovariatesToResidualize = NULL,
-        residualizePhenotypeCovariates = TRUE,
-        residualizeGenotypeCovariates = TRUE,
-        residualizePhenotypeCovariatesFromGenotypes = NULL,
-        residualizeGenotypeCovariatesFromGenotypes = NULL,
-        covariateNaAction = c("impute", "drop"),
-        ...
-    ) {
-        if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
-            msg <- glue(
-                "`contexts` is required for ",
-                "getResidualizedGenotypes(QtlDataset). ",
-                "Use getContexts(x) to list the available contexts. ",
-                "Pass a single context for per-context mode or multiple ",
-                "contexts for joint mode (sample intersection)."
-            )
-            abort(msg)
-        }
-        covariateNaAction <- arg_match(covariateNaAction)
-        convPhenoMissing <- missing(residualizePhenotypeCovariates)
-        convGenoMissing <- missing(residualizeGenotypeCovariates)
-        precPhenoMissing <- missing(
-            residualizePhenotypeCovariatesFromGenotypes
-        ) ||
-            is.null(residualizePhenotypeCovariatesFromGenotypes)
-        precGenoMissing <- missing(
-            residualizeGenotypeCovariatesFromGenotypes
-        ) ||
-            is.null(residualizeGenotypeCovariatesFromGenotypes)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .qtlResidualizedGenotypesImpl(p)
-    }
-)
 
 # Intersect a genotype matrix G and covariate design C to their common samples
 # (no-op when C is NULL); errors if they share none.
@@ -1817,75 +1970,179 @@ setMethod(
     list(G = G[common, , drop = FALSE], C = C[common, , drop = FALSE])
 }
 
-# getResidualizedGenotypes worker: resolve the covariate inclusion flags +
-# selections, extract genotypes, build + NA-handle the covariate design, and
-# QR-residualize. `p` holds the setMethod args + the precomputed `missing()`
-# booleans.
-# @noRd
-# The two residualization flags, each reconciled against its convenience and
-# precision spellings. Paired here because the reconciliation rule is the same
-# for both and only the argument names differ.
-# @noRd
-.qtlResidualizationFlags <- function(p) {
-    list(
-        pheno = .qtlResolveResidualizationFlag(
-            p$residualizePhenotypeCovariates,
-            p$convPhenoMissing,
-            p$residualizePhenotypeCovariatesFromGenotypes,
-            p$precPhenoMissing,
-            "residualizePhenotypeCovariates",
-            "residualizePhenotypeCovariatesFromGenotypes"
-        ),
-        geno = .qtlResolveResidualizationFlag(
-            p$residualizeGenotypeCovariates,
-            p$convGenoMissing,
-            p$residualizeGenotypeCovariatesFromGenotypes,
-            p$precGenoMissing,
-            "residualizeGenotypeCovariates",
-            "residualizeGenotypeCovariatesFromGenotypes"
+.qtlResidualizedGenotypesImpl <- function(
+    x,
+    contexts,
+    traitId = NULL,
+    region = NULL,
+    cisWindow = NULL,
+    samples = NULL,
+    residualizationArgs = ResidualizationParam()
+) {
+    if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
+        msg <- glue(
+            "`contexts` is required for ",
+            "getResidualizedGenotypes(QtlDataset). ",
+            "Use getContexts(x) to list the available contexts. ",
+            "Pass a single context for per-context mode or multiple ",
+            "contexts for joint mode (sample intersection)."
         )
-    )
-}
-
-.qtlResidualizedGenotypesImpl <- function(p) {
-    bad <- setdiff(p$contexts, getContexts(p$x))
-    if (length(bad) > 0L) {
-        msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
         abort(msg)
     }
-    include <- .qtlResidualizationFlags(p)
-    includePheno <- include$pheno
-    includeGeno <- include$geno
-    phenoSel <- .qtlResolvePhenoSelection(
-        p$x,
-        p$contexts,
-        p$phenotypeCovariatesToResidualize
+    .assertMethodParam(
+        residualizationArgs,
+        "ResidualizationParam",
+        "residualizationArgs"
     )
-    genoSel <- .qtlResolveGenoSelection(p$x, p$genotypeCovariatesToResidualize)
+    bad <- setdiff(contexts, getContexts(x))
+    if (length(bad) > 0L) {
+        msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
+        abort(msg)
+    }
     G <- getGenotypes(
-        p$x,
-        traitId = p$traitId,
-        region = p$region,
-        cisWindow = p$cisWindow,
-        samples = p$samples
+        x,
+        traitId = traitId,
+        region = region,
+        cisWindow = cisWindow,
+        samples = samples
     )
     if (ncol(G) == 0L) {
         return(G)
     }
-    C <- .qtlBuildResidualizationDesign(
-        p$x,
-        contexts = p$contexts,
-        phenoSelection = phenoSel,
-        genoSelection = genoSel,
-        includePheno = includePheno,
-        includeGeno = includeGeno
-    )
-    C <- .qtlHandleCovariateNa(C, p$covariateNaAction)
-    aligned <- .qtlAlignGC(G, C, p$contexts)
+    C <- .qtlResidCovariateMatrix(x, contexts, residualizationArgs)
+    aligned <- .qtlAlignGC(G, C, contexts)
     .qtlResidualizeQr(
         aligned$G,
         aligned$C,
-        scaleResiduals = getScaleResiduals(p$x)
+        scaleResiduals = getScaleResiduals(x)
+    )
+}
+
+#' @rdname getResidualizedGenotypes
+#' @export
+setMethod(
+    "getResidualizedGenotypes",
+    "QtlDataset",
+    .qtlResidualizedGenotypesImpl
+)
+
+# NA-handled raw phenotypes per context (re-wrapped to a list so single- and
+# multi-context callers see the same shape).
+# @noRd
+.qtlResidPhenoY <- function(x, contexts, traitId, region, naAction) {
+    fetched <- getPhenotypes(
+        x,
+        contexts = contexts,
+        traitId = traitId,
+        region = region,
+        naAction = naAction
+    )
+    # A single context returns the bare matrix rather than a named list.
+    Yraw <- if (length(contexts) == 1L) {
+        set_names(list(fetched), contexts)
+    } else {
+        fetched
+    }
+    Yraw
+}
+
+# Phenotype and covariate matrices restricted to the samples they share.
+# A NULL covariate matrix leaves the phenotypes whole.
+# @noRd
+.qtlAlignPhenoCovariates <- function(allY, C, ctx) {
+    if (is.null(C)) {
+        return(list(Y = allY, C = NULL))
+    }
+    common <- intersect(rownames(allY), rownames(C))
+    if (length(common) == 0L) {
+        abort(glue(
+            "context '{ctx}': no samples shared between phenotype data ",
+            "and the resolved covariate matrix."
+        ))
+    }
+    list(
+        Y = allY[common, , drop = FALSE],
+        C = C[common, , drop = FALSE]
+    )
+}
+
+# Residualize one context's phenotypes against the covariate design
+# (intersected to common samples) and drop residual-scale outliers.
+# @noRd
+.qtlResidualizeContextPheno <- function(
+    se,
+    C,
+    ctx,
+    outlierAction,
+    outlierPvalThreshold,
+    scaleResiduals,
+    outlierArgs = list()
+) {
+    allY <- t(SummarizedExperiment::assay(se)) # samples x traits
+    aligned <- .qtlAlignPhenoCovariates(allY, C, ctx)
+    allRes <- .qtlResidualizeQr(
+        aligned$Y,
+        aligned$C,
+        scaleResiduals = scaleResiduals
+    )
+    if (outlierAction == "keep") {
+        return(allRes)
+    }
+    # Outlier detection on the residualized scale.
+    keep <- .qtlOutlierKeepMask(allRes, outlierPvalThreshold, outlierArgs)
+    if (all(keep)) {
+        return(allRes)
+    }
+    allRes[keep, , drop = FALSE]
+}
+
+# getResidualizedPhenotypes worker: resolve covariate inclusion + selections,
+# NA-handle Y, build the covariate design, and per-context residualize +
+# outlier-filter. `p` holds the setMethod args + precomputed missing() flags.
+# @noRd
+.qtlResidualizedPhenotypesImpl <- function(
+    x,
+    contexts,
+    traitId = NULL,
+    region = NULL,
+    naAction = c("keep", "drop", "impute"),
+    outlierAction = c("keep", "drop"),
+    outlierPvalThreshold = 1e-3,
+    outlierArgs = CovMcdOptions(),
+    residualizationArgs = ResidualizationParam()
+) {
+    if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
+        abort("`contexts` is required for getResidualizedPhenotypes().")
+    }
+    naAction <- arg_match(naAction)
+    outlierAction <- arg_match(outlierAction)
+    .assertMethodOptions(outlierArgs, "CovMcdOptions", "outlierArgs")
+    .assertMethodParam(
+        residualizationArgs,
+        "ResidualizationParam",
+        "residualizationArgs"
+    )
+    bad <- setdiff(contexts, getContexts(x))
+    if (length(bad) > 0L) {
+        msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
+        abort(msg)
+    }
+    C <- .qtlResidCovariateMatrix(x, contexts, residualizationArgs)
+    Yraw <- .qtlResidPhenoY(
+        x,
+        contexts,
+        traitId,
+        region,
+        naAction
+    )
+    .qtlResidPerContext(
+        contexts,
+        Yraw = Yraw,
+        C = C,
+        x = x,
+        outlierAction = outlierAction,
+        outlierPvalThreshold = outlierPvalThreshold,
+        outlierArgs = outlierArgs
     )
 }
 
@@ -1894,164 +2151,68 @@ setMethod(
 setMethod(
     "getResidualizedPhenotypes",
     "QtlDataset",
-    function(
-        x,
-        contexts,
-        traitId = NULL,
-        region = NULL,
-        phenotypeCovariatesToResidualize = NULL,
-        genotypeCovariatesToResidualize = NULL,
-        residualizePhenotypeCovariates = TRUE,
-        residualizeGenotypeCovariates = TRUE,
-        residualizePhenotypeCovariatesFromPhenotypes = NULL,
-        residualizeGenotypeCovariatesFromPhenotypes = NULL,
-        naAction = c("keep", "drop", "impute"),
-        covariateNaAction = c("impute", "drop"),
-        outlierAction = c("keep", "drop"),
-        outlierPvalThreshold = 1e-3,
-        ...
-    ) {
-        if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
-            abort("`contexts` is required for getResidualizedPhenotypes().")
-        }
-        naAction <- arg_match(naAction)
-        covariateNaAction <- arg_match(covariateNaAction)
-        outlierAction <- arg_match(outlierAction)
-        convPhenoMissing <- missing(residualizePhenotypeCovariates)
-        convGenoMissing <- missing(residualizeGenotypeCovariates)
-        precPhenoMissing <- missing(
-            residualizePhenotypeCovariatesFromPhenotypes
-        ) ||
-            is.null(residualizePhenotypeCovariatesFromPhenotypes)
-        precGenoMissing <- missing(
-            residualizeGenotypeCovariatesFromPhenotypes
-        ) ||
-            is.null(residualizeGenotypeCovariatesFromPhenotypes)
-        p <- as.list(environment())
-        p$dots <- list(...)
-        .qtlResidualizedPhenotypesImpl(p)
-    }
+    .qtlResidualizedPhenotypesImpl
 )
 
-# NA-handled raw phenotypes per context (re-wrapped to a list so single- and
-# multi-context callers see the same shape).
+# What the phenotypes are regressed against: resolve the convenience vs
+# precise inclusion flags, pick the phenotype- and genotype-covariate sets
+# they select, build the design, and apply the NA policy to it. One step,
+# because none of the four halves means anything without the others.
 # @noRd
-.qtlResidPhenoY <- function(x, contexts, traitId, region, naAction) {
-    Yraw <- getPhenotypes(
+.qtlResidCovariateMatrix <- function(x, contexts, residualizationArgs) {
+    # arg_match() reports on its argument by name, so it must be handed a
+    # symbol: resolve the bundle field first, then validate it.
+    covariateNaAction <- residualizationArgs$covariateNaAction %||% "impute"
+    covariateNaAction <- arg_match(covariateNaAction, c("impute", "drop"))
+    phenoSel <- .qtlResolvePhenoSelection(
+        x,
+        contexts,
+        residualizationArgs$phenotypeCovariates
+    )
+    design <- .qtlBuildResidualizationDesign(
         x,
         contexts = contexts,
-        traitId = traitId,
-        region = region,
-        naAction = naAction
+        phenoSelection = phenoSel,
+        genoSelection = .qtlResolveGenoSelection(
+            x,
+            residualizationArgs$genotypeCovariates
+        ),
+        # Unset means "residualize on this side": the accessors' own
+        # historical default, now expressed as the absence of a value
+        # rather than as a formal defaulting to TRUE.
+        includePheno = residualizationArgs$residualizePhenotype %||% TRUE,
+        includeGeno = residualizationArgs$residualizeGenotype %||% TRUE
     )
-    if (length(contexts) == 1L) {
-        Yraw <- set_names(list(Yraw), contexts)
-    }
-    Yraw
+    .qtlHandleCovariateNa(design, covariateNaAction)
 }
 
-# Residualize one context's phenotypes against the covariate design (intersected
-# to common samples) and drop residual-scale outliers.
+# Residualize every requested context, unwrapping a single-context request
+# the way the rest of the QtlDataset accessors do.
 # @noRd
-.qtlResidualizeContextPheno <- function(
-    se,
+.qtlResidPerContext <- function(
+    contexts,
+    Yraw,
     C,
-    ctx,
+    x,
     outlierAction,
     outlierPvalThreshold,
-    scaleResiduals
+    outlierArgs
 ) {
-    Y <- t(SummarizedExperiment::assay(se)) # samples x traits
-    Cctx <- NULL
-    if (!is.null(C)) {
-        common <- intersect(rownames(Y), rownames(C))
-        if (length(common) == 0L) {
-            msg <- glue(
-                "context '{ctx}': no samples shared between phenotype data ",
-                "and the resolved covariate matrix."
-            )
-            abort(msg)
-        }
-        Y <- Y[common, , drop = FALSE]
-        Cctx <- C[common, , drop = FALSE]
-    }
-    Yres <- .qtlResidualizeQr(Y, Cctx, scaleResiduals = scaleResiduals)
-    # Outlier detection on the residualized scale.
-    if (outlierAction != "keep") {
-        keep <- .qtlOutlierKeepMask(Yres, outlierPvalThreshold)
-        if (!all(keep)) {
-            Yres <- Yres[keep, , drop = FALSE]
-        }
-    }
-    Yres
-}
-
-# Resolve the phenotype/genotype covariate inclusion flags (convenience vs
-# precise `*FromPhenotypes`) for getResidualizedPhenotypes.
-# @noRd
-.qtlResidPhenoFlags <- function(p) {
-    list(
-        includePheno = .qtlResolveResidualizationFlag(
-            p$residualizePhenotypeCovariates,
-            p$convPhenoMissing,
-            p$residualizePhenotypeCovariatesFromPhenotypes,
-            p$precPhenoMissing,
-            "residualizePhenotypeCovariates",
-            "residualizePhenotypeCovariatesFromPhenotypes"
-        ),
-        includeGeno = .qtlResolveResidualizationFlag(
-            p$residualizeGenotypeCovariates,
-            p$convGenoMissing,
-            p$residualizeGenotypeCovariatesFromPhenotypes,
-            p$precGenoMissing,
-            "residualizeGenotypeCovariates",
-            "residualizeGenotypeCovariatesFromPhenotypes"
-        )
-    )
-}
-
-# getResidualizedPhenotypes worker: resolve covariate inclusion + selections,
-# NA-handle Y, build the covariate design, and per-context residualize +
-# outlier-filter. `p` holds the setMethod args + precomputed missing() flags.
-# @noRd
-.qtlResidualizedPhenotypesImpl <- function(p) {
-    bad <- setdiff(p$contexts, getContexts(p$x))
-    if (length(bad) > 0L) {
-        msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
-        abort(msg)
-    }
-    flags <- .qtlResidPhenoFlags(p)
-    includePheno <- flags$includePheno
-    includeGeno <- flags$includeGeno
-    phenoSel <- .qtlResolvePhenoSelection(
-        p$x,
-        p$contexts,
-        p$phenotypeCovariatesToResidualize
-    )
-    genoSel <- .qtlResolveGenoSelection(p$x, p$genotypeCovariatesToResidualize)
-    Yraw <- .qtlResidPhenoY(
-        p$x,
-        p$contexts,
-        p$traitId,
-        p$region,
-        p$naAction
-    )
-    C <- .qtlBuildResidualizationDesign(
-        p$x,
-        contexts = p$contexts,
-        phenoSelection = phenoSel,
-        genoSelection = genoSel,
-        includePheno = includePheno,
-        includeGeno = includeGeno
-    )
-    C <- .qtlHandleCovariateNa(C, p$covariateNaAction)
     out <- set_names(
-        map(p$contexts, .qtlResidualizeContext, Yraw = Yraw, C = C, p = p),
-        p$contexts
+        map(
+            contexts,
+            .qtlResidualizeContext,
+            Yraw = Yraw,
+            C = C,
+            x = x,
+            outlierAction = outlierAction,
+            outlierPvalThreshold = outlierPvalThreshold,
+            outlierArgs = outlierArgs
+        ),
+        contexts
     )
-    if (length(p$contexts) == 1L) out[[1L]] else out
+    if (length(contexts) == 1L) out[[1L]] else out
 }
-
 
 #' @rdname show-methods
 #' @export
@@ -2059,10 +2220,7 @@ setMethod("show", "QtlDataset", function(object) {
     pheno <- .qtlPhenotypeList(object)
     nCtx <- length(pheno)
     ctxNames <- names(pheno)
-    totalTraits <- length(unique(unlist(
-        map(pheno, rownames),
-        use.names = FALSE
-    )))
+    totalTraits <- length(unique(unname(list_c(map(pheno, rownames)))))
     cat(glue("QtlDataset for study '{object@study}'\n", .trim = FALSE))
     cat(glue(
         "  {nCtx} context(s): {str_flatten(ctxNames, ', ')}\n",
@@ -2128,13 +2286,210 @@ setMethod("show", "QtlDataset", function(object) {
 
 # Residualize + filter one context's raw phenotype matrix against covariates C.
 # @noRd
-.qtlResidualizeContext <- function(ctx, Yraw, C, p) {
+.qtlResidualizeContext <- function(
+    ctx,
+    Yraw,
+    C,
+    x,
+    outlierAction,
+    outlierPvalThreshold,
+    outlierArgs = list()
+) {
     .qtlResidualizeContextPheno(
         Yraw[[ctx]],
         C,
         ctx,
-        p$outlierAction,
-        p$outlierPvalThreshold,
-        getScaleResiduals(p$x)
+        outlierAction,
+        outlierPvalThreshold,
+        getScaleResiduals(x),
+        outlierArgs
     )
 }
+
+# Which covariates to residualize on: a character vector of names applied to
+# every context, a list keyed by context name, or NULL to take each context's
+# own. .qtlResolvePhenoSelection() branches on exactly these three.
+setClassUnion("CovariateSelection", c("character", "list", "NULL"))
+
+#' @rdname ResidualizationParam
+#' @aliases ResidualizationParam-class
+#' @exportClass ResidualizationParam
+setClass(
+    "ResidualizationParam",
+    contains = "MethodParam",
+    slots = c(
+        phenotypeCovariates = "CovariateSelection",
+        genotypeCovariates = "CovariateSelection",
+        residualizePhenotype = "logical_OR_NULL",
+        residualizeGenotype = "logical_OR_NULL",
+        covariateNaAction = "character_OR_NULL"
+    )
+)
+
+#' @title Covariate Residualization Settings
+#' @description What is regressed out of the phenotype and genotype before
+#'   fitting. Shared by \code{\link{fineMappingPipeline}} and
+#'   \code{\link{twasWeightsPipeline}}, which hold the same four settings.
+#'
+#'   \code{fineMappingPipeline}'s \code{usePCA} / \code{nPCs} are
+#'   \strong{not} here. They do not residualize anything: they PCA-reduce a
+#'   multi-trait context's phenotype matrix and fine-map each top principal
+#'   component \emph{as a trait}. That is an analysis mode, a sibling of the
+#'   univariate and multivariate dispatch paths, not a covariate setting.
+#' @section Summary-statistics inputs:
+#'   A \code{QtlSumStats} / \code{GwasSumStats} input carries no genotypes
+#'   or covariates, so nothing here applies and the whole bundle is
+#'   \strong{ignored} --- not refused.
+#'
+#'   That is the opposite of \code{\link{CrossValidationParam}}, which
+#'   \emph{is} refused on those inputs
+#'   (\code{fineMappingPipeline(QtlSumStats, crossValidation = ...)} errors).
+#'   The difference is the default: CV is off unless asked for
+#'   (\code{folds = 0}), so a non-default value on a summary-statistics run
+#'   is an explicit request for something impossible. Residualization is on
+#'   by default (\code{residualizePhenotype} and \code{residualizeGenotype}
+#'   are both \code{TRUE}), so refusing a non-default would reject the
+#'   \emph{default} bundle and force every sumstats caller to unset it.
+#'
+#'   One bundle therefore travels to either input kind unchanged, the same
+#'   way \code{CrossValidationParam}'s \code{weightMethods} /
+#'   \code{maxVariants} are carried but ignored by
+#'   \code{fineMappingPipeline}.
+#' @param phenotypeCovariates Covariates to residualize the phenotype on, or
+#'   \code{NULL} (default) for the dataset's own.
+#' @param genotypeCovariates Covariates to residualize the genotype on, or
+#'   \code{NULL} (default) for the dataset's own.
+#' @param residualizePhenotype Logical. Residualize on the phenotype
+#'   covariates. \code{NULL} (default) means unset, which the accessors
+#'   read as \code{TRUE}.
+#' @param residualizeGenotype Logical. Residualize on the genotype
+#'   covariates. \code{NULL} (default) means unset, read as \code{TRUE}.
+#' @param covariateNaAction How missing covariate values are handled when the
+#'   design is assembled: \code{"impute"} or \code{"drop"}. \code{NULL}
+#'   (default) leaves the accessor's own default in place.
+#' @return A \code{ResidualizationParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' ResidualizationParam(residualizeGenotype = FALSE)
+#' @export
+ResidualizationParam <- function(
+    phenotypeCovariates = NULL,
+    genotypeCovariates = NULL,
+    residualizePhenotype = NULL,
+    residualizeGenotype = NULL,
+    covariateNaAction = NULL
+) {
+    # NULL means "unset", which is why the accessors no longer need a
+    # `missing()` companion for each flag: FALSE and "not given" are both
+    # falsy, so a flat formal defaulting to TRUE could not tell them apart,
+    # and each needed a second formal recording whether it was supplied.
+    new(
+        "ResidualizationParam",
+        phenotypeCovariates = phenotypeCovariates,
+        genotypeCovariates = genotypeCovariates,
+        residualizePhenotype = residualizePhenotype,
+        residualizeGenotype = residualizeGenotype,
+        covariateNaAction = covariateNaAction
+    )
+}
+
+#' @rdname GenotypeFilterParam
+#' @aliases GenotypeFilterParam-class
+#' @exportClass GenotypeFilterParam
+setClass(
+    "GenotypeFilterParam",
+    contains = "MethodParam",
+    slots = c(
+        mafCutoff = "numeric_OR_NULL",
+        macCutoff = "numeric_OR_NULL",
+        xvarCutoff = "numeric_OR_NULL",
+        imissCutoff = "numeric_OR_NULL",
+        keepSamples = "character_OR_NULL",
+        keepVariants = "character_OR_NULL",
+        keepIndel = "logical_OR_NULL"
+    )
+)
+
+#' @title Genotype Filtering Options
+#' @description Which variants and samples survive when a genotype matrix is
+#'   assembled, as one checked bundle. Used by \code{\link{QtlDataset}}, the
+#'   manifest loaders, and the pipelines that build a dataset.
+#' @section Unset versus set:
+#'   Every field defaults to \code{NULL}, meaning \strong{not set}, and an
+#'   unset field is absent from the result rather than carried as \code{NULL}.
+#'   That is what lets one bundle serve two roles:
+#'   \itemize{
+#'     \item to \code{\link{QtlDataset}} it is a \emph{specification}, and
+#'       an unset field takes that constructor's own default --- \code{0} for
+#'       each cutoff, \code{character(0)} for each \code{keep}, \code{TRUE}
+#'       for \code{keepIndel}.
+#'     \item to a pipeline it is an \emph{override}, and an unset field
+#'       leaves the dataset's construct-time value alone.
+#'   }
+#'   So \code{GenotypeFilterParam(mafCutoff = 0)} and
+#'   \code{GenotypeFilterParam()} differ: the first pins the cutoff at zero,
+#'   the second defers. \code{\link{PanelFilterParam}} needs no such
+#'   distinction and keeps ordinary defaults.
+#' @param mafCutoff Minor-allele-frequency floor.
+#' @param macCutoff Minor-allele-count floor; the stricter of this and
+#'   \code{mafCutoff} applies.
+#' @param xvarCutoff Genotype-variance floor.
+#' @param imissCutoff Per-variant missingness ceiling.
+#' @param keepSamples Sample ids to restrict to; \code{character(0)} keeps
+#'   all samples.
+#' @param keepVariants Variant ids to restrict to; \code{character(0)} keeps
+#'   all variants.
+#' @param keepIndel Logical. Retain insertions and deletions.
+#' @return A \code{GenotypeFilterParam} object, a \code{\link{MethodParam}}.
+#' @seealso \code{\link{PanelFilterParam}}, \code{\link{SumstatsFilterParam}}
+#' @examples
+#' GenotypeFilterParam(mafCutoff = 0.01, keepIndel = FALSE)
+#' @export
+GenotypeFilterParam <- function(
+    mafCutoff = NULL,
+    macCutoff = NULL,
+    xvarCutoff = NULL,
+    imissCutoff = NULL,
+    keepSamples = NULL,
+    keepVariants = NULL,
+    keepIndel = NULL
+) {
+    new(
+        "GenotypeFilterParam",
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        xvarCutoff = xvarCutoff,
+        imissCutoff = imissCutoff,
+        keepSamples = keepSamples,
+        keepVariants = keepVariants,
+        keepIndel = keepIndel
+    )
+}
+
+# =============================================================================
+# Variant / sample filtering bundles
+# -----------------------------------------------------------------------------
+# Which rows and columns of the DATA survive, as opposed to the stage bundles
+# above, which describe how a stage behaves. Three filters run in this
+# package, on three different objects, and they are deliberately three
+# constructors rather than one:
+#
+#   GenotypeFilterParam  -- a study's own genotype matrix (QtlDataset and the
+#                          pipelines that build one)
+#   PanelFilterParam     -- an LD reference panel's variants
+#   SumstatsFilterParam  -- rows of a summary-statistics table
+#
+# Their fields overlap without meaning the same thing, and their defaults
+# genuinely differ: `imissCutoff` resolves to 0 on the genotype path and 1 on
+# the panel path. One union bundle would have to pick one of those, and would
+# accept `removeIndels` where nothing reads it -- the failure mode these
+# constructors exist to prevent.
+#
+# GenotypeFilterParam defaults every field to NULL ("not set") because its
+# fields are a SPECIFICATION to QtlDataset and an OVERRIDE to the pipelines;
+# absence is what distinguishes "pin this value" from "leave it alone". The
+# other two have one meaning each and keep ordinary defaults.
+#
+# SumstatsCleaningParam sits with them because it runs on the same pass over
+# the same table, but it is coercion and normalisation (coerceNumeric,
+# normalizeChr, clampSmallP) that also drops rows -- not a filter.
+# =============================================================================

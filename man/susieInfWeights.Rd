@@ -4,19 +4,25 @@
 \alias{susieInfWeights}
 \title{Compute SuSiE-inf TWAS weights}
 \usage{
-susieInfWeights(X = NULL, y = NULL, susieInfFit = NULL, retainFit = FALSE, ...)
+susieInfWeights(
+  X = NULL,
+  y = NULL,
+  susieInfFit = NULL,
+  fitRetention = c("none", "slim", "full")
+)
 }
 \arguments{
-\item{X}{Genotype matrix. Required when `susieInfFit` is NULL.}
+\item{X}{Optional genotype matrix; when supplied it is only used to
+check that the fit covers the same number of variants.}
 
-\item{y}{Phenotype vector. Required when `susieInfFit` is NULL.}
+\item{y}{Unused; retained for signature compatibility.}
 
 \item{susieInfFit}{Optional fitted SuSiE-inf object.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute on the
-returned weights.}
-
-\item{...}{Additional arguments passed to `susieR::susie()` when fitting.}
+\item{fitRetention}{How much of the fit is kept on the returned weights:
+\code{"none"} attaches nothing, \code{"slim"} and \code{"full"} attach
+it as the \code{"fit"} attribute. These extractors hold no trimmable
+intermediates, so the two retaining levels behave alike here.}
 }
 \value{
 Numeric vector of variant weights.
@@ -42,5 +48,6 @@ Extracts coefficients from an existing SuSiE-inf fit or fits
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:30]
 y <- eqtlRegionExample$yRes
-susieInfWeights(X, y)
+fit <- susieR::susie(X, y, L = 5)
+susieInfWeights(susieInfFit = fit)
 }
