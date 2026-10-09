@@ -40,6 +40,13 @@ context("ctwasPipeline")
     )
 }
 
+# A panel with its correlation already built, the shape callers saw before
+# the LD became on-demand. Tests that assert on R_wgt want it materialized.
+.ctp_fullPanel <- function(h) {
+    p <- pecotmr:::.ctwasPanelFor(h)
+    c(p, list(R = pecotmr:::.ctwasPanelLd(p)))
+}
+
 # Canonical SNP IDs the fixtures use. .ctp_makeHandle() emits these in
 # chr:pos:A2:A1 form; tests reference them by index via .ctp_snpId(i).
 .ctp_snpId <- function(i) sprintf("chr1:%d:G:A", 100L * i)
@@ -432,6 +439,12 @@ test_that(".ctwasRequireMatchingLdSketches: differently trimmed panels ok", {
     # One LD reference QC'd separately on the two sides leaves each sketch
     # trimmed to its own surviving variants, so the panels overlap without
     # being identical. That is the normal case, not an error.
+    #
+    # The overlap note is rate-limited to once per session and the assembly
+    # tests legitimately trip it first (each block's GWAS panel is narrowed to
+    # its own variants while the weights carry the whole one), so clear that
+    # budget here rather than depending on which files ran before this.
+    rlang::reset_warning_verbosity("pecotmrLdSketchOverlap-ctwasPipeline")
     twLd <- .ctp_makeHandle(snp_n = 5L)
     gwasLd <- .ctp_makeHandle(snp_n = 6L)
     expect_warning(
@@ -646,7 +659,7 @@ test_that(".ctwasSnpInfoForBlock: repairs a tag-allele panel id from A1/A2", {
         extractBlockGenotypes = .ctp_mockExtractor(),
         .package = "pecotmr"
     )
-    panel <- pecotmr:::.ctwasComputeFullPanelLd(h)
+    panel <- .ctp_fullPanel(h)
     expect_true("chr1:200:G:A" %in% rownames(panel$R))
     expect_true("chr1:200:G:A" %in% names(panel$variance))
 })
@@ -679,6 +692,95 @@ test_that(".ctwasLdPanelKey: errors when no candidate file exists", {
         pecotmr:::.ctwasLdPanelKey(ghost),
         "could not derive an existing LD-file token"
     )
+})
+
+# ---------------------------------------------------------------------------
+# Per-block LD scoping. Two bugs met here: combineGwasSumStats() UNIONS the
+# per-piece sketches, and `[` carries that collection-level slot into every
+# block, so each one referenced the whole chromosome; and the panel cache was
+# keyed on the backing genotype file, which every block on a chromosome
+# shares, so only block 1's panel was ever computed and the rest read it back.
+# ---------------------------------------------------------------------------
+
+test_that(".ctwasPickBlock: narrows the collection sketch to the block", {
+    ss <- .ctp_makeGwasSumstats()
+    # The collection's sketch spans both blocks, as combineGwasSumStats
+    # leaves it.
+    expect_equal(length(pecotmr:::.ldSketchRanges(getLdSketch(ss))), 12L)
+    byBlock <- pecotmr:::.ctwasGwasByBlock(ss)
+    sizes <- map_int(byBlock, function(b) {
+        length(pecotmr:::.ldSketchRanges(getLdSketch(b)))
+    })
+    expect_equal(unname(sizes), c(6L, 6L))
+    # Narrowed to DIFFERENT variants: block 1 holds 1..6, block 2 holds 7..12.
+    pos <- map(byBlock, function(b) {
+        GenomicRanges::start(pecotmr:::.ldSketchRanges(getLdSketch(b)))
+    })
+    expect_equal(pos[[1L]], 100L * (1:6))
+    expect_equal(pos[[2L]], 100L * (7:12))
+})
+
+test_that(".ctwasRegionLdTokens: one distinct, existing token per region", {
+    ss <- .ctp_makeGwasSumstats()
+    byBlock <- pecotmr:::.ctwasGwasByBlock(ss)
+    sketches <- map(byBlock, getLdSketch)
+    tokens <- pecotmr:::.ctwasRegionLdTokens(names(byBlock), sketches)
+    expect_length(unique(unname(tokens)), 2L)
+    expect_true(all(file.exists(tokens)))
+    expect_equal(names(tokens), c("block1", "block2"))
+})
+
+test_that(".ctwasTokenSlug: sanitizes ids and keeps duplicates apart", {
+    slug <- pecotmr:::.ctwasTokenSlug(
+        c("chr19:1-500000", "chr19:500001-1000000", "chr19:1-500000")
+    )
+    expect_false(any(str_detect(slug, ":")))
+    # The index prefix separates two ids that sanitize to the same stem.
+    expect_length(unique(slug), 3L)
+})
+
+test_that("assembleCtwasInputs: each region gets its own block-sized panel", {
+    inp <- .ctp_makeMultiBlockInputs()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    out <- assembleCtwasInputs(
+        gwasSumStats = inp$gwasSumStats,
+        twasWeights = inp$twasWeights
+    )
+    expect_length(unique(out$LD_map$LD_file), 2L)
+    panels <- pecotmr:::.ctwasCachedPanels(out)
+    expect_length(panels, 2L)
+    # Block-sized (6x6), not the 12-variant whole-panel LD.
+    expect_equal(dim(pecotmr:::.ctwasPanelLd(panels[[1L]])), c(6L, 6L))
+    expect_equal(dim(pecotmr:::.ctwasPanelLd(panels[[2L]])), c(6L, 6L))
+    # And genuinely different LD, not block 1's twice.
+    expect_false(identical(panels[[1L]]$snpInfo$id, panels[[2L]]$snpInfo$id))
+})
+
+test_that(".ctwasResolveLdPaths: re-mints sentinels lost with the session", {
+    inp <- .ctp_makeMultiBlockInputs()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    out <- assembleCtwasInputs(
+        gwasSumStats = inp$gwasSumStats,
+        twasWeights = inp$twasWeights
+    )
+    before <- pecotmr:::.ctwasCachedPanels(out)
+    # The sentinels live in the session tempdir; a payload reloaded in a new
+    # session finds them gone, and ctwas asserts file.exists() on each.
+    unlink(out$LD_map$LD_file)
+    restored <- pecotmr:::.ctwasResolveLdPaths(out)
+    tokens <- restored$LD_map$LD_file
+    expect_true(all(file.exists(tokens)))
+    expect_length(unique(tokens), 2L)
+    # Each region still reaches its OWN panel through the re-keyed loader.
+    loader <- restored$LD_loader_fun
+    expect_equal(loader(tokens[[1L]]), pecotmr:::.ctwasPanelLd(before[[1L]]))
+    expect_equal(loader(tokens[[2L]]), pecotmr:::.ctwasPanelLd(before[[2L]]))
 })
 
 test_that(".ctwasResolveMethod: caller-supplied method wins when present", {
@@ -1142,7 +1244,7 @@ test_that(".ctwasFilterMethod: subsets rows to the requested method", {
     expect_equal(as.character(twSub$method), "susie")
 })
 
-# Build an ldPanel fixture (matches .ctwasComputeFullPanelLd's return
+# Build an ldPanel fixture (the materialized shape, R included)
 # shape) for the 6-SNP toy panel from .ctp_makeHandle().
 .ctp_makeLdPanel <- function(snp_n = 6L) {
     h <- .ctp_makeHandle(snp_n = snp_n)
@@ -1520,22 +1622,62 @@ test_that(".ctwasBuildWeights: intersects with gwasSnpIds when supplied", {
     expect_equal(wl[[1L]]$n_wgt, 3L)
 })
 
-test_that(".ctwasComputeFullPanelLd: extracts once + returns cached R + snpInfo + variance", {
+test_that(".ctwasPanelFor: cheap fields eagerly, correlation on request", {
     local_mocked_bindings(
         extractBlockGenotypes = .ctp_mockExtractor(),
         .package = "pecotmr"
     )
-    out <- pecotmr:::.ctwasComputeFullPanelLd(.ctp_makeHandle(snp_n = 6L))
+    out <- pecotmr:::.ctwasPanelFor(.ctp_makeHandle(snp_n = 6L))
     ids6 <- map_chr(1:6, .ctp_snpId)
-    expect_named(out, c("R", "snpInfo", "variance"))
-    expect_true(is.matrix(out$R))
-    expect_equal(dim(out$R), c(6L, 6L))
-    expect_equal(rownames(out$R), ids6)
+    # The n x n correlation is deliberately NOT built here: ctwas pulls a
+    # region's LD only while fine-mapping, and only for the regions that
+    # survive screening.
+    expect_named(out, c("snpInfo", "variance", "sketch"))
+    expect_null(out$R)
     expect_setequal(
         colnames(out$snpInfo),
         c("chrom", "id", "pos", "alt", "ref")
     )
     expect_named(out$variance, ids6)
+    # It is built, with the right shape, when something asks.
+    R <- pecotmr:::.ctwasPanelLd(out)
+    expect_true(is.matrix(R))
+    expect_equal(dim(R), c(6L, 6L))
+    expect_equal(rownames(R), ids6)
+})
+
+test_that(".ctwasPanelLdSubset: equals the slice of the full correlation", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    panel <- pecotmr:::.ctwasPanelFor(.ctp_makeHandle(snp_n = 6L))
+    vids <- map_chr(c(2L, 4L, 5L), .ctp_snpId)
+    full <- pecotmr:::.ctwasPanelLd(panel)
+    # Mean imputation is per column, so correlating a subset of the dosages
+    # gives the same pairwise values as slicing the whole matrix.
+    expect_equal(
+        pecotmr:::.ctwasPanelLdSubset(panel, vids),
+        full[vids, vids]
+    )
+})
+
+test_that(".ctwasRWgtSource: builds the block matrix only when it pays", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    panel <- pecotmr:::.ctwasPanelFor(.ctp_makeHandle(snp_n = 6L))
+    # One gene on two variants: 4 against 36, so no block matrix is formed.
+    expect_null(pecotmr:::.ctwasRWgtSource(panel, 2L))
+    # Six genes on five variants each: 150 against 36, so form it once.
+    dense <- pecotmr:::.ctwasRWgtSource(panel, rep(5L, 6L))
+    expect_equal(dim(dense), c(6L, 6L))
+    # A panel that already carries one is never rebuilt.
+    expect_identical(
+        pecotmr:::.ctwasRWgtSource(.ctp_makeLdPanel(), 1L),
+        .ctp_makeLdPanel()$R
+    )
 })
 
 test_that(".ctwasBuildZGene: builds z_gene from a TWAS-Z GRanges", {
@@ -2503,7 +2645,7 @@ test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", 
         entry = list(ent),
         ldSketch = gh
     )
-    ldPanel <- pecotmr:::.ctwasComputeFullPanelLd(gh)
+    ldPanel <- .ctp_fullPanel(gh)
     wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, maxNumVariants = 3L)
     expect_equal(wl[[1L]]$n_wgt, 3L)
     expect_equal(nrow(wl[[1L]]$wgt), 3L)
@@ -2529,7 +2671,7 @@ test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
         entry = list(ent),
         ldSketch = gh
     )
-    ldPanel <- pecotmr:::.ctwasComputeFullPanelLd(gh)
+    ldPanel <- .ctp_fullPanel(gh)
     wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, twasWeightCutoff = 0.01)
     expect_equal(wl[[1L]]$n_wgt, 3L)
     expect_setequal(rownames(wl[[1L]]$wgt), vids[c(2L, 4L, 5L)])
@@ -3234,13 +3376,15 @@ test_that("finemapCtwasRegions: an empty screened-region set returns a NULL fine
 # Bundled example payloads: portable LD tokens
 #
 # `LD_map$LD_file` is both something ctwas asserts exists on disk and the key
-# pecotmr dispatches on into the cached LD panels. Serialising an absolute
-# path made the bundled payloads carry the build machine's path, so
-# finemapCtwasRegions() died on `all(file.exists(LD_matrix_files))` for every
-# user. They now carry a "pecotmr://extdata/..." token resolved on the way in.
+# pecotmr dispatches on into the cached LD panels. Those two duties are why
+# the token cannot be the backing genotype file: every block on a chromosome
+# shares it, so each block was handed the FIRST block's panel. Each region
+# now carries its own sentinel, and a payload read back in a later session
+# finds those gone -- .ctwasResolveLdPaths() re-mints one per region and
+# re-keys the loader cache onto them.
 # =============================================================================
 
-test_that("bundled cTWAS payloads carry a resolvable LD token", {
+test_that("bundled cTWAS payloads carry one resolvable token per region", {
     data(ctwasInputsExample)
     data(ctwasEstExample)
     data(ctwasFinemapExample)
@@ -3251,16 +3395,24 @@ test_that("bundled cTWAS payloads carry a resolvable LD token", {
         ctwasFinemapExample
     )) {
         tokens <- as.character(payload$LD_map$LD_file)
-        expect_true(all(startsWith(tokens, "pecotmr://extdata/")))
-        resolved <- map_chr(
-            tokens,
-            pecotmr:::.resolveCtwasLdToken
-        )
-        expect_true(all(file.exists(resolved)))
-        expect_equal(
-            as.character(payload$LD_map$SNP_file),
-            tokens
-        )
+        # One per region, never shared: the bug was every region reading
+        # block 1's panel back out of a single key.
+        expect_equal(length(unique(tokens)), nrow(payload$LD_map))
+        expect_equal(as.character(payload$LD_map$SNP_file), tokens)
+        # Whatever state the sentinels are in on this machine, the resolver
+        # leaves every region with a token that exists and its own panel.
+        resolved <- pecotmr:::.ctwasResolveLdPaths(payload)
+        live <- as.character(resolved$LD_map$LD_file)
+        expect_true(all(file.exists(live)))
+        expect_equal(length(unique(live)), nrow(payload$LD_map))
+        loader <- resolved$LD_loader_fun
+        panels <- pecotmr:::.ctwasCachedPanels(resolved)
+        for (i in seq_along(live)) {
+            expect_equal(
+                loader(live[[i]]),
+                pecotmr:::.ctwasPanelLd(panels[[i]])
+            )
+        }
     }
 })
 
@@ -3319,11 +3471,11 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
 
 test_that("ctwas LD assembly reports a missing LD sketch like everything else", {
     expect_error(
-        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        pecotmr:::.ctwasPanelFor(NULL),
         "carries no ldSketch"
     )
     expect_error(
-        pecotmr:::.ctwasComputeFullPanelLd("not a panel"),
+        pecotmr:::.ctwasPanelFor("not a panel"),
         "must be a genotype panel"
     )
 })
@@ -3334,7 +3486,7 @@ test_that("the shared validator gives ctwas and .ldFromSketch one message", {
         error = conditionMessage
     )
     own <- tryCatch(
-        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        pecotmr:::.ctwasPanelFor(NULL),
         error = conditionMessage
     )
     expect_equal(own, shared)

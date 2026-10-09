@@ -1214,6 +1214,59 @@ test_that(".cipComputeMr: IVW Wald-ratio over PIP-passing instruments", {
 })
 
 # ---------------------------------------------------------------------------
+# Exposure / outcome scale agreement. Without maf + N the outcome falls back
+# to z with unit se; the exposure has to follow, or the Wald ratio is a ratio
+# of incommensurable units, inflated by 1/seX (answers like -1094 +/- 1105).
+# ---------------------------------------------------------------------------
+
+test_that(".cipComputeMr: the exposure standardizes when maf/N are absent", {
+    tl <- data.frame(
+        variant_id = "chr1:100:A:G",
+        pip = 0.9,
+        beta = 0.3,
+        se = 0.01,
+        stringsAsFactors = FALSE
+    )
+    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    g <- .cip_gwasDf("chr1:100:A:G", 2)
+    noScale <- g[, setdiff(names(g), c("N", "maf"))]
+    res <- pecotmr:::.cipComputeMr(NULL, noScale, pipCutoff = 0.5)
+    # A single instrument, so IVW hands back its own ratio: z / (beta / se).
+    # Before the fix this was z / beta -- 100x larger for this instrument.
+    expect_equal(res$nIV, 1L)
+    expect_equal(res$waldRatio, 2 / (0.3 / 0.01))
+    # With maf and N the outcome is a real effect size, so the raw exposure
+    # stands and the ratio stays interpretable.
+    keep <- pecotmr:::.cipComputeMr(NULL, g, pipCutoff = 0.5)
+    expect_equal(
+        keep$waldRatio,
+        pecotmr:::.cipZToBeta(2, 0.3, 1000) / 0.3
+    )
+})
+
+test_that(".cipCsAwareAlign: exposure scale follows the GWAS, both ways", {
+    raw <- list(
+        cs = c(1L, 1L),
+        pip = c(0.6, 0.3),
+        bhatX = c(0.3, -0.2),
+        sbhatX = c(0.05, 0.04),
+        vids = sprintf("chr1:%d:A:G", c(100L, 200L))
+    )
+    g <- .cip_gwasDf(raw$vids, c(2, -1.5))
+    al <- pecotmr:::.cipCsAwareAlign(raw, g, alleleFlip = TRUE)
+    # maf + N present: both sides are real effect sizes, so the exposure
+    # keeps its own SE rather than being forced to 1. This is the half that
+    # was wrong before -- csAware standardized unconditionally.
+    expect_equal(al$bhatX, raw$bhatX)
+    expect_equal(al$sbhatX, raw$sbhatX)
+    # Without them the outcome is z / 1, so the exposure standardizes.
+    noScale <- g[, setdiff(names(g), c("N", "maf"))]
+    alNo <- pecotmr:::.cipCsAwareAlign(raw, noScale, alleleFlip = TRUE)
+    expect_equal(alNo$bhatX, raw$bhatX / raw$sbhatX)
+    expect_equal(alNo$sbhatX, rep(1, 2))
+})
+
+# ---------------------------------------------------------------------------
 # Phase 3: tuple-based (chrom/pos/allele) matching of QTL exposure to GWAS.
 # Positional ids exercise matchVariants' tuple path (the v1.. fixtures above
 # use the rsID string-fallback). Previously these joins used intersect()/match

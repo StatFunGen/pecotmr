@@ -40,6 +40,44 @@ context("sumstats_qc")
     }
 }
 
+test_that(".entryToSumstatDf: derives maf from a directional af", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:3), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:3)),
+        A1 = "A",
+        A2 = "G",
+        Z = c(2, -1.5, 1.8),
+        N = 1000L,
+        AF = c(0.3, 0.8, 0.5)
+    )
+    df <- pecotmr:::.entryToSumstatDf(gr)
+    # af is directional, maf is not: 0.8 folds to 0.2.
+    expect_equal(df$af, c(0.3, 0.8, 0.5))
+    expect_equal(df$maf, c(0.3, 0.2, 0.5))
+    # ... which is what takes the MR ratio off the z-scale fallback.
+    expect_true(pecotmr:::.cipGwasHasScale(df$maf, df$N))
+})
+
+test_that(".entryToSumstatDf: a declared MAF is not overwritten by af", {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = "chr1:100:A:G",
+        A1 = "A",
+        A2 = "G",
+        Z = 2,
+        N = 1000L,
+        AF = 0.8,
+        MAF = 0.45
+    )
+    df <- pecotmr:::.entryToSumstatDf(gr)
+    # The study asserted 0.45; af is only another route to the same thing.
+    expect_equal(df$maf, 0.45)
+    expect_equal(df$af, 0.8)
+})
+
 test_that("ldMismatchQc dentist returns a data frame with an outlier column", {
     set.seed(42)
     p <- 20

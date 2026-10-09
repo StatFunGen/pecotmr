@@ -723,6 +723,30 @@ setMethod("getPath", "GenotypeHandle", function(x) x@path)
 #' @keywords internal
 setMethod("getChromPaths", "GenotypeHandle", function(x) x@chromPaths)
 
+# A stem-based genotype format is named by a companion file rather than by
+# the stem itself: plink1 writes <stem>.bed, plink2 writes <stem>.pgen.
+# Returns the stem when one of those is bundled, NULL otherwise -- a
+# single-file format (a .gds) is the stem, and the caller handles that.
+#
+# plink2 was missing here, so a .pgen panel could not be referenced
+# portably at all and had to bake an absolute build-machine path.
+# @noRd
+.resolveBundledStem <- function(stem) {
+    exts <- c(".bed", ".pgen")
+    paths <- map_chr(exts, .bundledExtdataPath, stem = stem)
+    hit <- which(str_length(paths) > 0L)
+    if (length(hit) == 0L) {
+        return(NULL)
+    }
+    first <- hit[[1L]]
+    str_remove(paths[[first]], str_c("\\", exts[[first]], "$"))
+}
+
+# @noRd
+.bundledExtdataPath <- function(ext, stem) {
+    system.file("extdata", str_c(stem, ext), package = "pecotmr")
+}
+
 # Resolve a portable bundled-resource reference of the form
 # "pecotmr://extdata/<stem>" to a concrete filesystem path via
 # `system.file()`; any ordinary path is returned unchanged. This lets the
@@ -738,9 +762,9 @@ setMethod("getChromPaths", "GenotypeHandle", function(x) x@chromPaths)
         return(path)
     }
     stem <- m[[2L]]
-    bed <- system.file("extdata", str_c(stem, ".bed"), package = "pecotmr")
-    if (str_length(bed) > 0L) {
-        return(str_remove(bed, "\\.bed$"))
+    byStem <- .resolveBundledStem(stem)
+    if (!is.null(byStem)) {
+        return(byStem)
     }
     resolved <- system.file("extdata", stem, package = "pecotmr")
     if (str_length(resolved) == 0L) {

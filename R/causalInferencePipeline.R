@@ -888,14 +888,20 @@ causalInferencePipeline <- function(
     if (length(m$idxA) == 0L) {
         return(.cipEmptyMrRatio())
     }
-    # Align the QTL exposure effect to the GWAS allele coding (sign = -1 on an
-    # allele swap) so the Wald ratio betaY / betaX has the correct sign.
-    betaX <- iv$betaX[m$idxA] * m$sign
-    seX <- iv$seX[m$idxA]
     gIdx <- m$idxB
     gZ <- gwasDf$z[gIdx]
     gN <- .cipGwasCol(gwasDf$N, gIdx)
     gMaf <- .cipGwasCol(gwasDf$maf, gIdx)
+    # Align the QTL exposure effect to the GWAS allele coding (sign = -1 on an
+    # allele swap) so the Wald ratio betaY / betaX has the correct sign, and
+    # put it on the same scale the outcome lands on.
+    exposure <- .cipMrExposureScale(
+        iv$betaX[m$idxA] * m$sign,
+        iv$seX[m$idxA],
+        .cipGwasHasScale(gMaf, gN)
+    )
+    betaX <- exposure$beta
+    seX <- exposure$se
     betaY <- .cipZToBeta(gZ, gMaf, gN)
     seY <- .cipZToSe(gZ, gMaf, gN)
     ratio <- betaY / betaX
@@ -1068,8 +1074,13 @@ causalInferencePipeline <- function(
 }
 
 # Match the exposure variants to the GWAS sumstats (allele-aware), derive the
-# outcome beta/se, and standardize the exposure to unit SE. Returns NULL when
+# outcome beta/se, and put the exposure on the same scale. Returns NULL when
 # nothing matches.
+#
+# The exposure used to be standardized to unit SE unconditionally, which left
+# csAware dividing a real-scale outcome by a z-scale exposure whenever the
+# GWAS did carry maf and N -- the mirror of the ivwPerVariant mismatch. It is
+# conditional now, on the same test the outcome conversion uses.
 # @noRd
 .cipCsAwareAlign <- function(raw, gwasDf, alleleFlip) {
     m <- matchVariants(raw$vids, gwasDf$variant_id, allowFlip = alleleFlip)
@@ -1080,13 +1091,16 @@ causalInferencePipeline <- function(
     gZ <- gwasDf$z[gIdx]
     gN <- .cipGwasCol(gwasDf$N, gIdx)
     gMaf <- .cipGwasCol(gwasDf$maf, gIdx)
-    # Standardize bhatX -> z; sbhatX -> 1 (legacy mrAnalysis rescaling).
-    bhatX <- (raw$bhatX[m$idxA] * m$sign) / raw$sbhatX[m$idxA]
+    exposure <- .cipMrExposureScale(
+        raw$bhatX[m$idxA] * m$sign,
+        raw$sbhatX[m$idxA],
+        .cipGwasHasScale(gMaf, gN)
+    )
     list(
         cs = raw$cs[m$idxA],
         pip = raw$pip[m$idxA],
-        bhatX = bhatX,
-        sbhatX = rep(1, length(bhatX)),
+        bhatX = exposure$beta,
+        sbhatX = exposure$se,
         bhatY = .cipZToBeta(gZ, gMaf, gN),
         sbhatY = .cipZToSe(gZ, gMaf, gN)
     )
@@ -1147,20 +1161,50 @@ causalInferencePipeline <- function(
 }
 
 
+# Whether the GWAS can be put on an effect-size scale at all, which needs
+# both maf and N. All-or-nothing per call, matching how the conversions below
+# behave.
+#
+# Stated once because three callers have to agree on it: the outcome beta, the
+# outcome se, and the EXPOSURE scaling. While the exposure had no such test,
+# a z-scale outcome was divided by a raw-scale QTL effect and the Wald ratio
+# came out inflated by 1/seX -- answers like -1094 +/- 1105 for a tight
+# instrument.
+# @noRd
+.cipGwasHasScale <- function(maf, n) {
+    !any(is.na(maf)) && !any(is.na(n))
+}
+
 # Derive beta / se from z using maf + n via the shared zToBetaSe() (model-exact
 # se = 1/sqrt(2*p*q*(N + z^2)), beta = z*se). Fall back to z as a beta surrogate
 # / se = 1 when maf or n is unavailable.
 .cipZToBeta <- function(z, maf, n) {
-    if (any(is.na(maf)) || any(is.na(n))) {
+    if (!.cipGwasHasScale(maf, n)) {
         return(z)
-    } # fall back to z as a beta surrogate when no maf/n
+    }
     .zToBetaSe(z, maf, n)$beta
 }
 .cipZToSe <- function(z, maf, n) {
-    if (any(is.na(maf)) || any(is.na(n))) {
+    if (!.cipGwasHasScale(maf, n)) {
         return(rep(1, length(z)))
     }
     .zToBetaSe(z, maf, n)$se
+}
+
+# The exposure on whatever scale the outcome ended up on. With maf and N both
+# sides are real effect sizes, so the Wald ratio is an effect-size ratio and
+# the raw QTL estimate is the one worth having. Without them the outcome is a
+# z with unit se, so the exposure standardizes to z as well.
+#
+# Both MR methods route through this, so neither can end up on a scale the
+# other is not on -- which is how ivwPerVariant paired a z outcome with a raw
+# exposure, and csAware a real-scale outcome with a standardized one.
+# @noRd
+.cipMrExposureScale <- function(beta, se, gwasHasScale) {
+    if (gwasHasScale) {
+        return(list(beta = beta, se = se))
+    }
+    list(beta = beta / se, se = rep(1, length(beta)))
 }
 
 # Fixed-effect inverse-variance-weighted (IVW) pooling of per-instrument

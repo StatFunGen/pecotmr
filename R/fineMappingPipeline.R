@@ -449,6 +449,12 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 #
 # Mirrors the convention of .twasNormalizeMethods so the two pipelines
 # expose the same shape on the user side.
+#
+# A plain named list is routable HERE even though the constructor refuses one
+# under `methods`: this call knows its input class, so the overrides go into
+# that path's slot and are checked against the engine that will actually
+# receive them. A retired FineMappingMethodsParam() record is still accepted
+# too.
 # @noRd
 .fmNormalizeMethods <- function(
     methods,
@@ -467,10 +473,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     parsed <- if (is.character(methods)) {
         .fmMethodsFromTokens(methods)
     } else if (is(methods, "MethodsSelectionParam") || is.list(methods)) {
-        # A plain named list is routable HERE even though the constructor
-        # refuses one under `methods`: this call knows its input class, so
-        # the overrides go into that path's slot and are checked against the
-        # engine that will actually receive them.
         .methodsParamResolve(
             .methodsParamFor(
                 methods,
@@ -481,7 +483,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
             inputKind
         )
     } else if (.isMethodOptions(methods)) {
-        # The retired FineMappingMethodsParam() record.
         list(
             tokens = names(methods),
             methodArgs = map(as.list(methods), as.list)

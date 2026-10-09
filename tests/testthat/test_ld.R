@@ -4504,7 +4504,7 @@ test_that("every panel access route rejects a NULL sketch the same way", {
         shared = function() {
             pecotmr:::.ldFromSketch(NULL, "chr22:1:A:G", label = "demo")
         },
-        ctwas = function() pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        ctwas = function() pecotmr:::.ctwasPanelFor(NULL),
         raiss = function() pecotmr:::.qcRaissWindowIdx(df, NULL, 0L),
         matchIds = function() pecotmr:::.ldSketchMatchIds(NULL),
         dosage = function() pecotmr:::.ldSketchDosage(NULL, 1L),
@@ -4521,7 +4521,7 @@ test_that("a non-panel sketch is rejected by every route", {
         "must be a genotype panel"
     )
     expect_error(
-        pecotmr:::.ctwasComputeFullPanelLd("not a panel"),
+        pecotmr:::.ctwasPanelFor("not a panel"),
         "must be a genotype panel"
     )
     expect_error(
@@ -4538,7 +4538,7 @@ test_that("callers that validate first keep their own label", {
     )
     expect_match(shared, "^fineMappingPipeline:")
     ctwas <- tryCatch(
-        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        pecotmr:::.ctwasPanelFor(NULL),
         error = conditionMessage
     )
     expect_match(ctwas, "^ctwasPipeline:")

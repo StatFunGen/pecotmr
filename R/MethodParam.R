@@ -624,6 +624,11 @@ setValidity("MethodsSelectionParam", function(object) {
 
 # One slot's own problems: shape, vocabulary, element class, and -- for the
 # two path slots -- that each record is actually usable on that path.
+#
+# The first two stages stop on the first problem because the stages are
+# ordered: a slot whose names are malformed has nothing to compare against
+# the method vocabulary, and a name that is not a method of this pipeline
+# cannot be asked whether it is usable on a given input path.
 # @noRd
 .methodsSlotProblems <- function(slotName, object, cls) {
     entries <- slot(object, slotName)
@@ -631,32 +636,71 @@ setValidity("MethodsSelectionParam", function(object) {
         return(character(0))
     }
     nms <- names(entries)
+    shape <- .methodsSlotShapeProblem(slotName, nms)
+    if (length(shape) > 0L) {
+        return(shape)
+    }
+    inputKind <- .methodsSlotInput(slotName)
+    vocabulary <- .methodsSlotVocabularyProblem(
+        slotName,
+        nms,
+        cls,
+        inputKind
+    )
+    if (length(vocabulary) > 0L) {
+        return(vocabulary)
+    }
+    .methodsSlotEntryProblems(nms, entries, slotName, cls, inputKind)
+}
+
+# Every entry named, exactly once.
+# @noRd
+.methodsSlotShapeProblem <- function(slotName, nms) {
     if (is.null(nms) || any(!nzchar(nms))) {
         return(glue("`{slotName}`: every entry must be named for its method"))
     }
     dup <- unique(nms[duplicated(nms)])
-    if (length(dup) > 0L) {
-        return(glue(
-            "`{slotName}`: {str_flatten(dup, ', ')} given more than once; ",
-            "one set of options per method"
-        ))
+    if (length(dup) == 0L) {
+        return(character(0))
     }
-    inputKind <- .methodsSlotInput(slotName)
+    glue(
+        "`{slotName}`: {str_flatten(dup, ', ')} given more than once; ",
+        "one set of options per method"
+    )
+}
+
+# Every name a method this pipeline runs -- on `inputKind` for a path slot,
+# anywhere for the shared one.
+# @noRd
+.methodsSlotVocabularyProblem <- function(slotName, nms, cls, inputKind) {
     allowed <- if (is.null(inputKind)) {
         .methodsParamAnyMethod(cls)
     } else {
         .methodsParamAvailable(cls, inputKind)
     }
     unknown <- setdiff(nms, allowed)
-    if (length(unknown) > 0L) {
-        return(glue(
-            "`{slotName}`: {str_flatten(unknown, ', ')} ",
-            "{if (length(unknown) == 1L) 'is not a method' else ",
-            "'are not methods'} this pipeline runs",
-            "{if (is.null(inputKind)) '' else glue(' on {inputKind}')}. ",
-            "Available: {str_flatten(allowed, ', ')}."
-        ))
+    if (length(unknown) == 0L) {
+        return(character(0))
     }
+    glue(
+        "`{slotName}`: {str_flatten(unknown, ', ')} ",
+        "{if (length(unknown) == 1L) 'is not a method' else ",
+        "'are not methods'} this pipeline runs",
+        "{if (is.null(inputKind)) '' else glue(' on {inputKind}')}. ",
+        "Available: {str_flatten(allowed, ', ')}."
+    )
+}
+
+# Each entry's own problems. Unlike the two stages above these are collected
+# rather than short-circuited: one bad entry says nothing about the others.
+# @noRd
+.methodsSlotEntryProblems <- function(
+    nms,
+    entries,
+    slotName,
+    cls,
+    inputKind
+) {
     c(
         unlist(map(
             nms,
@@ -671,33 +715,49 @@ setValidity("MethodsSelectionParam", function(object) {
             slotName = slotName,
             cls = cls
         )),
-        if (!is.null(inputKind)) {
-            c(
-                unlist(map(
-                    nms,
-                    .methodsEntryPathProblem,
-                    entries = entries,
-                    slotName = slotName,
-                    inputKind = inputKind
-                )),
-                unlist(map(
-                    nms,
-                    .methodsEntryNameProblem,
-                    entries = entries,
-                    slotName = slotName,
-                    inputKind = inputKind,
-                    cls = cls
-                )),
-                unlist(map(
-                    nms,
-                    .methodsEntryEngineProblem,
-                    entries = entries,
-                    slotName = slotName,
-                    inputKind = inputKind,
-                    cls = cls
-                ))
-            )
+        if (is.null(inputKind)) {
+            NULL
+        } else {
+            .methodsSlotPathProblems(nms, entries, slotName, inputKind, cls)
         }
+    )
+}
+
+# The checks that only mean anything on a path slot: the record has to be
+# usable on `inputKind`, name arguments that method accepts, and declare an
+# engine that path provides.
+# @noRd
+.methodsSlotPathProblems <- function(
+    nms,
+    entries,
+    slotName,
+    inputKind,
+    cls
+) {
+    c(
+        unlist(map(
+            nms,
+            .methodsEntryPathProblem,
+            entries = entries,
+            slotName = slotName,
+            inputKind = inputKind
+        )),
+        unlist(map(
+            nms,
+            .methodsEntryNameProblem,
+            entries = entries,
+            slotName = slotName,
+            inputKind = inputKind,
+            cls = cls
+        )),
+        unlist(map(
+            nms,
+            .methodsEntryEngineProblem,
+            entries = entries,
+            slotName = slotName,
+            inputKind = inputKind,
+            cls = cls
+        ))
     )
 }
 

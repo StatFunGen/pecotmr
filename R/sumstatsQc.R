@@ -2965,17 +2965,42 @@ effectiveN <- function(nCase, nControl) {
 }
 
 .entryDfAddStats <- function(df, mc) {
-    statMap <- c(z = "Z", beta = "BETA", se = "SE", N = "N", maf = "MAF")
+    statMap <- c(
+        z = "Z",
+        beta = "BETA",
+        se = "SE",
+        N = "N",
+        maf = "MAF",
+        af = "AF"
+    )
     present <- statMap[is_in(statMap, colnames(mc))]
     # mutate() overwrites an existing column in place and appends a new one,
     # which is what the `df[[out]] <-` loop did.
-    mutate(
+    out <- mutate(
         df,
         !!!set_names(
             map(unname(present), .entryStatColumn, mc = mc),
             names(present)
         )
     )
+    .entryDfDeriveMaf(out)
+}
+
+# AF is the DIRECTIONAL effect-allele frequency; MAF is its directionless
+# form. A study that declared only `af:` therefore already carries the
+# information, so derive the MAF rather than leaving the column absent --
+# absent, the MR Wald ratio falls back to the z scale (see
+# .cipGwasHasScale) even though a real frequency was supplied. Same
+# pmin(af, 1 - af) the QC frequency filter uses.
+#
+# A declared MAF wins: it is what the study actually asserted, and AF is
+# only a route to the same quantity.
+# @noRd
+.entryDfDeriveMaf <- function(df) {
+    if (!is.null(df[["maf"]]) || is.null(df[["af"]])) {
+        return(df)
+    }
+    mutate(df, maf = pmin(.data$af, 1 - .data$af))
 }
 
 .entryToSumstatDf <- function(

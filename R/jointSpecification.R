@@ -1974,6 +1974,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     )
 }
 
+# Engine routing (jointEngine.R) for one region block; the caller loops the
+# regions.
+# @noRd
 .fmDispatchJointSpecsQtlDatasetOneRegion <- function(
     parsedJointSpec,
     data,
@@ -1994,8 +1997,6 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     credibleSetArgs,
     fitRetention
 ) {
-    # Engine routing (jointEngine.R); one region block (the caller loops
-    # regions).
     pipeline <- .fmJointPipelineChecked(
         parsedJointSpec,
         credibleSetArgs = credibleSetArgs,

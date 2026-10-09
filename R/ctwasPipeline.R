@@ -555,14 +555,18 @@ assembleCtwasInputs <- function(
     minPipCutoff <- variantPruningArgs$pipRescue
     maxNumVariants <- variantPruningArgs$maxVariants
     .ctwasValidateGwasList(gwasSumStats)
-    # One single-block GwasSumStats per element, keyed by blockId: the region
-    # grid the rest of the assembly walks.
+    globalPanelInfo <- .ctwasGlobalPanelInfo(gwasSumStats)
     gwasSumStats <- .ctwasGwasByBlock(gwasSumStats)
     twasWeights <- .ctwasResolveAndValidateWeights(twasWeights, gwasSumStats)
     .ctwasValidateOptional(twasZ, fineMappingResult)
     regionIds <- names(gwasSumStats)
     resolvedMethod <- .ctwasResolveMethod(twasWeights, method)
-    fp <- .ctwasFirstPass(regionIds, gwasSumStats, twasWeights)
+    fp <- .ctwasFirstPass(
+        regionIds,
+        gwasSumStats,
+        twasWeights,
+        globalPanelInfo
+    )
     globalGwasSnpIds <- unique(list_c(map(fp$zSnpPieces, "id")))
     cutoffs <- list(
         twasWeightCutoff = twasWeightCutoff,
@@ -655,9 +659,23 @@ assembleCtwasInputs <- function(
     )
 }
 
+# One block's slice of the collection. `[` carries the collection-level
+# ldSketch through verbatim, and combineGwasSumStats() deliberately UNIONS
+# the per-piece panels, so without narrowing here every block references the
+# whole chromosome and its LD panel would cover all of it (a
+# chr19-wide panel runs to ~155 GB). Narrowed to the block's own variants
+# the same way summaryStatsQc narrows the sketch it retains.
 # @noRd
 .ctwasPickBlock <- function(i, x) {
-    x[i]
+    block <- x[i]
+    sketch <- getLdSketch(block)
+    if (is.null(sketch)) {
+        return(block)
+    }
+    methods::initialize(
+        block,
+        ldSketch = .subsetSketchToIds(sketch, as.list(block))
+    )
 }
 
 # Resolve a flat weight source into per-region buckets (cTWAS's p0 start-of-
@@ -742,6 +760,23 @@ assembleCtwasInputs <- function(
 # ldFileByRegion).
 # @noRd
 # One region's GWAS LD sketch, checked against the region's weights.
+# The ctwas-shaped snpInfo for the whole collection's panel, captured BEFORE
+# .ctwasGwasByBlock() narrows each block's sketch to its own variants. A
+# gene's cis SPAN has to cover every block it reaches or
+# ctwas::get_boundary_genes cannot route it to merge_regions, so the span is
+# measured against this table rather than against any one block's panel.
+#
+# NULL when the collection carries no sketch -- .ctwasRegionGwasLd() reports
+# that case with its own message, so this must not pre-empt it.
+# @noRd
+.ctwasGlobalPanelInfo <- function(gwasSumStats) {
+    sketch <- getLdSketch(gwasSumStats)
+    if (is.null(sketch)) {
+        return(NULL)
+    }
+    .ctwasSnpInfoForBlock(sketch)
+}
+
 # @noRd
 .ctwasRegionGwasLd <- function(rid, gwasSumStats, twasWeights) {
     gwasLd <- getLdSketch(gwasSumStats[[rid]])
@@ -774,24 +809,40 @@ assembleCtwasInputs <- function(
     .ctwasBuildSingleRegionInfo(rid, gwasSumStats[[rid]])
 }
 
-.ctwasFirstPass <- function(regionIds, gwasSumStats, twasWeights) {
+# First pass: one LD panel per region, plus the z_snp / region_info / snp_map
+# pieces built from them.
+#
+# Each region gets a token of its own. The panel cache used to be keyed on the
+# genotype file backing the sketch, which every block on a chromosome shares,
+# so only the first block's panel was ever computed and every other region
+# silently read that one back out.
+#
+# `globalVariance` is assembled from the per-block variance vectors rather
+# than re-read: a boundary gene needs the variance of its out-of-block weight
+# variants too, and the blocks partition the panel, so their union is exactly
+# the global vector. It costs nothing beyond the panels themselves.
+# @noRd
+.ctwasFirstPass <- function(
+    regionIds,
+    gwasSumStats,
+    twasWeights,
+    globalPanelInfo = NULL
+) {
     sketches <- map(
         regionIds,
         .ctwasRegionGwasLd,
         gwasSumStats = gwasSumStats,
         twasWeights = twasWeights
     )
-    ldKeys <- map_chr(sketches, .ctwasLdPanelKey)
-    # The panel cache is "compute once per distinct key": the first region
-    # carrying each key is the one whose sketch gets expanded, and every
-    # region then reads its panel back out by key.
-    firstOfKey <- !duplicated(ldKeys)
+    ldTokens <- .ctwasRegionLdTokens(regionIds, sketches)
     ldPanelsByRegion <- set_names(
-        map(sketches[firstOfKey], .ctwasComputeFullPanelLd),
-        ldKeys[firstOfKey]
+        map(sketches, .ctwasPanelFor),
+        unname(ldTokens)
     )
-    panels <- unname(ldPanelsByRegion[ldKeys])
+    panels <- unname(ldPanelsByRegion)
     list(
+        globalPanelInfo = globalPanelInfo,
+        globalVariance = list_c(map(panels, "variance")),
         ldPanelsByRegion = ldPanelsByRegion,
         zSnpPieces = set_names(
             map2(regionIds, panels, .ctwasZSnpAt, gwasSumStats = gwasSumStats),
@@ -810,7 +861,7 @@ assembleCtwasInputs <- function(
             ),
             regionIds
         ),
-        ldFileByRegion = set_names(ldKeys, regionIds)
+        ldFileByRegion = ldTokens
     )
 }
 
@@ -880,7 +931,9 @@ assembleCtwasInputs <- function(
         minPipCutoff = cutoffs$minPipCutoff,
         maxNumVariants = cutoffs$maxNumVariants,
         gwasSnpIds = globalGwasSnpIds,
-        regionSnpIds = fp$snpMap[[rid]]$id
+        regionSnpIds = fp$snpMap[[rid]]$id,
+        globalPanelInfo = fp$globalPanelInfo,
+        globalVariance = fp$globalVariance
     )
     if (length(blockWeights) == 0L) {
         return(NULL)
@@ -2457,38 +2510,102 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
-# Compute the full-panel LD ONCE and return everything the rest of the
-# pipeline needs to consume it. Returns a list with:
-#   R        : full-panel correlation matrix (n_var x n_var, dimnames =
-#              SNP IDs). Single source of truth for both the per-region
-#              LD loader closure and the per-gene R_wgt submatrices.
+# Everything about a block's LD panel that is cheap, plus the sketch it came
+# from so the expensive part can be built later. Returns a list with:
 #   snpInfo  : ctwas-shaped per-block table (chrom, id, pos, alt, ref)
 #              -- both the snp_map element and the snpinfo loader return.
-#   variance : named numeric vector of per-variant dosage variance from
-#              the LD reference. Used to scale non-standardized TWAS
-#              weights to the correlation scale that ctwas expects.
+#   variance : named numeric vector of per-variant dosage variance from the
+#              LD reference, used to scale non-standardized TWAS weights to
+#              the correlation scale ctwas expects.
+#   sketch   : the block's narrowed LD sketch, retained because the n x n
+#              correlation is deliberately NOT built here.
+#
+# ctwas pulls a region's LD only while fine-mapping, and only for the regions
+# that survive screening, so building every block's matrix up front spent
+# O(n^2) apiece on panels that are frequently never read at all.
 # @noRd
-.ctwasComputeFullPanelLd <- function(gwasLd) {
+.ctwasPanelFor <- function(gwasLd) {
     # Share the validator with `.ldFromSketch()`, the entry point every other
-    # pipeline uses. This function cannot use `.ldFromSketch()` itself -- it
-    # needs the whole panel rather than a matched subset, and returns the
-    # per-variant variance alongside R -- but skipping the guard meant a NULL
-    # or non-panel sketch surfaced as "unable to find an inherited method for
-    # 'getSnpInfo'" instead of saying the LD reference was missing.
+    # pipeline uses: skipping the guard meant a NULL or non-panel sketch
+    # surfaced as "unable to find an inherited method for 'getSnpInfo'"
+    # instead of saying the LD reference was missing.
     .ldFromSketchValidate(gwasLd, "ctwasPipeline")
-    snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
+    snpInfo <- .ctwasSnpInfoForBlock(gwasLd)
     geno <- .ldSketchDosage(
         gwasLd,
-        seq_len(nrow(snpInfoCtwas)),
+        seq_len(nrow(snpInfo)),
         meanImpute = TRUE
     )
-    snpIds <- snpInfoCtwas$id
-    R <- `dimnames<-`(
-        computeLd(geno, method = "sample"),
-        list(snpIds, snpIds)
+    list(
+        snpInfo = snpInfo,
+        variance = set_names(
+            apply(geno, 2, stats::var, na.rm = TRUE),
+            snpInfo$id
+        ),
+        sketch = gwasLd
     )
-    variance <- set_names(apply(geno, 2, stats::var, na.rm = TRUE), snpIds)
-    list(R = R, snpInfo = snpInfoCtwas, variance = variance)
+}
+
+# The block's full n x n correlation, built on request. A panel that already
+# carries one -- a caller who computed it, or a payload it travelled with --
+# is used as it stands rather than rebuilt.
+# @noRd
+.ctwasPanelLd <- function(panel) {
+    if (!is.null(panel$R)) {
+        return(panel$R)
+    }
+    .ctwasPanelLdFor(
+        panel,
+        seq_len(nrow(panel$snpInfo)),
+        panel$snpInfo$id
+    )
+}
+
+# The correlation over `vids` alone. Identical to slicing the full matrix --
+# mean imputation is per column, so correlating a subset of the dosages gives
+# the same pairwise values -- at O(|vids|^2) instead of O(n^2).
+# @noRd
+.ctwasPanelLdSubset <- function(panel, vids) {
+    idx <- match(vids, panel$snpInfo$id)
+    if (anyNA(idx)) {
+        msg <- glue(
+            "ctwasPipeline: {sum(is.na(idx))} weight variant(s) absent from ",
+            "the block's LD panel."
+        )
+        abort(msg)
+    }
+    if (!is.null(panel$R)) {
+        return(panel$R[vids, vids, drop = FALSE])
+    }
+    .ctwasPanelLdFor(panel, idx, vids)
+}
+
+# @noRd
+.ctwasPanelLdFor <- function(panel, idx, ids) {
+    geno <- .ldSketchDosage(panel$sketch, idx, meanImpute = TRUE)
+    `dimnames<-`(
+        computeLd(geno, method = "sample"),
+        list(ids, ids)
+    )
+}
+
+# Whether to build the block's full correlation once and slice it per gene,
+# or to compute one small correlation per gene. Per-gene submatrices are what
+# keep a block ctwas never fine-maps from ever forming its n x n matrix, but
+# g genes on |vids| variants each cost sum(|vids|^2) against n^2 for the
+# whole block, so the full matrix wins once the weights are dense enough.
+# Returns the full matrix in that case and NULL in the other.
+# @noRd
+.ctwasRWgtSource <- function(ldPanel, nVids) {
+    # Already built: slicing it is free, so there is nothing to weigh up.
+    if (!is.null(ldPanel$R)) {
+        return(ldPanel$R)
+    }
+    n <- as.numeric(nrow(ldPanel$snpInfo))
+    if (length(nVids) == 0L || sum(as.numeric(nVids)^2) < n^2) {
+        return(NULL)
+    }
+    .ctwasPanelLd(ldPanel)
 }
 
 # Harmonize TWAS weight variants against the LD reference panel. Same
@@ -2647,9 +2764,29 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     panelSnps[sort(m$idxA)]
 }
 
-# R_wgt is sliced from the cached full-panel LD by SNP ID -- no
-# per-gene genotype re-extraction. Variants absent from the panel
-# are dropped from that gene's row set.
+# The ctwas per-gene weight entries for one block.
+#
+# Two variant sets, because they answer different questions. `gwasSnpIds` is
+# the GLOBAL set: it bounds each gene's cis SPAN, which has to cover every
+# block the gene reaches for boundary detection to work. `regionSnpIds` is
+# this block's own set: it bounds the weight vector actually FITTED, because
+# ctwas fine-maps one region at a time.
+#
+# So anything feeding the SPAN is read off the whole panel rather than off
+# `ldPanel`, whose sketch is narrowed to this block -- `globalPanelInfo` for
+# the coordinates, `globalVariance` for the scaling, and the same table for
+# allele harmonization, since an out-of-block weight variant has to survive
+# matching to be counted in p0/p1 at all. Reading any of them off the block
+# would clip a boundary gene back to its home region, which is exactly what
+# p0/p1 exist to prevent. The allele columns agree with the block's own
+# table wherever the two overlap, so nothing about the in-block result
+# changes.
+#
+# Genes are prepared in one sweep and given their `R_wgt` in a second, so
+# that choice is made with every gene's fitted size in hand -- which is what
+# lets a block no gene needs densely skip its n x n correlation entirely.
+# .ctwasRWgtSource() picks, and says why. Variants absent from the panel are
+# dropped from that gene's row set.
 # @noRd
 .ctwasBuildWeights <- function(
     twasWeights,
@@ -2660,19 +2797,19 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     minPipCutoff = 0,
     maxNumVariants = Inf,
     gwasSnpIds = NULL,
-    regionSnpIds = NULL
+    regionSnpIds = NULL,
+    globalPanelInfo = NULL,
+    globalVariance = NULL
 ) {
-    # Two variant sets, because they answer different questions. `gwasSnpIds` is
-    # the GLOBAL set: it bounds the gene's cis SPAN, which has to cover every
-    # block the gene reaches for boundary detection to work. `regionSnpIds` is
-    # this block's own set: it bounds the weight vector actually FITTED, because
-    # ctwas fine-maps one region at a time.
-    panelSnps <- .ctwasPanelSnpsForGwas(rownames(ldPanel$R), gwasSnpIds)
+    spanInfo <- globalPanelInfo %||% ldPanel$snpInfo
+    panelSnps <- .ctwasPanelSnpsForGwas(spanInfo$id, gwasSnpIds)
     ctx <- list(
         ldPanel = ldPanel,
+        spanInfo = spanInfo,
         panelSnps = panelSnps,
         regionSnps = regionSnpIds,
-        refVariants = .ctwasRefVariants(ldPanel$snpInfo),
+        refVariants = .ctwasRefVariants(spanInfo),
+        spanVariance = globalVariance %||% ldPanel$variance,
         fineMappingResult = fineMappingResult,
         cutoffs = list(
             twasWeightCutoff = twasWeightCutoff,
@@ -2681,12 +2818,20 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             maxNumVariants = maxNumVariants
         )
     )
-    genes <- compact(map(
+    prepared <- compact(map(
         seq_len(nrow(twasWeights)),
-        .ctwasGeneWeight,
+        .ctwasGenePrepared,
         twasWeights = twasWeights,
         ctx = ctx
     ))
+    fullR <- .ctwasRWgtSource(ldPanel, map_int(prepared, .ctwasPreparedSize))
+    genes <- map(
+        prepared,
+        .ctwasGeneEntryFor,
+        ldPanel = ldPanel,
+        fullR = fullR,
+        spanInfo = spanInfo
+    )
     # Later genes overwrite an earlier one sharing a key, which is what the
     # `out[[g$key]] <- ...` loop did.
     keyed <- set_names(map(genes, "entry"), map_chr(genes, "key"))
@@ -2758,7 +2903,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # fit) and variance scaling for non-standardized weights (w * sqrt(per-variant
 # genotype variance from the LD panel)). Returns the adjusted weight vector.
 # @noRd
-.ctwasAdjustGeneWeights <- function(parts, aligned, ldPanel) {
+.ctwasAdjustGeneWeights <- function(parts, aligned, spanVariance) {
     fits <- .rowFits(parts)
     shrank <- length(aligned$keptIdx) < length(aligned$origVids)
     # A NULL renormalization means the fit could not be re-keyed onto the
@@ -2776,7 +2921,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (.rowStandardized(parts)) {
         return(renormalized)
     }
-    varLookup <- ldPanel$variance[aligned$vids]
+    varLookup <- spanVariance[aligned$vids]
     if (anyNA(varLookup)) {
         msg <- glue(
             ".ctwasBuildWeights: missing genotype variance for ",
@@ -2797,12 +2942,22 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # region boundary. Measuring the span over the fitted subset would clip a
 # boundary gene down to its home region and hide it from merge_regions.
 # @noRd
-.ctwasGeneEntry <- function(vids, w, ldPanel, meta, spanVids = vids) {
-    panelInfo <- ldPanel$snpInfo
+.ctwasGeneEntry <- function(
+    vids,
+    w,
+    rWgt,
+    meta,
+    spanVids = vids,
+    spanInfo
+) {
+    # Span coordinates come from the whole-panel table, while `rWgt` was
+    # computed on the block's own panel: ctwas fine-maps one region at a
+    # time, but a boundary gene's span has to reach past it.
+    panelInfo <- spanInfo
     rowIdx <- match(spanVids, panelInfo$id)
     list(
         wgt = matrix(w, ncol = 1L, dimnames = list(vids, "wgt")),
-        R_wgt = ldPanel$R[vids, vids, drop = FALSE],
+        R_wgt = rWgt,
         type = meta$context,
         context = meta$context,
         gene_name = meta$trait,
@@ -2839,7 +2994,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # (PIP/CS + magnitude + cap) -> entry. Returns list(key, entry), or NULL when
 # the gene contributes no usable variants.
 # @noRd
-.ctwasGeneWeight <- function(i, twasWeights, ctx) {
+.ctwasGenePrepared <- function(i, twasWeights, ctx) {
     # Polymorphic: the weight source may be a TwasWeights or a
     # FineMappingResult, so the payload comes from the class-aware bridge.
     parts <- .rowParts(twasWeights, i)
@@ -2847,7 +3002,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(aligned)) {
         return(NULL)
     }
-    w <- .ctwasAdjustGeneWeights(parts, aligned, ctx$ldPanel)
+    w <- .ctwasAdjustGeneWeights(parts, aligned, ctx$spanVariance)
     meta <- .ctwasGeneMeta(twasWeights, i)
     finemapAux <- .ctwasGetFinemapAux(
         ctx$fineMappingResult,
@@ -2878,14 +3033,42 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (!any(inRegion)) {
         return(NULL)
     }
+    # No LD yet. R_wgt is built in a second sweep, once every gene's fitted
+    # size is known and the block can choose between forming one full
+    # correlation and one small correlation per gene.
     list(
         key = meta$key,
+        vids = kept$vids[inRegion],
+        w = kept$w[inRegion],
+        spanVids = kept$vids,
+        meta = meta
+    )
+}
+
+# @noRd
+.ctwasPreparedSize <- function(g) {
+    length(g$vids)
+}
+
+# One prepared gene's ctwas entry. `fullR` is the block's correlation when
+# .ctwasRWgtSource() chose to form it, and NULL when each gene computes its
+# own small one.
+# @noRd
+.ctwasGeneEntryFor <- function(g, ldPanel, fullR, spanInfo) {
+    rWgt <- if (is.null(fullR)) {
+        .ctwasPanelLdSubset(ldPanel, g$vids)
+    } else {
+        fullR[g$vids, g$vids, drop = FALSE]
+    }
+    list(
+        key = g$key,
         entry = .ctwasGeneEntry(
-            kept$vids[inRegion],
-            kept$w[inRegion],
-            ctx$ldPanel,
-            meta,
-            spanVids = kept$vids
+            g$vids,
+            g$w,
+            rWgt,
+            g$meta,
+            spanVids = g$spanVids,
+            spanInfo = spanInfo
         )
     )
 }
@@ -3195,6 +3378,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     stored <- as.character(ldMap[["LD_file"]])
     resolved <- map_chr(stored, .resolveCtwasLdToken)
+    resolved <- .ctwasRemintMissingTokens(
+        resolved,
+        .ctwasLdMapRegionIds(ldMap, length(resolved))
+    )
     if (identical(resolved, stored)) {
         return(payload)
     }
@@ -3208,6 +3395,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         )
     )
     .ctwasRekeyLdLoaders(rekeyed, keyMap)
+}
+
+# The region ids an LD_map carries, falling back to positions when the table
+# has no region_id column (the granular steps accept hand-built stubs).
+# @noRd
+.ctwasLdMapRegionIds <- function(ldMap, n) {
+    rid <- ldMap[["region_id"]]
+    if (is.null(rid) || length(rid) != n) {
+        return(as.character(seq_len(n)))
+    }
+    as.character(rid)
 }
 
 # Only "pecotmr://" tokens move; an ordinary path is the caller's own and is
@@ -3267,7 +3465,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             )
             abort(msg)
         }
-        panel$R
+        # Built here rather than up front: this is the only place a region's
+        # full LD is actually needed, and ctwas reaches it only for regions
+        # that survived screening.
+        .ctwasPanelLd(panel)
     }
     # Published explicitly so .ctwasCachedPanels can recover the cache from a
     # loader we built, instead of looking the name up inside the closure's
@@ -3321,6 +3522,65 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         abort(msg)
     }
     hit[[1L]]
+}
+
+# ctwas asserts `file.exists()` on every `LD_map$LD_file` / `SNP_file` and
+# then dispatches `LD_loader_fun(LD_file)` on that same string, so a token
+# has to be BOTH an existing path and unique per region. The genotype file
+# backing a sketch is shared by every block on a chromosome, which is why
+# using it directly handed every block the first one's panel. A per-region
+# empty sentinel satisfies both constraints, and nothing ever reads it --
+# the panels travel inside the loader closures.
+# @noRd
+.ctwasRegionLdTokens <- function(regionIds, sketches) {
+    # Fail here, with the sketch-specific message, if a block's panel has no
+    # readable payload: the panel builder is about to read dosages
+    # out of it.
+    walk(sketches, .ctwasLdPanelKey)
+    .ctwasMintLdTokens(regionIds)
+}
+
+# The sentinels themselves. Separate from the validation above so the payload
+# resolver can re-mint them without a sketch in hand.
+# @noRd
+.ctwasMintLdTokens <- function(regionIds) {
+    dir <- file.path(tempdir(), "pecotmr-ctwas-ld")
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    tokens <- file.path(dir, str_c(.ctwasTokenSlug(regionIds), ".ld"))
+    walk(tokens, .ctwasTouchToken)
+    set_names(tokens, regionIds)
+}
+
+# Sentinels live in the session tempdir, so a payload serialised in one
+# session carries tokens that no longer exist in the next -- and ctwas
+# asserts file.exists() on every one. Mint replacements; the caller re-keys
+# the cached panels onto them, exactly as it does for a "pecotmr://" move.
+# @noRd
+.ctwasRemintMissingTokens <- function(tokens, regionIds) {
+    gone <- !file.exists(tokens)
+    if (!any(gone)) {
+        return(tokens)
+    }
+    replace(tokens, gone, unname(.ctwasMintLdTokens(regionIds[gone])))
+}
+
+# A filesystem-safe stem per region. The index prefix keeps two region ids
+# that sanitize to the same string apart.
+# @noRd
+.ctwasTokenSlug <- function(regionIds) {
+    str_c(
+        seq_along(regionIds),
+        "_",
+        str_replace_all(as.character(regionIds), "[^A-Za-z0-9._-]+", "_")
+    )
+}
+
+# @noRd
+.ctwasTouchToken <- function(path) {
+    if (!file.exists(path)) {
+        file.create(path)
+    }
+    invisible(NULL)
 }
 
 # Build a per-block snpInfo table restricted to variants present in the
