@@ -493,3 +493,63 @@ test_that("inputType is derived, not declared per constructor", {
     )
     expect_length(pecotmr:::.twasLabelInputType("NoSuchOptions"), 0L)
 })
+
+# ===========================================================================
+# Why a name was or was not checked, and the nested-entry helpers
+# ===========================================================================
+
+test_that(".engineCheckNote says WHICH reason a name went unchecked", {
+    note <- pecotmr:::.engineCheckNote
+    # A package that is not installed cannot have its formals read.
+    expect_match(
+        as.character(note("nosuchpkg::nosuchfn")),
+        "package 'nosuchpkg' is not installed"
+    )
+    # A primitive has no formals at all, which is a different reason.
+    expect_match(
+        as.character(note("base::sum")),
+        "the engine's formals are unknown"
+    )
+    # An engine taking `...` accepts any name, so checking is meaningless.
+    expect_match(
+        as.character(note("base::paste")),
+        "takes `...`, so any name is accepted"
+    )
+    # The normal case names the callee it checked against.
+    expect_match(
+        as.character(note("stats::rnorm")),
+        "checked against stats::rnorm"
+    )
+})
+
+test_that(".twasLabelInputType answers nothing for a label it cannot use", {
+    f <- pecotmr:::.twasLabelInputType
+    expect_equal(f(42), character(0))
+    expect_equal(f(c("a", "b")), character(0))
+    expect_equal(f(NULL), character(0))
+})
+
+test_that(".nestedExpectedEngine falls back to the key it was given", {
+    # The engine is read off a record the constructor builds. When the
+    # constructor cannot run, the key is the best name available.
+    expect_equal(
+        pecotmr:::.nestedExpectedEngine(
+            "broken",
+            list(broken = function(...) stop("no"))
+        ),
+        "broken"
+    )
+})
+
+test_that(".nestedElement refuses an entry that is neither list nor record", {
+    expect_error(
+        pecotmr:::.nestedElement(42, "pca", list(pca = CovPcaOptions), "lbl"),
+        "the `pca` entry must be a list or a constructor result"
+    )
+    # An already-built record passes straight through.
+    rec <- CovPcaOptions()
+    expect_identical(
+        pecotmr:::.nestedElement(rec, "pca", list(pca = CovPcaOptions), "lbl"),
+        rec
+    )
+})

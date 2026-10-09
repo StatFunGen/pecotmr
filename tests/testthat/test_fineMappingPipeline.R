@@ -5073,3 +5073,30 @@ test_that("every settable CredibleSetParam field has both accessors", {
         )
     }
 })
+
+test_that("CredibleSetParam accessors read and replace every field", {
+    # The pairing test above asserts the accessors EXIST; this one dispatches
+    # them. Existence is checked with exists(), which never reaches the
+    # generic, so without this the setGeneric bodies in AllGenerics.R and the
+    # copy semantics of each setter go unexercised.
+    cs <- CredibleSetParam()
+    expect_equal(getSecondaryCoverage(cs), c(0.7, 0.5))
+    expect_equal(getSignalCutoff(cs), 0.025)
+    expect_equal(getMinAbsCorr(cs), 0.8)
+    expect_false(getIncludeAllCs(cs))
+    expect_equal(getPerCsColumns(cs), "none")
+    expect_null(getLgreedy(cs))
+
+    # Each setter hands back a new record; the original is untouched.
+    expect_equal(getSecondaryCoverage(setSecondaryCoverage(cs, 0.6)), 0.6)
+    expect_equal(getSignalCutoff(setSignalCutoff(cs, 0.1)), 0.1)
+    expect_equal(getMinAbsCorr(setMinAbsCorr(cs, 0.5)), 0.5)
+    expect_equal(getMedianAbsCorr(setMedianAbsCorr(cs, 0.4)), 0.4)
+    expect_true(getIncludeAllCs(setIncludeAllCs(cs, TRUE)))
+    expect_equal(getPerCsColumns(setPerCsColumns(cs, "alpha")), "alpha")
+    expect_equal(getSecondaryCoverage(cs), c(0.7, 0.5))
+    expect_false(getIncludeAllCs(cs))
+
+    # Setters revalidate, so a wrong-typed replacement is refused.
+    expect_error(setIncludeAllCs(cs, "yes"), "includeAllCs")
+})

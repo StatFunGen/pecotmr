@@ -1580,3 +1580,29 @@ test_that("GwasFineMappingParam accessors round-trip a nested bundle", {
         "GwasFineMappingParam"
     )
 })
+
+test_that("GwasFineMappingParam accessors read and replace every field", {
+    # Dispatching each accessor is what exercises the generics declared in
+    # AllGenerics.R; the constructor alone never reaches them.
+    p <- GwasFineMappingParam()
+    expect_equal(getFineMappingMethods(p), "susie")
+    expect_s4_class(getRssArgs(p), "SusieRssParam")
+    expect_s4_class(getPanelFilterArgs(p), "PanelFilterParam")
+    expect_s4_class(getCredibleSetArgs(p), "CredibleSetParam")
+    expect_true(getAddSusieInf(p))
+    expect_equal(getFitRetention(p), "slim")
+
+    # Each setter returns a new record and leaves the original alone.
+    expect_equal(
+        getFineMappingMethods(setFineMappingMethods(p, "susieInf")),
+        "susieInf"
+    )
+    expect_false(getAddSusieInf(setAddSusieInf(p, FALSE)))
+    expect_equal(getFitRetention(setFitRetention(p, "full")), "full")
+    expect_s4_class(
+        getPanelFilterArgs(setPanelFilterArgs(p, PanelFilterParam())),
+        "PanelFilterParam"
+    )
+    expect_equal(getFineMappingMethods(p), "susie")
+    expect_true(getAddSusieInf(p))
+})

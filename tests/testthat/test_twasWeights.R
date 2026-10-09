@@ -2277,3 +2277,51 @@ test_that("each method's Options constructor is resolved per input path", {
     expect_null(pecotmr:::.twasMethodCtorFor("prsCs", "QtlDataset"))
     expect_null(pecotmr:::.twasMethodCtorFor("nosuch", "QtlDataset"))
 })
+
+# ===========================================================================
+# Lookup and per-fold helpers: the absent-input branches
+# ===========================================================================
+
+test_that(".twasMethodListArgs answers an empty list for nothing usable", {
+    f <- pecotmr:::.twasMethodListArgs
+    expect_equal(f(list()), list())
+    # Unnamed entries carry no method to key on.
+    expect_equal(f(list(1, 2)), list())
+    # Named entries are re-keyed with the _weights suffix dropped.
+    expect_named(f(list(lasso_weights = list(a = 1))), "lasso")
+})
+
+test_that("name lookups answer NA / NULL when the name resolves to nothing", {
+    expect_equal(
+        pecotmr:::.twasChainHopFormals("noSuchFunctionAnywhere"),
+        NA_character_
+    )
+    expect_null(pecotmr:::.twasImplCtorName("noSuchImplAnywhere"))
+    expect_null(pecotmr:::.twasImplCtorName(NULL))
+})
+
+test_that(".twasCanonicalShortName maps a function name back, else passes on", {
+    f <- pecotmr:::.twasCanonicalShortName
+    map <- c(lassoWeights = "lasso")
+    expect_equal(f("lassoWeights", map), "lasso")
+    expect_equal(f("lasso", map), "lasso")
+    expect_equal(f("unknownThing", map), "unknownThing")
+})
+
+test_that(".twasFoldFitsFor answers NULL when no spelling is present", {
+    f <- pecotmr:::.twasFoldFitsFor
+    expect_null(f(NULL, "susie"))
+    # A CV payload keyed by something else is not this token's fits.
+    expect_null(f(list(somethingElse = list()), "susie"))
+})
+
+test_that(".twasFoldFit leaves args alone when there is no fold fit", {
+    f <- pecotmr:::.twasFoldFit
+    args <- list(X = 1)
+    # No CV payload at all.
+    expect_identical(f(args, "susie", 1L, NULL), args)
+    # A method with no fine-mapping token to look up.
+    expect_identical(f(args, "lasso", 1L, list(susie = list())), args)
+    # The token is present but carries no folds, so there is nothing to add.
+    expect_identical(f(args, "susie", 1L, list(susie = list())), args)
+})

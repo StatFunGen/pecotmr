@@ -308,7 +308,6 @@ setClass("MethodOptions", contains = "SimpleList")
     engine = NULL,
     accepted = NULL,
     filtered = FALSE,
-    check = TRUE,
     inputType = NULL
 ) {
     if (length(extra) > 0L && !is_named(extra)) {
@@ -324,14 +323,13 @@ setClass("MethodOptions", contains = "SimpleList")
     # `accepted` given explicitly is for an engine whose options are not its
     # formals -- udr takes a `control` list, whose valid names come from
     # udr::ud_fit_control_default(). Still a live source, not a transcription.
-    # `check = FALSE` is for a bundle that reaches an engine whose accepted
-    # names pecotmr has not enumerated. Rejecting a name there would be a
-    # guess, and a false rejection is worse than no check.
-    accepted <- if (!check) {
-        NULL
-    } else {
-        accepted %||% .engineAcceptedNames(callee, filtered)
-    }
+    #
+    # There is no flag for "do not check": the one case where names cannot
+    # be checked is an engine that takes `...`, and .engineAcceptedNames()
+    # reads that off the callee's live formals, returning NULL -- which is
+    # what .engineCheckExtra() treats as "nothing to check against". A
+    # missing package and unreadable formals answer NULL the same way.
+    accepted <- accepted %||% .engineAcceptedNames(callee, filtered)
     .engineCheckExtra(extra, accepted, label, calleeName)
     res <- new(
         "MethodOptions",
@@ -341,7 +339,6 @@ setClass("MethodOptions", contains = "SimpleList")
         engine = engine %||% label,
         callee = if (is.character(callee)) callee else NA_character_,
         filtered = filtered,
-        check = check,
         inputType = inputType %||% .engineInputType(callee, label)
     )
     res
@@ -610,15 +607,7 @@ setMethod("show", "MethodOptions", function(object) {
         # Whether names were checkable is a property of the callee, not of
         # this record, so say it here rather than leaving the user to guess
         # why a typo was or was not caught.
-        note <- if (isFALSE(md$check)) {
-            glue(
-                "argument names NOT checked: this method reaches a different ",
-                "engine on the summary-statistics path, whose accepted names ",
-                "pecotmr has not enumerated"
-            )
-        } else {
-            .engineCheckNote(md$callee, md$filtered %||% FALSE)
-        }
+        note <- .engineCheckNote(md$callee, md$filtered %||% FALSE)
         cat("  ", note, "\n", sep = "")
     }
     # Which input classes these arguments belong to, when that is a

@@ -486,3 +486,159 @@ test_that("show renders a slot holding per-method entries", {
         "coverage\\s+0.9"
     )
 })
+
+# ===========================================================================
+# show() and the slot-rendering helpers
+# ---------------------------------------------------------------------------
+# A populated Param used to fail to print: format() falls through to
+# as.character() on an S4 slot value and errors. Nothing printed one, so the
+# whole suite stayed green while show() was broken. These pin each rendering
+# branch -- a nested Options record, a nested Param, a named list, an
+# unnamed list -- so the next one cannot regress silently.
+# ===========================================================================
+
+test_that("show renders a Param with nothing set", {
+    out <- capture.output(show(MashComponentParam()))
+    expect_true(any(str_detect(out, "MashComponentParam")))
+    expect_true(any(str_detect(out, fixed("(nothing set)"))))
+    expect_true(any(str_detect(out, "unset: components")))
+})
+
+test_that("show names a nested Options record by its engine", {
+    # Defaults carry no settings, so the record is reported as such.
+    bare <- capture.output(show(SusieRssParam(
+        control = SusieRssControlOptions()
+    )))
+    expect_true(any(str_detect(bare, fixed("<susieRssControl: defaults>"))))
+    # With settings, they are listed instead.
+    set <- capture.output(show(SusieRssParam(
+        control = SusieRssControlOptions(r_tol = 1e-08)
+    )))
+    expect_true(any(str_detect(set, "susieRssControl: r_tol")))
+})
+
+test_that("show names a nested Param by what it contains", {
+    # Not by slot name: the reader wants the fields, not "credibleSetArgs".
+    out <- capture.output(show(GwasFineMappingParam()))
+    expect_true(any(str_detect(out, "credibleSetArgs")))
+    expect_true(any(str_detect(out, "coverage, secondaryCoverage")))
+})
+
+test_that("show counts an unnamed list slot and names a named one", {
+    unnamed <- capture.output(show(CrossValidationParam(
+        samplePartition = list(1:2, 3:4)
+    )))
+    expect_true(any(str_detect(unnamed, fixed("2 entries"))))
+    one <- capture.output(show(CrossValidationParam(
+        samplePartition = list(1:2)
+    )))
+    expect_true(any(str_detect(one, fixed("1 entry"))))
+    named <- capture.output(show(FineMappingMethodsParam(
+        qtlDatasetMethods = list(susie = SusieOptions())
+    )))
+    expect_true(any(str_detect(named, "susie")))
+})
+
+test_that(".paramNestedText reports a nested Param that is empty", {
+    expect_match(
+        as.character(pecotmr:::.paramNestedText(MashComponentParam())),
+        "nothing set"
+    )
+})
+
+test_that("$ and [[ refuse names and positions a Param does not have", {
+    cs <- CredibleSetParam()
+    expect_error(cs$nosuch, "is not a setting of CredibleSetParam")
+    expect_error(cs$nosuch, "It has:")
+    expect_error(cs[[99L]], "subscript out of bounds")
+    expect_equal(cs[["coverage"]], 0.95)
+    expect_error(cs[["nosuch"]], "is not a setting of CredibleSetParam")
+    expect_error(cs[[NA_integer_]], "subscript out of bounds")
+})
+
+test_that(".assetMethodParam names the record it was handed", {
+    # A Param of the wrong class reports its own class, not "a bare list".
+    expect_error(
+        pecotmr:::.assertMethodParam(
+            CredibleSetParam(),
+            "ColocPriorParam",
+            "priors"
+        ),
+        "a CredibleSetParam"
+    )
+    expect_error(
+        pecotmr:::.assertMethodParam(list(a = 1), "ColocPriorParam", "priors"),
+        "a bare list"
+    )
+    # An empty list is "no settings", as it is for MethodOptions.
+    expect_silent(pecotmr:::.assertMethodParam(
+        list(),
+        "ColocPriorParam",
+        "priors"
+    ))
+})
+
+test_that("validity catches unnamed entries that bypass the constructor", {
+    # Two different checks produce near-identical text, and only one is on
+    # the constructor path: .methodsNormalizeSlot() aborts first, so the
+    # validity guard in .methodsSlotProblems() is reached only by a direct
+    # new() or a slot<- afterwards. Asserting on the phrase alone cannot
+    # tell them apart -- the prefix is what distinguishes them.
+    expect_error(
+        FineMappingMethodsParam(qtlDatasetMethods = list(list(L = 1))),
+        "FineMappingMethodsParam: every `qtlDatasetMethods` entry must be"
+    )
+    expect_error(
+        new(
+            "FineMappingMethodsParam",
+            qtlDatasetMethods = list(list(L = 1))
+        ),
+        "`qtlDatasetMethods`: every entry must be named for its method"
+    )
+    # An empty-string name is the same failure as a missing one.
+    expect_error(
+        new(
+            "FineMappingMethodsParam",
+            qtlDatasetMethods = set_names(list(list()), "")
+        ),
+        "`qtlDatasetMethods`: every entry must be named for its method"
+    )
+})
+
+test_that(".methodsParamFor and ...ForMulti route each input shape", {
+    f <- pecotmr:::.methodsParamFor
+    m <- pecotmr:::.methodsParamForMulti
+    # A record of the right class passes straight through.
+    p <- FineMappingMethodsParam(methods = "susie")
+    expect_identical(f(p, "QtlDataset", "FineMappingMethodsParam", "x"), p)
+    expect_identical(m(p, "FineMappingMethodsParam", "x", TRUE), p)
+    # A character vector names methods with their defaults.
+    expect_equal(
+        names(f("susie", "QtlDataset", "FineMappingMethodsParam", "x")$methods),
+        "susie"
+    )
+    # A record for the OTHER pipeline is refused by name, not silently used.
+    expect_error(
+        f(
+            TwasWeightsMethodsParam(methods = "lasso"),
+            "QtlDataset",
+            "FineMappingMethodsParam",
+            "fineMappingPipeline"
+        ),
+        "configures a different pipeline"
+    )
+    expect_error(
+        m(
+            TwasWeightsMethodsParam(methods = "lasso"),
+            "FineMappingMethodsParam",
+            "fineMappingPipeline",
+            TRUE
+        ),
+        "configures a different pipeline"
+    )
+    # Anything that is neither a record, a character vector nor a list.
+    expect_error(
+        m(42, "FineMappingMethodsParam", "fineMappingPipeline", TRUE),
+        "must be a character vector, a named list"
+    )
+})

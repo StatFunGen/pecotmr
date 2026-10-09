@@ -777,80 +777,6 @@ setMethod("show", "TwasWeights", function(object) {
 
 # --- TWAS method-token registry ---------------------------------------------
 
-# The weight function's own formals, minus the `methodArgs` slot that carries
-# everything destined for the engine.
-# @noRd
-.twasImplFormals <- function(impl) {
-    fn <- tryCatch(
-        get(impl, envir = asNamespace("pecotmr")),
-        error = function(cnd) NULL
-    )
-    if (!is.function(fn)) {
-        return(character())
-    }
-    setdiff(names(formals(fn)), c("methodArgs", "..."))
-}
-
-# The fitting engine a token reaches, per input class. The two differ for
-# every method with a summary-statistics counterpart: the individual path
-# goes to the external package, the RSS path to pecotmr's own solver. Written
-# out because it cannot be read off the capability table, which records the
-# pecotmr wrapper rather than the engine behind it.
-# @noRd
-.twasTokenEngines <- function(token) {
-    individual <- list(
-        mrash = "susieR::mr.ash",
-        enet = "glmnet::cv.glmnet",
-        lasso = "glmnet::cv.glmnet",
-        bayesA = "qgg::gbayes",
-        bayesC = "qgg::gbayes",
-        bayesN = "qgg::gbayes",
-        bayesR = "qgg::gbayes",
-        bayesB = "BGLR::BGLR",
-        bayesL = "BGLR::BGLR",
-        bLasso = "BGLR::BGLR",
-        dprVb = "RcppDPR::fit_model",
-        dprGibbs = "RcppDPR::fit_model",
-        dprAdaptiveGibbs = "RcppDPR::fit_model",
-        scad = "ncvreg::cv.ncvreg",
-        mcp = "ncvreg::cv.ncvreg",
-        l0learn = "L0Learn::L0Learn.cvfit",
-        mrmash = "mr.mashr::mr.mash"
-    )
-    sumstat <- list(
-        mrash = "susieR::mr.ash.rss",
-        lasso = "pecotmr::lassosumRss",
-        scad = "pecotmr::penalizedRss",
-        mcp = "pecotmr::penalizedRss",
-        l0learn = "pecotmr::penalizedRss",
-        dprGibbs = "pecotmr::sdpr",
-        mrmash = "mr.mashr::mr.mash.rss",
-        prsCs = "pecotmr::prsCs"
-    )
-    list(individual = individual[[token]], sumstat = sumstat[[token]])
-}
-
-# The engine for one input class, or NULL when the token has no path there.
-# @noRd
-.twasTokenEngineFor <- function(token, inputKind) {
-    e <- .twasTokenEngines(token)
-    if (identical(inputKind, "QtlDataset")) e$individual else e$sumstat
-}
-
-# Every engine a token can reach, across classes.
-# @noRd
-.twasTokenEngineNames <- function(token) {
-    callees <- unlist(compact(unname(.twasTokenEngines(token))))
-    if (length(callees) == 0L) {
-        return(NULL)
-    }
-    # filtered = FALSE: .splitMethodArgs does not DROP unrecognised names, it
-    # forwards them to the engine -- so an engine with `...` really would
-    # accept them and nothing can be rejected across the union. The per-class
-    # check below narrows to one engine, where this is no longer true.
-    .engineAcceptedNames(callees, FALSE)
-}
-
 # The per-token kwargs carried by a normalized methodList, keyed by canonical
 # token. The list is keyed by weight-function name, which is the spelling the
 # fitters want but not the one the engine map uses.
@@ -1156,42 +1082,6 @@ setMethod("show", "TwasWeights", function(object) {
     )
 }
 
-# Entries may be keyed by the short token (`lasso`) or by the full weight
-# function name (`lasso_weights`), the same two spellings .twasMethodLookup
-# accepts. Canonicalize to the short form so the registry has one key per
-# method and errors name the canonical spelling.
-# @noRd
-.twasCanonicalEntryNames <- function(entries) {
-    if (length(entries) == 0L || is.null(names(entries))) {
-        return(entries)
-    }
-    fnToShort <- set_names(
-        names(.twasMethodMap),
-        map_chr(.twasMethodMap, "fn")
-    )
-    set_names(
-        entries,
-        map_chr(names(entries), .twasCanonicalEntryName, fnToShort = fnToShort)
-    )
-}
-
-# One entry name in canonical short form. .twasMethodMap covers the tokens
-# with an individual-level fitter; a sumstat-only token such as prsCs is not
-# in it, so a `<token>_weights` spelling is also recognised by stripping the
-# suffix when what remains is a known method.
-# @noRd
-.twasCanonicalEntryName <- function(nm, fnToShort) {
-    short <- .twasCanonicalShortName(nm, fnToShort)
-    if (is_in(short, names(.twasMethodCtors()))) {
-        return(short)
-    }
-    stripped <- str_remove(nm, "(_weights|Weights)$")
-    if (is_in(stripped, names(.twasMethodCtors()))) {
-        return(stripped)
-    }
-    short
-}
-
 # Why a token takes no options, so the error can say something useful rather
 # than just "unknown method".
 # @noRd
@@ -1209,21 +1099,6 @@ setMethod("show", "TwasWeights", function(object) {
         ))
     }
     NULL
-}
-
-# A token's summary-statistic constructor, where that path runs a different
-# engine from the individual-level one. The four pecotmr solvers are real
-# engines with their own formals, so each has its own constructor; a token
-# whose two paths share an engine is absent here.
-# @noRd
-.twasMethodRssCtors <- function() {
-    list(
-        lasso = LassosumOptions,
-        scad = PenalizedRssOptions,
-        mcp = PenalizedRssOptions,
-        l0learn = PenalizedRssOptions,
-        dprGibbs = SdprOptions
-    )
 }
 
 # Map short method names and presets to weightMethods lists.
