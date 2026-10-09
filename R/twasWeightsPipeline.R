@@ -1392,6 +1392,26 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     )
 }
 
+# The QtlDataset worker's argument checks, grouped so its entry point names
+# the validation phase once instead of listing four calls inline.
+# @noRd
+.twasQdsAssertParams <- function(
+    methods,
+    fitRetention,
+    crossValidationArgs,
+    ensembleArgs
+) {
+    .twasWarnUnretainableDetail(fitRetention, methods)
+    .assertMethodParam(
+        crossValidationArgs,
+        "CrossValidationParam",
+        "crossValidation"
+    )
+    .assertMethodParam(ensembleArgs, "EnsembleParam", "ensemble")
+    .ensembleAssertCv(ensembleArgs, crossValidationArgs)
+    invisible(NULL)
+}
+
 .twasPipelineQtlDataset <- function(
     data,
     methods = "default",
@@ -1420,14 +1440,12 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
 ) {
     naAction <- arg_match(naAction)
     fitRetention <- arg_match(fitRetention)
-    .twasWarnUnretainableDetail(fitRetention, methods)
-    .assertMethodParam(
+    .twasQdsAssertParams(
+        methods,
+        fitRetention,
         crossValidationArgs,
-        "CrossValidationParam",
-        "crossValidation"
+        ensembleArgs
     )
-    .assertMethodParam(ensembleArgs, "EnsembleParam", "ensemble")
-    .ensembleAssertCv(ensembleArgs, crossValidationArgs)
     cvCfg <- .cvResolve(crossValidationArgs)
     # Each stage returns only the values it derives; nothing is grafted onto a
     # captured environment.
@@ -3272,6 +3290,25 @@ setMethod(
     (is.character(methods) || is.list(methods)) && length(methods) == 0L
 }
 
+# Resolve the MultiStudyQtlDataset inputs: the region/cisWindow guard, the
+# naAction choice and the joint-region spec. Mirrors .fmMsResolveInputs so
+# both MultiStudy workers read the same way, rather than one open-coding
+# what the other names.
+# @noRd
+.twasMsResolveInputs <- function(naAction, region, cisWindow, jointRegions) {
+    if (!is.null(region) && !is.null(cisWindow)) {
+        msg <- glue(
+            "twasWeightsPipeline(MultiStudyQtlDataset): specify either ",
+            "`region` or `cisWindow`, not both."
+        )
+        abort(msg)
+    }
+    list(
+        naAction = arg_match(naAction, c("drop", "impute")),
+        xRegions = .makeXRegions(region, jointRegions)
+    )
+}
+
 .twasPipelineMultiStudy <- function(
     data,
     methods = "default",
@@ -3297,16 +3334,10 @@ setMethod(
     ensembleArgs = EnsembleParam(),
     seed = NULL
 ) {
-    naAction <- arg_match(naAction)
     fitRetention <- arg_match(fitRetention)
     .twasWarnUnretainableDetail(fitRetention, methods)
-    if (!is.null(region) && !is.null(cisWindow)) {
-        msg <- glue(
-            "twasWeightsPipeline(MultiStudyQtlDataset): specify either ",
-            "`region` or `cisWindow`, not both."
-        )
-        abort(msg)
-    }
+    inputs <- .twasMsResolveInputs(naAction, region, cisWindow, jointRegions)
+    naAction <- inputs$naAction
     # One record of the settings the joint phase and the shared dispatcher
     # both need, so each names them once.
     jointCfg <- list(
@@ -3315,7 +3346,7 @@ setMethod(
         traitId = traitId,
         cisWindow = cisWindow,
         verbose = verbose,
-        xRegions = .makeXRegions(region, jointRegions),
+        xRegions = inputs$xRegions,
         fitRetention = fitRetention,
         seed = seed
     )

@@ -183,6 +183,12 @@ setClass("MethodOptions", contains = "SimpleList")
     ))
 }
 
+# Whether one fine-mapping method token accepts GwasSumStats.
+# @noRd
+.fmTokenGwasAllowed <- function(tk, caps) {
+    isTRUE(caps[[tk]]$gwasAllowed)
+}
+
 # Fine-mapping stores the callees themselves, so the lookup is direct. A
 # callee may serve several methods (susieR::susie backs susie, susieInf and
 # susieAsh), and GwasSumStats is a summary-statistics class that only the
@@ -194,13 +200,23 @@ setClass("MethodOptions", contains = "SimpleList")
     }
     caps <- .fineMappingMethodCapabilities
     ind <- compact(map(caps, "individualImpl"))
-    sum <- compact(map(caps, "sumstatImpl"))
-    gwas <- keep(names(sum), function(tk) isTRUE(caps[[tk]]$gwasAllowed))
+    sumstat <- compact(map(caps, "sumstatImpl"))
+    gwas <- keep(names(sumstat), .fmTokenGwasAllowed, caps = caps)
     c(
         if (any(is_in(callee, unlist(ind)))) "QtlDataset",
-        if (any(is_in(callee, unlist(sum)))) "QtlSumStats",
-        if (any(is_in(callee, unlist(sum[gwas])))) "GwasSumStats"
+        if (any(is_in(callee, unlist(sumstat)))) "QtlSumStats",
+        if (any(is_in(callee, unlist(sumstat[gwas])))) "GwasSumStats"
     )
+}
+
+# The Options-constructor names declared by every TWAS method that fills
+# one capability field.
+# @noRd
+.twasCtorNamesFor <- function(caps, field) {
+    unlist(compact(map(
+        compact(map(caps, field)),
+        .twasImplCtorName
+    )))
 }
 
 # TWAS stores pecotmr implementations rather than callees, and each one
@@ -212,15 +228,11 @@ setClass("MethodOptions", contains = "SimpleList")
         return(character(0))
     }
     caps <- .twasMethodCapabilities
-    named <- function(field) {
-        unlist(compact(map(
-            compact(map(caps, field)),
-            .twasImplCtorName
-        )))
-    }
+    individual <- .twasCtorNamesFor(caps, "individualImpl")
+    sumstat <- .twasCtorNamesFor(caps, "sumstatImpl")
     c(
-        if (is_in(label, named("individualImpl"))) "QtlDataset",
-        if (is_in(label, named("sumstatImpl"))) "QtlSumStats"
+        if (is_in(label, individual)) "QtlDataset",
+        if (is_in(label, sumstat)) "QtlSumStats"
     )
 }
 

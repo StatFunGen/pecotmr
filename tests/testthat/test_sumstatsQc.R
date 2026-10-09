@@ -603,6 +603,20 @@ test_that("invertMatEigen handles matrices with negative eigenvalues", {
     expect_silent(invertMatEigen(mat))
 })
 
+test_that("invertMatEigen inverts a matrix that keeps a single eigenvector", {
+    # A near-rank-1 matrix puts >99.9% of the variance in one eigenvalue, so
+    # L == 1. That used to drop the eigenvector subscript to a vector and
+    # hand diag() a length-one value, which returns an identity matrix of
+    # THAT ORDER (diag(0.1) is 0x0) rather than a 1x1 matrix holding it.
+    v <- c(1, 1, 1) / sqrt(3)
+    mat <- 3 * outer(v, v) + diag(1e-9, 3)
+    actual <- invertMatEigen(mat)
+    expect_equal(dim(actual), c(3L, 3L))
+    expect_equal(actual, t(actual))
+    # The rank-1 pseudo-inverse reproduces the matrix it came from.
+    expect_equal(mat %*% actual %*% mat, mat, tolerance = 1e-6)
+})
+
 # ===========================================================================
 # raissSingleMatrix edge cases
 # ===========================================================================

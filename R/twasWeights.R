@@ -960,11 +960,11 @@ setMethod("show", "TwasWeights", function(object) {
     if (is.null(chain)) {
         return(NULL)
     }
-    all <- map(chain, .twasChainHopFormals)
-    if (any(map_lgl(all, .twasChainHopUnknown))) {
+    perHop <- map(chain, .twasChainHopFormals)
+    if (any(map_lgl(perHop, .twasChainHopUnknown))) {
         return(NULL)
     }
-    setdiff(unique(list_c(all)), .twasChainDataArgs())
+    setdiff(unique(list_c(perHop)), .twasChainDataArgs())
 }
 
 # A hop contributes nothing checkable when it could not be read, or when it
@@ -2411,9 +2411,6 @@ learnTwasWeights <- function(
     map(weightsList, .twasSetRownames, X = X)
 }
 
-# learnTwasWeights worker: validate, resolve methods, fit each, and assemble the
-# TwasWeights collection. `p` is the captured public arguments.
-# @noRd
 # Whether a fine-mapping token's fit is already available -- on the method's
 # own arguments, or in `fittedModels`.
 # @noRd

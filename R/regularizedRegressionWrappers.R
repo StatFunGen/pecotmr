@@ -466,7 +466,7 @@ mrmashWeights <- function(
             !!!split$rest
         )
     }
-    out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, ]
+    out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, , drop = FALSE]
     # mu1 (= out) is already the returned weights; the payload carries only the
     # mvSuSiE data-driven-prior reconstruction inputs (w0, V, and the raw prior
     # matrices), plus the whole fit at fitRetention = "full".
@@ -3487,12 +3487,12 @@ computeCoefficientsUnivGlmnet <- function(
         yhatList <- map(out, "yhat_new")
         YhatNew <- `colnames<-`(exec(cbind, !!!yhatList), colnames(Y))
         results <- list(
-            Bhat = Bhat[-1, ],
+            Bhat = Bhat[-1, , drop = FALSE],
             intercept = Bhat[1, ],
             Yhat_new = YhatNew
         )
     } else {
-        results <- list(Bhat = Bhat[-1, ], intercept = Bhat[1, ])
+        results <- list(Bhat = Bhat[-1, , drop = FALSE], intercept = Bhat[1, ])
     }
     return(results)
 }

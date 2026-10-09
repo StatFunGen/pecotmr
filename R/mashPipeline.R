@@ -1325,9 +1325,12 @@ fitMashContrast <- function(
     # Three cases, stated directly: conditions sharing a group split the
     # deviation weight between them, the diagonal carries the full weight,
     # and everything else contributes -1.
-    groupSize <- as.integer(table(grouping)[as.character(grouping)])
-    sameGroup <- outer(grouping, grouping, "==") &
-        matrix(grouping > 0, nPop, nPop)
+    sameAll <- outer(grouping, grouping, "==")
+    # Group sizes are counted off `sameAll`, not looked up in
+    # table(grouping) by as.character(grouping): that round-tripped every
+    # grouping code through its string form to find its own count.
+    groupSize <- as.integer(colSums(sameAll))
+    sameGroup <- sameAll & matrix(grouping > 0, nPop, nPop)
     matrix(
         ifelse(
             sameGroup,
@@ -2184,7 +2187,13 @@ filterInvalidSummaryStat <- function(
     list_assign(
         reset,
         !!!set_names(
-            list(reset[[bhat]][keep, ], reset[[sbhat]][keep, ]),
+            # `drop = FALSE`: one surviving variant would collapse these
+            # to vectors, and they go back into the mash data list where
+            # mashr expects an N x R matrix.
+            list(
+                reset[[bhat]][keep, , drop = FALSE],
+                reset[[sbhat]][keep, , drop = FALSE]
+            ),
             c(bhat, sbhat)
         )
     )
@@ -2215,9 +2224,11 @@ filterInvalidSummaryStat <- function(
     keepIndex <- filterBySignificance(withZ$strong.z, sigPCutoff)
     list_assign(
         withZ,
-        strong.z = withZ$strong.z[keepIndex, ],
-        strong.b = withZ$strong.b[keepIndex, ],
-        strong.s = withZ$strong.s[keepIndex, ]
+        # `drop = FALSE`: exactly one significant variant is a common
+        # outcome, and a vector here would reach mashr as the strong set.
+        strong.z = withZ$strong.z[keepIndex, , drop = FALSE],
+        strong.b = withZ$strong.b[keepIndex, , drop = FALSE],
+        strong.s = withZ$strong.s[keepIndex, , drop = FALSE]
     )
 }
 

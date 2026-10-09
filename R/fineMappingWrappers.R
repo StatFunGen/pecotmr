@@ -3229,7 +3229,7 @@ mvsusieWeights <- function(mvsusieFit = NULL) {
         )
         abort(msg)
     }
-    mvsusieR::coef.mvsusie(mvsusieFit)[-1, ]
+    mvsusieR::coef.mvsusie(mvsusieFit)[-1, , drop = FALSE]
 }
 
 # One wavelet basis row: inverse-DWT (wr) of the unit coefficient vector e_k,

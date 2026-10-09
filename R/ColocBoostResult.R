@@ -560,7 +560,11 @@ setMethod("getColocPairs", "ColocBoostResult", function(x) {
     if (is.null(md) || length(x) == 0L) {
         return(tibble())
     }
-    flat <- as.data.frame(md[, setdiff(colnames(md), "outcomes")])
+    # `drop = FALSE` as in the sibling views: a single kept column would
+    # arrive as a vector and be named after the subscript text.
+    flat <- as.data.frame(
+        md[, setdiff(colnames(md), "outcomes"), drop = FALSE]
+    )
     mutate(
         as_tibble(flat, .name_repair = "minimal"),
         outcomes = map_chr(as.list(md$outcomes), str_flatten, collapse = "; "),

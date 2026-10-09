@@ -1186,7 +1186,9 @@ loadLdFromGenotype <- function(
     if (methods::is(x, "GenotypeHandle")) {
         return(.subsetGenotypeHandle(x, keep))
     }
-    x[keep, ]
+    # `drop = FALSE`: the fallback shape is the matrix sketch, which a
+    # one-variant `keep` would otherwise collapse to a vector.
+    x[keep, , drop = FALSE]
 }
 
 # A sketch trimmed to zero variants, every other property preserved. Used when

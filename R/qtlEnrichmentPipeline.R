@@ -591,8 +591,8 @@ qtlEnrichmentPipeline <- function(
 # row per (id, rounded-pip), so a conflicting variant survives with >1 row for
 # add_count() to flag.
 # @noRd
-.enrCollapseDuplicatePips <- function(all) {
-    byId <- tibble(id = names(all), pip = as.numeric(all)) |>
+.enrCollapseDuplicatePips <- function(pips) {
+    byId <- tibble(id = names(pips), pip = as.numeric(pips)) |>
         mutate(pipR = round(.data$pip, 12)) |>
         distinct(.data$id, .data$pipR, .keep_all = TRUE) |>
         add_count(.data$id)

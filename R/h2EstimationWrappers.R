@@ -2400,10 +2400,11 @@ h2EstimateToSldscTrait <- function(h2Est) {
     .lderLocalBlock(blockStats[[b]], b, N, a)
 }
 
-# LDER weighted score z for candidate column `c` under the `keep` block mask.
+# LDER weighted score z for candidate column `cand` under the `keep` block
+# mask.
 # @noRd
-.lderScoreForCand <- function(c, ldCand, lam, w, resid, N, keep) {
-    .lderCandidateScore(ldCand[, c], lam, w, resid, N, keep)
+.lderScoreForCand <- function(cand, ldCand, lam, w, resid, N, keep) {
+    .lderCandidateScore(ldCand[, cand], lam, w, resid, N, keep)
 }
 
 # LDER leave-one-block-out candidate score z's for block `b`.

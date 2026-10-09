@@ -2557,9 +2557,15 @@ invertMatEigen <- function(mat, tol = 1e-3) {
         )
         abort(msg)
     }
-    matInv <- eigenMat$vectors[, seq_len(L)] %*%
-        diag(1 / eigenMat$values[seq_len(L)]) %*%
-        t(eigenMat$vectors[, seq_len(L)])
+    # Both guards matter when L == 1: the subscript would drop to a vector,
+    # and diag() of a length-one value returns an identity matrix of THAT
+    # ORDER -- diag(0.1) is 0x0 -- not a 1x1 matrix holding the value, so
+    # the product failed with "non-conformable arguments".
+    kept <- seq_len(L)
+    vectors <- eigenMat$vectors[, kept, drop = FALSE]
+    matInv <- vectors %*%
+        diag(1 / eigenMat$values[kept], nrow = L) %*%
+        t(vectors)
 
     return(matInv)
 }

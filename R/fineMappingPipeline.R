@@ -2809,11 +2809,66 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     .rbindFineMappingResult(perTupleResult, jointResult, ldSketch = NULL)
 }
 
-# QtlDataset fine-mapping worker. `p` is the setMethod's captured arguments;
-# each phase extends the bundle via list_modify so the dispatch helpers read
-# everything from `p`. The susieInf chaining is applied downstream inside
-# .fmFitXBlock / .fmFitRssBlock (which recompute .fmResolveSusieChain), so no
-# chain config is threaded here.
+# Resolve the context/trait tuples, split the tokens across the univariate,
+# multivariate and functional paths, dispatch one row per tuple and assemble
+# the result. Carved out of .fmPipelineQtlDataset purely to shorten it --
+# every argument is one the entry point already holds, so the two still have
+# to be read together.
+# @noRd
+.fmQdsRunAndAssemble <- function(
+    data,
+    commonCfg,
+    jointCfg,
+    contexts,
+    traitId,
+    region,
+    tokens,
+    methodArgs,
+    jointResult,
+    addSusieInf,
+    nPCs,
+    naAction,
+    usePCA
+) {
+    ctxInfo <- .fmQdsResolveContexts(
+        data = data,
+        contexts = contexts,
+        traitId = traitId,
+        region = region
+    )
+    split <- .fmQdsSplitTokens(tokens, ctxInfo$nCtx, ctxInfo$nTraits)
+    rows <- .fmQdsDispatchRows(.fmQdsRunCfg(
+        commonCfg,
+        addSusieInf = addSusieInf,
+        methodArgs = methodArgs,
+        nPCs = nPCs,
+        naAction = naAction,
+        perCtxTraits = ctxInfo$perCtxTraits,
+        study = ctxInfo$study,
+        univTokens = split$univTokens,
+        useCtx = ctxInfo$useCtx,
+        usePCA = usePCA
+    ))
+    .fmQdsAssemble(
+        data,
+        rows,
+        .fmQdsAutoJoint(
+            jointCfg,
+            mvTokens = split$mvTokens,
+            fsTokens = split$fsTokens,
+            jointResult = jointResult,
+            methodArgs = methodArgs,
+            nCtx = ctxInfo$nCtx,
+            nTraits = ctxInfo$nTraits
+        )
+    )
+}
+
+# QtlDataset fine-mapping worker. Each stage returns only the values it
+# derives, and the next stage takes them as named arguments -- nothing rides
+# on a captured environment. The susieInf chaining is applied downstream
+# inside .fmFitXBlock / .fmFitRssBlock (which recompute
+# .fmResolveSusieChain), so no chain config is threaded here.
 # @noRd
 .fmPipelineQtlDataset <- function(
     data,
@@ -2895,48 +2950,20 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     if (rt$done) {
         return(rt$result)
     }
-    tokens <- rt$tokens
-    methodArgs <- rt$methodArgs
-    jointResult <- rt$result
-    ctxInfo <- .fmQdsResolveContexts(
-        data = data,
+    .fmQdsRunAndAssemble(
+        data,
+        commonCfg,
+        jointCfg,
         contexts = contexts,
         traitId = traitId,
-        region = region
-    )
-    study <- ctxInfo$study
-    useCtx <- ctxInfo$useCtx
-    perCtxTraits <- ctxInfo$perCtxTraits
-    nCtx <- ctxInfo$nCtx
-    nTraits <- ctxInfo$nTraits
-    split <- .fmQdsSplitTokens(tokens, nCtx, nTraits)
-    univTokens <- split$univTokens
-    mvTokens <- split$mvTokens
-    fsTokens <- split$fsTokens
-    rows <- .fmQdsDispatchRows(.fmQdsRunCfg(
-        commonCfg,
+        region = region,
+        tokens = rt$tokens,
+        methodArgs = rt$methodArgs,
+        jointResult = rt$result,
         addSusieInf = addSusieInf,
-        methodArgs = methodArgs,
         nPCs = nPCs,
         naAction = naAction,
-        perCtxTraits = perCtxTraits,
-        study = study,
-        univTokens = univTokens,
-        useCtx = useCtx,
         usePCA = usePCA
-    ))
-    .fmQdsAssemble(
-        data,
-        rows,
-        .fmQdsAutoJoint(
-            jointCfg,
-            mvTokens = mvTokens,
-            fsTokens = fsTokens,
-            jointResult = jointResult,
-            methodArgs = methodArgs,
-            nCtx = nCtx,
-            nTraits = nTraits
-        )
     )
 }
 
@@ -3155,10 +3182,9 @@ setMethod(
     )
 }
 
-# MultiStudyQtlDataset fine-mapping worker. `p` is the setMethod's captured
-# arguments; after resolving the explicit joint spec it routes
-# each remaining method to the components it supports via the shared
-# multi-study driver.
+# MultiStudyQtlDataset fine-mapping worker. After resolving the explicit
+# joint spec it routes each remaining method to the components it supports,
+# via the shared multi-study driver.
 # @noRd
 .fmPipelineMultiStudy <- function(
     data,
@@ -3754,9 +3780,9 @@ NULL
     )
 }
 
-# QtlSumStats fine-mapping worker. `p` is the setMethod's captured arguments;
-# it is extended via list_modify with the resolved tokens / row selection / LD
-# sketch so the per-entry dispatch helpers read everything from one bundle.
+# QtlSumStats fine-mapping worker. The resolved tokens, row selection and LD
+# sketch are ordinary locals, handed to the per-entry dispatch helpers as
+# named arguments.
 # @noRd
 .fmPipelineQtlSumStats <- function(
     data,
@@ -3976,13 +4002,12 @@ setMethod(
     }
 }
 
-# GwasSumStats fine-mapping worker. `p` is the setMethod's captured arguments
-# resolved tokens / LD sketch / finite-sample size are ordinary locals; the
-# tokens / LD sketch / finite-sample size so the per-entry dispatch helpers
-# read everything from the single bundle. One GwasSumStats is one LD
-# block (the caller builds one collection per block when sweeping the genome);
-# we fine-map each (study, method) tuple across the whole entry, no in-pipeline
-# block partitioning.
+# GwasSumStats fine-mapping worker. The resolved tokens, LD sketch and
+# finite-sample size are ordinary locals, handed to the per-entry dispatch
+# helpers as named arguments. One GwasSumStats is one LD block (the caller
+# builds one collection per block when sweeping the genome); we fine-map each
+# (study, method) tuple across the whole entry, with no in-pipeline block
+# partitioning.
 # @noRd
 .fmPipelineGwas <- function(
     data,
