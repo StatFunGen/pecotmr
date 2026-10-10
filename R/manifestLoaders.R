@@ -80,10 +80,10 @@ NULL
 # .qtlValidateScalars exactly, so this tightens nothing.
 # @noRd
 #' @importFrom checkmate assertLogical assertNumber assertFlag assertCharacter
-.assertQtlPassThrough <- function(scaleResiduals, genotypeFilterArgs) {
+.assertQtlPassThrough <- function(scaleResiduals, genotypeFilterParam) {
     assertLogical(scaleResiduals, len = 1L)
     .assertMethodParam(
-        genotypeFilterArgs,
+        genotypeFilterParam,
         "GenotypeFilterParam",
         "genotypeFilter"
     )
@@ -92,22 +92,22 @@ NULL
     walk(
         c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff"),
         .assertQtlFilterNumber,
-        genotypeFilterArgs = genotypeFilterArgs
+        genotypeFilterParam = genotypeFilterParam
     )
     walk(
         c("keepSamples", "keepVariants"),
         .assertQtlFilterCharacter,
-        genotypeFilterArgs = genotypeFilterArgs
+        genotypeFilterParam = genotypeFilterParam
     )
-    if (!is.null(genotypeFilterArgs$keepIndel)) {
-        assertFlag(genotypeFilterArgs$keepIndel)
+    if (!is.null(genotypeFilterParam$keepIndel)) {
+        assertFlag(genotypeFilterParam$keepIndel)
     }
     invisible(NULL)
 }
 
 # @noRd
-.assertQtlFilterNumber <- function(field, genotypeFilterArgs) {
-    v <- genotypeFilterArgs[[field]]
+.assertQtlFilterNumber <- function(field, genotypeFilterParam) {
+    v <- genotypeFilterParam[[field]]
     if (!is.null(v)) {
         assertNumber(v, lower = 0, finite = TRUE, .var.name = field)
     }
@@ -115,8 +115,8 @@ NULL
 }
 
 # @noRd
-.assertQtlFilterCharacter <- function(field, genotypeFilterArgs) {
-    v <- genotypeFilterArgs[[field]]
+.assertQtlFilterCharacter <- function(field, genotypeFilterParam) {
+    v <- genotypeFilterParam[[field]]
     if (!is.null(v)) {
         assertCharacter(v, .var.name = field)
     }
@@ -367,8 +367,8 @@ NULL
 # the chromPaths names; for a single-file handle the unique snpInfo chromosomes.
 .ldSketchChroms <- function(ldSketch) {
     handle <- .ldSketchHandle(ldSketch)
-    if (length(getChromPaths(handle)) > 0L) {
-        canonChrom(names(getChromPaths(handle)))
+    if (length(chromPaths(handle)) > 0L) {
+        canonChrom(names(chromPaths(handle)))
     } else {
         unique(.ldSketchChrom(ldSketch))
     }
@@ -1404,7 +1404,7 @@ NULL
 # genotypePath / genotypeCovariatePath columns when supplied as arguments.
 .buildQtlDatasetFromRows <- function(
     rows,
-    study,
+    studyName,
     base,
     transposeCov,
     qc,
@@ -1417,23 +1417,23 @@ NULL
             contexts,
             .buildOneContextSe,
             rows = rows,
-            study = study,
+            study = studyName,
             base = base,
             transposeCov = transposeCov
         ),
         contexts
     )
-    genoHandle <- .resolveGenoHandle(rows, study, base, genotypesOverride)
+    genoHandle <- .resolveGenoHandle(rows, studyName, base, genotypesOverride)
     genoCov <- .resolveGenoCov(
         rows,
-        study,
+        studyName,
         base,
         transposeCov,
         genoCovOverride
     )
     qtlArgs <- c(
         list(
-            study = study,
+            study = studyName,
             genotypes = genoHandle,
             phenotypes = phenotypes,
             genotypeCovariates = genoCov
@@ -1446,24 +1446,24 @@ NULL
 # The SummarizedExperiment for one context: exactly one phenotypePath (+ at most
 # one covariatePath) across its manifest rows.
 # @noRd
-.buildOneContextSe <- function(cx, rows, study, base, transposeCov) {
+.buildOneContextSe <- function(cx, rows, studyName, base, transposeCov) {
     sub <- rows[as.character(rows$context) == cx, , drop = FALSE]
     pths <- unique(sub$phenotypePath[!is.na(sub$phenotypePath)])
     if (length(pths) != 1L) {
         msg <- glue(
-            "Context '{cx}' (study '{study}') must reference exactly one ",
+            "Context '{cx}' (study '{studyName}') must reference exactly one ",
             "phenotypePath; got: {str_flatten(pths, ', ')}"
         )
         abort(msg)
     }
-    covPath <- .oneContextCovariatePath(sub, cx, study, base)
+    covPath <- .oneContextCovariatePath(sub, cx, studyName, base)
     .buildContextSe(.resolveRel(pths[[1L]], base), covPath, transposeCov)
 }
 
 # The single covariate path a context declares, or NULL when the manifest has
 # no covariatePath column or the context leaves it blank.
 # @noRd
-.oneContextCovariatePath <- function(sub, cx, study, base) {
+.oneContextCovariatePath <- function(sub, cx, studyName, base) {
     if (!is_in("covariatePath", names(sub))) {
         return(NULL)
     }
@@ -1473,7 +1473,7 @@ NULL
     ])
     if (length(covs) > 1L) {
         abort(glue(
-            "Context '{cx}' (study '{study}') references multiple ",
+            "Context '{cx}' (study '{studyName}') references multiple ",
             "covariatePath values: {str_flatten(covs, ', ')}"
         ))
     }
@@ -1486,7 +1486,7 @@ NULL
 # The genotype handle: an override panel/path, else the study's single
 # genotypePath (auto-detecting the format).
 # @noRd
-.resolveGenoHandle <- function(rows, study, base, genotypesOverride) {
+.resolveGenoHandle <- function(rows, studyName, base, genotypesOverride) {
     open <- .openGenotypeHandle(genotypesOverride)
     if (!is.null(open)) {
         return(open)
@@ -1497,7 +1497,7 @@ NULL
         v <- unique(as.character(rows$genotypePath[!is.na(rows$genotypePath)]))
         if (length(v) != 1L) {
             msg <- glue(
-                "study '{study}' must reference exactly one genotypePath; ",
+                "study '{studyName}' must reference exactly one genotypePath; ",
                 "got: {str_flatten(v, ', ')}"
             )
             abort(msg)
@@ -1510,7 +1510,13 @@ NULL
 # The genotype covariate matrix: an override matrix/path, else the study's
 # single genotypeCovariatePath, else an empty matrix.
 # @noRd
-.resolveGenoCov <- function(rows, study, base, transposeCov, genoCovOverride) {
+.resolveGenoCov <- function(
+    rows,
+    studyName,
+    base,
+    transposeCov,
+    genoCovOverride
+) {
     if (is.matrix(genoCovOverride)) {
         return(genoCovOverride)
     }
@@ -1523,7 +1529,8 @@ NULL
         ]))
         if (length(v) > 1L) {
             msg <- glue(
-                "study '{study}' references multiple genotypeCovariatePath ",
+                "study '{studyName}' references multiple ",
+                "genotypeCovariatePath ",
                 "values."
             )
             abort(msg)
@@ -1553,13 +1560,13 @@ NULL
 #'   \code{covariatePath} (optional, per-context covariates), and the
 #'   single-valued \code{study} / \code{genotypePath} /
 #'   \code{genotypeCovariatePath}.
-#' @param study Study identifier; reconciled with a \code{study} column.
+#' @param studyName Study identifier; reconciled with a \code{study} column.
 #' @param genotypes A genotype panel (see \code{\link{readGenotypes}}) or
 #'   a genotype path/prefix; reconciled with a \code{genotypePath} column.
 #' @param genotypeCovariates A numeric matrix (samples x covariates) or a path
 #'   to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.
 #' @param scaleResiduals Pass-through \code{\link{QtlDataset}} argument.
-#' @param genotypeFilterArgs Pass-through \code{\link{QtlDataset}} filtering
+#' @param genotypeFilterParam Pass-through \code{\link{QtlDataset}} filtering
 #'   options, built with \code{\link{GenotypeFilterParam}} and stored as lazy
 #'   QC slots.
 #' @param transposeCovariates Transpose covariate TSVs (QTLtools layout) before
@@ -1570,22 +1577,22 @@ NULL
 #' manifest <- data.frame(context = "brain",
 #'   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
 #'   study = "s1", genotypePath = file.path(d, "example.chr22"))
-#' loadQtlDatasetFromManifest(manifest = manifest, study = "s1")
+#' loadQtlDatasetFromManifest(manifest = manifest, studyName = "s1")
 #' @importFrom stringr str_ends
 #' @importFrom checkmate assertString assertFlag
 #' @export
 loadQtlDatasetFromManifest <- function(
     manifest,
-    study = NULL,
+    studyName = NULL,
     genotypes = NULL,
     genotypeCovariates = NULL,
     scaleResiduals = TRUE,
-    genotypeFilterArgs = GenotypeFilterParam(),
+    genotypeFilterParam = GenotypeFilterParam(),
     transposeCovariates = FALSE
 ) {
-    assertString(study, null.ok = TRUE)
+    assertString(studyName, null.ok = TRUE)
     assertFlag(transposeCovariates)
-    .assertQtlPassThrough(scaleResiduals, genotypeFilterArgs)
+    .assertQtlPassThrough(scaleResiduals, genotypeFilterParam)
     base <- .manifestBase(manifest)
     df <- .canonManifestCols(
         .readManifest(manifest),
@@ -1595,11 +1602,11 @@ loadQtlDatasetFromManifest <- function(
     )
     # df[["study"]] (not df$study): study is optional here (it may be passed as
     # the `study` arg instead), and a tibble `$` on an absent column warns.
-    study <- .reconcileScalar(df[["study"]], study, "study")
-    qc <- .msqQcArgs(scaleResiduals, genotypeFilterArgs)
+    studyName <- .reconcileScalar(df[["study"]], studyName, "study")
+    qc <- .msqQcArgs(scaleResiduals, genotypeFilterParam)
     .buildQtlDatasetFromRows(
         df,
-        study,
+        studyName,
         base,
         transposeCovariates,
         qc,
@@ -2084,7 +2091,7 @@ loadQtlSumStatsFromManifest <- function(
 #' @param transposeCovariates Transpose covariate TSVs (QTLtools layout).
 #' @param scaleResiduals Pass-through \code{\link{QtlDataset}} argument,
 #'   applied to every study.
-#' @param genotypeFilterArgs Pass-through \code{\link{QtlDataset}} filtering
+#' @param genotypeFilterParam Pass-through \code{\link{QtlDataset}} filtering
 #'   options, built with \code{\link{GenotypeFilterParam}} and applied to
 #'   every study.
 #' @return A \code{MultiStudyQtlDataset} object.
@@ -2108,12 +2115,12 @@ loadMultiStudyQtlDatasetFromManifest <- function(
     formatMapping = NULL,
     transposeCovariates = FALSE,
     scaleResiduals = TRUE,
-    genotypeFilterArgs = GenotypeFilterParam()
+    genotypeFilterParam = GenotypeFilterParam()
 ) {
     assertFlag(transposeCovariates)
     assertNumber(minLdOverlapWarn, lower = 0, upper = 1)
-    .assertQtlPassThrough(scaleResiduals, genotypeFilterArgs)
-    qc <- .msqQcArgs(scaleResiduals, genotypeFilterArgs)
+    .assertQtlPassThrough(scaleResiduals, genotypeFilterParam)
+    qc <- .msqQcArgs(scaleResiduals, genotypeFilterParam)
     qtlDatasets <- .msqBuildDatasets(
         qtlDatasetsManifest,
         transposeCovariates,
@@ -2136,10 +2143,10 @@ loadMultiStudyQtlDatasetFromManifest <- function(
 # after GenotypeFilterParam() absorbed the seven filter fields: this is what is
 # spliced into QtlDataset().
 # @noRd
-.msqQcArgs <- function(scaleResiduals, genotypeFilterArgs) {
+.msqQcArgs <- function(scaleResiduals, genotypeFilterParam) {
     list(
         scaleResiduals = scaleResiduals,
-        genotypeFilterArgs = genotypeFilterArgs
+        genotypeFilterParam = genotypeFilterParam
     )
 }
 

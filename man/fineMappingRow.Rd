@@ -40,7 +40,7 @@ tl <- data.frame(
 )
 row <- fineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
 QtlFineMappingResult(
-    study = "s1", context = "c1", trait = "g1", method = "susie",
+    studyName = "s1", context = "c1", trait = "g1", method = "susie",
     entry = list(row)
 )
 }

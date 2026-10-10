@@ -186,7 +186,7 @@ qtlEnrichmentPipeline <- function(
     fmrClasses <- c("GwasFineMappingResult", "QtlFineMappingResult")
     assertMultiClass(gwasFineMappingResult, fmrClasses)
     assertMultiClass(qtlFineMappingResult, fmrClasses)
-    outcomeLd <- getLdSketch(gwasFineMappingResult)
+    outcomeLd <- ldSketch(gwasFineMappingResult)
     if (
         is.null(outcomeLd) &&
             methods::is(gwasFineMappingResult, "GwasFineMappingResult")
@@ -201,7 +201,7 @@ qtlEnrichmentPipeline <- function(
     # individual-level fit carrying no panel, and the requirement above already
     # covers the RSS-derived GWAS case.
     .requireMatchingLdSketches(
-        getLdSketch(qtlFineMappingResult),
+        ldSketch(qtlFineMappingResult),
         outcomeLd,
         pipelineName = "qtlEnrichmentPipeline",
         nullPolicy = "lenient"
@@ -558,7 +558,7 @@ qtlEnrichmentPipeline <- function(
 # @noRd
 .enrRowPipVector <- function(i, gwasFmr) {
     parts <- .fmrRowParts(gwasFmr, i)
-    fit <- getSusieFit(parts)
+    fit <- susieFit(parts)
     if (is.null(fit) || is.null(fit$pip)) {
         return(NULL)
     }
@@ -629,7 +629,7 @@ qtlEnrichmentPipeline <- function(
 # @noRd
 .enrRowRegion <- function(i, qtlFmr) {
     parts <- .fmrRowParts(qtlFmr, i)
-    fit <- getSusieFit(parts)
+    fit <- susieFit(parts)
     if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) {
         return(NULL)
     }

@@ -6,7 +6,7 @@
 \usage{
 buildLdEigen(
   ldBlockData,
-  nRef = NULL,
+  nSamples = NULL,
   inSample = FALSE,
   genome = NA_character_,
   eigenvalueTruncation = 1
@@ -24,7 +24,7 @@ buildLdEigen(
   least two blocks and wants many more. Loading a whole region as one
   dense matrix yields a single block.}
 
-\item{nRef}{Integer, the LD reference panel sample size. Defaults to the
+\item{nSamples}{Integer, the LD reference panel sample size. Defaults to the
 size recorded by the supplied \code{LdData}; required when they record
 none, and an error when they disagree.}
 
@@ -60,7 +60,7 @@ meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
 ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
 ldEigen <- buildLdEigen(ld, genome = "hg38")
 ldEigen
-length(getEigenList(ldEigen))
+length(eigenList(ldEigen))
 }
 \seealso{
 \code{\link{buildLdScore}} for the g-LDSC input,

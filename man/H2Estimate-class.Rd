@@ -11,25 +11,36 @@ Container for univariate heritability estimation results. Holds
 \section{Slots}{
 
 \describe{
-\item{\code{h2}}{Numeric, global SNP heritability estimate.}
+\item{\code{estimate}}{Numeric, global SNP heritability estimate.}
 
-\item{\code{h2Se}}{Numeric, standard error of global h2.}
+\item{\code{estimateSe}}{Numeric, standard error of global h2.}
 
 \item{\code{intercept}}{Numeric, confounding intercept estimate (NA if method does
 not estimate one).}
 
 \item{\code{interceptSe}}{Numeric, SE of intercept.}
 
-\item{\code{local}}{A \code{data.frame} with per-block local heritability estimates
+\item{\code{localBlocks}}{A \code{data.frame} with per-block local
+heritability estimates
 (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}). NULL if
 \code{local = FALSE}.}
 
-\item{\code{enrichment}}{A \code{data.frame} with baseline annotation enrichment
-estimates (columns: \code{annotation}, \code{tau}, \code{tauSe},
-\code{enrichment}, \code{enrichmentSe}, \code{enrichmentP}, \code{propH2},
-\code{propSnps}). NULL if unstratified.}
+\item{\code{enrichment}}{A \code{data.frame} of per-annotation enrichment results,
+NULL if unstratified. Two shapes are possible, depending on which route
+produced the estimate:
+\describe{
+  \item{partitioned}{tau-based enrichment of the baseline annotations
+    (\code{computeBaselineEnrichment}, \code{.gldscEnrichmentDf}), with
+    columns \code{annotation}, \code{tau}, \code{tauSe},
+    \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
+    \code{propH2}, \code{propSnps}.}
+  \item{score test}{the score test over the tested (candidate)
+    annotations, with columns \code{annotation}, \code{scoreZ},
+    \code{scoreP}.}
+}}
 
-\item{\code{tauBlocks}}{A numeric matrix (nBlocks x n_annotations) of per-block
+\item{\code{annotationJackknifeCoefs}}{A numeric matrix
+(nBlocks x n_annotations) of per-block
 jackknife tau values. Required for Gazal tauStar standardization
 downstream. NULL if not available (e.g., unstratified analysis).}
 

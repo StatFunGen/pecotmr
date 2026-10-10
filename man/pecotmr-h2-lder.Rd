@@ -17,7 +17,7 @@ Estimate SNP heritability by LD eigenvalue regression (Song et
   + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS
   weight
   uses an in-sample (\eqn{\min(1,\lambda)}) or out-of-sample (logistic) form
-  selected by \code{getInSample}, and a two-stage step estimates the
+  selected by \code{inSample}, and a two-stage step estimates the
   confounding inflation \eqn{a} on a \eqn{\chi^2}-filtered subset. The
   stratified extension regresses on \eqn{\lambda_i \ell_{ia}}
   (\eqn{\ell_{ia} = \sum_j A_{ja} V_{ji}^2}) and reduces to the univariate

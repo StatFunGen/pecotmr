@@ -4,29 +4,62 @@
 \alias{CtwasOptions}
 \title{Arguments For The ctwas Fitting Steps}
 \usage{
-CtwasOptions(...)
+CtwasOptions(
+  geneZ = CtwasGeneZOptions(),
+  regionData = CtwasRegionDataOptions(),
+  estParam = CtwasEstParamOptions(),
+  screen = CtwasScreenOptions(),
+  expand = CtwasExpandOptions(),
+  finemap = CtwasFinemapOptions(),
+  merge = CtwasMergeOptions(),
+  boundaryGenes = CtwasBoundaryGenesOptions()
+)
 }
 \arguments{
-\item{...}{Any argument accepted by one of the ctwas steps, under ctwas's
-own names (\code{niter}, \code{min_gene}, \code{min_nonSNP_PIP},
-\code{numThreads}, ...). Note that settings pecotmr exposes as its own
-parameters --- \code{thin}, \code{L}, \code{numThreads} on the pipeline ---
-are passed there, not here.}
+\item{geneZ}{Arguments for \code{ctwas::compute_gene_z()}, built with
+\code{\link{CtwasGeneZOptions}}.}
+
+\item{regionData}{Arguments for \code{ctwas::assemble_region_data()},
+built with \code{\link{CtwasRegionDataOptions}}.}
+
+\item{estParam}{Arguments for the group-prior EM, built with
+\code{\link{CtwasEstParamOptions}}.}
+
+\item{screen}{Arguments for \code{ctwas::screen_regions()}, built with
+\code{\link{CtwasScreenOptions}}.}
+
+\item{expand}{Arguments for \code{ctwas::expand_region_data()}, built with
+\code{\link{CtwasExpandOptions}}.}
+
+\item{finemap}{Arguments for \code{ctwas::finemap_regions()}, built with
+\code{\link{CtwasFinemapOptions}}.}
+
+\item{merge}{Arguments for the region-merging postprocess, built with
+\code{\link{CtwasMergeOptions}}.}
+
+\item{boundaryGenes}{Arguments for \code{ctwas::get_boundary_genes()},
+built with \code{\link{CtwasBoundaryGenesOptions}}.}
 }
 \value{
 A \code{\link{MethodOptions}} object.
 }
 \description{
-Options forwarded to ctwas. \code{ctwasPipeline} runs seven
-  ctwas functions in sequence and hands this one bundle to each, forwarding
-  only the arguments that step actually accepts -- so a setting meant for
-  the screening step does not disturb the fitting step. Names are therefore
-  checked against what those seven functions accept \emph{between them}.
+ctwas is not one function but nine, run in sequence, so each
+  step's arguments travel in their own bundle and are checked against that
+  step's own live formals --- the same shape as
+  \code{\link{CovUdrOptions}}.
 
-  The interface is deliberately flat, matching ctwas's own
-  \code{ctwas_sumstats}, which takes forty arguments in one signature and
-  distributes them to its internal steps itself.
+  This replaces a single flat bundle that was checked against the
+  \emph{union} of every step's formals. That mirrored ctwas's own
+  \code{ctwas_sumstats}, which takes forty arguments in one signature, but
+  it could not tell which step a name was meant for: of the 55 names in
+  the union, 29 are accepted by exactly one step, so a name aimed at the
+  wrong step was accepted and then silently dropped. Per-step bundles make
+  that a construction-time error instead.
 }
 \examples{
-CtwasOptions(min_group_size = 1, min_gene = 1)
+CtwasOptions(
+    estParam = CtwasEstParamOptions(min_group_size = 1),
+    screen = CtwasScreenOptions(min_gene = 1)
+)
 }

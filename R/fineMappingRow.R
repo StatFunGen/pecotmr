@@ -86,7 +86,7 @@ methods::setValidity("FineMappingRow", function(object) {
 #' )
 #' row <- fineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
 #' QtlFineMappingResult(
-#'     study = "s1", context = "c1", trait = "g1", method = "susie",
+#'     studyName = "s1", context = "c1", trait = "g1", method = "susie",
 #'     entry = list(row)
 #' )
 #' @export
@@ -207,7 +207,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         !is.null(fit$alpha)
 }
 
-# Chromosome of the fit's variants (matches getTopLoci's `chrom`, no "chr").
+# Chromosome of the fit's variants (matches topLoci's `chrom`, no "chr").
 # @noRd
 .fsusieChrom <- function(fit) {
     vid <- names(fit$csd_X)
@@ -393,7 +393,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 }
 
 
-# ---- getCredibleSetSummary helpers -------------------------------------
+# ---- credibleSetSummary helpers -------------------------------------
 
 .emptyCsSummary <- function() {
     tibble(
@@ -436,7 +436,8 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # present),
 # the per-effect prior variance V, the CS log Bayes factor (max member logBF),
 # and the lead (highest-PIP) variant. Sourced primarily from the entry's topLoci
-# so it stays consistent with getCs / getTopLoci; V / mean-purity come from the
+# so it stays consistent with credibleSets / topLoci; V / mean-purity come
+# from the
 # stored fit. The credible-set index in the `cs` label doubles as the effect (L)
 # index for susie-family fits (unfiltered CS are ordered by effect).
 # @noRd
@@ -745,8 +746,16 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # Project a posterior-view data.frame to GRanges (empty GRanges when empty).
 # @noRd
 .fmeTopLociGRanges <- function(out) {
-    if (is.null(out) || nrow(out) == 0L) {
+    if (is.null(out)) {
         return(GenomicRanges::GRanges())
+    }
+    # Keep the column schema when there are no retained variants, so an
+    # empty result is inspectable the same way a populated one is.
+    if (nrow(out) == 0L) {
+        return(S4Vectors::`mcols<-`(
+            GenomicRanges::GRanges(),
+            value = S4Vectors::DataFrame(out)
+        ))
     }
     parsed <- parseVariantId(out$variant_id)
     gr <- GenomicRanges::GRanges(
@@ -1431,7 +1440,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 
 # The entry view for a collection row (or rows). A tuple split across
 # chromosomes owns several elements; they are stitched back into the single
-# entry callers expect, the same contract getSumStats() keeps.
+# entry callers expect, the same contract sumStats() keeps.
 # @noRd
 
 # One element (plus its outer-mcols payload) -> the entry view.
@@ -1456,12 +1465,12 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 #' @rdname adjustPips
 #' @noRd
 setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
-    vids <- getVariantIds(x)
+    vids <- variantIds(x)
     keepIdx <- .adjustPipsKeepIdx(vids, keepVariants)
     common <- vids[keepIdx]
-    fit <- .adjustPipsSubsetFit(getSusieFit(x), keepIdx, length(vids))
+    fit <- .adjustPipsSubsetFit(susieFit(x), keepIdx, length(vids))
     newTopLoci <- .adjustPipsRebuildTopLoci(
-        .fmeTopLociFromElement(rowVariants(x)),
+        .fmeTopLociFromElement(variants(x)),
         fit,
         common
     )
@@ -1471,7 +1480,7 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
         variantIds = common,
         susieFit = fit,
         topLoci = newTopLoci,
-        cvResult = getCvResult(x)
+        cvResult = cvResult(x)
     )
 })
 
@@ -1479,19 +1488,19 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
 # The only methods this class carries. `@` is confined to these bodies, which
 # is what keeps the slot-access rule satisfied everywhere else.
 
-#' @rdname getVariantIds
+#' @rdname variantIds
 #' @export
-setMethod("getVariantIds", "FineMappingRow", function(x) {
+setMethod("variantIds", "FineMappingRow", function(x) {
     .grVariantIds(x@variants)
 })
 
-#' @rdname getSusieFit
+#' @rdname susieFit
 #' @export
-setMethod("getSusieFit", "FineMappingRow", function(x) x@susieFit)
+setMethod("susieFit", "FineMappingRow", function(x) x@susieFit)
 
-#' @rdname getCvResult
+#' @rdname cvResult
 #' @export
-setMethod("getCvResult", "FineMappingRow", function(x) x@cvResult)
+setMethod("cvResult", "FineMappingRow", function(x) x@cvResult)
 
 #' @rdname show-methods
 #' @export
@@ -1518,7 +1527,7 @@ setMethod("show", "FineMappingRow", function(object) {
 # The element itself. Used by the collection constructors, which store it
 # directly as the row's element.
 # @noRd
-setGeneric("rowVariants", function(x, ...) standardGeneric("rowVariants"))
+setGeneric("variants", function(x, ...) standardGeneric("variants"))
 
 # @noRd
-setMethod("rowVariants", "FineMappingRow", function(x) x@variants)
+setMethod("variants", "FineMappingRow", function(x) x@variants)

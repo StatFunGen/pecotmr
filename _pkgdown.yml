@@ -68,7 +68,7 @@ articles:
     - finemapping-postprocessing
   - title: "TWAS"
     desc: >
-      Training TWAS weights from QTL data (individual-level and
+      Training TWAS weights-methods from QTL data (individual-level and
       summary-statistics, single and multi-context), computing per-gene
       TWAS Z-scores from GWAS summary statistics, and fine-mapping genes
       jointly with SNPs so a gene's PIP is conditioned on the signal
@@ -194,6 +194,14 @@ reference:
       - CovPcaOptions
       - CovUdrOptions
       - CtwasOptions
+      - CtwasBoundaryGenesOptions
+      - CtwasEstParamOptions
+      - CtwasExpandOptions
+      - CtwasFinemapOptions
+      - CtwasGeneZOptions
+      - CtwasMergeOptions
+      - CtwasRegionDataOptions
+      - CtwasScreenOptions
       - fineMappingMethodOptions
       - GbjOptions
       - GbjOmniOptions
@@ -277,7 +285,7 @@ reference:
       # The virtual base of every tuple collection: container and metadata
       # methods, the region verb, and the plyranges bridge. The families
       # that inherit it -- fine-mapping results, colocalization results,
-      # summary statistics, TWAS weights -- follow.
+      # summary statistics, TWAS weights-methods -- follow.
       - flattenTupleRanges
       - nestTupleRanges
       - RangedTupleList-methods
@@ -288,214 +296,209 @@ reference:
       - computeCsCorrelation
       - fsusieAffectedRegions
       - fsusieCredibleBand
-      - getCredibleSetSummary
-      - getCs
-      - getLbf
-      - getLdSketch
-      - getMarginalEffects
-      - getMethodNames
-      - getRegion
-      - getRetainedMass
-      - getStudy
-      - getSusieFit
-      - getTopLoci
-      - getTraitPosition
-      - getVariantIds
+      - credibleSetSummary
+      - credibleSets
+      - lbf
+      - ldSketch
+      - marginalEffects
+      - methodNames
+      - genomicRegion
+      - retainedMass
+      - studyName
+      - susieFit
+      - topLoci
+      - traitPosition
+      - variantIds
       - intersectVariants
       - resolveWeights
       - writeSumStatsVcf
 
   - subtitle: "QtlFineMappingResult"
     contents:
-      - getContexts
-      - getCvResult
-      - getFineMappingResult
-      - getPip
-      - getTraits
+      - contexts
+      - cvResult
+      - fineMappingResult
+      - pip
+      - traitNames
 
   - subtitle: "GwasFineMappingResult"
     contents:
-      - getContexts
-      - getFineMappingResult
-      - getPip
-      - getTraits
+      - contexts
+      - fineMappingResult
+      - pip
+      - traitNames
 
   - subtitle: "FineMappingRow"
     contents:
-      - getCvResult
-      - getSusieFit
-      - getVariantIds
+      - cvResult
+      - susieFit
+      - variantIds
 
   - subtitle: "ColocResultBase / ColocResult / ColocBoostResult"
     contents:
       - "as.data.frame,ColocBoostResult-method"
       - "as.data.frame,ColocResult-method"
       - colocViews
-      - getColocBoostOutcomes
-      - getComputingTime
-      - getLdSketch
-      - getRegionVcp
+      - colocBoostOutcomes
+      - computingTime
+      - ldSketch
+      - regionVcp
 
   - subtitle: "SumStatsBase"
     contents:
-      - getBeta
-      - getGenome
-      - getLdSketch
-      - getMaf
-      - getN
-      - getP
-      - getQcDiagnostics
-      - getQcInfo
-      - getSe
-      - getStudy
-      - getVariantIds
-      - getZ
+      - af
+      - coef
+      - ldSketch
+      - maf
+      - nSamples
+      - variantColumnReplace
+      - pval
+      - qcDiagnostics
+      - qcInfo
+      - se
+      - studyName
+      - variantIds
+      - z
       - nSnps
       - subsetChr
 
   - subtitle: "GwasSumStats"
     contents:
-      - as.data.frame.GwasSumStats
       - combineGwasSumStats
-      - getSumStatsDf
-      - "getSumStats,GwasSumStats-method"
-      - getVarY
+      - sumStatsDataFrame
+      - "sumStats,GwasSumStats-method"
+      - varY
       - writeSumStatsVcf
 
   - subtitle: "QtlSumStats"
     contents:
       - combineQtlSumStats
-      - getContexts
-      - getSignificantQtls
-      - getSumStatsDf
-      - getSumStats
-      - getTraitPosition
-      - getTraits
-      - getVarY
+      - contexts
+      - significantQtls
+      - sumStatsDataFrame
+      - sumStats
+      - traitPosition
+      - traitNames
+      - varY
       - qtlAssociationPostprocess
 
   - subtitle: "TwasWeights"
     contents:
-      - getContexts
-      - getCvResult
-      - getDataType
-      - getFits
-      - getLdSketch
-      - getMethodNames
-      - getRegion
-      - getStandardized
-      - getStudy
-      - getTraitPosition
-      - getTraits
-      - getTwasWeights
-      - getVariantIds
-      - getWeights
+      - contexts
+      - cvResult
+      - weightsDataType
+      - methodFits
+      - ldSketch
+      - methodNames
+      - genomicRegion
+      - weightStandardized
+      - studyName
+      - traitPosition
+      - traitNames
+      - twasWeights
+      - variantIds
+      - weights-methods
       - resolveWeights
 
   - subtitle: "TwasWeightsRow"
     contents:
-      - getCvResult
-      - getDataType
-      - getFits
-      - getStandardized
-      - getVariantIds
-      - getWeights
+      - cvResult
+      - weightsDataType
+      - methodFits
+      - weightStandardized
+      - variantIds
+      - weights-methods
 
   - subtitle: "AnnotationMatrix"
     contents:
       # Classes outside the RangedTupleList hierarchy follow, in
       # alphabetical order.
-      - getBaseline
-      - getCandidates
-      - getGenome
+      - baselineAnnotations
+      - testedAnnotations
 
   - subtitle: "CtwasResult / CtwasResultEntry"
     contents:
-      - getContexts
-      - getCtwasGroupPriors
-      - getFinemap
-      - getMethodNames
-      - getStudy
-      - getSusieAlpha
+      - contexts
+      - ctwasGroupPriors
+      - ctwasPosteriors
+      - methodNames
+      - studyName
+      - susieAlpha
 
   - subtitle: "H2Estimate"
     contents:
-      - getEnrichment
-      - getH2
-      - getH2Se
-      - getIntercept
-      - getInterceptSe
-      - getLocal
-      - getMethodNames
-      - getNSnps
-      - getScoreStats
-      - getTauBlocks
-      - getTraitName
+      - stratifiedHeritabilityEnrichment
+      - heritabilityEstimate
+      - heritabilityEstimateSe
+      - heritabilityIntercept
+      - heritabilityInterceptSe
+      - localH2Blocks
+      - methodNames
+      - nSnps
+      - scoreStats
+      - annotationJackknifeCoefs
+      - traitNames
 
   - subtitle: "LdData"
     contents:
-      - getBlockMetadata
-      - getCorrelation
-      - getGenotypes
-      - getMixtureWeights
-      - getNRef
-      - getRefPanel
-      - getSnpIdx
-      - getVariantIds
-      - getVariantInfo
+      - blockMetadata
+      - ldMatrix
+      - genotypes
+      - mixtureWeights
+      - ldPanelNSamples
+      - refPanel
+      - snpIdx
+      - variantIds
+      - variantInfo
       - hasGenotypes
 
   - subtitle: "LdEigen"
     contents:
-      - getEigenList
+      - eigenList
 
   - subtitle: "LdScore"
     contents:
-      - getLdMatrixList
-      - getLdScores
-      - getLdScoreWeights
+      - ldMatrixList
 
   - subtitle: "LdStatistic"
     contents:
-      - getGenome
-      - getInSample
-      - getLdBlocks
-      - getNRef
+      - inSample
+      - ldBlocks
+      - ldPanelNSamples
 
   - subtitle: "MashPrior"
     contents:
-      - getCvFits
-      - getFullFit
+      - cvFits
+      - fullFit
 
   - subtitle: "MultiStudyQtlDataset"
     contents:
-      - getQtlDatasets
-      - getStudy
-      - getSumStats
+      - qtlDatasets
+      - studyName
+      - sumStats
 
   - subtitle: "QtlDataset"
     contents:
-      - getAf
-      - getContexts
-      - getGenotypeCovariates
-      - getGenotypes
-      - getMaf
-      - getPhenotypeCovariates
-      - getPhenotypes
-      - getResidualizedGenotypes
-      - getResidualizedPhenotypes
-      - getScaleResiduals
-      - getStudy
-      - getTraitPosition
+      - contexts
+      - genotypeCovariates
+      - genotypes
+      - maf
+      - phenotypeCovariates
+      - molecularTraits
+      - residualizedGenotypes
+      - residualizedPhenotypes
+      - scaleResiduals
+      - studyName
+      - traitPosition
       - qtlDatasetFilters
 
   - subtitle: "SldscData"
     contents:
-      - getAnnotCols
-      - getAnnotData
-      - getFrqData
-      - getTraitRun
-      - getTraitRuns
+      - annotCols
+      - annotData
+      - frqData
+      - sldscResults
+      - sldscResults
 
   - title: "Pipelines"
     desc: >
@@ -570,7 +573,7 @@ reference:
       - readGenotypes
       - loadGenotypeRegion
       - readAfreq
-      - getRefVariantInfo
+      - refVariantInfo
       - invertMinmaxScaling
 
   - title: "Variant ID and region helpers"
@@ -609,7 +612,7 @@ reference:
       - fitSusieInfThenSusieRss
       - fsusieGetCs
       - fsusieWrapper
-      - getSusieResult
+      - susieResult
       - computeCsTables
       - buildTopLoci
       - extractCsInfo
@@ -683,7 +686,7 @@ reference:
 
   - subtitle: "Association testing and p-value combination"
     contents:
-      # twasZ() turns weights plus GWAS summary statistics into a per-tuple
+      # twasZ() turns weights-methods plus GWAS summary statistics into a per-tuple
       # Z and p-value, then delegates cross-tuple pooling to combinePValues().
       - twasZ
       - combinePValues

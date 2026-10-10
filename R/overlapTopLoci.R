@@ -27,7 +27,7 @@
         keyCols
     )
     # A collection with no signal above the cutoff yields an identity-only
-    # getTopLoci frame (study/context/trait/method) that carries no
+    # topLoci frame (study/context/trait/method) that carries no
     # variant_id; restore the join key so the empty join still resolves
     # instead of erroring in inner_join()'s `by` check.
     inner_join(
@@ -47,10 +47,15 @@
     mutate(tl, variant_id = character(0))
 }
 
-# Convert the merged frame to the requested output type.
+
+
+# The per-variant top-loci columns of one side as a tibble -- topLoci()
+# returns ranges, and mcols() is exactly the pre-conversion table.
 # @noRd
-.overlapFinish <- function(df, type) {
-    if (type == "GRanges") .overlapToGRanges(df) else df
+.overlapTopLociTable <- function(x, signalCutoff) {
+    as_tibble(as.data.frame(
+        S4Vectors::mcols(topLoci(x, signalCutoff = signalCutoff))
+    ))
 }
 
 #' Overlap QTL and GWAS top loci by allele-aware variant matching
@@ -69,15 +74,14 @@
 #'
 #' @param qtl A \code{QtlFineMappingResult}.
 #' @param gwas A \code{GwasFineMappingResult}.
-#' @param signalCutoff PIP cutoff forwarded to \code{\link{getTopLoci}} for both
+#' @param signalCutoff PIP cutoff forwarded to \code{\link{topLoci}} for both
 #'   inputs. Default 0.025.
-#' @param type \code{"data.frame"} (default) or \code{"GRanges"}.
 #' @param ... Ignored.
-#' @return A \code{tibble} (or \code{GRanges}) keyed on the QTL variant
-#'   (\code{variant_id, chrom, pos, A1, A2}) with all other columns prefixed
-#'   \code{qtl_} / \code{gwas_}. Zero rows when there is no allele-aware
-#'   overlap.
-#' @seealso \code{\link{getTopLoci}}, \code{matchVariants}
+#' @return A \code{GRanges} keyed on the QTL variant
+#'   (\code{variant_id, chrom, pos, A1, A2} in \code{mcols()}) with all other
+#'   columns prefixed \code{qtl_} / \code{gwas_}. Zero ranges when there is no
+#'   allele-aware overlap. Take a table with \code{as.data.frame()}.
+#' @seealso \code{\link{topLoci}}, \code{matchVariants}
 #' @examples
 #' data(qtlFineMappingLbfExample)
 #' data(gwasFineMappingLbfExample)
@@ -94,26 +98,24 @@ setGeneric("overlapTopLoci", function(qtl, gwas, ...) {
 setMethod(
     "overlapTopLoci",
     signature("QtlFineMappingResult", "GwasFineMappingResult"),
-    function(
-        qtl,
-        gwas,
-        signalCutoff = 0.025,
-        type = c("data.frame", "GRanges")
-    ) {
-        type <- arg_match(type)
+    function(qtl, gwas, signalCutoff = 0.025) {
         keyCols <- c("variant_id", "chrom", "pos", "A1", "A2")
         coordCols <- c("chrom", "pos", "A1", "A2")
-        qtlTl <- as_tibble(getTopLoci(qtl, signalCutoff = signalCutoff))
-        gwasTl <- as_tibble(getTopLoci(gwas, signalCutoff = signalCutoff))
+        # mcols() rather than as.data.frame() on the ranges: the join
+        # prefixes every non-key column, so the standard
+        # seqnames/start/end/width/strand columns a GRanges coercion adds
+        # would turn into qtl_seqnames / gwas_start noise.
+        qtlTl <- .overlapTopLociTable(qtl, signalCutoff)
+        gwasTl <- .overlapTopLociTable(gwas, signalCutoff)
         if (nrow(qtlTl) == 0L || nrow(gwasTl) == 0L) {
-            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols, type))
+            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols))
         }
         # Allele-aware correspondence between the unique QTL + GWAS variant
         # sets. target = GWAS, ref = QTL, so `sign` is the flip applied to the
         # GWAS side.
         vmap <- .overlapVariantMap(qtlTl, gwasTl)
         if (is.null(vmap)) {
-            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols, type))
+            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols))
         }
         # No zero-row check on `g`: every gwas_vid in `vmap` is drawn from
         # gwasTl$variant_id, so once vmap is non-NULL the inner join above
@@ -130,16 +132,15 @@ setMethod(
             intersect(keyCols, names(merged)),
             setdiff(names(merged), keyCols)
         )
-        .overlapFinish(select(merged, all_of(ordered)), type)
+        .overlapToGRanges(select(merged, all_of(ordered)))
     }
 )
 
-# Finish an empty-overlap result (an empty prefixed merge) in the chosen type.
+# Finish an empty-overlap result (an empty prefixed merge).
 # @noRd
-.overlapEmptyReturn <- function(qtlTl, gwasTl, coordCols, keyCols, type) {
-    .overlapFinish(
-        .overlapEmptyMerge(qtlTl, gwasTl, coordCols, keyCols),
-        type
+.overlapEmptyReturn <- function(qtlTl, gwasTl, coordCols, keyCols) {
+    .overlapToGRanges(
+        .overlapEmptyMerge(qtlTl, gwasTl, coordCols, keyCols)
     )
 }
 
@@ -197,8 +198,17 @@ setMethod(
 # columns (qtl_* / gwas_*) as mcols.
 # @noRd
 .overlapToGRanges <- function(df) {
-    if (is.null(df) || nrow(df) == 0L) {
+    if (is.null(df)) {
         return(GenomicRanges::GRanges())
+    }
+    # An empty overlap keeps the prefixed column schema: a zero-row frame
+    # still names its columns, and callers inspect them. Returning a bare
+    # GRanges() here would drop that.
+    if (nrow(df) == 0L) {
+        return(S4Vectors::`mcols<-`(
+            GenomicRanges::GRanges(),
+            value = S4Vectors::DataFrame(df, check.names = FALSE)
+        ))
     }
     p <- parseVariantId(df$variant_id)
     gr <- GenomicRanges::GRanges(

@@ -183,7 +183,7 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
     )
 }
 
-getRegionalLdMeta <- function(
+regionalLdMeta <- function(
     ldReferenceMetaFile,
     region,
     completeCoverageRequired = FALSE
@@ -426,7 +426,7 @@ createLdMatrix <- function(ldMatrices, variants) {
 
 # Drop duplicate variant ids (boundary-overlap safety net).
 .loadLdDedup <- function(result) {
-    variantIds <- getVariantIds(result)
+    variantIds <- variantIds(result)
     if (is.null(variantIds)) {
         return(result)
     }
@@ -434,7 +434,7 @@ createLdMatrix <- function(ldMatrices, variants) {
     if (length(dupIdx) == 0) {
         return(result)
     }
-    full <- getCorrelation(result)
+    full <- ldMatrix(result)
     corr <- if (is.null(full)) {
         NULL
     } else {
@@ -442,11 +442,11 @@ createLdMatrix <- function(ldMatrices, variants) {
     }
     LdData(
         correlation = corr,
-        genotypeHandle = getGenotypeHandle(result),
-        snpIdx = getSnpIdx(result),
-        variants = getVariantInfo(result)[-dupIdx],
-        blockMetadata = getBlockMetadata(result),
-        nRef = getNRef(result)
+        genotypeHandle = genotypeHandle(result),
+        snpIdx = snpIdx(result),
+        variants = variantInfo(result)[-dupIdx],
+        blockMetadata = blockMetadata(result),
+        nSamples = ldPanelNSamples(result)
     )
 }
 
@@ -688,7 +688,7 @@ loadLdMatrix <- function(
             startIdx = 1L,
             endIdx = n
         ),
-        nRef = 0L
+        nSamples = 0L
     )
 }
 
@@ -711,7 +711,7 @@ loadLdMatrix <- function(
         genotypeHandle = if (isGenotype) mat else NULL,
         variants = gr,
         blockMetadata = tibble(blockId = 1L, size = n),
-        nRef = if (isGenotype) nrow(mat) else 0L
+        nSamples = if (isGenotype) nrow(mat) else 0L
     )
 }
 
@@ -722,7 +722,7 @@ loadLdMatrix <- function(
     if (!isTRUE(dropMonomorphic)) {
         return(ld)
     }
-    refPanel <- getRefPanel(ld)
+    refPanel <- refPanel(ld)
     if (is.null(refPanel) || !is_in("allele_freq", colnames(refPanel))) {
         return(ld)
     }
@@ -755,7 +755,7 @@ loadLdMatrix <- function(
     if (!isTRUE(materializeGenotypes) || !hasGenotypes(ld)) {
         return(ld)
     }
-    X <- getGenotypes(ld)
+    X <- genotypes(ld)
     if (!is.matrix(X)) {
         return(ld)
     }
@@ -763,9 +763,9 @@ loadLdMatrix <- function(
         correlation = NULL,
         genotypeHandle = X,
         snpIdx = NULL,
-        variants = getVariantInfo(ld),
-        blockMetadata = getBlockMetadata(ld),
-        nRef = getNRef(ld)
+        variants = variantInfo(ld),
+        blockMetadata = blockMetadata(ld),
+        nSamples = ldPanelNSamples(ld)
     )
 }
 
@@ -790,9 +790,9 @@ loadLdMatrix <- function(
         correlation = R,
         genotypeHandle = gh,
         snpIdx = if (is.matrix(gh)) NULL else snpIdx,
-        variants = getVariantInfo(ld)[idx],
-        blockMetadata = getBlockMetadata(ld),
-        nRef = getNRef(ld)
+        variants = variantInfo(ld)[idx],
+        blockMetadata = blockMetadata(ld),
+        nSamples = ldPanelNSamples(ld)
     )
 }
 
@@ -1050,14 +1050,14 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     X
 ) {
     handle <- .readGenotypeHandle(genotypePath)
-    snpIdx <- .regionToSnpIdx(getSnpInfo(handle), region)
+    snpIdx <- .regionToSnpIdx(snpInfo(handle), region)
     LdData(
         correlation = NULL,
         genotypeHandle = handle,
         snpIdx = snpIdx,
         variants = variantsGr,
         blockMetadata = blockMetadata,
-        nRef = as.integer(nrow(X))
+        nSamples = as.integer(nrow(X))
     )
 }
 
@@ -1105,7 +1105,7 @@ loadLdFromGenotype <- function(
         snpIdx = NULL,
         variants = variantsGr,
         blockMetadata = blockMetadata,
-        nRef = as.integer(nrow(X))
+        nSamples = as.integer(nrow(X))
     )
 }
 
@@ -1216,7 +1216,7 @@ loadLdFromGenotype <- function(
 # @noRd
 .ldSketchLabel <- function(x) {
     handle <- .ldSketchHandle(x)
-    glue("{getFormat(handle)} @ {getPath(handle)}")
+    glue("{genotypeFormat(handle)} @ {path(handle)}")
 }
 
 # TRUE for anything that can serve as an LD panel. A bare GenotypeHandle
@@ -1262,7 +1262,7 @@ loadLdFromGenotype <- function(
     # The chokepoint every panel accessor funnels through, so the guard lives
     # here rather than being repeated at each entry point. Without it a NULL
     # or non-panel sketch surfaces as "unable to find an inherited method for
-    # 'getSnpInfo'" from whichever accessor happened to touch it first, which
+    # 'snpInfo'" from whichever accessor happened to touch it first, which
     # says nothing about the LD reference being the problem. Callers that
     # validate with their own label (`.ldFromSketch`, the ctwas assembler) do
     # so first, so their message wins.
@@ -1270,7 +1270,7 @@ loadLdFromGenotype <- function(
     if (methods::is(x, "RangedSummarizedExperiment")) {
         return(SummarizedExperiment::rowRanges(x))
     }
-    .genotypeSnpRanges(x, normalizeVariantId(as.character(getSnpInfo(x)$SNP)))
+    .genotypeSnpRanges(x, normalizeVariantId(as.character(snpInfo(x)$SNP)))
 }
 
 # The panel's variant ids in the panel's OWN labelling. This is the mcols
@@ -1313,7 +1313,7 @@ loadLdFromGenotype <- function(
     if (methods::is(x, "RangedSummarizedExperiment")) {
         return(as.character(colnames(x)))
     }
-    as.character(getSampleIds(x))
+    as.character(sampleIds(x))
 }
 
 # @noRd
@@ -1469,7 +1469,7 @@ loadLdFromGenotype <- function(
     if (length(chromPaths) == 0L) {
         return(.genotypeReadPath(handle))
     }
-    spanned <- unique(canonChrom(as.character(getSnpInfo(handle)$CHR)))
+    spanned <- unique(canonChrom(as.character(snpInfo(handle)$CHR)))
     paths <- unname(chromPaths[is_in(names(chromPaths), spanned)])
     map_chr(paths, .resolveGenotypeResourcePath)
 }
@@ -1495,7 +1495,7 @@ loadLdFromGenotype <- function(
 # .afreq happens to omit would disagree with it about the same variant.
 # @noRd
 .panelAfreqMaf <- function(handle, variantIds) {
-    if (getFormat(handle) != "plink2") {
+    if (genotypeFormat(handle) != "plink2") {
         return(NULL)
     }
     tbls <- compact(map(.panelAfreqPrefixes(handle), .panelAfreqTable))
@@ -1520,8 +1520,8 @@ loadLdFromGenotype <- function(
 # sidecar (its observation count is an ALLELE count, whose ploidy the mask
 # would have to guess), so an imissCutoff always takes the dosage path.
 # @noRd
-.panelDropMask <- function(ldSketch, matched, panelFilterArgs) {
-    imissCutoff <- panelFilterArgs$imissCutoff
+.panelDropMask <- function(ldSketch, matched, panelFilterParam) {
+    imissCutoff <- panelFilterParam$imissCutoff
     if (imissCutoff >= 1) {
         # Keyed on the PANEL's own variant labels, not the caller's: .afreq
         # carries the .pvar ids, while `keptIds` is whatever id form the
@@ -1532,8 +1532,8 @@ loadLdFromGenotype <- function(
         maf <- .panelAfreqMaf(.ldSketchHandle(ldSketch), panelIds)
         if (!is.null(maf)) {
             effMaf <- .panelEffectiveMaf(
-                panelFilterArgs$mafCutoff,
-                panelFilterArgs$macCutoff,
+                panelFilterParam$mafCutoff,
+                panelFilterParam$macCutoff,
                 .ldSketchNSamples(ldSketch)
             )
             return(is.na(maf) | maf < effMaf)
@@ -1542,8 +1542,8 @@ loadLdFromGenotype <- function(
     dosage <- .ldSketchDosage(ldSketch, matched$idx, meanImpute = FALSE)
     stats <- .panelVariantStats(dosage)
     effMaf <- .panelEffectiveMaf(
-        panelFilterArgs$mafCutoff,
-        panelFilterArgs$macCutoff,
+        panelFilterParam$mafCutoff,
+        panelFilterParam$macCutoff,
         nrow(dosage)
     )
     is.na(stats$maf) | stats$maf < effMaf | stats$missRate > imissCutoff
@@ -1560,12 +1560,12 @@ loadLdFromGenotype <- function(
 .panelVariantFilter <- function(
     ldSketch,
     variantIds,
-    panelFilterArgs = PanelFilterParam(),
+    panelFilterParam = PanelFilterParam(),
     label = ".panelVariantFilter"
 ) {
     # .panelCutoffs answers NULL for a filter that would keep everything,
     # which is also the cheap exit here.
-    cutoffs <- .panelCutoffs(panelFilterArgs)
+    cutoffs <- .panelCutoffs(panelFilterParam)
     if (is.null(cutoffs)) {
         return(variantIds)
     }
@@ -1603,13 +1603,13 @@ loadLdFromGenotype <- function(
 # The panel-filter cutoffs a pipeline call carries, or NULL when none is set
 # (so the filter short-circuits without touching the panel).
 # @noRd
-.panelCutoffs <- function(panelFilterArgs = PanelFilterParam()) {
+.panelCutoffs <- function(panelFilterParam = PanelFilterParam()) {
     # NULL fields are how the pipelines spell "not set"; normalise them to the
     # no-op values so the short-circuit below is the only place that decides
     # whether a filter is worth running.
-    maf <- panelFilterArgs$mafCutoff %||% 0
-    mac <- panelFilterArgs$macCutoff %||% 0
-    imiss <- panelFilterArgs$imissCutoff %||% 1
+    maf <- panelFilterParam$mafCutoff %||% 0
+    mac <- panelFilterParam$macCutoff %||% 0
+    imiss <- panelFilterParam$imissCutoff %||% 1
     if (maf <= 0 && mac <= 0 && imiss >= 1) {
         return(NULL)
     }
@@ -2017,7 +2017,7 @@ loadLdFromBlocks <- function(
     extractCoordinates = NULL,
     nSample = NULL
 ) {
-    intersectedLdFiles <- getRegionalLdMeta(ldMetaFilePath, region)
+    intersectedLdFiles <- regionalLdMeta(ldMetaFilePath, region)
     ldFilePaths <- intersectedLdFiles$intersections$LD_file_paths
     bimFilePaths <- intersectedLdFiles$intersections$bimFilePaths
     blocks <- .loadLdBlocksLoop(
@@ -2042,7 +2042,7 @@ loadLdFromBlocks <- function(
         snpIdx = NULL,
         variants = variantsGr,
         blockMetadata = blockMetadata,
-        nRef = if (is.null(nSample)) 0L else as.integer(nSample)
+        nSamples = if (is.null(nSample)) 0L else as.integer(nSample)
     )
 }
 
@@ -2083,7 +2083,7 @@ filterVariantsByLdReference <- function(
         summarise(start = min(.data$pos), end = max(.data$pos))
 
     # Use shared helper -- no genotype loading
-    refInfo <- getRefVariantInfo(ldReferenceMetaFile, regionDf)
+    refInfo <- refVariantInfo(ldReferenceMetaFile, regionDf)
     refChrom <- canonChrom(refInfo$chrom)
     refKey <- str_c(refChrom, ":", refInfo$pos)
 
@@ -2188,15 +2188,15 @@ partitionLdMatrix <- function(
     maxMergedBlockSize = 10000
 ) {
     assertClass(ldData, "LdData")
-    variantIds <- getVariantIds(ldData)
+    variantIds <- variantIds(ldData)
     combinedMatrix <- .partitionValidateMatrix(
-        getCorrelation(ldData),
+        ldMatrix(ldData),
         variantIds
     )
     # The slot is always a GRanges now, so no flattening: every consumer
     # below reads it as one (mcols via `$`, blocks via `[` and length()).
     blocks <- .partitionFilterBlocks(
-        getBlockMetadata(ldData),
+        blockMetadata(ldData),
         length(variantIds)
     )
     # Validate the block structure of the matrix (skip if only one block).
@@ -3327,16 +3327,16 @@ ldClumpByScore <- function(
 #' Extract the LD or genotype matrix from an LdData S4 object.
 #' @param ld An LdData object.
 #' @param wantGenotype Logical; if TRUE, extract the genotype matrix (via
-#'   \code{getGenotypes()}).
+#'   \code{genotypes()}).
 #' @return A matrix.
 #' @importFrom checkmate assertClass
 #' @noRd
 extractLdMatrix <- function(ld, wantGenotype = FALSE) {
     assertClass(ld, "LdData")
     if (wantGenotype && hasGenotypes(ld)) {
-        return(getGenotypes(ld))
+        return(genotypes(ld))
     }
-    getCorrelation(ld)
+    ldMatrix(ld)
 }
 
 
@@ -3425,7 +3425,7 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
             "already in memory, which is what onDisk exists to avoid."
         ))
     }
-    fmt <- getFormat(.ldSketchHandle(X))
+    fmt <- genotypeFormat(.ldSketchHandle(X))
     if (fmt != "gds") {
         abort(glue(
             "computeLd(onDisk = TRUE) needs a GDS-backed panel; this one is ",
@@ -3611,7 +3611,7 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
 #'   \code{dimnames} taken from the block where available.
 #' @examples
 #' data(qtlSumStatsExample)
-#' panel <- getLdSketch(qtlSumStatsExample)
+#' panel <- ldSketch(qtlSumStatsExample)
 #' R <- computeLd(panel, snpIdx = 1:5)
 #' dim(R)
 #' # A dosage matrix already in memory is correlated directly.

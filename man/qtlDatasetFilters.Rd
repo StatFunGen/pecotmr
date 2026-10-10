@@ -2,43 +2,43 @@
 % Please edit documentation in R/AllGenerics.R, R/QtlDataset.R
 \name{qtlDatasetFilters}
 \alias{qtlDatasetFilters}
-\alias{getMafCutoff}
-\alias{getMacCutoff}
-\alias{getXvarCutoff}
-\alias{getImissCutoff}
-\alias{getKeepVariants}
-\alias{getKeepIndel}
-\alias{getMafCutoff,QtlDataset-method}
-\alias{getMacCutoff,QtlDataset-method}
-\alias{getXvarCutoff,QtlDataset-method}
-\alias{getImissCutoff,QtlDataset-method}
-\alias{getKeepVariants,QtlDataset-method}
-\alias{getKeepIndel,QtlDataset-method}
+\alias{mafCutoff}
+\alias{macCutoff}
+\alias{xvarCutoff}
+\alias{imissCutoff}
+\alias{keepVariants}
+\alias{keepIndel}
+\alias{mafCutoff,QtlDataset-method}
+\alias{macCutoff,QtlDataset-method}
+\alias{xvarCutoff,QtlDataset-method}
+\alias{imissCutoff,QtlDataset-method}
+\alias{keepVariants,QtlDataset-method}
+\alias{keepIndel,QtlDataset-method}
 \title{QtlDataset Filter Settings}
 \usage{
-getMafCutoff(x, ...)
+mafCutoff(x, ...)
 
-getMacCutoff(x, ...)
+macCutoff(x, ...)
 
-getXvarCutoff(x, ...)
+xvarCutoff(x, ...)
 
-getImissCutoff(x, ...)
+imissCutoff(x, ...)
 
-getKeepVariants(x, ...)
+keepVariants(x, ...)
 
-getKeepIndel(x, ...)
+keepIndel(x, ...)
 
-\S4method{getMafCutoff}{QtlDataset}(x)
+\S4method{mafCutoff}{QtlDataset}(x)
 
-\S4method{getMacCutoff}{QtlDataset}(x)
+\S4method{macCutoff}{QtlDataset}(x)
 
-\S4method{getXvarCutoff}{QtlDataset}(x)
+\S4method{xvarCutoff}{QtlDataset}(x)
 
-\S4method{getImissCutoff}{QtlDataset}(x)
+\S4method{imissCutoff}{QtlDataset}(x)
 
-\S4method{getKeepVariants}{QtlDataset}(x)
+\S4method{keepVariants}{QtlDataset}(x)
 
-\S4method{getKeepIndel}{QtlDataset}(x)
+\S4method{keepIndel}{QtlDataset}(x)
 }
 \arguments{
 \item{x}{A \code{QtlDataset}.}
@@ -46,10 +46,10 @@ getKeepIndel(x, ...)
 \item{...}{Additional arguments passed on to methods.}
 }
 \value{
-\code{getMafCutoff()}, \code{getMacCutoff()},
-  \code{getXvarCutoff()} and \code{getImissCutoff()} single numerics;
-  \code{getKeepVariants()} a character vector (empty when no restriction
-  was requested); \code{getKeepIndel()} a single logical. The sample set
+\code{mafCutoff()}, \code{macCutoff()},
+  \code{xvarCutoff()} and \code{imissCutoff()} single numerics;
+  \code{keepVariants()} a character vector (empty when no restriction
+  was requested); \code{keepIndel()} a single logical. The sample set
   is not among them: it lives in \code{colData(x)} and \code{sampleMap(x)}.
 }
 \description{
@@ -60,6 +60,6 @@ The variant- and sample-filter settings a
 }
 \examples{
 data(qtlDatasetExample)
-getMafCutoff(qtlDatasetExample)
-getKeepIndel(qtlDatasetExample)
+mafCutoff(qtlDatasetExample)
+keepIndel(qtlDatasetExample)
 }

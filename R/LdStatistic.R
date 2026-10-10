@@ -22,7 +22,7 @@ NULL
 #'   statistics together. The genome build comes from \code{seqinfo()} rather
 #'   than a slot of its own.
 #' @slot ldBlocks A \code{GRanges} of LD block intervals.
-#' @slot nRef Integer, sample size of the LD reference panel.
+#' @slot nSamples Integer, sample size of the LD reference panel.
 #' @slot inSample Logical, whether the LD reference is from the same cohort as
 #'   the GWAS (affects bias correction).
 #' @export
@@ -31,7 +31,7 @@ setClass(
     contains = c("VIRTUAL", "GRanges"),
     representation(
         ldBlocks = "GRanges",
-        nRef = "integer",
+        nSamples = "integer",
         inSample = "logical"
     ),
     validity = function(object) .validateLdStatistic(object)
@@ -41,7 +41,12 @@ setClass(
 #' @importFrom checkmate makeAssertCollection assertCount assertLogical
 .validateLdStatistic <- function(object) {
     coll <- makeAssertCollection()
-    assertCount(object@nRef, positive = TRUE, .var.name = "nRef", add = coll)
+    assertCount(
+        object@nSamples,
+        positive = TRUE,
+        .var.name = "nSamples",
+        add = coll
+    )
     # assertLogical(len = 1) rather than assertFlag: the slot's declared type
     # already excludes non-logicals, and NA is tolerated here as it was before.
     assertLogical(object@inSample, len = 1L, .var.name = "inSample", add = coll)
@@ -105,7 +110,7 @@ setClass(
 # Shared front half of buildLdEigen()/buildLdScore(): validate the input,
 # split it into blocks, and resolve what the LdStatistic base needs.
 # @noRd
-.ldRefPrepare <- function(ldBlockData, nRef, genome) {
+.ldRefPrepare <- function(ldBlockData, nSamples, genome) {
     dataList <- .ldRefAsDataList(ldBlockData)
     blocks <- list_flatten(map(dataList, .ldRefBlocksOf))
     resolvedGenome <- .ldRefResolveGenome(dataList, genome)
@@ -114,7 +119,7 @@ setClass(
         snpInfo = .ldRefSnpInfo(blocks),
         snpIdx = .ldRefSnpIdx(blocks),
         ldBlocks = .ldRefBlockRanges(blocks, resolvedGenome),
-        nRef = .ldRefResolveNRef(dataList, nRef),
+        nRef = .ldRefResolveNRef(dataList, nSamples),
         genome = resolvedGenome
     )
 }
@@ -146,8 +151,8 @@ setClass(
 # them (block-diagonal LD across a multi-block region).
 # @noRd
 .ldRefBlocksOf <- function(x) {
-    R <- getCorrelation(x)
-    gr <- getVariantInfo(x)
+    R <- ldMatrix(x)
+    gr <- variantInfo(x)
     if (!is.list(R)) {
         return(list(.ldRefOneBlock(R, gr)))
     }
@@ -180,7 +185,7 @@ setClass(
             "LdData carries {nVariants}."
         ))
     }
-    md <- getBlockMetadata(x)
+    md <- blockMetadata(x)
     # blockMetadata is a GRanges: the index payload is in mcols.
     hasIdx <- all(is_in(
         c("startIdx", "endIdx"),
@@ -313,9 +318,9 @@ setClass(
 # sizes are an error rather than a silent pick: nRef drives HDL's
 # finite-reference correction, so the wrong one shifts h2.
 # @noRd
-.ldRefResolveNRef <- function(dataList, nRef) {
-    if (!is.null(nRef)) {
-        return(as.integer(nRef))
+.ldRefResolveNRef <- function(dataList, nSamples) {
+    if (!is.null(nSamples)) {
+        return(as.integer(nSamples))
     }
     found <- discard(unique(map_int(dataList, .ldRefNRefOf)), is.na)
     if (length(found) == 0L) {
@@ -335,7 +340,7 @@ setClass(
 
 # @noRd
 .ldRefNRefOf <- function(x) {
-    n <- getNRef(x)
+    n <- ldPanelNSamples(x)
     if (length(n) == 0L) NA_integer_ else as.integer(n[[1L]])
 }
 
@@ -354,23 +359,14 @@ setClass(
     if (length(g) == 1L) g[[1L]] else NA_character_
 }
 
-#' @rdname getNRef
+#' @rdname ldPanelNSamples
 #' @export
-setMethod("getNRef", "LdStatistic", function(x) x@nRef)
+setMethod("ldPanelNSamples", "LdStatistic", function(x) x@nSamples)
 
-#' @rdname getInSample
+#' @rdname inSample
 #' @export
-setMethod("getInSample", "LdStatistic", function(x) x@inSample)
+setMethod("inSample", "LdStatistic", function(x) x@inSample)
 
-#' @rdname getLdBlocks
+#' @rdname ldBlocks
 #' @export
-setMethod("getLdBlocks", "LdStatistic", function(x) x@ldBlocks)
-
-#' @rdname getGenome
-#' @export
-setMethod("getGenome", "LdStatistic", function(x) {
-    # The build lives in seqinfo, not a slot: a GRanges already has somewhere
-    # to keep it, and storing it twice is what the retired LdBlocks class did.
-    build <- discard(unique(GenomeInfoDb::genome(x)), is.na)
-    if (length(build) == 0L) NA_character_ else build[[1L]]
-})
+setMethod("ldBlocks", "LdStatistic", function(x) x@ldBlocks)

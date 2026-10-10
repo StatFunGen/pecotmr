@@ -155,7 +155,7 @@ S4Vectors::mcols(entry) <- S4Vectors::DataFrame(
 )
 
 gwsManual <- GwasSumStats(
-    study = "MyGWAS",
+    studyName = "MyGWAS",
     entry = list(entry),
     genome = "GRCh38",
     ldSketch = ldSketch
@@ -201,7 +201,7 @@ qts
 
 ```{r qtl-manual}
 qtsManual <- QtlSumStats(
-    study = "MyQTL",
+    studyName = "MyQTL",
     context = "Blood",
     trait = "ENSG00000001",
     entry = list(entry),
@@ -229,7 +229,7 @@ contexts as column names:
 data(mashInputExample)
 z <- mashInputExample$strong.z[1:6, 1:3]
 rownames(z) <- paste0("chr1:", seq(1000, by = 100, length.out = 6), ":A:G")
-qtlSumStatsFromZMatrix(z, study = "demo")
+qtlSumStatsFromZMatrix(z, studyName = "demo")
 ```
 
 `qtlSumStatsFromBetaMatrix()` is the effect-size counterpart, taking `bhat`
@@ -239,7 +239,7 @@ and `shat`:
 b <- mashInputExample$strong.b[1:6, 1:3]
 shat <- mashInputExample$strong.s[1:6, 1:3]
 rownames(b) <- rownames(shat) <- rownames(z)
-getContexts(qtlSumStatsFromBetaMatrix(b, shat, study = "demo"))
+contexts(qtlSumStatsFromBetaMatrix(b, shat, studyName = "demo"))
 ```
 
 Both default `ldSketch = NULL`, giving an LD-free collection. That is fine
@@ -404,9 +404,9 @@ weights with pecotmr* and *Multi-trait colocalization with ColocBoost*
 vignettes.
 
 ```{r accessors}
-getGenome(gws)
+unname(GenomeInfoDb::genome(gws))
 as.character(gws$study)
-length(getSumStats(gws)) # variants in the first entry
+length(sumStats(gws)) # variants in the first entry
 ```
 
 ```{r session-info}

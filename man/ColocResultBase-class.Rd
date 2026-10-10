@@ -14,8 +14,8 @@ Virtual base shared by \code{\linkS4class{ColocResult}} (from
   normalized posterior over an arbitrary-sized set of outcomes -- so neither
   can be expressed in the other's schema. What they share is the shape (one
   element per colocalization unit, its variants inside) and therefore the
-  projection surface: both answer \code{\link{getColocPairs}} and
-  \code{\link{getColocVariants}}, so code that only needs "which variants
+  projection surface: both answer \code{\link{colocPairs}} and
+  \code{\link{colocVariants}}, so code that only needs "which variants
   colocalized, and how strongly" works against either.
 }
 \section{Slots}{

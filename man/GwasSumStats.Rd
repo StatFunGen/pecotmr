@@ -5,7 +5,7 @@
 \title{Create a GwasSumStats Collection Object}
 \usage{
 GwasSumStats(
-  study,
+  studyName,
   entry,
   genome,
   ldSketch = NULL,
@@ -20,7 +20,7 @@ GwasSumStats(
 )
 }
 \arguments{
-\item{study}{Character vector of study identifiers (must be unique).}
+\item{studyName}{Character vector of study identifiers (must be unique).}
 
 \item{entry}{A \code{SimpleList} or \code{list} of \code{GRanges}, one per
 study.}
@@ -48,13 +48,13 @@ in a mixed collection). For case/control GWAS, downstream consumers (e.g.
 \code{NULL}). Attached only when supplied (length 1 or length(study)). Used
 as the study-level fallback for the per-variant \code{N} when a study has
 no per-variant \code{N} column and no case/control counts. Named
-\code{nSample} to avoid clashing with \code{getNSamples()} (the LD-panel
+\code{nSample} to avoid clashing with \code{nSamples()} (the LD-panel
 sample size).}
 
 \item{qcInfo}{A \code{list} recording which QC steps ran. Empty \code{list()}
 on construction; populated by \code{summaryStatsQc()} with a per-step audit
 record. Fine-mapping / TWAS pipelines reject inputs where
-\code{length(getQcInfo(x)) == 0}.}
+\code{length(qcInfo(x)) == 0}.}
 
 \item{ldBlocks}{Optional LD-block specification: an \code{LdBlocks}, a
 \code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end}
@@ -99,6 +99,6 @@ panel <- readGenotypes(
 gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
-GwasSumStats(study = "t1", entry = list(gr), genome = "hg38",
+GwasSumStats(studyName = "t1", entry = list(gr), genome = "hg38",
   ldSketch = panel)
 }

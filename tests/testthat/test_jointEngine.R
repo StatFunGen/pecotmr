@@ -118,7 +118,7 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
     pipe <- new(
         "FmJointPipeline",
         config = list(
-            credibleSetArgs = CredibleSetParam(
+            credibleSetParam = CredibleSetParam(
                 includeAllCs = TRUE,
                 perCsColumns = "full"
             ),
@@ -140,7 +140,7 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
         method,
         dataX,
         dataY,
-        credibleSetArgs,
+        credibleSetParam,
         fitRetention,
         csInput = NULL,
         af = NULL,
@@ -148,17 +148,17 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
         conditionIdx = NULL,
         ...
     ) {
-        captured$perCsColumns <- credibleSetArgs$perCsColumns
-        captured$includeAllCs <- credibleSetArgs$includeAllCs
+        captured$perCsColumns <- credibleSetParam$perCsColumns
+        captured$includeAllCs <- credibleSetParam$includeAllCs
         .je_mockPostprocess(
             fit,
             method,
             dataX,
             dataY,
-            credibleSetArgs$coverage,
-            credibleSetArgs$secondaryCoverage,
-            credibleSetArgs$signalCutoff,
-            credibleSetArgs$minAbsCorr,
+            credibleSetParam$coverage,
+            credibleSetParam$secondaryCoverage,
+            credibleSetParam$signalCutoff,
+            credibleSetParam$minAbsCorr,
             csInput = csInput,
             af = af,
             region = region,
@@ -213,11 +213,11 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     twEntry <- twasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         weights = c(0.1, 0.2),
-        fits = fp,
+        methodFits = fp,
         cvResult = cvPayload
     )
     tw <- TwasWeights(
-        study = "S",
+        studyName = "S",
         context = "c1",
         trait = "G1",
         method = "mrmash",
@@ -292,12 +292,12 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     X,
     Y,
     weightMethods,
-    study,
+    studyName,
     context,
     trait,
     fitRetention,
-    standardized,
-    dataType,
+    weightStandardized,
+    weightsDataType,
     verbose,
     ...
 ) {
@@ -310,10 +310,10 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     e <- twasWeightsRow(
         variantIds = colnames(X),
         weights = W,
-        fits = .je_fakeMrmashFit()
+        methodFits = .je_fakeMrmashFit()
     )
     TwasWeights(
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = "mrmash",
@@ -389,11 +389,11 @@ test_that(".runJointCell: cross-context twas expands to per-context weight vecto
     expect_equal(as.character(res$trait), c("G1", "G1"))
     expect_equal(as.character(res$jointContexts), c("c1;c2", "c1;c2"))
     # Each row carries that context's weight VECTOR (the matrix column).
-    w1 <- getWeights(pecotmr:::.collectionEntry(res, 1L))
+    w1 <- weights(pecotmr:::.collectionEntry(res, 1L))
     expect_false(is.matrix(w1))
     expect_length(w1, 2L)
     # shared joint fit on each
-    expect_false(is.null(getFits(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.null(methodFits(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that(".runJointCell: cross-context twas attaches per-condition CV slices", {
@@ -420,12 +420,12 @@ test_that(".runJointCell: cross-context twas attaches per-condition CV slices", 
         args = list(dataDrivenPriorMatricesCv = list(1, 2))
     )
     expect_equal(nrow(res), 2L)
-    cv <- getCvResult(pecotmr:::.collectionEntry(res, 1L))
+    cv <- cvResult(pecotmr:::.collectionEntry(res, 1L))
     expect_equal(names(cv$foldFits), c("fold_1", "fold_2")) # shared per-fold fits
     expect_false(is.null(cv$predictions)) # this context's slice
     expect_false(is.null(cv$samplePartition))
     # per-context vector
-    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.matrix(weights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", {
@@ -454,8 +454,8 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
     expect_equal(nrow(res), 2L)
     e <- pecotmr:::.collectionEntry(res, 1L)
     expect_length(.twrPartsVariantIds(e), 0L) # placeholder weights
-    expect_null(getWeights(e))
-    expect_equal(names(getCvResult(e)$foldFits), c("fold_1", "fold_2"))
+    expect_null(weights(e))
+    expect_equal(names(cvResult(e)$foldFits), c("fold_1", "fold_2"))
 })
 
 # ---- sumstats column (RSS; no sample folds) ---------------------------------
@@ -574,8 +574,8 @@ test_that(".runJointCell: cross-context twas sumstats (mr.mash.rss) -> per-conte
     expect_equal(nrow(res), 2L)
     expect_equal(as.character(res$context), c("c1", "c2"))
     expect_equal(as.character(res$jointContexts), c("c1;c2", "c1;c2"))
-    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
-    expect_false(is.null(getFits(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.matrix(weights(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.null(methodFits(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regression)", {
@@ -628,7 +628,7 @@ test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regressi
         fitJointGroup(group, pipe, "mrmash", list())
     ))
     expect_length(entries, K)
-    w <- getWeights(entries[[1L]])
+    w <- weights(entries[[1L]])
     expect_length(w, p)
     expect_true(all(is.finite(w)))
 })
@@ -892,7 +892,7 @@ test_that(".runJointCell: cross-trait twas -> per-trait weight vectors", {
     expect_equal(as.character(res$context), c("brain", "brain"))
     expect_equal(as.character(res$trait), c("G1", "G2"))
     expect_equal(as.character(res$jointTraits), c("G1;G2", "G1;G2"))
-    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.matrix(weights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that("fitJointGroup(Individual, Fm): fsusie returns one entry per trait", {
@@ -1038,7 +1038,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
     expect_equal(as.character(res$trait), c("gA", "gB", "gA"))
     expect_equal(as.character(res$jointContexts), rep("c1;c2", 3L))
     expect_equal(as.character(res$jointTraits), rep("gA;gB", 3L))
-    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.matrix(weights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 # ---- SR-TWAS ensemble layer (.twasEnsembleLayer) ----------------------------
@@ -1122,8 +1122,8 @@ test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble en
     )
     expect_length(ens, 2L)
     expect_s4_class(ens[[1L]], "TwasWeightsRow")
-    expect_length(getWeights(ens[[1L]]), 3L)
-    coef <- getCvResult(ens[[1L]])$methodCoef
+    expect_length(weights(ens[[1L]]), 3L)
+    coef <- cvResult(ens[[1L]])$methodCoef
     expect_true(all(coef >= -1e-8))
     expect_equal(sum(coef), 1, tolerance = 1e-6)
 })
@@ -1318,7 +1318,7 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
         )
     )
     expect_false(cvCalled) # handoff used, no re-CV
-    expect_false(is.null(getCvResult(entries[[1L]])$predictions))
+    expect_false(is.null(cvResult(entries[[1L]])$predictions))
 })
 
 # =============================================================================
@@ -1399,7 +1399,7 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
         traits = list(S = c("G1", "G2"))
     )
     local_mocked_bindings(
-        getStudy = function(data) "S",
+        studyName = function(data) "S",
         .buildIndividualCrossContextXy = function(
             data,
             tid,
@@ -1440,7 +1440,7 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
 })
 
 test_that(".enumCrossContextIndividual: study not in scope / < 2 contexts -> empty", {
-    local_mocked_bindings(getStudy = function(data) "S", .package = "pecotmr")
+    local_mocked_bindings(studyName = function(data) "S", .package = "pecotmr")
     expect_length(
         pecotmr:::.enumCrossContextIndividual(
             NULL,
@@ -1469,7 +1469,7 @@ test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contex
         traits = list(S = "t1")
     )
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
@@ -1482,7 +1482,7 @@ test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contex
 
 test_that(".enumCrossContextSumstats: < 2 contexts and < 2 tuple rows skip", {
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
@@ -1511,7 +1511,7 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
         traits = list(S = c("G1", "G2"))
     )
     local_mocked_bindings(
-        getStudy = function(data) "S",
+        studyName = function(data) "S",
         .buildIndividualCrossTraitXy = function(
             data,
             cx,
@@ -1519,7 +1519,7 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
             cisWindow,
             verbose,
             label,
-            study,
+            studyName,
             region = NULL,
             ...
         ) {
@@ -1554,7 +1554,7 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
 })
 
 test_that(".enumCrossTraitIndividual: study not in scope -> empty", {
-    local_mocked_bindings(getStudy = function(data) "S", .package = "pecotmr")
+    local_mocked_bindings(studyName = function(data) "S", .package = "pecotmr")
     expect_length(
         pecotmr:::.enumCrossTraitIndividual(
             NULL,
@@ -1572,7 +1572,7 @@ test_that(".enumCrossTraitSumstats: groups per (study, context) with >= 2 traits
         traits = list(S = c("t1", "t2"))
     )
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
@@ -1593,7 +1593,7 @@ test_that(".enumCrossStudySumstats: group per (context, trait) in >= 2 studies",
         traits = list(S1 = "t1", S2 = "t1")
     )
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
@@ -1617,11 +1617,11 @@ test_that(".enumComposedIndividual: one group joining every (context, trait) tup
         traits = list(S = c("gA", "gB"))
     )
     local_mocked_bindings(
-        getStudy = function(data) "S",
+        studyName = function(data) "S",
         .buildComposedIndividualXy = function(
             data,
             scope,
-            study,
+            studyName,
             cisWindow,
             verbose,
             label,
@@ -1661,7 +1661,7 @@ test_that(".enumComposedIndividual: one group joining every (context, trait) tup
 
 test_that(".enumComposedIndividual: study not in scope / NULL xy -> empty", {
     local_mocked_bindings(
-        getStudy = function(data) "S",
+        studyName = function(data) "S",
         .buildComposedIndividualXy = function(...) NULL,
         .package = "pecotmr"
     )
@@ -1693,8 +1693,8 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
     )
     samp <- paste0("s", 1:5)
     local_mocked_bindings(
-        getStudy = function(data) "S",
-        getPhenotypes = function(data, contexts) .je_mkSe(c("G1", "G2")),
+        studyName = function(data) "S",
+        molecularTraits = function(data, contexts) .je_mkSe(c("G1", "G2")),
         .fmResidPheno = function(
             data,
             contexts,
@@ -1735,8 +1735,8 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
         traits = list(S = "G1")
     )
     local_mocked_bindings(
-        getStudy = function(data) "S",
-        getPhenotypes = function(data, contexts) .je_mkSe("G1"),
+        studyName = function(data) "S",
+        molecularTraits = function(data, contexts) .je_mkSe("G1"),
         .fmResidPheno = function(
             data,
             contexts,
@@ -1767,7 +1767,7 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
 })
 
 test_that(".enumUnivariateIndividual: study not in scope -> empty", {
-    local_mocked_bindings(getStudy = function(data) "S", .package = "pecotmr")
+    local_mocked_bindings(studyName = function(data) "S", .package = "pecotmr")
     expect_length(
         pecotmr:::.enumUnivariateIndividual(
             NULL,
@@ -1785,7 +1785,7 @@ test_that(".enumComposedSumstats: one group per fixed-axis row block", {
         traits = list(S = "t1")
     )
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .enumerateComposedSumstatGroups = function(spec, data, scope) {
             list(
                 groups = list(c(1L, 2L)),
@@ -1809,7 +1809,7 @@ test_that(".enumComposedSumstats: one group per fixed-axis row block", {
 
 test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .enumerateComposedSumstatGroups = function(spec, data, scope) NULL,
         .package = "pecotmr"
     )
@@ -1821,7 +1821,7 @@ test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
         0L
     ) # gi NULL (646)
     local_mocked_bindings(
-        getLdSketch = function(x) NULL,
+        ldSketch = function(x) NULL,
         .enumerateComposedSumstatGroups = function(spec, data, scope) {
             list(
                 groups = list(1L),
@@ -2097,7 +2097,7 @@ test_that("fitJointGroup(SumStats, twas): a vector weight without rownames falls
     )
     expect_s4_class(res, "TwasWeights")
     expect_equal(
-        getVariantIds(pecotmr:::.collectionEntry(res, 1L)),
+        variantIds(pecotmr:::.collectionEntry(res, 1L)),
         rownames(.jgZ(grp))
     ) # fallback vids
 })
@@ -2264,7 +2264,7 @@ test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's 
         )
     )
     expect_s4_class(ens[[1L]], "TwasWeightsRow")
-    expect_equal(getVariantIds(ens[[1L]]), colnames(.jgX(g))) # fallback ids
+    expect_equal(variantIds(ens[[1L]]), colnames(.jgX(g))) # fallback ids
 })
 
 # =============================================================================
@@ -2366,7 +2366,7 @@ test_that(".twasGroupArgs: takes the CV partition from the fine-mapping CV when 
     local_mocked_bindings(
         .twasFineMappingFits = function(
             fineMappingResult,
-            study,
+            studyName,
             context,
             trait
         ) {
@@ -2402,7 +2402,7 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
                 traits = list(S = c("g1", "g2"), S2 = "g9")
             )
         },
-        getPhenotypes = function(data, contexts) .je_mkSe(c("g1", "g2")),
+        molecularTraits = function(data, contexts) .je_mkSe(c("g1", "g2")),
         .fmTraitsInRegion = function(se, traits, region) {
             captured <<- traits
             "g1"
@@ -2450,7 +2450,7 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
 # A QtlSumStats carrying a traitPos column, which no bundled fixture has.
 .je_ssWithTraitPos <- function() {
     QtlSumStats(
-        study = c("S", "S"),
+        studyName = c("S", "S"),
         context = c("brain", "brain"),
         trait = c("G1", "G2"),
         entry = list(
@@ -2504,8 +2504,8 @@ test_that("the fit region of a QtlSumStats row is its variant span", {
 test_that("the fit region of a QtlDataset row is traitPos +/- the cis window", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
-    cx <- getContexts(qd)[[1L]]
-    tr <- rownames(getPhenotypes(qd, contexts = cx))[[1L]]
+    cx <- contexts(qd)[[1L]]
+    tr <- rownames(molecularTraits(qd, contexts = cx))[[1L]]
     tp <- pecotmr:::.traitPosFor(qd, cx, tr)
     bare <- pecotmr:::.fitRegionFor(qd, cx, tr)
     wide <- pecotmr:::.fitRegionFor(qd, cx, tr, cisWindow = 1e5)
@@ -2522,7 +2522,7 @@ test_that("the fit region of a QtlDataset row is traitPos +/- the cis window", {
 test_that("the anchors are NULL for a trait the dataset does not carry", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
-    cx <- getContexts(qd)[[1L]]
+    cx <- contexts(qd)[[1L]]
     expect_null(pecotmr:::.traitPosFor(qd, cx, "absentTrait"))
     expect_null(pecotmr:::.traitPosFor(qd, "absentContext", "anything"))
     expect_null(pecotmr:::.fitRegionFor(qd, cx, "absentTrait"))
@@ -2546,7 +2546,7 @@ test_that("a sumstats entry with no variants has no fit region", {
         n = integer(0)
     )
     ss <- QtlSumStats(
-        study = "S",
+        studyName = "S",
         context = "brain",
         trait = "G0",
         entry = list(emptyEntry),
@@ -2872,8 +2872,8 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         dimnames = list("t1", c("s1", "s2"))
     )
     local_mocked_bindings(
-        getStudy = function(data) "S1",
-        getPhenotypes = function(data, contexts) phenotypes,
+        studyName = function(data) "S1",
+        molecularTraits = function(data, contexts) phenotypes,
         .fmResidPheno = function(data, contexts, traitId, naAction, ...) {
             matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "t1"))
         },

@@ -5,16 +5,17 @@
 \alias{show,SldscData-method}
 \title{Construct an SldscData object}
 \usage{
-SldscData(annot, frq = NULL, traits = list())
+SldscData(annotData, frqData = NULL, traits = list())
 
 \S4method{show}{SldscData}(object)
 }
 \arguments{
-\item{annot}{A target-annotation \code{data.frame} (e.g. from
+\item{annotData}{A target-annotation \code{data.frame} (e.g. from
 \code{\link{readSldscAnnot}}): \code{CHR}, \code{SNP}, and one or more
 annotation columns.}
 
-\item{frq}{Optional reference-panel allele-frequency \code{data.frame} (e.g.
+\item{frqData}{Optional reference-panel allele-frequency
+\code{data.frame} (e.g.
 from \code{\link{readSldscFrq}}): \code{SNP}, \code{MAF}. \code{NULL} (the
 default) stores an empty frame, which disables MAF-based filtering.}
 
@@ -41,8 +42,8 @@ mkRun <- function(cats) {
     enrichmentP = setNames(rep(0.01, n), cats),
     propH2 = setNames(rep(0.2, n), cats),
     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-    tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-    nBlocks = 10L)
+    annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+  cats)), nBlocks = 10L)
 }
 annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -54,7 +55,7 @@ mkTrait <- function() {
     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 }
 traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-sd <- SldscData(annot = annot, frq = frq, traits = traits)
+sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 sd
 }
 \seealso{

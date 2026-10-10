@@ -640,8 +640,11 @@ test_that("nestTupleRanges round-trips an unmodified flatten", {
     expect_equal(mcols(back), mcols(mc))
     # Collection-level slots survive, which is the point of nesting through a
     # template rather than rebuilding from the ranges alone.
-    expect_identical(getLdSketch(back), getLdSketch(mc))
-    expect_identical(getGenome(back), getGenome(mc))
+    expect_identical(ldSketch(back), ldSketch(mc))
+    expect_identical(
+        unname(GenomeInfoDb::genome(back)),
+        unname(GenomeInfoDb::genome(mc))
+    )
 })
 
 test_that("nestTupleRanges returns a filtered flatten to its elements", {
@@ -715,7 +718,7 @@ test_that("filter keeps the collection and narrows its elements", {
     expect_s4_class(out, "QtlSumStats")
     expect_equal(nrow(out), nrow(mc))
     expect_lt(sum(lengths(out)), sum(lengths(mc)))
-    expect_identical(getLdSketch(out), getLdSketch(mc))
+    expect_identical(ldSketch(out), ldSketch(mc))
 })
 
 test_that("filter can mix identity and per-range columns", {

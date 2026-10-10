@@ -65,13 +65,13 @@ block addresses. Extra columns the caller supplied are kept as mcols.
 A block whose index range is out of bounds has no span to derive and
 gets a width-0 range.}
 
-\item{\code{nRef}}{Integer, reference panel sample size.}
+\item{\code{nSamples}}{Integer, reference panel sample size.}
 
 \item{\code{mixtureWeights}}{NULL when \code{genotypeHandle} is a single
 \code{GenotypeHandle}; a numeric vector of mixing proportions (one per
 panel, summing to 1) when \code{genotypeHandle} is a list of
-\code{GenotypeHandle}s. Used by \code{getCorrelation()} to compute a
+\code{GenotypeHandle}s. Used by \code{ldMatrix()} to compute a
 weighted-average mixture LD matrix; required whenever \code{genotypeHandle}
-is a list and \code{getCorrelation()} will be called.}
+is a list and \code{ldMatrix()} will be called.}
 }}
 

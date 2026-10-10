@@ -39,7 +39,7 @@ context("colocboostPipeline")
 #
 #   - QTL data is supplied as a QtlDataset / QtlSumStats / MultiStudyQtlDataset
 #     (DFrame-based S4 objects with an ldSketch slot for sumstats inputs and
-#     getResidualizedGenotypes() / getResidualizedPhenotypes() accessors for
+#     residualizedGenotypes() / residualizedPhenotypes() accessors for
 #     individual-level inputs).
 #   - GWAS is supplied separately via the gwasSumStats = GwasSumStats(...)
 #     argument.
@@ -47,7 +47,7 @@ context("colocboostPipeline")
 #     selection) lives on the QtlDataset constructor and is applied lazily
 #     by its accessors. There is no separate qcRegionalData() pass.
 #   - All summary-statistic QC lives in summaryStatsQc(). The pipeline
-#     rejects QtlSumStats / GwasSumStats whose getQcInfo() is empty.
+#     rejects QtlSumStats / GwasSumStats whose qcInfo() is empty.
 #
 # Rewriting the legacy tests in place would require fabricating new
 # QtlDataset / QtlSumStats / GwasSumStats / MultiStudyQtlDataset fixtures
@@ -112,31 +112,31 @@ context("colocboostPipeline (S4 dispatch)")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -183,7 +183,7 @@ context("colocboostPipeline (S4 dispatch)")
         contexts
     )
     QtlDataset(
-        study = "study1",
+        studyName = "study1",
         genotypes = gh,
         phenotypes = phen,
         genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
@@ -206,7 +206,7 @@ context("colocboostPipeline (S4 dispatch)")
         N = rep(1000L, 5)
     )
     QtlSumStats(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         entry = list(gr),
@@ -232,7 +232,7 @@ context("colocboostPipeline (S4 dispatch)")
         N = rep(1000L, 5)
     )
     GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .cbp_makeHandle(),
@@ -413,7 +413,7 @@ test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked
     # ran" is read off the recorded timing rather than off a retained raw
     # object -- the timing is written whether or not the run produced sets.
     expect_s4_class(out, "ColocBoostResult")
-    expect_true(is_in("xqtl_coloc", names(getComputingTime(out)$Analysis)))
+    expect_true(is_in("xqtl_coloc", names(computingTime(out)$Analysis)))
     expect_true("X" %in% names(capturedArgs))
 })
 
@@ -488,21 +488,21 @@ test_that("colocboostPipeline: jointGwas merges qtl + gwas sumstats and runs onc
             separateGwas = FALSE
         )
     )
-    expect_true(is_in("joint_gwas", names(getComputingTime(out)$Analysis)))
+    expect_true(is_in("joint_gwas", names(computingTime(out)$Analysis)))
 })
 
-test_that("colocboostPipeline: separateGwas runs once per merged sumstat study", {
+test_that("colocboostPipeline: separateGwas runs once per GWAS study", {
     ss <- .cbp_makeQtlSumStats()
     gs <- .cbp_makeGwasSumStats()
-    callCount <- 0
+    seen <- list()
     local_mocked_bindings(
         extractBlockGenotypes = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
         colocboost = function(...) {
-            callCount <<- callCount + 1L
-            list(round = callCount)
+            seen[[length(seen) + 1L]] <<- list(...)
+            list(round = length(seen))
         },
         .package = "colocboost"
     )
@@ -515,12 +515,47 @@ test_that("colocboostPipeline: separateGwas runs once per merged sumstat study",
             separateGwas = TRUE
         )
     )
-    # Driver merges QTL + GWAS sumstats into a single bundle and the
-    # separate-loop iterates over every merged study label (Q1:c1:t1 + G1).
-    expect_equal(callCount, 2L)
+    # ONE run per GWAS study, not per merged sumstat label. The QTL study is
+    # a non-focal outcome of that run, not a focal "GWAS" of its own: the
+    # merged bundle holds both sides, so iterating it ran the QTL as its own
+    # focal GWAS and reported "0 contexts".
+    expect_equal(length(seen), 1L)
+    call <- seen[[1L]]
+    expect_equal(length(call$sumstat), 2L)
+    expect_equal(call$outcome_names, c("Q1:c1:t1", "G1"))
+    # The focal outcome is the GWAS, and it is last.
+    expect_equal(call$focal_outcome_idx, 2L)
+    expect_equal(call$outcome_names[[call$focal_outcome_idx]], "G1")
+    # The QTL side's LD travels with it, so the dict covers both sumstats.
+    expect_equal(nrow(call$dict_sumstatLD), 2L)
     expect_true(
-        is_in("separate_gwas", names(getComputingTime(out)$Analysis))
+        is_in("separate_gwas", names(computingTime(out)$Analysis))
     )
+})
+
+test_that("separateGwas refuses a QTL-only sumstat input", {
+    ss <- .cbp_makeQtlSumStats()
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    # Guarded on GWAS presence, not on "any summary statistics": the old
+    # `hasSs` guard let a QTL-only input through and ran one focal pass per
+    # QTL study.
+    warnings <- character()
+    withCallingHandlers(
+        suppressMessages(colocboostPipeline(
+            ss,
+            xqtlColoc = FALSE,
+            jointGwas = FALSE,
+            separateGwas = TRUE
+        )),
+        warning = function(w) {
+            warnings <<- c(warnings, conditionMessage(w))
+            invokeRestart("muffleWarning")
+        }
+    )
+    expect_true(any(str_detect(warnings, "GWAS summary statistics")))
 })
 
 test_that("colocboostPipeline: no analysis flag set is an error", {
@@ -574,7 +609,7 @@ test_that("colocboostPipeline: GWAS ldSketch mismatch errors during the driver",
         N = rep(1000L, 5)
     )
     gs <- GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = gh_diff,
@@ -748,7 +783,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles 
         separateGwas = FALSE
     ))
     expect_s4_class(out, "ColocBoostResult")
-    expect_true(is_in("xqtl_coloc", names(getComputingTime(out)$Analysis)))
+    expect_true(is_in("xqtl_coloc", names(computingTime(out)$Analysis)))
     # The individual study's outcome is prefixed "study1:" in the combined bundle.
     expect_true(any(grepl("study1:", names(capturedArgs$Y))))
 })
@@ -782,7 +817,7 @@ test_that(".cbIndividualBundle: multi-context bundle names + prefixes outcomes",
         .package = "colocboost"
     )
     out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
-    expect_true(is_in("xqtl_coloc", names(getComputingTime(out)$Analysis)))
+    expect_true(is_in("xqtl_coloc", names(computingTime(out)$Analysis)))
     # Two contexts -> two context-prefixed outcomes (covers the xMatch + naming).
     expect_gte(length(capturedArgs$Y), 2L)
 })
@@ -1009,9 +1044,9 @@ test_that("colocboost sumstat bundle drops panel-rare variants", {
 test_that("colocboost RSS cutoffs match .panelVariantFilter", {
     ss <- .cbf_qcd()
     ids <- normalizeVariantId(
-        getSumStatsDf(
+        as.data.frame(
             ss,
-            study = ss$study[[1L]],
+            studyName = ss$study[[1L]],
             context = ss$context[[1L]],
             trait = ss$trait[[1L]],
             require = "Z"
@@ -1021,7 +1056,7 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
         expect_equal(
             .cbf_n(ss, mafCutoff = cut),
             length(.panelVariantFilter(
-                getLdSketch(ss),
+                ldSketch(ss),
                 ids,
                 PanelFilterParam(mafCutoff = cut)
             )),
@@ -1032,7 +1067,7 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
 
 test_that("colocboost RSS treats MAC as a MAF equivalent", {
     ss <- .cbf_qcd()
-    nSamp <- ncol(getLdSketch(ss))
+    nSamp <- ncol(ldSketch(ss))
     expect_equal(
         .cbf_n(ss, macCutoff = 0.1 * 2 * nSamp),
         .cbf_n(ss, mafCutoff = 0.1)
@@ -1050,14 +1085,14 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
     # filtered set has to be passed to the LD build separately rather than by
     # shrinking that vector.
     ss <- .cbf_qcd()
-    df <- getSumStatsDf(
+    df <- as.data.frame(
         ss,
-        study = ss$study[[1L]],
+        studyName = ss$study[[1L]],
         context = ss$context[[1L]],
         trait = ss$trait[[1L]],
         require = "Z"
     )
-    sketch <- getLdSketch(ss)
+    sketch <- ldSketch(ss)
     pair <- suppressMessages(.cbSumstatPair(
         df = df,
         ldSketch = sketch,
@@ -1075,16 +1110,16 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
 
 test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
     ss <- .cbf_qcd()
-    df <- getSumStatsDf(
+    df <- as.data.frame(
         ss,
-        study = ss$study[[1L]],
+        studyName = ss$study[[1L]],
         context = ss$context[[1L]],
         trait = ss$trait[[1L]],
         require = "Z"
     )
     expect_null(suppressMessages(.cbSumstatPair(
         df = df,
-        ldSketch = getLdSketch(ss),
+        ldSketch = ldSketch(ss),
         cutoffs = list(mafCutoff = 0.99, macCutoff = 0, imissCutoff = 1)
     )))
 })
@@ -1207,7 +1242,7 @@ test_that(".cbBuildContextXY skips a context with no shared samples", {
 
 test_that(".cbResidualizedX reports why genotypes were unavailable", {
     local_mocked_bindings(
-        getResidualizedGenotypes = function(...) stop("kaboom"),
+        residualizedGenotypes = function(...) stop("kaboom"),
         .package = "pecotmr"
     )
     # The cause is chained via `parent`, not flattened into the text, so the
@@ -1363,7 +1398,7 @@ test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
         qtlSumstatBundle = qtlOnly
     ))
     expect_equal(called, "xqtl")
-    expect_false(is.null(getComputingTime(out)$Analysis$xqtl_coloc))
+    expect_false(is.null(computingTime(out)$Analysis$xqtl_coloc))
 })
 
 test_that(".cbRunVariants warns instead of silently skipping an analysis", {
@@ -1416,7 +1451,7 @@ test_that(".cbRunVariants warns when xqtlColoc has only GWAS sumstats", {
         )),
         "xqtlColoc = TRUE was requested"
     )
-    expect_null(getComputingTime(out)$Analysis$xqtl_coloc)
+    expect_null(computingTime(out)$Analysis$xqtl_coloc)
 })
 
 test_that("ColocboostOptions() options reach the engine by name", {

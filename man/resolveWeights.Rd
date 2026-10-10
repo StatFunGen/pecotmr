@@ -10,21 +10,27 @@ resolveWeights(x, ...)
 
 \S4method{resolveWeights}{FineMappingResultBase}(
   x,
-  study = NULL,
+  studyName = NULL,
   context = NULL,
   trait = NULL,
   method = NULL,
   region = NULL
 )
 
-\S4method{resolveWeights}{TwasWeights}(x, study = NULL, context = NULL, trait = NULL, method = NULL)
+\S4method{resolveWeights}{TwasWeights}(
+  x,
+  studyName = NULL,
+  context = NULL,
+  trait = NULL,
+  method = NULL
+)
 }
 \arguments{
 \item{x}{A \code{TwasWeights} or a \code{FineMappingResult}.}
 
 \item{...}{Reserved for future use.}
 
-\item{study, context, trait, method}{Optional length-1 selectors pinning one
+\item{studyName, context, trait, method}{Optional length-1 selectors pinning one
 row of a collection, as elsewhere; each \code{NULL} (default) leaves that
 part of the tuple unconstrained. Ignored when \code{x} is already a row.}
 
@@ -46,7 +52,7 @@ Return an aligned \code{(variantIds, weights)} pair from a
 }
 \examples{
 data(twasWeightsExample)
-w <- resolveWeights(twasWeightsExample, study = "protocol_example",
+w <- resolveWeights(twasWeightsExample, studyName = "protocol_example",
   context = "bulk_rnaseq", trait = "ENSG00000130538", method = "susie")
 length(w$variantIds)
 }

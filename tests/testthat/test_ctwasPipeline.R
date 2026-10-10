@@ -40,6 +40,13 @@ context("ctwasPipeline")
     )
 }
 
+# A panel with its correlation already built, the shape callers saw before
+# the LD became on-demand. Tests that assert on R_wgt want it materialized.
+.ctp_fullPanel <- function(h) {
+    p <- pecotmr:::.ctwasPanelFor(h)
+    c(p, list(R = pecotmr:::.ctwasPanelLd(p)))
+}
+
 # Canonical SNP IDs the fixtures use. .ctp_makeHandle() emits these in
 # chr:pos:A2:A1 form; tests reference them by index via .ctp_snpId(i).
 .ctp_snpId <- function(i) sprintf("chr1:%d:G:A", 100L * i)
@@ -48,31 +55,31 @@ context("ctwasPipeline")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -105,7 +112,7 @@ context("ctwasPipeline")
 .ctp_makeGwasSumstats <- function(qc = TRUE, blockIds = c("block1", "block2")) {
     n <- length(blockIds)
     GwasSumStats(
-        study = rep("G1", n),
+        studyName = rep("G1", n),
         entry = map(seq_len(n), .ctp_blockVariants),
         genome = "hg19",
         ldSketch = .ctp_makeHandle(snp_n = 6L * n),
@@ -123,7 +130,7 @@ context("ctwasPipeline")
         weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
     )
     TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -154,7 +161,7 @@ context("ctwasPipeline")
     )
     fe <- fineMappingRow(variantIds = vids, susieFit = list(), topLoci = tl)
     QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -266,14 +273,14 @@ test_that("assembleCtwasInputs: accepts a QtlFineMappingResult weight source (to
     # a standardized TwasWeights carrying the same effect vector (both skip cTWAS's
     # variance scaling). Compare against that, not the default (unstandardized) one.
     tw_std <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
         entry = list(twasWeightsRow(
             variantIds = map_chr(1:5, .ctp_snpId),
             weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
-            standardized = TRUE
+            weightStandardized = TRUE
         )),
         ldSketch = .ctp_makeHandle()
     )
@@ -302,7 +309,7 @@ test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
     # crosses the block boundary. With a per-block filter the gene would
     # lose v4..v5 (block-2 variants); with a global-union filter all four
     # weight variants survive.
-    mkBlockGss <- function(study, snpIds, qc = TRUE) {
+    mkBlockGss <- function(studyName, snpIds, qc = TRUE) {
         gr <- GenomicRanges::GRanges(
             seqnames = "chr1",
             ranges = IRanges::IRanges(
@@ -318,7 +325,7 @@ test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
             N = rep(1000L, length(snpIds))
         )
         GwasSumStats(
-            study = study,
+            studyName = studyName,
             entry = list(gr),
             genome = "hg19",
             ldSketch = .ctp_makeHandle(),
@@ -333,7 +340,7 @@ test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
         weights = c(0.1, 0.2, 0.3, 0.4)
     )
     tw <- TwasWeights(
-        study = "G1",
+        studyName = "G1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -412,7 +419,7 @@ test_that("CtwasPriorParam rejects an unknown varStructure", {
 
 test_that(".ctwasRequireMatchingLdSketches: NULL twas-side handle is allowed", {
     twNoLd <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -432,6 +439,12 @@ test_that(".ctwasRequireMatchingLdSketches: differently trimmed panels ok", {
     # One LD reference QC'd separately on the two sides leaves each sketch
     # trimmed to its own surviving variants, so the panels overlap without
     # being identical. That is the normal case, not an error.
+    #
+    # The overlap note is rate-limited to once per session and the assembly
+    # tests legitimately trip it first (each block's GWAS panel is narrowed to
+    # its own variants while the weights carry the whole one), so clear that
+    # budget here rather than depending on which files ran before this.
+    rlang::reset_warning_verbosity("pecotmrLdSketchOverlap-ctwasPipeline")
     twLd <- .ctp_makeHandle(snp_n = 5L)
     gwasLd <- .ctp_makeHandle(snp_n = 6L)
     expect_warning(
@@ -443,7 +456,7 @@ test_that(".ctwasRequireMatchingLdSketches: differently trimmed panels ok", {
 test_that(".ctwasRequireMatchingLdSketches: disjoint panels error", {
     twLd <- .ctp_makeHandle(snp_n = 3L)
     gwasLd <- .ctp_makeHandle(snp_n = 3L)
-    si <- getSnpInfo(gwasLd)
+    si <- snpInfo(gwasLd)
     si$BP <- si$BP + 1e6L
     gwasLd@snpInfo <- si
     expect_error(
@@ -590,7 +603,7 @@ test_that(".ctwasBuildSingleRegionInfo: uses the block entry span, not the wider
         N = 1000L
     )
     gss <- GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ctp_makeHandle(),
@@ -614,7 +627,7 @@ test_that(".ctwasBuildSingleRegionInfo: multi-chromosome block entry errors", {
         N = 1000L
     )
     gss <- GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ctp_makeHandle(),
@@ -646,7 +659,7 @@ test_that(".ctwasSnpInfoForBlock: repairs a tag-allele panel id from A1/A2", {
         extractBlockGenotypes = .ctp_mockExtractor(),
         .package = "pecotmr"
     )
-    panel <- pecotmr:::.ctwasComputeFullPanelLd(h)
+    panel <- .ctp_fullPanel(h)
     expect_true("chr1:200:G:A" %in% rownames(panel$R))
     expect_true("chr1:200:G:A" %in% names(panel$variance))
 })
@@ -655,7 +668,7 @@ test_that(".ctwasLdPanelKey: returns the on-disk path for an existing GDS sketch
     handle <- .ctp_makeHandle()
     key <- pecotmr:::.ctwasLdPanelKey(handle)
     expect_true(file.exists(key))
-    expect_equal(key, getPath(handle))
+    expect_equal(key, path(handle))
 })
 
 test_that(".ctwasLdPanelKey: errors when no candidate file exists", {
@@ -681,13 +694,102 @@ test_that(".ctwasLdPanelKey: errors when no candidate file exists", {
     )
 })
 
+# ---------------------------------------------------------------------------
+# Per-block LD scoping. Two bugs met here: combineGwasSumStats() UNIONS the
+# per-piece sketches, and `[` carries that collection-level slot into every
+# block, so each one referenced the whole chromosome; and the panel cache was
+# keyed on the backing genotype file, which every block on a chromosome
+# shares, so only block 1's panel was ever computed and the rest read it back.
+# ---------------------------------------------------------------------------
+
+test_that(".ctwasPickBlock: narrows the collection sketch to the block", {
+    ss <- .ctp_makeGwasSumstats()
+    # The collection's sketch spans both blocks, as combineGwasSumStats
+    # leaves it.
+    expect_equal(length(pecotmr:::.ldSketchRanges(ldSketch(ss))), 12L)
+    byBlock <- pecotmr:::.ctwasGwasByBlock(ss)
+    sizes <- map_int(byBlock, function(b) {
+        length(pecotmr:::.ldSketchRanges(ldSketch(b)))
+    })
+    expect_equal(unname(sizes), c(6L, 6L))
+    # Narrowed to DIFFERENT variants: block 1 holds 1..6, block 2 holds 7..12.
+    pos <- map(byBlock, function(b) {
+        GenomicRanges::start(pecotmr:::.ldSketchRanges(ldSketch(b)))
+    })
+    expect_equal(pos[[1L]], 100L * (1:6))
+    expect_equal(pos[[2L]], 100L * (7:12))
+})
+
+test_that(".ctwasRegionLdTokens: one distinct, existing token per region", {
+    ss <- .ctp_makeGwasSumstats()
+    byBlock <- pecotmr:::.ctwasGwasByBlock(ss)
+    sketches <- map(byBlock, ldSketch)
+    tokens <- pecotmr:::.ctwasRegionLdTokens(names(byBlock), sketches)
+    expect_length(unique(unname(tokens)), 2L)
+    expect_true(all(file.exists(tokens)))
+    expect_equal(names(tokens), c("block1", "block2"))
+})
+
+test_that(".ctwasTokenSlug: sanitizes ids and keeps duplicates apart", {
+    slug <- pecotmr:::.ctwasTokenSlug(
+        c("chr19:1-500000", "chr19:500001-1000000", "chr19:1-500000")
+    )
+    expect_false(any(str_detect(slug, ":")))
+    # The index prefix separates two ids that sanitize to the same stem.
+    expect_length(unique(slug), 3L)
+})
+
+test_that("assembleCtwasInputs: each region gets its own block-sized panel", {
+    inp <- .ctp_makeMultiBlockInputs()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    out <- assembleCtwasInputs(
+        gwasSumStats = inp$gwasSumStats,
+        twasWeights = inp$twasWeights
+    )
+    expect_length(unique(out$LD_map$LD_file), 2L)
+    panels <- pecotmr:::.ctwasCachedPanels(out)
+    expect_length(panels, 2L)
+    # Block-sized (6x6), not the 12-variant whole-panel LD.
+    expect_equal(dim(pecotmr:::.ctwasPanelLd(panels[[1L]])), c(6L, 6L))
+    expect_equal(dim(pecotmr:::.ctwasPanelLd(panels[[2L]])), c(6L, 6L))
+    # And genuinely different LD, not block 1's twice.
+    expect_false(identical(panels[[1L]]$snpInfo$id, panels[[2L]]$snpInfo$id))
+})
+
+test_that(".ctwasResolveLdPaths: re-mints sentinels lost with the session", {
+    inp <- .ctp_makeMultiBlockInputs()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    out <- assembleCtwasInputs(
+        gwasSumStats = inp$gwasSumStats,
+        twasWeights = inp$twasWeights
+    )
+    before <- pecotmr:::.ctwasCachedPanels(out)
+    # The sentinels live in the session tempdir; a payload reloaded in a new
+    # session finds them gone, and ctwas asserts file.exists() on each.
+    unlink(out$LD_map$LD_file)
+    restored <- pecotmr:::.ctwasResolveLdPaths(out)
+    tokens <- restored$LD_map$LD_file
+    expect_true(all(file.exists(tokens)))
+    expect_length(unique(tokens), 2L)
+    # Each region still reaches its OWN panel through the re-keyed loader.
+    loader <- restored$LD_loader_fun
+    expect_equal(loader(tokens[[1L]]), pecotmr:::.ctwasPanelLd(before[[1L]]))
+    expect_equal(loader(tokens[[2L]]), pecotmr:::.ctwasPanelLd(before[[2L]]))
+})
+
 test_that(".ctwasResolveMethod: caller-supplied method wins when present", {
     e <- twasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
         weights = c(0.1, 0.2, 0.3)
     )
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "mrash",
@@ -703,7 +805,7 @@ test_that(".ctwasResolveMethod: caller-supplied unknown method errors", {
         weights = c(0.1, 0.2, 0.3)
     )
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "mrash",
@@ -723,7 +825,7 @@ test_that(".ctwasResolveMethod: defaults to ensemble when present among multiple
             weights = c(0.1, 0.2, 0.3)
         )
         TwasWeights(
-            study = "Q1",
+            studyName = "Q1",
             context = "c1",
             trait = "t1",
             method = m,
@@ -733,7 +835,7 @@ test_that(".ctwasResolveMethod: defaults to ensemble when present among multiple
     }
     # Build a multi-method TwasWeights by stitching two methods together.
     tw <- TwasWeights(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("mrash", "ensemble"),
@@ -758,7 +860,7 @@ test_that(".ctwasResolveMethod: single method auto-picked when only one availabl
         weights = c(0.1, 0.2, 0.3)
     )
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "mrash",
@@ -770,7 +872,7 @@ test_that(".ctwasResolveMethod: single method auto-picked when only one availabl
 
 test_that(".ctwasResolveMethod: multi-method + no ensemble + no caller method errors", {
     tw <- TwasWeights(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("mrash", "susie"),
@@ -797,7 +899,7 @@ test_that(".ctwasResolveMethod: multi-method + no ensemble + no caller method er
 # ---------------------------------------------------------------------------
 .ctp_multiMethodTw <- function(methods = c("mrash", "susie")) {
     TwasWeights(
-        study = rep("Q1", length(methods)),
+        studyName = rep("Q1", length(methods)),
         context = rep("c1", length(methods)),
         trait = rep("t1", length(methods)),
         method = methods,
@@ -923,7 +1025,7 @@ test_that(".ctwasBucketWeights: places a flat 2-gene source into its home blocks
     # anchor can tell them apart. block1 spans 100-600, block2 spans 700-1200,
     # so gA @chr1:100 homes to block1 and gB @chr1:800 to block2.
     tw <- TwasWeights(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("gA", "gB"),
         method = c("susie", "susie"),
@@ -939,7 +1041,7 @@ test_that(".ctwasBucketWeights: places a flat 2-gene source into its home blocks
     expect_named(bucketed, c("block1", "block2"), ignore.order = TRUE)
     expect_equal(as.character(bucketed[["block1"]]$trait), "gA")
     expect_equal(as.character(bucketed[["block2"]]$trait), "gB")
-    expect_false(is.null(getLdSketch(bucketed[["block1"]])))
+    expect_false(is.null(ldSketch(bucketed[["block1"]])))
 })
 
 test_that(".ctwasBucketWeights: errors when source lacks traitPos", {
@@ -1019,9 +1121,9 @@ test_that(".ctwasRunToRows: single-context run -> one row, no jointContexts", {
     expect_equal(rows[[1L]]$study, "Q1")
     expect_equal(rows[[1L]]$gwasStudy, "D1")
     expect_true(is.na(rows[[1L]]$jointContexts))
-    expect_equal(nrow(getFinemap(rows[[1L]]$entry)), 2L)
+    expect_equal(nrow(ctwasPosteriors(rows[[1L]]$entry)), 2L)
     expect_equal(
-        getCtwasGroupPriors(rows[[1L]]$entry)$group_prior[["c1"]],
+        ctwasGroupPriors(rows[[1L]]$entry)$group_prior[["c1"]],
         0.01
     )
 })
@@ -1048,9 +1150,9 @@ test_that(".ctwasRunToRows: multi-context run -> per-context rows sharing jointC
         map_chr(rows, function(r) r$jointContexts) == "brain,liver"
     ))
     # Each per-context row keeps only its own genes but shares the joint param.
-    expect_equal(nrow(getFinemap(rows[[1L]]$entry)), 2L)
+    expect_equal(nrow(ctwasPosteriors(rows[[1L]]$entry)), 2L)
     expect_named(
-        getCtwasGroupPriors(rows[[1L]]$entry)$group_prior,
+        ctwasGroupPriors(rows[[1L]]$entry)$group_prior,
         c("brain", "liver", "SNP")
     )
 })
@@ -1076,8 +1178,8 @@ test_that(".ctwasRunToRows: empty finemap_res still yields the modeled row", {
     )
     rows <- pecotmr:::.ctwasRunToRows(run, "D1", "susie")
     expect_length(rows, 1L)
-    expect_null(getFinemap(rows[[1L]]$entry))
-    expect_null(getSusieAlpha(rows[[1L]]$entry))
+    expect_null(ctwasPosteriors(rows[[1L]]$entry))
+    expect_null(susieAlpha(rows[[1L]]$entry))
 })
 
 test_that(".ctwasRunToRows: susieAlpha subset mirrors finemap per context", {
@@ -1087,7 +1189,7 @@ test_that(".ctwasRunToRows: susieAlpha subset mirrors finemap per context", {
         c(c1 = 0.01, SNP = 1e-4)
     )
     rows <- pecotmr:::.ctwasRunToRows(run, "D1", "susie")
-    sa <- getSusieAlpha(rows[[1L]]$entry)
+    sa <- susieAlpha(rows[[1L]]$entry)
     expect_equal(nrow(sa), 2L)
     expect_true("susie_alpha" %in% names(sa))
 })
@@ -1103,7 +1205,7 @@ test_that(".ctwasRunToRows: keepSnps adds a dedicated SNP row; default drops SNP
     # default: SNP background dropped, only the gene (context) row.
     rowsOff <- pecotmr:::.ctwasRunToRows(run, "D1", "susie")
     expect_length(rowsOff, 1L)
-    expect_true(all(getFinemap(rowsOff[[1L]]$entry)$type == "gene"))
+    expect_true(all(ctwasPosteriors(rowsOff[[1L]]$entry)$type == "gene"))
     # keepSnps: one extra study = context = "SNP" row carrying the SNP background.
     rowsOn <- pecotmr:::.ctwasRunToRows(run, "D1", "susie", keepSnps = TRUE)
     expect_length(rowsOn, 2L)
@@ -1112,16 +1214,16 @@ test_that(".ctwasRunToRows: keepSnps adds a dedicated SNP row; default drops SNP
     expect_equal(snpRow$context, "SNP")
     # The payloads are ranged now: SNP rows carry the coordinates their own
     # variant ids encode, so the count is length() and the columns are mcols.
-    fm <- getFinemap(snpRow$entry)
+    fm <- ctwasPosteriors(snpRow$entry)
     expect_s4_class(fm, "GRanges")
     expect_length(fm, 2L)
     expect_true(all(S4Vectors::mcols(fm)$type == "SNP"))
-    expect_length(getSusieAlpha(snpRow$entry), 2L)
+    expect_length(susieAlpha(snpRow$entry), 2L)
 })
 
 test_that(".ctwasFilterMethod: subsets rows to the requested method", {
     tw <- TwasWeights(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("mrash", "susie"),
@@ -1142,7 +1244,7 @@ test_that(".ctwasFilterMethod: subsets rows to the requested method", {
     expect_equal(as.character(twSub$method), "susie")
 })
 
-# Build an ldPanel fixture (matches .ctwasComputeFullPanelLd's return
+# Build an ldPanel fixture (the materialized shape, R included)
 # shape) for the 6-SNP toy panel from .ctp_makeHandle().
 .ctp_makeLdPanel <- function(snp_n = 6L) {
     h <- .ctp_makeHandle(snp_n = snp_n)
@@ -1164,7 +1266,7 @@ test_that(".ctwasBuildWeights: scales non-standardized weights by sqrt(variance)
     ids5 <- map_chr(1:5, .ctp_snpId)
     rawW <- c(0.1, 0.2, 0.3, 0.4, 0.5)
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -1182,14 +1284,14 @@ test_that(".ctwasBuildWeights: standardized weights bypass variance scaling", {
     ids5 <- map_chr(1:5, .ctp_snpId)
     rawW <- c(0.1, 0.2, 0.3, 0.4, 0.5)
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
         entry = list(twasWeightsRow(
             variantIds = ids5,
             weights = rawW,
-            standardized = TRUE
+            weightStandardized = TRUE
         )),
         ldSketch = .ctp_makeHandle()
     )
@@ -1475,7 +1577,7 @@ test_that(".ctwasBuildWeights: drops variants not present in the LD panel", {
     ids3 <- map_chr(1:3, .ctp_snpId)
     missing <- c("chr1:99900:G:A", "chr1:99910:G:A") # not in panel
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -1500,7 +1602,7 @@ test_that(".ctwasBuildWeights: intersects with gwasSnpIds when supplied", {
     ids5 <- map_chr(1:5, .ctp_snpId)
     blockIds <- map_chr(c(1, 2, 4), .ctp_snpId)
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -1520,22 +1622,62 @@ test_that(".ctwasBuildWeights: intersects with gwasSnpIds when supplied", {
     expect_equal(wl[[1L]]$n_wgt, 3L)
 })
 
-test_that(".ctwasComputeFullPanelLd: extracts once + returns cached R + snpInfo + variance", {
+test_that(".ctwasPanelFor: cheap fields eagerly, correlation on request", {
     local_mocked_bindings(
         extractBlockGenotypes = .ctp_mockExtractor(),
         .package = "pecotmr"
     )
-    out <- pecotmr:::.ctwasComputeFullPanelLd(.ctp_makeHandle(snp_n = 6L))
+    out <- pecotmr:::.ctwasPanelFor(.ctp_makeHandle(snp_n = 6L))
     ids6 <- map_chr(1:6, .ctp_snpId)
-    expect_named(out, c("R", "snpInfo", "variance"))
-    expect_true(is.matrix(out$R))
-    expect_equal(dim(out$R), c(6L, 6L))
-    expect_equal(rownames(out$R), ids6)
+    # The n x n correlation is deliberately NOT built here: ctwas pulls a
+    # region's LD only while fine-mapping, and only for the regions that
+    # survive screening.
+    expect_named(out, c("snpInfo", "variance", "sketch"))
+    expect_null(out$R)
     expect_setequal(
         colnames(out$snpInfo),
         c("chrom", "id", "pos", "alt", "ref")
     )
     expect_named(out$variance, ids6)
+    # It is built, with the right shape, when something asks.
+    R <- pecotmr:::.ctwasPanelLd(out)
+    expect_true(is.matrix(R))
+    expect_equal(dim(R), c(6L, 6L))
+    expect_equal(rownames(R), ids6)
+})
+
+test_that(".ctwasPanelLdSubset: equals the slice of the full correlation", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    panel <- pecotmr:::.ctwasPanelFor(.ctp_makeHandle(snp_n = 6L))
+    vids <- map_chr(c(2L, 4L, 5L), .ctp_snpId)
+    full <- pecotmr:::.ctwasPanelLd(panel)
+    # Mean imputation is per column, so correlating a subset of the dosages
+    # gives the same pairwise values as slicing the whole matrix.
+    expect_equal(
+        pecotmr:::.ctwasPanelLdSubset(panel, vids),
+        full[vids, vids]
+    )
+})
+
+test_that(".ctwasRWgtSource: builds the block matrix only when it pays", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    panel <- pecotmr:::.ctwasPanelFor(.ctp_makeHandle(snp_n = 6L))
+    # One gene on two variants: 4 against 36, so no block matrix is formed.
+    expect_null(pecotmr:::.ctwasRWgtSource(panel, 2L))
+    # Six genes on five variants each: 150 against 36, so form it once.
+    dense <- pecotmr:::.ctwasRWgtSource(panel, rep(5L, 6L))
+    expect_equal(dim(dense), c(6L, 6L))
+    # A panel that already carries one is never rebuilt.
+    expect_identical(
+        pecotmr:::.ctwasRWgtSource(.ctp_makeLdPanel(), 1L),
+        .ctp_makeLdPanel()$R
+    )
 })
 
 test_that(".ctwasBuildZGene: builds z_gene from a TWAS-Z GRanges", {
@@ -1742,24 +1884,24 @@ test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and
     # Output is a CtwasResult: one (gwasStudy, study, context, method) row.
     expect_s4_class(out, "CtwasResult")
     expect_equal(nrow(out), 1L)
-    expect_equal(getMethodNames(out), "susie")
-    expect_equal(getStudy(out), "Q1")
-    expect_equal(getContexts(out), "c1")
+    expect_equal(methodNames(out), "susie")
+    expect_equal(studyName(out), "Q1")
+    expect_equal(contexts(out), "c1")
     expect_equal(as.character(out$gwasStudy), "G1")
     # The run's jointly-estimated param is carried on the row.
     expect_equal(
-        unname(getCtwasGroupPriors(out$entry[[1L]])$group_prior),
+        unname(ctwasGroupPriors(out$entry[[1L]])$group_prior),
         c(0.1, 0.0001)
     )
-    # getFinemap aggregates the per-gene rows, tagged with run identity.
-    fm <- getFinemap(out)
+    # ctwasPosteriors aggregates the per-gene rows, tagged with run identity.
+    fm <- ctwasPosteriors(out)
     expect_equal(nrow(fm), 2L)
     expect_true(all(
         c("gwasStudy", "study", "context", "method", "susie_pip") %in% names(fm)
     ))
     expect_setequal(fm$id, c("block1|Q1|c1|t1|susie", "block2|Q1|c1|t1|susie"))
-    # getSusieAlpha aggregates the fuller per-effect table, likewise tagged.
-    sa <- getSusieAlpha(out)
+    # susieAlpha aggregates the fuller per-effect table, likewise tagged.
+    sa <- susieAlpha(out)
     expect_equal(nrow(sa), 2L)
     expect_true(all(c("gwasStudy", "context", "susie_alpha") %in% names(sa)))
 })
@@ -1809,8 +1951,8 @@ test_that("ctwasPipeline: keepSnps retains the SNP background as a dedicated row
     out <- ctwasPipeline(inp$gwasSumStats, inp$twasWeights, keepSnps = TRUE)
     # A gene (c1) row plus the dedicated SNP row.
     expect_equal(nrow(out), 2L)
-    expect_setequal(getContexts(out), c("c1", "SNP"))
-    fm <- getFinemap(out)
+    expect_setequal(contexts(out), c("c1", "SNP"))
+    fm <- ctwasPosteriors(out)
     expect_setequal(fm$type, c("gene", "SNP"))
     expect_true("chr1:100:G:A" %in% fm$id)
 })
@@ -1921,7 +2063,9 @@ test_that("mergeCtwasBoundaryRegions passes no unnamed argument to ctwas", {
     # ...and a user option still arrives spliced, by its own name
     mergeCtwasBoundaryRegions(
         .ctp_finemapResult(hasLd = TRUE),
-        methodArgs = CtwasOptions(min_abs_corr = 0.1)
+        methodArgs = CtwasOptions(
+            merge = CtwasMergeOptions(min_abs_corr = 0.1)
+        )
     )
     expect_equal(captured$min_abs_corr, 0.1)
     expect_false(any(names(captured) == ""))
@@ -2020,7 +2164,7 @@ test_that("ctwasPipeline: mergeBoundary = TRUE re-fine-maps and flows into Ctwas
     expect_true(merged) # merging ran
     expect_s4_class(out, "CtwasResult")
     # The post-merge PIP (0.99) is what the decomposition carries.
-    expect_equal(getFinemap(out)$susie_pip, 0.99)
+    expect_equal(ctwasPosteriors(out)$susie_pip, 0.99)
 })
 
 # ===========================================================================
@@ -2033,11 +2177,11 @@ test_that("asCtwasResult: structures a granular finemap result into a CtwasResul
     expect_s4_class(cr, "CtwasResult")
     expect_equal(nrow(cr), 1L)
     expect_equal(as.character(cr$gwasStudy), "D1")
-    expect_equal(getStudy(cr), "Q1") # derived from the gene ids
-    expect_equal(getContexts(cr), "c1")
-    expect_equal(getMethodNames(cr), "susie")
-    expect_equal(getFinemap(cr)$susie_pip, 0.90)
-    expect_false(is.null(getSusieAlpha(cr)))
+    expect_equal(studyName(cr), "Q1") # derived from the gene ids
+    expect_equal(contexts(cr), "c1")
+    expect_equal(methodNames(cr), "susie")
+    expect_equal(ctwasPosteriors(cr)$susie_pip, 0.90)
+    expect_false(is.null(susieAlpha(cr)))
 })
 
 test_that("asCtwasResult: keepSnps adds the dedicated SNP row", {
@@ -2053,7 +2197,7 @@ test_that("asCtwasResult: keepSnps adds the dedicated SNP row", {
         )
     )
     cr <- asCtwasResult(fmr, keepSnps = TRUE)
-    expect_setequal(getContexts(cr), c("c1", "SNP"))
+    expect_setequal(contexts(cr), c("c1", "SNP"))
 })
 
 test_that("asCtwasResult: errors when the weights mix methods", {
@@ -2280,7 +2424,7 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     data(qtlDatasetExample)
     gss <- gwasSumStatsS4Example
     qd <- qtlDatasetExample
-    gh <- getGenotypeHandle(qd)
+    gh <- genotypeHandle(qd)
 
     # Two 5-variant synthetic genes from the bundled panel, one anchored in
     # each LD block below. cTWAS's EM runs per region and cannot fit a block
@@ -2288,24 +2432,24 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     # the previous per-region list dodged this by putting the SAME GWAS block
     # and the SAME gene under two region ids.
     geneOne <- twasWeightsRow(
-        variantIds = getSnpInfo(gh)$SNP[1:5],
+        variantIds = snpInfo(gh)$SNP[1:5],
         weights = c(0.1, -0.2, 0.05, 0.0, 0.3)
     )
     geneTwo <- twasWeightsRow(
-        variantIds = getSnpInfo(gh)$SNP[9:13],
+        variantIds = snpInfo(gh)$SNP[9:13],
         weights = c(0.2, 0.1, -0.15, 0.05, 0.0)
     )
     # A FLAT weight source is placed into blocks by `traitPos`, so each gene
     # needs the span it sits in.
     geneSpan <- function(i) {
-        bp <- getSnpInfo(gh)$BP[i]
+        bp <- snpInfo(gh)$BP[i]
         GenomicRanges::GRanges(
-            str_c("chr", getSnpInfo(gh)$CHR[i][[1L]]),
+            str_c("chr", snpInfo(gh)$CHR[i][[1L]]),
             IRanges::IRanges(min(bp), max(bp))
         )
     }
     tw <- TwasWeights(
-        study = rep("study1", 2L),
+        studyName = rep("study1", 2L),
         context = rep("brain", 2L),
         trait = c("ENSG_example", "ENSG_example2"),
         method = rep("susie", 2L),
@@ -2330,11 +2474,11 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     )
     names(twoBlocks) <- c("blockA", "blockB")
     gssTwoBlocks <- GwasSumStats(
-        study = getStudy(gss),
+        studyName = studyName(gss),
         entry = list(unlist(gss)),
-        genome = getGenome(gss),
-        ldSketch = getLdSketch(gss),
-        qcInfo = getQcInfo(gss),
+        genome = unique(unname(GenomeInfoDb::genome(gss))),
+        ldSketch = ldSketch(gss),
+        qcInfo = qcInfo(gss),
         ldBlocks = twoBlocks
     )
     res <- suppressMessages(suppressWarnings(
@@ -2347,8 +2491,11 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
             # function has ever had such a formal, so .ctwasInvoke dropped it
             # silently. CtwasOptions() now rejects it.
             methodArgs = CtwasOptions(
-                min_group_size = 1L,
-                min_p_single_effect = 0
+                regionData = CtwasRegionDataOptions(min_group_size = 1L),
+                estParam = CtwasEstParamOptions(
+                    min_group_size = 1L,
+                    min_p_single_effect = 0
+                )
             )
         )
     ))
@@ -2357,13 +2504,13 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     # susie) row (single-context run, so no jointContexts).
     expect_s4_class(res, "CtwasResult")
     expect_equal(nrow(res), 1L)
-    expect_equal(getContexts(res), "brain")
-    expect_equal(getStudy(res), "study1")
-    expect_equal(getMethodNames(res), "susie")
+    expect_equal(contexts(res), "brain")
+    expect_equal(studyName(res), "study1")
+    expect_equal(methodNames(res), "susie")
     expect_false("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
     # The gene we passed in was fine-mapped and shows up in the aggregated
     # finemap table, tagged with the run identity.
-    fm <- getFinemap(res)
+    fm <- ctwasPosteriors(res)
     expect_true(!is.null(fm) && nrow(fm) > 0L)
     expect_true(all(
         c("gwasStudy", "study", "context", "method", "susie_pip") %in% names(fm)
@@ -2379,7 +2526,7 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
     )))
     expect_true(all(fm$context == "brain"))
     # The fuller per-effect table is retained and reconstructable.
-    sa <- getSusieAlpha(res)
+    sa <- susieAlpha(res)
     expect_true(!is.null(sa) && nrow(sa) > 0L)
     expect_true(all(c("susie_pip", "susie_alpha", "region_id") %in% names(sa)))
 })
@@ -2489,21 +2636,21 @@ test_that(".ctwasFilterVariants: returns NULL when no variants survive", {
 test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
-    gh <- getGenotypeHandle(qd)
-    vids <- getSnpInfo(gh)$SNP[1:5]
+    gh <- genotypeHandle(qd)
+    vids <- snpInfo(gh)$SNP[1:5]
     ent <- twasWeightsRow(
         variantIds = vids,
         weights = c(0.1, -0.2, 0.05, 0.3, 0.15)
     )
     tw <- TwasWeights(
-        study = "study1",
+        studyName = "study1",
         context = "brain",
         trait = "ENSG_example",
         method = "susie",
         entry = list(ent),
         ldSketch = gh
     )
-    ldPanel <- pecotmr:::.ctwasComputeFullPanelLd(gh)
+    ldPanel <- .ctp_fullPanel(gh)
     wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, maxNumVariants = 3L)
     expect_equal(wl[[1L]]$n_wgt, 3L)
     expect_equal(nrow(wl[[1L]]$wgt), 3L)
@@ -2514,22 +2661,22 @@ test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", 
 test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
-    gh <- getGenotypeHandle(qd)
-    vids <- getSnpInfo(gh)$SNP[1:5]
+    gh <- genotypeHandle(qd)
+    vids <- snpInfo(gh)$SNP[1:5]
     ent <- twasWeightsRow(
         variantIds = vids,
         # v1 (0.005) and v3 (0.001) will be dropped at cutoff 0.01
         weights = c(0.005, 0.2, 0.001, 0.3, 0.1)
     )
     tw <- TwasWeights(
-        study = "study1",
+        studyName = "study1",
         context = "brain",
         trait = "ENSG_example",
         method = "susie",
         entry = list(ent),
         ldSketch = gh
     )
-    ldPanel <- pecotmr:::.ctwasComputeFullPanelLd(gh)
+    ldPanel <- .ctp_fullPanel(gh)
     wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, twasWeightCutoff = 0.01)
     expect_equal(wl[[1L]]$n_wgt, 3L)
     expect_setequal(rownames(wl[[1L]]$wgt), vids[c(2L, 4L, 5L)])
@@ -2706,7 +2853,7 @@ test_that("assembleCtwasInputs: skips a block whose TwasWeights lacks the resolv
     ids5 <- map_chr(1:5, .ctp_snpId)
     mkTw <- function(m) {
         TwasWeights(
-            study = "Q1",
+            studyName = "Q1",
             context = "c1",
             trait = "t1",
             method = m,
@@ -2864,10 +3011,10 @@ test_that(".ctwasBuildWeights: SuSiE renormalization fires when variants are dro
     ent <- twasWeightsRow(
         variantIds = c(ids4, bogus),
         weights = c(0.1, 0.2, 0.3, 0.4, 0.5),
-        fits = fits
+        methodFits = fits
     )
     tw <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -2921,7 +3068,7 @@ test_that(".ctwasGetFinemapAux: parses pip + cs_95 membership + purity", {
         stringsAsFactors = FALSE
     )
     fmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -2943,7 +3090,7 @@ test_that(".ctwasGetFinemapAux: cs_95 without a purity column yields NA purity",
         stringsAsFactors = FALSE
     )
     fmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -2962,7 +3109,7 @@ test_that(".ctwasGetFinemapAux: no cs_95 column yields empty CS membership", {
         stringsAsFactors = FALSE
     )
     fmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -2982,7 +3129,7 @@ test_that(".ctwasGetFinemapAux: NULL input, no-match tuple, and empty topLoci al
         stringsAsFactors = FALSE
     )
     fmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -2992,7 +3139,7 @@ test_that(".ctwasGetFinemapAux: NULL input, no-match tuple, and empty topLoci al
     expect_null(pecotmr:::.ctwasGetFinemapAux(fmr, "NOPE", "c1", "t1", "susie"))
     # Matching tuple but an empty topLoci -> NULL.
     fmrEmpty <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -3027,7 +3174,7 @@ test_that(".ctwasSnpInfoForGwasBlock: returns an empty frame when the block has 
     # GRanges entry with no mcols -> no SNP column -> blockIds is empty.
     gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
     gss <- GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ctp_makeHandle(),
@@ -3132,7 +3279,7 @@ test_that(".ctwasBucketWeights: unplaced genes warn + drop; empty blocks skipped
         )
     }
     tw <- TwasWeights(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("gA", "gX"),
         method = c("susie", "susie"),
@@ -3163,7 +3310,7 @@ test_that(".ctwasBucketWeights: errors when no gene lands in any block", {
         )
     }
     twOff <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "gX",
         method = "susie",
@@ -3234,13 +3381,15 @@ test_that("finemapCtwasRegions: an empty screened-region set returns a NULL fine
 # Bundled example payloads: portable LD tokens
 #
 # `LD_map$LD_file` is both something ctwas asserts exists on disk and the key
-# pecotmr dispatches on into the cached LD panels. Serialising an absolute
-# path made the bundled payloads carry the build machine's path, so
-# finemapCtwasRegions() died on `all(file.exists(LD_matrix_files))` for every
-# user. They now carry a "pecotmr://extdata/..." token resolved on the way in.
+# pecotmr dispatches on into the cached LD panels. Those two duties are why
+# the token cannot be the backing genotype file: every block on a chromosome
+# shares it, so each block was handed the FIRST block's panel. Each region
+# now carries its own sentinel, and a payload read back in a later session
+# finds those gone -- .ctwasResolveLdPaths() re-mints one per region and
+# re-keys the loader cache onto them.
 # =============================================================================
 
-test_that("bundled cTWAS payloads carry a resolvable LD token", {
+test_that("bundled cTWAS payloads carry one resolvable token per region", {
     data(ctwasInputsExample)
     data(ctwasEstExample)
     data(ctwasFinemapExample)
@@ -3251,16 +3400,24 @@ test_that("bundled cTWAS payloads carry a resolvable LD token", {
         ctwasFinemapExample
     )) {
         tokens <- as.character(payload$LD_map$LD_file)
-        expect_true(all(startsWith(tokens, "pecotmr://extdata/")))
-        resolved <- map_chr(
-            tokens,
-            pecotmr:::.resolveCtwasLdToken
-        )
-        expect_true(all(file.exists(resolved)))
-        expect_equal(
-            as.character(payload$LD_map$SNP_file),
-            tokens
-        )
+        # One per region, never shared: the bug was every region reading
+        # block 1's panel back out of a single key.
+        expect_equal(length(unique(tokens)), nrow(payload$LD_map))
+        expect_equal(as.character(payload$LD_map$SNP_file), tokens)
+        # Whatever state the sentinels are in on this machine, the resolver
+        # leaves every region with a token that exists and its own panel.
+        resolved <- pecotmr:::.ctwasResolveLdPaths(payload)
+        live <- as.character(resolved$LD_map$LD_file)
+        expect_true(all(file.exists(live)))
+        expect_equal(length(unique(live)), nrow(payload$LD_map))
+        loader <- resolved$LD_loader_fun
+        panels <- pecotmr:::.ctwasCachedPanels(resolved)
+        for (i in seq_along(live)) {
+            expect_equal(
+                loader(live[[i]]),
+                pecotmr:::.ctwasPanelLd(panels[[i]])
+            )
+        }
     }
 })
 
@@ -3300,7 +3457,9 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
     screened <- suppressMessages(
         screenCtwasRegions(
             ctwasEstExample,
-            methodArgs = CtwasOptions(min_nonSNP_PIP = 0)
+            methodArgs = CtwasOptions(
+                screen = CtwasScreenOptions(min_nonSNP_PIP = 0)
+            )
         )
     )
     out <- suppressMessages(finemapCtwasRegions(screened))
@@ -3319,11 +3478,11 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
 
 test_that("ctwas LD assembly reports a missing LD sketch like everything else", {
     expect_error(
-        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        pecotmr:::.ctwasPanelFor(NULL),
         "carries no ldSketch"
     )
     expect_error(
-        pecotmr:::.ctwasComputeFullPanelLd("not a panel"),
+        pecotmr:::.ctwasPanelFor("not a panel"),
         "must be a genotype panel"
     )
 })
@@ -3334,7 +3493,7 @@ test_that("the shared validator gives ctwas and .ldFromSketch one message", {
         error = conditionMessage
     )
     own <- tryCatch(
-        pecotmr:::.ctwasComputeFullPanelLd(NULL),
+        pecotmr:::.ctwasPanelFor(NULL),
         error = conditionMessage
     )
     expect_equal(own, shared)
@@ -3631,7 +3790,7 @@ test_that(".ctwasBuildSingleRegionInfo reports an empty block accurately", {
     S4Vectors::mcols(emptyGr)$Z <- numeric(0)
     S4Vectors::mcols(emptyGr)$N <- integer(0)
     gss <- GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(emptyGr),
         genome = "hg19",
         blockId = "b1"
@@ -3658,7 +3817,7 @@ test_that(".ctwasBuildSingleRegionInfo reports an empty block accurately", {
         g
     }
     GwasSumStats(
-        study = c("G1", "G1"),
+        studyName = c("G1", "G1"),
         entry = list(mkGr("chr1", c(100L, 200L)), mkGr("chr1", c(300L, 400L))),
         genome = "hg19",
         blockId = c("b1", "b2"),
@@ -3668,7 +3827,7 @@ test_that(".ctwasBuildSingleRegionInfo reports an empty block accurately", {
 
 test_that(".ctwasFirstPass requires an LD reference on every region", {
     byBlock <- pecotmr:::.ctwasGwasByBlock(.ctp_noLdGwas())
-    expect_null(getLdSketch(byBlock[[1L]]))
+    expect_null(ldSketch(byBlock[[1L]]))
     expect_error(
         pecotmr:::.ctwasFirstPass("b1", byBlock, list(b1 = NULL)),
         "region 'b1' carries no ldSketch"
@@ -3705,7 +3864,7 @@ test_that(".ctwasTraitPosAt is bounded by the traitPos column length", {
         )
     )
     res <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(row),
         traitPos = GenomicRanges::GRanges("chr1", IRanges::IRanges(500, 900))

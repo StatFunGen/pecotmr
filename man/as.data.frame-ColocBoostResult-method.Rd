@@ -19,7 +19,7 @@ A data frame with one row per confidence set.
 \description{
 Returns the set-level view. New code should call the view it
   wants (\code{\link{colocViews}},
-  \code{\link{getColocBoostOutcomes}}).
+  \code{\link{colocBoostOutcomes}}).
 }
 \examples{
 methods::existsMethod("as.data.frame", "ColocBoostResult")

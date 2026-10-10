@@ -10,7 +10,7 @@ test_that("LdScore constructs and validates correctly", {
     obj <- LdScore(
         ldBlocks = ldblocks,
         snpInfo = snp_info,
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(runif(n), nrow = n, ncol = 1),
@@ -31,7 +31,7 @@ test_that("LdScore rejects ld_scores row mismatch with snp_info", {
             LdScore(
                 ldBlocks = ldblocks,
                 snpInfo = snp_info,
-                nRef = 500L,
+                nSamples = 500L,
                 inSample = FALSE,
                 genome = "hg19",
                 ldScores = matrix(0, nrow = 5, ncol = 1), # wrong rows
@@ -50,7 +50,7 @@ test_that("show(LdScore) does not error", {
     lsr <- LdScore(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(n),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(1, nrow = n, ncol = 1),
@@ -66,7 +66,7 @@ test_that("LdScore rejects weights that are not parallel to the variants", {
         LdScore(
             ldBlocks = makeTestLdBlocks(),
             snpInfo = makeTestSnpInfo(n),
-            nRef = 500L,
+            nSamples = 500L,
             inSample = FALSE,
             genome = "hg19",
             ldScores = matrix(runif(n), nrow = n, ncol = 1),
@@ -77,20 +77,20 @@ test_that("LdScore rejects weights that are not parallel to the variants", {
     )
 })
 
-test_that("getLdScoreWeights returns the per-variant weights", {
+test_that("mcols exposes the per-variant LD-score weights", {
     n <- 10
     w <- runif(n)
     obj <- LdScore(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(n),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(runif(n), nrow = n, ncol = 1),
         ldScoreWeights = w,
         ldMatrixList = list()
     )
-    expect_equal(getLdScoreWeights(obj), w)
+    expect_equal(mcols(obj)$ldScoreWeights, w)
 })
 
 test_that("validity requires the score columns to be present in mcols", {
@@ -100,7 +100,7 @@ test_that("validity requires the score columns to be present in mcols", {
     obj <- LdScore(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(n),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(runif(n), nrow = n, ncol = 1),
@@ -123,17 +123,17 @@ test_that("buildLdScore computes per-block sums of r^2", {
 
     expect_s4_class(ref, "LdScore")
     expect_equal(length(ref), 6L)
-    expect_equal(colnames(getLdScores(ref)), "base_l2")
+    expect_equal(colnames(mcols(ref)$ldScores), "base_l2")
     expect_equal(
-        as.vector(getLdScores(ref)[, 1]),
-        rowSums(unname(getCorrelation(ld))^2)
+        as.vector(mcols(ref)$ldScores[, 1]),
+        rowSums(unname(ldMatrix(ld))^2)
     )
 })
 
 test_that("buildLdScore scores each block against only its own variants", {
     ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
-    scores <- as.vector(getLdScores(buildLdScore(ld))[, 1])
-    perBlock <- unlist(map(getCorrelation(ld), function(R) rowSums(R^2)))
+    scores <- as.vector(mcols(buildLdScore(ld))$ldScores[, 1])
+    perBlock <- unlist(map(ldMatrix(ld), function(R) rowSums(R^2)))
 
     expect_equal(length(scores), 7L)
     expect_equal(scores, perBlock)
@@ -145,7 +145,7 @@ test_that("buildLdScore scores each block against only its own variants", {
 test_that("buildLdScore agrees with computeLdScores on the same reference", {
     for (ld in list(makeTestLdData(n = 6L), makeTestLdDataMultiBlock())) {
         expect_equal(
-            as.vector(getLdScores(buildLdScore(ld))[, 1]),
+            as.vector(mcols(buildLdScore(ld))$ldScores[, 1]),
             as.vector(computeLdScores(buildLdEigen(ld))[, 1])
         )
     }
@@ -153,14 +153,14 @@ test_that("buildLdScore agrees with computeLdScores on the same reference", {
 
 test_that("buildLdScore keeps per-block LD matrices for g-LDSC by default", {
     ld <- makeTestLdDataMultiBlock(sizes = c(4L, 3L))
-    mats <- getLdMatrixList(buildLdScore(ld))
+    mats <- ldMatrixList(buildLdScore(ld))
 
     expect_equal(length(mats), 2L)
     expect_equal(dim(mats[[1]]$R), c(4L, 4L))
     expect_equal(mats[[1]]$snpIdx, 1:4)
     expect_equal(mats[[2]]$snpIdx, 5:7)
     expect_equal(
-        length(getLdMatrixList(buildLdScore(ld, keepLdMatrices = FALSE))),
+        length(ldMatrixList(buildLdScore(ld, keepLdMatrices = FALSE))),
         0L
     )
 })
@@ -168,11 +168,11 @@ test_that("buildLdScore keeps per-block LD matrices for g-LDSC by default", {
 test_that("buildLdScore defaults weights to 1/max(l2, 1)", {
     ld <- makeTestLdData(n = 6L)
     ref <- buildLdScore(ld)
-    l2 <- as.vector(getLdScores(ref)[, 1])
-    expect_equal(getLdScoreWeights(ref), 1 / pmax(l2, 1))
+    l2 <- as.vector(mcols(ref)$ldScores[, 1])
+    expect_equal(mcols(ref)$ldScoreWeights, 1 / pmax(l2, 1))
 
     custom <- buildLdScore(ld, ldScoreWeights = rep(2, 6))
-    expect_equal(getLdScoreWeights(custom), rep(2, 6))
+    expect_equal(mcols(custom)$ldScoreWeights, rep(2, 6))
     expect_error(
         buildLdScore(ld, ldScoreWeights = rep(2, 3)),
         "ldScoreWeights.*Must have length 6, but has length 3"
@@ -187,7 +187,7 @@ test_that("buildLdScore: argument guards fire", {
         package = "pecotmr"
     )
     ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
-    expect_error(buildLdScore(ld, nRef = 0L), "nRef.*Must be >= 1")
+    expect_error(buildLdScore(ld, nSamples = 0L), "nSamples.*Must be >= 1")
     expect_error(buildLdScore(ld, inSample = NA), "inSample.*May not be NA")
     expect_error(
         buildLdScore(ld, keepLdMatrices = NA),

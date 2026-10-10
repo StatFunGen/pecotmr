@@ -5,7 +5,7 @@
 \title{Create a QtlFineMappingResult Collection}
 \usage{
 QtlFineMappingResult(
-  study,
+  studyName,
   context,
   trait,
   method,
@@ -18,7 +18,7 @@ QtlFineMappingResult(
 )
 }
 \arguments{
-\item{study}{Character vector of study identifiers (per tuple). Use the
+\item{studyName}{Character vector of study identifiers (per tuple). Use the
 sentinel \code{"joint"} for rows produced by a cross-study joint fit.}
 
 \item{context}{Character vector of context labels (per tuple). Use
@@ -65,6 +65,6 @@ tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
 fe <- fineMappingRow(
   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
-QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
+QtlFineMappingResult(studyName = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(fe))
 }

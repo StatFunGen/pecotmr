@@ -47,7 +47,7 @@ NULL
 #' }
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} object. Must be QC'd
-#'   (\code{length(getQcInfo(x)) > 0L}).
+#'   (\code{length(qcInfo(x)) > 0L}).
 #' @param twasWeights Optional \code{\link{TwasWeights}} carrying per-(study,
 #'   context, trait, method) weights. When supplied, drives the TWAS-Z
 #'   computation.
@@ -164,10 +164,10 @@ causalInferencePipeline <- function(
 #' @importFrom checkmate assertClass checkClass
 .cipValidateInputs <- function(gwasSumStats, twasWeights, fineMappingResult) {
     assertClass(gwasSumStats, "GwasSumStats")
-    if (length(getQcInfo(gwasSumStats)) == 0L) {
+    if (length(qcInfo(gwasSumStats)) == 0L) {
         msg <- glue(
             "causalInferencePipeline: gwasSumStats has no QC record ",
-            "(getQcInfo() is empty). Call summaryStatsQc() first."
+            "(qcInfo() is empty). Call summaryStatsQc() first."
         )
         abort(msg)
     }
@@ -200,17 +200,17 @@ causalInferencePipeline <- function(
 # returns the GWAS LD sketch.
 # @noRd
 .cipCheckLdSketches <- function(gwasSumStats, twasWeights, fineMappingResult) {
-    gwasLd <- getLdSketch(gwasSumStats)
+    gwasLd <- ldSketch(gwasSumStats)
     if (!is.null(twasWeights)) {
         .cipRequireMatchingLdSketches(
-            getLdSketch(twasWeights),
+            ldSketch(twasWeights),
             gwasLd,
             label = "twasWeights"
         )
     }
     if (!is.null(fineMappingResult)) {
         .cipRequireMatchingLdSketches(
-            getLdSketch(fineMappingResult),
+            ldSketch(fineMappingResult),
             gwasLd,
             label = "fineMappingResult"
         )
@@ -320,7 +320,7 @@ causalInferencePipeline <- function(
     weightsInfo <- .cipExtractWeights(
         twasWeights = twasWeights,
         fineMappingResult = fineMappingResult,
-        study = tuple$qStudy,
+        studyName = tuple$qStudy,
         context = tuple$qContext,
         trait = tuple$qTrait,
         method = tuple$qMethod,
@@ -363,9 +363,9 @@ causalInferencePipeline <- function(
     if (!hasTuple) {
         return(NULL)
     }
-    getFineMappingResult(
+    fineMappingResult(
         fineMappingResult,
-        study = qStudy,
+        studyName = qStudy,
         context = qContext,
         trait = qTrait,
         method = qMethod
@@ -386,9 +386,9 @@ causalInferencePipeline <- function(
     mrArgs
 ) {
     gStudy <- as.character(gwasSumStats$study)[[gi]]
-    gdf <- getSumStatsDf(
+    gdf <- as.data.frame(
         gwasSumStats,
-        study = gStudy,
+        studyName = gStudy,
         require = c("SNP", "Z")
     )
     twasOut <- .cipComputeTwasZ(
@@ -565,11 +565,18 @@ causalInferencePipeline <- function(
 # metric names; the first present is used. Returns NA when no usable metric.
 # @noRd
 #' @importFrom rlang try_fetch
-.cipCvMetric <- function(twasWeights, study, context, trait, method, which) {
+.cipCvMetric <- function(
+    twasWeights,
+    studyName,
+    context,
+    trait,
+    method,
+    which
+) {
     perf <- try_fetch(
-        getCvResult(
+        cvResult(
             twasWeights,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method
@@ -723,10 +730,15 @@ causalInferencePipeline <- function(
     if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
 }
 
-.cipFmrHasTuple <- function(fmr, study, context, trait, method) {
+.cipFmrHasTuple <- function(fmr, studyName, context, trait, method) {
     length(.matchTupleRows(
         fmr,
-        list(study = study, context = context, trait = trait, method = method)
+        list(
+            study = studyName,
+            context = context,
+            trait = trait,
+            method = method
+        )
     )) >
         0L
 }
@@ -739,16 +751,16 @@ causalInferencePipeline <- function(
 .cipExtractWeights <- function(
     twasWeights,
     fineMappingResult,
-    study,
+    studyName,
     context,
     trait,
     method,
     useFmr
 ) {
     ent <- if (!useFmr) {
-        .cipWeightsFromTwas(twasWeights, study, context, trait, method)
+        .cipWeightsFromTwas(twasWeights, studyName, context, trait, method)
     } else {
-        .cipWeightsFromFmr(fineMappingResult, study, context, trait, method)
+        .cipWeightsFromFmr(fineMappingResult, studyName, context, trait, method)
     }
     if (is.null(ent)) {
         return(NULL)
@@ -762,9 +774,15 @@ causalInferencePipeline <- function(
 
 # TwasWeights entry for a tuple (NULL when absent).
 # @noRd
-.cipWeightsFromTwas <- function(twasWeights, study, context, trait, method) {
+.cipWeightsFromTwas <- function(
+    twasWeights,
+    studyName,
+    context,
+    trait,
+    method
+) {
     tuple <- list(
-        study = study,
+        study = studyName,
         context = context,
         trait = trait,
         method = method
@@ -772,9 +790,9 @@ causalInferencePipeline <- function(
     if (length(.matchTupleRows(twasWeights, tuple)) == 0L) {
         return(NULL)
     }
-    getTwasWeights(
+    twasWeights(
         twasWeights,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = method
@@ -785,17 +803,19 @@ causalInferencePipeline <- function(
 # @noRd
 .cipWeightsFromFmr <- function(
     fineMappingResult,
-    study,
+    studyName,
     context,
     trait,
     method
 ) {
-    if (!.cipFmrHasTuple(fineMappingResult, study, context, trait, method)) {
+    if (
+        !.cipFmrHasTuple(fineMappingResult, studyName, context, trait, method)
+    ) {
         return(NULL)
     }
-    getFineMappingResult(
+    fineMappingResult(
         fineMappingResult,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = method
@@ -803,7 +823,7 @@ causalInferencePipeline <- function(
 }
 
 # Compute the per-tuple TWAS Z from a single GwasSumStats tuple's
-# unpacked data.frame (produced by getSumStatsDf upstream). Returns
+# unpacked data.frame (produced by as.data.frame upstream). Returns
 # NULL when the overlap is too small.
 .cipComputeTwasZ <- function(
     weights,
@@ -888,14 +908,20 @@ causalInferencePipeline <- function(
     if (length(m$idxA) == 0L) {
         return(.cipEmptyMrRatio())
     }
-    # Align the QTL exposure effect to the GWAS allele coding (sign = -1 on an
-    # allele swap) so the Wald ratio betaY / betaX has the correct sign.
-    betaX <- iv$betaX[m$idxA] * m$sign
-    seX <- iv$seX[m$idxA]
     gIdx <- m$idxB
     gZ <- gwasDf$z[gIdx]
     gN <- .cipGwasCol(gwasDf$N, gIdx)
     gMaf <- .cipGwasCol(gwasDf$maf, gIdx)
+    # Align the QTL exposure effect to the GWAS allele coding (sign = -1 on an
+    # allele swap) so the Wald ratio betaY / betaX has the correct sign, and
+    # put it on the same scale the outcome lands on.
+    exposure <- .cipMrExposureScale(
+        iv$betaX[m$idxA] * m$sign,
+        iv$seX[m$idxA],
+        .cipGwasHasScale(gMaf, gN)
+    )
+    betaX <- exposure$beta
+    seX <- exposure$se
     betaY <- .cipZToBeta(gZ, gMaf, gN)
     seY <- .cipZToSe(gZ, gMaf, gN)
     ratio <- betaY / betaX
@@ -928,8 +954,19 @@ causalInferencePipeline <- function(
 # Instrumental variables from a FineMappingRow's topLoci: variants with PIP >
 # pipCutoff. Returns list(ivVars, betaX, seX) or NULL when none qualify.
 # @noRd
+# The per-variant top-loci table of one entry. topLoci() returns ranges and
+# mcols() is exactly the pre-conversion table -- as.data.frame() on the
+# ranges would add the standard seqnames/start/end/width/strand columns the
+# MR column matching does not expect. Both instrument builders read through
+# here, so the equivalence is stated once and the tests have one seam to
+# substitute a controlled table at.
+# @noRd
+.cipTopLociTable <- function(fmrEntry) {
+    as.data.frame(S4Vectors::mcols(topLoci(fmrEntry)))
+}
+
 .cipMrInstruments <- function(fmrEntry, pipCutoff) {
-    tl <- getTopLoci(fmrEntry)
+    tl <- .cipTopLociTable(fmrEntry)
     if (is.null(tl) || nrow(tl) == 0L) {
         return(NULL)
     }
@@ -1025,7 +1062,7 @@ causalInferencePipeline <- function(
 # unit-SE-standardized (cs, pip, bhatX, sbhatX, bhatY, sbhatY) or NULL.
 # @noRd
 .cipCsAwareInstruments <- function(fmrEntry, gwasDf, alleleFlip) {
-    tl <- getTopLoci(fmrEntry)
+    tl <- .cipTopLociTable(fmrEntry)
     if (is.null(tl) || nrow(tl) == 0L) {
         return(NULL)
     }
@@ -1068,8 +1105,13 @@ causalInferencePipeline <- function(
 }
 
 # Match the exposure variants to the GWAS sumstats (allele-aware), derive the
-# outcome beta/se, and standardize the exposure to unit SE. Returns NULL when
+# outcome beta/se, and put the exposure on the same scale. Returns NULL when
 # nothing matches.
+#
+# The exposure used to be standardized to unit SE unconditionally, which left
+# csAware dividing a real-scale outcome by a z-scale exposure whenever the
+# GWAS did carry maf and N -- the mirror of the ivwPerVariant mismatch. It is
+# conditional now, on the same test the outcome conversion uses.
 # @noRd
 .cipCsAwareAlign <- function(raw, gwasDf, alleleFlip) {
     m <- matchVariants(raw$vids, gwasDf$variant_id, allowFlip = alleleFlip)
@@ -1080,13 +1122,16 @@ causalInferencePipeline <- function(
     gZ <- gwasDf$z[gIdx]
     gN <- .cipGwasCol(gwasDf$N, gIdx)
     gMaf <- .cipGwasCol(gwasDf$maf, gIdx)
-    # Standardize bhatX -> z; sbhatX -> 1 (legacy mrAnalysis rescaling).
-    bhatX <- (raw$bhatX[m$idxA] * m$sign) / raw$sbhatX[m$idxA]
+    exposure <- .cipMrExposureScale(
+        raw$bhatX[m$idxA] * m$sign,
+        raw$sbhatX[m$idxA],
+        .cipGwasHasScale(gMaf, gN)
+    )
     list(
         cs = raw$cs[m$idxA],
         pip = raw$pip[m$idxA],
-        bhatX = bhatX,
-        sbhatX = rep(1, length(bhatX)),
+        bhatX = exposure$beta,
+        sbhatX = exposure$se,
         bhatY = .cipZToBeta(gZ, gMaf, gN),
         sbhatY = .cipZToSe(gZ, gMaf, gN)
     )
@@ -1147,20 +1192,50 @@ causalInferencePipeline <- function(
 }
 
 
+# Whether the GWAS can be put on an effect-size scale at all, which needs
+# both maf and N. All-or-nothing per call, matching how the conversions below
+# behave.
+#
+# Stated once because three callers have to agree on it: the outcome beta, the
+# outcome se, and the EXPOSURE scaling. While the exposure had no such test,
+# a z-scale outcome was divided by a raw-scale QTL effect and the Wald ratio
+# came out inflated by 1/seX -- answers like -1094 +/- 1105 for a tight
+# instrument.
+# @noRd
+.cipGwasHasScale <- function(maf, n) {
+    !any(is.na(maf)) && !any(is.na(n))
+}
+
 # Derive beta / se from z using maf + n via the shared zToBetaSe() (model-exact
 # se = 1/sqrt(2*p*q*(N + z^2)), beta = z*se). Fall back to z as a beta surrogate
 # / se = 1 when maf or n is unavailable.
 .cipZToBeta <- function(z, maf, n) {
-    if (any(is.na(maf)) || any(is.na(n))) {
+    if (!.cipGwasHasScale(maf, n)) {
         return(z)
-    } # fall back to z as a beta surrogate when no maf/n
+    }
     .zToBetaSe(z, maf, n)$beta
 }
 .cipZToSe <- function(z, maf, n) {
-    if (any(is.na(maf)) || any(is.na(n))) {
+    if (!.cipGwasHasScale(maf, n)) {
         return(rep(1, length(z)))
     }
     .zToBetaSe(z, maf, n)$se
+}
+
+# The exposure on whatever scale the outcome ended up on. With maf and N both
+# sides are real effect sizes, so the Wald ratio is an effect-size ratio and
+# the raw QTL estimate is the one worth having. Without them the outcome is a
+# z with unit se, so the exposure standardizes to z as well.
+#
+# Both MR methods route through this, so neither can end up on a scale the
+# other is not on -- which is how ivwPerVariant paired a z outcome with a raw
+# exposure, and csAware a real-scale outcome with a standardized one.
+# @noRd
+.cipMrExposureScale <- function(beta, se, gwasHasScale) {
+    if (gwasHasScale) {
+        return(list(beta = beta, se = se))
+    }
+    list(beta = beta / se, se = rep(1, length(beta)))
 }
 
 # Fixed-effect inverse-variance-weighted (IVW) pooling of per-instrument

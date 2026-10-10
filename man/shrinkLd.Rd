@@ -4,12 +4,12 @@
 \alias{shrinkLd}
 \title{Apply LD Shrinkage}
 \usage{
-shrinkLd(R, nRef, shrinkageType = "wen_stephens", geneticMap = NULL)
+shrinkLd(R, nSamples, shrinkageType = "wen_stephens", geneticMap = NULL)
 }
 \arguments{
 \item{R}{Numeric matrix, sample LD correlation matrix.}
 
-\item{nRef}{Integer, reference panel sample size.}
+\item{nSamples}{Integer, reference panel sample size.}
 
 \item{shrinkageType}{Character, one of "wen_stephens", "constant".}
 

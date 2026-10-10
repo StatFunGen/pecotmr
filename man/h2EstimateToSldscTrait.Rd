@@ -7,7 +7,8 @@
 h2EstimateToSldscTrait(h2Est)
 }
 \arguments{
-\item{h2Est}{An \code{H2Estimate} object with enrichment and tauBlocks.}
+\item{h2Est}{An \code{H2Estimate} object with enrichment and
+\code{annotationJackknifeCoefs}.}
 }
 \value{
 A named list matching the format of \code{\link{readSldscTrait}}:
@@ -21,8 +22,8 @@ A named list matching the format of \code{\link{readSldscTrait}}:
     \item{propH2}{Named numeric vector of proportion of h2}
     \item{propSnps}{Named numeric vector of proportion of SNPs}
     \item{h2g}{Numeric scalar, global h2 estimate}
-    \item{tauBlocks}{Matrix (nBlocks x nCategories) for jackknife}
-    \item{nBlocks}{Integer, number of jackknife blocks}
+    \item{annotationJackknifeCoefs}{Matrix (nBlocks x nCategories) for
+  jackknife} \item{nBlocks}{Integer, number of jackknife blocks}
   }
 }
 \description{

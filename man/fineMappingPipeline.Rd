@@ -17,11 +17,11 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = GenotypeFilterParam(),
+  genotypeFilterParam = GenotypeFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
-  addSusieInf = TRUE,
-  credibleSetArgs = CredibleSetParam(),
+  initializeWithSusieInf = TRUE,
+  credibleSetParam = CredibleSetParam(),
   fineMappingResult = NULL,
   crossValidationArgs = CrossValidationParam(),
   residualizationArgs = ResidualizationParam(),
@@ -43,19 +43,19 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = GenotypeFilterParam(),
-  panelFilterArgs = PanelFilterParam(),
+  genotypeFilterParam = GenotypeFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
-  addSusieInf = TRUE,
-  credibleSetArgs = CredibleSetParam(),
+  initializeWithSusieInf = TRUE,
+  credibleSetParam = CredibleSetParam(),
   fineMappingResult = NULL,
   mrmashPrior = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
   crossValidationArgs = CrossValidationParam(),
   residualizationArgs = ResidualizationParam(),
   signalScreenArgs = SignalScreenParam(),
-  rssArgs = SusieRssParam(),
+  susieRssParam = SusieRssParam(),
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
@@ -70,15 +70,15 @@ fineMappingPipeline(data, ...)
   contexts = NULL,
   traitId = NULL,
   jointSpecification = NULL,
-  addSusieInf = TRUE,
-  credibleSetArgs = CredibleSetParam(),
+  initializeWithSusieInf = TRUE,
+  credibleSetParam = CredibleSetParam(),
   fineMappingResult = NULL,
   mrmashPrior = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
   verbose = 1,
   fitRetention = c("slim", "full"),
-  rssArgs = SusieRssParam(),
-  panelFilterArgs = PanelFilterParam(),
+  susieRssParam = SusieRssParam(),
+  panelFilterParam = PanelFilterParam(),
   crossValidationArgs = CrossValidationParam(),
   residualizationArgs = ResidualizationParam()
 )
@@ -86,13 +86,13 @@ fineMappingPipeline(data, ...)
 \S4method{fineMappingPipeline}{GwasSumStats}(
   data,
   methods,
-  addSusieInf = TRUE,
-  credibleSetArgs = CredibleSetParam(),
+  initializeWithSusieInf = TRUE,
+  credibleSetParam = CredibleSetParam(),
   fineMappingResult = NULL,
   verbose = 1,
   fitRetention = c("slim", "full"),
-  rssArgs = SusieRssParam(),
-  panelFilterArgs = PanelFilterParam(),
+  susieRssParam = SusieRssParam(),
+  panelFilterParam = PanelFilterParam(),
   crossValidationArgs = CrossValidationParam(),
   residualizationArgs = ResidualizationParam()
 )
@@ -137,7 +137,7 @@ with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
 position when extracting variants. Required when \code{traitId} is
 supplied. Mutually exclusive with \code{region}.}
 
-\item{genotypeFilterArgs}{Per-call overrides of the \code{QtlDataset}'s own
+\item{genotypeFilterParam}{Per-call overrides of the \code{QtlDataset}'s own
 filters, built with \code{\link{GenotypeFilterParam}}. A field left unset
 keeps the dataset's construct-time value, so
 \code{GenotypeFilterParam(mafCutoff = 0)} pins the cutoff at zero while
@@ -162,26 +162,28 @@ implementation is in progress and a non-NULL value currently errors with an
 informative message. See the design notes in \code{R/jointSpecification.R}
 for the accepted grammar.}
 
-\item{addSusieInf}{Logical. When \code{susieInf} is in \code{methods}
-alongside \code{susie} and/or \code{susieAsh}, whether the SuSiE-inf
-fit initialises the chained downstream method(s). Default \code{TRUE}.
-A choice between methods rather than a property of the credible sets,
-which is why it stands alone.}
+\item{initializeWithSusieInf}{Logical. When \code{susieInf} is in
+\code{methods} alongside \code{susie} and/or \code{susieAsh}, whether the
+SuSiE-inf fit initialises the chained downstream method(s). Default
+\code{TRUE}. A choice between methods rather than a property of the
+credible sets, which is why it stands alone.}
 
-\item{credibleSetArgs}{How credible sets are built and reported, built with
+\item{credibleSetParam}{How credible sets are built and reported, built with
   \code{\link{CredibleSetParam}}: \code{coverage} (default \code{0.95}),
   \code{secondaryCoverage} (\code{c(0.7, 0.5)}), \code{signalCutoff}
   (the PIP cutoff for top-loci selection, \code{0.025}),
   \code{minAbsCorr} (\code{0.8}) and \code{medianAbsCorr}
   (\code{NULL}) for purity --- a set is kept if it passes either, OR-logic
   --- and \code{includeAllCs}. \code{perCsColumns} adds the per-set
-  variant-level columns to \code{topLoci}. \code{L} bounds how many
-  credible sets can exist (default \code{10}) and \code{Lgreedy} the
-  greedy-L loop of the SuSiE-inf refinement.
+  variant-level columns to \code{topLoci}.
+  \code{maxNumSingleEffects} bounds how many credible sets can exist
+  (default \code{10}) and \code{maxNumSingleEffectsGreedy} the greedy
+  loop of the SuSiE-inf refinement.
 
   Most fields are read by \code{\link{postprocessFinemappingFits}}, so a
   stored fit can be re-summarized under different settings without
-  refitting. \code{L} / \code{Lgreedy} are the exception: they are seeded
+  refitting. \code{maxNumSingleEffects} /
+  \code{maxNumSingleEffectsGreedy} are the exception: they are seeded
   onto each SuSiE-family token's own arguments, so changing them needs a
   refit.}
 
@@ -276,19 +278,20 @@ phenotype/genotype data.}
 
 \item{fitRetention}{How much of each fit the \code{susieFit} slot keeps:
 \code{"slim"} (default) a trimmed view, or \code{"full"} the whole
-\code{susie()} return, so \code{getSusieFit()} and
-non-default-coverage \code{getCs()} queries can read the full posterior
+\code{susie()} return, so \code{susieFit()} and
+non-default-coverage \code{credibleSets()} queries can read the full
+posterior
 matrices. The per-variant \code{topLoci} table is fully populated
 either way --- its per-credible-set columns are governed by
 \code{credibleSet}'s \code{perCsColumns}, not by this.}
 
-\item{panelFilterArgs}{LD-reference-panel filters for the summary-statistics
+\item{panelFilterParam}{LD-reference-panel filters for the summary-statistics
 and GWAS methods, built with \code{\link{PanelFilterParam}}. See
 \emph{Panel filters on the RSS path} above.}
 
-\item{rssArgs}{Summary-statistics solver settings for \code{QtlSumStats} /
-\code{GwasSumStats} input, built with \code{\link{SusieRssParam}}:
-\itemize{
+\item{susieRssParam}{Summary-statistics solver settings for
+\code{QtlSumStats} / \code{GwasSumStats} input, built with
+\code{\link{SusieRssParam}}: \itemize{
   \item \code{serFallback} (default \code{FALSE}) --- after each
     multi-effect SuSiE-RSS fit, read susieR's finite-sample R
     diagnostics and, when
@@ -299,13 +302,13 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
     pre-fallback multi-effect fits to retain: only the regions that fell
     back, \code{"all"}, or \code{"none"}. Meaningful only with
     \code{serFallback}. The retained fit and the decision are read via
-    \code{getSusieFit(res)$multiEffectFit},
+    \code{susieFit(res)$multiEffectFit},
     \code{$R_reliability_flag} and \code{$serFallbackUsed}.
   \item \code{rFinite} --- finite-sample size for susieR's
     \code{R_finite} correction. \code{NULL} (default) uses susieR's
     own, except when a finite/EB mode is active (\code{serFallback} or
     \code{rMismatch != "none"}), where it falls back to the LD panel's
-    \code{getNSamples(ldSketch)}.
+    \code{nSamples(ldSketch)}.
   \item \code{rMismatch} (default \code{"none"}) --- LD-mismatch
     correction forwarded as \code{R_mismatch}: also \code{"eb"} or
     \code{"eb_mix"}.
@@ -378,7 +381,8 @@ S4-dispatched per-region fine-mapping entry point that
 \section{Chained initialisation}{
  When \code{susieInf} is requested alongside
   \code{susie} and/or \code{susieAsh} and
-  \code{addSusieInf = TRUE} (the default), the SuSiE-inf fit is computed
+  \code{initializeWithSusieInf = TRUE} (the default), the SuSiE-inf fit
+  is computed
   first and used as initialisation
   for the SuSiE / SuSiE-ash fits, mirroring the legacy
   \code{univariateAnalysisPipeline} / \code{susieRssPipeline} chained init
@@ -389,7 +393,7 @@ S4-dispatched per-region fine-mapping entry point that
 \section{QC contract}{
  All \code{QtlSumStats} and \code{GwasSumStats} inputs
   must have been QC'd via \code{\link{summaryStatsQc}}; the pipeline errors
-  on inputs where \code{length(getQcInfo(x)) == 0L}. \code{summaryStatsQc}
+  on inputs where \code{length(qcInfo(x)) == 0L}. \code{summaryStatsQc}
   also drops variants absent from the \code{ldSketch}, so by the time
   per-entry processing runs every variant is guaranteed to be present in the
   LD panel and a local LD matrix can be built with

@@ -16,7 +16,7 @@ assembleCtwasInputs(
 \arguments{
 \item{gwasSumStats}{A \code{\link{GwasSumStats}} whose elements are LD
 blocks (at least two), keyed by its \code{blockId} column, with
-\code{getQcInfo()} non-empty. Build it with
+\code{qcInfo()} non-empty. Build it with
 \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
 through \code{\link{summaryStatsQc}}.}
 
@@ -94,7 +94,7 @@ blocks <- GenomicRanges::GRanges("chr22",
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 gwasByRegion <- summaryStatsQc(gss,
-  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
+  panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
 }

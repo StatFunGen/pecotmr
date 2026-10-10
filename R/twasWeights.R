@@ -153,7 +153,7 @@ setClass(
 #' @description Construct a \code{TwasWeights} DFrame-subclass collection from
 #'   per-tuple vectors and a list of \code{TwasWeightsRow} payloads (one per
 #'   tuple).
-#' @param study Character vector of study identifiers. Use the sentinel
+#' @param studyName Character vector of study identifiers. Use the sentinel
 #'   \code{"joint"} for rows produced by a cross-study joint fit.
 #' @param context Character vector of context labels. Use \code{"joint"} for
 #'   rows produced by a cross-context joint fit.
@@ -177,15 +177,16 @@ setClass(
 #' @return A \code{TwasWeights} object.
 #' @examples
 #' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
-#'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
-#' tw <- TwasWeights(study = "s1", context = "brain", trait = "gene1",
+#'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
+#'   weightStandardized = FALSE)
+#' tw <- TwasWeights(studyName = "s1", context = "brain", trait = "gene1",
 #'   method = "susie", entry = list(twe))
 #' tw
 #' @importFrom checkmate assertCharacter assert checkList
 #' @importFrom checkmate checkClass
 #' @export
 TwasWeights <- function(
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -197,7 +198,7 @@ TwasWeights <- function(
     ldSketch = NULL
 ) {
     .twasAssertArgs(
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -206,11 +207,11 @@ TwasWeights <- function(
         jointContexts,
         jointTraits
     )
-    n <- .twasCheckRowLengths(study, context, trait, method, entry)
+    n <- .twasCheckRowLengths(studyName, context, trait, method, entry)
     entry <- map(entry, .asTwRowPayload)
     .checkRowPayloads(entry, "TwasWeightsRow", "TWAS-weight")
     cols <- .twasMetadataCols(
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -235,7 +236,7 @@ TwasWeights <- function(
 # SimpleList is S4 and fails checkList, so that one is an or-combination.
 # @noRd
 .twasAssertArgs <- function(
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -244,7 +245,7 @@ TwasWeights <- function(
     jointContexts,
     jointTraits
 ) {
-    assertCharacter(study, any.missing = FALSE)
+    assertCharacter(studyName, any.missing = FALSE)
     assertCharacter(context, any.missing = FALSE)
     assertCharacter(trait, any.missing = FALSE)
     assertCharacter(method, any.missing = FALSE)
@@ -262,7 +263,7 @@ TwasWeights <- function(
 # per-row payload columns, then the optional joint axes and trait position.
 # @noRd
 .twasMetadataCols <- function(
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -275,7 +276,7 @@ TwasWeights <- function(
 ) {
     baseCols <- c(
         list(
-            study = as.character(study),
+            study = as.character(studyName),
             context = as.character(context),
             trait = as.character(trait),
             method = as.character(method)
@@ -302,7 +303,7 @@ TwasWeights <- function(
 
 # @noRd
 .twPayloadStandardized <- function(p) {
-    getStandardized(p)
+    weightStandardized(p)
 }
 
 # Every `entry` must be a TwasWeightsRow. Checked before the payload is
@@ -312,8 +313,8 @@ TwasWeights <- function(
 
 # Require study/context/trait/method/entry to share one length; returns it.
 # @noRd
-.twasCheckRowLengths <- function(study, context, trait, method, entry) {
-    n <- length(study)
+.twasCheckRowLengths <- function(studyName, context, trait, method, entry) {
+    n <- length(studyName)
     if (
         length(context) != n ||
             length(trait) != n ||
@@ -357,49 +358,55 @@ TwasWeights <- function(
     abort(msg)
 }
 
-#' @rdname getRegion
+#' @rdname genomicRegion
 #' @export
-setMethod("getRegion", "TwasWeights", function(x) .getRegionColumn(x))
+setMethod("genomicRegion", "TwasWeights", function(x) .getRegionColumn(x))
 
-#' @rdname getTraitPosition
+#' @rdname traitPosition
 #' @export
-setMethod("getTraitPosition", "TwasWeights", function(x) {
+setMethod("traitPosition", "TwasWeights", function(x) {
     .getTraitPosColumn(x)
 })
 
+# Documented as `twasWeightsEntry`, not as `twasWeights`: man/ pages are
+# files, and on a case-insensitive filesystem `twasWeights.Rd` and the
+# constructor's `TwasWeights.Rd` are the same file, so whichever document()
+# writes second silently destroys the other. Do not "simplify" this @rdname
+# back to the generic's own name.
 #' @title Get a Single TWAS Weights Entry
 #' @description Return the \code{TwasWeightsRow} for one \code{(study,
 #'   context, trait, method)} row of a \code{TwasWeights} collection.
 #' @param x A \code{TwasWeights} object.
-#' @param study,context,trait,method Single character identifiers. All required
-#'   when the collection has more than one row; optional when the collection has
-#'   a single row.
+#' @param studyName,context,trait,method Single character identifiers. All
+#'   required when the collection has more than one row; optional when the
+#'   collection has a single row.
 #' @return A \code{TwasWeightsRow} object.
 #' @examples
 #' twe <- twasWeightsRow(
 #'   variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
-#'   cvResult = list(rsq = 0.5), standardized = FALSE)
-#' tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
+#'   cvResult = list(rsq = 0.5), weightStandardized = FALSE)
+#' tw <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(twe))
-#' getTwasWeights(tw, study = "s1", context = "brain", trait = "g1",
+#' twasWeights(tw, studyName = "s1", context = "brain", trait = "g1",
 #'   method = "susie")
+#' @rdname twasWeightsEntry
 #' @export
 setGeneric(
-    "getTwasWeights",
-    function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        standardGeneric("getTwasWeights")
+    "twasWeights",
+    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+        standardGeneric("twasWeights")
     }
 )
 
-#' @rdname getTwasWeights
+#' @rdname twasWeightsEntry
 #' @export
 setMethod(
-    "getTwasWeights",
+    "twasWeights",
     "TwasWeights",
-    function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
         idx <- .tupleSelectRow(
             x,
-            study,
+            studyName,
             context,
             trait,
             method,
@@ -421,19 +428,19 @@ setMethod(
 # element, the weights in that element's mcols, and the rest of the payload in
 # the collection's mcols. A tuple split across chromosomes owns several
 # elements, so they are stitched back into the single entry callers expect --
-# the same contract getSumStats() keeps.
+# the same contract sumStats() keeps.
 # @noRd
 
 # The row payload a (study, context, trait, method) selector pins.
 #
-# Read directly rather than via getTwasWeights(): that accessor returns a
+# Read directly rather than via twasWeights(): that accessor returns a
 # single-row collection, so routing the per-field accessors through it would
 # dispatch straight back into them.
 # @noRd
-.twrSelectRowParts <- function(x, study, context, trait, method) {
+.twrSelectRowParts <- function(x, studyName, context, trait, method) {
     idx <- .tupleSelectRow(
         x,
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -449,75 +456,103 @@ setMethod(
     "TwasWeights",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL
     ) {
         .twrRowResolveWeights(
-            .twrSelectRowParts(x, study, context, trait, method)
+            .twrSelectRowParts(x, studyName, context, trait, method)
         )
     }
 )
 
-#' @rdname getWeights
+# Adopts BiocGenerics' `weights` generic instead of a pecotmr-owned one. Its
+# first formal is `object`, not `x`, and the inherited default returned NULL
+# for these classes, so overriding it loses nothing. Documented as
+# `weights-methods` so no \alias{weights} competes with stats::weights.
+#' @title Get TWAS Weights
+#' @description Extract weights from a \code{TwasWeightsRow} or from one entry
+#'   of a \code{TwasWeights} collection.
+#' @param object A \code{TwasWeightsRow} or \code{TwasWeights}.
+#' @param ... Class-specific selection arguments.
+#' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
+#'   to this study; \code{NULL} matches all studies.
+#' @param context Character (length 1) or \code{NULL}. Restrict the selection to
+#'   this context; \code{NULL} matches all contexts.
+#' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
+#'   this trait; \code{NULL} matches all traits.
+#' @param method Character (length 1) or \code{NULL}. Restrict the selection to
+#'   this fine-mapping / weight method; \code{NULL} matches all methods.
+#' @return A numeric vector or matrix of weights.
+#' @examples
+#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+#'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
+#'   weightStandardized = FALSE)
+#' weights(twe)
+#' @importFrom BiocGenerics weights
+#' @rdname weights-methods
+#' @aliases weights-methods
 #' @export
 setMethod(
-    "getWeights",
+    "weights",
+    "TwasWeights",
+    function(
+        object,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL,
+        ...
+    ) {
+        weights(
+            .twrSelectRowParts(object, studyName, context, trait, method)
+        )
+    }
+)
+
+#' @rdname cvResult
+#' @export
+setMethod(
+    "cvResult",
     "TwasWeights",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL
     ) {
-        getWeights(.twrSelectRowParts(x, study, context, trait, method))
+        cvResult(.twrSelectRowParts(x, studyName, context, trait, method))
     }
 )
 
-#' @rdname getCvResult
+#' @rdname methodFits
 #' @export
 setMethod(
-    "getCvResult",
+    "methodFits",
     "TwasWeights",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL
     ) {
-        getCvResult(.twrSelectRowParts(x, study, context, trait, method))
+        methodFits(.twrSelectRowParts(x, studyName, context, trait, method))
     }
 )
 
-#' @rdname getFits
+#' @rdname weightStandardized
 #' @export
 setMethod(
-    "getFits",
+    "weightStandardized",
     "TwasWeights",
-    function(
-        x,
-        study = NULL,
-        context = NULL,
-        trait = NULL,
-        method = NULL
-    ) {
-        getFits(.twrSelectRowParts(x, study, context, trait, method))
-    }
-)
-
-#' @rdname getStandardized
-#' @export
-setMethod(
-    "getStandardized",
-    "TwasWeights",
-    function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
         isTRUE(
-            getStandardized(.twrSelectRowParts(
+            weightStandardized(.twrSelectRowParts(
                 x,
-                study,
+                studyName,
                 context,
                 trait,
                 method
@@ -526,55 +561,63 @@ setMethod(
     }
 )
 
-#' @rdname getDataType
+#' @rdname weightsDataType
 #' @export
 setMethod(
-    "getDataType",
+    "weightsDataType",
     "TwasWeights",
-    function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        getDataType(.twrSelectRowParts(x, study, context, trait, method))
+    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+        weightsDataType(.twrSelectRowParts(
+            x,
+            studyName,
+            context,
+            trait,
+            method
+        ))
     }
 )
 
-#' @rdname getVariantIds
+#' @rdname variantIds
 #' @export
 setMethod(
-    "getVariantIds",
+    "variantIds",
     "TwasWeights",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL
     ) {
         .twrPartsVariantIds(
-            .twrSelectRowParts(x, study, context, trait, method)
+            .twrSelectRowParts(x, studyName, context, trait, method)
         )
     }
 )
 
-#' @rdname getStudy
+#' @rdname studyName
 #' @export
-setMethod("getStudy", "TwasWeights", function(x) unique(as.character(x$study)))
+setMethod("studyName", "TwasWeights", function(x) unique(as.character(x$study)))
 
-#' @rdname getLdSketch
+#' @rdname ldSketch
 #' @export
-setMethod("getLdSketch", "TwasWeights", function(x) x@ldSketch)
+setMethod("ldSketch", "TwasWeights", function(x) x@ldSketch)
 
-#' @rdname getContexts
+#' @rdname contexts
 #' @export
-setMethod("getContexts", "TwasWeights", function(x) {
+setMethod("contexts", "TwasWeights", function(x) {
     unique(as.character(x$context))
 })
 
-#' @rdname getTraits
+#' @rdname traitNames
 #' @export
-setMethod("getTraits", "TwasWeights", function(x) unique(as.character(x$trait)))
+setMethod("traitNames", "TwasWeights", function(x) {
+    unique(as.character(x$trait))
+})
 
-#' @rdname getMethodNames
+#' @rdname methodNames
 #' @export
-setMethod("getMethodNames", "TwasWeights", function(x) {
+setMethod("methodNames", "TwasWeights", function(x) {
     unique(as.character(x$method))
 })
 
@@ -2175,10 +2218,10 @@ twasWeightsCv <- function(
     twasWeightsRow(
         variantIds = variantIds,
         weights = weights,
-        fits = fits,
+        methodFits = fits,
         cvResult = NULL,
-        standardized = ctx$standardized,
-        dataType = ctx$dataType
+        weightStandardized = ctx$standardized,
+        weightsDataType = ctx$dataType
     )
 }
 
@@ -2258,16 +2301,16 @@ twasWeightsCv <- function(
 #' @param verbose Integer controlling verbosity level: 0 = suppress all
 #'   messages, 1 = suppress external package messages (default), 2 = show all
 #'   messages including those from external packages.
-#' @param study Character. Study identity label recorded on the resulting
+#' @param studyName Character. Study identity label recorded on the resulting
 #'   weights.
 #' @param context Character. Context identity label recorded on the resulting
 #'   weights.
 #' @param trait Character. Trait identity label recorded on the resulting
 #'   weights.
-#' @param standardized Logical. Whether the supplied \code{X} / \code{Y} are
-#'   already standardized. Default \code{FALSE}.
-#' @param dataType Character or \code{NULL}. Data-type label recorded on the
-#'   weights (e.g. \code{"individual"}).
+#' @param weightStandardized Logical. Whether the supplied \code{X} / \code{Y}
+#'   are already standardized. Default \code{FALSE}.
+#' @param weightsDataType Character or \code{NULL}. Data-type label recorded on
+#'   the weights (e.g. \code{"individual"}).
 #' @param ldSketch A genotype panel (see \code{\link{readGenotypes}}) to
 #'   record on the weights as their LD sketch, or \code{NULL}.
 #' @param seed Integer or \code{NULL}. When supplied, seeds the main-process
@@ -2299,25 +2342,25 @@ learnTwasWeights <- function(
     X,
     Y,
     weightMethods,
-    study = "",
+    studyName = "",
     context = "",
     trait = "",
     numThreads = 1,
     fittedModels = NULL,
     fitRetention = c("none", "slim", "full"),
-    standardized = FALSE,
-    dataType = NULL,
+    weightStandardized = FALSE,
+    weightsDataType = NULL,
     ldSketch = NULL,
     verbose = 1,
     seed = NULL
 ) {
-    assertString(study)
+    assertString(studyName)
     assertString(context)
     assertString(trait)
     assertInt(numThreads)
     fitRetention <- arg_match(fitRetention)
-    assertFlag(standardized)
-    assertString(dataType, null.ok = TRUE)
+    assertFlag(weightStandardized)
+    assertString(weightsDataType, null.ok = TRUE)
     assertCount(verbose)
     assertInt(seed, null.ok = TRUE)
     # weightMethods is documented as a named list OR a character vector.
@@ -2330,14 +2373,14 @@ learnTwasWeights <- function(
         X = X,
         Y = Y,
         weightMethods = weightMethods,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         numThreads = numThreads,
         fittedModels = fittedModels,
         fitRetention = fitRetention,
-        standardized = standardized,
-        dataType = dataType,
+        weightStandardized = weightStandardized,
+        weightsDataType = weightsDataType,
         ldSketch = ldSketch,
         verbose = verbose,
         seed = seed
@@ -2444,14 +2487,14 @@ learnTwasWeights <- function(
     X,
     Y,
     weightMethods,
-    study,
+    studyName,
     context,
     trait,
     numThreads,
     fittedModels,
     fitRetention,
-    standardized,
-    dataType,
+    weightStandardized,
+    weightsDataType,
     ldSketch,
     verbose,
     seed
@@ -2470,12 +2513,12 @@ learnTwasWeights <- function(
         Y = Y,
         Xfiltered = Xfiltered,
         validColumns = validColumns,
-        study = study,
+        study = studyName,
         context = context,
         trait = trait,
         fitRetention = fitRetention,
-        standardized = standardized,
-        dataType = dataType,
+        standardized = weightStandardized,
+        dataType = weightsDataType,
         verbose = verbose,
         rngSeed = seed
     )
@@ -2496,7 +2539,7 @@ learnTwasWeights <- function(
 # @noRd
 .twasLearnResult <- function(rows, ldSketch) {
     TwasWeights(
-        study = rows$study,
+        studyName = rows$study,
         context = rows$context,
         trait = rows$trait,
         method = rows$method,
@@ -2541,8 +2584,9 @@ learnTwasWeights <- function(
 #' X <- multiTraitData$X[, 1:4]
 #' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:4))
 #' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
-#'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
-#' tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
+#'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
+#'   weightStandardized = FALSE)
+#' tw <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(twe))
 #' twasPredict(X, tw)
 #' @importFrom checkmate assert checkList checkClass
@@ -2610,7 +2654,7 @@ estimateSparsity <- function(weightResults) {
             )
             abort(msg)
         }
-        fit <- getFits(.twrRowParts(weightResults, idx[[1L]]))
+        fit <- methodFits(.twrRowParts(weightResults, idx[[1L]]))
         if (is.null(fit) || is.null(fit$pi)) {
             msg <- glue(
                 "mr.ash fit object not found. Run learnTwasWeights() with ",

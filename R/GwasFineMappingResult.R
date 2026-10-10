@@ -118,7 +118,7 @@ setClass(
 #'   own range, which is derived from the variants rather than stored, so it
 #'   cannot drift out of step with them and stays correct after
 #'   \code{\link{subsetRegion}}.
-#' @param study Character vector of study identifiers (per tuple).
+#' @param studyName Character vector of study identifiers (per tuple).
 #' @param method Character vector of fine-mapping method names (per tuple).
 #' @param entry List / \code{SimpleList} of \code{FineMappingRow} objects.
 #' @param blockId Optional character vector (per tuple) keying the external LD
@@ -137,27 +137,27 @@ setClass(
 #'   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
 #' fe <- fineMappingRow(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
-#' GwasFineMappingResult(study = "t1", method = "susie", entry = list(fe))
+#' GwasFineMappingResult(studyName = "t1", method = "susie", entry = list(fe))
 #' @export
 GwasFineMappingResult <- function(
-    study,
+    studyName,
     method,
     entry,
     blockId = NULL,
     traitPos = NULL,
     ldSketch = NULL
 ) {
-    n <- length(study)
+    n <- length(studyName)
     if (length(method) != n || length(entry) != n) {
         abort("`study`, `method`, and `entry` must all have the same length.")
     }
     entry <- map(entry, .asFmRowPayload)
     .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
     cols <- list(
-        study = as.character(study),
+        study = as.character(studyName),
         method = as.character(method),
-        susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
-        cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
+        susieFit = S4Vectors::SimpleList(map(entry, susieFit)),
+        cvResult = S4Vectors::SimpleList(map(entry, cvResult))
     ) |>
         .appendBlockIdCol(blockId, n) |>
         .appendTraitPosCol(traitPos, n)
@@ -165,7 +165,7 @@ GwasFineMappingResult <- function(
     # Each entry's variants become one ELEMENT, its topLoci that element's
     # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
     # splits by chromosome with its metadata row replicated.
-    split <- .rtlSplitBySeqname(map(entry, rowVariants))
+    split <- .rtlSplitBySeqname(map(entry, variants))
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
     grl <- S4Vectors::`mcols<-`(
         GenomicRanges::GRangesList(split$entry),
@@ -188,38 +188,38 @@ GwasFineMappingResult <- function(
 # GwasFineMappingResult has no context / trait columns; the generic
 # returns NULL so callers can write generic code that handles either
 # class without conditionals.
-#' @rdname getContexts
+#' @rdname contexts
 #' @export
-setMethod("getContexts", "GwasFineMappingResult", function(x) NULL)
+setMethod("contexts", "GwasFineMappingResult", function(x) NULL)
 
-#' @rdname getTraits
+#' @rdname traitNames
 #' @export
-setMethod("getTraits", "GwasFineMappingResult", function(x) NULL)
+setMethod("traitNames", "GwasFineMappingResult", function(x) NULL)
 
 # Per-tuple lookup keyed by (study, method, blockId). The generic
 # accepts the full set of selectors; `context` / `trait` are QTL-only and a
 # GwasFineMappingResult refuses them rather than ignoring them, the same way
-# getSumStats(GwasSumStats) does. `region` is the per-block disambiguator
+# sumStats(GwasSumStats) does. `region` is the per-block disambiguator
 # for multi-block genome-wide collections.
-#' @rdname getFineMappingResult
+#' @rdname fineMappingResult
 #' @export
 setMethod(
-    "getFineMappingResult",
+    "fineMappingResult",
     "GwasFineMappingResult",
-    function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
         .gwasFmrRefuseQtlSelectors(context, trait)
-        x[.tupleSelectRowGwasFmr(x, study, method)]
+        x[.tupleSelectRowGwasFmr(x, studyName, method)]
     }
 )
 
-#' @rdname getPip
+#' @rdname pip
 #' @export
 setMethod(
-    "getPip",
+    "pip",
     "GwasFineMappingResult",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -227,7 +227,7 @@ setMethod(
         returnList = FALSE
     ) {
         .gwasFmrRefuseQtlSelectors(context, trait)
-        idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+        idx <- .tupleSelectRowGwasFmr(x, studyName, method, region)
         pip <- .fmrRowPip(.fmrRowParts(x, idx))
         if (!isTRUE(returnList)) {
             return(pip)
@@ -273,15 +273,15 @@ setMethod(
     !is.null(v) && !all(is.na(v))
 }
 
-# Row selector for the base delegating accessors (getCs / getTopLoci /
-# getMarginalEffects / getSusieFit / getVariantIds live on
+# Row selector for the base delegating accessors (credibleSets / topLoci /
+# marginalEffects / susieFit / variantIds live on
 # FineMappingResultBase, AllClasses.R). The Gwas selector threads `region`.
 setMethod(
     ".fmrSelectEntry",
     "GwasFineMappingResult",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -292,7 +292,7 @@ setMethod(
         # as the VCF writer thread a whole selector record through it
         # without knowing the class. The user-facing entry points are where
         # a QTL-only selector is a mistake worth reporting.
-        .fmrRowParts(x, .tupleSelectRowGwasFmr(x, study, method, region))
+        .fmrRowParts(x, .tupleSelectRowGwasFmr(x, studyName, method, region))
     }
 )
 

@@ -6,7 +6,7 @@ test_that("GwasFineMappingResult: builds a collection keyed by 2-tuple", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(3)
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(e1, e2)
     )
@@ -15,31 +15,31 @@ test_that("GwasFineMappingResult: builds a collection keyed by 2-tuple", {
 })
 
 test_that("GwasFineMappingResult: region is derived from the variants", {
-    # getRegion() reports the element's REALIZED variant span, not a nominal
+    # genomicRegion() reports the element's REALIZED variant span, not a nominal
     # window parsed out of blockId. A stored window had no correct update
     # rule under subsetRegion() and would quietly go stale; the span is in
     # sync by construction.
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- GwasFineMappingResult(
-        study = c("g1", "g1"),
+        studyName = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("chr1_1_500", "chr2_600_900"),
         entry = list(e1, e2)
     )
-    reg <- getRegion(res)
+    reg <- genomicRegion(res)
     expect_equal(as.character(GenomicRanges::seqnames(reg)), c("chr1", "chr1"))
     expect_equal(GenomicRanges::start(reg), c(100L, 100L))
     expect_equal(GenomicRanges::end(reg), c(300L, 200L))
     # A synthetic blockId no longer produces a chrUn sentinel: with the span
     # derived from the variants there is nothing to fabricate.
     res2 <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(e1)
     )
     expect_equal(
-        as.character(GenomicRanges::seqnames(getRegion(res2))),
+        as.character(GenomicRanges::seqnames(genomicRegion(res2))),
         "chr1"
     )
 })
@@ -53,7 +53,7 @@ test_that("GwasFineMappingResult: validity does not recurse on key subset (#546)
     # "missing columns: entry".
     e <- .sc_makeFineMappingRow(3)
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(e)
     )
@@ -71,7 +71,7 @@ test_that("GwasFineMappingResult: errors on length mismatch", {
     e <- .sc_makeFineMappingRow(3)
     expect_error(
         GwasFineMappingResult(
-            study = c("g1", "g2"),
+            studyName = c("g1", "g2"),
             method = c("susie"),
             entry = list(e)
         ),
@@ -88,7 +88,7 @@ test_that("GwasFineMappingResult: same (study, method), other ranges", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(3, offset = 10000L)
     res <- GwasFineMappingResult(
-        study = c("g1", "g1"),
+        studyName = c("g1", "g1"),
         method = c("susie", "susie"),
         entry = list(e1, e2)
     )
@@ -109,7 +109,7 @@ test_that("GwasFineMappingResult: rejects two rows covering the same range", {
     e2 <- .sc_makeFineMappingRow(3)
     expect_error(
         GwasFineMappingResult(
-            study = c("g1", "g1"),
+            studyName = c("g1", "g1"),
             method = c("susie", "susie"),
             blockId = c("chr22_1_100", "chr22_200_300"),
             entry = list(e1, e2)
@@ -124,7 +124,7 @@ test_that("GwasFineMappingResult: errors when blockId length mismatches", {
     e2 <- .sc_makeFineMappingRow(3)
     expect_error(
         GwasFineMappingResult(
-            study = c("g1", "g1"),
+            studyName = c("g1", "g1"),
             method = c("susie", "susie"),
             blockId = "only_one",
             entry = list(e1, e2)
@@ -137,7 +137,7 @@ test_that("GwasFineMappingResult: errors when blockId length mismatches", {
 test_that("GwasFineMappingResult: show prints summary", {
     e <- .sc_makeFineMappingRow(3)
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(e)
     )
@@ -152,7 +152,7 @@ test_that("GwasFineMappingResult: show prints summary", {
 
 test_that("show.GwasFineMappingResult prints (study, method) summary", {
     res <- GwasFineMappingResult(
-        study = c("g1", "g1"),
+        studyName = c("g1", "g1"),
         method = c("susie", "susieRss"),
         entry = list(.sh_makeFmEntry(), .sh_makeFmEntry())
     )
@@ -165,7 +165,7 @@ test_that("show.GwasFineMappingResult prints (study, method) summary", {
 
 test_that("show.GwasFineMappingResult reports the ldSketch source when present", {
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(.sh_makeFmEntry()),
         ldSketch = .sh_makeGenotypeHandle()
@@ -177,63 +177,63 @@ test_that("show.GwasFineMappingResult reports the ldSketch source when present",
 
 # === Tests migrated from test_collectionAccessors.R (GwasFineMappingResult) ===
 
-test_that("GwasFineMappingResult: getPip with study/method selectors", {
+test_that("GwasFineMappingResult: pip with study/method selectors", {
     e1 <- .ca_makeFmEntry(3)
     e2 <- .ca_makeFmEntry(4)
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(e1, e2)
     )
-    pip <- getPip(res, study = "g2", method = "susie")
+    pip <- pip(res, studyName = "g2", method = "susie")
     expect_equal(length(pip), 4L)
 })
 
 
-test_that("GwasFineMappingResult: getContexts/getTraits return NULL", {
+test_that("GwasFineMappingResult: contexts/traitNames return NULL", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(e)
     )
-    expect_null(getContexts(res))
-    expect_null(getTraits(res))
+    expect_null(contexts(res))
+    expect_null(traitNames(res))
 })
 
 
-test_that("GwasFineMappingResult: getCs/getTopLoci/getSusieFit/getVariantIds dispatch", {
+test_that("GwasFineMappingResult: credibleSets/topLoci/susieFit/variantIds dispatch", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(e)
     )
-    expect_equal(nrow(getCs(res)), 2L)
-    # getTopLoci returns the projected posterior view (filtered by default
+    expect_equal(nrow(credibleSets(res)), 2L)
+    # topLoci returns the projected posterior view (filtered by default
     # signalCutoff = 0.025; .ca_makeTopLoci sets all pip > 0.025 so all rows
     # survive). Compare on the projected shape, not the slot's raw shape.
-    tl <- getTopLoci(res, signalCutoff = 0)
-    expect_equal(nrow(tl), 3L)
+    tl <- topLoci(res, signalCutoff = 0)
+    expect_equal(length(tl), 3L)
     expect_equal(tl$variant_id, .ca_makeTopLoci(3)$variant_id)
-    expect_equal(getSusieFit(res), list(payload = "fit_n=3"))
-    expect_equal(length(getVariantIds(res)), 3L)
+    expect_equal(susieFit(res), list(payload = "fit_n=3"))
+    expect_equal(length(variantIds(res)), 3L)
 })
 
-test_that("GwasFineMappingResult: getTopLoci aggregates per-block rows genome-wide", {
+test_that("GwasFineMappingResult: topLoci aggregates per-block rows genome-wide", {
     # A genome-wide collection: same (study, method) across two region blocks.
-    # With no selectors getTopLoci now stacks both blocks, tagging each variant
+    # With no selectors topLoci now stacks both blocks, tagging each variant
     # with its blockId; context/trait are NA-filled (GWAS keys on region).
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- GwasFineMappingResult(
-        study = c("g1", "g1"),
+        studyName = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("chr1:1-100", "chr1:200-300"),
         entry = list(e1, e2)
     )
-    agg <- getTopLoci(res, signalCutoff = 0)
-    expect_equal(nrow(agg), 5L)
+    agg <- topLoci(res, signalCutoff = 0)
+    expect_equal(length(agg), 5L)
     expect_equal(
         agg$blockId,
         c(
@@ -246,40 +246,40 @@ test_that("GwasFineMappingResult: getTopLoci aggregates per-block rows genome-wi
     )
     expect_true(all(is.na(agg$context)))
     expect_true(all(is.na(agg$trait)))
-    expect_true("variant_id" %in% names(agg))
+    expect_true("variant_id" %in% names(S4Vectors::mcols(agg)))
 })
 
-test_that("GwasFineMappingResult: getTopLoci region= selects a single block", {
+test_that("GwasFineMappingResult: topLoci region= selects a single block", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- GwasFineMappingResult(
-        study = c("g1", "g1"),
+        studyName = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("chr1:1-100", "chr1:200-300"),
         entry = list(e1, e2)
     )
     # region= pins one row, so this hits the single-entry fast path (bare table).
-    tl <- getTopLoci(
+    tl <- topLoci(
         res,
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         region = "chr1:200-300",
         signalCutoff = 0
     )
-    expect_equal(nrow(tl), 2L)
-    expect_false("blockId" %in% names(tl))
+    expect_equal(length(tl), 2L)
+    expect_false("blockId" %in% names(S4Vectors::mcols(tl)))
 })
 
-test_that("GwasFineMappingResult: getCs aggregates CS across blocks", {
+test_that("GwasFineMappingResult: credibleSets aggregates CS across blocks", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- GwasFineMappingResult(
-        study = c("g1", "g1"),
+        studyName = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("chr1:1-100", "chr1:200-300"),
         entry = list(e1, e2)
     )
-    cs <- getCs(res)
+    cs <- credibleSets(res)
     expect_equal(nrow(cs), 4L) # 2 CS members per block
     expect_equal(
         cs$blockId,
@@ -287,7 +287,7 @@ test_that("GwasFineMappingResult: getCs aggregates CS across blocks", {
     )
     expect_true(all(is.na(cs$context)))
     # region= pins one block -> bare table
-    bare <- getCs(res, study = "g1", method = "susie", region = "chr1:1-100")
+    bare <- credibleSets(res, studyName = "g1", method = "susie", region = "chr1:1-100")
     expect_false("blockId" %in% names(bare))
 })
 
@@ -295,42 +295,42 @@ test_that("GwasFineMappingResult: getCs aggregates CS across blocks", {
 test_that("GwasFineMappingResult: .tupleSelectRowGwasFmr requires both selectors for multi-row", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(e, e)
     )
-    expect_error(getPip(res), "Pass `study` and `method`")
+    expect_error(pip(res), "Pass `study` and `method`")
     expect_error(
-        getPip(res, study = c("g1", "g2"), method = "susie"),
+        pip(res, studyName = c("g1", "g2"), method = "susie"),
         "Must have length 1"
     )
-    expect_error(getPip(res, study = "ghost", method = "susie"), "No entry for")
+    expect_error(pip(res, studyName = "ghost", method = "susie"), "No entry for")
 })
 
 
-test_that("GwasFineMappingResult: getStudy/getMethodNames inherit from base", {
+test_that("GwasFineMappingResult: studyName/methodNames inherit from base", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susieRss"),
         entry = list(e, e)
     )
-    expect_setequal(getStudy(res), c("g1", "g2"))
-    expect_setequal(getMethodNames(res), c("susie", "susieRss"))
+    expect_setequal(studyName(res), c("g1", "g2"))
+    expect_setequal(methodNames(res), c("susie", "susieRss"))
 })
 
 
-test_that("GwasFineMappingResult: getMarginalEffects with study/method selectors", {
+test_that("GwasFineMappingResult: marginalEffects with study/method selectors", {
     e1 <- .ca_makeFmEntry(3)
     e2 <- .ca_makeFmEntry(4)
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(e1, e2)
     )
     # Collection-level selection picks the g2 entry, then delegates to the
     # entry-level getMarginalEffects.
-    me <- getMarginalEffects(res, study = "g2", method = "susie")
+    me <- marginalEffects(res, studyName = "g2", method = "susie")
     expect_s3_class(me, "data.frame")
     expect_equal(nrow(me), 4L)
     expect_true(all(c("variant_id", "beta", "se", "z", "p") %in% names(me)))
@@ -346,7 +346,7 @@ test_that("GwasFineMappingResult: getMarginalEffects with study/method selectors
 
 test_that("validity names a missing identity column", {
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(.sc_makeFineMappingRow(3), .sc_makeFineMappingRow(3))
     )
@@ -360,7 +360,7 @@ test_that("validity names a missing identity column", {
 
 test_that("validity names a missing entry payload column", {
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(.sc_makeFineMappingRow(3))
     )
@@ -372,21 +372,21 @@ test_that("validity names a missing entry payload column", {
     )
 })
 
-test_that("GwasFineMappingResult: getPip(returnList) keys by study|method", {
+test_that("GwasFineMappingResult: pip(returnList) keys by study|method", {
     # Documented as "a per-entry list keyed by identity tuple". The QTL
     # method always honoured it; this one used to ignore the flag and hand
     # back the flat vector, so the list branch had no test.
     res <- GwasFineMappingResult(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(.ca_makeFmEntry(3), .ca_makeFmEntry(4))
     )
-    got <- getPip(res, study = "g2", method = "susie", returnList = TRUE)
+    got <- pip(res, studyName = "g2", method = "susie", returnList = TRUE)
     expect_type(got, "list")
     expect_named(got, "g2|susie")
     expect_equal(length(got[["g2|susie"]]), 4L)
     # The flat vector is still what you get without the flag.
-    expect_false(is.list(getPip(res, study = "g2", method = "susie")))
+    expect_false(is.list(pip(res, studyName = "g2", method = "susie")))
 })
 
 test_that("GwasFineMappingResult: context / trait selectors are refused", {
@@ -394,27 +394,27 @@ test_that("GwasFineMappingResult: context / trait selectors are refused", {
     # but a GWAS collection has no such axis, so asking is a mistake rather
     # than a silent no-op.
     res <- GwasFineMappingResult(
-        study = "g1",
+        studyName = "g1",
         method = "susie",
         entry = list(.ca_makeFmEntry(3))
     )
     expect_error(
-        getPip(res, study = "g1", method = "susie", context = "brain"),
+        pip(res, studyName = "g1", method = "susie", context = "brain"),
         "has no context or trait axis"
     )
     expect_error(
-        getPip(res, study = "g1", method = "susie", context = "brain"),
+        pip(res, studyName = "g1", method = "susie", context = "brain"),
         "`context` does not select anything"
     )
     expect_error(
-        getPip(res, study = "g1", method = "susie", trait = "ENSG_A"),
+        pip(res, studyName = "g1", method = "susie", trait = "ENSG_A"),
         "`trait` does not select anything"
     )
     # Both at once: the message pluralises rather than naming one.
     expect_error(
-        getPip(
+        pip(
             res,
-            study = "g1",
+            studyName = "g1",
             method = "susie",
             context = "brain",
             trait = "ENSG_A"
@@ -424,9 +424,9 @@ test_that("GwasFineMappingResult: context / trait selectors are refused", {
     # NA is an absence, not a request: callers threading a whole
     # (study, context, trait, method) record fill absent axes with NA.
     expect_equal(
-        length(getPip(
+        length(pip(
             res,
-            study = "g1",
+            studyName = "g1",
             method = "susie",
             context = NA,
             trait = NA

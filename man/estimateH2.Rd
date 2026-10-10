@@ -20,7 +20,7 @@ estimateH2(
   method = "lder",
   annotations = NULL,
   local = FALSE,
-  study = NULL,
+  studyName = NULL,
   estimatorArgs = list()
 )
 }
@@ -56,8 +56,8 @@ unstratified estimation.}
 
 \item{...}{Additional method-specific arguments.}
 
-\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
-this study; \code{NULL} matches all studies.}
+\item{studyName}{Character (length 1) or \code{NULL}. Restrict the selection
+to this study; \code{NULL} matches all studies.}
 
 \item{estimatorArgs}{Optional named list of estimator-specific options
 (\code{lambda} for lder / gldsc / hdl, \code{nIter} for sldsc).}
@@ -85,7 +85,8 @@ S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
 panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr")
 )
-ss <- GwasSumStats(study = "trait1", entry = list(gr),
-  genome = getGenome(ldScoreExample), ldSketch = panel)
+ss <- GwasSumStats(studyName = "trait1", entry = list(gr),
+  genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
+  ldSketch = panel)
 estimateH2(ss, ldScoreExample, method = "sldsc")
 }

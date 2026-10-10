@@ -5,7 +5,7 @@
 \title{Create a TwasWeights Collection Object}
 \usage{
 TwasWeights(
-  study,
+  studyName,
   context,
   trait,
   method,
@@ -18,7 +18,7 @@ TwasWeights(
 )
 }
 \arguments{
-\item{study}{Character vector of study identifiers. Use the sentinel
+\item{studyName}{Character vector of study identifiers. Use the sentinel
 \code{"joint"} for rows produced by a cross-study joint fit.}
 
 \item{context}{Character vector of context labels. Use \code{"joint"} for
@@ -59,8 +59,9 @@ Construct a \code{TwasWeights} DFrame-subclass collection from
 }
 \examples{
 twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
-  weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
-tw <- TwasWeights(study = "s1", context = "brain", trait = "gene1",
+  weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
+  weightStandardized = FALSE)
+tw <- TwasWeights(studyName = "s1", context = "brain", trait = "gene1",
   method = "susie", entry = list(twe))
 tw
 }

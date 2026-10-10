@@ -5,14 +5,15 @@
 \title{Create a CtwasResultEntry}
 \usage{
 CtwasResultEntry(
-  finemap = NULL,
+  posteriors = NULL,
   susieAlpha = NULL,
   groupPriors = NULL,
   regionInfo = NULL
 )
 }
 \arguments{
-\item{finemap}{The per-gene (and, when SNPs are retained, per-SNP) posterior
+\item{posteriors}{The per-gene (and, when SNPs are retained,
+per-SNP) posterior
 summary table (\code{ctwas::finemap_regions} \code{finemap_res} shape), or
 \code{NULL}.}
 
@@ -37,7 +38,7 @@ Per-run cTWAS payload wrapping the fine-mapping posterior table,
 }
 \examples{
 cre <- CtwasResultEntry(
-  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
   susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
 cre
 }

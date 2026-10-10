@@ -8,7 +8,7 @@ LdEigen(
   snpInfo,
   eigenList,
   ldBlocks,
-  nRef,
+  nSamples,
   inSample = FALSE,
   genome = NA_character_,
   eigenvalueTruncation = 1
@@ -22,7 +22,7 @@ LdEigen(
 
 \item{ldBlocks}{A \code{GRanges} of LD block intervals.}
 
-\item{nRef}{Integer, sample size of the LD reference panel.}
+\item{nSamples}{Integer, sample size of the LD reference panel.}
 
 \item{inSample}{Logical, whether the reference is the GWAS cohort.}
 
@@ -47,7 +47,7 @@ mkBlock <- function(idx) list(values = rep(1, length(idx)),
   vectors = diag(length(idx)), snpIdx = idx)
 le <- LdEigen(snpInfo = snpInfo,
   eigenList = list(mkBlock(1:2), mkBlock(3:4)),
-  ldBlocks = blocks, nRef = 100L, genome = "hg19")
+  ldBlocks = blocks, nSamples = 100L, genome = "hg19")
 length(le)
-length(getEigenList(le))
+length(eigenList(le))
 }

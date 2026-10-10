@@ -4,7 +4,16 @@
 \alias{bayesNWeights}
 \title{BayesN TWAS weights (Gaussian prior, ridge-equivalent)}
 \usage{
-bayesNWeights(X, y, Z = NULL, methodArgs = QggOptions())
+bayesNWeights(
+  X,
+  y,
+  Z = NULL,
+  h2 = NULL,
+  nit = 5000,
+  nburn = 1000,
+  nthin = 5,
+  methodArgs = QggOptions()
+)
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -12,6 +21,16 @@ bayesNWeights(X, y, Z = NULL, methodArgs = QggOptions())
 \item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
 
 \item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
+
+\item{h2}{Numeric or \code{NULL}. Prior heritability; \code{NULL}
+leaves the engine's own default.}
+
+\item{nit}{Integer. Total MCMC iterations. Default \code{5000}.}
+
+\item{nburn}{Integer. Burn-in iterations. Default \code{1000}.}
+
+\item{nthin}{Integer. Thinning interval for retained MCMC samples.
+Default \code{5}.}
 
 \item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
 with \code{\link{QggOptions}}. A bare list is refused: it cannot be

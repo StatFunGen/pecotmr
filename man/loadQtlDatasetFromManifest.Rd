@@ -6,11 +6,11 @@
 \usage{
 loadQtlDatasetFromManifest(
   manifest,
-  study = NULL,
+  studyName = NULL,
   genotypes = NULL,
   genotypeCovariates = NULL,
   scaleResiduals = TRUE,
-  genotypeFilterArgs = GenotypeFilterParam(),
+  genotypeFilterParam = GenotypeFilterParam(),
   transposeCovariates = FALSE
 )
 }
@@ -22,7 +22,7 @@ loadQtlDatasetFromManifest(
 single-valued \code{study} / \code{genotypePath} /
 \code{genotypeCovariatePath}.}
 
-\item{study}{Study identifier; reconciled with a \code{study} column.}
+\item{studyName}{Study identifier; reconciled with a \code{study} column.}
 
 \item{genotypes}{A genotype panel (see \code{\link{readGenotypes}}) or
 a genotype path/prefix; reconciled with a \code{genotypePath} column.}
@@ -32,7 +32,7 @@ to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.}
 
 \item{scaleResiduals}{Pass-through \code{\link{QtlDataset}} argument.}
 
-\item{genotypeFilterArgs}{Pass-through \code{\link{QtlDataset}} filtering
+\item{genotypeFilterParam}{Pass-through \code{\link{QtlDataset}} filtering
 options, built with \code{\link{GenotypeFilterParam}} and stored as lazy
 QC slots.}
 
@@ -53,5 +53,5 @@ d <- system.file("extdata", "qtl_mini", package = "pecotmr")
 manifest <- data.frame(context = "brain",
   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
   study = "s1", genotypePath = file.path(d, "example.chr22"))
-loadQtlDatasetFromManifest(manifest = manifest, study = "s1")
+loadQtlDatasetFromManifest(manifest = manifest, studyName = "s1")
 }

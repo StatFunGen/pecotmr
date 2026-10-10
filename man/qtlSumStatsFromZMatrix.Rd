@@ -6,7 +6,7 @@
 \usage{
 qtlSumStatsFromZMatrix(
   z,
-  study,
+  studyName,
   ldSketch = NULL,
   context = colnames(z),
   trait = "mash",
@@ -22,7 +22,7 @@ qtlSumStatsFromZMatrix(
 variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
 conditions.}
 
-\item{study}{Study identifier (recycled across conditions).}
+\item{studyName}{Study identifier (recycled across conditions).}
 
 \item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}})
 embedded in the collection, or \code{NULL} (default) -- mash operates
@@ -68,6 +68,6 @@ panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 z <- matrix(rnorm(6), 2, 3, dimnames = list(
   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = panel,
+qtlSumStatsFromZMatrix(z = z, studyName = "s1", ldSketch = panel,
   context = colnames(z), trait = "g1", genome = "hg38", n = 100)
 }

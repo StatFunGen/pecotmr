@@ -47,10 +47,12 @@ apply once \code{filterLbfCs} or \code{secondary} selects another.}
 \item{gwasFineMappingArgs}{How \code{gwasInput} is fine-mapped when it is
 summary statistics rather than a fine-mapping result, built with
 \code{\link{GwasFineMappingParam}}: \code{methods},
-\code{credibleSet}, \code{rss}, \code{panelFilter},
-\code{addSusieInf} and \code{fitRetention}. Inert when
-\code{gwasInput} is already fine-mapped. \code{credibleSet} is the one
-to check: its \code{coverage} / \code{L} decide the sets whose LBFs are
+\code{credibleSetParam}, \code{susieRssParam},
+\code{panelFilterParam}, \code{initializeWithSusieInf} and
+\code{fitRetention}. Inert when \code{gwasInput} is already
+fine-mapped. \code{credibleSetParam} is the one to check: its
+\code{coverage} / \code{maxNumSingleEffects} decide the sets whose
+LBFs are
 scored, so defaults here against a differently-built QTL side compare
 two different things.}
 
@@ -117,10 +119,10 @@ A \code{\linkS4class{ColocResult}}: one element per tested
   \code{PP.H3.abf + PP.H4.abf}, reported under enloc's names because that
   is what readers of enloc output expect to find.
 
-  Project it with \code{\link{getColocPairs}} (the flat table this
+  Project it with \code{\link{colocPairs}} (the flat table this
   pipeline used to return, also available as \code{as.data.frame}),
-  \code{\link{getColocVariants}}, \code{\link{getColocCredibleSets}} or
-  \code{\link{getColocGenes}}.
+  \code{\link{colocVariants}}, \code{\link{colocCredibleSets}} or
+  \code{\link{colocGenes}}.
 }
 \description{
 Per-region pipeline that pairs two fine-mapping result
@@ -178,7 +180,7 @@ This pipeline preserves all three.
 
 \section{LD-sketch compatibility check}{
  If
-  \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must come
+  \code{ldSketch(qtlFineMappingResult)} is non-\code{NULL}, it must come
   from the same reference panel as the LD sketch on \code{gwasInput}: the
   same samples, and the same allele orientation on the variants the two
   carry in common. The two need NOT carry the same variants --- running
@@ -201,5 +203,5 @@ colocPipeline(qtlFineMappingLbfExample,
 # trait in gwasContext / gwasTrait.
 res <- colocPipeline(qtlFineMappingLbfExample,
   gwasInput = qtlFineMappingLbfExample)
-unique(getColocPairs(res)[, c("context", "gwasContext")])
+unique(colocPairs(res)[, c("context", "gwasContext")])
 }

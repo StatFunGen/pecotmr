@@ -8,14 +8,14 @@ learnTwasWeights(
   X,
   Y,
   weightMethods,
-  study = "",
+  studyName = "",
   context = "",
   trait = "",
   numThreads = 1,
   fittedModels = NULL,
   fitRetention = c("none", "slim", "full"),
-  standardized = FALSE,
-  dataType = NULL,
+  weightStandardized = FALSE,
+  weightsDataType = NULL,
   ldSketch = NULL,
   verbose = 1,
   seed = NULL
@@ -35,7 +35,7 @@ alternatively a character vector of method names (eg, c("susie_weights",
 methods. methods in the list can be either univariate (applied to each
 column of Y) or multivariate (applied to the entire Y matrix).}
 
-\item{study}{Character. Study identity label recorded on the resulting
+\item{studyName}{Character. Study identity label recorded on the resulting
 weights.}
 
 \item{context}{Character. Context identity label recorded on the resulting
@@ -62,11 +62,11 @@ payload downstream needs, \code{"full"} keeps the whole fitted object.
 Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
 for every other method the two behave alike.}
 
-\item{standardized}{Logical. Whether the supplied \code{X} / \code{Y} are
-already standardized. Default \code{FALSE}.}
+\item{weightStandardized}{Logical. Whether the supplied \code{X} / \code{Y}
+are already standardized. Default \code{FALSE}.}
 
-\item{dataType}{Character or \code{NULL}. Data-type label recorded on the
-weights (e.g. \code{"individual"}).}
+\item{weightsDataType}{Character or \code{NULL}. Data-type label recorded on
+the weights (e.g. \code{"individual"}).}
 
 \item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}}) to
 record on the weights as their LD sketch, or \code{NULL}.}

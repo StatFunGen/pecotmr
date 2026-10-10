@@ -63,7 +63,7 @@ test_that(".tupleSelectRow: zero-row input errors with the class label", {
     expect_error(
         pecotmr:::.tupleSelectRow(
             empty,
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "susie",
@@ -109,7 +109,7 @@ test_that(".tupleSelectRow: non-scalar selectors error", {
     expect_error(
         pecotmr:::.tupleSelectRow(
             multi,
-            study = c("s1", "s2"),
+            studyName = c("s1", "s2"),
             context = "c1",
             trait = "t1",
             method = "susie"
@@ -129,7 +129,7 @@ test_that(".tupleSelectRow: matching tuple returns first row index", {
     expect_equal(
         pecotmr:::.tupleSelectRow(
             multi,
-            study = "s1",
+            studyName = "s1",
             context = "c2",
             trait = "t1",
             method = "susie"
@@ -149,7 +149,7 @@ test_that(".tupleSelectRow: missing tuple errors with the 4-tuple in the message
     expect_error(
         pecotmr:::.tupleSelectRow(
             multi,
-            study = "ghost",
+            studyName = "ghost",
             context = "c1",
             trait = "t1",
             method = "susie"
@@ -170,7 +170,7 @@ test_that(".tupleSelectRowGwasFmr: zero-row input errors", {
         stringsAsFactors = FALSE
     )
     expect_error(
-        pecotmr:::.tupleSelectRowGwasFmr(empty, study = "g1", method = "susie"),
+        pecotmr:::.tupleSelectRowGwasFmr(empty, studyName = "g1", method = "susie"),
         "GwasFineMappingResult has no rows"
     )
 })
@@ -208,7 +208,7 @@ test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
     expect_error(
         pecotmr:::.tupleSelectRowGwasFmr(
             multi,
-            study = "g1",
+            studyName = "g1",
             method = "susie",
             region = c("r1", "r2")
         ),
@@ -227,7 +227,7 @@ test_that(".tupleSelectRowGwasFmr: region disambiguates per-block rows", {
     expect_equal(
         pecotmr:::.tupleSelectRowGwasFmr(
             multi,
-            study = "g1",
+            studyName = "g1",
             method = "susie",
             region = "chr22_500_600"
         ),
@@ -245,7 +245,7 @@ test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in m
     expect_error(
         pecotmr:::.tupleSelectRowGwasFmr(
             one,
-            study = "g1",
+            studyName = "g1",
             method = "susie",
             region = "ghost"
         ),
@@ -263,7 +263,7 @@ test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candi
         stringsAsFactors = FALSE
     )
     expect_error(
-        pecotmr:::.tupleSelectRowGwasFmr(multi, study = "g1", method = "susie"),
+        pecotmr:::.tupleSelectRowGwasFmr(multi, studyName = "g1", method = "susie"),
         "pass `region` to disambiguate"
     )
 })
@@ -291,7 +291,7 @@ test_that(".fmrRowsMatching: matches a subset without erroring on ambiguity", {
         method = c("susie", "susie", "susie"),
         stringsAsFactors = FALSE
     )
-    expect_equal(pecotmr:::.fmrRowsMatching(df, study = "s1"), c(1L, 2L))
+    expect_equal(pecotmr:::.fmrRowsMatching(df, studyName = "s1"), c(1L, 2L))
     expect_equal(pecotmr:::.fmrRowsMatching(df, context = "c1"), c(1L, 3L))
 })
 
@@ -326,7 +326,7 @@ test_that(".fmrRowsMatching: a vector selector matches any listed value", {
         stringsAsFactors = FALSE
     )
     expect_equal(
-        pecotmr:::.fmrRowsMatching(df, study = c("s1", "s3")),
+        pecotmr:::.fmrRowsMatching(df, studyName = c("s1", "s3")),
         c(1L, 3L)
     )
 })
@@ -555,7 +555,7 @@ test_that("chromosome paths union when they agree and abort when they clash", {
 # ===========================================================================
 
 test_that("an empty collection coerces to itself, not to a row", {
-    # getFineMappingResult() hands over a single-row COLLECTION, so the
+    # fineMappingResult() hands over a single-row COLLECTION, so the
     # coercion has to accept that shape -- but an empty one has no row to
     # extract and must come back untouched.
     data(qtlFineMappingExample, twasWeightsExample)

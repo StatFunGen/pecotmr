@@ -9,7 +9,7 @@ extractTopPipInfo(fmRow, sumstats)
 \arguments{
 \item{fmRow}{A \code{\link{fineMappingRow}}, or a single-row
 fine-mapping collection as returned by
-\code{\link{getFineMappingResult}}, carrying the SuSiE fit and
+\code{\link{fineMappingResult}}, carrying the SuSiE fit and
 variant ids.}
 
 \item{sumstats}{A list or data frame carrying a \code{z} element aligned to

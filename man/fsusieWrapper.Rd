@@ -8,7 +8,7 @@ fsusieWrapper(
   X,
   Y,
   pos,
-  L,
+  maxNumSingleEffects,
   prior,
   maxSnpEm,
   covLev,
@@ -25,7 +25,7 @@ fsusieWrapper(
 \item{pos}{Genomics position of phenotypes, used for specifying the wavelet
 model.}
 
-\item{L}{The maximum number of the credible set.}
+\item{maxNumSingleEffects}{The maximum number of the credible set.}
 
 \item{prior}{method to generate the prior.}
 
@@ -63,7 +63,7 @@ base <- sin(seq(0, 2 * pi, length.out = nPos))
 Y <- matrix(rep(base, each = n), n, nPos) +
   X[, 1] \%o\% (0.5 * cos(seq(0, pi, length.out = nPos)))
 pos <- seq_len(nPos)
-fsusieWrapper(X, Y, pos = pos, L = 2,
+fsusieWrapper(X, Y, pos = pos, maxNumSingleEffects = 2,
   prior = "mixture_normal_per_scale", maxSnpEm = 10,
   covLev = 0.95, minPurity = 0.5, maxScale = 6)
 }

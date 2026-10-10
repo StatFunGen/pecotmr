@@ -47,7 +47,7 @@ Restrict two fine-mapping collections to the variants they have
   same variants. What it cannot recover is the information the dropped
   variants carried: coverage falls as overlap shrinks, equally for both, and
   that degradation is irreducible rather than an artifact of the method.
-  \code{getRetainedMass()} is what makes it visible.
+  \code{retainedMass()} is what makes it visible.
 }
 \examples{
 data(qtlFineMappingExample)

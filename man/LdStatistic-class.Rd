@@ -21,7 +21,7 @@ Abstract container for pre-computed LD statistics. Subclasses
 \describe{
 \item{\code{ldBlocks}}{A \code{GRanges} of LD block intervals.}
 
-\item{\code{nRef}}{Integer, sample size of the LD reference panel.}
+\item{\code{nSamples}}{Integer, sample size of the LD reference panel.}
 
 \item{\code{inSample}}{Logical, whether the LD reference is from the same cohort as
 the GWAS (affects bias correction).}

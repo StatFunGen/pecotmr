@@ -231,7 +231,7 @@ test_that("readannotations with BED file creates AnnotationMatrix", {
     expect_equal(nrow(assay(result, "annotations")), 3)
     expect_equal(ncol(assay(result, "annotations")), 1)
     expect_equal(colnames(assay(result, "annotations")), "enhancer")
-    expect_equal(getGenome(result), "hg38")
+    expect_equal(unname(GenomeInfoDb::genome(result)), "hg38")
     # Auto-detected meta should be binary, candidate tier
     expect_equal(SummarizedExperiment::colData(result)$type, "binary")
     expect_equal(SummarizedExperiment::colData(result)$tier, "candidate")

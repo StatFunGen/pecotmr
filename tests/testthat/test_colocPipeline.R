@@ -84,7 +84,7 @@ context("colocPipeline")
         )
     }
     QtlFineMappingResult(
-        study = map_chr(tuples, 1L),
+        studyName = map_chr(tuples, 1L),
         context = map_chr(tuples, 2L),
         trait = map_chr(tuples, 3L),
         method = map_chr(tuples, 4L),
@@ -106,14 +106,14 @@ context("colocPipeline")
         )
     }
     GwasFineMappingResult(
-        study = map_chr(tuples, 1L),
+        studyName = map_chr(tuples, 1L),
         method = map_chr(tuples, 2L),
         entry = entries,
         ldSketch = if (with_sketch) .cp_makeHandle() else NULL
     )
 }
 
-.cp_makeGwasSumstats <- function(study = "G1", qc = TRUE) {
+.cp_makeGwasSumstats <- function(studyName = "G1", qc = TRUE) {
     gr <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(
@@ -129,7 +129,7 @@ context("colocPipeline")
         N = rep(1000L, 5)
     )
     GwasSumStats(
-        study = study,
+        studyName = studyName,
         entry = list(gr),
         genome = "hg19",
         ldSketch = .cp_makeHandle(),
@@ -137,7 +137,7 @@ context("colocPipeline")
     )
 }
 
-.cp_makeQtlSumstats <- function(study = "Q1", qc = TRUE) {
+.cp_makeQtlSumstats <- function(studyName = "Q1", qc = TRUE) {
     gr <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(
@@ -153,7 +153,7 @@ context("colocPipeline")
         N = rep(1000L, 5)
     )
     QtlSumStats(
-        study = study,
+        studyName = studyName,
         context = "c1",
         trait = "t1",
         entry = list(gr),
@@ -165,8 +165,8 @@ context("colocPipeline")
 
 # The enrichment lookup takes each side's identity list, as the scoring loop
 # builds it.
-.cp_side <- function(study, context = NA_character_, trait = NA_character_) {
-    list(study = study, context = context, trait = trait)
+.cp_side <- function(studyName, context = NA_character_, trait = NA_character_) {
+    list(study = studyName, context = context, trait = trait)
 }
 
 .cp_mockColocBfBf <- function() {
@@ -245,7 +245,7 @@ test_that(".colocRequireMatchingLdSketches: sample set mismatch errors", {
     qfmr <- .cp_makeQtlFmr()
     otherPanel <- .cp_makeHandle(sample_prefix = "other")
     gfmr <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(.cp_makeFmEntry()),
         ldSketch = otherPanel
@@ -466,7 +466,7 @@ test_that("colocPipeline: empty result has the documented schema", {
         )
     )
     gfmr <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(e),
         ldSketch = .cp_makeHandle()
@@ -780,7 +780,7 @@ test_that("enrichment mode reports RCP and LCP alongside the hypotheses", {
         gwasInput = gfmr,
         enrichment = enr
     ))
-    pairs <- getColocPairs(out)
+    pairs <- colocPairs(out)
     expect_true(all(c("RCP", "LCP") %in% colnames(pairs)))
     # The two names for the same quantities: fastenloc's RCP is the posterior
     # of one shared causal variant, and LCP adds the distinct-variant case.
@@ -843,7 +843,7 @@ test_that("colocPipeline: enrichment joins on the second side's trait", {
         gwasInput = other,
         enrichment = enr
     ))
-    pairs <- getColocPairs(out)
+    pairs <- colocPairs(out)
     # Four effect pairs per trait now that enrichment mode scores each one,
     # so the check is that each trait carries its own factor throughout.
     expect_equal(
@@ -920,7 +920,7 @@ test_that("colocPipeline: attaches gwasFineMapping when no pairs survive", {
         topLoci = .cp_tl("chr1:100:A:G", pip = 0)
     )
     resolved <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(e),
         ldSketch = .cp_makeHandle()
@@ -1434,10 +1434,9 @@ test_that("priors cannot be set twice", {
     skip_if_not_installed("coloc")
     # p1/p2/p12 are read by the enrichment adjustment as well as forwarded,
     # so allowing them in methodArgs would let the two disagree.
-    expect_error(
-        pecotmr:::.colocEngineArgs(ColocOptions(p12 = 1e-5), ColocPriorParam()),
-        "set through `priors`"
-    )
+    # Refused at construction now -- ColocOptions() owns the check, so the
+    # deeper .colocEngineArgs() guard is never reached for this input.
+    expect_error(ColocOptions(p12 = 1e-5), "supplied by pecotmr")
     expect_silent(
         pecotmr:::.colocEngineArgs(ColocOptions(), ColocPriorParam())
     )
@@ -1508,24 +1507,24 @@ test_that("GwasFineMappingParam carries only what the inline fit can use", {
         names(g),
         c(
             "methods",
-            "credibleSetArgs",
-            "rssArgs",
-            "panelFilterArgs",
-            "addSusieInf",
+            "credibleSetParam",
+            "susieRssParam",
+            "panelFilterParam",
+            "initializeWithSusieInf",
             "fitRetention"
         )
     )
-    # Nested bundles survive: the inline fit gets a real credibleSetArgs.
+    # Nested bundles survive: the inline fit gets a real Param back.
     expect_s4_class(
         GwasFineMappingParam(
-            credibleSetArgs = CredibleSetParam(coverage = 0.9)
-        )$credibleSetArgs,
+            credibleSetParam = CredibleSetParam(coverage = 0.9)
+        )$credibleSetParam,
         "CredibleSetParam"
     )
     expect_equal(
         GwasFineMappingParam(
-            credibleSetArgs = CredibleSetParam(coverage = 0.9)
-        )$credibleSetArgs$coverage,
+            credibleSetParam = CredibleSetParam(coverage = 0.9)
+        )$credibleSetParam$coverage,
         0.9
     )
     # The fineMappingPipeline settings that cannot apply are absent, not
@@ -1547,10 +1546,18 @@ test_that("GwasFineMappingParam carries only what the inline fit can use", {
         setdiff(names(formals(GwasFineMappingParam)), "methods"),
         c(
             accepted,
-            "credibleSetArgs",
-            "rssArgs",
-            "panelFilterArgs",
-            "addSusieInf",
+            # Listed explicitly because the S4 method's visible formals
+            # are only `(data, ...)` -- the per-input-kind arguments are
+            # documented on the generic -- so there is nothing in `accepted`
+            # to match them against. The names themselves now agree with the
+            # pipeline's own; the earlier split that spelled these
+            # `credibleSetArgs` / `rssArgs` / `panelFilterArgs` /
+            # `addSusieInf` on pipelines was retired once the
+            # accessor-shadowing conflict was measured not to arise.
+            "credibleSetParam",
+            "susieRssParam",
+            "panelFilterParam",
+            "initializeWithSusieInf",
             "fitRetention"
         )
     )))
@@ -1559,50 +1566,51 @@ test_that("GwasFineMappingParam carries only what the inline fit can use", {
 
 test_that("GwasFineMappingParam accessors round-trip a nested bundle", {
     g <- GwasFineMappingParam()
-    expect_equal(getFineMappingMethods(g), "susie")
-    expect_s4_class(getCredibleSetArgs(g), "CredibleSetParam")
+    expect_equal(fineMappingMethods(g), "susie")
+    expect_s4_class(credibleSetParam(g), "CredibleSetParam")
 
     # Why this class has accessors at all: once CredibleSetParam is
     # settable, the container must let the edited record back in, or the
     # nested settings would be readable but not writable.
-    g2 <- setCredibleSetArgs(g, setCoverage(getCredibleSetArgs(g), 0.8))
-    expect_equal(getCoverage(getCredibleSetArgs(g2)), 0.8)
-    expect_equal(getCoverage(getCredibleSetArgs(g)), 0.95)
+    g2 <- g
+    cs <- credibleSetParam(g2)
+    csCoverage(cs) <- 0.8
+    credibleSetParam(g2) <- cs
+    expect_equal(csCoverage(credibleSetParam(g2)), 0.8)
+    expect_equal(csCoverage(credibleSetParam(g)), 0.95)
 
     # The nested slots are typed, so the wrong Param is refused rather than
     # surfacing as a missing field somewhere downstream.
     expect_error(
-        setRssArgs(g, CredibleSetParam()),
-        "not valid for @.+rssArgs"
+        susieRssParam(g) <- CredibleSetParam(),
+        "not valid for @.+susieRssParam"
     )
-    expect_s4_class(
-        setRssArgs(g, SusieRssParam(serFallback = TRUE)),
-        "GwasFineMappingParam"
-    )
+    g3 <- g
+    susieRssParam(g3) <- SusieRssParam(serFallback = TRUE)
+    expect_s4_class(g3, "GwasFineMappingParam")
 })
 
 test_that("GwasFineMappingParam accessors read and replace every field", {
     # Dispatching each accessor is what exercises the generics declared in
     # AllGenerics.R; the constructor alone never reaches them.
     p <- GwasFineMappingParam()
-    expect_equal(getFineMappingMethods(p), "susie")
-    expect_s4_class(getRssArgs(p), "SusieRssParam")
-    expect_s4_class(getPanelFilterArgs(p), "PanelFilterParam")
-    expect_s4_class(getCredibleSetArgs(p), "CredibleSetParam")
-    expect_true(getAddSusieInf(p))
-    expect_equal(getFitRetention(p), "slim")
+    expect_equal(fineMappingMethods(p), "susie")
+    expect_s4_class(susieRssParam(p), "SusieRssParam")
+    expect_s4_class(panelFilterParam(p), "PanelFilterParam")
+    expect_s4_class(credibleSetParam(p), "CredibleSetParam")
+    expect_true(initializeWithSusieInf(p))
+    expect_equal(fitRetention(p), "slim")
 
-    # Each setter returns a new record and leaves the original alone.
-    expect_equal(
-        getFineMappingMethods(setFineMappingMethods(p, "susieInf")),
-        "susieInf"
-    )
-    expect_false(getAddSusieInf(setAddSusieInf(p, FALSE)))
-    expect_equal(getFitRetention(setFitRetention(p, "full")), "full")
-    expect_s4_class(
-        getPanelFilterArgs(setPanelFilterArgs(p, PanelFilterParam())),
-        "PanelFilterParam"
-    )
-    expect_equal(getFineMappingMethods(p), "susie")
-    expect_true(getAddSusieInf(p))
+    # Replacement edits a copy and leaves the original alone.
+    edited <- p
+    fineMappingMethods(edited) <- "susieInf"
+    initializeWithSusieInf(edited) <- FALSE
+    fitRetention(edited) <- "full"
+    panelFilterParam(edited) <- PanelFilterParam()
+    expect_equal(fineMappingMethods(edited), "susieInf")
+    expect_false(initializeWithSusieInf(edited))
+    expect_equal(fitRetention(edited), "full")
+    expect_s4_class(panelFilterParam(edited), "PanelFilterParam")
+    expect_equal(fineMappingMethods(p), "susie")
+    expect_true(initializeWithSusieInf(p))
 })

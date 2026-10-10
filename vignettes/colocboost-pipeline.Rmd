@@ -178,12 +178,12 @@ are the per-call refinements.
 -  **Individual-level (`QtlDataset` / `MultiStudyQtlDataset`)**: QC (MAF / MAC
     / X-variance / per-sample missingness, sample / variant restrictions) lives
     on the `QtlDataset` constructor and is applied lazily inside
-    `getGenotypes()` / `getResidualizedGenotypes()`. The pipeline does not run
+    `genotypes()` / `residualizedGenotypes()`. The pipeline does not run
     a separate pass.
 -  **Summary statistics (`QtlSumStats` / `GwasSumStats`)**: all variant
     filters, panel harmonization, LD-mismatch detection, and RAISS imputation
     live in [`summaryStatsQc()`](rss-qc.html). The pipeline rejects inputs
-    whose `getQcInfo()` is empty.
+    whose `qcInfo()` is empty.
 
 # Session info
 

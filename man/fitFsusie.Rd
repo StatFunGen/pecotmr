@@ -32,5 +32,5 @@ base <- sin(seq(0, 2 * pi, length.out = nPos))
 Y <- matrix(rep(base, each = n), n, nPos) +
   X[, 1] \%o\% (0.5 * cos(seq(0, pi, length.out = nPos)))
 pos <- seq_len(nPos)
-fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(L = 2))
+fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(maxit = 5))
 }

@@ -44,9 +44,11 @@ Selects the methods \code{\link{fineMappingPipeline}} runs and
 }
 \examples{
 FineMappingMethodsParam(methods = "susie")
-FineMappingMethodsParam(methods = list(susie = SusieOptions(L = 20)))
 FineMappingMethodsParam(
-    qtlDatasetMethods = list(susie = SusieOptions(L = 20)),
-    qtlSumStatsMethods = list(susie = SusieRssOptions(L = 20))
+  methods = list(susie = SusieOptions(max_iter = 200))
+)
+FineMappingMethodsParam(
+    qtlDatasetMethods = list(susie = SusieOptions(max_iter = 200)),
+    qtlSumStatsMethods = list(susie = SusieRssOptions(max_iter = 200))
 )
 }

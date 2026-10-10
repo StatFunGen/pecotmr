@@ -413,7 +413,7 @@ setMethod("subsetRegion", "RangedTupleList", function(x, region) {
 # constructors, whose assembly differs only in the columns handed in.
 # @noRd
 .rtlGrlWithMetadata <- function(payloads, cols) {
-    split <- .rtlSplitBySeqname(map(payloads, rowVariants))
+    split <- .rtlSplitBySeqname(map(payloads, variants))
     md <- exec(S4Vectors::DataFrame, !!!c(cols, list(check.names = FALSE)))
     S4Vectors::`mcols<-`(
         GenomicRanges::GRangesList(split$entry),
@@ -688,7 +688,7 @@ setMethod(
 #' Non-atomic \code{mcols} columns -- the per-element \code{susieFit} /
 #' \code{cvResult} payloads -- are dropped. They describe an element, not a
 #' range, so there is no row to broadcast them onto. Use the accessors
-#' (\code{\link{getSusieFit}}, \code{\link{getCvResult}}) for those.
+#' (\code{\link{susieFit}}, \code{\link{cvResult}}) for those.
 #'
 #' @param x A \code{RangedTupleList}.
 #' @return A \code{GRanges}.

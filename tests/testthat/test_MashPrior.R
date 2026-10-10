@@ -19,9 +19,9 @@ test_that("MashPrior: construct + accessors (full + cv)", {
         cvFits = list(samplePartition = sp, perFoldFits = perFold)
     )
     expect_s4_class(mp, "MashPrior")
-    expect_identical(getFullFit(mp)$U, U)
-    expect_length(getCvFits(mp)$perFoldFits, 3L)
-    expect_identical(getCvFits(mp)$samplePartition, sp)
+    expect_identical(fullFit(mp)$U, U)
+    expect_length(cvFits(mp)$perFoldFits, 3L)
+    expect_identical(cvFits(mp)$samplePartition, sp)
     expect_output(show(mp), "MashPrior")
 })
 
@@ -29,10 +29,10 @@ test_that("MashPrior: full-only and cv-only bundles", {
     U <- list(U1 = diag(2))
     perFold <- list(list(U = U), list(U = U), list(U = U))
     mpFull <- MashPrior(fullFit = list(U = U))
-    expect_null(getCvFits(mpFull))
+    expect_null(cvFits(mpFull))
     mpCv <- MashPrior(cvFits = list(perFoldFits = perFold))
-    expect_null(getFullFit(mpCv))
-    expect_length(getCvFits(mpCv)$perFoldFits, 3L)
+    expect_null(fullFit(mpCv))
+    expect_length(cvFits(mpCv)$perFoldFits, 3L)
 })
 
 test_that("MashPrior: validity rejects malformed bundles", {

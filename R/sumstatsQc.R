@@ -2965,17 +2965,42 @@ effectiveN <- function(nCase, nControl) {
 }
 
 .entryDfAddStats <- function(df, mc) {
-    statMap <- c(z = "Z", beta = "BETA", se = "SE", N = "N", maf = "MAF")
+    statMap <- c(
+        z = "Z",
+        beta = "BETA",
+        se = "SE",
+        N = "N",
+        maf = "MAF",
+        af = "AF"
+    )
     present <- statMap[is_in(statMap, colnames(mc))]
     # mutate() overwrites an existing column in place and appends a new one,
     # which is what the `df[[out]] <-` loop did.
-    mutate(
+    out <- mutate(
         df,
         !!!set_names(
             map(unname(present), .entryStatColumn, mc = mc),
             names(present)
         )
     )
+    .entryDfDeriveMaf(out)
+}
+
+# AF is the DIRECTIONAL effect-allele frequency; MAF is its directionless
+# form. A study that declared only `af:` therefore already carries the
+# information, so derive the MAF rather than leaving the column absent --
+# absent, the MR Wald ratio falls back to the z scale (see
+# .cipGwasHasScale) even though a real frequency was supplied. Same
+# pmin(af, 1 - af) the QC frequency filter uses.
+#
+# A declared MAF wins: it is what the study actually asserted, and AF is
+# only a route to the same quantity.
+# @noRd
+.entryDfDeriveMaf <- function(df) {
+    if (!is.null(df[["maf"]]) || is.null(df[["af"]])) {
+        return(df)
+    }
+    mutate(df, maf = pmin(.data$af, 1 - .data$af))
 }
 
 .entryToSumstatDf <- function(
@@ -4503,7 +4528,7 @@ effectiveN <- function(nCase, nControl) {
     # becoming two separate settings.
     cf <- .applyContentFilters(
         df,
-        mafCutoff = opts$panelFilterArgs$mafCutoff,
+        mafCutoff = opts$panelFilterParam$mafCutoff,
         infoCutoff = opts$sumstatsFilterArgs$infoCutoff,
         nCutoff = opts$sumstatsFilterArgs$nCutoff
     )
@@ -4971,9 +4996,9 @@ effectiveN <- function(nCase, nControl) {
 # Shape-check the panel-filter trio. Runs before the panel is opened, so a
 # malformed cutoff fails on the call rather than after a dosage read.
 # @noRd
-.ssqcCheckPanelCutoffs <- function(panelFilterArgs) {
-    bad <- names(panelFilterArgs)[
-        !map_lgl(as.list(panelFilterArgs), .ssqcIsCutoff)
+.ssqcCheckPanelCutoffs <- function(panelFilterParam) {
+    bad <- names(panelFilterParam)[
+        !map_lgl(as.list(panelFilterParam), .ssqcIsCutoff)
     ]
     if (length(bad) > 0L) {
         msg <- glue(
@@ -4988,7 +5013,7 @@ effectiveN <- function(nCase, nControl) {
 # Build the per-entry QC options list from the captured call parameters.
 .ssqcBuildOpts <- function(
     sumstatsFilterArgs,
-    panelFilterArgs,
+    panelFilterParam,
     skipRegion,
     ldMismatchQcMethod,
     alleleFlipKriging,
@@ -5004,7 +5029,7 @@ effectiveN <- function(nCase, nControl) {
     # character vector: a renamed argument is now an error, not a NULL entry.
     opts <- list(
         sumstatsFilterArgs = sumstatsFilterArgs,
-        panelFilterArgs = panelFilterArgs,
+        panelFilterParam = panelFilterParam,
         skipRegion = skipRegion,
         ldMismatchQcMethod = ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,
@@ -5112,11 +5137,11 @@ effectiveN <- function(nCase, nControl) {
     # harmonized, so a variant the panel cannot support is gone from the LD
     # and from the summary statistics alike.
     ldSketch <- .ssqcPrunePanel(
-        getLdSketch(sumstats),
-        .panelCutoffs(opts$panelFilterArgs),
+        ldSketch(sumstats),
+        .panelCutoffs(opts$panelFilterParam),
         "summaryStatsQc"
     )
-    refGenome <- getGenome(sumstats)
+    refGenome <- unique(unname(GenomeInfoDb::genome(sumstats)))
     results <- map(
         seq_len(nrow(sumstats)),
         .ssqcRunEntry,
@@ -5134,7 +5159,7 @@ effectiveN <- function(nCase, nControl) {
 
 # One screen metric's cutoff as qcInfo echoes it. The bundle leaves an unset
 # metric absent; the echoed record has always spelled "off" as 0, and readers
-# like getQcDiagnostics() index these four names, so the output shape is kept
+# like qcDiagnostics() index these four names, so the output shape is kept
 # even though the input is now one argument.
 # @noRd
 .ssqcScreenEcho <- function(signalScreenArgs, metric) {
@@ -5145,7 +5170,7 @@ effectiveN <- function(nCase, nControl) {
 .ssqcBuildQcInfo <- function(
     entryAudits,
     sumstatsFilterArgs,
-    panelFilterArgs,
+    panelFilterParam,
     signalScreenArgs,
     ldMismatchQcMethod,
     alleleFlipKriging,
@@ -5156,15 +5181,15 @@ effectiveN <- function(nCase, nControl) {
     list(
         timestamp = NA_character_,
         # Echoed FLAT, not nested: this record is part of the returned
-        # object's shape, which readers like getQcDiagnostics() index by
+        # object's shape, which readers like qcDiagnostics() index by
         # these names. The bundles are an argument convention, not an
         # output one.
         options = list(
             removeIndels = sumstatsFilterArgs$removeIndels,
             removeStrandAmbiguous = sumstatsFilterArgs$removeStrandAmbiguous,
-            mafCutoff = panelFilterArgs$mafCutoff,
-            macCutoff = panelFilterArgs$macCutoff,
-            imissCutoff = panelFilterArgs$imissCutoff,
+            mafCutoff = panelFilterParam$mafCutoff,
+            macCutoff = panelFilterParam$macCutoff,
+            imissCutoff = panelFilterParam$imissCutoff,
             infoCutoff = sumstatsFilterArgs$infoCutoff,
             nCutoff = sumstatsFilterArgs$nCutoff,
             pipCutoffToSkip = .ssqcScreenEcho(signalScreenArgs, "pip"),
@@ -5197,9 +5222,9 @@ effectiveN <- function(nCase, nControl) {
     nSample <- if (has("nSample")) as.numeric(sumstats$nSample) else NULL
     if (methods::is(sumstats, "GwasSumStats")) {
         GwasSumStats(
-            study = as.character(sumstats$study),
+            studyName = as.character(sumstats$study),
             entry = newEntries,
-            genome = getGenome(sumstats),
+            genome = unique(unname(GenomeInfoDb::genome(sumstats))),
             ldSketch = newLdSketch,
             varY = as.numeric(sumstats$varY),
             nCase = if (has("nCase")) as.numeric(sumstats$nCase) else NULL,
@@ -5221,11 +5246,11 @@ effectiveN <- function(nCase, nControl) {
         )
     } else {
         QtlSumStats(
-            study = as.character(sumstats$study),
+            studyName = as.character(sumstats$study),
             context = as.character(sumstats$context),
             trait = as.character(sumstats$trait),
             entry = newEntries,
-            genome = getGenome(sumstats),
+            genome = unique(unname(GenomeInfoDb::genome(sumstats))),
             ldSketch = newLdSketch,
             varY = as.numeric(sumstats$varY),
             nSample = nSample,
@@ -5250,7 +5275,7 @@ effectiveN <- function(nCase, nControl) {
 #' The returned collection has its \code{qcInfo} slot populated with a per-entry
 #' audit record (variant counts, drop counts at each step, which filters fired,
 #' etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
-#' \code{length(getQcInfo(x)) == 0L}.
+#' \code{length(qcInfo(x)) == 0L}.
 #'
 #' Column-availability error contract: a non-zero \code{infoCutoff} requires
 #' every entry to carry an \code{INFO} column, and a non-zero \code{nCutoff}
@@ -5287,7 +5312,7 @@ effectiveN <- function(nCase, nControl) {
 #'   column when non-zero), and \code{nCutoff} drops variants whose \code{N}
 #'   is more than that many median-absolute-deviations from the median (0
 #'   disables it).
-#' @param panelFilterArgs LD-reference-panel filters, built with
+#' @param panelFilterParam LD-reference-panel filters, built with
 #'   \code{\link{PanelFilterParam}}. \code{macCutoff} is converted to a MAF
 #'   equivalent using \code{macCutoff / (2 * nSamples)} and the stricter of
 #'   it and \code{mafCutoff} applies; \code{imissCutoff} is a per-variant
@@ -5383,7 +5408,7 @@ effectiveN <- function(nCase, nControl) {
 summaryStatsQc <- function(
     sumstats,
     sumstatsFilterArgs = SumstatsFilterParam(),
-    panelFilterArgs = PanelFilterParam(),
+    panelFilterParam = PanelFilterParam(),
     keepVariants = NULL,
     skipRegion = NULL,
     signalScreenArgs = SignalScreenParam(),
@@ -5398,7 +5423,7 @@ summaryStatsQc <- function(
     r <- .ssqcResolveInputs(
         sumstats,
         sumstatsFilterArgs,
-        panelFilterArgs,
+        panelFilterParam,
         signalScreenArgs,
         sumstatsCleaningArgs,
         imputeArgs,
@@ -5406,7 +5431,7 @@ summaryStatsQc <- function(
     )
     opts <- .ssqcBuildOpts(
         sumstatsFilterArgs = sumstatsFilterArgs,
-        panelFilterArgs = panelFilterArgs,
+        panelFilterParam = panelFilterParam,
         skipRegion = skipRegion,
         ldMismatchQcMethod = r$ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,
@@ -5423,7 +5448,7 @@ summaryStatsQc <- function(
         sumstats,
         res,
         sumstatsFilterArgs = sumstatsFilterArgs,
-        panelFilterArgs = panelFilterArgs,
+        panelFilterParam = panelFilterParam,
         signalScreenArgs = signalScreenArgs,
         ldMismatchQcMethod = r$ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,
@@ -5441,7 +5466,7 @@ summaryStatsQc <- function(
 .ssqcResolveInputs <- function(
     sumstats,
     sumstatsFilterArgs,
-    panelFilterArgs,
+    panelFilterParam,
     signalScreenArgs,
     sumstatsCleaningArgs,
     imputeArgs,
@@ -5452,11 +5477,11 @@ summaryStatsQc <- function(
         "SumstatsFilterParam",
         "sumstatsFilter"
     )
-    .assertMethodParam(panelFilterArgs, "PanelFilterParam", "panelFilter")
+    .assertMethodParam(panelFilterParam, "PanelFilterParam", "panelFilter")
     .assertMethodParam(signalScreenArgs, "SignalScreenParam", "signalScreen")
     .assertMethodParam(imputeArgs, "RaissParam", "imputeArgs")
     .ssqcCheckEntries(sumstats, sumstatsFilterArgs$infoCutoff)
-    .ssqcCheckPanelCutoffs(panelFilterArgs)
+    .ssqcCheckPanelCutoffs(panelFilterParam)
     list(
         ldMismatchQcMethod = .resolveLdMismatchChoice(ldMismatchQcMethod),
         cleaning = .sumstatsCleaningResolve(sumstatsCleaningArgs),
@@ -5470,7 +5495,7 @@ summaryStatsQc <- function(
     sumstats,
     res,
     sumstatsFilterArgs,
-    panelFilterArgs,
+    panelFilterParam,
     signalScreenArgs,
     ldMismatchQcMethod,
     alleleFlipKriging,
@@ -5481,7 +5506,7 @@ summaryStatsQc <- function(
     qcInfo <- .ssqcBuildQcInfo(
         res$entryAudits,
         sumstatsFilterArgs = sumstatsFilterArgs,
-        panelFilterArgs = panelFilterArgs,
+        panelFilterParam = panelFilterParam,
         signalScreenArgs = signalScreenArgs,
         ldMismatchQcMethod = ldMismatchQcMethod,
         alleleFlipKriging = alleleFlipKriging,

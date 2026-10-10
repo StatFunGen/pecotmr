@@ -62,7 +62,7 @@ setClass(
 setMethod("show", "GwasSumStats", function(object) {
     cat(glue(
         "GwasSumStats: {nrow(object)} studies, ",
-        "genome build {getGenome(object)}\n",
+        "genome build {GenomeInfoDb::genome(object)}\n",
         .trim = FALSE
     ))
     ld <- object@ldSketch
@@ -93,11 +93,11 @@ NULL
 # Recycle a length-1 per-study scalar to one value per study (or validate an
 # already-per-study vector), coerced to numeric.
 # @noRd
-.recyclePerStudy <- function(v, nm, study) {
-    if (length(v) == 1L && length(study) > 1L) {
-        v <- rep(v, length(study))
+.recyclePerStudy <- function(v, nm, studyName) {
+    if (length(v) == 1L && length(studyName) > 1L) {
+        v <- rep(v, length(studyName))
     }
-    if (length(v) != length(study)) {
+    if (length(v) != length(studyName)) {
         msg <- glue("`{nm}` must have length 1 or length(study).")
         abort(msg)
     }
@@ -113,7 +113,7 @@ NULL
 #' Each \code{GRanges} entry must carry per-variant statistics in its mcols (at
 #' minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; optionally
 #' \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
-#' @param study Character vector of study identifiers (must be unique).
+#' @param studyName Character vector of study identifiers (must be unique).
 #' @param entry A \code{SimpleList} or \code{list} of \code{GRanges}, one per
 #'   study.
 #' @param genome Single character string giving the genome build (e.g.,
@@ -135,7 +135,7 @@ NULL
 #'   \code{NULL}). Attached only when supplied (length 1 or length(study)). Used
 #'   as the study-level fallback for the per-variant \code{N} when a study has
 #'   no per-variant \code{N} column and no case/control counts. Named
-#'   \code{nSample} to avoid clashing with \code{getNSamples()} (the LD-panel
+#'   \code{nSample} to avoid clashing with \code{nSamples()} (the LD-panel
 #'   sample size).
 #' @param ldBlocks Optional LD-block specification: an \code{LdBlocks}, a
 #'   \code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end}
@@ -161,7 +161,7 @@ NULL
 #' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record. Fine-mapping / TWAS pipelines reject inputs where
-#'   \code{length(getQcInfo(x)) == 0}.
+#'   \code{length(qcInfo(x)) == 0}.
 #' @return A \code{GwasSumStats} object.
 #' @examples
 #' panel <- readGenotypes(
@@ -169,11 +169,11 @@ NULL
 #' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 #' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
 #'   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
-#' GwasSumStats(study = "t1", entry = list(gr), genome = "hg38",
+#' GwasSumStats(studyName = "t1", entry = list(gr), genome = "hg38",
 #'   ldSketch = panel)
 #' @export
 GwasSumStats <- function(
-    study,
+    studyName,
     entry,
     genome,
     ldSketch = NULL,
@@ -186,15 +186,15 @@ GwasSumStats <- function(
     blockId = NULL,
     extraCols = list()
 ) {
-    if (missing(study) || missing(entry) || missing(genome)) {
+    if (missing(studyName) || missing(entry) || missing(genome)) {
         abort("`study`, `entry`, and `genome` are all required.")
     }
-    varY <- .gwasValidateArgs(study, entry, genome, varY)
+    varY <- .gwasValidateArgs(studyName, entry, genome, varY)
     cols <- list(
-        study = as.character(study),
+        study = as.character(studyName),
         varY = varY
     ) |>
-        .gwasAppendOptional(nCase, nControl, nSample, study) |>
+        .gwasAppendOptional(nCase, nControl, nSample, studyName) |>
         .gwasAppendExtras(extraCols)
     dfArgs <- c(cols, list(check.names = FALSE))
     # The per-study GRanges become the collection's ELEMENTS; everything else
@@ -298,7 +298,7 @@ GwasSumStats <- function(
 
 # Validate genome / entry / length consistency; returns the recycled varY.
 # @noRd
-.gwasValidateArgs <- function(study, entry, genome, varY) {
+.gwasValidateArgs <- function(studyName, entry, genome, varY) {
     if (length(genome) != 1L) {
         msg <- glue(
             "`genome` must be a single character string (one build per ",
@@ -311,31 +311,31 @@ GwasSumStats <- function(
             "`entry` must be a list (or SimpleList) of GRanges, one per study."
         )
     }
-    if (length(entry) != length(study)) {
+    if (length(entry) != length(studyName)) {
         msg <- glue(
             "length(entry) ({length(entry)}) must equal ",
-            "length(study) ({length(study)})."
+            "length(studyName) ({length(studyName)})."
         )
         abort(msg)
     }
-    .recyclePerStudy(varY, "varY", study)
+    .recyclePerStudy(varY, "varY", studyName)
 }
 
 # Attach the OPTIONAL per-study nCase / nControl / nSample columns (each only
 # when supplied; NA for the non-case/control studies in a mixed collection).
 # @noRd
-.gwasAppendOptional <- function(cols, nCase, nControl, nSample, study) {
+.gwasAppendOptional <- function(cols, nCase, nControl, nSample, studyName) {
     c(
         cols,
         compact(list(
             nCase = if (!is.null(nCase)) {
-                .recyclePerStudy(nCase, "nCase", study)
+                .recyclePerStudy(nCase, "nCase", studyName)
             },
             nControl = if (!is.null(nControl)) {
-                .recyclePerStudy(nControl, "nControl", study)
+                .recyclePerStudy(nControl, "nControl", studyName)
             },
             nSample = if (!is.null(nSample)) {
-                .recyclePerStudy(nSample, "nSample", study)
+                .recyclePerStudy(nSample, "nSample", studyName)
             }
         ))
     )
@@ -356,14 +356,14 @@ GwasSumStats <- function(
 # `study` is missing on a multi-study collection.
 # Element indices for one study. Returns a VECTOR, not a scalar: the seqname
 # split means one study can own several elements (one per chromosome), and
-# getSumStats() stitches them back into the single GRanges callers expect.
+# sumStats() stitches them back into the single GRanges callers expect.
 # @noRd
-.gwasSelectStudy <- function(x, study) {
+.gwasSelectStudy <- function(x, studyName) {
     if (nrow(x) == 0L) {
         abort("GwasSumStats has no rows.")
     }
     studies <- as.character(x$study)
-    if (missing(study) || is.null(study)) {
+    if (missing(studyName) || is.null(studyName)) {
         if (n_distinct(studies) == 1L) {
             return(seq_len(nrow(x)))
         }
@@ -374,10 +374,10 @@ GwasSumStats <- function(
         )
         abort(msg)
     }
-    idx <- which(studies == as.character(study))
+    idx <- which(studies == as.character(studyName))
     if (length(idx) == 0L) {
         msg <- glue(
-            "Unknown study: '{study}'. ",
+            "Unknown study: '{studyName}'. ",
             "Available: {str_flatten(unique(studies), ', ')}"
         )
         abort(msg)
@@ -389,7 +389,7 @@ GwasSumStats <- function(
 #' @description Return the per-variant \code{GRanges} of summary statistics for
 #'   one study in a \code{GwasSumStats} collection.
 #' @param x A \code{GwasSumStats} object.
-#' @param study Character (length 1) study identifier. Optional when the
+#' @param studyName Character (length 1) study identifier. Optional when the
 #'   collection has a single row.
 #' @param ranges Optional \code{GRanges} restricting the returned variants to
 #'   those it overlaps. \code{NULL} (default) returns the study's full set.
@@ -400,11 +400,11 @@ GwasSumStats <- function(
 #' @return A \code{GRanges} object.
 #' @export
 setMethod(
-    "getSumStats",
+    "sumStats",
     signature(x = "GwasSumStats"),
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         ranges = NULL,
         context = NULL,
         trait = NULL,
@@ -416,7 +416,7 @@ setMethod(
         # silently ignored request -- the shared SumStatsBase accessors pass
         # the union of both classes' selectors.
         .gwasRefuseQtlSelectors(context, trait, annotateSignificance)
-        .ssStitchElements(x, .gwasSelectStudy(x, study), ranges)
+        .ssStitchElements(x, .gwasSelectStudy(x, studyName), ranges)
     }
 )
 
@@ -431,45 +431,78 @@ setMethod(
         return(invisible(NULL))
     }
     abort(glue(
-        "getSumStats(GwasSumStats): {str_flatten(names(given)[given], ', ')} ",
+        "sumStats(GwasSumStats): {str_flatten(names(given)[given], ', ')} ",
         "{if (sum(given) == 1L) 'is' else 'are'} a QtlSumStats selector. ",
         "A GWAS is selected by `study` (and narrowed by `ranges`)."
     ))
 }
 
-# getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R).
+# z / nSamples / maf / nSnps are provided once by SumStatsBase (AllClasses.R).
 
-#' @rdname getSumStatsDf
+#' @title Coerce Summary Statistics to a Data Frame
+#' @description Coerce one tuple of a \code{GwasSumStats} or
+#'   \code{QtlSumStats} collection to a per-variant \code{data.frame} in the
+#'   standardized layout \code{variant_id, chrom, pos, A1, A2, z, beta, se, N,
+#'   maf} (optional columns omitted when absent on the entry). This is the
+#'   table view of \code{\link{sumStats}}, which returns the same selection as
+#'   a \code{GRanges}; coercion rather than a return-type argument is the
+#'   Bioconductor idiom for choosing a representation.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param row.names,optional Accepted for compatibility with
+#'   \code{as.data.frame} and ignored.
+#' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
+#'   to this study; \code{NULL} matches all studies.
+#' @param context Character (length 1) or \code{NULL}. Restrict the selection to
+#'   this context; \code{NULL} matches all contexts (\code{QtlSumStats} only).
+#' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
+#'   this trait; \code{NULL} matches all traits (\code{QtlSumStats} only).
+#' @param require Character vector. Columns that must be present (derived if
+#'   necessary) in the returned summary-statistics data frame.
+#' @param derive Whether to derive missing standard columns from the available
+#'   ones; \code{"zFromBetaSe"} recovers \code{z} from \code{beta}/\code{se}.
+#' @param keepChrPrefix Logical. If \code{TRUE}, keep the \code{chr} prefix on
+#'   chromosome names; otherwise strip it.
+#' @param ... Unused.
+#' @return A \code{data.frame}.
+#' @examples
+#' data(qtlSumStatsExample)
+#' head(as.data.frame(qtlSumStatsExample))
+#' @rdname sumStatsDataFrame
+#' @aliases sumStatsDataFrame
 #' @export
 setMethod(
-    "getSumStatsDf",
+    "as.data.frame",
     "GwasSumStats",
     function(
         x,
-        study = NULL,
+        row.names = NULL,
+        optional = FALSE,
+        studyName = NULL,
         require = character(0),
         derive = c("none", "zFromBetaSe"),
-        keepChrPrefix = TRUE
+        keepChrPrefix = TRUE,
+        ...
     ) {
         derive <- arg_match(derive)
-        gr <- getSumStats(x, study = study)
+        gr <- sumStats(x, studyName = studyName)
         .entryToSumstatDf(
             gr,
             require = require,
             derive = derive,
             keepChrPrefix = keepChrPrefix,
             label = glue(
-                "GwasSumStats[{if (is.null(study)) '<auto>' else study}]"
+                "GwasSumStats[",
+                "{if (is.null(studyName)) '<auto>' else studyName}]"
             )
         )
     }
 )
 
 
-#' @rdname getVarY
+#' @rdname varY
 #' @export
-setMethod("getVarY", "GwasSumStats", function(x, study = NULL) {
-    idx <- .gwasSelectStudy(x, study)
+setMethod("varY", "GwasSumStats", function(x, studyName = NULL) {
+    idx <- .gwasSelectStudy(x, studyName)
     val <- x$varY[[idx]]
     if (is.na(val)) NULL else val
 })
@@ -477,37 +510,6 @@ setMethod("getVarY", "GwasSumStats", function(x, study = NULL) {
 # =============================================================================
 # Coercion / converters
 # =============================================================================
-
-#' @title Convert GwasSumStats to data.frame
-#' @description Extracts the per-variant statistics for one study (selected by
-#'   \code{study}) into a plain data.frame with columns SNP, CHR, BP, A1, A2, Z,
-#'   N (and any optional columns such as MAF, BETA, SE, P).
-#' @param x A \code{GwasSumStats} object.
-#' @param row.names Ignored (present for S3 generic compatibility).
-#' @param optional Ignored.
-#' @param study Character (length 1) study identifier. Optional when the
-#'   collection has a single row.
-#' @param ... Ignored.
-#' @return A data.frame.
-#' @method as.data.frame GwasSumStats
-#' @export
-as.data.frame.GwasSumStats <- function(
-    x,
-    row.names = NULL,
-    optional = FALSE,
-    study = NULL,
-    ...
-) {
-    gr <- getSumStats(x, study = study)
-    mc <- mutate(
-        as.data.frame(mcols(gr)),
-        CHR = as.character(seqnames(gr)),
-        BP = start(gr)
-    )
-    firstCols <- c("SNP", "CHR", "BP")
-    restCols <- setdiff(names(mc), firstCols)
-    select(mc, all_of(c(firstCols, restCols)))
-}
 
 #' Combine GwasSumStats collections
 #'
@@ -521,7 +523,7 @@ as.data.frame.GwasSumStats <- function(
 #' input: \code{genome} and the \code{\link{summaryStatsQc}} options must agree
 #' across the inputs (a mismatch is an error, not a silent first-wins), the
 #' per-element \code{qcInfo$entryAudit} concatenates in element order so
-#' \code{\link{getQcDiagnostics}} keeps addressing the right element, and the
+#' \code{\link{qcDiagnostics}} keeps addressing the right element, and the
 #' LD sketches union into one panel over the shared genotype handle. That last
 #' one matters: block-parallel pipelines narrow each piece's panel to its own
 #' block, so keeping only the first would leave a multi-block collection whose

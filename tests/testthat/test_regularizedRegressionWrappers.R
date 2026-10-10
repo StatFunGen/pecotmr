@@ -6,8 +6,8 @@ context("SS-TWAS: weights, pipeline, and omnibus combination")
 # context, trait, method, entry) columns where each entry is a
 # `TwasWeightsRow` S4 object carrying weights / fits / cvResult.
 # Class-shape tests for the new collection should live alongside the
-# pipeline tests and assert via accessors (`getWeights`, `getStudy`,
-# `getCvResult`, etc.) — not against legacy slot shapes.
+# pipeline tests and assert via accessors (`weights`, `studyName`,
+# `cvResult`, etc.) — not against legacy slot shapes.
 #
 # `twasAnalysis()` was collapsed into the unified `twasZ()` dispatcher
 # (task #37); its tests are removed here.
@@ -71,7 +71,7 @@ test_that("fitSusieInfThenSusieRss returns two fits", {
     n <- 500
     R <- diag(p)
     z <- rnorm(p)
-    fits <- fitSusieInfThenSusieRss(z, R, n, args = SusieOptions(L = 5))
+    fits <- fitSusieInfThenSusieRss(z, R, n, args = SusieOptions(max_iter = 5))
     expect_true(is.list(fits))
     expect_true("susie" %in% names(fits))
     expect_true("susieInf" %in% names(fits))
@@ -467,7 +467,7 @@ test_that("mrashWeights returns length-p weights and can retain the fit", {
 test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
-    mc <- list(methodArgs = QggOptions(nit = 200, nburn = 20, nthin = 1))
+    mc <- list(nit = 200, nburn = 20, nthin = 1)
     expect_length(exec(bayesNWeights, !!!c(list(f$X, f$y), mc)), f$p)
     expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
     expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
@@ -1055,7 +1055,7 @@ test_that("mrmashWrapper refuses to let methodArgs override derived values", {
             dataDrivenPriorMatrices = list(U = list(diag(2))),
             methodArgs = MrmashOptions(S0 = list(diag(2)))
         ),
-        "derived by the wrapper"
+        "supplied by pecotmr"
     )
 })
 

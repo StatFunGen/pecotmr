@@ -40,8 +40,8 @@ test_that("makeGwasSumStatsFromDf() constructor creates object from data.frame",
 
     expect_s4_class(obj, "GwasSumStats")
     expect_equal(as.character(obj$study)[[1L]], "height")
-    expect_equal(getGenome(obj), "hg38")
-    expect_equal(length(getSumStats(obj)), 20)
+    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
+    expect_equal(length(sumStats(obj)), 20)
 })
 
 
@@ -49,14 +49,14 @@ test_that("makeGwasSumStatsFromDf() normalizes chr prefix", {
     df <- makeTestSumstatsDf(5)
     # Input has CHR = "1" (no prefix)
     obj <- makeGwasSumStatsFromDf(df)
-    chrs <- as.character(GenomicRanges::seqnames(getSumStats(obj)))
+    chrs <- as.character(GenomicRanges::seqnames(sumStats(obj)))
     expect_true(all(startsWith(chrs, "chr")))
 
     # Input already has "chr" prefix
     df2 <- df
     df2$CHR <- "chr1"
     obj2 <- makeGwasSumStatsFromDf(df2)
-    chrs2 <- as.character(GenomicRanges::seqnames(getSumStats(obj2)))
+    chrs2 <- as.character(GenomicRanges::seqnames(sumStats(obj2)))
     # Should not double-prefix
     expect_true(all(chrs2 == "chr1"))
     expect_false(any(grepl("^chrchr", chrs2)))
@@ -77,7 +77,7 @@ test_that("makeGwasSumStatsFromDf() removes rows with NA in required columns", {
         obj <- makeGwasSumStatsFromDf(df),
         "Removed.*SNPs with missing"
     )
-    expect_equal(length(getSumStats(obj)), 8)
+    expect_equal(length(sumStats(obj)), 8)
 })
 
 
@@ -85,7 +85,7 @@ test_that("getz() returns correct Z vector", {
     set.seed(99)
     df <- makeTestSumstatsDf(5)
     obj <- makeGwasSumStatsFromDf(df)
-    z <- getZ(obj)
+    z <- z(obj)
     expect_type(z, "double")
     expect_equal(length(z), 5)
 })
@@ -94,7 +94,7 @@ test_that("getz() returns correct Z vector", {
 test_that("getn() returns correct N vector", {
     df <- makeTestSumstatsDf(5)
     obj <- makeGwasSumStatsFromDf(df)
-    n <- getN(obj)
+    n <- nSamples(obj)
     expect_equal(length(n), 5)
     expect_true(all(n == 10000))
 })
@@ -103,11 +103,11 @@ test_that("getn() returns correct N vector", {
 test_that("getmaf() returns MAF when present, NULL when absent", {
     df <- makeTestSumstatsDf(5)
     obj_no_maf <- makeGwasSumStatsFromDf(df)
-    expect_null(getMaf(obj_no_maf))
+    expect_null(maf(obj_no_maf))
 
     df$MAF <- runif(5, 0.01, 0.5)
     obj_with_maf <- makeGwasSumStatsFromDf(df)
-    maf <- getMaf(obj_with_maf)
+    maf <- maf(obj_with_maf)
     expect_type(maf, "double")
     expect_equal(length(maf), 5)
 })
@@ -149,7 +149,7 @@ test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
         N = rep(100L, 3)
     )
     obj <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .sh_makeGenotypeHandle(),
@@ -170,27 +170,31 @@ test_that("getvary() returns var_y and NULL cases", {
     df <- makeTestSumstatsDf(5)
 
     obj_null <- makeGwasSumStatsFromDf(df, varY = NULL)
-    expect_null(getVarY(obj_null))
+    expect_null(varY(obj_null))
 
     obj_vy <- makeGwasSumStatsFromDf(df, varY = 4.5)
-    expect_equal(getVarY(obj_vy), 4.5)
+    expect_equal(varY(obj_vy), 4.5)
 })
 
 
-test_that("as.data.frame.makeGwasSumStatsFromDf() round-trips", {
+test_that("as.data.frame() round-trips in the standardized layout", {
     df_in <- makeTestSumstatsDf(15)
     obj <- makeGwasSumStatsFromDf(df_in)
     df_out <- as.data.frame(obj)
 
+    # One coercion per class: as.data.frame() is the table view of
+    # sumStats(), so it yields the standardized layout rather than the raw
+    # mcols names. The raw form is still reachable through
+    # as.data.frame(mcols(sumStats(obj))).
     expect_true(is.data.frame(df_out))
     expect_true(all(
-        c("SNP", "CHR", "BP", "A1", "A2", "Z", "N") %in%
+        c("variant_id", "chrom", "pos", "A1", "A2", "z", "N") %in%
             names(df_out)
     ))
     expect_equal(nrow(df_out), 15)
-    expect_equal(df_out$SNP, df_in$SNP)
-    # BP should round-trip
-    expect_equal(df_out$BP, as.integer(df_in$BP))
+    expect_equal(df_out$variant_id, df_in$SNP)
+    # position should round-trip
+    expect_equal(df_out$pos, as.integer(df_in$BP))
 })
 
 
@@ -202,7 +206,7 @@ test_that("as.data.frame.makeGwasSumStatsFromDf() round-trips", {
 
 test_that("show.GwasSumStats prints nrow and genome build", {
     ss <- GwasSumStats(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
         genome = "hg19",
         ldSketch = .sh_makeGenotypeHandle()
@@ -221,13 +225,13 @@ test_that("show.GwasSumStats prints nrow and genome build", {
 # =============================================================================
 
 test_that("GwasSumStats() errors when required args are missing", {
-    expect_error(GwasSumStats(study = "g1"), "are all required")
+    expect_error(GwasSumStats(studyName = "g1"), "are all required")
 })
 
 test_that("GwasSumStats() errors when genome is not a single string", {
     expect_error(
         GwasSumStats(
-            study = "g1",
+            studyName = "g1",
             entry = list(.sh_makeQtlSumstatsGr()),
             genome = c("hg19", "hg38"),
             ldSketch = .sh_makeGenotypeHandle()
@@ -239,7 +243,7 @@ test_that("GwasSumStats() errors when genome is not a single string", {
 test_that("GwasSumStats() errors when entry is not a list", {
     expect_error(
         GwasSumStats(
-            study = "g1",
+            studyName = "g1",
             entry = "not_a_list",
             genome = "hg19",
             ldSketch = .sh_makeGenotypeHandle()
@@ -251,7 +255,7 @@ test_that("GwasSumStats() errors when entry is not a list", {
 test_that("GwasSumStats() errors when length(entry) != length(study)", {
     expect_error(
         GwasSumStats(
-            study = c("g1", "g2"),
+            studyName = c("g1", "g2"),
             entry = list(.sh_makeQtlSumstatsGr()),
             genome = "hg19",
             ldSketch = .sh_makeGenotypeHandle()
@@ -263,7 +267,7 @@ test_that("GwasSumStats() errors when length(entry) != length(study)", {
 test_that("GwasSumStats() errors when a per-study column has a bad length", {
     expect_error(
         GwasSumStats(
-            study = c("g1", "g2"),
+            studyName = c("g1", "g2"),
             entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
             genome = "hg19",
             ldSketch = .sh_makeGenotypeHandle(),
@@ -275,7 +279,7 @@ test_that("GwasSumStats() errors when a per-study column has a bad length", {
 
 test_that("GwasSumStats() attaches extra per-study columns via ...", {
     obj <- GwasSumStats(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
         genome = "hg19",
         ldSketch = .sh_makeGenotypeHandle(),
@@ -286,7 +290,7 @@ test_that("GwasSumStats() attaches extra per-study columns via ...", {
     # so a bare `cohort =` here would read as adding an entry.
     expect_error(
         GwasSumStats(
-            study = "g1",
+            studyName = "g1",
             entry = list(),
             genome = "hg19",
             cohort = "UKB"
@@ -295,43 +299,43 @@ test_that("GwasSumStats() attaches extra per-study columns via ...", {
     )
 })
 
-test_that("getSumStats() errors on an empty GwasSumStats", {
+test_that("sumStats() errors on an empty GwasSumStats", {
     empty <- GwasSumStats(
-        study = character(0),
+        studyName = character(0),
         entry = list(),
         genome = "hg19",
         ldSketch = .sh_makeGenotypeHandle(),
         varY = numeric(0)
     )
     expect_equal(nrow(empty), 0L)
-    expect_error(getSumStats(empty), "has no rows")
+    expect_error(sumStats(empty), "has no rows")
 })
 
-test_that("getSumStats() on a multi-study GwasSumStats needs a study selector", {
+test_that("sumStats() on a multi-study GwasSumStats needs a study selector", {
     two <- GwasSumStats(
-        study = c("g1", "g2"),
+        studyName = c("g1", "g2"),
         entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
         genome = "hg19",
         ldSketch = .sh_makeGenotypeHandle()
     )
-    expect_error(getSumStats(two), "studies. Pass")
-    expect_error(getSumStats(two, study = "ghost"), "Unknown study")
+    expect_error(sumStats(two), "studies. Pass")
+    expect_error(sumStats(two, studyName = "ghost"), "Unknown study")
 })
 
 test_that("GwasSumStats: ldSketch is optional (NULL for LD-free workflows)", {
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.sh_makeQtlSumstatsGr()),
         genome = "hg19"
     ) # ldSketch omitted -> NULL
-    expect_null(getLdSketch(ss))
+    expect_null(ldSketch(ss))
     expect_output(show(ss), "none \\(LD-free\\)")
 })
 
 test_that("GwasSumStats: a non-GenotypeHandle ldSketch is rejected", {
     expect_error(
         GwasSumStats(
-            study = "g1",
+            studyName = "g1",
             entry = list(.sh_makeQtlSumstatsGr()),
             genome = "hg19",
             ldSketch = "not_a_handle"
@@ -378,7 +382,7 @@ test_that("show(GwasSumStats) does not error", {
 
 test_that("GwasSumStats records blockId as the seqname without a manifest", {
     g <- .gss_variants(c("chr1", "chr1", "chr2"), c(100L, 900L, 300L))
-    x <- GwasSumStats(study = "t1", entry = list(g), genome = "hg38")
+    x <- GwasSumStats(studyName = "t1", entry = list(g), genome = "hg38")
     expect_equal(length(x), 2L)
     expect_equal(x$blockId, c("chr1", "chr2"))
     expect_true(is_in("blockId", colnames(x)))
@@ -387,7 +391,7 @@ test_that("GwasSumStats records blockId as the seqname without a manifest", {
 test_that("GwasSumStats splits by LD block when a manifest is supplied", {
     g <- .gss_variants("chr1", c(100L, 250L, 900L))
     x <- GwasSumStats(
-        study = "t1",
+        studyName = "t1",
         entry = list(g),
         genome = "hg38",
         ldBlocks = .gss_ldBlocks()
@@ -403,7 +407,7 @@ test_that("GwasSumStats splits by LD block when a manifest is supplied", {
 test_that("GwasSumStats replicates the study row against each block", {
     g <- .gss_variants("chr1", c(100L, 900L))
     x <- GwasSumStats(
-        study = "t1",
+        studyName = "t1",
         entry = list(g),
         genome = "hg38",
         varY = 2,
@@ -417,7 +421,7 @@ test_that("GwasSumStats warns about variants outside every LD block", {
     g <- .gss_variants("chr1", c(100L, 5000L))
     expect_warning(
         x <- GwasSumStats(
-            study = "t1",
+            studyName = "t1",
             entry = list(g),
             genome = "hg38",
             ldBlocks = .gss_ldBlocks()
@@ -429,7 +433,7 @@ test_that("GwasSumStats warns about variants outside every LD block", {
 
 test_that("GwasSumStats keeps blockId aligned across two studies", {
     x <- GwasSumStats(
-        study = c("t1", "t2"),
+        studyName = c("t1", "t2"),
         entry = list(
             .gss_variants("chr1", c(100L, 900L)),
             .gss_variants("chr1", 900L)
@@ -443,7 +447,7 @@ test_that("GwasSumStats keeps blockId aligned across two studies", {
 
 test_that("GwasSumStats blockId survives subsetting", {
     x <- GwasSumStats(
-        study = "t1",
+        studyName = "t1",
         entry = list(.gss_variants("chr1", c(100L, 900L))),
         genome = "hg38",
         ldBlocks = .gss_ldBlocks()
@@ -484,7 +488,7 @@ test_that("GwasSumStats blockId survives subsetting", {
 test_that("supplying both ldBlocks and blockId is refused", {
     expect_error(
         GwasSumStats(
-            study = "g1",
+            studyName = "g1",
             entry = list(.gss_entry()),
             genome = "hg19",
             ldBlocks = GenomicRanges::GRanges(
@@ -500,7 +504,7 @@ test_that("supplying both ldBlocks and blockId is refused", {
 test_that("blockId must carry one value per entry", {
     expect_error(
         GwasSumStats(
-            study = c("g1", "g2"),
+            studyName = c("g1", "g2"),
             entry = list(.gss_entry(), .gss_entry()),
             genome = "hg19",
             blockId = "only-one"
@@ -511,7 +515,7 @@ test_that("blockId must carry one value per entry", {
 
 test_that("a supplied blockId survives onto the elements", {
     obj <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.gss_entry()),
         genome = "hg19",
         blockId = "chr1:1-10000"
@@ -531,7 +535,7 @@ test_that("combineGwasSumStats() row-binds per-block pieces in order", {
     expect_equal(nrow(out), nrow(a) + nrow(b))
     expect_equal(as.character(out$blockId), c("chr1_1_1000", "chr1_1001_2000"))
     expect_identical(as.list(out), c(as.list(a), as.list(b)))
-    expect_equal(getGenome(out), "hg19")
+    expect_equal(unname(GenomeInfoDb::genome(out)), "hg19")
 })
 
 
@@ -551,12 +555,12 @@ test_that("combineGwasSumStats() concatenates the per-element QC audit", {
     b <- makeGwasBlock("chr1_1001_2000", 1100L, n = 3L)
     out <- combineGwasSumStats(a, b)
 
-    audit <- getQcInfo(out)$entryAudit
+    audit <- qcInfo(out)$entryAudit
     expect_length(audit, nrow(out))
     # element i's audit still describes element i
     expect_equal(audit[[1L]]$block, "chr1_1_1000")
     expect_equal(audit[[2L]]$block, "chr1_1001_2000")
-    expect_equal(getQcInfo(out)$options, getQcInfo(a)$options)
+    expect_equal(qcInfo(out)$options, qcInfo(a)$options)
 })
 
 
@@ -567,10 +571,10 @@ test_that("combineGwasSumStats() unions the per-block LD panels", {
 
     # Keeping only the first block's panel would leave a two-block collection
     # whose LD reference covers one block.
-    expect_equal(nrow(getLdSketch(out)), 8L)
+    expect_equal(nrow(ldSketch(out)), 8L)
     expect_equal(
-        rownames(getLdSketch(out)),
-        c(rownames(getLdSketch(a)), rownames(getLdSketch(b)))
+        rownames(ldSketch(out)),
+        c(rownames(ldSketch(a)), rownames(ldSketch(b)))
     )
 })
 
@@ -578,8 +582,8 @@ test_that("combineGwasSumStats() unions the per-block LD panels", {
 test_that("combineGwasSumStats() honours an explicit ldSketch", {
     a <- makeGwasBlock("chr1_1_1000", 100L)
     b <- makeGwasBlock("chr1_1001_2000", 1100L)
-    out <- combineGwasSumStats(a, b, ldSketch = getLdSketch(a))
-    expect_identical(getLdSketch(out), getLdSketch(a))
+    out <- combineGwasSumStats(a, b, ldSketch = ldSketch(a))
+    expect_identical(ldSketch(out), ldSketch(a))
 })
 
 
@@ -634,24 +638,24 @@ test_that("combineGwasSumStats() validates its inputs", {
     )
 })
 
-test_that("getSumStats(GwasSumStats) refuses the QtlSumStats selectors", {
+test_that("sumStats(GwasSumStats) refuses the QtlSumStats selectors", {
     # The shared SumStatsBase accessors pass the union of both classes'
     # selectors, so a GWAS sees context / trait / annotateSignificance. It
     # names them in order to reject them, rather than absorbing them in `...`.
     gss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.gss_entry()),
         genome = "hg19"
     )
-    expect_error(getSumStats(gss, context = "brain"), "QtlSumStats selector")
-    expect_error(getSumStats(gss, trait = "G1"), "QtlSumStats selector")
+    expect_error(sumStats(gss, context = "brain"), "QtlSumStats selector")
+    expect_error(sumStats(gss, trait = "G1"), "QtlSumStats selector")
     expect_error(
-        getSumStats(gss, annotateSignificance = "qvalue"),
+        sumStats(gss, annotateSignificance = "qvalue"),
         "QtlSumStats selector"
     )
     # and the same through an accessor that forwards them
-    expect_error(getZ(gss, context = "brain"), "QtlSumStats selector")
+    expect_error(z(gss, context = "brain"), "QtlSumStats selector")
     # the supported selectors still work
-    expect_s4_class(getSumStats(gss), "GRanges")
-    expect_type(getZ(gss), "double")
+    expect_s4_class(sumStats(gss), "GRanges")
+    expect_type(z(gss), "double")
 })

@@ -69,14 +69,17 @@ Options forwarded to the engine behind a TWAS weight method,
   what lets each be checked exactly, rather than against a union in which
   an option meant for the other path would pass and then be dropped.
 
-  \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot be
-  checked: \code{cv.glmnet}, \code{cv.ncvreg} and \code{fit_model} each
-  take \code{...}, so they accept any name and there is nothing to check
-  against. Every other constructor here rejects an unknown option. See
-  \code{\link{MethodOptions}}.
+  \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
+  check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
+  \code{fit_model} each take \code{...}, so they accept any name and there
+  is nothing to check against. Every other constructor here rejects an
+  unknown option. Separately, and in all of them, a name pecotmr supplies
+  itself is refused --- \code{GlmnetOptions(alpha=)} and
+  \code{NcvregOptions(penalty=)} select the penalty family, which is the
+  calling wrapper's to set. See \code{\link{MethodOptions}}.
 }
 \examples{
 GlmnetOptions(nfold = 10)
-QggOptions(nit = 1000)
+QggOptions(updateB = TRUE)
 LassosumOptions(thr = 1e-4)
 }

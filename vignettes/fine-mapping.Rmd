@@ -80,22 +80,22 @@ fmr
 Per-tuple PIPs:
 
 ```{r individual-pips}
-pip <- getPip(
+pipAll <- pip(
     fmr,
-    study = "study1",
+    studyName = "study1",
     context = "brain",
     trait = "ENSG_example",
     method = "susie"
 )
-head(sort(pip, decreasing = TRUE), 5)
+head(sort(pipAll, decreasing = TRUE), 5)
 ```
 
 Credible sets:
 
 ```{r individual-cs}
-getCs(
+credibleSets(
     fmr,
-    study = "study1",
+    studyName = "study1",
     context = "brain",
     trait = "ENSG_example",
     method = "susie",
@@ -108,9 +108,9 @@ sumstats into one long-format data.frame:
 
 ```{r individual-toploci}
 head(
-    getTopLoci(
+    topLoci(
         fmr,
-        study = "study1",
+        studyName = "study1",
         context = "brain",
         trait = "ENSG_example",
         method = "susie"
@@ -161,27 +161,27 @@ fineMappingPipeline(
     contexts = "brain",
     traitId = "ENSG_example",
     cisWindow = 5e5,
-    credibleSetArgs = CredibleSetParam(
+    credibleSetParam = CredibleSetParam(
         coverage = 0.95,
         secondaryCoverage = c(0.7, 0.5),
         signalCutoff = 0.025,
         minAbsCorr = 0.8,
-        L = 10L
+        maxNumSingleEffects = 10L
     ),
-    addSusieInf = TRUE,
+    initializeWithSusieInf = TRUE,
     naAction = "drop", # "drop" (default) or "impute"
     verbose = 1
 )
 ```
 
 -  `naAction` controls how phenotype NAs are handled by
-    `getResidualizedPhenotypes()`: `"drop"` removes samples with any NA across
+    `residualizedPhenotypes()`: `"drop"` removes samples with any NA across
     the requested traits, `"impute"` mean-imputes each trait independently.
--  `addSusieInf = TRUE` runs SuSiE-inf first and uses its result to
-    initialise the susie fit, which improves credible-set purity in regions
-    with background polygenic signal.
--  `CredibleSetParam(L = ...)` bounds how many single effects the fit may
-    carry, and so how many credible sets can exist.
+-  `initializeWithSusieInf = TRUE` runs SuSiE-inf first and uses its
+    result to initialise the susie fit, which improves credible-set purity
+    in regions with background polygenic signal.
+-  `CredibleSetParam(maxNumSingleEffects = ...)` bounds how many single
+    effects the fit may carry, and so how many credible sets can exist.
 -  `CredibleSetParam(secondaryCoverage = ...)` adds secondary CS columns at the
     requested coverages (alongside the primary `coverage`); useful when you
     want both narrow and broad CS reports.
@@ -217,13 +217,14 @@ colnames(fmr)
 lengths(fmr) # variants per tuple
 ```
 
-Rather than reaching into the payload, use the view accessors. Each returns a
-tidy table over the whole collection, with the tuple columns carried along:
+Rather than reaching into the payload, use the view accessors. `topLoci()`
+returns a `GRanges` over the whole collection with the tuple columns carried
+in `mcols()`; the others return tidy tables:
 
 ```{r fm-views}
-head(getTopLoci(fmr), 3) # per-variant posterior summary
-head(getCs(fmr), 3) # credible-set membership
-head(getCredibleSetSummary(fmr), 3) # one row per credible set
+head(topLoci(fmr), 3) # per-variant posterior summary
+head(credibleSets(fmr), 3) # credible-set membership
+head(credibleSetSummary(fmr), 3) # one row per credible set
 ```
 
 Passing a tuple selects a single fit and returns that tuple's values on their
@@ -231,17 +232,17 @@ own — a bare vector rather than a table:
 
 ```{r fm-one-tuple}
 key <- list(
-    study = fmr$study[[1L]],
+    studyName = fmr$study[[1L]],
     context = fmr$context[[1L]],
     trait = fmr$trait[[1L]],
     method = fmr$method[[1L]]
 )
-pip <- do.call(getPip, c(list(fmr), key))
-length(pip)
+pipOne <- do.call(pip, c(list(fmr), key))
+length(pipOne)
 ```
 
-The underlying SuSiE fit is available with `getSusieFit()` and the
-cross-validation record with `getCvResult()`, both keyed the same way.
+The underlying SuSiE fit is available with `susieFit()` and the
+cross-validation record with `cvResult()`, both keyed the same way.
 Range-based subsetting works directly:
 
 ```{r fm-range}

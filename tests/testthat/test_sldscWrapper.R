@@ -41,9 +41,9 @@ test_that("readSldscTrait reads polyfun outputs correctly", {
     expect_equal(result$nBlocks, 5L)
     expect_equal(length(result$tau), 3L)
     expect_true("myannot_0" %in% names(result$tau))
-    expect_true(is.matrix(result$tauBlocks))
-    expect_equal(nrow(result$tauBlocks), 5L)
-    expect_equal(ncol(result$tauBlocks), 3L)
+    expect_true(is.matrix(result$annotationJackknifeCoefs))
+    expect_equal(nrow(result$annotationJackknifeCoefs), 5L)
+    expect_equal(ncol(result$annotationJackknifeCoefs), 3L)
 })
 
 test_that("readSldscTrait errors on missing files", {
@@ -344,7 +344,7 @@ test_that("isBinarySldscAnnot errors on non-SldscData input", {
 
 
 # =============================================================================
-# standardizeSldscTrait  (operates on SldscData via getTraitRun)
+# standardizeSldscTrait  (operates on SldscData via sldscResults)
 # =============================================================================
 
 # Build a readSldscTrait-shaped run with specific values the tests assert on.
@@ -367,7 +367,7 @@ test_that("isBinarySldscAnnot errors on non-SldscData input", {
         propH2 = setNames(rep(0.15, n), cats),
         propSnps = setNames(rep(0.06, n), cats),
         h2g = h2g,
-        tauBlocks = blocks,
+        annotationJackknifeCoefs = blocks,
         nBlocks = nBlocks
     )
 }
@@ -376,7 +376,7 @@ test_that("isBinarySldscAnnot errors on non-SldscData input", {
 # standardizeSldscTrait(sldscData, trait, mode, idx, ...) API can reach it.
 .wrapRun <- function(run, joint = run) {
     SldscData(
-        annot = data.frame(
+        annotData = data.frame(
             CHR = 1,
             SNP = "rs1",
             A = 1,

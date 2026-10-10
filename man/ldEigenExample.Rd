@@ -19,7 +19,7 @@ reference panel, so the LD is real rather than simulated. Describes the
 same variants as \code{\link{ldScoreExample}}, so the four estimators can
 be compared on one reference.
 
-The panel behind it has \code{nRef = 1000}. That is small enough that
+The panel behind it has \code{nSamples = 1000}. That is small enough that
 \code{method = "hdl"}, which models reference-panel noise explicitly,
 shrinks its estimate hard -- correct behaviour for a panel this size
 rather than a fault.

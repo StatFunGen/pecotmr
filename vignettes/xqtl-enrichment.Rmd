@@ -44,21 +44,21 @@ qtlFineMappingExample
 ## Input data
 
 Each object is a `GRangesList`-backed collection, one element per tuple;
-use the accessors rather than reaching into slots. `getTopLoci()` returns the
-per-variant posterior table (identity columns, `pip`, and credible-set
-membership):
+use the accessors rather than reaching into slots. `topLoci()` returns the
+per-variant posterior summary as a `GRanges`, with the identity columns,
+`pip`, and credible-set membership in `mcols()`:
 
 ```{r toploci}
-head(getTopLoci(gwasFineMappingExample))
-head(getTopLoci(qtlFineMappingExample))
+head(topLoci(gwasFineMappingExample))
+head(topLoci(qtlFineMappingExample))
 ```
 
 Posterior inclusion probabilities across all variants in each region, taken
 from the underlying SuSiE fit:
 
 ```{r pip-plots, fig.width = 7, fig.height = 3.2}
-gwas_pip <- getSusieFit(gwasFineMappingExample)$pip
-qtl_pip <- getSusieFit(qtlFineMappingExample)$pip
+gwas_pip <- susieFit(gwasFineMappingExample)$pip
+qtl_pip <- susieFit(qtlFineMappingExample)$pip
 op <- par(mfrow = c(1, 2))
 plot(
     gwas_pip,

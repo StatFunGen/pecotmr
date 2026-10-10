@@ -28,7 +28,7 @@ yields two credible sets. Built by
 \examples{
 data(qtlFineMappingPairedExample)
 data(qtlSumStatsExample)
-fe <- getFineMappingResult(qtlFineMappingPairedExample)
+fe <- fineMappingResult(qtlFineMappingPairedExample)
 computeCsCorrelation(fe, qtlSumStatsExample)
 
 }

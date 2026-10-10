@@ -8,15 +8,15 @@ context("qtlEnrichmentPipeline")
 # The internal builders take an identity list keyed by the collection's own
 # columns; the axes a GWAS collection lacks are NA.
 .qep_gwasIdent <- function(
-    study,
+    studyName,
     context = NA_character_,
     trait = NA_character_
 ) {
-    list(study = study, context = context, trait = trait)
+    list(study = studyName, context = context, trait = trait)
 }
 
-.qep_qtlIdent <- function(study, context) {
-    list(study = study, context = context)
+.qep_qtlIdent <- function(studyName, context) {
+    list(study = studyName, context = context)
 }
 
 .qep_makeHandle <- function(
@@ -82,7 +82,7 @@ context("qtlEnrichmentPipeline")
         methodVec <- c(methodVec, "susie")
     }
     GwasFineMappingResult(
-        study = studyVec,
+        studyName = studyVec,
         method = methodVec,
         entry = entries,
         ldSketch = if (with_sketch) .qep_makeHandle() else NULL
@@ -105,7 +105,7 @@ context("qtlEnrichmentPipeline")
         simplify = FALSE
     )
     QtlFineMappingResult(
-        study = studies,
+        studyName = studies,
         context = ctx,
         trait = trs,
         method = methods,
@@ -159,7 +159,7 @@ test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
     alpha <- alpha / rowSums(alpha)
     sketch <- .qep_makeHandle()
     gfmr <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(fineMappingRow(
             variantIds = ids,
@@ -173,7 +173,7 @@ test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
         ldSketch = sketch
     )
     qfmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -213,7 +213,7 @@ test_that("qtlEnrichmentPipeline: keys a QTL outcome side by its trait", {
     # study alone they collide -- the pipeline would abort on conflicting PIPs
     # -- and one estimate would stand in for both traits.
     outcome <- QtlFineMappingResult(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("t1", "t2"),
         method = c("susie", "susie"),
@@ -313,9 +313,9 @@ test_that("qtlEnrichmentPipeline: ldSketch mismatch errors", {
     # Build the QTL with a sketch carrying a different sample set.
     gfmr <- .qep_makeGwasFmr()
     qSketch <- .qep_makeHandle()
-    qSketch@sampleIds <- paste0("z", seq_len(getNSamples(qSketch)))
+    qSketch@sampleIds <- paste0("z", seq_len(nSamples(qSketch)))
     qfmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -362,7 +362,7 @@ test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a con
     e1 <- .qep_makeFmEntry(variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5)))
     e2 <- .qep_makeFmEntry(variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5)))
     qfmr <- QtlFineMappingResult(
-        study = c("Q1", "Q2"),
+        studyName = c("Q1", "Q2"),
         context = c("shared_ctx", "shared_ctx"),
         trait = c("t1", "t1"),
         method = c("susie", "susie"),
@@ -419,7 +419,7 @@ test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema
         )
     )
     gfmr <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(emptyEntry),
         ldSketch = .qep_makeHandle()
@@ -472,7 +472,7 @@ test_that(".enrBuildGwasPipVector: deduplicates identical PIPs across blocks", {
         pip = c(0.5, 0.4)
     )
     g <- GwasFineMappingResult(
-        study = c("G1", "G1"),
+        studyName = c("G1", "G1"),
         method = c("susie", "susie"),
         entry = list(e1, e2),
         ldSketch = .qep_makeHandle()
@@ -501,7 +501,7 @@ test_that(".enrBuildGwasPipVector: conflicting PIPs across blocks errors", {
         alpha = matrix(c(0.8, 0.1), nrow = 1)
     )
     g <- GwasFineMappingResult(
-        study = c("G1", "G1"),
+        studyName = c("G1", "G1"),
         method = c("susie", "susie"),
         entry = list(e1, e2),
         ldSketch = .qep_makeHandle()
@@ -559,7 +559,7 @@ test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context)
     # Trimmed to the number of causal variants actually asked for; callers
     # that pass a shorter causalIdx would otherwise warn on the assignment.
     causalPips = c(0.8, 0.6, 0.9)[seq_along(causalIdx)],
-    L = 2L
+    maxNumSingleEffects = 2L
 ) {
     set.seed(seed)
     variantNames <- paste0("1:", seq_len(nSnps), ":A:G")
@@ -567,7 +567,7 @@ test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context)
     gwasPip[causalIdx] <- causalPips
     names(gwasPip) <- variantNames
 
-    alpha <- matrix(1 / nSnps, nrow = L, ncol = nSnps)
+    alpha <- matrix(1 / nSnps, nrow = maxNumSingleEffects, ncol = nSnps)
     alpha[1, ] <- 0.001
     alpha[1, causalIdx[1]] <- 0.95
     alpha[1, ] <- alpha[1, ] / sum(alpha[1, ])
@@ -859,7 +859,7 @@ test_that(".enrBuildGwasPipVector: unknown study yields numeric(0)", {
 
 test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with variantIds", {
     # Unnamed pip of length 2 against 3 variant ids -> ids come from
-    # getVariantIds and length(ids) != length(pip) -> the block is skipped,
+    # variantIds and length(ids) != length(pip) -> the block is skipped,
     # leaving no pieces -> numeric(0).
     badEntry <- fineMappingRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
@@ -871,7 +871,7 @@ test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with
         )
     )
     g <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(badEntry),
         ldSketch = .qep_makeHandle()
@@ -898,7 +898,7 @@ test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
         )
     )
     qfmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -929,7 +929,7 @@ test_that(".enrBuildQtlRegionsList: skips a fit with no V and no prior_variance"
         )
     )
     qfmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -948,7 +948,7 @@ test_that(".enrBuildQtlRegionsList: skips a fit with no V and no prior_variance"
 test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's variant ids", {
     unnamedPipFit <- list(
         alpha = matrix(c(0.6, 0.4), nrow = 1),
-        pip = c(0.6, 0.4), # unnamed -> names assigned from getVariantIds
+        pip = c(0.6, 0.4), # unnamed -> names assigned from variantIds
         V = 0.1
     )
     entry <- fineMappingRow(
@@ -961,7 +961,7 @@ test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's varian
         )
     )
     qfmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -983,7 +983,7 @@ test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's varian
 test_that("qtlEnrichmentPipeline: empty QTL collection errors with the no-triples message", {
     gfmr <- .qep_makeGwasFmr()
     qfmrEmpty <- QtlFineMappingResult(
-        study = character(0),
+        studyName = character(0),
         context = character(0),
         trait = character(0),
         method = character(0),
@@ -1012,7 +1012,7 @@ test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies
         pip = c(0.4, 0.3, 0.2)
     )
     gfmr <- GwasFineMappingResult(
-        study = c("G1", "G2"),
+        studyName = c("G1", "G2"),
         method = c("susie", "susie"),
         entry = list(e1, e2),
         ldSketch = .qep_makeHandle()
@@ -1042,7 +1042,7 @@ test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and i
         )
     )
     qfmr <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -1091,7 +1091,7 @@ test_that(".enrBuildQtlRegionsList reads prior variance under either name", {
         local_mocked_bindings(
             .enrMatchRows = function(qtlFmr, ident) 1L,
             .fmrRowParts = function(qtlFmr, i) "parts",
-            getSusieFit = function(parts) fit,
+            susieFit = function(parts) fit,
             .package = "pecotmr"
         )
         pecotmr:::.enrBuildQtlRegionsList("fmr", "ident")

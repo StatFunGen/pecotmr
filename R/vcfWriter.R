@@ -14,14 +14,14 @@ NULL
 setMethod(
     "writeSumStatsVcf",
     signature("GwasSumStats"),
-    function(x, outputPath, sampleName = NULL, study = NULL) {
+    function(x, outputPath, sampleName = NULL, studyName = NULL) {
         if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
             abort(
                 "Package 'VariantAnnotation' is required for writeSumStatsVcf"
             )
         }
-        study <- .vcfResolveStudy(x, study)
-        ss <- getSumStats(x, study = study)
+        studyName <- .vcfResolveStudy(x, studyName)
+        ss <- sumStats(x, studyName = studyName)
         mc <- mcols(ss)
         .writeVcfImpl(
             chrom = as.character(seqnames(ss)),
@@ -31,7 +31,7 @@ setMethod(
             snpIds = mc$SNP,
             geno = .vcfSumstatsGeno(mc, length(ss)),
             genoHeader = .vcfSumstatsGenoHeader(),
-            sampleName = sampleName %||% study,
+            sampleName = sampleName %||% studyName,
             outputPath = outputPath
         )
     }
@@ -40,9 +40,9 @@ setMethod(
 # Select which study to write (a GwasSumStats can hold many); a single-study
 # collection defaults to its one study.
 # @noRd
-.vcfResolveStudy <- function(x, study) {
-    if (!is.null(study)) {
-        return(study)
+.vcfResolveStudy <- function(x, studyName) {
+    if (!is.null(studyName)) {
+        return(studyName)
     }
     if (nrow(x) != 1L) {
         msg <- glue(
@@ -90,7 +90,7 @@ setMethod(
         x,
         outputPath,
         sampleName = NULL,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -108,7 +108,7 @@ setMethod(
         # iterates over the unique values of the requested axis.
         rowSpecs <- .resolveFineMappingRows(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -161,7 +161,7 @@ setMethod(
 # @noRd
 .resolveFineMappingRows <- function(
     x,
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -172,7 +172,7 @@ setMethod(
     hasContextSlot <- is_in("context", cols)
     hasTraitSlot <- is_in("trait", cols)
     selectors <- compact(list(
-        study = study,
+        study = studyName,
         context = if (hasContextSlot) context,
         trait = if (hasTraitSlot) trait,
         method = method
@@ -335,20 +335,22 @@ setMethod(
     c(fixed, .vcfCsSpecs(base), .vcfFullFitSpecs(base))
 }
 
-# Resolve the per-variant body: the fine-mapping POSTERIOR (getTopLoci at
+# Resolve the per-variant body: the fine-mapping POSTERIOR (topLoci at
 # signalCutoff 0 = every fitted variant, carrying pip / CS membership /
 # conditional effect) joined to the MARGINAL univariate sumstats
-# (getMarginalEffects) where those exist. mvSuSiE / fSuSiE have no marginal
+# (marginalEffects) where those exist. mvSuSiE / fSuSiE have no marginal
 # sumstats, so the posterior drives the variant set; univariate susie adds
 # marginal ES=beta / SE / LP / AF on top. Returns list(base, m, hasPost).
 # @noRd
 .vcfResolveBody <- function(entry, sn) {
     post <- try_fetch(
-        as_tibble(getTopLoci(entry, signalCutoff = 0)),
+        as_tibble(as.data.frame(
+            S4Vectors::mcols(topLoci(entry, signalCutoff = 0))
+        )),
         error = function(cnd) NULL
     )
     marg <- try_fetch(
-        as_tibble(getMarginalEffects(entry)),
+        as_tibble(marginalEffects(entry)),
         error = function(cnd) NULL
     )
     hasPost <- !is.null(post) && nrow(post) > 0L
@@ -411,7 +413,7 @@ setMethod(
     splitByContext,
     splitByTrait
 ) {
-    entry <- getFineMappingResult(
+    entry <- fineMappingResult(
         x,
         spec$study,
         spec$context,

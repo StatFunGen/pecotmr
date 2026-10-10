@@ -15,11 +15,11 @@ An in-memory bundle of the loaded S-LDSC inputs, produced from
 \section{Slots}{
 
 \describe{
-\item{\code{annot}}{A \code{data.frame} of target annotations with at least
+\item{\code{annotData}}{A \code{data.frame} of target annotations with at least
 \code{CHR} and \code{SNP} columns plus one or more annotation columns
 (\code{BP}/\code{CM} optional).}
 
-\item{\code{frq}}{A \code{data.frame} of reference-panel allele frequencies with
+\item{\code{frqData}}{A \code{data.frame} of reference-panel allele frequencies with
 \code{SNP} and \code{MAF} columns (a 0-row frame when no \code{.frq} data
 was supplied).}
 

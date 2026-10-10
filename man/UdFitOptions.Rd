@@ -9,7 +9,9 @@ UdFitOptions(...)
 \arguments{
 \item{...}{Any \code{udr} control field: \code{unconstrained.update},
 \code{maxiter}, \code{tol}, \code{tol.lik}, \code{penalty.type}, and
-the rest of \code{udr::ud_fit_control_default()}.}
+the rest of \code{udr::ud_fit_control_default()}. The one exception is
+\code{lambda}, which pecotmr derives from the number of conditions and
+so refuses here.}
 }
 \value{
 A \code{\link{MethodOptions}} object.

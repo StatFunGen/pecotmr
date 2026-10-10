@@ -10,7 +10,7 @@ LdData(
   snpIdx = NULL,
   variants,
   blockMetadata,
-  nRef = 0L,
+  nSamples = 0L,
   mixtureWeights = NULL
 )
 }
@@ -33,12 +33,12 @@ single block is derived from \code{variants}, so a bare genomic span
 columns or \code{size} must be supplied. Normalised on the way in and
 stored as a \code{GRanges} (see the \code{blockMetadata} slot).}
 
-\item{nRef}{Integer, reference panel sample size.}
+\item{nSamples}{Integer, reference panel sample size.}
 
 \item{mixtureWeights}{Optional numeric vector of mixing proportions, one per
 panel in \code{genotypeHandle} when it is a list. Must be non-negative and
 sum to 1. Required whenever \code{genotypeHandle} is a list and downstream
-code will call \code{getCorrelation()}.}
+code will call \code{ldMatrix()}.}
 }
 \value{
 An \code{LdData} object.

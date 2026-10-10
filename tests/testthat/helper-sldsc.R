@@ -246,7 +246,7 @@
         # Per-block tau has to vary: a constant matrix gives a jackknife
         # tauStarSe of exactly 0, which drops every trait from the
         # DerSimonian-Laird meta (nTraits == 0 and all-NA meta rows).
-        tauBlocks = matrix(
+        annotationJackknifeCoefs = matrix(
             rep(tau * seq(0.9, 1.1, length.out = nBlocks), n),
             nBlocks,
             n,
@@ -295,5 +295,5 @@
         tr
     }
     traits <- setNames(map(traitNames, function(.) mkTrait()), traitNames)
-    SldscData(annot = annot, frq = frq, traits = traits)
+    SldscData(annotData = annot, frqData = frq, traits = traits)
 }

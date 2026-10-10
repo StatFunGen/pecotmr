@@ -32,6 +32,6 @@ This function constructs a list that mimics the structure of
 }
 \examples{
 data(fsusieFineMappingExample)
-fit <- getSusieFit(fsusieFineMappingExample)
+fit <- susieFit(fsusieFineMappingExample)
 fsusieGetCs(fit)
 }

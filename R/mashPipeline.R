@@ -1539,7 +1539,7 @@ mashPosteriorContrast <- function(
 #' mi <- mashInputExample
 #' mk <- function(b, s) {
 #'   qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
-#'     study = "mash")
+#'     studyName = "mash")
 #' }
 #' ssl <- list(strong = mk("strong.b", "strong.s"),
 #'   random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
@@ -2518,9 +2518,10 @@ mergeMashData <- function(resData, oneData) {
 # row indices of its "strong" variants. Class dispatch:
 #   QtlSumStats / GwasSumStats -> .mashSumStatsToMatrices; strong = the single
 #       most significant variant (max|z|) per condition, unioned.
-#   FineMappingResultBase      -> pivot getMarginalEffects() into a
+#   FineMappingResultBase      -> pivot marginalEffects() into a
 #       variants x context (beta, se) pair; strong = the lead (max PIP) variant
-#       of each credible set in each condition (getCs()), unioned. Conditions
+#       of each credible set in each condition (credibleSets()), unioned.
+#       Conditions
 #       with no credible set contribute no strong variant.
 # For z-scale QtlSumStats the returned Shat is 1, so downstream code that forms
 # z = b / s recovers the z-scores uniformly across both scales.
@@ -2555,11 +2556,11 @@ mergeMashData <- function(resData, oneData) {
 # PIP) variant.
 # @noRd
 .mashFmrMatrices <- function(obj, coverage) {
-    rawMe <- getMarginalEffects(obj)
-    rawCs <- getCs(obj, coverage = coverage)
+    rawMe <- marginalEffects(obj)
+    rawCs <- credibleSets(obj, coverage = coverage)
     if (!all(is_in(c("variant_id", "context", "beta", "se"), names(rawMe)))) {
         msg <- glue(
-            "mashInput: getMarginalEffects() must return variant_id/context/",
+            "mashInput: marginalEffects() must return variant_id/context/",
             "beta/se columns; a FineMappingResult with >= 2 contexts is ",
             "required."
         )
@@ -2957,7 +2958,7 @@ mashInput <- function(
 #' @param z Numeric matrix (variants x conditions). \code{rownames(z)} are
 #'   variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
 #'   conditions.
-#' @param study Study identifier (recycled across conditions).
+#' @param studyName Study identifier (recycled across conditions).
 #' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
 #'   embedded in the collection, or \code{NULL} (default) -- mash operates
 #'   across
@@ -2981,12 +2982,12 @@ mashInput <- function(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' z <- matrix(rnorm(6), 2, 3, dimnames = list(
 #'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-#' qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = panel,
+#' qtlSumStatsFromZMatrix(z = z, studyName = "s1", ldSketch = panel,
 #'   context = colnames(z), trait = "g1", genome = "hg38", n = 100)
 #' @export
 qtlSumStatsFromZMatrix <- function(
     z,
-    study,
+    studyName,
     ldSketch = NULL,
     context = colnames(z),
     trait = "mash",
@@ -3007,7 +3008,7 @@ qtlSumStatsFromZMatrix <- function(
     .qtlSumStatsFromMatrix(
         vids = vids,
         nCond = ncol(z),
-        study = study,
+        studyName = studyName,
         ldSketch = ldSketch,
         context = context,
         trait = trait,
@@ -3033,7 +3034,7 @@ qtlSumStatsFromZMatrix <- function(
 #'   conditions.
 #' @param shat Numeric matrix of standard errors, aligned with \code{bhat}
 #'   (identical dimensions and row/column order).
-#' @param study Study identifier (recycled across conditions).
+#' @param studyName Study identifier (recycled across conditions).
 #' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
 #'   embedded in the collection, or \code{NULL} (default) -- mash operates
 #'   across
@@ -3055,14 +3056,14 @@ qtlSumStatsFromZMatrix <- function(
 #' bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
 #'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
 #' shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
-#' qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, study = "s1",
+#' qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, studyName = "s1",
 #'   ldSketch = panel, context = colnames(bhat), trait = "g1",
 #'     genome = "hg38", n = 100)
 #' @export
 qtlSumStatsFromBetaMatrix <- function(
     bhat,
     shat,
-    study,
+    studyName,
     ldSketch = NULL,
     context = colnames(bhat),
     trait = "mash",
@@ -3077,7 +3078,7 @@ qtlSumStatsFromBetaMatrix <- function(
     .qtlSumStatsFromMatrix(
         vids = vids,
         nCond = ncol(bhat),
-        study = study,
+        studyName = studyName,
         ldSketch = ldSketch,
         context = context,
         trait = trait,
@@ -3157,7 +3158,7 @@ qtlSumStatsFromBetaMatrix <- function(
 .qtlSumStatsFromMatrix <- function(
     vids,
     nCond,
-    study,
+    studyName,
     ldSketch,
     context,
     trait,
@@ -3181,7 +3182,7 @@ qtlSumStatsFromBetaMatrix <- function(
         mcolArgs = mcolArgs
     )
     QtlSumStats(
-        study = rep(as.character(study), nCond),
+        studyName = rep(as.character(studyName), nCond),
         context = context,
         trait = trait,
         entry = entries,
@@ -3272,10 +3273,10 @@ qtlSumStatsFromBetaMatrix <- function(
         )
         abort(msg)
     }
-    if (length(getQcInfo(x)) == 0L) {
+    if (length(qcInfo(x)) == 0L) {
         msg <- glue(
             "mashPipeline: '{role}' SumStats has no QC info ",
-            "(length(getQcInfo(x)) == 0L). ",
+            "(length(qcInfo(x)) == 0L). ",
             "Run summaryStatsQc() on the SumStats before passing it to ",
             "mashPipeline()."
         )
@@ -3450,15 +3451,19 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashRowDf <- function(x, rIdx, setup, requireCols) {
     if (setup$isQtl) {
-        getSumStatsDf(
+        as.data.frame(
             x,
-            study = setup$studyCol[[rIdx]],
+            studyName = setup$studyCol[[rIdx]],
             context = setup$contextCol[[rIdx]],
             trait = setup$traitCol[[rIdx]],
             require = requireCols
         )
     } else {
-        getSumStatsDf(x, study = setup$studyCol[[rIdx]], require = requireCols)
+        as.data.frame(
+            x,
+            studyName = setup$studyCol[[rIdx]],
+            require = requireCols
+        )
     }
 }
 

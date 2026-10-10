@@ -15,7 +15,8 @@ NULL
 #'   full per-effect susie alpha table, the jointly-estimated group prior(s),
 #'   and per-region metadata. One entry sits in every row of a
 #'   \code{\linkS4class{CtwasResult}} collection.
-#' @slot finemap The per-gene (and, when SNPs are retained, per-SNP) posterior
+#' @slot posteriors The per-gene (and, when SNPs are retained,
+#'   per-SNP) posterior
 #'   summary table (\code{ctwas::finemap_regions} \code{finemap_res} shape),
 #'   or \code{NULL}.
 #' @slot susieAlpha The per-effect susie alpha table
@@ -31,14 +32,14 @@ NULL
 setClass(
     "CtwasResultEntry",
     representation(
-        finemap = "ANY", # per-gene/SNP posterior summary (ctwas finemap_res)
+        posteriors = "ANY", # per-gene/SNP posterior summary (ctwas finemap_res)
         # per-effect susie alpha table (ctwas susie_alpha_res)
         susieAlpha = "ANY",
         groupPriors = "ANY", # group_prior / group_prior_var for this run
         regionInfo = "ANY" # per-region metadata (optional)
     ),
     prototype = prototype(
-        finemap = NULL,
+        posteriors = NULL,
         susieAlpha = NULL,
         groupPriors = NULL,
         regionInfo = NULL
@@ -50,7 +51,8 @@ setClass(
 #'   the full per-effect susie alpha table, the estimated group prior(s), and
 #'   region metadata. Held in every row of a \code{\link{CtwasResult}}
 #'   collection.
-#' @param finemap The per-gene (and, when SNPs are retained, per-SNP) posterior
+#' @param posteriors The per-gene (and, when SNPs are retained,
+#'   per-SNP) posterior
 #'   summary table (\code{ctwas::finemap_regions} \code{finemap_res} shape), or
 #'   \code{NULL}.
 #' @param susieAlpha The per-effect susie alpha table
@@ -63,37 +65,37 @@ setClass(
 #' @return A \code{CtwasResultEntry} object.
 #' @examples
 #' cre <- CtwasResultEntry(
-#'   finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+#'   posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
 #'   susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
 #' cre
 #' @export
 CtwasResultEntry <- function(
-    finemap = NULL,
+    posteriors = NULL,
     susieAlpha = NULL,
     groupPriors = NULL,
     regionInfo = NULL
 ) {
     new(
         "CtwasResultEntry",
-        finemap = finemap,
+        posteriors = posteriors,
         susieAlpha = susieAlpha,
         groupPriors = groupPriors,
         regionInfo = regionInfo
     )
 }
 
-#' @rdname getFinemap
+#' @rdname ctwasPosteriors
 #' @export
-setMethod("getFinemap", "CtwasResultEntry", function(x) x@finemap)
+setMethod("ctwasPosteriors", "CtwasResultEntry", function(x) x@posteriors)
 
-#' @rdname getSusieAlpha
+#' @rdname susieAlpha
 #' @export
-setMethod("getSusieAlpha", "CtwasResultEntry", function(x) x@susieAlpha)
+setMethod("susieAlpha", "CtwasResultEntry", function(x) x@susieAlpha)
 
-#' @rdname getCtwasGroupPriors
+#' @rdname ctwasGroupPriors
 #' @export
 setMethod(
-    "getCtwasGroupPriors",
+    "ctwasGroupPriors",
     "CtwasResultEntry",
     function(x) x@groupPriors
 )

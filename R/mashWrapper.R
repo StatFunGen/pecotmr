@@ -250,6 +250,14 @@
 #' CovCanonicalOptions(cov_methods = c("identity", "equal_effects"))
 #' @export
 CovCanonicalOptions <- function(cov_methods = NULL, ...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            data = "supplied from the data by the pipeline"
+        ),
+        "CovCanonicalOptions"
+    )
     .newMethodOptions(
         "mashr::cov_canonical",
         defaults = list(cov_methods = cov_methods),
@@ -270,6 +278,14 @@ CovCanonicalOptions <- function(cov_methods = NULL, ...) {
 #' CovPcaOptions(subset = 1:50)
 #' @export
 CovPcaOptions <- function(subset = NULL, ...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            data = "supplied from the data by the pipeline"
+        ),
+        "CovPcaOptions"
+    )
     .newMethodOptions(
         "mashr::cov_pca",
         defaults = list(subset = subset),
@@ -303,6 +319,12 @@ CovFlashOptions <- function(
     backfit_args = list(),
     ...
 ) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(data = "supplied from the data by the pipeline"),
+        "CovFlashOptions"
+    )
     .newMethodOptions(
         "mashr::cov_flash",
         defaults = list(
@@ -335,6 +357,15 @@ CovFlashOptions <- function(
 #' CovEdOptions(algorithm = "teem")
 #' @export
 CovEdOptions <- function(subset = NULL, algorithm = "bovy", ...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            data = "supplied from the data by the pipeline",
+            Ulist_init = "the pipeline's data-driven priors"
+        ),
+        "CovEdOptions"
+    )
     .newMethodOptions(
         "mashr::cov_ed",
         defaults = list(subset = subset, algorithm = algorithm),
@@ -399,13 +430,24 @@ UdInitOptions <- function(...) {
 #'   a transcription.
 #' @param ... Any \code{udr} control field: \code{unconstrained.update},
 #'   \code{maxiter}, \code{tol}, \code{tol.lik}, \code{penalty.type}, and
-#'   the rest of \code{udr::ud_fit_control_default()}.
+#'   the rest of \code{udr::ud_fit_control_default()}. The one exception is
+#'   \code{lambda}, which pecotmr derives from the number of conditions and
+#'   so refuses here.
 #' @return A \code{\link{MethodOptions}} object.
 #' @examples
 #' UdFitOptions(unconstrained.update = "ted", maxiter = 500)
 #' @export
 UdFitOptions <- function(...) {
     extra <- list(...)
+    # `lambda` is the one control field pecotmr derives rather than fixes:
+    # .mashUdControl() sets it to the number of conditions, and the merge
+    # there lets a user value replace it. The rest are plain tunables, so
+    # this bundle has exactly one owned name.
+    .configRefuseOwned(
+        extra,
+        c(lambda = "the number of conditions in the mash data"),
+        "UdFitOptions"
+    )
     .udAssertUnconstrainedUpdate(extra)
     .newMethodOptions(
         NULL,
@@ -775,7 +817,7 @@ CorShrinkOptions <- function(...) {
 #' mi <- mashInputExample
 #' mk <- function(b, s) {
 #'   qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
-#'     study = "mash")
+#'     studyName = "mash")
 #' }
 #' ssl <- list(strong = mk("strong.b", "strong.s"),
 #'   random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
@@ -879,7 +921,7 @@ mashModelFit <- function(
 #' mi <- mashInputExample
 #' mk <- function(b, s) {
 #'   qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
-#'     study = "mash")
+#'     studyName = "mash")
 #' }
 #' ssl <- list(strong = mk("strong.b", "strong.s"),
 #'   random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))

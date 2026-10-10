@@ -154,43 +154,6 @@ BoundaryMergeParam <- function(
     )
 }
 
-# cTWAS arguments the pipeline owns as named settings of its own. They are
-# real ctwas formals, so the union check would accept them here -- but
-# .ctwasInvoke drops any name the pipeline already supplies, so a value set
-# through CtwasOptions() was silently discarded. Refuse it and say where the
-# setting lives instead.
-# @noRd
-.ctwasPipelineOwnedArgs <- function() {
-    c(
-        thin = "CtwasPriorParam(thin =)",
-        niter = "CtwasPriorParam(niter =)",
-        niter_prefit = "CtwasPriorParam(niterPrefit =)",
-        group_prior_var_structure = "CtwasPriorParam(varStructure =)",
-        L = "the pipeline's own `L`",
-        ncore = "the pipeline's own `numThreads`",
-        maxSNP = "BoundaryMergeParam(maxSnp =)"
-    )
-}
-
-# @noRd
-.ctwasRefusePipelineOwned <- function(extra) {
-    owned <- .ctwasPipelineOwnedArgs()
-    clash <- intersect(names(extra), names(owned))
-    if (length(clash) == 0L) {
-        return(invisible(NULL))
-    }
-    where <- str_flatten(
-        sprintf("`%s` -> %s", clash, unname(owned[clash])),
-        collapse = "; "
-    )
-    abort(glue(
-        "CtwasOptions: {str_flatten(clash, ', ')} ",
-        "{if (length(clash) == 1L) 'is' else 'are'} set by the pipeline, ",
-        "not through methodArgs -- a value given here is dropped. Use: ",
-        "{where}."
-    ))
-}
-
 # Every bundle ctwasPipeline() takes, checked together. The argument names
 # in the messages are the pipeline's own, which drop the `Args` suffix.
 # @noRd
@@ -234,8 +197,8 @@ BoundaryMergeParam <- function(
 #'   blocks.
 #'
 #' @section LD-sketch compatibility check: Per block:
-#'   \code{getLdSketch(twasWeights)} (when non-NULL) must come from the same
-#'   reference panel as \code{getLdSketch(gwasSumStats)} --- same samples, same
+#'   \code{ldSketch(twasWeights)} (when non-NULL) must come from the same
+#'   reference panel as \code{ldSketch(gwasSumStats)} --- same samples, same
 #'   allele orientation on the shared variants. The two need NOT carry the same
 #'   variants; a partial overlap, which is what QC-ing the two sides separately
 #'   produces, only warns. A different sample set, a swapped A1/A2 on a shared
@@ -243,7 +206,7 @@ BoundaryMergeParam <- function(
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} whose elements are LD
 #'   blocks (at least two), keyed by its \code{blockId} column, with
-#'   \code{getQcInfo()} non-empty. Build it with
+#'   \code{qcInfo()} non-empty. Build it with
 #'   \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
 #'   through \code{\link{summaryStatsQc}}.
 #' @param twasWeights The per-gene weight source. Either (a) a FLAT
@@ -275,8 +238,9 @@ BoundaryMergeParam <- function(
 #'   present; otherwise run \strong{every} method as an independent cTWAS run
 #'   (one \code{CtwasResult} row-set per method). Passing the name explicitly
 #'   (e.g. \code{"mrash"}) restricts the run to that single method.
-#' @param L Integer. Max number of single effects in cTWAS fine-mapping.
-#'   Default \code{5}. Pass-through to \code{ctwas::ctwas_sumstats}.
+#' @param maxNumSingleEffects Integer. Max number of single effects in cTWAS
+#'   fine-mapping. Default \code{5}. Pass-through to
+#'   \code{ctwas::ctwas_sumstats}.
 #' @param numThreads Number of cores. Default \code{1}.
 #' @param ctwasPriorArgs The EM stage that estimates cTWAS's group priors, built
 #'   with \code{\link{CtwasPriorParam}}: \code{thin}, \code{niterPrefit},
@@ -297,7 +261,7 @@ BoundaryMergeParam <- function(
 #'   context-agnostic SNP background of each run as one extra \code{CtwasResult}
 #'   row (\code{study = context = "SNP"}, mirroring cTWAS's own \code{"SNP"}
 #'   group) so the full ctwas output is reconstructable from
-#'   \code{\link{getFinemap}} / \code{getSusieAlpha}. Default \code{FALSE} --
+#'   \code{\link{ctwasPosteriors}} / \code{susieAlpha}. Default \code{FALSE} --
 #'   the SNP rows are the null background and are dropped from the structured
 #'   gene-level result.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
@@ -329,12 +293,17 @@ BoundaryMergeParam <- function(
 #' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 #'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
-#'   panelFilter = PanelFilterParam(mafCutoff = 0.0025))
+#'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 #' ctwasPipeline(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample),
 #'   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
-#'   methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+#'   methodArgs = CtwasOptions(
+#'     regionData = CtwasRegionDataOptions(min_group_size = 1),
+#'     estParam = CtwasEstParamOptions(
+#'       min_group_size = 1, min_p_single_effect = 0
+#'     )
+#'   ))
 #' @export
 ctwasPipeline <- function(
     gwasSumStats,
@@ -342,7 +311,7 @@ ctwasPipeline <- function(
     twasZ = NULL,
     fineMappingResult = NULL,
     method = NULL,
-    L = 5L,
+    maxNumSingleEffects = 5L,
     numThreads = 1L,
     ctwasPriorArgs = CtwasPriorParam(),
     variantPruningArgs = VariantPruningParam(),
@@ -369,7 +338,7 @@ ctwasPipeline <- function(
         variantPruningArgs = variantPruningArgs,
         ctwasPriorArgs = ctwasPriorArgs,
         numThreads = numThreads,
-        L = L,
+        maxNumSingleEffects = maxNumSingleEffects,
         boundaryMergeArgs = boundaryMergeArgs,
         gwasStudy = gwasStudy,
         keepSnps = keepSnps,
@@ -395,7 +364,7 @@ ctwasPipeline <- function(
     inputs,
     ctwasPriorArgs,
     boundaryMergeArgs,
-    L,
+    maxNumSingleEffects,
     numThreads,
     methodArgs
 ) {
@@ -412,7 +381,7 @@ ctwasPipeline <- function(
     )
     finemap <- finemapCtwasRegions(
         screened,
-        L = L,
+        maxNumSingleEffects = maxNumSingleEffects,
         numThreads = numThreads,
         methodArgs = methodArgs
     )
@@ -422,7 +391,7 @@ ctwasPipeline <- function(
     .ctwasMaybeMerge(
         finemap,
         boundaryMergeArgs = boundaryMergeArgs,
-        L = L,
+        maxNumSingleEffects = maxNumSingleEffects,
         numThreads = numThreads,
         methodArgs = methodArgs
     )
@@ -441,7 +410,7 @@ ctwasPipeline <- function(
     variantPruningArgs,
     ctwasPriorArgs,
     numThreads,
-    L,
+    maxNumSingleEffects,
     boundaryMergeArgs,
     gwasStudy,
     keepSnps,
@@ -459,7 +428,7 @@ ctwasPipeline <- function(
         inputs,
         ctwasPriorArgs = ctwasPriorArgs,
         boundaryMergeArgs = boundaryMergeArgs,
-        L = L,
+        maxNumSingleEffects = maxNumSingleEffects,
         numThreads = numThreads,
         methodArgs = methodArgs
     )
@@ -475,9 +444,9 @@ ctwasPipeline <- function(
 # regions and re-fine-map. Merge-transparent downstream (keyed by gene id).
 # @noRd
 .ctwasMaybeMerge <- function(
-    finemap,
+    posteriors,
     boundaryMergeArgs,
-    L,
+    maxNumSingleEffects,
     numThreads,
     methodArgs
 ) {
@@ -489,11 +458,11 @@ ctwasPipeline <- function(
     # takes one, and c()-ing it into an argument list would append the S4
     # object as a single element rather than splice its entries.
     mergeCtwasBoundaryRegions(
-        finemap,
+        posteriors,
         pipThresh = mergePipThresh,
         filterCs = mergeFilterCs,
         maxSNP = mergeMaxSNP,
-        L = L,
+        maxNumSingleEffects = maxNumSingleEffects,
         numThreads = numThreads,
         methodArgs = methodArgs
     )
@@ -532,7 +501,7 @@ ctwasPipeline <- function(
 #' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 #'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
-#'   panelFilter = PanelFilterParam(mafCutoff = 0.0025))
+#'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 #' assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
 #' @export
@@ -555,14 +524,18 @@ assembleCtwasInputs <- function(
     minPipCutoff <- variantPruningArgs$pipRescue
     maxNumVariants <- variantPruningArgs$maxVariants
     .ctwasValidateGwasList(gwasSumStats)
-    # One single-block GwasSumStats per element, keyed by blockId: the region
-    # grid the rest of the assembly walks.
+    globalPanelInfo <- .ctwasGlobalPanelInfo(gwasSumStats)
     gwasSumStats <- .ctwasGwasByBlock(gwasSumStats)
     twasWeights <- .ctwasResolveAndValidateWeights(twasWeights, gwasSumStats)
     .ctwasValidateOptional(twasZ, fineMappingResult)
     regionIds <- names(gwasSumStats)
     resolvedMethod <- .ctwasResolveMethod(twasWeights, method)
-    fp <- .ctwasFirstPass(regionIds, gwasSumStats, twasWeights)
+    fp <- .ctwasFirstPass(
+        regionIds,
+        gwasSumStats,
+        twasWeights,
+        globalPanelInfo
+    )
     globalGwasSnpIds <- unique(list_c(map(fp$zSnpPieces, "id")))
     cutoffs <- list(
         twasWeightCutoff = twasWeightCutoff,
@@ -622,7 +595,7 @@ assembleCtwasInputs <- function(
 # The collection must be QC'd, and its block keys must be usable as region ids.
 # @noRd
 .ctwasValidateGwasEntries <- function(gwasSumStats) {
-    if (length(getQcInfo(gwasSumStats)) == 0L) {
+    if (length(qcInfo(gwasSumStats)) == 0L) {
         msg <- glue(
             "assembleCtwasInputs: `gwasSumStats` has no QC record. ",
             "Call summaryStatsQc() first."
@@ -655,9 +628,23 @@ assembleCtwasInputs <- function(
     )
 }
 
+# One block's slice of the collection. `[` carries the collection-level
+# ldSketch through verbatim, and combineGwasSumStats() deliberately UNIONS
+# the per-piece panels, so without narrowing here every block references the
+# whole chromosome and its LD panel would cover all of it (a
+# chr19-wide panel runs to ~155 GB). Narrowed to the block's own variants
+# the same way summaryStatsQc narrows the sketch it retains.
 # @noRd
 .ctwasPickBlock <- function(i, x) {
-    x[i]
+    block <- x[i]
+    sketch <- ldSketch(block)
+    if (is.null(sketch)) {
+        return(block)
+    }
+    methods::initialize(
+        block,
+        ldSketch = .subsetSketchToIds(sketch, as.list(block))
+    )
 }
 
 # Resolve a flat weight source into per-region buckets (cTWAS's p0 start-of-
@@ -742,9 +729,26 @@ assembleCtwasInputs <- function(
 # ldFileByRegion).
 # @noRd
 # One region's GWAS LD sketch, checked against the region's weights.
+# The ctwas-shaped snpInfo for the whole collection's panel, captured BEFORE
+# .ctwasGwasByBlock() narrows each block's sketch to its own variants. A
+# gene's cis SPAN has to cover every block it reaches or
+# ctwas::get_boundary_genes cannot route it to merge_regions, so the span is
+# measured against this table rather than against any one block's panel.
+#
+# NULL when the collection carries no sketch -- .ctwasRegionGwasLd() reports
+# that case with its own message, so this must not pre-empt it.
+# @noRd
+.ctwasGlobalPanelInfo <- function(gwasSumStats) {
+    sketch <- ldSketch(gwasSumStats)
+    if (is.null(sketch)) {
+        return(NULL)
+    }
+    .ctwasSnpInfoForBlock(sketch)
+}
+
 # @noRd
 .ctwasRegionGwasLd <- function(rid, gwasSumStats, twasWeights) {
-    gwasLd <- getLdSketch(gwasSumStats[[rid]])
+    gwasLd <- ldSketch(gwasSumStats[[rid]])
     if (is.null(gwasLd)) {
         msg <- glue(
             "ctwasPipeline: GwasSumStats for region '{rid}' carries no ",
@@ -754,7 +758,7 @@ assembleCtwasInputs <- function(
     }
     tw <- twasWeights[[rid]]
     if (!is.null(tw)) {
-        .ctwasRequireMatchingLdSketches(getLdSketch(tw), gwasLd)
+        .ctwasRequireMatchingLdSketches(ldSketch(tw), gwasLd)
     }
     gwasLd
 }
@@ -774,24 +778,40 @@ assembleCtwasInputs <- function(
     .ctwasBuildSingleRegionInfo(rid, gwasSumStats[[rid]])
 }
 
-.ctwasFirstPass <- function(regionIds, gwasSumStats, twasWeights) {
+# First pass: one LD panel per region, plus the z_snp / region_info / snp_map
+# pieces built from them.
+#
+# Each region gets a token of its own. The panel cache used to be keyed on the
+# genotype file backing the sketch, which every block on a chromosome shares,
+# so only the first block's panel was ever computed and every other region
+# silently read that one back out.
+#
+# `globalVariance` is assembled from the per-block variance vectors rather
+# than re-read: a boundary gene needs the variance of its out-of-block weight
+# variants too, and the blocks partition the panel, so their union is exactly
+# the global vector. It costs nothing beyond the panels themselves.
+# @noRd
+.ctwasFirstPass <- function(
+    regionIds,
+    gwasSumStats,
+    twasWeights,
+    globalPanelInfo = NULL
+) {
     sketches <- map(
         regionIds,
         .ctwasRegionGwasLd,
         gwasSumStats = gwasSumStats,
         twasWeights = twasWeights
     )
-    ldKeys <- map_chr(sketches, .ctwasLdPanelKey)
-    # The panel cache is "compute once per distinct key": the first region
-    # carrying each key is the one whose sketch gets expanded, and every
-    # region then reads its panel back out by key.
-    firstOfKey <- !duplicated(ldKeys)
+    ldTokens <- .ctwasRegionLdTokens(regionIds, sketches)
     ldPanelsByRegion <- set_names(
-        map(sketches[firstOfKey], .ctwasComputeFullPanelLd),
-        ldKeys[firstOfKey]
+        map(sketches, .ctwasPanelFor),
+        unname(ldTokens)
     )
-    panels <- unname(ldPanelsByRegion[ldKeys])
+    panels <- unname(ldPanelsByRegion)
     list(
+        globalPanelInfo = globalPanelInfo,
+        globalVariance = list_c(map(panels, "variance")),
         ldPanelsByRegion = ldPanelsByRegion,
         zSnpPieces = set_names(
             map2(regionIds, panels, .ctwasZSnpAt, gwasSumStats = gwasSumStats),
@@ -810,7 +830,7 @@ assembleCtwasInputs <- function(
             ),
             regionIds
         ),
-        ldFileByRegion = set_names(ldKeys, regionIds)
+        ldFileByRegion = ldTokens
     )
 }
 
@@ -880,7 +900,9 @@ assembleCtwasInputs <- function(
         minPipCutoff = cutoffs$minPipCutoff,
         maxNumVariants = cutoffs$maxNumVariants,
         gwasSnpIds = globalGwasSnpIds,
-        regionSnpIds = fp$snpMap[[rid]]$id
+        regionSnpIds = fp$snpMap[[rid]]$id,
+        globalPanelInfo = fp$globalPanelInfo,
+        globalVariance = fp$globalVariance
     )
     if (length(blockWeights) == 0L) {
         return(NULL)
@@ -951,7 +973,12 @@ assembleCtwasInputs <- function(
 #' estCtwasGroupPriors(ctwasInputsExample,
 #'   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
-#'   methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+#'   methodArgs = CtwasOptions(
+#'     regionData = CtwasRegionDataOptions(min_group_size = 1),
+#'     estParam = CtwasEstParamOptions(
+#'       min_group_size = 1, min_p_single_effect = 0
+#'     )
+#'   ))
 #' @export
 estCtwasGroupPriors <- function(
     inputs,
@@ -972,15 +999,19 @@ estCtwasGroupPriors <- function(
     }
     numThreads <- as.integer(numThreads)
     inputs <- .ctwasResolveLdPaths(inputs)
-    zGene <- .ctwasEnsureZGene(inputs, numThreads, methodArgs)
+    zGene <- .ctwasEnsureZGene(inputs, numThreads, methodArgs$geneZ)
     regionData <- .ctwasAssembleRegionData(
         inputs,
         zGene,
         thin,
         numThreads,
-        methodArgs
+        methodArgs$regionData
     )
-    boundaryGenes <- .ctwasBoundaryGenes(inputs, numThreads, methodArgs)
+    boundaryGenes <- .ctwasBoundaryGenes(
+        inputs,
+        numThreads,
+        methodArgs$boundaryGenes
+    )
     paramRes <- .ctwasEstParamOrFallback(
         regionData,
         niterPrefit,
@@ -989,7 +1020,7 @@ estCtwasGroupPriors <- function(
         numThreads,
         thin,
         fallbackToPrefit,
-        methodArgs
+        methodArgs$estParam
     )
     # assemble_region_data does not echo z_gene back, so propagate the
     # precomputed z_gene we passed in (inputs$z_gene is NULL when twasZ was not
@@ -1070,7 +1101,7 @@ estCtwasGroupPriors <- function(
 #'   \code{screen_res}).
 #'
 #' @param screenResult A list returned by \code{\link{screenCtwasRegions}}.
-#' @param L Pass-through.
+#' @param maxNumSingleEffects Pass-through.
 #' @param numThreads Number of cores.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
 #'   with \code{\link{CtwasOptions}}. Names are checked against what
@@ -1092,19 +1123,24 @@ estCtwasGroupPriors <- function(
 #' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 #'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
-#'   panelFilter = PanelFilterParam(mafCutoff = 0.0025))
+#'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 #' inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
 #' est <- estCtwasGroupPriors(inp,
 #'   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
-#'   methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+#'   methodArgs = CtwasOptions(
+#'     regionData = CtwasRegionDataOptions(min_group_size = 1),
+#'     estParam = CtwasEstParamOptions(
+#'       min_group_size = 1, min_p_single_effect = 0
+#'     )
+#'   ))
 #' screened <- screenCtwasRegions(est)
-#' finemapCtwasRegions(screened, L = 5L)
+#' finemapCtwasRegions(screened, maxNumSingleEffects = 5L)
 #' @export
 finemapCtwasRegions <- function(
     screenResult,
-    L = 5L,
+    maxNumSingleEffects = 5L,
     numThreads = 1L,
     methodArgs = CtwasOptions()
 ) {
@@ -1113,7 +1149,12 @@ finemapCtwasRegions <- function(
         abort("Package 'ctwas' is required for finemapCtwasRegions.")
     }
     screenResult <- .ctwasResolveLdPaths(screenResult)
-    fmRes <- .ctwasFinemapOrEmpty(screenResult, L, numThreads, methodArgs)
+    fmRes <- .ctwasFinemapOrEmpty(
+        screenResult,
+        maxNumSingleEffects,
+        numThreads,
+        methodArgs
+    )
     # Repair cTWAS's molecular_id mislabel (first-"|" split of our composite
     # id).
     list(
@@ -1163,8 +1204,8 @@ finemapCtwasRegions <- function(
 #'   \code{FALSE}.
 #' @param maxSNP Numeric (length 1). Per-merged-region SNP cap. Default
 #'   \code{Inf}.
-#' @param L Integer. Max number of single effects for the merged-region
-#'   re-fine-mapping (LD path only). Default \code{5}.
+#' @param maxNumSingleEffects Integer. Max number of single effects for the
+#'   merged-region re-fine-mapping (LD path only). Default \code{5}.
 #' @param numThreads Number of cores. Default \code{1}.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
 #'   with \code{\link{CtwasOptions}}. Names are checked against what
@@ -1184,7 +1225,7 @@ mergeCtwasBoundaryRegions <- function(
     pipThresh = 0.5,
     filterCs = FALSE,
     maxSNP = Inf,
-    L = 5L,
+    maxNumSingleEffects = 5L,
     numThreads = 1L,
     methodArgs = CtwasOptions()
 ) {
@@ -1209,12 +1250,12 @@ mergeCtwasBoundaryRegions <- function(
         maxSNP,
         numThreads
     )
-    fa <- .ctwasMergeDispatch(finemapResult, common, L)
+    fa <- .ctwasMergeDispatch(finemapResult, common, maxNumSingleEffects)
     # Flatten the record before merging: c() on a list and a MethodOptions (a
     # SimpleList) appends the S4 object as ONE unnamed element rather than
     # splicing its entries, and exec() would then hand that object to ctwas
     # as a positional argument.
-    user <- as.list(methodArgs)
+    user <- as.list(methodArgs$merge)
     callArgs <- c(fa$args, user[setdiff(names(user), names(fa$args))])
     res <- exec(fa$fn, !!!callArgs)
     .ctwasApplyMergeResult(finemapResult, res)
@@ -1652,7 +1693,7 @@ mergeCtwasBoundaryRegions <- function(
     `slot<-`(
         combined[idx, ],
         "ldSketch",
-        value = getLdSketch(gwasSumStats[[rid]])
+        value = ldSketch(gwasSumStats[[rid]])
     )
 }
 
@@ -1674,7 +1715,7 @@ mergeCtwasBoundaryRegions <- function(
         abort(msg)
     }
     home <- .ctwasPlaceByAnchor(
-        getTraitPosition(combined),
+        traitPosition(combined),
         gwasSumStats
     )
     unplaced <- sum(is.na(home))
@@ -2017,7 +2058,7 @@ mergeCtwasBoundaryRegions <- function(
 .ctwasMkEntry <- function(fm, sa, runResult) {
     geneCoords <- .ctwasGeneCoords(runResult$weights)
     CtwasResultEntry(
-        finemap = .ctwasRangePayload(fm, geneCoords),
+        posteriors = .ctwasRangePayload(fm, geneCoords),
         susieAlpha = .ctwasRangePayload(sa, geneCoords),
         groupPriors = runResult$param,
         regionInfo = .ctwasRangeRegionInfo(runResult$region_info)
@@ -2060,7 +2101,7 @@ mergeCtwasBoundaryRegions <- function(
 # background as ONE extra row (study = context = "SNP"), mirroring cTWAS's own
 # "SNP" group in `group_prior`. Kept off by default because the SNP rows are the
 # null background and bloat the structured gene-level result; when on, the full
-# ctwas run is reconstructable from `getFinemap()` / `getSusieAlpha()`.
+# ctwas run is reconstructable from `ctwasPosteriors()` / `susieAlpha()`.
 # @noRd
 .ctwasRunToRows <- function(runResult, gwasStudy, method, keepSnps = FALSE) {
     geneIds <- names(runResult$weights)
@@ -2174,7 +2215,7 @@ mergeCtwasBoundaryRegions <- function(
     jointContexts <- map_chr(rows, "jointContexts")
     CtwasResult(
         gwasStudy = map_chr(rows, "gwasStudy"),
-        study = map_chr(rows, "study"),
+        studyName = map_chr(rows, "study"),
         context = map_chr(rows, "context"),
         method = map_chr(rows, "method"),
         entry = map(rows, "entry"),
@@ -2274,7 +2315,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     # Row subset carries every column forward (joint* / region / ...); the old
     # hand-listed rebuild silently dropped them.
-    methods::initialize(tw[keep, ], ldSketch = getLdSketch(tw))
+    methods::initialize(tw[keep, ], ldSketch = ldSketch(tw))
 }
 
 # Build the per-variant Z data.frame ctwas expects from a GwasSumStats.
@@ -2391,7 +2432,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     # Derive the block's [start, stop] from the GWAS variants actually in this
     # block (the GwasSumStats entry GRanges) -- NOT the LD sketch. When many
     # blocks share one whole-chromosome LD payload (the common one-file-per-chr
-    # layout), getSnpInfo(ldSketch) spans the entire chromosome, so every region
+    # layout), snpInfo(ldSketch) spans the entire chromosome, so every region
     # would collapse to the same whole-chromosome [start, stop] and every SNP
     # would be assigned to every region (inflating SNP group_size N-fold and
     # diluting the gene prior to ~0).
@@ -2457,38 +2498,102 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
-# Compute the full-panel LD ONCE and return everything the rest of the
-# pipeline needs to consume it. Returns a list with:
-#   R        : full-panel correlation matrix (n_var x n_var, dimnames =
-#              SNP IDs). Single source of truth for both the per-region
-#              LD loader closure and the per-gene R_wgt submatrices.
+# Everything about a block's LD panel that is cheap, plus the sketch it came
+# from so the expensive part can be built later. Returns a list with:
 #   snpInfo  : ctwas-shaped per-block table (chrom, id, pos, alt, ref)
 #              -- both the snp_map element and the snpinfo loader return.
-#   variance : named numeric vector of per-variant dosage variance from
-#              the LD reference. Used to scale non-standardized TWAS
-#              weights to the correlation scale that ctwas expects.
+#   variance : named numeric vector of per-variant dosage variance from the
+#              LD reference, used to scale non-standardized TWAS weights to
+#              the correlation scale ctwas expects.
+#   sketch   : the block's narrowed LD sketch, retained because the n x n
+#              correlation is deliberately NOT built here.
+#
+# ctwas pulls a region's LD only while fine-mapping, and only for the regions
+# that survive screening, so building every block's matrix up front spent
+# O(n^2) apiece on panels that are frequently never read at all.
 # @noRd
-.ctwasComputeFullPanelLd <- function(gwasLd) {
+.ctwasPanelFor <- function(gwasLd) {
     # Share the validator with `.ldFromSketch()`, the entry point every other
-    # pipeline uses. This function cannot use `.ldFromSketch()` itself -- it
-    # needs the whole panel rather than a matched subset, and returns the
-    # per-variant variance alongside R -- but skipping the guard meant a NULL
-    # or non-panel sketch surfaced as "unable to find an inherited method for
-    # 'getSnpInfo'" instead of saying the LD reference was missing.
+    # pipeline uses: skipping the guard meant a NULL or non-panel sketch
+    # surfaced as "unable to find an inherited method for 'snpInfo'"
+    # instead of saying the LD reference was missing.
     .ldFromSketchValidate(gwasLd, "ctwasPipeline")
-    snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
+    snpInfo <- .ctwasSnpInfoForBlock(gwasLd)
     geno <- .ldSketchDosage(
         gwasLd,
-        seq_len(nrow(snpInfoCtwas)),
+        seq_len(nrow(snpInfo)),
         meanImpute = TRUE
     )
-    snpIds <- snpInfoCtwas$id
-    R <- `dimnames<-`(
-        computeLd(geno, method = "sample"),
-        list(snpIds, snpIds)
+    list(
+        snpInfo = snpInfo,
+        variance = set_names(
+            apply(geno, 2, stats::var, na.rm = TRUE),
+            snpInfo$id
+        ),
+        sketch = gwasLd
     )
-    variance <- set_names(apply(geno, 2, stats::var, na.rm = TRUE), snpIds)
-    list(R = R, snpInfo = snpInfoCtwas, variance = variance)
+}
+
+# The block's full n x n correlation, built on request. A panel that already
+# carries one -- a caller who computed it, or a payload it travelled with --
+# is used as it stands rather than rebuilt.
+# @noRd
+.ctwasPanelLd <- function(panel) {
+    if (!is.null(panel$R)) {
+        return(panel$R)
+    }
+    .ctwasPanelLdFor(
+        panel,
+        seq_len(nrow(panel$snpInfo)),
+        panel$snpInfo$id
+    )
+}
+
+# The correlation over `vids` alone. Identical to slicing the full matrix --
+# mean imputation is per column, so correlating a subset of the dosages gives
+# the same pairwise values -- at O(|vids|^2) instead of O(n^2).
+# @noRd
+.ctwasPanelLdSubset <- function(panel, vids) {
+    idx <- match(vids, panel$snpInfo$id)
+    if (anyNA(idx)) {
+        msg <- glue(
+            "ctwasPipeline: {sum(is.na(idx))} weight variant(s) absent from ",
+            "the block's LD panel."
+        )
+        abort(msg)
+    }
+    if (!is.null(panel$R)) {
+        return(panel$R[vids, vids, drop = FALSE])
+    }
+    .ctwasPanelLdFor(panel, idx, vids)
+}
+
+# @noRd
+.ctwasPanelLdFor <- function(panel, idx, ids) {
+    geno <- .ldSketchDosage(panel$sketch, idx, meanImpute = TRUE)
+    `dimnames<-`(
+        computeLd(geno, method = "sample"),
+        list(ids, ids)
+    )
+}
+
+# Whether to build the block's full correlation once and slice it per gene,
+# or to compute one small correlation per gene. Per-gene submatrices are what
+# keep a block ctwas never fine-maps from ever forming its n x n matrix, but
+# g genes on |vids| variants each cost sum(|vids|^2) against n^2 for the
+# whole block, so the full matrix wins once the weights are dense enough.
+# Returns the full matrix in that case and NULL in the other.
+# @noRd
+.ctwasRWgtSource <- function(ldPanel, nVids) {
+    # Already built: slicing it is free, so there is nothing to weigh up.
+    if (!is.null(ldPanel$R)) {
+        return(ldPanel$R)
+    }
+    n <- as.numeric(nrow(ldPanel$snpInfo))
+    if (length(nVids) == 0L || sum(as.numeric(nVids)^2) < n^2) {
+        return(NULL)
+    }
+    .ctwasPanelLd(ldPanel)
 }
 
 # Harmonize TWAS weight variants against the LD reference panel. Same
@@ -2647,9 +2752,29 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     panelSnps[sort(m$idxA)]
 }
 
-# R_wgt is sliced from the cached full-panel LD by SNP ID -- no
-# per-gene genotype re-extraction. Variants absent from the panel
-# are dropped from that gene's row set.
+# The ctwas per-gene weight entries for one block.
+#
+# Two variant sets, because they answer different questions. `gwasSnpIds` is
+# the GLOBAL set: it bounds each gene's cis SPAN, which has to cover every
+# block the gene reaches for boundary detection to work. `regionSnpIds` is
+# this block's own set: it bounds the weight vector actually FITTED, because
+# ctwas fine-maps one region at a time.
+#
+# So anything feeding the SPAN is read off the whole panel rather than off
+# `ldPanel`, whose sketch is narrowed to this block -- `globalPanelInfo` for
+# the coordinates, `globalVariance` for the scaling, and the same table for
+# allele harmonization, since an out-of-block weight variant has to survive
+# matching to be counted in p0/p1 at all. Reading any of them off the block
+# would clip a boundary gene back to its home region, which is exactly what
+# p0/p1 exist to prevent. The allele columns agree with the block's own
+# table wherever the two overlap, so nothing about the in-block result
+# changes.
+#
+# Genes are prepared in one sweep and given their `R_wgt` in a second, so
+# that choice is made with every gene's fitted size in hand -- which is what
+# lets a block no gene needs densely skip its n x n correlation entirely.
+# .ctwasRWgtSource() picks, and says why. Variants absent from the panel are
+# dropped from that gene's row set.
 # @noRd
 .ctwasBuildWeights <- function(
     twasWeights,
@@ -2660,19 +2785,19 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     minPipCutoff = 0,
     maxNumVariants = Inf,
     gwasSnpIds = NULL,
-    regionSnpIds = NULL
+    regionSnpIds = NULL,
+    globalPanelInfo = NULL,
+    globalVariance = NULL
 ) {
-    # Two variant sets, because they answer different questions. `gwasSnpIds` is
-    # the GLOBAL set: it bounds the gene's cis SPAN, which has to cover every
-    # block the gene reaches for boundary detection to work. `regionSnpIds` is
-    # this block's own set: it bounds the weight vector actually FITTED, because
-    # ctwas fine-maps one region at a time.
-    panelSnps <- .ctwasPanelSnpsForGwas(rownames(ldPanel$R), gwasSnpIds)
+    spanInfo <- globalPanelInfo %||% ldPanel$snpInfo
+    panelSnps <- .ctwasPanelSnpsForGwas(spanInfo$id, gwasSnpIds)
     ctx <- list(
         ldPanel = ldPanel,
+        spanInfo = spanInfo,
         panelSnps = panelSnps,
         regionSnps = regionSnpIds,
-        refVariants = .ctwasRefVariants(ldPanel$snpInfo),
+        refVariants = .ctwasRefVariants(spanInfo),
+        spanVariance = globalVariance %||% ldPanel$variance,
         fineMappingResult = fineMappingResult,
         cutoffs = list(
             twasWeightCutoff = twasWeightCutoff,
@@ -2681,12 +2806,20 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             maxNumVariants = maxNumVariants
         )
     )
-    genes <- compact(map(
+    prepared <- compact(map(
         seq_len(nrow(twasWeights)),
-        .ctwasGeneWeight,
+        .ctwasGenePrepared,
         twasWeights = twasWeights,
         ctx = ctx
     ))
+    fullR <- .ctwasRWgtSource(ldPanel, map_int(prepared, .ctwasPreparedSize))
+    genes <- map(
+        prepared,
+        .ctwasGeneEntryFor,
+        ldPanel = ldPanel,
+        fullR = fullR,
+        spanInfo = spanInfo
+    )
     # Later genes overwrite an earlier one sharing a key, which is what the
     # `out[[g$key]] <- ...` loop did.
     keyed <- set_names(map(genes, "entry"), map_chr(genes, "key"))
@@ -2709,17 +2842,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # study/context/trait/method identity for gene row `i` + its collection key.
 # @noRd
 .ctwasGeneMeta <- function(twasWeights, i) {
-    study <- as.character(twasWeights$study)[[i]]
+    studyName <- as.character(twasWeights$study)[[i]]
     context <- as.character(twasWeights$context)[[i]]
     trait <- as.character(twasWeights$trait)[[i]]
     method <- as.character(twasWeights$method)[[i]]
     list(
-        study = study,
+        study = studyName,
         context = context,
         trait = trait,
         method = method,
         traitPos = .ctwasTraitPosAt(twasWeights, i),
-        key = as.character(glue("{study}|{context}|{trait}|{method}"))
+        key = as.character(glue("{studyName}|{context}|{trait}|{method}"))
     )
 }
 
@@ -2758,7 +2891,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # fit) and variance scaling for non-standardized weights (w * sqrt(per-variant
 # genotype variance from the LD panel)). Returns the adjusted weight vector.
 # @noRd
-.ctwasAdjustGeneWeights <- function(parts, aligned, ldPanel) {
+.ctwasAdjustGeneWeights <- function(parts, aligned, spanVariance) {
     fits <- .rowFits(parts)
     shrank <- length(aligned$keptIdx) < length(aligned$origVids)
     # A NULL renormalization means the fit could not be re-keyed onto the
@@ -2776,7 +2909,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (.rowStandardized(parts)) {
         return(renormalized)
     }
-    varLookup <- ldPanel$variance[aligned$vids]
+    varLookup <- spanVariance[aligned$vids]
     if (anyNA(varLookup)) {
         msg <- glue(
             ".ctwasBuildWeights: missing genotype variance for ",
@@ -2797,12 +2930,22 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # region boundary. Measuring the span over the fitted subset would clip a
 # boundary gene down to its home region and hide it from merge_regions.
 # @noRd
-.ctwasGeneEntry <- function(vids, w, ldPanel, meta, spanVids = vids) {
-    panelInfo <- ldPanel$snpInfo
+.ctwasGeneEntry <- function(
+    vids,
+    w,
+    rWgt,
+    meta,
+    spanVids = vids,
+    spanInfo
+) {
+    # Span coordinates come from the whole-panel table, while `rWgt` was
+    # computed on the block's own panel: ctwas fine-maps one region at a
+    # time, but a boundary gene's span has to reach past it.
+    panelInfo <- spanInfo
     rowIdx <- match(spanVids, panelInfo$id)
     list(
         wgt = matrix(w, ncol = 1L, dimnames = list(vids, "wgt")),
-        R_wgt = ldPanel$R[vids, vids, drop = FALSE],
+        R_wgt = rWgt,
         type = meta$context,
         context = meta$context,
         gene_name = meta$trait,
@@ -2828,7 +2971,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (!is_in("traitPos", .tupleColumnNames(twasWeights))) {
         return(NULL)
     }
-    tp <- getTraitPosition(twasWeights)
+    tp <- traitPosition(twasWeights)
     if (!methods::is(tp, "GRanges") || length(tp) < i) {
         return(NULL)
     }
@@ -2839,7 +2982,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # (PIP/CS + magnitude + cap) -> entry. Returns list(key, entry), or NULL when
 # the gene contributes no usable variants.
 # @noRd
-.ctwasGeneWeight <- function(i, twasWeights, ctx) {
+.ctwasGenePrepared <- function(i, twasWeights, ctx) {
     # Polymorphic: the weight source may be a TwasWeights or a
     # FineMappingResult, so the payload comes from the class-aware bridge.
     parts <- .rowParts(twasWeights, i)
@@ -2847,7 +2990,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(aligned)) {
         return(NULL)
     }
-    w <- .ctwasAdjustGeneWeights(parts, aligned, ctx$ldPanel)
+    w <- .ctwasAdjustGeneWeights(parts, aligned, ctx$spanVariance)
     meta <- .ctwasGeneMeta(twasWeights, i)
     finemapAux <- .ctwasGetFinemapAux(
         ctx$fineMappingResult,
@@ -2878,14 +3021,42 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (!any(inRegion)) {
         return(NULL)
     }
+    # No LD yet. R_wgt is built in a second sweep, once every gene's fitted
+    # size is known and the block can choose between forming one full
+    # correlation and one small correlation per gene.
     list(
         key = meta$key,
+        vids = kept$vids[inRegion],
+        w = kept$w[inRegion],
+        spanVids = kept$vids,
+        meta = meta
+    )
+}
+
+# @noRd
+.ctwasPreparedSize <- function(g) {
+    length(g$vids)
+}
+
+# One prepared gene's ctwas entry. `fullR` is the block's correlation when
+# .ctwasRWgtSource() chose to form it, and NULL when each gene computes its
+# own small one.
+# @noRd
+.ctwasGeneEntryFor <- function(g, ldPanel, fullR, spanInfo) {
+    rWgt <- if (is.null(fullR)) {
+        .ctwasPanelLdSubset(ldPanel, g$vids)
+    } else {
+        fullR[g$vids, g$vids, drop = FALSE]
+    }
+    list(
+        key = g$key,
         entry = .ctwasGeneEntry(
-            kept$vids[inRegion],
-            kept$w[inRegion],
-            ctx$ldPanel,
-            meta,
-            spanVids = kept$vids
+            g$vids,
+            g$w,
+            rWgt,
+            g$meta,
+            spanVids = g$spanVids,
+            spanInfo = spanInfo
         )
     )
 }
@@ -2909,32 +3080,33 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 #   csPurity  : numeric vector aligned with csMembers
 # @noRd
 .ctwasGetFinemapAux <- function(
-    fineMappingResult,
-    study,
+    fmr,
+    studyName,
     context,
     trait,
     method
 ) {
-    if (is.null(fineMappingResult)) {
+    if (is.null(fmr)) {
         return(NULL)
     }
-    cols <- .tupleColumnNames(fineMappingResult)
+    cols <- .tupleColumnNames(fmr)
     selectors <- c(
-        list(study = study, method = method),
+        list(study = studyName, method = method),
         compact(list(
             context = if (is_in("context", cols)) context,
             trait = if (is_in("trait", cols)) trait
         ))
     )
-    selArgs <- c(list(fineMappingResult), selectors)
+    # `fineMappingResult` here is the accessor generic, not the `fmr`
+    # argument -- the two must not be conflated.
     entry <- try_fetch(
-        exec(getFineMappingResult, !!!selArgs),
+        exec(fineMappingResult, fmr, !!!selectors),
         error = function(cnd) NULL
     )
     if (is.null(entry)) {
         return(NULL)
     }
-    tl <- getTopLoci(entry, raw = TRUE)
+    tl <- topLoci(entry, raw = TRUE)
     if (nrow(tl) == 0L) {
         return(NULL)
     }
@@ -3195,6 +3367,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     stored <- as.character(ldMap[["LD_file"]])
     resolved <- map_chr(stored, .resolveCtwasLdToken)
+    resolved <- .ctwasRemintMissingTokens(
+        resolved,
+        .ctwasLdMapRegionIds(ldMap, length(resolved))
+    )
     if (identical(resolved, stored)) {
         return(payload)
     }
@@ -3208,6 +3384,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         )
     )
     .ctwasRekeyLdLoaders(rekeyed, keyMap)
+}
+
+# The region ids an LD_map carries, falling back to positions when the table
+# has no region_id column (the granular steps accept hand-built stubs).
+# @noRd
+.ctwasLdMapRegionIds <- function(ldMap, n) {
+    rid <- ldMap[["region_id"]]
+    if (is.null(rid) || length(rid) != n) {
+        return(as.character(seq_len(n)))
+    }
+    as.character(rid)
 }
 
 # Only "pecotmr://" tokens move; an ordinary path is the caller's own and is
@@ -3267,7 +3454,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             )
             abort(msg)
         }
-        panel$R
+        # Built here rather than up front: this is the only place a region's
+        # full LD is actually needed, and ctwas reaches it only for regions
+        # that survived screening.
+        .ctwasPanelLd(panel)
     }
     # Published explicitly so .ctwasCachedPanels can recover the cache from a
     # loader we built, instead of looking the name up inside the closure's
@@ -3301,7 +3491,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # @noRd
 .ctwasLdPanelKey <- function(sketch) {
     handle <- .ldSketchHandle(sketch)
-    fmt <- getFormat(handle)
+    fmt <- genotypeFormat(handle)
     stem <- .genotypeReadPath(handle)
     candidates <- switch(
         fmt,
@@ -3321,6 +3511,65 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         abort(msg)
     }
     hit[[1L]]
+}
+
+# ctwas asserts `file.exists()` on every `LD_map$LD_file` / `SNP_file` and
+# then dispatches `LD_loader_fun(LD_file)` on that same string, so a token
+# has to be BOTH an existing path and unique per region. The genotype file
+# backing a sketch is shared by every block on a chromosome, which is why
+# using it directly handed every block the first one's panel. A per-region
+# empty sentinel satisfies both constraints, and nothing ever reads it --
+# the panels travel inside the loader closures.
+# @noRd
+.ctwasRegionLdTokens <- function(regionIds, sketches) {
+    # Fail here, with the sketch-specific message, if a block's panel has no
+    # readable payload: the panel builder is about to read dosages
+    # out of it.
+    walk(sketches, .ctwasLdPanelKey)
+    .ctwasMintLdTokens(regionIds)
+}
+
+# The sentinels themselves. Separate from the validation above so the payload
+# resolver can re-mint them without a sketch in hand.
+# @noRd
+.ctwasMintLdTokens <- function(regionIds) {
+    dir <- file.path(tempdir(), "pecotmr-ctwas-ld")
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    tokens <- file.path(dir, str_c(.ctwasTokenSlug(regionIds), ".ld"))
+    walk(tokens, .ctwasTouchToken)
+    set_names(tokens, regionIds)
+}
+
+# Sentinels live in the session tempdir, so a payload serialised in one
+# session carries tokens that no longer exist in the next -- and ctwas
+# asserts file.exists() on every one. Mint replacements; the caller re-keys
+# the cached panels onto them, exactly as it does for a "pecotmr://" move.
+# @noRd
+.ctwasRemintMissingTokens <- function(tokens, regionIds) {
+    gone <- !file.exists(tokens)
+    if (!any(gone)) {
+        return(tokens)
+    }
+    replace(tokens, gone, unname(.ctwasMintLdTokens(regionIds[gone])))
+}
+
+# A filesystem-safe stem per region. The index prefix keeps two region ids
+# that sanitize to the same string apart.
+# @noRd
+.ctwasTokenSlug <- function(regionIds) {
+    str_c(
+        seq_along(regionIds),
+        "_",
+        str_replace_all(as.character(regionIds), "[^A-Za-z0-9._-]+", "_")
+    )
+}
+
+# @noRd
+.ctwasTouchToken <- function(path) {
+    if (!file.exists(path)) {
+        file.create(path)
+    }
+    invisible(NULL)
 }
 
 # Build a per-block snpInfo table restricted to variants present in the

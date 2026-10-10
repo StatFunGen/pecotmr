@@ -63,7 +63,7 @@ gws_qcd <- summaryStatsQc(
         infoCutoff = 0, # 0 = off; > 0 requires INFO column
         nCutoff = 5
     ),
-    panelFilterArgs = PanelFilterParam(
+    panelFilterParam = PanelFilterParam(
         mafCutoff = 0 # 0 = off; > 0 requires MAF column
     ),
     skipRegion = NULL, # e.g. MHC "chr6:25000000-35000000"
@@ -76,10 +76,10 @@ gws_qcd <- summaryStatsQc(
 
 `gws_qc` is a new `GwasSumStats` of the same class, with cleaned
 entries and a populated `qcInfo` slot. The per-entry audit record is
-accessible via `getQcInfo()`:
+accessible via `qcInfo()`:
 
 ```{r inspect-qcinfo, eval=FALSE}
-qc <- getQcInfo(gws_qcd)
+qc <- qcInfo(gws_qcd)
 str(qc$entryAudit[[1]]) # per-entry counts: variantsIn, mungeSumstatsDropped,
 # keepVariantsDropped, skipRegionDropped, matchedAgainstSketch,
 # krigingOutliersDropped, ldMismatchOutliersDropped, ...

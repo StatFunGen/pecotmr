@@ -127,7 +127,7 @@
 #' @importFrom checkmate assertVector
 .tupleSelectRow <- function(
     x,
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -137,8 +137,8 @@
         msg <- glue("{cls} has no rows.")
         abort(msg)
     }
-    anyUnset <- missing(study) ||
-        is.null(study) ||
+    anyUnset <- missing(studyName) ||
+        is.null(studyName) ||
         missing(context) ||
         is.null(context) ||
         missing(trait) ||
@@ -155,23 +155,28 @@
         )
         abort(msg)
     }
-    assertVector(study, len = 1L)
+    assertVector(studyName, len = 1L)
     assertVector(context, len = 1L)
     assertVector(trait, len = 1L)
     assertVector(method, len = 1L)
-    .tupleMatchQtl(x, study, context, trait, method)
+    .tupleMatchQtl(x, studyName, context, trait, method)
 }
 
 # Resolve a (study, context, trait, method) tuple to a single row index.
 # @noRd
-.tupleMatchQtl <- function(x, study, context, trait, method) {
+.tupleMatchQtl <- function(x, studyName, context, trait, method) {
     idx <- .matchTupleRows(
         x,
-        list(study = study, context = context, trait = trait, method = method)
+        list(
+            study = studyName,
+            context = context,
+            trait = trait,
+            method = method
+        )
     )
     if (length(idx) == 0L) {
         msg <- glue(
-            "No entry for (study='{study}', context='{context}', ",
+            "No entry for (study='{studyName}', context='{context}', ",
             "trait='{trait}', method='{method}')."
         )
         abort(msg)
@@ -184,12 +189,12 @@
 # the (study, method) pair maps to a single row; otherwise it disambiguates
 # among per-block rows of a genome-wide collection.
 #' @importFrom checkmate assertVector
-.tupleSelectRowGwasFmr <- function(x, study, method, region = NULL) {
+.tupleSelectRowGwasFmr <- function(x, studyName, method, region = NULL) {
     if (nrow(x) == 0L) {
         abort("GwasFineMappingResult has no rows.")
     }
-    anyUnset <- missing(study) ||
-        is.null(study) ||
+    anyUnset <- missing(studyName) ||
+        is.null(studyName) ||
         missing(method) ||
         is.null(method)
     if (anyUnset) {
@@ -202,17 +207,17 @@
         )
         abort(msg)
     }
-    assertVector(study, len = 1L)
+    assertVector(studyName, len = 1L)
     assertVector(method, len = 1L)
     assertVector(region, len = 1L, null.ok = TRUE)
-    .tupleMatchGwas(x, study, method, region)
+    .tupleMatchGwas(x, studyName, method, region)
 }
 
 # Resolve a (study, method[, blockId]) tuple to a single row index.
 # @noRd
-.tupleMatchGwas <- function(x, study, method, region) {
+.tupleMatchGwas <- function(x, studyName, method, region) {
     keys <- c(
-        list(study = study, method = method),
+        list(study = studyName, method = method),
         compact(list(blockId = region))
     )
     idx <- .matchTupleRows(x, keys)
@@ -223,26 +228,26 @@
             glue(", region='{region}'")
         }
         msg <- glue(
-            "No entry for (study='{study}', method='{method}'{regionPart})."
+            "No entry for (study='{studyName}', method='{method}'{regionPart})."
         )
         abort(msg)
     }
     if (length(idx) > 1L) {
-        .tupleGwasAmbiguous(x, study, method, idx)
+        .tupleGwasAmbiguous(x, studyName, method, idx)
     }
     idx[[1L]]
 }
 
 # Multiple (study, method) rows matched: report the disambiguating regions.
 # @noRd
-.tupleGwasAmbiguous <- function(x, study, method, idx) {
+.tupleGwasAmbiguous <- function(x, studyName, method, idx) {
     regions <- str_flatten(
         shQuote(as.character(x$blockId[idx])),
         ", "
     )
     msg <- glue(
         "GwasFineMappingResult has {length(idx)} rows matching ",
-        "(study='{study}', method='{method}'); pass `region` to ",
+        "(study='{studyName}', method='{method}'); pass `region` to ",
         "disambiguate (available: {regions})."
     )
     abort(msg)
@@ -257,14 +262,14 @@
 # ambiguity; it is the aggregate counterpart used by getTopLoci.
 .fmrRowsMatching <- function(
     x,
-    study = NULL,
+    studyName = NULL,
     context = NULL,
     trait = NULL,
     method = NULL,
     region = NULL
 ) {
     supplied <- compact(list(
-        study = study,
+        study = studyName,
         context = context,
         trait = trait,
         method = method,
@@ -307,7 +312,7 @@
 }
 
 # Internal: read the per-row `region` GRanges column of a collection, or an
-# empty GRanges when the collection carries none. Shared by getRegion on
+# empty GRanges when the collection carries none. Shared by genomicRegion on
 # TwasWeights and FineMappingResultBase (region is a uniform column across the
 # family; no derivation from topLoci / blockId).
 # The per-element span, DERIVED from the ranges rather than read from a stored
@@ -361,7 +366,7 @@
 # traitPos is optional provenance: always known for a QtlDataset, but only known
 # for a QtlSumStats when the caller supplied it (it cannot be inferred from
 # summary statistics). When the column is absent we return a scalar NA rather
-# than an empty GRanges, so getTraitPosition() reports "no trait position"
+# than an empty GRanges, so traitPosition() reports "no trait position"
 # honestly instead of a zero-length range.
 .getTraitPosColumn <- function(x) {
     if (is_in("traitPos", .tupleColumnNames(x))) {
@@ -461,8 +466,9 @@
 # Internal: aggregate a per-entry accessor across every row of a
 # FineMappingResultBase collection that matches the given selectors, prefixing
 # each entry's rows with the row identity (study/context/trait/blockId/method)
-# so rows stay attributable to their source entry. Shared by getTopLoci / getCs
-# / getMarginalEffects on FineMappingResultBase.
+# so rows stay attributable to their source entry. Shared by topLoci /
+# credibleSets
+# / marginalEffects on FineMappingResultBase.
 #
 # When at least one selector is supplied AND resolves to exactly one entry, this
 # short-circuits to `onSingle(entry)` -- the bare per-entry view with no
@@ -477,7 +483,7 @@
 #     entry (defaults to perEntry).
 .fmrAggregateView <- function(
     x,
-    study = NULL,
+    studyName = NULL,
     context = NULL,
     trait = NULL,
     method = NULL,
@@ -488,7 +494,7 @@
 ) {
     single <- .fmrTrySingle(
         x,
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -501,7 +507,7 @@
     }
     idx <- .fmrRowsMatching(
         x,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = method,
@@ -543,7 +549,7 @@
 #' @importFrom rlang try_fetch
 .fmrTrySingle <- function(
     x,
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -551,7 +557,7 @@
     onSingle,
     viewArgs
 ) {
-    anySelector <- !is.null(study) ||
+    anySelector <- !is.null(studyName) ||
         !is.null(context) ||
         !is.null(trait) ||
         !is.null(method) ||
@@ -562,7 +568,7 @@
     sel <- try_fetch(
         .fmrSelectEntry(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -702,22 +708,22 @@
 
 # @noRd
 .fmrPartsVariantIds <- function(parts) {
-    getVariantIds(.asFmRowPayload(parts))
+    variantIds(.asFmRowPayload(parts))
 }
 
 # @noRd
 .fmrPartsSusieFit <- function(parts) {
-    getSusieFit(.asFmRowPayload(parts))
+    susieFit(.asFmRowPayload(parts))
 }
 
 # @noRd
 .fmrPartsCvResult <- function(parts) {
-    getCvResult(.asFmRowPayload(parts))
+    cvResult(.asFmRowPayload(parts))
 }
 
 # @noRd
 .fmrPartsTopLoci <- function(parts) {
-    .fmeTopLociFromElement(rowVariants(.asFmRowPayload(parts)))
+    .fmeTopLociFromElement(variants(.asFmRowPayload(parts)))
 }
 
 # ---- per-row views ----------------------------------------------------------
@@ -728,7 +734,6 @@
 # @noRd
 .fmrRowTopLoci <- function(
     parts,
-    type = c("data.frame", "GRanges"),
     signalCutoff = 0.025,
     minPurity = NULL,
     raw = FALSE
@@ -739,12 +744,9 @@
     if (isTRUE(raw)) {
         return(tl)
     }
-    type <- arg_match(type)
-    out <- .fmeFilterTopLoci(tl, signalCutoff, minPurity)
-    if (type == "data.frame") {
-        return(out)
-    }
-    .fmeTopLociGRanges(out)
+    # Always a table: .fmrAggregateView() stacks these, and topLoci()
+    # converts the stacked result to ranges once.
+    .fmeFilterTopLoci(tl, signalCutoff, minPurity)
 }
 
 # @noRd
@@ -793,7 +795,7 @@
     hasPurity <- is_in(purCol, names(tl))
     if (!is.null(minPurity) && !hasPurity) {
         msg <- glue(
-            "getCs: no purity column '{purCol}' for coverage ",
+            "credibleSets: no purity column '{purCol}' for coverage ",
             "{coverage}; minPurity filter skipped."
         )
         warn(msg)
@@ -809,7 +811,7 @@
 
 # @noRd
 .fmrRowLbf <- function(parts) {
-    lbf <- .asLbfMatrix(getSusieFit(parts))
+    lbf <- .asLbfMatrix(susieFit(parts))
     vids <- .fmrPartsVariantIds(parts)
     if (is.null(lbf) || ncol(lbf) != length(vids)) {
         return(tibble(variant_id = character(0)))
@@ -821,18 +823,18 @@
 
 # @noRd
 .fmrRowCredibleSetSummary <- function(parts, coverage = 0.95) {
-    .csSummaryFit(.fmrPartsTopLoci(parts), getSusieFit(parts), coverage)
+    .csSummaryFit(.fmrPartsTopLoci(parts), susieFit(parts), coverage)
 }
 
 # @noRd
 .fmrRowFsusieCredibleBand <- function(parts) {
-    .fsusieCredibleBandFit(getSusieFit(parts))
+    .fsusieCredibleBandFit(susieFit(parts))
 }
 
 # @noRd
 .fmrRowFsusieAffectedRegions <- function(parts) {
     .fsusieAffectedRegionsFit(
-        getSusieFit(parts),
+        susieFit(parts),
         topLoci = .fmrPartsTopLoci(parts)
     )
 }
@@ -870,16 +872,16 @@
         "TwasWeightsRow",
         variants = gr,
         weights = mcols(gr, use.names = FALSE)$weight,
-        fits = md$fits[[first]],
+        methodFits = md$fits[[first]],
         cvResult = md$cvResult[[first]],
-        standardized = isTRUE(md$standardized[[first]]),
-        dataType = md$dataType[[first]]
+        weightStandardized = isTRUE(md$standardized[[first]]),
+        weightsDataType = md$dataType[[first]]
     )
 }
 
 # @noRd
 .twrPartsVariantIds <- function(parts) {
-    getVariantIds(parts)
+    variantIds(parts)
 }
 
 # The weight vector aligned to the row's variant ids -- what resolveWeights
@@ -888,7 +890,7 @@
 .twrRowResolveWeights <- function(parts) {
     empty <- list(variantIds = character(0), weights = numeric(0))
     vids <- .twrPartsVariantIds(parts)
-    raw <- getWeights(parts)
+    raw <- weights(parts)
     if (length(vids) == 0L || is.null(raw)) {
         return(empty)
     }
@@ -930,10 +932,10 @@
 # A fine-mapping row deliberately reports NULL: cTWAS would otherwise
 # renormalize alpha into an UNstandardized weight, which is inconsistent with
 # the standardized posterior effect the topLoci view already carries. Preserved
-# verbatim from the FineMappingRow getFits method.
+# verbatim from the FineMappingRow methodFits method.
 # @noRd
 .rowFits <- function(parts) {
-    if (methods::is(parts, "TwasWeightsRow")) getFits(parts) else NULL
+    if (methods::is(parts, "TwasWeightsRow")) methodFits(parts) else NULL
 }
 
 # Whether the row's weights are already on the standardized scale.
@@ -944,7 +946,7 @@
 # @noRd
 .rowStandardized <- function(parts) {
     if (methods::is(parts, "TwasWeightsRow")) {
-        return(getStandardized(parts))
+        return(weightStandardized(parts))
     }
     TRUE
 }
@@ -961,7 +963,7 @@
 # @noRd
 .asFmRowPayload <- function(e) {
     # A single-row collection is the other shape callers hand over -- it is
-    # what getFineMappingResult() returns, so anything accepting "one row's
+    # what fineMappingResult() returns, so anything accepting "one row's
     # worth of fine-mapping" has to take it too.
     if (methods::is(e, "FineMappingResultBase")) {
         if (length(e) == 0L) {
@@ -1006,17 +1008,17 @@
 # nothing produces entries.
 # @noRd
 .rowCvResult <- function(e) {
-    getCvResult(e)
+    cvResult(e)
 }
 
 # @noRd
 .rowWeights <- function(e) {
-    getWeights(e)
+    weights(e)
 }
 
 # @noRd
 .rowVariantIds <- function(e) {
-    getVariantIds(e)
+    variantIds(e)
 }
 
 # The non-variant half of each TWAS row payload, as outer mcols columns.
@@ -1024,10 +1026,10 @@
 # @noRd
 .twRowPayloadCols <- function(entry) {
     list(
-        fits = S4Vectors::SimpleList(map(entry, getFits)),
-        cvResult = S4Vectors::SimpleList(map(entry, getCvResult)),
+        fits = S4Vectors::SimpleList(map(entry, methodFits)),
+        cvResult = S4Vectors::SimpleList(map(entry, cvResult)),
         standardized = map_lgl(entry, .twPayloadStandardized),
-        dataType = S4Vectors::SimpleList(map(entry, getDataType))
+        dataType = S4Vectors::SimpleList(map(entry, weightsDataType))
     )
 }
 
@@ -1113,7 +1115,7 @@
 }
 
 # The single build every part must agree on, or NULL for a family that does
-# not carry one. Read through getGenome() so it works off seqinfo.
+# not carry one. Read seqinfo directly via GenomeInfoDb::genome().
 # @noRd
 .rtlCombineGenome <- function(parts, fn) {
     if (!methods::is(parts[[1L]], "SumStatsBase")) {
@@ -1133,7 +1135,13 @@
 # parts must agree.
 # @noRd
 .ssCombineGenome <- function(parts, fn) {
-    genomes <- unique(map_chr(parts, getGenome))
+    # genome() is per-seqlevel, so flatten across parts before uniquing
+    # rather than map_chr (which would reject a multi-seqlevel part).
+    builds <- discard(list_c(map(parts, GenomeInfoDb::genome)), is.na)
+    genomes <- unique(unname(builds))
+    if (length(genomes) == 0L) {
+        return(NA_character_)
+    }
     if (length(genomes) > 1L) {
         msg <- glue(
             "{fn}: every input must share one genome build (got ",
@@ -1144,7 +1152,7 @@
     genomes
 }
 
-# qcInfo is collection-level EXCEPT `entryAudit`, which getQcDiagnostics()
+# qcInfo is collection-level EXCEPT `entryAudit`, which qcDiagnostics()
 # addresses BY element index -- so the audit concatenates in element order
 # while the rest is carried from the first part. Concatenation pads a part
 # whose audit is absent or short, because an audit that slipped out of step
@@ -1166,19 +1174,19 @@
     }
     .ssCheckQcOptions(populated, fn)
     list_assign(
-        getQcInfo(populated[[1L]]),
+        qcInfo(populated[[1L]]),
         entryAudit = list_flatten(map(parts, .ssEntryAudit))
     )
 }
 
 # @noRd
-.ssHasQcInfo <- function(x) length(getQcInfo(x)) > 0L
+.ssHasQcInfo <- function(x) length(qcInfo(x)) > 0L
 
 # One part's per-element audit, padded to its element count so positions stay
 # aligned with the elements they describe.
 # @noRd
 .ssEntryAudit <- function(x) {
-    audit <- getQcInfo(x)$entryAudit %||% list()
+    audit <- qcInfo(x)$entryAudit %||% list()
     n <- nrow(x)
     if (length(audit) >= n) {
         return(as.list(audit)[seq_len(n)])
@@ -1191,7 +1199,7 @@
 # and every downstream consumer reads that answer off one record.
 # @noRd
 .ssCheckQcOptions <- function(parts, fn) {
-    first <- getQcInfo(parts[[1L]])$options
+    first <- qcInfo(parts[[1L]])$options
     same <- map_lgl(parts, .ssSameQcOptions, first = first)
     if (all(same)) {
         return(invisible(NULL))
@@ -1206,7 +1214,7 @@
 
 # @noRd
 .ssSameQcOptions <- function(x, first) {
-    identical(getQcInfo(x)$options, first)
+    identical(qcInfo(x)$options, first)
 }
 
 # The union of the parts' LD panels. All-NULL stays NULL (an individual-level
@@ -1214,7 +1222,7 @@
 # panels that exist would leave elements harmonized against nothing.
 # @noRd
 .combineLdSketch <- function(parts, fn) {
-    sketches <- map(parts, getLdSketch)
+    sketches <- map(parts, ldSketch)
     present <- !map_lgl(sketches, is.null)
     if (!any(present)) {
         return(NULL)
@@ -1317,7 +1325,7 @@
 # positionally and a tibble column is a one-column list there.
 # @noRd
 .ssUnionSnpInfo <- function(handles) {
-    first <- getSnpInfo(handles[[1L]])
+    first <- snpInfo(handles[[1L]])
     combined <- list_rbind(map(handles, .ssHandleSnpInfo))
     keyed <- all(is_in(c("SNP", "CHR", "BP"), names(combined)))
     si <- if (nrow(combined) > 0L && keyed) {
@@ -1334,4 +1342,4 @@
 }
 
 # @noRd
-.ssHandleSnpInfo <- function(h) as_tibble(getSnpInfo(h))
+.ssHandleSnpInfo <- function(h) as_tibble(snpInfo(h))

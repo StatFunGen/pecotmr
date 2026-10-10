@@ -7,12 +7,12 @@
 \description{
 A collection of colocalization results, one element per tested
   (QTL credible set, GWAS credible set, block) pair. Build the four views
-  with \code{\link{getColocPairs}}, \code{\link{getColocVariants}},
-  \code{\link{getColocCredibleSets}} and \code{\link{getColocGenes}}.
+  with \code{\link{colocPairs}}, \code{\link{colocVariants}},
+  \code{\link{colocCredibleSets}} and \code{\link{colocGenes}}.
 }
 \details{
 The inherited \code{ldSketch} is what
-  \code{getColocCredibleSets()} uses to compute credible-set purity.
+  \code{colocCredibleSets()} uses to compute credible-set purity.
 }
 \seealso{
 \code{\link{colocPipeline}}

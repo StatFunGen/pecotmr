@@ -134,7 +134,7 @@ setClass(
 # Per-dataset trait -> rowRanges map (first occurrence of each trait id).
 # @noRd
 .msqdTraitRanges <- function(qd) {
-    pairs <- .msqdConcat(map(getContexts(qd), .msqdContextTraitRanges, qd = qd))
+    pairs <- .msqdConcat(map(contexts(qd), .msqdContextTraitRanges, qd = qd))
     if (length(pairs) == 0L) {
         return(list())
     }
@@ -161,7 +161,7 @@ setClass(
 # One context's (trait, range) pairs in row order.
 # @noRd
 .msqdContextTraitRanges <- function(ctx, qd) {
-    se <- getPhenotypes(qd, ctx)
+    se <- molecularTraits(qd, ctx)
     map(
         seq_along(rownames(se)),
         .msqdTraitRangePair,
@@ -239,10 +239,10 @@ setClass(
 #'   rowRanges = rng
 #' )
 #' qd1 <- QtlDataset(
-#'   study = "s1", genotypes = panel, phenotypes = list(brain = se)
+#'   studyName = "s1", genotypes = panel, phenotypes = list(brain = se)
 #' )
 #' qd2 <- QtlDataset(
-#'   study = "s2", genotypes = panel, phenotypes = list(brain = se)
+#'   studyName = "s2", genotypes = panel, phenotypes = list(brain = se)
 #' )
 #' MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
 #' @importFrom checkmate assertList
@@ -258,21 +258,21 @@ MultiStudyQtlDataset <- function(qtlDatasets, sumStats = NULL) {
     obj
 }
 
-#' @rdname getQtlDatasets
+#' @rdname qtlDatasets
 #' @export
-setMethod("getQtlDatasets", "MultiStudyQtlDataset", function(x) x@qtlDatasets)
+setMethod("qtlDatasets", "MultiStudyQtlDataset", function(x) x@qtlDatasets)
 
-#' @rdname getSumStats
+#' @rdname sumStats
 #' @export
 # No selectors: this returns the embedded QtlSumStats collection whole, and
-# one entry is fetched by calling getSumStats() on that result. Taking no
+# one entry is fetched by calling sumStats() on that result. Taking no
 # extra formals is what refuses a selector -- R reports the unused argument
 # by name.
-setMethod("getSumStats", "MultiStudyQtlDataset", function(x) x@sumStats)
+setMethod("sumStats", "MultiStudyQtlDataset", function(x) x@sumStats)
 
-#' @rdname getStudy
+#' @rdname studyName
 #' @export
-setMethod("getStudy", "MultiStudyQtlDataset", function(x) {
+setMethod("studyName", "MultiStudyQtlDataset", function(x) {
     fromQtl <- names(x@qtlDatasets)
     fromSs <- if (is.null(x@sumStats)) {
         character(0)

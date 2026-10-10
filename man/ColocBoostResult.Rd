@@ -55,7 +55,7 @@ colocboostResultExample
 # Its unit is a SET of colocalized outcomes rather than a pair, so one row
 # can carry any number of them.
 colocboostResultExample$outcomes
-getColocPairs(colocboostResultExample)$nOutcomes
+colocPairs(colocboostResultExample)$nOutcomes
 # A run that failed or was not requested arrives as NULL and is skipped,
 # giving an empty result rather than an error.
 nrow(ColocBoostResult(list(NULL), "xqtl_coloc"))

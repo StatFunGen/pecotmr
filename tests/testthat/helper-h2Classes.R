@@ -109,7 +109,7 @@ makeGwasSumStatsFromDf <- function(
         varY <- NA_real_
     }
     GwasSumStats(
-        study = traitName,
+        studyName = traitName,
         entry = list(.dfToSumstatsGr(df)),
         genome = genome,
         ldSketch = .testGenotypeHandle(),
@@ -162,7 +162,7 @@ makeGwasBlock <- function(
         stringsAsFactors = FALSE
     )
     obj <- GwasSumStats(
-        study = "trait1",
+        studyName = "trait1",
         entry = list(.dfToSumstatsGr(df)),
         genome = genome,
         ldSketch = .blockGenotypeHandle(bp),
@@ -222,7 +222,7 @@ makeTestLdData <- function(
     chrom = "chr1",
     startBp = 1000L,
     rho = 0.5,
-    nRef = 500L
+    nSamples = 500L
 ) {
     gr <- .testLdVariants(n, chrom, startBp)
     R <- .testArBlock(n, rho)
@@ -234,7 +234,7 @@ makeTestLdData <- function(
         correlation = R,
         variants = gr,
         blockMetadata = .testBlockMetadata(n, chrom, gr),
-        nRef = nRef
+        nSamples = nSamples
     )
 }
 
@@ -245,13 +245,13 @@ makeTestLdDataMultiBlock <- function(
     chrom = "chr1",
     startBp = 1000L,
     rho = 0.5,
-    nRef = 500L
+    nSamples = 500L
 ) {
     gr <- .testLdVariants(sum(sizes), chrom, startBp)
     LdData(
         correlation = map(sizes, .testArBlock, rho = rho),
         variants = gr,
         blockMetadata = .testBlockMetadata(sizes, chrom, gr),
-        nRef = nRef
+        nSamples = nSamples
     )
 }

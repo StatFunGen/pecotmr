@@ -124,8 +124,20 @@ setClass("MethodOptions", contains = "SimpleList")
         return(NULL)
     }
     fm <- tryCatch(names(formals(fn)), error = function(cnd) NULL)
-    if (is.null(fm) || is_in("...", fm)) {
+    if (is.null(fm)) {
         return(NULL)
+    }
+    # `filtered` says the call site already restricts the bundle to the
+    # callee's explicit formals, so `...` is not a reason to stop checking.
+    # Honoured for ONE callee as well as several: a single dots-taking step
+    # (ctwas's finemap_regions) is the same situation as a dots-taking member
+    # of a set, and leaving it unchecked made the record claim "NOT checked"
+    # while .engineCheckExtra() was in fact checking it.
+    if (is_in("...", fm)) {
+        if (!filtered) {
+            return(NULL)
+        }
+        return(setdiff(fm, "..."))
     }
     fm
 }
@@ -357,7 +369,7 @@ setClass("MethodOptions", contains = "SimpleList")
 }
 
 # Refuse names the caller cannot usefully set, naming where the setting
-# lives instead. Same shape as .ctwasRefusePipelineOwned: a real formal of
+# lives instead: a real formal of
 # the engine that pecotmr supplies itself, so a value given here would be
 # overwritten rather than honoured. `owned` is a named character vector,
 # name = the refused argument, value = where the caller sets it instead.
@@ -593,7 +605,7 @@ setClass("MethodOptions", contains = "SimpleList")
     if (is.null(fm)) {
         return("argument names NOT checked: the engine's formals are unknown")
     }
-    if (is_in("...", fm)) {
+    if (is_in("...", fm) && !filtered) {
         return(glue(
             "argument names NOT checked: {callee}() takes `...`, ",
             "so any name is accepted"

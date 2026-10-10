@@ -5,16 +5,16 @@
 \title{Create a QtlDataset Object}
 \usage{
 QtlDataset(
-  study,
+  studyName,
   genotypes,
   phenotypes,
   genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
   scaleResiduals = TRUE,
-  genotypeFilterArgs = GenotypeFilterParam()
+  genotypeFilterParam = GenotypeFilterParam()
 )
 }
 \arguments{
-\item{study}{Character (length 1). Study identifier.}
+\item{studyName}{Character (length 1). Study identifier.}
 
 \item{genotypes}{A genotype panel (see \code{\link{readGenotypes}}).}
 
@@ -29,11 +29,11 @@ genotype experiment.}
 
 \item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
 
-\item{genotypeFilterArgs}{Which variants and samples to keep, built with
+\item{genotypeFilterParam}{Which variants and samples to keep, built with
 \code{\link{GenotypeFilterParam}}. A bare list is refused, since it
 cannot be checked. Each field is recorded on the object and applied
-lazily, at extraction time inside \code{getGenotypes()} /
-\code{getResidualizedGenotypes()}:
+lazily, at extraction time inside \code{genotypes()} /
+\code{residualizedGenotypes()}:
 \itemize{
   \item \code{mafCutoff} --- drop variants with
     \code{MAF < mafCutoff}. Unset means 0 (no filter).
@@ -82,5 +82,7 @@ se <- SummarizedExperiment::SummarizedExperiment(
   )),
   rowRanges = rng
 )
-QtlDataset(study = "s1", genotypes = panel, phenotypes = list(brain = se))
+QtlDataset(
+    studyName = "s1", genotypes = panel, phenotypes = list(brain = se)
+)
 }

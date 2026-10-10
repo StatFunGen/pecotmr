@@ -28,7 +28,7 @@ validate its presence when they consume the collection.}
 on construction; populated by \code{summaryStatsQc()} with a per-step audit
 record (filter names, drop counts, liftover target, RAISS settings, etc.).
 Fine-mapping and TWAS-weights pipelines reject inputs where
-\code{length(getQcInfo(x)) == 0L} -- the slot serves as both the gating
+\code{length(qcInfo(x)) == 0L} -- the slot serves as both the gating
 flag and the audit trail.}
 }}
 

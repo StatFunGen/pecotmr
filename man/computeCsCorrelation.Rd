@@ -17,9 +17,9 @@ computeCsCorrelation(x, ldSource, ...)
 membership and PIP) and its variant ids.}
 
 \item{ldSource}{The object supplying the LD: a \code{QtlDataset}
-(individual-level; genotypes via \code{\link{getGenotypes}}) or a
+(individual-level; genotypes via \code{\link{genotypes}}) or a
 \code{QtlSumStats} / \code{GwasSumStats} (summary statistics; LD via
-\code{\link{getLdSketch}}). Any other type is an error.}
+\code{\link{ldSketch}}). Any other type is an error.}
 
 \item{...}{Passed to methods.}
 }
@@ -39,6 +39,6 @@ Compute the between-credible-set correlation matrix for a
 \examples{
 data(qtlFineMappingPairedExample)
 data(qtlSumStatsExample)
-fe <- getFineMappingResult(qtlFineMappingPairedExample)
+fe <- fineMappingResult(qtlFineMappingPairedExample)
 computeCsCorrelation(fe, qtlSumStatsExample)
 }

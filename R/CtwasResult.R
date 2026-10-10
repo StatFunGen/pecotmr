@@ -141,7 +141,7 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 #'   is one row; a multi-context run emits per-context rows sharing the same
 #'   \code{jointContexts} set and jointly-estimated group priors.
 #' @param gwasStudy Character vector of GWAS (disease) study identifiers.
-#' @param study Character vector of QTL study identifiers.
+#' @param studyName Character vector of QTL study identifiers.
 #' @param context Character vector of context labels (scalar per row).
 #' @param method Character vector of weight-method names.
 #' @param entry List / \code{SimpleList} of \code{CtwasResultEntry} objects.
@@ -153,15 +153,15 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 #' @return A \code{CtwasResult} object.
 #' @examples
 #' cre <- CtwasResultEntry(
-#'   finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+#'   posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
 #'   susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
-#' cr <- CtwasResult(gwasStudy = "gwas1", study = "s1", context = "brain",
+#' cr <- CtwasResult(gwasStudy = "gwas1", studyName = "s1", context = "brain",
 #'   method = "susie", entry = list(cre))
 #' cr
 #' @export
 CtwasResult <- function(
     gwasStudy,
-    study,
+    studyName,
     context,
     method,
     entry,
@@ -170,7 +170,7 @@ CtwasResult <- function(
 ) {
     n <- length(gwasStudy)
     if (
-        length(study) != n ||
+        length(studyName) != n ||
             length(context) != n ||
             length(method) != n ||
             length(entry) != n
@@ -183,7 +183,7 @@ CtwasResult <- function(
     }
     cols <- list(
         gwasStudy = as.character(gwasStudy),
-        study = as.character(study),
+        study = as.character(studyName),
         context = as.character(context),
         method = as.character(method),
         entry = S4Vectors::SimpleList(entry)
@@ -204,19 +204,19 @@ CtwasResult <- function(
     obj
 }
 
-#' @rdname getMethodNames
+#' @rdname methodNames
 #' @export
-setMethod("getMethodNames", "CtwasResult", function(x) {
+setMethod("methodNames", "CtwasResult", function(x) {
     unique(as.character(x$method))
 })
 
-#' @rdname getStudy
+#' @rdname studyName
 #' @export
-setMethod("getStudy", "CtwasResult", function(x) unique(as.character(x$study)))
+setMethod("studyName", "CtwasResult", function(x) unique(as.character(x$study)))
 
-#' @rdname getContexts
+#' @rdname contexts
 #' @export
-setMethod("getContexts", "CtwasResult", function(x) {
+setMethod("contexts", "CtwasResult", function(x) {
     unique(as.character(x$context))
 })
 
@@ -237,16 +237,16 @@ setMethod("getContexts", "CtwasResult", function(x) {
     .rbindAligned(parts)
 }
 
-#' @rdname getFinemap
+#' @rdname ctwasPosteriors
 #' @export
-setMethod("getFinemap", "CtwasResult", function(x) {
-    .ctwasAggregateRows(x, getFinemap)
+setMethod("ctwasPosteriors", "CtwasResult", function(x) {
+    .ctwasAggregateRows(x, ctwasPosteriors)
 })
 
-#' @rdname getSusieAlpha
+#' @rdname susieAlpha
 #' @export
-setMethod("getSusieAlpha", "CtwasResult", function(x) {
-    .ctwasAggregateRows(x, getSusieAlpha)
+setMethod("susieAlpha", "CtwasResult", function(x) {
+    .ctwasAggregateRows(x, susieAlpha)
 })
 
 #' @rdname show-methods

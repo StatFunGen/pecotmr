@@ -14,6 +14,7 @@ Container for SNP-level annotations used in stratified
   \code{rowRanges}, the annotation matrix in the \code{annotations}
   assay, and the per-annotation table in \code{colData}. Subsetting works
   in both directions -- \code{x[i, j]} narrows SNPs and annotations
-  together -- and \code{\link{getBaseline}} / \code{\link{getCandidates}}
+  together -- and \code{\link{baselineAnnotations}} /
+  \code{\link{testedAnnotations}}
   are column subsets rather than reconstructions.
 }

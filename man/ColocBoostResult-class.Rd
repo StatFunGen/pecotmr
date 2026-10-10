@@ -6,8 +6,8 @@
 \title{ColocBoost Result}
 \description{
 A collection of ColocBoost results, one element per confidence
-  set (CoS). Project it with \code{\link{getColocPairs}},
-  \code{\link{getColocVariants}} or \code{\link{getColocBoostOutcomes}}.
+  set (CoS). Project it with \code{\link{colocPairs}},
+  \code{\link{colocVariants}} or \code{\link{colocBoostOutcomes}}.
 }
 \section{Slots}{
 

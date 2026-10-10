@@ -157,11 +157,11 @@ test_that("malformed slots are rejected with the caller's own error", {
 test_that("TwasWeightsMethodsParam shares the rules with its own registry", {
     p <- TwasWeightsMethodsParam(
         methods = list(susie = list()),
-        qtlDatasetMethods = list(lasso = GlmnetOptions(alpha = 0.5)),
+        qtlDatasetMethods = list(lasso = GlmnetOptions(nfold = 5)),
         qtlSumStatsMethods = list(lasso = LassosumOptions())
     )
     expect_s4_class(p, "TwasWeightsMethodsParam")
-    expect_equal(p$qtlDatasetMethods$lasso$alpha, 0.5)
+    expect_equal(p$qtlDatasetMethods$lasso$nfold, 5)
     # The registries differ: prsCs is summary-statistics only, enet
     # individual only, and both are methods a fine-mapping Param never has.
     expect_error(
@@ -457,7 +457,7 @@ test_that("show renders a slot holding per-method entries", {
     out <- paste(
         capture.output(show(
             FineMappingMethodsParam(
-                methods = list(susie = SusieOptions(L = 20))
+                methods = list(susie = SusieOptions(max_iter = 20))
             )
         )),
         collapse = " "
@@ -469,7 +469,7 @@ test_that("show renders a slot holding per-method entries", {
     multi <- paste(
         capture.output(show(TwasWeightsMethodsParam(
             methods = list(susie = list()),
-            qtlDatasetMethods = list(lasso = GlmnetOptions(alpha = 0.5)),
+            qtlDatasetMethods = list(lasso = GlmnetOptions(nfold = 5)),
             qtlSumStatsMethods = list(lasso = LassosumOptions())
         ))),
         collapse = " "
@@ -518,9 +518,9 @@ test_that("show names a nested Options record by its engine", {
 })
 
 test_that("show names a nested Param by what it contains", {
-    # Not by slot name: the reader wants the fields, not "credibleSetArgs".
+    # Not by slot name: the reader wants the fields, not the bundle name.
     out <- capture.output(show(GwasFineMappingParam()))
-    expect_true(any(str_detect(out, "credibleSetArgs")))
+    expect_true(any(str_detect(out, "credibleSetParam")))
     expect_true(any(str_detect(out, "coverage, secondaryCoverage")))
 })
 

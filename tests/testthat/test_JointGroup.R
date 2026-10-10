@@ -3,9 +3,9 @@
 # JointDispatchCell wiring row, and the pipeline marker classes. Construction is
 # validated, so a malformed group / mistyped cell fails loudly at the source.
 
-.jg_cond <- function(study = "S", context = c("c1", "c2"), trait = "G") {
+.jg_cond <- function(studyName = "S", context = c("c1", "c2"), trait = "G") {
     data.frame(
-        study = study,
+        study = studyName,
         context = context,
         trait = trait,
         stringsAsFactors = FALSE

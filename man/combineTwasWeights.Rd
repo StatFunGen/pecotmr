@@ -26,10 +26,10 @@ cTWAS. Joint-specification metadata columns are carried through.
 \examples{
 twe <- twasWeightsRow(
   variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
-  cvResult = list(rsq = 0.5), standardized = FALSE)
-tw1 <- TwasWeights(study = "s1", context = "brain", trait = "g1",
+  cvResult = list(rsq = 0.5), weightStandardized = FALSE)
+tw1 <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(twe))
-tw2 <- TwasWeights(study = "s2", context = "brain", trait = "g1",
+tw2 <- TwasWeights(studyName = "s2", context = "brain", trait = "g1",
   method = "susie", entry = list(twe))
 combineTwasWeights(tw1, tw2)
 }

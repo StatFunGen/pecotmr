@@ -5,10 +5,10 @@
 #'   \code{\link{sldscPostprocessingPipeline}}. The class itself performs no
 #'   file I/O: the user runs the readers, then constructs an \code{SldscData}
 #'   from those in-memory objects, and the pipeline does all computation on it.
-#' @slot annot A \code{data.frame} of target annotations with at least
+#' @slot annotData A \code{data.frame} of target annotations with at least
 #'   \code{CHR} and \code{SNP} columns plus one or more annotation columns
 #'   (\code{BP}/\code{CM} optional).
-#' @slot frq A \code{data.frame} of reference-panel allele frequencies with
+#' @slot frqData A \code{data.frame} of reference-panel allele frequencies with
 #'   \code{SNP} and \code{MAF} columns (a 0-row frame when no \code{.frq} data
 #'   was supplied).
 #' @slot traits A named list, one entry per trait, each a list with a
@@ -20,13 +20,13 @@
 setClass(
     "SldscData",
     slots = c(
-        annot = "data.frame",
-        frq = "data.frame",
+        annotData = "data.frame",
+        frqData = "data.frame",
         traits = "list"
     ),
     prototype = list(
-        annot = tibble(),
-        frq = tibble(),
+        annotData = tibble(),
+        frqData = tibble(),
         traits = list()
     )
 )
@@ -38,8 +38,8 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 # @noRd
 .validateSldscData <- function(object) {
     errs <- c(
-        .sldscDataCheckAnnot(object@annot),
-        .sldscDataCheckFrq(object@frq),
+        .sldscDataCheckAnnot(object@annotData),
+        .sldscDataCheckFrq(object@frqData),
         .sldscDataCheckTraits(object@traits)
     )
     if (length(errs)) errs else TRUE
@@ -47,9 +47,9 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 
 # @noRd
 #' @importFrom checkmate checkNames
-.sldscDataCheckAnnot <- function(annot) {
-    cols <- checkNames(names(annot), must.include = c("CHR", "SNP"))
-    annotCols <- setdiff(names(annot), c("CHR", "SNP", "BP", "CM"))
+.sldscDataCheckAnnot <- function(annotData) {
+    cols <- checkNames(names(annotData), must.include = c("CHR", "SNP"))
+    annotCols <- setdiff(names(annotData), c("CHR", "SNP", "BP", "CM"))
     c(
         if (!isTRUE(cols)) {
             str_c("`annot` must have columns CHR and SNP: ", cols)
@@ -65,11 +65,11 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 }
 
 # @noRd
-.sldscDataCheckFrq <- function(frq) {
-    if (nrow(frq) == 0L) {
+.sldscDataCheckFrq <- function(frqData) {
+    if (nrow(frqData) == 0L) {
         return(NULL)
     }
-    cols <- checkNames(names(frq), must.include = c("SNP", "MAF"))
+    cols <- checkNames(names(frqData), must.include = c("SNP", "MAF"))
     if (isTRUE(cols)) {
         return(NULL)
     }
@@ -110,10 +110,11 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 #' Bundles the in-memory outputs of the S-LDSC readers into a single object for
 #' \code{\link{sldscPostprocessingPipeline}}. Performs no file I/O.
 #'
-#' @param annot A target-annotation \code{data.frame} (e.g. from
+#' @param annotData A target-annotation \code{data.frame} (e.g. from
 #'   \code{\link{readSldscAnnot}}): \code{CHR}, \code{SNP}, and one or more
 #'   annotation columns.
-#' @param frq Optional reference-panel allele-frequency \code{data.frame} (e.g.
+#' @param frqData Optional reference-panel allele-frequency
+#'   \code{data.frame} (e.g.
 #'   from \code{\link{readSldscFrq}}): \code{SNP}, \code{MAF}. \code{NULL} (the
 #'   default) stores an empty frame, which disables MAF-based filtering.
 #' @param traits A named list of per-trait runs; each entry a list with a
@@ -134,8 +135,8 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -147,20 +148,20 @@ setValidity("SldscData", function(object) .validateSldscData(object))
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
+#' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 #' sd
 #' @export
-SldscData <- function(annot, frq = NULL, traits = list()) {
-    if (missing(annot)) {
-        abort("SldscData: `annot` is required.")
+SldscData <- function(annotData, frqData = NULL, traits = list()) {
+    if (missing(annotData)) {
+        abort("SldscData: `annotData` is required.")
     }
-    if (is.null(frq)) {
-        frq <- tibble()
+    if (is.null(frqData)) {
+        frqData <- tibble()
     }
     obj <- new(
         "SldscData",
-        annot = as_tibble(annot),
-        frq = as_tibble(frq),
+        annotData = as_tibble(annotData),
+        frqData = as_tibble(frqData),
         traits = traits
     )
     validObject(obj)
@@ -169,49 +170,48 @@ SldscData <- function(annot, frq = NULL, traits = list()) {
 
 # ---- accessors ----
 
-#' @rdname getAnnotData
+#' @rdname annotData
 #' @export
-setMethod("getAnnotData", "SldscData", function(x) x@annot)
+setMethod("annotData", "SldscData", function(x) x@annotData)
 
-#' @rdname getFrqData
+#' @rdname frqData
 #' @export
-setMethod("getFrqData", "SldscData", function(x) x@frq)
+setMethod("frqData", "SldscData", function(x) x@frqData)
 
-#' @rdname getTraitRuns
+#' @rdname traitNames
 #' @export
-setMethod("getTraitRuns", "SldscData", function(x) x@traits)
+setMethod("traitNames", "SldscData", function(x) names(x@traits))
 
-#' @rdname getTraits
+#' @rdname annotCols
 #' @export
-setMethod("getTraits", "SldscData", function(x) names(x@traits))
-
-#' @rdname getAnnotCols
-#' @export
-setMethod("getAnnotCols", "SldscData", function(x) {
-    setdiff(names(x@annot), c("CHR", "SNP", "BP", "CM"))
+setMethod("annotCols", "SldscData", function(x) {
+    setdiff(names(x@annotData), c("CHR", "SNP", "BP", "CM"))
 })
 
-#' @rdname getTraitRun
+#' @rdname sldscResults
 #' @export
 setMethod(
-    "getTraitRun",
+    "sldscResults",
     "SldscData",
-    function(x, trait, mode = c("single", "joint"), idx = NULL) {
+    function(x, trait = NULL, mode = c("single", "joint"), idx = NULL) {
+        if (is.null(trait)) {
+            return(x@traits)
+        }
         mode <- arg_match(mode)
-        t <- x@traits[[trait]]
-        if (is.null(t)) {
+        runs <- x@traits[[trait]]
+        if (is.null(runs)) {
             return(NULL)
         }
         if (mode == "joint") {
-            return(t$joint)
+            return(runs$joint)
         }
         if (is.null(idx)) {
-            return(t$single)
+            return(runs$single)
         }
-        if (idx > length(t$single)) {
+        if (idx > length(runs$single)) {
             return(NULL)
         }
-        t$single[[idx]]
+        runs$single[[idx]]
     }
 )
 
@@ -219,13 +219,13 @@ setMethod(
 setMethod("show", "SldscData", function(object) {
     cat("SldscData\n")
     cat(glue(
-        "  annotations ({length(getAnnotCols(object))}): ",
-        "{str_flatten(getAnnotCols(object), ', ')}\n",
+        "  annotations ({length(annotCols(object))}): ",
+        "{str_flatten(annotCols(object), ', ')}\n",
         .trim = FALSE
     ))
     cat(glue(
-        "  annot SNPs: {nrow(object@annot)} | ",
-        "frq SNPs: {nrow(object@frq)}\n",
+        "  annot SNPs: {nrow(object@annotData)} | ",
+        "frq SNPs: {nrow(object@frqData)}\n",
         .trim = FALSE
     ))
     cat(glue(

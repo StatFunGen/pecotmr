@@ -52,8 +52,8 @@ mkRun <- function(cats) {
     enrichmentP = setNames(rep(0.01, n), cats),
     propH2 = setNames(rep(0.2, n), cats),
     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-    tauBlocks = matrix(1e-7 * seq(0.9, 1.1, length.out = 10), 10, n,
-      dimnames = list(NULL, cats)),
+    annotationJackknifeCoefs = matrix(1e-7 * seq(0.9, 1.1, length.out = 10),
+  10, n, dimnames = list(NULL, cats)),
     nBlocks = 10L)
 }
 annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
@@ -66,7 +66,7 @@ mkTrait <- function() {
     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 }
 traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-sldscData <- SldscData(annot = annot, frq = frq, traits = traits)
+sldscData <- SldscData(annotData = annot, frqData = frq, traits = traits)
 sldscPostprocessingPipeline(sldscData = sldscData)
 }
 \seealso{

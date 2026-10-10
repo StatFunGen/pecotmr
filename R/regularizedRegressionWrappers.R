@@ -694,7 +694,7 @@ mrmashRssWeights <- function(
     }
     # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer
     # Bhat/Shat. n must be a scalar (mr.mash.rss contract); use the median.
-    rssArgs <- c(
+    callArgs <- c(
         list(
             Bhat = ss$Bhat,
             Shat = ss$Shat,
@@ -709,7 +709,7 @@ mrmashRssWeights <- function(
         # one opaque element instead of splicing its entries.
         as.list(dots)
     )
-    exec(mr.mashr::mr.mash.rss, !!!rssArgs)
+    exec(mr.mashr::mr.mash.rss, !!!callArgs)
 }
 
 
@@ -770,16 +770,19 @@ initPriorSd <- function(X, y, n = 30) {
 #'   what lets each be checked exactly, rather than against a union in which
 #'   an option meant for the other path would pass and then be dropped.
 #'
-#'   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot be
-#'   checked: \code{cv.glmnet}, \code{cv.ncvreg} and \code{fit_model} each
-#'   take \code{...}, so they accept any name and there is nothing to check
-#'   against. Every other constructor here rejects an unknown option. See
-#'   \code{\link{MethodOptions}}.
+#'   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
+#'   check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
+#'   \code{fit_model} each take \code{...}, so they accept any name and there
+#'   is nothing to check against. Every other constructor here rejects an
+#'   unknown option. Separately, and in all of them, a name pecotmr supplies
+#'   itself is refused --- \code{GlmnetOptions(alpha=)} and
+#'   \code{NcvregOptions(penalty=)} select the penalty family, which is the
+#'   calling wrapper's to set. See \code{\link{MethodOptions}}.
 #' @param ... Arguments for the engine, under its own names.
 #' @return A \code{\link{MethodOptions}} object.
 #' @examples
 #' GlmnetOptions(nfold = 10)
-#' QggOptions(nit = 1000)
+#' QggOptions(updateB = TRUE)
 #' LassosumOptions(thr = 1e-4)
 #' @name twasEngineOptions
 NULL
@@ -787,6 +790,20 @@ NULL
 #' @rdname twasEngineOptions
 #' @export
 GlmnetOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            x = "supplied from the data by the pipeline",
+            y = "supplied from the data by the pipeline",
+            # `alpha` selects the penalty family -- it is what distinguishes
+            # lasso from enet from ridge -- so it belongs to the calling
+            # wrapper. Refused here rather than in glmnetWeights() so the
+            # failure lands where the value was written.
+            alpha = "the calling wrapper (lassoWeights, enetWeights)"
+        ),
+        "GlmnetOptions"
+    )
     .newMethodOptions(
         "glmnet::cv.glmnet",
         defaults = list(),
@@ -799,6 +816,26 @@ GlmnetOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 QggOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            y = "supplied from the data by the pipeline",
+            # qgg's spellings do not line up with the wrapper's: the
+            # genotype matrix is `W` here and `X` is the covariates (the
+            # wrapper's `Z`). Both are pecotmr's to supply, so both are
+            # refused -- matching only the names that happen to agree on
+            # both sides is how `W` was missed.
+            W = "supplied from the data by the pipeline",
+            X = "supplied from the data by the pipeline",
+            h2 = "the wrapper's `h2`",
+            method = "the wrapper's `method`",
+            nit = "the wrapper's `nit`",
+            nburn = "the wrapper's `nburn`",
+            nthin = "the wrapper's `nthin`"
+        ),
+        "QggOptions"
+    )
     .newMethodOptions(
         "qgg::gbayes",
         defaults = list(),
@@ -811,6 +848,18 @@ QggOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 BglrOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            y = "supplied from the data by the pipeline",
+            ETA = "supplied from the data by the pipeline",
+            nIter = "the wrapper's `nIter`",
+            burnIn = "the wrapper's `burnIn`",
+            thin = "the wrapper's `thin`"
+        ),
+        "BglrOptions"
+    )
     .newMethodOptions(
         "BGLR::BGLR",
         defaults = list(),
@@ -823,6 +872,17 @@ BglrOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 DprOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            y = "supplied from the data by the pipeline",
+            x = "supplied from the data by the pipeline",
+            w = "supplied from the data by the pipeline",
+            fitting_method = "the wrapper's `fittingMethod`"
+        ),
+        "DprOptions"
+    )
     .newMethodOptions(
         "RcppDPR::fit_model",
         defaults = list(),
@@ -835,6 +895,17 @@ DprOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 NcvregOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            X = "supplied from the data by the pipeline",
+            y = "supplied from the data by the pipeline",
+            nfolds = "the wrapper's `nfolds`",
+            penalty = "the calling wrapper (scadWeights, mcpWeights)"
+        ),
+        "NcvregOptions"
+    )
     .newMethodOptions(
         "ncvreg::cv.ncvreg",
         defaults = list(),
@@ -847,6 +918,17 @@ NcvregOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 L0learnOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            x = "supplied from the data by the pipeline",
+            y = "supplied from the data by the pipeline",
+            nFolds = "the wrapper's `nFolds`",
+            penalty = "the wrapper's `penalty`"
+        ),
+        "L0learnOptions"
+    )
     .newMethodOptions(
         "L0Learn::L0Learn.cvfit",
         defaults = list(),
@@ -859,6 +941,15 @@ L0learnOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 MrashOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            X = "supplied from the data by the pipeline",
+            y = "supplied from the data by the pipeline"
+        ),
+        "MrashOptions"
+    )
     .newMethodOptions(
         "susieR::mr.ash",
         defaults = list(),
@@ -871,6 +962,25 @@ MrashOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 MrashRssOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            bhat = "supplied from the data by the pipeline",
+            shat = "supplied from the data by the pipeline",
+            R = "supplied from the data by the pipeline",
+            n = "supplied from the data by the pipeline",
+            # The engine writes these five in snake_case while the wrapper
+            # spells them camelCase, so they read as unrelated names; every
+            # one is still fed straight from a formal.
+            z = "the wrapper's `z`",
+            var_y = "the wrapper's `varY`",
+            sigma2_e = "the wrapper's `sigma2E`",
+            s0 = "the wrapper's `s0`",
+            w0 = "the wrapper's `w0`"
+        ),
+        "MrashRssOptions"
+    )
     # The summary-statistics twin of MrashOptions(). Separate because the two
     # engines take different arguments entirely -- mr.ash takes (X, y, ...),
     # mr.ash.rss takes (bhat, shat, R, ...) -- so one record validating
@@ -888,6 +998,16 @@ MrashRssOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 PrsCsOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            bhat = "supplied from the data by the pipeline",
+            R = "supplied from the data by the pipeline",
+            n = "supplied from the data by the pipeline"
+        ),
+        "PrsCsOptions"
+    )
     .newMethodOptions(
         "pecotmr::prsCs",
         defaults = list(),
@@ -900,6 +1020,16 @@ PrsCsOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 LassosumOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            bhat = "supplied from the data by the pipeline",
+            R = "supplied from the data by the pipeline",
+            n = "supplied from the data by the pipeline"
+        ),
+        "LassosumOptions"
+    )
     .newMethodOptions(
         "pecotmr::lassosumRss",
         defaults = list(),
@@ -912,6 +1042,16 @@ LassosumOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 PenalizedRssOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            bhat = "supplied from the data by the pipeline",
+            R = "supplied from the data by the pipeline",
+            n = "supplied from the data by the pipeline"
+        ),
+        "PenalizedRssOptions"
+    )
     .newMethodOptions(
         "pecotmr::penalizedRss",
         defaults = list(),
@@ -924,6 +1064,16 @@ PenalizedRssOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 SdprOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            bhat = "supplied from the data by the pipeline",
+            R = "supplied from the data by the pipeline",
+            n = "supplied from the data by the pipeline"
+        ),
+        "SdprOptions"
+    )
     .newMethodOptions(
         "pecotmr::sdpr",
         defaults = list(),
@@ -936,6 +1086,20 @@ SdprOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 MrmashOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            X = "supplied from the data by the pipeline",
+            Y = "supplied from the data by the pipeline",
+            S0 = "the pipeline's prior matrices",
+            mu1_init = "the wrapper's `bInit`",
+            standardize = "the wrapper's `standardize`",
+            update_V_method = "the wrapper's `updateVMethod`",
+            nthreads = "the wrapper's `numThreads`"
+        ),
+        "MrmashOptions"
+    )
     .newMethodOptions(
         "mr.mashr::mr.mash",
         defaults = list(),
@@ -956,6 +1120,21 @@ MrmashOptions <- function(...) {
 #' @rdname twasEngineOptions
 #' @export
 MrmashRssOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            Bhat = "supplied from the data by the pipeline",
+            Shat = "supplied from the data by the pipeline",
+            R = "supplied from the data by the pipeline",
+            n = "supplied from the data by the pipeline",
+            covY = "supplied from the data by the pipeline",
+            V = "supplied from the data by the pipeline",
+            S0 = "the pipeline's prior matrices",
+            w0 = "the pipeline's prior weights"
+        ),
+        "MrmashRssOptions"
+    )
     # The summary-statistics twin of MrmashOptions(). mr.mash takes
     # (X, Y, S0, w0, V, mu1_init, ...) and mr.mash.rss takes
     # (Bhat, Shat, Z, R, covY, n, ...), so the two cannot share one
@@ -1003,17 +1182,9 @@ glmnetWeights <- function(X, y, alpha, methodArgs = GlmnetOptions()) {
     .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "glmnetWeights")
-    # `alpha` is the wrapper's own dial -- it is what distinguishes lasso from
-    # enet from ridge -- so it is supplied here rather than settable in
-    # methodArgs. Everything else pecotmr fixed is now overridable.
-    userArgs <- as.list(methodArgs)
-    if (is_in("alpha", names(userArgs))) {
-        abort(glue(
-            "glmnetWeights: `alpha` selects the penalty family and is set by ",
-            "the calling wrapper (lassoWeights = 1, enetWeights = 0.5), so ",
-            "it cannot also be given in `methodArgs`."
-        ))
-    }
+    # `alpha` is the wrapper's own dial and is refused by GlmnetOptions()
+    # itself, so there is no second check here. Everything else pecotmr
+    # fixed below is a literal default and stays overridable.
     callArgs <- list_modify(
         list(
             x = X[, keep, drop = FALSE],
@@ -1023,7 +1194,7 @@ glmnetWeights <- function(X, y, alpha, methodArgs = GlmnetOptions()) {
             intercept = TRUE,
             standardize = FALSE
         ),
-        !!!userArgs
+        !!!methodArgs
     )
     enet <- exec(glmnet::cv.glmnet, !!!callArgs)
     replace(eff.wgt, keep, coef(enet, s = "lambda.min")[2:(sum(keep) + 1)])
@@ -1221,6 +1392,12 @@ bayesAlphabetWeights <- function(
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
+#' @param h2 Numeric or \code{NULL}. Prior heritability; \code{NULL}
+#'   leaves the engine's own default.
+#' @param nit Integer. Total MCMC iterations. Default \code{5000}.
+#' @param nburn Integer. Burn-in iterations. Default \code{1000}.
+#' @param nthin Integer. Thinning interval for retained MCMC samples.
+#'   Default \code{5}.
 #' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
 #'   with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -1233,9 +1410,28 @@ bayesAlphabetWeights <- function(
 #' y <- eqtlRegionExample$yRes
 #' bayesNWeights(X, y)
 #' @export
-bayesNWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
+bayesNWeights <- function(
+    X,
+    y,
+    Z = NULL,
+    h2 = NULL,
+    nit = 5000,
+    nburn = 1000,
+    nthin = 5,
+    methodArgs = QggOptions()
+) {
     .assertMethodOptions(methodArgs, "QggOptions", "methodArgs")
-    bayesAlphabetWeights(X, y, method = "bayesN", Z, methodArgs = methodArgs)
+    bayesAlphabetWeights(
+        X,
+        y,
+        method = "bayesN",
+        Z,
+        h2 = h2,
+        nit = nit,
+        nburn = nburn,
+        nthin = nthin,
+        methodArgs = methodArgs
+    )
 }
 #' @title BayesL TWAS weights (Laplace prior, LASSO-equivalent)
 #' @description Use laplace/double exponential distribution as prior. This is
@@ -1243,6 +1439,12 @@ bayesNWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
+#' @param h2 Numeric or \code{NULL}. Prior heritability; \code{NULL}
+#'   leaves the engine's own default.
+#' @param nit Integer. Total MCMC iterations. Default \code{5000}.
+#' @param nburn Integer. Burn-in iterations. Default \code{1000}.
+#' @param nthin Integer. Thinning interval for retained MCMC samples.
+#'   Default \code{5}.
 #' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
 #'   with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -1255,15 +1457,40 @@ bayesNWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesLWeights(X, y)
 #' @export
-bayesLWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
+bayesLWeights <- function(
+    X,
+    y,
+    Z = NULL,
+    h2 = NULL,
+    nit = 5000,
+    nburn = 1000,
+    nthin = 5,
+    methodArgs = QggOptions()
+) {
     .assertMethodOptions(methodArgs, "QggOptions", "methodArgs")
-    bayesAlphabetWeights(X, y, method = "bayesL", Z, methodArgs = methodArgs)
+    bayesAlphabetWeights(
+        X,
+        y,
+        method = "bayesL",
+        Z,
+        h2 = h2,
+        nit = nit,
+        nburn = nburn,
+        nthin = nthin,
+        methodArgs = methodArgs
+    )
 }
 #' @title BayesA TWAS weights (t-distribution prior)
 #' @description Use t-distribution as prior.
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
+#' @param h2 Numeric or \code{NULL}. Prior heritability; \code{NULL}
+#'   leaves the engine's own default.
+#' @param nit Integer. Total MCMC iterations. Default \code{5000}.
+#' @param nburn Integer. Burn-in iterations. Default \code{1000}.
+#' @param nthin Integer. Thinning interval for retained MCMC samples.
+#'   Default \code{5}.
 #' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
 #'   with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -1276,9 +1503,28 @@ bayesLWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesAWeights(X, y)
 #' @export
-bayesAWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
+bayesAWeights <- function(
+    X,
+    y,
+    Z = NULL,
+    h2 = NULL,
+    nit = 5000,
+    nburn = 1000,
+    nthin = 5,
+    methodArgs = QggOptions()
+) {
     .assertMethodOptions(methodArgs, "QggOptions", "methodArgs")
-    bayesAlphabetWeights(X, y, method = "bayesA", Z, methodArgs = methodArgs)
+    bayesAlphabetWeights(
+        X,
+        y,
+        method = "bayesA",
+        Z,
+        h2 = h2,
+        nit = nit,
+        nburn = nburn,
+        nthin = nthin,
+        methodArgs = methodArgs
+    )
 }
 #' @title BayesC TWAS weights (rounded-spike prior)
 #' @description Use a rounded spike prior (low-variance Gaussian).
@@ -1287,6 +1533,12 @@ bayesAWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
 #' @param pi Numeric in (0, 1). Prior proportion of non-null effects for the
 #'   BayesC mixture. Default \code{0.1}.
+#' @param h2 Numeric or \code{NULL}. Prior heritability; \code{NULL}
+#'   leaves the engine's own default.
+#' @param nit Integer. Total MCMC iterations. Default \code{5000}.
+#' @param nburn Integer. Burn-in iterations. Default \code{1000}.
+#' @param nthin Integer. Thinning interval for retained MCMC samples.
+#'   Default \code{5}.
 #' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
 #'   with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -1299,7 +1551,17 @@ bayesAWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesCWeights(X, y)
 #' @export
-bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions()) {
+bayesCWeights <- function(
+    X,
+    y,
+    Z = NULL,
+    pi = 0.1,
+    h2 = NULL,
+    nit = 5000,
+    nburn = 1000,
+    nthin = 5,
+    methodArgs = QggOptions()
+) {
     .assertMethodOptions(methodArgs, "QggOptions", "methodArgs")
     # `pi` is a qgg option, not a formal of bayesAlphabetWeights, so it joins
     # the option list rather than the argument list.
@@ -1308,6 +1570,10 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions()) {
         y,
         method = "bayesC",
         Z,
+        h2 = h2,
+        nit = nit,
+        nburn = nburn,
+        nthin = nthin,
         methodArgs = .methodOptionsWith(methodArgs, "QggOptions", pi = pi)
     )
 }
@@ -1317,6 +1583,12 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions()) {
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
+#' @param h2 Numeric or \code{NULL}. Prior heritability; \code{NULL}
+#'   leaves the engine's own default.
+#' @param nit Integer. Total MCMC iterations. Default \code{5000}.
+#' @param nburn Integer. Burn-in iterations. Default \code{1000}.
+#' @param nthin Integer. Thinning interval for retained MCMC samples.
+#'   Default \code{5}.
 #' @param methodArgs Options forwarded to \code{qgg::gbayes}, built
 #'   with \code{\link{QggOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -1329,9 +1601,28 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions()) {
 #' y <- eqtlRegionExample$yRes
 #' bayesRWeights(X, y)
 #' @export
-bayesRWeights <- function(X, y, Z = NULL, methodArgs = QggOptions()) {
+bayesRWeights <- function(
+    X,
+    y,
+    Z = NULL,
+    h2 = NULL,
+    nit = 5000,
+    nburn = 1000,
+    nthin = 5,
+    methodArgs = QggOptions()
+) {
     .assertMethodOptions(methodArgs, "QggOptions", "methodArgs")
-    bayesAlphabetWeights(X, y, method = "bayesR", Z, methodArgs = methodArgs)
+    bayesAlphabetWeights(
+        X,
+        y,
+        method = "bayesR",
+        Z,
+        h2 = h2,
+        nit = nit,
+        nburn = nburn,
+        nthin = nthin,
+        methodArgs = methodArgs
+    )
 }
 
 
