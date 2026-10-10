@@ -64,7 +64,7 @@ Correlation between variants, from either a dosage matrix
 }
 \examples{
 data(qtlSumStatsExample)
-panel <- getLdSketch(qtlSumStatsExample)
+panel <- ldSketch(qtlSumStatsExample)
 R <- computeLd(panel, snpIdx = 1:5)
 dim(R)
 # A dosage matrix already in memory is correlated directly.

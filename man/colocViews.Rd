@@ -3,33 +3,33 @@
 %   R/ColocBoostResult.R
 \name{colocViews}
 \alias{colocViews}
-\alias{getColocPairs}
-\alias{getColocVariants}
-\alias{getColocCredibleSets}
-\alias{getColocGenes}
-\alias{getColocPairs,ColocResult-method}
-\alias{getColocVariants,ColocResult-method}
-\alias{getColocGenes,ColocResult-method}
-\alias{getColocCredibleSets,ColocResult-method}
-\alias{getColocPairs,ColocBoostResult-method}
-\alias{getColocVariants,ColocBoostResult-method}
+\alias{colocPairs}
+\alias{colocVariants}
+\alias{colocCredibleSets}
+\alias{colocGenes}
+\alias{colocPairs,ColocResult-method}
+\alias{colocVariants,ColocResult-method}
+\alias{colocGenes,ColocResult-method}
+\alias{colocCredibleSets,ColocResult-method}
+\alias{colocPairs,ColocBoostResult-method}
+\alias{colocVariants,ColocBoostResult-method}
 \title{Colocalization Views}
 \usage{
-getColocPairs(x, ...)
+colocPairs(x, ...)
 
-getColocVariants(x, pooled = FALSE, ...)
+colocVariants(x, pooled = FALSE, ...)
 
-getColocCredibleSets(x, coverage = 0.95, minPp4 = NULL, minAbsCorr = 0.8, ...)
+colocCredibleSets(x, coverage = 0.95, minPp4 = NULL, minAbsCorr = 0.8, ...)
 
-getColocGenes(x, ...)
+colocGenes(x, ...)
 
-\S4method{getColocPairs}{ColocResult}(x)
+\S4method{colocPairs}{ColocResult}(x)
 
-\S4method{getColocVariants}{ColocResult}(x, pooled = FALSE)
+\S4method{colocVariants}{ColocResult}(x, pooled = FALSE)
 
-\S4method{getColocGenes}{ColocResult}(x)
+\S4method{colocGenes}{ColocResult}(x)
 
-\S4method{getColocCredibleSets}{ColocResult}(
+\S4method{colocCredibleSets}{ColocResult}(
   x,
   coverage = 0.95,
   minPp4 = NULL,
@@ -37,16 +37,16 @@ getColocGenes(x, ...)
   requireMaxH4 = FALSE
 )
 
-\S4method{getColocPairs}{ColocBoostResult}(x)
+\S4method{colocPairs}{ColocBoostResult}(x)
 
-\S4method{getColocVariants}{ColocBoostResult}(x, pooled = FALSE)
+\S4method{colocVariants}{ColocBoostResult}(x, pooled = FALSE)
 }
 \arguments{
 \item{x}{A \code{ColocResult}.}
 
 \item{...}{Additional arguments passed on to methods.}
 
-\item{pooled}{Logical. \code{getColocVariants()} only: pool to one row per
+\item{pooled}{Logical. \code{colocVariants()} only: pool to one row per
 (gene, variant) instead of per (pair, variant).}
 
 \item{coverage}{Cumulative \code{SNP.PP.H4} the credible set must reach.}
@@ -73,20 +73,20 @@ The four views over a \code{\linkS4class{ColocResult}}. The
   analysis needs, rather than any one of them being the stored shape.
 
   \describe{
-    \item{\code{getColocPairs()}}{One row per tested pair -- coloc's native
+    \item{\code{colocPairs()}}{One row per tested pair -- coloc's native
       \code{$summary} granularity. Every testable pair is reported verbatim,
       including both halves of a credible set that straddles a block
       boundary; interpreting them is the caller's decision.}
-    \item{\code{getColocVariants()}}{One row per (pair, variant), carrying
+    \item{\code{colocVariants()}}{One row per (pair, variant), carrying
       \code{colocPp = PP.H4.abf * SNP.PP.H4} -- the posterior that this
       variant is the shared causal one. With \code{pooled = TRUE}, one row
       per (gene, variant) pooled by the rule below.}
-    \item{\code{getColocCredibleSets()}}{One row per coloc credible set: the
+    \item{\code{colocCredibleSets()}}{One row per coloc credible set: the
       smallest set of variants whose cumulative \code{SNP.PP.H4} reaches
       \code{coverage}. This is a THIRD variant set, not guaranteed to be a
       subset of either input credible set, so its purity is recomputed from
       LD rather than inherited.}
-    \item{\code{getColocGenes()}}{One row per gene, pooled across pairs.}
+    \item{\code{colocGenes()}}{One row per gene, pooled across pairs.}
   }
 }
 \section{Pooling}{
@@ -106,8 +106,8 @@ res <- colocPipeline(
     qtlFineMappingResult = qtlFineMappingLbfExample,
     gwasInput = gwasFineMappingLbfExample
 )
-head(getColocPairs(res))
-head(getColocVariants(res))
-getColocGenes(res)
-head(getColocCredibleSets(res, minPp4 = 0.001))
+head(colocPairs(res))
+head(colocVariants(res))
+colocGenes(res)
+head(colocCredibleSets(res, minPp4 = 0.001))
 }

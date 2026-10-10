@@ -43,8 +43,8 @@ NULL
 #'   normalized posterior over an arbitrary-sized set of outcomes -- so neither
 #'   can be expressed in the other's schema. What they share is the shape (one
 #'   element per colocalization unit, its variants inside) and therefore the
-#'   projection surface: both answer \code{\link{getColocPairs}} and
-#'   \code{\link{getColocVariants}}, so code that only needs "which variants
+#'   projection surface: both answer \code{\link{colocPairs}} and
+#'   \code{\link{colocVariants}}, so code that only needs "which variants
 #'   colocalized, and how strongly" works against either.
 #' @slot ldSketch The LD reference panel the underlying fits were computed
 #'   against, or \code{NULL}. Shared by both subclasses: coloc and ColocBoost
@@ -58,17 +58,17 @@ setClass(
     prototype(ldSketch = NULL)
 )
 
-#' @rdname getLdSketch
+#' @rdname ldSketch
 #' @export
-setMethod("getLdSketch", "ColocResultBase", function(x) x@ldSketch)
+setMethod("ldSketch", "ColocResultBase", function(x) x@ldSketch)
 
 #' @title Colocalization Result
 #' @description A collection of colocalization results, one element per tested
 #'   (QTL credible set, GWAS credible set, block) pair. Build the four views
-#'   with \code{\link{getColocPairs}}, \code{\link{getColocVariants}},
-#'   \code{\link{getColocCredibleSets}} and \code{\link{getColocGenes}}.
+#'   with \code{\link{colocPairs}}, \code{\link{colocVariants}},
+#'   \code{\link{colocCredibleSets}} and \code{\link{colocGenes}}.
 #' @details The inherited \code{ldSketch} is what
-#'   \code{getColocCredibleSets()} uses to compute credible-set purity.
+#'   \code{colocCredibleSets()} uses to compute credible-set purity.
 #' @seealso \code{\link{colocPipeline}}
 #' @export
 setClass("ColocResult", contains = "ColocResultBase")
@@ -198,7 +198,7 @@ setMethod("show", "ColocResult", function(object) {
 #' @param variants A list, parallel to \code{pairs}' rows, of per-pair data
 #'   frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.
 #' @param ldSketch Optional genotype panel (see \code{\link{readGenotypes}})
-#'   for the LD reference, used by \code{\link{getColocCredibleSets}} to
+#'   for the LD reference, used by \code{\link{colocCredibleSets}} to
 #'   compute purity.
 #' @return A \code{ColocResult}.
 #' @examples
@@ -331,7 +331,7 @@ ColocResult <- function(pairs, variants, ldSketch = NULL) {
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocPairs", "ColocResult", function(x) {
+setMethod("colocPairs", "ColocResult", function(x) {
     md <- mcols(x, use.names = FALSE)
     if (is.null(md) || length(x) == 0L) {
         return(tibble())
@@ -341,7 +341,7 @@ setMethod("getColocPairs", "ColocResult", function(x) {
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocVariants", "ColocResult", function(x, pooled = FALSE) {
+setMethod("colocVariants", "ColocResult", function(x, pooled = FALSE) {
     long <- .crLongVariants(x)
     if (!isTRUE(pooled) || nrow(long) == 0L) {
         return(long)
@@ -410,8 +410,8 @@ setMethod("getColocVariants", "ColocResult", function(x, pooled = FALSE) {
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocGenes", "ColocResult", function(x) {
-    pairs <- getColocPairs(x)
+setMethod("colocGenes", "ColocResult", function(x) {
+    pairs <- colocPairs(x)
     if (nrow(pairs) == 0L) {
         return(tibble())
     }
@@ -439,7 +439,7 @@ setMethod("getColocGenes", "ColocResult", function(x) {
 #' @rdname colocViews
 #' @export
 setMethod(
-    "getColocCredibleSets",
+    "colocCredibleSets",
     "ColocResult",
     function(
         x,
@@ -461,7 +461,7 @@ setMethod(
         }
         out <- bind_rows(sets)
         .crApplyPurityFilter(
-            mutate(out, purity = .crPuritiesFor(out, getLdSketch(x))),
+            mutate(out, purity = .crPuritiesFor(out, ldSketch(x))),
             minAbsCorr
         )
     }
@@ -553,7 +553,7 @@ setMethod(
         .ldFromSketch(
             ldSketch,
             ids,
-            label = "getColocCredibleSets",
+            label = "colocCredibleSets",
             onMissing = "drop"
         ),
         error = function(cnd) NULL
@@ -607,6 +607,6 @@ setMethod(
     "as.data.frame",
     "ColocResult",
     function(x, row.names = NULL, optional = FALSE, ...) {
-        as.data.frame(getColocPairs(x))
+        as.data.frame(colocPairs(x))
     }
 )

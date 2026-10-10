@@ -160,10 +160,10 @@ setClass(
     contains = "MethodParam",
     slots = c(
         methods = "MethodSelection",
-        credibleSetArgs = "CredibleSetParam",
-        rssArgs = "SusieRssParam",
-        panelFilterArgs = "PanelFilterParam",
-        addSusieInf = "logical",
+        credibleSetParam = "CredibleSetParam",
+        susieRssParam = "SusieRssParam",
+        panelFilterParam = "PanelFilterParam",
+        initializeWithSusieInf = "logical",
         fitRetention = "character"
     )
 )
@@ -182,47 +182,50 @@ setClass(
 #'   fine-mapping result, since no fit is run.
 #' @param methods Fine-mapping methods, as a character vector or a
 #'   \code{\link{FineMappingMethodsParam}} record. Default \code{"susie"}.
-#' @param credibleSetArgs How credible sets are built, built with
+#' @param credibleSetParam How credible sets are built, built with
 #'   \code{\link{CredibleSetParam}}. \code{coverage} and \code{L} matter
 #'   most here: they decide the sets whose log Bayes factors coloc scores, so
 #'   leaving them at the defaults while the QTL side used something else
 #'   compares two differently-built sets.
-#' @param rssArgs The summary-statistics solver, built with
+#' @param susieRssParam The summary-statistics solver, built with
 #'   \code{\link{SusieRssParam}} --- \code{serFallback}, \code{rMismatch},
 #'   \code{rFinite} and the \code{susie_rss} control list. What a GWAS block
 #'   with an imperfect LD panel needs.
-#' @param panelFilterArgs LD-reference-panel filters, built with
+#' @param panelFilterParam LD-reference-panel filters, built with
 #'   \code{\link{PanelFilterParam}}.
-#' @param addSusieInf Logical. Chain a SuSiE-inf fit, when \code{methods}
-#'   asks for \code{susieInf} alongside \code{susie}. Default \code{TRUE}.
+#' @param initializeWithSusieInf Logical. Chain a SuSiE-inf fit, when
+#'   \code{methods} asks for \code{susieInf} alongside \code{susie}.
+#'   Default \code{TRUE}.
 #' @param fitRetention How much of each fit is kept: \code{"slim"} (default)
 #'   or \code{"full"}. Only observable when
 #'   \code{returnGwasFineMapping = TRUE}, which is when the fine-mapping
 #'   result is handed back for other uses.
 #' @return \code{GwasFineMappingParam} returns a
 #'   \code{GwasFineMappingParam} object, a \code{\link{MethodParam}}.
-#'   Each \code{get*} returns that setting's value --- for the three
-#'   nested bundles, the \code{MethodParam} itself --- and each
-#'   \code{set*} returns a modified copy.
+#'   Each accessor returns that setting's value --- for the three nested
+#'   bundles, the \code{MethodParam} itself --- and each replacement form
+#'   returns a modified copy.
 #' @examples
-#' GwasFineMappingParam(credibleSet = CredibleSetParam(coverage = 0.9))
+#' GwasFineMappingParam(
+#'     credibleSetParam = CredibleSetParam(coverage = 0.9)
+#' )
 #' @export
 GwasFineMappingParam <- function(
     methods = "susie",
-    credibleSetArgs = CredibleSetParam(),
-    rssArgs = SusieRssParam(),
-    panelFilterArgs = PanelFilterParam(),
-    addSusieInf = TRUE,
+    credibleSetParam = CredibleSetParam(),
+    susieRssParam = SusieRssParam(),
+    panelFilterParam = PanelFilterParam(),
+    initializeWithSusieInf = TRUE,
     fitRetention = c("slim", "full")
 ) {
     fitRetention <- arg_match(fitRetention)
     new(
         "GwasFineMappingParam",
         methods = methods,
-        credibleSetArgs = credibleSetArgs,
-        rssArgs = rssArgs,
-        panelFilterArgs = panelFilterArgs,
-        addSusieInf = addSusieInf,
+        credibleSetParam = credibleSetParam,
+        susieRssParam = susieRssParam,
+        panelFilterParam = panelFilterParam,
+        initializeWithSusieInf = initializeWithSusieInf,
         fitRetention = fitRetention
     )
 }
@@ -280,7 +283,7 @@ GwasFineMappingParam <- function(
 #'   }
 #'
 #' @section LD-sketch compatibility check: If
-#'   \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must come
+#'   \code{ldSketch(qtlFineMappingResult)} is non-\code{NULL}, it must come
 #'   from the same reference panel as the LD sketch on \code{gwasInput}: the
 #'   same samples, and the same allele orientation on the variants the two
 #'   carry in common. The two need NOT carry the same variants --- running
@@ -317,10 +320,12 @@ GwasFineMappingParam <- function(
 #' @param gwasFineMappingArgs How \code{gwasInput} is fine-mapped when it is
 #'   summary statistics rather than a fine-mapping result, built with
 #'   \code{\link{GwasFineMappingParam}}: \code{methods},
-#'   \code{credibleSet}, \code{rss}, \code{panelFilter},
-#'   \code{addSusieInf} and \code{fitRetention}. Inert when
-#'   \code{gwasInput} is already fine-mapped. \code{credibleSet} is the one
-#'   to check: its \code{coverage} / \code{L} decide the sets whose LBFs are
+#'   \code{credibleSetParam}, \code{susieRssParam},
+#'   \code{panelFilterParam}, \code{initializeWithSusieInf} and
+#'   \code{fitRetention}. Inert when \code{gwasInput} is already
+#'   fine-mapped. \code{credibleSetParam} is the one to check: its
+#'   \code{coverage} / \code{maxNumSingleEffects} decide the sets whose
+#'   LBFs are
 #'   scored, so defaults here against a differently-built QTL side compare
 #'   two different things.
 #' @param returnGwasFineMapping Logical. When \code{TRUE}, attach the
@@ -380,10 +385,10 @@ GwasFineMappingParam <- function(
 #'   \code{PP.H3.abf + PP.H4.abf}, reported under enloc's names because that
 #'   is what readers of enloc output expect to find.
 #'
-#'   Project it with \code{\link{getColocPairs}} (the flat table this
+#'   Project it with \code{\link{colocPairs}} (the flat table this
 #'   pipeline used to return, also available as \code{as.data.frame}),
-#'   \code{\link{getColocVariants}}, \code{\link{getColocCredibleSets}} or
-#'   \code{\link{getColocGenes}}.
+#'   \code{\link{colocVariants}}, \code{\link{colocCredibleSets}} or
+#'   \code{\link{colocGenes}}.
 #' @examples
 #' data(qtlFineMappingLbfExample)
 #' data(gwasFineMappingLbfExample)
@@ -394,7 +399,7 @@ GwasFineMappingParam <- function(
 #' # trait in gwasContext / gwasTrait.
 #' res <- colocPipeline(qtlFineMappingLbfExample,
 #'   gwasInput = qtlFineMappingLbfExample)
-#' unique(getColocPairs(res)[, c("context", "gwasContext")])
+#' unique(colocPairs(res)[, c("context", "gwasContext")])
 #' @export
 colocPipeline <- function(
     qtlFineMappingResult,
@@ -497,8 +502,8 @@ colocPipeline <- function(
     )
     rawGwasFmr <- .colocResolveGwasFmr(gwasInput, gwasFineMappingArgs)
     .colocRequireMatchingLdSketches(
-        getLdSketch(qtlFineMappingResult),
-        getLdSketch(rawGwasFmr)
+        ldSketch(qtlFineMappingResult),
+        ldSketch(rawGwasFmr)
     )
     adjusted <- .colocMaybeAdjustPips(
         adjustPips = adjustPips,
@@ -605,7 +610,7 @@ colocPipeline <- function(
         "GwasFineMappingParam",
         "gwasFineMapping"
     )
-    if (length(getQcInfo(gwasInput)) == 0L) {
+    if (length(qcInfo(gwasInput)) == 0L) {
         msg <- glue(
             "colocPipeline: gwasInput ({class(gwasInput)[[1L]]}) has no QC ",
             "record. Call summaryStatsQc() first."
@@ -617,12 +622,13 @@ colocPipeline <- function(
     fineMappingPipeline(
         gwasInput,
         methods = gwasFineMappingArgs$methods %||% "susie",
-        credibleSetArgs = gwasFineMappingArgs$credibleSetArgs %||%
+        credibleSetParam = gwasFineMappingArgs$credibleSetParam %||%
             CredibleSetParam(),
-        rssArgs = gwasFineMappingArgs$rssArgs %||% SusieRssParam(),
-        panelFilterArgs = gwasFineMappingArgs$panelFilterArgs %||%
+        susieRssParam = gwasFineMappingArgs$susieRssParam %||% SusieRssParam(),
+        panelFilterParam = gwasFineMappingArgs$panelFilterParam %||%
             PanelFilterParam(),
-        addSusieInf = gwasFineMappingArgs$addSusieInf %||% TRUE,
+        initializeWithSusieInf = gwasFineMappingArgs$initializeWithSusieInf %||%
+            TRUE,
         fitRetention = gwasFineMappingArgs$fitRetention %||% "slim"
     )
 }
@@ -686,7 +692,7 @@ colocPipeline <- function(
     list(qtlFineMappingResult = both$x, gwasFmr = both$y)
 }
 
-# The LD reference the result carries forward, so getColocCredibleSets() can
+# The LD reference the result carries forward, so colocCredibleSets() can
 # recompute purity (section 3.7) without being handed a sketch separately. The
 # two sides' sketches are already required to match by
 # .colocRequireMatchingLdSketches, so either one identifies the panel -- but a
@@ -694,7 +700,7 @@ colocPipeline <- function(
 # side's panel is the only one there is.
 # @noRd
 .colocLdSketch <- function(qtlFineMappingResult, gwasFmr) {
-    getLdSketch(qtlFineMappingResult) %||% getLdSketch(gwasFmr)
+    ldSketch(qtlFineMappingResult) %||% ldSketch(gwasFmr)
 }
 
 # Empty-result early return (attaching the GWAS fine-mapping when requested).
@@ -1143,7 +1149,7 @@ colocPipeline <- function(
     lbfFilterArgs,
     label = "entry"
 ) {
-    fit <- getSusieFit(parts)
+    fit <- susieFit(parts)
     if (is.null(fit)) {
         msg <- glue("colocPipeline: {label} has no trimmedFit; skipping.")
         warn(msg)
@@ -1579,69 +1585,88 @@ colocPipeline <- function(
 
 # --- GwasFineMappingParam accessors ----------------------------------------
 # The nested getters return the Param itself, so a caller edits it with its
-# own setters and hands it back: setCredibleSetArgs(g, setCoverage(cs, 0.9)).
+# own replacement methods and hands it back:
+#   cs <- credibleSetParam(g); csCoverage(cs) <- 0.9; credibleSetParam(g) <- cs
 
 #' @rdname GwasFineMappingParam
-setMethod("getFineMappingMethods", "GwasFineMappingParam", function(x) {
+setMethod("fineMappingMethods", "GwasFineMappingParam", function(x) {
     x@methods
 })
 
 #' @rdname GwasFineMappingParam
-setMethod("setFineMappingMethods", "GwasFineMappingParam", function(x, value) {
-    x@methods <- value
+setReplaceMethod(
+    "fineMappingMethods",
+    "GwasFineMappingParam",
+    function(x, value) {
+        x@methods <- value
+        validObject(x)
+        x
+    }
+)
+
+#' @rdname GwasFineMappingParam
+setMethod("credibleSetParam", "GwasFineMappingParam", function(x) {
+    x@credibleSetParam
+})
+
+#' @rdname GwasFineMappingParam
+setReplaceMethod(
+    "credibleSetParam",
+    "GwasFineMappingParam",
+    function(x, value) {
+        x@credibleSetParam <- value
+        validObject(x)
+        x
+    }
+)
+
+#' @rdname GwasFineMappingParam
+setMethod("susieRssParam", "GwasFineMappingParam", function(x) x@susieRssParam)
+
+#' @rdname GwasFineMappingParam
+setReplaceMethod("susieRssParam", "GwasFineMappingParam", function(x, value) {
+    x@susieRssParam <- value
     validObject(x)
     x
 })
 
 #' @rdname GwasFineMappingParam
-setMethod("getCredibleSetArgs", "GwasFineMappingParam", function(x) {
-    x@credibleSetArgs
+setMethod("panelFilterParam", "GwasFineMappingParam", function(x) {
+    x@panelFilterParam
 })
 
 #' @rdname GwasFineMappingParam
-setMethod("setCredibleSetArgs", "GwasFineMappingParam", function(x, value) {
-    x@credibleSetArgs <- value
-    validObject(x)
-    x
+setReplaceMethod(
+    "panelFilterParam",
+    "GwasFineMappingParam",
+    function(x, value) {
+        x@panelFilterParam <- value
+        validObject(x)
+        x
+    }
+)
+
+#' @rdname GwasFineMappingParam
+setMethod("initializeWithSusieInf", "GwasFineMappingParam", function(x) {
+    x@initializeWithSusieInf
 })
 
 #' @rdname GwasFineMappingParam
-setMethod("getRssArgs", "GwasFineMappingParam", function(x) x@rssArgs)
+setReplaceMethod(
+    "initializeWithSusieInf",
+    "GwasFineMappingParam",
+    function(x, value) {
+        x@initializeWithSusieInf <- value
+        validObject(x)
+        x
+    }
+)
 
 #' @rdname GwasFineMappingParam
-setMethod("setRssArgs", "GwasFineMappingParam", function(x, value) {
-    x@rssArgs <- value
-    validObject(x)
-    x
-})
+setMethod("fitRetention", "GwasFineMappingParam", function(x) x@fitRetention)
 
 #' @rdname GwasFineMappingParam
-setMethod("getPanelFilterArgs", "GwasFineMappingParam", function(x) {
-    x@panelFilterArgs
-})
-
-#' @rdname GwasFineMappingParam
-setMethod("setPanelFilterArgs", "GwasFineMappingParam", function(x, value) {
-    x@panelFilterArgs <- value
-    validObject(x)
-    x
-})
-
-#' @rdname GwasFineMappingParam
-setMethod("getAddSusieInf", "GwasFineMappingParam", function(x) x@addSusieInf)
-
-#' @rdname GwasFineMappingParam
-setMethod("setAddSusieInf", "GwasFineMappingParam", function(x, value) {
-    x@addSusieInf <- value
-    validObject(x)
-    x
-})
-
-#' @rdname GwasFineMappingParam
-setMethod("getFitRetention", "GwasFineMappingParam", function(x) x@fitRetention)
-
-#' @rdname GwasFineMappingParam
-setMethod("setFitRetention", "GwasFineMappingParam", function(x, value) {
+setReplaceMethod("fitRetention", "GwasFineMappingParam", function(x, value) {
     x@fitRetention <- value
     validObject(x)
     x
@@ -1660,6 +1685,18 @@ setMethod("setFitRetention", "GwasFineMappingParam", function(x, value) {
 #' ColocOptions(trim_by_posterior = FALSE)
 #' @export
 ColocOptions <- function(overlap.min = NULL, trim_by_posterior = NULL, ...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            bf1 = "supplied from the data by the pipeline",
+            bf2 = "supplied from the data by the pipeline",
+            p1 = "`colocP1` on the pipeline",
+            p2 = "`colocP2` on the pipeline",
+            p12 = "`colocP12` on the pipeline"
+        ),
+        "ColocOptions"
+    )
     .newMethodOptions(
         "coloc::coloc.bf_bf",
         defaults = list(

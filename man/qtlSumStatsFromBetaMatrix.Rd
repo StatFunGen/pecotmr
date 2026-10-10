@@ -7,7 +7,7 @@
 qtlSumStatsFromBetaMatrix(
   bhat,
   shat,
-  study,
+  studyName,
   ldSketch = NULL,
   context = colnames(bhat),
   trait = "mash",
@@ -26,7 +26,7 @@ conditions.}
 \item{shat}{Numeric matrix of standard errors, aligned with \code{bhat}
 (identical dimensions and row/column order).}
 
-\item{study}{Study identifier (recycled across conditions).}
+\item{studyName}{Study identifier (recycled across conditions).}
 
 \item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}})
 embedded in the collection, or \code{NULL} (default) -- mash operates
@@ -65,7 +65,7 @@ panel <- readGenotypes(
 bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
 shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
-qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, study = "s1",
+qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, studyName = "s1",
   ldSketch = panel, context = colnames(bhat), trait = "g1",
     genome = "hg38", n = 100)
 }

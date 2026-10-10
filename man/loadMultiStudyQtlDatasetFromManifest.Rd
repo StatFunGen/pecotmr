@@ -16,7 +16,7 @@ loadMultiStudyQtlDatasetFromManifest(
   formatMapping = NULL,
   transposeCovariates = FALSE,
   scaleResiduals = TRUE,
-  genotypeFilterArgs = GenotypeFilterParam()
+  genotypeFilterParam = GenotypeFilterParam()
 )
 }
 \arguments{
@@ -38,7 +38,7 @@ loader for \code{sumStatsManifest}.}
 \item{scaleResiduals}{Pass-through \code{\link{QtlDataset}} argument,
 applied to every study.}
 
-\item{genotypeFilterArgs}{Pass-through \code{\link{QtlDataset}} filtering
+\item{genotypeFilterParam}{Pass-through \code{\link{QtlDataset}} filtering
 options, built with \code{\link{GenotypeFilterParam}} and applied to
 every study.}
 }

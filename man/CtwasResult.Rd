@@ -6,7 +6,7 @@
 \usage{
 CtwasResult(
   gwasStudy,
-  study,
+  studyName,
   context,
   method,
   entry,
@@ -17,7 +17,7 @@ CtwasResult(
 \arguments{
 \item{gwasStudy}{Character vector of GWAS (disease) study identifiers.}
 
-\item{study}{Character vector of QTL study identifiers.}
+\item{studyName}{Character vector of QTL study identifiers.}
 
 \item{context}{Character vector of context labels (scalar per row).}
 
@@ -44,9 +44,9 @@ Construct a \code{CtwasResult} DFrame-subclass collection of
 }
 \examples{
 cre <- CtwasResultEntry(
-  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
   susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
-cr <- CtwasResult(gwasStudy = "gwas1", study = "s1", context = "brain",
+cr <- CtwasResult(gwasStudy = "gwas1", studyName = "s1", context = "brain",
   method = "susie", entry = list(cre))
 cr
 }

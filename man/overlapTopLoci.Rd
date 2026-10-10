@@ -7,12 +7,7 @@
 \usage{
 overlapTopLoci(qtl, gwas, ...)
 
-\S4method{overlapTopLoci}{QtlFineMappingResult,GwasFineMappingResult}(
-  qtl,
-  gwas,
-  signalCutoff = 0.025,
-  type = c("data.frame", "GRanges")
-)
+\S4method{overlapTopLoci}{QtlFineMappingResult,GwasFineMappingResult}(qtl, gwas, signalCutoff = 0.025)
 }
 \arguments{
 \item{qtl}{A \code{QtlFineMappingResult}.}
@@ -21,16 +16,14 @@ overlapTopLoci(qtl, gwas, ...)
 
 \item{...}{Ignored.}
 
-\item{signalCutoff}{PIP cutoff forwarded to \code{\link{getTopLoci}} for both
+\item{signalCutoff}{PIP cutoff forwarded to \code{\link{topLoci}} for both
 inputs. Default 0.025.}
-
-\item{type}{\code{"data.frame"} (default) or \code{"GRanges"}.}
 }
 \value{
-A \code{tibble} (or \code{GRanges}) keyed on the QTL variant
-  (\code{variant_id, chrom, pos, A1, A2}) with all other columns prefixed
-  \code{qtl_} / \code{gwas_}. Zero rows when there is no allele-aware
-  overlap.
+A \code{GRanges} keyed on the QTL variant
+  (\code{variant_id, chrom, pos, A1, A2} in \code{mcols()}) with all other
+  columns prefixed \code{qtl_} / \code{gwas_}. Zero ranges when there is no
+  allele-aware overlap. Take a table with \code{as.data.frame()}.
 }
 \description{
 Intersect the top-loci tables of a \code{QtlFineMappingResult} and a
@@ -51,5 +44,5 @@ data(gwasFineMappingLbfExample)
 overlapTopLoci(qtlFineMappingLbfExample, gwasFineMappingLbfExample)
 }
 \seealso{
-\code{\link{getTopLoci}}, \code{matchVariants}
+\code{\link{topLoci}}, \code{matchVariants}
 }

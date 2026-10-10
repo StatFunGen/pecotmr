@@ -68,27 +68,27 @@ tw
 Extract the per-variant weights for one tuple:
 
 ```{r individual-weights}
-entry <- getTwasWeights(
+entry <- twasWeights(
     tw,
-    study = "study1",
+    studyName = "study1",
     context = "brain",
     trait = "ENSG_example",
     method = "lasso"
 )
-head(getWeights(entry))
+head(weights(entry))
 ```
 
 CV performance:
 
 ```{r individual-cv}
-getCvResult(entry)
+cvResult(entry)
 ```
 
 The entry's `variantIds` slot lists the LD-aligned variant set the
 weights are defined on:
 
 ```{r individual-vids}
-length(getVariantIds(entry))
+length(variantIds(entry))
 ```
 
 ## Including a fine-mapping susie fit in the TWAS ensemble
@@ -312,7 +312,7 @@ twasWeightsPipeline(
         phenotypeCovariates = NULL,
         genotypeCovariates = NULL
     ),
-    dataType = NULL,
+    weightsDataType = NULL,
     naAction = "drop"
 )
 ```
@@ -320,7 +320,7 @@ twasWeightsPipeline(
 -  `EnsembleParam(enabled = TRUE)` adds an additional `ensembleWeights` row to
     the collection — a weighted combination of the individual methods' CV
     predictions, filtered by that bundle's `r2Threshold`.
--  `naAction` is forwarded to `getResidualizedPhenotypes()` (see the
+-  `naAction` is forwarded to `residualizedPhenotypes()` (see the
     [fine-mapping vignette](fine-mapping.html#common-parameters) for
     semantics).
 
@@ -348,21 +348,21 @@ To pull one method's weights, pass the tuple to the accessor:
 
 ```{r tw-one-tuple}
 key <- list(
-    study = tw$study[[1L]],
+    studyName = tw$study[[1L]],
     context = tw$context[[1L]],
     trait = tw$trait[[1L]],
     method = tw$method[[1L]]
 )
-w <- do.call(getWeights, c(list(tw), key))
+w <- do.call(weights, c(list(tw), key))
 length(w)
-do.call(getStandardized, c(list(tw), key)) # standardized or original scale
-do.call(getDataType, c(list(tw), key)) # tag carried through for reporting
+do.call(weightStandardized, c(list(tw), key)) # standardized or original scale
+do.call(weightsDataType, c(list(tw), key)) # tag carried through for reporting
 ```
 
-`getWeights()` returns a named numeric vector for univariate methods and a
+`weights()` returns a named numeric vector for univariate methods and a
 matrix for multivariate ones. The remaining payloads are keyed the same way:
-`getVariantIds()` for the aligned variant set, `getCvResult()` for the
-cross-validation record (`rsq`, `r`, predicted values), and `getFits()` for
+`variantIds()` for the aligned variant set, `cvResult()` for the
+cross-validation record (`rsq`, `r`, predicted values), and `methodFits()` for
 the full fit object when the pipeline kept fits (`fitRetention != "none"`).
 `resolveWeights()` returns the weights and their variant IDs together, which
 is the form the downstream TWAS and MR steps consume.

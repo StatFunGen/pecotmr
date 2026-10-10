@@ -15,7 +15,7 @@ standard post-processing columns (\code{pip}, \code{logBF}, \code{cs_95} /
 One credible set of 42 variants. Its \code{min.abs.corr} is 0.626, below the
 pipeline default of 0.8, so the fixture was built at \code{minAbsCorr = 0.5}
 to keep the set labelled; \code{cs_95_purity} records the true value, so
-\code{getCs(x, minPurity = 0.8)} still filters it out. Built by
+\code{credibleSets(x, minPurity = 0.8)} still filters it out. Built by
 \code{inst/scripts/prepare_example_data.R}.
 }
 \description{
@@ -29,7 +29,7 @@ region/context names are synthetic.
 \examples{
 data(qtlFineMappingExample)
 qtlFineMappingExample
-head(getTopLoci(qtlFineMappingExample))
+head(topLoci(qtlFineMappingExample))
 
 }
 \keyword{data}

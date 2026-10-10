@@ -19,7 +19,7 @@ columns are \code{NA} for it.}
 frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.}
 
 \item{ldSketch}{Optional genotype panel (see \code{\link{readGenotypes}})
-for the LD reference, used by \code{\link{getColocCredibleSets}} to
+for the LD reference, used by \code{\link{colocCredibleSets}} to
 compute purity.}
 }
 \value{

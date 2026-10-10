@@ -9,7 +9,7 @@
 # tss_distance / tes_distance / qvalue mcols. It returns the SAME object
 # enriched with the corrected-statistic columns. No file I/O, no globbing (that
 # stays in the wrapper); no method key and no new class (the result is enriched
-# summary statistics). Significance is never stored -- see getSignificantQtls().
+# summary statistics). Significance is never stored -- see significantQtls().
 #
 # ALL multiple-testing math uses established package functions:
 #   Bonferroni -> stats::p.adjust(method="bonferroni", n = <per-gene test
@@ -166,7 +166,7 @@ QvalueOptions <- function(...) {
 # fdrThreshold stashed by qtlAssociationPostprocess. Uses the SAME package math
 # as the correction (p.adjust for the Bonferroni-adjusted per-variant p).
 .qapSignificanceMask <- function(x, method, threshold = NULL) {
-    recipe <- getQcInfo(x)$associationPostprocess
+    recipe <- qcInfo(x)$associationPostprocess
     if (is.null(recipe)) {
         msg <- glue(
             "This QtlSumStats was not produced by ",
@@ -198,7 +198,7 @@ QvalueOptions <- function(...) {
 .qapMaskPermutation <- function(x, masks, pcol) {
     if (is.null(x$p_nominal_threshold)) {
         msg <- glue(
-            "getSignificantQtls: no p_nominal_threshold (run the ",
+            "significantQtls: no p_nominal_threshold (run the ",
             "permutation method)."
         )
         abort(msg)
@@ -234,7 +234,7 @@ QvalueOptions <- function(...) {
     nCol <- if (flav == "filtered") "n_variants_filtered" else "n_variants"
     if (is.null(.tupleColumn(x, fdrCol))) {
         msg <- glue(
-            "getSignificantQtls: '{method}' columns absent; recompute with ",
+            "significantQtls: '{method}' columns absent; recompute with ",
             "the matching flavour."
         )
         abort(msg)
@@ -301,7 +301,7 @@ QvalueOptions <- function(...) {
     qCol <- if (!is.null(x$q_beta)) "q_beta" else "q_bonferroni_min_original"
     if (is.null(.tupleColumn(x, qCol))) {
         msg <- glue(
-            "getSignificantQtls: no event q-value column (q_beta / ",
+            "significantQtls: no event q-value column (q_beta / ",
             "q_bonferroni_min_original)."
         )
         abort(msg)
@@ -316,7 +316,7 @@ QvalueOptions <- function(...) {
     )
 }
 
-#' @rdname getSignificantQtls
+#' @rdname significantQtls
 #' @param method Correction method whose significant variants to extract:
 #'   \code{"permutation"}, \code{"bonferroni_original"},
 #'   \code{"bonferroni_filtered"}, or \code{"qvalue"}.
@@ -324,7 +324,7 @@ QvalueOptions <- function(...) {
 #'   \code{qtlAssociationPostprocess}).
 #' @export
 setMethod(
-    "getSignificantQtls",
+    "significantQtls",
     "QtlSumStats",
     function(
         x,
@@ -375,13 +375,13 @@ setMethod(
     built <- .withGenomeBuild(
         GenomicRanges::GRangesList(as.list(x)),
         TRUE,
-        getGenome(x)
+        unique(unname(GenomeInfoDb::genome(x)))
     )
     grl <- S4Vectors::`mcols<-`(built, value = md)
     methods::new(
         "QtlSumStats",
         grl,
-        ldSketch = getLdSketch(x),
+        ldSketch = ldSketch(x),
         qcInfo = qcInfo
     )
 }
@@ -400,7 +400,7 @@ setMethod(
 #'   (needs \code{p_beta}/\code{beta_shape1}/\code{beta_shape2}) and
 #'   \code{"bonferroni"} (needs \code{n_variants}). The q-value SNP method adds
 #'   no stored column -- it is a significance query (see
-#'   \code{getSignificantQtls}).
+#'   \code{significantQtls}).
 #' @param pvalueCol,afCol Entry mcol names for the per-variant p-value / allele
 #'   frequency (defaults \code{"P"} / \code{"af"}).
 #' @param qvalueArgs Extra arguments for \code{qvalue::qvalue()}, built with
@@ -438,11 +438,11 @@ setMethod(
             fdrThreshold = fdrThreshold,
             qvalueArgs = qvalueArgs
         )
-        # Stash the correction recipe so getSignificantQtls /
+        # Stash the correction recipe so significantQtls /
         # annotateSignificance can reproduce significance cheaply (thresholds,
         # not flags).
         qc <- list_assign(
-            getQcInfo(x),
+            qcInfo(x),
             associationPostprocess = list(
                 fdrThreshold = fdrThreshold,
                 mafCutoff = mafCutoff,

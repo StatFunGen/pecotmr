@@ -58,7 +58,7 @@ correlation matrix, or the genotypes to compute it from:
 region <- "chr22:10000000-19000000"
 ld <- loadLdMatrix(ldMeta, region = region)
 ld
-R <- getCorrelation(ld)
+R <- ldMatrix(ld)
 dim(R)
 ```
 
@@ -67,11 +67,11 @@ source. `returnGenotype = "auto"` (the default for genotype sources) returns
 dosages and computes `R` on demand, which matters because a dense matrix for
 a large region is far bigger than the genotypes it came from.
 
-`getVariantInfo()` gives the variants as a plain `GRanges`, which is what you
+`variantInfo()` gives the variants as a plain `GRanges`, which is what you
 need to align summary statistics against the panel:
 
 ```{r variant-info}
-head(getVariantInfo(ld), 3)
+head(variantInfo(ld), 3)
 ```
 
 **A region is not a block.** Loading a whole region returns one dense matrix

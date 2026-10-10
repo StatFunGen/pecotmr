@@ -23,7 +23,7 @@ Derived from the de-identified \code{protocol_example} toy data
 \examples{
 data(qtlFineMappingLbfExample)
 qtlFineMappingLbfExample
-head(getTopLoci(qtlFineMappingLbfExample))
+head(topLoci(qtlFineMappingLbfExample))
 
 }
 \keyword{data}

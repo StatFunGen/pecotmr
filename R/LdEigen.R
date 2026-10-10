@@ -71,7 +71,7 @@ setClass(
 #'   \code{BP}, \code{A1}, \code{A2} (and optionally \code{MAF}).
 #' @param eigenList A list with one entry per LD block.
 #' @param ldBlocks A \code{GRanges} of LD block intervals.
-#' @param nRef Integer, sample size of the LD reference panel.
+#' @param nSamples Integer, sample size of the LD reference panel.
 #' @param inSample Logical, whether the reference is the GWAS cohort.
 #' @param genome Character, genome build; recorded in \code{seqinfo()}.
 #' @param eigenvalueTruncation Numeric in (0, 1]; proportion of variance
@@ -86,28 +86,28 @@ setClass(
 #'   vectors = diag(length(idx)), snpIdx = idx)
 #' le <- LdEigen(snpInfo = snpInfo,
 #'   eigenList = list(mkBlock(1:2), mkBlock(3:4)),
-#'   ldBlocks = blocks, nRef = 100L, genome = "hg19")
+#'   ldBlocks = blocks, nSamples = 100L, genome = "hg19")
 #' length(le)
-#' length(getEigenList(le))
+#' length(eigenList(le))
 #' @importFrom checkmate assertDataFrame assertList assertCount
 #' @export
 LdEigen <- function(
     snpInfo,
     eigenList,
     ldBlocks,
-    nRef,
+    nSamples,
     inSample = FALSE,
     genome = NA_character_,
     eigenvalueTruncation = 1
 ) {
     assertDataFrame(snpInfo)
     assertList(eigenList)
-    assertCount(nRef, positive = TRUE)
+    assertCount(nSamples, positive = TRUE)
     obj <- methods::new(
         "LdEigen",
         .ldStatRanges(snpInfo, genome),
         ldBlocks = .asLdBlockRanges(ldBlocks),
-        nRef = as.integer(nRef),
+        nSamples = as.integer(nSamples),
         inSample = isTRUE(inSample),
         eigenList = eigenList,
         eigenvalueTruncation = as.numeric(eigenvalueTruncation)
@@ -138,7 +138,7 @@ LdEigen <- function(
 #'   standard error from a delete-one-block jackknife, so it requires at
 #'   least two blocks and wants many more. Loading a whole region as one
 #'   dense matrix yields a single block.
-#' @param nRef Integer, the LD reference panel sample size. Defaults to the
+#' @param nSamples Integer, the LD reference panel sample size. Defaults to the
 #'   size recorded by the supplied \code{LdData}; required when they record
 #'   none, and an error when they disagree.
 #' @param inSample Logical, whether the reference is the GWAS cohort itself.
@@ -158,18 +158,18 @@ LdEigen <- function(
 #' ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
 #' ldEigen <- buildLdEigen(ld, genome = "hg38")
 #' ldEigen
-#' length(getEigenList(ldEigen))
+#' length(eigenList(ldEigen))
 #' @export
 buildLdEigen <- function(
     ldBlockData,
-    nRef = NULL,
+    nSamples = NULL,
     inSample = FALSE,
     genome = NA_character_,
     eigenvalueTruncation = 1
 ) {
-    assertCount(nRef, positive = TRUE, null.ok = TRUE)
+    assertCount(nSamples, positive = TRUE, null.ok = TRUE)
     assertFlag(inSample)
-    prep <- .ldRefPrepare(ldBlockData, nRef, genome)
+    prep <- .ldRefPrepare(ldBlockData, nSamples, genome)
     eigenList <- map2(
         prep$blocks,
         prep$snpIdx,
@@ -180,7 +180,7 @@ buildLdEigen <- function(
         snpInfo = prep$snpInfo,
         eigenList = eigenList,
         ldBlocks = prep$ldBlocks,
-        nRef = prep$nRef,
+        nSamples = prep$nRef,
         inSample = inSample,
         genome = prep$genome,
         eigenvalueTruncation = eigenvalueTruncation
@@ -243,11 +243,11 @@ setMethod("show", "LdEigen", function(object) {
     ))
     cat(sprintf("  Eigenvalue truncation: %.2f\n", object@eigenvalueTruncation))
     cat(glue(
-        "  Reference N: {object@nRef}, In-sample: {object@inSample}\n",
+        "  Reference N: {object@nSamples}, In-sample: {object@inSample}\n",
         .trim = FALSE
     ))
 })
 
-#' @rdname getEigenList
+#' @rdname eigenList
 #' @export
-setMethod("getEigenList", "LdEigen", function(x) x@eigenList)
+setMethod("eigenList", "LdEigen", function(x) x@eigenList)

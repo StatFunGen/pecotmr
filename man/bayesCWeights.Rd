@@ -4,7 +4,17 @@
 \alias{bayesCWeights}
 \title{BayesC TWAS weights (rounded-spike prior)}
 \usage{
-bayesCWeights(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions())
+bayesCWeights(
+  X,
+  y,
+  Z = NULL,
+  pi = 0.1,
+  h2 = NULL,
+  nit = 5000,
+  nburn = 1000,
+  nthin = 5,
+  methodArgs = QggOptions()
+)
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -15,6 +25,16 @@ bayesCWeights(X, y, Z = NULL, pi = 0.1, methodArgs = QggOptions())
 
 \item{pi}{Numeric in (0, 1). Prior proportion of non-null effects for the
 BayesC mixture. Default \code{0.1}.}
+
+\item{h2}{Numeric or \code{NULL}. Prior heritability; \code{NULL}
+leaves the engine's own default.}
+
+\item{nit}{Integer. Total MCMC iterations. Default \code{5000}.}
+
+\item{nburn}{Integer. Burn-in iterations. Default \code{1000}.}
+
+\item{nthin}{Integer. Thinning interval for retained MCMC samples.
+Default \code{5}.}
 
 \item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
 with \code{\link{QggOptions}}. A bare list is refused: it cannot be

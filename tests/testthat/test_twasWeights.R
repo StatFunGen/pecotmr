@@ -26,14 +26,14 @@ makeData <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
     list(X = X, Y = Y, beta = beta)
 }
 
-makeFakeSusieFit <- function(p = 10, L = 3, inf = FALSE) {
+makeFakeSusieFit <- function(p = 10, maxNumSingleEffects = 3, inf = FALSE) {
     fit <- list(
-        alpha = matrix(1 / p, nrow = L, ncol = p),
-        mu = matrix(0, nrow = L, ncol = p),
-        lbf_variable = matrix(0, nrow = L, ncol = p),
+        alpha = matrix(1 / p, nrow = maxNumSingleEffects, ncol = p),
+        mu = matrix(0, nrow = maxNumSingleEffects, ncol = p),
+        lbf_variable = matrix(0, nrow = maxNumSingleEffects, ncol = p),
         X_column_scale_factors = rep(1, p),
         pip = rep(0.1, p),
-        V = rep(0.5, L),
+        V = rep(0.5, maxNumSingleEffects),
         sets = list(cs = NULL, purity = NULL)
     )
     if (inf) {
@@ -47,7 +47,7 @@ mockSusie <- function(...) {
     L <- if (is.null(args$L)) 3 else args$L
     makeFakeSusieFit(
         ncol(args$X),
-        L = L,
+        maxNumSingleEffects = L,
         inf = identical(args$unmappable_effects, "inf")
     )
 }
@@ -66,15 +66,15 @@ mockSusie <- function(...) {
     }
     # The entry is a derived view now: ask the collection for it rather than
     # reaching into a stored `entry` column that no longer exists.
-    entry <- getTwasWeights(
+    entry <- twasWeights(
         tw,
-        study = as.character(tw$study)[[idx[[1L]]]],
+        studyName = as.character(tw$study)[[idx[[1L]]]],
         context = as.character(tw$context)[[idx[[1L]]]],
         trait = as.character(tw$trait)[[idx[[1L]]]],
         method = shortName
     )
-    w <- getWeights(entry)
-    vids <- getVariantIds(entry)
+    w <- weights(entry)
+    vids <- variantIds(entry)
     if (is.numeric(w) && is.null(dim(w))) {
         nm <- names(w)
         if (is.null(nm) && length(vids) == length(w)) {
@@ -331,7 +331,7 @@ test_that("twasWeights: Y as vector gets converted to matrix internally", {
         weightMethods = list(lasso_weights = list())
     )
     expect_true(is(result, "TwasWeights"))
-    expect_equal(length(getMethodNames(result)), 1)
+    expect_equal(length(methodNames(result)), 1)
     expect_equal(nrow(.weightsByMethod(result, "lassoWeights")), ncol(d$X))
     # Weight vector length must equal number of predictors and be numeric/finite
     w <- .weightsByMethod(result, "lassoWeights")[, 1]
@@ -357,7 +357,7 @@ test_that("twasWeights: character weight_methods input is accepted", {
     # Short name should be resolved via .twas_method_lookup
     result <- learnTwasWeights(d$X, d$Y, weightMethods = c("lasso"))
     expect_true(is(result, "TwasWeights"))
-    expect_equal(getMethodNames(result), "lasso")
+    expect_equal(methodNames(result), "lasso")
 })
 
 test_that("twasWeights: zero variance columns are filtered and padded back with zeros", {
@@ -429,9 +429,9 @@ test_that("twasWeights: multiple methods return named list with one entry per me
         d$Y,
         weightMethods = list(lasso_weights = list(), enetWeights = list())
     )
-    expect_equal(length(getMethodNames(result)), 2)
-    expect_true("lasso" %in% getMethodNames(result))
-    expect_true("enet" %in% getMethodNames(result))
+    expect_equal(length(methodNames(result)), 2)
+    expect_true("lasso" %in% methodNames(result))
+    expect_true("enet" %in% methodNames(result))
 })
 
 # ===========================================================================
@@ -450,7 +450,7 @@ test_that("twasWeights: lassoWeights produces correct structure with real glmnet
     )
 
     expect_true(is(result, "TwasWeights"))
-    expect_equal(getMethodNames(result), "lasso")
+    expect_equal(methodNames(result), "lasso")
     expect_equal(nrow(.weightsByMethod(result, "lassoWeights")), ncol(d$X))
     expect_equal(ncol(.weightsByMethod(result, "lassoWeights")), 1)
     # At least some weights should be non-zero for this strong signal
@@ -467,7 +467,7 @@ test_that("twasWeights: enetWeights produces correct structure with real glmnet"
     )
 
     expect_true(is(result, "TwasWeights"))
-    expect_equal(getMethodNames(result), "enet")
+    expect_equal(methodNames(result), "enet")
     expect_equal(nrow(.weightsByMethod(result, "enetWeights")), ncol(d$X))
 })
 
@@ -656,7 +656,7 @@ test_that("learnTwasWeights resolves fits under camelCase method names", {
         d$X,
         as.numeric(d$Y),
         weightMethods = list(susie_weights = list()),
-        fittedModels = list(susie = makeFakeSusieFit(p = 10, L = 5))
+        fittedModels = list(susie = makeFakeSusieFit(p = 10, maxNumSingleEffects = 5))
     )
     expect_true("susie" %in% class(seen))
 })
@@ -676,11 +676,11 @@ test_that("learnTwasWeights runs susie + susieInf from supplied fits", {
             susie_inf_weights = list()
         ),
         fittedModels = list(
-            susie = makeFakeSusieFit(p = 10, L = 5),
-            susieInf = makeFakeSusieFit(p = 10, L = 7, inf = TRUE)
+            susie = makeFakeSusieFit(p = 10, maxNumSingleEffects = 5),
+            susieInf = makeFakeSusieFit(p = 10, maxNumSingleEffects = 7, inf = TRUE)
         )
     )
-    expect_equal(getMethodNames(result), c("susie", "susie_inf"))
+    expect_equal(methodNames(result), c("susie", "susie_inf"))
 })
 
 
@@ -948,7 +948,7 @@ test_that("TwasWeights: builds a collection keyed by 4-tuple", {
     e1 <- .sc_makeTwasWeightsRow()
     e2 <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
@@ -956,22 +956,22 @@ test_that("TwasWeights: builds a collection keyed by 4-tuple", {
     )
     expect_s4_class(tw, "TwasWeights")
     expect_equal(nrow(tw), 2L)
-    expect_setequal(getMethodNames(tw), c("lasso", "enet"))
+    expect_setequal(methodNames(tw), c("lasso", "enet"))
 })
 
 
-test_that("TwasWeights: getStudy / getContexts / getTraits / getMethodNames", {
+test_that("TwasWeights: studyName / contexts / traitNames / methodNames", {
     e <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
-        study = c("s1", "s2"),
+        studyName = c("s1", "s2"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
         method = c("lasso", "lasso"),
         entry = list(e, e)
     )
-    expect_setequal(getContexts(tw), c("c1", "c2"))
-    expect_equal(getTraits(tw), "t1")
-    expect_equal(getMethodNames(tw), "lasso")
+    expect_setequal(contexts(tw), c("c1", "c2"))
+    expect_equal(traitNames(tw), "t1")
+    expect_equal(methodNames(tw), "lasso")
 })
 
 
@@ -979,7 +979,7 @@ test_that("TwasWeights: rejects duplicate 4-tuples", {
     e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
-            study = c("s1", "s1"),
+            studyName = c("s1", "s1"),
             context = c("c1", "c1"),
             trait = c("t1", "t1"),
             method = c("lasso", "lasso"),
@@ -994,7 +994,7 @@ test_that("TwasWeights: joint columns work the same as on the FMR class", {
     e <- .sc_makeTwasWeightsRow()
     # Univariate lasso at c1 + the c1 slice of an mr.mash joint over (c1, c2).
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "mrmash"),
@@ -1006,7 +1006,7 @@ test_that("TwasWeights: joint columns work the same as on the FMR class", {
     # uniqueness: same (s1, c1, t1, mrmash) tuple from two joint fits over
     # (c1, c2) and (c1, c3) -> distinct rows via jointContexts.
     tw2 <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("mrmash", "mrmash"),
@@ -1017,21 +1017,21 @@ test_that("TwasWeights: joint columns work the same as on the FMR class", {
 })
 
 
-test_that("TwasWeights: getTwasWeights extracts the entry for a tuple", {
+test_that("TwasWeights: twasWeights extracts the entry for a tuple", {
     e1 <- .sc_makeTwasWeightsRow()
     e2 <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
         entry = list(e1, e2)
     )
-    # getTwasWeights() returns the single-row COLLECTION for that tuple, not a
+    # twasWeights() returns the single-row COLLECTION for that tuple, not a
     # detached entry object, so compare what the row carries.
-    picked <- getTwasWeights(
+    picked <- twasWeights(
         tw,
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         method = "enet"
@@ -1039,8 +1039,8 @@ test_that("TwasWeights: getTwasWeights extracts the entry for a tuple", {
     expect_s4_class(picked, "TwasWeights")
     expect_equal(nrow(picked), 1L)
     expect_equal(as.character(picked$method), "enet")
-    expect_identical(getVariantIds(picked), .twrPartsVariantIds(e2))
-    expect_equal(unname(getWeights(picked)), unname(getWeights(e2)))
+    expect_identical(variantIds(picked), .twrPartsVariantIds(e2))
+    expect_equal(unname(weights(picked)), unname(weights(e2)))
 })
 
 # ===========================================================================
@@ -1052,7 +1052,7 @@ test_that("TwasWeights: getTwasWeights extracts the entry for a tuple", {
 test_that("show.TwasWeights prints entry/study/context/trait/method counts", {
     e <- .sh_makeTwEntry()
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
@@ -1067,7 +1067,7 @@ test_that("show.TwasWeights prints entry/study/context/trait/method counts", {
 test_that("show.TwasWeights reports ldSketch when present", {
     e <- .sh_makeTwEntry()
     tw <- TwasWeights(
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         method = "lasso",
@@ -1223,7 +1223,7 @@ test_that("TwasWeights: mismatched core-vector lengths error", {
     e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
-            study = c("s1", "s2"),
+            studyName = c("s1", "s2"),
             context = "c1",
             trait = "t1",
             method = "lasso",
@@ -1237,7 +1237,7 @@ test_that("TwasWeights: joint* column length must match study", {
     e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "lasso",
@@ -1248,45 +1248,45 @@ test_that("TwasWeights: joint* column length must match study", {
     )
 })
 
-test_that("TwasWeights: getStandardized/getDataType/getVariantIds delegate to the entry", {
+test_that("TwasWeights: weightStandardized/weightsDataType/variantIds delegate to the entry", {
     e1 <- twasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
-        standardized = TRUE,
-        dataType = "expression"
+        weightStandardized = TRUE,
+        weightsDataType = "expression"
     )
     e2 <- twasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
-        standardized = FALSE,
-        dataType = "splicing"
+        weightStandardized = FALSE,
+        weightsDataType = "splicing"
     )
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
         entry = list(e1, e2)
     )
 
-    expect_true(getStandardized(
+    expect_true(weightStandardized(
         tw,
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         method = "lasso"
     ))
-    expect_false(getStandardized(
+    expect_false(weightStandardized(
         tw,
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         method = "enet"
     ))
     expect_equal(
-        getDataType(
+        weightsDataType(
             tw,
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "enet"
@@ -1294,9 +1294,9 @@ test_that("TwasWeights: getStandardized/getDataType/getVariantIds delegate to th
         "splicing"
     )
     expect_equal(
-        getVariantIds(
+        variantIds(
             tw,
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "lasso"
@@ -1305,24 +1305,24 @@ test_that("TwasWeights: getStandardized/getDataType/getVariantIds delegate to th
     )
 })
 
-test_that("TwasWeights: getStudy returns unique study labels", {
+test_that("TwasWeights: studyName returns unique study labels", {
     e <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
-        study = c("s1", "s2"),
+        studyName = c("s1", "s2"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
         method = c("lasso", "lasso"),
         entry = list(e, e)
     )
-    expect_setequal(getStudy(tw), c("s1", "s2"))
+    expect_setequal(studyName(tw), c("s1", "s2"))
 })
 
-test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per tuple", {
+test_that("TwasWeights: weights/cvResult/methodFits/ldSketch delegate per tuple", {
     w1 <- rnorm(4)
     e1 <- twasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = w1,
-        fits = list(tag = "fitA"),
+        methodFits = list(tag = "fitA"),
         cvResult = list(rsq = 0.42)
     )
     e2 <- twasWeightsRow(
@@ -1330,7 +1330,7 @@ test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per 
         weights = rnorm(4)
     )
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
@@ -1339,9 +1339,9 @@ test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per 
     )
 
     expect_equal(
-        getWeights(
+        weights(
             tw,
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "lasso"
@@ -1349,9 +1349,9 @@ test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per 
         w1
     )
     expect_equal(
-        getCvResult(
+        cvResult(
             tw,
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "lasso"
@@ -1359,16 +1359,16 @@ test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per 
         0.42
     )
     expect_equal(
-        getFits(
+        methodFits(
             tw,
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "lasso"
         )$tag,
         "fitA"
     )
-    expect_s4_class(getLdSketch(tw), "RangedSummarizedExperiment")
+    expect_s4_class(ldSketch(tw), "RangedSummarizedExperiment")
 })
 
 # ===========================================================================
@@ -1391,8 +1391,8 @@ test_that(".resolveMethodFunction: unresolvable key falls back to the key itself
 # ===========================================================================
 
 test_that(".prepareSusieWeightMethods writes supplied fits onto the method args", {
-    infFit <- makeFakeSusieFit(p = 8, L = 3, inf = TRUE)
-    susieFit <- makeFakeSusieFit(p = 8, L = 5)
+    infFit <- makeFakeSusieFit(p = 8, maxNumSingleEffects = 3, inf = TRUE)
+    susieFit <- makeFakeSusieFit(p = 8, maxNumSingleEffects = 5)
 
     wm <- pecotmr:::.prepareSusieWeightMethods(
         weightMethods = list(
@@ -1628,7 +1628,7 @@ test_that("learnTwasWeights: parallel weights path (numThreads = 2)", {
         numThreads = 2
     ))
     expect_true(is(result, "TwasWeights"))
-    expect_setequal(getMethodNames(result), c("lasso", "enet"))
+    expect_setequal(methodNames(result), c("lasso", "enet"))
 })
 
 # ===========================================================================
@@ -1651,7 +1651,7 @@ test_that("twasPredict: accepts a TwasWeights S4 collection", {
         weights = w2
     )
     tw <- TwasWeights(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
@@ -1806,8 +1806,11 @@ test_that("learnTwasWeights: argument guards fire", {
     d <- generateXY(seed = 1)
     base <- list(X = d$X, Y = d$Y, weightMethods = list())
     expect_error(
-        exec(learnTwasWeights, !!!list_modify(base, !!!list(study = 1L))),
-        "study.*Must be of type 'string'"
+        exec(
+            learnTwasWeights,
+            !!!list_modify(base, !!!list(studyName = 1L))
+        ),
+        "studyName.*Must be of type 'string'"
     )
     # Called directly, not via modifyList(): modifyList() DROPS an element
     # whose value is NULL, so the argument would fall back to its default.
@@ -1816,13 +1819,16 @@ test_that("learnTwasWeights: argument guards fire", {
             d$X,
             d$Y,
             weightMethods = list(),
-            standardized = NULL
+            weightStandardized = NULL
         ),
-        "standardized.*Must be of type 'logical flag'"
+        "weightStandardized.*Must be of type 'logical flag'"
     )
     expect_error(
-        exec(learnTwasWeights, !!!list_modify(base, !!!list(dataType = 1L))),
-        "dataType.*Must be of type 'string'"
+        exec(
+            learnTwasWeights,
+            !!!list_modify(base, !!!list(weightsDataType = 1L))
+        ),
+        "weightsDataType.*Must be of type 'string'"
     )
     expect_error(
         exec(

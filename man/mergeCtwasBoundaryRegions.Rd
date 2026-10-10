@@ -9,7 +9,7 @@ mergeCtwasBoundaryRegions(
   pipThresh = 0.5,
   filterCs = FALSE,
   maxSNP = Inf,
-  L = 5L,
+  maxNumSingleEffects = 5L,
   numThreads = 1L,
   methodArgs = CtwasOptions()
 )
@@ -33,8 +33,8 @@ to be selected (\code{select_boundary_genes} \code{filter_cs}). Default
 \item{maxSNP}{Numeric (length 1). Per-merged-region SNP cap. Default
 \code{Inf}.}
 
-\item{L}{Integer. Max number of single effects for the merged-region
-re-fine-mapping (LD path only). Default \code{5}.}
+\item{maxNumSingleEffects}{Integer. Max number of single effects for the
+merged-region re-fine-mapping (LD path only). Default \code{5}.}
 
 \item{numThreads}{Number of cores. Default \code{1}.}
 

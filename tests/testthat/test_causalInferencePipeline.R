@@ -29,31 +29,31 @@ context("causalInferencePipeline")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -79,7 +79,7 @@ context("causalInferencePipeline")
         MAF = rep(0.3, 5)
     )
     GwasSumStats(
-        study = "G1",
+        studyName = "G1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .cip_makeHandle(),
@@ -96,7 +96,7 @@ context("causalInferencePipeline")
         weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
     )
     TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = method,
@@ -113,7 +113,7 @@ context("causalInferencePipeline")
         variant_id = variant_ids,
         pip = c(0.9, 0.05, 0.5, 0.8, 0.01),
         # posterior_mean / posterior_sd carry the "fine-mapped causal effect"
-        # estimates that getTopLoci surfaces as beta / se in its projected
+        # estimates that topLoci surfaces as beta / se in its projected
         # output (the column names downstream MR / TWAS code reads).
         posterior_mean = c(0.2, 0.05, -0.1, 0.3, 0.0),
         posterior_sd = rep(0.05, n),
@@ -125,7 +125,7 @@ context("causalInferencePipeline")
         topLoci = tl
     )
     QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
@@ -183,7 +183,7 @@ test_that("causalInferencePipeline: rejects GwasFineMappingResult for the QTL sl
         )
     )
     gfmr <- GwasFineMappingResult(
-        study = "G1",
+        studyName = "G1",
         method = "susie",
         entry = list(e)
     )
@@ -203,7 +203,7 @@ test_that("causalInferencePipeline: rejects GwasFineMappingResult for the QTL sl
 test_that(".cipRequireMatchingLdSketches: NULL twas-side ldSketch is allowed", {
     # Build a TwasWeights without an ldSketch.
     twNoLd <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "lasso",
@@ -227,7 +227,7 @@ test_that(".cipRequireMatchingLdSketches: NULL twas-side ldSketch is allowed", {
 test_that(".cipRequireMatchingLdSketches: sample set mismatch errors", {
     otherPanel <- .cip_makeHandle(sample_prefix = "other")
     twOther <- TwasWeights(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "lasso",
@@ -334,7 +334,7 @@ test_that("causalInferencePipeline: FMR-only path extracts weights from topLoci$
 
 test_that("causalInferencePipeline: combineMethods appends combined rows", {
     tw1 <- TwasWeights(
-        study = c("Q1", "Q1"),
+        studyName = c("Q1", "Q1"),
         context = c("c1", "c1"),
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
@@ -388,7 +388,7 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
         )
     }
     tw <- TwasWeights(
-        study = rep("S", 4),
+        studyName = rep("S", 4),
         context = rep("c1", 4),
         trait = c("G", "G", "G", "G2"),
         method = c("susie", "enet", "lasso", "susie"),
@@ -417,7 +417,7 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
     )
     # pval gate: a high-rsq method with a bad CV p-value is excluded.
     tw2 <- TwasWeights(
-        study = rep("S", 2),
+        studyName = rep("S", 2),
         context = rep("c1", 2),
         trait = rep("G", 2),
         method = c("susie", "lasso"),
@@ -434,7 +434,7 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
     expect_equal(f2$method, "lasso")
     # SS-TWAS: no usable cvResult -> keep all methods in the group.
     twss <- TwasWeights(
-        study = rep("S", 2),
+        studyName = rep("S", 2),
         context = rep("c1", 2),
         trait = rep("G", 2),
         method = c("susie", "lasso"),
@@ -489,7 +489,7 @@ test_that(".cipSelectBestMethod: max-rsq finite Z, NA/Inf re-selection, SS-TWAS 
 
 test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per group", {
     tw <- TwasWeights(
-        study = rep("Q1", 2),
+        studyName = rep("Q1", 2),
         context = rep("c1", 2),
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
@@ -521,7 +521,7 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
 
 test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection", {
     tw <- TwasWeights(
-        study = rep("Q1", 2),
+        studyName = rep("Q1", 2),
         context = rep("c1", 2),
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
@@ -555,7 +555,7 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
 
 test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods", {
     tw <- TwasWeights(
-        study = rep("Q1", 2),
+        studyName = rep("Q1", 2),
         context = rep("c1", 2),
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
@@ -1166,9 +1166,9 @@ test_that("twasZ: error when weights and z have different lengths", {
 # Phase 2: LD-sketch loading and standardize_genotype_hwe()
 
 # ===========================================================================
-# Direct unit tests for the MR / metric helpers (mock getTopLoci to feed
+# Direct unit tests for the MR / metric helpers (mock topLoci to feed
 # controlled topLoci frames; gwasDf is a plain data.frame as produced by
-# getSumStatsDf upstream).
+# as.data.frame upstream).
 # ===========================================================================
 
 .cip_gwasDf <- function(
@@ -1202,7 +1202,7 @@ test_that(".cipComputeMr: IVW Wald-ratio over PIP-passing instruments", {
         se = rep(0.05, 4),
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     res <- pecotmr:::.cipComputeMr(
         NULL,
         .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:4)), c(2, -1.5, 1, 1.8)),
@@ -1227,7 +1227,7 @@ test_that(".cipComputeMr: the exposure standardizes when maf/N are absent", {
         se = 0.01,
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     g <- .cip_gwasDf("chr1:100:A:G", 2)
     noScale <- g[, setdiff(names(g), c("N", "maf"))]
     res <- pecotmr:::.cipComputeMr(NULL, noScale, pipCutoff = 0.5)
@@ -1282,7 +1282,7 @@ test_that(".cipComputeMr matches across a chr-prefix difference (tuple match)", 
         se = c(0.05, 0.05),
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     # GWAS carries the same variants without the "chr" prefix.
     g <- .cip_gwasDf(c("1:100:A:G", "1:200:A:G"), z = c(2, 1.5))
     res <- pecotmr:::.cipComputeMr(NULL, g, pipCutoff = 0.5)
@@ -1298,7 +1298,7 @@ test_that(".cipComputeMr includes an allele-swapped GWAS variant and flips the s
         se = 0.05,
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     rSame <- pecotmr:::.cipComputeMr(
         NULL,
         .cip_gwasDf("chr1:100:A:G", z = 2.0),
@@ -1323,7 +1323,7 @@ test_that(".cipComputeMr with alleleFlip = FALSE drops an allele-swapped GWAS va
         se = 0.05,
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     # GWAS variant is the ref/alt swap; with flipping disabled it is not matched.
     rSwap <- pecotmr:::.cipComputeMr(
         NULL,
@@ -1344,7 +1344,7 @@ test_that(".cipComputeMrCsAware matches across a chr-prefix difference", {
         se = c(0.05, 0.05),
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     g <- .cip_gwasDf(c("1:100:A:G", "1:200:A:G"), z = c(2, 1.5))
     res <- pecotmr:::.cipComputeMrCsAware(NULL, g, cpipCutoff = 0.5)
     expect_equal(res$nCs, 1L)
@@ -1375,12 +1375,12 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
         expect_equal(r$nIV, 0L)
     }
     local_mocked_bindings(
-        getTopLoci = function(x, ...) data.frame(),
+        .cipTopLociTable = function(x, ...) data.frame(),
         .package = "pecotmr"
     )
     isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5)) # empty
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # no beta/se
             data.frame(
                 variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1391,7 +1391,7 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
     )
     isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # none pass
             data.frame(
                 variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1404,7 +1404,7 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
     )
     isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # no overlap
             data.frame(
                 variant_id = paste0("z", 1:4),
@@ -1417,7 +1417,7 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
     )
     isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # zero beta
             data.frame(
                 variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1440,7 +1440,7 @@ test_that(".cipComputeMrCsAware: CS-aware composite Wald + heterogeneity", {
         se = rep(0.05, 4),
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     res <- pecotmr:::.cipComputeMrCsAware(
         NULL,
         .cip_gwasDf(
@@ -1463,7 +1463,7 @@ test_that(".cipComputeMrCsAware: credible-set column found via the ^cs fallback"
         se = rep(0.05, 2),
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+    local_mocked_bindings(.cipTopLociTable = function(x) tl, .package = "pecotmr")
     res <- pecotmr:::.cipComputeMrCsAware(
         NULL,
         .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:2)), c(2, -1.5)),
@@ -1476,12 +1476,12 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
     g <- .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:4)))
     isNa <- function(r) expect_true(is.na(r$waldRatio))
     local_mocked_bindings(
-        getTopLoci = function(x, ...) data.frame(),
+        .cipTopLociTable = function(x, ...) data.frame(),
         .package = "pecotmr"
     )
     isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5)) # empty
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # no pip col
             data.frame(
                 variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1494,7 +1494,7 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
     )
     isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # cs all 0
             data.frame(
                 variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1508,7 +1508,7 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
     )
     isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # no overlap
             data.frame(
                 variant_id = paste0("z", 1:4),
@@ -1522,7 +1522,7 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
     )
     isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .cipTopLociTable = function(x) {
             # cpip < cutoff
             data.frame(
                 variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1895,7 +1895,7 @@ test_that(".cipScoreQtlTuple skips a tuple with no weights", {
 
 test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
     local_mocked_bindings(
-        getSumStatsDf = function(...) data.frame(SNP = "v1", Z = 1),
+        as.data.frame = function(...) data.frame(SNP = "v1", Z = 1),
         .cipComputeTwasZ = function(...) NULL,
         .cipPairLabel = function(...) "lab",
         .package = "pecotmr"
@@ -1935,7 +1935,7 @@ test_that(".cipRunMr routes to the CS-aware estimator when asked", {
 
 test_that(".cipCvMetric reads metrics wrapped or bare, NA when absent", {
     local_mocked_bindings(
-        getCvResult = function(...) list(rsq = 0.42, pval = 0.01),
+        cvResult = function(...) list(rsq = 0.42, pval = 0.01),
         .package = "pecotmr"
     )
     # A bare metrics list (no $metrics wrapper) is read directly.
@@ -1945,7 +1945,7 @@ test_that(".cipCvMetric reads metrics wrapped or bare, NA when absent", {
 
 test_that(".cipCvMetric returns NA when the CV result cannot be read", {
     local_mocked_bindings(
-        getCvResult = function(...) stop("nope"),
+        cvResult = function(...) stop("nope"),
         .package = "pecotmr"
     )
     expect_true(

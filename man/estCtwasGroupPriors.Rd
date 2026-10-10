@@ -44,5 +44,10 @@ data(ctwasInputsExample)
 estCtwasGroupPriors(ctwasInputsExample,
   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
-  methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+  methodArgs = CtwasOptions(
+    regionData = CtwasRegionDataOptions(min_group_size = 1),
+    estParam = CtwasEstParamOptions(
+      min_group_size = 1, min_p_single_effect = 0
+    )
+  ))
 }

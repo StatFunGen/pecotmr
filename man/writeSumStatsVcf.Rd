@@ -8,13 +8,13 @@
 \usage{
 writeSumStatsVcf(x, outputPath, sampleName = NULL, ...)
 
-\S4method{writeSumStatsVcf}{GwasSumStats}(x, outputPath, sampleName = NULL, study = NULL)
+\S4method{writeSumStatsVcf}{GwasSumStats}(x, outputPath, sampleName = NULL, studyName = NULL)
 
 \S4method{writeSumStatsVcf}{FineMappingResultBase}(
   x,
   outputPath,
   sampleName = NULL,
-  study = NULL,
+  studyName = NULL,
   context = NULL,
   trait = NULL,
   method = NULL,
@@ -36,8 +36,8 @@ method name from the S4 object).}
 
 \item{...}{Additional arguments passed to methods.}
 
-\item{study}{Character or \code{NULL}. Restrict the written records to this
-study; \code{NULL} includes all studies.}
+\item{studyName}{Character or \code{NULL}. Restrict the written records to
+this study; \code{NULL} includes all studies.}
 
 \item{context}{Character or \code{NULL}. Restrict the written records to this
 context; \code{NULL} includes all contexts.}

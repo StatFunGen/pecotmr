@@ -7,10 +7,10 @@
 twasWeightsRow(
   variantIds,
   weights,
-  fits = NULL,
+  methodFits = NULL,
   cvResult = NULL,
-  standardized = FALSE,
-  dataType = NULL
+  weightStandardized = FALSE,
+  weightsDataType = NULL
 )
 }
 \arguments{
@@ -20,14 +20,14 @@ coordinates (\code{chrom:pos:ref:alt}).}
 \item{weights}{Per-variant weights, aligned to \code{variantIds} (a vector,
 or a matrix with one column per condition).}
 
-\item{fits}{Optional per-method fit payload.}
+\item{methodFits}{Optional per-method fit payload.}
 
 \item{cvResult}{Optional cross-validation payload.}
 
-\item{standardized}{Whether the weights are already on the standardized
+\item{weightStandardized}{Whether the weights are already on the standardized
 scale.}
 
-\item{dataType}{Optional data-type label.}
+\item{weightsDataType}{Optional data-type label.}
 }
 \value{
 A \code{\linkS4class{TwasWeightsRow}}.
@@ -43,7 +43,7 @@ row <- twasWeightsRow(
     weights = c(0.4, -0.2)
 )
 TwasWeights(
-    study = "s1", context = "brain", trait = "g1", method = "lasso",
+    studyName = "s1", context = "brain", trait = "g1", method = "lasso",
     entry = list(row)
 )
 }

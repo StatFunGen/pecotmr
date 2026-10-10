@@ -16,7 +16,7 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = GenotypeFilterParam(),
+  genotypeFilterParam = GenotypeFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
@@ -30,7 +30,7 @@ twasWeightsPipeline(data, ...)
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
   residualizationArgs = ResidualizationParam(),
-  dataType = NULL,
+  weightsDataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
   seed = NULL
@@ -45,9 +45,9 @@ twasWeightsPipeline(data, ...)
   fineMappingResult = NULL,
   twasWeights = NULL,
   fitRetention = c("slim", "none", "full"),
-  dataType = NULL,
+  weightsDataType = NULL,
   verbose = 1L,
-  panelFilterArgs = PanelFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   crossValidationArgs = CrossValidationParam()
 )
 
@@ -58,8 +58,8 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  genotypeFilterArgs = GenotypeFilterParam(),
-  panelFilterArgs = PanelFilterParam(),
+  genotypeFilterParam = GenotypeFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
@@ -68,7 +68,7 @@ twasWeightsPipeline(data, ...)
   fitFullData = TRUE,
   estimatePi = TRUE,
   fitRetention = c("slim", "none", "full"),
-  dataType = NULL,
+  weightsDataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
   residualizationArgs = ResidualizationParam(),
@@ -107,9 +107,9 @@ with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
 position when extracting variants. Required when \code{traitId} is
 supplied. Mutually exclusive with \code{region}.}
 
-\item{genotypeFilterArgs}{For QtlDataset: per-call genotype-filter overrides,
-built with \code{\link{GenotypeFilterParam}}. Each field that is set
-replaces the corresponding construct-time \code{\link{QtlDataset}} slot
+\item{genotypeFilterParam}{For QtlDataset: per-call genotype-filter
+overrides, built with \code{\link{GenotypeFilterParam}}. Each field that is
+set replaces the corresponding construct-time \code{\link{QtlDataset}} slot
 for this call only (applied to a validated copy); a field left unset
 leaves the stored value in place. Variant QC is a property of the data,
 so these are applied identically here and in
@@ -206,8 +206,8 @@ components fitted per context when \code{usePCA = TRUE} (default
 
 \item{residualizationArgs}{Covariate residualization settings, built with
   \code{\link{ResidualizationParam}} and forwarded to
-  \code{\link{getResidualizedPhenotypes}} /
-  \code{\link{getResidualizedGenotypes}}: \code{phenotypeCovariates} and
+  \code{\link{residualizedPhenotypes}} /
+  \code{\link{residualizedGenotypes}}: \code{phenotypeCovariates} and
   \code{genotypeCovariates} name which covariates to regress out
   (\code{NULL}, the default, uses every available one), and
   \code{residualizePhenotype} / \code{residualizeGenotype} turn each side
@@ -221,7 +221,7 @@ components fitted per context when \code{usePCA = TRUE} (default
   off by default, so a non-default value there is an explicit request for
   something the input cannot do.}
 
-\item{dataType}{Optional data-type label recorded on every
+\item{weightsDataType}{Optional data-type label recorded on every
 \code{TwasWeightsRow$dataType} (e.g. \code{"expression"}).}
 
 \item{naAction}{Character. How to handle missing values in the extracted
@@ -238,7 +238,7 @@ the call, so the session RNG is left as it was found. \code{NULL}
 (default) does not seed at all, so an outer \code{set.seed()} still
 governs the main-process draws.}
 
-\item{panelFilterArgs}{For QtlSumStats: LD-reference-panel filters,
+\item{panelFilterParam}{For QtlSumStats: LD-reference-panel filters,
 built with
 \code{\link{PanelFilterParam}}. See \emph{Panel filters on the RSS path}
 above.}

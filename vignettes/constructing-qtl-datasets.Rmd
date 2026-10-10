@@ -181,7 +181,7 @@ applied at load), for example:
 ```{r qtl-manifest-qc}
 qdFiltered <- loadQtlDatasetFromManifest(
     manifest,
-    genotypeFilterArgs = GenotypeFilterParam(
+    genotypeFilterParam = GenotypeFilterParam(
         mafCutoff = 0.01,
         imissCutoff = 0.05,
         keepIndel = FALSE
@@ -231,7 +231,7 @@ phenotypes <- list(Muscle = buildSE(muscleBed), Blood = buildSE(bloodBed))
 genotypes <- readGenotypes(plink1Prefix = genoPrefix)
 
 qdManual <- QtlDataset(
-    study = "GTEx_toy",
+    studyName = "GTEx_toy",
     genotypes = genotypes,
     phenotypes = phenotypes
 )
@@ -272,7 +272,7 @@ A MultiStudyQtlDataset can be manually constructed by building a named list of
 msdManual <- MultiStudyQtlDataset(
     qtlDatasets = list(StudyA = qd, StudyB = qdManual)
 )
-names(getQtlDatasets(msdManual))
+names(qtlDatasets(msdManual))
 ```
 
 To attach a summary-only study, pass a `QtlSumStats` object to the `sumStats`
@@ -341,12 +341,12 @@ Once built, the accessors extract data lazily, applying the stored QC filters
 at extraction time:
 
 ```{r accessors}
-getStudy(qd)
-getContexts(qd)
+studyName(qd)
+contexts(qd)
 # Cis genotypes around a trait (+/- a window), QC applied on the fly:
-dim(getGenotypes(qd, traitId = "GENE1", cisWindow = 1e6))
+dim(genotypes(qd, traitId = "GENE1", cisWindow = 1e6))
 # Phenotype matrix for one context:
-dim(SummarizedExperiment::assay(getPhenotypes(qd, contexts = "Muscle")))
+dim(SummarizedExperiment::assay(molecularTraits(qd, contexts = "Muscle")))
 ```
 
 `QtlDataset` and `MultiStudyQtlDataset` are direct inputs to

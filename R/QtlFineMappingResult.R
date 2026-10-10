@@ -143,8 +143,8 @@ setClass(
 # (study, context, trait, method). A length mismatch would otherwise surface as
 # a recycling artefact deep inside the DataFrame assembly.
 # @noRd
-.qfmrCheckTupleLengths <- function(study, context, trait, method, entry) {
-    n <- length(study)
+.qfmrCheckTupleLengths <- function(studyName, context, trait, method, entry) {
+    n <- length(studyName)
     ok <- length(context) == n &&
         length(trait) == n &&
         length(method) == n &&
@@ -165,7 +165,7 @@ setClass(
 #'   payloads (one per tuple). The optional \code{ldSketch} slot records the LD
 #'   reference used for RSS-derived fits; pass \code{NULL} (the default) for
 #'   individual-level fits.
-#' @param study Character vector of study identifiers (per tuple). Use the
+#' @param studyName Character vector of study identifiers (per tuple). Use the
 #'   sentinel \code{"joint"} for rows produced by a cross-study joint fit.
 #' @param context Character vector of context labels (per tuple). Use
 #'   \code{"joint"} for rows produced by a cross-context joint fit.
@@ -193,13 +193,13 @@ setClass(
 #'   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
 #' fe <- fineMappingRow(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
-#' QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
+#' QtlFineMappingResult(studyName = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(fe))
 #' @importFrom checkmate assertCharacter assert checkList
 #' @importFrom checkmate checkClass
 #' @export
 QtlFineMappingResult <- function(
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -211,7 +211,7 @@ QtlFineMappingResult <- function(
     ldSketch = NULL
 ) {
     .qfmrAssertArgs(
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -220,12 +220,12 @@ QtlFineMappingResult <- function(
         jointContexts,
         jointTraits
     )
-    n <- length(study)
-    .qfmrCheckTupleLengths(study, context, trait, method, entry)
+    n <- length(studyName)
+    .qfmrCheckTupleLengths(studyName, context, trait, method, entry)
     payloads <- map(entry, .asFmRowPayload)
     .checkRowPayloads(payloads, "FineMappingRow", "fine-mapping")
     cols <- .qfmrMetadataCols(
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -248,7 +248,7 @@ QtlFineMappingResult <- function(
 # Every argument's type contract, checked before anything is built.
 # @noRd
 .qfmrAssertArgs <- function(
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -257,7 +257,7 @@ QtlFineMappingResult <- function(
     jointContexts,
     jointTraits
 ) {
-    assertCharacter(study, any.missing = FALSE)
+    assertCharacter(studyName, any.missing = FALSE)
     assertCharacter(context, any.missing = FALSE)
     assertCharacter(trait, any.missing = FALSE)
     assertCharacter(method, any.missing = FALSE)
@@ -277,7 +277,7 @@ QtlFineMappingResult <- function(
 # payload, and any joint-provenance or trait-position columns.
 # @noRd
 .qfmrMetadataCols <- function(
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -289,12 +289,12 @@ QtlFineMappingResult <- function(
     n
 ) {
     baseCols <- list(
-        study = as.character(study),
+        study = as.character(studyName),
         context = as.character(context),
         trait = as.character(trait),
         method = as.character(method),
-        susieFit = S4Vectors::SimpleList(map(payloads, getSusieFit)),
-        cvResult = S4Vectors::SimpleList(map(payloads, getCvResult))
+        susieFit = S4Vectors::SimpleList(map(payloads, susieFit)),
+        cvResult = S4Vectors::SimpleList(map(payloads, cvResult))
     )
     withJoint <- .qfmrAppendJointCols(
         baseCols,
@@ -337,10 +337,10 @@ QtlFineMappingResult <- function(
 
 # The single row a (study, context, trait, method) selector pins.
 # @noRd
-.qfmrSelectRowIndex <- function(x, study, context, trait, method) {
+.qfmrSelectRowIndex <- function(x, studyName, context, trait, method) {
     .tupleSelectRow(
         x,
-        study,
+        studyName,
         context,
         trait,
         method,
@@ -348,25 +348,25 @@ QtlFineMappingResult <- function(
     )
 }
 
-#' @rdname getFineMappingResult
+#' @rdname fineMappingResult
 setMethod(
-    "getFineMappingResult",
+    "fineMappingResult",
     "QtlFineMappingResult",
-    function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        x[.qfmrSelectRowIndex(x, study, context, trait, method)]
+    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+        x[.qfmrSelectRowIndex(x, studyName, context, trait, method)]
     }
 )
 
 # Derived collection-level accessors (delegate to entry-level methods).
 
-#' @rdname getPip
+#' @rdname pip
 #' @export
 setMethod(
-    "getPip",
+    "pip",
     "QtlFineMappingResult",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -375,7 +375,7 @@ setMethod(
         pip <- .fmrRowPip(
             .fmrRowParts(
                 x,
-                .qfmrSelectRowIndex(x, study, context, trait, method)
+                .qfmrSelectRowIndex(x, studyName, context, trait, method)
             )
         )
         if (isTRUE(returnList)) {
@@ -389,15 +389,15 @@ setMethod(
     }
 )
 
-# Row selector for the base delegating accessors (getCs / getTopLoci /
-# getMarginalEffects / getSusieFit / getVariantIds now live on
+# Row selector for the base delegating accessors (credibleSets / topLoci /
+# marginalEffects / susieFit / variantIds now live on
 # FineMappingResultBase, AllClasses.R).
 setMethod(
     ".fmrSelectEntry",
     "QtlFineMappingResult",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -416,42 +416,42 @@ setMethod(
         }
         .fmrRowParts(
             x,
-            .qfmrSelectRowIndex(x, study, context, trait, method)
+            .qfmrSelectRowIndex(x, studyName, context, trait, method)
         )
     }
 )
 
-#' @rdname getCvResult
+#' @rdname cvResult
 #' @export
 setMethod(
-    "getCvResult",
+    "cvResult",
     "QtlFineMappingResult",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL
     ) {
-        getCvResult(.fmrRowParts(
+        cvResult(.fmrRowParts(
             x,
-            .qfmrSelectRowIndex(x, study, context, trait, method)
+            .qfmrSelectRowIndex(x, studyName, context, trait, method)
         ))
     }
 )
 
-# getTopLoci / getMarginalEffects / getSusieFit / getVariantIds are defined once
+# topLoci / marginalEffects / susieFit / variantIds are defined once
 # on FineMappingResultBase (AllClasses.R), routing through .fmrSelectEntry.
 
-#' @rdname getContexts
+#' @rdname contexts
 #' @export
-setMethod("getContexts", "QtlFineMappingResult", function(x) {
+setMethod("contexts", "QtlFineMappingResult", function(x) {
     unique(as.character(x$context))
 })
 
-#' @rdname getTraits
+#' @rdname traitNames
 #' @export
-setMethod("getTraits", "QtlFineMappingResult", function(x) {
+setMethod("traitNames", "QtlFineMappingResult", function(x) {
     unique(as.character(x$trait))
 })
 #' @rdname show-methods

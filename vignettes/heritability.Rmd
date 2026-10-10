@@ -72,7 +72,7 @@ perSnpVar <- rep(h2True / M, M)
 
 set.seed(1)
 z <- numeric(M)
-for (block in getLdMatrixList(ldScoreExample)) {
+for (block in ldMatrixList(ldScoreExample)) {
     idx <- block$snpIdx
     p <- length(idx)
     sigma <- nGwas * (block$R %*% diag(perSnpVar[idx], p) %*% block$R) +
@@ -90,9 +90,9 @@ S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
     N = as.integer(nGwas)
 )
 gwas <- GwasSumStats(
-    study = "trait1",
+    studyName = "trait1",
     entry = list(gr),
-    genome = getGenome(ldScoreExample),
+    genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
     ldSketch = readGenotypes(
         system.file("extdata", "toy_ref.bed", package = "pecotmr")
     )
@@ -111,8 +111,8 @@ names(estimates) <- methods
 
 data.frame(
     method = methods,
-    h2 = round(vapply(estimates, getH2, numeric(1)), 3),
-    se = round(vapply(estimates, getH2Se, numeric(1)), 3),
+    h2 = round(vapply(estimates, heritabilityEstimate, numeric(1)), 3),
+    se = round(vapply(estimates, heritabilityEstimateSe, numeric(1)), 3),
     row.names = NULL
 )
 ```
@@ -154,10 +154,10 @@ outgrows the signal, the modelled variance is driven to its floor across
 most eigen-directions, and the optimiser walks the intercept out to the top
 of its range — returning a number that reflects that bound rather than the
 data. At `N = 1e5` against this reference (`nRef` =
-`r getNRef(ldEigenExample)`) it drifts to about 0.56 for a true 0.4 and
+`r ldPanelNSamples(ldEigenExample)`) it drifts to about 0.56 for a true 0.4 and
 warns that the fit sits on a bound. At the `N = 1e4` used here it is
 comfortably inside its range. If HDL disagrees sharply with the others,
-check for that warning and compare `getN()` against `getNRef()`.
+check for that warning and compare `nSamples()` against `ldPanelNSamples()`.
 
 A standard error of zero, or an estimate pinned at a boundary, almost always
 means the reference is too small rather than that the trait has no
@@ -202,7 +202,7 @@ perSnpVarStrat <- ifelse(inA, 0.225 / sum(inA), 0.075 / sum(!inA))
 
 set.seed(1)
 zStrat <- numeric(M)
-for (block in getLdMatrixList(ldScoreExample)) {
+for (block in ldMatrixList(ldScoreExample)) {
     idx <- block$snpIdx
     p <- length(idx)
     sigma <- nGwas *
@@ -215,9 +215,9 @@ for (block in getLdMatrixList(ldScoreExample)) {
 }
 S4Vectors::mcols(gr)$Z <- zStrat
 gwasStrat <- GwasSumStats(
-    study = "trait1",
+    studyName = "trait1",
     entry = list(gr),
-    genome = getGenome(ldScoreExample),
+    genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
     ldSketch = readGenotypes(
         system.file("extdata", "toy_ref.bed", package = "pecotmr")
     )
@@ -227,7 +227,7 @@ annot <- AnnotationMatrix(
     matrix(as.integer(inA), ncol = 1, dimnames = list(NULL, "annotA")),
     as(ldScoreExample, "GRanges"),
     data.frame(name = "annotA", tier = "baseline", type = "binary"),
-    genome = getGenome(ldScoreExample)
+    genome = unique(unname(GenomeInfoDb::genome(ldScoreExample)))
 )
 ```
 
@@ -238,7 +238,7 @@ strat <- estimateH2(
     method = "gldsc",
     annotations = annot
 )
-as.data.frame(getEnrichment(strat))[, c(
+as.data.frame(stratifiedHeritabilityEnrichment(strat))[, c(
     "annotation",
     "tau",
     "enrichment",
@@ -268,7 +268,7 @@ annot <- readAnnotations(
 The `tier` column decides how each annotation is used: `"baseline"`
 annotations enter the model and get an enrichment estimate, while
 `"candidate"` annotations are scored against the fitted baseline (the sHDL
-score test, via `getScoreStats()`).
+score test, via `scoreStats()`).
 
 One structural caveat: a set of baseline annotations that exactly partitions
 the variants is rank-deficient by construction, because the model's implicit
@@ -303,8 +303,8 @@ test.
 
 ```{r sldsc-pipeline}
 sldscData <- SldscData(
-    annot = annotTable,
-    frq = frq,
+    annotData = annotTable,
+    frqData = frq,
     traits = lapply(runs, function(r) list(single = list(r)))
 )
 result <- sldscPostprocessingPipeline(
@@ -344,7 +344,7 @@ standardisation for one trait's run, and `metaSldscRandom()` is the
 DerSimonian-Laird pooling across traits. Running them yourself is the way to
 see which of the three a strange tau\* came from.
 
-`getAnnotData()`, `getFrqData()`, `getAnnotCols()` and `getTraitRuns()` read
+`annotData()`, `frqData()`, `annotCols()` and `sldscResults()` read
 the corresponding parts of an `SldscData` back out.
 
 ### LD scores from an existing reference

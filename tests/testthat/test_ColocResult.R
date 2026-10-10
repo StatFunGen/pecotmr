@@ -80,7 +80,7 @@ test_that("ColocResult: an empty result still carries the column schema", {
     x <- ColocResult(.cr_pairs()[0, , drop = FALSE], list())
     expect_equal(nrow(x), 0L)
     expect_true(is_in("PP.H4.abf", colnames(x)))
-    expect_equal(nrow(getColocPairs(x)), 0L)
+    expect_equal(nrow(colocPairs(x)), 0L)
 })
 
 test_that("ColocResult: variants keep their alleles, so ids round-trip", {
@@ -88,7 +88,7 @@ test_that("ColocResult: variants keep their alleles, so ids round-trip", {
     # the alleles an element cannot render its own variant ids.
     x <- ColocResult(.cr_pairs(), .cr_variants())
     expect_equal(
-        getColocVariants(x)$variant_id,
+        colocVariants(x)$variant_id,
         c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
     )
 })
@@ -100,14 +100,14 @@ test_that("ColocResult: is reachable by range, not just by identity", {
     expect_equal(length(IRanges::subsetByOverlaps(x, win)), 1L)
 })
 
-test_that("getColocVariants: colocPp is the pair posterior times the variant", {
+test_that("colocVariants: colocPp is the pair posterior times the variant", {
     x <- ColocResult(.cr_pairs(pp4 = 0.5), .cr_variants())
-    v <- getColocVariants(x)
+    v <- colocVariants(x)
     expect_equal(nrow(v), 3L)
     expect_equal(v$colocPp, 0.5 * c(0.6, 0.3, 0.1))
 })
 
-test_that("getColocGenes: sums within a QTL CS, noisy-ORs across them", {
+test_that("colocGenes: sums within a QTL CS, noisy-ORs across them", {
     # Two QTL credible sets, each tested against two blocks. Within a CS the
     # per-block results are mutually exclusive (sum); across CSs they are
     # independent signals (noisy-OR).
@@ -117,95 +117,95 @@ test_that("getColocGenes: sums within a QTL CS, noisy-ORs across them", {
         pp4 = c(0.1, 0.2, 0.3, 0.4)
     )
     x <- ColocResult(pairs, .cr_variants(4L))
-    genes <- getColocGenes(x)
+    genes <- colocGenes(x)
     expect_equal(nrow(genes), 1L)
     expect_equal(genes$PP.H4, 1 - (1 - 0.3) * (1 - 0.7))
     expect_equal(genes$nQtlCs, 2L)
     expect_equal(genes$nPairs, 4L)
 })
 
-test_that("getColocGenes: clips a sum above 1 and says so", {
+test_that("colocGenes: clips a sum above 1 and says so", {
     pairs <- .cr_pairs(
         qtlCs = c(1L, 1L),
         blockId = c("b1", "b2"),
         pp4 = c(0.7, 0.6)
     )
     x <- ColocResult(pairs, .cr_variants(2L))
-    expect_warning(genes <- getColocGenes(x), "competing")
+    expect_warning(genes <- colocGenes(x), "competing")
     expect_equal(genes$PP.H4, 1)
 })
 
-test_that("getColocGenes: keeps distinct genes apart", {
+test_that("colocGenes: keeps distinct genes apart", {
     pairs <- .cr_pairs(trait = c("g1", "g2"), pp4 = c(0.5, 0.25))
     x <- ColocResult(pairs, .cr_variants(2L))
-    genes <- getColocGenes(x)
+    genes <- colocGenes(x)
     expect_equal(nrow(genes), 2L)
     expect_setequal(genes$trait, c("g1", "g2"))
 })
 
-test_that("getColocGenes: keeps distinct second-side traits apart", {
+test_that("colocGenes: keeps distinct second-side traits apart", {
     # A QTL-QTL colocalization has a trait axis on BOTH sides. Grouping on the
     # second side's study alone would pool two molecular phenotypes into one
     # unit and noisy-OR their posteriors together.
     pairs <- .cr_pairs(gwasTrait = c("h1", "h2"), pp4 = c(0.5, 0.25))
     x <- ColocResult(pairs, .cr_variants(2L))
-    genes <- getColocGenes(x)
+    genes <- colocGenes(x)
     expect_equal(nrow(genes), 2L)
     expect_setequal(genes$gwasTrait, c("h1", "h2"))
 })
 
-test_that("getColocVariants(pooled): pools by the same rule as genes", {
+test_that("colocVariants(pooled): pools by the same rule as genes", {
     pairs <- .cr_pairs(
         qtlCs = c(1L, 2L),
         blockId = c("b1", "b1"),
         pp4 = c(0.5, 0.25)
     )
     x <- ColocResult(pairs, .cr_variants(2L))
-    pooled <- getColocVariants(x, pooled = TRUE)
+    pooled <- colocVariants(x, pooled = TRUE)
     expect_equal(nrow(pooled), 3L)
     lead <- pooled[pooled$variant_id == "chr1:100:A:G", ]
     expect_equal(lead$colocPp, 1 - (1 - 0.5 * 0.6) * (1 - 0.25 * 0.6))
 })
 
-test_that("getColocCredibleSets: takes the smallest set reaching coverage", {
+test_that("colocCredibleSets: takes the smallest set reaching coverage", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
-    expect_equal(getColocCredibleSets(x, coverage = 0.5)$csSize, 1L)
-    expect_equal(getColocCredibleSets(x, coverage = 0.9)$csSize, 2L)
-    expect_equal(getColocCredibleSets(x, coverage = 0.95)$csSize, 3L)
+    expect_equal(colocCredibleSets(x, coverage = 0.5)$csSize, 1L)
+    expect_equal(colocCredibleSets(x, coverage = 0.9)$csSize, 2L)
+    expect_equal(colocCredibleSets(x, coverage = 0.95)$csSize, 3L)
 })
 
-test_that("getColocCredibleSets: reports the lead variant and coverage", {
+test_that("colocCredibleSets: reports the lead variant and coverage", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
-    cs <- getColocCredibleSets(x, coverage = 0.9)
+    cs <- colocCredibleSets(x, coverage = 0.9)
     expect_equal(cs$leadVariant, "chr1:100:A:G")
     expect_equal(cs$leadPp, 0.6)
     expect_equal(cs$csCoverage, 0.9)
 })
 
-test_that("getColocCredibleSets: minPp4 drops pairs before any LD work", {
+test_that("colocCredibleSets: minPp4 drops pairs before any LD work", {
     pairs <- .cr_pairs(qtlCs = c(1L, 2L), pp4 = c(0.8, 0.1))
     x <- ColocResult(pairs, .cr_variants(2L))
-    expect_equal(nrow(getColocCredibleSets(x)), 2L)
-    expect_equal(nrow(getColocCredibleSets(x, minPp4 = 0.5)), 1L)
-    expect_equal(nrow(getColocCredibleSets(x, minPp4 = 0.99)), 0L)
+    expect_equal(nrow(colocCredibleSets(x)), 2L)
+    expect_equal(nrow(colocCredibleSets(x, minPp4 = 0.5)), 1L)
+    expect_equal(nrow(colocCredibleSets(x, minPp4 = 0.99)), 0L)
 })
 
-test_that("getColocCredibleSets: requireMaxH4 keeps only H4-dominant pairs", {
+test_that("colocCredibleSets: requireMaxH4 keeps only H4-dominant pairs", {
     pairs <- .cr_pairs(qtlCs = c(1L, 2L), pp4 = c(0.8, 0.1))
     x <- ColocResult(pairs, .cr_variants(2L))
-    cs <- getColocCredibleSets(x, requireMaxH4 = TRUE)
+    cs <- colocCredibleSets(x, requireMaxH4 = TRUE)
     expect_equal(nrow(cs), 1L)
     expect_equal(cs$qtlCs, 1L)
 })
 
-test_that("getColocCredibleSets: purity is NA, not passing, without LD", {
+test_that("colocCredibleSets: purity is NA, not passing, without LD", {
     # No LD reference means no evidence either way; reporting a passing value
     # would let a filtered view silently depend on whether a sketch happened
     # to be attached.
     x <- ColocResult(.cr_pairs(), .cr_variants())
-    cs <- getColocCredibleSets(x)
+    cs <- colocCredibleSets(x)
     expect_true(is.na(cs$purity))
-    expect_equal(nrow(getColocCredibleSets(x, minAbsCorr = 0.99)), 1L)
+    expect_equal(nrow(colocCredibleSets(x, minAbsCorr = 0.99)), 1L)
 })
 
 test_that("as.data.frame returns the pair view", {
@@ -384,7 +384,7 @@ test_that("the views answer an empty collection with empty tables", {
     expect_equal(length(empty), 0L)
     expect_equal(nrow(.crLongVariants(empty)), 0L)
     expect_equal(.crPairFilter(empty, 0, FALSE), integer(0))
-    expect_equal(nrow(getColocGenes(empty)), 0L)
+    expect_equal(nrow(colocGenes(empty)), 0L)
 })
 
 test_that("pivoting a per-row column that is absent yields the empty frame", {
@@ -409,5 +409,5 @@ test_that("a pair with no variants contributes no credible set", {
     expect_equal(length(cr[[1L]]), 0L)
     expect_null(.crCsForPair(1L, cr, coverage = 0.95))
     # ...and the accessor over that result is an empty table, not an error.
-    expect_equal(nrow(getColocCredibleSets(cr)), 0L)
+    expect_equal(nrow(colocCredibleSets(cr)), 0L)
 })

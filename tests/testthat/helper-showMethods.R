@@ -51,12 +51,12 @@ context("show methods")
     )
 }
 
-.sh_makeTwEntry <- function(p = 4, standardized = FALSE) {
+.sh_makeTwEntry <- function(p = 4, weightStandardized = FALSE) {
     twasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = rep(0.1, p),
         cvResult = list(rsq = 0.5),
-        standardized = standardized
+        weightStandardized = weightStandardized
     )
 }
 
@@ -86,9 +86,9 @@ context("show methods")
     )
 }
 
-.sh_makeQtlDataset <- function(study = "study1") {
+.sh_makeQtlDataset <- function(studyName = "study1") {
     QtlDataset(
-        study = study,
+        studyName = studyName,
         genotypes = .sh_makeGenotypeHandle(),
         phenotypes = list(brain = .sh_makeSe()),
         genotypeCovariates = matrix(0, nrow = 50, ncol = 0)

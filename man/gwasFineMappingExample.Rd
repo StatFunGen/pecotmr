@@ -28,7 +28,7 @@ identifiers are synthetic. Built by
 \examples{
 data(gwasFineMappingExample)
 gwasFineMappingExample
-head(getTopLoci(gwasFineMappingExample))
+head(topLoci(gwasFineMappingExample))
 
 }
 \keyword{data}

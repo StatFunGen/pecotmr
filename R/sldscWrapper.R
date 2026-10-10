@@ -75,7 +75,7 @@ readSldscTrait <- function(prefix) {
         propH2 = set_names(as.numeric(results[["Prop._h2"]]), cats),
         propSnps = set_names(as.numeric(results[["Prop._SNPs"]]), cats),
         h2g = h2g,
-        tauBlocks = deleteValues,
+        annotationJackknifeCoefs = deleteValues,
         nBlocks = nrow(deleteValues)
     )
 }
@@ -248,8 +248,8 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -261,14 +261,14 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
+#' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 #' computeSldscAnnotSd(sldscData = sd)
 #' @importFrom purrr map map_dbl compact reduce
 #' @export
 computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
     assertClass(sldscData, "SldscData")
-    annot <- getAnnotData(sldscData)
-    frq <- getFrqData(sldscData)
+    annot <- annotData(sldscData)
+    frq <- frqData(sldscData)
     if (mafCutoff > 0 && nrow(frq) == 0L) {
         msg <- glue(
             "computeSldscAnnotSd: mafCutoff = {mafCutoff} requires frq ",
@@ -281,8 +281,8 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
     contribs <- compact(map(
         unique(annot$CHR),
         .sldscChromVar,
-        annot = annot,
-        frq = frq,
+        annotData = annot,
+        frqData = frq,
         mafCutoff = mafCutoff,
         colsUse = colsUse
     ))
@@ -304,9 +304,9 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 # @noRd
 .sldscColsUse <- function(sldscData, annotCols) {
     colsUse <- if (is.null(annotCols)) {
-        getAnnotCols(sldscData)
+        annotCols(sldscData)
     } else if (is.numeric(annotCols)) {
-        getAnnotCols(sldscData)[annotCols]
+        annotCols(sldscData)[annotCols]
     } else {
         annotCols
     }
@@ -320,11 +320,11 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 # Returns list(num = named weighted-variance vector, den = n-1), or NULL when
 # the chromosome has <= 1 usable variant after MAF filtering.
 # @noRd
-.sldscChromVar <- function(chrom, annot, frq, mafCutoff, colsUse) {
-    onChrom <- filter(annot, .data$CHR == chrom)
+.sldscChromVar <- function(chrom, annotData, frqData, mafCutoff, colsUse) {
+    onChrom <- filter(annotData, .data$CHR == chrom)
     dat <- if (mafCutoff > 0) {
         onChrom |>
-            inner_join(select(frq, all_of(c("SNP", "MAF"))), by = "SNP") |>
+            inner_join(select(frqData, all_of(c("SNP", "MAF"))), by = "SNP") |>
             filter(!is.na(.data$MAF) & .data$MAF > mafCutoff)
     } else {
         onChrom
@@ -373,8 +373,8 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -386,12 +386,12 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
+#' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 #' computeSldscMRef(sldscData = sd)
 #' @export
 computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
     assertClass(sldscData, "SldscData")
-    frq <- getFrqData(sldscData)
+    frq <- frqData(sldscData)
     if (nrow(frq) > 0L) {
         return(as.integer(
             if (mafCutoff > 0) {
@@ -408,7 +408,7 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
         )
         abort(msg)
     }
-    as.integer(nrow(getAnnotData(sldscData)))
+    as.integer(nrow(annotData(sldscData)))
 }
 
 
@@ -435,8 +435,8 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -448,27 +448,27 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
+#' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 #' isBinarySldscAnnot(sd)
 #' @export
 isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
     assertClass(sldscData, "SldscData")
-    annot <- getAnnotData(sldscData)
+    annot <- annotData(sldscData)
     colsUse <- if (is.null(annotCols)) {
-        getAnnotCols(sldscData)
+        annotCols(sldscData)
     } else if (is.numeric(annotCols)) {
-        getAnnotCols(sldscData)[annotCols]
+        annotCols(sldscData)[annotCols]
     } else {
         annotCols
     }
 
-    set_names(map_lgl(colsUse, .sldscColIsBinary, annot = annot), colsUse)
+    set_names(map_lgl(colsUse, .sldscColIsBinary, annotData = annot), colsUse)
 }
 
 # An annotation is binary when every non-missing value is 0 or 1.
 # @noRd
-.sldscColIsBinary <- function(col, annot) {
-    vals <- unique(na.omit(as.numeric(annot[[col]])))
+.sldscColIsBinary <- function(col, annotData) {
+    vals <- unique(na.omit(as.numeric(annotData[[col]])))
     all(is_in(vals, c(0, 1)))
 }
 
@@ -483,7 +483,7 @@ isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
 #'   \Phi^{-1}(1 - p/2)}.
 #'
 #' @param sldscData An \code{\link{SldscData}} object (the run is pulled from it
-#'   via \code{getTraitRun}).
+#'   via \code{sldscResults}).
 #' @param trait Character. Trait name (a key of the SldscData traits list).
 #' @param mode Character: `"single"` or `"joint"`.
 #' @param idx Integer or NULL. For `mode = "single"`, which of the trait's
@@ -508,8 +508,8 @@ isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -520,7 +520,7 @@ isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
 #'     mkRun(c("annot_B_0", "baselineLD_0"))),
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
-#' sd <- SldscData(annot = annot, frq = frq,
+#' sd <- SldscData(annotData = annot, frqData = frq,
 #'   traits = setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY")))
 #' sdAnnot <- computeSldscAnnotSd(sd)
 #' MRef <- computeSldscMRef(sd)
@@ -549,7 +549,10 @@ standardizeSldscTrait <- function(
     sdTarget <- .stdSdTarget(sdAnnot, targetCategories)
     tau <- as.numeric(traitData$tau[targetCategories])
     tauSe <- as.numeric(traitData$tauSe[targetCategories])
-    blocksTarget <- traitData$tauBlocks[, targetIdx, drop = FALSE]
+    blocksTarget <- traitData$annotationJackknifeCoefs[,
+        targetIdx,
+        drop = FALSE
+    ]
     ts <- standardizeTauStar(tau, blocksTarget, sdTarget, MRef, h2g)
     base <- .stdSummaryDf(targetCategories, tau, tauSe, ts)
     summaryDf <- if (mode != "single") {
@@ -582,7 +585,7 @@ standardizeSldscTrait <- function(
 # Fetch the requested trait's single/joint run (error when absent).
 # @noRd
 .stdTraitRun <- function(sldscData, trait, mode, idx) {
-    traitData <- getTraitRun(sldscData, trait, mode, idx)
+    traitData <- sldscResults(sldscData, trait, mode, idx)
     if (is.null(traitData)) {
         idxNote <- if (!is.null(idx)) glue(" (idx={idx})") else ""
         msg <- glue(
@@ -696,8 +699,8 @@ standardizeSldscTrait <- function(
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -709,7 +712,7 @@ standardizeSldscTrait <- function(
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
+#' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 #' pp <- sldscPostprocessingPipeline(sd)
 #' metaSldscRandom(pp$per_trait, category = "annot_A_0",
 #'   quantity = "enrichment")
@@ -909,8 +912,8 @@ metaSldscRandom <- function(
 #'     enrichmentP = setNames(rep(0.01, n), cats),
 #'     propH2 = setNames(rep(0.2, n), cats),
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-#'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-#'     nBlocks = 10L)
+#'     annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+#'   cats)), nBlocks = 10L)
 #' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -922,7 +925,7 @@ metaSldscRandom <- function(
 #'     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
-#' sd <- SldscData(annot = annot, frq = frq, traits = traits)
+#' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
 #' pp <- sldscPostprocessingPipeline(sd)
 #' sldscSubsetMeta(pp, subsetTraits = "traitX")
 #' @export

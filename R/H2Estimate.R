@@ -11,19 +11,30 @@
 #' @title Heritability Estimate
 #' @description Container for univariate heritability estimation results. Holds
 #'   global, local, and annotation-stratified estimates.
-#' @slot h2 Numeric, global SNP heritability estimate.
-#' @slot h2Se Numeric, standard error of global h2.
+#' @slot estimate Numeric, global SNP heritability estimate.
+#' @slot estimateSe Numeric, standard error of global h2.
 #' @slot intercept Numeric, confounding intercept estimate (NA if method does
 #'   not estimate one).
 #' @slot interceptSe Numeric, SE of intercept.
-#' @slot local A \code{data.frame} with per-block local heritability estimates
+#' @slot localBlocks A \code{data.frame} with per-block local
+#'   heritability estimates
 #'   (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}). NULL if
 #'   \code{local = FALSE}.
-#' @slot enrichment A \code{data.frame} with baseline annotation enrichment
-#'   estimates (columns: \code{annotation}, \code{tau}, \code{tauSe},
-#'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP}, \code{propH2},
-#'   \code{propSnps}). NULL if unstratified.
-#' @slot tauBlocks A numeric matrix (nBlocks x n_annotations) of per-block
+#' @slot enrichment A \code{data.frame} of per-annotation enrichment results,
+#'   NULL if unstratified. Two shapes are possible, depending on which route
+#'   produced the estimate:
+#'   \describe{
+#'     \item{partitioned}{tau-based enrichment of the baseline annotations
+#'       (\code{computeBaselineEnrichment}, \code{.gldscEnrichmentDf}), with
+#'       columns \code{annotation}, \code{tau}, \code{tauSe},
+#'       \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
+#'       \code{propH2}, \code{propSnps}.}
+#'     \item{score test}{the score test over the tested (candidate)
+#'       annotations, with columns \code{annotation}, \code{scoreZ},
+#'       \code{scoreP}.}
+#'   }
+#' @slot annotationJackknifeCoefs A numeric matrix
+#'   (nBlocks x n_annotations) of per-block
 #'   jackknife tau values. Required for Gazal tauStar standardization
 #'   downstream. NULL if not available (e.g., unstratified analysis).
 #' @slot scoreStats A list with score statistics for candidate annotations,
@@ -41,13 +52,13 @@
 setClass(
     "H2Estimate",
     representation(
-        h2 = "numeric",
-        h2Se = "numeric",
+        estimate = "numeric",
+        estimateSe = "numeric",
         intercept = "numeric",
         interceptSe = "numeric",
-        local = "ANY", # data.frame or NULL
+        localBlocks = "ANY", # data.frame or NULL
         enrichment = "ANY", # data.frame or NULL
-        tauBlocks = "ANY", # matrix or NULL
+        annotationJackknifeCoefs = "ANY", # matrix or NULL
         scoreStats = "ANY", # list or NULL
         method = "character",
         nSnps = "integer",
@@ -60,53 +71,55 @@ setClass(
 # Accessors
 # =============================================================================
 
-#' @rdname getH2
+#' @rdname heritabilityEstimate
 #' @export
-setMethod("getH2", "H2Estimate", function(x) x@h2)
+setMethod("heritabilityEstimate", "H2Estimate", function(x) x@estimate)
 
-#' @rdname getH2Se
+#' @rdname heritabilityEstimateSe
 #' @export
-setMethod("getH2Se", "H2Estimate", function(x) x@h2Se)
+setMethod("heritabilityEstimateSe", "H2Estimate", function(x) x@estimateSe)
 
-#' @rdname getIntercept
+#' @rdname heritabilityIntercept
 #' @export
-setMethod("getIntercept", "H2Estimate", function(x) x@intercept)
+setMethod("heritabilityIntercept", "H2Estimate", function(x) x@intercept)
 
-#' @rdname getInterceptSe
+#' @rdname heritabilityInterceptSe
 #' @export
-setMethod("getInterceptSe", "H2Estimate", function(x) x@interceptSe)
+setMethod("heritabilityInterceptSe", "H2Estimate", function(x) x@interceptSe)
 
-#' @rdname getNSnps
+#' @rdname nSnps
 #' @export
-setMethod("getNSnps", "H2Estimate", function(x) x@nSnps)
+setMethod("nSnps", "H2Estimate", function(x) x@nSnps)
 
-#' @rdname getTraitName
+#' @rdname traitNames
 #' @export
-setMethod("getTraitName", "H2Estimate", function(x) x@traitName)
+setMethod("traitNames", "H2Estimate", function(x) x@traitName)
 
-#' @rdname getMethodNames
+#' @rdname methodNames
 #' @export
-setMethod("getMethodNames", "H2Estimate", function(x) x@method)
+setMethod("methodNames", "H2Estimate", function(x) x@method)
 
-#' @rdname getTauBlocks
+#' @rdname annotationJackknifeCoefs
 #' @export
-setMethod("getTauBlocks", "H2Estimate", function(x) x@tauBlocks)
-
-#' @rdname getLocal
-#' @export
-setMethod("getLocal", "H2Estimate", function(object) {
-    object@local
+setMethod("annotationJackknifeCoefs", "H2Estimate", function(x) {
+    x@annotationJackknifeCoefs
 })
 
-#' @rdname getEnrichment
+#' @rdname localH2Blocks
 #' @export
-setMethod("getEnrichment", "H2Estimate", function(object) {
+setMethod("localH2Blocks", "H2Estimate", function(object) {
+    object@localBlocks
+})
+
+#' @rdname stratifiedHeritabilityEnrichment
+#' @export
+setMethod("stratifiedHeritabilityEnrichment", "H2Estimate", function(object) {
     object@enrichment
 })
 
-#' @rdname getScoreStats
+#' @rdname scoreStats
 #' @export
-setMethod("getScoreStats", "H2Estimate", function(object) {
+setMethod("scoreStats", "H2Estimate", function(object) {
     object@scoreStats
 })
 
@@ -123,7 +136,11 @@ setMethod("show", "H2Estimate", function(object) {
         "(method: {object@method})\n",
         .trim = FALSE
     ))
-    cat(sprintf("  h2 = %.4f (SE = %.4f)\n", object@h2, object@h2Se))
+    cat(sprintf(
+        "  h2 = %.4f (SE = %.4f)\n",
+        object@estimate,
+        object@estimateSe
+    ))
     if (!is.na(object@intercept)) {
         cat(sprintf(
             "  intercept = %.4f (SE = %.4f)\n",
@@ -131,12 +148,12 @@ setMethod("show", "H2Estimate", function(object) {
             object@interceptSe
         ))
     }
-    has_local <- !is.null(object@local)
+    has_local <- !is.null(object@localBlocks)
     has_enrich <- !is.null(object@enrichment)
-    has_tau_blocks <- !is.null(object@tauBlocks)
+    has_tau_blocks <- !is.null(object@annotationJackknifeCoefs)
     cat(glue(
         "  Local: {has_local}, Enrichment: {has_enrich}, ",
-        "tauBlocks: {has_tau_blocks}\n",
+        "annotationJackknifeCoefs: {has_tau_blocks}\n",
         .trim = FALSE
     ))
     cat(glue("  N SNPs: {object@nSnps}\n", .trim = FALSE))

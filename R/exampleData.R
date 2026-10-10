@@ -91,7 +91,7 @@ NULL
 #' @examples
 #' data(gwasFineMappingExample)
 #' gwasFineMappingExample
-#' head(getTopLoci(gwasFineMappingExample))
+#' head(topLoci(gwasFineMappingExample))
 #'
 NULL
 
@@ -119,7 +119,7 @@ NULL
 #' One credible set of 42 variants. Its \code{min.abs.corr} is 0.626, below the
 #' pipeline default of 0.8, so the fixture was built at \code{minAbsCorr = 0.5}
 #' to keep the set labelled; \code{cs_95_purity} records the true value, so
-#' \code{getCs(x, minPurity = 0.8)} still filters it out. Built by
+#' \code{credibleSets(x, minPurity = 0.8)} still filters it out. Built by
 #' \code{inst/scripts/prepare_example_data.R}.
 #'
 #' @keywords data
@@ -127,7 +127,7 @@ NULL
 #' @examples
 #' data(qtlFineMappingExample)
 #' qtlFineMappingExample
-#' head(getTopLoci(qtlFineMappingExample))
+#' head(topLoci(qtlFineMappingExample))
 #'
 NULL
 
@@ -161,7 +161,7 @@ NULL
 #' @examples
 #' data(qtlFineMappingPairedExample)
 #' data(qtlSumStatsExample)
-#' fe <- getFineMappingResult(qtlFineMappingPairedExample)
+#' fe <- fineMappingResult(qtlFineMappingPairedExample)
 #' computeCsCorrelation(fe, qtlSumStatsExample)
 #'
 NULL
@@ -304,7 +304,7 @@ NULL
 #' @examples
 #' data(qtlSumStatsMulticontextExample)
 #' qtlSumStatsMulticontextExample
-#' getContexts(qtlSumStatsMulticontextExample)
+#' contexts(qtlSumStatsMulticontextExample)
 #'
 NULL
 
@@ -384,7 +384,7 @@ NULL
 #' @examples
 #' data(qtlFineMappingLbfExample)
 #' qtlFineMappingLbfExample
-#' head(getTopLoci(qtlFineMappingLbfExample))
+#' head(topLoci(qtlFineMappingLbfExample))
 #'
 NULL
 
@@ -679,7 +679,7 @@ NULL
 #' same variants as \code{\link{ldScoreExample}}, so the four estimators can
 #' be compared on one reference.
 #'
-#' The panel behind it has \code{nRef = 1000}. That is small enough that
+#' The panel behind it has \code{nSamples = 1000}. That is small enough that
 #' \code{method = "hdl"}, which models reference-panel noise explicitly,
 #' shrinks its estimate hard -- correct behaviour for a panel this size
 #' rather than a fault.
@@ -741,8 +741,8 @@ NULL
 #' synthetic.
 #'
 #' @format An \code{H2Estimate} object with \code{h2}, \code{h2Se},
-#'   \code{intercept}, an \code{enrichment} data frame, and \code{tauBlocks}.
-#'
+#'   \code{intercept}, an \code{enrichment} data frame, and
+#'   \code{annotationJackknifeCoefs}.
 #' @keywords data
 #'
 #' @examples

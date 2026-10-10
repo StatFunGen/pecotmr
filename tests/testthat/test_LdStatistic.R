@@ -1,22 +1,23 @@
 # Tests for R/LdStatistic.R (virtual base class)
-# getGenome() is defined on the virtual LdStatistic and inherited by its
-# concrete subclasses (LdEigen / LdScore); exercise it through a concrete
+# The build is read from seqinfo() via GenomeInfoDb::genome(), which the
+# virtual LdStatistic and its concrete subclasses (LdEigen / LdScore) all
+# inherit from GRanges; exercise it through a concrete
 # LdScore instance. Fixtures (makeTestLdBlocks / makeTestSnpInfo) come
 # from helper-h2Classes.R.
 
-test_that("getGenome returns the genome build string (via an LdScore subclass)", {
+test_that("genome() reports the build from seqinfo (via an LdScore)", {
     n <- 10
     obj <- LdScore(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(n),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(runif(n), nrow = n, ncol = 1),
         ldScoreWeights = runif(n),
         ldMatrixList = list()
     )
-    expect_equal(getGenome(obj), "hg19")
+    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg19")
 })
 
 # ===========================================================================
@@ -34,7 +35,7 @@ test_that("getGenome returns the genome build string (via an LdScore subclass)",
     args <- list(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(n),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(runif(n), nrow = n, ncol = 1),
@@ -46,13 +47,14 @@ test_that("getGenome returns the genome build string (via an LdScore subclass)",
     exec(LdScore, !!!args)
 }
 
-test_that("validity rejects an nRef that is not a single positive integer", {
-    # Matched on the validity text, not just "nRef": the argument name alone
+test_that("validity rejects an nSamples that is not a positive integer", {
+    # Matched on the validity text, not just the name: the argument name
+    # alone
     # also appears in R's own argument-matching errors.
-    msg <- "Variable 'nRef'"
-    expect_error(.lds_score(nRef = 0L), msg)
-    expect_error(.lds_score(nRef = -1L), msg)
-    expect_error(.lds_score(nRef = c(10L, 20L)), msg)
+    msg <- "Variable 'nSamples'"
+    expect_error(.lds_score(nSamples = 0L), msg)
+    expect_error(.lds_score(nSamples = -1L), msg)
+    expect_error(.lds_score(nSamples = c(10L, 20L)), msg)
 })
 
 test_that("validity rejects an inSample that is not a single flag", {
@@ -68,7 +70,7 @@ test_that("validity rejects an inSample that is not a single flag", {
             "LdScore",
             gr,
             ldBlocks = makeTestLdBlocks(),
-            nRef = 500L,
+            nSamples = 500L,
             inSample = flag,
             ldMatrixList = list()
         )
@@ -96,7 +98,7 @@ test_that("validity rejects a statistic carrying no variants", {
             "LdScore",
             gr,
             ldBlocks = makeTestLdBlocks(),
-            nRef = 500L,
+            nSamples = 500L,
             inSample = FALSE,
             ldMatrixList = list()
         ),
@@ -110,7 +112,7 @@ test_that(".ldStatRanges names the snpInfo columns it is missing", {
         LdScore(
             ldBlocks = makeTestLdBlocks(),
             snpInfo = si[, setdiff(colnames(si), c("A1", "A2"))],
-            nRef = 500L,
+            nSamples = 500L,
             inSample = FALSE,
             genome = "hg19",
             ldScores = matrix(runif(4), nrow = 4, ncol = 1),
@@ -121,10 +123,10 @@ test_that(".ldStatRanges names the snpInfo columns it is missing", {
     )
 })
 
-test_that("getLdBlocks returns the blocks the statistic was built against", {
+test_that("ldBlocks returns the blocks the statistic was built against", {
     obj <- .lds_score()
-    expect_s4_class(getLdBlocks(obj), "GRanges")
-    expect_equal(length(getLdBlocks(obj)), 2L)
+    expect_s4_class(ldBlocks(obj), "GRanges")
+    expect_equal(length(ldBlocks(obj)), 2L)
 })
 
 
@@ -143,8 +145,8 @@ test_that("the builders accept a bare LdData as well as a list of them", {
     # variant order follows the list order.
     joined <- buildLdEigen(list(one, two))
     expect_equal(length(joined), 7L)
-    expect_equal(length(getEigenList(joined)), 2L)
-    expect_equal(getEigenList(joined)[[2]]$snpIdx, 5:7)
+    expect_equal(length(eigenList(joined)), 2L)
+    expect_equal(eigenList(joined)[[2]]$snpIdx, 5:7)
 })
 
 test_that("the builders reject input that is not LdData", {
@@ -157,31 +159,34 @@ test_that("the builders reject input that is not LdData", {
 })
 
 test_that("nRef is taken from the LdData, and disagreement is an error", {
-    a <- makeTestLdData(n = 4L, nRef = 500L)
-    b <- makeTestLdData(n = 3L, startBp = 5000L, nRef = 900L)
+    a <- makeTestLdData(n = 4L, nSamples = 500L)
+    b <- makeTestLdData(n = 3L, startBp = 5000L, nSamples = 900L)
 
-    expect_equal(getNRef(buildLdEigen(list(a, a))), 500L)
+    expect_equal(ldPanelNSamples(buildLdEigen(list(a, a))), 500L)
     expect_error(buildLdEigen(list(a, b)), "differing reference panel sizes")
     # An explicit nRef settles it.
-    expect_equal(getNRef(buildLdEigen(list(a, b), nRef = 700L)), 700L)
+    expect_equal(ldPanelNSamples(buildLdEigen(list(a, b), nSamples = 700L)), 700L)
 })
 
 test_that("the genome build comes from the LdData when the caller names none", {
     ld <- makeTestLdData()
     # loadLdMatrix() leaves the build unset, which must stay NA rather than
     # becoming a made-up default.
-    expect_true(is.na(getGenome(buildLdEigen(ld))))
+    expect_true(is.na(unname(GenomeInfoDb::genome(buildLdEigen(ld)))))
 
     tagged <- ld
     GenomeInfoDb::genome(tagged) <- "hg38"
-    expect_equal(getGenome(buildLdEigen(tagged)), "hg38")
+    expect_equal(unname(GenomeInfoDb::genome(buildLdEigen(tagged))), "hg38")
     # An explicit argument still wins.
-    expect_equal(getGenome(buildLdEigen(tagged, genome = "hg19")), "hg19")
+    expect_equal(
+        unname(GenomeInfoDb::genome(buildLdEigen(tagged, genome = "hg19"))),
+        "hg19"
+    )
 })
 
 test_that("LD block ranges span the variants each block covers", {
     ref <- buildLdEigen(makeTestLdDataMultiBlock(sizes = c(4L, 3L)))
-    blocks <- getLdBlocks(ref)
+    blocks <- ldBlocks(ref)
     variants <- GenomicRanges::start(ref)
 
     expect_equal(
@@ -201,10 +206,10 @@ test_that("an LD block spanning chromosomes is rejected", {
         levels = c("chr1", "chr2")
     )
     crossChrom <- LdData(
-        correlation = getCorrelation(ld),
+        correlation = ldMatrix(ld),
         variants = gr,
-        blockMetadata = getBlockMetadata(ld),
-        nRef = getNRef(ld)
+        blockMetadata = blockMetadata(ld),
+        nSamples = ldPanelNSamples(ld)
     )
     expect_error(buildLdEigen(crossChrom), "spans 2 chromosomes")
 })
@@ -262,7 +267,7 @@ test_that("an LD block spanning chromosomes is rejected", {
     n = 3L,
     md = NULL,
     variantNames = NULL,
-    nRef = 100L,
+    nSamples = 100L,
     correlation = NULL,
     blockMetadata = NULL
 ) {
@@ -270,7 +275,7 @@ test_that("an LD block spanning chromosomes is rejected", {
         correlation = correlation %||% diag(n),
         variants = .ldsVariants(n, md, variantNames),
         blockMetadata = blockMetadata %||% .ldsBlockMeta(n),
-        nRef = nRef
+        nSamples = nSamples
     )
 }
 
@@ -341,7 +346,7 @@ test_that("blocks are taken in order when blockMetadata has no startIdx", {
         blockMetadata = noIdx
     ))
     expect_equal(length(ref), 4L)
-    expect_equal(length(getLdBlocks(ref)), 2L)
+    expect_equal(length(ldBlocks(ref)), 2L)
 })
 
 test_that("a variant table with no A1 column is rejected", {
@@ -390,12 +395,12 @@ test_that("a block matrix sized differently from its span is rejected", {
 
 test_that("nRef is required when no LdData records one", {
     expect_error(
-        buildLdScore(.ldsData(3L, nRef = NA_integer_)),
+        buildLdScore(.ldsData(3L, nSamples = NA_integer_)),
         "`nRef` is required"
     )
 })
 
 test_that("an explicit nRef overrides a missing one", {
-    ref <- buildLdScore(.ldsData(3L, nRef = NA_integer_), nRef = 250L)
-    expect_equal(getNRef(ref), 250L)
+    ref <- buildLdScore(.ldsData(3L, nSamples = NA_integer_), nSamples = 250L)
+    expect_equal(ldPanelNSamples(ref), 250L)
 })

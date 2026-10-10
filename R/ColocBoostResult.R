@@ -23,8 +23,8 @@
 #
 # What the two DO share is the LD panel they were computed against and the
 # projection surface, so both extend ColocResultBase -- which carries the
-# ldSketch slot and its accessor -- and both answer getColocPairs() and
-# getColocVariants().
+# ldSketch slot and its accessor -- and both answer colocPairs() and
+# colocVariants().
 #
 #   element      the member variants of one CoS
 #   inner mcols  per-variant: vcp
@@ -44,8 +44,8 @@ NULL
 
 #' @title ColocBoost Result
 #' @description A collection of ColocBoost results, one element per confidence
-#'   set (CoS). Project it with \code{\link{getColocPairs}},
-#'   \code{\link{getColocVariants}} or \code{\link{getColocBoostOutcomes}}.
+#'   set (CoS). Project it with \code{\link{colocPairs}},
+#'   \code{\link{colocVariants}} or \code{\link{colocBoostOutcomes}}.
 #' @slot outcomeInfo A data frame mapping each outcome \code{name} to its
 #'   \code{study}, \code{context}, \code{trait} and \code{dataForm}. ColocBoost
 #'   is given outcome names as bare labels, and those labels are lossy -- a
@@ -220,7 +220,7 @@ setMethod("show", "ColocBoostResult", function(object) {
 #' # Its unit is a SET of colocalized outcomes rather than a pair, so one row
 #' # can carry any number of them.
 #' colocboostResultExample$outcomes
-#' getColocPairs(colocboostResultExample)$nOutcomes
+#' colocPairs(colocboostResultExample)$nOutcomes
 #' # A run that failed or was not requested arrives as NULL and is skipped,
 #' # giving an empty result rather than an error.
 #' nrow(ColocBoostResult(list(NULL), "xqtl_coloc"))
@@ -405,7 +405,7 @@ ColocBoostResult <- function(
 # -- silently yields NA.
 #
 # min_abs_cor is used because that is what `minAbsCorr` means everywhere else
-# in the package (fineMappingPipeline, getColocCredibleSets).
+# in the package (fineMappingPipeline, colocCredibleSets).
 # @noRd
 .cbrPurity <- function(purity, id) {
     m <- purity$min_abs_cor
@@ -553,7 +553,7 @@ ColocBoostResult <- function(
 
 #' @rdname colocViews
 #' @export
-setMethod("getColocPairs", "ColocBoostResult", function(x) {
+setMethod("colocPairs", "ColocBoostResult", function(x) {
     # Named "pairs" for symmetry with ColocResult, but a ColocBoost row is a
     # SET, not a pair: `outcomes` holds however many outcomes colocalized.
     md <- mcols(x, use.names = FALSE)
@@ -575,7 +575,7 @@ setMethod("getColocPairs", "ColocBoostResult", function(x) {
 #' @rdname colocViews
 #' @export
 setMethod(
-    "getColocVariants",
+    "colocVariants",
     "ColocBoostResult",
     function(x, pooled = FALSE) {
         long <- .cbrLongVariants(x)
@@ -626,15 +626,15 @@ setMethod(
 #'   \code{trait} and \code{dataForm}.
 #' @examples
 #' # See colocboostPipeline(); a ColocBoostResult carries the mapping it needs.
-#' methods::existsMethod("getColocBoostOutcomes", "ColocBoostResult")
+#' methods::existsMethod("colocBoostOutcomes", "ColocBoostResult")
 #' @export
-setGeneric("getColocBoostOutcomes", function(x, ...) {
-    standardGeneric("getColocBoostOutcomes")
+setGeneric("colocBoostOutcomes", function(x, ...) {
+    standardGeneric("colocBoostOutcomes")
 })
 
-#' @rdname getColocBoostOutcomes
+#' @rdname colocBoostOutcomes
 #' @export
-setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x) {
+setMethod("colocBoostOutcomes", "ColocBoostResult", function(x) {
     if (length(x) == 0L) {
         return(tibble())
     }
@@ -665,7 +665,7 @@ setMethod("getColocBoostOutcomes", "ColocBoostResult", function(x) {
 #' @title Coerce a ColocBoostResult to a data frame
 #' @description Returns the set-level view. New code should call the view it
 #'   wants (\code{\link{colocViews}},
-#'   \code{\link{getColocBoostOutcomes}}).
+#'   \code{\link{colocBoostOutcomes}}).
 #' @param x A \code{ColocBoostResult}.
 #' @param row.names,optional Ignored; present for generic compatibility.
 #' @param ... Ignored.
@@ -677,7 +677,7 @@ setMethod(
     "as.data.frame",
     "ColocBoostResult",
     function(x, row.names = NULL, optional = FALSE, ...) {
-        as.data.frame(getColocPairs(x))
+        as.data.frame(colocPairs(x))
     }
 )
 
@@ -688,31 +688,31 @@ setMethod(
 #' @param ... Ignored.
 #' @return A list of timings, empty when none were recorded.
 #' @examples
-#' methods::existsMethod("getComputingTime", "ColocBoostResult")
+#' methods::existsMethod("computingTime", "ColocBoostResult")
 #' @export
-setGeneric("getComputingTime", function(x, ...) {
-    standardGeneric("getComputingTime")
+setGeneric("computingTime", function(x, ...) {
+    standardGeneric("computingTime")
 })
 
-#' @rdname getComputingTime
+#' @rdname computingTime
 #' @export
-setMethod("getComputingTime", "ColocBoostResult", function(x) {
+setMethod("computingTime", "ColocBoostResult", function(x) {
     x@computingTime
 })
 
 #' @title Region-Wide Variant Colocalization Probabilities
 #' @description The marginal \code{vcp} for every variant in the analysed
 #'   region, not just the confidence-set members. Distinct from
-#'   \code{\link{getColocVariants}}, which reports the per-set \code{vcp} of
+#'   \code{\link{colocVariants}}, which reports the per-set \code{vcp} of
 #'   members only.
 #' @param x A \code{\linkS4class{ColocBoostResult}}.
 #' @param ... Ignored.
 #' @return A \code{GRanges} carrying a \code{vcp} column, or \code{NULL}.
 #' @examples
-#' methods::existsMethod("getRegionVcp", "ColocBoostResult")
+#' methods::existsMethod("regionVcp", "ColocBoostResult")
 #' @export
-setGeneric("getRegionVcp", function(x, ...) standardGeneric("getRegionVcp"))
+setGeneric("regionVcp", function(x, ...) standardGeneric("regionVcp"))
 
-#' @rdname getRegionVcp
+#' @rdname regionVcp
 #' @export
-setMethod("getRegionVcp", "ColocBoostResult", function(x) x@regionVcp)
+setMethod("regionVcp", "ColocBoostResult", function(x) x@regionVcp)

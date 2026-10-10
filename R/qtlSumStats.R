@@ -102,7 +102,7 @@ NULL
 #'   statistics in its mcols (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
 #'   \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE},
 #'   \code{P}).
-#' @param study Character vector of study identifiers (per tuple).
+#' @param studyName Character vector of study identifiers (per tuple).
 #' @param context Character vector of context labels (per tuple).
 #' @param trait Character vector of trait identifiers (per tuple).
 #' @param entry A list / \code{SimpleList} of \code{GRanges}, one per tuple.
@@ -118,7 +118,7 @@ NULL
 #'   \code{NULL}). Attached only when supplied (length 1 or length(study)). Used
 #'   as the study-level fallback for the per-variant \code{N} when a tuple has
 #'   no per-variant \code{N} column. Named \code{nSample} to avoid clashing with
-#'   \code{getNSamples()} (the LD-panel sample size). Unlike GWAS, QTL
+#'   \code{nSamples()} (the LD-panel sample size). Unlike GWAS, QTL
 #'   collections carry no case/control counts (molecular traits are
 #'   quantitative), so only this total-N fallback is exposed.
 #' @param extraCols Optional named list of additional per-tuple columns to
@@ -129,7 +129,7 @@ NULL
 #' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record. Fine-mapping / TWAS pipelines reject inputs where
-#'   \code{length(getQcInfo(x)) == 0}.
+#'   \code{length(qcInfo(x)) == 0}.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -140,11 +140,11 @@ NULL
 #' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 #' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
 #'   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
-#' QtlSumStats(study = "s1", context = "brain", trait = "g1", entry = list(gr),
-#'   genome = "hg38", ldSketch = panel)
+#' QtlSumStats(studyName = "s1", context = "brain", trait = "g1", entry =
+#'   list(gr), genome = "hg38", ldSketch = panel)
 #' @export
 QtlSumStats <- function(
-    study,
+    studyName,
     context,
     trait,
     entry,
@@ -157,7 +157,7 @@ QtlSumStats <- function(
     extraCols = list()
 ) {
     if (
-        missing(study) ||
+        missing(studyName) ||
             missing(context) ||
             missing(trait) ||
             missing(entry) ||
@@ -169,10 +169,10 @@ QtlSumStats <- function(
         )
         abort(msg)
     }
-    n <- length(study)
+    n <- length(studyName)
     varY <- .qssValidateArgs(context, trait, entry, genome, varY, n)
     entry <- .qssAddTraitDistances(entry, traitPos, n)
-    cols <- .qssBaseCols(study, context, trait, varY) |>
+    cols <- .qssBaseCols(studyName, context, trait, varY) |>
         .qssAppendNSample(nSample, n) |>
         .appendTraitPosCol(traitPos, n) |>
         .qssAppendExtras(extraCols)
@@ -236,9 +236,9 @@ QtlSumStats <- function(
 # trait position when supplied; the authoritative shape check is in
 # .appendTraitPosCol).
 # @noRd
-.qssBaseCols <- function(study, context, trait, varY) {
+.qssBaseCols <- function(studyName, context, trait, varY) {
     list(
-        study = as.character(study),
+        study = as.character(studyName),
         context = as.character(context),
         trait = as.character(trait),
         varY = as.numeric(varY)
@@ -306,12 +306,12 @@ QtlSumStats <- function(
 # Returns a VECTOR: a tuple whose entry spanned several chromosomes was split
 # into one element per seqname at construction.
 #' @importFrom checkmate assertVector
-.qtlSumStatsSelectRow <- function(x, study, context, trait) {
+.qtlSumStatsSelectRow <- function(x, studyName, context, trait) {
     if (nrow(x) == 0L) {
         abort("QtlSumStats has no rows.")
     }
-    anyUnset <- missing(study) ||
-        is.null(study) ||
+    anyUnset <- missing(studyName) ||
+        is.null(studyName) ||
         missing(context) ||
         is.null(context) ||
         missing(trait) ||
@@ -326,10 +326,10 @@ QtlSumStats <- function(
         )
         abort(msg)
     }
-    assertVector(study, len = 1L)
+    assertVector(studyName, len = 1L)
     assertVector(context, len = 1L)
     assertVector(trait, len = 1L)
-    .qssMatchTuple(x, study, context, trait)
+    .qssMatchTuple(x, studyName, context, trait)
 }
 
 # TRUE when every element belongs to the same (study, context, trait) tuple,
@@ -348,14 +348,14 @@ QtlSumStats <- function(
 
 # Resolve the element indices for a (study, context, trait) tuple.
 # @noRd
-.qssMatchTuple <- function(x, study, context, trait) {
+.qssMatchTuple <- function(x, studyName, context, trait) {
     idx <- .matchTupleRows(
         x,
-        list(study = study, context = context, trait = trait)
+        list(study = studyName, context = context, trait = trait)
     )
     if (length(idx) == 0L) {
         msg <- glue(
-            "No entry for (study='{study}', context='{context}', ",
+            "No entry for (study='{studyName}', context='{context}', ",
             "trait='{trait}')."
         )
         abort(msg)
@@ -366,7 +366,7 @@ QtlSumStats <- function(
     idx
 }
 
-#' @rdname getSumStats
+#' @rdname sumStats
 #' @param annotateSignificance Optional correction-method name
 #'   (\code{"permutation"} / \code{"bonferroni_original"} /
 #'   \code{"bonferroni_filtered"} / \code{"qvalue"}). When set on a QtlSumStats
@@ -374,21 +374,21 @@ QtlSumStats <- function(
 #'   \code{significant} mcol for that method is added to the returned entry (the
 #'   significance is derived on the fly, not stored). Flat export flattens this
 #'   full entry GRanges (all mcols) directly; note
-#'   \code{\link{getSumStatsDf}} is a fixed GWAS-schema view and does not
+#'   \code{\link{as.data.frame}} is a fixed GWAS-schema view and does not
 #'   carry the association columns.
 #' @export
 setMethod(
-    "getSumStats",
+    "sumStats",
     signature(x = "QtlSumStats"),
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
-        idx <- .qtlSumStatsSelectRow(x, study, context, trait)
+        idx <- .qtlSumStatsSelectRow(x, studyName, context, trait)
         stitched <- .ssStitchElements(x, idx, ranges)
         gr <- if (is.null(annotateSignificance)) {
             stitched
@@ -415,32 +415,41 @@ setMethod(
     }
 )
 
-# getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R);
-# they only delegate to getSumStats().
+# z / nSamples / maf / nSnps are provided once by SumStatsBase (AllClasses.R);
+# they only delegate to sumStats().
 
-#' @rdname getSumStatsDf
+#' @rdname sumStatsDataFrame
 #' @export
 setMethod(
-    "getSumStatsDf",
+    "as.data.frame",
     "QtlSumStats",
     function(
         x,
-        study = NULL,
+        row.names = NULL,
+        optional = FALSE,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         require = character(0),
         derive = c("none", "zFromBetaSe"),
-        keepChrPrefix = TRUE
+        keepChrPrefix = TRUE,
+        ...
     ) {
         derive <- arg_match(derive)
-        gr <- getSumStats(x, study = study, context = context, trait = trait)
+        gr <- sumStats(
+            x,
+            studyName = studyName,
+            context = context,
+            trait = trait
+        )
         .entryToSumstatDf(
             gr,
             require = require,
             derive = derive,
             keepChrPrefix = keepChrPrefix,
             label = glue(
-                "QtlSumStats[{if (is.null(study)) '<auto>' else study}/",
+                "QtlSumStats[",
+                "{if (is.null(studyName)) '<auto>' else studyName}/",
                 "{if (is.null(context)) '<auto>' else context}/",
                 "{if (is.null(trait)) '<auto>' else trait}]"
             )
@@ -449,35 +458,37 @@ setMethod(
 )
 
 
-#' @rdname getVarY
+#' @rdname varY
 #' @export
 setMethod(
-    "getVarY",
+    "varY",
     "QtlSumStats",
-    function(x, study = NULL, context = NULL, trait = NULL) {
-        idx <- .qtlSumStatsSelectRow(x, study, context, trait)
+    function(x, studyName = NULL, context = NULL, trait = NULL) {
+        idx <- .qtlSumStatsSelectRow(x, studyName, context, trait)
         val <- x$varY[[idx]]
         if (is.na(val)) NULL else val
     }
 )
 
-#' @rdname getContexts
+#' @rdname contexts
 #' @export
-setMethod("getContexts", "QtlSumStats", function(x) {
+setMethod("contexts", "QtlSumStats", function(x) {
     unique(as.character(x$context))
 })
 
-#' @rdname getTraits
+#' @rdname traitNames
 #' @export
-setMethod("getTraits", "QtlSumStats", function(x) unique(as.character(x$trait)))
+setMethod("traitNames", "QtlSumStats", function(x) {
+    unique(as.character(x$trait))
+})
 
 # Trait position provenance. Optional for a QtlSumStats -- it cannot be inferred
 # from summary statistics, so it is only present when the caller supplied it.
 # Returns the traitPos GRanges (whole column, or the rows matching `traitId`),
 # or a scalar NA when no trait position was supplied.
-#' @rdname getTraitPosition
+#' @rdname traitPosition
 #' @export
-setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL) {
+setMethod("traitPosition", "QtlSumStats", function(x, traitId = NULL) {
     tp <- .getTraitPosColumn(x)
     if (!methods::is(tp, "GRanges") || is.null(traitId)) {
         return(tp)
@@ -501,7 +512,7 @@ setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL) {
 setMethod("show", "QtlSumStats", function(object) {
     cat(glue(
         "QtlSumStats: {nrow(object)} entries, ",
-        "genome build {getGenome(object)}\n",
+        "genome build {GenomeInfoDb::genome(object)}\n",
         .trim = FALSE
     ))
     if (nrow(object) > 0L) {
@@ -512,7 +523,7 @@ setMethod("show", "QtlSumStats", function(object) {
             .trim = FALSE
         ))
     }
-    ld <- getLdSketch(object)
+    ld <- ldSketch(object)
     ldSrc <- if (is.null(ld)) {
         "none (LD-free)"
     } else {

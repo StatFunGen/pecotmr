@@ -5,7 +5,7 @@
 # A generic with no methods is dead API. It exports a name, generates a help
 # page, and answers every call with "unable to find an inherited method", which
 # reads to a user like a bug in their input rather than a gap in the package.
-# The refactor produced one of these (`getPhenotypes` briefly had no method at
+# The refactor produced one of these (`molecularTraits` briefly had no method at
 # all), so this is a live failure mode, not a hypothetical.
 
 # @noRd

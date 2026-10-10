@@ -11,7 +11,7 @@
 # any shipped LD source, so cross-object, LD-derived computations such as
 # `computeCsCorrelation()` cannot use them. This fixture closes that gap: it is
 # self-consistent with `qtlSumStatsExample`, so
-# `computeCsCorrelation(getFineMappingResult(qtlFineMappingPairedExample),
+# `computeCsCorrelation(fineMappingResult(qtlFineMappingPairedExample),
 # qtlSumStatsExample)` returns a real between-credible-set correlation matrix.
 #
 # A phenotype with two causal variants in low mutual LD is simulated so the fit
@@ -27,7 +27,7 @@ library(susieR)
 data(qtlDatasetExample)
 
 # Genotypes for the 200 shipped variants (columns match the LD-source panels).
-X <- getGenotypes(qtlDatasetExample)
+X <- genotypes(qtlDatasetExample)
 variantIds <- colnames(X)
 
 # Two causal variants far apart and in low mutual LD -> two credible sets.
@@ -57,7 +57,7 @@ if (length(fit$sets$cs) < 2L) {
 # Post-process through the same entry point fineMappingPipeline() uses, rather
 # than hand-assembling a topLoci table. A hand-built table carries only
 # variant_id and pip, with no cs_95 / cs_70 / cs_50 (+ _purity) columns, and a
-# fixture like that makes getCs() and getCredibleSetSummary() return nothing
+# fixture like that makes credibleSets() and credibleSetSummary() return nothing
 # even though the fit has credible sets.
 post <- postprocessFinemappingFits(
     fits = list(susie = fit),
@@ -84,7 +84,7 @@ save(
 # Sanity check: the paired correlation resolves against qtlSumStatsExample.
 data(qtlSumStatsExample)
 cc <- computeCsCorrelation(
-    getFineMappingResult(qtlFineMappingPairedExample),
+    fineMappingResult(qtlFineMappingPairedExample),
     qtlSumStatsExample
 )
 cat(sprintf(
@@ -93,10 +93,10 @@ cat(sprintf(
     ncol(cc)
 ))
 
-nCs <- nrow(getCredibleSetSummary(qtlFineMappingPairedExample))
+nCs <- nrow(credibleSetSummary(qtlFineMappingPairedExample))
 cat(sprintf(
-    "getCs() -> %d rows across %d credible sets\n",
-    nrow(getCs(qtlFineMappingPairedExample)),
+    "credibleSets() -> %d rows across %d credible sets\n",
+    nrow(credibleSets(qtlFineMappingPairedExample)),
     nCs
 ))
 if (nCs < 2L) {

@@ -121,6 +121,14 @@ PlinkQcOptions <- function(
     otherCriterionMeasure = NULL,
     ...
 ) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            relatedness = "the caller's relatedness table"
+        ),
+        "PlinkQcOptions"
+    )
     .newMethodOptions(
         "plinkQC::relatednessFilter",
         defaults = list(

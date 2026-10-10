@@ -17,7 +17,7 @@ buildTopLoci(
   otherQuantities = NULL,
   region = NULL,
   conditionIdx = NULL,
-  credibleSetArgs = CredibleSetParam(includeAllCs = FALSE)
+  credibleSetParam = CredibleSetParam(includeAllCs = FALSE)
 )
 }
 \arguments{
@@ -61,7 +61,7 @@ carries no sample count: \code{n} is left \code{NA} for the per-variant
 \item{conditionIdx}{Integer or \code{NULL}. Index of the conditioned effect
 (per-condition output); \code{NULL} for the unconditioned fit.}
 
-\item{credibleSetArgs}{How credible sets are built and reported, built with
+\item{credibleSetParam}{How credible sets are built and reported, built with
 \code{\link{CredibleSetParam}}. \code{perCsColumns} decides which
 per-credible-set variant-level columns this table carries, and
 \code{includeAllCs} their labels.}

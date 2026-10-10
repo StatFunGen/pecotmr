@@ -58,14 +58,14 @@ context("s4Constructors")
 
 .sc_makeTwasWeightsRow <- function(
     p = 5L,
-    standardized = FALSE,
-    dataType = "expression"
+    weightStandardized = FALSE,
+    weightsDataType = "expression"
 ) {
     twasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = rnorm(p),
-        standardized = standardized,
-        dataType = dataType
+        weightStandardized = weightStandardized,
+        weightsDataType = weightsDataType
     )
 }
 

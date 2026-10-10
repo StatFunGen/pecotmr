@@ -23,13 +23,13 @@ A \code{MethodOptions} record for the \code{outlierArgs} argument.
 Build a checked record of extra arguments for
   \code{robustbase::covMcd()}, the minimum-covariance-determinant
   estimator behind \code{outlierAction = "drop"} on
-  \code{\link{getPhenotypes}} and
-  \code{\link{getResidualizedPhenotypes}}.
+  \code{\link{molecularTraits}} and
+  \code{\link{residualizedPhenotypes}}.
 }
 \examples{
 CovMcdOptions(alpha = 0.75)
 }
 \seealso{
-\code{\link{getPhenotypes}},
-  \code{\link{getResidualizedPhenotypes}}
+\code{\link{molecularTraits}},
+  \code{\link{residualizedPhenotypes}}
 }

@@ -1,8 +1,9 @@
 context("AnnotationMatrix")
 
 # Migrated from test_h2Annotations.R: the AnnotationMatrix S4 class + validity,
-# its constructor, the getGenome accessor, and the getBaseline /
-# getCandidates tier accessors — all now defined in R/AnnotationMatrix.R.
+# its constructor, the genome build read from seqinfo, and the
+# baselineAnnotations /
+# testedAnnotations tier accessors — all now defined in R/AnnotationMatrix.R.
 # The class is a RangedSummarizedExperiment, so the annotation matrix,
 # its per-column metadata and its ranges are read with assay(),
 # colData() and rowRanges() rather than through accessors of our own.
@@ -72,7 +73,7 @@ test_that("AnnotationMatrix() constructor creates object from matrix", {
     expect_s4_class(obj, "AnnotationMatrix")
     expect_equal(nrow(assay(obj, "annotations")), n)
     expect_equal(ncol(assay(obj, "annotations")), 3)
-    expect_equal(getGenome(obj), "hg38")
+    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
 })
 
 test_that("AnnotationMatrix() sets column names from annotation_meta", {
@@ -125,31 +126,31 @@ test_that("AnnotationMatrix accessors round-trip the stored slots", {
     want <- gr
     GenomeInfoDb::genome(want) <- "hg38"
     expect_equal(rowRanges(obj), want)
-    expect_equal(getGenome(obj), "hg38")
+    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
 })
 
-test_that("getBaseline() subsets to baseline-tier only", {
+test_that("baselineAnnotations() subsets to baseline-tier only", {
     n <- 10
     gr <- makeTestGRanges(n)
     meta <- makeTestAnnotationMeta() # 1 baseline, 2 candidate
     mat <- matrix(0, nrow = n, ncol = 3)
 
     obj <- AnnotationMatrix(mat, gr, meta)
-    baseline <- getBaseline(obj)
+    baseline <- baselineAnnotations(obj)
 
     expect_s4_class(baseline, "AnnotationMatrix")
     expect_equal(ncol(assay(baseline, "annotations")), 1)
     expect_true(all(SummarizedExperiment::colData(baseline)$tier == "baseline"))
 })
 
-test_that("getCandidates() subsets to candidate-tier only", {
+test_that("testedAnnotations() subsets to candidate-tier only", {
     n <- 10
     gr <- makeTestGRanges(n)
     meta <- makeTestAnnotationMeta() # 1 baseline, 2 candidate
     mat <- matrix(0, nrow = n, ncol = 3)
 
     obj <- AnnotationMatrix(mat, gr, meta)
-    cand <- getCandidates(obj)
+    cand <- testedAnnotations(obj)
 
     expect_s4_class(cand, "AnnotationMatrix")
     expect_equal(ncol(assay(cand, "annotations")), 2)

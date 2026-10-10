@@ -23,7 +23,7 @@ works with both \code{inputScale = "beta"} (the default) and
 \examples{
 data(qtlSumStatsMulticontextExample)
 qtlSumStatsMulticontextExample
-getContexts(qtlSumStatsMulticontextExample)
+contexts(qtlSumStatsMulticontextExample)
 
 }
 \keyword{data}

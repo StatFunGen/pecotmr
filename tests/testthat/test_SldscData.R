@@ -9,25 +9,25 @@ test_that("SldscData constructs from in-memory objects", {
 test_that("SldscData defaults frq to a 0-row data.frame when NULL", {
     sd <- .sldscMkData(withFrq = FALSE)
     expect_s4_class(sd, "SldscData")
-    expect_equal(nrow(getFrqData(sd)), 0L)
+    expect_equal(nrow(frqData(sd)), 0L)
 })
 
-test_that("SldscData errors when `annot` is missing", {
-    expect_error(SldscData(), "`annot` is required")
+test_that("SldscData errors when `annotData` is missing", {
+    expect_error(SldscData(), "`annotData` is required")
 })
 
 # ---- validity ----
 
 test_that("validity rejects annot without CHR/SNP", {
     expect_error(
-        SldscData(annot = data.frame(SNP = "rs1", annot_A = 1)),
+        SldscData(annotData = data.frame(SNP = "rs1", annot_A = 1)),
         "must have columns CHR and SNP"
     )
 })
 
 test_that("validity rejects annot with no annotation column", {
     expect_error(
-        SldscData(annot = data.frame(CHR = 1, SNP = "rs1")),
+        SldscData(annotData = data.frame(CHR = 1, SNP = "rs1")),
         "at least one annotation column"
     )
 })
@@ -35,8 +35,8 @@ test_that("validity rejects annot with no annotation column", {
 test_that("validity rejects a non-empty frq without SNP/MAF", {
     expect_error(
         SldscData(
-            annot = data.frame(CHR = 1, SNP = "rs1", a = 1),
-            frq = data.frame(CHR = 1, foo = 0.2)
+            annotData = data.frame(CHR = 1, SNP = "rs1", a = 1),
+            frqData = data.frame(CHR = 1, foo = 0.2)
         ),
         "non-empty `frq` must have columns SNP and MAF"
     )
@@ -46,7 +46,7 @@ test_that("validity rejects unnamed traits", {
     run <- .sldscMkRun(c("annot_A_0"))
     expect_error(
         SldscData(
-            annot = data.frame(CHR = 1, SNP = "rs1", a = 1),
+            annotData = data.frame(CHR = 1, SNP = "rs1", a = 1),
             traits = list(list(single = list(run)))
         ),
         "must be a named list"
@@ -57,7 +57,7 @@ test_that("validity rejects a trait without a `single` element", {
     run <- .sldscMkRun(c("annot_A_0"))
     expect_error(
         SldscData(
-            annot = data.frame(CHR = 1, SNP = "rs1", a = 1),
+            annotData = data.frame(CHR = 1, SNP = "rs1", a = 1),
             traits = list(traitX = list(joint = run))
         ),
         "must be a list with a `single` element"
@@ -66,43 +66,43 @@ test_that("validity rejects a trait without a `single` element", {
 
 # ---- accessors ----
 
-test_that("getAnnotData / getFrqData return the stored frames", {
+test_that("annotData / frqData return the stored frames", {
     sd <- .sldscMkData()
-    expect_s3_class(getAnnotData(sd), "data.frame")
-    expect_equal(nrow(getAnnotData(sd)), 6L)
-    expect_equal(nrow(getFrqData(sd)), 6L)
+    expect_s3_class(annotData(sd), "data.frame")
+    expect_equal(nrow(annotData(sd)), 6L)
+    expect_equal(nrow(frqData(sd)), 6L)
 })
 
-test_that("getAnnotCols returns the annotation columns only", {
+test_that("annotCols returns the annotation columns only", {
     sd <- .sldscMkData()
-    expect_equal(getAnnotCols(sd), c("annot_A", "annot_B"))
+    expect_equal(annotCols(sd), c("annot_A", "annot_B"))
 })
 
-test_that("getTraitRuns / getTraits expose the traits list", {
+test_that("sldscResults / traitNames expose the traits list", {
     sd <- .sldscMkData()
-    expect_equal(getTraits(sd), c("traitX", "traitY"))
-    expect_named(getTraitRuns(sd), c("traitX", "traitY"))
+    expect_equal(traitNames(sd), c("traitX", "traitY"))
+    expect_named(sldscResults(sd), c("traitX", "traitY"))
 })
 
-test_that("getTraitRun retrieves single (by idx), joint, and NULL cases", {
+test_that("sldscResults retrieves single (by idx), joint, and NULL cases", {
     sd <- .sldscMkData()
-    single1 <- getTraitRun(sd, "traitX", "single", 1L)
+    single1 <- sldscResults(sd, "traitX", "single", 1L)
     expect_equal(single1$categories, c("annot_A_0", "baselineLD_0"))
     expect_equal(
-        getTraitRun(sd, "traitX", "joint")$categories,
+        sldscResults(sd, "traitX", "joint")$categories,
         c("annot_A_0", "annot_B_0", "baselineLD_0")
     )
     # whole single list when idx is NULL
-    expect_length(getTraitRun(sd, "traitX", "single"), 2L)
+    expect_length(sldscResults(sd, "traitX", "single"), 2L)
     # out-of-range idx -> NULL
-    expect_null(getTraitRun(sd, "traitX", "single", 5L))
+    expect_null(sldscResults(sd, "traitX", "single", 5L))
     # unknown trait -> NULL
-    expect_null(getTraitRun(sd, "no_such_trait", "joint"))
+    expect_null(sldscResults(sd, "no_such_trait", "joint"))
 })
 
-test_that("getTraitRun returns NULL joint when a trait has none", {
+test_that("sldscResults returns NULL joint when a trait has none", {
     sd <- .sldscMkData(withJoint = FALSE)
-    expect_null(getTraitRun(sd, "traitX", "joint"))
+    expect_null(sldscResults(sd, "traitX", "joint"))
 })
 
 test_that("show prints a compact summary", {

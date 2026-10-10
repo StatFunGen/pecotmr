@@ -42,13 +42,14 @@ qtlFineMappingExample
 A fine-mapping result carries two flat summaries, and which one you want
 depends on whether your unit of interest is a variant or a credible set.
 
-**`getTopLoci()`** is one row per retained variant, with its PIP, effect
-size, and credible-set membership at each coverage level:
+**`topLoci()`** is one range per retained variant, with its PIP, effect
+size, and credible-set membership at each coverage level carried in
+`mcols()`. Take a table with `as.data.frame()`:
 
 ```{r top-loci}
-topLoci <- getTopLoci(qtlFineMappingExample)
-dim(topLoci)
-head(as.data.frame(topLoci)[, c(
+loci <- topLoci(qtlFineMappingExample)
+length(loci)
+head(as.data.frame(loci)[, c(
     "variant_id",
     "pip",
     "cs_95",
@@ -62,10 +63,10 @@ head(as.data.frame(topLoci)[, c(
 belongs to none. The `cs_70` / `cs_50` columns give the same membership at
 looser coverage, so a variant can be in a 95% set but not a 50% one.
 
-**`getCredibleSetSummary()`** is one row per credible set instead:
+**`credibleSetSummary()`** is one row per credible set instead:
 
 ```{r cs-summary}
-as.data.frame(getCredibleSetSummary(qtlFineMappingExample))[, c(
+as.data.frame(credibleSetSummary(qtlFineMappingExample))[, c(
     "cs",
     "coverage",
     "n_variants",
@@ -192,11 +193,11 @@ When the flat tables are not enough — you want the per-effect posterior, or
 to re-derive PIPs under a different assumption — the underlying fit is
 available.
 
-`getLbf()` returns the log Bayes factors, one row per variant and one
+`lbf()` returns the log Bayes factors, one row per variant and one
 column per single effect:
 
 ```{r lbf}
-lbf <- getLbf(qtlFineMappingLbfExample)
+lbf <- lbf(qtlFineMappingLbfExample)
 unit <- lbf[lbf$trait == lbf$trait[1] & lbf$context == lbf$context[1], ]
 lbfMatrix <- as.matrix(unit[, grep("^lbf_L", names(unit))])
 dim(lbfMatrix)
@@ -220,11 +221,11 @@ The LBF matrix is also what `colocPipeline()` consumes, which is why
 `fineMappingPipeline(..., keepLbf = TRUE)` is required before
 colocalization.
 
-`getSusieFit()` returns the raw per-unit SuSiE object when you need
+`susieFit()` returns the raw per-unit SuSiE object when you need
 something the accessors do not expose:
 
 ```{r susie-fit}
-fit <- getSusieFit(qtlFineMappingExample)
+fit <- susieFit(qtlFineMappingExample)
 class(fit)
 names(fit)
 ```
@@ -252,7 +253,7 @@ threshold are applied, so re-running it with a different `coverage` gives a
 different `top_loci` without refitting anything.
 
 Two smaller extractors sit at the row level and are what
-`getCredibleSetSummary()` is assembled from:
+`credibleSetSummary()` is assembled from:
 
 - `extractCsInfo(fmRow, csNames, topLociTable, ldSource)` — per-credible-set
   detail for one result row, including the between-variant correlations that
@@ -260,7 +261,7 @@ Two smaller extractors sit at the row level and are what
 - `extractTopPipInfo(fmRow, sumstats)` — the lead variant and its statistics,
   joined against summary statistics.
 
-`getSusieResult()` unwraps a per-condition fit list into the single SuSiE
+`susieResult()` unwraps a per-condition fit list into the single SuSiE
 object the other helpers expect.
 
 ## Writing results out

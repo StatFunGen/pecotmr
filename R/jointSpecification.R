@@ -14,14 +14,14 @@
 # @noRd
 .spListStudies <- function(data) {
     if (is(data, "QtlDataset")) {
-        return(getStudy(data))
+        return(studyName(data))
     }
     if (is(data, "QtlSumStats")) {
         return(unique(as.character(data$study)))
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        indStudies <- names(getQtlDatasets(data))
-        ss <- getSumStats(data)
+        indStudies <- names(qtlDatasets(data))
+        ss <- sumStats(data)
         ssStudies <- if (is.null(ss)) {
             character(0)
         } else {
@@ -37,12 +37,12 @@
 # Return "individual" or "sumstats" for a single study in `data`. Errors if
 # the study is not present.
 # @noRd
-.spStudyDataForm <- function(data, study) {
+.spStudyDataForm <- function(data, studyName) {
     if (is(data, "QtlDataset")) {
-        if (!identical(study, getStudy(data))) {
-            dataStudy <- getStudy(data)
+        if (!identical(studyName, studyName(data))) {
+            dataStudy <- studyName(data)
             msg <- glue(
-                ".spStudyDataForm: study '{study}' not in QtlDataset ",
+                ".spStudyDataForm: study '{studyName}' not in QtlDataset ",
                 "(study='{dataStudy}')"
             )
             abort(msg)
@@ -50,22 +50,24 @@
         return("individual")
     }
     if (is(data, "QtlSumStats")) {
-        if (!is_in(study, unique(as.character(data$study)))) {
-            msg <- glue(".spStudyDataForm: study '{study}' not in QtlSumStats")
+        if (!is_in(studyName, unique(as.character(data$study)))) {
+            msg <- glue(
+                ".spStudyDataForm: study '{studyName}' not in QtlSumStats"
+            )
             abort(msg)
         }
         return("sumstats")
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        if (is_in(study, names(getQtlDatasets(data)))) {
+        if (is_in(studyName, names(qtlDatasets(data)))) {
             return("individual")
         }
-        ss <- getSumStats(data)
-        if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
+        ss <- sumStats(data)
+        if (!is.null(ss) && is_in(studyName, unique(as.character(ss$study)))) {
             return("sumstats")
         }
         msg <- glue(
-            ".spStudyDataForm: study '{study}' not in MultiStudyQtlDataset"
+            ".spStudyDataForm: study '{studyName}' not in MultiStudyQtlDataset"
         )
         abort(msg)
     }
@@ -87,27 +89,27 @@
     list_c(pieces)
 }
 
-.spListContexts <- function(data, study = NULL) {
+.spListContexts <- function(data, studyName = NULL) {
     if (is(data, "QtlDataset")) {
-        if (!is.null(study) && !identical(study, getStudy(data))) {
+        if (!is.null(studyName) && !identical(studyName, studyName(data))) {
             return(character(0))
         }
-        return(getContexts(data))
+        return(contexts(data))
     }
     if (is(data, "QtlSumStats")) {
-        if (is.null(study)) {
+        if (is.null(studyName)) {
             return(unique(as.character(data$context)))
         }
         return(unique(as.character(
-            data$context[as.character(data$study) == study]
+            data$context[as.character(data$study) == studyName]
         )))
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        indDatasets <- getQtlDatasets(data)
-        ss <- getSumStats(data)
-        if (is.null(study)) {
+        indDatasets <- qtlDatasets(data)
+        ss <- sumStats(data)
+        if (is.null(studyName)) {
             fromInd <- .spConcat(
-                map(indDatasets, getContexts),
+                map(indDatasets, contexts),
                 empty = character(0)
             )
             fromSs <- if (is.null(ss)) {
@@ -117,12 +119,12 @@
             }
             return(unique(c(fromInd, fromSs)))
         }
-        if (is_in(study, names(indDatasets))) {
-            return(getContexts(indDatasets[[study]]))
+        if (is_in(studyName, names(indDatasets))) {
+            return(contexts(indDatasets[[studyName]]))
         }
-        if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
+        if (!is.null(ss) && is_in(studyName, unique(as.character(ss$study)))) {
             return(unique(as.character(
-                ss$context[as.character(ss$study) == study]
+                ss$context[as.character(ss$study) == studyName]
             )))
         }
         return(character(0))
@@ -138,38 +140,39 @@
 # The trait ids present in one context of a QtlDataset.
 # @noRd
 .spTraitsInContext <- function(context, data) {
-    rownames(getPhenotypes(data, context))
+    rownames(molecularTraits(data, context))
 }
 
 # Traits available in a single individual-level QtlDataset (optionally scoped).
-.spListTraitsQtlDataset <- function(data, study, context) {
-    if (!is.null(study) && !identical(study, getStudy(data))) {
+.spListTraitsQtlDataset <- function(data, studyName, context) {
+    if (!is.null(studyName) && !identical(studyName, studyName(data))) {
         return(character(0))
     }
     if (is.null(context)) {
         return(unique(unname(list_c(
-            map(getContexts(data), .spTraitsInContext, data = data)
+            map(contexts(data), .spTraitsInContext, data = data)
         ))))
     }
     # Checked here rather than left to the accessor: `.spListTraits` answers
     # "which traits are in this scope", and an absent context is an empty
     # answer, not an error. The raw slot read this replaced returned NULL for
-    # an unknown context; getPhenotypes() rejects one, so the empty case has to
+    # an unknown context; molecularTraits() rejects one, so the empty case
+    # has to
     # be stated instead of falling out of a NULL.
-    if (!is_in(context, getContexts(data))) {
+    if (!is_in(context, contexts(data))) {
         return(character(0))
     }
-    rownames(getPhenotypes(data, context))
+    rownames(molecularTraits(data, context))
 }
 
 # Traits across a MultiStudyQtlDataset (individual studies + sumstats).
-.spListTraitsMultiStudy <- function(data, study, context) {
-    indDatasets <- getQtlDatasets(data)
-    ss <- getSumStats(data)
+.spListTraitsMultiStudy <- function(data, studyName, context) {
+    indDatasets <- qtlDatasets(data)
+    ss <- sumStats(data)
     # No study filter: aggregate across every component (individual + sumstats).
     # Must precede per-study branches so a present sumStats slot does not shadow
     # the individual-level studies' traits when study = NULL.
-    if (is.null(study)) {
+    if (is.null(studyName)) {
         fromInd <- .spConcat(
             map(indDatasets, .spListTraits, context = context),
             empty = character(0)
@@ -181,24 +184,24 @@
         }
         return(unique(c(fromInd, fromSs)))
     }
-    if (is_in(study, names(indDatasets))) {
-        return(.spListTraits(indDatasets[[study]], context = context))
+    if (is_in(studyName, names(indDatasets))) {
+        return(.spListTraits(indDatasets[[studyName]], context = context))
     }
-    if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
-        return(.spListTraits(ss, study = study, context = context))
+    if (!is.null(ss) && is_in(studyName, unique(as.character(ss$study)))) {
+        return(.spListTraits(ss, studyName = studyName, context = context))
     }
     character(0)
 }
 
-.spListTraits <- function(data, study = NULL, context = NULL) {
+.spListTraits <- function(data, studyName = NULL, context = NULL) {
     if (is(data, "QtlDataset")) {
-        return(.spListTraitsQtlDataset(data, study, context))
+        return(.spListTraitsQtlDataset(data, studyName, context))
     }
     if (is(data, "QtlSumStats")) {
-        byStudy <- if (is.null(study)) {
+        byStudy <- if (is.null(studyName)) {
             rep(TRUE, nrow(data))
         } else {
-            as.character(data$study) == study
+            as.character(data$study) == studyName
         }
         byContext <- if (is.null(context)) {
             TRUE
@@ -209,7 +212,7 @@
         return(unique(as.character(data$trait[keep])))
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        return(.spListTraitsMultiStudy(data, study, context))
+        return(.spListTraitsMultiStudy(data, studyName, context))
     }
     cls <- class(data)[[1L]]
     msg <- glue(".spListTraits: unsupported class: {cls}")
@@ -491,7 +494,7 @@ parseContexts <- function(contexts, data) {
         )
         abort(msg)
     }
-    missing <- setdiff(v2, .spListTraits(data, study = s, context = cx))
+    missing <- setdiff(v2, .spListTraits(data, studyName = s, context = cx))
     if (length(missing) > 0L) {
         missingStr <- str_flatten(missing, ", ")
         msg <- glue(
@@ -509,7 +512,7 @@ parseContexts <- function(contexts, data) {
         msg <- glue("traitId[['{s}']] must be a non-empty character vector")
         abort(msg)
     }
-    missing <- setdiff(val, .spListTraits(data, study = s))
+    missing <- setdiff(val, .spListTraits(data, studyName = s))
     if (length(missing) > 0L) {
         missingStr <- str_flatten(missing, ", ")
         msg <- glue("traitId[['{s}']] contains unknown traits: {missingStr}")
@@ -820,7 +823,7 @@ parseTraitIds <- function(traitId, data) {
         return(invisible(NULL))
     }
     tr <- leaf$path[[3L]]
-    if (!is_in(tr, .spListTraits(data, study = s, context = cx))) {
+    if (!is_in(tr, .spListTraits(data, studyName = s, context = cx))) {
         msg <- glue(
             "{lab}: unknown trait '{tr}' for (study '{s}', ",
             "context '{cx}')"
@@ -1040,7 +1043,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # shape the context lister has.
 # @noRd
 .fmScopeTraits <- function(data, s) {
-    .spListTraits(data, study = s)
+    .spListTraits(data, studyName = s)
 }
 
 # What a pipeline-level `contexts` / `traitIds` argument narrows study `s` to,
@@ -1099,9 +1102,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         context = as.character(data$context),
         trait = as.character(data$trait)
     )
-    allDf <- getSumStatsDf(
+    allDf <- as.data.frame(
         data,
-        study = cols$study[[tupleRows[[1L]]]],
+        studyName = cols$study[[tupleRows[[1L]]]],
         context = cols$context[[tupleRows[[1L]]]],
         trait = cols$trait[[tupleRows[[1L]]]],
         require = c("SNP", "Z", "N")
@@ -1137,9 +1140,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     errorLabel
 ) {
     i <- tupleRows[[kk]]
-    d <- getSumStatsDf(
+    d <- as.data.frame(
         data,
-        study = cols$study[[i]],
+        studyName = cols$study[[i]],
         context = cols$context[[i]],
         trait = cols$trait[[i]],
         require = c("SNP", "Z", "N")
@@ -1204,7 +1207,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # Does context `cx` carry trait `tid`?
 # @noRd
 .ccContextHasTrait <- function(cx, data, tid) {
-    is_in(tid, rownames(getPhenotypes(data, contexts = cx)))
+    is_in(tid, rownames(molecularTraits(data, contexts = cx)))
 }
 
 .crossContextPerTrait <- function(data, tid, scopedContexts, verbose, label) {
@@ -1338,14 +1341,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # subset is too small.
 # @noRd
 # Warn + signal skip when a context has fewer than 2 scoped traits.
-.crossTraitTooFew <- function(traitsHere, cx, study, verbose, label) {
+.crossTraitTooFew <- function(traitsHere, cx, studyName, verbose, label) {
     if (length(traitsHere) >= 2L) {
         return(FALSE)
     }
     if (verbose >= 1) {
         nTraits <- length(traitsHere)
         msg <- glue(
-            "{label}: context '{cx}' (study '{study}') has {nTraits} ",
+            "{label}: context '{cx}' (study '{studyName}') has {nTraits} ",
             "scoped trait(s); skipping."
         )
         inform(msg)
@@ -1360,15 +1363,15 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     cisWindow,
     verbose,
     label,
-    study,
+    studyName,
     region = NULL,
     residualizationArgs
 ) {
-    se <- getPhenotypes(data, contexts = cx)
+    se <- molecularTraits(data, contexts = cx)
     # scopedTraits is already region-restricted upstream (.runJointSpecs) when
     # region mode is used without an explicit traitId.
     traitsHere <- intersect(scopedTraits, rownames(se))
-    if (.crossTraitTooFew(traitsHere, cx, study, verbose, label)) {
+    if (.crossTraitTooFew(traitsHere, cx, studyName, verbose, label)) {
         return(NULL)
     }
     allX <- .buildResidGeno(
@@ -1446,14 +1449,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # The (context, trait) tuples context `cx` contributes.
 # @noRd
 .composedTuplesForContext <- function(cx, data, scopedTraits) {
-    se <- getPhenotypes(data, contexts = cx)
+    se <- molecularTraits(data, contexts = cx)
     # scopedTraits is region-restricted upstream (.runJointSpecs) if needed.
     map(intersect(scopedTraits, rownames(se)), .composedTuple, cx = cx)
 }
 
-.composedTuples <- function(data, scope, study, verbose, label) {
-    scopedContexts <- scope$contexts[[study]]
-    scopedTraits <- scope$traits[[study]]
+.composedTuples <- function(data, scope, studyName, verbose, label) {
+    scopedContexts <- scope$contexts[[studyName]]
+    scopedTraits <- scope$traits[[studyName]]
     tuples <- .spConcat(map(
         scopedContexts,
         .composedTuplesForContext,
@@ -1464,7 +1467,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         if (verbose >= 1) {
             nTuples <- length(tuples)
             msg <- glue(
-                "{label}: study '{study}' has {nTuples} (context, trait) ",
+                "{label}: study '{studyName}' has {nTuples} (context, trait) ",
                 "tuple(s) in scope; skipping."
             )
             inform(msg)
@@ -1545,14 +1548,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .buildComposedIndividualXy <- function(
     data,
     scope,
-    study,
+    studyName,
     cisWindow,
     verbose,
     label,
     region = NULL,
     residualizationArgs
 ) {
-    tuples <- .composedTuples(data, scope, study, verbose, label)
+    tuples <- .composedTuples(data, scope, studyName, verbose, label)
     if (is.null(tuples)) {
         return(NULL)
     }
@@ -1768,7 +1771,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (is.null(ssRes)) {
         return(list(out = fromStudies, embeddedLd = NULL))
     }
-    embeddedLd <- getLdSketch(ssRes)
+    embeddedLd <- ldSketch(ssRes)
     out <- if (is.null(fromStudies)) {
         ssRes
     } else {
@@ -1807,8 +1810,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     noun = "a result"
 ) {
     acc <- .msDriverAccumulate(
-        getQtlDatasets(data),
-        getSumStats(data),
+        qtlDatasets(data),
+        sumStats(data),
         perStudyFn,
         sumStatsFn,
         cfg,
@@ -1865,7 +1868,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE),
+    credibleSetParam = CredibleSetParam(includeAllCs = FALSE),
     verbose,
     methodArgs = list(),
     xRegions = list(NULL),
@@ -1892,7 +1895,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         verbose = verbose,
         methodArgs = methodArgs,
         mrmashPrior = mrmashPrior,
@@ -1924,7 +1927,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # FmJointPipeline for individual-level fine-mapping, built from the call params.
 .fmJointPipeline <- function(
-    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE),
+    credibleSetParam = CredibleSetParam(includeAllCs = FALSE),
     dataDrivenPriorWeightsCutoff,
     crossValidationArgs,
     residualizationArgs,
@@ -1936,7 +1939,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     new(
         "FmJointPipeline",
         config = list(
-            credibleSetArgs = credibleSetArgs,
+            credibleSetParam = credibleSetParam,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
             crossValidationArgs = crossValidationArgs,
             residualizationArgs = residualizationArgs,
@@ -1954,7 +1957,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .fmJointPipelineChecked <- function(
     parsedJointSpec,
-    credibleSetArgs,
+    credibleSetParam,
     dataDrivenPriorWeightsCutoff,
     crossValidationArgs,
     residualizationArgs,
@@ -1964,7 +1967,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 ) {
     .jointRejectStudyOnIndividual(parsedJointSpec)
     .fmJointPipeline(
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         crossValidationArgs = crossValidationArgs,
         residualizationArgs = residualizationArgs,
@@ -1994,12 +1997,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     pipCutoffToSkip = 0,
     fineMappingResult = NULL,
     seed = NULL,
-    credibleSetArgs,
+    credibleSetParam,
     fitRetention
 ) {
     pipeline <- .fmJointPipelineChecked(
         parsedJointSpec,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         crossValidationArgs = crossValidationArgs,
         residualizationArgs = residualizationArgs,
@@ -2035,7 +2038,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # LD sketch drawn from the data).
 .fmSumStatsPipeline <- function(
     data,
-    credibleSetArgs,
+    credibleSetParam,
     dataDrivenPriorWeightsCutoff,
     verbose,
     fitRetention
@@ -2043,12 +2046,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     new(
         "FmJointPipeline",
         config = list(
-            credibleSetArgs = credibleSetArgs,
+            credibleSetParam = credibleSetParam,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
             verbose = verbose,
             fitRetention = fitRetention,
             crossValidationArgs = .cvResolve(CrossValidationParam()),
-            ldSketch = getLdSketch(data)
+            ldSketch = ldSketch(data)
         )
     )
 }
@@ -2064,8 +2067,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     mrmashPrior = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10,
     fineMappingResult = NULL,
-    panelFilterArgs = PanelFilterParam(),
-    credibleSetArgs,
+    panelFilterParam = PanelFilterParam(),
+    credibleSetParam,
     fitRetention
 ) {
     # Engine routing (jointEngine.R): the dispatch table + .runJointCell replace
@@ -2073,7 +2076,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     # dispatchers.
     pipeline <- .fmSumStatsPipeline(
         data = data,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         verbose = verbose,
         fitRetention = fitRetention
@@ -2092,7 +2095,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             methodArgs = methodArgs,
             verbose = verbose,
             cache = fineMappingResult,
-            cutoffs = .panelCutoffs(panelFilterArgs)
+            cutoffs = .panelCutoffs(panelFilterParam)
         )
     )
 }
@@ -2137,7 +2140,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    credibleSetArgs,
+    credibleSetParam,
     verbose,
     methodArgs,
     xRegions,
@@ -2156,7 +2159,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             contexts = contexts,
             traitIds = traitIds,
             cisWindow = cisWindow,
-            credibleSetArgs = credibleSetArgs,
+            credibleSetParam = credibleSetParam,
             verbose = verbose,
             methodArgs = methodArgs,
             xRegions = xRegions,
@@ -2181,7 +2184,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     xRegions,
     mrmashPrior,
     dataDrivenPriorWeightsCutoff,
-    credibleSetArgs
+    credibleSetParam
 ) {
     .fmDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs,
@@ -2190,7 +2193,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         verbose = verbose,
         methodArgs = methodArgs,
         xRegions = xRegions,
@@ -2212,7 +2215,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     methodArgs,
     mrmashPrior,
     dataDrivenPriorWeightsCutoff,
-    credibleSetArgs
+    credibleSetParam
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
@@ -2230,7 +2233,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         methods = methods,
         contexts = contexts,
         traitIds = traitIds,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         verbose = verbose,
         methodArgs = methodArgs,
         mrmashPrior = mrmashPrior,
@@ -2239,7 +2242,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (is.null(ssRes)) {
         return(out)
     }
-    embeddedLd <- getLdSketch(ssRes)
+    embeddedLd <- ldSketch(ssRes)
     if (is.null(out)) {
         ssRes
     } else {
@@ -2254,15 +2257,15 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    credibleSetArgs,
+    credibleSetParam,
     verbose,
     methodArgs = list(),
     xRegions = list(NULL),
     mrmashPrior = NULL,
     dataDrivenPriorWeightsCutoff = 1e-10
 ) {
-    qtlDatasets <- getQtlDatasets(data)
-    sumStats <- getSumStats(data)
+    qtlDatasets <- qtlDatasets(data)
+    sumStats <- sumStats(data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .fmMultiStudyWarnExcluded(specs$study, qtlDatasets, verbose)
     out <- .fmMultiStudyQtlLoop(
@@ -2272,7 +2275,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         verbose = verbose,
         methodArgs = methodArgs,
         xRegions = xRegions,
@@ -2342,7 +2345,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    dataType,
+    weightsDataType,
     verbose,
     xRegions = list(NULL),
     fitRetention = c("slim", "none", "full"),
@@ -2361,7 +2364,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        dataType = dataType,
+        weightsDataType = weightsDataType,
         verbose = verbose,
         fitRetention = fitRetention,
         seed = seed
@@ -2386,7 +2389,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    dataType,
+    weightsDataType,
     verbose,
     region = NULL,
     fitRetention = c("slim", "none", "full"),
@@ -2399,7 +2402,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     pipeline <- new(
         "TwasJointPipeline",
         config = list(
-            dataType = dataType,
+            dataType = weightsDataType,
             crossValidationArgs = .cvResolve(CrossValidationParam()),
             fitFullData = TRUE,
             standardized = FALSE,
@@ -2433,21 +2436,21 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     methods,
     contexts,
     traitIds,
-    dataType,
+    weightsDataType,
     verbose,
     fitRetention = c("slim", "none", "full"),
-    panelFilterArgs = PanelFilterParam()
+    panelFilterParam = PanelFilterParam()
 ) {
     fitRetention <- arg_match(fitRetention)
     # Engine routing (jointEngine.R).
     pipeline <- new(
         "TwasJointPipeline",
         config = list(
-            dataType = dataType,
+            dataType = weightsDataType,
             crossValidationArgs = .cvResolve(CrossValidationParam()),
             fitFullData = TRUE,
             standardized = TRUE,
-            ldSketch = getLdSketch(data)
+            ldSketch = ldSketch(data)
         )
     )
     .runJointSpecs(
@@ -2461,7 +2464,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         args = list(
             methodArgs = list(),
             verbose = verbose,
-            cutoffs = .panelCutoffs(panelFilterArgs)
+            cutoffs = .panelCutoffs(panelFilterParam)
         )
     )
 }
@@ -2494,7 +2497,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    dataType,
+    weightsDataType,
     verbose,
     xRegions,
     fitRetention,
@@ -2512,7 +2515,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             contexts = contexts,
             traitIds = traitIds,
             cisWindow = cisWindow,
-            dataType = dataType,
+            weightsDataType = weightsDataType,
             verbose = verbose,
             xRegions = xRegions,
             fitRetention = fitRetention,
@@ -2531,7 +2534,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    dataType,
+    weightsDataType,
     verbose,
     xRegions,
     fitRetention,
@@ -2544,7 +2547,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        dataType = dataType,
+        weightsDataType = weightsDataType,
         verbose = verbose,
         xRegions = xRegions,
         fitRetention = fitRetention,
@@ -2561,7 +2564,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     methods,
     contexts,
     traitIds,
-    dataType,
+    weightsDataType,
     verbose,
     fitRetention
 ) {
@@ -2581,14 +2584,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         methods = methods,
         contexts = contexts,
         traitIds = traitIds,
-        dataType = dataType,
+        weightsDataType = weightsDataType,
         verbose = verbose,
         fitRetention = fitRetention
     )
     if (is.null(ssRes)) {
         return(out)
     }
-    embeddedLd <- getLdSketch(ssRes)
+    embeddedLd <- ldSketch(ssRes)
     if (is.null(out)) {
         ssRes
     } else {
@@ -2603,15 +2606,15 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    dataType,
+    weightsDataType,
     verbose,
     xRegions = list(NULL),
     fitRetention = c("slim", "none", "full"),
     seed = NULL
 ) {
     fitRetention <- arg_match(fitRetention)
-    qtlDatasets <- getQtlDatasets(data)
-    sumStats <- getSumStats(data)
+    qtlDatasets <- qtlDatasets(data)
+    sumStats <- sumStats(data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .twasMultiStudyWarnExcluded(specs$study, qtlDatasets, verbose)
     out <- .twasMultiStudyQtlLoop(
@@ -2621,7 +2624,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        dataType = dataType,
+        weightsDataType = weightsDataType,
         verbose = verbose,
         xRegions = xRegions,
         fitRetention = fitRetention,
@@ -2635,7 +2638,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         methods = methods,
         contexts = contexts,
         traitIds = traitIds,
-        dataType = dataType,
+        weightsDataType = weightsDataType,
         verbose = verbose,
         fitRetention = fitRetention
     )
@@ -2723,7 +2726,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    credibleSetArgs,
+    credibleSetParam,
     verbose,
     methodArgs,
     mrmashPrior,
@@ -2742,7 +2745,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts = contexts,
         traitIds = traitIds,
         cisWindow = cisWindow,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         verbose = verbose,
         methodArgs = methodArgs,
         mrmashPrior = mrmashPrior,
@@ -2767,7 +2770,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     contexts,
     traitIds,
     cisWindow,
-    dataType,
+    weightsDataType,
     verbose,
     fitRetention,
     seed = NULL
@@ -2779,7 +2782,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         contexts,
         traitIds,
         cisWindow,
-        dataType,
+        weightsDataType,
         verbose,
         region = rg,
         fitRetention = fitRetention,

@@ -116,7 +116,7 @@ NULL
 .traitPosFor <- function(data, context, trait) {
     if (methods::is(data, "QtlDataset")) {
         se <- try_fetch(
-            getPhenotypes(data, contexts = context),
+            molecularTraits(data, contexts = context),
             error = function(cnd) NULL
         )
         if (is.null(se)) {
@@ -217,7 +217,7 @@ NULL
     ends <- map_int(anchors, "end")
     # Nothing resolved (e.g. a QtlSumStats with no supplied traitPos): return
     # NULL
-    # so the builder omits the column entirely and getTraitPosition() reports
+    # so the builder omits the column entirely and traitPosition() reports
     # NA,
     # rather than a column full of chrUn sentinels.
     if (!anyFound) {
@@ -331,7 +331,7 @@ setMethod(
         args$methodArgs,
         cvFolds,
         samplePartition = cfg$crossValidationArgs$samplePartition,
-        coverage = cfg$credibleSetArgs$coverage,
+        coverage = cfg$credibleSetParam$coverage,
         pos = .jgTraitPos(group),
         verbose = verbose,
         numThreads = cv$threads %||% 1L,
@@ -348,7 +348,7 @@ setMethod(
     cvM,
     Xc,
     cfg,
-    credibleSetArgs,
+    credibleSetParam,
     fitRetention
 ) {
     bare <- .fmPostprocessOne(
@@ -358,7 +358,7 @@ setMethod(
         dataY = NULL,
         conditionIdx = r,
         csInput = "fsusie",
-        credibleSetArgs = cfg$credibleSetArgs,
+        credibleSetParam = cfg$credibleSetParam,
         fitRetention = cfg$fitRetention
     )
     e <- if (is.null(cvM)) {
@@ -453,7 +453,7 @@ setMethod(
             X = Xc,
             Y = Ys,
             prior_variance = mvPrior$priorVariance,
-            coverage = cfg$credibleSetArgs$coverage
+            coverage = cfg$credibleSetParam$coverage
         ),
         compact(list(residual_variance = mvPrior$residualVariance))
     )
@@ -505,7 +505,7 @@ setMethod(
         args$methodArgs,
         cvFolds,
         samplePartition = sp,
-        coverage = cfg$credibleSetArgs$coverage,
+        coverage = cfg$credibleSetParam$coverage,
         verbose = verbose,
         mvPrior = mvPrior,
         mvPriorCv = mvPriorCv,
@@ -525,7 +525,7 @@ setMethod(
     keep,
     survivors,
     cfg,
-    credibleSetArgs,
+    credibleSetParam,
     fitRetention
 ) {
     if (!keep[i]) {
@@ -539,7 +539,7 @@ setMethod(
         dataY = NULL,
         conditionIdx = r,
         csInput = "X",
-        credibleSetArgs = cfg$credibleSetArgs,
+        credibleSetParam = cfg$credibleSetParam,
         fitRetention = cfg$fitRetention
     )
     e <- if (is.null(fitted$cvM)) {
@@ -611,7 +611,7 @@ setMethod(
         R = ldMat,
         N = as.numeric(stats::median(.jgN(group))),
         prior_variance = mvPrior$priorVariance,
-        coverage = cfg$credibleSetArgs$coverage
+        coverage = cfg$credibleSetParam$coverage
     ) |>
         c(compact(list(residual_variance = mvPrior$residualVariance)))
     fitArgs <- .fmMergeUserArgs(
@@ -639,7 +639,7 @@ setMethod(
         dataY = NULL,
         conditionIdx = r,
         csInput = "Xcorr",
-        credibleSetArgs = cfg$credibleSetArgs,
+        credibleSetParam = cfg$credibleSetParam,
         fitRetention = cfg$fitRetention
     )
 }
@@ -843,12 +843,12 @@ setMethod(
         Xc,
         Yc,
         weightMethods = list(mrash_weights = list()),
-        study = as.character(cond$study[1L]),
+        studyName = as.character(cond$study[1L]),
         context = as.character(cond$context[1L]),
         trait = as.character(cond$trait[1L]),
         fitRetention = "slim",
-        standardized = stdz,
-        dataType = cfg$dataType,
+        weightStandardized = stdz,
+        weightsDataType = cfg$dataType,
         verbose = 0,
         seed = cfg$seed
     )
@@ -898,25 +898,25 @@ setMethod(
         Xc,
         Yc,
         weightMethods = wm,
-        study = as.character(cond$study[1L]),
+        studyName = as.character(cond$study[1L]),
         context = as.character(cond$context[1L]),
         trait = as.character(cond$trait[1L]),
         fittedModels = fittedModels,
         fitRetention = retention,
-        standardized = stdz,
-        dataType = cfg$dataType,
+        weightStandardized = stdz,
+        weightsDataType = cfg$dataType,
         verbose = verbose,
         seed = cfg$seed
     )
     base <- .twrRowParts(tw, 1L)
     vids <- .twrPartsVariantIds(base)
-    raw <- getWeights(base)
+    raw <- weights(base)
     W <- if (is.matrix(raw)) {
         raw
     } else {
         matrix(raw, ncol = nCond, dimnames = list(vids, NULL))
     }
-    list(W = W, fitParts = getFits(base), vids = vids)
+    list(W = W, fitParts = methodFits(base), vids = vids)
 }
 
 # Warn when cross-validating mr.mash with a single full-data data-driven prior
@@ -1058,17 +1058,17 @@ setMethod(
             variantIds = character(0),
             weights = NULL,
             cvResult = cvR,
-            standardized = stdz,
-            dataType = cfg$dataType
+            weightStandardized = stdz,
+            weightsDataType = cfg$dataType
         ))
     }
     twasWeightsRow(
         variantIds = full$vids,
         weights = full$W[, r],
-        fits = full$fitParts,
+        methodFits = full$fitParts,
         cvResult = cvR,
-        standardized = stdz,
-        dataType = cfg$dataType
+        weightStandardized = stdz,
+        weightsDataType = cfg$dataType
     )
 }
 
@@ -1147,12 +1147,12 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # cross-context / individual: one group per scoped trait present in >= 2 scoped
 # contexts (the conditions are those (study, context, trait) rows).
 .enumCrossContextIndividual <- function(data, scope, args = list()) {
-    study <- getStudy(data)
-    if (!is_in(study, scope$studies)) {
+    studyName <- studyName(data)
+    if (!is_in(studyName, scope$studies)) {
         return(list())
     }
-    scopedContexts <- scope$contexts[[study]]
-    scopedTraits <- scope$traits[[study]]
+    scopedContexts <- scope$contexts[[studyName]]
+    scopedTraits <- scope$traits[[studyName]]
     if (length(scopedContexts) < 2L) {
         return(list())
     }
@@ -1161,7 +1161,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         scopedTraits,
         .enumCrossContextGroupFor,
         data = data,
-        study = study,
+        study = studyName,
         scopedContexts = scopedContexts,
         args = args,
         verbose = verbose
@@ -1173,7 +1173,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 .enumCrossContextGroupFor <- function(
     tid,
     data,
-    study,
+    studyName,
     scopedContexts,
     args,
     verbose
@@ -1194,7 +1194,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     new(
         "IndividualJointGroup",
         conditions = tibble(
-            study = study,
+            study = studyName,
             context = xy$perTraitContexts,
             trait = tid
         ),
@@ -1205,7 +1205,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # cross-context / sumstats.
 .enumCrossContextSumstats <- function(data, scope, args = list()) {
-    ldSketch <- getLdSketch(data)
+    ldSketch <- ldSketch(data)
     studyCol <- as.character(data$study)
     contextCol <- as.character(data$context)
     traitCol <- as.character(data$trait)
@@ -1302,18 +1302,18 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # cross-trait / individual: one group per scoped context with >= 2 scoped
 # traits.
 .enumCrossTraitIndividual <- function(data, scope, args = list()) {
-    study <- getStudy(data)
-    if (!is_in(study, scope$studies)) {
+    studyName <- studyName(data)
+    if (!is_in(studyName, scope$studies)) {
         return(list())
     }
-    scopedContexts <- scope$contexts[[study]]
-    scopedTraits <- scope$traits[[study]]
+    scopedContexts <- scope$contexts[[studyName]]
+    scopedTraits <- scope$traits[[studyName]]
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
     compact(map(
         scopedContexts,
         .enumCrossTraitGroupFor,
         data = data,
-        study = study,
+        study = studyName,
         scopedTraits = scopedTraits,
         args = args,
         verbose = verbose
@@ -1325,7 +1325,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 .enumCrossTraitGroupFor <- function(
     cx,
     data,
-    study,
+    studyName,
     scopedTraits,
     args,
     verbose
@@ -1337,7 +1337,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         args$cisWindow,
         verbose,
         label = "jointCrossTrait",
-        study = study,
+        studyName = studyName,
         region = args$region,
         residualizationArgs = args$residualizationArgs
     )
@@ -1352,7 +1352,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     new(
         "IndividualJointGroup",
         conditions = tibble(
-            study = study,
+            study = studyName,
             context = cx,
             trait = xy$traitsHere
         ),
@@ -1366,7 +1366,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # cross-trait / sumstats.
 .enumCrossTraitSumstats <- function(data, scope, args = list()) {
-    ldSketch <- getLdSketch(data)
+    ldSketch <- ldSketch(data)
     studyCol <- as.character(data$study)
     contextCol <- as.character(data$context)
     traitCol <- as.character(data$trait)
@@ -1450,7 +1450,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # disjoint samples). One group per (context, trait) present in >= 2 scoped
 # studies; the study axis varies -> "joint" + jointStudies.
 .enumCrossStudySumstats <- function(data, scope, args = list()) {
-    ldSketch <- getLdSketch(data)
+    ldSketch <- ldSketch(data)
     cols <- list(
         study = as.character(data$study),
         context = as.character(data$context),
@@ -1556,15 +1556,15 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # to "joint" (the conditions model handles multi-varying-axis uniformly; if the
 # tuples happen to share a context it degrades to cross-trait, and vice versa).
 .enumComposedIndividual <- function(data, scope, args = list()) {
-    study <- getStudy(data)
-    if (!is_in(study, scope$studies)) {
+    studyName <- studyName(data)
+    if (!is_in(studyName, scope$studies)) {
         return(list())
     }
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
     xy <- .buildComposedIndividualXy(
         data,
         scope,
-        study,
+        studyName,
         args$cisWindow,
         verbose,
         label = "composed",
@@ -1579,7 +1579,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     # are simple labels; trait ids may themselves contain ":").
     labs <- colnames(xy$Y)
     conds <- tibble(
-        study = study,
+        study = studyName,
         context = str_remove(labs, ":.*$"),
         trait = str_remove(labs, "^[^:]*:")
     )
@@ -1591,32 +1591,39 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # univariate methods (lasso / enet / susie / ...) flow through the SAME per-
 # method fitter + ensemble layer as the joint ones (minGroup = 1).
 .enumUnivariateIndividual <- function(data, scope, args = list()) {
-    study <- getStudy(data)
-    if (!is_in(study, scope$studies)) {
+    studyName <- studyName(data)
+    if (!is_in(studyName, scope$studies)) {
         return(list())
     }
     naAction <- if (is.null(args$naAction)) "drop" else args$naAction
     .jeConcat(map(
-        scope$contexts[[study]],
+        scope$contexts[[studyName]],
         .enumUnivariateForContext,
         data = data,
         scope = scope,
         args = args,
-        study = study,
+        study = studyName,
         naAction = naAction
     ))
 }
 
 # One context's univariate groups, one per trait it carries.
 # @noRd
-.enumUnivariateForContext <- function(cx, data, scope, args, study, naAction) {
-    se <- getPhenotypes(data, contexts = cx)
+.enumUnivariateForContext <- function(
+    cx,
+    data,
+    scope,
+    args,
+    studyName,
+    naAction
+) {
+    se <- molecularTraits(data, contexts = cx)
     compact(map(
-        intersect(scope$traits[[study]], rownames(se)),
+        intersect(scope$traits[[studyName]], rownames(se)),
         .enumUnivariateGroupFor,
         data = data,
         args = args,
-        study = study,
+        study = studyName,
         cx = cx,
         naAction = naAction
     ))
@@ -1625,7 +1632,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # One (context, trait) univariate group, or NULL when fewer than two samples
 # are shared between its genotypes and its phenotype.
 # @noRd
-.enumUnivariateGroupFor <- function(tid, data, args, study, cx, naAction) {
+.enumUnivariateGroupFor <- function(tid, data, args, studyName, cx, naAction) {
     Y <- .fmResidPheno(
         data,
         contexts = cx,
@@ -1655,7 +1662,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     }
     new(
         "IndividualJointGroup",
-        conditions = tibble(study = study, context = cx, trait = tid),
+        conditions = tibble(study = studyName, context = cx, trait = tid),
         X = X[common, , drop = FALSE],
         Y = Y[common, , drop = FALSE]
     )
@@ -1666,7 +1673,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # (fixed) axes form one group each. Reuses .enumerateComposedSumstatGroups.
 .enumComposedSumstats <- function(data, scope, args = list()) {
     axes <- args$axes %||% c("context", "trait")
-    ldSketch <- getLdSketch(data)
+    ldSketch <- ldSketch(data)
     gi <- .enumerateComposedSumstatGroups(list(axes = axes), data, scope)
     if (is.null(gi)) {
         return(list())
@@ -1754,7 +1761,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     t1 <- as.character(cond$trait[[1L]])
     nR <- if (is.null(args$nRegions)) 1L else args$nRegions
     bi <- if (is.null(args$regionIndex)) 1L else args$regionIndex
-    af <- .twasFineMappingFits(fmRes, study = s1, context = c1, trait = t1)
+    af <- .twasFineMappingFits(fmRes, studyName = s1, context = c1, trait = t1)
     list(
         fittedModels = if (is.null(af)) {
             list()
@@ -2112,7 +2119,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     }
     ew <- ens$ensembleTwasWeights
     vids <- (if (!is.null(names(ew))) names(ew) else rownames(ew)) %||%
-        getVariantIds(perTokenEntries[[passing[1L]]][[r]])
+        variantIds(perTokenEntries[[passing[1L]]][[r]])
     twasWeightsRow(
         variantIds = vids,
         weights = as.numeric(ew),
@@ -2120,8 +2127,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             methodCoef = ens$methodCoef,
             methodPerformance = ens$methodPerformance
         ),
-        standardized = stdz,
-        dataType = cfg$dataType
+        weightStandardized = stdz,
+        weightsDataType = cfg$dataType
     )
 }
 
@@ -2133,26 +2140,26 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # fineMappingPipeline's .fmPcaContextRows, sharing .fmTopPcScores().
 # @noRd
 .enumTopPcIndividual <- function(data, scope, args = list()) {
-    study <- getStudy(data)
-    if (!is_in(study, scope$studies)) {
+    studyName <- studyName(data)
+    if (!is_in(studyName, scope$studies)) {
         return(list())
     }
     naAction <- if (is.null(args$naAction)) "drop" else args$naAction
     .jeConcat(map(
-        scope$contexts[[study]],
+        scope$contexts[[studyName]],
         .enumTopPcForContext,
         data = data,
         scope = scope,
         args = args,
-        study = study,
+        study = studyName,
         naAction = naAction
     ))
 }
 
 # @noRd
-.enumTopPcForContext <- function(cx, data, scope, args, study, naAction) {
-    se <- getPhenotypes(data, contexts = cx)
-    traits <- intersect(scope$traits[[study]], rownames(se))
+.enumTopPcForContext <- function(cx, data, scope, args, studyName, naAction) {
+    se <- molecularTraits(data, contexts = cx)
+    traits <- intersect(scope$traits[[studyName]], rownames(se))
     # PCA is undefined for a single trait, matching the fine-mapping rule.
     if (length(traits) < 2L) {
         return(list())
@@ -2178,7 +2185,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         .enumTopPcGroup,
         X = X[common, , drop = FALSE],
         scores = scores[common, , drop = FALSE],
-        study = study,
+        study = studyName,
         cx = cx
     ))
 }
@@ -2203,10 +2210,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 }
 
 # @noRd
-.enumTopPcGroup <- function(pcName, X, scores, study, cx) {
+.enumTopPcGroup <- function(pcName, X, scores, studyName, cx) {
     new(
         "IndividualJointGroup",
-        conditions = tibble(study = study, context = cx, trait = pcName),
+        conditions = tibble(study = studyName, context = cx, trait = pcName),
         X = X,
         Y = scores[, pcName, drop = FALSE]
     )
@@ -2416,7 +2423,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (length(ctxs) == 0L) {
         return(scope$traits[[st]])
     }
-    se <- getPhenotypes(data, contexts = ctxs[[1L]])
+    se <- molecularTraits(data, contexts = ctxs[[1L]])
     .fmTraitsInRegion(
         se,
         intersect(scope$traits[[st]], rownames(se)),
@@ -2483,9 +2490,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     twasWeightsRow(
         variantIds = vids,
         weights = weights[, r],
-        fits = fitParts,
-        standardized = TRUE,
-        dataType = cfg$dataType
+        methodFits = fitParts,
+        weightStandardized = TRUE,
+        weightsDataType = cfg$dataType
     )
 }
 
@@ -2523,7 +2530,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # One joint output record for condition `i`, or NULL when that entry is absent.
 # traitPos = the bare trait position (NULL when a QtlSumStats caller supplied
-# none -> the column is omitted and getTraitPosition() reports NA). The
+# none -> the column is omitted and traitPosition() reports NA). The
 # fine-mapping window is NOT recorded: the element's own span is the region
 # (section 4.4), and a stored window would go stale under subsetRegion().
 # @noRd

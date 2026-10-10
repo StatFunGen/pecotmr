@@ -188,7 +188,8 @@ setMethod(
     )
 }
 
-# (The AnnotationMatrix() constructor and the getBaseline / getCandidates tier
+# (The AnnotationMatrix() constructor and the baselineAnnotations /
+# testedAnnotations tier
 # accessors now live in R/AnnotationMatrix.R alongside the class definition.)
 
 # The mean BigWig score at one SNP (0 when the SNP has no overlapping

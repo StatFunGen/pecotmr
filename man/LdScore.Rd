@@ -9,7 +9,7 @@ LdScore(
   ldScores,
   ldScoreWeights,
   ldBlocks,
-  nRef,
+  nSamples,
   inSample = FALSE,
   genome = NA_character_,
   ldMatrixList = list()
@@ -27,7 +27,7 @@ annotation-stratified scores.}
 
 \item{ldBlocks}{A \code{GRanges} of LD block intervals.}
 
-\item{nRef}{Integer, sample size of the LD reference panel.}
+\item{nSamples}{Integer, sample size of the LD reference panel.}
 
 \item{inSample}{Logical, whether the reference is the GWAS cohort.}
 
@@ -48,8 +48,8 @@ blocks <- GenomicRanges::GRanges("chr1",
   IRanges::IRanges(c(1L, 200L), c(199L, 400L)))
 ls <- LdScore(snpInfo = snpInfo,
   ldScores = matrix(runif(4), ncol = 1, dimnames = list(NULL, "base_l2")),
-  ldScoreWeights = rep(1, 4), ldBlocks = blocks, nRef = 100L,
+  ldScoreWeights = rep(1, 4), ldBlocks = blocks, nSamples = 100L,
   inSample = FALSE, genome = "hg19")
 length(ls)
-head(getLdScores(ls))
+head(S4Vectors::mcols(ls)$ldScores)
 }

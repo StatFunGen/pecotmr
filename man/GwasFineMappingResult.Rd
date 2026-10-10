@@ -5,7 +5,7 @@
 \title{Create a GwasFineMappingResult Collection}
 \usage{
 GwasFineMappingResult(
-  study,
+  studyName,
   method,
   entry,
   blockId = NULL,
@@ -14,7 +14,7 @@ GwasFineMappingResult(
 )
 }
 \arguments{
-\item{study}{Character vector of study identifiers (per tuple).}
+\item{studyName}{Character vector of study identifiers (per tuple).}
 
 \item{method}{Character vector of fine-mapping method names (per tuple).}
 
@@ -53,5 +53,5 @@ tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
 fe <- fineMappingRow(
   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
-GwasFineMappingResult(study = "t1", method = "susie", entry = list(fe))
+GwasFineMappingResult(studyName = "t1", method = "susie", entry = list(fe))
 }

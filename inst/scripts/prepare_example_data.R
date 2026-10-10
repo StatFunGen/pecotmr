@@ -21,7 +21,7 @@
 # entry point fineMappingPipeline() uses, rather than being assembled by hand.
 # Earlier versions of this script hand-built a `cs` column of bare integer
 # labels; that predates the cs_95 / cs_70 / cs_50 (+ _purity) schema, and a
-# fixture carrying it makes getCs() and getCredibleSetSummary() silently return
+# fixture carrying it makes credibleSets() and credibleSetSummary() silently return
 # nothing. Going through the real post-processor keeps the fixtures on whatever
 # schema the package currently emits.
 #
@@ -49,10 +49,10 @@ posOffset <- 5000000L
 
 # The one credible set at this eQTL locus spans 42 variants with
 # min.abs.corr = 0.626, so the pipeline default (minAbsCorr = 0.8) would reject
-# it and label every variant "susie_0" -- leaving getCs() on the package's
+# it and label every variant "susie_0" -- leaving credibleSets() on the package's
 # headline QTL example with nothing to show. Building at 0.5 keeps the set
 # labelled while cs_95_purity still records the true 0.626, so a caller who
-# asks for getCs(x, minPurity = 0.8) correctly gets nothing back. The GWAS fit
+# asks for credibleSets(x, minPurity = 0.8) correctly gets nothing back. The GWAS fit
 # below needs no such allowance: its credible sets are all above 0.95.
 qtlMinAbsCorr <- 0.5
 
@@ -303,24 +303,24 @@ for (nm in c(
 cat("\n=== Verifying ===\n")
 for (nm in c("qtlFineMappingExample", "gwasFineMappingExample")) {
     obj <- get(nm)
-    cs <- getCs(obj)
-    summ <- getCredibleSetSummary(obj)
+    cs <- credibleSets(obj)
+    summ <- credibleSetSummary(obj)
     cat(sprintf(
-        "  %-24s %d variants, getCs() %d rows, %d credible sets\n",
+        "  %-24s %d variants, credibleSets() %d rows, %d credible sets\n",
         nm,
         sum(lengths(obj)),
         nrow(cs),
         nrow(summ)
     ))
     if (nrow(cs) == 0L) {
-        stop(nm, ": getCs() is empty, which is the defect this build fixes")
+        stop(nm, ": credibleSets() is empty, which is the defect this build fixes")
     }
 }
 
 # intersectVariants() returns the two collections restricted to their shared
 # variants (a list of x and y), not the variant vector itself.
 both <- intersectVariants(qtlFineMappingExample, gwasFineMappingExample)
-nShared <- length(getVariantIds(both$x))
+nShared <- length(variantIds(both$x))
 cat(sprintf("  intersectVariants() -> %d shared variants\n", nShared))
 if (nShared != sum(lengths(qtlFineMappingExample))) {
     stop(

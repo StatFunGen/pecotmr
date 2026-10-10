@@ -13,7 +13,8 @@ Per-run cTWAS payload: the fine-mapping posterior table, the
 \section{Slots}{
 
 \describe{
-\item{\code{finemap}}{The per-gene (and, when SNPs are retained, per-SNP) posterior
+\item{\code{posteriors}}{The per-gene (and, when SNPs are retained,
+per-SNP) posterior
 summary table (\code{ctwas::finemap_regions} \code{finemap_res} shape),
 or \code{NULL}.}
 

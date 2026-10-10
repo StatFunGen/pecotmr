@@ -29,7 +29,7 @@ makeTestGwasSumStats <- function(n = 5) {
         N = rep(1000L, n)
     )
     GwasSumStats(
-        study = "test_trait",
+        studyName = "test_trait",
         entry = list(gr),
         genome = "hg38",
         ldSketch = makeTestGenotypeHandle()
@@ -69,7 +69,7 @@ makeTestFineMappingResult <- function(n = 5) {
         topLoci = tl
     )
     GwasFineMappingResult(
-        study = "test_study",
+        studyName = "test_study",
         method = "susie",
         entry = list(entry)
     )
@@ -241,7 +241,7 @@ test_that("writeSumStatsVcf errors on empty FineMappingResult", {
         topLoci = empty_tl
     )
     fm_empty <- GwasFineMappingResult(
-        study = "test_study",
+        studyName = "test_study",
         method = "susie",
         entry = list(entry)
     )
@@ -282,7 +282,7 @@ test_that("writeSumStatsVcf errors on empty FineMappingResult", {
         fineMappingRow(variantIds = ids, susieFit = list(), topLoci = tl)
     })
     QtlFineMappingResult(
-        study = rep("study1", 2),
+        studyName = rep("study1", 2),
         context = contexts,
         trait = traits,
         method = rep("susie", 2),
@@ -391,7 +391,7 @@ test_that("writeSumStatsVcf(FineMappingResult): multi-row without split flags re
         gr
     }
     GwasSumStats(
-        study = c("studyA", "studyB"),
+        studyName = c("studyA", "studyB"),
         entry = list(mkGr(), mkGr()),
         genome = "hg38",
         ldSketch = makeTestGenotypeHandle()
@@ -411,7 +411,7 @@ test_that("writeSumStatsVcf(GwasSumStats): `study` selector writes the chosen st
     ss2 <- .makeTwoStudyGwasSumStats()
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    res <- writeSumStatsVcf(ss2, out, study = "studyB")
+    res <- writeSumStatsVcf(ss2, out, studyName = "studyB")
     expect_equal(res, out)
     expect_true(file.exists(out))
 })
@@ -420,7 +420,7 @@ test_that("writeSumStatsVcf(GwasSumStats): emits the AF genotype field when MAF 
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss <- GwasSumStats(
-        study = "t",
+        studyName = "t",
         entry = list(local({
             gr <- GenomicRanges::GRanges(
                 "chr1",
@@ -473,7 +473,7 @@ test_that("writeSumStatsVcf(FineMappingResult): explicit selectors pick a single
     res <- writeSumStatsVcf(
         fmr,
         out,
-        study = "study1",
+        studyName = "study1",
         context = "brain",
         trait = "ENSG_A",
         method = "susie"
@@ -488,7 +488,7 @@ test_that("writeSumStatsVcf(FineMappingResult): no matching rows errors", {
     fmr <- .makeMultiTupleQtlFmr()
     out <- tempfile(fileext = ".vcf")
     expect_error(
-        writeSumStatsVcf(fmr, out, study = "does_not_exist"),
+        writeSumStatsVcf(fmr, out, studyName = "does_not_exist"),
         "no rows match"
     )
 })
@@ -562,7 +562,7 @@ test_that("writeSumStatsVcf(FineMappingResult): emits AF from the topLoci `af` c
         topLoci = tl
     )
     fm <- GwasFineMappingResult(
-        study = "s",
+        studyName = "s",
         method = "susie",
         entry = list(entry)
     )
@@ -609,7 +609,7 @@ test_that("writeSumStatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit
         topLoci = tl
     )
     fm <- GwasFineMappingResult(
-        study = "s",
+        studyName = "s",
         method = "susie",
         entry = list(entry)
     )
@@ -633,10 +633,10 @@ test_that("writeSumStatsVcf(FineMappingResult): falls back to marginal sumstats 
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fm <- makeTestFineMappingResult(5)
-    # Simulate an entry whose posterior table is unavailable (empty getTopLoci) so
+    # Simulate an entry whose posterior table is unavailable (empty topLoci) so
     # the marginal univariate sumstats alone drive the VCF body (the else-if branch).
     testthat::local_mocked_bindings(
-        getTopLoci = function(x, ...) data.frame(),
+        topLoci = function(x, ...) GenomicRanges::GRanges(),
         .package = "pecotmr"
     )
     out <- tempfile(fileext = ".vcf")
@@ -693,10 +693,23 @@ test_that("BCF output explains itself when Rsamtools cannot convert", {
 
 test_that(".vcfResolveBody uses posterior rows when no marginals exist", {
     local_mocked_bindings(
-        getTopLoci = function(entry, signalCutoff) {
-            data.frame(variant_id = c("v1", "v2"), pip = c(0.9, 0.1))
+        topLoci = function(entry, signalCutoff) {
+            # topLoci() returns ranges carrying the per-variant columns in
+            # mcols(); these ids are deliberately not coordinate-shaped, so
+            # the ranges are built directly rather than parsed from them.
+            gr <- GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(start = c(1L, 2L), width = 1L)
+            )
+            S4Vectors::`mcols<-`(
+                gr,
+                value = S4Vectors::DataFrame(
+                    variant_id = c("v1", "v2"),
+                    pip = c(0.9, 0.1)
+                )
+            )
         },
-        getMarginalEffects = function(entry) stop("none"),
+        marginalEffects = function(entry) stop("none"),
         .package = "pecotmr"
     )
     out <- pecotmr:::.vcfResolveBody("e", "S1")

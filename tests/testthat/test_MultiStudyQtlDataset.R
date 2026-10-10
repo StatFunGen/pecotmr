@@ -4,24 +4,24 @@
 
 test_that("MultiStudyQtlDataset: combines two QtlDatasets", {
     qd1 <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
     qd2 <- QtlDataset(
-        study = "s2",
+        studyName = "s2",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
     mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
     expect_s4_class(mt, "MultiStudyQtlDataset")
-    expect_setequal(getStudy(mt), c("s1", "s2"))
+    expect_setequal(studyName(mt), c("s1", "s2"))
 })
 
 
 test_that("MultiStudyQtlDataset: rejects single dataset with no sumStats", {
     qd <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
@@ -34,7 +34,7 @@ test_that("MultiStudyQtlDataset: rejects single dataset with no sumStats", {
 
 test_that("MultiStudyQtlDataset: rejects unnamed qtlDatasets list", {
     qd <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
@@ -69,12 +69,12 @@ test_that("MultiStudyQtlDataset: rejects trait/position conflicts across studies
         colData = cd2
     )
     qd1 <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = se1)
     )
     qd2 <- QtlDataset(
-        study = "s2",
+        studyName = "s2",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = se2)
     )
@@ -109,12 +109,12 @@ test_that("MultiStudyQtlDataset: tolerates chr-prefix-only seqname differences a
         colData = cd2
     )
     qd1 <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = se1)
     )
     qd2 <- QtlDataset(
-        study = "s2",
+        studyName = "s2",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = se2)
     )
@@ -125,7 +125,7 @@ test_that("MultiStudyQtlDataset: tolerates chr-prefix-only seqname differences a
 })
 
 
-test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
+test_that("sumStats(MultiStudyQtlDataset) rejects selection arguments", {
     # Compose one individual-level QtlDataset with a QtlSumStats of
     # summary-statistic-only studies (1 + 1 = 2 studies total).
     gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
@@ -137,7 +137,7 @@ test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
         N = 1000L
     )
     ss <- QtlSumStats(
-        study = "s3",
+        studyName = "s3",
         context = "c1",
         trait = "t1",
         entry = list(gr),
@@ -145,17 +145,17 @@ test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
         ldSketch = .sc_makeGenotypeHandle()
     )
     qd1 <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
     mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1), sumStats = ss)
 
     # Bare call returns the embedded QtlSumStats collection ...
-    expect_s4_class(getSumStats(mt), "QtlSumStats")
+    expect_s4_class(sumStats(mt), "QtlSumStats")
     # ... but any selection argument is rejected.
     # Taking no extra formals is the rejection: R names the argument.
-    expect_error(getSumStats(mt, study = "s1"), "unused argument")
+    expect_error(sumStats(mt, studyName = "s1"), "unused argument")
 })
 
 
@@ -175,7 +175,7 @@ test_that("MultiStudyQtlDataset: rejects an empty qtlDatasets list", {
 
 test_that("MultiStudyQtlDataset: rejects duplicated study names", {
     qd <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
@@ -187,7 +187,7 @@ test_that("MultiStudyQtlDataset: rejects duplicated study names", {
 
 test_that("MultiStudyQtlDataset: rejects a non-QtlSumStats sumStats", {
     qd <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
@@ -201,12 +201,12 @@ test_that("MultiStudyQtlDataset: rejects a non-QtlSumStats sumStats", {
 })
 
 
-test_that("getStudy unions the individual-level and summary-only studies", {
+test_that("studyName unions the individual-level and summary-only studies", {
     # The sumStats arm was never taken: every collection built above carries
-    # only QtlDatasets, so getStudy() only ever read their names.
+    # only QtlDatasets, so studyName() only ever read their names.
     data(qtlSumStatsExample)
     qd <- QtlDataset(
-        study = "s1",
+        studyName = "s1",
         genotypes = .sc_makeGenotypeHandle(),
         phenotypes = list(brain = .sc_makeSe())
     )
@@ -214,7 +214,7 @@ test_that("getStudy unions the individual-level and summary-only studies", {
         qtlDatasets = list(s1 = qd),
         sumStats = qtlSumStatsExample
     )
-    expect_setequal(getStudy(mt), c("s1", "study1"))
+    expect_setequal(studyName(mt), c("s1", "study1"))
 })
 
 test_that("MultiStudyQtlDataset: qtlDatasets guard fires on a non-list", {

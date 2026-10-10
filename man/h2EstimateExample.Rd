@@ -6,7 +6,8 @@
 \title{Example Heritability Estimate}
 \format{
 An \code{H2Estimate} object with \code{h2}, \code{h2Se},
-  \code{intercept}, an \code{enrichment} data frame, and \code{tauBlocks}.
+  \code{intercept}, an \code{enrichment} data frame, and
+  \code{annotationJackknifeCoefs}.
 }
 \description{
 A small synthetic \code{H2Estimate} (the output of

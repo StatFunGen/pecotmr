@@ -21,7 +21,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
-  panelFilterArgs = PanelFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   signalScreenArgs = SignalScreenParam(),
   alleleFlip = TRUE,
   methodArgs = ColocboostOptions()
@@ -37,7 +37,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   alleleFlip = TRUE,
-  panelFilterArgs = PanelFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   methodArgs = ColocboostOptions()
 )
 
@@ -53,7 +53,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
-  panelFilterArgs = PanelFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   signalScreenArgs = SignalScreenParam(),
   alleleFlip = TRUE,
   methodArgs = ColocboostOptions()
@@ -75,7 +75,7 @@ every context present is used.}
 \item{traitId}{Optional character vector of trait identifiers to restrict the
 analysis to. When supplied with an individual-level \code{QtlDataset}
 input, \code{cisWindow} is required (passed to
-\code{getResidualizedGenotypes} / \code{getPhenotypes} for the
+\code{residualizedGenotypes} / \code{molecularTraits} for the
 variant-window selection).}
 
 \item{region}{Optional single-range \code{GRanges} describing the analysis
@@ -101,8 +101,8 @@ colocboost variants to run.}
 \item{samples}{Optional character vector of sample IDs to restrict the
 analysis to; \code{NULL} (default) uses all samples.}
 
-\item{panelFilterArgs}{Analysis-time filters applied to the summary-statistic
-sides against the LD reference panel, built with
+\item{panelFilterParam}{Analysis-time filters applied to the
+summary-statistic sides against the LD reference panel, built with
 \code{\link{PanelFilterParam}}: a variant whose panel genotypes fall
 below its cutoffs is dropped before the LD matrix is built. The defaults
 filter nothing. See the Details section for how these relate to the
@@ -151,11 +151,11 @@ A \code{\linkS4class{ColocBoostResult}}: one element per
   \code{separate_gwas} runs. Outcome-specific (uncolocalized) sets are
   included with \code{isColocalized = FALSE}.
 
-  Project it with \code{\link{getColocPairs}} (also available as
-  \code{as.data.frame}), \code{\link{getColocVariants}} or
-  \code{\link{getColocBoostOutcomes}}; timings are on
-  \code{\link{getComputingTime}} and the region-wide marginal
-  probabilities on \code{\link{getRegionVcp}}.
+  Project it with \code{\link{colocPairs}} (also available as
+  \code{as.data.frame}), \code{\link{colocVariants}} or
+  \code{\link{colocBoostOutcomes}}; timings are on
+  \code{\link{computingTime}} and the region-wide marginal
+  probabilities on \code{\link{regionVcp}}.
 }
 \description{
 Protocol-level multi-trait colocalization analysis using
@@ -168,7 +168,7 @@ Protocol-level multi-trait colocalization analysis using
     \item \code{QtlSumStats} -- summary-statistic-only QTL data with a
           shared LD reference (\code{ldSketch}). Must already have
           been passed through \code{\link{summaryStatsQc}} (the
-          pipeline rejects inputs whose \code{getQcInfo()} is empty).
+          pipeline rejects inputs whose \code{qcInfo()} is empty).
           Every analysis variant is available on this input, including
           \code{xqtlColoc}, which colocalizes the QTL studies against
           each other with no GWAS involved.
@@ -188,7 +188,7 @@ for either side; colocboost has its own variable-selection algorithm.
     \item Individual-level QC (MAF / MAC / X-variance / per-sample
           missingness, sample / variant restrictions) lives on the
           \code{QtlDataset} constructor and is applied lazily inside
-          \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
+          \code{genotypes()} / \code{residualizedGenotypes()}.
           The pipeline does \emph{not} run a separate
           individual-level QC pass.
     \item \code{panelFilter} acts at ANALYSIS time on the sumstat
@@ -205,7 +205,7 @@ for either side; colocboost has its own variable-selection algorithm.
           imputation, etc.) lives in
           \code{\link{summaryStatsQc}}. The pipeline rejects any
           \code{QtlSumStats} or \code{GwasSumStats} where
-          \code{length(getQcInfo(x)) == 0L}.
+          \code{length(qcInfo(x)) == 0L}.
   }
 }
 

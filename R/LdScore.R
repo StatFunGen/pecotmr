@@ -54,7 +54,7 @@ setClass(
 #'   annotation-stratified scores.
 #' @param ldScoreWeights Numeric regression weights, one per variant.
 #' @param ldBlocks A \code{GRanges} of LD block intervals.
-#' @param nRef Integer, sample size of the LD reference panel.
+#' @param nSamples Integer, sample size of the LD reference panel.
 #' @param inSample Logical, whether the reference is the GWAS cohort.
 #' @param genome Character, genome build; recorded in \code{seqinfo()}.
 #' @param ldMatrixList Optional list of per-block LD matrices (g-LDSC only).
@@ -66,10 +66,10 @@ setClass(
 #'   IRanges::IRanges(c(1L, 200L), c(199L, 400L)))
 #' ls <- LdScore(snpInfo = snpInfo,
 #'   ldScores = matrix(runif(4), ncol = 1, dimnames = list(NULL, "base_l2")),
-#'   ldScoreWeights = rep(1, 4), ldBlocks = blocks, nRef = 100L,
+#'   ldScoreWeights = rep(1, 4), ldBlocks = blocks, nSamples = 100L,
 #'   inSample = FALSE, genome = "hg19")
 #' length(ls)
-#' head(getLdScores(ls))
+#' head(S4Vectors::mcols(ls)$ldScores)
 #' @importFrom checkmate assertMatrix assertNumeric
 #' @export
 LdScore <- function(
@@ -77,7 +77,7 @@ LdScore <- function(
     ldScores,
     ldScoreWeights,
     ldBlocks,
-    nRef,
+    nSamples,
     inSample = FALSE,
     genome = NA_character_,
     ldMatrixList = list()
@@ -100,7 +100,7 @@ LdScore <- function(
         "LdScore",
         scored,
         ldBlocks = .asLdBlockRanges(ldBlocks),
-        nRef = as.integer(nRef),
+        nSamples = as.integer(nSamples),
         inSample = isTRUE(inSample),
         ldMatrixList = ldMatrixList
     )
@@ -133,7 +133,7 @@ LdScore <- function(
 #'   standard error from a delete-one-block jackknife, so it requires at
 #'   least two blocks and wants many more. Loading a whole region as one
 #'   dense matrix yields a single block.
-#' @param nRef Integer, the LD reference panel sample size. Defaults to the
+#' @param nSamples Integer, the LD reference panel sample size. Defaults to the
 #'   size recorded by the supplied \code{LdData}; required when they record
 #'   none, and an error when they disagree.
 #' @param inSample Logical, whether the reference is the GWAS cohort itself.
@@ -155,20 +155,20 @@ LdScore <- function(
 #' ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
 #' ldScore <- buildLdScore(ld, genome = "hg38")
 #' ldScore
-#' head(getLdScores(ldScore))
+#' head(S4Vectors::mcols(ldScore)$ldScores)
 #' @export
 buildLdScore <- function(
     ldBlockData,
-    nRef = NULL,
+    nSamples = NULL,
     inSample = FALSE,
     genome = NA_character_,
     ldScoreWeights = NULL,
     keepLdMatrices = TRUE
 ) {
-    assertCount(nRef, positive = TRUE, null.ok = TRUE)
+    assertCount(nSamples, positive = TRUE, null.ok = TRUE)
     assertFlag(inSample)
     assertFlag(keepLdMatrices)
-    prep <- .ldRefPrepare(ldBlockData, nRef, genome)
+    prep <- .ldRefPrepare(ldBlockData, nSamples, genome)
     l2 <- .ldScoreVector(prep$blocks, prep$snpIdx, nrow(prep$snpInfo))
     ldMatrixList <- if (isTRUE(keepLdMatrices)) {
         map2(prep$blocks, prep$snpIdx, .ldScoreKeepMatrix)
@@ -180,7 +180,7 @@ buildLdScore <- function(
         ldScores = matrix(l2, ncol = 1, dimnames = list(NULL, "base_l2")),
         ldScoreWeights = .ldScoreResolveWeights(ldScoreWeights, l2),
         ldBlocks = prep$ldBlocks,
-        nRef = prep$nRef,
+        nSamples = prep$nRef,
         inSample = inSample,
         genome = prep$genome,
         ldMatrixList = ldMatrixList
@@ -227,7 +227,7 @@ buildLdScore <- function(
 #' @rdname show-methods
 #' @export
 setMethod("show", "LdScore", function(object) {
-    scores <- getLdScores(object)
+    scores <- mcols(object)$ldScores
     cat(glue(
         "LdScore: {length(object)} SNPs, ",
         "{ncol(scores)} LD score columns\n",
@@ -239,23 +239,11 @@ setMethod("show", "LdScore", function(object) {
         .trim = FALSE
     ))
     cat(glue(
-        "  Reference N: {object@nRef}, In-sample: {object@inSample}\n",
+        "  Reference N: {object@nSamples}, In-sample: {object@inSample}\n",
         .trim = FALSE
     ))
 })
 
-#' @rdname getLdScores
+#' @rdname ldMatrixList
 #' @export
-setMethod("getLdScores", "LdScore", function(x) {
-    S4Vectors::mcols(x, use.names = FALSE)$ldScores
-})
-
-#' @rdname getLdScoreWeights
-#' @export
-setMethod("getLdScoreWeights", "LdScore", function(x) {
-    S4Vectors::mcols(x, use.names = FALSE)$ldScoreWeights
-})
-
-#' @rdname getLdMatrixList
-#' @export
-setMethod("getLdMatrixList", "LdScore", function(x) x@ldMatrixList)
+setMethod("ldMatrixList", "LdScore", function(x) x@ldMatrixList)

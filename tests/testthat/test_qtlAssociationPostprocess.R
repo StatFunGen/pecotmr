@@ -90,7 +90,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
     )
 
     expect_s4_class(r, "QtlSumStats")
-    expect_false(is.null(getQcInfo(r)$associationPostprocess)) # recipe stashed
+    expect_false(is.null(qcInfo(r)$associationPostprocess)) # recipe stashed
 
     # Bonferroni original == min over variants of p.adjust(P, "bonferroni", n).
     expP <- map_dbl(
@@ -157,10 +157,10 @@ test_that("permutation nominal threshold == stats::qbeta of the empirical cutoff
     )
 })
 
-test_that("getSignificantQtls (bonferroni) matches the derived threshold rule", {
+test_that("significantQtls (bonferroni) matches the derived threshold rule", {
     x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(x, mafCutoff = 0.01, cisWindow = 1e6)
-    sig <- getSignificantQtls(r, "bonferroni_original", threshold = 0.5)
+    sig <- significantQtls(r, "bonferroni_original", threshold = 0.5)
     expect_s4_class(sig, "GRanges")
     expect_true("trait" %in% names(S4Vectors::mcols(sig)))
 
@@ -178,12 +178,12 @@ test_that("getSignificantQtls (bonferroni) matches the derived threshold rule", 
     expect_equal(length(sig), expN)
 })
 
-test_that("getSumStats(annotateSignificance=) adds a derived logical mcol", {
+test_that("sumStats(annotateSignificance=) adds a derived logical mcol", {
     x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(x, methods = "permutation")
-    gr <- getSumStats(
+    gr <- sumStats(
         r,
-        study = "s",
+        studyName = "s",
         context = "brain",
         trait = "g1",
         annotateSignificance = "permutation"
@@ -203,7 +203,7 @@ test_that("getSumStats(annotateSignificance=) adds a derived logical mcol", {
 test_that("significance accessors require a postprocessed object", {
     x <- .qapDefaultFixture # not postprocessed
     expect_error(
-        getSignificantQtls(x, "bonferroni_original"),
+        significantQtls(x, "bonferroni_original"),
         "qtlAssociationPostprocess"
     )
 })
@@ -267,15 +267,15 @@ test_that("permutation nominal threshold is NA for every gene when none pass FDR
     expect_true(all(is.na(as.numeric(r$p_nominal_threshold))))
 })
 
-# ---- getSignificantQtls: one branch of the significance mask per method -------
+# ---- significantQtls: one branch of the significance mask per method -------
 
-test_that("getSignificantQtls (permutation) uses each gene's nominal threshold", {
+test_that("significantQtls (permutation) uses each gene's nominal threshold", {
     r <- qtlAssociationPostprocess(
         .qapDefaultFixture,
         fdrThreshold = 0.1,
         methods = "permutation"
     )
-    sig <- getSignificantQtls(r, "permutation") # threshold defaults to recipe
+    sig <- significantQtls(r, "permutation") # threshold defaults to recipe
     expect_s4_class(sig, "GRanges")
     expect_true("trait" %in% names(S4Vectors::mcols(sig)))
     # Reproduce: per gene, variants with P < p_nominal_threshold[gene].
@@ -293,7 +293,7 @@ test_that("getSignificantQtls (permutation) uses each gene's nominal threshold",
     expect_equal(length(sig), expN)
 })
 
-test_that("getSignificantQtls (permutation) skips genes with an NA threshold", {
+test_that("significantQtls (permutation) skips genes with an NA threshold", {
     # Gene 1's NA beta_shape1 makes its qbeta nominal threshold NA, so the mask
     # loop must `next` past it while still processing the non-NA genes.
     r <- qtlAssociationPostprocess(
@@ -304,7 +304,7 @@ test_that("getSignificantQtls (permutation) skips genes with an NA threshold", {
     thr <- as.numeric(r$p_nominal_threshold)
     expect_true(is.na(thr[1])) # NA-threshold gene present ...
     expect_true(any(!is.na(thr))) # ... alongside non-NA genes
-    sig <- getSignificantQtls(r, "permutation")
+    sig <- significantQtls(r, "permutation")
     expect_s4_class(sig, "GRanges")
     # Gene 1 contributes nothing; total is the sum over the non-NA-threshold genes.
     expN <- sum(map_int(
@@ -319,23 +319,23 @@ test_that("getSignificantQtls (permutation) skips genes with an NA threshold", {
     expect_equal(length(sig), expN)
 })
 
-test_that("getSignificantQtls (permutation) errors without a nominal threshold", {
+test_that("significantQtls (permutation) errors without a nominal threshold", {
     # No beta shapes -> postprocess produces no p_nominal_threshold column.
     r <- qtlAssociationPostprocess(
         .qapFixture(drop = c("beta_shape1", "beta_shape2")),
         methods = "permutation"
     )
     expect_null(r$p_nominal_threshold)
-    expect_error(getSignificantQtls(r, "permutation"), "p_nominal_threshold")
+    expect_error(significantQtls(r, "permutation"), "p_nominal_threshold")
 })
 
-test_that("getSignificantQtls (bonferroni_filtered) applies the MAF/cis keep filter", {
+test_that("significantQtls (bonferroni_filtered) applies the MAF/cis keep filter", {
     r <- qtlAssociationPostprocess(
         .qapDefaultFixture,
         mafCutoff = 0.01,
         cisWindow = 1e6
     )
-    sig <- getSignificantQtls(r, "bonferroni_filtered", threshold = 0.5)
+    sig <- significantQtls(r, "bonferroni_filtered", threshold = 0.5)
     expect_s4_class(sig, "GRanges")
     expect_gt(length(sig), 0)
     # Every returned variant must satisfy the filtered keep rule (MAF & cis window).
@@ -347,19 +347,19 @@ test_that("getSignificantQtls (bonferroni_filtered) applies the MAF/cis keep fil
     ))
 })
 
-test_that("getSignificantQtls (bonferroni) errors when its columns are absent", {
+test_that("significantQtls (bonferroni) errors when its columns are absent", {
     r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation") # no bonferroni
-    expect_error(getSignificantQtls(r, "bonferroni_original"), "columns absent")
+    expect_error(significantQtls(r, "bonferroni_original"), "columns absent")
 })
 
-test_that("getSignificantQtls (qvalue) selects variants by their qvalue mcol", {
+test_that("significantQtls (qvalue) selects variants by their qvalue mcol", {
     skip_if_not_installed("qvalue")
     r <- qtlAssociationPostprocess(
         .qapFixture(withQvalue = TRUE),
         fdrThreshold = 0.1,
         methods = "permutation"
     )
-    sig <- getSignificantQtls(r, "qvalue", threshold = 0.1)
+    sig <- significantQtls(r, "qvalue", threshold = 0.1)
     expect_s4_class(sig, "GRanges")
     # Reproduce: within genes whose event q_beta < 0.1, variants with qvalue < 0.1.
     qb <- as.numeric(r$q_beta)
@@ -375,7 +375,7 @@ test_that("getSignificantQtls (qvalue) selects variants by their qvalue mcol", {
     expect_equal(length(sig), expN)
 })
 
-test_that("getSignificantQtls (qvalue) errors when no event q column exists", {
+test_that("significantQtls (qvalue) errors when no event q column exists", {
     # Drop p_beta so permutation adds no q_beta, and skip bonferroni so there is
     # no q_bonferroni_min_original either -- yet the object is still postprocessed.
     r <- qtlAssociationPostprocess(
@@ -384,16 +384,16 @@ test_that("getSignificantQtls (qvalue) errors when no event q column exists", {
     )
     expect_null(r$q_beta)
     expect_null(r$q_bonferroni_min_original)
-    expect_error(getSignificantQtls(r, "qvalue"), "event q-value column")
+    expect_error(significantQtls(r, "qvalue"), "event q-value column")
 })
 
-test_that("getSignificantQtls returns an empty GRanges when nothing is significant", {
+test_that("significantQtls returns an empty GRanges when nothing is significant", {
     r <- qtlAssociationPostprocess(
         .qapDefaultFixture,
         mafCutoff = 0.01,
         cisWindow = 1e6
     )
-    sig <- getSignificantQtls(r, "bonferroni_original", threshold = 1e-300)
+    sig <- significantQtls(r, "bonferroni_original", threshold = 1e-300)
     expect_s4_class(sig, "GRanges")
     expect_length(sig, 0)
 })
@@ -453,7 +453,7 @@ test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_
     ))
 })
 
-test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on the filtered set", {
+test_that("significantQtls(bonferroni_filtered) applies the derived rule on the filtered set", {
     x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
@@ -461,7 +461,7 @@ test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on t
         cisWindow = 1e6,
         methods = "bonferroni"
     )
-    sig <- getSignificantQtls(r, "bonferroni_filtered", threshold = 0.5)
+    sig <- significantQtls(r, "bonferroni_filtered", threshold = 0.5)
     expect_s4_class(sig, "GRanges")
     fdr <- as.numeric(r$fdr_bonferroni_min_filtered)
     sigGenes <- which(!is.na(fdr) & fdr < 0.5)
@@ -491,14 +491,14 @@ test_that(".qapSignificanceMask returns empty masks for an unknown method", {
     S4Vectors::mcols(g)$Z <- c(1, 2)
     S4Vectors::mcols(g)$N <- c(10L, 10L)
     qss <- QtlSumStats(
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "g1",
         entry = list(g),
         genome = "hg19"
     )
     local_mocked_bindings(
-        getQcInfo = function(x) {
+        qcInfo = function(x) {
             list(
                 associationPostprocess = list(
                     fdrThreshold = 0.05,

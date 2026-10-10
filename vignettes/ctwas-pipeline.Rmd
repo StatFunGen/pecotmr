@@ -101,7 +101,7 @@ gwasSumStats <- loadGwasSumStatsFromManifest(
 )
 gwasByRegion <- summaryStatsQc(
     gwasSumStats,
-    panelFilterArgs = PanelFilterParam(mafCutoff = 0.0025)
+    panelFilterParam = PanelFilterParam(mafCutoff = 0.0025)
 )
 
 data(ctwasWeightsExample)
@@ -120,9 +120,12 @@ res <- ctwasPipeline(
         fallbackToPrefit = TRUE
     ),
     methodArgs = CtwasOptions(
-        min_group_size = 1,
-        min_p_single_effect = 0,
-        min_nonSNP_PIP = 0
+        regionData = CtwasRegionDataOptions(min_group_size = 1),
+        estParam = CtwasEstParamOptions(
+            min_group_size = 1,
+            min_p_single_effect = 0
+        ),
+        screen = CtwasScreenOptions(min_nonSNP_PIP = 0)
     )
 )
 res
@@ -192,15 +195,15 @@ ctwasPipeline(
 `(gwasStudy, study, context, method)` run.
 
 ```{r ctwas-identity}
-getMethodNames(res)
-getStudy(res)
-getContexts(res)
+methodNames(res)
+studyName(res)
+contexts(res)
 ```
 
-The per-gene posteriors live in `getFinemap()`:
+The per-gene posteriors live in `ctwasPosteriors()`:
 
 ```{r ctwas-finemap}
-fm <- getFinemap(res)
+fm <- ctwasPosteriors(res)
 as.data.frame(fm)[, c(
     "molecular_id",
     "context",
@@ -216,11 +219,11 @@ gene is causal given the SNPs it competes with. Here it is low (the toy GWAS
 has no real signal) and `cs` is `NA` because the gene falls in no credible
 set.
 
-`getSusieAlpha()` returns the per-single-effect alpha matrix behind those
+`susieAlpha()` returns the per-single-effect alpha matrix behind those
 PIPs, and the EM group priors sit on each row's entry:
 
 ```{r ctwas-param}
-param <- getCtwasGroupPriors(res$entry[[1]])
+param <- ctwasGroupPriors(res$entry[[1]])
 param$group_prior
 param$group_prior_var
 param$converged
@@ -251,20 +254,31 @@ est <- estCtwasGroupPriors(
         niter = 10,
         fallbackToPrefit = TRUE
     ),
-    methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0)
+    methodArgs = CtwasOptions(
+        regionData = CtwasRegionDataOptions(min_group_size = 1),
+        estParam = CtwasEstParamOptions(
+            min_group_size = 1,
+            min_p_single_effect = 0
+        )
+    )
 )
-screened <- screenCtwasRegions(est, methodArgs = CtwasOptions(min_nonSNP_PIP = 0))
+screened <- screenCtwasRegions(
+    est,
+    methodArgs = CtwasOptions(
+        screen = CtwasScreenOptions(min_nonSNP_PIP = 0)
+    )
+)
 finemapped <- finemapCtwasRegions(screened)
 nrow(finemapped$finemap_res)
 ```
 
-`finemap_res` here has more rows than `getFinemap(res)` above: it still
+`finemap_res` here has more rows than `ctwasPosteriors(res)` above: it still
 carries the SNP rows. `asCtwasResult()` is the step that structures the
 payload and drops them.
 
 ```{r ctwas-as-result}
-nrow(getFinemap(asCtwasResult(finemapped)))
-nrow(getFinemap(asCtwasResult(finemapped, keepSnps = TRUE)))
+nrow(ctwasPosteriors(asCtwasResult(finemapped)))
+nrow(ctwasPosteriors(asCtwasResult(finemapped, keepSnps = TRUE)))
 ```
 
 Each step's payload is also bundled, so you can enter anywhere:
@@ -308,7 +322,7 @@ ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
     method = NULL, # NULL: "ensemble" if present, else every method
-    L = 5,
+    maxNumSingleEffects = 5,
     ncore = 1,
     keepSnps = FALSE,
     ctwasPriorArgs = CtwasPriorParam(

@@ -360,7 +360,7 @@ fitSusieInfThenSusieRss <- function(
 #'   MAF). Default NULL.
 #' @param n Optional per-variant sample size, exported as the \code{N} column.
 #'   Default NULL -> \code{N} falls back to the fit's own scalar sample size.
-#' @param credibleSetArgs How credible sets are built and reported, built with
+#' @param credibleSetParam How credible sets are built and reported, built with
 #'   \code{\link{CredibleSetParam}}: \code{coverage},
 #'   \code{secondaryCoverage}, \code{signalCutoff} (the PIP cutoff for
 #'   including non-credible-set variants in top loci), \code{minAbsCorr} and
@@ -404,7 +404,7 @@ postprocessFinemappingFits <- function(
     yScalar = 1,
     af = NULL,
     n = NULL,
-    credibleSetArgs = CredibleSetParam(),
+    credibleSetParam = CredibleSetParam(),
     fitRetention = "slim",
     otherQuantities = NULL,
     region = NULL,
@@ -427,7 +427,7 @@ postprocessFinemappingFits <- function(
         yScalar = yScalar,
         af = af,
         n = n,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         fitRetention = fitRetention,
         otherQuantities = otherQuantities,
         region = region,
@@ -447,7 +447,7 @@ postprocessFinemappingFits <- function(
     yScalar,
     af,
     n,
-    credibleSetArgs,
+    credibleSetParam,
     fitRetention,
     otherQuantities,
     region,
@@ -465,7 +465,7 @@ postprocessFinemappingFits <- function(
         yScalar = yScalar,
         af = af,
         n = n,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         fitRetention = fitRetention,
         otherQuantities = otherQuantities,
         region = region,
@@ -592,7 +592,7 @@ postprocessFinemappingFit.susiF <- function(
     yScalar = 1,
     af = NULL,
     n = NULL,
-    credibleSetArgs = CredibleSetParam(),
+    credibleSetParam = CredibleSetParam(),
     fitRetention = "slim",
     otherQuantities = NULL,
     region = NULL,
@@ -602,7 +602,7 @@ postprocessFinemappingFit.susiF <- function(
 ) {
     csInput <- arg_match(csInput)
     # "slim" keeps a trimmed view of the fit; "full" the whole susie()
-    # return, so getSusieFit() and non-default-coverage getCs() can read
+    # return, so susieFit() and non-default-coverage credibleSets() can read
     # the full posterior matrices.
     trim <- identical(arg_match(fitRetention, c("slim", "full")), "slim")
     variantNames <- extractVariantNames(fit)
@@ -611,7 +611,7 @@ postprocessFinemappingFit.susiF <- function(
         csInput,
         fit = fit,
         dataX = dataX,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         method = method
     )
     .ppFinish(
@@ -626,7 +626,7 @@ postprocessFinemappingFit.susiF <- function(
         otherQuantities = otherQuantities,
         region = region,
         conditionIdx = conditionIdx,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         trim = trim,
         priorEffTol = priorEffTol
     )
@@ -649,7 +649,7 @@ postprocessFinemappingFit.susiF <- function(
     otherQuantities,
     region,
     conditionIdx,
-    credibleSetArgs,
+    credibleSetParam,
     trim,
     priorEffTol
 ) {
@@ -665,7 +665,7 @@ postprocessFinemappingFit.susiF <- function(
         otherQuantities = otherQuantities,
         region = region,
         conditionIdx = conditionIdx,
-        credibleSetArgs = credibleSetArgs
+        credibleSetParam = credibleSetParam
     )
     .ppEntryAndResult(
         topLociFull,
@@ -676,7 +676,7 @@ postprocessFinemappingFit.susiF <- function(
         method = method,
         dataY = dataY,
         otherQuantities = otherQuantities,
-        signalCutoff = credibleSetArgs$signalCutoff,
+        signalCutoff = credibleSetParam$signalCutoff,
         trim = trim,
         priorEffTol = priorEffTol
     )
@@ -748,18 +748,18 @@ postprocessFinemappingFit.susiF <- function(
     csInput,
     fit,
     dataX,
-    credibleSetArgs,
+    credibleSetParam,
     method
 ) {
     computeCsTables(
         fit,
         dataX = dataX,
-        coverage = credibleSetArgs$coverage,
-        secondaryCoverage = credibleSetArgs$secondaryCoverage,
+        coverage = credibleSetParam$coverage,
+        secondaryCoverage = credibleSetParam$secondaryCoverage,
         method = method,
         csInput = csInput,
-        minAbsCorr = credibleSetArgs$minAbsCorr,
-        medianAbsCorr = credibleSetArgs$medianAbsCorr
+        minAbsCorr = credibleSetParam$minAbsCorr,
+        medianAbsCorr = credibleSetParam$medianAbsCorr
     )
 }
 
@@ -776,7 +776,7 @@ postprocessFinemappingFit.susiF <- function(
     otherQuantities,
     region,
     conditionIdx,
-    credibleSetArgs
+    credibleSetParam
 ) {
     buildTopLoci(
         fit,
@@ -791,7 +791,7 @@ postprocessFinemappingFit.susiF <- function(
         otherQuantities = otherQuantities,
         region = region,
         conditionIdx = conditionIdx,
-        credibleSetArgs = credibleSetArgs
+        credibleSetParam = credibleSetParam
     )
 }
 
@@ -1072,7 +1072,7 @@ computeCsTable <- function(
 # The between-CS correlation is a view over the fit-time LD, which lives on the
 # QtlDataset (genotypes) / SumStats (LD sketch) -- it is NEVER stored on the
 # fit. get_cs_correlation() needs only the CS membership + PIP + the LD, with
-# the LD columns/rows ALIGNED to the fit's variable order (getVariantIds).
+# the LD columns/rows ALIGNED to the fit's variable order (variantIds).
 
 # TRUE when the fit has fewer than two credible sets (no between-CS corr).
 .csCountBelowTwo <- function(fit) {
@@ -1100,7 +1100,7 @@ computeCsTable <- function(
 # order; errors if any fit variant is absent (a missing one would misalign the
 # 1..p credible-set indices with a shrunken genotype matrix).
 .csGenotypesForFit <- function(qtlDataset, variantIds) {
-    geno <- getGenotypes(qtlDataset, region = .csVariantRegion(variantIds))
+    geno <- genotypes(qtlDataset, region = .csVariantRegion(variantIds))
     absent <- setdiff(variantIds, colnames(geno))
     if (length(absent) > 0L) {
         abort(glue(
@@ -1127,7 +1127,7 @@ setMethod(
         if (.csCountBelowTwo(fit)) {
             return(NULL)
         }
-        ldSketch <- getLdSketch(ldSource)
+        ldSketch <- ldSketch(ldSource)
         if (is.null(ldSketch)) {
             abort(glue(
                 "computeCsCorrelation(): the summary-statistics ldSource ",
@@ -1202,9 +1202,9 @@ setMethod(
     scale,
     primaryCsPos,
     effectOf,
-    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE)
+    credibleSetParam = CredibleSetParam(includeAllCs = FALSE)
 ) {
-    perCs <- credibleSetArgs$perCsColumns %||% "none"
+    perCs <- credibleSetParam$perCsColumns %||% "none"
     nV <- if (is.null(alpha) || length(dim(alpha)) < 2L) {
         length(primaryCsPos)
     } else {
@@ -1226,7 +1226,7 @@ setMethod(
         effectOf,
         nV,
         identical(perCs, "alpha"),
-        credibleSetArgs$includeAllCs
+        credibleSetParam$includeAllCs
     )
 }
 
@@ -1551,7 +1551,7 @@ setMethod(
 #' @param region Optional \code{"chr:start-end"} string. Default is NULL.
 #' @param conditionIdx Integer or \code{NULL}. Index of the conditioned effect
 #'   (per-condition output); \code{NULL} for the unconditioned fit.
-#' @param credibleSetArgs How credible sets are built and reported, built with
+#' @param credibleSetParam How credible sets are built and reported, built with
 #'   \code{\link{CredibleSetParam}}. \code{perCsColumns} decides which
 #'   per-credible-set variant-level columns this table carries, and
 #'   \code{includeAllCs} their labels.
@@ -1579,7 +1579,7 @@ buildTopLoci <- function(
     otherQuantities = NULL,
     region = NULL,
     conditionIdx = NULL,
-    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE)
+    credibleSetParam = CredibleSetParam(includeAllCs = FALSE)
 ) {
     if (missing(method)) {
         method <- NULL
@@ -1601,7 +1601,7 @@ buildTopLoci <- function(
         otherQuantities = otherQuantities,
         region = region,
         conditionIdx = conditionIdx,
-        credibleSetArgs = credibleSetArgs
+        credibleSetParam = credibleSetParam
     )
 }
 
@@ -1619,7 +1619,7 @@ buildTopLoci <- function(
     otherQuantities,
     region,
     conditionIdx,
-    credibleSetArgs
+    credibleSetParam
 ) {
     nV <- length(variantNames)
     cov <- .btlCoverage(csTables)
@@ -1634,7 +1634,7 @@ buildTopLoci <- function(
         cs,
         csTables,
         nV,
-        list(credibleSetArgs = credibleSetArgs)
+        list(credibleSetParam = credibleSetParam)
     )
     .btlAssembleFinal(
         variantNames,
@@ -1739,7 +1739,7 @@ buildTopLoci <- function(
 }
 
 # The per-variant N column. Numeric, so a fractional *effective* N (e.g.
-# 4 / (1 / nCase + 1 / nControl)) matches getSumStatsDf(entry)$N exactly rather
+# 4 / (1 / nCase + 1 / nControl)) matches as.data.frame(entry)$N exactly rather
 # than being truncated. With no per-variant n this falls back to the fit's
 # scalar N (integer nrow on the QTL path, NA otherwise); a scalar n recycles.
 # @noRd
@@ -2122,7 +2122,7 @@ buildTopLoci <- function(
         fit$X_column_scale_factors,
         primaryCsPos,
         effectOfPrim,
-        credibleSetArgs = opts$credibleSetArgs
+        credibleSetParam = opts$credibleSetParam
     )
 }
 
@@ -2397,7 +2397,7 @@ formatFinemappingOutput <- function(post, primaryMethod) {
 }
 
 #' @noRd
-getCsIndex <- function(snpsIdx, susieCs) {
+csIndex <- function(snpsIdx, susieCs) {
     # Return ALL CS indices that contain this variant (not just one)
     idx <- which(map_lgl(susieCs, .csContains, snpsIdx = snpsIdx))
     if (length(idx) == 0) {
@@ -2406,7 +2406,7 @@ getCsIndex <- function(snpsIdx, susieCs) {
     return(idx)
 }
 #' @noRd
-getTopVariantsIdx <- function(susieOutput, signalCutoff) {
+topVariantsIdx <- function(susieOutput, signalCutoff) {
     # `sets$cs` is absent when no credible set was found; list_c() is strict
     # about NULL where unlist() silently returned it.
     cs <- list_c(susieOutput$sets$cs %||% list())
@@ -2418,7 +2418,7 @@ getTopVariantsIdx <- function(susieOutput, signalCutoff) {
 # Variants in multiple CSs get multiple rows.
 #' @importFrom stringr str_replace
 #' @noRd
-getCsInfo <- function(susieOutputSetsCs, topVariantsIdx) {
+csInfo <- function(susieOutputSetsCs, topVariantsIdx) {
     csNames <- names(susieOutputSetsCs)
     rows <- map(
         topVariantsIdx,
@@ -2511,7 +2511,7 @@ calPurity <- function(lCs, X, method = "min") {
 #'   Similar to the SuSiE set output
 #' @examples
 #' data(fsusieFineMappingExample)
-#' fit <- getSusieFit(fsusieFineMappingExample)
+#' fit <- susieFit(fsusieFineMappingExample)
 #' fsusieGetCs(fit)
 #' @export
 fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
@@ -2563,7 +2563,7 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #' @param Y Response phenotype matrix.
 #' @param pos Genomics position of phenotypes, used for specifying the wavelet
 #'   model.
-#' @param L The maximum number of the credible set.
+#' @param maxNumSingleEffects The maximum number of the credible set.
 #' @param prior method to generate the prior.
 #' @param maxSnpEm maximum number of SNP used for learning the prior.
 #' @param covLev Coverage level for the credible sets.
@@ -2585,7 +2585,7 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #' Y <- matrix(rep(base, each = n), n, nPos) +
 #'   X[, 1] %o% (0.5 * cos(seq(0, pi, length.out = nPos)))
 #' pos <- seq_len(nPos)
-#' fsusieWrapper(X, Y, pos = pos, L = 2,
+#' fsusieWrapper(X, Y, pos = pos, maxNumSingleEffects = 2,
 #'   prior = "mixture_normal_per_scale", maxSnpEm = 10,
 #'   covLev = 0.95, minPurity = 0.5, maxScale = 6)
 #' @export
@@ -2593,7 +2593,7 @@ fsusieWrapper <- function(
     X,
     Y,
     pos,
-    L,
+    maxNumSingleEffects,
     prior,
     maxSnpEm,
     covLev,
@@ -2610,7 +2610,7 @@ fsusieWrapper <- function(
             X = X,
             Y = Y,
             pos = pos,
-            L = L,
+            L = maxNumSingleEffects,
             prior = prior,
             max_SNP_EM = maxSnpEm,
             cov_lev = covLev,
@@ -2781,7 +2781,7 @@ fitMvsusieRss <- function(
 #' Y <- matrix(rep(base, each = n), n, nPos) +
 #'   X[, 1] %o% (0.5 * cos(seq(0, pi, length.out = nPos)))
 #' pos <- seq_len(nPos)
-#' fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(L = 2))
+#' fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(maxit = 5))
 #' @export
 fitFsusie <- function(X, Y, pos, methodArgs = FsusieOptions()) {
     .assertMethodOptions(methodArgs, "FsusieOptions", "methodArgs")
@@ -3213,7 +3213,7 @@ susieAshRssWeights <- function(
 #' Y <- multiTraitData$Y
 #' fit <- fitMvsusie(X = X, Y = Y,
 #'   prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
-#'   methodArgs = MvsusieOptions(L = 5))
+#'   methodArgs = MvsusieOptions(max_iter = 50))
 #' mvsusieWeights(mvsusieFit = fit)
 #' }
 #' @export
@@ -3314,7 +3314,7 @@ mvsusieWeights <- function(mvsusieFit = NULL) {
 #' Y <- matrix(rep(base, each = n), n, nPos) +
 #'   X[, 1] %o% (0.5 * cos(seq(0, pi, length.out = nPos)))
 #' pos <- seq_len(nPos)
-#' fit <- fsusieWrapper(X, Y, pos = pos, L = 2,
+#' fit <- fsusieWrapper(X, Y, pos = pos, maxNumSingleEffects = 2,
 #'   prior = "mixture_normal_per_scale", maxSnpEm = 10,
 #'   covLev = 0.95, minPurity = 0.5, maxScale = 6)
 #' fsusieWeights(fsusieFit = fit, X = X, Y = Y,
@@ -3805,10 +3805,10 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 #' @return The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 #' @examples
 #' data(qtlSumStatsExample)
-#' getSusieResult(qtlSumStatsExample)
+#' susieResult(qtlSumStatsExample)
 #' @importFrom checkmate assertList
 #' @export
-getSusieResult <- function(conData) {
+susieResult <- function(conData) {
     # No type guard: this is duck-typed on `$` and `length()` and returns NULL
     # for anything without a `finemappingEntry`. Its own @example passes a
     # QtlSumStats, which assertList rejects.
@@ -3833,12 +3833,12 @@ getSusieResult <- function(conData) {
 #'
 #' @param fmRow A \code{\link{fineMappingRow}}, or a single-row
 #'   fine-mapping collection as returned by
-#'   \code{\link{getFineMappingResult}}, carrying the SuSiE fit and
+#'   \code{\link{fineMappingResult}}, carrying the SuSiE fit and
 #'   variant ids.
 #' @param csNames Character vector. Names of the Credible Sets, usually in the
 #'   format "L_<number>".
 #' @param topLociTable Data frame. The top-loci table (e.g. from
-#'   \code{\link{getTopLoci}}) carrying \code{variant_id}, \code{pip}, and
+#'   \code{\link{topLoci}}) carrying \code{variant_id}, \code{pip}, and
 #'   \code{z} columns.
 #' @param ldSource The LD source from which the between-credible-set correlation
 #'   is derived on demand: a \code{QtlDataset} (individual-level) or a
@@ -3910,7 +3910,7 @@ extractCsInfo <- function(fmRow, csNames, topLociTable, ldSource) {
 #'
 #' @param fmRow A \code{\link{fineMappingRow}}, or a single-row
 #'   fine-mapping collection as returned by
-#'   \code{\link{getFineMappingResult}}, carrying the SuSiE fit and
+#'   \code{\link{fineMappingResult}}, carrying the SuSiE fit and
 #'   variant ids.
 #' @param sumstats A list or data frame carrying a \code{z} element aligned to
 #'   the fit's variants (\code{sumstats$z}).
@@ -4267,7 +4267,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     infFit,
     X,
     y,
-    credibleSetArgs,
+    credibleSetParam,
     methodArgs,
     verbose,
     ctx,
@@ -4281,7 +4281,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         infFit,
         X = X,
         y = y,
-        coverage = credibleSetArgs$coverage,
+        coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
         verbose = verbose,
         ctx = ctx,
@@ -4295,7 +4295,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         tk,
         X = X,
         y = y,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         af = af,
         fitRetention = fitRetention
     )
@@ -4307,10 +4307,10 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # @noRd
 .fmXFitAll <- function(
     toRun,
-    addSusieInf,
+    initializeWithSusieInf,
     X,
     y,
-    credibleSetArgs,
+    credibleSetParam,
     methodArgs,
     verbose,
     ctx,
@@ -4318,12 +4318,12 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     af,
     fitRetention
 ) {
-    chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
+    chainLocal <- .fmResolveSusieChain(toRun, initializeWithSusieInf)
     infFit <- .fmXInfFit(
         chainLocal,
         X = X,
         y = y,
-        coverage = credibleSetArgs$coverage,
+        coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
         verbose = verbose,
         ctx = ctx,
@@ -4337,7 +4337,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             infFit = infFit,
             X = X,
             y = y,
-            credibleSetArgs = credibleSetArgs,
+            credibleSetParam = credibleSetParam,
             methodArgs = methodArgs,
             verbose = verbose,
             ctx = ctx,
@@ -4353,8 +4353,8 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     X,
     y,
     toRun,
-    addSusieInf,
-    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE),
+    initializeWithSusieInf,
+    credibleSetParam = CredibleSetParam(includeAllCs = FALSE),
     methodArgs,
     verbose,
     ctx,
@@ -4368,10 +4368,10 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 ) {
     out <- .fmXFitAll(
         toRun,
-        addSusieInf = addSusieInf,
+        initializeWithSusieInf = initializeWithSusieInf,
         X = X,
         y = y,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         methodArgs = methodArgs,
         verbose = verbose,
         ctx = ctx,
@@ -4383,7 +4383,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         out,
         X = X,
         y = y,
-        coverage = credibleSetArgs$coverage,
+        coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
         cvFolds = cvFolds,
         cvThreads = cvThreads,
@@ -4473,7 +4473,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     tk,
     X,
     y,
-    credibleSetArgs,
+    credibleSetParam,
     af,
     fitRetention
 ) {
@@ -4484,7 +4484,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         dataY = y,
         af = af,
         csInput = "X",
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         fitRetention = fitRetention
     )
 }
@@ -4547,25 +4547,25 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     R,
     n,
     toRun,
-    addSusieInf,
-    credibleSetArgs = CredibleSetParam(includeAllCs = FALSE),
+    initializeWithSusieInf,
+    credibleSetParam = CredibleSetParam(includeAllCs = FALSE),
     methodArgs,
     verbose,
     label,
     af = NULL,
     nVar = NULL,
     fitRetention = "slim",
-    rssArgs
+    susieRssParam
 ) {
-    chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
+    chainLocal <- .fmResolveSusieChain(toRun, initializeWithSusieInf)
     infFit <- .fmRssInfFit(
         chainLocal,
         z = z,
         R = R,
         n = n,
-        coverage = credibleSetArgs$coverage,
+        coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
-        rssArgs = rssArgs,
+        susieRssParam = susieRssParam,
         verbose = verbose,
         label = label
     )
@@ -4578,9 +4578,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             z = z,
             R = R,
             n = n,
-            credibleSetArgs = credibleSetArgs,
+            credibleSetParam = credibleSetParam,
             methodArgs = methodArgs,
-            rssArgs = rssArgs,
+            susieRssParam = susieRssParam,
             verbose = verbose,
             label = label,
             af = af,
@@ -4601,9 +4601,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     z,
     R,
     n,
-    credibleSetArgs,
+    credibleSetParam,
     methodArgs,
-    rssArgs,
+    susieRssParam,
     verbose,
     label,
     af,
@@ -4617,9 +4617,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         z = z,
         R = R,
         n = n,
-        coverage = credibleSetArgs$coverage,
+        coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
-        rssArgs = rssArgs,
+        susieRssParam = susieRssParam,
         verbose = verbose,
         label = label
     )
@@ -4630,13 +4630,13 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         f$fit,
         R = R,
         z = z,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         af = af,
         nVar = nVar,
         fitRetention = fitRetention
     )
-    if (f$isStd && isTRUE(rssArgs$serFallback)) {
-        return(.fmRssRecordFallback(entry, f, rssArgs$keepFullFit))
+    if (f$isStd && isTRUE(susieRssParam$serFallback)) {
+        return(.fmRssRecordFallback(entry, f, susieRssParam$keepFullFit))
     }
     entry
 }
@@ -4649,7 +4649,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     n,
     coverage,
     methodArgs,
-    rssArgs,
+    susieRssParam,
     verbose,
     label
 ) {
@@ -4667,9 +4667,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         "susieInf",
         coverage = coverage,
         userArgs = methodArgs[["susieInf"]],
-        rFinite = rssArgs$rFinite,
-        rMismatch = rssArgs$rMismatch,
-        rssControl = .rssControlList(rssArgs$control)
+        rFinite = susieRssParam$rFinite,
+        rMismatch = susieRssParam$rMismatch,
+        rssControl = .rssControlList(susieRssParam$control)
     )
 }
 
@@ -4684,7 +4684,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     n,
     coverage,
     methodArgs,
-    rssArgs,
+    susieRssParam,
     verbose,
     label
 ) {
@@ -4708,11 +4708,11 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         chainFromInf = chainFrom,
         coverage = coverage,
         userArgs = methodArgs[[tk]],
-        rFinite = rssArgs$rFinite,
-        rMismatch = rssArgs$rMismatch,
-        rssControl = .rssControlList(rssArgs$control)
+        rFinite = susieRssParam$rFinite,
+        rMismatch = susieRssParam$rMismatch,
+        rssControl = .rssControlList(susieRssParam$control)
     )
-    .fmRssSerFallback(fit, rssArgs)
+    .fmRssSerFallback(fit, susieRssParam)
 }
 
 # An unreliable LD matrix makes the multi-effect fit untrustworthy, so with
@@ -4720,7 +4720,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # returned instead -- with the multi-effect fit kept alongside it, since
 # the caller may still want to inspect what was rejected.
 # @noRd
-.fmRssSerFallback <- function(fit, rssArgs) {
+.fmRssSerFallback <- function(fit, susieRssParam) {
     rfd <- fit$R_finite_diagnostics
     flag <- if (!is.null(rfd) && !is.null(rfd$R_reliability_flag)) {
         isTRUE(rfd$R_reliability_flag)
@@ -4728,7 +4728,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         NA
     }
     if (
-        !isTRUE(rssArgs$serFallback) || !isTRUE(flag) || is.null(rfd$ser_model)
+        !isTRUE(susieRssParam$serFallback) ||
+            !isTRUE(flag) ||
+            is.null(rfd$ser_model)
     ) {
         return(list(fit = fit, flag = flag, multiFit = NULL))
     }
@@ -4749,7 +4751,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     n,
     coverage,
     methodArgs,
-    rssArgs,
+    susieRssParam,
     verbose,
     label
 ) {
@@ -4781,7 +4783,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         n = n,
         coverage = coverage,
         methodArgs = methodArgs,
-        rssArgs = rssArgs,
+        susieRssParam = susieRssParam,
         verbose = verbose,
         label = label
     )
@@ -4793,7 +4795,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     fit,
     R,
     z,
-    credibleSetArgs,
+    credibleSetParam,
     af,
     nVar,
     fitRetention
@@ -4809,7 +4811,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         # never 1. This is NOT `n` (the scalar median the RSS fit consumes).
         n = nVar,
         csInput = "Xcorr",
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         fitRetention = fitRetention
     )
 }
@@ -4837,10 +4839,10 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     # assigning into it. The variants and topLoci are unchanged, so this
     # round-trips them through the same builder the caller used.
     fineMappingRow(
-        variantIds = getVariantIds(ent),
+        variantIds = variantIds(ent),
         susieFit = sf,
         topLoci = .fmrPartsTopLoci(ent),
-        cvResult = getCvResult(ent)
+        cvResult = cvResult(ent)
     )
 }
 
@@ -4878,7 +4880,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     yScalar,
     af,
     n,
-    credibleSetArgs,
+    credibleSetParam,
     fitRetention,
     otherQuantities,
     region,
@@ -4896,7 +4898,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         yScalar = yScalar,
         af = af,
         n = n,
-        credibleSetArgs = credibleSetArgs,
+        credibleSetParam = credibleSetParam,
         fitRetention = fitRetention,
         otherQuantities = otherQuantities,
         region = region,
@@ -4974,7 +4976,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # One (variant, CS) block of rows for variant `vi`.
 # @noRd
 .csInfoRow <- function(vi, susieOutputSetsCs, csNames) {
-    idx <- getCsIndex(vi, susieOutputSetsCs)
+    idx <- csIndex(vi, susieOutputSetsCs)
     if (length(idx) == 1 && is.na(idx)) {
         return(tibble(
             variant_idx = vi,

@@ -207,7 +207,7 @@ colocPipeline(
     priors = ColocPriorParam(p1 = 1e-4, p2 = 1e-4, p12 = 5e-6),
     gwasFineMappingArgs = GwasFineMappingParam( # inline GWAS FM when needed
         methods = "susie",
-        credibleSetArgs = CredibleSetParam(coverage = 0.95)
+        credibleSetParam = CredibleSetParam(coverage = 0.95)
     ),
     returnGwasFineMapping = FALSE,
     enrichment = NULL, # data.frame for enloc mode
@@ -228,7 +228,7 @@ pair is reported verbatim, including both halves of a credible set that
 straddles a block boundary.
 
 ```{r read-pairs}
-pairs <- getColocPairs(res)
+pairs <- colocPairs(res)
 head(pairs[order(pairs$PP.H4.abf, decreasing = TRUE), ])
 ```
 
@@ -245,7 +245,7 @@ The per-variant layer: `colocPp` is `PP.H4.abf * SNP.PP.H4`, the posterior that
 this particular variant is the shared causal one.
 
 ```{r read-variants}
-variants <- getColocVariants(res)
+variants <- colocVariants(res)
 head(variants[order(variants$colocPp, decreasing = TRUE), ])
 ```
 
@@ -258,7 +258,7 @@ rather than inherited. Filtering happens before any LD extraction, so a
 stricter threshold costs strictly less.
 
 ```{r read-cs}
-head(getColocCredibleSets(res, coverage = 0.95, minPp4 = 0.1))
+head(colocCredibleSets(res, coverage = 0.95, minPp4 = 0.1))
 ```
 
 ### Genes
@@ -269,7 +269,7 @@ variant is in one block or the other — so they are summed; distinct QTL
 credible sets are independent signals and combine as `1 - prod(1 - p)`.
 
 ```{r read-genes}
-getColocGenes(res)
+colocGenes(res)
 ```
 
 The warning above is the diagnostic that rule produces: a within-credible-set

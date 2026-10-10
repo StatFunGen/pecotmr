@@ -35,7 +35,7 @@ test_that("pipeline runs end-to-end on a single + joint SldscData", {
 })
 
 # The shape assertions above pass even when every meta row is NA, which is
-# what a degenerate per-block tau (constant tauBlocks -> jackknife SE of 0)
+# what a degenerate per-block tau (constant annotationJackknifeCoefs -> jackknife SE of 0)
 # produces: metafor gets zero-variance inputs and DerSimonian-Laird drops
 # every trait, leaving nTraits == 0. Assert on the values, not just the
 # columns.
@@ -51,7 +51,7 @@ test_that("meta tables pool every trait rather than dropping them", {
         expect_true(all(meta$singleSe > 0), info = tbl)
     }
     # tau* is the one pooled from the jackknife blocks, so it is the column
-    # a zero-variance tauBlocks silently empties.
+    # a zero-variance annotationJackknifeCoefs silently empties.
     expect_true(all(res$meta$tauStar$singleMean > 0))
     expect_false(any(is.na(res$meta$tauStar$jointMean)))
 })
@@ -100,7 +100,7 @@ test_that("pipeline errors on non-SldscData input", {
 })
 
 test_that("pipeline errors when the SldscData has no traits", {
-    sd <- SldscData(annot = data.frame(CHR = 1, SNP = "rs1", annot_A = 1))
+    sd <- SldscData(annotData = data.frame(CHR = 1, SNP = "rs1", annot_A = 1))
     expect_error(suppressMessages(sldscPostprocessingPipeline(sd)), "no traits")
 })
 
@@ -302,7 +302,7 @@ test_that(".sldscCollectSingle returns empty parts for no standardizations", {
 
 test_that(".sldscTraitSingle tolerates a trait with no single-mode runs", {
     local_mocked_bindings(
-        getTraitRun = function(...) NULL,
+        sldscResults = function(...) NULL,
         .package = "pecotmr"
     )
     ctx <- list(sldscData = NULL, targetCategories = c("t1", "t2"))

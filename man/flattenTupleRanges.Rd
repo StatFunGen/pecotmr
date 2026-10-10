@@ -33,7 +33,7 @@ between objects.
 Non-atomic \code{mcols} columns -- the per-element \code{susieFit} /
 \code{cvResult} payloads -- are dropped. They describe an element, not a
 range, so there is no row to broadcast them onto. Use the accessors
-(\code{\link{getSusieFit}}, \code{\link{getCvResult}}) for those.
+(\code{\link{susieFit}}, \code{\link{cvResult}}) for those.
 }
 \examples{
 data(qtlFineMappingExample)

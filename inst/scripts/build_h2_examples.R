@@ -61,14 +61,14 @@ ldScoreExample <- buildLdScore(ldList, genome = "hg38")
 
 stopifnot(
     length(ldEigenExample) == length(ldScoreExample),
-    length(getEigenList(ldEigenExample)) == N_BLOCKS,
-    length(getLdMatrixList(ldScoreExample)) == N_BLOCKS,
+    length(eigenList(ldEigenExample)) == N_BLOCKS,
+    length(ldMatrixList(ldScoreExample)) == N_BLOCKS,
     identical(names(ldEigenExample), names(ldScoreExample))
 )
 
 # The two routes to an LD score must agree, or one of them has drifted.
 stopifnot(all.equal(
-    as.vector(getLdScores(ldScoreExample)[, 1]),
+    as.vector(mcols(ldScoreExample)$ldScores[, 1]),
     as.vector(computeLdScores(ldEigenExample)[, 1])
 ))
 
@@ -83,7 +83,7 @@ perSnpVar <- rep(h2True / M, M)
 
 simZ <- function() {
     z <- numeric(M)
-    for (block in getLdMatrixList(ldScoreExample)) {
+    for (block in ldMatrixList(ldScoreExample)) {
         idx <- block$snpIdx
         p <- length(idx)
         sigma <- N * (block$R %*% diag(perSnpVar[idx], p) %*% block$R) + block$R

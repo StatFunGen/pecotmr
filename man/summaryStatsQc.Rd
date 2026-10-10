@@ -7,7 +7,7 @@
 summaryStatsQc(
   sumstats,
   sumstatsFilterArgs = SumstatsFilterParam(),
-  panelFilterArgs = PanelFilterParam(),
+  panelFilterParam = PanelFilterParam(),
   keepVariants = NULL,
   skipRegion = NULL,
   signalScreenArgs = SignalScreenParam(),
@@ -32,7 +32,7 @@ column when non-zero), and \code{nCutoff} drops variants whose \code{N}
 is more than that many median-absolute-deviations from the median (0
 disables it).}
 
-\item{panelFilterArgs}{LD-reference-panel filters, built with
+\item{panelFilterParam}{LD-reference-panel filters, built with
   \code{\link{PanelFilterParam}}. \code{macCutoff} is converted to a MAF
   equivalent using \code{macCutoff / (2 * nSamples)} and the stricter of
   it and \code{mafCutoff} applies; \code{imissCutoff} is a per-variant
@@ -150,7 +150,7 @@ optional RAISS imputation. No Bioconductor genome / dbSNP packages required.
 The returned collection has its \code{qcInfo} slot populated with a per-entry
 audit record (variant counts, drop counts at each step, which filters fired,
 etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
-\code{length(getQcInfo(x)) == 0L}.
+\code{length(qcInfo(x)) == 0L}.
 
 Column-availability error contract: a non-zero \code{infoCutoff} requires
 every entry to carry an \code{INFO} column, and a non-zero \code{nCutoff}

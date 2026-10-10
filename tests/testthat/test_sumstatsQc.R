@@ -8,7 +8,7 @@ context("sumstats_qc")
 #     pair
 #   * `QcResult` and the accessors `getRssInput()`, `getLdData()`,
 #     `getOutlierNumber()` have been removed; QC audit lives on
-#     `getQcInfo(<SumStats>)`
+#     `qcInfo(<SumStats>)`
 # Integration coverage of `summaryStatsQc(<SumStats>)` lives in the
 # pipeline test files (test_colocboostPipeline.R, etc.).
 #
@@ -3075,10 +3075,10 @@ context("summaryStatsQc")
 .ssQ_makeGwasSumStats <- function(
     snp_ids = paste0("rs", 1:4),
     positions = c(100L, 200L, 300L, 400L),
-    study = "g1"
+    studyName = "g1"
 ) {
     GwasSumStats(
-        study = study,
+        studyName = studyName,
         entry = list(.ssQ_makeEntryGr(snp_ids, positions)),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3089,31 +3089,31 @@ context("summaryStatsQc")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -3147,7 +3147,7 @@ test_that("mafCutoff > 0 with no frequency skips the filter, not the run", {
     expect_warning(
         res <- summaryStatsQc(
             ss,
-            panelFilterArgs = PanelFilterParam(mafCutoff = 0.05)
+            panelFilterParam = PanelFilterParam(mafCutoff = 0.05)
         ),
         "skipping the MAF filter"
     )
@@ -3180,7 +3180,7 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
     mc$Z <- c(0.2, 0.3, 0.1, 12) # only the off-panel rsX carries signal
     S4Vectors::mcols(gr) <- mc
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3207,7 +3207,7 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
     mc$Z <- c(0.2, 0.3, 0.1, 12)
     S4Vectors::mcols(gr) <- mc
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3228,7 +3228,7 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
 # as real genotype LD sketches do, so a re-keyed entry SNP resolves against it.
 .ssQ_makeHandleVid <- function(snp_n = 8L, n_samples = 60L) {
     h <- .ssQ_makeHandle(snp_n, n_samples)
-    h@snpInfo$SNP <- paste0("chr1:", getSnpInfo(h)$BP, ":G:A")
+    h@snpInfo$SNP <- paste0("chr1:", snpInfo(h)$BP, ":G:A")
     h
 }
 
@@ -3254,7 +3254,7 @@ test_that("summaryStatsQc: harmonization re-keys SNP and sign-flips Z", {
     # the SNP must be re-keyed to the panel-orientation id (chr1:200:G:A), not
     # left at the input-orientation chr1:200:A:G. Exact matches are unchanged.
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeFlipEntryGr()),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3333,7 +3333,7 @@ test_that("a tag-named panel entry survives the end-to-end sketch subset", {
     h <- .ssQ_makeHandleVid()
     h@snpInfo$SNP[h@snpInfo$BP == 200L] <- "chr1:200:INS:A"
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr()),
         genome = "hg19",
         ldSketch = h
@@ -3347,7 +3347,7 @@ test_that("a tag-named panel entry survives the end-to-end sketch subset", {
     expect_true("chr1:200:G:A" %in% snp)
     # the retained sketch keeps the panel row the QC'd entry still refers to
     expect_true(
-        "chr1:200:G:A" %in% pecotmr:::.ldSketchMatchIds(getLdSketch(out))
+        "chr1:200:G:A" %in% pecotmr:::.ldSketchMatchIds(ldSketch(out))
     )
 })
 
@@ -3360,10 +3360,10 @@ test_that("the sketch survives a chr:pos:A1:A2 panel (PLINK .bim order)", {
     # .subsetSketchToIds() silently emptied the sketch and RSS fine-mapping /
     # TWAS weights aborted later with "not present in the LD sketch panel".
     h <- .ssQ_makeHandleVid()
-    si <- getSnpInfo(h)
+    si <- snpInfo(h)
     h@snpInfo$SNP <- paste0("chr1:", si$BP, ":", si$A1, ":", si$A2)
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
             snp_ids = paste0("chr1:", c(100L, 200L, 300L, 400L), ":G:A")
         )),
@@ -3375,7 +3375,7 @@ test_that("the sketch survives a chr:pos:A1:A2 panel (PLINK .bim order)", {
         signalScreenArgs = SignalScreenParam(pip = 0),
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
     )
-    kept <- pecotmr:::.ldSketchMatchIds(getLdSketch(out))
+    kept <- pecotmr:::.ldSketchMatchIds(ldSketch(out))
     expect_length(kept, 4L)
     expect_setequal(
         pecotmr:::parseVariantId(kept)$pos,
@@ -3389,7 +3389,7 @@ test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants", {
     # "absent from the ldSketch panel". After the harmonization re-key the SNP
     # matches the panel and slalom QC runs to completion.
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeFlipEntryGr()),
         genome = "hg19",
         ldSketch = .ssQ_makeHandleVid()
@@ -3431,9 +3431,9 @@ test_that("summaryStatsQc: ldMismatchQc reconciles a chr-prefix difference", {
     # canonical chr-prefixed form, so the opt-in z-mismatch panel match must
     # reconcile the prefix (previously errored "absent from the ldSketch panel").
     h <- .ssQ_makeHandle()
-    h@snpInfo$SNP <- paste0("1:", getSnpInfo(h)$BP, ":G:A") # non-chr-prefixed
+    h@snpInfo$SNP <- paste0("1:", snpInfo(h)$BP, ":G:A") # non-chr-prefixed
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr()),
         genome = "hg19",
         ldSketch = h
@@ -3521,7 +3521,7 @@ test_that("summaryStatsQc: vanilla run fills qcInfo, returns GwasSumStats", {
     ss <- .ssQ_makeGwasSumStats()
     res <- summaryStatsQc(ss)
     expect_s4_class(res, "GwasSumStats")
-    qc <- getQcInfo(res)
+    qc <- qcInfo(res)
     expect_true(length(qc) > 0L)
     expect_true("options" %in% names(qc))
     expect_true("entryAudit" %in% names(qc))
@@ -3534,7 +3534,7 @@ test_that("summaryStatsQc: vanilla run fills qcInfo, returns GwasSumStats", {
 test_that("summaryStatsQc: keepVariants subsets entries, records the drop", {
     ss <- .ssQ_makeGwasSumStats()
     res <- summaryStatsQc(ss, keepVariants = c("rs1", "rs3"))
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$keepVariantsDropped, 2L)
     expect_equal(ea$variantsOut, 2L)
 })
@@ -3542,7 +3542,7 @@ test_that("summaryStatsQc: keepVariants subsets entries, records the drop", {
 test_that("summaryStatsQc: skipRegion drops overlapping variants", {
     ss <- .ssQ_makeGwasSumStats()
     res <- summaryStatsQc(ss, skipRegion = "chr1:50-150")
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$skipRegionDropped, 1L) # rs1 at pos 100 is dropped
 })
 
@@ -3552,13 +3552,13 @@ test_that("summaryStatsQc: PIP screen triggers when no variant has signal", {
     gr <- .ssQ_makeEntryGr()
     S4Vectors::mcols(gr)$Z <- rep(0.1, length(gr))
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
     res <- summaryStatsQc(ss, signalScreenArgs = SignalScreenParam(pip = 0.99))
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_true(isTRUE(ea$pipScreenSkipped))
     expect_match(ea$pipScreenReason, "no signals above PIP threshold")
     expect_equal(length(res[[1L]]), 0L)
@@ -3567,7 +3567,7 @@ test_that("summaryStatsQc: PIP screen triggers when no variant has signal", {
 test_that("summaryStatsQc: harmonized variants count is recorded", {
     ss <- .ssQ_makeGwasSumStats()
     res <- summaryStatsQc(ss)
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$matchedAgainstSketch, 4L)
 })
 
@@ -3581,7 +3581,7 @@ test_that("summaryStatsQc: options block records the curated knobs", {
             nCutoff = 10
         )
     )
-    opts <- getQcInfo(res)$options
+    opts <- qcInfo(res)$options
     expect_true(opts$removeIndels)
     expect_false(opts$removeStrandAmbiguous)
     expect_equal(opts$nCutoff, 10)
@@ -3590,7 +3590,7 @@ test_that("summaryStatsQc: options block records the curated knobs", {
 test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
     gr <- .ssQ_makeEntryGr()
     ss <- QtlSumStats(
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         entry = list(gr),
@@ -3599,7 +3599,7 @@ test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
     )
     res <- summaryStatsQc(ss)
     expect_s4_class(res, "QtlSumStats")
-    expect_equal(length(getQcInfo(res)$entryAudit), 1L)
+    expect_equal(length(qcInfo(res)$entryAudit), 1L)
 })
 
 # ===========================================================================
@@ -3666,7 +3666,7 @@ test_that("summaryStatsQc(effectiveN=TRUE): counts, no N -> N == N_eff", {
         nControl = c(900, 800, 850, 750)
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3674,7 +3674,7 @@ test_that("summaryStatsQc(effectiveN=TRUE): counts, no N -> N == N_eff", {
     res <- summaryStatsQc(ss)
     # 4*case*control/(case+control) per variant.
     expect_equal(.ssQ_entryNByPos(res[[1L]]), c(360, 640, 510, 750))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
 test_that("summaryStatsQc(effectiveN=TRUE): counts + N -> counts win", {
@@ -3684,7 +3684,7 @@ test_that("summaryStatsQc(effectiveN=TRUE): counts + N -> counts win", {
         includeN = TRUE
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3693,14 +3693,14 @@ test_that("summaryStatsQc(effectiveN=TRUE): counts + N -> counts win", {
     res <- summaryStatsQc(ss)
     # N (was 1000) is replaced by the per-variant N_eff.
     expect_equal(.ssQ_entryNByPos(res[[1L]]), c(360, 640, 510, 750))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
 test_that("summaryStatsQc(effectiveN=TRUE): N only, no counts -> used as-is", {
     ss <- .ssQ_makeGwasSumStats() # entry carries N = 1000, no counts
     res <- summaryStatsQc(ss)
     expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 1000))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "column")
 })
 
 test_that("summaryStatsQc(effectiveN=FALSE): counts + N -> raw N", {
@@ -3710,14 +3710,14 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts + N -> raw N", {
         includeN = TRUE
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
     res <- summaryStatsQc(ss, effectiveN = FALSE)
     expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 1000))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "column")
 })
 
 test_that("summaryStatsQc(effectiveN=FALSE): counts -> raw total", {
@@ -3726,7 +3726,7 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts -> raw total", {
         nControl = c(900, 800, 850, 750)
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -3734,14 +3734,14 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts -> raw total", {
     res <- summaryStatsQc(ss, effectiveN = FALSE)
     # Raw total n_case + n_control per variant.
     expect_equal(.ssQ_entryNByPos(res[[1L]]), c(1000, 1000, 1000, 1000))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "total")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "total")
 })
 
 test_that("summaryStatsQc(effectiveN=TRUE): study scalars fill all variants", {
     # Entry has an N column but NO per-variant N_CASE/N_CONTROL; the scalars win.
     gr <- .ssQ_makeEntryGr()
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(),
@@ -3752,7 +3752,7 @@ test_that("summaryStatsQc(effectiveN=TRUE): study scalars fill all variants", {
     res <- summaryStatsQc(ss)
     # 4*100*900/1000 = 360 for every variant.
     expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 360))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
 test_that("summaryStatsQc: study nSample is the level-4 fallback", {
@@ -3762,7 +3762,7 @@ test_that("summaryStatsQc: study nSample is the level-4 fallback", {
     mc$N <- NULL # remove per-variant N
     S4Vectors::mcols(gr) <- mc
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(),
@@ -3770,7 +3770,7 @@ test_that("summaryStatsQc: study nSample is the level-4 fallback", {
     )
     res <- summaryStatsQc(ss)
     expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 4321))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
 })
 
 test_that("summaryStatsQc: QtlSumStats tuple nSample falls back too", {
@@ -3782,7 +3782,7 @@ test_that("summaryStatsQc: QtlSumStats tuple nSample falls back too", {
     mc$N <- NULL # remove per-variant N
     S4Vectors::mcols(gr) <- mc
     ss <- QtlSumStats(
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         entry = list(gr),
@@ -3793,7 +3793,7 @@ test_that("summaryStatsQc: QtlSumStats tuple nSample falls back too", {
     res <- summaryStatsQc(ss)
     expect_s4_class(res, "QtlSumStats")
     expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 838))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
     expect_equal(as.numeric(res$nSample), 838) # slot preserved through QC
 })
 
@@ -3804,7 +3804,7 @@ test_that("summaryStatsQc: counts beat nSample, and an N column beats it", {
         nControl = c(900, 800, 850, 750)
     )
     ss1 <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr1),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(),
@@ -3812,10 +3812,10 @@ test_that("summaryStatsQc: counts beat nSample, and an N column beats it", {
     )
     res1 <- summaryStatsQc(ss1)
     expect_equal(.ssQ_entryNByPos(res1[[1L]]), c(360, 640, 510, 750))
-    expect_identical(getQcInfo(res1)$entryAudit[[1L]]$nSource, "effective")
+    expect_identical(qcInfo(res1)$entryAudit[[1L]]$nSource, "effective")
     # per-variant N column present alongside nSample (no counts) -> N wins (column).
     ss2 <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr()),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(),
@@ -3823,14 +3823,14 @@ test_that("summaryStatsQc: counts beat nSample, and an N column beats it", {
     )
     res2 <- summaryStatsQc(ss2) # .ssQ_makeEntryGr carries N = 1000
     expect_true(all(.ssQ_entryNByPos(res2[[1L]]) == 1000))
-    expect_identical(getQcInfo(res2)$entryAudit[[1L]]$nSource, "column")
+    expect_identical(qcInfo(res2)$entryAudit[[1L]]$nSource, "column")
 })
 
 test_that("summaryStatsQc: effectiveN recorded in qcInfo options", {
     ss <- .ssQ_makeGwasSumStats()
-    expect_true(getQcInfo(summaryStatsQc(ss))$options$effectiveN)
+    expect_true(qcInfo(summaryStatsQc(ss))$options$effectiveN)
     expect_false(
-        getQcInfo(summaryStatsQc(ss, effectiveN = FALSE))$options$effectiveN
+        qcInfo(summaryStatsQc(ss, effectiveN = FALSE))$options$effectiveN
     )
 })
 
@@ -3839,7 +3839,7 @@ test_that("summaryStatsQc: quantitative QtlSumStats: no effective N", {
     # "column"), N untouched.
     gr <- .ssQ_makeEntryGr()
     ss <- QtlSumStats(
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "t1",
         entry = list(gr),
@@ -3848,7 +3848,7 @@ test_that("summaryStatsQc: quantitative QtlSumStats: no effective N", {
     )
     res <- summaryStatsQc(ss)
     expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 1000))
-    expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
+    expect_identical(qcInfo(res)$entryAudit[[1L]]$nSource, "column")
 })
 
 # ===========================================================================
@@ -3859,7 +3859,7 @@ test_that("summaryStatsQc: ldMismatchQcMethod 'dentist' walks the LD branch", {
     # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so the
     # post-harmonization re-keyed SNP resolves against the panel for z-mismatch QC.
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
             snp_ids = paste0("rs", 1:8),
             positions = seq(100L, by = 100L, length.out = 8L)
@@ -3872,7 +3872,7 @@ test_that("summaryStatsQc: ldMismatchQcMethod 'dentist' walks the LD branch", {
         .package = "pecotmr"
     )
     res <- suppressWarnings(summaryStatsQc(ss, ldMismatchQcMethod = "dentist"))
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$ldMismatchMethod, "dentist")
     expect_true("ldMismatchOutliersDropped" %in% names(ea))
 })
@@ -3887,7 +3887,7 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS, records counts", {
     full_snp_ids <- paste0("rs", 1:8)
     full_positions <- seq(100L, by = 100L, length.out = 8L)
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
             snp_ids = full_snp_ids[1:4],
             positions = full_positions[1:4]
@@ -3919,7 +3919,7 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS, records counts", {
         impute = TRUE,
         imputeArgs = RaissParam(flank = 500)
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$raissTotalVariants, 6L)
     expect_equal(ea$raissImputedVariants, 2L)
 })
@@ -3938,7 +3938,7 @@ test_that("summaryStatsQc: impute scopes panel/dosage to the region", {
     cap <- new.env(parent = emptyenv())
     cap$idx <- list()
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
             paste0("rs", 1:4),
             c(100L, 200L, 300L, 400L)
@@ -3970,7 +3970,7 @@ test_that("summaryStatsQc: impute with a NULL raiss records 0 imputed", {
     full_snp_ids <- paste0("rs", 1:8)
     full_positions <- seq(100L, by = 100L, length.out = 8L)
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
             snp_ids = full_snp_ids[1:4],
             positions = full_positions[1:4]
@@ -3985,7 +3985,7 @@ test_that("summaryStatsQc: impute with a NULL raiss records 0 imputed", {
         .package = "pecotmr"
     )
     res <- summaryStatsQc(ss, impute = TRUE)
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$raissImputedVariants, 0L)
 })
 
@@ -4074,7 +4074,7 @@ test_that("summaryStatsQc: skipped steps are omitted from the rollup", {
 test_that("summaryStatsQc: QtlSumStats log lines carry the tuple label", {
     # Reuse the QtlSumStats fixture from the round-trip test.
     qss <- QtlSumStats(
-        study = "qstudy",
+        studyName = "qstudy",
         context = "qctx",
         trait = "qtrait",
         entry = list(.ssQ_makeEntryGr()),
@@ -4147,31 +4147,31 @@ context("sumstatsQc internal helpers")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -4418,20 +4418,20 @@ test_that("summaryStatsQc: surfaces the sanity audit, honours the knobs", {
     S4Vectors::mcols(gr)$SE <- c(0.1, 0.1, 0.1, 0.1)
     S4Vectors::mcols(gr)$P <- c(0.5, 0.5, 0.5, 0.5)
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
     res <- summaryStatsQc(ss)
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$sanityChecks$zeroEffectDropped, 2L)
     # Disable the knob: zero-effect rows should remain.
     res2 <- summaryStatsQc(
         ss,
         sumstatsCleaningArgs = SumstatsCleaningParam(dropZeroEffect = FALSE)
     )
-    ea2 <- getQcInfo(res2)$entryAudit[[1L]]
+    ea2 <- qcInfo(res2)$entryAudit[[1L]]
     expect_null(ea2$sanityChecks$zeroEffectDropped)
 })
 
@@ -4756,7 +4756,7 @@ test_that(".applyLdMismatchQcToEntry: NA slalom outlier flags are kept", {
     # treating it as FALSE (current behavior) keeps them and yields a
     # finite outlier count.
     handle <- .ssh_makeHandle()
-    panel_ids <- as.character(getSnpInfo(handle)$SNP)
+    panel_ids <- as.character(snpInfo(handle)$SNP)
     vids <- panel_ids[seq_len(min(4L, length(panel_ids)))]
     df <- data.frame(
         SNP = vids,
@@ -4874,7 +4874,7 @@ test_that("summaryStatsQc: absZ / bf / logBf screens skip a no-signal entry", {
         gr <- .ssQ_makeEntryGr()
         S4Vectors::mcols(gr)$Z <- rep(0.1, length(gr))
         GwasSumStats(
-            study = "g1",
+            studyName = "g1",
             entry = list(gr),
             genome = "hg19",
             ldSketch = .ssQ_makeHandle()
@@ -4891,7 +4891,7 @@ test_that("summaryStatsQc: absZ / bf / logBf screens skip a no-signal entry", {
             !!!arg,
             sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
         )
-        ea <- getQcInfo(res)$entryAudit[[1L]]
+        ea <- qcInfo(res)$entryAudit[[1L]]
         expect_true(isTRUE(ea$pipScreenSkipped))
         expect_equal(length(res[[1L]]), 0L)
     }
@@ -4903,7 +4903,7 @@ test_that("summaryStatsQc: absZ screen keeps a strong marginal Z", {
     z[1] <- 8
     S4Vectors::mcols(gr)$Z <- z
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -4913,7 +4913,7 @@ test_that("summaryStatsQc: absZ screen keeps a strong marginal Z", {
         signalScreenArgs = SignalScreenParam(absZ = 5),
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_false(isTRUE(ea$pipScreenSkipped))
     expect_gt(length(res[[1L]]), 0L)
 })
@@ -5851,7 +5851,7 @@ test_that("autoDecision assigns SER for single CS", {
 test_that("summaryStatsQc: preserves nCase/nControl columns through QC", {
     gr <- .ssQ_makeEntryGr(paste0("rs", 1:4), c(100L, 200L, 300L, 400L))
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(),
@@ -6829,7 +6829,7 @@ test_that("summaryStatsQc: emit() drops the label for an empty study id", {
     # An empty study id resolves the per-entry label to NA, exercising the
     # unlabeled emit() branch.
     ss <- GwasSumStats(
-        study = "",
+        studyName = "",
         entry = list(.ssQ_makeEntryGr()),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -6848,7 +6848,7 @@ test_that("summaryStatsQc: the N filter emits its message and rollup", {
     gr <- .ssQ_makeEntryGr()
     S4Vectors::mcols(gr)$N <- c(1000L, 1010L, 1005L, 100000L) # last is an N outlier
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -6862,7 +6862,7 @@ test_that("summaryStatsQc: the N filter emits its message and rollup", {
     joined <- paste(msgs, collapse = "")
     expect_match(joined, "MAF/INFO/N filters kept")
     expect_match(joined, "nCutoff 1")
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$contentFilters$nDropped, 1L)
 })
 
@@ -6880,7 +6880,7 @@ test_that("summaryStatsQc: derives BETA/SE from Z+MAF+N, records it", {
         MAF = c(0.2, 0.3, 0.4, 0.25)
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -6889,7 +6889,7 @@ test_that("summaryStatsQc: derives BETA/SE from Z+MAF+N, records it", {
         ss,
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$betaSeFromZ$nDerived, 4L)
 })
 
@@ -6897,7 +6897,7 @@ test_that("summaryStatsQc: clamps tiny Z-derived P and audits it", {
     gr <- .ssQ_makeEntryGr()
     S4Vectors::mcols(gr)$Z <- c(50, 1, 2, 3) # |Z| = 50 underflows P to 0
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -6906,7 +6906,7 @@ test_that("summaryStatsQc: clamps tiny Z-derived P and audits it", {
         ss,
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_true(!is.null(ea$sanityChecks$smallPClamped))
     expect_gte(ea$sanityChecks$smallPClamped, 1L)
 })
@@ -6914,7 +6914,7 @@ test_that("summaryStatsQc: clamps tiny Z-derived P and audits it", {
 test_that("summaryStatsQc: early-exits below two pre-harmonization variants", {
     gr <- .ssQ_makeEntryGr(snp_ids = "rs1", positions = 100L)
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -6923,7 +6923,7 @@ test_that("summaryStatsQc: early-exits below two pre-harmonization variants", {
         ss,
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_match(ea$earlyExit, "fewer than two variants")
     expect_equal(length(res[[1L]]), 1L)
 })
@@ -6934,7 +6934,7 @@ test_that("summaryStatsQc: kriging QC records its audit and rollup", {
         "installed susieR has no kriging_rss"
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
             snp_ids = paste0("rs", 1:8),
             positions = seq(100L, by = 100L, length.out = 8L)
@@ -6957,7 +6957,7 @@ test_that("summaryStatsQc: kriging QC records its audit and rollup", {
     joined <- paste(msgs, collapse = "")
     expect_match(joined, "kriging sign-flipped")
     expect_match(joined, "kriging-flip ")
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_true("krigingFlipped" %in% names(ea))
     expect_true("krigingDiagnostics" %in% names(ea))
     kd <- ea$krigingDiagnostics
@@ -6984,7 +6984,7 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
         SE = rep(0.1, 4)
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L)
@@ -7011,7 +7011,7 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
         impute = TRUE,
         imputeArgs = RaissParam(flank = 500)
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$raissTotalVariants, 6L)
     expect_equal(ea$raissImputedVariants, 2L)
     mc <- S4Vectors::mcols(res[[1L]])
@@ -7132,7 +7132,7 @@ test_that("summaryStatsQc: the rollup enumerates every removed step", {
         SE = df$SE
     )
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
@@ -7151,14 +7151,14 @@ test_that("summaryStatsQc: the rollup enumerates every removed step", {
                 infoCutoff = 0.5,
                 nCutoff = 3
             ),
-            panelFilterArgs = PanelFilterParam(mafCutoff = 0.01)
+            panelFilterParam = PanelFilterParam(mafCutoff = 0.01)
         )
     )
     joined <- paste(msgs, collapse = "")
     # The chr99 variant lands in its own ELEMENT (entries are split by seqname
     # at construction), so the audit is now per (study, chromosome) and the
     # drop counts are summed across entries rather than read off entry 1.
-    audits <- getQcInfo(res)$entryAudit
+    audits <- qcInfo(res)$entryAudit
     tally <- function(section, field) {
         sum(unlist(map(map(audits, section), field)))
     }
@@ -7350,7 +7350,7 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
     # the row.
     corrExtractor <- function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(42)
-        n <- length(getSampleIds(handle))
+        n <- length(sampleIds(handle))
         k <- length(snpIdx)
         f <- rnorm(n) # shared latent factor
         M <- exec(
@@ -7360,26 +7360,26 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
             })
         )
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         dosage <- t(M)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
             colData = S4Vectors::DataFrame(
-                sampleId = getSampleIds(handle),
-                row.names = getSampleIds(handle)
+                sampleId = sampleIds(handle),
+                row.names = sampleIds(handle)
             )
         )
     }
@@ -7394,7 +7394,7 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
     mc$N <- rep(3000L, 8)
     S4Vectors::mcols(gr) <- mc
     ss <- GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = .ssQ_makeHandleVid(snp_n = 8L, n_samples = 300L)
@@ -7411,7 +7411,7 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
             sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0)
         )
     )
-    ea <- getQcInfo(res)$entryAudit[[1L]]
+    ea <- qcInfo(res)$entryAudit[[1L]]
     expect_gte(ea$krigingFlipped, 1L) # at least one flipped
     expect_equal(length(res[[1L]]), 8L) # retained, not dropped
     # rs4's -15 flips to +15; its neighbours were +4, so every retained Z is now
@@ -7429,7 +7429,7 @@ test_that(".subsetSketchToRange keeps panel variants in the entry span", {
         test_path("test_data/test_variants"),
         format = "plink2"
     )
-    si <- getSnpInfo(h)
+    si <- snpInfo(h)
     ch <- names(sort(table(si$CHR), decreasing = TRUE))[1] # busiest chromosome
     chIdx <- which(si$CHR == ch)
     slice <- si[chIdx[seq_len(min(30L, length(chIdx)))], , drop = FALSE]
@@ -7438,7 +7438,7 @@ test_that(".subsetSketchToRange keeps panel variants in the entry span", {
         IRanges::IRanges(as.integer(slice$BP), width = 1L)
     )
     S4Vectors::mcols(gr)$SNP <- slice$SNP
-    sub <- getSnpInfo(pecotmr:::.subsetSketchToRange(h, list(gr)))
+    sub <- snpInfo(pecotmr:::.subsetSketchToRange(h, list(gr)))
     lo <- min(slice$BP)
     hi <- max(slice$BP)
     expected <- si$SNP[
@@ -7455,14 +7455,14 @@ test_that(".subsetSketchToIds keeps exactly the entries' variants", {
         test_path("test_data/test_variants"),
         format = "plink2"
     )
-    si <- getSnpInfo(h)
+    si <- snpInfo(h)
     sel <- c(3L, 10L, 40L, 200L)
     gr <- GenomicRanges::GRanges(
         paste0("chr", si$CHR[sel]),
         IRanges::IRanges(as.integer(si$BP[sel]), width = 1L)
     )
     S4Vectors::mcols(gr)$SNP <- si$SNP[sel]
-    sub <- getSnpInfo(pecotmr:::.subsetSketchToIds(h, list(gr)))
+    sub <- snpInfo(pecotmr:::.subsetSketchToIds(h, list(gr)))
     expect_setequal(
         normalizeVariantId(sub$SNP),
         normalizeVariantId(si$SNP[sel])
@@ -7492,7 +7492,7 @@ test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
 # order -- the ground truth the filter is checked against.
 .ssqcPanelMaf <- function(handle) {
     afreq <- readAfreq(.ssqcPanelStem())
-    ids <- as.character(getSnpInfo(handle)$SNP)
+    ids <- as.character(snpInfo(handle)$SNP)
     altFreq <- afreq$alt_freq[match(ids, afreq$id)]
     pmin(altFreq, 1 - altFreq)
 }
@@ -7501,7 +7501,7 @@ test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
 # common in the study whatever the panel says, so only a panel-side filter can
 # remove it.
 .ssqcPanelSumStats <- function(handle) {
-    si <- getSnpInfo(handle)
+    si <- snpInfo(handle)
     gr <- GenomicRanges::GRanges(
         seqnames = paste0("chr", si$CHR),
         ranges = IRanges::IRanges(start = as.integer(si$BP), width = 1L)
@@ -7516,7 +7516,7 @@ test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
         AF = rep(0.30, nrow(si))
     )
     GwasSumStats(
-        study = "g1",
+        studyName = "g1",
         entry = list(gr),
         genome = "hg19",
         ldSketch = handle
@@ -7526,7 +7526,7 @@ test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
 test_that(".ssqcPrunePanel drops exactly the sub-cutoff panel variants", {
     skip_if_not_installed("pgenlibr")
     h <- .ssqcPanelHandle()
-    ids <- as.character(getSnpInfo(h)$SNP)
+    ids <- as.character(snpInfo(h)$SNP)
     maf <- .ssqcPanelMaf(h)
     cutoff <- stats::median(maf, na.rm = TRUE)
     pruned <- expect_message(
@@ -7537,7 +7537,7 @@ test_that(".ssqcPrunePanel drops exactly the sub-cutoff panel variants", {
         ),
         "below the LD-panel MAF / MAC / missingness cutoffs"
     )
-    keptIds <- as.character(getSnpInfo(pruned)$SNP)
+    keptIds <- as.character(snpInfo(pruned)$SNP)
     expect_lt(length(keptIds), length(ids))
     expect_setequal(keptIds, ids[!is.na(maf) & maf >= cutoff])
 })
@@ -7559,7 +7559,7 @@ test_that(".ssqcPrunePanel prunes the RSE sketch's seed handle, not the view", {
     # the seed -- the real-flow shape the bare-handle tests do not exercise.
     h <- .ssqcPanelHandle()
     maf <- .ssqcPanelMaf(h)
-    ids <- as.character(getSnpInfo(h)$SNP)
+    ids <- as.character(snpInfo(h)$SNP)
     cutoff <- stats::median(maf, na.rm = TRUE)
     rse <- pecotmr:::.genotypeExperiment(h)
     expect_s4_class(rse, "RangedSummarizedExperiment")
@@ -7570,7 +7570,7 @@ test_that(".ssqcPrunePanel prunes the RSE sketch's seed handle, not the view", {
     ))
     seed <- pecotmr:::.ldSketchHandle(pruned)
     expect_setequal(
-        as.character(getSnpInfo(seed)$SNP),
+        as.character(snpInfo(seed)$SNP),
         ids[!is.na(maf) & maf >= cutoff]
     )
 })
@@ -7587,16 +7587,16 @@ test_that("summaryStatsQc: mafCutoff drops panel-rare observed variants", {
     out <- suppressMessages(summaryStatsQc(
         ss,
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0),
-        panelFilterArgs = PanelFilterParam(mafCutoff = cutoff)
+        panelFilterParam = PanelFilterParam(mafCutoff = cutoff)
     ))
     entry <- pecotmr:::.collectionEntry(out, 1)
     expect_equal(length(entry), sum(!is.na(maf) & maf >= cutoff))
     # ... and the panel carried on the result -- the seed handle every LD
     # read keys off, not just the row view -- holds no sub-cutoff variant.
-    seed <- pecotmr:::.ldSketchHandle(getLdSketch(out))
+    seed <- pecotmr:::.ldSketchHandle(ldSketch(out))
     keptMaf <- maf[match(
-        as.character(getSnpInfo(seed)$SNP),
-        as.character(getSnpInfo(h)$SNP)
+        as.character(snpInfo(seed)$SNP),
+        as.character(snpInfo(h)$SNP)
     )]
     expect_true(all(keptMaf >= cutoff))
 })
@@ -7608,14 +7608,14 @@ test_that("summaryStatsQc: macCutoff is the stricter of MAF / MAC", {
     ss <- .ssqcPanelSumStats(h)
     # MAC expressed per panel sample: 2 * nSamples * mafEquivalent.
     cutoff <- stats::median(maf, na.rm = TRUE)
-    mac <- ceiling(cutoff * 2 * getNSamples(h))
+    mac <- ceiling(cutoff * 2 * nSamples(h))
     out <- suppressMessages(summaryStatsQc(
         ss,
         sumstatsFilterArgs = SumstatsFilterParam(nCutoff = 0),
-        panelFilterArgs = PanelFilterParam(macCutoff = mac)
+        panelFilterParam = PanelFilterParam(macCutoff = mac)
     ))
     entry <- pecotmr:::.collectionEntry(out, 1)
-    expected <- sum(!is.na(maf) & maf >= mac / (2 * getNSamples(h)))
+    expected <- sum(!is.na(maf) & maf >= mac / (2 * nSamples(h)))
     expect_equal(length(entry), expected)
 })
 
@@ -7629,7 +7629,7 @@ test_that("summaryStatsQc: the panel filter is off by default", {
     ))
     expect_equal(
         length(pecotmr:::.collectionEntry(out, 1)),
-        nrow(getSnpInfo(h))
+        nrow(snpInfo(h))
     )
 })
 
@@ -7638,28 +7638,28 @@ test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
     expect_error(
         summaryStatsQc(
             ss,
-            panelFilterArgs = PanelFilterParam(mafCutoff = -1)
+            panelFilterParam = PanelFilterParam(mafCutoff = -1)
         ),
         "mafCutoff"
     )
     expect_error(
         summaryStatsQc(
             ss,
-            panelFilterArgs = PanelFilterParam(macCutoff = c(1, 2))
+            panelFilterParam = PanelFilterParam(macCutoff = c(1, 2))
         ),
         "macCutoff"
     )
     expect_error(
         summaryStatsQc(
             ss,
-            panelFilterArgs = PanelFilterParam(imissCutoff = NA_real_)
+            panelFilterParam = PanelFilterParam(imissCutoff = NA_real_)
         ),
         "imissCutoff"
     )
     expect_error(
         summaryStatsQc(
             ss,
-            panelFilterArgs = PanelFilterParam(macCutoff = Inf)
+            panelFilterParam = PanelFilterParam(macCutoff = Inf)
         ),
         "macCutoff"
     )
@@ -7803,10 +7803,10 @@ test_that("summaryStatsQc imputeArgs cutoffs bound what RAISS imputes", {
     gss <- gwasSumStatsS4Example
     variants <- unlist(gss)
     thin <- GwasSumStats(
-        study = getStudy(gss),
+        studyName = studyName(gss),
         entry = list(variants[seq(1L, length(variants), by = 4L)]),
-        genome = getGenome(gss),
-        ldSketch = getLdSketch(gss)
+        genome = unique(unname(GenomeInfoDb::genome(gss))),
+        ldSketch = ldSketch(gss)
     )
     nObserved <- sum(lengths(thin))
     # The bundled toy panel imputes poorly, so the R2 gate would otherwise
@@ -8107,8 +8107,8 @@ test_that("emptying drops both axes but keeps the panel's identity", {
     expect_equal(ncol(e), 0L)
     hh <- .ldSketchHandle(h)
     eh <- .ldSketchHandle(e)
-    expect_equal(getFormat(eh), getFormat(hh))
-    expect_equal(getPath(eh), getPath(hh))
+    expect_equal(genotypeFormat(eh), genotypeFormat(hh))
+    expect_equal(path(eh), path(hh))
 })
 
 test_that(".emptySketch drops the seed's variants, not just the rows", {
@@ -8118,7 +8118,7 @@ test_that(".emptySketch drops the seed's variants, not just the rows", {
     h <- .sk_panel()
     e <- .emptySketch(h)
     expect_equal(nrow(e), 0L)
-    expect_equal(nrow(getSnpInfo(.ldSketchHandle(e))), 0L)
+    expect_equal(nrow(snpInfo(.ldSketchHandle(e))), 0L)
     expect_lt(
         length(serialize(e, NULL)),
         length(serialize(h, NULL)) / 2

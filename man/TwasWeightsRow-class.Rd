@@ -16,13 +16,13 @@ One row's worth of TWAS weights. Build one with
 
 \item{\code{weights}}{Per-variant weights, aligned to \code{variants}.}
 
-\item{\code{fits}}{Per-method fit payload, or \code{NULL}.}
+\item{\code{methodFits}}{Per-method fit payload, or \code{NULL}.}
 
 \item{\code{cvResult}}{Cross-validation payload, or \code{NULL}.}
 
-\item{\code{standardized}}{Whether the weights are on the standardized scale.}
+\item{\code{weightStandardized}}{Whether the weights are on the standardized scale.}
 
-\item{\code{dataType}}{Optional data-type label.}
+\item{\code{weightsDataType}}{Optional data-type label.}
 }}
 
 \seealso{

@@ -101,8 +101,8 @@ ctwasWeightsExample <- methods::initialize(
 )
 
 stopifnot(
-    getPath(pecotmr:::.ldSketchHandle(
-        getLdSketch(ctwasWeightsExample)
+    path(pecotmr:::.ldSketchHandle(
+        ldSketch(ctwasWeightsExample)
     )) == asBundledResource(ldStem)
 )
 

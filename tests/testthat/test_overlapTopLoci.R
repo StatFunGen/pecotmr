@@ -49,7 +49,7 @@ test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-fli
         af = c(0.3, 0.4)
     ))
     qtl <- QtlFineMappingResult(
-        study = c("s", "s"),
+        studyName = c("s", "s"),
         context = c("ctx1", "ctx2"),
         trait = c("t", "t"),
         method = c("susie", "susie"),
@@ -64,7 +64,7 @@ test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-fli
         af = c(0.2, 0.7)
     ))
     gwas <- GwasFineMappingResult(
-        study = "gwas",
+        studyName = "gwas",
         method = "susie",
         entry = list(g1)
     )
@@ -72,13 +72,12 @@ test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-fli
     ov <- overlapTopLoci(qtl, gwas, signalCutoff = 0)
 
     # variant key kept once; every other column prefixed qtl_ / gwas_
-    expect_true(all(c("variant_id", "chrom", "pos", "A1", "A2") %in% names(ov)))
-    expect_true(
-        any(grepl("^qtl_", names(ov))) && any(grepl("^gwas_", names(ov)))
-    )
-    expect_false(any(grepl("^qtl_(chrom|pos|A1|A2)$", names(ov))))
+    cols <- names(S4Vectors::mcols(ov))
+    expect_true(all(c("variant_id", "chrom", "pos", "A1", "A2") %in% cols))
+    expect_true(any(grepl("^qtl_", cols)) && any(grepl("^gwas_", cols)))
+    expect_false(any(grepl("^qtl_(chrom|pos|A1|A2)$", cols)))
     # 2 shared variants x 2 QTL contexts x 1 GWAS study = 4 rows (wide cross-product)
-    expect_equal(nrow(ov), 4L)
+    expect_equal(length(ov), 4L)
     expect_setequal(unique(ov$variant_id), c("chr1:100:A:G", "chr1:200:A:G"))
     # per-context QTL rows preserved
     expect_setequal(unique(ov$qtl_context), c("ctx1", "ctx2"))
@@ -109,25 +108,24 @@ test_that("overlapTopLoci returns zero rows when no variants overlap", {
         af = 0.2
     ))
     qtl <- QtlFineMappingResult(
-        study = "s",
+        studyName = "s",
         context = "c",
         trait = "t",
         method = "susie",
         entry = list(q)
     )
     gwas <- GwasFineMappingResult(
-        study = "g",
+        studyName = "g",
         method = "susie",
         entry = list(g)
     )
     ov <- overlapTopLoci(qtl, gwas, signalCutoff = 0)
-    expect_equal(nrow(ov), 0L)
-    expect_true(
-        any(grepl("^qtl_", names(ov))) && any(grepl("^gwas_", names(ov)))
-    )
+    expect_equal(length(ov), 0L)
+    cols <- names(S4Vectors::mcols(ov))
+    expect_true(any(grepl("^qtl_", cols)) && any(grepl("^gwas_", cols)))
 })
 
-test_that("overlapTopLoci returns an empty merge when a side has no signal (df + GRanges)", {
+test_that("overlapTopLoci returns an empty merge when a side has no signal", {
     q <- .ot_entry(.ot_tl(
         "chr1:100:A:G",
         A1 = "G",
@@ -143,30 +141,27 @@ test_that("overlapTopLoci returns an empty merge when a side has no signal (df +
         af = 0.2
     ))
     qtl <- QtlFineMappingResult(
-        study = "s",
+        studyName = "s",
         context = "c",
         trait = "t",
         method = "susie",
         entry = list(q)
     )
     gwas <- GwasFineMappingResult(
-        study = "g",
+        studyName = "g",
         method = "susie",
         entry = list(g)
     )
     # signalCutoff above every pip (0.9) -> both top-loci tables empty -> emptyMerge.
     df <- overlapTopLoci(qtl, gwas, signalCutoff = 0.99)
-    expect_equal(nrow(df), 0L)
-    expect_true(
-        any(grepl("^qtl_", names(df))) && any(grepl("^gwas_", names(df)))
-    )
-    # same empty result routed through the GRanges branch (.overlapToGRanges empty guard).
-    gr <- overlapTopLoci(qtl, gwas, signalCutoff = 0.99, type = "GRanges")
-    expect_s4_class(gr, "GRanges")
-    expect_equal(length(gr), 0L)
+    expect_equal(length(df), 0L)
+    cols <- names(S4Vectors::mcols(df))
+    expect_true(any(grepl("^qtl_", cols)) && any(grepl("^gwas_", cols)))
+    # the empty result is still ranges (.overlapToGRanges empty guard)
+    expect_s4_class(df, "GRanges")
 })
 
-test_that("overlapTopLoci type='GRanges' returns a GRanges of the shared variants", {
+test_that("overlapTopLoci returns a GRanges of the shared variants", {
     q <- .ot_entry(.ot_tl(
         c("chr1:100:A:G", "chr1:200:A:G"),
         A1 = c("G", "G"),
@@ -182,18 +177,18 @@ test_that("overlapTopLoci type='GRanges' returns a GRanges of the shared variant
         af = 0.2
     ))
     qtl <- QtlFineMappingResult(
-        study = "s",
+        studyName = "s",
         context = "c",
         trait = "t",
         method = "susie",
         entry = list(q)
     )
     gwas <- GwasFineMappingResult(
-        study = "g",
+        studyName = "g",
         method = "susie",
         entry = list(g)
     )
-    gr <- overlapTopLoci(qtl, gwas, signalCutoff = 0, type = "GRanges")
+    gr <- overlapTopLoci(qtl, gwas, signalCutoff = 0)
     expect_s4_class(gr, "GRanges")
     expect_equal(length(gr), 1L)
     expect_true("gwas_beta" %in% names(S4Vectors::mcols(gr)))

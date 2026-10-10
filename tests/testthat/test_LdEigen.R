@@ -17,7 +17,7 @@ test_that("LdEigen constructs and validates correctly", {
     obj <- LdEigen(
         ldBlocks = ldblocks,
         snpInfo = snp_info,
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         eigenList = eigen_list,
@@ -36,7 +36,7 @@ test_that("LdEigen rejects eigen_list length mismatch", {
             LdEigen(
                 ldBlocks = ldblocks,
                 snpInfo = makeTestSnpInfo(),
-                nRef = 500L,
+                nSamples = 500L,
                 inSample = FALSE,
                 genome = "hg19",
                 eigenList = list(list(values = 1)),
@@ -55,7 +55,7 @@ test_that("LdEigen rejects invalid eigenvalue_truncation", {
             LdEigen(
                 ldBlocks = ldblocks,
                 snpInfo = makeTestSnpInfo(),
-                nRef = 500L,
+                nSamples = 500L,
                 inSample = FALSE,
                 genome = "hg19",
                 eigenList = list(list(), list()),
@@ -72,7 +72,7 @@ test_that("show(LdEigen) does not error", {
     eig <- LdEigen(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         eigenList = list(list(), list()),
@@ -88,7 +88,7 @@ test_that("subsetting an LdEigen is refused, not silently allowed", {
     obj <- LdEigen(
         ldBlocks = makeTestLdBlocks(),
         snpInfo = makeTestSnpInfo(),
-        nRef = 500L,
+        nSamples = 500L,
         inSample = FALSE,
         genome = "hg19",
         eigenList = list(
@@ -120,30 +120,30 @@ test_that("buildLdEigen decomposes a single-block LdData", {
 
     expect_s4_class(ref, "LdEigen")
     expect_equal(length(ref), 6L)
-    expect_equal(length(getEigenList(ref)), 1L)
-    expect_equal(length(getLdBlocks(ref)), 1L)
-    expect_equal(getNRef(ref), 500L)
-    expect_false(getInSample(ref))
-    expect_equal(getEigenList(ref)[[1]]$snpIdx, 1:6)
+    expect_equal(length(eigenList(ref)), 1L)
+    expect_equal(length(ldBlocks(ref)), 1L)
+    expect_equal(ldPanelNSamples(ref), 500L)
+    expect_false(inSample(ref))
+    expect_equal(eigenList(ref)[[1]]$snpIdx, 1:6)
 })
 
 test_that("buildLdEigen gives one block per matrix of a multi-block LdData", {
     ref <- buildLdEigen(makeTestLdDataMultiBlock(sizes = c(4L, 3L)))
 
     expect_equal(length(ref), 7L)
-    blocks <- getEigenList(ref)
+    blocks <- eigenList(ref)
     expect_equal(length(blocks), 2L)
     # snpIdx must index the concatenated variant order, not each block's own.
     expect_equal(blocks[[1]]$snpIdx, 1:4)
     expect_equal(blocks[[2]]$snpIdx, 5:7)
-    expect_equal(length(getLdBlocks(ref)), 2L)
+    expect_equal(length(ldBlocks(ref)), 2L)
 })
 
 test_that("buildLdEigen reconstructs the correlation it was given", {
     ld <- makeTestLdData(n = 6L)
-    block <- getEigenList(buildLdEigen(ld))[[1]]
+    block <- eigenList(buildLdEigen(ld))[[1]]
     rebuilt <- block$vectors %*% diag(block$values) %*% t(block$vectors)
-    expect_equal(rebuilt, unname(getCorrelation(ld)), tolerance = 1e-10)
+    expect_equal(rebuilt, unname(ldMatrix(ld)), tolerance = 1e-10)
 })
 
 test_that("buildLdEigen carries variant identity across from the LdData", {
@@ -163,8 +163,8 @@ test_that("buildLdEigen carries variant identity across from the LdData", {
 
 test_that("buildLdEigen truncates to the requested eigenvalue mass", {
     ld <- makeTestLdData(n = 6L)
-    full <- getEigenList(buildLdEigen(ld))[[1]]
-    cut <- getEigenList(buildLdEigen(ld, eigenvalueTruncation = 0.9))[[1]]
+    full <- eigenList(buildLdEigen(ld))[[1]]
+    cut <- eigenList(buildLdEigen(ld, eigenvalueTruncation = 0.9))[[1]]
 
     expect_equal(length(full$values), 6L)
     expect_lt(length(cut$values), 6L)
@@ -176,13 +176,13 @@ test_that("buildLdEigen truncates to the requested eigenvalue mass", {
 test_that("buildLdEigen prefers an explicit nRef, inSample and genome", {
     ref <- buildLdEigen(
         makeTestLdData(),
-        nRef = 12345L,
+        nSamples = 12345L,
         inSample = TRUE,
         genome = "hg38"
     )
-    expect_equal(getNRef(ref), 12345L)
-    expect_true(getInSample(ref))
-    expect_equal(getGenome(ref), "hg38")
+    expect_equal(ldPanelNSamples(ref), 12345L)
+    expect_true(inSample(ref))
+    expect_equal(unname(GenomeInfoDb::genome(ref)), "hg38")
 })
 
 
@@ -204,7 +204,7 @@ test_that("LdEigen: argument guards fire", {
     ok <- list(
         ldBlocks = ldblocks,
         snpInfo = snp_info,
-        nRef = 500L,
+        nSamples = 500L,
         eigenList = eigen_list
     )
     expect_error(
@@ -216,12 +216,12 @@ test_that("LdEigen: argument guards fire", {
         "eigenList.*Must be of type 'list'"
     )
     expect_error(
-        exec(LdEigen, !!!list_modify(ok, !!!list(nRef = 0L))),
-        "nRef.*Must be >= 1"
+        exec(LdEigen, !!!list_modify(ok, !!!list(nSamples = 0L))),
+        "nSamples.*Must be >= 1"
     )
     expect_error(
-        exec(LdEigen, !!!list_modify(ok, !!!list(nRef = "500"))),
-        "nRef.*Must be of type 'count'"
+        exec(LdEigen, !!!list_modify(ok, !!!list(nSamples = "500"))),
+        "nSamples.*Must be of type 'count'"
     )
 })
 
@@ -233,7 +233,7 @@ test_that("buildLdEigen: argument guards fire", {
         package = "pecotmr"
     )
     ld <- loadLdMatrix(meta, region = "chr22:10000000-19000000")
-    expect_error(buildLdEigen(ld, nRef = 0L), "nRef.*Must be >= 1")
+    expect_error(buildLdEigen(ld, nSamples = 0L), "nSamples.*Must be >= 1")
     expect_error(
         buildLdEigen(ld, inSample = NA),
         "inSample.*May not be NA"

@@ -16,7 +16,7 @@ causalInferencePipeline(
 }
 \arguments{
 \item{gwasSumStats}{A \code{\link{GwasSumStats}} object. Must be QC'd
-(\code{length(getQcInfo(x)) > 0L}).}
+(\code{length(qcInfo(x)) > 0L}).}
 
 \item{twasWeights}{Optional \code{\link{TwasWeights}} carrying per-(study,
 context, trait, method) weights. When supplied, drives the TWAS-Z

@@ -15,10 +15,10 @@ NULL
 #'   \code{\link{TwasWeights}}' \code{entry} argument.
 #' @slot variants A \code{GRanges} of the weighted variants.
 #' @slot weights Per-variant weights, aligned to \code{variants}.
-#' @slot fits Per-method fit payload, or \code{NULL}.
+#' @slot methodFits Per-method fit payload, or \code{NULL}.
 #' @slot cvResult Cross-validation payload, or \code{NULL}.
-#' @slot standardized Whether the weights are on the standardized scale.
-#' @slot dataType Optional data-type label.
+#' @slot weightStandardized Whether the weights are on the standardized scale.
+#' @slot weightsDataType Optional data-type label.
 #' @seealso \code{\link{twasWeightsRow}},
 #'   \code{\linkS4class{FineMappingRow}}
 #' @export
@@ -27,17 +27,17 @@ setClass(
     representation(
         variants = "GRanges",
         weights = "ANY",
-        fits = "ANY",
+        methodFits = "ANY",
         cvResult = "ANY",
-        standardized = "logical",
-        dataType = "ANY"
+        weightStandardized = "logical",
+        weightsDataType = "ANY"
     ),
     prototype(
         weights = NULL,
-        fits = NULL,
+        methodFits = NULL,
         cvResult = NULL,
-        standardized = FALSE,
-        dataType = NULL
+        weightStandardized = FALSE,
+        weightsDataType = NULL
     )
 )
 
@@ -58,7 +58,11 @@ methods::setValidity("TwasWeightsRow", function(object) {
             add = coll
         )
     }
-    assertFlag(object@standardized, .var.name = "standardized", add = coll)
+    assertFlag(
+        object@weightStandardized,
+        .var.name = "weightStandardized",
+        add = coll
+    )
     coll$getMessages()
 })
 
@@ -70,11 +74,11 @@ methods::setValidity("TwasWeightsRow", function(object) {
 #'   coordinates (\code{chrom:pos:ref:alt}).
 #' @param weights Per-variant weights, aligned to \code{variantIds} (a vector,
 #'   or a matrix with one column per condition).
-#' @param fits Optional per-method fit payload.
+#' @param methodFits Optional per-method fit payload.
 #' @param cvResult Optional cross-validation payload.
-#' @param standardized Whether the weights are already on the standardized
+#' @param weightStandardized Whether the weights are already on the standardized
 #'   scale.
-#' @param dataType Optional data-type label.
+#' @param weightsDataType Optional data-type label.
 #' @return A \code{\linkS4class{TwasWeightsRow}}.
 #' @seealso \code{\link{fineMappingRow}}
 #' @examples
@@ -83,17 +87,17 @@ methods::setValidity("TwasWeightsRow", function(object) {
 #'     weights = c(0.4, -0.2)
 #' )
 #' TwasWeights(
-#'     study = "s1", context = "brain", trait = "g1", method = "lasso",
+#'     studyName = "s1", context = "brain", trait = "g1", method = "lasso",
 #'     entry = list(row)
 #' )
 #' @export
 twasWeightsRow <- function(
     variantIds,
     weights,
-    fits = NULL,
+    methodFits = NULL,
     cvResult = NULL,
-    standardized = FALSE,
-    dataType = NULL
+    weightStandardized = FALSE,
+    weightsDataType = NULL
 ) {
     vids <- as.character(variantIds)
     gr <- .variantIdsToGRanges(vids, "variantIds")
@@ -120,10 +124,10 @@ twasWeightsRow <- function(
         "TwasWeightsRow",
         variants = withWeight,
         weights = w,
-        fits = fits,
+        methodFits = methodFits,
         cvResult = cvResult,
-        standardized = isTRUE(standardized),
-        dataType = dataType
+        weightStandardized = isTRUE(weightStandardized),
+        weightsDataType = weightsDataType
     )
     validObject(obj)
     obj
@@ -132,43 +136,43 @@ twasWeightsRow <- function(
 
 # ---- field accessors --------------------------------------------------------
 
-#' @rdname getVariantIds
+#' @rdname variantIds
 #' @export
-setMethod("getVariantIds", "TwasWeightsRow", function(x) {
+setMethod("variantIds", "TwasWeightsRow", function(x) {
     .grVariantIds(x@variants)
 })
 
-#' @rdname getWeights
+#' @rdname weights-methods
 #' @export
-setMethod("getWeights", "TwasWeightsRow", function(x) x@weights)
+setMethod("weights", "TwasWeightsRow", function(object, ...) object@weights)
 
-#' @rdname getFits
+#' @rdname methodFits
 #' @export
-setMethod("getFits", "TwasWeightsRow", function(x) x@fits)
+setMethod("methodFits", "TwasWeightsRow", function(x) x@methodFits)
 
-#' @rdname getCvResult
+#' @rdname cvResult
 #' @export
-setMethod("getCvResult", "TwasWeightsRow", function(x) x@cvResult)
+setMethod("cvResult", "TwasWeightsRow", function(x) x@cvResult)
 
-#' @rdname getStandardized
+#' @rdname weightStandardized
 #' @export
-setMethod("getStandardized", "TwasWeightsRow", function(x) {
-    isTRUE(x@standardized)
+setMethod("weightStandardized", "TwasWeightsRow", function(x) {
+    isTRUE(x@weightStandardized)
 })
 
-#' @rdname getDataType
+#' @rdname weightsDataType
 #' @export
-setMethod("getDataType", "TwasWeightsRow", function(x) x@dataType)
+setMethod("weightsDataType", "TwasWeightsRow", function(x) x@weightsDataType)
 
 # @noRd
-setMethod("rowVariants", "TwasWeightsRow", function(x) x@variants)
+setMethod("variants", "TwasWeightsRow", function(x) x@variants)
 
 #' @rdname show-methods
 #' @export
 setMethod("show", "TwasWeightsRow", function(object) {
     cat(glue(
         "TwasWeightsRow: {length(object@variants)} variants, ",
-        "standardized={object@standardized}\n",
+        "standardized={object@weightStandardized}\n",
         .trim = FALSE
     ))
     hasCv <- !is.null(object@cvResult)

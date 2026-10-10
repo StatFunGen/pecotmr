@@ -6,7 +6,7 @@
 \usage{
 finemapCtwasRegions(
   screenResult,
-  L = 5L,
+  maxNumSingleEffects = 5L,
   numThreads = 1L,
   methodArgs = CtwasOptions()
 )
@@ -14,7 +14,7 @@ finemapCtwasRegions(
 \arguments{
 \item{screenResult}{A list returned by \code{\link{screenCtwasRegions}}.}
 
-\item{L}{Pass-through.}
+\item{maxNumSingleEffects}{Pass-through.}
 
 \item{numThreads}{Number of cores.}
 
@@ -49,13 +49,18 @@ blocks <- GenomicRanges::GRanges("chr22",
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 gwasByRegion <- summaryStatsQc(gss,
-  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
+  panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
 est <- estCtwasGroupPriors(inp,
   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
-  methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+  methodArgs = CtwasOptions(
+    regionData = CtwasRegionDataOptions(min_group_size = 1),
+    estParam = CtwasEstParamOptions(
+      min_group_size = 1, min_p_single_effect = 0
+    )
+  ))
 screened <- screenCtwasRegions(est)
-finemapCtwasRegions(screened, L = 5L)
+finemapCtwasRegions(screened, maxNumSingleEffects = 5L)
 }

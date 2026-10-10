@@ -61,31 +61,31 @@ context("LdData accessors")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -95,20 +95,20 @@ context("LdData accessors")
 }
 
 # ===========================================================================
-# getCorrelation
+# ldMatrix
 # ===========================================================================
 
-test_that("getCorrelation: returns the stored correlation matrix when set", {
+test_that("ldMatrix: returns the stored correlation matrix when set", {
     R <- diag(4)
     ld <- LdData(
         correlation = R,
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1)
     )
-    expect_identical(getCorrelation(ld), R)
+    expect_identical(ldMatrix(ld), R)
 })
 
-test_that("getCorrelation: computes from a single GenotypeHandle via extractBlockGenotypes", {
+test_that("ldMatrix: computes from a single GenotypeHandle via extractBlockGenotypes", {
     ld <- LdData(
         correlation = NULL,
         genotypeHandle = .ld_makeHandle(),
@@ -120,18 +120,18 @@ test_that("getCorrelation: computes from a single GenotypeHandle via extractBloc
         extractBlockGenotypes = .ld_mockExtractor(seed = 7),
         .package = "pecotmr"
     )
-    R <- getCorrelation(ld)
+    R <- ldMatrix(ld)
     expect_true(is.matrix(R))
     expect_equal(dim(R), c(4L, 4L))
     expect_equal(unname(diag(R)), c(1, 1, 1, 1), tolerance = 1e-12)
 })
 
-# NB: The "neither correlation nor genotypeHandle" branch in getCorrelation
+# NB: The "neither correlation nor genotypeHandle" branch in ldMatrix
 # is defensive — LdData validity rejects that state at construction time, so
 # the only way to hit the runtime stop() is to mutate the slot post-hoc.
 # Skipping that test in favor of paths the validity actually permits.
 
-test_that("getCorrelation: mixture handles produce a weighted-average R", {
+test_that("ldMatrix: mixture handles produce a weighted-average R", {
     gh1 <- .ld_makeHandle(path = "/tmp/h1.gds")
     gh2 <- .ld_makeHandle(path = "/tmp/h2.gds")
     ld <- LdData(
@@ -156,7 +156,7 @@ test_that("getCorrelation: mixture handles produce a weighted-average R", {
         },
         .package = "pecotmr"
     )
-    R_mix <- getCorrelation(ld)
+    R_mix <- ldMatrix(ld)
     expect_equal(dim(R_mix), c(4L, 4L))
     # Recompute per-panel R independently and check weighted-average property.
     call_n <- 0
@@ -180,7 +180,7 @@ test_that("getCorrelation: mixture handles produce a weighted-average R", {
     expect_equal(R_mix, expected, tolerance = 1e-12)
 })
 
-test_that("getCorrelation: mixture handles without mixtureWeights errors", {
+test_that("ldMatrix: mixture handles without mixtureWeights errors", {
     gh <- .ld_makeHandle()
     # Build via new() to skip the constructor's mixtureWeights validity check.
     ld <- new(
@@ -190,16 +190,16 @@ test_that("getCorrelation: mixture handles without mixtureWeights errors", {
         genotypeHandle = list(gh, gh),
         snpIdx = 1:4,
         blockMetadata = .ld_makeBlockMetadata(),
-        nRef = 0L,
+        nSamples = 0L,
         mixtureWeights = NULL
     )
     expect_error(
-        getCorrelation(ld),
+        ldMatrix(ld),
         "Cannot compute mixture LD: `mixtureWeights` is NULL"
     )
 })
 
-test_that("getCorrelation: mixture panels of differing dim error", {
+test_that("ldMatrix: mixture panels of differing dim error", {
     gh_small <- .ld_makeHandle(snp_n = 3L)
     gh <- .ld_makeHandle(snp_n = 4L)
     ld <- new(
@@ -209,7 +209,7 @@ test_that("getCorrelation: mixture panels of differing dim error", {
         genotypeHandle = list(gh_small, gh),
         snpIdx = 1:3,
         blockMetadata = .ld_makeBlockMetadata(),
-        nRef = 0L,
+        nSamples = 0L,
         mixtureWeights = c(0.5, 0.5)
     )
     # The first call sees snpIdx 1:3 against gh_small (3 variants); the second
@@ -230,25 +230,25 @@ test_that("getCorrelation: mixture panels of differing dim error", {
         .package = "pecotmr"
     )
     expect_error(
-        getCorrelation(ld),
+        ldMatrix(ld),
         "panels yielded LD matrices of differing dimensions"
     )
 })
 
 # ===========================================================================
-# getGenotypes
+# genotypes
 # ===========================================================================
 
-test_that("getGenotypes: NULL handle returns NULL", {
+test_that("genotypes: NULL handle returns NULL", {
     ld <- LdData(
         correlation = diag(4),
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1)
     )
-    expect_null(getGenotypes(ld))
+    expect_null(genotypes(ld))
 })
 
-test_that("getGenotypes: matrix handle is returned unchanged", {
+test_that("genotypes: matrix handle is returned unchanged", {
     X <- matrix(
         0,
         nrow = 10,
@@ -262,13 +262,13 @@ test_that("getGenotypes: matrix handle is returned unchanged", {
         genotypeHandle = X,
         snpIdx = NULL,
         blockMetadata = .ld_makeBlockMetadata(),
-        nRef = 0L,
+        nSamples = 0L,
         mixtureWeights = NULL
     )
-    expect_identical(getGenotypes(ld), X)
+    expect_identical(genotypes(ld), X)
 })
 
-test_that("getGenotypes: single handle returns samples x variants dosage", {
+test_that("genotypes: single handle returns samples x variants dosage", {
     ld <- LdData(
         correlation = NULL,
         genotypeHandle = .ld_makeHandle(),
@@ -280,12 +280,12 @@ test_that("getGenotypes: single handle returns samples x variants dosage", {
         extractBlockGenotypes = .ld_mockExtractor(seed = 7),
         .package = "pecotmr"
     )
-    G <- getGenotypes(ld)
+    G <- genotypes(ld)
     expect_equal(dim(G), c(30L, 4L))
     expect_equal(colnames(G), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
-test_that("getGenotypes: list of handles returns a list of dosage matrices", {
+test_that("genotypes: list of handles returns a list of dosage matrices", {
     gh1 <- .ld_makeHandle(path = "/tmp/h1.gds")
     gh2 <- .ld_makeHandle(path = "/tmp/h2.gds")
     ld <- LdData(
@@ -308,7 +308,7 @@ test_that("getGenotypes: list of handles returns a list of dosage matrices", {
         },
         .package = "pecotmr"
     )
-    G <- getGenotypes(ld)
+    G <- genotypes(ld)
     expect_true(is.list(G))
     expect_equal(length(G), 2L)
     expect_equal(dim(G[[1L]]), c(30L, 4L))
@@ -336,23 +336,23 @@ test_that("hasGenotypes: TRUE when handle present, FALSE otherwise", {
     expect_true(hasGenotypes(ld_gh))
 })
 
-test_that("getVariantIds returns the variant_id mcol", {
+test_that("variantIds returns the variant_id mcol", {
     ld <- LdData(
         correlation = diag(4),
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1)
     )
-    expect_equal(getVariantIds(ld), sprintf("chr1:%d:A:G", 100L * (1:4)))
+    expect_equal(variantIds(ld), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
-test_that("getVariantInfo returns the variants verbatim", {
+test_that("variantInfo returns the variants verbatim", {
     vars <- .ld_makeVariants()
     bm <- S4Vectors::DataFrame(region = "chr1:100-400")
     ld <- LdData(correlation = diag(4), variants = vars, blockMetadata = bm)
-    expect_identical(getVariantInfo(ld), vars)
+    expect_identical(variantInfo(ld), vars)
     # blockMetadata is NOT verbatim: the constructor normalises it to the
     # columns consumers read. A column the caller added is carried through.
-    got <- getBlockMetadata(ld)
+    got <- blockMetadata(ld)
     expect_s4_class(got, "GRanges")
     expect_true(all(
         c("blockId", "size", "startIdx", "endIdx") %in%
@@ -361,13 +361,13 @@ test_that("getVariantInfo returns the variants verbatim", {
     expect_equal(got$region, "chr1:100-400")
 })
 
-test_that("getRefPanel: assembles the chrom/pos/A1/A2/variant_id data.frame", {
+test_that("refPanel: assembles the chrom/pos/A1/A2/variant_id data.frame", {
     ld <- LdData(
         correlation = diag(4),
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1)
     )
-    rp <- getRefPanel(ld)
+    rp <- refPanel(ld)
     expect_s3_class(rp, "data.frame")
     expect_setequal(colnames(rp), c("A1", "A2", "variant_id", "chrom", "pos"))
     expect_equal(rp$variant_id, sprintf("chr1:%d:A:G", 100L * (1:4)))
@@ -403,10 +403,10 @@ test_that("LdData constructor works with correlation matrix", {
     ld <- LdData(correlation = R, variants = gr, blockMetadata = bm)
     expect_s4_class(ld, "LdData")
     expect_false(hasGenotypes(ld))
-    expect_true(is.matrix(getCorrelation(ld)))
-    expect_equal(getVariantIds(ld), c("chr1:100:A:G", "chr1:200:C:T"))
-    expect_equal(length(getBlockMetadata(ld)), 1L)
-    expect_null(getGenotypes(ld))
+    expect_true(is.matrix(ldMatrix(ld)))
+    expect_equal(variantIds(ld), c("chr1:100:A:G", "chr1:200:C:T"))
+    expect_equal(length(blockMetadata(ld)), 1L)
+    expect_null(genotypes(ld))
 })
 
 
@@ -475,7 +475,7 @@ test_that("LdData supports block-diagonal correlation", {
         variants = gr,
         blockMetadata = data.frame()
     )
-    corr <- getCorrelation(ld)
+    corr <- ldMatrix(ld)
     expect_true(is.list(corr))
     expect_equal(length(corr), 2)
 })
@@ -497,10 +497,10 @@ test_that("LdData S4 accessors return correct data", {
         variants = gr,
         blockMetadata = data.frame(blockId = 1L)
     )
-    expect_equal(getCorrelation(ld), R)
-    expect_equal(getVariantIds(ld), c("chr1:100:A:G", "chr1:200:A:G"))
+    expect_equal(ldMatrix(ld), R)
+    expect_equal(variantIds(ld), c("chr1:100:A:G", "chr1:200:A:G"))
     expect_false(hasGenotypes(ld))
-    rp <- getRefPanel(ld)
+    rp <- refPanel(ld)
     expect_true(is.data.frame(rp))
     expect_true("variant_id" %in% names(rp))
     expect_equal(rp$variant_id, c("chr1:100:A:G", "chr1:200:A:G"))
@@ -527,12 +527,12 @@ test_that(".refPanelToGranges builds GRanges from data.frame", {
     expect_equal(S4Vectors::mcols(gr)$allele_freq, c(0.3, 0.7))
 })
 # =============================================================================
-# getTopLoci(type = "GRanges")
+# topLoci() ranges
 # =============================================================================
 
 # === Tests migrated from test_s4Constructors.R (LdData) ===
 
-test_that("LdData: pre-computed correlation matrix is returned by getCorrelation", {
+test_that("LdData: pre-computed correlation matrix is returned by ldMatrix", {
     gr <- GenomicRanges::GRanges(
         seqnames = rep("chr1", 3),
         ranges = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
@@ -549,10 +549,10 @@ test_that("LdData: pre-computed correlation matrix is returned by getCorrelation
         snpIdx = NULL,
         variants = gr,
         blockMetadata = block_meta,
-        nRef = 100L
+        nSamples = 100L
     )
     expect_s4_class(ld, "LdData")
-    expect_equal(getCorrelation(ld), R)
+    expect_equal(ldMatrix(ld), R)
 })
 
 
@@ -656,10 +656,10 @@ test_that("LdData: mixtureWeights must be non-negative and sum to 1", {
 
 
 # ===========================================================================
-# getGenotypeHandle / getMixtureWeights / getSnpIdx accessors
+# genotypeHandle / mixtureWeights / snpIdx accessors
 # ===========================================================================
 
-test_that("LdData: getGenotypeHandle / getMixtureWeights / getSnpIdx return their slots", {
+test_that("LdData: genotypeHandle / mixtureWeights / snpIdx return their slots", {
     gh1 <- .ld_makeHandle(path = "/tmp/h1.gds")
     gh2 <- .ld_makeHandle(path = "/tmp/h2.gds")
     ld <- LdData(
@@ -670,12 +670,12 @@ test_that("LdData: getGenotypeHandle / getMixtureWeights / getSnpIdx return thei
         blockMetadata = S4Vectors::DataFrame(x = 1),
         mixtureWeights = c(0.3, 0.7)
     )
-    expect_identical(getGenotypeHandle(ld), list(gh1, gh2))
-    expect_equal(getMixtureWeights(ld), c(0.3, 0.7))
-    expect_equal(getSnpIdx(ld), 1:4)
+    expect_identical(genotypeHandle(ld), list(gh1, gh2))
+    expect_equal(mixtureWeights(ld), c(0.3, 0.7))
+    expect_equal(snpIdx(ld), 1:4)
 })
 
-test_that("getCorrelation: errors when neither correlation nor genotypeHandle is set", {
+test_that("ldMatrix: errors when neither correlation nor genotypeHandle is set", {
     # LdData validity forbids this state at construction, so build a valid
     # object and drop the correlation slot post-hoc to reach the defensive
     # runtime stop().
@@ -686,7 +686,7 @@ test_that("getCorrelation: errors when neither correlation nor genotypeHandle is
     )
     ld@correlation <- NULL
     expect_error(
-        getCorrelation(ld),
+        ldMatrix(ld),
         "No correlation matrix or genotype handle available"
     )
 })
@@ -695,11 +695,11 @@ test_that("getCorrelation: errors when neither correlation nor genotypeHandle is
 # genotypeHandle: what the slot admits
 # ===========================================================================
 
-test_that("getCorrelation works when the source is a dosage matrix", {
+test_that("ldMatrix works when the source is a dosage matrix", {
     # .loadLdFromBlocks stores extracted, filtered dosages in genotypeHandle
-    # with snpIdx NULL (the matrix IS the subset). getGenotypes() always had a
-    # branch for that shape; getCorrelation() did not, and died inside the
-    # file readers with a dispatch error on getSampleIds().
+    # with snpIdx NULL (the matrix IS the subset). genotypes() always had a
+    # branch for that shape; ldMatrix() did not, and died inside the
+    # file readers with a dispatch error on sampleIds().
     set.seed(3)
     X <- matrix(
         rbinom(40, 2, 0.3),
@@ -713,9 +713,9 @@ test_that("getCorrelation works when the source is a dosage matrix", {
         snpIdx = NULL,
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1),
-        nRef = 10L
+        nSamples = 10L
     )
-    R <- getCorrelation(ld)
+    R <- ldMatrix(ld)
     expect_equal(dim(R), c(4L, 4L))
     expect_equal(unname(R), unname(cor(X)), tolerance = 1e-8)
 })
@@ -726,7 +726,7 @@ test_that("the genotypeHandle slot refuses a source LD cannot be read from", {
         snpIdx = NULL,
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1),
-        nRef = 0L
+        nSamples = 0L
     )
     for (bad in list("a path", 42L, sum)) {
         expect_error(
@@ -744,7 +744,7 @@ test_that("a mixture list must hold sources, not arbitrary values", {
             snpIdx = 1:4,
             variants = .ld_makeVariants(),
             blockMetadata = S4Vectors::DataFrame(x = 1),
-            nRef = 0L,
+            nSamples = 0L,
             mixtureWeights = c(0.5, 0.5)
         ),
         "must each be a genotype panel or a dosage matrix"
@@ -765,10 +765,10 @@ test_that("the constructor unwraps a genotype panel to its handle", {
         snpIdx = 1:4,
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1),
-        nRef = 0L
+        nSamples = 0L
     )
-    expect_s4_class(getGenotypeHandle(ld), "GenotypeHandle")
-    expect_equal(dim(getCorrelation(ld)), c(4L, 4L))
+    expect_s4_class(genotypeHandle(ld), "GenotypeHandle")
+    expect_equal(dim(ldMatrix(ld)), c(4L, 4L))
 })
 
 test_that("a DelayedMatrix is refused with the panel route named", {
@@ -811,7 +811,7 @@ test_that("snpIdx accepts doubles and stores them as integer", {
         genotypeHandle = .ld_makeHandle(),
         snpIdx = c(1, 2, 3, 4)
     )
-    expect_identical(getSnpIdx(ld), 1:4)
+    expect_identical(snpIdx(ld), 1:4)
 })
 
 test_that("correlation takes a matrix, a per-block list, or NULL", {
@@ -919,7 +919,7 @@ test_that("blockMetadata: a bare genomic span is completed from variants", {
             end = 400L
         )
     )
-    bm <- getBlockMetadata(ld)
+    bm <- blockMetadata(ld)
     expect_s4_class(bm, "GRanges")
     expect_true(all(.ld_bmMcols %in% names(S4Vectors::mcols(bm))))
     expect_equal(length(bm), 1L)
@@ -939,7 +939,7 @@ test_that("blockMetadata: a placeholder table means one block, not none", {
         variants = .ld_makeVariants(),
         blockMetadata = data.frame()
     )
-    bm <- getBlockMetadata(ld)
+    bm <- blockMetadata(ld)
     expect_equal(length(bm), 1L)
     expect_true(all(.ld_bmMcols %in% names(S4Vectors::mcols(bm))))
     expect_equal(bm$size, 4L)
@@ -963,7 +963,7 @@ test_that("blockMetadata: a GRanges keeps its mcols over its ranges", {
         variants = .ld_makeVariants(),
         blockMetadata = gr
     )
-    bm <- getBlockMetadata(ld)
+    bm <- blockMetadata(ld)
     expect_equal(length(bm), 2L)
     # chrom is the seqnames now, and must not ALSO linger as an mcol:
     # binding the ranges and the mcols both would duplicate it.
@@ -979,7 +979,7 @@ test_that("blockMetadata: several blocks take their ranges from size", {
         variants = .ld_makeVariants(),
         blockMetadata = tibble(blockId = 1:2, size = c(3L, 1L))
     )
-    bm <- getBlockMetadata(ld)
+    bm <- blockMetadata(ld)
     expect_equal(bm$startIdx, c(1L, 4L))
     expect_equal(bm$endIdx, c(3L, 4L))
     expect_equal(
@@ -1023,7 +1023,7 @@ test_that("blockMetadata: supplied indices are never replaced", {
             endIdx = 20L
         )
     )
-    bm <- getBlockMetadata(ld)
+    bm <- blockMetadata(ld)
     expect_equal(bm$startIdx, 10L)
     expect_equal(bm$endIdx, 20L)
     # An out-of-range block has no span to derive, and a GRanges cannot
@@ -1038,7 +1038,7 @@ test_that("blockMetadata: a caller's own columns are carried through", {
         variants = .ld_makeVariants(),
         blockMetadata = tibble(region = "chr1:100-400", note = "kept")
     )
-    bm <- getBlockMetadata(ld)
+    bm <- blockMetadata(ld)
     expect_equal(bm$region, "chr1:100-400")
     expect_equal(bm$note, "kept")
     # The index payload comes first so the mcols read the same way whatever

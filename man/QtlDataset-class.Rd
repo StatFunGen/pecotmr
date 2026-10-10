@@ -87,7 +87,7 @@ than one of the things being chosen between, so it is always retained.
 \section{Slots}{
 
 \describe{
-\item{\code{study}}{Character (length 1). Study identifier; used in collection
+\item{\code{studyName}}{Character (length 1). Study identifier; used in collection
 classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
 entries.
 The \code{genotype} experiment's assay reads through this handle; the
@@ -99,7 +99,7 @@ scale residuals to unit variance.}
 
 \item{\code{mafCutoff}}{Numeric (length 1). Minor allele frequency threshold;
 variants with \code{MAF < mafCutoff} are dropped at extraction time inside
-\code{getGenotypes()} / \code{getResidualizedGenotypes()}. Default 0 (no
+\code{genotypes()} / \code{residualizedGenotypes()}. Default 0 (no
 filter).}
 
 \item{\code{macCutoff}}{Numeric (length 1). Minor allele count threshold; converted

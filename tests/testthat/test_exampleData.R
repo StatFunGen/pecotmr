@@ -130,10 +130,13 @@ test_that("the bundled LD references describe one shared variant set", {
     data(ldScoreExample)
     expect_equal(length(ldEigenExample), length(ldScoreExample))
     expect_equal(names(ldEigenExample), names(ldScoreExample))
-    expect_equal(getGenome(ldEigenExample), getGenome(ldScoreExample))
+    expect_equal(
+        unname(GenomeInfoDb::genome(ldEigenExample)),
+        unname(GenomeInfoDb::genome(ldScoreExample))
+    )
     # Two routes to the same quantity; disagreement means one has drifted.
     expect_equal(
-        as.vector(getLdScores(ldScoreExample)[, 1]),
+        as.vector(mcols(ldScoreExample)$ldScores[, 1]),
         as.vector(computeLdScores(ldEigenExample)[, 1])
     )
 })
@@ -142,8 +145,8 @@ test_that("the bundled LD references support a block jackknife", {
     data(ldEigenExample)
     data(ldScoreExample)
     # estimateH2 requires at least two blocks and wants many more.
-    expect_gte(length(getEigenList(ldEigenExample)), 10L)
-    expect_gte(length(getLdMatrixList(ldScoreExample)), 10L)
+    expect_gte(length(eigenList(ldEigenExample)), 10L)
+    expect_gte(length(ldMatrixList(ldScoreExample)), 10L)
     expect_gt(length(ldEigenExample), 500L)
 })
 
@@ -163,23 +166,23 @@ test_that("every estimateH2 method runs on the bundled LD references", {
         system.file("extdata", "toy_ref.bed", package = "pecotmr")
     )
     ss <- GwasSumStats(
-        study = "trait1",
+        studyName = "trait1",
         entry = list(gr),
-        genome = getGenome(ldScoreExample),
+        genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
         ldSketch = panel
     )
     for (method in c("sldsc", "gldsc")) {
         res <- estimateH2(ss, ldScoreExample, method = method)
         expect_s4_class(res, "H2Estimate")
-        expect_true(is.finite(getH2(res)), info = method)
-        expect_true(is.finite(getH2Se(res)), info = method)
-        expect_gt(getH2Se(res), 0)
+        expect_true(is.finite(heritabilityEstimate(res)), info = method)
+        expect_true(is.finite(heritabilityEstimateSe(res)), info = method)
+        expect_gt(heritabilityEstimateSe(res), 0)
     }
     for (method in c("lder", "hdl")) {
         res <- suppressWarnings(
             estimateH2(ss, ldEigenExample, method = method)
         )
         expect_s4_class(res, "H2Estimate")
-        expect_true(is.finite(getH2(res)), info = method)
+        expect_true(is.finite(heritabilityEstimate(res)), info = method)
     }
 })

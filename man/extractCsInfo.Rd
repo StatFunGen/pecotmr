@@ -9,14 +9,14 @@ extractCsInfo(fmRow, csNames, topLociTable, ldSource)
 \arguments{
 \item{fmRow}{A \code{\link{fineMappingRow}}, or a single-row
 fine-mapping collection as returned by
-\code{\link{getFineMappingResult}}, carrying the SuSiE fit and
+\code{\link{fineMappingResult}}, carrying the SuSiE fit and
 variant ids.}
 
 \item{csNames}{Character vector. Names of the Credible Sets, usually in the
 format "L_<number>".}
 
 \item{topLociTable}{Data frame. The top-loci table (e.g. from
-\code{\link{getTopLoci}}) carrying \code{variant_id}, \code{pip}, and
+\code{\link{topLoci}}) carrying \code{variant_id}, \code{pip}, and
 \code{z} columns.}
 
 \item{ldSource}{The LD source from which the between-credible-set correlation

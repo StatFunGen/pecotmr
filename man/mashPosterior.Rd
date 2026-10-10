@@ -70,7 +70,7 @@ data(mashInputExample)
 mi <- mashInputExample
 mk <- function(b, s) {
   qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
-    study = "mash")
+    studyName = "mash")
 }
 ssl <- list(strong = mk("strong.b", "strong.s"),
   random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))

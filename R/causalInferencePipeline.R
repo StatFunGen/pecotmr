@@ -47,7 +47,7 @@ NULL
 #' }
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} object. Must be QC'd
-#'   (\code{length(getQcInfo(x)) > 0L}).
+#'   (\code{length(qcInfo(x)) > 0L}).
 #' @param twasWeights Optional \code{\link{TwasWeights}} carrying per-(study,
 #'   context, trait, method) weights. When supplied, drives the TWAS-Z
 #'   computation.
@@ -164,10 +164,10 @@ causalInferencePipeline <- function(
 #' @importFrom checkmate assertClass checkClass
 .cipValidateInputs <- function(gwasSumStats, twasWeights, fineMappingResult) {
     assertClass(gwasSumStats, "GwasSumStats")
-    if (length(getQcInfo(gwasSumStats)) == 0L) {
+    if (length(qcInfo(gwasSumStats)) == 0L) {
         msg <- glue(
             "causalInferencePipeline: gwasSumStats has no QC record ",
-            "(getQcInfo() is empty). Call summaryStatsQc() first."
+            "(qcInfo() is empty). Call summaryStatsQc() first."
         )
         abort(msg)
     }
@@ -200,17 +200,17 @@ causalInferencePipeline <- function(
 # returns the GWAS LD sketch.
 # @noRd
 .cipCheckLdSketches <- function(gwasSumStats, twasWeights, fineMappingResult) {
-    gwasLd <- getLdSketch(gwasSumStats)
+    gwasLd <- ldSketch(gwasSumStats)
     if (!is.null(twasWeights)) {
         .cipRequireMatchingLdSketches(
-            getLdSketch(twasWeights),
+            ldSketch(twasWeights),
             gwasLd,
             label = "twasWeights"
         )
     }
     if (!is.null(fineMappingResult)) {
         .cipRequireMatchingLdSketches(
-            getLdSketch(fineMappingResult),
+            ldSketch(fineMappingResult),
             gwasLd,
             label = "fineMappingResult"
         )
@@ -320,7 +320,7 @@ causalInferencePipeline <- function(
     weightsInfo <- .cipExtractWeights(
         twasWeights = twasWeights,
         fineMappingResult = fineMappingResult,
-        study = tuple$qStudy,
+        studyName = tuple$qStudy,
         context = tuple$qContext,
         trait = tuple$qTrait,
         method = tuple$qMethod,
@@ -363,9 +363,9 @@ causalInferencePipeline <- function(
     if (!hasTuple) {
         return(NULL)
     }
-    getFineMappingResult(
+    fineMappingResult(
         fineMappingResult,
-        study = qStudy,
+        studyName = qStudy,
         context = qContext,
         trait = qTrait,
         method = qMethod
@@ -386,9 +386,9 @@ causalInferencePipeline <- function(
     mrArgs
 ) {
     gStudy <- as.character(gwasSumStats$study)[[gi]]
-    gdf <- getSumStatsDf(
+    gdf <- as.data.frame(
         gwasSumStats,
-        study = gStudy,
+        studyName = gStudy,
         require = c("SNP", "Z")
     )
     twasOut <- .cipComputeTwasZ(
@@ -565,11 +565,18 @@ causalInferencePipeline <- function(
 # metric names; the first present is used. Returns NA when no usable metric.
 # @noRd
 #' @importFrom rlang try_fetch
-.cipCvMetric <- function(twasWeights, study, context, trait, method, which) {
+.cipCvMetric <- function(
+    twasWeights,
+    studyName,
+    context,
+    trait,
+    method,
+    which
+) {
     perf <- try_fetch(
-        getCvResult(
+        cvResult(
             twasWeights,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method
@@ -723,10 +730,15 @@ causalInferencePipeline <- function(
     if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
 }
 
-.cipFmrHasTuple <- function(fmr, study, context, trait, method) {
+.cipFmrHasTuple <- function(fmr, studyName, context, trait, method) {
     length(.matchTupleRows(
         fmr,
-        list(study = study, context = context, trait = trait, method = method)
+        list(
+            study = studyName,
+            context = context,
+            trait = trait,
+            method = method
+        )
     )) >
         0L
 }
@@ -739,16 +751,16 @@ causalInferencePipeline <- function(
 .cipExtractWeights <- function(
     twasWeights,
     fineMappingResult,
-    study,
+    studyName,
     context,
     trait,
     method,
     useFmr
 ) {
     ent <- if (!useFmr) {
-        .cipWeightsFromTwas(twasWeights, study, context, trait, method)
+        .cipWeightsFromTwas(twasWeights, studyName, context, trait, method)
     } else {
-        .cipWeightsFromFmr(fineMappingResult, study, context, trait, method)
+        .cipWeightsFromFmr(fineMappingResult, studyName, context, trait, method)
     }
     if (is.null(ent)) {
         return(NULL)
@@ -762,9 +774,15 @@ causalInferencePipeline <- function(
 
 # TwasWeights entry for a tuple (NULL when absent).
 # @noRd
-.cipWeightsFromTwas <- function(twasWeights, study, context, trait, method) {
+.cipWeightsFromTwas <- function(
+    twasWeights,
+    studyName,
+    context,
+    trait,
+    method
+) {
     tuple <- list(
-        study = study,
+        study = studyName,
         context = context,
         trait = trait,
         method = method
@@ -772,9 +790,9 @@ causalInferencePipeline <- function(
     if (length(.matchTupleRows(twasWeights, tuple)) == 0L) {
         return(NULL)
     }
-    getTwasWeights(
+    twasWeights(
         twasWeights,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = method
@@ -785,17 +803,19 @@ causalInferencePipeline <- function(
 # @noRd
 .cipWeightsFromFmr <- function(
     fineMappingResult,
-    study,
+    studyName,
     context,
     trait,
     method
 ) {
-    if (!.cipFmrHasTuple(fineMappingResult, study, context, trait, method)) {
+    if (
+        !.cipFmrHasTuple(fineMappingResult, studyName, context, trait, method)
+    ) {
         return(NULL)
     }
-    getFineMappingResult(
+    fineMappingResult(
         fineMappingResult,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = method
@@ -803,7 +823,7 @@ causalInferencePipeline <- function(
 }
 
 # Compute the per-tuple TWAS Z from a single GwasSumStats tuple's
-# unpacked data.frame (produced by getSumStatsDf upstream). Returns
+# unpacked data.frame (produced by as.data.frame upstream). Returns
 # NULL when the overlap is too small.
 .cipComputeTwasZ <- function(
     weights,
@@ -934,8 +954,19 @@ causalInferencePipeline <- function(
 # Instrumental variables from a FineMappingRow's topLoci: variants with PIP >
 # pipCutoff. Returns list(ivVars, betaX, seX) or NULL when none qualify.
 # @noRd
+# The per-variant top-loci table of one entry. topLoci() returns ranges and
+# mcols() is exactly the pre-conversion table -- as.data.frame() on the
+# ranges would add the standard seqnames/start/end/width/strand columns the
+# MR column matching does not expect. Both instrument builders read through
+# here, so the equivalence is stated once and the tests have one seam to
+# substitute a controlled table at.
+# @noRd
+.cipTopLociTable <- function(fmrEntry) {
+    as.data.frame(S4Vectors::mcols(topLoci(fmrEntry)))
+}
+
 .cipMrInstruments <- function(fmrEntry, pipCutoff) {
-    tl <- getTopLoci(fmrEntry)
+    tl <- .cipTopLociTable(fmrEntry)
     if (is.null(tl) || nrow(tl) == 0L) {
         return(NULL)
     }
@@ -1031,7 +1062,7 @@ causalInferencePipeline <- function(
 # unit-SE-standardized (cs, pip, bhatX, sbhatX, bhatY, sbhatY) or NULL.
 # @noRd
 .cipCsAwareInstruments <- function(fmrEntry, gwasDf, alleleFlip) {
-    tl <- getTopLoci(fmrEntry)
+    tl <- .cipTopLociTable(fmrEntry)
     if (is.null(tl) || nrow(tl) == 0L) {
         return(NULL)
     }

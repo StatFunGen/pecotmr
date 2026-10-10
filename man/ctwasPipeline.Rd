@@ -10,7 +10,7 @@ ctwasPipeline(
   twasZ = NULL,
   fineMappingResult = NULL,
   method = NULL,
-  L = 5L,
+  maxNumSingleEffects = 5L,
   numThreads = 1L,
   ctwasPriorArgs = CtwasPriorParam(),
   variantPruningArgs = VariantPruningParam(),
@@ -22,7 +22,7 @@ ctwasPipeline(
 \arguments{
 \item{gwasSumStats}{A \code{\link{GwasSumStats}} whose elements are LD
 blocks (at least two), keyed by its \code{blockId} column, with
-\code{getQcInfo()} non-empty. Build it with
+\code{qcInfo()} non-empty. Build it with
 \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
 through \code{\link{summaryStatsQc}}.}
 
@@ -59,8 +59,9 @@ present; otherwise run \strong{every} method as an independent cTWAS run
 (one \code{CtwasResult} row-set per method). Passing the name explicitly
 (e.g. \code{"mrash"}) restricts the run to that single method.}
 
-\item{L}{Integer. Max number of single effects in cTWAS fine-mapping.
-Default \code{5}. Pass-through to \code{ctwas::ctwas_sumstats}.}
+\item{maxNumSingleEffects}{Integer. Max number of single effects in cTWAS
+fine-mapping. Default \code{5}. Pass-through to
+\code{ctwas::ctwas_sumstats}.}
 
 \item{numThreads}{Number of cores. Default \code{1}.}
 
@@ -86,7 +87,7 @@ boundary has its regions merged and re-fine-mapped, built with
 context-agnostic SNP background of each run as one extra \code{CtwasResult}
 row (\code{study = context = "SNP"}, mirroring cTWAS's own \code{"SNP"}
 group) so the full ctwas output is reconstructable from
-\code{\link{getFinemap}} / \code{getSusieAlpha}. Default \code{FALSE} --
+\code{\link{ctwasPosteriors}} / \code{susieAlpha}. Default \code{FALSE} --
 the SNP rows are the null background and are dropped from the structured
 gene-level result.}
 
@@ -131,8 +132,8 @@ Pipeline that hands a per-block set of
 
 \section{LD-sketch compatibility check}{
  Per block:
-  \code{getLdSketch(twasWeights)} (when non-NULL) must come from the same
-  reference panel as \code{getLdSketch(gwasSumStats)} --- same samples, same
+  \code{ldSketch(twasWeights)} (when non-NULL) must come from the same
+  reference panel as \code{ldSketch(gwasSumStats)} --- same samples, same
   allele orientation on the shared variants. The two need NOT carry the same
   variants; a partial overlap, which is what QC-ing the two sides separately
   produces, only warns. A different sample set, a swapped A1/A2 on a shared
@@ -153,10 +154,15 @@ blocks <- GenomicRanges::GRanges("chr22",
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
 gwasByRegion <- summaryStatsQc(gss,
-  panelFilter = PanelFilterParam(mafCutoff = 0.0025))
+  panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 ctwasPipeline(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample),
   ctwasPrior = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
-  methodArgs = CtwasOptions(min_group_size = 1, min_p_single_effect = 0))
+  methodArgs = CtwasOptions(
+    regionData = CtwasRegionDataOptions(min_group_size = 1),
+    estParam = CtwasEstParamOptions(
+      min_group_size = 1, min_p_single_effect = 0
+    )
+  ))
 }

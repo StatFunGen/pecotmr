@@ -27,7 +27,7 @@ test_that("ColocBoostResult: a set holds an arbitrary number of outcomes", {
     )
     expect_equal(nrow(x), 1L)
     expect_equal(lengths(x$outcomes), 3L)
-    expect_equal(getColocPairs(x)$nOutcomes, 3L)
+    expect_equal(colocPairs(x)$nOutcomes, 3L)
 })
 
 test_that("ColocBoostResult: shares a base with ColocResult", {
@@ -89,7 +89,7 @@ test_that("ColocBoostResult: an empty result keeps the column schema", {
         c("cosId", "analysis", "cosNpc", "isColocalized"),
         colnames(x)
     )))
-    expect_equal(nrow(getColocPairs(x)), 0L)
+    expect_equal(nrow(colocPairs(x)), 0L)
 })
 
 test_that("ColocBoostResult: NULL runs are skipped, not errors", {
@@ -139,7 +139,7 @@ test_that("ColocBoostResult: variants keep alleles so ids round-trip", {
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
-    expect_equal(getColocVariants(x)$variant_id, "chr1:200:C:T")
+    expect_equal(colocVariants(x)$variant_id, "chr1:200:C:T")
 })
 
 test_that("ColocBoostResult: reachable by range, not just identity", {
@@ -153,26 +153,26 @@ test_that("ColocBoostResult: reachable by range, not just identity", {
     expect_equal(sum(lengths(subsetRegion(x, win))), 1L)
 })
 
-test_that("getColocBoostOutcomes: joins each outcome to its identity", {
+test_that("colocBoostOutcomes: joins each outcome to its identity", {
     x <- ColocBoostResult(
         list(.cbr_fake()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
-    out <- getColocBoostOutcomes(x)
+    out <- colocBoostOutcomes(x)
     expect_equal(nrow(out), 2L)
     expect_setequal(out$outcome, c("t1", "t2"))
     expect_setequal(out$context, c("ctx1", "ctx2"))
     expect_true(all(out$trait == "GENE1"))
 })
 
-test_that("getRegionVcp spans the region, not just set members", {
+test_that("regionVcp spans the region, not just set members", {
     x <- ColocBoostResult(
         list(.cbr_fake(nRegion = 6L)),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
-    expect_equal(length(getRegionVcp(x)), 6L)
+    expect_equal(length(regionVcp(x)), 6L)
     expect_equal(sum(lengths(x)), 1L)
 })
 
@@ -321,7 +321,7 @@ test_that("show counts colocalized and outcome-only sets separately", {
 # Pooled variants, and the fallbacks for a result missing its summary tables
 # ===========================================================================
 
-test_that("getColocVariants(pooled = TRUE) collapses to one row per variant", {
+test_that("colocVariants(pooled = TRUE) collapses to one row per variant", {
     # Noisy-OR only: ColocBoost's sets are not per-block slices of one signal,
     # so there is no mutually-exclusive sum stage the way coloc has.
     x <- ColocBoostResult(
@@ -329,8 +329,8 @@ test_that("getColocVariants(pooled = TRUE) collapses to one row per variant", {
         c("xqtl_coloc", "gwas_only"),
         outcomeInfo = .cbr_info()
     )
-    long <- getColocVariants(x)
-    pooled <- getColocVariants(x, pooled = TRUE)
+    long <- colocVariants(x)
+    pooled <- colocVariants(x, pooled = TRUE)
     expect_lte(nrow(pooled), nrow(long))
     expect_equal(
         anyDuplicated(pooled[, c("analysis", "variant_id")]),
@@ -417,7 +417,7 @@ test_that("the views answer an empty collection with empty tables", {
     empty <- colocboostResultExample[0]
     expect_equal(length(empty), 0L)
     expect_equal(nrow(.cbrLongVariants(empty)), 0L)
-    expect_equal(nrow(getColocBoostOutcomes(empty)), 0L)
+    expect_equal(nrow(colocBoostOutcomes(empty)), 0L)
 })
 
 test_that("outcome info defaults to the empty frame and is not joined", {
@@ -425,7 +425,7 @@ test_that("outcome info defaults to the empty frame and is not joined", {
     # outcomes view returns before attempting a join against it.
     cb <- ColocBoostResult(list(.cbr_fake()), analysis = "xqtl")
     expect_equal(nrow(cb@outcomeInfo), 0L)
-    out <- getColocBoostOutcomes(cb)
+    out <- colocBoostOutcomes(cb)
     expect_gt(nrow(out), 0L)
     expect_false(is_in("outcomeTrait", colnames(out)))
 })

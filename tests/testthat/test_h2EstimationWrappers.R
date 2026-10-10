@@ -37,7 +37,7 @@ makeTestEigenRef <- function(nSnps = 20, nBlocks = 2) {
     LdEigen(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         eigenList = eigen_list,
@@ -93,7 +93,7 @@ makeTestScoreRef <- function(
     LdScore(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = ld_scores,
@@ -144,7 +144,7 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
     }
 
     set.seed(55)
-    tauBlocks <- if (with_enrichment) {
+    annotationJackknifeCoefs <- if (with_enrichment) {
         matrix(
             rnorm(20),
             nrow = 10,
@@ -157,13 +157,13 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
 
     new(
         "H2Estimate",
-        h2 = 0.3,
-        h2Se = 0.05,
+        estimate = 0.3,
+        estimateSe = 0.05,
         intercept = 1.01,
         interceptSe = 0.02,
-        local = NULL,
+        localBlocks = NULL,
         enrichment = enrich,
-        tauBlocks = tauBlocks,
+        annotationJackknifeCoefs = annotationJackknifeCoefs,
         scoreStats = NULL,
         method = "lder",
         nSnps = 100L,
@@ -252,7 +252,7 @@ test_that("computeLdScores LdEigen annotation column names match", {
 test_that("computeLdScores LdScore without annotations returns stored ld_scores", {
     score_ref <- makeTestScoreRef()
     result <- computeLdScores(score_ref)
-    expect_identical(result, getLdScores(score_ref))
+    expect_identical(result, mcols(score_ref)$ldScores)
 })
 
 test_that("computeLdScores LdScore with annotations but no ld_matrix_list errors", {
@@ -277,24 +277,24 @@ test_that("getlocal returns the local slot", {
     )
     h2_obj <- new(
         "H2Estimate",
-        h2 = 0.3,
-        h2Se = 0.05,
+        estimate = 0.3,
+        estimateSe = 0.05,
         intercept = 1.0,
         interceptSe = 0.01,
-        local = local_df,
+        localBlocks = local_df,
         enrichment = NULL,
-        tauBlocks = NULL,
+        annotationJackknifeCoefs = NULL,
         scoreStats = NULL,
         method = "lder",
         nSnps = 100L,
         traitName = "test"
     )
-    expect_identical(getLocal(h2_obj), local_df)
+    expect_identical(localH2Blocks(h2_obj), local_df)
 })
 
 test_that("getenrichment returns the enrichment slot", {
     h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
-    result <- getEnrichment(h2_obj)
+    result <- stratifiedHeritabilityEnrichment(h2_obj)
     expect_true(is.data.frame(result))
     expect_equal(result$annotation, c("annot1", "annot2"))
 })
@@ -307,39 +307,39 @@ test_that("getscorestats returns the scoreStats slot", {
     )
     h2_obj <- new(
         "H2Estimate",
-        h2 = 0.3,
-        h2Se = 0.05,
+        estimate = 0.3,
+        estimateSe = 0.05,
         intercept = 1.0,
         interceptSe = 0.01,
-        local = NULL,
+        localBlocks = NULL,
         enrichment = NULL,
-        tauBlocks = NULL,
+        annotationJackknifeCoefs = NULL,
         scoreStats = scoreStats,
         method = "lder",
         nSnps = 100L,
         traitName = "test"
     )
-    expect_identical(getScoreStats(h2_obj), scoreStats)
+    expect_identical(scoreStats(h2_obj), scoreStats)
 })
 
 test_that("accessors return NULL when slots are NULL", {
     h2_obj <- new(
         "H2Estimate",
-        h2 = 0.3,
-        h2Se = 0.05,
+        estimate = 0.3,
+        estimateSe = 0.05,
         intercept = 1.0,
         interceptSe = 0.01,
-        local = NULL,
+        localBlocks = NULL,
         enrichment = NULL,
-        tauBlocks = NULL,
+        annotationJackknifeCoefs = NULL,
         scoreStats = NULL,
         method = "lder",
         nSnps = 100L,
         traitName = "test"
     )
-    expect_null(getLocal(h2_obj))
-    expect_null(getEnrichment(h2_obj))
-    expect_null(getScoreStats(h2_obj))
+    expect_null(localH2Blocks(h2_obj))
+    expect_null(stratifiedHeritabilityEnrichment(h2_obj))
+    expect_null(scoreStats(h2_obj))
 })
 
 # ===========================================================================
@@ -360,7 +360,7 @@ test_that("h2EstimateToSldscTrait returns correct list structure", {
         "propH2",
         "propSnps",
         "h2g",
-        "tauBlocks",
+        "annotationJackknifeCoefs",
         "nBlocks"
     )
     expect_true(all(expected_names %in% names(result)))
@@ -368,7 +368,7 @@ test_that("h2EstimateToSldscTrait returns correct list structure", {
 
     expect_equal(result$categories, c("annot1", "annot2"))
     expect_equal(result$h2g, 0.3)
-    expect_true(is.matrix(result$tauBlocks))
+    expect_true(is.matrix(result$annotationJackknifeCoefs))
     expect_equal(result$nBlocks, 10L)
     expect_equal(names(result$tau), c("annot1", "annot2"))
     expect_equal(names(result$enrichment), c("annot1", "annot2"))
@@ -389,13 +389,13 @@ test_that("h2EstimateToSldscTrait errors when enrichment is NULL", {
     )
 })
 
-test_that("h2EstimateToSldscTrait creates 1-row dummy when tauBlocks is NULL", {
+test_that("h2EstimateToSldscTrait creates 1-row dummy when annotationJackknifeCoefs is NULL", {
     h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
-    h2_obj@tauBlocks <- NULL
+    h2_obj@annotationJackknifeCoefs <- NULL
     result <- h2EstimateToSldscTrait(h2_obj)
-    expect_equal(nrow(result$tauBlocks), 1)
+    expect_equal(nrow(result$annotationJackknifeCoefs), 1)
     expect_equal(result$nBlocks, 1L)
-    expect_equal(colnames(result$tauBlocks), c("annot1", "annot2"))
+    expect_equal(colnames(result$annotationJackknifeCoefs), c("annot1", "annot2"))
 })
 
 # ===========================================================================
@@ -450,7 +450,7 @@ makeTestSumstatsForRef <- function(
         stringsAsFactors = FALSE
     )
     GwasSumStats(
-        study = traitName,
+        studyName = traitName,
         entry = list(.dfToGwasGr(df)),
         genome = "hg19",
         ldSketch = makeTestGwasGenotypeHandle(),
@@ -468,13 +468,13 @@ test_that("estimateh2 with method='lder' returns H2Estimate with correct slots",
     result <- estimateH2(ss, eigen_ref, method = "lder")
 
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(getH2(result)))
-    expect_true(is.numeric(getH2Se(result)))
-    expect_true(is.numeric(getIntercept(result)))
-    expect_true(is.numeric(getInterceptSe(result)))
-    expect_equal(getMethodNames(result), "lder")
-    expect_equal(getNSnps(result), nSnps(ss))
-    expect_equal(getTraitName(result), "test")
+    expect_true(is.numeric(heritabilityEstimate(result)))
+    expect_true(is.numeric(heritabilityEstimateSe(result)))
+    expect_true(is.numeric(heritabilityIntercept(result)))
+    expect_true(is.numeric(heritabilityInterceptSe(result)))
+    expect_equal(methodNames(result), "lder")
+    expect_equal(nSnps(result), nSnps(ss))
+    expect_equal(traitNames(result), "test")
 })
 
 # ===========================================================================
@@ -487,10 +487,10 @@ test_that("estimateh2 with method='lder' returns H2Estimate with correct slots",
 
 # Rebuild `ss`'s single entry with the mcols kept and the ranges replaced.
 .reposition <- function(ss, gr) {
-    entry <- getSumStats(ss)
+    entry <- sumStats(ss)
     S4Vectors::mcols(gr) <- S4Vectors::mcols(entry)
     GwasSumStats(
-        study = "test",
+        studyName = "test",
         entry = list(gr),
         genome = "hg19",
         ldSketch = makeTestGwasGenotypeHandle()
@@ -501,8 +501,8 @@ test_that("estimateH2 rejects a sumstats with a different variant count", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
     short <- GwasSumStats(
-        study = "test",
-        entry = list(getSumStats(ss)[1:10]),
+        studyName = "test",
+        entry = list(sumStats(ss)[1:10]),
         genome = "hg19",
         ldSketch = makeTestGwasGenotypeHandle()
     )
@@ -558,8 +558,8 @@ test_that("estimateH2 rejects a genome build mismatch", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
     hg38 <- GwasSumStats(
-        study = "test",
-        entry = list(getSumStats(ss)),
+        studyName = "test",
+        entry = list(sumStats(ss)),
         genome = "hg38",
         ldSketch = makeTestGwasGenotypeHandle()
     )
@@ -592,8 +592,8 @@ test_that("unstratified S-LDSC runs without the per-block LD matrices", {
     expect_error(estimateH2(ss, noMat, method = "gldsc"), "per-block LD")
     res <- estimateH2(ss, noMat, method = "sldsc")
     expect_s4_class(res, "H2Estimate")
-    expect_equal(getMethodNames(res), "sldsc")
-    expect_true(is.finite(getH2(res)))
+    expect_equal(methodNames(res), "sldsc")
+    expect_true(is.finite(heritabilityEstimate(res)))
 })
 
 test_that("stratified S-LDSC needs the per-block LD matrices", {
@@ -612,7 +612,7 @@ test_that("S-LDSC reports an enrichment table when stratified", {
     annot <- makeTestAnnotations(nSnps = length(ref))
     res <- estimateH2(ss, ref, method = "sldsc", annotations = annot)
 
-    enr <- getEnrichment(res)
+    enr <- stratifiedHeritabilityEnrichment(res)
     expect_s3_class(enr, "data.frame")
     expect_equal(nrow(enr), 2L)
     expect_true(all(
@@ -628,7 +628,7 @@ test_that("S-LDSC reports an enrichment table when stratified", {
         ) %in%
             names(enr)
     ))
-    expect_false(is.null(getTauBlocks(res)))
+    expect_false(is.null(annotationJackknifeCoefs(res)))
 })
 
 test_that("S-LDSC requires an LdScore, not an LdEigen", {
@@ -708,7 +708,7 @@ test_that("the S-LDSC weights reproduce upstream Hsq.weights", {
             IRanges::IRanges(start = starts, end = ends)
         ),
         snpInfo = snpInfo,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         eigenvalueTruncation = 1.0,
@@ -718,7 +718,7 @@ test_that("the S-LDSC weights reproduce upstream Hsq.weights", {
 
 test_that("a rank-deficient LD block really does yield negative eigenvalues", {
     ref <- .rankDeficientEigenRef()
-    values <- unlist(map(getEigenList(ref), function(b) b$values))
+    values <- unlist(map(eigenList(ref), function(b) b$values))
     expect_true(any(values < 0))
     expect_true(min(values) > -1e-6) # noise, not structure
 })
@@ -728,7 +728,7 @@ test_that("estimateH2 survives negative eigenvalues from rank-deficient LD", {
     ss <- makeTestSumstatsForRef(ref)
     res <- estimateH2(ss, ref, method = "lder")
     expect_s4_class(res, "H2Estimate")
-    expect_false(is.na(getH2(res)))
+    expect_false(is.na(heritabilityEstimate(res)))
 })
 
 test_that(".lderWeights never returns a negative weight", {
@@ -800,7 +800,7 @@ test_that("estimateH2 accepts a chr-prefix difference between the two sides", {
     # makeTestSumstatsForRef already strips the prefix ("1" vs "chr1"),
     # so this pins that the check normalizes rather than rejects it.
     expect_equal(
-        as.character(GenomicRanges::seqnames(getSumStats(ss)))[[1]],
+        as.character(GenomicRanges::seqnames(sumStats(ss)))[[1]],
         "1"
     )
     expect_s4_class(estimateH2(ss, ref, method = "lder"), "H2Estimate")
@@ -813,11 +813,11 @@ test_that("estimateh2 with var_y correction runs without error", {
         traitName = "cc_trait",
         varY = 4.0
     )
-    expect_equal(getVarY(ss), 4.0)
+    expect_equal(varY(ss), 4.0)
 
     result <- estimateH2(ss, eigen_ref, method = "lder")
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(getH2(result)))
+    expect_true(is.numeric(heritabilityEstimate(result)))
 })
 
 test_that("estimateh2 with method='gldsc' returns H2Estimate", {
@@ -826,11 +826,11 @@ test_that("estimateh2 with method='gldsc' returns H2Estimate", {
     result <- estimateH2(ss, score_ref, method = "gldsc")
 
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(getH2(result)))
-    expect_true(is.numeric(getH2Se(result)))
-    expect_equal(getMethodNames(result), "gldsc")
-    expect_equal(getNSnps(result), nSnps(ss))
-    expect_equal(getTraitName(result), "test")
+    expect_true(is.numeric(heritabilityEstimate(result)))
+    expect_true(is.numeric(heritabilityEstimateSe(result)))
+    expect_equal(methodNames(result), "gldsc")
+    expect_equal(nSnps(result), nSnps(ss))
+    expect_equal(traitNames(result), "test")
 })
 
 test_that("estimateh2 with method='hdl' returns H2Estimate", {
@@ -843,11 +843,11 @@ test_that("estimateh2 with method='hdl' returns H2Estimate", {
     )
 
     expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(getH2(result)))
-    expect_true(is.numeric(getH2Se(result)))
-    expect_equal(getMethodNames(result), "hdl")
-    expect_equal(getNSnps(result), nSnps(ss))
-    expect_equal(getTraitName(result), "test")
+    expect_true(is.numeric(heritabilityEstimate(result)))
+    expect_true(is.numeric(heritabilityEstimateSe(result)))
+    expect_equal(methodNames(result), "hdl")
+    expect_equal(nSnps(result), nSnps(ss))
+    expect_equal(traitNames(result), "test")
 })
 
 # ===========================================================================
@@ -865,7 +865,7 @@ test_that("computeLdScores LdScore with annotations and ld_matrix_list returns c
     expect_equal(nrow(result), length(score_ref))
     expect_equal(colnames(result), c("base_l2", "annot_A", "annot_B"))
     # First column should be the stored base LD scores
-    expect_equal(result[, 1], getLdScores(score_ref)[, 1])
+    expect_equal(result[, 1], mcols(score_ref)$ldScores[, 1])
 })
 
 
@@ -1009,16 +1009,16 @@ test_that("computeBaselineEnrichment uses jackknife blocks when provided", {
     tauSe <- c(0.002, 0.001)
     h2 <- 0.5
     annot_names <- c("annot1", "base")
-    tauBlocks <- matrix(rep(tau, each = nBlocks), nrow = nBlocks, ncol = 2)
+    annotationJackknifeCoefs <- matrix(rep(tau, each = nBlocks), nrow = nBlocks, ncol = 2)
     res <- pecotmr:::computeBaselineEnrichment(
         tau,
         tauSe,
-        tauBlocks,
+        annotationJackknifeCoefs,
         baseline_mat,
         annot_names,
         h2
     )
-    # With constant tauBlocks, enrichmentSe should be 0
+    # With constant annotationJackknifeCoefs, enrichmentSe should be 0
     expect_equal(res$enrichmentSe, c(0, 0))
 })
 
@@ -1032,8 +1032,8 @@ test_that("standardize_tau_star computes tauStar = tau * sd_annot * M_ref / h2g"
     M_ref <- 1000L
     h2g <- 0.4
     nBlocks <- 5
-    tauBlocks <- matrix(rep(tau, each = nBlocks), nrow = nBlocks, ncol = 2)
-    res <- pecotmr:::standardizeTauStar(tau, tauBlocks, sd_annot, M_ref, h2g)
+    annotationJackknifeCoefs <- matrix(rep(tau, each = nBlocks), nrow = nBlocks, ncol = 2)
+    res <- pecotmr:::standardizeTauStar(tau, annotationJackknifeCoefs, sd_annot, M_ref, h2g)
     expected <- tau * sd_annot * M_ref / h2g
     expect_equal(res$tauStar, expected)
     expect_length(res$tauStarSe, 2)
@@ -1070,8 +1070,8 @@ test_that("standardize_tau_star returns list with tauStar and tauStarSe", {
     sd_annot <- c(0.5)
     M_ref <- 1000L
     h2g <- 0.4
-    tauBlocks <- matrix(rnorm(5, mean = 0.01, sd = 0.001), nrow = 5, ncol = 1)
-    res <- pecotmr:::standardizeTauStar(tau, tauBlocks, sd_annot, M_ref, h2g)
+    annotationJackknifeCoefs <- matrix(rnorm(5, mean = 0.01, sd = 0.001), nrow = 5, ncol = 1)
+    res <- pecotmr:::standardizeTauStar(tau, annotationJackknifeCoefs, sd_annot, M_ref, h2g)
     expect_true(is.list(res))
     expect_named(res, c("tauStar", "tauStarSe"))
     expect_length(res$tauStar, 1)
@@ -1393,7 +1393,7 @@ simulateH2Data <- function(
     eigen_ref <- LdEigen(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         eigenList = eigen_list,
@@ -1411,7 +1411,7 @@ simulateH2Data <- function(
     ld_score_ref <- LdScore(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(
@@ -1477,7 +1477,7 @@ test_that("lderUnivariate returns correct structure", {
             "interceptSe",
             "local",
             "enrichment",
-            "tauBlocks",
+            "annotationJackknifeCoefs",
             "scoreStats"
         ) %in%
             names(res)
@@ -1531,7 +1531,7 @@ test_that("gldscUnivariate returns correct structure", {
             "interceptSe",
             "local",
             "enrichment",
-            "tauBlocks",
+            "annotationJackknifeCoefs",
             "scoreStats"
         ) %in%
             names(res)
@@ -1577,7 +1577,7 @@ test_that("hdlUnivariate returns correct structure", {
             "interceptSe",
             "local",
             "enrichment",
-            "tauBlocks",
+            "annotationJackknifeCoefs",
             "scoreStats"
         ) %in%
             names(res)
@@ -1640,7 +1640,7 @@ test_that("lder enrichment has correct columns", {
     expect_true(all(expected_cols %in% colnames(res$enrichment)))
 })
 
-test_that("lder with annotations returns tauBlocks matrix", {
+test_that("lder with annotations returns annotationJackknifeCoefs matrix", {
     annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::lderUnivariate(
         dat_annot$z,
@@ -1648,9 +1648,9 @@ test_that("lder with annotations returns tauBlocks matrix", {
         dat_annot$eigen_ref,
         annotations = annot
     )
-    expect_true(is.matrix(res$tauBlocks))
+    expect_true(is.matrix(res$annotationJackknifeCoefs))
     # nBlocks rows (5 blocks in the annotation test data)
-    expect_equal(nrow(res$tauBlocks), 5L)
+    expect_equal(nrow(res$annotationJackknifeCoefs), 5L)
 })
 
 test_that("lder with annotations returns scoreStats list", {
@@ -1697,7 +1697,7 @@ test_that("hdlUnivariate with annotations returns enrichment data.frame with cor
     expect_true(all(is.finite(res$enrichment$enrichment)))
 })
 
-test_that("hdlUnivariate with annotations returns tauBlocks matrix", {
+test_that("hdlUnivariate with annotations returns annotationJackknifeCoefs matrix", {
     set.seed(124)
     annot <- makeTestAnnotations(dat_annot$n_snps)
     res <- pecotmr:::hdlUnivariate(
@@ -1706,13 +1706,13 @@ test_that("hdlUnivariate with annotations returns tauBlocks matrix", {
         dat_annot$eigen_ref,
         annotations = annot
     )
-    expect_true(is.matrix(res$tauBlocks))
+    expect_true(is.matrix(res$annotationJackknifeCoefs))
     # nBlocks rows (5 blocks in dat_annot)
-    expect_equal(nrow(res$tauBlocks), 5L)
+    expect_equal(nrow(res$annotationJackknifeCoefs), 5L)
     # Number of columns matches baseline annotation count
-    expect_equal(ncol(res$tauBlocks), 1L)
+    expect_equal(ncol(res$annotationJackknifeCoefs), 1L)
     # Values should be finite
-    expect_true(all(is.finite(res$tauBlocks)))
+    expect_true(all(is.finite(res$annotationJackknifeCoefs)))
 })
 
 test_that("hdlUnivariate with annotations and local = TRUE returns local data.frame", {
@@ -1814,7 +1814,7 @@ test_that("gldscUnivariate with annotations returns enrichment data.frame", {
     expect_true(all(is.finite(res$enrichment$enrichment)))
 })
 
-test_that("gldscUnivariate with annotations returns tauBlocks matrix", {
+test_that("gldscUnivariate with annotations returns annotationJackknifeCoefs matrix", {
     set.seed(201)
     annot <- makeGldscAnnotations(dat_annot$n_snps)
     res <- pecotmr:::gldscUnivariate(
@@ -1823,14 +1823,14 @@ test_that("gldscUnivariate with annotations returns tauBlocks matrix", {
         dat_annot$ld_score_ref,
         annotations = annot
     )
-    expect_true(is.matrix(res$tauBlocks))
+    expect_true(is.matrix(res$annotationJackknifeCoefs))
     # gldsc jackknife uses 200 blocks by default; with 500 SNPs the actual
     # number of unique blocks equals ceil(500/ceil(500/200)) = 200
-    expect_true(nrow(res$tauBlocks) > 0)
+    expect_true(nrow(res$annotationJackknifeCoefs) > 0)
     # Number of columns matches baseline annotation count
-    expect_equal(ncol(res$tauBlocks), 1L)
+    expect_equal(ncol(res$annotationJackknifeCoefs), 1L)
     # Values should be finite (allow some NAs from edge blocks)
-    expect_true(any(is.finite(res$tauBlocks)))
+    expect_true(any(is.finite(res$annotationJackknifeCoefs)))
 })
 
 test_that("gldscUnivariate with annotations returns scoreStats", {
@@ -1865,7 +1865,7 @@ test_that("gldscUnivariate with annotations returns scoreStats", {
 #   tau=NULL), .lderLocalH2 (small block + baseline path), .hdlSeFisher-
 #   Stratified / .hdlJackknifeTau (lambda>0 + singular fallback), the
 #   multi-candidate (cor) and no-candidate (NULL) paths of the stratified
-#   score-statistic helpers, h2EstimateToSldscTrait (unnamed tauBlocks), and
+#   score-statistic helpers, h2EstimateToSldscTrait (unnamed annotationJackknifeCoefs), and
 #   the multi-study estimateH2 dispatch error.
 # ===========================================================================
 
@@ -2068,16 +2068,16 @@ test_that("gldscUnivariate with baseline-only annotations yields NULL scoreStats
 })
 
 # ---------------------------------------------------------------------------
-# h2EstimateToSldscTrait — tauBlocks present but without column names
+# h2EstimateToSldscTrait — annotationJackknifeCoefs present but without column names
 # ---------------------------------------------------------------------------
 
-test_that("h2EstimateToSldscTrait assigns category names to unnamed tauBlocks", {
+test_that("h2EstimateToSldscTrait assigns category names to unnamed annotationJackknifeCoefs", {
     h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
-    tb <- getTauBlocks(h2_obj)
+    tb <- annotationJackknifeCoefs(h2_obj)
     colnames(tb) <- NULL
-    h2_obj@tauBlocks <- tb
+    h2_obj@annotationJackknifeCoefs <- tb
     result <- h2EstimateToSldscTrait(h2_obj)
-    expect_equal(colnames(result$tauBlocks), c("annot1", "annot2"))
+    expect_equal(colnames(result$annotationJackknifeCoefs), c("annot1", "annot2"))
     expect_equal(result$nBlocks, 10L)
 })
 
@@ -2105,7 +2105,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
     )
     gr <- .dfToGwasGr(df)
     ss2 <- GwasSumStats(
-        study = c("studyA", "studyB"),
+        studyName = c("studyA", "studyB"),
         entry = list(gr, gr),
         genome = "hg19",
         ldSketch = makeTestGwasGenotypeHandle(),
@@ -2161,7 +2161,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
     eigenRef <- LdEigen(
         ldBlocks = lb,
         snpInfo = snpInfo,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         eigenvalueTruncation = 1.0,
@@ -2180,7 +2180,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
     scoreRef <- LdScore(
         ldBlocks = lb,
         snpInfo = snpInfo,
-        nRef = 500000L,
+        nSamples = 500000L,
         inSample = FALSE,
         genome = "hg19",
         ldScores = matrix(lsv, ncol = 1, dimnames = list(NULL, "base_l2")),
@@ -2278,7 +2278,7 @@ test_that("HDL uses the finite-reference correction (nRef changes h2)", {
     z <- d$simZ(rep(0.4 / d$M, d$M))
     refBig <- d$eigenRef
     refSmall <- d$eigenRef
-    refSmall@nRef <- 2000L
+    refSmall@nSamples <- 2000L
     h2Big <- hdlUnivariate(z, d$N, refBig)$h2
     # nRef = 2000 against this N is exactly the regime where the
     # finite-reference term dominates, so the fit lands on its bound and says
@@ -2454,8 +2454,8 @@ test_that("univariate S-LDSC reproduces upstream ldsc to 1e-5", {
     data(ldScoreExample)
     ref <- ldScoreExample
     M <- length(ref)
-    scores <- matrix(as.vector(getLdScores(ref)[, 1]), ncol = 1)
-    baseScore <- as.vector(getLdScores(ref)[, 1])
+    scores <- matrix(as.vector(mcols(ref)$ldScores[, 1]), ncol = 1)
+    baseScore <- as.vector(mcols(ref)$ldScores[, 1])
 
     reference <- list(
         list(
@@ -2544,7 +2544,7 @@ test_that("the two S-LDSC routes differ, as upstream's do", {
     ref <- ldScoreExample
     M <- length(ref)
     z <- .sldscUpstreamZ(ref, 0.4, 10000, 42)
-    scores <- matrix(as.vector(getLdScores(ref)[, 1]), ncol = 1)
+    scores <- matrix(as.vector(mcols(ref)$ldScores[, 1]), ncol = 1)
     uni <- pecotmr:::.sldscFit(
         z^2,
         scores,
@@ -2586,14 +2586,14 @@ test_that("HDL reports when its fit lands on an optimiser bound", {
     z <- .sldscUpstreamZ(ldScoreExample, 0.4, 1e5, 2)
 
     small <- ldEigenExample
-    small@nRef <- 1000L
+    small@nSamples <- 1000L
     expect_warning(
         est <- pecotmr:::hdlUnivariate(z, 1e5, small)$h2,
         "sits at the top of its range"
     )
 
     big <- ldEigenExample
-    big@nRef <- 20000L
+    big@nSamples <- 20000L
     expect_no_warning(
         ok <- pecotmr:::hdlUnivariate(z, 1e5, big)$h2,
         message = "sits at the top of its range"
@@ -2608,7 +2608,7 @@ test_that("HDL reports when its fit lands on an optimiser bound", {
 test_that("HDL recovers a known h2 given an adequate reference", {
     data(ldEigenExample, ldScoreExample)
     ref <- ldEigenExample
-    ref@nRef <- 20000L
+    ref@nSamples <- 20000L
     ests <- map_dbl(
         1:5,
         function(seed) {
@@ -2656,7 +2656,7 @@ test_that("HDL reproduces upstream HDL", {
     )
     for (g in reference) {
         ref <- ldEigenExample
-        ref@nRef <- g$nRef
+        ref@nSamples <- g$nRef
         z <- .sldscUpstreamZ(ldScoreExample, g$h2, g$n, g$seed)
         est <- suppressWarnings(pecotmr:::hdlUnivariate(z, g$n, ref)$h2)
         expect_equal(est, g$want, tolerance = 1e-6)
@@ -2707,21 +2707,25 @@ test_that("an explicit study is used without inspecting the collection", {
     expect_equal(pecotmr:::.estimateH2ResolveStudy(NULL, "myStudy"), "myStudy")
 })
 
-test_that("the genome check reports NA, the build, or refuses a mixture", {
+test_that("the genome check skips an unlabelled build and refuses a mixture", {
     gr <- GenomicRanges::GRanges(
         c("chr1", "chr2"),
         IRanges::IRanges(c(1L, 2L), width = 1L)
     )
-    # No build recorded: NA rather than a guess.
-    expect_true(is.na(pecotmr:::.h2GenomeOfRanges(gr)))
+    # No build recorded: skipped rather than guessed at or rejected.
+    expect_true(pecotmr:::checkGenomeBuild(gr))
+    # Two builds inside ONE object are as much a mismatch as two objects
+    # disagreeing, and report through the same path.
     GenomeInfoDb::genome(gr) <- c("hg19", "hg38")
-    # Mixed builds mean the parts were never comparable.
     expect_error(
-        pecotmr:::.h2GenomeOfRanges(gr),
-        "names 2 genome build"
+        pecotmr:::checkGenomeBuild(gr),
+        "Genome build mismatch"
     )
     GenomeInfoDb::genome(gr) <- "hg38"
-    expect_equal(pecotmr:::.h2GenomeOfRanges(gr), "hg38")
+    expect_true(pecotmr:::checkGenomeBuild(gr))
+    # An unlabelled object alongside a labelled one still passes.
+    bare <- GenomicRanges::GRanges("chr3", IRanges::IRanges(1L, width = 1L))
+    expect_true(pecotmr:::checkGenomeBuild(gr, bare))
 })
 
 test_that("the chi2 filter is abandoned when too few variants survive it", {
@@ -2831,7 +2835,7 @@ test_that(".h2BaselineMat is NULL when no annotation is baseline tier", {
     )
     am <- AnnotationMatrix(mat, gr, meta, genome = "hg19")
     # The object has annotations, but none of them are baseline.
-    expect_equal(ncol(assay(getBaseline(am), "annotations")), 0L)
+    expect_equal(ncol(assay(baselineAnnotations(am), "annotations")), 0L)
     expect_null(pecotmr:::.h2BaselineMat(am))
     expect_null(pecotmr:::.h2BaselineMat(NULL))
 })
@@ -2874,7 +2878,7 @@ test_that(".h2Enrichment names unnamed annotation columns positionally", {
         baselineMat,
         tau = c(0.1, 0.2),
         tauSe = c(0.01, 0.02),
-        tauBlocks = matrix(c(0.1, 0.2, 0.1, 0.2), nrow = 2L),
+        annotationJackknifeCoefs = matrix(c(0.1, 0.2, 0.1, 0.2), nrow = 2L),
         h2 = 0.3
     )
     expect_equal(out$annotation, c("annot_1", "annot_2"))
@@ -2896,7 +2900,7 @@ test_that(".sldscBlockIndex errors when no block covers a variant", {
             ldScores = matrix(1, nrow = n, ncol = 1L),
             ldScoreWeights = rep(1, n),
             ldBlocks = blocks,
-            nRef = 100L,
+            nSamples = 100L,
             genome = "hg19",
             ldMatrixList = list()
         )

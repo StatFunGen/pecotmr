@@ -4,13 +4,13 @@
 \alias{standardizeTauStar}
 \title{Standardize Tau to Tau-Star (Gazal et al. 2017)}
 \usage{
-standardizeTauStar(tau, tauBlocks, sdAnnot, MRef, h2g)
+standardizeTauStar(tau, annotationJackknifeCoefs, sdAnnot, MRef, h2g)
 }
 \arguments{
 \item{tau}{Numeric vector of per-annotation regression coefficients.}
 
-\item{tauBlocks}{Numeric matrix (nBlocks x nAnnotations) of block-level tau
-estimates from delete-one jackknife.}
+\item{annotationJackknifeCoefs}{Numeric matrix (nBlocks x nAnnotations) of
+block-level tau estimates from delete-one jackknife.}
 
 \item{sdAnnot}{Numeric vector of per-annotation standard deviations, same
 length as \code{tau}.}

@@ -41,13 +41,13 @@ NULL
 #'   block addresses. Extra columns the caller supplied are kept as mcols.
 #'   A block whose index range is out of bounds has no span to derive and
 #'   gets a width-0 range.
-#' @slot nRef Integer, reference panel sample size.
+#' @slot nSamples Integer, reference panel sample size.
 #' @slot mixtureWeights NULL when \code{genotypeHandle} is a single
 #'   \code{GenotypeHandle}; a numeric vector of mixing proportions (one per
 #'   panel, summing to 1) when \code{genotypeHandle} is a list of
-#'   \code{GenotypeHandle}s. Used by \code{getCorrelation()} to compute a
+#'   \code{GenotypeHandle}s. Used by \code{ldMatrix()} to compute a
 #'   weighted-average mixture LD matrix; required whenever \code{genotypeHandle}
-#'   is a list and \code{getCorrelation()} will be called.
+#'   is a list and \code{ldMatrix()} will be called.
 #' @export
 setClass(
     "LdData",
@@ -57,7 +57,7 @@ setClass(
         genotypeHandle = "LdGenotypeSource",
         snpIdx = "LdSnpIndex",
         blockMetadata = "GRanges",
-        nRef = "integer",
+        nSamples = "integer",
         mixtureWeights = "LdMixtureWeights"
     ),
     validity = function(object) {
@@ -140,7 +140,7 @@ setMethod("show", "LdData", function(object) {
         "Genotype handle: {if (has_geno) 'available' else 'NULL'}\n",
         .trim = FALSE
     ))
-    cat(glue("  Reference N: {object@nRef}\n", .trim = FALSE))
+    cat(glue("  Reference N: {object@nSamples}\n", .trim = FALSE))
 })
 
 # One element of a mixture list: unwrap a panel, pass anything else through
@@ -464,11 +464,11 @@ setMethod("show", "LdData", function(object) {
 #'   -- or nothing at all -- is enough; with several blocks either the index
 #'   columns or \code{size} must be supplied. Normalised on the way in and
 #'   stored as a \code{GRanges} (see the \code{blockMetadata} slot).
-#' @param nRef Integer, reference panel sample size.
+#' @param nSamples Integer, reference panel sample size.
 #' @param mixtureWeights Optional numeric vector of mixing proportions, one per
 #'   panel in \code{genotypeHandle} when it is a list. Must be non-negative and
 #'   sum to 1. Required whenever \code{genotypeHandle} is a list and downstream
-#'   code will call \code{getCorrelation()}.
+#'   code will call \code{ldMatrix()}.
 #' @return An \code{LdData} object.
 #' @examples
 #' data(eqtlRegionExample)
@@ -488,7 +488,7 @@ LdData <- function(
     snpIdx = NULL,
     variants,
     blockMetadata,
-    nRef = 0L,
+    nSamples = 0L,
     mixtureWeights = NULL
 ) {
     # correlation is documented as a matrix OR a list of matrices OR NULL,
@@ -507,7 +507,7 @@ LdData <- function(
         genotypeHandle = .ldDataGenotypeSource(genotypeHandle),
         snpIdx = if (is.null(snpIdx)) NULL else as.integer(snpIdx),
         blockMetadata = .ldBlockMetadata(blockMetadata, variants),
-        nRef = as.integer(nRef),
+        nSamples = as.integer(nSamples),
         mixtureWeights = mixtureWeights
     )
     validObject(obj)
@@ -550,9 +550,9 @@ LdData <- function(
     w * panel
 }
 
-#' @rdname getCorrelation
+#' @rdname ldMatrix
 #' @export
-setMethod("getCorrelation", "LdData", function(x) {
+setMethod("ldMatrix", "LdData", function(x) {
     if (!is.null(x@correlation)) {
         return(x@correlation)
     }
@@ -592,9 +592,9 @@ setMethod("getCorrelation", "LdData", function(x) {
     computeLd(.ldSourceDosages(x@genotypeHandle, x@snpIdx), method = "sample")
 })
 
-#' @rdname getGenotypes
+#' @rdname genotypes
 #' @export
-setMethod("getGenotypes", "LdData", function(x) {
+setMethod("genotypes", "LdData", function(x) {
     if (is.null(x@genotypeHandle)) {
         return(NULL)
     }
@@ -609,32 +609,32 @@ setMethod("getGenotypes", "LdData", function(x) {
 #' @rdname hasGenotypes
 #' @export
 setMethod("hasGenotypes", "LdData", function(x) {
-    !is.null(getGenotypeHandle(x))
+    !is.null(genotypeHandle(x))
 })
 
-#' @rdname getVariantIds
+#' @rdname variantIds
 #' @export
-setMethod("getVariantIds", "LdData", function(x) {
+setMethod("variantIds", "LdData", function(x) {
     mcols(x)$variant_id
 })
 
-#' @rdname getVariantInfo
+#' @rdname variantInfo
 #' @export
-setMethod("getVariantInfo", "LdData", function(x) {
+setMethod("variantInfo", "LdData", function(x) {
     # A plain GRanges view: callers subset and re-wrap it, and carrying the
     # LD payload along would make those copies quietly expensive.
     as(x, "GRanges")
 })
 
-#' @rdname getBlockMetadata
+#' @rdname blockMetadata
 #' @export
-setMethod("getBlockMetadata", "LdData", function(x) {
+setMethod("blockMetadata", "LdData", function(x) {
     x@blockMetadata
 })
 
-#' @rdname getRefPanel
+#' @rdname refPanel
 #' @export
-setMethod("getRefPanel", "LdData", function(x) {
+setMethod("refPanel", "LdData", function(x) {
     mutate(
         as_tibble(as.data.frame(mcols(x))),
         chrom = as.character(seqnames(x)),
@@ -642,21 +642,21 @@ setMethod("getRefPanel", "LdData", function(x) {
     )
 })
 
-#' @rdname getGenotypeHandle
+#' @rdname genotypeHandle
 #' @keywords internal
-setMethod("getGenotypeHandle", "LdData", function(x) x@genotypeHandle)
+setMethod("genotypeHandle", "LdData", function(x) x@genotypeHandle)
 
-#' @rdname getMixtureWeights
+#' @rdname mixtureWeights
 #' @export
-setMethod("getMixtureWeights", "LdData", function(x) x@mixtureWeights)
+setMethod("mixtureWeights", "LdData", function(x) x@mixtureWeights)
 
-#' @rdname getSnpIdx
+#' @rdname snpIdx
 #' @export
-setMethod("getSnpIdx", "LdData", function(x) x@snpIdx)
+setMethod("snpIdx", "LdData", function(x) x@snpIdx)
 
-#' @rdname getNRef
+#' @rdname ldPanelNSamples
 #' @export
-setMethod("getNRef", "LdData", function(x) x@nRef)
+setMethod("ldPanelNSamples", "LdData", function(x) x@nSamples)
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 

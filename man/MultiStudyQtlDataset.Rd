@@ -40,10 +40,10 @@ se <- SummarizedExperiment::SummarizedExperiment(
   rowRanges = rng
 )
 qd1 <- QtlDataset(
-  study = "s1", genotypes = panel, phenotypes = list(brain = se)
+  studyName = "s1", genotypes = panel, phenotypes = list(brain = se)
 )
 qd2 <- QtlDataset(
-  study = "s2", genotypes = panel, phenotypes = list(brain = se)
+  studyName = "s2", genotypes = panel, phenotypes = list(brain = se)
 )
 MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
 }

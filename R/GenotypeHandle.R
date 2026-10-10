@@ -298,7 +298,7 @@ GenotypeHandle <- function(
 # erroring on no-coverage, multi-row spans, or a pre-computed .cor(.xz) matrix.
 # @noRd
 .ghResolveLdPath <- function(ldMeta, region) {
-    ldPaths <- getRegionalLdMeta(ldMeta, region)$intersections$LD_file_paths
+    ldPaths <- regionalLdMeta(ldMeta, region)$intersections$LD_file_paths
     if (length(ldPaths) == 0L) {
         regionStr <- deparse(region)
         msg <- glue(
@@ -427,7 +427,7 @@ GenotypeHandle <- function(
 #' @importFrom purrr possibly
 .genotypeChromPaths <- function(handle) {
     # A handle with no chromosome paths is an ordinary outcome, not a fault.
-    possibly(getChromPaths, otherwise = character(0))(handle)
+    possibly(chromPaths, otherwise = character(0))(handle)
 }
 
 # Case-insensitive match of the first of `aliases` present in `cols`; falls
@@ -611,8 +611,8 @@ GenotypeHandle <- function(
         path = .chromMetaPath(genoMeta),
         format = sharedFormat,
         snpInfo = unifiedSnpInfo,
-        nSamples = getNSamples(shards[[1L]]),
-        sampleIds = getSampleIds(shards[[1L]]),
+        nSamples = nSamples(shards[[1L]]),
+        sampleIds = sampleIds(shards[[1L]]),
         pgenPtr = NULL,
         chromPaths = .chromMetaPaths(shards)
     )
@@ -670,8 +670,8 @@ GenotypeHandle <- function(
 # One shard's chromosome -> path mapping.
 # @noRd
 .chromShardPaths <- function(shard) {
-    chroms <- unique(canonChrom(getSnpInfo(shard)$CHR))
-    set_names(rep(getPath(shard), length(chroms)), chroms)
+    chroms <- unique(canonChrom(snpInfo(shard)$CHR))
+    set_names(rep(path(shard), length(chroms)), chroms)
 }
 
 # A chromosome may only come from one file; two shards claiming it means the
@@ -707,21 +707,25 @@ GenotypeHandle <- function(
     if (.isChromMetaFile(genoMeta)) normalizePath(genoMeta) else "<chrom-meta>"
 }
 
-#' @rdname getSnpInfo
+#' @rdname snpInfo
 #' @keywords internal
-setMethod("getSnpInfo", "GenotypeHandle", function(x) x@snpInfo)
+setMethod("snpInfo", "GenotypeHandle", function(x) x@snpInfo)
 
-#' @rdname getFormat
+#' @rdname genotypeFormat
 #' @keywords internal
-setMethod("getFormat", "GenotypeHandle", function(x) x@format)
+setMethod("genotypeFormat", "GenotypeHandle", function(x) x@format)
 
-#' @rdname getPath
-#' @keywords internal
-setMethod("getPath", "GenotypeHandle", function(x) x@path)
+# Adopts BiocGenerics' `path` generic rather than defining a pecotmr one:
+# a file-backed handle is exactly what that generic is for. Deliberately not
+# exported -- GenotypeHandle is internal, so only package code dispatches
+# here. The generic's first formal is `object`, not `x`.
+#' @importFrom BiocGenerics path
+#' @noRd
+setMethod("path", "GenotypeHandle", function(object, ...) object@path)
 
-#' @rdname getChromPaths
+#' @rdname chromPaths
 #' @keywords internal
-setMethod("getChromPaths", "GenotypeHandle", function(x) x@chromPaths)
+setMethod("chromPaths", "GenotypeHandle", function(x) x@chromPaths)
 
 # A stem-based genotype format is named by a companion file rather than by
 # the stem itself: plink1 writes <stem>.bed, plink2 writes <stem>.pgen.
@@ -779,23 +783,25 @@ setMethod("getChromPaths", "GenotypeHandle", function(x) x@chromPaths)
 
 # The concrete filesystem path/stem to open for a handle's data. Resolves a
 # bundled-resource reference; ordinary paths pass through. Used by the block
-# extractors and LD-panel keying, so `getPath()` keeps returning the stored
+# extractors and LD-panel keying, so `path()` keeps returning the stored
 # (portable) value for display/provenance while file access resolves it.
 .genotypeReadPath <- function(handle) {
-    .resolveGenotypeResourcePath(getPath(handle))
+    .resolveGenotypeResourcePath(path(handle))
 }
 
-#' @rdname getSampleIds
+#' @rdname sampleIds
 #' @keywords internal
-setMethod("getSampleIds", "GenotypeHandle", function(x) x@sampleIds)
+setMethod("sampleIds", "GenotypeHandle", function(x) x@sampleIds)
 
-#' @rdname getPgenPtr
+#' @rdname pgenPtr
 #' @keywords internal
-setMethod("getPgenPtr", "GenotypeHandle", function(x) x@pgenPtr)
+setMethod("pgenPtr", "GenotypeHandle", function(x) x@pgenPtr)
 
-#' @rdname getNSamples
-#' @keywords internal
-setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
+# Shares the public `nSamples` page: the generic's @details already records
+# that the handle is the seed layer behind a panel, and a @keywords internal
+# here would mark that whole merged page internal.
+#' @rdname nSamples
+setMethod("nSamples", "GenotypeHandle", function(x) x@nSamples)
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
@@ -818,13 +824,13 @@ setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
 # The snpInfo slot of one genotype shard.
 # @noRd
 .ghSnpInfo <- function(h) {
-    getSnpInfo(h)
+    snpInfo(h)
 }
 
 # The format slot of one genotype shard.
 # @noRd
 .ghFormat <- function(h) {
-    getFormat(h)
+    genotypeFormat(h)
 }
 
 
@@ -842,7 +848,7 @@ setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
 # features x samples, and `assay(se, "dosage")` is already variants x samples.
 # The seed therefore reports variants as rows. Getting this backwards returns a
 # plausible-looking matrix and a silently transposed LD matrix, so the tests
-# pin it against getGenotypes().
+# pin it against genotypes().
 # =============================================================================
 
 #' DelayedArray seed over a GenotypeHandle
@@ -868,9 +874,9 @@ setMethod("dimnames", "GhSeed", function(x) {
     # The sample axis is derived from the handle, not stored a second time.
     # handle@sampleIds is the single copy; storing dn[[2]] as well would
     # duplicate ~10k anonymous projection-dimension names in every serialised
-    # sketch (see genotypeDelayedArray()). getSampleIds() is character(0) on an
+    # sketch (see genotypeDelayedArray()). sampleIds() is character(0) on an
     # emptied handle, so this stays consistent with dm = c(nVar, 0).
-    list(x@dn[[1L]], as.character(getSampleIds(x@handle)))
+    list(x@dn[[1L]], as.character(sampleIds(x@handle)))
 })
 
 # The handle a seed reads through. Internal accessor: GhSeed is not exported,
@@ -907,7 +913,7 @@ setMethod("extract_array", "GhSeed", function(x, index) {
 #' an operation actually touches are fetched.
 #'
 #' The result is \strong{variants x samples}, the Bioconductor assay
-#' orientation, which is the transpose of what \code{\link{getGenotypes}}
+#' orientation, which is the transpose of what \code{\link{genotypes}}
 #' returns.
 #'
 #' @param handle A \code{\link{GenotypeHandle}}.
@@ -920,11 +926,11 @@ genotypeDelayedArray <- function(handle) {
         )
         abort(msg)
     }
-    si <- getSnpInfo(handle)
+    si <- snpInfo(handle)
     seed <- methods::new(
         "GhSeed",
         handle = handle,
-        dm = c(nrow(si), as.integer(getNSamples(handle))),
+        dm = c(nrow(si), as.integer(nSamples(handle))),
         # Only the variant axis is stored; the sample axis is derived from the
         # handle in the dimnames() method above, so the ~10k sample ids are not
         # duplicated between dn[[2]] and handle@sampleIds.

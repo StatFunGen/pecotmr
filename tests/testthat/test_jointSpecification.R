@@ -54,7 +54,7 @@
 }
 
 .js_makeQtlDataset <- function(
-    study = "s1",
+    studyName = "s1",
     contexts = c("brain", "liver"),
     traits = c("ENSG1", "ENSG2")
 ) {
@@ -63,7 +63,7 @@
         contexts
     )
     QtlDataset(
-        study = study,
+        studyName = studyName,
         genotypes = .js_makeGenotypeHandle(),
         phenotypes = phenos,
         genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
@@ -96,7 +96,7 @@
         gr
     })
     QtlSumStats(
-        study = rows$study,
+        studyName = rows$study,
         context = rows$context,
         trait = rows$trait,
         entry = entries,
@@ -111,14 +111,14 @@
 
 test_that(".spListStudies / .spListContexts / .spListTraits: QtlDataset", {
     qd <- .js_makeQtlDataset(
-        study = "S1",
+        studyName = "S1",
         contexts = c("brain", "liver"),
         traits = c("ENSG_A", "ENSG_B")
     )
     expect_equal(pecotmr:::.spListStudies(qd), "S1")
     expect_setequal(pecotmr:::.spListContexts(qd), c("brain", "liver"))
     expect_setequal(
-        pecotmr:::.spListTraits(qd, study = "S1", context = "brain"),
+        pecotmr:::.spListTraits(qd, studyName = "S1", context = "brain"),
         c("ENSG_A", "ENSG_B")
     )
     expect_equal(pecotmr:::.spStudyDataForm(qd, "S1"), "individual")
@@ -126,12 +126,12 @@ test_that(".spListStudies / .spListContexts / .spListTraits: QtlDataset", {
 
 test_that(".sp* helpers: MultiStudyQtlDataset combines individual + sumstats", {
     qd1 <- .js_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = "brain",
         traits = "ENSG_A"
     )
     qd2 <- .js_makeQtlDataset(
-        study = "indB",
+        studyName = "indB",
         contexts = "liver",
         traits = "ENSG_A"
     )
@@ -179,8 +179,8 @@ test_that("parseJointSpecification: accepts a list of specs", {
 })
 
 test_that("parseJointSpecification: accepts scope-restricted spec", {
-    qd1 <- .js_makeQtlDataset(study = "A")
-    qd2 <- .js_makeQtlDataset(study = "B")
+    qd1 <- .js_makeQtlDataset(studyName = "A")
+    qd2 <- .js_makeQtlDataset(studyName = "B")
     mt <- MultiStudyQtlDataset(qtlDatasets = list(A = qd1, B = qd2))
     out <- pecotmr:::parseJointSpecification(
         list(list(axes = "context", scope = list(study = c("A")))),
@@ -217,7 +217,7 @@ test_that("parseJointSpecification: rejects unknown scope keys", {
 })
 
 test_that("parseJointSpecification: rejects scope values absent from data", {
-    qd <- .js_makeQtlDataset(study = "S1")
+    qd <- .js_makeQtlDataset(studyName = "S1")
     expect_error(
         pecotmr:::parseJointSpecification(
             list(list(axes = "context", scope = list(study = "NotPresent"))),
@@ -248,8 +248,8 @@ test_that("parseContexts: NULL passes through", {
 })
 
 test_that("parseContexts: vector intersects with each study's contexts", {
-    qd1 <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
-    qd2 <- .js_makeQtlDataset(study = "B", contexts = c("brain"))
+    qd1 <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
+    qd2 <- .js_makeQtlDataset(studyName = "B", contexts = c("brain"))
     mt <- MultiStudyQtlDataset(qtlDatasets = list(A = qd1, B = qd2))
     expect_warning(
         out <- pecotmr:::parseContexts(c("brain", "liver"), mt),
@@ -260,7 +260,7 @@ test_that("parseContexts: vector intersects with each study's contexts", {
 })
 
 test_that("parseContexts: named-list form requires valid studies", {
-    qd <- .js_makeQtlDataset(study = "A")
+    qd <- .js_makeQtlDataset(studyName = "A")
     expect_error(
         pecotmr:::parseContexts(list(B = "brain"), qd),
         "unknown studies"
@@ -268,7 +268,7 @@ test_that("parseContexts: named-list form requires valid studies", {
 })
 
 test_that("parseContexts: named-list rejects unknown contexts", {
-    qd <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
     expect_error(
         pecotmr:::parseContexts(list(A = "bogus"), qd),
         "unknown contexts"
@@ -276,8 +276,8 @@ test_that("parseContexts: named-list rejects unknown contexts", {
 })
 
 test_that("parseContexts: list form fills unmentioned studies with defaults", {
-    qd1 <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
-    qd2 <- .js_makeQtlDataset(study = "B", contexts = c("brain", "liver"))
+    qd1 <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
+    qd2 <- .js_makeQtlDataset(studyName = "B", contexts = c("brain", "liver"))
     mt <- MultiStudyQtlDataset(qtlDatasets = list(A = qd1, B = qd2))
     out <- pecotmr:::parseContexts(list(A = "brain"), mt)
     expect_equal(out$A, "brain")
@@ -299,8 +299,8 @@ test_that("parseTraitIds: vector form returns the vector", {
 })
 
 test_that("parseTraitIds: study-keyed list validates per study", {
-    qd1 <- .js_makeQtlDataset(study = "A", traits = c("ENSG_A"))
-    qd2 <- .js_makeQtlDataset(study = "B", traits = c("ENSG_B"))
+    qd1 <- .js_makeQtlDataset(studyName = "A", traits = c("ENSG_A"))
+    qd2 <- .js_makeQtlDataset(studyName = "B", traits = c("ENSG_B"))
     mt <- MultiStudyQtlDataset(qtlDatasets = list(A = qd1, B = qd2))
     expect_error(
         pecotmr:::parseTraitIds(list(A = "ENSG_B"), mt),
@@ -313,7 +313,7 @@ test_that("parseTraitIds: study-keyed list validates per study", {
 
 test_that("parseTraitIds: doubly-nested study->context validates per context", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = c("brain", "liver"),
         traits = c("ENSG_A", "ENSG_B")
     )
@@ -384,7 +384,7 @@ test_that("parseMethods: rejects unknown tokens", {
 })
 
 test_that("parseMethods: rejects multi-axis methods at per-context level", {
-    qd <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
     expect_error(
         pecotmr:::parseMethods(
             methods = list(A = list(brain = c("susie", "mvsusie"))),
@@ -398,7 +398,7 @@ test_that("parseMethods: rejects multi-axis methods at per-context level", {
 
 test_that("parseMethods: rejects multi-axis methods at per-trait level", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B")
     )
@@ -445,7 +445,7 @@ test_that("parseMethods: rejectedAtUser tokens are refused", {
 })
 
 test_that("parseMethods: accepts per-context univariate methods", {
-    qd <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
     out <- pecotmr:::parseMethods(
         methods = list(A = list(brain = "susie", liver = "susieInf")),
         data = qd,
@@ -457,7 +457,7 @@ test_that("parseMethods: accepts per-context univariate methods", {
 
 test_that("parseMethods: validates per-(study, context, trait) leaf paths", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B")
     )
@@ -477,8 +477,8 @@ test_that("parseMethods: validates per-(study, context, trait) leaf paths", {
 # -----------------------------------------------------------------------------
 
 test_that("validateMethodsVsJointSpec: per-study methods + jointCrossStudy errors", {
-    qd1 <- .js_makeQtlDataset(study = "A")
-    qd2 <- .js_makeQtlDataset(study = "B")
+    qd1 <- .js_makeQtlDataset(studyName = "A")
+    qd2 <- .js_makeQtlDataset(studyName = "B")
     ss <- .js_makeQtlSumStats(studies = "C")
     mt <- MultiStudyQtlDataset(
         qtlDatasets = list(A = qd1, B = qd2),
@@ -498,7 +498,7 @@ test_that("validateMethodsVsJointSpec: per-study methods + jointCrossStudy error
 })
 
 test_that("validateMethodsVsJointSpec: per-context methods + jointCrossContext errors", {
-    qd <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
     parsed <- pecotmr:::parseMethods(
         methods = list(A = list(brain = "susie", liver = "susie")),
         data = qd,
@@ -513,7 +513,7 @@ test_that("validateMethodsVsJointSpec: per-context methods + jointCrossContext e
 })
 
 test_that("validateMethodsVsJointSpec: vector methods + any joint flag OK", {
-    qd <- .js_makeQtlDataset(study = "A", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "A", contexts = c("brain", "liver"))
     parsed <- pecotmr:::parseMethods(
         methods = c("susie", "mvsusie"),
         data = qd,
@@ -535,7 +535,7 @@ test_that("fineMappingPipeline(QtlDataset): trait-axis joint dispatcher is wired
     # the stub error), so we check that the error comes from the genotype
     # I/O layer rather than the jointSpec wiring.
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B")
     )
@@ -556,7 +556,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher is wired",
     # dispatcher reaches the extractor, which proves the dispatcher was
     # invoked (rather than the previous stub error).
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = c("brain", "liver"),
         traits = c("ENSG_A", "ENSG_B")
     )
@@ -573,7 +573,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher is wired",
 
 test_that("fineMappingPipeline(QtlDataset): composed joint rejects axes with 'study'", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = c("brain", "liver"),
         traits = "ENSG_A"
     )
@@ -590,7 +590,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint rejects axes with 'st
 
 test_that("fineMappingPipeline(QtlDataset): study-axis on individual data errors", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = c("brain", "liver"),
         traits = "ENSG_A"
     )
@@ -606,14 +606,14 @@ test_that("fineMappingPipeline(QtlDataset): study-axis on individual data errors
 })
 
 test_that("fineMappingPipeline(QtlDataset): NULL jointSpec is the default", {
-    qd <- .js_makeQtlDataset(study = "A", contexts = "brain", traits = "ENSG_A")
+    qd <- .js_makeQtlDataset(studyName = "A", contexts = "brain", traits = "ENSG_A")
     expect_silent(
         pecotmr:::parseJointSpecification(NULL, qd)
     )
 })
 
 test_that("fineMappingPipeline(QtlDataset): invalid jointSpec errors before fit", {
-    qd <- .js_makeQtlDataset(study = "A")
+    qd <- .js_makeQtlDataset(studyName = "A")
     expect_error(
         fineMappingPipeline(
             qd,
@@ -627,7 +627,7 @@ test_that("fineMappingPipeline(QtlDataset): invalid jointSpec errors before fit"
 
 test_that("twasWeightsPipeline(QtlDataset): cross-trait joint dispatcher is wired", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B")
     )
@@ -644,7 +644,7 @@ test_that("twasWeightsPipeline(QtlDataset): cross-trait joint dispatcher is wire
 
 test_that("twasWeightsPipeline(QtlDataset): study-axis on individual data errors", {
     qd <- .js_makeQtlDataset(
-        study = "A",
+        studyName = "A",
         contexts = c("brain", "liver"),
         traits = "ENSG_A"
     )
@@ -735,31 +735,31 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
+            rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(getSnpInfo(handle)),
-            dimnames = list(getSampleIds(handle), getSnpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle)),
+            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", getSnpInfo(handle)$CHR[snpIdx]),
+            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
             ranges = IRanges::IRanges(
-                start = getSnpInfo(handle)$BP[snpIdx],
+                start = snpInfo(handle)$BP[snpIdx],
                 width = 1L
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = getSnpInfo(handle)$SNP[snpIdx],
-            A1 = getSnpInfo(handle)$A1[snpIdx],
-            A2 = getSnpInfo(handle)$A2[snpIdx]
+            SNP = snpInfo(handle)$SNP[snpIdx],
+            A1 = snpInfo(handle)$A1[snpIdx],
+            A2 = snpInfo(handle)$A2[snpIdx]
         )
         cd <- S4Vectors::DataFrame(
-            sampleId = getSampleIds(handle),
-            row.names = getSampleIds(handle)
+            sampleId = sampleIds(handle),
+            row.names = sampleIds(handle)
         )
         dosage <- t(sub)
-        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- getSampleIds(handle)
+        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
+        colnames(dosage) <- sampleIds(handle)
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
             rowRanges = rr,
@@ -800,7 +800,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         gr
     }
     QtlSumStats(
-        study = rows$study,
+        studyName = rows$study,
         context = rows$context,
         trait = rows$trait,
         entry = map(seq_len(nrow(rows)), function(.) makeGr()),
@@ -1108,7 +1108,7 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie",
 }
 
 .jd_makeQtlDataset <- function(
-    study = "Q1",
+    studyName = "Q1",
     contexts = c("c1", "c2"),
     traits = c("t1", "t2")
 ) {
@@ -1117,7 +1117,7 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie",
         contexts
     )
     QtlDataset(
-        study = study,
+        studyName = studyName,
         genotypes = .jd_makeHandle(),
         phenotypes = phen,
         genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
@@ -1126,7 +1126,7 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie",
 
 test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' fits mr.mash per trait", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -1151,7 +1151,7 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' fits mr.mash per
 
 test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' with only one context skips", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = "c1",
         traits = c("t1", "t2")
     )
@@ -1175,7 +1175,7 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' with only one co
 
 test_that("twasWeightsPipeline(QtlDataset): jointSpec='trait' fits mr.mash per context", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = "c1",
         traits = c("t1", "t2")
     )
@@ -1200,7 +1200,7 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='trait' fits mr.mash per c
 
 test_that("twasWeightsPipeline(QtlDataset): study-axis fails on individual data", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -1217,7 +1217,7 @@ test_that("twasWeightsPipeline(QtlDataset): study-axis fails on individual data"
 
 test_that("twasWeightsPipeline(QtlDataset): composed jointSpec axes=c('context','trait') fits", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = c("t1", "t2")
     )
@@ -1242,7 +1242,7 @@ test_that("twasWeightsPipeline(QtlDataset): composed jointSpec axes=c('context',
 
 test_that("twasWeightsPipeline(QtlDataset): composed jointSpec including 'study' errors", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -1376,7 +1376,7 @@ test_that(".sp* helpers: QtlSumStats study/context/trait listing + dataForm", {
     expect_setequal(pecotmr:::.spListContexts(ss), c("c1", "c2")) # study=NULL
     expect_setequal(pecotmr:::.spListContexts(ss, "A"), c("c1", "c2"))
     expect_setequal(
-        pecotmr:::.spListTraits(ss, study = "A", context = "c1"),
+        pecotmr:::.spListTraits(ss, studyName = "A", context = "c1"),
         c("t1", "t2")
     )
     expect_equal(pecotmr:::.spStudyDataForm(ss, "A"), "sumstats")
@@ -1387,13 +1387,13 @@ test_that(".sp* helpers: QtlSumStats study/context/trait listing + dataForm", {
 })
 
 test_that(".spStudyDataForm: QtlDataset wrong study errors", {
-    qd <- .js_makeQtlDataset(study = "S1")
+    qd <- .js_makeQtlDataset(studyName = "S1")
     expect_error(pecotmr:::.spStudyDataForm(qd, "wrong"), "not in QtlDataset")
 })
 
 test_that(".sp* helpers: MultiStudy per-study context/trait routing", {
     qd1 <- .js_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = "brain",
         traits = c("g1", "g2")
     )
@@ -1407,9 +1407,9 @@ test_that(".sp* helpers: MultiStudy per-study context/trait routing", {
     expect_setequal(pecotmr:::.spListContexts(mt, "indA"), "brain")
     expect_setequal(pecotmr:::.spListContexts(mt), c("brain", "DLPFC")) # all
     expect_equal(pecotmr:::.spListContexts(mt, "nope"), character(0))
-    expect_setequal(pecotmr:::.spListTraits(mt, study = "ssC"), "g3") # ss branch
-    expect_setequal(pecotmr:::.spListTraits(mt, study = "indA"), c("g1", "g2"))
-    expect_equal(pecotmr:::.spListTraits(mt, study = "nope"), character(0))
+    expect_setequal(pecotmr:::.spListTraits(mt, studyName = "ssC"), "g3") # ss branch
+    expect_setequal(pecotmr:::.spListTraits(mt, studyName = "indA"), c("g1", "g2"))
+    expect_equal(pecotmr:::.spListTraits(mt, studyName = "nope"), character(0))
     # study = NULL aggregates ALL traits across individual + sumstats components
     # (regression guard: a present sumStats slot must not shadow the QtlDatasets).
     expect_setequal(pecotmr:::.spListTraits(mt), c("g1", "g2", "g3"))
@@ -1417,11 +1417,11 @@ test_that(".sp* helpers: MultiStudy per-study context/trait routing", {
 
 test_that(".spListTraits: study=NULL on a sumstats-free MultiStudy aggregates traits", {
     qdA <- .js_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = "brain",
         traits = c("g1", "g2")
     )
-    qdB <- .js_makeQtlDataset(study = "indB", contexts = "liver", traits = "g3")
+    qdB <- .js_makeQtlDataset(studyName = "indB", contexts = "liver", traits = "g3")
     mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
     expect_setequal(pecotmr:::.spListTraits(mt), c("g1", "g2", "g3")) # aggregate
 })
@@ -1469,7 +1469,7 @@ test_that("parseJointSpecification: malformed inputs error", {
 })
 
 test_that("parseContexts: malformed inputs error", {
-    qd <- .js_makeQtlDataset(study = "S1", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "S1", contexts = c("brain", "liver"))
     expect_error(pecotmr:::parseContexts(character(0), qd), "non-empty")
     expect_error(
         pecotmr:::parseContexts(list(brain = "x"), qd),
@@ -1484,7 +1484,7 @@ test_that("parseContexts: malformed inputs error", {
 })
 
 test_that("parseContexts: vector form warns on contexts missing from a study", {
-    qd <- .js_makeQtlDataset(study = "S1", contexts = c("brain", "liver"))
+    qd <- .js_makeQtlDataset(studyName = "S1", contexts = c("brain", "liver"))
     expect_warning(
         out <- pecotmr:::parseContexts(c("brain", "absent"), qd),
         "missing requested context"
@@ -1494,7 +1494,7 @@ test_that("parseContexts: vector form warns on contexts missing from a study", {
 
 test_that("parseTraitIds: malformed inputs error", {
     qd <- .js_makeQtlDataset(
-        study = "S1",
+        studyName = "S1",
         contexts = "brain",
         traits = c("ENSG1", "ENSG2")
     )
@@ -1534,7 +1534,7 @@ test_that("parseTraitIds: malformed inputs error", {
 # -----------------------------------------------------------------------------
 
 test_that(".spWalkMethods: structural errors via parseMethods", {
-    qd <- .js_makeQtlDataset(study = "S1", contexts = "brain", traits = "ENSG1")
+    qd <- .js_makeQtlDataset(studyName = "S1", contexts = "brain", traits = "ENSG1")
     caps <- list(lasso = list(multivariate = FALSE))
     walk <- function(m) {
         pecotmr:::parseMethods(
@@ -1559,7 +1559,7 @@ test_that(".spWalkMethods: structural errors via parseMethods", {
 })
 
 test_that("parseMethods: split-form and leaf validation errors", {
-    qd <- .js_makeQtlDataset(study = "S1", contexts = "brain", traits = "ENSG1")
+    qd <- .js_makeQtlDataset(studyName = "S1", contexts = "brain", traits = "ENSG1")
     caps <- list(
         lasso = list(multivariate = FALSE),
         mrmash = list(multivariate = TRUE)
@@ -1637,7 +1637,7 @@ test_that("validateMethodsVsJointSpec: empty spec is a no-op; per-trait nesting 
 
 test_that(".fmResolveSpecScope: scope + contexts + traitIds filters intersect", {
     qd <- .js_makeQtlDataset(
-        study = "S1",
+        studyName = "S1",
         contexts = c("brain", "liver"),
         traits = c("ENSG1", "ENSG2")
     )
@@ -1670,7 +1670,7 @@ test_that(".buildJointSumstatZMatrix: a mismatched SNP order across entries erro
     )
     calls <- 0L
     local_mocked_bindings(
-        getSumStatsDf = function(x, study, context, trait, require, ...) {
+        as.data.frame = function(x, studyName, context, trait, require, ...) {
             calls <<- calls + 1L
             vid <- if (calls == 1L) {
                 c("chr1:100:A:G", "chr1:200:A:G")
@@ -1705,7 +1705,7 @@ test_that(".buildIndividualCrossContextXy: skips when a trait spans < 2 contexts
     se1 <- .js_makeSe(traits = "g1") # g1 present
     se0 <- .js_makeSe(traits = "other") # g1 absent
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) {
+        molecularTraits = function(data, contexts) {
             if (identical(contexts, "c1")) se1 else se0
         },
         .package = "pecotmr"
@@ -1725,7 +1725,7 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
     samp <- paste0("s", 1:6)
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000))
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -1764,7 +1764,7 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
 test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
     se <- .js_makeSe(traits = "g1", samples = paste0("s", 1:6))
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -1813,7 +1813,7 @@ test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, comp
     samp <- paste0("s", 1:6)
     # < 2 scoped traits in the context -> NULL.
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se2,
+        molecularTraits = function(data, contexts) se2,
         .package = "pecotmr"
     )
     expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
@@ -1823,11 +1823,11 @@ test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, comp
         cisWindow = 1000L,
         verbose = 1,
         label = "X",
-        study = "S"
+        studyName = "S"
     )))
     # region path + < 2 complete cases.
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se2,
+        molecularTraits = function(data, contexts) se2,
         .fmResidGeno = function(
             x,
             contexts,
@@ -1856,7 +1856,7 @@ test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, comp
         cisWindow = NULL,
         verbose = 1,
         label = "X",
-        study = "S",
+        studyName = "S",
         region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 9999))
     )))
 })
@@ -1867,7 +1867,7 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
     scope <- list(contexts = list(S = "c1"), traits = list(S = c("g1", "g2")))
     # Single context: YresList wrap branch, then a valid 2-tuple build.
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -1901,7 +1901,7 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
     # < 2 tuples -> NULL.
     scope1 <- list(contexts = list(S = "c1"), traits = list(S = "g1"))
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) {
+        molecularTraits = function(data, contexts) {
             .js_makeSe(traits = "g1")
         },
         .package = "pecotmr"
@@ -1976,7 +1976,7 @@ test_that(".fmSynthesizeJointSpec: trait wins over context; single/single -> emp
 test_that(".fmMergeResultsByKey: merges per-region entries by (s,c,t,method)", {
     mk <- function() {
         QtlFineMappingResult(
-            study = "S",
+            studyName = "S",
             context = "c1",
             trait = "t1",
             method = "mvsusie",
@@ -1992,7 +1992,7 @@ test_that(".fmMergeResultsByKey: merges per-region entries by (s,c,t,method)", {
     expect_equal(nrow(out), 1L)
     # n == 0 short-circuit returns the (empty) base unchanged.
     empty <- QtlFineMappingResult(
-        study = character(0),
+        studyName = character(0),
         context = character(0),
         trait = character(0),
         method = character(0),
@@ -2004,7 +2004,7 @@ test_that(".fmMergeResultsByKey: merges per-region entries by (s,c,t,method)", {
 test_that(".twasMergeResultsByKey: merges per-region TwasWeights entries", {
     mk <- function() {
         TwasWeights(
-            study = "S",
+            studyName = "S",
             context = "c1",
             trait = "t1",
             method = "lasso",
@@ -2018,7 +2018,7 @@ test_that(".twasMergeResultsByKey: merges per-region TwasWeights entries", {
     expect_s4_class(out, "TwasWeights")
     expect_equal(nrow(out), 1L)
     empty <- TwasWeights(
-        study = character(0),
+        studyName = character(0),
         context = character(0),
         trait = character(0),
         method = character(0),
@@ -2045,7 +2045,7 @@ test_that(".twasDispatchJointSpecsQtlDataset: two region blocks are merged by ke
     parsed <- list(list(axes = "context", scope = NULL))
     mkRegionRes <- function() {
         TwasWeights(
-            study = c("Q1", "Q1"),
+            studyName = c("Q1", "Q1"),
             context = c("c1", "c2"),
             trait = c("t1", "t1"),
             method = c("mrmash", "mrmash"),
@@ -2068,7 +2068,7 @@ test_that(".twasDispatchJointSpecsQtlDataset: two region blocks are merged by ke
         contexts = NULL,
         traitIds = NULL,
         cisWindow = NULL,
-        dataType = NULL,
+        weightsDataType = NULL,
         verbose = 0,
         xRegions = list(r1, r2)
     )
@@ -2083,7 +2083,7 @@ test_that(".twasDispatchJointSpecsQtlDataset: two region blocks are merged by ke
 
 test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components, study spec to sumstats", {
     qd <- .js_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -2094,14 +2094,14 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
         list(axes = "study", scope = NULL)
     )
     qdRes <- QtlFineMappingResult(
-        study = "indA",
+        studyName = "indA",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
         entry = list(.js_fmEntry())
     )
     ssRes <- QtlFineMappingResult(
-        study = "ssC",
+        studyName = "ssC",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
@@ -2121,7 +2121,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
         traitIds = NULL,
         cisWindow = NULL,
         verbose = 1,
-        credibleSetArgs = CredibleSetParam(
+        credibleSetParam = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2134,12 +2134,12 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
 
 test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot messages", {
     qdA <- .js_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     qdB <- .js_makeQtlDataset(
-        study = "indB",
+        studyName = "indB",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -2154,7 +2154,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
             traitIds = NULL,
             cisWindow = NULL,
             verbose = 1,
-            credibleSetArgs = CredibleSetParam(
+            credibleSetParam = CredibleSetParam(
                 coverage = 0.95,
                 secondaryCoverage = 0.5,
                 signalCutoff = 0.1,
@@ -2168,7 +2168,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
 
 test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and rbinds", {
     qd <- .jd_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -2179,7 +2179,7 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and r
         list(axes = "study", scope = NULL)
     )
     qdRes <- TwasWeights(
-        study = "indA",
+        studyName = "indA",
         context = "c1",
         trait = "t1",
         method = "mrmash",
@@ -2189,7 +2189,7 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and r
         ))
     )
     ssRes <- TwasWeights(
-        study = "ssC",
+        studyName = "ssC",
         context = "c1",
         trait = "t1",
         method = "mrmash",
@@ -2211,7 +2211,7 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and r
         contexts = NULL,
         traitIds = NULL,
         cisWindow = NULL,
-        dataType = NULL,
+        weightsDataType = NULL,
         verbose = 1
     ))
     expect_s4_class(out, "TwasWeights")
@@ -2220,12 +2220,12 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and r
 
 test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats -> message + NULL", {
     qdA <- .jd_makeQtlDataset(
-        study = "indA",
+        studyName = "indA",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     qdB <- .jd_makeQtlDataset(
-        study = "indB",
+        studyName = "indB",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -2239,7 +2239,7 @@ test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats -> message
             contexts = NULL,
             traitIds = NULL,
             cisWindow = NULL,
-            dataType = NULL,
+            weightsDataType = NULL,
             verbose = 1
         ),
         "no sumStats slot"
@@ -2254,12 +2254,12 @@ test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats -> message
 
 test_that(".sp* QtlDataset: mismatched study / absent context return empty", {
     qd <- .js_makeQtlDataset(
-        study = "S1",
+        studyName = "S1",
         contexts = "brain",
         traits = c("g1", "g2")
     )
     expect_equal(pecotmr:::.spListContexts(qd, "wrong"), character(0)) # 59
-    expect_equal(pecotmr:::.spListTraits(qd, study = "wrong"), character(0)) # 93
+    expect_equal(pecotmr:::.spListTraits(qd, studyName = "wrong"), character(0)) # 93
     expect_equal(pecotmr:::.spListTraits(qd, context = "nope"), character(0)) # 98
 })
 
@@ -2274,7 +2274,7 @@ test_that("validateMethodsVsJointSpec: per-study methods with a context joint pa
 test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context", {
     se <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -2302,7 +2302,7 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context",
         cisWindow = 1000L,
         verbose = 1,
         label = "X",
-        study = "S"
+        studyName = "S"
     ))) # 730
 })
 
@@ -2315,7 +2315,7 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
     )
     # (a) disjoint X samples -> < 2 common -> NULL (774).
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -2356,7 +2356,7 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
     ))) # 774
     # (b) one context's Y lacks the trait column -> tuple skipped -> < 2 yCols (779/785).
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -2390,7 +2390,7 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
     ))) # 779/785
     # (c) two valid columns but < 2 complete rows (NA) -> NULL (788).
     local_mocked_bindings(
-        getPhenotypes = function(data, contexts) se,
+        molecularTraits = function(data, contexts) se,
         .fmResidGeno = function(
             x,
             contexts,
@@ -2436,14 +2436,14 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
 
 test_that(".fmMergeResultsByKey: a key missing from a later region contributes nothing", {
     twoRow <- QtlFineMappingResult(
-        study = c("S", "S"),
+        studyName = c("S", "S"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
         method = c("mvsusie", "mvsusie"),
         entry = list(.js_fmEntry("chr1:100:A:G"), .js_fmEntry("chr1:200:A:G"))
     )
     oneRow <- QtlFineMappingResult(
-        study = "S",
+        studyName = "S",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
@@ -2464,7 +2464,7 @@ test_that(".fmMergeResultsByKey: a key missing from a later region contributes n
 
 test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
@@ -2472,7 +2472,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
     r2 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(300, 500))
     mkRes <- function() {
         QtlFineMappingResult(
-            study = c("Q1", "Q1"),
+            studyName = c("Q1", "Q1"),
             context = c("c1", "c2"),
             trait = c("t1", "t1"),
             method = c("mvsusie", "mvsusie"),
@@ -2496,7 +2496,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
         cisWindow = NULL,
         verbose = 0,
         xRegions = list(r1, r2),
-        credibleSetArgs = CredibleSetParam(
+        credibleSetParam = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2509,12 +2509,12 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
 
 test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; all-NULL -> NULL", {
     qd <- .jd_makeQtlDataset(
-        study = "Q1",
+        studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     res1 <- QtlFineMappingResult(
-        study = "Q1",
+        studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
@@ -2532,7 +2532,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         traitIds = NULL,
         cisWindow = 1000L,
         verbose = 0,
-        credibleSetArgs = CredibleSetParam(
+        credibleSetParam = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2552,7 +2552,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         traitIds = NULL,
         cisWindow = 1000L,
         verbose = 0,
-        credibleSetArgs = CredibleSetParam(
+        credibleSetParam = CredibleSetParam(
             coverage = 0.95,
             secondaryCoverage = 0.5,
             signalCutoff = 0.1,
@@ -2563,7 +2563,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
 
 test_that(".twasMergeResultsByKey: a key absent from a later region contributes nothing", {
     twoRow <- TwasWeights(
-        study = c("S", "S"),
+        studyName = c("S", "S"),
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
         method = c("lasso", "lasso"),
@@ -2573,7 +2573,7 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         )
     )
     oneRow <- TwasWeights(
-        study = "S",
+        studyName = "S",
         context = "c1",
         trait = "t1",
         method = "lasso",
@@ -2610,7 +2610,7 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         seq_len(nrow(ss)),
         as.character(ss$context),
         "probe",
-        ldSketch = getLdSketch(ss),
+        ldSketch = ldSketch(ss),
         cutoffs = .panelCutoffs(PanelFilterParam(...))
     ))
 }
@@ -2640,7 +2640,7 @@ test_that(".buildJointSumstatZMatrix agrees with .panelVariantFilter", {
         expect_equal(
             length(.bjz_build(ss, mafCutoff = cut)$variantIds),
             length(.panelVariantFilter(
-                getLdSketch(ss),
+                ldSketch(ss),
                 ids,
                 PanelFilterParam(mafCutoff = cut)
             )),

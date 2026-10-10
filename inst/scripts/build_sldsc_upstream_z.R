@@ -30,7 +30,7 @@ simZ <- function(ref, h2, n, seed) {
     perSnpVar <- rep(h2 / M, M)
     set.seed(seed)
     z <- numeric(M)
-    for (b in pecotmr:::getLdMatrixList(ref)) {
+    for (b in pecotmr:::ldMatrixList(ref)) {
         idx <- b$snpIdx
         p <- length(idx)
         sigma <- n * (b$R %*% diag(perSnpVar[idx], p) %*% b$R) + b$R

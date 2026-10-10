@@ -36,7 +36,7 @@ setClassUnion(
 #   list            one handle per panel for a mixture reference, averaged by
 #                   `mixtureWeights`
 #   matrix          dosages already extracted and filtered, kept so
-#                   getGenotypes() answers without reopening the file (see
+#                   genotypes() answers without reopening the file (see
 #                   .loadLdFromBlocks); `snpIdx` is NULL in this case because
 #                   the matrix is already the subset
 #   NULL            no genotypes -- the object carries a pre-computed R
@@ -79,9 +79,9 @@ setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 # lives in seqinfo, not a slot). Each element
 # is one tuple's per-variant GRanges: x[[i]], formerly x$entry[[i]].
 #
-# getZ / getN / getMaf / nSnps are
-# defined once on SumStatsBase (they only delegate to getSumStats); subsetChr /
-# getVarY / getSumStats / getSumStatsDf stay on the concrete subclass because
+# z / nSamples / maf / nSnps are
+# defined once on SumStatsBase (they only delegate to sumStats); subsetChr /
+# varY / sumStats / as.data.frame stay on the concrete subclass because
 # they rely on the tuple shape (3-tuple QtlSumStats, 1-tuple GwasSumStats).
 # =============================================================================
 
@@ -104,7 +104,7 @@ setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
 #'   record (filter names, drop counts, liftover target, RAISS settings, etc.).
 #'   Fine-mapping and TWAS-weights pipelines reject inputs where
-#'   \code{length(getQcInfo(x)) == 0L} -- the slot serves as both the gating
+#'   \code{length(qcInfo(x)) == 0L} -- the slot serves as both the gating
 #'   flag and the audit trail.
 #' @export
 setClass(
@@ -202,33 +202,19 @@ setClass(
     )
 }
 
-#' @rdname getGenome
+#' @rdname qcInfo
 #' @examples
 #' data(qtlSumStatsExample)
-#' getGenome(qtlSumStatsExample)
+#' qcInfo(qtlSumStatsExample)
 #' @export
-setMethod("getGenome", "SumStatsBase", function(x) {
-    # The build lives in seqinfo, exactly as it does on LdStatistic: a
-    # GRangesList already has somewhere to keep it, and a parallel `genome`
-    # slot went stale against it (getGenome() said hg19 while genome(x) said
-    # NA, so every Bioconductor path that reads genome(x) saw nothing).
-    build <- discard(unique(GenomeInfoDb::genome(x)), is.na)
-    if (length(build) == 0L) NA_character_ else build[[1L]]
-})
+setMethod("qcInfo", "SumStatsBase", function(x) x@qcInfo)
 
-#' @rdname getQcInfo
+#' @rdname qcDiagnostics
 #' @examples
 #' data(qtlSumStatsExample)
-#' getQcInfo(qtlSumStatsExample)
+#' qcDiagnostics(qtlSumStatsExample)
 #' @export
-setMethod("getQcInfo", "SumStatsBase", function(x) x@qcInfo)
-
-#' @rdname getQcDiagnostics
-#' @examples
-#' data(qtlSumStatsExample)
-#' getQcDiagnostics(qtlSumStatsExample)
-#' @export
-setMethod("getQcDiagnostics", "SumStatsBase", function(x, entry = 1L) {
+setMethod("qcDiagnostics", "SumStatsBase", function(x, entry = 1L) {
     qc <- x@qcInfo
     if (length(qc) == 0L) {
         return(NULL)
@@ -260,187 +246,454 @@ setMethod("getQcDiagnostics", "SumStatsBase", function(x, entry = 1L) {
     }
 })
 
-#' @rdname getLdSketch
+#' @rdname ldSketch
 #' @examples
 #' data(qtlSumStatsExample)
-#' getLdSketch(qtlSumStatsExample)
+#' ldSketch(qtlSumStatsExample)
 #' @export
-setMethod("getLdSketch", "SumStatsBase", function(x) x@ldSketch)
+setMethod("ldSketch", "SumStatsBase", function(x) x@ldSketch)
 
-#' @rdname getStudy
+#' @rdname studyName
 #' @examples
 #' data(qtlDatasetExample)
-#' getStudy(qtlDatasetExample)
+#' studyName(qtlDatasetExample)
 #' @export
-setMethod("getStudy", "SumStatsBase", function(x) unique(as.character(x$study)))
+setMethod("studyName", "SumStatsBase", function(x) {
+    unique(as.character(x$study))
+})
 
-# getZ / getN / getMaf / nSnps delegate purely to getSumStats (which the
+# z / nSamples / maf / nSnps delegate purely to sumStats (which the
 # concrete subclass dispatches with its own tuple shape), so they live once on
 # the base and forward `...` through.
-#' @rdname getZ
+#' @rdname z
 #' @examples
 #' data(qtlSumStatsExample)
-#' getZ(qtlSumStatsExample)
+#' z(qtlSumStatsExample)
 #' @export
 setMethod(
-    "getZ",
+    "z",
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        mcols(exec(getSumStats, x, !!!sel))$Z
+        mcols(exec(sumStats, x, !!!sel))$Z
     }
 )
 
-#' @rdname getN
+#' @rdname nSamples
 #' @examples
 #' data(qtlSumStatsExample)
-#' getN(qtlSumStatsExample)
+#' nSamples(qtlSumStatsExample)
 #' @export
 setMethod(
-    "getN",
+    "nSamples",
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        mcols(exec(getSumStats, x, !!!sel))$N
+        mcols(exec(sumStats, x, !!!sel))$N
     }
 )
 
-# getP / getBeta / getSe are first-class alongside getZ / getN: they read the
+# pval / coef / se are first-class alongside z / nSamples: they read the
 # optional P / BETA / SE mcols and return NULL when the entry does not carry
 # them (DataFrame `$` semantics), so a p-value-primary sumstats (e.g. TensorQTL
 # cis output) is an equal citizen to a Z-primary GWAS sumstats.
-#' @rdname getP
+#' @rdname pval
 #' @examples
 #' data(qtlSumStatsExample)
-#' getP(qtlSumStatsExample)
+#' pval(qtlSumStatsExample)
 #' @export
 setMethod(
-    "getP",
+    "pval",
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        mcols(exec(getSumStats, x, !!!sel))$P
+        mcols(exec(sumStats, x, !!!sel))$P
     }
 )
 
-#' @rdname getBeta
+#' @rdname coef-methods
 #' @examples
 #' data(qtlSumStatsExample)
-#' getBeta(qtlSumStatsExample)
+#' coef(qtlSumStatsExample)
 #' @export
 setMethod(
-    "getBeta",
+    "coef",
+    "SumStatsBase",
+    function(
+        object,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        annotateSignificance = NULL,
+        ranges = NULL,
+        ...
+    ) {
+        sel <- list(
+            study = studyName,
+            context = context,
+            trait = trait,
+            annotateSignificance = annotateSignificance,
+            ranges = ranges
+        )
+        mcols(exec(sumStats, object, !!!sel))$BETA
+    }
+)
+
+#' @rdname se
+#' @examples
+#' data(qtlSumStatsExample)
+#' se(qtlSumStatsExample)
+#' @export
+setMethod(
+    "se",
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        mcols(exec(getSumStats, x, !!!sel))$BETA
+        mcols(exec(sumStats, x, !!!sel))$SE
     }
 )
 
-#' @rdname getSe
-#' @examples
-#' data(qtlSumStatsExample)
-#' getSe(qtlSumStatsExample)
-#' @export
-setMethod(
-    "getSe",
-    "SumStatsBase",
-    function(
-        x,
-        study = NULL,
-        context = NULL,
-        trait = NULL,
-        annotateSignificance = NULL,
-        ranges = NULL
-    ) {
-        sel <- list(
-            study = study,
-            context = context,
-            trait = trait,
-            annotateSignificance = annotateSignificance,
-            ranges = ranges
-        )
-        mcols(exec(getSumStats, x, !!!sel))$SE
-    }
-)
-
-#' @rdname getMaf
+#' @rdname maf
 #' @examples
 #' data(qtlDatasetExample)
-#' getMaf(qtlDatasetExample)
+#' maf(qtlDatasetExample)
 #' @export
 setMethod(
-    "getMaf",
+    "maf",
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        mc <- mcols(exec(getSumStats, x, !!!sel))
+        mc <- mcols(exec(sumStats, x, !!!sel))
         if (is_in("MAF", colnames(mc))) mc$MAF else NULL
+    }
+)
+
+#' @rdname af
+#' @examples
+#' data(qtlSumStatsExample)
+#' af(qtlSumStatsExample)
+#' @export
+setMethod(
+    "af",
+    "SumStatsBase",
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        annotateSignificance = NULL,
+        ranges = NULL
+    ) {
+        sel <- list(
+            study = studyName,
+            context = context,
+            trait = trait,
+            annotateSignificance = annotateSignificance,
+            ranges = ranges
+        )
+        mc <- mcols(exec(sumStats, x, !!!sel))
+        if (is_in("AF", colnames(mc))) mc$AF else NULL
+    }
+)
+
+# =============================================================================
+# Variant-level replacement
+# =============================================================================
+
+# The element index the selectors pin. GwasSumStats is keyed by study alone
+# and QtlSumStats by the (study, context, trait) tuple; branching here rather
+# than adding an internal generic keeps one copy of each replacement body.
+# @noRd
+.ssRowIndexFor <- function(x, studyName, context, trait) {
+    if (methods::is(x, "QtlSumStats")) {
+        return(.qtlSumStatsSelectRow(x, studyName, context, trait))
+    }
+    .gwasRefuseQtlSelectors(context, trait, NULL)
+    .gwasSelectStudy(x, studyName)
+}
+
+# Write one per-variant column onto the pinned element and put it back. The
+# `[[<-` route rebuilds the collection and re-runs validity, so a write that
+# would break the identity invariants is refused rather than stored.
+# @noRd
+.ssWriteVariantColumn <- function(x, idx, column, values) {
+    el <- x[[idx]]
+    mcols(el)[[column]] <- values
+    x[[idx]] <- el
+    x
+}
+
+# Positional replacement. The vector is taken to be in the element's own
+# variant order, so length is the only thing checkable -- and it is checked
+# hard: a recycled or truncated frequency vector is silently wrong, which is
+# exactly the failure the GRanges form exists to avoid.
+# @noRd
+.ssVariantColumnPositional <- function(x, idx, column, value) {
+    n <- length(x[[idx]])
+    if (length(value) != n) {
+        abort(glue(
+            "{column}: a positional replacement needs one value per variant ",
+            "({n}); got {length(value)}. Pass a GRanges carrying A1/A2 to ",
+            "match on (chrom, pos, A1, A2) instead."
+        ))
+    }
+    .ssWriteVariantColumn(x, idx, column, as.numeric(value))
+}
+
+# Variant ids for either side of a match, rebuilt from the coordinates and
+# alleles rather than read off a stored id column, so the two sides agree on
+# format. NOTE formatVariantId() takes A2 BEFORE A1.
+# @noRd
+.ssVariantKeys <- function(gr) {
+    mc <- mcols(gr)
+    formatVariantId(
+        chrom = as.character(seqnames(gr)),
+        pos = start(gr),
+        A2 = as.character(mc$A2),
+        A1 = as.character(mc$A1)
+    )
+}
+
+# The payload column of a replacement GRanges. A1/A2 are the match key, so
+# exactly one other mcols column is the values; requiring that rather than a
+# fixed name keeps the caller from having to know the stored column names.
+# @noRd
+.ssReplacementPayload <- function(value, column) {
+    mc <- mcols(value)
+    nms <- colnames(mc)
+    if (!all(is_in(c("A1", "A2"), nms))) {
+        abort(glue(
+            "{column}: a GRanges replacement must carry A1 and A2 in ",
+            "mcols() so an allele swap can be detected."
+        ))
+    }
+    payload <- setdiff(nms, c("A1", "A2"))
+    if (length(payload) != 1L) {
+        abort(glue(
+            "{column}: a GRanges replacement must carry exactly one value ",
+            "column besides A1/A2 (got {length(payload)}",
+            "{if (length(payload)) str_c(': ', str_flatten(payload, ', '))",
+            " else ''})."
+        ))
+    }
+    as.numeric(mc[[payload]])
+}
+
+# Matched replacement. Ids are rebuilt from both sides and paired with
+# matchVariants, so a chr-prefix or separator difference does not read as
+# no-overlap. A variant the replacement does not name becomes NA -- its value
+# is unknown, not unchanged. `directional` says whether an allele swap
+# inverts the quantity: AF goes to 1 - AF, while MAF (min(af, 1 - af)) and N
+# are swap-invariant, and complementing those would corrupt them.
+# @noRd
+.ssVariantColumnMatched <- function(x, idx, column, value, directional) {
+    vals <- .ssReplacementPayload(value, column)
+    el <- x[[idx]]
+    m <- matchVariants(.ssVariantKeys(el), .ssVariantKeys(value))
+    if (length(m$idxA) == 0L) {
+        abort(glue(
+            "{column}: no variant in the replacement matches this entry on ",
+            "(chrom, pos, A1, A2)."
+        ))
+    }
+    picked <- vals[m$idxB]
+    if (directional) {
+        picked <- ifelse(m$sign < 0, 1 - picked, picked)
+    }
+    out <- rep(NA_real_, length(el))
+    out[m$idxA] <- picked
+    unused <- length(value) - length(m$idxB)
+    if (unused > 0L) {
+        warn(glue(
+            "{column}: {unused} of {length(value)} replacement variant(s) ",
+            "are not in this entry and were ignored."
+        ))
+    }
+    missed <- length(el) - length(m$idxA)
+    if (missed > 0L) {
+        warn(glue(
+            "{column}: {missed} of {length(el)} entry variant(s) are not in ",
+            "the replacement and were set NA."
+        ))
+    }
+    .ssWriteVariantColumn(x, idx, column, out)
+}
+
+# @noRd
+.ssReplacePositional <- function(x, column, value, studyName, context, trait) {
+    .ssVariantColumnPositional(
+        x,
+        .ssRowIndexFor(x, studyName, context, trait),
+        column,
+        value
+    )
+}
+
+# @noRd
+.ssReplaceMatched <- function(
+    x,
+    column,
+    value,
+    directional,
+    studyName,
+    context,
+    trait
+) {
+    .ssVariantColumnMatched(
+        x,
+        .ssRowIndexFor(x, studyName, context, trait),
+        column,
+        value,
+        directional
+    )
+}
+
+#' @rdname variantColumnReplace
+#' @export
+setReplaceMethod(
+    "af",
+    signature(x = "SumStatsBase", value = "numeric"),
+    function(x, studyName = NULL, context = NULL, trait = NULL, ..., value) {
+        .ssReplacePositional(x, "AF", value, studyName, context, trait)
+    }
+)
+
+#' @rdname variantColumnReplace
+#' @export
+setReplaceMethod(
+    "af",
+    signature(x = "SumStatsBase", value = "GRanges"),
+    function(x, studyName = NULL, context = NULL, trait = NULL, ..., value) {
+        .ssReplaceMatched(
+            x,
+            "AF",
+            value,
+            directional = TRUE,
+            studyName,
+            context,
+            trait
+        )
+    }
+)
+
+#' @rdname variantColumnReplace
+#' @export
+setReplaceMethod(
+    "maf",
+    signature(x = "SumStatsBase", value = "numeric"),
+    function(x, studyName = NULL, context = NULL, trait = NULL, ..., value) {
+        .ssReplacePositional(x, "MAF", value, studyName, context, trait)
+    }
+)
+
+#' @rdname variantColumnReplace
+#' @export
+setReplaceMethod(
+    "maf",
+    signature(x = "SumStatsBase", value = "GRanges"),
+    function(x, studyName = NULL, context = NULL, trait = NULL, ..., value) {
+        .ssReplaceMatched(
+            x,
+            "MAF",
+            value,
+            directional = FALSE,
+            studyName,
+            context,
+            trait
+        )
+    }
+)
+
+#' @rdname variantColumnReplace
+#' @export
+setReplaceMethod(
+    "nSamples",
+    signature(x = "SumStatsBase", value = "numeric"),
+    function(x, studyName = NULL, context = NULL, trait = NULL, ..., value) {
+        .ssReplacePositional(x, "N", value, studyName, context, trait)
+    }
+)
+
+#' @rdname variantColumnReplace
+#' @export
+setReplaceMethod(
+    "nSamples",
+    signature(x = "SumStatsBase", value = "GRanges"),
+    function(x, studyName = NULL, context = NULL, trait = NULL, ..., value) {
+        .ssReplaceMatched(
+            x,
+            "N",
+            value,
+            directional = FALSE,
+            studyName,
+            context,
+            trait
+        )
     }
 )
 
@@ -454,20 +707,20 @@ setMethod(
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
         ranges = NULL
     ) {
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        length(exec(getSumStats, x, !!!sel))
+        length(exec(sumStats, x, !!!sel))
     }
 )
 
@@ -500,22 +753,22 @@ setClass(
     representation(ldSketch = "LdSketch_OR_NULL")
 )
 
-#' @rdname getStudy
+#' @rdname studyName
 #' @export
-setMethod("getStudy", "FineMappingResultBase", function(x) {
+setMethod("studyName", "FineMappingResultBase", function(x) {
     unique(as.character(x$study))
 })
 
-#' @rdname getLdSketch
+#' @rdname ldSketch
 #' @export
-setMethod("getLdSketch", "FineMappingResultBase", function(x) x@ldSketch)
+setMethod("ldSketch", "FineMappingResultBase", function(x) x@ldSketch)
 
-#' @rdname getMethodNames
+#' @rdname methodNames
 #' @examples
 #' data(qtlFineMappingExample)
-#' getMethodNames(qtlFineMappingExample)
+#' methodNames(qtlFineMappingExample)
 #' @export
-setMethod("getMethodNames", "FineMappingResultBase", function(x) {
+setMethod("methodNames", "FineMappingResultBase", function(x) {
     unique(as.character(x$method))
 })
 
@@ -575,12 +828,12 @@ setMethod(
     withFit <- `[[<-`(
         md,
         "susieFit",
-        value = S4Vectors::SimpleList(map(entries, getSusieFit))
+        value = S4Vectors::SimpleList(map(entries, susieFit))
     )
     `[[<-`(
         withFit,
         "cvResult",
-        value = S4Vectors::SimpleList(map(entries, getCvResult))
+        value = S4Vectors::SimpleList(map(entries, cvResult))
     )
 }
 
@@ -589,10 +842,10 @@ setMethod(
 # @noRd
 .fmrFromEntries <- function(x, entries) {
     grl <- `mcols<-`(
-        GenomicRanges::GRangesList(map(entries, rowVariants)),
+        GenomicRanges::GRangesList(map(entries, variants)),
         value = .withEntryPayload(mcols(x, use.names = FALSE), entries)
     )
-    new(class(x), grl, ldSketch = .asLdSketch(getLdSketch(x)))
+    new(class(x), grl, ldSketch = .asLdSketch(ldSketch(x)))
 }
 
 # TRUE when an entry shares at least one variant with `keepVariants`, matched
@@ -617,7 +870,7 @@ setMethod(
 # What reconciliation does NOT do is recover the information the dropped
 # variants carried. Coverage falls as overlap shrinks -- equally for a
 # renormalization and for a full refit -- so that loss is irreducible, not an
-# approximation error. getRetainedMass() is what makes it visible instead of
+# approximation error. retainedMass() is what makes it visible instead of
 # letting a heavily-trimmed fit look as confident as an untouched one.
 # =============================================================================
 
@@ -672,9 +925,9 @@ setMethod(
 # Retained-mass diagnostic
 # =============================================================================
 
-#' @rdname getRetainedMass
+#' @rdname retainedMass
 #' @export
-setMethod("getRetainedMass", "FineMappingResultBase", function(x) {
+setMethod("retainedMass", "FineMappingResultBase", function(x) {
     if (nrow(x) == 0L) {
         return(.rcEmptyMass(x))
     }
@@ -769,14 +1022,14 @@ setGeneric(".fmrSelectEntry", function(x, ...) {
     standardGeneric(".fmrSelectEntry")
 })
 
-#' @rdname getCs
+#' @rdname credibleSets
 #' @export
 setMethod(
-    "getCs",
+    "credibleSets",
     "FineMappingResultBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -792,7 +1045,7 @@ setMethod(
         # coverage.
         .fmrAggregateView(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -806,16 +1059,16 @@ setMethod(
     }
 )
 
-#' @rdname getLbf
+#' @rdname lbf
 #' @export
-setMethod("getLbf", "FineMappingResultBase", function(x) {
+setMethod("lbf", "FineMappingResultBase", function(x) {
     .fmrAggregateView(x, perEntry = .fmrRowLbf)
 })
 
-#' @rdname getCredibleSetSummary
+#' @rdname credibleSetSummary
 #' @export
 setMethod(
-    "getCredibleSetSummary",
+    "credibleSetSummary",
     "FineMappingResultBase",
     function(x, coverage = 0.95) {
         .fmrAggregateView(
@@ -843,16 +1096,15 @@ setMethod("fsusieAffectedRegions", "FineMappingResultBase", function(x) {
     exec(c, !!!grs)
 })
 
-#' @rdname getTopLoci
+#' @rdname topLoci
 #' @export
 setMethod(
-    "getTopLoci",
+    "topLoci",
     "FineMappingResultBase",
     function(
         x,
-        type = c("data.frame", "GRanges"),
         signalCutoff = 0.025,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -860,68 +1112,47 @@ setMethod(
         minPurity = NULL,
         raw = FALSE
     ) {
-        type <- arg_match(type)
-        # The five selectors travel together to every branch, so they are
-        # named once and spliced rather than relisted three times.
+        # The five selectors travel together to both branches, so they are
+        # named once and spliced rather than relisted twice.
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             method = method,
             region = region
         )
+        # raw = TRUE hands back the stored canonical table verbatim, which is
+        # a data.frame by definition -- there is no posterior projection to
+        # put on a range.
         if (isTRUE(raw)) {
-            return(.fmrbTopLociRaw(x, sel, type))
+            return(exec(.fmrbTopLociTable, x, !!!sel, list(raw = TRUE)))
         }
-        # type = "GRanges" is honored only for a single pinned entry; the
-        # aggregate (identity-prefixed) form is data.frame-only.
-        if (type == "GRanges") {
-            return(exec(
-                .fmrbTopLociGranges,
-                x,
-                !!!sel,
-                signalCutoff,
-                minPurity
-            ))
-        }
-        # data.frame: bare per-variant table when selectors pin one entry, else
-        # the matching rows' per-variant tables stacked with row-identity cols.
-        exec(
+        # The per-variant table first -- bare when the selectors pin one
+        # entry, else the matching rows' tables stacked with row-identity
+        # columns -- then one conversion to ranges. Converting last is what
+        # lets the aggregate form be a GRanges too: the identity columns just
+        # become mcols, where the old type = "GRanges" branch had to refuse
+        # anything but a single pinned entry.
+        tbl <- exec(
             .fmrbTopLociTable,
             x,
             !!!sel,
-            list(
-                type = "data.frame",
-                signalCutoff = signalCutoff,
-                minPurity = minPurity
-            )
+            list(signalCutoff = signalCutoff, minPurity = minPurity)
         )
+        .fmeTopLociGRanges(tbl)
     }
 )
 
-# raw = TRUE hands back the stored canonical table verbatim, so the
-# posterior-view projection and the type switch do not apply -- and there
-# is no GRanges form of it to hand back.
-# @noRd
-.fmrbTopLociRaw <- function(x, sel, type) {
-    if (type == "GRanges") {
-        abort(glue(
-            "getTopLoci: `raw = TRUE` returns the stored table ",
-            "verbatim, which has no GRanges form. Use ",
-            "type = \"data.frame\"."
-        ))
-    }
-    exec(.fmrbTopLociTable, x, !!!sel, list(raw = TRUE))
-}
 
-# The per-variant top-loci table, in whichever of its two table forms the
-# caller asked for: the stored table verbatim (raw) or the projected
-# data.frame view. Both stack with row-identity columns when the selectors
-# match more than one entry, so they differ only in `viewArgs`.
+# The per-variant top-loci table: the stored table verbatim (raw) or the
+# projected posterior view, selected by `viewArgs`. Both stack with
+# row-identity columns when the selectors match more than one entry. The
+# caller converts to ranges; this stays a table so the aggregate form can be
+# stacked before conversion.
 # @noRd
 .fmrbTopLociTable <- function(
     x,
-    study,
+    studyName,
     context,
     trait,
     method,
@@ -930,7 +1161,7 @@ setMethod(
 ) {
     .fmrAggregateView(
         x,
-        study = study,
+        studyName = studyName,
         context = context,
         trait = trait,
         method = method,
@@ -939,56 +1170,18 @@ setMethod(
         viewArgs = viewArgs
     )
 }
-
-# Resolve the single pinned entry and return its GRanges view (aggregating
-# across multiple entries requires type = "data.frame").
-# @noRd
-#' @importFrom rlang try_fetch
-.fmrbTopLociGranges <- function(
-    x,
-    study,
-    context,
-    trait,
-    method,
-    region,
-    signalCutoff,
-    minPurity
-) {
-    sel <- try_fetch(
-        .fmrSelectEntry(
-            x,
-            study = study,
-            context = context,
-            trait = trait,
-            method = method,
-            region = region
-        ),
-        error = function(cnd) cnd
-    )
-    if (inherits(sel, "error")) {
-        msg <- glue(
-            "getTopLoci: aggregating across multiple entries requires ",
-            "type = 'data.frame'."
-        )
-        abort(msg)
-    }
-    .fmrRowTopLoci(
-        sel,
-        type = "GRanges",
-        signalCutoff = signalCutoff,
-        minPurity = minPurity
-    )
-}
-
-#' @rdname getMarginalEffects
+# raw = TRUE hands back the stored canonical table verbatim, so the
+# posterior-view projection does not apply -- and marginal effects are
+# not a posterior view, so they stay a table rather than ranges.
+#' @rdname marginalEffects
 #' @export
 setMethod(
-    "getMarginalEffects",
+    "marginalEffects",
     "FineMappingResultBase",
     function(
         x,
         maxPval = NULL,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -999,7 +1192,7 @@ setMethod(
         # prefixed with the row identity (study/context/trait/blockId/method).
         .fmrAggregateView(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -1010,32 +1203,32 @@ setMethod(
     }
 )
 
-#' @rdname getRegion
+#' @rdname genomicRegion
 #' @examples
 #' data(qtlFineMappingExample)
-#' getRegion(qtlFineMappingExample)
+#' genomicRegion(qtlFineMappingExample)
 #' @export
-setMethod("getRegion", "FineMappingResultBase", function(x) {
+setMethod("genomicRegion", "FineMappingResultBase", function(x) {
     .getRegionColumn(x)
 })
 
-#' @rdname getTraitPosition
+#' @rdname traitPosition
 #' @examples
 #' data(qtlDatasetExample)
-#' getTraitPosition(qtlDatasetExample)
+#' traitPosition(qtlDatasetExample)
 #' @export
-setMethod("getTraitPosition", "FineMappingResultBase", function(x) {
+setMethod("traitPosition", "FineMappingResultBase", function(x) {
     .getTraitPosColumn(x)
 })
 
-#' @rdname getSusieFit
+#' @rdname susieFit
 #' @export
 setMethod(
-    "getSusieFit",
+    "susieFit",
     "FineMappingResultBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -1043,7 +1236,7 @@ setMethod(
     ) {
         .fmrPartsSusieFit(.fmrSelectEntry(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -1059,14 +1252,14 @@ setMethod(
     "FineMappingResultBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
         region = NULL
     ) {
         # The per-variant weight of the row a selector pins. Defined on the
-        # collection because that is what getFineMappingResult() now
+        # collection because that is what fineMappingResult() now
         # returns; the body is the per-row primitive, so they cannot drift.
         #
         # The selectors are named, not absorbed by `...`: .fmrSelectEntry is the
@@ -1074,7 +1267,7 @@ setMethod(
         # index by (a QtlFineMappingResult has no `region` axis).
         .fmrRowResolveWeights(.fmrSelectEntry(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -1083,14 +1276,14 @@ setMethod(
     }
 )
 
-#' @rdname getVariantIds
+#' @rdname variantIds
 #' @export
 setMethod(
-    "getVariantIds",
+    "variantIds",
     "FineMappingResultBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
@@ -1098,7 +1291,7 @@ setMethod(
     ) {
         .fmrPartsVariantIds(.fmrSelectEntry(
             x,
-            study = study,
+            studyName = studyName,
             context = context,
             trait = trait,
             method = method,
@@ -1107,14 +1300,14 @@ setMethod(
     }
 )
 
-#' @rdname getVariantIds
+#' @rdname variantIds
 #' @export
 setMethod(
-    "getVariantIds",
+    "variantIds",
     "SumStatsBase",
     function(
         x,
-        study = NULL,
+        studyName = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
@@ -1127,13 +1320,13 @@ setMethod(
         # Rendered with the same .grVariantIds() the row classes use, so an id
         # means the same string whichever object produced it.
         sel <- list(
-            study = study,
+            study = studyName,
             context = context,
             trait = trait,
             annotateSignificance = annotateSignificance,
             ranges = ranges
         )
-        .grVariantIds(exec(getSumStats, x, !!!sel))
+        .grVariantIds(exec(sumStats, x, !!!sel))
     }
 )
 

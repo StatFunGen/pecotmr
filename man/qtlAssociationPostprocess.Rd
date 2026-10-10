@@ -39,7 +39,7 @@ row column).}
 (needs \code{p_beta}/\code{beta_shape1}/\code{beta_shape2}) and
 \code{"bonferroni"} (needs \code{n_variants}). The q-value SNP method adds
 no stored column -- it is a significance query (see
-\code{getSignificantQtls}).}
+\code{significantQtls}).}
 
 \item{pvalueCol, afCol}{Entry mcol names for the per-variant p-value / allele
 frequency (defaults \code{"P"} / \code{"af"}).}
@@ -72,7 +72,7 @@ entries <- lapply(seq_len(G), function(i) {
     tes_distance = c(0L, 500L, 900000L, 2000000L))
   gr
 })
-qss <- QtlSumStats(study = rep("s", G), context = rep("brain", G),
+qss <- QtlSumStats(studyName = rep("s", G), context = rep("brain", G),
   trait = paste0("g", seq_len(G)), entry = entries, genome = "hg19",
   extraCols = list(
     n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),

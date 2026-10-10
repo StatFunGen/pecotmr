@@ -145,7 +145,7 @@ setMethod(
     # via .emptySketch (the empty / PIP-skip path), never on a surviving region.
     methods::initialize(
         handle,
-        snpInfo = slice(getSnpInfo(handle), integer(0)),
+        snpInfo = slice(snpInfo(handle), integer(0)),
         sampleIds = character(0),
         nSamples = 0L
     )
@@ -155,7 +155,7 @@ setMethod(
     if (is.null(handle)) {
         return(NULL)
     }
-    si <- getSnpInfo(handle)
+    si <- snpInfo(handle)
     keepIdx <- if (is.logical(keep)) which(keep) else as.integer(keep)
     if (length(keepIdx) >= nrow(si)) {
         return(handle)
@@ -382,7 +382,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     # tryCatch could see. The sharded branch above already returns early for
     # the same reason; this is the single-file path catching up.
     if (length(snpIdx) == 0L) {
-        return(.emptyBlockSe(getSampleIds(handle)))
+        return(.emptyBlockSe(sampleIds(handle)))
     }
     # Read ascending, then put the columns back in the requested order. See
     # .restoreRequestedOrder() for why this is not merely tidiness.
@@ -402,7 +402,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # with what the ID-selecting backends actually hand back.
 # @noRd
 .genotypeFilePos <- function(handle, snpIdx) {
-    fileIdx <- getSnpInfo(handle)$fileIdx
+    fileIdx <- snpInfo(handle)$fileIdx
     if (is.null(fileIdx)) snpIdx else fileIdx[snpIdx]
 }
 
@@ -518,7 +518,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # describe variants the same way, and overlaps between the two actually hit.
 # @noRd
 .genotypeSnpRanges <- function(genotypes, variantIds) {
-    si <- getSnpInfo(genotypes)
+    si <- snpInfo(genotypes)
     `names<-`(
         GenomicRanges::GRanges(
             seqnames = withChrPrefix(as.character(si$CHR)),
@@ -534,7 +534,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # Dispatch block extraction to the format-specific backend (samples x variants).
 # @noRd
 .extractBlockByFormat <- function(handle, snpIdx) {
-    fmt <- getFormat(handle)
+    fmt <- genotypeFormat(handle)
     switch(
         fmt,
         "gds" = .extractBlockGds(handle, snpIdx),
@@ -549,7 +549,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # SummarizedExperiment with per-variant rowRanges + sample colData.
 # @noRd
 .blockGenotypesToSe <- function(geno, handle, snpIdx) {
-    si <- slice(getSnpInfo(handle), snpIdx)
+    si <- slice(snpInfo(handle), snpIdx)
     chr <- str_c(
         "chr",
         str_remove(as.character(si$CHR), regex("^chr", ignore_case = TRUE))
@@ -561,7 +561,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         A1 = si$A1,
         A2 = si$A2
     )
-    sampleIds <- getSampleIds(handle)
+    sampleIds <- sampleIds(handle)
     # Transpose to Bioc convention: variants x samples.
     dosage <- `dimnames<-`(t(geno), list(si$SNP, sampleIds))
     SummarizedExperiment(
@@ -582,7 +582,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     unifiedChr,
     meanImpute
 ) {
-    if (!is_in(chrom, names(getChromPaths(handle)))) {
+    if (!is_in(chrom, names(chromPaths(handle)))) {
         msg <- glue(
             "extractBlockGenotypes: no per-chromosome file for chromosome ",
             "'{chrom}' (have: ",
@@ -612,11 +612,11 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # case -- returns its one SE directly.
 #' @keywords internal
 .extractBlockSharded <- function(handle, snpIdx, meanImpute = TRUE) {
-    sampleIds <- getSampleIds(handle)
+    sampleIds <- sampleIds(handle)
     if (length(snpIdx) == 0L) {
         return(.emptyBlockSe(sampleIds))
     }
-    unifiedChr <- canonChrom(getSnpInfo(handle)$CHR)
+    unifiedChr <- canonChrom(snpInfo(handle)$CHR)
     groups <- split(seq_along(snpIdx), unifiedChr[snpIdx])
     ses <- set_names(
         map2(
@@ -680,7 +680,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 .extractBlockVcf <- function(handle, snpIdx) {
-    si <- slice(getSnpInfo(handle), snpIdx)
+    si <- slice(snpInfo(handle), snpIdx)
     gr <- GRanges(
         seqnames = si$CHR,
         ranges = IRanges(start = si$BP, end = si$BP)
@@ -709,7 +709,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 .extractBlockPlink1 <- function(handle, snpIdx) {
-    snpIds <- getSnpInfo(handle)$SNP[snpIdx]
+    snpIds <- snpInfo(handle)$SNP[snpIdx]
     pathStem <- .genotypeReadPath(handle)
     plinkData <- snpStats::read.plink(
         bed = str_c(pathStem, ".bed"),
@@ -727,7 +727,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 .extractBlockPlink2 <- function(handle, snpIdx) {
     # pgenlibr::ReadList returns ALT dosage = A1 dosage in pecotmr convention.
     # The cached @pgenPtr does not survive saveRDS/readRDS (external pointers
-    # become stale), so we re-open from getPath() on the fly if the cached
+    # become stale), so we re-open from path() on the fly if the cached
     # pointer errors out. Opening is cheap relative to dosage extraction.
     paths <- resolvePlink2Paths(.genotypeReadPath(handle))
     # `variant_subset` indexes the .pgen by FILE position. `snpIdx` is a
@@ -735,12 +735,12 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     # fileIdx to recover the true .pgen index. For a full handle fileIdx ==
     # seq_len(nrow), so this is a no-op. Older RDS handles predate the column ->
     # fall back to snpIdx.
-    fileIdx <- getSnpInfo(handle)$fileIdx
+    fileIdx <- snpInfo(handle)$fileIdx
     variantSubset <- if (is.null(fileIdx)) snpIdx else fileIdx[snpIdx]
     # A sharded handle routes through a transient view with pgenPtr = NULL (one
     # pgen per chromosome), and a deserialized pointer is stale; open a fresh
     # pgen up front in those cases rather than provoking a caught read error.
-    ptr <- getPgenPtr(handle) %||% pgenlibr::NewPgen(paths$pgen)
+    ptr <- pgenPtr(handle) %||% pgenlibr::NewPgen(paths$pgen)
     geno <- try_fetch(
         pgenlibr::ReadList(
             ptr,
@@ -949,7 +949,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # -----------------------------------------------------------------------------
 # Low-level PLINK / VCF / GDS variant-metadata readers, the stochastic
 # genotype sidecar helpers (.afreq / .stochastic_meta.tsv), and the
-# top-level dispatchers loadGenotypeRegion + getRefVariantInfo that
+# top-level dispatchers loadGenotypeRegion + refVariantInfo that
 # auto-detect the underlying format and route to the correct reader.
 # =============================================================================
 
@@ -1276,9 +1276,9 @@ readVariantMetadata <- function(snpFilePath) {
 #' @examples
 #' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
 #'   package = "pecotmr")
-#' getRefVariantInfo(meta, region = "chr22:10000000-19000000")
+#' refVariantInfo(meta, region = "chr22:10000000-19000000")
 #' @export
-getRefVariantInfo <- function(source, region = NULL) {
+refVariantInfo <- function(source, region = NULL) {
     resolved <- resolveLdSource(source)
     dataPath <- .refDataPath(resolved, region)
     if (resolved$type == "plink2") {
@@ -1352,10 +1352,10 @@ getRefVariantInfo <- function(source, region = NULL) {
 }
 
 # Pre-computed LD variant info: read the per-intersection bim/pvar metadata
-# (already region-filtered by getRegionalLdMeta).
+# (already region-filtered by regionalLdMeta).
 # @noRd
 .refInfoPrecomputedLd <- function(resolved, region) {
-    bimPaths <- getRegionalLdMeta(
+    bimPaths <- regionalLdMeta(
         resolved$metaPath,
         region
     )$intersections$bimFilePaths
@@ -1522,7 +1522,7 @@ loadGenotypeRegion <- function(
     stochasticMetaFormat = NULL
 ) {
     handle <- .loadGenoHandle(genotype)
-    handleSnpInfo <- getSnpInfo(handle)
+    handleSnpInfo <- snpInfo(handle)
     snpIdx <- .loadGenoSnpIdx(handleSnpInfo, region)
     # Samples x variants matrix (pecotmr convention); callers handle missing.
     extracted <- list(
@@ -1584,7 +1584,7 @@ loadGenotypeRegion <- function(
 #' @importFrom dplyr left_join
 #' @noRd
 .loadGenoAttachAfreq <- function(handle, variantInfo) {
-    if (getFormat(handle) != "plink2") {
+    if (genotypeFormat(handle) != "plink2") {
         return(variantInfo)
     }
     afreq <- readAfreq(.genotypeReadPath(handle))
@@ -1757,7 +1757,7 @@ loadGenotypeRegion <- function(
 # is needed; it also handles non-contiguous SNP selection.
 # @noRd
 .gdsBlockGeno <- function(gds, handle, snpIdx) {
-    snpIds <- getSnpInfo(handle)$SNP[snpIdx]
+    snpIds <- snpInfo(handle)$SNP[snpIdx]
     geno <- SNPRelate::snpgdsGetGeno(
         gds,
         snp.id = snpIds,
@@ -1777,7 +1777,7 @@ loadGenotypeRegion <- function(
     # given in, and labels nothing. Ask in ascending order and permute back,
     # exactly as the block readers do, so the matrix agrees with its names.
     ord <- order(.genotypeFilePos(handle, snpIdx))
-    snpIds <- getSnpInfo(handle)$SNP[snpIdx[ord]]
+    snpIds <- snpInfo(handle)$SNP[snpIdx[ord]]
     ldMat <- SNPRelate::snpgdsLDMat(
         gds,
         snp.id = snpIds,
@@ -1787,7 +1787,7 @@ loadGenotypeRegion <- function(
     )
     raw <- replace(ldMat$LD, is.na(ldMat$LD), 0)
     inv <- order(ord)
-    ids <- getSnpInfo(handle)$SNP[snpIdx]
+    ids <- snpInfo(handle)$SNP[snpIdx]
     `dimnames<-`(raw[inv, inv, drop = FALSE], list(ids, ids))
 }
 

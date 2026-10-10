@@ -2,10 +2,10 @@
 
 # Helper for adjustPips tests, migrated from test_dataStructures.R
 
-.makeAdjustEntry <- function(vids, L = 2L) {
+.makeAdjustEntry <- function(vids, maxNumSingleEffects = 2L) {
     p <- length(vids)
     set.seed(11L)
-    lbf <- matrix(rnorm(L * p), nrow = L, ncol = p)
+    lbf <- matrix(rnorm(maxNumSingleEffects * p), nrow = maxNumSingleEffects, ncol = p)
     colnames(lbf) <- vids
     alpha <- lbfToAlpha(lbf)
     pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
@@ -15,7 +15,7 @@
             pip = pip,
             alpha = alpha,
             lbf_variable = lbf,
-            mu = matrix(0, L, p),
+            mu = matrix(0, maxNumSingleEffects, p),
             X_column_scale_factors = rep(1, p)
         ),
         topLoci = data.frame(
@@ -30,10 +30,10 @@
 
 
 # ===========================================================================
-# Tests migrated from test_dataStructures.R (getTopLoci, adjustPips)
+# Tests migrated from test_dataStructures.R (topLoci, adjustPips)
 # ===========================================================================
 
-test_that(".fmrRowTopLoci(type='GRanges') converts topLoci data.frame to GRanges", {
+test_that(".fmrRowTopLoci() tables convert to ranges", {
     tl <- data.frame(
         variant_id = c("1:100:A:G", "1:200:C:T"),
         pip = c(0.9, 0.1),
@@ -48,26 +48,31 @@ test_that(".fmrRowTopLoci(type='GRanges') converts topLoci data.frame to GRanges
         susieFit = list(),
         topLoci = tl
     )
-    gr <- .fmrRowTopLoci(ent, type = "GRanges")
+    # .fmrRowTopLoci() is the per-row table; topLoci() converts once, after
+    # the aggregate view has stacked the rows, so the conversion is tested
+    # through the converter it now lives in.
+    out <- .fmrRowTopLoci(ent)
+    expect_s3_class(out, "data.frame")
+    gr <- pecotmr:::.fmeTopLociGRanges(out)
     expect_s4_class(gr, "GRanges")
     expect_equal(length(gr), 2)
     expect_equal(S4Vectors::mcols(gr)$pip, c(0.9, 0.1))
 })
 
 
-test_that(".fmrRowTopLoci(type='GRanges') handles empty input", {
+test_that(".fmrRowTopLoci() empty input converts to empty ranges", {
     ent <- fineMappingRow(
         variantIds = character(0),
         susieFit = list(),
         topLoci = data.frame()
     )
-    gr <- .fmrRowTopLoci(ent, type = "GRanges")
+    gr <- pecotmr:::.fmeTopLociGRanges(.fmrRowTopLoci(ent))
     expect_s4_class(gr, "GRanges")
     expect_equal(length(gr), 0)
 })
 
 
-test_that("getTopLoci defaults to data.frame", {
+test_that(".fmrRowTopLoci() always returns the per-row table", {
     tl <- data.frame(
         variant_id = "1:100:A:G",
         pip = 0.9,
@@ -94,15 +99,15 @@ test_that("adjustPips renormalizes PIPs on a kept FineMappingRow subset", {
     keep <- vids[2:5]
     adj <- adjustPips(entry, keep)
     expect_s4_class(adj, "FineMappingRow")
-    expect_equal(getVariantIds(adj), keep)
-    expect_equal(ncol(getSusieFit(adj)$lbf_variable), 4)
+    expect_equal(variantIds(adj), keep)
+    expect_equal(ncol(susieFit(adj)$lbf_variable), 4)
     # Renormalized: each effect's alpha row sums to 1 (when row has any signal)
-    expect_true(all(abs(rowSums(getSusieFit(adj)$alpha) - 1) < 1e-10))
+    expect_true(all(abs(rowSums(susieFit(adj)$alpha) - 1) < 1e-10))
     # PIPs match topLoci
-    expect_equal(.fmrPartsTopLoci(adj)$pip, getSusieFit(adj)$pip)
+    expect_equal(.fmrPartsTopLoci(adj)$pip, susieFit(adj)$pip)
     # PIPs change under renormalization
     origPips <- .fmrRowPip(entry)
-    expect_false(identical(unname(origPips[keep]), getSusieFit(adj)$pip))
+    expect_false(identical(unname(origPips[keep]), susieFit(adj)$pip))
 })
 
 
@@ -122,8 +127,8 @@ test_that("adjustPips tolerates a chr-prefix difference between entry and keepVa
     keep <- paste0("1:", 2:5, ":A:G") # same variants, no "chr" prefix
     adj <- adjustPips(entry, keep)
     expect_s4_class(adj, "FineMappingRow")
-    expect_equal(getVariantIds(adj), vids[2:5]) # entry keeps its own labels
-    expect_equal(ncol(getSusieFit(adj)$lbf_variable), 4)
+    expect_equal(variantIds(adj), vids[2:5]) # entry keeps its own labels
+    expect_equal(ncol(susieFit(adj)$lbf_variable), 4)
 })
 
 
@@ -133,7 +138,7 @@ test_that("adjustPips on a FineMappingResultBase collection renormalizes each en
     entryA <- .makeAdjustEntry(vidsA)
     entryB <- .makeAdjustEntry(vidsB)
     fmr <- QtlFineMappingResult(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("c1", "c2"),
         trait = c("g1", "g1"),
         method = c("susie", "susie"),
@@ -144,8 +149,8 @@ test_that("adjustPips on a FineMappingResultBase collection renormalizes each en
     adj <- adjustPips(fmr, keep)
     expect_s4_class(adj, "QtlFineMappingResult")
     expect_equal(nrow(adj), 2L)
-    expect_equal(getVariantIds(pecotmr:::.collectionEntry(adj, 1L)), keep)
-    expect_equal(getVariantIds(pecotmr:::.collectionEntry(adj, 2L)), keep)
+    expect_equal(variantIds(pecotmr:::.collectionEntry(adj, 1L)), keep)
+    expect_equal(variantIds(pecotmr:::.collectionEntry(adj, 2L)), keep)
 })
 
 
@@ -165,13 +170,13 @@ test_that("FineMappingRow: constructor stores slots and accessors return them", 
         sprintf("chr9:%d:A:G", 100L * (1:3))
     )
     expect_equal(.fmrPartsSusieFit(entry), list(payload = 1L))
-    # getTopLoci returns the projected posterior view, not the raw slot
+    # topLoci returns the projected posterior view, not the raw slot
     out <- .fmrRowTopLoci(entry, signalCutoff = 0)
     expect_equal(out$variant_id, sprintf("chr9:%d:A:G", 100L * (1:3)))
 })
 
 
-test_that("FineMappingRow: getPip returns named pip vector keyed by variant_id", {
+test_that("FineMappingRow: pip returns named pip vector keyed by variant_id", {
     entry <- .sc_makeFineMappingRow(3)
     pip <- .fmrRowPip(entry)
     expect_equal(length(pip), 3L)
@@ -198,7 +203,7 @@ test_that("FineMappingRow: resolveWeights returns topLoci posterior effect align
 })
 
 
-test_that("FineMappingRow: getPip returns numeric(0) when topLoci is empty", {
+test_that("FineMappingRow: pip returns numeric(0) when topLoci is empty", {
     entry <- fineMappingRow(
         variantIds = character(0),
         susieFit = list(),
@@ -212,14 +217,14 @@ test_that("FineMappingRow: getPip returns numeric(0) when topLoci is empty", {
 })
 
 
-test_that("FineMappingRow: getCs filters to rows in any credible set", {
+test_that("FineMappingRow: credibleSets filters to rows in any credible set", {
     entry <- .sc_makeFineMappingRow(3) # last row has cs_95 = "susie_0"
     res <- .fmrRowCs(entry)
     expect_equal(nrow(res), 2L)
 })
 
 
-test_that("FineMappingRow: getCs/getTopLoci surface the directional af column", {
+test_that("FineMappingRow: credibleSets/topLoci surface the directional af column", {
     # Regression: the posterior view must carry the topLoci `af` (effect-allele
     # frequency) through to .fmrRowCs() / .fmrRowTopLoci(), not drop it to NA. The
     # value is directional (0.87 > 0.5), so a folded MAF would be a bug.
@@ -299,7 +304,7 @@ test_that("FineMappingRow cvResult defaults to NULL and rejects non-list", {
 test_that("QtlFineMappingResult: rejects rows that are not row payloads", {
     expect_error(
         QtlFineMappingResult(
-            study = "s1",
+            studyName = "s1",
             context = "c1",
             trait = "t1",
             method = "susie",
@@ -336,9 +341,9 @@ test_that("show.FineMappingRow reports variant count and CS count", {
 })
 
 
-# === getMarginalEffects maxPval filter ===
+# === marginalEffects maxPval filter ===
 
-test_that("FineMappingRow: getMarginalEffects applies the maxPval filter", {
+test_that("FineMappingRow: marginalEffects applies the maxPval filter", {
     tl <- data.frame(
         variant_id = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         pip = c(0.9, 0.5, 0.1),
@@ -357,9 +362,9 @@ test_that("FineMappingRow: getMarginalEffects applies the maxPval filter", {
 })
 
 
-# === getCs empty / cs-less topLoci projections ===
+# === credibleSets empty / cs-less topLoci projections ===
 
-test_that("FineMappingRow: getCs returns empty posterior view when topLoci is empty", {
+test_that("FineMappingRow: credibleSets returns empty posterior view when topLoci is empty", {
     entry <- fineMappingRow(
         variantIds = character(0),
         susieFit = list(),
@@ -376,7 +381,7 @@ test_that("FineMappingRow: getCs returns empty posterior view when topLoci is em
 })
 
 
-test_that("FineMappingRow: getCs returns empty posterior view when the cs column is absent", {
+test_that("FineMappingRow: credibleSets returns empty posterior view when the cs column is absent", {
     tl <- data.frame(
         variant_id = c("chr9:100:A:G", "chr9:200:A:G"),
         pip = c(0.1, 0.2),
@@ -444,7 +449,7 @@ test_that("FineMappingRow: adjustPips subsets mu2 and recomputes posterior_sd", 
     adj <- adjustPips(entry, keep)
     expect_s4_class(adj, "FineMappingRow")
     # mu2 carried through the variant subsetting alongside lbf/mu.
-    expect_equal(ncol(getSusieFit(adj)$mu2), 3L)
+    expect_equal(ncol(susieFit(adj)$mu2), 3L)
     # posterior_mean / posterior_sd recomputed from the subset alpha/mu/mu2.
     expect_equal(nrow(.fmrPartsTopLoci(adj)), 3L)
     expect_true("posterior_sd" %in% names(.fmrPartsTopLoci(adj)))
@@ -452,7 +457,7 @@ test_that("FineMappingRow: adjustPips subsets mu2 and recomputes posterior_sd", 
     expect_true(all(.fmrPartsTopLoci(adj)$posterior_sd >= 0))
 })
 
-test_that("getCs / getTopLoci minPurity filters CS by purity, independent of coverage + pip", {
+test_that("credibleSets / topLoci minPurity filters CS by purity, independent of coverage + pip", {
     # Two 0.95 credible sets: CS1 (v1,v2) pure (0.9), CS2 (v3,v4) impure (0.3); v5 non-CS.
     vn <- paste0("chr1:", (1:5) * 100, ":A:G")
     L <- 2L
@@ -481,13 +486,13 @@ test_that("getCs / getTopLoci minPurity filters CS by purity, independent of cov
     tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
     e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
 
-    # getCs: minPurity is orthogonal to coverage -> keeps only the pure CS members
+    # credibleSets: minPurity is orthogonal to coverage -> keeps only the pure CS members
     expect_equal(nrow(.fmrRowCs(e, coverage = 0.95)), 4L)
     expect_equal(
         .fmrRowCs(e, coverage = 0.95, minPurity = 0.8)$variant_id,
         vn[1:2]
     )
-    # getTopLoci: minPurity is orthogonal to the pip cutoff -> drops impure-CS
+    # topLoci: minPurity is orthogonal to the pip cutoff -> drops impure-CS
     # variants (v3,v4), keeps pure-CS (v1,v2) and non-CS (v5)
     expect_setequal(
         .fmrRowTopLoci(e, signalCutoff = 0, minPurity = 0.8)$variant_id,
@@ -504,11 +509,11 @@ test_that("getCs / getTopLoci minPurity filters CS by purity, independent of cov
 
 # A fit whose alpha was built from a deliberately NON-uniform prior, so the
 # stored-alpha route and the rebuild-from-lbf route disagree.
-.makeNonUniformPriorEntry <- function(vids, prior, L = 2L, seed = 404L) {
+.makeNonUniformPriorEntry <- function(vids, prior, maxNumSingleEffects = 2L, seed = 404L) {
     p <- length(vids)
     set.seed(seed)
-    lbf <- matrix(rnorm(L * p, sd = 2), L, p, dimnames = list(NULL, vids))
-    w <- exp(sweep(lbf, 1L, apply(lbf, 1L, max), `-`)) * rep(prior, each = L)
+    lbf <- matrix(rnorm(maxNumSingleEffects * p, sd = 2), maxNumSingleEffects, p, dimnames = list(NULL, vids))
+    w <- exp(sweep(lbf, 1L, apply(lbf, 1L, max), `-`)) * rep(prior, each = maxNumSingleEffects)
     alpha <- w / rowSums(w)
     pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
     list(
@@ -540,9 +545,9 @@ test_that("adjustPips renormalizes stored alpha, honouring a non-uniform prior",
 
     expected <- built$alpha[, keepIdx, drop = FALSE]
     expected <- expected / rowSums(expected)
-    expect_equal(unname(getSusieFit(adj)$alpha), unname(expected))
+    expect_equal(unname(susieFit(adj)$alpha), unname(expected))
     expect_equal(
-        getSusieFit(adj)$pip,
+        susieFit(adj)$pip,
         as.numeric(1 - apply(1 - expected, 2, prod))
     )
     # The old route -- rebuilding alpha from lbf_variable with a uniform prior
@@ -550,7 +555,7 @@ test_that("adjustPips renormalizes stored alpha, honouring a non-uniform prior",
     uniform <- lbfToAlpha(built$lbf[, keepIdx, drop = FALSE])
     expect_gt(max(abs(unname(uniform) - unname(expected))), 1e-6)
     # `pi` is carried along, subset to the retained variants.
-    expect_equal(getSusieFit(adj)[["pi"]], prior[keepIdx])
+    expect_equal(susieFit(adj)[["pi"]], prior[keepIdx])
 })
 
 test_that("adjustPips does not mistake `pip` for the prior `pi`", {
@@ -560,8 +565,8 @@ test_that("adjustPips does not mistake `pip` for the prior `pi`", {
     entry <- .makeAdjustEntry(vids)
     expect_null(.fmrPartsSusieFit(entry)[["pi"]])
     adj <- adjustPips(entry, vids[2:4])
-    expect_null(getSusieFit(adj)[["pi"]])
-    expect_length(getSusieFit(adj)[["pip"]], 3L)
+    expect_null(susieFit(adj)[["pi"]])
+    expect_length(susieFit(adj)[["pip"]], 3L)
 })
 
 test_that("adjustPips refuses an Omega-weighted (susieInf / susieAsh) fit", {
@@ -597,12 +602,12 @@ test_that("adjustPips keeps the null_weight column in the renormalization", {
     )
     keepIdx <- c(1L, 3L, 5L)
     adj <- adjustPips(entry, vids[keepIdx])
-    adjAlpha <- getSusieFit(adj)$alpha
+    adjAlpha <- susieFit(adj)$alpha
 
     expect_equal(ncol(adjAlpha), length(keepIdx) + 1L)
-    expect_equal(getSusieFit(adj)[["null_index"]], length(keepIdx) + 1L)
+    expect_equal(susieFit(adj)[["null_index"]], length(keepIdx) + 1L)
     expect_equal(rowSums(adjAlpha), rep(1, L))
-    expect_length(getSusieFit(adj)[["pip"]], length(keepIdx))
+    expect_length(susieFit(adj)[["pip"]], length(keepIdx))
     # Null mass survives: the retained variants alone do not sum to 1.
     expect_lt(max(rowSums(adjAlpha[, seq_along(keepIdx), drop = FALSE])), 1)
     expected <- alpha[, c(keepIdx, p + 1L), drop = FALSE]
@@ -656,7 +661,7 @@ test_that("adjustPips recomputes credible sets instead of remapping indices", {
     )
     keepIdx <- 1:3
     adj <- adjustPips(entry, vids[keepIdx])
-    sets <- getSusieFit(adj)$sets
+    sets <- susieFit(adj)$sets
 
     # Every recomputed index addresses a retained variant.
     expect_true(all(unlist(sets$cs) %in% seq_along(keepIdx)))
@@ -687,10 +692,10 @@ test_that("adjustPips subsets mvsusie-shaped coef rows and 3-D clfsr", {
     keepIdx <- c(2L, 4L)
     adj <- adjustPips(mv, vids[keepIdx])
 
-    expect_equal(getSusieFit(adj)$coef, fit$coef[keepIdx, , drop = FALSE])
-    expect_equal(dim(getSusieFit(adj)$clfsr), c(L, length(keepIdx), R))
+    expect_equal(susieFit(adj)$coef, fit$coef[keepIdx, , drop = FALSE])
+    expect_equal(dim(susieFit(adj)$clfsr), c(L, length(keepIdx), R))
     expect_equal(
-        getSusieFit(adj)$clfsr,
+        susieFit(adj)$clfsr,
         fit$clfsr[, keepIdx, , drop = FALSE]
     )
 })
@@ -706,11 +711,11 @@ test_that(".fmrRowTopLoci(raw = TRUE) returns the stored table verbatim", {
 })
 
 # ===========================================================================
-# getLbf (merged from test_getLbf.R when R/getLbf.R was folded
+# lbf (merged from test_getLbf.R when R/getLbf.R was folded
 # into R/FineMappingRow.R + R/AllClasses.R)
 # ===========================================================================
 
-test_that("getLbf returns the wide variant x effect lbf matrix", {
+test_that("lbf returns the wide variant x effect lbf matrix", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
     lbf <- matrix(c(3.0, 2.5, 0.1, 0.1, 0.1, 2.0), nrow = 2, byrow = TRUE) # L=2 x p=3
     fit <- list(
@@ -737,7 +742,7 @@ test_that("getLbf returns the wide variant x effect lbf matrix", {
     expect_equal(w$lbf_L2, lbf[2, ]) # effect 2's lbf across variants
 })
 
-test_that("getLbf is empty when the fit carries no lbf matrix", {
+test_that("lbf is empty when the fit carries no lbf matrix", {
     e <- fineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(pip = 0.5),
@@ -750,10 +755,10 @@ test_that("getLbf is empty when the fit carries no lbf matrix", {
     expect_equal(nrow(.fmrRowLbf(e)), 0L)
 })
 
-test_that("getLbf aggregates over a collection, carrying identity + NA-filling ragged effects", {
+test_that("lbf aggregates over a collection, carrying identity + NA-filling ragged effects", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
-    mkEntry <- function(L) {
-        lbf <- matrix(seq_len(L * length(vids)), nrow = L, byrow = TRUE) # L x p
+    mkEntry <- function(maxNumSingleEffects) {
+        lbf <- matrix(seq_len(maxNumSingleEffects * length(vids)), nrow = maxNumSingleEffects, byrow = TRUE) # L x p
         fit <- structure(
             list(lbf_variable = lbf, pip = rep(0.3, length(vids))),
             class = "susie"
@@ -771,13 +776,13 @@ test_that("getLbf aggregates over a collection, carrying identity + NA-filling r
     # Two entries with different effect counts (L = 2 vs 3) exercise the NA-fill of
     # the ragged lbf_L<k> columns described in the collection method's contract.
     res <- QtlFineMappingResult(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("brain", "blood"),
         trait = c("g", "g"),
         method = c("susie", "susie"),
         entry = list(mkEntry(2L), mkEntry(3L))
     )
-    w <- getLbf(res)
+    w <- lbf(res)
     expect_true(all(
         c("study", "context", "trait", "method", "variant_id") %in% names(w)
     ))
@@ -789,11 +794,11 @@ test_that("getLbf aggregates over a collection, carrying identity + NA-filling r
 })
 
 # ===========================================================================
-# getCredibleSetSummary (merged from test_credibleSetSummary.R
+# credibleSetSummary (merged from test_credibleSetSummary.R
 # when R/credibleSetSummary.R was folded in)
 # ===========================================================================
 
-test_that("getCredibleSetSummary returns one row per CS with size/purity/V/logBF/lead", {
+test_that("credibleSetSummary returns one row per CS with size/purity/V/logBF/lead", {
     vn <- paste0("chr1:", (1:5) * 100, ":A:G")
     L <- 2L
     P <- 5L
@@ -857,7 +862,7 @@ test_that("getCredibleSetSummary returns one row per CS with size/purity/V/logBF
     expect_equal(s$lead_variant, c("chr1:100:A:G", "chr1:300:A:G"))
 })
 
-test_that("getCredibleSetSummary is empty when there are no credible sets", {
+test_that("credibleSetSummary is empty when there are no credible sets", {
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
     fit <- list(
         alpha = matrix(c(0.2, 0.1), 1, 2),
@@ -877,7 +882,7 @@ test_that("getCredibleSetSummary is empty when there are no credible sets", {
     expect_equal(nrow(.fmrRowCredibleSetSummary(e)), 0L)
 })
 
-test_that("getCredibleSetSummary is empty when the requested coverage column is absent", {
+test_that("credibleSetSummary is empty when the requested coverage column is absent", {
     # topLoci carries only cs_95 / cs_70 / cs_50; asking for coverage 0.99 finds no
     # cs_99 column -> the .csSummaryFit guard returns the empty summary.
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
@@ -893,7 +898,7 @@ test_that("getCredibleSetSummary is empty when the requested coverage column is 
     expect_equal(nrow(.fmrRowCredibleSetSummary(e, coverage = 0.99)), 0L)
 })
 
-test_that("getCredibleSetSummary reports NA cs_log_bf when the fit carries no lbf matrix", {
+test_that("credibleSetSummary reports NA cs_log_bf when the fit carries no lbf matrix", {
     # A trimmed fit drops lbf_variable: the per-effect single-effect logBF degrades
     # to NA while the max-member cs_log10bf still comes from the topLoci.
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
@@ -916,7 +921,7 @@ test_that("getCredibleSetSummary reports NA cs_log_bf when the fit carries no lb
     expect_equal(s$cs_log10bf, 2.5)
 })
 
-test_that("getCredibleSetSummary reports NA cs_log_bf when the effect's lbf row is all non-finite", {
+test_that("credibleSetSummary reports NA cs_log_bf when the effect's lbf row is all non-finite", {
     # effect 1's lbf row is entirely -Inf, so the finite subset is empty and the
     # logSumExp path short-circuits to NA.
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
@@ -934,7 +939,7 @@ test_that("getCredibleSetSummary reports NA cs_log_bf when the effect's lbf row 
     expect_true(is.na(.fmrRowCredibleSetSummary(e)$cs_log_bf))
 })
 
-test_that("getCredibleSetSummary aggregates across a collection with entry identity", {
+test_that("credibleSetSummary aggregates across a collection with entry identity", {
     mkEntry <- function() {
         vn <- c("chr1:100:A:G", "chr1:200:C:T")
         tl <- data.frame(
@@ -948,13 +953,13 @@ test_that("getCredibleSetSummary aggregates across a collection with entry ident
         fineMappingRow(variantIds = vn, susieFit = list(x = 1), topLoci = tl)
     }
     res <- QtlFineMappingResult(
-        study = c("s", "s"),
+        studyName = c("s", "s"),
         context = c("brain", "blood"),
         trait = c("g", "g"),
         method = c("susie", "susie"),
         entry = list(mkEntry(), mkEntry())
     )
-    s <- getCredibleSetSummary(res)
+    s <- credibleSetSummary(res)
     expect_true(all(
         c("study", "context", "trait", "method", "cs") %in% names(s)
     ))
@@ -1071,7 +1076,7 @@ test_that("fsusieCredibleBand + fsusieAffectedRegions aggregate across a collect
     skip_if_not_installed("wavethresh")
     fit <- .fsa_makeFit() # deterministic; reuse for both rows
     res <- QtlFineMappingResult(
-        study = c("s", "s"),
+        studyName = c("s", "s"),
         context = c("brain", "blood"),
         trait = c("g", "g"),
         method = c("fsusie", "fsusie"),
@@ -1116,7 +1121,7 @@ test_that("fsusieAffectedRegions on a collection of non-fSuSiE entries is an emp
         )
     )
     res <- QtlFineMappingResult(
-        study = "s",
+        studyName = "s",
         context = "c",
         trait = "t",
         method = "susie",
@@ -1225,7 +1230,7 @@ test_that("fsusieAffectedRegions yields NA direction for a region outside the gr
     expect_true(is.na(S4Vectors::mcols(gr)$direction))
 })
 
-test_that("getCs warns when the coverage has no purity column to filter on", {
+test_that("credibleSets warns when the coverage has no purity column to filter on", {
     # minPurity is orthogonal to coverage, so asking for it at a coverage that
     # produced no credible sets leaves nothing to filter. Skipping silently
     # would look like "the filter ran and kept everything".
@@ -1314,16 +1319,16 @@ test_that("topLoci must list the variants in the same order", {
 # adjustPips: fits this code cannot slice safely
 # ===========================================================================
 
-.fmr_susieFit <- function(p = 5L, L = 2L, seed = 7L) {
+.fmr_susieFit <- function(p = 5L, maxNumSingleEffects = 2L, seed = 7L) {
     set.seed(seed)
-    lbf <- matrix(rnorm(L * p, sd = 3), L, p)
+    lbf <- matrix(rnorm(maxNumSingleEffects * p, sd = 3), maxNumSingleEffects, p)
     alpha <- lbfToAlpha(lbf)
     list(
         alpha = alpha,
-        mu = matrix(0.3, L, p),
-        mu2 = matrix(1.2, L, p),
+        mu = matrix(0.3, maxNumSingleEffects, p),
+        mu2 = matrix(1.2, maxNumSingleEffects, p),
         lbf_variable = lbf,
-        V = rep(1, L),
+        V = rep(1, maxNumSingleEffects),
         pip = as.numeric(1 - apply(1 - alpha, 2, prod))
     )
 }

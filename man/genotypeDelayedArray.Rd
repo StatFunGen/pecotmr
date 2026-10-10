@@ -21,7 +21,7 @@ an operation actually touches are fetched.
 }
 \details{
 The result is \strong{variants x samples}, the Bioconductor assay
-orientation, which is the transpose of what \code{\link{getGenotypes}}
+orientation, which is the transpose of what \code{\link{genotypes}}
 returns.
 }
 \keyword{internal}

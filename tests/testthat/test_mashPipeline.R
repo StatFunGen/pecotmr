@@ -43,7 +43,7 @@
         gr
     })
     QtlSumStats(
-        study = rep("s1", length(contexts)),
+        studyName = rep("s1", length(contexts)),
         context = contexts,
         trait = rep("g1", length(contexts)),
         entry = entries,
@@ -134,7 +134,7 @@
         topLoci = mkTL(c(-0.4, 0.7, 0.1, 5.0, -1.2, 0.6), c(4, 5))
     )
     QtlFineMappingResult(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("brain", "blood"),
         trait = c("t1", "t1"),
         method = c("susie", "susie"),
@@ -3003,7 +3003,7 @@ test_that(".mashSumStatsToMatrices: inputScale='z' errors when Z missing", {
 
 test_that(".mashObjectMatrices errors when marginal effects lack the required columns", {
     res <- QtlFineMappingResult(
-        study = "s",
+        studyName = "s",
         context = "brain",
         trait = "t",
         method = "susie",
@@ -3012,7 +3012,7 @@ test_that(".mashObjectMatrices errors when marginal effects lack the required co
     # Force a marginal-effects table with no `context` column (as an mv/f-SuSiE
     # result trimmed of marginal sumstats would yield): mash cannot pivot it.
     testthat::local_mocked_bindings(
-        getMarginalEffects = function(x, ...) {
+        marginalEffects = function(x, ...) {
             data.frame(variant_id = "v", beta = 1, se = 1)
         },
         .package = "pecotmr"
@@ -3029,7 +3029,7 @@ test_that(".mashObjectMatrices errors when marginal effects lack the required co
 
 test_that(".mashObjectMatrices warns and pins the first method on a multi-method result", {
     res <- QtlFineMappingResult(
-        study = c("s", "s"),
+        studyName = c("s", "s"),
         context = c("brain", "liver"),
         trait = c("t", "t"),
         method = c("susie", "mvsusie"),
@@ -3155,7 +3155,7 @@ test_that(".mashSumStatsToMatrices fills missing variants with bhat=0 / sbhat=10
     }
     # ctx1 has all 5 variants; ctx2 has only the first 3
     ss <- QtlSumStats(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("ctx1", "ctx2"),
         trait = c("g1", "g1"),
         entry = list(
@@ -3216,7 +3216,7 @@ test_that(".mashSumStatsToMatrices disambiguates rownames across (study, trait) 
     # Two (study, trait) blocks but they share SNP IDs v1, v2, v3 — without
     # the prefix the rbind would silently merge them.
     ss <- QtlSumStats(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("ctx1", "ctx1"),
         trait = c("g1", "g2"),
         entry = list(
@@ -3270,7 +3270,7 @@ test_that(".mashSumStatsToMatrices errors when entry lacks SNP mcol", {
         SE = rep(0.05, 3)
     )
     ss <- QtlSumStats(
-        study = "s1",
+        studyName = "s1",
         context = "ctx1",
         trait = "g1",
         entry = list(gr),
@@ -3323,7 +3323,7 @@ test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
     # Each study is its own (study) block; columns of the mash matrix are the
     # studies, so the result is block-diagonal with NA-fill off the diagonal.
     ss <- GwasSumStats(
-        study = c("studyA", "studyB"),
+        studyName = c("studyA", "studyB"),
         entry = list(
             mkGr(sprintf("chr1:%d:A:G", 100L * (1:3))),
             mkGr(sprintf("chr1:%d:A:G", 100L * (1:3)))
@@ -3389,7 +3389,7 @@ test_that(".mashSumStatsToMatrices errors when SumStats has empty QC info", {
         SE = rep(0.05, 3)
     )
     ss <- QtlSumStats(
-        study = "s1",
+        studyName = "s1",
         context = "c1",
         trait = "g1",
         entry = list(gr),
@@ -3421,7 +3421,7 @@ test_that(".mashSumStatsToMatrices errors when SumStats has zero entries", {
         pgenPtr = NULL
     )
     ss <- QtlSumStats(
-        study = character(0),
+        studyName = character(0),
         context = character(0),
         trait = character(0),
         entry = list(),
@@ -3455,7 +3455,7 @@ test_that("qtlSumStatsFromZMatrix: one row per context, Z preserved verbatim", {
             c("brain", "liver")
         )
     )
-    qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh())
+    qss <- qtlSumStatsFromZMatrix(z, studyName = "s1", ldSketch = .qszm_gh())
     expect_s4_class(qss, "QtlSumStats")
     # The variants span chr1 and chr2, so each context becomes one ELEMENT per
     # chromosome. The tuple is what stays 1:1 with a matrix column.
@@ -3463,11 +3463,11 @@ test_that("qtlSumStatsFromZMatrix: one row per context, Z preserved verbatim", {
     expect_setequal(as.character(qss$context), c("brain", "liver"))
     expect_equal(unique(as.character(qss$study)), "s1")
     expect_equal(unique(as.character(qss$trait)), "mash")
-    # getSumStats stitches a tuple's elements back together, so the Z column
+    # sumStats stitches a tuple's elements back together, so the Z column
     # still matches the input matrix column verbatim (values only; the mcols
     # column is unnamed whereas z[, j] carries the row ids as names).
-    brain <- getSumStats(qss, study = "s1", context = "brain", trait = "mash")
-    liver <- getSumStats(qss, study = "s1", context = "liver", trait = "mash")
+    brain <- sumStats(qss, studyName = "s1", context = "brain", trait = "mash")
+    liver <- sumStats(qss, studyName = "s1", context = "liver", trait = "mash")
     expect_equal(S4Vectors::mcols(brain)$Z, unname(z[, 1]))
     expect_equal(S4Vectors::mcols(liver)$Z, unname(z[, 2]))
 })
@@ -3478,10 +3478,10 @@ test_that("qtlSumStatsFromZMatrix: decodes chrom/pos from ids, synthesises when 
         ncol = 1,
         dimnames = list(c("chr1:250:A:G", "not_a_variant"), "ctx")
     )
-    qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh())
+    qss <- qtlSumStatsFromZMatrix(z, studyName = "s1", ldSketch = .qszm_gh())
     # Stitched across whatever seqnames the ids decoded to, so the variant
     # order still matches the matrix rows.
-    e <- getSumStats(qss, study = "s1", context = "ctx", trait = "mash")
+    e <- sumStats(qss, studyName = "s1", context = "ctx", trait = "mash")
     expect_equal(GenomicRanges::start(e)[1], 250L) # decoded
     expect_true(GenomicRanges::start(e)[2] >= 1L) # synthetic fallback
     # un-parseable chrom falls back to chr1 (never NA)
@@ -3492,7 +3492,7 @@ test_that("qtlSumStatsFromZMatrix: decodes chrom/pos from ids, synthesises when 
 
 test_that("qtlSumStatsFromZMatrix: NULL rownames get synthetic variant ids", {
     z <- matrix(rnorm(4), nrow = 2, dimnames = list(NULL, c("a", "b")))
-    qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh())
+    qss <- qtlSumStatsFromZMatrix(z, studyName = "s1", ldSketch = .qszm_gh())
     expect_equal(S4Vectors::mcols(qss[[1]])$SNP, c("var1", "var2"))
 })
 
@@ -3500,7 +3500,7 @@ test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcInfo are set"
     z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("x", "y")))
     qss <- qtlSumStatsFromZMatrix(
         z,
-        study = "s1",
+        studyName = "s1",
         ldSketch = .qszm_gh(),
         n = 500L,
         a1 = "T",
@@ -3511,8 +3511,8 @@ test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcInfo are set"
     expect_equal(unique(mc$A1), "T")
     expect_equal(unique(mc$A2), "C")
     expect_equal(unique(mc$N), 500L)
-    expect_equal(getQcInfo(qss)$role, "strong")
-    expect_equal(length(getQcInfo(qss)$entryAudit), 2L) # one slot per context
+    expect_equal(qcInfo(qss)$role, "strong")
+    expect_equal(length(qcInfo(qss)$entryAudit), 2L) # one slot per context
 })
 
 test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait pairs", {
@@ -3520,7 +3520,7 @@ test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait 
     # columns as traits: constant context, one trait per column
     qss <- qtlSumStatsFromZMatrix(
         z,
-        study = "s1",
+        studyName = "s1",
         ldSketch = .qszm_gh(),
         context = "brain",
         trait = colnames(z)
@@ -3530,7 +3530,7 @@ test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait 
     # columns as (context, trait) pairs
     qss2 <- qtlSumStatsFromZMatrix(
         z,
-        study = "s1",
+        studyName = "s1",
         ldSketch = .qszm_gh(),
         context = c("brain", "liver"),
         trait = c("geneA", "geneA")
@@ -3544,7 +3544,7 @@ test_that("qtlSumStatsFromZMatrix: a condition label of the wrong length errors"
     expect_error(
         qtlSumStatsFromZMatrix(
             z,
-            study = "s1",
+            studyName = "s1",
             ldSketch = .qszm_gh(),
             trait = c("t1", "t2", "t3")
         ),
@@ -3554,13 +3554,13 @@ test_that("qtlSumStatsFromZMatrix: a condition label of the wrong length errors"
 
 test_that("qtlSumStatsFromZMatrix: rejects non-matrix input and unlabelled conditions", {
     expect_error(
-        qtlSumStatsFromZMatrix(1:5, study = "s1", ldSketch = .qszm_gh()),
+        qtlSumStatsFromZMatrix(1:5, studyName = "s1", ldSketch = .qszm_gh()),
         "variants x conditions matrix"
     )
     # no colnames -> the default context = colnames(z) is NULL
     z <- matrix(rnorm(4), nrow = 2)
     expect_error(
-        qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh()),
+        qtlSumStatsFromZMatrix(z, studyName = "s1", ldSketch = .qszm_gh()),
         "column names"
     )
 })
@@ -3570,15 +3570,15 @@ test_that("qtlSumStatsFromBetaMatrix: one entry per context, BETA/SE/Z mcols set
     qss <- qtlSumStatsFromBetaMatrix(
         d$bhat,
         d$shat,
-        study = "s1",
+        studyName = "s1",
         ldSketch = .qszm_gh()
     )
     expect_s4_class(qss, "QtlSumStats")
     expect_setequal(as.character(qss$context), c("brain", "liver"))
-    # One element per (context, chromosome); getSumStats stitches a context
+    # One element per (context, chromosome); sumStats stitches a context
     # back into the single GRanges matching the matrix column.
     mc <- S4Vectors::mcols(
-        getSumStats(qss, study = "s1", context = "brain", trait = "mash")
+        sumStats(qss, studyName = "s1", context = "brain", trait = "mash")
     )
     expect_true(all(c("BETA", "SE", "Z") %in% colnames(mc)))
     expect_equal(mc$BETA, unname(d$bhat[, 1]))
@@ -3591,7 +3591,7 @@ test_that("qtlSumStatsFromBetaMatrix: feeds .mashSumStatsToMatrices on both scal
     qss <- qtlSumStatsFromBetaMatrix(
         d$bhat,
         d$shat,
-        study = "s1",
+        studyName = "s1",
         ldSketch = .qszm_gh()
     )
     mb <- .mashSumStatsToMatrices(qss, "strong", inputScale = "beta")
@@ -3627,7 +3627,7 @@ test_that("qtlSumStatsFromBetaMatrix: NULL rownames -> synthetic ids; placeholde
     qss <- qtlSumStatsFromBetaMatrix(
         bhat,
         shat,
-        study = "s1",
+        studyName = "s1",
         ldSketch = .qszm_gh(),
         n = 500L,
         a1 = "T",
@@ -3638,7 +3638,7 @@ test_that("qtlSumStatsFromBetaMatrix: NULL rownames -> synthetic ids; placeholde
     expect_equal(mc$SNP, c("var1", "var2"))
     expect_equal(unique(mc$A1), "T")
     expect_equal(unique(mc$N), 500L)
-    expect_equal(getQcInfo(qss)$role, "strong")
+    expect_equal(qcInfo(qss)$role, "strong")
 })
 
 test_that("mashInput: QtlSumStats path returns the flat b/s/z + XtX contract", {
@@ -3719,7 +3719,7 @@ test_that("mashInput: a FineMappingResult with no credible set yields no strong"
         topLoci = noCsTL(rnorm(6))
     )
     fmr <- QtlFineMappingResult(
-        study = c("s1", "s1"),
+        studyName = c("s1", "s1"),
         context = c("brain", "blood"),
         trait = c("t1", "t1"),
         method = c("susie", "susie"),
@@ -3851,7 +3851,7 @@ test_that(".qtlSumStatsFromMatrix synthesises coords for unparseable ids", {
     out <- pecotmr:::.qtlSumStatsFromMatrix(
         vids = c("weird1", "weird2"),
         nCond = 1L,
-        study = "s1",
+        studyName = "s1",
         ldSketch = NULL,
         context = "cA",
         trait = "g1",

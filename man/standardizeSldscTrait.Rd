@@ -16,7 +16,7 @@ standardizeSldscTrait(
 }
 \arguments{
 \item{sldscData}{An \code{\link{SldscData}} object (the run is pulled from it
-via \code{getTraitRun}).}
+via \code{sldscResults}).}
 
 \item{trait}{Character. Trait name (a key of the SldscData traits list).}
 
@@ -53,8 +53,8 @@ mkRun <- function(cats) {
     enrichmentP = setNames(rep(0.01, n), cats),
     propH2 = setNames(rep(0.2, n), cats),
     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
-    tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
-    nBlocks = 10L)
+    annotationJackknifeCoefs = matrix(1e-7, 10, n, dimnames = list(NULL,
+  cats)), nBlocks = 10L)
 }
 annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
@@ -65,7 +65,7 @@ mkTrait <- function() {
     mkRun(c("annot_B_0", "baselineLD_0"))),
     joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
 }
-sd <- SldscData(annot = annot, frq = frq,
+sd <- SldscData(annotData = annot, frqData = frq,
   traits = setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY")))
 sdAnnot <- computeSldscAnnotSd(sd)
 MRef <- computeSldscMRef(sd)

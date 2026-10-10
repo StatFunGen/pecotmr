@@ -25,7 +25,8 @@ NULL
 #'   \code{rowRanges}, the annotation matrix in the \code{annotations}
 #'   assay, and the per-annotation table in \code{colData}. Subsetting works
 #'   in both directions -- \code{x[i, j]} narrows SNPs and annotations
-#'   together -- and \code{\link{getBaseline}} / \code{\link{getCandidates}}
+#'   together -- and \code{\link{baselineAnnotations}} /
+#'   \code{\link{testedAnnotations}}
 #'   are column subsets rather than reconstructions.
 #' @importClassesFrom SummarizedExperiment RangedSummarizedExperiment
 #' @export
@@ -89,17 +90,10 @@ setMethod("show", "AnnotationMatrix", function(object) {
         "Continuous: {sum(meta$type == 'continuous')}\n",
         .trim = FALSE
     ))
-    cat(glue("  Genome build: {getGenome(object)}\n", .trim = FALSE))
-})
-
-#' @rdname getGenome
-#' @export
-setMethod("getGenome", "AnnotationMatrix", function(x) {
-    build <- discard(
-        unique(GenomeInfoDb::genome(SummarizedExperiment::rowRanges(x))),
-        is.na
-    )
-    if (length(build) == 0L) NA_character_ else build[[1L]]
+    cat(glue(
+        "  Genome build: {GenomeInfoDb::genome(object)}\n",
+        .trim = FALSE
+    ))
 })
 
 # =============================================================================
@@ -202,17 +196,13 @@ AnnotationMatrix <- function(
 # rows, the assay and the per-annotation table aligned, where the previous
 # implementation rebuilt the object from three separately-subset pieces.
 # @noRd
-#' @importFrom checkmate assertClass
-.annotTier <- function(annot, tier) {
-    assertClass(annot, "AnnotationMatrix")
-    annot[, SummarizedExperiment::colData(annot)$tier == tier]
+# Callers are methods dispatching on AnnotationMatrix, so the class is
+# already guaranteed here -- no assertClass.
+.annotTier <- function(x, tier) {
+    x[, SummarizedExperiment::colData(x)$tier == tier]
 }
 
-#' @title Get Baseline Annotations
-#' @description Extract only baseline-tier annotations from an
-#'   \code{AnnotationMatrix}.
-#' @param annot An \code{AnnotationMatrix} object.
-#' @return An \code{AnnotationMatrix} with only baseline annotations.
+#' @rdname baselineAnnotations
 #' @examples
 #' snpRanges <- GenomicRanges::GRanges(
 #'   "22", IRanges::IRanges((1:10) * 100, width = 1))
@@ -221,17 +211,13 @@ AnnotationMatrix <- function(
 #' meta <- data.frame(name = paste0("annot", 1:5), tier = "baseline",
 #'   type = "binary")
 #' am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
-#' getBaseline(am)
+#' baselineAnnotations(am)
 #' @export
-getBaseline <- function(annot) {
-    .annotTier(annot, "baseline")
-}
+setMethod("baselineAnnotations", "AnnotationMatrix", function(x) {
+    .annotTier(x, "baseline")
+})
 
-#' @title Get Candidate Annotations
-#' @description Extract only candidate-tier annotations from an
-#'   \code{AnnotationMatrix}.
-#' @param annot An \code{AnnotationMatrix} object.
-#' @return An \code{AnnotationMatrix} with only candidate annotations.
+#' @rdname testedAnnotations
 #' @examples
 #' snpRanges <- GenomicRanges::GRanges(
 #'   "22", IRanges::IRanges((1:10) * 100, width = 1))
@@ -240,8 +226,8 @@ getBaseline <- function(annot) {
 #' meta <- data.frame(name = paste0("annot", 1:5),
 #'   tier = c(rep("baseline", 3), rep("candidate", 2)), type = "binary")
 #' am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
-#' getCandidates(am)
+#' testedAnnotations(am)
 #' @export
-getCandidates <- function(annot) {
-    .annotTier(annot, "candidate")
-}
+setMethod("testedAnnotations", "AnnotationMatrix", function(x) {
+    .annotTier(x, "candidate")
+})

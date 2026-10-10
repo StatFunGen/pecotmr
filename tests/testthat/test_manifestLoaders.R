@@ -122,7 +122,7 @@ test_that(".reconcileScalar resolves arg/column and flags conflicts", {
 test_that(".detectGenotypeFormat builds a PLINK1 handle from a prefix", {
     h <- pecotmr:::.detectGenotypeFormat(.toyRefPrefix())
     expect_s4_class(h, "GenotypeHandle")
-    expect_equal(getFormat(h), "plink1")
+    expect_equal(genotypeFormat(h), "plink1")
 })
 
 test_that("BCF sumstats are rejected", {
@@ -191,13 +191,13 @@ test_that("loadGwasSumStatsFromManifest builds from a data.frame manifest", {
     expect_s4_class(obj, "GwasSumStats")
     expect_true(methods::validObject(obj))
     expect_equal(as.character(obj$study), "study1")
-    expect_equal(getGenome(obj), "hg38")
+    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
     expect_equal(length(obj[[1L]]), 5L)
     expect_true(all(
         c("SNP", "A1", "A2", "Z", "N") %in%
             colnames(S4Vectors::mcols(obj[[1L]]))
     ))
-    expect_equal(length(getQcInfo(obj)), 0L) # loaders run no QC
+    expect_equal(length(qcInfo(obj)), 0L) # loaders run no QC
 })
 
 test_that("loadGwasSumStatsFromManifest reads a file and reconciles genome", {
@@ -219,7 +219,7 @@ test_that("loadGwasSumStatsFromManifest reads a file and reconciles genome", {
         genome = "hg38",
         ldSketch = .toyLdSketch()
     )
-    expect_equal(getGenome(obj), "hg38")
+    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
     # conflicting arg errors.
     expect_error(
         loadGwasSumStatsFromManifest(
@@ -748,8 +748,8 @@ test_that("loadQtlDatasetFromManifest builds a single-study dataset", {
     qd <- loadQtlDatasetFromManifest(manifest)
     expect_s4_class(qd, "QtlDataset")
     expect_true(methods::validObject(qd))
-    expect_equal(getStudy(qd), "studyX")
-    expect_equal(getContexts(qd), "ctxA")
+    expect_equal(studyName(qd), "studyX")
+    expect_equal(contexts(qd), "ctxA")
 })
 
 test_that("loadQtlDatasetFromManifest accepts study/genotypes as arguments", {
@@ -762,10 +762,10 @@ test_that("loadQtlDatasetFromManifest accepts study/genotypes as arguments", {
     )
     qd <- loadQtlDatasetFromManifest(
         manifest,
-        study = "studyY",
+        studyName = "studyY",
         genotypes = .toyLdSketch()
     )
-    expect_equal(getStudy(qd), "studyY")
+    expect_equal(studyName(qd), "studyY")
 })
 
 # ---------------------------------------------------------------------------
@@ -786,7 +786,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
     msd <- loadMultiStudyQtlDatasetFromManifest(manifest)
     expect_s4_class(msd, "MultiStudyQtlDataset")
     expect_true(methods::validObject(msd))
-    expect_equal(sort(names(getQtlDatasets(msd))), c("study1", "study2"))
+    expect_equal(sort(names(qtlDatasets(msd))), c("study1", "study2"))
 })
 
 test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {
@@ -815,7 +815,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {
     )
     expect_true(methods::validObject(msd))
     expect_s4_class(msd@sumStats, "QtlSumStats")
-    expect_equal(names(getQtlDatasets(msd)), "study1")
+    expect_equal(names(qtlDatasets(msd)), "study1")
 })
 
 # ===========================================================================
@@ -879,13 +879,13 @@ test_that(".detectGenotypeFormat dispatches by extension", {
         "Could not determine genotype format"
     )
     h <- pecotmr:::.detectGenotypeFormat(paste0(.toyRefPrefix(), ".bed"))
-    expect_equal(getFormat(h), "plink1")
+    expect_equal(genotypeFormat(h), "plink1")
 })
 
 test_that(".resolveLdSketch accepts a genoMeta vector or path, rejects junk", {
     sharded <- pecotmr:::.resolveLdSketch(c("22" = .toyRefPrefix()))
     expect_s4_class(sharded, "GenotypeHandle")
-    expect_true("22" %in% names(getChromPaths(sharded)))
+    expect_true("22" %in% names(chromPaths(sharded)))
     expect_s4_class(
         pecotmr:::.resolveLdSketch(.toyRefPrefix()),
         "GenotypeHandle"
@@ -934,7 +934,7 @@ test_that(".materializeLdSketch passes a handle through, restricts shards", {
     spec <- c("22" = .toyRefPrefix(), "21" = "/no/such/chr21/prefix")
     restricted <- pecotmr:::.materializeLdSketch(spec, "22")
     expect_s4_class(restricted, "GenotypeHandle")
-    expect_equal(names(getChromPaths(restricted)), "22")
+    expect_equal(names(chromPaths(restricted)), "22")
     expect_error(pecotmr:::.materializeLdSketch(spec, c("22", "21")))
 })
 
@@ -1151,8 +1151,8 @@ test_that("loadQtlDatasetFromManifest attaches context/genotype covariates", {
         stringsAsFactors = FALSE
     )
     qd <- loadQtlDatasetFromManifest(manifest)
-    expect_equal(ncol(getPhenotypeCovariates(qd, "ctx")[["ctx"]]), 3L)
-    expect_equal(ncol(getGenotypeCovariates(qd)), 2L)
+    expect_equal(ncol(phenotypeCovariates(qd, "ctx")[["ctx"]]), 3L)
+    expect_equal(ncol(genotypeCovariates(qd)), 2L)
 })
 
 test_that("loadQtlDatasetFromManifest reads transposed (QTLtools) covariates", {
@@ -1174,7 +1174,7 @@ test_that("loadQtlDatasetFromManifest reads transposed (QTLtools) covariates", {
         stringsAsFactors = FALSE
     )
     qd <- loadQtlDatasetFromManifest(manifest, transposeCovariates = TRUE)
-    expect_equal(ncol(getPhenotypeCovariates(qd, "ctx")[["ctx"]]), 4L)
+    expect_equal(ncol(phenotypeCovariates(qd, "ctx")[["ctx"]]), 4L)
 })
 
 test_that("loadQtlDatasetFromManifest accepts a prefix and matrix covariates", {
@@ -1193,7 +1193,7 @@ test_that("loadQtlDatasetFromManifest accepts a prefix and matrix covariates", {
         genotypes = .toyRefPrefix(),
         genotypeCovariates = gmat
     )
-    expect_equal(ncol(getGenotypeCovariates(qd)), 2L)
+    expect_equal(ncol(genotypeCovariates(qd)), 2L)
 })
 
 test_that("QtlDataset builder errors on inconsistent per-context paths", {
@@ -1553,7 +1553,7 @@ test_that("genotypeCovariates accepts a path string", {
         stringsAsFactors = FALSE
     )
     qd <- loadQtlDatasetFromManifest(manifest, genotypeCovariates = gcov)
-    expect_equal(ncol(getGenotypeCovariates(qd)), 2L)
+    expect_equal(ncol(genotypeCovariates(qd)), 2L)
 })
 
 test_that("QtlSumStats manifest resolves a per-row columnMapping", {
@@ -1771,14 +1771,14 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     expect_error(
         loadQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = GenotypeFilterParam(mafCutoff = -1)
+            genotypeFilterParam = GenotypeFilterParam(mafCutoff = -1)
         ),
         "mafCutoff.*is not >= 0"
     )
     expect_error(
         loadQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = GenotypeFilterParam(keepIndel = NA)
+            genotypeFilterParam = GenotypeFilterParam(keepIndel = NA)
         ),
         "keepIndel.*May not be NA"
     )
@@ -1786,7 +1786,7 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     expect_error(
         loadQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = list(mafCutoff = 0.01)
+            genotypeFilterParam = list(mafCutoff = 0.01)
         ),
         "must be built with GenotypeFilterParam"
     )
@@ -1798,8 +1798,8 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
         "scaleResiduals.*Must have length 1"
     )
     expect_error(
-        loadQtlDatasetFromManifest(data.frame(), study = 1L),
-        "study.*Must be of type 'string'"
+        loadQtlDatasetFromManifest(data.frame(), studyName = 1L),
+        "studyName.*Must be of type 'string'"
     )
     expect_error(
         loadMultiStudyQtlDatasetFromManifest(
@@ -1811,7 +1811,7 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
     expect_error(
         loadMultiStudyQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterArgs = GenotypeFilterParam(xvarCutoff = -1)
+            genotypeFilterParam = GenotypeFilterParam(xvarCutoff = -1)
         ),
         "xvarCutoff.*is not >= 0"
     )

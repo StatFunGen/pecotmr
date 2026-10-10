@@ -66,7 +66,7 @@ Options forwarded to one fine-mapping engine, checked
   input class is known.
 }
 \examples{
-SusieOptions(L = 5)
+SusieOptions(max_iter = 200)
 SusieRssOptions(maf_thresh = 0.01)
 MvsusieOptions(prior_tol = 1e-9)
 }

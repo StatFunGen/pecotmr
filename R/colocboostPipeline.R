@@ -10,7 +10,7 @@
 #'     \item \code{QtlSumStats} -- summary-statistic-only QTL data with a
 #'           shared LD reference (\code{ldSketch}). Must already have
 #'           been passed through \code{\link{summaryStatsQc}} (the
-#'           pipeline rejects inputs whose \code{getQcInfo()} is empty).
+#'           pipeline rejects inputs whose \code{qcInfo()} is empty).
 #'           Every analysis variant is available on this input, including
 #'           \code{xqtlColoc}, which colocalizes the QTL studies against
 #'           each other with no GWAS involved.
@@ -29,7 +29,7 @@
 #'     \item Individual-level QC (MAF / MAC / X-variance / per-sample
 #'           missingness, sample / variant restrictions) lives on the
 #'           \code{QtlDataset} constructor and is applied lazily inside
-#'           \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
+#'           \code{genotypes()} / \code{residualizedGenotypes()}.
 #'           The pipeline does \emph{not} run a separate
 #'           individual-level QC pass.
 #'     \item \code{panelFilter} acts at ANALYSIS time on the sumstat
@@ -46,7 +46,7 @@
 #'           imputation, etc.) lives in
 #'           \code{\link{summaryStatsQc}}. The pipeline rejects any
 #'           \code{QtlSumStats} or \code{GwasSumStats} where
-#'           \code{length(getQcInfo(x)) == 0L}.
+#'           \code{length(qcInfo(x)) == 0L}.
 #'   }
 #'
 #' @section Analysis variants:
@@ -76,7 +76,7 @@
 #' @param traitId Optional character vector of trait identifiers to restrict the
 #'   analysis to. When supplied with an individual-level \code{QtlDataset}
 #'   input, \code{cisWindow} is required (passed to
-#'   \code{getResidualizedGenotypes} / \code{getPhenotypes} for the
+#'   \code{residualizedGenotypes} / \code{molecularTraits} for the
 #'   variant-window selection).
 #' @param region Optional single-range \code{GRanges} describing the analysis
 #'   window. Mutually exclusive with \code{traitId} (see the \code{QtlDataset}
@@ -115,8 +115,8 @@
 #'   \code{\link{SignalScreenParam}} enforces when you build it. Unset (the
 #'   default) screens nothing. Summary-statistic skipping is handled upstream
 #'   by \code{\link{summaryStatsQc}}.
-#' @param panelFilterArgs Analysis-time filters applied to the summary-statistic
-#'   sides against the LD reference panel, built with
+#' @param panelFilterParam Analysis-time filters applied to the
+#'   summary-statistic sides against the LD reference panel, built with
 #'   \code{\link{PanelFilterParam}}: a variant whose panel genotypes fall
 #'   below its cutoffs is dropped before the LD matrix is built. The defaults
 #'   filter nothing. See the Details section for how these relate to the
@@ -142,11 +142,11 @@
 #'   \code{separate_gwas} runs. Outcome-specific (uncolocalized) sets are
 #'   included with \code{isColocalized = FALSE}.
 #'
-#'   Project it with \code{\link{getColocPairs}} (also available as
-#'   \code{as.data.frame}), \code{\link{getColocVariants}} or
-#'   \code{\link{getColocBoostOutcomes}}; timings are on
-#'   \code{\link{getComputingTime}} and the region-wide marginal
-#'   probabilities on \code{\link{getRegionVcp}}.
+#'   Project it with \code{\link{colocPairs}} (also available as
+#'   \code{as.data.frame}), \code{\link{colocVariants}} or
+#'   \code{\link{colocBoostOutcomes}}; timings are on
+#'   \code{\link{computingTime}} and the region-wide marginal
+#'   probabilities on \code{\link{regionVcp}}.
 #' @name colocboostPipeline
 #' @importFrom methods is setGeneric setMethod
 #' @importFrom S4Vectors mcols
@@ -246,16 +246,16 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 }
 
 # Reject SumStats objects that have not been passed through
-# summaryStatsQc(). Both QtlSumStats and GwasSumStats expose getQcInfo();
+# summaryStatsQc(). Both QtlSumStats and GwasSumStats expose qcInfo();
 # an empty list (the constructor default) signals "no QC run".
 .cbRequireSumStatsQc <- function(x, what) {
     if (is.null(x)) {
         return(invisible(NULL))
     }
-    if (length(getQcInfo(x)) == 0L) {
+    if (length(qcInfo(x)) == 0L) {
         msg <- glue(
             "{what} must be passed through summaryStatsQc() before ",
-            "reaching colocboostPipeline (getQcInfo() returned an empty ",
+            "reaching colocboostPipeline (qcInfo() returned an empty ",
             "list). Call summaryStatsQc(x, ...) and pass the result."
         )
         abort(msg)
@@ -318,7 +318,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     split <- .cbSplitY(YperCtx, dedup$xMatch)
     outcomeInfo <- mutate(
         split$outcomeInfo,
-        study = getStudy(qd),
+        study = studyName(qd),
         dataForm = "individual"
     )
     list(
@@ -335,12 +335,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbResolveBundleContexts <- function(qd, contexts) {
     if (is.null(contexts) || length(contexts) == 0L) {
-        return(getContexts(qd))
+        return(contexts(qd))
     }
-    available <- getContexts(qd)
+    available <- contexts(qd)
     bad <- setdiff(contexts, available)
     if (length(bad) > 0L) {
-        qdStudy <- getStudy(qd)
+        qdStudy <- studyName(qd)
         badStr <- str_flatten(bad, ", ")
         availStr <- str_flatten(available, ", ")
         msg <- glue(
@@ -403,7 +403,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbResidualizedY <- function(qd, ctx, traitId, region) {
     try_fetch(
-        getResidualizedPhenotypes(
+        residualizedPhenotypes(
             qd,
             contexts = ctx,
             traitId = traitId,
@@ -424,7 +424,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbResidualizedX <- function(qd, ctx, traitId, region, cisWindow, samples) {
     try_fetch(
-        getResidualizedGenotypes(
+        residualizedGenotypes(
             qd,
             contexts = ctx,
             traitId = traitId,
@@ -699,7 +699,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     if (is.null(ss) || nrow(ss) == 0L) {
         return(list())
     }
-    ldSketch <- getLdSketch(ss)
+    ldSketch <- ldSketch(ss)
     byContext <- if (!is.null(contexts) && length(contexts) > 0L) {
         is_in(as.character(ss$context), contexts)
     } else {
@@ -742,9 +742,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbQtlEntryPair <- function(i, ss, ldSketch, cutoffs) {
     .cbSumstatPair(
-        df = getSumStatsDf(
+        df = as.data.frame(
             ss,
-            study = as.character(ss$study)[[i]],
+            studyName = as.character(ss$study)[[i]],
             context = as.character(ss$context)[[i]],
             trait = as.character(ss$trait)[[i]],
             require = "Z"
@@ -772,7 +772,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     if (is.null(gws) || nrow(gws) == 0L) {
         return(list())
     }
-    ldSketch <- getLdSketch(gws)
+    ldSketch <- ldSketch(gws)
     compact(set_names(
         map(
             seq_len(nrow(gws)),
@@ -789,9 +789,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbGwasEntryPair <- function(i, gws, ldSketch, cutoffs) {
     .cbSumstatPair(
-        df = getSumStatsDf(
+        df = as.data.frame(
             gws,
-            study = as.character(gws$study)[[i]],
+            studyName = as.character(gws$study)[[i]],
             require = "Z"
         ),
         ldSketch = ldSketch,
@@ -843,6 +843,14 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     )
 }
 
+# One focal separate-GWAS run's sumstat bundle: every QTL pair plus the one
+# GWAS under test, in that order, so the GWAS is the LAST outcome and its
+# focal index is simply the outcome count.
+# @noRd
+.cbGwasRunBundle <- function(gwasKey, pairs, qtlKeys) {
+    .cbMergeSumstatBundles(pairs[c(qtlKeys, gwasKey)])
+}
+
 # Build an empty result skeleton consistent with what the per-method
 # dispatch fills in.
 .cbEmptyResult <- function() {
@@ -861,7 +869,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 }
 
 # A requested analysis with nothing to run on would otherwise be a silent
-# no-op: the caller gets an empty ColocBoostResult whose getComputingTime()
+# no-op: the caller gets an empty ColocBoostResult whose computingTime()
 # entries are all NULL, with no indication of why. Say so.
 # @noRd
 # TRUE when an analysis was requested and has the data to run. When it was
@@ -884,7 +892,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         "colocboostPipeline: {flag} = TRUE was requested, but there is no ",
         "{needed} to run it on. Skipping it -- the returned ",
         "ColocBoostResult will hold no confidence sets from this analysis ",
-        "and its getComputingTime() entry will be NULL."
+        "and its computingTime() entry will be NULL."
     )
     warn(msg)
 }
@@ -909,7 +917,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     hasSs,
     hasQtlSs,
     focalTrait,
-    methodArgs
+    methodArgs,
+    gwasRunBundles = list(),
+    hasGwasSs = FALSE
 ) {
     # Resolved first, in the order the runs are listed: .cbCanRun() warns
     # when a requested analysis has no data for it, and hoisting keeps those
@@ -922,7 +932,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         "QTL data"
     )
     runJoint <- .cbCanRun(jointGwas, hasSs, "jointGwas", ssNeeded)
-    runSeparate <- .cbCanRun(separateGwas, hasSs, "separateGwas", ssNeeded)
+    runSeparate <- .cbCanRun(
+        separateGwas, hasGwasSs, "separateGwas", "GWAS summary statistics"
+    )
     compact(list(
         xqtl_coloc = if (runXqtl) {
             .cbRunXqtlOnly(
@@ -934,12 +946,18 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             )
         },
         joint_gwas = if (runJoint) {
-            .cbRunJointGwas(individualBundle, sumstatBundle, hasInd, methodArgs)
+            .cbRunJointGwas(
+                individualBundle,
+                sumstatBundle,
+                hasInd,
+                methodArgs,
+                gwasNames = names(gwasRunBundles)
+            )
         },
         separate_gwas = if (runSeparate) {
             .cbRunSeparateGwas(
                 individualBundle,
-                sumstatBundle,
+                gwasRunBundles,
                 hasInd,
                 methodArgs
             )
@@ -998,13 +1016,18 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     focalTrait,
     methodArgs,
     qtlLdSketch = NULL,
-    qtlSumstatBundle = NULL
+    qtlSumstatBundle = NULL,
+    gwasRunBundles = list()
 ) {
     empty <- .cbEmptyResult()
     hasInd <- !is.null(individualBundle)
     hasSs <- length(sumstatBundle$sumstat) > 0L
     qtlSumstatBundle <- qtlSumstatBundle %||% .cbMergeSumstatBundles(list())
     hasQtlSs <- length(qtlSumstatBundle$sumstat) > 0L
+    # separateGwas needs a GWAS, not merely "some summary statistics": a
+    # QTL-only sumstat input used to satisfy the old `hasSs` guard and then
+    # run one focal pass per QTL study.
+    hasGwasSs <- length(gwasRunBundles) > 0L
     if (!hasInd && !hasSs) {
         msg <- glue(
             "colocboostPipeline: no QTL inputs remain after selection. ",
@@ -1024,7 +1047,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         hasSs,
         hasQtlSs,
         focalTrait,
-        methodArgs
+        methodArgs,
+        gwasRunBundles = gwasRunBundles,
+        hasGwasSs = hasGwasSs
     )
     results <- .cbMergeRuns(empty, runs)
     .cbToResultObject(
@@ -1227,15 +1252,21 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     individualBundle,
     sumstatBundle,
     hasInd,
-    methodArgs
+    methodArgs,
+    gwasNames = character()
 ) {
+    ssNames <- names(sumstatBundle$sumstat)
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
-        names(sumstatBundle$sumstat)
+        ssNames
     )
     ldArgs <- .cbBuildLdArgs(sumstatBundle$LD)
-    nContexts <- if (hasInd) length(individualBundle$Y) else 0L
-    nGwas <- length(sumstatBundle$sumstat)
+    # The merged bundle holds QTL sumstats as well as GWAS, so split the
+    # labels rather than calling every sumstat a GWAS: a context is any
+    # outcome that is not one of the GWAS studies, whether it arrived as
+    # individual-level data or as summary statistics.
+    nGwas <- length(intersect(ssNames, gwasNames))
+    nContexts <- length(traits) - nGwas
     msg <- glue(
         "====== Performing non-focal GWAS-xQTL ColocBoost on ",
         "{nContexts} contexts and {nGwas} GWAS. ====="
@@ -1266,19 +1297,20 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbRunSeparateGwas <- function(
     individualBundle,
-    sumstatBundle,
+    gwasRunBundles,
     hasInd,
     methodArgs
 ) {
-    ssNames <- names(sumstatBundle$sumstat)
+    # One run per GWAS study -- NOT per merged sumstat label. Each bundle
+    # already holds the QTL side plus its own GWAS.
+    ssNames <- names(gwasRunBundles)
     t1 <- Sys.time()
     separate <- set_names(
         map(
-            seq_along(ssNames),
+            ssNames,
             .cbSeparateGwasAt,
-            ssNames = ssNames,
+            gwasRunBundles = gwasRunBundles,
             individualBundle = individualBundle,
-            sumstatBundle = sumstatBundle,
             hasInd = hasInd,
             methodArgs = methodArgs
         ),
@@ -1302,31 +1334,38 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # One focal GWAS-xQTL ColocBoost run -> its result.
 # @noRd
 .cbRunOneSeparateGwas <- function(
-    i,
-    study,
+    studyName,
+    runBundle,
     individualBundle,
-    sumstatBundle,
     hasInd,
     methodArgs
 ) {
-    ldIdx <- sumstatBundle$dict_sumstatLD[i, 2L]
-    ldArgs <- .cbBuildLdArgs(sumstatBundle$LD[ldIdx])
+    # `runBundle` carries every QTL sumstat followed by this one GWAS, so the
+    # whole LD list and its dict come along -- the same shape as the joint
+    # run, but focal on the last outcome.
+    ldArgs <- .cbBuildLdArgs(runBundle$LD)
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
-        study
+        names(runBundle$sumstat)
     )
-    nContexts <- if (hasInd) length(individualBundle$Y) else 0L
+    # Every outcome but the focal GWAS is a context, whether it arrived as
+    # individual-level data or as summary statistics. Counting only
+    # individualBundle$Y reported "0 contexts" for a summary-statistic QTL
+    # run -- which was accurate about the call, because the QTL sumstats were
+    # not being passed at all.
+    nContexts <- length(traits) - 1L
     msg <- glue(
         "====== Performing focal GWAS-xQTL ColocBoost on {nContexts} ",
-        "contexts and {study} GWAS. ====="
+        "contexts and {studyName} GWAS. ====="
     )
     inform(msg)
     args <- c(
         list(
             X = if (hasInd) individualBundle$X else NULL,
             Y = if (hasInd) individualBundle$Y else NULL,
-            sumstat = sumstatBundle$sumstat[i],
+            sumstat = runBundle$sumstat,
             dict_YX = if (hasInd) individualBundle$dict_YX else NULL,
+            dict_sumstatLD = runBundle$dict_sumstatLD,
             outcome_names = traits,
             focal_outcome_idx = length(traits),
             output_level = 2
@@ -1337,7 +1376,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         # that object to colocboost as a positional argument.
         as.list(methodArgs)
     )
-    .cbRun(str_c("Separate GWAS ColocBoost for ", study), args)$result
+    .cbRun(str_c("Separate GWAS ColocBoost for ", studyName), args)$result
 }
 
 # =============================================================================
@@ -1486,6 +1525,19 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     # deduplicated LD list and dict_sumstatLD consistent for the subset.
     qtlKeys <- intersect(names(harmonized$pairs), names(qtlPairs))
     qtlSumstatBundle <- .cbMergeSumstatBundles(harmonized$pairs[qtlKeys])
+    # The separate-GWAS runs are FOCAL: each is one GWAS tested against the
+    # whole QTL side, so each needs its own bundle of (every QTL pair + that
+    # one GWAS). Built the same way and for the same reason as the xQTL
+    # bundle above -- the deduplicated LD list and dict_sumstatLD have to
+    # match the subset, which subsetting the merged bundle would not give.
+    # Without this the separate loop ran over EVERY merged label and treated
+    # each QTL study as a focal GWAS in its own right.
+    gwasKeys <- setdiff(names(harmonized$pairs), qtlKeys)
+    gwasRunBundles <- set_names(
+        map(gwasKeys, .cbGwasRunBundle, pairs = harmonized$pairs,
+            qtlKeys = qtlKeys),
+        gwasKeys
+    )
     .cbRunVariants(
         harmonized$individualBundle,
         sumstatBundle,
@@ -1495,7 +1547,8 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         focalTrait,
         methodArgs,
         qtlLdSketch = qtlLdSketch,
-        qtlSumstatBundle = qtlSumstatBundle
+        qtlSumstatBundle = qtlSumstatBundle,
+        gwasRunBundles = gwasRunBundles
     )
 }
 
@@ -1514,7 +1567,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     }
     .cbRequireSumStatsQc(gwasSumStats, "gwasSumStats")
     if (!is.null(qtlLdSketch)) {
-        .cbRequireMatchingLdSketches(qtlLdSketch, getLdSketch(gwasSumStats))
+        .cbRequireMatchingLdSketches(qtlLdSketch, ldSketch(gwasSumStats))
     }
     gwasPairs <- .cbGwasSumStatsBundle(gwasSumStats, cutoffs = cutoffs)
     if (length(gwasPairs) == 0L) {
@@ -1551,7 +1604,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     jointGwas,
     separateGwas,
     samples,
-    panelFilterArgs,
+    panelFilterParam,
     signalScreenArgs,
     alleleFlip,
     methodArgs
@@ -1578,7 +1631,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         alleleFlip = alleleFlip,
         # The QTL side is individual-level here, but the GWAS side may still
         # be sumstats, so the panel cutoffs still apply to it.
-        cutoffs = .panelCutoffs(panelFilterArgs)
+        cutoffs = .panelCutoffs(panelFilterParam)
     )
 }
 
@@ -1600,7 +1653,7 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         samples = NULL,
-        panelFilterArgs = PanelFilterParam(),
+        panelFilterParam = PanelFilterParam(),
         signalScreenArgs = SignalScreenParam(),
         alleleFlip = TRUE,
         # `list()`, not ColocboostOptions(): the formal shadows the
@@ -1623,7 +1676,7 @@ setMethod(
             jointGwas = jointGwas,
             separateGwas = separateGwas,
             samples = samples,
-            panelFilterArgs = panelFilterArgs,
+            panelFilterParam = panelFilterParam,
             signalScreenArgs = signalScreenArgs,
             alleleFlip = alleleFlip,
             methodArgs = methodArgs
@@ -1646,13 +1699,13 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         alleleFlip = TRUE,
-        panelFilterArgs = PanelFilterParam(),
+        panelFilterParam = PanelFilterParam(),
         methodArgs = ColocboostOptions()
     ) {
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbRequireSumStatsQc(qtlData, "qtlData")
-        cutoffs <- .panelCutoffs(panelFilterArgs)
+        cutoffs <- .panelCutoffs(panelFilterParam)
         qtlPairs <- .cbQtlSumStatsBundle(
             qtlData,
             contexts = contexts,
@@ -1668,7 +1721,7 @@ setMethod(
             separateGwas = separateGwas,
             focalTrait = focalTrait,
             methodArgs = methodArgs,
-            qtlLdSketch = getLdSketch(qtlData),
+            qtlLdSketch = ldSketch(qtlData),
             alleleFlip = alleleFlip,
             cutoffs = cutoffs
         )
@@ -1692,7 +1745,7 @@ setMethod(
         jointGwas = FALSE,
         separateGwas = FALSE,
         samples = NULL,
-        panelFilterArgs = PanelFilterParam(),
+        panelFilterParam = PanelFilterParam(),
         signalScreenArgs = SignalScreenParam(),
         alleleFlip = TRUE,
         # `list()`, not ColocboostOptions(): the formal shadows the
@@ -1715,7 +1768,7 @@ setMethod(
             jointGwas = jointGwas,
             separateGwas = separateGwas,
             samples = samples,
-            panelFilterArgs = panelFilterArgs,
+            panelFilterParam = panelFilterParam,
             signalScreenArgs = signalScreenArgs,
             alleleFlip = alleleFlip,
             methodArgs = methodArgs
@@ -1738,7 +1791,7 @@ setMethod(
     jointGwas,
     separateGwas,
     samples,
-    panelFilterArgs,
+    panelFilterParam,
     signalScreenArgs,
     alleleFlip,
     methodArgs
@@ -1753,7 +1806,7 @@ setMethod(
         samples = samples,
         screenSpec = screenSpec
     )
-    cutoffs <- .panelCutoffs(panelFilterArgs)
+    cutoffs <- .panelCutoffs(panelFilterParam)
     ss <- .cbMultiStudySumstats(
         qtlData,
         contexts,
@@ -1784,7 +1837,7 @@ setMethod(
 # nothing to contribute.
 # @noRd
 .cbStudyBundle <- function(
-    study,
+    studyName,
     qtlDatasets,
     contexts,
     traitId,
@@ -1794,7 +1847,7 @@ setMethod(
     screenSpec
 ) {
     sub <- .cbIndividualBundle(
-        qtlDatasets[[study]],
+        qtlDatasets[[studyName]],
         contexts = contexts,
         traitId = traitId,
         region = region,
@@ -1805,7 +1858,7 @@ setMethod(
     if (is.null(sub)) {
         return(NULL)
     }
-    .cbPrefixStudyNames(sub, study)
+    .cbPrefixStudyNames(sub, studyName)
 }
 
 # @noRd
@@ -1835,7 +1888,7 @@ setMethod(
     samples,
     screenSpec
 ) {
-    qtlDatasets <- getQtlDatasets(qtlData)
+    qtlDatasets <- qtlDatasets(qtlData)
     subs <- compact(map(
         names(qtlDatasets),
         .cbStudyBundle,
@@ -1880,11 +1933,11 @@ setMethod(
 # Prefix a study's X names + outcome names with "{study}:" (Y names track the
 # outcome names).
 # @noRd
-.cbPrefixStudyNames <- function(sub, study) {
-    outcomeNames <- str_c(study, sub$outcomeNames, sep = ":")
+.cbPrefixStudyNames <- function(sub, studyName) {
+    outcomeNames <- str_c(studyName, sub$outcomeNames, sep = ":")
     renamed <- list_assign(
         sub,
-        X = set_names(sub$X, str_c(study, names(sub$X), sep = ":")),
+        X = set_names(sub$X, str_c(studyName, names(sub$X), sep = ":")),
         Y = set_names(sub$Y, outcomeNames),
         outcomeNames = outcomeNames
     )
@@ -1895,7 +1948,7 @@ setMethod(
         return(renamed)
     }
     # `studyLabel` so the data mask cannot shadow it with the `study` column.
-    studyLabel <- study
+    studyLabel <- studyName
     list_assign(
         renamed,
         outcomeInfo = mutate(
@@ -1915,7 +1968,7 @@ setMethod(
     traitId,
     cutoffs = NULL
 ) {
-    embeddedSs <- getSumStats(qtlData)
+    embeddedSs <- sumStats(qtlData)
     if (is.null(embeddedSs)) {
         return(list(qtlPairs = list(), qtlLdSketch = NULL))
     }
@@ -1927,7 +1980,7 @@ setMethod(
             traitId = traitId,
             cutoffs = cutoffs
         ),
-        qtlLdSketch = getLdSketch(embeddedSs)
+        qtlLdSketch = ldSketch(embeddedSs)
     )
 }
 
@@ -1945,21 +1998,19 @@ setMethod(
     .fmSerScreen(X, Y[, j], spec, fallback = FALSE)
 }
 
-# Run one separate-GWAS colocboost fit for sumstat index `i`.
+# Run one separate-GWAS colocboost fit for GWAS study `gwasName`.
 # @noRd
 .cbSeparateGwasAt <- function(
-    i,
-    ssNames,
+    gwasName,
+    gwasRunBundles,
     individualBundle,
-    sumstatBundle,
     hasInd,
     methodArgs
 ) {
     .cbRunOneSeparateGwas(
-        i,
-        ssNames[[i]],
+        gwasName,
+        gwasRunBundles[[gwasName]],
         individualBundle,
-        sumstatBundle,
         hasInd,
         methodArgs
     )
@@ -1981,6 +2032,21 @@ setMethod(
 #' @export
 ColocboostOptions <- function(...) {
     extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            X = "supplied from the data by the pipeline",
+            Y = "supplied from the data by the pipeline",
+            dict_YX = "supplied from the data by the pipeline",
+            dict_sumstatLD = "supplied from the data by the pipeline",
+            sumstat = "supplied from the data by the pipeline",
+            LD = "supplied from the data by the pipeline",
+            outcome_names = "supplied from the data by the pipeline",
+            focal_outcome_idx = "supplied from the data by the pipeline",
+            output_level = "supplied from the data by the pipeline"
+        ),
+        "ColocboostOptions"
+    )
     .cbRefusePipelineOwned(extra)
     .newMethodOptions(
         "colocboost::colocboost",

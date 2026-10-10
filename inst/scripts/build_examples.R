@@ -301,7 +301,7 @@ asResource <- function(p) paste0("pecotmr://extdata/", basename(p))
 # assay's seed. Repointing only the slot would leave the assay reading the
 # build machine's absolute path, so both move together.
 repointHandle <- function(x) {
-    handle <- getGenotypeHandle(x)
+    handle <- genotypeHandle(x)
     handle@path <- asResource(handle@path)
     pecotmr:::.qtlWithGenotypeHandle(x, handle)
 }
