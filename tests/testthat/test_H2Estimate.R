@@ -127,3 +127,35 @@ test_that("accessors return NULL when slots are NULL", {
     expect_null(stratifiedHeritabilityEnrichment(h2_obj))
     expect_null(scoreStats(h2_obj))
 })
+
+test_that("updateObject() moves an H2Estimate's estimates off the old names", {
+    h2Obj <- new(
+        "H2Estimate",
+        estimate = 0.3,
+        estimateSe = 0.05,
+        intercept = 1.0,
+        interceptSe = 0.01,
+        localBlocks = data.frame(blockId = "b1", h2Local = 0.1, h2LocalSe = 0),
+        enrichment = NULL,
+        annotationJackknifeCoefs = matrix(0.2, nrow = 2L, ncol = 1L),
+        scoreStats = NULL,
+        method = "sldsc",
+        nSnps = 100L,
+        traitName = "test"
+    )
+    saved <- .savedUnder(
+        h2Obj,
+        c(
+            h2 = "estimate",
+            h2Se = "estimateSe",
+            local = "localBlocks",
+            tauBlocks = "annotationJackknifeCoefs"
+        )
+    )
+    # The inherited update alone drops slots the class no longer has, with a
+    # warning, and leaves the estimate empty.
+    expect_no_warning(up <- updateObject(saved))
+    expect_identical(up, h2Obj)
+    expect_identical(updateObject(h2Obj), h2Obj)
+    expect_message(updateObject(h2Obj, verbose = TRUE), "H2Estimate")
+})

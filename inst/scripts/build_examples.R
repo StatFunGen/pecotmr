@@ -77,6 +77,27 @@ snpStats::write.plink(
     na.code = 0L
 )
 gh <- readGenotypes(plink1Prefix = smallStem)
+
+# Point the panel at a portable bundled-resource reference
+# ("pecotmr://extdata/<stem>") before any object is built from it, so the .rda
+# objects carry no source-tree absolute path. The panel's seed resolves it via
+# system.file() when it reads, so no user-facing fixup step is required.
+asResource <- function(p) paste0("pecotmr://extdata/", basename(p))
+
+# A PLINK1 panel records its stem twice: as its seed's backend, which reads
+# the file, and as its genotype source, which says where it came from. Both
+# move together.
+asPortablePanel <- function(panel) {
+    seed <- pecotmr:::.panelSeed(panel)
+    ref <- asResource(pecotmr:::.gdSeedBackend(seed))
+    SummarizedExperiment::assay(panel, "dosage", withDimnames = FALSE) <-
+        DelayedArray::DelayedArray(methods::initialize(seed, backend = ref))
+    md <- S4Vectors::metadata(panel)
+    md$genotypeSource$path <- ref
+    S4Vectors::metadata(panel) <- md
+    panel
+}
+gh <- asPortablePanel(gh)
 windowSnpInfo <- pecotmr:::.rangesSnpInfo(SummarizedExperiment::rowRanges(gh))
 
 # Materialise the dosage matrix once for synthetic-phenotype generation.
@@ -152,7 +173,7 @@ S4Vectors::mcols(qtlGr) <- S4Vectors::DataFrame(
 )
 
 qtlSumStatsExample <- QtlSumStats(
-    study = "study1",
+    studyName = "study1",
     context = "brain",
     trait = "ENSG_example",
     entry = list(qtlGr),
@@ -188,7 +209,7 @@ S4Vectors::mcols(gwasGr) <- S4Vectors::DataFrame(
 )
 
 gwasSumStatsS4Example <- GwasSumStats(
-    study = "trait1",
+    studyName = "trait1",
     entry = list(gwasGr),
     genome = "hg19",
     ldReference = gh,
@@ -283,7 +304,7 @@ multiCtxEntries <- map(multiCtxNames, function(ctx) {
 })
 
 qtlSumStatsMulticontextExample <- QtlSumStats(
-    study = rep("study1", length(multiCtxNames)),
+    studyName = rep("study1", length(multiCtxNames)),
     context = multiCtxNames,
     trait = rep("ENSG_example", length(multiCtxNames)),
     entry = multiCtxEntries,
@@ -293,50 +314,7 @@ qtlSumStatsMulticontextExample <- QtlSumStats(
 )
 
 # -----------------------------------------------------------------------------
-# 7. Point the PLINK1 panels at a portable bundled-resource reference
-#    ("pecotmr://extdata/<stem>") so the .rda objects carry no source-tree
-#    absolute path. The panel's seed resolves it via system.file() when it
-#    reads, so no user-facing fixup step is required.
-# -----------------------------------------------------------------------------
-asResource <- function(p) paste0("pecotmr://extdata/", basename(p))
-
-# A PLINK1 panel records its stem twice: as its seed's backend, which reads
-# the file, and as its genotype source, which says where it came from. Both
-# move together.
-asPortablePanel <- function(panel) {
-    seed <- pecotmr:::.panelSeed(panel)
-    ref <- asResource(pecotmr:::.gdSeedBackend(seed))
-    SummarizedExperiment::assay(panel, "dosage", withDimnames = FALSE) <-
-        DelayedArray::DelayedArray(methods::initialize(seed, backend = ref))
-    md <- S4Vectors::metadata(panel)
-    md$genotypeSource$path <- ref
-    S4Vectors::metadata(panel) <- md
-    panel
-}
-repointDataset <- function(x) {
-    pecotmr:::.qtlWithGenotypeHandle(
-        x,
-        asPortablePanel(pecotmr:::.qtlGenotypeSe(x))
-    )
-}
-
-qtlDatasetExample <- repointDataset(qtlDatasetExample)
-qtlSumStatsExample@ldReference <- asPortablePanel(
-    qtlSumStatsExample@ldReference
-)
-qtlSumStatsMulticontextExample@ldReference <- asPortablePanel(
-    qtlSumStatsMulticontextExample@ldReference
-)
-gwasSumStatsS4Example@ldReference <- asPortablePanel(
-    gwasSumStatsS4Example@ldReference
-)
-multiStudyQtlDatasetExample@qtlDatasets <- map(
-    multiStudyQtlDatasetExample@qtlDatasets,
-    repointDataset
-)
-
-# -----------------------------------------------------------------------------
-# 8. Save.
+# 7. Save.
 # -----------------------------------------------------------------------------
 usethis::use_data(qtlDatasetExample, overwrite = TRUE, compress = "xz")
 usethis::use_data(qtlSumStatsExample, overwrite = TRUE, compress = "xz")

@@ -59,8 +59,11 @@ ColocBoost can run three different model flavours in one call.
 | Flag | Default | What |
 |---|---|---|
 | `xqtlColoc` | TRUE | QTL-only colocboost across the QTL contexts. |
-| `jointGwas` | FALSE | All QTL outcomes with every GWAS study in one model; focal on a lone GWAS. |
+| `jointGwas` | FALSE | All QTL outcomes with every GWAS study in one non-focal model. |
 | `separateGwas` | FALSE | One focal colocboost model per GWAS study (the GWAS is the focal outcome). |
+
+The flags combine freely. With a single GWAS study, `jointGwas` and
+`separateGwas` fit the same outcomes, one non-focal and one focal on the GWAS.
 
 ## xQTL-only colocalization
 
@@ -96,9 +99,9 @@ names(res2)
 Each GWAS study is one outcome: the rows of the study that the QTL data
 overlap, joined. A study split by chromosome or LD block contributes only the
 one or two rows the QTL region reaches, and QTL variants past those blocks are
-checked as `colocPipeline()` checks them. With a single GWAS study, as here, the
-joint run is focal on it; with several it is non-focal, since only one
-outcome can be focal (see below).
+checked as `colocPipeline()` checks them. The joint run is non-focal however
+many GWAS studies it holds (colocboost's disease-agnostic mode); for a run
+focal on a GWAS, use `separateGwas`.
 
 ## QTL + GWAS (per-GWAS focal models)
 
@@ -152,12 +155,10 @@ resMs <- colocboostPipeline(
 
 ## Focal outcome
 
-`focalOutcome` chooses the focal outcome. A plain string names a GWAS
-study, which becomes the joint run's focal outcome. A named vector names a
-QTL outcome by its `study`, `context` and `trait`, as many as it takes to
-pick out one, and that outcome is focal in both the xQTL-only and the joint
-run. `NA` makes every run non-focal. The `separateGwas` runs are always
-focal on their own GWAS study.
+`focalOutcome` makes one QTL outcome focal in the xQTL-only run. It names
+the outcome by its `study`, `context` and `trait`, as many as it takes to
+pick out one. The default, `NULL`, leaves that run non-focal. The joint run
+is never focal, and each `separateGwas` run is focal on its own GWAS study.
 
 ```{r focal, eval=FALSE}
 colocboostPipeline(
@@ -177,7 +178,7 @@ colocboostPipeline(
     traitId = "ENSG_example",
     region = NULL, # alternative to traitId + cisWindow
     cisWindow = 5e5, # required with traitId
-    focalOutcome = NULL, # the GWAS study, when there is only one
+    focalOutcome = NULL, # a QTL outcome to make the xQTL-only run focal on
     xqtlColoc = TRUE,
     jointGwas = FALSE,
     separateGwas = FALSE,

@@ -2452,3 +2452,109 @@ test_that("a set's shards hold the same samples, one chromosome each", {
         "appears in more than one per-chromosome file"
     )
 })
+
+# ===========================================================================
+# Panels saved by an earlier version (.updatePanel)
+# ===========================================================================
+
+# The saved panels are built by helper-savedObjects.R.
+
+test_that(".updatePanel reads a saved PLINK1 panel again through its backend", {
+    stem <- test_path("test_data", "test_variants")
+    fresh <- readGenotypes(stem, format = "plink1")
+    saved <- .savedHandlePanel(fresh, stem, "plink1")
+    SummarizedExperiment::colData(saved) <- S4Vectors::DataFrame(
+        age = seq_len(ncol(fresh)),
+        row.names = colnames(fresh)
+    )
+    # Saved as it was held: a few variants and samples, out of file order.
+    saved <- saved[c(4L, 2L, 7L), c(3L, 1L)]
+    # As saved, its dosages go through a reader handles no longer have.
+    expect_error(
+        as.matrix(SummarizedExperiment::assay(saved)),
+        "Unsupported format.*plink1"
+    )
+    up <- .updatePanel(saved)
+    expect_s4_class(.panelSeed(up), "GenotypeDosageSeed")
+    expect_identical(dimnames(up), dimnames(saved))
+    expect_equal(
+        as.matrix(SummarizedExperiment::assay(up)),
+        as.matrix(SummarizedExperiment::assay(fresh))[c(4L, 2L, 7L), c(3L, 1L)]
+    )
+    expect_identical(
+        SummarizedExperiment::colData(up),
+        SummarizedExperiment::colData(saved)
+    )
+    expect_identical(.ldRefSource(up)$format, "plink1")
+    # Brought up to date, it is current, and a second update leaves it be.
+    expect_identical(.updatePanel(up), up)
+})
+
+test_that(".updatePanel gives a saved stochastic sketch its real n and AF", {
+    skip_if_not_installed("pgenlibr")
+    ref <- "pecotmr://extdata/ld_reference/chr22/protocol_example.LD.chr22"
+    fresh <- readGenotypes(.resolveGenotypeResourcePath(ref), format = "plink2")
+    saved <- .savedHandlePanel(fresh, ref, "plink2")
+    # Saved before sketches recorded them, it passes for real genotypes.
+    expect_false(.ldRefIsProjection(saved))
+    up <- .updatePanel(saved)
+    expect_true(.ldRefIsProjection(up))
+    expect_identical(.ldRefRealNSamples(up), .ldRefRealNSamples(fresh))
+    expect_identical(.ldRefAf(up), .ldRefAf(fresh))
+    expect_identical(dimnames(up), dimnames(saved))
+    expect_identical(.updatePanel(up), up)
+})
+
+test_that(".updatePanel reads a saved per-chromosome panel again", {
+    files <- c(
+        chr21 = test_path("test_data", "test_variants.bed"),
+        chr22 = test_path("test_data", "test_variants_chr22.bed")
+    )
+    fresh <- readGenotypes(genoMeta = files)
+    saved <- .savedHandlePanel(fresh, "per-chromosome", "plink1", files)
+    # One variant from each chromosome.
+    keep <- c(2L, nrow(fresh) - 1L)
+    up <- .updatePanel(saved[keep, ])
+    expect_identical(dimnames(up), dimnames(fresh[keep, ]))
+    expect_equal(
+        as.matrix(SummarizedExperiment::assay(up)),
+        as.matrix(SummarizedExperiment::assay(fresh)[keep, ])
+    )
+    expect_identical(.updatePanel(up), up)
+})
+
+test_that(".updatePanel takes a saved bare handle as the panel over it", {
+    stem <- test_path("test_data", "test_variants")
+    fresh <- readGenotypes(stem, format = "plink1")
+    handle <- .ldRefHandle(.savedHandlePanel(fresh, stem, "plink1"))
+    up <- .updatePanel(handle)
+    expect_s4_class(.panelSeed(up), "GenotypeDosageSeed")
+    expect_identical(dimnames(up), dimnames(fresh))
+})
+
+test_that(".updatePanel leaves a current panel, or no panel, as it is", {
+    expect_null(.updatePanel(NULL))
+    stem <- test_path("test_data", "test_variants")
+    plink1 <- readGenotypes(stem, format = "plink1")
+    expect_identical(.updatePanel(plink1), plink1)
+    skip_if_not_installed("pgenlibr")
+    plink2 <- readGenotypes(stem, format = "plink2")
+    expect_identical(.updatePanel(plink2), plink2)
+})
+
+test_that(".updatePanel refuses a saved panel it cannot read again", {
+    stem <- test_path("test_data", "test_variants")
+    fresh <- readGenotypes(stem, format = "plink1")
+    gone <- .savedHandlePanel(fresh, file.path(tempdir(), "nowhere"), "plink1")
+    cnd <- tryCatch(.updatePanel(gone), error = identity)
+    expect_s3_class(cnd, "pecotmrUnreadablePanel")
+    expect_match(conditionMessage(cnd), "nowhere.*cannot be read")
+    # Its files are where they were, but no longer hold one of its variants.
+    moved <- .savedHandlePanel(fresh, stem, "plink1")
+    rr <- SummarizedExperiment::rowRanges(moved)
+    rr[1L] <- GenomicRanges::shift(rr[1L], 1L)
+    SummarizedExperiment::rowRanges(moved) <- rr
+    cnd <- tryCatch(.updatePanel(moved), error = identity)
+    expect_s3_class(cnd, "pecotmrUnreadablePanel")
+    expect_match(conditionMessage(cnd), "no longer hold every variant")
+})

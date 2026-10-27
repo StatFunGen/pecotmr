@@ -55,17 +55,19 @@
 #'           \code{gwasSumStats}. Works for either data form -- the
 #'           individual-level contexts, the summary-level QTL studies, or
 #'           both together when a \code{MultiStudyQtlDataset} carries a
-#'           mixture. Focal only on a QTL outcome named by
-#'           \code{focalOutcome}.
-#'     \item \code{jointGwas} (default \code{FALSE}): run one colocboost
-#'           model that combines all QTL contexts/studies with the
-#'           supplied \code{gwasSumStats} studies. By default it is focal on
-#'           the GWAS when \code{gwasSumStats} holds a single study, and
-#'           non-focal when it holds several; \code{focalOutcome} chooses.
-#'     \item \code{separateGwas} (default \code{FALSE}): run one focal
-#'           colocboost model per GWAS study, where the GWAS is the
-#'           focal outcome.
+#'           mixture. Non-focal unless \code{focalOutcome} names one of its
+#'           QTL outcomes.
+#'     \item \code{jointGwas} (default \code{FALSE}): run one non-focal
+#'           colocboost model (colocboost's disease-agnostic mode) that
+#'           combines all QTL contexts/studies with the supplied
+#'           \code{gwasSumStats} studies, however many there are.
+#'     \item \code{separateGwas} (default \code{FALSE}): run one colocboost
+#'           model per GWAS study, focal on that study (the
+#'           disease-prioritized mode), even when there is only one.
 #'   }
+#'   The flags combine freely, as in colocboost's own pipeline. With one
+#'   GWAS study, \code{jointGwas} and \code{separateGwas} fit the same
+#'   outcomes, one non-focal and one focal on the GWAS.
 #'
 #' @param qtlData One of \code{QtlDataset}, \code{QtlSumStats}, or
 #'   \code{MultiStudyQtlDataset}.
@@ -110,23 +112,14 @@
 #'   applies it to both kinds of study it holds.
 #' @param samples Optional character vector of sample IDs to restrict the
 #'   analysis to; \code{NULL} (default) uses all samples.
-#' @param focalOutcome The outcome a run treats as focal (colocboost's
-#'   \code{focal_outcome_idx}). One of:
-#'   \itemize{
-#'     \item \code{NULL} (default): the GWAS study, in the \code{jointGwas}
-#'           run, when \code{gwasSumStats} holds exactly one. With several
-#'           there is no one study to choose, so no run is focal.
-#'     \item A GWAS study name, as a plain string: that study is focal in
-#'           the \code{jointGwas} run. It must be a study of
-#'           \code{gwasSumStats}.
-#'     \item A named character vector with any of \code{study},
-#'           \code{context} and \code{trait} that identifies exactly one QTL
-#'           outcome, e.g. \code{c(context = "brain", trait = "ENSG1")}: that
-#'           outcome is focal in every run holding it, the \code{xqtlColoc}
-#'           run and the \code{jointGwas} run.
-#'     \item \code{NA}: no run is focal.
-#'   }
-#'   The \code{separateGwas} runs are always focal on their own GWAS study.
+#' @param focalOutcome The QTL outcome the \code{xqtlColoc} run treats as
+#'   focal (colocboost's \code{focal_outcome_idx}): a named character vector
+#'   with any of \code{study}, \code{context} and \code{trait} that
+#'   identifies exactly one QTL outcome, e.g.
+#'   \code{c(context = "brain", trait = "ENSG1")}. \code{NULL} (default) runs
+#'   it non-focal. It needs \code{xqtlColoc = TRUE}: the \code{jointGwas} run
+#'   is never focal, and each \code{separateGwas} run is focal on its own
+#'   GWAS study.
 #' @param xqtlColoc,jointGwas,separateGwas Logical flags selecting which
 #'   colocboost variants to run.
 #' @param signalScreenParam Individual-level pre-filter (ports the legacy
@@ -257,113 +250,62 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ))
 }
 
-# focalOutcome's shape: NULL, NA, one GWAS study name, or a named character
-# vector of `study` / `context` / `trait` naming one QTL outcome. Whether it
-# names a real outcome is settled once the outcomes are built
-# (.cbResolveFocal()).
+# focalOutcome's shape: NULL, or a named character vector of `study` /
+# `context` / `trait` naming the xQTL-only run's focal QTL outcome, which only
+# that run can have. Whether it names a real outcome is settled once the
+# outcomes are built (.cbResolveFocal()).
 # @noRd
-.cbAssertFocalOutcome <- function(focalOutcome) {
-    if (is.null(focalOutcome) || .cbFocalIsNa(focalOutcome)) {
+.cbAssertFocalOutcome <- function(focalOutcome, xqtlColoc) {
+    if (is.null(focalOutcome)) {
         return(invisible(NULL))
     }
-    if (.cbFocalShapeOk(focalOutcome)) {
-        return(invisible(NULL))
+    runs <- str_c(
+        "The `jointGwas` run is never focal, and each `separateGwas` run is ",
+        "focal on its own GWAS study."
+    )
+    if (!.cbFocalShapeOk(focalOutcome)) {
+        abort(c(
+            str_c(
+                "colocboostPipeline: `focalOutcome` must be NULL or a named ",
+                "character vector of `study`, `context` and/or `trait` naming ",
+                "one QTL outcome, e.g. ",
+                "c(context = \"brain\", trait = \"ENSG1\")."
+            ),
+            i = runs
+        ))
     }
-    abort(c(
-        str_c(
-            "colocboostPipeline: `focalOutcome` must be NULL, NA, one GWAS ",
-            "study name, or a named character vector of `study`, `context` ",
-            "and/or `trait` naming one QTL outcome."
-        ),
-        i = str_c(
-            "e.g. focalOutcome = \"MyGWAS\", or ",
-            "focalOutcome = c(context = \"brain\", trait = \"ENSG1\")."
-        )
-    ))
+    if (!isTRUE(xqtlColoc)) {
+        abort(c(
+            str_c(
+                "colocboostPipeline: `focalOutcome` names the xQTL-only run's ",
+                "focal outcome, but `xqtlColoc` is FALSE."
+            ),
+            i = runs
+        ))
+    }
+    invisible(NULL)
 }
 
-# @noRd
-.cbFocalIsNa <- function(x) {
-    is.atomic(x) && length(x) == 1L && is.null(names(x)) && is.na(x)
-}
-
-# One unnamed string, or a named character vector whose names are distinct
-# fields of a QTL outcome.
+# A named character vector whose names are distinct fields of a QTL outcome.
 # @noRd
 .cbFocalShapeOk <- function(x) {
     if (!is.character(x) || length(x) == 0L || anyNA(x)) {
         return(FALSE)
     }
     nm <- names(x)
-    if (is.null(nm)) {
-        return(length(x) == 1L)
-    }
-    !anyDuplicated(nm) && all(is_in(nm, c("study", "context", "trait")))
+    !is.null(nm) &&
+        !anyDuplicated(nm) &&
+        all(is_in(nm, c("study", "context", "trait")))
 }
 
-# The outcome each run is focal on (NULL for none), from `focalOutcome`.
-# `qtlInfo` lists the QTL outcomes (.cbQtlOutcomeInfo()) and `gwasKeys` maps
-# each GWAS study that reached the runs to its outcome name (.cbGwasKeys()).
-# A GWAS study can be focal only where it is an outcome, the joint run; a QTL
-# outcome is focal in both runs that hold it.
+# The QTL outcome the xQTL-only run is focal on, from `focalOutcome`; NULL for
+# none. `qtlInfo` lists the QTL outcomes (.cbQtlOutcomeInfo()).
 # @noRd
-.cbResolveFocal <- function(focalOutcome, gwasSumStats, qtlInfo, gwasKeys) {
-    if (.cbFocalIsNa(focalOutcome)) {
-        return(list(xqtl = NULL, joint = NULL))
-    }
-    studies <- unique(as.character(gwasSumStats$study))
+.cbResolveFocal <- function(focalOutcome, qtlInfo) {
     if (is.null(focalOutcome)) {
-        return(list(xqtl = NULL, joint = .cbDefaultFocal(studies, gwasKeys)))
-    }
-    if (is.null(names(focalOutcome))) {
-        return(list(
-            xqtl = NULL,
-            joint = .cbFocalGwasKey(focalOutcome, studies, gwasKeys)
-        ))
-    }
-    name <- .cbFocalQtlName(focalOutcome, qtlInfo)
-    list(xqtl = name, joint = name)
-}
-
-# The default focal outcome: the GWAS, when gwasSumStats holds one study and
-# it reached the runs. Several studies leave no one study to choose.
-# @noRd
-.cbDefaultFocal <- function(studies, gwasKeys) {
-    if (length(studies) != 1L || !is_in(studies, names(gwasKeys))) {
         return(NULL)
     }
-    unname(gwasKeys[[studies]])
-}
-
-# The outcome name of GWAS study `study`, which must be a study of
-# gwasSumStats and must have reached the runs.
-# @noRd
-.cbFocalGwasKey <- function(study, studies, gwasKeys) {
-    if (!is_in(study, studies)) {
-        known <- if (length(studies) == 0L) {
-            "no gwasSumStats was given"
-        } else {
-            str_c("its studies are ", str_flatten(studies, ", "))
-        }
-        abort(c(
-            glue(
-                "colocboostPipeline: focalOutcome '{study}' names no GWAS ",
-                "study ({known})."
-            ),
-            i = str_c(
-                "Name a QTL outcome by a named vector, e.g. ",
-                "c(context = \"brain\", trait = \"ENSG1\")."
-            )
-        ))
-    }
-    if (!is_in(study, names(gwasKeys))) {
-        abort(glue(
-            "colocboostPipeline: focalOutcome names GWAS study '{study}', ",
-            "but none of its rows overlap the QTL data, so it is not an ",
-            "outcome of the joint run."
-        ))
-    }
-    unname(gwasKeys[[study]])
+    .cbFocalQtlName(focalOutcome, qtlInfo)
 }
 
 # The one QTL outcome a focalOutcome vector identifies.
@@ -1319,8 +1261,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # variants `run` (from .cbResolveRuns) switched on. `qtlSumstatBundle` is the
 # QTL-side subset of `sumstatBundle` (see .cbDriver); only the xQTL-only run
 # uses it, so that a GWAS study never becomes an xQTL-only outcome. `focal`
-# names each run's focal outcome (.cbResolveFocal()). The result is keyed by
-# the result slot each run fills; compact() drops what did not run.
+# names the xQTL-only run's focal outcome (.cbResolveFocal()); the joint run
+# is never focal, and each separate run is focal on its own GWAS. The result
+# is keyed by the result slot each run fills; compact() drops what did not
+# run.
 # @noRd
 .cbDispatchRuns <- function(
     individualBundle,
@@ -1338,7 +1282,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
                 individualBundle,
                 qtlSumstatBundle,
                 hasInd,
-                focal$xqtl,
+                focal,
                 methodArgs
             )
         },
@@ -1348,8 +1292,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
                 sumstatBundle,
                 hasInd,
                 methodArgs,
-                gwasNames = names(gwasRunBundles),
-                focal = focal$joint
+                gwasNames = names(gwasRunBundles)
             )
         },
         separate_gwas = if (run$separate) {
@@ -1445,8 +1388,8 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 
 # Run the requested colocboost analyses over the prepared bundles and fold
 # them into a ColocBoostResult (an empty one when no QTL input remains).
-# `focal` names each run's focal outcome; `resultInfo` carries the outcome
-# table and LD references the result records (.cbPrepareInputs()).
+# `focal` names the xQTL-only run's focal outcome; `resultInfo` carries the
+# outcome table and LD references the result records (.cbPrepareInputs()).
 # @noRd
 .cbRunVariants <- function(
     individualBundle,
@@ -1716,30 +1659,32 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     )
 }
 
-# Joint QTL + GWAS run -> list(result, time). Focal on `focal`, an outcome
-# name, when one was resolved (.cbResolveFocal()); non-focal otherwise.
+# Joint QTL + GWAS run -> list(result, time). Non-focal (colocboost's
+# disease-agnostic mode) however many GWAS studies it holds: a GWAS-focal fit
+# is a separate run.
 # @noRd
 .cbRunJointGwas <- function(
     individualBundle,
     sumstatBundle,
     hasInd,
     methodArgs,
-    gwasNames = character(),
-    focal = NULL
+    gwasNames = character()
 ) {
     ssNames <- names(sumstatBundle$sumstat)
     traits <- c(
         if (hasInd) individualBundle$outcomeNames else character(),
         ssNames
     )
-    focalIdx <- .cbFocalIdx(focal, traits)
     ldArgs <- .cbBuildLdArgs(sumstatBundle$LD, sumstatBundle$ldArg)
     # The merged bundle holds QTL sumstats as well as GWAS, so split the
     # labels rather than calling every sumstat a GWAS: a context is any
     # outcome that is not one of the GWAS studies, whether it arrived as
     # individual-level data or as summary statistics.
     nGwas <- length(intersect(ssNames, gwasNames))
-    inform(.cbJointMessage(length(traits) - nGwas, nGwas, traits[focalIdx]))
+    inform(glue(
+        "====== Performing non-focal GWAS-xQTL ColocBoost on ",
+        "{length(traits) - nGwas} contexts and {nGwas} GWAS. ====="
+    ))
     args <- c(
         list(
             X = if (hasInd) individualBundle$X else NULL,
@@ -1748,7 +1693,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             dict_YX = if (hasInd) individualBundle$dict_YX else NULL,
             dict_sumstatLD = sumstatBundle$dict_sumstatLD,
             outcome_names = traits,
-            focal_outcome_idx = focalIdx,
+            focal_outcome_idx = NULL,
             output_level = 2
         ),
         ldArgs,
@@ -1759,22 +1704,6 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     )
     run <- .cbRun("Joint GWAS ColocBoost", args)
     list(result = run$result, time = run$time)
-}
-
-# The joint run's announcement; `focal` is the focal outcome's name, or empty
-# for a non-focal run.
-# @noRd
-.cbJointMessage <- function(nContexts, nGwas, focal) {
-    if (length(focal) == 0L) {
-        return(glue(
-            "====== Performing non-focal GWAS-xQTL ColocBoost on ",
-            "{nContexts} contexts and {nGwas} GWAS. ====="
-        ))
-    }
-    glue(
-        "====== Performing focal GWAS-xQTL ColocBoost on {nContexts} ",
-        "contexts and {nGwas} GWAS, focal on {focal}. ====="
-    )
 }
 
 # The position of outcome `focal` among `traits`, the form colocboost's
@@ -2052,7 +1981,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # Everything the runs read, from the QTL side and gwasSumStats: each
 # outcome's (sumstat, LD) pair -- a GWAS study once, over its rows the QTL
 # data overlap -- allele-harmonized when asked; the bundles each run takes;
-# the outcome each run is focal on; and the outcome table and LD references
+# the xQTL-only run's focal outcome; and the outcome table and LD references
 # the result records. The tuples and keys are read before harmonization,
 # which keeps every pair's name.
 # @noRd
@@ -2082,9 +2011,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         gwasRunBundles = .cbGwasRunBundles(harmonized$pairs, qtlKeys),
         focal = .cbResolveFocal(
             focalOutcome,
-            gwasSumStats,
-            .cbQtlOutcomeInfo(individualBundle, qtlPairs),
-            .cbGwasKeys(pairs, names(qtlPairs))
+            .cbQtlOutcomeInfo(individualBundle, qtlPairs)
         ),
         resultInfo = list(
             outcomeInfo = .cbOutcomeInfo(
@@ -2161,13 +2088,6 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         "colocboostPipeline",
         "the QTL data"
     )
-}
-
-# Each GWAS study that reached the runs, mapped to its outcome name.
-# @noRd
-.cbGwasKeys <- function(pairs, qtlNames) {
-    gwas <- pairs[setdiff(names(pairs), qtlNames)]
-    set_names(names(gwas), map_chr(unname(gwas), "study"))
 }
 
 # The QTL outcomes a focalOutcome vector is matched against: the
@@ -2337,7 +2257,7 @@ setMethod(
     ) {
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
-        .cbAssertFocalOutcome(focalOutcome)
+        .cbAssertFocalOutcome(focalOutcome, xqtlColoc)
         .cbAssertTraitsSelected(qtlData, contexts, traitId)
         build <- .cbBuild(qtlData, gwasSumStats, region)
         res <- .cbQtlDatasetDrive(
@@ -2385,7 +2305,7 @@ setMethod(
     ) {
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
-        .cbAssertFocalOutcome(focalOutcome)
+        .cbAssertFocalOutcome(focalOutcome, xqtlColoc)
         .cbRequireSumStatsQc(qtlData, "qtlData")
         .cbAssertQssRowsSelected(qtlData, contexts, traitId)
         build <- .cbBuild(qtlData, gwasSumStats)
@@ -2440,7 +2360,7 @@ setMethod(
     ) {
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
-        .cbAssertFocalOutcome(focalOutcome)
+        .cbAssertFocalOutcome(focalOutcome, xqtlColoc)
         # As in fineMappingPipeline: a context no study has is refused, and
         # one only some lack is skipped for those, with a warning.
         parseContexts(contexts, qtlData)

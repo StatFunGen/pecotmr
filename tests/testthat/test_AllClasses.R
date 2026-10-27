@@ -293,6 +293,36 @@ test_that("updateObject() drops audits it cannot match to rows, saying so", {
     expect_null(up$qcAudit)
 })
 
+test_that("updateObject() makes every update old summary statistics need", {
+    # Saved as the oldest versions saved them: the QC record in `qcInfo`, the
+    # reference in `ldSketch`, and no element names. Each update on its own
+    # leaves an invalid object, so the one call has to make all of them.
+    ss <- .alc_makeGwasSumStats()
+    panel <- ldReference(ss)[["ld1"]]
+    saved <- .savedWithLdSketch(
+        .alc_savedWithQcInfo(`names<-`(ss, NULL), list(step1 = "ok")),
+        panel
+    )
+    up <- updateObject(saved)
+    expect_true(validObject(up))
+    expect_equal(qcOptions(up), list(step1 = "ok"))
+    expect_identical(ldReference(up), list(ld1 = panel))
+    expect_identical(names(up), names(ss))
+    expect_identical(updateObject(up), up)
+})
+
+test_that("updateObject() moves a saved genome slot into seqinfo()", {
+    ss <- .alc_makeGwasSumStats()
+    saved <- ss
+    GenomeInfoDb::genome(saved) <- NA
+    attr(saved, "genome") <- "hg19"
+    up <- updateObject(saved)
+    expect_true(validObject(up))
+    expect_null(attr(up, "genome", exact = TRUE))
+    expect_identical(unique(unname(GenomeInfoDb::genome(up))), "hg19")
+    expect_identical(updateObject(up), up)
+})
+
 test_that("updateObject() leaves a current summary-statistics object as is", {
     ss <- .alc_makeGwasSumStats(qcOptions = list(step1 = "ok"))
     up <- updateObject(ss, verbose = FALSE)
@@ -752,6 +782,18 @@ test_that("updateObject() backfills the variants each fit was made with", {
     # A current collection is left as it is.
     expect_identical(updateObject(x)$fitVariants, x$fitVariants)
     expect_message(updateObject(x, verbose = TRUE), "updateObject")
+})
+
+test_that("updateObject() backfills fitVariants and keys LD rows in one call", {
+    x <- .rc_makeFmr(.rc_vids(1:10))
+    saved <- x
+    saved$fitVariants <- NULL
+    up <- updateObject(.savedWithLdSketch(saved, NULL))
+    expect_true(validObject(up))
+    expect_equal(as.character(up$fitVariants[[1L]]), .rc_vids(1:10))
+    expect_identical(ldReference(up), list())
+    expect_true(is.na(up$ldReference))
+    expect_identical(updateObject(up), up)
 })
 
 test_that("updateObject(): an unnamed fit records its row, no fit none", {

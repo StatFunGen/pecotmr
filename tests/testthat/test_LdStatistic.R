@@ -350,3 +350,23 @@ test_that("a block's LD and decomposition are read as stored", {
         0L
     )
 })
+
+# ===========================================================================
+# updateObject(): statistics saved by an earlier version
+# ===========================================================================
+
+test_that("updateObject() renames nRef; an old statistic gets no reference", {
+    x <- .lds_score()
+    # Saved before the reference's sample size was named nSamples, and
+    # before a statistic could keep an LD reference at all.
+    saved <- .savedUnder(x, c(nRef = "nSamples"))
+    attr(saved, "ldReference") <- NULL
+    up <- updateObject(saved)
+    expect_true(validObject(up))
+    expect_identical(up, x)
+    expect_identical(updateObject(x), x)
+    expect_message(
+        updateObject(x, verbose = TRUE),
+        "updateObject\\(object = 'LdScore'\\)"
+    )
+})

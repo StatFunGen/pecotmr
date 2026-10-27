@@ -551,6 +551,9 @@ test_that("updateObject keys an old result's sumstat outcomes to its ref", {
     expect_true(methods::validObject(new))
     expect_identical(ldReference(new), list(ld1 = ref))
     expect_identical(new@outcomeInfo$ldReference, c("ld1", NA))
+    # Saved before the slot was renamed, the reference sits in `ldSketch`.
+    sketched <- .savedUnder(old, c(ldSketch = "ldReference"))
+    expect_identical(updateObject(sketched), new)
     # A current result is left as it is.
     expect_identical(updateObject(x), x)
 })

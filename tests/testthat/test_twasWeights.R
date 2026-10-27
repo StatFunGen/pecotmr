@@ -2348,6 +2348,20 @@ test_that("updateObject() backfills a fitted row's held variants", {
     expect_message(updateObject(tw, verbose = TRUE), "TwasWeights")
 })
 
+test_that("updateObject() backfills held variants and keys LD rows at once", {
+    tw <- .tw_collection(list(
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4))
+    ))
+    saved <- tw
+    saved$fitVariants <- NULL
+    up <- updateObject(.savedWithLdSketch(saved, NULL))
+    expect_true(validObject(up))
+    expect_equal(as.character(up$fitVariants[[1L]]), .tw_ids)
+    expect_identical(ldReference(up), list())
+    expect_true(is.na(up$ldReference))
+    expect_identical(updateObject(up), up)
+})
+
 # ===========================================================================
 # estimateSparsity
 # ===========================================================================

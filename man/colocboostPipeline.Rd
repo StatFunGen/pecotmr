@@ -116,23 +116,14 @@ QtlSumStats input: each selected tuple is analysed over its
 every selected tuple needs a \code{traitPos}. A MultiStudyQtlDataset
 applies it to both kinds of study it holds.}
 
-\item{focalOutcome}{The outcome a run treats as focal (colocboost's
-\code{focal_outcome_idx}). One of:
-\itemize{
-  \item \code{NULL} (default): the GWAS study, in the \code{jointGwas}
-        run, when \code{gwasSumStats} holds exactly one. With several
-        there is no one study to choose, so no run is focal.
-  \item A GWAS study name, as a plain string: that study is focal in
-        the \code{jointGwas} run. It must be a study of
-        \code{gwasSumStats}.
-  \item A named character vector with any of \code{study},
-        \code{context} and \code{trait} that identifies exactly one QTL
-        outcome, e.g. \code{c(context = "brain", trait = "ENSG1")}: that
-        outcome is focal in every run holding it, the \code{xqtlColoc}
-        run and the \code{jointGwas} run.
-  \item \code{NA}: no run is focal.
-}
-The \code{separateGwas} runs are always focal on their own GWAS study.}
+\item{focalOutcome}{The QTL outcome the \code{xqtlColoc} run treats as
+focal (colocboost's \code{focal_outcome_idx}): a named character vector
+with any of \code{study}, \code{context} and \code{trait} that
+identifies exactly one QTL outcome, e.g.
+\code{c(context = "brain", trait = "ENSG1")}. \code{NULL} (default) runs
+it non-focal. It needs \code{xqtlColoc = TRUE}: the \code{jointGwas} run
+is never focal, and each \code{separateGwas} run is focal on its own
+GWAS study.}
 
 \item{xqtlColoc, jointGwas, separateGwas}{Logical flags selecting which
 colocboost variants to run.}
@@ -284,17 +275,19 @@ for either side; colocboost has its own variable-selection algorithm.
           \code{gwasSumStats}. Works for either data form -- the
           individual-level contexts, the summary-level QTL studies, or
           both together when a \code{MultiStudyQtlDataset} carries a
-          mixture. Focal only on a QTL outcome named by
-          \code{focalOutcome}.
-    \item \code{jointGwas} (default \code{FALSE}): run one colocboost
-          model that combines all QTL contexts/studies with the
-          supplied \code{gwasSumStats} studies. By default it is focal on
-          the GWAS when \code{gwasSumStats} holds a single study, and
-          non-focal when it holds several; \code{focalOutcome} chooses.
-    \item \code{separateGwas} (default \code{FALSE}): run one focal
-          colocboost model per GWAS study, where the GWAS is the
-          focal outcome.
+          mixture. Non-focal unless \code{focalOutcome} names one of its
+          QTL outcomes.
+    \item \code{jointGwas} (default \code{FALSE}): run one non-focal
+          colocboost model (colocboost's disease-agnostic mode) that
+          combines all QTL contexts/studies with the supplied
+          \code{gwasSumStats} studies, however many there are.
+    \item \code{separateGwas} (default \code{FALSE}): run one colocboost
+          model per GWAS study, focal on that study (the
+          disease-prioritized mode), even when there is only one.
   }
+  The flags combine freely, as in colocboost's own pipeline. With one
+  GWAS study, \code{jointGwas} and \code{separateGwas} fit the same
+  outcomes, one non-focal and one focal on the GWAS.
 }
 
 \examples{

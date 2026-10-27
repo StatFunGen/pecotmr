@@ -126,6 +126,36 @@ setMethod("scoreStats", "H2Estimate", function(object) {
     object@scoreStats
 })
 
+# Each slot an H2Estimate was saved under before its slots were renamed, and
+# its name now.
+# @noRd
+.H2_RENAMED_SLOTS <- c(
+    h2 = "estimate",
+    h2Se = "estimateSe",
+    local = "localBlocks",
+    tauBlocks = "annotationJackknifeCoefs"
+)
+
+# An H2Estimate saved before the rename holds its estimates under the old
+# names, which the inherited update would drop as slots the class no longer
+# has, leaving the estimate empty; they are moved to the new names first.
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "H2Estimate",
+    function(object, ..., verbose = FALSE) {
+        if (isTRUE(verbose)) {
+            message("updateObject(object = 'H2Estimate')")
+        }
+        methods::callNextMethod(
+            .renameSavedSlots(object, .H2_RENAMED_SLOTS),
+            ...,
+            verbose = verbose
+        )
+    }
+)
+
 
 # =============================================================================
 # Show

@@ -659,7 +659,8 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 
 #' @title Update an Object Saved by an Earlier pecotmr
 #' @description Bring an object saved by an earlier version of pecotmr up to
-#'   date. An up-to-date object is returned unchanged.
+#'   date. An up-to-date object is returned unchanged; an older one gets every
+#'   update below that applies to it, in the one call.
 #'
 #'   \itemize{
 #'     \item Collections keep their LD references per row: each distinct
@@ -669,20 +670,52 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 #'       when it held a single reference for all its rows is converted by
 #'       keying every row to that reference (for a \code{ColocBoostResult},
 #'       every summary-statistic outcome), and one that held none by marking
-#'       every row LD-free.
+#'       every row LD-free. An object saved when the slot was named
+#'       \code{ldSketch} has it renamed first.
+#'     \item A genotype panel saved before panels recorded where their
+#'       genotypes come from (an LD reference, or a \code{QtlDataset}'s
+#'       genotypes) is read again from its files, as
+#'       \code{\link{readGenotypes}} reads them, and cut to the variants and
+#'       samples it held: a VCF, GDS or PLINK1 panel then reads through its
+#'       format's own backend, and a stochastic sketch records its real
+#'       sample count and allele frequencies. Only the files' variant and
+#'       sample lists, and a sketch's \code{.afreq}, are read; no genotypes
+#'       are, and nothing is written. An LD reference whose files cannot be
+#'       read again is kept as saved, with a warning, and updating again once
+#'       they are back finishes the job; a \code{QtlDataset} whose genotypes
+#'       cannot be is an error.
 #'     \item Collections name their elements by their identity tuple; one
 #'       saved without names gets them.
+#'     \item Summary statistics keep their QC settings in \code{qcOptions}
+#'       and each row's QC audit in a \code{qcAudit} column; ones saved with
+#'       both in one \code{qcInfo} record have it split between the two.
+#'       Their genome build is in \code{seqinfo()}; ones saved with it in a
+#'       \code{genome} slot have it moved there.
+#'     \item Fine-mapping results and TWAS weights record the variants each
+#'       row was fitted on in a \code{fitVariants} column; ones saved without
+#'       it have it filled in from their fits.
+#'     \item A \code{CtwasResult} holds one element per region; one saved as a
+#'       table of whole runs is rebuilt.
 #'     \item A \code{QtlDataset} no longer stores run settings (genotype
 #'       QC cutoffs, \code{scaleResiduals}); one saved with them has them
 #'       dropped, as the pipelines' \code{\link{GenotypeFilterParam}} and
-#'       \code{\link{ResidualizationParam}} now carry them.
+#'       \code{\link{ResidualizationParam}} now carry them. One saved with
+#'       its study in a \code{study} slot has it moved to \code{studyName}.
 #'     \item A \code{MultiStudyQtlDataset} is now a list of its studies; one
 #'       saved when it held them in a slot is rebuilt as one, its studies
 #'       updated too.
+#'     \item An \code{LdScore} or \code{LdEigen} saved before it could keep
+#'       an LD reference stores its blocks' LD itself, and gets none; one
+#'       saved with the reference's sample size as \code{nRef} has it moved
+#'       to \code{nSamples}.
+#'     \item An \code{H2Estimate} saved with its estimates under the slots'
+#'       earlier names (\code{h2}, \code{h2Se}, \code{local},
+#'       \code{tauBlocks}) has them moved to the current ones.
 #'   }
 #' @param object A collection (summary statistics, fine-mapping results, TWAS
-#'   weights, a colocalization result), a \code{QtlDataset} or a
-#'   \code{MultiStudyQtlDataset}.
+#'   weights, a colocalization or cTWAS result), a \code{QtlDataset}, a
+#'   \code{MultiStudyQtlDataset}, an \code{LdScore} or \code{LdEigen}, or an
+#'   \code{H2Estimate}.
 #' @param ... Passed on to the inherited method.
 #' @param verbose Report the update.
 #' @return \code{object} in the current representation.
@@ -711,6 +744,29 @@ setMethod(
         )
     }
 )
+
+# `object` with each slot an earlier version saved under another name moved
+# to its current one: `renames` maps each old name to the new. The inherited
+# update keeps only the slots a class still has, so a value left under its
+# old name would be dropped. A name the object was not saved under is
+# skipped.
+# @noRd
+#' @importFrom purrr reduce2
+.renameSavedSlots <- function(object, renames) {
+    reduce2(names(renames), unname(renames), .renameSavedSlot, .init = object)
+}
+
+# slot() rather than attr(): R stores a NULL slot as a placeholder symbol,
+# which slot() reads back as NULL and attr() hands back unconverted.
+# @noRd
+.renameSavedSlot <- function(object, from, to) {
+    if (is.null(attr(object, from, exact = TRUE))) {
+        return(object)
+    }
+    value <- methods::slot(object, from)
+    attr(object, from) <- NULL
+    `slot<-`(object, to, check = FALSE, value = value)
+}
 
 # -----------------------------------------------------------------------------
 # Construction helper: enforce one seqname per element

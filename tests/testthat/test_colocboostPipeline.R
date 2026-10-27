@@ -1750,18 +1750,19 @@ test_that("a GWAS study's overlapped rows must share one LD reference", {
     )
 })
 
-test_that(".cbAssertFocalOutcome takes a study name or a named QTL vector", {
+test_that(".cbAssertFocalOutcome takes NULL or a named QTL vector", {
     ok <- list(
         NULL,
-        NA,
-        "G1",
         c(trait = "ENSG1"),
         c(study = "S1", context = "brain", trait = "ENSG1")
     )
     for (x in ok) {
-        expect_invisible(pecotmr:::.cbAssertFocalOutcome(x))
+        expect_invisible(pecotmr:::.cbAssertFocalOutcome(x, TRUE))
     }
+    # A GWAS study name is not one: its separate run is the focal one.
     bad <- list(
+        NA,
+        "G1",
         1,
         c("G1", "G2"),
         c(gene = "ENSG1"),
@@ -1771,45 +1772,36 @@ test_that(".cbAssertFocalOutcome takes a study name or a named QTL vector", {
         list(trait = "ENSG1")
     )
     for (x in bad) {
-        expect_error(pecotmr:::.cbAssertFocalOutcome(x), "focalOutcome")
+        expect_error(
+            pecotmr:::.cbAssertFocalOutcome(x, TRUE),
+            "must be NULL or a named"
+        )
     }
+    # Only the xQTL-only run is ever focal on a QTL outcome.
+    expect_error(
+        pecotmr:::.cbAssertFocalOutcome(c(trait = "ENSG1"), FALSE),
+        "but .xqtlColoc. is FALSE"
+    )
+    expect_invisible(pecotmr:::.cbAssertFocalOutcome(NULL, FALSE))
 })
 
-test_that(".cbResolveFocal: the lone GWAS by default, a named one, or none", {
-    one <- .cbp_makeGwasSumStats()
-    two <- .cbp_makeTwoGwas()
+test_that(".cbResolveFocal: the one QTL outcome named, or none", {
     qtlInfo <- tibble::tibble(
         name = c("brain_ENSG1", "liver_ENSG1", "Q1:c1:t1"),
         study = c("S1", "S1", "Q1"),
         context = c("brain", "liver", "c1"),
         trait = c("ENSG1", "ENSG1", "t1")
     )
-    resolve <- function(focal, gws, keys) {
-        pecotmr:::.cbResolveFocal(focal, gws, qtlInfo, keys)
-    }
-    keys <- c(G1 = "G1", G2 = "G2")
-    # One study: the GWAS is the joint run's focal outcome, unless NA.
-    expect_equal(resolve(NULL, one, keys[1]), list(xqtl = NULL, joint = "G1"))
-    expect_equal(resolve(NA, one, keys[1]), list(xqtl = NULL, joint = NULL))
-    # ...and only when it reached the runs.
-    expect_null(resolve(NULL, one, character(0))$joint)
-    # Several studies: none, unless one is named.
-    expect_equal(resolve(NULL, two, keys), list(xqtl = NULL, joint = NULL))
-    expect_equal(resolve("G2", two, keys)$joint, "G2")
-    expect_error(resolve("G3", two, keys), "names no GWAS study")
-    expect_error(resolve("G1", NULL, character(0)), "no gwasSumStats")
-    expect_error(resolve("G2", two, keys[1]), "none of its rows overlap")
-    # A QTL outcome, by as many parts as it takes, is focal in both runs.
-    expect_equal(
-        resolve(c(context = "brain", trait = "ENSG1"), two, keys),
-        list(xqtl = "brain_ENSG1", joint = "brain_ENSG1")
-    )
-    expect_equal(resolve(c(trait = "t1"), two, keys)$xqtl, "Q1:c1:t1")
-    expect_error(resolve(c(trait = "ENSG1"), two, keys), "matches 2 QTL")
-    expect_error(resolve(c(trait = "nope"), two, keys), "matches no QTL")
+    resolve <- function(focal) pecotmr:::.cbResolveFocal(focal, qtlInfo)
+    expect_null(resolve(NULL))
+    # A QTL outcome, by as many parts as it takes to name one.
+    expect_equal(resolve(c(context = "brain", trait = "ENSG1")), "brain_ENSG1")
+    expect_equal(resolve(c(trait = "t1")), "Q1:c1:t1")
+    expect_error(resolve(c(trait = "ENSG1")), "matches 2 QTL")
+    expect_error(resolve(c(trait = "nope")), "matches no QTL")
 })
 
-test_that("the joint run is focal on a lone GWAS study by default", {
+test_that("the joint run is non-focal; focalOutcome reaches xQTL-only", {
     seen <- list()
     local_mocked_bindings(
         extractBlockGenotypes = .cbp_mockExtractor(),
@@ -1822,32 +1814,47 @@ test_that("the joint run is focal on a lone GWAS study by default", {
         },
         .package = "colocboost"
     )
-    # Built once: the runs below differ only in their focal outcome.
+    # Built once: the runs below differ only in their flags.
     qtl <- .cbp_makeQtlSumStats()
     oneGwas <- .cbp_makeGwasSumStats()
-    twoGwas <- .cbp_makeTwoGwas()
     run <- function(gws, ...) {
         seen <<- list()
-        suppressMessages(colocboostPipeline(
-            qtl,
-            gwasSumStats = gws,
+        suppressMessages(colocboostPipeline(qtl, gwasSumStats = gws, ...))
+        seen
+    }
+    # One GWAS: the joint run and its separate run fit the same outcomes,
+    # one non-focal and one focal on the GWAS.
+    calls <- run(
+        oneGwas,
+        xqtlColoc = FALSE,
+        jointGwas = TRUE,
+        separateGwas = TRUE
+    )
+    expect_length(calls, 2L)
+    expect_equal(calls[[1L]]$outcome_names, c("Q1:c1:t1", "G1"))
+    expect_null(calls[[1L]]$focal_outcome_idx)
+    expect_equal(calls[[2L]]$outcome_names, c("Q1:c1:t1", "G1"))
+    expect_equal(calls[[2L]]$focal_outcome_idx, 2L)
+    # Several GWAS studies leave the joint run non-focal too.
+    twoGwas <- run(.cbp_makeTwoGwas(), xqtlColoc = FALSE, jointGwas = TRUE)
+    expect_null(twoGwas[[1L]]$focal_outcome_idx)
+    # A QTL outcome is focal in the xQTL-only run, and only there.
+    calls <- run(oneGwas, jointGwas = TRUE, focalOutcome = c(trait = "t1"))
+    expect_equal(calls[[1L]]$focal_outcome_idx, 1L)
+    expect_null(calls[[2L]]$focal_outcome_idx)
+    expect_error(
+        run(
+            oneGwas,
             xqtlColoc = FALSE,
             jointGwas = TRUE,
-            ...
-        ))
-        seen[[1L]]
-    }
-    call <- run(oneGwas)
-    expect_equal(call$outcome_names, c("Q1:c1:t1", "G1"))
-    expect_equal(call$focal_outcome_idx, 2L)
-    off <- run(oneGwas, focalOutcome = NA)
-    expect_null(off$focal_outcome_idx)
-    toQtl <- run(oneGwas, focalOutcome = c(trait = "t1"))
-    expect_equal(toQtl$focal_outcome_idx, 1L)
-    # Two studies: non-focal unless one is named.
-    expect_null(run(twoGwas)$focal_outcome_idx)
-    named <- run(twoGwas, focalOutcome = "G2")
-    expect_equal(named$outcome_names[[named$focal_outcome_idx]], "G2")
+            focalOutcome = c(trait = "t1")
+        ),
+        "but .xqtlColoc. is FALSE"
+    )
+    expect_error(
+        run(oneGwas, jointGwas = TRUE, focalOutcome = "G1"),
+        "must be NULL or a named"
+    )
 })
 
 test_that("a QTL sumstat outcome records the tuple it came from", {
@@ -1876,12 +1883,7 @@ test_that("a focalOutcome vector with no QTL outcomes to match says so", {
         trait = character(0)
     )
     expect_error(
-        pecotmr:::.cbResolveFocal(
-            c(trait = "t1"),
-            .cbp_makeGwasSumStats(),
-            noQtl,
-            c(G1 = "G1")
-        ),
+        pecotmr:::.cbResolveFocal(c(trait = "t1"), noQtl),
         "The QTL outcomes are: none"
     )
 })

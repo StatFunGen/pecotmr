@@ -205,7 +205,9 @@ setMethod("ldReference", "ColocBoostResult", function(x) x@ldReference)
 
 # A ColocBoostResult keys its outcomes, not its sets, to its references, so
 # its update is its own: the one reference an earlier version recorded was
-# the one every summary-statistic outcome was matched against.
+# the one every summary-statistic outcome was matched against. A version
+# older still recorded it as `ldSketch`. Each reference is brought up to date
+# as any collection's is (.updateLdRefOrKeep()).
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -222,18 +224,25 @@ setMethod(
 
 # @noRd
 .cbrUpdateLdRefs <- function(object) {
+    object <- .renameSavedSlots(object, c(ldSketch = "ldReference"))
     old <- methods::slot(object, "ldReference")
     info <- .cbrWithLdKeys(object@outcomeInfo)
     if (is.list(old) && !is.object(old)) {
-        return(`slot<-`(object, "outcomeInfo", value = info))
+        refs <- map(old, .updateLdRefOrKeep)
+    } else {
+        dict <- .ldRefDict(list(.updateLdRefOrKeep(old)))
+        key <- if (length(dict$refs) == 0L) NA_character_ else dict$keys[[1L]]
+        info <- mutate(
+            info,
+            ldReference = if_else(
+                .data$dataForm == "sumstats",
+                key,
+                NA_character_
+            )
+        )
+        refs <- dict$refs
     }
-    dict <- .ldRefDict(list(.asLdRef(old)))
-    key <- if (length(dict$refs) == 0L) NA_character_ else dict$keys[[1L]]
-    info <- mutate(
-        info,
-        ldReference = if_else(.data$dataForm == "sumstats", key, NA_character_)
-    )
-    updated <- `slot<-`(object, "ldReference", check = FALSE, value = dict$refs)
+    updated <- `slot<-`(object, "ldReference", check = FALSE, value = refs)
     `slot<-`(updated, "outcomeInfo", value = info)
 }
 

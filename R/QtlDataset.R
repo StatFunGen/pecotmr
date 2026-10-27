@@ -2309,20 +2309,46 @@ ResidualizationParam <- function(
     "keepIndel"
 )
 
+# A QtlDataset saved before its study's slot was named `studyName` holds it
+# as `study`; one saved with run settings has them dropped
+# (.QTL_RETIRED_SLOTS); and its genotype panel is brought up to date
+# (.qtlUpdateGenotypes()).
 #' @rdname updateObject-methods
 #' @export
 setMethod("updateObject", "QtlDataset", function(object, ..., verbose = FALSE) {
     if (isTRUE(verbose)) {
         message("updateObject(object = 'QtlDataset')")
     }
-    trimmed <- reduce(.QTL_RETIRED_SLOTS, .qtlDropAttribute, .init = object)
-    methods::callNextMethod(trimmed, ..., verbose = verbose)
+    trimmed <- reduce(
+        .QTL_RETIRED_SLOTS,
+        .qtlDropAttribute,
+        .init = .renameSavedSlots(object, c(study = "studyName"))
+    )
+    # Updated here, not as callNextMethod()'s argument: the inherited update
+    # first reads its argument inside try(), so an error there would be
+    # swallowed and the update run a second time.
+    updated <- .qtlUpdateGenotypes(trimmed)
+    methods::callNextMethod(updated, ..., verbose = verbose)
 })
 
 # @noRd
 .qtlDropAttribute <- function(object, nm) {
     attr(object, nm) <- NULL
     object
+}
+
+# A dataset whose genotype panel was saved before panels took today's shape
+# has it read again (.updatePanel()). Unlike an LD reference it cannot be
+# kept as saved when that fails -- the dataset is nothing without its
+# genotypes -- so the error stands.
+# @noRd
+.qtlUpdateGenotypes <- function(x) {
+    panel <- .qtlGenotypeSe(x)
+    updated <- .updatePanel(panel)
+    if (identical(updated, panel)) {
+        return(x)
+    }
+    .qtlWithGenotypeHandle(x, updated)
 }
 
 #' @rdname GenotypeFilterParam

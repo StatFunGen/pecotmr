@@ -409,6 +409,118 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     )
 }
 
+# =============================================================================
+# Panels saved by an earlier version
+# -----------------------------------------------------------------------------
+# A panel built today records where its genotypes come from
+# (metadata$genotypeSource), and one over a VCF, GDS or PLINK1 file reads
+# through that format's own backend. A panel saved before either reads
+# through a GenotypeHandle's GhSeed, in a format a handle may no longer read,
+# and a stochastic sketch saved then lacks the real sample count and allele
+# frequencies it is read with today (.withLdProjection()). Such a panel is
+# read again from its files, as readGenotypes() reads them, and cut to the
+# variants and samples it held. Only the files' variant and sample lists and
+# a sketch's sidecar are read, never genotypes, and nothing is written.
+# =============================================================================
+
+# `panel` as a panel built today: read again from its files when it was
+# saved before the changes above, else `panel` itself -- as for one that
+# reads through no handle (a VCF, GDS or PLINK1 panel built since, or one
+# held in memory). A bare GenotypeHandle, which an LD reference was before
+# it was a panel, is taken as the panel over it.
+# @noRd
+.updatePanel <- function(panel) {
+    panel <- .asLdRef(panel)
+    handle <- .ldRefHandle(panel)
+    if (is.null(handle)) {
+        return(panel)
+    }
+    source <- .genotypeSourceRecord(handle)
+    recorded <- !is.null(S4Vectors::metadata(panel)$genotypeSource)
+    if (recorded && !is_in(source$format, .DOSAGE_PANEL_FORMATS)) {
+        return(panel)
+    }
+    .rereadPanel(panel, source)
+}
+
+# `panel` read again from `source`, the record of where its genotypes come
+# from, and cut to the variants and samples it held, keeping its sample data
+# (a QTL dataset's genotype covariates). Variants are matched on position
+# and alleles, which identify them however their names were normalized when
+# the panel was saved. A `pecotmrUnreadablePanel` error when the files
+# cannot be read or no longer hold them all.
+# @noRd
+#' @importFrom rlang try_fetch
+.rereadPanel <- function(panel, source) {
+    fresh <- try_fetch(
+        .readSourcePanel(source),
+        error = function(cnd) {
+            .abortUnreadablePanel(source, "they cannot be read", cnd)
+        }
+    )
+    rows <- match(
+        .grVariantIds(SummarizedExperiment::rowRanges(panel)),
+        .grVariantIds(SummarizedExperiment::rowRanges(fresh))
+    )
+    cols <- match(colnames(panel), colnames(fresh))
+    if (length(rows) != nrow(panel) || anyNA(rows) || anyNA(cols)) {
+        .abortUnreadablePanel(
+            source,
+            "they no longer hold every variant and sample it did"
+        )
+    }
+    SummarizedExperiment::`colData<-`(
+        .panelCut(fresh, rows, cols),
+        value = SummarizedExperiment::colData(panel)
+    )
+}
+
+# The panel today's readers build over a genotype source: its per-chromosome
+# files' panels stacked when it has them, else its one file's. A bundled
+# example's portable path resolves under the installed package.
+# @noRd
+.readSourcePanel <- function(source) {
+    if (length(source$chromPaths) > 0L) {
+        return(.chromMetaPanel(
+            map_chr(source$chromPaths, .resolveGenotypeResourcePath),
+            format = source$format
+        ))
+    }
+    .readGenotypePanel(
+        .resolveGenotypeResourcePath(source$path),
+        format = source$format
+    )
+}
+
+# `panel` cut to rows `rows` and columns `cols`, each cut only when it does
+# not keep everything in order.
+# @noRd
+.panelCut <- function(panel, rows, cols) {
+    if (!identical(rows, seq_len(nrow(panel)))) {
+        panel <- .ldRefSubset(panel, rows)
+    }
+    if (identical(cols, seq_len(ncol(panel)))) {
+        return(panel)
+    }
+    panel[, cols]
+}
+
+# @noRd
+.abortUnreadablePanel <- function(source, why, parent = NULL) {
+    abort(
+        c(
+            glue(
+                "A {source$format} genotype panel saved by an earlier pecotmr ",
+                "has to be read again from its files at {source$path}, and ",
+                "{why}."
+            ),
+            i = "Put the files back where they were, then update again."
+        ),
+        class = "pecotmrUnreadablePanel",
+        parent = parent
+    )
+}
+
 # PLINK2 writes the .psam header line with a leading "#" on the first field.
 # @noRd
 .psamHeaderNames <- function(nms) str_remove(nms, "^#")

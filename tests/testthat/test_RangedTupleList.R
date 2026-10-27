@@ -993,38 +993,84 @@ test_that("blockId reads the recorded value, not the variants' span", {
 # updateObject(): collections saved before references became per-row
 # ===========================================================================
 
-# A collection as an earlier version saved it: one reference (or NULL) in the
-# slot and no row key.
-.rtl_asSaved <- function(x, ref) {
-    old <- `slot<-`(x, "ldReference", check = FALSE, value = ref)
-    md <- attr(old, "elementMetadata")
-    md[["ldReference"]] <- NULL
-    attr(old, "elementMetadata") <- md
-    old
-}
+# The collections saved this way are built by helper-savedObjects.R.
 
 test_that("updateObject keys every row of an old collection to its reference", {
     data(qtlSumStatsMulticontextExample)
     mc <- qtlSumStatsMulticontextExample
     panel <- ldReference(mc)[[1L]]
-    old <- .rtl_asSaved(mc, panel)
+    old <- .savedWithOneLdRef(mc, panel)
     # Read as it was saved, the old object is refused, not taken as LD-free.
     expect_error(ldReference(old), "updateObject")
     new <- updateObject(old)
     expect_true(methods::validObject(new))
     expect_identical(ldReference(new), list(ld1 = panel))
     expect_identical(new$ldReference, rep("ld1", nrow(mc)))
+    # Saved before the slot was renamed, it holds the reference as ldSketch:
+    # refused the same way, and brought to the same object.
+    sketched <- .savedWithLdSketch(mc, panel)
+    expect_error(ldReference(sketched), "updateObject")
+    expect_identical(updateObject(sketched), new)
 })
 
 test_that("updateObject marks every row of an old LD-free collection LD-free", {
     data(qtlFineMappingExample)
-    old <- .rtl_asSaved(qtlFineMappingExample, NULL)
+    old <- .savedWithOneLdRef(qtlFineMappingExample, NULL)
     # Read as it was saved, it already reads LD-free: a NULL slot meant no
     # reference then too, so there is nothing to refuse.
     expect_identical(ldReference(old), list())
     new <- updateObject(old)
     expect_identical(ldReference(new), list())
     expect_true(all(is.na(new$ldReference)))
+    # A NULL saved under the old name is read back as NULL, not as the
+    # placeholder R stores it as.
+    sketched <- .savedWithLdSketch(qtlFineMappingExample, NULL)
+    expect_identical(updateObject(sketched), new)
+})
+
+test_that("updateObject reads a collection's saved PLINK1 reference again", {
+    data(qtlSumStatsMulticontextExample)
+    mc <- qtlSumStatsMulticontextExample
+    current <- ldReference(mc)[[1L]]
+    saved <- .savedHandlePanel(
+        current,
+        "pecotmr://extdata/toy_canonical",
+        "plink1"
+    )
+    up <- updateObject(.savedWithLdSketch(mc, saved))
+    ref <- ldReference(up)[[1L]]
+    expect_s4_class(.panelSeed(ref), "GenotypeDosageSeed")
+    expect_identical(dimnames(ref), dimnames(current))
+    expect_equal(
+        as.matrix(SummarizedExperiment::assay(ref)[1:3, 1:4]),
+        as.matrix(SummarizedExperiment::assay(current)[1:3, 1:4])
+    )
+})
+
+test_that("updateObject keeps a reference it cannot read again, then retries", {
+    data(qtlFineMappingExample)
+    files <- str_c(
+        test_path("test_data", "test_variants"),
+        c(".bed", ".bim", ".fam")
+    )
+    stem <- file.path(withr::local_tempdir(), "panel")
+    moved <- str_c(stem, c(".bed", ".bim", ".fam"))
+    file.copy(files, moved)
+    saved <- .savedHandlePanel(
+        readGenotypes(stem, format = "plink1"),
+        stem,
+        "plink1"
+    )
+    unlink(moved)
+    old <- .savedWithLdSketch(qtlFineMappingExample, saved)
+    # The rest of the collection is brought up to date; the reference is kept
+    # as saved, and the warning says why.
+    expect_warning(up <- updateObject(old), "kept as saved")
+    expect_identical(ldReference(up), list(ld1 = saved))
+    # With the files back, updating again finishes the job.
+    file.copy(files, moved)
+    again <- updateObject(up)
+    expect_s4_class(.panelSeed(ldReference(again)[[1L]]), "GenotypeDosageSeed")
 })
 
 test_that("updateObject leaves a current collection as it is", {

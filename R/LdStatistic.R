@@ -443,6 +443,32 @@ setMethod("ldBlocks", "LdStatistic", function(x) x@ldBlocks)
 #' @export
 setMethod("ldReference", "LdStatistic", function(x) x@ldReference)
 
+# An LdStatistic saved before the reference's sample size was named
+# `nSamples` holds it as `nRef`, and one saved before statistics kept their LD
+# reference has no `ldReference` slot: it stored what it needs of its blocks'
+# LD, which a NULL reference now says.
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "LdStatistic",
+    function(object, ..., verbose = FALSE) {
+        if (isTRUE(verbose)) {
+            message(str_c("updateObject(object = '", class(object)[[1L]], "')"))
+        }
+        object <- .renameSavedSlots(object, c(nRef = "nSamples"))
+        if (!methods::.hasSlot(object, "ldReference")) {
+            object <- `slot<-`(
+                object,
+                "ldReference",
+                check = FALSE,
+                value = NULL
+            )
+        }
+        methods::callNextMethod(object, ..., verbose = verbose)
+    }
+)
+
 # =============================================================================
 # Reading an LD statistic's blocks
 # -----------------------------------------------------------------------------

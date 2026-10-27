@@ -566,7 +566,8 @@ setMethod(
 
 # Before rows recorded the variants their weights were fitted on, a
 # collection had no `fitVariants` column; a row saved then records the
-# variants it holds, and a row with no fit payload records none.
+# variants it holds, and a row with no fit payload records none. The
+# inherited update runs either way, for the updates every collection shares.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -576,11 +577,11 @@ setMethod(
         if (isTRUE(verbose)) {
             message("updateObject(object = 'TwasWeights')")
         }
-        if (is_in("fitVariants", .tupleColumnNames(object))) {
-            return(methods::callNextMethod(object, ..., verbose = verbose))
+        if (!is_in("fitVariants", .tupleColumnNames(object))) {
+            held <- map(seq_along(object), .twrBackfillFitVariants, x = object)
+            object <- `$<-`(object, "fitVariants", IRanges::CharacterList(held))
         }
-        held <- map(seq_along(object), .twrBackfillFitVariants, x = object)
-        `$<-`(object, "fitVariants", IRanges::CharacterList(held))
+        methods::callNextMethod(object, ..., verbose = verbose)
     }
 )
 

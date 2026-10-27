@@ -500,23 +500,32 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # so a subset does not report the ones its rows left behind. An object saved
 # before the references became per-row holds one reference in the slot and no
 # key column, and read as a list it would pass for LD-free; it is refused
-# instead (one that held NULL was LD-free, and still reads that way).
+# instead (one that held NULL was LD-free, and still reads that way). So is
+# one saved before the slot was renamed, which holds it as `ldSketch`.
 # @noRd
 .ldRefsInUse <- function(x) {
+    if (!methods::.hasSlot(x, "ldReference")) {
+        .abortSavedLdRef(x)
+    }
     refs <- x@ldReference
     if (is.null(refs)) {
         return(list())
     }
     if (!is.list(refs) || is.object(refs)) {
-        abort(c(
-            glue(
-                "This {class(x)[[1L]]} was saved before LD references became ",
-                "per-row, so its rows cannot be matched to its reference."
-            ),
-            i = "Bring it up to date with `x <- updateObject(x)`."
-        ))
+        .abortSavedLdRef(x)
     }
     .ldRefsUsed(refs, .ldRefKeys(x))
+}
+
+# @noRd
+.abortSavedLdRef <- function(x) {
+    abort(c(
+        glue(
+            "This {class(x)[[1L]]} was saved before LD references became ",
+            "per-row, so its rows cannot be matched to its reference."
+        ),
+        i = "Bring it up to date with `x <- updateObject(x)`."
+    ))
 }
 
 # The entries of `refs` some key in `keys` names.
@@ -560,18 +569,46 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # `object` as saved before its references became per-row -- one reference,
 # or NULL, in the slot and no row key -- brought up to date: that reference
 # becomes the slot's one entry and every row is keyed to it (every row is
-# LD-free when it held none). A current object -- or a collection that keeps
-# no LD references, such as a CtwasResult -- is returned as it is.
+# LD-free when it held none). An object saved before the slot was renamed
+# holds that reference, a panel or NULL, as `ldSketch`; it is moved to
+# `ldReference` first. Every reference is brought up to date too
+# (.updateLdRefOrKeep()). A collection that keeps no LD references, such as
+# a CtwasResult, is returned as it is.
 # @noRd
 .updateRowLdRefs <- function(object) {
+    object <- .renameSavedSlots(object, c(ldSketch = "ldReference"))
     if (!methods::.hasSlot(object, "ldReference")) {
         return(object)
     }
     old <- methods::slot(object, "ldReference")
-    if (is.list(old) && !is.object(old)) {
-        return(object)
+    if (!is.list(old) || is.object(old)) {
+        return(.withRowLdRefs(object, .updateLdRefOrKeep(old)))
     }
-    .withRowLdRefs(object, .asLdRef(old))
+    `slot<-`(
+        object,
+        "ldReference",
+        check = FALSE,
+        value = map(old, .updateLdRefOrKeep)
+    )
+}
+
+# A collection's LD reference as saved, brought up to date (.updatePanel()).
+# One whose files cannot be read again is kept as saved, with a warning,
+# rather than failing the update: the rest of the collection is still worth
+# having, and updating again once the files are back finishes the job.
+# @noRd
+#' @importFrom rlang try_fetch
+.updateLdRefOrKeep <- function(ref) {
+    try_fetch(
+        .updatePanel(ref),
+        pecotmrUnreadablePanel = function(cnd) {
+            warn(
+                "An LD reference is kept as saved: LD cannot be read from it.",
+                parent = cnd
+            )
+            .asLdRef(ref)
+        }
+    )
 }
 
 # Row `i`'s LD reference, or NULL for an LD-free row.

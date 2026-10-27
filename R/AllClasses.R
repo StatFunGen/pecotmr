@@ -397,7 +397,9 @@ setMethod(
 # collection held its whole QC record in a `qcInfo` slot: the options, and
 # under `entryAudit` one audit per row. An object saved then still carries
 # that slot as an attribute; it is split into the `qcOptions` slot and the
-# `qcAudit` column.
+# `qcAudit` column. An object older still held its genome build in a
+# `genome` slot (.ssMigrateGenome()). An object that old needs the updates
+# every collection shares too, so the inherited update runs either way.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -408,12 +410,30 @@ setMethod(
             message(str_c("updateObject(object = '", class(object)[[1L]], "')"))
         }
         old <- attr(object, "qcInfo", exact = TRUE)
-        if (is.null(old)) {
-            return(methods::callNextMethod(object, ..., verbose = verbose))
+        if (!is.null(old)) {
+            object <- .ssMigrateQcInfo(object, old)
         }
-        .ssMigrateQcInfo(object, old)
+        methods::callNextMethod(
+            .ssMigrateGenome(object),
+            ...,
+            verbose = verbose
+        )
     }
 )
+
+# Before the genome build moved into seqinfo(), summary statistics held it
+# in a `genome` slot; an object saved then still carries it as an
+# attribute, and it becomes the build seqinfo() names (none, when the slot
+# was left empty).
+# @noRd
+.ssMigrateGenome <- function(object) {
+    build <- attr(object, "genome", exact = TRUE)
+    if (is.null(build)) {
+        return(object)
+    }
+    attr(object, "genome") <- NULL
+    .withGenome(object, build[1L])
+}
 
 # @noRd
 .ssMigrateQcInfo <- function(object, old) {
@@ -1418,7 +1438,8 @@ setMethod(
 # had no `fitVariants` column. A fine-mapping fit names its own variants, so
 # each row's are read off it; a row whose fit names none (a
 # cross-validation-only row, or an unnamed fit) records what it holds, and a
-# row with no fit records none.
+# row with no fit records none. The inherited update runs either way, for
+# the updates every collection shares.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -1428,11 +1449,11 @@ setMethod(
         if (isTRUE(verbose)) {
             message(str_c("updateObject(object = '", class(object)[[1L]], "')"))
         }
-        if (is_in("fitVariants", .tupleColumnNames(object))) {
-            return(methods::callNextMethod(object, ..., verbose = verbose))
+        if (!is_in("fitVariants", .tupleColumnNames(object))) {
+            fv <- map(seq_along(object), .fmrBackfillFitVariants, x = object)
+            object <- `$<-`(object, "fitVariants", IRanges::CharacterList(fv))
         }
-        fv <- map(seq_along(object), .fmrBackfillFitVariants, x = object)
-        `$<-`(object, "fitVariants", IRanges::CharacterList(fv))
+        methods::callNextMethod(object, ..., verbose = verbose)
     }
 )
 

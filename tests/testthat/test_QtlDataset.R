@@ -1813,6 +1813,41 @@ test_that("updateObject drops the slots a QtlDataset no longer has", {
     )
 })
 
+test_that("updateObject renames study and reads saved genotypes again", {
+    data(qtlDatasetExample)
+    current <- .qtlGenotypeSe(qtlDatasetExample)
+    # Saved by a version that named the slot `study` and read PLINK1 files
+    # through a GenotypeHandle (helper-savedObjects.R).
+    saved <- .savedHandlePanel(current, .ldRefSource(current)$path, "plink1")
+    old <- .savedUnder(
+        .qtlWithGenotypeHandle(qtlDatasetExample, saved),
+        c(study = "studyName")
+    )
+    up <- updateObject(old)
+    expect_true(methods::validObject(up))
+    expect_identical(studyName(up), studyName(qtlDatasetExample))
+    geno <- .qtlGenotypeSe(up)
+    expect_s4_class(.panelSeed(geno), "GenotypeDosageSeed")
+    expect_identical(dimnames(geno), dimnames(current))
+    expect_identical(
+        SummarizedExperiment::colData(geno),
+        SummarizedExperiment::colData(current)
+    )
+})
+
+test_that("updateObject refuses a QtlDataset whose genotypes cannot be read", {
+    data(qtlDatasetExample)
+    current <- .qtlGenotypeSe(qtlDatasetExample)
+    gone <- .savedHandlePanel(
+        current,
+        file.path(tempdir(), "nowhere"),
+        "plink1"
+    )
+    old <- .qtlWithGenotypeHandle(qtlDatasetExample, gone)
+    cnd <- tryCatch(updateObject(old), error = identity)
+    expect_s3_class(cnd, "pecotmrUnreadablePanel")
+})
+
 # ===========================================================================
 # show()
 # ===========================================================================
