@@ -586,6 +586,48 @@ NULL
     )
 }
 
+# =============================================================================
+# Cross-validation settings
+# -----------------------------------------------------------------------------
+# One bundle for both fineMappingPipeline() and twasWeightsPipeline(). The two
+# had drifted on a setting that means the same thing in each: `cvFolds`
+# defaulted to 0 in fine-mapping and 5 in TWAS. Folding them into one
+# constructor is the rule the joint specification already follows.
+#
+# `folds` is 0 everywhere. twasWeightsPipeline used to default to 5, so the
+# two pipelines disagreed on what an unspecified `cvFolds` meant; converging
+# on "off unless asked" makes one bundle mean one thing. The knock-on is that
+# the SR-TWAS ensemble, which needs out-of-fold predictions, no longer runs by
+# default -- so `EnsembleParam(enabled =)` defaults to FALSE too, and asking
+# for an ensemble
+# without folds is an error rather than a silently missing row.
+#
+# `fitFullData` means the same thing in both pipelines: keep only the
+# cross-validation results, skipping the full-data fit.
+#
+# Two of the six fields are honoured by twasWeightsPipeline() only, and are
+# IGNORED rather than rejected by fineMappingPipeline() -- one bundle the
+# caller can hand to either pipeline without rewriting it:
+#
+#   weightMethods -- selects among TWAS *weight* methods, matching tokens like
+#     `lasso` / `mrmash` and their `<token>_weights` spellings. Fine mapping's
+#     `methods=` are fine-mapping methods and its CV refits all of them, so
+#     there is no weight-method set to select from. It is also the knob that
+#     decides whether .jointTwasCvBlocked() reaches back for a fold's
+#     fine-mapping fit -- a TWAS-to-fine-mapping handoff with no counterpart
+#     in the other direction.
+#   maxVariants -- caps the CV design matrix for twasWeightsCv(). Fine mapping
+#     does not use that engine; .fmWeightsCv() has its own loop and only
+#     mirrors twasWeightsCv()'s output shape.
+#
+# Both are documented as TWAS-only so the silence is stated, not discovered.
+#
+# `seed` is not here either. It seeds the whole call in both pipelines
+# (fine-mapping wraps the call in withr::local_seed; TWAS also seeds the
+# BiocParallel RNG for method fitting), so it is a call-level knob that CV
+# happens to benefit from, not a CV setting.
+# =============================================================================
+
 #' @rdname CrossValidationParam
 #' @aliases CrossValidationParam-class
 #' @importClassesFrom BiocParallel BiocParallelParam
@@ -746,45 +788,3 @@ CrossValidationParam <- function(
     # folds = 0 (or 1) is the no-op default.
     !(length(x) == 1L && !is.na(x) && is.numeric(x) && (x == 0 || x == 1))
 }
-
-# =============================================================================
-# Cross-validation settings
-# -----------------------------------------------------------------------------
-# One bundle for both fineMappingPipeline() and twasWeightsPipeline(). The two
-# had drifted on a setting that means the same thing in each: `cvFolds`
-# defaulted to 0 in fine-mapping and 5 in TWAS. Folding them into one
-# constructor is the rule the joint specification already follows.
-#
-# `folds` is 0 everywhere. twasWeightsPipeline used to default to 5, so the
-# two pipelines disagreed on what an unspecified `cvFolds` meant; converging
-# on "off unless asked" makes one bundle mean one thing. The knock-on is that
-# the SR-TWAS ensemble, which needs out-of-fold predictions, no longer runs by
-# default -- so `EnsembleParam(enabled =)` defaults to FALSE too, and asking
-# for an ensemble
-# without folds is an error rather than a silently missing row.
-#
-# `fitFullData` means the same thing in both pipelines: keep only the
-# cross-validation results, skipping the full-data fit.
-#
-# Two of the six fields are honoured by twasWeightsPipeline() only, and are
-# IGNORED rather than rejected by fineMappingPipeline() -- one bundle the
-# caller can hand to either pipeline without rewriting it:
-#
-#   weightMethods -- selects among TWAS *weight* methods, matching tokens like
-#     `lasso` / `mrmash` and their `<token>_weights` spellings. Fine mapping's
-#     `methods=` are fine-mapping methods and its CV refits all of them, so
-#     there is no weight-method set to select from. It is also the knob that
-#     decides whether .jointTwasCvBlocked() reaches back for a fold's
-#     fine-mapping fit -- a TWAS-to-fine-mapping handoff with no counterpart
-#     in the other direction.
-#   maxVariants -- caps the CV design matrix for twasWeightsCv(). Fine mapping
-#     does not use that engine; .fmWeightsCv() has its own loop and only
-#     mirrors twasWeightsCv()'s output shape.
-#
-# Both are documented as TWAS-only so the silence is stated, not discovered.
-#
-# `seed` is not here either. It seeds the whole call in both pipelines
-# (fine-mapping wraps the call in withr::local_seed; TWAS also seeds the
-# BiocParallel RNG for method fitting), so it is a call-level knob that CV
-# happens to benefit from, not a CV setting.
-# =============================================================================

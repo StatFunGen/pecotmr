@@ -258,10 +258,10 @@ The summaries above are not stored by the fitter — they are derived from the
 raw SuSiE fit by a short chain that `fineMappingPipeline()` runs for you:
 
 ```
-postprocessFinemappingFits()   # per-method fits -> a post object
-  -> computeCsTables()         # credible sets from alpha, with purity
-  -> buildTopLoci()            # the flat one-row-per-variant table
-  -> formatFinemappingOutput() # assemble the result payload
+postprocessFinemappingFits()     # per-method fits -> a post object
+    -> computeCsTables()         # credible sets from alpha, with purity
+    -> buildTopLoci()            # the flat one-row-per-variant table
+    -> formatFinemappingOutput() # assemble the result payload
 ```
 
 Call them directly when you have SuSiE fits from elsewhere and want
@@ -274,10 +274,10 @@ Two smaller extractors sit at the row level and are what
 `credibleSetSummary()` is assembled from:
 
 - `extractCsInfo(fmRow, csNames, topLociTable, ldSource)` — per-credible-set
-  detail for one result row, including the between-variant correlations that
-  give `purity_min`, which is why it needs an `ldSource`.
+    detail for one result row, including the between-variant correlations that
+    give `purity_min`, which is why it needs an `ldSource`.
 - `extractTopPipInfo(fmRow, sumstats)` — the lead variant and its statistics,
-  joined against summary statistics.
+    joined against summary statistics.
 
 `susieResult()` unwraps a per-condition fit list into the single SuSiE
 object the other helpers expect.
@@ -359,11 +359,11 @@ which is why both schemas publish it as `WGT`.
 ## Next steps
 
 - [Fine-mapping](fine-mapping.html) — producing the results this vignette
-  consumes.
+    consumes.
 - [Colocalization](coloc-pipeline.html) — the model that answers whether an
-  overlap reflects a shared causal variant.
+    overlap reflects a shared causal variant.
 - [TWAS weights](twas-weights.html) — reusing a fine-mapping fit as a weight
-  method.
+    method.
 
 # Session info
 

@@ -273,9 +273,9 @@ covered in the [QC vignette](rss-qc.html), where the motivation lives.
 
 - [QC for summary statistics](rss-qc.html) — matching statistics to a panel.
 - [Heritability](heritability.html) — `buildLdEigen()` / `buildLdScore()`
-  turn per-block LD into the statistics the h2 estimators consume.
+    turn per-block LD into the statistics the h2 estimators consume.
 - [Fine-mapping](fine-mapping.html) and [TWAS weights](twas-weights.html) —
-  the RSS methods that consume LD.
+    the RSS methods that consume LD.
 
 # Session info
 

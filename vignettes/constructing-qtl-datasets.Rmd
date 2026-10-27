@@ -17,6 +17,8 @@ knitr::opts_chunk$set(
     fig.width = 7,
     fig.height = 4.5
 )
+hasRelatednessQc <- requireNamespace("plinkQC", quietly = TRUE) &&
+    requireNamespace("igraph", quietly = TRUE)
 ```
 
 ## Overview
@@ -288,7 +290,7 @@ dataset is built — the pipelines do not model it.
 `filterRelatedness()` takes a kinship table — one row per pair, the shape
 PLINK's `--genome` or KING emits — and returns the individuals to **drop**:
 
-```{r relatedness, eval = requireNamespace("plinkQC", quietly = TRUE) && requireNamespace("igraph", quietly = TRUE)}
+```{r relatedness, eval = hasRelatednessQc}
 relatedness <- data.frame(
     IID1 = c(samples[1], samples[3], samples[5]),
     IID2 = c(samples[2], samples[4], samples[6]),
@@ -312,7 +314,11 @@ is described with `RelatednessColumnsParam()`:
 ```r
 filterRelatedness(
     relatedness,
-    columns = RelatednessColumnsParam(iid1 = "ID1", iid2 = "ID2", value = "KINSHIP")
+    columns = RelatednessColumnsParam(
+        iid1 = "ID1",
+        iid2 = "ID2",
+        value = "KINSHIP"
+    )
 )
 ```
 

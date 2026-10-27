@@ -130,18 +130,18 @@ should carry into a real analysis:
 - `thin = 1` keeps every SNP (production runs thin to `0.1`).
 - `niterPrefit` / `niter` are cut to keep the vignette fast.
 - `min_nonSNP_PIP = 0` disables region screening. The bundled GWAS has no
-  genome-wide-significant signal, so the default (`0.5`) selects no region at
-  all and the result comes back empty. On real data, leave it alone.
+    genome-wide-significant signal, so the default (`0.5`) selects no region at
+    all and the result comes back empty. On real data, leave it alone.
 - `fallbackToPrefit = TRUE` recovers from the accurate-EM step returning
-  `NaN` on underpowered data by keeping the prefit estimates.
+    `NaN` on underpowered data by keeping the prefit estimates.
 
 ## Where genes come from
 
 `twasWeights` accepts two shapes:
 
 - a **flat** `TwasWeights` or `QtlFineMappingResult` (or a homogeneous list
-  of them) carrying `region` provenance. Each gene is assigned to its home
-  LD block by `start(region)`, matching cTWAS's own placement rule.
+    of them) carrying `region` provenance. Each gene is assigned to its home
+    LD block by `start(region)`, matching cTWAS's own placement rule.
 - a **pre-bucketed named list** keyed by `region_id`, used as-is.
 
 Blocks with no gene weights still contribute their SNP-level signal to the
@@ -346,9 +346,9 @@ Each run reads one method; compare methods by running each in turn.
 
 - [TWAS weights](twas-weights.html) — training the weights cTWAS consumes.
 - [TWAS Z-scores and MR](twas-zscore.html) — the per-gene Z that
-  `twasZ` optionally supplies here.
+    `twasZ` optionally supplies here.
 - [QC for summary statistics](rss-qc.html) — `summaryStatsQc()`, which
-  `gwasSumStats` must have been through.
+    `gwasSumStats` must have been through.
 
 # Session info
 

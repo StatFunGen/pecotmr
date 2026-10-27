@@ -2933,10 +2933,8 @@ MvsusieMixturePriorOptions <- function(...) {
 #'   ready to pass as \code{prior_variance} to \code{\link{fitMvsusie}} or
 #'   \code{\link{fitMvsusieRss}}.
 #' @examples
-#' \donttest{
 #' # Canonical uniform mixture over two named conditions.
 #' buildMvsusieMixturePrior(conditionNames = c("brain", "blood"))
-#' }
 #' @importFrom checkmate assertCount
 #' @export
 buildMvsusieMixturePrior <- function(

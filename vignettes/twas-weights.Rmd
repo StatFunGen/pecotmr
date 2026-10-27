@@ -255,15 +255,14 @@ reference instead of `X`/`y` — `lassosumRssWeights()` for `lasso`,
 `mcpRssWeights()`, `sdprWeights()` (SDPR) for `dprGibbs`, `susieRssWeights()`,
 and so on; the Bayesian alphabet, `dprVb` and `dprAdaptiveGibbs` have none.
 `enet` mixes the lasso and ridge penalties at `alpha = 0.5` on either input;
-`methods = list(enet = list(alpha = 0.3))` sets another mixing. Those are what `twasWeightsPipeline()` calls when the input is a
-`QtlSumStats`. The LD
-reference is the same `ldReference` the rest of the package takes: a
-genotype panel from `readGenotypes()`, a `GenotypeMixture` or an
-`LdMatrix`, matched to the statistics by their `variantNames`. lassosum,
-the penalized methods, PRS-CS and SDPR use a genotype reference through its
-standardized genotypes without forming the LD matrix; the mr.ash and
-mr.mash engines take the matrix, which is formed over the statistics'
-variants.
+`methods = list(enet = list(alpha = 0.3))` sets another mixing. Those are what
+`twasWeightsPipeline()` calls when the input is a `QtlSumStats`. The LD
+reference is the same `ldReference` the rest of the package takes: a genotype
+panel from `readGenotypes()`, a `GenotypeMixture` or an `LdMatrix`, matched to
+the statistics by their `variantNames`. lassosum, the penalized methods, PRS-CS
+and SDPR use a genotype reference through its standardized genotypes without
+forming the LD matrix; the mr.ash and mr.mash engines take the matrix, which is
+formed over the statistics' variants.
 
 Several of these engines estimate more than the weights, and
 `fitRetention = "slim"` keeps it as the `"fit"` attribute of the weights they
@@ -400,15 +399,15 @@ do.call(weightsDataType, c(list(tw), key)) # tag carried through for reporting
 are centred and scaled to unit variance before every method runs, so all the
 weights are on one scale. That scaling is part of residualization —
 `ResidualizationParam(scaleResiduals = FALSE)` opts out, and it is on by
-default — so the
-recorded flag reports what was done rather than what you claimed. That is not bookkeeping. Every method here returns
-coefficients on the scale of the `X` it was handed — exactly so for glmnet,
-ncvreg, L0Learn, mr.ash, the Bayesian alphabet and `susieWeights()` — while
-the DPR samplers are not even scale-equivariant, so rescaling `X` changes
-their fit rather than just its units. Standardizing up front removes the
-question, and lands on the scale the LD correlations and z-scores behind a
-TWAS Z already use. `learnTwasWeights()` still takes `weightStandardized`,
-because there you supply `X` yourself.
+default — so the recorded flag reports what was done rather than what you
+claimed. That is not bookkeeping. Every method here returns coefficients on the
+scale of the `X` it was handed — exactly so for glmnet, ncvreg, L0Learn,
+mr.ash, the Bayesian alphabet and `susieWeights()` — while the DPR samplers are
+not even scale-equivariant, so rescaling `X` changes their fit rather than just
+its units. Standardizing up front removes the question, and lands on the scale
+the LD correlations and z-scores behind a TWAS Z already use.
+`learnTwasWeights()` still takes `weightStandardized`, because there you supply
+`X` yourself.
 
 `weights()` returns a named numeric vector for univariate methods and a
 matrix for multivariate ones. The remaining payloads are keyed the same way:
@@ -440,8 +439,13 @@ For the same reason neither exporter writes CV metrics. Those stay on the
 object:
 
 ```{r tw-cv, eval=FALSE}
-cv <- cvResult(tw, studyName = "s1", context = "brain", trait = "g1",
-               method = "susie")
+cv <- cvResult(
+    tw,
+    studyName = "s1",
+    context = "brain",
+    trait = "g1",
+    method = "susie"
+)
 cv$performance # per-method metric matrix: corr, rsq, adj_rsq, pval, RMSE, MAE
 ```
 

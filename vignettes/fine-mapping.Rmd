@@ -293,13 +293,13 @@ rather than the coefficients.
 Two are worth calling out:
 
 - `fsusieWrapper()` wraps `fitFsusie()` with the credible-band and
-  affected-region post-processing, and `fsusieGetCs()`,
-  `fsusieCredibleBand()` and `fsusieAffectedRegions()` read those out.
-  fSuSiE needs a *functional* phenotype — a curve per sample, not a scalar —
-  so it does not accept the same `Y` the other methods do.
+    affected-region post-processing, and `fsusieGetCs()`,
+    `fsusieCredibleBand()` and `fsusieAffectedRegions()` read those out.
+    fSuSiE needs a *functional* phenotype — a curve per sample, not a scalar —
+    so it does not accept the same `Y` the other methods do.
 - `fitSusieInfThenSusieRss()` chains the two: `susie_inf` first to estimate
-  the infinitesimal component, then SuSiE-RSS on the residual signal. That
-  is what `methods = "susieInf"` runs on summary statistics.
+    the infinitesimal component, then SuSiE-RSS on the residual signal. That
+    is what `methods = "susieInf"` runs on summary statistics.
 
 ## Next steps
 

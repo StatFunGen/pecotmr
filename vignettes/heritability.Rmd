@@ -391,7 +391,7 @@ names(h2EstimateToSldscTrait(strat))
 ## Next steps
 
 - [Molecular QTL enrichment](xqtl-enrichment.html) — the complementary
-  per-variant QTL/GWAS enrichment analysis.
+    per-variant QTL/GWAS enrichment analysis.
 - [QC for summary statistics](rss-qc.html) — preparing the GWAS side.
 
 # Session info
