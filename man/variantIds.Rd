@@ -25,17 +25,10 @@ variantIds(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL
+  blockId = NULL
 )
 
-\S4method{variantIds}{SumStatsBase}(
-  x,
-  studyName = NULL,
-  context = NULL,
-  trait = NULL,
-  annotateSignificance = NULL,
-  ranges = NULL
-)
+\S4method{variantIds}{SumStatsBase}(x, studyName = NULL, context = NULL, trait = NULL)
 
 \S4method{variantIds}{FineMappingRow}(x)
 
@@ -60,15 +53,8 @@ this trait; \code{NULL} matches all traits.}
 \item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
 this fine-mapping / weight method; \code{NULL} matches all methods.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{annotateSignificance}{Optional correction-method name passed through to
-\code{\link{sumStats}} (QTL only); \code{NULL} applies none.}
-
-\item{ranges}{A \code{GRanges} or \code{NULL} (default). Return only the
-variants overlapping these ranges; \code{NULL} returns everything.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block of a fit; \code{NULL} matches every block.}
 }
 \value{
 Character vector of variant IDs.
@@ -76,7 +62,10 @@ Character vector of variant IDs.
 \description{
 Extract variant ID vector from an object that carries one (e.g.,
   \code{LdMatrix}, \code{FineMappingRow}, \code{TwasWeightsRow}) or from
-  one entry of a collection class selected by its identity tuple.
+  one entry of a collection class selected by its identity tuple. Every
+  class renders the same canonical \code{chrom:pos:A2:A1} id from each
+  variant's range and alleles; labels a source gave (an rsID, a file's own
+  spelling) stay in the \code{SNP} column of its ranges.
 }
 \examples{
 data(qtlFineMappingExample)

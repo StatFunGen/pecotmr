@@ -63,25 +63,6 @@ test_that("bayesAlphabetWeights with Z = NULL does not error on dimension check"
     expect_true(is.numeric(result))
 })
 
-# ---- bayes_n/l/a/c/r_weights (wrapper dispatchers) ----
-test_that("bayesNWeights dispatches to bayesAlphabetWeights with bayesN", {
-    skip_if_not_installed("qgg")
-    set.seed(42)
-    n <- 50
-    p <- 10
-    X <- matrix(rnorm(n * p), nrow = n)
-    y <- X[, 1] * 0.5 + rnorm(n)
-    result <- bayesNWeights(
-        X,
-        y,
-        nit = 50,
-        nburn = 10
-    )
-    expect_equal(length(result), p)
-    expect_true(is.numeric(result))
-    expect_true(all(is.finite(result)))
-})
-
 # ---- bayesAlphabetWeights zero-variance handling ----
 test_that("bayesAlphabetWeights warns and zero-pads when X has zero-variance columns", {
     skip_if_not_installed("qgg")

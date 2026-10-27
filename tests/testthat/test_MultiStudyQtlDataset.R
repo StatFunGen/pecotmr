@@ -1,7 +1,5 @@
 # Tests for R/MultiStudyQtlDataset.R
 
-# === Tests migrated from test_s4Constructors.R (MultiStudyQtlDataset) ===
-
 test_that("MultiStudyQtlDataset: combines two QtlDatasets", {
     qd1 <- QtlDataset(
         studyName = "s1",
@@ -44,6 +42,18 @@ test_that("MultiStudyQtlDataset: rejects unnamed qtlDatasets list", {
     )
 })
 
+
+test_that("MultiStudyQtlDataset: rejects non-QtlDataset entries", {
+    qd <- QtlDataset(
+        studyName = "s1",
+        genotypes = .sc_makeGenotypeHandle(),
+        phenotypes = list(brain = .sc_makeSe())
+    )
+    expect_error(
+        MultiStudyQtlDataset(qtlDatasets = list(s1 = qd, s2 = "not a dataset")),
+        "must be a QtlDataset"
+    )
+})
 
 test_that("MultiStudyQtlDataset: rejects a trait at two positions", {
     se1 <- .sc_makeSe(traits = "ENSG1")
@@ -161,9 +171,6 @@ test_that("sumStats(MultiStudyQtlDataset) rejects selection arguments", {
 
 # ===========================================================================
 # Validity branches
-#
-# Every construction above builds a VALID object, so the message-returning
-# arms of the checks were never reached.
 # ===========================================================================
 
 test_that("MultiStudyQtlDataset: rejects an empty qtlDatasets list", {
@@ -204,8 +211,6 @@ test_that("MultiStudyQtlDataset: rejects a non-QtlSumStats sumStats", {
 
 
 test_that("studyName unions the individual-level and summary-only studies", {
-    # The sumStats arm was never taken: every collection built above carries
-    # only QtlDatasets, so studyName() only ever read their names.
     data(qtlSumStatsExample)
     qd <- QtlDataset(
         studyName = "s1",
@@ -228,4 +233,77 @@ test_that("MultiStudyQtlDataset: qtlDatasets guard fires on a non-list", {
 
 test_that(".msqdConcat answers an empty list for no pieces", {
     expect_identical(pecotmr:::.msqdConcat(list()), list())
+})
+
+test_that("updateObject rebuilds a MultiStudyQtlDataset from its studies", {
+    data(multiStudyQtlDatasetExample)
+    ms <- multiStudyQtlDatasetExample
+    expect_equal(updateObject(ms), ms)
+    # A study set with no summary statistics keeps none: the NULL slot is
+    # read through slot(), not as the placeholder attr() would return.
+    expect_null(pecotmr:::.msqdSavedSumStats(ms))
+    expect_null(sumStats(updateObject(ms)))
+    noSlot <- ms
+    attr(noSlot, "sumStats") <- NULL
+    expect_null(pecotmr:::.msqdSavedSumStats(noSlot))
+    expect_message(
+        updateObject(ms, verbose = TRUE),
+        "updateObject\\(object = 'MultiStudyQtlDataset'\\)"
+    )
+    # Saved before it became a SimpleList, the studies sat in a
+    # `qtlDatasets` slot, which the object still carries as an attribute.
+    old <- ms
+    attr(old, "qtlDatasets") <- rev(as.list(ms))
+    expect_identical(names(updateObject(old)), rev(names(ms)))
+    # Its summary-statistic studies are updated along with it.
+    qd <- QtlDataset(
+        studyName = "s1",
+        genotypes = .sc_makeGenotypeHandle(),
+        phenotypes = list(brain = .sc_makeSe())
+    )
+    withSs <- MultiStudyQtlDataset(
+        qtlDatasets = list(s1 = qd),
+        sumStats = qtlSumStatsExample
+    )
+    expect_s4_class(sumStats(updateObject(withSs)), "QtlSumStats")
+})
+
+test_that("subsetting a MultiStudyQtlDataset re-checks what is left", {
+    data(multiStudyQtlDatasetExample)
+    ms <- multiStudyQtlDatasetExample
+    swapped <- ms[rev(names(ms))]
+    expect_s4_class(swapped, "MultiStudyQtlDataset")
+    expect_identical(names(swapped), rev(names(ms)))
+    expect_error(ms[1L], "at least 2 studies")
+})
+
+# ===========================================================================
+# show()
+# ===========================================================================
+
+test_that("show.MultiStudyQtlDataset reports per-source study counts", {
+    qd1 <- .sh_makeQtlDataset(studyName = "s1")
+    qd2 <- .sh_makeQtlDataset(studyName = "s2")
+    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+    out <- capture.output(show(mt))
+    expect_true(any(grepl(
+        "MultiStudyQtlDataset: 2 individual-level \\+ 0 sumstats",
+        out
+    )))
+    expect_true(any(grepl("Individual-level studies: s1, s2", out)))
+})
+
+test_that("show.MultiStudyQtlDataset reports sumstats studies when present", {
+    qd <- .sh_makeQtlDataset(studyName = "s1")
+    ss <- QtlSumStats(
+        studyName = "s2",
+        context = "c1",
+        trait = "t1",
+        entry = list(.sh_makeQtlSumstatsGr()),
+        genome = "hg19",
+        ldReference = .sh_makeGenotypeHandle()
+    )
+    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd), sumStats = ss)
+    out <- capture.output(show(mt))
+    expect_true(any(grepl("Sumstats studies: s2", out)))
 })

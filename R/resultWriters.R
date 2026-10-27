@@ -4,11 +4,12 @@
 # Every pecotmr output format that leaves the package as a FILE lives here,
 # behind TWO generics rather than one entry point per class:
 #
-#   exportToVcf(x, path, ...)   GWAS-VCF-style: one record per variant, one
-#                               SAMPLE per study / fitted model, the statistics
-#                               as FORMAT fields. GwasSumStats, every
-#                               FineMappingResultBase, TwasWeights.
-#   exportToBed(x, path, ...)   the published long-format tables, one row per
+#   writeGwasVcf(obj, filename, ...) GWAS-VCF-style: one record per variant,
+#                               one SAMPLE per study / fitted model, the
+#                               statistics as FORMAT fields. GwasSumStats,
+#                               every FineMappingResultBase, TwasWeights.
+#                               VariantAnnotation (a Suggests) writes the file.
+#   writeBed(obj, filename, ...) the published long-format tables, one row per
 #                               published observation, bgzipped + tabix-indexed
 #                               on request. FineMappingResultBase,
 #                               TwasWeights.
@@ -285,7 +286,7 @@ NULL
 }
 
 # Rows of a TwasWeights with no full-data weights: a CV-only row has an empty
-# element AND no `weight` metadata column (twasWeightsRow() drops the column
+# element AND no `weight` metadata column (TwasWeightsRow() drops the column
 # when `weights` is NULL).
 # @noRd
 .twbIncompleteRows <- function(x) {
@@ -423,7 +424,8 @@ genomicOrder <- function(chrom, start, end = NULL) {
     index,
     emptySchema = .pubSchema(character(0)),
     keepColumns = character(0),
-    extraColumns = NULL
+    extraColumns = NULL,
+    build = NA_character_
 ) {
     if (is.null(out) || nrow(out) == 0L) {
         # A header-only file documents the whole vocabulary rather than
@@ -443,24 +445,30 @@ genomicOrder <- function(chrom, start, end = NULL) {
     if (nrow(out) > 0L) {
         out <- slice(out, genomicOrder(out[["#chr"]], out[["start"]]))
     }
-    .pubEmitTable(out, path, naString, index)
+    .pubEmitTable(out, path, naString, index, build)
 }
 
 # Materialise the ordered table at `path`, compressing and indexing it when the
-# extension asks for it.
+# extension asks for it. A named genome build goes first, as a `##genome=`
+# line above the column header; tabix skips both as comments.
 # @noRd
-.pubEmitTable <- function(out, path, naString, index) {
+.pubEmitTable <- function(out, path, naString, index, build = NA_character_) {
     dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
     compress <- str_detect(path, "\\.(gz|bgz)$")
     plain <- if (compress) str_remove(path, "\\.(gz|bgz)$") else path
+    con <- file(plain, "w")
+    if (!is.na(build)) {
+        writeLines(str_c("##genome=", build), con)
+    }
     utils::write.table(
         out,
-        plain,
+        con,
         sep = "\t",
         quote = FALSE,
         row.names = FALSE,
         na = naString
     )
+    close(con)
     if (!compress) {
         return(invisible(path))
     }
@@ -475,18 +483,19 @@ genomicOrder <- function(chrom, start, end = NULL) {
 
 # ---- shared: output-path decoration -----------------------------------------
 
-# Decorate `outputPath` with the spec's context / trait tags when split flags
-# are set. Preserves the file extension. Examples: "out.vcf" + (context="brain")
-# -> "out.brain.vcf" "out.vcf.bgz" + (context="brain", trait="ENSG1") ->
-# "out.brain.ENSG1.vcf.bgz"
+# Decorate `outputPath` with the spec's context / trait / block tags when split
+# flags are set. Preserves the file extension. Examples: "out.vcf" +
+# (context="brain") -> "out.brain.vcf" "out.vcf.bgz" + (context="brain",
+# trait="ENSG1") -> "out.brain.ENSG1.vcf.bgz"
 # @noRd
 .decorateOutputPath <- function(
     outputPath,
     spec,
     splitByContext,
-    splitByTrait
+    splitByTrait,
+    splitByBlock = FALSE
 ) {
-    if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
+    if (!isTRUE(splitByContext) && !isTRUE(splitByTrait) && !splitByBlock) {
         return(outputPath)
     }
     ext <- str_to_lower(tools::file_ext(outputPath))
@@ -506,7 +515,8 @@ genomicOrder <- function(chrom, start, end = NULL) {
     )
     tags <- c(
         if (isTRUE(splitByContext)) .pubPathTag(spec$context),
-        if (isTRUE(splitByTrait)) .pubPathTag(spec$trait)
+        if (isTRUE(splitByTrait)) .pubPathTag(spec$trait),
+        if (splitByBlock) .pubPathTag(spec$block)
     )
     if (length(tags) == 0L) {
         return(outputPath)
@@ -526,30 +536,30 @@ genomicOrder <- function(chrom, start, end = NULL) {
 
 # ---- VCF: entry points ------------------------------------------------------
 
-#' @rdname exportToVcf
+#' @rdname writeGwasVcf
 #' @export
 setMethod(
-    "exportToVcf",
+    "writeGwasVcf",
     signature("list"),
-    function(x, outputPath, sampleName = NULL, ...) {
-        exportToVcf(
-            .pubCombineList(x),
-            outputPath,
+    function(obj, filename, sampleName = NULL, ...) {
+        writeGwasVcf(
+            .pubCombineList(obj),
+            filename,
             sampleName = sampleName,
             ...
         )
     }
 )
 
-#' @rdname exportToVcf
+#' @rdname writeGwasVcf
 #' @export
 setMethod(
-    "exportToVcf",
+    "writeGwasVcf",
     signature("GwasSumStats"),
-    function(x, outputPath, sampleName = NULL, studyName = NULL) {
+    function(obj, filename, sampleName = NULL, studyName = NULL) {
         .vcfRequireVariantAnnotation()
-        studyName <- .vcfResolveStudy(x, studyName)
-        ss <- sumStats(x, studyName = studyName)
+        studyName <- .vcfResolveStudy(obj, studyName)
+        ss <- sumStats(obj, studyName = studyName)
         mc <- mcols(ss)
         .writeVcfImpl(
             chrom = as.character(seqnames(ss)),
@@ -560,16 +570,17 @@ setMethod(
             geno = .vcfSumstatsGeno(mc, length(ss)),
             genoHeader = .vcfSumstatsGenoHeader(),
             sampleName = sampleName %||% studyName,
-            outputPath = outputPath
+            outputPath = filename,
+            build = .oneBuild(obj)
         )
     }
 )
 
-# VariantAnnotation is a Suggests, and every VCF path needs it.
+# VariantAnnotation writes the file; it is a Suggests, so the writer checks.
 # @noRd
 .vcfRequireVariantAnnotation <- function() {
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
-        abort("Package 'VariantAnnotation' is required for exportToVcf")
+        abort("Package 'VariantAnnotation' is required for writeGwasVcf().")
     }
     invisible(NULL)
 }
@@ -581,14 +592,17 @@ setMethod(
     if (!is.null(studyName)) {
         return(studyName)
     }
-    if (nrow(x) != 1L) {
+    # Studies, not rows: one study is several rows once split by chromosome
+    # or LD block, and sumStats() stitches them back together.
+    studies <- unique(as.character(x$study))
+    if (length(studies) != 1L) {
         msg <- glue(
-            "This GwasSumStats has {nrow(x)} studies. ",
-            "Pass `study = <name>` to select one."
+            "This GwasSumStats has {length(studies)} studies. ",
+            "Pass `studyName = <name>` to select one."
         )
         abort(msg)
     }
-    as.character(x$study[[1L]])
+    studies
 }
 
 # Per-sample geno matrices for the GWAS-VCF fields the mcols can fill.
@@ -667,40 +681,41 @@ setMethod(
     )
 }
 
-#' @rdname exportToVcf
+#' @rdname writeGwasVcf
 #' @export
 setMethod(
-    "exportToVcf",
+    "writeGwasVcf",
     signature("FineMappingResultBase"),
     function(
-        x,
-        outputPath,
+        obj,
+        filename,
         sampleName = NULL,
         studyName = NULL,
         context = NULL,
         trait = NULL,
         method = NULL,
         splitByContext = FALSE,
-        splitByTrait = FALSE
+        splitByTrait = FALSE,
+        splitByBlock = FALSE
     ) {
         .vcfRequireVariantAnnotation()
+        rows <- .pubMatchingRows(obj, studyName, context, trait, method)
+        .fitCoverageCheckedRows(obj[rows], "writeGwasVcf()")
         # Resolve what goes in each FILE. Without a split flag every matching
-        # fit is a SAMPLE of one file; with one, each fit gets its own file at
-        # a decorated path.
+        # fit is a SAMPLE of one file; with one, each context, trait or LD
+        # block gets its own file at a decorated path.
         groups <- .resolveFineMappingGroups(
-            x,
-            outputPath = outputPath,
-            studyName = studyName,
-            context = context,
-            trait = trait,
-            method = method,
+            obj,
+            outputPath = filename,
+            rows = rows,
             splitByContext = splitByContext,
-            splitByTrait = splitByTrait
+            splitByTrait = splitByTrait,
+            splitByBlock = splitByBlock
         )
         invisible(map_chr(
             groups,
             .fmvWriteGroup,
-            x = x,
+            x = obj,
             sampleName = sampleName
         ))
     }
@@ -709,66 +724,122 @@ setMethod(
 # Resolve what each OUTPUT FILE holds. Without a split flag every matching fit
 # becomes a SAMPLE of one multi-sample VCF -- which is GWAS-VCF's own shape,
 # where the samples are the studies -- so comparing two methods over a region
-# means reading one file rather than two. `splitByContext` / `splitByTrait`
-# still emit one single-sample file per fit, at a decorated path.
+# means reading one file rather than two. A GWAS fit is every LD block of its
+# (study, method), so its blocks share one sample. `splitByContext` /
+# `splitByTrait` emit one file per context / trait and `splitByBlock` one per
+# block, each at a decorated path; the fits that land on one path share it.
 # @noRd
 .resolveFineMappingGroups <- function(
     x,
     outputPath,
-    studyName,
-    context,
-    trait,
-    method,
+    rows,
     splitByContext,
-    splitByTrait
+    splitByTrait,
+    splitByBlock
 ) {
-    rows <- .pubMatchingRows(x, studyName, context, trait, method)
     if (length(rows) == 0L) {
-        abort("exportToVcf: no rows match the supplied selectors.")
+        abort("writeGwasVcf: no rows match the supplied selectors.")
     }
-    specs <- map(rows, .rowSpec, x = x)
-    if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
+    .fmvCheckSplitByBlock(x, splitByBlock)
+    specs <- map(
+        .fmvFitRows(x, rows),
+        .fitSpec,
+        x = x,
+        blockIds = .fmvBlockIds(x)
+    )
+    if (isTRUE(splitByBlock)) {
+        specs <- list_flatten(map(specs, .fmvSpecPerBlock))
+    }
+    if (!isTRUE(splitByContext) && !isTRUE(splitByTrait) && !splitByBlock) {
         return(list(list(path = outputPath, specs = specs)))
     }
-    map(
+    paths <- map_chr(
         specs,
-        .fmvSplitGroup,
+        .decorateOutputPath,
         outputPath = outputPath,
         splitByContext = splitByContext,
-        splitByTrait = splitByTrait
+        splitByTrait = splitByTrait,
+        splitByBlock = splitByBlock
     )
+    unname(imap(
+        split(specs, factor(paths, levels = unique(paths))),
+        .fmvPathGroup
+    ))
 }
 
 # @noRd
-.fmvSplitGroup <- function(spec, outputPath, splitByContext, splitByTrait) {
-    list(
-        path = .decorateOutputPath(
-            outputPath,
-            spec,
-            splitByContext,
-            splitByTrait
-        ),
-        specs = list(spec)
+.fmvPathGroup <- function(specs, path) {
+    list(path = path, specs = unname(specs))
+}
+
+# Blocks are a GWAS notion: a QTL fit is one row, so there is nothing to split.
+# @noRd
+.fmvCheckSplitByBlock <- function(x, splitByBlock) {
+    assertFlag(splitByBlock)
+    if (!splitByBlock || methods::is(x, "GwasFineMappingResult")) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "writeGwasVcf: `splitByBlock` splits a GWAS fit into its LD blocks; a ",
+        "{class(x)[[1L]]} fit is one row. Use `splitByContext` / ",
+        "`splitByTrait` instead."
+    ))
+}
+
+# The matching rows grouped into fits, in first-appearance order. A GWAS fit is
+# every LD block of one (study, method); a QTL row is a fit of its own, its
+# joint-membership columns being part of what identifies it.
+# @noRd
+.fmvFitRows <- function(x, rows) {
+    if (!methods::is(x, "GwasFineMappingResult")) {
+        return(as.list(rows))
+    }
+    key <- str_c(
+        .fmrIdentityColumn(x, "study")[rows],
+        .fmrIdentityColumn(x, "method")[rows],
+        sep = "\r"
+    )
+    unname(split(rows, factor(key, levels = unique(key))))
+}
+
+# One spec per block of a fit, each carrying the block it is for.
+# @noRd
+.fmvSpecPerBlock <- function(spec) {
+    map(unique(spec$blocks), .fmvBlockSpec, spec = spec)
+}
+
+# @noRd
+.fmvBlockSpec <- function(block, spec) {
+    on <- spec$blocks == block
+    list_assign(
+        spec,
+        rows = spec$rows[on],
+        blocks = spec$blocks[on],
+        block = block
     )
 }
 
-# Build a (study, context, trait, method) spec list for one row index.
+# The LD block each row of a GWAS result covers: its `blockId`, which keys the
+# block manifest, else its own range.
 # @noRd
-.rowSpec <- function(r, x) {
+.fmvBlockIds <- function(x) {
+    ids <- .fmrIdentityColumn(x, "blockId")
+    if_else(is.na(ids), .rtlRangeKeys(x), ids)
+}
+
+# Build a (study, context, trait, method) spec for one fit: its rows -- one,
+# or one per LD block of a GWAS fit -- their blocks, and the identity they
+# share.
+# @noRd
+.fitSpec <- function(rows, x, blockIds) {
+    r <- rows[[1L]]
     list(
-        row = r,
-        study = as.character(x$study)[r],
-        context = if (is_in("context", .tupleColumnNames(x))) {
-            as.character(x$context)[r]
-        } else {
-            NA_character_
-        },
-        trait = if (is_in("trait", .tupleColumnNames(x))) {
-            as.character(x$trait)[r]
-        } else {
-            NA_character_
-        },
-        method = as.character(x$method)[r]
+        rows = rows,
+        blocks = blockIds[rows],
+        study = .fmrIdentityAt(x, "study", r),
+        context = .fmrIdentityAt(x, "context", r),
+        trait = .fmrIdentityAt(x, "trait", r),
+        method = .fmrIdentityAt(x, "method", r)
     )
 }
 
@@ -980,7 +1051,10 @@ setMethod(
         error = function(cnd) NULL
     )
     marg <- try_fetch(
-        as_tibble(marginalEffects(entry)),
+        as_tibble(as.data.frame(
+            S4Vectors::mcols(marginalEffects(entry)),
+            optional = TRUE
+        )),
         error = function(cnd) NULL
     )
     hasPost <- !is.null(post) && nrow(post) > 0L
@@ -992,7 +1066,7 @@ setMethod(
         base <- marg
         m <- marg
     } else {
-        msg <- glue("exportToVcf: entry [{sn}] has no variants to write")
+        msg <- glue("writeGwasVcf: entry [{sn}] has no variants to write")
         abort(msg)
     }
     list(base = base, m = m, hasPost = hasPost)
@@ -1032,7 +1106,9 @@ setMethod(
 # variant leaves its cells empty.
 # @noRd
 .fmvWriteGroup <- function(group, x, sampleName) {
-    rows <- map(group$specs, .fmvRowSpecs, x = x)
+    # Every row's window at once: a genome-wide study's blocks join one
+    # sample, and asking per block would rebuild them all for each.
+    rows <- map(group$specs, .fmvRowSpecs, x = x, rg = genomicRegion(x))
     sn <- .vcfSampleNames(map_chr(rows, "sampleName"), sampleName)
     variants <- .fmvVariantUnion(rows)
     specs <- keep(
@@ -1049,36 +1125,142 @@ setMethod(
         genoHeader = .vcfGenoHeader(specs),
         sampleName = sn,
         outputPath = group$path,
-        sampleMeta = .fmvSampleMeta(rows, sn)
+        sampleMeta = .fmvSampleMeta(rows, sn),
+        build = .oneBuild(x)
     )
     group$path
 }
 
 # One fit's body, its FORMAT specs, and the variants they are aligned to.
 # @noRd
-.fmvRowSpecs <- function(spec, x) {
-    entry <- fineMappingResult(
-        x,
-        spec$study,
-        spec$context,
-        spec$trait,
-        spec$method
-    )
+.fmvRowSpecs <- function(spec, x, rg = genomicRegion(x)) {
     sn <- .fmvSampleLabel(spec)
-    body <- .vcfResolveBody(entry, sn)
-    nSnps <- nrow(body$base)
+    blocks <- map2(
+        spec$rows,
+        spec$blocks,
+        .fmvBlockBody,
+        x = x,
+        sn = sn,
+        rg = rg
+    )
+    base <- bind_rows(map(blocks, "base"))
+    nSnps <- nrow(base)
     list(
         sampleName = sn,
         spec = spec,
-        perFit = .pubPerFitFields(x, spec$row, susieFit(entry)),
-        base = body$base,
+        perFit = .fmvJoinPerFit(map(blocks, "perFit")),
+        base = base,
         nVariants = nSnps,
-        variantIds = as.character(.pubCol(body$base, "variant_id", nSnps)),
+        variantIds = as.character(.pubCol(base, "variant_id", nSnps)),
         formats = c(
-            .vcfCoreSpecs(body$base, body$m, nSnps),
-            if (body$hasPost) .vcfPosteriorSpecs(body$base, nSnps) else list()
+            .vcfCoreSpecs(base, .fmvJoinMarginals(blocks), nSnps),
+            if (any(map_lgl(blocks, "hasPost"))) {
+                .vcfPosteriorSpecs(base, nSnps)
+            } else {
+                list()
+            },
+            .fmvBlockIdSpec(blocks)
         )
     )
+}
+
+# One row's body and its per-fit header values. A GWAS fit fine-mapped block
+# by block is several rows, and each contributes one of these to the sample.
+# @noRd
+.fmvBlockBody <- function(r, block, x, sn, rg) {
+    entry <- x[r]
+    list_assign(
+        .vcfResolveBody(entry, sn),
+        perFit = .pubPerFitFields(
+            x,
+            r,
+            .fmrPartsSusieFit(.fmrRowParts(x, r)),
+            rg
+        ),
+        block = block
+    )
+}
+
+# The marginals of every block, row-aligned with the stacked bases. A block
+# with none still holds its rows, as NA; with none anywhere the table has no
+# columns, which the marginal fields read as missing, as they read NULL.
+# @noRd
+.fmvJoinMarginals <- function(blocks) {
+    bind_rows(map2(map(blocks, "m"), blocks, .fmvMarginalsOrEmpty))
+}
+
+# @noRd
+.fmvMarginalsOrEmpty <- function(m, block) {
+    m %||% tibble(.rows = nrow(block$base))
+}
+
+# The BID field: each variant's LD block, written only when a sample joins
+# several, since credible-set indices are numbered within a block.
+# @noRd
+.fmvBlockIdSpec <- function(blocks) {
+    if (length(blocks) < 2L) {
+        return(list())
+    }
+    list(.vcfSpec(
+        "BID",
+        list_c(map(blocks, .fmvBlockColumn)),
+        "String",
+        "LD block of the variant; credible sets are numbered within a block"
+    ))
+}
+
+# @noRd
+.fmvBlockColumn <- function(block) {
+    rep(block$block, nrow(block$base))
+}
+
+# The per-fit header fields that differ between the blocks of one fit, packed
+# in block order with "|" when a sample joins several.
+# @noRd
+.FMV_BLOCK_FIELDS <- c(
+    "block_id",
+    "region_id",
+    "region_start",
+    "region_end",
+    "region_given",
+    "V",
+    "cs_index"
+)
+
+# The header values of a fit spread over several LD blocks: the per-block
+# fields packed, the rest -- which describe the fit -- taken once, after
+# checking every block agrees on them.
+# @noRd
+.fmvJoinPerFit <- function(perFits) {
+    if (length(perFits) == 1L) {
+        return(perFits[[1L]])
+    }
+    fields <- names(perFits[[1L]])
+    set_names(map(fields, .fmvJoinField, perFits = perFits), fields)
+}
+
+# @noRd
+.fmvJoinField <- function(nm, perFits) {
+    vals <- map_chr(perFits, .fmvFieldText, nm = nm)
+    if (all(is.na(vals))) {
+        return(NA_character_)
+    }
+    if (is_in(nm, .FMV_BLOCK_FIELDS)) {
+        return(str_flatten(replace_na(vals, ""), "|"))
+    }
+    if (n_distinct(vals) > 1L) {
+        abort(glue(
+            "writeGwasVcf: the LD blocks of one fit disagree on `{nm}` ",
+            "({str_flatten(unique(vals), ', ')}), so they cannot be written ",
+            "as one sample. Pass `splitByBlock = TRUE`."
+        ))
+    }
+    perFits[[1L]][[nm]]
+}
+
+# @noRd
+.fmvFieldText <- function(perFit, nm) {
+    as.character(perFit[[nm]] %||% NA_character_)
 }
 
 # @noRd
@@ -1150,7 +1332,12 @@ setMethod(
 # sample is missing a variant.
 # @noRd
 .fmvFormatColumn <- function(r, nm, unionIds, type) {
-    fill <- if (identical(type, "Integer")) NA_integer_ else NA_real_
+    fill <- switch(
+        type,
+        Integer = NA_integer_,
+        String = NA_character_,
+        NA_real_
+    )
     out <- rep(fill, length(unionIds))
     f <- .fmvFindFormat(r, nm)
     if (is.null(f)) {
@@ -1197,6 +1384,7 @@ setMethod(
     region_id = "RegionId",
     region_start = "RegionStart",
     region_end = "RegionEnd",
+    region_given = "RegionGiven",
     V = "V",
     cs_index = "CsIndex"
 )
@@ -1233,9 +1421,11 @@ setMethod(
 
 # @noRd
 .fmvSampleMetaRow <- function(r) {
+    # As text: a sample joining several LD blocks packs its per-block fields
+    # into one string, and one header holds both kinds of sample.
     bind_cols(
         tibble(total_variants = r$nVariants),
-        as_tibble(r$perFit)
+        as_tibble(map(r$perFit, as.character))
     )
 }
 
@@ -1249,8 +1439,7 @@ setMethod(
 # colocPipeline's row filter reads them off the fit -- `sets$cs_index` or `V`.
 # Without them a round-tripped LBF matrix could be read but not filtered.
 # @noRd
-.pubPerFitFields <- function(x, row, fit) {
-    rg <- genomicRegion(x)
+.pubPerFitFields <- function(x, row, fit, rg = genomicRegion(x)) {
     inRange <- !is.null(row) && length(rg) >= row
     md <- mcols(x)
     list(
@@ -1268,6 +1457,7 @@ setMethod(
         region_id = if (inRange) .pubRegionIds(rg)[[row]] else NA_character_,
         region_start = if (inRange) start(rg)[[row]] else NA_integer_,
         region_end = if (inRange) end(rg)[[row]] else NA_integer_,
+        region_given = .pubRowValue(md, "regionGiven", row),
         V = .pubPackOrNa(.fitField(fit, "V")),
         cs_index = .pubPackOrNa(.fitField(fit, "sets", "cs_index"))
     )
@@ -1293,14 +1483,14 @@ setMethod(
 
 # ---- VCF: TWAS weights ------------------------------------------------------
 
-#' @rdname exportToVcf
+#' @rdname writeGwasVcf
 #' @export
 setMethod(
-    "exportToVcf",
+    "writeGwasVcf",
     signature("TwasWeights"),
     function(
-        x,
-        outputPath,
+        obj,
+        filename,
         sampleName = NULL,
         studyName = NULL,
         context = NULL,
@@ -1308,29 +1498,29 @@ setMethod(
         method = NULL
     ) {
         .vcfRequireVariantAnnotation()
-        .pubRequireFullFit(x, .twbIncompleteRows(x), "exportToVcf")
-        rows <- .pubMatchingRows(x, studyName, context, trait, method)
+        .pubRequireFullFit(obj, .twbIncompleteRows(obj), "writeGwasVcf")
+        rows <- .pubMatchingRows(obj, studyName, context, trait, method)
         if (length(rows) == 0L) {
-            abort("exportToVcf: no rows match the supplied selectors.")
+            abort("writeGwasVcf: no rows match the supplied selectors.")
         }
         # The same rule the BED path applies, and for the same reason: a
         # fine-mapping method's "weights" are the posterior re-expressed, so
         # the fine-mapping result says strictly more. This path used to publish
         # them, which made the two formats disagree about what a weights file
         # contains.
-        rows <- intersect(rows, .twbExportableRows(x, "exportToVcf"))
+        rows <- intersect(rows, .twbExportableRows(obj, "writeGwasVcf"))
         if (length(rows) == 0L) {
             abort(str_c(
-                "exportToVcf: every selected row is fine-mapping-derived, so ",
-                "there is nothing to write as weights. Export the ",
+                "writeGwasVcf: every selected row is fine-mapping-derived, so ",
+                "there is nothing to write as weights. Write the ",
                 "fine-mapping result."
             ))
         }
         .twvWriteSamples(
-            x,
-            .twvSampleSpecs(x, rows),
+            obj,
+            .twvSampleSpecs(obj, rows),
             sampleName,
-            outputPath
+            filename
         )
     }
 )
@@ -1367,7 +1557,8 @@ setMethod(
             meta,
             colSums(!is.na(wgt)),
             x
-        )
+        ),
+        build = .oneBuild(x)
     )
 }
 
@@ -1526,14 +1717,20 @@ setMethod(
     genoHeader,
     sampleName,
     outputPath,
-    sampleMeta = NULL
+    sampleMeta = NULL,
+    build = NA_character_
 ) {
-    # Ensure chromosome names have the "chr" prefix.
-    if (!all(str_detect(chrom, "^chr"))) {
-        chrom <- str_c("chr", chrom)
-    }
+    # UCSC chromosome names (chr1, chrX, chrM), as the package's ranges use.
+    chrom <- withChrPrefix(chrom)
     gr <- .vcfBuildRanges(chrom, pos, ref, alt, snpIds)
-    hdr <- .vcfBuildHeader(sampleName, genoHeader, geno, sampleMeta)
+    hdr <- .vcfBuildHeader(
+        sampleName,
+        genoHeader,
+        geno,
+        sampleMeta,
+        build,
+        unique(chrom)
+    )
     vcf <- .vcfBuildObject(gr, sampleName, hdr, geno, ref, alt)
     .vcfWriteByFormat(vcf, outputPath, chrom)
     invisible(outputPath)
@@ -1552,12 +1749,31 @@ setMethod(
     )
 }
 
-# VCF header (VCFv4.2, the optional ##SAMPLE block, and the geno header subset
-# to the fields actually present).
+# VCF header (VCFv4.2, the genome build when the object names one, the
+# optional ##SAMPLE block, and the geno header subset to the fields actually
+# present). The build is written as ##reference and as the assembly of each
+# ##contig, the two places a VCF reader looks for it.
 # @noRd
-.vcfBuildHeader <- function(sampleName, genoHeader, geno, sampleMeta = NULL) {
+.vcfBuildHeader <- function(
+    sampleName,
+    genoHeader,
+    geno,
+    sampleMeta = NULL,
+    build = NA_character_,
+    contigs = character(0)
+) {
+    named <- !is.na(build)
     sections <- compact(list(
         fileformat = DataFrame(Value = "VCFv4.2", row.names = "fileformat"),
+        reference = if (named) {
+            DataFrame(Value = build, row.names = "reference")
+        },
+        contig = if (named && length(contigs) > 0L) {
+            DataFrame(
+                assembly = rep(build, length(contigs)),
+                row.names = contigs
+            )
+        },
         SAMPLE = sampleMeta
     ))
     hdr <- VariantAnnotation::VCFHeader(
@@ -1611,7 +1827,8 @@ setMethod(
     CharacterList(as.list(alt))
 }
 
-# Write the VCF in the format implied by the output extension. writeVcf appends
+# Write the VCF in the format implied by the output extension.
+# VariantAnnotation::writeVcf() appends
 # ".bgz" when index = TRUE, so paths are passed WITHOUT the .bgz/.gz suffix.
 # @noRd
 .vcfWriteByFormat <- function(vcf, outputPath, chrom) {
@@ -1649,7 +1866,7 @@ setMethod(
         ),
         error = function(cnd) {
             msg <- glue(
-                "exportToVcf: BCF output needs a working ",
+                "writeGwasVcf: BCF output needs a working ",
                 "Rsamtools::asBcf(), which the installed Rsamtools does not ",
                 "provide. Write a bgzipped VCF instead by giving the output ",
                 "path a .vcf.bgz extension."
@@ -1659,7 +1876,8 @@ setMethod(
     )
 }
 
-# bgzip / gzip path: writeVcf always creates .bgz; rename to .gz on request.
+# bgzip / gzip path: VariantAnnotation::writeVcf() always creates .bgz;
+# renamed to .gz on request.
 # @noRd
 .vcfWriteBgz <- function(vcf, outputPath) {
     vcfStem <- str_remove(outputPath, "\\.(bgz|gz)$")
@@ -1763,7 +1981,7 @@ setMethod(
     levels <- .pubCsLevels(view, coverage)
     if (length(levels) == 0L) {
         abort(str_c(
-            "exportToBed(schema = 'fsusie'): the result carries no ",
+            "writeBed(schema = 'fsusie'): the result carries no ",
             "credible-set column, so there are no rows to key on."
         ))
     }
@@ -1896,18 +2114,21 @@ setMethod(
     if (nrow(fs) == 0L) {
         return(NULL)
     }
-    band <- as.data.frame(fsusieCredibleBand(fs))
+    band <- as.data.frame(
+        S4Vectors::mcols(fsusieCredibleBand(fs)),
+        optional = TRUE
+    )
     if (nrow(band) == 0L) {
         abort(str_c(
-            "exportToBed(schema = 'fsusie'): the functional fields ",
+            "writeBed(schema = 'fsusie'): the functional fields ",
             "are absent from every row. Refit with a retention level that ",
             "keeps the fSuSiE curves."
         ))
     }
-    csTbl <- as.data.frame(credibleSets(fs))
+    csTbl <- as.data.frame(S4Vectors::mcols(credibleSets(fs)), optional = TRUE)
     primary <- .fmbPrimaryCsLevel(csTbl, coverage)
     csCols <- .pubCsColumns(csTbl, coverage)
-    marks <- as.data.frame(fsusieTraitEffects(fs))
+    marks <- as.data.frame(.fsusieTraitEffectsTable(fs))
     rowRegions <- genomicRegion(fs)
     rowRegionIds <- set_names(
         .pubRegionIds(rowRegions),
@@ -2017,10 +2238,12 @@ setMethod(
     "joint_contexts",
     "joint_traits",
     # The window ANALYSED, without which a read-back result's genomicRegion()
-    # silently degrades to the span of the variants that survived QC.
+    # silently degrades to the span of the variants that survived QC, and,
+    # for a GWAS block, whether its range was given or is that span.
     "region_id",
     "region_start",
-    "region_end"
+    "region_end",
+    "region_given"
 )
 
 # Always written, so the output is always a valid BED even when every optional
@@ -2162,6 +2385,15 @@ setMethod(
     "p"
 )
 
+# The marginal estimates of `x`'s variants joined onto its posterior table.
+# @noRd
+.fmbMarginalsFor <- function(tl, x) {
+    .pubJoinMarginals(
+        tl,
+        as.data.frame(S4Vectors::mcols(marginalEffects(x)), optional = TRUE)
+    )
+}
+
 # The topLoci BED table.
 #
 # `tl$beta`/`tl$se` are the POSTERIOR mean and sd -- topLoci() is the
@@ -2178,7 +2410,7 @@ setMethod(
     if (nrow(tl) == 0L) {
         return(NULL)
     }
-    mm <- .pubJoinMarginals(tl, as.data.frame(marginalEffects(x)))
+    mm <- .fmbMarginalsFor(tl, x)
     win <- .fmbRowWindows(x, tl)
     pos <- .pubCol(tl, "pos")
     p <- suppressWarnings(as.numeric(.pubCol(mm, "p")))
@@ -2209,7 +2441,8 @@ setMethod(
         list(
             region_id = win$id,
             region_start = win$start,
-            region_end = win$end
+            region_end = win$end,
+            region_given = win$given
         )
     )
     out <- .pubFrame(cols, .pubSchema(csCols))
@@ -2330,14 +2563,18 @@ setMethod(
 
 # The analysis window of the collection row each long-view row came from,
 # matched on the row identity so a folded multi-row table keeps each row's own
-# window rather than the first one's.
+# window rather than the first one's. Both keys are built from the SAME
+# columns -- those the view and the collection both carry -- since a GWAS view
+# NA-fills a context and trait its collection does not have; and `blockId` is
+# among them, as it is what tells the blocks of one GWAS fit apart.
 # @noRd
 .fmbRowWindows <- function(x, df) {
     rg <- genomicRegion(x)
-    idx <- match(
-        .pubIdentityKey(df, .PUB_ROW_COLS),
-        .pubCollectionKey(x, .PUB_ROW_COLS)
+    cols <- intersect(
+        intersect(c(.PUB_ROW_COLS, "blockId"), names(df)),
+        .tupleColumnNames(x)
     )
+    idx <- match(.pubIdentityKey(df, cols), .pubCollectionKey(x, cols))
     # 0-based half-open, like every other coordinate in a BED -- that is the
     # format's requirement, not a pecotmr choice. `region_id` stays the
     # canonical 1-based `chrom_start_end`, because it is an IDENTIFIER matched
@@ -2345,19 +2582,30 @@ setMethod(
     list(
         id = .pubRegionIds(rg)[idx],
         start = start(rg)[idx] - 1L,
-        end = end(rg)[idx]
+        end = end(rg)[idx],
+        given = .pubRegionGiven(x)[idx]
     )
+}
+
+# Whether each row's block range was given, or NA where the collection does
+# not record it (only a GWAS result does).
+# @noRd
+.pubRegionGiven <- function(x) {
+    if (!is_in("regionGiven", .tupleColumnNames(x))) {
+        return(rep(NA, nrow(x)))
+    }
+    as.logical(.tupleColumn(x, "regionGiven"))
 }
 
 # ---- BED: fine-mapping entry point ------------------------------------------
 
-#' @rdname exportToBed
+#' @rdname writeBed
 #' @export
 setMethod(
-    "exportToBed",
+    "writeBed",
     signature("list"),
-    function(x, outputPath, ...) {
-        exportToBed(.pubCombineList(x), outputPath, ...)
+    function(obj, filename, ...) {
+        writeBed(.pubCombineList(obj), filename, ...)
     }
 )
 
@@ -2365,14 +2613,14 @@ setMethod(
 # window each row was ANALYSED over. A nominal TAD boundary is what a
 # publication table means by its region, not the narrower span of whichever
 # variants survived QC.
-#' @rdname exportToBed
+#' @rdname writeBed
 #' @export
 setMethod(
-    "exportToBed",
+    "writeBed",
     signature("FineMappingResultBase"),
     function(
-        x,
-        outputPath,
+        obj,
+        filename,
         schema = c("topLoci", "fsusie"),
         signalCutoff = 0.025,
         minPurity = NULL,
@@ -2383,25 +2631,27 @@ setMethod(
     ) {
         schema <- arg_match(schema)
         levels <- arg_match(levels, multiple = TRUE)
-        assertString(outputPath)
-        .pubRequireFullFit(x, .fmbIncompleteRows(x), "exportToBed")
+        assertString(filename)
+        .pubRequireFullFit(obj, .fmbIncompleteRows(obj), "writeBed")
         if (identical(schema, "fsusie")) {
             return(.pubWriteTable(
-                .fmbFsusieTable(x, columns, levels, coverage),
-                outputPath,
+                .fmbFsusieTable(obj, columns, levels, coverage),
+                filename,
                 naString = "NA",
                 index = TRUE,
                 emptySchema = .fmbFsusieColumns(levels),
-                extraColumns = extraColumns
+                extraColumns = extraColumns,
+                build = .oneBuild(obj)
             ))
         }
         .pubWriteTable(
-            .fmbTopLociTable(x, signalCutoff, minPurity, columns, coverage),
-            outputPath,
+            .fmbTopLociTable(obj, signalCutoff, minPurity, columns, coverage),
+            filename,
             naString = "NA",
             index = TRUE,
             keepColumns = .pubNamedColumns(columns),
-            extraColumns = extraColumns
+            extraColumns = extraColumns,
+            build = .oneBuild(obj)
         )
     }
 )
@@ -2529,7 +2779,7 @@ setMethod(
 )
 
 # @noRd
-.twbExportableRows <- function(x, label = "exportToBed") {
+.twbExportableRows <- function(x, label = "writeBed") {
     methods <- .pubTupleColumn("method", x)
     skip <- which(is_in(methods, .TWB_FINE_MAPPING_METHODS))
     if (length(skip) > 0L) {
@@ -2647,7 +2897,7 @@ setMethod(
     rows <- .twbExportableRows(x)
     if (length(rows) == 0L) {
         abort(str_c(
-            "exportToBed: every row is fine-mapping-derived, so there is ",
+            "writeBed: every row is fine-mapping-derived, so there is ",
             "nothing to write as weights. Export the fine-mapping result."
         ))
     }
@@ -2677,27 +2927,28 @@ setMethod(
 # held-out FOLDS, nothing about them is per-variant, and a published file has
 # no data-secure way to express anything fold-level. They stay on the object,
 # where cvResult() returns them and the caller tabulates whatever they need.
-#' @rdname exportToBed
+#' @rdname writeBed
 #' @export
 setMethod(
-    "exportToBed",
+    "writeBed",
     signature("TwasWeights"),
     function(
-        x,
-        outputPath,
+        obj,
+        filename,
         coverage = NULL,
         columns = NULL,
         extraColumns = NULL
     ) {
-        assertString(outputPath)
-        .pubRequireFullFit(x, .twbIncompleteRows(x), "exportToBed")
+        assertString(filename)
+        .pubRequireFullFit(obj, .twbIncompleteRows(obj), "writeBed")
         .pubWriteTable(
-            .twbWeightsTable(x, columns, coverage),
-            outputPath,
+            .twbWeightsTable(obj, columns, coverage),
+            filename,
             naString = "NA",
             index = TRUE,
             keepColumns = .pubNamedColumns(columns),
-            extraColumns = extraColumns
+            extraColumns = extraColumns,
+            build = .oneBuild(obj)
         )
     }
 )

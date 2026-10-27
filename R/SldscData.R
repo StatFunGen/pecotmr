@@ -158,25 +158,34 @@ SldscData <- function(annotData, frqData = NULL, traits = list()) {
     if (is.null(frqData)) {
         frqData <- tibble()
     }
-    obj <- new(
+    new(
         "SldscData",
         annotData = as_tibble(annotData),
         frqData = as_tibble(frqData),
         traits = traits
     )
-    validObject(obj)
-    obj
 }
 
 # ---- accessors ----
 
 #' @rdname annotData
 #' @export
-setMethod("annotData", "SldscData", function(x) x@annotData)
+setMethod("annotData", "SldscData", function(x) {
+    S4Vectors::DataFrame(x@annotData, check.names = FALSE)
+})
 
 #' @rdname frqData
 #' @export
-setMethod("frqData", "SldscData", function(x) x@frqData)
+setMethod("frqData", "SldscData", function(x) {
+    S4Vectors::DataFrame(x@frqData, check.names = FALSE)
+})
+
+# The stored tables as the estimators read them, with dplyr.
+# @noRd
+.sdAnnot <- function(x) x@annotData
+
+# @noRd
+.sdFrq <- function(x) x@frqData
 
 #' @rdname traitNames
 #' @export
@@ -193,27 +202,42 @@ setMethod("annotCols", "SldscData", function(x) {
 setMethod(
     "sldscResults",
     "SldscData",
-    function(x, trait = NULL, mode = c("single", "joint"), idx = NULL) {
+    function(x, trait = NULL) {
         if (is.null(trait)) {
             return(x@traits)
         }
-        mode <- arg_match(mode)
-        runs <- x@traits[[trait]]
-        if (is.null(runs)) {
-            return(NULL)
+        unknown <- setdiff(trait, names(x@traits))
+        if (length(unknown) > 0L) {
+            abort(glue(
+                "sldscResults: no trait {str_flatten(unknown, ', ')} in this ",
+                "SldscData. It has: {str_flatten(names(x@traits), ', ')}."
+            ))
         }
-        if (mode == "joint") {
-            return(runs$joint)
-        }
-        if (is.null(idx)) {
-            return(runs$single)
-        }
-        if (idx > length(runs$single)) {
-            return(NULL)
-        }
-        runs$single[[idx]]
+        x@traits[trait]
     }
 )
+
+# One trait's run, for the pipelines: its joint run, its single runs, or one
+# single run by position -- NULL when the trait, the run kind or that index
+# is absent, which those callers turn into their own message.
+# @noRd
+.sldscRun <- function(x, trait, mode = c("single", "joint"), idx = NULL) {
+    mode <- arg_match(mode)
+    runs <- x@traits[[trait]]
+    if (is.null(runs)) {
+        return(NULL)
+    }
+    if (mode == "joint") {
+        return(runs$joint)
+    }
+    if (is.null(idx)) {
+        return(runs$single)
+    }
+    if (idx > length(runs$single)) {
+        return(NULL)
+    }
+    runs$single[[idx]]
+}
 
 #' @rdname SldscData
 setMethod("show", "SldscData", function(object) {

@@ -4,7 +4,7 @@
 \alias{ColocResult}
 \title{Build a ColocResult}
 \usage{
-ColocResult(pairs, variants, ldReference = NULL)
+ColocResult(pairs, variants, ldReference = NULL, metadata = list())
 }
 \arguments{
 \item{pairs}{A data frame with one row per tested pair, carrying at least
@@ -23,6 +23,10 @@ frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.}
 \code{LdMatrix} -- for every pair, or a list with one per pair; used by
 \code{\link{colocCredibleSets}} to compute purity. Each distinct
 reference is stored once.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{ColocResult}.

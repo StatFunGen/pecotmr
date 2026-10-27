@@ -49,8 +49,7 @@ disables it).}
 \item{keepVariants}{Optional character vector of variant IDs (SNP column) to
 retain prior to harmonization.}
 
-\item{skipRegion}{Optional character vector of \code{"chr:start-end"}
-strings, or a \code{GRanges}, of regions to drop.}
+\item{skipRegion}{Optional \code{GRanges} of regions to drop.}
 
 \item{signalScreenParam}{Whether to skip an entry before fitting it,
 built with
@@ -84,8 +83,9 @@ counts and an \code{N} column are present the counts win: \code{N} is
 overridden and the override is logged. Inputs with no counts (quantitative
 traits) are unchanged. The escape hatch \code{effectiveN = FALSE} restores
 the raw \code{N} column (or, when there is no \code{N}, the raw total
-\code{nCase + nControl}) with no override. \code{qcInfo$options$effectiveN}
-records the setting and each entry's \code{nSource} is one of
+\code{nCase + nControl}) with no override.
+\code{qcOptions(x)$options$effectiveN} records the setting and each
+row's \code{nSource} (a \code{\link{qcInfo}} column) is one of
 \code{"effective"}, \code{"column"}, \code{"total"}, or \code{NA}.}
 
 \item{impute}{Logical (length 1). Run RAISS imputation against the
@@ -99,7 +99,10 @@ records how many variants were imputed. Default \code{FALSE}.}
   RAISS imputation scopes its reference panel to the analysis-region window
   (so a per-chromosome / genome-wide \code{ldReference} does not materialize
   its full dosage); \code{flank} widens that window by the given number of
-  base pairs on each side to retain LD context for edge variants.
+  base pairs on each side to retain LD context for edge variants, though
+  never into the stretch of another row of the same study, nor past a
+  block range that was given: a study split into LD blocks imputes each
+  block once, in its own row.
 
   \code{mafCutoff}, \code{macCutoff} and \code{imissCutoff} bound which
   panel variants RAISS will attempt to impute. Without them every rare
@@ -133,8 +136,8 @@ filter or screen. Distinct from \code{sumstatsFilterParam}, which applies
 quality thresholds to rows that are already well formed.}
 }
 \value{
-A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries
-  and \code{qcInfo} populated.
+A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries,
+  \code{qcOptions} filled and each row's QC audit attached.
 }
 \description{
 Applies a single QC pass to a \code{QtlSumStats} or \code{GwasSumStats}
@@ -150,10 +153,12 @@ and optional RAISS imputation. No Bioconductor genome / dbSNP packages
 required.
 }
 \details{
-The returned collection has its \code{qcInfo} slot populated with a per-entry
-audit record (variant counts, drop counts at each step, which filters fired,
-etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
-\code{length(qcInfo(x)) == 0L}.
+The returned collection records the options QC ran with in its
+\code{qcOptions} slot, and what QC did to each row (variant counts, drop
+counts at each step, which filters fired, etc.) in its \code{qcAudit}
+column, read as a table with \code{\link{qcInfo}}. Fine-mapping and
+TWAS-weights pipelines reject SumStats inputs where
+\code{length(qcOptions(x)) == 0L}.
 
 Column-availability error contract: a non-zero \code{infoCutoff} requires
 every entry to carry an \code{INFO} column, and a non-zero \code{nCutoff}
@@ -168,8 +173,8 @@ filtered against the reference panel (see below).
   \code{\link{twasWeightsPipeline}} measure them on the RSS path, so one
   number means the same thing wherever it is set. MAC is converted to a MAF
   equivalent and the stricter of the two applies, matching
-  \code{\link{QtlDataset}}. Defaults (\code{0}, \code{0}, \code{1}) filter
-  nothing.
+  \code{\link{GenotypeFilterParam}}. Defaults (\code{0}, \code{0},
+  \code{1}) filter nothing.
 
   The panel is filtered once, before any entry is harmonized, so a variant
   the panel cannot support is absent from the LD used by kriging,

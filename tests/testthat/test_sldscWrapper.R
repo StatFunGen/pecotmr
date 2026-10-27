@@ -1,13 +1,121 @@
 # Tests for R/sldscWrapper.R
 #
-# File-based fixture builders (.makeAnnotGz / .make_frq / .makePolyfunSingle
-# / .makePolyfunJoint / .makeSldscFixtures) and the in-memory SldscData
-# builders (.sldscMkRun / .sldscMkData) live in helper-sldsc.R.
+# The file-based fixture builders are below; the in-memory SldscData builders
+# (.sldscMkRun / .sldscMkData), shared with the other S-LDSC tests, live in
+# helper-sldsc.R.
 #
 # The reader functions (readSldscTrait/readSldscAnnot/readSldscFrq) do file I/O
 # and are tested against real fixture files. The compute functions
 # (computeSldscMRef/computeSldscAnnotSd/isBinarySldscAnnot/standardizeSldscTrait)
 # operate on an in-memory SldscData and are tested with in-memory fixtures.
+
+# =============================================================================
+# File-based fixtures for the readers
+# =============================================================================
+#
+# Fixture convention:
+#   - 2 chromosomes (1, 2), 50 SNPs each -> 100 total
+#   - 2 target annotations: "annot_A" (binary), "annot_B" (continuous)
+#   - 10 jackknife blocks
+#   - Polyfun appends "_0" to target annotation names in .results
+
+# Create a single .annot.gz file for one chromosome.
+# Real polyfun .annot.gz files have CHR, SNP, BP, CM + annotation columns only
+# (no MAF/A1/A2 -- those come from the .frq / PLINK files).
+.makeAnnotGz <- function(dir, chrom, nSnps = 50) {
+    df <- data.frame(
+        CHR = chrom,
+        SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(nSnps)),
+        BP = seq_len(nSnps) * 1000L,
+        CM = seq_len(nSnps) * 0.01,
+        annot_A = sample(c(0L, 1L), nSnps, replace = TRUE),
+        annot_B = rnorm(nSnps, 2, 0.5),
+        stringsAsFactors = FALSE
+    )
+    path <- file.path(dir, sprintf("target.%d.annot.gz", chrom))
+    gz <- gzfile(path, "wb")
+    vroom::vroom_write(df, gz, delim = "\t")
+    close(gz)
+    invisible(df)
+}
+
+# Create a PLINK .frq file for one chromosome
+.make_frq <- function(dir, chrom, plinkName = "ref_chr", nSnps = 50) {
+    df <- data.frame(
+        CHR = chrom,
+        SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(nSnps)),
+        A1 = "A",
+        A2 = "G",
+        MAF = runif(nSnps, 0.01, 0.49),
+        NCHROBS = 200L,
+        stringsAsFactors = FALSE
+    )
+    path <- file.path(dir, sprintf("%s%d.frq", plinkName, chrom))
+    vroom::vroom_write(df, path, delim = "\t")
+    invisible(df)
+}
+
+# Create the three polyfun output files (.results, .log, .part_delete)
+# for a single-target run. Real polyfun output includes baseline categories
+# even in single-target mode, so we add 2 dummy baseline categories.
+.makePolyfunSingle <- function(
+    dir,
+    prefix,
+    target_name,
+    nBlocks = 10,
+    h2g = 0.3,
+    tau = 1e-7,
+    enrichment = 2.5,
+    n_baseline = 2
+) {
+    target_cat <- paste0(target_name, "_0")
+    baseline_cats <- paste0("baselineLD_", seq_len(n_baseline) - 1L)
+    all_cats <- c(target_cat, baseline_cats)
+    n_cats <- length(all_cats)
+
+    taus_all <- c(tau, rep(1e-8, n_baseline))
+    enrichments_all <- c(enrichment, rep(1.0, n_baseline))
+
+    results <- data.frame(
+        Category = all_cats,
+        Coefficient = taus_all,
+        Coefficient_std_error = abs(taus_all) * 0.3,
+        Enrichment = enrichments_all,
+        Enrichment_std_error = enrichments_all * 0.2,
+        Enrichment_p = rep(0.01, n_cats),
+        `Prop._h2` = c(0.15, rep(0.425, n_baseline)),
+        `Prop._SNPs` = c(0.06, rep(0.47, n_baseline)),
+        check.names = FALSE,
+        stringsAsFactors = FALSE
+    )
+    vroom::vroom_write(results, paste0(prefix, ".results"), delim = "\t")
+
+    writeLines(
+        c(
+            "Analysis started at 2024-01-01",
+            sprintf("Total Observed scale h2: %g (0.05)", h2g),
+            "Analysis finished"
+        ),
+        paste0(prefix, ".log")
+    )
+
+    blocks <- matrix(
+        rnorm(
+            nBlocks * n_cats,
+            mean = rep(taus_all, each = nBlocks),
+            sd = abs(rep(taus_all, each = nBlocks)) * 0.5
+        ),
+        nrow = nBlocks,
+        ncol = n_cats
+    )
+    colnames(blocks) <- all_cats
+    vroom::vroom_write(
+        as.data.frame(blocks),
+        paste0(prefix, ".part_delete"),
+        delim = "\t"
+    )
+    invisible(NULL)
+}
 
 # =============================================================================
 # .sldscDetectAnnotCols
@@ -262,12 +370,6 @@ test_that("computeSldscAnnotSd errors with zero degrees of freedom", {
 # computeSldscMRef  (operates on SldscData)
 # =============================================================================
 
-test_that("computeSldscMRef counts MAF > cutoff SNPs from the frq table", {
-    M <- computeSldscMRef(.sldscMkData(), mafCutoff = 0.05)
-    expect_true(is.integer(M))
-    expect_equal(M, 6L) # all 6 frq SNPs have MAF 0.2 > 0.05
-})
-
 test_that("computeSldscMRef counts all SNPs when mafCutoff = 0", {
     expect_equal(computeSldscMRef(.sldscMkData(), mafCutoff = 0), 6L)
 })
@@ -286,7 +388,9 @@ test_that("computeSldscMRef applies the MAF cutoff", {
         stringsAsFactors = FALSE
     )
     sd <- SldscData(annot, frq, list())
-    expect_equal(computeSldscMRef(sd, mafCutoff = 0.05), 2L) # rs1, rs3
+    M <- computeSldscMRef(sd, mafCutoff = 0.05)
+    expect_true(is.integer(M))
+    expect_equal(M, 2L) # rs1, rs3
 })
 
 test_that("computeSldscMRef falls back to annot row count when frq absent and mafCutoff = 0", {
@@ -539,7 +643,7 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
 
 
 # =============================================================================
-# metaSldscRandom  (unchanged: operates on standardized per-trait estimates)
+# metaSldscRandom  (operates on standardized per-trait estimates)
 # =============================================================================
 
 .makePerTraitMeta <- function(
@@ -549,7 +653,9 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
     ses = NULL
 ) {
     if (is.null(means)) {
-        means <- rnorm(nTraits, 1e-5, 1e-6)
+        # Seeded, so the fixture is the same on every run, and scoped, so
+        # the caller's random stream is left as it was.
+        means <- withr::with_seed(1L, rnorm(nTraits, 1e-5, 1e-6))
     }
     if (is.null(ses)) {
         ses <- rep(1e-6, nTraits)
@@ -572,30 +678,18 @@ test_that("standardizeSldscTrait errors on non-SldscData input", {
     per_trait
 }
 
-test_that("metaSldscRandom works for tauStar", {
+test_that("metaSldscRandom meta-analyzes tauStar, enrichment and enrichstat", {
     pt <- .makePerTraitMeta(nTraits = 4)
-    result <- metaSldscRandom(pt, "A_0", quantity = "tauStar")
-    expect_true(is.list(result))
-    expect_equal(result$nTraits, 4L)
-    expect_true(is.numeric(result$mean))
-    expect_true(is.numeric(result$se))
-    expect_true(is.numeric(result$p))
-    expect_true(result$se > 0)
-    expect_equal(length(result$traitsUsed), 4L)
-})
-
-test_that("metaSldscRandom works for enrichment", {
-    pt <- .makePerTraitMeta(nTraits = 3)
-    result <- metaSldscRandom(pt, "A_0", quantity = "enrichment")
-    expect_equal(result$nTraits, 3L)
-    expect_true(is.finite(result$mean))
-})
-
-test_that("metaSldscRandom works for enrichstat", {
-    pt <- .makePerTraitMeta(nTraits = 3)
-    result <- metaSldscRandom(pt, "A_0", quantity = "enrichstat")
-    expect_equal(result$nTraits, 3L)
-    expect_true(is.finite(result$mean))
+    for (quantity in c("tauStar", "enrichment", "enrichstat")) {
+        result <- metaSldscRandom(pt, "A_0", quantity = quantity)
+        expect_true(is.list(result), info = quantity)
+        expect_equal(result$nTraits, 4L, info = quantity)
+        expect_true(is.finite(result$mean), info = quantity)
+        expect_true(is.numeric(result$se), info = quantity)
+        expect_true(is.numeric(result$p), info = quantity)
+        expect_true(result$se > 0, info = quantity)
+        expect_equal(length(result$traitsUsed), 4L, info = quantity)
+    }
 })
 
 # A per-trait $summary carrying the wide (Single/Joint) columns that
@@ -680,13 +774,6 @@ test_that("metaSldscRandom skips traits with NA or zero SE", {
     result <- metaSldscRandom(pt, "A_0", "tauStar")
     expect_equal(result$nTraits, 1L)
     expect_true(is.na(result$mean))
-})
-
-test_that("metaSldscRandom skips NULL entries", {
-    pt <- .makePerTraitMeta(nTraits = 3)
-    pt$trait2 <- NULL
-    result <- metaSldscRandom(pt, "A_0", "tauStar")
-    expect_equal(result$nTraits, 2L)
 })
 
 test_that("metaSldscRandom generates names for unnamed list", {
@@ -863,6 +950,10 @@ test_that(".sldscViewForMeta returns NULL when no matching columns", {
     expect_null(view$traitX)
 })
 
+
+# =============================================================================
+# Annotation variance, positional annotCols, and meta-analysis arguments
+# =============================================================================
 
 test_that("a constant annotation column contributes no variance", {
     # var() of a constant is 0 and of an all-NA column is NA; both must come

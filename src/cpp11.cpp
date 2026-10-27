@@ -33,20 +33,6 @@ extern "C" SEXP _pecotmr_dentistIterativeImputeFactor(SEXP factorR, SEXP nSample
     return cpp11::as_sexp(dentistIterativeImputeFactor(cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(factorR), cpp11::as_cpp<cpp11::decay_t<int>>(nSample), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zScoreR), cpp11::as_cpp<cpp11::decay_t<double>>(pValueThreshold), cpp11::as_cpp<cpp11::decay_t<double>>(propSVD), cpp11::as_cpp<cpp11::decay_t<bool>>(gcControl), cpp11::as_cpp<cpp11::decay_t<int>>(nIter), cpp11::as_cpp<cpp11::decay_t<double>>(gPvalueThreshold), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<bool>>(correctChenEtAlBug), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
   END_CPP11
 }
-// lassosum_rss.cpp
-cpp11::writable::list lassosumRssCpp(const doubles& zR, const list& LD, double shrink, const doubles& lambdaR, double thr, int maxiter);
-extern "C" SEXP _pecotmr_lassosumRssCpp(SEXP zR, SEXP LD, SEXP shrink, SEXP lambdaR, SEXP thr, SEXP maxiter) {
-  BEGIN_CPP11
-    return cpp11::as_sexp(lassosumRssCpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zR), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<double>>(shrink), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lambdaR), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter)));
-  END_CPP11
-}
-// lassosum_rss.cpp
-cpp11::writable::list lassosumRssFactorCpp(const doubles& zR, const doubles_matrix<>& factorR, double shrink, const doubles& lambdaR, double thr, int maxiter);
-extern "C" SEXP _pecotmr_lassosumRssFactorCpp(SEXP zR, SEXP factorR, SEXP shrink, SEXP lambdaR, SEXP thr, SEXP maxiter) {
-  BEGIN_CPP11
-    return cpp11::as_sexp(lassosumRssFactorCpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zR), cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(factorR), cpp11::as_cpp<cpp11::decay_t<double>>(shrink), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lambdaR), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter)));
-  END_CPP11
-}
 // ld_prune.cpp
 cpp11::writable::integers ldThresholdComponents(const doubles_matrix<>& standardized, double threshold, int stripe);
 extern "C" SEXP _pecotmr_ldThresholdComponents(SEXP standardized, SEXP threshold, SEXP stripe) {
@@ -117,8 +103,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_bgenSampleIdsCpp",             (DL_FUNC) &_pecotmr_bgenSampleIdsCpp,              2},
     {"_pecotmr_dentistIterativeImpute",       (DL_FUNC) &_pecotmr_dentistIterativeImpute,       12},
     {"_pecotmr_dentistIterativeImputeFactor", (DL_FUNC) &_pecotmr_dentistIterativeImputeFactor, 12},
-    {"_pecotmr_lassosumRssCpp",               (DL_FUNC) &_pecotmr_lassosumRssCpp,                6},
-    {"_pecotmr_lassosumRssFactorCpp",         (DL_FUNC) &_pecotmr_lassosumRssFactorCpp,          6},
     {"_pecotmr_ldThresholdComponents",        (DL_FUNC) &_pecotmr_ldThresholdComponents,         3},
     {"_pecotmr_penalizedRssCpp",              (DL_FUNC) &_pecotmr_penalizedRssCpp,              12},
     {"_pecotmr_penalizedRssFactorCpp",        (DL_FUNC) &_pecotmr_penalizedRssFactorCpp,        12},

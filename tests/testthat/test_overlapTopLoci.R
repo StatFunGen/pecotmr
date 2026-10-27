@@ -25,7 +25,7 @@ context("overlapTopLoci")
     )
 }
 .ot_entry <- function(tl) {
-    fineMappingRow(
+    FineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(fake = TRUE),
         topLoci = tl
@@ -70,6 +70,7 @@ test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-fli
     )
 
     ov <- overlapTopLoci(qtl, gwas, signalCutoff = 0)
+    expect_s4_class(ov, "GRanges")
 
     # variant key kept once; every other column prefixed qtl_ / gwas_
     cols <- names(S4Vectors::mcols(ov))
@@ -82,11 +83,12 @@ test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-fli
     # per-context QTL rows preserved
     expect_setequal(unique(ov$qtl_context), c("ctx1", "ctx2"))
 
-    # v1 unflipped: gwas beta unchanged (+0.6); v2 swapped: sign-flipped (-0.5)
+    # v1 unflipped: gwas posterior effect unchanged (+0.6); v2 swapped:
+    # sign-flipped (-0.5)
     v1 <- ov[ov$variant_id == "chr1:100:A:G", ]
     v2 <- ov[ov$variant_id == "chr1:200:A:G", ]
-    expect_true(all(abs(v1$gwas_beta - 0.60) < 1e-9))
-    expect_true(all(abs(v2$gwas_beta + 0.50) < 1e-9))
+    expect_equal(v1$gwas_posterior_effect, c(0.60, 0.60))
+    expect_equal(v2$gwas_posterior_effect, c(-0.50, -0.50))
     # af complemented on the swapped variant (0.7 -> 0.3), untouched otherwise
     expect_true(all(abs(v2$gwas_af - 0.30) < 1e-9))
     expect_true(all(abs(v1$gwas_af - 0.20) < 1e-9))
@@ -159,37 +161,4 @@ test_that("overlapTopLoci returns an empty merge when a side has no signal", {
     expect_true(any(grepl("^qtl_", cols)) && any(grepl("^gwas_", cols)))
     # the empty result is still ranges (.overlapToGRanges empty guard)
     expect_s4_class(df, "GRanges")
-})
-
-test_that("overlapTopLoci returns a GRanges of the shared variants", {
-    q <- .ot_entry(.ot_tl(
-        c("chr1:100:A:G", "chr1:200:A:G"),
-        A1 = c("G", "G"),
-        A2 = c("A", "A"),
-        pm = c(0.3, 0.4),
-        af = c(0.3, 0.4)
-    ))
-    g <- .ot_entry(.ot_tl(
-        "chr1:100:A:G",
-        A1 = "G",
-        A2 = "A",
-        pm = 0.6,
-        af = 0.2
-    ))
-    qtl <- QtlFineMappingResult(
-        studyName = "s",
-        context = "c",
-        trait = "t",
-        method = "susie",
-        entry = list(q)
-    )
-    gwas <- GwasFineMappingResult(
-        studyName = "g",
-        method = "susie",
-        entry = list(g)
-    )
-    gr <- overlapTopLoci(qtl, gwas, signalCutoff = 0)
-    expect_s4_class(gr, "GRanges")
-    expect_equal(length(gr), 1L)
-    expect_true("gwas_posterior_effect" %in% names(S4Vectors::mcols(gr)))
 })

@@ -15,7 +15,7 @@ mrmashWrapper(
   updateV = TRUE,
   updateVMethod = "full",
   standardize = FALSE,
-  numThreads = 1,
+  BPPARAM = SerialParam(),
   methodArgs = MrmashOptions()
 )
 }
@@ -53,8 +53,12 @@ data. Default is FALSE. Used by the summary-statistic and initialisation
 steps as well as the fit, so it is set here rather than in
 \code{methodArgs}.}
 
-\item{numThreads}{The number of threads to use for parallel computation.
-Default is 1. Used by the same three steps as \code{standardize}.}
+\item{BPPARAM}{A \code{BiocParallelParam}. The univariate glmnet fits that
+initialise the coefficients run on its workers, and mr.mash's own
+threads (the summary statistics and the fit) number its workers when
+they run on this machine (\code{SerialParam}, \code{MulticoreParam});
+for other backends mr.mash runs on one thread. Default
+\code{SerialParam()}.}
 
 \item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash} under its
 own names, built with \code{\link{MrmashOptions}}

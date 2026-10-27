@@ -15,7 +15,7 @@ retainedMass(x, ...)
 \item{...}{Additional arguments passed to methods.}
 }
 \value{
-A \code{data.frame}, one row per (element, effect), with the
+A \code{DataFrame}, one row per (element, effect), with the
   element's identity columns, the effect index, and its retained mass.
 }
 \description{

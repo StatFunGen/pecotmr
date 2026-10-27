@@ -5,23 +5,19 @@
 \alias{marginalEffects,FineMappingResultBase-method}
 \title{Get Marginal Effects}
 \usage{
-marginalEffects(x, maxPval = NULL, ...)
+marginalEffects(x, ...)
 
 \S4method{marginalEffects}{FineMappingResultBase}(
   x,
-  maxPval = NULL,
   studyName = NULL,
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL
+  blockId = NULL
 )
 }
 \arguments{
 \item{x}{A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.}
-
-\item{maxPval}{Optional numeric (length 1). When non-\code{NULL}, filter rows
-where \code{p > maxPval}. Default \code{NULL} (no filter).}
 
 \item{...}{Class-specific selection arguments.}
 
@@ -37,19 +33,21 @@ this trait; \code{NULL} matches all traits.}
 \item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
 this fine-mapping / weight method; \code{NULL} matches all methods.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block of a fit; \code{NULL} matches every block.}
 }
 \value{
-A \code{data.frame}.
+A \code{GRanges}, one range per variant; when the selectors match
+  more than one entry the row-identity columns are carried in
+  \code{mcols()} too.
 }
 \description{
 Extract per-variant marginal univariate effects from a
-  fine-mapping entry or result. Returns a \code{data.frame} with identity
-  columns (\code{variant_id, chrom, pos, A1, A2}), context (\code{N, MAF}),
-  and the marginal effect columns (\code{beta, se, z, p}). Populated
-  uniformly across the individual-level and RSS paths.
+  fine-mapping entry or result, one range per variant. Its \code{mcols()}
+  hold the identity columns (\code{variant_id, chrom, pos, A1, A2}),
+  context (\code{N, MAF}), and the marginal effect columns
+  (\code{beta, se, z, p}). Populated uniformly across the
+  individual-level and RSS paths.
 }
 \examples{
 data(qtlFineMappingExample)

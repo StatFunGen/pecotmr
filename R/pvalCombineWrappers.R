@@ -121,19 +121,28 @@ pvalHmp <- function(pvals) {
     abort(msg)
 }
 
+# poolr's empirical adjustment works out which test it is running from its
+# own call, as.character(sys.call()[1]) with any "poolr::" prefix stripped.
+# So the test is called as poolr::<method>(...): a function object inlined
+# into the call, as exec() would do, names no test and fails there.
+# @noRd
+#' @importFrom rlang call2
 pvalPoolr <- function(pvals, method, R, methodArgs = PoolrOptions()) {
     if (!requireNamespace("poolr", quietly = TRUE)) {
         abort("Package 'poolr' is required for this method.")
     }
-    fn <- switch(
-        method,
-        fisher = poolr::fisher,
-        stouffer = poolr::stouffer,
-        invchisq = poolr::invchisq,
+    if (!is_in(method, c("fisher", "stouffer", "invchisq"))) {
         .abortUnknownMethod("poolr", method)
-    )
+    }
     args <- as.list(methodArgs)
-    exec(fn, pvals, R = .poolrDependence(R, method, args), !!!args)$p
+    test <- call2(
+        method,
+        pvals,
+        R = .poolrDependence(R, method, args),
+        !!!args,
+        .ns = "poolr"
+    )
+    eval(test)$p
 }
 
 # `R` in the form poolr's adjustment reads it. `R` holds the correlations
@@ -917,6 +926,6 @@ PvalMethodsParam <- function(
         return(list())
     }
     ctors <- .pvalMethodCtors()
-    .nestedAssertEngines(given, ctors, NULL, "PvalMethodsParam")
+    .nestedAssertEngines(given, ctors, "PvalMethodsParam")
     imap(given, .nestedElement, ctors = ctors, label = "PvalMethodsParam")
 }

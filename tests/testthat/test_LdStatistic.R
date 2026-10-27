@@ -28,9 +28,9 @@ test_that("genome() reports the build from seqinfo (via an LdScore)", {
 # ===========================================================================
 
 # Overrides REPLACE the defaults rather than being appended: forwarding `...`
-# alongside a fixed `nRef = 500L` makes .lds_score(nRef = 0L) fail with
-# "formal argument matched by multiple actual arguments", which an
-# expect_error(., "nRef") happily matches without ever reaching validity.
+# alongside a fixed `nSamples = 500L` makes .lds_score(nSamples = 0L) fail
+# with "formal argument matched by multiple actual arguments", which an
+# expect_error(., "nSamples") happily matches without ever reaching validity.
 .lds_score <- function(n = 10, ...) {
     args <- list(
         ldBlocks = makeTestLdBlocks(),
@@ -60,8 +60,9 @@ test_that("validity rejects an nSamples that is not a positive integer", {
 test_that("validity rejects an inSample that is not a single flag", {
     # Through new(), not LdScore(): the constructor writes
     # `inSample = isTRUE(inSample)`, so a multi-element or empty flag is
-    # collapsed before validity can see it. (`nRef = as.integer(nRef)` does
-    # not collapse length, which is why the nRef branch IS reachable above.)
+    # collapsed before validity can see it. (`nSamples = as.integer(nSamples)`
+    # does not collapse length, which is why the nSamples branch IS reachable
+    # above.)
     # This one guards direct new() use -- migration scripts, deserialization.
     gr <- as(.lds_score(), "GRanges")
     msg <- "Variable 'inSample': Must have length 1"
@@ -166,7 +167,7 @@ test_that("nRef is taken from the LdMatrix blocks; disagreement is an error", {
 
     expect_equal(ldPanelNSamples(buildLdEigen(list(a, a))), 500L)
     expect_error(buildLdEigen(list(a, b)), "differing reference panel sizes")
-    # An explicit nRef settles it.
+    # An explicit nSamples settles it.
     expect_equal(
         ldPanelNSamples(buildLdEigen(list(a, b), nSamples = 700L)),
         700L
@@ -242,12 +243,11 @@ test_that("a genotype panel is cut into LD blocks at ldBlocks", {
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     pos <- GenomicRanges::start(SummarizedExperiment::rowRanges(panel))
     cut <- pos[[200L]]
-    # The block table may name chromosomes either way; a panel's are
+    # The blocks may name chromosomes either way; a panel's are
     # chr-prefixed. Variants outside every block are left out.
-    blocks <- data.frame(
-        chrom = "21",
-        start = c(pos[[1L]], cut),
-        end = c(cut - 1L, pos[[300L]])
+    blocks <- GenomicRanges::GRanges(
+        "21",
+        IRanges::IRanges(c(pos[[1L]], cut), c(cut - 1L, pos[[300L]]))
     )
     ref <- buildLdScore(panel, ldBlocks = blocks)
     expect_equal(length(ref), 300L)
@@ -263,10 +263,12 @@ test_that("a genotype panel is cut into LD blocks at ldBlocks", {
         unname(computeLd(panel, snpIdx = 200:300))
     )
     expect_error(buildLdScore(panel), "`ldBlocks` is required")
-    overlapping <- data.frame(
-        chrom = "chr21",
-        start = c(pos[[1L]], pos[[100L]]),
-        end = c(pos[[150L]], pos[[300L]])
+    overlapping <- GenomicRanges::GRanges(
+        "chr21",
+        IRanges::IRanges(
+            c(pos[[1L]], pos[[100L]]),
+            c(pos[[150L]], pos[[300L]])
+        )
     )
     expect_error(
         buildLdEigen(panel, ldBlocks = overlapping),
@@ -280,10 +282,12 @@ test_that("a stochastic sketch's blocks carry its effective size", {
         test_path("test_data", "test_harmonize_regions.pgen")
     )
     gr <- SummarizedExperiment::rowRanges(sketch)
-    blocks <- data.frame(
-        chrom = "chr21",
-        start = min(GenomicRanges::start(gr)),
-        end = max(GenomicRanges::start(gr))
+    blocks <- GenomicRanges::GRanges(
+        "chr21",
+        IRanges::IRanges(
+            min(GenomicRanges::start(gr)),
+            max(GenomicRanges::start(gr))
+        )
     )
     ref <- buildLdEigen(sketch, ldBlocks = blocks)
     # 50 real samples projected onto 100 pseudo-samples: 1 / (1/50 + 1/100).

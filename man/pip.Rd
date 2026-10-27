@@ -15,18 +15,10 @@ pip(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL,
-  returnList = FALSE
+  blockId = NULL
 )
 
-\S4method{pip}{QtlFineMappingResult}(
-  x,
-  studyName = NULL,
-  context = NULL,
-  trait = NULL,
-  method = NULL,
-  returnList = FALSE
-)
+\S4method{pip}{QtlFineMappingResult}(x, studyName = NULL, context = NULL, trait = NULL, method = NULL)
 }
 \arguments{
 \item{x}{A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.}
@@ -45,12 +37,8 @@ this trait; \code{NULL} matches all traits.}
 \item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
 this fine-mapping / weight method; \code{NULL} matches all methods.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{returnList}{Logical. If \code{TRUE}, return a per-entry list keyed by
-identity tuple instead of a single flattened vector.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block of a fit; \code{NULL} matches every block.}
 }
 \value{
 A named numeric vector of PIPs.

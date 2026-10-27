@@ -9,8 +9,10 @@ normalizeVariantId(ids, chrPrefix = TRUE, convention = NULL)
 \arguments{
 \item{ids}{A character vector of variant IDs in any supported format.}
 
-\item{chrPrefix}{Logical, whether to include "chr" prefix. Default TRUE.
-Ignored if \code{convention} is provided.}
+\item{chrPrefix}{Logical. \code{TRUE} (default) writes the chromosome in
+UCSC style (\code{chr1}, \code{chrM}), the style pecotmr uses
+throughout; \code{FALSE} writes it bare. Ignored if \code{convention} is
+provided.}
 
 \item{convention}{Optional list from \code{detectVariantConvention} or
 \code{attr(parseVariantId(ids), "convention")}. When provided, the output

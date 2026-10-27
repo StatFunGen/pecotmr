@@ -89,37 +89,6 @@ than one of the things being chosen between, so it is always retained.
 \describe{
 \item{\code{studyName}}{Character (length 1). Study identifier; used in collection
 classes to tag downstream \code{QtlFineMappingResult} / \code{TwasWeights}
-entries.
-The \code{genotype} experiment's assay reads through this handle; the
-extraction accessors read it directly, so that QC can be applied per
-block.}
-
-\item{\code{scaleResiduals}}{Logical (length 1). Whether residualization accessors
-scale residuals to unit variance.}
-
-\item{\code{mafCutoff}}{Numeric (length 1). Minor allele frequency threshold;
-variants with \code{MAF < mafCutoff} are dropped at extraction time inside
-\code{genotypes()} / \code{residualizedGenotypes()}. Default 0 (no
-filter).}
-
-\item{\code{macCutoff}}{Numeric (length 1). Minor allele count threshold; converted
-to a MAF threshold using \code{max(mafCutoff, macCutoff / (2 * n))} where
-\code{n} is the post-narrowing sample count of the extracted block. Default
-0 (no filter).}
-
-\item{\code{xvarCutoff}}{Numeric (length 1). Per-variant genotype variance threshold;
-variants with column variance below this are dropped at extraction time.
-Default 0 (no filter).}
-
-\item{\code{imissCutoff}}{Numeric (length 1). Per-sample genotype-missingness
-threshold; samples with a missing-genotype rate above this are dropped at
-extraction time. Default 0 (no filter).}
-
-\item{\code{keepVariants}}{Character vector of variant identifiers to retain prior to
-per-block QC. Length 0 means no restriction.}
-
-\item{\code{keepIndel}}{Logical (length 1). When \code{FALSE}, indel variants
-(alleles that are not single nucleotides) are dropped at extraction time.
-Default \code{TRUE}.}
+entries.}
 }}
 

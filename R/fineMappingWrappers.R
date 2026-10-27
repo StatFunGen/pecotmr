@@ -297,8 +297,8 @@ fitSusieInfThenSusie <- function(
 #' @param otherQuantities Optional named list of extra per-method quantities to
 #'   carry on the result untouched (returned as the \code{otherQuantities}
 #'   element). Default \code{NULL}.
-#' @param region Optional \code{"chr:start-end"} string naming the region the
-#'   fits cover; recorded on the result. Default \code{NULL}.
+#' @param region Optional \code{GRanges}: the window the fits cover, recorded
+#'   on the result. Default \code{NULL}.
 #' @param priorEffTol Numeric (length 1). Effects whose prior variance
 #'   \code{V} is at or below this tolerance are dropped as unconverged before
 #'   the credible sets are read. Default \code{1e-9}.
@@ -624,7 +624,7 @@ postprocessFinemappingFit.susiF <- function(
     trim,
     priorEffTol
 ) {
-    fmEntry <- fineMappingRow(
+    fmEntry <- FineMappingRow(
         variantIds = variantNames,
         susieFit = .ppStoredFit(
             csTables,
@@ -1091,7 +1091,10 @@ computeCsTable <- function(
 # order; errors if any fit variant is absent (a missing one would misalign the
 # 1..p credible-set indices with a shrunken genotype matrix).
 .csGenotypesForFit <- function(qtlDataset, variantIds) {
-    geno <- genotypes(qtlDataset, region = .csVariantRegion(variantIds))
+    geno <- .qtlExtractBlock(
+        qtlDataset,
+        window = .csVariantRegion(variantIds)
+    )$geno
     absent <- setdiff(variantIds, colnames(geno))
     if (length(absent) > 0L) {
         abort(glue(
@@ -1108,7 +1111,10 @@ setMethod(
     "computeCsCorrelation",
     signature(x = "FineMappingResultBase", ldSource = "SumStatsBase"),
     function(x, ldSource) {
-        .rowCsCorrelationSumstats(.asFmRowPayload(x), ldSource)
+        .rowCsCorrelationSumstats(
+            .fitCoverageChecked(.asFmRowPayload(x), "computeCsCorrelation()"),
+            ldSource
+        )
     }
 )
 
@@ -1121,8 +1127,10 @@ setMethod(
         }
         ldReference <- .csSumstatsLdRef(ldSource)
         # onMissing = "error": every fit variant must be in the panel, else the
-        # 1..p sets$cs indices would misalign with a shrunken LD matrix.
-        ids <- .fmrPartsVariantIds(parts)
+        # 1..p sets$cs indices would misalign with a shrunken LD matrix. The
+        # indices are the fit's, so the ids are too, even for a row narrowed
+        # since.
+        ids <- .partsFitIds(parts)
         label <- "computeCsCorrelation"
         if (inherits(fit, "susiF")) {
             return(.fsusieCsCorrelationLd(fit$cs, ldReference, ids, label))
@@ -1171,7 +1179,10 @@ setMethod(
     "computeCsCorrelation",
     signature(x = "FineMappingResultBase", ldSource = "QtlDataset"),
     function(x, ldSource) {
-        .rowCsCorrelationGeno(.asFmRowPayload(x), ldSource)
+        .rowCsCorrelationGeno(
+            .fitCoverageChecked(.asFmRowPayload(x), "computeCsCorrelation()"),
+            ldSource
+        )
     }
 )
 
@@ -1182,7 +1193,7 @@ setMethod(
         if (.csCountBelowTwo(fit)) {
             return(NULL)
         }
-        geno <- .csGenotypesForFit(ldSource, .fmrPartsVariantIds(parts))
+        geno <- .csGenotypesForFit(ldSource, .partsFitIds(parts))
         if (inherits(fit, "susiF")) {
             if (!requireNamespace("fsusieR", quietly = TRUE)) {
                 abort(glue(
@@ -1567,7 +1578,8 @@ setMethod(
 #'   carries no sample count: \code{n} is left \code{NA} for the per-variant
 #'   \code{n} argument to fill.
 #' @param otherQuantities Optional list. Default is NULL.
-#' @param region Optional \code{"chr:start-end"} string. Default is NULL.
+#' @param region Optional \code{GRanges}: the window the fit covers, whose
+#'   bounds the table records. Default is NULL.
 #' @param conditionIdx Integer or \code{NULL}. Index of the conditioned effect
 #'   (per-condition output); \code{NULL} for the unconditioned fit.
 #' @param credibleSetParam How credible sets are built and reported, built with
@@ -2327,35 +2339,19 @@ buildTopLoci <- function(
     )
 }
 
-.parseGrange <- function(regionStr) {
-    # Every in-package source of a window is a GRanges (the pipeline's
-    # `region`, an X block's own range); only the documented user-facing form
-    # is a string. Normalize here so no caller has to.
-    if (methods::is(regionStr, "GRanges")) {
-        if (length(regionStr) == 0L) {
-            return(c(start = NA_integer_, end = NA_integer_))
-        }
-        return(c(
-            start = as.integer(GenomicRanges::start(regionStr)[[1L]]),
-            end = as.integer(GenomicRanges::end(regionStr)[[1L]])
-        ))
-    }
-    if (
-        is.null(regionStr) ||
-            length(regionStr) == 0L ||
-            is.na(regionStr) ||
-            str_length(as.character(regionStr)) == 0L
-    ) {
+# The bounds the top-loci table records for the window the fits cover: a
+# GRanges, as every source of one is (the pipeline's `region`, an X block's
+# own range, a caller's), or NA bounds when there is none.
+# @noRd
+.parseGrange <- function(region) {
+    if (is.null(region) || length(region) == 0L) {
         return(c(start = NA_integer_, end = NA_integer_))
     }
-    pr <- try_fetch(
-        parseRegion(as.character(regionStr)),
-        error = function(cnd) NULL
+    .assertRegionGRanges(region)
+    c(
+        start = as.integer(GenomicRanges::start(region)[[1L]]),
+        end = as.integer(GenomicRanges::end(region)[[1L]])
     )
-    if (is.null(pr) || !is.data.frame(pr)) {
-        return(c(start = NA_integer_, end = NA_integer_))
-    }
-    c(start = as.integer(pr$start), end = as.integer(pr$end))
 }
 
 trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
@@ -4050,7 +4046,9 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 #'
 #' Returns the trimmed model fit underlying \code{conData$finemappingEntry} (a
 #' \code{FineMappingRow}, or a single-row fine-mapping result), or NULL if no
-#' fine-mapping entry is attached.
+#' fine-mapping entry is attached. As \code{\link{susieFit}} does, it warns
+#' (condition class \code{pecotmrFitCoverage}) when the entry holds fewer
+#' variants than its fit was made with.
 #'
 #' @param conData List. The method-layer entry from a finemapping pipeline
 #'   result, expected to carry \code{$finemappingEntry} as a
@@ -4074,6 +4072,7 @@ susieResult <- function(conData) {
     if (!is(fm, "FineMappingRow") && !is(fm, "FineMappingResultBase")) {
         return(NULL)
     }
+    fm <- .fitCoverageChecked(.asFmRowPayload(fm), "susieResult()")
     trimmed <- .fmrPartsSusieFit(fm)
     if (length(trimmed) == 0) {
         return(NULL)
@@ -4086,7 +4085,7 @@ susieResult <- function(conData) {
 #' This function extracts and processes information for each Credible Set (CS)
 #' from finemapping results, typically obtained from a finemapping RDS file.
 #'
-#' @param fmRow A \code{\link{fineMappingRow}}, or a single-row
+#' @param fmRow A \code{\link{FineMappingRow}}, or a single-row
 #'   fine-mapping collection as returned by
 #'   \code{\link{fineMappingResult}}, carrying the SuSiE fit and
 #'   variant ids.
@@ -4132,7 +4131,7 @@ susieResult <- function(conData) {
 #' fit <- list(pip = c(0.1, 0.7, 0.2), sets = list(cs = list(L_1 = c(1, 2))))
 #' tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2),
 #'   z = c(1.0, 3.5, -0.5))
-#' fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
+#' fe <- FineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 #' # A single credible set has no between-CS correlation (cs_corr_* are NA), so
 #' # the ldSource is not consulted here.
 #' extractCsInfo(fe, csNames = "L_1", topLociTable = tl,
@@ -4142,9 +4141,11 @@ susieResult <- function(conData) {
 #' @export
 extractCsInfo <- function(fmRow, csNames, topLociTable, ldSource) {
     assertCharacter(csNames, any.missing = FALSE)
-    fm <- fmRow
+    # The credible sets index the fit's own variables, so they are named by
+    # the ids the fit was made with rather than the ones the row holds now.
+    fm <- .fitCoverageChecked(.asFmRowPayload(fmRow), "extractCsInfo()")
     trimmed <- .fmrPartsSusieFit(fm)
-    variantNames <- .fmrPartsVariantIds(fm)
+    variantNames <- .partsFitIds(fm)
     csCorr <- .rowCsCorrelation(fm, ldSource)
     rows <- map(
         seq_along(csNames),
@@ -4163,7 +4164,7 @@ extractCsInfo <- function(fmRow, csNames, topLociTable, ldSource) {
 #' Posterior Inclusion Probability (PIP) from finemapping results, typically
 #' used when no Credible Sets (CS) are identified in the analysis.
 #'
-#' @param fmRow A \code{\link{fineMappingRow}}, or a single-row
+#' @param fmRow A \code{\link{FineMappingRow}}, or a single-row
 #'   fine-mapping collection as returned by
 #'   \code{\link{fineMappingResult}}, carrying the SuSiE fit and
 #'   variant ids.
@@ -4199,15 +4200,15 @@ extractCsInfo <- function(fmRow, csNames, topLociTable, ldSource) {
 #' vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
 #' fit <- list(pip = c(0.1, 0.7, 0.2))
 #' tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2))
-#' fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
+#' fe <- FineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 #' extractTopPipInfo(fe, sumstats = list(z = c(1.0, 3.5, -0.5)))
 #'
 #' @importFrom checkmate assertClass
 #' @export
 extractTopPipInfo <- function(fmRow, sumstats) {
-    fm <- fmRow
+    fm <- .fitCoverageChecked(.asFmRowPayload(fmRow), "extractTopPipInfo()")
     trimmed <- .fmrPartsSusieFit(fm)
-    variantNames <- .fmrPartsVariantIds(fm)
+    variantNames <- .partsFitIds(fm)
     # Find the variant with the highest PIP
     topPipIndex <- which.max(trimmed$pip)
     topPip <- trimmed$pip[topPipIndex]
@@ -4622,7 +4623,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     ctx,
     tid,
     cvFolds = 0,
-    cvThreads = 1,
+    cvBpparam = SerialParam(),
     samplePartition = NULL,
     af = NULL,
     fitRetention = "slim",
@@ -4652,7 +4653,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
         cvFolds = cvFolds,
-        cvThreads = cvThreads,
+        cvBpparam = cvBpparam,
         samplePartition = samplePartition,
         seed = seed,
         verbose = verbose,
@@ -4766,7 +4767,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     coverage,
     methodArgs,
     cvFolds,
-    cvThreads,
+    cvBpparam,
     samplePartition,
     seed,
     verbose,
@@ -4792,7 +4793,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         samplePartition = samplePartition,
         coverage = coverage,
         verbose = verbose,
-        numThreads = cvThreads,
+        BPPARAM = cvBpparam,
         seed = seed
     )
     set_names(
@@ -5120,7 +5121,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     # A row is immutable: rebuild it with the amended fit rather than
     # assigning into it. The variants and topLoci are unchanged, so this
     # round-trips them through the same builder the caller used.
-    fineMappingRow(
+    FineMappingRow(
         variantIds = variantIds(ent),
         susieFit = sf,
         topLoci = .fmrPartsTopLoci(ent),
@@ -5881,7 +5882,7 @@ krigingOutlierQc <- function(
         fit = fit
     )
     GenomicRanges::GRanges(
-        seqnames = str_c("chr", str_remove(chrom, "^chr")),
+        seqnames = chrom,
         ranges = IRanges::IRanges(
             start = as.integer(reg$Start),
             end = as.integer(reg$End)

@@ -20,12 +20,16 @@ raiss(
 \arguments{
 \item{refPanel}{A data frame containing 'chrom', 'pos', 'variant_id', 'A1',
 and 'A2'. Optional when the LD comes as an \code{LdMatrix} or a genotype
-panel, whose own variants are used; \code{knownZscores} must then label
-chromosomes canonically, as character (e.g. \code{"22"}). Required
-with a plain \code{ldMatrix}, whose rows and columns follow it.}
+panel, whose own variants are used. Required with a plain
+\code{ldMatrix}, whose rows and columns follow it.}
 
 \item{knownZscores}{A data frame containing 'chrom', 'pos', 'variant_id',
-'A1', 'A2', and 'z' values.}
+'A1', 'A2', and 'z' values, or a summary-statistics \code{GRanges} --
+one entry as \code{\link{sumStats}} returns it, with its \code{SNP},
+\code{A1}, \code{A2} and \code{Z} columns. Here and in \code{refPanel}
+a chromosome may be labelled in any style (\code{22}, \code{"22"},
+\code{"chr22"}); both are read in UCSC style (\code{"chr22"}), which
+the result uses.}
 
 \item{ldMatrix}{A square LD matrix over \code{refPanel}'s variants, in its
 order, or an \code{LdMatrix} covering them. Provide either

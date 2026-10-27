@@ -9,37 +9,16 @@ residualizedGenotypes(x, ...)
 
 \S4method{residualizedGenotypes}{QtlDataset}(
   x,
-  contexts,
-  traitId = NULL,
-  region = NULL,
-  cisWindow = NULL,
-  samples = NULL,
+  context,
   residualizationParam = ResidualizationParam()
 )
 }
 \arguments{
 \item{x}{A \code{QtlDataset} object.}
 
-\item{...}{Selection arguments: \code{traitId}, \code{region},
-\code{cisWindow}, \code{phenotypeCovariatesToRemove},
-\code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
-(\code{"impute"}, the default, mean-imputes missing covariate cells;
-\code{"drop"} removes samples with any missing covariate).}
+\item{...}{Passed on to methods.}
 
-\item{contexts}{Character vector. Context(s) whose data to extract.}
-
-\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
-to select; \code{NULL} matches all traits in the dataset.}
-
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
-around the trait; \code{NULL} uses the dataset default.}
-
-\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
-\code{NULL} uses all samples.}
+\item{context}{Character vector. Context(s) whose data to extract.}
 
 \item{residualizationParam}{What the data is residualized on, built with
 \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
@@ -54,11 +33,11 @@ A numeric matrix (samples x variants).
 }
 \description{
 Residualize the genotype matrix against the per-context
-  phenotype covariates and the genotype covariates, optionally subsetting
-  variants to those falling within a trait's cis-window or an explicit
-  region.
+  phenotype covariates and the genotype covariates, over the whole
+  dataset: narrow it first, with \code{x[i, j, ]}, to residualize part
+  of it.
 }
 \examples{
 data(qtlDatasetExample)
-residualizedGenotypes(qtlDatasetExample, contexts = "brain")
+residualizedGenotypes(qtlDatasetExample, context = "brain")
 }

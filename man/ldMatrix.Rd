@@ -3,25 +3,33 @@
 \name{ldMatrix}
 \alias{ldMatrix}
 \alias{ldMatrix,LdMatrix-method}
+\alias{as.matrix,LdMatrix-method}
+\alias{coerce,LdMatrix,matrix-method}
 \title{Get LD Correlation Matrix}
 \usage{
 ldMatrix(x)
 
 \S4method{ldMatrix}{LdMatrix}(x)
+
+\S4method{as.matrix}{LdMatrix}(x, ...)
 }
 \arguments{
 \item{x}{An \code{LdMatrix}.}
+
+\item{...}{Unused.}
 }
 \value{
 A correlation matrix.
 }
 \description{
 Extract the LD correlation matrix an \code{\link{LdMatrix}}
-  holds, labelled by its variant ids.
+  holds, labelled by its variant ids. \code{as.matrix(x)} and
+  \code{as(x, "matrix")} return the same matrix.
 }
 \examples{
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:8]
 ld <- LdMatrix(cor(X), nSamples = nrow(X))
 ldMatrix(ld)[1:3, 1:3]
+identical(as.matrix(ld), ldMatrix(ld))
 }

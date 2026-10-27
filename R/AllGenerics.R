@@ -134,7 +134,7 @@ setGeneric("computeLdScores", function(ldRef, annotations = NULL, ...) {
 #'   \code{plink2Prefix} for a triplet stem, \code{bed}/\code{bim}/\code{fam}
 #'   or \code{pgen}/\code{pvar}/\code{psam} for explicit triplet paths,
 #'   \code{genoMeta} for a one-file-per-chromosome panel (optionally narrowed
-#'   with \code{chroms}), or \code{ldMeta} plus \code{region} to resolve a
+#'   with \code{chroms}), or \code{ldMeta} plus \code{block} to resolve a
 #'   block out of an LD-meta table. Exactly one source may be given.
 #' @param path Character, path to a single self-describing genotype file
 #'   (\code{.vcf.gz}, \code{.vcf.bgz}, \code{.gds} or \code{.bgen}). Omit it
@@ -180,14 +180,15 @@ setGeneric("computeLdScores", function(ldRef, annotations = NULL, ...) {
 #'   chromosomes, values = payload paths / prefixes). Every file must be of
 #'   one format and hold the same samples in the same order.
 #' @param chroms Optional character vector of chromosomes. Only the
-#'   \code{genoMeta} shards whose chromosome is listed are read; chromosome
-#'   labels are compared canonically. Meaningful only with \code{genoMeta}.
+#'   \code{genoMeta} shards whose chromosome is listed are read; a label may
+#'   be in any style (\code{"chr1"} or \code{"1"}). Meaningful only with
+#'   \code{genoMeta}.
 #' @param ldMeta Path to an LD-meta TSV (columns \code{chrom}, \code{start},
-#'   \code{end}, \code{path}). Requires \code{region}: the row covering it is
+#'   \code{end}, \code{path}). Requires \code{block}: the row covering it is
 #'   resolved and the file it names is read with the matching backend.
-#' @param region Region to resolve out of \code{ldMeta}: a
-#'   \code{"chr:start-end"} string, or a one-row data.frame with
-#'   \code{chrom}, \code{start}, \code{end}.
+#' @param block The \code{GRanges} window whose LD block to read out of
+#'   \code{ldMeta}. It chooses a file rather than filtering records: the
+#'   panel is the whole LD block that covers it.
 #' @param vcfArgs Optional named list of arguments forwarded to
 #'   \code{VariantAnnotation::readVcf} when a VCF's records are read (its
 #'   genotypes are read a block at a time, as they are needed).
@@ -214,7 +215,7 @@ setGeneric("readGenotypes", function(path, format = NULL, ...) {
 #' @title Read Annotations
 #' @description Read genomic annotations from files (BED, BigWig, S-LDSC .annot
 #'   format, or GRanges objects) and create an AnnotationMatrix.
-#' @param paths Named character vector of file paths, or a named list of GRanges
+#' @param path Named character vector of file paths, or a named list of GRanges
 #'   objects. Names become annotation names.
 #' @param snpRanges A \code{GRanges} object defining SNP positions.
 #' @param annotationMeta A \code{data.frame} with annotation metadata (name,
@@ -231,7 +232,7 @@ setGeneric("readGenotypes", function(path, format = NULL, ...) {
 #' @export
 setGeneric(
     "readAnnotations",
-    function(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...) {
+    function(path, snpRanges, annotationMeta = NULL, genome = "hg19", ...) {
         standardGeneric("readAnnotations")
     }
 )
@@ -289,21 +290,36 @@ setGeneric("scoreStats", function(object) standardGeneric("scoreStats"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
 #' @return Numeric vector of z-scores.
 #' @export
 setGeneric("z", function(x, ...) standardGeneric("z"))
 
-#' @title Get Sample Sizes
-#' @description Extract sample sizes: the per-variant sample-size vector of a
-#'   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
-#'   tuple, the number of samples carried by a \code{GenotypeHandle}, or the
-#'   panel size an \code{\link{LdMatrix}} records.
-#' @param x A \code{GwasSumStats}, \code{QtlSumStats}, \code{LdMatrix} or
-#'   \code{GenotypeHandle} object.
+#' @title Get the Number of Reference Samples
+#' @description The number of samples an LD reference was built from: the
+#'   samples carried by a \code{GenotypeHandle}, or the panel size an
+#'   \code{\link{LdMatrix}} records. The per-variant sample size of summary
+#'   statistics is \code{\link{sampleSize}}.
+#' @param x An \code{LdMatrix} or \code{GenotypeHandle} object.
+#' @param ... Class-specific selection arguments.
+#' @return An integer of length 1 (\code{NA} when an \code{LdMatrix} records
+#'   no size).
+#' @details The genotype handle is the seed layer behind a panel and is not
+#'   part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:8]
+#' nSamples(LdMatrix(cor(X), nSamples = nrow(X)))
+#' @export
+setGeneric("nSamples", function(x, ...) standardGeneric("nSamples"))
+
+#' @title Get Per-Variant Sample Sizes
+#' @description Extract the per-variant sample-size vector (the \code{N}
+#'   column) of a \code{GwasSumStats} or \code{QtlSumStats} entry, selected
+#'   by its identity tuple. Part of the summary-statistic column set alongside
+#'   \code{\link{z}}, \code{\link{se}} and \code{\link{pval}}; replace it
+#'   with \code{\link[=variantColumnReplace]{sampleSize<-}}.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
 #' @param ... Class-specific selection arguments.
 #' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
 #'   to this study; \code{NULL} matches all studies.
@@ -311,18 +327,10 @@ setGeneric("z", function(x, ...) standardGeneric("z"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
-#' @return Numeric vector of sample sizes for a summary-statistic entry;
-#'   integer of length 1 for a \code{GenotypeHandle} or an \code{LdMatrix}
-#'   (\code{NA} when the matrix records no size).
-#' @details The genotype handle is the seed layer behind a panel and is not
-#'   part of the public interface; obtain a panel from
-#'   \code{readGenotypes()} and ask it directly.
+#' @return Numeric vector of per-variant sample sizes, or \code{NULL} when the
+#'   entry carries none.
 #' @export
-setGeneric("nSamples", function(x, ...) standardGeneric("nSamples"))
+setGeneric("sampleSize", function(x, ...) standardGeneric("sampleSize"))
 
 #' @title Get Association P-values
 #' @description Extract the association p-value vector from a
@@ -337,10 +345,6 @@ setGeneric("nSamples", function(x, ...) standardGeneric("nSamples"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
 #' @return Numeric vector of p-values, or \code{NULL} if not available.
 #' @export
 setGeneric("pval", function(x, ...) standardGeneric("pval"))
@@ -360,10 +364,6 @@ setGeneric("pval", function(x, ...) standardGeneric("pval"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
 #' @return Numeric vector of effect sizes, or \code{NULL} if not available.
 #' @importFrom stats coef
 #' @rdname coef-methods
@@ -381,36 +381,24 @@ setGeneric("coef")
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
 #' @return Numeric vector of standard errors, or \code{NULL} if not available.
 #' @export
 setGeneric("se", function(x, ...) standardGeneric("se"))
 
 #' @title Get Minor Allele Frequencies
-#' @description Extract MAF vector from a GwasSumStats object.
-#' @param x A \code{GwasSumStats} or \code{QtlDataset} object.
-#' @param ... Class-specific selection arguments (e.g., \code{region},
-#'   \code{cisWindow} for \code{QtlDataset}).
+#' @description Extract the minor-allele-frequency vector from one entry of
+#'   a summary-statistic collection, or from a \code{QtlDataset} over the
+#'   whole dataset (narrow it first, with \code{x[i, j, ]}, to read part of
+#'   it).
+#' @param x A \code{GwasSumStats}, \code{QtlSumStats} or \code{QtlDataset}
+#'   object.
+#' @param ... Class-specific selection arguments.
 #' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
 #'   to this study; \code{NULL} matches all studies.
 #' @param context Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param cisWindow Integer or \code{NULL}. Half-width (bp) of the cis window
-#'   around the trait; \code{NULL} uses the dataset default.
-#' @param samples Character vector or \code{NULL}. Restrict to these sample IDs;
-#'   \code{NULL} uses all samples.
 #' @return Numeric vector of MAFs, or NULL if not available.
 #' @export
 setGeneric("maf", function(x, ...) standardGeneric("maf"))
@@ -419,30 +407,22 @@ setGeneric("maf", function(x, ...) standardGeneric("maf"))
 #' @description Supply or overwrite one per-variant column of a
 #'   \code{GwasSumStats} / \code{QtlSumStats} entry after construction --
 #'   the usual case being an effect-allele frequency the source file did not
-#'   carry. Dispatch is on \code{value}:
-#'   \describe{
-#'     \item{\code{numeric}}{positional: the vector is in the entry's own
-#'       variant order and must have exactly one value per variant. Length is
-#'       checked hard, because a recycled or truncated vector is otherwise
-#'       silently wrong.}
-#'     \item{\code{GRanges}}{matched: paired to the entry on
-#'       \code{(chrom, pos, A1, A2)} via \code{matchVariants}, so ordering
-#'       does not matter. \code{A1}/\code{A2} are \strong{required} in
-#'       \code{mcols()} so an allele swap can be detected, and exactly one
-#'       other \code{mcols} column carries the values. Entry variants the
-#'       replacement does not name are set \code{NA}.}
-#'   }
-#'   An allele swap sends \code{af} to \code{1 - af}, so \code{af<-}
-#'   complements a flipped match. \code{maf} is \code{min(af, 1 - af)} and
-#'   \code{nSamples} is a count, both swap-invariant, so neither is
-#'   complemented.
+#'   carry. The value is positional: a vector in \code{\link{sumStats}}
+#'   order for the selection -- a GWAS study split across rows is stitched,
+#'   as \code{sumStats()} returns it -- with exactly one value per variant.
+#'   Length is checked hard, because a recycled or truncated vector is
+#'   otherwise silently wrong. To take the values from a reference keyed by
+#'   variant instead, matched on \code{(chrom, pos, A1, A2)} and oriented to
+#'   the entry's alleles, use \code{\link{fillFromReference}}.
 #' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
-#' @param studyName,context,trait Selectors pinning one entry; \code{context}
-#'   and \code{trait} are \code{QtlSumStats}-only.
+#' @param studyName,context,trait Selectors pinning one study (every row of a
+#'   GWAS study) or one \code{QtlSumStats} entry; \code{context} and
+#'   \code{trait} are \code{QtlSumStats}-only.
 #' @param ... Unused.
-#' @param value A \code{numeric} vector (positional) or a \code{GRanges}
-#'   carrying \code{A1}/\code{A2} plus one value column (matched).
-#' @return The object, with that entry's column replaced.
+#' @param value A \code{numeric} vector, one value per variant in
+#'   \code{sumStats()} order.
+#' @return The object, with the selection's column replaced. \code{sampleSize<-}
+#'   writes the per-variant \code{N}.
 #' @examples
 #' data(qtlSumStatsExample)
 #' x <- qtlSumStatsExample
@@ -459,8 +439,8 @@ setGeneric("maf<-", function(x, ..., value) standardGeneric("maf<-"))
 
 #' @rdname variantColumnReplace
 #' @export
-setGeneric("nSamples<-", function(x, ..., value) {
-    standardGeneric("nSamples<-")
+setGeneric("sampleSize<-", function(x, ..., value) {
+    standardGeneric("sampleSize<-")
 })
 
 #' @title Get Effect-Allele Frequencies
@@ -473,30 +453,17 @@ setGeneric("nSamples<-", function(x, ..., value) {
 #'   \code{af} column report. For a summary-statistic collection this is
 #'   \code{NULL} when the source
 #'   carried no frequency column -- see \code{\link{variantColumnReplace}}
-#'   for supplying one afterwards.
+#'   for supplying one afterwards. A \code{QtlDataset} answers over the whole
+#'   dataset; narrow it first, with \code{x[i, j, ]}, to read part of it.
 #' @param x A \code{QtlDataset}, \code{LdMatrix}, \code{GwasSumStats} or
 #'   \code{QtlSumStats} object.
-#' @param ... Class-specific selection arguments (e.g., \code{traitId},
-#'   \code{region}, \code{cisWindow}, \code{samples} for \code{QtlDataset}).
-#' @param traitId Character or \code{NULL}. Molecular trait / feature identifier
-#'   to select; \code{NULL} matches all traits in the dataset.
+#' @param ... Class-specific selection arguments.
 #' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
 #'   to this study; \code{NULL} matches all studies.
 #' @param context Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param cisWindow Integer or \code{NULL}. Half-width (bp) of the cis window
-#'   around the trait; \code{NULL} uses the dataset default.
-#' @param samples Character vector or \code{NULL}. Restrict to these sample IDs;
-#'   \code{NULL} uses all samples.
 #' @return Named numeric vector of effect-allele frequencies (names are variant
 #'   IDs), or an empty vector when no variants are selected.
 #' @examples
@@ -518,10 +485,6 @@ setGeneric("af", function(x, ...) standardGeneric("af"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
 #' @return Integer.
 #' @export
 setGeneric("nSnps", function(x, ...) standardGeneric("nSnps"))
@@ -594,23 +557,12 @@ setGeneric("significantQtls", function(x, ...) {
     standardGeneric("significantQtls")
 })
 
-#' @title Subset by Chromosome
-#' @description Extract a chromosome-specific subset of a GwasSumStats object.
-#' @param x A \code{GwasSumStats} object.
-#' @param chr Character, chromosome name (e.g., "1", "chr1").
-#' @return A \code{GwasSumStats} object.
-#' @examples
-#' data(gwasSumStatsS4Example)
-#' subsetChr(gwasSumStatsS4Example, "chr22")
-#' @export
-setGeneric("subsetChr", function(x, chr) standardGeneric("subsetChr"))
-
 #' @title Reconcile Two Collections to Their Shared Variants
 #' @description Restrict two fine-mapping collections to the variants they have
 #'   in common, renormalizing each retained single-effect posterior over the
 #'   variants that survive.
-#' @details \code{subsetRegion()} restricts ONE object to a window; this
-#'   intersects TWO objects against each other. Coloc needs it symmetric --
+#' @details This intersects two objects against each other. Coloc needs it
+#'   symmetric --
 #'   both sides must be scored on the same variant set -- while TWAS, MR and
 #'   cTWAS need it one-sided, adjusting the QTL side to the GWAS variant set
 #'   and leaving the GWAS side alone.
@@ -660,7 +612,7 @@ setGeneric("intersectVariants", function(x, y, oneSided = FALSE, ...) {
 #'   null. An explicit diagnostic is the only thing that surfaces this.
 #' @param x A fine-mapping collection.
 #' @param ... Additional arguments passed to methods.
-#' @return A \code{data.frame}, one row per (element, effect), with the
+#' @return A \code{DataFrame}, one row per (element, effect), with the
 #'   element's identity columns, the effect index, and its retained mass.
 #' @examples
 #' data(qtlFineMappingExample)
@@ -672,43 +624,6 @@ setGeneric("intersectVariants", function(x, y, oneSided = FALSE, ...) {
 #' @export
 setGeneric("retainedMass", function(x, ...) {
     standardGeneric("retainedMass")
-})
-
-#' @title Restrict a Collection to a Region
-#' @description Narrow a \code{RangedTupleList} collection to an analysis
-#'   window: elements that do not overlap it are dropped, and the survivors are
-#'   trimmed to the overlapping variants. Elements that trim to zero variants
-#'   are dropped too.
-#' @details This is deliberately a new verb rather than a redefinition of a
-#'   Bioconductor generic, because three genuinely different operations are in
-#'   play and all three are useful:
-#'   \describe{
-#'     \item{\code{subsetByOverlaps(x, win)}}{selects elements, keeps them
-#'       whole.}
-#'     \item{\code{restrict(x, start, end)}}{trims elements, keeps empty ones.}
-#'     \item{\code{subsetRegion(x, win)}}{selects AND trims AND drops empties.}
-#'   }
-#'   \code{subsetChr()} is the whole-seqname special case of this verb.
-#' @param x A \code{RangedTupleList} collection.
-#' @param region A \code{GRanges}, a \code{"chr:start-end"} string, or a
-#'   one-row \code{data.frame} with \code{chrom} / \code{start} / \code{end}.
-#' @param ... Additional arguments passed to methods. Fine-mapping collections
-#'   accept \code{adjust} to renormalize PIPs over the retained variants.
-#' @return An object of the same class as \code{x}, with the collection-level
-#'   slots carried over and \code{mcols} narrowed to the surviving elements.
-#' @examples
-#' data(qtlSumStatsMulticontextExample)
-#' mc <- qtlSumStatsMulticontextExample
-#' sum(lengths(mc))
-#' # Every element is narrowed to the window; the collection keeps its shape,
-#' # so an element with nothing left stays as an empty one rather than a
-#' # dropped row.
-#' sub <- subsetRegion(mc, "chr22:14560203-15000000")
-#' sum(lengths(sub))
-#' nrow(sub)
-#' @export
-setGeneric("subsetRegion", function(x, region, ...) {
-    standardGeneric("subsetRegion")
 })
 
 #' @title Get Phenotype Variance
@@ -751,11 +666,6 @@ setGeneric("varY", function(x, ...) standardGeneric("varY"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). A selected tuple can
-#'   own several elements -- one per chromosome, since a multi-seqname entry is
-#'   split at construction -- and they are stitched back into a single
-#'   \code{GRanges}. Pass \code{ranges} to pull only the variants overlapping a
-#'   region instead of the whole span; \code{NULL} returns everything.
 #' @return A \code{GRanges}, a \code{QtlSumStats}, or \code{NULL}.
 #' @examples
 #' data(qtlSumStatsExample)
@@ -763,48 +673,50 @@ setGeneric("varY", function(x, ...) standardGeneric("varY"))
 #' @export
 setGeneric("sumStats", function(x, ...) standardGeneric("sumStats"))
 
-#' @title Get the Embedded QtlDataset List
-#' @description Return the named list of \code{QtlDataset} objects carried by a
-#'   \code{MultiStudyQtlDataset}.
-#' @param x A \code{MultiStudyQtlDataset} object.
-#' @return A named list of \code{QtlDataset} objects.
-#' @examples
-#' data(multiStudyQtlDatasetExample)
-#' qtlDatasets(multiStudyQtlDatasetExample)
-#' @export
-setGeneric("qtlDatasets", function(x) standardGeneric("qtlDatasets"))
-
-#' @title Get QC Audit Record
-#' @description Return the audit record of QC steps applied to this collection.
-#'   An empty \code{list()} (default on construction) means
-#'   \code{\link{summaryStatsQc}} has not yet been run. Pipelines that require
-#'   harmonized sumstats (\code{fineMappingPipeline},
-#'   \code{twasWeightsPipeline}, and downstream consumers) reject inputs where
-#'   \code{length(qcInfo(x)) == 0L}.
+#' @title Get the Per-Row QC Audit
+#' @description What \code{\link{summaryStatsQc}} did to each row of a
+#'   summary-statistics collection: one row per tuple, its identity columns,
+#'   then the variant counts each QC step recorded (\code{variantsIn},
+#'   \code{variantsOut}, and so on; a nested count is named by its path, as
+#'   in \code{contentFilters.nDropped}). A step that did not run on a row is
+#'   \code{NA} there. Only the identity columns are present before QC has run.
+#'   The options the QC ran with are \code{\link{qcOptions}}; the per-variant
+#'   LD-mismatch tables are \code{\link{qcDiagnostics}}.
 #' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
 #' @param ... Unused.
-#' @return A \code{list} (possibly empty).
+#' @return A \code{DataFrame}, one row per tuple.
 #' @export
 setGeneric("qcInfo", function(x, ...) standardGeneric("qcInfo"))
 
-#' @title Get SLALOM / DENTIST Diagnostics
-#' @description Return the per-variant LD-mismatch diagnostics table (SLALOM or
-#'   DENTIST output) attached to a sumstats entry by
-#'   \code{\link{summaryStatsQc}} when \code{ldMismatchQcMethod} was not
-#'   \code{"none"}.
-#'   Convenience accessor over
-#'   \code{qcInfo(x)$entryAudit[[entry]]$ldMismatchDiagnostics}.
+#' @title Get the QC Options
+#' @description The record of the QC that ran over a summary-statistics
+#'   collection: the options \code{\link{summaryStatsQc}} was called with and
+#'   when. An empty \code{list()} (the default on construction) means QC has
+#'   not run; pipelines that need harmonized summary statistics
+#'   (\code{fineMappingPipeline}, \code{twasWeightsPipeline} and others)
+#'   refuse such inputs. What QC did to each row is \code{\link{qcInfo}}.
 #' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
-#' @param entry Integer index (default 1) of the entry whose diagnostics table
-#'   to return. When \code{NULL}, returns a named list of every entry's
-#'   diagnostics keyed by entry index.
 #' @param ... Unused.
-#' @return A \code{data.frame} of per-variant diagnostics (columns include
-#'   \code{variant_id} plus the SLALOM / DENTIST output columns), \code{NULL}
-#'   when no diagnostics were preserved for that entry, or a named list of such
-#'   data.frames when \code{entry = NULL}.
+#' @return A \code{list}, possibly empty.
 #' @export
-setGeneric("qcDiagnostics", function(x, entry = 1L, ...) {
+setGeneric("qcOptions", function(x, ...) standardGeneric("qcOptions"))
+
+#' @title Get SLALOM / DENTIST Diagnostics
+#' @description Return the per-variant LD-mismatch diagnostics (SLALOM or
+#'   DENTIST output) that \code{\link{summaryStatsQc}} attached to the
+#'   selected entry when \code{ldMismatchQcMethod} was not \code{"none"}.
+#'   The selectors pin one study (every row of a GWAS study, whose rows'
+#'   tables are stacked) or one \code{QtlSumStats} entry, as for
+#'   \code{\link{sumStats}}.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param studyName,context,trait Selectors pinning one study or entry;
+#'   \code{context} and \code{trait} are \code{QtlSumStats}-only.
+#' @param ... Unused.
+#' @return A \code{DataFrame} of per-variant diagnostics (columns include
+#'   \code{variant_id} plus the SLALOM / DENTIST output columns), or
+#'   \code{NULL} when no diagnostics were preserved for the selection.
+#' @export
+setGeneric("qcDiagnostics", function(x, ...) {
     standardGeneric("qcDiagnostics")
 })
 
@@ -839,34 +751,27 @@ setGeneric("ldReference", function(x, ...) standardGeneric("ldReference"))
 
 #' @title Get LD Correlation Matrix
 #' @description Extract the LD correlation matrix an \code{\link{LdMatrix}}
-#'   holds, labelled by its variant ids.
+#'   holds, labelled by its variant ids. \code{as.matrix(x)} and
+#'   \code{as(x, "matrix")} return the same matrix.
 #' @param x An \code{LdMatrix}.
+#' @param ... Unused.
 #' @return A correlation matrix.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:8]
 #' ld <- LdMatrix(cor(X), nSamples = nrow(X))
 #' ldMatrix(ld)[1:3, 1:3]
+#' identical(as.matrix(ld), ldMatrix(ld))
 #' @export
 setGeneric("ldMatrix", function(x) standardGeneric("ldMatrix"))
 
 #' @title Get Genotype Matrix
 #' @description Extract a genotype matrix from an object that carries genotype
-#'   data. For a \code{QtlDataset}, returns the genotype matrix for a selected
-#'   set of traits or region (see method documentation for the per-class
-#'   selection arguments).
+#'   data. For a \code{QtlDataset}, the whole dataset's dosages (samples x
+#'   variants), with no QC applied: to read part of it, narrow the dataset
+#'   first, e.g. \code{genotypes(x[window, samples, ])}.
 #' @param x The object to extract from.
-#' @param ... Class-specific selection arguments (e.g., \code{traitId},
-#'   \code{region}, \code{cisWindow} for \code{QtlDataset}).
-#' @param traitId Character or \code{NULL}. Molecular trait / feature identifier
-#'   to select; \code{NULL} matches all traits in the dataset.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param cisWindow Integer or \code{NULL}. Half-width (bp) of the cis window
-#'   around the trait; \code{NULL} uses the dataset default.
-#' @param samples Character vector or \code{NULL}. Restrict to these sample IDs;
-#'   \code{NULL} uses all samples.
+#' @param ... Passed on to methods.
 #' @return A numeric matrix, a list of matrices, or \code{NULL}.
 #' @examples
 #' data(qtlDatasetExample)
@@ -877,7 +782,10 @@ setGeneric("genotypes", function(x, ...) standardGeneric("genotypes"))
 #' @title Get Variant IDs
 #' @description Extract variant ID vector from an object that carries one (e.g.,
 #'   \code{LdMatrix}, \code{FineMappingRow}, \code{TwasWeightsRow}) or from
-#'   one entry of a collection class selected by its identity tuple.
+#'   one entry of a collection class selected by its identity tuple. Every
+#'   class renders the same canonical \code{chrom:pos:A2:A1} id from each
+#'   variant's range and alleles; labels a source gave (an rsID, a file's own
+#'   spelling) stay in the \code{SNP} column of its ranges.
 #' @param x The object.
 #' @param ... Class-specific selection arguments.
 #' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
@@ -888,13 +796,8 @@ setGeneric("genotypes", function(x, ...) standardGeneric("genotypes"))
 #'   this trait; \code{NULL} matches all traits.
 #' @param method Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param annotateSignificance Optional correction-method name passed through to
-#'   \code{\link{sumStats}} (QTL only); \code{NULL} applies none.
-#' @param ranges A \code{GRanges} or \code{NULL} (default). Return only the
-#'   variants overlapping these ranges; \code{NULL} returns everything.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block of a fit; \code{NULL} matches every block.
 #' @return Character vector of variant IDs.
 #' @examples
 #' data(qtlFineMappingExample)
@@ -904,37 +807,25 @@ setGeneric("variantIds", function(x, ...) standardGeneric("variantIds"))
 
 #' @title Get Molecular Traits
 #' @description Extract molecular-trait data from an object that carries it.
-#'   For a \code{QtlDataset}, the user can optionally select specific contexts,
-#'   traits, or a region (see method documentation for the per-class selection
-#'   arguments).
+#'   For a \code{QtlDataset}, select contexts and, optionally, traits by
+#'   name. The data come back as stored: missing values and outliers are a
+#'   run's phenotype QC (\code{\link{PhenotypeFilterParam}}), applied by the
+#'   pipelines, not by this accessor.
 #' @param x The object to extract from.
-#' @param ... Class-specific selection arguments (e.g., \code{contexts},
-#'   \code{traitId}, \code{region}).
-#' @param contexts Character vector. Context(s) whose data to extract.
-#' @param traitId Character or \code{NULL}. Molecular trait / feature identifier
+#' @param ... Class-specific selection arguments (e.g., \code{context},
+#'   \code{trait}).
+#' @param context Character vector. Context(s) whose data to extract.
+#' @param trait Character or \code{NULL}. Molecular trait / feature identifier
 #'   to select; \code{NULL} matches all traits in the dataset.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param naAction Character. How to handle missing phenotype values: one of
-#'   \code{"keep"}, \code{"drop"}, or \code{"impute"}.
-#' @param outlierAction Character. How to handle phenotype outliers: one of
-#'   \code{"keep"} or \code{"drop"}.
-#' @param outlierPvalThreshold Numeric. Two-sided p-value threshold for flagging
-#'   phenotype outliers. Default \code{1e-3}.
-#' @param outlierArgs Extra arguments for \code{robustbase::covMcd()}, the
-#'   robust covariance estimator the outlier rule is built on, supplied with
-#'   \code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
-#'   consulted when \code{outlierAction = "drop"}.
-#' @return A \code{SummarizedExperiment} when one context is selected, or a
-#'   named list of them for several. A \code{QtlDataset} is a
+#' @return A named list of \code{SummarizedExperiment}s keyed by context,
+#'   one per selected context. A \code{QtlDataset} is a
 #'   \code{MultiAssayExperiment}, so these are its experiments; take the
 #'   measurement matrix itself with
 #'   \code{SummarizedExperiment::assay()} rather than asking this accessor
 #'   for one.
 #' @examples
 #' data(qtlDatasetExample)
-#' molecularTraits(qtlDatasetExample, contexts = "brain")
+#' molecularTraits(qtlDatasetExample, context = "brain")
 #' @export
 setGeneric("molecularTraits", function(x, ...) {
     standardGeneric("molecularTraits")
@@ -943,15 +834,21 @@ setGeneric("molecularTraits", function(x, ...) {
 # Fine-mapping result accessor generics
 # =============================================================================
 
-#' @title Get a Single Fine-Mapping Entry
-#' @description Return one row of a \code{QtlFineMappingResult} or
-#'   \code{GwasFineMappingResult}, selected by its identity, as a single-row
-#'   collection of the same class.
+#' @title Get One Fine-Mapping Fit
+#' @description Return the rows of one fit of a \code{QtlFineMappingResult}
+#'   or \code{GwasFineMappingResult}, selected by its identity, as a
+#'   collection of the same class. A QTL fit is one row. A GWAS study
+#'   fine-mapped block by block holds one row per LD block, so its fit is
+#'   every block of the \code{(study, method)} pair, unless \code{blockId}
+#'   names one or \code{region} narrows them.
 #' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
-#' @param studyName,context,trait,method Single character identifiers. All
-#'   required when the collection has more than one row; optional when the
-#'   collection has a single row.
-#' @return A single-row collection of the same class as \code{x}.
+#' @param studyName,context,trait,method Single character identifiers.
+#'   Required when the collection holds more than one fit; optional when it
+#'   holds one. \code{context} and \code{trait} are QTL-only.
+#' @param blockId GWAS only: the \code{blockId} of one LD block, to select
+#'   that block alone. \code{NULL} (default) selects every block of the fit.
+#' @return A collection of the same class as \code{x}: one row for a QTL fit,
+#'   one row per selected block for a GWAS fit.
 #' @examples
 #' data(qtlFineMappingExample)
 #' fineMappingResult(qtlFineMappingExample, studyName = "study_1",
@@ -959,7 +856,14 @@ setGeneric("molecularTraits", function(x, ...) {
 #' @export
 setGeneric(
     "fineMappingResult",
-    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL,
+        blockId = NULL
+    ) {
         standardGeneric("fineMappingResult")
     }
 )
@@ -1006,11 +910,8 @@ setGeneric("adjustPips", function(x, keepVariants, ...) {
 #'   this trait; \code{NULL} matches all traits.
 #' @param method Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param returnList Logical. If \code{TRUE}, return a per-entry list keyed by
-#'   identity tuple instead of a single flattened vector.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block of a fit; \code{NULL} matches every block.
 #' @return A named numeric vector of PIPs.
 #' @examples
 #' data(qtlFineMappingExample)
@@ -1034,9 +935,8 @@ setGeneric("pip", function(x, ...) standardGeneric("pip"))
 #'   this trait; \code{NULL} matches all traits.
 #' @param method Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block of a fit; \code{NULL} matches every block.
 #' @return A list (the SuSiE fit object).
 #' @examples
 #' data(qtlFineMappingExample)
@@ -1046,12 +946,12 @@ setGeneric("susieFit", function(x, ...) standardGeneric("susieFit"))
 
 #' @title Compute Between-Credible-Set Correlation On Demand
 #' @description Compute the between-credible-set correlation matrix for a
-#'   \code{\link{fineMappingRow}} on demand from an LD source. The correlation
+#'   \code{\link{FineMappingRow}} on demand from an LD source. The correlation
 #'   is a view over the fit-time LD, which lives on the data object --- a
 #'   \code{QtlDataset}'s genotypes or a \code{QtlSumStats} / \code{GwasSumStats}
 #'   LD reference --- and is deliberately never stored on the fit. An
 #'   \code{ldSource} is therefore always required.
-#' @param x A \code{\link{fineMappingRow}} carrying the fit (credible-set
+#' @param x A \code{\link{FineMappingRow}} carrying the fit (credible-set
 #'   membership and PIP) and its variant ids.
 #' @param ldSource The object supplying the LD: a \code{QtlDataset}
 #'   (individual-level; genotypes via \code{\link{genotypes}}) or a
@@ -1117,13 +1017,12 @@ setGeneric("cvResult", function(x, ...) standardGeneric("cvResult"))
 
 #' @title Get Marginal Effects
 #' @description Extract per-variant marginal univariate effects from a
-#'   fine-mapping entry or result. Returns a \code{data.frame} with identity
-#'   columns (\code{variant_id, chrom, pos, A1, A2}), context (\code{N, MAF}),
-#'   and the marginal effect columns (\code{beta, se, z, p}). Populated
-#'   uniformly across the individual-level and RSS paths.
+#'   fine-mapping entry or result, one range per variant. Its \code{mcols()}
+#'   hold the identity columns (\code{variant_id, chrom, pos, A1, A2}),
+#'   context (\code{N, MAF}), and the marginal effect columns
+#'   (\code{beta, se, z, p}). Populated uniformly across the
+#'   individual-level and RSS paths.
 #' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
-#' @param maxPval Optional numeric (length 1). When non-\code{NULL}, filter rows
-#'   where \code{p > maxPval}. Default \code{NULL} (no filter).
 #' @param ... Class-specific selection arguments.
 #' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
 #'   to this study; \code{NULL} matches all studies.
@@ -1133,15 +1032,16 @@ setGeneric("cvResult", function(x, ...) standardGeneric("cvResult"))
 #'   this trait; \code{NULL} matches all traits.
 #' @param method Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @return A \code{data.frame}.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block of a fit; \code{NULL} matches every block.
+#' @return A \code{GRanges}, one range per variant; when the selectors match
+#'   more than one entry the row-identity columns are carried in
+#'   \code{mcols()} too.
 #' @examples
 #' data(qtlFineMappingExample)
 #' marginalEffects(qtlFineMappingExample)
 #' @export
-setGeneric("marginalEffects", function(x, maxPval = NULL, ...) {
+setGeneric("marginalEffects", function(x, ...) {
     standardGeneric("marginalEffects")
 })
 
@@ -1166,22 +1066,17 @@ setGeneric("marginalEffects", function(x, maxPval = NULL, ...) {
 #'   this trait; \code{NULL} matches all traits.
 #' @param method Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block of a fit; \code{NULL} matches every block.
 #' @param minPurity Numeric or \code{NULL}. Minimum credible-set purity to
 #'   retain; \code{NULL} applies no purity filter.
-#' @param raw Logical (length 1). \code{FALSE} (default) returns the posterior
-#'   view described above. \code{TRUE} hands back the stored canonical table
-#'   verbatim -- a \code{data.frame}, not a \code{GRanges} -- so neither the
-#'   projection nor \code{signalCutoff} applies.
 #' @return A \code{GRanges}, one range per retained variant, carrying the
 #'   per-variant columns in \code{mcols()}; when the selectors match more than
 #'   one entry the row-identity columns are carried there too. Take a table
 #'   with \code{as.data.frame()} (which adds the standard
 #'   \code{seqnames}/\code{start}/... columns) or
 #'   \code{as.data.frame(S4Vectors::mcols(.))} for the per-variant columns
-#'   alone. \code{raw = TRUE} returns the stored \code{data.frame} instead.
+#'   alone.
 #' @examples
 #' data(qtlFineMappingExample)
 #' topLoci(qtlFineMappingExample)
@@ -1203,14 +1098,17 @@ setGeneric(
 #'   this trait; \code{NULL} matches all traits.
 #' @param method Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block of a fit; \code{NULL} matches every block.
 #' @param coverage Numeric in (0, 1). Credible-set coverage level. Default
 #'   \code{0.95}.
 #' @param minPurity Numeric or \code{NULL}. Minimum credible-set purity to
 #'   retain; \code{NULL} applies no purity filter.
-#' @return A data.frame of credible set information.
+#' @return A \code{GRanges}, one range per credible-set member, carrying the
+#'   per-variant columns in \code{mcols()}; when the selectors match more
+#'   than one entry the row-identity columns are carried there too. Narrow it
+#'   with \code{subsetByOverlaps()}; take a table with
+#'   \code{as.data.frame()}.
 #' @examples
 #' data(qtlFineMappingExample)
 #' credibleSets(qtlFineMappingExample)
@@ -1233,9 +1131,8 @@ setGeneric("credibleSets", function(x, ...) standardGeneric("credibleSets"))
 #' @param studyName,context,trait,method Optional length-1 selectors pinning one
 #'   row of a collection, as elsewhere; each \code{NULL} (default) leaves that
 #'   part of the tuple unconstrained. Ignored when \code{x} is already a row.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   A further selector for a fine-mapping result, whose rows also carry a
-#'   region; \code{NULL} (default) leaves it unconstrained.
+#' @param blockId GWAS fine-mapping results only: the \code{blockId} naming
+#'   one LD block; \code{NULL} (default) leaves it unconstrained.
 #' @param ... Reserved for future use.
 #' @return A \code{list} with \code{variantIds} (character) and \code{weights}
 #'   (numeric) of equal length; both empty when no usable weights are present.
@@ -1253,7 +1150,12 @@ setGeneric("resolveWeights", function(x, ...) standardGeneric("resolveWeights"))
 #'   collection (aggregated across rows, tagged with run identity).
 #' @param x A \code{CtwasResultEntry} or \code{CtwasResult}.
 #' @param ... Class-specific selection arguments.
-#' @return A \code{data.frame} of posteriors (or \code{NULL} when absent).
+#' @return On a \code{CtwasResultEntry}, the stored posteriors: a
+#'   \code{GRanges} when the pipeline placed its rows (each table column in
+#'   \code{mcols()}), the table as given otherwise, or \code{NULL} when
+#'   absent. On a \code{CtwasResult}, one \code{GRanges} of every row's
+#'   posteriors with the run identity in \code{mcols()} (empty when no row
+#'   has any); a row whose payload carries no coordinates is an error.
 #' @examples
 #' cre <- CtwasResultEntry(
 #'   posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
@@ -1272,8 +1174,11 @@ setGeneric("ctwasPosteriors", function(x, ...) {
 #'   cTWAS output retained so the raw run is reconstructable.
 #' @param x A \code{CtwasResultEntry} or \code{CtwasResult}.
 #' @param ... Class-specific selection arguments.
-#' @return A \code{data.frame} of per-effect alphas (or \code{NULL} when
-#'   absent).
+#' @return On a \code{CtwasResultEntry}, the stored alphas: a
+#'   \code{GRanges} when the pipeline placed its rows, the table as given
+#'   otherwise, or \code{NULL} when absent. On a \code{CtwasResult}, one
+#'   \code{GRanges} of every row's alphas with the run identity in
+#'   \code{mcols()} (empty when no row has any).
 #' @examples
 #' cre <- CtwasResultEntry(
 #'   posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
@@ -1391,7 +1296,7 @@ setGeneric("methodNames", function(x) standardGeneric("methodNames"))
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
 #' @return A character vector or NULL.
 #' @examples
-#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+#' twe <- TwasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
 #'   weightStandardized = FALSE)
 #' weightsDataType(twe)
@@ -1404,23 +1309,27 @@ setGeneric("weightsDataType", function(x, ...) {
 # Published-output generics (VCF/BCF and BED)
 # =============================================================================
 
-#' Export a result to VCF/BCF
+#' Write a result to VCF/BCF
 #'
 #' Writes GWAS summary statistics, fine-mapping results or TWAS weights to a
-#' GWAS-VCF-style file via VariantAnnotation and Rsamtools: one record per
-#' variant, one SAMPLE per study / fitted model, and the per-variant statistics
-#' as FORMAT fields. Supports bgzipped VCF (.vcf.gz/.vcf.bgz); BCF (.bcf)
-#' additionally needs a working \code{Rsamtools::asBcf()}, which recent
-#' Rsamtools releases disable, so prefer .vcf.bgz.
+#' GWAS-VCF-style file: one record per variant, one SAMPLE per study / fitted
+#' model, and the per-variant statistics as FORMAT fields. The file is written
+#' with VariantAnnotation's \code{\link[VariantAnnotation]{writeVcf}}, so that
+#' package must be installed.
+#' Supports bgzipped VCF (.vcf.gz/.vcf.bgz); BCF (.bcf) additionally needs a
+#' working \code{Rsamtools::asBcf()}, which recent Rsamtools releases disable,
+#' so prefer .vcf.bgz.
 #'
 #' Which FORMAT fields are written depends on the input:
 #' \describe{
-#'   \item{\code{GwasSumStats}}{\code{ES} / \code{SS} / \code{AF} for one
-#'     study.}
+#'   \item{\code{GwasSumStats}}{\code{ES} / \code{SE} / \code{EZ} /
+#'     \code{NS} / \code{AF} / \code{MAF} for one study, whichever its
+#'     variants carry.}
 #'   \item{a fine-mapping result}{the marginal fields (\code{ES},
-#'     \code{SE}, \code{LP}, \code{SS}, \code{AF}) plus the posterior ones
-#'     (\code{PIP}, \code{LBF}, \code{LFSR}, and a \code{CS}/\code{PUR} pair
-#'     per credible-set coverage present).}
+#'     \code{SE}, \code{EZ}, \code{LP}, \code{NS}), the fit's own
+#'     (\code{AF}, \code{WGT}, \code{WGTSE}, \code{THETA}) and the
+#'     posterior ones (\code{PIP}, \code{LBF}, \code{LFSR}, and a
+#'     \code{CS}/\code{PUR} pair per credible-set coverage present).}
 #'   \item{\code{TwasWeights}}{\code{WGT}, the prediction weight.}
 #' }
 #'
@@ -1431,17 +1340,28 @@ setGeneric("weightsDataType", function(x, ...) {
 #' methods for one gene, are compared by reading one file rather than a dozen.
 #' Each sample is described in its own \code{##SAMPLE} header line, carrying
 #' the fit's identity tuple and how many variants it contributed.
-#' Cross-validation results are not exported -- see \code{\link{exportToBed}}
-#' for why -- and an export requires the full-data fit.
+#' Cross-validation results are not written -- see \code{\link{writeBed}} for
+#' why -- and writing requires the full-data fit.
+#'
+#' A GWAS study fine-mapped block by block is ONE fit, so its blocks are
+#' joined into one sample. A \code{BID} FORMAT field then names each
+#' variant's LD block -- credible-set indices are numbered within a block,
+#' so a set is the \code{(BID, CS)} pair -- and the per-block header values
+#' (block id, analysis window and whether it was given, \code{V},
+#' \code{cs_index}) are packed in block order, separated by \code{|}.
+#' \code{\link{readFineMappingResult}} splits such a sample back into its
+#' blocks.
 #'
 #' \code{splitByContext} / \code{splitByTrait} opt out of that and write one
-#' single-sample file per fit, at a path decorated with the axis value.
+#' file per context / trait, at a path decorated with the axis value, holding
+#' the fits that share it. \code{splitByBlock} writes one file per LD block
+#' of a GWAS result, each holding every fit's part of that block.
 #'
-#' @param x A \code{GwasSumStats}, \code{QtlFineMappingResult},
+#' @param obj A \code{GwasSumStats}, \code{QtlFineMappingResult},
 #'   \code{GwasFineMappingResult} or \code{TwasWeights} object, or a
 #'   \code{list} of fine-mapping results or of \code{TwasWeights} objects to
 #'   combine first.
-#' @param outputPath File path for output. Extension determines format:
+#' @param filename File path for output. Extension determines format:
 #'   \code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF, \code{.bcf} for BCF,
 #'   \code{.vcf} for uncompressed VCF.
 #' @param sampleName Name(s) for the VCF sample column(s). Default \code{NULL}
@@ -1458,26 +1378,28 @@ setGeneric("weightsDataType", function(x, ...) {
 #'   Default \code{FALSE}.
 #' @param splitByTrait Logical. If \code{TRUE}, write one VCF per trait. Default
 #'   \code{FALSE}.
+#' @param splitByBlock Logical. \code{GwasFineMappingResult} only: if
+#'   \code{TRUE}, write one VCF per LD block instead of joining a study's
+#'   blocks into one file. Default \code{FALSE}.
 #' @param ... Additional arguments passed to methods.
 #' @return Invisible path(s) to the written file(s).
-#' @seealso \code{\link{exportToBed}}
+#' @seealso \code{\link{writeBed}}, \code{\link{readFineMappingResult}}
 #' @examples
 #' data(gwasSumStatsS4Example)
-#' exportToVcf(
-#'   gwasSumStatsS4Example, outputPath = tempfile(fileext = ".vcf"))
+#' writeGwasVcf(gwasSumStatsS4Example, tempfile(fileext = ".vcf"))
 #' @export
-setGeneric("exportToVcf", function(x, outputPath, sampleName = NULL, ...) {
-    standardGeneric("exportToVcf")
+setGeneric("writeGwasVcf", function(obj, filename, ...) {
+    standardGeneric("writeGwasVcf")
 })
 
-#' Export a result to a published BED table
+#' Write a result to a published BED table
 #'
 #' Writes fine-mapping results or TWAS weights to a published FunGen-xQTL BED
 #' table, bgzipping and tabix-indexing the output when the path ends in
 #' \code{.gz} / \code{.bgz}. The tabular counterpart of
-#' \code{\link{exportToVcf}}: the VCF is one record per variant with the models
-#' as samples, while these tables are long-format, one row per published
-#' observation.
+#' \code{\link{writeGwasVcf}}: the VCF is one record per variant
+#' with the models as samples, while these tables are long-format, one row per
+#' published observation.
 #'
 #' A \code{TwasWeights} writes one table, a row per (variant, weight column).
 #' A fine-mapping result offers two, selected with \code{schema}:
@@ -1494,19 +1416,19 @@ setGeneric("exportToVcf", function(x, outputPath, sampleName = NULL, ...) {
 #' \code{method} -- because these collections are keyed by that tuple and
 #' several of them are routinely folded into one output.
 #'
-#' Cross-validation results are NOT exported, in any schema. They describe how
+#' Cross-validation results are NOT written, in any schema. They describe how
 #' a model scored on held-out FOLDS; nothing about them is per-variant, and a
 #' published file has no data-secure way to express anything fold-level,
 #' because fold membership is sample-level information and sample names can be
 #' protected. They remain on the object, where \code{\link{cvResult}} returns
-#' them and the caller tabulates whatever they need. For the same reason an
-#' export REQUIRES the full-data fit: a cross-validation-only collection (what
-#' \code{twasWeightsPipeline(fitFullData = FALSE)} produces) is refused rather
-#' than written out empty.
+#' them and the caller tabulates whatever they need. For the same reason
+#' writing REQUIRES the full-data fit: a cross-validation-only collection
+#' (what \code{twasWeightsPipeline(fitFullData = FALSE)} produces) is refused
+#' rather than written out empty.
 #'
-#' @param x A \code{QtlFineMappingResult}, \code{GwasFineMappingResult} or
+#' @param obj A \code{QtlFineMappingResult}, \code{GwasFineMappingResult} or
 #'   \code{TwasWeights} object, or a \code{list} of them, to combine first.
-#' @param outputPath Output path. A \code{.gz} / \code{.bgz} extension selects
+#' @param filename Output path. A \code{.gz} / \code{.bgz} extension selects
 #'   bgzip + tabix (via Rsamtools, so no htslib binary is needed); any other
 #'   extension writes a plain table.
 #' @param schema Fine-mapping results only: which published schema to
@@ -1539,8 +1461,7 @@ setGeneric("exportToVcf", function(x, outputPath, sampleName = NULL, ...) {
 #'   (\code{grange_start} / \code{grange_end}, the legacy \code{gene} /
 #'   \code{event} aliases, and whatever a custom build added); a
 #'   \code{TwasWeights} element carries only its alleles and weight, so there
-#'   is nothing further to add unless the collection was built by hand. Not
-#'   accepted by the \code{"performance"} schema, which has no variant axis.
+#'   is nothing further to add unless the collection was built by hand.
 #' @param extraColumns Optional NAMED list of trailing columns to append after
 #'   the published schema. Each element is either length 1 (recycled across
 #'   every row) or one value per row. For fields no S4 object can know -- the
@@ -1548,20 +1469,21 @@ setGeneric("exportToVcf", function(x, outputPath, sampleName = NULL, ...) {
 #'   is the motivating case. Names that collide with a published column are an
 #'   error rather than a silent overwrite.
 #' @param ... Additional arguments passed to methods.
-#' @return \code{outputPath}, invisibly.
-#' @seealso \code{\link{exportToVcf}}, \code{\link{genomicOrder}}
+#' @return \code{filename}, invisibly.
+#' @seealso \code{\link{writeGwasVcf}},
+#'   \code{\link{readFineMappingResult}}, \code{\link{genomicOrder}}
 #' @examples
 #' data(qtlFineMappingExample)
-#' exportToBed(qtlFineMappingExample, tempfile(fileext = ".bed"))
-#' exportToBed(
+#' writeBed(qtlFineMappingExample, tempfile(fileext = ".bed"))
+#' writeBed(
 #'     qtlFineMappingExample, tempfile(fileext = ".bed"),
 #'     schema = "topLoci", columns = "all"
 #' )
 #' data(twasWeightsExample)
-#' exportToBed(twasWeightsExample, tempfile(fileext = ".bed"))
+#' writeBed(twasWeightsExample, tempfile(fileext = ".bed"))
 #' @export
-setGeneric("exportToBed", function(x, outputPath, ...) {
-    standardGeneric("exportToBed")
+setGeneric("writeBed", function(obj, filename, ...) {
+    standardGeneric("writeBed")
 })
 
 # =============================================================================
@@ -1604,10 +1526,13 @@ setGeneric("traitNames", function(x) standardGeneric("traitNames"))
 #' @title Get Per-Row Analysis Windows
 #' @description Return the genomic interval each row was analysed over, as a
 #'   \code{GRanges} with one range per row -- the trait's own region for a
-#'   \code{TwasWeights}, and for a fine-mapping result the window the fit
-#'   was run over (the requested region, or the trait's cis-window when the fit
-#'   was driven by \code{traitId} + \code{cisWindow}). This is location
-#'   provenance (e.g. for cTWAS LD-block placement).
+#'   \code{TwasWeights}; for a fine-mapping result the window the fit was run
+#'   over (the requested region, or the trait's cis-window when the fit was
+#'   driven by \code{traitId} + \code{cisWindow}); for summary statistics the
+#'   LD block or window the row was loaded for (the \code{region} given to the
+#'   constructor or loader), else the span of its variants before QC. This is
+#'   location provenance (e.g. for cTWAS LD-block placement). One method
+#'   serves every collection.
 #'
 #'   This is the window that was ANALYSED, not the span of the variants that
 #'   survived into the fit: QC and screening drop variants first, so a fit over
@@ -1616,7 +1541,7 @@ setGeneric("traitNames", function(x) standardGeneric("traitNames"))
 #'   recovered from the object; the span can, and is simply \code{range(x)}.
 #'
 #'   Being a record of what was analysed, it deliberately does NOT change under
-#'   \code{subsetRegion()} or row subsetting -- a subset of a fit's variants was
+#'   subsetting -- a subset of a fit's variants was
 #'   still produced by a fit over the original window. Use \code{range(x)} when
 #'   you want the current content instead.
 #'
@@ -1641,11 +1566,13 @@ setGeneric("genomicRegion", function(x, ...) standardGeneric("genomicRegion"))
 #'   on, so the returned vector is always the same length as \code{nrow(x)}
 #'   and can be used to label or join rows directly.
 #'
-#'   It keys the external block manifest the blocks were defined in, and so
-#'   carries the true block BOUNDARIES --- unlike \code{range(x)}, which is
-#'   the span of the variants that survived QC. A collection with no block
-#'   axis (every QTL flavour) returns \code{NA} for every row rather than
-#'   erroring, so code that handles both flavours needs no class test.
+#'   It keys the external block manifest the blocks were defined in. The
+#'   block's BOUNDARIES are the \code{region} column, recorded as given or
+#'   computed in \code{regionGiven} (see \code{\linkS4class{GwasSumStats}})
+#'   --- unlike \code{range(x)}, which is the span of the variants that
+#'   survived QC. A collection with no block axis (every QTL flavour)
+#'   returns \code{NA} for every row rather than erroring, so code that
+#'   handles both flavours needs no class test.
 #' @param x The object.
 #' @param ... Reserved for future use.
 #' @return Character, one value per row of \code{x} (\code{NA} where the row
@@ -1670,10 +1597,13 @@ setGeneric("blockId", function(x, ...) standardGeneric("blockId"))
 #'   \code{QtlFineMappingResult} and \code{TwasWeights}.
 #' @param x The object.
 #' @param ... Reserved for future use.
-#' @param traitId Character or \code{NULL}. Molecular trait / feature identifier
+#' @param trait Character or \code{NULL}. Molecular trait / feature identifier
 #'   to select; \code{NULL} matches all traits in the dataset.
-#' @return A \code{GRanges} with one range per row of \code{x}, or an empty
-#'   \code{GRanges} when the collection carries no trait-position provenance.
+#' @return A \code{GRanges}: one range per row of a collection, or an empty
+#'   \code{GRanges} when the collection carries no trait-position provenance
+#'   (or, for a \code{QtlSumStats} with \code{trait} given, none of those
+#'   traits). For a \code{QtlDataset}, one range per requested trait, named
+#'   by trait; a trait in no context is an error.
 #' @export
 setGeneric("traitPosition", function(x, ...) {
     standardGeneric("traitPosition")
@@ -1681,25 +1611,12 @@ setGeneric("traitPosition", function(x, ...) {
 
 #' @title Get Residualized Genotypes
 #' @description Residualize the genotype matrix against the per-context
-#'   phenotype covariates and the genotype covariates, optionally subsetting
-#'   variants to those falling within a trait's cis-window or an explicit
-#'   region.
+#'   phenotype covariates and the genotype covariates, over the whole
+#'   dataset: narrow it first, with \code{x[i, j, ]}, to residualize part
+#'   of it.
 #' @param x A \code{QtlDataset} object.
-#' @param ... Selection arguments: \code{traitId}, \code{region},
-#'   \code{cisWindow}, \code{phenotypeCovariatesToRemove},
-#'   \code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
-#'   (\code{"impute"}, the default, mean-imputes missing covariate cells;
-#'   \code{"drop"} removes samples with any missing covariate).
-#' @param contexts Character vector. Context(s) whose data to extract.
-#' @param traitId Character or \code{NULL}. Molecular trait / feature identifier
-#'   to select; \code{NULL} matches all traits in the dataset.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
-#' @param cisWindow Integer or \code{NULL}. Half-width (bp) of the cis window
-#'   around the trait; \code{NULL} uses the dataset default.
-#' @param samples Character vector or \code{NULL}. Restrict to these sample IDs;
-#'   \code{NULL} uses all samples.
+#' @param ... Passed on to methods.
+#' @param context Character vector. Context(s) whose data to extract.
 #' @param residualizationParam What the data is residualized on, built with
 #'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 #'   \code{genotypeCovariates} choose the covariate sets,
@@ -1710,7 +1627,7 @@ setGeneric("traitPosition", function(x, ...) {
 #' @return A numeric matrix (samples x variants).
 #' @examples
 #' data(qtlDatasetExample)
-#' residualizedGenotypes(qtlDatasetExample, contexts = "brain")
+#' residualizedGenotypes(qtlDatasetExample, context = "brain")
 #' @export
 setGeneric("residualizedGenotypes", function(x, ...) {
     standardGeneric("residualizedGenotypes")
@@ -1719,19 +1636,14 @@ setGeneric("residualizedGenotypes", function(x, ...) {
 #' @title Get Residualized Phenotypes
 #' @description Residualize the per-context phenotype matrices against the
 #'   per-context phenotype covariates and the genotype covariates, for one or
-#'   more requested contexts.
+#'   more requested contexts. Missing values and outliers are left as they
+#'   are: they are a run's phenotype QC (\code{\link{PhenotypeFilterParam}}),
+#'   applied by the pipelines.
 #' @param x A \code{QtlDataset} object.
-#' @param ... Selection arguments: \code{contexts} (required), \code{traitId},
-#'   \code{region}, \code{phenotypeCovariatesToRemove},
-#'   \code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
-#'   (\code{"impute"}, the default, mean-imputes missing covariate cells;
-#'   \code{"drop"} removes samples with any missing covariate).
-#' @param contexts Character vector. Context(s) whose data to extract.
-#' @param traitId Character or \code{NULL}. Molecular trait / feature identifier
+#' @param ... Passed on to methods.
+#' @param context Character vector. Context(s) whose data to extract.
+#' @param trait Character or \code{NULL}. Molecular trait / feature identifier
 #'   to select; \code{NULL} matches all traits in the dataset.
-#' @param region Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-#'   Restrict variants to this region; \code{NULL} uses the full cis window /
-#'   all regions.
 #' @param residualizationParam What the data is residualized on, built with
 #'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 #'   \code{genotypeCovariates} choose the covariate sets,
@@ -1739,20 +1651,10 @@ setGeneric("residualizedGenotypes", function(x, ...) {
 #'   side on or off, and \code{covariateNaAction} says how missing
 #'   covariate values are handled. The same record the pipelines take, so a
 #'   setting means the same thing by either route.
-#' @param naAction Character. How to handle missing phenotype values: one of
-#'   \code{"keep"}, \code{"drop"}, or \code{"impute"}.
-#' @param outlierAction Character. How to handle phenotype outliers: one of
-#'   \code{"keep"} or \code{"drop"}.
-#' @param outlierPvalThreshold Numeric. Two-sided p-value threshold for flagging
-#'   phenotype outliers. Default \code{1e-3}.
-#' @param outlierArgs Extra arguments for \code{robustbase::covMcd()}, the
-#'   robust covariance estimator the outlier rule is built on, supplied with
-#'   \code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
-#'   consulted when \code{outlierAction = "drop"}.
 #' @return A named list of numeric matrices keyed by context.
 #' @examples
 #' data(qtlDatasetExample)
-#' residualizedPhenotypes(qtlDatasetExample, contexts = "brain")
+#' residualizedPhenotypes(qtlDatasetExample, context = "brain")
 #' @export
 setGeneric("residualizedPhenotypes", function(x, ...) {
     standardGeneric("residualizedPhenotypes")
@@ -1762,14 +1664,14 @@ setGeneric("residualizedPhenotypes", function(x, ...) {
 #' @description Return per-context phenotype covariate matrices, taken from the
 #'   \code{colData} of each context's \code{SummarizedExperiment}.
 #' @param x A \code{QtlDataset} object.
-#' @param contexts Character vector of context names (subset of
+#' @param context Character vector of context names (subset of
 #'   \code{names(molecularTraits(x))}).
 #' @return A named list of matrices keyed by context.
 #' @examples
 #' data(qtlDatasetExample)
-#' phenotypeCovariates(qtlDatasetExample, contexts = "brain")
+#' phenotypeCovariates(qtlDatasetExample, context = "brain")
 #' @export
-setGeneric("phenotypeCovariates", function(x, contexts) {
+setGeneric("phenotypeCovariates", function(x, context) {
     standardGeneric("phenotypeCovariates")
 })
 
@@ -1784,19 +1686,6 @@ setGeneric("phenotypeCovariates", function(x, contexts) {
 #' @export
 setGeneric("genotypeCovariates", function(x) {
     standardGeneric("genotypeCovariates")
-})
-
-#' @title Get scaleResiduals Flag
-#' @description Whether residualization accessors scale residuals to unit
-#'   variance.
-#' @param x A \code{QtlDataset} object.
-#' @return Logical (length 1).
-#' @examples
-#' data(qtlDatasetExample)
-#' scaleResiduals(qtlDatasetExample)
-#' @export
-setGeneric("scaleResiduals", function(x) {
-    standardGeneric("scaleResiduals")
 })
 
 # =============================================================================
@@ -1913,7 +1802,6 @@ setGeneric("ldMatrixList", function(x) standardGeneric("ldMatrixList"))
 #' ldBlocks(ldEigenExample)
 #' @export
 setGeneric("ldBlocks", function(x) standardGeneric("ldBlocks"))
-
 
 #' @title Get GenotypeHandle
 #' @description Return the \code{GenotypeHandle} behind a \code{QtlDataset}'s
@@ -2040,7 +1928,7 @@ setGeneric("construct", function(pipeline, records, ...) {
 # ---- SldscData accessors ----
 #' @title Get the annotation table from an SldscData
 #' @param x An \code{\link{SldscData}} object.
-#' @return A \code{data.frame} of annotations (CHR, SNP, annotation columns).
+#' @return A \code{DataFrame} of annotations (CHR, SNP, annotation columns).
 #' @rdname annotData
 #' @examples
 #' mkRun <- function(cats) {
@@ -2072,7 +1960,7 @@ setGeneric("annotData", function(x) standardGeneric("annotData"))
 
 #' @title Get the allele-frequency table from an SldscData
 #' @param x An \code{\link{SldscData}} object.
-#' @return A \code{data.frame} of reference-panel frequencies (SNP, MAF).
+#' @return A \code{DataFrame} of reference-panel frequencies (SNP, MAF).
 #' @rdname frqData
 #' @examples
 #' mkRun <- function(cats) {
@@ -2157,17 +2045,16 @@ setGeneric("testedAnnotations", function(x) {
 
 #' @title Get sLDSC Results from an SldscData
 #' @description Return the stratified LD-score regression runs held by an
-#'   \code{\link{SldscData}}: every trait's runs when \code{trait} is
-#'   \code{NULL}, otherwise the selected run(s) for that one trait.
+#'   \code{\link{SldscData}}, keyed by trait. Each trait's entry holds its
+#'   \code{single} runs (one per annotation) and its \code{joint} run, read
+#'   with \code{[[}: \code{sldscResults(x, "T")[["T"]]$joint}.
 #' @param x An \code{\link{SldscData}} object.
-#' @param trait Character trait name, or \code{NULL} (default) to return the
-#'   named list of per-trait \code{single}/\code{joint} runs for all traits.
-#' @param ... Further arguments: \code{mode} (\code{"single"}/\code{"joint"})
-#'   and \code{idx} (which single run).
-#' @param mode Character. Trait-run selection mode.
-#' @param idx Integer. Index of the trait run to select.
-#' @return The named list of per-trait runs when \code{trait} is \code{NULL};
-#'   otherwise a single run list, the list of single runs, or \code{NULL}.
+#' @param trait Character trait name(s), or \code{NULL} (default) for every
+#'   trait. A name the object does not hold is an error.
+#' @param ... Unused.
+#' @return A named list keyed by trait, each element a list with
+#'   \code{single} (a list of runs) and \code{joint} (one run, or
+#'   \code{NULL} when the trait has none).
 #' @rdname sldscResults
 #' @examples
 #' mkRun <- function(cats) {
@@ -2193,14 +2080,14 @@ setGeneric("testedAnnotations", function(x) {
 #' }
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
 #' sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
-#' sldscResults(sd, "traitX")
+#' sldscResults(sd, "traitX")[["traitX"]]$joint$categories
 #' @export
 setGeneric("sldscResults", function(x, trait = NULL, ...) {
     standardGeneric("sldscResults")
 })
 
 #' @title Colocalization Views
-#' @description The four views over a \code{\linkS4class{ColocResult}}. The
+#' @description The five views over a \code{\linkS4class{ColocResult}}. The
 #'   object stores one element per tested (QTL credible set, GWAS credible set,
 #'   block) pair; these accessors project it to the granularity a given
 #'   analysis needs, rather than any one of them being the stored shape.
@@ -2210,13 +2097,19 @@ setGeneric("sldscResults", function(x, trait = NULL, ...) {
 #'       \code{$summary} granularity. Every testable pair is reported verbatim,
 #'       including both halves of a credible set that straddles a block
 #'       boundary; interpreting them is the caller's decision.}
-#'     \item{\code{colocVariants()}}{One row per (pair, variant), carrying
+#'     \item{\code{colocVariants()}}{One range per (pair, variant), carrying
 #'       \code{colocPp = PP.H4.abf * SNP.PP.H4} -- the posterior that this
-#'       variant is the shared causal one. With \code{pooled = TRUE}, one row
-#'       per (gene, variant) pooled by the rule below.}
-#'     \item{\code{colocCredibleSets()}}{One row per coloc credible set: the
-#'       smallest set of variants whose cumulative \code{SNP.PP.H4} reaches
-#'       \code{coverage}. This is a THIRD variant set, not guaranteed to be a
+#'       variant is the shared causal one.}
+#'     \item{\code{colocPooledVariants()}}{One range per (gene, variant),
+#'       pooled across pairs by the rule below. A
+#'       \code{\linkS4class{ColocBoostResult}} pools per (analysis, variant)
+#'       instead, with the noisy-OR stage only.}
+#'     \item{\code{colocCredibleSets()}}{One element per coloc credible set:
+#'       the smallest set of variants whose cumulative \code{SNP.PP.H4}
+#'       reaches \code{coverage}, as ranges carrying their \code{SNP.PP.H4},
+#'       with the set's pair columns, \code{csSize}, \code{csCoverage},
+#'       \code{leadVariant}, \code{leadPp} and \code{purity} in
+#'       \code{mcols()}. This is a THIRD variant set, not guaranteed to be a
 #'       subset of either input credible set, so its purity is recomputed from
 #'       LD rather than inherited.}
 #'     \item{\code{colocGenes()}}{One row per gene, pooled across pairs.}
@@ -2231,8 +2124,6 @@ setGeneric("sldscResults", function(x, trait = NULL, ...) {
 #'   combine as \code{1 - prod_i (1 - p_i)}.
 #'
 #' @param x A \code{ColocResult}.
-#' @param pooled Logical. \code{colocVariants()} only: pool to one row per
-#'   (gene, variant) instead of per (pair, variant).
 #' @param coverage Cumulative \code{SNP.PP.H4} the credible set must reach.
 #' @param minPp4 Optional lower bound on the pair's \code{PP.H4.abf}. Applied
 #'   before any LD work, so a stricter threshold costs strictly less.
@@ -2244,7 +2135,10 @@ setGeneric("sldscResults", function(x, trait = NULL, ...) {
 #'   (purity). Requires the object's \code{ldReference}; when that is absent,
 #'   purity is reported as \code{NA} and no set is dropped.
 #' @param ... Additional arguments passed on to methods.
-#' @return A tibble at the requested granularity.
+#' @return \code{colocVariants()} and \code{colocPooledVariants()} a
+#'   \code{GRanges}, its columns in \code{mcols()};
+#'   \code{colocCredibleSets()} a \code{GRangesList}, one element per set;
+#'   the other views a \code{DataFrame}.
 #' @name colocViews
 #' @rdname colocViews
 #' @examples
@@ -2256,6 +2150,7 @@ setGeneric("sldscResults", function(x, trait = NULL, ...) {
 #' )
 #' head(colocPairs(res))
 #' head(colocVariants(res))
+#' head(colocPooledVariants(res))
 #' colocGenes(res)
 #' head(colocCredibleSets(res, minPp4 = 0.001))
 NULL
@@ -2268,8 +2163,14 @@ setGeneric("colocPairs", function(x, ...) {
 
 #' @rdname colocViews
 #' @export
-setGeneric("colocVariants", function(x, pooled = FALSE, ...) {
+setGeneric("colocVariants", function(x, ...) {
     standardGeneric("colocVariants")
+})
+
+#' @rdname colocViews
+#' @export
+setGeneric("colocPooledVariants", function(x, ...) {
+    standardGeneric("colocPooledVariants")
 })
 
 #' @rdname colocViews
@@ -2287,54 +2188,6 @@ setGeneric("colocGenes", function(x, ...) {
     standardGeneric("colocGenes")
 })
 
-#' @title QtlDataset Filter Settings
-#' @description The variant- and sample-filter settings a
-#'   \code{\link{QtlDataset}} was built with. They are recorded on the object
-#'   rather than reapplied per call, so reading them back is how a caller finds
-#'   out what a dataset already excludes.
-#' @param x A \code{QtlDataset}.
-#' @param ... Additional arguments passed on to methods.
-#' @return \code{mafCutoff()}, \code{macCutoff()},
-#'   \code{xvarCutoff()} and \code{imissCutoff()} single numerics;
-#'   \code{keepVariants()} a character vector (empty when no restriction
-#'   was requested); \code{keepIndel()} a single logical. The sample set
-#'   is not among them: it lives in \code{colData(x)} and \code{sampleMap(x)}.
-#' @name qtlDatasetFilters
-#' @rdname qtlDatasetFilters
-#' @examples
-#' data(qtlDatasetExample)
-#' mafCutoff(qtlDatasetExample)
-#' keepIndel(qtlDatasetExample)
-NULL
-
-#' @rdname qtlDatasetFilters
-#' @export
-setGeneric("mafCutoff", function(x, ...) standardGeneric("mafCutoff"))
-
-#' @rdname qtlDatasetFilters
-#' @export
-setGeneric("macCutoff", function(x, ...) standardGeneric("macCutoff"))
-
-#' @rdname qtlDatasetFilters
-#' @export
-setGeneric("xvarCutoff", function(x, ...) standardGeneric("xvarCutoff"))
-
-#' @rdname qtlDatasetFilters
-#' @export
-setGeneric("imissCutoff", function(x, ...) {
-    standardGeneric("imissCutoff")
-})
-
-#' @rdname qtlDatasetFilters
-#' @export
-setGeneric("keepVariants", function(x, ...) {
-    standardGeneric("keepVariants")
-})
-
-#' @rdname qtlDatasetFilters
-#' @export
-setGeneric("keepIndel", function(x, ...) standardGeneric("keepIndel"))
-
 #' @title Get Per-Chromosome Payload Paths
 #' @description The chromosome-to-path map of a sharded
 #'   \code{\link{GenotypeHandle}}. Empty (\code{character(0)}) for a
@@ -2343,8 +2196,8 @@ setGeneric("keepIndel", function(x, ...) standardGeneric("keepIndel"))
 #'   routed by chromosome.
 #' @param x A \code{GenotypeHandle}.
 #' @param ... Additional arguments passed on to methods.
-#' @return A named character vector mapping canonical chromosome to path or
-#'   prefix, possibly empty.
+#' @return A named character vector mapping each chromosome, in UCSC style
+#'   (\code{"chr21"}), to its path or prefix, possibly empty.
 #' @details The genotype handle is the seed layer behind a panel and
 #'   is not part of the public interface; obtain a panel from
 #'   \code{readGenotypes()} and ask it directly.
@@ -2354,7 +2207,7 @@ setGeneric("chromPaths", function(x, ...) standardGeneric("chromPaths"))
 #' Per-variant per-effect log Bayes factors (wide)
 #'
 #' The variant x effect matrix of single-effect log Bayes factors
-#' (\code{lbf_variable}, or fSuSiE's \code{lBF}) from the stored fit: one row
+#' (\code{lbf_variable}, or fSuSiE's \code{lBF}) from the stored fit: one range
 #' per variant, one \code{lbf_L<k>} column per effect. The per-variant scalar
 #' summary (max across effects) is the \code{logBF} column of
 #' \code{\link{topLoci}}; this accessor keeps the full per-effect breakdown.
@@ -2363,8 +2216,9 @@ setGeneric("chromPaths", function(x, ...) standardGeneric("chromPaths"))
 #'
 #' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
 #' @param ... Ignored.
-#' @return A \code{tibble}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
-#'   collection method also carries the entry identity columns).
+#' @return A \code{GRanges}, one range per variant, whose \code{mcols()}
+#'   hold \code{variant_id} + \code{lbf_L1..lbf_LL} (the collection method
+#'   also carries the entry identity columns).
 #' @seealso \code{\link{topLoci}} (the scalar \code{logBF} column)
 #' @examples
 #' data(qtlFineMappingExample)
@@ -2382,7 +2236,7 @@ setGeneric("lbf", function(x, ...) standardGeneric("lbf"))
 #' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
 #' @param coverage Credible-set coverage to summarise. Default 0.95.
 #' @param ... Ignored.
-#' @return A \code{tibble}: \code{cs, effect_id, coverage, n_variants,
+#' @return A \code{DataFrame}: \code{cs, effect_id, coverage, n_variants,
 #'   purity_min, purity_mean, V, cs_log10bf} (strongest member logBF),
 #'   \code{cs_log_bf} (true per-effect single-effect log Bayes factor),
 #'   \code{cs_pip} (summed member PIP = inclusion mass captured),
@@ -2402,18 +2256,20 @@ setGeneric("credibleSetSummary", function(x, ...) {
 #'
 #' For a functional-SuSiE (\code{fsusieR::susiF}) fine-mapping entry, returns
 #' the fitted effect curve and its credible band over the functional grid, one
-#' row per (credible set, grid position). Wraps the upstream fSuSiE band
+#' range per (credible set, grid position). Wraps the upstream fSuSiE band
 #' computation (fsusieR's internal \code{update_cal_credible_band.susiF} +
 #' \code{get_fitted_effect}). Uses saved bands in trimmed fits, or computes
-#' them from an untrimmed fit. Returns zero rows when the functional fields
-#' are absent.
+#' them from an untrimmed fit. Returns an empty \code{GRanges} when the
+#' functional fields are absent.
 #'
 #' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
 #' @param ... Ignored.
-#' @return A long \code{tibble}: \code{cs, chrom, pos, effect, lower, upper,
-#'   halfwidth} -- \code{halfwidth} being \code{(upper - lower) / 2}, the
-#'   symmetric band half-width publication tables carry (the collection method
-#'   additionally carries the entry identity columns).
+#' @return A \code{GRanges}, one width-1 range per (credible set, grid
+#'   position), whose \code{mcols()} hold \code{cs, chrom, pos, effect,
+#'   lower, upper, halfwidth} -- \code{halfwidth} being
+#'   \code{(upper - lower) / 2}, the symmetric band half-width publication
+#'   tables carry (the collection method additionally carries the entry
+#'   identity columns).
 #' @seealso \code{\link{fsusieTraitEffects}},
 #'   \code{\link{fsusieAffectedRegions}}
 #' @examples
@@ -2439,7 +2295,7 @@ setGeneric("fsusieCredibleBand", function(x, ...) {
 #'
 #' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
 #' @param ... Ignored.
-#' @return A long \code{tibble}: \code{cs, chrom, jointTrait, traitPos,
+#' @return A long \code{DataFrame}: \code{cs, chrom, jointTrait, traitPos,
 #'   effect} (the collection method additionally carries the entry identity
 #'   columns).
 #' @seealso \code{\link{fsusieCredibleBand}},
@@ -2477,29 +2333,22 @@ setGeneric("fsusieAffectedRegions", function(x, ...) {
 # =============================================================================
 # MethodParam accessor generics
 # -----------------------------------------------------------------------------
-# Only two Param classes carry accessors, and both earn them by being records
-# the user HOLDS rather than builds and forgets:
+# Every Param is read with `$` / `[[` and written with `$<-` (MethodParam.R),
+# which rebuilds the record through its constructor. Two classes also carry
+# named getters, because they are records the user HOLDS rather than builds
+# and forgets:
 #
 #   CredibleSetParam     postprocessFinemappingFits() and buildTopLoci() take
 #                        an already-computed fit, so a stored fit is
 #                        re-summarized under changed settings without
-#                        refitting. `L` / `Lgreedy` are deliberately
-#                        get-only: they are seeded onto each SuSiE-family
-#                        token's own arguments, so changing one needs a
-#                        refit and a setter would hand back a record that
-#                        looks applied but is not.
-#   GwasFineMappingParam the only Param nesting others. Once CredibleSetParam
-#                        is settable, the container has to let the nested
-#                        record back in, or it could be read but not written.
+#                        refitting. `L` / `Lgreedy` are deliberately fixed:
+#                        they are seeded onto each SuSiE-family token's own
+#                        arguments, so changing one needs a refit, and `$<-`
+#                        refuses them.
+#   GwasFineMappingParam the only Param nesting others.
 #
-# The other 24 Params are construct-and-pass -- handed to one pipeline
-# argument and never seen again -- and get none, which is what Bioconductor's
-# own PileupParam does with twelve slots.
-#
-# get*/set* rather than Rsamtools' bamWhich()/bamWhich<-() spelling: pecotmr
-# already exports 95 get* accessors, and bare field names are not available
-# anyway -- `coverage` is an IRanges generic for read depth and `methods` is
-# utils::methods.
+# Bare field names are not available as getter names -- `coverage` is an
+# IRanges generic for read depth and `methods` is utils::methods.
 # =============================================================================
 
 #' @rdname CredibleSetParam
@@ -2511,22 +2360,9 @@ setGeneric("csCoverage", function(x, ...) {
 })
 
 #' @rdname CredibleSetParam
-#' @param value The replacement value for that setting.
-#' @export
-setGeneric("csCoverage<-", function(x, ..., value) {
-    standardGeneric("csCoverage<-")
-})
-
-#' @rdname CredibleSetParam
 #' @export
 setGeneric("secondaryCoverage", function(x, ...) {
     standardGeneric("secondaryCoverage")
-})
-
-#' @rdname CredibleSetParam
-#' @export
-setGeneric("secondaryCoverage<-", function(x, ..., value) {
-    standardGeneric("secondaryCoverage<-")
 })
 
 #' @rdname CredibleSetParam
@@ -2537,20 +2373,8 @@ setGeneric("signalCutoff", function(x, ...) {
 
 #' @rdname CredibleSetParam
 #' @export
-setGeneric("signalCutoff<-", function(x, ..., value) {
-    standardGeneric("signalCutoff<-")
-})
-
-#' @rdname CredibleSetParam
-#' @export
 setGeneric("minAbsCorr", function(x, ...) {
     standardGeneric("minAbsCorr")
-})
-
-#' @rdname CredibleSetParam
-#' @export
-setGeneric("minAbsCorr<-", function(x, ..., value) {
-    standardGeneric("minAbsCorr<-")
 })
 
 #' @rdname CredibleSetParam
@@ -2561,32 +2385,14 @@ setGeneric("medianAbsCorr", function(x, ...) {
 
 #' @rdname CredibleSetParam
 #' @export
-setGeneric("medianAbsCorr<-", function(x, ..., value) {
-    standardGeneric("medianAbsCorr<-")
-})
-
-#' @rdname CredibleSetParam
-#' @export
 setGeneric("includeAllCs", function(x, ...) {
     standardGeneric("includeAllCs")
 })
 
 #' @rdname CredibleSetParam
 #' @export
-setGeneric("includeAllCs<-", function(x, ..., value) {
-    standardGeneric("includeAllCs<-")
-})
-
-#' @rdname CredibleSetParam
-#' @export
 setGeneric("perCsColumns", function(x, ...) {
     standardGeneric("perCsColumns")
-})
-
-#' @rdname CredibleSetParam
-#' @export
-setGeneric("perCsColumns<-", function(x, ..., value) {
-    standardGeneric("perCsColumns<-")
 })
 
 #' @rdname CredibleSetParam
@@ -2610,22 +2416,9 @@ setGeneric("fineMappingMethods", function(x, ...) {
 })
 
 #' @rdname GwasFineMappingParam
-#' @param value The replacement value for that setting.
-#' @export
-setGeneric("fineMappingMethods<-", function(x, ..., value) {
-    standardGeneric("fineMappingMethods<-")
-})
-
-#' @rdname GwasFineMappingParam
 #' @export
 setGeneric("credibleSetParam", function(x, ...) {
     standardGeneric("credibleSetParam")
-})
-
-#' @rdname GwasFineMappingParam
-#' @export
-setGeneric("credibleSetParam<-", function(x, ..., value) {
-    standardGeneric("credibleSetParam<-")
 })
 
 #' @rdname GwasFineMappingParam
@@ -2636,20 +2429,8 @@ setGeneric("susieRssParam", function(x, ...) {
 
 #' @rdname GwasFineMappingParam
 #' @export
-setGeneric("susieRssParam<-", function(x, ..., value) {
-    standardGeneric("susieRssParam<-")
-})
-
-#' @rdname GwasFineMappingParam
-#' @export
 setGeneric("panelFilterParam", function(x, ...) {
     standardGeneric("panelFilterParam")
-})
-
-#' @rdname GwasFineMappingParam
-#' @export
-setGeneric("panelFilterParam<-", function(x, ..., value) {
-    standardGeneric("panelFilterParam<-")
 })
 
 #' @rdname GwasFineMappingParam
@@ -2660,18 +2441,6 @@ setGeneric("initializeWithSusieInf", function(x, ...) {
 
 #' @rdname GwasFineMappingParam
 #' @export
-setGeneric("initializeWithSusieInf<-", function(x, ..., value) {
-    standardGeneric("initializeWithSusieInf<-")
-})
-
-#' @rdname GwasFineMappingParam
-#' @export
 setGeneric("fitRetention", function(x, ...) {
     standardGeneric("fitRetention")
-})
-
-#' @rdname GwasFineMappingParam
-#' @export
-setGeneric("fitRetention<-", function(x, ..., value) {
-    standardGeneric("fitRetention<-")
 })

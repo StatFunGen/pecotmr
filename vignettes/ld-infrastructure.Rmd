@@ -85,8 +85,8 @@ dim(R)
 
 A panel can also be reached through an LD meta file: one row per chromosome
 or block, giving its coordinates and the genotype files behind it, with
-paths relative to the meta file. `readGenotypes(ldMeta = , region = )` opens
-the row covering a region.
+paths relative to the meta file. `readGenotypes(ldMeta = , block = )` opens
+the whole block whose row covers the window.
 
 ### An LdMatrix
 

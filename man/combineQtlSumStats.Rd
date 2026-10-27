@@ -27,9 +27,9 @@ lacking an optional column is NA-padded.
 \details{
 The three collection-level slots are merged rather than taken from the first
 input, on the same rules as \code{\link{combineGwasSumStats}}: \code{genome}
-and the \code{\link{summaryStatsQc}} options must agree, the per-element
-\code{qcInfo$entryAudit} concatenates in element order, and the rows keep
-their own LD references, stored the same way.
+and the \code{\link{summaryStatsQc}} options must agree, each row keeps
+its own QC audit, and the rows keep their own LD references, stored the
+same way.
 }
 \examples{
 data(qtlSumStatsExample)

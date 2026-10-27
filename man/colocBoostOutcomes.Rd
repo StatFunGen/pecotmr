@@ -15,8 +15,9 @@ colocBoostOutcomes(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A tibble with one row per (set, outcome) and the set-level columns
-  repeated, plus \code{outcome}, \code{study}, \code{context},
+A \code{DataFrame} with one row per (set, outcome), the
+  set-level columns repeated, plus \code{outcome}, \code{study},
+  \code{context},
   \code{trait}, \code{dataForm} and \code{ldReference} (the name of the
   \code{\link{ldReference}} entry the outcome's summary statistics were
   matched against).

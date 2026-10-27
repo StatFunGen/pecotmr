@@ -70,8 +70,8 @@ setClassUnion("MethodOptions_OR_NULL", c("MethodOptions", "NULL"))
 #'   does not attempt to mirror its semantics.
 #' @section List interface:
 #'   A \code{MethodParam} reads like a list: \code{$} and \code{[[} fetch a
-#'   field, and \code{names()}, \code{length()} and \code{as.list()} describe
-#'   it.
+#'   field, \code{$<-} replaces one, and \code{names()}, \code{length()} and
+#'   \code{as.list()} describe it.
 #'
 #'   Those last three report only the fields that are \strong{set}. A slot
 #'   holding \code{NULL} is absent from all three, while \code{$} and
@@ -178,6 +178,82 @@ setMethod("as.list", "MethodParam", function(x, ...) {
     set <- .paramSetFields(x)
     set_names(map(set, slot, object = x), set)
 })
+
+#' @rdname MethodParam-class
+#' @param value The setting's new value; \code{NULL} unsets a setting that
+#'   may be unset.
+#' @return \code{$<-} returns the record rebuilt with that setting replaced.
+#'   The rebuild goes through the class's own constructor, so the value is
+#'   normalised and checked exactly as it is when the record is built, and a
+#'   value the constructor would refuse is refused here too. A setting that
+#'   cannot change once the record exists is refused, saying why.
+#' @export
+setReplaceMethod("$", "MethodParam", function(x, name, value) {
+    .paramReplace(x, name, value)
+})
+
+# The one replacement path, shared by `$<-` and the deprecated per-field
+# setters. `$<-` takes its name literally, so a setter holding the field name
+# in a variable cannot reach it through `$<-` itself.
+# @noRd
+.paramReplace <- function(x, name, value) {
+    .paramAssertField(x, name)
+    .paramAssertSettable(x, name)
+    .paramRebuild(x, name, value)
+}
+
+# Settings `$<-` refuses, by class, and why. CredibleSetParam's L / Lgreedy
+# seed each SuSiE-family fit's own arguments, so changing one needs a refit;
+# a record that took the new value would look applied without being so. The
+# other two are assembled by their constructors from several arguments, so
+# there is no single value to put back.
+# @noRd
+.PARAM_FIXED_FIELDS <- list(
+    CredibleSetParam = c(
+        maxNumSingleEffects = str_c(
+            "it seeds each SuSiE-family fit's own arguments, so changing it ",
+            "needs a refit"
+        ),
+        maxNumSingleEffectsGreedy = str_c(
+            "it seeds each SuSiE-family fit's own arguments, so changing it ",
+            "needs a refit"
+        )
+    ),
+    MashComponentParam = c(
+        components = str_c(
+            "MashComponentParam() assembles it from its canonical / pca / ",
+            "flash / flashNonneg arguments"
+        )
+    ),
+    PvalMethodsParam = c(
+        methods = "PvalMethodsParam() assembles it from one argument per method"
+    )
+)
+
+# @noRd
+.paramAssertSettable <- function(x, name) {
+    cls <- class(x)[[1L]]
+    fixed <- .PARAM_FIXED_FIELDS[[cls]]
+    if (!is_in(name, names(fixed))) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "`{name}` cannot be replaced on a {cls}: {fixed[[name]]}. Build a new ",
+        "{cls}() instead."
+    ))
+}
+
+# The record rebuilt by its own constructor from every current setting plus
+# the replaced one. Every settable class's constructor takes exactly its
+# slots, so a replacement runs the constructor's normalisation and checks
+# rather than a bare slot write that could store what construction refuses.
+# @noRd
+.paramRebuild <- function(x, name, value) {
+    cls <- class(x)[[1L]]
+    fields <- set_names(map(slotNames(x), slot, object = x), slotNames(x))
+    fields[name] <- list(value)
+    exec(get(cls, mode = "function", envir = topenv()), !!!fields)
+}
 
 #' @rdname MethodParam-class
 #' @param object A \code{MethodParam} object.
@@ -1003,6 +1079,9 @@ setValidity("MethodsSelectionParam", function(object) {
     if (.isMethodParam(value)) {
         return(.paramNestedText(value))
     }
+    if (methods::is(value, "BiocParallelParam")) {
+        return(.paramBpparamText(value))
+    }
     if (is.list(value) && !is.null(names(value))) {
         return(str_flatten(names(value), ", "))
     }
@@ -1012,6 +1091,15 @@ setValidity("MethodsSelectionParam", function(object) {
         ))
     }
     str_flatten(format(value), ", ")
+}
+
+# A BiocParallelParam by its class and worker count; format() would print
+# the reference object's every field.
+# @noRd
+#' @importFrom BiocParallel bpnworkers
+.paramBpparamText <- function(value) {
+    n <- bpnworkers(value)
+    glue("{class(value)[[1L]]} ({n} worker{if (n == 1L) '' else 's'})")
 }
 
 # A nested Param by what it CONTAINS, not by its slot names. The

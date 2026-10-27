@@ -11,7 +11,12 @@ autoDecision(df, highCorrCols)
 study and block.}
 
 \item{highCorrCols}{Character vector. Names of columns in df that represent
-high correlations.}
+high correlations; a non-top CS whose value in any of them is 1 is
+tagged. A CS's own column of \code{\link{extractCsInfo}}'s between-CS
+correlations (\code{cs_corr_<i>} for row \code{i}, its self-correlation)
+is never read, so passing every \code{cs_corr_*} column tags a CS only by
+its correlation with the other sets. Rows are taken in
+\code{extractCsInfo()}'s order.}
 }
 \value{
 A modified data frame with additional columns attached to the

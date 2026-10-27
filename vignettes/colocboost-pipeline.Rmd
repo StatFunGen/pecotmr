@@ -59,7 +59,7 @@ ColocBoost can run three different model flavours in one call.
 | Flag | Default | What |
 |---|---|---|
 | `xqtlColoc` | TRUE | QTL-only colocboost across the QTL contexts. |
-| `jointGwas` | FALSE | Single non-focal colocboost model that stacks all QTL contexts/studies with every supplied GWAS study. |
+| `jointGwas` | FALSE | All QTL outcomes with every GWAS study in one model; focal on a lone GWAS. |
 | `separateGwas` | FALSE | One focal colocboost model per GWAS study (the GWAS is the focal outcome). |
 
 ## xQTL-only colocalization
@@ -92,6 +92,13 @@ res2 <- colocboostPipeline(
 )
 names(res2)
 ```
+
+Each GWAS study is one outcome: the rows of the study that the QTL data
+overlap, joined. A study split by chromosome or LD block contributes only the
+one or two rows the QTL region reaches, and QTL variants past those blocks are
+checked as `colocPipeline()` checks them. With a single GWAS study, as here, the
+joint run is focal on it; with several it is non-focal, since only one
+outcome can be focal (see below).
 
 ## QTL + GWAS (per-GWAS focal models)
 
@@ -143,16 +150,20 @@ resMs <- colocboostPipeline(
 )
 ```
 
-## Focal trait
+## Focal outcome
 
-`focalTrait` makes the xQTL-only run treat one specific trait as the
-focal outcome:
+`focalOutcome` chooses the focal outcome. A plain string names a GWAS
+study, which becomes the joint run's focal outcome. A named vector names a
+QTL outcome by its `study`, `context` and `trait`, as many as it takes to
+pick out one, and that outcome is focal in both the xQTL-only and the joint
+run. `NA` makes every run non-focal. The `separateGwas` runs are always
+focal on their own GWAS study.
 
 ```{r focal, eval=FALSE}
 colocboostPipeline(
     qtlDatasetExample,
     xqtlColoc = TRUE,
-    focalTrait = "ENSG_example"
+    focalOutcome = c(context = "brain", trait = "ENSG_example")
 )
 ```
 
@@ -164,35 +175,31 @@ colocboostPipeline(
     gwasSumStats = gwasSumStatsS4Example,
     contexts = "brain",
     traitId = "ENSG_example",
-    region = NULL, # alternative to traitId+cisWindow
+    region = NULL, # alternative to traitId + cisWindow
     cisWindow = 5e5, # required with traitId
-    focalTrait = NULL,
+    focalOutcome = NULL, # the GWAS study, when there is only one
     xqtlColoc = TRUE,
     jointGwas = FALSE,
     separateGwas = FALSE,
-    # Forward to colocboost::colocboost
-    M = 10,
-    L = 5,
-    output_level = 1L
+    # Forwarded to colocboost::colocboost
+    methodArgs = ColocboostOptions(M = 10)
 )
 ```
 
-Trait / context / region restrictions are pre-construction concerns on
-the `QtlDataset` (`keepSamples`, `keepVariants`, the per-context
-`SummarizedExperiment` row selection); the pipeline parameters above
-are the per-call refinements.
+Which traits, contexts and window to analyse are the pipeline parameters
+above; which variants and samples to keep is `genotypeFilterParam`, as in
+`fineMappingPipeline()`.
 
 ## QC requirements
 
 -  **Individual-level (`QtlDataset` / `MultiStudyQtlDataset`)**: QC (MAF / MAC
-    / X-variance / per-sample missingness, sample / variant restrictions) lives
-    on the `QtlDataset` constructor and is applied lazily inside
-    `genotypes()` / `residualizedGenotypes()`. The pipeline does not run
-    a separate pass.
+    / X-variance / per-sample missingness, sample / variant restrictions) is
+    the pipeline's `genotypeFilterParam`, applied to each block of genotypes
+    it extracts. The dataset itself records no filter.
 -  **Summary statistics (`QtlSumStats` / `GwasSumStats`)**: all variant
     filters, panel harmonization, LD-mismatch detection, and RAISS imputation
     live in [`summaryStatsQc()`](rss-qc.html). The pipeline rejects inputs
-    whose `qcInfo()` is empty.
+    whose `qcOptions()` is empty.
 
 # Session info
 

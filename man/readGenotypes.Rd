@@ -21,7 +21,7 @@ readGenotypes(path, format = NULL, ...)
   pvar = NULL,
   psam = NULL,
   ldMeta = NULL,
-  region = NULL,
+  block = NULL,
   genoMeta = NULL,
   chroms = NULL,
   format = NULL,
@@ -79,12 +79,12 @@ triplet, when they do not share a stem.}
 plink2 triplet, when they do not share a stem.}
 
 \item{ldMeta}{Path to an LD-meta TSV (columns \code{chrom}, \code{start},
-\code{end}, \code{path}). Requires \code{region}: the row covering it is
+\code{end}, \code{path}). Requires \code{block}: the row covering it is
 resolved and the file it names is read with the matching backend.}
 
-\item{region}{Region to resolve out of \code{ldMeta}: a
-\code{"chr:start-end"} string, or a one-row data.frame with
-\code{chrom}, \code{start}, \code{end}.}
+\item{block}{The \code{GRanges} window whose LD block to read out of
+\code{ldMeta}. It chooses a file rather than filtering records: the
+panel is the whole LD block that covers it.}
 
 \item{genoMeta}{One-file-per-chromosome specification: a path to a
 \code{#chr,path} meta file, or a named character vector (names =
@@ -92,8 +92,9 @@ chromosomes, values = payload paths / prefixes). Every file must be of
 one format and hold the same samples in the same order.}
 
 \item{chroms}{Optional character vector of chromosomes. Only the
-\code{genoMeta} shards whose chromosome is listed are read; chromosome
-labels are compared canonically. Meaningful only with \code{genoMeta}.}
+\code{genoMeta} shards whose chromosome is listed are read; a label may
+be in any style (\code{"chr1"} or \code{"1"}). Meaningful only with
+\code{genoMeta}.}
 }
 \value{
 A \code{RangedSummarizedExperiment} of variants x samples.
@@ -117,7 +118,7 @@ Read genotype data (VCF, plink1, plink2, GDS or BGEN) as a
   \code{plink2Prefix} for a triplet stem, \code{bed}/\code{bim}/\code{fam}
   or \code{pgen}/\code{pvar}/\code{psam} for explicit triplet paths,
   \code{genoMeta} for a one-file-per-chromosome panel (optionally narrowed
-  with \code{chroms}), or \code{ldMeta} plus \code{region} to resolve a
+  with \code{chroms}), or \code{ldMeta} plus \code{block} to resolve a
   block out of an LD-meta table. Exactly one source may be given.
 }
 \examples{

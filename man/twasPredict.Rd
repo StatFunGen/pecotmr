@@ -33,7 +33,7 @@ are derived from the names in \code{weightsList}, with "_weights" replaced by
 data(multiTraitData)
 X <- multiTraitData$X[, 1:4]
 colnames(X) <- sprintf("chr1:\%d:A:G", 100L * (1:4))
-twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
+twe <- TwasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
   weightStandardized = FALSE)
 tw <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",

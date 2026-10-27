@@ -18,7 +18,8 @@ QtlFineMappingResult(
   dataType = NULL,
   dataSource = NULL,
   weightStandardized = NULL,
-  ldReference = NULL
+  ldReference = NULL,
+  metadata = list()
 )
 }
 \arguments{
@@ -78,21 +79,25 @@ against -- a genotype panel (see \code{\link{readGenotypes}}), a
 \code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
 a list with one per row; \code{NULL} for individual-level fits. Each
 distinct reference is stored once.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{QtlFineMappingResult} object.
 }
 \description{
-Construct a \code{QtlFineMappingResult} DFrame-subclass
-  collection from per-tuple vectors and a list of \code{FineMappingRow}
-  payloads (one per tuple). The optional \code{ldReference} records the LD
+Construct a \code{QtlFineMappingResult} collection from
+  per-tuple vectors and a list of \code{FineMappingRow} payloads (one per
+  tuple). The optional \code{ldReference} records the LD
   reference each RSS-derived fit used; leave it \code{NULL} (the default)
   for individual-level fits.
 }
 \examples{
 tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-fe <- fineMappingRow(
+fe <- FineMappingRow(
   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 QtlFineMappingResult(studyName = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(fe))

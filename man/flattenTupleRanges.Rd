@@ -2,6 +2,7 @@
 % Please edit documentation in R/RangedTupleList.R
 \name{flattenTupleRanges}
 \alias{flattenTupleRanges}
+\alias{coerce,RangedTupleList,GRanges-method}
 \title{Flatten a tuple collection to a plain GRanges}
 \usage{
 flattenTupleRanges(x)
@@ -34,9 +35,12 @@ Non-atomic \code{mcols} columns -- the per-element \code{susieFit} /
 \code{cvResult} payloads -- are dropped. They describe an element, not a
 range, so there is no row to broadcast them onto. Use the accessors
 (\code{\link{susieFit}}, \code{\link{cvResult}}) for those.
+
+\code{as(x, "GRanges")} is the same conversion.
 }
 \examples{
 data(qtlFineMappingExample)
 flat <- flattenTupleRanges(qtlFineMappingExample)
 head(names(S4Vectors::mcols(flat)))
+identical(as(qtlFineMappingExample, "GRanges"), flat)
 }

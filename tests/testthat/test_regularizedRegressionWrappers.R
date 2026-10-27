@@ -1,30 +1,19 @@
-context("SS-TWAS: weights, pipeline, and omnibus combination")
+context("regularized_regression - wrappers")
 
-# Previous TwasWeights-class tests used the legacy constructor
-# `TwasWeights(weights = list(...), variantIds = ..., standardized = ...)`.
-# The new `TwasWeights` is a DFrame collection class with (study,
-# context, trait, method, entry) columns where each entry is a
-# `TwasWeightsRow` S4 object carrying weights / fits / cvResult.
-# Class-shape tests for the new collection should live alongside the
-# pipeline tests and assert via accessors (`weights`, `studyName`,
-# `cvResult`, etc.) — not against legacy slot shapes.
-#
-# `twasAnalysis()` was collapsed into the unified `twasZ()` dispatcher
-# (task #37); its tests are removed here.
-# `twasWeightsSumstatPipeline()` was removed without replacement in the
-# S4 refactor (twasWeightsPipeline now dispatches directly on
-# `QtlSumStats` / `QtlDataset` / `MultiStudyQtlDataset`).
-#
-# What remains: tests of the internal SuSiE-RSS weight extractors that
-# are still present in `R/twasWeights.R` (`.susieRssExtractWeights`,
-# `susieRssWeights`, `susieInfRssWeights`).
+# Tests of R/regularizedRegressionWrappers.R: the mr.mash helpers, the weight
+# wrappers' engine arguments and fit retention, and their real-fit coverage.
+# Each method's own tests live in the matching test_rr*.R topic file.
 
 # =============================================================================
-# SuSiE-RSS weight extraction
+# mrmashWeights fit retention
 # =============================================================================
 
-test_that("mrmashWeights fitRetention: slim omits the full fit, full keeps it", {
+test_that("mrmashWeights retains nothing, the prior parts, or the full fit", {
     skip_if_not_installed("mr.mashr")
+    # The slim payload is exactly what fineMappingPipeline needs to rebuild the
+    # mvSuSiE reweighted mixture prior (w0 -> rescaleCovW0, original $U) and
+    # the residual variance (V); the heavy mu1 coefficient matrix is not
+    # retained.
     fakeFit <- list(w0 = c(a_1 = 0.5, a_2 = 0.5), V = diag(2))
     ddpm <- list(U = list(a = diag(2)))
     # Mock coef extraction so we exercise only the retain payload logic, not a
@@ -41,10 +30,17 @@ test_that("mrmashWeights fitRetention: slim omits the full fit, full keeps it", 
         ),
         "fit"
     )
+    expect_true(is.list(fitSlim))
     expect_setequal(names(fitSlim), c("dataDrivenPriorMatrices", "w0", "V"))
     expect_null(fitSlim$fit) # slim: no full fit
     expect_identical(fitSlim$dataDrivenPriorMatrices, ddpm)
     expect_identical(fitSlim$w0, fakeFit$w0)
+    expect_identical(fitSlim$V, fakeFit$V)
+    # The default ("none") leaves the weights free of the fit attribute.
+    expect_null(attr(
+        mrmashWeights(mrmashFit = fakeFit, dataDrivenPriorMatrices = ddpm),
+        "fit"
+    ))
 
     fitFull <- attr(
         mrmashWeights(
@@ -59,12 +55,9 @@ test_that("mrmashWeights fitRetention: slim omits the full fit, full keeps it", 
     expect_identical(fitFull$w0, fakeFit$w0) # slim fields still present
 })
 
-
 # =============================================================================
-# Two-stage SuSiE-RSS fitting
+# mr.mash helpers: computeW0
 # =============================================================================
-
-# === Tests migrated from test_mrmashWrapper.R (mr.mash + glasso/glmnet coef helpers) ===
 
 test_that("computeW0 returns uniform weights when ncomps == 1", {
     Bhat <- matrix(c(1, 0, 0, 2, 0, 0), nrow = 3, ncol = 2)
@@ -96,7 +89,7 @@ test_that("computeW0 distributes weight based on nonzero rows when ncomps > 1", 
 })
 
 # =========================================================================
-# mrmashWrapper.R: rescaleCovW0 (lines 300-329)
+# rescaleCovW0
 # =========================================================================
 
 test_that("rescaleCovW0 removes null component and renormalizes", {
@@ -137,7 +130,7 @@ test_that("rescaleCovW0 groups correctly by prior group prefix", {
 })
 
 # =========================================================================
-# mrmashWrapper.R: computeGrid (mr.mash's own exported grid builder)
+# computeGrid (mr.mash's own exported grid builder)
 # =========================================================================
 
 test_that("computeGrid is mr.mash's grid, not a reimplementation of it", {
@@ -148,28 +141,19 @@ test_that("computeGrid is mr.mash's grid, not a reimplementation of it", {
     set.seed(3)
     bhat <- matrix(rnorm(20, sd = 2), nrow = 10, ncol = 2)
     sbhat <- matrix(abs(rnorm(20, mean = 0.5, sd = 0.1)), nrow = 10, ncol = 2)
+    grid <- pecotmr:::computeGrid(bhat, sbhat)
     expect_equal(
-        pecotmr:::computeGrid(bhat, sbhat),
+        grid,
         mr.mashr::autoselect.mixsd(
             list(Bhat = bhat, Shat = sbhat),
             mult = sqrt(2)
         )^2
     )
+    expect_true(all(grid > 0))
     # The ported floor would have been 10^2 times this one, since the grid
     # scales variances.
     ported <- min(sbhat)
-    expect_lt(min(pecotmr:::computeGrid(bhat, sbhat)), ported^2)
-})
-
-
-test_that("compute_grid produces a valid grid from summary statistics", {
-    set.seed(42)
-    bhat <- matrix(rnorm(20, sd = 2), nrow = 10, ncol = 2)
-    sbhat <- matrix(abs(rnorm(20, mean = 0.5, sd = 0.1)), nrow = 10, ncol = 2)
-    result <- pecotmr:::computeGrid(bhat, sbhat)
-    expect_true(is.numeric(result))
-    expect_true(length(result) > 0)
-    expect_true(all(result > 0))
+    expect_lt(min(grid), ported^2)
 })
 
 
@@ -182,7 +166,7 @@ test_that("compute_grid handles NA and zero sbhat values", {
 })
 
 # =========================================================================
-# mrmashWrapper.R: mrmashWrapper input validation (lines 99-130)
+# mrmashWrapper input validation
 # =========================================================================
 
 # Note: Cannot mock requireNamespace via local_mocked_bindings because it is a
@@ -273,7 +257,7 @@ test_that("mrmashWrapper warns when Y has missing and B_init_method is glasso", 
 })
 
 # =========================================================================
-# mrmashWrapper.R: computeCoefficientsGlasso (lines 211-240)
+# computeCoefficientsGlasso
 # =========================================================================
 
 test_that("computeCoefficientsGlasso runs without Xnew", {
@@ -289,7 +273,6 @@ test_that("computeCoefficientsGlasso runs without Xnew", {
         X,
         Y,
         standardize = FALSE,
-        numThreads = 1,
         Xnew = NULL
     )
     expect_true("Bhat" %in% names(result))
@@ -314,7 +297,6 @@ test_that("computeCoefficientsGlasso runs with Xnew", {
         X,
         Y,
         standardize = FALSE,
-        numThreads = 1,
         Xnew = Xnew
     )
     expect_true("Yhat_new" %in% names(result))
@@ -324,8 +306,29 @@ test_that("computeCoefficientsGlasso runs with Xnew", {
 })
 
 # =========================================================================
-# mrmashWrapper.R: computeCoefficientsUnivGlmnet (lines 243-281)
+# computeCoefficientsUnivGlmnet
 # =========================================================================
+
+test_that("computeCoefficientsUnivGlmnet gives the same fits on two workers", {
+    skip_if_not_installed("glmnet")
+    skip_on_os("windows")
+    set.seed(5)
+    X <- matrix(rnorm(60 * 5), 60, 5)
+    Y <- matrix(rnorm(60 * 2), 60, 2, dimnames = list(NULL, c("a", "b")))
+    fit <- function(bp) {
+        pecotmr:::computeCoefficientsUnivGlmnet(
+            X,
+            Y,
+            alpha = 0.5,
+            standardize = FALSE,
+            BPPARAM = bp
+        )
+    }
+    expect_equal(
+        fit(BiocParallel::SerialParam(RNGseed = 9L)),
+        fit(BiocParallel::MulticoreParam(2, RNGseed = 9L))
+    )
+})
 
 test_that("computeCoefficientsUnivGlmnet runs without Xnew", {
     skip_if_not_installed("glmnet")
@@ -397,22 +400,22 @@ test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
 })
 
 # =========================================================================
-# mrmashWrapper.R: mrmashWrapper seed warning (line 107-108)
+# mrmashWrapper seed message
 # =========================================================================
 
 # Note: Cannot mock base::exists() via local_mocked_bindings.
-# The seed-check message on line 107-108 would require removing .Random.seed
-# from the global environment, which is not safe to do in tests.
+# The seed-check message would require removing .Random.seed from the global
+# environment, which is not safe to do in tests.
 
 # =============================================================================
 # Real-fit coverage for the solver wrappers in R/regularizedRegressionWrappers.R
 # -----------------------------------------------------------------------------
-# The fine-mapping / TWAS pipelines MOCK these wrappers, so their bodies are
-# otherwise untested. Here we drive each wrapper on a SMALL real fixture and
-# assert the return shape (weight length == #variants; matrix for multivariate;
-# attr(.,"fit") unless fitRetention is "none"). MCMC iterations kept tiny.
-# fsusieWeights and the mock-based mrmash/mvsusie payload tests live in
-# test_rrMrmashMvsusie.R and are not duplicated here.
+# The fine-mapping / TWAS pipelines MOCK these wrappers. Here we drive the
+# wrappers on a SMALL real fixture and assert the return shape (weight length
+# == #variants; matrix for multivariate; attr(.,"fit") unless fitRetention is
+# "none"). MCMC iterations kept tiny. Each method's shape and signal-recovery
+# tests live in its test_rr*.R topic file; fsusieWeights is tested in
+# test_fineMappingWrappers.R.
 # =============================================================================
 
 # (Shared .rrwXy / .rrwStatLd / .rrwMulti fixtures live in helper-rrwFixtures.R
@@ -528,8 +531,7 @@ test_that("mr.mash glmnet initialisation routes through fitGlmnetCv", {
     gl <- .rrw_captureGlmnet(computeCoefficientsGlasso(
         f$X,
         Y,
-        standardize = TRUE,
-        numThreads = 1L
+        standardize = TRUE
     ))
     expect_equal(gl$family, "mgaussian")
     expect_equal(gl$alpha, 1)
@@ -550,26 +552,6 @@ test_that("mr.mash glmnet initialisation routes through fitGlmnetCv", {
     expect_false(is_in("parallel", names(uv)))
 })
 
-test_that("lassoWeights / enetWeights (glmnet) return length-p weights", {
-    skip_if_not_installed("glmnet")
-    f <- .rrwXy()
-    expect_length(as.numeric(lassoWeights(f$X, f$y)), f$p)
-    expect_length(as.numeric(enetWeights(f$X, f$y)), f$p)
-})
-
-test_that("scadWeights / mcpWeights (ncvreg) return length-p weights", {
-    skip_if_not_installed("ncvreg")
-    f <- .rrwXy()
-    expect_length(as.numeric(scadWeights(f$X, f$y)), f$p)
-    expect_length(as.numeric(mcpWeights(f$X, f$y)), f$p)
-})
-
-test_that("l0learnWeights returns length-p weights", {
-    skip_if_not_installed("L0Learn")
-    f <- .rrwXy()
-    expect_length(as.numeric(l0learnWeights(f$X, f$y)), f$p)
-})
-
 test_that("mrashWeights returns length-p weights and can retain the fit", {
     skip_if_not_installed("susieR")
     skip_if_not_installed("glmnet")
@@ -588,7 +570,10 @@ test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
     mc <- list(nit = 200, nburn = 20, nthin = 1)
-    expect_length(exec(bayesNWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    wN <- exec(bayesNWeights, !!!c(list(f$X, f$y), mc))
+    expect_length(wN, f$p)
+    expect_true(is.numeric(wN))
+    expect_true(all(is.finite(wN)))
     expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
     expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
     expect_length(exec(bayesCWeights, !!!c(list(f$X, f$y), mc)), f$p)
@@ -650,37 +635,6 @@ test_that("bayesAlphabetWeights forwards every MCMC control to gbayes", {
     expect_equal(seen$nthin, 7)
 })
 
-test_that("bayesAlphabetWeights validates matching row counts before fitting", {
-    skip_if_not_installed("qgg")
-    f <- .rrwXy()
-    expect_error(
-        bayesAlphabetWeights(f$X, f$y[-1], method = "bayesN"),
-        "y.*Must have length 50"
-    )
-    expect_error(
-        bayesAlphabetWeights(
-            f$X,
-            f$y,
-            method = "bayesN",
-            Z = matrix(1, f$n - 1, 1)
-        ),
-        "Z.*Must have exactly 50 rows"
-    )
-})
-
-test_that("bayesBWeights / bLassoWeights (BGLR) return length-p weights", {
-    skip_if_not_installed("BGLR")
-    f <- .rrwXy()
-    expect_length(
-        bayesBWeights(f$X, f$y, nIter = 200, burnIn = 20, thin = 1),
-        f$p
-    )
-    expect_length(
-        bLassoWeights(f$X, f$y, nIter = 200, burnIn = 20, thin = 1),
-        f$p
-    )
-})
-
 test_that("dprVbWeights returns length-p weights and retains the fit", {
     skip_if_not_installed("RcppDPR")
     f <- .rrwXy()
@@ -692,7 +646,15 @@ test_that("dprVbWeights returns length-p weights and retains the fit", {
 test_that("dprGibbsWeights returns length-p weights", {
     skip_if_not_installed("RcppDPR")
     f <- .rrwXy()
-    invisible(capture.output(w <- dprGibbsWeights(f$X, f$y, sStep = 200)))
+    # Capturing the DPR engine's progress bar is what is slow, not sampling.
+    invisible(capture.output(
+        w <- dprGibbsWeights(
+            f$X,
+            f$y,
+            sStep = 200,
+            methodArgs = DprOptions(show_progress = FALSE)
+        )
+    ))
     expect_length(w, f$p)
 })
 
@@ -703,7 +665,7 @@ test_that("dprAdaptiveGibbsWeights returns length-p weights", {
         w <- dprAdaptiveGibbsWeights(
             f$X,
             f$y,
-            methodArgs = DprOptions(s_step = 100)
+            methodArgs = DprOptions(s_step = 100, show_progress = FALSE)
         )
     ))
     expect_length(w, f$p)
@@ -724,66 +686,6 @@ test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
 })
 
 
-# ----------------------------- RSS solvers (C++) ----------------------------
-
-test_that("lassosumRss returns a p x nlambda beta matrix", {
-    f <- .rrwStatLd()
-    out <- lassosumRss(f$stat$b, f$LD, f$n)
-    expect_equal(nrow(out$beta), f$p)
-    expect_equal(ncol(out$beta), length(out$lambda))
-    expect_length(out$conv, length(out$lambda))
-})
-
-test_that("penalizedRss traces a solution path for MCP / SCAD / L0", {
-    f <- .rrwStatLd()
-    for (pen in c("MCP", "SCAD")) {
-        out <- penalizedRss(f$stat$b, f$LD, f$n, penalty = pen)
-        expect_equal(nrow(out$beta), f$p)
-    }
-    outL0 <- penalizedRss(
-        f$stat$b,
-        f$LD,
-        f$n,
-        penalty = "L0",
-        lambda0 = 0.01,
-        lambda = c(0)
-    )
-    expect_equal(nrow(outL0$beta), f$p)
-})
-
-test_that("prsCs returns posterior betaEst of length p", {
-    f <- .rrwStatLd()
-    out <- prsCs(f$stat$b, f$LD, f$n, nIter = 100, nBurnin = 20, thin = 1)
-    expect_length(out$betaEst, f$p)
-    expect_true(all(is.finite(out$betaEst)))
-})
-
-test_that("sdpr returns betaEst of length p", {
-    f <- .rrwStatLd()
-    out <- sdpr(
-        f$stat$b,
-        f$LD,
-        f$n,
-        iter = 100,
-        burn = 20,
-        thin = 1,
-        verbose = FALSE
-    )
-    expect_length(out$betaEst, f$p)
-})
-
-test_that("RSS solvers validate their R-matrix / sample-size / length inputs", {
-    f <- .rrwStatLd()
-    # A list (the old block-list contract) is now rejected: R must be a matrix.
-    expect_error(prsCs(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
-    expect_error(lassosumRss(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
-    expect_error(penalizedRss(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
-    expect_error(prsCs(f$stat$b, f$LD, -1), "sample size")
-    expect_error(prsCs(f$stat$b[-1], f$LD, f$n), "bhat.*Must have length 6")
-    expect_error(sdpr(f$stat$b[-1], f$LD, f$n), "bhat.*Must have length 6")
-    expect_error(sdpr(f$stat$b, f$LD, f$n, M = 2), "at least 4")
-})
-
 # --------------------------- RSS weight wrappers ----------------------------
 
 test_that("lassosumRssWeights returns length-p weights and records the selection", {
@@ -797,18 +699,19 @@ test_that("lassosumRssWeights returns length-p weights and records the selection
     )
 })
 
-test_that("scadRssWeights / mcpRssWeights / l0learnRssWeights return length-p weights", {
-    f <- .rrwStatLd()
-    expect_length(scadRssWeights(f$stat, f$ldReference), f$p)
-    expect_length(mcpRssWeights(f$stat, f$ldReference), f$p)
-    expect_length(l0learnRssWeights(f$stat, f$ldReference), f$p)
-})
-
 test_that("mrashRssWeights attaches the mr.ash.rss fit on request", {
     f <- .rrwStatLd()
-    none <- mrashRssWeights(f$stat, f$ldReference)
+    # At mr.ash.rss's own tol (1e-8) this fit takes some 10,000 iterations;
+    # what is retained does not depend on how tightly it converged.
+    opts <- MrashRssOptions(tol = 1e-4)
+    none <- mrashRssWeights(f$stat, f$ldReference, methodArgs = opts)
     expect_null(attr(none, "fit"))
-    slim <- mrashRssWeights(f$stat, f$ldReference, fitRetention = "slim")
+    slim <- mrashRssWeights(
+        f$stat,
+        f$ldReference,
+        fitRetention = "slim",
+        methodArgs = opts
+    )
     expect_equal(as.numeric(slim), as.numeric(none))
     expect_equal(as.numeric(attr(slim, "fit")$mu1), as.numeric(none))
 })
@@ -822,6 +725,8 @@ test_that("the raw RSS solvers are internal behind their weight adapters", {
         "prsCsWeights",
         "sdprWeights",
         "lassosumRssWeights",
+        "enetRssWeights",
+        "ridgeRssWeights",
         "scadRssWeights",
         "mcpRssWeights",
         "l0learnRssWeights"
@@ -832,6 +737,35 @@ test_that("the raw RSS solvers are internal behind their weight adapters", {
     expect_error(SdprOptions(notAnOption = 1), "unknown argument")
     expect_error(LassosumOptions(notAnOption = 1), "unknown argument")
     expect_error(PenalizedRssOptions(notAnOption = 1), "unknown argument")
+})
+
+test_that("PenalizedRssOptions refuses the settings its wrappers own", {
+    for (nm in c(
+        "penalty",
+        "alpha",
+        "gamma",
+        "lambda0",
+        "lambda2",
+        "maxSwaps"
+    )) {
+        expect_error(
+            exec(PenalizedRssOptions, !!!set_names(list(1), nm)),
+            str_c(nm, " is supplied by pecotmr"),
+            label = nm
+        )
+    }
+    # The rest stay tunable: `lambda` is the only route to the path for the
+    # wrappers that take none.
+    expect_no_error(
+        PenalizedRssOptions(lambda = c(0.1, 0.01), thr = 1e-6, maxiter = 500)
+    )
+})
+
+test_that("GlmnetOptions points alpha at the wrapper that takes it", {
+    expect_error(
+        GlmnetOptions(alpha = 0.3),
+        "alpha is supplied by pecotmr.*enetWeights' own `alpha`"
+    )
 })
 
 test_that("prsCsWeights and sdprWeights attach the sampler's estimates", {
@@ -946,46 +880,79 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     beta <- replace(numeric(120), c(5, 40, 90), c(0.3, -0.2, 0.25))
     z <- as.vector(R %*% beta) + rnorm(120, sd = 0.05)
     lambda <- exp(seq(log(0.1), log(0.001), length.out = 8))
+    # lassosum is the lasso at alpha = 1; below it, the elastic net and ridge.
+    # L0L2 adds its fixed ridge weight lambda2, which both routes apply in
+    # the shared thresholding, swaps and objective.
+    cases <- data.frame(
+        penalty = c(
+            "lasso",
+            "lasso",
+            "lasso",
+            "MCP",
+            "MCP",
+            "SCAD",
+            "L0",
+            "L0L2",
+            "L0L2"
+        ),
+        alpha = c(1, 0.5, 0, 1, 0.5, 1, 1, 1, 1),
+        lambda2 = c(0, 0, 0, 0, 0, 0, 0, 0.05, 0.5)
+    )
     for (s in c(0.2, 0.9)) {
         Rs <- (1 - s) * R + s * diag(120)
-        dense <- pecotmr:::lassosumRssCpp(z, list(R), s, lambda, 1e-6, 1000L)
-        expect_equal(
-            dense,
-            pecotmr:::lassosumRssCpp(z, list(Rs), 0, lambda, 1e-6, 1000L),
-            tolerance = 1e-10
-        )
-        expect_equal(
-            pecotmr:::lassosumRssFactorCpp(z, F, s, lambda, 1e-6, 1000L),
-            dense,
-            tolerance = 1e-8
-        )
-        for (pen in c("lasso", "MCP", "SCAD", "L0")) {
+        for (k in seq_len(nrow(cases))) {
             args <- list(
                 lambdaR = lambda,
-                penaltyStr = pen,
+                penaltyStr = cases$penalty[[k]],
                 gamma = 3.7,
-                alpha = 1,
+                alpha = cases$alpha[[k]],
                 lambda0 = 0.001,
-                lambda2 = 0,
+                lambda2 = cases$lambda2[[k]],
                 thr = 1e-6,
                 maxiter = 1000L,
                 maxSwaps = 10L
+            )
+            label <- str_c(
+                cases$penalty[[k]],
+                ", alpha = ",
+                cases$alpha[[k]],
+                ", lambda2 = ",
+                cases$lambda2[[k]]
             )
             dense <- exec(pecotmr:::penalizedRssCpp, z, list(R), s, !!!args)
             expect_equal(
                 dense,
                 exec(pecotmr:::penalizedRssCpp, z, list(Rs), 0, !!!args),
                 tolerance = 1e-10,
-                label = pen
+                label = label
             )
             expect_equal(
                 exec(pecotmr:::penalizedRssFactorCpp, z, F, s, !!!args),
                 dense,
                 tolerance = 1e-8,
-                label = pen
+                label = label
             )
         }
     }
+    # The two routes agreeing would not show lambda2 is applied at all; the
+    # fit with it must differ from the one without.
+    l0Fit <- function(lambda2) {
+        pecotmr:::penalizedRssFactorCpp(
+            z,
+            F,
+            0.2,
+            lambdaR = lambda,
+            penaltyStr = "L0L2",
+            gamma = 3.7,
+            alpha = 1,
+            lambda0 = 0.001,
+            lambda2 = lambda2,
+            thr = 1e-6,
+            maxiter = 1000L,
+            maxSwaps = 10L
+        )$beta
+    }
+    expect_false(isTRUE(all.equal(l0Fit(0.5), l0Fit(0))))
 })
 
 test_that("SDPR on a factor of the LD draws as it does on the matrix", {
@@ -1014,8 +981,10 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
         M = 50L,
         a0k = 0.5,
         b0k = 0.5,
-        iter = 200L,
-        burn = 50L,
+        # Every sampler step runs on each iteration, so a short chain already
+        # exercises burn-in, thinning and the draws the routes must share.
+        iter = 100L,
+        burn = 25L,
         thin = 5L,
         numThreads = 1L,
         optLlk = 1L,
@@ -1045,31 +1014,6 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
     expect_error(
         exec(pecotmr:::sdprFactorCpp, factorR = F[, -1], !!!base),
         "The LD factor has 119 columns but there are 120 effects"
-    )
-})
-
-test_that("prsCsWeights and sdprWeights take (stat, ldReference)", {
-    f <- .rrwStatLd()
-    expect_length(
-        prsCsWeights(
-            f$stat,
-            f$ldReference,
-            methodArgs = PrsCsOptions(nIter = 100, nBurnin = 20, thin = 1)
-        ),
-        f$p
-    )
-    expect_length(
-        sdprWeights(
-            f$stat,
-            f$ldReference,
-            methodArgs = SdprOptions(
-                iter = 100,
-                burn = 20,
-                thin = 1,
-                verbose = FALSE
-            )
-        ),
-        f$p
     )
 })
 
@@ -1132,19 +1076,24 @@ test_that("RSS weights read a genotype panel's LD as they read the matrix", {
             label = nm
         )
     }
-    # mr.ash.rss takes only a matrix, formed from the panel.
+    # mr.ash.rss takes only a matrix, formed from the panel. A looser tol
+    # than its own 1e-8 (some 7,000 iterations here) converges in about 100;
+    # the two routes fit the same matrix whatever the tolerance.
+    mrashOpts <- MrashRssOptions(tol = 1e-4)
     expect_equal(
-        mrashRssWeights(d$stat, d$panel),
-        mrashRssWeights(d$stat, d$ldMatrix),
+        mrashRssWeights(d$stat, d$panel, methodArgs = mrashOpts),
+        mrashRssWeights(d$stat, d$ldMatrix, methodArgs = mrashOpts),
         tolerance = 1e-8
     )
     # SDPR runs its own sampler on the low-rank form of its matrices, so a
-    # seeded chain lands on the matrix route's.
+    # seeded chain lands on the matrix route's. A 50-component mixture
+    # rather than the default 1000 keeps the chains quick.
     for (optLlk in 1:2) {
         opts <- SdprOptions(
             iter = 100,
             burn = 20,
             thin = 1,
+            M = 50,
             optLlk = optLlk,
             verbose = FALSE,
             seed = 1L
@@ -1194,7 +1143,15 @@ test_that("mrashRssWeights defaults to mr.ash's own prior grid", {
         fit$data$sa2
     )
     f <- .rrwStatLd()
-    expect_length(mrashRssWeights(f$stat, f$ldReference), f$p)
+    # A looser tol than mr.ash.rss's 1e-8, which takes some 10,000 iterations.
+    expect_length(
+        mrashRssWeights(
+            f$stat,
+            f$ldReference,
+            methodArgs = MrashRssOptions(tol = 1e-4)
+        ),
+        f$p
+    )
     # With b, seb and varY the unstandardized statistics set the scale.
     z <- f$stat$z
     shat <- f$stat$seb
@@ -1203,21 +1160,6 @@ test_that("mrashRssWeights defaults to mr.ash's own prior grid", {
         pecotmr:::.mrashRssDefaultGrid(f$n, z, shat, 2),
         (2^((0:24) / 25) - 1)^2 / median(w) * f$n
     )
-})
-
-test_that("mrashRssWeights returns posterior-mean weights of length p", {
-    skip_if_not_installed("susieR")
-    f <- .rrwStatLd()
-    w <- mrashRssWeights(
-        f$stat,
-        f$ldReference,
-        varY = 1,
-        sigma2E = 1,
-        s0 = c(0, 0.01, 0.1, 0.5, 1),
-        w0 = rep(1 / 5, 5)
-    )
-    expect_length(w, f$p)
-    expect_true(all(is.finite(w)))
 })
 
 
@@ -1356,7 +1298,7 @@ test_that("buildMrmashPriorMatrices errors without canonical or data-driven prio
 
 
 # ===========================================================================
-# mr.mash weight tests (relocated from test_rrMrmashMvsusie.R)
+# mrmashWeights and the mr.mash engine arguments
 # ===========================================================================
 
 # ---- mrmashWeights ----
@@ -1385,41 +1327,6 @@ test_that("mrmashWeights errors when X and Y are NULL and fit is NULL", {
         mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL),
         "Both X and Y must be provided"
     )
-})
-
-test_that("mrmashWeights retaining attaches {dataDrivenPriorMatrices, w0, V}", {
-    skip_if_not(
-        requireNamespace("mr.mashr", quietly = TRUE),
-        "mr.mashr not installed"
-    )
-    # These are exactly the parts fineMappingPipeline needs to rebuild the
-    # mvSuSiE reweighted mixture prior (w0 -> rescaleCovW0, original $U) and the
-    # residual variance (V); the heavy mu1 coefficient matrix is not retained.
-    ddpm <- list(U = list(comp = diag(2)))
-    fakeFit <- structure(
-        list(w0 = c(null = 0.4, comp_grid1 = 0.6), V = diag(2) * 2),
-        class = "mr.mash"
-    )
-    fakeCoef <- matrix(0.1, nrow = 5, ncol = 2)
-    local_mocked_bindings(
-        coef.mr.mash = function(object, ...) fakeCoef,
-        .package = "mr.mashr"
-    )
-    w <- mrmashWeights(
-        mrmashFit = fakeFit,
-        dataDrivenPriorMatrices = ddpm,
-        fitRetention = "slim"
-    )
-    fit <- attr(w, "fit")
-    expect_true(is.list(fit))
-    expect_identical(fit$dataDrivenPriorMatrices, ddpm)
-    expect_identical(fit$w0, fakeFit$w0)
-    expect_identical(fit$V, fakeFit$V)
-    # The default ("none") leaves the weights free of the fit attribute.
-    expect_null(attr(
-        mrmashWeights(mrmashFit = fakeFit, dataDrivenPriorMatrices = ddpm),
-        "fit"
-    ))
 })
 
 test_that("MCMC / optimiser control arguments are guarded", {
@@ -1452,17 +1359,8 @@ test_that("MCMC / optimiser control arguments are guarded", {
         "nfolds.*Must be >= 1"
     )
     expect_error(
-        computeCoefficientsGlasso(NULL, NULL, standardize = NA, numThreads = 1),
+        computeCoefficientsGlasso(NULL, NULL, standardize = NA),
         "standardize.*May not be NA"
-    )
-    expect_error(
-        computeCoefficientsGlasso(
-            NULL,
-            NULL,
-            standardize = TRUE,
-            numThreads = 1.5
-        ),
-        "numThreads.*integerish"
     )
 })
 
@@ -1539,7 +1437,7 @@ test_that("MrmashPriorParam nests each engine function's own arguments", {
     expect_length(MrmashExpandCovsOptions(), 0L)
 })
 
-test_that("mrmashWrapper forwards methodArgs under mr.mash's own names", {
+test_that("MrmashOptions takes mr.mash's own argument names", {
     skip_if_not_installed("mr.mashr")
     ma <- MrmashOptions(max_iter = 10, tol = 0.5)
     expect_equal(ma$max_iter, 10)

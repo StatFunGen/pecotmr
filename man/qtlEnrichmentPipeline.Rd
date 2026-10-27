@@ -8,7 +8,7 @@ qtlEnrichmentPipeline(
   gwasFineMappingResult,
   qtlFineMappingResult,
   qtlEnrichmentParam = QtlEnrichmentParam(),
-  numThreads = 1L,
+  BPPARAM = SerialParam(),
   seed = NULL,
   verbose = TRUE
 )
@@ -24,8 +24,9 @@ qtlEnrichmentPipeline(
 \code{besselCorrection}. A bare list is refused, since it cannot be
 checked.}
 
-\item{numThreads}{Number of threads used by \code{qtlEnrichment}. Default
-\code{1}.}
+\item{BPPARAM}{A \code{BiocParallelParam} handed to
+\code{\link{qtlEnrichment}}, whose multiple-imputation threads number
+its workers. Default \code{SerialParam()}.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed forwarded to
 \code{\link{qtlEnrichment}} for reproducible multiple imputation.
@@ -34,11 +35,12 @@ checked.}
 \item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
 }
 \value{
-A tibble with one row per (outcome trait, annotation unit) pair.
+A tibble with one row per (outcome fit, annotation unit) pair.
   The identity columns are \code{gwasStudy}, \code{gwasContext},
-  \code{gwasTrait}, \code{qtlStudy}, \code{qtlContext}; the axes a side does
-  not have are \code{NA} (\code{gwasContext} / \code{gwasTrait} for a GWAS
-  outcome, \code{qtlContext} for a GWAS annotation). Suitable as the
+  \code{gwasTrait}, \code{gwasMethod}, \code{qtlStudy}, \code{qtlContext},
+  \code{qtlMethod}; the axes a side does not have are \code{NA}
+  (\code{gwasContext} / \code{gwasTrait} for a GWAS outcome,
+  \code{qtlContext} for a GWAS annotation). Suitable as the
   \code{enrichment} argument to \code{\link{colocPipeline}}, which joins on
   those columns.
 
@@ -79,17 +81,22 @@ genome of outcome PIPs and the full collection of annotation fits at once.
 \itemize{
   \item \code{gwasFineMappingResult}: the genome-wide outcome collection.
     Each row's stored fit (\code{\link{susieFit}}) must carry a \code{pip}
-    vector. One PIP vector is built per outcome trait -- keyed by
-    \code{study} for a GWAS collection (one trait per study) and by
-    (\code{study}, \code{context}, \code{trait}) for a QTL one, since a
-    variant's PIP differs between molecular traits and pooling them would
-    collide.
+    vector. One PIP vector is built per outcome fit, across all its LD
+    blocks -- keyed by (\code{study}, \code{method}) for a GWAS collection
+    (one trait per study) and by (\code{study}, \code{context},
+    \code{trait}, \code{method}) for a QTL one, since a variant's PIP
+    differs between molecular traits and between fine-mapping methods, and
+    pooling them would collide.
   \item \code{qtlFineMappingResult}: the annotation collection. Each row's
     stored fit must carry \code{alpha}, \code{pip}, and
     prior-variance fields (\code{V}). Its region fits are pooled per
-    (\code{study}, \code{context}) -- per \code{study} alone for a GWAS
-    collection, which has no context axis.
+    (\code{study}, \code{context}, \code{method}) -- per (\code{study},
+    \code{method}) for a GWAS collection, which has no context axis -- so
+    each method's fits make their own estimate rather than counting every
+    region once per method.
 }
+Both sides' fits are read whole, so a row narrowed since its fit warns
+(condition class \code{pecotmrFitCoverage}).
 }
 
 \section{LD reference compatibility check}{

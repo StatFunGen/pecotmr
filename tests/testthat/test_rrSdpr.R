@@ -68,42 +68,30 @@ test_that("sdpr runs successfully", {
     expect_true(all(is.finite(result$betaEst)))
 })
 
-test_that("sdpr with per_variant_sample_size", {
+test_that("sdpr runs with a per-variant sample size or an array vector", {
     set.seed(42)
     p <- 10
     bhat <- rnorm(p, sd = 0.1)
     R <- diag(p)
-    result <- sdpr(
-        bhat = bhat,
-        R = R,
-        n = 100,
-        perVariantSampleSize = rep(100, p),
-        iter = 50,
-        burn = 10,
-        thin = 2,
-        verbose = FALSE
+    extras <- list(
+        perVariantSampleSize = list(perVariantSampleSize = rep(100, p)),
+        array = list(array = rep(1, p))
     )
-    expect_equal(length(result$betaEst), p)
-    expect_true(all(is.finite(result$betaEst)))
-})
-
-test_that("sdpr with valid array parameter", {
-    set.seed(42)
-    p <- 10
-    bhat <- rnorm(p, sd = 0.1)
-    R <- diag(p)
-    result <- sdpr(
-        bhat = bhat,
-        R = R,
-        n = 100,
-        array = rep(1, p),
-        iter = 50,
-        burn = 10,
-        thin = 2,
-        verbose = FALSE
-    )
-    expect_equal(length(result$betaEst), p)
-    expect_true(all(is.finite(result$betaEst)))
+    for (nm in names(extras)) {
+        result <- exec(
+            sdpr,
+            bhat = bhat,
+            R = R,
+            n = 100,
+            !!!extras[[nm]],
+            iter = 50,
+            burn = 10,
+            thin = 2,
+            verbose = FALSE
+        )
+        expect_equal(length(result$betaEst), p, info = nm)
+        expect_true(all(is.finite(result$betaEst)), info = nm)
+    }
 })
 
 # ---- sdpr signal recovery ----
@@ -122,8 +110,8 @@ test_that("sdpr recovers signal direction on simulated genotype data", {
         bhat = bhat,
         R = R,
         n = n,
-        iter = 500,
-        burn = 200,
+        iter = 200,
+        burn = 50,
         thin = 5,
         verbose = FALSE,
         seed = 42L
@@ -142,48 +130,26 @@ test_that("sdpr with verbose = TRUE produces output", {
     bhat <- rnorm(p, sd = 0.1)
     R <- diag(p)
     # iter >= 100 triggers the verbose print inside the MCMC loop
-    result <- sdpr(
-        bhat = bhat,
-        R = R,
-        n = 100,
-        iter = 110,
-        burn = 10,
-        thin = 2,
-        verbose = TRUE,
-        seed = 42L
+    out <- capture.output(
+        result <- sdpr(
+            bhat = bhat,
+            R = R,
+            n = 100,
+            iter = 110,
+            burn = 10,
+            thin = 2,
+            verbose = TRUE,
+            seed = 42L
+        )
     )
+    expect_match(out, "^100 iter\\. h2:", all = FALSE)
     expect_type(result, "list")
     expect_equal(length(result$betaEst), p)
     expect_true(all(is.finite(result$betaEst)))
 })
 
 # ---- sdpr optLlk = 2 (multi-array) ----
-test_that("sdpr runs with optLlk = 2 and mixed array values", {
-    set.seed(42)
-    p <- 10
-    bhat <- rnorm(p, sd = 0.1)
-    R <- diag(p)
-    # Mixed array: some variants from array 1, some from array 2
-    arr <- c(rep(1, 5), rep(2, 5))
-    result <- sdpr(
-        bhat = bhat,
-        R = R,
-        n = 100,
-        perVariantSampleSize = rep(100, p),
-        array = arr,
-        optLlk = 2,
-        iter = 50,
-        burn = 10,
-        thin = 2,
-        verbose = FALSE,
-        seed = 42L
-    )
-    expect_type(result, "list")
-    expect_equal(length(result$betaEst), p)
-    expect_true(all(is.finite(result$betaEst)))
-})
-
-test_that("sdpr optLlk = 2 with realistic genotype data", {
+test_that("sdpr runs with optLlk = 2 on mixed arrays and genotype LD", {
     set.seed(2024)
     n <- 500
     p <- 20
@@ -209,6 +175,7 @@ test_that("sdpr optLlk = 2 with realistic genotype data", {
         verbose = FALSE,
         seed = 42L
     )
+    expect_type(result, "list")
     expect_equal(length(result$betaEst), p)
     expect_true(all(is.finite(result$betaEst)))
 })

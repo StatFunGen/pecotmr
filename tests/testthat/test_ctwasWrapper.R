@@ -30,7 +30,7 @@ test_that("the geneZ bundle reaches compute_gene_z", {
     )
     pecotmr:::.ctwasEnsureZGene(
         inputs,
-        numThreads = 1L,
+        threads = 1L,
         extra = CtwasGeneZOptions(logfile = "gene-z.log")
     )
     expect_equal(seen$logfile, "gene-z.log")
@@ -38,7 +38,7 @@ test_that("the geneZ bundle reaches compute_gene_z", {
     # A supplied z_gene still short-circuits without calling the engine.
     seen <- NULL
     inputs$z_gene <- data.frame(id = "t1", z = 2.0)
-    pecotmr:::.ctwasEnsureZGene(inputs, numThreads = 1L)
+    pecotmr:::.ctwasEnsureZGene(inputs, threads = 1L)
     expect_null(seen)
 })
 

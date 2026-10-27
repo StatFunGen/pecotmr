@@ -30,7 +30,7 @@ twasWeightsPipeline(data, ...)
   fitRetention = c("slim", "none", "full"),
   residualizationParam = ResidualizationParam(),
   weightsDataType = NULL,
-  naAction = c("drop", "impute"),
+  phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
   seed = NULL
 )
@@ -40,6 +40,7 @@ twasWeightsPipeline(data, ...)
   methods = NULL,
   contexts = NULL,
   traitId = NULL,
+  cisWindow = NULL,
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
@@ -69,7 +70,7 @@ twasWeightsPipeline(data, ...)
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
   weightsDataType = NULL,
-  naAction = c("drop", "impute"),
+  phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
   residualizationParam = ResidualizationParam(),
   crossValidationParam = CrossValidationParam(),
@@ -92,9 +93,9 @@ default is \code{c("lasso", "prsCs", "dprGibbs")}, which there run
 lassosum, PRS-CS and SDPR; the fine-mapping methods are not in it, and
 are requested by name together with a \code{fineMappingResult}.}
 
-\item{contexts}{Optional context selection; \code{NULL} (the default) uses
-every context. A character vector applies to every study: a context no
-study has is an error, and one only some studies lack is skipped for
+\item{contexts}{Optional context selection; \code{NULL} (the default)
+uses every context. A character vector applies to every study: a context
+no study has is an error, and one only some studies lack is skipped for
 those, with a warning. A list keyed by study name picks each study's
 contexts separately (\code{list(A = "liver")}); studies it does not name
 keep all of theirs.}
@@ -107,23 +108,27 @@ study's entry may itself be a list keyed by context
 (\code{list(A = list(brain = "ENSG1"))}). Studies and contexts the list
 does not name keep all of their traits. A joint fit spanning a study's
 contexts uses every trait selected in any of them, minus the (context,
-trait) pairs a per-context entry leaves out.}
+trait) pairs a per-context entry leaves out. In a MultiStudyQtlDataset
+a study left with no trait selected sits out; the run is refused only
+when no study or summary-statistics row has one.}
 
 \item{region}{Optional variant window for QtlDataset trait selection: a
-\code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
-with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
-\code{traitId}.}
+\code{GRanges}. Mutually exclusive with \code{traitId}.}
 
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's genomic
 position when extracting variants. Required when \code{traitId} is
-supplied. Mutually exclusive with \code{region}.}
+supplied. Mutually exclusive with \code{region}. For QtlSumStats:
+optional; each selected tuple is analysed over its \code{traitPos}
+\eqn{\pm} \code{cisWindow}, within its \code{region}, which is then
+the window its result records. Every selected tuple needs a
+\code{traitPos}. A MultiStudyQtlDataset applies it to each of its
+studies, individual-level or summary-statistics, as above.}
 
-\item{genotypeFilterParam}{For QtlDataset: per-call genotype-filter
-overrides, built with \code{\link{GenotypeFilterParam}}. Each field that is
-set replaces the corresponding construct-time \code{\link{QtlDataset}} slot
-for this call only (applied to a validated copy); a field left unset
-leaves the stored value in place. Variant QC is a property of the data,
-so these are applied identically here and in
+\item{genotypeFilterParam}{For QtlDataset: which variants and samples the
+run keeps, built with \code{\link{GenotypeFilterParam}}: its
+\code{keepSamples} narrows the dataset once, and its other settings
+apply to each extracted block. A field left unset filters nothing.
+These are applied identically here and in
 \code{\link{fineMappingPipeline}} --- there is deliberately no
 TWAS-specific variant filter.}
 
@@ -153,7 +158,9 @@ part.}
 its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
 context, trait) tuples are injected into \code{learnTwasWeights} via
 \code{fittedModels} so SuSiE-family weight methods reuse the prior fit
-instead of refitting.}
+instead of refitting. Its fits and cross-validation are reused whole,
+so a row narrowed since its fit warns (condition class
+\code{pecotmrFitCoverage}).}
 
 \item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache. For each
 requested \code{(study, context, trait, method)} tuple already present in
@@ -217,8 +224,8 @@ components fitted per context when \code{usePCA = TRUE} (default
   of the returned object's contract.
 
   \code{"full"} is honoured by the mr.mash engines and, on summary
-  statistics, by \code{lasso}, \code{scad}, \code{mcp} and
-  \code{l0learn}, whose full fit also keeps every candidate's
+  statistics, by \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+  \code{mcp} and \code{l0learn}, whose full fit also keeps every candidate's
   coefficients; every other method keeps its fit whole or not at all.
   Requesting \code{"full"} for a run where no method can honour it is an
   error, and a mixed run warns rather than dropping it in silence.}
@@ -244,8 +251,12 @@ components fitted per context when \code{usePCA = TRUE} (default
 \item{weightsDataType}{Optional data-type label recorded on every
 \code{TwasWeightsRow$dataType} (e.g. \code{"expression"}).}
 
-\item{naAction}{Character. How to handle missing values in the extracted
-data.}
+\item{phenotypeFilterParam}{The run's phenotype QC, built with
+\code{\link{PhenotypeFilterParam}}: how missing phenotype values are
+handled (unset drops the affected samples; \code{"impute"} fills each
+trait's mean; a fit cannot take \code{"keep"}) and whether outlier
+samples are dropped. Every fit of the run, joint ones included, reads
+its phenotypes under it.}
 
 \item{verbose}{Verbosity (0 silent, 1 default, 2 includes external package
 messages).}
@@ -267,6 +278,8 @@ above.}
 A \code{\link{TwasWeights}} collection keyed by \code{(study,
   context, trait, method)}. Each row's LD reference is none for
   individual-level fits and that of the input row(s) for RSS-derived fits.
+  Its \code{seqinfo()} names the genome build the inputs name; inputs
+  naming different builds are refused.
 }
 \description{
 S4-dispatched per-region pipeline for learning TWAS prediction weights.
@@ -287,11 +300,16 @@ Method-restriction rules (enforced):
         (require at least two traits OR at least two contexts).
   \item \code{prsCs} runs only on summary statistics, so it is rejected
         on \code{QtlDataset} input.
-  \item \code{enet}, \code{dprVb}, \code{dprAdaptiveGibbs} and the
-        Bayesian alphabet (\code{bayesA}, \code{bayesB}, \code{bayesC},
-        \code{bayesL}, \code{bayesN}, \code{bayesR}, \code{bLasso}) run
-        only on individual-level data, so they are rejected on
-        \code{QtlSumStats} input.
+  \item \code{dprVb}, \code{dprAdaptiveGibbs} and the Bayesian alphabet
+        (\code{bayesA}, \code{bayesB}, \code{bayesC}, \code{bayesL},
+        \code{bayesN}, \code{bayesR}, \code{bLasso}) run only on
+        individual-level data, so they are rejected on \code{QtlSumStats}
+        input.
+  \item \code{lasso}, \code{enet} and \code{ridge} are glmnet on
+        individual-level data and the penalized RSS solver on summary
+        statistics. \code{enet} mixes the two penalties at
+        \code{alpha = 0.5} unless the method's options set it, on either
+        input: \code{methods = list(enet = list(alpha = 0.3))}.
 }
 
 A \code{QtlSumStats} input must have been QC'd via
@@ -337,11 +355,10 @@ same shared partition.
 
   Individual-level genotypes reach every method centred and scaled to unit
   variance, so all the weights are on one scale and the recorded
-  \code{weight_standardized} says so. The scaling belongs to the
-  \code{QtlDataset} accessors rather than to this pipeline:
-  \code{\link{residualizedGenotypes}} applies it, governed by
-  \code{ResidualizationParam(scaleResiduals = )} per call with the
-  dataset's own \code{\link{scaleResiduals}} slot as the default.
+  \code{weight_standardized} says so. The residualization
+  (\code{\link{residualizedGenotypes}}) applies it, governed by
+  \code{ResidualizationParam(scaleResiduals = )}, which defaults to
+  \code{TRUE}.
 
   It is not cosmetic: measured through pecotmr's own entry points, every
   method returns coefficients on the scale of the \code{X} it was given

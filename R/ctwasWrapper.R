@@ -43,7 +43,7 @@
 # ctwas_sumstats). Routed through .ctwasInvoke so `methodArgs` reaches it --
 # this was the one ctwas step CtwasOptions() could not configure.
 # @noRd
-.ctwasEnsureZGene <- function(inputs, numThreads, extra = list()) {
+.ctwasEnsureZGene <- function(inputs, threads, extra = list()) {
     if (!is.null(inputs$z_gene)) {
         return(inputs$z_gene)
     }
@@ -52,7 +52,7 @@
         list(
             z_snp = inputs$z_snp,
             weights = inputs$weights,
-            ncore = numThreads
+            ncore = threads
         ),
         extra = extra
     )
@@ -61,7 +61,7 @@
 # assemble_region_data -> the per-region list (keyed by region_id). It does NOT
 # echo z_gene or return boundary genes; both are recovered separately.
 # @noRd
-.ctwasAssembleRegionData <- function(inputs, zGene, thin, numThreads, extra) {
+.ctwasAssembleRegionData <- function(inputs, zGene, thin, threads, extra) {
     .ctwasInvoke(
         ctwas::assemble_region_data,
         list(
@@ -71,7 +71,7 @@
             weights = inputs$weights,
             snp_map = inputs$snp_map,
             thin = thin,
-            ncore = numThreads
+            ncore = threads
         ),
         extra = extra
     )
@@ -80,7 +80,7 @@
 # Boundary genes (computed internally by assemble_region_data for adjustment but
 # never returned) recovered via ctwas::get_boundary_genes; NULL for one region.
 # @noRd
-.ctwasBoundaryGenes <- function(inputs, numThreads, extra) {
+.ctwasBoundaryGenes <- function(inputs, threads, extra) {
     if (nrow(inputs$region_info) <= 1L) {
         return(NULL)
     }
@@ -89,7 +89,7 @@
         list(
             region_info = inputs$region_info,
             weights = inputs$weights,
-            ncore = numThreads
+            ncore = threads
         ),
         extra = extra
     )
@@ -105,7 +105,7 @@
     niterPrefit,
     niter,
     groupPriorVarStructure,
-    numThreads,
+    threads,
     extra
 ) {
     .ctwasInvoke(
@@ -115,7 +115,7 @@
             niter_prefit = as.integer(niterPrefit),
             niter = as.integer(niter),
             group_prior_var_structure = groupPriorVarStructure,
-            ncore = numThreads
+            ncore = threads
         ),
         extra = extra
     )
@@ -131,7 +131,10 @@
 #'   values).
 #'
 #' @param estResult A list returned by \code{\link{estCtwasGroupPriors}}.
-#' @param numThreads Number of cores.
+#' @param BPPARAM A \code{BiocParallelParam} whose workers number the cores
+#'   ctwas's own \code{ncore} parallelism uses when they run on this machine
+#'   (\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+#'   core. Default \code{SerialParam()}.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
 #'   with \code{\link{CtwasOptions}}. Names are checked against what
 #'   the ctwas steps accept between them.
@@ -144,10 +147,12 @@
 #' @export
 screenCtwasRegions <- function(
     estResult,
-    numThreads = 1L,
+    BPPARAM = SerialParam(),
     methodArgs = CtwasOptions()
 ) {
+    .assertBpparam(BPPARAM)
     .assertMethodOptions(methodArgs, "CtwasOptions", "methodArgs")
+    threads <- .bpLocalThreads(BPPARAM, "screenCtwasRegions")
     if (!requireNamespace("ctwas", quietly = TRUE)) {
         abort("Package 'ctwas' is required for screenCtwasRegions.")
     }
@@ -164,7 +169,7 @@ screenCtwasRegions <- function(
                 region_data = estResult$region_data,
                 snp_map = estResult$snp_map,
                 z_snp = estResult$z_snp,
-                ncore = as.integer(numThreads)
+                ncore = threads
             ),
             extra = methodArgs$expand
         )
@@ -177,7 +182,7 @@ screenCtwasRegions <- function(
             region_data = regionDataForScreen,
             group_prior = estResult$param$group_prior,
             group_prior_var = estResult$param$group_prior_var,
-            ncore = as.integer(numThreads)
+            ncore = threads
         ),
         extra = methodArgs$screen
     )
@@ -197,7 +202,7 @@ screenCtwasRegions <- function(
 .ctwasFinemapOrEmpty <- function(
     screenResult,
     maxNumSingleEffects,
-    numThreads,
+    threads,
     methodArgs
 ) {
     rd <- screenResult$screened_region_data
@@ -216,7 +221,7 @@ screenCtwasRegions <- function(
             LD_format = "custom",
             LD_loader_fun = screenResult$LD_loader_fun,
             snpinfo_loader_fun = screenResult$snpinfo_loader_fun,
-            ncore = as.integer(numThreads)
+            ncore = threads
         ),
         extra = methodArgs$finemap
     )
@@ -271,13 +276,13 @@ screenCtwasRegions <- function(
 
 # What the pipeline itself supplies at each step's call site -- taken from the
 # base `list()` handed to .ctwasInvoke(), which is exactly the set that gets
-# deduped away. `ncore` is the pipeline's `numThreads` everywhere.
+# deduped away. `ncore` comes from the pipeline's `BPPARAM` everywhere.
 # @noRd
 .ctwasOwnedGeneZ <- function() {
     c(
         z_snp = "supplied from the data by the pipeline",
         weights = "supplied from the data by the pipeline",
-        ncore = "the pipeline's own `numThreads`"
+        ncore = "the pipeline's own `BPPARAM`"
     )
 }
 
@@ -324,7 +329,7 @@ CtwasRegionDataOptions <- function(...) {
             weights = "supplied from the data by the pipeline",
             snp_map = "supplied from the data by the pipeline",
             thin = "CtwasPriorParam(thin =)",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasRegionDataOptions",
         "ctwasRegionData",
@@ -354,7 +359,7 @@ CtwasEstParamOptions <- function(...) {
             niter_prefit = "CtwasPriorParam(niterPrefit =)",
             niter = "CtwasPriorParam(niter =)",
             group_prior_var_structure = "CtwasPriorParam(varStructure =)",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasEstParamOptions",
         "ctwasEstParam",
@@ -377,7 +382,7 @@ CtwasScreenOptions <- function(...) {
             region_data = "supplied from the data by the pipeline",
             group_prior = "estimated by the EM step",
             group_prior_var = "estimated by the EM step",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasScreenOptions",
         "ctwasScreen",
@@ -401,7 +406,7 @@ CtwasExpandOptions <- function(...) {
             region_data = "supplied from the data by the pipeline",
             snp_map = "supplied from the data by the pipeline",
             z_snp = "supplied from the data by the pipeline",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasExpandOptions",
         "ctwasExpand",
@@ -430,7 +435,7 @@ CtwasFinemapOptions <- function(...) {
             LD_format = "fixed by the pipeline's LD loaders",
             LD_loader_fun = "fixed by the pipeline's LD loaders",
             snpinfo_loader_fun = "fixed by the pipeline's LD loaders",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasFinemapOptions",
         "ctwasFinemap",
@@ -477,7 +482,7 @@ CtwasMergeOptions <- function(...) {
             LD_format = "fixed by the pipeline's LD loaders",
             LD_loader_fun = "fixed by the pipeline's LD loaders",
             snpinfo_loader_fun = "fixed by the pipeline's LD loaders",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasMergeOptions",
         "ctwasMerge",
@@ -505,7 +510,7 @@ CtwasBoundaryGenesOptions <- function(...) {
         c(
             region_info = "supplied from the data by the pipeline",
             weights = "supplied from the data by the pipeline",
-            ncore = "the pipeline's own `numThreads`"
+            ncore = "the pipeline's own `BPPARAM`"
         ),
         "CtwasBoundaryGenesOptions",
         "ctwasBoundaryGenes",

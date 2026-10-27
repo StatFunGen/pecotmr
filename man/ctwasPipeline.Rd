@@ -9,9 +9,10 @@ ctwasPipeline(
   twasWeights,
   twasZ = NULL,
   fineMappingResult = NULL,
+  fineMappingMethod = NULL,
   method = NULL,
   maxNumSingleEffects = 5L,
-  numThreads = 1L,
+  BPPARAM = SerialParam(),
   ctwasPriorParam = CtwasPriorParam(),
   variantPruningParam = VariantPruningParam(),
   boundaryMergeParam = BoundaryMergeParam(),
@@ -22,8 +23,8 @@ ctwasPipeline(
 \arguments{
 \item{gwasSumStats}{A \code{\link{GwasSumStats}} whose elements are LD
 blocks (at least two), keyed by its \code{blockId} column, with
-\code{qcInfo()} non-empty. Build it with
-\code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
+\code{qcOptions()} non-empty. Build it with
+\code{loadGwasSumStatsFromManifest(..., region = <blocks>)} and pass it
 through \code{\link{summaryStatsQc}}.}
 
 \item{twasWeights}{The per-gene weight source. Either (a) a FLAT
@@ -37,33 +38,47 @@ ctwas's joint group prior estimate (the legacy whole-chromosome pattern
 where only a few of many LD blocks carry gene weights). A gene whose cis
 span straddles a block boundary is homed by its single anchor; the
 cross-block signal is cTWAS's boundary-gene concern
-(\code{\link{mergeCtwasBoundaryRegions}}), not placement.}
+(\code{\link{mergeCtwasBoundaryRegions}}), not placement. A
+\code{TwasWeights} row of the run's method that carries a SuSiE fit and
+was narrowed since that fit warns (condition class
+\code{pecotmrFitCoverage}): the fit no longer lines up with the row's
+variants, so its weights are not renormalized over the variants kept.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, the per-(trait,
 context) Z is used as the \code{z_gene} input to \code{ctwas_sumstats} so
 it is not recomputed.}
 
-\item{fineMappingResult}{Optional \code{QtlFineMappingResult} or
-\code{GwasFineMappingResult} carrying the per-variant PIP and credible-set
-membership data used by the CS / PIP rescue filters (\code{csMinCor} and
-\code{minPipCutoff}). When \code{NULL} (default) the smart filters are
-no-ops; only the magnitude filter (\code{twasWeightCutoff}) and the
-per-gene cap (\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
+\item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the genes'
+own fine-mapping, whose per-variant PIP and credible-set membership the
+CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
+Each gene is looked up by its weights' \code{(study, context, trait)} in
+the fits of \code{fineMappingMethod}; a gene with no fit there gets no
+rescue. When \code{NULL} (default) the smart filters are no-ops; only the
+magnitude filter (\code{twasWeightCutoff}) and the per-gene cap
+(\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
 
-\item{method}{Optional character (length 1). Picks which TWAS method's
-weights to feed into ctwas for each (study, context, trait) gene. When
-\code{NULL} (default): use \code{"ensemble"} if that method is present
-across the weight sources; otherwise use the sole method when only one is
-present; otherwise run \strong{every} method as an independent cTWAS run
-(one \code{CtwasResult} row-set per method). Passing the name explicitly
-(e.g. \code{"mrash"}) restricts the run to that single method.}
+\item{fineMappingMethod}{Character (length 1): the method of
+\code{fineMappingResult} whose fits the rescues read, e.g.
+\code{"susie"}. Required with a \code{fineMappingResult}, since the
+weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
+names no fine-mapping fit. Default \code{NULL}.}
+
+\item{method}{Character (length 1): which TWAS method's weights to feed
+into ctwas for each (study, context, trait) gene, one method per run.
+\code{NULL} (default) uses the pre-combined \code{"ensemble"} weights of
+\code{TwasWeights}. Weights with no ensemble, and fine-mapping results as
+the weight source, have no default: name the method (e.g.
+\code{"mrash"}, or a fine-mapping method such as \code{"susie"}).}
 
 \item{maxNumSingleEffects}{Integer. Max number of single effects in cTWAS
 fine-mapping. Default \code{5}. Pass-through to
 \code{ctwas::ctwas_sumstats}.}
 
-\item{numThreads}{Number of cores. Default \code{1}.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the cores
+ctwas's own \code{ncore} parallelism uses when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+core. Default \code{SerialParam()}.}
 
 \item{ctwasPriorParam}{The EM stage that estimates cTWAS's group priors,
 built with \code{\link{CtwasPriorParam}}: \code{thin},
@@ -85,9 +100,9 @@ boundary has its regions merged and re-fine-mapped, built with
 \code{maxSnp}.}
 
 \item{keepSnps}{Logical (length 1). When \code{TRUE}, retain the
-context-agnostic SNP background of each run as one extra \code{CtwasResult}
-row (\code{study = context = "SNP"}, mirroring cTWAS's own \code{"SNP"}
-group) so the full ctwas output is reconstructable from
+context-agnostic SNP background of each run as extra \code{CtwasResult}
+rows, one per region (\code{study = context = "SNP"}, mirroring cTWAS's
+own \code{"SNP"} group) so the full ctwas output is reconstructable from
 \code{\link{ctwasPosteriors}} / \code{susieAlpha}. Default \code{FALSE} --
 the SNP rows are the null background and are dropped from the structured
 gene-level result.}
@@ -97,13 +112,16 @@ with \code{\link{CtwasOptions}}. Names are checked against what
 the ctwas steps accept between them.}
 }
 \value{
-A \code{\link{CtwasResult}} collection: one row per \code{(gwasStudy,
-  study, context, method)}. A single-context run is one row per method; a
-  multi-context (joint) run emits per-context rows sharing the same
-  \code{jointContexts} set and the jointly-estimated group priors. Each row's
-  \code{\link{CtwasResultEntry}} payload carries that context's per-gene
-  fine-mapping posteriors (\code{finemap}), the run's \code{param}, and its
-  \code{regionInfo}. For the raw \code{ctwas::finemap_regions} list (e.g. to
+A \code{\link{CtwasResult}} collection: one row per
+  \code{(gwasStudy, study, context, method)} run and cTWAS region. A
+  single-context run gives each method its own rows; a multi-context
+  (joint) run emits per-context rows sharing the same \code{jointContexts}
+  set and the jointly-estimated group priors. Each row holds that region's
+  per-gene fine-mapping posteriors as ranges, with the region's per-effect
+  susie alpha table (\code{susieAlpha}), its \code{regionInfo} and the
+  run's \code{groupPriors} in \code{mcols()}. Its \code{seqinfo()} names
+  the genome build the inputs name; inputs naming different builds are
+  refused. For the raw \code{ctwas::finemap_regions} list (e.g. to
   feed \code{\link{mergeCtwasBoundaryRegions}}), call the granular
   \code{\link{assembleCtwasInputs}} \eqn{\to}
   \code{\link{estCtwasGroupPriors}} \eqn{\to}
@@ -123,7 +141,7 @@ Pipeline that hands a per-block set of
  \code{gwasSumStats} is ONE
   \code{\link{GwasSumStats}} whose elements are LD blocks, keyed by its
   \code{blockId} column -- build it with
-  \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)}. Per-block
+  \code{loadGwasSumStatsFromManifest(..., region = <blocks>)}. Per-block
   \code{region_info}, \code{LD_map}, and \code{snp_map} entries are built
   automatically from the LD reference and concatenated before the call to
   \code{ctwas::ctwas_sumstats}. A single-block input is rejected: cTWAS's EM
@@ -166,12 +184,11 @@ blocks <- GenomicRanges::GRanges("chr22",
   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
   blockId = c("chr22_1", "chr22_2"))
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-  ldReference = ldStem, region = "chr22:10000000-19000000",
-  ldBlocks = blocks)
+  ldReference = ldStem, which = blocks)
 gwasByRegion <- summaryStatsQc(gss,
   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 ctwasPipeline(gwasSumStats = gwasByRegion,
-  twasWeights = list(ctwasWeightsExample),
+  twasWeights = list(ctwasWeightsExample), method = "susie",
   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
   methodArgs = CtwasOptions(

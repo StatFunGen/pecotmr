@@ -7,29 +7,26 @@
 \usage{
 sldscResults(x, trait = NULL, ...)
 
-\S4method{sldscResults}{SldscData}(x, trait = NULL, mode = c("single", "joint"), idx = NULL)
+\S4method{sldscResults}{SldscData}(x, trait = NULL)
 }
 \arguments{
 \item{x}{An \code{\link{SldscData}} object.}
 
-\item{trait}{Character trait name, or \code{NULL} (default) to return the
-named list of per-trait \code{single}/\code{joint} runs for all traits.}
+\item{trait}{Character trait name(s), or \code{NULL} (default) for every
+trait. A name the object does not hold is an error.}
 
-\item{...}{Further arguments: \code{mode} (\code{"single"}/\code{"joint"})
-and \code{idx} (which single run).}
-
-\item{mode}{Character. Trait-run selection mode.}
-
-\item{idx}{Integer. Index of the trait run to select.}
+\item{...}{Unused.}
 }
 \value{
-The named list of per-trait runs when \code{trait} is \code{NULL};
-  otherwise a single run list, the list of single runs, or \code{NULL}.
+A named list keyed by trait, each element a list with
+  \code{single} (a list of runs) and \code{joint} (one run, or
+  \code{NULL} when the trait has none).
 }
 \description{
 Return the stratified LD-score regression runs held by an
-  \code{\link{SldscData}}: every trait's runs when \code{trait} is
-  \code{NULL}, otherwise the selected run(s) for that one trait.
+  \code{\link{SldscData}}, keyed by trait. Each trait's entry holds its
+  \code{single} runs (one per annotation) and its \code{joint} run, read
+  with \code{[[}: \code{sldscResults(x, "T")[["T"]]$joint}.
 }
 \examples{
 mkRun <- function(cats) {
@@ -55,5 +52,5 @@ mkTrait <- function() {
 }
 traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
 sd <- SldscData(annotData = annot, frqData = frq, traits = traits)
-sldscResults(sd, "traitX")
+sldscResults(sd, "traitX")[["traitX"]]$joint$categories
 }

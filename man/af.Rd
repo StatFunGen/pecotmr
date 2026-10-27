@@ -12,23 +12,15 @@ af(x, ...)
 
 \S4method{af}{LdMatrix}(x, ...)
 
-\S4method{af}{SumStatsBase}(
-  x,
-  studyName = NULL,
-  context = NULL,
-  trait = NULL,
-  annotateSignificance = NULL,
-  ranges = NULL
-)
+\S4method{af}{SumStatsBase}(x, studyName = NULL, context = NULL, trait = NULL)
 
-\S4method{af}{QtlDataset}(x, traitId = NULL, region = NULL, cisWindow = NULL, samples = NULL)
+\S4method{af}{QtlDataset}(x)
 }
 \arguments{
 \item{x}{A \code{QtlDataset}, \code{LdMatrix}, \code{GwasSumStats} or
 \code{QtlSumStats} object.}
 
-\item{...}{Class-specific selection arguments (e.g., \code{traitId},
-\code{region}, \code{cisWindow}, \code{samples} for \code{QtlDataset}).}
+\item{...}{Class-specific selection arguments.}
 
 \item{studyName}{Character (length 1) or \code{NULL}. Restrict the selection
 to this study; \code{NULL} matches all studies.}
@@ -38,25 +30,6 @@ this context; \code{NULL} matches all contexts.}
 
 \item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
 this trait; \code{NULL} matches all traits.}
-
-\item{annotateSignificance}{Optional correction-method name passed through to
-\code{\link{sumStats}} (QTL only); \code{NULL} applies none.}
-
-\item{ranges}{A \code{GRanges} or \code{NULL} (default). Return only the
-variants overlapping these ranges; \code{NULL} returns everything.}
-
-\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
-to select; \code{NULL} matches all traits in the dataset.}
-
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
-around the trait; \code{NULL} uses the dataset default.}
-
-\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
-\code{NULL} uses all samples.}
 }
 \value{
 Named numeric vector of effect-allele frequencies (names are variant
@@ -72,7 +45,8 @@ Extract the directional effect-allele (A1) frequency vector
   \code{af} column report. For a summary-statistic collection this is
   \code{NULL} when the source
   carried no frequency column -- see \code{\link{variantColumnReplace}}
-  for supplying one afterwards.
+  for supplying one afterwards. A \code{QtlDataset} answers over the whole
+  dataset; narrow it first, with \code{x[i, j, ]}, to read part of it.
 }
 \examples{
 data(qtlDatasetExample)

@@ -9,6 +9,7 @@ assembleCtwasInputs(
   twasWeights,
   twasZ = NULL,
   fineMappingResult = NULL,
+  fineMappingMethod = NULL,
   method = NULL,
   variantPruningParam = VariantPruningParam()
 )
@@ -16,8 +17,8 @@ assembleCtwasInputs(
 \arguments{
 \item{gwasSumStats}{A \code{\link{GwasSumStats}} whose elements are LD
 blocks (at least two), keyed by its \code{blockId} column, with
-\code{qcInfo()} non-empty. Build it with
-\code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
+\code{qcOptions()} non-empty. Build it with
+\code{loadGwasSumStatsFromManifest(..., region = <blocks>)} and pass it
 through \code{\link{summaryStatsQc}}.}
 
 \item{twasWeights}{The per-gene weight source. Either (a) a FLAT
@@ -31,27 +32,38 @@ ctwas's joint group prior estimate (the legacy whole-chromosome pattern
 where only a few of many LD blocks carry gene weights). A gene whose cis
 span straddles a block boundary is homed by its single anchor; the
 cross-block signal is cTWAS's boundary-gene concern
-(\code{\link{mergeCtwasBoundaryRegions}}), not placement.}
+(\code{\link{mergeCtwasBoundaryRegions}}), not placement. A
+\code{TwasWeights} row of the run's method that carries a SuSiE fit and
+was narrowed since that fit warns (condition class
+\code{pecotmrFitCoverage}): the fit no longer lines up with the row's
+variants, so its weights are not renormalized over the variants kept.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, the per-(trait,
 context) Z is used as the \code{z_gene} input to \code{ctwas_sumstats} so
 it is not recomputed.}
 
-\item{fineMappingResult}{Optional \code{QtlFineMappingResult} or
-\code{GwasFineMappingResult} carrying the per-variant PIP and credible-set
-membership data used by the CS / PIP rescue filters (\code{csMinCor} and
-\code{minPipCutoff}). When \code{NULL} (default) the smart filters are
-no-ops; only the magnitude filter (\code{twasWeightCutoff}) and the
-per-gene cap (\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
+\item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the genes'
+own fine-mapping, whose per-variant PIP and credible-set membership the
+CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
+Each gene is looked up by its weights' \code{(study, context, trait)} in
+the fits of \code{fineMappingMethod}; a gene with no fit there gets no
+rescue. When \code{NULL} (default) the smart filters are no-ops; only the
+magnitude filter (\code{twasWeightCutoff}) and the per-gene cap
+(\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
 
-\item{method}{Optional character (length 1). Picks which TWAS method's
-weights to feed into ctwas for each (study, context, trait) gene. When
-\code{NULL} (default): use \code{"ensemble"} if that method is present
-across the weight sources; otherwise use the sole method when only one is
-present; otherwise run \strong{every} method as an independent cTWAS run
-(one \code{CtwasResult} row-set per method). Passing the name explicitly
-(e.g. \code{"mrash"}) restricts the run to that single method.}
+\item{fineMappingMethod}{Character (length 1): the method of
+\code{fineMappingResult} whose fits the rescues read, e.g.
+\code{"susie"}. Required with a \code{fineMappingResult}, since the
+weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
+names no fine-mapping fit. Default \code{NULL}.}
+
+\item{method}{Character (length 1): which TWAS method's weights to feed
+into ctwas for each (study, context, trait) gene, one method per run.
+\code{NULL} (default) uses the pre-combined \code{"ensemble"} weights of
+\code{TwasWeights}. Weights with no ensemble, and fine-mapping results as
+the weight source, have no default: name the method (e.g.
+\code{"mrash"}, or a fine-mapping method such as \code{"susie"}).}
 
 \item{variantPruningParam}{Which variants survive into each gene's weight
 matrix, built with \code{\link{VariantPruningParam}}:
@@ -92,10 +104,9 @@ blocks <- GenomicRanges::GRanges("chr22",
   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
   blockId = c("chr22_1", "chr22_2"))
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-  ldReference = ldStem, region = "chr22:10000000-19000000",
-  ldBlocks = blocks)
+  ldReference = ldStem, which = blocks)
 gwasByRegion <- summaryStatsQc(gss,
   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 assembleCtwasInputs(gwasSumStats = gwasByRegion,
-  twasWeights = list(ctwasWeightsExample))
+  twasWeights = list(ctwasWeightsExample), method = "susie")
 }

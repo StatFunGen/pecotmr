@@ -38,7 +38,7 @@ test_that("scadWeights recovers signal indices on simulated data", {
     skip_if_not_installed("ncvreg")
     sim <- .simulateSparseXY()
     w <- scadWeights(sim$X, sim$y, nfolds = 5)
-    expect_equal(length(w), ncol(sim$X))
+    expect_equal(dim(w), c(ncol(sim$X), 1L))
     expect_true(all(is.finite(w)))
     # SCAD is sparse: top-3 by absolute weight should heavily overlap truth.
     top3 <- order(abs(w), decreasing = TRUE)[1:3]
@@ -49,7 +49,7 @@ test_that("l0learnWeights with default L0 penalty recovers signal indices", {
     skip_if_not_installed("L0Learn")
     sim <- .simulateSparseXY()
     w <- l0learnWeights(sim$X, sim$y, penalty = "L0", nFolds = 5)
-    expect_equal(length(w), ncol(sim$X))
+    expect_equal(dim(w), c(ncol(sim$X), 1L))
     expect_true(all(is.finite(w)))
     top3 <- order(abs(w), decreasing = TRUE)[1:3]
     expect_gte(length(intersect(top3, sim$signal_idx)), 2L)
@@ -59,7 +59,7 @@ test_that("l0learnWeights with L0L2 penalty recovers signal direction", {
     skip_if_not_installed("L0Learn")
     sim <- .simulateSparseXY()
     w <- l0learnWeights(sim$X, sim$y, penalty = "L0L2", nFolds = 5)
-    expect_equal(length(w), ncol(sim$X))
+    expect_equal(dim(w), c(ncol(sim$X), 1L))
     expect_true(all(is.finite(w)))
     # L0L2 selects (gamma, lambda) over a 2D grid; correlation is the safer bet.
     expect_gt(cor(w, sim$beta_true), 0.4)
@@ -69,6 +69,7 @@ test_that("dprWeights with VB fitting recovers signal direction", {
     skip_if_not_installed("RcppDPR")
     sim <- .simulateSparseXY()
     w <- dprWeights(sim$X, sim$y, fittingMethod = "VB")
+    expect_true(is.numeric(w))
     expect_equal(length(w), ncol(sim$X))
     expect_true(all(is.finite(w)))
     expect_gt(cor(w, sim$beta_true), 0.4)

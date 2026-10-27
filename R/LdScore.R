@@ -64,7 +64,8 @@ setClass(
 #'   ldsc's unbiased r^2, as ldsc's own score files do); further columns are
 #'   annotation-stratified scores.
 #' @param ldScoreWeights Numeric regression weights, one per variant.
-#' @param ldBlocks A \code{GRanges} of LD block intervals.
+#' @param ldBlocks The LD block intervals: a \code{GRanges}, or the path
+#'   of a BED file, read as BED with a 0-based start.
 #' @param nSamples Integer, sample size of the LD reference panel.
 #' @param inSample Logical, whether the reference is the GWAS cohort.
 #' @param genome Character, genome build; recorded in \code{seqinfo()}.
@@ -107,7 +108,7 @@ LdScore <- function(
             )
         )
     )
-    obj <- methods::new(
+    methods::new(
         "LdScore",
         scored,
         ldBlocks = .asLdBlockRanges(ldBlocks),
@@ -115,8 +116,6 @@ LdScore <- function(
         inSample = isTRUE(inSample),
         ldMatrixList = ldMatrixList
     )
-    validObject(obj)
-    obj
 }
 
 #' @importFrom checkmate assertCount assertFlag
@@ -148,8 +147,8 @@ LdScore <- function(
 #'   standard error from a delete-one-block jackknife, so it requires at
 #'   least two blocks and wants many more.
 #' @param ldBlocks With a genotype panel, the LD blocks to cut it into: a
-#'   \code{GRanges}, or a data frame with columns \code{chrom}, \code{start}
-#'   and \code{end}. Each block's LD is computed from the panel variants
+#'   \code{GRanges}, or the path of a BED file, read as BED with a 0-based
+#'   start. Each block's LD is computed from the panel variants
 #'   inside it; variants outside every block are left out. Not used with
 #'   \code{LdMatrix} blocks.
 #' @param nSamples Integer, the number of samples the reference's LD was
@@ -176,8 +175,8 @@ LdScore <- function(
 #' panel <- readGenotypes(plink2Prefix = file.path(system.file("extdata",
 #'   "ld_reference", "chr22", package = "pecotmr"),
 #'   "protocol_example.LD.chr22"))
-#' blocks <- data.frame(chrom = "chr22", start = c(10000000, 15000001),
-#'   end = c(15000000, 19000000))
+#' blocks <- GenomicRanges::GRanges("chr22",
+#'   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)))
 #' ldScore <- buildLdScore(panel, ldBlocks = blocks, genome = "hg38")
 #' ldScore
 #' head(S4Vectors::mcols(ldScore)$ldScores)
@@ -380,6 +379,9 @@ setMethod("ldMatrixList", "LdScore", function(x) {
 # One block's LD matrix computed from the panel an LdScore reads it from.
 # @noRd
 .ldScorePanelMatrix <- function(block, ldReference) {
-    F <- .ldRefFactor(ldReference, block$rows)
-    list(R = crossprod(F) / (nrow(F) - 1), snpIdx = block$idx)
+    ldFactor <- .ldRefFactor(ldReference, block$rows)
+    list(
+        R = crossprod(ldFactor) / (nrow(ldFactor) - 1),
+        snpIdx = block$idx
+    )
 }

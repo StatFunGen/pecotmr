@@ -9,7 +9,7 @@ penalizedRss(
   R,
   n,
   penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
-  lambda = exp(seq(log(1e-04), log(0.1), length.out = 20)),
+  lambda = NULL,
   gamma = NULL,
   alpha = 1,
   lambda0 = 0,
@@ -33,13 +33,19 @@ window), as in \code{lassosumRss()}.}
 \item{lambda}{Numeric vector of regularization parameter values along which
 to trace a solution path (warm-started, largest-first). For LASSO/MCP/SCAD
 this is the primary penalty strength; for L0 variants it controls the L1
-component.}
+component. \code{NULL} (default) is 20 values from 1e-4 to 0.1 on a log
+scale, divided by \code{max(alpha, 0.001)} as glmnet sizes its path, so
+the L1 share spans the same range at any \code{alpha} and a ridge path
+runs from 0.1 to 100.}
 
 \item{gamma}{Concavity parameter for MCP (default 3) or SCAD (default 3.7).
 Ignored for LASSO and L0 variants.}
 
-\item{alpha}{Elastic-net mixing for MCP/SCAD: \eqn{l_1 = \lambda \alpha},
-\eqn{l_2 = \lambda (1-\alpha)}. Default 1 (pure L1, no ridge).}
+\item{alpha}{Elastic-net mixing for LASSO, MCP and SCAD, in \code{[0, 1]}:
+\eqn{l_1 = \lambda \alpha} and \eqn{l_2 = \lambda (1-\alpha)}, so the
+penalty is \eqn{2 P(\beta; l_1) + l_2 \beta^T \beta}, glmnet's mixing.
+Default 1, no ridge term. For LASSO, 0.5 is the elastic net and 0 ridge;
+MCP and SCAD need \code{alpha > 0}. Ignored by the L0 variants.}
 
 \item{lambda0}{L0 penalty weight (number of non-zeros). Required for L0
 variants; ignored otherwise. Default 0.}
@@ -67,14 +73,16 @@ A list with components:
 }
 }
 \description{
-Generalizes \code{lassosumRss()} to support LASSO, MCP, SCAD, L0, L0L1,
-and L0L2 penalties.  Uses coordinate descent on the objective
+The RSS penalized-regression solver: LASSO with its elastic-net and ridge
+mixtures, MCP, SCAD, L0, L0L1 and L0L2. Uses coordinate descent on the
+objective
 \deqn{\beta^T R \beta - 2 \beta^T z + \mathrm{penalty}(\beta)}
 where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta /
-\sqrt{n}}.
+\sqrt{n}}. \code{lassosumRss()} is its LASSO at \code{alpha = 1}.
 }
 \details{
-Internal: \code{\link{scadRssWeights}}, \code{\link{mcpRssWeights}} and
+Internal: \code{\link{enetRssWeights}}, \code{\link{ridgeRssWeights}},
+\code{\link{scadRssWeights}}, \code{\link{mcpRssWeights}} and
 \code{\link{l0learnRssWeights}} are the public interface, with
 \code{\link{lassosumRssWeights}} for the lasso. They run this over a grid
 of LD shrinkage values, forward its options through

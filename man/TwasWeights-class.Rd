@@ -5,14 +5,16 @@
 \alias{TwasWeights-class}
 \title{TWAS Weights Collection}
 \description{
-S4 collection of TWAS weights keyed by the identity tuple
-  \code{(study, context, trait, method)}. Each entry is a
-  \code{TwasWeightsRow} carrying one method's weights for one
-  trait/context/study. Implements the \code{DFrame}-subclass collection
-  pattern.
+S4 collection of TWAS weights, one row per
+  \code{(study, context, trait, method)}: one method's weights for one
+  trait, context and study. Each element is a row's variants: a
+  \code{GRanges} whose \code{weight} column holds the weights.
 
-Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
-\code{entry}. Each \code{entry} is a \code{TwasWeightsRow}.
+Required \code{mcols()} columns: the identity tuple \code{study},
+\code{context}, \code{trait} and \code{method}, and each row's payload:
+its stored fits (\code{fits}), \code{cvResult}, \code{standardized} and
+\code{dataType}. The constructor also records \code{fitVariants}, the
+variants the weights were fitted on.
 
 Optional columns \code{jointStudies}, \code{jointContexts},
 \code{jointTraits} appear when the collection contains rows produced by a
@@ -32,4 +34,17 @@ derived against, each a genotype panel, a \code{GenotypeMixture} or an
 learned from individual-level data). Used downstream to check that the
 rows a pipeline combines share an LD reference.}
 }}
+
+\section{Narrowed rows}{
+ Each row records in its \code{fitVariants} column
+  the ids of the variants its weights were fitted on (none for a row
+  without a fit payload). A row narrowed since keeps its fits as they
+  were, so \code{cvResult()} and \code{methodFits()} warn, with condition
+  class \code{pecotmrFitCoverage}, when a row holds fewer variants than
+  they describe. So do the pipelines that read them:
+  \code{causalInferencePipeline()} when it selects weights by their
+  cross-validation, and \code{ctwasPipeline()} for rows whose SuSiE fit
+  renormalizes their weights. The weights themselves are narrowed with
+  the row and do not warn.
+}
 

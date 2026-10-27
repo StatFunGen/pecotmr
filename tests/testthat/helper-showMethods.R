@@ -1,5 +1,3 @@
-context("show methods")
-
 # ===========================================================================
 # Shared fixtures
 # ===========================================================================
@@ -11,7 +9,7 @@ context("show methods")
         format = "plink2",
         snpInfo = data.frame(
             SNP = paste0("rs", seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
             A2 = rep("G", snp_n),
@@ -44,7 +42,7 @@ context("show methods")
     if (with_cs) {
         tl$cs_95 <- paste0("susie_", c(1L, 1L, 0L)[seq_len(n)])
     }
-    fineMappingRow(
+    FineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -52,7 +50,7 @@ context("show methods")
 }
 
 .sh_makeTwEntry <- function(p = 4, weightStandardized = FALSE) {
-    twasWeightsRow(
+    TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = rep(0.1, p),
         cvResult = list(rsq = 0.5),

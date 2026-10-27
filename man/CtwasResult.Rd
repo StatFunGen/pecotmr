@@ -11,7 +11,8 @@ CtwasResult(
   method,
   entry,
   jointStudies = NULL,
-  jointContexts = NULL
+  jointContexts = NULL,
+  metadata = list()
 )
 }
 \arguments{
@@ -19,11 +20,13 @@ CtwasResult(
 
 \item{studyName}{Character vector of QTL study identifiers.}
 
-\item{context}{Character vector of context labels (scalar per row).}
+\item{context}{Character vector of context labels (scalar per run).}
 
 \item{method}{Character vector of weight-method names.}
 
-\item{entry}{List / \code{SimpleList} of \code{CtwasResultEntry} objects.}
+\item{entry}{List / \code{SimpleList} of \code{CtwasResultEntry} objects,
+one per run; their posteriors and susie alpha tables must be
+\code{GRanges}, which the pipeline builds them as.}
 
 \item{jointStudies}{Optional character vector (length
 \code{length(gwasStudy)}) listing the joined studies for a multi-study run,
@@ -31,22 +34,34 @@ CtwasResult(
 
 \item{jointContexts}{Optional character vector for multi-context runs. Same
 shape as \code{jointStudies}.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{CtwasResult} object.
 }
 \description{
-Construct a \code{CtwasResult} DFrame-subclass collection of
-  cTWAS runs from per-tuple vectors and a list of
-  \code{\link{CtwasResultEntry}} payloads (one per run). A single-context run
-  is one row; a multi-context run emits per-context rows sharing the same
-  \code{jointContexts} set and jointly-estimated group priors.
+Construct a \code{CtwasResult} collection of cTWAS runs from
+  per-run identity vectors and a list of \code{\link{CtwasResultEntry}}
+  payloads (one per run). Each run is split into one element per cTWAS
+  region -- by the payloads' \code{region_id}, or by chromosome when they
+  carry none -- so a single-context run is one row per region, and a
+  multi-context run emits per-context rows sharing the same
+  \code{jointContexts} set and jointly-estimated group priors. A run whose
+  payload holds no posteriors is kept as one empty element.
 }
 \examples{
+at <- IRanges::IRanges(c(100L, 200L), width = 1L)
 cre <- CtwasResultEntry(
-  posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
-  susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
-cr <- CtwasResult(gwasStudy = "gwas1", studyName = "s1", context = "brain",
-  method = "susie", entry = list(cre))
+  posteriors = GenomicRanges::GRanges("chr1", at,
+    id = c("g1", "g2"), region_id = "chr1_1_1000",
+    susie_pip = c(0.9, 0.1)),
+  susieAlpha = GenomicRanges::GRanges("chr1", at,
+    id = c("g1", "g2"), region_id = "chr1_1_1000",
+    susie_alpha = c(0.9, 0.1)))
+cr <- CtwasResult(gwasStudy = "gwas1", studyName = "s1",
+  context = "brain", method = "susie", entry = list(cre))
 cr
 }

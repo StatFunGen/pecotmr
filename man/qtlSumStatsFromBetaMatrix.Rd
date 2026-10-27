@@ -43,7 +43,7 @@ colnames(bhat)}, \code{trait = "mash"}.}
 
 \item{a1, a2}{Placeholder alleles. Defaults \code{"A"} / \code{"G"}.}
 
-\item{role}{Tag stored in the \code{qcInfo} record. Default \code{"mash"}.}
+\item{role}{Tag stored in the \code{qcOptions()}. Default \code{"mash"}.}
 }
 \value{
 A \code{\link{QtlSumStats}} with one entry per condition (column).

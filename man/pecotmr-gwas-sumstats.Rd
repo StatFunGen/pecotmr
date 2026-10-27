@@ -4,7 +4,8 @@
 \alias{pecotmr-gwas-sumstats}
 \title{GWAS Summary Statistics Handling}
 \description{
-Constructor, accessors, and converters for \code{GwasSumStats}
-  (the post-refactor DFrame-subclass collection keyed by \code{study}).
+Constructor, accessors, and converters for
+  \code{GwasSumStats}, the \code{RangedTupleList} collection of GWAS
+  summary statistics keyed by \code{study}.
 }
 \keyword{internal}

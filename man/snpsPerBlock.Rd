@@ -9,7 +9,8 @@ snpsPerBlock(snpInfo, ldBlocks)
 \arguments{
 \item{snpInfo}{A data.frame with columns CHR, BP.}
 
-\item{ldBlocks}{A \code{GRanges} of LD block intervals.}
+\item{ldBlocks}{The LD block intervals: a \code{GRanges}, or the path
+of a BED file, read as BED with a 0-based start.}
 }
 \value{
 A list of integer vectors, one per block.

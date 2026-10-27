@@ -130,9 +130,7 @@ setClass(
 #' @export
 MashPrior <- function(fullFit = NULL, cvFits = NULL) {
     assertList(cvFits, null.ok = TRUE)
-    obj <- new("MashPrior", fullFit = fullFit, cvFits = cvFits)
-    validObject(obj)
-    obj
+    new("MashPrior", fullFit = fullFit, cvFits = cvFits)
 }
 
 #' @rdname fullFit

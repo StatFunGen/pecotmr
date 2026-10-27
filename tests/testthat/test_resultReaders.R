@@ -75,12 +75,42 @@
     path
 }
 
+# The bundled fine-mapping example, published once as a VCF and read back
+# once. Reading a published VCF is the slow step of a round trip, so the tests
+# that need only "the example after a VCF round trip" share this copy instead
+# of each writing and reading the same file again.
+# @noRd
+.rdr_fmVcf <- .rdr_tmp("shared_fm.vcf")
+if (requireNamespace("VariantAnnotation", quietly = TRUE)) {
+    data(qtlFineMappingExample, envir = environment())
+    writeGwasVcf(qtlFineMappingExample, .rdr_fmVcf, context = "context_1")
+    .rdr_fmVcfBack <- readFineMappingResult(
+        .rdr_fmVcf,
+        weightStandardized = TRUE
+    )
+}
+
+# One three-variant fit per context: small enough to publish and read back in
+# a fraction of the example's time, for the tests that edit a published VCF's
+# header or need only some VCF to read.
+# @noRd
+.rdr_smallFmr <- function(contexts = "c1") {
+    n <- length(contexts)
+    QtlFineMappingResult(
+        studyName = rep("s1", n),
+        context = contexts,
+        trait = rep("t1", n),
+        method = rep("susie", n),
+        entry = rep(list(.sc_makeFineMappingRow(3)), n)
+    )
+}
+
 # ---- round trips ----------------------------------------------------------
 
 test_that("a fine-mapping result round-trips through a published BED", {
     data(qtlFineMappingExample, envir = environment())
     path <- .rdr_tmp("rt_fm.bed")
-    exportToBed(qtlFineMappingExample, path, columns = "all")
+    writeBed(qtlFineMappingExample, path, columns = "all")
     back <- readFineMappingResult(path, weightStandardized = TRUE)
     expect_s4_class(back, "QtlFineMappingResult")
     expect_equal(nrow(back), nrow(qtlFineMappingExample))
@@ -109,10 +139,9 @@ test_that("a fine-mapping result round-trips through a published BED", {
 })
 
 test_that("a fine-mapping result round-trips through a published VCF", {
+    skip_if_not_installed("VariantAnnotation")
     data(qtlFineMappingExample, envir = environment())
-    path <- .rdr_tmp("rt_fm.vcf")
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
-    back <- readFineMappingResult(path, weightStandardized = TRUE)
+    back <- .rdr_fmVcfBack
     expect_s4_class(back, "QtlFineMappingResult")
     expect_equal(
         .rdr_diff(
@@ -126,16 +155,15 @@ test_that("a fine-mapping result round-trips through a published VCF", {
 })
 
 test_that("the two formats agree with each other", {
+    skip_if_not_installed("VariantAnnotation")
     # The point of one shared vocabulary: whichever format a result was
     # published in, it reads back the same. A `region_start` that is 0-based
     # in the table and 1-based in the VCF header was caught by exactly this.
     data(qtlFineMappingExample, envir = environment())
     bed <- .rdr_tmp("agree.bed")
-    vcf <- .rdr_tmp("agree.vcf")
-    exportToBed(qtlFineMappingExample, bed, columns = "all")
-    exportToVcf(qtlFineMappingExample, vcf, context = "context_1")
+    writeBed(qtlFineMappingExample, bed, columns = "all")
     fromBed <- readFineMappingResult(bed, weightStandardized = TRUE)
-    fromVcf <- readFineMappingResult(vcf, weightStandardized = TRUE)
+    fromVcf <- .rdr_fmVcfBack
     expect_equal(genomicRegion(fromBed), genomicRegion(fromVcf))
     expect_equal(
         .rdr_diff(
@@ -151,10 +179,9 @@ test_that("a published VCF restores the per-effect fit the header carried", {
     # `V` and `sets$cs_index` are per EFFECT, so no per-variant column can
     # hold them -- the `##SAMPLE` block is why they survive at all, and
     # colocalization's credible-set filter reads them off the fit.
+    skip_if_not_installed("VariantAnnotation")
     data(qtlFineMappingExample, envir = environment())
-    path <- .rdr_tmp("fit.vcf")
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
-    fit <- susieFit(readFineMappingResult(path, weightStandardized = TRUE))
+    fit <- susieFit(.rdr_fmVcfBack)
     original <- susieFit(qtlFineMappingExample)
     expect_equal(as.numeric(fit$V), as.numeric(original$V), tolerance = 1e-8)
     expect_equal(
@@ -164,7 +191,7 @@ test_that("a published VCF restores the per-effect fit the header carried", {
     # A BED has no header to carry them, so there the fit is honestly absent
     # rather than half-invented.
     bed <- .rdr_tmp("fit.bed")
-    exportToBed(qtlFineMappingExample, bed)
+    writeBed(qtlFineMappingExample, bed)
     expect_null(susieFit(readFineMappingResult(bed, weightStandardized = TRUE)))
 })
 
@@ -172,7 +199,7 @@ test_that("TWAS weights round-trip through a published BED", {
     data(twasWeightsExample, envir = environment())
     path <- .rdr_tmp("rt_w.bed")
     expect_message(
-        exportToBed(twasWeightsExample, path),
+        writeBed(twasWeightsExample, path),
         "fine-mapping-derived"
     )
     back <- readTwasWeights(path)
@@ -216,7 +243,7 @@ test_that("a merged table reads back as a multi-row collection", {
         qtlFineMappingLbfExample
     )
     path <- .rdr_tmp("merged.bed")
-    exportToBed(combined, path)
+    writeBed(combined, path)
     back <- readFineMappingResult(path, weightStandardized = TRUE)
     expect_equal(nrow(back), nrow(combined))
     md <- S4Vectors::mcols(back)
@@ -402,7 +429,7 @@ test_that("a table with no way to identify its variants says so", {
 test_that("a weights file read as a fine-mapping result points back", {
     data(twasWeightsExample, envir = environment())
     wt <- .rdr_tmp("x_wt.bed")
-    suppressMessages(exportToBed(twasWeightsExample, wt))
+    suppressMessages(writeBed(twasWeightsExample, wt))
     expect_error(
         readFineMappingResult(wt, weightStandardized = TRUE),
         "no `PIP` column.*readTwasWeights"
@@ -414,7 +441,7 @@ test_that("a fine-mapping table reads as weights, because WGT is the weight", {
     # TWAS coefficient, which is why it publishes as WGT in both schemas.
     data(qtlFineMappingExample, envir = environment())
     fm <- .rdr_tmp("x_fm.bed")
-    exportToBed(qtlFineMappingExample, fm)
+    writeBed(qtlFineMappingExample, fm)
     asWeights <- readTwasWeights(fm, weightStandardized = TRUE)
     expect_s4_class(asWeights, "TwasWeights")
     expect_equal(
@@ -435,7 +462,7 @@ test_that("a fine-mapping table reads as weights, because WGT is the weight", {
 test_that("a published weight without its scale has to be told", {
     data(twasWeightsExample, envir = environment())
     path <- .rdr_tmp("scale.bed")
-    suppressMessages(exportToBed(twasWeightsExample, path))
+    suppressMessages(writeBed(twasWeightsExample, path))
     # This fixture records the flag, so it reads without one.
     expect_s4_class(readTwasWeights(path), "TwasWeights")
     df <- utils::read.delim(path, check.names = FALSE)
@@ -547,7 +574,7 @@ test_that("EZ round-trips as a SUPPLIED z and is not invented", {
 test_that("a result with no context or trait is a GWAS result", {
     data(gwasFineMappingExample, envir = environment())
     path <- .rdr_tmp("gwas.bed")
-    exportToBed(gwasFineMappingExample, path)
+    writeBed(gwasFineMappingExample, path)
     back <- readFineMappingResult(path, weightStandardized = TRUE)
     expect_s4_class(back, "GwasFineMappingResult")
     expect_equal(
@@ -571,7 +598,7 @@ test_that("the format follows the extension unless it is named", {
 test_that("a tabix-indexed table can be read by region", {
     data(qtlFineMappingExample, envir = environment())
     path <- .rdr_tmp("region.bed.gz")
-    exportToBed(qtlFineMappingExample, path)
+    writeBed(qtlFineMappingExample, path)
     all <- readFineMappingResult(path, weightStandardized = TRUE)
     full <- topLoci(all, signalCutoff = 0)
     window <- GenomicRanges::GRanges(
@@ -583,7 +610,7 @@ test_that("a tabix-indexed table can be read by region", {
     )
     part <- readFineMappingResult(
         path,
-        region = window,
+        which = window,
         weightStandardized = TRUE
     )
     expect_lt(length(variantIds(part)), length(variantIds(all)))
@@ -605,8 +632,16 @@ test_that("an un-indexed file ignores a region loudly", {
     )
     path <- .rdr_writeTable(df, "noindex.bed")
     expect_warning(
-        readFineMappingResult(path, region = "chr1:1-1000"),
+        readFineMappingResult(
+            path,
+            which = GenomicRanges::GRanges("chr1:1-1000")
+        ),
         "not bgzipped \\+ tabix-indexed"
+    )
+    # A region given in R is a GRanges; a string is refused, not read.
+    expect_error(
+        readFineMappingResult(path, which = "chr1:1-1000"),
+        "`which` must be a GRanges"
     )
 })
 
@@ -637,10 +672,8 @@ test_that("a per-fit field with no ##SAMPLE key stops the writer", {
 })
 
 test_that("the ##SAMPLE block survives a VariantAnnotation read", {
-    data(qtlFineMappingExample, envir = environment())
-    path <- .rdr_tmp("sample_block.vcf")
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
-    meta <- pecotmr:::.prdVcfSampleMeta(VariantAnnotation::readVcf(path))
+    skip_if_not_installed("VariantAnnotation")
+    meta <- pecotmr:::.prdVcfSampleMeta(VariantAnnotation::readVcf(.rdr_fmVcf))
     # Named in the shared vocabulary, not the header's CamelCase: the reader
     # inverts the key table so everything downstream sees one set of names.
     expect_true(all(is_in(
@@ -670,7 +703,7 @@ test_that("an empty result survives an export and a read", {
     data(qtlFineMappingExample, envir = environment())
     path <- .rdr_tmp("empty_rt.bed")
     # A signal cutoff above 1 retains nothing, so the table is vacuous.
-    exportToBed(qtlFineMappingExample, path, signalCutoff = 2)
+    writeBed(qtlFineMappingExample, path, signalCutoff = 2)
     expect_equal(nrow(readFineMappingResult(path)), 0L)
 })
 
@@ -678,11 +711,9 @@ test_that("an empty result survives an export and a read", {
 # The VCF reader's edge paths
 # ---------------------------------------------------------------------------
 
-# A published VCF, bgzipped and tabix-indexed so it can be read by region.
+# A published VCF's bgzipped, tabix-indexed copy, so it can be read by region.
 # @noRd
-.rdr_indexedVcf <- function(x, name, ...) {
-    plain <- .rdr_tmp(name)
-    exportToVcf(x, plain, ...)
+.rdr_indexedVcf <- function(plain) {
     gz <- Rsamtools::bgzip(plain, dest = str_c(plain, ".gz"), overwrite = TRUE)
     Rsamtools::indexTabix(gz, format = "vcf")
     gz
@@ -690,13 +721,9 @@ test_that("an empty result survives an export and a read", {
 
 test_that("a tabix-indexed VCF can be read by region", {
     skip_if_not_installed("VariantAnnotation")
-    data(qtlFineMappingExample, envir = environment())
-    gz <- .rdr_indexedVcf(
-        qtlFineMappingExample,
-        "region.vcf",
-        context = "context_1"
-    )
-    all <- readFineMappingResult(gz, weightStandardized = TRUE)
+    gz <- .rdr_indexedVcf(.rdr_fmVcf)
+    # Read whole, the indexed copy holds what the shared round trip read.
+    all <- .rdr_fmVcfBack
     full <- topLoci(all, signalCutoff = 0)
     window <- GenomicRanges::GRanges(
         as.character(GenomicRanges::seqnames(full))[[1L]],
@@ -707,7 +734,7 @@ test_that("a tabix-indexed VCF can be read by region", {
     )
     part <- readFineMappingResult(
         gz,
-        region = window,
+        which = window,
         weightStandardized = TRUE
     )
     expect_lt(length(variantIds(part)), length(variantIds(all)))
@@ -719,15 +746,10 @@ test_that("a tabix-indexed VCF can be read by region", {
 
 test_that("a region naming no seqname in the VCF reads as empty", {
     skip_if_not_installed("VariantAnnotation")
-    data(qtlFineMappingExample, envir = environment())
-    gz <- .rdr_indexedVcf(
-        qtlFineMappingExample,
-        "noseq.vcf",
-        context = "context_1"
-    )
+    gz <- .rdr_indexedVcf(.rdr_fmVcf)
     back <- readFineMappingResult(
         gz,
-        region = "chrZZ:1-1000",
+        which = GenomicRanges::GRanges("chrZZ:1-1000"),
         weightStandardized = TRUE,
         studyName = "s",
         context = "c",
@@ -739,13 +761,12 @@ test_that("a region naming no seqname in the VCF reads as empty", {
 
 test_that("an un-indexed VCF ignores a region loudly", {
     skip_if_not_installed("VariantAnnotation")
-    data(qtlFineMappingExample, envir = environment())
     path <- .rdr_tmp("plain.vcf")
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
+    writeGwasVcf(.rdr_smallFmr(), path)
     expect_warning(
         readFineMappingResult(
             path,
-            region = "chr22:1-1000000",
+            which = GenomicRanges::GRanges("chr1:1-1000"),
             weightStandardized = TRUE
         ),
         "not bgzipped \\+ tabix-indexed"
@@ -762,11 +783,9 @@ test_that("a missing VCF names itself before VariantAnnotation is asked", {
 
 test_that("sampleSelect picks fits out of a multi-sample VCF", {
     skip_if_not_installed("VariantAnnotation")
-    data(qtlFineMappingLbfExample, envir = environment())
     # Two rows -> two samples in one file, which is GWAS-VCF's own shape.
-    expect_equal(nrow(qtlFineMappingLbfExample), 2L)
     path <- .rdr_tmp("multi.vcf")
-    exportToVcf(qtlFineMappingLbfExample, path)
+    writeGwasVcf(.rdr_smallFmr(c("c1", "c2")), path)
     both <- readFineMappingResult(path, weightStandardized = TRUE)
     expect_equal(nrow(both), 2L)
     samples <- VariantAnnotation::samples(
@@ -786,9 +805,8 @@ test_that("sampleSelect picks fits out of a multi-sample VCF", {
 
 test_that("a VCF with no ##SAMPLE block falls back to the sample name", {
     skip_if_not_installed("VariantAnnotation")
-    data(qtlFineMappingExample, envir = environment())
     path <- .rdr_tmp("nosample.vcf")
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
+    writeGwasVcf(.rdr_smallFmr(), path)
     stripped <- .rdr_tmp("nosample_stripped.vcf")
     lines <- readLines(path)
     writeLines(lines[!str_starts(lines, "##SAMPLE=")], stripped)
@@ -860,6 +878,17 @@ test_that("a weights file read with no WGT column points at the other reader", {
     )
 })
 
+test_that("a published window is read on UCSC sequence names", {
+    df <- data.frame(
+        region_id = "22_100_200",
+        region_start = 99L,
+        region_end = 200L
+    )
+    gr <- .prdRowRegion(df, 1L, "x")
+    expect_identical(as.character(GenomicRanges::seqnames(gr)), "chr22")
+    expect_identical(GenomicRanges::start(gr), 100L)
+})
+
 test_that("a region id with no underscores falls back to the variants' chrom", {
     expect_equal(
         .prdRegionChrom(
@@ -895,9 +924,8 @@ test_that("a packed header value unpacks, and an absent one is NULL", {
 # there rather than requiring the full set.
 # @noRd
 .rdr_reheaderedVcf <- function(name, keys) {
-    data(qtlFineMappingExample, envir = environment())
     path <- .rdr_tmp(str_c(name, "_src.vcf"))
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
+    writeGwasVcf(.rdr_smallFmr(), path)
     lines <- readLines(path)
     at <- which(str_starts(lines, "##SAMPLE="))
     expect_length(at, 1L)
@@ -956,10 +984,7 @@ test_that("a ##SAMPLE block with no RegionStart still reads", {
 
 test_that("a VCF with no samples reads as an empty result", {
     skip_if_not_installed("VariantAnnotation")
-    data(qtlFineMappingExample, envir = environment())
-    path <- .rdr_tmp("sites_src.vcf")
-    exportToVcf(qtlFineMappingExample, path, context = "context_1")
-    lines <- readLines(path)
+    lines <- readLines(.rdr_fmVcf)
     keep <- !str_starts(lines, "##SAMPLE=") & !str_starts(lines, "##FORMAT=")
     # A sites-only VCF: the eight fixed columns and no sample at all, which
     # is a legal VCF and carries no results.
@@ -973,4 +998,157 @@ test_that("a VCF with no samples reads as an empty result", {
         "the VCF has no samples"
     )
     expect_error(readTwasWeights(out), "the VCF has no samples")
+})
+
+test_that("each sample of a VCF reads back only its own variants", {
+    skip_if_not_installed("VariantAnnotation")
+    # Two fits over different variants: the records are their union, and a
+    # fit leaves the cells of the other's variants empty.
+    fmr <- GwasFineMappingResult(
+        studyName = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(
+            .sc_makeFineMappingRow(3),
+            .sc_makeFineMappingRow(2, offset = 1000L)
+        )
+    )
+    path <- .rdr_tmp("disjoint.vcf")
+    writeGwasVcf(fmr, path)
+    back <- readFineMappingResult(path, weightStandardized = TRUE)
+    expect_equal(unname(lengths(back)), c(3L, 2L))
+    expect_false(anyNA(pip(back[1L])))
+    expect_false(anyNA(pip(back[2L])))
+})
+
+test_that("a BID naming a block the header does not list is refused", {
+    row <- data.frame(block_id = "b1|b2")
+    expect_identical(
+        pecotmr:::.prdBlockPositions(row, c("b2", NA, "b1")),
+        c(2L, NA, 1L)
+    )
+    expect_null(pecotmr:::.prdBlockPositions(data.frame(block_id = "b1"), "b1"))
+    expect_error(
+        pecotmr:::.prdBlockPositions(row, "b3"),
+        "names block\\(s\\) b3 that the sample's header does not list"
+    )
+})
+
+test_that("a header field one sample lacks reads back as NA for it", {
+    skip_if_not_installed("VariantAnnotation")
+    fmr <- GwasFineMappingResult(
+        studyName = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(
+            .sc_makeFineMappingRow(3),
+            .sc_makeFineMappingRow(2, offset = 1000L)
+        ),
+        dataType = c("gwas", NA)
+    )
+    path <- .rdr_tmp("onefield.vcf")
+    writeGwasVcf(fmr, path)
+    back <- readFineMappingResult(path, weightStandardized = TRUE)
+    expect_identical(back$dataType, c("gwas", NA))
+})
+
+test_that(".prdBlockPiece reads one block's part of a header cell", {
+    expect_null(pecotmr:::.prdBlockPiece(NULL, 1L))
+    expect_null(pecotmr:::.prdBlockPiece(".", 1L))
+    expect_null(pecotmr:::.prdBlockPiece("a|b", NA_integer_))
+    expect_identical(pecotmr:::.prdBlockPiece("a|b", 2L), "b")
+    # A single-block sample's cell is its one value whole.
+    expect_identical(pecotmr:::.prdBlockPiece("a", 2L), "a")
+})
+
+# ---- the genome build -------------------------------------------------------
+
+test_that("a result read back carries the build its file recorded", {
+    x <- .rdr_smallFmr()
+    GenomeInfoDb::genome(x) <- "hg38"
+    bed <- .rdr_tmp("build_fm.bed")
+    writeBed(x, bed, columns = "all")
+    expect_equal(
+        unique(unname(GenomeInfoDb::genome(
+            readFineMappingResult(bed, weightStandardized = TRUE)
+        ))),
+        "hg38"
+    )
+    skip_if_not_installed("VariantAnnotation")
+    vcf <- .rdr_tmp("build_fm.vcf")
+    writeGwasVcf(x, vcf)
+    expect_equal(
+        unique(unname(GenomeInfoDb::genome(
+            readFineMappingResult(vcf, weightStandardized = TRUE)
+        ))),
+        "hg38"
+    )
+})
+
+test_that("a file that names no build reads back with none", {
+    data(qtlFineMappingExample, envir = environment())
+    x <- qtlFineMappingExample
+    GenomeInfoDb::genome(x) <- NA_character_
+    bed <- .rdr_tmp("nobuild_fm.bed")
+    writeBed(x, bed, columns = "all")
+    expect_true(all(is.na(GenomeInfoDb::genome(
+        readFineMappingResult(bed, weightStandardized = TRUE)
+    ))))
+    expect_true(is.na(pecotmr:::.prdBedBuild(bed)))
+})
+
+test_that("TWAS weights read back with the build their file recorded", {
+    data(twasWeightsExample, envir = environment())
+    x <- twasWeightsExample
+    GenomeInfoDb::genome(x) <- "hg19"
+    bed <- .rdr_tmp("build_tw.bed")
+    writeBed(x, bed)
+    expect_equal(
+        unique(unname(GenomeInfoDb::genome(readTwasWeights(bed)))),
+        "hg19"
+    )
+})
+
+test_that("a file of no lines, or of meta lines alone, still reads a build", {
+    # Every line a `##` line is the count's other branch: there is no first
+    # non-meta line to stop at.
+    empty <- .rdr_tmp("empty_build.bed")
+    writeLines(character(0), empty)
+    expect_true(is.na(pecotmr:::.prdBedBuild(empty)))
+    metaOnly <- .rdr_tmp("meta_only_build.bed")
+    writeLines(c("##genome=hg38", "##source=pecotmr"), metaOnly)
+    expect_equal(pecotmr:::.prdBedBuild(metaOnly), "hg38")
+    expect_equal(pecotmr:::.prdLeadingCount(c(TRUE, FALSE, TRUE)), 1L)
+})
+
+# ===========================================================================
+# readFineMappingResult: a joined sample splits back into its blocks
+# ===========================================================================
+
+test_that("readFineMappingResult splits a joined sample back into its blocks", {
+    skip_if_not_installed("VariantAnnotation")
+    x <- .rw_blockedGwasFmr()
+    out <- tempfile(fileext = ".vcf")
+    writeGwasVcf(x, out)
+    back <- readFineMappingResult(out, weightStandardized = TRUE)
+    expect_s4_class(back, "GwasFineMappingResult")
+    expect_identical(back$blockId, x$blockId)
+    expect_equal(unname(lengths(back)), c(3L, 3L))
+    expect_equal(susieFit(back[2L])$V, c(0.3, 0.4))
+    expect_identical(susieFit(back[2L])$sets$cs_index, 2L)
+    expect_equal(pip(back[2L]), pip(x[2L]))
+    expect_identical(
+        as.character(genomicRegion(back)),
+        as.character(genomicRegion(x))
+    )
+    expect_identical(back$regionGiven, c(TRUE, TRUE))
+    # A block whose range is its variants' span reads back as computed.
+    mixed <- .rw_mixedGwasFmr()
+    out2 <- tempfile(fileext = ".vcf")
+    writeGwasVcf(mixed, out2)
+    expect_match(
+        .rw_sampleLines(out2),
+        "RegionGiven=TRUE|FALSE",
+        fixed = TRUE
+    )
+    back2 <- readFineMappingResult(out2, weightStandardized = TRUE)
+    expect_identical(back2$regionGiven, c(TRUE, FALSE))
 })

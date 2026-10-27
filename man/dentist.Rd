@@ -53,7 +53,7 @@ through \code{computeLd}. Ignored when \code{R} is provided directly.}
 \item{dentistParam}{The DENTIST algorithm settings, built with
 \code{\link{DentistParam}}: \code{pValueThreshold}, \code{propSVD},
 \code{gcControl}, \code{nIter}, \code{gPvalueThreshold},
-\code{duprThreshold}, \code{numThreads}, \code{correctChenEtAlBug}
+\code{duprThreshold}, \code{BPPARAM}, \code{correctChenEtAlBug}
 and \code{seed}. This is the same record
 \code{\link{ldMismatchQc}} takes as
 \code{method = DentistParam(...)}, so a setting means the same thing

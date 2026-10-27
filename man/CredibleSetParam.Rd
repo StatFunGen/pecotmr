@@ -3,68 +3,40 @@
 \docType{class}
 \name{csCoverage}
 \alias{csCoverage}
-\alias{csCoverage<-}
 \alias{secondaryCoverage}
-\alias{secondaryCoverage<-}
 \alias{signalCutoff}
-\alias{signalCutoff<-}
 \alias{minAbsCorr}
-\alias{minAbsCorr<-}
 \alias{medianAbsCorr}
-\alias{medianAbsCorr<-}
 \alias{includeAllCs}
-\alias{includeAllCs<-}
 \alias{perCsColumns}
-\alias{perCsColumns<-}
 \alias{maxNumSingleEffects}
 \alias{maxNumSingleEffectsGreedy}
 \alias{CredibleSetParam-class}
 \alias{CredibleSetParam}
 \alias{csCoverage,CredibleSetParam-method}
-\alias{csCoverage<-,CredibleSetParam-method}
 \alias{secondaryCoverage,CredibleSetParam-method}
-\alias{secondaryCoverage<-,CredibleSetParam-method}
 \alias{signalCutoff,CredibleSetParam-method}
-\alias{signalCutoff<-,CredibleSetParam-method}
 \alias{minAbsCorr,CredibleSetParam-method}
-\alias{minAbsCorr<-,CredibleSetParam-method}
 \alias{medianAbsCorr,CredibleSetParam-method}
-\alias{medianAbsCorr<-,CredibleSetParam-method}
 \alias{includeAllCs,CredibleSetParam-method}
-\alias{includeAllCs<-,CredibleSetParam-method}
 \alias{perCsColumns,CredibleSetParam-method}
-\alias{perCsColumns<-,CredibleSetParam-method}
 \alias{maxNumSingleEffects,CredibleSetParam-method}
 \alias{maxNumSingleEffectsGreedy,CredibleSetParam-method}
 \title{Credible-Set Construction And Reporting}
 \usage{
 csCoverage(x, ...)
 
-csCoverage(x, ...) <- value
-
 secondaryCoverage(x, ...)
-
-secondaryCoverage(x, ...) <- value
 
 signalCutoff(x, ...)
 
-signalCutoff(x, ...) <- value
-
 minAbsCorr(x, ...)
-
-minAbsCorr(x, ...) <- value
 
 medianAbsCorr(x, ...)
 
-medianAbsCorr(x, ...) <- value
-
 includeAllCs(x, ...)
 
-includeAllCs(x, ...) <- value
-
 perCsColumns(x, ...)
-
-perCsColumns(x, ...) <- value
 
 maxNumSingleEffects(x, ...)
 
@@ -84,31 +56,17 @@ CredibleSetParam(
 
 \S4method{csCoverage}{CredibleSetParam}(x)
 
-\S4method{csCoverage}{CredibleSetParam}(x) <- value
-
 \S4method{secondaryCoverage}{CredibleSetParam}(x)
-
-\S4method{secondaryCoverage}{CredibleSetParam}(x) <- value
 
 \S4method{signalCutoff}{CredibleSetParam}(x)
 
-\S4method{signalCutoff}{CredibleSetParam}(x) <- value
-
 \S4method{minAbsCorr}{CredibleSetParam}(x)
-
-\S4method{minAbsCorr}{CredibleSetParam}(x) <- value
 
 \S4method{medianAbsCorr}{CredibleSetParam}(x)
 
-\S4method{medianAbsCorr}{CredibleSetParam}(x) <- value
-
 \S4method{includeAllCs}{CredibleSetParam}(x)
 
-\S4method{includeAllCs}{CredibleSetParam}(x) <- value
-
 \S4method{perCsColumns}{CredibleSetParam}(x)
-
-\S4method{perCsColumns}{CredibleSetParam}(x) <- value
 
 \S4method{maxNumSingleEffects}{CredibleSetParam}(x)
 
@@ -118,8 +76,6 @@ CredibleSetParam(
 \item{x}{A \code{CredibleSetParam}.}
 
 \item{...}{Unused, present for generic consistency.}
-
-\item{value}{The replacement value for that setting.}
 
 \item{coverage}{Primary credible-set coverage. Default \code{0.95}.}
 
@@ -161,10 +117,12 @@ where the engine has one.
 \value{
 \code{CredibleSetParam} returns a \code{CredibleSetParam}
   object, a \code{\link{MethodParam}}. Each accessor returns that
-  setting's value; each replacement form returns a modified copy.
-  \code{maxNumSingleEffects} and \code{maxNumSingleEffectsGreedy} have
-  no replacement form: they are seeded onto the fitting tokens, so
-  changing one needs a refit rather than a re-summary.
+  setting's value. Change a setting with \code{x$<field> <- value} (the
+  field for \code{csCoverage()} is \code{coverage}), which returns a
+  modified copy; \code{maxNumSingleEffects} and
+  \code{maxNumSingleEffectsGreedy} cannot be changed that way: they are
+  seeded onto the fitting tokens, so changing one needs a refit rather
+  than a re-summary.
 }
 \description{
 How credible sets are built from a fit and which of them are

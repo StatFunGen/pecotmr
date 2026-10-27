@@ -162,7 +162,7 @@ data. This reference's `r ldPanelNSamples(ldEigenExample)` people are plenty:
 even at `N = 1e5` HDL recovers about 0.40 for a true 0.4. Against a
 1,000-person panel at that `N` it drifts to about 0.57 and warns that the fit
 sits on a bound. If HDL disagrees sharply with the others, check for that
-warning and compare `nSamples()` against `ldPanelNSamples()`.
+warning and compare `sampleSize()` against `ldPanelNSamples()`.
 
 A standard error of zero, or an estimate pinned at a boundary, almost always
 means the reference is too small rather than that the trait has no
@@ -178,7 +178,7 @@ to cut it into, or one `LdMatrix` per block. One block has no jackknife.
 
 ```{r build-ref, eval=FALSE}
 panel <- readGenotypes(plink2Prefix = "/path/to/reference.chr22")
-blocks <- read.delim("/path/to/ld_blocks.tsv") # chrom, start, end
+blocks <- "/path/to/ld_blocks.bed" # a BED file, or a GRanges
 
 ldEigen <- buildLdEigen(panel, ldBlocks = blocks, genome = "hg38")
 ldScore <- buildLdScore(panel, ldBlocks = blocks, genome = "hg38")

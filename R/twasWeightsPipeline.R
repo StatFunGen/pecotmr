@@ -58,7 +58,7 @@
 #' @return A single combined \code{TwasWeights}.
 #' @seealso \code{\link{combineFineMappingResults}}
 #' @examples
-#' twe <- twasWeightsRow(
+#' twe <- TwasWeightsRow(
 #'   variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
 #'   cvResult = list(rsq = 0.5), weightStandardized = FALSE)
 #' tw1 <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",
@@ -134,7 +134,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     } else {
         unname(list_c(wList))
     }
-    twasWeightsRow(
+    TwasWeightsRow(
         variantIds = unname(list_c(map(payloads, .twrPartsVariantIds))),
         weights = stacked,
         methodFits = set_names(map(payloads, methodFits), fittedLabels),
@@ -184,10 +184,11 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 # Per the design: BGLR / qgg "Bayes alphabet" methods (bayes_a/b/c/l/n/r,
 # b_lasso) are individual-only until the qgg CRAN release adds qBayes
 # sumstat support. dpr_gibbs has the SDPR sumstat counterpart;
-# dpr_vb / dpr_adaptive_gibbs remain individual-only. enet has no cpp11
-# sumstat solver yet (lassosumRssCpp is pure L1, no alpha mixing) and is
-# documented as individual-only for now. prsCs has no individual-level
-# counterpart (it is a sumstat-only Bayesian shrinkage method).
+# dpr_vb / dpr_adaptive_gibbs remain individual-only. lasso, enet and ridge
+# are glmnet on individual data and the penalized RSS solver on summary
+# statistics, at alpha = 1, 0.5 (or the caller's) and 0. prsCs has no
+# individual-level counterpart (it is a sumstat-only Bayesian shrinkage
+# method).
 # @noRd
 .twasMethodCapabilities <- list(
     # NOTE: fine-mapping methods (susie / susieInf / susieAsh / mvsusie /
@@ -230,10 +231,14 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         sumstatImpl = "sdprWeights",
         multivariate = FALSE
     ),
-    # Individual-only -- no cpp11 sumstat solver yet.
     enet = list(
         individualImpl = "enetWeights",
-        sumstatImpl = NULL,
+        sumstatImpl = "enetRssWeights",
+        multivariate = FALSE
+    ),
+    ridge = list(
+        individualImpl = "ridgeWeights",
+        sumstatImpl = "ridgeRssWeights",
         multivariate = FALSE
     ),
     # Individual-only DPR variants (sumstat counterparts not implemented).
@@ -400,6 +405,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         "susieInf",
         "mrash",
         "enet",
+        "ridge",
         "lasso",
         "bayesR",
         "bayesL",
@@ -432,6 +438,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         susie_ash_inf = "susieAsh",
         mrash = "mrash",
         enet = "enet",
+        ridge = "ridge",
         lasso = "lasso",
         bayesR = "bayesR",
         bayesL = "bayesL",
@@ -818,7 +825,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     if (length(mv) == 0L) {
         return(invisible(NULL))
     }
-    components <- qtlDatasets(data)
+    components <- as.list(data)
     if (length(components) == 0L) {
         return(invisible(NULL))
     }
@@ -877,11 +884,11 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 # set is a subset of the ldReference panel.
 # @noRd
 .twasAssertQcd <- function(sumstats) {
-    if (length(qcInfo(sumstats)) == 0L) {
+    if (length(qcOptions(sumstats)) == 0L) {
         cls <- class(sumstats)[[1L]]
         msg <- glue(
             "twasWeightsPipeline: the supplied {cls} has no QC record ",
-            "(qcInfo is empty). Call summaryStatsQc() first and pass the ",
+            "(qcOptions() is empty). Call summaryStatsQc() first and pass the ",
             "QC-applied result."
         )
         abort(msg)
@@ -933,7 +940,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
             tokens,
             .twasFitForToken,
             fineMappingResult = fineMappingResult,
-            study = studyName,
+            studyName = studyName,
             context = context,
             trait = trait
         ),
@@ -1084,11 +1091,16 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'         (require at least two traits OR at least two contexts).
 #'   \item \code{prsCs} runs only on summary statistics, so it is rejected
 #'         on \code{QtlDataset} input.
-#'   \item \code{enet}, \code{dprVb}, \code{dprAdaptiveGibbs} and the
-#'         Bayesian alphabet (\code{bayesA}, \code{bayesB}, \code{bayesC},
-#'         \code{bayesL}, \code{bayesN}, \code{bayesR}, \code{bLasso}) run
-#'         only on individual-level data, so they are rejected on
-#'         \code{QtlSumStats} input.
+#'   \item \code{dprVb}, \code{dprAdaptiveGibbs} and the Bayesian alphabet
+#'         (\code{bayesA}, \code{bayesB}, \code{bayesC}, \code{bayesL},
+#'         \code{bayesN}, \code{bayesR}, \code{bLasso}) run only on
+#'         individual-level data, so they are rejected on \code{QtlSumStats}
+#'         input.
+#'   \item \code{lasso}, \code{enet} and \code{ridge} are glmnet on
+#'         individual-level data and the penalized RSS solver on summary
+#'         statistics. \code{enet} mixes the two penalties at
+#'         \code{alpha = 0.5} unless the method's options set it, on either
+#'         input: \code{methods = list(enet = list(alpha = 0.3))}.
 #' }
 #'
 #' A \code{QtlSumStats} input must have been QC'd via
@@ -1124,9 +1136,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   default is \code{c("lasso", "prsCs", "dprGibbs")}, which there run
 #'   lassosum, PRS-CS and SDPR; the fine-mapping methods are not in it, and
 #'   are requested by name together with a \code{fineMappingResult}.
-#' @param contexts Optional context selection; \code{NULL} (the default) uses
-#'   every context. A character vector applies to every study: a context no
-#'   study has is an error, and one only some studies lack is skipped for
+#' @param contexts Optional context selection; \code{NULL} (the default)
+#'   uses every context. A character vector applies to every study: a context
+#'   no study has is an error, and one only some studies lack is skipped for
 #'   those, with a warning. A list keyed by study name picks each study's
 #'   contexts separately (\code{list(A = "liver")}); studies it does not name
 #'   keep all of theirs.
@@ -1138,14 +1150,19 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   (\code{list(A = list(brain = "ENSG1"))}). Studies and contexts the list
 #'   does not name keep all of their traits. A joint fit spanning a study's
 #'   contexts uses every trait selected in any of them, minus the (context,
-#'   trait) pairs a per-context entry leaves out.
+#'   trait) pairs a per-context entry leaves out. In a MultiStudyQtlDataset
+#'   a study left with no trait selected sits out; the run is refused only
+#'   when no study or summary-statistics row has one.
 #' @param region Optional variant window for QtlDataset trait selection: a
-#'   \code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
-#'   with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
-#'   \code{traitId}.
+#'   \code{GRanges}. Mutually exclusive with \code{traitId}.
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's genomic
 #'   position when extracting variants. Required when \code{traitId} is
-#'   supplied. Mutually exclusive with \code{region}.
+#'   supplied. Mutually exclusive with \code{region}. For QtlSumStats:
+#'   optional; each selected tuple is analysed over its \code{traitPos}
+#'   \eqn{\pm} \code{cisWindow}, within its \code{region}, which is then
+#'   the window its result records. Every selected tuple needs a
+#'   \code{traitPos}. A MultiStudyQtlDataset applies it to each of its
+#'   studies, individual-level or summary-statistics, as above.
 #' @section Panel filters on the RSS path: On \code{QtlSumStats} input there
 #'   is no genotype matrix to filter, so \code{panelFilterParam}'s
 #'   \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} are measured
@@ -1160,12 +1177,11 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   \code{summaryStatsQc(raissParam = ...)}, which only bounds which variants
 #'   RAISS will impute.
 #'
-#' @param genotypeFilterParam For QtlDataset: per-call genotype-filter
-#'   overrides, built with \code{\link{GenotypeFilterParam}}. Each field that is
-#'   set replaces the corresponding construct-time \code{\link{QtlDataset}} slot
-#'   for this call only (applied to a validated copy); a field left unset
-#'   leaves the stored value in place. Variant QC is a property of the data,
-#'   so these are applied identically here and in
+#' @param genotypeFilterParam For QtlDataset: which variants and samples the
+#'   run keeps, built with \code{\link{GenotypeFilterParam}}: its
+#'   \code{keepSamples} narrows the dataset once, and its other settings
+#'   apply to each extracted block. A field left unset filters nothing.
+#'   These are applied identically here and in
 #'   \code{\link{fineMappingPipeline}} --- there is deliberately no
 #'   TWAS-specific variant filter.
 #' @param panelFilterParam For QtlSumStats: LD-reference-panel filters,
@@ -1196,7 +1212,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
 #'   context, trait) tuples are injected into \code{learnTwasWeights} via
 #'   \code{fittedModels} so SuSiE-family weight methods reuse the prior fit
-#'   instead of refitting.
+#'   instead of refitting. Its fits and cross-validation are reused whole,
+#'   so a row narrowed since its fit warns (condition class
+#'   \code{pecotmrFitCoverage}).
 #' @param twasWeights Optional \code{\link{TwasWeights}} resume cache. For each
 #'   requested \code{(study, context, trait, method)} tuple already present in
 #'   this collection, the cached \code{TwasWeightsRow} is copied through and
@@ -1228,13 +1246,17 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   of the returned object's contract.
 #'
 #'   \code{"full"} is honoured by the mr.mash engines and, on summary
-#'   statistics, by \code{lasso}, \code{scad}, \code{mcp} and
-#'   \code{l0learn}, whose full fit also keeps every candidate's
+#'   statistics, by \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+#'   \code{mcp} and \code{l0learn}, whose full fit also keeps every candidate's
 #'   coefficients; every other method keeps its fit whole or not at all.
 #'   Requesting \code{"full"} for a run where no method can honour it is an
 #'   error, and a mixed run warns rather than dropping it in silence.
-#' @param naAction Character. How to handle missing values in the extracted
-#'   data.
+#' @param phenotypeFilterParam The run's phenotype QC, built with
+#'   \code{\link{PhenotypeFilterParam}}: how missing phenotype values are
+#'   handled (unset drops the affected samples; \code{"impute"} fills each
+#'   trait's mean; a fit cannot take \code{"keep"}) and whether outlier
+#'   samples are dropped. Every fit of the run, joint ones included, reads
+#'   its phenotypes under it.
 #' @param crossValidationParam Cross-validation settings, built with
 #'   \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
 #'   CV), \code{threads}, \code{samplePartition}, \code{maxVariants} (cap
@@ -1281,11 +1303,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #' @section The genotype scale:
 #'   Individual-level genotypes reach every method centred and scaled to unit
 #'   variance, so all the weights are on one scale and the recorded
-#'   \code{weight_standardized} says so. The scaling belongs to the
-#'   \code{QtlDataset} accessors rather than to this pipeline:
-#'   \code{\link{residualizedGenotypes}} applies it, governed by
-#'   \code{ResidualizationParam(scaleResiduals = )} per call with the
-#'   dataset's own \code{\link{scaleResiduals}} slot as the default.
+#'   \code{weight_standardized} says so. The residualization
+#'   (\code{\link{residualizedGenotypes}}) applies it, governed by
+#'   \code{ResidualizationParam(scaleResiduals = )}, which defaults to
+#'   \code{TRUE}.
 #'
 #'   It is not cosmetic: measured through pecotmr's own entry points, every
 #'   method returns coefficients on the scale of the \code{X} it was given
@@ -1312,6 +1333,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #' @return A \code{\link{TwasWeights}} collection keyed by \code{(study,
 #'   context, trait, method)}. Each row's LD reference is none for
 #'   individual-level fits and that of the input row(s) for RSS-derived fits.
+#'   Its \code{seqinfo()} names the genome build the inputs name; inputs
+#'   naming different builds are refused.
 #' @examples
 #' data(qtlDatasetExample)
 #' twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)
@@ -1383,6 +1406,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     dataDrivenPriorMatricesCv,
     cisWindow,
     residualizationParam,
+    genotypeFilter,
     verbose
 ) {
     # A per-context selection goes in whole: the joint scope then takes each
@@ -1401,6 +1425,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
             dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
             cisWindow = cisWindow,
             residualizationParam = residualizationParam,
+            genotypeFilter = genotypeFilter,
             verbose = verbose
         )
     )
@@ -1420,8 +1445,9 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     twasWeights,
     dataDrivenPriorMatricesCv,
     cisWindow,
-    naAction,
+    phenotypeFilter,
     residualizationParam,
+    genotypeFilter,
     usePCA,
     nPCs,
     verbose
@@ -1437,14 +1463,12 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
             dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
             cisWindow = cisWindow,
             residualizationParam = residualizationParam,
+            genotypeFilter = genotypeFilter,
             verbose = verbose
         ))
     }
     .twasQdsUnivariateEngine(
-        studyName = grid$study,
-        useCtx = grid$useCtx,
-        allTraits = grid$allTraits,
-        traitSelection = grid$traitSelection,
+        grid,
         marker = marker,
         data = data,
         xRegions = xRegions,
@@ -1453,8 +1477,9 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
         twasWeights = twasWeights,
         dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
         cisWindow = cisWindow,
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam,
+        genotypeFilter = genotypeFilter,
         usePCA = usePCA,
         nPCs = nPCs,
         verbose = verbose
@@ -1509,12 +1534,17 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     fitRetention = c("slim", "none", "full"),
     residualizationParam = ResidualizationParam(),
     weightsDataType = NULL,
-    naAction = c("drop", "impute"),
+    phenotypeFilterParam = PhenotypeFilterParam(),
     verbose = 1,
     seed = NULL
 ) {
-    naAction <- arg_match(naAction)
+    phenotypeFilter <- .twasResolvePhenotypeFilter(phenotypeFilterParam)
     fitRetention <- arg_match(fitRetention)
+    build <- .inputsBuild(
+        list(data, region, fineMappingResult, twasWeights),
+        "twasWeightsPipeline"
+    )
+    .fitCoverageCheckedRows(fineMappingResult, "twasWeightsPipeline()")
     contexts <- parseContexts(contexts, data)
     traitId <- parseTraitIds(traitId, data)
     .twasQdsAssertParams(
@@ -1532,6 +1562,8 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     )
     data <- resolved$data
     cfg <- .twasJointCfg(
+        genotypeFilter = resolved$genotypeFilter,
+        phenotypeFilter = phenotypeFilter,
         contexts = contexts,
         traitId = traitId,
         cisWindow = cisWindow,
@@ -1563,7 +1595,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
         traitId
     )
     if (joint$done) {
-        return(joint$result)
+        return(.withGenome(joint$result, build))
     }
     grid <- .twasQdsResolveGrid(
         data,
@@ -1582,13 +1614,14 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
         twasWeights = twasWeights,
         dataDrivenPriorMatricesCv = setup$ctx$dataDrivenPriorMatricesCv,
         cisWindow = cisWindow,
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam,
+        genotypeFilter = resolved$genotypeFilter,
         usePCA = usePCA,
         nPCs = nPCs,
         verbose = verbose
     )
-    .twasQdsAssemble(tw, joint$result)
+    .withGenome(.twasQdsAssemble(tw, joint$result), build)
 }
 
 #' @rdname twasWeightsPipeline
@@ -1645,10 +1678,10 @@ setMethod(
     )
 }
 
-# Reject the region + cisWindow combination, derive the X windows, and apply
-# the per-call filter overrides to a validated copy of the dataset. Mirrors
-# .fmQdsResolveInputs; variant QC is a data property applied identically to
-# fine-mapping and TWAS, so there is no TWAS-specific variant filter.
+# Reject the region + cisWindow combination, derive the X windows, resolve the
+# run's genotype filter and narrow the dataset to its samples. Mirrors
+# .fmQdsResolveInputs; variant QC is applied identically to fine-mapping and
+# TWAS, so there is no TWAS-specific variant filter.
 # @noRd
 .twasQdsResolveInputs <- function(
     data,
@@ -1662,9 +1695,11 @@ setMethod(
         cisWindow,
         "twasWeightsPipeline(QtlDataset)"
     )
+    genotypeFilter <- .qtlResolveFilter(genotypeFilterParam)
     list(
-        data = .qtlApplyFilterOverrides(data, genotypeFilterParam),
-        xRegions = .makeXRegions(region, jointRegions)
+        data = .qtlRestrictSamples(data, genotypeFilter$keepSamples),
+        xRegions = .makeXRegions(region, jointRegions),
+        genotypeFilter = genotypeFilter
     )
 }
 
@@ -1748,11 +1783,25 @@ setMethod(
     list(parsedJointSpec = parsedJointSpec, norm = norm)
 }
 
+# TWAS's phenotype QC: a weight fit cannot take a missing phenotype, so an
+# unset naAction drops the affected samples and "keep" is refused.
+# @noRd
+.twasResolvePhenotypeFilter <- function(phenotypeFilterParam) {
+    .qtlResolvePhenotypeFilter(
+        phenotypeFilterParam,
+        naDefault = "drop",
+        naAllowed = c("drop", "impute"),
+        caller = "twasWeightsPipeline"
+    )
+}
+
 # The individual-level settings a TWAS run fits under, as one record: built
 # once by the QtlDataset method and once by the MultiStudyQtlDataset method,
 # with the same builder, so a setting added for one reaches the other.
 # @noRd
 .twasJointCfg <- function(
+    genotypeFilter,
+    phenotypeFilter,
     contexts,
     traitId,
     cisWindow,
@@ -1769,6 +1818,8 @@ setMethod(
     seed
 ) {
     list(
+        genotypeFilter = genotypeFilter,
+        phenotypeFilter = phenotypeFilter,
         contexts = contexts,
         traitId = traitId,
         cisWindow = cisWindow,
@@ -1801,7 +1852,7 @@ setMethod(
         ),
         ensembleParam = .ensembleResolve(cfg$ensembleParam),
         weightsDataType = cfg$weightsDataType,
-        standardized = .qtlScaleResiduals(data, cfg$residualizationParam),
+        standardized = .qtlScaleResiduals(cfg$residualizationParam),
         fitRetention = cfg$fitRetention,
         estimatePi = cfg$estimatePi,
         verbose = cfg$verbose,
@@ -1817,6 +1868,8 @@ setMethod(
             dataDrivenPriorMatricesCv = mash$dataDrivenPriorMatricesCv,
             cisWindow = cfg$cisWindow,
             residualizationParam = cfg$residualizationParam,
+            genotypeFilter = cfg$genotypeFilter,
+            phenotypeFilter = cfg$phenotypeFilter,
             verbose = cfg$verbose
         )
     )
@@ -1860,8 +1913,8 @@ setMethod(
 .twasQdsResolveTraits <- function(data, useCtx, traitId, region) {
     perCtxTraits <- map(
         useCtx,
-        .twasQdsCtxTraits,
-        data = data,
+        .contextSelectedTraits,
+        qd = data,
         traitId = traitId,
         region = region
     )
@@ -1896,9 +1949,8 @@ setMethod(
             fitRetention = fitRetention,
             # DERIVED from what the accessors actually do: genotypes reach
             # the fitter scaled to unit variance unless
-            # `ResidualizationParam(scaleResiduals = FALSE)` or the dataset's
-            # own slot says otherwise. Resolved by the caller, which is where
-            # the dataset and the bundle are both in scope.
+            # `ResidualizationParam(scaleResiduals = FALSE)` says otherwise.
+            # Resolved by the caller, which holds the bundle.
             standardized = standardized,
             estimatePi = estimatePi,
             verbose = verbose,
@@ -1938,12 +1990,10 @@ setMethod(
 # Univariate methods ROUTED THROUGH THE ENGINE: one 1-condition group per
 # (context, trait), per region -> the SAME per-method fitter (+ ensemble layer
 # for >= 2 methods + resume cache) as the joint paths, merged across regions.
+# `grid` is the dispatch row naming the study, contexts and traits.
 # @noRd
 .twasQdsUnivariateEngine <- function(
-    studyName,
-    useCtx,
-    allTraits,
-    traitSelection,
+    grid,
     marker,
     data,
     xRegions,
@@ -1952,18 +2002,19 @@ setMethod(
     twasWeights,
     dataDrivenPriorMatricesCv,
     cisWindow,
-    naAction,
+    phenotypeFilter,
     residualizationParam,
+    genotypeFilter,
     usePCA,
     nPCs,
     verbose
 ) {
     plan <- .twasQdsUnivPlan(
         usePCA,
-        studyName,
-        useCtx,
-        allTraits,
-        traitSelection
+        grid$study,
+        grid$useCtx,
+        grid$allTraits,
+        grid$traitSelection
     )
     cells <- plan$cells
     scope <- plan$scope
@@ -1981,8 +2032,9 @@ setMethod(
         twasWeights = twasWeights,
         dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
         cisWindow = cisWindow,
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam,
+        genotypeFilter = genotypeFilter,
         nPCs = nPCs,
         verbose = verbose
     )
@@ -2000,8 +2052,9 @@ setMethod(
     twasWeights,
     dataDrivenPriorMatricesCv,
     cisWindow,
-    naAction,
+    phenotypeFilter,
     residualizationParam,
+    genotypeFilter,
     nPCs,
     verbose
 ) {
@@ -2014,8 +2067,9 @@ setMethod(
         region = xRegions[[bi]],
         regionIndex = bi,
         nRegions = length(xRegions),
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam,
+        genotypeFilter = genotypeFilter,
         nPCs = nPCs,
         verbose = verbose
     )
@@ -2062,6 +2116,7 @@ setMethod(
         methods = NULL,
         contexts = NULL,
         traitId = NULL,
+        cisWindow = NULL,
         jointSpecification = NULL,
         fineMappingResult = NULL,
         twasWeights = NULL,
@@ -2078,11 +2133,17 @@ setMethod(
             "twasWeightsPipeline",
             "QtlSumStats"
         )
-        .twasPipelineQtlSumStats(
+        build <- .inputsBuild(
+            list(data, fineMappingResult, twasWeights),
+            "twasWeightsPipeline"
+        )
+        .fitCoverageCheckedRows(fineMappingResult, "twasWeightsPipeline()")
+        res <- .twasPipelineQtlSumStats(
             data = data,
             methods = methods,
             contexts = contexts,
             traitId = traitId,
+            cisWindow = cisWindow,
             jointSpecification = jointSpecification,
             fineMappingResult = fineMappingResult,
             twasWeights = twasWeights,
@@ -2091,6 +2152,7 @@ setMethod(
             verbose = verbose,
             panelFilterParam = panelFilterParam
         )
+        .withGenome(res, build)
     }
 )
 
@@ -2138,11 +2200,21 @@ setMethod(
     )
 }
 
+# A QtlSumStats TWAS-weights run's inputs: its data, checked for a QC
+# record, and its selection parsed once, with `cisWindow` laid on the tuples
+# selected.
+# @noRd
+.twasQssInputs <- function(data, contexts, traitId, cisWindow) {
+    .twasAssertQcd(data)
+    .qssSelection(data, contexts, traitId, cisWindow, "twasWeightsPipeline")
+}
+
 .twasPipelineQtlSumStats <- function(
     data,
     methods,
     contexts,
     traitId,
+    cisWindow,
     jointSpecification,
     fineMappingResult,
     twasWeights,
@@ -2151,15 +2223,13 @@ setMethod(
     verbose,
     panelFilterParam
 ) {
-    .twasAssertQcd(data)
-    contexts <- parseContexts(contexts, data)
-    traitId <- parseTraitIds(traitId, data)
+    inputs <- .twasQssInputs(data, contexts, traitId, cisWindow)
     # One record of the settings the joint phase and the shared dispatcher
     # both need, so each names them once.
     jointCfg <- list(
-        data = data,
-        contexts = contexts,
-        traitId = traitId,
+        data = inputs$data,
+        contexts = inputs$contexts,
+        traitId = inputs$traitId,
         weightsDataType = weightsDataType,
         verbose = verbose,
         fitRetention = fitRetention,
@@ -2175,10 +2245,10 @@ setMethod(
         return(joint$result)
     }
     .twasQssAfterJoint(
-        data,
+        inputs$data,
         joint = joint,
-        contexts = contexts,
-        traitId = traitId,
+        contexts = inputs$contexts,
+        traitId = inputs$traitId,
         twasWeights = twasWeights,
         weightsDataType = weightsDataType,
         fineMappingResult = fineMappingResult,
@@ -2220,7 +2290,7 @@ setMethod(
             panelFilterParam = panelFilterParam
         )
     )
-    .twasQssAssemble(rows, joint$result)
+    .twasQssAssemble(rows, joint$result, data)
 }
 
 # Normalize the methods argument into (tokens, methodArgs). The default set
@@ -2404,18 +2474,25 @@ setMethod(
 }
 
 # Assemble a TwasWeights collection from a flat list of row records, each row
-# on the LD reference its record carries (none for an individual-level fit).
+# on the LD reference its record carries (none for an individual-level fit),
+# and on the trait position and window `data` holds for its (study, context,
+# trait) -- the window a cisWindow laid, which the result promises to record.
 # @noRd
-.twasRowsToWeights <- function(rows) {
+.twasRowsToWeights <- function(rows, data) {
     if (length(rows) == 0L) {
         return(NULL)
     }
+    studies <- map_chr(rows, "study")
+    contexts <- map_chr(rows, "context")
+    traits <- map_chr(rows, "trait")
     TwasWeights(
-        studyName = map_chr(rows, "study"),
-        context = map_chr(rows, "context"),
-        trait = map_chr(rows, "trait"),
+        studyName = studies,
+        context = contexts,
+        trait = traits,
         method = map_chr(rows, "method"),
         entry = map(rows, "entry"),
+        traitPos = .anchorVector(data, studies, contexts, traits, "traitPos"),
+        region = .anchorVector(data, studies, contexts, traits, "region"),
         ldReference = map(rows, "ldReference")
     )
 }
@@ -2661,7 +2738,7 @@ setMethod(
     ldReference,
     cutoffs = NULL
 ) {
-    allDf <- as.data.frame(
+    allDf <- .sumStatsDf(
         data,
         studyName = st,
         context = ctx,
@@ -2791,7 +2868,7 @@ setMethod(
         ctx,
         tr,
         tk,
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = fitCtx$variantIds,
             weights = as.numeric(`attr<-`(weights, "fit", NULL)),
             methodFits = attr(weights, "fit"),
@@ -2961,7 +3038,7 @@ setMethod(
     ldReference = NULL,
     cutoffs = NULL
 ) {
-    allDf <- as.data.frame(
+    allDf <- .sumStatsDf(
         data,
         studyName = st,
         context = ctxNames[[1L]],
@@ -2993,7 +3070,7 @@ setMethod(
 # One context's z column and median N, checked against the shared SNP order.
 # @noRd
 .twasQssContextStats <- function(ctx, data, st, tr, variantIds) {
-    d <- as.data.frame(
+    d <- .sumStatsDf(
         data,
         studyName = st,
         context = ctx,
@@ -3246,8 +3323,8 @@ setMethod(
 
 # Combine the per-tuple result with any joint result (error if both empty).
 # @noRd
-.twasQssAssemble <- function(rows, jointResult) {
-    perTupleResult <- .twasRowsToWeights(rows)
+.twasQssAssemble <- function(rows, jointResult, data) {
+    perTupleResult <- .twasRowsToWeights(rows, data)
     if (is.null(jointResult)) {
         if (is.null(perTupleResult)) {
             msg <- glue(
@@ -3285,25 +3362,25 @@ setMethod(
 # @noRd
 .twasPerStudy <- function(qd, cfg) {
     # `cfg` carries the parsed selection for every study; this study gets its
-    # own share, and a study with none of its contexts selected sits out.
-    s <- studyName(qd)
-    contexts <- .selectedContexts(cfg$contexts, s)
-    if (!is.null(contexts) && length(contexts) == 0L) {
+    # own share, and a study left with no trait selected in its selected
+    # contexts -- none of its contexts, none of the traits -- sits out.
+    if (!.studyHasSelectedTraits(qd, cfg$contexts, cfg$traitId, cfg$region)) {
         return(NULL)
     }
-    twasWeightsPipeline(
+    s <- studyName(qd)
+    .muffleFitCoverage(twasWeightsPipeline(
         data = qd,
         jointSpecification = NULL,
         fitRetention = cfg$fitRetention,
         methods = cfg$methods,
-        contexts = contexts,
+        contexts = .selectedContexts(cfg$contexts, s),
         traitId = .studyTraitIdArg(cfg$traitId, s),
         region = cfg$region,
         cisWindow = cfg$cisWindow,
         jointRegions = cfg$jointRegions,
         fineMappingResult = cfg$fineMappingResult,
         twasWeights = cfg$twasWeights,
-        naAction = cfg$naAction,
+        phenotypeFilterParam = cfg$phenotypeFilterParam,
         verbose = cfg$verbose,
         crossValidationParam = cfg$crossValidationParam,
         ensembleParam = cfg$ensembleParam,
@@ -3315,16 +3392,17 @@ setMethod(
         nPCs = cfg$nPCs,
         weightsDataType = cfg$weightsDataType,
         residualizationParam = cfg$residualizationParam
-    )
+    ))
 }
 
 # Embedded-sumstats TWAS-weights worker for .multiStudyPipelineDriver.
 # @noRd
 .twasSumStats <- function(ss, cfg) {
-    # Summary statistics carry no genotypes: nothing to select a region
-    # from, residualize, cross-validate, stack or fit on full data. `cfg`
-    # carries those for the individual-level sibling and they are not
-    # forwarded here.
+    # Summary statistics carry no genotypes: each tuple's window is in the
+    # input, narrowed by `cisWindow` around its trait position as on the
+    # QtlDataset side, and there is nothing to residualize, cross-validate,
+    # stack or fit on full data. `cfg` carries those for the individual-level
+    # sibling and they are not forwarded here.
     #
     # The parsed selection is applied here, to the rows, so the recursion runs
     # on what it keeps with nothing left to filter -- and rows it leaves out
@@ -3333,19 +3411,20 @@ setMethod(
     if (!any(keepRows)) {
         return(NULL)
     }
-    twasWeightsPipeline(
+    .muffleFitCoverage(twasWeightsPipeline(
         data = if (all(keepRows)) ss else ss[which(keepRows)],
         jointSpecification = NULL,
         fitRetention = cfg$fitRetention,
         methods = cfg$methods,
         contexts = NULL,
         traitId = NULL,
+        cisWindow = cfg$cisWindow,
         fineMappingResult = cfg$fineMappingResult,
         twasWeights = cfg$twasWeights,
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam,
         weightsDataType = cfg$weightsDataType
-    )
+    ))
 }
 
 # Few methods distinguish the retention levels (.twasFullDetailTokens());
@@ -3389,7 +3468,7 @@ setMethod(
 # @noRd
 .twasFullDetailTokens <- function(inputKind) {
     if (identical(inputKind, "QtlSumStats")) {
-        return(c("mrmash", "lasso", "scad", "mcp", "l0learn"))
+        return(c("mrmash", "lasso", "enet", "ridge", "scad", "mcp", "l0learn"))
     }
     "mrmash"
 }
@@ -3472,7 +3551,7 @@ setMethod(
     nPCs = 10L,
     fitRetention = c("slim", "none", "full"),
     weightsDataType = NULL,
-    naAction = c("drop", "impute"),
+    phenotypeFilterParam = PhenotypeFilterParam(),
     verbose = 1,
     residualizationParam = ResidualizationParam(),
     crossValidationParam = CrossValidationParam(),
@@ -3483,14 +3562,21 @@ setMethod(
     # Every collection holds individual-level studies, so their rule applies
     # here; a summary-statistic study is checked again by its own route.
     .twasWarnUnretainableDetail(fitRetention, methods, "QtlDataset")
+    # Resolved once here so a bad choice fails before any study runs; the
+    # record carries the bundle itself, as each component resolves its own.
+    .twasResolvePhenotypeFilter(phenotypeFilterParam)
+    build <- .inputsBuild(
+        list(data, region, fineMappingResult, twasWeights),
+        "twasWeightsPipeline(MultiStudyQtlDataset)"
+    )
+    # Once here; each study's run below reads the same rows and is muffled.
+    .fitCoverageCheckedRows(fineMappingResult, "twasWeightsPipeline()")
     inputs <- .msResolveInputs(
-        naAction,
         region,
         cisWindow,
         jointRegions,
         "twasWeightsPipeline(MultiStudyQtlDataset)"
     )
-    naAction <- inputs$naAction
     cfg <- .twasMsCfg(
         methods = methods,
         contexts = parseContexts(contexts, data),
@@ -3500,7 +3586,7 @@ setMethod(
         jointRegions = jointRegions,
         fineMappingResult = fineMappingResult,
         twasWeights = twasWeights,
-        naAction = naAction,
+        phenotypeFilterParam = phenotypeFilterParam,
         verbose = verbose,
         crossValidationParam = crossValidationParam,
         ensembleParam = ensembleParam,
@@ -3515,6 +3601,7 @@ setMethod(
         weightsDataType = weightsDataType,
         residualizationParam = residualizationParam
     )
+    .msAssertTraitsSelected(data, cfg, "twasWeightsPipeline")
     jointCfg <- .twasMsJointCfg(cfg, data, inputs$xRegions)
     joint <- .twasMsResolveTokens(
         jointSpecification,
@@ -3523,9 +3610,16 @@ setMethod(
         jointCfg
     )
     if (joint$done) {
-        return(joint$result)
+        return(.withGenome(joint$result, build))
     }
-    .twasMsDriver(data, joint$result, list_assign(cfg, methods = joint$methods))
+    .withGenome(
+        .twasMsDriver(
+            data,
+            joint$result,
+            list_assign(cfg, methods = joint$methods)
+        ),
+        build
+    )
 }
 
 # The MultiStudyQtlDataset joint record, derived from the record the
@@ -3538,6 +3632,10 @@ setMethod(
 .twasMsJointCfg <- function(cfg, data, xRegions) {
     list_assign(
         .twasJointCfg(
+            genotypeFilter = .qtlResolveFilter(cfg$genotypeFilterParam),
+            phenotypeFilter = .twasResolvePhenotypeFilter(
+                cfg$phenotypeFilterParam
+            ),
             contexts = cfg$contexts,
             traitId = cfg$traitId,
             cisWindow = cfg$cisWindow,
@@ -3668,7 +3766,7 @@ setMethod(
     jointRegions,
     fineMappingResult,
     twasWeights,
-    naAction,
+    phenotypeFilterParam,
     verbose,
     crossValidationParam,
     ensembleParam,
@@ -3692,7 +3790,7 @@ setMethod(
         jointRegions = jointRegions,
         fineMappingResult = fineMappingResult,
         twasWeights = twasWeights,
-        naAction = naAction,
+        phenotypeFilterParam = phenotypeFilterParam,
         verbose = verbose,
         crossValidationParam = crossValidationParam,
         ensembleParam = ensembleParam,
@@ -4564,26 +4662,10 @@ ensembleWeights <- function(
         regionIndex = bi,
         nRegions = length(ctx$xRegions),
         residualizationParam = ctx$residualizationParam,
+        genotypeFilter = ctx$genotypeFilter,
+        phenotypeFilter = ctx$phenotypeFilter,
         verbose = ctx$verbose
     )
-}
-
-# The traits of one context: those traitId selects there, else region
-# overlap, else every trait in the context. A traitId that leaves this
-# context out keeps all of its traits -- region picks traits only when no
-# traitId is given at all.
-# @noRd
-.twasQdsCtxTraits <- function(ctx, data, traitId, region) {
-    se <- molecularTraits(data, contexts = ctx)
-    ids <- rownames(se)
-    if (!is.null(traitId)) {
-        intersect(ids, .selectedTraits(traitId, studyName(data), ctx) %||% ids)
-    } else if (!is.null(region)) {
-        rr <- SummarizedExperiment::rowRanges(se)
-        ids[IRanges::overlapsAny(rr, region)]
-    } else {
-        ids
-    }
 }
 
 # One region's univariate joint-cell fit (region `bi` of `xRegions`).
@@ -4600,8 +4682,9 @@ ensembleWeights <- function(
     twasWeights,
     dataDrivenPriorMatricesCv,
     cisWindow,
-    naAction,
+    phenotypeFilter,
     residualizationParam,
+    genotypeFilter,
     nPCs,
     verbose
 ) {
@@ -4615,8 +4698,9 @@ ensembleWeights <- function(
         twasWeights = twasWeights,
         dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
         cisWindow = cisWindow,
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam,
+        genotypeFilter = genotypeFilter,
         nPCs = nPCs,
         verbose = verbose
     )
@@ -4694,7 +4778,7 @@ ensembleWeights <- function(
         ctxNames[[kk]],
         tr,
         tk,
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = mvStat$variantIds,
             weights = as.numeric(weights[, kk]),
             methodFits = if (kk == 1L) fitAttr else NULL,

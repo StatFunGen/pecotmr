@@ -228,12 +228,7 @@ setClass(
             i = "It says where each LD block starts and ends."
         ))
     }
-    # A panel's seqnames are chr-prefixed; a block table may not be.
-    blocks <- .asLdBlockRanges(ldBlocks)
-    spans <- GenomeInfoDb::renameSeqlevels(
-        blocks,
-        withChrPrefix(GenomeInfoDb::seqlevels(blocks))
-    )
+    spans <- .asLdBlockRanges(ldBlocks)
     gr <- .ldRefRanges(panel)
     hits <- GenomicRanges::findOverlaps(gr, spans)
     if (anyDuplicated(S4Vectors::queryHits(hits)) > 0L) {
@@ -348,7 +343,7 @@ setClass(
 # silently get a range covering everything between them.
 # @noRd
 .h2RefBlockChrom <- function(block) {
-    chrom <- unique(withChrPrefix(as.character(seqnames(block$gr))))
+    chrom <- unique(as.character(seqnames(block$gr)))
     if (length(chrom) != 1L) {
         abort(glue(
             "an LD block spans {length(chrom)} chromosomes ",

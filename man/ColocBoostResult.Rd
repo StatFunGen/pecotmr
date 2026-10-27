@@ -11,7 +11,7 @@ ColocBoostResult(
   outcomeInfo = NULL,
   ldReference = NULL,
   computingTime = list(),
-  includeUncolocalized = TRUE
+  metadata = list()
 )
 }
 \arguments{
@@ -39,13 +39,15 @@ objects.}
 
 \item{computingTime}{Optional list of per-analysis timings.}
 
-\item{includeUncolocalized}{Keep the outcome-specific (uncolocalized) sets
-as elements flagged \code{isColocalized = FALSE}. Default \code{TRUE}:
-dropping them at write time would make "no colocalization here" and "no
-signal here" indistinguishable downstream.}
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
-A \code{ColocBoostResult}.
+A \code{ColocBoostResult}. The outcome-specific (uncolocalized)
+  sets are kept as elements flagged \code{isColocalized = FALSE}, so "no
+  colocalization here" stays distinct from "no signal here";
+  \code{x[x$isColocalized]} keeps the colocalized ones.
 }
 \description{
 Assemble a \code{\linkS4class{ColocBoostResult}} from the raw

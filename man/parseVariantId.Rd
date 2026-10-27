@@ -12,18 +12,19 @@ parseVariantId(ids)
 layout).}
 }
 \value{
-A tibble with columns "chrom" (character, normalized), "pos"
+A tibble with columns "chrom" (character, UCSC style), "pos"
   (integer), "A2" (character), "A1" (character). The detected convention is
   stored as \code{attr(result, "convention")}.
 }
 \description{
 Converts variant IDs from any supported string format or data.frame into a
-standardized data.frame with a normalized character chrom, integer pos, and
-character allele columns (A2, A1). The chrom is canonicalized (chr stripped,
-uppercased, 23 -> X / 24 -> Y / M -> MT) but kept as a string so X/Y/MT
-survive. Supports colon-separated ("chr1:100:A:G"), underscore-separated
-("1_100_A_G"), with or without "chr" prefix, and with optional build suffix
-(":b38" or "_b38"). The detected input convention is stored as an attribute.
+standardized data.frame with a character chrom, integer pos, and character
+allele columns (A2, A1). The chrom is spelled in UCSC style, as every
+chromosome pecotmr holds is ("chr1", "chrX", "chrM"; 23 -> chrX,
+24 -> chrY). Supports colon-separated ("chr1:100:A:G"),
+underscore-separated ("1_100_A_G"), with or without "chr" prefix, and with
+optional build suffix (":b38" or "_b38"). The detected input convention is
+stored as an attribute.
 }
 \examples{
 parseVariantId(c("chr1:100:A:G", "chr2:200:T:C"))

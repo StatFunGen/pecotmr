@@ -47,7 +47,12 @@ this and \code{mafCutoff} applies. Default \code{0}.}
 \item{imissCutoff}{Missingness ceiling for a target. Default \code{1}.}
 
 \item{flank}{Base pairs by which to widen the analysis-region window on
-each side, retaining LD context for edge variants. Default \code{0}.}
+each side, retaining LD context for edge variants. The window never
+widens into another row of the same study on its chromosome -- the
+neighbouring LD block of a block-split GWAS -- since that row imputes
+its own variants, nor past a row's block range where that was given
+(\code{regionGiven}, see \code{\linkS4class{GwasSumStats}}). Default
+\code{0}.}
 }
 \value{
 A \code{RaissParam} object, a \code{\link{MethodParam}}.

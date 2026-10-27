@@ -70,8 +70,7 @@ gwasSumStats <- loadGwasSumStatsFromManifest(
     manifest = data.frame(study = "gwas1", sumStatsPath = gwasTsv),
     genome = "hg38",
     ldReference = ldStem,
-    region = "chr22:10000000-19000000",
-    ldBlocks = blocks
+    which = blocks
 )
 gwasByRegion <- summaryStatsQc(
     gwasSumStats,
@@ -112,7 +111,8 @@ stopifnot(
 # -----------------------------------------------------------------------------
 ctwasInputsExample <- assembleCtwasInputs(
     gwasSumStats = gwasByRegion,
-    twasWeights = list(ctwasWeightsExample)
+    twasWeights = list(ctwasWeightsExample),
+    method = "susie"
 )
 
 ctwasEstExample <- estCtwasGroupPriors(

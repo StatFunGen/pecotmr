@@ -174,7 +174,8 @@ PlinkQcOptions <- function(
         analysisType,
         phenoData,
         phenoCol,
-        columns
+        columns,
+        relatednessThreshold
     )
     .relatednessIterativeCleanup(
         filtered$kin,
@@ -275,7 +276,8 @@ filterRelatedness <- function(
     analysisType,
     phenoData,
     phenoCol,
-    columns
+    columns,
+    relatednessThreshold
 ) {
     if (analysisType == "maximizeUnrelated") {
         return(list(
@@ -283,7 +285,14 @@ filterRelatedness <- function(
             kin = kin
         ))
     }
-    .relatednessMaximizeCases(kin, pqArgs, phenoData, phenoCol, columns)
+    .relatednessMaximizeCases(
+        kin,
+        pqArgs,
+        phenoData,
+        phenoCol,
+        columns,
+        relatednessThreshold
+    )
 }
 
 # @noRd
@@ -459,7 +468,8 @@ filterRelatedness <- function(
     pqArgs,
     phenoData,
     phenoCol,
-    columns
+    columns,
+    relatednessThreshold
 ) {
     iid1Col <- columns$iid1
     iid2Col <- columns$iid2
@@ -483,7 +493,8 @@ filterRelatedness <- function(
         kin,
         casesKeep,
         relatedControls,
-        columns
+        columns,
+        relatednessThreshold
     )
     # Step 3: filter among the remaining controls.
     controlsKeep <- setdiff(relatedControls, controlsExclude)
@@ -497,15 +508,21 @@ filterRelatedness <- function(
 
 # Controls related to a retained case (row order preserved; a case--control
 # edge excludes the control, mirroring the original per-row if / else-if).
+# Related means above `relatednessThreshold`, the test plinkQC applies to the
+# case and control steps on either side of this one. The xqtl-protocol
+# GWAS_QC.R this was ported from took every listed pair, so a control whose
+# kinship with a kept case fell below the threshold was dropped too.
 # @noRd
 .relatednessControlsToExclude <- function(
     kin,
     casesKeep,
     relatedControls,
-    columns
+    columns,
+    relatednessThreshold
 ) {
-    iid1 <- kin[[columns$iid1]]
-    iid2 <- kin[[columns$iid2]]
+    related <- filter(kin, .data[[columns$value]] > relatednessThreshold)
+    iid1 <- related[[columns$iid1]]
+    iid2 <- related[[columns$iid2]]
     mask1 <- is_in(iid1, casesKeep) & is_in(iid2, relatedControls)
     mask2 <- is_in(iid2, casesKeep) & is_in(iid1, relatedControls)
     contrib <- case_when(

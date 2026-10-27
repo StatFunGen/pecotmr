@@ -68,7 +68,8 @@ test_that("validity rejects a trait without a `single` element", {
 
 test_that("annotData / frqData return the stored frames", {
     sd <- .sldscMkData()
-    expect_s3_class(annotData(sd), "data.frame")
+    expect_s4_class(annotData(sd), "DataFrame")
+    expect_s4_class(frqData(sd), "DataFrame")
     expect_equal(nrow(annotData(sd)), 6L)
     expect_equal(nrow(frqData(sd)), 6L)
 })
@@ -84,25 +85,43 @@ test_that("sldscResults / traitNames expose the traits list", {
     expect_named(sldscResults(sd), c("traitX", "traitY"))
 })
 
-test_that("sldscResults retrieves single (by idx), joint, and NULL cases", {
+test_that("sldscResults is one trait-keyed list, whatever is selected", {
     sd <- .sldscMkData()
-    single1 <- sldscResults(sd, "traitX", "single", 1L)
+    one <- sldscResults(sd, "traitX")
+    expect_named(one, "traitX")
+    expect_equal(
+        one[["traitX"]]$joint$categories,
+        c("annot_A_0", "annot_B_0", "baselineLD_0")
+    )
+    expect_length(one[["traitX"]]$single, 2L)
+    expect_named(sldscResults(sd, c("traitY", "traitX")), c("traitY", "traitX"))
+    expect_error(
+        sldscResults(sd, "no_such_trait"),
+        "no trait no_such_trait.*It has: traitX, traitY"
+    )
+    expect_error(sldscResults(sd, "traitX", "joint"), "unused argument")
+})
+
+test_that(".sldscRun retrieves single (by idx), joint, and NULL cases", {
+    sd <- .sldscMkData()
+    single1 <- .sldscRun(sd, "traitX", "single", 1L)
     expect_equal(single1$categories, c("annot_A_0", "baselineLD_0"))
     expect_equal(
-        sldscResults(sd, "traitX", "joint")$categories,
+        .sldscRun(sd, "traitX", "joint")$categories,
         c("annot_A_0", "annot_B_0", "baselineLD_0")
     )
     # whole single list when idx is NULL
-    expect_length(sldscResults(sd, "traitX", "single"), 2L)
+    expect_length(.sldscRun(sd, "traitX", "single"), 2L)
     # out-of-range idx -> NULL
-    expect_null(sldscResults(sd, "traitX", "single", 5L))
+    expect_null(.sldscRun(sd, "traitX", "single", 5L))
     # unknown trait -> NULL
-    expect_null(sldscResults(sd, "no_such_trait", "joint"))
+    expect_null(.sldscRun(sd, "no_such_trait", "joint"))
 })
 
-test_that("sldscResults returns NULL joint when a trait has none", {
+test_that(".sldscRun returns NULL joint when a trait has none", {
     sd <- .sldscMkData(withJoint = FALSE)
-    expect_null(sldscResults(sd, "traitX", "joint"))
+    expect_null(.sldscRun(sd, "traitX", "joint"))
+    expect_null(sldscResults(sd, "traitX")[["traitX"]]$joint)
 })
 
 test_that("show prints a compact summary", {

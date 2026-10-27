@@ -7,35 +7,21 @@
 \usage{
 genotypes(x, ...)
 
-\S4method{genotypes}{QtlDataset}(x, traitId = NULL, region = NULL, cisWindow = NULL, samples = NULL)
+\S4method{genotypes}{QtlDataset}(x)
 }
 \arguments{
 \item{x}{The object to extract from.}
 
-\item{...}{Class-specific selection arguments (e.g., \code{traitId},
-\code{region}, \code{cisWindow} for \code{QtlDataset}).}
-
-\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
-to select; \code{NULL} matches all traits in the dataset.}
-
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
-around the trait; \code{NULL} uses the dataset default.}
-
-\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
-\code{NULL} uses all samples.}
+\item{...}{Passed on to methods.}
 }
 \value{
 A numeric matrix, a list of matrices, or \code{NULL}.
 }
 \description{
 Extract a genotype matrix from an object that carries genotype
-  data. For a \code{QtlDataset}, returns the genotype matrix for a selected
-  set of traits or region (see method documentation for the per-class
-  selection arguments).
+  data. For a \code{QtlDataset}, the whole dataset's dosages (samples x
+  variants), with no QC applied: to read part of it, narrow the dataset
+  first, e.g. \code{genotypes(x[window, samples, ])}.
 }
 \examples{
 data(qtlDatasetExample)

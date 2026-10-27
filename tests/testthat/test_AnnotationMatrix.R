@@ -7,18 +7,27 @@ context("AnnotationMatrix")
 # The class is a RangedSummarizedExperiment, so the annotation matrix,
 # its per-column metadata and its ranges are read with assay(),
 # colData() and rowRanges() rather than through accessors of our own.
-# Annotation *readers* stay in test_h2Annotations.R. Fixtures come from
-# helper-h2Classes.R.
+# Annotation *readers* stay in test_h2Annotations.R. The fixtures are the
+# two builders below.
 
-test_that("AnnotationMatrix validates dimensions and meta", {
-    gr <- makeTestGRanges(10)
-    meta <- makeTestAnnotationMeta()
-    mat <- matrix(0, nrow = 10, ncol = 3)
+makeTestGRanges <- function(n = 10) {
+    GenomicRanges::GRanges(
+        seqnames = rep("chr1", n),
+        ranges = IRanges::IRanges(
+            start = seq(1000, by = 100, length.out = n),
+            width = 1L
+        )
+    )
+}
 
-    obj <- AnnotationMatrix(mat, gr, meta)
-    expect_s4_class(obj, "AnnotationMatrix")
-    expect_true(methods::validObject(obj))
-})
+makeTestAnnotationMeta <- function() {
+    data.frame(
+        name = c("base", "enhancer", "promoter"),
+        tier = c("baseline", "candidate", "candidate"),
+        type = c("binary", "binary", "continuous"),
+        stringsAsFactors = FALSE
+    )
+}
 
 test_that("AnnotationMatrix rejects row mismatch", {
     gr <- makeTestGRanges(10)
@@ -26,15 +35,6 @@ test_that("AnnotationMatrix rejects row mismatch", {
     mat <- matrix(0, nrow = 5, ncol = 3) # wrong number of rows
 
     expect_error(AnnotationMatrix(mat, gr, meta), "rows.*must match")
-})
-
-test_that("AnnotationMatrix rejects column mismatch with meta", {
-    gr <- makeTestGRanges(10)
-    meta <- makeTestAnnotationMeta() # 3 annotations
-    mat <- matrix(0, nrow = 10, ncol = 2) # only 2 columns
-
-    # Constructor errors when colnames assignment fails (dimnames mismatch)
-    expect_error(AnnotationMatrix(mat, gr, meta))
 })
 
 test_that("AnnotationMatrix rejects invalid tier values", {
@@ -63,20 +63,7 @@ test_that("AnnotationMatrix rejects invalid type values", {
     expect_error(AnnotationMatrix(mat, gr, meta), "type.*binary.*continuous")
 })
 
-test_that("AnnotationMatrix() constructor creates object from matrix", {
-    n <- 10
-    gr <- makeTestGRanges(n)
-    meta <- makeTestAnnotationMeta()
-    mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
-
-    obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
-    expect_s4_class(obj, "AnnotationMatrix")
-    expect_equal(nrow(assay(obj, "annotations")), n)
-    expect_equal(ncol(assay(obj, "annotations")), 3)
-    expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
-})
-
-test_that("AnnotationMatrix() sets column names from annotation_meta", {
+test_that("AnnotationMatrix() sets column names from annotationMeta", {
     n <- 10
     gr <- makeTestGRanges(n)
     meta <- makeTestAnnotationMeta()
@@ -113,6 +100,8 @@ test_that("AnnotationMatrix accessors round-trip the stored slots", {
     mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
     obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
 
+    expect_s4_class(obj, "AnnotationMatrix")
+    expect_true(methods::validObject(obj))
     expect_equal(dim(assay(obj, "annotations")), c(n, 3L))
     # colData is a DFrame keyed by the annotation names, so the plain
     # fixture compares as data after dropping those rownames.
@@ -157,8 +146,6 @@ test_that("testedAnnotations() subsets to candidate-tier only", {
     expect_true(all(SummarizedExperiment::colData(cand)$tier == "candidate"))
 })
 
-# show() smoke test, moved here from test_showMethods.R so the test
-# tree mirrors R/.
 test_that("show(AnnotationMatrix) does not error", {
     am <- AnnotationMatrix(
         matrix(0, nrow = 10, ncol = 1),

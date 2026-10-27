@@ -107,6 +107,21 @@ windows.  Ultimately this means that the variable selection in the QTL and GWAS
 fine-mapping will have been done over different variant sets, which may reduce
 the sensitivity for colocalizations, particuarly in areas with complex LD.
 
+A QTL region that reaches more than one of a GWAS study's LD blocks is still
+one colocalization, not one per block. Given a `GwasSumStats`, the blocks the
+region reaches are stitched together and fine-mapped once. Given a
+`GwasFineMappingResult`, their fits are collapsed into one fit over the
+region, assuming no LD between blocks, so each block's effects keep to their
+own block. Either way the result's `blockId` names the stretch the blocks
+cover.
+
+So load every block a QTL region reaches. A region whose variants run past
+the loaded blocks of a GWAS study it overlaps is an error when those blocks'
+windows were given as the study's `region`: the variants past them lie in a
+block that was not loaded. When the windows are only the span of the GWAS
+variants, the variants past them may be ones the GWAS lacks, so more than one
+in a row past a block is a warning.
+
 ## Filtering effects fed into coloc
 
 `coloc::coloc.bf_bf` accepts one LBF matrix for the QTL and one for hte GWAS.
@@ -133,7 +148,7 @@ colocPipeline(
 
 ## Enrichment-aware colocalisation (enloc mode)
 
-Passing a per-`(gwasStudy, qtlContext)` enrichment table --- the output of
+Passing a per-pair enrichment table --- the output of
 `qtlEnrichmentPipeline()` --- switches the pair from coloc to enloc. This is
 a port of `fastenloc`, not a reweighting of coloc: the priors are *derived*
 from the enrichment estimate rather than the baseline `p12` being scaled by
@@ -278,8 +293,8 @@ The warning above is the diagnostic that rule produces: a within-credible-set
 sum above 1 means several GWAS credible sets are competing for one QTL signal.
 The value is clipped to 1, and the pair view shows which pairs were involved.
 
-If you need the flat table the pipeline used to return, `as.data.frame(res)`
-gives the pair view.
+If you need the flat table the pipeline used to return, `colocPairs(res)` is
+the pair view, as a `DataFrame`.
 
 # Session info
 

@@ -4,10 +4,10 @@
 \alias{readAfreq}
 \title{Read a PLINK2 allele frequency file (.afreq or .afreq.zst)}
 \usage{
-readAfreq(prefix)
+readAfreq(path)
 }
 \arguments{
-\item{prefix}{File prefix (without .afreq extension).}
+\item{path}{File prefix (without .afreq extension).}
 }
 \value{
 A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq,

@@ -55,7 +55,7 @@ setMethod(
         pvar = NULL,
         psam = NULL,
         ldMeta = NULL,
-        region = NULL,
+        block = NULL,
         genoMeta = NULL,
         chroms = NULL,
         format = NULL,
@@ -74,7 +74,7 @@ setMethod(
             pvar = pvar,
             psam = psam,
             ldMeta = ldMeta,
-            region = region,
+            block = block,
             genoMeta = genoMeta,
             chroms = chroms,
             format = format,
@@ -98,7 +98,7 @@ setMethod(
     pvar = NULL,
     psam = NULL,
     ldMeta = NULL,
-    region = NULL,
+    block = NULL,
     genoMeta = NULL,
     chroms = NULL,
     format = NULL,
@@ -112,7 +112,7 @@ setMethod(
         pvar = pvar,
         psam = psam,
         ldMeta = ldMeta,
-        region = region
+        block = block
     )
     sources <- .ghResolveSources(
         path = NULL,
@@ -134,7 +134,7 @@ setMethod(
         plink2Triplet = .genotypeExperiment(
             .genotypeHandleFromPlink2Triplet(pgen, pvar, psam)
         ),
-        ldMeta = .ghLdPathToPanel(.ghResolveLdPath(ldMeta, region), vcfArgs),
+        ldMeta = .ghLdPathToPanel(.ghResolveLdPath(ldMeta, block), vcfArgs),
         genoMeta = .chromMetaPanel(genoMeta, chroms, format)
     )
 }
@@ -255,7 +255,7 @@ setMethod(
     # readPvar returns: chrom, id, pos, A2 (REF), A1 (ALT) -- pecotmr convention
     snpInfo <- tibble(
         SNP = vi$id,
-        CHR = as.character(vi$chrom),
+        CHR = withChrPrefix(vi$chrom),
         BP = as.integer(vi$pos),
         A1 = vi$A1,
         A2 = vi$A2
@@ -458,14 +458,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 }
 
 # A panel's variants snpInfo-style, one row per rowRanges element: SNP (the
-# file's own ids), CHR (canonical), BP, A1, A2. The inverse of
-# .snpInfoRanges(), so genotypes from any backend answer alike.
+# file's own ids), CHR, BP, A1, A2. The inverse of .snpInfoRanges(), so
+# genotypes from any backend answer alike.
 # @noRd
 .rangesSnpInfo <- function(gr) {
     mc <- S4Vectors::mcols(gr)
     tibble(
         SNP = as.character(mc$SNP),
-        CHR = canonChrom(as.character(seqnames(gr))),
+        CHR = as.character(seqnames(gr)),
         BP = as.integer(start(gr)),
         A1 = as.character(mc$A1),
         A2 = as.character(mc$A2)
@@ -473,12 +473,13 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 }
 
 # The rowRanges of variants described snpInfo-style (SNP, CHR, BP, A1, A2),
-# named `variantIds`: a handle's, or a VCF, GDS or PLINK1 panel's rows.
+# named `variantIds`: a handle's, or a VCF, GDS or PLINK1 panel's rows. Every
+# reader spells CHR in UCSC style as it reads the file.
 # @noRd
 .snpInfoRanges <- function(si, variantIds) {
     `names<-`(
         GenomicRanges::GRanges(
-            seqnames = withChrPrefix(as.character(si$CHR)),
+            seqnames = as.character(si$CHR),
             ranges = IRanges::IRanges(as.integer(si$BP), width = 1L),
             SNP = as.character(si$SNP),
             A1 = as.character(si$A1),
@@ -505,12 +506,8 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # @noRd
 .blockGenotypesToSe <- function(geno, handle, snpIdx) {
     si <- slice(snpInfo(handle), snpIdx)
-    chr <- str_c(
-        "chr",
-        str_remove(as.character(si$CHR), regex("^chr", ignore_case = TRUE))
-    )
     rowRanges <- GRanges(
-        seqnames = chr,
+        seqnames = si$CHR,
         ranges = IRanges(start = as.integer(si$BP), width = 1L),
         SNP = si$SNP,
         A1 = si$A1,
@@ -571,7 +568,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     if (length(snpIdx) == 0L) {
         return(.emptyBlockSe(sampleIds))
     }
-    unifiedChr <- canonChrom(snpInfo(handle)$CHR)
+    unifiedChr <- snpInfo(handle)$CHR
     groups <- split(seq_along(snpIdx), unifiedChr[snpIdx])
     ses <- set_names(
         map2(
@@ -714,16 +711,30 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @title Filter SNP Info by Region
 #' @description Return 1-based indices into snpInfo for SNPs within a genomic
-#'   region string.
+#'   window.
 #' @param snpInfo data.frame with CHR and BP columns.
-#' @param region Character region string "chr:start-end".
+#' @param region A \code{GRanges} window, of one range or several.
 #' @return Integer vector of matching SNP indices.
 #' @keywords internal
 .regionToSnpIdx <- function(snpInfo, region) {
-    parsed <- parseRegion(region)
-    chrMatch <- stripChrPrefix(as.character(snpInfo$CHR)) == parsed$chrom
-    posMatch <- snpInfo$BP >= parsed$start & snpInfo$BP <= parsed$end
-    which(chrMatch & posMatch)
+    which(.refMultiRegionMask(
+        as.character(snpInfo$CHR),
+        snpInfo$BP,
+        .regionTable(region)
+    ))
+}
+
+# Internal: a GRanges window argument as the chrom / start / end table the
+# genotype readers match variants against, one row per range, its
+# chromosome in UCSC style as the LD and genotype metadata are.
+# @noRd
+.regionTable <- function(region, what = "`region`") {
+    region <- .assertRegionGRanges(region, what)
+    tibble(
+        chrom = as.character(GenomicRanges::seqnames(region)),
+        start = GenomicRanges::start(region),
+        end = GenomicRanges::end(region)
+    )
 }
 
 #' @title Convert SNP Info to Variant Info
@@ -865,7 +876,7 @@ readBim <- function(bed) {
 
 #' Read a PLINK2 allele frequency file (.afreq or .afreq.zst)
 #'
-#' @param prefix File prefix (without .afreq extension).
+#' @param path File prefix (without .afreq extension).
 #' @return A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq,
 #'   obs_ct. alt_freq is the frequency of the A1 (ALT/effect) allele.
 #' @importFrom vroom vroom
@@ -877,24 +888,33 @@ readBim <- function(bed) {
 #' readAfreq(stem)
 #' @export
 #' @importFrom checkmate assertString
-readAfreq <- function(prefix) {
-    assertString(prefix)
-    afreqZst <- str_c(prefix, ".afreq.zst")
-    afreqPlain <- str_c(prefix, ".afreq")
+readAfreq <- function(path) {
+    assertString(path)
+    afreqZst <- str_c(path, ".afreq.zst")
+    afreqPlain <- str_c(path, ".afreq")
     if (file.exists(afreqZst)) {
-        af <- vroom(
-            archive_read(afreqZst, format = "raw", filter = "zstd"),
-            delim = "\t",
-            show_col_types = FALSE
-        )
-    } else if (file.exists(afreqPlain)) {
-        af <- vroom(
-            afreqPlain,
+        return(.readAfreqFile(afreqZst))
+    }
+    if (file.exists(afreqPlain)) {
+        return(.readAfreqFile(afreqPlain))
+    }
+    NULL
+}
+
+# One PLINK2 .afreq table read from the file named, zstd-compressed when the
+# name ends in .zst. readAfreq() finds that file from a prefix; a caller that
+# holds the file itself (readStochasticMeta()'s format override) reads it
+# here, so the file need not be named *.afreq.
+# @noRd
+.readAfreqFile <- function(file) {
+    af <- if (str_detect(file, "\\.zst$")) {
+        vroom(
+            archive_read(file, format = "raw", filter = "zstd"),
             delim = "\t",
             show_col_types = FALSE
         )
     } else {
-        return(NULL)
+        vroom(file, delim = "\t", show_col_types = FALSE)
     }
     # PLINK2 .afreq: REF = A2, ALT = A1, ALT_FREQS = A1 (effect allele)
     # frequency
@@ -927,8 +947,8 @@ readAfreq <- function(prefix) {
 #' Reads per-variant min/max values used to invert min-max [0,2] scaling
 #' of stochastic genotype data. Supports two formats:
 #' \itemize{
-#'   \item \strong{afreq}: PLINK2 .afreq/.afreq.zst with U_MIN/U_MAX columns
-#'     (read via \code{readAfreq}, which also returns allele frequencies).
+#'   \item \strong{afreq}: a PLINK2 .afreq table with U_MIN/U_MAX columns,
+#'     whatever the file is named (zstd-compressed when it ends in .zst).
 #'   \item \strong{generic}: Tab-delimited file with columns id, u_min, u_max.
 #' }
 #'
@@ -956,11 +976,10 @@ readStochasticMeta <- function(path, format = NULL) {
     resolved <- arg_match(detected, c("afreq", "generic"))
 
     if (resolved == "afreq") {
-        # readAfreq expects a prefix, not a full path - strip the .afreq[.zst]
-        # suffix
-        prefix <- str_remove(path, "\\.afreq(\\.zst)?$")
-        af <- readAfreq(prefix)
-        if (is.null(af) || !all(is_in(c("u_min", "u_max"), colnames(af)))) {
+        # The file itself, under whatever name it has: going through
+        # readAfreq()'s prefix would read <path>.afreq instead.
+        af <- .readAfreqFile(path)
+        if (!all(is_in(c("u_min", "u_max"), colnames(af)))) {
             return(NULL)
         }
         return(select(af, all_of(c("id", "u_min", "u_max"))))
@@ -1028,7 +1047,8 @@ invertMinmaxScaling <- function(X, uMin, uMax) {
         abort(msg)
     }
     span <- uMax - uMin
-    # Monomorphic variant: the forward scaling was the identity.
+    # Monomorphic variant: the forward step divided by 1 rather than 0, which
+    # left the column all 0.
     denom <- replace(span, span == 0, 1)
     # Invert: U_original = U_scaled * (u_max - u_min) / 2 + u_min
     sweep(sweep(X, 2, denom / 2, "*"), 2, uMin, "+")
@@ -1091,8 +1111,8 @@ readPvar <- function(pvarPath) {
 #' extracts variant info.
 #'
 #' @param source Genotype file path/prefix or LD metadata file path.
-#' @param region Region of interest: "chr:start-end" string or data.frame with
-#'   chrom/start/end. If NULL, returns all variants.
+#' @param which Optional \code{GRanges}: return only the variants that
+#'   overlap it. If NULL, returns all variants.
 #' @return A data.frame with columns: chrom, id, pos, A2, A1. May also include
 #'   allele_freq, variance, n_nomiss depending on source.
 #'
@@ -1100,20 +1120,21 @@ readPvar <- function(pvarPath) {
 #' @examples
 #' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
 #'   package = "pecotmr")
-#' refVariantInfo(meta, region = "chr22:10000000-19000000")
+#' refVariantInfo(meta,
+#'   which = GenomicRanges::GRanges("chr22:10000000-19000000"))
 #' @export
-refVariantInfo <- function(source, region = NULL) {
+refVariantInfo <- function(source, which = NULL) {
     resolved <- resolveLdSource(source)
-    dataPath <- .refDataPath(resolved, region)
+    dataPath <- .refDataPath(resolved, which)
     if (resolved$type == "plink2") {
         info <- .refInfoPlink2(dataPath)
     } else if (resolved$type == "plink1") {
         info <- .refInfoPlink1(dataPath)
     } else {
-        return(.refInfoVcfGds(dataPath, region))
+        return(.refInfoVcfGds(dataPath, which))
     }
     # Region filter for plink2 / plink1 (the loader-based paths self-filter).
-    .refRegionFilter(info, region)
+    .refRegionFilter(info, which)
 }
 
 # Resolve the per-chromosome data path when the source carries region metadata,
@@ -1140,6 +1161,7 @@ refVariantInfo <- function(source, region = NULL) {
     afreq <- readAfreq(dataPath)
     mutate(
         info,
+        chrom = withChrPrefix(.data$chrom),
         !!!compact(list(
             allele_freq = if (!is.null(afreq)) {
                 afreq$alt_freq[match(info$id, afreq$id)]
@@ -1153,7 +1175,7 @@ refVariantInfo <- function(source, region = NULL) {
 .refInfoPlink1 <- function(dataPath) {
     bim <- readBim(str_c(dataPath, ".bed"))
     tibble(
-        chrom = bim$chrom,
+        chrom = withChrPrefix(bim$chrom),
         id = bim$id,
         pos = bim$pos,
         A2 = bim$a0,
@@ -1167,7 +1189,7 @@ refVariantInfo <- function(source, region = NULL) {
 .refInfoVcfGds <- function(dataPath, region) {
     result <- loadGenotypeRegion(
         dataPath,
-        region = region,
+        which = region,
         returnVariantInfo = TRUE
     )
     mutate(
@@ -1182,19 +1204,15 @@ refVariantInfo <- function(source, region = NULL) {
     if (is.null(region)) {
         return(info)
     }
-    parsed <- parseRegion(region)
-    infoChrom <- stripChrPrefix(info$chrom)
-    inRegion <- if (is.data.frame(parsed) && nrow(parsed) > 1) {
-        .refMultiRegionMask(infoChrom, info$pos, parsed)
-    } else {
-        infoChrom == as.character(parsed$chrom) &
-            info$pos >= parsed$start &
-            info$pos <= parsed$end
-    }
+    inRegion <- .refMultiRegionMask(
+        info$chrom,
+        info$pos,
+        .regionTable(region)
+    )
     info[inRegion, , drop = FALSE]
 }
 
-# OR-mask across a multi-row (one row per chrom) parsed region.
+# OR-mask across a region table's rows (.regionTable()), one per range.
 # @noRd
 .refMultiRegionMask <- function(infoChrom, pos, parsed) {
     reduce(
@@ -1239,7 +1257,7 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
         ids <- read_lines(keepVariantsPath)
         keepVariants <- parseVariantId(ids)
     }
-    viChrom <- canonChrom(variantInfo$chrom)
+    viChrom <- variantInfo$chrom
     hasAlleles <- is_in("A1", names(keepVariants)) &&
         is_in("A2", names(keepVariants)) &&
         !any(is.na(keepVariants$A1)) &&
@@ -1279,7 +1297,8 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
 #' dosages are automatically rescaled using the stored U_MIN/U_MAX values.
 #'
 #' @param genotype Path to the genotype data file, or a PLINK prefix.
-#' @param region The target region in the format "chr:start-end".
+#' @param which Optional \code{GRanges}: load only the variants that overlap
+#'   it. If NULL, loads every variant.
 #' @param keepIndel Whether to keep indel SNPs.
 #' @param keepVariantsPath Path to a file listing variants to keep.
 #' @param returnVariantInfo If TRUE, return a list with X (dosage matrix) and
@@ -1298,11 +1317,12 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
 #' @examples
 #' stem <- sub("[.]bed$", "",
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-#' loadGenotypeRegion(genotype = stem, region = "chr22:1-100000000")
+#' loadGenotypeRegion(genotype = stem,
+#'   which = GenomicRanges::GRanges("chr22:1-100000000"))
 #' @export
 loadGenotypeRegion <- function(
     genotype,
-    region = NULL,
+    which = NULL,
     keepIndel = TRUE,
     keepVariantsPath = NULL,
     returnVariantInfo = FALSE,
@@ -1314,7 +1334,7 @@ loadGenotypeRegion <- function(
         format = .requireGenotypeFormat(genotype, "loadGenotypeRegion")
     )
     variants <- .rangesSnpInfo(SummarizedExperiment::rowRanges(panel))
-    snpIdx <- .loadGenoSnpIdx(variants, region)
+    snpIdx <- .loadGenoSnpIdx(variants, which)
     # Samples x variants matrix (pecotmr convention), its columns named by
     # the file's own variant ids; callers handle missing.
     extracted <- list(
@@ -1345,7 +1365,10 @@ loadGenotypeRegion <- function(
     }
     snpIdx <- .regionToSnpIdx(variants, region)
     if (length(snpIdx) == 0) {
-        msg <- glue("No SNPs found in the specified region {region}")
+        msg <- glue(
+            "No SNPs found in the specified region ",
+            "{str_flatten(as.character(region), ', ')}"
+        )
         abort(msg, class = "NoSnpsError")
     }
     snpIdx
@@ -1530,7 +1553,7 @@ loadGenotypeRegion <- function(
     a2 <- map_chr(allelesSplit, `[`, 2L)
     tibble(
         SNP = snpId,
-        CHR = as.character(chr),
+        CHR = withChrPrefix(chr),
         BP = as.integer(pos),
         A1 = a1,
         A2 = a2
@@ -1558,6 +1581,7 @@ loadGenotypeRegion <- function(
 # are read here.
 # @noRd
 #' @importFrom checkmate assertFileExists
+#' @importFrom purrr walk
 .makeBgenHandle <- function(path) {
     walk(c("DBI", "RSQLite"), .bgenRequirePackage)
     assertFileExists(path, access = "r", .var.name = "BGEN file")
@@ -1738,7 +1762,7 @@ loadGenotypeRegion <- function(
     named <- !is.na(index$rsid) & nzchar(index$rsid) & index$rsid != "."
     tibble(
         SNP = if_else(named, index$rsid, ids),
-        CHR = canonChrom(index$chromosome),
+        CHR = withChrPrefix(index$chromosome),
         BP = as.integer(index$position),
         A1 = index$allele2,
         A2 = index$allele1,
@@ -1755,7 +1779,7 @@ loadGenotypeRegion <- function(
     others <- alleles[-1L]
     tibble(
         SNP = formatVariantId(chrom, pos, alleles[[1L]], others),
-        CHR = canonChrom(chrom),
+        CHR = withChrPrefix(chrom),
         BP = as.integer(pos),
         A1 = others,
         A2 = alleles[[1L]],
@@ -2032,7 +2056,7 @@ loadGenotypeRegion <- function(
             records$id[record],
             formatVariantId(records$chrom[record], records$pos[record], a2, a1)
         ),
-        CHR = canonChrom(records$chrom[record]),
+        CHR = withChrPrefix(records$chrom[record]),
         BP = as.integer(records$pos[record]),
         A1 = a1,
         A2 = a2,
@@ -2248,7 +2272,6 @@ loadGenotypeRegion <- function(
     rows <- mutate(
         meta$snpInfo,
         SNP = as.character(.data$SNP),
-        CHR = canonChrom(.data$CHR),
         record = row_number(),
         allele = 1L
     )
@@ -2454,7 +2477,7 @@ loadGenotypeRegion <- function(
     # pecotmr convention directly.
     snpInfo <- tibble(
         SNP = bim$SNP,
-        CHR = as.character(bim$CHR),
+        CHR = withChrPrefix(bim$CHR),
         BP = as.integer(bim$BP),
         A1 = bim$A1,
         A2 = bim$A2

@@ -13,17 +13,20 @@ GwasSumStats(
   nCase = NULL,
   nControl = NULL,
   nSample = NULL,
-  qcInfo = list(),
-  ldBlocks = NULL,
+  qcOptions = list(),
+  region = NULL,
   blockId = NULL,
-  extraCols = list()
+  extraCols = list(),
+  metadata = list()
 )
 }
 \arguments{
-\item{studyName}{Character vector of study identifiers (must be unique).}
+\item{studyName}{Character vector of study identifiers, one per
+\code{entry}. A study whose entries are already split by block repeats
+here, once per entry, with \code{blockId} telling them apart.}
 
 \item{entry}{A \code{SimpleList} or \code{list} of \code{GRanges}, one per
-study.}
+study (or per block of an already-split study).}
 
 \item{genome}{Single character string giving the genome build (e.g.,
 \code{"hg19"}, \code{"hg38"}). One build per collection.}
@@ -53,42 +56,50 @@ no per-variant \code{N} column and no case/control counts. Named
 \code{nSample} to avoid clashing with \code{nSamples()} (the LD-panel
 sample size).}
 
-\item{qcInfo}{A \code{list} recording which QC steps ran. Empty \code{list()}
-on construction; populated by \code{summaryStatsQc()} with a per-step audit
-record. Fine-mapping / TWAS pipelines reject inputs where
-\code{length(qcInfo(x)) == 0}.}
+\item{qcOptions}{A \code{list} recording the QC that ran. Empty
+\code{list()} on construction; \code{summaryStatsQc()} fills it.
+Fine-mapping / TWAS pipelines reject inputs where
+\code{length(qcOptions(x)) == 0}.}
 
-\item{ldBlocks}{Optional LD-block specification: a \code{GRanges}, a
-data.frame with \code{chrom}/\code{start}/\code{end} (plus an optional
-\code{blockId}), or a path to such a table. When supplied, each
-study's variants are split into one element per block rather than one per
-chromosome, and \code{blockId} takes the block's key (its \code{names},
-else a \code{blockId} metadata column, else its coordinates). cTWAS needs
-this granularity: its EM estimates parameters across blocks, so a
-per-chromosome split is too coarse. Variants overlapping no block are
-dropped with a warning, because a variant outside every block has no
-block-local LD to be fine-mapped against.}
+\item{region}{Optional analysis windows, typically LD blocks: a
+\code{GRanges}, or the path of a BED file, read as BED with a 0-based
+start (a fourth column, when present, names each window). One set of
+windows applies to every study; a list gives one set per study,
+\code{NULL} for a study to split by chromosome. Each study's variants are
+split into one element per window they fall in, rather than one per
+chromosome, and each element's \code{region} is its window, recorded as
+given. Its \code{blockId} is the window's name: its \code{names}, else
+its \code{blockId} column (a BED file's fourth column), else its
+coordinates. cTWAS needs this granularity: its EM estimates parameters
+across blocks, so a per-chromosome split is too coarse. Variants outside
+every window are dropped with a warning.}
 
-\item{blockId}{Optional character vector of block keys, one per
-\code{entry}, for entries that are \strong{already} split by block. Use
-it to carry existing keys through a rebuild; without it a rebuild would
-re-derive them as seqnames and collapse distinct blocks onto one key.
-Mutually exclusive with \code{ldBlocks}.}
+\item{blockId}{Optional character vector of block names, one per
+\code{entry}, for entries that are \strong{already} split. Use it to
+carry existing names through a rebuild; without it a rebuild would
+re-derive them as seqnames and collapse distinct blocks onto one name. A
+name only: it gives no window, which comes from \code{region}. Mutually
+exclusive with \code{region}.}
 
-\item{extraCols}{Optional named list of additional per-study columns to
+\item{extraCols}{Optional named list (or \code{DataFrame} /
+\code{data.frame}) of additional per-study columns to
 attach to the collection's \code{mcols}. Named rather than variadic
 because the base class's own constructor, \code{GRangesList(...)}, uses
 \code{...} for its \emph{elements}: a bare \code{...} here would read
 as adding an entry rather than a metadata column.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{GwasSumStats} object.
 }
 \description{
-Construct a \code{GwasSumStats} S4 DFrame-subclass collection
-  from per-study tuple vectors and a list of \code{GRanges} entries (one per
-  study), plus the LD reference(s) the rows were harmonized against and a
-  single genome build that applies to the whole collection.
+Construct a \code{GwasSumStats} S4 collection from per-study
+  tuple vectors and a list of \code{GRanges} entries (one per study), plus
+  the LD reference(s) the rows were harmonized against and a single genome
+  build that applies to the whole collection.
 
 Each \code{GRanges} entry must carry per-variant statistics in its mcols (at
 minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; optionally

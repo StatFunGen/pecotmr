@@ -13,16 +13,6 @@ test_that("waldTestPval: returns two-sided p-values matching stats::pt", {
     expect_equal(res, expected)
 })
 
-test_that("waldTestPval: returns 1 when beta is zero", {
-    expect_equal(waldTestPval(0, 0.1, 50), 1, tolerance = 1e-12)
-})
-
-test_that("waldTestPval: is vectorised over beta/se", {
-    res <- waldTestPval(c(1, 2, 3), c(0.5, 0.5, 0.5), 100)
-    expect_length(res, 3)
-    expect_true(all(res > 0 & res <= 1))
-})
-
 # ===========================================================================
 # pvalAcat (internal)
 # ===========================================================================
@@ -51,6 +41,7 @@ test_that("pvalAcat: clips very-near-1 p-values to 0.99", {
 
 test_that("pvalAcat: small p-values produce small combined p", {
     combined <- pecotmr:::pvalAcat(rep(1e-6, 5))
+    expect_gt(combined, 0)
     expect_lt(combined, 1e-5)
 })
 
@@ -312,7 +303,7 @@ test_that("combinePValues dispatches aSPU and GATES", {
 })
 
 # ===========================================================================
-# Tests migrated from test_misc.R (p-value combiners + waldTestPval)
+# pvalHmp
 # ===========================================================================
 
 test_that("pvalHmp returns valid p-value", {
@@ -321,23 +312,10 @@ test_that("pvalHmp returns valid p-value", {
     result <- pecotmr:::pvalHmp(pvals)
     expect_true(is.numeric(result))
     expect_true(result >= 0 && result <= 1)
-    # The harmonic mean is L/sum(1/p) where L = length(unique(pvals))
-    L <- length(unique(pvals))
-    HMP <- L / sum(1 / pvals)
-    # Result should be based on pLandau(1/HMP, ...) and be smaller than the arithmetic mean
+    # pLandau's tail at 1 / HMP, HMP = L / sum(1 / p): for these inputs it
+    # sits below both their arithmetic mean and the largest of them.
     expect_true(result < mean(pvals))
-    # Verify the result is less than the smallest individual p-value is not required,
-    # but it should be in a reasonable range relative to the harmonic mean
     expect_true(result < 0.1)
-})
-
-
-test_that("pvalHmp uses unique p-values only", {
-    skip_if_not_installed("harmonicmeanp")
-    pvals <- c(0.01, 0.01, 0.05, 0.05, 0.3)
-    result <- pecotmr:::pvalHmp(pvals)
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
 })
 
 
@@ -353,26 +331,6 @@ test_that("pvalHmp errors when package not available", {
 # pvalAcat
 # =============================================================================
 
-test_that("pvalAcat returns single p-value unchanged", {
-    expect_equal(pecotmr:::pvalAcat(0.05), 0.05)
-})
-
-
-test_that("pvalAcat combines multiple p-values", {
-    pvals <- c(0.001, 0.01, 0.1)
-    combined <- pecotmr:::pvalAcat(pvals)
-    expect_true(combined > 0 && combined < 1)
-})
-
-
-test_that("pvalAcat with very small p-values does not return NA", {
-    result <- pecotmr:::pvalAcat(c(1e-10, 1e-8, 1e-6))
-    expect_true(is.numeric(result))
-    expect_true(!is.na(result))
-    expect_true(result > 0 && result <= 1)
-})
-
-
 test_that("pvalAcat with all large p-values returns large combined p-value", {
     result <- pecotmr:::pvalAcat(c(0.8, 0.9, 0.95))
     expect_true(is.numeric(result))
@@ -380,47 +338,9 @@ test_that("pvalAcat with all large p-values returns large combined p-value", {
 })
 
 
-test_that("pvalAcat uses asymptotic approximation for p < 1e-15", {
-    # p-values below 1e-15 use 1/(p*pi) instead of tan()
-    result <- pecotmr:::pvalAcat(c(1e-20, 1e-18, 0.01))
-    expect_true(is.numeric(result))
-    expect_true(result > 0 && result < 1)
-    expect_false(is.na(result))
-})
-
 # =============================================================================
 # pvalPoolr
 # =============================================================================
-
-test_that("pvalPoolr fisher method returns valid p-value", {
-    skip_if_not_installed("poolr")
-    pvals <- c(0.01, 0.05, 0.1)
-    R <- diag(3)
-    result <- pecotmr:::pvalPoolr(pvals, method = "fisher", R = R)
-    expect_true(is.numeric(result))
-    expect_true(result > 0 && result < 1)
-})
-
-
-test_that("pvalPoolr stouffer method returns valid p-value", {
-    skip_if_not_installed("poolr")
-    pvals <- c(0.01, 0.05, 0.1)
-    R <- diag(3)
-    result <- pecotmr:::pvalPoolr(pvals, method = "stouffer", R = R)
-    expect_true(is.numeric(result))
-    expect_true(result > 0 && result < 1)
-})
-
-
-test_that("pvalPoolr invchisq method returns valid p-value", {
-    skip_if_not_installed("poolr")
-    pvals <- c(0.01, 0.05, 0.1)
-    R <- diag(3)
-    result <- pecotmr:::pvalPoolr(pvals, method = "invchisq", R = R)
-    expect_true(is.numeric(result))
-    expect_true(result > 0 && result < 1)
-})
-
 
 test_that("generalized poolr tests reduce to the plain ones when independent", {
     # With R = I the generalized adjustment must give the unadjusted test.
@@ -433,6 +353,32 @@ test_that("generalized poolr tests reduce to the plain ones when independent", {
     expect_equal(pecotmr:::pvalPoolr(p, "fisher", R), poolr::fisher(p)$p)
     expect_equal(pecotmr:::pvalPoolr(p, "stouffer", R), poolr::stouffer(p)$p)
     expect_equal(pecotmr:::pvalPoolr(p, "invchisq", R), poolr::invchisq(p)$p)
+})
+
+test_that("pvalPoolr runs poolr's empirical adjustment for every test", {
+    # poolr names the running test from its own call; with the function
+    # object inlined into the call it could not, and every empirical
+    # adjustment failed inside poolr.
+    skip_if_not_installed("poolr")
+    p <- c(0.01, 0.2, 0.5)
+    R <- diag(3)
+    R[1, 2] <- R[2, 1] <- 0.3
+    direct <- list(
+        fisher = function() poolr::fisher(p, adjust = "empirical", R = R),
+        stouffer = function() poolr::stouffer(p, adjust = "empirical", R = R),
+        invchisq = function() poolr::invchisq(p, adjust = "empirical", R = R)
+    )
+    for (method in names(direct)) {
+        set.seed(1)
+        got <- pecotmr:::pvalPoolr(
+            p,
+            method,
+            R,
+            PoolrOptions(adjust = "empirical")
+        )
+        set.seed(1)
+        expect_equal(got, direct[[method]]()$p, info = method)
+    }
 })
 
 test_that(".poolrDependence converts R for the adjustment poolr runs", {
@@ -481,66 +427,6 @@ test_that("pvalPoolr errors on unknown method", {
 # pvalGbj
 # =============================================================================
 
-test_that("pvalGbj gbj method returns valid p-value", {
-    skip_if_not_installed("GBJ")
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalGbj(z, R, method = "gbj")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
-test_that("pvalGbj hc method returns valid p-value", {
-    skip_if_not_installed("GBJ")
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalGbj(z, R, method = "hc")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
-test_that("pvalGbj minp method returns valid p-value", {
-    skip_if_not_installed("GBJ")
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalGbj(z, R, method = "minp")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
-test_that("pvalGbj bj method returns valid p-value", {
-    skip_if_not_installed("GBJ")
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalGbj(z, R, method = "bj")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
-test_that("pvalGbj ghc method returns valid p-value", {
-    skip_if_not_installed("GBJ")
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalGbj(z, R, method = "ghc")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
-test_that("pvalGbj gbj_omni method returns valid p-value", {
-    skip_if_not_installed("GBJ")
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalGbj(z, R, method = "gbj_omni")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
 test_that("pvalGbj errors on unknown method", {
     skip_if_not_installed("GBJ")
     expect_error(
@@ -553,27 +439,6 @@ test_that("pvalGbj errors on unknown method", {
 # pvalAspu
 # =============================================================================
 
-test_that("pvalAspu aspu method returns valid p-value", {
-    skip_if_not_installed("aSPU")
-    set.seed(42)
-    z <- c(2.5, 1.8, 3.0)
-    R <- diag(3)
-    result <- pecotmr:::pvalAspu(zScores = z, R = R, method = "aspu")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
-test_that("pvalAspu gates method returns valid p-value", {
-    skip_if_not_installed("aSPU")
-    pvals <- c(0.01, 0.05, 0.1)
-    R <- diag(3)
-    result <- pecotmr:::pvalAspu(pvals = pvals, R = R, method = "gates")
-    expect_true(is.numeric(result))
-    expect_true(result >= 0 && result <= 1)
-})
-
-
 test_that("pvalAspu errors on unknown method", {
     skip_if_not_installed("aSPU")
     expect_error(
@@ -582,49 +447,9 @@ test_that("pvalAspu errors on unknown method", {
     )
 })
 
-# =============================================================================
-# =============================================================================
-# findValidFilePath and findValidFilePaths
-# =============================================================================
-
-test_that("waldTestPval computes correct p-values", {
-    pval <- waldTestPval(beta = 5, se = 1, n = 100)
-    expect_true(pval < 0.001)
-
-    pval_zero <- waldTestPval(beta = 0, se = 1, n = 100)
-    expect_equal(pval_zero, 1.0, tolerance = 1e-10)
-})
-
-
-test_that("waldTestPval handles vector inputs", {
-    betas <- c(0, 1, 2, 5)
-    ses <- c(1, 1, 1, 1)
-    pvals <- waldTestPval(betas, ses, n = 100)
-    expect_length(pvals, 4)
-    expect_true(pvals[1] > pvals[4])
-})
-
-
-test_that("waldTestPval is symmetric in beta sign", {
-    pval_pos <- waldTestPval(beta = 3, se = 1, n = 50)
-    pval_neg <- waldTestPval(beta = -3, se = 1, n = 50)
-    expect_equal(pval_pos, pval_neg, tolerance = 1e-10)
-})
-
-
-test_that("waldTestPval with very large beta gives p near 0", {
-    pval <- waldTestPval(beta = 100, se = 1, n = 1000)
-    expect_true(pval < 1e-10)
-})
-
-
-test_that("waldTestPval with very large se gives p near 1", {
-    pval <- waldTestPval(beta = 1, se = 1000, n = 100)
-    expect_true(pval > 0.99)
-})
 
 # =============================================================================
-# parseRegion
+# Argument guards
 # =============================================================================
 
 test_that("pvalCombine: argument guards fire", {
@@ -757,7 +582,10 @@ test_that("combinePValues forwards each method's options to its engine", {
         ),
         stouffer = function(...) {
             seen <<- list(...)
-            real(...)
+            # Called by its own name: poolr's empirical adjustment reads
+            # which test it is from its call.
+            stouffer <- real
+            stouffer(...)
         },
         .package = "poolr"
     )

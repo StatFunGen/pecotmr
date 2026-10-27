@@ -57,11 +57,11 @@ GWAS, `nCase` / `nControl`.
 *  **Manually** — build the `entry` GRanges yourself and call the
     `GwasSumStats()` / `QtlSumStats()` constructor.
 
-> **The loaders run no QC.** They build the raw collection with an empty
-> `qcInfo` slot. Allele harmonization, MAF/INFO/N filtering, and LD-mismatch QC
+> **The loaders run no QC.** They build the raw collection with empty
+> `qcOptions()`. Allele harmonization, MAF/INFO/N filtering, and LD-mismatch QC
 > are a separate, mandatory step — `summaryStatsQc()` — documented in the
 > *Quality Control for GWAS and QTL Summary Statistics* vignette. Downstream
-> pipelines reject collections whose `qcInfo` is empty.
+> pipelines reject collections whose `qcOptions()` is empty.
 
 ```{r load-packages}
 library(pecotmr)
@@ -305,9 +305,10 @@ length(gwsMapped[[1]])
 
 If a `region` is supplied and the sumstats file is **compressed with bgzip and
 indexed with tabix** (a `<file>.tbi` must exist in the same directory), only
-that region is read. Plain-text files are read whole and the region is ignored
-with a warning. The tabix header line must begin with `#` so its column names
-can be recovered.
+that region is read. Plain-text files are read whole, with a warning, and the
+region then selects the variants kept. Given in R, a `region` is a `GRanges`;
+the path of a BED file also works, read as BED with a 0-based start. The tabix
+header line must begin with `#` so its column names can be recovered.
 
 ```{r tabix-region}
 tabixDf <- sumstatsDf
@@ -325,7 +326,7 @@ gwsRegion <- loadGwasSumStatsFromManifest(
     data.frame(study = "MyGWAS", sumStatsPath = gz),
     genome = "GRCh38",
     ldReference = ldReference,
-    region = "22:14560000-14565000"
+    which = GenomicRanges::GRanges("22:14560000-14565000")
 )
 length(gwsRegion[[1]]) # only the two variants in the region
 ```
@@ -398,7 +399,7 @@ study; override the FORMAT tag names with `formatMapping` if they differ from
 ## Next steps
 
 The collections carry no QC yet. Run `summaryStatsQc()` before any downstream
-analysis (it populates `qcInfo`; downstream pipelines require it):
+analysis (it fills `qcOptions()`; downstream pipelines require it):
 
 ```{r qc, eval=FALSE}
 gws_qcd <- summaryStatsQc(gws, ldMismatchQcMethod = "slalom")

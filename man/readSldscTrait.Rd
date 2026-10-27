@@ -4,10 +4,10 @@
 \alias{readSldscTrait}
 \title{Read S-LDSC outputs from polyfun for one trait/run}
 \usage{
-readSldscTrait(prefix)
+readSldscTrait(path)
 }
 \arguments{
-\item{prefix}{Character. Path prefix to the polyfun outputs for one
+\item{path}{Character. Path prefix to the polyfun outputs for one
 trait/run. The function appends `.results`, `.log`, and `.part_delete` to
 this prefix. Example: `"/path/to/cwd/CAD_META.filtered.sumstats.gz"`.}
 }

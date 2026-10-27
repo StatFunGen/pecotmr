@@ -20,8 +20,6 @@
     "bgenSampleIdsCpp",
     "dentistIterativeImpute",
     "dentistIterativeImputeFactor",
-    "lassosumRssCpp",
-    "lassosumRssFactorCpp",
     "ldThresholdComponents",
     "penalizedRssCpp",
     "penalizedRssFactorCpp",

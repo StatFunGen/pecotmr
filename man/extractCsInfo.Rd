@@ -7,7 +7,7 @@
 extractCsInfo(fmRow, csNames, topLociTable, ldSource)
 }
 \arguments{
-\item{fmRow}{A \code{\link{fineMappingRow}}, or a single-row
+\item{fmRow}{A \code{\link{FineMappingRow}}, or a single-row
 fine-mapping collection as returned by
 \code{\link{fineMappingResult}}, carrying the SuSiE fit and
 variant ids.}
@@ -59,7 +59,7 @@ vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
 fit <- list(pip = c(0.1, 0.7, 0.2), sets = list(cs = list(L_1 = c(1, 2))))
 tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2),
   z = c(1.0, 3.5, -0.5))
-fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
+fe <- FineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 # A single credible set has no between-CS correlation (cs_corr_* are NA), so
 # the ldSource is not consulted here.
 extractCsInfo(fe, csNames = "L_1", topLociTable = tl,

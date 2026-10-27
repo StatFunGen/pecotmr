@@ -22,13 +22,20 @@ NULL
 
 #' @title Fine-Mapping Row
 #' @description One row's worth of fine-mapping: the variants and the stored
-#'   fit. Build one with \code{\link{fineMappingRow}} and pass a list of them
+#'   fit. Build one with \code{\link{FineMappingRow}} and pass a list of them
 #'   as a collection's \code{entry} argument.
 #' @slot variants A \code{GRanges} of the fit's variants whose metadata
 #'   columns are the per-variant \code{topLoci} values.
 #' @slot susieFit The stored fine-mapping fit, or \code{NULL}.
 #' @slot cvResult Cross-validation payload, or \code{NULL}.
-#' @seealso \code{\link{fineMappingRow}},
+#' @slot fitVariants The ids of the variants the stored fit was made with, in
+#'   the fit's own order, recorded when the row is built; empty for a row with
+#'   no fit. A row narrowed to fewer variants keeps them, which is how reading
+#'   the fit can tell it describes more variants than the row now holds.
+#' @section Coercion: \code{as(x, "GRanges")} gives the row's variants with
+#'   their per-variant \code{topLoci} columns: the element a collection
+#'   stores for it.
+#' @seealso \code{\link{FineMappingRow}},
 #'   \code{\linkS4class{TwasWeightsRow}}
 #' @export
 setClass(
@@ -36,9 +43,10 @@ setClass(
     representation(
         variants = "GRanges",
         susieFit = "ANY",
-        cvResult = "ANY"
+        cvResult = "ANY",
+        fitVariants = "character"
     ),
-    prototype(susieFit = NULL, cvResult = NULL)
+    prototype(susieFit = NULL, cvResult = NULL, fitVariants = character(0))
 )
 
 #' @importFrom checkmate makeAssertCollection assertList
@@ -78,19 +86,19 @@ methods::setValidity("FineMappingRow", function(object) {
 #'   \code{variantIds}.
 #' @param cvResult Optional cross-validation payload.
 #' @return A \code{\linkS4class{FineMappingRow}}.
-#' @seealso \code{\link{twasWeightsRow}}
+#' @seealso \code{\link{TwasWeightsRow}}
 #' @examples
 #' tl <- data.frame(
 #'     variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
 #'     pip = c(0.9, 0.1)
 #' )
-#' row <- fineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
+#' row <- FineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
 #' QtlFineMappingResult(
 #'     studyName = "s1", context = "c1", trait = "g1", method = "susie",
 #'     entry = list(row)
 #' )
 #' @export
-fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
+FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     vids <- as.character(variantIds)
     bare <- .variantIdsToGRanges(vids, "variantIds")
     tl <- as_tibble(topLoci)
@@ -113,14 +121,14 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         .fmRowCheckIdOrder(vids, as.character(tl$variant_id))
     }
     gr <- .fmRowAttachPayload(bare, tl)
-    obj <- new(
+    fitted <- length(susieFit) > 0L || !is.null(cvResult)
+    new(
         "FineMappingRow",
         variants = gr,
         susieFit = susieFit,
-        cvResult = cvResult
+        cvResult = cvResult,
+        fitVariants = if (fitted) .grVariantIds(bare) else character(0)
     )
-    validObject(obj)
-    obj
 }
 
 # The row a cross-validation-only fit leaves (CrossValidationParam(fitFullData =
@@ -129,7 +137,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # a resume cache only reuses them for another cross-validation-only run.
 # @noRd
 .fmCvOnlyRow <- function(cvResult = NULL) {
-    fineMappingRow(
+    FineMappingRow(
         variantIds = character(0),
         susieFit = NULL,
         topLoci = tibble(),
@@ -187,7 +195,7 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
             (!is.null(fit$fitted_wc2) && !is.null(fit$alpha)))
 }
 
-# Chromosome of the fit's variants (matches topLoci's `chrom`, no "chr").
+# Chromosome of the fit's variants, as topLoci's `chrom` spells it.
 # @noRd
 .fsusieChrom <- function(fit) {
     vid <- names(fit$csd_X)
@@ -857,26 +865,59 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     !(inCs & !is.na(pur) & pur < minPurity)
 }
 
-# Project a posterior-view data.frame to GRanges (empty GRanges when empty).
+# A tabular view handed back as a Bioconductor DataFrame. The views assemble
+# tibbles (dplyr is how they are built); a table attached to an S4 result is
+# a DataFrame, as mcols() and colData() are, so the conversion happens once,
+# at the accessor. check.names = FALSE keeps names such as PP.H4.abf.
 # @noRd
-.fmeTopLociGRanges <- function(out) {
+.asViewDataFrame <- function(tbl) {
+    S4Vectors::DataFrame(tbl, check.names = FALSE)
+}
+
+# A per-variant table as ranges: one width-1 range per row at the position its
+# `variant_id` names, every column kept as mcols. topLoci(), credibleSets(),
+# marginalEffects() and lbf() all convert through here once their rows are
+# stacked, so the aggregate form is a GRanges as well as the single-entry
+# one, and either narrows with subsetByOverlaps().
+# @noRd
+.variantTableGRanges <- function(out) {
     if (is.null(out)) {
         return(GenomicRanges::GRanges())
     }
-    # Keep the column schema when there are no retained variants, so an
-    # empty result is inspectable the same way a populated one is.
     if (nrow(out) == 0L) {
-        return(S4Vectors::`mcols<-`(
-            GenomicRanges::GRanges(),
-            value = S4Vectors::DataFrame(out)
-        ))
+        return(.emptyTableGRanges(out))
     }
     parsed <- parseVariantId(out$variant_id)
     gr <- GenomicRanges::GRanges(
-        seqnames = str_c("chr", parsed$chrom),
+        seqnames = parsed$chrom,
         ranges = IRanges::IRanges(start = parsed$pos, width = 1L)
     )
     S4Vectors::`mcols<-`(gr, value = S4Vectors::DataFrame(out))
+}
+
+# An fSuSiE credible-band table as ranges: one width-1 range per grid point,
+# on the chromosome and at the position its `chrom` / `pos` columns give --
+# the same placement fsusieAffectedRegions() uses for its regions.
+# @noRd
+.bandTableGRanges <- function(out) {
+    if (nrow(out) == 0L) {
+        return(.emptyTableGRanges(out))
+    }
+    gr <- GenomicRanges::GRanges(
+        seqnames = out$chrom,
+        ranges = IRanges::IRanges(start = as.integer(out$pos), width = 1L)
+    )
+    S4Vectors::`mcols<-`(gr, value = S4Vectors::DataFrame(out))
+}
+
+# An empty table as an empty GRanges that keeps the column schema, so an
+# empty result is inspectable the same way a populated one is.
+# @noRd
+.emptyTableGRanges <- function(out) {
+    S4Vectors::`mcols<-`(
+        GenomicRanges::GRanges(),
+        value = S4Vectors::DataFrame(out)
+    )
 }
 
 
@@ -895,6 +936,21 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         abort(msg)
     }
     sort(m$idxA)
+}
+
+# Where each of `common` sits among the variables `fitted` the fit was made
+# with. An element replaced through `[[<-` can hold a variant its fit never
+# had, which leaves no column to restrict to.
+# @noRd
+.adjustPipsFitIdx <- function(common, fitted) {
+    idx <- .fitColumnOf(common, fitted)
+    if (anyNA(idx)) {
+        abort(glue(
+            "adjustPips: {sum(is.na(idx))} of the row's variants are not ",
+            "among the {length(fitted)} its fit was made with."
+        ))
+    }
+    idx
 }
 
 # Restrict the SuSiE fit to `keepIdx` and renormalize every single-effect
@@ -1582,9 +1638,15 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 #' @noRd
 setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
     vids <- variantIds(x)
-    keepIdx <- .adjustPipsKeepIdx(vids, keepVariants)
-    common <- vids[keepIdx]
-    fit <- .adjustPipsSubsetFit(susieFit(x), keepIdx, length(vids))
+    common <- vids[.adjustPipsKeepIdx(vids, keepVariants)]
+    # The fit's columns are its own variables, which a row narrowed since
+    # holds only some of, so the kept variants are found in it by id.
+    fitted <- .partsFitIds(x)
+    fit <- .adjustPipsSubsetFit(
+        susieFit(x),
+        .adjustPipsFitIdx(common, fitted),
+        length(fitted)
+    )
     newTopLoci <- .adjustPipsRebuildTopLoci(
         .fmeTopLociFromElement(variants(x)),
         fit,
@@ -1592,7 +1654,7 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
     )
     # cvResult is sample-indexed (partition + held-out predictions), not
     # variant-indexed, so it carries through a variant-subsetting unchanged.
-    fineMappingRow(
+    FineMappingRow(
         variantIds = common,
         susieFit = fit,
         topLoci = newTopLoci,
@@ -1617,6 +1679,9 @@ setMethod("susieFit", "FineMappingRow", function(x) x@susieFit)
 #' @rdname cvResult
 #' @export
 setMethod("cvResult", "FineMappingRow", function(x) x@cvResult)
+
+# @noRd
+.fmRowFitVariants <- function(x) x@fitVariants
 
 #' @rdname show-methods
 #' @export
@@ -1647,3 +1712,10 @@ setGeneric("variants", function(x, ...) standardGeneric("variants"))
 
 # @noRd
 setMethod("variants", "FineMappingRow", function(x) x@variants)
+
+#' @rdname FineMappingRow-class
+#' @name coerce,FineMappingRow,GRanges-method
+#' @aliases coerce,FineMappingRow,GRanges-method
+#' @usage NULL
+#' @exportMethod coerce
+setAs("FineMappingRow", "GRanges", function(from) variants(from))

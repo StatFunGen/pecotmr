@@ -11,7 +11,7 @@ learnTwasWeights(
   studyName = "",
   context = "",
   trait = "",
-  numThreads = 1,
+  BPPARAM = SerialParam(),
   fittedModels = NULL,
   fitRetention = c("none", "slim", "full"),
   weightStandardized = FALSE,
@@ -44,10 +44,11 @@ weights.}
 \item{trait}{Character. Trait identity label recorded on the resulting
 weights.}
 
-\item{numThreads}{The number of threads to use for parallel processing. If
-set to -1, the function uses all available cores. If set to 0 or 1, no
-parallel processing is performed. If set to 2 or more, parallel processing
-is enabled with that many threads.}
+\item{BPPARAM}{A \code{BiocParallelParam} the methods run on;
+\code{SerialParam()} (default) runs them one at a time. Each draws from
+its own random-number stream, seeded by \code{seed}, else by the param's
+own \code{RNGseed}, else by one draw from the session RNG, so a run
+gives the same numbers however many workers it has.}
 
 \item{fittedModels}{Named list of fitted SuSiE-family models, keyed by
 token (\code{susie}, \code{susieInf}, \code{mvsusie}, \code{fsusie}).
@@ -77,10 +78,9 @@ messages, 1 = suppress external package messages (default), 2 = show all
 messages including those from external packages.}
 
 \item{seed}{Integer or \code{NULL}. When supplied, seeds the main-process
-RNG and the parallel method-fitting RNG via the \code{BiocParallel}
-\code{RNGseed}, for reproducibility under multi-threading. The
+RNG and the streams the methods draw from (see \code{BPPARAM}). The
 main-process seed is scoped to the call, so the session RNG is left as it
-was found. \code{NULL} (default) does not seed at all.}
+was found. \code{NULL} (default) seeds neither.}
 }
 \value{
 A list where each element is named after a method and contains the

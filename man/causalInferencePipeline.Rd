@@ -16,9 +16,14 @@ causalInferencePipeline(
 }
 \arguments{
 \item{gwasSumStats}{A \code{\link{GwasSumStats}} object. Must be QC'd
-(\code{length(qcInfo(x)) > 0L}). A study may span many rows (one per
+(\code{length(qcOptions(x)) > 0L}). A study may span many rows (one per
 chromosome or LD block); each QTL tuple is scored once per study, over the
-statistics of the rows its window overlaps.}
+statistics of the rows its window overlaps. A tuple's variants outside
+every loaded block of a study it overlaps are an error where the blocks'
+ranges were given (\code{regionGiven}, see
+\code{\linkS4class{GwasSumStats}}), since they lie in a block that was not
+loaded, and a warning for more than one in a row past a range computed
+from the GWAS variants.}
 
 \item{twasWeights}{Optional \code{\link{TwasWeights}} carrying per-(study,
 context, trait, method) weights. When supplied, drives the TWAS-Z
@@ -39,7 +44,9 @@ Selection runs when \code{cutoff > 0} or \code{pvalCutoff} is finite;
 it keeps the highest-\code{metric} method among those clearing both
 gates that also produced a finite TWAS Z. Otherwise every method is
 carried through. Ports the legacy \code{twas_pipeline}
-\code{pick_best_model} / \code{update_twas_method}.}
+\code{pick_best_model} / \code{update_twas_method}. The metrics describe
+each fit on all of its variants, so selection warns about a row narrowed
+since its fit (condition class \code{pecotmrFitCoverage}).}
 
 \item{mrParam}{How Mendelian randomization is run, built with
 \code{\link{MrParam}}: \code{method} (\code{"ivwPerVariant"}, the
@@ -59,7 +66,9 @@ effect / weight sign-flipped accordingly; when FALSE, match on exact
 alleles only, so a ref/alt swap is treated as a distinct variant.}
 }
 \value{
-A \code{GRanges} as described above.
+A \code{GRanges} as described above, its \code{seqinfo()} naming
+  the genome build the inputs name (inputs naming different builds are
+  refused).
 }
 \description{
 Per-region pipeline that pairs QTL-derived weight vectors

@@ -116,7 +116,7 @@ phenoSe <- SummarizedExperiment::SummarizedExperiment(
 )
 
 qtlDatasetExample <- QtlDataset(
-    study = "study1",
+    studyName = "study1",
     genotypes = gh,
     phenotypes = list(brain = phenoSe),
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
@@ -158,7 +158,7 @@ qtlSumStatsExample <- QtlSumStats(
     entry = list(qtlGr),
     genome = "hg19",
     ldReference = gh,
-    qcInfo = list(prebuilt = "synthetic example data; QC bypassed")
+    qcOptions = list(prebuilt = "synthetic example data; QC bypassed")
 )
 
 # -----------------------------------------------------------------------------
@@ -192,7 +192,7 @@ gwasSumStatsS4Example <- GwasSumStats(
     entry = list(gwasGr),
     genome = "hg19",
     ldReference = gh,
-    qcInfo = list(prebuilt = "synthetic example data; QC bypassed")
+    qcOptions = list(prebuilt = "synthetic example data; QC bypassed")
 )
 
 # -----------------------------------------------------------------------------
@@ -210,7 +210,7 @@ phenoSe2 <- SummarizedExperiment::SummarizedExperiment(
 )
 
 qd2 <- QtlDataset(
-    study = "study2",
+    studyName = "study2",
     genotypes = gh,
     phenotypes = list(brain = phenoSe2),
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
@@ -289,7 +289,7 @@ qtlSumStatsMulticontextExample <- QtlSumStats(
     entry = multiCtxEntries,
     genome = "hg19",
     ldReference = gh,
-    qcInfo = list(prebuilt = "synthetic multi-context example; QC bypassed")
+    qcOptions = list(prebuilt = "synthetic multi-context example; QC bypassed")
 )
 
 # -----------------------------------------------------------------------------

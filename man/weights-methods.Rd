@@ -42,7 +42,7 @@ Extract weights from a \code{TwasWeightsRow} or from one entry
   of a \code{TwasWeights} collection.
 }
 \examples{
-twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
+twe <- TwasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
   weightStandardized = FALSE)
 weights(twe)

@@ -15,8 +15,8 @@ chromPaths(x, ...)
 \item{...}{Additional arguments passed on to methods.}
 }
 \value{
-A named character vector mapping canonical chromosome to path or
-  prefix, possibly empty.
+A named character vector mapping each chromosome, in UCSC style
+  (\code{"chr21"}), to its path or prefix, possibly empty.
 }
 \description{
 The chromosome-to-path map of a sharded

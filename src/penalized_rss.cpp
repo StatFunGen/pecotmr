@@ -1,11 +1,17 @@
 // penalized_rss.cpp — Coordinate descent for penalized regression on RSS objective
 //
-// Generalizes lassosum_rss.cpp to support multiple penalties:
+// The package's one RSS coordinate-descent solver, for the penalties
 //   LASSO, MCP, SCAD, L0, L0L1, L0L2
+// lassosum (Mak et al 2017) is its LASSO at alpha = 1: the same updates in the
+// same order, so the same coefficients bit for bit.
 //
 // Objective (smooth part): min_beta  beta'R beta - 2 beta'z + penalty(beta)
 // where R is the LD matrix shrunk to R_s = (1 - s) R + s I (s = `shrink`;
 // 0 for an LD matrix already shrunk) and z = bhat / sqrt(n).
+//
+// LASSO, MCP and SCAD mix in a ridge term the way glmnet and ncvreg do:
+// l1 = lambda * alpha, l2 = lambda * (1 - alpha), penalty = 2 P(beta; l1) +
+// l2 beta'beta. LASSO with alpha < 1 is the elastic net, alpha = 0 ridge.
 //
 // The coordinate descent update is identical across penalties; only the
 // proximal/thresholding operator differs.  MCP/SCAD operators are ported
@@ -39,11 +45,17 @@ static Penalty parse_penalty(const std::string& s) {
 // v = R_jj (diagonal of LD matrix for coordinate j)
 // l1, l2 = L1 and L2 penalty weights (for elastic net: l1 = lambda*alpha,
 //          l2 = lambda*(1-alpha))
+//
+// Each operator is the exact minimizer of the one-coordinate problem
+// v b^2 - 2 z b + 2 P(b; l1) + l2 b^2, whose curvature is a = v + l2. ncvreg
+// writes the curvature v (1 + l2), which is the same only when v = 1: a
+// correlation matrix's diagonal, but not a diagonal the shrinkage or a
+// genotype factor leaves slightly off 1.
 
 static inline double lasso_thresh(double z, double l1, double l2, double v) {
   double az = std::abs(z);
   if (az <= l1) return 0.0;
-  return std::copysign(az - l1, z) / (v * (1.0 + l2));
+  return std::copysign(az - l1, z) / (v + l2);
 }
 
 // MCP (minimax concave penalty) — Breheny & Huang 2011
@@ -51,10 +63,11 @@ static inline double lasso_thresh(double z, double l1, double l2, double v) {
 static inline double mcp_thresh(double z, double l1, double l2,
                                 double gamma, double v) {
   double az = std::abs(z);
+  double a = v + l2;
   if (az <= l1) return 0.0;
-  if (az <= gamma * l1 * (1.0 + l2))
-    return std::copysign(az - l1, z) / (v * (1.0 + l2 - 1.0 / gamma));
-  return z / (v * (1.0 + l2));
+  if (az <= gamma * l1 * a)
+    return std::copysign(az - l1, z) / (a - 1.0 / gamma);
+  return z / a;
 }
 
 // SCAD (smoothly clipped absolute deviation) — Fan & Li 2001
@@ -62,13 +75,14 @@ static inline double mcp_thresh(double z, double l1, double l2,
 static inline double scad_thresh(double z, double l1, double l2,
                                  double gamma, double v) {
   double az = std::abs(z);
+  double a = v + l2;
   if (az <= l1) return 0.0;
-  if (az <= l1 * (2.0 + l2))
-    return std::copysign(az - l1, z) / (v * (1.0 + l2));
-  if (az <= gamma * l1 * (1.0 + l2))
+  if (az <= l1 * (1.0 + a))
+    return std::copysign(az - l1, z) / a;
+  if (az <= gamma * l1 * a)
     return std::copysign(az - gamma * l1 / (gamma - 1.0), z) /
-           (v * (1.0 - 1.0 / (gamma - 1.0) + l2));
-  return z / (v * (1.0 + l2));
+           (a - 1.0 / (gamma - 1.0));
+  return z / a;
 }
 
 // L0 (+L1+L2) — Hazimeh & Mazumder 2020
@@ -118,28 +132,29 @@ static double scad_penalty_single(double bj, double lambda, double gamma) {
   return lambda * lambda * (gamma + 1.0) / 2.0;
 }
 
+// The penalty the thresholding operators minimize: 2 P(beta; l1) + l2
+// beta'beta, so MCP and SCAD are evaluated at l1 = lambda * alpha, the
+// threshold the operators use, not at lambda.
 static double compute_penalty(Penalty pen, const vec& beta,
                                double lambda, double alpha, double gamma,
                                double lambda0, double lambda2) {
   double val = 0.0;
   double l1 = lambda * alpha;
+  double l2 = lambda * (1.0 - alpha);
   int p = beta.n_elem;
   switch (pen) {
     case PEN_LASSO:
-      val = 2.0 * l1 * sum(abs(beta));
+      val = 2.0 * l1 * sum(abs(beta)) + l2 * dot(beta, beta);
       break;
     case PEN_MCP:
       for (int j = 0; j < p; j++)
-        val += 2.0 * alpha * mcp_penalty_single(beta(j), lambda, gamma);
-      // Add ridge part
-      if (alpha < 1.0)
-        val += lambda * (1.0 - alpha) * dot(beta, beta);
+        val += 2.0 * mcp_penalty_single(beta(j), l1, gamma);
+      val += l2 * dot(beta, beta);
       break;
     case PEN_SCAD:
       for (int j = 0; j < p; j++)
-        val += 2.0 * alpha * scad_penalty_single(beta(j), lambda, gamma);
-      if (alpha < 1.0)
-        val += lambda * (1.0 - alpha) * dot(beta, beta);
+        val += 2.0 * scad_penalty_single(beta(j), l1, gamma);
+      val += l2 * dot(beta, beta);
       break;
     case PEN_L0: {
       int nnz = 0;

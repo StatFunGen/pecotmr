@@ -18,7 +18,8 @@ An object of \code{template}'s class.
 }
 \description{
 The inverse of \code{\link{flattenTupleRanges}}: ranges are grouped by the
-identity tuple they carry and returned to \code{template}'s elements, so the
+identity tuple they carry -- and, for a tuple split across chromosomes, by
+chromosome -- and returned to \code{template}'s elements, so the
 collection's class, its per-element payloads and its collection-level slots
 all survive a plyranges round trip.
 }

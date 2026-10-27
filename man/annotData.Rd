@@ -13,7 +13,7 @@ annotData(x)
 \item{x}{An \code{\link{SldscData}} object.}
 }
 \value{
-A \code{data.frame} of annotations (CHR, SNP, annotation columns).
+A \code{DataFrame} of annotations (CHR, SNP, annotation columns).
 }
 \description{
 Get the annotation table from an SldscData

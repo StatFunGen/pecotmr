@@ -36,10 +36,10 @@ table to an LD reference panel. Two are frequently encountered in practice:
 The `summaryStatsQc()` function provides a convenient interface to performing
 many QC tasks to address these issues. It takes a `GwasSumStats` or
 `QtlSumStats` object (see the *Building QtlSumStats and GwasSumStats objects*
-vignette), and returns a new collection of the same class with updated entries
-and a populated `qcInfo` slot. Downstream pipelines require the `qcInfo` to be
-populated, so QC is mandatory before fine-mapping, TWAS-weight learning,
-colocalization, etc.
+vignette), and returns a new collection of the same class with updated entries,
+the options it ran with recorded in `qcOptions()`, and what it did to each row
+in `qcInfo()`. Downstream pipelines require `qcOptions()` to be filled, so QC is
+mandatory before fine-mapping, TWAS-weight learning, colocalization, etc.
 
 ```{r load-packages}
 library(pecotmr)
@@ -75,15 +75,13 @@ gws_qcd <- summaryStatsQc(
 ```
 
 `gws_qc` is a new `GwasSumStats` of the same class, with cleaned
-entries and a populated `qcInfo` slot. The per-entry audit record is
-accessible via `qcInfo()`:
+entries. What QC did to each row is a table, `qcInfo()`, and the options it ran
+with are `qcOptions()`:
 
 ```{r inspect-qcinfo, eval=FALSE}
-qc <- qcInfo(gws_qcd)
-str(qc$entryAudit[[1]]) # per-entry counts: variantsIn, mungeSumstatsDropped,
-# keepVariantsDropped, skipRegionDropped, matchedAgainstLdReference,
-# krigingOutliersDropped, ldMismatchOutliersDropped, ...
-qc$options # the curated knobs you passed (frozen for provenance)
+qcInfo(gws_qcd) # one row per tuple: variantsIn, matchedAgainstLdReference,
+# krigingOutliersDropped, ldMismatchOutliersDropped, ..., variantsOut
+qcOptions(gws_qcd)$options # the knobs you passed, kept for provenance
 ```
 
 A non-zero `mafCutoff` requires every entry to carry a `MAF` mcol; non-zero
@@ -193,7 +191,7 @@ It uses `susieR`'s kriging RSS diagnostic:
     ~`N(0, 1)` when the z-scores and LD panel agree. A large residual flags an
     allele-flip / LD-mismatch outlier; variants below a two-sided p-value
     threshold (default `5e-8`) are dropped. The number removed is recorded in
-    the `qcInfo` audit as `krigingOutliersDropped`.
+    the `qcInfo()` table as `krigingOutliersDropped`.
 
 Because it needs a per-region LD matrix and the kriging diagnostic, this is an
 **RSS-only** check: it draws `R` from each row's LD reference and

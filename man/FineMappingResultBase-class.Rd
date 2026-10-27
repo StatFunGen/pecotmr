@@ -24,3 +24,22 @@ from individual-level data). Used downstream to check that the rows a
 pipeline combines share an LD reference.}
 }}
 
+\section{Narrowed rows}{
+ Each row records in its \code{fitVariants} column
+  the ids of the variants its fit was made with (none for a row without a
+  fit). A row narrowed since -- by \code{endoapply()} or \code{[[<-} --
+  keeps its fit as it was, so every reader of the fit warns, with
+  condition class \code{pecotmrFitCoverage}, when a row holds fewer
+  variants than its fit describes. The readers are the accessors
+  (\code{susieFit()}, \code{lbf()}, \code{cvResult()},
+  \code{credibleSetSummary()} and the fSuSiE views),
+  \code{computeCsCorrelation()}, \code{susieResult()},
+  \code{extractCsInfo()}, \code{extractTopPipInfo()},
+  \code{writeGwasVcf()}, and the pipelines that score the fits:
+  \code{colocPipeline(adjustPips = FALSE)}, \code{qtlEnrichmentPipeline()}
+  and \code{twasWeightsPipeline()}. Values held per variant, such as
+  \code{topLoci()}, are narrowed with the row and do not warn. Nothing is
+  rescaled: \code{\link{intersectVariants}} restricts a fit explicitly, as
+  \code{colocPipeline()} does by default.
+}
+

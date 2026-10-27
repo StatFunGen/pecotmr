@@ -8,9 +8,7 @@ QtlDataset(
   studyName,
   genotypes,
   phenotypes,
-  genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
-  scaleResiduals = TRUE,
-  genotypeFilterParam = GenotypeFilterParam()
+  genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
 )
 }
 \arguments{
@@ -26,34 +24,6 @@ context. Each SE must have \code{rowRanges} carrying trait positions and
 \item{genotypeCovariates}{Numeric matrix of genotype-derived covariates
 (e.g., ancestry PCs); rows are samples. Becomes the \code{colData} of the
 genotype experiment.}
-
-\item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
-
-\item{genotypeFilterParam}{Which variants and samples to keep, built with
-\code{\link{GenotypeFilterParam}}. A bare list is refused, since it
-cannot be checked. Each field is recorded on the object and applied
-lazily, at extraction time inside \code{genotypes()} /
-\code{residualizedGenotypes()}:
-\itemize{
-  \item \code{mafCutoff} --- drop variants with
-    \code{MAF < mafCutoff}. Unset means 0 (no filter).
-  \item \code{macCutoff} --- a minor-allele-count threshold, converted
-    to a MAF threshold as \code{max(mafCutoff, macCutoff / (2 * n))}
-    with \code{n} the post-narrowing sample count of the extracted
-    block. Unset means 0.
-  \item \code{xvarCutoff} --- drop variants whose column variance is
-    below this. Unset means 0.
-  \item \code{imissCutoff} --- drop samples whose missing-genotype rate
-    exceeds this. Unset means 0.
-  \item \code{keepSamples} --- subset the dataset to these samples,
-    narrowing \code{colData} and \code{sampleMap} together so the
-    sample set has one home rather than two. Unset, or
-    \code{character(0)}, means no restriction.
-  \item \code{keepVariants} --- retain only these variants, before
-    per-block QC. Unset, or \code{character(0)}, means no restriction.
-  \item \code{keepIndel} --- when \code{FALSE}, drop variants whose
-    alleles are not single nucleotides. Unset means \code{TRUE}.
-}}
 }
 \value{
 A \code{QtlDataset} object.
@@ -66,6 +36,16 @@ Construct a \code{QtlDataset}: one study's individual-level
   context experiment. The \code{sampleMap} is derived from the column
   names actually present in each, so contexts observing different sample
   subsets are recorded rather than assumed away.
+}
+\details{
+A \code{QtlDataset} holds data only. Which variants and samples
+  an analysis keeps, and whether residuals are scaled, are the pipeline's
+  settings (\code{\link{GenotypeFilterParam}} and
+  \code{\link{ResidualizationParam}} on \code{\link{fineMappingPipeline}},
+  \code{\link{twasWeightsPipeline}} and \code{\link{colocboostPipeline}}),
+  applied per extracted block. To work with part of the data, subset the
+  dataset itself: \code{x[i, j, k]} narrows features, samples and
+  contexts.
 }
 \examples{
 panel <- readGenotypes(

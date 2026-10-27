@@ -12,12 +12,6 @@
 #' @importFrom magrittr is_in
 NULL
 
-#' Strip "chr" prefix from chromosome identifiers.
-#' @param x Character vector of chromosome identifiers (e.g., "chr1", "chrX").
-#' @return Character vector with "chr" prefix removed (e.g., "1", "X").
-#' @noRd
-stripChrPrefix <- function(x) str_remove(x, "^chr")
-
 #' Canonicalize chromosome identifiers to a normalized string.
 #'
 #' Strips a leading "chr"/"ch" prefix (case-insensitive), uppercases, drops
@@ -52,16 +46,84 @@ canonChromLabel <- function(x) {
         replace(ok & x == "M", "MT")
 }
 
-#' Ensure a leading chr prefix on a chromosome identifier.
+#' Chromosome identifiers in the UCSC style.
 #'
-#' Case-insensitive additive companion to \code{canonChrom} (which strips the
-#' prefix): \code{"1"}, \code{"chr1"}, \code{"CHR1"} all become \code{"chr1"}.
-#' Does not remap 23/24/M.
+#' The style \code{seqlevelsStyle(x) <- "UCSC"} gives, and the only one pecotmr
+#' holds: every chromosome label that enters -- read from a file, parsed from a
+#' variant id, or passed to a constructor or as a range argument -- goes
+#' through here once, so comparisons inside the package are exact.
+#' \code{"1"}, \code{"chr1"},
+#' \code{"CHR1"} and \code{"01"} all become \code{"chr1"}; the numeric codes
+#' fold as in \code{canonChrom} (\code{23 -> chrX}, \code{24 -> chrY}); and
+#' the mitochondrion, \code{"M"} or \code{"MT"}, becomes \code{"chrM"}. A
+#' label outside the standard set keeps its spelling behind the prefix.
 #' @param x Character or numeric vector of chromosome identifiers.
-#' @return Character vector with a lowercase \code{"chr"} prefix.
+#' @return Character vector of UCSC-style chromosome names.
 #' @noRd
 withChrPrefix <- function(x) {
-    str_c("chr", str_remove(as.character(x), regex("^chr", ignore_case = TRUE)))
+    bare <- str_remove(as.character(x), regex("^chr", ignore_case = TRUE))
+    canon <- canonChrom(bare)
+    standard <- is_in(canon, .STANDARD_CHROMS)
+    str_c("chr", if_else(standard, str_replace(canon, "^MT$", "M"), bare))
+}
+
+# The chromosomes withChrPrefix() spells as UCSC does, in canonChrom() form.
+# @noRd
+.STANDARD_CHROMS <- c(as.character(seq_len(22L)), "X", "Y", "MT")
+
+# `gr` with its chromosomes in UCSC style, for ranges entering from outside:
+# a constructor's ranges, a range argument. Strand, metadata columns and the
+# genome build are kept, and ranges already in UCSC style come back as they
+# are. Anything but ranges (NULL, a stray value a constructor is about to
+# refuse) passes through untouched.
+# @noRd
+.ucscRanges <- function(gr) {
+    if (!methods::is(gr, "GenomicRanges") && !methods::is(gr, "GRangesList")) {
+        return(gr)
+    }
+    old <- GenomeInfoDb::seqlevels(gr)
+    new <- withChrPrefix(old)
+    if (identical(old, new)) {
+        return(gr)
+    }
+    if (!anyDuplicated(new)) {
+        return(GenomeInfoDb::renameSeqlevels(gr, set_names(new, old)))
+    }
+    # Two spellings of one chromosome ("1" and "chr1") cannot both be
+    # renamed onto one name, so the ranges are rebuilt on the merged names.
+    out <- S4Vectors::`mcols<-`(
+        GenomicRanges::GRanges(
+            withChrPrefix(as.character(GenomicRanges::seqnames(gr))),
+            IRanges::ranges(gr),
+            strand = GenomicRanges::strand(gr)
+        ),
+        value = S4Vectors::mcols(gr)
+    )
+    .withGenome(out, .oneBuild(gr))
+}
+
+# A collection constructor's `entry` list with every element's chromosomes in
+# UCSC style; a NULL element stays NULL.
+# @noRd
+.ucscEntries <- function(entry) {
+    map(as.list(entry), .ucscRanges)
+}
+
+# A context or genotype experiment with its rowRanges in UCSC style, so a
+# dataset compares them exactly with every other range pecotmr holds.
+# @noRd
+.ucscExperiment <- function(se) {
+    if (!methods::is(se, "RangedSummarizedExperiment")) {
+        return(se)
+    }
+    old <- GenomeInfoDb::seqlevels(se)
+    if (identical(withChrPrefix(old), old)) {
+        return(se)
+    }
+    SummarizedExperiment::`rowRanges<-`(
+        se,
+        value = .ucscRanges(SummarizedExperiment::rowRanges(se))
+    )
 }
 
 #' Order key for chromosome identifiers.
@@ -81,15 +143,11 @@ chromOrder <- function(x) {
     factor(x, levels = c(standard, extra), ordered = TRUE)
 }
 
-# Backwards-compat alias
-
 #' Strip build suffix from variant IDs (e.g., ":b38" or "_b38").
 #' @param x Character vector of variant IDs.
 #' @return Character vector with build suffix removed.
 #' @noRd
 stripBuildSuffix <- function(x) str_remove(x, "(:|_)b[0-9]+$")
-
-# Backwards-compat alias
 
 #' Test whether allele pairs are single-nucleotide (SNP, not indel).
 #'
@@ -162,8 +220,6 @@ isSnpAlleles <- function(a1, a2) {
     )
 }
 
-# Backwards-compat alias
-
 #' Detect the naming convention of variant IDs
 #'
 #' Examines variant ID strings to detect their format: whether they have a "chr"
@@ -220,22 +276,21 @@ detectVariantConvention <- function(ids) {
     )
 }
 
-# Backwards-compat alias for external callers
-
 #' Parse variant IDs into a data frame
 #'
 #' Converts variant IDs from any supported string format or data.frame into a
-#' standardized data.frame with a normalized character chrom, integer pos, and
-#' character allele columns (A2, A1). The chrom is canonicalized (chr stripped,
-#' uppercased, 23 -> X / 24 -> Y / M -> MT) but kept as a string so X/Y/MT
-#' survive. Supports colon-separated ("chr1:100:A:G"), underscore-separated
-#' ("1_100_A_G"), with or without "chr" prefix, and with optional build suffix
-#' (":b38" or "_b38"). The detected input convention is stored as an attribute.
+#' standardized data.frame with a character chrom, integer pos, and character
+#' allele columns (A2, A1). The chrom is spelled in UCSC style, as every
+#' chromosome pecotmr holds is ("chr1", "chrX", "chrM"; 23 -> chrX,
+#' 24 -> chrY). Supports colon-separated ("chr1:100:A:G"),
+#' underscore-separated ("1_100_A_G"), with or without "chr" prefix, and with
+#' optional build suffix (":b38" or "_b38"). The detected input convention is
+#' stored as an attribute.
 #'
 #' @param ids A character vector of variant IDs, or a data.frame with columns
 #'   "chrom", "pos", and allele columns (A2/A1 or ref/alt or any 4-column
 #'   layout).
-#' @return A tibble with columns "chrom" (character, normalized), "pos"
+#' @return A tibble with columns "chrom" (character, UCSC style), "pos"
 #'   (integer), "A2" (character), "A1" (character). The detected convention is
 #'   stored as \code{attr(result, "convention")}.
 #' @examples
@@ -259,7 +314,7 @@ parseVariantId <- function(ids) {
     # non-matching id yields an all-NA capture row (mirrors strcapture).
     m <- str_match(normalized, "^([^:]+):([^:]+):([^:]+):([^:]+)")
     data <- tibble(
-        chrom = canonChrom(m[, 2L]),
+        chrom = withChrPrefix(m[, 2L]),
         pos = as.integer(m[, 3L]),
         A2 = m[, 4L],
         A1 = m[, 5L]
@@ -274,7 +329,7 @@ parseVariantId <- function(ids) {
 .withCanonicalCoords <- function(ids) {
     # `value =` named: tibble's `[[<-` method carries an extra `j` formal, so a
     # third POSITIONAL argument binds to `j` and the write silently misfires.
-    coerced <- `[[<-`(ids, "chrom", value = canonChrom(ids$chrom))
+    coerced <- `[[<-`(ids, "chrom", value = withChrPrefix(ids$chrom))
     `[[<-`(coerced, "pos", value = as.integer(ids$pos))
 }
 
@@ -323,8 +378,10 @@ parseVariantId <- function(ids) {
 #' @param pos Integer position.
 #' @param A2 Character reference allele.
 #' @param A1 Character alternate/effect allele.
-#' @param chrPrefix Logical, whether to add "chr" prefix. Default TRUE. Ignored
-#'   if \code{convention} is provided.
+#' @param chrPrefix Logical. \code{TRUE} (default) spells the chromosome in UCSC
+#'   style (\code{chr1}, \code{chrX}, \code{chrM}); \code{FALSE} writes it
+#'   bare (\code{1}, \code{X}, \code{MT}). Ignored if \code{convention} is
+#'   provided.
 #' @param alleleSep Character, separator between pos/A2 and A2/A1 fields.
 #'   Default \code{":"} produces canonical \code{"chr1:100:A:G"}; \code{"_"}
 #'   produces mixed \code{"chr1:100_A_G"}. Ignored if \code{convention} is
@@ -353,17 +410,11 @@ formatVariantId <- function(
             ":"
         }
     }
-    # Normalize the chromosome (strip prefix, uppercase, map synonyms) then
-    # re-add the "chr" prefix if requested. canonChrom keeps X/Y/MT as strings.
-    chromClean <- canonChrom(chrom)
-    if (chrPrefix) {
-        str_c("chr", chromClean, ":", pos, alleleSep, A2, alleleSep, A1)
-    } else {
-        str_c(chromClean, ":", pos, alleleSep, A2, alleleSep, A1)
-    }
+    # UCSC style is pecotmr's own; the bare form is for a consumer that wants
+    # it (canonChrom keeps X/Y/MT as strings).
+    chromOut <- if (chrPrefix) withChrPrefix(chrom) else canonChrom(chrom)
+    str_c(chromOut, ":", pos, alleleSep, A2, alleleSep, A1)
 }
-
-# Backwards-compat alias for external callers
 
 #' Re-format variant IDs to a chosen output convention
 #'
@@ -380,8 +431,10 @@ formatVariantId <- function(
 #' name-based downstream consumers.
 #'
 #' @param ids A character vector of variant IDs in any supported format.
-#' @param chrPrefix Logical, whether to include "chr" prefix. Default TRUE.
-#'   Ignored if \code{convention} is provided.
+#' @param chrPrefix Logical. \code{TRUE} (default) writes the chromosome in
+#'   UCSC style (\code{chr1}, \code{chrM}), the style pecotmr uses
+#'   throughout; \code{FALSE} writes it bare. Ignored if \code{convention} is
+#'   provided.
 #' @param convention Optional list from \code{detectVariantConvention} or
 #'   \code{attr(parseVariantId(ids), "convention")}. When provided, the output
 #'   format is driven automatically by the detected convention.
@@ -1180,122 +1233,6 @@ matchVariants <- function(
     )
 }
 
-# Backwards-compat alias for external callers
-
-#' Parse a region string into its components
-#'
-#' Split a region identifier (e.g. \code{"chr1:100-200"} or
-#' \code{"chr1_100_200"}) into chromosome, start and end. Non-character or
-#' non-scalar input is returned unchanged.
-#'
-#' @param region A single region string.
-#' @return A vector/list with the chromosome, start and end, or the input
-#'   unchanged when it is not a scalar string.
-#' @importFrom stringr str_split
-#' @examples
-#' parseRegion("chr1:1000000-2000000")
-#' parseRegion("chr1_1000000_2000000")
-#' @export
-parseRegion <- function(region) {
-    if (!is.character(region) || length(region) != 1) {
-        return(region)
-    }
-
-    # Both documented spellings: "chr1:100-200" and the underscore form
-    # "chr1_100_200" that LD-block / region ids use. MT and M are accepted
-    # alongside X/Y -- canonChrom() below exists precisely to normalize them,
-    # and rejecting them here made that unreachable.
-    pattern <- "^chr[0-9XYMTm]+(:[0-9]+-[0-9]+|_[0-9]+_[0-9]+)$"
-    if (!str_detect(region, pattern)) {
-        abort(
-            "Input string format must be 'chr:start-end' or 'chr_start_end'."
-        )
-    }
-    parts <- str_split_1(region, "[:_-]")
-    tibble(
-        chrom = canonChrom(parts[1]),
-        start = as.integer(parts[2]),
-        end = as.integer(parts[3])
-    )
-}
-
-#' Utility function to convert LD region_ids to `region of interest` dataframe
-#'
-#' The first field is treated as the chromosome and kept as a normalized string
-#' (via \code{canonChrom}) so X/Y/MT survive; the remaining fields are genomic
-#' positions and are returned as integers.
-#' @param ldRegionId A string of region in the format of chrom_start_end.
-#' @param colnames Character vector of length 3 giving output column names for
-#'   chromosome, start and end. Default \code{c("chrom", "start", "end")}.
-#' @return A tibble with one row per input region and columns named by
-#'   \code{colnames}: a normalized character chromosome plus integer start/end.
-#' @examples
-#' regionToDf(c("1_100_200", "2_300_400"))
-#' @importFrom checkmate assertCharacter
-#' @export
-regionToDf <- function(ldRegionId, colnames = c("chrom", "start", "end")) {
-    # @param says "A string", but the function is vectorised and callers pass
-    # a character vector -- assert what it actually accepts, not the prose.
-    assertCharacter(ldRegionId, any.missing = FALSE)
-    assertCharacter(colnames, len = 3L, any.missing = FALSE)
-    parts <- str_split(ldRegionId, "[_:-]", simplify = TRUE)
-    regionOfInterest <- `colnames<-`(
-        as_tibble(parts, .name_repair = "minimal"),
-        colnames
-    )
-    regionOfInterest |>
-        mutate(
-            across(all_of(colnames[1]), canonChrom),
-            across(all_of(colnames[-1]), as.integer)
-        )
-}
-
-# Backwards-compat alias for external callers
-
-#' Convert region specifications to a GRanges object
-#'
-#' Accepts region strings ("chr1:100-200", "1_100_200"), character vectors of
-#' such strings, or data.frames with chrom/start/end columns. Returns a
-#' \code{\link[GenomicRanges]{GRanges}} object.
-#'
-#' @param regions A region string, character vector, or data.frame with
-#'   chrom/start/end columns.
-#' @return A \code{GRanges} object.
-#' @examples
-#' regions <- c("chr1:100-200", "chr1:300-400")
-#' asGranges(regions = regions)
-#' @export
-asGranges <- function(regions) {
-    if (is.character(regions)) {
-        df <- regionToDf(regions)
-    } else if (is.data.frame(regions)) {
-        if (!all(is_in(c("chrom", "start", "end"), names(regions)))) {
-            abort("data.frame must have columns: chrom, start, end")
-        }
-        df <- regions
-    } else {
-        msg <- glue(
-            "regions must be a character vector or data.frame with ",
-            "chrom/start/end columns"
-        )
-        abort(msg)
-    }
-    # GRanges expects character seqnames; prefix with "chr" if numeric
-    rawChrom <- as.character(df$chrom)
-    seqnames <- if (any(str_detect(rawChrom, "^chr"))) {
-        rawChrom
-    } else {
-        str_c("chr", rawChrom)
-    }
-    GenomicRanges::GRanges(
-        seqnames = seqnames,
-        ranges = IRanges::IRanges(
-            start = as.integer(df$start),
-            end = as.integer(df$end)
-        )
-    )
-}
-
 #' Classify variant type from allele strings
 #'
 #' Determines whether each variant is a SNP, insertion, deletion, or
@@ -1360,8 +1297,8 @@ classifyVariantType <- function(ids) {
 # Build the element GRanges for a set of variant ids.
 #
 # Ids that do not encode coordinates are a CONSTRUCTION ERROR. Substituting a
-# synthetic range would make range() lie, and range() is the block identity that
-# subsetRegion() and the (tuple, range) uniqueness key are both built on -- a
+# synthetic range would make range() lie, and range() is the block identity the
+# (tuple, range) uniqueness key is built on -- a
 # fabricated coordinate corrupts both silently.
 # @noRd
 .variantIdsToGRanges <- function(ids, what = "variant ids") {
@@ -1391,7 +1328,7 @@ classifyVariantType <- function(ids) {
     }
     gr <- S4Vectors::`mcols<-`(
         GenomicRanges::GRanges(
-            withChrPrefix(parsed$chrom),
+            parsed$chrom,
             IRanges::IRanges(start = parsed$pos, width = 1L)
         ),
         value = S4Vectors::DataFrame(

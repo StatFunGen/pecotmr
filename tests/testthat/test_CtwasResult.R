@@ -4,16 +4,20 @@ context("CtwasResult")
 # test_CtwasResultEntry.R; this file covers the CtwasResult collection.
 
 .cr_entry <- function(ids = c("g1", "g2"), pip = c(0.9, 0.1), prior = NULL) {
+    # Ranged, as the pipeline stores them: each id placed at a position.
+    at <- IRanges::IRanges(100L * seq_along(ids), width = 1L)
     CtwasResultEntry(
-        posteriors = data.frame(
+        posteriors = GenomicRanges::GRanges(
+            "chr1",
+            at,
             id = ids,
-            susie_pip = pip,
-            stringsAsFactors = FALSE
+            susie_pip = pip
         ),
-        susieAlpha = data.frame(
+        susieAlpha = GenomicRanges::GRanges(
+            "chr1",
+            at,
             id = ids,
-            susie_alpha = pip,
-            stringsAsFactors = FALSE
+            susie_alpha = pip
         ),
         groupPriors = prior,
         regionInfo = data.frame(region_id = "r1", stringsAsFactors = FALSE)
@@ -47,11 +51,12 @@ test_that("CtwasResult: ctwasPosteriors aggregates rows tagged with run identity
         )
     )
     fm <- ctwasPosteriors(cr)
+    expect_s4_class(fm, "GRanges")
     expect_true(all(
         c("gwasStudy", "study", "context", "method", "id", "susie_pip") %in%
-            names(fm)
+            names(S4Vectors::mcols(fm))
     ))
-    expect_equal(nrow(fm), 3L) # 2 + 1 gene rows
+    expect_equal(length(fm), 3L) # 2 + 1 gene rows
     expect_equal(fm$context, c("brain", "brain", "liver"))
 })
 
@@ -67,10 +72,10 @@ test_that("CtwasResult: susieAlpha aggregates the per-effect table with identity
         )
     )
     sa <- susieAlpha(cr)
-    expect_equal(nrow(sa), 3L)
+    expect_equal(length(sa), 3L)
     expect_true(all(
         c("gwasStudy", "study", "context", "method", "susie_alpha") %in%
-            names(sa)
+            names(S4Vectors::mcols(sa))
     ))
     expect_equal(sa$context, c("brain", "brain", "liver"))
 })
@@ -140,7 +145,7 @@ test_that("CtwasResult: a joint column of the wrong length is rejected", {
     )
 })
 
-test_that("CtwasResult: ctwasPosteriors/susieAlpha are NULL when empty or all-NULL", {
+test_that("CtwasResult: the views are empty ranges when no row has a payload", {
     empty <- CtwasResult(
         gwasStudy = character(0),
         studyName = character(0),
@@ -148,8 +153,8 @@ test_that("CtwasResult: ctwasPosteriors/susieAlpha are NULL when empty or all-NU
         method = character(0),
         entry = list()
     )
-    expect_null(ctwasPosteriors(empty))
-    expect_null(susieAlpha(empty))
+    expect_length(ctwasPosteriors(empty), 0L)
+    expect_s4_class(susieAlpha(empty), "GRanges")
     nullE <- CtwasResult(
         gwasStudy = "D1",
         studyName = "Q1",
@@ -157,8 +162,8 @@ test_that("CtwasResult: ctwasPosteriors/susieAlpha are NULL when empty or all-NU
         method = "susie",
         entry = list(CtwasResultEntry(posteriors = NULL, susieAlpha = NULL))
     )
-    expect_null(ctwasPosteriors(nullE))
-    expect_null(susieAlpha(nullE))
+    expect_length(ctwasPosteriors(nullE), 0L)
+    expect_length(susieAlpha(nullE), 0L)
 })
 
 test_that("CtwasResult: show() prints a one-line-per-run summary", {
@@ -176,9 +181,9 @@ test_that("CtwasResult: show() prints a one-line-per-run summary", {
 # ===========================================================================
 # Validity: the branches that name what is wrong
 #
-# CtwasResult is a DFrame subclass, so its columns are ordinary DataFrame
-# columns and a downstream edit can drop or retype one. Validity guards that,
-# but every test above built a valid object.
+# A CtwasResult's identity and payload columns are mcols, so a downstream edit
+# can drop or retype one. Validity guards that, but every test above built a
+# valid object.
 # ===========================================================================
 
 .ctr_res <- function() {
@@ -200,21 +205,9 @@ test_that("validity names a missing required column", {
     )
 })
 
-test_that("validity requires one entry payload per row", {
-    # Written straight into listData: `$<-` enforces the length itself, so
-    # the only way to reach this branch is the direct slot edit that a
-    # careless downstream mutation would perform.
-    bad <- .ctr_res()
-    bad@listData$entry <- list(.cr_entry(), .cr_entry())
-    expect_error(
-        methods::validObject(bad),
-        "length\\(entry\\) must equal nrow"
-    )
-})
-
 test_that("a joint column must be character", {
     bad <- .ctr_res()
-    bad@listData$jointStudies <- 1L
+    S4Vectors::mcols(bad)$jointStudies <- 1L
     expect_error(
         methods::validObject(bad),
         "'jointStudies' column must be character \\(got integer\\)"
@@ -222,10 +215,123 @@ test_that("a joint column must be character", {
 })
 
 
-test_that("an empty ranged payload flattens to NULL", {
-    expect_null(pecotmr:::.ctwasPayloadAsDf(GenomicRanges::GRanges()))
-    expect_null(pecotmr:::.ctwasPayloadAsDf(NULL))
-    # A non-GRanges payload is passed straight through.
-    df <- data.frame(a = 1)
-    expect_equal(pecotmr:::.ctwasPayloadAsDf(df), df)
+test_that("a payload with no coordinates is refused at construction", {
+    # An entry built by hand from a plain table has nowhere to place its rows
+    # in a ranged collection, so the constructor says so instead of dropping
+    # them.
+    tableOnly <- CtwasResultEntry(
+        posteriors = data.frame(id = "g1", susie_pip = 0.5)
+    )
+    expect_error(
+        CtwasResult(
+            gwasStudy = "D1",
+            studyName = "Q1",
+            context = "brain",
+            method = "susie",
+            entry = list(tableOnly)
+        ),
+        "run 1's posteriors carry no genomic coordinates"
+    )
+    # The entry itself still reads back as given.
+    expect_s3_class(ctwasPosteriors(tableOnly), "data.frame")
+})
+
+# ===========================================================================
+# One element per cTWAS region
+# ===========================================================================
+
+# A run over two cTWAS regions on two chromosomes, with its region metadata.
+.cr_twoRegionEntry <- function() {
+    regions <- c("chr1_1_1000", "chr2_1_1000")
+    pos <- GenomicRanges::GRanges(
+        c("chr1", "chr1", "chr2"),
+        IRanges::IRanges(c(100L, 200L, 300L), width = 1L),
+        id = c("g1", "g2", "g3"),
+        region_id = regions[c(1L, 1L, 2L)],
+        susie_pip = c(0.9, 0.1, 0.5)
+    )
+    sa <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(100L, 300L), width = 1L),
+        id = c("g1", "g3"),
+        region_id = regions,
+        susie_alpha = c(0.8, 0.4)
+    )
+    ri <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(1L, 999L),
+        region_id = regions
+    )
+    CtwasResultEntry(
+        posteriors = pos,
+        susieAlpha = sa,
+        groupPriors = list(group_prior = c(gene = 0.01)),
+        regionInfo = ri
+    )
+}
+
+test_that("a run splits into one element per cTWAS region", {
+    cr <- CtwasResult(
+        gwasStudy = "D1",
+        studyName = "Q1",
+        context = "brain",
+        method = "susie",
+        entry = list(.cr_twoRegionEntry())
+    )
+    expect_s4_class(cr, "RangedTupleList")
+    expect_equal(length(cr), 2L)
+    expect_equal(cr$blockId, c("chr1_1_1000", "chr2_1_1000"))
+    expect_equal(unname(lengths(cr)), c(2L, 1L))
+    # Each element sits on one chromosome, so the range machinery applies.
+    expect_equal(unname(lengths(range(cr))), c(1L, 1L))
+    # The region's own payloads ride with it; the run's priors repeat.
+    expect_equal(cr$susieAlpha[[2L]]$id, "g3")
+    expect_equal(cr$regionInfo[[1L]]$region_id, "chr1_1_1000")
+    expect_identical(cr$groupPriors[[1L]], cr$groupPriors[[2L]])
+    # Named by the run identity plus the region.
+    expect_equal(names(cr)[[1L]], "Q1|brain|susie|D1|chr1_1_1000")
+    # The stacked views put every region back together.
+    expect_equal(ctwasPosteriors(cr)$id, c("g1", "g2", "g3"))
+    expect_equal(susieAlpha(cr)$id, c("g1", "g3"))
+    # And a region narrows like any ranged collection.
+    one <- IRanges::subsetByOverlaps(
+        cr,
+        GenomicRanges::GRanges("chr2", IRanges::IRanges(1L, 1000L))
+    )
+    expect_equal(one$blockId, "chr2_1_1000")
+    expect_s4_class(one, "CtwasResult")
+})
+
+test_that("updateObject rebuilds a CtwasResult saved as a table of runs", {
+    # The earlier shape: a DFrame of whole runs, one entry per row.
+    old <- S4Vectors::DataFrame(
+        gwasStudy = "D1",
+        study = "Q1",
+        context = "brain",
+        method = "susie",
+        entry = S4Vectors::SimpleList(list(.cr_twoRegionEntry()))
+    )
+    attr(old, "class") <- methods::getClass("CtwasResult")@className
+    up <- updateObject(old)
+    expect_s4_class(up, "CtwasResult")
+    expect_true(methods::validObject(up))
+    expect_equal(length(up), 2L)
+    # A current object needs nothing.
+    expect_identical(updateObject(up), up)
+    expect_message(
+        updateObject(up, verbose = TRUE),
+        "updateObject\\(object = 'CtwasResult'\\)"
+    )
+})
+
+test_that("CtwasResult() keeps the caller's metadata", {
+    cr <- CtwasResult(
+        gwasStudy = "D1",
+        studyName = "Q1",
+        context = "brain",
+        method = "susie",
+        entry = list(.cr_entry()),
+        metadata = list(run = "r1")
+    )
+    expect_equal(S4Vectors::metadata(cr), list(run = "r1"))
 })

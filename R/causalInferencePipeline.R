@@ -53,9 +53,14 @@ NULL
 #' }
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} object. Must be QC'd
-#'   (\code{length(qcInfo(x)) > 0L}). A study may span many rows (one per
+#'   (\code{length(qcOptions(x)) > 0L}). A study may span many rows (one per
 #'   chromosome or LD block); each QTL tuple is scored once per study, over the
-#'   statistics of the rows its window overlaps.
+#'   statistics of the rows its window overlaps. A tuple's variants outside
+#'   every loaded block of a study it overlaps are an error where the blocks'
+#'   ranges were given (\code{regionGiven}, see
+#'   \code{\linkS4class{GwasSumStats}}), since they lie in a block that was not
+#'   loaded, and a warning for more than one in a row past a range computed
+#'   from the GWAS variants.
 #' @param twasWeights Optional \code{\link{TwasWeights}} carrying per-(study,
 #'   context, trait, method) weights. When supplied, drives the TWAS-Z
 #'   computation.
@@ -73,7 +78,9 @@ NULL
 #'   it keeps the highest-\code{metric} method among those clearing both
 #'   gates that also produced a finite TWAS Z. Otherwise every method is
 #'   carried through. Ports the legacy \code{twas_pipeline}
-#'   \code{pick_best_model} / \code{update_twas_method}.
+#'   \code{pick_best_model} / \code{update_twas_method}. The metrics describe
+#'   each fit on all of its variants, so selection warns about a row narrowed
+#'   since its fit (condition class \code{pecotmrFitCoverage}).
 #' @param mrParam How Mendelian randomization is run, built with
 #'   \code{\link{MrParam}}: \code{method} (\code{"ivwPerVariant"}, the
 #'   default, or \code{"csAware"}), the PIP threshold that method reads
@@ -88,7 +95,9 @@ NULL
 #'   to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
 #'   effect / weight sign-flipped accordingly; when FALSE, match on exact
 #'   alleles only, so a ref/alt swap is treated as a distinct variant.
-#' @return A \code{GRanges} as described above.
+#' @return A \code{GRanges} as described above, its \code{seqinfo()} naming
+#'   the genome build the inputs name (inputs naming different builds are
+#'   refused).
 #' @examples
 #' data(qtlDatasetExample)
 #' data(gwasSumStatsS4Example)
@@ -111,7 +120,11 @@ causalInferencePipeline <- function(
         "WeightSelectionParam"
     )
     .assertMethodParam(mrParam, "MrParam")
-    .cipRun(
+    build <- .inputsBuild(
+        list(gwasSumStats, twasWeights, fineMappingResult),
+        "causalInferencePipeline"
+    )
+    res <- .cipRun(
         gwasSumStats = gwasSumStats,
         twasWeights = twasWeights,
         fineMappingResult = fineMappingResult,
@@ -120,6 +133,7 @@ causalInferencePipeline <- function(
         alleleFlip = alleleFlip,
         mrParam = mrParam
     )
+    .withGenome(res, build)
 }
 
 # Orchestrate the causal-inference pipeline: validate, resolve the QTL work
@@ -143,12 +157,17 @@ causalInferencePipeline <- function(
         weightSelectionParam = weightSelectionParam
     )
     qtlRows <- sel$qtlRows
-    outRows <- list_flatten(map(
+    tuples <- compact(map(
         seq_len(nrow(qtlRows)),
-        .cipScoreQtlTuple,
+        .cipTupleInputs,
         qtlRows = qtlRows,
         twasWeights = twasWeights,
-        fineMappingResult = fineMappingResult,
+        fineMappingResult = fineMappingResult
+    ))
+    .cipCheckBlockReach(tuples, gwasSumStats)
+    outRows <- list_flatten(map(
+        tuples,
+        .cipScoreQtlTuple,
         gwasSumStats = gwasSumStats,
         gwasIndex = .rowSpans(gwasSumStats),
         alleleFlip = alleleFlip,
@@ -167,10 +186,10 @@ causalInferencePipeline <- function(
 #' @importFrom checkmate assertClass checkClass
 .cipValidateInputs <- function(gwasSumStats, twasWeights, fineMappingResult) {
     assertClass(gwasSumStats, "GwasSumStats")
-    if (length(qcInfo(gwasSumStats)) == 0L) {
+    if (length(qcOptions(gwasSumStats)) == 0L) {
         msg <- glue(
             "causalInferencePipeline: gwasSumStats has no QC record ",
-            "(qcInfo() is empty). Call summaryStatsQc() first."
+            "(qcOptions() is empty). Call summaryStatsQc() first."
         )
         abort(msg)
     }
@@ -224,21 +243,14 @@ causalInferencePipeline <- function(
 # other rows are not read and may.
 # @noRd
 .cipRowsLdRef <- function(gwasSumStats, rows, gStudy) {
-    keys <- unique(.ldRefKeys(gwasSumStats)[rows])
-    if (length(keys) > 1L) {
-        abort(c(
-            glue(
-                "causalInferencePipeline: the rows of GWAS study '{gStudy}' ",
-                "a QTL tuple overlaps use {length(keys)} different LD ",
-                "references."
-            ),
-            i = str_c(
-                "Their statistics are scored together against one LD matrix; ",
-                "give them one LD reference."
-            )
-        ))
-    }
-    .rowLdRef(gwasSumStats, rows[[1L]])
+    .rowsSharedLdRef(
+        gwasSumStats,
+        rows,
+        glue(
+            "causalInferencePipeline: the rows of GWAS study '{gStudy}' ",
+            "a QTL tuple overlaps"
+        )
+    )
 }
 
 # Build the (qtlStudy, context, trait, method) work list + the per-row
@@ -296,6 +308,8 @@ causalInferencePipeline <- function(
             selectionActive = FALSE
         ))
     }
+    # The metrics describe each fit on all of its variants.
+    .fitCoverageCheckedRows(twasWeights, "causalInferencePipeline()")
     metricTab <- .cipMethodMetrics(
         qtlRows,
         twasWeights,
@@ -321,23 +335,12 @@ causalInferencePipeline <- function(
     list(qtlRows = qtlRows, rsqLookup = rsqLookup, selectionActive = TRUE)
 }
 
-# Score one QTL tuple against every GWAS study it overlaps -> a list of
-# result records (empty when the tuple has no usable weights, or overlaps no
-# GWAS row). Each study is scored once, over just the rows the tuple's window
-# overlaps: a study split by chromosome or LD block has many rows, and
-# pairing the tuple with every one of them scored it once per row.
-# `gwasIndex` is .rowSpans(gwasSumStats), built once for the run.
+# One QTL tuple's inputs: its identity, weights and fine-mapping entry, and
+# the variants it reads the GWAS at. NULL when the tuple has no usable
+# weights. The variants are its weight variants plus its fine-mapping ones,
+# which MR reads too.
 # @noRd
-.cipScoreQtlTuple <- function(
-    qi,
-    qtlRows,
-    twasWeights,
-    fineMappingResult,
-    gwasSumStats,
-    gwasIndex,
-    alleleFlip,
-    mrParam
-) {
+.cipTupleInputs <- function(qi, qtlRows, twasWeights, fineMappingResult) {
     tuple <- list(
         qStudy = qtlRows$qtlStudy[[qi]],
         qContext = qtlRows$context[[qi]],
@@ -354,7 +357,7 @@ causalInferencePipeline <- function(
         useFmr = qtlRows$useFmrForWeights[[qi]]
     )
     if (is.null(weightsInfo)) {
-        return(list())
+        return(NULL)
     }
     fmrEntry <- .cipResolveFmrEntry(
         fineMappingResult,
@@ -363,32 +366,73 @@ causalInferencePipeline <- function(
         tuple$qTrait,
         tuple$qMethod
     )
-    window <- .cipTupleWindow(weightsInfo, fmrEntry)
+    fmrIds <- if (!is.null(fmrEntry)) {
+        .grVariantIds(unlist(fmrEntry, use.names = FALSE))
+    }
+    list(
+        tuple = tuple,
+        weightsInfo = weightsInfo,
+        fmrEntry = fmrEntry,
+        variants = .variantIdsToGRanges(
+            unique(c(weightsInfo$variantIds, fmrIds)),
+            what = "causalInferencePipeline variant id"
+        )
+    )
+}
+
+# Each tuple's variants against the LD blocks of the GWAS studies they
+# overlap (.checkGwasBlockReach()).
+# @noRd
+.cipCheckBlockReach <- function(tuples, gwasSumStats) {
+    .checkGwasBlockReach(
+        set_names(map(tuples, "variants"), map_chr(tuples, .cipTupleLabel)),
+        gwasSumStats,
+        "causalInferencePipeline",
+        "QTL tuples"
+    )
+}
+
+# @noRd
+.cipTupleLabel <- function(input) {
+    t <- input$tuple
+    .fmrTupleLabel(
+        "QTL",
+        list(
+            study = t$qStudy,
+            context = t$qContext,
+            trait = t$qTrait,
+            method = t$qMethod
+        )
+    )
+}
+
+# Score one QTL tuple against every GWAS study it overlaps -> a list of
+# result records (empty when it overlaps no GWAS row). Each study is scored
+# once, over just the rows the tuple's window -- the span of its variants --
+# overlaps: a study split by chromosome or LD block has many rows, and
+# pairing the tuple with every one of them scored it once per row.
+# `gwasIndex` is .rowSpans(gwasSumStats), built once for the run.
+# @noRd
+.cipScoreQtlTuple <- function(
+    input,
+    gwasSumStats,
+    gwasIndex,
+    alleleFlip,
+    mrParam
+) {
+    window <- range(input$variants)
     rows <- unique(gwasIndex$rows[.overlapsOnShared(gwasIndex$spans, window)])
     studies <- as.character(gwasSumStats$study)[rows]
     compact(imap(
         split(rows, factor(studies, levels = unique(studies))),
         .cipScoreGwasPair,
-        tuple = tuple,
-        weightsInfo = weightsInfo,
-        fmrEntry = fmrEntry,
+        tuple = input$tuple,
+        weightsInfo = input$weightsInfo,
+        fmrEntry = input$fmrEntry,
         gwasSumStats = gwasSumStats,
         window = window,
         alleleFlip = alleleFlip,
         mrParam = mrParam
-    ))
-}
-
-# The window a QTL tuple's GWAS statistics are read over: the span of its
-# weight variants, widened to its fine-mapping variants, which MR reads too.
-# @noRd
-.cipTupleWindow <- function(weightsInfo, fmrEntry) {
-    fmrIds <- if (!is.null(fmrEntry)) {
-        .grVariantIds(unlist(fmrEntry, use.names = FALSE))
-    }
-    range(.variantIdsToGRanges(
-        unique(c(weightsInfo$variantIds, fmrIds)),
-        what = "causalInferencePipeline variant id"
     ))
 }
 
@@ -614,6 +658,9 @@ causalInferencePipeline <- function(
 # with a named $metrics vector (corr, rsq, adj_rsq, pval, RMSE, MAE); a bare
 # metrics vector / data frame is tolerated too. `which` is a vector of candidate
 # metric names; the first present is used. Returns NA when no usable metric.
+# Read from the row, not through cvResult(x, ...): .cipCvSelection() has
+# already warned once about narrowed rows, which the accessor would repeat
+# for every row and metric.
 # @noRd
 #' @importFrom rlang try_fetch
 .cipCvMetric <- function(
@@ -626,11 +673,7 @@ causalInferencePipeline <- function(
 ) {
     perf <- try_fetch(
         cvResult(
-            twasWeights,
-            studyName = studyName,
-            context = context,
-            trait = trait,
-            method = method
+            .twrSelectRowParts(twasWeights, studyName, context, trait, method)
         ),
         error = function(cnd) NULL
     )
@@ -1393,9 +1436,8 @@ causalInferencePipeline <- function(
 
 # Convert the assembled result data.frame to a GRanges with mcols.
 .cipDfToGranges <- function(df) {
-    chr <- withChrPrefix(df$chrom)
     gr <- GenomicRanges::GRanges(
-        seqnames = chr,
+        seqnames = df$chrom,
         ranges = IRanges::IRanges(
             start = as.integer(df$startPos),
             end = as.integer(df$endPos)

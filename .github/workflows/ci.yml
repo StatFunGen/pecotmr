@@ -27,6 +27,8 @@ jobs:
           - { name: Run R CMD check, task: rcmdcheck, platform: linux-64, runner: ubuntu-latest, environment: r45 }
           - { name: Run BiocCheckGitClone, task: bioccheck_git_clone, platform: linux-64, runner: ubuntu-latest, environment: r45 }
           - { name: Run BiocCheck, task: bioccheck, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Check goodpractice, task: goodpractice, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Check pkgdown_build, task: pkgdown_build, platform: linux-64, runner: ubuntu-latest, environment: r45 }
     steps:
       - name: Checkout pull request branch
         uses: actions/checkout@v7

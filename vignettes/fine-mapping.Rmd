@@ -56,7 +56,7 @@ data(
 qtlDatasetExample
 ```
 
-The `*_sumstats_example` objects ship with a non-empty `qcInfo` slot so
+The `*_sumstats_example` objects ship with non-empty `qcOptions()` so
 they bypass the `summaryStatsQc()` gate. In a real analysis you'd
 construct the raw `QtlSumStats` / `GwasSumStats` from your data, then
 run `summaryStatsQc()` to populate that slot (see the
@@ -171,14 +171,17 @@ fineMappingPipeline(
         maxNumSingleEffects = 10L
     ),
     initializeWithSusieInf = TRUE,
-    naAction = "drop", # "drop" (default) or "impute"
+    phenotypeFilterParam = PhenotypeFilterParam(naAction = "drop"),
     verbose = 1
 )
 ```
 
--  `naAction` controls how phenotype NAs are handled by
-    `residualizedPhenotypes()`: `"drop"` removes samples with any NA across
-    the requested traits, `"impute"` mean-imputes each trait independently.
+-  `phenotypeFilterParam` is the run's phenotype QC. Its `naAction` says how
+    phenotype NAs are handled: `"drop"` (the default) removes samples with
+    any NA across the requested traits, `"impute"` mean-imputes each trait
+    independently. `outlierAction = "drop"` also removes samples flagged as
+    multivariate outliers. The QtlDataset accessors apply none of this; it
+    belongs to the run.
 -  `initializeWithSusieInf = TRUE` runs SuSiE-inf first and uses its
     result to initialise the susie fit, which improves credible-set purity
     in regions with background polygenic signal.
@@ -255,14 +258,18 @@ length(pipOne)
 
 The underlying SuSiE fit is available with `susieFit()` and the
 cross-validation record with `cvResult()`, both keyed the same way.
-Range-based subsetting works directly:
+Range-based subsetting uses the standard verbs: subset the collection by its
+rows' analysis windows, or narrow a ranged view directly:
 
 ```{r fm-range}
 window <- GenomicRanges::GRanges(
     "chr22",
     IRanges::IRanges(20000000, 21000000)
 )
-sum(lengths(subsetRegion(fmr, window)))
+# the fits whose analysis window overlaps it
+nrow(fmr[IRanges::overlapsAny(genomicRegion(fmr), window)])
+# the top loci inside it
+length(IRanges::subsetByOverlaps(topLoci(fmr), window))
 ```
 
 ## Calling a fitter directly

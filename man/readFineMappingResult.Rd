@@ -6,7 +6,7 @@
 \usage{
 readFineMappingResult(
   path,
-  region = NULL,
+  which = NULL,
   format = c("auto", "bed", "vcf"),
   studyName = NULL,
   context = NULL,
@@ -20,12 +20,12 @@ readFineMappingResult(
 }
 \arguments{
 \item{path}{Path to the published file. Bgzipped and tabix-indexed files
-can be read by region.}
+can be read in part, with \code{which}.}
 
-\item{region}{Optional region to restrict the read to -- a
-\code{"chr:start-end"} string, a \code{GRanges}, or a one-row
-\code{data.frame} with chrom/start/end. Ignored with a warning when the
-file is not tabix-indexed.}
+\item{which}{Optional \code{GRanges}: read only the records that overlap
+it, as \code{which} does for \code{rtracklayer::import()} and
+\code{VariantAnnotation::ScanVcfParam()}. Ignored with a warning when
+the file is not tabix-indexed.}
 
 \item{format}{\code{"auto"} (default) reads a \code{.vcf} / \code{.bcf}
 path as a VCF and anything else as a published table; \code{"bed"} /
@@ -57,10 +57,10 @@ A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
 }
 \description{
 Rebuild a \code{QtlFineMappingResult} or
-  \code{GwasFineMappingResult} from a file \code{\link{exportToBed}} or
-  \code{\link{exportToVcf}} wrote -- or from any file in the same
-  vocabulary, which is what makes this the way into pecotmr for results
-  produced elsewhere.
+  \code{GwasFineMappingResult} from a file \code{\link{writeBed}} or
+  \code{\link{writeGwasVcf}} wrote -- or from any file in
+  the same vocabulary, which is what makes this the way into pecotmr for
+  results produced elsewhere.
 
   A merged table holding several \code{(study, context, trait, method)}
   tuples reads back as a multi-row collection, one row per tuple. Which
@@ -91,7 +91,7 @@ Rebuild a \code{QtlFineMappingResult} or
   Every published quantity comes back identical, in either format. Three
   things are not identities:
   \itemize{
-    \item \code{exportToBed()} publishes the \strong{filtered} top-loci
+    \item \code{writeBed()} publishes the \strong{filtered} top-loci
       table, so a default export holds the variants that passed
       \code{signalCutoff} / \code{minPurity} rather than every variant of
       the fit. Export with \code{signalCutoff = 0} for the whole table.
@@ -109,13 +109,13 @@ Rebuild a \code{QtlFineMappingResult} or
 \examples{
 data(qtlFineMappingExample)
 path <- file.path(tempdir(), "top_loci.bed")
-exportToBed(qtlFineMappingExample, path)
+writeBed(qtlFineMappingExample, path)
 # This fit predates the provenance columns, so its published table does
 # not say which genotype scale its posterior effects are on -- the reader
 # will not guess.
 readFineMappingResult(path, weightStandardized = TRUE)
 }
 \seealso{
-\code{\link{exportToBed}}, \code{\link{exportToVcf}},
+\code{\link{writeBed}}, \code{\link{writeGwasVcf}},
   \code{\link{readTwasWeights}}
 }

@@ -27,6 +27,9 @@ NULL
 #'   \code{group_prior_var} for
 #'   this run, or \code{NULL}.
 #' @slot regionInfo Per-region metadata, or \code{NULL}.
+#' @section Coercion: \code{as(x, "GRanges")} gives the per-gene (and, with
+#'   SNPs kept, per-SNP) posteriors as ranges -- an error when they could not
+#'   be placed on the genome and are still a table.
 #' @seealso \code{\link{CtwasResultEntry}} for the constructor.
 #' @export
 setClass(
@@ -92,6 +95,31 @@ setMethod("ctwasPosteriors", "CtwasResultEntry", function(x) x@posteriors)
 #' @export
 setMethod("susieAlpha", "CtwasResultEntry", function(x) x@susieAlpha)
 
+#' @rdname CtwasResultEntry-class
+#' @name coerce,CtwasResultEntry,GRanges-method
+#' @aliases coerce,CtwasResultEntry,GRanges-method
+#' @usage NULL
+#' @exportMethod coerce
+setAs("CtwasResultEntry", "GRanges", function(from) {
+    .ctwasEntryRanges(from@posteriors)
+})
+
+# Posteriors as ranges: an absent table is no ranges; one the pipeline could
+# not place on the genome has no ranges to give.
+# @noRd
+.ctwasEntryRanges <- function(posteriors) {
+    if (is.null(posteriors)) {
+        return(GenomicRanges::GRanges())
+    }
+    if (methods::is(posteriors, "GRanges")) {
+        return(posteriors)
+    }
+    abort(str_c(
+        "These cTWAS posteriors were not placed on the genome, so they have ",
+        "no ranges; ctwasPosteriors(x) returns them as a table."
+    ))
+}
+
 #' @rdname ctwasGroupPriors
 #' @export
 setMethod(
@@ -99,3 +127,44 @@ setMethod(
     "CtwasResultEntry",
     function(x) x@groupPriors
 )
+
+#' @rdname show-methods
+#' @export
+setMethod("show", "CtwasResultEntry", function(object) {
+    post <- .ctwasPosteriorTable(object@posteriors)
+    priors <- if (is.null(object@groupPriors)) "not set" else "set"
+    cat(glue(
+        "CtwasResultEntry: {.ctwasGeneCount(post)} gene(s) in ",
+        "{.ctwasRegionCount(post)} region(s); group priors {priors}\n",
+        .trim = FALSE
+    ))
+    invisible(NULL)
+})
+
+# The posterior table whichever form it is held in: a ranged payload's
+# columns, or the table itself.
+# @noRd
+.ctwasPosteriorTable <- function(posteriors) {
+    if (methods::is(posteriors, "GRanges")) {
+        return(as.data.frame(mcols(posteriors)))
+    }
+    posteriors %||% data.frame()
+}
+
+# The genes a posterior table scores: its rows that are not SNPs.
+# @noRd
+.ctwasGeneCount <- function(post) {
+    if (!is_in("id", colnames(post))) {
+        return(0L)
+    }
+    genes <- if (is_in("type", colnames(post))) post$type != "SNP" else TRUE
+    length(unique(as.character(post$id[genes])))
+}
+
+# @noRd
+.ctwasRegionCount <- function(post) {
+    if (!is_in("region_id", colnames(post))) {
+        return(0L)
+    }
+    length(unique(as.character(post$region_id)))
+}

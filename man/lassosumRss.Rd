@@ -22,7 +22,7 @@ it before passing (e.g., \code{(1-s)*R + s*I}).}
 
 \item{n}{Sample size of the GWAS.}
 
-\item{lambda}{A vector of L1 penalty values. Default: 20 values from 0.001 to
+\item{lambda}{A vector of L1 penalty values. Default: 20 values from 1e-4 to
 0.1 on log scale.}
 
 \item{thr}{Convergence threshold. Default: 1e-4.}
@@ -47,7 +47,10 @@ where \eqn{R} is the LD matrix (pre-shrunk if desired) and \eqn{r =
 }
 \details{
 Based on Mak et al (2017) "Polygenic scores via penalized regression on
-summary statistics", Genetic Epidemiology 41(6):469-480.
+summary statistics", Genetic Epidemiology 41(6):469-480. It runs on the
+solver of \code{\link{penalizedRss}}, whose LASSO at \code{alpha = 1} is
+lassosum's coordinate descent: the same updates in the same order, so the
+same coefficients bit for bit.
 
 Internal: \code{\link{lassosumRssWeights}} is the public interface. It
 runs this over a grid of LD shrinkage values, forwards \code{lambda},

@@ -8,22 +8,15 @@
 \usage{
 maf(x, ...)
 
-\S4method{maf}{SumStatsBase}(
-  x,
-  studyName = NULL,
-  context = NULL,
-  trait = NULL,
-  annotateSignificance = NULL,
-  ranges = NULL
-)
+\S4method{maf}{SumStatsBase}(x, studyName = NULL, context = NULL, trait = NULL)
 
-\S4method{maf}{QtlDataset}(x, region = NULL, cisWindow = NULL, samples = NULL)
+\S4method{maf}{QtlDataset}(x)
 }
 \arguments{
-\item{x}{A \code{GwasSumStats} or \code{QtlDataset} object.}
+\item{x}{A \code{GwasSumStats}, \code{QtlSumStats} or \code{QtlDataset}
+object.}
 
-\item{...}{Class-specific selection arguments (e.g., \code{region},
-\code{cisWindow} for \code{QtlDataset}).}
+\item{...}{Class-specific selection arguments.}
 
 \item{studyName}{Character (length 1) or \code{NULL}. Restrict the selection
 to this study; \code{NULL} matches all studies.}
@@ -33,28 +26,15 @@ this context; \code{NULL} matches all contexts.}
 
 \item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
 this trait; \code{NULL} matches all traits.}
-
-\item{annotateSignificance}{Optional correction-method name passed through to
-\code{\link{sumStats}} (QTL only); \code{NULL} applies none.}
-
-\item{ranges}{A \code{GRanges} or \code{NULL} (default). Return only the
-variants overlapping these ranges; \code{NULL} returns everything.}
-
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
-around the trait; \code{NULL} uses the dataset default.}
-
-\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
-\code{NULL} uses all samples.}
 }
 \value{
 Numeric vector of MAFs, or NULL if not available.
 }
 \description{
-Extract MAF vector from a GwasSumStats object.
+Extract the minor-allele-frequency vector from one entry of
+  a summary-statistic collection, or from a \code{QtlDataset} over the
+  whole dataset (narrow it first, with \code{x[i, j, ]}, to read part of
+  it).
 }
 \examples{
 data(qtlDatasetExample)

@@ -13,7 +13,7 @@ twasWeightsCv(
   weightMethods = NULL,
   maxNumVariants = NULL,
   variantsToKeep = NULL,
-  numThreads = 1,
+  BPPARAM = SerialParam(),
   verbose = 1,
   fitRetention = c("none", "slim", "full"),
   seed = NULL,
@@ -49,10 +49,11 @@ maximum number of variants to use for CV purpose, to save computing time.}
 \item{variantsToKeep}{An optional integer to ensure that the listed variants
 are kept in the CV when there is a limit on the maxNumVariants to use.}
 
-\item{numThreads}{The number of threads to use for parallel processing. If
-set to -1, the function uses all available cores. If set to 0 or 1, no
-parallel processing is performed. If set to 2 or more, parallel processing
-is enabled with that many threads.}
+\item{BPPARAM}{A \code{BiocParallelParam} the folds run on;
+\code{SerialParam()} (default) runs them one at a time. Each draws from
+its own random-number stream, seeded by \code{seed}, else by the param's
+own \code{RNGseed}, else by one draw from the session RNG, so a run
+gives the same numbers however many workers it has.}
 
 \item{verbose}{Integer controlling verbosity level: 0 = suppress all
 messages, 1 = suppress external package messages (default), 2 = show all
@@ -66,11 +67,9 @@ for every other method the two behave alike.}
 
 \item{seed}{Integer or \code{NULL}. When supplied, seeds both the
 main-process RNG (fold partitioning, variant sub-sampling) and the
-parallel fold-fitting RNG via the \code{BiocParallel} \code{RNGseed}, so
-results are reproducible even under multi-threading. The main-process
-seed is scoped to the call, so the session RNG is left as it was found.
-\code{NULL} (default) does not seed at all and uses the historical
-parallel default.}
+streams the folds draw from (see \code{BPPARAM}). The main-process seed
+is scoped to the call, so the session RNG is left as it was found.
+\code{NULL} (default) seeds neither.}
 
 \item{dataDrivenPriorMatricesCv}{Optional list, one element per fold, of
 data-driven prior matrices for the mr.mash learner.}

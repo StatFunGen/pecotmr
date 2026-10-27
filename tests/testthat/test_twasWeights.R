@@ -1,5 +1,18 @@
 context("twasWeights")
 
+.sc_makeTwasWeightsRow <- function(
+    p = 5L,
+    weightStandardized = FALSE,
+    weightsDataType = "expression"
+) {
+    TwasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
+        weights = rnorm(p),
+        weightStandardized = weightStandardized,
+        weightsDataType = weightsDataType
+    )
+}
+
 # ---------------------------------------------------------------------------
 # Shared synthetic data generator
 # ---------------------------------------------------------------------------
@@ -87,7 +100,7 @@ mockSusie <- function(...) {
 
 # ===========================================================================
 #
-#  .twas_method_lookup
+#  .twasMethodLookup
 #
 # ===========================================================================
 
@@ -127,26 +140,8 @@ generateXY <- function(
     return(list(X = X, Y = y))
 }
 
-test_that(".twas_method_lookup: 'default' preset returns 10 methods", {
-    result <- pecotmr:::.twasMethodLookup("default")
-    expected_names <- c(
-        "susie_weights",
-        "susie_inf_weights",
-        "mrash_weights",
-        "enet_weights",
-        "lasso_weights",
-        "mcp_weights",
-        "scad_weights",
-        "l0learn_weights",
-        "bayes_r_weights",
-        "bayes_c_weights"
-    )
-    expect_equal(sort(names(result)), sort(expected_names))
-})
-
-test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
-    result <- pecotmr:::.twasMethodLookup("fastDefault")
-    expected_names <- c(
+test_that(".twasMethodLookup: 'default' (10) and 'fastDefault' (8) presets", {
+    fastDefault <- c(
         "susie_weights",
         "susie_inf_weights",
         "mrash_weights",
@@ -156,10 +151,20 @@ test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
         "scad_weights",
         "l0learn_weights"
     )
-    expect_equal(sort(names(result)), sort(expected_names))
+    presets <- list(
+        default = c(fastDefault, "bayes_r_weights", "bayes_c_weights"),
+        fastDefault = fastDefault
+    )
+    for (preset in names(presets)) {
+        expect_equal(
+            sort(names(pecotmr:::.twasMethodLookup(preset))),
+            sort(presets[[preset]]),
+            info = preset
+        )
+    }
 })
 
-test_that(".twas_method_lookup: custom vector of short names", {
+test_that(".twasMethodLookup: custom vector of short names", {
     result <- pecotmr:::.twasMethodLookup(c("susie", "enet", "dprVb"))
     expect_equal(
         sort(names(result)),
@@ -167,30 +172,31 @@ test_that(".twas_method_lookup: custom vector of short names", {
     )
 })
 
-test_that(".twas_method_lookup: unknown method produces error", {
+test_that(".twasMethodLookup: unknown method produces error", {
     expect_error(
         pecotmr:::.twasMethodLookup(c("susie", "nonexistent_method")),
         "unknown method token"
     )
 })
 
-test_that(".twas_method_lookup: default args are set for mrash, not susie", {
+test_that(".twasMethodLookup: default args are set for mrash, not susie", {
     result <- pecotmr:::.twasMethodLookup("fastDefault")
     # susie carries NO fitting defaults: susieWeights extracts from a supplied
-    # fit and never runs susie, so `refine` / `L` would have nothing to configure.
+    # fit and never runs susie, so `refine` / `L` would have nothing to
+    # configure.
     expect_length(result$susie_weights, 0L)
     # mrash keeps mr.ash's own prior grid, so only the iteration cap is set.
     expect_named(result$mrash_weights, "max.iter")
     expect_equal(result$mrash_weights$max.iter, 100)
 })
 
-test_that(".twas_method_lookup: methods with no special args get empty list", {
+test_that(".twasMethodLookup: methods with no special args get empty list", {
     result <- pecotmr:::.twasMethodLookup(c("enet", "lasso"))
     expect_equal(length(result$enet_weights), 0L)
     expect_equal(length(result$lasso_weights), 0L)
 })
 
-test_that(".twas_method_lookup: all DPR variants can coexist", {
+test_that(".twasMethodLookup: all DPR variants can coexist", {
     result <- pecotmr:::.twasMethodLookup(c(
         "dprVb",
         "dprGibbs",
@@ -212,18 +218,6 @@ test_that(".twas_method_lookup: all DPR variants can coexist", {
 #
 # ===========================================================================
 
-test_that("twasPredict: basic matrix multiplication is correct", {
-    d <- makeData(n = 20, p = 5)
-    set.seed(99)
-    w <- matrix(runif(5), ncol = 1)
-    rownames(w) <- colnames(d$X)
-    wl <- list(test_weights = w)
-    res <- twasPredict(d$X, wl)
-
-    expected <- d$X %*% w
-    expect_equal(res[["test_predicted"]], expected)
-})
-
 test_that("twasPredict: multiple weight methods in list", {
     d <- makeData(n = 20, p = 5)
     w1 <- matrix(c(1, 0, 0, 0, 0), ncol = 1)
@@ -237,22 +231,6 @@ test_that("twasPredict: multiple weight methods in list", {
     expect_equal(res[["method_b_predicted"]], d$X %*% w2)
 })
 
-test_that("twasPredict: name transformation weights -> predicted", {
-    set.seed(42)
-    wl <- list(
-        lassoWeights = matrix(1, nrow = 3, ncol = 1),
-        enetWeights = matrix(1, nrow = 3, ncol = 1),
-        susieWeights = matrix(1, nrow = 3, ncol = 1)
-    )
-    X <- matrix(rnorm(9), nrow = 3, ncol = 3)
-    res <- twasPredict(X, wl)
-
-    expect_equal(
-        names(res),
-        c("lassoPredicted", "enetPredicted", "susiePredicted")
-    )
-})
-
 test_that("twasPredict: names without _weights suffix are kept unchanged", {
     wl <- list(custom_method = matrix(1, nrow = 2, ncol = 1))
     X <- matrix(1:4, nrow = 2, ncol = 2)
@@ -260,17 +238,6 @@ test_that("twasPredict: names without _weights suffix are kept unchanged", {
 
     # gsub("_weights", "_predicted", "custom_method") == "custom_method"
     expect_equal(names(res), "custom_method")
-})
-
-test_that("twasPredict: single column Y dimension preserved", {
-    d <- makeData(n = 10, p = 4)
-    w <- matrix(rep(0.25, 4), ncol = 1)
-    wl <- list(avg_weights = w)
-    res <- twasPredict(d$X, wl)
-
-    expect_true(is.matrix(res[["avg_predicted"]]))
-    expect_equal(nrow(res[["avg_predicted"]]), 10)
-    expect_equal(ncol(res[["avg_predicted"]]), 1)
 })
 
 test_that("twasPredict: multi-column weights produce multi-column predictions", {
@@ -286,20 +253,13 @@ test_that("twasPredict: multi-column weights produce multi-column predictions", 
     expect_equal(res[["multi_predicted"]], X %*% W)
 })
 
-test_that("twasPredict: zero weights give zero predictions", {
-    X <- matrix(1:6, nrow = 2, ncol = 3)
-    wl <- list(null_weights = matrix(0, nrow = 3, ncol = 1))
-    res <- twasPredict(X, wl)
-    expect_true(all(res[["null_predicted"]] == 0))
-})
-
 # ===========================================================================
 #
-#  twasWeights  (input validation and basic behavior)
+#  learnTwasWeights  (input validation and basic behavior)
 #
 # ===========================================================================
 
-test_that("twasWeights: X must be a matrix", {
+test_that("learnTwasWeights: X must be a matrix", {
     d <- makeData()
     expect_error(
         learnTwasWeights(as.data.frame(d$X), d$Y, weightMethods = list()),
@@ -307,7 +267,7 @@ test_that("twasWeights: X must be a matrix", {
     )
 })
 
-test_that("twasWeights: Y must be a matrix or vector", {
+test_that("learnTwasWeights: Y must be a matrix or vector", {
     d <- makeData()
     # In R, is.vector(list(...)) returns TRUE, so a list passes the initial
     # type check and gets converted via matrix(). The resulting matrix has
@@ -318,7 +278,7 @@ test_that("twasWeights: Y must be a matrix or vector", {
     )
 })
 
-test_that("twasWeights: Y as vector gets converted to matrix internally", {
+test_that("learnTwasWeights: Y as vector gets converted to matrix internally", {
     d <- makeData()
     y_vec <- as.numeric(d$Y)
 
@@ -341,7 +301,7 @@ test_that("twasWeights: Y as vector gets converted to matrix internally", {
     expect_true(all(is.finite(w)))
 })
 
-test_that("twasWeights: mismatched row counts error", {
+test_that("learnTwasWeights: mismatched row counts error", {
     d <- makeData(n = 50, p = 10)
     Y_short <- d$Y[1:30, , drop = FALSE]
     expect_error(
@@ -350,18 +310,18 @@ test_that("twasWeights: mismatched row counts error", {
     )
 })
 
-test_that("twasWeights: character weight_methods input is accepted", {
+test_that("learnTwasWeights: character weightMethods input is accepted", {
     d <- makeData()
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0, ncol(X))
     )
-    # Short name should be resolved via .twas_method_lookup
+    # Short name should be resolved via .twasMethodLookup
     result <- learnTwasWeights(d$X, d$Y, weightMethods = c("lasso"))
     expect_true(is(result, "TwasWeights"))
     expect_equal(methodNames(result), "lasso")
 })
 
-test_that("twasWeights: zero variance columns are filtered and padded back with zeros", {
+test_that("learnTwasWeights: zero-variance columns are filtered, weighted 0", {
     d <- makeData(n = 50, p = 10, add_zero_var_col = TRUE)
     p_with_extra <- ncol(d$X) # 11 columns, last is zero-var
 
@@ -378,7 +338,8 @@ test_that("twasWeights: zero variance columns are filtered and padded back with 
         weightMethods = list(lasso_weights = list())
     )
 
-    # The returned weight matrix should have rows equal to total columns (including zero-var)
+    # The returned weight matrix should have rows equal to total columns
+    # (including zero-var)
     expect_equal(nrow(.weightsByMethod(result, "lassoWeights")), p_with_extra)
     # The zero-var column weight should be 0 (padded back)
     expect_equal(
@@ -387,7 +348,7 @@ test_that("twasWeights: zero variance columns are filtered and padded back with 
     )
 })
 
-test_that("twasWeights: rownames of result match colnames of X", {
+test_that("learnTwasWeights: weights are ncol(X) x ncol(Y), rows named by X", {
     d <- makeData()
     local_mocked_bindings(
         enetWeights = function(X, y, ...) rep(0.1, ncol(X))
@@ -398,28 +359,16 @@ test_that("twasWeights: rownames of result match colnames of X", {
         weightMethods = list(enetWeights = list())
     )
     expect_equal(
+        dim(.weightsByMethod(result, "enetWeights")),
+        c(ncol(d$X), ncol(d$Y))
+    )
+    expect_equal(
         rownames(.weightsByMethod(result, "enetWeights")),
         colnames(d$X)
     )
 })
 
-test_that("twasWeights: result dimensions match ncol(X) x ncol(Y)", {
-    d <- makeData()
-    local_mocked_bindings(
-        enetWeights = function(X, y, ...) rep(0, ncol(X))
-    )
-    result <- learnTwasWeights(
-        d$X,
-        d$Y,
-        weightMethods = list(enetWeights = list())
-    )
-    expect_equal(
-        dim(.weightsByMethod(result, "enetWeights")),
-        c(ncol(d$X), ncol(d$Y))
-    )
-})
-
-test_that("twasWeights: multiple methods return named list with one entry per method", {
+test_that("learnTwasWeights: multiple methods return one entry per method", {
     d <- makeData()
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0.1, ncol(X)),
@@ -437,39 +386,28 @@ test_that("twasWeights: multiple methods return named list with one entry per me
 
 # ===========================================================================
 #
-#  twasWeights with actual glmnet (lasso/enet) -- skip if not available
+#  learnTwasWeights with real glmnet (lasso/enet)
 #
 # ===========================================================================
 
-test_that("twasWeights: lassoWeights produces correct structure with real glmnet", {
+test_that("learnTwasWeights: lasso and enet fit p x 1 weights with glmnet", {
     skip_if_not_installed("glmnet")
     d <- makeData(n = 50, p = 10)
-    result <- learnTwasWeights(
-        d$X,
-        d$Y,
-        weightMethods = list(lasso_weights = list())
-    )
-
-    expect_true(is(result, "TwasWeights"))
-    expect_equal(methodNames(result), "lasso")
-    expect_equal(nrow(.weightsByMethod(result, "lassoWeights")), ncol(d$X))
-    expect_equal(ncol(.weightsByMethod(result, "lassoWeights")), 1)
-    # At least some weights should be non-zero for this strong signal
-    expect_true(any(.weightsByMethod(result, "lassoWeights") != 0))
-})
-
-test_that("twasWeights: enetWeights produces correct structure with real glmnet", {
-    skip_if_not_installed("glmnet")
-    d <- makeData(n = 50, p = 10)
-    result <- learnTwasWeights(
-        d$X,
-        d$Y,
-        weightMethods = list(enetWeights = list())
-    )
-
-    expect_true(is(result, "TwasWeights"))
-    expect_equal(methodNames(result), "enet")
-    expect_equal(nrow(.weightsByMethod(result, "enetWeights")), ncol(d$X))
+    # One snake_case and one camelCase key: both spellings resolve.
+    keys <- c(lasso = "lasso_weights", enet = "enetWeights")
+    for (method in names(keys)) {
+        result <- learnTwasWeights(
+            d$X,
+            d$Y,
+            weightMethods = set_names(list(list()), keys[[method]])
+        )
+        w <- .weightsByMethod(result, method)
+        expect_true(is(result, "TwasWeights"), info = method)
+        expect_equal(methodNames(result), method, info = method)
+        expect_equal(dim(w), c(ncol(d$X), 1L), info = method)
+        # At least some weights should be non-zero for this strong signal
+        expect_true(any(w != 0), info = method)
+    }
 })
 
 # ===========================================================================
@@ -478,18 +416,13 @@ test_that("twasWeights: enetWeights produces correct structure with real glmnet"
 #
 # ===========================================================================
 
-test_that("twasWeightsCv: NULL weight_methods returns only samplePartition", {
-    d <- makeData()
-    result <- twasWeightsCv(d$X, d$Y, fold = 3, weightMethods = NULL)
-    expect_equal(names(result), "samplePartition")
-    expect_true(is.data.frame(result$samplePartition))
-})
-
-test_that("twasWeightsCv: samplePartition structure is correct", {
+test_that("twasWeightsCv: NULL methods return only a well-formed partition", {
     d <- makeData()
     result <- twasWeightsCv(d$X, d$Y, fold = 5, weightMethods = NULL)
+    expect_equal(names(result), "samplePartition")
     sp <- result$samplePartition
 
+    expect_true(is.data.frame(sp))
     expect_true("Sample" %in% colnames(sp))
     expect_true("Fold" %in% colnames(sp))
     expect_equal(nrow(sp), nrow(d$X))
@@ -498,7 +431,7 @@ test_that("twasWeightsCv: samplePartition structure is correct", {
     expect_true(all(rownames(d$X) %in% sp$Sample))
 })
 
-test_that("twasWeightsCv: character weight_methods are accepted", {
+test_that("twasWeightsCv: character weightMethods are accepted", {
     d <- makeData()
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0, ncol(X))
@@ -619,28 +552,9 @@ test_that("twasWeightsCv: multivariate Y with multiple columns", {
 
 # ===========================================================================
 #
-#  twasWeightsPipeline  (structure and input validation)
+#  learnTwasWeights with supplied SuSiE fits; twasWeightsCv plumbing
 #
 # ===========================================================================
-
-test_that("learnTwasWeights refuses the susie + susieInf pair without fits", {
-    # The chained susieInf -> susie fit lives in fineMappingPipeline() now;
-    # learnTwasWeights never fine-maps, so the pair is an error here.
-    # fitSusieInfThenSusie() itself is covered in test_fineMappingWrappers.R.
-    d <- makeData(n = 50, p = 10)
-    expect_error(
-        learnTwasWeights(
-            d$X,
-            as.numeric(d$Y),
-            weightMethods = list(
-                susie_weights = list(),
-                susie_inf_weights = list()
-            )
-        ),
-        "susie, susieInf"
-    )
-})
-
 
 test_that("learnTwasWeights resolves fits under camelCase method names", {
     # `susieWeights` and `susie_weights` name the same method; a fit supplied
@@ -768,14 +682,10 @@ test_that("twasWeightsCv: dataDrivenPriorMatricesCv is plumbed through", {
 })
 
 # ===========================================================================
-# twasWeightsPipeline: removed_methods warning + max_cv_variants subsampling
+# learnTwasWeights: a fit with extra rows is cut back to the fitted variants
 # ===========================================================================
 
-# ===========================================================================
-# twasWeights: dim-fix branch when nrow(weights_matrix) != length(valid_columns)
-# ===========================================================================
-
-test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns when row counts mismatch", {
+test_that("learnTwasWeights: mr.mash rows beyond X's variants are dropped", {
     set.seed(42)
     n <- 20
     p <- 5
@@ -787,8 +697,8 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
 
     local_mocked_bindings(
         mrmashWeights = function(X, Y, ...) {
-            # Return more rows than valid_columns (length p) so the dim-fix branch
-            # subsets the matrix back to names(valid_columns).
+            # Return more rows than the p fitted variants, so the result is
+            # subset back to those variants' names.
             extra_rows <- p + 2
             m <- matrix(
                 seq_len(extra_rows * ncol(Y)),
@@ -809,7 +719,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
         Y,
         weightMethods = list(mrmashWeights = list())
     )
-    # After the dim-fix, the weights matrix is restricted to v1..v5 -> shape p x ncol(Y)
+    # Restricted to the p fitted variants -> shape p x ncol(Y)
     expect_equal(nrow(.weightsByMethod(result, "mrmashWeights")), p)
     expect_equal(ncol(.weightsByMethod(result, "mrmashWeights")), 2)
     expect_equal(
@@ -855,11 +765,7 @@ test_that("twasWeightsCv handles errors appropriately", {
     sim <- generateXY(seed = 1)
     X <- sim$X
     y <- sim$Y
-    local_mocked_bindings(
-        susieWeights = function(X, y, ...) rnorm(ncol(X)),
-        glmnetWeights = function(X, y, ...) runif(ncol(X))
-    )
-    weight_methods_test <- list(susie = list(), glmnetWeights = list())
+    # fold defaults to NULL, so this is also the call that omits it.
     expect_error(twasWeightsCv(X, y, fold = NULL), "fold.*samplePartitions")
     expect_error(
         twasWeightsCv(X, y, fold = "invalid"),
@@ -868,39 +774,19 @@ test_that("twasWeightsCv handles errors appropriately", {
     expect_error(twasWeightsCv(X, y, fold = -1), "Must be >= 1")
     expect_error(twasWeightsCv(2, y, fold = 2), "Must be of type 'matrix'")
     expect_error(twasWeightsCv(X, 2, fold = 2), "Y.*Must have exactly 10 rows")
-    expect_error(
-        twasWeightsCv(
-            matrix(rnorm(4, nrow = 2)),
-            matrix(rnorm(2, nrow = 1)),
-            fold = 2
-        ),
-        "unused argument"
-    )
-    expect_error(twasWeightsCv(X, y), "fold.*samplePartitions")
 })
 
 
 test_that("learnTwasWeights handles errors appropriately", {
     sim <- generateXY(seed = 1)
-    X <- sim$X
-    y <- sim$Y
-    local_mocked_bindings(
-        susieWeights = function(X, y, ...) rnorm(ncol(X)),
-        glmnetWeights = function(X, y, ...) runif(ncol(X))
-    )
-    weight_methods_test <- list(susie = list(), glmnetWeights = list())
     expect_error(
-        learnTwasWeights(
-            matrix(rnorm(4, nrow = 2)),
-            matrix(rnorm(2, nrow = 1))
-        ),
+        learnTwasWeights(sim$X, sim$Y),
         "weightMethods.*is missing"
     )
-    expect_error(learnTwasWeights(X, y), "weightMethods")
 })
 
 # ===========================================================================
-# twasZ: mathematical correctness (single-method / vector path)
+# twasPredict: vector weights
 # ===========================================================================
 
 test_that("twasPredict multiplies X by weights", {
@@ -930,14 +816,6 @@ test_that("twasPredict handles multiple weight methods", {
     )
     # Verify computation for one method
     expect_equal(result$lassoPredicted, X %*% c(1, 0, -1))
-})
-
-
-test_that("twasPredict with zero weights gives zero predictions", {
-    X <- matrix(1:6, nrow = 2, ncol = 3)
-    weights_list <- list(null_weights = c(0, 0, 0))
-    result <- twasPredict(X, weights_list)
-    expect_true(all(result$null_predicted == 0))
 })
 
 
@@ -976,6 +854,7 @@ test_that("TwasWeights: studyName / contexts / traitNames / methodNames", {
         method = c("lasso", "lasso"),
         entry = list(e, e)
     )
+    expect_setequal(studyName(tw), c("s1", "s2"))
     expect_setequal(contexts(tw), c("c1", "c2"))
     expect_equal(traitNames(tw), "t1")
     expect_equal(methodNames(tw), "lasso")
@@ -1050,9 +929,46 @@ test_that("TwasWeights: twasWeights extracts the entry for a tuple", {
     expect_equal(unname(weights(picked)), unname(weights(e2)))
 })
 
-# ===========================================================================
-# LdData
-# ===========================================================================
+test_that("TwasWeights: rows are picked by window through subsetting", {
+    near <- TwasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+        weights = c(0.1, 0.2, 0.3, 0.4)
+    )
+    far <- TwasWeightsRow(
+        variantIds = sprintf("chr2:%d:A:G", 100L * (1:4)),
+        weights = c(0.5, 0.6, 0.7, 0.8)
+    )
+    tw <- TwasWeights(
+        studyName = c("s1", "s1"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t2"),
+        method = c("lasso", "lasso"),
+        entry = list(near, far)
+    )
+    # A window selects rows by subsetting the collection on its rows'
+    # analysis windows; the one row left needs no other selector.
+    inChr2 <- tw[IRanges::overlapsAny(
+        genomicRegion(tw),
+        GenomicRanges::GRanges("chr2:150-250")
+    )]
+    expect_identical(as.character(twasWeights(inChr2)$trait), "t2")
+    expect_equal(resolveWeights(inChr2)$weights, c(0.5, 0.6, 0.7, 0.8))
+    inChr1 <- tw[IRanges::overlapsAny(
+        genomicRegion(tw),
+        GenomicRanges::GRanges("chr1:1-1000")
+    )]
+    expect_equal(unname(weights(inChr1)), c(0.1, 0.2, 0.3, 0.4))
+    expect_identical(
+        variantIds(inChr1),
+        sprintf("chr1:%d:A:G", 100L * (1:4))
+    )
+    # A window over both rows still needs the tuple to choose between them.
+    both <- tw[IRanges::overlapsAny(
+        genomicRegion(tw),
+        GenomicRanges::GRanges(c("chr1:1-1000", "chr2:1-1000"))
+    )]
+    expect_error(twasWeights(both), "has 2 entries")
+})
 
 # === Tests migrated from test_showMethods.R (TwasWeights) ===
 
@@ -1256,13 +1172,13 @@ test_that("TwasWeights: joint* column length must match study", {
 })
 
 test_that("TwasWeights: weightStandardized/weightsDataType/variantIds delegate to the entry", {
-    e1 <- twasWeightsRow(
+    e1 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
         weightStandardized = TRUE,
         weightsDataType = "expression"
     )
-    e2 <- twasWeightsRow(
+    e2 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
         weightStandardized = FALSE,
@@ -1312,27 +1228,15 @@ test_that("TwasWeights: weightStandardized/weightsDataType/variantIds delegate t
     )
 })
 
-test_that("TwasWeights: studyName returns unique study labels", {
-    e <- .sc_makeTwasWeightsRow()
-    tw <- TwasWeights(
-        studyName = c("s1", "s2"),
-        context = c("c1", "c2"),
-        trait = c("t1", "t1"),
-        method = c("lasso", "lasso"),
-        entry = list(e, e)
-    )
-    expect_setequal(studyName(tw), c("s1", "s2"))
-})
-
 test_that("TwasWeights: per-tuple weights/cvResult/methodFits/ldReference", {
     w1 <- rnorm(4)
-    e1 <- twasWeightsRow(
+    e1 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = w1,
         methodFits = list(tag = "fitA"),
         cvResult = list(rsq = 0.42)
     )
-    e2 <- twasWeightsRow(
+    e2 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4)
     )
@@ -1377,6 +1281,35 @@ test_that("TwasWeights: per-tuple weights/cvResult/methodFits/ldReference", {
     )
     expect_length(ldReference(tw), 1L)
     expect_s4_class(ldReference(tw)[[1L]], "RangedSummarizedExperiment")
+})
+
+test_that("TwasWeights: rejects non-TwasWeightsRow rows", {
+    expect_error(
+        TwasWeights(
+            studyName = "s1",
+            context = "c1",
+            trait = "t1",
+            method = "lasso",
+            entry = list("not_an_entry")
+        ),
+        "must be a TWAS-weight row"
+    )
+})
+
+test_that("TwasWeights: validity does not recurse on key subset (#546)", {
+    # Building the tuple-uniqueness key via `object[, keyCols]` preserves the
+    # TwasWeights class while dropping the required `entry` column; older
+    # S4Vectors revalidates that intermediate and fails with "missing columns".
+    e <- .sc_makeTwasWeightsRow(p = 5L)
+    res <- TwasWeights(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "lasso",
+        entry = list(e)
+    )
+    expect_s4_class(res, "TwasWeights")
+    expect_true(validObject(res))
 })
 
 # ===========================================================================
@@ -1427,7 +1360,7 @@ test_that(".prepareSusieWeightMethods writes supplied fits onto the method args"
 test_that("twasWeightsCv: warns when no random seed has been set", {
     d <- makeData(n = 20, p = 5)
     # makeData() set a seed; drop it just before the call so the unset-seed
-    # branch (verbose>=1) is exercised. The fold-sampling at line ~713 restores
+    # branch (verbose>=1) is exercised. The fold sampling creates a fresh
     # .Random.seed afterwards, so later tests are unaffected.
     if (exists(".Random.seed", envir = .GlobalEnv)) {
         rm(".Random.seed", envir = .GlobalEnv)
@@ -1623,7 +1556,8 @@ test_that("learnTwasWeights: univariate fitter runs under verbose=2", {
     expect_equal(nrow(.weightsByMethod(result, "lassoWeights")), ncol(d$X))
 })
 
-test_that("learnTwasWeights: parallel weights path (numThreads = 2)", {
+test_that("learnTwasWeights: parallel weights path (two workers)", {
+    skip_on_os("windows")
     d <- makeData(n = 30, p = 6)
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) rep(0.1, ncol(X)),
@@ -1633,7 +1567,7 @@ test_that("learnTwasWeights: parallel weights path (numThreads = 2)", {
         d$X,
         d$Y,
         weightMethods = list(lasso_weights = list(), enetWeights = list()),
-        numThreads = 2
+        BPPARAM = BiocParallel::MulticoreParam(2)
     ))
     expect_true(is(result, "TwasWeights"))
     expect_setequal(methodNames(result), c("lasso", "enet"))
@@ -1650,11 +1584,11 @@ test_that("twasPredict: accepts a TwasWeights S4 collection", {
     p <- 5
     w1 <- rnorm(p)
     w2 <- rnorm(p)
-    e1 <- twasWeightsRow(
+    e1 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = w1
     )
-    e2 <- twasWeightsRow(
+    e2 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * seq_len(p)),
         weights = w2
     )
@@ -1790,8 +1724,8 @@ test_that("twasWeightsCv: argument guards fire", {
         "maxNumVariants.*is not >= 1"
     )
     expect_error(
-        exec(twasWeightsCv, !!!list_modify(base, !!!list(numThreads = 1.5))),
-        "numThreads.*Must be of type 'single integerish value'"
+        exec(twasWeightsCv, !!!list_modify(base, !!!list(BPPARAM = 2))),
+        "must be a BiocParallelParam"
     )
     expect_error(
         exec(
@@ -1860,55 +1794,8 @@ test_that("twasPredict: weightsList must be a list or TwasWeights", {
 # fineMappingPipeline's own CV retained each fold's fit.
 # ---------------------------------------------------------------------------
 
-.twcv_foldFits <- function(seed = 11, fold = 3) {
-    set.seed(seed)
-    data(eqtlRegionExample)
-    X <- eqtlRegionExample$X[, 1:40]
-    y <- eqtlRegionExample$yRes
-    Y <- matrix(y, ncol = 1, dimnames = list(rownames(X), "t1"))
-    cv <- pecotmr:::.fmWeightsCv(
-        X,
-        Y,
-        tokens = "susie",
-        methodArgs = list(),
-        fold = fold,
-        verbose = 0,
-        seed = 1
-    )
-    list(X = X, Y = Y, cv = cv, slice = pecotmr:::.fmSliceCv(cv, "susie"))
-}
-
-test_that("fineMappingPipeline CV retains a lean per-fold fit", {
-    skip_if_not_installed("susieR")
-    f <- suppressMessages(.twcv_foldFits())
-    expect_false(is.null(f$cv$foldFits))
-    expect_equal(names(f$cv$foldFits), c("fold_1", "fold_2", "fold_3"))
-    # lean: only the fields the weight extractors read
-    fit1 <- f$cv$foldFits[["fold_1"]][["susie"]]
-    expect_true(all(c("pip", "alpha", "mu") %in% names(fit1)))
-    expect_false("lbf_variable" %in% names(fit1))
-    # and it slices per method onto the row payload
-    expect_equal(names(f$slice$foldFits), c("fold_1", "fold_2", "fold_3"))
-})
-
-test_that("twasWeightsCv cannot cross-validate susie without the fold fits", {
-    skip_if_not_installed("susieR")
-    f <- suppressMessages(.twcv_foldFits())
-    expect_error(
-        suppressMessages(twasWeightsCv(
-            f$X,
-            f$Y,
-            samplePartitions = f$slice$samplePartition,
-            weightMethods = list(susie_weights = list()),
-            verbose = 0
-        )),
-        "never run fine-mapping themselves"
-    )
-})
-
 test_that("twasWeightsCv cross-validates susie from the retained fold fits", {
-    skip_if_not_installed("susieR")
-    f <- suppressMessages(.twcv_foldFits())
+    f <- .twcvFixture
     out <- suppressMessages(twasWeightsCv(
         f$X,
         f$Y,
@@ -1921,20 +1808,22 @@ test_that("twasWeightsCv cross-validates susie from the retained fold fits", {
     expect_false(is.null(out$prediction))
 })
 
-test_that(".twasFoldFit injects the fold's fit under the adapter's fit arg", {
+test_that(".twasFoldFit injects the fold's fit, else leaves the args alone", {
+    f <- pecotmr:::.twasFoldFit
     ff <- list(susie = list(fold_1 = "FIT1", fold_2 = "FIT2"))
-    a <- pecotmr:::.twasFoldFit(list(), "susie_weights", 2L, ff)
+    a <- f(list(), "susie_weights", 2L, ff)
     expect_identical(a$susieFit, "FIT2")
-    # a method with no fine-mapping adapter is untouched
-    b <- pecotmr:::.twasFoldFit(list(), "lasso_weights", 1L, ff)
-    expect_length(b, 0L)
-    # and so is the NULL case
-    expect_length(pecotmr:::.twasFoldFit(list(), "susie_weights", 1L, NULL), 0L)
+    args <- list(X = 1)
+    # No CV payload at all.
+    expect_identical(f(args, "susie_weights", 1L, NULL), args)
+    # A method with no fine-mapping adapter is untouched.
+    expect_identical(f(args, "lasso_weights", 1L, ff), args)
+    # The token is present but carries no folds, so there is nothing to add.
+    expect_identical(f(args, "susie", 1L, list(susie = list())), args)
 })
 
 test_that("twasWeightsCv refuses fold fits from a different partition", {
-    skip_if_not_installed("susieR")
-    f <- suppressMessages(.twcv_foldFits())
+    f <- .twcvFixture
     wm <- list(susie = list())
 
     # (a) no partition at all: a freshly drawn one would score each fold with
@@ -1951,8 +1840,8 @@ test_that("twasWeightsCv refuses fold fits from a different partition", {
     )
 
     # (b) fits with no fingerprint cannot be shown to match.
-    unstamped <- f$slice$foldFits
-    attr(unstamped, "partitionKey") <- NULL
+    unkeyed <- f$slice$foldFits
+    attr(unkeyed, "partitionKey") <- NULL
     expect_error(
         suppressMessages(twasWeightsCv(
             f$X,
@@ -1960,21 +1849,15 @@ test_that("twasWeightsCv refuses fold fits from a different partition", {
             weightMethods = wm,
             verbose = 0,
             samplePartitions = f$slice$samplePartition,
-            fittedModelsCv = list(susie = unstamped)
+            fittedModelsCv = list(susie = unkeyed)
         )),
         "no partition fingerprint"
     )
 
-    # (c) a genuinely different split is caught by the fingerprint.
-    other <- suppressMessages(pecotmr:::.fmWeightsCv(
-        f$X,
-        f$Y,
-        tokens = "susie",
-        methodArgs = list(),
-        fold = 3,
-        verbose = 0,
-        seed = 77
-    ))
+    # (c) a genuinely different split is caught by the fingerprint. Drawing
+    # one needs no fits: with no methods, twasWeightsCv returns just the
+    # partition.
+    other <- suppressMessages(twasWeightsCv(f$X, f$Y, fold = 3, seed = 77))
     expect_error(
         suppressMessages(twasWeightsCv(
             f$X,
@@ -1986,21 +1869,6 @@ test_that("twasWeightsCv refuses fold fits from a different partition", {
         )),
         "trained on a different fold partition"
     )
-})
-
-test_that(".cvPartitionKey ignores row order but not fold assignment", {
-    sp <- data.frame(Sample = c("s1", "s2", "s3"), Fold = c(1L, 2L, 1L))
-    shuffled <- sp[c(3, 1, 2), ]
-    expect_identical(
-        pecotmr:::.cvPartitionKey(sp),
-        pecotmr:::.cvPartitionKey(shuffled)
-    )
-    moved <- sp
-    moved$Fold <- c(1L, 1L, 2L)
-    expect_false(identical(
-        pecotmr:::.cvPartitionKey(sp),
-        pecotmr:::.cvPartitionKey(moved)
-    ))
 })
 
 # ---------------------------------------------------------------------------
@@ -2027,6 +1895,21 @@ test_that("learnTwasWeights refuses a susie token with no fit", {
         )),
         "never run fine-mapping themselves"
     )
+    # The susie + susieInf pair is refused too, naming both: the chained
+    # susieInf -> susie fit lives in fineMappingPipeline(), and
+    # fitSusieInfThenSusie() itself is covered in test_fineMappingWrappers.R.
+    expect_error(
+        learnTwasWeights(
+            X,
+            Y,
+            weightMethods = list(
+                susie_weights = list(),
+                susie_inf_weights = list()
+            ),
+            verbose = 0
+        ),
+        "susie, susieInf"
+    )
     # supplying it through fittedModels satisfies the gate
     fit <- suppressMessages(susieR::susie(X, Y[, 1], L = 5))
     expect_no_error(suppressMessages(learnTwasWeights(
@@ -2046,8 +1929,7 @@ test_that("learnTwasWeights refuses a susie token with no fit", {
 })
 
 test_that("twasWeightsCv refuses a susie token with no per-fold fits", {
-    skip_if_not_installed("susieR")
-    f <- suppressMessages(.twcv_foldFits())
+    f <- .twcvFixture
     expect_error(
         suppressMessages(twasWeightsCv(
             f$X,
@@ -2056,7 +1938,7 @@ test_that("twasWeightsCv refuses a susie token with no per-fold fits", {
             weightMethods = list(susie_weights = list()),
             verbose = 0
         )),
-        "needs that fold's own fit"
+        "never run fine-mapping themselves.*needs that fold's own fit"
     )
 })
 
@@ -2073,11 +1955,6 @@ test_that(".twasSusieTokensRequested matches both method spellings", {
         pecotmr:::.twasSusieTokensRequested(list(lasso_weights = list())),
         0L
     )
-})
-
-test_that("the twas lookup helpers answer NULL when the token is absent", {
-    expect_null(pecotmr:::.twasMethodArgsFor(list(), "susie"))
-    expect_null(pecotmr:::.twasFoldFitsFor(NULL, "susie"))
 })
 
 # --- per-token argument chains ----------------------------------------------
@@ -2105,7 +1982,6 @@ test_that("the twas lookup helpers answer NULL when the token is absent", {
         "penalizedRss",
         ".penalizedRssPath",
         "lassosumRss",
-        ".lassosumRssPath",
         "sdpr",
         ".sdprRun",
         "prsCs",
@@ -2197,7 +2073,13 @@ test_that("the recorded RSS chains match what a fit enters", {
     expect_true(is_in(".rssShrinkGridWeights", seen))
     seen <- .tw_traceChain(lassosumRssWeights(fx$stat, fx$ldReference))
     expect_true(all(is_in(seen, recordedFor("lasso"))))
-    expect_true(is_in(".lassosumRssPath", seen))
+    expect_true(is_in(".penalizedRssPath", seen))
+    seen <- .tw_traceChain(enetRssWeights(fx$stat, fx$ldReference))
+    expect_true(all(is_in(seen, recordedFor("enet"))))
+    expect_true(is_in(".penalizedRssPath", seen))
+    seen <- .tw_traceChain(ridgeRssWeights(fx$stat, fx$ldReference))
+    expect_true(all(is_in(seen, recordedFor("ridge"))))
+    expect_true(is_in(".penalizedRssPath", seen))
     prsCsOpts <- PrsCsOptions(nIter = 20, nBurnin = 5, thin = 1)
     seen <- .tw_traceChain(
         prsCsWeights(fx$stat, fx$ldReference, methodArgs = prsCsOpts)
@@ -2212,11 +2094,44 @@ test_that("the recorded RSS chains match what a fit enters", {
     expect_true(is_in(".sdprRun", recordedFor("dprGibbs")))
 })
 
+test_that("an RSS method accepts its own penalty settings and no other's", {
+    # The penalty reaches .penalizedRssPath() as the wrapper's record, so
+    # every chain shares that hop without taking each other's settings.
+    accepted <- function(tk) pecotmr:::.twasChainAccepted(tk, "QtlSumStats")
+    path <- c("lambda", "thr", "maxiter")
+    l0Only <- c("lambda0", "lambda2", "maxSwaps")
+    expect_true(all(is_in(path, accepted("lasso"))))
+    expect_false(any(is_in(
+        c("alpha", "gamma", "penalty", l0Only, "spec", "label", "method"),
+        accepted("lasso")
+    )))
+    expect_true(all(is_in(c("alpha", path), accepted("enet"))))
+    expect_false(any(is_in(c("gamma", l0Only), accepted("enet"))))
+    expect_false(any(is_in(c("alpha", "gamma", l0Only), accepted("ridge"))))
+    expect_true(all(is_in(c("alpha", "gamma"), accepted("scad"))))
+    expect_false(any(is_in(l0Only, accepted("scad"))))
+    expect_true(all(is_in(
+        c("penalty", "lambda", l0Only),
+        accepted("l0learn")
+    )))
+    expect_false(any(is_in(c("alpha", "gamma"), accepted("l0learn"))))
+})
+
 test_that("every RSS chain yields a checkable argument set", {
     # The point of the chains: each summary-statistics path ends in one of
     # pecotmr's own solvers, which enumerate their formals, so the RSS side
     # is checkable even where the individual side is not.
-    for (tk in c("scad", "mcp", "l0learn", "lasso", "prsCs", "dprGibbs")) {
+    tokens <- c(
+        "scad",
+        "mcp",
+        "l0learn",
+        "lasso",
+        "enet",
+        "ridge",
+        "prsCs",
+        "dprGibbs"
+    )
+    for (tk in tokens) {
         expect_false(
             is.null(pecotmr:::.twasChainAccepted(tk, "QtlSumStats")),
             label = paste("accepted set for", tk)
@@ -2256,6 +2171,24 @@ test_that("per-class checking rejects a name only the other path accepts", {
     )
 })
 
+# The exported *Options constructor that method `token` resolves to on input
+# path `path`, by name: NA when the method does not run on that path, "?"
+# when what it resolves to is not an exported *Options constructor.
+optionsCtorName <- function(token, path) {
+    ctor <- pecotmr:::.twasMethodCtorFor(token, path)
+    if (is.null(ctor)) {
+        return(NA_character_)
+    }
+    exports <- getNamespaceExports("pecotmr")
+    candidates <- exports[str_ends(exports, "Options")]
+    isCtor <- map_lgl(
+        mget(candidates, envir = asNamespace("pecotmr")),
+        identical,
+        ctor
+    )
+    if (any(isCtor)) candidates[isCtor][[1L]] else "?"
+}
+
 test_that("the TWAS Options registry is derived from each implementation", {
     # It used to be 18 hand-written token -> constructor pairs, which had to
     # restate a pairing the implementation already declares through its own
@@ -2265,69 +2198,40 @@ test_that("the TWAS Options registry is derived from each implementation", {
         pecotmr:::.twasConfigurableMethods(),
         names(pecotmr:::.twasMethodCapabilities)
     )
-    # Every configurable method has a constructor on each path it runs on.
+    # Every configurable method resolves, on each path it runs on, to an
+    # exported *Options constructor a caller can build its options with. The
+    # pairs themselves are pinned in the next test.
     for (path in c("QtlDataset", "QtlSumStats")) {
         toks <- intersect(
             pecotmr:::.twasConfigurableMethods(),
             pecotmr:::.twasMethodsFor(path)
         )
-        ctors <- map(toks, pecotmr:::.twasMethodCtorFor, inputKind = path)
-        expect_true(all(map_lgl(ctors, is.function)), info = path)
-    }
-
-    nameOf <- function(f) {
-        if (is.null(f)) {
-            return(NA_character_)
-        }
-        hit <- keep(
-            grep("Options$", getNamespaceExports("pecotmr"), value = TRUE),
-            function(n) identical(get(n, envir = asNamespace("pecotmr")), f)
+        ctorNames <- map_chr(toks, optionsCtorName, path = path)
+        expect_equal(
+            toks[is.na(ctorNames) | ctorNames == "?"],
+            character(0),
+            info = path
         )
-        if (length(hit) > 0L) hit[[1L]] else "?"
     }
-    # Spot-check the pairs the derivation must reproduce.
-    ctorName <- function(tk, path) {
-        nameOf(pecotmr:::.twasMethodCtorFor(tk, path))
-    }
-    expect_equal(ctorName("lasso", "QtlDataset"), "GlmnetOptions")
-    expect_equal(ctorName("mcp", "QtlDataset"), "NcvregOptions")
-    expect_equal(ctorName("bayesB", "QtlDataset"), "BglrOptions")
-    # prsCs has no individual implementation; its one constructor is the
-    # summary-statistics one.
-    expect_equal(ctorName("prsCs", "QtlSumStats"), "PrsCsOptions")
 })
 
 test_that("each method's Options constructor is resolved per input path", {
-    nameOf <- function(f) {
-        if (is.null(f)) {
-            return(NA_character_)
-        }
-        hit <- keep(
-            grep("Options$", getNamespaceExports("pecotmr"), value = TRUE),
-            function(n) identical(get(n, envir = asNamespace("pecotmr")), f)
-        )
-        if (length(hit) > 0L) hit[[1L]] else "?"
-    }
     # The two paths of one method can reach different PACKAGES, which is why
     # one constructor per method was never enough.
-    expect_equal(
-        nameOf(pecotmr:::.twasMethodCtorFor("lasso", "QtlDataset")),
-        "GlmnetOptions"
-    )
-    expect_equal(
-        nameOf(pecotmr:::.twasMethodCtorFor("lasso", "QtlSumStats")),
-        "LassosumOptions"
-    )
-    expect_equal(
-        nameOf(pecotmr:::.twasMethodCtorFor("dprGibbs", "QtlSumStats")),
-        "SdprOptions"
-    )
-    expect_equal(
-        nameOf(pecotmr:::.twasMethodCtorFor("mrmash", "QtlSumStats")),
-        "MrmashRssOptions"
-    )
+    expect_equal(optionsCtorName("lasso", "QtlDataset"), "GlmnetOptions")
+    expect_equal(optionsCtorName("lasso", "QtlSumStats"), "LassosumOptions")
+    expect_equal(optionsCtorName("mcp", "QtlDataset"), "NcvregOptions")
+    expect_equal(optionsCtorName("bayesB", "QtlDataset"), "BglrOptions")
+    expect_equal(optionsCtorName("dprGibbs", "QtlSumStats"), "SdprOptions")
+    expect_equal(optionsCtorName("mrmash", "QtlSumStats"), "MrmashRssOptions")
+    # enet and ridge run on summary statistics through the penalized solver.
+    expect_equal(optionsCtorName("enet", "QtlSumStats"), "PenalizedRssOptions")
+    expect_equal(optionsCtorName("ridge", "QtlDataset"), "GlmnetOptions")
+    # prsCs has no individual implementation; its one constructor is the
+    # summary-statistics one.
+    expect_equal(optionsCtorName("prsCs", "QtlSumStats"), "PrsCsOptions")
     # A method that does not run on a path has no constructor there.
-    expect_null(pecotmr:::.twasMethodCtorFor("enet", "QtlSumStats"))
+    expect_null(pecotmr:::.twasMethodCtorFor("dprVb", "QtlSumStats"))
     expect_null(pecotmr:::.twasMethodCtorFor("prsCs", "QtlDataset"))
     expect_null(pecotmr:::.twasMethodCtorFor("nosuch", "QtlDataset"))
 })
@@ -2352,6 +2256,8 @@ test_that("name lookups answer NA / NULL when the name resolves to nothing", {
     )
     expect_null(pecotmr:::.twasImplCtorName("noSuchImplAnywhere"))
     expect_null(pecotmr:::.twasImplCtorName(NULL))
+    # A token no weightMethods name spells has no arguments to look up.
+    expect_null(pecotmr:::.twasMethodArgsFor(list(), "susie"))
 })
 
 test_that(".twasCanonicalShortName maps a function name back, else passes on", {
@@ -2369,13 +2275,176 @@ test_that(".twasFoldFitsFor answers NULL when no spelling is present", {
     expect_null(f(list(somethingElse = list()), "susie"))
 })
 
-test_that(".twasFoldFit leaves args alone when there is no fold fit", {
-    f <- pecotmr:::.twasFoldFit
-    args <- list(X = 1)
-    # No CV payload at all.
-    expect_identical(f(args, "susie", 1L, NULL), args)
-    # A method with no fine-mapping token to look up.
-    expect_identical(f(args, "lasso", 1L, list(susie = list())), args)
-    # The token is present but carries no folds, so there is nothing to add.
-    expect_identical(f(args, "susie", 1L, list(susie = list())), args)
+# ===========================================================================
+# metadata, and the variants each row's fits were made on
+# ===========================================================================
+
+.tw_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+
+# A TwasWeights of one row per payload in `rows`, named r1, r2, ...
+.tw_collection <- function(rows, metadata = list()) {
+    n <- length(rows)
+    TwasWeights(
+        studyName = rep("s1", n),
+        context = rep("c1", n),
+        trait = sprintf("g%d", seq_len(n)),
+        method = rep("lasso", n),
+        entry = rows,
+        metadata = metadata
+    )
+}
+
+test_that("TwasWeights() keeps the caller's metadata", {
+    tw <- .tw_collection(
+        list(TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))),
+        metadata = list(run = "r1")
+    )
+    expect_equal(S4Vectors::metadata(tw), list(run = "r1"))
+})
+
+test_that("a weights row records its fit variants only with a fit payload", {
+    tw <- .tw_collection(list(
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4)),
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))
+    ))
+    expect_s4_class(tw$fitVariants, "CharacterList")
+    expect_equal(as.character(tw$fitVariants[[1L]]), .tw_ids)
+    expect_equal(as.character(tw$fitVariants[[2L]]), character(0))
+})
+
+test_that("cvResult() and methodFits() of a narrowed row warn", {
+    fits <- list(lasso = list(lambda = 0.1))
+    cv <- list(r2 = 0.4)
+    tw <- .tw_collection(list(
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), fits, cv)
+    ))
+    narrowed <- endoapply(tw, utils::head, 2L)
+    expect_warning(
+        out <- cvResult(narrowed),
+        "cvResult\\(\\): the stored fit was made with 3 variants, 1 of"
+    )
+    expect_identical(out, cv)
+    expect_warning(
+        outFits <- methodFits(narrowed),
+        "methodFits\\(\\): .* Refit on the variants kept"
+    )
+    expect_identical(outFits, fits)
+    expect_no_warning(cvResult(tw))
+    expect_no_warning(methodFits(tw))
+})
+
+test_that("updateObject() backfills a fitted row's held variants", {
+    tw <- .tw_collection(list(
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4)),
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))
+    ))
+    saved <- tw
+    saved$fitVariants <- NULL
+    up <- updateObject(saved)
+    expect_equal(as.character(up$fitVariants[[1L]]), .tw_ids)
+    expect_equal(as.character(up$fitVariants[[2L]]), character(0))
+    # A current collection is left as it is.
+    expect_identical(updateObject(tw)$fitVariants, tw$fitVariants)
+    expect_message(updateObject(tw, verbose = TRUE), "TwasWeights")
+})
+
+# ===========================================================================
+# estimateSparsity
+# ===========================================================================
+
+test_that("estimateSparsity: legacy list input reads attr(.,'fit')$pi", {
+    # Build a weight result that mimics learnTwasWeights keeping its fits:
+    # element name carries the `_weights` suffix; attr 'fit' carries an mr.ash
+    # object whose pi[1] is the spike weight.
+    fake_w <- structure(c(0.1, 0, 0.3), fit = list(pi = c(0.6, 0.2, 0.2)))
+    weightResults <- list(mrash_weights = fake_w)
+    expect_equal(estimateSparsity(weightResults), 1 - 0.6, tolerance = 1e-12)
+})
+
+test_that("estimateSparsity: TwasWeights collection input reads from the mrash entry", {
+    entry <- TwasWeightsRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
+        weights = c(0.1, 0, 0.3),
+        methodFits = list(pi = c(0.7, 0.2, 0.1)),
+        weightStandardized = FALSE
+    )
+    tw <- TwasWeights(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "mrash",
+        entry = list(entry)
+    )
+    expect_equal(estimateSparsity(tw), 1 - 0.7, tolerance = 1e-12)
+})
+
+test_that("estimateSparsity: TwasWeights without mrash entry errors", {
+    entry <- TwasWeightsRow(variantIds = c("chr1:100:A:G"), weights = c(0.1))
+    tw <- TwasWeights(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "lasso",
+        entry = list(entry)
+    )
+    expect_error(
+        estimateSparsity(tw),
+        "mr.ash entry not found in TwasWeights"
+    )
+})
+
+test_that("estimateSparsity: TwasWeights with mrash entry but no fit$pi errors", {
+    entry <- TwasWeightsRow(
+        variantIds = c("chr1:100:A:G"),
+        weights = c(0.1),
+        methodFits = list(other = 1)
+    )
+    tw <- TwasWeights(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "mrash",
+        entry = list(entry)
+    )
+    expect_error(
+        estimateSparsity(tw),
+        "mr.ash fit object not found"
+    )
+})
+
+test_that("estimateSparsity: legacy list input without mrash_weights errors", {
+    expect_error(
+        estimateSparsity(list(lasso = c(0.1, 0.2))),
+        "'mrash_weights'.*not found"
+    )
+})
+
+test_that("estimateSparsity: legacy list input without fit attr errors", {
+    expect_error(
+        estimateSparsity(list(mrash_weights = c(0.1, 0.2))),
+        "mr.ash fit object not found"
+    )
+})
+
+# ===========================================================================
+# .twasMethodMap
+# ===========================================================================
+
+test_that("ser is reachable as a TWAS method", {
+    # It is fit-derived like susie/mvsusie, so it carries no learner
+    # arguments and its entry is an empty stub.
+    expect_true(is_in("ser", names(pecotmr:::.twasMethodMap)))
+    expect_equal(pecotmr:::.twasMethodMap$ser$impl, "serWeights")
+    expect_length(pecotmr:::.twasMethodMap$ser$args, 0L)
+    expect_setequal(
+        pecotmr:::.twasNormalizeMethods(c("ser", "lasso"))$tokens,
+        c("ser", "lasso")
+    )
+    # Nothing to configure, same as the other fit-derived methods.
+    expect_error(
+        TwasWeightsMethodsParam(
+            qtlSumStatsMethods = list(ser = list(nope = 1))
+        ),
+        "nothing to configure here"
+    )
 })

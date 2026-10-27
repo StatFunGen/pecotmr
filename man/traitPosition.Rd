@@ -13,9 +13,9 @@ traitPosition(x, ...)
 
 \S4method{traitPosition}{FineMappingResultBase}(x)
 
-\S4method{traitPosition}{QtlSumStats}(x, traitId = NULL)
+\S4method{traitPosition}{QtlSumStats}(x, trait = NULL)
 
-\S4method{traitPosition}{QtlDataset}(x, traitId = NULL)
+\S4method{traitPosition}{QtlDataset}(x, trait = NULL)
 
 \S4method{traitPosition}{TwasWeights}(x)
 }
@@ -24,12 +24,15 @@ traitPosition(x, ...)
 
 \item{...}{Reserved for future use.}
 
-\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+\item{trait}{Character or \code{NULL}. Molecular trait / feature identifier
 to select; \code{NULL} matches all traits in the dataset.}
 }
 \value{
-A \code{GRanges} with one range per row of \code{x}, or an empty
-  \code{GRanges} when the collection carries no trait-position provenance.
+A \code{GRanges}: one range per row of a collection, or an empty
+  \code{GRanges} when the collection carries no trait-position provenance
+  (or, for a \code{QtlSumStats} with \code{trait} given, none of those
+  traits). For a \code{QtlDataset}, one range per requested trait, named
+  by trait; a trait in no context is an error.
 }
 \description{
 Return the molecular feature's OWN genomic coordinates (the gene

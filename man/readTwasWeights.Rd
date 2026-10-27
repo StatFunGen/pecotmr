@@ -6,7 +6,7 @@
 \usage{
 readTwasWeights(
   path,
-  region = NULL,
+  which = NULL,
   format = c("auto", "bed", "vcf"),
   studyName = NULL,
   context = NULL,
@@ -19,12 +19,12 @@ readTwasWeights(
 }
 \arguments{
 \item{path}{Path to the published file. Bgzipped and tabix-indexed files
-can be read by region.}
+can be read in part, with \code{which}.}
 
-\item{region}{Optional region to restrict the read to -- a
-\code{"chr:start-end"} string, a \code{GRanges}, or a one-row
-\code{data.frame} with chrom/start/end. Ignored with a warning when the
-file is not tabix-indexed.}
+\item{which}{Optional \code{GRanges}: read only the records that overlap
+it, as \code{which} does for \code{rtracklayer::import()} and
+\code{VariantAnnotation::ScanVcfParam()}. Ignored with a warning when
+the file is not tabix-indexed.}
 
 \item{format}{\code{"auto"} (default) reads a \code{.vcf} / \code{.bcf}
 path as a VCF and anything else as a published table; \code{"bed"} /
@@ -49,8 +49,8 @@ A \code{TwasWeights}.
 }
 \description{
 Rebuild a \code{TwasWeights} from a file
-  \code{\link{exportToBed}} or \code{\link{exportToVcf}} wrote, or from any
-  file in the same vocabulary.
+  \code{\link{writeBed}} or \code{\link{writeGwasVcf}}
+  wrote, or from any file in the same vocabulary.
 
   A merged table reads back as a multi-row collection, one row per
   \code{(study, context, trait, method)} tuple. A fitted model whose
@@ -77,9 +77,9 @@ Rebuild a \code{TwasWeights} from a file
 \examples{
 data(twasWeightsExample)
 path <- file.path(tempdir(), "weights.bed")
-exportToBed(twasWeightsExample, path)
+writeBed(twasWeightsExample, path)
 readTwasWeights(path)
 }
 \seealso{
-\code{\link{exportToBed}}, \code{\link{readFineMappingResult}}
+\code{\link{writeBed}}, \code{\link{readFineMappingResult}}
 }

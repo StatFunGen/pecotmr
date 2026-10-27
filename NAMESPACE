@@ -13,21 +13,8 @@ S3method(postprocessFinemappingFit,susie)
 S3method(postprocessFinemappingFit,susieInf)
 S3method(postprocessFinemappingFit,susieRss)
 export("af<-")
-export("credibleSetParam<-")
-export("csCoverage<-")
-export("fineMappingMethods<-")
-export("fitRetention<-")
-export("includeAllCs<-")
-export("initializeWithSusieInf<-")
 export("maf<-")
-export("medianAbsCorr<-")
-export("minAbsCorr<-")
-export("nSamples<-")
-export("panelFilterParam<-")
-export("perCsColumns<-")
-export("secondaryCoverage<-")
-export("signalCutoff<-")
-export("susieRssParam<-")
+export("sampleSize<-")
 export(AnnotationMatrix)
 export(AspuOptions)
 export(BglrOptions)
@@ -63,6 +50,7 @@ export(DentistParam)
 export(DprOptions)
 export(EnsembleParam)
 export(FineMappingMethodsParam)
+export(FineMappingRow)
 export(FsusieOptions)
 export(GbjOmniOptions)
 export(GbjOptions)
@@ -102,6 +90,7 @@ export(MvsusieRssOptions)
 export(NcvregOptions)
 export(PanelFilterParam)
 export(PenalizedRssOptions)
+export(PhenotypeFilterParam)
 export(PlinkQcOptions)
 export(PoolrOptions)
 export(PrsCsOptions)
@@ -134,6 +123,7 @@ export(SusieRssOptions)
 export(SusieRssParam)
 export(TwasWeights)
 export(TwasWeightsMethodsParam)
+export(TwasWeightsRow)
 export(UdFitOptions)
 export(UdInitOptions)
 export(VariantPruningParam)
@@ -143,7 +133,6 @@ export(annotCols)
 export(annotData)
 export(annotationJackknifeCoefs)
 export(asCtwasResult)
-export(asGranges)
 export(assembleCtwasInputs)
 export(autoDecision)
 export(bLassoWeights)
@@ -170,6 +159,7 @@ export(colocCredibleSets)
 export(colocGenes)
 export(colocPairs)
 export(colocPipeline)
+export(colocPooledVariants)
 export(colocVariants)
 export(colocboostPipeline)
 export(combineFineMappingResults)
@@ -204,6 +194,7 @@ export(dprVbWeights)
 export(dprWeights)
 export(effectiveN)
 export(eigenList)
+export(enetRssWeights)
 export(enetWeights)
 export(enforceDesignFullRank)
 export(enlocClusterProbabilities)
@@ -211,10 +202,9 @@ export(ensembleWeights)
 export(estCtwasGroupPriors)
 export(estimateH2)
 export(estimateSparsity)
-export(exportToBed)
-export(exportToVcf)
 export(extractCsInfo)
 export(extractTopPipInfo)
+export(fillFromReference)
 export(filterInvalidSummaryStat)
 export(filterMixtureComponents)
 export(filterRelatedness)
@@ -222,7 +212,6 @@ export(filterVariantsByLdReference)
 export(fineMappingMethods)
 export(fineMappingPipeline)
 export(fineMappingResult)
-export(fineMappingRow)
 export(finemapCtwasRegions)
 export(fitFsusie)
 export(fitGlmnetCv)
@@ -249,15 +238,12 @@ export(heritabilityEstimate)
 export(heritabilityEstimateSe)
 export(heritabilityIntercept)
 export(heritabilityInterceptSe)
-export(imissCutoff)
 export(inSample)
 export(includeAllCs)
 export(initializeWithSusieInf)
 export(intersectVariants)
 export(invertMinmaxScaling)
 export(isBinarySldscAnnot)
-export(keepIndel)
-export(keepVariants)
 export(krigingOutlierQc)
 export(l0learnRssWeights)
 export(l0learnWeights)
@@ -280,9 +266,7 @@ export(loadMultiStudyQtlDatasetFromManifest)
 export(loadQtlDatasetFromManifest)
 export(loadQtlSumStatsFromManifest)
 export(localH2Blocks)
-export(macCutoff)
 export(maf)
-export(mafCutoff)
 export(makePairwiseContrastCol)
 export(marginalEffects)
 export(mashCovarianceComponents)
@@ -324,7 +308,6 @@ export(nestTupleRanges)
 export(normalizeVariantId)
 export(overlapTopLoci)
 export(panelFilterParam)
-export(parseRegion)
 export(parseVariantId)
 export(perCsColumns)
 export(phenotypeCovariates)
@@ -334,8 +317,8 @@ export(prsCsWeights)
 export(pval)
 export(qcDiagnostics)
 export(qcInfo)
+export(qcOptions)
 export(qtlAssociationPostprocess)
-export(qtlDatasets)
 export(qtlEnrichment)
 export(qtlEnrichmentPipeline)
 export(qtlSumStatsFromBetaMatrix)
@@ -350,16 +333,17 @@ export(readSldscFrq)
 export(readSldscTrait)
 export(readTwasWeights)
 export(refVariantInfo)
-export(regionToDf)
 export(regionVcp)
 export(residualizedGenotypes)
 export(residualizedPhenotypes)
 export(resolveWeights)
 export(retainedMass)
+export(ridgeRssWeights)
+export(ridgeWeights)
+export(sampleSize)
 export(sanitizeMashData)
 export(scadRssWeights)
 export(scadWeights)
-export(scaleResiduals)
 export(scoreFromCs)
 export(scoreStats)
 export(screenCtwasRegions)
@@ -377,8 +361,6 @@ export(sliceMashData)
 export(standardizeSldscTrait)
 export(stratifiedHeritabilityEnrichment)
 export(studyName)
-export(subsetChr)
-export(subsetRegion)
 export(sumStats)
 export(summaryStatsQc)
 export(susieAlpha)
@@ -399,7 +381,6 @@ export(twasPredict)
 export(twasWeights)
 export(twasWeightsCv)
 export(twasWeightsPipeline)
-export(twasWeightsRow)
 export(twasZ)
 export(updateMashModelCov)
 export(varY)
@@ -407,7 +388,8 @@ export(variantIds)
 export(waldTestPval)
 export(weightStandardized)
 export(weightsDataType)
-export(xvarCutoff)
+export(writeBed)
+export(writeGwasVcf)
 export(z)
 exportClasses(AnnotationMatrix)
 exportClasses(BoundaryMergeParam)
@@ -446,6 +428,7 @@ exportClasses(MrParam)
 exportClasses(MrmashPriorParam)
 exportClasses(MultiStudyQtlDataset)
 exportClasses(PanelFilterParam)
+exportClasses(PhenotypeFilterParam)
 exportClasses(PvalMethodsParam)
 exportClasses(QtlDataset)
 exportClasses(QtlEnrichmentParam)
@@ -474,23 +457,26 @@ exportMethods("[")
 exportMethods("[[")
 exportMethods("[[<-")
 exportMethods("af<-")
+exportMethods("elementMetadata<-")
 exportMethods("maf<-")
-exportMethods("nSamples<-")
+exportMethods("sampleSize<-")
 exportMethods(af)
 exportMethods(annotCols)
 exportMethods(annotData)
 exportMethods(annotationJackknifeCoefs)
-exportMethods(as.data.frame)
 exportMethods(as.list)
+exportMethods(as.matrix)
 exportMethods(baselineAnnotations)
 exportMethods(bindROWS)
 exportMethods(blockId)
 exportMethods(coef)
+exportMethods(coerce)
 exportMethods(colnames)
 exportMethods(colocBoostOutcomes)
 exportMethods(colocCredibleSets)
 exportMethods(colocGenes)
 exportMethods(colocPairs)
+exportMethods(colocPooledVariants)
 exportMethods(colocVariants)
 exportMethods(colocboostPipeline)
 exportMethods(computeLdScores)
@@ -505,8 +491,6 @@ exportMethods(cvResult)
 exportMethods(eigenList)
 exportMethods(endoapply)
 exportMethods(estimateH2)
-exportMethods(exportToBed)
-exportMethods(exportToVcf)
 exportMethods(fineMappingPipeline)
 exportMethods(fineMappingResult)
 exportMethods(frqData)
@@ -521,11 +505,8 @@ exportMethods(heritabilityEstimate)
 exportMethods(heritabilityEstimateSe)
 exportMethods(heritabilityIntercept)
 exportMethods(heritabilityInterceptSe)
-exportMethods(imissCutoff)
 exportMethods(inSample)
 exportMethods(intersectVariants)
-exportMethods(keepIndel)
-exportMethods(keepVariants)
 exportMethods(lbf)
 exportMethods(ldBlocks)
 exportMethods(ldMatrix)
@@ -535,9 +516,7 @@ exportMethods(ldReference)
 exportMethods(length)
 exportMethods(localH2Blocks)
 exportMethods(longForm)
-exportMethods(macCutoff)
 exportMethods(maf)
-exportMethods(mafCutoff)
 exportMethods(marginalEffects)
 exportMethods(methodFits)
 exportMethods(methodNames)
@@ -554,8 +533,8 @@ exportMethods(pip)
 exportMethods(pval)
 exportMethods(qcDiagnostics)
 exportMethods(qcInfo)
+exportMethods(qcOptions)
 exportMethods(qtlAssociationPostprocess)
-exportMethods(qtlDatasets)
 exportMethods(readAnnotations)
 exportMethods(readGenotypes)
 exportMethods(regionVcp)
@@ -563,16 +542,15 @@ exportMethods(residualizedGenotypes)
 exportMethods(residualizedPhenotypes)
 exportMethods(resolveWeights)
 exportMethods(retainedMass)
-exportMethods(scaleResiduals)
+exportMethods(sampleSize)
 exportMethods(scoreStats)
 exportMethods(se)
 exportMethods(show)
 exportMethods(significantQtls)
 exportMethods(sldscResults)
+exportMethods(sort)
 exportMethods(stratifiedHeritabilityEnrichment)
 exportMethods(studyName)
-exportMethods(subsetChr)
-exportMethods(subsetRegion)
 exportMethods(sumStats)
 exportMethods(susieAlpha)
 exportMethods(susieFit)
@@ -580,16 +558,20 @@ exportMethods(testedAnnotations)
 exportMethods(topLoci)
 exportMethods(traitNames)
 exportMethods(traitPosition)
+exportMethods(trim)
 exportMethods(twasWeights)
 exportMethods(twasWeightsPipeline)
+exportMethods(unique)
 exportMethods(updateObject)
 exportMethods(varY)
 exportMethods(variantIds)
 exportMethods(weightStandardized)
 exportMethods(weights)
 exportMethods(weightsDataType)
-exportMethods(xvarCutoff)
+exportMethods(writeBed)
+exportMethods(writeGwasVcf)
 exportMethods(z)
+importClassesFrom(BiocParallel,BiocParallelParam)
 importClassesFrom(GenomicRanges,GRanges)
 importClassesFrom(MultiAssayExperiment,MultiAssayExperiment)
 importClassesFrom(S4Vectors,DataFrame)
@@ -603,14 +585,19 @@ importFrom(BiocGenerics,
   ncol,
   nrow,
   path,
+  sort,
+  unique,
+  unstrand,
   updateObject,
   weights,
   width
 )
 importFrom(BiocParallel,
-  MulticoreParam,
+  "bpRNGseed<-",
+  SerialParam,
+  bpRNGseed,
   bplapply,
-  multicoreWorkers
+  bpnworkers
 )
 importFrom(Biostrings,
   DNAStringSet,
@@ -627,7 +614,8 @@ importFrom(IRanges,
   DataFrameList,
   IRanges,
   findOverlaps,
-  overlapsAny
+  overlapsAny,
+  trim
 )
 importFrom(MASS,ginv)
 importFrom(MultiAssayExperiment,
@@ -647,8 +635,12 @@ importFrom(Rsamtools,
   scanTabix,
   seqnamesTabix
 )
-importFrom(S4Arrays,extract_array)
+importFrom(S4Arrays,
+  as.matrix,
+  extract_array
+)
 importFrom(S4Vectors,
+  "elementMetadata<-",
   "mcols<-",
   "metadata<-",
   DataFrame,
@@ -671,6 +663,7 @@ importFrom(archive,archive_read)
 importFrom(checkmate,
   assert,
   assertCharacter,
+  assertChoice,
   assertClass,
   assertCount,
   assertDataFrame,
@@ -711,6 +704,8 @@ importFrom(dplyr,
   bind_cols,
   bind_rows,
   case_when,
+  coalesce,
+  count,
   desc,
   distinct,
   everything,
@@ -737,6 +732,7 @@ importFrom(metafor,rma)
 importFrom(methods,
   "slot<-",
   as,
+  coerce,
   is,
   new,
   setClass,
@@ -763,7 +759,6 @@ importFrom(purrr,
   map,
   map2,
   map2_dbl,
-  map2_lgl,
   map_chr,
   map_dbl,
   map_dfr,
@@ -792,6 +787,7 @@ importFrom(rlang,
   abort,
   arg_match,
   arg_match0,
+  call2,
   caller_arg,
   cnd_signal,
   eval_bare,

@@ -28,12 +28,12 @@ is carried through; a collection lacking an optional column is NA-padded.
 \details{
 The three collection-level slots are merged rather than taken from the first
 input: \code{genome} and the \code{\link{summaryStatsQc}} options must agree
-across the inputs (a mismatch is an error, not a silent first-wins), the
-per-element \code{qcInfo$entryAudit} concatenates in element order so
-\code{\link{qcDiagnostics}} keeps addressing the right element, and every
-row keeps its own LD reference. References that are views of one source
-are stored once: genotype panels read from the same files union into one
-panel over the shared genotype handle (block-parallel pipelines narrow each
+across the inputs (a mismatch is an error, not a silent first-wins), each
+row keeps its own QC audit, so \code{\link{qcDiagnostics}} keeps
+addressing the right element, and every row keeps its own LD reference.
+References that are views of one source are stored once: genotype panels
+read from the same files union into one panel over the shared genotype
+handle (block-parallel pipelines narrow each
 piece's panel to its own block, so a multi-block collection would otherwise
 hold one panel per block), and an \code{LdMatrix} or
 \code{GenotypeMixture} that another input's reference covers gives way to

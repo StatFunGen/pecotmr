@@ -16,14 +16,6 @@ dentistIterativeImputeFactor <- function(factorR, nSample, zScoreR, pValueThresh
   .Call(`_pecotmr_dentistIterativeImputeFactor`, factorR, nSample, zScoreR, pValueThreshold, propSVD, gcControl, nIter, gPvalueThreshold, numThreads, correctChenEtAlBug, verbose, seed)
 }
 
-lassosumRssCpp <- function(zR, LD, shrink, lambdaR, thr, maxiter) {
-  .Call(`_pecotmr_lassosumRssCpp`, zR, LD, shrink, lambdaR, thr, maxiter)
-}
-
-lassosumRssFactorCpp <- function(zR, factorR, shrink, lambdaR, thr, maxiter) {
-  .Call(`_pecotmr_lassosumRssFactorCpp`, zR, factorR, shrink, lambdaR, thr, maxiter)
-}
-
 ldThresholdComponents <- function(standardized, threshold, stripe) {
   .Call(`_pecotmr_ldThresholdComponents`, standardized, threshold, stripe)
 }

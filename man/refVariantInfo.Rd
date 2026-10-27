@@ -4,13 +4,13 @@
 \alias{refVariantInfo}
 \title{Get variant information from any LD reference source}
 \usage{
-refVariantInfo(source, region = NULL)
+refVariantInfo(source, which = NULL)
 }
 \arguments{
 \item{source}{Genotype file path/prefix or LD metadata file path.}
 
-\item{region}{Region of interest: "chr:start-end" string or data.frame with
-chrom/start/end. If NULL, returns all variants.}
+\item{which}{Optional \code{GRanges}: return only the variants that
+overlap it. If NULL, returns all variants.}
 }
 \value{
 A data.frame with columns: chrom, id, pos, A2, A1. May also include
@@ -26,5 +26,6 @@ extracts variant info.
 \examples{
 meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
   package = "pecotmr")
-refVariantInfo(meta, region = "chr22:10000000-19000000")
+refVariantInfo(meta,
+  which = GenomicRanges::GRanges("chr22:10000000-19000000"))
 }

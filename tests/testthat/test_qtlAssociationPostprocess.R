@@ -1,84 +1,14 @@
 context("qtlAssociationPostprocess")
 
-# A deterministic per-gene QtlSumStats: one row per gene carrying the regional
-# summary as row columns (p_beta / beta shapes / n_variants), each entry a
-# per-variant GRanges (P / af / tss_distance / tes_distance). Deterministic so
-# qvalue::qvalue sees a stable p-value distribution.
-#   drop       row columns to omit (e.g. "n_variants", "p_beta", beta shapes),
-#              for the required-column / missing-input error paths.
-#   withQvalue attach a per-variant `qvalue` mcol (needed by the qvalue SNP
-#              significance query), with v1 tracking the gene signal.
-#   emptyIdx   gene indices whose entry is an empty GRanges (no p-values), for
-#              the "skip genes with no variants" branch.
-#   naShapeIdx gene indices given an NA beta_shape1 (so qbeta -> NA nominal
-#              threshold), for the "skip genes with an NA threshold" branch.
-# Column counts and the p_beta distribution are unchanged from the base
-# fixture, so qvalue::qvalue still estimates pi0 on its default path.
-.qapFixture <- function(
-    nVar = 50L,
-    nVarFilt = 30L,
-    drop = character(),
-    withQvalue = FALSE,
-    emptyIdx = integer(0),
-    naShapeIdx = integer(0)
-) {
-    # 6 strong signal p_beta + a deterministic uniform null (ppoints) so
-    # qvalue::qvalue estimates pi0 on its default path (no fallback needed).
-    pBeta <- c(10^(-c(8, 7, 6, 5, 4, 3)), stats::ppoints(54))
-    G <- length(pBeta)
-    entries <- map(seq_len(G), function(i) {
-        if (i %in% emptyIdx) {
-            return(GenomicRanges::GRanges())
-        } # no variants
-        k <- 4L
-        pv <- c(pBeta[i] / 5, 0.2, 0.5, 0.8) # min tracks the gene signal
-        gr <- GenomicRanges::GRanges(
-            "chr1",
-            IRanges::IRanges(
-                start = seq(1000L, by = 50L, length.out = k),
-                width = 1L
-            )
-        )
-        mc <- S4Vectors::DataFrame(
-            SNP = paste0("g", i, "_v", seq_len(k)),
-            A1 = "A",
-            A2 = "G",
-            P = pv,
-            af = c(0.30, 0.20, 0.005, 0.40), # v3 fails MAF 0.01
-            tss_distance = c(0L, 500L, 900000L, 2000000L), # v4 outside 1Mb cis
-            tes_distance = c(0L, 500L, 900000L, 2000000L)
-        )
-        if (withQvalue) {
-            mc$qvalue <- c(pBeta[i] / 5, 0.30, 0.60, 0.90)
-        }
-        S4Vectors::mcols(gr) <- mc
-        gr
-    })
-    shape1 <- rep(1, G)
-    shape1[naShapeIdx] <- NA_real_
-    extra <- list(
-        n_variants = rep(nVar, G),
-        n_variants_filtered = rep(nVarFilt, G),
-        p_beta = pBeta,
-        beta_shape1 = shape1,
-        beta_shape2 = rep(200, G)
-    )
-    args <- list(
-        study = rep("s", G),
-        context = rep("brain", G),
-        trait = paste0("g", seq_len(G)),
-        entry = entries,
-        genome = "hg19",
-        extraCols = extra[setdiff(names(extra), drop)]
-    )
-    exec(QtlSumStats, !!!args[setdiff(names(args), drop)])
+# The shared fixture without the named row columns, for the required-column /
+# missing-input error paths: dropping a column is a cheap mcols edit, where a
+# rebuild costs as much as the test itself.
+.qapWithout <- function(cols) {
+    x <- .qapDefaultFixture
+    kept <- setdiff(colnames(S4Vectors::mcols(x)), cols)
+    S4Vectors::mcols(x) <- S4Vectors::mcols(x)[, kept, drop = FALSE]
+    x
 }
-
-# The default fixture is 60 genes of GRanges + mcols and costs ~0.5s to build,
-# which is most of this file's runtime when every test rebuilds it. S4 objects
-# are copy-on-modify, so one shared instance is safe; tests needing a variant
-# still call .qapFixture() with arguments.
-.qapDefaultFixture <- .qapFixture()
 
 test_that("qtlAssociationPostprocess enriches with package-computed columns", {
     x <- .qapDefaultFixture
@@ -90,7 +20,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
     )
 
     expect_s4_class(r, "QtlSumStats")
-    expect_false(is.null(qcInfo(r)$associationPostprocess)) # recipe stashed
+    expect_false(is.null(qcOptions(r)$associationPostprocess)) # recipe stashed
 
     # Bonferroni original == min over variants of p.adjust(P, "bonferroni", n).
     expP <- map_dbl(
@@ -178,28 +108,6 @@ test_that("significantQtls (bonferroni) matches the derived threshold rule", {
     expect_equal(length(sig), expN)
 })
 
-test_that("sumStats(annotateSignificance=) adds a derived logical mcol", {
-    x <- .qapDefaultFixture
-    r <- qtlAssociationPostprocess(x, methods = "permutation")
-    gr <- sumStats(
-        r,
-        studyName = "s",
-        context = "brain",
-        trait = "g1",
-        annotateSignificance = "permutation"
-    )
-    expect_true("significant" %in% names(S4Vectors::mcols(gr)))
-    expect_type(S4Vectors::mcols(gr)$significant, "logical")
-    # matches the permutation rule P < p_nominal_threshold[gene 1]
-    thr1 <- as.numeric(r$p_nominal_threshold)[1]
-    exp1 <- if (is.na(thr1)) {
-        rep(FALSE, length(gr))
-    } else {
-        S4Vectors::mcols(gr)$P < thr1
-    }
-    expect_equal(S4Vectors::mcols(gr)$significant, exp1)
-})
-
 test_that("significance accessors require a postprocessed object", {
     x <- .qapDefaultFixture # not postprocessed
     expect_error(
@@ -214,34 +122,29 @@ test_that("significance accessors require a postprocessed object", {
 # qvalue-native error on the primary (no-lambda) call and succeed on the retry
 # (lambda supplied), then assert the retry value flows through unchanged.
 
-test_that(".qapSafeQvalue retries with lambda=0 on qvalue 'missing or infinite'", {
+test_that(".qapSafeQvalue retries both qvalue-native degenerate cases", {
     skip_if_not_installed("qvalue")
-    testthat::local_mocked_bindings(
-        qvalue = function(p, lambda, ...) {
-            if (missing(lambda)) {
-                stop("missing or infinite values in the smoother")
-            }
-            list(qvalues = rep(0.111, length(p)))
-        },
-        .package = "qvalue"
-    )
-    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation")
-    expect_true(all(as.numeric(r$q_beta) == 0.111))
-})
-
-test_that(".qapSafeQvalue retries with bootstrap pi0 on qvalue 'pi0 <= 0'", {
-    skip_if_not_installed("qvalue")
-    testthat::local_mocked_bindings(
-        qvalue = function(p, lambda, ...) {
-            if (missing(lambda)) {
-                stop("ERROR: The estimated pi0 <= 0.")
-            }
-            list(qvalues = rep(0.222, length(p)))
-        },
-        .package = "qvalue"
-    )
-    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation")
-    expect_true(all(as.numeric(r$q_beta) == 0.222))
+    # 'missing or infinite' retries with lambda = 0, 'pi0 <= 0' with a
+    # bootstrap pi0.
+    for (err in c(
+        "missing or infinite values in the smoother",
+        "ERROR: The estimated pi0 <= 0."
+    )) {
+        testthat::local_mocked_bindings(
+            qvalue = function(p, lambda, ...) {
+                if (missing(lambda)) {
+                    stop(err)
+                }
+                list(qvalues = rep(0.111, length(p)))
+            },
+            .package = "qvalue"
+        )
+        r <- qtlAssociationPostprocess(
+            .qapDefaultFixture,
+            methods = "permutation"
+        )
+        expect_true(all(as.numeric(r$q_beta) == 0.111), info = err)
+    }
 })
 
 test_that(".qapSafeQvalue re-raises a non-native qvalue error (no hand-rolled q)", {
@@ -296,8 +199,10 @@ test_that("significantQtls (permutation) uses each gene's nominal threshold", {
 test_that("significantQtls (permutation) skips genes with an NA threshold", {
     # Gene 1's NA beta_shape1 makes its qbeta nominal threshold NA, so the mask
     # loop must `next` past it while still processing the non-NA genes.
+    x <- .qapDefaultFixture
+    S4Vectors::mcols(x)$beta_shape1[1L] <- NA_real_
     r <- qtlAssociationPostprocess(
-        .qapFixture(naShapeIdx = 1L),
+        x,
         fdrThreshold = 0.1,
         methods = "permutation"
     )
@@ -322,29 +227,11 @@ test_that("significantQtls (permutation) skips genes with an NA threshold", {
 test_that("significantQtls (permutation) errors without a nominal threshold", {
     # No beta shapes -> postprocess produces no p_nominal_threshold column.
     r <- qtlAssociationPostprocess(
-        .qapFixture(drop = c("beta_shape1", "beta_shape2")),
+        .qapWithout(c("beta_shape1", "beta_shape2")),
         methods = "permutation"
     )
     expect_null(r$p_nominal_threshold)
     expect_error(significantQtls(r, "permutation"), "p_nominal_threshold")
-})
-
-test_that("significantQtls (bonferroni_filtered) applies the MAF/cis keep filter", {
-    r <- qtlAssociationPostprocess(
-        .qapDefaultFixture,
-        mafCutoff = 0.01,
-        cisWindow = 1e6
-    )
-    sig <- significantQtls(r, "bonferroni_filtered", threshold = 0.5)
-    expect_s4_class(sig, "GRanges")
-    expect_gt(length(sig), 0)
-    # Every returned variant must satisfy the filtered keep rule (MAF & cis window).
-    af <- S4Vectors::mcols(sig)$af
-    expect_true(all(pmin(af, 1 - af) > 0.01))
-    expect_true(all(
-        S4Vectors::mcols(sig)$tss_distance >= -1e6 &
-            S4Vectors::mcols(sig)$tes_distance <= 1e6
-    ))
 })
 
 test_that("significantQtls (bonferroni) errors when its columns are absent", {
@@ -355,7 +242,7 @@ test_that("significantQtls (bonferroni) errors when its columns are absent", {
 test_that("significantQtls (qvalue) selects variants by their qvalue mcol", {
     skip_if_not_installed("qvalue")
     r <- qtlAssociationPostprocess(
-        .qapFixture(withQvalue = TRUE),
+        .qapDefaultFixture,
         fdrThreshold = 0.1,
         methods = "permutation"
     )
@@ -379,7 +266,7 @@ test_that("significantQtls (qvalue) errors when no event q column exists", {
     # Drop p_beta so permutation adds no q_beta, and skip bonferroni so there is
     # no q_bonferroni_min_original either -- yet the object is still postprocessed.
     r <- qtlAssociationPostprocess(
-        .qapFixture(drop = "p_beta"),
+        .qapWithout("p_beta"),
         methods = "permutation"
     )
     expect_null(r$q_beta)
@@ -403,7 +290,7 @@ test_that("significantQtls returns an empty GRanges when nothing is significant"
 test_that("qtlAssociationPostprocess requires n_variants for Bonferroni", {
     expect_error(
         qtlAssociationPostprocess(
-            .qapFixture(drop = "n_variants"),
+            .qapWithout("n_variants"),
             methods = "bonferroni"
         ),
         "required for the Bonferroni"
@@ -413,7 +300,7 @@ test_that("qtlAssociationPostprocess requires n_variants for Bonferroni", {
 test_that("qtlAssociationPostprocess requires n_variants_filtered when filtering", {
     expect_error(
         qtlAssociationPostprocess(
-            .qapFixture(drop = "n_variants_filtered"),
+            .qapWithout("n_variants_filtered"),
             methods = "bonferroni",
             mafCutoff = 0.01
         ),
@@ -475,7 +362,16 @@ test_that("significantQtls(bonferroni_filtered) applies the derived rule on the 
             sum(pmin(1, p * 30) <= varThr)
         }
     ))
+    expect_gt(expN, 0)
     expect_equal(length(sig), expN)
+    # Every returned variant satisfies the filtered keep rule (MAF and the
+    # cis window).
+    af <- S4Vectors::mcols(sig)$af
+    expect_true(all(pmin(af, 1 - af) > 0.01))
+    expect_true(all(
+        S4Vectors::mcols(sig)$tss_distance >= -1e6 &
+            S4Vectors::mcols(sig)$tes_distance <= 1e6
+    ))
 })
 
 test_that(".qapSignificanceMask returns empty masks for an unknown method", {
@@ -498,7 +394,7 @@ test_that(".qapSignificanceMask returns empty masks for an unknown method", {
         genome = "hg19"
     )
     local_mocked_bindings(
-        qcInfo = function(x) {
+        qcOptions = function(x) {
             list(
                 associationPostprocess = list(
                     fdrThreshold = 0.05,

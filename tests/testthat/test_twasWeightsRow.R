@@ -1,9 +1,19 @@
-# Tests for R/TwasWeightsRow.R
+# Tests for R/twasWeightsRow.R
 
 # === Tests migrated from test_s4Constructors.R (TwasWeightsRow) ===
 
+test_that("as(row, 'GRanges') carries the weights", {
+    row <- TwasWeightsRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
+        weights = c(0.4, -0.2)
+    )
+    gr <- as(row, "GRanges")
+    expect_s4_class(gr, "GRanges")
+    expect_identical(gr$weight, c(0.4, -0.2))
+})
+
 test_that("TwasWeightsRow: constructor and accessors round-trip", {
-    e <- twasWeightsRow(
+    e <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         weights = c(0.1, -0.2, 0.05),
         methodFits = list(model = "lasso"),
@@ -24,7 +34,7 @@ test_that("TwasWeightsRow: constructor and accessors round-trip", {
 })
 
 test_that("TwasWeightsRow: resolveWeights returns the aligned (variantIds, weights) pair", {
-    e <- twasWeightsRow(
+    e <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         weights = c(0.1, -0.2, 0.05)
     )
@@ -35,7 +45,7 @@ test_that("TwasWeightsRow: resolveWeights returns the aligned (variantIds, weigh
     )
     expect_equal(wr$weights, c(0.1, -0.2, 0.05))
     # length mismatch (defensive) -> empty
-    e2 <- twasWeightsRow(
+    e2 <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         weights = c(0.1, -0.2)
     )
@@ -47,14 +57,14 @@ test_that("TwasWeightsRow: resolveWeights returns the aligned (variantIds, weigh
 test_that("TwasWeightsRow: standardized is coerced via isTRUE() semantics", {
     # isTRUE() only returns TRUE for a length-1 logical TRUE. Non-TRUE
     # input lands as FALSE (the safe default for the standardized flag).
-    e_logical <- twasWeightsRow(
+    e_logical <- TwasWeightsRow(
         variantIds = "chr1:100:A:G",
         weights = 0.1,
         weightStandardized = TRUE
     )
     expect_true(isTRUE(weightStandardized(e_logical)))
 
-    e_default <- twasWeightsRow(
+    e_default <- TwasWeightsRow(
         variantIds = "chr1:100:A:G",
         weights = 0.1,
         weightStandardized = "yes-please"
@@ -65,7 +75,7 @@ test_that("TwasWeightsRow: standardized is coerced via isTRUE() semantics", {
 
 test_that("TwasWeightsRow: validity rejects matrix weights with wrong nrow", {
     expect_error(
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
             weights = matrix(0, nrow = 5, ncol = 1)
         ),
@@ -73,40 +83,22 @@ test_that("TwasWeightsRow: validity rejects matrix weights with wrong nrow", {
     )
 })
 
-# ===========================================================================
-# QtlFineMappingResult
-# ===========================================================================
-
-test_that("TwasWeights: rejects non-TwasWeightsRow rows", {
+test_that("TwasWeightsRow: rejects mismatched variantIds/weights lengths", {
+    # The weights are per-variant mcols on the entry's element now, so a
+    # length mismatch cannot be represented. It is refused at construction
+    # rather than producing a gene that gets silently dropped downstream.
     expect_error(
-        TwasWeights(
-            studyName = "s1",
-            context = "c1",
-            trait = "t1",
-            method = "lasso",
-            entry = list("not_an_entry")
+        TwasWeightsRow(
+            variantIds = sprintf("chr1:%d:G:A", 100L * 1:5),
+            weights = c(0.1, 0.2, 0.3)
         ),
-        "must be a TWAS-weight row"
+        "length\\(weights\\) is 3 but 5 variants were supplied"
     )
 })
 
-
-test_that("TwasWeights: validity does not recurse on key subset (#546)", {
-    # Building the tuple-uniqueness key via `object[, keyCols]` preserves the
-    # TwasWeights class while dropping the required `entry` column; older
-    # S4Vectors revalidates that intermediate and fails with "missing columns".
-    e <- .sc_makeTwasWeightsRow(p = 5L)
-    res <- TwasWeights(
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "lasso",
-        entry = list(e)
-    )
-    expect_s4_class(res, "TwasWeights")
-    expect_true(validObject(res))
-})
-
+# ===========================================================================
+# TwasWeights
+# ===========================================================================
 
 # === Tests migrated from test_showMethods.R (TwasWeightsRow) ===
 
@@ -119,7 +111,7 @@ test_that("show.TwasWeightsRow reports standardized flag and CV availability", {
     )))
     expect_true(any(grepl("CV performance: TRUE", out)))
 
-    e_no_cv <- twasWeightsRow(
+    e_no_cv <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         weights = c(0.1, 0.2)
     )
@@ -134,12 +126,12 @@ test_that("show.TwasWeightsRow reports standardized flag and CV availability", {
 # that rejects ids carrying no coordinates was never executed.
 # ===========================================================================
 
-test_that("variantIds that encode no coordinates are rejected", {
+test_that("variantIds that encode no coordinates are rejected by name", {
     # An id is a rendering of the variant's range and alleles; "v1" names
     # nothing, and the failure should bite here rather than later when the
     # entry is turned into a ranged element.
-    expect_error(
-        twasWeightsRow(
+    err <- tryCatch(
+        TwasWeightsRow(
             variantIds = c("chr1:100:A:G", "v1", "v2"),
             weights = c(0.1, -0.2, 0.05),
             methodFits = list(model = "lasso"),
@@ -147,30 +139,18 @@ test_that("variantIds that encode no coordinates are rejected", {
             weightStandardized = TRUE,
             weightsDataType = "expression"
         ),
-        "do not encode coordinates"
-    )
-})
-
-test_that("the identity message names the offenders", {
-    err <- tryCatch(
-        twasWeightsRow(
-            variantIds = c("rsX", "rsY"),
-            weights = c(0.1, -0.2),
-            methodFits = list(),
-            cvResult = list(),
-            weightStandardized = TRUE,
-            weightsDataType = "expression"
-        ),
         error = function(e) conditionMessage(e)
     )
-    expect_match(err, "2 of 2")
-    expect_match(err, "rsX, rsY")
+    expect_match(err, "do not encode coordinates")
+    # The message counts and names the offenders.
+    expect_match(err, "2 of 3")
+    expect_match(err, "v1, v2")
 })
 
 test_that("an empty variant set is allowed", {
     # Emptiness is a separate concern from malformedness: there is nothing to
     # parse, so the coordinate rule has nothing to say.
-    e <- twasWeightsRow(
+    e <- TwasWeightsRow(
         variantIds = character(0),
         weights = numeric(0),
         methodFits = list(),

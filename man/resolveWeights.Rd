@@ -14,7 +14,7 @@ resolveWeights(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL
+  blockId = NULL
 )
 
 \S4method{resolveWeights}{TwasWeights}(
@@ -35,9 +35,8 @@ resolveWeights(x, ...)
 row of a collection, as elsewhere; each \code{NULL} (default) leaves that
 part of the tuple unconstrained. Ignored when \code{x} is already a row.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-A further selector for a fine-mapping result, whose rows also carry a
-region; \code{NULL} (default) leaves it unconstrained.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block; \code{NULL} (default) leaves it unconstrained.}
 }
 \value{
 A \code{list} with \code{variantIds} (character) and \code{weights}

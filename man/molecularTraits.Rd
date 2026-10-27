@@ -7,49 +7,22 @@
 \usage{
 molecularTraits(x, ...)
 
-\S4method{molecularTraits}{QtlDataset}(
-  x,
-  contexts,
-  traitId = NULL,
-  region = NULL,
-  naAction = c("keep", "drop", "impute"),
-  outlierAction = c("keep", "drop"),
-  outlierPvalThreshold = 0.001,
-  outlierArgs = CovMcdOptions()
-)
+\S4method{molecularTraits}{QtlDataset}(x, context, trait = NULL)
 }
 \arguments{
 \item{x}{The object to extract from.}
 
-\item{...}{Class-specific selection arguments (e.g., \code{contexts},
-\code{traitId}, \code{region}).}
+\item{...}{Class-specific selection arguments (e.g., \code{context},
+\code{trait}).}
 
-\item{contexts}{Character vector. Context(s) whose data to extract.}
+\item{context}{Character vector. Context(s) whose data to extract.}
 
-\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+\item{trait}{Character or \code{NULL}. Molecular trait / feature identifier
 to select; \code{NULL} matches all traits in the dataset.}
-
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{naAction}{Character. How to handle missing phenotype values: one of
-\code{"keep"}, \code{"drop"}, or \code{"impute"}.}
-
-\item{outlierAction}{Character. How to handle phenotype outliers: one of
-\code{"keep"} or \code{"drop"}.}
-
-\item{outlierPvalThreshold}{Numeric. Two-sided p-value threshold for flagging
-phenotype outliers. Default \code{1e-3}.}
-
-\item{outlierArgs}{Extra arguments for \code{robustbase::covMcd()}, the
-robust covariance estimator the outlier rule is built on, supplied with
-\code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
-consulted when \code{outlierAction = "drop"}.}
 }
 \value{
-A \code{SummarizedExperiment} when one context is selected, or a
-  named list of them for several. A \code{QtlDataset} is a
+A named list of \code{SummarizedExperiment}s keyed by context,
+  one per selected context. A \code{QtlDataset} is a
   \code{MultiAssayExperiment}, so these are its experiments; take the
   measurement matrix itself with
   \code{SummarizedExperiment::assay()} rather than asking this accessor
@@ -57,11 +30,12 @@ A \code{SummarizedExperiment} when one context is selected, or a
 }
 \description{
 Extract molecular-trait data from an object that carries it.
-  For a \code{QtlDataset}, the user can optionally select specific contexts,
-  traits, or a region (see method documentation for the per-class selection
-  arguments).
+  For a \code{QtlDataset}, select contexts and, optionally, traits by
+  name. The data come back as stored: missing values and outliers are a
+  run's phenotype QC (\code{\link{PhenotypeFilterParam}}), applied by the
+  pipelines, not by this accessor.
 }
 \examples{
 data(qtlDatasetExample)
-molecularTraits(qtlDatasetExample, contexts = "brain")
+molecularTraits(qtlDatasetExample, context = "brain")
 }

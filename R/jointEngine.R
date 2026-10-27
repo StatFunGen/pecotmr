@@ -108,15 +108,19 @@ NULL
 #              column (NULL when absent -- the true position cannot be inferred
 #              from summary statistics alone).
 #   region   = the fine-mapping window. QtlDataset -> traitPos +/- cisWindow;
-#              QtlSumStats -> the entry's variant span (sumstats carry no
-#              cis-window, so the fitted span IS the region).
+#              QtlSumStats -> the tuple's own `region`: the window it was
+#              given, or the span of its variants as first built, before QC
+#              (a pipeline's cisWindow sets it from traitPos first).
 # Each returns a length-1 GRanges, or NULL when the anchor is unavailable (the
-# accumulator / builder then records a chrUn sentinel).
+# accumulator / builder then records a chrUn sentinel). A row is named by its
+# whole (study, context, trait) tuple: a QtlSumStats can carry the same
+# (context, trait) in several studies, each with its own position and window.
+# A QtlDataset holds one study, so `study` has nothing to choose there.
 #' @importFrom rlang try_fetch
-.traitPosFor <- function(data, context, trait) {
+.traitPosFor <- function(data, study, context, trait) {
     if (methods::is(data, "QtlDataset")) {
         se <- try_fetch(
-            molecularTraits(data, contexts = context),
+            .qtlContextSe(data, context = context),
             error = function(cnd) NULL
         )
         if (is.null(se)) {
@@ -137,10 +141,7 @@ NULL
         if (!is_in("traitPos", colnames(data))) {
             return(NULL)
         }
-        idx <- which(
-            as.character(data$context) == context &
-                as.character(data$trait) == trait
-        )
+        idx <- .qssTupleRows(data, study, context, trait)
         if (length(idx) == 0L) {
             return(NULL)
         }
@@ -152,9 +153,9 @@ NULL
     NULL
 }
 
-.fitRegionFor <- function(data, context, trait, cisWindow = NULL) {
+.fitRegionFor <- function(data, study, context, trait, cisWindow = NULL) {
     if (methods::is(data, "QtlDataset")) {
-        tp <- .traitPosFor(data, context, trait)
+        tp <- .traitPosFor(data, study, context, trait)
         if (is.null(tp)) {
             return(NULL)
         }
@@ -168,34 +169,32 @@ NULL
         ))
     }
     if (methods::is(data, "QtlSumStats")) {
-        idx <- which(
-            as.character(data$context) == context &
-                as.character(data$trait) == trait
-        )
+        idx <- .qssTupleRows(data, study, context, trait)
         if (length(idx) == 0L) {
             return(NULL)
         }
-        gr <- .collectionEntry(data, idx[[1L]])
-        if (length(gr) == 0L) {
-            return(NULL)
-        }
-        return(GenomicRanges::GRanges(
-            as.character(GenomicRanges::seqnames(gr))[[1L]],
-            IRanges::IRanges(
-                min(GenomicRanges::start(gr)),
-                max(GenomicRanges::end(gr))
-            )
-        ))
+        return(.rowRegionAt(data, idx[[1L]]))
     }
     NULL
 }
 
+# The rows of a QtlSumStats holding one (study, context, trait) tuple.
+# @noRd
+.qssTupleRows <- function(data, study, context, trait) {
+    which(
+        as.character(data$study) == study &
+            as.character(data$context) == context &
+            as.character(data$trait) == trait
+    )
+}
+
 # Vectorised per-row anchors for the pushRow builders: map the scalar helper
-# over aligned (context, trait) vectors and assemble ONE GRanges of length n,
-# using a chrUn sentinel where the anchor is unavailable. Built from plain
-# chr/start/end vectors so mixed seqlevels never trip seqinfo merging.
+# over aligned (study, context, trait) vectors and assemble ONE GRanges of
+# length n, using a chrUn sentinel where the anchor is unavailable. Built from
+# plain chr/start/end vectors so mixed seqlevels never trip seqinfo merging.
 .anchorVector <- function(
     data,
+    studies,
     contexts,
     traits,
     kind = c("traitPos", "region"),
@@ -206,6 +205,7 @@ NULL
         seq_along(traits),
         .jointAnchorAt,
         data = data,
+        studies = studies,
         contexts = contexts,
         traits = traits,
         kind = kind,
@@ -216,10 +216,8 @@ NULL
     starts <- map_int(anchors, "start")
     ends <- map_int(anchors, "end")
     # Nothing resolved (e.g. a QtlSumStats with no supplied traitPos): return
-    # NULL
-    # so the builder omits the column entirely and traitPosition() reports
-    # NA,
-    # rather than a column full of chrUn sentinels.
+    # NULL so the builder omits the column entirely and traitPosition()
+    # reports an empty GRanges, rather than a column full of chrUn sentinels.
     if (!anyFound) {
         return(NULL)
     }
@@ -233,11 +231,25 @@ NULL
 # records which it was, so the caller can tell "nothing resolved" from "every
 # anchor really is chrUn:1-1".
 # @noRd
-.jointAnchorAt <- function(i, data, contexts, traits, kind, cisWindow) {
+.jointAnchorAt <- function(
+    i,
+    data,
+    studies,
+    contexts,
+    traits,
+    kind,
+    cisWindow
+) {
     g <- if (kind == "traitPos") {
-        .traitPosFor(data, contexts[[i]], traits[[i]])
+        .traitPosFor(data, studies[[i]], contexts[[i]], traits[[i]])
     } else {
-        .fitRegionFor(data, contexts[[i]], traits[[i]], cisWindow)
+        .fitRegionFor(
+            data,
+            studies[[i]],
+            contexts[[i]],
+            traits[[i]],
+            cisWindow
+        )
     }
     if (is.null(g)) {
         return(list(found = FALSE, chr = "chrUn", start = 1L, end = 1L))
@@ -264,6 +276,7 @@ NULL
     per <- try_fetch(
         .anchorVector(
             data,
+            as.character(cond$study),
             as.character(cond$context),
             as.character(cond$trait),
             "region",
@@ -286,7 +299,7 @@ NULL
 # taken from the fit's OWN variants rather than a trait cis-window: a joint
 # group spans several traits, so no single trait's window describes X.
 # @noRd
-.jointAfForGroup <- function(data, g) {
+.jointAfForGroup <- function(data, g, genotypeFilter) {
     if (!is(g, "IndividualJointGroup")) {
         return(NULL)
     }
@@ -298,7 +311,7 @@ NULL
     if (is.null(rg)) {
         return(NULL)
     }
-    .fmAfForX(data, X, region = rg)
+    .fmAfForX(data, X, genotypeFilter = genotypeFilter, region = rg)
 }
 
 
@@ -426,7 +439,7 @@ setMethod(
         coverage = cfg$credibleSetParam$coverage,
         pos = .jgTraitPos(group),
         verbose = verbose,
-        numThreads = cv$numThreads %||% 1L,
+        BPPARAM = cv$BPPARAM %||% SerialParam(),
         seed = cfg$seed
     )
     .fmSliceCv(cv, "fsusie")
@@ -624,7 +637,7 @@ setMethod(
         verbose = verbose,
         mvPrior = mvPrior,
         mvPriorCv = mvPriorCv,
-        numThreads = cv$numThreads %||% 1L,
+        BPPARAM = cv$BPPARAM %||% SerialParam(),
         seed = cfg$seed
     )
     .fmSliceCv(cv, "mvsusie")
@@ -1153,7 +1166,7 @@ setMethod(
         weightMethods = wm,
         fitRetention = "slim",
         maxNumVariants = maxCv,
-        numThreads = cfg$crossValidationParam$numThreads %||% 1,
+        BPPARAM = cv$BPPARAM %||% SerialParam(),
         dataDrivenPriorMatricesCv = args$dataDrivenPriorMatricesCv,
         verbose = cfg$verbose %||% 1,
         seed = cfg$seed
@@ -1192,7 +1205,7 @@ setMethod(
         NULL
     }
     if (is.null(full$W)) {
-        return(twasWeightsRow(
+        return(TwasWeightsRow(
             variantIds = character(0),
             weights = NULL,
             cvResult = cvR,
@@ -1200,7 +1213,7 @@ setMethod(
             weightsDataType = cfg$dataType
         ))
     }
-    twasWeightsRow(
+    TwasWeightsRow(
         variantIds = full$vids,
         weights = full$W[, r],
         methodFits = full$fitParts,
@@ -1292,7 +1305,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         scopedTraits,
         .enumCrossContextGroupFor,
         data = data,
-        study = studyName,
+        studyName = studyName,
         scopedContexts = scopedContexts,
         args = args,
         verbose = verbose
@@ -1317,7 +1330,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         verbose,
         label = "jointCrossContext",
         region = args$region,
-        residualizationParam = args$residualizationParam
+        residualizationParam = args$residualizationParam,
+        genotypeFilter = args$genotypeFilter,
+        phenotypeFilter = args$phenotypeFilter
     )
     if (is.null(xy)) {
         return(NULL)
@@ -1470,7 +1485,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         scopedContexts,
         .enumCrossTraitGroupFor,
         data = data,
-        study = studyName,
+        studyName = studyName,
         scopedTraits = scopedTraits,
         args = args,
         verbose = verbose
@@ -1496,7 +1511,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         label = "jointCrossTrait",
         studyName = studyName,
         region = args$region,
-        residualizationParam = args$residualizationParam
+        residualizationParam = args$residualizationParam,
+        genotypeFilter = args$genotypeFilter,
+        phenotypeFilter = args$phenotypeFilter
     )
     if (is.null(xy)) {
         return(NULL)
@@ -1712,7 +1729,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         verbose,
         label = "composed",
         region = args$region,
-        residualizationParam = args$residualizationParam
+        residualizationParam = args$residualizationParam,
+        genotypeFilter = args$genotypeFilter,
+        phenotypeFilter = args$phenotypeFilter
     )
     if (is.null(xy)) {
         return(list())
@@ -1729,6 +1748,20 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     list(new("IndividualJointGroup", conditions = conds, X = xy$X, Y = xy$Y))
 }
 
+# The run's resolved phenotype QC, or the univariate fits' own default -- drop
+# a sample with a missing value, keep outliers -- when the engine record
+# carries none.
+# @noRd
+.jointPhenotypeFilter <- function(args) {
+    args$phenotypeFilter %||%
+        .qtlResolvePhenotypeFilter(
+            PhenotypeFilterParam(),
+            naDefault = "drop",
+            naAllowed = c("drop", "impute"),
+            caller = "the joint engine"
+        )
+}
+
 # univariate / individual: one 1-condition group per (study, context, trait) in
 # scope -- the per-(context, trait) iteration expressed as engine groups, so
 # univariate methods (lasso / enet / susie / ...) flow through the SAME per-
@@ -1738,15 +1771,15 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (!is_in(studyName, scope$studies)) {
         return(list())
     }
-    naAction <- if (is.null(args$naAction)) "drop" else args$naAction
+    phenotypeFilter <- .jointPhenotypeFilter(args)
     .jeConcat(map(
         scope$contexts[[studyName]],
         .enumUnivariateForContext,
         data = data,
         scope = scope,
         args = args,
-        study = studyName,
-        naAction = naAction
+        studyName = studyName,
+        phenotypeFilter = phenotypeFilter
     ))
 }
 
@@ -1758,9 +1791,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     scope,
     args,
     studyName,
-    naAction
+    phenotypeFilter
 ) {
-    se <- molecularTraits(data, contexts = cx)
+    se <- .qtlContextSe(data, context = cx)
     traits <- keep(
         intersect(scope$traits[[studyName]], rownames(se)),
         .traitSelectedAt,
@@ -1773,21 +1806,28 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         .enumUnivariateGroupFor,
         data = data,
         args = args,
-        study = studyName,
+        studyName = studyName,
         cx = cx,
-        naAction = naAction
+        phenotypeFilter = phenotypeFilter
     ))
 }
 
 # One (context, trait) univariate group, or NULL when fewer than two samples
 # are shared between its genotypes and its phenotype.
 # @noRd
-.enumUnivariateGroupFor <- function(tid, data, args, studyName, cx, naAction) {
+.enumUnivariateGroupFor <- function(
+    tid,
+    data,
+    args,
+    studyName,
+    cx,
+    phenotypeFilter
+) {
     Y <- .fmResidPheno(
         data,
         contexts = cx,
         traitId = tid,
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = args$residualizationParam
     )
     X <- if (is.null(args$region)) {
@@ -1796,14 +1836,16 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             contexts = cx,
             traitId = tid,
             cisWindow = args$cisWindow,
-            residualizationParam = args$residualizationParam
+            residualizationParam = args$residualizationParam,
+            genotypeFilter = args$genotypeFilter
         )
     } else {
         .fmResidGeno(
             data,
             contexts = cx,
             region = args$region,
-            residualizationParam = args$residualizationParam
+            residualizationParam = args$residualizationParam,
+            genotypeFilter = args$genotypeFilter
         )
     }
     common <- intersect(rownames(X), rownames(Y))
@@ -2097,7 +2139,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         ldReference = .jgLdRefOf(g)
     )
     fitArgs <- .twasGroupArgs(g, pipeline, args)
-    fitArgs$af <- .jointAfForGroup(data, g)
+    fitArgs$af <- .jointAfForGroup(data, g, args$genotypeFilter)
     fitArgs$region <- args$region
     perTokenEntries <- compact(set_names(
         map(
@@ -2328,7 +2370,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     ew <- ens$ensembleTwasWeights
     vids <- (if (!is.null(names(ew))) names(ew) else rownames(ew)) %||%
         variantIds(perTokenEntries[[passing[1L]]][[r]])
-    twasWeightsRow(
+    TwasWeightsRow(
         variantIds = vids,
         weights = as.numeric(ew),
         cvResult = list(
@@ -2352,21 +2394,28 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (!is_in(studyName, scope$studies)) {
         return(list())
     }
-    naAction <- if (is.null(args$naAction)) "drop" else args$naAction
+    phenotypeFilter <- .jointPhenotypeFilter(args)
     .jeConcat(map(
         scope$contexts[[studyName]],
         .enumTopPcForContext,
         data = data,
         scope = scope,
         args = args,
-        study = studyName,
-        naAction = naAction
+        studyName = studyName,
+        phenotypeFilter = phenotypeFilter
     ))
 }
 
 # @noRd
-.enumTopPcForContext <- function(cx, data, scope, args, studyName, naAction) {
-    se <- molecularTraits(data, contexts = cx)
+.enumTopPcForContext <- function(
+    cx,
+    data,
+    scope,
+    args,
+    studyName,
+    phenotypeFilter
+) {
+    se <- .qtlContextSe(data, context = cx)
     traits <- keep(
         intersect(scope$traits[[studyName]], rownames(se)),
         .traitSelectedAt,
@@ -2382,7 +2431,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         data,
         contexts = cx,
         traitId = traits,
-        naAction = naAction,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = args$residualizationParam
     )
     scores <- .fmTopPcScores(Y, args$nPCs %||% 10L)
@@ -2399,7 +2448,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         .enumTopPcGroup,
         X = X[common, , drop = FALSE],
         scores = scores[common, , drop = FALSE],
-        study = studyName,
+        studyName = studyName,
         cx = cx
     ))
 }
@@ -2412,14 +2461,16 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             contexts = cx,
             traitId = traits,
             cisWindow = args$cisWindow,
-            residualizationParam = args$residualizationParam
+            residualizationParam = args$residualizationParam,
+            genotypeFilter = args$genotypeFilter
         ))
     }
     .fmResidGeno(
         data,
         contexts = cx,
         region = args$region,
-        residualizationParam = args$residualizationParam
+        residualizationParam = args$residualizationParam,
+        genotypeFilter = args$genotypeFilter
     )
 }
 
@@ -2622,7 +2673,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (length(ctxs) == 0L) {
         return(scope$traits[[st]])
     }
-    se <- molecularTraits(data, contexts = ctxs[[1L]])
+    se <- .qtlContextSe(data, context = ctxs[[1L]])
     .fmTraitsInRegion(
         se,
         intersect(scope$traits[[st]], rownames(se)),
@@ -2690,7 +2741,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # One per-condition TwasWeightsRow from column `r` of a joint weight matrix.
 # @noRd
 .jointColEntry <- function(r, vids, weights, fitParts, cfg) {
-    twasWeightsRow(
+    TwasWeightsRow(
         variantIds = vids,
         weights = weights[, r],
         methodFits = fitParts,
@@ -2733,20 +2784,22 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # One joint output record for condition `i`, or NULL when that entry is absent.
 # traitPos = the bare trait position (NULL when a QtlSumStats caller supplied
-# none -> the column is omitted and traitPosition() reports NA). The
-# fine-mapping window is NOT recorded: the element's own span is the region
-# (section 4.4), and a stored window would go stale under subsetRegion().
+# none -> the column is omitted and traitPosition() reports an empty
+# GRanges). region = the window the joint group was analysed over
+# (.jointGroupWindow(): an explicit region, else the union of its traits' cis
+# windows).
 # @noRd
 .jointEntryRecordAt <- function(i, entries, cond, method, grp, data) {
     e <- entries[[i]]
     if (is.null(e)) {
         return(NULL)
     }
+    st <- as.character(cond$study[[i]])
     ctx <- as.character(cond$context[[i]])
     tid <- as.character(cond$trait[[i]])
-    tpos <- .traitPosFor(data, ctx, tid)
+    tpos <- .traitPosFor(data, st, ctx, tid)
     list(
-        study = as.character(cond$study[[i]]),
+        study = st,
         context = ctx,
         trait = tid,
         method = method,

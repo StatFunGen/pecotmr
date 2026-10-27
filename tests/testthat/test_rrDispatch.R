@@ -4,19 +4,9 @@ context("regularized_regression - dispatch verification")
 # These tests use local_mocked_bindings to replace the inner function with a
 # stub that captures its arguments, then assert the wrapper forwarded the
 # correct values. They catch silent dispatch bugs (wrong method, wrong penalty,
-# dropped argument) that the shape-only tests above would not.
-
-test_that("susie-family weight wrappers never fit; they demand the fit", {
-    # Fitting belongs to fineMappingPipeline(); these wrappers extract only.
-    # The susie dispatch arguments they used to build are covered in
-    # test_fineMappingWrappers.R and test_fineMappingPipeline.R.
-    data(eqtlRegionExample)
-    X <- eqtlRegionExample$X[, 1:20]
-    y <- eqtlRegionExample$yRes
-    expect_error(susieWeights(X = X, y = y), "no 'susie' fit supplied")
-    expect_error(susieAshWeights(X = X, y = y), "no 'susieAsh' fit supplied")
-    expect_error(susieInfWeights(X = X, y = y), "no 'susieInf' fit supplied")
-})
+# dropped argument) that shape-only tests would not. The glmnet, ncvreg and
+# BGLR wrappers are checked at the external solver itself, in
+# test_rrE2eSolvers.R and test_rrBglr.R.
 
 test_that("prsCsWeights hands the PRS-CS sampler the right arguments", {
     set.seed(42)
@@ -96,10 +86,10 @@ test_that("lassosumRssWeights runs the lassosum path once per s value", {
     call_log <- new.env(parent = emptyenv())
     call_log$calls <- list()
     local_mocked_bindings(
-        .lassosumRssPath = function(bhat, ld, n, ...) {
+        .penalizedRssPath = function(bhat, ld, n, ...) {
             call_log$calls <- c(
                 call_log$calls,
-                list(list(bhat = bhat, ld = ld, n = n))
+                list(list(bhat = bhat, ld = ld, n = n, spec = list(...)$spec))
             )
             list(
                 beta = cbind(rep(0, length(bhat)), rep(0.05, length(bhat))),
@@ -116,6 +106,9 @@ test_that("lassosumRssWeights runs the lassosum path once per s value", {
     )
     expect_equal(length(call_log$calls), 2L)
     expect_equal(call_log$calls[[1]]$n, 100)
+    # lassosum is the penalized path at the lasso, alpha = 1.
+    expect_equal(call_log$calls[[1]]$spec$penalty, "lasso")
+    expect_equal(call_log$calls[[1]]$spec$alpha, 1)
     expect_equal(length(call_log$calls[[1]]$bhat), p)
     # Each call carries its own s for the solver to apply to the one LD
     # matrix, rather than a copy of the matrix shrunk for that s.
@@ -137,7 +130,7 @@ test_that("lassosumRssWeights defaults to LD-quadratic selection", {
     expected <- c(1, 0, 0, 0)
 
     local_mocked_bindings(
-        .lassosumRssPath = function(bhat, ld, n, ...) {
+        .penalizedRssPath = function(bhat, ld, n, ...) {
             list(
                 beta = cbind(expected, c(1, 1, 0, 0)),
                 lambda = c(0.05, 0.01),
@@ -168,7 +161,7 @@ test_that("lassosumRssWeights uses first-max tie behavior for LD-quadratic selec
     R <- diag(p)
 
     local_mocked_bindings(
-        .lassosumRssPath = function(bhat, ld, n, ...) {
+        .penalizedRssPath = function(bhat, ld, n, ...) {
             list(
                 beta = cbind(c(1, 0, 0), c(0, 1, 0)),
                 lambda = c(0.05, 0.01),
@@ -200,7 +193,7 @@ test_that("lassosumRssWeights still supports explicit min(fbeta)", {
     expected <- c(1, 1, 0, 0)
 
     local_mocked_bindings(
-        .lassosumRssPath = function(bhat, ld, n, ...) {
+        .penalizedRssPath = function(bhat, ld, n, ...) {
             list(
                 beta = cbind(c(1, 0, 0, 0), expected),
                 lambda = c(0.05, 0.01),
@@ -250,115 +243,6 @@ test_that("bayes_{n,l,a,c,r}_weights each dispatch to bayesAlphabetWeights with 
     }
 })
 
-test_that("scadWeights and mcpWeights dispatch to ncvreg_weights with correct penalty", {
-    set.seed(42)
-    X <- matrix(rnorm(50), nrow = 10)
-    y <- rnorm(10)
-    dispatchers <- list(
-        list(fn = scadWeights, expected_penalty = "SCAD", nfolds = 7),
-        list(fn = mcpWeights, expected_penalty = "MCP", nfolds = 9)
-    )
-    for (d in dispatchers) {
-        captured <- new.env(parent = emptyenv())
-        local_mocked_bindings(
-            ncvregWeights = function(X, y, penalty, nfolds = 5, ...) {
-                captured$penalty <- penalty
-                captured$nfolds <- nfolds
-                matrix(0, nrow = ncol(X), ncol = 1)
-            }
-        )
-        d$fn(X, y, nfolds = d$nfolds)
-        expect_equal(
-            captured$penalty,
-            d$expected_penalty,
-            label = paste("penalty for", d$expected_penalty)
-        )
-        expect_equal(
-            captured$nfolds,
-            d$nfolds,
-            label = paste("nfolds for", d$expected_penalty)
-        )
-    }
-})
-
-test_that("bLassoWeights dispatches to bglr_weights with model = 'BL'", {
-    set.seed(42)
-    X <- matrix(rnorm(50), nrow = 10)
-    y <- rnorm(10)
-    captured <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        bglrWeights = function(X, y, model, nIter, burnIn, thin, ...) {
-            captured$model <- model
-            captured$nIter <- nIter
-            captured$burnIn <- burnIn
-            captured$thin <- thin
-            rep(0, ncol(X))
-        }
-    )
-    bLassoWeights(X, y, nIter = 77, burnIn = 11, thin = 3)
-    expect_equal(captured$model, "BL")
-    expect_equal(captured$nIter, 77)
-    expect_equal(captured$burnIn, 11)
-    expect_equal(captured$thin, 3)
-})
-
-test_that("bayesBWeights dispatches to bglr_weights with model = 'BayesB' and probIn", {
-    set.seed(42)
-    X <- matrix(rnorm(50), nrow = 10)
-    y <- rnorm(10)
-    captured <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        bglrWeights = function(
-            X,
-            y,
-            model,
-            nIter,
-            burnIn,
-            thin,
-            etaArgs = list(),
-            ...
-        ) {
-            captured$model <- model
-            captured$etaArgs <- etaArgs
-            rep(0, ncol(X))
-        }
-    )
-    bayesBWeights(X, y, nIter = 100, burnIn = 20, thin = 2, probIn = 0.42)
-    expect_equal(captured$model, "BayesB")
-    expect_equal(captured$etaArgs, list(probIn = 0.42))
-})
-
-test_that("lassoWeights and enetWeights dispatch to glmnetWeights with correct alpha", {
-    set.seed(42)
-    X <- matrix(rnorm(50), nrow = 10)
-    y <- rnorm(10)
-    dispatchers <- list(
-        list(fn = lassoWeights, expected_alpha = 1),
-        list(fn = enetWeights, expected_alpha = 0.5)
-    )
-    for (d in dispatchers) {
-        captured <- new.env(parent = emptyenv())
-        local_mocked_bindings(
-            glmnetWeights = function(
-                X,
-                y,
-                alpha,
-                methodArgs = GlmnetOptions()
-            ) {
-                captured$alpha <- alpha
-                captured$methodArgs <- methodArgs
-                matrix(0, nrow = ncol(X), ncol = 1)
-            }
-        )
-        d$fn(X, y)
-        expect_equal(
-            captured$alpha,
-            d$expected_alpha,
-            label = paste("alpha for", d$expected_alpha)
-        )
-    }
-})
-
 
 test_that("mrashWeights actually calls lassoWeights for default beta.init", {
     skip_if_not_installed("glmnet")
@@ -375,8 +259,10 @@ test_that("mrashWeights actually calls lassoWeights for default beta.init", {
             rep(0.01, ncol(X))
         }
     )
-    suppressWarnings(mrashWeights(X, y))
+    result <- suppressWarnings(mrashWeights(X, y))
     expect_true(called$lasso)
+    expect_true(is.numeric(result))
+    expect_equal(length(result), p)
 })
 
 test_that("mrashWeights leaves the prior grid to mr.ash unless one is given", {

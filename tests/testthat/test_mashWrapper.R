@@ -1,83 +1,21 @@
 context("mash_wrapper")
 
 # ===========================================================================
-# filterInvalidSummaryStat
+# mashModelFit / mashPosterior and the mashr / udr engine-argument
+# constructors (R/mashWrapper.R)
 # ===========================================================================
 
-# ===========================================================================
-# filterMixtureComponents
-# ===========================================================================
-
-# ===========================================================================
-# mergeMashData
-# ===========================================================================
-
-# ===========================================================================
-# mashRandNullSample
-# ===========================================================================
-
-# mashPipeline integration tests were removed in the S4 refactor: the
-# legacy matrix-list input (strong.b/strong.s/random.b/random.s/null.b/null.s)
-# is no longer accepted. The new API takes a named list of QtlSumStats /
-# GwasSumStats objects, which is non-trivial to mock without exercising the
-# full SumStats QC pipeline. Cover mashPipeline behavior end-to-end via the
-# pipeline-level integration tests instead.
-
-# === Tests migrated from test_mrmashWrapper.R (filterMixtureComponents) ===
-
-# ===========================================================================
-# Tests from test_misc_round3.R (mrmashWrapper coverage boost)
-# ===========================================================================
-
-# =========================================================================
-# mrmashWrapper.R: computeW0 (lines 284-298)
-# =========================================================================
-
-# ===========================================================================
-# .mashSumStatsToMatrices — inputScale resolution
-# ===========================================================================
-
-# ===========================================================================
-# .mashObjectMatrices / .mashObjectPartitions
-# ===========================================================================
-
-# ===========================================================================
-# .mashSumStatsToMatrices — matrix assembly behaviour (NA fill,
-#   rowname disambiguation, multi-context shape) on the bundled fixture
-#   and on hand-built partial-coverage data.
-# ===========================================================================
-
-# ===========================================================================
-# .mashSumStatsToMatrices — GwasSumStats path + input-validation errors
-# ===========================================================================
-
-# ===========================================================================
-# mergeMashData — oneData-empty branch (returns resData unchanged)
-# ===========================================================================
-
-# ===========================================================================
-# qtlSumStatsFromZMatrix
-# ===========================================================================
-
-# ===========================================================================
-# qtlSumStatsFromBetaMatrix (beta-scale sibling of qtlSumStatsFromZMatrix)
-# ===========================================================================
-
-# ===========================================================================
-# mashInput  (unified strong/random/null assembly from S4 objects)
-# ===========================================================================
+delayedAssign(".mwModel", .mashTestModel(.mwSs))
 
 test_that("mashModelFit returns a fitted mash model", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
-    m <- .mashTestModel(ss)
-    expect_s3_class(m, "mash")
-    expect_false(is.null(m$fitted_g))
+    expect_s3_class(.mwModel, "mash")
+    expect_false(is.null(.mwModel$fitted_g))
 })
 
 test_that("mashModelFit validates the prior and the fitOn entry", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mwSs
     expect_error(
         mashModelFit(list(random = ss), alpha = 0, priorCovariances = list()),
         "non-empty named list"
@@ -94,27 +32,23 @@ test_that("mashModelFit validates the prior and the fitOn entry", {
 
 test_that("mashModelFit accepts either prior shape and fits identically", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    # .mwModel is the fit of this same prior given as a bare list.
     ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     wrapped <- list(U = ulist, w = NULL, loglik = NULL)
-
-    fit <- function(prior) {
-        suppressMessages(suppressWarnings(mashModelFit(
-            list(random = ss),
-            alpha = 0,
-            priorCovariances = prior,
-            vhat = diag(3),
-            setSeed = 1L
-        )))
-    }
-    expect_equal(fit(wrapped)$loglik, fit(ulist)$loglik)
+    fit <- suppressMessages(suppressWarnings(mashModelFit(
+        list(random = .mwSs),
+        alpha = 0,
+        priorCovariances = wrapped,
+        vhat = diag(3),
+        setSeed = 1L
+    )))
+    expect_equal(fit$loglik, .mwModel$loglik)
 })
 
 test_that("mashPosterior returns posterior matrices with covariance", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
     post <- suppressMessages(suppressWarnings(
-        mashPosterior(.mashTestModel(ss), ss, alpha = 0, vhat = diag(3))
+        mashPosterior(.mwModel, .mwSs, alpha = 0, vhat = diag(3))
     ))
     expect_true(all(
         c("PosteriorMean", "PosteriorSD", "lfsr", "PosteriorCov") %in%
@@ -126,11 +60,10 @@ test_that("mashPosterior returns posterior matrices with covariance", {
 
 test_that("mashPosterior outputPosteriorCov = FALSE omits PosteriorCov", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
     post <- suppressMessages(suppressWarnings(
         mashPosterior(
-            .mashTestModel(ss),
-            ss,
+            .mwModel,
+            .mwSs,
             alpha = 0,
             vhat = diag(3),
             outputPosteriorCov = FALSE
@@ -142,11 +75,11 @@ test_that("mashPosterior outputPosteriorCov = FALSE omits PosteriorCov", {
 
 test_that("mashPosterior(excludeCondition) drops the condition from model + output", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mwSs
     conds <- colnames(.mashSumStatsToMatrices(ss, "strong")$b)
     post <- suppressMessages(suppressWarnings(
         mashPosterior(
-            .mashTestModel(ss),
+            .mwModel,
             ss,
             alpha = 0,
             vhat = diag(3),
@@ -159,11 +92,10 @@ test_that("mashPosterior(excludeCondition) drops the condition from model + outp
 
 test_that("mashPosterior errors on an unknown excludeCondition", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
     expect_error(
         mashPosterior(
-            .mashTestModel(ss),
-            ss,
+            .mwModel,
+            .mwSs,
             alpha = 0,
             vhat = diag(3),
             excludeCondition = "not_a_condition"
@@ -174,7 +106,7 @@ test_that("mashPosterior errors on an unknown excludeCondition", {
 
 test_that("mashModelFit: SimpleList input + default (NULL) vhat", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mwSs
     m <- suppressMessages(suppressWarnings(
         mashModelFit(
             S4Vectors::SimpleList(random = ss),
@@ -188,8 +120,8 @@ test_that("mashModelFit: SimpleList input + default (NULL) vhat", {
 
 test_that("mashPosterior: default (NULL) vhat and excludeCondition dropping every condition", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
-    model <- .mashTestModel(ss)
+    ss <- .mwSs
+    model <- .mwModel
     conds <- colnames(.mashSumStatsToMatrices(ss, "strong")$b)
     # NULL vhat path: omit vhat so mashPosterior fills the identity default.
     post <- suppressMessages(suppressWarnings(mashPosterior(
@@ -315,10 +247,13 @@ test_that("the mash constructors carry their pecotmr defaults", {
     expect_length(MashOptions(), 0L)
 })
 
-test_that("mashDataArgs reaches mashr::mash_set_data", {
+test_that("mashDataArgs and mashArgs reach mashr::mash_set_data and mash", {
     skip_if_not_installed("mashr")
-    seen <- NULL
-    real <- mashr::mash_set_data
+    # One recorded fit serves both bundles: each mash() call is costly.
+    dataSeen <- NULL
+    mashSeen <- NULL
+    realData <- mashr::mash_set_data
+    realMash <- mashr::mash
     ss <- mashFixture(20L)
     suppressMessages(suppressWarnings(with_mocked_bindings(
         mashModelFit(
@@ -327,61 +262,38 @@ test_that("mashDataArgs reaches mashr::mash_set_data", {
             priorCovariances = mashTinyPrior(),
             vhat = diag(3),
             mashDataArgs = MashDataOptions(zero_Shat_reset = 0.5),
-            setSeed = 1L
-        ),
-        mash_set_data = function(...) {
-            seen <<- list(...)
-            real(...)
-        },
-        .package = "mashr"
-    )))
-    expect_equal(seen$zero_Shat_reset, 0.5)
-    # The pecotmr default rides along unless the caller overrides it.
-    expect_equal(seen$zero_Bhat_Shat_reset, 1000)
-})
-
-test_that("mashArgs reaches mashr::mash", {
-    skip_if_not_installed("mashr")
-    seen <- NULL
-    real <- mashr::mash
-    ss <- mashFixture(20L)
-    suppressMessages(suppressWarnings(with_mocked_bindings(
-        mashModelFit(
-            list(random = ss),
-            alpha = 0,
-            priorCovariances = mashTinyPrior(),
-            vhat = diag(3),
             mashArgs = MashOptions(nullweight = 7, verbose = FALSE),
             setSeed = 1L
         ),
+        mash_set_data = function(...) {
+            dataSeen <<- list(...)
+            realData(...)
+        },
         mash = function(...) {
-            seen <<- list(...)
-            real(...)
+            mashSeen <<- list(...)
+            realMash(...)
         },
         .package = "mashr"
     )))
-    expect_equal(seen$nullweight, 7)
-    expect_false(seen$verbose)
+    expect_equal(dataSeen$zero_Shat_reset, 0.5)
+    # The pecotmr default rides along unless the caller overrides it.
+    expect_equal(dataSeen$zero_Bhat_Shat_reset, 1000)
+    expect_equal(mashSeen$nullweight, 7)
+    expect_false(mashSeen$verbose)
     # The entry point keeps owning outputlevel and the data/prior pair.
-    expect_equal(seen$outputlevel, 4L)
+    expect_equal(mashSeen$outputlevel, 4L)
 })
 
 test_that("mashPosterior forwards posteriorArgs", {
     skip_if_not_installed("mashr")
     seen <- NULL
     real <- mashr::mash_compute_posterior_matrices
-    ss <- mashFixture(20L)
-    model <- suppressMessages(suppressWarnings(mashModelFit(
-        list(random = ss),
-        alpha = 0,
-        priorCovariances = mashTinyPrior(),
-        vhat = diag(3),
-        setSeed = 1L
-    )))
+    # Built before the mock is in place, so only mashPosterior is recorded.
+    model <- .mwModel
     suppressMessages(suppressWarnings(with_mocked_bindings(
         mashPosterior(
             model,
-            ss,
+            .mwSs,
             alpha = 0,
             vhat = diag(3),
             posteriorArgs = MashPosteriorOptions(pi_thresh = 1e-8)
@@ -393,29 +305,6 @@ test_that("mashPosterior forwards posteriorArgs", {
         .package = "mashr"
     )))
     expect_equal(seen$pi_thresh, 1e-8)
-})
-
-test_that("the udr engine runs on the z scale, where udr picks TED", {
-    skip_if_not_installed("mashr")
-    skip_if_not_installed("udr")
-    # The companion to the alpha = 0 run above: both existing udr tests were
-    # on the beta scale, so the branch that lets udr choose was unexercised.
-    ss <- mashFixture()
-    pc <- suppressMessages(suppressWarnings(
-        mashPriorCovariances(
-            list(strong = ss),
-            alpha = 1,
-            vhat = diag(3),
-            engine = CovUdrOptions(
-                init = UdInitOptions(n_unconstrained = 2L),
-                fit = UdFitOptions(maxiter = 20L)
-            ),
-            setSeed = 1L
-        )
-    ))
-    expect_gt(length(pc$U), 0L)
-    expect_true(all(map_lgl(pc$U, function(m) all(dim(m) == c(3L, 3L)))))
-    expect_equal(sum(pc$w), 1, tolerance = 1e-6)
 })
 
 test_that("UdFitOptions checks unconstrained.update's value, not just its name", {

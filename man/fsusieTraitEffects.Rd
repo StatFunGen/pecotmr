@@ -15,7 +15,7 @@ fsusieTraitEffects(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A long \code{tibble}: \code{cs, chrom, jointTrait, traitPos,
+A long \code{DataFrame}: \code{cs, chrom, jointTrait, traitPos,
   effect} (the collection method additionally carries the entry identity
   columns).
 }

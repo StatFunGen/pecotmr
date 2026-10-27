@@ -1,5 +1,5 @@
-# Tests for the published result writers (resultWriters.R): exportToVcf, the
-# GWAS-VCF-style writer, and exportToBed, the published long-format tables.
+# Tests for the published result writers (resultWriters.R): writeGwasVcf, the
+# GWAS-VCF-style writer, and writeBed, the published long-format tables.
 
 # =============================================================================
 # Test data helpers
@@ -64,7 +64,7 @@ makeTestFineMappingResult <- function(n = 5) {
         method = rep("susie", n),
         stringsAsFactors = FALSE
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -77,67 +77,17 @@ makeTestFineMappingResult <- function(n = 5) {
 }
 
 # =============================================================================
-# GwasSumStats to VCF
-# =============================================================================
-
-test_that("exportToVcf writes GwasSumStats to uncompressed VCF", {
-    skip_if_not_installed("VariantAnnotation")
-    skip_if_not_installed("Biostrings")
-
-    ss <- makeTestGwasSumStats(5)
-    out <- tempfile(fileext = ".vcf")
-    on.exit(unlink(out), add = TRUE)
-
-    result <- exportToVcf(ss, out)
-    expect_equal(result, out)
-    expect_true(file.exists(out))
-    expect_gt(file.info(out)$size, 0)
-})
-
-# =============================================================================
-# GwasSumStats to bgzipped VCF
-# =============================================================================
-
-test_that("exportToVcf writes GwasSumStats to bgzipped VCF", {
-    skip_if_not_installed("VariantAnnotation")
-    skip_if_not_installed("Biostrings")
-
-    ss <- makeTestGwasSumStats(5)
-    out <- tempfile(fileext = ".vcf.bgz")
-    on.exit(unlink(c(out, paste0(out, ".tbi")), force = TRUE), add = TRUE)
-
-    result <- exportToVcf(ss, out)
-    expect_equal(result, out)
-    expect_true(file.exists(out))
-    expect_gt(file.info(out)$size, 0)
-})
-
-# =============================================================================
 # Fine-mapping result to VCF
 # =============================================================================
 
-test_that("exportToVcf writes a fine-mapping result to uncompressed VCF", {
+test_that("writeGwasVcf(FineMapping): emits PIP + CS FORMAT fields", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
     fm <- makeTestFineMappingResult(5)
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-
-    result <- exportToVcf(fm, out)
-    expect_equal(result, out)
-    expect_true(file.exists(out))
-    expect_gt(file.info(out)$size, 0)
-})
-
-test_that("exportToVcf(FineMapping): emits PIP + CS FORMAT fields", {
-    skip_if_not_installed("VariantAnnotation")
-    skip_if_not_installed("Biostrings")
-
-    fm <- makeTestFineMappingResult(5)
-    out <- tempfile(fileext = ".vcf")
-    on.exit(unlink(out), add = TRUE)
-    exportToVcf(fm, out)
+    expect_equal(writeGwasVcf(fm, out), out)
     ln <- readLines(out)
     # The posterior fields the legacy create_vcf carried must be present. The CS
     # field is DYNAMIC (CS<coverage>) -- the fixture carries cs_95 -> CS95.
@@ -156,7 +106,7 @@ test_that("exportToVcf(FineMapping): emits PIP + CS FORMAT fields", {
 # Fine-mapping result to BCF
 # =============================================================================
 
-test_that("exportToVcf writes a fine-mapping result to BCF", {
+test_that("writeGwasVcf writes a fine-mapping result to BCF", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     skip_if_not_installed("Rsamtools")
@@ -205,7 +155,7 @@ test_that("exportToVcf writes a fine-mapping result to BCF", {
     out <- tempfile(fileext = ".bcf")
     on.exit(unlink(out), add = TRUE)
 
-    result <- exportToVcf(fm, out)
+    result <- writeGwasVcf(fm, out)
     expect_equal(result, out)
     expect_true(file.exists(out))
     expect_gt(file.info(out)$size, 0)
@@ -215,7 +165,7 @@ test_that("exportToVcf writes a fine-mapping result to BCF", {
 # Empty fine-mapping result errors
 # =============================================================================
 
-test_that("exportToVcf errors on an empty fine-mapping result", {
+test_that("writeGwasVcf errors on an empty fine-mapping result", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
 
@@ -236,7 +186,7 @@ test_that("exportToVcf errors on an empty fine-mapping result", {
         posterior_sd = numeric(0),
         stringsAsFactors = FALSE
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = character(0),
         susieFit = list(),
         topLoci = empty_tl
@@ -250,7 +200,7 @@ test_that("exportToVcf errors on an empty fine-mapping result", {
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
 
-    expect_error(exportToVcf(fm_empty, out), "no variants to write")
+    expect_error(writeGwasVcf(fm_empty, out), "no variants to write")
 })
 
 # =============================================================================
@@ -280,7 +230,7 @@ test_that("exportToVcf errors on an empty fine-mapping result", {
             cs_95 = paste0("susie_", c(1L, 1L, 0L)),
             stringsAsFactors = FALSE
         )
-        fineMappingRow(variantIds = ids, susieFit = list(), topLoci = tl)
+        FineMappingRow(variantIds = ids, susieFit = list(), topLoci = tl)
     })
     QtlFineMappingResult(
         studyName = rep("study1", 2),
@@ -291,73 +241,47 @@ test_that("exportToVcf errors on an empty fine-mapping result", {
     )
 }
 
-test_that("exportToVcf(FineMapping): splitByContext emits one VCF each", {
+test_that("writeGwasVcf(FineMapping): each split flag emits one VCF per tag", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .makeMultiTupleQtlFmr()
-    baseOut <- tempfile(fileext = ".vcf")
-    on.exit(
-        unlink(list.files(
-            dirname(baseOut),
-            pattern = basename(tools::file_path_sans_ext(baseOut)),
-            full.names = TRUE
-        )),
-        add = TRUE
+    # Each path is decorated with the tags its flags select; both flags
+    # combine them, context first.
+    cases <- list(
+        context = list(
+            flags = list(splitByContext = TRUE),
+            tags = c("brain", "blood")
+        ),
+        trait = list(
+            flags = list(splitByTrait = TRUE),
+            tags = c("ENSG_A", "ENSG_B")
+        ),
+        both = list(
+            flags = list(splitByContext = TRUE, splitByTrait = TRUE),
+            tags = c("brain.ENSG_A", "blood.ENSG_B")
+        )
     )
-    paths <- exportToVcf(fmr, baseOut, splitByContext = TRUE)
-    expect_length(paths, 2L)
-    # Each path is decorated with the context tag.
-    expect_true(any(grepl("\\.brain\\.vcf$", paths)))
-    expect_true(any(grepl("\\.blood\\.vcf$", paths)))
-    for (p in paths) {
-        expect_true(file.exists(p))
+    d <- withr::local_tempdir()
+    for (case in names(cases)) {
+        paths <- exec(
+            writeGwasVcf,
+            fmr,
+            file.path(d, str_c(case, ".vcf")),
+            !!!cases[[case]]$flags
+        )
+        expect_equal(length(paths), 2L, info = case)
+        expect_true(
+            setequal(
+                basename(paths),
+                str_c(case, ".", cases[[case]]$tags, ".vcf")
+            ),
+            info = case
+        )
+        expect_true(all(file.exists(paths)), info = case)
     }
 })
 
-test_that("exportToVcf(FineMapping): splitByTrait emits one VCF each", {
-    skip_if_not_installed("VariantAnnotation")
-    skip_if_not_installed("Biostrings")
-    fmr <- .makeMultiTupleQtlFmr()
-    baseOut <- tempfile(fileext = ".vcf")
-    on.exit(
-        unlink(list.files(
-            dirname(baseOut),
-            pattern = basename(tools::file_path_sans_ext(baseOut)),
-            full.names = TRUE
-        )),
-        add = TRUE
-    )
-    paths <- exportToVcf(fmr, baseOut, splitByTrait = TRUE)
-    expect_length(paths, 2L)
-    expect_true(any(grepl("\\.ENSG_A\\.vcf$", paths)))
-    expect_true(any(grepl("\\.ENSG_B\\.vcf$", paths)))
-})
-
-test_that("exportToVcf(FineMapping): both split flags combine the tags", {
-    skip_if_not_installed("VariantAnnotation")
-    skip_if_not_installed("Biostrings")
-    fmr <- .makeMultiTupleQtlFmr()
-    baseOut <- tempfile(fileext = ".vcf")
-    on.exit(
-        unlink(list.files(
-            dirname(baseOut),
-            pattern = basename(tools::file_path_sans_ext(baseOut)),
-            full.names = TRUE
-        )),
-        add = TRUE
-    )
-    paths <- exportToVcf(
-        fmr,
-        baseOut,
-        splitByContext = TRUE,
-        splitByTrait = TRUE
-    )
-    expect_length(paths, 2L)
-    expect_true(any(grepl("\\.brain\\.ENSG_A\\.vcf$", paths)))
-    expect_true(any(grepl("\\.blood\\.ENSG_B\\.vcf$", paths)))
-})
-
-test_that("exportToVcf(FineMapping): several fits make one multi-sample VCF", {
+test_that("writeGwasVcf(FineMapping): several fits make one multi-sample VCF", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .makeMultiTupleQtlFmr()
@@ -365,7 +289,7 @@ test_that("exportToVcf(FineMapping): several fits make one multi-sample VCF", {
     on.exit(unlink(out), add = TRUE)
     # No selector and no split flag: every matching fit is a SAMPLE of one
     # file, which is what GWAS-VCF's per-sample design means.
-    expect_identical(exportToVcf(fmr, out), out)
+    expect_identical(writeGwasVcf(fmr, out), out)
     lines <- readLines(out)
     header <- str_split(lines[str_starts(lines, "#CHROM")][[1L]], "\t")[[1L]]
     samples <- header[-seq_len(9L)]
@@ -381,7 +305,7 @@ test_that("exportToVcf(FineMapping): several fits make one multi-sample VCF", {
     expect_length(body, 9L + 2L)
 })
 
-test_that("exportToVcf(FineMapping): a fit missing a variant leaves a gap", {
+test_that("writeGwasVcf(FineMapping): a fit missing a variant leaves a gap", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # Two fits over DISJOINT variants: the records are the union, and each
@@ -404,7 +328,7 @@ test_that("exportToVcf(FineMapping): a fit missing a variant leaves a gap", {
             context = ctx,
             trait = "g1",
             method = "susie",
-            entry = list(fineMappingRow(
+            entry = list(FineMappingRow(
                 variantIds = ids,
                 susieFit = list(),
                 topLoci = tl
@@ -414,7 +338,7 @@ test_that("exportToVcf(FineMapping): a fit missing a variant leaves a gap", {
     fmr <- combineFineMappingResults(mk(c(100, 200), "a"), mk(c(300), "b"))
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    exportToVcf(fmr, out)
+    writeGwasVcf(fmr, out)
     lines <- readLines(out)
     cells <- str_split(keep(lines, str_starts, "chr1"), "\t")
     expect_identical(map_chr(cells, 2L), c("100", "200", "300"))
@@ -429,8 +353,10 @@ test_that("exportToVcf(FineMapping): a fit missing a variant leaves a gap", {
 # GwasSumStats: multi-study selection, MAF/AF field, .gz rename
 # =============================================================================
 
-.makeTwoStudyGwasSumStats <- function(n = 3, withMaf = FALSE) {
-    mkGr <- function() {
+# Two studies over the same variants, told apart by their sample size: N is
+# 1000 in studyA and 2000 in studyB.
+.makeTwoStudyGwasSumStats <- function(n = 3) {
+    mkGr <- function(nSample) {
         gr <- GenomicRanges::GRanges(
             "chr1",
             IRanges::IRanges(
@@ -443,41 +369,45 @@ test_that("exportToVcf(FineMapping): a fit missing a variant leaves a gap", {
             A1 = rep("A", n),
             A2 = rep("T", n),
             Z = seq(1.5, by = -0.5, length.out = n),
-            N = rep(1000L, n)
+            N = rep(nSample, n)
         )
-        if (withMaf) {
-            mc$MAF <- rep(0.2, n)
-        }
         S4Vectors::mcols(gr) <- mc
         gr
     }
     GwasSumStats(
         studyName = c("studyA", "studyB"),
-        entry = list(mkGr(), mkGr()),
+        entry = list(mkGr(1000L), mkGr(2000L)),
         genome = "hg38",
         ldReference = makeTestGenotypeHandle()
     )
 }
 
-test_that("exportToVcf(SumStats): multi-study needs a `study`", {
+test_that("writeGwasVcf(SumStats): multi-study needs a `studyName`", {
     skip_if_not_installed("VariantAnnotation")
     ss2 <- .makeTwoStudyGwasSumStats()
     out <- tempfile(fileext = ".vcf")
-    expect_error(exportToVcf(ss2, out), "2 studies")
+    expect_error(writeGwasVcf(ss2, out), "2 studies")
 })
 
-test_that("exportToVcf(SumStats): `study` picks the chosen study", {
+test_that("writeGwasVcf(SumStats): `studyName` picks the chosen study", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss2 <- .makeTwoStudyGwasSumStats()
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    res <- exportToVcf(ss2, out, studyName = "studyB")
+    res <- writeGwasVcf(ss2, out, studyName = "studyB")
     expect_equal(res, out)
-    expect_true(file.exists(out))
+    # The file holds studyB alone: one sample, named for it, with its N. A
+    # Number=A field reads back as a list matrix, one value per cell.
+    vcf <- VariantAnnotation::readVcf(out)
+    expect_identical(colnames(vcf), "studyB")
+    expect_identical(
+        list_c(VariantAnnotation::geno(vcf)$NS[, 1L]),
+        rep(2000L, 3L)
+    )
 })
 
-test_that("exportToVcf(SumStats): emits AF when MAF is present", {
+test_that("writeGwasVcf(SumStats): emits AF when MAF is present", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss <- GwasSumStats(
@@ -502,7 +432,7 @@ test_that("exportToVcf(SumStats): emits AF when MAF is present", {
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    exportToVcf(ss, out)
+    writeGwasVcf(ss, out)
     expect_true(file.exists(out))
     # The AF FORMAT field is declared in the header when MAF is present.
     # A source carrying only MAF gets the MAF key, not AF: the spec's AF is
@@ -512,15 +442,16 @@ test_that("exportToVcf(SumStats): emits AF when MAF is present", {
     expect_false(any(grepl("ID=AF,", readLines(out))))
 })
 
-test_that("exportToVcf(SumStats): .vcf.gz is renamed from .bgz", {
+test_that("writeGwasVcf(SumStats): .vcf.gz is renamed from .bgz", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     ss <- makeTestGwasSumStats(5)
     out <- tempfile(fileext = ".vcf.gz")
     on.exit(unlink(c(out, paste0(out, ".tbi")), force = TRUE), add = TRUE)
-    res <- exportToVcf(ss, out)
+    res <- writeGwasVcf(ss, out)
     expect_equal(res, out)
-    # writeVcf always emits .bgz; the writer renames it to the requested .gz.
+    # VariantAnnotation::writeVcf() always emits .bgz; the writer renames it
+    # to the requested .gz.
     expect_true(file.exists(out))
     expect_false(file.exists(sub("\\.gz$", ".bgz", out)))
 })
@@ -530,13 +461,13 @@ test_that("exportToVcf(SumStats): .vcf.gz is renamed from .bgz", {
 # tags
 # =============================================================================
 
-test_that("exportToVcf(FineMapping): selectors pick a single row", {
+test_that("writeGwasVcf(FineMapping): selectors pick a single row", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .makeMultiTupleQtlFmr()
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    res <- exportToVcf(
+    res <- writeGwasVcf(
         fmr,
         out,
         studyName = "study1",
@@ -545,21 +476,28 @@ test_that("exportToVcf(FineMapping): selectors pick a single row", {
         method = "susie"
     )
     expect_equal(res, out)
-    expect_true(file.exists(out))
+    # One sample, the brain / ENSG_A fit, carrying that row's marginal
+    # effects; the blood row's are 0.01 larger.
+    vcf <- VariantAnnotation::readVcf(out)
+    expect_identical(colnames(vcf), "study1|brain|ENSG_A|susie")
+    expect_equal(
+        list_c(VariantAnnotation::geno(vcf)$ES[, 1L]),
+        c(0.31, 0.11, -0.19)
+    )
 })
 
-test_that("exportToVcf(fine-mapping result): no matching rows errors", {
+test_that("writeGwasVcf(fine-mapping result): no matching rows errors", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .makeMultiTupleQtlFmr()
     out <- tempfile(fileext = ".vcf")
     expect_error(
-        exportToVcf(fmr, out, studyName = "does_not_exist"),
+        writeGwasVcf(fmr, out, studyName = "does_not_exist"),
         "no rows match"
     )
 })
 
-test_that("exportToVcf(FineMapping): split decorates a .vcf.bgz path", {
+test_that("writeGwasVcf(FineMapping): split decorates a .vcf.bgz path", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fmr <- .makeMultiTupleQtlFmr()
@@ -576,7 +514,7 @@ test_that("exportToVcf(FineMapping): split decorates a .vcf.bgz path", {
         ),
         add = TRUE
     )
-    paths <- exportToVcf(fmr, baseOut, splitByContext = TRUE)
+    paths <- writeGwasVcf(fmr, baseOut, splitByContext = TRUE)
     expect_length(paths, 2L)
     # The composite extension survives; the tag is injected before it.
     expect_true(all(grepl("\\.vcf\\.bgz$", paths)))
@@ -584,7 +522,7 @@ test_that("exportToVcf(FineMapping): split decorates a .vcf.bgz path", {
     expect_true(any(grepl("\\.blood\\.vcf\\.bgz$", paths)))
 })
 
-test_that("exportToVcf(FineMapping): a context-less split keeps the path", {
+test_that("writeGwasVcf(FineMapping): a context-less split keeps the path", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # GwasFineMappingResult has no context/trait axes, so the split tag set is
@@ -592,13 +530,13 @@ test_that("exportToVcf(FineMapping): a context-less split keeps the path", {
     fm <- makeTestFineMappingResult(5)
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    paths <- exportToVcf(fm, out, splitByContext = TRUE)
+    paths <- writeGwasVcf(fm, out, splitByContext = TRUE)
     expect_length(paths, 1L)
     expect_equal(paths[[1L]], out)
     expect_true(file.exists(out))
 })
 
-test_that("exportToVcf(FineMapping): AF comes from topLoci `af`", {
+test_that("writeGwasVcf(FineMapping): AF comes from topLoci `af`", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # The marginal view projects allele frequency to a column named `af`, so a
@@ -622,7 +560,7 @@ test_that("exportToVcf(FineMapping): AF comes from topLoci `af`", {
         cs_95 = paste0("susie_", c(1L, 0L, 2L)),
         stringsAsFactors = FALSE
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -634,12 +572,12 @@ test_that("exportToVcf(FineMapping): AF comes from topLoci `af`", {
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    exportToVcf(fm, out)
+    writeGwasVcf(fm, out)
     expect_true(file.exists(out))
     expect_true(any(grepl("ID=AF", readLines(out))))
 })
 
-test_that("exportToVcf(FineMapping): LBF / LFSR / PUR / fullFit fields", {
+test_that("writeGwasVcf(FineMapping): LBF / LFSR / PUR / fullFit fields", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     # A rich topLoci exercises every posterior FORMAT field: per-variant
@@ -670,7 +608,7 @@ test_that("exportToVcf(FineMapping): LBF / LFSR / PUR / fullFit fields", {
         cs_effect_susie_1 = c(0.4, NA, NA),
         stringsAsFactors = FALSE
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -682,7 +620,7 @@ test_that("exportToVcf(FineMapping): LBF / LFSR / PUR / fullFit fields", {
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    exportToVcf(fm, out)
+    writeGwasVcf(fm, out)
     ln <- readLines(out)
     for (id in c(
         "ID=LBF",
@@ -696,7 +634,7 @@ test_that("exportToVcf(FineMapping): LBF / LFSR / PUR / fullFit fields", {
     }
 })
 
-test_that("exportToVcf(FineMapping): falls back to marginal sumstats", {
+test_that("writeGwasVcf(FineMapping): falls back to marginal sumstats", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
     fm <- makeTestFineMappingResult(5)
@@ -708,7 +646,7 @@ test_that("exportToVcf(FineMapping): falls back to marginal sumstats", {
     )
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
-    exportToVcf(fm, out)
+    writeGwasVcf(fm, out)
     expect_true(file.exists(out))
     # marginal beta -> ES
     expect_true(any(grepl("ID=ES", readLines(out), fixed = TRUE)))
@@ -723,11 +661,18 @@ test_that("plain and bgzipped VCF are written, the latter with an index", {
     skip_if_not_installed("VariantAnnotation")
     data(gwasSumStatsS4Example)
     d <- withr::local_tempdir()
-    exportToVcf(gwasSumStatsS4Example, outputPath = file.path(d, "a.vcf"))
+    # Each call returns the path it wrote.
+    expect_equal(
+        writeGwasVcf(gwasSumStatsS4Example, filename = file.path(d, "a.vcf")),
+        file.path(d, "a.vcf")
+    )
     expect_true(file.exists(file.path(d, "a.vcf")))
-    exportToVcf(
-        gwasSumStatsS4Example,
-        outputPath = file.path(d, "b.vcf.bgz")
+    expect_equal(
+        writeGwasVcf(
+            gwasSumStatsS4Example,
+            filename = file.path(d, "b.vcf.bgz")
+        ),
+        file.path(d, "b.vcf.bgz")
     )
     expect_true(file.exists(file.path(d, "b.vcf.bgz")))
     # index = TRUE, so the tabix index is written alongside.
@@ -751,9 +696,9 @@ test_that("BCF output explains itself when Rsamtools cannot convert", {
     )
     skip_if(canConvert, "Rsamtools::asBcf() works here; nothing to translate")
     expect_error(
-        exportToVcf(
+        writeGwasVcf(
             gwasSumStatsS4Example,
-            outputPath = file.path(d, "c.bcf")
+            filename = file.path(d, "c.bcf")
         ),
         "BCF output needs a working Rsamtools::asBcf"
     )
@@ -787,7 +732,7 @@ test_that(".vcfResolveBody uses posterior rows when no marginals exist", {
     expect_null(out$m)
 })
 
-test_that(".writeVcfImpl adds the chr prefix to bare chromosome names", {
+test_that(".writeVcfImpl writes UCSC chromosome names", {
     skip_if_not_installed("VariantAnnotation")
     out <- tempfile(fileext = ".vcf")
     on.exit(unlink(out), add = TRUE)
@@ -799,7 +744,7 @@ test_that(".writeVcfImpl adds the chr prefix to bare chromosome names", {
         row.names = "Z"
     )
     pecotmr:::.writeVcfImpl(
-        chrom = c("1", "1"),
+        chrom = c("1", "MT"),
         pos = c(100L, 200L),
         ref = c("A", "C"),
         alt = c("G", "T"),
@@ -811,18 +756,18 @@ test_that(".writeVcfImpl adds the chr prefix to bare chromosome names", {
     )
     body <- readLines(out)
     body <- body[!startsWith(body, "#")]
-    expect_true(all(startsWith(body, "chr1\t")))
+    expect_setequal(stringr::str_extract(body, "^[^\t]+"), c("chr1", "chrM"))
 })
 
 # =============================================================================
-# exportToBed: the fine-mapping schemas
+# writeBed: the fine-mapping schemas
 # =============================================================================
 
-test_that("exportToBed writes the published top-loci schema", {
+test_that("writeBed writes the published top-loci schema", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
     expect_identical(
-        exportToBed(qtlFineMappingExample, out, signalCutoff = 0),
+        writeBed(qtlFineMappingExample, out, signalCutoff = 0),
         out
     )
     tbl <- utils::read.delim(out, check.names = FALSE)
@@ -854,10 +799,10 @@ test_that("exportToBed writes the published top-loci schema", {
     expect_false(is.unsorted(tbl$start[tbl[[1L]] == first]))
 })
 
-test_that("exportToBed bgzips and tabix-indexes a .gz fsusie table", {
+test_that("writeBed bgzips and tabix-indexes a .gz fsusie table", {
     data(fsusieFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed.gz")
-    exportToBed(fsusieFineMappingExample, out, schema = "fsusie")
+    writeBed(fsusieFineMappingExample, out, schema = "fsusie")
     expect_true(file.exists(out))
     expect_true(file.exists(str_c(out, ".tbi")))
     hdr <- readLines(gzfile(out), n = 1L)
@@ -888,12 +833,12 @@ test_that("exportToBed bgzips and tabix-indexes a .gz fsusie table", {
     ))
 })
 
-test_that("exportToBed emits the full schema for an empty result", {
+test_that("writeBed emits the full schema for an empty result", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
     # A cutoff no variant clears -> 0 data rows, but the schema must not
     # collapse. read.table() cannot read a header-only file, so read the line.
-    exportToBed(qtlFineMappingExample, out, signalCutoff = 2)
+    writeBed(qtlFineMappingExample, out, signalCutoff = 2)
     lines <- readLines(out)
     expect_length(lines, 1L)
     # A header-only file documents the whole vocabulary rather than
@@ -903,13 +848,13 @@ test_that("exportToBed emits the full schema for an empty result", {
     expect_true(all(c("ES", "WGT", "PIP", "region_id") %in% hdr))
 })
 
-test_that("exportToBed combines several results into one table", {
+test_that("writeBed combines several results into one table", {
     data(qtlFineMappingExample)
     data(mvsusieFineMappingExample)
     one <- withr::local_tempfile(fileext = ".bed")
     both <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(qtlFineMappingExample, one, signalCutoff = 0)
-    exportToBed(
+    writeBed(qtlFineMappingExample, one, signalCutoff = 0)
+    writeBed(
         list(qtlFineMappingExample, mvsusieFineMappingExample),
         both,
         signalCutoff = 0
@@ -928,17 +873,17 @@ test_that("exportToBed combines several results into one table", {
     )
 })
 
-test_that("exportToBed rejects something that is not a result collection", {
+test_that("writeBed rejects something that is not a result collection", {
     out <- withr::local_tempfile(fileext = ".bed")
-    expect_error(exportToBed(data.frame(a = 1), out), "FineMappingResult")
-    expect_error(exportToBed(list(), out), "at least one")
+    expect_error(writeBed(data.frame(a = 1), out), "FineMappingResult")
+    expect_error(writeBed(list(), out), "at least one")
 })
 
 test_that("the fsusie schema is still complete when no fsusie rows exist", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
     # No fsusie rows at all -> a header-only table, not an error.
-    exportToBed(qtlFineMappingExample, out, schema = "fsusie")
+    writeBed(qtlFineMappingExample, out, schema = "fsusie")
     lines <- readLines(out)
     expect_length(lines, 1L)
     # a header-only file documents the schema, with no coverage discovered
@@ -966,7 +911,7 @@ test_that("a merged multi-region fSuSiE table keeps each region's own window", {
         withRegion(b, wantB)
     )
     out <- withr::local_tempfile(fileext = ".bed.gz")
-    exportToBed(both, out, schema = "fsusie")
+    writeBed(both, out, schema = "fsusie")
     tbl <- utils::read.delim(gzfile(out), check.names = FALSE)
     expect_setequal(
         unique(tbl$region_id),
@@ -979,7 +924,7 @@ test_that("a merged multi-region fSuSiE table keeps each region's own window", {
 test_that("extraColumns appends trailing fields the object cannot know", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         qtlFineMappingExample,
         out,
         signalCutoff = 0,
@@ -991,7 +936,7 @@ test_that("extraColumns appends trailing fields the object cannot know", {
 
     # one value per row is equally valid
     perRow <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         qtlFineMappingExample,
         perRow,
         signalCutoff = 0,
@@ -1007,7 +952,7 @@ test_that("extraColumns refuses a clash, a bad length, an unnamed list", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
     expect_error(
-        exportToBed(
+        writeBed(
             qtlFineMappingExample,
             out,
             signalCutoff = 0,
@@ -1016,7 +961,7 @@ test_that("extraColumns refuses a clash, a bad length, an unnamed list", {
         "would overwrite"
     )
     expect_error(
-        exportToBed(
+        writeBed(
             qtlFineMappingExample,
             out,
             signalCutoff = 0,
@@ -1025,7 +970,7 @@ test_that("extraColumns refuses a clash, a bad length, an unnamed list", {
         "one value per row"
     )
     expect_error(
-        exportToBed(
+        writeBed(
             qtlFineMappingExample,
             out,
             signalCutoff = 0,
@@ -1038,7 +983,7 @@ test_that("extraColumns refuses a clash, a bad length, an unnamed list", {
 test_that("extraColumns survive an empty table", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         qtlFineMappingExample,
         out,
         signalCutoff = 2,
@@ -1046,9 +991,12 @@ test_that("extraColumns survive an empty table", {
     )
     lines <- readLines(out)
     expect_length(lines, 1L)
+    # The header-only schema, with the extra column after it.
+    plain <- withr::local_tempfile(fileext = ".bed")
+    writeBed(qtlFineMappingExample, plain, signalCutoff = 2)
     expect_identical(
         str_split(lines[[1L]], "\t")[[1L]],
-        c(str_split(readLines(out)[[1L]], "\t")[[1L]])
+        c(str_split(readLines(plain)[[1L]], "\t")[[1L]], "source_file")
     )
 })
 
@@ -1097,7 +1045,7 @@ test_that("genomicOrder uses `end` only to break ties, and only if numeric", {
 })
 
 # =============================================================================
-# exportToBed: the TWAS-weight schemas
+# writeBed: the TWAS-weight schemas
 # =============================================================================
 
 makeTestTwasWeights <- function(weights, method = "lasso", nVariants = 3L) {
@@ -1107,7 +1055,7 @@ makeTestTwasWeights <- function(weights, method = "lasso", nVariants = 3L) {
         context = "brain",
         trait = "g1",
         method = method,
-        entry = list(twasWeightsRow(
+        entry = list(TwasWeightsRow(
             variantIds = ids,
             weights = weights,
             cvResult = list(metrics = c(rsq = 0.5, pval = 0.01)),
@@ -1116,10 +1064,10 @@ makeTestTwasWeights <- function(weights, method = "lasso", nVariants = 3L) {
     )
 }
 
-test_that("exportToBed writes the published TWAS-weight schema", {
+test_that("writeBed writes the published TWAS-weight schema", {
     data(twasWeightsExample)
     out <- withr::local_tempfile(fileext = ".bed")
-    expect_identical(exportToBed(twasWeightsExample, out), out)
+    expect_identical(writeBed(twasWeightsExample, out), out)
     tbl <- utils::read.delim(out, check.names = FALSE)
     expect_identical(
         names(tbl)[1:6],
@@ -1147,11 +1095,11 @@ test_that("exportToBed writes the published TWAS-weight schema", {
     expect_identical(unique(tbl$region_end), 18850784L)
 })
 
-test_that("exportToBed writes one TWAS-weight row per matrix column", {
+test_that("writeBed writes one TWAS-weight row per matrix column", {
     w <- matrix(c(0.1, 0.2, 0.3, -0.4, -0.5, -0.6), nrow = 3L)
     colnames(w) <- c("mark_a", "mark_b")
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(makeTestTwasWeights(w), out)
+    writeBed(makeTestTwasWeights(w), out)
     tbl <- utils::read.delim(out, check.names = FALSE)
     expect_identical(nrow(tbl), 6L)
     expect_setequal(unique(tbl$trait), c("mark_a", "mark_b"))
@@ -1161,17 +1109,17 @@ test_that("exportToBed writes one TWAS-weight row per matrix column", {
     )
     # a plain weight vector has no feature axis, so the column is empty
     plain <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(makeTestTwasWeights(c(0.1, 0.2, 0.3)), plain)
+    writeBed(makeTestTwasWeights(c(0.1, 0.2, 0.3)), plain)
     plainTbl <- utils::read.delim(plain, check.names = FALSE)
     expect_identical(nrow(plainTbl), 3L)
     # a plain weight vector has no feature axis, so `trait` stays the row's
     expect_identical(unique(plainTbl$trait), "g1")
 })
 
-test_that("exportToBed bgzips and tabix-indexes a .gz TWAS-weight table", {
+test_that("writeBed bgzips and tabix-indexes a .gz TWAS-weight table", {
     data(twasWeightsExample)
     out <- withr::local_tempfile(fileext = ".bed.gz")
-    exportToBed(twasWeightsExample, out)
+    writeBed(twasWeightsExample, out)
     expect_true(file.exists(out))
     expect_true(file.exists(str_c(out, ".tbi")))
     cols <- str_split(readLines(gzfile(out), n = 1L), "\t")[[1L]]
@@ -1187,24 +1135,24 @@ test_that("exporting refuses a TwasWeights with no full-data fit", {
         context = "brain",
         trait = "g1",
         method = "susie",
-        entry = list(twasWeightsRow(
+        entry = list(TwasWeightsRow(
             variantIds = character(0),
             weights = NULL,
             cvResult = list(metrics = c(rsq = 0.5))
         ))
     )
     out <- withr::local_tempfile(fileext = ".bed")
-    expect_error(exportToBed(cvOnly, out), "no full-data fit")
-    expect_error(exportToBed(cvOnly, out), "fitFullData")
+    expect_error(writeBed(cvOnly, out), "no full-data fit")
+    expect_error(writeBed(cvOnly, out), "fitFullData")
     expect_error(
-        exportToVcf(cvOnly, withr::local_tempfile(fileext = ".vcf")),
+        writeGwasVcf(cvOnly, withr::local_tempfile(fileext = ".vcf")),
         "no full-data fit"
     )
     # the offending row is named, so a genome-wide run says which one
-    expect_error(exportToBed(cvOnly, out), "s1\\|brain\\|g1\\|susie")
+    expect_error(writeBed(cvOnly, out), "s1\\|brain\\|g1\\|susie")
     # and a weightless-but-populated row is refused for the same reason
     expect_error(
-        exportToBed(makeTestTwasWeights(NULL), out),
+        writeBed(makeTestTwasWeights(NULL), out),
         "no full-data fit"
     )
 })
@@ -1217,45 +1165,45 @@ test_that("exporting refuses a fine-mapping row with no fitted variants", {
         context = "c1",
         trait = "g1",
         method = "susie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             variantIds = character(0),
             susieFit = list(),
             topLoci = data.frame()
         ))
     )
     out <- withr::local_tempfile(fileext = ".bed")
-    expect_error(exportToBed(fmr, out), "no full-data fit")
+    expect_error(writeBed(fmr, out), "no full-data fit")
 })
 
-test_that("exportToBed combines a list of TwasWeights into one table", {
+test_that("writeBed combines a list of TwasWeights into one table", {
     one <- withr::local_tempfile(fileext = ".bed")
     both <- withr::local_tempfile(fileext = ".bed")
     a <- makeTestTwasWeights(c(0.1, 0.2, 0.3), method = "lasso")
     b <- makeTestTwasWeights(c(0.4, 0.5, 0.6), method = "enet")
-    exportToBed(a, one)
-    exportToBed(list(a, b), both)
+    writeBed(a, one)
+    writeBed(list(a, b), both)
     expect_identical(length(readLines(both)), 2L * length(readLines(one)) - 1L)
     tbl <- utils::read.delim(both, check.names = FALSE)
     expect_setequal(unique(tbl$method), c("lasso", "enet"))
 })
 
-test_that("exportToBed rejects a list that holds neither result type", {
+test_that("writeBed rejects a list that holds neither result type", {
     out <- withr::local_tempfile(fileext = ".bed")
-    expect_error(exportToBed(list(), out), "at least one")
+    expect_error(writeBed(list(), out), "at least one")
     expect_error(
-        exportToBed(list(1, 2), out),
+        writeBed(list(1, 2), out),
         "TwasWeights, QtlFineMappingResult or GwasFineMappingResult"
     )
 })
 
 # =============================================================================
-# exportToVcf: TWAS weights
+# writeGwasVcf: TWAS weights
 # =============================================================================
 
-test_that("exportToVcf writes TWAS weights with one sample per model", {
+test_that("writeGwasVcf writes TWAS weights with one sample per model", {
     data(twasWeightsExample)
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(twasWeightsExample, out)
+    writeGwasVcf(twasWeightsExample, out)
     lines <- readLines(out)
     header <- str_split(
         lines[str_starts(lines, "#CHROM")][[1L]],
@@ -1274,23 +1222,27 @@ test_that("exportToVcf writes TWAS weights with one sample per model", {
     expect_length(body, 9L + 9L)
 })
 
-test_that("the TWAS-weight VCF describes each model in a ##SAMPLE line", {
+test_that("the TWAS-weight VCF's ##SAMPLE lines describe each model, not CV", {
     data(twasWeightsExample)
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(twasWeightsExample, out)
+    writeGwasVcf(twasWeightsExample, out)
     sampleLines <- keep(readLines(out), str_starts, "##SAMPLE=")
     expect_length(sampleLines, 9L)
+    expect_true(all(str_detect(sampleLines, "TotalVariants=")))
     susie <- keep(sampleLines, str_detect, fixed("Method=lasso,"))[[1L]]
     expect_true(str_detect(susie, "Trait=ENSG00000130538"))
     expect_true(str_detect(susie, "TotalVariants=168"))
     expect_true(str_detect(susie, "WeightStandardized=FALSE"))
     expect_true(str_detect(susie, "DataType=bulk_rnaseq"))
+    # CV describes held-out folds; a published file has no data-secure way to
+    # say anything fold-level, so the header stops at identity + counts.
+    expect_false(any(str_detect(sampleLines, "rsq=|corr=|pval=|CvRegions=")))
 })
 
-test_that("exportToVcf narrows TWAS models with the identity selectors", {
+test_that("writeGwasVcf narrows TWAS models with the identity selectors", {
     data(twasWeightsExample)
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(twasWeightsExample, out, method = "lasso")
+    writeGwasVcf(twasWeightsExample, out, method = "lasso")
     lines <- readLines(out)
     header <- str_split(
         lines[str_starts(lines, "#CHROM")][[1L]],
@@ -1298,13 +1250,13 @@ test_that("exportToVcf narrows TWAS models with the identity selectors", {
     )[[1L]]
     expect_length(header[-seq_len(9L)], 1L)
     expect_error(
-        exportToVcf(twasWeightsExample, out, method = "nope"),
+        writeGwasVcf(twasWeightsExample, out, method = "nope"),
         "no rows match"
     )
     # Selecting a fine-mapping method leaves nothing exportable, which is a
     # different refusal from "no rows match".
     expect_error(
-        suppressMessages(exportToVcf(
+        suppressMessages(writeGwasVcf(
             twasWeightsExample,
             out,
             method = "susie"
@@ -1313,10 +1265,10 @@ test_that("exportToVcf narrows TWAS models with the identity selectors", {
     )
 })
 
-test_that("exportToVcf names TWAS samples, or refuses a mismatched count", {
+test_that("writeGwasVcf names TWAS samples, or refuses a mismatched count", {
     out <- withr::local_tempfile(fileext = ".vcf")
     tw <- makeTestTwasWeights(c(0.1, 0.2, 0.3))
-    exportToVcf(tw, out, sampleName = "my_model")
+    writeGwasVcf(tw, out, sampleName = "my_model")
     lines <- readLines(out)
     header <- str_split(
         lines[str_starts(lines, "#CHROM")][[1L]],
@@ -1324,7 +1276,7 @@ test_that("exportToVcf names TWAS samples, or refuses a mismatched count", {
     )[[1L]]
     expect_identical(header[[10L]], "my_model")
     expect_error(
-        exportToVcf(tw, out, sampleName = c("a", "b")),
+        writeGwasVcf(tw, out, sampleName = c("a", "b")),
         "one name per model"
     )
 })
@@ -1336,13 +1288,13 @@ test_that("a TWAS-weight VCF unions the variants its models disagree on", {
         context = "brain",
         trait = "g1",
         method = "enet",
-        entry = list(twasWeightsRow(
+        entry = list(TwasWeightsRow(
             variantIds = c("chr1:300:A:G", "chr1:400:A:G"),
             weights = c(0.7, 0.8)
         ))
     )
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(list(a, b), out)
+    writeGwasVcf(list(a, b), out)
     body <- keep(readLines(out), str_starts, "chr1")
     # union of {100,200,300} and {300,400}
     expect_length(body, 4L)
@@ -1388,14 +1340,14 @@ test_that(".pubJoinMarginals gives an NA row where no marginal exists", {
 })
 
 # =============================================================================
-# exportToBed: variant-level column completeness
+# writeBed: variant-level column completeness
 # =============================================================================
 
 test_that("the top-loci schema identifies the fit each row came from", {
     data(qtlFineMappingExample)
     data(mvsusieFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         list(qtlFineMappingExample, mvsusieFineMappingExample),
         out,
         signalCutoff = 0
@@ -1444,8 +1396,8 @@ test_that("columns = 'all' appends the rest of the source view", {
     data(qtlFineMappingExample)
     base <- withr::local_tempfile(fileext = ".bed")
     full <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(qtlFineMappingExample, base, signalCutoff = 0)
-    exportToBed(qtlFineMappingExample, full, signalCutoff = 0, columns = "all")
+    writeBed(qtlFineMappingExample, base, signalCutoff = 0)
+    writeBed(qtlFineMappingExample, full, signalCutoff = 0, columns = "all")
     baseCols <- names(utils::read.delim(base, check.names = FALSE))
     fullCols <- names(utils::read.delim(full, check.names = FALSE))
     # additive: the published columns keep their place, the rest follow
@@ -1464,7 +1416,7 @@ test_that("columns = 'all' appends the rest of the source view", {
 test_that("columns takes an explicit set, and refuses a bad one", {
     data(qtlFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         qtlFineMappingExample,
         out,
         signalCutoff = 0,
@@ -1473,7 +1425,7 @@ test_that("columns takes an explicit set, and refuses a bad one", {
     cols <- names(utils::read.delim(out, check.names = FALSE))
     expect_identical(cols[[length(cols)]], "grange_start")
     expect_error(
-        exportToBed(
+        writeBed(
             qtlFineMappingExample,
             out,
             signalCutoff = 0,
@@ -1482,7 +1434,7 @@ test_that("columns takes an explicit set, and refuses a bad one", {
         "does not carry"
     )
     expect_error(
-        exportToBed(
+        writeBed(
             qtlFineMappingExample,
             out,
             signalCutoff = 0,
@@ -1492,11 +1444,13 @@ test_that("columns takes an explicit set, and refuses a bad one", {
     )
 })
 
-test_that("the fsusie schema carries its study and takes columns = 'all'", {
+test_that("the fsusie schema: both resolutions, its study, columns = 'all'", {
     data(fsusieFineMappingExample)
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(fsusieFineMappingExample, out, schema = "fsusie")
+    writeBed(fsusieFineMappingExample, out, schema = "fsusie")
     tbl <- utils::read.delim(out, check.names = FALSE)
+    # MAF is absent from this fixture, so the file carries the schema minus
+    # the columns that had nothing to say.
     expect_identical(
         names(tbl),
         setdiff(
@@ -1507,10 +1461,13 @@ test_that("the fsusie schema carries its study and takes columns = 'all'", {
             "AF"
         )
     )
+    # Both resolutions by default.
+    expect_true(all(.FMB_FSUSIE_WAVELET_COLUMNS %in% names(tbl)))
+    expect_true(all(.FMB_FSUSIE_TRAIT_COLUMNS %in% names(tbl)))
     expect_false(anyNA(tbl$study))
 
     full <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         fsusieFineMappingExample,
         full,
         schema = "fsusie",
@@ -1523,7 +1480,7 @@ test_that("the fsusie schema carries its study and takes columns = 'all'", {
     expect_true(all(names(tbl) %in% fullCols))
     # an explicitly named column is written even though it is empty here
     named <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(
+    writeBed(
         fsusieFineMappingExample,
         named,
         schema = "fsusie",
@@ -1537,33 +1494,12 @@ test_that("a TwasWeights element has no variant columns left to add", {
     data(twasWeightsExample)
     base <- withr::local_tempfile(fileext = ".bed")
     full <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(twasWeightsExample, base)
-    exportToBed(twasWeightsExample, full, columns = "all")
+    writeBed(twasWeightsExample, base)
+    writeBed(twasWeightsExample, full, columns = "all")
     expect_identical(
         names(utils::read.delim(full, check.names = FALSE)),
         names(utils::read.delim(base, check.names = FALSE))
     )
-})
-
-test_that("the fsusie schema writes both resolutions by default", {
-    data(fsusieFineMappingExample)
-    out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(fsusieFineMappingExample, out, schema = "fsusie")
-    cols <- names(utils::read.delim(out, check.names = FALSE))
-    # MAF is absent from this fixture, so the file carries the schema minus
-    # the columns that had nothing to say.
-    expect_identical(
-        cols,
-        setdiff(
-            .fmbFsusieColumns(
-                c("wavelet", "trait"),
-                c("CS95", "PUR95")
-            ),
-            "AF"
-        )
-    )
-    expect_true(all(.FMB_FSUSIE_WAVELET_COLUMNS %in% cols))
-    expect_true(all(.FMB_FSUSIE_TRAIT_COLUMNS %in% cols))
 })
 
 test_that("fsusie `levels` drops one resolution, leaving a strict subset", {
@@ -1573,7 +1509,7 @@ test_that("fsusie `levels` drops one resolution, leaving a strict subset", {
             fileext = ".bed",
             .local_envir = parent.frame()
         )
-        exportToBed(
+        writeBed(
             fsusieFineMappingExample,
             out,
             schema = "fsusie",
@@ -1609,7 +1545,7 @@ test_that("fsusie `levels` drops one resolution, leaving a strict subset", {
     expect_identical(wav$grid_effects, both$grid_effects)
 
     expect_error(
-        exportToBed(
+        writeBed(
             fsusieFineMappingExample,
             withr::local_tempfile(),
             schema = "fsusie",
@@ -1617,18 +1553,6 @@ test_that("fsusie `levels` drops one resolution, leaving a strict subset", {
         ),
         "wavelet"
     )
-})
-
-test_that("the weight VCF header carries no cross-validation metrics", {
-    # CV describes held-out folds; a published file has no data-secure way to
-    # say anything fold-level, so the header stops at identity + counts.
-    data(twasWeightsExample)
-    out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(twasWeightsExample, out)
-    sampleLines <- keep(readLines(out), str_starts, "##SAMPLE=")
-    expect_length(sampleLines, 9L)
-    expect_true(all(str_detect(sampleLines, "TotalVariants=")))
-    expect_false(any(str_detect(sampleLines, "rsq=|corr=|pval=|CvRegions=")))
 })
 
 # ---------------------------------------------------------------------------
@@ -1643,41 +1567,16 @@ test_that("the weight VCF header carries no cross-validation metrics", {
 # ---------------------------------------------------------------------------
 
 # @noRd
-.ezss <- function(supplied) {
-    gr <- GenomicRanges::GRanges(
-        "chr1",
-        IRanges::IRanges(c(100L, 200L), width = 1L)
-    )
-    cols <- S4Vectors::DataFrame(
-        SNP = c("chr1:100:A:G", "chr1:200:C:T"),
-        A1 = c("G", "T"),
-        A2 = c("A", "C"),
-        Z = c(2.5, -1.2),
-        N = c(1000L, 1000L),
-        BETA = c(0.25, -0.12),
-        SE = c(0.1, 0.1)
-    )
-    if (!is.null(supplied)) {
-        cols$z_supplied <- rep(supplied, 2L)
-    }
-    GwasSumStats(
-        studyName = "s",
-        entry = list(S4Vectors::`mcols<-`(gr, value = cols)),
-        genome = "hg38"
-    )
-}
-
-# @noRd
 .ezFields <- function(x, name) {
     skip_if_not_installed("VariantAnnotation")
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(x, out)
+    writeGwasVcf(x, out)
     lines <- readLines(out)
     record <- keep(lines, str_starts, "chr1")[[1L]]
     str_split(str_split(record, "\t")[[1L]][[9L]], ":")[[1L]]
 }
 
-test_that("exportToVcf(GwasSumStats) publishes EZ only for a supplied z", {
+test_that("writeGwasVcf(GwasSumStats) publishes EZ only for a supplied z", {
     expect_true(is_in("EZ", .ezFields(.ezss(TRUE))))
     expect_false(is_in("EZ", .ezFields(.ezss(FALSE))))
     # A collection built by hand that never recorded the provenance is
@@ -1689,48 +1588,15 @@ test_that("exportToVcf(GwasSumStats) publishes EZ only for a supplied z", {
 test_that("a supplied z survives the GwasSumStats VCF round trip", {
     skip_if_not_installed("VariantAnnotation")
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(.ezss(TRUE), out)
+    writeGwasVcf(.ezss(TRUE), out)
     back <- .readSumStatsVcf(out, NULL, NULL, NULL, "x")
     expect_equal(back$Z, c(2.5, -1.2))
     expect_true(all(back$z_supplied))
     # The derived case comes back derived, so a re-export does not promote it.
-    exportToVcf(.ezss(FALSE), out)
+    writeGwasVcf(.ezss(FALSE), out)
     derived <- .readSumStatsVcf(out, NULL, NULL, NULL, "x")
     expect_false(any(derived$z_supplied))
     expect_equal(derived$Z, c(2.5, -1.2))
-})
-
-# Drop the ES and SE subfields from one record (or leave a header line as-is).
-# @noRd
-.ezDropEsSe <- function(line) {
-    if (!str_starts(line, "chr1")) {
-        return(line)
-    }
-    fields <- str_split(line, "\t")[[1L]]
-    keys <- str_split(fields[[9L]], ":")[[1L]]
-    values <- str_split(fields[[10L]], ":")[[1L]]
-    keep <- !is_in(keys, c("ES", "SE"))
-    fields[[9L]] <- str_flatten(keys[keep], ":")
-    fields[[10L]] <- str_flatten(values[keep], ":")
-    str_flatten(fields, "\t")
-}
-
-test_that("a z-only GWAS-VCF reads without ES and SE", {
-    # Reading EZ was missing altogether, so a file whose ES/SE were derived
-    # upstream from z either lost that fact or, with no ES/SE at all, was
-    # refused outright.
-    skip_if_not_installed("VariantAnnotation")
-    out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(.ezss(TRUE), out)
-    lines <- readLines(out)
-    lines <- lines[!str_detect(lines, "^##FORMAT=<ID=(ES|SE),")]
-    lines <- map_chr(lines, .ezDropEsSe)
-    stripped <- withr::local_tempfile(fileext = ".vcf")
-    writeLines(lines, stripped)
-    back <- .readSumStatsVcf(stripped, NULL, NULL, NULL, "x")
-    expect_equal(back$Z, c(2.5, -1.2))
-    expect_true(all(back$z_supplied))
-    expect_false(is_in("BETA", names(back)))
 })
 
 # ---------------------------------------------------------------------------
@@ -1745,7 +1611,7 @@ test_that("a z-only GWAS-VCF reads without ES and SE", {
 test_that("coverage = selects a subset of the levels the fit computed", {
     data(qtlFineMappingExample, envir = environment())
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(qtlFineMappingExample, out, coverage = 0.95)
+    writeBed(qtlFineMappingExample, out, coverage = 0.95)
     nms <- names(read.delim(out, check.names = FALSE))
     expect_true(is_in("CS95", nms))
     # The fit computed 70 and 50 as well; asking for 95 drops them.
@@ -1756,7 +1622,7 @@ test_that("coverage = names what the fit did compute, when asked for more", {
     data(qtlFineMappingExample, envir = environment())
     out <- withr::local_tempfile(fileext = ".bed")
     expect_error(
-        exportToBed(qtlFineMappingExample, out, coverage = c(0.95, 0.8)),
+        writeBed(qtlFineMappingExample, out, coverage = c(0.95, 0.8)),
         "asks for 80, which this fit did not compute.*Available: 95, 70, 50"
     )
 })
@@ -1801,7 +1667,7 @@ test_that("a fine-mapping table publishes EZ when the source supplied z", {
         marginal_z_supplied = c(TRUE, TRUE),
         stringsAsFactors = FALSE
     )
-    row <- fineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
+    row <- FineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
     res <- QtlFineMappingResult(
         studyName = "s",
         context = "c",
@@ -1810,13 +1676,13 @@ test_that("a fine-mapping table publishes EZ when the source supplied z", {
         entry = list(row)
     )
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(res, out, signalCutoff = 0)
+    writeBed(res, out, signalCutoff = 0)
     tbl <- read.delim(out, check.names = FALSE)
     expect_equal(tbl$EZ, c(5.5, -2.5))
     # Flip the flag and the column goes away entirely rather than publishing a
     # z pecotmr computed itself.
     tl$marginal_z_supplied <- c(FALSE, FALSE)
-    row2 <- fineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
+    row2 <- FineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
     res2 <- QtlFineMappingResult(
         studyName = "s",
         context = "c",
@@ -1824,11 +1690,11 @@ test_that("a fine-mapping table publishes EZ when the source supplied z", {
         method = "susie",
         entry = list(row2)
     )
-    exportToBed(res2, out, signalCutoff = 0)
+    writeBed(res2, out, signalCutoff = 0)
     expect_false(is_in("EZ", names(read.delim(out, check.names = FALSE))))
 })
 
-test_that("a weights export takes AF from the collection's LD panel", {
+test_that("a weights export with no LD panel publishes no AF", {
     # A TwasWeights element records only alleles and a weight, so the only
     # frequency available is the panel's -- and AF is what a
     # standardized-to-raw conversion would need, so its absence is worth
@@ -1836,7 +1702,9 @@ test_that("a weights export takes AF from the collection's LD panel", {
     data(twasWeightsExample, envir = environment())
     expect_identical(ldReference(twasWeightsExample), list())
     out <- withr::local_tempfile(fileext = ".bed")
-    suppressMessages(exportToBed(twasWeightsExample, out))
+    suppressMessages(writeBed(twasWeightsExample, out))
+    # An all-NA column is dropped rather than written as a column of ".",
+    # so the absence of a frequency is visible in the file's shape.
     expect_false(is_in("AF", names(read.delim(out, check.names = FALSE))))
 })
 
@@ -1853,7 +1721,7 @@ test_that("every weight row being fine-mapping-derived is an error", {
     expect_gt(nrow(fm), 0L)
     out <- withr::local_tempfile(fileext = ".bed")
     expect_error(
-        suppressMessages(exportToBed(fm, out)),
+        suppressMessages(writeBed(fm, out)),
         "every row is fine-mapping-derived"
     )
 })
@@ -1896,8 +1764,8 @@ test_that("both formats skip fine-mapping-derived weight rows alike", {
     expect_gt(sum(derived), 0L)
     out <- withr::local_tempfile(fileext = ".vcf")
     expect_message(
-        exportToVcf(twasWeightsExample, out),
-        "exportToVcf: skipping \\d+ fine-mapping-derived"
+        writeGwasVcf(twasWeightsExample, out),
+        "writeGwasVcf: skipping \\d+ fine-mapping-derived"
     )
     header <- keep(readLines(out), str_starts, "#CHROM")[[1L]]
     samples <- str_split(header, "\t")[[1L]][-seq_len(9L)]
@@ -1907,20 +1775,6 @@ test_that("both formats skip fine-mapping-derived weight rows alike", {
         samples,
         str_c("\\|", .TWB_FINE_MAPPING_METHODS, "$", collapse = "|")
     )))
-})
-
-test_that("a VCF of only fine-mapping-derived weights is refused", {
-    skip_if_not_installed("VariantAnnotation")
-    data(twasWeightsExample, envir = environment())
-    fm <- twasWeightsExample[is_in(
-        as.character(twasWeightsExample$method),
-        .TWB_FINE_MAPPING_METHODS
-    )]
-    out <- withr::local_tempfile(fileext = ".vcf")
-    expect_error(
-        suppressMessages(exportToVcf(fm, out)),
-        "every selected row is fine-mapping-derived"
-    )
 })
 
 test_that("a weights export reads AF off the collection's LD panel", {
@@ -1946,7 +1800,7 @@ test_that("a weights export reads AF off the collection's LD panel", {
             ldReference = ref
         )
         out <- withr::local_tempfile(fileext = ".bed")
-        exportToBed(withPanel, out)
+        writeBed(withPanel, out)
         read.delim(out, check.names = FALSE)
     }
     tbl <- exported(panel)
@@ -1984,7 +1838,7 @@ test_that("a sumstats collection with no Z publishes no EZ", {
         genome = "hg38"
     )
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(ss, out)
+    writeGwasVcf(ss, out)
     expect_false(any(str_detect(readLines(out), "ID=EZ,")))
 })
 
@@ -2017,7 +1871,7 @@ test_that("a sumstats collection with no Z publishes no EZ", {
         context = "ctx",
         trait = "tA",
         method = "mr_mash",
-        entry = list(twasWeightsRow(
+        entry = list(TwasWeightsRow(
             variantIds = vids[seq_len(nVariant)],
             weights = w[seq_len(nVariant), , drop = FALSE]
         )),
@@ -2025,22 +1879,10 @@ test_that("a sumstats collection with no Z publishes no EZ", {
     )
 }
 
-test_that("a joint fit writes one BED row per (variant, trait)", {
-    tw <- .pbw_jointWeights()
-    out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(tw, out)
-    bed <- read.delim(out, check.names = FALSE)
-    # Six variants x two weight columns, and the matrix column label -- not
-    # the row's own trait -- is what each block is published under.
-    expect_equal(nrow(bed), 12L)
-    expect_equal(sort(unique(bed$trait)), c("tA", "tB"))
-    expect_equal(bed$WGT[bed$trait == "tB"][[1L]], 0.2)
-})
-
 test_that("AF is published from the LD panel when it records one", {
     tw <- .pbw_jointWeights()
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(tw, out)
+    writeBed(tw, out)
     bed <- read.delim(out, check.names = FALSE)
     panel <- ldReference(tw)[[1L]]
     rr <- SummarizedExperiment::rowRanges(panel)
@@ -2048,20 +1890,11 @@ test_that("AF is published from the LD panel when it records one", {
     expect_equal(bed$AF, expected)
 })
 
-test_that("a panel with no AF column publishes no AF at all", {
-    data(twasWeightsExample, envir = environment())
-    out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(twasWeightsExample[5], out)
-    # An all-NA column is dropped rather than written as a column of ".",
-    # so the absence of a frequency is visible in the file's shape.
-    expect_false(is_in("AF", names(read.delim(out, check.names = FALSE))))
-})
-
 test_that("a joint fit's VCF samples carry the weight-column label", {
     skip_if_not_installed("VariantAnnotation")
     tw <- .pbw_jointWeights()
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(tw, out)
+    writeGwasVcf(tw, out)
     hdr <- readLines(out)
     chrom <- hdr[str_starts(hdr, "#CHROM")]
     # The label is appended to the row's identity, so two weight columns of
@@ -2087,15 +1920,15 @@ test_that("a recorded data_source wins over the derived one", {
     )
     expect_equal(.pubDataSource(recorded), "individual")
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(recorded, out)
+    writeBed(recorded, out)
     bed <- read.delim(out, check.names = FALSE)
     expect_equal(unique(bed$data_source), "sumstat")
 })
 
 test_that("columns= appends a hand-built row's own variant columns", {
-    # `twasWeightsRow()` writes exactly A1 / A2 / weight, which is the whole
+    # `TwasWeightsRow()` writes exactly A1 / A2 / weight, which is the whole
     # published source set -- so for a constructor-built collection there is
-    # nothing left for `columns` to add, as ?exportToBed says. A collection
+    # nothing left for `columns` to add, as ?writeBed says. A collection
     # assembled by hand is the case the argument exists for: its variants
     # carry fields pecotmr knows nothing about, and they travel into the file
     # AFTER the published schema rather than displacing any of it.
@@ -2118,7 +1951,7 @@ test_that("columns= appends a hand-built row's own variant columns", {
         entry = list(row)
     )
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(tw, out, columns = "all")
+    writeBed(tw, out, columns = "all")
     bed <- read.delim(out, check.names = FALSE)
     expect_equal(bed$qc_note, c("ok", "ok", "flipped", "ok"))
     expect_equal(bed$n_fold, rep(5L, 4L))
@@ -2128,10 +1961,10 @@ test_that("columns= appends a hand-built row's own variant columns", {
     expect_false(is_in("weight", names(bed)))
     # Naming one explicitly works the same way; naming a published one is an
     # error rather than a duplicate column.
-    exportToBed(tw, out, columns = "qc_note")
+    writeBed(tw, out, columns = "qc_note")
     expect_false(is_in("n_fold", names(read.delim(out, check.names = FALSE))))
     expect_error(
-        exportToBed(tw, out, columns = "weight"),
+        writeBed(tw, out, columns = "weight"),
         "already writes"
     )
 })
@@ -2160,7 +1993,7 @@ test_that("a weight matrix with no columns publishes a header-only file", {
     expect_length(.twbWeightLabels(mcols(tw[[1L]])$weight), 0L)
     expect_null(.twbWeightsTable(tw, NULL, NULL))
     out <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(tw, out)
+    writeBed(tw, out)
     lines <- readLines(out)
     expect_length(lines, 1L)
     expect_equal(
@@ -2176,24 +2009,6 @@ test_that("a weight matrix with no columns publishes a header-only file", {
 
 # ---- THETA: the infinitesimal half of WGT -----------------------------------
 
-.thetaFit <- function(nV = 12, theta = NULL) {
-    set.seed(1)
-    alpha <- matrix(runif(2 * nV), nrow = 2)
-    alpha <- alpha / rowSums(alpha)
-    mu <- matrix(rnorm(2 * nV), nrow = 2)
-    fit <- list(
-        alpha = alpha,
-        mu = mu,
-        mu2 = mu^2 + 0.1,
-        pip = runif(nV),
-        X_column_scale_factors = rep(1, nV)
-    )
-    if (!is.null(theta)) {
-        fit$theta <- theta
-    }
-    fit
-}
-
 .thetaFmr <- function(theta = NULL, nV = 12) {
     vids <- sprintf("chr1:%d:A:T", seq_len(nV) * 1000)
     fit <- .thetaFit(nV, theta)
@@ -2208,47 +2023,13 @@ test_that("a weight matrix with no columns publishes a header-only file", {
         context = "c",
         trait = "g",
         method = "susie_inf",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             variantIds = vids,
             susieFit = fit,
             topLoci = tl
         ))
     )
 }
-
-test_that("theta is the posterior effect's infinitesimal part, not an extra", {
-    nV <- 12
-    th <- rnorm(nV, sd = 0.05)
-    fit <- .thetaFit(nV, th)
-    vids <- sprintf("chr1:%d:A:T", seq_len(nV) * 1000)
-    tl <- buildTopLoci(
-        fit = fit,
-        csTables = NULL,
-        variantNames = vids,
-        method = "susie_inf"
-    )
-    sparse <- colSums(fit$alpha * fit$mu)
-    # coef.susie() sums the sparse and infinitesimal terms, so the published
-    # effect ALREADY contains theta -- publishing theta only exposes the split.
-    expect_equal(tl$posterior_mean, sparse + th, tolerance = 1e-10)
-    expect_equal(tl$posterior_theta, th, tolerance = 1e-10)
-    expect_equal(
-        tl$posterior_mean - tl$posterior_theta,
-        sparse,
-        tolerance = 1e-10
-    )
-})
-
-test_that("a fit with no infinitesimal term reports theta = 0, not NA", {
-    tl <- buildTopLoci(
-        fit = .thetaFit(12),
-        csTables = NULL,
-        variantNames = sprintf("chr1:%d:A:T", seq_len(12) * 1000),
-        method = "susie"
-    )
-    expect_true(all(tl$posterior_theta == 0))
-    expect_false(anyNA(tl$posterior_theta))
-})
 
 test_that("THETA round-trips through both published formats", {
     th <- rnorm(12, sd = 0.05)
@@ -2257,7 +2038,7 @@ test_that("THETA round-trips through both published formats", {
     expect_equal(sort(want), sort(th), tolerance = 1e-10)
 
     bed <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(fmr, bed)
+    writeBed(fmr, bed)
     expect_true(is_in("THETA", strsplit(readLines(bed, n = 1), "\t")[[1]]))
     gotBed <- as.data.frame(topLoci(
         readFineMappingResult(bed, weightStandardized = TRUE),
@@ -2266,7 +2047,7 @@ test_that("THETA round-trips through both published formats", {
     expect_equal(sort(gotBed), sort(want), tolerance = 1e-5)
 
     vcf <- withr::local_tempfile(fileext = ".vcf.bgz")
-    exportToVcf(fmr, vcf)
+    writeGwasVcf(fmr, vcf)
     hdr <- grep("^##FORMAT", readLines(gzfile(vcf)), value = TRUE)
     expect_true(any(grepl("ID=THETA,", hdr)))
     gotVcf <- as.data.frame(topLoci(
@@ -2289,13 +2070,13 @@ test_that("THETA is omitted for collections that never recorded one", {
     d <- as.data.frame(topLoci(old, signalCutoff = 0))
     expect_true(all(is.na(d$theta)))
     bed <- withr::local_tempfile(fileext = ".bed")
-    exportToBed(old[1], bed)
+    writeBed(old[1], bed)
     expect_false(is_in("THETA", strsplit(readLines(bed, n = 1), "\t")[[1]]))
 })
 
 test_that("data_source falls back per row, and to NA for a mixed collection", {
     rows <- map(1:2, function(i) {
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:3) + i),
             weights = c(0.1, 0.2, 0.3)
         )
@@ -2316,4 +2097,248 @@ test_that("data_source falls back per row, and to NA for a mixed collection", {
     )
     expect_identical(pecotmr:::.pubDataSource(tw), NA_character_)
     expect_identical(pecotmr:::.pubDataSource(tw[1L]), "sumstat")
+})
+
+# =============================================================================
+# A GWAS study fine-mapped block by block
+# =============================================================================
+
+test_that("writeGwasVcf joins a GWAS fit's blocks into one sample", {
+    skip_if_not_installed("VariantAnnotation")
+    out <- tempfile(fileext = ".vcf")
+    writeGwasVcf(.rw_blockedGwasFmr(), out)
+    sample <- .rw_sampleLines(out)
+    expect_length(sample, 1L)
+    expect_match(sample, "TotalVariants=6", fixed = TRUE)
+    expect_match(sample, "BlockId=chr1_1_5000|chr1_5001_20000", fixed = TRUE)
+    expect_match(sample, "V=0.1;0.2|0.3;0.4", fixed = TRUE)
+    expect_match(sample, "CsIndex=1|2", fixed = TRUE)
+    expect_match(sample, "RegionGiven=TRUE|TRUE", fixed = TRUE)
+    # Credible sets are numbered within a block, so each variant says which.
+    vcf <- VariantAnnotation::readVcf(out)
+    bid <- unlist(VariantAnnotation::geno(vcf)$BID[, 1L])
+    expect_identical(
+        unname(bid),
+        rep(c("chr1_1_5000", "chr1_5001_20000"), each = 3L)
+    )
+})
+
+test_that("writeGwasVcf splitByBlock writes one file per LD block", {
+    skip_if_not_installed("VariantAnnotation")
+    out <- tempfile(fileext = ".vcf")
+    paths <- writeGwasVcf(.rw_blockedGwasFmr(), out, splitByBlock = TRUE)
+    expect_identical(
+        basename(paths),
+        str_c(
+            basename(tools::file_path_sans_ext(out)),
+            c(".chr1_1_5000", ".chr1_5001_20000"),
+            ".vcf"
+        )
+    )
+    second <- .rw_sampleLines(paths[[2L]])
+    expect_match(second, "BlockId=chr1_5001_20000,", fixed = TRUE)
+    expect_match(second, "V=0.3;0.4", fixed = TRUE)
+    vcf <- VariantAnnotation::readVcf(paths[[2L]])
+    expect_equal(nrow(vcf), 3L)
+    expect_false("BID" %in% names(VariantAnnotation::geno(vcf)))
+})
+
+test_that("writeGwasVcf refuses to join blocks that disagree on a fit field", {
+    skip_if_not_installed("VariantAnnotation")
+    x <- .rw_blockedGwasFmr(dataType = c("gwas", "eqtl"))
+    expect_error(
+        writeGwasVcf(x, tempfile(fileext = ".vcf")),
+        "disagree on `data_type`"
+    )
+    expect_length(
+        writeGwasVcf(x, tempfile(fileext = ".vcf"), splitByBlock = TRUE),
+        2L
+    )
+})
+
+test_that("writeGwasVcf splitByBlock is for GWAS results only", {
+    skip_if_not_installed("VariantAnnotation")
+    expect_error(
+        writeGwasVcf(
+            .makeMultiTupleQtlFmr(),
+            tempfile(fileext = ".vcf"),
+            splitByBlock = TRUE
+        ),
+        "a QtlFineMappingResult fit is one row"
+    )
+})
+
+test_that("writeBed gives a GWAS result's rows their own windows", {
+    data(gwasFineMappingExample)
+    out <- tempfile(fileext = ".bed")
+    writeBed(gwasFineMappingExample, out, signalCutoff = 0)
+    tbl <- utils::read.delim(out, check.names = FALSE)
+    expect_true(all(!is.na(tbl$region_id)))
+    # Two blocks of one fit each keep their own window.
+    blocked <- .rw_blockedGwasFmr()
+    out2 <- tempfile(fileext = ".bed")
+    writeBed(blocked, out2, signalCutoff = 0)
+    tbl2 <- utils::read.delim(out2, check.names = FALSE)
+    windows <- unique(tbl2[, c("block_id", "region_id", "region_given")])
+    expect_identical(windows$block_id, blocked$blockId)
+    # The blocks were given their windows, so those are published, given.
+    expect_identical(windows$region_id, c("chr1_1_5000", "chr1_5001_20000"))
+    expect_identical(windows$region_given, c(TRUE, TRUE))
+})
+
+test_that("writeBed records whether each block's range was given", {
+    x <- .rw_mixedGwasFmr()
+    out <- tempfile(fileext = ".bed")
+    writeBed(x, out, signalCutoff = 0)
+    tbl <- utils::read.delim(out, check.names = FALSE)
+    windows <- unique(tbl[, c("block_id", "region_id", "region_given")])
+    # The second block was given none, so its window is its span.
+    expect_identical(windows$region_id, c("chr1_1_5000", "chr1_10100_10300"))
+    expect_identical(windows$region_given, c(TRUE, FALSE))
+    back <- readFineMappingResult(out, weightStandardized = TRUE)
+    expect_identical(back$regionGiven, c(TRUE, FALSE))
+    expect_identical(
+        as.character(genomicRegion(back)),
+        as.character(genomicRegion(x))
+    )
+    # A file that does not record it reads back as computed: a window read
+    # from a file says nothing of where it came from.
+    old <- tempfile(fileext = ".bed")
+    utils::write.table(
+        tbl[, setdiff(names(tbl), "region_given")],
+        old,
+        sep = "\t",
+        quote = FALSE,
+        row.names = FALSE
+    )
+    expect_identical(
+        readFineMappingResult(old, weightStandardized = TRUE)$regionGiven,
+        c(FALSE, FALSE)
+    )
+})
+
+test_that("writeGwasVcf(GwasSumStats) defaults to a study split across rows", {
+    skip_if_not_installed("VariantAnnotation")
+    data(gwasSumStatsS4Example)
+    g <- gwasSumStatsS4Example
+    split <- GwasSumStats(
+        studyName = "trait1",
+        entry = list(sumStats(g)),
+        genome = "hg19",
+        ldReference = ldReference(g)[[1L]],
+        region = GenomicRanges::GRanges(
+            "chr22",
+            IRanges::IRanges(c(1L, 15200001L), c(15200000L, 51304566L))
+        )
+    )
+    expect_equal(nrow(split), 2L)
+    out <- tempfile(fileext = ".vcf")
+    writeGwasVcf(split, out)
+    expect_equal(nrow(VariantAnnotation::readVcf(out)), length(sumStats(g)))
+})
+
+test_that("writeGwasVcf splitByContext keeps each context's fits in one file", {
+    skip_if_not_installed("VariantAnnotation")
+    # Two traits in one context decorate to one path; both fits belong in
+    # that file, rather than the second overwriting the first.
+    fmr <- .makeMultiTupleQtlFmr()
+    S4Vectors::mcols(fmr)$context <- c("brain", "brain")
+    paths <- writeGwasVcf(
+        fmr,
+        tempfile(fileext = ".vcf"),
+        splitByContext = TRUE
+    )
+    expect_length(paths, 1L)
+    header <- VariantAnnotation::scanVcfHeader(paths[[1L]])
+    expect_length(VariantAnnotation::samples(header), 2L)
+})
+
+test_that("writeGwasVcf joins blocks that carry no marginal effects", {
+    skip_if_not_installed("VariantAnnotation")
+    # The fits' top loci hold no marginal beta / se / z, so the joined
+    # sample has no ES / SE / EZ to write.
+    bare <- function(offset, V, csIndex) {
+        tl <- .sc_makeTopLoci(3, offset = offset)
+        tl <- tl[, setdiff(
+            names(tl),
+            c(
+                "marginal_beta",
+                "marginal_se",
+                "marginal_z",
+                "marginal_p"
+            )
+        )]
+        FineMappingRow(
+            variantIds = tl$variant_id,
+            susieFit = list(V = V, sets = list(cs_index = csIndex)),
+            topLoci = tl
+        )
+    }
+    x <- GwasFineMappingResult(
+        studyName = c("g1", "g1"),
+        method = c("susie", "susie"),
+        entry = list(bare(0L, c(0.1, 0.2), 1L), bare(10000L, c(0.3, 0.4), 2L))
+    )
+    out <- tempfile(fileext = ".vcf")
+    writeGwasVcf(x, out)
+    vcf <- VariantAnnotation::readVcf(out)
+    expect_equal(nrow(vcf), 6L)
+    expect_false("ES" %in% names(VariantAnnotation::geno(vcf)))
+    expect_true("PIP" %in% names(VariantAnnotation::geno(vcf)))
+})
+
+# =============================================================================
+# The genome build in the file header, and fit coverage
+# =============================================================================
+
+test_that("a published table names its genome build above the header", {
+    data(qtlFineMappingExample, envir = environment())
+    x <- qtlFineMappingExample
+    GenomeInfoDb::genome(x) <- "hg38"
+    path <- tempfile(fileext = ".bed")
+    on.exit(unlink(path), add = TRUE)
+    writeBed(x, path)
+    lines <- readLines(path, n = 2L)
+    expect_equal(lines[[1L]], "##genome=hg38")
+    expect_match(lines[[2L]], "^#chr\t")
+    # With no build named there is no line to write.
+    GenomeInfoDb::genome(x) <- NA_character_
+    plain <- tempfile(fileext = ".bed")
+    on.exit(unlink(plain), add = TRUE)
+    writeBed(x, plain)
+    expect_match(readLines(plain, n = 1L), "^#chr\t")
+})
+
+test_that("a published VCF names its build as reference and contig assembly", {
+    skip_if_not_installed("VariantAnnotation")
+    data(qtlFineMappingExample, envir = environment())
+    x <- qtlFineMappingExample
+    GenomeInfoDb::genome(x) <- "hg38"
+    path <- tempfile(fileext = ".vcf")
+    on.exit(unlink(path), add = TRUE)
+    writeGwasVcf(x, path, context = "context_1")
+    lines <- readLines(path)
+    expect_true(is_in("##reference=hg38", lines))
+    contigs <- lines[str_detect(lines, "^##contig=")]
+    expect_gt(length(contigs), 0L)
+    expect_true(all(str_detect(contigs, "assembly=hg38")))
+})
+
+test_that("writeGwasVcf() warns about the narrowed rows it writes, only", {
+    skip_if_not_installed("VariantAnnotation")
+    data(qtlFineMappingLbfExample, envir = environment())
+    x <- qtlFineMappingLbfExample
+    narrowed <- endoapply(x, utils::head, 50L)
+    path <- tempfile(fileext = ".vcf")
+    on.exit(unlink(path), add = TRUE)
+    expect_warning(
+        writeGwasVcf(narrowed, path),
+        "writeGwasVcf\\(\\): 2 row\\(s\\) hold fewer variants"
+    )
+    # Rows a selector leaves out are not written, so not reported.
+    mixed <- narrowed
+    mixed[[2L]] <- x[[2L]]
+    expect_no_warning(
+        writeGwasVcf(mixed, path, context = mixed$context[[2L]])
+    )
 })

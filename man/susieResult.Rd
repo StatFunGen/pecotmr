@@ -17,7 +17,9 @@ The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 \description{
 Returns the trimmed model fit underlying \code{conData$finemappingEntry} (a
 \code{FineMappingRow}, or a single-row fine-mapping result), or NULL if no
-fine-mapping entry is attached.
+fine-mapping entry is attached. As \code{\link{susieFit}} does, it warns
+(condition class \code{pecotmrFitCoverage}) when the entry holds fewer
+variants than its fit was made with.
 }
 \examples{
 data(qtlFineMappingExample)

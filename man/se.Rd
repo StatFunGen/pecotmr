@@ -7,14 +7,7 @@
 \usage{
 se(x, ...)
 
-\S4method{se}{SumStatsBase}(
-  x,
-  studyName = NULL,
-  context = NULL,
-  trait = NULL,
-  annotateSignificance = NULL,
-  ranges = NULL
-)
+\S4method{se}{SumStatsBase}(x, studyName = NULL, context = NULL, trait = NULL)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}
@@ -29,12 +22,6 @@ this context; \code{NULL} matches all contexts.}
 
 \item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
 this trait; \code{NULL} matches all traits.}
-
-\item{annotateSignificance}{Optional correction-method name passed through to
-\code{\link{sumStats}} (QTL only); \code{NULL} applies none.}
-
-\item{ranges}{A \code{GRanges} or \code{NULL} (default). Return only the
-variants overlapping these ranges; \code{NULL} returns everything.}
 }
 \value{
 Numeric vector of standard errors, or \code{NULL} if not available.

@@ -11,7 +11,7 @@ NULL
 
 #' @title TWAS Weights Row
 #' @description One row's worth of TWAS weights. Build one with
-#'   \code{\link{twasWeightsRow}} and pass a list of them as
+#'   \code{\link{TwasWeightsRow}} and pass a list of them as
 #'   \code{\link{TwasWeights}}' \code{entry} argument.
 #' @slot variants A \code{GRanges} of the weighted variants.
 #' @slot weights Per-variant weights, aligned to \code{variants}.
@@ -19,7 +19,14 @@ NULL
 #' @slot cvResult Cross-validation payload, or \code{NULL}.
 #' @slot weightStandardized Whether the weights are on the standardized scale.
 #' @slot weightsDataType Optional data-type label.
-#' @seealso \code{\link{twasWeightsRow}},
+#' @slot fitVariants The ids of the variants the weights were fitted on, in
+#'   the fit's own order, recorded when the row is built; empty for a row with
+#'   no fit payload. A row narrowed to fewer variants keeps them, which is how
+#'   reading its fits can tell they describe more variants than the row now
+#'   holds.
+#' @section Coercion: \code{as(x, "GRanges")} gives the row's variants with
+#'   their \code{weight} column: the element a collection stores for it.
+#' @seealso \code{\link{TwasWeightsRow}},
 #'   \code{\linkS4class{FineMappingRow}}
 #' @export
 setClass(
@@ -30,14 +37,16 @@ setClass(
         methodFits = "ANY",
         cvResult = "ANY",
         weightStandardized = "logical",
-        weightsDataType = "ANY"
+        weightsDataType = "ANY",
+        fitVariants = "character"
     ),
     prototype(
         weights = NULL,
         methodFits = NULL,
         cvResult = NULL,
         weightStandardized = FALSE,
-        weightsDataType = NULL
+        weightsDataType = NULL,
+        fitVariants = character(0)
     )
 )
 
@@ -80,9 +89,9 @@ methods::setValidity("TwasWeightsRow", function(object) {
 #'   scale.
 #' @param weightsDataType Optional data-type label.
 #' @return A \code{\linkS4class{TwasWeightsRow}}.
-#' @seealso \code{\link{fineMappingRow}}
+#' @seealso \code{\link{FineMappingRow}}
 #' @examples
-#' row <- twasWeightsRow(
+#' row <- TwasWeightsRow(
 #'     variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
 #'     weights = c(0.4, -0.2)
 #' )
@@ -91,7 +100,7 @@ methods::setValidity("TwasWeightsRow", function(object) {
 #'     entry = list(row)
 #' )
 #' @export
-twasWeightsRow <- function(
+TwasWeightsRow <- function(
     variantIds,
     weights,
     methodFits = NULL,
@@ -120,17 +129,17 @@ twasWeightsRow <- function(
         gr,
         value = `[[<-`(mcols(gr, use.names = FALSE), "weight", value = w)
     )
-    obj <- new(
+    fitted <- length(methodFits) > 0L || !is.null(cvResult)
+    new(
         "TwasWeightsRow",
         variants = withWeight,
         weights = w,
         methodFits = methodFits,
         cvResult = cvResult,
         weightStandardized = isTRUE(weightStandardized),
-        weightsDataType = weightsDataType
+        weightsDataType = weightsDataType,
+        fitVariants = if (fitted) .grVariantIds(gr) else character(0)
     )
-    validObject(obj)
-    obj
 }
 
 
@@ -154,6 +163,9 @@ setMethod("methodFits", "TwasWeightsRow", function(x) x@methodFits)
 #' @export
 setMethod("cvResult", "TwasWeightsRow", function(x) x@cvResult)
 
+# @noRd
+.twRowFitVariants <- function(x) x@fitVariants
+
 #' @rdname weightStandardized
 #' @export
 setMethod("weightStandardized", "TwasWeightsRow", function(x) {
@@ -166,6 +178,13 @@ setMethod("weightsDataType", "TwasWeightsRow", function(x) x@weightsDataType)
 
 # @noRd
 setMethod("variants", "TwasWeightsRow", function(x) x@variants)
+
+#' @rdname TwasWeightsRow-class
+#' @name coerce,TwasWeightsRow,GRanges-method
+#' @aliases coerce,TwasWeightsRow,GRanges-method
+#' @usage NULL
+#' @exportMethod coerce
+setAs("TwasWeightsRow", "GRanges", function(from) variants(from))
 
 #' @rdname show-methods
 #' @export

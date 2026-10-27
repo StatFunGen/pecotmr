@@ -1,21 +1,6 @@
 context("regularized_regression - mrash")
 
 # ---- mrashWeights ----
-test_that("mrashWeights calls lassoWeights as default beta.init", {
-    skip_if_not_installed("glmnet")
-    set.seed(42)
-    n <- 50
-    p <- 10
-    X <- matrix(rnorm(n * p), nrow = n)
-    y <- X[, 1] * 0.5 + rnorm(n)
-    local_mocked_bindings(
-        lassoWeights = function(X, y) rep(0.01, ncol(X))
-    )
-    result <- mrashWeights(X, y)
-    expect_true(is.numeric(result))
-    expect_equal(length(result), p)
-})
-
 test_that("mrashWeights subsets a user-supplied beta.init of length ncol(X) by keep", {
     skip_if_not_installed("glmnet")
     set.seed(42)

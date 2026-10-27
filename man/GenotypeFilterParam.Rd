@@ -24,7 +24,9 @@ GenotypeFilterParam(
 
 \item{xvarCutoff}{Genotype-variance floor.}
 
-\item{imissCutoff}{Per-variant missingness ceiling.}
+\item{imissCutoff}{Per-sample missingness ceiling: a sample missing more
+than this fraction of an extracted block's genotypes is dropped from
+it.}
 
 \item{keepSamples}{Sample ids to restrict to; \code{character(0)} keeps
 all samples.}
@@ -39,26 +41,20 @@ A \code{GenotypeFilterParam} object, a \code{\link{MethodParam}}.
 }
 \description{
 Which variants and samples survive when a genotype matrix is
-  assembled, as one checked bundle. Used by \code{\link{QtlDataset}}, the
-  manifest loaders, and the pipelines that build a dataset.
+  assembled, as one checked bundle: the genotype QC of a run of
+  \code{\link{fineMappingPipeline}}, \code{\link{twasWeightsPipeline}}
+  or \code{\link{colocboostPipeline}} on a \code{\link{QtlDataset}}.
+  A \code{QtlDataset} records no filter of its own; \code{keepSamples}
+  narrows it once at the start of the run, and the other fields apply to
+  each extracted block, against that block's samples.
 }
-\section{Unset versus set}{
+\section{Unset fields}{
 
-  Every field defaults to \code{NULL}, meaning \strong{not set}, and an
-  unset field is absent from the result rather than carried as \code{NULL}.
-  That is what lets one bundle serve two roles:
-  \itemize{
-    \item to \code{\link{QtlDataset}} it is a \emph{specification}, and
-      an unset field takes that constructor's own default --- \code{0} for
-      each cutoff, \code{character(0)} for each \code{keep}, \code{TRUE}
-      for \code{keepIndel}.
-    \item to a pipeline it is an \emph{override}, and an unset field
-      leaves the dataset's construct-time value alone.
-  }
-  So \code{GenotypeFilterParam(mafCutoff = 0)} and
-  \code{GenotypeFilterParam()} differ: the first pins the cutoff at zero,
-  the second defers. \code{\link{PanelFilterParam}} needs no such
-  distinction and keeps ordinary defaults.
+  Every field defaults to \code{NULL}, meaning \strong{not set}: an unset
+  field is absent from the result rather than carried as \code{NULL}, and
+  takes its default when the run resolves the bundle --- \code{0} for
+  each cutoff, no restriction for each \code{keep}, \code{TRUE} for
+  \code{keepIndel}. So \code{GenotypeFilterParam()} filters nothing.
 }
 
 \examples{

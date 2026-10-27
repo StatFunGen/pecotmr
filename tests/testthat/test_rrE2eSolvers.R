@@ -3,10 +3,10 @@ context("regularized_regression - end-to-end solver verification")
 # ---- end-to-end solver verification ----
 # These tests mock the *external-package* solver and assert that the
 # user-facing wrapper forwards the correct dispatch parameter all the way
-# through the helper hop. This is the same pattern as the BGLR test at L1100,
-# applied to every method. Together with the dispatch verification tests
-# above, this gives full coverage of the parameter-passing chain
-# wrapper -> helper -> solver.
+# through the helper hop. This is the same pattern as the BGLR probIn test in
+# test_rrBglr.R, applied to every method. Together with the dispatch
+# verification tests in test_rrDispatch.R, this covers the parameter-passing
+# chain wrapper -> helper -> solver.
 #
 # Two patterns are used:
 #  - For solvers whose results are consumed via direct field access (BGLR,
@@ -15,7 +15,7 @@ context("regularized_regression - end-to-end solver verification")
 #    ncvreg, L0Learn), faking the result is awkward, so the mock captures
 #    the parameter and then raises a sentinel error that the test catches.
 
-test_that("glmnetWeights forwards alpha to glmnet::cv.glmnet", {
+test_that("lassoWeights / enetWeights forward alpha to glmnet::cv.glmnet", {
     skip_if_not_installed("glmnet")
     set.seed(42)
     X <- matrix(rnorm(50), nrow = 10)
@@ -35,7 +35,7 @@ test_that("glmnetWeights forwards alpha to glmnet::cv.glmnet", {
     expect_equal(captured$alpha, 0.5)
 })
 
-test_that("ncvreg_weights forwards penalty to ncvreg::cv.ncvreg", {
+test_that("scadWeights / mcpWeights forward penalty and nfolds to cv.ncvreg", {
     skip_if_not_installed("ncvreg")
     set.seed(42)
     X <- matrix(rnorm(50), nrow = 10)

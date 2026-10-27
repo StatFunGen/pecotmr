@@ -198,11 +198,11 @@ test_that(".tupleSelectRowGwasFmr: missing selectors on multi-row errors", {
     )
     expect_error(
         pecotmr:::.tupleSelectRowGwasFmr(multi),
-        "Pass `study` and `method`"
+        "Pass `studyName` and `method`"
     )
 })
 
-test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
+test_that(".tupleSelectRowGwasFmr: non-scalar blockId errors", {
     multi <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
@@ -214,14 +214,14 @@ test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
             multi,
             studyName = "g1",
             method = "susie",
-            region = c("r1", "r2")
+            blockId = c("r1", "r2")
         ),
-        "region.*Must have length 1"
+        "blockId.*Must have length 1"
     )
 })
 
-test_that(".tupleSelectRowGwasFmr: region disambiguates per-block rows", {
-    # Same (study, method) across two regions; region picks the right row.
+test_that(".tupleSelectRowGwasFmr: blockId disambiguates per-block rows", {
+    # Same (study, method) across two blocks; blockId picks the right row.
     multi <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
@@ -233,13 +233,13 @@ test_that(".tupleSelectRowGwasFmr: region disambiguates per-block rows", {
             multi,
             studyName = "g1",
             method = "susie",
-            region = "chr22_500_600"
+            blockId = "chr22_500_600"
         ),
         2L
     )
 })
 
-test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in message", {
+test_that(".tupleSelectRowGwasFmr: a missing tuple's error names its blockId", {
     one <- .ts_coll(
         study = "g1",
         method = "susie",
@@ -251,13 +251,13 @@ test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in m
             one,
             studyName = "g1",
             method = "susie",
-            region = "ghost"
+            blockId = "ghost"
         ),
-        "region='ghost'"
+        "blockId='ghost'"
     )
 })
 
-test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candidates", {
+test_that(".tupleSelectRowGwasFmr: ambiguous multi-match lists the blocks", {
     # Two rows share (study, method); .tupleSelectRowGwasFmr should error
     # listing the available blockIds since the caller didn't disambiguate.
     multi <- .ts_coll(
@@ -272,7 +272,7 @@ test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candi
             studyName = "g1",
             method = "susie"
         ),
-        "pass `region` to disambiguate"
+        "pass `blockId` to disambiguate"
     )
 })
 
@@ -315,14 +315,14 @@ test_that(".fmrRowsMatching: selectors on absent columns are ignored", {
     expect_equal(pecotmr:::.fmrRowsMatching(gwas, context = "c1"), c(1L, 2L))
 })
 
-test_that(".fmrRowsMatching: `region` matches the blockId column", {
+test_that(".fmrRowsMatching: `blockId` matches the blockId column", {
     gwas <- .ts_coll(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
         blockId = c("r1", "r2"),
         stringsAsFactors = FALSE
     )
-    expect_equal(pecotmr:::.fmrRowsMatching(gwas, region = "r2"), 2L)
+    expect_equal(pecotmr:::.fmrRowsMatching(gwas, blockId = "r2"), 2L)
 })
 
 test_that(".fmrRowsMatching: a vector selector matches any listed value", {
@@ -340,7 +340,7 @@ test_that(".fmrRowsMatching: a vector selector matches any listed value", {
 })
 
 # ===========================================================================
-# .fmrRowMetadata (stable 5-column identity frame)
+# .fmrRowMetadata (stable 8-column identity frame)
 # ===========================================================================
 
 test_that(".fmrRowMetadata: emits all eight identity columns, NA-filling absent ones", {
@@ -382,7 +382,7 @@ test_that(".fmrRowMetadata: GWAS frame NA-fills context/trait, keeps blockId", {
     expect_true(all(is.na(m$trait)))
 })
 
-test_that(".fmrRowMetadata: zero-row input yields a zero-row 5-column frame", {
+test_that(".fmrRowMetadata: zero-row input yields a zero-row 8-column frame", {
     empty <- .ts_coll(
         study = character(0),
         method = character(0),
@@ -452,11 +452,8 @@ test_that(".getRegionColumn: a zero-row collection yields an empty GRanges", {
 })
 
 test_that(".appendBlockIdCol: blockId must match the row count", {
-    # Replaces the old .appendRegionCol / .validateRegionColumn pair. The
-    # stored `region` GRanges column retired because it had no correct update
-    # rule under subsetRegion() -- it would simply go stale. blockId is a
-    # label keying the external block manifest, so subsetting cannot
-    # invalidate it.
+    # blockId is a label keying the external block manifest, so subsetting
+    # cannot invalidate it.
     expect_equal(pecotmr:::.appendBlockIdCol(list(), NULL, 2L), list())
     expect_equal(
         pecotmr:::.appendBlockIdCol(list(), c("b1", "b2"), 2L)$blockId,
@@ -466,15 +463,6 @@ test_that(".appendBlockIdCol: blockId must match the row count", {
         pecotmr:::.appendBlockIdCol(list(), "only_one", 2L),
         "same length as"
     )
-})
-
-test_that(".getRegionColumn derives the span rather than reading a column", {
-    # The one range concept is the intrinsic element range; there is no stored
-    # window to fall back to any more.
-    data(gwasFineMappingExample, envir = environment())
-    gr <- pecotmr:::.getRegionColumn(gwasFineMappingExample)
-    expect_s4_class(gr, "GRanges")
-    expect_length(gr, nrow(gwasFineMappingExample))
 })
 
 test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {
@@ -533,10 +521,10 @@ test_that("an exemplar column absent from every part is NULL", {
 # Combining collections: QC records and chromosome-path unions
 # ===========================================================================
 
-test_that("combining inputs that carry no QC record yields an empty audit", {
+test_that("combining inputs that carry no QC record yields no QC options", {
     # Empty, not a fabricated record: claiming QC that never ran would be
     # worse than reporting none.
-    expect_equal(pecotmr:::.ssCombineQcInfo(list(), "combineX"), list())
+    expect_equal(pecotmr:::.ssCombineQcOptions(list(), "combineX"), list())
 })
 
 test_that("chromosome paths union when they agree and abort when they clash", {
@@ -549,7 +537,7 @@ test_that("chromosome paths union when they agree and abort when they clash", {
             format = "plink2",
             snpInfo = data.frame(
                 SNP = "a",
-                CHR = "1",
+                CHR = "chr1",
                 BP = 1L,
                 A1 = "A",
                 A2 = "G",
@@ -675,7 +663,7 @@ test_that("a collection-level slot with no merge rule is refused", {
 })
 
 test_that(".twrRowResolveWeights drops rows whose weights are all NA", {
-    allNa <- twasWeightsRow(
+    allNa <- TwasWeightsRow(
         variantIds = c("chr1:1:A:G", "chr1:2:C:T"),
         weights = c(NA_real_, NA_real_)
     )
@@ -684,7 +672,7 @@ test_that(".twrRowResolveWeights drops rows whose weights are all NA", {
     expect_length(out$variantIds, 0L)
     expect_length(out$weights, 0L)
     # Control: a single usable weight is kept, and only that one.
-    partial <- twasWeightsRow(
+    partial <- TwasWeightsRow(
         variantIds = c("chr1:1:A:G", "chr1:2:C:T"),
         weights = c(NA_real_, 0.5)
     )
@@ -769,13 +757,13 @@ test_that("a region column must be a GRanges with one range per row", {
     )
 })
 
-test_that(".asAnalysisWindow normalizes strings, GRanges and multi-range input", {
+test_that(".asAnalysisWindow keeps a window and spans a multi-range one", {
     expect_null(.asAnalysisWindow(NULL))
     expect_null(.asAnalysisWindow(GenomicRanges::GRanges()))
-    expect_identical(
-        as.character(.asAnalysisWindow("chr1:100-200")),
-        as.character(GenomicRanges::GRanges("chr1:100-200"))
-    )
+    one <- GenomicRanges::GRanges("chr1:100-200")
+    expect_identical(.asAnalysisWindow(one), one)
+    # A window is a GRanges; a string is refused rather than read.
+    expect_error(.asAnalysisWindow("chr1:100-200"), "must be a GRanges")
     # A multi-range window collapses to the span it covered.
     span <- .asAnalysisWindow(GenomicRanges::GRanges(c(
         "chr1:100-200",
@@ -869,4 +857,583 @@ test_that("binding stores a mixture another part's covers as that one", {
         "probe"
     )
     expect_length(apart$refs, 2L)
+})
+
+# ===========================================================================
+# GWAS block ranges and the QTL variants past them
+# ===========================================================================
+
+# Ten GWAS variants at chr1:100-1000, 100 apart.
+.ts_gwasVariants <- function(pos = 100L * (1:10)) {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(pos, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", pos),
+        A1 = "A",
+        A2 = "G",
+        Z = 0,
+        N = 100L
+    )
+    gr
+}
+
+.ts_positions <- function(pos) {
+    GenomicRanges::GRanges("chr1", IRanges::IRanges(pos, width = 1L))
+}
+
+test_that(".rowSpanRanges spans each element, an empty one a placeholder", {
+    v <- .ts_gwasVariants()
+    spans <- pecotmr:::.rowSpanRanges(
+        GenomicRanges::GRangesList(v[1:3], v[0], v[5:10])
+    )
+    expect_identical(
+        as.character(spans),
+        c("chr1:100-300", "chrUn:1-0", "chr1:500-1000")
+    )
+    expect_identical(GenomicRanges::width(spans)[[2L]], 0L)
+})
+
+test_that(".asRegionRanges takes a GRanges, or reads a BED file as BED", {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(10L, 20L))
+    expect_identical(pecotmr:::.asRegionRanges(gr), gr)
+    # A BED file's start is 0-based, and its fourth column names a window.
+    path <- withr::local_tempfile(fileext = ".bed")
+    writeLines("chr1\t9\t20\tw1", path)
+    w <- pecotmr:::.asRegionRanges(path)
+    expect_identical(as.character(w), "chr1:10-20")
+    expect_identical(S4Vectors::mcols(w)$blockId, "w1")
+    # Given in R, a window is a GRanges: a table or a range string is
+    # refused rather than read, and a lone string is taken for a path.
+    table <- data.frame(chrom = "chr1", start = 9L, end = 20L)
+    expect_error(
+        pecotmr:::.asRegionRanges(table),
+        "must be a GRanges or the path of a BED file"
+    )
+    expect_error(
+        pecotmr:::.asRegionRanges(c("chr1:10-20", "chr2:5-8")),
+        "must be a GRanges or the path of a BED file"
+    )
+    expect_error(
+        pecotmr:::.asRegionRanges("chr1:10-20"),
+        "no file exists at 'chr1:10-20'"
+    )
+    expect_error(pecotmr:::.asRegionRanges(42), "must be a GRanges")
+})
+
+test_that(".assertRegionGRanges takes a GRanges and nothing else", {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(10L, 20L))
+    expect_identical(pecotmr:::.assertRegionGRanges(gr), gr)
+    expect_error(
+        pecotmr:::.assertRegionGRanges("chr1:10-20"),
+        "`region` must be a GRanges"
+    )
+})
+
+test_that(".rowRegionAt reads one row's window, or its span", {
+    v <- .ts_gwasVariants()
+    x <- GwasSumStats(
+        studyName = c("s", "s"),
+        entry = list(v[1:5], v[0L]),
+        genome = "hg19",
+        blockId = c("a", "b")
+    )
+    expect_identical(
+        as.character(pecotmr:::.rowRegionAt(x, 1L)),
+        "chr1:100-500"
+    )
+    # An empty row built empty has only a placeholder, so no window.
+    expect_null(pecotmr:::.rowRegionAt(x, 2L))
+    old <- x
+    old$region <- NULL
+    expect_identical(
+        as.character(pecotmr:::.rowRegionAt(old, 1L)),
+        "chr1:100-500"
+    )
+})
+
+test_that(".regionColumns keeps a given range and spans the rest", {
+    given <- GenomicRanges::GRanges(
+        c("chr1", "chrUn"),
+        IRanges::IRanges(1L, c(5000L, 0L))
+    )
+    spans <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, 300L))
+    cols <- pecotmr:::.regionColumns(given, c(TRUE, FALSE), rep(spans, 2L))
+    expect_identical(cols$regionGiven, c(TRUE, FALSE))
+    expect_identical(
+        as.character(cols$region),
+        c("chr1:1-5000", "chr1:100-300")
+    )
+    # A row with no variants keeps the range it was given.
+    empty <- pecotmr:::.regionColumns(
+        given[1L],
+        TRUE,
+        pecotmr:::.placeholderRanges(1L)
+    )
+    expect_true(empty$regionGiven)
+    expect_identical(as.character(empty$region), "chr1:1-5000")
+})
+
+test_that(".refuseUncontainedRegions wants a given range to hold its row", {
+    pieces <- GenomicRanges::GRangesList(
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(100L, 300L), width = 1L)
+        ),
+        GenomicRanges::GRanges(),
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(100L, 300L), width = 1L)
+        )
+    )
+    given <- function(chrom, start, end) {
+        GenomicRanges::GRanges(chrom, IRanges::IRanges(start, end))
+    }
+    refuse <- function(g, has = c(TRUE, TRUE, FALSE)) {
+        pecotmr:::.refuseUncontainedRegions(g, has, pieces, "f")
+    }
+    # Held; an empty row holds nothing, and a row given no range is not
+    # checked.
+    expect_null(refuse(given(c("chr1", "chr9", "chr9"), 50L, 400L)))
+    expect_error(
+        refuse(given(c("chr1", "chr1", "chr1"), 150L, 400L)),
+        "row 1: range chr1:150-400, variants at chr1:100-300",
+        fixed = TRUE
+    )
+    # Another chromosome holds none of them.
+    expect_error(
+        refuse(given(c("chr2", "chr1", "chr1"), 1L, 5000L)),
+        "variants at chr1:100-300"
+    )
+    # A variant sits at its start, so an indel's width cannot carry it past
+    # the end of the block it starts in.
+    indel <- GenomicRanges::GRangesList(
+        GenomicRanges::GRanges("chr1", IRanges::IRanges(300L, 310L))
+    )
+    expect_null(pecotmr:::.refuseUncontainedRegions(
+        given("chr1", 1L, 305L),
+        TRUE,
+        indel,
+        "f"
+    ))
+})
+
+test_that(".rowRegions falls back to the span where no range is stored", {
+    x <- GwasSumStats(
+        studyName = "s",
+        entry = list(.ts_gwasVariants()),
+        genome = "hg19",
+        region = GenomicRanges::GRanges("chr1:1-5000")
+    )
+    r <- pecotmr:::.rowRegions(x)
+    expect_identical(as.character(r$region), "chr1:1-5000")
+    expect_true(r$regionGiven)
+    # Saved before the columns existed: the span, computed.
+    old <- x
+    old$region <- NULL
+    old$regionGiven <- NULL
+    r <- pecotmr:::.rowRegions(old)
+    expect_identical(as.character(r$region), "chr1:100-1000")
+    expect_false(r$regionGiven)
+    # A range without its origin is not taken as given.
+    noOrigin <- x
+    noOrigin$regionGiven <- NULL
+    expect_false(pecotmr:::.rowRegions(noOrigin)$regionGiven)
+    # A placeholder a combine padded in falls back to the span as well.
+    padded <- x
+    padded$region <- pecotmr:::.placeholderRanges(1L)
+    padded$regionGiven <- NA
+    r <- pecotmr:::.rowRegions(padded)
+    expect_identical(as.character(r$region), "chr1:100-1000")
+    expect_false(r$regionGiven)
+})
+
+test_that(".checkGwasBlockReach words what it finds", {
+    v <- .ts_gwasVariants()
+    computed <- GwasSumStats(
+        studyName = c("s", "s"),
+        entry = list(v[1:5], v[6:10]),
+        genome = "hg19",
+        blockId = c("bA", "bB")
+    )
+    # Two variants before the first block's span count against it.
+    expect_warning(
+        pecotmr:::.checkGwasBlockReach(
+            list(u = .ts_positions(c(10L, 20L, 100L))),
+            computed,
+            "f",
+            "units"
+        ),
+        "u: 2 variant(s) past the start of block bA (chr1:100-500) of GWAS",
+        fixed = TRUE
+    )
+    # Past five lines the rest are counted.
+    many <- set_names(
+        rep(list(.ts_positions(c(1000L, 1100L, 1200L))), 7L),
+        str_c("u", 1:7)
+    )
+    msg <- tryCatch(
+        pecotmr:::.checkGwasBlockReach(many, computed, "f", "units"),
+        warning = conditionMessage
+    )
+    expect_match(msg, "u5: 2 variant(s)", fixed = TRUE)
+    expect_match(msg, "... and 2 more.", fixed = TRUE)
+    expect_no_match(msg, "u6: ", fixed = TRUE)
+    # A fine-mapping result's fit is a study and a method, and its given
+    # window is checked strictly.
+    fmr <- GwasFineMappingResult(
+        studyName = "s",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3)),
+        region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 350L))
+    )
+    expect_error(
+        pecotmr:::.checkGwasBlockReach(
+            list(u = .ts_positions(c(200L, 400L))),
+            fmr,
+            "f",
+            "units"
+        ),
+        "u: 1 variant(s) past the end of block chr1_100_300 (chr1:1-350) of",
+        fixed = TRUE
+    )
+    # Nothing to check against, or with.
+    expect_null(
+        pecotmr:::.checkGwasBlockReach(list(), computed, "f", "units")
+    )
+    expect_null(
+        pecotmr:::.checkGwasBlockReach(
+            list(u = .ts_positions(100L)),
+            computed[0L],
+            "f",
+            "units"
+        )
+    )
+})
+
+# ===========================================================================
+# Fit coverage: what a narrowed row's stored fit still describes
+# ===========================================================================
+
+.ts_fitted <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+
+# A fine-mapping row whose fit was made on `.ts_fitted`, holding `keep` of
+# them.
+.ts_fitRow <- function(keep = seq_along(.ts_fitted)) {
+    pip <- c(0.5, 0.3, 0.2)
+    full <- FineMappingRow(
+        .ts_fitted,
+        list(pip = pip),
+        data.frame(variant_id = .ts_fitted, pip = pip)
+    )
+    methods::new(
+        "FineMappingRow",
+        variants = variants(full)[keep],
+        susieFit = susieFit(full),
+        fitVariants = .ts_fitted
+    )
+}
+
+# A collection of `n` rows, each fitted on `.ts_fitted` and narrowed to its
+# first two.
+.ts_narrowedCollection <- function(n) {
+    pip <- c(0.5, 0.3, 0.2)
+    row <- FineMappingRow(
+        .ts_fitted,
+        list(pip = pip),
+        data.frame(variant_id = .ts_fitted, pip = pip)
+    )
+    x <- QtlFineMappingResult(
+        studyName = sprintf("s%d", seq_len(n)),
+        context = rep("c1", n),
+        trait = rep("g1", n),
+        method = rep("susie", n),
+        entry = rep(list(row), n)
+    )
+    endoapply(x, utils::head, 2L)
+}
+
+test_that(".lostFitVariantCount counts the fit's variants a row lost", {
+    f <- pecotmr:::.lostFitVariantCount
+    expect_equal(f(.ts_fitted, .ts_fitted), 0L)
+    expect_equal(f(.ts_fitted, .ts_fitted[1:2]), 1L)
+    expect_equal(f(character(0), .ts_fitted), 0L)
+    # A variant held under its swapped alleles is still held.
+    expect_equal(f(.ts_fitted, c("chr1:100:G:A", .ts_fitted[2:3])), 0L)
+})
+
+test_that(".fitColumnOf finds each held variant's column in the fit", {
+    f <- pecotmr:::.fitColumnOf
+    expect_equal(f(.ts_fitted[c(3L, 1L)], .ts_fitted), c(3L, 1L))
+    # Allele-aware for a swapped id; NA for a variant the fit never had.
+    expect_equal(f(c("chr1:200:T:C", "chr1:900:A:G"), .ts_fitted), c(2L, NA))
+})
+
+test_that(".mdFitVariants reads a group's first row, nothing for old rows", {
+    md <- S4Vectors::DataFrame(
+        fitVariants = IRanges::CharacterList(list(c("a", "b"), c("a", "b")))
+    )
+    # Rows split from one entry repeat its fit and its variants alike.
+    expect_equal(pecotmr:::.mdFitVariants(md, c(1L, 2L)), c("a", "b"))
+    expect_equal(
+        pecotmr:::.mdFitVariants(S4Vectors::DataFrame(x = 1:2), 1L),
+        character(0)
+    )
+})
+
+test_that(".partsFitIds: the recorded ids, else the fit's, else the row's", {
+    expect_equal(pecotmr:::.partsFitIds(.ts_fitRow(1:2)), .ts_fitted)
+    unrecorded <- methods::new(
+        "FineMappingRow",
+        variants = variants(.ts_fitRow()),
+        susieFit = NULL
+    )
+    named <- matrix(0, 1L, 3L, dimnames = list(NULL, rev(.ts_fitted)))
+    expect_equal(pecotmr:::.partsFitIds(unrecorded, named), rev(.ts_fitted))
+    expect_equal(pecotmr:::.partsFitIds(unrecorded), .ts_fitted)
+})
+
+test_that("a row records fit variants only when it carries a fit", {
+    w <- c(0.1, 0.2, 0.3)
+    withCv <- TwasWeightsRow(.ts_fitted, w, cvResult = list(r2 = 0.5))
+    expect_equal(pecotmr:::.rowFitVariants(withCv), .ts_fitted)
+    # Weights alone are no fit payload, and topLoci alone no fit.
+    expect_equal(
+        pecotmr:::.rowFitVariants(TwasWeightsRow(.ts_fitted, w)),
+        character(0)
+    )
+    fitless <- FineMappingRow(
+        .ts_fitted,
+        NULL,
+        data.frame(variant_id = .ts_fitted, pip = c(0.5, 0.3, 0.2))
+    )
+    expect_equal(pecotmr:::.rowFitVariants(fitless), character(0))
+})
+
+test_that(".fitCoverageChecked warns about a narrowed row and returns it", {
+    narrowed <- .ts_fitRow(1:2)
+    expect_warning(
+        out <- pecotmr:::.fitCoverageChecked(narrowed, "f()"),
+        "f\\(\\): the stored fit was made with 3 variants, 1 of which"
+    )
+    expect_identical(out, narrowed)
+    cnd <- tryCatch(
+        pecotmr:::.fitCoverageChecked(narrowed, "f()"),
+        warning = identity
+    )
+    expect_s3_class(cnd, "pecotmrFitCoverage")
+    expect_no_warning(pecotmr:::.fitCoverageChecked(.ts_fitRow(), "f()"))
+})
+
+test_that(".fitCoverageCheckedRows names at most five narrowed rows", {
+    x <- .ts_narrowedCollection(6L)
+    cnd <- tryCatch(
+        pecotmr:::.fitCoverageCheckedRows(x, "f()"),
+        warning = identity
+    )
+    expect_s3_class(cnd, "pecotmrFitCoverage")
+    msg <- conditionMessage(cnd)
+    expect_match(msg, "f\\(\\): 6 row\\(s\\) hold fewer variants")
+    expect_equal(stringr::str_count(msg, "\\|c1\\|g1\\|susie"), 5L)
+    expect_invisible(suppressWarnings(
+        pecotmr:::.fitCoverageCheckedRows(x, "f()")
+    ))
+})
+
+test_that(".fitCoverageCheckedRows is silent without a record or rows", {
+    x <- .ts_narrowedCollection(1L)
+    expect_no_warning(pecotmr:::.fitCoverageCheckedRows(x[0], "f()"))
+    unrecorded <- x
+    unrecorded$fitVariants <- NULL
+    expect_no_warning(pecotmr:::.fitCoverageCheckedRows(unrecorded, "f()"))
+    # An optional input left out is nothing to check.
+    expect_no_warning(pecotmr:::.fitCoverageCheckedRows(NULL, "f()"))
+})
+
+# TWAS weights fitted on `.ts_fitted`, holding `keep` of them.
+.ts_weights <- function(keep = seq_along(.ts_fitted)) {
+    tw <- TwasWeights(
+        studyName = "w1",
+        context = "c1",
+        trait = "g1",
+        method = "lasso",
+        entry = list(
+            TwasWeightsRow(.ts_fitted, c(0.1, 0.2, 0.3), cvResult = list())
+        )
+    )
+    endoapply(tw, `[`, keep)
+}
+
+test_that(".narrowedRowLabels labels the narrowed rows and no others", {
+    labels <- pecotmr:::.narrowedRowLabels(.ts_narrowedCollection(2L))
+    expect_length(labels, 2L)
+    expect_match(labels, "^s[12]\\|c1\\|g1\\|susie")
+    expect_identical(pecotmr:::.narrowedRowLabels(.ts_weights()), character(0))
+    expect_identical(
+        pecotmr:::.narrowedRowLabels(.ts_weights(1:2)),
+        pecotmr:::.pubRowLabels(.ts_weights(1:2), 1L)
+    )
+})
+
+test_that(".fitCoverageCheckedAll names every input's narrowed rows at once", {
+    fm <- .ts_narrowedCollection(2L)
+    cnd <- tryCatch(
+        pecotmr:::.fitCoverageCheckedAll(
+            list(NULL, fm, .ts_weights(1:2)),
+            "f()"
+        ),
+        warning = identity
+    )
+    expect_s3_class(cnd, "pecotmrFitCoverage")
+    expect_match(conditionMessage(cnd), "f\\(\\): 3 row\\(s\\) hold fewer")
+    expect_match(conditionMessage(cnd), "w1\\|c1\\|g1\\|lasso")
+    expect_null(suppressWarnings(
+        pecotmr:::.fitCoverageCheckedAll(list(fm), "f()")
+    ))
+    expect_no_warning(
+        pecotmr:::.fitCoverageCheckedAll(list(NULL, .ts_weights()), "f()")
+    )
+    # Anything but a collection is left to its caller's own validation.
+    expect_identical(
+        pecotmr:::.narrowedRowLabels(data.frame(a = 1)),
+        character(0)
+    )
+})
+
+test_that("the joint warning's hint is that of the first narrowed input", {
+    fm <- .ts_narrowedCollection(1L)
+    weightsFirst <- tryCatch(
+        pecotmr:::.fitCoverageCheckedAll(list(.ts_weights(1:2), fm), "f()"),
+        warning = identity
+    )
+    expect_match(conditionMessage(weightsFirst), "Refit on the variants kept")
+    expect_false(str_detect(
+        conditionMessage(weightsFirst),
+        "intersectVariants"
+    ))
+    # An input with nothing narrowed does not choose the hint.
+    fmFirst <- tryCatch(
+        pecotmr:::.fitCoverageCheckedAll(list(.ts_weights(), fm), "f()"),
+        warning = identity
+    )
+    expect_match(conditionMessage(fmFirst), "intersectVariants")
+})
+
+test_that(".muffleFitCoverage muffles fit-coverage warnings and no others", {
+    expect_no_warning(
+        out <- pecotmr:::.muffleFitCoverage({
+            warn("narrowed", class = "pecotmrFitCoverage")
+            "value"
+        })
+    )
+    expect_equal(out, "value")
+    expect_warning(pecotmr:::.muffleFitCoverage(warn("other")), "other")
+})
+
+test_that("the coverage hint names intersectVariants() only where it applies", {
+    expect_match(
+        pecotmr:::.fitCoverageHint(.ts_fitRow()),
+        "intersectVariants\\(\\) restricts a fit"
+    )
+    expect_match(
+        pecotmr:::.fitCoverageHint(.ts_narrowedCollection(1L)),
+        "intersectVariants"
+    )
+    weightsHint <- pecotmr:::.fitCoverageHint(
+        TwasWeightsRow(.ts_fitted, c(0.1, 0.2, 0.3))
+    )
+    expect_false(str_detect(weightsHint, "intersectVariants"))
+    expect_match(weightsHint, "Refit on the variants kept")
+})
+
+test_that(".naLikeColumn pads a list column with empty entries of its kind", {
+    cl <- pecotmr:::.naLikeColumn(IRanges::CharacterList("a"), 2L)
+    expect_s4_class(cl, "CharacterList")
+    expect_equal(unname(lengths(cl)), c(0L, 0L))
+    sl <- pecotmr:::.naLikeColumn(S4Vectors::SimpleList(list(1)), 2L)
+    expect_s4_class(sl, "SimpleList")
+    expect_length(sl, 2L)
+    expect_null(sl[[1L]])
+})
+
+test_that("binding a collection saved before fitVariants pads the column", {
+    x <- .ts_narrowedCollection(2L)
+    old <- x[1L]
+    old$fitVariants <- NULL
+    out <- pecotmr:::.rbindCollections(list(old, x[2L]))
+    expect_s4_class(out$fitVariants, "CharacterList")
+    expect_equal(unname(lengths(out$fitVariants)), c(0L, 3L))
+})
+
+# ===========================================================================
+# .fmrRowTopLoci
+# ===========================================================================
+
+test_that(".fmrRowTopLoci() tables convert to ranges", {
+    tl <- data.frame(
+        variant_id = c("1:100:A:G", "1:200:C:T"),
+        pip = c(0.9, 0.1),
+        betahat = c(0.5, -0.2),
+        sebetahat = c(0.1, 0.2),
+        cs = c(1L, 0L),
+        method = "susie",
+        stringsAsFactors = FALSE
+    )
+    ent <- FineMappingRow(
+        variantIds = tl$variant_id,
+        susieFit = list(),
+        topLoci = tl
+    )
+    # .fmrRowTopLoci() is the per-row table; topLoci() converts once, after
+    # the aggregate view has stacked the rows, so the conversion is tested
+    # through the converter it now lives in.
+    out <- .fmrRowTopLoci(ent)
+    expect_s3_class(out, "data.frame")
+    gr <- pecotmr:::.variantTableGRanges(out)
+    expect_s4_class(gr, "GRanges")
+    expect_equal(length(gr), 2)
+    expect_equal(S4Vectors::mcols(gr)$pip, c(0.9, 0.1))
+})
+
+test_that(".fmrRowTopLoci() empty input converts to empty ranges", {
+    ent <- FineMappingRow(
+        variantIds = character(0),
+        susieFit = list(),
+        topLoci = data.frame()
+    )
+    gr <- pecotmr:::.variantTableGRanges(.fmrRowTopLoci(ent))
+    expect_s4_class(gr, "GRanges")
+    expect_equal(length(gr), 0)
+})
+
+test_that(".fmrRowTopLoci(raw = TRUE) returns the stored table verbatim", {
+    vids <- paste0("chr1:", 1:4, ":A:G")
+    entry <- .makeAdjustEntry(vids)
+    raw <- .fmrRowTopLoci(entry, raw = TRUE)
+    expect_equal(nrow(raw), length(vids))
+    expect_true(all(c("betahat", "sebetahat") %in% names(raw)))
+    # The default view filters by pip and projects; raw does neither.
+    expect_false(identical(names(raw), names(.fmrRowTopLoci(entry))))
+})
+
+test_that("topLoci surfaces the mvsusie lfsr through the projector", {
+    tl <- data.frame(
+        variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+        chrom = "1",
+        pos = c(100L, 200L),
+        A1 = c("A", "C"),
+        A2 = c("G", "T"),
+        pip = c(0.6, 0.4),
+        posterior_mean = c(0.1, 0.2),
+        posterior_sd = c(0.05, 0.05),
+        cs_95 = c("mvsusie_1", "mvsusie_1"),
+        lfsr = c(0.001, 0.02),
+        stringsAsFactors = FALSE
+    )
+    e <- FineMappingRow(
+        variantIds = tl$variant_id,
+        susieFit = list(pip = tl$pip),
+        topLoci = tl
+    )
+    out <- .fmrRowTopLoci(e, signalCutoff = 0)
+    expect_true(is_in("lfsr", names(out)))
+    expect_equal(out$lfsr, c(0.001, 0.02))
 })

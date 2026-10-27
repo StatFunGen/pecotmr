@@ -67,27 +67,17 @@ test_that(".newMethodOptions merges defaults under extras, dropping NULLs", {
 })
 
 test_that(".newMethodOptions rejects a name the engine cannot accept", {
-    expect_error(
+    bad <- function() {
         pecotmr:::.newMethodOptions(
             "stats::var",
             defaults = list(),
             extra = list(naRM = TRUE),
             label = "varArgs"
-        ),
-        "unknown argument\\(s\\) naRM"
-    )
-})
-
-test_that(".newMethodOptions names the engine's accepted arguments in the error", {
-    expect_error(
-        pecotmr:::.newMethodOptions(
-            "stats::var",
-            defaults = list(),
-            extra = list(nope = 1),
-            label = "varArgs"
-        ),
-        "stats::var. accepts:.*na\\.rm"
-    )
+        )
+    }
+    expect_error(bad(), "unknown argument\\(s\\) naRM")
+    # The error names the arguments the engine does accept.
+    expect_error(bad(), "stats::var. accepts:.*na\\.rm")
 })
 
 test_that(".newMethodOptions skips validation when the engine takes dots", {

@@ -37,7 +37,7 @@
 #'   tidy list ready for downstream standardization. Hides the underlying file
 #'   formats; downstream code consumes only modeling quantities.
 #'
-#' @param prefix Character. Path prefix to the polyfun outputs for one
+#' @param path Character. Path prefix to the polyfun outputs for one
 #'   trait/run. The function appends `.results`, `.log`, and `.part_delete` to
 #'   this prefix. Example: `"/path/to/cwd/CAD_META.filtered.sumstats.gz"`.
 #'
@@ -55,8 +55,8 @@
 #' @importFrom vroom vroom
 #' @importFrom readr read_lines
 #' @export
-readSldscTrait <- function(prefix) {
-    files <- str_c(prefix, c(".results", ".log", ".part_delete"))
+readSldscTrait <- function(path) {
+    files <- str_c(path, c(".results", ".log", ".part_delete"))
     assertFileExists(files, access = "r", .var.name = "readSldscTrait input")
     results <- vroom(files[1], show_col_types = FALSE)
     cats <- as.character(results$Category)
@@ -133,7 +133,7 @@ readSldscTrait <- function(prefix) {
 #'   (\code{\link{computeSldscAnnotSd}}, \code{\link{isBinarySldscAnnot}}) then
 #'   runs on the loaded table, not on paths.
 #'
-#' @param targetAnnoDir Character. Directory of `.annot.gz` files.
+#' @param path Character. Directory of `.annot.gz` files.
 #' @param annotCols Character or integer vector, default NULL. Annotation
 #'   columns to keep. NULL keeps all non-standard columns (auto-detected).
 #' @return A \code{data.frame}: \code{CHR}, \code{SNP}, and annotation columns.
@@ -143,19 +143,19 @@ readSldscTrait <- function(prefix) {
 #' sldsc <- system.file("extdata", "sldsc", package = "pecotmr")
 #' readSldscAnnot(sldsc)
 #' @export
-readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
+readSldscAnnot <- function(path, annotCols = NULL) {
     assertDirectoryExists(
-        targetAnnoDir,
+        path,
         access = "r",
-        .var.name = "targetAnnoDir"
+        .var.name = "path"
     )
     annoFiles <- list.files(
-        targetAnnoDir,
+        path,
         pattern = "\\.annot\\.gz$",
         full.names = TRUE
     )
     if (length(annoFiles) == 0L) {
-        msg <- glue("readSldscAnnot: no .annot.gz files in: {targetAnnoDir}")
+        msg <- glue("readSldscAnnot: no .annot.gz files in: {path}")
         abort(msg)
     }
 
@@ -184,7 +184,7 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #'   \code{SNP}, \code{MAF}. Feeds the \code{frq} slot of
 #'   \code{\link{SldscData}}.
 #'
-#' @param frqfileDir Character. Directory of `.frq` files.
+#' @param path Character. Directory of `.frq` files.
 #' @param plinkName Character. Filename prefix (files at
 #'   `<plinkName><chr>.frq`). Falls back to all `*.frq` in the directory when
 #'   the prefix matches nothing.
@@ -195,8 +195,8 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #' sldsc <- system.file("extdata", "sldsc", package = "pecotmr")
 #' head(readSldscFrq(sldsc, plinkName = "reference."))
 #' @export
-readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
-    assertDirectoryExists(frqfileDir, access = "r", .var.name = "frqfileDir")
+readSldscFrq <- function(path, plinkName = "ADSP_chr") {
+    assertDirectoryExists(path, access = "r", .var.name = "path")
     pat <- str_c(
         "^",
         str_replace_all(plinkName, "([.])", "\\\\\\1"),
@@ -204,14 +204,14 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
     )
     # The per-chromosome pattern first; a directory holding a single
     # unnumbered .frq falls back to the bare extension.
-    matched <- list.files(frqfileDir, pattern = pat, full.names = TRUE)
+    matched <- list.files(path, pattern = pat, full.names = TRUE)
     frqFiles <- if (length(matched) > 0L) {
         matched
     } else {
-        list.files(frqfileDir, pattern = "\\.frq$", full.names = TRUE)
+        list.files(path, pattern = "\\.frq$", full.names = TRUE)
     }
     if (length(frqFiles) == 0L) {
-        msg <- glue("readSldscFrq: no .frq files in: {frqfileDir}")
+        msg <- glue("readSldscFrq: no .frq files in: {path}")
         abort(msg)
     }
 
@@ -267,8 +267,8 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 #' @export
 computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
     assertClass(sldscData, "SldscData")
-    annot <- annotData(sldscData)
-    frq <- frqData(sldscData)
+    annot <- .sdAnnot(sldscData)
+    frq <- .sdFrq(sldscData)
     if (mafCutoff > 0 && nrow(frq) == 0L) {
         msg <- glue(
             "computeSldscAnnotSd: mafCutoff = {mafCutoff} requires frq ",
@@ -391,7 +391,7 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 #' @export
 computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
     assertClass(sldscData, "SldscData")
-    frq <- frqData(sldscData)
+    frq <- .sdFrq(sldscData)
     if (nrow(frq) > 0L) {
         return(as.integer(
             if (mafCutoff > 0) {
@@ -408,7 +408,7 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
         )
         abort(msg)
     }
-    as.integer(nrow(annotData(sldscData)))
+    as.integer(nrow(.sdAnnot(sldscData)))
 }
 
 
@@ -453,7 +453,7 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
 #' @export
 isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
     assertClass(sldscData, "SldscData")
-    annot <- annotData(sldscData)
+    annot <- .sdAnnot(sldscData)
     colsUse <- if (is.null(annotCols)) {
         annotCols(sldscData)
     } else if (is.numeric(annotCols)) {
@@ -585,7 +585,7 @@ standardizeSldscTrait <- function(
 # Fetch the requested trait's single/joint run (error when absent).
 # @noRd
 .stdTraitRun <- function(sldscData, trait, mode, idx) {
-    traitData <- sldscResults(sldscData, trait, mode, idx)
+    traitData <- .sldscRun(sldscData, trait, mode, idx)
     if (is.null(traitData)) {
         idxNote <- if (!is.null(idx)) glue(" (idx={idx})") else ""
         msg <- glue(

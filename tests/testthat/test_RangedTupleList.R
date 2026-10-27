@@ -7,7 +7,11 @@
 setClass(
     "RtlTestKid",
     contains = "RangedTupleList",
-    representation(genome = "character", ldReference = "ANY", qcInfo = "list")
+    representation(
+        genome = "character",
+        ldReference = "ANY",
+        qcOptions = "list"
+    )
 )
 
 .rtl_mk <- function(chr, pos, strand = "*") {
@@ -28,7 +32,7 @@ setClass(
         ),
         genome = "hg38",
         ldReference = "SKETCH",
-        qcInfo = list(step1 = "ok")
+        qcOptions = list(step1 = "ok")
     )
     S4Vectors::mcols(x) <- S4Vectors::DataFrame(
         study = c("s1", "s2", "s3"),
@@ -57,7 +61,7 @@ test_that("ncol is zero when the collection has no mcols", {
         GenomicRanges::GRangesList(a = .rtl_mk("chr1", 1:2)),
         genome = "hg38",
         ldReference = NULL,
-        qcInfo = list()
+        qcOptions = list()
     )
     expect_equal(ncol(bare), 0L)
     expect_equal(nrow(bare), 1L)
@@ -88,7 +92,7 @@ test_that("$<- works on a collection that had no mcols at all", {
         GenomicRanges::GRangesList(a = .rtl_mk("chr1", 1:2)),
         genome = "hg38",
         ldReference = NULL,
-        qcInfo = list()
+        qcOptions = list()
     )
     bare$study <- "s1"
     expect_equal(bare$study, "s1")
@@ -133,7 +137,7 @@ test_that("validity rejects an element spanning two seqnames", {
             GenomicRanges::GRangesList(a = .rtl_mk(c("chr1", "chr2"), c(1, 2))),
             genome = "hg38",
             ldReference = NULL,
-            qcInfo = list()
+            qcOptions = list()
         ),
         "span more than one"
     )
@@ -150,7 +154,7 @@ test_that("validity rejects an element spanning two strands", {
             ),
             genome = "hg38",
             ldReference = NULL,
-            qcInfo = list()
+            qcOptions = list()
         ),
         "span more than one"
     )
@@ -164,7 +168,7 @@ test_that("validity accepts a stranded element as long as it is consistent", {
         ),
         genome = "hg38",
         ldReference = NULL,
-        qcInfo = list()
+        qcOptions = list()
     )
     expect_equal(length(x), 1L)
     expect_equal(length(range(x)[[1L]]), 1L)
@@ -176,7 +180,7 @@ test_that("an empty collection is valid", {
         GenomicRanges::GRangesList(),
         genome = "hg38",
         ldReference = NULL,
-        qcInfo = list()
+        qcOptions = list()
     )
     expect_equal(length(empty), 0L)
     expect_equal(nrow(empty), 0L)
@@ -193,7 +197,7 @@ test_that(".rtlRebuild carries every subclass slot across a rebuild", {
     x <- .rtl_makeKid()
     expect_setequal(
         pecotmr:::.rtlOwnSlots(x),
-        c("genome", "ldReference", "qcInfo")
+        c("genome", "ldReference", "qcOptions")
     )
     out <- pecotmr:::.rtlRebuild(
         x,
@@ -203,7 +207,7 @@ test_that(".rtlRebuild carries every subclass slot across a rebuild", {
     expect_s4_class(out, "RtlTestKid")
     expect_equal(out@genome, "hg38")
     expect_equal(out@ldReference, "SKETCH")
-    expect_equal(out@qcInfo, list(step1 = "ok"))
+    expect_equal(out@qcOptions, list(step1 = "ok"))
     expect_equal(out$study, c("s1", "s3"))
     expect_equal(unname(lengths(out)), c(1L, 1L))
 })
@@ -238,52 +242,24 @@ test_that("endoapply rejects a FUN that stops returning GRanges", {
 })
 
 # ===========================================================================
-# subsetRegion
+# Narrowing by range with the standard verbs
 # ===========================================================================
 
-test_that("subsetRegion selects, trims, and drops emptied elements", {
-    x <- .rtl_makeKid()
-    out <- subsetRegion(
-        x,
-        GenomicRanges::GRanges(
-            "chr1",
-            IRanges::IRanges(150, 1050)
-        )
-    )
-    # a: 200,300 kept (100 trimmed away); b: 1000 kept; c: chr2, dropped.
-    expect_equal(length(out), 2L)
-    expect_equal(names(out), c("a", "b"))
-    expect_equal(unname(lengths(out)), c(2L, 1L))
-    expect_equal(out$study, c("s1", "s2"))
-    expect_equal(out@genome, "hg38")
-})
-
-test_that("subsetRegion accepts a chr:start-end string", {
-    x <- .rtl_makeKid()
-    out <- subsetRegion(x, "chr2:40-70")
-    expect_equal(length(out), 1L)
-    expect_equal(names(out), "c")
-    expect_equal(out$study, "s3")
-})
-
-test_that("subsetRegion returns an empty collection when nothing overlaps", {
-    x <- .rtl_makeKid()
-    out <- subsetRegion(x, "chr9:1-100")
-    expect_s4_class(out, "RtlTestKid")
-    expect_equal(length(out), 0L)
-    expect_equal(out@genome, "hg38")
-})
-
-test_that("subsetRegion differs from subsetByOverlaps and restrict", {
-    # The three operations are genuinely distinct and all three are useful.
+test_that("the standard verbs narrow a collection by range", {
+    # subsetByOverlaps() keeps the elements that overlap, whole; endoapply()
+    # over it trims each element to the window and keeps the class and its
+    # collection-level slots.
     x <- .rtl_makeKid()
     win <- GenomicRanges::GRanges("chr1", IRanges::IRanges(150, 1050))
     byOverlaps <- IRanges::subsetByOverlaps(x, win)
-    trimmed <- subsetRegion(x, win)
-    # subsetByOverlaps keeps matching elements WHOLE (a still has 3 variants).
+    expect_s4_class(byOverlaps, "RtlTestKid")
     expect_equal(unname(lengths(byOverlaps)), c(3L, 2L))
-    # subsetRegion trims them (a keeps 2, b keeps 1).
-    expect_equal(unname(lengths(trimmed)), c(2L, 1L))
+    trimmed <- endoapply(x, IRanges::subsetByOverlaps, ranges = win)
+    expect_s4_class(trimmed, "RtlTestKid")
+    # a keeps 200 and 300, b keeps 1000, c (chr2) is left empty.
+    expect_equal(unname(lengths(trimmed)), c(2L, 1L, 0L))
+    expect_equal(trimmed@genome, "hg38")
+    expect_equal(unname(lengths(trimmed[lengths(trimmed) > 0L])), c(2L, 1L))
 })
 
 
@@ -313,6 +289,11 @@ test_that(".rtlSplitByBlocks splits one element into per-block pieces", {
     # `outer.inner` mangling was an artifact, and inconsistent at that).
     expect_null(names(r$entry))
     expect_equal(r$blockId, c("b1", "b2"))
+    # Each piece carries its block's interval as well as its key.
+    expect_identical(
+        as.character(r$blockRange),
+        c("chr1:1-500", "chr1:800-1200")
+    )
     expect_equal(unname(lengths(r$entry)), c(2L, 1L))
     # Both pieces came from the one input element, so its metadata row is
     # replicated twice.
@@ -391,6 +372,7 @@ test_that(".rtlSplitByBlocks handles an empty entry list", {
     expect_length(r$entry, 0L)
     expect_length(r$fromIdx, 0L)
     expect_length(r$blockId, 0L)
+    expect_length(r$blockRange, 0L)
 })
 
 test_that(".rtlSplitByBlocks rejects a non-GRanges element", {
@@ -420,7 +402,7 @@ test_that("[[<- replaces an element and keeps class, slots and mcols", {
     # The collection-level slots are exactly what the setAs route would drop.
     expect_equal(x@genome, "hg38")
     expect_equal(x@ldReference, "SKETCH")
-    expect_equal(x@qcInfo, list(step1 = "ok"))
+    expect_equal(x@qcOptions, list(step1 = "ok"))
 })
 
 test_that("[[<- leaves the other elements untouched", {
@@ -514,6 +496,7 @@ test_that(".rtlGatherElements matches unlist(x[idx]) for every index shape", {
     x <- .rtl_makeKid()
     slow <- function(idx) unlist(x[idx], use.names = FALSE)
     expect_identical(.rtlGatherElements(x, 1L), slow(1L))
+    expect_identical(.rtlGatherElements(x, 2L), x[[2]])
     expect_identical(.rtlGatherElements(x, c(1L, 3L)), slow(c(1L, 3L)))
     expect_identical(
         .rtlGatherElements(x, seq_len(length(x))),
@@ -557,13 +540,6 @@ test_that(".rtlGatherElements keeps the elements' inner mcols", {
     got <- .rtlGatherElements(kid, c(1L, 2L))
     expect_true(is_in("score", colnames(mcols(got))))
     expect_identical(got, unlist(kid[c(1L, 2L)], use.names = FALSE))
-})
-
-test_that(".rtlGatherElements does not re-validate the collection", {
-    # Nothing here reconstructs the subclass, so a collection whose validity
-    # would be expensive is not paying for it on every element read.
-    x <- .rtl_makeKid()
-    expect_identical(.rtlGatherElements(x, 2L), x[[2]])
 })
 
 
@@ -700,10 +676,9 @@ test_that("nestTupleRanges validates its arguments", {
 # ---------------------------------------------------------------------------
 # plyranges / dplyr verbs.
 #
-# These call the methods directly rather than through the generic: dispatch
-# needs the S3method() entries a roxygen regen writes, and the logic under test
-# is the same either way. The final test checks dispatch itself, and skips
-# until the registration exists.
+# These call the methods directly rather than through the generic; the logic
+# under test is the same either way. The final test checks dispatch through
+# the dplyr generics, which the NAMESPACE's S3method() entries provide.
 # ---------------------------------------------------------------------------
 
 # @noRd
@@ -778,18 +753,9 @@ test_that("group_by returns plyranges' own grouped representation", {
 
 
 test_that("the verbs are reachable through the dplyr generics", {
-    # Needs the S3method() entries from a roxygen regen; skips until then.
-    # Probed by attempting dispatch rather than by looking the function up:
+    # Checked by dispatching rather than by looking the function up:
     # getS3method() finds it in the namespace whether or not it is registered.
     mc <- .trv_mc()
-    dispatches <- tryCatch(
-        {
-            dplyr::filter(mc, Z > 2)
-            TRUE
-        },
-        error = function(e) FALSE
-    )
-    skip_if_not(dispatches, "S3 methods not yet registered (regen pending)")
     expect_s4_class(dplyr::filter(mc, Z > 2), "QtlSumStats")
     expect_s4_class(dplyr::slice(mc, 1:2), "QtlSumStats")
 })
@@ -834,6 +800,130 @@ test_that("range keys of an empty collection are empty", {
     )
 })
 
+test_that("range keys and seqnames are read per element, NA when empty", {
+    grl <- GenomicRanges::GRangesList(
+        a = .rtl_mk("chr1", c(100, 300)),
+        b = GenomicRanges::GRanges(),
+        c = .rtl_mk("chr2", c(50, 60))
+    )
+    keys <- pecotmr:::.rtlRangeKeys(grl)
+    expect_identical(keys, c("chr1_100_300", NA, "chr2_50_60"))
+    # One formatter keys a single GRanges' span the same way.
+    expect_identical(
+        pecotmr:::.rtlOneRangeKey(range(grl[["a"]])),
+        keys[[1L]]
+    )
+    expect_identical(
+        pecotmr:::.rtlElementSeqnames(grl),
+        c("chr1", NA, "chr2")
+    )
+})
+
+test_that("elements bind into the object GRangesList() builds", {
+    # Plain elements are joined from their vectors; the result must be the
+    # very object GRangesList() makes, names and seqinfo included.
+    data(
+        qtlFineMappingExample,
+        qtlSumStatsMulticontextExample,
+        envir = environment()
+    )
+    named <- .rtl_mk("chr1", c(5, 9))
+    names(named) <- c("v1", "v2")
+    stranded <- .rtl_mk("chr3", 7, strand = "+")
+    GenomeInfoDb::genome(stranded) <- "hg38"
+    namedColumn <- .rtl_mk("chr1", c(1, 2))
+    S4Vectors::mcols(namedColumn)$x <- c(p = 0.1, q = 0.2)
+    plainColumn <- .rtl_mk("chr2", 3)
+    S4Vectors::mcols(plainColumn)$x <- 0.3
+    cases <- list(
+        columnNames = list(namedColumn, plainColumn),
+        fineMapping = as.list(qtlFineMappingExample),
+        sumStats = as.list(qtlSumStatsMulticontextExample),
+        withEmpty = list(
+            .rtl_mk("chr1", 1),
+            GenomicRanges::GRanges(),
+            .rtl_mk("chr2", 2)
+        ),
+        mixed = list(named, stranded, .rtl_mk("chr1", 3)),
+        outerNames = list(a = .rtl_mk("chr1", 1), b = .rtl_mk("chr2", 2))
+    )
+    for (nm in names(cases)) {
+        # The bare join is the fast path; it reports the seqinfo merge
+        # warnings .rtlBindElements() silences, as GRangesList() does.
+        joined <- suppressWarnings(
+            pecotmr:::.rtlJoinPlainElements(cases[[nm]])
+        )
+        expect_false(is.null(joined), info = nm)
+        expect_identical(
+            pecotmr:::.rtlBindElements(cases[[nm]]),
+            GenomicRanges::GRangesList(cases[[nm]]),
+            info = nm
+        )
+    }
+})
+
+test_that("elements outside the plain case bind through GRangesList()", {
+    a <- .rtl_mk("chr1", 1)
+    S4Vectors::mcols(a)$x <- 1L
+    otherType <- .rtl_mk("chr2", 2)
+    S4Vectors::mcols(otherType)$x <- 2.5
+    otherColumn <- .rtl_mk("chr2", 3)
+    S4Vectors::mcols(otherColumn)$y <- "z"
+    matrixColumn <- .rtl_mk("chr2", 4)
+    S4Vectors::mcols(matrixColumn)$x <- matrix(1:2, nrow = 1L)
+    withMetadata <- a
+    S4Vectors::metadata(withMetadata) <- list(source = "test")
+    cases <- list(
+        list(a, otherType),
+        list(a, otherColumn),
+        list(matrixColumn, matrixColumn),
+        list(withMetadata, a),
+        list()
+    )
+    for (els in cases) {
+        expect_null(pecotmr:::.rtlJoinPlainElements(els))
+        expect_identical(
+            pecotmr:::.rtlBindElements(els),
+            GenomicRanges::GRangesList(els)
+        )
+    }
+})
+
+test_that("collections join into the GRangesList of their elements", {
+    data(qtlSumStatsMulticontextExample, envir = environment())
+    x <- qtlSumStatsMulticontextExample
+    parts <- list(x[1L], x[2:3])
+    expect_identical(
+        pecotmr:::.rtlJoinParts(parts),
+        GenomicRanges::GRangesList(c(as.list(parts[[1L]]), as.list(x[2:3])))
+    )
+})
+
+test_that("joining elements on different chromosomes says nothing", {
+    # Merging their seqinfo warns that the two share no seqlevel, which
+    # GRangesList() keeps quiet, and so do both joins.
+    a <- GenomicRanges::GRangesList(a = .rtl_mk("chr1", 1))
+    b <- GenomicRanges::GRangesList(b = .rtl_mk("chr2", 2))
+    expect_silent(joined <- pecotmr:::.rtlJoinParts(list(a, b)))
+    expect_identical(
+        joined,
+        GenomicRanges::GRangesList(c(as.list(a), as.list(b)))
+    )
+    elements <- list(.rtl_mk("chr1", 1), .rtl_mk("chr2", 2))
+    expect_silent(bound <- pecotmr:::.rtlBindElements(elements))
+    expect_identical(bound, GenomicRanges::GRangesList(elements))
+})
+
+test_that("a variant column is found on all elements or none", {
+    x <- .rtl_makeKid()
+    expect_false(pecotmr:::.rtlHasVariantColumn(x, "pip"))
+    withPip <- GenomicRanges::GRangesList(
+        a = GenomicRanges::GRanges("chr1:1-2", pip = 0.5),
+        b = GenomicRanges::GRanges("chr1:5-6", pip = 0.1)
+    )
+    expect_true(pecotmr:::.rtlHasVariantColumn(withPip, "pip"))
+})
+
 test_that("seqinfo is left alone when the source carries none", {
     # Nothing to restore from, so the rebuild is returned untouched.
     empty <- new(
@@ -841,7 +931,7 @@ test_that("seqinfo is left alone when the source carries none", {
         GenomicRanges::GRangesList(),
         genome = "hg38",
         ldReference = NULL,
-        qcInfo = list()
+        qcOptions = list()
     )
     grl <- GenomicRanges::GRangesList(
         a = GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
@@ -889,7 +979,7 @@ test_that("blockId reads the recorded value, not the variants' span", {
         variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
         pip = c(0.9, 0.1)
     )
-    row <- fineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
+    row <- FineMappingRow(tl$variant_id, susieFit = list(), topLoci = tl)
     res <- GwasFineMappingResult(
         studyName = "s",
         method = "susie",
@@ -944,4 +1034,171 @@ test_that("updateObject leaves a current collection as it is", {
         updateObject(qtlSumStatsExample, verbose = TRUE),
         "updateObject\\(object = 'QtlSumStats'\\)"
     )
+})
+
+# ===========================================================================
+# Coercion, sort / unique / trim, rebuilt names, and split tuples
+# ===========================================================================
+
+test_that("as(x, 'GRanges') flattens a collection", {
+    data(qtlFineMappingExample)
+    expect_identical(
+        as(qtlFineMappingExample, "GRanges"),
+        flattenTupleRanges(qtlFineMappingExample)
+    )
+})
+
+test_that("sort, unique and trim return the collection's own class", {
+    data(qtlSumStatsMulticontextExample)
+    x <- qtlSumStatsMulticontextExample
+    # Each element is sorted on its own; the collection keeps its slots and
+    # its names.
+    s <- sort(endoapply(x, rev))
+    expect_s4_class(s, "QtlSumStats")
+    expect_identical(GenomicRanges::start(s[[1L]]), sort(start(x[[1L]])))
+    expect_identical(ldReference(s), ldReference(x))
+    expect_identical(names(s), names(x))
+    expect_s4_class(unique(x), "QtlSumStats")
+    expect_identical(lengths(unique(x)), lengths(x))
+    expect_s4_class(trim(x), "QtlSumStats")
+})
+
+test_that("a rebuild names an unnamed collection from its tuples", {
+    data(qtlSumStatsMulticontextExample)
+    x <- qtlSumStatsMulticontextExample
+    unnamed <- `names<-`(x, NULL)
+    expect_null(names(unnamed))
+    expect_identical(names(endoapply(unnamed, identity)), names(x))
+})
+
+test_that("nestTupleRanges returns a split tuple's pieces to their own rows", {
+    # A fit-less entry on two chromosomes, given one blockId, splits into two
+    # rows sharing that whole identity; only the chromosome tells their
+    # ranges apart.
+    ids <- c("chr1:100:A:G", "chr1:200:A:G", "chr2:100:A:G")
+    tl <- data.frame(variant_id = ids, pip = c(0.5, 0.3, 0.2))
+    x <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(FineMappingRow(ids, susieFit = list(), topLoci = tl)),
+        blockId = "b1"
+    )
+    expect_identical(x$blockId, c("b1", "b1"))
+    expect_equal(nrow(x), 2L)
+    back <- nestTupleRanges(flattenTupleRanges(x), x)
+    expect_equal(unname(lengths(back)), c(2L, 1L))
+    expect_identical(
+        as.character(unlist(GenomicRanges::seqnames(back), use.names = FALSE)),
+        c("chr1", "chr1", "chr2")
+    )
+    # An emptied piece has no chromosome, and stays empty.
+    flat <- flattenTupleRanges(x)
+    kept <- flat[as.character(GenomicRanges::seqnames(flat)) == "chr1"]
+    expect_equal(unname(lengths(nestTupleRanges(kept, x))), c(2L, 0L))
+})
+
+# ===========================================================================
+# Identity columns are character; metadata; genomicRegion()
+# ===========================================================================
+
+test_that("an identity column must be character, and may hold NA", {
+    # A bare GRangesList takes any table; building the collection from it
+    # runs validity.
+    grl <- GenomicRanges::GRangesList(a = .rtl_mk("chr1", 1:2))
+    S4Vectors::mcols(grl)$study <- 1L
+    expect_error(
+        new(
+            "RtlTestKid",
+            grl,
+            genome = "hg38",
+            ldReference = NULL,
+            qcOptions = list()
+        ),
+        "the `study` column must be character \\(got integer\\)"
+    )
+    withNa <- .rtl_makeKid()
+    S4Vectors::mcols(withNa)$gwasContext <- c("c1", NA, "c3")
+    expect_true(validObject(withNa))
+})
+
+test_that("mcols<- and its older spellings refuse a wrong-typed identity", {
+    x <- .rtl_makeKid()
+    expect_error(
+        S4Vectors::mcols(x)$study <- 1:3,
+        "the `study` column must be character \\(got integer\\)"
+    )
+    expect_error(
+        S4Vectors::mcols(x) <- S4Vectors::DataFrame(blockId = c(1, 2, 3)),
+        "the `blockId` column must be character \\(got numeric\\)"
+    )
+    expect_error(
+        S4Vectors::values(x)$trait <- c(TRUE, FALSE, TRUE),
+        "the `trait` column must be character \\(got logical\\)"
+    )
+    expect_error(
+        S4Vectors::elementMetadata(x)$method <- factor(c("a", "b", "c")),
+        "the `method` column must be character \\(got factor\\)"
+    )
+    # The refused assignments left the collection as it was.
+    expect_identical(x, .rtl_makeKid())
+    # Character identity values, and any other column, are stored.
+    S4Vectors::mcols(x)$study <- c("a", "b", "c")
+    S4Vectors::mcols(x)$n <- c(1.5, 2.5, 3.5)
+    expect_equal(x$study, c("a", "b", "c"))
+    expect_equal(x$n, c(1.5, 2.5, 3.5))
+    expect_s4_class(x, "RtlTestKid")
+    # Dropping the table leaves no identity column to check.
+    S4Vectors::mcols(x) <- NULL
+    expect_equal(ncol(x), 0L)
+})
+
+test_that("the per-variant metadata level is passed through untouched", {
+    x <- .rtl_makeKid()
+    perVariant <- S4Vectors::splitAsList(
+        S4Vectors::DataFrame(score = seq_len(sum(lengths(x)))),
+        factor(rep(names(x), lengths(x)), levels = names(x))
+    )
+    S4Vectors::mcols(x, level = "within") <- perVariant
+    expect_equal(S4Vectors::mcols(x[[2L]])$score, 4:5)
+    expect_equal(x$study, c("s1", "s2", "s3"))
+})
+
+test_that("$<- refuses an identity column of the wrong type", {
+    x <- .rtl_makeKid()
+    expect_error(
+        x$study <- 1:3,
+        "the `study` column must be character \\(got integer\\)"
+    )
+    expect_error(
+        x$gwasTrait <- c(1, 2, 3),
+        "the `gwasTrait` column must be character \\(got numeric\\)"
+    )
+    # Character identity values, and any other column, are taken as given.
+    x$n <- c(1L, 2L, 3L)
+    x$study <- c("a", "b", "c")
+    expect_equal(x$study, c("a", "b", "c"))
+    expect_equal(x$n, 1:3)
+})
+
+test_that(".withMetadata attaches a list as the collection's metadata", {
+    x <- .rtl_makeKid()
+    out <- pecotmr:::.withMetadata(x, list(source = "unit test"))
+    expect_equal(S4Vectors::metadata(out), list(source = "unit test"))
+    expect_identical(pecotmr:::.withMetadata(x, list()), x)
+    expect_error(pecotmr:::.withMetadata(x, "not a list"), "metadata")
+})
+
+test_that("genomicRegion() is each row's span unless a region was stored", {
+    x <- .rtl_makeKid()
+    expect_equal(
+        as.character(genomicRegion(x)),
+        c("chr1:100-300", "chr1:1000-1100", "chr2:50-60")
+    )
+    stored <- GenomicRanges::GRanges(
+        c("chr1", "chr1", "chr2"),
+        IRanges::IRanges(c(1L, 901L, 1L), c(500L, 1500L, 100L))
+    )
+    x$region <- stored
+    expect_identical(genomicRegion(x), stored)
+    expect_length(genomicRegion(x[0]), 0L)
 })

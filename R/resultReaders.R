@@ -2,7 +2,7 @@
 # Published result readers
 # -----------------------------------------------------------------------------
 # The inverse of R/resultWriters.R: take a file that was published -- by
-# `exportToBed()` / `exportToVcf()`, or by another tool writing the same
+# `writeBed()` / `writeGwasVcf()`, or by another tool writing the same
 # vocabulary -- and rebuild the S4 collection.
 #
 #   readFineMappingResult(path, ...)  -> Qtl / GwasFineMappingResult
@@ -85,7 +85,8 @@ NULL
     weight_standardized = "standardized",
     joint_studies = "jointStudies",
     joint_contexts = "jointContexts",
-    joint_traits = "jointTraits"
+    joint_traits = "jointTraits",
+    region_given = "regionGiven"
 )
 
 # The published columns that are structural or per-row, and so are never
@@ -115,21 +116,22 @@ NULL
 # be uniformly "T" within a region would otherwise be type-guessed as logical,
 # silently corrupting the variant identity.
 # @noRd
-.prdReadTable <- function(path, region, label) {
+.prdReadTable <- function(path, which, label) {
     if (!file.exists(path)) {
         abort(glue("{label}: file '{path}' does not exist."))
     }
-    if (!is.null(region)) {
+    if (!is.null(which)) {
         if (file.exists(str_c(path, ".tbi"))) {
-            return(.readTabixRegion(path, region))
+            return(.readTabixRegion(path, which))
         }
         warn(glue(
-            "{label}: '{path}' is not bgzipped + tabix-indexed; `region` ",
+            "{label}: '{path}' is not bgzipped + tabix-indexed; `which` ",
             "ignored, reading the whole file."
         ))
     }
     readr::read_tsv(
         path,
+        skip = length(.prdBedMetaLines(path)),
         show_col_types = FALSE,
         progress = FALSE,
         col_types = readr::cols(.default = readr::col_character())
@@ -156,8 +158,8 @@ NULL
 # off the `##SAMPLE` header block. Each sample is one fitted model, so each
 # contributes its own block of rows.
 # @noRd
-.prdVcfTable <- function(path, region, sampleSelect, label) {
-    vcf <- .prdReadVcf(path, region, label)
+.prdVcfTable <- function(path, which, sampleSelect, label) {
+    vcf <- .prdReadVcf(path, which, label)
     samples <- colnames(vcf)
     if (!is.null(sampleSelect)) {
         absent <- setdiff(as.character(sampleSelect), samples)
@@ -185,27 +187,84 @@ NULL
     meta <- .prdVcfSampleMeta(vcf)
     pieces <- map(samples, .prdVcfSampleTable, vcf = vcf, meta = meta)
     list(
+        build = .prdVcfBuild(vcf),
         table = list_rbind(pieces),
-        fits = compact(set_names(
-            map(samples, .prdVcfPartialFit, meta = meta),
-            map_chr(pieces, .prdFirstKey)
-        ))
+        fits = compact(list_flatten(unname(map2(
+            samples,
+            pieces,
+            .prdVcfSampleFits,
+            meta = meta
+        ))))
     )
 }
 
-# The identity key of a sample's block, so its header-recorded partial fit can
-# be found again once every sample's rows are stacked into one table.
+# The genome build a VCF records on its ##reference line, or NA.
 # @noRd
-.prdFirstKey <- function(tbl) {
-    cols <- intersect(.PRD_GROUP_COLS, names(tbl))
-    if (nrow(tbl) == 0L || length(cols) == 0L) {
-        return("")
-    }
-    .pubIdentityKey(tbl, cols)[[1L]]
+.prdVcfBuild <- function(vcf) {
+    .vcfMetaBuild(VariantAnnotation::header(vcf))
 }
 
 # @noRd
-.prdReadVcf <- function(path, region, label) {
+.vcfMetaBuild <- function(hdr) {
+    ref <- VariantAnnotation::meta(hdr)$reference
+    if (is.null(ref) || nrow(ref) == 0L) {
+        return(NA_character_)
+    }
+    as.character(ref$Value[[1L]])
+}
+
+# A sample's partial fits, keyed by the group each belongs to: one for a
+# single fit, or one per LD block of a sample that joined several, taken from
+# the header's "|"-packed values in the order its block list gives. The keys
+# are the ones .prdGroups() splits the stacked table by, so each partial fit
+# is found again once every sample's rows are stacked together.
+# @noRd
+.prdVcfSampleFits <- function(sample, tbl, meta) {
+    if (is.null(meta) || !is_in(sample, rownames(meta)) || nrow(tbl) == 0L) {
+        return(list())
+    }
+    row <- meta[sample, , drop = FALSE]
+    keys <- .pubIdentityKey(tbl, .PRD_GROUP_COLS)
+    first <- which(!duplicated(keys))
+    pos <- .prdBlockPositions(row, tbl$block_id[first]) %||%
+        rep(1L, length(first))
+    set_names(map(pos, .prdVcfPartialFit, row = row), keys[first])
+}
+
+# Where each block sits in a joined sample's header lists, or NULL for a
+# sample holding one block.
+# @noRd
+.prdBlockPositions <- function(row, blocks) {
+    listed <- .prdBlockList(row)
+    if (length(listed) < 2L || is.null(blocks) || all(is.na(blocks))) {
+        return(NULL)
+    }
+    # An NA block is a variant this sample does not have -- another sample of
+    # the file contributed it -- and it stays NA.
+    pos <- match(blocks, listed)
+    unknown <- !is.na(blocks) & is.na(pos)
+    if (any(unknown)) {
+        abort(glue(
+            "readFineMappingResult: the BID field names block(s) ",
+            "{str_flatten(unique(blocks[unknown]), ', ')} that the ",
+            "sample's header does not list."
+        ))
+    }
+    pos
+}
+
+# The LD blocks a sample's `##SAMPLE` line lists, in packing order.
+# @noRd
+.prdBlockList <- function(row) {
+    cell <- row[["block_id"]]
+    if (is.null(cell) || is.na(cell[[1L]])) {
+        return(character(0))
+    }
+    str_split_1(as.character(cell[[1L]]), fixed("|"))
+}
+
+# @noRd
+.prdReadVcf <- function(path, which, label) {
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
         abort(glue(
             "{label}: reading a published VCF requires the ",
@@ -215,18 +274,18 @@ NULL
     if (!file.exists(path)) {
         abort(glue("{label}: file '{path}' does not exist."))
     }
-    if (is.null(region) || !file.exists(str_c(path, ".tbi"))) {
-        if (!is.null(region)) {
+    if (is.null(which) || !file.exists(str_c(path, ".tbi"))) {
+        if (!is.null(which)) {
             warn(glue(
                 "{label}: '{path}' is not bgzipped + tabix-indexed; ",
-                "`region` ignored, reading the whole file."
+                "`which` ignored, reading the whole file."
             ))
         }
         return(VariantAnnotation::readVcf(path))
     }
     tf <- Rsamtools::TabixFile(path)
     gr <- .matchRegionSeqnames(
-        .asGRegion(region),
+        which,
         Rsamtools::seqnamesTabix(tf)
     )
     if (is.null(gr)) {
@@ -236,7 +295,7 @@ NULL
 }
 
 # The per-fit `##SAMPLE` block as a plain data.frame keyed by sample id, or
-# NULL when the file has none. This is where `exportToVcf()` records the
+# NULL when the file has none. This is where `writeGwasVcf()` records the
 # identity, the analysis window and the two per-EFFECT fit quantities (`V`,
 # `cs_index`) that no per-variant column could hold.
 # @noRd
@@ -274,15 +333,29 @@ NULL
         end = as.integer(GenomicRanges::start(rr)),
         ID = names(rr) %||% rep(NA_character_, n),
         REF = unname(as.character(VariantAnnotation::ref(vcf))),
-        ALT = unname(map_chr(as.list(VariantAnnotation::alt(vcf)), .mlFirstAlt))
+        ALT = .mlFirstAlts(VariantAnnotation::alt(vcf))
     )
     fmt <- set_names(
         map(names(geno), .prdVcfFormatColumn, geno = geno, sample = sample),
         map_chr(names(geno), .prdVcfKeyName)
     )
-    ident <- .prdVcfIdentity(meta, sample, n)
-    bind_cols(fixed, as_tibble(fmt, .name_repair = "minimal"), ident)
+    # BID is structure, not a statistic: it says which LD block of a joined
+    # sample each variant belongs to, and so feeds the identity columns.
+    ident <- .prdVcfIdentity(meta, sample, n, fmt[["BID"]])
+    fmt[["BID"]] <- NULL
+    # The records are the union of every sample's variants, and a sample
+    # leaves the cells of a variant it does not have empty. Those rows are
+    # not its results, so they are dropped rather than read back as variants
+    # with no statistics.
+    has <- reduce(map(fmt, .prdNotNa), `|`, .init = rep(FALSE, n))
+    slice(
+        bind_cols(fixed, as_tibble(fmt, .name_repair = "minimal"), ident),
+        which(has)
+    )
 }
+
+# @noRd
+.prdNotNa <- function(v) !is.na(v)
 
 # One FORMAT field's column for one sample. A field the sample does not report
 # is all-NA, which is what an absent column means on the way back in.
@@ -302,7 +375,7 @@ NULL
 
 # A FORMAT key as the published column name. The fixed vocabulary is already
 # shared between the two formats, so only the per-credible-set `fullFit`
-# fields need undoing: `exportToVcf()` uppercases those column names because a
+# fields need undoing: `writeGwasVcf()` uppercases those column names because a
 # FORMAT key is conventionally uppercase, and nothing else in the schema is
 # case-ambiguous.
 # @noRd
@@ -322,7 +395,7 @@ NULL
 # several merge into one identity-less row, and the reader's own arguments
 # supply whatever else is wanted.
 # @noRd
-.prdVcfIdentity <- function(meta, sample, n) {
+.prdVcfIdentity <- function(meta, sample, n, bid = NULL) {
     if (is.null(meta) || !is_in(sample, rownames(meta))) {
         return(tibble(study = rep(sample, length.out = n)))
     }
@@ -339,12 +412,27 @@ NULL
     if (length(cols) == 0L) {
         return(tibble(study = rep(sample, length.out = n)))
     }
+    pos <- .prdBlockPositions(row, bid)
     out <- as_tibble(
-        set_names(map(cols, .prdMetaValue, row = row, n = n), cols),
+        set_names(
+            map(cols, .prdMetaValue, row = row, n = n, pos = pos),
+            cols
+        ),
         .name_repair = "minimal"
     )
     .prdVcfRegionStart(out)
 }
+
+# The header fields a sample joining several LD blocks packs one value per
+# block of, separated by "|" (see writeGwasVcf).
+# @noRd
+.PRD_BLOCK_FIELDS <- c(
+    "block_id",
+    "region_id",
+    "region_start",
+    "region_end",
+    "region_given"
+)
 
 # A VCF header's `RegionStart` is 1-based, because VCF coordinates are; a
 # published table's `region_start` is 0-based half-open, because BED
@@ -368,9 +456,17 @@ NULL
 # missing value and `.vcfHeaderValue()` writes it for a field one sample has
 # and another does not, so it is restored as NA rather than as the string ".".
 # @noRd
-.prdMetaValue <- function(nm, row, n) {
+.prdMetaValue <- function(nm, row, n, pos = NULL) {
     v <- as.character(row[[nm]][[1L]])
-    rep(if (!is.na(v) && v == ".") NA_character_ else v, length.out = n)
+    if (is.na(v) || v == ".") {
+        return(rep(NA_character_, length.out = n))
+    }
+    if (is.null(pos) || !is_in(nm, .PRD_BLOCK_FIELDS)) {
+        return(rep(v, length.out = n))
+    }
+    # A joined sample: each variant takes its own block's value.
+    perBlock <- str_split_1(v, fixed("|"))[pos]
+    replace(perBlock, perBlock == "", NA_character_)
 }
 
 # The per-effect fit quantities the `##SAMPLE` block carried, as the partial
@@ -381,18 +477,30 @@ NULL
 # the posterior matrices) is not published, so this is deliberately partial:
 # `NULL` when the header recorded neither.
 # @noRd
-.prdVcfPartialFit <- function(meta, sample) {
-    if (is.null(meta) || !is_in(sample, rownames(meta))) {
-        return(NULL)
-    }
-    row <- meta[sample, , drop = FALSE]
-    v <- .prdUnpackNumeric(row[["V"]])
-    csIndex <- .prdUnpackNumeric(row[["cs_index"]])
+.prdVcfPartialFit <- function(pos, row) {
+    v <- .prdUnpackNumeric(.prdBlockPiece(row[["V"]], pos))
+    csIndex <- .prdUnpackNumeric(.prdBlockPiece(row[["cs_index"]], pos))
     out <- compact(list(
         V = v,
         sets = if (!is.null(csIndex)) list(cs_index = as.integer(csIndex))
     ))
     if (length(out) == 0L) NULL else out
+}
+
+# The `pos`-th block's part of a header cell: a sample joining several LD
+# blocks packs one value per block, separated by "|", and a single-block
+# sample's cell is its one value whole.
+# @noRd
+.prdBlockPiece <- function(cell, pos) {
+    if (is.null(cell) || length(cell) == 0L) {
+        return(NULL)
+    }
+    chr <- as.character(cell[[1L]])
+    if (is.na(chr) || chr == "." || is.na(pos)) {
+        return(NULL)
+    }
+    pieces <- str_split_1(chr, fixed("|"))
+    if (length(pieces) == 1L) pieces else pieces[[pos]]
 }
 
 # A ";"-packed header value as a numeric vector, or NULL when it was NA.
@@ -668,14 +776,45 @@ NULL
 
 # One published table read into the long form both readers work from.
 # @noRd
-.prdRead <- function(path, region, format, sampleSelect, label) {
+.prdRead <- function(path, which, format, sampleSelect, label) {
     assertString(path)
+    if (!is.null(which)) {
+        .assertRegionGRanges(which, "`which`")
+    }
     if (.prdFormat(path, format) == "vcf") {
-        return(.prdVcfTable(path, region, sampleSelect, label))
+        return(.prdVcfTable(path, which, sampleSelect, label))
     }
     # A published table has no header to carry a fit in -- only the VCF's
     # `##SAMPLE` block does -- so a BED read restores no fit at all.
-    list(table = .prdReadTable(path, region, label), fits = list())
+    list(
+        table = .prdReadTable(path, which, label),
+        fits = list(),
+        build = .prdBedBuild(path)
+    )
+}
+
+# The genome build a published BED records on its `##genome=` line, or NA.
+# @noRd
+.prdBedBuild <- function(path) {
+    meta <- .prdBedMetaLines(path)
+    hit <- meta[str_detect(meta, "^##genome=")]
+    if (length(hit) == 0L) {
+        NA_character_
+    } else {
+        str_remove(hit[[1L]], "^##genome=")
+    }
+}
+
+# The `##` lines a published BED opens with, above its column header.
+# @noRd
+.prdBedMetaLines <- function(path) {
+    head <- readr::read_lines(path, n_max = 20L, progress = FALSE)
+    head[seq_len(.prdLeadingCount(str_detect(head, "^##")))]
+}
+
+# @noRd
+.prdLeadingCount <- function(flags) {
+    if (all(flags)) length(flags) else which(!flags)[[1L]] - 1L
 }
 
 # The row groups of a published table, in first-appearance order: one per
@@ -773,6 +912,7 @@ NULL
 # file did not publish it. `region_start` is 0-based half-open like every
 # other published coordinate, so it is shifted back by one; `region_id` stays
 # the 1-based `chrom_start_end` identifier and is not a coordinate source.
+# The chromosome is spelled in UCSC style, as the variants' ranges are.
 # @noRd
 .prdRowRegion <- function(df, idx, label) {
     start <- .prdGroupValue(df, "region_start", idx, label)
@@ -782,7 +922,7 @@ NULL
         return(NULL)
     }
     GenomicRanges::GRanges(
-        chrom,
+        withChrPrefix(chrom),
         IRanges::IRanges(
             start = as.integer(start) + 1L,
             end = as.integer(end)
@@ -821,7 +961,7 @@ NULL
     # back to the list method and hands back a list, which the constructor
     # then rejects as "not a GRanges". Names come from the group keys and
     # would otherwise land on the stored ranges.
-    unname(unlist(GenomicRanges::GRangesList(regions)))
+    unname(unlist(.rtlBindElements(regions)))
 }
 
 # A per-row character column for a constructor argument, or NULL when no row
@@ -904,10 +1044,10 @@ NULL
 
 #' @title Read A Published Fine-Mapping Result
 #' @description Rebuild a \code{QtlFineMappingResult} or
-#'   \code{GwasFineMappingResult} from a file \code{\link{exportToBed}} or
-#'   \code{\link{exportToVcf}} wrote -- or from any file in the same
-#'   vocabulary, which is what makes this the way into pecotmr for results
-#'   produced elsewhere.
+#'   \code{GwasFineMappingResult} from a file \code{\link{writeBed}} or
+#'   \code{\link{writeGwasVcf}} wrote -- or from any file in
+#'   the same vocabulary, which is what makes this the way into pecotmr for
+#'   results produced elsewhere.
 #'
 #'   A merged table holding several \code{(study, context, trait, method)}
 #'   tuples reads back as a multi-row collection, one row per tuple. Which
@@ -935,7 +1075,7 @@ NULL
 #'   Every published quantity comes back identical, in either format. Three
 #'   things are not identities:
 #'   \itemize{
-#'     \item \code{exportToBed()} publishes the \strong{filtered} top-loci
+#'     \item \code{writeBed()} publishes the \strong{filtered} top-loci
 #'       table, so a default export holds the variants that passed
 #'       \code{signalCutoff} / \code{minPurity} rather than every variant of
 #'       the fit. Export with \code{signalCutoff = 0} for the whole table.
@@ -950,11 +1090,11 @@ NULL
 #'   }
 #'
 #' @param path Path to the published file. Bgzipped and tabix-indexed files
-#'   can be read by region.
-#' @param region Optional region to restrict the read to -- a
-#'   \code{"chr:start-end"} string, a \code{GRanges}, or a one-row
-#'   \code{data.frame} with chrom/start/end. Ignored with a warning when the
-#'   file is not tabix-indexed.
+#'   can be read in part, with \code{which}.
+#' @param which Optional \code{GRanges}: read only the records that overlap
+#'   it, as \code{which} does for \code{rtracklayer::import()} and
+#'   \code{VariantAnnotation::ScanVcfParam()}. Ignored with a warning when
+#'   the file is not tabix-indexed.
 #' @param format \code{"auto"} (default) reads a \code{.vcf} / \code{.bcf}
 #'   path as a VCF and anything else as a published table; \code{"bed"} /
 #'   \code{"vcf"} say so explicitly for a file named otherwise.
@@ -975,12 +1115,12 @@ NULL
 #'   \code{LBF}. These are an approximation under a prior you chose, not
 #'   susie's \code{lbf_variable}, so nothing derives them unasked.
 #' @return A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
-#' @seealso \code{\link{exportToBed}}, \code{\link{exportToVcf}},
+#' @seealso \code{\link{writeBed}}, \code{\link{writeGwasVcf}},
 #'   \code{\link{readTwasWeights}}
 #' @examples
 #' data(qtlFineMappingExample)
 #' path <- file.path(tempdir(), "top_loci.bed")
-#' exportToBed(qtlFineMappingExample, path)
+#' writeBed(qtlFineMappingExample, path)
 #' # This fit predates the provenance columns, so its published table does
 #' # not say which genotype scale its posterior effects are on -- the reader
 #' # will not guess.
@@ -990,7 +1130,7 @@ NULL
 #' @export
 readFineMappingResult <- function(
     path,
-    region = NULL,
+    which = NULL,
     format = c("auto", "bed", "vcf"),
     studyName = NULL,
     context = NULL,
@@ -1002,7 +1142,7 @@ readFineMappingResult <- function(
     priorVariance = NULL
 ) {
     label <- "readFineMappingResult"
-    src <- .prdRead(path, region, format, sampleSelect, label)
+    src <- .prdRead(path, which, format, sampleSelect, label)
     df <- src$table
     .prdRequirePip(df, label)
     .prdRequireStandardized(df, weightStandardized, label)
@@ -1024,7 +1164,10 @@ readFineMappingResult <- function(
         priorVariance = priorVariance,
         fits = src$fits
     )
-    .prdBuildFineMapping(rows, df, context, trait, label)
+    .withGenome(
+        .prdBuildFineMapping(rows, df, context, trait, label),
+        src$build %||% NA_character_
+    )
 }
 
 # A fine-mapping result is a posterior, and the PIP is the posterior. A table
@@ -1051,7 +1194,7 @@ readFineMappingResult <- function(
     list(
         fields = fields,
         region = .prdRowRegion(df, idx, label),
-        entry = fineMappingRow(
+        entry = FineMappingRow(
             variantIds = tl$variant_id,
             susieFit = .prdFitFor(fits, key),
             topLoci = tl
@@ -1086,7 +1229,7 @@ readFineMappingResult <- function(
         return(.prdBuildQtl(rows, fields, regions, label))
     }
     .prdRequireIdentity(fields, c("study", "method"), label)
-    GwasFineMappingResult(
+    out <- GwasFineMappingResult(
         studyName = .prdRowColumn(fields, "study"),
         method = .prdRowColumn(fields, "method"),
         entry = map(rows, "entry"),
@@ -1096,6 +1239,22 @@ readFineMappingResult <- function(
         dataSource = .prdRowColumn(fields, "dataSource"),
         weightStandardized = .prdStandardizedColumn(fields)
     )
+    .prdRestoreRegionGiven(out, rows)
+}
+
+# Whether each block range was given is what the file says. The constructor
+# counts every range it is handed as given, but a range read from a file is
+# the analysis window, which says nothing of where it came from, so a file
+# that does not record it reads back as computed. A group spanning several
+# chromosomes is split into a row per chromosome, each keeping its group's.
+# @noRd
+.prdRestoreRegionGiven <- function(out, rows) {
+    recorded <- as.logical(
+        map_chr(map(rows, "fields"), .prdRowField, nm = "regionGiven")
+    )
+    fromIdx <- .rtlSplitBySeqname(map(map(rows, "entry"), variants))$fromIdx
+    out$regionGiven <- !is.na(recorded[fromIdx]) & recorded[fromIdx]
+    out
 }
 
 
@@ -1166,8 +1325,8 @@ readFineMappingResult <- function(
 
 #' @title Read Published TWAS Weights
 #' @description Rebuild a \code{TwasWeights} from a file
-#'   \code{\link{exportToBed}} or \code{\link{exportToVcf}} wrote, or from any
-#'   file in the same vocabulary.
+#'   \code{\link{writeBed}} or \code{\link{writeGwasVcf}}
+#'   wrote, or from any file in the same vocabulary.
 #'
 #'   A merged table reads back as a multi-row collection, one row per
 #'   \code{(study, context, trait, method)} tuple. A fitted model whose
@@ -1194,17 +1353,17 @@ readFineMappingResult <- function(
 #'   standardized genotype scale. Required when the file does not record it:
 #'   the scale is not recoverable from the weights themselves.
 #' @return A \code{TwasWeights}.
-#' @seealso \code{\link{exportToBed}}, \code{\link{readFineMappingResult}}
+#' @seealso \code{\link{writeBed}}, \code{\link{readFineMappingResult}}
 #' @examples
 #' data(twasWeightsExample)
 #' path <- file.path(tempdir(), "weights.bed")
-#' exportToBed(twasWeightsExample, path)
+#' writeBed(twasWeightsExample, path)
 #' readTwasWeights(path)
 
 #' @export
 readTwasWeights <- function(
     path,
-    region = NULL,
+    which = NULL,
     format = c("auto", "bed", "vcf"),
     studyName = NULL,
     context = NULL,
@@ -1215,7 +1374,7 @@ readTwasWeights <- function(
     sampleSelect = NULL
 ) {
     label <- "readTwasWeights"
-    src <- .prdRead(path, region, format, sampleSelect, label)
+    src <- .prdRead(path, which, format, sampleSelect, label)
     df <- src$table
     .prdRequireWgt(df, label)
     .prdRequireStandardized(df, weightStandardized, label)
@@ -1234,7 +1393,7 @@ readTwasWeights <- function(
         supplied = supplied,
         label = label
     )
-    .prdTwFromRows(rows, label)
+    .withGenome(.prdTwFromRows(rows, label), src$build %||% NA_character_)
 }
 
 # @noRd
@@ -1294,7 +1453,7 @@ readTwasWeights <- function(
     list(
         fields = fields,
         region = .prdRowRegion(df, idx, label),
-        entry = twasWeightsRow(
+        entry = TwasWeightsRow(
             variantIds = tl$variant_id,
             weights = suppressWarnings(as.numeric(sub$WGT)),
             weightStandardized = isTRUE(.prdFlag(fields$standardized)),
