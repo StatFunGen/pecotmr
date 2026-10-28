@@ -1447,6 +1447,9 @@ loadGenotypeRegion <- function(
     )
     variants <- .rangesSnpInfo(SummarizedExperiment::rowRanges(panel))
     snpIdx <- .loadGenoSnpIdx(variants, which)
+    # Apply the indel and whitelist filters to the variant index before any
+    # dosage is read, so only the requested variants are loaded.
+    snpIdx <- .loadGenoKeepIdx(variants, snpIdx, keepIndel, keepVariantsPath)
     # Samples x variants matrix (pecotmr convention), its columns named by
     # the file's own variant ids; callers handle missing.
     extracted <- list(
@@ -1459,9 +1462,8 @@ loadGenotypeRegion <- function(
             .snpInfoToVariantInfo(slice(variants, snpIdx))
         )
     )
-    filtered <- .loadGenoPostFilter(extracted, keepIndel, keepVariantsPath)
     result <- .loadGenoInvertStochastic(
-        filtered,
+        extracted,
         genotype,
         stochasticMetaPath,
         stochasticMetaFormat
@@ -1506,35 +1508,23 @@ loadGenotypeRegion <- function(
     )
 }
 
-# Apply the indel-drop and variant-whitelist post-filters to (X, variant_info).
+# Restrict the SNP indices to the variants kept by the indel and whitelist
+# filters. Runs before the dosage read, so filtered-out variants are never
+# loaded.
 # @noRd
-.loadGenoPostFilter <- function(result, keepIndel, keepVariantsPath) {
-    snpOnly <- if (keepIndel) {
-        result
-    } else {
-        .loadGenoSubsetVariants(
-            result,
-            isSnpAlleles(result$variant_info$A1, result$variant_info$A2)
-        )
+.loadGenoKeepIdx <- function(variants, snpIdx, keepIndel, keepVariantsPath) {
+    if (keepIndel && is.null(keepVariantsPath)) {
+        return(snpIdx)
     }
-    if (is.null(keepVariantsPath)) {
-        return(snpOnly)
+    info <- .snpInfoToVariantInfo(slice(variants, snpIdx))
+    keep <- rep(TRUE, length(snpIdx))
+    if (!keepIndel) {
+        keep <- keep & isSnpAlleles(info$A1, info$A2)
     }
-    .loadGenoSubsetVariants(
-        snpOnly,
-        matchVariantsToKeep(snpOnly$variant_info, keepVariantsPath)
-    )
-}
-
-# Subset a loaded (X, variant_info) pair along the variant axis, keeping the
-# dosage columns and the metadata rows in step.
-# @noRd
-.loadGenoSubsetVariants <- function(result, keep) {
-    list_assign(
-        result,
-        X = result$X[, keep, drop = FALSE],
-        variant_info = result$variant_info[keep, , drop = FALSE]
-    )
+    if (!is.null(keepVariantsPath)) {
+        keep <- keep & matchVariantsToKeep(info, keepVariantsPath)
+    }
+    snpIdx[keep]
 }
 
 # Restore a stochastic sketch's original scale from its metadata sidecar.
