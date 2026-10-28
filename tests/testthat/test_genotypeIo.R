@@ -622,6 +622,27 @@ test_that("loadGenotypeRegion filters by keep_variants_path for plink2", {
     expect_equal(ncol(result), 3L)
 })
 
+test_that("loadGenotypeRegion with keepVariantsPath reads the same dosages as a full load", {
+    skip_if_not_installed("pgenlibr")
+    td <- test_path("test_data")
+    full <- loadGenotypeRegion(
+        file.path(td, "test_variants"),
+        returnVariantInfo = TRUE
+    )
+    keep_file <- tempfile(fileext = ".tsv")
+    on.exit(unlink(keep_file), add = TRUE)
+    keep_df <- full$variant_info[c(2, 5, 9), c("chrom", "pos", "A2", "A1")]
+    vroom::vroom_write(keep_df, keep_file, delim = "\t")
+    kept <- loadGenotypeRegion(
+        file.path(td, "test_variants"),
+        keepVariantsPath = keep_file,
+        returnVariantInfo = TRUE
+    )
+    expect_equal(kept$X, full$X[, c(2, 5, 9), drop = FALSE])
+    expect_equal(kept$variant_info, full$variant_info[c(2, 5, 9), , drop = FALSE],
+        ignore_attr = TRUE)
+})
+
 test_that("loadGenotypeRegion attaches afreq info for plink2", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
