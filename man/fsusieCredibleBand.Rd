@@ -15,19 +15,21 @@ fsusieCredibleBand(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A long \code{tibble}: \code{cs, chrom, pos, effect, lower, upper,
-  halfwidth} -- \code{halfwidth} being \code{(upper - lower) / 2}, the
-  symmetric band half-width publication tables carry (the collection method
-  additionally carries the entry identity columns).
+A \code{GRanges}, one width-1 range per (credible set, grid
+  position), whose \code{mcols()} hold \code{cs, chrom, pos, effect,
+  lower, upper, halfwidth} -- \code{halfwidth} being
+  \code{(upper - lower) / 2}, the symmetric band half-width publication
+  tables carry (the collection method additionally carries the entry
+  identity columns).
 }
 \description{
 For a functional-SuSiE (\code{fsusieR::susiF}) fine-mapping entry, returns
 the fitted effect curve and its credible band over the functional grid, one
-row per (credible set, grid position). Wraps the upstream fSuSiE band
+range per (credible set, grid position). Wraps the upstream fSuSiE band
 computation (fsusieR's internal \code{update_cal_credible_band.susiF} +
 \code{get_fitted_effect}). Uses saved bands in trimmed fits, or computes
-them from an untrimmed fit. Returns zero rows when the functional fields
-are absent.
+them from an untrimmed fit. Returns an empty \code{GRanges} when the
+functional fields are absent.
 }
 \examples{
 data(fsusieFineMappingExample)

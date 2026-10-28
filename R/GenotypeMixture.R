@@ -130,7 +130,7 @@ setValidity("GenotypeMixture", function(object) {
 #' @export
 GenotypeMixture <- function(panels, mixtureWeights) {
     .gmAssertPanels(panels)
-    panels <- map(panels, .asLdRef)
+    panels <- map(map(panels, .asLdRef), .ucscExperiment)
     if (!all(map_lgl(panels, .gmIsPanel))) {
         abort("Every element of `panels` must be a genotype panel.")
     }
@@ -154,9 +154,7 @@ GenotypeMixture <- function(panels, mixtureWeights) {
         sampleMap = .gmSampleMap(experiments),
         metadata = list(mixtureWeights = w)
     )
-    obj <- methods::new("GenotypeMixture", mae)
-    validObject(obj)
-    obj
+    methods::new("GenotypeMixture", mae)
 }
 
 # @noRd
@@ -335,14 +333,18 @@ setMethod("mixtureWeights", "GenotypeMixture", function(x) {
     S4Vectors::metadata(x)$mixtureWeights
 })
 
+# The canonical chrom:pos:A2:A1 id every class renders; the panels' own labels
+# stay in the SNP column of the mixture's ranges.
 #' @rdname variantIds
 #' @export
 setMethod("variantIds", "GenotypeMixture", function(x, ...) {
-    .ldRefVariantIds(x)
+    .grVariantIds(.gmRanges(x))
 })
 
 #' @rdname GenotypeMixture-class
 #' @param object A \code{GenotypeMixture}.
+#' @return \code{show} is called for its side effect and returns
+#'   \code{invisible(NULL)}.
 #' @export
 setMethod("show", "GenotypeMixture", function(object) {
     w <- mixtureWeights(object)

@@ -12,23 +12,23 @@ concurrency:
 
 jobs:
   ci:
-    name: CI (${{ matrix.platform }} / ${{ matrix.environment }})
+    name: ${{ matrix.name }} (${{ matrix.platform }} / ${{ matrix.environment }})
     runs-on: ${{ matrix.runner }}
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-latest, ubuntu-24.04-arm]
-        environment: ["r45"]
         include:
-          - runner: ubuntu-latest
-            platform: linux-64
-          - runner: ubuntu-24.04-arm
-            platform: linux-aarch64
-          - runner: macos-latest
-            platform: osx-arm64
-    
+          - { name: Run unit tests, task: devtools_test, platform: linux-aarch64, runner: ubuntu-24.04-arm, environment: r45 }
+          - { name: Run unit tests, task: devtools_test, platform: osx-arm64, runner: macos-latest, environment: r45 }
+          - { name: Run unit tests, task: devtools_test, platform: linux-64, -aarch64, runner: ubuntu-24.04-arm, environment: r45 }
+          - { name: Check code coverage with covr, task: codecov, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Run R CMD check, task: rcmdcheck, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Run BiocCheckGitClone, task: bioccheck_git_clone, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Run BiocCheck, task: bioccheck, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Check goodpractice, task: goodpractice, platform: linux-64, runner: ubuntu-latest, environment: r45 }
+          - { name: Check pkgdown_build, task: pkgdown_build, platform: linux-64, runner: ubuntu-latest, environment: r45 }
     steps:
       - name: Checkout pull request branch
         uses: actions/checkout@v7
@@ -46,20 +46,8 @@ jobs:
         with:
           manifest-path: /tmp/pixi/pixi.toml
 
-      - name: Run unit tests
-        run: |
-          pixi config set --manifest-path /tmp/pixi/pixi.toml --local run-post-link-scripts insecure
-          pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml devtools_test
+      - name: Allow post-link scripts
+        run: pixi config set --manifest-path /tmp/pixi/pixi.toml --local run-post-link-scripts insecure
 
-      - name: Check unit test code coverage
-        if: matrix.platform == 'linux-64'
-        run: pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml codecov
-
-      #- name: Run R CMD CHECK
-        #run: pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml rcmdcheck
-
-      #- name: Run BiocCheckGitClone
-        #run: pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml bioccheck_git_clone
-
-      #- name: Run BiocCheck
-        #run: pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml bioccheck
+      - name: ${{ matrix.name }}
+        run: pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml ${{ matrix.task }}

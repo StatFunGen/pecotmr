@@ -253,15 +253,13 @@ LdMatrix <- function(
 
 # @noRd
 .ldmNew <- function(gr, R, nSamples, mixtureWeights) {
-    obj <- methods::new(
+    methods::new(
         "LdMatrix",
         gr,
         correlation = R,
         nSamples = as.integer(round(nSamples)),
         mixtureWeights = as.numeric(mixtureWeights)
     )
-    validObject(obj)
-    obj
 }
 
 # A plain numeric matrix: a Matrix-package matrix is made dense, as every
@@ -384,7 +382,7 @@ LdMatrix <- function(
     out <- tibble(
         SNP = snp %||%
             formatVariantId(
-                canonChrom(as.character(tbl$chrom)),
+                as.character(tbl$chrom),
                 as.integer(tbl$pos),
                 as.character(tbl$A2),
                 as.character(tbl$A1)
@@ -462,15 +460,13 @@ LdMatrix <- function(
     )
     ids <- rownames(ref@correlation)[common]
     gr <- .ldmMixtureVariants(ref[common], components, aligned, w)
-    obj <- methods::new(
+    methods::new(
         "LdMatrix",
         gr,
         correlation = `dimnames<-`(R, list(ids, ids)),
         nSamples = .ldmMixtureN(map_int(components, nSamples), w),
         mixtureWeights = w
     )
-    validObject(obj)
-    obj
 }
 
 # @noRd
@@ -605,6 +601,18 @@ setMethod("extractROWS", "LdMatrix", function(x, i) {
 #' @export
 setMethod("ldMatrix", "LdMatrix", function(x) x@correlation)
 
+#' @rdname ldMatrix
+#' @importFrom S4Arrays as.matrix
+#' @export
+setMethod("as.matrix", "LdMatrix", function(x, ...) ldMatrix(x))
+
+#' @rdname ldMatrix
+#' @name coerce,LdMatrix,matrix-method
+#' @aliases coerce,LdMatrix,matrix-method
+#' @usage NULL
+#' @exportMethod coerce
+setAs("LdMatrix", "matrix", function(from) ldMatrix(from))
+
 #' @rdname nSamples
 #' @export
 setMethod("nSamples", "LdMatrix", function(x, ...) x@nSamples)
@@ -615,10 +623,12 @@ setMethod("mixtureWeights", "LdMatrix", function(x) {
     if (length(x@mixtureWeights) == 0L) NULL else x@mixtureWeights
 })
 
+# The canonical chrom:pos:A2:A1 id every class renders; the labels the matrix
+# was given stay in mcols(x)$SNP.
 #' @rdname variantIds
 #' @export
 setMethod("variantIds", "LdMatrix", function(x, ...) {
-    as.character(S4Vectors::mcols(x)$SNP)
+    .grVariantIds(methods::as(x, "GRanges"))
 })
 
 #' @rdname af
@@ -631,6 +641,8 @@ setMethod("af", "LdMatrix", function(x, ...) {
 
 #' @rdname LdMatrix-class
 #' @param object An \code{LdMatrix}.
+#' @return \code{show} is called for its side effect and returns
+#'   \code{invisible(NULL)}.
 #' @export
 setMethod("show", "LdMatrix", function(object) {
     n <- if (is.na(object@nSamples)) "unknown" else object@nSamples

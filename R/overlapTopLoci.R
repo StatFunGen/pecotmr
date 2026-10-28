@@ -79,7 +79,9 @@
 #' @return A \code{GRanges} keyed on the QTL variant
 #'   (\code{variant_id, chrom, pos, A1, A2} in \code{mcols()}) with all other
 #'   columns prefixed \code{qtl_} / \code{gwas_}. Zero ranges when there is no
-#'   allele-aware overlap. Take a table with \code{as.data.frame()}.
+#'   allele-aware overlap. Take a table with \code{as.data.frame()}. Its
+#'   \code{seqinfo()} names the genome build the two results name; results
+#'   naming different builds are refused.
 #' @seealso \code{\link{topLoci}}, \code{matchVariants}
 #' @examples
 #' data(qtlFineMappingLbfExample)
@@ -98,6 +100,7 @@ setMethod(
     "overlapTopLoci",
     signature("QtlFineMappingResult", "GwasFineMappingResult"),
     function(qtl, gwas, signalCutoff = 0.025) {
+        build <- .inputsBuild(list(qtl, gwas), "overlapTopLoci")
         keyCols <- c("variant_id", "chrom", "pos", "A1", "A2")
         coordCols <- c("chrom", "pos", "A1", "A2")
         # mcols() rather than as.data.frame() on the ranges: the join
@@ -107,14 +110,20 @@ setMethod(
         qtlTl <- .overlapTopLociTable(qtl, signalCutoff)
         gwasTl <- .overlapTopLociTable(gwas, signalCutoff)
         if (nrow(qtlTl) == 0L || nrow(gwasTl) == 0L) {
-            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols))
+            return(.withGenome(
+                .overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols),
+                build
+            ))
         }
         # Allele-aware correspondence between the unique QTL + GWAS variant
         # sets. target = GWAS, ref = QTL, so `sign` is the flip applied to the
         # GWAS side.
         vmap <- .overlapVariantMap(qtlTl, gwasTl)
         if (is.null(vmap)) {
-            return(.overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols))
+            return(.withGenome(
+                .overlapEmptyReturn(qtlTl, gwasTl, coordCols, keyCols),
+                build
+            ))
         }
         # No zero-row check on `g`: every gwas_vid in `vmap` is drawn from
         # gwasTl$variant_id, so once vmap is non-NULL the inner join above
@@ -131,7 +140,7 @@ setMethod(
             intersect(keyCols, names(merged)),
             setdiff(names(merged), keyCols)
         )
-        .overlapToGRanges(select(merged, all_of(ordered)))
+        .withGenome(.overlapToGRanges(select(merged, all_of(ordered))), build)
     }
 )
 
@@ -215,7 +224,7 @@ setMethod(
     }
     p <- parseVariantId(df$variant_id)
     gr <- GenomicRanges::GRanges(
-        seqnames = str_c("chr", p$chrom),
+        seqnames = p$chrom,
         ranges = IRanges::IRanges(start = p$pos, width = 1L)
     )
     S4Vectors::`mcols<-`(

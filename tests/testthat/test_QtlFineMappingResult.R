@@ -14,7 +14,7 @@ test_that("QtlFineMappingResult: builds a collection keyed by 4-tuple", {
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L)
-    expect_null(ldReference(res))
+    expect_identical(ldReference(res), list())
 })
 
 
@@ -57,9 +57,11 @@ test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
         entry = list(e),
         ldReference = gh
     )
-    # The slot holds the panel; the handle it reads through is its seed.
-    expect_s4_class(ldReference(res), "RangedSummarizedExperiment")
-    expect_identical(pecotmr:::.ldRefHandle(ldReference(res)), gh)
+    # The reference is a panel; the handle it reads through is its seed.
+    refs <- ldReference(res)
+    expect_named(refs, res$ldReference)
+    expect_s4_class(refs[[1L]], "RangedSummarizedExperiment")
+    expect_identical(pecotmr:::.ldRefHandle(refs[[1L]]), gh)
 })
 
 
@@ -160,19 +162,6 @@ test_that("QtlFineMappingResult: single-row collection allows omitting selectors
 })
 
 
-test_that("QtlFineMappingResult: show prints summary", {
-    e <- .sc_makeFineMappingRow(3)
-    res <- QtlFineMappingResult(
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(e)
-    )
-    expect_output(show(res), "QtlFineMappingResult")
-})
-
-
 test_that("QtlFineMappingResult: joint columns absent by default", {
     e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
@@ -270,10 +259,6 @@ test_that("QtlFineMappingResult: length-mismatched joint vector errors", {
     )
 })
 
-# ===========================================================================
-# GwasFineMappingResult
-# ===========================================================================
-
 # === Tests migrated from test_showMethods.R (QtlFineMappingResult) ===
 
 test_that("show.QtlFineMappingResult prints entry/study/context/trait/method counts", {
@@ -329,7 +314,7 @@ test_that("QtlFineMappingResult: pip returns named pip vector for selected tuple
 })
 
 
-test_that("QtlFineMappingResult: pip(returnList = TRUE) wraps in pipe-keyed list", {
+test_that("QtlFineMappingResult: pip() is one named numeric vector", {
     e <- .ca_makeFmEntry(3)
     res <- QtlFineMappingResult(
         studyName = "s1",
@@ -338,124 +323,12 @@ test_that("QtlFineMappingResult: pip(returnList = TRUE) wraps in pipe-keyed list
         method = "susie",
         entry = list(e)
     )
-    out <- pip(res, returnList = TRUE)
-    expect_true(is.list(out))
-    expect_equal(names(out), "s1|c1|t1|susie")
+    out <- pip(res)
+    expect_type(out, "double")
+    expect_length(out, 3L)
+    expect_error(pip(res, returnList = TRUE), "unused")
 })
 
-
-test_that("QtlFineMappingResult: credibleSets filters to credible sets", {
-    e <- .ca_makeFmEntry(3) # cs_95 = c("susie_1", "susie_1", "susie_0")
-    res <- QtlFineMappingResult(
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(e)
-    )
-    cs <- credibleSets(res)
-    expect_equal(nrow(cs), 2L)
-})
-
-
-test_that("QtlFineMappingResult: topLoci returns the entry's topLoci (projected)", {
-    e <- .ca_makeFmEntry(3)
-    res <- QtlFineMappingResult(
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(e)
-    )
-    tl <- topLoci(res, signalCutoff = 0)
-    expect_equal(length(tl), 3L)
-    expect_equal(tl$variant_id, .ca_makeTopLoci(3)$variant_id)
-})
-
-test_that("QtlFineMappingResult: topLoci aggregates entries when selectors do not pin one", {
-    # Two entries, no selectors: the old behaviour errored ("2 entries; pass
-    # study/context/trait/method"). Now it stacks the per-variant tables,
-    # prefixed with the row identity so variants stay attributable.
-    e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
-    res <- QtlFineMappingResult(
-        studyName = c("s1", "s1"),
-        context = c("c1", "c2"),
-        trait = c("t1", "t1"),
-        method = c("susie", "susie"),
-        entry = list(e1, e2)
-    )
-    agg <- topLoci(res, signalCutoff = 0)
-    expect_equal(length(agg), 5L)
-    expect_true(all(
-        c("study", "context", "trait", "blockId", "method") %in%
-            names(S4Vectors::mcols(agg))
-    ))
-    expect_equal(agg$context, c("c1", "c1", "c1", "c2", "c2"))
-    expect_true("variant_id" %in% names(S4Vectors::mcols(agg)))
-    # QTL results key on context/trait, so blockId is NA-filled.
-    expect_true(all(is.na(agg$blockId)))
-    # the added per-variant `method` must not duplicate the identity column
-    expect_equal(sum(names(S4Vectors::mcols(agg)) == "method"), 1L)
-})
-
-test_that("QtlFineMappingResult: topLoci with a full tuple keeps the bare (id-free) table", {
-    e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
-    res <- QtlFineMappingResult(
-        studyName = c("s1", "s1"),
-        context = c("c1", "c2"),
-        trait = c("t1", "t1"),
-        method = c("susie", "susie"),
-        entry = list(e1, e2)
-    )
-    tl <- topLoci(
-        res,
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        signalCutoff = 0
-    )
-    expect_equal(length(tl), 3L)
-    # single-entry fast path, unchanged
-    expect_false(is_in("context", names(S4Vectors::mcols(tl))))
-})
-
-test_that("QtlFineMappingResult: topLoci aggregates only the matching subset", {
-    e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
-    res <- QtlFineMappingResult(
-        studyName = c("s1", "s1"),
-        context = c("c1", "c2"),
-        trait = c("t1", "t1"),
-        method = c("susie", "susie"),
-        entry = list(e1, e2)
-    )
-    sub <- topLoci(res, context = "c2", signalCutoff = 0)
-    expect_equal(length(sub), 2L)
-    expect_equal(unique(sub$context), "c2")
-})
-
-test_that("QtlFineMappingResult: topLoci on a single-row collection still carries identity columns", {
-    # A no-selector call takes the aggregate path even for one row, so the PIP
-    # table has a uniform shape (identity columns present) whatever the row count
-    # -- callers don't special-case single-entry results.
-    res <- QtlFineMappingResult(
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(.sc_makeFineMappingRow(4))
-    )
-    tl <- topLoci(res, signalCutoff = 0)
-    expect_equal(length(tl), 4L)
-    expect_true(all(
-        c("study", "context", "trait", "method", "variant_id") %in%
-            names(S4Vectors::mcols(tl))
-    ))
-    expect_equal(unique(tl$context), "c1")
-})
 
 test_that("QtlFineMappingResult: credibleSets aggregates every entry's credible sets with identity columns", {
     # e1 (n=3) has cs_95 = susie_1/susie_1/susie_0 -> 2 CS members; e2 (n=2) -> 2.
@@ -469,10 +342,10 @@ test_that("QtlFineMappingResult: credibleSets aggregates every entry's credible 
         entry = list(e1, e2)
     )
     cs <- credibleSets(res)
-    expect_equal(nrow(cs), 4L)
+    expect_equal(length(cs), 4L)
     expect_true(all(
         c("study", "context", "trait", "blockId", "method", "variant_id") %in%
-            names(cs)
+            names(S4Vectors::mcols(cs))
     ))
     expect_equal(cs$context, c("c1", "c1", "c2", "c2"))
     # full tuple still returns the bare per-entry credible-set table
@@ -483,8 +356,8 @@ test_that("QtlFineMappingResult: credibleSets aggregates every entry's credible 
         trait = "t1",
         method = "susie"
     )
-    expect_false("context" %in% names(bare))
-    expect_equal(nrow(bare), 2L)
+    expect_false("context" %in% names(S4Vectors::mcols(bare)))
+    expect_equal(length(bare), 2L)
 })
 
 test_that("QtlFineMappingResult: marginalEffects aggregates every entry with identity columns", {
@@ -498,8 +371,11 @@ test_that("QtlFineMappingResult: marginalEffects aggregates every entry with ide
         entry = list(e1, e2)
     )
     me <- marginalEffects(res)
-    expect_equal(nrow(me), 5L) # all topLoci rows (no CS filter)
-    expect_true(all(c("study", "context", "trait", "method") %in% names(me)))
+    expect_equal(length(me), 5L) # all topLoci rows (no CS filter)
+    expect_true(all(
+        c("study", "context", "trait", "method") %in%
+            names(S4Vectors::mcols(me))
+    ))
     expect_equal(unique(me$context), c("c1", "c2"))
 })
 
@@ -557,7 +433,7 @@ test_that("cvResult works at the QtlFineMappingResult collection level", {
         prediction = list(susie_predicted = matrix(0, 1, 1)),
         performance = list(susie_performance = matrix(0, 1, 6))
     )
-    e <- fineMappingRow("chr1:100:A:G", list(), tl, cvResult = cv)
+    e <- FineMappingRow("chr1:100:A:G", list(), tl, cvResult = cv)
     fmr <- QtlFineMappingResult(
         studyName = "S",
         context = "C",
@@ -597,14 +473,12 @@ test_that("QtlFineMappingResult: marginalEffects with tuple selectors", {
         trait = "t1",
         method = "susie"
     )
-    expect_s3_class(me, "data.frame")
-    expect_equal(nrow(me), 4L)
-    expect_true(all(c("variant_id", "beta", "se", "z", "p") %in% names(me)))
+    expect_s4_class(me, "GRanges")
+    expect_equal(length(me), 4L)
+    expect_true(all(
+        c("variant_id", "beta", "se", "z", "p") %in% names(S4Vectors::mcols(me))
+    ))
 })
-
-# ===========================================================================
-# GwasFineMappingResult collection accessors
-# ===========================================================================
 
 # ===========================================================================
 # Validity: the branches that name what is wrong
@@ -653,20 +527,128 @@ test_that("a joint column must be character, not a factor or number", {
     )
 })
 
-test_that("a QtlFineMappingResult refuses a region selector", {
+test_that("a QtlFineMappingResult refuses a blockId", {
     data(qtlFineMappingExample)
-    # Region selection belongs to GwasFineMappingResult. The shared
-    # FineMappingResultBase accessors pass `region` to every selector, and
-    # this one used to absorb it in `...` and silently return the
-    # study/context/trait/method match instead.
-    expect_error(
-        susieFit(qtlFineMappingExample, region = "chr22:1-2"),
-        "not region-indexed"
-    )
-    expect_error(
-        variantIds(qtlFineMappingExample, region = "chr22:1-2"),
-        "not region-indexed"
-    )
+    x <- qtlFineMappingExample
+    # Block selection belongs to GwasFineMappingResult. The shared
+    # FineMappingResultBase accessors pass `blockId` to every selector, and
+    # this one refuses it rather than return the study/context/trait/method
+    # match as if it had been honoured.
+    expect_error(susieFit(x, blockId = "b1"), "has no LD blocks")
+    expect_error(variantIds(x, blockId = "b1"), "has no LD blocks")
     # The supported selectors still work.
-    expect_type(susieFit(qtlFineMappingExample, method = "susie"), "list")
+    expect_type(susieFit(x, method = "susie"), "list")
+})
+
+test_that("fineMappingResult(QtlFineMappingResult) refuses a blockId", {
+    res <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3))
+    )
+    # A QTL fit is one row; `blockId` names a GWAS block, and NA is unset.
+    expect_equal(nrow(fineMappingResult(res, blockId = NA)), 1L)
+    expect_error(
+        fineMappingResult(res, blockId = "chr1_1_500"),
+        "`blockId` names an LD block of a GWAS fit"
+    )
+})
+
+test_that("a QTL fit across chromosomes is refused by name", {
+    ids <- c("chr1:100:A:G", "chr2:100:A:G")
+    trans <- FineMappingRow(
+        variantIds = ids,
+        susieFit = list(),
+        topLoci = data.frame(variant_id = ids, pip = c(0.6, 0.4))
+    )
+    expect_error(
+        QtlFineMappingResult(
+            studyName = c("s1", "s1"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t2"),
+            method = c("susie", "susie"),
+            entry = list(.sc_makeFineMappingRow(3), trans)
+        ),
+        "`entry` element\\(s\\) 2 span more than one chromosome"
+    )
+})
+
+test_that("QtlFineMappingResult() keeps the caller's metadata", {
+    res <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3)),
+        metadata = list(run = "r1")
+    )
+    expect_equal(S4Vectors::metadata(res), list(run = "r1"))
+    expect_error(
+        QtlFineMappingResult(
+            studyName = "s1",
+            context = "c1",
+            trait = "t1",
+            method = "susie",
+            entry = list(.sc_makeFineMappingRow(3)),
+            metadata = "r1"
+        ),
+        "metadata"
+    )
+})
+
+test_that("each row records the variants its fit was made with", {
+    row <- .sc_makeFineMappingRow(3)
+    res <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(row)
+    )
+    expect_s4_class(res$fitVariants, "CharacterList")
+    expect_equal(
+        as.character(res$fitVariants[[1L]]),
+        pecotmr:::.fmRowFitVariants(row)
+    )
+})
+
+test_that("cvResult() of a narrowed row warns and returns it unchanged", {
+    tl <- data.frame(
+        variant_id = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
+        pip = c(0.5, 0.3, 0.2)
+    )
+    cv <- list(prediction = list(susie = 1:4))
+    res <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(FineMappingRow(tl$variant_id, NULL, tl, cvResult = cv))
+    )
+    narrowed <- endoapply(res, utils::head, 2L)
+    expect_warning(
+        out <- cvResult(narrowed),
+        "cvResult\\(\\): the stored fit was made with 3 variants"
+    )
+    expect_identical(out, cv)
+    expect_no_warning(cvResult(res))
+})
+
+# ===========================================================================
+# Constructor guards
+# ===========================================================================
+
+test_that("QtlFineMappingResult: rejects rows that are not row payloads", {
+    expect_error(
+        QtlFineMappingResult(
+            studyName = "s1",
+            context = "c1",
+            trait = "t1",
+            method = "susie",
+            entry = list("not_an_entry")
+        ),
+        "must be a fine-mapping row"
+    )
 })

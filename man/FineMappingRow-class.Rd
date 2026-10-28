@@ -3,10 +3,11 @@
 \docType{class}
 \name{FineMappingRow-class}
 \alias{FineMappingRow-class}
+\alias{coerce,FineMappingRow,GRanges-method}
 \title{Fine-Mapping Row}
 \description{
 One row's worth of fine-mapping: the variants and the stored
-  fit. Build one with \code{\link{fineMappingRow}} and pass a list of them
+  fit. Build one with \code{\link{FineMappingRow}} and pass a list of them
   as a collection's \code{entry} argument.
 }
 \section{Slots}{
@@ -18,9 +19,20 @@ columns are the per-variant \code{topLoci} values.}
 \item{\code{susieFit}}{The stored fine-mapping fit, or \code{NULL}.}
 
 \item{\code{cvResult}}{Cross-validation payload, or \code{NULL}.}
+
+\item{\code{fitVariants}}{The ids of the variants the stored fit was made with, in
+the fit's own order, recorded when the row is built; empty for a row with
+no fit. A row narrowed to fewer variants keeps them, which is how reading
+the fit can tell it describes more variants than the row now holds.}
 }}
 
+\section{Coercion}{
+ \code{as(x, "GRanges")} gives the row's variants with
+  their per-variant \code{topLoci} columns: the element a collection
+  stores for it.
+}
+
 \seealso{
-\code{\link{fineMappingRow}},
+\code{\link{FineMappingRow}},
   \code{\linkS4class{TwasWeightsRow}}
 }

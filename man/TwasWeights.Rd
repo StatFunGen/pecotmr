@@ -15,7 +15,8 @@ TwasWeights(
   jointTraits = NULL,
   traitPos = NULL,
   region = NULL,
-  ldReference = NULL
+  ldReference = NULL,
+  metadata = list()
 )
 }
 \arguments{
@@ -53,19 +54,25 @@ forward as provenance; not part of the identity key. \code{NULL}
 (default) omits the column, and \code{\link{genomicRegion}} then
 derives the window from the span of the variants present.}
 
-\item{ldReference}{An optional genotype panel (see
-\code{\link{readGenotypes}}), or \code{NULL} for individual-level fits.}
+\item{ldReference}{The LD reference the weights were derived against --
+a genotype panel (see \code{\link{readGenotypes}}), a
+\code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
+a list with one per row; \code{NULL} for individual-level fits. Each
+distinct reference is stored once.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{TwasWeights} object.
 }
 \description{
-Construct a \code{TwasWeights} DFrame-subclass collection from
-  per-tuple vectors and a list of \code{TwasWeightsRow} payloads (one per
-  tuple).
+Construct a \code{TwasWeights} collection from per-tuple
+  vectors and a list of \code{TwasWeightsRow} payloads (one per tuple).
 }
 \examples{
-twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
+twe <- TwasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
   weightStandardized = FALSE)
 tw <- TwasWeights(studyName = "s1", context = "brain", trait = "gene1",

@@ -91,7 +91,7 @@ setMethod("show", "AnnotationMatrix", function(object) {
         .trim = FALSE
     ))
     cat(glue(
-        "  Genome build: {GenomeInfoDb::genome(object)}\n",
+        "  Genome build: {.showGenomeBuild(object)}\n",
         .trim = FALSE
     ))
 })
@@ -166,10 +166,11 @@ AnnotationMatrix <- function(
             "{length(snpRanges)} SNP range(s); the rows must match."
         ))
     }
+    ucsc <- .ucscRanges(snpRanges)
     named <- if (!is.null(genome) && length(genome) == 1L && !is.na(genome)) {
-        GenomeInfoDb::`genome<-`(snpRanges, value = genome)
+        GenomeInfoDb::`genome<-`(ucsc, value = genome)
     } else {
-        snpRanges
+        ucsc
     }
     se <- SummarizedExperiment::SummarizedExperiment(
         assays = list(annotations = annotations),
@@ -183,9 +184,7 @@ AnnotationMatrix <- function(
             row.names = colnames(annotations)
         )
     )
-    obj <- methods::new("AnnotationMatrix", se)
-    validObject(obj)
-    obj
+    methods::new("AnnotationMatrix", se)
 }
 
 # =============================================================================

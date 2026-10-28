@@ -62,7 +62,7 @@
     ...
 ) {
     vids <- colnames(dataX)
-    fineMappingRow(
+    FineMappingRow(
         variantIds = vids,
         susieFit = list(method = method, cond = conditionIdx),
         topLoci = data.frame(
@@ -218,7 +218,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
         samplePartition = sp,
         foldFits = list(fold_1 = fp, fold_2 = fp)
     )
-    twEntry <- twasWeightsRow(
+    twEntry <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         weights = c(0.1, 0.2),
         methodFits = fp,
@@ -253,7 +253,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
             verbose = 1,
             mvPrior = NULL,
             mvPriorCv = NULL,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             seed = NULL
         ) {
             captured <<- list(
@@ -315,7 +315,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
         ncol(Y),
         dimnames = list(colnames(X), colnames(Y))
     )
-    e <- twasWeightsRow(
+    e <- TwasWeightsRow(
         variantIds = colnames(X),
         weights = W,
         methodFits = .je_fakeMrmashFit()
@@ -603,9 +603,10 @@ test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regressi
     # errored in sqrt(nVec) on genuine summary-statistic input. This drives the
     # unmocked fitter end to end.
     set.seed(1)
-    p <- 30L
+    # Small enough that the real mr.mash.rss fit stays quick.
+    p <- 10L
     K <- 2L
-    nObs <- 400L
+    nObs <- 100L
     X <- matrix(rnorm(nObs * p), nObs, p)
     colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     R <- cor(X)
@@ -1074,10 +1075,9 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
 })
 
 # ---- SR-TWAS ensemble layer (.twasEnsembleLayer) ----------------------------
-# The ensemble orchestration formerly inside .twasWeightsPipelineMatrix is now a
-# LAYER ON TOP of per-method fitting: per condition, read each method's retained
-# out-of-fold CV predictions + weights + R^2, drop methods below the cutoff
-# (needs >= 2), and stack via `ensembleWeights` per context.
+# The ensemble is a LAYER ON TOP of per-method fitting: per condition, read each
+# method's retained out-of-fold CV predictions + weights + R^2, drop methods
+# below the cutoff (needs >= 2), and stack via `ensembleWeights` per context.
 
 .je_ensGroup <- function(n = 40L, nCond = 2L) {
     samp <- paste0("s", seq_len(n))
@@ -1112,7 +1112,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
         pr <- predCor * Y[, r] + rnorm(nrow(Y), sd = 0.3)
         names(pr) <- rownames(Y)
         rsq <- stats::cor(Y[, r], pr)^2
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = vars,
             weights = rnorm(length(vars)),
             cvResult = list(
@@ -1183,7 +1183,7 @@ test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", 
     expect_true(all(map_lgl(ens, is.null)))
 })
 
-# ---- engine twas fitter: orchestration absorbed from .twasWeightsPipelineMatrix
+# ---- engine twas fitter (fitJointGroup on a TwasJointPipeline) --------------
 
 test_that("fitJointGroup(twas): leakage warning when a full-data mr.mash prior is reused across folds", {
     set.seed(3)
@@ -1444,7 +1444,7 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
         ) {
             if (tid == "G2") {
                 return(NULL)
-            } # skip branch (461)
+            } # skip branch
             X <- matrix(
                 0,
                 4,
@@ -1501,7 +1501,7 @@ test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contex
         traits = list(S = "t1")
     )
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromRef = .je_mockLd,
         .package = "pecotmr"
@@ -1514,7 +1514,7 @@ test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contex
 
 test_that(".enumCrossContextSumstats: < 2 contexts and < 2 tuple rows skip", {
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromRef = .je_mockLd,
         .package = "pecotmr"
@@ -1557,7 +1557,7 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
         ) {
             if (cx == "c2") {
                 return(NULL)
-            } # skip branch (511)
+            } # skip branch
             X <- matrix(
                 0,
                 4,
@@ -1604,7 +1604,7 @@ test_that(".enumCrossTraitSumstats: groups per (study, context) with >= 2 traits
         traits = list(S = c("t1", "t2"))
     )
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromRef = .je_mockLd,
         .package = "pecotmr"
@@ -1625,7 +1625,7 @@ test_that(".enumCrossStudySumstats: group per (context, trait) in >= 2 studies",
         traits = list(S1 = "t1", S2 = "t1")
     )
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .buildJointSumstatZMatrix = .je_mockJointZ,
         .ldFromRef = .je_mockLd,
         .package = "pecotmr"
@@ -1717,6 +1717,40 @@ test_that(".enumComposedIndividual: study not in scope / NULL xy -> empty", {
     ) # xy NULL
 })
 
+test_that(".enumTopPcIndividual enumerates only the studies in scope", {
+    # Reached through .jointDispatchTable, which covr cannot see, so called
+    # directly here.
+    data(qtlDatasetExample)
+    qd <- qtlDatasetExample
+    expect_identical(
+        pecotmr:::.enumTopPcIndividual(qd, list(studies = "other")),
+        list()
+    )
+    seen <- list()
+    local_mocked_bindings(
+        .enumTopPcForContext = function(
+            cx,
+            data,
+            scope,
+            args,
+            studyName,
+            phenotypeFilter
+        ) {
+            seen[[cx]] <<- list(study = studyName, filter = phenotypeFilter)
+            list(cx)
+        },
+        .package = "pecotmr"
+    )
+    scope <- list(studies = "study1", contexts = list(study1 = c("a", "b")))
+    expect_identical(
+        pecotmr:::.enumTopPcIndividual(qd, scope),
+        list("a", "b")
+    )
+    expect_identical(seen$a$study, "study1")
+    # The joint engine's own phenotype QC when the run supplied none.
+    expect_identical(seen$a$filter$naAction, "drop")
+})
+
 test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)", {
     scope <- list(
         studies = "S",
@@ -1726,12 +1760,12 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
     samp <- paste0("s", 1:5)
     local_mocked_bindings(
         studyName = function(data) "S",
-        molecularTraits = function(data, contexts) .je_mkSe(c("G1", "G2")),
+        .qtlContextSe = function(data, context) .je_mkSe(c("G1", "G2")),
         .fmResidPheno = function(
             data,
             contexts,
             traitId,
-            naAction = "drop",
+            phenotypeFilter = NULL,
             ...
         ) {
             matrix(0, 5, 1, dimnames = list(samp, traitId))
@@ -1768,12 +1802,12 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
     )
     local_mocked_bindings(
         studyName = function(data) "S",
-        molecularTraits = function(data, contexts) .je_mkSe("G1"),
+        .qtlContextSe = function(data, context) .je_mkSe("G1"),
         .fmResidPheno = function(
             data,
             contexts,
             traitId,
-            naAction = "drop",
+            phenotypeFilter = NULL,
             ...
         ) {
             matrix(0, 1, 1, dimnames = list("s1", traitId))
@@ -1817,7 +1851,7 @@ test_that(".enumComposedSumstats: one group per fixed-axis row block", {
         traits = list(S = "t1")
     )
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .enumerateComposedSumstatGroups = function(spec, data, scope) {
             list(
                 groups = list(c(1L, 2L)),
@@ -1841,7 +1875,7 @@ test_that(".enumComposedSumstats: one group per fixed-axis row block", {
 
 test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .enumerateComposedSumstatGroups = function(spec, data, scope) NULL,
         .package = "pecotmr"
     )
@@ -1851,9 +1885,9 @@ test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
             list(studies = "S")
         ),
         0L
-    ) # gi NULL (646)
+    ) # gi NULL
     local_mocked_bindings(
-        ldReference = function(x) NULL,
+        .jointRowsLdRef = function(data, rows, label) NULL,
         .enumerateComposedSumstatGroups = function(spec, data, scope) {
             list(
                 groups = list(1L),
@@ -1873,7 +1907,7 @@ test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
             args = list(axes = c("context", "trait"))
         ),
         0L
-    ) # < 2 gIdx (649)
+    ) # < 2 gIdx
 })
 
 # =============================================================================
@@ -2214,7 +2248,7 @@ test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
     g <- .je_ensGroup(nCond = 1L)
     good <- .je_ensEntries(g, 0.85)
     # A method whose entry carries no CV predictions -> contributes nothing.
-    noCv <- list(twasWeightsRow(
+    noCv <- list(TwasWeightsRow(
         variantIds = colnames(.jgX(g)),
         weights = rnorm(ncol(.jgX(g))),
         cvResult = NULL
@@ -2322,9 +2356,9 @@ test_that(".jointTwasCvResult: NULL cv and empty/absent payloads degrade gracefu
         foldFits = list(fold_1 = list(other = 1))
     )
     out <- pecotmr:::.jointTwasCvResult(cv, "mrmash")
-    expect_null(out$predictions) # pickByBase empty (252)
-    expect_null(out$foldFits) # all-NULL ffKey (260)
-    # A method token absent from a non-empty prediction list -> NULL (255).
+    expect_null(out$predictions) # pickByBase empty
+    expect_null(out$foldFits) # all-NULL ffKey
+    # A method token absent from a non-empty prediction list -> NULL.
     cv2 <- list(
         samplePartition = NULL,
         prediction = list(lasso_predicted = matrix(0, 1, 1)),
@@ -2412,7 +2446,7 @@ test_that(".twasGroupArgs: takes the CV partition from the fine-mapping CV when 
         .package = "pecotmr"
     )
     out <- pecotmr:::.twasGroupArgs(g, pipe, list(fineMappingResult = "FMR"))
-    expect_identical(out$samplePartition, sp) # line 692
+    expect_identical(out$samplePartition, sp)
 })
 
 test_that(".runJointCell: a token whose fitter returns NULL is skipped", {
@@ -2422,7 +2456,7 @@ test_that(".runJointCell: a token whose fitter returns NULL is skipped", {
         fitJointGroup = function(...) NULL,
         .package = "pecotmr"
     )
-    expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie")) # 755
+    expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie"))
 })
 
 test_that(".runJointSpecs: region mode without traitId restricts scoped traits to the locus", {
@@ -2430,7 +2464,7 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 100))
     captured <- NULL
     local_mocked_bindings(
-        # S2 has no scoped contexts -> the region-restriction loop skips it (873).
+        # S2 has no scoped contexts -> the region-restriction loop skips it.
         .fmResolveSpecScope = function(spec, data, contexts, traitIds) {
             list(
                 studies = c("S", "S2"),
@@ -2438,7 +2472,7 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
                 traits = list(S = c("g1", "g2"), S2 = "g9")
             )
         },
-        molecularTraits = function(data, contexts) .je_mkSe(c("g1", "g2")),
+        .qtlContextSe = function(data, context) .je_mkSe(c("g1", "g2")),
         .fmTraitsInRegion = function(se, traits, region) {
             captured <<- traits
             "g1"
@@ -2457,7 +2491,7 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
         args = list(region = region)
     )
     expect_null(res) # empty cell -> NULL
-    expect_equal(captured, c("g1", "g2")) # 871-875 ran
+    expect_equal(captured, c("g1", "g2")) # the restriction ran
 })
 
 
@@ -2503,8 +2537,8 @@ test_that(".runJointSpecs: region mode without traitId restricts scoped traits t
 
 test_that("traitPos comes from the QtlSumStats traitPos column", {
     ss <- .je_ssWithTraitPos()
-    g1 <- pecotmr:::.traitPosFor(ss, "brain", "G1")
-    g2 <- pecotmr:::.traitPosFor(ss, "brain", "G2")
+    g1 <- pecotmr:::.traitPosFor(ss, "S", "brain", "G1")
+    g2 <- pecotmr:::.traitPosFor(ss, "S", "brain", "G2")
     expect_s4_class(g1, "GRanges")
     expect_equal(GenomicRanges::start(g1), 500L)
     expect_equal(GenomicRanges::start(g2), 900L)
@@ -2514,37 +2548,72 @@ test_that("traitPos comes from the QtlSumStats traitPos column", {
 
 test_that("traitPos is NULL when the sumstats cannot supply one", {
     ss <- .je_ssWithTraitPos()
-    expect_null(pecotmr:::.traitPosFor(ss, "brain", "absentTrait"))
-    expect_null(pecotmr:::.traitPosFor(ss, "absentContext", "G1"))
+    expect_null(pecotmr:::.traitPosFor(ss, "S", "brain", "absentTrait"))
+    expect_null(pecotmr:::.traitPosFor(ss, "S", "absentContext", "G1"))
+    expect_null(pecotmr:::.traitPosFor(ss, "absentStudy", "brain", "G1"))
     # A collection with no traitPos column at all.
     data(qtlSumStatsExample)
     expect_false(is_in("traitPos", colnames(qtlSumStatsExample)))
     expect_null(pecotmr:::.traitPosFor(
         qtlSumStatsExample,
+        as.character(qtlSumStatsExample$study)[[1L]],
         as.character(qtlSumStatsExample$context)[[1L]],
         as.character(qtlSumStatsExample$trait)[[1L]]
     ))
+})
+
+test_that("each study keeps its own anchors for a shared (context, trait)", {
+    # Two studies carry brain:G1 at different positions and spans; a row
+    # named by its study gets that study's, not the first study's.
+    ss <- QtlSumStats(
+        studyName = c("S1", "S2"),
+        context = c("brain", "brain"),
+        trait = c("G1", "G1"),
+        entry = list(
+            .je_mkSsEntry("chr1", c(100L, 200L)),
+            .je_mkSsEntry("chr1", c(300L, 400L))
+        ),
+        genome = "hg38",
+        traitPos = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(500L, 900L), width = 1L)
+        )
+    )
+    tp <- pecotmr:::.anchorVector(
+        ss,
+        c("S2", "S1"),
+        c("brain", "brain"),
+        c("G1", "G1"),
+        kind = "traitPos"
+    )
+    expect_equal(GenomicRanges::start(tp), c(900L, 500L))
+    rg <- pecotmr:::.fitRegionFor(ss, "S2", "brain", "G1")
+    expect_equal(
+        c(GenomicRanges::start(rg), GenomicRanges::end(rg)),
+        c(300L, 400L)
+    )
 })
 
 test_that("the fit region of a QtlSumStats row is its variant span", {
     # Sumstats carry no cis-window, so the fitted span IS the region --
     # deliberately different from traitPos (500) above.
     ss <- .je_ssWithTraitPos()
-    r <- pecotmr:::.fitRegionFor(ss, "brain", "G1")
+    r <- pecotmr:::.fitRegionFor(ss, "S", "brain", "G1")
     expect_s4_class(r, "GRanges")
     expect_equal(GenomicRanges::start(r), 100L)
     expect_equal(GenomicRanges::end(r), 200L)
-    expect_null(pecotmr:::.fitRegionFor(ss, "brain", "absentTrait"))
+    expect_null(pecotmr:::.fitRegionFor(ss, "S", "brain", "absentTrait"))
 })
 
 test_that("the fit region of a QtlDataset row is traitPos +/- the cis window", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
     cx <- contexts(qd)[[1L]]
-    tr <- rownames(molecularTraits(qd, contexts = cx))[[1L]]
-    tp <- pecotmr:::.traitPosFor(qd, cx, tr)
-    bare <- pecotmr:::.fitRegionFor(qd, cx, tr)
-    wide <- pecotmr:::.fitRegionFor(qd, cx, tr, cisWindow = 1e5)
+    tr <- rownames(molecularTraits(qd, context = cx)[[cx]])[[1L]]
+    st <- studyName(qd)
+    tp <- pecotmr:::.traitPosFor(qd, st, cx, tr)
+    bare <- pecotmr:::.fitRegionFor(qd, st, cx, tr)
+    wide <- pecotmr:::.fitRegionFor(qd, st, cx, tr, cisWindow = 1e5)
     # With no window the region collapses onto the trait position.
     expect_equal(GenomicRanges::start(bare), GenomicRanges::start(tp))
     # With one it is symmetric about it.
@@ -2559,14 +2628,15 @@ test_that("the anchors are NULL for a trait the dataset does not carry", {
     data(qtlDatasetExample)
     qd <- qtlDatasetExample
     cx <- contexts(qd)[[1L]]
-    expect_null(pecotmr:::.traitPosFor(qd, cx, "absentTrait"))
-    expect_null(pecotmr:::.traitPosFor(qd, "absentContext", "anything"))
-    expect_null(pecotmr:::.fitRegionFor(qd, cx, "absentTrait"))
+    st <- studyName(qd)
+    expect_null(pecotmr:::.traitPosFor(qd, st, cx, "absentTrait"))
+    expect_null(pecotmr:::.traitPosFor(qd, st, "absentContext", "anything"))
+    expect_null(pecotmr:::.fitRegionFor(qd, st, cx, "absentTrait"))
 })
 
 test_that("the anchors are NULL for an unsupported input class", {
-    expect_null(pecotmr:::.traitPosFor(42, "a", "b"))
-    expect_null(pecotmr:::.fitRegionFor(42, "a", "b"))
+    expect_null(pecotmr:::.traitPosFor(42, "s", "a", "b"))
+    expect_null(pecotmr:::.fitRegionFor(42, "s", "a", "b"))
 })
 
 
@@ -2588,7 +2658,7 @@ test_that("a sumstats entry with no variants has no fit region", {
         entry = list(emptyEntry),
         genome = "hg38"
     )
-    expect_null(pecotmr:::.fitRegionFor(ss, "brain", "G0"))
+    expect_null(pecotmr:::.fitRegionFor(ss, "S", "brain", "G0"))
 })
 
 test_that("slicing a CV result to one condition tolerates absent payloads", {
@@ -2630,12 +2700,14 @@ test_that("the anchor vector keeps traitPos and region distinct", {
     ss <- .je_ssWithTraitPos()
     region <- pecotmr:::.anchorVector(
         ss,
+        c("S", "S"),
         c("brain", "brain"),
         c("G1", "G2"),
         kind = "region"
     )
     anchors <- pecotmr:::.anchorVector(
         ss,
+        c("S", "S"),
         c("brain", "brain"),
         c("G1", "G2"),
         kind = "traitPos"
@@ -2845,7 +2917,7 @@ test_that(".jointTwasCv prefers per-call CV settings over the config", {
             weightMethods,
             fitRetention,
             maxNumVariants,
-            numThreads,
+            BPPARAM,
             dataDrivenPriorMatricesCv,
             verbose,
             seed
@@ -2913,8 +2985,14 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
     )
     local_mocked_bindings(
         studyName = function(data) "S1",
-        molecularTraits = function(data, contexts) phenotypes,
-        .fmResidPheno = function(data, contexts, traitId, naAction, ...) {
+        .qtlContextSe = function(data, context) phenotypes,
+        .fmResidPheno = function(
+            data,
+            contexts,
+            traitId,
+            phenotypeFilter,
+            ...
+        ) {
             matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "t1"))
         },
         .fmResidGeno = function(
@@ -2942,11 +3020,11 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
     pecotmr:::.enumUnivariateIndividual(
         NULL,
         scope,
-        list(region = "chr1:1-1000")
+        list(region = GenomicRanges::GRanges("chr1:1-1000"))
     )
     # An explicit region replaces the trait-anchored cis window entirely --
     # neither traitId nor cisWindow is passed down.
-    expect_equal(seen$region, "chr1:1-1000")
+    expect_equal(seen$region, GenomicRanges::GRanges("chr1:1-1000"))
     expect_null(seen$cisWindow)
     expect_null(seen$traitId)
 })
@@ -3158,7 +3236,7 @@ test_that(".twasEnsembleCollect answers empty parts when no token contributes", 
     expect_identical(out$rsq, c())
 })
 
-test_that(".jointAfForGroup resolves allele frequencies for an individual group", {
+test_that(".jointAfForGroup is NULL without a QtlDataset or individual group", {
     data(qtlDatasetExample)
     X <- matrix(
         c(0, 1, 2, 1, 2, 0),
@@ -3173,7 +3251,8 @@ test_that(".jointAfForGroup resolves allele frequencies for an individual group"
     )
     # Not a QtlDataset -> no af rather than an error.
     expect_null(.jointAfForGroup(NULL, g))
-    # A SumStats group has no design matrix to take frequencies from.
+    # Anything but an individual group has no design matrix to read
+    # frequencies from.
     expect_null(.jointAfForGroup(qtlDatasetExample, "not a group"))
 })
 
@@ -3242,7 +3321,6 @@ test_that(".jointMrmashRssWeights passes the caller's mr.mash options", {
             coverage = 0.95,
             crossValidationParam = list(
                 folds = 2,
-                numThreads = 1,
                 fitFullData = FALSE
             )
         )
@@ -3362,4 +3440,74 @@ test_that(".jointGroupSelect drops pairs a per-context traitId leaves out", {
         g,
         list(A = list(brain = "g2", liver = "g2"))
     ))
+})
+
+# ===========================================================================
+# A summary-statistics joint group reads one LD matrix
+# ===========================================================================
+
+# Two QtlSumStats rows (contexts c1, c2 of one study and trait) over the same
+# five variants, each on the LD reference given for it.
+.je_twoRowSs <- function(refs) {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:5), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        A1 = "A",
+        A2 = "G",
+        Z = seq_len(5) / 10,
+        N = 100L
+    )
+    QtlSumStats(
+        studyName = c("S", "S"),
+        context = c("c1", "c2"),
+        trait = c("t1", "t1"),
+        entry = list(gr, gr),
+        genome = "hg19",
+        ldReference = refs,
+        qcOptions = list(step1 = "ok")
+    )
+}
+
+# An LdMatrix over those five variants.
+.je_ldm <- function(rho) {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    LdMatrix(`dimnames<-`(rho^abs(outer(1:5, 1:5, "-")), list(ids, ids)))
+}
+
+test_that(".jointRowsLdRef returns the reference a group's rows share", {
+    ldm <- .je_ldm(0.2)
+    expect_identical(
+        pecotmr:::.jointRowsLdRef(.je_twoRowSs(ldm), 1:2, "probe"),
+        ldm
+    )
+})
+
+test_that(".jointRowsLdRef refuses rows on different references", {
+    # A joint fit reads one LD matrix for every condition, so fitting these
+    # together would put one row against LD it was never harmonized to.
+    ss <- .je_twoRowSs(list(.je_ldm(0.2), .je_ldm(0.6)))
+    expect_error(
+        pecotmr:::.jointRowsLdRef(ss, 1:2, "probe"),
+        "probe: a joint fit uses one LD matrix"
+    )
+    expect_error(
+        pecotmr:::.jointRowsLdRef(ss, 1:2, "probe"),
+        "S:c1:t1 -> ld1; S:c2:t1 -> ld2"
+    )
+})
+
+test_that("a cross-context sumstats group refuses rows on two references", {
+    ss <- .je_twoRowSs(list(.je_ldm(0.2), .je_ldm(0.6)))
+    scope <- list(
+        studies = "S",
+        contexts = list(S = c("c1", "c2")),
+        traits = list(S = "t1")
+    )
+    expect_error(
+        pecotmr:::.enumCrossContextSumstats(ss, scope),
+        "jointCrossContext \\(QtlSumStats\\): a joint fit uses one LD"
+    )
 })

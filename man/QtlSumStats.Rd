@@ -13,9 +13,11 @@ QtlSumStats(
   ldReference = NULL,
   varY = NA_real_,
   nSample = NULL,
-  qcInfo = list(),
+  qcOptions = list(),
   traitPos = NULL,
-  extraCols = list()
+  region = NULL,
+  extraCols = list(),
+  metadata = list()
 )
 }
 \arguments{
@@ -29,12 +31,13 @@ QtlSumStats(
 Same length as \code{study}, \code{context}, and \code{trait}.}
 
 \item{genome}{Single character string giving the genome build (e.g.,
-\code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
-entries share the same LD reference.}
+\code{"hg19"}, \code{"hg38"}). One build per collection.}
 
 \item{ldReference}{The LD reference: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
-\code{\link{LdMatrix}}.}
+\code{\link{LdMatrix}}, used for every tuple, or a list with one per
+tuple when they sit on different references. Each distinct reference is
+stored once, and the \code{ldReference} column names each row's.}
 
 \item{varY}{Optional numeric vector of per-tuple phenotype variances
 (\code{NA_real_} entries allowed).}
@@ -47,32 +50,46 @@ no per-variant \code{N} column. Named \code{nSample} to avoid clashing with
 collections carry no case/control counts (molecular traits are
 quantitative), so only this total-N fallback is exposed.}
 
-\item{qcInfo}{A \code{list} recording which QC steps ran. Empty \code{list()}
-on construction; populated by \code{summaryStatsQc()} with a per-step audit
-record. Fine-mapping / TWAS pipelines reject inputs where
-\code{length(qcInfo(x)) == 0}.}
+\item{qcOptions}{A \code{list} recording the QC that ran. Empty
+\code{list()} on construction; \code{summaryStatsQc()} fills it.
+Fine-mapping / TWAS pipelines reject inputs where
+\code{length(qcOptions(x)) == 0}.}
 
 \item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
 \code{NULL}), carried forward as provenance; not part of the identity key.
-\code{NULL} (default) omits the column.}
+\code{NULL} (default) omits the column. A pipeline given a
+\code{cisWindow} analyses each tuple over \code{traitPos} \eqn{\pm}
+\code{cisWindow}.}
 
-\item{extraCols}{Optional named list of additional per-tuple columns to
+\item{region}{Optional analysis window of each tuple: a \code{GRanges},
+or the path of a BED file, read as BED with a 0-based start. One window
+for every tuple, or one per tuple. A tuple's variants outside its window
+are dropped with a warning, and its \code{region} is the window,
+recorded as given in \code{regionGiven}. Without it, a tuple's
+\code{region} is the span of its variants as built, before any QC.}
+
+\item{extraCols}{Optional named list (or \code{DataFrame} /
+\code{data.frame}) of additional per-tuple columns to
 attach to the collection's \code{mcols}. Named rather than variadic
 because the base class's own constructor, \code{GRangesList(...)}, uses
 \code{...} for its \emph{elements}: a bare \code{...} here would read
 as adding an entry rather than a metadata column.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{QtlSumStats} object.
 }
 \description{
-Construct a \code{QtlSumStats} S4 DFrame-subclass collection
-  from per-tuple vectors and a list of \code{GRanges} entries (one per
-  tuple), plus a single LD reference and a single genome build that apply
-  to the whole collection. Each \code{GRanges} entry must carry per-variant
-  statistics in its mcols (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
-  \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE},
-  \code{P}).
+Construct a \code{QtlSumStats} S4 collection from per-tuple
+  vectors and a list of \code{GRanges} entries (one per tuple), plus the LD
+  reference(s) the rows were harmonized against and a single genome build
+  that applies to the whole collection. Each \code{GRanges} entry must
+  carry per-variant statistics in its mcols (\code{SNP}, \code{A1},
+  \code{A2}, \code{Z}, \code{N}; plus optional \code{MAF}, \code{INFO},
+  \code{BETA}, \code{SE}, \code{P}).
 }
 \examples{
 panel <- readGenotypes(

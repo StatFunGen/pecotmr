@@ -55,8 +55,19 @@ test_that("ColocResult: stores one element per pair with its variants", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
     expect_s4_class(x, "ColocResult")
     expect_equal(nrow(x), 1L)
-    expect_equal(lengths(x), 3L)
+    expect_equal(unname(lengths(x)), 3L)
     expect_equal(x$PP.H4.abf, 0.6)
+})
+
+test_that("ColocResult: keeps each pair's LD reference", {
+    ids <- c("chr1:100:C:T", "chr1:200:A:G")
+    ldm <- LdMatrix(matrix(c(1, 0.2, 0.2, 1), 2, dimnames = list(ids, ids)))
+    x <- ColocResult(.cr_pairs(), .cr_variants(), ldReference = ldm)
+    expect_identical(ldReference(x), list(ld1 = ldm))
+    expect_equal(x$ldReference, "ld1")
+    none <- ColocResult(.cr_pairs(), .cr_variants())
+    expect_identical(ldReference(none), list())
+    expect_true(is.na(none$ldReference))
 })
 
 test_that("ColocResult: rejects an element with no per-variant layer", {
@@ -96,14 +107,18 @@ test_that("ColocResult: variants keep their alleles, so ids round-trip", {
 test_that("ColocResult: is reachable by range, not just by identity", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
     win <- GenomicRanges::GRanges("chr1", IRanges::IRanges(150, 250))
-    expect_equal(sum(lengths(subsetRegion(x, win))), 1L)
+    expect_equal(
+        sum(lengths(endoapply(x, IRanges::subsetByOverlaps, ranges = win))),
+        1L
+    )
     expect_equal(length(IRanges::subsetByOverlaps(x, win)), 1L)
 })
 
 test_that("colocVariants: colocPp is the pair posterior times the variant", {
     x <- ColocResult(.cr_pairs(pp4 = 0.5), .cr_variants())
     v <- colocVariants(x)
-    expect_equal(nrow(v), 3L)
+    expect_s4_class(v, "GRanges")
+    expect_equal(length(v), 3L)
     expect_equal(v$colocPp, 0.5 * c(0.6, 0.3, 0.1))
 })
 
@@ -154,29 +169,41 @@ test_that("colocGenes: keeps distinct second-side traits apart", {
     expect_setequal(genes$gwasTrait, c("h1", "h2"))
 })
 
-test_that("colocVariants(pooled): pools by the same rule as genes", {
+test_that("colocPooledVariants: pools by the same rule as genes", {
     pairs <- .cr_pairs(
         qtlCs = c(1L, 2L),
         blockId = c("b1", "b1"),
         pp4 = c(0.5, 0.25)
     )
     x <- ColocResult(pairs, .cr_variants(2L))
-    pooled <- colocVariants(x, pooled = TRUE)
-    expect_equal(nrow(pooled), 3L)
+    pooled <- colocPooledVariants(x)
+    expect_equal(length(pooled), 3L)
     lead <- pooled[pooled$variant_id == "chr1:100:A:G", ]
     expect_equal(lead$colocPp, 1 - (1 - 0.5 * 0.6) * (1 - 0.25 * 0.6))
 })
 
 test_that("colocCredibleSets: takes the smallest set reaching coverage", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
-    expect_equal(colocCredibleSets(x, coverage = 0.5)$csSize, 1L)
-    expect_equal(colocCredibleSets(x, coverage = 0.9)$csSize, 2L)
-    expect_equal(colocCredibleSets(x, coverage = 0.95)$csSize, 3L)
+    expect_equal(mcols(colocCredibleSets(x, coverage = 0.5))$csSize, 1L)
+    expect_equal(mcols(colocCredibleSets(x, coverage = 0.9))$csSize, 2L)
+    expect_equal(mcols(colocCredibleSets(x, coverage = 0.95))$csSize, 3L)
+})
+
+test_that("colocCredibleSets: each set's members are its element", {
+    x <- ColocResult(.cr_pairs(), .cr_variants())
+    cs <- colocCredibleSets(x, coverage = 0.9)
+    expect_s4_class(cs, "GRangesList")
+    expect_equal(unname(lengths(cs)), mcols(cs)$csSize)
+    expect_equal(
+        .grVariantIds(cs[[1L]]),
+        c("chr1:100:A:G", "chr1:200:C:T")
+    )
+    expect_equal(mcols(cs[[1L]])$SNP.PP.H4, c(0.6, 0.3))
 })
 
 test_that("colocCredibleSets: reports the lead variant and coverage", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
-    cs <- colocCredibleSets(x, coverage = 0.9)
+    cs <- mcols(colocCredibleSets(x, coverage = 0.9))
     expect_equal(cs$leadVariant, "chr1:100:A:G")
     expect_equal(cs$leadPp, 0.6)
     expect_equal(cs$csCoverage, 0.9)
@@ -185,17 +212,17 @@ test_that("colocCredibleSets: reports the lead variant and coverage", {
 test_that("colocCredibleSets: minPp4 drops pairs before any LD work", {
     pairs <- .cr_pairs(qtlCs = c(1L, 2L), pp4 = c(0.8, 0.1))
     x <- ColocResult(pairs, .cr_variants(2L))
-    expect_equal(nrow(colocCredibleSets(x)), 2L)
-    expect_equal(nrow(colocCredibleSets(x, minPp4 = 0.5)), 1L)
-    expect_equal(nrow(colocCredibleSets(x, minPp4 = 0.99)), 0L)
+    expect_length(colocCredibleSets(x), 2L)
+    expect_length(colocCredibleSets(x, minPp4 = 0.5), 1L)
+    expect_length(colocCredibleSets(x, minPp4 = 0.99), 0L)
 })
 
 test_that("colocCredibleSets: requireMaxH4 keeps only H4-dominant pairs", {
     pairs <- .cr_pairs(qtlCs = c(1L, 2L), pp4 = c(0.8, 0.1))
     x <- ColocResult(pairs, .cr_variants(2L))
     cs <- colocCredibleSets(x, requireMaxH4 = TRUE)
-    expect_equal(nrow(cs), 1L)
-    expect_equal(cs$qtlCs, 1L)
+    expect_length(cs, 1L)
+    expect_equal(mcols(cs)$qtlCs, 1L)
 })
 
 test_that("colocCredibleSets: purity is NA, not passing, without LD", {
@@ -204,16 +231,27 @@ test_that("colocCredibleSets: purity is NA, not passing, without LD", {
     # to be attached.
     x <- ColocResult(.cr_pairs(), .cr_variants())
     cs <- colocCredibleSets(x)
-    expect_true(is.na(cs$purity))
-    expect_equal(nrow(colocCredibleSets(x, minAbsCorr = 0.99)), 1L)
+    expect_true(is.na(mcols(cs)$purity))
+    expect_length(colocCredibleSets(x, minAbsCorr = 0.99), 1L)
 })
 
-test_that("as.data.frame returns the pair view", {
+test_that("colocCredibleSets: carries the result's genome", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
+    GenomeInfoDb::genome(x) <- "hg38"
+    cs <- colocCredibleSets(x)
+    expect_equal(unique(unname(GenomeInfoDb::genome(cs))), "hg38")
+})
+
+test_that("colocPairs is the pair view; as.data.frame is standard", {
+    x <- ColocResult(.cr_pairs(), .cr_variants())
+    pairs <- colocPairs(x)
+    expect_equal(nrow(pairs), 1L)
+    expect_equal(pairs$PP.H4.abf, 0.6)
+    # as.data.frame() is the inherited GRangesList coercion: one row per
+    # (pair, variant), placed by its range.
     df <- as.data.frame(x)
-    expect_s3_class(df, "data.frame")
-    expect_equal(nrow(df), 1L)
-    expect_equal(df$PP.H4.abf, 0.6)
+    expect_true(all(c("group", "seqnames", "start") %in% names(df)))
+    expect_equal(nrow(df), sum(lengths(x)))
 })
 
 test_that(".crPivotColocResults: maps results column K to summary row K", {
@@ -298,14 +336,19 @@ test_that("show on an empty ColocResult stops after the header", {
     )[seq_len(n)]
 }
 
+# The panel as a pair's LD reference, keyed the way a ColocResult keys it.
+.cr_refs <- function() {
+    list(ld1 = .cr_panel())
+}
+
 test_that("a singleton credible set is pure by definition", {
     # No pair to correlate; susie treats it as pure rather than unmeasurable.
-    expect_equal(.crPurityOne(.cr_panelIds(1L), .cr_panel()), 1)
+    expect_equal(.crPurityOne(.cr_panelIds(1L), "ld1", .cr_refs()), 1)
 })
 
 test_that("purity is the minimum absolute correlation among members", {
     ids <- .cr_panelIds(3L)
-    pur <- .crPurityOne(ids, .cr_panel())
+    pur <- .crPurityOne(ids, "ld1", .cr_refs())
     R <- computeLd(.cr_panel(), snpIdx = 1:3)
     expect_equal(pur, min(abs(R[upper.tri(R)])), tolerance = 1e-8)
 })
@@ -314,29 +357,48 @@ test_that("purity is NA when the panel cannot supply the members", {
     # Reported honestly rather than defaulted to a passing value: an
     # unmeasurable purity must not look like a pure set.
     expect_true(is.na(
-        .crPurityOne(c("chr9:1:A:G", "chr9:2:C:T"), .cr_panel())
+        .crPurityOne(c("chr9:1:A:G", "chr9:2:C:T"), "ld1", .cr_refs())
     ))
 })
 
-test_that("purity is NA for every set when there is no LD reference", {
-    out <- tibble(csVariants = list(c("a", "b"), c("c", "d")))
-    expect_equal(.crPuritiesFor(out, NULL), c(NA_real_, NA_real_))
+# One credible-set record as .crCredibleSets() builds it: the members'
+# ranges and the pair row that names its LD reference.
+.cr_set <- function(ids, ldReference) {
+    list(
+        members = .variantIdsToGRanges(ids, what = "variant_id"),
+        row = tibble(ldReference = ldReference)
+    )
+}
+
+test_that("purity is NA for every set whose pair has no LD reference", {
+    sets <- list(
+        .cr_set(c("chr1:100:A:G", "chr1:200:C:T"), NA_character_),
+        .cr_set("chr1:300:G:A", NA_character_)
+    )
+    expect_equal(
+        map_dbl(sets, .crSetPurity, refs = list()),
+        c(NA_real_, NA_real_)
+    )
 })
 
-test_that("purity is computed per set when an LD reference is supplied", {
-    # The counterpart of the NULL case above: with a panel in hand each set
-    # is mapped through .crPurityOne rather than short-circuiting to NA.
+test_that("purity is computed per set against its own pair's reference", {
+    # The counterpart of the no-reference case above: each set is mapped
+    # through .crPurityOne with the reference its pair names.
     ids <- .cr_panelIds(3L)
-    out <- tibble(csVariants = list(ids, ids[[1L]]))
-    pur <- .crPuritiesFor(out, .cr_panel())
-    expect_length(pur, 2L)
-    expect_false(anyNA(pur))
+    sets <- list(
+        .cr_set(ids, "ld1"),
+        .cr_set(ids[[1L]], "ld1"),
+        .cr_set(ids, NA_character_)
+    )
+    pur <- map_dbl(sets, .crSetPurity, refs = .cr_refs())
+    expect_length(pur, 3L)
     expect_equal(pur[[2L]], 1) # singleton is pure by definition
     expect_equal(
         pur[[1L]],
-        .crPurityOne(ids, .cr_panel()),
+        .crPurityOne(ids, "ld1", .cr_refs()),
         tolerance = 1e-8
     )
+    expect_true(is.na(pur[[3L]]))
 })
 
 # ===========================================================================
@@ -386,6 +448,20 @@ test_that("the views answer an empty collection with empty tables", {
     expect_equal(nrow(.crLongVariants(empty)), 0L)
     expect_equal(.crPairFilter(empty, 0, FALSE), integer(0))
     expect_equal(nrow(colocGenes(empty)), 0L)
+    expect_length(colocPooledVariants(empty), 0L)
+    expect_s4_class(colocPooledVariants(empty), "GRanges")
+})
+
+test_that("the tabular views are DataFrames, the ranged ones GRanges", {
+    x <- ColocResult(.cr_pairs(), .cr_variants())
+    expect_s4_class(colocPairs(x), "DataFrame")
+    expect_s4_class(colocGenes(x), "DataFrame")
+    expect_s4_class(colocCredibleSets(x, coverage = 0.5), "GRangesList")
+    expect_s4_class(mcols(colocCredibleSets(x, coverage = 0.5)), "DataFrame")
+    expect_s4_class(colocVariants(x), "GRanges")
+    expect_s4_class(colocPooledVariants(x), "GRanges")
+    # Column names survive the conversion as written.
+    expect_true("PP.H4.abf" %in% colnames(colocPairs(x)))
 })
 
 test_that("pivoting a per-row column that is absent yields the empty frame", {
@@ -394,9 +470,13 @@ test_that("pivoting a per-row column that is absent yields the empty frame", {
 })
 
 test_that("a NULL purity cutoff leaves the credible sets untouched", {
-    # NULL means "do not filter", which is different from filtering at 0.
-    out <- tibble(a = 1, purity = NA_real_)
-    expect_identical(.crApplyPurityFilter(out, NULL), out)
+    # NULL means "do not filter": a set a cutoff would drop stays.
+    ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    R <- matrix(0.2, 3L, 3L, dimnames = list(ids, ids))
+    diag(R) <- 1
+    x <- ColocResult(.cr_pairs(), .cr_variants(), ldReference = LdMatrix(R))
+    expect_equal(mcols(colocCredibleSets(x, minAbsCorr = NULL))$purity, 0.2)
+    expect_length(colocCredibleSets(x, minAbsCorr = 0.8), 0L)
 })
 
 test_that("a pair with no variants contributes no credible set", {
@@ -409,6 +489,14 @@ test_that("a pair with no variants contributes no credible set", {
     cr <- ColocResult(.cr_pairs(), list(noVariants))
     expect_equal(length(cr[[1L]]), 0L)
     expect_null(.crCsForPair(1L, cr, coverage = 0.95))
-    # ...and the accessor over that result is an empty table, not an error.
-    expect_equal(nrow(colocCredibleSets(cr)), 0L)
+    # ...and the accessor over that result is an empty list, not an error.
+    expect_length(colocCredibleSets(cr), 0L)
+    expect_s4_class(colocCredibleSets(cr), "GRangesList")
+})
+
+test_that("ColocResult() keeps the caller's metadata", {
+    x <- ColocResult(.cr_pairs(), .cr_variants(), metadata = list(run = "r1"))
+    expect_equal(S4Vectors::metadata(x), list(run = "r1"))
+    plain <- ColocResult(.cr_pairs(), .cr_variants())
+    expect_equal(S4Vectors::metadata(plain), list())
 })

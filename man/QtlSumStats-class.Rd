@@ -12,10 +12,21 @@ S4 collection of QTL summary statistics keyed by the identity
 }
 \details{
 Required columns: \code{study}, \code{context} and \code{trait};
-  the 3-tuple is unique. The class-level slots inherited from
-  \code{\linkS4class{SumStatsBase}} -- \code{ldReference}, \code{genome} and
-  \code{qcInfo} -- apply uniformly to every row, and \code{qcInfo} records
-  which \code{\link{summaryStatsQc}} passes have run.
+  the 3-tuple is unique. The constructor also adds each tuple's analysis
+  window: \code{region}, a \code{GRanges} with one range per element, and
+  \code{regionGiven}, \code{TRUE} where the window was given as a
+  \code{region} and \code{FALSE} where it is the span of the tuple's
+  variants when the collection was first built, before any QC. A QC pass
+  carries both unchanged; the span of the variants left is
+  \code{range(x)}. An optional \code{traitPos} gives the trait's own
+  coordinates, from which a pipeline's \code{cisWindow} derives a cis
+  window. The class-level slots inherited from
+  \code{\linkS4class{SumStatsBase}} -- \code{genome} and
+  \code{qcOptions} -- apply uniformly to every row, and \code{qcOptions}
+  records the \code{\link{summaryStatsQc}} options that ran (what QC did
+  to each row is \code{\link{qcInfo}}); \code{ldReference} holds
+  each distinct LD reference once, and the \code{ldReference} column names
+  the one each row uses.
 }
 \seealso{
 \code{\link{QtlSumStats}} for the constructor and

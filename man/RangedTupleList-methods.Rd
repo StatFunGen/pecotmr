@@ -7,9 +7,13 @@
 \alias{colnames,RangedTupleList-method}
 \alias{$,RangedTupleList-method}
 \alias{$<-,RangedTupleList-method}
+\alias{elementMetadata<-,RangedTupleList-method}
 \alias{[,RangedTupleList,ANY,ANY,ANY-method}
 \alias{[[<-,RangedTupleList,ANY,ANY-method}
 \alias{endoapply,RangedTupleList-method}
+\alias{sort,RangedTupleList-method}
+\alias{unique,RangedTupleList-method}
+\alias{trim,RangedTupleList-method}
 \alias{bindROWS,RangedTupleList-method}
 \title{RangedTupleList methods}
 \usage{
@@ -23,11 +27,19 @@
 
 \S4method{$}{RangedTupleList}(x, name) <- value
 
+\S4method{elementMetadata}{RangedTupleList}(x, ...) <- value
+
 \S4method{[}{RangedTupleList,ANY,ANY,ANY}(x, i, j, ..., drop = TRUE)
 
 \S4method{[[}{RangedTupleList,ANY,ANY}(x, i, j, ...) <- value
 
 \S4method{endoapply}{RangedTupleList}(X, FUN, ...)
+
+\S4method{sort}{RangedTupleList}(x, decreasing = FALSE, ...)
+
+\S4method{unique}{RangedTupleList}(x, incomparables = FALSE, ...)
+
+\S4method{trim}{RangedTupleList}(x, use.names = TRUE, ...)
 
 \S4method{bindROWS}{RangedTupleList}(
   x,
@@ -44,28 +56,36 @@
 
 \item{name}{An \code{mcols} column name.}
 
-\item{value}{Replacement value for that column.}
+\item{value}{For \code{$<-}, the replacement column; for
+\code{elementMetadata<-}, the replacement metadata table.}
+
+\item{...}{Additional arguments passed on.}
 
 \item{i}{Element selector.}
 
 \item{j}{Not supported; supplying it is an error.}
 
-\item{...}{Additional arguments passed on.}
-
 \item{drop}{Passed through to the inherited method.}
 
 \item{FUN}{A function applied to each element, returning a \code{GRanges}.}
 
+\item{decreasing}{Passed to each element's \code{sort()}.}
+
+\item{incomparables}{Passed to each element's \code{unique()}.}
+
+\item{use.names}{For \code{trim()}, passed to each element's
+\code{trim()}; otherwise unused, present for generic compatibility.}
+
 \item{objects}{Further collections to append, as \code{c()} and
 \code{append()} pass them.}
 
-\item{use.names, ignore.mcols, check}{Unused; present for generic
-compatibility.}
+\item{ignore.mcols, check}{Unused; present for generic compatibility.}
 }
 \value{
 \code{nrow()} and \code{ncol()} integers; \code{colnames()} a
-  character vector; \code{$} a metadata column; \code{$<-}, \code{[} and
-  \code{endoapply()} a collection of the same class.
+  character vector; \code{$} a metadata column; \code{$<-},
+  \code{elementMetadata<-}, \code{[}, \code{endoapply()}, \code{sort()},
+  \code{unique()} and \code{trim()} a collection of the same class.
 }
 \description{
 Container and metadata methods shared by every
@@ -74,10 +94,18 @@ Container and metadata methods shared by every
   \code{nrow()} counts elements, \code{ncol()} counts metadata columns and
   \code{colnames()} names them, so the collections read exactly as the
   \code{DFrame}-shaped ones they replace. \code{$} and \code{$<-}
-  read and write \code{mcols} columns. \code{[} selects elements and
+  read and write \code{mcols} columns. Storing metadata, whether by
+  \code{$<-}, \code{mcols<-} or its older spellings \code{values<-} and
+  \code{elementMetadata<-}, refuses an identity column (\code{study},
+  \code{context}, \code{trait}, \code{method}, their \code{gwas}
+  counterparts and \code{blockId}) that is not character; \code{NA} values
+  are allowed. \code{[} selects elements and
   \strong{rejects} a second argument, because the stock method would
   silently discard it. \code{endoapply()} maps over the elements and
-  rebuilds the object with its collection-level slots intact.
+  rebuilds the object with its collection-level slots intact;
+  \code{sort()}, \code{unique()} and \code{trim()} work on each element
+  the same way, so they too return the collection's own class rather than
+  a bare \code{GRangesList}.
 }
 \examples{
 data(qtlSumStatsMulticontextExample)

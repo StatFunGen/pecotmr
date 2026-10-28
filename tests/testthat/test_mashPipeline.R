@@ -1,8 +1,7 @@
 # =============================================================================
-# Tests for utility helpers exported from R/mashPipeline.R that don't
-# require mashr / flashier installs:
-#   sanitizeMashData, makePairwiseContrastCol, sliceMashData,
-#   metaAnalysisPerCondition
+# Tests for R/mashPipeline.R: the mash pipeline and its extracted building
+# blocks, the contrast and feature-score helpers, and the input preparation
+# that turns SumStats / fine-mapping objects into mash matrices.
 
 # Fixtures for the input-preparation tests, moved here with them.
 
@@ -20,7 +19,7 @@
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(nSnp)),
-            CHR = "1",
+            CHR = "chr1",
             BP = seq(100L, by = 100L, length.out = nSnp),
             A1 = "A",
             A2 = "G",
@@ -49,7 +48,7 @@
         entry = entries,
         genome = "hg19",
         ldReference = gh,
-        qcInfo = list(prebuilt = "synthetic")
+        qcOptions = list(prebuilt = "synthetic")
     )
 }
 
@@ -60,7 +59,7 @@
         format = "plink2",
         snpInfo = data.frame(
             SNP = "chr1:100:A:G",
-            CHR = "1",
+            CHR = "chr1",
             BP = 100L,
             A1 = "A",
             A2 = "G",
@@ -123,12 +122,12 @@
         )
     }
     vids <- paste0("chr1:", 100 * seq_len(6), ":A:G")
-    e1 <- fineMappingRow(
+    e1 <- FineMappingRow(
         variantIds = vids,
         susieFit = list(x = 1),
         topLoci = mkTL(c(0.5, -1, 6.0, 0.2, 1.1, -0.3), c(3, 2))
     )
-    e2 <- fineMappingRow(
+    e2 <- FineMappingRow(
         variantIds = vids,
         susieFit = list(x = 1),
         topLoci = mkTL(c(-0.4, 0.7, 0.1, 5.0, -1.2, 0.6), c(4, 5))
@@ -141,6 +140,71 @@
         entry = list(e1, e2)
     )
 }
+
+# The mash fixture and the fits several tests only read, each built on first
+# use and then shared. Every mash() call forces three garbage collections
+# (mashr times each step with system.time()), which costs far more than the
+# fit itself, so repeated fits are what made this file slow.
+delayedAssign(".mpSs", mashFixture())
+# The default component set, and the default prior refined from it.
+delayedAssign(
+    ".mpDefaultComps",
+    suppressMessages(suppressWarnings(mashCovarianceComponents(
+        list(strong = .mpSs),
+        alpha = 0,
+        vhat = diag(3),
+        nPcs = 2L,
+        setSeed = 1L
+    )))
+)
+delayedAssign(
+    ".mpDefaultPrior",
+    suppressMessages(suppressWarnings(mashPriorCovariances(
+        list(strong = .mpSs),
+        alpha = 0,
+        vhat = diag(3),
+        nPcs = 2L,
+        setSeed = 1L
+    )))
+)
+# The whole pipeline: null-based Vhat, then the default prior chain.
+delayedAssign(
+    ".mpSimpleFull",
+    suppressMessages(suppressWarnings(mashPipeline(
+        list(strong = .mpSs, random = .mpSs, null = .mpSs),
+        alpha = 0,
+        residualCorrelationMethod = "simple",
+        setSeed = 1L
+    )))
+)
+# mashPipeline with the tiny prior under each residual-correlation setup the
+# residualCorrelationMethod tests compare. evaluate_promise() keeps the
+# messages a run emits next to its result.
+.mpVhatRun <- function(partitions, ...) {
+    evaluate_promise(mashPipeline(
+        set_names(rep(list(.mpSs), length(partitions)), partitions),
+        alpha = 0,
+        ...,
+        prior = MashPriorParam(priorCovariances = mashTinyPrior()),
+        setSeed = 1L
+    ))
+}
+delayedAssign(".mpVhatWithNull", .mpVhatRun(c("strong", "random", "null")))
+delayedAssign(".mpVhatWithoutNull", .mpVhatRun(c("strong", "random")))
+delayedAssign(
+    ".mpVhatIdentity",
+    .mpVhatRun(
+        c("strong", "random", "null"),
+        residualCorrelationMethod = "identity"
+    )
+)
+delayedAssign(
+    ".mpVhatSimple",
+    .mpVhatRun(
+        c("strong", "random", "null"),
+        residualCorrelationMethod = "simple"
+    )
+)
 
 # =============================================================================
 
@@ -471,7 +535,7 @@ test_that("fitMashContrast: 3-tested-conditions yields deviation + pairwise cont
 test_that("mashPipeline runs end-to-end on qtlSumStatsMulticontextExample", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     # Use the same fixture for strong/random; nPcs <= ncol - 1 (3 contexts).
     res <- suppressMessages(suppressWarnings(
         mashPipeline(
@@ -631,7 +695,7 @@ test_that("mashPipeline coerces a SimpleList before validating its names", {
 test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     vhat <- diag(3)
     # Empty list.
     expect_error(
@@ -662,7 +726,7 @@ test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
 test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     vhat <- diag(3)
     expect_error(
         suppressMessages(suppressWarnings(
@@ -680,7 +744,7 @@ test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
 test_that("mashPipeline passes supplied residualCorrelation + priorCovariances through", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     vhat <- diag(3)
     U0 <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     res <- suppressMessages(suppressWarnings(
@@ -706,18 +770,10 @@ test_that("mashPipeline passes supplied residualCorrelation + priorCovariances t
 test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
     # `residualCorrelationMethod = "simple"` runs
     # estimate_null_correlation_simple on the null set; leaving nPcs NULL
     # exercises the `nPcs <- ncol(Bhat) - 1` default in the cov_* chain.
-    res <- suppressMessages(suppressWarnings(
-        mashPipeline(
-            list(strong = ss, random = ss, null = ss),
-            alpha = 0,
-            residualCorrelationMethod = "simple",
-            setSeed = 1L
-        )
-    ))
+    res <- .mpSimpleFull
     expect_named(res, c("U", "w"))
     expect_gt(length(res$U), 0L)
     expect_true(all(map_lgl(
@@ -738,116 +794,46 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
 test_that("the default is identity regardless of which partitions are given", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    prior <- mashTinyPrior()
     # The default must not depend on data shape -- that was the old silent
     # behaviour this argument replaced. `w` is what carries the evidence: it
     # is fitted against V, so an identical `w` across the three calls is the
     # same V reaching mash() each time. (`U` is the supplied prior passed
     # through, so comparing it would prove nothing here.)
-    withNull <- suppressMessages(suppressWarnings(mashPipeline(
-        list(strong = ss, random = ss, null = ss),
-        alpha = 0,
-        prior = MashPriorParam(priorCovariances = prior),
-        setSeed = 1L
-    )))
-    withoutNull <- suppressMessages(suppressWarnings(mashPipeline(
-        list(strong = ss, random = ss),
-        alpha = 0,
-        prior = MashPriorParam(priorCovariances = prior),
-        setSeed = 1L
-    )))
-    explicit <- suppressMessages(suppressWarnings(mashPipeline(
-        list(strong = ss, random = ss, null = ss),
-        alpha = 0,
-        residualCorrelationMethod = "identity",
-        prior = MashPriorParam(priorCovariances = prior),
-        setSeed = 1L
-    )))
-    expect_equal(withNull$w, withoutNull$w)
-    expect_equal(withNull$w, explicit$w)
+    withNull <- .mpVhatWithNull$result
+    expect_equal(withNull$w, .mpVhatWithoutNull$result$w)
+    expect_equal(withNull$w, .mpVhatIdentity$result$w)
 })
 
 test_that("an unused null partition is reported", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
     # Assembling a null set and still getting identity is more often an
     # oversight than an intent, so it must not pass silently.
-    expect_message(
-        suppressWarnings(mashPipeline(
-            list(strong = ss, random = ss, null = ss),
-            alpha = 0,
-            prior = MashPriorParam(priorCovariances = mashTinyPrior()),
-            setSeed = 1L
-        )),
-        "does not use it"
-    )
+    expect_match(.mpVhatWithNull$messages, "does not use it", all = FALSE)
     # Naming identity explicitly does not change that the set is unused.
-    expect_message(
-        suppressWarnings(mashPipeline(
-            list(strong = ss, random = ss, null = ss),
-            alpha = 0,
-            residualCorrelationMethod = "identity",
-            prior = MashPriorParam(priorCovariances = mashTinyPrior()),
-            setSeed = 1L
-        )),
-        "'null' partition"
-    )
+    expect_match(.mpVhatIdentity$messages, "'null' partition", all = FALSE)
 })
 
 test_that("no unused-null notice when there is nothing to ignore", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    noNull <- function() {
-        suppressWarnings(mashPipeline(
-            list(strong = ss, random = ss),
-            alpha = 0,
-            prior = MashPriorParam(priorCovariances = mashTinyPrior()),
-            setSeed = 1L
-        ))
-    }
-    expect_no_message(noNull(), message = "'null' partition")
+    expect_false(any(grepl("'null' partition", .mpVhatWithoutNull$messages)))
     # Nor when the null set is actually being consumed.
-    usesNull <- function() {
-        suppressWarnings(mashPipeline(
-            list(strong = ss, random = ss, null = ss),
-            alpha = 0,
-            residualCorrelationMethod = "simple",
-            prior = MashPriorParam(priorCovariances = mashTinyPrior()),
-            setSeed = 1L
-        ))
-    }
-    expect_no_message(usesNull(), message = "does not use it")
+    expect_false(any(grepl("does not use it", .mpVhatSimple$messages)))
 })
 
 test_that("mashPipeline honours a data-driven residualCorrelationMethod", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    sl <- list(strong = ss, random = ss, null = ss)
-    prior <- mashTinyPrior()
-    identityFit <- suppressMessages(suppressWarnings(mashPipeline(
-        sl,
-        alpha = 0,
-        residualCorrelationMethod = "identity",
-        prior = MashPriorParam(priorCovariances = prior),
-        setSeed = 1L
-    )))
-    simpleFit <- suppressMessages(suppressWarnings(mashPipeline(
-        sl,
-        alpha = 0,
-        residualCorrelationMethod = "simple",
-        prior = MashPriorParam(priorCovariances = prior),
-        setSeed = 1L
-    )))
     # A different V has to move the fit, or the argument is not reaching it.
-    expect_false(isTRUE(all.equal(identityFit$w, simpleFit$w)))
+    expect_false(isTRUE(all.equal(
+        .mpVhatIdentity$result$w,
+        .mpVhatSimple$result$w
+    )))
 })
 
 test_that("mashPipeline rejects an unknown residualCorrelationMethod", {
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashPipeline(
             list(strong = ss, random = ss),
@@ -860,7 +846,7 @@ test_that("mashPipeline rejects an unknown residualCorrelationMethod", {
 
 test_that("a method needing a partition it lacks errors through mashPipeline", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashPipeline(
             list(strong = ss, random = ss),
@@ -874,7 +860,7 @@ test_that("a method needing a partition it lacks errors through mashPipeline", {
 test_that("a supplied residualCorrelation wins over the method", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     # 'simple' would error without a null set; the supplied matrix means the
     # estimator is never consulted.
     res <- suppressMessages(suppressWarnings(mashPipeline(
@@ -894,7 +880,7 @@ test_that("a supplied residualCorrelation wins over the method", {
 
 test_that("mashResidualCorrelation(identity) is an identity of the right size", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     v <- mashResidualCorrelation(
         list(strong = ss),
         alpha = 0,
@@ -906,7 +892,7 @@ test_that("mashResidualCorrelation(identity) is an identity of the right size", 
 
 test_that("mashResidualCorrelation(simple) returns a null correlation matrix", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, null = ss),
@@ -921,7 +907,7 @@ test_that("mashResidualCorrelation(simple) returns a null correlation matrix", {
 
 test_that("mashResidualCorrelation(simple) errors without a null entry", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashResidualCorrelation(
             list(strong = ss),
@@ -934,7 +920,7 @@ test_that("mashResidualCorrelation(simple) errors without a null entry", {
 
 test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, null = ss),
@@ -949,7 +935,7 @@ test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", 
 test_that("mashResidualCorrelation(corshrink) returns a 3x3 correlation matrix", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("CorShrink")
-    ss <- mashFixture()
+    ss <- .mpSs
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, null = ss),
@@ -963,7 +949,7 @@ test_that("mashResidualCorrelation(corshrink) returns a 3x3 correlation matrix",
 
 test_that("mashResidualCorrelation(mle) refines V against a supplied prior", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     v <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             list(strong = ss, random = ss),
@@ -971,7 +957,8 @@ test_that("mashResidualCorrelation(mle) refines V against a supplied prior", {
             method = "mle",
             priorCovariances = list(identity = diag(3)),
             nSubset = 100L,
-            maxIter = 3L,
+            # One EM refinement: each iteration is another mash() fit.
+            maxIter = 1L,
             setSeed = 1L
         )
     ))
@@ -980,7 +967,7 @@ test_that("mashResidualCorrelation(mle) refines V against a supplied prior", {
 
 test_that("mashResidualCorrelation errors when a method's inputs are missing", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashResidualCorrelation(
             list(strong = ss),
@@ -1008,16 +995,7 @@ test_that("mashResidualCorrelation errors when a method's inputs are missing", {
 test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    pc <- suppressMessages(suppressWarnings(
-        mashPriorCovariances(
-            list(strong = ss),
-            alpha = 0,
-            vhat = diag(3),
-            nPcs = 2L,
-            setSeed = 1L
-        )
-    ))
+    pc <- .mpDefaultPrior
     expect_named(pc, c("U", "w", "loglik"))
     expect_gt(length(pc$U), 0L)
     expect_true(all(map_lgl(
@@ -1028,10 +1006,10 @@ test_that("mashPriorCovariances computes the default (all-but-udr) prior", {
     expect_null(pc$loglik)
 })
 
-test_that("mashPriorCovariances passes a supplied prior through unchanged", {
+test_that("mashPriorCovariances passes a given prior through, either shape", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     U0 <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
     pc <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
@@ -1043,12 +1021,24 @@ test_that("mashPriorCovariances passes a supplied prior through unchanged", {
     ))
     expect_identical(pc$U, U0)
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
+    # A mashPriorCovariances()-shaped list(U, w, loglik) is unwrapped to the
+    # same prior and fits the same weights.
+    wrapped <- suppressMessages(suppressWarnings(
+        mashPriorCovariances(
+            list(strong = ss),
+            alpha = 0,
+            vhat = diag(3),
+            priorCovariances = list(U = U0, w = NULL, loglik = NULL)
+        )
+    ))
+    expect_equal(names(wrapped$U), names(pc$U))
+    expect_equal(wrapped$w, pc$w)
 })
 
 test_that("mashPriorCovariances validates a supplied prior", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         suppressMessages(suppressWarnings(
             mashPriorCovariances(
@@ -1076,7 +1066,7 @@ test_that("mashPriorCovariances validates a supplied prior", {
 test_that("mashPriorCovariances(flashNonneg) adds components vs flash-only", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     base <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -1087,28 +1077,24 @@ test_that("mashPriorCovariances(flashNonneg) adds components vs flash-only", {
             setSeed = 1L
         )
     ))
-    wide <- suppressMessages(suppressWarnings(
-        mashPriorCovariances(
-            list(strong = ss),
-            alpha = 0,
-            vhat = diag(3),
-            components = c("canonical", "pca", "flash", "flashNonneg"),
-            nPcs = 2L,
-            setSeed = 1L
-        )
-    ))
-    expect_gt(length(wide$U), length(base$U))
+    # The shared default prior is this same call with flashNonneg added.
+    expect_identical(
+        eval(formals(mashPriorCovariances)$components),
+        c("canonical", "pca", "flash", "flashNonneg")
+    )
+    expect_gt(length(.mpDefaultPrior$U), length(base$U))
 })
 
 test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     skip_if_not_installed("udr")
-    ss <- mashFixture()
-    # A toy-sized udr config: `n_unconstrained` dominates the cost, and the default
-    # (50, sized for many-condition data) is pathological on a 3-condition fixture
-    # (it drove a 5+ minute fit). 2 unconstrained matrices suffice to exercise the
-    # udr path.
+    ss <- .mpSs
+    # A toy-sized udr config: `n_unconstrained` dominates the cost, and the
+    # default (50, sized for many-condition data) is pathological on a
+    # 3-condition fixture (it drove a 5+ minute fit). 2 unconstrained
+    # matrices suffice to exercise the udr path, and on the beta scale each
+    # update iteration is slow, so a few iterations do too.
     pc <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -1116,7 +1102,7 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
             vhat = diag(3),
             engine = CovUdrOptions(
                 init = UdInitOptions(n_unconstrained = 2L),
-                fit = UdFitOptions(maxiter = 20L)
+                fit = UdFitOptions(maxiter = 5L)
             ),
             setSeed = 1L
         )
@@ -1129,11 +1115,33 @@ test_that("mashPriorCovariances engine 'ud' (udr) produces U + weights", {
     expect_equal(sum(pc$w), 1, tolerance = 1e-6)
 })
 
+test_that("the udr engine runs on the z scale, where udr picks TED", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("udr")
+    # The companion to the alpha = 0 udr run in test_mashPipeline.R: on the
+    # beta scale pecotmr pins the update, so only here does udr choose.
+    pc <- suppressMessages(suppressWarnings(
+        mashPriorCovariances(
+            list(strong = .mwSs),
+            alpha = 1,
+            vhat = diag(3),
+            engine = CovUdrOptions(
+                init = UdInitOptions(n_unconstrained = 2L),
+                fit = UdFitOptions(maxiter = 20L)
+            ),
+            setSeed = 1L
+        )
+    ))
+    expect_gt(length(pc$U), 0L)
+    expect_true(all(map_lgl(pc$U, function(m) all(dim(m) == c(3L, 3L)))))
+    expect_equal(sum(pc$w), 1, tolerance = 1e-6)
+})
+
 test_that("mashPriorCovariances TED update errors clearly on non-i.i.d. data", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     skip_if_not_installed("udr")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         suppressMessages(suppressWarnings(
             mashPriorCovariances(
@@ -1153,7 +1161,7 @@ test_that("mashPriorCovariances TED update errors clearly on non-i.i.d. data", {
 test_that("mashPriorCovariances rejects an unknown component", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashPriorCovariances(
             list(strong = ss),
@@ -1172,7 +1180,7 @@ test_that("mashPriorCovariances rejects an unknown component", {
 test_that("mashCovarianceComponents builds a single requested component", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     fl <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1191,7 +1199,7 @@ test_that("mashCovarianceComponents builds a single requested component", {
 
 test_that("a requested component that yields nothing returns an empty list", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     # flashier legitimately finds no factors on weak data. c(NULL, NULL) is
     # NULL, so the collapse used to leak a NULL out of a function documented
     # to return a named list -- length()/names()/c() then behave differently
@@ -1215,7 +1223,7 @@ test_that("a requested component that yields nothing returns an empty list", {
 test_that("mashCovarianceComponents default builds all non-udr components", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     one <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1225,40 +1233,16 @@ test_that("mashCovarianceComponents default builds all non-udr components", {
             setSeed = 1L
         )
     ))
-    all4 <- suppressMessages(suppressWarnings(
-        mashCovarianceComponents(
-            list(strong = ss),
-            alpha = 0,
-            vhat = diag(3),
-            nPcs = 2L,
-            setSeed = 1L
-        )
-    ))
-    expect_gt(length(all4), length(one))
+    expect_gt(length(.mpDefaultComps), length(one))
 })
 
 test_that("mashCovarianceComponents feeds mashPriorCovariances (same components)", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    comps <- suppressMessages(suppressWarnings(
-        mashCovarianceComponents(
-            list(strong = ss),
-            alpha = 0,
-            vhat = diag(3),
-            nPcs = 2L,
-            setSeed = 1L
-        )
-    ))
-    prior <- suppressMessages(suppressWarnings(
-        mashPriorCovariances(
-            list(strong = ss),
-            alpha = 0,
-            vhat = diag(3),
-            nPcs = 2L,
-            setSeed = 1L
-        )
-    ))
+    ss <- .mpSs
+    # Both built with the same settings: the default components, nPcs = 2.
+    comps <- .mpDefaultComps
+    prior <- .mpDefaultPrior
     # Canonical components are structural hypotheses and reach the prior
     # unrefined, so their names survive verbatim. The data-driven ones are
     # replaced by their Extreme Deconvolution refinements (mashr names those
@@ -1286,7 +1270,7 @@ test_that("mashCovarianceComponents feeds mashPriorCovariances (same components)
 test_that("mashCovarianceComponents rejects unknown components", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashCovarianceComponents(
             list(strong = ss),
@@ -1300,16 +1284,8 @@ test_that("mashCovarianceComponents rejects unknown components", {
 test_that("mashPriorCovariances refines supplied priorComponents (pipeline mode)", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    comps <- suppressMessages(suppressWarnings(
-        mashCovarianceComponents(
-            list(strong = ss),
-            alpha = 0,
-            vhat = diag(3),
-            nPcs = 2L,
-            setSeed = 1L
-        )
-    ))
+    ss <- .mpSs
+    comps <- .mpDefaultComps
     pr <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -1331,7 +1307,7 @@ test_that("mashPriorCovariances refines supplied priorComponents (pipeline mode)
 test_that("mashPriorCovariances validates priorComponents", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashPriorCovariances(
             list(strong = ss),
@@ -1345,15 +1321,9 @@ test_that("mashPriorCovariances validates priorComponents", {
 test_that("mashPipeline result == composing the two extracted building blocks", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
-    full <- suppressMessages(suppressWarnings(
-        mashPipeline(
-            list(strong = ss, random = ss, null = ss),
-            alpha = 0,
-            residualCorrelationMethod = "simple",
-            setSeed = 1L
-        )
-    ))
+    ss <- .mpSs
+    # The pipeline on (strong, random, null) with Vhat method "simple".
+    full <- .mpSimpleFull
     # Same seed discipline mashPipeline uses: seed once, then delegate with
     # setSeed = NULL so the RNG stream stays continuous.
     set.seed(1L)
@@ -1374,11 +1344,6 @@ test_that("mashPipeline result == composing the two extracted building blocks", 
     expect_equal(full$U, prior$U)
     expect_equal(full$w, prior$w)
 })
-
-# ---------------------------------------------------------------------------
-# mashModelFit + mashPosterior — the fit -> posterior chain (mash_fit /
-# mash_posterior). A tiny 2-component prior keeps these fast.
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Prior-shape normalisation (.mashAsUlist)
@@ -1405,32 +1370,9 @@ test_that(".mashAsUlist does not mistake a covariance named U for the wrapper", 
     expect_equal(pecotmr:::.mashAsUlist(ulist), ulist)
 })
 
-test_that("mashPriorCovariances accepts either shape for its two prior args", {
-    skip_if_not_installed("mashr")
-    ss <- mashFixture()
-    sl <- list(strong = ss, random = ss)
-    ulist <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
-    wrapped <- list(U = ulist, w = NULL, loglik = NULL)
-
-    bare <- suppressMessages(suppressWarnings(mashPriorCovariances(
-        sl,
-        alpha = 0,
-        vhat = diag(3),
-        priorCovariances = ulist
-    )))
-    wrap <- suppressMessages(suppressWarnings(mashPriorCovariances(
-        sl,
-        alpha = 0,
-        vhat = diag(3),
-        priorCovariances = wrapped
-    )))
-    expect_equal(names(wrap$U), names(bare$U))
-    expect_equal(wrap$w, bare$w)
-})
-
 test_that("fitMashContrast consumes a mashPosterior result", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     post <- suppressMessages(suppressWarnings(
         mashPosterior(.mashTestModel(ss), ss, alpha = 0, vhat = diag(3))
     ))
@@ -1443,59 +1385,8 @@ test_that("fitMashContrast consumes a mashPosterior result", {
 })
 
 # ---------------------------------------------------------------------------
-# .rmaMeta: thin metafor::rma adapter (DL default; REML/ML/... pass through)
+# metaAnalysisPerCondition
 # ---------------------------------------------------------------------------
-
-test_that(".rmaMeta: DL is the default and reshapes the metafor fit", {
-    set.seed(1)
-    m <- rnorm(6)
-    s <- abs(rnorm(6)) + 0.2
-    expect_equal(
-        pecotmr:::.rmaMeta(m, s),
-        pecotmr:::.rmaMeta(m, s, method = "DL")
-    )
-    out <- pecotmr:::.rmaMeta(m, s)
-    expect_true(all(c("mean", "se", "tau2", "I2", "Q") %in% names(out)))
-    expect_true(out$I2 >= 0 && out$I2 <= 1) # metafor's % rescaled to [0,1]
-})
-
-test_that(".rmaMeta: DL matches the closed-form DerSimonian-Laird", {
-    means <- c(0.5, 0.8, 0.3)
-    ses <- c(0.2, 0.3, 0.15)
-    res <- pecotmr:::.rmaMeta(means, ses)
-    wFe <- 1 / ses^2
-    muFe <- sum(wFe * means) / sum(wFe)
-    Q <- sum(wFe * (means - muFe)^2)
-    tau2 <- max(0, (Q - 2) / (sum(wFe) - sum(wFe^2) / sum(wFe)))
-    wRe <- 1 / (ses^2 + tau2)
-    expect_equal(res$Q, Q, tolerance = 1e-6)
-    expect_equal(res$tau2, tau2, tolerance = 1e-6)
-    expect_equal(res$mean, sum(wRe * means) / sum(wRe), tolerance = 1e-6)
-    expect_equal(res$se, sqrt(1 / sum(wRe)), tolerance = 1e-6)
-})
-
-test_that(".rmaMeta: non-DL estimator (REML) runs via metafor and differs from DL", {
-    set.seed(3)
-    m <- rnorm(8, sd = 1.5)
-    s <- abs(rnorm(8)) + 0.3
-    reml <- pecotmr:::.rmaMeta(m, s, method = "REML")
-    expect_true(all(c("mean", "se", "tau2", "I2", "Q") %in% names(reml)))
-    expect_true(reml$I2 >= 0 && reml$I2 <= 1)
-    # REML tau2 generally differs from DL tau2 on heterogeneous data
-    expect_false(isTRUE(all.equal(reml$tau2, pecotmr:::.rmaMeta(m, s)$tau2)))
-})
-
-test_that(".rmaMeta: non-DL estimator falls back to DL on non-convergence (never errors)", {
-    # metafor's iterative estimators can fail to converge on small / degenerate
-    # inputs; .rmaMeta must still return a finite fit (via the DL fallback).
-    set.seed(1)
-    for (i in seq_len(25)) {
-        m <- rnorm(sample(3:8, 1L))
-        s <- abs(rnorm(length(m))) + 0.1
-        r <- suppressWarnings(pecotmr:::.rmaMeta(m, s, method = "REML"))
-        expect_true(is.finite(r$mean) && is.finite(r$se))
-    }
-})
 
 test_that("metaAnalysisPerCondition: threads metaMethod (DL default unchanged)", {
     es <- matrix(
@@ -1707,7 +1598,7 @@ test_that("mashPosteriorContrast: empty frame when every feature is dropped", {
 
 test_that("mashResidualCorrelation(mle): errors without a 'random' entry", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashResidualCorrelation(list(strong = ss), alpha = 0, method = "mle"),
         "requires a 'random' entry"
@@ -1716,7 +1607,7 @@ test_that("mashResidualCorrelation(mle): errors without a 'random' entry", {
 
 test_that("mashResidualCorrelation accepts a SimpleList sumStatsList", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     V <- suppressMessages(suppressWarnings(
         mashResidualCorrelation(
             S4Vectors::SimpleList(null = ss),
@@ -1729,7 +1620,7 @@ test_that("mashResidualCorrelation accepts a SimpleList sumStatsList", {
 
 test_that("mashCovarianceComponents: SimpleList input + default (NULL) vhat", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     cc <- suppressMessages(suppressWarnings(
         mashCovarianceComponents(
             S4Vectors::SimpleList(strong = ss),
@@ -1743,7 +1634,7 @@ test_that("mashCovarianceComponents: SimpleList input + default (NULL) vhat", {
 
 test_that("mashPriorCovariances: SimpleList input (canonical only)", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     pc <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             S4Vectors::SimpleList(strong = ss),
@@ -1865,7 +1756,7 @@ test_that("MashPriorParam takes only a MashComponentParam for components", {
 test_that("mashPriorCovariances takes components as names or a record", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     byRecord <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -1884,7 +1775,7 @@ test_that("mashPriorCovariances takes components as names or a record", {
 test_that("engine 'none' leaves the data-driven components unrefined", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
-    ss <- mashFixture()
+    ss <- .mpSs
     raw <- suppressMessages(suppressWarnings(
         mashPriorCovariances(
             list(strong = ss),
@@ -1904,7 +1795,7 @@ test_that("engine 'none' leaves the data-driven components unrefined", {
 
 test_that("mashPriorCovariances rejects an unknown engine", {
     skip_if_not_installed("mashr")
-    ss <- mashFixture()
+    ss <- .mpSs
     expect_error(
         mashPriorCovariances(
             list(strong = ss),
@@ -2283,32 +2174,6 @@ test_that("filterInvalidSummaryStat z path handles NULL strong component", {
     expect_true(!is.null(result$random$z))
 })
 
-test_that("filterMixtureComponents removes zero matrices", {
-    U <- list(
-        comp1 = matrix(
-            c(1, 0, 0, 2),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        ),
-        comp2 = matrix(
-            c(0, 0, 0, 0),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        ),
-        A = matrix(
-            c(3, 0, 0, 4),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        )
-    )
-    w <- c(comp1 = 0.5, comp2 = 0.3, A = 0.2)
-    result <- filterMixtureComponents(c("A", "B"), U, w)
-    expect_false("comp2" %in% names(result$U))
-})
-
 test_that("filterMixtureComponents removes matrices below weight cutoff", {
     U <- list(
         comp1 = matrix(
@@ -2344,29 +2209,7 @@ test_that("filterMixtureComponents errors on missing conditions", {
     )
 })
 
-test_that("filterMixtureComponents removes components named as filtered conditions", {
-    U <- list(
-        comp1 = matrix(
-            c(1, 0, 0, 0, 2, 0, 0, 0, 3),
-            3,
-            3,
-            dimnames = list(c("A", "B", "C"), c("A", "B", "C"))
-        ),
-        C = matrix(
-            c(4, 0, 0, 0, 5, 0, 0, 0, 6),
-            3,
-            3,
-            dimnames = list(c("A", "B", "C"), c("A", "B", "C"))
-        )
-    )
-    w <- c(comp1 = 0.6, C = 0.4)
-    result <- filterMixtureComponents(c("A", "B"), U, w)
-    expect_false("C" %in% names(result$U))
-    expect_equal(nrow(result$U$comp1), 2)
-    expect_equal(ncol(result$U$comp1), 2)
-})
-
-test_that("filterMixtureComponents renormalizes weights to preserve original sum", {
+test_that("filterMixtureComponents drops zero matrices, renormalizes weights", {
     U <- list(
         comp1 = matrix(
             c(1, 0, 0, 2),
@@ -2551,28 +2394,6 @@ test_that("mergeMashData uses one_data when res_data element has zero rows", {
     expect_true(nrow(result$random) >= 3)
 })
 
-test_that("mashRandNullSample with z scores returns random and null", {
-    set.seed(42)
-    dat <- list(
-        z = data.frame(
-            cond1 = c(5, 0.1, 0.2, 0.3, 0.5, 6, 0.1, 0.2, 0.4, 0.3),
-            cond2 = c(0.2, 0.3, 0.1, 0.5, 0.4, 0.1, 0.3, 0.2, 0.1, 0.5)
-        )
-    )
-    result <- mashRandNullSample(
-        dat,
-        nRandom = 5,
-        nNull = 3,
-        excludeCondition = c(),
-        seed = 123
-    )
-    expect_type(result, "list")
-    expect_true("random" %in% names(result))
-    expect_true("null" %in% names(result))
-    expect_true("z" %in% names(result$random))
-    expect_equal(nrow(result$random$z), 5)
-})
-
 test_that("mashRandNullSample with seed is reproducible", {
     dat <- list(
         z = data.frame(
@@ -2648,29 +2469,6 @@ test_that("mashRandNullSample warns when not enough null data", {
     expect_equal(length(result$null), 0)
 })
 
-test_that("mashRandNullSample with bhat/sbhat processes random and null samples", {
-    dat <- list(
-        bhat = data.frame(
-            cond1 = c(0.1, 0.05, 0.02, 0.01, 0.03),
-            cond2 = c(0.02, 0.01, 0.03, 0.05, 0.04)
-        ),
-        sbhat = data.frame(
-            cond1 = c(0.1, 0.1, 0.1, 0.1, 0.1),
-            cond2 = c(0.1, 0.1, 0.1, 0.1, 0.1)
-        )
-    )
-    result <- mashRandNullSample(
-        dat,
-        nRandom = 3,
-        nNull = 3,
-        excludeCondition = c(),
-        seed = 42
-    )
-    expect_equal(ncol(result$random$bhat), 2)
-    expect_equal(nrow(result$random$bhat), 3)
-    expect_true(length(result$null) > 0)
-})
-
 test_that("mashRandNullSample errors when excludeCondition not found (z path)", {
     dat <- list(
         z = data.frame(cond1 = 1:5, cond2 = 1:5)
@@ -2681,6 +2479,17 @@ test_that("mashRandNullSample errors when excludeCondition not found (z path)", 
             nRandom = 3,
             nNull = 2,
             excludeCondition = "nonexistent",
+            seed = 42
+        ),
+        "excludeCondition are not present"
+    )
+    # A numeric index is not a column name, even where it is a valid position.
+    expect_error(
+        mashRandNullSample(
+            dat,
+            nRandom = 3,
+            nNull = 2,
+            excludeCondition = 2,
             seed = 42
         ),
         "excludeCondition are not present"
@@ -2698,6 +2507,17 @@ test_that("mashRandNullSample errors when excludeCondition not found (bhat path)
             nRandom = 3,
             nNull = 2,
             excludeCondition = "nonexistent",
+            seed = 42
+        ),
+        "excludeCondition are not present"
+    )
+    # A numeric index is not a column name, even where it is a valid position.
+    expect_error(
+        mashRandNullSample(
+            dat,
+            nRandom = 3,
+            nNull = 2,
+            excludeCondition = 2,
             seed = 42
         ),
         "excludeCondition are not present"
@@ -2724,7 +2544,7 @@ test_that("mashRandNullSample drops excluded condition by column name", {
     expect_false("cond3" %in% colnames(result$random$z))
 })
 
-test_that("mashRandNullSample extracts null data with z scores when enough null variants exist", {
+test_that("mashRandNullSample draws random and null samples from z scores", {
     dat <- list(
         z = data.frame(
             cond1 = c(0.1, 0.3, 0.2, 0.5, 0.4, 0.1, 0.3, 0.2, 0.5, 0.4),
@@ -2745,7 +2565,7 @@ test_that("mashRandNullSample extracts null data with z scores when enough null 
     expect_equal(nrow(result$random$z), 5)
 })
 
-test_that("mashRandNullSample null data capped at available null variants", {
+test_that("mashRandNullSample caps both samples at the available rows", {
     dat <- list(
         z = data.frame(
             cond1 = c(0.1, 0.2, 0.3),
@@ -2754,16 +2574,17 @@ test_that("mashRandNullSample null data capped at available null variants", {
     )
     result <- mashRandNullSample(
         dat,
-        nRandom = 2,
+        nRandom = 100,
         nNull = 100,
         excludeCondition = c(),
         seed = 42
     )
+    expect_equal(nrow(result$random$z), 3)
     expect_true(length(result$null) > 0)
     expect_equal(nrow(result$null$z), 3)
 })
 
-test_that("mashRandNullSample extracts null data with bhat/sbhat when enough null variants", {
+test_that("mashRandNullSample draws random and null samples from bhat/sbhat", {
     dat <- list(
         bhat = data.frame(
             cond1 = c(0.01, 0.02, 0.01, 0.03, 0.02, 0.01),
@@ -2781,154 +2602,12 @@ test_that("mashRandNullSample extracts null data with bhat/sbhat when enough nul
         excludeCondition = c(),
         seed = 42
     )
+    expect_equal(dim(result$random$bhat), c(3L, 2L))
     expect_true("null" %in% names(result))
     expect_true("bhat" %in% names(result$null))
     expect_true("sbhat" %in% names(result$null))
     expect_equal(nrow(result$null$bhat), 4)
     expect_equal(nrow(result$null$sbhat), 4)
-})
-
-test_that("mashRandNullSample excludeCondition with numeric index errors on z path", {
-    dat <- list(
-        z = data.frame(
-            cond1 = c(0.1, 0.2, 0.3, 0.4, 0.5),
-            cond2 = c(0.5, 0.4, 0.3, 0.2, 0.1),
-            cond3 = c(0.3, 0.3, 0.3, 0.3, 0.3)
-        )
-    )
-    expect_error(
-        mashRandNullSample(
-            dat,
-            nRandom = 3,
-            nNull = 2,
-            excludeCondition = 3,
-            seed = 42
-        ),
-        "excludeCondition are not present"
-    )
-})
-
-test_that("mashRandNullSample excludeCondition with numeric index errors on bhat path", {
-    dat <- list(
-        bhat = data.frame(
-            cond1 = c(0.01, 0.02, 0.01, 0.03, 0.02),
-            cond2 = c(0.02, 0.01, 0.03, 0.01, 0.02),
-            cond3 = c(0.01, 0.01, 0.01, 0.01, 0.01)
-        ),
-        sbhat = data.frame(
-            cond1 = c(0.1, 0.1, 0.1, 0.1, 0.1),
-            cond2 = c(0.1, 0.1, 0.1, 0.1, 0.1),
-            cond3 = c(0.1, 0.1, 0.1, 0.1, 0.1)
-        )
-    )
-    expect_error(
-        mashRandNullSample(
-            dat,
-            nRandom = 3,
-            nNull = 2,
-            excludeCondition = 3,
-            seed = 42
-        ),
-        "excludeCondition are not present"
-    )
-})
-
-test_that("mashRandNullSample caps random sample at available rows", {
-    dat <- list(
-        z = data.frame(
-            cond1 = c(0.1, 0.2, 0.3),
-            cond2 = c(0.2, 0.1, 0.3)
-        )
-    )
-    result <- mashRandNullSample(
-        dat,
-        nRandom = 100,
-        nNull = 2,
-        excludeCondition = c(),
-        seed = 42
-    )
-    expect_equal(nrow(result$random$z), 3)
-})
-
-test_that("filterMixtureComponents filters zero matrices", {
-    U <- list(
-        mat1 = matrix(
-            c(1, 0.5, 0.5, 1),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        ),
-        mat2 = matrix(0, 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
-        mat3 = matrix(
-            c(0.8, 0.3, 0.3, 0.9),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        )
-    )
-    w <- c(mat1 = 0.5, mat2 = 0.3, mat3 = 0.2)
-    conditions_to_keep <- c("A", "B")
-
-    result <- filterMixtureComponents(conditions_to_keep, U, w)
-
-    # mat2 should be removed (all zeros)
-    expect_true(!"mat2" %in% names(result$U))
-    # weights should be rescaled to maintain sum
-    expect_equal(sum(result$w), sum(w), tolerance = 1e-10)
-})
-
-test_that("filterMixtureComponents removes low weight components", {
-    U <- list(
-        mat1 = matrix(
-            c(1, 0.5, 0.5, 1),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        ),
-        mat2 = matrix(
-            c(0.8, 0.3, 0.3, 0.9),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        )
-    )
-    w <- c(mat1 = 0.999, mat2 = 0.00001) # mat2 below default cutoff
-    conditions_to_keep <- c("A", "B")
-
-    result <- filterMixtureComponents(conditions_to_keep, U, w, wCutoff = 1e-04)
-    expect_true(!"mat2" %in% names(result$U))
-})
-
-test_that("filterMixtureComponents errors on missing condition", {
-    U <- list(
-        mat1 = matrix(
-            c(1, 0.5, 0.5, 1),
-            2,
-            2,
-            dimnames = list(c("A", "B"), c("A", "B"))
-        )
-    )
-    w <- c(mat1 = 1.0)
-    expect_error(
-        filterMixtureComponents(c("A", "C"), U, w),
-        "not found in matrix"
-    )
-})
-
-test_that("filterMixtureComponents subsets conditions", {
-    U <- list(
-        mat1 = matrix(
-            c(1, 0.5, 0.2, 0.5, 1, 0.3, 0.2, 0.3, 1),
-            3,
-            3,
-            dimnames = list(c("A", "B", "C"), c("A", "B", "C"))
-        )
-    )
-    w <- c(mat1 = 1.0)
-
-    result <- filterMixtureComponents(c("A", "B"), U, w)
-    expect_equal(nrow(result$U[[1]]), 2)
-    expect_equal(ncol(result$U[[1]]), 2)
 })
 
 test_that(".mashSumStatsToMatrices: auto picks BETA+SE when present", {
@@ -3032,11 +2711,20 @@ test_that(".mashObjectMatrices errors when marginal effects lack the required co
         method = "susie",
         entry = list(.sc_makeFineMappingRow(3))
     )
-    # Force a marginal-effects table with no `context` column (as an mv/f-SuSiE
+    # Force marginal effects with no `context` column (as an mv/f-SuSiE
     # result trimmed of marginal sumstats would yield): mash cannot pivot it.
     testthat::local_mocked_bindings(
         marginalEffects = function(x, ...) {
-            data.frame(variant_id = "v", beta = 1, se = 1)
+            # mcols set apart: `se =` passed to GRanges() would partially
+            # match its `seqnames` formal.
+            S4Vectors::`mcols<-`(
+                GenomicRanges::GRanges("chr1:100"),
+                value = S4Vectors::DataFrame(
+                    variant_id = "chr1:100:A:G",
+                    beta = 1,
+                    se = 1
+                )
+            )
         },
         .package = "pecotmr"
     )
@@ -3148,7 +2836,7 @@ test_that(".mashSumStatsToMatrices fills missing variants with bhat=0 / sbhat=10
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
-            CHR = "1",
+            CHR = "chr1",
             BP = seq(100L, by = 100L, length.out = 5L),
             A1 = "A",
             A2 = "G",
@@ -3187,7 +2875,7 @@ test_that(".mashSumStatsToMatrices fills missing variants with bhat=0 / sbhat=10
         ),
         genome = "hg19",
         ldReference = gh,
-        qcInfo = list(prebuilt = "synthetic")
+        qcOptions = list(prebuilt = "synthetic")
     )
     out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto")
     expect_equal(dim(out$b), c(5L, 2L))
@@ -3208,7 +2896,7 @@ test_that(".mashSumStatsToMatrices disambiguates rownames across (study, trait) 
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * (1:3)),
-            CHR = "1",
+            CHR = "chr1",
             BP = c(100L, 200L, 300L),
             A1 = "A",
             A2 = "G",
@@ -3248,7 +2936,7 @@ test_that(".mashSumStatsToMatrices disambiguates rownames across (study, trait) 
         ),
         genome = "hg19",
         ldReference = gh,
-        qcInfo = list(prebuilt = "synthetic")
+        qcOptions = list(prebuilt = "synthetic")
     )
     out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto")
     # 3 variants per block × 2 blocks = 6 rows
@@ -3270,7 +2958,7 @@ test_that(".mashSumStatsToMatrices errors when entry lacks SNP mcol", {
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * (1:3)),
-            CHR = "1",
+            CHR = "chr1",
             BP = c(100L, 200L, 300L),
             A1 = "A",
             A2 = "G",
@@ -3299,7 +2987,7 @@ test_that(".mashSumStatsToMatrices errors when entry lacks SNP mcol", {
         entry = list(gr),
         genome = "hg19",
         ldReference = gh,
-        qcInfo = list(prebuilt = "synthetic")
+        qcOptions = list(prebuilt = "synthetic")
     )
     expect_error(
         pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto"),
@@ -3315,7 +3003,7 @@ test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * (1:3)),
-            CHR = "1",
+            CHR = "chr1",
             BP = c(100L, 200L, 300L),
             A1 = "A",
             A2 = "G",
@@ -3353,7 +3041,7 @@ test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
         ),
         genome = "hg19",
         ldReference = gh,
-        qcInfo = list(prebuilt = "synthetic")
+        qcOptions = list(prebuilt = "synthetic")
     )
     out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto")
     expect_equal(ncol(out$b), 2L)
@@ -3389,7 +3077,7 @@ test_that(".mashSumStatsToMatrices errors when SumStats has empty QC info", {
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * (1:3)),
-            CHR = "1",
+            CHR = "chr1",
             BP = c(100L, 200L, 300L),
             A1 = "A",
             A2 = "G",
@@ -3418,7 +3106,7 @@ test_that(".mashSumStatsToMatrices errors when SumStats has empty QC info", {
         entry = list(gr),
         genome = "hg19",
         ldReference = gh,
-        qcInfo = list()
+        qcOptions = list()
     ) # empty QC info
     expect_error(
         pecotmr:::.mashSumStatsToMatrices(ss, "strong"),
@@ -3433,7 +3121,7 @@ test_that(".mashSumStatsToMatrices errors when SumStats has zero entries", {
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * (1:3)),
-            CHR = "1",
+            CHR = "chr1",
             BP = c(100L, 200L, 300L),
             A1 = "A",
             A2 = "G",
@@ -3451,7 +3139,7 @@ test_that(".mashSumStatsToMatrices errors when SumStats has zero entries", {
         genome = "hg19",
         ldReference = gh,
         varY = numeric(0),
-        qcInfo = list(prebuilt = "synthetic")
+        qcOptions = list(prebuilt = "synthetic")
     )
     expect_error(
         pecotmr:::.mashSumStatsToMatrices(ss, "strong"),
@@ -3507,8 +3195,12 @@ test_that("qtlSumStatsFromZMatrix: decodes chrom/pos from ids, synthesises when 
     e <- sumStats(qss, studyName = "s1", context = "ctx", trait = "mash")
     expect_equal(GenomicRanges::start(e)[1], 250L) # decoded
     expect_true(GenomicRanges::start(e)[2] >= 1L) # synthetic fallback
-    # un-parseable chrom falls back to chr1 (never NA)
-    expect_false(any(is.na(as.character(GenomicRanges::seqnames(e)))))
+    # un-parseable chrom falls back to chr1 (never NA), and a decoded one is
+    # spelled in UCSC style like it
+    expect_identical(
+        as.character(GenomicRanges::seqnames(e)),
+        c("chr1", "chr1")
+    )
     # SNP ids are carried through unchanged
     expect_equal(S4Vectors::mcols(e)$SNP, rownames(z))
 })
@@ -3519,7 +3211,7 @@ test_that("qtlSumStatsFromZMatrix: NULL rownames get synthetic variant ids", {
     expect_equal(S4Vectors::mcols(qss[[1]])$SNP, c("var1", "var2"))
 })
 
-test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcInfo are set", {
+test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcOptions", {
     z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("x", "y")))
     qss <- qtlSumStatsFromZMatrix(
         z,
@@ -3534,8 +3226,10 @@ test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcInfo are set"
     expect_equal(unique(mc$A1), "T")
     expect_equal(unique(mc$A2), "C")
     expect_equal(unique(mc$N), 500L)
-    expect_equal(qcInfo(qss)$role, "strong")
-    expect_equal(length(qcInfo(qss)$entryAudit), 2L) # one slot per context
+    expect_equal(qcOptions(qss)$role, "strong")
+    # No QC has run: the audit names one row per context and records nothing.
+    expect_equal(nrow(qcInfo(qss)), 2L)
+    expect_null(mcols(qss)$qcAudit)
 })
 
 test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait pairs", {
@@ -3661,7 +3355,7 @@ test_that("qtlSumStatsFromBetaMatrix: NULL rownames -> synthetic ids; placeholde
     expect_equal(mc$SNP, c("var1", "var2"))
     expect_equal(unique(mc$A1), "T")
     expect_equal(unique(mc$N), 500L)
-    expect_equal(qcInfo(qss)$role, "strong")
+    expect_equal(qcOptions(qss)$role, "strong")
 })
 
 test_that("mashInput: QtlSumStats path returns the flat b/s/z + XtX contract", {
@@ -3731,12 +3425,12 @@ test_that("mashInput: a fine-mapping result with no credible set: no strong", {
             stringsAsFactors = FALSE
         )
     }
-    e1 <- fineMappingRow(
+    e1 <- FineMappingRow(
         variantIds = vids,
         susieFit = list(x = 1),
         topLoci = noCsTL(rnorm(6))
     )
-    e2 <- fineMappingRow(
+    e2 <- FineMappingRow(
         variantIds = vids,
         susieFit = list(x = 1),
         topLoci = noCsTL(rnorm(6))
@@ -3890,7 +3584,7 @@ test_that(".qtlSumStatsFromMatrix synthesises coords for unparseable ids", {
     expect_equal(GenomicRanges::start(gr), c(1L, 2L))
 })
 
-test_that("mashWrapper: argument guards fire", {
+test_that("mash data filters and merge: argument guards fire", {
     expect_error(
         filterInvalidSummaryStat("not-a-list"),
         "datList.*Must be of type 'list'"
@@ -3937,4 +3631,82 @@ test_that(".mashFilterZ leaves a list with no z-carrying partition alone", {
     # nothing to rewrite has to come back identical.
     datList <- list(other = list(bhat = matrix(1)))
     expect_identical(pecotmr:::.mashFilterZ(datList, 0.5, NULL), datList)
+})
+
+# ===========================================================================
+# A GWAS study split across rows
+# ===========================================================================
+
+test_that("mash reads each study once however many rows it spans", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:6), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:6)),
+        A1 = "A",
+        A2 = "G",
+        Z = c(3, -1, 0.5, 2, -2.5, 1),
+        N = 1000L
+    )
+    gss <- GwasSumStats(
+        studyName = c("g1", "g2"),
+        entry = list(gr, gr),
+        genome = "hg19",
+        qcOptions = list(step1 = "ok"),
+        region = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(1L, 351L), c(350L, 1000L))
+        )
+    )
+    expect_equal(nrow(gss), 4L)
+    reads <- 0L
+    original <- pecotmr:::.mashRowDf
+    local_mocked_bindings(
+        .mashRowDf = function(...) {
+            reads <<- reads + 1L
+            original(...)
+        },
+        .package = "pecotmr"
+    )
+    mats <- pecotmr:::.mashSumStatsToMatrices(gss, "probe", inputScale = "z")
+    # One read per study, each stitching both of its rows.
+    expect_identical(reads, 2L)
+    # And the matrices are the unsplit studies'.
+    whole <- GwasSumStats(
+        studyName = c("g1", "g2"),
+        entry = list(gr, gr),
+        genome = "hg19",
+        qcOptions = list(step1 = "ok")
+    )
+    expect_equal(
+        mats,
+        pecotmr:::.mashSumStatsToMatrices(whole, "probe", inputScale = "z")
+    )
+})
+
+test_that("a GWAS fine-mapping result's conditions are its studies", {
+    block <- function(studyName, offset) {
+        list(study = studyName, entry = .sc_makeFineMappingRow(3, offset))
+    }
+    rows <- list(
+        block("g1", 0L),
+        block("g1", 10000L),
+        block("g2", 0L),
+        block("g2", 10000L)
+    )
+    fmr <- GwasFineMappingResult(
+        studyName = map_chr(rows, "study"),
+        method = rep("susie", 4L),
+        entry = map(rows, "entry"),
+        blockId = rep(c("chr1_1_5000", "chr1_5001_20000"), 2L)
+    )
+    mats <- pecotmr:::.mashFmrMatrices(fmr, coverage = 0.95)
+    expect_identical(colnames(mats$b), c("g1", "g2"))
+    expect_equal(nrow(mats$b), 6L)
+    # Set 1 of each block is its own set, so each block contributes a lead.
+    expect_identical(
+        rownames(mats$b)[mats$strongRows],
+        c("chr1:100:A:G", "chr1:10100:A:G")
+    )
 })

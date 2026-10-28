@@ -14,9 +14,8 @@ topLoci(x, signalCutoff = 0.025, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL,
-  minPurity = NULL,
-  raw = FALSE
+  blockId = NULL,
+  minPurity = NULL
 )
 }
 \arguments{
@@ -40,17 +39,11 @@ this trait; \code{NULL} matches all traits.}
 \item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
 this fine-mapping / weight method; \code{NULL} matches all methods.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block of a fit; \code{NULL} matches every block.}
 
 \item{minPurity}{Numeric or \code{NULL}. Minimum credible-set purity to
 retain; \code{NULL} applies no purity filter.}
-
-\item{raw}{Logical (length 1). \code{FALSE} (default) returns the posterior
-view described above. \code{TRUE} hands back the stored canonical table
-verbatim -- a \code{data.frame}, not a \code{GRanges} -- so neither the
-projection nor \code{signalCutoff} applies.}
 }
 \value{
 A \code{GRanges}, one range per retained variant, carrying the
@@ -59,7 +52,7 @@ A \code{GRanges}, one range per retained variant, carrying the
   with \code{as.data.frame()} (which adds the standard
   \code{seqnames}/\code{start}/... columns) or
   \code{as.data.frame(S4Vectors::mcols(.))} for the per-variant columns
-  alone. \code{raw = TRUE} returns the stored \code{data.frame} instead.
+  alone.
 }
 \description{
 Extract the per-variant posterior fine-mapping payload as either

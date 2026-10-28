@@ -14,7 +14,8 @@ GwasFineMappingResult(
   dataType = NULL,
   dataSource = NULL,
   weightStandardized = NULL,
-  ldReference = NULL
+  ldReference = NULL,
+  metadata = list()
 )
 }
 \arguments{
@@ -24,11 +25,13 @@ GwasFineMappingResult(
 
 \item{entry}{List / \code{SimpleList} of \code{FineMappingRow} objects.}
 
-\item{blockId}{Optional character vector (per tuple) keying the external LD
-block manifest, e.g. \code{"chr22_10516173_17414263"}. Provenance only,
-not part of the identity key. Supply it when the block BOUNDARIES matter:
-those are the one thing not recoverable from the variants, since adjacent
-blocks' spans leave gaps.}
+\item{blockId}{Optional character vector (per tuple) naming each row's
+block, e.g. \code{"chr22_10516173_17414263"}. Provenance only, not part
+of the identity key, and a name only: a block's boundaries, which the
+variants cannot give since adjacent blocks' spans leave gaps, go in
+\code{region}. Where it is \code{NULL}, or \code{NA} for a row, the
+row's \code{blockId} is its own span, as \code{"chrom_start_end"}, so
+every row is named by its block.}
 
 \item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
 \code{NULL}), carried forward as provenance; not part of the identity key.
@@ -36,18 +39,21 @@ blocks' spans leave gaps.}
 
 \item{region}{Optional per-row analysis WINDOW (a \code{GRanges} or
 \code{NULL}) -- the interval each row's fit was run over, carried
-forward as provenance; not part of the identity key. \code{NULL}
-(default) omits the column, and \code{\link{genomicRegion}} then
-derives the window from the span of the variants present.}
+forward as provenance; not part of the identity key. It is recorded as
+given, so each range must contain its row's variants.
+\code{\link{fineMappingPipeline}} always sets it, from the window of the
+input row. \code{NULL} (default) omits the column, and
+\code{\link{genomicRegion}} then derives the window from the span of the
+variants present.}
 
 \item{dataType}{Optional assay / modality label ("bulk_rnaseq",
 "methylation"), recorded as a per-row provenance column. Length 1 or
 one per row; \code{NULL} (default) omits the column.}
 
 \item{dataSource}{Optional per-row label for the kind of input the fit saw,
-\code{"individual"} or \code{"sumstat"}. Recorded rather than derived: a
-combined collection can hold rows of both kinds, and its single
-\code{ldReference} cannot say which row came from which.}
+\code{"individual"} or \code{"sumstat"}. Where it is absent, the result
+writers read a row's kind from its LD reference: a row with none saw
+individual-level data.}
 
 \item{weightStandardized}{Optional per-row flag: whether the posterior
 effect is on the STANDARDIZED genotype scale. The posterior effect IS the
@@ -57,11 +63,22 @@ it standardizes genotypes before fitting, and the posterior mean is
 reported on the scale of the \code{X} the fit was given. The argument
 exists for a collection assembled by hand, where only the caller knows.}
 
-\item{ldReference}{An optional genotype panel (see
-\code{\link{readGenotypes}}).}
+\item{ldReference}{The LD reference the fits were computed against -- a
+genotype panel (see \code{\link{readGenotypes}}), a
+\code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
+a list with one per row; \code{NULL} for none. Each distinct reference is
+stored once.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
-A \code{GwasFineMappingResult} object.
+A \code{GwasFineMappingResult} object. Its logical
+  \code{regionGiven} column says, per row, whether the window was given
+  or is the span of the variants; \code{\link{fineMappingPipeline}}
+  carries it over from the input. See \code{\linkS4class{GwasSumStats}}
+  for how the pipelines use it.
 }
 \description{
 Construct a \code{GwasFineMappingResult} collection from
@@ -72,13 +89,13 @@ Construct a \code{GwasFineMappingResult} collection from
 
   Rows are identified by (\code{study}, \code{method}) plus the element's
   own range, which is derived from the variants rather than stored, so it
-  cannot drift out of step with them and stays correct after
-  \code{\link{subsetRegion}}.
+  cannot drift out of step with them and stays correct when an element's
+  variants are narrowed.
 }
 \examples{
 tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-fe <- fineMappingRow(
+fe <- FineMappingRow(
   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 GwasFineMappingResult(studyName = "t1", method = "susie", entry = list(fe))
 }

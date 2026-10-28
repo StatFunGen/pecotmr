@@ -7,22 +7,25 @@ context("variantId")
 test_that("parseVariantId: canonical colon format with chr prefix", {
     res <- parseVariantId(c("chr1:100:A:G", "chr2:200:T:C"))
     expect_s3_class(res, "data.frame")
-    expect_equal(res$chrom, c("1", "2"))
+    expect_equal(res$chrom, c("chr1", "chr2"))
     expect_equal(res$pos, c(100L, 200L))
     expect_equal(res$A2, c("A", "T"))
     expect_equal(res$A1, c("G", "C"))
+    expect_equal(attr(res, "convention")$alleleSep, ":")
 })
 
 test_that("parseVariantId: canonical colon format without chr prefix", {
     res <- parseVariantId(c("1:100:A:G", "2:200:T:C"))
-    expect_equal(res$chrom, c("1", "2"))
+    expect_equal(res$chrom, c("chr1", "chr2"))
     expect_equal(res$pos, c(100L, 200L))
+    expect_equal(res$A2, c("A", "T"))
+    expect_equal(res$A1, c("G", "C"))
     expect_equal(attr(res, "convention")$hasChr, FALSE)
 })
 
 test_that("parseVariantId: underscore separator format", {
     res <- parseVariantId(c("chr1_100_A_G", "1_200_T_C"))
-    expect_equal(res$chrom, c("1", "1"))
+    expect_equal(res$chrom, c("chr1", "chr1"))
     expect_equal(res$pos, c(100L, 200L))
     expect_equal(res$A2, c("A", "T"))
     expect_equal(res$A1, c("G", "C"))
@@ -30,7 +33,7 @@ test_that("parseVariantId: underscore separator format", {
 
 test_that("parseVariantId: mixed colon-underscore format", {
     res <- parseVariantId("chr1:100_A_G")
-    expect_equal(res$chrom, "1")
+    expect_equal(res$chrom, "chr1")
     expect_equal(res$pos, 100L)
     expect_equal(res$A2, "A")
     expect_equal(res$A1, "G")
@@ -39,7 +42,10 @@ test_that("parseVariantId: mixed colon-underscore format", {
 
 test_that("parseVariantId: strips build suffix", {
     res <- parseVariantId(c("chr1:100:A:G:b38", "chr1:200:T:C_b37"))
+    # The suffix is dropped, not carried as a fifth column.
+    expect_equal(colnames(res), c("chrom", "pos", "A2", "A1"))
     expect_equal(res$pos, c(100L, 200L))
+    expect_equal(res$A2, c("A", "T"))
     expect_equal(res$A1, c("G", "C"))
     expect_equal(attr(res, "convention")$hasBuild, TRUE)
 })
@@ -51,17 +57,18 @@ test_that("parseVariantId: convention attribute records hasChr", {
     expect_equal(attr(no_chr, "convention")$hasChr, FALSE)
 })
 
-test_that("parseVariantId: data.frame input with chrom/pos/A2/A1 returns as-is", {
+test_that("parseVariantId: a chrom/pos/A2/A1 frame is read in UCSC style", {
     df <- data.frame(
-        chrom = "chr1",
-        pos = 100L,
-        A2 = "A",
-        A1 = "G",
+        chrom = c("chr1", "2"),
+        pos = c(100, 200),
+        A2 = c("A", "C"),
+        A1 = c("G", "T"),
         stringsAsFactors = FALSE
     )
     res <- parseVariantId(df)
-    expect_equal(res$chrom, "1")
-    expect_equal(res$pos, 100L)
+    # A bare chromosome gains the prefix; a double position becomes integer.
+    expect_equal(res$chrom, c("chr1", "chr2"))
+    expect_equal(res$pos, c(100L, 200L))
     expect_equal(attr(res, "convention")$hasChr, TRUE)
 })
 
@@ -75,44 +82,12 @@ test_that("parseVariantId: data.frame input with >=4 columns assigns positional 
         stringsAsFactors = FALSE
     )
     res <- parseVariantId(df)
-    expect_equal(res$chrom, "1")
+    # The first four columns are renamed; the rest pass through.
+    expect_equal(names(res), c("chrom", "pos", "A2", "A1", "extra"))
+    expect_equal(res$chrom, "chr1")
     expect_equal(res$pos, 100L)
     expect_equal(res$A2, "A")
     expect_equal(res$A1, "G")
-})
-
-# ===========================================================================
-# normalizeVariantId
-# ===========================================================================
-
-test_that("normalizeVariantId: canonical output adds chr prefix by default", {
-    res <- normalizeVariantId(c("1:100:A:G", "2:200:T:C"))
-    expect_equal(res, c("chr1:100:A:G", "chr2:200:T:C"))
-})
-
-test_that("normalizeVariantId: chrPrefix = FALSE strips the chr prefix", {
-    res <- normalizeVariantId(
-        c("chr1:100:A:G", "chr2:200:T:C"),
-        chrPrefix = FALSE
-    )
-    expect_equal(res, c("1:100:A:G", "2:200:T:C"))
-})
-
-test_that("normalizeVariantId: convention argument preserves the input format", {
-    ids <- c("chr1:100_A_G", "chr2:200_T_C")
-    conv <- attr(parseVariantId(ids), "convention")
-    res <- normalizeVariantId(c("1:100:A:G", "2:200:T:C"), convention = conv)
-    expect_equal(res, c("chr1:100_A_G", "chr2:200_T_C"))
-})
-
-test_that("normalizeVariantId: round-trips underscore-only input", {
-    res <- normalizeVariantId("1_100_A_G")
-    expect_equal(res, "chr1:100:A:G")
-})
-
-test_that("normalizeVariantId: strips build suffix and re-emits canonical", {
-    res <- normalizeVariantId("chr1:100:A:G:b38")
-    expect_equal(res, "chr1:100:A:G")
 })
 
 # ===========================================================================
@@ -183,119 +158,27 @@ test_that(".repairVariantIds: non-DNA alleles on both sides are still kept", {
 })
 
 # ===========================================================================
-# parseRegion
-# ===========================================================================
-
-test_that("parseRegion: canonical chr:start-end string", {
-    res <- parseRegion("chr1:100-200")
-    expect_s3_class(res, "data.frame")
-    expect_equal(res$chrom, "1")
-    expect_equal(res$start, 100L)
-    expect_equal(res$end, 200L)
-})
-
-test_that("parseRegion: handles X chromosome", {
-    res <- parseRegion("chrX:1000-2000")
-    expect_equal(res$chrom, "X")
-    expect_equal(res$start, 1000L)
-    expect_equal(res$end, 2000L)
-})
-
-test_that("parseRegion: accepts the underscore form its docs advertise", {
-    # LD-block / region ids are spelled chr_start_end; the docstring always
-    # claimed this worked while the regex rejected it.
-    expect_identical(
-        parseRegion("chr1_100_200"),
-        parseRegion("chr1:100-200")
-    )
-    expect_identical(
-        parseRegion("chr22_49355984_50799822"),
-        parseRegion("chr22:49355984-50799822")
-    )
-})
-
-test_that("parseRegion: accepts the mitochondrial contig", {
-    # canonChrom() exists to normalize MT/M, which the old regex made
-    # unreachable by erroring first.
-    res <- parseRegion("chrMT:10-20")
-    expect_identical(as.integer(res$start), 10L)
-    expect_identical(as.integer(res$end), 20L)
-})
-
-test_that("parseRegion: rejects malformed input", {
-    expect_error(parseRegion("notARegion"), "format must be")
-    expect_error(parseRegion("1:100:200"), "format must be")
-    # mixed spellings are not a third format
-    expect_error(parseRegion("chr1:100_200"), "format must be")
-    expect_error(parseRegion("chr1_100-200"), "format must be")
-})
-
-test_that("parseRegion: returns non-character input unchanged", {
-    df_in <- data.frame(
-        chrom = "1",
-        start = 100L,
-        end = 200L,
-        stringsAsFactors = FALSE
-    )
-    expect_identical(parseRegion(df_in), df_in)
-    expect_identical(parseRegion(42L), 42L)
-})
-
-# ===========================================================================
-# regionToDf
-# ===========================================================================
-
-test_that("regionToDf: parses chrom_start_end LD region IDs", {
-    res <- regionToDf(c("1_100_200", "2_300_400"))
-    expect_equal(res$chrom, c("1", "2"))
-    expect_equal(res$start, c(100L, 300L))
-    expect_equal(res$end, c(200L, 400L))
-})
-
-test_that("regionToDf: strips chr prefix from chromosome", {
-    res <- regionToDf("chr5_1000_2000")
-    expect_equal(res$chrom, "5")
-})
-
-test_that("regionToDf: accepts colon/dash separators", {
-    res <- regionToDf("chr1:100-200")
-    expect_equal(res$chrom, "1")
-    expect_equal(res$start, 100L)
-    expect_equal(res$end, 200L)
-})
-
-test_that("regionToDf: honours custom column names", {
-    res <- regionToDf("1_10_20", colnames = c("seq", "from", "to"))
-    expect_equal(colnames(res), c("seq", "from", "to"))
-})
-
-# ===========================================================================
 # classifyVariantType
 # ===========================================================================
 
-test_that("classifyVariantType: identifies SNPs", {
-    expect_equal(
-        classifyVariantType(c("chr1:100:A:G", "chr1:200:C:T")),
-        c("SNP", "SNP")
+test_that("classifyVariantType: identifies SNPs, indels and MNPs", {
+    ids <- c(
+        "chr1:100:A:G",
+        "chr1:200:ATG:A",
+        "chr1:300:A:ATG",
+        "chr1:400:AT:GC"
     )
-})
-
-test_that("classifyVariantType: identifies insertions and deletions", {
-    expect_equal(classifyVariantType("chr1:100:A:ATG"), "insertion")
-    expect_equal(classifyVariantType("chr1:100:ATG:A"), "deletion")
-})
-
-test_that("classifyVariantType: identifies MNPs (equal-length multi-base)", {
-    expect_equal(classifyVariantType("chr1:100:AT:GC"), "MNP")
+    result <- classifyVariantType(ids)
+    expect_equal(result, c("SNP", "deletion", "insertion", "MNP"))
 })
 
 test_that("classifyVariantType: accepts data.frame input with A2/A1 columns", {
     df <- data.frame(
-        A2 = c("A", "AT"),
-        A1 = c("G", "GC"),
+        A2 = c("A", "AT", "ATG"),
+        A1 = c("G", "GC", "A"),
         stringsAsFactors = FALSE
     )
-    expect_equal(classifyVariantType(df), c("SNP", "MNP"))
+    expect_equal(classifyVariantType(df), c("SNP", "MNP", "deletion"))
 })
 
 test_that("classifyVariantType: errors when given an unsupported input", {
@@ -307,16 +190,8 @@ test_that("classifyVariantType: errors when given an unsupported input", {
 })
 
 # ===========================================================================
-# Tests migrated from test_misc.R (variant-id helpers)
+# formatVariantId
 # ===========================================================================
-
-test_that("Test formatVariantId", {
-    expect_equal(
-        formatVariantId(c(1, 1), c(123, 132), c("G", "A"), c("C", "T")),
-        c("chr1:123:G:C", "chr1:132:A:T")
-    )
-})
-
 
 test_that("formatVariantId uses convention parameter automatically", {
     expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G"), "chr1:100:A:G")
@@ -346,7 +221,6 @@ test_that("formatVariantId uses convention parameter automatically", {
     )
 })
 
-
 test_that("formatVariantId constructs canonical IDs", {
     expect_equal(
         pecotmr:::formatVariantId(
@@ -365,85 +239,6 @@ test_that("formatVariantId constructs canonical IDs", {
         pecotmr:::formatVariantId("chr1", 100, "A", "G"),
         "chr1:100:A:G"
     )
-})
-
-# =============================================================================
-# =============================================================================
-# pvalHmp
-# =============================================================================
-
-test_that("parseRegion parses valid region string", {
-    result <- parseRegion("chr1:100-200")
-    expect_s3_class(result, "data.frame")
-    expect_equal(result$chrom, "1")
-    expect_equal(result$start, 100L)
-    expect_equal(result$end, 200L)
-})
-
-
-test_that("parseRegion handles X chromosome", {
-    result <- parseRegion("chrX:500-1000")
-    expect_equal(result$chrom, "X")
-    expect_equal(result$start, 500L)
-    expect_equal(result$end, 1000L)
-})
-
-
-test_that("parseRegion errors on invalid format", {
-    expect_error(parseRegion("1:100-200"), "format must be")
-    expect_error(parseRegion("chr1-100-200"), "format must be")
-    expect_error(parseRegion("chr1:abc-200"), "format must be")
-})
-
-
-test_that("parseRegion returns non-string input unchanged", {
-    df <- data.frame(chrom = 1, start = 100, end = 200)
-    result <- parseRegion(df)
-    expect_identical(result, df)
-})
-
-
-test_that("parseRegion returns non-single-string input unchanged", {
-    input <- c("chr1:100-200", "chr2:300-400")
-    result <- parseRegion(input)
-    expect_identical(result, input)
-})
-
-# =============================================================================
-# parseVariantId
-# =============================================================================
-
-test_that("parseVariantId parses single variant with chr prefix", {
-    result <- parseVariantId("chr1:12345:A:G")
-    expect_equal(result$chrom, "1")
-    expect_equal(result$pos, 12345L)
-    expect_equal(result$A2, "A")
-    expect_equal(result$A1, "G")
-    conv <- attr(result, "convention")
-    expect_true(conv$hasChr)
-    expect_equal(conv$alleleSep, ":")
-})
-
-
-test_that("parseVariantId parses single variant without chr prefix", {
-    result <- parseVariantId("5:12345:A:G")
-    expect_equal(result$chrom, "5")
-    expect_equal(result$pos, 12345L)
-    expect_equal(result$A2, "A")
-    expect_equal(result$A1, "G")
-    conv <- attr(result, "convention")
-    expect_false(conv$hasChr)
-})
-
-
-test_that("parseVariantId parses multiple variants", {
-    ids <- c("chr1:100:A:G", "chr2:200:C:T", "chr3:300:G:A")
-    result <- parseVariantId(ids)
-    expect_equal(nrow(result), 3)
-    expect_equal(result$chrom, c("1", "2", "3"))
-    expect_equal(result$pos, c(100L, 200L, 300L))
-    expect_equal(result$A2, c("A", "C", "G"))
-    expect_equal(result$A1, c("G", "T", "A"))
 })
 
 # =============================================================================
@@ -472,6 +267,14 @@ test_that("detectVariantConvention detects chr prefix and allele separators", {
     expect_equal(conv5$alleleSep, "_")
 })
 
+test_that("detectVariantConvention returns defaults for all-NA input", {
+    result <- detectVariantConvention(c(NA, NA, NA))
+    expect_false(result$hasChr)
+    expect_equal(result$alleleSep, ":")
+    expect_false(result$hasBuild)
+    expect_true(is.na(result$example))
+})
+
 # =============================================================================
 # normalizeVariantId
 # =============================================================================
@@ -493,151 +296,12 @@ test_that("normalizeVariantId normalizes various formats", {
     )
 })
 
-
 test_that("normalizeVariantId leaves unparseable ids (rsIDs) unchanged", {
     expect_equal(
         normalizeVariantId(c("rs123", "1:100:A:G", "chr2:200_C_T")),
         c("rs123", "chr1:100:A:G", "chr2:200:C:T")
     ) # rsID passes through
     expect_equal(normalizeVariantId("rs1"), "rs1") # all-unparseable input
-})
-
-# =============================================================================
-# parseVariantId — id-format coverage (was the variantIdToDf alias)
-# =============================================================================
-
-test_that("parseVariantId handles colon-separated format", {
-    ids <- c("1:100:A:G", "2:200:C:T")
-    result <- parseVariantId(ids)
-    expect_equal(nrow(result), 2)
-    expect_equal(result$chrom, c("1", "2"))
-    expect_equal(result$pos, c(100L, 200L))
-    expect_equal(result$A2, c("A", "C"))
-    expect_equal(result$A1, c("G", "T"))
-})
-
-
-test_that("parseVariantId handles underscore-separated format", {
-    ids <- c("1:100_A_G", "2:200_C_T")
-    result <- parseVariantId(ids)
-    expect_equal(nrow(result), 2)
-    expect_equal(result$A2, c("A", "C"))
-})
-
-
-test_that("parseVariantId strips chr prefix", {
-    ids <- c("chr1:100:A:G", "chr2:200:C:T")
-    result <- parseVariantId(ids)
-    expect_equal(result$chrom, c("1", "2"))
-})
-
-
-test_that("parseVariantId handles data.frame input with named columns", {
-    df <- data.frame(
-        chrom = c("chr1", "2"),
-        pos = c(100, 200),
-        A2 = c("A", "C"),
-        A1 = c("G", "T")
-    )
-    suppressWarnings(result <- parseVariantId(df))
-    expect_equal(result$chrom, c("1", "2"))
-    expect_equal(result$pos, c(100L, 200L))
-})
-
-
-test_that("parseVariantId handles 5-part IDs with build suffix", {
-    ids <- c("chr1:100:A:G:b38", "chr2:200:T:C")
-    result <- parseVariantId(ids)
-    expect_equal(ncol(result), 4)
-    expect_equal(colnames(result), c("chrom", "pos", "A2", "A1"))
-    expect_equal(result$chrom, c("1", "2"))
-    expect_equal(result$A2, c("A", "T"))
-    expect_equal(result$A1, c("G", "C"))
-})
-
-
-test_that("parseVariantId handles mixed 4/5-part IDs", {
-    ids <- c("1:100:A:G", "chr2:200:T:C:b38", "3:300:G:A:b37")
-    suppressWarnings(result <- parseVariantId(ids))
-    expect_equal(nrow(result), 3)
-    expect_equal(ncol(result), 4)
-    expect_equal(result$A1, c("G", "C", "A"))
-})
-
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# computeLd — uncovered branches
-# =============================================================================
-
-test_that("detectVariantConvention returns defaults for all-NA input", {
-    result <- detectVariantConvention(c(NA, NA, NA))
-    expect_false(result$hasChr)
-    expect_equal(result$alleleSep, ":")
-    expect_false(result$hasBuild)
-    expect_true(is.na(result$example))
-})
-
-# =============================================================================
-# parseVariantId — uncovered line 622
-# =============================================================================
-
-test_that("parseVariantId handles data.frame with generic column names", {
-    df <- data.frame(
-        col1 = c("chr1", "chr2"),
-        col2 = c(100, 200),
-        col3 = c("A", "T"),
-        col4 = c("G", "C"),
-        stringsAsFactors = FALSE
-    )
-    result <- parseVariantId(df)
-    expect_equal(names(result)[1:4], c("chrom", "pos", "A2", "A1"))
-    expect_equal(result$chrom, c("1", "2"))
-    expect_equal(result$pos, c(100L, 200L))
-    expect_equal(result$A2, c("A", "T"))
-    expect_equal(result$A1, c("G", "C"))
-})
-
-# =============================================================================
-# classifyVariantType
-# =============================================================================
-
-test_that("classifyVariantType identifies SNPs", {
-    expect_equal(classifyVariantType("chr1:100:A:G"), "SNP")
-})
-
-
-test_that("classifyVariantType identifies insertions", {
-    expect_equal(classifyVariantType("chr1:100:A:ATG"), "insertion")
-})
-
-
-test_that("classifyVariantType identifies deletions", {
-    expect_equal(classifyVariantType("chr1:100:ATG:A"), "deletion")
-})
-
-
-test_that("classifyVariantType identifies MNPs", {
-    expect_equal(classifyVariantType("chr1:100:AT:GC"), "MNP")
-})
-
-
-test_that("classifyVariantType handles vector input", {
-    ids <- c(
-        "chr1:100:A:G",
-        "chr1:200:ATG:A",
-        "chr1:300:A:ATG",
-        "chr1:400:AT:GC"
-    )
-    result <- classifyVariantType(ids)
-    expect_equal(result, c("SNP", "deletion", "insertion", "MNP"))
-})
-
-
-test_that("classifyVariantType accepts data.frame input", {
-    df <- data.frame(A2 = c("A", "ATG"), A1 = c("G", "A"))
-    result <- classifyVariantType(df)
-    expect_equal(result, c("SNP", "deletion"))
 })
 
 # ===========================================================================
@@ -676,7 +340,7 @@ test_that("parseVariantId keeps non-autosomal chromosomes as strings", {
         "chrM:5:G:A",
         "chrY:9:C:T"
     ))
-    expect_equal(res$chrom, c("X", "X", "MT", "Y"))
+    expect_equal(res$chrom, c("chrX", "chrX", "chrM", "chrY"))
     expect_equal(res$pos, c(100L, 200L, 5L, 9L))
 })
 
@@ -689,19 +353,13 @@ test_that("formatVariantId emits non-autosomal ids without 'chrNA'", {
 test_that("normalizeVariantId round-trips non-autosomal chromosomes", {
     expect_equal(normalizeVariantId("23:100:A:G"), "chrX:100:A:G")
     expect_equal(normalizeVariantId("chrX:100:A:G"), "chrX:100:A:G")
-    expect_equal(normalizeVariantId("chrM:5:G:A"), "chrMT:5:G:A")
+    expect_equal(normalizeVariantId("chrM:5:G:A"), "chrM:5:G:A")
+    expect_equal(normalizeVariantId("MT:5:G:A"), "chrM:5:G:A")
 })
 
 test_that("chromOrder sorts autosomes then X/Y/MT", {
     ord <- pecotmr:::chromOrder(c("MT", "X", "2", "1", "22", "Y"))
     expect_equal(as.character(sort(ord)), c("1", "2", "22", "X", "Y", "MT"))
-})
-
-test_that("regionToDf keeps chrom as a string and positions as integers", {
-    res <- regionToDf("chrX_1000_2000")
-    expect_equal(res$chrom, "X")
-    expect_type(res$start, "integer")
-    expect_equal(res$start, 1000L)
 })
 
 # ===========================================================================
@@ -873,15 +531,17 @@ test_that("harmonizeAlleles flipStrand = TRUE runs the strand-flip branch", {
 
 test_that("harmonizeAlleles complements colToComplement on an allele swap", {
     # target G/A is the ref/alt swap of ref A/G, so an effect-allele freq
-    # complements to 1 - af.
-    tgt <- .vid_df("1", 100, "G", "A", af = 0.3)
+    # complements to 1 - af while the signed colToFlip column is negated.
+    tgt <- .vid_df("1", 100, "G", "A", af = 0.3, z = 2)
     res <- pecotmr:::harmonizeAlleles(
         tgt,
         .vid_df("1", 100, "A", "G"),
+        colToFlip = "z",
         colToComplement = "af",
         matchMinProp = 0
     )
     expect_equal(res$harmonizedData$af, 0.7)
+    expect_equal(res$harmonizedData$z, -2)
 })
 
 test_that("harmonizeAlleles errors when colToFlip / colToComplement are absent", {
@@ -926,7 +586,7 @@ test_that("harmonizeAlleles errors on duplicate variant IDs when removeDups = FA
             .vid_df("1", 100, "A", "G"),
             matchMinProp = 0
         ),
-        "Duplicated variant IDs"
+        "Duplicated variant IDs remain"
     )
 })
 
@@ -939,7 +599,7 @@ test_that("harmonizeAlleles removeDups = TRUE drops duplicates with a warning", 
             removeDups = TRUE,
             matchMinProp = 0
         ),
-        "duplicate"
+        "Removed 1 duplicate"
     )
     expect_equal(nrow(res$harmonizedData), 1L)
 })
@@ -1037,8 +697,110 @@ test_that("harmonizeAlleles counts what it kept, not what it joined", {
     expect_equal(counts$signFlip, 0L)
 })
 
+test_that("harmonizeAlleles surfaces sign/strand/dropped in qcCounts", {
+    # 4 shared positions: 100 exact, 200 sign-flip, 300 strand-flip (A/G
+    # unambiguous), 400 allele mismatch (dropped).
+    target <- data.frame(
+        chrom = c(1, 1, 1, 1),
+        pos = c(100, 200, 300, 400),
+        A2 = c("A", "A", "A", "A"),
+        A1 = c("G", "G", "G", "G"),
+        z = c(1, 2, 3, 4),
+        stringsAsFactors = FALSE
+    )
+    ref <- data.frame(
+        chrom = c(1, 1, 1, 1),
+        pos = c(100, 200, 300, 400),
+        A2 = c("A", "G", "T", "C"),
+        A1 = c("G", "A", "C", "A"),
+        stringsAsFactors = FALSE
+    )
+    res <- pecotmr:::harmonizeAlleles(
+        target,
+        ref,
+        colToFlip = "z",
+        matchMinProp = 0
+    )
+    # Default return shape unchanged.
+    expect_named(res, c("harmonizedData", "qcSummary"))
+    expect_equal(nrow(res$harmonizedData), 3L)
+    cnt <- attr(res, "qcCounts")
+    expect_false(is.null(cnt))
+    expect_equal(cnt$considered, 4L)
+    expect_equal(cnt$signFlip, 1L)
+    expect_equal(cnt$strandFlip, 1L)
+    expect_equal(cnt$kept, 3L)
+    expect_equal(cnt$dropped, 1L)
+})
+
+test_that("harmonizeAlleles: accepts a bare variant-id vector as target", {
+    res <- pecotmr:::harmonizeAlleles(
+        c("chr1:100:A:G", "chr1:200:C:T"),
+        c("chr1:100:A:G", "chr1:200:C:T"),
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 2L)
+})
+
+test_that("harmonizeAlleles: strips a conflicting variant_id from target", {
+    target <- data.frame(
+        chrom = c(1, 1),
+        pos = c(100, 200),
+        A2 = c("A", "C"),
+        A1 = c("G", "T"),
+        variant_id = c("old1", "old2"),
+        z = c(1, 2),
+        stringsAsFactors = FALSE
+    )
+    ref <- data.frame(
+        chrom = c(1, 1),
+        pos = c(100, 200),
+        A2 = c("A", "C"),
+        A1 = c("G", "T"),
+        stringsAsFactors = FALSE
+    )
+    res <- pecotmr:::harmonizeAlleles(
+        target,
+        ref,
+        colToFlip = "z",
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 2L)
+    # The input variant_id was stripped; the returned id is rebuilt from QC'd alleles.
+    expect_false(any(c("old1", "old2") %in% res$harmonizedData$variant_id))
+})
+
+test_that("harmonizeAlleles renames an empty target column to unnamed_N", {
+    # 5 columns whose first four are positional (NOT literally named
+    # chrom/pos/A2/A1), so harmonizeAlleles routes through parseVariantId --
+    # which preserves the extra column -- rather than the select()-based path.
+    # The 5th column has an empty name, so the joined matchResult carries an
+    # empty-named column and .sanitizeNames() rewrites it to "unnamed_1".
+    target <- data.frame(
+        CHR = c(1, 1, 1),
+        POS = c(100, 200, 300),
+        ref = c("A", "C", "G"),
+        alt = c("G", "T", "A"),
+        extra = c(0.1, 0.2, 0.3),
+        stringsAsFactors = FALSE
+    )
+    names(target)[5] <- ""
+    ref <- data.frame(
+        chrom = c(1, 1, 1),
+        pos = c(100, 200, 300),
+        A2 = c("A", "C", "G"),
+        A1 = c("G", "T", "A"),
+        stringsAsFactors = FALSE
+    )
+    res <- pecotmr:::harmonizeAlleles(target, ref, matchMinProp = 0)
+    expect_equal(nrow(res$harmonizedData), 3L)
+    nm <- colnames(res$harmonizedData)
+    expect_false(any(nm == "" | is.na(nm))) # the empty name was repaired
+    expect_true(any(grepl("^unnamed_", nm))) # ... to an "unnamed_*" label
+})
+
 # ===========================================================================
-# withChrPrefix + asGranges error paths
+# withChrPrefix
 # ===========================================================================
 
 test_that("withChrPrefix adds a lowercase chr prefix case-insensitively", {
@@ -1048,21 +810,106 @@ test_that("withChrPrefix adds a lowercase chr prefix case-insensitively", {
     )
 })
 
-test_that("asGranges errors on malformed input", {
-    expect_error(pecotmr:::asGranges(data.frame(foo = 1)), "must have columns")
-    expect_error(pecotmr:::asGranges(list(1)), "character vector or data.frame")
+test_that("withChrPrefix spells chromosomes as UCSC does", {
+    expect_equal(
+        pecotmr:::withChrPrefix(
+            c("01", "23", "24", "x", "M", "MT", "chrM", "chrMT", NA)
+        ),
+        c("chr1", "chrX", "chrY", "chrX", "chrM", "chrM", "chrM", "chrM", NA)
+    )
+    # A contig outside the standard set keeps its spelling behind the prefix.
+    expect_equal(
+        pecotmr:::withChrPrefix(c("chrUn_gl000192", "GL000192.1", "XY")),
+        c("chrUn_gl000192", "chrGL000192.1", "chrXY")
+    )
 })
 
-test_that("asGranges (exported) converts region strings and data.frames", {
-    gr <- asGranges("chr1:100-200")
-    expect_s4_class(gr, "GRanges")
-    expect_equal(as.character(GenomicRanges::seqnames(gr)), "chr1")
-    expect_equal(GenomicRanges::start(gr), 100L)
-    expect_equal(GenomicRanges::end(gr), 200L)
-    # numeric chrom gets a chr prefix; data.frame input is accepted too
-    gr2 <- asGranges(data.frame(chrom = "2", start = 5, end = 9))
-    expect_equal(as.character(GenomicRanges::seqnames(gr2)), "chr2")
+test_that("withChrPrefix agrees with GenomeInfoDb's UCSC style", {
+    ncbi <- c(as.character(1:22), "X", "Y", "MT")
+    expect_identical(
+        pecotmr:::withChrPrefix(ncbi),
+        unname(GenomeInfoDb::mapSeqlevels(ncbi, "UCSC"))
+    )
+    gr <- GenomicRanges::GRanges(
+        pecotmr:::withChrPrefix(ncbi),
+        IRanges::IRanges(1L, width = 1L)
+    )
+    expect_identical(GenomeInfoDb::seqlevelsStyle(gr), "UCSC")
 })
+
+test_that(".ucscRanges renames to UCSC and keeps the rest", {
+    # Anything but ranges passes through for its caller to refuse.
+    expect_null(pecotmr:::.ucscRanges(NULL))
+    expect_identical(pecotmr:::.ucscRanges("chr1"), "chr1")
+    ucsc <- GenomicRanges::GRanges("chr1", IRanges::IRanges(5L, width = 1L))
+    expect_identical(pecotmr:::.ucscRanges(ucsc), ucsc)
+    gr <- GenomicRanges::GRanges(
+        c("1", "MT"),
+        IRanges::IRanges(c(100L, 5L), width = 1L, names = c("a", "b")),
+        strand = c("+", "-"),
+        SNP = c("rs1", "rs2")
+    )
+    GenomeInfoDb::genome(gr) <- "hg19"
+    out <- pecotmr:::.ucscRanges(gr)
+    expect_identical(
+        as.character(GenomicRanges::seqnames(out)),
+        c("chr1", "chrM")
+    )
+    expect_identical(names(out), c("a", "b"))
+    expect_identical(as.character(GenomicRanges::strand(out)), c("+", "-"))
+    expect_identical(out$SNP, c("rs1", "rs2"))
+    expect_identical(unname(GenomeInfoDb::genome(out)), c("hg19", "hg19"))
+})
+
+test_that(".ucscRanges merges two spellings of one chromosome", {
+    gr <- GenomicRanges::GRanges(
+        c("1", "chr1", "2"),
+        IRanges::IRanges(c(10L, 20L, 30L), width = 1L),
+        strand = c("+", "*", "-"),
+        SNP = c("a", "b", "c")
+    )
+    GenomeInfoDb::genome(gr) <- "hg38"
+    out <- pecotmr:::.ucscRanges(gr)
+    expect_identical(GenomeInfoDb::seqlevels(out), c("chr1", "chr2"))
+    expect_identical(
+        as.character(GenomicRanges::seqnames(out)),
+        c("chr1", "chr1", "chr2")
+    )
+    expect_identical(as.character(GenomicRanges::strand(out)), c("+", "*", "-"))
+    expect_identical(out$SNP, c("a", "b", "c"))
+    expect_identical(unname(GenomeInfoDb::genome(out)), c("hg38", "hg38"))
+})
+
+test_that(".ucscEntries renames every element and keeps a NULL one", {
+    out <- pecotmr:::.ucscEntries(list(
+        a = GenomicRanges::GRanges("22", IRanges::IRanges(1L, width = 1L)),
+        b = NULL
+    ))
+    expect_identical(names(out), c("a", "b"))
+    expect_identical(as.character(GenomicRanges::seqnames(out$a)), "chr22")
+    expect_null(out$b)
+})
+
+test_that(".ucscExperiment renames an experiment's rowRanges only", {
+    m <- matrix(1, 1L, 1L, dimnames = list("v", "s"))
+    plain <- SummarizedExperiment::SummarizedExperiment(list(x = m))
+    expect_identical(pecotmr:::.ucscExperiment(plain), plain)
+    rse <- SummarizedExperiment::SummarizedExperiment(
+        list(x = m),
+        rowRanges = GenomicRanges::GRanges(
+            "X",
+            IRanges::IRanges(9L, width = 1L)
+        )
+    )
+    out <- pecotmr:::.ucscExperiment(rse)
+    expect_identical(GenomeInfoDb::seqlevels(out), "chrX")
+    expect_identical(SummarizedExperiment::assay(out), m)
+    expect_identical(pecotmr:::.ucscExperiment(out), out)
+})
+
+# ===========================================================================
+# matchVariants: data.frame input
+# ===========================================================================
 
 test_that("matchVariants allowFlip = FALSE accepts data.frame input", {
     a <- .vid_df("1", 100, "A", "G")
@@ -1085,15 +932,10 @@ test_that("matchVariants returns empty for unparseable data.frame input", {
 # matchVariants: a reference carrying both orientations of one variant
 # ===========================================================================
 
-test_that("matchVariants drops a target matching both orientations", {
+test_that("matchVariants drops a flip-pair target, whatever the row order", {
     # Two distinct indels at one position that are each other's allele flip is
     # rare but biologically real. A target then matches one exactly (+1) and
     # the other as a swap (-1), and nothing can say which it is.
-    panel <- c("chr1:100:A:AT", "chr1:100:AT:A")
-    expect_length(matchVariants("chr1:100:A:AT", panel)$idxA, 0L)
-})
-
-test_that("the drop does not depend on the reference's row order", {
     # The bug this replaces: `!duplicated()` kept whichever match came first,
     # so the SIGN -- and with it the effect direction -- was decided by the
     # panel's row order.
@@ -1144,6 +986,9 @@ test_that("the rule applies to SNP flip pairs, not just indels", {
     expect_length(matchVariants("chr1:200:A:G", panel)$idxA, 0L)
 })
 
+# ===========================================================================
+# Remaining helpers and argument guards
+# ===========================================================================
 
 test_that("a convention without an allele separator keeps the default", {
     f <- pecotmr:::formatVariantId
@@ -1262,28 +1107,5 @@ test_that("normalizeVariantId: argument guards fire", {
     expect_error(
         normalizeVariantId(ids, convention = "nope"),
         "convention.*Must be of type 'list'"
-    )
-})
-
-test_that("regionToDf: argument guards fire", {
-    expect_error(regionToDf(1L), "Must be of type 'character'")
-    expect_error(
-        regionToDf("1_100_200", colnames = c("a", "b")),
-        "colnames.*Must have length 3"
-    )
-})
-
-test_that("asGranges leaves an already chr-prefixed chromosome alone", {
-    # The prefix is added only when absent; a frame that already carries it
-    # must not become "chrchr1".
-    gr <- asGranges(data.frame(
-        chrom = c("chr1", "chr2"),
-        start = c(100L, 200L),
-        end = c(150L, 250L),
-        stringsAsFactors = FALSE
-    ))
-    expect_identical(
-        as.character(GenomicRanges::seqnames(gr)),
-        c("chr1", "chr2")
     )
 })

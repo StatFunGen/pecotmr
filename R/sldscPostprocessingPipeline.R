@@ -176,8 +176,8 @@ sldscPostprocessingPipeline <- function(
 # first single run.
 # @noRd
 .sldscPivotRun <- function(sldscData, trait1) {
-    pivotRun <- sldscResults(sldscData, trait1, "joint") %||%
-        sldscResults(sldscData, trait1, "single", 1L)
+    pivotRun <- .sldscRun(sldscData, trait1, "joint") %||%
+        .sldscRun(sldscData, trait1, "single", 1L)
     pivotRun
 }
 
@@ -242,7 +242,7 @@ sldscPostprocessingPipeline <- function(
 # Baseline categories = the first trait's joint categories minus the targets.
 # @noRd
 .sldscBaselineCategories <- function(sldscData, traitNames, targetCategories) {
-    jointPivot <- sldscResults(sldscData, traitNames[1], "joint")
+    jointPivot <- .sldscRun(sldscData, traitNames[1], "joint")
     baselineCategories <- if (!is.null(jointPivot)) {
         setdiff(jointPivot$categories, targetCategories)
     } else {
@@ -319,7 +319,7 @@ sldscPostprocessingPipeline <- function(
 # list(singleDf, blocksSingle, singleH2gs).
 # @noRd
 .sldscTraitSingle <- function(trait, ctx) {
-    singleRuns <- sldscResults(ctx$sldscData, trait, "single") %||% list()
+    singleRuns <- .sldscRun(ctx$sldscData, trait, "single") %||% list()
     nRun <- min(length(ctx$targetCategories), length(singleRuns))
     stds <- compact(map(
         seq_len(nRun),
@@ -395,7 +395,7 @@ sldscPostprocessingPipeline <- function(
         jointH2g = NA_real_,
         nBlocks = NA_integer_
     )
-    if (is.null(sldscResults(ctx$sldscData, trait, "joint"))) {
+    if (is.null(.sldscRun(ctx$sldscData, trait, "joint"))) {
         return(empty)
     }
     std <- try_fetch(

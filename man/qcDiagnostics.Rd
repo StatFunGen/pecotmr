@@ -5,32 +5,30 @@
 \alias{qcDiagnostics,SumStatsBase-method}
 \title{Get SLALOM / DENTIST Diagnostics}
 \usage{
-qcDiagnostics(x, entry = 1L, ...)
+qcDiagnostics(x, ...)
 
-\S4method{qcDiagnostics}{SumStatsBase}(x, entry = 1L)
+\S4method{qcDiagnostics}{SumStatsBase}(x, studyName = NULL, context = NULL, trait = NULL)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}
 
-\item{entry}{Integer index (default 1) of the entry whose diagnostics table
-to return. When \code{NULL}, returns a named list of every entry's
-diagnostics keyed by entry index.}
-
 \item{...}{Unused.}
+
+\item{studyName, context, trait}{Selectors pinning one study or entry;
+\code{context} and \code{trait} are \code{QtlSumStats}-only.}
 }
 \value{
-A \code{data.frame} of per-variant diagnostics (columns include
-  \code{variant_id} plus the SLALOM / DENTIST output columns), \code{NULL}
-  when no diagnostics were preserved for that entry, or a named list of such
-  data.frames when \code{entry = NULL}.
+A \code{DataFrame} of per-variant diagnostics (columns include
+  \code{variant_id} plus the SLALOM / DENTIST output columns), or
+  \code{NULL} when no diagnostics were preserved for the selection.
 }
 \description{
-Return the per-variant LD-mismatch diagnostics table (SLALOM or
-  DENTIST output) attached to a sumstats entry by
-  \code{\link{summaryStatsQc}} when \code{ldMismatchQcMethod} was not
-  \code{"none"}.
-  Convenience accessor over
-  \code{qcInfo(x)$entryAudit[[entry]]$ldMismatchDiagnostics}.
+Return the per-variant LD-mismatch diagnostics (SLALOM or
+  DENTIST output) that \code{\link{summaryStatsQc}} attached to the
+  selected entry when \code{ldMismatchQcMethod} was not \code{"none"}.
+  The selectors pin one study (every row of a GWAS study, whose rows'
+  tables are stacked) or one \code{QtlSumStats} entry, as for
+  \code{\link{sumStats}}.
 }
 \examples{
 data(qtlSumStatsExample)

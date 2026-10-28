@@ -7,32 +7,35 @@
 .penalizedRssWeights(
   stat,
   ldReference,
-  penalty,
+  spec,
   s = c(0.2, 0.5, 0.9, 1),
-  gamma = NULL,
-  alpha = 1,
-  lambda0 = 0,
-  lambda2 = 0,
   selection = c("ldQuadratic", "minFbeta"),
   fitRetention = c("none", "slim", "full"),
-  methodArgs = PenalizedRssOptions()
+  methodArgs = PenalizedRssOptions(),
+  label = str_c(str_to_lower(spec$penalty), "RssWeights")
 )
 }
 \arguments{
-\item{stat, ldReference, s, selection, penalty, gamma, alpha, lambda0, lambda2}{See
-the public wrappers for details.}
+\item{stat, ldReference, s, selection}{See the public wrappers for details.}
+
+\item{spec}{The penalty, built by the calling wrapper from its own
+arguments (internal \code{.rssPenalty()}).}
 
 \item{fitRetention}{How much of the search is kept as the \code{"fit"}
 attribute; see \code{\link{scadRssWeights}}.}
 
 \item{methodArgs}{Options forwarded to \code{penalizedRss}, built with
-\code{\link{PenalizedRssOptions}}.}
+\code{\link{PenalizedRssOptions}}: the path only, since the penalty is
+the wrapper's.}
+
+\item{label}{The calling wrapper's name, for its error messages.}
 }
 \value{
 Numeric weight vector, one weight per variant of \code{stat}.
 }
 \description{
-Shared implementation for \code{scadRssWeights()} and \code{mcpRssWeights()}.
+Shared implementation for \code{scadRssWeights()}, \code{mcpRssWeights()},
+\code{enetRssWeights()} and \code{ridgeRssWeights()}.
 (\code{l0learnRssWeights()} uses the lower-level \code{.rssShrinkGridWeights}
 scaffold directly, since it sweeps an additional \code{lambda0} path.)
 Searches over a shrinkage grid \code{s} (LD matrix shrinkage \code{(1-s)R +

@@ -152,14 +152,13 @@ p-value than the normal approximation would.
 
 ## LD reference consistency
 
-Both `twasWeights` and `fineMappingResult` carry an `ldReference` slot.
-When provided, they must be the same LD reference as `gwasSumStats`
-carries. The pipeline errors on mismatch.
+Both `twasWeights` and `fineMappingResult` record an LD reference per row.
+Where a row has one, it must be the same LD reference as the `gwasSumStats`
+rows it overlaps carry. The pipeline errors on mismatch.
 
-A QTL input with `ldReference = NULL` (e.g. weights learned from
-individual-level data without any RSS step) skips the panel check for
-that input — useful for analyses that mix individual-level QTL fits
-with sumstats GWAS.
+A QTL row with no LD reference (e.g. weights learned from individual-level
+data without any RSS step) skips the panel check — useful for analyses that
+mix individual-level QTL fits with sumstats GWAS.
 
 ## Common parameters
 

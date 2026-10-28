@@ -1,87 +1,172 @@
-# Tests migrated from test_h2ClassesSumstats.R
+# Tests for R/gwasSumStats.R (the GwasSumStats class). makeGwasSumStatsFromDf(),
+# below, is a test helper over GwasSumStats().
 
-# === Tests migrated from test_h2ClassesSumstats.R (GwasSumStats) ===
-
-test_that("GwasSumStats(df) errors when required mcols are missing", {
-    df <- data.frame(
-        SNP = "rs1",
-        CHR = "1",
-        BP = 100,
-        A1 = "A",
+makeTestSumstatsDf <- function(n = 50) {
+    set.seed(42)
+    data.frame(
+        SNP = paste0("rs", seq_len(n)),
+        CHR = rep("1", n),
+        BP = seq(1000, by = 100, length.out = n),
+        A1 = rep("A", n),
+        A2 = rep("G", n),
+        Z = rnorm(n),
+        N = rep(10000, n),
         stringsAsFactors = FALSE
     )
-    expect_error(
-        makeGwasSumStatsFromDf(df),
-        "Missing required columns"
+}
+
+# Bridge helper: turn the legacy per-study data.frame shape into a
+# single-row GwasSumStats collection using the new API. Keeps the bulk of
+# the per-accessor tests below readable.
+.testGenotypeHandle <- function() {
+    new(
+        "GenotypeHandle",
+        path = "/tmp/test",
+        format = "plink2",
+        snpInfo = data.frame(),
+        nSamples = 0L,
+        sampleIds = character(),
+        pgenPtr = NULL
     )
-})
+}
 
+.dfToSumstatsGr <- function(df) {
+    chrs <- as.character(df$CHR)
+    if (!all(grepl("^chr", chrs))) {
+        chrs <- paste0("chr", sub("^chr", "", chrs))
+    }
+    gr <- GenomicRanges::GRanges(
+        seqnames = chrs,
+        ranges = IRanges::IRanges(start = as.integer(df$BP), width = 1L)
+    )
+    mc <- df[, setdiff(colnames(df), c("CHR", "BP")), drop = FALSE]
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mc)
+    gr
+}
 
-test_that("GwasSumStats valid object passes with all required mcols", {
-    set.seed(1)
+makeGwasSumStatsFromDf <- function(
+    df,
+    traitName = "test",
+    genome = "hg19",
+    varY = NA_real_
+) {
+    if (is.null(varY)) {
+        varY <- NA_real_
+    }
+    GwasSumStats(
+        studyName = traitName,
+        entry = list(.dfToSumstatsGr(df)),
+        genome = genome,
+        ldReference = .testGenotypeHandle(),
+        varY = varY
+    )
+}
+
+# A handle over a real (fake-path) variant set, so tests can build the
+# per-block LD panels a block-parallel pipeline produces: same genotype source,
+# each narrowed to its own variants.
+.blockGenotypeHandle <- function(bp, path = "/tmp/test.pgen") {
+    new(
+        "GenotypeHandle",
+        path = path,
+        format = "plink2",
+        snpInfo = data.frame(
+            SNP = paste0("chr1:", bp, ":A:G"),
+            CHR = rep("chr1", length(bp)),
+            BP = as.integer(bp),
+            A1 = rep("G", length(bp)),
+            A2 = rep("A", length(bp)),
+            fileIdx = seq_along(bp),
+            stringsAsFactors = FALSE
+        ),
+        nSamples = 10L,
+        sampleIds = paste0("s", seq_len(10)),
+        pgenPtr = NULL
+    )
+}
+
+# One LD block's worth of GWAS summary statistics: `n` variants starting at
+# `start`, carrying a QC record and an LD panel narrowed to just those
+# variants (what a per-block pipeline step writes out).
+makeGwasBlock <- function(
+    blockId,
+    start,
+    n = 5L,
+    genome = "hg19",
+    qcOptions = list(mafCutoff = 0.01),
+    ldReference = .blockGenotypeHandle(bp)
+) {
+    bp <- seq(start, by = 100L, length.out = n)
     df <- data.frame(
-        SNP = paste0("rs", 1:5),
-        CHR = rep("1", 5),
-        BP = 1:5,
-        A1 = rep("A", 5),
-        A2 = rep("G", 5),
-        Z = rnorm(5),
-        N = rep(1000, 5),
+        SNP = paste0("chr1:", bp, ":A:G"),
+        CHR = rep("1", n),
+        BP = bp,
+        A1 = rep("A", n),
+        A2 = rep("G", n),
+        Z = seq_len(n) / 10,
+        N = rep(1000L, n),
         stringsAsFactors = FALSE
     )
-    obj <- makeGwasSumStatsFromDf(df)
-    expect_true(methods::validObject(obj))
-})
+    obj <- GwasSumStats(
+        studyName = "trait1",
+        entry = list(.dfToSumstatsGr(df)),
+        genome = genome,
+        ldReference = ldReference,
+        blockId = blockId,
+        qcOptions = list(timestamp = NA_character_, options = qcOptions)
+    )
+    obj$qcAudit <- S4Vectors::SimpleList(list(list(
+        variantsIn = n,
+        block = blockId
+    )))
+    obj
+}
 
-
-test_that("makeGwasSumStatsFromDf() constructor creates object from data.frame", {
+test_that("GwasSumStats() records the study, genome build and variants", {
     df <- makeTestSumstatsDf(20)
     obj <- makeGwasSumStatsFromDf(df, traitName = "height", genome = "hg38")
 
     expect_s4_class(obj, "GwasSumStats")
-    expect_equal(as.character(obj$study)[[1L]], "height")
+    expect_true(methods::validObject(obj))
+    # One chromosome, so one row, keyed on the study it was given.
+    expect_identical(obj$study, "height")
     expect_equal(unname(GenomeInfoDb::genome(obj)), "hg38")
-    expect_equal(length(sumStats(obj)), 20)
+    expect_identical(sumStats(obj)$SNP, df$SNP)
 })
 
 
-test_that("makeGwasSumStatsFromDf() normalizes chr prefix", {
-    df <- makeTestSumstatsDf(5)
-    # Input has CHR = "1" (no prefix)
-    obj <- makeGwasSumStatsFromDf(df)
-    chrs <- as.character(GenomicRanges::seqnames(sumStats(obj)))
-    expect_true(all(startsWith(chrs, "chr")))
-
-    # Input already has "chr" prefix
-    df2 <- df
-    df2$CHR <- "chr1"
-    obj2 <- makeGwasSumStatsFromDf(df2)
-    chrs2 <- as.character(GenomicRanges::seqnames(sumStats(obj2)))
-    # Should not double-prefix
-    expect_true(all(chrs2 == "chr1"))
-    expect_false(any(grepl("^chrchr", chrs2)))
-})
-
-
-test_that("makeGwasSumStatsFromDf() errors on missing columns", {
-    df <- data.frame(SNP = "rs1", CHR = "1", BP = 100)
-    expect_error(makeGwasSumStatsFromDf(df), "Missing required columns")
-})
-
-
-test_that("makeGwasSumStatsFromDf() removes rows with NA in required columns", {
-    df <- makeTestSumstatsDf(10)
-    df$Z[1] <- NA
-    df$N[3] <- NA
-    expect_message(
-        obj <- makeGwasSumStatsFromDf(df),
-        "Removed.*SNPs with missing"
+test_that("GwasSumStats() reads an entry's chromosomes in UCSC style", {
+    # Built here rather than through makeGwasSumStatsFromDf(), which adds
+    # the "chr" prefix itself before the constructor sees the names.
+    gr <- GenomicRanges::GRanges(
+        c("1", "1", "CHR2"),
+        IRanges::IRanges(c(100L, 200L, 300L), width = 1L)
     )
-    expect_equal(length(sumStats(obj)), 8)
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = c("rs1", "rs2", "rs3"),
+        A1 = "A",
+        A2 = "G",
+        Z = c(1, 2, 3),
+        N = 100L
+    )
+    obj <- GwasSumStats(studyName = "t1", entry = list(gr), genome = "hg19")
+    expect_identical(
+        as.character(GenomicRanges::seqnames(sumStats(obj))),
+        c("chr1", "chr1", "chr2")
+    )
+    # The per-chromosome rows are keyed on the renamed chromosomes.
+    expect_identical(obj$blockId, c("chr1", "chr2"))
+    # Names already in UCSC style are kept, not prefixed a second time.
+    again <- GwasSumStats(
+        studyName = "t1",
+        entry = list(sumStats(obj)),
+        genome = "hg19"
+    )
+    expect_identical(GenomeInfoDb::seqlevels(again), c("chr1", "chr2"))
 })
 
 
-test_that("getz() returns correct Z vector", {
+test_that("z() returns correct Z vector", {
     set.seed(99)
     df <- makeTestSumstatsDf(5)
     obj <- makeGwasSumStatsFromDf(df)
@@ -91,16 +176,16 @@ test_that("getz() returns correct Z vector", {
 })
 
 
-test_that("getn() returns correct N vector", {
+test_that("sampleSize() returns correct N vector", {
     df <- makeTestSumstatsDf(5)
     obj <- makeGwasSumStatsFromDf(df)
-    n <- nSamples(obj)
+    n <- sampleSize(obj)
     expect_equal(length(n), 5)
     expect_true(all(n == 10000))
 })
 
 
-test_that("getmaf() returns MAF when present, NULL when absent", {
+test_that("maf() returns MAF when present, NULL when absent", {
     df <- makeTestSumstatsDf(5)
     obj_no_maf <- makeGwasSumStatsFromDf(df)
     expect_null(maf(obj_no_maf))
@@ -120,23 +205,22 @@ test_that("nSnps() returns correct count", {
 })
 
 
-test_that("subsetchr() filters correctly", {
+test_that("keepSeqlevels() narrows a GwasSumStats to a chromosome", {
     df <- makeTestSumstatsDf(10)
     df$CHR <- c(rep("1", 6), rep("2", 4))
     obj <- makeGwasSumStatsFromDf(df)
 
-    chr1 <- subsetChr(obj, "1")
+    chr1 <- GenomeInfoDb::keepSeqlevels(obj, "chr1", pruning.mode = "coarse")
+    expect_s4_class(chr1, "GwasSumStats")
     expect_equal(nSnps(chr1), 6)
-
-    # Also works with "chr" prefix
-    chr2 <- subsetChr(obj, "chr2")
+    chr2 <- GenomeInfoDb::keepSeqlevels(obj, "chr2", pruning.mode = "coarse")
     expect_equal(nSnps(chr2), 4)
 })
 
 
-test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
-    # Regression: the chromosome subset rebuilds the GwasSumStats and previously
-    # dropped the optional per-study case/control counts + total N.
+test_that("keepSeqlevels() preserves study-level nCase/nControl/nSample", {
+    # The per-study case/control counts and total N are row columns, so a
+    # chromosome subset carries them with the rows it keeps.
     gr <- GenomicRanges::GRanges(
         c("chr1", "chr1", "chr2"),
         IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
@@ -158,7 +242,7 @@ test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
         nSample = 20000
     )
 
-    sub <- subsetChr(obj, "chr1")
+    sub <- GenomeInfoDb::keepSeqlevels(obj, "chr1", pruning.mode = "coarse")
     expect_equal(nSnps(sub), 2)
     expect_equal(as.numeric(sub$nCase), 5000)
     expect_equal(as.numeric(sub$nControl), 15000)
@@ -166,7 +250,7 @@ test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
 })
 
 
-test_that("getvary() returns var_y and NULL cases", {
+test_that("varY() returns var_y and NULL cases", {
     df <- makeTestSumstatsDf(5)
 
     obj_null <- makeGwasSumStatsFromDf(df, varY = NULL)
@@ -177,15 +261,16 @@ test_that("getvary() returns var_y and NULL cases", {
 })
 
 
-test_that("as.data.frame() round-trips in the standardized layout", {
+test_that("as.data.frame() is the standard coercion, one row per variant", {
     df_in <- makeTestSumstatsDf(15)
     obj <- makeGwasSumStatsFromDf(df_in)
-    df_out <- as.data.frame(obj)
-
-    # One coercion per class: as.data.frame() is the table view of
-    # sumStats(), so it yields the standardized layout rather than the raw
-    # mcols names. The raw form is still reachable through
-    # as.data.frame(mcols(sumStats(obj))).
+    # The inherited GRangesList coercion: the element ranges plus their
+    # stored mcols, under the stored names.
+    std <- as.data.frame(obj)
+    expect_true(all(c("group", "seqnames", "start", "Z") %in% names(std)))
+    expect_equal(nrow(std), 15)
+    # The standardized layout the pipelines use is built internally.
+    df_out <- pecotmr:::.entryToSumstatDf(sumStats(obj))
     expect_true(is.data.frame(df_out))
     expect_true(all(
         c("variant_id", "chrom", "pos", "A1", "A2", "z", "N") %in%
@@ -199,10 +284,8 @@ test_that("as.data.frame() round-trips in the standardized layout", {
 
 
 # =============================================================================
-# AnnotationMatrix (h2Annotations.R)
+# show()
 # =============================================================================
-
-# === Tests migrated from test_showMethods.R (GwasSumStats) ===
 
 test_that("show.GwasSumStats prints nrow and genome build", {
     ss <- GwasSumStats(
@@ -212,11 +295,34 @@ test_that("show.GwasSumStats prints nrow and genome build", {
         ldReference = .sh_makeGenotypeHandle()
     )
     out <- capture.output(show(ss))
-    expect_true(any(grepl("GwasSumStats: 2 studies, genome build hg19", out)))
+    expect_true(any(grepl(
+        "GwasSumStats: 2 studies in 2 rows, genome build hg19",
+        out
+    )))
     expect_true(any(grepl("LD reference: plink2 @ /tmp/test", out)))
 })
 
-# === Tests migrated from test_h2ClassesSumstats.R (showMethods) ===
+test_that("show.GwasSumStats counts a study split across chromosomes once", {
+    gr <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(100L, 100L), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = c("chr1:100:A:G", "chr2:100:A:G"),
+        A1 = "A",
+        A2 = "G",
+        Z = c(1, 2),
+        N = 100L
+    )
+    ss <- GwasSumStats(studyName = "g1", entry = list(gr), genome = "hg19")
+    expect_equal(nrow(ss), 2L)
+    out <- capture.output(show(ss))
+    # One header line, not one per chromosome the study spans.
+    expect_identical(
+        grep("^GwasSumStats:", out, value = TRUE),
+        "GwasSumStats: 1 studies in 2 rows, genome build hg19"
+    )
+})
 
 # =============================================================================
 # GwasSumStats() constructor validation + accessor error branches
@@ -327,8 +433,9 @@ test_that("GwasSumStats: ldReference is optional (NULL when LD-free)", {
         studyName = "g1",
         entry = list(.sh_makeQtlSumstatsGr()),
         genome = "hg19"
-    ) # ldReference omitted -> NULL
-    expect_null(ldReference(ss))
+    ) # ldReference omitted -> LD-free
+    expect_identical(ldReference(ss), list())
+    expect_true(is.na(ss$ldReference))
     expect_output(show(ss), "none \\(LD-free\\)")
 })
 
@@ -344,15 +451,8 @@ test_that("GwasSumStats: a non-GenotypeHandle ldReference is rejected", {
     )
 })
 
-# show() smoke test, moved here from test_showMethods.R so the test
-# tree mirrors R/.
-test_that("show(GwasSumStats) does not error", {
-    ss <- makeGwasSumStatsFromDf(makeTestSumstatsDf(10))
-    expect_output(show(ss), "GwasSumStats")
-})
 
-
-# blockId + ldBlocks (§4.2). A genome-wide GWAS split by seqname gives one
+# blockId + region (§4.2). A genome-wide GWAS split by seqname gives one
 # element per chromosome, which is too coarse for cTWAS: its EM estimates
 # parameters across LD blocks. `blockId` is always present so downstream code
 # can key regions without asking how the collection was built.
@@ -371,7 +471,7 @@ test_that("show(GwasSumStats) does not error", {
 }
 
 # @noRd
-.gss_ldBlocks <- function() {
+.gss_blocks <- function() {
     b <- GenomicRanges::GRanges(
         "chr1",
         IRanges::IRanges(c(1L, 800L), c(500L, 1200L))
@@ -394,7 +494,7 @@ test_that("GwasSumStats splits by LD block when a manifest is supplied", {
         studyName = "t1",
         entry = list(g),
         genome = "hg38",
-        ldBlocks = .gss_ldBlocks()
+        region = .gss_blocks()
     )
     # Same chromosome, so the seqname split would have left ONE element; the
     # manifest is what produces per-block granularity.
@@ -411,7 +511,7 @@ test_that("GwasSumStats replicates the study row against each block", {
         entry = list(g),
         genome = "hg38",
         varY = 2,
-        ldBlocks = .gss_ldBlocks()
+        region = .gss_blocks()
     )
     expect_equal(x$study, c("t1", "t1"))
     expect_equal(x$varY, c(2, 2))
@@ -424,7 +524,7 @@ test_that("GwasSumStats warns about variants outside every LD block", {
             studyName = "t1",
             entry = list(g),
             genome = "hg38",
-            ldBlocks = .gss_ldBlocks()
+            region = .gss_blocks()
         ),
         "1 variant"
     )
@@ -439,7 +539,7 @@ test_that("GwasSumStats keeps blockId aligned across two studies", {
             .gss_variants("chr1", 900L)
         ),
         genome = "hg38",
-        ldBlocks = .gss_ldBlocks()
+        region = .gss_blocks()
     )
     expect_equal(x$study, c("t1", "t1", "t2"))
     expect_equal(x$blockId, c("b1", "b2", "b2"))
@@ -450,13 +550,13 @@ test_that("GwasSumStats blockId survives subsetting", {
         studyName = "t1",
         entry = list(.gss_variants("chr1", c(100L, 900L))),
         genome = "hg38",
-        ldBlocks = .gss_ldBlocks()
+        region = .gss_blocks()
     )
     expect_equal(x[2L]$blockId, "b2")
 })
 
 # ===========================================================================
-# Block-key resolution: ldBlocks vs blockId
+# Block-key resolution: region vs blockId
 #
 # Both arguments answer "how is this entry split into elements", so supplying
 # both is ambiguous rather than redundant. Neither error branch had a test.
@@ -485,13 +585,13 @@ test_that("GwasSumStats blockId survives subsetting", {
     gr
 }
 
-test_that("supplying both ldBlocks and blockId is refused", {
+test_that("supplying both region and blockId is refused", {
     expect_error(
         GwasSumStats(
             studyName = "g1",
             entry = list(.gss_entry()),
             genome = "hg19",
-            ldBlocks = GenomicRanges::GRanges(
+            region = GenomicRanges::GRanges(
                 "chr1",
                 IRanges::IRanges(1L, 10000L)
             ),
@@ -555,12 +655,12 @@ test_that("combineGwasSumStats() concatenates the per-element QC audit", {
     b <- makeGwasBlock("chr1_1001_2000", 1100L, n = 3L)
     out <- combineGwasSumStats(a, b)
 
-    audit <- qcInfo(out)$entryAudit
+    audit <- out$qcAudit
     expect_length(audit, nrow(out))
     # element i's audit still describes element i
     expect_equal(audit[[1L]]$block, "chr1_1_1000")
     expect_equal(audit[[2L]]$block, "chr1_1001_2000")
-    expect_equal(qcInfo(out)$options, qcInfo(a)$options)
+    expect_equal(qcOptions(out)$options, qcOptions(a)$options)
 })
 
 
@@ -569,13 +669,16 @@ test_that("combineGwasSumStats() unions the per-block LD panels", {
     b <- makeGwasBlock("chr1_1001_2000", 1100L, n = 3L)
     out <- combineGwasSumStats(a, b)
 
-    # Keeping only the first block's panel would leave a two-block collection
-    # whose LD reference covers one block.
-    expect_equal(nrow(ldReference(out)), 8L)
+    # Each block's panel was narrowed to its own variants, but one panel's
+    # files back both, so the bound collection holds them once, unioned.
+    refs <- ldReference(out)
+    expect_length(refs, 1L)
+    expect_equal(nrow(refs[[1L]]), 8L)
     expect_equal(
-        rownames(ldReference(out)),
-        c(rownames(ldReference(a)), rownames(ldReference(b)))
+        rownames(refs[[1L]]),
+        c(rownames(ldReference(a)[[1L]]), rownames(ldReference(b)[[1L]]))
     )
+    expect_equal(unique(out$ldReference), names(refs))
 })
 
 
@@ -609,24 +712,33 @@ test_that("combineGwasSumStats() rejects collection-level disagreement", {
         "different summaryStatsQc\\(\\) options"
     )
     noQc <- makeGwasBlock("chr1_1001_2000", 1100L)
-    noQc@qcInfo <- list()
+    noQc@qcOptions <- list()
     expect_error(combineGwasSumStats(a, noQc), "carry no QC record")
+})
 
-    noLd <- makeGwasBlock("chr1_1001_2000", 1100L)
-    noLd@ldReference <- NULL
-    expect_error(combineGwasSumStats(a, noLd), "carry no ldReference")
 
-    other <- makeGwasBlock("chr1_1001_2000", 1100L)
-    other@ldReference <- pecotmr:::.asLdRef(
-        .blockGenotypeHandle(
+test_that("combineGwasSumStats() keeps each row on its own LD reference", {
+    a <- makeGwasBlock("chr1_1_1000", 100L)
+    other <- makeGwasBlock(
+        "chr1_1001_2000",
+        1100L,
+        ldReference = .blockGenotypeHandle(
             seq(1100L, by = 100L, length.out = 5L),
             path = "/tmp/other.pgen"
         )
     )
-    expect_error(
-        combineGwasSumStats(a, other),
-        "different genotype panels"
+    out <- combineGwasSumStats(a, other)
+    # Panels read from different files cannot be unioned, so both are kept.
+    expect_length(ldReference(out), 2L)
+    expect_identical(
+        pecotmr:::.rowLdRefs(out),
+        list(ldReference(a)[[1L]], ldReference(other)[[1L]])
     )
+    # An LD-free part's rows stay LD-free beside them.
+    noLd <- makeGwasBlock("chr1_2001_3000", 2100L, ldReference = NULL)
+    mixed <- combineGwasSumStats(a, noLd)
+    expect_equal(is.na(mixed$ldReference), c(FALSE, TRUE))
+    expect_length(ldReference(mixed), 1L)
 })
 
 
@@ -640,8 +752,9 @@ test_that("combineGwasSumStats() validates its inputs", {
 
 test_that("sumStats(GwasSumStats) refuses the QtlSumStats selectors", {
     # The shared SumStatsBase accessors pass the union of both classes'
-    # selectors, so a GWAS sees context / trait / annotateSignificance. It
-    # names them in order to reject them, rather than absorbing them in `...`.
+    # selectors, so a GWAS sees context / trait, and sumStats() also takes
+    # annotateSignificance. It names them in order to reject them, rather
+    # than absorbing them in `...`.
     gss <- GwasSumStats(
         studyName = "g1",
         entry = list(.gss_entry()),
@@ -658,4 +771,208 @@ test_that("sumStats(GwasSumStats) refuses the QtlSumStats selectors", {
     # the supported selectors still work
     expect_s4_class(sumStats(gss), "GRanges")
     expect_type(z(gss), "double")
+})
+
+test_that("varY reads one value for a study split across rows", {
+    gr <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(100L, 100L), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = c("chr1:100:A:G", "chr2:100:A:G"),
+        A1 = "A",
+        A2 = "G",
+        Z = c(1, 2),
+        N = 100L
+    )
+    ss <- GwasSumStats(
+        studyName = "g1",
+        entry = list(gr),
+        genome = "hg19",
+        varY = 4
+    )
+    expect_equal(nrow(ss), 2L)
+    expect_equal(varY(ss), 4)
+    # Rows of one study that disagree have no single answer.
+    split <- GwasSumStats(
+        studyName = c("g1", "g1"),
+        entry = list(gr[1L], gr[2L]),
+        genome = "hg19",
+        varY = c(1, 2),
+        blockId = c("a", "b")
+    )
+    expect_error(varY(split), "the 2 rows of study 'g1' disagree on varY")
+})
+
+test_that("GwasSumStats records each row's window and its origin", {
+    data(gwasSumStatsS4Example)
+    gr <- sumStats(gwasSumStatsS4Example)
+    cut <- GenomicRanges::start(gr)[[100L]]
+    # A `region` gives each window its interval, however it is keyed.
+    blocks <- GenomicRanges::GRanges(
+        "chr22",
+        IRanges::IRanges(c(1L, cut + 1L), c(cut, 60000000L))
+    )
+    names(blocks) <- c("b1", "b2")
+    x <- GwasSumStats(
+        studyName = "s",
+        entry = list(gr),
+        genome = "hg19",
+        region = blocks
+    )
+    expect_identical(x$blockId, c("b1", "b2"))
+    expect_identical(x$regionGiven, c(TRUE, TRUE))
+    expect_identical(
+        as.character(x$region),
+        c(str_c("chr22:1-", cut), str_c("chr22:", cut + 1L, "-60000000"))
+    )
+    # Read from a BED file, a window's start is 0-based and the fourth column
+    # names it. The variants past its one window are dropped, with a warning.
+    bedPath <- withr::local_tempfile(fileext = ".bed")
+    writeLines(str_c("chr22\t0\t", cut, "\tb1"), bedPath)
+    expect_warning(
+        bed <- GwasSumStats(
+            studyName = "s",
+            entry = list(gr),
+            genome = "hg19",
+            region = bedPath
+        ),
+        "100 variant(s) lie outside every `region` window",
+        fixed = TRUE
+    )
+    expect_identical(bed$blockId, "b1")
+    expect_identical(as.character(bed$region), str_c("chr22:1-", cut))
+    # Given in R, a window is a GRanges: a table is refused, not read.
+    expect_error(
+        GwasSumStats(
+            studyName = "s",
+            entry = list(gr),
+            genome = "hg19",
+            region = data.frame(chrom = "chr22", start = 1L, end = cut)
+        ),
+        "must be a GRanges or the path of a BED file"
+    )
+    # A blockId is a name and gives no window, however it is spelled: each
+    # row's window is its variants' span.
+    y <- GwasSumStats(
+        studyName = c("s", "s"),
+        entry = list(gr[1:100], gr[101:200]),
+        genome = "hg19",
+        blockId = c("chr22_1_15700000", "b2")
+    )
+    expect_identical(y$blockId, c("chr22_1_15700000", "b2"))
+    expect_identical(y$regionGiven, c(FALSE, FALSE))
+    expect_identical(
+        as.character(y$region),
+        c(as.character(range(gr[1:100])), as.character(range(gr[101:200])))
+    )
+    # One set of windows per study, or none for a study split by chromosome.
+    per <- suppressWarnings(GwasSumStats(
+        studyName = c("s", "t"),
+        entry = list(gr, gr),
+        genome = "hg19",
+        region = list(blocks[1L], NULL)
+    ))
+    expect_identical(per$study, c("s", "t"))
+    expect_identical(per$blockId, c("b1", "chr22"))
+    expect_identical(per$regionGiven, c(TRUE, FALSE))
+    expect_error(
+        GwasSumStats(
+            studyName = "s",
+            entry = list(gr),
+            genome = "hg19",
+            region = list(blocks, blocks)
+        ),
+        "one element per `entry`"
+    )
+    # Split by chromosome, a row's window is its variants' span.
+    z <- GwasSumStats(studyName = "s", entry = list(gr), genome = "hg19")
+    expect_false(z$regionGiven)
+    expect_identical(as.character(z$region), "chr22:14560203-15826991")
+})
+
+test_that("combineGwasSumStats() carries each row's block range through", {
+    data(gwasSumStatsS4Example)
+    gr <- sumStats(gwasSumStatsS4Example)
+    given <- GwasSumStats(
+        studyName = "s",
+        entry = list(gr),
+        genome = "hg19",
+        region = GenomicRanges::GRanges("chr22:1-20000000")
+    )
+    computed <- GwasSumStats(studyName = "t", entry = list(gr), genome = "hg19")
+    both <- combineGwasSumStats(given, computed)
+    expect_identical(both$regionGiven, c(TRUE, FALSE))
+    expect_identical(
+        as.character(both$region),
+        c("chr22:1-20000000", "chr22:14560203-15826991")
+    )
+})
+
+# === metadata, qcOptions and a tabular extraCols ===
+
+test_that("GwasSumStats() takes extra columns as a DataFrame or data.frame", {
+    build <- function(extra) {
+        GwasSumStats(
+            studyName = c("g1", "g2"),
+            entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+            genome = "hg19",
+            ldReference = .sh_makeGenotypeHandle(),
+            extraCols = extra
+        )
+    }
+    cohorts <- c("UKB", "FinnGen")
+    fromDf <- build(S4Vectors::DataFrame(cohort = cohorts, wave = 1:2))
+    expect_equal(fromDf$cohort, cohorts)
+    expect_equal(fromDf$wave, 1:2)
+    expect_equal(build(data.frame(cohort = cohorts))$cohort, cohorts)
+})
+
+test_that("GwasSumStats() keeps the caller's metadata and QC options", {
+    obj <- GwasSumStats(
+        studyName = "g1",
+        entry = list(.sh_makeQtlSumstatsGr()),
+        genome = "hg19",
+        ldReference = .sh_makeGenotypeHandle(),
+        qcOptions = list(step1 = "ok"),
+        metadata = list(source = "unit test")
+    )
+    expect_equal(S4Vectors::metadata(obj), list(source = "unit test"))
+    expect_equal(qcOptions(obj), list(step1 = "ok"))
+})
+
+# ===========================================================================
+# nCase and nControl
+# ===========================================================================
+
+test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)", {
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        A1 = "A",
+        A2 = "G",
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    base <- list(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .cbp_makeHandle(),
+        qcOptions = list(ok = 1)
+    )
+    g0 <- exec(GwasSumStats, !!!base)
+    expect_false(any(
+        c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
+    ))
+    g1 <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
+    expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
+    expect_equal(g1$nCase, 500)
+    expect_equal(g1$nControl, 1500)
 })

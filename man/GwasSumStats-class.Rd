@@ -6,15 +6,32 @@
 \title{GWAS Summary-Statistic Collection}
 \description{
 S4 collection of GWAS summary statistics keyed by the identity
-  tuple \code{(study)}. Each element is that study's per-variant
-  \code{GRanges} covering a single LD block, so build one collection per
-  block when sweeping the genome.
+  tuple \code{(study)}. A study is split into one element per chromosome,
+  or per window when \code{\link{GwasSumStats}} is given a \code{region},
+  each a per-variant \code{GRanges}; \code{\link{sumStats}} and the other
+  accessors stitch a study's elements back together.
 }
 \details{
-Required column: \code{study}, unique across rows. The class-level
-  slots inherited from \code{\linkS4class{SumStatsBase}} --
-  \code{ldReference}, \code{genome} and \code{qcInfo} -- apply uniformly to
-  every row.
+Required column: \code{study}; the constructor also adds
+  \code{blockId}, naming each element's chromosome or window, and the
+  element's analysis window: \code{region}, a \code{GRanges} with one
+  range per element, and \code{regionGiven}. \code{regionGiven} is
+  \code{TRUE} where the window was given as a \code{region}, and
+  \code{FALSE} where it is the span of the element's variants when the
+  collection was first built, before any QC. A QC pass carries both
+  unchanged; the span of the variants left is \code{range(x)}.
+  \code{\link{colocPipeline}},
+  \code{\link{colocboostPipeline}} and
+  \code{\link{causalInferencePipeline}} check the QTL variants against
+  these windows. Variants past a given window lie in one that was not
+  loaded, which is an error. Variants past a computed window may only be
+  ones the GWAS lacks, so more than one in a row is a warning.
+  A study repeats across its elements, so uniqueness is on
+  \code{(study, range)}. The class-level
+  slots inherited from \code{\linkS4class{SumStatsBase}} -- \code{genome}
+  and \code{qcOptions} -- apply uniformly to every row; \code{ldReference}
+  holds each distinct LD reference once, and the \code{ldReference} column
+  names the one each row uses.
 }
 \seealso{
 \code{\link{GwasSumStats}} for the constructor and

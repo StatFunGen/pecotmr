@@ -7,7 +7,7 @@
 extractTopPipInfo(fmRow, sumstats)
 }
 \arguments{
-\item{fmRow}{A \code{\link{fineMappingRow}}, or a single-row
+\item{fmRow}{A \code{\link{FineMappingRow}}, or a single-row
 fine-mapping collection as returned by
 \code{\link{fineMappingResult}}, carrying the SuSiE fit and
 variant ids.}
@@ -49,7 +49,7 @@ This function is particularly useful for capturing information about
 vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
 fit <- list(pip = c(0.1, 0.7, 0.2))
 tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2))
-fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
+fe <- FineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 extractTopPipInfo(fe, sumstats = list(z = c(1.0, 3.5, -0.5)))
 
 }

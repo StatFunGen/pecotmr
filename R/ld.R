@@ -5,7 +5,7 @@ NULL
 #' @importFrom dplyr distinct arrange
 #' @noRd
 orderDedupRegions <- function(df) {
-    mutate(df, chrom = canonChrom(.data$chrom)) |>
+    df |>
         distinct(.data$chrom, .data$start, .keep_all = TRUE) |>
         arrange(chromOrder(.data$chrom), .data$start)
 }
@@ -175,7 +175,7 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
 #'
 #' @param ldReferenceMetaFile TSV with columns chrom, start, end, path. The path
 #'   column may be comma-separated: "ld_file,bim_file".
-#' @param region "chr:start-end" string or data.frame with chrom/start/end.
+#' @param region A \code{GRanges} window.
 #' @param completeCoverageRequired If TRUE, error when the region extends beyond
 #'   available LD blocks.
 #' @return A list with: intersections (LD_file_paths, bimFilePaths), ldMetaData,
@@ -193,14 +193,11 @@ regionalLdMeta <- function(
         vroom(ldReferenceMetaFile),
         c("chrom", "start", "end", "path")
     ) |>
+        mutate(chrom = withChrPrefix(.data$chrom)) |>
         .ldMetaWidenWholeChrom() |>
         orderDedupRegions() |>
         .regionalLdParsePaths()
-    region <- `names<-`(
-        parseRegion(region),
-        c("chrom", "start", "end")
-    ) |>
-        orderDedupRegions()
+    region <- orderDedupRegions(.regionTable(region))
     intersectionRows <- findIntersectionRows(
         genomicData,
         region$chrom,
@@ -335,11 +332,16 @@ resolveLdSource <- function(path) {
 #' @importFrom vroom vroom
 #' @noRd
 resolveGenotypePathForRegion <- function(metaPath, region) {
-    parsed <- parseRegion(region)
+    queryChrom <- unique(.regionTable(region)$chrom)
+    if (length(queryChrom) != 1L) {
+        abort(glue(
+            "`region` spans chromosomes {str_flatten(queryChrom, ', ')}; ",
+            "a genotype file is resolved for one chromosome at a time."
+        ))
+    }
     meta <- as.data.frame(vroom(metaPath, show_col_types = FALSE)) |>
         `colnames<-`(c("chrom", "start", "end", "path")) |>
-        mutate(chrom = canonChrom(.data$chrom))
-    queryChrom <- canonChrom(parsed$chrom)
+        mutate(chrom = withChrPrefix(.data$chrom))
 
     matching <- meta[meta$chrom == queryChrom, , drop = FALSE]
     if (nrow(matching) == 0) {
@@ -410,6 +412,246 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # @noRd
 .ldIsReference <- function(x) {
     .ldIsGenotypeRef(x) || .ldIsMatrixRef(x)
+}
+
+# -----------------------------------------------------------------------------
+# Per-row LD references
+# -----------------------------------------------------------------------------
+# A collection whose rows can sit on different LD references -- summary
+# statistics, the fine-mapping results and TWAS weights fit from them, coloc
+# results -- keeps each distinct reference ONCE, in a named list in its
+# `ldReference` slot, and names each row's entry in an `ldReference` mcols
+# column (NA for an LD-free row). Fifty rows on one sketch hold one copy of
+# it, in memory and in a saved object alike, and the per-row key travels with
+# the rows on subsetting the way every per-row value in mcols does.
+
+# The per-tuple form of an `ldReference` argument: one reference for every
+# tuple, or a list holding one per tuple. What ldReference() returns reads
+# the same way -- an empty list is LD-free and a one-entry list is that
+# reference for every tuple -- so a collection's references can be handed
+# straight to the next one built from it.
+# @noRd
+.ldRefPerTuple <- function(ldReference, n) {
+    asList <- is.list(ldReference) && !is.object(ldReference)
+    if (asList && length(ldReference) <= 1L) {
+        ldReference <- if (length(ldReference) == 0L) {
+            NULL
+        } else {
+            ldReference[[1L]]
+        }
+        asList <- FALSE
+    }
+    if (!asList) {
+        return(rep(list(.asLdRef(ldReference)), n))
+    }
+    if (length(ldReference) != n) {
+        abort(glue(
+            "`ldReference` must be one LD reference, or a list with one per ",
+            "tuple (got {length(ldReference)} for {n} tuple(s))."
+        ))
+    }
+    map(unname(ldReference), .asLdRef)
+}
+
+# Each distinct reference among `perRow` once, named ld1, ld2, ... in order
+# of first use, and every row's key into them (NA for an LD-free row).
+# @noRd
+.ldRefDict <- function(perRow) {
+    present <- which(!map_lgl(perRow, is.null))
+    ids <- .ldRefIdentities(perRow[present])
+    firstIdx <- which(!duplicated(ids))
+    keys <- str_c("ld", seq_along(firstIdx))
+    rowKeys <- replace(
+        rep(NA_character_, length(perRow)),
+        present,
+        keys[match(ids, ids[firstIdx])]
+    )
+    refs <- if (length(firstIdx) == 0L) {
+        list()
+    } else {
+        set_names(perRow[present[firstIdx]], keys)
+    }
+    list(refs = refs, keys = rowKeys)
+}
+
+# A content identity per reference, so equal references -- the same object
+# handed to every row, or two equal copies -- collapse to one entry. Hashed
+# once per distinct object rather than per row: a large LdMatrix shared by
+# every row is read once, not once per row.
+# @noRd
+#' @importFrom rlang hash obj_address
+.ldRefIdentities <- function(refs) {
+    if (length(refs) == 0L) {
+        return(character(0))
+    }
+    addresses <- map_chr(refs, obj_address)
+    firstOfAddress <- !duplicated(addresses)
+    hashes <- map_chr(refs[firstOfAddress], hash)
+    hashes[match(addresses, addresses[firstOfAddress])]
+}
+
+# Each row's key into its collection's LD references (NA for an LD-free row).
+# @noRd
+.ldRefKeys <- function(x) {
+    mcols(x, use.names = FALSE)$ldReference %||% rep(NA_character_, length(x))
+}
+
+# What a collection reports as its LD references: the entries some row names,
+# so a subset does not report the ones its rows left behind. An object saved
+# before the references became per-row holds one reference in the slot and no
+# key column, and read as a list it would pass for LD-free; it is refused
+# instead (one that held NULL was LD-free, and still reads that way). So is
+# one saved before the slot was renamed, which holds it as `ldSketch`.
+# @noRd
+.ldRefsInUse <- function(x) {
+    if (!methods::.hasSlot(x, "ldReference")) {
+        .abortSavedLdRef(x)
+    }
+    refs <- x@ldReference
+    if (is.null(refs)) {
+        return(list())
+    }
+    if (!is.list(refs) || is.object(refs)) {
+        .abortSavedLdRef(x)
+    }
+    .ldRefsUsed(refs, .ldRefKeys(x))
+}
+
+# @noRd
+.abortSavedLdRef <- function(x) {
+    abort(c(
+        glue(
+            "This {class(x)[[1L]]} was saved before LD references became ",
+            "per-row, so its rows cannot be matched to its reference."
+        ),
+        i = "Bring it up to date with `x <- updateObject(x)`."
+    ))
+}
+
+# The entries of `refs` some key in `keys` names.
+# @noRd
+.ldRefsUsed <- function(refs, keys) {
+    used <- refs[is_in(names(refs), keys)]
+    if (length(used) == 0L) list() else used
+}
+
+# Every row's LD reference, NULL for an LD-free row.
+# @noRd
+.rowLdRefs <- function(x) {
+    refs <- ldReference(x)
+    map(.ldRefKeys(x), .ldRefForKey, refs = refs)
+}
+
+# Result records tagged with the LD reference of the input row they came
+# from, so the collection built from them keeps every row on its own
+# reference.
+# @noRd
+.recordsWithLdRef <- function(records, ldReference) {
+    map(records, list_assign, ldReference = ldReference)
+}
+
+# `x` with every row on `ldReference` -- one reference, or a list with one
+# per row -- its references and its rows' keys rebuilt together. The slot is
+# written first and the keys second, so the object is only validated once
+# the two agree.
+# @noRd
+#' @importFrom methods slot<-
+.withRowLdRefs <- function(x, ldReference) {
+    dict <- .ldRefDict(.ldRefPerTuple(ldReference, length(x)))
+    md <- mcols(x, use.names = FALSE)
+    md[["ldReference"]] <- dict$keys
+    S4Vectors::`mcols<-`(
+        `slot<-`(x, "ldReference", check = FALSE, value = dict$refs),
+        value = md
+    )
+}
+
+# `object` as saved before its references became per-row -- one reference,
+# or NULL, in the slot and no row key -- brought up to date: that reference
+# becomes the slot's one entry and every row is keyed to it (every row is
+# LD-free when it held none). An object saved before the slot was renamed
+# holds that reference, a panel or NULL, as `ldSketch`; it is moved to
+# `ldReference` first. Every reference is brought up to date too
+# (.updateLdRefOrKeep()). A collection that keeps no LD references, such as
+# a CtwasResult, is returned as it is.
+# @noRd
+.updateRowLdRefs <- function(object) {
+    object <- .renameSavedSlots(object, c(ldSketch = "ldReference"))
+    if (!methods::.hasSlot(object, "ldReference")) {
+        return(object)
+    }
+    old <- methods::slot(object, "ldReference")
+    if (!is.list(old) || is.object(old)) {
+        return(.withRowLdRefs(object, .updateLdRefOrKeep(old)))
+    }
+    `slot<-`(
+        object,
+        "ldReference",
+        check = FALSE,
+        value = map(old, .updateLdRefOrKeep)
+    )
+}
+
+# A collection's LD reference as saved, brought up to date (.updatePanel()).
+# One whose files cannot be read again is kept as saved, with a warning,
+# rather than failing the update: the rest of the collection is still worth
+# having, and updating again once the files are back finishes the job.
+# @noRd
+#' @importFrom rlang try_fetch
+.updateLdRefOrKeep <- function(ref) {
+    try_fetch(
+        .updatePanel(ref),
+        pecotmrUnreadablePanel = function(cnd) {
+            warn(
+                "An LD reference is kept as saved: LD cannot be read from it.",
+                parent = cnd
+            )
+            .asLdRef(ref)
+        }
+    )
+}
+
+# Row `i`'s LD reference, or NULL for an LD-free row.
+# @noRd
+.rowLdRef <- function(x, i) {
+    .ldRefForKey(.ldRefKeys(x)[[i]], ldReference(x))
+}
+
+# @noRd
+.ldRefForKey <- function(key, refs) {
+    if (is.na(key)) NULL else refs[[key]]
+}
+
+# What is wrong with an LD-reference list and the keys pointing into it, or
+# NULL. An entry's name is what a key points at, so an unnamed, blank or
+# repeated one leaves a row pointing at nothing, or at two references.
+# @noRd
+.ldRefDictProblems <- function(refs, keys) {
+    if (length(refs) > 0L) {
+        nms <- names(refs)
+        badNames <- is.null(nms) ||
+            anyNA(nms) ||
+            any(nms == "") ||
+            anyDuplicated(nms) > 0L
+        if (badNames) {
+            return("ldReference entries must have unique, non-empty names")
+        }
+        bad <- nms[!map_lgl(refs, .ldIsReference)]
+        if (length(bad) > 0L) {
+            return(str_c(
+                "ldReference entries that are not LD references: ",
+                str_flatten(bad, ", ")
+            ))
+        }
+    }
+    unknown <- setdiff(keys[!is.na(keys)], names(refs))
+    if (length(unknown) == 0L) {
+        return(NULL)
+    }
+    str_c(
+        "rows name LD reference(s) not in ldReference: ",
+        str_flatten(unknown, ", ")
+    )
 }
 
 # The GenotypeHandle a panel reads through, or NULL when it reads through
@@ -667,6 +909,24 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     glue("{source$format} @ {source$path}")
 }
 
+# The `show()` line for a collection's LD references: the one reference, or
+# each by name when the rows use several; `none` when there are none.
+# @noRd
+.ldRefsLabel <- function(refs, none) {
+    if (length(refs) == 0L) {
+        return(none)
+    }
+    labels <- map_chr(refs, .ldRefLabel)
+    if (length(refs) == 1L) {
+        return(labels[[1L]])
+    }
+    str_c(
+        length(refs),
+        " references -- ",
+        str_flatten(str_c(names(refs), ": ", labels), "; ")
+    )
+}
+
 # TRUE for anything that can serve as an LD panel. A bare GenotypeHandle
 # still counts: that is what objects serialised before the slot became an RSE
 # carry.
@@ -721,7 +981,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
         return(.gmRanges(x))
     }
     if (methods::is(x, "RangedSummarizedExperiment")) {
-        return(SummarizedExperiment::rowRanges(x))
+        # A panel built outside pecotmr may spell its chromosomes otherwise.
+        return(.ucscRanges(SummarizedExperiment::rowRanges(x)))
     }
     .genotypeSnpRanges(x, normalizeVariantId(as.character(snpInfo(x)$SNP)))
 }
@@ -761,10 +1022,10 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     .repairVariantIds(ids, as.character(mc$A2), as.character(mc$A1))
 }
 
-# Per-variant chromosome, canonical (no chr prefix).
+# Per-variant chromosome.
 # @noRd
 .ldRefChrom <- function(x) {
-    canonChrom(as.character(GenomicRanges::seqnames(.ldRefRanges(x))))
+    as.character(GenomicRanges::seqnames(.ldRefRanges(x)))
 }
 
 # A panel's sample ids. An LdMatrix has no samples, so asking is a bug in the
@@ -1225,12 +1486,12 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # returns, largest first. R's other p - min(m, p) eigenvalues are exactly
 # zero; `nNull` counts them, for an estimator that counts every direction.
 # @noRd
-.ldFactorEigen <- function(F) {
-    s <- svd(F, nu = 0L)
+.ldFactorEigen <- function(ldFactor) {
+    s <- svd(ldFactor, nu = 0L)
     list(
-        values = s$d^2 / (nrow(F) - 1),
+        values = s$d^2 / (nrow(ldFactor) - 1),
         vectors = s$v,
-        nNull = ncol(F) - length(s$d)
+        nNull = ncol(ldFactor) - length(s$d)
     )
 }
 
@@ -1387,7 +1648,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (length(chromPaths) == 0L) {
         return(.genotypeStem(.resolveGenotypeResourcePath(source$path)))
     }
-    spanned <- unique(canonChrom(as.character(chroms)))
+    spanned <- unique(as.character(chroms))
     paths <- unname(chromPaths[is_in(names(chromPaths), spanned)])
     .genotypeStem(map_chr(paths, .resolveGenotypeResourcePath))
 }
@@ -1652,14 +1913,15 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # yields two differently trimmed sketches. Downstream LD lookups are all
 # id-matched, so a partial overlap is reported (once per session) rather than
 # refused; no overlap at all is an error. Shared by causalInferencePipeline,
-# colocPipeline, qtlEnrichmentPipeline, ctwasPipeline, and colocboostPipeline.
+# colocPipeline, qtlEnrichmentPipeline and ctwasPipeline, each over the rows
+# it combines (.requireMatchingRowLdRefs()).
 #
 # NULL handling:
 #   nullPolicy = "qtl-required" (default): a NULL qtlLd skips the check; a
-#     non-NULL qtlLd with a NULL gwasLd is an error. Used by cip / coloc /
-#     ctwas / enloc / qtlEnrichment.
+#     non-NULL qtlLd with a NULL gwasLd is an error. Used by cip / coloc
+#     (enloc included) / ctwas.
 #   nullPolicy = "lenient": a NULL on either side skips the check. Used by
-#     colocboostPipeline.
+#     qtlEnrichmentPipeline.
 #
 # `label` is the human-readable name of the QTL-side input (e.g.
 # "twasWeights" or "fineMappingResult"); it is woven into the error
@@ -1743,7 +2005,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     gr <- .ldRefRanges(x)
     mc <- S4Vectors::mcols(gr)
     stem <- str_c(
-        canonChrom(as.character(GenomicRanges::seqnames(gr))),
+        as.character(GenomicRanges::seqnames(gr)),
         ":",
         as.character(GenomicRanges::start(gr))
     )
@@ -1960,6 +2222,188 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     invisible(NULL)
 }
 
+# .requireMatchingLdRefs() for the rows an analysis actually combines: QTL row
+# qtlRows[k] with GWAS row gwasRows[k]. Rows on different references are fine
+# as long as no combined pair puts two of them together. Each distinct pair of
+# references is checked once, and an error names the first rows that combine
+# them.
+# @noRd
+#' @importFrom purrr pwalk
+.requireMatchingRowLdRefs <- function(
+    qtl,
+    gwas,
+    qtlRows,
+    gwasRows,
+    pipelineName,
+    label = NULL,
+    nullPolicy = c("qtl-required", "lenient")
+) {
+    nullPolicy <- arg_match(nullPolicy)
+    pairs <- distinct(
+        tibble(
+            qtlKey = .ldRefKeys(qtl)[qtlRows],
+            gwasKey = .ldRefKeys(gwas)[gwasRows],
+            qtlRow = qtlRows,
+            gwasRow = gwasRows
+        ),
+        .data$qtlKey,
+        .data$gwasKey,
+        .keep_all = TRUE
+    )
+    pwalk(
+        pairs,
+        .requireMatchingPairLdRefs,
+        qtlRefs = ldReference(qtl),
+        gwasRefs = ldReference(gwas),
+        pipelineName = pipelineName,
+        label = label %||% "qtl input",
+        nullPolicy = nullPolicy
+    )
+    invisible(NULL)
+}
+
+# @noRd
+.requireMatchingPairLdRefs <- function(
+    qtlKey,
+    gwasKey,
+    qtlRow,
+    gwasRow,
+    qtlRefs,
+    gwasRefs,
+    pipelineName,
+    label,
+    nullPolicy
+) {
+    .requireMatchingLdRefs(
+        .ldRefForKey(qtlKey, qtlRefs),
+        .ldRefForKey(gwasKey, gwasRefs),
+        pipelineName = pipelineName,
+        label = glue("{label} row {qtlRow} (with gwas row {gwasRow})"),
+        nullPolicy = nullPolicy
+    )
+}
+
+# .requireMatchingRowLdRefs() over the QTL / GWAS row pairs whose regions
+# overlap: the pairs an analysis that brings the two sides together region by
+# region combines.
+# @noRd
+.requireOverlapLdRefs <- function(
+    qtl,
+    gwas,
+    pipelineName,
+    label = NULL,
+    nullPolicy = c("qtl-required", "lenient")
+) {
+    pairs <- .overlappingRowPairs(qtl, gwas)
+    .requireMatchingRowLdRefs(
+        qtl,
+        gwas,
+        pairs$qtlRows,
+        pairs$gwasRows,
+        pipelineName = pipelineName,
+        label = label,
+        nullPolicy = nullPolicy
+    )
+}
+
+# The (QTL row, GWAS row) pairs whose element spans overlap. Both sides are
+# narrowed to the chromosomes they share first: GenomicRanges warns about
+# sequence levels the two have no part of in common, which would be noise for
+# collections on different chromosomes rather than a sign of anything wrong.
+# @noRd
+.overlappingRowPairs <- function(qtl, gwas) {
+    q <- .rowSpans(qtl)
+    g <- .rowSpans(gwas)
+    shared <- intersect(
+        as.character(GenomicRanges::seqnames(q$spans)),
+        as.character(GenomicRanges::seqnames(g$spans))
+    )
+    if (length(shared) == 0L) {
+        return(list(qtlRows = integer(0), gwasRows = integer(0)))
+    }
+    qOn <- is_in(as.character(GenomicRanges::seqnames(q$spans)), shared)
+    gOn <- is_in(as.character(GenomicRanges::seqnames(g$spans)), shared)
+    hits <- GenomicRanges::findOverlaps(
+        .onSeqlevels(q$spans[qOn], shared),
+        .onSeqlevels(g$spans[gOn], shared),
+        ignore.strand = TRUE
+    )
+    list(
+        qtlRows = q$rows[qOn][S4Vectors::queryHits(hits)],
+        gwasRows = g$rows[gOn][S4Vectors::subjectHits(hits)]
+    )
+}
+
+# Which of `query`'s ranges overlap any of `subject`'s, compared on the
+# chromosomes the two share -- GenomicRanges warns about sequence levels two
+# objects have none of in common, which is noise for ranges that simply sit
+# on different chromosomes.
+# @noRd
+.overlapsOnShared <- function(query, subject) {
+    query <- .locusRanges(query)
+    subject <- .locusRanges(subject)
+    qChr <- as.character(GenomicRanges::seqnames(query))
+    sChr <- as.character(GenomicRanges::seqnames(subject))
+    shared <- intersect(qChr, sChr)
+    hit <- rep(FALSE, length(query))
+    if (length(shared) == 0L) {
+        return(hit)
+    }
+    qOn <- is_in(qChr, shared)
+    replace(
+        hit,
+        qOn,
+        IRanges::overlapsAny(
+            .onSeqlevels(query[qOn], shared),
+            .onSeqlevels(subject[is_in(sChr, shared)], shared)
+        )
+    )
+}
+
+# Each non-empty row's span, with the row it belongs to.
+# @noRd
+.rowSpans <- function(x) {
+    rr <- range(x)
+    list(
+        spans = .locusRanges(unlist(rr, use.names = FALSE)),
+        rows = rep(seq_along(rr), lengths(rr))
+    )
+}
+
+# Where `gr`'s ranges sit, for comparing collections' ranges: strand and
+# metadata dropped, the genome build kept, which is what stops ranges of two
+# builds from meeting.
+# @noRd
+#' @importFrom BiocGenerics unstrand
+.locusRanges <- function(gr) {
+    GenomicRanges::granges(unstrand(gr))
+}
+
+# The one LD reference rows `rows` of `x` share, for an analysis that reads
+# their statistics together against one LD matrix. Rows on different
+# references are refused rather than read from one of them; `what` names the
+# rows in the error.
+# @noRd
+.rowsSharedLdRef <- function(x, rows, what) {
+    keys <- unique(.ldRefKeys(x)[rows])
+    if (length(keys) > 1L) {
+        abort(c(
+            glue("{what} use {length(keys)} different LD references."),
+            i = str_c(
+                "Their statistics are read together against one LD matrix; ",
+                "give them one LD reference."
+            )
+        ))
+    }
+    .rowLdRef(x, rows[[1L]])
+}
+
+# `gr` with exactly the sequence levels `levels`.
+# @noRd
+.onSeqlevels <- function(gr, levels) {
+    GenomeInfoDb::keepSeqlevels(gr, levels, pruning.mode = "coarse")
+}
+
 # ---------- Variant lookups against an LD reference on disk ----------
 
 #' Filter variants by LD Reference
@@ -1993,15 +2437,20 @@ filterVariantsByLdReference <- function(
     assertFlag(keepIndel)
     variantsDf <- parseVariantId(variantIds)
 
-    # Derive region to scope the reference lookup
-    regionDf <- variantsDf |>
+    # The span of the variants on each chromosome scopes the reference lookup.
+    spans <- variantsDf |>
         group_by(.data$chrom) |>
         summarise(start = min(.data$pos), end = max(.data$pos))
 
     # Use shared helper -- no genotype loading
-    refInfo <- refVariantInfo(ldReferenceMetaFile, regionDf)
-    refChrom <- canonChrom(refInfo$chrom)
-    refKey <- str_c(refChrom, ":", refInfo$pos)
+    refInfo <- refVariantInfo(
+        ldReferenceMetaFile,
+        GenomicRanges::GRanges(
+            spans$chrom,
+            IRanges::IRanges(spans$start, spans$end)
+        )
+    )
+    refKey <- str_c(refInfo$chrom, ":", refInfo$pos)
 
     variantKey <- str_c(variantsDf$chrom, ":", variantsDf$pos)
     inRef <- which(is_in(variantKey, refKey))
@@ -2786,7 +3235,7 @@ enforceDesignFullRank <- function(
 #'   which case bigsnpr falls back to minor allele frequency computed from
 #'   \code{X}.
 #' @param chr Integer or character vector of length \code{ncol(X)} giving the
-#'   chromosome for each variant.
+#'   chromosome for each variant, in any style (\code{"chr1"} or \code{1}).
 #' @param pos Integer vector of length \code{ncol(X)} giving the base-pair
 #'   position for each variant.
 #' @param r2 Numeric in (0, 1]. r-squared threshold for clumping (variants
@@ -2835,7 +3284,7 @@ ldClumpByScore <- function(
     G <- .ldClumpFbm(X)
     keep <- bigsnpr::snp_clumping(
         G = G,
-        infos.chr = as.integer(chr),
+        infos.chr = as.integer(chromOrder(chr)),
         infos.pos = as.integer(pos),
         S = score,
         thr.r2 = r2,
@@ -3131,7 +3580,7 @@ ldClumpByScore <- function(
 #'   \code{dimnames} taken from the block where available.
 #' @examples
 #' data(qtlSumStatsExample)
-#' panel <- ldReference(qtlSumStatsExample)
+#' panel <- ldReference(qtlSumStatsExample)[[1L]]
 #' R <- computeLd(panel, snpIdx = 1:5)
 #' dim(R)
 #' # A dosage matrix already in memory is correlated directly.

@@ -82,7 +82,8 @@ setClass(
 #' @param snpInfo A \code{data.frame} with columns \code{SNP}, \code{CHR},
 #'   \code{BP}, \code{A1}, \code{A2} (and optionally \code{MAF}).
 #' @param eigenList A list with one entry per LD block.
-#' @param ldBlocks A \code{GRanges} of LD block intervals.
+#' @param ldBlocks The LD block intervals: a \code{GRanges}, or the path
+#'   of a BED file, read as BED with a 0-based start.
 #' @param nSamples Integer, sample size of the LD reference panel.
 #' @param inSample Logical, whether the reference is the GWAS cohort.
 #' @param genome Character, genome build; recorded in \code{seqinfo()}.
@@ -115,7 +116,7 @@ LdEigen <- function(
     assertDataFrame(snpInfo)
     assertList(eigenList)
     assertCount(nSamples, positive = TRUE)
-    obj <- methods::new(
+    methods::new(
         "LdEigen",
         .ldStatRanges(snpInfo, genome),
         ldBlocks = .asLdBlockRanges(ldBlocks),
@@ -124,8 +125,6 @@ LdEigen <- function(
         eigenList = eigenList,
         eigenvalueTruncation = as.numeric(eigenvalueTruncation)
     )
-    validObject(obj)
-    obj
 }
 
 #' @importFrom checkmate assertCount assertFlag
@@ -148,8 +147,8 @@ LdEigen <- function(
 #'   standard error from a delete-one-block jackknife, so it requires at
 #'   least two blocks and wants many more.
 #' @param ldBlocks With a genotype panel, the LD blocks to cut it into: a
-#'   \code{GRanges}, or a data frame with columns \code{chrom}, \code{start}
-#'   and \code{end}. Each block's LD is computed from the panel variants
+#'   \code{GRanges}, or the path of a BED file, read as BED with a 0-based
+#'   start. Each block's LD is computed from the panel variants
 #'   inside it; variants outside every block are left out. Not used with
 #'   \code{LdMatrix} blocks.
 #' @param nSamples Integer, the number of samples the reference's LD was
@@ -172,8 +171,8 @@ LdEigen <- function(
 #' panel <- readGenotypes(plink2Prefix = file.path(system.file("extdata",
 #'   "ld_reference", "chr22", package = "pecotmr"),
 #'   "protocol_example.LD.chr22"))
-#' blocks <- data.frame(chrom = "chr22", start = c(10000000, 15000001),
-#'   end = c(15000000, 19000000))
+#' blocks <- GenomicRanges::GRanges("chr22",
+#'   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)))
 #' ldEigen <- buildLdEigen(panel, ldBlocks = blocks, genome = "hg38")
 #' ldEigen
 #' length(eigenList(ldEigen))
@@ -217,7 +216,7 @@ buildLdEigen <- function(
 .ldEigenFromPanel <- function(prep, inSample, truncation) {
     gr <- .ldStatRanges(prep$snpInfo, prep$genome)
     S4Vectors::mcols(gr)$panelRow <- prep$panelRow
-    obj <- methods::new(
+    methods::new(
         "LdEigen",
         gr,
         ldBlocks = .asLdBlockRanges(prep$ldBlocks),
@@ -227,8 +226,6 @@ buildLdEigen <- function(
         eigenvalueTruncation = as.numeric(truncation),
         ldReference = prep$ldReference
     )
-    validObject(obj)
-    obj
 }
 
 # One block's decomposition, truncated to the leading components carrying

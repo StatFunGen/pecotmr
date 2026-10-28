@@ -13,7 +13,7 @@ frqData(x)
 \item{x}{An \code{\link{SldscData}} object.}
 }
 \value{
-A \code{data.frame} of reference-panel frequencies (SNP, MAF).
+A \code{DataFrame} of reference-panel frequencies (SNP, MAF).
 }
 \description{
 Get the allele-frequency table from an SldscData

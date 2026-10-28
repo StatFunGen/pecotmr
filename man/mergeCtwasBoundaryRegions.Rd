@@ -10,7 +10,7 @@ mergeCtwasBoundaryRegions(
   filterCs = FALSE,
   maxSNP = Inf,
   maxNumSingleEffects = 5L,
-  numThreads = 1L,
+  BPPARAM = SerialParam(),
   methodArgs = CtwasOptions()
 )
 }
@@ -36,7 +36,10 @@ to be selected (\code{select_boundary_genes} \code{filter_cs}). Default
 \item{maxNumSingleEffects}{Integer. Max number of single effects for the
 merged-region re-fine-mapping (LD path only). Default \code{5}.}
 
-\item{numThreads}{Number of cores. Default \code{1}.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the cores
+ctwas's own \code{ncore} parallelism uses when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+core. Default \code{SerialParam()}.}
 
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
 with \code{\link{CtwasOptions}}. Names are checked against what

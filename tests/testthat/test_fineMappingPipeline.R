@@ -18,7 +18,7 @@ context("fineMappingPipeline")
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
             A2 = rep("G", snp_n),
@@ -136,7 +136,7 @@ context("fineMappingPipeline")
     gr
 }
 
-.fmp_makeQtlSumStats <- function(qc = TRUE) {
+.fmp_makeQtlSumStats <- function(qc = TRUE, traitPos = NULL) {
     QtlSumStats(
         studyName = "Q1",
         context = "c1",
@@ -144,8 +144,15 @@ context("fineMappingPipeline")
         entry = list(.fmp_makeSumstatsGr()),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        qcOptions = if (qc) list(step1 = "ok") else list(),
+        traitPos = traitPos
     )
+}
+
+# A trait position for the summary statistics above: a MultiStudyQtlDataset
+# lays its `cisWindow` there too, and 1000 bp around it keeps every variant.
+.fmp_traitPos <- function() {
+    GenomicRanges::GRanges("chr1:300")
 }
 
 .fmp_makeGwasSumStats <- function(qc = TRUE, studyName = "G1") {
@@ -154,14 +161,50 @@ context("fineMappingPipeline")
         entry = list(.fmp_makeSumstatsGr()),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        qcOptions = if (qc) list(step1 = "ok") else list()
     )
+}
+
+# The fixtures most tests read, built once: every constructor validates its
+# whole collection, so rebuilding them in each test was a large share of this
+# file's run time. Tests only read them (a change makes a local copy).
+.fmp_qdA <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+.fmp_qdAB <- .fmp_makeQtlDataset()
+.fmp_qss <- .fmp_makeQtlSumStats()
+.fmp_gss <- .fmp_makeGwasSumStats()
+.fmp_qdTwoCtxA <- .fmp_makeQtlDataset(
+    contexts = c("brain", "liver"),
+    traits = "ENSG_A"
+)
+.fmp_qdTwoCtxAB <- .fmp_makeQtlDataset(contexts = c("brain", "liver"))
+# One individual-level study plus embedded summary statistics placed at
+# .fmp_traitPos(), so a `cisWindow` can be laid on both.
+.fmp_msqd <- MultiStudyQtlDataset(
+    qtlDatasets = list(study1 = .fmp_qdA),
+    sumStats = .fmp_makeQtlSumStats(traitPos = .fmp_traitPos())
+)
+
+# The result class each summary-statistics input comes back as.
+.fmp_resultClass <- c(
+    GwasSumStats = "GwasFineMappingResult",
+    QtlSumStats = "QtlFineMappingResult"
+)
+
+# One susie fit of a summary-statistics input under `susieRssParam`.
+.fmp_fitRss <- function(input, susieRssParam = SusieRssParam()) {
+    suppressMessages(fineMappingPipeline(
+        input,
+        methods = "susie",
+        initializeWithSusieInf = FALSE,
+        susieRssParam = susieRssParam
+    ))
 }
 
 # Mocks for the SuSiE fitters + post-processor. Return tiny payloads keyed
 # only by the token so post-process knows what to wrap. The `userArgs`
-# parameter (per-method kwargs merged in by .fmMergeUserArgs) is accepted
-# but ignored — the mocks don't simulate downstream susie behaviour.
+# parameter (per-method kwargs merged in by .fmMergeUserArgs) is recorded
+# when a `capture` environment is given and otherwise ignored -- the mocks
+# don't simulate downstream susie behaviour.
 .fmp_mockFitIndiv <- function(capture = NULL) {
     function(
         X,
@@ -264,7 +307,7 @@ context("fineMappingPipeline")
         if (is.null(vids)) {
             vids <- "chr1:1200:A:G"
         }
-        fineMappingRow(
+        FineMappingRow(
             variantIds = vids,
             susieFit = list(method = method, payload = fit),
             topLoci = data.frame(
@@ -430,26 +473,6 @@ test_that(".fmCheckMethodCapabilities: mvsusie on GwasSumStats rejected", {
     )
 })
 
-test_that(".fmTraitsInRegion: keeps genes overlapping the region; NULL keeps all", {
-    # g1: 1000-1500, g2: 2000-2500, g3: 3000-3500 (width 500).
-    se <- .fmp_makeSe(
-        traits = c("g1", "g2", "g3"),
-        starts = c(1000L, 2000L, 3000L)
-    )
-    r1 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(900L, 1600L)) # g1 only
-    r12 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(900L, 2600L)) # g1 + g2
-    expect_equal(pecotmr:::.fmTraitsInRegion(se, c("g1", "g2", "g3"), r1), "g1")
-    expect_setequal(
-        pecotmr:::.fmTraitsInRegion(se, c("g1", "g2", "g3"), r12),
-        c("g1", "g2")
-    )
-    # NULL region (gene/cisWindow mode) leaves the set unchanged.
-    expect_setequal(
-        pecotmr:::.fmTraitsInRegion(se, c("g1", "g2", "g3"), NULL),
-        c("g1", "g2", "g3")
-    )
-})
-
 # ===========================================================================
 # .fmResolveSusieChain
 # ===========================================================================
@@ -473,7 +496,7 @@ test_that(".fmResolveSusieChain: keeps susieInf when explicitly requested", {
     expect_true(res$keepInf)
 })
 
-test_that(".fmResolveSusieChain: no chain when addSusieInf=FALSE", {
+test_that(".fmResolveSusieChain: no chain or susieInf run for susie alone", {
     res <- pecotmr:::.fmResolveSusieChain(
         c("susie"),
         initializeWithSusieInf = FALSE
@@ -491,7 +514,7 @@ test_that(".fmCacheLookup: NULL fineMappingResult returns NULL", {
 })
 
 test_that(".fmCacheLookup: returns matching entry by 4-tuple", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -521,7 +544,7 @@ test_that(".fmCacheLookup: returns matching entry by 4-tuple", {
 })
 
 test_that(".fmCacheLookupGwas: matches on study/method/blockId", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -530,9 +553,9 @@ test_that(".fmCacheLookupGwas: matches on study/method/blockId", {
             stringsAsFactors = FALSE
         )
     )
-    # GwasFineMappingResult assigns the synthetic blockId "region_1"
-    # when none is supplied; the lookup must include it in the 3-tuple
-    # key (multi-block FMRs disambiguate per-block fits by blockId).
+    # GwasFineMappingResult names a row with no blockId by its own span; the
+    # lookup keys on that span (multi-block FMRs disambiguate per-block fits
+    # by it).
     fmr <- GwasFineMappingResult(
         studyName = "g1",
         method = "susie",
@@ -551,9 +574,24 @@ test_that(".fmCacheLookupGwas: matches on study/method/blockId", {
     expect_null(pecotmr:::.fmCacheLookupGwas(fmr, "ghost", "susie", key))
 })
 
+test_that(".fmCacheLookupGwas: a one-block cache answers for that block only", {
+    # A cache holding one block of a study is no fit for its other blocks, so
+    # the range is compared even when only one row matches (study, method).
+    fmr <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3))
+    )
+    key <- pecotmr:::.rtlRangeKeys(fmr)[[1L]]
+    expect_false(is.null(
+        pecotmr:::.fmCacheLookupGwas(fmr, "g1", "susie", key)
+    ))
+    expect_null(
+        pecotmr:::.fmCacheLookupGwas(fmr, "g1", "susie", "chr1_10100_10300")
+    )
+})
+
 test_that(".fmCacheLookupGwas: the range key disambiguates multi-block FMRs", {
-    # With one row per (study, method) the range never has to be consulted;
-    # it only becomes load-bearing once a study is swept across blocks.
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(3, offset = 10000L)
     fmr <- GwasFineMappingResult(
@@ -574,7 +612,7 @@ test_that(".fmCacheLookupGwas: the range key disambiguates multi-block FMRs", {
 })
 
 test_that(".fmCacheLookup: non-QtlFineMappingResult input returns NULL", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -589,26 +627,6 @@ test_that(".fmCacheLookup: non-QtlFineMappingResult input returns NULL", {
         entry = list(e)
     )
     expect_null(pecotmr:::.fmCacheLookup(gwasFmr, "g1", "c1", "t1", "susie"))
-})
-
-test_that(".fmCacheLookupGwas: non-GwasFineMappingResult input returns NULL", {
-    e <- fineMappingRow(
-        variantIds = "chr1:100:A:G",
-        susieFit = list(token = "susie"),
-        topLoci = data.frame(
-            variant_id = "chr1:100:A:G",
-            pip = 0.5,
-            stringsAsFactors = FALSE
-        )
-    )
-    qtlFmr <- QtlFineMappingResult(
-        studyName = "s1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(e)
-    )
-    expect_null(pecotmr:::.fmCacheLookupGwas(qtlFmr, "s1", "susie", "region_1"))
 })
 
 # ===========================================================================
@@ -640,7 +658,7 @@ test_that(".fmBuildGwasResult: empty entries errors", {
 # ===========================================================================
 
 test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -667,7 +685,7 @@ test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
 })
 
 test_that(".rbindFineMappingResult: rejects mixed Qtl/Gwas inputs", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -695,7 +713,7 @@ test_that(".rbindFineMappingResult: rejects mixed Qtl/Gwas inputs", {
 })
 
 test_that(".rbindFineMappingResult: concatenates two GwasFineMappingResult collections", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -720,7 +738,7 @@ test_that(".rbindFineMappingResult: concatenates two GwasFineMappingResult colle
 })
 
 test_that("combineFineMappingResults: row-binds same-class collections; rejects mixed class/empty", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(token = "susie"),
         topLoci = data.frame(
@@ -776,11 +794,7 @@ test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
 # fineMappingPipeline(QtlDataset)
 # ===========================================================================
 
-test_that("fineMappingPipeline(QtlDataset): runs univariate dispatch with mocked fitters", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+test_that("fineMappingPipeline(QtlDataset): univariate rows record traitPos", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -789,7 +803,7 @@ test_that("fineMappingPipeline(QtlDataset): runs univariate dispatch with mocked
     )
     res <- suppressMessages(
         fineMappingPipeline(
-            qd,
+            .fmp_qdAB,
             methods = "susie",
             cisWindow = 1000L,
             initializeWithSusieInf = FALSE
@@ -799,27 +813,6 @@ test_that("fineMappingPipeline(QtlDataset): runs univariate dispatch with mocked
     # 1 context x 2 traits x 1 method = 2 rows.
     expect_equal(nrow(res), 2L)
     expect_setequal(methodNames(res), "susie")
-})
-
-test_that("fineMappingPipeline(QtlDataset): threads real trait positions into traitPos provenance", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieIndiv = .fmp_mockFitIndiv(),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            qd,
-            methods = "susie",
-            cisWindow = 1000L,
-            initializeWithSusieInf = FALSE
-        )
-    )
     tp <- traitPosition(res)
     expect_s4_class(tp, "GRanges")
     expect_length(tp, nrow(res))
@@ -835,7 +828,7 @@ test_that("fineMappingPipeline(QtlDataset): threads real trait positions into tr
     expect_equal(ent[["ENSG_B"]], 2499L)
     # genomicRegion() reports the REALIZED variant span now, not the nominal cis
     # window (traitPos +/- cisWindow). The window is gone because it had no
-    # correct update rule under subsetRegion(); the span is in sync with the
+    # correct update rule under subsetting; the span is in sync with the
     # variants by construction. It still sits inside the window the fit was
     # drawn from, which is what this checks.
     reg <- genomicRegion(res)
@@ -848,7 +841,7 @@ test_that("fineMappingPipeline(QtlDataset): threads real trait positions into tr
 })
 
 test_that(".fmAfForX: returns directional effect-allele af aligned to colnames(X)", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .package = "pecotmr"
@@ -865,17 +858,21 @@ test_that(".fmAfForX: returns directional effect-allele af aligned to colnames(X
             c("chr1:300:A:G", "chr1:100:A:G", "chr1:200:A:G")
         )
     )
-    af <- pecotmr:::.fmAfForX(qd, X, region = region)
+    noFilter <- pecotmr:::.qtlResolveFilter()
+    af <- pecotmr:::.fmAfForX(qd, X, genotypeFilter = noFilter, region = region)
     expect_length(af, 3L)
     expect_false(anyNA(af)) # region matched -> every fitted variant has an af
-    expect_equal(
-        af,
-        unname(af(qd, region = region, samples = rownames(X))[colnames(X)])
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        window = region,
+        samples = rownames(X),
+        filter = noFilter
     )
+    expect_equal(af, unname(setNames(blk$af, blk$variantIds)[colnames(X)]))
 })
 
 test_that(".fmAfForX: returns NULL for an empty block or a non-QtlDataset source", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     emptyX <- matrix(numeric(0), nrow = 0L, ncol = 0L)
     expect_null(pecotmr:::.fmAfForX(qd, emptyX))
     X <- matrix(
@@ -891,7 +888,7 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
     # Regression for af = NA in credibleSets: the individual-level univariate path must
     # forward a non-NULL, directional effect-allele frequency to the
     # post-processor (which writes it into the topLoci `af` column).
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     captured <- new.env(parent = emptyenv())
     captured$af <- "UNSET"
     captured$cols <- NULL
@@ -913,7 +910,7 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
         captured$af <- af
         captured$cols <- colnames(dataX)
         vids <- colnames(dataX)
-        fineMappingRow(
+        FineMappingRow(
             variantIds = vids,
             susieFit = list(method = method),
             topLoci = data.frame(
@@ -947,7 +944,7 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
 })
 
 test_that("fineMappingPipeline(QtlDataset): seed argument is accepted and runs", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -967,7 +964,7 @@ test_that("fineMappingPipeline(QtlDataset): seed argument is accepted and runs",
     expect_equal(nrow(res), 1L)
 })
 
-test_that(".fmTopPcScores: clean matrix -> samples x min(nPCs, traits) topPC scores", {
+test_that(".fmTopPcScores: samples x min(nPCs, traits) scores, else NULL", {
     set.seed(7)
     n <- 30L
     Y <- matrix(
@@ -1001,12 +998,14 @@ test_that(".fmTopPcScores: clean matrix -> samples x min(nPCs, traits) topPC sco
     scn <- fn(Yna, 10L)
     expect_equal(nrow(scn), n - 2L)
     expect_false(any(c("s1", "s2") %in% rownames(scn)))
+    # (f) fewer than two complete rows, fewer than two traits with variance,
+    # or nPCs = 0 leaves nothing to score.
+    expect_null(fn(matrix(c(1, NA), 2, 2), 2L))
+    expect_null(fn(cbind(a = rep(1, 4), b = rnorm(4)), 2L))
+    expect_null(fn(Y, 0L))
 })
 
-test_that("fineMappingPipeline(
-    QtlDataset,
-    usePCA
-): top-PC susie rows keyed topPC{i}", {
+test_that("fineMappingPipeline(QtlDataset, usePCA): rows keyed topPC{i}", {
     qd <- .fmp_makeQtlDataset(
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B", "ENSG_C")
@@ -1038,7 +1037,7 @@ test_that("fineMappingPipeline(
 
 test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
     mkEntry <- function(fits) {
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
             weights = c(0.1, 0.2),
             methodFits = fits
@@ -1067,7 +1066,7 @@ test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
 
 test_that(".fmLookupMrmashCv: finds the per-fold CV payload by (study, trait)", {
     mkEntry <- function(cv) {
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
             weights = c(0.1, 0.2),
             cvResult = cv
@@ -1187,25 +1186,8 @@ test_that(".fmBuildMvsusiePriorCv: mode C reuses full-fit w0/V with per-fold U",
     expect_equal(captured[[2]]$mixture_prior$matrices$Z, diag(2) * 3) # fold 2's U
 })
 
-test_that("enabling two screen metrics errors at the constructor", {
-    # It used to take a pipeline call to find this out; now the bundle
-    # refuses to be built, so the mistake is caught where it is written.
-    expect_error(
-        SignalScreenParam(pip = 0.5, absZ = 5),
-        "only one screening metric"
-    )
-    # 0 is the long-standing "off" spelling, so this is one screen, not two.
-    expect_equal(
-        pecotmr:::.screenResolve(SignalScreenParam(pip = 0, absZ = 5)),
-        list(metric = "absZ", cutoff = 5)
-    )
-})
-
 test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univariate traits", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     # Stateful screen: reject the first block (ENSG_A), keep the rest (ENSG_B).
     seen <- 0L
     local_mocked_bindings(
@@ -1232,12 +1214,9 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univ
     expect_setequal(traitNames(res), "ENSG_B")
 })
 
-test_that("fineMappingPipeline(
-    QtlDataset,
-    cvFolds>1
-): attaches cvResult end to end", {
+test_that("fineMappingPipeline(QtlDataset): CV folds attach a cvResult", {
     skip_if_not_installed("susieR")
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     # Real susie fits drive CV; the genotype extraction and the full-data
     # post-processor are mocked (the mock SNP ids are not chr:pos:a1:a2, which the
     # real buildTopLoci requires). CV runs its own real .fmFitSusieIndiv, so the
@@ -1273,11 +1252,8 @@ test_that("fineMappingPipeline(
     expect_false(anyNA(cv$prediction[["susie_predicted"]]))
 })
 
-test_that("fineMappingPipeline(
-    QtlDataset,
-    crossValidation = CrossValidationParam(folds = 0)
-): leaves cvResult NULL", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+test_that("fineMappingPipeline(QtlDataset): no CV folds leaves cvResult NULL", {
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -1306,13 +1282,6 @@ test_that("fineMappingPipeline(
 # .fmSliceCv / .fmAttachCv (unit-level counterparts to the cvFolds end-to-end
 # tests above).
 # ===========================================================================
-
-test_that(".cvSamplePartition partitions every sample into the requested folds", {
-    part <- pecotmr:::.cvSamplePartition(paste0("s", 1:20), fold = 4L)
-    expect_setequal(part$Sample, paste0("s", 1:20))
-    expect_setequal(sort(unique(part$Fold)), 1:4)
-    expect_equal(nrow(part), 20L)
-})
 
 test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake method", {
     skip_if_not_installed("susieR")
@@ -1412,47 +1381,42 @@ test_that(".fmSliceCv / .fmAttachCv slice one method and round-trip onto an entr
         pip = 0.5,
         stringsAsFactors = FALSE
     )
-    e <- fineMappingRow("chr1:100:A:G", list(), tl)
+    e <- FineMappingRow("chr1:100:A:G", list(), tl)
     e2 <- pecotmr:::.fmAttachCv(e, sl)
     expect_identical(pecotmr:::.fmrPartsCvResult(e2), sl)
 })
 
-test_that("fineMappingPipeline(QtlDataset): RSS-only method rejected by capability check", {
-    qd <- .fmp_makeQtlDataset()
+test_that("fineMappingPipeline(QtlDataset): a TWAS-only method is rejected", {
     expect_error(
-        fineMappingPipeline(qd, methods = "mrmash"),
+        fineMappingPipeline(.fmp_qdAB, methods = "mrmash"),
         "TWAS-weight-oriented"
     )
 })
 
 test_that("fineMappingPipeline(QtlDataset): unknown context errors", {
-    qd <- .fmp_makeQtlDataset()
     expect_error(
-        fineMappingPipeline(qd, methods = "susie", contexts = "ghost"),
+        fineMappingPipeline(.fmp_qdAB, methods = "susie", contexts = "ghost"),
         "no study has: ghost"
     )
 })
 
-test_that("fineMappingPipeline(QtlDataset): empty traitId filter errors", {
-    qd <- .fmp_makeQtlDataset(traits = "ENSG_A")
+test_that("fineMappingPipeline(QtlDataset): empty trait filter errors", {
     expect_error(
-        fineMappingPipeline(qd, methods = "susie", traitId = "ENSG_Z"),
+        fineMappingPipeline(.fmp_qdA, methods = "susie", traitId = "ENSG_Z"),
         "no traits selected"
     )
 })
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie with single trait/context rejected", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     expect_error(
-        fineMappingPipeline(qd, methods = "mvsusie"),
+        fineMappingPipeline(.fmp_qdA, methods = "mvsusie"),
         "mvsusie requires multi-trait or multi-context"
     )
 })
 
 test_that("fineMappingPipeline(QtlDataset): fsusie with single trait rejected", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     expect_error(
-        fineMappingPipeline(qd, methods = "fsusie"),
+        fineMappingPipeline(.fmp_qdA, methods = "fsusie"),
         "fsusie requires multi-trait"
     )
 })
@@ -1491,10 +1455,7 @@ test_that("fineMappingPipeline(QtlDataset): fsusie with single trait rejected", 
 }
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie multi-trait single-context dispatch", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1536,7 +1497,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie multi-trait single-context d
 })
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie multi-context single-trait dispatch", {
-    qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+    qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1588,7 +1549,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip drops null contexts 
 
 test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips mvsusie when < 2 contexts survive", {
     # susie runs alongside so the result still has rows after mvsusie is skipped.
-    qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+    qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -1617,10 +1578,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips mvsusie when <
 })
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie both multi falls back to per-context multi-trait", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = c("brain", "liver"),
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdTwoCtxAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1650,17 +1608,14 @@ test_that("fineMappingPipeline(QtlDataset): multi-trait auto-detection USES the 
     # canonical create_mixture_prior(R=ncol). Routed through the engine, it now
     # looks up a prior cross-trait mr.mash fit (study, context fixed; trait
     # match-any) and reweights from it.
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     fitParts <- list(
         dataDrivenPriorMatrices = list(U = list(K = diag(2)), w = c(K = 1)),
         w0 = c(K_grid1 = 1),
         V = diag(2)
     )
     mkE <- function() {
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
             weights = c(0.1, 0.2),
             methodFits = fitParts
@@ -1707,10 +1662,7 @@ test_that("fineMappingPipeline(QtlDataset): multi-trait auto-detection USES the 
 })
 
 test_that("fineMappingPipeline(QtlDataset): multi-trait without mrmashPrior keeps the canonical prior", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     sawMixturePrior <- FALSE
     sawCanonical <- FALSE
     local_mocked_bindings(
@@ -1742,12 +1694,9 @@ test_that("fineMappingPipeline(QtlDataset): multi-trait without mrmashPrior keep
 test_that("fineMappingPipeline(QtlDataset): mvsusie resume cache short-circuits the joint fitter", {
     # All conditions of the cross-trait group are already in the prior partial
     # result -> the engine reuses the cached entries and never calls mvsusie.
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     cachedEntry <- function() {
-        fineMappingRow(
+        FineMappingRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
             susieFit = list(token = "mvsusie_cached"),
             topLoci = data.frame(
@@ -1791,10 +1740,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie resume cache short-circuits 
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joint row per trait", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = c("brain", "liver"),
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdTwoCtxAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1827,7 +1773,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joi
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' + univariate compose without double-fitting mvsusie", {
-    qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+    qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -1860,10 +1806,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' + univariate com
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' with only one context skips with message", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1888,10 +1831,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' with only one co
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' produces one joint row per context", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = c("brain", "liver"),
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdTwoCtxAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1919,10 +1859,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' produces one joint
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' with fsusie wires fsusieR::susiF", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1960,10 +1897,7 @@ test_that("fineMappingPipeline(QtlDataset): fsusie receives the CredibleSetParam
     # while nothing did -- the row described the retired fsusieWrapper() while
     # the pipeline called fitFsusie(). `--L` was silently ignored and susiF
     # ran at its own default. The mocked susiF records what it was handed.
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -1994,10 +1928,7 @@ test_that("fineMappingPipeline(QtlDataset): fsusie receives the CredibleSetParam
 })
 
 test_that("fineMappingPipeline(QtlDataset): fsusie multi-trait per context dispatch", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -2027,20 +1958,25 @@ test_that("fineMappingPipeline(QtlDataset): fsusie multi-trait per context dispa
 # fineMappingPipeline(MultiStudyQtlDataset)
 # ===========================================================================
 
+# Two individual-level studies of one trait in one context, built once.
+.fmp_twoStudies <- MultiStudyQtlDataset(
+    qtlDatasets = list(
+        s1 = QtlDataset(
+            studyName = "s1",
+            genotypes = .fmp_makeHandle(),
+            phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
+            genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+        ),
+        s2 = QtlDataset(
+            studyName = "s2",
+            genotypes = .fmp_makeHandle(),
+            phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
+            genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+        )
+    )
+)
+
 test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across constituent QtlDatasets", {
-    qd1 <- QtlDataset(
-        studyName = "s1",
-        genotypes = .fmp_makeHandle(),
-        phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
-        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
-    )
-    qd2 <- QtlDataset(
-        studyName = "s2",
-        genotypes = .fmp_makeHandle(),
-        phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
-        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
-    )
-    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -2049,7 +1985,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across 
     )
     res <- suppressMessages(
         fineMappingPipeline(
-            mt,
+            .fmp_twoStudies,
             methods = "susie",
             cisWindow = 1000L,
             initializeWithSusieInf = FALSE
@@ -2060,7 +1996,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across 
     expect_equal(nrow(res), 2L)
     expect_setequal(studyName(res), c("s1", "s2"))
     # Pure individual-level -> ldReference should be NULL.
-    expect_null(ldReference(res))
+    expect_identical(ldReference(res), list())
 })
 
 # A study measured in brain and liver, on the synthetic genotypes.
@@ -2110,7 +2046,7 @@ test_that("fineMappingPipeline(MultiStudy): list selections stay per study", {
     )
 })
 
-test_that("fineMappingPipeline(QtlDataset): traitId chosen per context", {
+test_that("fineMappingPipeline(QtlDataset): trait chosen per context", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -2149,15 +2085,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): per-study options are not 
     )
     expect_error(
         suppressMessages(fineMappingPipeline(
-            MultiStudyQtlDataset(
-                qtlDatasets = list(
-                    study1 = .fmp_makeQtlDataset(
-                        contexts = "brain",
-                        traits = "ENSG_A"
-                    )
-                ),
-                sumStats = .fmp_makeQtlSumStats()
-            ),
+            .fmp_msqd,
             methods = "susie",
             cisWindow = 1000L,
             credibleSetParam = CredibleSetParam(coverage = 0.9),
@@ -2182,15 +2110,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): a misspelled option errors
     # The method no longer takes `...`, so a typo cannot be swallowed.
     expect_error(
         fineMappingPipeline(
-            MultiStudyQtlDataset(
-                qtlDatasets = list(
-                    study1 = .fmp_makeQtlDataset(
-                        contexts = "brain",
-                        traits = "ENSG_A"
-                    )
-                ),
-                sumStats = .fmp_makeQtlSumStats()
-            ),
+            .fmp_msqd,
             methods = "susie",
             credibelSet = CredibleSetParam()
         ),
@@ -2201,12 +2121,6 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): a misspelled option errors
 test_that("fineMappingPipeline(MSQD): L / Lgreedy reach the per-study fit", {
     # One individual-level study and one embedded QtlSumStats, so both
     # per-study workers (.fmPerStudy and .fmSumStats) are exercised.
-    mt <- MultiStudyQtlDataset(
-        qtlDatasets = list(
-            study1 = .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-        ),
-        sumStats = .fmp_makeQtlSumStats()
-    )
     capX <- new.env(parent = emptyenv())
     capRss <- new.env(parent = emptyenv())
     local_mocked_bindings(
@@ -2218,7 +2132,7 @@ test_that("fineMappingPipeline(MSQD): L / Lgreedy reach the per-study fit", {
     )
     suppressMessages(
         fineMappingPipeline(
-            mt,
+            .fmp_msqd,
             methods = "susie",
             cisWindow = 1000L,
             initializeWithSusieInf = FALSE,
@@ -2239,19 +2153,6 @@ test_that("fineMappingPipeline(MSQD): L / Lgreedy reach the per-study fit", {
 })
 
 test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges per region in each study", {
-    qd1 <- QtlDataset(
-        studyName = "s1",
-        genotypes = .fmp_makeHandle(),
-        phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
-        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
-    )
-    qd2 <- QtlDataset(
-        studyName = "s2",
-        genotypes = .fmp_makeHandle(),
-        phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
-        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
-    )
-    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -2263,7 +2164,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges 
         IRanges::IRanges(c(50L, 350L), c(350L, 650L))
     )
     res <- suppressMessages(fineMappingPipeline(
-        mt,
+        .fmp_twoStudies,
         methods = "susie",
         traitId = "ENSG_A",
         region = regions,
@@ -2285,14 +2186,6 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges 
 })
 
 test_that("fineMappingPipeline(MSQD): embedded sumstats record ldReference", {
-    qd <- QtlDataset(
-        studyName = "s1",
-        genotypes = .fmp_makeHandle(),
-        phenotypes = list(brain = .fmp_makeSe(traits = "ENSG_A")),
-        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
-    )
-    ss <- .fmp_makeQtlSumStats()
-    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd), sumStats = ss)
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -2302,7 +2195,7 @@ test_that("fineMappingPipeline(MSQD): embedded sumstats record ldReference", {
     )
     res <- suppressMessages(
         fineMappingPipeline(
-            mt,
+            .fmp_msqd,
             methods = "susie",
             cisWindow = 1000L,
             initializeWithSusieInf = FALSE
@@ -2311,49 +2204,57 @@ test_that("fineMappingPipeline(MSQD): embedded sumstats record ldReference", {
     expect_s4_class(res, "QtlFineMappingResult")
     expect_true(nrow(res) >= 2L)
     # Embedded sumstats has an LD sketch -> the merged result carries it.
-    expect_s4_class(ldReference(res), "RangedSummarizedExperiment")
+    expect_s4_class(ldReference(res)[[1L]], "RangedSummarizedExperiment")
 })
 
 # ===========================================================================
-# fineMappingPipeline(QtlSumStats)
+# fineMappingPipeline(QtlSumStats) and fineMappingPipeline(GwasSumStats)
 # ===========================================================================
 
-test_that("fineMappingPipeline(QtlSumStats): runs end-to-end with mocked RSS fitters", {
-    ss <- .fmp_makeQtlSumStats()
+test_that("fineMappingPipeline(*SumStats): runs with mocked RSS fitters", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE
+    for (input in list(.fmp_qss, .fmp_gss)) {
+        kind <- class(input)[[1L]]
+        res <- .fmp_fitRss(input)
+        expect_s4_class(res, .fmp_resultClass[[kind]])
+        expect_equal(nrow(res), 1L, info = kind)
+        expect_equal(methodNames(res), "susie", info = kind)
+        # The result carries the build its summary statistics name.
+        expect_identical(
+            unique(unname(GenomeInfoDb::genome(res))),
+            "hg19",
+            info = kind
         )
-    )
-    expect_s4_class(res, "QtlFineMappingResult")
-    expect_equal(nrow(res), 1L)
+    }
 })
 
-test_that("fineMappingPipeline(QtlSumStats): un-QCd input rejected", {
-    ss <- .fmp_makeQtlSumStats(qc = FALSE)
-    expect_error(
-        fineMappingPipeline(ss, methods = "susie"),
-        "has no QC record"
+test_that("fineMappingPipeline(*SumStats): un-QCd input rejected", {
+    unQcd <- list(
+        .fmp_makeQtlSumStats(qc = FALSE),
+        .fmp_makeGwasSumStats(qc = FALSE)
     )
+    for (input in unQcd) {
+        expect_error(
+            fineMappingPipeline(input, methods = "susie"),
+            "has no QC record",
+            info = class(input)[[1L]]
+        )
+    }
 })
 
 test_that("fineMappingPipeline(QtlSumStats): empty selection rejected", {
-    ss <- .fmp_makeQtlSumStats()
     expect_error(
-        fineMappingPipeline(ss, methods = "susie", traitId = "ghost"),
+        fineMappingPipeline(.fmp_qss, methods = "susie", traitId = "ghost"),
         "no entries matched"
     )
     # A context no study has is caught earlier, when the selection is parsed.
     expect_error(
-        fineMappingPipeline(ss, methods = "susie", contexts = "ghost"),
+        fineMappingPipeline(.fmp_qss, methods = "susie", contexts = "ghost"),
         "no study has: ghost"
     )
 })
@@ -2362,27 +2263,7 @@ test_that("fineMappingPipeline(QtlSumStats): empty selection rejected", {
 # fineMappingPipeline(GwasSumStats)
 # ===========================================================================
 
-test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fitters", {
-    gss <- .fmp_makeGwasSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRss(),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE
-        )
-    )
-    expect_s4_class(res, "GwasFineMappingResult")
-    expect_equal(nrow(res), 1L)
-    expect_setequal(methodNames(res), "susie")
-})
-
-test_that("fineMappingPipeline(GwasSumStats): opaque blockId, entry's span", {
+test_that("fineMappingPipeline(GwasSumStats): a blockId gives no window", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
@@ -2396,7 +2277,7 @@ test_that("fineMappingPipeline(GwasSumStats): opaque blockId, entry's span", {
             genome = "hg19",
             ldReference = .fmp_makeHandle(),
             blockId = blockId,
-            qcInfo = list(step1 = "ok")
+            qcOptions = list(step1 = "ok")
         )
         res <- suppressMessages(fineMappingPipeline(
             gss,
@@ -2406,10 +2287,51 @@ test_that("fineMappingPipeline(GwasSumStats): opaque blockId, entry's span", {
         reg <- genomicRegion(res)
         c(GenomicRanges::start(reg), GenomicRanges::end(reg))
     }
-    # A blockId spelling coordinates is the region's boundary; an opaque
-    # label says nothing, so the region is the entry's own variant span.
-    expect_equal(regionOf("chr1_50_600"), c(50L, 600L))
+    # A blockId is a name, however it is spelled, so the window is the
+    # entry's span; a window the caller means goes in `region`.
+    expect_equal(regionOf("chr1_50_600"), c(100L, 500L))
     expect_equal(regionOf("block1"), c(100L, 500L))
+})
+
+test_that("fineMappingPipeline(GwasSumStats): a range keeps its origin", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRss(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    fitOver <- function(...) {
+        gss <- GwasSumStats(
+            studyName = "G1",
+            entry = list(.fmp_makeSumstatsGr()),
+            genome = "hg19",
+            ldReference = .fmp_makeHandle(),
+            qcOptions = list(step1 = "ok"),
+            ...
+        )
+        suppressMessages(fineMappingPipeline(
+            gss,
+            methods = "susie",
+            initializeWithSusieInf = FALSE
+        ))
+    }
+    # A window named in a blockId column gives the block its range and key.
+    named <- fitOver(
+        region = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(1L, 2000L),
+            blockId = "b1"
+        )
+    )
+    expect_identical(named$blockId, "b1")
+    expect_identical(as.character(genomicRegion(named)), "chr1:1-2000")
+    expect_true(named$regionGiven)
+    # Without one, the row keeps its seqname as its name, and its span bounds
+    # the block, computed.
+    bare <- fitOver()
+    expect_identical(bare$blockId, "chr1")
+    expect_identical(as.character(genomicRegion(bare)), "chr1:100-500")
+    expect_false(bare$regionGiven)
 })
 
 test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
@@ -2439,7 +2361,7 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
         entry = list(gr),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = list(step1 = "ok")
+        qcOptions = list(step1 = "ok")
     )
     captured <- new.env(parent = emptyenv())
     captured$n <- "UNSET"
@@ -2462,7 +2384,7 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
         if (is.null(vids)) {
             vids <- snp_ids
         }
-        fineMappingRow(
+        FineMappingRow(
             variantIds = vids,
             susieFit = list(method = method),
             topLoci = data.frame(
@@ -2492,23 +2414,28 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
 
 # ---- PIP-screen graceful skip: a screened region -> empty result, not error ----
 
+# A collection whose rows QC audited as `audits` (one list per row).
+.fmp_withAudits <- function(x, audits) {
+    x$qcAudit <- S4Vectors::SimpleList(audits)
+    x
+}
+
 # A GwasSumStats whose (single) entry was emptied by summaryStatsQc's PIP screen:
-# 0-variant entry + qcInfo$entryAudit[[1]]$pipScreenSkipped = TRUE (+ reason).
+# 0-variant entry + an audit with pipScreenSkipped = TRUE (+ reason).
 .fmp_makeScreenedGwas <- function(
     studyName = "G1",
     reason = "no signals above PIP threshold 0.025"
 ) {
-    GwasSumStats(
+    gss <- GwasSumStats(
         studyName = studyName,
         entry = list(GenomicRanges::GRanges()),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = list(
-            entryAudit = list(list(
-                pipScreenSkipped = TRUE,
-                pipScreenReason = reason
-            ))
-        )
+        qcOptions = list(step1 = "ok")
+    )
+    .fmp_withAudits(
+        gss,
+        list(list(pipScreenSkipped = TRUE, pipScreenReason = reason))
     )
 }
 
@@ -2525,12 +2452,15 @@ test_that("fineMappingPipeline(GwasSumStats): a PIP-screened region yields an em
     expect_s4_class(res, "GwasFineMappingResult")
     expect_equal(nrow(res), 0L) # graceful skip, not stop("no ... tuples")
     # An audit recording the skip but no reason gets the screen's own.
-    noReason <- GwasSumStats(
-        studyName = "G1",
-        entry = list(GenomicRanges::GRanges()),
-        genome = "hg19",
-        ldReference = .fmp_makeHandle(),
-        qcInfo = list(entryAudit = list(list(pipScreenSkipped = TRUE)))
+    noReason <- .fmp_withAudits(
+        GwasSumStats(
+            studyName = "G1",
+            entry = list(GenomicRanges::GRanges()),
+            genome = "hg19",
+            ldReference = .fmp_makeHandle(),
+            qcOptions = list(step1 = "ok")
+        ),
+        list(list(pipScreenSkipped = TRUE))
     )
     expect_message(
         fineMappingPipeline(
@@ -2543,16 +2473,17 @@ test_that("fineMappingPipeline(GwasSumStats): a PIP-screened region yields an em
 })
 
 test_that("fineMappingPipeline(GwasSumStats): mixed screened + real keeps only the real region", {
-    gss <- GwasSumStats(
-        studyName = c("Gskip", "Greal"),
-        entry = list(GenomicRanges::GRanges(), .fmp_makeSumstatsGr()),
-        genome = "hg19",
-        ldReference = .fmp_makeHandle(),
-        qcInfo = list(
-            entryAudit = list(
-                list(pipScreenSkipped = TRUE, pipScreenReason = "no signal"),
-                list()
-            )
+    gss <- .fmp_withAudits(
+        GwasSumStats(
+            studyName = c("Gskip", "Greal"),
+            entry = list(GenomicRanges::GRanges(), .fmp_makeSumstatsGr()),
+            genome = "hg19",
+            ldReference = .fmp_makeHandle(),
+            qcOptions = list(step1 = "ok")
+        ),
+        list(
+            list(pipScreenSkipped = TRUE, pipScreenReason = "no signal"),
+            list()
         )
     )
     local_mocked_bindings(
@@ -2578,7 +2509,7 @@ test_that("fineMappingPipeline(GwasSumStats): a 0-variant entry is skipped even 
         entry = list(GenomicRanges::GRanges()),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = list(step1 = "ok")
+        qcOptions = list(step1 = "ok")
     )
     res <- suppressMessages(
         fineMappingPipeline(
@@ -2592,19 +2523,17 @@ test_that("fineMappingPipeline(GwasSumStats): a 0-variant entry is skipped even 
 })
 
 test_that("fineMappingPipeline(QtlSumStats): a screened trait is skipped gracefully", {
-    qss <- QtlSumStats(
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        entry = list(GenomicRanges::GRanges()),
-        genome = "hg19",
-        ldReference = .fmp_makeHandle(),
-        qcInfo = list(
-            entryAudit = list(list(
-                pipScreenSkipped = TRUE,
-                pipScreenReason = "no signal"
-            ))
-        )
+    qss <- .fmp_withAudits(
+        QtlSumStats(
+            studyName = "Q1",
+            context = "c1",
+            trait = "t1",
+            entry = list(GenomicRanges::GRanges()),
+            genome = "hg19",
+            ldReference = .fmp_makeHandle(),
+            qcOptions = list(step1 = "ok")
+        ),
+        list(list(pipScreenSkipped = TRUE, pipScreenReason = "no signal"))
     )
     res <- suppressMessages(
         fineMappingPipeline(
@@ -2618,226 +2547,143 @@ test_that("fineMappingPipeline(QtlSumStats): a screened trait is skipped gracefu
 })
 
 # ---- SER fallback (shared sumstat SuSiE-RSS path: GwasSumStats + QtlSumStats) ----
+#
+# Both summary-statistics inputs reach the same SuSiE-RSS block, so each test
+# runs it once per input kind.
 
-test_that("fineMappingPipeline(GwasSumStats): serFallback + reliable R keeps multi-effect", {
-    gss <- .fmp_makeGwasSumStats()
+test_that("fineMappingPipeline(*SumStats): serFallback keeps a reliable fit", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb"
-            )
-        )
-    )
-    sf <- susieFit(res, studyName = "G1", method = "susie")
-    # Multi-effect fit reported (payload keeps the multi tag, not the ser tag).
-    expect_equal(sf$payload$multiTag, "multi")
-    expect_false(sf$serFallbackUsed)
-    expect_false(sf$R_reliability_flag)
-    # keepFullFit="fallback": non-fallback region carries no retained fit.
-    expect_null(sf$multiEffectFit)
+    for (input in list(.fmp_gss, .fmp_qss)) {
+        kind <- class(input)[[1L]]
+        sf <- susieFit(.fmp_fitRss(
+            input,
+            SusieRssParam(serFallback = TRUE, rMismatch = "eb")
+        ))
+        # Multi-effect fit reported (payload keeps the multi tag, not the ser
+        # tag).
+        expect_equal(sf$payload$multiTag, "multi", info = kind)
+        expect_false(sf$serFallbackUsed, info = kind)
+        expect_false(sf$R_reliability_flag, info = kind)
+        # keepFullFit="fallback": non-fallback region carries no retained fit.
+        expect_null(sf$multiEffectFit, info = kind)
+    }
 })
 
-test_that("fineMappingPipeline(GwasSumStats): serFallback + unreliable R falls back to SER", {
-    gss <- .fmp_makeGwasSumStats()
+test_that("fineMappingPipeline(*SumStats): unreliable R falls back to SER", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb"
-            )
-        )
-    )
-    sf <- susieFit(res, studyName = "G1", method = "susie")
-    # Reported result is the single-effect ser_model.
-    expect_equal(sf$payload$serTag, "ser")
-    expect_true(sf$serFallbackUsed)
-    expect_true(sf$R_reliability_flag)
-    # Fallback region retains the pre-fallback multi-effect fit.
-    expect_false(is.null(sf$multiEffectFit))
-    expect_equal(sf$multiEffectFit$multiTag, "multi")
+    for (input in list(.fmp_gss, .fmp_qss)) {
+        kind <- class(input)[[1L]]
+        sf <- susieFit(.fmp_fitRss(
+            input,
+            SusieRssParam(serFallback = TRUE, rMismatch = "eb")
+        ))
+        # Reported result is the single-effect ser_model.
+        expect_equal(sf$payload$serTag, "ser", info = kind)
+        expect_true(sf$serFallbackUsed, info = kind)
+        expect_true(sf$R_reliability_flag, info = kind)
+        # Fallback region retains the pre-fallback multi-effect fit.
+        expect_false(is.null(sf$multiEffectFit), info = kind)
+        expect_equal(sf$multiEffectFit$multiTag, "multi", info = kind)
+    }
 })
 
-test_that("fineMappingPipeline(GwasSumStats): serFallback=FALSE default is behavior-preserving", {
-    gss <- .fmp_makeGwasSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE
-        )
-    )
-    sf <- susieFit(res, studyName = "G1", method = "susie")
-    # No fallback even though flag=TRUE; multi-effect result kept.
-    expect_equal(sf$payload$multiTag, "multi")
-    # Feature off: the susieFit carries NO diagnostic fields (byte-identical to
-    # pre-change behavior).
-    expect_false("R_reliability_flag" %in% names(sf))
-    expect_false("serFallbackUsed" %in% names(sf))
-    expect_false("multiEffectFit" %in% names(sf))
-})
-
-test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFinite defaults to panel N", {
-    gss <- .fmp_makeGwasSumStats()
+test_that("fineMappingPipeline(*SumStats): serFallback=FALSE changes nothing", {
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE, capture = cap),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb"
-            )
-        )
-    )
-    # rFinite defaulted to the LD-panel sample size (40 in .fmp_makeHandle).
-    expect_equal(cap$rFinite, 40L)
-    expect_equal(cap$rMismatch, "eb")
-
-    # Explicit rFinite is forwarded verbatim.
-    cap2 <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap2),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rFinite = 12345,
-                rMismatch = "eb"
-            )
-        )
-    )
-    expect_equal(cap2$rFinite, 12345)
-
-    # eb_mix (susieR >= 0.16.6) is passed through to R_mismatch unrestricted.
-    cap3 <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap3),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb_mix"
-            )
-        )
-    )
-    expect_equal(cap3$rMismatch, "eb_mix")
-
-    # rssControl (susie_rss_control() settings) forwarded through to the fitter.
-    cap4 <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap4),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                control = SusieRssControlOptions(
-                    check_prior = TRUE,
-                    mismatch_estimator = "map"
-                )
-            )
-        )
-    )
-    expect_equal(
-        cap4$rssControl,
-        list(check_prior = TRUE, mismatch_estimator = "map")
-    )
-    # default: no rssControl -> fitter sees NULL
-    cap5 <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap5),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE
-        )
-    )
-    expect_null(cap5$rssControl)
+    for (input in list(.fmp_gss, .fmp_qss)) {
+        kind <- class(input)[[1L]]
+        sf <- susieFit(.fmp_fitRss(input))
+        # With serFallback off (the default), the shared block never fires the
+        # fallback nor forwards a non-default rFinite/rMismatch -- even though
+        # the mock flags the fit unreliable -- so the multi-effect result is
+        # kept and the fit carries NO diagnostic fields.
+        expect_null(cap$rFinite, info = kind)
+        expect_equal(cap$rMismatch, "none", info = kind)
+        expect_equal(sf$payload$multiTag, "multi", info = kind)
+        expect_false("R_reliability_flag" %in% names(sf), info = kind)
+        expect_false("serFallbackUsed" %in% names(sf), info = kind)
+        expect_false("multiEffectFit" %in% names(sf), info = kind)
+    }
 })
 
-test_that("fineMappingPipeline(GwasSumStats): keepFullFit='all' retains fit on non-fallback region", {
-    gss <- .fmp_makeGwasSumStats()
+test_that("fineMappingPipeline(*SumStats): SusieRssParam reaches the fitter", {
+    # rFinite defaults to the LD-panel sample size (40 in .fmp_makeHandle) and
+    # an explicit one is forwarded verbatim; rMismatch -- eb_mix too, which
+    # susieR >= 0.16.6 takes -- and the susie_rss_control() settings pass
+    # through unrestricted, and with no control the fitter sees NULL.
+    cap <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(capture = cap),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    control <- SusieRssControlOptions(
+        check_prior = TRUE,
+        mismatch_estimator = "map"
+    )
+    for (input in list(.fmp_gss, .fmp_qss)) {
+        kind <- class(input)[[1L]]
+        .fmp_fitRss(input, SusieRssParam(serFallback = TRUE, rMismatch = "eb"))
+        expect_equal(cap$rFinite, 40L, info = kind)
+        expect_equal(cap$rMismatch, "eb", info = kind)
+        expect_null(cap$rssControl, info = kind)
+        .fmp_fitRss(
+            input,
+            SusieRssParam(
+                serFallback = TRUE,
+                rFinite = 12345,
+                rMismatch = "eb_mix",
+                control = control
+            )
+        )
+        expect_equal(cap$rFinite, 12345, info = kind)
+        expect_equal(cap$rMismatch, "eb_mix", info = kind)
+        expect_equal(
+            cap$rssControl,
+            list(check_prior = TRUE, mismatch_estimator = "map"),
+            info = kind
+        )
+    }
+})
+
+test_that("fineMappingPipeline(*SumStats): keepFullFit='all' retains the fit", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb",
-                keepFullFit = "all"
-            )
-        )
+    keepAll <- SusieRssParam(
+        serFallback = TRUE,
+        rMismatch = "eb",
+        keepFullFit = "all"
     )
-    sf <- susieFit(res, studyName = "G1", method = "susie")
-    expect_false(is.null(sf$multiEffectFit))
-    expect_equal(sf$multiEffectFit$multiTag, "multi")
+    for (input in list(.fmp_gss, .fmp_qss)) {
+        kind <- class(input)[[1L]]
+        # A region that did not fall back still keeps its multi-effect fit.
+        sf <- susieFit(.fmp_fitRss(input, keepAll))
+        expect_false(is.null(sf$multiEffectFit), info = kind)
+        expect_equal(sf$multiEffectFit$multiTag, "multi", info = kind)
+    }
 })
 
 test_that("fineMappingPipeline(QtlSumStats): top-level L / Lgreedy reach the susie fit", {
-    ss <- .fmp_makeQtlSumStats()
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
@@ -2847,7 +2693,7 @@ test_that("fineMappingPipeline(QtlSumStats): top-level L / Lgreedy reach the sus
     )
     suppressMessages(
         fineMappingPipeline(
-            ss,
+            .fmp_qss,
             methods = "susie",
             initializeWithSusieInf = FALSE,
             credibleSetParam = CredibleSetParam(
@@ -2863,7 +2709,6 @@ test_that("fineMappingPipeline(QtlSumStats): top-level L / Lgreedy reach the sus
 })
 
 test_that("fineMappingPipeline(QtlSumStats): per-method L beats the top-level L", {
-    ss <- .fmp_makeQtlSumStats()
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
@@ -2873,7 +2718,7 @@ test_that("fineMappingPipeline(QtlSumStats): per-method L beats the top-level L"
     )
     suppressMessages(
         fineMappingPipeline(
-            ss,
+            .fmp_qss,
             methods = list(susie = list(L = 7L)),
             initializeWithSusieInf = FALSE,
             credibleSetParam = CredibleSetParam(maxNumSingleEffects = 4L)
@@ -2882,229 +2727,28 @@ test_that("fineMappingPipeline(QtlSumStats): per-method L beats the top-level L"
     expect_equal(cap$userArgs$L, 7L)
 })
 
-test_that("fineMappingPipeline(QtlSumStats): serFallback=FALSE default leaves the QTL path unchanged", {
-    ss <- .fmp_makeQtlSumStats()
-    cap <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE, capture = cap),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE
-        )
-    )
-    expect_s4_class(res, "QtlFineMappingResult")
-    # With serFallback off (the default), the shared block never fires the
-    # fallback nor forwards a non-default rFinite/rMismatch -- even though the
-    # mock flags the fit unreliable -- so the result is byte-identical to before.
-    expect_null(cap$rFinite)
-    expect_equal(cap$rMismatch, "none")
-    sf <- susieFit(
-        res,
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        method = "susie"
-    )
-    expect_false("R_reliability_flag" %in% names(sf))
-    expect_false("serFallbackUsed" %in% names(sf))
-    expect_false("multiEffectFit" %in% names(sf))
-})
-
-test_that("fineMappingPipeline(QtlSumStats): serFallback + reliable R keeps multi-effect", {
-    ss <- .fmp_makeQtlSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb"
-            )
-        )
-    )
-    sf <- susieFit(
-        res,
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        method = "susie"
-    )
-    # Multi-effect fit reported (payload keeps the multi tag, not the ser tag).
-    expect_equal(sf$payload$multiTag, "multi")
-    expect_false(sf$serFallbackUsed)
-    expect_false(sf$R_reliability_flag)
-    # keepFullFit="fallback": non-fallback region carries no retained fit.
-    expect_null(sf$multiEffectFit)
-})
-
-test_that("fineMappingPipeline(QtlSumStats): serFallback + unreliable R falls back to SER", {
-    ss <- .fmp_makeQtlSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb"
-            )
-        )
-    )
-    sf <- susieFit(
-        res,
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        method = "susie"
-    )
-    # Reported result is the single-effect ser_model.
-    expect_equal(sf$payload$serTag, "ser")
-    expect_true(sf$serFallbackUsed)
-    expect_true(sf$R_reliability_flag)
-    # Fallback region retains the pre-fallback multi-effect fit.
-    expect_false(is.null(sf$multiEffectFit))
-    expect_equal(sf$multiEffectFit$multiTag, "multi")
-})
-
-test_that("fineMappingPipeline(QtlSumStats): rFinite/rMismatch forwarded; rFinite defaults to panel N", {
-    ss <- .fmp_makeQtlSumStats()
-    cap <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb"
-            )
-        )
-    )
-    # rFinite defaulted to the LD-panel sample size (40 in .fmp_makeHandle).
-    expect_equal(cap$rFinite, 40L)
-    expect_equal(cap$rMismatch, "eb")
-
-    # Explicit rFinite is forwarded verbatim.
-    cap2 <- new.env(parent = emptyenv())
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = cap2),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rFinite = 12345,
-                rMismatch = "eb"
-            )
-        )
-    )
-    expect_equal(cap2$rFinite, 12345)
-})
-
-test_that("fineMappingPipeline(QtlSumStats): keepFullFit='all' retains fit on non-fallback region", {
-    ss <- .fmp_makeQtlSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susie",
-            initializeWithSusieInf = FALSE,
-            susieRssParam = SusieRssParam(
-                serFallback = TRUE,
-                rMismatch = "eb",
-                keepFullFit = "all"
-            )
-        )
-    )
-    sf <- susieFit(
-        res,
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        method = "susie"
-    )
-    expect_false(is.null(sf$multiEffectFit))
-    expect_equal(sf$multiEffectFit$multiTag, "multi")
-})
-
-test_that("fineMappingPipeline(GwasSumStats): un-QCd input rejected", {
-    gss <- .fmp_makeGwasSumStats(qc = FALSE)
-    expect_error(
-        fineMappingPipeline(gss, methods = "susie"),
-        "has no QC record"
-    )
-})
-
 test_that("fineMappingPipeline(GwasSumStats): non-RSS family rejected by capability check", {
-    gss <- .fmp_makeGwasSumStats()
     expect_error(
-        fineMappingPipeline(gss, methods = "fsusie"),
+        fineMappingPipeline(.fmp_gss, methods = "fsusie"),
         "not supported on GwasSumStats"
     )
 })
 
 # ---- ser (LD-free single-effect regression); sumstat-only, not GWAS-only ----
 
-test_that("fineMappingPipeline(QtlSumStats): ser dispatches via .fmFitSusieSer", {
-    ss <- .fmp_makeQtlSumStats()
+test_that("fineMappingPipeline(*SumStats): ser runs via .fmFitSusieSer", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieSer = .fmp_mockFitSer(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    res <- suppressMessages(fineMappingPipeline(ss, methods = "ser"))
-    expect_s4_class(res, "QtlFineMappingResult")
-    expect_setequal(methodNames(res), "ser")
-})
-
-test_that("fineMappingPipeline(GwasSumStats): ser dispatches via .fmFitSusieSer", {
-    gss <- .fmp_makeGwasSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieSer = .fmp_mockFitSer(),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(fineMappingPipeline(gss, methods = "ser"))
-    expect_s4_class(res, "GwasFineMappingResult")
-    expect_setequal(methodNames(res), "ser")
+    for (input in list(.fmp_qss, .fmp_gss)) {
+        kind <- class(input)[[1L]]
+        res <- suppressMessages(fineMappingPipeline(input, methods = "ser"))
+        expect_s4_class(res, .fmp_resultClass[[kind]])
+        expect_equal(methodNames(res), "ser", info = kind)
+    }
 })
 
 test_that("ser is sumstat-only: rejected on QtlDataset, allowed on all sumstat kinds", {
@@ -3143,20 +2787,12 @@ test_that("fineMappingPipeline(ANY): unsupported input class errors", {
 })
 
 # ===========================================================================
-# Cache hit short-circuits the fit
-# ===========================================================================
-
-# ===========================================================================
-# .fmFitSusieIndiv / .fmFitSusieRss — chained-init and branch coverage
-# ===========================================================================
-
-# ===========================================================================
-# QtlSumStats: empty selection, mvsusie single-context rejection, cache hits
+# QtlSumStats: mvsusie single-context rejection and auto-detection, cache hits
 # ===========================================================================
 
 .fmp_makeMultiCtxQtlSumStats <- function() {
-    # Multi-row QtlSumStats: 2 contexts x 1 trait so the test can filter to
-    # a single context and exercise both selRows filters.
+    # Multi-row QtlSumStats: 2 contexts x 1 trait, the shape a cross-context
+    # joint fit takes.
     e1 <- .fmp_makeSumstatsGr()
     e2 <- .fmp_makeSumstatsGr()
     QtlSumStats(
@@ -3166,22 +2802,11 @@ test_that("fineMappingPipeline(ANY): unsupported input class errors", {
         entry = list(e1, e2),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = list(step1 = "ok")
+        qcOptions = list(step1 = "ok")
     )
 }
 
-test_that("fineMappingPipeline(QtlSumStats): traitId filter that selects no rows errors", {
-    ss <- .fmp_makeMultiCtxQtlSumStats()
-    expect_error(
-        fineMappingPipeline(ss, methods = "susie", traitId = "ghost"),
-        "no entries matched"
-    )
-})
-
-test_that("fineMappingPipeline(
-    QtlSumStats): mvsusie rejected when every (study,
-    trait
-) has only one context", {
+test_that("fineMappingPipeline(QtlSumStats): mvsusie needs two contexts", {
     # Build a single-context-per-(study, trait) collection. Mvsusie requires
     # at least two contexts per (study, trait) group.
     ss <- QtlSumStats(
@@ -3191,7 +2816,7 @@ test_that("fineMappingPipeline(
         entry = list(.fmp_makeSumstatsGr(), .fmp_makeSumstatsGr()),
         genome = "hg19",
         ldReference = .fmp_makeHandle(),
-        qcInfo = list(step1 = "ok")
+        qcOptions = list(step1 = "ok")
     )
     expect_error(
         fineMappingPipeline(ss, methods = "mvsusie"),
@@ -3199,10 +2824,7 @@ test_that("fineMappingPipeline(
     )
 })
 
-test_that("fineMappingPipeline(
-    QtlSumStats): mvsusie auto-detection fits cross-context per (study,
-    trait
-)", {
+test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-joins contexts", {
     # Multi-context (c1, c2) single-trait collection: mvsusie without an explicit
     # jointSpecification routes through the joint engine -> per-context rows that
     # share the cross-context RSS fit, each tagged with the co-fit membership.
@@ -3228,8 +2850,8 @@ test_that("fineMappingPipeline(
 })
 
 test_that("fineMappingPipeline(QtlSumStats): cache hit short-circuits the RSS fitter", {
-    ss <- .fmp_makeQtlSumStats()
-    cachedEntry <- fineMappingRow(
+    ss <- .fmp_qss
+    cachedEntry <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
         susieFit = list(token = "susie_cached"),
         topLoci = data.frame(
@@ -3273,8 +2895,8 @@ test_that("fineMappingPipeline(QtlSumStats): cache hit short-circuits the RSS fi
 # ===========================================================================
 
 test_that("fineMappingPipeline(GwasSumStats): cache hit short-circuits the RSS fitter", {
-    gss <- .fmp_makeGwasSumStats()
-    cachedEntry <- fineMappingRow(
+    gss <- .fmp_gss
+    cachedEntry <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
         susieFit = list(token = "susie_cached"),
         topLoci = data.frame(
@@ -3320,8 +2942,8 @@ test_that("fineMappingPipeline(GwasSumStats): wrong-shape cache (QtlFineMappingR
     # When `fineMappingResult` is a QtlFineMappingResult the GwasSumStats
     # method's cache-lookup branch should treat it as a cache miss and
     # still invoke the RSS fitter.
-    gss <- .fmp_makeGwasSumStats()
-    cachedEntry <- fineMappingRow(
+    gss <- .fmp_gss
+    cachedEntry <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
         susieFit = list(token = "susie_cached"),
         topLoci = data.frame(
@@ -3360,9 +2982,9 @@ test_that("fineMappingPipeline(GwasSumStats): wrong-shape cache (QtlFineMappingR
 })
 
 test_that("fineMappingPipeline(QtlDataset): cache hit avoids the fitter", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     # Build a cache that already has the (study1, brain, ENSG_A, susie) row.
-    cachedEntry <- fineMappingRow(
+    cachedEntry <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
         susieFit = list(token = "susie_cached"),
         topLoci = data.frame(
@@ -3401,87 +3023,11 @@ test_that("fineMappingPipeline(QtlDataset): cache hit avoids the fitter", {
     expect_equal(nrow(res), 1L)
 })
 
-
-context("univariate_pipeline")
-
-# ===========================================================================
-# Post-S4-refactor cleanup
-# ---------------------------------------------------------------------------
-# The S4 refactor removed `univariateAnalysisPipeline()`,
-# `rssAnalysisPipeline()`, `loadStudyLd()`, `loadRssData()`, and
-# `rssBasicQc()` as functional pipelines. They are now `.Deprecated()`
-# no-ops that return `NULL` invisibly. The `QcResult` /
-# `FineMappingResult` classes and `regionDataToSusieRssInput()` helper
-# were also removed. Their replacements live behind a different S4 API
-# (`fineMappingPipeline()` dispatched on `GwasSumStats` / `QtlSumStats` /
-# `QtlDataset`, `summaryStatsQc()`, `fineMappingRow()`) with different
-# signatures and contracts, so the legacy mocked pipeline tests cannot
-# be ported in a meaningful way and have been removed.
-#
-# What survives in this file:
-#   * Deprecation no-op checks for the removed public wrappers.
-#   * Tests for `resolveLdInput()`, which is still a live internal helper
-#     in `dentistQc.R` with an unchanged signature.
-# ===========================================================================
-
-# ===========================================================================
-# resolveLdInput (still-live internal helper in dentistQc.R)
-# ===========================================================================
-
-test_that("resolveLdInput errors when both R and X are NULL", {
-    expect_error(
-        pecotmr:::resolveLdInput(R = NULL, X = NULL),
-        "Either R .* or X .* must be provided"
-    )
-})
-
-test_that("resolveLdInput errors when both R and X are provided", {
-    R <- diag(5)
-    X <- matrix(rnorm(50), 10, 5)
-    expect_error(
-        pecotmr:::resolveLdInput(R = R, X = X),
-        "Provide either R or X, not both"
-    )
-})
-
-test_that("resolveLdInput with R returns R unchanged", {
-    R <- diag(5)
-    result <- pecotmr:::resolveLdInput(R = R, nSample = 100)
-    expect_equal(result$R, R)
-    expect_equal(result$nSample, 100)
-})
-
-test_that("resolveLdInput with X computes LD and infers nSample", {
-    set.seed(42)
-    X <- matrix(rbinom(200, 2, 0.3), 20, 10)
-    result <- pecotmr:::resolveLdInput(X = X)
-    expect_equal(nrow(result$R), 10)
-    expect_equal(ncol(result$R), 10)
-    expect_equal(result$nSample, 20)
-})
-
-test_that("resolveLdInput errors when nSample required but missing", {
-    R <- diag(5)
-    expect_error(
-        pecotmr:::resolveLdInput(R = R, needNSample = TRUE),
-        "nSample is required"
-    )
-})
-
-test_that("resolveLdInput does not error when nSample not needed", {
-    R <- diag(5)
-    result <- pecotmr:::resolveLdInput(R = R, needNSample = FALSE)
-    expect_equal(result$R, R)
-    expect_null(result$nSample)
-})
 # ===========================================================================
 # Residualization settings propagation
 # ===========================================================================
-# These used to be four loose flags scraped off the call stack by
-# .resPickFlags() (sys.frames() + get(envir = )), then four translated
-# argument names via .resArgsFor(). The accessors now take the bundle
-# itself, so there is no translation left to test -- only that the bundle
-# travels intact.
+# The accessors take the ResidualizationParam bundle itself, so there is no
+# translation to test -- only that the bundle travels intact.
 
 test_that(".fmResidGeno / .fmResidPheno forward the bundle to the accessors", {
     capturedGeno <- NULL
@@ -3492,11 +3038,11 @@ test_that(".fmResidGeno / .fmResidPheno forward the bundle to the accessors", {
     }
     fakePheno <- function(x, ...) {
         capturedPheno <<- list(...)
-        matrix(0, 0, 0)
+        list(c1 = matrix(0, 0, 0))
     }
     local_mocked_bindings(
-        residualizedGenotypes = fakeGeno,
-        residualizedPhenotypes = fakePheno,
+        .qtlResidualizedGenotypes = fakeGeno,
+        .qtlResidualizedPhenotypes = fakePheno,
         .package = "pecotmr"
     )
     res <- ResidualizationParam(
@@ -3506,7 +3052,12 @@ test_that(".fmResidGeno / .fmResidPheno forward the bundle to the accessors", {
     )
     # Passed, not scraped: the settings reach the accessors because the
     # caller hands them over, with no enclosing frame involved.
-    pecotmr:::.fmResidGeno(NULL, contexts = "c1", residualizationParam = res)
+    pecotmr:::.fmResidGeno(
+        NULL,
+        contexts = "c1",
+        residualizationParam = res,
+        genotypeFilter = pecotmr:::.qtlResolveFilter()
+    )
     pecotmr:::.fmResidPheno(NULL, contexts = "c1", residualizationParam = res)
     for (captured in list(capturedGeno, capturedPheno)) {
         got <- captured$residualizationParam
@@ -3520,9 +3071,9 @@ test_that(".fmResidGeno / .fmResidPheno forward the bundle to the accessors", {
 test_that("an absent bundle becomes the constructor's own defaults", {
     captured <- NULL
     local_mocked_bindings(
-        residualizedPhenotypes = function(x, ...) {
+        .qtlResidualizedPhenotypes = function(x, ...) {
             captured <<- list(...)
-            matrix(0, 0, 0)
+            list(c1 = matrix(0, 0, 0))
         },
         .package = "pecotmr"
     )
@@ -3531,49 +3082,6 @@ test_that("an absent bundle becomes the constructor's own defaults", {
     # Nothing pinned: every flag is unset, which the accessors read as "on".
     expect_length(captured$residualizationParam, 0L)
 })
-
-# ===========================================================================
-# Removed during the post-S4-refactor cleanup (for traceability)
-# ---------------------------------------------------------------------------
-# univariateAnalysisPipeline input-validation tests (12):
-#   * X non-matrix / non-numeric / Y non-numeric / multi-column Y /
-#     single-column Y / X-Y row mismatch / maf length mismatch /
-#     maf out of bounds / invalid xScalar / wrong-length xScalar /
-#     non-numeric yScalar / non-positive L / non-positive lGreedy.
-# univariateAnalysisPipeline functional tests (4):
-#   * minimal valid input; twasWeights = TRUE; respects xScalar;
-#     cvFolds = 0.
-# univariateAnalysisPipeline mocked-pipeline tests (16):
-#   * pip_cutoff_to_skip branch (3); LD reference filtering (2);
-#     filter_X branch (2); main susie + post-processing (4);
-#     TWAS weights (4); coverage forwarding (2); combined LD +
-#     filter_X (1); null imiss/maf cutoffs (1).
-# univariateAnalysisPipeline af/maf single-source tests (6):
-#   * af supplied (no maf); maf supplied (no af); both disagreeing;
-#     neither with mafCutoff errors; neither without mafCutoff runs;
-#     af-derived MAF parity with explicit maf.
-# rssAnalysisPipeline tests (~21):
-#   * input-file validation; empty sumstats branches; pip_cutoff_to_skip
-#     branches; full QC + imputation + fine-mapping; method-name
-#     conventions (NO_QC / SLALOM / DENTIST / RAISS); outlierNumber
-#     plumbing; finemappingMethod = NULL skip; ldMismatchQcMethod = NULL;
-#     impute = FALSE; diagnostics branches (BCR + SER re-analysis);
-#     finemappingOpts passthrough; mafCutoff (af single source);
-#     finemapping-defaults passthrough; X-as-LD genotype path;
-#     mixture-LD passthrough.
-# regionDataToSusieRssInput tests (3):
-#   * correlation-backed input; genotype-backed input; rejects
-#     default rownames as variant IDs.
-# loadStudyLd tests (2):
-#   * single path returns loadLdMatrix output unchanged; comma-separated
-#     paths build a mixture LdData with a list of genotype handles.
-#
-# Replacement APIs (do NOT speculatively port — that is out of scope for
-# this cleanup): `fineMappingPipeline()` dispatched on `GwasSumStats` /
-# `QtlSumStats` / `QtlDataset`; `summaryStatsQc()` (returns a SumStats
-# with `qcInfo()` populated); `fineMappingRow(variantIds, ...)`;
-# `result$finemappingEntry` (was `result$finemappingResult`).
-# ===========================================================================
 
 # ===========================================================================
 # Multi-region / jointRegions (P3)
@@ -3599,7 +3107,7 @@ test_that(".fmMergeEntries concatenates variants, renumbers CS, lists susieFit",
     # Ids must encode coordinates: the merge now emits a row payload, whose
     # element is built from the range and alleles the id renders.
     mk <- function(vids, cs95, fit) {
-        fineMappingRow(
+        FineMappingRow(
             variantIds = vids,
             susieFit = fit,
             topLoci = data.frame(
@@ -3625,10 +3133,11 @@ test_that(".fmMergeEntries concatenates variants, renumbers CS, lists susieFit",
     expect_equal(names(fit), c("region1", "region2"))
 })
 
-test_that(".fmMergeEntries returns a single entry unchanged", {
+test_that(".fmMergeEntries: no entries -> NULL; one comes back unchanged", {
+    expect_null(pecotmr:::.fmMergeEntries(list(NULL, NULL)))
     # Ids must encode coordinates now: the payload builds its element from the
     # range and alleles the id renders.
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(variant_id = "chr1:100:A:G", pip = 0.5)
@@ -3644,7 +3153,7 @@ test_that(".fmMergeEntries renumbers past a region with no cs column", {
         if (!is.null(cs95)) {
             tl$cs_95 <- cs95
         }
-        fineMappingRow(variantIds = vids, susieFit = NULL, topLoci = tl)
+        FineMappingRow(variantIds = vids, susieFit = NULL, topLoci = tl)
     }
     m <- pecotmr:::.fmMergeEntries(list(
         mk("chr1:100:A:G", "susie_1"),
@@ -3655,8 +3164,22 @@ test_that(".fmMergeEntries renumbers past a region with no cs column", {
     expect_equal(tl$cs_95, c("susie_1", NA, "susie_2"))
 })
 
+test_that("fineMappingPipeline(QtlDataset): region is a GRanges", {
+    # Given in R, a window is a GRanges; a string or a table is refused rather
+    # than read, so its base is never in doubt.
+    expect_error(
+        fineMappingPipeline(
+            .fmp_qdAB,
+            methods = "susie",
+            region = "chr1:1-600"
+        ),
+        "`region` must be a GRanges (got character)",
+        fixed = TRUE
+    )
+})
+
 test_that("fineMappingPipeline(QtlDataset): region + cisWindow is rejected", {
-    qd <- .fmp_makeQtlDataset()
+    qd <- .fmp_qdAB
     expect_error(
         fineMappingPipeline(
             qd,
@@ -3669,10 +3192,7 @@ test_that("fineMappingPipeline(QtlDataset): region + cisWindow is rejected", {
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointRegions=FALSE merges per-region fits", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -3705,7 +3225,7 @@ test_that("fineMappingPipeline(QtlDataset): jointRegions=FALSE merges per-region
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointRegions=TRUE fits one concatenated block", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -3737,10 +3257,7 @@ test_that("fineMappingPipeline(QtlDataset): jointRegions=TRUE fits one concatena
 })
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie jointRegions=FALSE merges per-region fits", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3774,10 +3291,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie jointRegions=FALSE merges pe
 })
 
 test_that("fineMappingPipeline(QtlDataset): fsusie jointRegions=FALSE merges per-region fits", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3809,10 +3323,9 @@ test_that("fineMappingPipeline(QtlDataset): fsusie jointRegions=FALSE merges per
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec + jointRegions=FALSE merges per region", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = c("brain", "liver"),
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    # One trait: the cross-context joint and the per-region merge are what is
+    # tested, and each further trait only repeats them.
+    qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3830,15 +3343,15 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec + jointRegions=FALSE merge
     res <- suppressMessages(fineMappingPipeline(
         qd,
         methods = "mvsusie",
-        traitId = c("ENSG_A", "ENSG_B"),
+        traitId = "ENSG_A",
         region = regions,
         jointRegions = FALSE,
         jointSpecification = "context"
     ))
     expect_s4_class(res, "QtlFineMappingResult")
-    # cross-context joint -> per-context rows (2 contexts x 2 traits = 4), each
-    # merged across the 2 regions.
-    expect_equal(nrow(res), 4L)
+    # cross-context joint -> one row per context, each merged across the 2
+    # regions.
+    expect_equal(nrow(res), 2L)
     expect_setequal(as.character(res$context), c("brain", "liver"))
     fit <- susieFit(
         res,
@@ -3871,7 +3384,7 @@ test_that(".fmCacheLookupGwas: NULL / non-GwasFineMappingResult -> NULL", {
         context = "c1",
         trait = "t1",
         method = "susie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -3899,7 +3412,7 @@ test_that(".fmBuildMvsusiePriorCv: NULL CV -> NULL; NULL fold fits are skipped",
         c("c1", "c2")
     )
     expect_equal(out[["1"]], "PRIOR")
-    expect_null(out[["2"]]) # NULL fold -> next (831)
+    expect_null(out[["2"]]) # a NULL fold fit is skipped
 })
 
 test_that(".fmFoldFitAt finds a fold's fit by name, else by position", {
@@ -3913,84 +3426,31 @@ test_that(".fmFoldFitAt finds a fold's fit by name, else by position", {
     expect_null(fn(3L, c(1, 2, 3), unnamed))
 })
 
-test_that(".fmTopPcScores: PCA scores for multi-trait Y; degenerate inputs -> NULL", {
-    expect_null(pecotmr:::.fmTopPcScores(matrix(1, 5, 1), 2L)) # < 2 traits
-    expect_null(pecotmr:::.fmTopPcScores(matrix(c(1, NA), 2, 2), 2L)) # < 2 complete
-    expect_null(pecotmr:::.fmTopPcScores(
-        cbind(a = rep(1, 4), b = rnorm(4)),
-        2L
-    )) # < 2 nonzero-var
-    set.seed(1)
-    Y <- matrix(
-        rnorm(20),
-        10,
-        2,
-        dimnames = list(paste0("s", 1:10), c("t1", "t2"))
-    )
-    sc <- pecotmr:::.fmTopPcScores(Y, 2L)
-    expect_equal(dim(sc), c(10L, 2L))
-    expect_equal(colnames(sc), c("topPC1", "topPC2"))
-})
-
-test_that(".fmMergeEntries: empty -> NULL; merges per-region entries + relabels CS", {
-    expect_null(pecotmr:::.fmMergeEntries(list(NULL, NULL)))
-    e1 <- fineMappingRow(
-        "chr1:100:A:G",
-        list(a = 1),
-        data.frame(variant_id = "chr1:100:A:G", pip = 0.9, cs_95 = "susie_1")
-    )
-    e2 <- fineMappingRow(
-        "chr1:200:A:G",
-        list(b = 2),
-        data.frame(variant_id = "chr1:200:A:G", pip = 0.8, cs_95 = "susie_1")
-    )
-    m <- pecotmr:::.fmMergeEntries(list(e1, e2))
-    expect_equal(
-        pecotmr:::.fmrPartsVariantIds(m),
-        c("chr1:100:A:G", "chr1:200:A:G")
-    )
-    # region2's CS is relabelled
-    expect_equal(
-        pecotmr:::.fmrPartsTopLoci(m)$cs_95,
-        c("susie_1", "susie_2")
-    )
-    expect_equal(
-        names(pecotmr:::.fmrPartsSusieFit(m)),
-        c("region1", "region2")
-    )
-})
-
 test_that(".fmTwasMethodKey: bare token without adapter returned unchanged", {
-    expect_equal(pecotmr:::.fmTwasMethodKey("lasso"), "lasso") # no adapter (1170)
+    expect_equal(pecotmr:::.fmTwasMethodKey("lasso"), "lasso") # no adapter
     expect_equal(pecotmr:::.fmTwasMethodKey("susie"), "susie") # adapter -> stripped
 })
 
-test_that(".cvMetricRow: < 3 usable predictions -> all-NA row", {
-    expect_true(all(is.na(pecotmr:::.cvMetricRow(c(1, 2), c(1, 2))))) # < 3 (1182)
-    ok <- pecotmr:::.cvMetricRow(c(1, 2, 3, 4, 5), c(1.1, 2, 2.9, 4, 5))
-    expect_false(is.na(ok[["rsq"]]))
-})
-
 test_that(".fmSliceCv: NULL cv or missing predicted key -> NULL", {
-    expect_null(pecotmr:::.fmSliceCv(NULL, "susie")) # 1323
+    expect_null(pecotmr:::.fmSliceCv(NULL, "susie"))
     cv <- list(
         samplePartition = NULL,
         prediction = list(enet_predicted = matrix(0, 1, 1)),
         performance = list(enet_performance = matrix(0, 1, 6))
     )
-    expect_null(pecotmr:::.fmSliceCv(cv, "susie")) # pk absent (1327)
+    expect_null(pecotmr:::.fmSliceCv(cv, "susie")) # no susie_predicted key
     expect_true(
         "enet_predicted" %in% names(pecotmr:::.fmSliceCv(cv, "enet")$prediction)
     )
 })
 
 test_that(".fmAttachCv: NULL entry or NULL cvResult returns the entry unchanged", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         "chr1:100:A:G",
         list(),
         data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
     )
-    expect_identical(pecotmr:::.fmAttachCv(e, NULL), e) # 1336
+    expect_identical(pecotmr:::.fmAttachCv(e, NULL), e)
     expect_null(pecotmr:::.fmAttachCv(NULL, list(x = 1)))
     expect_equal(
         pecotmr:::.fmrPartsCvResult(
@@ -4001,27 +3461,17 @@ test_that(".fmAttachCv: NULL entry or NULL cvResult returns the entry unchanged"
 })
 
 # ---- jointSpec dispatch branches in the QtlSumStats / MultiStudy methods -----
-# (dispatchers mocked; the real joint fitting is covered in test_jointSpecification.R)
-
-test_that(".fmTopPcScores: nPCs = 0 -> k < 1 -> NULL", {
-    set.seed(3)
-    Y <- matrix(
-        rnorm(20),
-        10,
-        2,
-        dimnames = list(paste0("s", 1:10), c("t1", "t2"))
-    )
-    expect_null(pecotmr:::.fmTopPcScores(Y, 0L)) # k < 1 (858)
-})
+# (dispatchers mocked; the real joint fitting is covered in
+# test_jointSpecification.R)
 
 test_that("fineMappingPipeline(QtlSumStats): mvsusie-only jointSpec returns the joint result", {
-    ss <- .fmp_makeQtlSumStats()
+    ss <- .fmp_qss
     jr <- QtlFineMappingResult(
         studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4039,19 +3489,19 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie-only jointSpec returns the 
         )
     )
     expect_s4_class(res, "QtlFineMappingResult")
-    expect_setequal(as.character(res$method), "mvsusie") # 1843-1857
+    expect_setequal(as.character(res$method), "mvsusie")
 })
 
 test_that("fineMappingPipeline(QtlSumStats): joint spec plus per-entry susie", {
     # The joint spec consumes mvsusie; susie, asked for alongside it, still
     # runs per entry, and the two results are combined.
-    ss <- .fmp_makeQtlSumStats()
+    ss <- .fmp_qss
     jr <- QtlFineMappingResult(
         studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4090,14 +3540,13 @@ test_that("fineMappingPipeline(QtlSumStats): no auto-joint fit is an error", {
 })
 
 test_that("fineMappingPipeline(QtlSumStats): mvsusie-only jointSpec with no fits -> error", {
-    ss <- .fmp_makeQtlSumStats()
     local_mocked_bindings(
         .fmDispatchJointSpecsQtlSumStats = function(...) NULL,
         .package = "pecotmr"
     )
     expect_error(
         suppressMessages(fineMappingPipeline(
-            ss,
+            .fmp_qss,
             methods = "mvsusie",
             jointSpecification = "context"
         )),
@@ -4105,21 +3554,12 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie-only jointSpec with no fits
     )
 })
 
-.fmp_makeMultiStudy <- function() {
-    MultiStudyQtlDataset(
-        qtlDatasets = list(
-            study1 = .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-        ),
-        sumStats = .fmp_makeQtlSumStats()
-    )
-}
-
 test_that("MultiStudyQtlDataset forwards the mvsusie prior settings", {
     # `mrmashPrior` and `dataDrivenPriorWeightsCutoff` configure the mvsusie
     # data-driven reweighted prior. They used to reach ONLY jointCfg (the
     # cross-study joint phase); the per-study config omitted them, so every
     # per-study recursion silently refit mr.mash and used the 1e-10 cutoff.
-    mt <- .fmp_makeMultiStudy()
+    mt <- .fmp_msqd
     seen <- new.env(parent = emptyenv())
     seen$perStudy <- NULL
     seen$sumStats <- NULL
@@ -4152,26 +3592,58 @@ test_that("MultiStudyQtlDataset forwards the mvsusie prior settings", {
     }
 })
 
+test_that("fineMappingPipeline(MSQD) lays cisWindow on its sumstats", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieIndiv = .fmp_mockFitIndiv(),
+        .fmFitSusieRss = .fmp_mockFitRss(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    res <- suppressMessages(fineMappingPipeline(
+        .fmp_msqd,
+        methods = "susie",
+        cisWindow = 100L,
+        initializeWithSusieInf = FALSE
+    ))
+    fromSumStats <- which(res$study == "Q1")
+    expect_identical(
+        as.character(genomicRegion(res)[fromSumStats]),
+        "chr1:200-400"
+    )
+    # A summary-statistics study without a trait position is an error, as it
+    # is on its own.
+    bare <- MultiStudyQtlDataset(
+        qtlDatasets = list(study1 = .fmp_qdA),
+        sumStats = .fmp_qss
+    )
+    expect_error(
+        fineMappingPipeline(bare, methods = "susie", cisWindow = 100L),
+        "fineMappingPipeline: `cisWindow` is laid around each tuple's trait",
+        fixed = TRUE
+    )
+})
+
 test_that("fineMappingPipeline(MultiStudyQtlDataset): region + cisWindow is rejected", {
     expect_error(
         fineMappingPipeline(
-            .fmp_makeMultiStudy(),
+            .fmp_msqd,
             methods = "mvsusie",
             region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 100)),
             cisWindow = 1000L
         ),
         "specify either"
-    ) # 1694
+    )
 })
 
 test_that("fineMappingPipeline(MultiStudyQtlDataset): mvsusie-only jointSpec returns the joint result", {
-    mt <- .fmp_makeMultiStudy()
+    mt <- .fmp_msqd
     jr <- QtlFineMappingResult(
         studyName = "study1",
         context = "brain",
         trait = "ENSG_A",
         method = "mvsusie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4189,19 +3661,19 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): mvsusie-only jointSpec ret
         )
     )
     expect_s4_class(res, "QtlFineMappingResult")
-    expect_setequal(as.character(res$method), "mvsusie") # 1709-1726
+    expect_setequal(as.character(res$method), "mvsusie")
 })
 
 test_that("fineMappingPipeline(MultiStudy): joint spec, rest per component", {
     # The joint spec consumes mvsusie; susie, asked for alongside it, still
     # runs on every component -- the study and the embedded sumstats.
-    mt <- .fmp_makeMultiStudy()
+    mt <- .fmp_msqd
     jr <- QtlFineMappingResult(
         studyName = "study1",
         context = "brain",
         trait = "ENSG_A",
         method = "mvsusie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4230,7 +3702,7 @@ test_that("fineMappingPipeline(MultiStudy): joint spec, rest per component", {
 test_that("fineMappingPipeline(MultiStudy): an unselected component sits out", {
     # One context vector applies to every component; one lacking it keeps
     # none of its tuples and contributes no rows.
-    mt <- .fmp_makeMultiStudy()
+    mt <- .fmp_msqd
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -4259,16 +3731,45 @@ test_that("fineMappingPipeline(MultiStudy): an unselected component sits out", {
     expect_setequal(as.character(studyOnly$study), "study1")
 })
 
+test_that("fineMappingPipeline(MultiStudy): trait selection skips a study", {
+    # A trait vector applies to every component too: one carrying none of
+    # the traits sits out, and the run is refused only when none carries any.
+    mt <- .fmp_msqd
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieIndiv = .fmp_mockFitIndiv(),
+        .fmFitSusieRss = .fmp_mockFitRss(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    fit <- function(traitId) {
+        suppressMessages(fineMappingPipeline(
+            mt,
+            methods = "susie",
+            traitId = traitId,
+            cisWindow = 1000L,
+            initializeWithSusieInf = FALSE
+        ))
+    }
+    expect_setequal(as.character(fit("t1")$study), "Q1")
+    expect_setequal(as.character(fit("ENSG_A")$study), "study1")
+    expect_error(
+        fit("absent"),
+        "fineMappingPipeline(MultiStudyQtlDataset): no traits selected.",
+        fixed = TRUE
+    )
+})
+
 test_that("fineMappingPipeline(MultiStudy): joint rows record scale override", {
     # The study's own slot scales its residuals; the per-call override says
     # otherwise and wins, and the joint rows record what was used.
-    mt <- .fmp_makeMultiStudy()
+    mt <- .fmp_msqd
     jr <- QtlFineMappingResult(
         studyName = "study1",
         context = "brain",
         trait = "ENSG_A",
         method = "mvsusie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4396,7 +3897,7 @@ test_that(".fmPostprocessOne wraps a fit into a FineMappingRow", {
         postprocessFinemappingFits = function(...) list(x = 1),
         formatFinemappingOutput = function(post, primaryMethod, ...) {
             list(
-                finemappingEntry = fineMappingRow(
+                finemappingEntry = FineMappingRow(
                     "chr1:100:A:G",
                     list(),
                     data.frame(variant_id = "chr1:100:A:G", pip = 0.5)
@@ -4441,11 +3942,26 @@ test_that(".fmPostprocessOne errors when output carries no FineMappingRow", {
     )
 })
 
-test_that(".fmWeightsCv covers per-fold prior, NULL-weights, and no-overlap branches", {
-    # mvPriorCv supplies a prior for fold "1" only: fold 1 takes the per-fold
-    # prior (else-branch) and returns weights whose rownames don't overlap the
-    # test columns (no-common `next`); fold 2 has no prior, so .fmFoldWeights
-    # returns NULL (NULL-weights `next`).
+test_that(".fmWeightsCv: fold prior else mvPrior; weightless folds give NA", {
+    # Three folds of ten. Fold 1 has its own prior in mvPriorCv and weights
+    # (all 1) on the test variants; fold 2 has its own prior but its fit
+    # returns no weights; fold 3 has no prior of its own, so it takes the
+    # full-data mvPrior, and its weights share no variant with the test
+    # genotypes. Each fold fit records the prior it was handed.
+    set.seed(3)
+    X <- matrix(
+        rbinom(60, 2, 0.4),
+        30,
+        2,
+        dimnames = list(str_c("s", 1:30), c("chr1:100:A:G", "chr1:200:A:G"))
+    )
+    Y <- matrix(rnorm(60), 30, 2, dimnames = list(rownames(X), c("c1", "c2")))
+    sp <- data.frame(Sample = rownames(X), Fold = rep(1:3, each = 10))
+    fullPrior <- list(priorVariance = diag(2) * 3)
+    foldPriors <- list(
+        "1" = list(priorVariance = diag(2)),
+        "2" = list(priorVariance = diag(2) * 2)
+    )
     local_mocked_bindings(
         .fmFoldWeights = function(
             token,
@@ -4456,75 +3972,69 @@ test_that(".fmWeightsCv covers per-fold prior, NULL-weights, and no-overlap bran
             pos,
             mvPrior
         ) {
-            if (is.null(mvPrior)) {
+            trained <- sp$Fold[is_in(sp$Sample, rownames(Xtr))]
+            heldOut <- setdiff(sp$Fold, trained)
+            if (heldOut == 2L) {
                 return(NULL)
             }
-            matrix(0.5, 1L, 1L, dimnames = list("not_a_variant", NULL))
+            vars <- if (heldOut == 1L) colnames(Xtr) else "not_a_variant"
+            W <- matrix(1, length(vars), ncol(Ytr), dimnames = list(vars, NULL))
+            `attr<-`(W, "fit", list(prior = mvPrior))
         },
         .package = "pecotmr"
     )
-    set.seed(3)
-    X <- matrix(
-        rbinom(40, 2, 0.4),
-        20,
-        2,
-        dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
-    )
-    Y <- matrix(rnorm(40), 20, 2, dimnames = list(rownames(X), c("c1", "c2")))
     cv <- pecotmr:::.fmWeightsCv(
         X,
         Y,
         tokens = "mvsusie",
         methodArgs = list(mvsusie = list()),
-        fold = 2L,
-        coverage = 0.95,
+        fold = 3L,
+        samplePartition = sp,
         verbose = 0,
-        mvPriorCv = list("1" = list(priorVariance = diag(2)))
+        mvPrior = fullPrior,
+        mvPriorCv = foldPriors
     )
-    expect_named(
-        cv,
-        c("samplePartition", "prediction", "performance", "foldFits")
+    # A fold takes its own prior when mvPriorCv has one, else mvPrior.
+    expect_identical(cv$foldFits$fold_1$mvsusie$prior, foldPriors[["1"]])
+    expect_identical(cv$foldFits$fold_3$mvsusie$prior, fullPrior)
+    # A fold whose fit returns no weights keeps no fit either.
+    expect_length(cv$foldFits$fold_2, 0L)
+    # Only fold 1 predicts: X %*% W, the dosage row sums. NULL weights (fold
+    # 2) and weights on no test variant (fold 3) leave their samples NA ...
+    pred <- cv$prediction[["mvsusie_predicted"]]
+    f1 <- sp$Sample[sp$Fold == 1L]
+    expect_equal(
+        pred[f1, ],
+        cbind(c1 = rowSums(X[f1, ]), c2 = rowSums(X[f1, ]))
+    )
+    expect_true(all(is.na(pred[!is_in(rownames(pred), f1), ])))
+    # ... and those samples are left out of the score, not counted.
+    expect_equal(
+        cv$performance[["mvsusie_performance"]][, "corr"],
+        drop(cor(Y[f1, ], rowSums(X[f1, ])))
     )
 })
 
-test_that("fineMappingPipeline(QtlSumStats): susieInf RSS chain (mocked)", {
-    ss <- .fmp_makeQtlSumStats()
+test_that("fineMappingPipeline(*SumStats): susieInf RSS chain (mocked)", {
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            ss,
-            methods = "susieInf",
-            initializeWithSusieInf = FALSE,
-            verbose = 1
+    for (input in list(.fmp_qss, .fmp_gss)) {
+        kind <- class(input)[[1L]]
+        res <- suppressMessages(
+            fineMappingPipeline(
+                input,
+                methods = "susieInf",
+                initializeWithSusieInf = FALSE,
+                verbose = 1
+            )
         )
-    )
-    expect_s4_class(res, "QtlFineMappingResult")
-    expect_setequal(as.character(res$method), "susieInf")
-})
-
-test_that("fineMappingPipeline(GwasSumStats): susieInf RSS chain (mocked)", {
-    gss <- .fmp_makeGwasSumStats()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieRss = .fmp_mockFitRss(),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            gss,
-            methods = "susieInf",
-            initializeWithSusieInf = FALSE,
-            verbose = 1
-        )
-    )
-    expect_s4_class(res, "GwasFineMappingResult")
-    expect_setequal(methodNames(res), "susieInf")
+        expect_s4_class(res, .fmp_resultClass[[kind]])
+        expect_equal(methodNames(res), "susieInf", info = kind)
+    }
 })
 
 test_that(".fmFoldWeights covers mvPrior residual var, missing rownames, unknown token", {
@@ -4532,7 +4042,7 @@ test_that(".fmFoldWeights covers mvPrior residual var, missing rownames, unknown
         fitMvsusie = function(X, Y, ...) {
             list(vn = colnames(X), R = ncol(as.matrix(Y)))
         },
-        # weights WITHOUT rownames -> .fmFoldWeights sets them from Xtr (1231)
+        # weights WITHOUT rownames -> .fmFoldWeights sets them from Xtr
         mvsusieWeights = function(mvsusieFit = NULL, ...) {
             matrix(0.01, length(mvsusieFit$vn), mvsusieFit$R)
         },
@@ -4545,7 +4055,7 @@ test_that(".fmFoldWeights covers mvPrior residual var, missing rownames, unknown
         dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
     )
     Y <- matrix(rnorm(40), 20, 2)
-    # mvPrior carrying a residualVariance exercises line 1227
+    # an mvPrior carrying a residualVariance hands it to the fit
     W <- pecotmr:::.fmFoldWeights(
         "mvsusie",
         X,
@@ -4556,7 +4066,7 @@ test_that(".fmFoldWeights covers mvPrior residual var, missing rownames, unknown
         mvPrior = list(priorVariance = diag(2), residualVariance = diag(2))
     )
     expect_equal(rownames(W), colnames(X))
-    # an unknown token falls through to NULL (1241)
+    # an unknown token falls through to NULL
     expect_null(pecotmr:::.fmFoldWeights("bogus", X, Y, 0.95, list(), NULL))
 })
 
@@ -4587,7 +4097,7 @@ test_that(".fmWeightsCv fills Y rownames and reports per-fold fit failures", {
         2,
         dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
     )
-    Y <- matrix(rnorm(20), 20, 1) # no rownames -> filled from X (1258)
+    Y <- matrix(rnorm(20), 20, 1) # no rownames -> filled from X
     expect_message(
         cv <- suppressWarnings(pecotmr:::.fmWeightsCv(
             X,
@@ -4598,46 +4108,47 @@ test_that(".fmWeightsCv fills Y rownames and reports per-fold fit failures", {
             verbose = 1
         )),
         "CV fold .* failed"
-    ) # 1291-1294
+    )
 })
 
-test_that(".fmWeightsCv skips a fold that holds out every sample", {
-    X <- matrix(
-        rbinom(40, 2, 0.4),
-        20,
-        2,
-        dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
-    )
-    Y <- matrix(rnorm(20), 20, 1, dimnames = list(rownames(X), NULL))
-    sp <- data.frame(Sample = rownames(X), Fold = 1L) # single fold = all test -> 1273
-    cv <- pecotmr:::.fmWeightsCv(
-        X,
-        Y,
-        tokens = "susie",
-        methodArgs = list(susie = list()),
-        fold = 1L,
-        samplePartition = sp,
-        verbose = 0
-    )
-    expect_true(all(is.na(cv$prediction[["susie_predicted"]])))
+test_that("fineMappingPipeline CV retains a lean per-fold fit", {
+    f <- .twcvFixture
+    expect_false(is.null(f$cv$foldFits))
+    expect_equal(names(f$cv$foldFits), c("fold_1", "fold_2", "fold_3"))
+    # lean: only the fields the weight extractors read
+    fit1 <- f$cv$foldFits[["fold_1"]][["susie"]]
+    expect_true(all(c("pip", "alpha", "mu") %in% names(fit1)))
+    expect_false("lbf_variable" %in% names(fit1))
+    # and it slices per method onto the row payload
+    expect_equal(names(f$slice$foldFits), c("fold_1", "fold_2", "fold_3"))
 })
 
 # --- method-level branches (drive the pipeline methods with mocked fitters) ---
 
 test_that(".fmAfForX returns NULL when af yields nothing", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-    local_mocked_bindings(af = function(...) NULL, .package = "pecotmr")
+    qd <- .fmp_qdA
+    local_mocked_bindings(
+        .qtlExtractBlock = function(...) {
+            list(af = numeric(0), variantIds = character(0))
+        },
+        .package = "pecotmr"
+    )
     X <- matrix(
         0,
         3,
         2,
         dimnames = list(paste0("s", 1:3), c("chr1:100:A:G", "chr1:200:A:G"))
     )
-    expect_null(pecotmr:::.fmAfForX(qd, X, traitId = "ENSG_A"))
+    expect_null(pecotmr:::.fmAfForX(
+        qd,
+        X,
+        genotypeFilter = pecotmr:::.qtlResolveFilter(),
+        traitId = "ENSG_A"
+    ))
 })
 
-test_that("fineMappingPipeline(QtlDataset): explicit valid contexts arg is honored", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+test_that("fineMappingPipeline(QtlDataset): a valid context is honored", {
+    qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -4654,33 +4165,33 @@ test_that("fineMappingPipeline(QtlDataset): explicit valid contexts arg is honor
         )
     )
     expect_s4_class(res, "QtlFineMappingResult")
+    # The context left out is not fit.
+    expect_setequal(contexts(res), "brain")
 })
 
 test_that("fineMappingPipeline(QtlDataset): region selects traits by rowRanges overlap", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 3000L))
+    # ENSG_A spans 1000-1499 and ENSG_B 2000-2499: the region reaches only A.
+    region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 1600L))
     res <- suppressMessages(
         fineMappingPipeline(
-            qd,
+            .fmp_qdAB,
             methods = "susie",
             region = region,
             initializeWithSusieInf = FALSE
         )
     )
     expect_s4_class(res, "QtlFineMappingResult")
+    expect_setequal(traitNames(res), "ENSG_A")
 })
 
 test_that("fineMappingPipeline(QtlDataset): too few shared samples errors", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         # residualized X carries a sample absent from Y -> < 2 shared samples
@@ -4709,7 +4220,7 @@ test_that("fineMappingPipeline(QtlDataset): too few shared samples errors", {
 })
 
 test_that("fineMappingPipeline(QtlDataset): errors when no tuple produces a result", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmSerScreen = function(...) FALSE, # screen out every block
@@ -4726,34 +4237,8 @@ test_that("fineMappingPipeline(QtlDataset): errors when no tuple produces a resu
     )
 })
 
-test_that("fineMappingPipeline(QtlDataset): usePCA fine-maps top PCs of a multi-trait context", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmFitSusieIndiv = .fmp_mockFitIndiv(),
-        .fmPostprocessOne = .fmp_mockPostprocess(),
-        .fmSerScreen = function(...) TRUE,
-        .package = "pecotmr"
-    )
-    res <- suppressMessages(
-        fineMappingPipeline(
-            qd,
-            methods = "susie",
-            usePCA = TRUE,
-            nPCs = 1L,
-            cisWindow = 1000L,
-            initializeWithSusieInf = FALSE
-        )
-    )
-    expect_s4_class(res, "QtlFineMappingResult")
-    expect_true(any(grepl("PC", as.character(res$trait))))
-})
-
 test_that("fineMappingPipeline(QtlDataset): usePCA skips single-trait contexts", {
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -4777,7 +4262,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips single-trait contexts",
 })
 
 test_that("fineMappingPipeline(MultiStudyQtlDataset): jointSpec with no intersecting scope errors", {
-    mt <- .fmp_makeMultiStudy()
+    mt <- .fmp_msqd
     # The joint engine yields nothing for this scope -> the no-joint-fits stop.
     local_mocked_bindings(
         .fmDispatchJointSpecsMultiStudy = function(...) NULL,
@@ -4793,16 +4278,16 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): jointSpec with no intersec
     )
 })
 
-# --- usePCA sub-branches. Use methods="mvsusie" so the univariate dispatch is
-# skipped (no 1531 stop / SER entanglement); the PCA path still runs susie, and
-# the mvsusie joint dispatch is mocked to keep a non-empty result (no 1647).
+# --- usePCA sub-branches. The tests using methods = "mvsusie" skip the
+# univariate dispatch (and its SER screen); the PCA path still runs susie, and
+# the mocked mvsusie joint dispatch keeps the result non-empty.
 .fmp_jr <- function() {
     QtlFineMappingResult(
         studyName = "study1",
         context = "brain",
         trait = "ENSG_A",
         method = "mvsusie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4811,15 +4296,12 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): jointSpec with no intersec
 }
 
 test_that("fineMappingPipeline(QtlDataset): usePCA skips a context whose PCA yields no scores", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
-        .fmTopPcScores = function(...) NULL, # 1577 next
+        .fmTopPcScores = function(...) NULL, # PCA yields no scores
         .package = "pecotmr"
     )
     res <- suppressMessages(fineMappingPipeline(
@@ -4834,16 +4316,13 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a context whose PCA yie
 })
 
 test_that("fineMappingPipeline(QtlDataset): usePCA reuses a cached PC entry", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     cachedFMR <- QtlFineMappingResult(
         studyName = "study1",
         context = "brain",
         trait = "topPC1",
         method = "susie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             "chr1:100:A:G",
             list(),
             data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
@@ -4872,14 +4351,11 @@ test_that("fineMappingPipeline(QtlDataset): usePCA reuses a cached PC entry", {
         initializeWithSusieInf = FALSE,
         fineMappingResult = cachedFMR
     ))
-    expect_true(any(as.character(res$trait) == "topPC1")) # 1584 cache hit
+    expect_true(any(as.character(res$trait) == "topPC1")) # from the cache
 })
 
 test_that("fineMappingPipeline(QtlDataset): usePCA + region uses the region genotype block", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
@@ -4896,14 +4372,11 @@ test_that("fineMappingPipeline(QtlDataset): usePCA + region uses the region geno
         nPCs = 1L,
         region = region
     ))
-    expect_true(any(grepl("PC", as.character(res$trait)))) # 1591-1592 region block
+    expect_true(any(grepl("PC", as.character(res$trait))))
 })
 
 test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block with too few shared samples", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
         .fmResidGeno = function(x, ...) {
@@ -4916,7 +4389,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block with too few
                     c("chr1:100:A:G", "chr1:200:A:G")
                 )
             )
-        }, # PC common < 2 -> 1595
+        }, # < 2 samples shared with the PCs
         .fmDispatchJointSpecsQtlDataset = function(...) .fmp_jr(),
         .package = "pecotmr"
     )
@@ -4927,17 +4400,14 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block with too few
         nPCs = 1L,
         cisWindow = 1000L
     ))
-    expect_false(any(grepl("PC", as.character(res$trait)))) # 1595 + 1607
+    expect_false(any(grepl("PC", as.character(res$trait))))
 })
 
 test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out by SER", {
-    qd <- .fmp_makeQtlDataset(
-        contexts = "brain",
-        traits = c("ENSG_A", "ENSG_B")
-    )
+    qd <- .fmp_qdAB
     local_mocked_bindings(
         extractBlockGenotypes = .fmp_mockExtractor(),
-        .fmSerScreen = function(...) FALSE, # PC screened -> 1597
+        .fmSerScreen = function(...) FALSE, # the PC block is screened out
         .fmDispatchJointSpecsQtlDataset = function(...) .fmp_jr(),
         .package = "pecotmr"
     )
@@ -4948,9 +4418,8 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out
         nPCs = 1L,
         cisWindow = 1000L
     ))
-    expect_false(any(grepl("PC", as.character(res$trait)))) # 1597 + 1607
+    expect_false(any(grepl("PC", as.character(res$trait))))
 })
-
 
 # ---------------------------------------------------------------------------
 # RSS panel filters: mafCutoff / macCutoff / imissCutoff on QtlSumStats and
@@ -4961,11 +4430,12 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out
 # and the LD matrix are built, so the two cannot fall out of alignment.
 # ---------------------------------------------------------------------------
 
-# @noRd
-.rssf_qcd <- function() {
+# The bundled QTL summary statistics, QC'd once: summaryStatsQc() is the slow
+# step, and every test below only reads the result.
+.rssf_ss <- local({
     data(qtlSumStatsExample, envir = environment())
     suppressMessages(summaryStatsQc(qtlSumStatsExample))
-}
+})
 
 # @noRd
 .rssf_n <- function(ss, ...) {
@@ -4980,42 +4450,34 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out
 }
 
 test_that("fineMappingPipeline(QtlSumStats) filters nothing by default", {
-    ss <- .rssf_qcd()
+    ss <- .rssf_ss
     expect_equal(.rssf_n(ss), sum(lengths(ss)))
 })
 
-test_that("fineMappingPipeline(QtlSumStats) drops panel-rare variants", {
-    ss <- .rssf_qcd()
-    full <- .rssf_n(ss)
-    loose <- .rssf_n(ss, mafCutoff = 0.05)
-    tight <- .rssf_n(ss, mafCutoff = 0.2)
-    expect_lt(loose, full)
-    expect_lt(tight, loose)
-})
-
-test_that("fineMappingPipeline RSS cutoffs agree with .panelVariantFilter", {
+test_that("fineMappingPipeline RSS MAF cutoffs match .panelVariantFilter", {
     # The pipeline must drop exactly the variants the shared filter names --
     # no more (which would mean something else is filtering) and no fewer
-    # (which would mean the cutoff silently did nothing).
-    ss <- .rssf_qcd()
+    # (which would mean the cutoff silently did nothing) -- so panel-rare
+    # variants go, and a tighter cutoff drops more.
+    ss <- .rssf_ss
     ids <- variantIds(ss)
+    kept <- sum(lengths(ss))
     for (cut in c(0.05, 0.2)) {
         expected <- length(.panelVariantFilter(
-            ldReference(ss),
+            ldReference(ss)[[1L]],
             ids,
             PanelFilterParam(mafCutoff = cut)
         ))
-        expect_equal(
-            .rssf_n(ss, mafCutoff = cut),
-            expected,
-            label = str_c("mafCutoff ", cut)
-        )
+        n <- .rssf_n(ss, mafCutoff = cut)
+        expect_equal(n, expected, label = str_c("mafCutoff ", cut))
+        expect_lt(n, kept, label = str_c("mafCutoff ", cut))
+        kept <- n
     }
 })
 
 test_that("fineMappingPipeline RSS treats MAC as a MAF equivalent", {
-    ss <- .rssf_qcd()
-    nSamp <- ncol(ldReference(ss))
+    ss <- .rssf_ss
+    nSamp <- ncol(ldReference(ss)[[1L]])
     expect_equal(
         .rssf_n(ss, macCutoff = 0.1 * 2 * nSamp),
         .rssf_n(ss, mafCutoff = 0.1)
@@ -5023,16 +4485,15 @@ test_that("fineMappingPipeline RSS treats MAC as a MAF equivalent", {
 })
 
 test_that("fineMappingPipeline RSS honours a missingness cutoff", {
-    ss <- .rssf_qcd()
+    ss <- .rssf_ss
     expect_lt(.rssf_n(ss, imissCutoff = 0), sum(lengths(ss)))
     expect_equal(.rssf_n(ss, imissCutoff = 1), sum(lengths(ss)))
 })
 
-
 test_that(".fmExtractZn keeps z, ids and n aligned after filtering", {
-    ss <- .rssf_qcd()
+    ss <- .rssf_ss
     entry <- pecotmr:::.collectionEntry(ss, 1L)
-    sketch <- ldReference(ss)
+    sketch <- ldReference(ss)[[1L]]
     unfiltered <- pecotmr:::.fmExtractZn(entry, "t")
     filtered <- suppressMessages(pecotmr:::.fmExtractZn(
         entry,
@@ -5123,21 +4584,6 @@ test_that("FineMappingMethodsParam takes lists or constructors per entry", {
         FineMappingMethodsParam(qtlDatasetMethods = list(nope = list())),
         "not a method this pipeline runs"
     )
-})
-
-test_that("fineMappingPipeline accepts the record and the character form", {
-    skip_if_not_installed("susieR")
-    byName <- pecotmr:::.fmNormalizeMethods(
-        c("susie", "susieInf"),
-        inputKind = "QtlDataset"
-    )
-    expect_equal(byName$tokens, c("susie", "susieInf"))
-    byRecord <- pecotmr:::.fmNormalizeMethods(
-        FineMappingMethodsParam(qtlDatasetMethods = list(susie = list(L = 3))),
-        inputKind = "QtlDataset"
-    )
-    expect_equal(byRecord$tokens, "susie")
-    expect_equal(byRecord$methodArgs$susie$L, 3)
 })
 
 test_that("argument checking narrows to the engine the input class reaches", {
@@ -5296,9 +4742,11 @@ test_that("CredibleSetParam owns the single-effect bounds", {
         )$maxNumSingleEffectsGreedy,
         3L
     )
-    # addSusieInf stands alone: it selects a chained initialisation between
-    # methods rather than describing credible sets.
-    expect_false("addSusieInf" %in% names(formals(CredibleSetParam)))
+    # initializeWithSusieInf stands alone: it selects a chained
+    # initialisation between methods rather than describing credible sets.
+    expect_false(
+        "initializeWithSusieInf" %in% names(formals(CredibleSetParam))
+    )
     expect_false("fitStructureArgs" %in% getNamespaceExports("pecotmr"))
 })
 
@@ -5319,6 +4767,11 @@ test_that("SignalScreenParam resolves each metric to a pipeline spec", {
     # list(metric, cutoff). .asScreen() canonicalizes either.
     expect_null(pecotmr:::.screenResolve(SignalScreenParam()))
     expect_equal(pecotmr:::.screenResolve(SignalScreenParam(pip = 0.5)), 0.5)
+    # A per-context pip vector passes through with its names.
+    expect_equal(
+        pecotmr:::.screenResolve(SignalScreenParam(pip = c(brain = 0.3))),
+        c(brain = 0.3)
+    )
     expect_equal(
         pecotmr:::.screenResolve(SignalScreenParam(absZ = 5)),
         list(metric = "absZ", cutoff = 5)
@@ -5353,6 +4806,31 @@ test_that("SignalScreenParam rejects two metrics and negative absZ / bf", {
     )
 })
 
+test_that(".fmSerScreen / .fmScreenActive / .fmSerScreenColumns", {
+    set.seed(2)
+    X <- matrix(
+        rnorm(40),
+        20,
+        2,
+        dimnames = list(paste0("s", 1:20), c("chr1:100:A:G", "chr1:200:A:G"))
+    )
+    y <- rnorm(20)
+    expect_true(pecotmr:::.fmSerScreen(X, y, 0)) # disabled
+    expect_true(pecotmr:::.fmSerScreen(X, c(1, rep(NA, 19)), 0.5)) # < 2 obs
+    expect_type(pecotmr:::.fmSerScreen(X, y, 0.5), "logical") # real susie fit
+    local_mocked_bindings(
+        susie = function(...) stop("boom"),
+        .package = "susieR"
+    )
+    expect_true(pecotmr:::.fmSerScreen(X, y, 0.5)) # fit fails -> keep
+    expect_false(pecotmr:::.fmScreenActive(0))
+    expect_true(pecotmr:::.fmScreenActive(0.5))
+    expect_length(
+        pecotmr:::.fmSerScreenColumns(X, matrix(rnorm(40), 20, 2), 0),
+        2L
+    )
+})
+
 test_that("every recursion forwards each cfg field its callee accepts", {
     ns <- asNamespace("pecotmr")
     cases <- list(
@@ -5379,10 +4857,7 @@ test_that("every recursion forwards each cfg field its callee accepts", {
     )
     for (cs in cases) {
         fields <- .cfgFieldNames(cs$builder)
-        accepted <- setdiff(
-            names(formals(get(cs$callee, envir = ns))),
-            "..."
-        )
+        accepted <- setdiff(names(formals(get(cs$callee, envir = ns))), "...")
         passed <- .argNamesPassed(cs$site)
         # A field the record carries AND the callee accepts must be passed.
         dropped <- setdiff(intersect(fields, accepted), passed)
@@ -5424,7 +4899,7 @@ test_that("MultiStudyQtlDataset takes every component argument", {
 
 test_that("QtlDataset: a CV-only run keeps the CV and skips the full fit", {
     skip_if_not_installed("susieR")
-    qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    qd <- .fmp_qdA
     # The full-data post-processor stops the test if it is reached: a
     # cross-validation-only run must not fit, or summarize, the full data.
     local_mocked_bindings(
@@ -5444,7 +4919,7 @@ test_that("QtlDataset: a CV-only run keeps the CV and skips the full fit", {
         verbose = 0
     ))
     expect_equal(nrow(res), 1L)
-    expect_equal(lengths(res), 0L)
+    expect_equal(unname(lengths(res)), 0L)
     expect_null(susieFit(
         res,
         studyName = "study1",
@@ -5461,7 +4936,7 @@ test_that("QtlDataset: a CV-only run keeps the CV and skips the full fit", {
     )
     expect_true("susie_predicted" %in% names(cv$prediction))
     # Fold-level results cannot be published, so the export refuses.
-    expect_error(exportToBed(res, tempfile(fileext = ".bed")), "fitFullData")
+    expect_error(writeBed(res, tempfile(fileext = ".bed")), "fitFullData")
 })
 
 test_that(".fmMergeEntries keeps a merged cross-validation-only row fit-free", {
@@ -5487,8 +4962,8 @@ test_that(".fmCacheForRun reuses only rows that carry what the run asks for", {
         trait = c("fullCv", "full", "cvOnly"),
         method = rep("susie", 3L),
         entry = list(
-            fineMappingRow(vid, list(a = 1), tl, cvResult = cv),
-            fineMappingRow(vid, list(a = 1), tl),
+            FineMappingRow(vid, list(a = 1), tl, cvResult = cv),
+            FineMappingRow(vid, list(a = 1), tl),
             pecotmr:::.fmCvOnlyRow(cv)
         )
     )
@@ -5504,7 +4979,7 @@ test_that(".fmCacheForRun reuses only rows that carry what the run asks for", {
     )
 })
 
-test_that("CredibleSetParam accessors read and replace, L is get-only", {
+test_that("CredibleSetParam fields read and replace, L is fixed", {
     cs <- CredibleSetParam(coverage = 0.95)
     expect_equal(csCoverage(cs), 0.95)
     expect_equal(maxNumSingleEffects(cs), 10L)
@@ -5513,34 +4988,26 @@ test_that("CredibleSetParam accessors read and replace, L is get-only", {
     # Copy semantics: replacement rebinds a modified copy, so another name
     # holding the original still sees the old value.
     cs2 <- cs
-    csCoverage(cs2) <- 0.9
+    cs2$coverage <- 0.9
     expect_equal(csCoverage(cs2), 0.9)
     expect_equal(csCoverage(cs), 0.95)
     expect_s4_class(cs2, "CredibleSetParam")
 
     # The slot's declared type still holds through a replacement.
-    expect_error(csCoverage(cs) <- "wide", "not valid for @.+coverage")
+    expect_error(cs$coverage <- "wide", "coverage")
 
-    # L / Lgreedy are deliberately get-only: they are seeded onto each
+    # L / Lgreedy are deliberately fixed: they are seeded onto each
     # SuSiE-family token's own arguments, so changing one needs a refit, not
-    # a re-summary. A setter would hand back a record that looks applied.
-    ns <- asNamespace("pecotmr")
-    expect_false(exists("setL", envir = ns, inherits = FALSE))
-    expect_false(exists("setLgreedy", envir = ns, inherits = FALSE))
+    # a re-summary. A replacement would hand back a record that looks
+    # applied, so `$<-` refuses them.
+    expect_error(cs$maxNumSingleEffects <- 5L, "needs a refit")
+    expect_error(cs$maxNumSingleEffectsGreedy <- 2L, "needs a refit")
     expect_true(is.function(maxNumSingleEffectsGreedy))
 })
 
-test_that("every settable CredibleSetParam field has both accessors", {
-    # The pairing is the contract: a field you can read and not write is a
-    # deliberate exception, so it must be one of exactly these two.
-    #
-    # The accessor is now the field name itself -- the get* prefix is gone --
-    # except where the bare field name would have been unusable or taken, so
-    # those three are named here rather than derived. Writers are the
-    # matching `<-` replacement generics.
-    getOnly <- c("maxNumSingleEffects", "maxNumSingleEffectsGreedy")
-    # The slots now carry their accessors' names, so `coverage` is the only
-    # field whose accessor is not derivable from it.
+test_that("every CredibleSetParam field has a getter", {
+    # The getter is the field name itself, except `coverage`, whose bare name
+    # is an IRanges generic -- so that one is named here, not derived.
     renamed <- c(coverage = "csCoverage")
     ns <- asNamespace("pecotmr")
     for (f in names(formals(CredibleSetParam))) {
@@ -5549,21 +5016,12 @@ test_that("every settable CredibleSetParam field has both accessors", {
             exists(accessor, envir = ns, inherits = FALSE),
             info = paste("no accessor for", f)
         )
-        # The writer is the replacement form of the accessor name, not a
-        # set* function: `csCoverage(p) <- v`, never `setCoverage(p, v)`.
-        expect_equal(
-            exists(str_c(accessor, "<-"), envir = ns, inherits = FALSE),
-            !is_in(f, getOnly),
-            info = paste("replacement presence wrong for", f)
-        )
     }
 })
 
-test_that("CredibleSetParam accessors read and replace every field", {
-    # The pairing test above asserts the accessors EXIST; this one dispatches
-    # them. Existence is checked with exists(), which never reaches the
-    # generic, so without this the setGeneric bodies in AllGenerics.R and the
-    # copy semantics of each setter go unexercised.
+test_that("CredibleSetParam getters read and $<- replaces every field", {
+    # Dispatching each getter is what exercises the setGeneric bodies in
+    # AllGenerics.R; existence alone never reaches them.
     cs <- CredibleSetParam()
     expect_equal(secondaryCoverage(cs), c(0.7, 0.5))
     expect_equal(signalCutoff(cs), 0.025)
@@ -5574,12 +5032,12 @@ test_that("CredibleSetParam accessors read and replace every field", {
 
     # Replacement on a copy; `cs` itself keeps its original values.
     edited <- cs
-    secondaryCoverage(edited) <- 0.6
-    signalCutoff(edited) <- 0.1
-    minAbsCorr(edited) <- 0.5
-    medianAbsCorr(edited) <- 0.4
-    includeAllCs(edited) <- TRUE
-    perCsColumns(edited) <- "alpha"
+    edited$secondaryCoverage <- 0.6
+    edited$signalCutoff <- 0.1
+    edited$minAbsCorr <- 0.5
+    edited$medianAbsCorr <- 0.4
+    edited$includeAllCs <- TRUE
+    edited$perCsColumns <- "alpha"
     expect_equal(secondaryCoverage(edited), 0.6)
     expect_equal(signalCutoff(edited), 0.1)
     expect_equal(minAbsCorr(edited), 0.5)
@@ -5589,8 +5047,9 @@ test_that("CredibleSetParam accessors read and replace every field", {
     expect_equal(secondaryCoverage(cs), c(0.7, 0.5))
     expect_false(includeAllCs(cs))
 
-    # Replacement revalidates, so a wrong-typed value is refused.
-    expect_error(includeAllCs(cs) <- "yes", "includeAllCs")
+    # Replacement goes through the constructor, so a wrong-typed value is
+    # refused exactly as CredibleSetParam() refuses it.
+    expect_error(cs$includeAllCs <- "yes", "includeAllCs")
 })
 
 # ---------------------------------------------------------------------------
@@ -5649,24 +5108,23 @@ test_that("CredibleSetParam validity catches range and length errors", {
     )
 })
 
-test_that("CredibleSetParam setters are held to the same checks", {
+test_that("CredibleSetParam replacements are held to the same checks", {
     cs <- CredibleSetParam()
-    # The setter path used to bypass every one of these: its body is
-    # `x@slot <- value; validObject(x)`, and before setValidity() existed
-    # validObject() only checked the slot's type.
-    expect_error(csCoverage(cs) <- 1.5, "coverage")
-    expect_error(csCoverage(cs) <- c(0.9, 0.95), "coverage")
-    expect_error(minAbsCorr(cs) <- -1, "minAbsCorr")
-    expect_error(signalCutoff(cs) <- 2, "signalCutoff")
-    expect_error(secondaryCoverage(cs) <- c(0.7, 3), "secondaryCoverage")
-    # perCsColumns was the sharpest asymmetry: the constructor refused a
-    # bad level via arg_match() while the setter accepted it.
-    expect_error(perCsColumns(cs) <- "bogus", "perCsColumns")
+    # A replacement is a rebuild through CredibleSetParam(), so it is refused
+    # exactly where the constructor would refuse the value.
+    expect_error(cs$coverage <- 1.5, "coverage")
+    expect_error(cs$coverage <- c(0.9, 0.95), "coverage")
+    expect_error(cs$minAbsCorr <- -1, "minAbsCorr")
+    expect_error(cs$signalCutoff <- 2, "signalCutoff")
+    expect_error(cs$secondaryCoverage <- c(0.7, 3), "secondaryCoverage")
+    # perCsColumns was the sharpest asymmetry of the old setters: the
+    # constructor refused a bad level via arg_match() while they accepted it.
+    expect_error(cs$perCsColumns <- "bogus", "perCsColumns")
     # Valid replacements still go through.
     ok <- cs
-    csCoverage(ok) <- 0.9
-    minAbsCorr(ok) <- 0.5
-    medianAbsCorr(ok) <- 0.4
+    ok$coverage <- 0.9
+    ok$minAbsCorr <- 0.5
+    ok$medianAbsCorr <- 0.4
     expect_equal(csCoverage(ok), 0.9)
     expect_equal(minAbsCorr(ok), 0.5)
     expect_equal(medianAbsCorr(ok), 0.4)
@@ -5725,36 +5183,6 @@ test_that(".fmOwnedEngineArgs owns nothing for an unknown engine", {
     )
 })
 
-test_that(".fmBlockIdRange recovers a block boundary the variants cannot give", {
-    # Adjacent LD blocks leave gaps, so the realized variant span is narrower
-    # than the block; only blockId carries the boundary.
-    gr <- .fmBlockIdRange("chr22_49355984_50799822")
-    expect_s4_class(gr, "GRanges")
-    expect_identical(as.character(GenomicRanges::seqnames(gr)), "chr22")
-    expect_identical(GenomicRanges::start(gr), 49355984L)
-    expect_identical(GenomicRanges::end(gr), 50799822L)
-    # the chr:start-end spelling works too
-    expect_identical(
-        as.character(.fmBlockIdRange("chr1:100-200")),
-        as.character(GenomicRanges::GRanges("chr1:100-200"))
-    )
-    # anything that is not coordinates is not guessed at
-    expect_null(.fmBlockIdRange("ENSG00000283047"))
-    expect_null(.fmBlockIdRange(NA_character_))
-    expect_null(.fmBlockIdRange(NULL))
-    expect_null(.fmBlockIdRange(c("chr1_1_2", "chr1_3_4")))
-})
-
-test_that(".fmRssFitWindow prefers the block boundary over the variant span", {
-    ids <- c("chr22:49363017:A:T", "chr22:50598205:C:G")
-    withBlock <- .fmRssFitWindow(NULL, ids, "chr22_49355984_50799822")
-    expect_identical(GenomicRanges::start(withBlock), 49355984L)
-    # No parseable blockId -> the fit's own variants define the window.
-    noBlock <- .fmRssFitWindow(NULL, ids, NULL)
-    expect_identical(GenomicRanges::start(noBlock), 49363017L)
-    expect_identical(GenomicRanges::end(noBlock), 50598205L)
-})
-
 test_that(".fmBlockWindow falls back to the trait's own cis window", {
     data(qtlDatasetExample)
     explicit <- GenomicRanges::GRanges("chr1:1-999")
@@ -5769,7 +5197,9 @@ test_that(".fmBlockWindow falls back to the trait's own cis window", {
     cfgNarrow <- list(data = qtlDatasetExample, cisWindow = 1000)
     cfgWide <- list(data = qtlDatasetExample, cisWindow = 500000)
     ctx <- contexts(qtlDatasetExample)[[1L]]
-    tid <- rownames(molecularTraits(qtlDatasetExample, contexts = ctx))[[1L]]
+    tid <- rownames(molecularTraits(qtlDatasetExample, context = ctx)[[ctx]])[[
+        1L
+    ]]
     narrow <- .fmBlockWindow(NULL, ctx, tid, cfgNarrow)
     wide <- .fmBlockWindow(NULL, ctx, tid, cfgWide)
     expect_lt(GenomicRanges::start(wide), GenomicRanges::start(narrow))
@@ -5780,29 +5210,46 @@ test_that(".fmBlockWindow falls back to the trait's own cis window", {
     )
 })
 
-test_that("a supplied block key survives into the result; a seqname fallback does not", {
+test_that("a GWAS row carries its block name and window into its fit", {
     data(gwasSumStatsS4Example)
-    gss <- gwasSumStatsS4Example
-    gr <- .collectionEntry(gss, 1L)
+    gr <- .collectionEntry(gwasSumStatsS4Example, 1L)
     derived <- .fmGwasRangeKey(gr)
 
-    # (a) No manifest and no explicit blockId: GwasSumStats() falls back to the
-    # bare seqname, which carries no coordinates and must NOT override the
-    # entry's own range key.
-    bare <- gss
-    S4Vectors::mcols(bare)$blockId <- rep("chr22", nrow(bare))
-    expect_identical(.fmGwasBlockId(bare, 1L, gr), derived)
+    # (a) No windows: GwasSumStats() names the row by its seqname, which the
+    # fit keeps, and its window is the span it was built with.
+    bare <- GwasSumStats(studyName = "s", entry = list(gr), genome = "hg19")
+    block <- .fmGwasBlock(bare, 1L, gr, .rowRegions(bare))
+    expect_identical(block$id, "chr22")
+    expect_false(block$given)
+    expect_identical(as.character(block$region), as.character(range(gr)))
 
-    # (b) A coordinate-bearing key -- from an ldBlocks manifest or an explicit
-    # vector -- IS the block boundary and wins. Adjacent blocks leave gaps, so
+    # (b) A range the caller gave -- here a `region` window keyed by name --
+    # IS the block boundary and keeps its key. Adjacent blocks leave gaps, so
     # it is wider than the variants that survived QC.
-    supplied <- gss
-    key <- "chr22_1_50000000"
-    S4Vectors::mcols(supplied)$blockId <- rep(key, nrow(supplied))
-    expect_identical(.fmGwasBlockId(supplied, 1L, gr), key)
-    expect_false(identical(.fmGwasBlockId(supplied, 1L, gr), derived))
+    named <- GwasSumStats(
+        studyName = "s",
+        entry = list(gr),
+        genome = "hg19",
+        region = GenomicRanges::GRanges(
+            "chr22",
+            IRanges::IRanges(1L, 50000000L),
+            blockId = "b7"
+        )
+    )
+    block <- .fmGwasBlock(named, 1L, gr, .rowRegions(named))
+    expect_identical(block$id, "b7")
+    expect_true(block$given)
+    expect_identical(as.character(block$region), "chr22:1-50000000")
 
-    # (c) The resume cache keys on the DERIVED range either way, so supplying a
+    # (c) A name is kept as it is; only a row with none, from a collection
+    # saved before the column existed, is named by its span.
+    expect_identical(
+        .fmGwasBlockName("chr22_1_50000000", gr),
+        "chr22_1_50000000"
+    )
+    expect_identical(.fmGwasBlockName(NA_character_, gr), derived)
+
+    # (d) The resume cache keys on the DERIVED range either way, so supplying a
     # wider boundary cannot make the cache miss.
     expect_identical(.fmGwasRangeKey(gr), derived)
 })
@@ -5810,7 +5257,7 @@ test_that("a supplied block key survives into the result; a seqname fallback doe
 # ---------------------------------------------------------------------------
 # Provenance columns (dataType / dataSource / standardized)
 #
-# These three are what exportToBed() / exportToVcf() publish as data_type,
+# These three are what writeBed() / writeGwasVcf() publish as data_type,
 # data_source and weight_standardized. Only the first is an outside fact; the
 # other two follow from the branch the pipeline took, so they are derived and
 # the summary-statistics methods refuse to be told.
@@ -5862,7 +5309,7 @@ test_that("fineMappingPipeline(QtlDataset) omits dataType when not supplied", {
 
 test_that("fineMappingPipeline(QtlSumStats) records sumstat / standardized", {
     res <- suppressWarnings(suppressMessages(fineMappingPipeline(
-        .rssf_qcd(),
+        .rssf_ss,
         methods = "susie",
         dataType = "bulk_rnaseq"
     )))
@@ -5880,7 +5327,7 @@ test_that("no pipeline takes a weight-scale declaration any more", {
     # derived and a declaration could only contradict it.
     expect_error(
         fineMappingPipeline(
-            .rssf_qcd(),
+            .rssf_ss,
             methods = "susie",
             weightStandardized = FALSE
         ),
@@ -5899,7 +5346,7 @@ test_that("no pipeline takes a weight-scale declaration any more", {
 })
 
 test_that(".fmMsDataSource leaves a mixed collection's joint rows NA", {
-    expect_true(is.na(pecotmr:::.fmMsDataSource(.fmp_makeMultiStudy())))
+    expect_true(is.na(pecotmr:::.fmMsDataSource(.fmp_msqd)))
 })
 
 test_that(".fmMsDataSource gives an individual-level collection's joint rows", {
@@ -5923,6 +5370,7 @@ test_that("individual-level genotypes reach the fitter standardized", {
     X <- pecotmr:::.fmResidGeno(
         qtlDatasetExample,
         ResidualizationParam(),
+        genotypeFilter = pecotmr:::.qtlResolveFilter(),
         contexts = "brain",
         traitId = "ENSG_example",
         cisWindow = 1e6
@@ -5932,24 +5380,11 @@ test_that("individual-level genotypes reach the fitter standardized", {
     expect_true(all(abs(sds[sds > 0] - 1) < 1e-10))
 })
 
-test_that("a constant genotype column comes back as zeros, not NaN", {
-    # `.qtlResidualizeQr()` treats anything below sqrt(.Machine$double.eps) as
-    # constant: lm.fit residuals of a constant column are ~1e-16 rather than
-    # 0, and dividing the (also tiny) residuals by that amplifies roundoff to
-    # unit scale. The column is zeroed instead, and .dropZeroVariance()
-    # removes it downstream.
-    Y <- cbind(a = c(1, 2, 3, 4), b = c(2, 2, 2, 2))
-    out <- pecotmr:::.qtlResidualizeQr(Y, NULL, scaleResiduals = TRUE)
-    expect_equal(unname(out[, "b"]), rep(0, 4))
-    expect_equal(sd(out[, "a"]), 1)
-    expect_false(anyNA(out))
-})
-
 test_that("the genotype scale comes from the accessor, not the pipeline", {
-    # ONE knob: ResidualizationParam(scaleResiduals=) per call, with the
-    # QtlDataset's own slot as the default. The pipelines add no mechanism of
-    # their own -- they only RECORD what the accessor resolved, so a wrong
-    # record and a wrong scale cannot come apart.
+    # ONE knob: ResidualizationParam(scaleResiduals=), TRUE when unset. The
+    # pipelines add no mechanism of their own -- they only RECORD what the
+    # residualizer resolved, so a wrong record and a wrong scale cannot come
+    # apart.
     data(qtlDatasetExample, envir = environment())
     recorded <- function(..., dataset = qtlDatasetExample) {
         res <- suppressMessages(fineMappingPipeline(
@@ -5963,11 +5398,6 @@ test_that("the genotype scale comes from the accessor, not the pipeline", {
     expect_true(recorded())
     expect_true(recorded(scaleResiduals = TRUE))
     expect_false(recorded(scaleResiduals = FALSE))
-    # Unset falls back to the object, which is where the default lives.
-    off <- methods::initialize(qtlDatasetExample, scaleResiduals = FALSE)
-    expect_false(recorded(dataset = off))
-    # An explicit per-call value overrides the object either way.
-    expect_true(recorded(scaleResiduals = TRUE, dataset = off))
 })
 
 test_that("the pipelines add no second standardization mechanism", {
@@ -5988,7 +5418,11 @@ test_that("the hatch does not reach a summary-statistics fit", {
     # There are no genotypes to scale, and the RSS likelihood is in
     # standardized units whatever anyone asks, so the flag stays TRUE.
     res <- suppressWarnings(suppressMessages(
-        fineMappingPipeline(.rssf_qcd(), methods = "susie")
+        fineMappingPipeline(
+            .rssf_ss,
+            methods = "susie",
+            residualizationParam = ResidualizationParam(scaleResiduals = FALSE)
+        )
     ))
     expect_true(all(as.logical(S4Vectors::mcols(res)$standardized)))
 })
@@ -6005,7 +5439,7 @@ test_that("QtlDataset: joint fits get every caller setting", {
     rp <- ResidualizationParam(scaleResiduals = FALSE)
     expect_error(
         suppressMessages(fineMappingPipeline(
-            .fmp_makeQtlDataset(contexts = c("brain", "liver")),
+            .fmp_qdTwoCtxAB,
             methods = "mvsusie",
             traitId = "ENSG_A",
             cisWindow = 1000L,
@@ -6038,7 +5472,7 @@ test_that("MultiStudyQtlDataset: per-study joint fits get every setting", {
     rp <- ResidualizationParam(scaleResiduals = FALSE)
     expect_error(
         suppressMessages(fineMappingPipeline(
-            .fmp_makeMultiStudy(),
+            .fmp_msqd,
             methods = "mvsusie",
             cisWindow = 1000L,
             jointSpecification = "context",
@@ -6060,7 +5494,7 @@ test_that("MultiStudyQtlDataset: per-study joint fits get every setting", {
         ind$args$pipCutoffToSkip,
         pecotmr:::.screenResolve(SignalScreenParam(pip = 0.1))
     )
-    expect_equal(mafCutoff(ind$data), 0.05)
+    expect_equal(ind$args$genotypeFilter$mafCutoff, 0.05)
 })
 
 test_that("MultiStudyQtlDataset: cross-study joint fits get their settings", {
@@ -6071,7 +5505,7 @@ test_that("MultiStudyQtlDataset: cross-study joint fits get their settings", {
     panel <- PanelFilterParam(mafCutoff = 0.05)
     expect_error(
         suppressMessages(fineMappingPipeline(
-            .fmp_makeMultiStudy(),
+            .fmp_msqd,
             methods = "mvsusie",
             jointSpecification = "study",
             fitRetention = "full",
@@ -6084,15 +5518,14 @@ test_that("MultiStudyQtlDataset: cross-study joint fits get their settings", {
     expect_equal(ss$args$cutoffs, pecotmr:::.panelCutoffs(panel))
 })
 
-
 # =============================================================================
 # The LD reference dispatch: an LdMatrix or a GenotypeMixture as ldReference
 # =============================================================================
 
 # The bundled GWAS collection, with its panel's LD copied into an LdMatrix
 # and used as the reference instead.
-.fmp_withLdMatrix <- function(gss, nSamples = ncol(ldReference(gss))) {
-    panel <- ldReference(gss)
+.fmp_withLdMatrix <- function(gss, nSamples = ncol(ldReference(gss)[[1L]])) {
+    panel <- ldReference(gss)[[1L]]
     ld <- LdMatrix(
         unname(computeLd(panel)),
         variants = SummarizedExperiment::rowRanges(panel),
@@ -6103,16 +5536,19 @@ test_that("MultiStudyQtlDataset: cross-study joint fits get their settings", {
         entry = list(.collectionEntry(gss, 1L)),
         genome = "hg19",
         ldReference = ld,
-        qcInfo = qcInfo(gss)
+        qcOptions = qcOptions(gss)
     )
 }
 
+# A real susie fit. L = 4 still finds the example's three credible sets, and
+# fits cheaper than the default L = 10; every route compared uses it.
 # @noRd
 .fmp_fitSusie <- function(x) {
     suppressWarnings(suppressMessages(fineMappingPipeline(
         x,
         methods = "susie",
-        initializeWithSusieInf = FALSE
+        initializeWithSusieInf = FALSE,
+        credibleSetParam = CredibleSetParam(maxNumSingleEffects = 4L)
     )))
 }
 
@@ -6127,13 +5563,13 @@ test_that("fine-mapping with an LdMatrix reference matches its panel", {
     viaPanel <- .fmp_fitSusie(gss)
     expect_equal(pip(viaMatrix), pip(viaPanel))
     expect_equal(credibleSets(viaMatrix), credibleSets(viaPanel))
-    expect_s4_class(ldReference(viaMatrix), "LdMatrix")
+    expect_s4_class(ldReference(viaMatrix)[[1L]], "LdMatrix")
 })
 
 test_that("an RSS block reads a genotype reference's factor, not its LD", {
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
-    panel <- ldReference(gss)
+    panel <- ldReference(gss)[[1L]]
     ids <- names(SummarizedExperiment::rowRanges(panel))[1:25]
     plain <- .fmRssLd(panel, ids, "susie", FALSE)
     expect_null(plain$R)
@@ -6147,7 +5583,12 @@ test_that("an RSS block reads a genotype reference's factor, not its LD", {
         expect_equal(both$R, .ldFromRef(panel, ids, label = "t"))
         expect_identical(both$X, plain$X)
     }
-    ldOnly <- .fmRssLd(ldReference(.fmp_withLdMatrix(gss)), ids, "susie", FALSE)
+    ldOnly <- .fmRssLd(
+        ldReference(.fmp_withLdMatrix(gss))[[1L]],
+        ids,
+        "susie",
+        FALSE
+    )
     expect_null(ldOnly$X)
     expect_equal(ldOnly$R, .ldFromRef(panel, ids, label = "t"))
 })
@@ -6155,7 +5596,7 @@ test_that("an RSS block reads a genotype reference's factor, not its LD", {
 test_that("fine-mapping runs on a GenotypeMixture reference", {
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
-    panel <- ldReference(gss)
+    panel <- ldReference(gss)[[1L]]
     mix <- GenotypeMixture(
         list(a = panel[, 1:80], b = panel[, 81:165]),
         mixtureWeights = c(0.5, 0.5)
@@ -6165,10 +5606,10 @@ test_that("fine-mapping runs on a GenotypeMixture reference", {
         entry = list(.collectionEntry(gss, 1L)),
         genome = "hg19",
         ldReference = mix,
-        qcInfo = qcInfo(gss)
+        qcOptions = qcOptions(gss)
     )
     res <- .fmp_fitSusie(withMix)
-    expect_s4_class(ldReference(res), "GenotypeMixture")
+    expect_s4_class(ldReference(res)[[1L]], "GenotypeMixture")
     expect_true(all(is.finite(unlist(pip(res)))))
 })
 
@@ -6190,4 +5631,198 @@ test_that("the rFinite default needs the reference's size", {
     # An explicit rFinite, or no mismatch mode, never asks.
     expect_identical(.fmResolveRFinite(50, TRUE, "none", unknown), 50)
     expect_null(.fmResolveRFinite(NULL, FALSE, "none", unknown))
+})
+
+# ===========================================================================
+# Per-row LD references
+# ===========================================================================
+
+# Two QtlSumStats rows (contexts c1, c2) carrying the same z over five
+# variants, each on the LD reference given for it.
+.fmp_twoRefSs <- function(refs) {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:5), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        A1 = "A",
+        A2 = "G",
+        Z = c(6, 5.5, 1, 0.5, 0.2),
+        N = 1000L
+    )
+    QtlSumStats(
+        studyName = c("S", "S"),
+        context = c("c1", "c2"),
+        trait = c("t1", "t1"),
+        entry = list(gr, gr),
+        genome = "hg19",
+        ldReference = refs,
+        qcOptions = list(step1 = "ok")
+    )
+}
+
+# An LdMatrix over those five variants, with nSamples recorded.
+.fmp_ldm <- function(rho) {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    LdMatrix(
+        `dimnames<-`(rho^abs(outer(1:5, 1:5, "-")), list(ids, ids)),
+        nSamples = 1000L
+    )
+}
+
+test_that("each QtlSumStats row is fine-mapped against its own LD reference", {
+    weak <- .fmp_ldm(0.1)
+    strong <- .fmp_ldm(0.95)
+    res <- suppressMessages(suppressWarnings(
+        fineMappingPipeline(
+            .fmp_twoRefSs(list(weak, strong)),
+            methods = "susie"
+        )
+    ))
+    c1 <- which(res$context == "c1")
+    c2 <- which(res$context == "c2")
+    # The result keeps each row on the reference its fit read.
+    expect_identical(pecotmr:::.rowLdRef(res, c1), weak)
+    expect_identical(pecotmr:::.rowLdRef(res, c2), strong)
+    # Identical z under different LD gives different fits: each row was fit
+    # against its own reference, not the first one's.
+    pip <- function(i) {
+        pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, i))$pip
+    }
+    expect_false(isTRUE(all.equal(pip(c1), pip(c2))))
+})
+
+test_that("mvsusie on QtlSumStats refuses contexts on two LD references", {
+    ss <- .fmp_twoRefSs(list(.fmp_ldm(0.1), .fmp_ldm(0.95)))
+    expect_error(
+        suppressMessages(fineMappingPipeline(ss, methods = "mvsusie")),
+        "a joint fit uses one LD matrix"
+    )
+})
+
+# ===========================================================================
+# A GWAS row spanning a whole chromosome is fine-mapped, but said
+# ===========================================================================
+
+# A study's row over `starts` on chr1.
+.fmp_spanningGwas <- function(starts, studies = "G1") {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(starts, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", starts),
+        A1 = "A",
+        A2 = "G",
+        Z = seq_along(starts) / 10,
+        N = 1000L
+    )
+    GwasSumStats(
+        studyName = studies,
+        entry = rep(list(gr), length(studies)),
+        genome = "hg19",
+        qcOptions = list(step1 = "ok")
+    )
+}
+
+test_that(".fmWarnChromosomeRows flags rows spanning a chromosome's worth", {
+    # An LD block's worth of variants passes in silence.
+    expect_silent(
+        pecotmr:::.fmWarnChromosomeRows(.fmp_spanningGwas(c(100L, 5e6)))
+    )
+    expect_warning(
+        pecotmr:::.fmWarnChromosomeRows(.fmp_spanningGwas(c(100L, 3e7))),
+        "20 Mb, as a whole chromosome does \\(G1 chr1_100_30000000\\)"
+    )
+    # Past five rows the list is cut short.
+    six <- .fmp_spanningGwas(c(100L, 3e7), studies = str_c("G", 1:6))
+    expect_warning(
+        pecotmr:::.fmWarnChromosomeRows(six),
+        "6 GWAS row\\(s\\).*G5 chr1_100_30000000, \\.\\.\\.\\)"
+    )
+})
+
+test_that("fineMappingPipeline(QtlSumStats): cisWindow sets each window", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRss(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    ss <- .fmp_qss
+    ss$traitPos <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(300L, width = 1L)
+    )
+    res <- suppressMessages(fineMappingPipeline(
+        ss,
+        methods = "susie",
+        cisWindow = 100,
+        initializeWithSusieInf = FALSE
+    ))
+    expect_identical(as.character(genomicRegion(res)), "chr1:200-400")
+    expect_equal(length(res[[1L]]), 3L)
+    # The selection is parsed before the window is laid, so naming a context
+    # works alongside it.
+    picked <- suppressMessages(fineMappingPipeline(
+        ss,
+        methods = "susie",
+        contexts = "c1",
+        cisWindow = 100,
+        initializeWithSusieInf = FALSE
+    ))
+    expect_identical(as.character(genomicRegion(picked)), "chr1:200-400")
+    # Without one, the result keeps the tuple's own window.
+    plain <- suppressMessages(fineMappingPipeline(
+        .fmp_qss,
+        methods = "susie",
+        initializeWithSusieInf = FALSE
+    ))
+    expect_identical(as.character(genomicRegion(plain)), "chr1:100-500")
+    expect_error(
+        fineMappingPipeline(
+            .fmp_qss,
+            methods = "susie",
+            cisWindow = 100
+        ),
+        "laid around each tuple's trait position"
+    )
+})
+
+test_that("fineMappingPipeline refuses a phenotype QC its fits cannot take", {
+    # Resolved before any study runs: a fit cannot take a missing phenotype,
+    # so naAction = "keep" is refused up front, on either input form.
+    keep <- PhenotypeFilterParam(naAction = "keep")
+    expect_error(
+        fineMappingPipeline(
+            .fmp_qdA,
+            methods = "susie",
+            phenotypeFilterParam = keep
+        ),
+        "naAction = \"keep\" is not available"
+    )
+    expect_error(
+        fineMappingPipeline(
+            .fmp_msqd,
+            methods = "susie",
+            phenotypeFilterParam = keep
+        ),
+        "naAction = \"keep\" is not available"
+    )
+})
+
+# ===========================================================================
+# .fmAfByVar
+# ===========================================================================
+
+test_that(".fmAfByVar reads AF, and is NULL when af was never declared", {
+    mk <- function(cm) {
+        .dfToEntryGranges(suppressWarnings(.resolveSumstatCols(
+            .afm_df("effect_allele_frequency", 0.8),
+            cm,
+            "lbl"
+        )))
+    }
+    gA <- mk(.afm_cm(af = "effect_allele_frequency"))
+    expect_equal(unname(.fmAfByVar(gA, "chr1:100:A:G")), 0.8)
+    gM <- mk(.afm_cm(maf = "effect_allele_frequency"))
+    expect_null(.fmAfByVar(gM, "chr1:100:A:G"))
 })

@@ -1,11 +1,13 @@
 # =============================================================================
 # GwasSumStats S4 class
 # -----------------------------------------------------------------------------
-# DFrame-subclass collection keyed by the identity tuple (study). Each
-# row holds a per-study GRanges of GWAS summary statistics covering a
-# single LD block; build a separate collection per block when sweeping
-# the genome. Class-level slots ldReference + genome + qcInfo apply
-# uniformly across rows.
+# GRangesList-subclass collection keyed by the identity tuple (study). A study
+# is split into one row per chromosome, or per window when the constructor is
+# given a `region`, each holding that part of its GWAS summary statistics;
+# the accessors stitch a study's rows back together. Class-level slots genome
+# + qcOptions apply uniformly across rows; ldReference holds each distinct LD
+# reference once, and the ldReference mcols column names the one every row
+# uses.
 # =============================================================================
 
 #' @include AllClasses.R tupleSelectors.R
@@ -13,13 +15,30 @@ NULL
 
 #' @title GWAS Summary-Statistic Collection
 #' @description S4 collection of GWAS summary statistics keyed by the identity
-#'   tuple \code{(study)}. Each element is that study's per-variant
-#'   \code{GRanges} covering a single LD block, so build one collection per
-#'   block when sweeping the genome.
-#' @details Required column: \code{study}, unique across rows. The class-level
-#'   slots inherited from \code{\linkS4class{SumStatsBase}} --
-#'   \code{ldReference}, \code{genome} and \code{qcInfo} -- apply uniformly to
-#'   every row.
+#'   tuple \code{(study)}. A study is split into one element per chromosome,
+#'   or per window when \code{\link{GwasSumStats}} is given a \code{region},
+#'   each a per-variant \code{GRanges}; \code{\link{sumStats}} and the other
+#'   accessors stitch a study's elements back together.
+#' @details Required column: \code{study}; the constructor also adds
+#'   \code{blockId}, naming each element's chromosome or window, and the
+#'   element's analysis window: \code{region}, a \code{GRanges} with one
+#'   range per element, and \code{regionGiven}. \code{regionGiven} is
+#'   \code{TRUE} where the window was given as a \code{region}, and
+#'   \code{FALSE} where it is the span of the element's variants when the
+#'   collection was first built, before any QC. A QC pass carries both
+#'   unchanged; the span of the variants left is \code{range(x)}.
+#'   \code{\link{colocPipeline}},
+#'   \code{\link{colocboostPipeline}} and
+#'   \code{\link{causalInferencePipeline}} check the QTL variants against
+#'   these windows. Variants past a given window lie in one that was not
+#'   loaded, which is an error. Variants past a computed window may only be
+#'   ones the GWAS lacks, so more than one in a row is a warning.
+#'   A study repeats across its elements, so uniqueness is on
+#'   \code{(study, range)}. The class-level
+#'   slots inherited from \code{\linkS4class{SumStatsBase}} -- \code{genome}
+#'   and \code{qcOptions} -- apply uniformly to every row; \code{ldReference}
+#'   holds each distinct LD reference once, and the \code{ldReference} column
+#'   names the one each row uses.
 #' @seealso \code{\link{GwasSumStats}} for the constructor and
 #'   \code{\linkS4class{QtlSumStats}} for the QTL counterpart.
 #' @importFrom checkmate makeAssertCollection assertNames assertList
@@ -38,7 +57,7 @@ setClass(
             add = coll
         )
         coll$push(.sumStatsCheckGenome(object))
-        assertList(object@qcInfo, .var.name = "qcInfo", add = coll)
+        assertList(object@qcOptions, .var.name = "qcOptions", add = coll)
         slotErrors <- coll$getMessages()
         if (length(slotErrors) > 0L) {
             return(slotErrors)
@@ -61,23 +80,19 @@ setClass(
 #' @rdname show-methods
 setMethod("show", "GwasSumStats", function(object) {
     cat(glue(
-        "GwasSumStats: {nrow(object)} studies, ",
-        "genome build {GenomeInfoDb::genome(object)}\n",
+        "GwasSumStats: {n_distinct(object$study)} studies in ",
+        "{nrow(object)} rows, genome build {.showGenomeBuild(object)}\n",
         .trim = FALSE
     ))
-    ld <- object@ldReference
-    ldSrc <- if (is.null(ld)) {
-        "none (LD-free)"
-    } else {
-        .ldRefLabel(ld)
-    }
+    ldSrc <- .ldRefsLabel(ldReference(object), "none (LD-free)")
     cat(glue("  LD reference: {ldSrc}\n", .trim = FALSE))
 })
 
 
 #' @title GWAS Summary Statistics Handling
-#' @description Constructor, accessors, and converters for \code{GwasSumStats}
-#'   (the post-refactor DFrame-subclass collection keyed by \code{study}).
+#' @description Constructor, accessors, and converters for
+#'   \code{GwasSumStats}, the \code{RangedTupleList} collection of GWAS
+#'   summary statistics keyed by \code{study}.
 #' @name pecotmr-gwas-sumstats
 #' @keywords internal
 #' @importFrom GenomicRanges GRanges seqnames start
@@ -105,23 +120,26 @@ NULL
 }
 
 #' @title Create a GwasSumStats Collection Object
-#' @description Construct a \code{GwasSumStats} S4 DFrame-subclass collection
-#'   from per-study tuple vectors and a list of \code{GRanges} entries (one per
-#'   study), plus a single LD reference and a single genome build that apply
-#'   to the whole collection.
+#' @description Construct a \code{GwasSumStats} S4 collection from per-study
+#'   tuple vectors and a list of \code{GRanges} entries (one per study), plus
+#'   the LD reference(s) the rows were harmonized against and a single genome
+#'   build that applies to the whole collection.
 #'
 #' Each \code{GRanges} entry must carry per-variant statistics in its mcols (at
 #' minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; optionally
 #' \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
-#' @param studyName Character vector of study identifiers (must be unique).
+#' @param studyName Character vector of study identifiers, one per
+#'   \code{entry}. A study whose entries are already split by block repeats
+#'   here, once per entry, with \code{blockId} telling them apart.
 #' @param entry A \code{SimpleList} or \code{list} of \code{GRanges}, one per
-#'   study.
+#'   study (or per block of an already-split study).
 #' @param genome Single character string giving the genome build (e.g.,
-#'   \code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
-#'   entries share the same LD reference.
+#'   \code{"hg19"}, \code{"hg38"}). One build per collection.
 #' @param ldReference The LD reference: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
-#'   \code{\link{LdMatrix}}.
+#'   \code{\link{LdMatrix}}, used for every study, or a list with one per
+#'   study when they sit on different references. Each distinct reference is
+#'   stored once, and the \code{ldReference} column names each row's.
 #' @param varY Optional numeric vector of per-study phenotype variances
 #'   (\code{NA_real_} entries allowed). Used by the sufficient-statistic
 #'   interface; z-score RSS analyses should leave entries as NA.
@@ -138,30 +156,37 @@ NULL
 #'   no per-variant \code{N} column and no case/control counts. Named
 #'   \code{nSample} to avoid clashing with \code{nSamples()} (the LD-panel
 #'   sample size).
-#' @param ldBlocks Optional LD-block specification: a \code{GRanges}, a
-#'   data.frame with \code{chrom}/\code{start}/\code{end} (plus an optional
-#'   \code{blockId}), or a path to such a table. When supplied, each
-#'   study's variants are split into one element per block rather than one per
-#'   chromosome, and \code{blockId} takes the block's key (its \code{names},
-#'   else a \code{blockId} metadata column, else its coordinates). cTWAS needs
-#'   this granularity: its EM estimates parameters across blocks, so a
-#'   per-chromosome split is too coarse. Variants overlapping no block are
-#'   dropped with a warning, because a variant outside every block has no
-#'   block-local LD to be fine-mapped against.
-#' @param blockId Optional character vector of block keys, one per
-#'   \code{entry}, for entries that are \strong{already} split by block. Use
-#'   it to carry existing keys through a rebuild; without it a rebuild would
-#'   re-derive them as seqnames and collapse distinct blocks onto one key.
-#'   Mutually exclusive with \code{ldBlocks}.
-#' @param extraCols Optional named list of additional per-study columns to
+#' @param region Optional analysis windows, typically LD blocks: a
+#'   \code{GRanges}, or the path of a BED file, read as BED with a 0-based
+#'   start (a fourth column, when present, names each window). One set of
+#'   windows applies to every study; a list gives one set per study,
+#'   \code{NULL} for a study to split by chromosome. Each study's variants are
+#'   split into one element per window they fall in, rather than one per
+#'   chromosome, and each element's \code{region} is its window, recorded as
+#'   given. Its \code{blockId} is the window's name: its \code{names}, else
+#'   its \code{blockId} column (a BED file's fourth column), else its
+#'   coordinates. cTWAS needs this granularity: its EM estimates parameters
+#'   across blocks, so a per-chromosome split is too coarse. Variants outside
+#'   every window are dropped with a warning.
+#' @param blockId Optional character vector of block names, one per
+#'   \code{entry}, for entries that are \strong{already} split. Use it to
+#'   carry existing names through a rebuild; without it a rebuild would
+#'   re-derive them as seqnames and collapse distinct blocks onto one name. A
+#'   name only: it gives no window, which comes from \code{region}. Mutually
+#'   exclusive with \code{region}.
+#' @param extraCols Optional named list (or \code{DataFrame} /
+#'   \code{data.frame}) of additional per-study columns to
 #'   attach to the collection's \code{mcols}. Named rather than variadic
 #'   because the base class's own constructor, \code{GRangesList(...)}, uses
 #'   \code{...} for its \emph{elements}: a bare \code{...} here would read
 #'   as adding an entry rather than a metadata column.
-#' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
-#'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
-#'   record. Fine-mapping / TWAS pipelines reject inputs where
-#'   \code{length(qcInfo(x)) == 0}.
+#' @param qcOptions A \code{list} recording the QC that ran. Empty
+#'   \code{list()} on construction; \code{summaryStatsQc()} fills it.
+#'   Fine-mapping / TWAS pipelines reject inputs where
+#'   \code{length(qcOptions(x)) == 0}.
+#' @param metadata A list of free-form metadata about the collection,
+#'   as \code{metadata()} holds on any Bioconductor vector. Default
+#'   \code{list()}.
 #' @return A \code{GwasSumStats} object.
 #' @examples
 #' panel <- readGenotypes(
@@ -181,97 +206,196 @@ GwasSumStats <- function(
     nCase = NULL,
     nControl = NULL,
     nSample = NULL,
-    qcInfo = list(),
-    ldBlocks = NULL,
+    qcOptions = list(),
+    region = NULL,
     blockId = NULL,
-    extraCols = list()
+    extraCols = list(),
+    metadata = list()
 ) {
     if (missing(studyName) || missing(entry) || missing(genome)) {
-        abort("`study`, `entry`, and `genome` are all required.")
+        abort("`studyName`, `entry`, and `genome` are all required.")
     }
     varY <- .gwasValidateArgs(studyName, entry, genome, varY)
+    entry <- .ucscEntries(entry)
     cols <- list(
         study = as.character(studyName),
         varY = varY
     ) |>
         .gwasAppendOptional(nCase, nControl, nSample, studyName) |>
         .gwasAppendExtras(extraCols)
-    dfArgs <- c(cols, list(check.names = FALSE))
-    # The per-study GRanges become the collection's ELEMENTS; everything else
-    # is per-study metadata and goes in mcols. There is no `entry` column.
-    # mcols are attached to the GRangesList BEFORE new(), because new()
-    # validates during initialize() and the validity method needs the identity
-    # columns to already be there.
-    # A multi-seqname entry (e.g. a genome-wide GWAS) is split into one
-    # element per block (or per chromosome when no block manifest is given),
-    # with its metadata row replicated alongside. Splitting is unconditional:
-    # a stored element always spans exactly one seqname.
-    split <- .gwasSplitEntry(entry, ldBlocks, blockId, length(entry))
-    # `blockId` is always present, so downstream code (cTWAS in particular) can
-    # key regions without first asking how the collection was built.
-    md <- cbind(
+    dict <- .ldRefDict(.ldRefPerTuple(ldReference, length(entry)))
+    dfArgs <- c(cols, list(ldReference = dict$keys, check.names = FALSE))
+    grl <- .gwasElements(entry, dfArgs, region, blockId)
+    .withMetadata(
+        .sumStatsNewValidated(
+            "GwasSumStats",
+            grl,
+            dict$refs,
+            genome,
+            qcOptions
+        ),
+        metadata
+    )
+}
+
+# The collection's elements with their metadata. The per-study GRanges become
+# the ELEMENTS; everything else is per-study metadata and goes in mcols. There
+# is no `entry` column. mcols are attached to the GRangesList BEFORE new(),
+# because new() validates during initialize() and the validity method needs
+# the identity columns to already be there.
+# A multi-seqname entry (e.g. a genome-wide GWAS) is split into one element
+# per `region` window (or per chromosome when there are none), with its
+# metadata row replicated alongside. Splitting is unconditional: a stored
+# element always spans exactly one seqname.
+# @noRd
+.gwasElements <- function(entry, dfArgs, region, blockId) {
+    split <- .gwasSplitEntry(entry, region, blockId, length(entry))
+    pieces <- .rtlBindElements(split$entry)
+    S4Vectors::`mcols<-`(
+        pieces,
+        value = .gwasPieceMetadata(dfArgs, split, pieces)
+    )
+}
+
+# Each piece's metadata row: its entry's, replicated across the pieces the
+# entry splits into, then the block the piece covers. `blockId` is always
+# present, so downstream code (cTWAS in particular) can key regions without
+# first asking how the collection was built. So are `region` and
+# `regionGiven`, so the block range of a row, and whether the caller gave it,
+# need no fallback either.
+# @noRd
+.gwasPieceMetadata <- function(dfArgs, split, pieces) {
+    cbind(
         exec(S4Vectors::DataFrame, !!!dfArgs)[split$fromIdx, , drop = FALSE],
-        S4Vectors::DataFrame(blockId = split$blockId)
+        exec(
+            S4Vectors::DataFrame,
+            blockId = split$blockId,
+            !!!.regionColumns(
+                split$given,
+                split$hasGiven,
+                .rowSpanRanges(pieces)
+            )
+        )
     )
-    grl <- S4Vectors::`mcols<-`(
-        GenomicRanges::GRangesList(split$entry),
-        value = md
-    )
-    .sumStatsNewValidated("GwasSumStats", grl, ldReference, genome, qcInfo)
 }
 
 # Build and validate a SumStatsBase subclass from its GRangesList plus the
 # three collection-level slots GwasSumStats and QtlSumStats share. Shared
 # rather than duplicated so the two constructors cannot drift in how they
-# coerce those slots. Used by qtlSumStats.R too.
+# coerce those slots. Used by qtlSumStats.R too. `ldReference` is the named
+# list of distinct references (.ldRefDict()), already keyed from the rows.
 # @noRd
-.sumStatsNewValidated <- function(Class, grl, ldReference, genome, qcInfo) {
+.sumStatsNewValidated <- function(Class, grl, ldReference, genome, qcOptions) {
     # The build goes into seqinfo, which is where a GRangesList keeps it and
     # where every Bioconductor consumer reads it from. Assigned before new()
     # so validity sees the finished object.
-    built <- GenomeInfoDb::`genome<-`(grl, value = as.character(genome))
-    obj <- methods::new(
+    built <- .rtlNamed(
+        GenomeInfoDb::`genome<-`(grl, value = as.character(genome))
+    )
+    methods::new(
         Class,
         built,
-        ldReference = .asLdRef(ldReference),
-        qcInfo = as.list(qcInfo)
+        ldReference = ldReference,
+        qcOptions = as.list(qcOptions)
     )
-    methods::validObject(obj)
-    obj
 }
 
-# Split by LD block when a manifest is supplied, else by seqname. Both return
-# (entry, fromIdx); this adds the blockId the seqname path does not carry,
-# which for that path is just the seqname each piece sits on.
+# Split across the `region` windows when they are given, else by seqname.
+# Both return (entry, fromIdx); this adds each piece's blockId -- its window's
+# name, or on the seqname path the seqname it sits on -- and its given window
+# (`given`, with `hasGiven` saying which pieces have one).
 # @noRd
-.gwasSplitEntry <- function(entry, ldBlocks, blockId, n) {
-    if (!is.null(ldBlocks) && !is.null(blockId)) {
+.gwasSplitEntry <- function(entry, region, blockId, n) {
+    if (!is.null(region) && !is.null(blockId)) {
         msg <- glue(
-            "pass `ldBlocks` (derive the keys) or `blockId` (supply them), ",
-            "not both."
+            "pass `region` (its windows name the rows) or `blockId` (supply ",
+            "the names), not both."
         )
         abort(msg)
     }
-    if (!is.null(ldBlocks)) {
-        return(.rtlSplitByBlocks(entry, .asLdBlockRanges(ldBlocks)))
+    if (!is.null(region)) {
+        return(.gwasSplitByRegion(entry, region, n))
     }
     split <- .rtlSplitBySeqname(entry)
     # Supplied ids are indexed by fromIdx, exactly like the other metadata
     # columns, so an entry that still splits further replicates its id rather
     # than falling out of alignment. This is what lets a rebuild (QC) carry
     # block keys through instead of silently re-deriving them as seqnames.
+    # unname(): the seqname splitter names its pieces, and those names would
+    # otherwise ride into the mcols column and make it inconsistent with the
+    # window path, which produces a bare character vector.
+    ids <- if (is.null(blockId)) {
+        unname(map_chr(split$entry, .rtlElementSeqname))
+    } else {
+        .gwasCheckBlockId(blockId, n)[split$fromIdx]
+    }
     list_assign(
         split,
-        blockId = if (!is.null(blockId)) {
-            .gwasCheckBlockId(blockId, n)[split$fromIdx]
-        } else {
-            # unname(): the seqname splitter names its pieces, and those names
-            # would otherwise ride into the mcols column and make it
-            # inconsistent with the block path, which produces a bare
-            # character vector.
-            unname(map_chr(split$entry, .gwasElementSeqname))
-        }
+        blockId = ids,
+        given = .placeholderRanges(length(split$entry)),
+        hasGiven = rep(FALSE, length(split$entry))
     )
+}
+
+# Each study split across its windows: one set shared by every study, or a
+# list with one per study (NULL for a study to split by chromosome), as
+# `ldReference` takes one reference or a list.
+# @noRd
+.gwasSplitByRegion <- function(entry, region, n) {
+    if (!.isPerStudyRegion(region)) {
+        return(.gwasWindowSplit(entry, .asRegionRanges(region)))
+    }
+    if (length(region) != n) {
+        abort(glue(
+            "`region` as a list must have one element per `entry` ",
+            "(got {length(region)} vs {n})."
+        ))
+    }
+    .gwasCombineSplits(map2(as.list(entry), as.list(region), .gwasSplitStudy))
+}
+
+# @noRd
+.isPerStudyRegion <- function(region) {
+    methods::is(region, "GRangesList") ||
+        (is.list(region) && !is.data.frame(region))
+}
+
+# @noRd
+.gwasWindowSplit <- function(entry, windows) {
+    split <- .rtlSplitByBlocks(entry, windows)
+    list_assign(
+        split,
+        given = .bareRanges(split$blockRange),
+        hasGiven = rep(TRUE, length(split$entry)),
+        blockRange = zap()
+    )
+}
+
+# One study against its own windows, or by chromosome when it has none.
+# @noRd
+.gwasSplitStudy <- function(e, r) {
+    if (is.null(r)) {
+        return(.gwasSplitEntry(list(e), NULL, NULL, 1L))
+    }
+    .gwasWindowSplit(list(e), .asRegionRanges(r))
+}
+
+# Per-study splits as one: each study's pieces in turn, with `fromIdx`
+# pointing back at the study they came from.
+# @noRd
+.gwasCombineSplits <- function(splits) {
+    list(
+        entry = list_flatten(map(splits, "entry")),
+        fromIdx = rep(seq_along(splits), map_int(splits, .gwasSplitSize)),
+        blockId = list_c(map(splits, "blockId"), ptype = character()),
+        given = unname(unlist(.rtlBindElements(map(splits, "given")))),
+        hasGiven = list_c(map(splits, "hasGiven"), ptype = logical())
+    )
+}
+
+# @noRd
+.gwasSplitSize <- function(split) {
+    length(split$entry)
 }
 
 # @noRd
@@ -286,23 +410,13 @@ GwasSumStats <- function(
     as.character(blockId)
 }
 
-# The one seqname an already-split element sits on. NA for an empty element,
-# which carries no coordinate to name.
-# @noRd
-.gwasElementSeqname <- function(g) {
-    if (length(g) == 0L) {
-        return(NA_character_)
-    }
-    as.character(seqnames(g))[[1L]]
-}
-
 # Validate genome / entry / length consistency; returns the recycled varY.
 # @noRd
 .gwasValidateArgs <- function(studyName, entry, genome, varY) {
     if (length(genome) != 1L) {
         msg <- glue(
             "`genome` must be a single character string (one build per ",
-            "collection, because all entries share the LD reference)."
+            "collection)."
         )
         abort(msg)
     }
@@ -344,7 +458,7 @@ GwasSumStats <- function(
 # Append any user-supplied extra columns (from `...`).
 # @noRd
 .gwasAppendExtras <- function(cols, extras) {
-    c(cols, extras)
+    c(cols, .extraColsList(extras))
 }
 
 
@@ -369,7 +483,7 @@ GwasSumStats <- function(
         }
         msg <- glue(
             "This GwasSumStats has {n_distinct(studies)} studies. ",
-            "Pass `study = <name>` to select one. ",
+            "Pass `studyName = <name>` to select one. ",
             "Available: {str_flatten(unique(studies), ', ')}"
         )
         abort(msg)
@@ -391,8 +505,6 @@ GwasSumStats <- function(
 #' @param x A \code{GwasSumStats} object.
 #' @param studyName Character (length 1) study identifier. Optional when the
 #'   collection has a single row.
-#' @param ranges Optional \code{GRanges} restricting the returned variants to
-#'   those it overlaps. \code{NULL} (default) returns the study's full set.
 #' @param context,trait,annotateSignificance QTL-only selectors, named here so
 #'   that supplying one is an error rather than a silently ignored request. A
 #'   GWAS has no context or trait axis and carries no significance annotation;
@@ -405,7 +517,6 @@ setMethod(
     function(
         x,
         studyName = NULL,
-        ranges = NULL,
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL
@@ -416,7 +527,7 @@ setMethod(
         # silently ignored request -- the shared SumStatsBase accessors pass
         # the union of both classes' selectors.
         .gwasRefuseQtlSelectors(context, trait, annotateSignificance)
-        .ssStitchElements(x, .gwasSelectStudy(x, studyName), ranges)
+        .ssStitchElements(x, .gwasSelectStudy(x, studyName))
     }
 )
 
@@ -433,77 +544,27 @@ setMethod(
     abort(glue(
         "sumStats(GwasSumStats): {str_flatten(names(given)[given], ', ')} ",
         "{if (sum(given) == 1L) 'is' else 'are'} a QtlSumStats selector. ",
-        "A GWAS is selected by `study` (and narrowed by `ranges`)."
+        "A GWAS is selected by `studyName`; narrow it first with ",
+        "subsetByOverlaps()."
     ))
 }
 
 # z / nSamples / maf / nSnps are provided once by SumStatsBase (AllClasses.R).
 
-#' @title Coerce Summary Statistics to a Data Frame
-#' @description Coerce one tuple of a \code{GwasSumStats} or
-#'   \code{QtlSumStats} collection to a per-variant \code{data.frame} in the
-#'   standardized layout \code{variant_id, chrom, pos, A1, A2, z, beta, se, N,
-#'   maf} (optional columns omitted when absent on the entry). This is the
-#'   table view of \code{\link{sumStats}}, which returns the same selection as
-#'   a \code{GRanges}; coercion rather than a return-type argument is the
-#'   Bioconductor idiom for choosing a representation.
-#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
-#' @param row.names,optional Accepted for compatibility with
-#'   \code{as.data.frame} and ignored.
-#' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
-#'   to this study; \code{NULL} matches all studies.
-#' @param context Character (length 1) or \code{NULL}. Restrict the selection to
-#'   this context; \code{NULL} matches all contexts (\code{QtlSumStats} only).
-#' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
-#'   this trait; \code{NULL} matches all traits (\code{QtlSumStats} only).
-#' @param require Character vector. Columns that must be present (derived if
-#'   necessary) in the returned summary-statistics data frame.
-#' @param derive Whether to derive missing standard columns from the available
-#'   ones; \code{"zFromBetaSe"} recovers \code{z} from \code{beta}/\code{se}.
-#' @param keepChrPrefix Logical. If \code{TRUE}, keep the \code{chr} prefix on
-#'   chromosome names; otherwise strip it.
-#' @param ... Unused.
-#' @return A \code{data.frame}.
-#' @examples
-#' data(qtlSumStatsExample)
-#' head(as.data.frame(qtlSumStatsExample))
-#' @rdname sumStatsDataFrame
-#' @aliases sumStatsDataFrame
-#' @export
-setMethod(
-    "as.data.frame",
-    "GwasSumStats",
-    function(
-        x,
-        row.names = NULL,
-        optional = FALSE,
-        studyName = NULL,
-        require = character(0),
-        derive = c("none", "zFromBetaSe"),
-        keepChrPrefix = TRUE,
-        ...
-    ) {
-        derive <- arg_match(derive)
-        gr <- sumStats(x, studyName = studyName)
-        .entryToSumstatDf(
-            gr,
-            require = require,
-            derive = derive,
-            keepChrPrefix = keepChrPrefix,
-            label = glue(
-                "GwasSumStats[",
-                "{if (is.null(studyName)) '<auto>' else studyName}]"
-            )
-        )
-    }
-)
-
-
 #' @rdname varY
 #' @export
 setMethod("varY", "GwasSumStats", function(x, studyName = NULL) {
     idx <- .gwasSelectStudy(x, studyName)
-    val <- x$varY[[idx]]
+    # One value per study, held on each of its rows; rows that disagree have
+    # no single answer, so that is an error rather than a pick.
+    val <- unique(as.numeric(x$varY[idx]))
+    if (length(val) > 1L) {
+        abort(glue(
+            "varY(): the {length(idx)} rows of study ",
+            "'{x$study[[idx[[1L]]]]}' disagree on varY ",
+            "({str_flatten(val, ', ')})."
+        ))
+    }
     if (is.na(val)) NULL else val
 })
 
@@ -522,22 +583,23 @@ setMethod("varY", "GwasSumStats", function(x, studyName = NULL) {
 #'
 #' The three collection-level slots are merged rather than taken from the first
 #' input: \code{genome} and the \code{\link{summaryStatsQc}} options must agree
-#' across the inputs (a mismatch is an error, not a silent first-wins), the
-#' per-element \code{qcInfo$entryAudit} concatenates in element order so
-#' \code{\link{qcDiagnostics}} keeps addressing the right element, and the
-#' LD references combine: genotype panels union into one panel over the shared
-#' genotype handle. That last one matters: block-parallel pipelines narrow each
-#' piece's panel to its own block, so keeping only the first would leave a
-#' multi-block collection whose LD reference covers one block. An
-#' \code{LdMatrix} or a \code{GenotypeMixture} cannot be unioned that way;
-#' one of the inputs' references must already cover the others, or the
-#' combined one is passed as \code{ldReference}.
+#' across the inputs (a mismatch is an error, not a silent first-wins), each
+#' row keeps its own QC audit, so \code{\link{qcDiagnostics}} keeps
+#' addressing the right element, and every row keeps its own LD reference.
+#' References that are views of one source are stored once: genotype panels
+#' read from the same files union into one panel over the shared genotype
+#' handle (block-parallel pipelines narrow each
+#' piece's panel to its own block, so a multi-block collection would otherwise
+#' hold one panel per block), and an \code{LdMatrix} or
+#' \code{GenotypeMixture} that another input's reference covers gives way to
+#' that one. Inputs on unrelated references keep both.
 #'
 #' @param ... Two or more \code{GwasSumStats} objects, or a single \code{list}
 #'   of them.
-#' @param ldReference Optional genotype panel (see \code{\link{readGenotypes}})
-#'   to attach to the combined collection, overriding the unioned one. Default
-#'   \code{NULL}.
+#' @param ldReference Optional LD reference -- a genotype panel (see
+#'   \code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
+#'   \code{LdMatrix} -- that every row of the combined collection uses
+#'   instead of its own. Default \code{NULL}.
 #' @return A single combined \code{GwasSumStats}.
 #' @seealso \code{\link{combineQtlSumStats}},
 #'   \code{\link{combineFineMappingResults}}, \code{\link{combineTwasWeights}}

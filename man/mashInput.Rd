@@ -22,7 +22,8 @@ mashInput(
 fine-mapping result objects, one per region. Names disambiguate
 rownames across regions (defaults to \code{region1}, \code{region2}, ...).
 For \code{QtlSumStats} inputs \code{\link{summaryStatsQc}} must have been
-run (the matrix builder rejects un-QC'd SumStats).}
+run (the matrix builder rejects un-QC'd SumStats). The conditions are a
+QTL object's contexts and a GWAS object's studies.}
 
 \item{nRandom, nNull}{Per-object random / null sample sizes (default 10 each).}
 

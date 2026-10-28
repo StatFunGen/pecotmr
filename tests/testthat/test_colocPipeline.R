@@ -14,7 +14,7 @@ context("colocPipeline")
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
             A2 = rep("G", snp_n),
@@ -68,7 +68,7 @@ context("colocPipeline")
             dimnames = list(NULL, variant_ids)
         )
     }
-    fineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
+    FineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
 }
 
 .cp_makeQtlFmr <- function(
@@ -133,7 +133,7 @@ context("colocPipeline")
         entry = list(gr),
         genome = "hg19",
         ldReference = .cp_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        qcOptions = if (qc) list(step1 = "ok") else list()
     )
 }
 
@@ -159,7 +159,7 @@ context("colocPipeline")
         entry = list(gr),
         genome = "hg19",
         ldReference = .cp_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        qcOptions = if (qc) list(step1 = "ok") else list()
     )
 }
 
@@ -263,11 +263,16 @@ test_that(".colocRequireMatchingLdRefs: sample set mismatch errors", {
 test_that(".colocRequireMatchingLdRefs: differently trimmed panels pass", {
     # The two sides QC'd separately keep different subsets of one LD
     # reference; the panels overlap, so the check warns rather than aborting.
+    qfmr <- pecotmr:::.withRowLdRefs(
+        .cp_makeQtlFmr(),
+        .cp_makeHandle(snp_n = 6L)
+    )
+    gfmr <- pecotmr:::.withRowLdRefs(
+        .cp_makeGwasFmr(),
+        .cp_makeHandle(snp_n = 7L)
+    )
     expect_warning(
-        expect_null(pecotmr:::.colocRequireMatchingLdRefs(
-            .cp_makeHandle(snp_n = 6L),
-            .cp_makeHandle(snp_n = 7L)
-        )),
+        expect_null(pecotmr:::.colocRequireMatchingLdRefs(qfmr, gfmr)),
         "share 6 variant"
     )
 })
@@ -293,6 +298,43 @@ test_that("colocPipeline: returns one row per (QTL tuple, GWAS tuple) pair", {
     expect_setequal(out$study, "Q1")
     expect_setequal(out$context, c("c1", "c2"))
     expect_setequal(out$gwasStudy, c("G1", "G2"))
+})
+
+test_that("colocPipeline carries the sides' genome build and refuses two", {
+    qfmr <- .cp_makeQtlFmr()
+    gfmr <- GenomeInfoDb::`genome<-`(.cp_makeGwasFmr(), value = "hg38")
+    # Per-variant results too, so the pair holds variants for seqinfo to
+    # describe: a collection of empty elements has no sequence to name a
+    # build for.
+    summaryOnly <- .cp_mockColocBfBf()
+    local_mocked_bindings(
+        coloc.bf_bf = function(qLbf, gLbf, ...) {
+            res <- summaryOnly(qLbf, gLbf, ...)
+            # The LBF matrices carry a `null` column beside the variants.
+            ids <- colnames(qLbf)[str_detect(colnames(qLbf), ":")]
+            res$results <- data.frame(
+                snp = ids,
+                SNP.PP.H4.row1 = 1 / length(ids)
+            )
+            res
+        },
+        .package = "coloc"
+    )
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = gfmr
+    ))
+    expect_gt(sum(lengths(out)), 0L)
+    expect_identical(unique(unname(GenomeInfoDb::genome(out))), "hg38")
+    expect_identical(
+        unique(unname(GenomeInfoDb::genome(colocVariants(out)))),
+        "hg38"
+    )
+    hg19 <- GenomeInfoDb::`genome<-`(qfmr, value = "hg19")
+    expect_error(
+        colocPipeline(qtlFineMappingResult = hg19, gwasInput = gfmr),
+        "colocPipeline: the inputs name different genome builds"
+    )
 })
 
 # ===========================================================================
@@ -387,8 +429,14 @@ test_that("colocPipeline: resolves GwasSumStats via fineMappingPipeline (mocked)
     qfmr <- .cp_makeQtlFmr()
     gss <- .cp_makeGwasSumstats()
     local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+    # Like the real pipeline, the stand-in keeps each row's block name, which
+    # is what the pairing finds a region's fit by.
     local_mocked_bindings(
-        fineMappingPipeline = function(data, methods, ...) .cp_makeGwasFmr(),
+        fineMappingPipeline = function(data, methods, ...) {
+            fmr <- .cp_makeGwasFmr()
+            fmr$blockId <- as.character(data$blockId)
+            fmr
+        },
         .package = "pecotmr"
     )
     out <- suppressWarnings(colocPipeline(
@@ -460,7 +508,7 @@ test_that("colocPipeline: empty result has the documented schema", {
         V = 0,
         lbf_variable = matrix(NA_real_, 1, 1)
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = shared,
         susieFit = emptyFit,
         topLoci = data.frame(
@@ -502,7 +550,8 @@ test_that("colocPipeline: empty result has the documented schema", {
             "PP.H3.abf",
             "PP.H4.abf",
             "qtlRetainedMass",
-            "gwasRetainedMass"
+            "gwasRetainedMass",
+            "ldReference"
         )
     )
 })
@@ -511,8 +560,8 @@ test_that("colocPipeline: empty result has the documented schema", {
 # Internal helpers
 # ===========================================================================
 
-test_that(".colocExtractLbfFromEntry: entry without trimmedFit returns NULL with warning", {
-    e <- fineMappingRow(
+test_that(".colocExtractLbfFromEntry: refuses an entry with no retained fit", {
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = NULL,
         topLoci = data.frame(
@@ -552,7 +601,7 @@ test_that(".colocExtractLbfFromEntry: filterLbfCs subsets by cs_index", {
         ),
         sets = list(cs_index = c(1L, 3L))
     ) # keep effects 1 and 3
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
         topLoci = data.frame(
@@ -616,21 +665,8 @@ test_that(".colocStandardiseRow: fills in missing PP columns with NA", {
     ))
 })
 
-
-context("encoloc")
-
-# The file-path colocalization / enrichment wrappers (colocWrapper,
-# xqtlEnrichmentWrapper, colocPostProcessor) and their helpers
-# (filterAndOrderColocResults, calculateCumsum, calculate_purity,
-# processColocResults, extract_ld_for_variants) have been removed in
-# favor of the S4 colocPipeline / qtlEnrichmentPipeline / enlocPipeline
-# entry points. The previous tests against the file-path wrappers no
-# longer apply; they relied on mocking rssAnalysisPipeline (also
-# removed). New tests for colocPipeline / qtlEnrichmentPipeline /
-# enlocPipeline live alongside their pipeline implementations.
-
 # ===========================================================================
-# .colocLookupEnrichment (formerly .enlocLookupEnrichment, now shared)
+# .colocLookupEnrichment
 # ===========================================================================
 
 test_that(".colocLookupEnrichment: returns the value for a (gwasStudy, qtlStudy, qtlContext) hit", {
@@ -675,7 +711,7 @@ test_that(".colocLookupEnrichment: returns NA when no row matches", {
 })
 
 # ===========================================================================
-# .colocEmptyResult(enriched = TRUE) — formerly .enlocEmptyResult
+# .colocEmptyResult(enriched = TRUE)
 # ===========================================================================
 
 test_that(".colocEmptyResult(enriched=TRUE): includes enrichment + p12Used schema", {
@@ -734,7 +770,7 @@ test_that("colocPipeline: rejects enrichment missing required columns", {
 
 # --- enrichment end-to-end (lookup + p12 scaling + output columns) ----------
 
-test_that("colocPipeline: enrichment mode takes its priors from the table", {
+test_that("colocPipeline: enrichment takes table priors and reports RCP/LCP", {
     qfmr <- .cp_makeQtlFmr() # Q1 / c1 / t1 / susie
     gfmr <- .cp_makeGwasFmr() # G1 / susie
     enr <- data.frame(
@@ -764,26 +800,7 @@ test_that("colocPipeline: enrichment mode takes its priors from the table", {
     # qtlEnrichmentPipeline derives p12 = P_eqtl * expit(a0 + a1) the way
     # fastenloc does; the pipeline uses that, rather than scaling a default.
     expect_equal(unique(out$p12Used), 2.5e-5)
-})
-
-test_that("enrichment mode reports RCP and LCP alongside the hypotheses", {
-    qfmr <- .cp_makeQtlFmr()
-    gfmr <- .cp_makeGwasFmr()
-    enr <- data.frame(
-        gwasStudy = "G1",
-        qtlStudy = "Q1",
-        qtlContext = "c1",
-        enrichment = 2.0,
-        colocP1 = 3e-4,
-        colocP2 = 7e-4,
-        colocP12 = 2.5e-5,
-        stringsAsFactors = FALSE
-    )
-    out <- suppressWarnings(colocPipeline(
-        qtlFineMappingResult = qfmr,
-        gwasInput = gfmr,
-        enrichment = enr
-    ))
+    # RCP and LCP are reported alongside the hypotheses.
     pairs <- colocPairs(out)
     expect_true(all(c("RCP", "LCP") %in% colnames(pairs)))
     # The two names for the same quantities: fastenloc's RCP is the posterior
@@ -905,7 +922,7 @@ test_that("colocPipeline: an enrichment miss warns and drops to plain priors", {
     expect_equal(unique(out$p12Used), 5e-6)
 })
 
-# --- returnGwasFineMapping attached on the empty-pair early return (~205) ----
+# --- returnGwasFineMapping attached on the empty-pair early return ----------
 
 test_that("colocPipeline: attaches gwasFineMapping when no pairs survive", {
     qfmr <- .cp_makeQtlFmr()
@@ -918,7 +935,7 @@ test_that("colocPipeline: attaches gwasFineMapping when no pairs survive", {
         V = 0,
         lbf_variable = matrix(NA_real_, 1, 1)
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = emptyFit,
         topLoci = .cp_tl("chr1:100:A:G", pip = 0)
@@ -946,7 +963,7 @@ test_that("colocPipeline: attaches gwasFineMapping when no pairs survive", {
     expect_identical(attr(out, "gwasFineMapping"), resolved)
 })
 
-# --- per-pair loop skips: no usable QTL LBF (~223) and no overlap (~233) -----
+# --- per-pair loop skips: no usable QTL LBF and no overlap -------------------
 
 test_that("colocPipeline: skips a QTL entry with no usable LBF", {
     badFit <- list(
@@ -955,7 +972,7 @@ test_that("colocPipeline: skips a QTL entry with no usable LBF", {
         V = 0,
         lbf_variable = matrix(NA_real_, 1, 1)
     )
-    badEntry <- fineMappingRow(
+    badEntry <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = badFit,
         topLoci = .cp_tl("chr1:100:A:G", pip = 0)
@@ -1002,7 +1019,7 @@ test_that("colocPipeline: skips a pair with no shared variants", {
     expect_equal(nrow(out), 0L)
 })
 
-# --- .colocFilterCsByConcentration (~324-331) -------------------------------
+# --- .colocFilterCsByConcentration -----------------------------------------
 
 test_that(".colocFilterCsByConcentration: keeps narrow CS, drops diffuse ones", {
     fit <- list(alpha = matrix(0.1, nrow = 3, ncol = 10)) # 10 variants
@@ -1043,7 +1060,7 @@ test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
         dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     fit <- list(fsusie_result = list(lBF = list(m1, m2)))
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
         topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
@@ -1068,7 +1085,7 @@ test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)",
         dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     fit <- list(list(fsusie_result = list(lBF = list(m1))))
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
         topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
@@ -1086,7 +1103,7 @@ test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)",
 
 test_that(".colocExtractLbfFromEntry: refuses a fit carrying no LBF slot", {
     fit <- list(notLbf = list(a = 1))
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = fit,
         topLoci = .cp_tl("chr1:100:A:G")
@@ -1126,7 +1143,7 @@ test_that(".colocExtractLbfFromEntry: refuses an empty LBF matrix", {
             dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:3)))
         )
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
         susieFit = fit,
         topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:3)))
@@ -1154,7 +1171,7 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
         ),
         alpha = matrix(0.25, 3, 4)
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
         topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
@@ -1179,7 +1196,7 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
 
 test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit lacks them", {
     fit <- list(lbf_variable = matrix(1:8, 2, 4)) # no dimnames
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
         topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
@@ -1206,7 +1223,7 @@ test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named
     )
     # variantIds length (1) != ncol (4) so colnames are NOT back-filled, and the
     # NA-named columns are dropped, leaving a 0-column matrix.
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = fit,
         topLoci = .cp_tl("chr1:100:A:G")
@@ -1222,7 +1239,7 @@ test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named
     expect_null(out)
 })
 
-# --- .colocAlignLbf no-overlap branch (~479) --------------------------------
+# --- .colocAlignLbf no-overlap branch --------------------------------------
 
 test_that(".colocAlignLbf: returns NULL when there are no shared variants", {
     q <- matrix(
@@ -1502,16 +1519,12 @@ test_that("priors and enrichment cannot both be given", {
         ),
         "cannot both be given"
     )
-    # Either alone is fine.
+    # Either alone is fine; the same table alone is the enrichment-mode run
+    # tested above.
     expect_no_error(suppressWarnings(colocPipeline(
         qtlFineMappingResult = qfmr,
         gwasInput = gfmr,
         priors = ColocPriorParam(p12 = 1e-5)
-    )))
-    expect_no_error(suppressWarnings(colocPipeline(
-        qtlFineMappingResult = qfmr,
-        gwasInput = gfmr,
-        enrichment = enr
     )))
 })
 
@@ -1584,28 +1597,27 @@ test_that("GwasFineMappingParam accessors round-trip a nested bundle", {
     expect_equal(fineMappingMethods(g), "susie")
     expect_s4_class(credibleSetParam(g), "CredibleSetParam")
 
-    # Why this class has accessors at all: once CredibleSetParam is
-    # settable, the container must let the edited record back in, or the
-    # nested settings would be readable but not writable.
+    # The container must let an edited nested record back in, or the nested
+    # settings would be readable but not writable.
     g2 <- g
-    cs <- credibleSetParam(g2)
-    csCoverage(cs) <- 0.8
-    credibleSetParam(g2) <- cs
+    cs <- g2$credibleSetParam
+    cs$coverage <- 0.8
+    g2$credibleSetParam <- cs
     expect_equal(csCoverage(credibleSetParam(g2)), 0.8)
     expect_equal(csCoverage(credibleSetParam(g)), 0.95)
 
     # The nested slots are typed, so the wrong Param is refused rather than
     # surfacing as a missing field somewhere downstream.
     expect_error(
-        susieRssParam(g) <- CredibleSetParam(),
-        "not valid for @.+susieRssParam"
+        g$susieRssParam <- CredibleSetParam(),
+        "susieRssParam"
     )
     g3 <- g
-    susieRssParam(g3) <- SusieRssParam(serFallback = TRUE)
+    g3$susieRssParam <- SusieRssParam(serFallback = TRUE)
     expect_s4_class(g3, "GwasFineMappingParam")
 })
 
-test_that("GwasFineMappingParam accessors read and replace every field", {
+test_that("GwasFineMappingParam fields read and replace, each one", {
     # Dispatching each accessor is what exercises the generics declared in
     # AllGenerics.R; the constructor alone never reaches them.
     p <- GwasFineMappingParam()
@@ -1618,14 +1630,564 @@ test_that("GwasFineMappingParam accessors read and replace every field", {
 
     # Replacement edits a copy and leaves the original alone.
     edited <- p
-    fineMappingMethods(edited) <- "susieInf"
-    initializeWithSusieInf(edited) <- FALSE
-    fitRetention(edited) <- "full"
-    panelFilterParam(edited) <- PanelFilterParam()
+    edited$methods <- "susieInf"
+    edited$initializeWithSusieInf <- FALSE
+    edited$fitRetention <- "full"
+    edited$panelFilterParam <- PanelFilterParam()
     expect_equal(fineMappingMethods(edited), "susieInf")
     expect_false(initializeWithSusieInf(edited))
     expect_equal(fitRetention(edited), "full")
     expect_s4_class(panelFilterParam(edited), "PanelFilterParam")
     expect_equal(fineMappingMethods(p), "susie")
     expect_true(initializeWithSusieInf(p))
+})
+
+# ===========================================================================
+# Per-pair LD references
+# ===========================================================================
+
+# An LdMatrix over five variants at 100 bp spacing on `chrom`.
+.cp_ldm <- function(rho, chrom = "chr1") {
+    ids <- sprintf("%s:%d:A:G", chrom, 100L * (1:5))
+    LdMatrix(`dimnames<-`(rho^abs(outer(1:5, 1:5, "-")), list(ids, ids)))
+}
+
+test_that("coloc refuses an overlapping pair on two different references", {
+    qfmr <- pecotmr:::.withRowLdRefs(.cp_makeQtlFmr(), .cp_ldm(0.2))
+    gfmr <- pecotmr:::.withRowLdRefs(.cp_makeGwasFmr(), .cp_ldm(0.8))
+    expect_error(
+        pecotmr:::.colocRequireMatchingLdRefs(qfmr, gfmr),
+        "disagree on the LD"
+    )
+})
+
+test_that("coloc lets rows that never pair sit on different references", {
+    # The QTL row is on chr1 and the GWAS row on chr2, so coloc never scores
+    # them against each other and their references need not match.
+    qfmr <- pecotmr:::.withRowLdRefs(.cp_makeQtlFmr(), .cp_ldm(0.2))
+    chr2 <- .cp_makeFmEntry(variant_ids = paste0("chr2:", 100 * (1:5), ":A:G"))
+    gfmr <- pecotmr:::.withRowLdRefs(
+        .cp_makeGwasFmr(entries = list(chr2)),
+        .cp_ldm(0.8, chrom = "chr2")
+    )
+    expect_null(pecotmr:::.colocRequireMatchingLdRefs(qfmr, gfmr))
+})
+
+# ===========================================================================
+# A QTL region over several GWAS LD blocks is one colocalization
+# ===========================================================================
+
+# One GWAS study fine-mapped in two LD blocks: chr1:100-500 in block
+# chr1_1_550 and chr1:600-1000 in block chr1_551_2000, two effects each.
+.cp_blockIds <- c("chr1_1_550", "chr1_551_2000")
+.cp_blockWindows <- GenomicRanges::GRanges(
+    "chr1",
+    IRanges::IRanges(c(1L, 551L), c(550L, 2000L))
+)
+
+.cp_makeBlockedGwasFmr <- function(
+    blockId = .cp_blockIds,
+    method = "susie",
+    region = .cp_blockWindows
+) {
+    GwasFineMappingResult(
+        studyName = rep("G1", 2L),
+        method = rep(method, 2L),
+        entry = list(
+            .cp_makeFmEntry(paste0("chr1:", 100 * (1:5), ":A:G")),
+            .cp_makeFmEntry(paste0("chr1:", 100 * (6:10), ":A:G"))
+        ),
+        blockId = blockId,
+        region = region,
+        ldReference = .cp_makeHandle(snp_n = 10L)
+    )
+}
+
+# A QTL fit over `positions` (multiples of 100 on chr1).
+.cp_makeQtlOver <- function(positions, trait = "t1") {
+    QtlFineMappingResult(
+        studyName = "Q1",
+        context = "c1",
+        trait = trait,
+        method = "susie",
+        entry = list(.cp_makeFmEntry(paste0("chr1:", positions, ":A:G"))),
+        ldReference = .cp_makeHandle(snp_n = 10L)
+    )
+}
+
+test_that(".colocCollapseBlocks stacks blocks, each confined to its own", {
+    recs <- pecotmr:::.colocPreextractGwasLbf(
+        .cp_makeBlockedGwasFmr(),
+        ColocLbfFilterParam()
+    )
+    expect_length(recs, 2L)
+    one <- pecotmr:::.colocCollapseBlocks(recs[1L])
+    expect_identical(one, recs[[1L]])
+    merged <- pecotmr:::.colocCollapseBlocks(recs)
+    blockA <- paste0("chr1:", 100 * (1:5), ":A:G")
+    blockB <- paste0("chr1:", 100 * (6:10), ":A:G")
+    expect_identical(colnames(merged$lbf), c(blockA, blockB))
+    # Block A's effects carry no evidence about block B's variants, and the
+    # reverse.
+    expect_true(all(merged$lbf[1:2, blockB] == -Inf))
+    expect_true(all(merged$lbf[3:4, blockA] == -Inf))
+    expect_equal(merged$lbf[1:2, blockA], recs[[1L]]$lbf)
+    # Block B's effects are numbered on from block A's two.
+    expect_identical(merged$effect, 1:4)
+    expect_identical(merged$nEffects, 4L)
+    # The blockIds spell coordinates, so the merged block is their union.
+    expect_identical(merged$blockId, "chr1_1_2000")
+    expect_match(merged$label, "chr1_1_2000")
+})
+
+test_that(".colocMergedBlockId names the stretch a fit's blocks cover", {
+    blocks <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(1L, 551L), c(550L, 2000L))
+    )
+    spans <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100L, 600L), c(500L, 1000L))
+    )
+    # The stretch comes from the blocks' windows, whatever the ids say.
+    expect_identical(
+        pecotmr:::.colocMergedBlockId(.cp_blockIds, blocks),
+        "chr1_1_2000"
+    )
+    expect_identical(
+        pecotmr:::.colocMergedBlockId(c("blockA", "blockB"), spans),
+        "chr1_100_1000"
+    )
+    # One block keeps its own id, whatever it is.
+    expect_identical(
+        pecotmr:::.colocMergedBlockId("blockA", blocks[1L]),
+        "blockA"
+    )
+    expect_identical(pecotmr:::.colocMergedBlockId("chr1", spans[1L]), "chr1")
+})
+
+test_that(".colocMergedLdRef keeps a shared reference and drops a split one", {
+    ref <- .cp_makeHandle()
+    same <- list(
+        list(ldKey = "ld1", ldReference = ref),
+        list(ldKey = "ld1", ldReference = ref)
+    )
+    expect_identical(pecotmr:::.colocMergedLdRef(same), ref)
+    split <- list(
+        list(ldKey = "ld1", ldReference = ref),
+        list(ldKey = "ld2", ldReference = ref)
+    )
+    expect_null(pecotmr:::.colocMergedLdRef(split))
+})
+
+test_that("colocPipeline scores a region over two blocks as one fit", {
+    skip_if_not_installed("coloc")
+    set.seed(3)
+    res <- suppressWarnings(colocPipeline(
+        .cp_makeQtlOver(100 * (1:10)),
+        gwasInput = .cp_makeBlockedGwasFmr(),
+        adjustPips = FALSE
+    ))
+    pairs <- colocPairs(res)
+    expect_identical(unique(pairs$blockId), "chr1_1_2000")
+    # Every QTL effect is scored over its whole region, against all four GWAS
+    # effects of the one collapsed fit.
+    expect_true(all(pairs$nSnps == 10L))
+    expect_setequal(pairs$gwasCs, 1:4)
+    pp <- as.matrix(pairs[, str_c("PP.H", 0:4, ".abf")])
+    expect_false(anyNA(pp))
+    expect_equal(unname(rowSums(pp)), rep(1, nrow(pairs)))
+    # A region inside one block reads that block alone, under its own id.
+    inside <- suppressWarnings(colocPipeline(
+        .cp_makeQtlOver(100 * (1:5)),
+        gwasInput = .cp_makeBlockedGwasFmr(),
+        adjustPips = FALSE
+    ))
+    expect_identical(unique(colocPairs(inside)$blockId), "chr1_1_550")
+    expect_true(all(colocPairs(inside)$nSnps == 5L))
+})
+
+test_that("colocPipeline keeps two methods' block fits apart", {
+    skip_if_not_installed("coloc")
+    set.seed(4)
+    gfmr <- combineFineMappingResults(
+        .cp_makeBlockedGwasFmr(method = "susie"),
+        .cp_makeBlockedGwasFmr(method = "ser")
+    )
+    res <- suppressWarnings(colocPipeline(
+        .cp_makeQtlOver(100 * (1:10)),
+        gwasInput = gfmr,
+        adjustPips = FALSE
+    ))
+    pairs <- colocPairs(res)
+    byMethod <- split(pairs$gwasCs, pairs$gwasMethod)
+    expect_setequal(names(byMethod), c("susie", "ser"))
+    expect_setequal(byMethod$susie, 1:4)
+    expect_setequal(byMethod$ser, 1:4)
+})
+
+# A GwasSumStats split into the two blocks above, and a fineMappingPipeline
+# stand-in that records what it was given and fits each row it was handed.
+.cp_makeBlockedGwasSumstats <- function() {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:10), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:10)),
+        A1 = "A",
+        A2 = "G",
+        Z = seq_len(10L) / 10,
+        N = 1000L
+    )
+    GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .cp_makeHandle(snp_n = 10L),
+        qcOptions = list(step1 = "ok"),
+        region = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(1L, 551L), c(550L, 2000L))
+        )
+    )
+}
+
+.cp_recordingFineMapper <- function(seen) {
+    function(data, methods, ...) {
+        seen$data <- data
+        GwasFineMappingResult(
+            studyName = as.character(data$study),
+            method = rep("susie", nrow(data)),
+            entry = map(
+                as.list(data),
+                function(gr) .cp_makeFmEntry(S4Vectors::mcols(gr)$SNP)
+            ),
+            blockId = as.character(data$blockId),
+            ldReference = .cp_makeHandle(snp_n = 10L)
+        )
+    }
+}
+
+test_that("colocPipeline fine-maps each set of blocks a region reaches once", {
+    seen <- new.env()
+    scored <- new.env()
+    scored$gwas <- character(0)
+    local_mocked_bindings(
+        fineMappingPipeline = .cp_recordingFineMapper(seen),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        coloc.bf_bf = function(qLbf, gLbf, p1, p2, p12, ...) {
+            scored$gwas <- c(scored$gwas, str_flatten(colnames(gLbf), ","))
+            .cp_mockColocBfBf()(qLbf, gLbf, p1, p2, p12)
+        },
+        .package = "coloc"
+    )
+    # The first region reaches no GWAS row, so the PIP reconciliation drops
+    # it, and the regions after it move up a row; each must still find its
+    # own fit.
+    elsewhere <- QtlFineMappingResult(
+        studyName = "Q1",
+        context = "c1",
+        trait = "elsewhere",
+        method = "susie",
+        entry = list(.cp_makeFmEntry(paste0("chr2:", 100 * (1:5), ":A:G")))
+    )
+    qtl <- combineFineMappingResults(
+        elsewhere,
+        .cp_makeQtlOver(100 * (1:5), trait = "inside"),
+        .cp_makeQtlOver(100 * (4:8), trait = "across")
+    )
+    res <- suppressMessages(suppressWarnings(colocPipeline(
+        qtl,
+        gwasInput = .cp_makeBlockedGwasSumstats(),
+        returnGwasFineMapping = TRUE
+    )))
+    # Two sets: block A alone, and both blocks stitched together.
+    expect_identical(
+        as.character(seen$data$blockId),
+        c("chr1_1_550", "chr1_1_2000")
+    )
+    expect_identical(unname(lengths(seen$data)), c(5L, 10L))
+    # Each set's range is the stretch its blocks' given ranges cover.
+    expect_identical(
+        as.character(seen$data$region),
+        c("chr1:1-550", "chr1:1-2000")
+    )
+    expect_identical(seen$data$regionGiven, c(TRUE, TRUE))
+    # Each region is scored against its own set's fit and no other.
+    pairs <- colocPairs(res)
+    expect_identical(
+        pairs$blockId[match(c("inside", "across"), pairs$trait)],
+        c("chr1_1_550", "chr1_1_2000")
+    )
+    expect_length(scored$gwas, 2L)
+    expect_identical(
+        S4Vectors::mcols(attr(res, "gwasFineMapping"))$blockId,
+        c("chr1_1_550", "chr1_1_2000")
+    )
+})
+
+test_that("colocPipeline needs one LD reference across stitched blocks", {
+    gws <- pecotmr:::.withRowLdRefs(
+        .cp_makeBlockedGwasSumstats(),
+        list(.cp_ldm(0.2), .cp_ldm(0.5))
+    )
+    expect_error(
+        pecotmr:::.colocResolveGwasFmr(
+            gws,
+            GwasFineMappingParam(),
+            .cp_makeQtlOver(100 * (4:8))
+        ),
+        "the rows of GWAS study 'G1' a QTL region reaches use 2"
+    )
+})
+
+test_that("colocPipeline fine-maps nothing when no region reaches the GWAS", {
+    resolved <- pecotmr:::.colocResolveGwasFmr(
+        .cp_makeBlockedGwasSumstats(),
+        GwasFineMappingParam(),
+        QtlFineMappingResult(
+            studyName = "Q1",
+            context = "c1",
+            trait = "t1",
+            method = "susie",
+            entry = list(.cp_makeFmEntry(paste0("chr2:", 100 * (1:5), ":A:G")))
+        )
+    )
+    expect_equal(nrow(resolved$fmr), 0L)
+    expect_equal(nrow(resolved$pairing), 0L)
+})
+
+test_that(".colocWithNull adds coloc's null column at log BF 0", {
+    m <- matrix(c(1, -Inf), 1L, dimnames = list(NULL, c("a", "b")))
+    expect_identical(
+        pecotmr:::.colocWithNull(m),
+        cbind(m, null = 0)
+    )
+})
+
+test_that("enloc reads SuSiE's natural-log Bayes factors as such", {
+    # With a flat GWAS effect the colocalization mass follows the QTL PIPs,
+    # which must be SuSiE's softmax over natural-log Bayes factors.
+    lbf <- c(2, 1, 0)
+    aligned <- list(
+        qtl = matrix(lbf, 1L, dimnames = list(NULL, c("a", "b", "c"))),
+        gwas = matrix(0, 1L, 3L, dimnames = list(NULL, c("a", "b", "c")))
+    )
+    out <- pecotmr:::.colocEnlocOneEffectPair(
+        1L,
+        1L,
+        aligned,
+        list(p1 = 1e-4, p2 = 1e-4, p12 = 5e-6)
+    )
+    expect_equal(
+        unname(out$scp / sum(out$scp)),
+        exp(lbf) / sum(exp(lbf))
+    )
+})
+
+test_that("the enrichment lookup matches on method when the table has it", {
+    enr <- data.frame(
+        gwasStudy = "G1",
+        gwasMethod = c("susie", "ser"),
+        qtlStudy = "Q1",
+        qtlContext = "c1",
+        qtlMethod = "susie",
+        enrichment = c(1, 2)
+    )
+    expect_null(pecotmr:::.colocValidateEnrichmentKeys(enr))
+    q <- list(study = "Q1", context = "c1", trait = "t1", method = "susie")
+    gwas <- function(m) {
+        list(study = "G1", context = NA, trait = NA, method = m)
+    }
+    expect_identical(
+        pecotmr:::.colocLookupEnrichment(enr, gwas("ser"), q),
+        2L
+    )
+    expect_identical(
+        pecotmr:::.colocLookupEnrichment(enr, gwas("susie"), q),
+        1L
+    )
+    expect_true(is.na(
+        pecotmr:::.colocLookupEnrichment(enr, gwas("susieInf"), q)
+    ))
+})
+
+test_that("a stitched set of blocks keeps its case and control counts", {
+    gws <- .cp_makeBlockedGwasSumstats()
+    withCounts <- GwasSumStats(
+        studyName = "G1",
+        entry = list(sumStats(gws)),
+        genome = "hg19",
+        ldReference = .cp_makeHandle(snp_n = 10L),
+        nCase = 100,
+        nControl = 200,
+        qcOptions = list(step1 = "ok"),
+        region = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(1L, 551L), c(550L, 2000L))
+        )
+    )
+    sets <- pecotmr:::.colocQtlRowSets(
+        withCounts,
+        .cp_makeQtlOver(100 * (4:8))
+    )
+    u <- pecotmr:::.colocUnionSumStats(withCounts, sets)
+    expect_equal(nrow(u), 1L)
+    expect_equal(u$nCase, 100)
+    expect_equal(u$nControl, 200)
+    expect_false("nSample" %in% colnames(S4Vectors::mcols(u)))
+})
+
+test_that("a stitched set is given its range only when every block was", {
+    gws <- .cp_makeBlockedGwasSumstats()
+    sets <- pecotmr:::.colocQtlRowSets(gws, .cp_makeQtlOver(100 * (4:8)))
+    given <- pecotmr:::.colocUnionSumStats(gws, sets)
+    expect_identical(as.character(given$region), "chr1:1-2000")
+    expect_true(given$regionGiven)
+    # The same blocks with their ranges computed: the set's range is the
+    # stretch their spans cover, and it is computed too.
+    computed <- GwasSumStats(
+        studyName = c("G1", "G1"),
+        entry = as.list(gws),
+        genome = "hg19",
+        ldReference = .cp_makeHandle(snp_n = 10L),
+        qcOptions = list(step1 = "ok"),
+        blockId = c("bA", "bB")
+    )
+    u <- pecotmr:::.colocUnionSumStats(
+        computed,
+        pecotmr:::.colocQtlRowSets(computed, .cp_makeQtlOver(100 * (4:8)))
+    )
+    expect_identical(u$blockId, "chr1_100_1000")
+    expect_identical(as.character(u$region), "chr1:100-1000")
+    expect_false(u$regionGiven)
+})
+
+# ===========================================================================
+# A region reaching past the GWAS blocks that were loaded
+# ===========================================================================
+
+test_that("colocPipeline refuses a region reaching past given blocks", {
+    skip_if_not_installed("coloc")
+    # The blocks' ids spell their ranges, so chr1:2100 lies in a block that
+    # was not loaded.
+    expect_error(
+        colocPipeline(
+            .cp_makeQtlOver(c(100 * (1:10), 2100)),
+            gwasInput = .cp_makeBlockedGwasFmr(),
+            adjustPips = FALSE
+        ),
+        "1 variant(s) past the end of block chr1:551-2000 of GWAS study",
+        fixed = TRUE
+    )
+    # Statistics are checked before any block is fine-mapped.
+    expect_error(
+        colocPipeline(
+            .cp_makeQtlOver(c(100 * (4:8), 2100)),
+            gwasInput = .cp_makeBlockedGwasSumstats()
+        ),
+        "lie in blocks that were not loaded"
+    )
+})
+
+test_that("colocPipeline warns of a region running past computed blocks", {
+    # Labels rather than coordinates: the blocks' ranges are the spans of
+    # their variants, chr1:100-500 and chr1:600-1000.
+    gfmr <- .cp_makeBlockedGwasFmr(blockId = c("bA", "bB"), region = NULL)
+    expect_warning(
+        pecotmr:::.colocCheckBlockReach(.cp_makeQtlOver(100 * (1:12)), gfmr),
+        "2 variant\\(s\\) past the end of block bB \\(chr1:600-1000\\)"
+    )
+    # One variant past a computed range may only be one the GWAS lacks.
+    expect_no_warning(
+        pecotmr:::.colocCheckBlockReach(.cp_makeQtlOver(100 * (1:11)), gfmr)
+    )
+    # A region meeting no block of the study is not checked against it.
+    expect_no_warning(
+        pecotmr:::.colocCheckBlockReach(.cp_makeQtlOver(100 * (30:35)), gfmr)
+    )
+    # Nor is a second side that has no blocks.
+    expect_null(
+        pecotmr:::.colocCheckBlockReach(
+            .cp_makeQtlOver(100 * (1:12)),
+            .cp_makeQtlOver(100 * (1:5))
+        )
+    )
+})
+
+# ===========================================================================
+# LBF column names come from the fit's own variants
+# ===========================================================================
+
+test_that("an unnamed LBF matrix is named by the variants of its fit", {
+    vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    tl <- data.frame(variant_id = vids, pip = c(0.5, 0.3, 0.2))
+    res <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "g1",
+        method = "susie",
+        entry = list(FineMappingRow(vids, list(pip = tl$pip), tl))
+    )
+    # The row holds two of the three variants the fit's columns are.
+    parts <- pecotmr:::.fmrRowParts(endoapply(res, utils::head, 2L), 1L)
+    named <- pecotmr:::.colocLbfNamesFrom(matrix(c(1, 2, 3), 1L), parts)
+    expect_equal(colnames(named), vids)
+    # A matrix that names its own columns keeps them; one matching no
+    # variant list stays unnamed.
+    own <- matrix(1:3, 1L, dimnames = list(NULL, c("a", "b", "c")))
+    expect_identical(pecotmr:::.colocLbfNamesFrom(own, parts), own)
+    expect_null(
+        colnames(pecotmr:::.colocLbfNamesFrom(matrix(1:2, 1L), parts))
+    )
+})
+
+# ===========================================================================
+# Narrowed rows: a fit scored whole warns
+# ===========================================================================
+
+test_that("fits scored as supplied warn about narrowed rows on both sides", {
+    data(qtlFineMappingExample, gwasFineMappingExample)
+    qtl <- endoapply(qtlFineMappingExample, utils::head, 2000L)
+    gwas <- endoapply(gwasFineMappingExample, utils::head, 2000L)
+    cnd <- tryCatch(
+        pecotmr:::.colocMaybeAdjustPips(
+            adjustPips = FALSE,
+            qtlFineMappingResult = qtl,
+            gwasFmr = gwas
+        ),
+        warning = identity
+    )
+    expect_s3_class(cnd, "pecotmrFitCoverage")
+    expect_match(conditionMessage(cnd), "colocPipeline\\(\\): 2 row\\(s\\)")
+    # An empty side scores nothing, so nothing is read.
+    expect_no_warning(pecotmr:::.colocMaybeAdjustPips(
+        adjustPips = FALSE,
+        qtlFineMappingResult = qtl[0],
+        gwasFmr = gwas
+    ))
+})
+
+test_that("colocPipeline warns about narrowed fits only when not adjusting", {
+    skip_if_not_installed("coloc")
+    data(qtlFineMappingLbfExample, gwasFineMappingLbfExample)
+    narrowed <- endoapply(qtlFineMappingLbfExample, utils::head, 150L)
+    asSupplied <- .fitCoverageMessages(colocPipeline(
+        narrowed,
+        gwasInput = gwasFineMappingLbfExample,
+        adjustPips = FALSE
+    ))
+    expect_length(asSupplied, 1L)
+    expect_match(asSupplied, "colocPipeline\\(\\): 2 row\\(s\\)")
+    # The adjustment restricts each fit to the variants its row keeps.
+    expect_length(
+        .fitCoverageMessages(colocPipeline(
+            narrowed,
+            gwasInput = gwasFineMappingLbfExample
+        )),
+        0L
+    )
 })

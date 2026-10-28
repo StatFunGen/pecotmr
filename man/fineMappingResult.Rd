@@ -5,14 +5,15 @@
 \alias{fineMappingResult}
 \alias{fineMappingResult,GwasFineMappingResult-method}
 \alias{fineMappingResult,QtlFineMappingResult-method}
-\title{Get a Single Fine-Mapping Entry}
+\title{Get One Fine-Mapping Fit}
 \usage{
 fineMappingResult(
   x,
   studyName = NULL,
   context = NULL,
   trait = NULL,
-  method = NULL
+  method = NULL,
+  blockId = NULL
 )
 
 \S4method{fineMappingResult}{GwasFineMappingResult}(
@@ -20,7 +21,8 @@ fineMappingResult(
   studyName = NULL,
   context = NULL,
   trait = NULL,
-  method = NULL
+  method = NULL,
+  blockId = NULL
 )
 
 \S4method{fineMappingResult}{QtlFineMappingResult}(
@@ -28,23 +30,31 @@ fineMappingResult(
   studyName = NULL,
   context = NULL,
   trait = NULL,
-  method = NULL
+  method = NULL,
+  blockId = NULL
 )
 }
 \arguments{
 \item{x}{A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.}
 
-\item{studyName, context, trait, method}{Single character identifiers. All
-required when the collection has more than one row; optional when the
-collection has a single row.}
+\item{studyName, context, trait, method}{Single character identifiers.
+Required when the collection holds more than one fit; optional when it
+holds one. \code{context} and \code{trait} are QTL-only.}
+
+\item{blockId}{GWAS only: the \code{blockId} of one LD block, to select
+that block alone. \code{NULL} (default) selects every block of the fit.}
 }
 \value{
-A single-row collection of the same class as \code{x}.
+A collection of the same class as \code{x}: one row for a QTL fit,
+  one row per selected block for a GWAS fit.
 }
 \description{
-Return one row of a \code{QtlFineMappingResult} or
-  \code{GwasFineMappingResult}, selected by its identity, as a single-row
-  collection of the same class.
+Return the rows of one fit of a \code{QtlFineMappingResult}
+  or \code{GwasFineMappingResult}, selected by its identity, as a
+  collection of the same class. A QTL fit is one row. A GWAS study
+  fine-mapped block by block holds one row per LD block, so its fit is
+  every block of the \code{(study, method)} pair, unless \code{blockId}
+  names one or \code{region} narrows them.
 }
 \examples{
 data(qtlFineMappingExample)

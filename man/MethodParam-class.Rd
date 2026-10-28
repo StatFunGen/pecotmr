@@ -9,6 +9,7 @@
 \alias{names,MethodParam-method}
 \alias{length,MethodParam-method}
 \alias{as.list,MethodParam-method}
+\alias{$<-,MethodParam-method}
 \alias{show,MethodParam-method}
 \title{Typed Settings For One Pipeline Stage}
 \usage{
@@ -21,6 +22,8 @@
 \S4method{length}{MethodParam}(x)
 
 \S4method{as.list}{MethodParam}(x, ...)
+
+\S4method{$}{MethodParam}(x, name) <- value
 
 \S4method{show}{MethodParam}(object)
 }
@@ -36,6 +39,9 @@ set.}
 
 \item{...}{Unused, for consistency with the generic.}
 
+\item{value}{The setting's new value; \code{NULL} unsets a setting that
+may be unset.}
+
 \item{object}{A \code{MethodParam} object.}
 }
 \value{
@@ -49,6 +55,12 @@ set.}
 \code{length} returns how many settings are set.
 
 \code{as.list} returns the settings that are set, as a named list.
+
+\code{$<-} returns the record rebuilt with that setting replaced.
+  The rebuild goes through the class's own constructor, so the value is
+  normalised and checked exactly as it is when the record is built, and a
+  value the constructor would refuse is refused here too. A setting that
+  cannot change once the record exists is refused, saying why.
 
 \code{show} is called for its side effect and returns
   \code{invisible(NULL)}.
@@ -71,8 +83,8 @@ The virtual base of pecotmr's \code{*Param()} records --
 \section{List interface}{
 
   A \code{MethodParam} reads like a list: \code{$} and \code{[[} fetch a
-  field, and \code{names()}, \code{length()} and \code{as.list()} describe
-  it.
+  field, \code{$<-} replaces one, and \code{names()}, \code{length()} and
+  \code{as.list()} describe it.
 
   Those last three report only the fields that are \strong{set}. A slot
   holding \code{NULL} is absent from all three, while \code{$} and

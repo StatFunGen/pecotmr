@@ -44,3 +44,9 @@ mashTinyPrior <- function(k = 3L) {
         )
     ))
 }
+
+# The fixture and one fitted model, built on first use and shared by the
+# tests that only read them. Every mash() call forces three garbage
+# collections (mashr times each step with system.time()), which costs far
+# more than the fit itself.
+delayedAssign(".mwSs", mashFixture())

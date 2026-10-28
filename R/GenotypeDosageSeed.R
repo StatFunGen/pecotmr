@@ -372,8 +372,12 @@ setMethod("extract_array", "GenotypeDosageSeed", function(x, index) {
 # pecotmr counts it -- with NA for a missing call. It is not told the sample
 # count: it counts the .fam itself, and a wrong count would misread silently.
 # The stem may be a bundled example's portable reference, resolved here.
+# PlinkMatrix is checked for here too, not only when the panel is built: a
+# panel loaded from a saved object, such as the bundled examples, was built
+# elsewhere.
 # @noRd
 .plinkBedSeedRead <- function(x, rows, samples) {
+    .requireReaderPackage("PlinkMatrix", "PLINK1")
     variant <- start(.gdSeedRecords(x))[.gdSeedRowRecord(x)[rows]]
     PlinkMatrix::read_bed_subset(
         .resolveGenotypeResourcePath(.gdSeedBackend(x)),

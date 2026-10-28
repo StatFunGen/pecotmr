@@ -3,7 +3,7 @@
 \name{qcInfo}
 \alias{qcInfo}
 \alias{qcInfo,SumStatsBase-method}
-\title{Get QC Audit Record}
+\title{Get the Per-Row QC Audit}
 \usage{
 qcInfo(x, ...)
 
@@ -15,15 +15,17 @@ qcInfo(x, ...)
 \item{...}{Unused.}
 }
 \value{
-A \code{list} (possibly empty).
+A \code{DataFrame}, one row per tuple.
 }
 \description{
-Return the audit record of QC steps applied to this collection.
-  An empty \code{list()} (default on construction) means
-  \code{\link{summaryStatsQc}} has not yet been run. Pipelines that require
-  harmonized sumstats (\code{fineMappingPipeline},
-  \code{twasWeightsPipeline}, and downstream consumers) reject inputs where
-  \code{length(qcInfo(x)) == 0L}.
+What \code{\link{summaryStatsQc}} did to each row of a
+  summary-statistics collection: one row per tuple, its identity columns,
+  then the variant counts each QC step recorded (\code{variantsIn},
+  \code{variantsOut}, and so on; a nested count is named by its path, as
+  in \code{contentFilters.nDropped}). A step that did not run on a row is
+  \code{NA} there. Only the identity columns are present before QC has run.
+  The options the QC ran with are \code{\link{qcOptions}}; the per-variant
+  LD-mismatch tables are \code{\link{qcDiagnostics}}.
 }
 \examples{
 data(qtlSumStatsExample)

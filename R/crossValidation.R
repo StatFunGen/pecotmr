@@ -135,9 +135,9 @@ NULL
 # predicts held-out samples (Xtest[, common] %*% W[common, ]), aggregates the
 # out-of-fold predictions into full-Y matrices, scores them with .cvMetricRow,
 # and keys the output via .cvOutputKey(). `maxNumVariants` (optional) randomly
-# subsamples variants up front to bound compute; `numThreads` parallelises the
-# fold loop (-1 = all cores, 0/1 = serial).
-#' @importFrom BiocParallel bplapply multicoreWorkers MulticoreParam
+# subsamples variants up front to bound compute; `BPPARAM` runs the folds
+# (SerialParam() one at a time).
+#' @importFrom BiocParallel SerialParam
 #' @importFrom stats sd lm cor
 #' @importFrom dplyr n_distinct
 #' @noRd
@@ -148,7 +148,7 @@ NULL
     samplePartitions = NULL,
     fitFold,
     fitFoldCtx = NULL,
-    numThreads = 1,
+    BPPARAM = SerialParam(),
     maxNumVariants = NULL,
     variantsToKeep = NULL,
     fitRetention = c("none", "slim", "full"),
@@ -168,7 +168,6 @@ NULL
     )
     foldIds <- sort(unique(samplePartition$Fold))
     st <- proc.time()
-    numCores <- .cvNumCores(numThreads)
     cvState <- list(
         X = X,
         Y = Y,
@@ -180,7 +179,7 @@ NULL
         verbose = verbose,
         rngSeed = seed
     )
-    foldResults <- .cvRunFolds(foldIds, cvState, numCores)
+    foldResults <- .cvRunFolds(foldIds, cvState, BPPARAM)
     agg <- .cvAggregate(foldResults, Y, verbose)
     list(
         samplePartition = samplePartition,
@@ -347,29 +346,101 @@ NULL
     samplePartitions
 }
 
-# multicoreWorkers() rather than bpworkers(MulticoreParam()): the two answer
-# the same number, but constructing a MulticoreParam costs ~0.6s (almost all
-# of it garbage collection) and this runs on every fit.
+# ---- BiocParallel ------------------------------------------------------------
+
+# Refuse a `BPPARAM` that is not a BiocParallelParam.
 # @noRd
-.cvNumCores <- function(numThreads) {
-    avail <- multicoreWorkers()
-    min(if (numThreads == -1) avail else numThreads, avail)
+.assertBpparam <- function(BPPARAM, what = "BPPARAM") {
+    if (methods::is(BPPARAM, "BiocParallelParam")) {
+        return(invisible(BPPARAM))
+    }
+    abort(glue(
+        "`{what}` must be a BiocParallelParam, such as SerialParam() or ",
+        "MulticoreParam(workers = 4) (got {class(BPPARAM)[[1L]]})."
+    ))
 }
 
-# MulticoreParam for CV / weight-fitting parallelism. A NULL seed keeps the
-# historical default RNGseed = 1L (reproducible); a caller-supplied seed
-# overrides it so the parallel L'Ecuyer streams are reproducible under it. This
-# is the one place a user seed reaches BiocParallel workers, which set.seed()
-# in the main process cannot.
+# bplapply() on a copy of the caller's BPPARAM seeded by .seededBpparam(). A
+# worker's error comes back as BiocParallel's report on every element; the
+# first one is raised again with its own message, as a serial map would have
+# raised it. The extra arguments reach `.f` through bplapply(), whose own
+# formals include X and FUN, so pass an argument of either name by position.
 # @noRd
-.bpSeedParam <- function(numCores, seed = NULL) {
-    MulticoreParam(workers = numCores, RNGseed = as.integer(seed %||% 1L))
+#' @importFrom BiocParallel bplapply
+.bpMap <- function(.x, .f, ..., BPPARAM, seed = NULL) {
+    try_fetch(
+        bplapply(.x, .f, ..., BPPARAM = .seededBpparam(BPPARAM, seed)),
+        bplist_error = .bpRaiseFirstError
+    )
+}
+
+# @noRd
+.bpRaiseFirstError <- function(cnd) {
+    failed <- keep(attr(cnd, "result"), .isRemoteError)
+    if (length(failed) == 0L) {
+        cnd_signal(cnd)
+    }
+    abort(conditionMessage(failed[[1L]]))
+}
+
+# @noRd
+.isRemoteError <- function(x) {
+    methods::is(x, "remote_error")
+}
+
+# The caller's BPPARAM, copied and given the RNG seed its workers draw from:
+# `seed` when one is given, else the param's own RNGseed, else one draw from
+# the session RNG, so a set.seed() before the call still governs the run. A
+# copy is seeded because a BiocParallelParam is a reference object: seeding
+# it in place would change the caller's own. Each element then draws from its
+# own stream, so the numbers do not depend on the backend or worker count.
+# @noRd
+#' @importFrom BiocParallel bpRNGseed bpRNGseed<-
+.seededBpparam <- function(BPPARAM, seed = NULL) {
+    copy <- BPPARAM$copy()
+    bpRNGseed(copy) <- as.integer(
+        seed %||% bpRNGseed(BPPARAM) %||% .sessionSeedDraw()
+    )
+    copy
+}
+
+# One integer from the session RNG.
+# @noRd
+.sessionSeedDraw <- function() {
+    sample.int(.Machine$integer.max, 1L)
+}
+
+# The threads an engine with its own parallelism (OpenMP, a C++ thread pool,
+# mclapply) may use under BPPARAM: its worker count when the workers are
+# processes on this machine (SerialParam, MulticoreParam), else 1. A
+# SnowParam's or BatchtoolsParam's workers can be other machines or
+# scheduler jobs, so their count is no budget for threads here. Said once a
+# session per backend, as a windowed engine asks once per window.
+# @noRd
+#' @importFrom BiocParallel bpnworkers
+.bpLocalThreads <- function(BPPARAM, caller) {
+    if (
+        methods::is(BPPARAM, "SerialParam") ||
+            methods::is(BPPARAM, "MulticoreParam")
+    ) {
+        return(as.integer(bpnworkers(BPPARAM)))
+    }
+    backend <- class(BPPARAM)[[1L]]
+    inform(
+        glue(
+            "{caller}: the workers of a {backend} need not run on this ",
+            "machine, so a threaded engine runs on 1 thread."
+        ),
+        .frequency = "once",
+        .frequency_id = str_c("pecotmr-bpLocalThreads-", backend)
+    )
+    1L
 }
 
 # Seed the main-process RNG when a seed is supplied. This covers only the serial
-# draws (fold partitioning, variant sub-sampling, single-threaded fitting);
-# BiocParallel workers seed their own L'Ecuyer streams via .bpSeedParam. A NULL
-# seed leaves the session RNG untouched so an outer set.seed() still governs it.
+# draws (fold partitioning, variant sub-sampling); BiocParallel workers draw
+# from the streams .seededBpparam() seeds. A NULL seed leaves the session RNG
+# untouched so an outer set.seed() still governs it.
 #
 # Scoped to the CALLER's frame rather than set.seed()'s permanent mutation, so
 # a seeded call does not leave the user's session RNG changed after it returns.
@@ -381,18 +452,16 @@ NULL
     }
 }
 
-# Run each fold (parallel via BiocParallel when >= 2 cores).
+# Run each fold on BPPARAM's workers.
 # @noRd
-.cvRunFolds <- function(foldIds, cvState, numCores) {
-    if (numCores >= 2) {
-        return(bplapply(
-            foldIds,
-            .cvRunFold,
-            cv = cvState,
-            BPPARAM = .bpSeedParam(numCores, cvState$rngSeed)
-        ))
-    }
-    map(foldIds, .cvRunFold, cv = cvState)
+.cvRunFolds <- function(foldIds, cvState, BPPARAM) {
+    .bpMap(
+        foldIds,
+        .cvRunFold,
+        cv = cvState,
+        BPPARAM = BPPARAM,
+        seed = cvState$rngSeed
+    )
 }
 
 # Aggregate per-fold predictions + performance across methods. Returns
@@ -517,160 +586,6 @@ NULL
     )
 }
 
-#' @rdname CrossValidationParam
-#' @aliases CrossValidationParam-class
-#' @exportClass CrossValidationParam
-setClass(
-    "CrossValidationParam",
-    contains = "MethodParam",
-    slots = c(
-        folds = "numeric",
-        numThreads = "numeric",
-        samplePartition = "list_OR_NULL",
-        maxVariants = "numeric_OR_NULL",
-        weightMethods = "list_OR_NULL",
-        fitFullData = "logical"
-    )
-)
-
-setValidity("CrossValidationParam", function(object) {
-    problems <- .cvFitFullDataProblem(object@fitFullData, object@folds)
-    if (length(problems) == 0L) TRUE else problems
-})
-
-# `fitFullData = FALSE` asks for cross-validation results alone, which is only
-# a request for something when cross-validation runs: without folds there
-# would be no fit of any kind. Checked here, at construction, rather than
-# separately by each pipeline that reads it.
-# @noRd
-.cvFitFullDataProblem <- function(fitFullData, folds) {
-    if (length(fitFullData) != 1L || is.na(fitFullData)) {
-        return("`fitFullData` must be a single TRUE or FALSE.")
-    }
-    if (!fitFullData && !.cvEnabled(list(folds = folds))) {
-        return(str_c(
-            "fitFullData = FALSE requires cross-validation (folds >= 2): ",
-            "without folds there would be no fit at all."
-        ))
-    }
-    NULL
-}
-
-#' @title Cross-Validation Settings
-#' @description How cross-validation runs, shared by
-#'   \code{\link{fineMappingPipeline}} and \code{\link{twasWeightsPipeline}}.
-#'
-#'   \code{folds}, \code{numThreads}, \code{samplePartition} and
-#'   \code{fitFullData} mean the same thing in both. \code{maxVariants} and
-#'   \code{weightMethods} are honoured by \code{\link{twasWeightsPipeline}}
-#'   only and are \strong{ignored} by \code{\link{fineMappingPipeline}}, so
-#'   one bundle can be handed to either pipeline unchanged.
-#' @param folds Integer. Number of folds; \code{0} (the default) or
-#'   \code{1} skips cross-validation. The same value in both pipelines ---
-#'   \code{twasWeightsPipeline} used to default to \code{5}, which made an
-#'   unspecified setting mean two different things.
-#' @param numThreads Integer. Parallel workers for the per-fold refits.
-#'   \code{1} (default) is serial; \code{-1} uses all cores. Only consulted
-#'   when \code{folds > 1}.
-#' @param samplePartition Optional pre-defined partition \code{data.frame}
-#'   with columns \code{Sample} and \code{Fold}. When supplied, every method
-#'   reuses this exact partition instead of generating a fresh one.
-#' @param maxVariants Integer. Cap on the number of variants used for CV;
-#'   unset means no limit. \strong{\code{twasWeightsPipeline} only} ---
-#'   \code{fineMappingPipeline} ignores it, because it does not use the
-#'   \code{twasWeightsCv} engine this configures.
-#' @param weightMethods Optional override of which methods are
-#'   cross-validated, as a character vector of tokens or a named method list.
-#'   Unset cross-validates every method that produced non-zero weights.
-#'   \strong{\code{twasWeightsPipeline} only} ---
-#'   \code{fineMappingPipeline} ignores it, because its \code{methods=} are
-#'   fine-mapping methods and its CV refits all of them.
-#' @param fitFullData Logical. \code{TRUE} (default) fits the final model on
-#'   the full data as well as cross-validating it; \code{FALSE} keeps only
-#'   the cross-validation results, and requires \code{folds >= 2}. A row
-#'   from such a run carries its \code{cvResult} and nothing else, so it
-#'   cannot be exported and cannot supply full-data weights or fits
-#'   downstream.
-#' @return A \code{CrossValidationParam} object, a \code{\link{MethodParam}}.
-#' @examples
-#' CrossValidationParam(folds = 10, numThreads = 4)
-#' CrossValidationParam(folds = 5, fitFullData = FALSE)
-#' @export
-CrossValidationParam <- function(
-    folds = 0,
-    numThreads = 1,
-    samplePartition = NULL,
-    maxVariants = NULL,
-    weightMethods = NULL,
-    fitFullData = TRUE
-) {
-    new(
-        "CrossValidationParam",
-        folds = folds,
-        numThreads = numThreads,
-        samplePartition = samplePartition,
-        maxVariants = maxVariants,
-        weightMethods = weightMethods,
-        fitFullData = fitFullData
-    )
-}
-
-# The fields a pipeline reads, as a plain list so call sites index it without
-# caring that the caller passed a constructor result.
-# @noRd
-.cvResolve <- function(crossValidationParam) {
-    list(
-        folds = crossValidationParam$folds %||% 0,
-        numThreads = crossValidationParam$numThreads %||% 1,
-        samplePartition = crossValidationParam$samplePartition,
-        # -1 is twasWeightsCv()'s "no cap" sentinel. fineMappingPipeline
-        # resolves these two as well but never reads them.
-        maxVariants = crossValidationParam$maxVariants %||% -1,
-        weightMethods = crossValidationParam$weightMethods,
-        fitFullData = crossValidationParam$fitFullData %||% TRUE
-    )
-}
-
-# TRUE when cross-validation will actually run. Both 0 and 1 mean "no CV",
-# and anything that needs out-of-fold predictions has to ask this rather than
-# testing `folds` itself.
-# @noRd
-.cvEnabled <- function(crossValidationParam) {
-    folds <- crossValidationParam$folds %||% 0
-    !is.null(folds) && length(folds) == 1L && !is.na(folds) && folds >= 2L
-}
-
-# Refuse a cross-validation request on an input that has no samples to hold
-# out. Summary statistics carry no individual-level data, so CV there is not
-# unimplemented but meaningless -- saying so beats running to completion and
-# returning results that were never cross-validated.
-# @noRd
-.cvRefuseOnSumstats <- function(crossValidationParam, pipeline, cls) {
-    set <- names(crossValidationParam)[
-        map_lgl(as.list(crossValidationParam), .cvFieldIsSet)
-    ]
-    if (length(set) == 0L) {
-        return(invisible(NULL))
-    }
-    abort(glue(
-        "{pipeline}: cross-validation is not possible on {cls} input -- ",
-        "it holds out samples, and summary statistics carry none. ",
-        "Remove CrossValidationParam({str_flatten(set, ', ')})."
-    ))
-}
-
-# A field counts as "set" when it differs from the constructor's own default,
-# so passing CrossValidationParam() unchanged is not mistaken for a request.
-# fitFullData = TRUE is that field's default.
-# @noRd
-.cvFieldIsSet <- function(x) {
-    if (is.null(x) || isTRUE(x)) {
-        return(FALSE)
-    }
-    # numThreads = 1 and folds = 0 are the no-op defaults.
-    !(length(x) == 1L && !is.na(x) && is.numeric(x) && (x == 0 || x == 1))
-}
-
 # =============================================================================
 # Cross-validation settings
 # -----------------------------------------------------------------------------
@@ -712,3 +627,164 @@ CrossValidationParam <- function(
 # BiocParallel RNG for method fitting), so it is a call-level knob that CV
 # happens to benefit from, not a CV setting.
 # =============================================================================
+
+#' @rdname CrossValidationParam
+#' @aliases CrossValidationParam-class
+#' @importClassesFrom BiocParallel BiocParallelParam
+#' @exportClass CrossValidationParam
+setClass(
+    "CrossValidationParam",
+    contains = "MethodParam",
+    slots = c(
+        folds = "numeric",
+        BPPARAM = "BiocParallelParam",
+        samplePartition = "list_OR_NULL",
+        maxVariants = "numeric_OR_NULL",
+        weightMethods = "list_OR_NULL",
+        fitFullData = "logical"
+    )
+)
+
+setValidity("CrossValidationParam", function(object) {
+    problems <- .cvFitFullDataProblem(object@fitFullData, object@folds)
+    if (length(problems) == 0L) TRUE else problems
+})
+
+# `fitFullData = FALSE` asks for cross-validation results alone, which is only
+# a request for something when cross-validation runs: without folds there
+# would be no fit of any kind. Checked here, at construction, rather than
+# separately by each pipeline that reads it.
+# @noRd
+.cvFitFullDataProblem <- function(fitFullData, folds) {
+    if (length(fitFullData) != 1L || is.na(fitFullData)) {
+        return("`fitFullData` must be a single TRUE or FALSE.")
+    }
+    if (!fitFullData && !.cvEnabled(list(folds = folds))) {
+        return(str_c(
+            "fitFullData = FALSE requires cross-validation (folds >= 2): ",
+            "without folds there would be no fit at all."
+        ))
+    }
+    NULL
+}
+
+#' @title Cross-Validation Settings
+#' @description How cross-validation runs, shared by
+#'   \code{\link{fineMappingPipeline}} and \code{\link{twasWeightsPipeline}}.
+#'
+#'   \code{folds}, \code{BPPARAM}, \code{samplePartition} and
+#'   \code{fitFullData} mean the same thing in both. \code{maxVariants} and
+#'   \code{weightMethods} are honoured by \code{\link{twasWeightsPipeline}}
+#'   only and are \strong{ignored} by \code{\link{fineMappingPipeline}}, so
+#'   one bundle can be handed to either pipeline unchanged.
+#' @param folds Integer. Number of folds; \code{0} (the default) or
+#'   \code{1} skips cross-validation. The same value in both pipelines ---
+#'   \code{twasWeightsPipeline} used to default to \code{5}, which made an
+#'   unspecified setting mean two different things.
+#' @param BPPARAM A \code{BiocParallelParam} the per-fold refits run on;
+#'   \code{SerialParam()} (default) runs them one at a time. Its workers draw
+#'   from random-number streams seeded by the pipeline's \code{seed}, else by
+#'   the param's own \code{RNGseed}, else by one draw from the session RNG,
+#'   so a run gives the same numbers however many workers it has. Only
+#'   consulted when \code{folds > 1}.
+#' @param samplePartition Optional pre-defined partition \code{data.frame}
+#'   with columns \code{Sample} and \code{Fold}. When supplied, every method
+#'   reuses this exact partition instead of generating a fresh one.
+#' @param maxVariants Integer. Cap on the number of variants used for CV;
+#'   unset means no limit. \strong{\code{twasWeightsPipeline} only} ---
+#'   \code{fineMappingPipeline} ignores it, because it does not use the
+#'   \code{twasWeightsCv} engine this configures.
+#' @param weightMethods Optional override of which methods are
+#'   cross-validated, as a character vector of tokens or a named method list.
+#'   Unset cross-validates every method that produced non-zero weights.
+#'   \strong{\code{twasWeightsPipeline} only} ---
+#'   \code{fineMappingPipeline} ignores it, because its \code{methods=} are
+#'   fine-mapping methods and its CV refits all of them.
+#' @param fitFullData Logical. \code{TRUE} (default) fits the final model on
+#'   the full data as well as cross-validating it; \code{FALSE} keeps only
+#'   the cross-validation results, and requires \code{folds >= 2}. A row
+#'   from such a run carries its \code{cvResult} and nothing else, so it
+#'   cannot be exported and cannot supply full-data weights or fits
+#'   downstream.
+#' @return A \code{CrossValidationParam} object, a \code{\link{MethodParam}}.
+#' @examples
+#' CrossValidationParam(folds = 10, BPPARAM = BiocParallel::SerialParam())
+#' CrossValidationParam(folds = 5, fitFullData = FALSE)
+#' @export
+CrossValidationParam <- function(
+    folds = 0,
+    BPPARAM = SerialParam(),
+    samplePartition = NULL,
+    maxVariants = NULL,
+    weightMethods = NULL,
+    fitFullData = TRUE
+) {
+    new(
+        "CrossValidationParam",
+        folds = folds,
+        BPPARAM = .assertBpparam(BPPARAM),
+        samplePartition = samplePartition,
+        maxVariants = maxVariants,
+        weightMethods = weightMethods,
+        fitFullData = fitFullData
+    )
+}
+
+# The fields a pipeline reads, as a plain list so call sites index it without
+# caring that the caller passed a constructor result.
+# @noRd
+.cvResolve <- function(crossValidationParam) {
+    list(
+        folds = crossValidationParam$folds %||% 0,
+        BPPARAM = crossValidationParam$BPPARAM %||% SerialParam(),
+        samplePartition = crossValidationParam$samplePartition,
+        # -1 is twasWeightsCv()'s "no cap" sentinel. fineMappingPipeline
+        # resolves these two as well but never reads them.
+        maxVariants = crossValidationParam$maxVariants %||% -1,
+        weightMethods = crossValidationParam$weightMethods,
+        fitFullData = crossValidationParam$fitFullData %||% TRUE
+    )
+}
+
+# TRUE when cross-validation will actually run. Both 0 and 1 mean "no CV",
+# and anything that needs out-of-fold predictions has to ask this rather than
+# testing `folds` itself.
+# @noRd
+.cvEnabled <- function(crossValidationParam) {
+    folds <- crossValidationParam$folds %||% 0
+    !is.null(folds) && length(folds) == 1L && !is.na(folds) && folds >= 2L
+}
+
+# Refuse a cross-validation request on an input that has no samples to hold
+# out. Summary statistics carry no individual-level data, so CV there is not
+# unimplemented but meaningless -- saying so beats running to completion and
+# returning results that were never cross-validated.
+# @noRd
+.cvRefuseOnSumstats <- function(crossValidationParam, pipeline, cls) {
+    set <- names(crossValidationParam)[
+        map_lgl(as.list(crossValidationParam), .cvFieldIsSet)
+    ]
+    if (length(set) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{pipeline}: cross-validation is not possible on {cls} input -- ",
+        "it holds out samples, and summary statistics carry none. ",
+        "Remove CrossValidationParam({str_flatten(set, ', ')})."
+    ))
+}
+
+# A field counts as "set" when it differs from the constructor's own default,
+# so passing CrossValidationParam() unchanged is not mistaken for a request.
+# fitFullData = TRUE and BPPARAM = SerialParam() are those fields' defaults.
+# @noRd
+.cvFieldIsSet <- function(x) {
+    if (is.null(x) || isTRUE(x) || methods::is(x, "SerialParam")) {
+        return(FALSE)
+    }
+    if (methods::is(x, "BiocParallelParam")) {
+        return(TRUE)
+    }
+    # folds = 0 (or 1) is the no-op default.
+    !(length(x) == 1L && !is.na(x) && is.numeric(x) && (x == 0 || x == 1))
+}

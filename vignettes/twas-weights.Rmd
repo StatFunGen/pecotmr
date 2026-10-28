@@ -33,9 +33,9 @@ by `(study, context, trait, method)`, one element per tuple).
 
 | Input class | Methods supported |
 |---|---|
-| `QtlDataset` | Univariate: LASSO, elastic net, mr.ash, MCP, SCAD, L0Learn, Bayesian alphabet, DPR. Multivariate: mr.mash, mvsusie |
+| `QtlDataset` | Univariate: LASSO, elastic net, ridge, mr.ash, MCP, SCAD, L0Learn, Bayesian alphabet, DPR. Multivariate: mr.mash, mvsusie |
 | `MultiStudyQtlDataset` | Iterates over embedded studies; same methods as `QtlDataset` |
-| `QtlSumStats` | RSS-only: LASSO, mr.ash, MCP, SCAD, L0Learn, DPR, PRS-CS, P+T. Multivariate: mr.mash, mvsusie |
+| `QtlSumStats` | RSS-only: LASSO, elastic net, ridge, mr.ash, MCP, SCAD, L0Learn, DPR, PRS-CS, P+T. Multivariate: mr.mash, mvsusie |
 
 ```{r load-packages}
 library(pecotmr)
@@ -174,8 +174,8 @@ twSs <- twasWeightsPipeline(qtlSumStatsExample, methods = "lasso")
 twSs
 ```
 
-The RSS path uses the `ldReference` genotype panel inside the
-`QtlSumStats` collection to compute LD as needed. The same rule holds for
+The RSS path computes LD as needed from each row's LD reference in the
+`QtlSumStats` collection. The same rule holds for
 fine-mapping methods here: they are not re-fit, so run
 `fineMappingPipeline()` on the `QtlSumStats` first and pass its result as
 `fineMappingResult`.
@@ -196,7 +196,9 @@ twasWeightsPipeline(
 To choose the axes yourself, pass a `jointSpecification`: a character
 vector of axes, or `list(axes = , scope = )` to limit the fit to listed
 studies, contexts or traits. The `jointSpecification` argument in
-`?twasWeightsPipeline` gives the full grammar.
+`?twasWeightsPipeline` gives the full grammar. On a `QtlSumStats` the
+contexts are fitted against one LD matrix, so their rows must share an LD
+reference.
 
 ```{r joint, eval=FALSE}
 # `qd`: a QtlDataset whose traits are measured in brain, liver and more.
@@ -236,7 +238,7 @@ The families, and the `methods =` name each answers to:
 
 | Family | `methods =` | Function |
 |---|---|---|
-| Penalized regression | `lasso`, `enet`, `mcp`, `scad`, `l0learn` | `lassoWeights()`, `enetWeights()`, … |
+| Penalized regression | `lasso`, `enet`, `ridge`, `mcp`, `scad`, `l0learn` | `lassoWeights()`, `enetWeights()`, `ridgeWeights()`, … |
 | Bayesian alphabet | `bayesA` … `bayesR`, `bLasso` | `bayesAWeights()`, `bLassoWeights()`, … |
 | Dirichlet process regression | `dprVb`, `dprGibbs`, `dprAdaptiveGibbs` | `dprVbWeights()`, `dprGibbsWeights()`, … |
 | PRS-CS | `prsCs` (sumstats input only) | `prsCsWeights()` |
@@ -249,17 +251,18 @@ of known tokens.
 
 Most families have an RSS counterpart taking summary statistics and an LD
 reference instead of `X`/`y` — `lassosumRssWeights()` for `lasso`,
+`enetRssWeights()` and `ridgeRssWeights()` for `enet` and `ridge`,
 `mcpRssWeights()`, `sdprWeights()` (SDPR) for `dprGibbs`, `susieRssWeights()`,
-and so on; the Bayesian alphabet, `enet`, `dprVb` and `dprAdaptiveGibbs` have
-none. Those are what `twasWeightsPipeline()` calls when the input is a
-`QtlSumStats`. The LD
-reference is the same `ldReference` the rest of the package takes: a
-genotype panel from `readGenotypes()`, a `GenotypeMixture` or an
-`LdMatrix`, matched to the statistics by their `variantNames`. lassosum,
-the penalized methods, PRS-CS and SDPR use a genotype reference through its
-standardized genotypes without forming the LD matrix; the mr.ash and
-mr.mash engines take the matrix, which is formed over the statistics'
-variants.
+and so on; the Bayesian alphabet, `dprVb` and `dprAdaptiveGibbs` have none.
+`enet` mixes the lasso and ridge penalties at `alpha = 0.5` on either input;
+`methods = list(enet = list(alpha = 0.3))` sets another mixing. Those are what
+`twasWeightsPipeline()` calls when the input is a `QtlSumStats`. The LD
+reference is the same `ldReference` the rest of the package takes: a genotype
+panel from `readGenotypes()`, a `GenotypeMixture` or an `LdMatrix`, matched to
+the statistics by their `variantNames`. lassosum, the penalized methods, PRS-CS
+and SDPR use a genotype reference through its standardized genotypes without
+forming the LD matrix; the mr.ash and mr.mash engines take the matrix, which is
+formed over the statistics' variants.
 
 Several of these engines estimate more than the weights, and
 `fitRetention = "slim"` keeps it as the `"fit"` attribute of the weights they
@@ -323,11 +326,12 @@ twasWeightsPipeline(
     methods = "susie",
     contexts = "brain",
     traitId = "ENSG_example",
-    region = "chr22:25000000-26000000",
     cisWindow = 5e5,
+    # or, in place of traitId + cisWindow, a literal window:
+    # region = GenomicRanges::GRanges("chr22:25000000-26000000"),
     crossValidationParam = CrossValidationParam(
         folds = 5,
-        numThreads = 1,
+        BPPARAM = BiocParallel::SerialParam(),
         samplePartition = NULL,
         maxVariants = -1
     ),
@@ -345,14 +349,14 @@ twasWeightsPipeline(
         genotypeCovariates = NULL
     ),
     weightsDataType = NULL,
-    naAction = "drop"
+    phenotypeFilterParam = PhenotypeFilterParam(naAction = "drop")
 )
 ```
 
 -  `EnsembleParam(enabled = TRUE)` adds an additional `ensembleWeights` row to
     the collection — a weighted combination of the individual methods' CV
     predictions, filtered by that bundle's `r2Threshold`.
--  `naAction` is forwarded to `residualizedPhenotypes()` (see the
+-  `phenotypeFilterParam` is the run's phenotype QC (see the
     [fine-mapping vignette](fine-mapping.html#common-parameters) for
     semantics).
 
@@ -393,17 +397,17 @@ do.call(weightsDataType, c(list(tw), key)) # tag carried through for reporting
 
 `weightStandardized()` is `TRUE` for anything the pipeline fitted: genotypes
 are centred and scaled to unit variance before every method runs, so all the
-weights are on one scale. That scaling lives in the `QtlDataset` accessors,
-not in the pipeline — `ResidualizationParam(scaleResiduals = FALSE)` opts out
-per call, and the dataset's own `scaleResiduals` slot is the default — so the
-recorded flag reports what was done rather than what you claimed. That is not bookkeeping. Every method here returns
-coefficients on the scale of the `X` it was handed — exactly so for glmnet,
-ncvreg, L0Learn, mr.ash, the Bayesian alphabet and `susieWeights()` — while
-the DPR samplers are not even scale-equivariant, so rescaling `X` changes
-their fit rather than just its units. Standardizing up front removes the
-question, and lands on the scale the LD correlations and z-scores behind a
-TWAS Z already use. `learnTwasWeights()` still takes `weightStandardized`,
-because there you supply `X` yourself.
+weights are on one scale. That scaling is part of residualization —
+`ResidualizationParam(scaleResiduals = FALSE)` opts out, and it is on by
+default — so the recorded flag reports what was done rather than what you
+claimed. That is not bookkeeping. Every method here returns coefficients on the
+scale of the `X` it was handed — exactly so for glmnet, ncvreg, L0Learn,
+mr.ash, the Bayesian alphabet and `susieWeights()` — while the DPR samplers are
+not even scale-equivariant, so rescaling `X` changes their fit rather than just
+its units. Standardizing up front removes the question, and lands on the scale
+the LD correlations and z-scores behind a TWAS Z already use.
+`learnTwasWeights()` still takes `weightStandardized`, because there you supply
+`X` yourself.
 
 `weights()` returns a named numeric vector for univariate methods and a
 matrix for multivariate ones. The remaining payloads are keyed the same way:
@@ -415,16 +419,16 @@ is the form the downstream TWAS and MR steps consume.
 
 ## Publishing the weights
 
-The same two generics that export fine-mapping results export weights.
-`exportToVcf()` writes a GWAS-VCF-style file: one record per variant, one
+The same two writers that write fine-mapping results write weights.
+`writeGwasVcf()` writes a GWAS-VCF-style file: one record per variant, one
 sample per fitted model, the weight in the `WGT` FORMAT field, and each
-model's identity in its own `##SAMPLE` header line. `exportToBed()` writes the
+model's identity in its own `##SAMPLE` header line. `writeBed()` writes the
 same thing as a long table, one row per (variant, model).
 
-```{r tw-export, eval=FALSE}
-exportToVcf(tw, "weights.vcf.gz")
-exportToVcf(tw, "lasso_weights.vcf.gz", method = "lasso") # one model
-exportToBed(tw, "weights.bed.gz")
+```{r tw-write, eval=FALSE}
+writeGwasVcf(tw, "weights.vcf.gz")
+writeGwasVcf(tw, "lasso_weights.vcf.gz", method = "lasso") # one model
+writeBed(tw, "weights.bed.gz")
 ```
 
 Both export the **full-data fit only**, and refuse an object that has none —
@@ -435,8 +439,13 @@ For the same reason neither exporter writes CV metrics. Those stay on the
 object:
 
 ```{r tw-cv, eval=FALSE}
-cv <- cvResult(tw, studyName = "s1", context = "brain", trait = "g1",
-               method = "susie")
+cv <- cvResult(
+    tw,
+    studyName = "s1",
+    context = "brain",
+    trait = "g1",
+    method = "susie"
+)
 cv$performance # per-method metric matrix: corr, rsq, adj_rsq, pval, RMSE, MAE
 ```
 
@@ -451,7 +460,10 @@ and the credible sets. Selecting only such a method, as in
 
 ```{r tw-read, eval=FALSE}
 tw <- readTwasWeights("weights.bed.gz")
-tw <- readTwasWeights("weights.bed.gz", region = "chr22:10e6-19e6")
+tw <- readTwasWeights(
+    "weights.bed.gz",
+    which = GenomicRanges::GRanges("chr22:10000000-19000000")
+)
 ```
 
 A weight is all it requires, so a table converted from another tool reads with

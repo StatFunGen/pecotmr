@@ -20,7 +20,8 @@ LdEigen(
 
 \item{eigenList}{A list with one entry per LD block.}
 
-\item{ldBlocks}{A \code{GRanges} of LD block intervals.}
+\item{ldBlocks}{The LD block intervals: a \code{GRanges}, or the path
+of a BED file, read as BED with a 0-based start.}
 
 \item{nSamples}{Integer, sample size of the LD reference panel.}
 

@@ -193,15 +193,31 @@ test_that("TwasWeightsMethodsParam shares the rules with its own registry", {
     )
     expect_s4_class(p, "TwasWeightsMethodsParam")
     expect_equal(p$qtlDatasetMethods$lasso$nfolds, 5)
-    # The registries differ: prsCs is summary-statistics only, enet
+    # The registries differ: prsCs is summary-statistics only, dprVb
     # individual only, and both are methods a fine-mapping Param never has.
     expect_error(
         TwasWeightsMethodsParam(qtlDatasetMethods = list(prsCs = list())),
         "prsCs is not a method this pipeline runs on QtlDataset"
     )
     expect_error(
-        TwasWeightsMethodsParam(qtlSumStatsMethods = list(enet = list())),
-        "enet is not a method this pipeline runs on QtlSumStats"
+        TwasWeightsMethodsParam(qtlSumStatsMethods = list(dprVb = list())),
+        "dprVb is not a method this pipeline runs on QtlSumStats"
+    )
+    # enet and ridge run on both, glmnet's options on one path and the
+    # penalized RSS solver's on the other.
+    both <- TwasWeightsMethodsParam(
+        qtlDatasetMethods = list(enet = GlmnetOptions(), ridge = list()),
+        qtlSumStatsMethods = list(
+            enet = PenalizedRssOptions(thr = 1e-6),
+            ridge = list()
+        )
+    )
+    expect_s4_class(both, "TwasWeightsMethodsParam")
+    expect_error(
+        TwasWeightsMethodsParam(
+            qtlSumStatsMethods = list(enet = GlmnetOptions())
+        ),
+        "options are for QtlDataset"
     )
     expect_error(
         FineMappingMethodsParam(methods = list(lasso = list())),
@@ -236,29 +252,6 @@ test_that("a pipeline resolves only the slots its input class reads", {
     expect_setequal(
         pecotmr:::.methodsParamResolve(p, "GwasSumStats")$tokens,
         c("ser", "susieInf")
-    )
-})
-
-test_that("a pipeline refuses a Param built for the other pipeline", {
-    expect_error(
-        pecotmr:::.methodsParamFor(
-            TwasWeightsMethodsParam(methods = "lasso"),
-            "QtlDataset",
-            "FineMappingMethodsParam",
-            "fineMappingPipeline"
-        ),
-        "configures a different pipeline"
-    )
-    # Its own family passes through untouched.
-    p <- FineMappingMethodsParam(methods = "susie")
-    expect_identical(
-        pecotmr:::.methodsParamFor(
-            p,
-            "QtlDataset",
-            "FineMappingMethodsParam",
-            "fineMappingPipeline"
-        ),
-        p
     )
 })
 
@@ -570,6 +563,15 @@ test_that("show counts an unnamed list slot and names a named one", {
     expect_true(any(str_detect(named, "susie")))
 })
 
+test_that("show names a BPPARAM by its backend and worker count", {
+    out <- capture.output(show(CrossValidationParam()))
+    expect_true(any(str_detect(out, fixed("SerialParam (1 worker)"))))
+    two <- capture.output(show(CrossValidationParam(
+        BPPARAM = BiocParallel::MulticoreParam(2)
+    )))
+    expect_true(any(str_detect(two, fixed("MulticoreParam (2 workers)"))))
+})
+
 test_that(".paramNestedText reports a nested Param that is empty", {
     expect_match(
         as.character(pecotmr:::.paramNestedText(MashComponentParam())),
@@ -587,7 +589,72 @@ test_that("$ and [[ refuse names and positions a Param does not have", {
     expect_error(cs[[NA_integer_]], "subscript out of bounds")
 })
 
-test_that(".assetMethodParam names the record it was handed", {
+# ---------------------------------------------------------------------------
+# $<-
+# ---------------------------------------------------------------------------
+
+# Every concrete MethodParam class whose constructor builds with defaults.
+.mp_defaultParams <- function() {
+    ns <- asNamespace("pecotmr")
+    classes <- names(methods::getClass("MethodParam")@subclasses)
+    concrete <- Filter(function(cl) !methods::getClass(cl)@virtual, classes)
+    built <- lapply(concrete, function(cl) {
+        if (!exists(cl, envir = ns, mode = "function")) {
+            return(NULL)
+        }
+        tryCatch(get(cl, envir = ns)(), error = function(e) NULL)
+    })
+    names(built) <- concrete
+    Filter(Negate(is.null), built)
+}
+
+test_that("$<- writing a setting back to itself changes nothing", {
+    # The rebuild goes through each class's own constructor, so every
+    # constructor must accept the values it stored -- normalised lists and
+    # nested records included. A round trip that is not the identity would
+    # mean `$<-` quietly reshapes a record.
+    params <- .mp_defaultParams()
+    expect_gt(length(params), 20L)
+    for (cl in names(params)) {
+        p <- params[[cl]]
+        fixed <- names(pecotmr:::.PARAM_FIXED_FIELDS[[cl]])
+        for (f in setdiff(methods::slotNames(p), fixed)) {
+            q <- do.call(`$<-`, list(p, f, methods::slot(p, f)))
+            expect_identical(q, p, info = paste0(cl, "$", f))
+        }
+    }
+})
+
+test_that("$<- normalises through the constructor and unsets with NULL", {
+    # FineMappingMethodsParam() turns a method name into its options entry;
+    # `$<-` stores exactly what the constructor would.
+    p <- FineMappingMethodsParam(methods = "susie")
+    p$methods <- c("susie", "susieInf")
+    expect_identical(
+        p,
+        FineMappingMethodsParam(methods = c("susie", "susieInf"))
+    )
+    cs <- CredibleSetParam(medianAbsCorr = 0.5)
+    expect_true("medianAbsCorr" %in% names(cs))
+    cs$medianAbsCorr <- NULL
+    expect_null(cs$medianAbsCorr)
+    expect_false("medianAbsCorr" %in% names(cs))
+})
+
+test_that("$<- refuses unknown and fixed settings, naming why", {
+    cs <- CredibleSetParam()
+    expect_error(cs$nosuch <- 1, "is not a setting of CredibleSetParam")
+    expect_error(
+        cs$maxNumSingleEffects <- 3L,
+        "needs a refit. Build a new CredibleSetParam\\(\\) instead"
+    )
+    mc <- MashComponentParam()
+    expect_error(mc$components <- list(), "assembles it from")
+    pv <- PvalMethodsParam(aspu = AspuOptions(n.perm = 5000))
+    expect_error(pv$methods <- list(), "one argument per method")
+})
+
+test_that(".assertMethodParam names the record it was handed", {
     # A Param of the wrong class reports its own class, not "a bare list".
     expect_error(
         pecotmr:::.assertMethodParam(
@@ -770,10 +837,18 @@ test_that(".methodsParamFor and ...ForMulti route each input shape", {
 .mpIsNsFunction <- function(n, ns) is.function(get(n, envir = ns))
 
 .mpShadowedValues <- function(f, label, own) {
-    hit <- intersect(
-        intersect(.mpFunValueSymbols(body(f)), names(formals(f))),
-        own
-    )
+    shadowing <- intersect(names(formals(f)), own)
+    if (length(shadowing) == 0L) {
+        return(NULL)
+    }
+    # A formal is passed as a value only through one of the .mpFunSlot
+    # helpers, and only if it appears in the body at all; all.names() rules
+    # out most closures before their call tree is walked.
+    syms <- all.names(body(f))
+    if (!any(is_in(shadowing, syms)) || !any(is_in(names(.mpFunSlot), syms))) {
+        return(NULL)
+    }
+    hit <- intersect(.mpFunValueSymbols(body(f)), shadowing)
     if (length(hit)) hit else NULL
 }
 

@@ -61,8 +61,10 @@ Options forwarded to the engine behind a TWAS weight method,
   A method's individual-level and summary-statistic paths often run
   DIFFERENT engines, and then each takes its own constructor:
   \code{lassoWeights} fits with glmnet (\code{GlmnetOptions}) while
-  \code{lassosumRssWeights} runs pecotmr's lassosum solver
-  (\code{LassosumOptions}); \code{scadWeights} / \code{mcpWeights} /
+  \code{lassosumRssWeights} runs pecotmr's lassosum
+  (\code{LassosumOptions}); \code{enetWeights} / \code{ridgeWeights} fit
+  with glmnet too, while \code{enetRssWeights} / \code{ridgeRssWeights}
+  use \code{PenalizedRssOptions}; \code{scadWeights} / \code{mcpWeights} /
   \code{l0learnWeights} use ncvreg and L0Learn while their \code{*Rss}
   counterparts use \code{PenalizedRssOptions}; \code{dprGibbsWeights} uses
   RcppDPR and \code{sdprWeights} uses \code{SdprOptions}. Splitting them is

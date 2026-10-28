@@ -7,7 +7,8 @@
 \description{
 Virtual base class for fine-mapping result collections. Concrete
   subclasses (\code{QtlFineMappingResult}, \code{GwasFineMappingResult})
-  carry a \code{DFrame} of per-fit rows and a shared \code{ldReference} slot.
+  carry a \code{DFrame} of per-fit rows and an \code{ldReference} slot
+  listing the LD references those fits used.
   Downstream pipelines should dispatch on \code{FineMappingResultBase} for
   behaviors that apply to either flavour, and on the concrete subclass when
   the tuple shape matters.
@@ -15,10 +16,30 @@ Virtual base class for fine-mapping result collections. Concrete
 \section{Slots}{
 
 \describe{
-\item{\code{ldReference}}{The LD reference the fits were computed against (a
-genotype panel, a \code{GenotypeMixture} or an \code{LdMatrix}), or
-\code{NULL} when the fits were derived from individual-level data. Used
-downstream to check that pipelines combining results share one LD
-reference.}
+\item{\code{ldReference}}{A named list of the LD references the fits were
+computed against, each a genotype panel, a \code{GenotypeMixture} or an
+\code{LdMatrix}, stored once apiece; the \code{ldReference} column of
+\code{mcols} names the entry each row used (\code{NA} for a fit derived
+from individual-level data). Used downstream to check that the rows a
+pipeline combines share an LD reference.}
 }}
+
+\section{Narrowed rows}{
+ Each row records in its \code{fitVariants} column
+  the ids of the variants its fit was made with (none for a row without a
+  fit). A row narrowed since -- by \code{endoapply()} or \code{[[<-} --
+  keeps its fit as it was, so every reader of the fit warns, with
+  condition class \code{pecotmrFitCoverage}, when a row holds fewer
+  variants than its fit describes. The readers are the accessors
+  (\code{susieFit()}, \code{lbf()}, \code{cvResult()},
+  \code{credibleSetSummary()} and the fSuSiE views),
+  \code{computeCsCorrelation()}, \code{susieResult()},
+  \code{extractCsInfo()}, \code{extractTopPipInfo()},
+  \code{writeGwasVcf()}, and the pipelines that score the fits:
+  \code{colocPipeline(adjustPips = FALSE)}, \code{qtlEnrichmentPipeline()}
+  and \code{twasWeightsPipeline()}. Values held per variant, such as
+  \code{topLoci()}, are narrowed with the row and do not warn. Nothing is
+  rescaled: \code{\link{intersectVariants}} restricts a fit explicitly, as
+  \code{colocPipeline()} does by default.
+}
 

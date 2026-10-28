@@ -35,8 +35,10 @@ library(pecotmr)
 
 ## Two kinds of LD reference
 
-Every pipeline reads LD from one place: the `ldReference` of the collection
-it is given. That reference is one of two things (or a mixture of either,
+Every pipeline reads LD from one place: the LD reference of the collection
+row it is working on. A collection can use one reference for every row or a
+different one per row; `ldReference()` lists the distinct references, each
+stored once. A reference is one of two things (or a mixture of either,
 below).
 
 - A **genotype panel**, read lazily from disk with `readGenotypes()`. LD is
@@ -83,8 +85,8 @@ dim(R)
 
 A panel can also be reached through an LD meta file: one row per chromosome
 or block, giving its coordinates and the genotype files behind it, with
-paths relative to the meta file. `readGenotypes(ldMeta = , region = )` opens
-the row covering a region.
+paths relative to the meta file. `readGenotypes(ldMeta = , block = )` opens
+the whole block whose row covers the window.
 
 ### An LdMatrix
 
@@ -147,17 +149,21 @@ GenotypeMixture(
 
 ### Using a reference
 
-Either kind goes in the same slot, and from there every step reads it the
-same way:
+Either kind is passed the same way, and from there every step reads it the
+same way. One reference serves every row; a list gives each row (each study,
+for `GwasSumStats`) its own:
 
 ```{r use, eval=FALSE}
 gwas <- GwasSumStats(..., ldReference = panel) # or ldReference = ld
+gwas <- GwasSumStats(..., ldReference = list(panelA, panelB)) # per study
 ```
 
 When two collections meet in one pipeline — a QTL and a GWAS side in
-colocalization, say — their references must be the same: two panels must
-share their samples and allele coding, two `LdMatrix` objects must agree on
-the LD they share, and a panel never matches a matrix.
+colocalization, say — each QTL row and the GWAS rows it is combined with must
+use the same reference: two panels must share their samples and allele
+coding, two `LdMatrix` objects must agree on the LD they share, and a panel
+never matches a matrix. `colocboostPipeline()` is the exception: it reads each
+side's LD from that side's own reference, so the two may differ.
 
 ## Computing LD from genotypes
 
@@ -267,9 +273,9 @@ covered in the [QC vignette](rss-qc.html), where the motivation lives.
 
 - [QC for summary statistics](rss-qc.html) — matching statistics to a panel.
 - [Heritability](heritability.html) — `buildLdEigen()` / `buildLdScore()`
-  turn per-block LD into the statistics the h2 estimators consume.
+    turn per-block LD into the statistics the h2 estimators consume.
 - [Fine-mapping](fine-mapping.html) and [TWAS weights](twas-weights.html) —
-  the RSS methods that consume LD.
+    the RSS methods that consume LD.
 
 # Session info
 

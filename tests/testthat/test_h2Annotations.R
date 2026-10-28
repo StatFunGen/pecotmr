@@ -1,8 +1,4 @@
-# Tests migrated from test_h2ClassesSumstats.R
-
-# === Tests migrated from test_h2ClassesSumstats.R (h2Annotations) ===
-
-test_that(".annot_detect_format() detects bigwig, bed, ldsc_annot", {
+test_that(".annotDetectFormat() detects bigwig, bed, ldsc_annot", {
     detect <- pecotmr:::.annotDetectFormat
 
     expect_equal(detect("path/to/file.bw"), "bigwig")
@@ -15,10 +11,10 @@ test_that(".annot_detect_format() detects bigwig, bed, ldsc_annot", {
 })
 
 # =============================================================================
-# .read_bed_annotation (h2Annotations.R)
+# .readBedAnnotation (h2Annotations.R)
 # =============================================================================
 
-test_that(".read_bed_annotation returns correct binary overlap vector", {
+test_that(".readBedAnnotation returns correct binary overlap vector", {
     skip_if_not_installed("rtracklayer")
 
     bed_content <- paste(
@@ -51,7 +47,7 @@ test_that(".read_bed_annotation returns correct binary overlap vector", {
 })
 
 
-test_that(".read_bed_annotation returns all zeros when no overlaps", {
+test_that(".readBedAnnotation returns all zeros when no overlaps", {
     skip_if_not_installed("rtracklayer")
 
     bed_content <- "chr1\t100\t200\tregion1"
@@ -70,10 +66,10 @@ test_that(".read_bed_annotation returns all zeros when no overlaps", {
 })
 
 # =============================================================================
-# .read_ldsc_annot (h2Annotations.R)
+# .readLdscAnnot (h2Annotations.R)
 # =============================================================================
 
-test_that(".read_ldsc_annot reads annotation column and matches SNPs", {
+test_that(".readLdscAnnot reads annotation column and matches SNPs", {
     annot_df <- data.frame(
         CHR = c(1, 1, 1, 1),
         BP = c(100, 200, 300, 400),
@@ -105,7 +101,7 @@ test_that(".read_ldsc_annot reads annotation column and matches SNPs", {
 })
 
 
-test_that(".read_ldsc_annot returns 0 for unmatched SNP positions", {
+test_that(".readLdscAnnot returns 0 for unmatched SNP positions", {
     annot_df <- data.frame(
         CHR = c(1, 1),
         BP = c(100, 200),
@@ -135,7 +131,7 @@ test_that(".read_ldsc_annot returns 0 for unmatched SNP positions", {
 })
 
 
-test_that(".read_ldsc_annot errors when annotation column not found", {
+test_that(".readLdscAnnot errors when annotation column not found", {
     annot_df <- data.frame(
         CHR = c(1),
         BP = c(100),
@@ -166,7 +162,7 @@ test_that(".read_ldsc_annot errors when annotation column not found", {
 })
 
 
-test_that(".read_ldsc_annot handles chr-prefixed CHR column", {
+test_that(".readLdscAnnot handles chr-prefixed CHR column", {
     annot_df <- data.frame(
         CHR = c("chr1", "chr1"),
         BP = c(100, 200),
@@ -195,10 +191,10 @@ test_that(".read_ldsc_annot handles chr-prefixed CHR column", {
 })
 
 # =============================================================================
-# readannotations method (h2Annotations.R)
+# readAnnotations method (h2Annotations.R)
 # =============================================================================
 
-test_that("readannotations errors when paths is not named", {
+test_that("readAnnotations errors when path is not named", {
     snp_gr <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(start = 100, width = 1)
@@ -206,12 +202,12 @@ test_that("readannotations errors when paths is not named", {
 
     expect_error(
         readAnnotations(c("/some/file.bed"), snp_gr),
-        "paths.*must be a named"
+        "path.*must be a named"
     )
 })
 
 
-test_that("readannotations with BED file creates AnnotationMatrix", {
+test_that("readAnnotations with BED file creates AnnotationMatrix", {
     skip_if_not_installed("rtracklayer")
 
     bed_content <- "chr1\t100\t500\tregion1"
@@ -240,7 +236,7 @@ test_that("readannotations with BED file creates AnnotationMatrix", {
 })
 
 
-test_that("readannotations with LDSC annot file creates AnnotationMatrix", {
+test_that("readAnnotations with LDSC annot file creates AnnotationMatrix", {
     annot_df <- data.frame(
         CHR = c(1, 1, 1),
         BP = c(100, 200, 300),
@@ -273,7 +269,7 @@ test_that("readannotations with LDSC annot file creates AnnotationMatrix", {
 })
 
 
-test_that("readannotations uses provided annotation_meta", {
+test_that("readAnnotations uses the provided annotationMeta", {
     annot_df <- data.frame(
         CHR = c(1, 1),
         BP = c(100, 200),
@@ -314,7 +310,7 @@ test_that("readannotations uses provided annotation_meta", {
 })
 
 
-test_that("readannotations with multiple files creates multi-column matrix", {
+test_that("readAnnotations with multiple files creates multi-column matrix", {
     # Two LDSC annot files
     annot_df1 <- data.frame(
         CHR = c(1, 1),
@@ -429,9 +425,3 @@ test_that(".readLdscAnnot errors when CHR/BP columns are absent", {
         "must contain CHR and BP columns"
     )
 })
-
-# =============================================================================
-# readsumstats edge cases (h2_sumstats.R)
-# =============================================================================
-
-# =============================================================================

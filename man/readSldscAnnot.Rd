@@ -4,10 +4,10 @@
 \alias{readSldscAnnot}
 \title{Read target annotation files (.annot.gz) into one table}
 \usage{
-readSldscAnnot(targetAnnoDir, annotCols = NULL)
+readSldscAnnot(path, annotCols = NULL)
 }
 \arguments{
-\item{targetAnnoDir}{Character. Directory of `.annot.gz` files.}
+\item{path}{Character. Directory of `.annot.gz` files.}
 
 \item{annotCols}{Character or integer vector, default NULL. Annotation
 columns to keep. NULL keeps all non-standard columns (auto-detected).}

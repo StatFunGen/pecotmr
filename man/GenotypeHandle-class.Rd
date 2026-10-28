@@ -13,7 +13,7 @@ GenotypeHandle(
   pvar = NULL,
   psam = NULL,
   ldMeta = NULL,
-  region = NULL,
+  block = NULL,
   genoMeta = NULL,
   chroms = NULL,
   format = NULL
@@ -29,17 +29,16 @@ GenotypeHandle(
 
 \item{ldMeta}{Path to an LD-meta TSV file (columns \code{chrom},
 \code{start}, \code{end}, \code{path}; the \code{path} column may be
-comma-separated as \code{ld_file,bim_file}). Requires \code{region}. The
-constructor resolves the row covering \code{region}, then delegates to the
+comma-separated as \code{ld_file,bim_file}). Requires \code{block}. The
+constructor resolves the row covering \code{block}, then delegates to the
 appropriate file-based handler. When the resolved row points at PLINK2
 or BGEN files, the corresponding reader is used; a row pointing
 at a pre-computed LD matrix (\code{.cor.xz}) is refused, as pecotmr reads
 no pre-computed LD from disk -- wrap such a matrix in an
 \code{\link{LdMatrix}} instead.}
 
-\item{region}{Region specification for \code{ldMeta} lookup:
-\code{"chr:start-end"} string or a one-row data.frame with \code{chrom},
-\code{start}, \code{end}.}
+\item{block}{The \code{GRanges} window to look up in \code{ldMeta}; the
+whole file of the row covering it is opened.}
 
 \item{genoMeta}{One-file-per-chromosome specification: a path to a
 \code{#chr,path} meta file or a named character vector (names =
@@ -49,8 +48,8 @@ chromosomes, values = payload paths/prefixes). Optionally pass
 \item{chroms}{Optional character vector of chromosomes. With \code{genoMeta}
 (a sharded, one-file-per-chromosome panel) only the shards whose chromosome
 is listed are read, skipping the rest -- an I/O optimisation when the panel
-is genome-wide but only a few chromosomes are needed. Chromosome labels are
-compared canonically (\code{"chr1"}/\code{"1"} match, \code{23}/\code{X}
+is genome-wide but only a few chromosomes are needed. Chromosome labels may
+be in any style (\code{"chr1"}/\code{"1"} match, \code{23}/\code{X}
 etc.). If none of the requested chromosomes are present in the panel, every
 shard is read (so the caller's own absence check can report the mismatch).
 Only meaningful with \code{genoMeta}; supplying it with any other source is
@@ -112,10 +111,10 @@ payload files live in \code{chromPaths}.}
 
 \item{\code{format}}{Character, \code{"plink2"} or \code{"bgen"}.}
 
-\item{\code{snpInfo}}{data.frame, SNP metadata read from the index/sidecar. For a
-sharded handle this is the union across chromosomes (row-bound in the order
-the shards were supplied), so \code{snpIdx} stays a single global index
-space.}
+\item{\code{snpInfo}}{data.frame, SNP metadata read from the index/sidecar, its
+\code{CHR} in UCSC style whatever the file writes. For a sharded handle
+this is the union across chromosomes (row-bound in the order the shards
+were supplied), so \code{snpIdx} stays a single global index space.}
 
 \item{\code{nSamples}}{Integer, number of samples.}
 
@@ -123,8 +122,9 @@ space.}
 
 \item{\code{pgenPtr}}{Opaque pointer for PLINK2 reader state (NULL otherwise).}
 
-\item{\code{chromPaths}}{Named character vector mapping canonical chromosome (e.g.
-\code{"21"}, \code{"X"}) to the per-chromosome payload path/prefix. Empty
+\item{\code{chromPaths}}{Named character vector mapping each chromosome, in UCSC
+style (e.g. \code{"chr21"}, \code{"chrX"}), to the per-chromosome
+payload path/prefix. Empty
 (\code{character(0)}) for a single-file handle; non-empty marks a
 one-file-per-chromosome (sharded) handle whose extraction is routed by
 chromosome.}

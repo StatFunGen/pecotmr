@@ -2,7 +2,7 @@
 # The pipeline is pure computation over an in-memory SldscData: no file I/O,
 # no mocks. Fixtures come from helper-sldsc.R (.sldscMkData / .sldscMkRun).
 
-test_that("pipeline runs end-to-end on a single + joint SldscData", {
+test_that("pipeline runs end-to-end, pooling every trait in the meta tables", {
     sd <- .sldscMkData()
     res <- suppressMessages(sldscPostprocessingPipeline(sd, mafCutoff = 0.05))
 
@@ -32,17 +32,12 @@ test_that("pipeline runs end-to-end on a single + joint SldscData", {
     expect_equal(res$params$trait_names, c("traitX", "traitY"))
     # baseline annotation detected from the joint run
     expect_true("baselineLD_0" %in% res$params$baseline_categories)
-})
 
-# The shape assertions above pass even when every meta row is NA, which is
-# what a degenerate per-block tau (constant annotationJackknifeCoefs -> jackknife SE of 0)
-# produces: metafor gets zero-variance inputs and DerSimonian-Laird drops
-# every trait, leaving nTraits == 0. Assert on the values, not just the
-# columns.
-test_that("meta tables pool every trait rather than dropping them", {
-    sd <- .sldscMkData()
-    res <- suppressMessages(sldscPostprocessingPipeline(sd, mafCutoff = 0.05))
-
+    # The shape assertions above pass even when every meta row is NA, which
+    # is what a degenerate per-block tau (constant annotationJackknifeCoefs
+    # -> jackknife SE of 0) produces: metafor gets zero-variance inputs and
+    # DerSimonian-Laird drops every trait, leaving nTraits == 0. Assert on
+    # the values, not just the columns.
     for (tbl in c("tauStar", "enrichment", "enrichstat")) {
         meta <- res$meta[[tbl]]
         expect_equal(meta$nTraits, rep(2L, nrow(meta)), info = tbl)
@@ -146,9 +141,9 @@ test_that("pipeline falls back to positional rename when names don't match", {
     expect_equal(res$params$target_categories, c("L2_1", "L2_2"))
 })
 
-test_that("pipeline breaks the single loop when a trait has fewer runs than targets", {
-    # traitX has only ONE single run but there are TWO target categories: the
-    # i > length(singleRuns) break is hit on the 2nd target.
+test_that("pipeline skips targets beyond a trait's single runs", {
+    # traitX has only ONE single run but there are TWO target categories, so
+    # only the first target is standardized in single mode.
     annot <- data.frame(
         CHR = c(1, 1, 2, 2),
         SNP = paste0("rs", 1:4),
@@ -173,8 +168,8 @@ test_that("pipeline breaks the single loop when a trait has fewer runs than targ
         sd,
         targetCategories = c("annot_A_0", "annot_B_0")
     ))
-    # The break stops before annot_B_0's single run; the single-keyed summary
-    # therefore carries only annot_A_0.
+    # annot_B_0 has no single run; the single-keyed summary therefore
+    # carries only annot_A_0.
     sm <- res$per_trait$traitX$summary
     expect_equal(sm$target, "annot_A_0")
     expect_false(is.na(sm$tauStarSingle))
@@ -182,7 +177,7 @@ test_that("pipeline breaks the single loop when a trait has fewer runs than targ
 
 test_that("pipeline warns and skips a single run that fails to standardize", {
     # traitX's 2nd single run lacks the target category annot_B_0, so
-    # standardizeSldscTrait errors and the pipeline's tryCatch warns + skips it.
+    # standardizeSldscTrait errors and the pipeline warns and skips it.
     annot <- data.frame(
         CHR = c(1, 1, 2, 2),
         SNP = paste0("rs", 1:4),
@@ -257,7 +252,7 @@ test_that("pipeline errors when targetCategories cannot be auto-detected", {
 test_that("pipeline warns and skips a joint run that fails to standardize", {
     af <- .sldscBranchAnnotFrq()
     # The joint run lacks the target category annot_A_0, so its standardization
-    # errors and the pipeline's joint-side tryCatch warns + skips it.
+    # errors and the pipeline warns and skips it.
     traits <- list(
         traitX = list(
             single = list(.sldscMkRun(c("annot_A_0", "baselineLD_0"))),
@@ -302,7 +297,7 @@ test_that(".sldscCollectSingle returns empty parts for no standardizations", {
 
 test_that(".sldscTraitSingle tolerates a trait with no single-mode runs", {
     local_mocked_bindings(
-        sldscResults = function(...) NULL,
+        .sldscRun = function(...) NULL,
         .package = "pecotmr"
     )
     ctx <- list(sldscData = NULL, targetCategories = c("t1", "t2"))

@@ -29,7 +29,7 @@ test_that("prsCs errors on mismatched bhat and R dimensions", {
     )
 })
 
-test_that("prsCs runs successfully with valid input", {
+test_that("prsCs runs with valid input and estimates phi when none is given", {
     set.seed(42)
     p <- 10
     n <- 100
@@ -52,24 +52,6 @@ test_that("prsCs runs successfully with valid input", {
     expect_true("betaEst" %in% names(result))
     expect_equal(length(result$betaEst), p)
     expect_true(all(is.finite(result$betaEst)))
-})
-
-test_that("prsCs with phi = NULL estimates phi automatically", {
-    set.seed(42)
-    p <- 10
-    n <- 100
-    bhat <- rnorm(p, sd = 0.1)
-    R <- diag(p)
-    result <- prsCs(
-        bhat = bhat,
-        R = R,
-        n = n,
-        phi = NULL,
-        maf = rep(0.3, p),
-        nIter = 50,
-        nBurnin = 10,
-        thin = 2
-    )
     expect_true("phiEst" %in% names(result))
 })
 
@@ -94,67 +76,33 @@ test_that("prsCs with explicit phi value", {
     expect_true("psiEst" %in% names(result))
 })
 
-test_that("prsCs works without maf (maf = NULL)", {
-    set.seed(42)
-    p <- 10
-    n <- 100
-    bhat <- rnorm(p, sd = 0.1)
-    R <- diag(p)
-    result <- prsCs(
-        bhat = bhat,
-        R = R,
-        n = n,
-        maf = NULL,
-        nIter = 50,
-        nBurnin = 10,
-        thin = 2
-    )
-    expect_equal(length(result$betaEst), p)
-})
-
 # ---- prsCs verbose output ----
-test_that("prsCs with verbose = TRUE produces output", {
+test_that("prsCs verbose = TRUE reports its iterations and estimated phi", {
     set.seed(42)
     p <- 10
     n <- 100
     bhat <- rnorm(p, sd = 0.1)
     R <- diag(p)
-    # n_iter >= 100 triggers the verbose print inside the MCMC loop
-    result <- prsCs(
-        bhat = bhat,
-        R = R,
-        n = n,
-        maf = rep(0.3, p),
-        nIter = 110,
-        nBurnin = 10,
-        thin = 2,
-        verbose = TRUE,
-        seed = 42L
+    # n_iter >= 100 triggers the verbose print inside the MCMC loop; phi is
+    # left NULL, so the sampler estimates it and prints the estimate.
+    out <- capture.output(
+        result <- prsCs(
+            bhat = bhat,
+            R = R,
+            n = n,
+            maf = rep(0.3, p),
+            nIter = 110,
+            nBurnin = 10,
+            thin = 2,
+            verbose = TRUE,
+            seed = 42L
+        )
     )
+    expect_match(out, "Iteration +100 of 110", all = FALSE)
+    expect_match(out, "Estimated global shrinkage parameter", all = FALSE)
     expect_type(result, "list")
     expect_equal(length(result$betaEst), p)
     expect_true(all(is.finite(result$betaEst)))
-})
-
-test_that("prsCs verbose with phi = NULL shows estimated phi", {
-    set.seed(42)
-    p <- 10
-    n <- 100
-    bhat <- rnorm(p, sd = 0.1)
-    R <- diag(p)
-    result <- prsCs(
-        bhat = bhat,
-        R = R,
-        n = n,
-        phi = NULL,
-        maf = rep(0.3, p),
-        nIter = 110,
-        nBurnin = 10,
-        thin = 2,
-        verbose = TRUE,
-        seed = 42L
-    )
-    expect_true("phiEst" %in% names(result))
     expect_true(result$phiEst > 0)
 })
 

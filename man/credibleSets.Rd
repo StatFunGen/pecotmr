@@ -13,7 +13,7 @@ credibleSets(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL,
+  blockId = NULL,
   coverage = 0.95,
   minPurity = NULL
 )
@@ -35,9 +35,8 @@ this trait; \code{NULL} matches all traits.}
 \item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
 this fine-mapping / weight method; \code{NULL} matches all methods.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block of a fit; \code{NULL} matches every block.}
 
 \item{coverage}{Numeric in (0, 1). Credible-set coverage level. Default
 \code{0.95}.}
@@ -46,7 +45,11 @@ all regions.}
 retain; \code{NULL} applies no purity filter.}
 }
 \value{
-A data.frame of credible set information.
+A \code{GRanges}, one range per credible-set member, carrying the
+  per-variant columns in \code{mcols()}; when the selectors match more
+  than one entry the row-identity columns are carried there too. Narrow it
+  with \code{subsetByOverlaps()}; take a table with
+  \code{as.data.frame()}.
 }
 \description{
 Extract credible set assignments at the requested coverage.

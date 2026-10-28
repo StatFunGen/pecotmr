@@ -31,8 +31,8 @@ Restrict two fine-mapping collections to the variants they have
   variants that survive.
 }
 \details{
-\code{subsetRegion()} restricts ONE object to a window; this
-  intersects TWO objects against each other. Coloc needs it symmetric --
+This intersects two objects against each other. Coloc needs it
+  symmetric --
   both sides must be scored on the same variant set -- while TWAS, MR and
   cTWAS need it one-sided, adjusting the QTL side to the GWAS variant set
   and leaving the GWAS side alone.

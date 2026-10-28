@@ -57,8 +57,6 @@ mr.mash covariances --- or leave it NULL for the canonical uniform
 mixture over \code{R} conditions.
 }
 \examples{
-\donttest{
 # Canonical uniform mixture over two named conditions.
 buildMvsusieMixturePrior(conditionNames = c("brain", "blood"))
-}
 }

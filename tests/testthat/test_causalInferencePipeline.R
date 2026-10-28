@@ -13,7 +13,7 @@ context("causalInferencePipeline")
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
             A2 = rep("G", snp_n),
@@ -83,7 +83,7 @@ context("causalInferencePipeline")
         entry = list(gr),
         genome = "hg19",
         ldReference = .cip_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        qcOptions = if (qc) list(step1 = "ok") else list()
     )
 }
 
@@ -91,7 +91,7 @@ context("causalInferencePipeline")
     method = "susie",
     variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5))
 ) {
-    entry <- twasWeightsRow(
+    entry <- TwasWeightsRow(
         variantIds = variant_ids,
         weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
     )
@@ -119,7 +119,7 @@ context("causalInferencePipeline")
         posterior_sd = rep(0.05, n),
         stringsAsFactors = FALSE
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = variant_ids,
         susieFit = list(),
         topLoci = tl
@@ -173,7 +173,7 @@ test_that("causalInferencePipeline: rejects non-TwasWeights twasWeights arg", {
 })
 
 test_that("causalInferencePipeline: rejects GwasFineMappingResult for the QTL slot", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(
@@ -207,7 +207,7 @@ test_that(".cipRequireMatchingLdRefs: NULL twas-side ldReference is allowed", {
         context = "c1",
         trait = "t1",
         method = "lasso",
-        entry = list(twasWeightsRow(
+        entry = list(TwasWeightsRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
             weights = rep(0.1, 5)
         )),
@@ -231,7 +231,7 @@ test_that(".cipRequireMatchingLdRefs: sample set mismatch errors", {
         context = "c1",
         trait = "t1",
         method = "lasso",
-        entry = list(twasWeightsRow(
+        entry = list(TwasWeightsRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
             weights = rep(0.1, 5)
         )),
@@ -250,14 +250,42 @@ test_that(".cipRequireMatchingLdRefs: differently trimmed panels pass", {
     # Independent QC of the QTL and GWAS sides leaves one LD reference as two
     # overlapping-but-unequal panels, which the check reports rather than
     # refuses.
+    tw <- .cip_makeTwasWeights()
+    tw <- pecotmr:::.withRowLdRefs(tw, .cip_makeHandle(snp_n = 6L))
+    gwas <- pecotmr:::.withRowLdRefs(
+        .cip_makeGwasSumstats(),
+        .cip_makeHandle(snp_n = 7L)
+    )
     expect_warning(
         expect_null(pecotmr:::.cipRequireMatchingLdRefs(
-            .cip_makeHandle(snp_n = 6L),
-            .cip_makeHandle(snp_n = 7L),
+            tw,
+            gwas,
             label = "twasWeights"
         )),
         "share 6 variant"
     )
+})
+
+test_that(".cipRequireMatchingLdRefs: rows that never meet may differ", {
+    # The check is per pair of rows scored together -- those whose regions
+    # overlap -- so a weight row elsewhere on the genome is not held to the
+    # GWAS rows' panel.
+    elsewhere <- TwasWeights(
+        studyName = "Q1",
+        context = "c1",
+        trait = "t1",
+        method = "lasso",
+        entry = list(TwasWeightsRow(
+            variantIds = sprintf("chr2:%d:A:G", 100L * (1:5)),
+            weights = rep(0.1, 5)
+        )),
+        ldReference = .cip_makeHandle(sample_prefix = "other")
+    )
+    expect_null(pecotmr:::.cipRequireMatchingLdRefs(
+        elsewhere,
+        .cip_makeGwasSumstats(),
+        label = "twasWeights"
+    ))
 })
 
 # ===========================================================================
@@ -339,11 +367,11 @@ test_that("causalInferencePipeline: combineMethods appends combined rows", {
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
         entry = list(
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0.1, 5)
             ),
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0.05, 5)
             )
@@ -381,7 +409,7 @@ test_that(".cipZToSe: falls back to vector of 1 when maf/n are NA", {
 
 test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, SS-TWAS keeps all", {
     mkEntry <- function(rsq, pval = 0.01) {
-        twasWeightsRow(
+        TwasWeightsRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
             weights = rep(0.1, 3),
             cvResult = list(metrics = c(corr = 0.1, rsq = rsq, pval = pval))
@@ -439,11 +467,11 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
         trait = rep("G", 2),
         method = c("susie", "lasso"),
         entry = list(
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
                 weights = rep(0.1, 3)
             ),
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
                 weights = rep(0.1, 3)
             )
@@ -494,12 +522,12 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
         entry = list(
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
                 cvResult = list(metrics = c(rsq = 0.2, pval = 0.001))
             ),
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
@@ -527,12 +555,12 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
         method = c("susie", "lasso"),
         entry = list(
             # top rsq but all-zero weights -> wᵀRw = 0 -> twasZ NaN
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0, 5),
                 cvResult = list(metrics = c(rsq = 0.9, pval = 0.001))
             ),
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
@@ -560,12 +588,12 @@ test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
         entry = list(
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.9, pval = 0.5))
             ),
-            twasWeightsRow(
+            TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
@@ -589,7 +617,7 @@ test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods
 })
 
 
-context("twas: twasZ and harmonize deprecated wrappers")
+context("twasZ")
 
 # ===========================================================================
 # Fixture builder: a small genotype + LD matrix.
@@ -822,27 +850,47 @@ test_that("twasZ: combineMethods K>=2 forwards to combinePValues with correlatio
     expect_equal(res$combined$input$nValid, 2L)
 })
 # ===========================================================================
-# Tests migrated from test_twas.R (twasZ behaviour)
+# twasZ: hand-computed values on the R path (positional alignment)
 # ===========================================================================
 
-test_that("twasZ errors when weights and z lengths differ", {
-    expect_error(twasZ(c(1, 2), c(1, 2, 3)), "Must have exactly 3 rows")
+test_that("twasZ: R path gives w'z / sqrt(w'Rw) on hand-computed cases", {
+    # Each case: weights, z, R and the Z worked out by hand.
+    cases <- list(
+        # 0.7 * 2.5 / sqrt(0.7^2) = 2.5
+        singleVariant = list(0.7, 2.5, matrix(1), 2.5),
+        # 5 * 3 / sqrt(5)
+        equalWeights = list(rep(1, 5), rep(3, 5), diag(5), 15 / sqrt(5)),
+        # (-1 - 0.3) / sqrt(0.25 + 0.09): the sign follows the weights.
+        negativeWeights = list(
+            c(-0.5, -0.3),
+            c(2, 1),
+            diag(2),
+            -1.3 / sqrt(0.34)
+        ),
+        # w'Rw = sum(w)^2 = 1 when every pair is perfectly correlated.
+        perfectlyCorrelated = list(rep(0.25, 4), rep(2, 4), matrix(1, 4, 4), 2),
+        # A single non-zero weight reads that variant's z alone.
+        sparseWeights = list(c(0, 0, 1, 0, 0), 1:5, diag(5), 3),
+        # 1e6 * 1e-6 / sqrt(1e12)
+        largeWeightTinyZ = list(c(1e6, 0, 0), c(1e-6, 5, 5), diag(3), 1e-6),
+        # Z = 0, so the p-value is 1.
+        zeroZ = list(c(0.5, 0.3, 0.2), c(0, 0, 0), diag(3), 0),
+        # Z = 2e6 / sqrt(2), so the p-value underflows to 0.
+        largeZ = list(c(1, 1), c(1e6, 1e6), diag(2), 2e6 / sqrt(2))
+    )
+    for (nm in names(cases)) {
+        cs <- cases[[nm]]
+        res <- twasZ(cs[[1L]], cs[[2L]], R = cs[[3L]])$Z
+        expect_equal(colnames(res), c("Z", "pval"), info = nm)
+        expect_equal(unname(res[, "Z"]), cs[[4L]], tolerance = 1e-10, info = nm)
+        expect_equal(
+            unname(res[, "pval"]),
+            2 * pnorm(-abs(cs[[4L]])),
+            tolerance = 1e-10,
+            info = nm
+        )
+    }
 })
-
-
-test_that("twasZ: single weight and single z-score returns valid result", {
-    weights <- 0.7
-    z <- 2.5
-    R <- matrix(1, nrow = 1, ncol = 1)
-    result <- twasZ(weights, z, R = R)
-    expect_true(is.list(result))
-    expect_equal(colnames(result$Z), c("Z", "pval"))
-    # With single variant: stat = 0.7 * 2.5 = 1.75, denom = 0.7 * 1 * 0.7 = 0.49
-    # zscore = 1.75 / sqrt(0.49) = 1.75 / 0.7 = 2.5
-    expect_equal(as.numeric(result$Z[, "Z"]), 2.5, tolerance = 1e-10)
-    expect_true(result$Z[, "pval"] > 0 && result$Z[, "pval"] < 1)
-})
-
 
 test_that("twasZ: all-zero weights produce NaN z-score", {
     weights <- c(0, 0, 0)
@@ -851,68 +899,6 @@ test_that("twasZ: all-zero weights produce NaN z-score", {
     result <- twasZ(weights, z, R = R)
     # stat = 0, denom = 0, so zscore = 0/0 = NaN
     expect_true(is.nan(as.numeric(result$Z[, "Z"])))
-})
-
-
-test_that("twasZ: very large z-scores still produce finite results", {
-    set.seed(42)
-    p <- 5
-    weights <- rnorm(p)
-    z <- rep(1e6, p)
-    R <- diag(p)
-    result <- twasZ(weights, z, R = R)
-    expect_true(is.finite(as.numeric(result$Z[, "Z"])))
-    # p-value should be extremely small for large z
-    expect_true(result$Z[, "pval"] < 1e-10 || result$Z[, "pval"] == 0)
-})
-
-
-test_that("twasZ: identical z-scores with equal weights gives proportional result", {
-    p <- 5
-    weights <- rep(1, p)
-    z <- rep(3.0, p)
-    R <- diag(p)
-    result <- twasZ(weights, z, R = R)
-    # stat = sum(weights * z) = 5 * 3 = 15
-    # denom = t(w) %*% I %*% w = 5
-    # zscore = 15 / sqrt(5) = 6.7082...
-    expect_equal(as.numeric(result$Z[, "Z"]), 15 / sqrt(5), tolerance = 1e-10)
-})
-
-
-test_that("twasZ: negative weights flip the sign of the z-score", {
-    weights_pos <- c(0.5, 0.3)
-    weights_neg <- c(-0.5, -0.3)
-    z <- c(2.0, 1.0)
-    R <- diag(2)
-    result_pos <- twasZ(weights_pos, z, R = R)
-    result_neg <- twasZ(weights_neg, z, R = R)
-    # z-score should have opposite sign but same p-value
-    expect_equal(
-        as.numeric(result_pos$Z[, "Z"]),
-        -as.numeric(result_neg$Z[, "Z"]),
-        tolerance = 1e-10
-    )
-    expect_equal(
-        as.numeric(result_pos$Z[, "pval"]),
-        as.numeric(result_neg$Z[, "pval"]),
-        tolerance = 1e-10
-    )
-})
-
-
-test_that("twasZ: off-diagonal correlation in R changes the result", {
-    weights <- c(0.5, 0.5)
-    z <- c(2.0, 2.0)
-    R_identity <- diag(2)
-    R_correlated <- matrix(c(1, 0.8, 0.8, 1), nrow = 2)
-    result_identity <- twasZ(weights, z, R = R_identity)
-    result_correlated <- twasZ(weights, z, R = R_correlated)
-    # Same stat but different denominators, so different z-scores
-    expect_false(isTRUE(all.equal(
-        as.numeric(result_identity$Z[, "Z"]),
-        as.numeric(result_correlated$Z[, "Z"])
-    )))
 })
 
 
@@ -939,102 +925,6 @@ test_that("twasZ: computing R from X matches providing R directly", {
     )
 })
 
-
-test_that("twasZ: p-value is always between 0 and 1 for random inputs", {
-    set.seed(999)
-    for (i in 1:5) {
-        p <- sample(2:10, 1)
-        weights <- rnorm(p)
-        z <- rnorm(p)
-        R <- diag(p) # use identity to avoid singularity
-        result <- twasZ(weights, z, R = R)
-        pval <- as.numeric(result$Z[, "pval"])
-        expect_true(
-            pval >= 0 && pval <= 1,
-            info = paste("Iteration", i, "p-value out of range:", pval)
-        )
-    }
-})
-
-
-test_that("twasZ: single very large weight with tiny z gives moderate result", {
-    weights <- c(1e6, 0, 0)
-    z <- c(1e-6, 5.0, 5.0)
-    R <- diag(3)
-    result <- twasZ(weights, z, R = R)
-    # stat = 1e6 * 1e-6 + 0 + 0 = 1.0
-    # denom = (1e6)^2 * 1 = 1e12
-    # zscore = 1 / sqrt(1e12) = 1e-6
-    expect_equal(as.numeric(result$Z[, "Z"]), 1e-6, tolerance = 1e-10)
-})
-
-# ===========================================================================
-# twasZ: more mathematical edge cases
-# ===========================================================================
-
-test_that("twasZ: perfectly correlated R matrix (all ones off-diagonal)", {
-    p <- 4
-    R <- matrix(1, nrow = p, ncol = p) # perfectly correlated
-    weights <- c(0.25, 0.25, 0.25, 0.25)
-    z <- c(2, 2, 2, 2)
-    result <- twasZ(weights, z, R = R)
-    # stat = sum(0.25 * 2) = 2
-    # denom = t(w) %*% ones_matrix %*% w = (sum(w))^2 = 1
-    # zscore = 2 / sqrt(1) = 2
-    expect_equal(as.numeric(result$Z[, "Z"]), 2.0, tolerance = 1e-10)
-})
-
-
-test_that("twasZ: sparse weights (only one non-zero) extracts single SNP signal", {
-    p <- 5
-    weights <- c(0, 0, 1, 0, 0)
-    z <- c(1, 2, 3, 4, 5)
-    R <- diag(p)
-    result <- twasZ(weights, z, R = R)
-    # With identity R and sparse weight: zscore = w3 * z3 / sqrt(w3^2) = 3
-    expect_equal(as.numeric(result$Z[, "Z"]), 3.0, tolerance = 1e-10)
-})
-
-
-test_that("twasZ: z-scores of zero give zero TWAS z-score", {
-    weights <- c(0.5, 0.3, 0.2)
-    z <- c(0, 0, 0)
-    R <- diag(3)
-    result <- twasZ(weights, z, R = R)
-    expect_equal(as.numeric(result$Z[, "Z"]), 0.0, tolerance = 1e-10)
-    # p-value for z=0 should be 1
-    expect_equal(as.numeric(result$Z[, "pval"]), 1.0, tolerance = 1e-10)
-})
-
-# ===========================================================================
-# twasZ: edge case with near-singular R matrix
-# ===========================================================================
-
-test_that("twasZ: near-singular R matrix still produces a result", {
-    set.seed(777)
-    p <- 3
-    # Create a nearly singular R by making two rows almost identical
-    R <- matrix(c(1, 0.999, 0.999, 0.999, 1, 0.999, 0.999, 0.999, 1), nrow = 3)
-    weights <- c(0.3, 0.4, 0.3)
-    z <- c(2.0, 2.5, 1.8)
-    result <- twasZ(weights, z, R = R)
-    expect_true(is.list(result))
-    expect_true(is.finite(as.numeric(result$Z[, "Z"])))
-})
-
-
-test_that("twasZ: length-one input vectors produce correct scalar output", {
-    result <- twasZ(1.0, 3.0, R = matrix(1, 1, 1))
-    expect_equal(as.numeric(result$Z[, "Z"]), 3.0, tolerance = 1e-10)
-    expect_true(result$Z[, "pval"] > 0 && result$Z[, "pval"] < 1)
-})
-
-
-test_that("twasZ: R=NULL and X=NULL still errors consistently", {
-    # When neither R nor X is provided, twasZ should error
-    expect_error(twasZ(c(1, 2), c(3, 4)))
-})
-
 # ===========================================================================
 # twasZ: matrix weights path -- multiple methods/conditions
 # ===========================================================================
@@ -1058,139 +948,39 @@ test_that("twasZ: matrix weights produce one Z row per column", {
 })
 
 
-test_that("twasZ: combineMethods returns combined p-value summary", {
-    set.seed(11)
-    p <- 4
-    k <- 2
-    weights <- matrix(
-        rnorm(p * k),
-        nrow = p,
-        ncol = k,
-        dimnames = list(paste0("SNP", seq_len(p)), paste0("Cond", seq_len(k)))
-    )
-    z <- rnorm(p)
-    R <- diag(p)
-    rownames(R) <- colnames(R) <- paste0("SNP", seq_len(p))
-    result <- twasZ(weights, z, R = R, combineMethods = "acat")
-    expect_false(is.null(result$combined))
-})
-
 # ===========================================================================
-# Tests from test_twas_predict.R
+# twasZ: the SVD path agrees with the R path
 # ===========================================================================
 
-# ---- twasPredict ----
-
-# ===========================================================================
-# Tests migrated from test_twasSketch.R (twasZ SVD path)
-# ===========================================================================
-
-test_that("twasZ: SVD path matches R path for full-rank genotype matrix", {
-    set.seed(42)
-    n <- 100 # samples (sketch size)
-    p <- 20 # variants
-
-    # Generate genotype-like matrix (dosages 0/1/2)
-    X <- matrix(rbinom(n * p, 2, runif(p, 0.1, 0.9)), nrow = n, ncol = p)
-
-    # HWE-based standardization
-    af <- colMeans(X) / 2
-    X_std <- sweep(X, 2, 2 * af)
-    X_std <- sweep(X_std, 2, sqrt(2 * af * (1 - af)), "/")
-
-    # Compute R from standardized X
-    R <- crossprod(X_std) / (n - 1)
-
-    # SVD of standardized X
-    svd_result <- svd(X_std)
-
-    # Random weights and z-scores
-    weights <- rnorm(p)
-    z <- rnorm(p)
-
-    # R path
-    result_R <- pecotmr:::twasZ(weights, z, R = R)
-
-    # SVD path
-    result_SVD <- pecotmr:::twasZ(
-        weights,
-        z,
-        V = svd_result$v,
-        D = svd_result$d,
-        nSketch = n
-    )
-
-    expect_equal(
-        as.numeric(result_SVD$z),
-        as.numeric(result_R$z),
-        tolerance = 1e-10
-    )
-    expect_equal(
-        as.numeric(result_SVD$pval),
-        as.numeric(result_R$pval),
-        tolerance = 1e-10
-    )
+test_that("twasZ: SVD path matches R path, full rank and n < p", {
+    # Sketch sizes (samples, variants, seed): full rank, and fewer samples
+    # than variants.
+    shapes <- list(fullRank = c(100, 20, 42), rankDeficient = c(15, 30, 123))
+    for (nm in names(shapes)) {
+        n <- shapes[[nm]][[1L]]
+        p <- shapes[[nm]][[2L]]
+        set.seed(shapes[[nm]][[3L]])
+        X <- matrix(rbinom(n * p, 2, runif(p, 0.15, 0.85)), nrow = n, ncol = p)
+        af <- colMeans(X) / 2
+        # A monomorphic column has no standardized dosage.
+        keep <- af > 0 & af < 1
+        X <- X[, keep, drop = FALSE]
+        af <- af[keep]
+        Xstd <- sweep(X, 2, 2 * af)
+        Xstd <- sweep(Xstd, 2, sqrt(2 * af * (1 - af)), "/")
+        R <- crossprod(Xstd) / (n - 1)
+        s <- svd(Xstd)
+        weights <- rnorm(ncol(X))
+        z <- rnorm(ncol(X))
+        expect_equal(
+            twasZ(weights, z, V = s$v, D = s$d, nSketch = n)$Z,
+            twasZ(weights, z, R = R)$Z,
+            tolerance = 1e-10,
+            info = nm
+        )
+    }
 })
 
-
-test_that("twasZ: SVD path matches R path for rank-deficient matrix (n < p)", {
-    set.seed(123)
-    n <- 15 # fewer samples than variants
-
-    p <- 30
-
-    X <- matrix(rbinom(n * p, 2, runif(p, 0.15, 0.85)), nrow = n, ncol = p)
-
-    af <- colMeans(X) / 2
-    # Remove monomorphic columns
-    keep <- af > 0 & af < 1
-    X <- X[, keep, drop = FALSE]
-    af <- af[keep]
-    p <- ncol(X)
-
-    X_std <- sweep(X, 2, 2 * af)
-    X_std <- sweep(X_std, 2, sqrt(2 * af * (1 - af)), "/")
-
-    R <- crossprod(X_std) / (n - 1)
-    svd_result <- svd(X_std)
-
-    weights <- rnorm(p)
-    z <- rnorm(p)
-
-    result_R <- pecotmr:::twasZ(weights, z, R = R)
-    result_SVD <- pecotmr:::twasZ(
-        weights,
-        z,
-        V = svd_result$v,
-        D = svd_result$d,
-        nSketch = n
-    )
-
-    expect_equal(
-        as.numeric(result_SVD$z),
-        as.numeric(result_R$z),
-        tolerance = 1e-10
-    )
-    expect_equal(
-        as.numeric(result_SVD$pval),
-        as.numeric(result_R$pval),
-        tolerance = 1e-10
-    )
-})
-
-
-test_that("twasZ: error when weights and z have different lengths", {
-    expect_error(
-        pecotmr:::twasZ(
-            rnorm(5),
-            rnorm(3),
-            V = matrix(1, 5, 2),
-            D = c(1, 1),
-            nSketch = 10
-        ),
-        "weights.*Must have exactly 3 rows"
-    )
-})
 
 # ===========================================================================
 # Direct unit tests for the MR / metric helpers (mock topLoci to feed
@@ -1398,7 +1188,7 @@ test_that(".cipComputeMrCsAware matches across a chr-prefix difference", {
 
 test_that(".cipComputeTwasZ gives a Z from a panel's factor or an LdMatrix", {
     data(gwasSumStatsS4Example)
-    panel <- ldReference(gwasSumStatsS4Example)
+    panel <- ldReference(gwasSumStatsS4Example)[[1L]]
     ids <- names(SummarizedExperiment::rowRanges(panel))[c(3, 8, 15, 21, 30)]
     ld <- LdMatrix(
         unname(computeLd(panel)),
@@ -1798,8 +1588,7 @@ test_that(".cipComputeTwasZ: below 2 matches warns instead of silent NULL", {
     expect_null(out)
 })
 
-test_that(".cipComputeTwasZ: full overlap is silent", {
-    ids <- paste0("chr1:", 100 * (1:3), ":A:G")
+test_that(".cipWarnVariantDrop: a full overlap is silent", {
     expect_silent(
         pecotmr:::.cipWarnVariantDrop(3L, 3L, "test pair")
     )
@@ -1977,7 +1766,7 @@ test_that(".cipRun errors when no tuple produced a result", {
                 selectionActive = FALSE
             )
         },
-        .cipScoreQtlTuple = function(qi, ...) list(),
+        .cipTupleInputs = function(...) NULL,
         .package = "pecotmr"
     )
     expect_error(
@@ -1994,30 +1783,75 @@ test_that(".cipRun errors when no tuple produced a result", {
     )
 })
 
-test_that(".cipScoreQtlTuple skips a tuple with no weights", {
+test_that(".cipTupleInputs skips a tuple with no weights", {
     local_mocked_bindings(
         .cipExtractWeights = function(...) NULL,
         .package = "pecotmr"
     )
-    p <- list(
-        qtlRows = data.frame(
-            qtlStudy = "s",
-            context = "c",
-            trait = "t",
-            method = "m",
-            useFmrForWeights = FALSE,
-            stringsAsFactors = FALSE
-        ),
-        twasWeights = NULL,
-        fineMappingResult = NULL
+    qtlRows <- data.frame(
+        qtlStudy = "s",
+        context = "c",
+        trait = "t",
+        method = "m",
+        useFmrForWeights = FALSE,
+        stringsAsFactors = FALSE
     )
-    # An empty list contributes no rows once flattened.
-    expect_identical(pecotmr:::.cipScoreQtlTuple(1L, p), list())
+    expect_null(pecotmr:::.cipTupleInputs(1L, qtlRows, NULL, NULL))
+})
+
+test_that("causalInferencePipeline refuses a tuple past given blocks", {
+    # The block window ends before chr1:500, which a weight sits on.
+    gws <- suppressWarnings(GwasSumStats(
+        studyName = "G1",
+        entry = list(sumStats(.cip_makeGwasSumstats())),
+        genome = "hg19",
+        ldReference = .cip_makeHandle(),
+        qcOptions = list(step1 = "ok"),
+        region = GenomicRanges::GRanges("chr1:1-450")
+    ))
+    expect_error(
+        causalInferencePipeline(
+            gwasSumStats = gws,
+            twasWeights = .cip_makeTwasWeights()
+        ),
+        "1 variant(s) past the end of block chr1:1-450 of GWAS study 'G1'",
+        fixed = TRUE
+    )
+})
+
+test_that(".cipCheckBlockReach warns of a tuple running past computed spans", {
+    gws <- GwasSumStats(
+        studyName = "G1",
+        entry = list(sumStats(.cip_makeGwasSumstats())[1:3]),
+        genome = "hg19"
+    )
+    tuple <- list(
+        tuple = list(
+            qStudy = "Q1",
+            qContext = "c1",
+            qTrait = "t1",
+            qMethod = "m"
+        ),
+        variants = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(100L * (1:5), width = 1L)
+        )
+    )
+    expect_warning(
+        pecotmr:::.cipCheckBlockReach(list(tuple), gws),
+        str_c(
+            "QTL (study='Q1', context='c1', trait='t1', method='m'): ",
+            "2 variant(s) past the end of block chr1 (chr1:100-300)"
+        ),
+        fixed = TRUE
+    )
 })
 
 test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
     local_mocked_bindings(
-        as.data.frame = function(...) data.frame(SNP = "v1", Z = 1),
+        .cipRowsLdRef = function(...) NULL,
+        .ssStitchElements = function(...) GenomicRanges::GRanges(),
+        .entryToSumstatDf = function(...) data.frame(SNP = "v1", Z = 1),
         .cipComputeTwasZ = function(...) NULL,
         .cipPairLabel = function(...) "lab",
         .package = "pecotmr"
@@ -2025,11 +1859,12 @@ test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
     expect_null(
         pecotmr:::.cipScoreGwasPair(
             1L,
+            "G1",
             NULL,
             list(),
             NULL,
-            gwasSumStats = list(study = "G1"),
-            gwasLd = NULL,
+            gwasSumStats = NULL,
+            window = NULL,
             alleleFlip = FALSE,
             mrParam = MrParam(
                 method = "csAware",
@@ -2055,23 +1890,95 @@ test_that(".cipRunMr routes to the CS-aware estimator when asked", {
     expect_true(isTRUE(out$SENTINEL))
 })
 
-test_that(".cipCvMetric reads metrics wrapped or bare, NA when absent", {
-    local_mocked_bindings(
-        cvResult = function(...) list(rsq = 0.42, pval = 0.01),
-        .package = "pecotmr"
+# One-row weights for (Q1, c1, t1, susie) whose cross-validation is `cv`.
+.cip_cvWeights <- function(cv) {
+    TwasWeights(
+        studyName = "Q1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(TwasWeightsRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
+            weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
+            cvResult = cv
+        ))
     )
+}
+
+test_that(".cipCvMetric reads metrics wrapped or bare, NA when absent", {
     # A bare metrics list (no $metrics wrapper) is read directly.
-    expect_equal(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "rsq"), 0.42)
-    expect_true(is.na(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "zzz")))
+    bare <- .cip_cvWeights(list(rsq = 0.42, pval = 0.01))
+    expect_equal(
+        pecotmr:::.cipCvMetric(bare, "Q1", "c1", "t1", "susie", "rsq"),
+        0.42
+    )
+    expect_true(is.na(
+        pecotmr:::.cipCvMetric(bare, "Q1", "c1", "t1", "susie", "zzz")
+    ))
+    wrapped <- .cip_cvWeights(list(metrics = c(rsq = 0.3, pval = 0.02)))
+    expect_equal(
+        pecotmr:::.cipCvMetric(wrapped, "Q1", "c1", "t1", "susie", "pval"),
+        0.02
+    )
 })
 
 test_that(".cipCvMetric returns NA when the CV result cannot be read", {
+    # No row for the tuple; and a row without a CV record.
+    tw <- .cip_cvWeights(list(rsq = 0.42))
+    expect_true(
+        is.na(pecotmr:::.cipCvMetric(tw, "Q9", "c1", "t1", "susie", "rsq"))
+    )
+    expect_true(is.na(
+        pecotmr:::.cipCvMetric(
+            .cip_cvWeights(NULL),
+            "Q1",
+            "c1",
+            "t1",
+            "susie",
+            "rsq"
+        )
+    ))
+})
+
+test_that("CV selection warns once about narrowed weights; scoring does not", {
+    tw <- TwasWeights(
+        studyName = rep("Q1", 2),
+        context = rep("c1", 2),
+        trait = rep("t1", 2),
+        method = c("susie", "lasso"),
+        entry = list(
+            TwasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
+                weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
+                cvResult = list(metrics = c(rsq = 0.2, pval = 0.001))
+            ),
+            TwasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
+                weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
+                cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
+            )
+        ),
+        ldReference = .cip_makeHandle()
+    )
+    narrowed <- endoapply(tw, utils::head, 4L)
     local_mocked_bindings(
-        cvResult = function(...) stop("nope"),
+        extractBlockGenotypes = .cip_mockExtractor(),
         .package = "pecotmr"
     )
-    expect_true(
-        is.na(pecotmr:::.cipCvMetric(NULL, "s", "c", "t", "m", "rsq"))
+    selected <- .fitCoverageMessages(causalInferencePipeline(
+        gwasSumStats = .cip_makeGwasSumstats(),
+        twasWeights = narrowed,
+        weightSelectionParam = WeightSelectionParam(cutoff = 0.1)
+    ))
+    expect_length(selected, 1L)
+    expect_match(selected, "causalInferencePipeline\\(\\): 2 row\\(s\\)")
+    # Without selection only the weights are read, which the row holds.
+    expect_length(
+        .fitCoverageMessages(causalInferencePipeline(
+            gwasSumStats = .cip_makeGwasSumstats(),
+            twasWeights = narrowed
+        )),
+        0L
     )
 })
 
@@ -2125,4 +2032,98 @@ test_that("WeightSelectionParam and MrParam do not overlap", {
     )
     expect_equal(WeightSelectionParam()$cutoff, 0)
     expect_equal(MrParam()$method, "ivwPerVariant")
+})
+
+test_that(".cipRowsLdRef refuses overlapped rows on two references", {
+    # The rows a tuple overlaps are scored together against one LD matrix.
+    block <- function(start) {
+        gr <- GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(seq(start, by = 100L, length.out = 3L), width = 1L)
+        )
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = sprintf(
+                "chr1:%d:A:G",
+                seq(start, by = 100L, length.out = 3L)
+            ),
+            A1 = "A",
+            A2 = "G",
+            Z = c(1, 2, 3),
+            N = 1000L
+        )
+        gr
+    }
+    two <- GwasSumStats(
+        studyName = c("G1", "G1"),
+        entry = list(block(100L), block(5000L)),
+        genome = "hg19",
+        ldReference = list(
+            .cip_makeHandle(),
+            .cip_makeHandle(sample_prefix = "z")
+        ),
+        blockId = c("b1", "b2"),
+        qcOptions = list(step1 = "ok")
+    )
+    expect_error(
+        pecotmr:::.cipRowsLdRef(two, 1:2, "G1"),
+        "GWAS study 'G1' a QTL tuple overlaps use 2 different LD"
+    )
+    # A tuple overlapping one of them reads that row's reference alone.
+    expect_identical(
+        pecotmr:::.cipRowsLdRef(two, 2L, "G1"),
+        ldReference(two)[[2L]]
+    )
+})
+
+test_that("a gene is scored once per GWAS study, over the rows it overlaps", {
+    # One study split into two LD blocks on chr1 plus a chr2 row on another
+    # panel: the chr1 gene overlaps only block A, so it is scored once,
+    # and the chr2 row's reference never enters into it.
+    idsA <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    idsB <- sprintf("chr1:%d:A:G", 100L * (6:10))
+    ids2 <- sprintf("chr2:%d:A:G", 100L * (1:5))
+    ldm <- function(ids) {
+        n <- length(ids)
+        LdMatrix(`dimnames<-`(diag(n) * 0.5 + 0.5, list(ids, ids)))
+    }
+    entry <- function(ids, chrom, pos) {
+        gr <- GenomicRanges::GRanges(chrom, IRanges::IRanges(pos, width = 1L))
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = ids,
+            A1 = "A",
+            A2 = "G",
+            Z = seq(4, 0.5, length.out = length(ids)),
+            N = 1000L
+        )
+        gr
+    }
+    chr1 <- ldm(c(idsA, idsB))
+    gws <- GwasSumStats(
+        studyName = c("G1", "G1", "G1"),
+        entry = list(
+            entry(idsA, "chr1", 100L * (1:5)),
+            entry(idsB, "chr1", 100L * (6:10)),
+            entry(ids2, "chr2", 100L * (1:5))
+        ),
+        genome = "hg19",
+        ldReference = list(chr1, chr1, ldm(ids2)),
+        blockId = c("blockA", "blockB", "chr2"),
+        qcOptions = list(step1 = "ok")
+    )
+    tw <- TwasWeights(
+        studyName = "Q1",
+        context = "c1",
+        trait = "gene1",
+        method = "lasso",
+        entry = list(TwasWeightsRow(
+            variantIds = idsA,
+            weights = c(0.3, 0.2, 0.1, 0.05, 0)
+        )),
+        ldReference = chr1
+    )
+    out <- suppressMessages(suppressWarnings(
+        causalInferencePipeline(gwasSumStats = gws, twasWeights = tw)
+    ))
+    expect_equal(length(out), 1L)
+    expect_equal(as.character(S4Vectors::mcols(out)$gwasStudy), "G1")
 })

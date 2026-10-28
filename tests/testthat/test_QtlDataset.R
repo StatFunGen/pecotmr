@@ -1,5 +1,8 @@
 context("QtlDataset internal helpers")
 
+# The bundled genotype files the tests that read real panels open.
+test_data_dir <- test_path("test_data")
+
 # ===========================================================================
 # Fixture builder: a QtlDataset whose GenotypeHandle is a stub. extraction
 # functions are stubbed in individual tests via local_mocked_bindings.
@@ -19,7 +22,7 @@ context("QtlDataset internal helpers")
         format = "plink2",
         snpInfo = data.frame(
             SNP = paste0("rs", seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = a1,
             A2 = a2,
@@ -70,16 +73,14 @@ context("QtlDataset internal helpers")
     )
 }
 
-# `...` reaches QtlDataset(): mafCutoff / keepIndel / keepVariants and the
-# other filters are constructor arguments, so a test configures them there
-# instead of assigning into the built object's slots.
+# The dataset holds data only: a test that filters passes the filter to the
+# extraction (.qh_filter()), as a pipeline does.
 .qh_makeDataset <- function(
     contexts = c("brain", "liver"),
     n_samples = 12L,
     geno_cov = NULL,
     a1 = rep("A", 6L),
-    a2 = rep("G", 6L),
-    ...
+    a2 = rep("G", 6L)
 ) {
     gh <- .qh_makeHandle(n_samples = n_samples, a1 = a1, a2 = a2)
     pheno <- setNames(
@@ -89,15 +90,17 @@ context("QtlDataset internal helpers")
     if (is.null(geno_cov)) {
         geno_cov <- matrix(numeric(0), nrow = 0, ncol = 0)
     }
-    # `...` is the genotype filter now: every caller passes only filter
-    # fields (mafCutoff / xvarCutoff / imissCutoff / keepVariants).
     QtlDataset(
         studyName = "study1",
         genotypes = gh,
         phenotypes = pheno,
-        genotypeCovariates = geno_cov,
-        genotypeFilterParam = GenotypeFilterParam(...)
+        genotypeCovariates = geno_cov
     )
+}
+
+# A resolved genotype filter, the form a pipeline threads to each extraction.
+.qh_filter <- function(...) {
+    pecotmr:::.qtlResolveFilter(GenotypeFilterParam(...))
 }
 
 # ===========================================================================
@@ -271,7 +274,7 @@ test_that(".qtlResolveVariantRegion: region must be a GRanges; multi-range is al
     qd <- .qh_makeDataset()
     expect_error(
         pecotmr:::.qtlResolveVariantRegion(qd, region = "chr1:100-200"),
-        "Must inherit from class 'GRanges'"
+        "`region` must be a GRanges"
     )
     expect_error(
         pecotmr:::.qtlResolveVariantRegion(
@@ -320,13 +323,15 @@ test_that(".qtlVariantIndices: filters by chromosome and BP range", {
     expect_equal(idx, c(2L, 3L))
 })
 
-test_that(".qtlVariantIndices: accepts chr-prefixed and bare chromosome names", {
+test_that(".qtlVariantIndices: a bare-named region is read as UCSC", {
     qd <- .qh_makeDataset()
     r1 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(50, 250))
     r2 <- GenomicRanges::GRanges("1", IRanges::IRanges(50, 250))
+    idx <- pecotmr:::.qtlVariantIndices(qd, r1)
+    expect_gt(length(idx), 0L)
     expect_equal(
-        pecotmr:::.qtlVariantIndices(qd, r1),
-        pecotmr:::.qtlVariantIndices(qd, r2)
+        pecotmr:::.qtlVariantIndices(qd, pecotmr:::.qtlLiteralRegion(r2, NULL)),
+        idx
     )
 })
 
@@ -352,16 +357,19 @@ test_that("traitPosition returns each trait's union genomic span across contexts
     expect_equal(GenomicRanges::end(gr["ENSG1"]), 1499L) # start 1000 + width 500 - 1
     expect_equal(GenomicRanges::start(gr["ENSG2"]), 2000L)
     # single-trait selection routes through the traitId branch of the method
-    one <- traitPosition(qd, traitId = "ENSG2")
+    one <- traitPosition(qd, trait = "ENSG2")
     expect_equal(names(one), "ENSG2")
     expect_equal(GenomicRanges::start(one), 2000L)
 })
 
-test_that("traitPosition emits a chrUn sentinel for a trait absent from every context", {
+test_that("traitPosition refuses a trait absent from every context", {
+    # No placeholder range: an unknown name is an error, as it is for
+    # rowRanges(), naming every trait that is missing.
     qd <- .qh_makeDataset(contexts = "brain")
-    gr <- traitPosition(qd, traitId = "NOPE")
-    expect_equal(names(gr), "NOPE")
-    expect_equal(as.character(GenomicRanges::seqnames(gr)), "chrUn")
+    expect_error(
+        traitPosition(qd, trait = c("NOPE", "ALSO")),
+        "in no context of this QtlDataset: NOPE, ALSO"
+    )
 })
 
 # (QtlDataset validity requires a trait's rowRanges to be identical across
@@ -369,39 +377,40 @@ test_that("traitPosition emits a chrUn sentinel for a trait absent from every co
 # matching ranges; the two-context fixture above already exercises that loop.)
 
 # ===========================================================================
-# .qtlApplyFilterOverrides
+# .qtlResolveFilter: a run's genotype filter
 # ===========================================================================
 
-test_that(".qtlApplyFilterOverrides replaces every supplied slot on a validated copy", {
+test_that(".qtlResolveFilter carries every set field; keepSamples narrows", {
     qd <- .qh_makeDataset(contexts = "brain")
-    out <- pecotmr:::.qtlApplyFilterOverrides(
-        qd,
-        GenotypeFilterParam(
-            mafCutoff = 0.05,
-            macCutoff = 10,
-            xvarCutoff = 0.01,
-            imissCutoff = 0.1,
-            keepIndel = FALSE,
-            keepSamples = c("s1", "s2"),
-            keepVariants = c("rs1", "rs2")
-        )
+    filt <- .qh_filter(
+        mafCutoff = 0.05,
+        macCutoff = 10,
+        xvarCutoff = 0.01,
+        imissCutoff = 0.1,
+        keepIndel = FALSE,
+        keepSamples = c("s1", "s2"),
+        keepVariants = c("rs1", "rs2")
     )
-    expect_equal(out@mafCutoff, 0.05)
-    expect_equal(out@macCutoff, 10)
-    expect_equal(out@xvarCutoff, 0.01)
-    expect_equal(out@imissCutoff, 0.1)
-    expect_false(out@keepIndel)
+    expect_equal(filt$mafCutoff, 0.05)
+    expect_equal(filt$macCutoff, 10)
+    expect_equal(filt$xvarCutoff, 0.01)
+    expect_equal(filt$imissCutoff, 0.1)
+    expect_false(filt$keepIndel)
+    expect_equal(filt$keepVariants, c("rs1", "rs2"))
+    out <- pecotmr:::.qtlRestrictSamples(qd, filt$keepSamples)
     expect_setequal(
         rownames(MultiAssayExperiment::colData(out)),
         c("s1", "s2")
     )
-    expect_equal(out@keepVariants, c("rs1", "rs2"))
 })
 
-test_that(".qtlApplyFilterOverrides leaves stored slots untouched when args are NULL", {
+test_that("an unset filter filters nothing and leaves the dataset whole", {
     qd <- .qh_makeDataset(contexts = "brain")
+    filt <- .qh_filter()
+    expect_equal(filt$mafCutoff, 0)
+    expect_true(filt$keepIndel)
     expect_identical(
-        pecotmr:::.qtlApplyFilterOverrides(qd, GenotypeFilterParam()),
+        pecotmr:::.qtlRestrictSamples(qd, filt$keepSamples),
         qd
     )
 })
@@ -476,7 +485,7 @@ test_that(".qtlResolvePhenoSelection: list with extra keys errors", {
             contexts = "brain",
             toResidualize = list(brain = "age", ghost = "sex")
         ),
-        "list key.*not in `contexts`"
+        "list key.*not in `context`"
     )
 })
 
@@ -714,6 +723,24 @@ test_that(".qtlBuildResidualizationDesign: intersects sample sets across blocks"
     }
 }
 
+test_that(".qtlExtractBlock refuses a missing filter rather than skip it", {
+    # A pipeline threads its resolved filter to every extraction; NULL means
+    # a call site dropped it, which must not pass for "no filter".
+    qd <- .qh_makeDataset()
+    expect_error(
+        pecotmr:::.qtlExtractBlock(qd, filter = NULL),
+        "No resolved genotype filter"
+    )
+})
+
+test_that("a NULL residualization bundle scales, as an unset field does", {
+    expect_true(pecotmr:::.qtlScaleResiduals(NULL))
+    expect_true(pecotmr:::.qtlScaleResiduals(ResidualizationParam()))
+    expect_false(pecotmr:::.qtlScaleResiduals(
+        ResidualizationParam(scaleResiduals = FALSE)
+    ))
+})
+
 test_that(".qtlExtractBlock: returns dosage matrix with kept variants and samples", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
@@ -731,27 +758,27 @@ test_that(".qtlExtractBlock: returns dosage matrix with kept variants and sample
 test_that(".qtlExtractBlock: empty snpIdx returns a zero-column block", {
     qd <- .qh_makeDataset()
     region <- GenomicRanges::GRanges("chr2", IRanges::IRanges(1, 1000))
-    blk <- pecotmr:::.qtlExtractBlock(qd, region = region)
+    blk <- pecotmr:::.qtlExtractBlock(qd, window = region)
     expect_equal(ncol(blk$geno), 0L)
     expect_equal(blk$variantIds, character(0))
 })
 
 test_that(".qtlExtractBlock: keepVariants restriction narrows the returned set", {
-    qd <- .qh_makeDataset(keepVariants = c("rs2", "rs4"))
+    qd <- .qh_makeDataset()
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        filter = .qh_filter(keepVariants = c("rs2", "rs4"))
+    )
     expect_setequal(blk$variantIds, c("rs2", "rs4"))
 })
 
 test_that(".qtlExtractBlock: keepSamples restriction narrows the returned set", {
     qd <- .qh_makeDataset()
-    qd <- pecotmr:::.qtlApplyFilterOverrides(
-        qd,
-        GenotypeFilterParam(keepSamples = paste0("s", 1:6))
-    )
+    qd <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:6))
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -762,10 +789,7 @@ test_that(".qtlExtractBlock: keepSamples restriction narrows the returned set", 
 
 test_that(".qtlExtractBlock: per-call samples arg further narrows the sample set", {
     qd <- .qh_makeDataset()
-    qd <- pecotmr:::.qtlApplyFilterOverrides(
-        qd,
-        GenotypeFilterParam(keepSamples = paste0("s", 1:6))
-    )
+    qd <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:6))
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -775,12 +799,15 @@ test_that(".qtlExtractBlock: per-call samples arg further narrows the sample set
 })
 
 test_that(".qtlExtractBlock: keepVariants with empty intersection returns empty block", {
-    qd <- .qh_makeDataset(keepVariants = c("rsGHOST"))
+    qd <- .qh_makeDataset()
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        filter = .qh_filter(keepVariants = "rsGHOST")
+    )
     expect_equal(ncol(blk$geno), 0L)
     expect_equal(nrow(blk$geno), 0L)
 })
@@ -789,20 +816,21 @@ test_that(".qtlExtractBlock: keepIndel = FALSE drops multi-base (indel) variants
     # rs2 an insertion, rs4 a deletion; the rest stay SNPs.
     qd <- .qh_makeDataset(
         a1 = replace(rep("A", 6L), 2L, "AT"),
-        a2 = replace(rep("G", 6L), 4L, "GC"),
-        keepIndel = FALSE
+        a2 = replace(rep("G", 6L), 4L, "GC")
     )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        filter = .qh_filter(keepIndel = FALSE)
+    )
     expect_equal(blk$variantIds, c("rs1", "rs3", "rs5", "rs6"))
 })
 
 test_that(".qtlExtractBlock: keepIndel = TRUE (default) keeps indel variants", {
     qd <- .qh_makeDataset(a1 = replace(rep("A", 6L), 2L, "AT"))
-    expect_true(qd@keepIndel) # default
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -811,35 +839,33 @@ test_that(".qtlExtractBlock: keepIndel = TRUE (default) keeps indel variants", {
     expect_equal(length(blk$variantIds), 6L)
 })
 
-test_that("QtlDataset: keepIndel defaults to TRUE; validity rejects non-scalar", {
-    qd <- .qh_makeDataset()
-    expect_true(qd@keepIndel)
-    # The constructor coerces via isTRUE(); validity guards direct new()/slot sets.
-    qd@keepIndel <- c(TRUE, FALSE)
-    expect_error(validObject(qd), "Variable 'keepIndel'")
+test_that("keepIndel resolves to TRUE and must be a flag", {
+    expect_true(.qh_filter()$keepIndel)
+    expect_error(GenotypeFilterParam(keepIndel = c(TRUE, FALSE)), "keepIndel")
+    expect_error(GenotypeFilterParam(keepIndel = NA), "keepIndel")
 })
 
 test_that(".qtlExtractBlock: mafCutoff drops low-MAF variants", {
     # The mocked extractor returns binomial(0.3) dosages: realized MAFs hover
     # around 0.3-0.5 (small sample noise). Cutoff above the realized maximum
     # drops everything.
-    qd <- .qh_makeDataset(mafCutoff = 0.51)
+    qd <- .qh_makeDataset()
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(qd, filter = .qh_filter(mafCutoff = 0.51))
     expect_equal(ncol(blk$geno), 0L)
 })
 
 test_that(".qtlExtractBlock: mafCutoff retains variants above the threshold", {
     # realized MAFs include 0.458 and 0.5
-    qd <- .qh_makeDataset(mafCutoff = 0.4)
+    qd <- .qh_makeDataset()
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(qd, filter = .qh_filter(mafCutoff = 0.4))
     expect_true(ncol(blk$geno) >= 1L)
     expect_true(all(blk$maf >= 0.4))
 })
@@ -927,8 +953,8 @@ test_that("maf stays folded while af is directional (they fold into each other)"
 context("QtlDataset residualization methods")
 
 # ===========================================================================
-# Fixture: mirrors test_qtlDatasetHelpers.R so we can mock extractBlockGenotypes
-# the same way.
+# Fixture: mirrors the .qh_* builders above so extractBlockGenotypes can be
+# mocked the same way.
 # ===========================================================================
 
 .qr_makeHandle <- function(snp_n = 6L, n_samples = 12L) {
@@ -938,7 +964,7 @@ context("QtlDataset residualization methods")
         format = "plink2",
         snpInfo = data.frame(
             SNP = paste0("rs", seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
             A2 = rep("G", snp_n),
@@ -988,8 +1014,7 @@ context("QtlDataset residualization methods")
 .qr_makeDataset <- function(
     contexts = c("brain", "liver"),
     n_samples = 12L,
-    geno_cov = NULL,
-    scaleResiduals = TRUE
+    geno_cov = NULL
 ) {
     gh <- .qr_makeHandle(n_samples = n_samples)
     pheno <- setNames(
@@ -1003,8 +1028,7 @@ context("QtlDataset residualization methods")
         studyName = "study1",
         genotypes = gh,
         phenotypes = pheno,
-        genotypeCovariates = geno_cov,
-        scaleResiduals = scaleResiduals
+        genotypeCovariates = geno_cov
     )
 }
 
@@ -1046,14 +1070,11 @@ context("QtlDataset residualization methods")
 }
 
 # ===========================================================================
-# ===========================================================================
 # Residualization flags (NULL = unset)
+#
+# ResidualizationParam() defaults each flag to NULL, so "not given" is
+# representable apart from FALSE and the accessors just read the field.
 # ===========================================================================
-# .qtlResolveResidualizationFlag and its two `*Flags` callers are gone: the
-# convenience/precise pair of booleans plus a missing() companion for each
-# existed only because a flat formal defaulting to TRUE cannot tell FALSE
-# from "not given". ResidualizationParam() defaults them to NULL, so
-# absence is representable and the accessors just read the field.
 
 test_that("an unset residualization flag means the side is residualized", {
     cfg <- ResidualizationParam()
@@ -1134,21 +1155,21 @@ test_that(".qtlHandleCovariateNa: drop removes any sample with a missing covaria
 
 test_that("residualizedGenotypes: requires contexts", {
     qd <- .qr_makeDataset()
-    expect_error(residualizedGenotypes(qd), "`contexts` is required")
+    expect_error(residualizedGenotypes(qd), "`context` is required")
     expect_error(
-        residualizedGenotypes(qd, contexts = NULL),
-        "`contexts` is required"
+        residualizedGenotypes(qd, context = NULL),
+        "`context` is required"
     )
     expect_error(
-        residualizedGenotypes(qd, contexts = character(0)),
-        "`contexts` is required"
+        residualizedGenotypes(qd, context = character(0)),
+        "`context` is required"
     )
 })
 
 test_that("residualizedGenotypes: unknown context errors", {
     qd <- .qr_makeDataset()
     expect_error(
-        residualizedGenotypes(qd, contexts = "ghost"),
+        residualizedGenotypes(qd, context = "ghost"),
         "Unknown context"
     )
 })
@@ -1161,7 +1182,11 @@ test_that("residualizedGenotypes: empty genotype block short-circuits to G", {
     )
     # region with no SNPs in the panel.
     region <- GenomicRanges::GRanges("chr2", IRanges::IRanges(1, 1000))
-    G <- residualizedGenotypes(qd, contexts = "brain", region = region)
+    G <- pecotmr:::.qtlResidualizedGenotypes(
+        qd,
+        contexts = "brain",
+        window = region
+    )
     expect_equal(ncol(G), 0L)
 })
 
@@ -1171,7 +1196,7 @@ test_that("residualizedGenotypes: produces residualized matrix shape", {
         extractBlockGenotypes = .qr_mockExtractor(),
         .package = "pecotmr"
     )
-    G <- residualizedGenotypes(qd, contexts = "brain")
+    G <- residualizedGenotypes(qd, context = "brain")
     expect_equal(nrow(G), 12L)
     expect_equal(ncol(G), 6L)
     # When scaleResiduals = TRUE (the default), kept columns should have unit sd
@@ -1189,7 +1214,7 @@ test_that("residualizedGenotypes: residualizes only against selected pheno covar
     )
     G <- residualizedGenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(phenotypeCovariates = "age")
     )
     expect_equal(nrow(G), 12L)
@@ -1210,7 +1235,7 @@ test_that("residualizedGenotypes: respects residualizePhenotype = FALSE", {
     # is just the centered (and scaled) raw block.
     G1 <- residualizedGenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(
             residualizePhenotype = FALSE
         )
@@ -1219,41 +1244,12 @@ test_that("residualizedGenotypes: respects residualizePhenotype = FALSE", {
     expect_equal(ncol(G1), 6L)
 })
 
-test_that("residualizedGenotypes: precise-name kwarg routes correctly", {
-    qd <- .qr_makeDataset(contexts = "brain")
-    local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
-        .package = "pecotmr"
-    )
-    G_precise <- residualizedGenotypes(
-        qd,
-        contexts = "brain",
-        residualizationParam = ResidualizationParam(
-            residualizePhenotype = FALSE
-        )
-    )
-    G_conv <- residualizedGenotypes(
-        qd,
-        contexts = "brain",
-        residualizationParam = ResidualizationParam(
-            residualizePhenotype = FALSE
-        )
-    )
-    expect_equal(G_precise, G_conv)
-})
-
-# The convenience/precise conflict test is gone with the duality itself:
-# residualizePhenotypeCovariates and its FromGenotypes twin were two
-# spellings of one
-# boolean, needing a conflict check between them. ResidualizationParam()
-# has one field, so there is nothing left to conflict.
-
 test_that("residualizedGenotypes refuses a bare list for the bundle", {
     qd <- .qr_makeDataset(contexts = "brain")
     expect_error(
         residualizedGenotypes(
             qd,
-            contexts = "brain",
+            context = "brain",
             residualizationParam = list(residualizePhenotype = FALSE)
         ),
         "ResidualizationParam"
@@ -1266,7 +1262,7 @@ test_that("residualizedGenotypes: joint-context mode intersects samples", {
         extractBlockGenotypes = .qr_mockExtractor(),
         .package = "pecotmr"
     )
-    G <- residualizedGenotypes(qd, contexts = c("brain", "liver"))
+    G <- residualizedGenotypes(qd, context = c("brain", "liver"))
     expect_equal(nrow(G), 12L)
     expect_setequal(rownames(G), paste0("s", 1:12))
 })
@@ -1285,7 +1281,7 @@ test_that("residualizedGenotypes: includes genotype covariates when supplied", {
     )
     G <- residualizedGenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(
             genotypeCovariates = c("pc1", "pc2")
         )
@@ -1313,7 +1309,7 @@ test_that("residualizedGenotypes: mean-imputes missing covariates by default", {
     # Default covariateNaAction = "impute": no error, all 12 samples retained.
     G <- residualizedGenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(
             genotypeCovariates = c("pc1", "pc2")
         )
@@ -1337,7 +1333,7 @@ test_that("residualizedGenotypes: covariateNaAction='drop' removes samples with 
     )
     G <- residualizedGenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(
             genotypeCovariates = c("pc1", "pc2"),
             covariateNaAction = "drop"
@@ -1353,33 +1349,45 @@ test_that("residualizedGenotypes: covariateNaAction='drop' removes samples with 
 
 test_that("residualizedPhenotypes: requires contexts", {
     qd <- .qr_makeDataset()
-    expect_error(residualizedPhenotypes(qd), "`contexts` is required")
+    expect_error(residualizedPhenotypes(qd), "`context` is required")
 })
 
 test_that("residualizedPhenotypes: unknown context errors", {
     qd <- .qr_makeDataset()
     expect_error(
-        residualizedPhenotypes(qd, contexts = "ghost"),
+        residualizedPhenotypes(qd, context = "ghost"),
         "Unknown context"
     )
 })
 
 test_that("residualizedPhenotypes: returns one matrix per context", {
     qd <- .qr_makeDataset(contexts = c("brain", "liver"))
-    res <- residualizedPhenotypes(qd, contexts = c("brain", "liver"))
+    res <- residualizedPhenotypes(qd, context = c("brain", "liver"))
     expect_equal(names(res), c("brain", "liver"))
     expect_equal(nrow(res$brain), 12L)
     expect_equal(ncol(res$brain), 2L)
     expect_equal(nrow(res$liver), 12L)
 })
 
+test_that("residualizedPhenotypes: an absent trait gives zero columns", {
+    # The trait filter keeps none of brain's traits; residualizing that empty
+    # selection answers an empty matrix rather than failing inside lm.fit().
+    qd <- .qr_makeDataset()
+    expect_warning(
+        res <- residualizedPhenotypes(qd, context = "brain", trait = "absent"),
+        "context 'brain' is missing trait(s): absent",
+        fixed = TRUE
+    )
+    expect_equal(dim(res$brain), c(12L, 0L))
+})
+
 test_that("residualizedPhenotypes: residualizes against age covariate", {
     qd <- .qr_makeDataset(contexts = "brain")
     Y <- residualizedPhenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(phenotypeCovariates = "age")
-    )
+    )[["brain"]]
     age <- seq_len(12)
     for (j in seq_len(ncol(Y))) {
         expect_lt(abs(cor(Y[, j], age)), 1e-6)
@@ -1390,52 +1398,49 @@ test_that("residualizedPhenotypes: respects residualizePhenotype = FALSE", {
     qd <- .qr_makeDataset(contexts = "brain")
     Y <- residualizedPhenotypes(
         qd,
-        contexts = "brain",
+        context = "brain",
         residualizationParam = ResidualizationParam(
             residualizePhenotype = FALSE
         )
-    )
+    )[["brain"]]
     expect_equal(nrow(Y), 12L)
     expect_equal(ncol(Y), 2L)
 })
 
-test_that("residualizedPhenotypes: precise-name kwarg routes correctly", {
+test_that("residualizedPhenotypes: trait subsets to requested traits", {
     qd <- .qr_makeDataset(contexts = "brain")
-    Y_precise <- residualizedPhenotypes(
-        qd,
-        contexts = "brain",
-        residualizationParam = ResidualizationParam(
-            residualizePhenotype = FALSE
-        )
-    )
-    Y_conv <- residualizedPhenotypes(
-        qd,
-        contexts = "brain",
-        residualizationParam = ResidualizationParam(
-            residualizePhenotype = FALSE
-        )
-    )
-    expect_equal(Y_precise, Y_conv)
-})
-
-test_that("residualizedPhenotypes: traitId subsets to requested traits", {
-    qd <- .qr_makeDataset(contexts = "brain")
-    Y <- residualizedPhenotypes(qd, contexts = "brain", traitId = "ENSG1")
+    Y <- residualizedPhenotypes(qd, context = "brain", trait = "ENSG1")[[
+        "brain"
+    ]]
     expect_equal(ncol(Y), 1L)
     expect_equal(colnames(Y), "ENSG1")
 })
 
 test_that("residualizedPhenotypes: scaleResiduals = FALSE skips the rescale step", {
-    qd <- .qr_makeDataset(contexts = "brain", scaleResiduals = FALSE)
-    Y <- residualizedPhenotypes(qd, contexts = "brain")
+    qd <- .qr_makeDataset(contexts = "brain")
+    Y <- residualizedPhenotypes(
+        qd,
+        context = "brain",
+        residualizationParam = ResidualizationParam(scaleResiduals = FALSE)
+    )[["brain"]]
     # Without scaling the residual columns generally won't have sd = 1.
     sds <- apply(Y, 2L, sd)
     expect_false(any(abs(sds - 1) < 1e-6))
 })
 
 # ===========================================================================
-# molecularTraits/residualizedPhenotypes naAction
+# Phenotype QC (PhenotypeFilterParam) applied by the extraction workers
 # ===========================================================================
+
+# The run's resolved phenotype QC, as a pipeline hands it to the workers.
+.qr_pheno <- function(...) {
+    pecotmr:::.qtlResolvePhenotypeFilter(
+        PhenotypeFilterParam(...),
+        naDefault = "keep",
+        naAllowed = c("keep", "drop", "impute"),
+        caller = "test"
+    )
+}
 
 # Helper to build a single-context SE with controlled NA placement.
 .qr_makeSeWithNa <- function(n_samples = 8L, na_idx = c(2L, 5L)) {
@@ -1465,7 +1470,7 @@ test_that("residualizedPhenotypes: scaleResiduals = FALSE skips the rescale step
     )
 }
 
-test_that("molecularTraits naAction='drop' drops samples with any NA in selected traits", {
+test_that("naAction = 'drop' drops samples with an NA in a selected trait", {
     gh <- .qr_makeHandle(n_samples = 8L)
     se <- .qr_makeSeWithNa(n_samples = 8L, na_idx = c(2L, 5L))
     qd <- QtlDataset(
@@ -1474,13 +1479,17 @@ test_that("molecularTraits naAction='drop' drops samples with any NA in selected
         phenotypes = list(brain = se),
         genotypeCovariates = matrix(numeric(0), 0L, 0L)
     )
-    out <- molecularTraits(qd, contexts = "brain", naAction = "drop")
+    out <- pecotmr:::.qtlMolecularTraits(
+        qd,
+        "brain",
+        phenotypeFilter = .qr_pheno(naAction = "drop")
+    )[["brain"]]
     expect_s4_class(out, "SummarizedExperiment")
     expect_equal(ncol(out), 6L)
     expect_false(any(is.na(SummarizedExperiment::assay(out))))
 })
 
-test_that("molecularTraits naAction='impute' mean-imputes NAs per trait", {
+test_that("naAction = 'impute' mean-imputes NAs per trait", {
     gh <- .qr_makeHandle(n_samples = 8L)
     se <- .qr_makeSeWithNa(n_samples = 8L, na_idx = c(2L, 5L))
     qd <- QtlDataset(
@@ -1489,7 +1498,11 @@ test_that("molecularTraits naAction='impute' mean-imputes NAs per trait", {
         phenotypes = list(brain = se),
         genotypeCovariates = matrix(numeric(0), 0L, 0L)
     )
-    out <- molecularTraits(qd, contexts = "brain", naAction = "impute")
+    out <- pecotmr:::.qtlMolecularTraits(
+        qd,
+        "brain",
+        phenotypeFilter = .qr_pheno(naAction = "impute")
+    )[["brain"]]
     Y <- SummarizedExperiment::assay(out)
     expect_equal(ncol(Y), 8L)
     expect_false(any(is.na(Y)))
@@ -1500,7 +1513,7 @@ test_that("molecularTraits naAction='impute' mean-imputes NAs per trait", {
     expect_equal(Y[1L, 5L], obsMean)
 })
 
-test_that("residualizedPhenotypes naAction='impute' yields NA-free residuals", {
+test_that("residualizing under naAction = 'impute' yields NA-free residuals", {
     gh <- .qr_makeHandle(n_samples = 8L)
     se <- .qr_makeSeWithNa(n_samples = 8L, na_idx = c(2L, 5L))
     qd <- QtlDataset(
@@ -1509,13 +1522,17 @@ test_that("residualizedPhenotypes naAction='impute' yields NA-free residuals", {
         phenotypes = list(brain = se),
         genotypeCovariates = matrix(numeric(0), 0L, 0L)
     )
-    Y <- residualizedPhenotypes(qd, contexts = "brain", naAction = "impute")
+    Y <- pecotmr:::.qtlResidualizedPhenotypes(
+        qd,
+        "brain",
+        phenotypeFilter = .qr_pheno(naAction = "impute")
+    )[["brain"]]
     expect_false(any(is.na(Y)))
     expect_equal(nrow(Y), 8L)
 })
 
 # ===========================================================================
-# molecularTraits/residualizedPhenotypes outlierAction
+# Outliers: dropped under the run's QC, kept by the accessors
 # ===========================================================================
 
 # Build a single-context SE with a clear multivariate outlier at sample s10.
@@ -1551,7 +1568,7 @@ test_that("residualizedPhenotypes naAction='impute' yields NA-free residuals", {
     )
 }
 
-test_that("molecularTraits outlierAction='drop' drops a clear multivariate outlier", {
+test_that("outlierAction = 'drop' drops a clear multivariate outlier", {
     skip_if_not_installed("robustbase")
     gh <- .qr_makeHandle(n_samples = 30L)
     se <- .qr_makeSeWithOutlier(n_samples = 30L, outlier_idx = 10L)
@@ -1561,13 +1578,17 @@ test_that("molecularTraits outlierAction='drop' drops a clear multivariate outli
         phenotypes = list(brain = se),
         genotypeCovariates = matrix(numeric(0), 0L, 0L)
     )
-    out <- molecularTraits(qd, contexts = "brain", outlierAction = "drop")
+    out <- pecotmr:::.qtlMolecularTraits(
+        qd,
+        "brain",
+        phenotypeFilter = .qr_pheno(outlierAction = "drop")
+    )[["brain"]]
     expect_s4_class(out, "SummarizedExperiment")
     expect_lt(ncol(out), 30L)
     expect_false("s10" %in% colnames(out))
 })
 
-test_that("molecularTraits outlierAction='keep' is the default and a no-op", {
+test_that("the accessors apply no phenotype QC: an outlier stays", {
     gh <- .qr_makeHandle(n_samples = 30L)
     se <- .qr_makeSeWithOutlier(n_samples = 30L, outlier_idx = 10L)
     qd <- QtlDataset(
@@ -1576,11 +1597,20 @@ test_that("molecularTraits outlierAction='keep' is the default and a no-op", {
         phenotypes = list(brain = se),
         genotypeCovariates = matrix(numeric(0), 0L, 0L)
     )
-    out <- molecularTraits(qd, contexts = "brain")
+    out <- molecularTraits(qd, context = "brain")[["brain"]]
     expect_equal(ncol(out), 30L)
+    # QC belongs to the run, so the accessors take none of its settings.
+    expect_error(
+        molecularTraits(qd, context = "brain", outlierAction = "drop"),
+        "unused argument"
+    )
+    expect_error(
+        residualizedPhenotypes(qd, context = "brain", naAction = "drop"),
+        "unused argument"
+    )
 })
 
-test_that("residualizedPhenotypes outlierAction='drop' drops residualized outliers", {
+test_that("outlierAction = 'drop' drops residualized outliers", {
     skip_if_not_installed("robustbase")
     gh <- .qr_makeHandle(n_samples = 30L)
     se <- .qr_makeSeWithOutlier(n_samples = 30L, outlier_idx = 10L)
@@ -1590,11 +1620,11 @@ test_that("residualizedPhenotypes outlierAction='drop' drops residualized outlie
         phenotypes = list(brain = se),
         genotypeCovariates = matrix(numeric(0), 0L, 0L)
     )
-    Y <- residualizedPhenotypes(
+    Y <- pecotmr:::.qtlResidualizedPhenotypes(
         qd,
-        contexts = "brain",
-        outlierAction = "drop"
-    )
+        "brain",
+        phenotypeFilter = .qr_pheno(outlierAction = "drop")
+    )[["brain"]]
     expect_lt(nrow(Y), 30L)
     expect_false("s10" %in% rownames(Y))
 })
@@ -1620,355 +1650,9 @@ test_that(".qtlOutlierKeepMask: returns all-TRUE when n < p + 2", {
     expect_true(all(keep))
 })
 
-
-# Tests for functions that consume genotype matrices or compute LD:
-#   computeLd, checkLd, ldPruneByCorrelation, ldClumpByScore,
-#   enforceDesignFullRank, filterVariantsByLdReference,
-#   resolveLdInput, dentistSingleWindow, dentist
-
-# Fixtures: 100 samples x 100 biallelic polymorphic SNPs on chr21
-test_data_dir <- test_path("test_data")
-plink_prefix <- file.path(test_data_dir, "test_variants")
-
-# Load genotype matrix once for reuse across tests
-loadTestGenotype <- function() {
-    loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
-}
-
-# --- computeLd --------------------------------------------------------------
-
-test_that("computeLd produces valid sample correlation matrix", {
-    skip_if_not_installed("pgenlibr")
-    geno <- loadTestGenotype()
-    R <- computeLd(geno$X, method = "sample")
-    expect_true(is.matrix(R))
-    expect_equal(nrow(R), ncol(geno$X))
-    expect_equal(ncol(R), ncol(geno$X))
-    expect_true(isSymmetric(R))
-    expect_true(all(abs(diag(R) - 1) < 1e-10))
-    expect_false(any(is.nan(R)))
-    expect_true(all(R >= -1 - 1e-10 & R <= 1 + 1e-10))
-})
-
-test_that("computeLd population method produces valid matrix", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "population")
-    expect_true(isSymmetric(R))
-    expect_true(all(abs(diag(R) - 1) < 1e-10))
-    expect_false(any(is.nan(R)))
-})
-
-test_that("computeLd sample and population methods are similar", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R_s <- computeLd(X, method = "sample")
-    R_p <- computeLd(X, method = "population")
-    # Should be close but not identical (N-1 vs N denominator)
-    expect_true(max(abs(R_s - R_p)) < 0.05)
-})
-
-test_that("computeLd errors on NULL input", {
-    expect_error(computeLd(NULL), "X must be provided")
-})
-
-# --- checkLd ----------------------------------------------------------------
-
-test_that("checkLd diagnoses real LD matrix correctly", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    result <- checkLd(R)
-    expect_true(is.list(result))
-    expect_true(result$isPsd)
-    expect_equal(result$methodApplied, "none")
-    # min eigenvalue may be near-zero (numerically PSD, not strictly PD)
-    expect_true(result$minEigenvalue > -1e-7)
-    expect_true(result$nNegative == 0)
-    expect_true(is.finite(result$conditionNumber))
-})
-
-test_that("checkLd eigenfix improves non-PSD matrix", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    # Make a non-PSD matrix by negating a small block of off-diagonal entries
-    R_bad <- R
-    R_bad[1:3, 4:6] <- -abs(R_bad[1:3, 4:6]) - 0.5
-    R_bad[4:6, 1:3] <- t(R_bad[1:3, 4:6])
-    diag(R_bad) <- 1
-
-    result_check <- checkLd(R_bad, method = "check")
-    expect_false(result_check$isPsd)
-    expect_true(result_check$nNegative > 0)
-
-    result_fix <- checkLd(R_bad, method = "eigenfix")
-    expect_equal(result_fix$methodApplied, "eigenfix")
-    # Eigenfix should improve (raise) minimum eigenvalue
-    fixed_check <- checkLd(result_fix$R)
-    expect_true(fixed_check$minEigenvalue > result_check$minEigenvalue)
-})
-
-test_that("checkLd shrink repairs perturbed LD matrix", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    R_bad <- R
-    R_bad[1, 2] <- R_bad[2, 1] <- 1.5
-    diag(R_bad) <- 1
-    result <- checkLd(R_bad, method = "shrink", shrinkage = 0.1)
-    expect_equal(result$methodApplied, "shrink")
-})
-
-# --- ldPruneByCorrelation -------------------------------------------------
-
-test_that("ldPruneByCorrelation prunes correlated variants", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    result <- ldPruneByCorrelation(X, corThres = 0.8)
-    expect_true(is.list(result))
-    expect_true(is.matrix(result$X.new))
-    expect_true(ncol(result$X.new) <= ncol(X))
-    expect_true(ncol(result$X.new) > 0)
-    expect_equal(length(result$filter.id), ncol(result$X.new))
-    # Retained columns are a subset of original
-    expect_true(all(result$filter.id %in% seq_len(ncol(X))))
-})
-
-test_that("ldPruneByCorrelation with strict threshold prunes more", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    loose <- ldPruneByCorrelation(X, corThres = 0.95)
-    strict <- ldPruneByCorrelation(X, corThres = 0.5)
-    expect_true(ncol(strict$X.new) <= ncol(loose$X.new))
-})
-
-test_that("ldPruneByCorrelation with high threshold keeps most columns", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    result <- ldPruneByCorrelation(X, corThres = 0.999)
-    # At threshold near 1, only near-duplicates are pruned; real data may have many
-    expect_true(ncol(result$X.new) >= ncol(X) * 0.4)
-})
-
-# --- ldClumpByScore -------------------------------------------------------
-
-test_that("ldClumpByScore returns valid indices", {
-    skip_if_not_installed("pgenlibr")
-    skip_if_not_installed("bigsnpr")
-    skip_if_not_installed("bigstatsr")
-    geno <- loadTestGenotype()
-    set.seed(42)
-    score <- runif(ncol(geno$X))
-    chr <- as.integer(geno$variant_info$chrom)
-    pos <- geno$variant_info$pos
-    keep <- ldClumpByScore(
-        geno$X,
-        score = score,
-        chr = chr,
-        pos = pos,
-        r2 = 0.2
-    )
-    expect_true(is.integer(keep))
-    expect_true(length(keep) > 0)
-    expect_true(length(keep) <= ncol(geno$X))
-    expect_true(all(keep %in% seq_len(ncol(geno$X))))
-})
-
-# --- enforceDesignFullRank ------------------------------------------------
-
-test_that("enforceDesignFullRank handles genotype matrix with covariates", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    # Create a simple covariate matrix (e.g., first 2 PCs of X)
-    pca <- prcomp(X, rank. = 2)
-    C <- pca$x
-    result <- enforceDesignFullRank(X, C, strategy = "correlation")
-    expect_true(is.matrix(result))
-    expect_equal(nrow(result), nrow(X))
-    # Should produce full-rank design
-    full_design <- cbind(1, result, C)
-    expect_equal(qr(full_design)$rank, ncol(full_design))
-})
-
-# --- filterVariantsByLdReference -----------------------------------------
-
-test_that("filterVariantsByLdReference filters against PLINK reference via metadata", {
-    skip_if_not_installed("pgenlibr")
-    geno <- loadTestGenotype()
-    vi <- geno$variant_info
-    variant_ids <- paste0(vi$chrom, ":", vi$pos, ":", vi$A2, ":", vi$A1)
-    fake_ids <- c("21:999999:A:G", "21:888888:C:T")
-    all_ids <- c(variant_ids, fake_ids)
-
-    # Create a metadata TSV in the same directory as the PLINK files
-    # so the relative path resolves correctly
-    meta_file <- file.path(test_data_dir, "ld_meta_tmp.tsv")
-    on.exit(unlink(meta_file), add = TRUE)
-    writeLines(
-        paste("chrom", "start", "end", "path", sep = "\t"),
-        meta_file
-    )
-    cat(
-        paste("21", "0", "0", "test_variants", sep = "\t"),
-        "\n",
-        file = meta_file,
-        append = TRUE
-    )
-
-    result <- suppressMessages(
-        filterVariantsByLdReference(all_ids, meta_file, keepIndel = TRUE)
-    )
-    expect_true(is.list(result))
-    expect_true(length(result$data) <= length(all_ids))
-    expect_true(length(result$idx) == length(result$data))
-    # Fake variants should be filtered out
-    expect_true(length(result$data) <= length(variant_ids))
-})
-
-# --- resolveLdInput (internal) ---------------------------------------------
-
-test_that("resolveLdInput computes LD from genotype matrix", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    result <- pecotmr:::resolveLdInput(X = X, needNSample = TRUE)
-    expect_true(is.list(result))
-    expect_true(is.matrix(result$R))
-    expect_equal(nrow(result$R), ncol(X))
-    expect_equal(result$nSample, nrow(X))
-    expect_true(isSymmetric(result$R))
-})
-
-test_that("resolveLdInput passes through pre-computed R", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    result <- pecotmr:::resolveLdInput(
-        R = R,
-        nSample = 100L,
-        needNSample = TRUE
-    )
-    expect_equal(result$R, R)
-    expect_equal(result$nSample, 100L)
-})
-
-test_that("resolveLdInput errors when neither R nor X provided", {
-    expect_error(
-        pecotmr:::resolveLdInput(),
-        "Either R .* or X .* must be provided"
-    )
-})
-
-test_that("resolveLdInput errors when both R and X provided", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    expect_error(
-        pecotmr:::resolveLdInput(R = R, X = X),
-        "Provide either R or X, not both"
-    )
-})
-
-test_that("resolveLdInput errors when R given without nSample and needed", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    expect_error(
-        pecotmr:::resolveLdInput(R = R, needNSample = TRUE),
-        "nSample is required"
-    )
-})
-
-# --- dentistSingleWindow ---------------------------------------------------
-
-test_that("dentistSingleWindow works with genotype matrix X", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    set.seed(42)
-    z <- rnorm(ncol(X))
-    result <- suppressWarnings(dentistSingleWindow(z, X = X))
-    expect_true(is.data.frame(result))
-    expect_equal(nrow(result), length(z))
-    expect_true("original_z" %in% names(result))
-    expect_true("imputed_z" %in% names(result))
-    expect_true("outlier" %in% names(result))
-    expect_true(is.logical(result$outlier))
-})
-
-test_that("dentistSingleWindow works with pre-computed R", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    set.seed(42)
-    z <- rnorm(ncol(X))
-    result <- suppressWarnings(dentistSingleWindow(z, R = R, nSample = nrow(X)))
-    expect_true(is.data.frame(result))
-    expect_equal(nrow(result), length(z))
-})
-
-test_that("dentistSingleWindow detects injected outliers", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    R <- computeLd(X, method = "sample")
-    set.seed(42)
-    z <- rnorm(ncol(X))
-    # Inject extreme outliers
-    z[1] <- 50
-    z[2] <- -50
-    result <- suppressWarnings(dentistSingleWindow(z, R = R, nSample = nrow(X)))
-    # At least one of the injected values should be flagged
-    expect_true(any(result$outlier))
-})
-
-# --- dentist (multi-window) -------------------------------------------------
-
-test_that("dentist works with genotype matrix and sum_stat data frame", {
-    skip_if_not_installed("pgenlibr")
-    geno <- loadTestGenotype()
-    set.seed(42)
-    sum_stat <- data.frame(
-        pos = geno$variant_info$pos,
-        z = rnorm(ncol(geno$X))
-    )
-    # Use count mode with small window since we only have 100 variants
-    result <- suppressWarnings(
-        dentist(sum_stat, X = geno$X, windowMode = "count", minDim = 50)
-    )
-    expect_true(is.data.frame(result))
-    # Window merging may add overlap rows; result should be >= input size
-    expect_true(nrow(result) >= nrow(sum_stat))
-    expect_true(all(c("original_z", "imputed_z", "outlier") %in% names(result)))
-})
-
-test_that("dentist accepts zscore column name variant", {
-    skip_if_not_installed("pgenlibr")
-    geno <- loadTestGenotype()
-    R <- computeLd(geno$X, method = "sample")
-    set.seed(42)
-    sum_stat <- data.frame(
-        position = geno$variant_info$pos,
-        zscore = rnorm(ncol(geno$X))
-    )
-    result <- suppressWarnings(
-        dentist(
-            sum_stat,
-            R = R,
-            nSample = nrow(geno$X),
-            windowMode = "count",
-            minDim = 50
-        )
-    )
-    expect_true(nrow(result) >= nrow(sum_stat))
-})
-
-test_that("dentist errors when sum_stat missing required columns", {
-    skip_if_not_installed("pgenlibr")
-    X <- loadTestGenotype()$X
-    bad_stat <- data.frame(x = seq_len(ncol(X)), y = rnorm(ncol(X)))
-    expect_error(dentist(bad_stat, X = X), "missing either")
-})
-
-# === Tests migrated from test_s4Constructors.R (QtlDataset) ===
+# ===========================================================================
+# QtlDataset construction and validity
+# ===========================================================================
 
 test_that("QtlDataset: builds and validates with a single-context SE", {
     se <- .sc_makeSe()
@@ -2034,17 +1718,9 @@ test_that("QtlDataset: rejects non-SE elements in phenotype list", {
 })
 
 
-test_that("QtlDataset: rejects negative QC cutoffs", {
-    se <- .sc_makeSe()
-    expect_error(
-        QtlDataset(
-            studyName = "s1",
-            genotypes = .sc_makeGenotypeHandle(),
-            phenotypes = list(brain = se),
-            genotypeFilterParam = GenotypeFilterParam(mafCutoff = -0.1)
-        ),
-        "is not >= 0"
-    )
+test_that("GenotypeFilterParam: rejects negative QC cutoffs", {
+    expect_error(GenotypeFilterParam(mafCutoff = -0.1), "is not >= 0")
+    expect_error(GenotypeFilterParam(imissCutoff = Inf), "imissCutoff")
 })
 
 
@@ -2119,23 +1795,62 @@ test_that("QtlDataset: tolerates chr-prefix-only seqname differences for a share
 })
 
 # ===========================================================================
-# MultiStudyQtlDataset
+# updateObject
 # ===========================================================================
 
-test_that("MultiStudyQtlDataset: rejects non-QtlDataset entries", {
-    qd <- QtlDataset(
-        studyName = "s1",
-        genotypes = .sc_makeGenotypeHandle(),
-        phenotypes = list(brain = .sc_makeSe())
-    )
-    expect_error(
-        MultiStudyQtlDataset(qtlDatasets = list(s1 = qd, s2 = "not a dataset")),
-        "must be a QtlDataset"
+test_that("updateObject drops the slots a QtlDataset no longer has", {
+    data(qtlDatasetExample)
+    old <- qtlDatasetExample
+    attr(old, "mafCutoff") <- 0.01
+    attr(old, "keepIndel") <- TRUE
+    up <- updateObject(old)
+    expect_null(attr(up, "mafCutoff"))
+    expect_null(attr(up, "keepIndel"))
+    expect_true(methods::validObject(up))
+    expect_message(
+        updateObject(qtlDatasetExample, verbose = TRUE),
+        "updateObject\\(object = 'QtlDataset'\\)"
     )
 })
 
+test_that("updateObject renames study and reads saved genotypes again", {
+    data(qtlDatasetExample)
+    current <- .qtlGenotypeSe(qtlDatasetExample)
+    # Saved by a version that named the slot `study` and read PLINK1 files
+    # through a GenotypeHandle (helper-savedObjects.R).
+    saved <- .savedHandlePanel(current, .ldRefSource(current)$path, "plink1")
+    old <- .savedUnder(
+        .qtlWithGenotypeHandle(qtlDatasetExample, saved),
+        c(study = "studyName")
+    )
+    up <- updateObject(old)
+    expect_true(methods::validObject(up))
+    expect_identical(studyName(up), studyName(qtlDatasetExample))
+    geno <- .qtlGenotypeSe(up)
+    expect_s4_class(.panelSeed(geno), "GenotypeDosageSeed")
+    expect_identical(dimnames(geno), dimnames(current))
+    expect_identical(
+        SummarizedExperiment::colData(geno),
+        SummarizedExperiment::colData(current)
+    )
+})
 
-# === Tests migrated from test_showMethods.R (QtlDataset) ===
+test_that("updateObject refuses a QtlDataset whose genotypes cannot be read", {
+    data(qtlDatasetExample)
+    current <- .qtlGenotypeSe(qtlDatasetExample)
+    gone <- .savedHandlePanel(
+        current,
+        file.path(tempdir(), "nowhere"),
+        "plink1"
+    )
+    old <- .qtlWithGenotypeHandle(qtlDatasetExample, gone)
+    cnd <- tryCatch(updateObject(old), error = identity)
+    expect_s3_class(cnd, "pecotmrUnreadablePanel")
+})
+
+# ===========================================================================
+# show()
+# ===========================================================================
 
 test_that("show.QtlDataset lists context names and trait count", {
     qd <- .sh_makeQtlDataset()
@@ -2144,35 +1859,6 @@ test_that("show.QtlDataset lists context names and trait count", {
     expect_true(any(grepl("1 context\\(s\\): brain", out)))
     expect_true(any(grepl("2 unique traits", out)))
     expect_true(any(grepl("Genotypes: plink2 @ /tmp/test", out)))
-})
-
-
-test_that("show.MultiStudyQtlDataset reports per-source study counts", {
-    qd1 <- .sh_makeQtlDataset(studyName = "s1")
-    qd2 <- .sh_makeQtlDataset(studyName = "s2")
-    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
-    out <- capture.output(show(mt))
-    expect_true(any(grepl(
-        "MultiStudyQtlDataset: 2 individual-level \\+ 0 sumstats",
-        out
-    )))
-    expect_true(any(grepl("Individual-level studies: s1, s2", out)))
-})
-
-
-test_that("show.MultiStudyQtlDataset reports sumstats studies when present", {
-    qd <- .sh_makeQtlDataset(studyName = "s1")
-    ss <- QtlSumStats(
-        studyName = "s2",
-        context = "c1",
-        trait = "t1",
-        entry = list(.sh_makeQtlSumstatsGr()),
-        genome = "hg19",
-        ldReference = .sh_makeGenotypeHandle()
-    )
-    mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd), sumStats = ss)
-    out <- capture.output(show(mt))
-    expect_true(any(grepl("Sumstats studies: s2", out)))
 })
 
 # ===========================================================================
@@ -2201,8 +1887,12 @@ test_that("show.MultiStudyQtlDataset reports sumstats studies when present", {
         colData = S4Vectors::DataFrame(row.names = samples)
     )
 }
-.mr_ncol <- function(qd, region) ncol(genotypes(qd, region = region))
-.mr_vids <- function(qd, region) colnames(genotypes(qd, region = region))
+# A pipeline's extraction over an analysis window of one or more ranges.
+.mr_geno <- function(qd, window) {
+    pecotmr:::.qtlExtractBlock(qd, window = window)$geno
+}
+.mr_ncol <- function(qd, window) ncol(.mr_geno(qd, window))
+.mr_vids <- function(qd, window) colnames(.mr_geno(qd, window))
 
 test_that("multi-range region unions disjoint sub-ranges on one chromosome", {
     skip_if_not_installed("pgenlibr")
@@ -2264,8 +1954,8 @@ test_that("multi-range region spans chromosomes on a sharded handle", {
     expect_gt(n22, 0L)
     expect_equal(.mr_ncol(qd, rBoth), n21 + n22)
 
-    gBoth <- genotypes(qd, region = rBoth)
-    g21 <- genotypes(qd, region = r21)
+    gBoth <- .mr_geno(qd, rBoth)
+    g21 <- .mr_geno(qd, r21)
     expect_equal(unname(gBoth[, seq_len(n21)]), unname(g21))
     expect_true(all(grepl("_c22$", colnames(gBoth)[(n21 + 1):(n21 + n22)])))
 })
@@ -2285,79 +1975,57 @@ test_that("multi-region: single-range extraction is unchanged (regression)", {
     expect_equal(.mr_ncol(qd, r), nrow(snpInfo(h)))
 })
 
-test_that(".qtlResolveVariantRegion rejects a non-GRanges / empty region", {
-    skip_if_not_installed("pgenlibr")
-    h <- GenotypeHandle(
-        plink2Prefix = file.path(test_data_dir, "test_variants")
-    )
-    qd <- QtlDataset(
-        studyName = "S",
-        genotypes = h,
-        phenotypes = list(ctx = .mr_makeSE(sampleIds(h)))
-    )
-    expect_error(
-        genotypes(qd, region = "chr21:1-2"),
-        "Must inherit from class 'GRanges'"
-    )
-    expect_error(
-        genotypes(qd, region = GenomicRanges::GRanges()),
-        "at least one range"
-    )
-})
-
 # ===========================================================================
-# Accessors: genotypeCovariates / scaleResiduals / phenotypeCovariates
+# Accessors: genotypeCovariates / phenotypeCovariates
 # ===========================================================================
 
-test_that("genotypeCovariates / scaleResiduals return their slots", {
+test_that("genotypeCovariates returns the genotype experiment's colData", {
     gc <- matrix(
         rnorm(12 * 2),
         nrow = 12,
         ncol = 2,
         dimnames = list(paste0("s", 1:12), c("pc1", "pc2"))
     )
-    qd <- .qr_makeDataset(
-        contexts = "brain",
-        geno_cov = gc,
-        scaleResiduals = FALSE
-    )
+    qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
+    # The covariates live on the genotype experiment's colData, one row per
+    # panel sample.
+    cd <- SummarizedExperiment::colData(pecotmr:::.qtlGenotypeSe(qd))
+    expect_equal(colnames(cd), c("pc1", "pc2"))
+    expect_equal(rownames(cd), sampleIds(genotypeHandle(qd)))
     expect_identical(
         genotypeCovariates(qd),
         pecotmr:::.qtlColDataMatrix(pecotmr:::.qtlGenotypeSe(qd))
     )
     expect_equal(unname(genotypeCovariates(qd)), unname(gc))
-    expect_false(scaleResiduals(qd))
-    qd2 <- .qr_makeDataset(contexts = "brain", scaleResiduals = TRUE)
-    expect_true(scaleResiduals(qd2))
 })
 
 test_that("phenotypeCovariates returns per-context colData matrices", {
     qd <- .qr_makeDataset(contexts = c("brain", "liver"))
-    out <- phenotypeCovariates(qd, contexts = c("brain", "liver"))
+    out <- phenotypeCovariates(qd, context = c("brain", "liver"))
     expect_equal(names(out), c("brain", "liver"))
     expect_true(is.matrix(out$brain))
     expect_setequal(colnames(out$brain), c("sex", "age"))
     expect_equal(nrow(out$brain), 12L)
     # Single-context request still returns a named list of length 1.
-    one <- phenotypeCovariates(qd, contexts = "liver")
+    one <- phenotypeCovariates(qd, context = "liver")
     expect_equal(names(one), "liver")
 })
 
 test_that("phenotypeCovariates: requires contexts and rejects unknown ones", {
     qd <- .qr_makeDataset(contexts = "brain")
-    expect_error(phenotypeCovariates(qd), "`contexts` is required")
+    expect_error(phenotypeCovariates(qd), "`context` is required")
     expect_error(
-        phenotypeCovariates(qd, contexts = character(0)),
-        "`contexts` is required"
+        phenotypeCovariates(qd, context = character(0)),
+        "`context` is required"
     )
     expect_error(
-        phenotypeCovariates(qd, contexts = "ghost"),
+        phenotypeCovariates(qd, context = "ghost"),
         "Unknown context"
     )
 })
 
 # ===========================================================================
-# .qtlResolveVariantRegion: region-path cisWindow validation (line ~247)
+# .qtlResolveVariantRegion: region-path cisWindow validation
 # ===========================================================================
 
 test_that(".qtlResolveVariantRegion: region path rejects a non-scalar/negative cisWindow", {
@@ -2383,12 +2051,15 @@ test_that(".qtlResolveVariantRegion: region path rejects a non-scalar/negative c
 
 test_that(".qtlExtractBlock: keepIndel = FALSE with an all-indel panel returns an empty block", {
     # Every variant a multi-base allele, so the indel filter drops them all.
-    qd <- .qh_makeDataset(a1 = rep("AT", 6L), keepIndel = FALSE)
+    qd <- .qh_makeDataset(a1 = rep("AT", 6L))
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        filter = .qh_filter(keepIndel = FALSE)
+    )
     expect_equal(ncol(blk$geno), 0L)
     expect_equal(nrow(blk$geno), 0L)
     expect_equal(blk$variantIds, character(0))
@@ -2398,10 +2069,7 @@ test_that(".qtlExtractBlock: keepIndel = FALSE with an all-indel panel returns a
 test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-sample block", {
     qd <- .qh_makeDataset()
     # none are panel samples
-    qd <- pecotmr:::.qtlApplyFilterOverrides(
-        qd,
-        GenotypeFilterParam(keepSamples = c("zzz1", "zzz2"))
-    )
+    qd <- pecotmr:::.qtlRestrictSamples(qd, c("zzz1", "zzz2"))
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -2459,12 +2127,15 @@ test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-
 
 test_that(".qtlExtractBlock: imissCutoff drops high-missingness samples and mean-imputes the rest", {
     # s1 (100% NA) dropped; s2 (1 NA) kept then imputed
-    qd <- .qh_makeDataset(imissCutoff = 0.5)
+    qd <- .qh_makeDataset()
     local_mocked_bindings(
         extractBlockGenotypes = .qh_naExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        filter = .qh_filter(imissCutoff = 0.5)
+    )
     expect_false("s1" %in% blk$sampleIds)
     expect_true("s2" %in% blk$sampleIds)
     expect_false(anyNA(blk$geno)) # scattered NA was mean-imputed
@@ -2512,12 +2183,15 @@ test_that(".qtlExtractBlock: imissCutoff drops high-missingness samples and mean
 }
 
 test_that(".qtlExtractBlock: xvarCutoff drops near-constant (low-variance) variants", {
-    qd <- .qh_makeDataset(xvarCutoff = 0.01)
+    qd <- .qh_makeDataset()
     local_mocked_bindings(
         extractBlockGenotypes = .qh_lowVarExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
+    blk <- pecotmr:::.qtlExtractBlock(
+        qd,
+        filter = .qh_filter(xvarCutoff = 0.01)
+    )
     expect_false("rs1" %in% blk$variantIds) # constant column dropped on variance
     expect_true(ncol(blk$geno) >= 1L)
 })
@@ -2528,36 +2202,40 @@ test_that(".qtlExtractBlock: xvarCutoff drops near-constant (low-variance) varia
 
 test_that("molecularTraits: requires contexts", {
     qd <- .qr_makeDataset()
-    expect_error(molecularTraits(qd), "`contexts` is required")
+    expect_error(molecularTraits(qd), "`context` is required")
     expect_error(
-        molecularTraits(qd, contexts = character(0)),
-        "`contexts` is required"
+        molecularTraits(qd, context = character(0)),
+        "`context` is required"
     )
 })
 
 test_that("molecularTraits: unknown context errors", {
     qd <- .qr_makeDataset()
-    expect_error(molecularTraits(qd, contexts = "ghost"), "Unknown context")
+    expect_error(molecularTraits(qd, context = "ghost"), "Unknown context")
 })
 
-test_that("molecularTraits: region keeps only overlapping traits", {
+test_that("a pipeline's window keeps only the overlapping traits", {
     qd <- .qr_makeDataset(contexts = "brain")
     # brain SE: ENSG1 @ chr1:1000-1499, ENSG2 @ chr1:2000-2499.
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(900, 1600))
-    out <- molecularTraits(qd, contexts = "brain", region = region)
+    out <- pecotmr:::.qtlMolecularTraits(
+        qd,
+        contexts = "brain",
+        window = region
+    )[["brain"]]
     expect_s4_class(out, "SummarizedExperiment")
     expect_equal(rownames(out), "ENSG1")
 })
 
-test_that("molecularTraits: non-overlapping region + naAction='drop' hits the empty-Y short-circuit", {
+test_that("an unmatched window under naAction = 'drop' gives an empty SE", {
     qd <- .qr_makeDataset(contexts = "brain")
     region <- GenomicRanges::GRanges("chr2", IRanges::IRanges(1, 100)) # no overlap
-    out <- molecularTraits(
+    out <- pecotmr:::.qtlMolecularTraits(
         qd,
         contexts = "brain",
-        region = region,
-        naAction = "drop"
-    )
+        window = region,
+        phenotypeFilter = .qr_pheno(naAction = "drop")
+    )[["brain"]]
     expect_s4_class(out, "SummarizedExperiment")
     expect_equal(nrow(out), 0L)
 })
@@ -2585,26 +2263,12 @@ test_that(".qtlOutlierKeepMask: robustbase covMcd failure falls back to colMeans
     )
     set.seed(8L)
     Y <- matrix(c(rnorm(29), 60), ncol = 1L)
-    keep <- pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 1e-3)
-    expect_length(keep, 30L)
-    expect_false(keep[[30L]]) # the planted 60 is still flagged
-})
-
-test_that(".qtlOutlierKeepMask: falls back with a message when robustbase is absent", {
-    # Force the robustbase-absent branch by mocking base::requireNamespace.
-    local_mocked_bindings(
-        requireNamespace = function(package, ...) {
-            if (identical(package, "robustbase")) FALSE else TRUE
-        },
-        .package = "base"
-    )
-    set.seed(5L)
-    Y <- matrix(c(rnorm(29), 50), ncol = 1L)
     expect_message(
         keep <- pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 1e-3),
-        "install 'robustbase'"
+        "robustbase's MCD estimator failed"
     )
     expect_length(keep, 30L)
+    expect_false(keep[[30L]]) # the planted 60 is still flagged
 })
 
 # ===========================================================================
@@ -2720,7 +2384,7 @@ test_that(".qtlBuildResidualizationDesign: disjoint blocks error", {
 })
 
 # ===========================================================================
-# getResidualized{Genotypes,Phenotypes}: disjoint sample-set errors
+# residualized{Genotypes,Phenotypes}: disjoint sample-set errors
 # ===========================================================================
 
 test_that("residualizedGenotypes: errors when genotypes and covariates share no samples", {
@@ -2738,7 +2402,7 @@ test_that("residualizedGenotypes: errors when genotypes and covariates share no 
     expect_error(
         residualizedGenotypes(
             qd,
-            contexts = "brain",
+            context = "brain",
             residualizationParam = ResidualizationParam(
                 residualizePhenotype = FALSE,
                 genotypeCovariates = c("pc1", "pc2")
@@ -2759,7 +2423,7 @@ test_that("residualizedPhenotypes: errors when phenotypes and covariates share n
     expect_error(
         residualizedPhenotypes(
             qd,
-            contexts = "brain",
+            context = "brain",
             residualizationParam = ResidualizationParam(
                 residualizePhenotype = FALSE,
                 genotypeCovariates = c("pc1", "pc2")
@@ -2767,37 +2431,6 @@ test_that("residualizedPhenotypes: errors when phenotypes and covariates share n
         ),
         "No samples in common"
     )
-})
-
-test_that("QtlDataset filter accessors report the construction settings", {
-    data(qtlDatasetExample, envir = environment())
-    x <- qtlDatasetExample
-    expect_type(mafCutoff(x), "double")
-    expect_length(mafCutoff(x), 1L)
-    expect_length(macCutoff(x), 1L)
-    expect_length(xvarCutoff(x), 1L)
-    expect_length(imissCutoff(x), 1L)
-    expect_type(keepIndel(x), "logical")
-    expect_type(keepVariants(x), "character")
-})
-
-test_that("QtlDataset filter accessors round-trip what was passed in", {
-    data(qtlDatasetExample, envir = environment())
-    x <- .qtlApplyFilterOverrides(
-        qtlDatasetExample,
-        GenotypeFilterParam(
-            mafCutoff = 0.05,
-            macCutoff = 10,
-            xvarCutoff = 0.01,
-            imissCutoff = 0.1,
-            keepIndel = FALSE
-        )
-    )
-    expect_equal(mafCutoff(x), 0.05)
-    expect_equal(macCutoff(x), 10)
-    expect_equal(xvarCutoff(x), 0.01)
-    expect_equal(imissCutoff(x), 0.1)
-    expect_false(keepIndel(x))
 })
 
 test_that("genotypeHandle returns the handle, genotypes a dosage block", {
@@ -2899,19 +2532,6 @@ test_that("the dosage assay is delayed and oriented variants x samples", {
     expect_equal(ncol(a), length(sampleIds(handle)))
 })
 
-test_that("genotype covariates live on the genotype experiment's colData", {
-    qd <- .qm_makeDataset()
-    cd <- SummarizedExperiment::colData(pecotmr:::.qtlGenotypeSe(qd))
-    expect_equal(colnames(cd), c("pc1", "pc2"))
-    expect_equal(rownames(cd), sampleIds(genotypeHandle(qd)))
-    expect_equal(
-        genotypeCovariates(qd),
-        pecotmr:::.qtlColDataMatrix(
-            pecotmr:::.qtlGenotypeSe(qd)
-        )
-    )
-})
-
 test_that("subsetting by sample keeps the class and its own slots", {
     qd <- .qm_makeDataset()
     out <- qd[, paste0("s", 1:5), ]
@@ -2919,7 +2539,6 @@ test_that("subsetting by sample keeps the class and its own slots", {
     expect_equal(nrow(MultiAssayExperiment::colData(out)), 5L)
     expect_equal(studyName(out), studyName(qd))
     expect_identical(genotypeHandle(out), genotypeHandle(qd))
-    expect_equal(mafCutoff(out), mafCutoff(qd))
 })
 
 test_that("subsetting by context keeps the genotype experiment", {
@@ -2938,36 +2557,28 @@ test_that("subsetting by context keeps the genotype experiment", {
     expect_true(validObject(out))
 })
 
-test_that("subsetting by sample and context together narrows both axes", {
-    # `x[, j, k]`: the experiment axis is applied here, then the remaining
+test_that("subsetting by context also applies feature and sample subscripts", {
+    # `x[i, j, k]`: the experiment axis is applied here, then the remaining
     # axes go back through the method with no `k` so the inherited one runs.
+    # With no sample subscript, every sample survives.
     qd <- .qm_makeDataset()
-    out <- suppressWarnings(suppressMessages(qd[, paste0("s", 1:5), "brain"]))
-    expect_s4_class(out, "QtlDataset")
-    expect_equal(contexts(out), "brain")
-    expect_equal(nrow(MultiAssayExperiment::colData(out)), 5L)
-    expect_true(validObject(out))
-})
-
-test_that("subsetting by feature and context leaves the samples alone", {
-    # `x[i, , k]`: no sample subscript, so every sample survives.
-    qd <- .qm_makeDataset()
-    out <- suppressWarnings(suppressMessages(qd[1, , "brain"]))
-    expect_s4_class(out, "QtlDataset")
-    expect_equal(contexts(out), "brain")
-    expect_equal(nrow(MultiAssayExperiment::colData(out)), 12L)
-    expect_true(validObject(out))
-})
-
-test_that("all three subscripts can be given at once", {
-    qd <- .qm_makeDataset()
-    out <- suppressWarnings(suppressMessages(
-        qd[1, paste0("s", 1:5), "brain"]
-    ))
-    expect_s4_class(out, "QtlDataset")
-    expect_equal(contexts(out), "brain")
-    expect_equal(nrow(MultiAssayExperiment::colData(out)), 5L)
-    expect_true(validObject(out))
+    s5 <- str_c("s", 1:5)
+    cases <- suppressWarnings(suppressMessages(list(
+        `sample and context` = list(out = qd[, s5, "brain"], nSamples = 5L),
+        `feature and context` = list(out = qd[1, , "brain"], nSamples = 12L),
+        `all three` = list(out = qd[1, s5, "brain"], nSamples = 5L)
+    )))
+    for (case in names(cases)) {
+        out <- cases[[case]]$out
+        expect_true(is(out, "QtlDataset"), info = case)
+        expect_equal(contexts(out), "brain", info = case)
+        expect_equal(
+            nrow(MultiAssayExperiment::colData(out)),
+            cases[[case]]$nSamples,
+            info = case
+        )
+        expect_true(validObject(out), info = case)
+    }
 })
 
 test_that("the experiment subscript accepts logical and numeric, not just names", {
@@ -3152,13 +2763,6 @@ test_that("QtlDataset still rejects a genotype source it cannot open", {
 # guards were never executed.
 # ===========================================================================
 
-test_that("validity rejects a non-scalar scaleResiduals", {
-    # The constructor coerces via isTRUE(); validity guards direct slot sets.
-    qd <- .qh_makeDataset()
-    qd@scaleResiduals <- c(TRUE, FALSE)
-    expect_error(validObject(qd), "Variable 'scaleResiduals'")
-})
-
 test_that("the phenotype-list check rejects duplicated context names", {
     se <- .qh_makeSe()
     errs <- pecotmr:::.qtlCheckPhenotypeList(list(brain = se, brain = se))
@@ -3253,16 +2857,34 @@ test_that("aligning covariates with nothing to align returns NULL", {
     expect_null(pecotmr:::.qtlAlignCovariates(list(), NULL))
 })
 
-test_that("outlier detection reports a singular trait covariance", {
-    # A singular covariance silently became a pseudo-inverse, while the
-    # sibling robustbase-missing branch already informed the user.
+test_that("outlier detection reports a singular trait covariance once", {
+    skip_if_not_installed("robustbase")
+    # robustbase::covMcd() warns, in its own words, that the samples lie
+    # on a line; that warning is the one signal, so pecotmr adds none.
     Y <- cbind(a = c(1, 2, 3, 4), b = c(2, 4, 6, 8))
-    cnd <- rlang::catch_cnd(
-        pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 0.05),
-        classes = "message"
+    expect_warning(
+        expect_no_message(
+            keep <- pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 0.05)
+        ),
+        "covariance matrix of the data is singular"
     )
-    expect_match(conditionMessage(cnd), "singular")
-    expect_match(conditionMessage(cnd), "pseudo-inverse")
+    expect_length(keep, 4L)
+})
+
+test_that("a non-robust fallback announces its own singular covariance", {
+    skip_if_not_installed("robustbase")
+    # With no MCD there is no robustbase warning, so pecotmr says both what
+    # it fell back to and that it took a pseudo-inverse.
+    local_mocked_bindings(
+        covMcd = function(...) stop("forced covMcd failure"),
+        .package = "robustbase"
+    )
+    Y <- cbind(a = c(1, 2, 3, 4), b = c(2, 4, 6, 8))
+    msgs <- capture_messages(
+        pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 0.05)
+    )
+    expect_true(any(str_detect(msgs, "MCD estimator failed")))
+    expect_true(any(str_detect(msgs, "pseudo-inverse")))
 })
 
 test_that(".qtlConcat answers an empty list for no pieces", {
@@ -3309,17 +2931,16 @@ test_that("the three filter bundles are separate on purpose", {
 })
 
 test_that("an unset genotype filter field is absent, not NULL", {
-    # Absence is what distinguishes "pin this value" from "leave it alone":
-    # QtlDataset resolves an unset field to its own default, a pipeline
-    # leaves the dataset's construct-time slot untouched.
+    # The bundle reports only what was set; a run resolves an unset field to
+    # its default (.qtlResolveFilter()).
     expect_length(GenotypeFilterParam(), 0L)
     expect_equal(names(GenotypeFilterParam(mafCutoff = 0)), "mafCutoff")
-    # A pinned zero is NOT the same as unset.
+    # A set zero is reported; an unset field is not.
     expect_equal(GenotypeFilterParam(mafCutoff = 0)$mafCutoff, 0)
     expect_null(GenotypeFilterParam()$mafCutoff)
 })
 
-test_that("every GenotypeFilterParam field is one QtlDataset resolves", {
+test_that("every GenotypeFilterParam field is one a run resolves", {
     expect_setequal(
         names(formals(GenotypeFilterParam)),
         names(pecotmr:::.qtlResolveFilter(GenotypeFilterParam()))
@@ -3396,9 +3017,94 @@ test_that("a QtlDataset reads genotypes held in memory as from a file", {
     expect_null(genotypeHandle(qd))
     region <- SummarizedExperiment::rowRanges(disk)[1:30]
     expect_equal(
-        genotypes(qd, region = region),
-        genotypes(qtlDatasetExample, region = region)
+        genotypes(qd[region, , ]),
+        genotypes(qtlDatasetExample[region, , ])
     )
     out <- capture.output(show(qd))
     expect_true(any(grepl("held in memory", out)))
+})
+
+# ===========================================================================
+# PhenotypeFilterParam: the run's phenotype QC
+# ===========================================================================
+
+test_that("PhenotypeFilterParam: unset fields take each pipeline's default", {
+    p <- PhenotypeFilterParam()
+    expect_length(p, 0L)
+    fm <- pecotmr:::.fmResolvePhenotypeFilter(p)
+    expect_equal(fm$naAction, "drop")
+    expect_equal(fm$outlierAction, "keep")
+    expect_equal(fm$outlierPvalThreshold, 1e-3)
+    expect_s4_class(fm$outlierArgs, "MethodOptions")
+    # colocboost takes missing phenotypes as they are.
+    expect_equal(pecotmr:::.cbResolvePhenotypeFilter(p)$naAction, "keep")
+    tw <- pecotmr:::.twasResolvePhenotypeFilter(
+        PhenotypeFilterParam(naAction = "impute", outlierPvalThreshold = 0.01)
+    )
+    expect_equal(tw$naAction, "impute")
+    expect_equal(tw$outlierPvalThreshold, 0.01)
+})
+
+test_that("PhenotypeFilterParam: a fit that cannot take NAs refuses 'keep'", {
+    keep <- PhenotypeFilterParam(naAction = "keep")
+    expect_error(
+        pecotmr:::.fmResolvePhenotypeFilter(keep),
+        "fineMappingPipeline: naAction = \"keep\" is not available"
+    )
+    expect_error(
+        pecotmr:::.twasResolvePhenotypeFilter(keep),
+        "twasWeightsPipeline: .*Use \"drop\" or \"impute\""
+    )
+    expect_equal(pecotmr:::.cbResolvePhenotypeFilter(keep)$naAction, "keep")
+})
+
+test_that("PhenotypeFilterParam: a bad value is named where it is set", {
+    expect_error(PhenotypeFilterParam(naAction = "zap"), "naAction")
+    expect_error(PhenotypeFilterParam(outlierAction = "zap"), "outlierAction")
+    expect_error(
+        PhenotypeFilterParam(outlierPvalThreshold = 2),
+        "outlierPvalThreshold"
+    )
+    expect_error(PhenotypeFilterParam(outlierArgs = list()), "outlierArgs")
+    # A record built for another engine means nothing to the detector.
+    expect_error(
+        PhenotypeFilterParam(outlierArgs = GlmnetOptions()),
+        "must be built with CovMcdOptions\\(\\) \\(got a record for glmnet"
+    )
+    expect_s4_class(
+        PhenotypeFilterParam(outlierArgs = CovMcdOptions(alpha = 0.9)),
+        "PhenotypeFilterParam"
+    )
+    expect_error(
+        pecotmr:::.fmResolvePhenotypeFilter(GenotypeFilterParam()),
+        "PhenotypeFilterParam"
+    )
+})
+
+test_that("molecularTraits / residualizedPhenotypes: lists for one context", {
+    qd <- .qr_makeDataset(contexts = "brain")
+    mt <- molecularTraits(qd, context = "brain")
+    expect_type(mt, "list")
+    expect_named(mt, "brain")
+    expect_s4_class(mt[["brain"]], "SummarizedExperiment")
+    rp <- residualizedPhenotypes(qd, context = "brain")
+    expect_named(rp, "brain")
+    expect_true(is.matrix(rp[["brain"]]))
+})
+
+# ===========================================================================
+# .qtlResidualizeQr
+# ===========================================================================
+
+test_that("a constant genotype column comes back as zeros, not NaN", {
+    # `.qtlResidualizeQr()` treats anything below sqrt(.Machine$double.eps) as
+    # constant: lm.fit residuals of a constant column are ~1e-16 rather than
+    # 0, and dividing the (also tiny) residuals by that amplifies roundoff to
+    # unit scale. The column is zeroed instead, and .dropZeroVariance()
+    # removes it downstream.
+    Y <- cbind(a = c(1, 2, 3, 4), b = c(2, 2, 2, 2))
+    out <- pecotmr:::.qtlResidualizeQr(Y, NULL, scaleResiduals = TRUE)
+    expect_equal(unname(out[, "b"]), rep(0, 4))
+    expect_equal(sd(out[, "a"]), 1)
+    expect_false(anyNA(out))
 })

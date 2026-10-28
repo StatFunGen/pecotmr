@@ -22,16 +22,18 @@ test_that("bglrWeights computes weights with BayesB model", {
     expect_true(all(is.finite(result)))
 })
 
-test_that("bayesBWeights computes weights and dispatches to bglrWeights", {
+test_that("bayesBWeights / bLassoWeights compute finite length-p weights", {
     skip_if_not_installed("BGLR")
     set.seed(42)
     n <- 50
     p <- 10
     X <- matrix(rnorm(n * p), nrow = n)
     y <- X[, 1] * 0.5 + rnorm(n)
-    result <- bayesBWeights(X, y, nIter = 100, burnIn = 20, thin = 2)
-    expect_equal(length(result), p)
-    expect_true(all(is.finite(result)))
+    for (fn in c("bayesBWeights", "bLassoWeights")) {
+        result <- exec(fn, X, y, nIter = 100, burnIn = 20, thin = 2)
+        expect_equal(length(result), p, info = fn)
+        expect_true(all(is.finite(result)), info = fn)
+    }
 })
 
 test_that("bayesBWeights passes probIn through to BGLR ETA", {
@@ -62,18 +64,8 @@ test_that("bayesBWeights passes probIn through to BGLR ETA", {
     expect_equal(length(result), p)
     expect_equal(captured$eta[[1]]$model, "BayesB")
     expect_equal(captured$eta[[1]]$probIn, 0.42)
-})
-
-test_that("bLassoWeights computes weights with BL model", {
-    skip_if_not_installed("BGLR")
-    set.seed(42)
-    n <- 50
-    p <- 10
-    X <- matrix(rnorm(n * p), nrow = n)
-    y <- X[, 1] * 0.5 + rnorm(n)
-    result <- bLassoWeights(X, y, nIter = 100, burnIn = 20, thin = 2)
-    expect_equal(length(result), p)
-    expect_true(all(is.finite(result)))
+    # probIn is the only ETA setting bayesBWeights adds.
+    expect_named(captured$eta[[1]], c("X", "model", "probIn"))
 })
 
 test_that("bglrWeights warns and zero-pads when X has zero-variance columns", {

@@ -3,6 +3,7 @@
 \docType{class}
 \name{CtwasResultEntry-class}
 \alias{CtwasResultEntry-class}
+\alias{coerce,CtwasResultEntry,GRanges-method}
 \title{cTWAS Per-Run Payload}
 \description{
 Per-run cTWAS payload: the fine-mapping posterior table, the
@@ -29,6 +30,12 @@ this run, or \code{NULL}.}
 
 \item{\code{regionInfo}}{Per-region metadata, or \code{NULL}.}
 }}
+
+\section{Coercion}{
+ \code{as(x, "GRanges")} gives the per-gene (and, with
+  SNPs kept, per-SNP) posteriors as ranges -- an error when they could not
+  be placed on the genome and are still a table.
+}
 
 \seealso{
 \code{\link{CtwasResultEntry}} for the constructor.

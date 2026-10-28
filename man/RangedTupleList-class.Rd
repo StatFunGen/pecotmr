@@ -14,6 +14,22 @@ Virtual base class for pecotmr's per-element collections. Each
   elements and \code{mcols} together, but leaves slots untouched, so a
   per-element slot silently ends up the wrong length and positionally wrong.
 }
+\section{Sequence names and genome build}{
+ Every range pecotmr holds is on
+  UCSC sequence names (\code{chr1}, \code{chrX}, \code{chrM}), the style
+  \code{seqlevelsStyle(x) <- "UCSC"} gives. Ranges read from a file,
+  placed by variant id, passed to a constructor or given as a range
+  argument are renamed on the way in (\code{"1"} and \code{"chr1"} both
+  become \code{chr1}), so ranges from different inputs compare as they
+  are. A query handed straight to an inherited Bioconductor method, such
+  as \code{subsetByOverlaps()}, is not renamed: give it in UCSC style.
+  A pipeline's result carries the genome build its inputs name in
+  \code{seqinfo()}, as do the ranged views of it (\code{topLoci()},
+  \code{colocVariants()}, ...); inputs naming different builds are
+  refused. When no input names one, \code{genome()} is \code{NA} until it
+  is set with \code{genome(x) <- "hg38"}.
+}
+
 \section{Invariant}{
  One seqname and one strand per element. \code{range()}
   splits on both, so a mixed element would return two ranges and break the

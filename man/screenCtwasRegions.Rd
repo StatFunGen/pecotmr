@@ -4,12 +4,19 @@
 \alias{screenCtwasRegions}
 \title{Screen cTWAS regions}
 \usage{
-screenCtwasRegions(estResult, numThreads = 1L, methodArgs = CtwasOptions())
+screenCtwasRegions(
+  estResult,
+  BPPARAM = SerialParam(),
+  methodArgs = CtwasOptions()
+)
 }
 \arguments{
 \item{estResult}{A list returned by \code{\link{estCtwasGroupPriors}}.}
 
-\item{numThreads}{Number of cores.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the cores
+ctwas's own \code{ncore} parallelism uses when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+core. Default \code{SerialParam()}.}
 
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
 with \code{\link{CtwasOptions}}. Names are checked against what

@@ -1,100 +1,31 @@
 # Tests for FineMappingRow (S4 class)
 
-# Helper for adjustPips tests, migrated from test_dataStructures.R
-
-.makeAdjustEntry <- function(vids, maxNumSingleEffects = 2L) {
-    p <- length(vids)
-    set.seed(11L)
-    lbf <- matrix(
-        rnorm(maxNumSingleEffects * p),
-        nrow = maxNumSingleEffects,
-        ncol = p
-    )
-    colnames(lbf) <- vids
-    alpha <- lbfToAlpha(lbf)
-    pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
-    fineMappingRow(
-        variantIds = vids,
-        susieFit = list(
-            pip = pip,
-            alpha = alpha,
-            lbf_variable = lbf,
-            mu = matrix(0, maxNumSingleEffects, p),
-            X_column_scale_factors = rep(1, p)
-        ),
-        topLoci = data.frame(
-            variant_id = vids,
-            pip = pip,
-            betahat = rep(0, p),
-            sebetahat = rep(1, p),
-            stringsAsFactors = FALSE
-        )
-    )
-}
-
-
 # ===========================================================================
-# Tests migrated from test_dataStructures.R (topLoci, adjustPips)
+# A row as GRanges, and adjustPips on a kept subset
 # ===========================================================================
 
-test_that(".fmrRowTopLoci() tables convert to ranges", {
-    tl <- data.frame(
-        variant_id = c("1:100:A:G", "1:200:C:T"),
-        pip = c(0.9, 0.1),
-        betahat = c(0.5, -0.2),
-        sebetahat = c(0.1, 0.2),
-        cs = c(1L, 0L),
+test_that("as(row, 'GRanges') is the element a collection stores", {
+    ids <- c("chr1:100:A:G", "chr1:200:C:T")
+    row <- FineMappingRow(
+        variantIds = ids,
+        susieFit = list(),
+        topLoci = data.frame(variant_id = ids, pip = c(0.7, 0.2))
+    )
+    gr <- as(row, "GRanges")
+    expect_s4_class(gr, "GRanges")
+    expect_identical(gr$pip, c(0.7, 0.2))
+    x <- QtlFineMappingResult(
+        studyName = "s",
+        context = "c",
+        trait = "t",
         method = "susie",
-        stringsAsFactors = FALSE
+        entry = list(row)
     )
-    ent <- fineMappingRow(
-        variantIds = tl$variant_id,
-        susieFit = list(),
-        topLoci = tl
-    )
-    # .fmrRowTopLoci() is the per-row table; topLoci() converts once, after
-    # the aggregate view has stacked the rows, so the conversion is tested
-    # through the converter it now lives in.
-    out <- .fmrRowTopLoci(ent)
-    expect_s3_class(out, "data.frame")
-    gr <- pecotmr:::.fmeTopLociGRanges(out)
-    expect_s4_class(gr, "GRanges")
-    expect_equal(length(gr), 2)
-    expect_equal(S4Vectors::mcols(gr)$pip, c(0.9, 0.1))
-})
-
-
-test_that(".fmrRowTopLoci() empty input converts to empty ranges", {
-    ent <- fineMappingRow(
-        variantIds = character(0),
-        susieFit = list(),
-        topLoci = data.frame()
-    )
-    gr <- pecotmr:::.fmeTopLociGRanges(.fmrRowTopLoci(ent))
-    expect_s4_class(gr, "GRanges")
-    expect_equal(length(gr), 0)
-})
-
-
-test_that(".fmrRowTopLoci() always returns the per-row table", {
-    tl <- data.frame(
-        variant_id = "1:100:A:G",
-        pip = 0.9,
-        betahat = 0.5,
-        sebetahat = 0.1,
-        cs = 1L,
-        stringsAsFactors = FALSE
-    )
-    ent <- fineMappingRow(
-        variantIds = tl$variant_id,
-        susieFit = list(),
-        topLoci = tl
-    )
-    expect_s3_class(.fmrRowTopLoci(ent), "data.frame")
+    expect_identical(unname(x[[1L]]), unname(gr))
 })
 
 # =============================================================================
-# extractBlockGenotypes returns RSE
+# adjustPips: renormalize PIPs on a kept subset of variants
 # =============================================================================
 
 test_that("adjustPips renormalizes PIPs on a kept FineMappingRow subset", {
@@ -114,7 +45,6 @@ test_that("adjustPips renormalizes PIPs on a kept FineMappingRow subset", {
     expect_false(identical(unname(origPips[keep]), susieFit(adj)$pip))
 })
 
-
 test_that("adjustPips errors when the intersection is empty", {
     vids <- paste0("chr1:", 1:4, ":A:G")
     entry <- .makeAdjustEntry(vids)
@@ -123,7 +53,6 @@ test_that("adjustPips errors when the intersection is empty", {
         "intersection.*empty"
     )
 })
-
 
 test_that("adjustPips tolerates a chr-prefix difference between entry and keepVariants", {
     vids <- paste0("chr1:", 1:6, ":A:G")
@@ -135,35 +64,12 @@ test_that("adjustPips tolerates a chr-prefix difference between entry and keepVa
     expect_equal(ncol(susieFit(adj)$lbf_variable), 4)
 })
 
-
-test_that("adjustPips on a FineMappingResultBase collection renormalizes each entry", {
-    vidsA <- paste0("chr1:", 1:6, ":A:G")
-    vidsB <- paste0("chr1:", 3:8, ":A:G")
-    entryA <- .makeAdjustEntry(vidsA)
-    entryB <- .makeAdjustEntry(vidsB)
-    fmr <- QtlFineMappingResult(
-        studyName = c("s1", "s1"),
-        context = c("c1", "c2"),
-        trait = c("g1", "g1"),
-        method = c("susie", "susie"),
-        entry = list(entryA, entryB)
-    )
-    # Keep only variants shared by both entries' raw sets.
-    keep <- intersect(vidsA, vidsB)
-    adj <- adjustPips(fmr, keep)
-    expect_s4_class(adj, "QtlFineMappingResult")
-    expect_equal(nrow(adj), 2L)
-    expect_equal(variantIds(pecotmr:::.collectionEntry(adj, 1L)), keep)
-    expect_equal(variantIds(pecotmr:::.collectionEntry(adj, 2L)), keep)
-})
-
-
 # === Tests migrated from test_s4Constructors.R (FineMappingRow) ===
 
 test_that("FineMappingRow: constructor stores slots and accessors return them", {
     tl <- .sc_makeTopLoci(3)
     tl$variant_id <- sprintf("chr9:%d:A:G", 100L * (1:3))
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = sprintf("chr9:%d:A:G", 100L * (1:3)),
         susieFit = list(payload = 1L),
         topLoci = tl
@@ -179,7 +85,6 @@ test_that("FineMappingRow: constructor stores slots and accessors return them", 
     expect_equal(out$variant_id, sprintf("chr9:%d:A:G", 100L * (1:3)))
 })
 
-
 test_that("FineMappingRow: pip returns named pip vector keyed by variant_id", {
     entry <- .sc_makeFineMappingRow(3)
     pip <- .fmrRowPip(entry)
@@ -194,7 +99,7 @@ test_that("FineMappingRow: resolveWeights returns topLoci posterior effect align
     expect_equal(wr$weights, rep(0.05, 3))
     expect_equal(length(wr$variantIds), length(wr$weights))
     # empty topLoci -> empty pair
-    empty <- fineMappingRow(
+    empty <- FineMappingRow(
         variantIds = character(0),
         susieFit = list(),
         topLoci = data.frame(
@@ -206,9 +111,8 @@ test_that("FineMappingRow: resolveWeights returns topLoci posterior effect align
     expect_length(.fmrRowResolveWeights(empty)$variantIds, 0L)
 })
 
-
 test_that("FineMappingRow: pip returns numeric(0) when topLoci is empty", {
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = character(0),
         susieFit = list(),
         topLoci = data.frame(
@@ -220,13 +124,11 @@ test_that("FineMappingRow: pip returns numeric(0) when topLoci is empty", {
     expect_equal(.fmrRowPip(entry), numeric(0))
 })
 
-
 test_that("FineMappingRow: credibleSets filters to rows in any credible set", {
     entry <- .sc_makeFineMappingRow(3) # last row has cs_95 = "susie_0"
     res <- .fmrRowCs(entry)
     expect_equal(nrow(res), 2L)
 })
-
 
 test_that("FineMappingRow: credibleSets/topLoci surface the directional af column", {
     # Regression: the posterior view must carry the topLoci `af` (effect-allele
@@ -243,10 +145,9 @@ test_that("FineMappingRow: credibleSets/topLoci surface the directional af colum
     expect_equal(unname(tl$af), rep(0.87, nrow(tl)))
 })
 
-
 test_that("FineMappingRow: validity errors when topLoci is missing required cols", {
     expect_error(
-        fineMappingRow(
+        FineMappingRow(
             variantIds = "chr1:100:A:G",
             susieFit = list(),
             topLoci = data.frame(other = 1, stringsAsFactors = FALSE)
@@ -254,7 +155,6 @@ test_that("FineMappingRow: validity errors when topLoci is missing required cols
         "topLoci missing required columns"
     )
 })
-
 
 # === cvResult slot (cross-validation payload) ===
 
@@ -269,7 +169,7 @@ test_that("FineMappingRow stores and returns a cvResult payload", {
         prediction = list(susie_predicted = matrix(0, 2, 1)),
         performance = list(susie_performance = matrix(0, 1, 6))
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl,
@@ -284,14 +184,14 @@ test_that("FineMappingRow cvResult defaults to NULL and rejects non-list", {
         pip = 0.5,
         stringsAsFactors = FALSE
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = tl
     )
     expect_null(.fmrPartsCvResult(e))
     expect_error(
-        fineMappingRow(
+        FineMappingRow(
             variantIds = "chr1:100:A:G",
             susieFit = list(),
             topLoci = tl,
@@ -302,24 +202,8 @@ test_that("FineMappingRow cvResult defaults to NULL and rejects non-list", {
 })
 
 # ===========================================================================
-# TwasWeightsRow
+# show(), credibleSets and adjustPips on one row
 # ===========================================================================
-
-test_that("QtlFineMappingResult: rejects rows that are not row payloads", {
-    expect_error(
-        QtlFineMappingResult(
-            studyName = "s1",
-            context = "c1",
-            trait = "t1",
-            method = "susie",
-            entry = list("not_an_entry")
-        ),
-        "must be a fine-mapping row"
-    )
-})
-
-
-# === Tests migrated from test_showMethods.R (FineMappingRow) ===
 
 test_that("show.FineMappingRow reports variant count and CS count", {
     e_with_cs <- .sh_makeFmEntry(n = 3, with_cs = TRUE) # 2 distinct cs > 0
@@ -335,41 +219,31 @@ test_that("show.FineMappingRow reports variant count and CS count", {
         pip = c(0.1, 0.2),
         stringsAsFactors = FALSE
     )
-    e_no_cs <- fineMappingRow(
+    e_no_cs <- FineMappingRow(
         variantIds = c("chr9:100:A:G", "chr9:200:A:G"),
         susieFit = list(),
         topLoci = tl
     )
     out_no <- capture.output(show(e_no_cs))
     expect_true(any(grepl("0 credible sets", out_no)))
-})
 
-
-# === marginalEffects maxPval filter ===
-
-test_that("FineMappingRow: marginalEffects applies the maxPval filter", {
-    tl <- data.frame(
-        variant_id = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
-        pip = c(0.9, 0.5, 0.1),
-        marginal_p = c(0.001, 0.5, NA_real_),
-        stringsAsFactors = FALSE
+    # An empty row has no variants and so no sets.
+    empty <- FineMappingRow(
+        variantIds = character(0),
+        susieFit = list(pip = numeric(0)),
+        topLoci = data.frame(
+            variant_id = character(0),
+            pip = numeric(0),
+            stringsAsFactors = FALSE
+        )
     )
-    entry <- fineMappingRow(
-        variantIds = tl$variant_id,
-        susieFit = list(),
-        topLoci = tl
-    )
-    out <- .fmrRowMarginalEffects(entry, maxPval = 0.01)
-    # Drops the p = 0.5 row and the NA-p row; keeps only v1.
-    expect_equal(nrow(out), 1L)
-    expect_equal(out$variant_id, "chr1:100:A:G")
+    expect_output(show(empty), "0 variants, 0 credible sets")
 })
-
 
 # === credibleSets empty / cs-less topLoci projections ===
 
 test_that("FineMappingRow: credibleSets returns empty posterior view when topLoci is empty", {
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = character(0),
         susieFit = list(),
         topLoci = data.frame(
@@ -384,14 +258,13 @@ test_that("FineMappingRow: credibleSets returns empty posterior view when topLoc
     expect_true(all(c("variant_id", "pip") %in% names(res)))
 })
 
-
 test_that("FineMappingRow: credibleSets returns empty posterior view when the cs column is absent", {
     tl <- data.frame(
         variant_id = c("chr9:100:A:G", "chr9:200:A:G"),
         pip = c(0.1, 0.2),
         stringsAsFactors = FALSE
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = c("chr9:100:A:G", "chr9:200:A:G"),
         susieFit = list(),
         topLoci = tl
@@ -401,7 +274,6 @@ test_that("FineMappingRow: credibleSets returns empty posterior view when the cs
     expect_equal(nrow(res), 0L)
 })
 
-
 # === adjustPips: missing alpha + mu2-driven posterior recompute ===
 
 test_that("FineMappingRow: adjustPips errors when susieFit lacks alpha", {
@@ -410,7 +282,7 @@ test_that("FineMappingRow: adjustPips errors when susieFit lacks alpha", {
         pip = c(0.6, 0.4),
         stringsAsFactors = FALSE
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         susieFit = list(),
         topLoci = tl
@@ -420,7 +292,6 @@ test_that("FineMappingRow: adjustPips errors when susieFit lacks alpha", {
         "no `alpha` matrix"
     )
 })
-
 
 test_that("FineMappingRow: adjustPips subsets mu2 and recomputes posterior_sd", {
     vids <- paste0("chr1:", 1:5, ":A:G")
@@ -433,7 +304,7 @@ test_that("FineMappingRow: adjustPips subsets mu2 and recomputes posterior_sd", 
     pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
     mu <- matrix(rnorm(L * p), L, p)
     mu2 <- mu^2 + 1 # plausible second moment (>= mean^2)
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = vids,
         susieFit = list(
             pip = pip,
@@ -488,7 +359,7 @@ test_that("credibleSets / topLoci minPurity filters CS by purity, independent of
     )
     attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
     tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
-    e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
+    e <- FineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
 
     # credibleSets: minPurity is orthogonal to coverage -> keeps only the pure CS members
     expect_equal(nrow(.fmrRowCs(e, coverage = 0.95)), 4L)
@@ -504,7 +375,6 @@ test_that("credibleSets / topLoci minPurity filters CS by purity, independent of
     )
     expect_equal(nrow(.fmrRowTopLoci(e, signalCutoff = 0)), 5L) # default (NULL) unchanged
 })
-
 
 # ===========================================================================
 # adjustPips: renormalize the stored alpha (prior-correct), reject
@@ -534,7 +404,7 @@ test_that("credibleSets / topLoci minPurity filters CS by purity, independent of
     list(
         lbf = lbf,
         alpha = alpha,
-        entry = fineMappingRow(
+        entry = FineMappingRow(
             variantIds = vids,
             susieFit = list(
                 pip = pip,
@@ -589,7 +459,7 @@ test_that("adjustPips refuses an Omega-weighted (susieInf / susieAsh) fit", {
     entry <- .makeAdjustEntry(vids)
     fit <- .fmrPartsSusieFit(entry)
     fit$theta <- rep(0.1, length(vids))
-    weighted <- fineMappingRow(
+    weighted <- FineMappingRow(
         variantIds = vids,
         susieFit = fit,
         topLoci = .fmrRowTopLoci(entry, raw = TRUE)
@@ -606,7 +476,7 @@ test_that("adjustPips keeps the null_weight column in the renormalization", {
     raw <- matrix(runif(L * (p + 1)), L, p + 1)
     alpha <- raw / rowSums(raw)
     pip <- as.numeric(1 - apply(1 - alpha[, seq_len(p), drop = FALSE], 2, prod))
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = vids,
         susieFit = list(pip = pip, alpha = alpha, null_index = p + 1L),
         topLoci = data.frame(
@@ -634,12 +504,56 @@ test_that("adjustPips errors when alpha's width matches neither variant count", 
     entry <- .makeAdjustEntry(vids)
     fit <- .fmrPartsSusieFit(entry)
     fit$alpha <- cbind(fit$alpha, fit$alpha)
-    broken <- fineMappingRow(
+    broken <- FineMappingRow(
         variantIds = vids,
         susieFit = fit,
         topLoci = .fmrRowTopLoci(entry, raw = TRUE)
     )
     expect_error(adjustPips(broken, vids[1:3]), "8 columns but the entry has 4")
+})
+
+test_that("adjustPips restricts a narrowed row's fit by the fit's own ids", {
+    # The row holds variants 3:6 of the six its fit was made with. The kept
+    # ones are found among the fit's columns by id, not by their position in
+    # the row, which would pick the fit's columns 1:2.
+    vids <- paste0("chr1:", 1:6, ":A:G")
+    entry <- .makeAdjustEntry(vids)
+    narrowed <- methods::new(
+        "FineMappingRow",
+        variants = variants(entry)[3:6],
+        susieFit = susieFit(entry),
+        fitVariants = vids
+    )
+    adj <- adjustPips(narrowed, vids[3:4])
+    alpha <- susieFit(entry)$alpha[, 3:4]
+    expect_equal(variantIds(adj), vids[3:4])
+    expect_equal(unname(susieFit(adj)$alpha), unname(alpha / rowSums(alpha)))
+    expect_equal(pecotmr:::.fmRowFitVariants(adj), vids[3:4])
+})
+
+test_that("adjustPips refuses a row holding a variant its fit never had", {
+    fitted <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    expect_equal(
+        pecotmr:::.adjustPipsFitIdx(fitted[c(3L, 1L)], fitted),
+        c(3L, 1L)
+    )
+    expect_error(
+        pecotmr:::.adjustPipsFitIdx(c(fitted[[1L]], "chr1:900:A:G"), fitted),
+        "1 of the row's variants are not among the 3 its fit was made with"
+    )
+})
+
+test_that("a row records its fit's variants only when it carries a fit", {
+    vids <- paste0("chr1:", 1:3, ":A:G")
+    tl <- data.frame(variant_id = vids, pip = c(0.5, 0.3, 0.2))
+    fitted <- FineMappingRow(vids, list(pip = tl$pip), tl)
+    expect_equal(pecotmr:::.fmRowFitVariants(fitted), vids)
+    cvOnly <- FineMappingRow(vids, NULL, tl, cvResult = list(r2 = 0.1))
+    expect_equal(pecotmr:::.fmRowFitVariants(cvOnly), vids)
+    expect_equal(
+        pecotmr:::.fmRowFitVariants(FineMappingRow(vids, list(), tl)),
+        character(0)
+    )
 })
 
 test_that("adjustPips recomputes credible sets instead of remapping indices", {
@@ -650,7 +564,7 @@ test_that("adjustPips recomputes credible sets instead of remapping indices", {
     lbf <- matrix(rnorm(L * p, sd = 3), L, p, dimnames = list(NULL, vids))
     alpha <- lbfToAlpha(lbf)
     pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = vids,
         susieFit = list(
             pip = pip,
@@ -699,7 +613,7 @@ test_that("adjustPips subsets mvsusie-shaped coef rows and 3-D clfsr", {
     fit <- .fmrPartsSusieFit(entry)
     fit$coef <- matrix(seq_len(p * R), nrow = p, ncol = R)
     fit$clfsr <- array(seq_len(L * p * R), dim = c(L, p, R))
-    mv <- fineMappingRow(
+    mv <- FineMappingRow(
         variantIds = vids,
         susieFit = fit,
         topLoci = .fmrRowTopLoci(entry, raw = TRUE)
@@ -713,16 +627,6 @@ test_that("adjustPips subsets mvsusie-shaped coef rows and 3-D clfsr", {
         susieFit(adj)$clfsr,
         fit$clfsr[, keepIdx, , drop = FALSE]
     )
-})
-
-test_that(".fmrRowTopLoci(raw = TRUE) returns the stored table verbatim", {
-    vids <- paste0("chr1:", 1:4, ":A:G")
-    entry <- .makeAdjustEntry(vids)
-    raw <- .fmrRowTopLoci(entry, raw = TRUE)
-    expect_equal(nrow(raw), length(vids))
-    expect_true(all(c("betahat", "sebetahat") %in% names(raw)))
-    # The default view filters by pip and projects; raw does neither.
-    expect_false(identical(names(raw), names(.fmrRowTopLoci(entry))))
 })
 
 # ===========================================================================
@@ -741,7 +645,7 @@ test_that("lbf returns the wide variant x effect lbf matrix", {
         lbf_variable = lbf
     )
     class(fit) <- "susie"
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = vids,
         susieFit = fit,
         topLoci = data.frame(
@@ -758,7 +662,7 @@ test_that("lbf returns the wide variant x effect lbf matrix", {
 })
 
 test_that("lbf is empty when the fit carries no lbf matrix", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(pip = 0.5),
         topLoci = data.frame(
@@ -768,48 +672,6 @@ test_that("lbf is empty when the fit carries no lbf matrix", {
         )
     )
     expect_equal(nrow(.fmrRowLbf(e)), 0L)
-})
-
-test_that("lbf aggregates over a collection, carrying identity + NA-filling ragged effects", {
-    vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
-    mkEntry <- function(maxNumSingleEffects) {
-        lbf <- matrix(
-            seq_len(maxNumSingleEffects * length(vids)),
-            nrow = maxNumSingleEffects,
-            byrow = TRUE
-        ) # L x p
-        fit <- structure(
-            list(lbf_variable = lbf, pip = rep(0.3, length(vids))),
-            class = "susie"
-        )
-        fineMappingRow(
-            variantIds = vids,
-            susieFit = fit,
-            topLoci = data.frame(
-                variant_id = vids,
-                pip = rep(0.3, length(vids)),
-                stringsAsFactors = FALSE
-            )
-        )
-    }
-    # Two entries with different effect counts (L = 2 vs 3) exercise the NA-fill of
-    # the ragged lbf_L<k> columns described in the collection method's contract.
-    res <- QtlFineMappingResult(
-        studyName = c("s1", "s1"),
-        context = c("brain", "blood"),
-        trait = c("g", "g"),
-        method = c("susie", "susie"),
-        entry = list(mkEntry(2L), mkEntry(3L))
-    )
-    w <- lbf(res)
-    expect_true(all(
-        c("study", "context", "trait", "method", "variant_id") %in% names(w)
-    ))
-    expect_equal(nrow(w), 6L) # 2 entries x 3 variants
-    expect_setequal(unique(w$context), c("brain", "blood"))
-    expect_true("lbf_L3" %in% names(w))
-    expect_true(all(is.na(w$lbf_L3[w$context == "brain"]))) # L = 2 entry: no effect 3
-    expect_true(all(!is.na(w$lbf_L3[w$context == "blood"]))) # L = 3 entry: present
 })
 
 # ===========================================================================
@@ -858,7 +720,7 @@ test_that("credibleSetSummary returns one row per CS with size/purity/V/logBF/le
     )
     attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
     tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
-    e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
+    e <- FineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
 
     s <- .fmrRowCredibleSetSummary(e)
     s <- s[order(s$cs), , drop = FALSE]
@@ -900,7 +762,7 @@ test_that("credibleSetSummary is empty when there are no credible sets", {
     )
     attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
     tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
-    e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
+    e <- FineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
     expect_equal(nrow(.fmrRowCredibleSetSummary(e)), 0L)
 })
 
@@ -916,7 +778,7 @@ test_that("credibleSetSummary is empty when the requested coverage column is abs
         cs_95_purity = c(0.9, 0.9),
         stringsAsFactors = FALSE
     )
-    e <- fineMappingRow(variantIds = vn, susieFit = list(x = 1), topLoci = tl)
+    e <- FineMappingRow(variantIds = vn, susieFit = list(x = 1), topLoci = tl)
     expect_equal(nrow(.fmrRowCredibleSetSummary(e, coverage = 0.99)), 0L)
 })
 
@@ -932,7 +794,7 @@ test_that("credibleSetSummary reports NA cs_log_bf when the fit carries no lbf m
         cs_95_purity = c(0.88, 0.88),
         stringsAsFactors = FALSE
     )
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = vn,
         susieFit = list(trimmed = TRUE),
         topLoci = tl
@@ -957,36 +819,8 @@ test_that("credibleSetSummary reports NA cs_log_bf when the effect's lbf row is 
         stringsAsFactors = FALSE
     )
     fit <- structure(list(lbf_variable = lbf), class = "susie")
-    e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
+    e <- FineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
     expect_true(is.na(.fmrRowCredibleSetSummary(e)$cs_log_bf))
-})
-
-test_that("credibleSetSummary aggregates across a collection with entry identity", {
-    mkEntry <- function() {
-        vn <- c("chr1:100:A:G", "chr1:200:C:T")
-        tl <- data.frame(
-            variant_id = vn,
-            pip = c(0.7, 0.2),
-            logBF = c(2.5, 0.3),
-            cs_95 = c("susie_1", "susie_1"),
-            cs_95_purity = c(0.9, 0.9),
-            stringsAsFactors = FALSE
-        )
-        fineMappingRow(variantIds = vn, susieFit = list(x = 1), topLoci = tl)
-    }
-    res <- QtlFineMappingResult(
-        studyName = c("s", "s"),
-        context = c("brain", "blood"),
-        trait = c("g", "g"),
-        method = c("susie", "susie"),
-        entry = list(mkEntry(), mkEntry())
-    )
-    s <- credibleSetSummary(res)
-    expect_true(all(
-        c("study", "context", "trait", "method", "cs") %in% names(s)
-    ))
-    expect_equal(nrow(s), 2L) # one CS per entry
-    expect_setequal(unique(s$context), c("brain", "blood"))
 })
 
 # ===========================================================================
@@ -994,65 +828,10 @@ test_that("credibleSetSummary aggregates across a collection with entry identity
 # test_fsusieAccessors.R when R/fsusieAccessors.R was folded in)
 # ===========================================================================
 
-.fsa_makeFit <- function(post_processing = "none") {
-    set.seed(1)
-    n <- 150L
-    p <- 24L
-    J <- 16L
-    X <- matrix(
-        rnorm(n * p),
-        n,
-        p,
-        dimnames = list(
-            paste0("s", seq_len(n)),
-            paste0("chr1:", seq_len(p) * 100, ":A:G")
-        )
-    )
-    b1 <- sin(seq(0, 2 * pi, length.out = J))
-    b2 <- cos(seq(0, pi, length.out = J))
-    Y <- X[, 3] %o% b1 + X[, 10] %o% b2 + matrix(rnorm(n * J, sd = 0.3), n, J)
-    colnames(Y) <- paste0("f", seq_len(J))
-    suppressWarnings(fsusieR::susiF(
-        X = X,
-        Y = Y,
-        pos = seq_len(J),
-        L = 5,
-        post_processing = post_processing,
-        verbose = FALSE
-    ))
-}
-.fsa_entry <- function(fit, purityVal = 0.85) {
-    vids <- names(fit$csd_X)
-    pipv <- if (!is.null(fit$pip)) {
-        as.numeric(fit$pip)
-    } else {
-        rep(0.1, length(vids))
-    }
-    # Canonical CS labels + purity from the fit's CS membership, mirroring what
-    # The fsusie post-processing writes into a real FMR's topLoci
-    # (cs_95 / cs_95_purity).
-    cs95 <- rep("fsusie_0", length(vids))
-    for (l in seq_along(fit$cs)) {
-        idx <- fit$cs[[l]]
-        if (is.numeric(idx)) {
-            idx <- as.integer(idx)
-        }
-        cs95[idx] <- paste0("fsusie_", l)
-    }
-    tl <- data.frame(
-        variant_id = vids,
-        pip = pipv,
-        cs_95 = cs95,
-        cs_95_purity = ifelse(cs95 != "fsusie_0", purityVal, 0),
-        stringsAsFactors = FALSE
-    )
-    fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
-}
-
 test_that("fsusieCredibleBand returns a long effect + band table (lower <= effect <= upper)", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
-    cb <- .fmrRowFsusieCredibleBand(.fsa_entry(.fsa_makeFit()))
+    cb <- .fmrRowFsusieCredibleBand(.fsa_entry(.fsa_fits$none))
     expect_named(
         cb,
         c("cs", "chrom", "pos", "effect", "lower", "upper", "halfwidth")
@@ -1068,7 +847,7 @@ test_that("trimmed fSuSiE keeps curves, bands and coloc inputs", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     for (mode in c("none", "TI")) {
-        fit <- .fsa_makeFit(mode)
+        fit <- .fsa_fits[[mode]]
         expectedFit <- pecotmr:::.fsusiePopulateCredibleBand(fit)
         tables <- list(list(sets = list(cs = list())))
         trimmed <- pecotmr:::trimFinemappingFit(
@@ -1111,12 +890,11 @@ test_that("trimmed fSuSiE keeps curves, bands and coloc inputs", {
     }
 })
 
-
 test_that("fsusieAffectedRegions returns a GRanges with cs / purity / direction", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     gr <- .fmrRowFsusieAffectedRegions(.fsa_entry(
-        .fsa_makeFit(),
+        .fsa_fits$none,
         purityVal = 0.85
     ))
     expect_s4_class(gr, "GRanges")
@@ -1132,7 +910,7 @@ test_that("fsusieAffectedRegions returns a GRanges with cs / purity / direction"
 })
 
 test_that("fsusie accessors degrade to empty for a non-fSuSiE / trimmed fit (no wavelet slots)", {
-    e <- fineMappingRow(
+    e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(pip = 0.5),
         topLoci = data.frame(
@@ -1147,7 +925,7 @@ test_that("fsusie accessors degrade to empty for a non-fSuSiE / trimmed fit (no 
 
 # ---- fsusieTraitEffects ---------------------------------------------
 
-# The pipeline stamps trait_positions onto the stored fit (jointEngine.R) and
+# The pipeline records trait_positions on the stored fit (jointEngine.R) and
 # keeps the matching names in the row's jointTraits column; rebuild that pairing
 # here, since .fsa_makeFit() returns the raw susiF fit.
 .fsa_jointFit <- function(fit, pos) {
@@ -1158,7 +936,7 @@ test_that("fsusie accessors degrade to empty for a non-fSuSiE / trimmed fit (no 
 test_that("fsusieTraitEffects evaluates the curve at each joint trait", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
-    fit <- .fsa_makeFit()
+    fit <- .fsa_fits$none
     nTrait <- length(fit$outing_grid)
     # Positions BETWEEN grid points, so the interpolation is doing real work.
     pos <- as.numeric(seq_len(nTrait)) + 0.5
@@ -1210,7 +988,7 @@ test_that("fsusieTraitEffects evaluates the curve at each joint trait", {
 test_that("fsusieTraitEffects refuses a fit whose positions and names disagree", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
-    fit <- .fsa_makeFit()
+    fit <- .fsa_fits$none
     res <- QtlFineMappingResult(
         studyName = "s",
         context = "brain",
@@ -1231,7 +1009,7 @@ test_that("fsusieTraitEffects returns zero rows for a non-fsusie fit", {
         context = "brain",
         trait = "g",
         method = "susie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             variantIds = "chr1:100:A:G",
             susieFit = list(pip = 0.5),
             topLoci = data.frame(variant_id = "chr1:100:A:G", pip = 0.5)
@@ -1240,65 +1018,6 @@ test_that("fsusieTraitEffects returns zero rows for a non-fsusie fit", {
     te <- fsusieTraitEffects(res)
     expect_equal(nrow(te), 0L)
     expect_true(all(c("cs", "jointTrait", "traitPos", "effect") %in% names(te)))
-})
-
-test_that("fsusieCredibleBand + fsusieAffectedRegions aggregate across a collection", {
-    skip_if_not_installed("fsusieR")
-    skip_if_not_installed("wavethresh")
-    fit <- .fsa_makeFit() # deterministic; reuse for both rows
-    res <- QtlFineMappingResult(
-        studyName = c("s", "s"),
-        context = c("brain", "blood"),
-        trait = c("g", "g"),
-        method = c("fsusie", "fsusie"),
-        entry = list(.fsa_entry(fit), .fsa_entry(fit))
-    )
-
-    cb <- fsusieCredibleBand(res)
-    expect_true(all(
-        c(
-            "study",
-            "context",
-            "trait",
-            "method",
-            "cs",
-            "effect",
-            "lower",
-            "upper"
-        ) %in%
-            names(cb)
-    ))
-    expect_gt(nrow(cb), 0)
-    expect_setequal(unique(cb$context), c("brain", "blood"))
-
-    gr <- fsusieAffectedRegions(res)
-    expect_s4_class(gr, "GRanges")
-    expect_gt(length(gr), 0)
-    expect_true(all(
-        c("study", "context", "trait", "cs", "purity", "direction") %in%
-            names(S4Vectors::mcols(gr))
-    ))
-    expect_setequal(unique(S4Vectors::mcols(gr)$context), c("brain", "blood"))
-})
-
-test_that("fsusieAffectedRegions on a collection of non-fSuSiE entries is an empty GRanges", {
-    e <- fineMappingRow(
-        variantIds = "chr1:100:A:G",
-        susieFit = list(pip = 0.5),
-        topLoci = data.frame(
-            variant_id = "chr1:100:A:G",
-            pip = 0.5,
-            stringsAsFactors = FALSE
-        )
-    )
-    res <- QtlFineMappingResult(
-        studyName = "s",
-        context = "c",
-        trait = "t",
-        method = "susie",
-        entry = list(e)
-    )
-    expect_equal(length(fsusieAffectedRegions(res)), 0L)
 })
 
 test_that(".fsusieChrom returns NA when the fit has no named variants", {
@@ -1329,7 +1048,7 @@ test_that(".fsusieCsMapFromTopLoci falls back to index labels when topLoci lacks
     list(fitted_wc2 = 1, fitted_func = list(1), outing_grid = 1:2, alpha = 1)
 }
 .fsa_bareEntry <- function() {
-    fineMappingRow(
+    FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = .fsa_fakeFit(),
         topLoci = data.frame(
@@ -1434,7 +1153,7 @@ test_that("credibleSets warns when the coverage has no purity column to filter o
     # outside -- and a coverage with no sets returns earlier, so that route
     # cannot reach it either.
     tl$cs_95_purity <- NULL
-    e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
+    e <- FineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
 
     expect_warning(
         .fmrRowCs(e, coverage = 0.95, minPurity = 0.8),
@@ -1455,7 +1174,7 @@ test_that("credibleSets warns when the coverage has no purity column to filter o
 test_that("topLoci must have one row per supplied variant", {
     vids <- .fmr_vids(3L)
     expect_error(
-        fineMappingRow(
+        FineMappingRow(
             variantIds = vids,
             susieFit = list(fake = TRUE),
             topLoci = data.frame(
@@ -1473,7 +1192,7 @@ test_that("topLoci must list the variants in the same order", {
     # order check catches it.
     vids <- .fmr_vids(3L)
     expect_error(
-        fineMappingRow(
+        FineMappingRow(
             variantIds = vids,
             susieFit = list(fake = TRUE),
             topLoci = data.frame(
@@ -1636,7 +1355,6 @@ test_that("a fit with no stored sets falls back to the per-variant column", {
     expect_equal(s$cs, "susie_1")
 })
 
-
 # ===========================================================================
 # Purity filtering, coverage defaults and column projection
 # ===========================================================================
@@ -1668,11 +1386,6 @@ test_that("an unusable coverage falls back to 0.95", {
     expect_equal(pecotmr:::.adjustPipsCoverage(NULL), 0.95)
 })
 
-test_that("the credible-set prefix defaults to cs with no method column", {
-    tl <- tibble(variant_id = c("a", "b"), pip = c(0.1, 0.9))
-    expect_equal(pecotmr:::.adjustPipsMethodLabel(tl), "cs")
-})
-
 test_that("projecting an absent column yields typed NAs of the right length", {
     # One NA per row, of the requested type, so the column binds against the
     # rest of the table instead of collapsing it.
@@ -1685,7 +1398,6 @@ test_that("projecting an absent column yields typed NAs of the right length", {
     expect_equal(pecotmr:::.tlCol(tl, "nope", "integer"), rep(NA_integer_, 2L))
     expect_equal(pecotmr:::.tlCol(tl, "pip", "numeric"), c(0.1, 0.9))
 })
-
 
 # ===========================================================================
 # Credible-set summary assembly and PIP adjustment
@@ -1831,30 +1543,6 @@ test_that(".adjustPipsMethodLabel defaults to 'cs'", {
     )
 })
 
-test_that("show(FineMappingRow) reports zero sets for an empty row", {
-    empty <- fineMappingRow(
-        variantIds = character(0),
-        susieFit = list(pip = numeric(0)),
-        topLoci = data.frame(
-            variant_id = character(0),
-            pip = numeric(0),
-            stringsAsFactors = FALSE
-        )
-    )
-    expect_output(show(empty), "0 variants, 0 credible sets")
-    withCs <- fineMappingRow(
-        variantIds = c("chr1:1:A:G", "chr1:2:C:T"),
-        susieFit = list(pip = c(0.9, 0.1)),
-        topLoci = data.frame(
-            variant_id = c("chr1:1:A:G", "chr1:2:C:T"),
-            pip = c(0.9, 0.1),
-            cs_95 = c("L1_1", "L1_0"),
-            stringsAsFactors = FALSE
-        )
-    )
-    expect_output(show(withCs), "2 variants, 1 credible sets")
-})
-
 test_that(".csLog10Bf and .csMeanEffect return NA, never -Inf or NaN", {
     # Both previously disagreed with their own missing-column branch: an empty
     # or all-NA column yielded -Inf / NaN from max() / mean() while a missing
@@ -1927,7 +1615,7 @@ test_that("an empty credible band still declares halfwidth", {
 
 # @noRd
 .fte_row <- function(fit) {
-    fineMappingRow(
+    FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = fit,
         topLoci = data.frame(
@@ -2012,7 +1700,7 @@ test_that("a credible-set label matching no fit effect claims none", {
 })
 
 test_that("a NULL posterior table projects to an empty GRanges", {
-    gr <- .fmeTopLociGRanges(NULL)
+    gr <- .variantTableGRanges(NULL)
     expect_s4_class(gr, "GRanges")
     expect_length(gr, 0L)
 })
@@ -2026,7 +1714,7 @@ test_that("a fit whose prior variances all vanished labels nothing", {
     colnames(lbf) <- vids
     alpha <- lbfToAlpha(lbf)
     pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = vids,
         susieFit = list(
             pip = pip,

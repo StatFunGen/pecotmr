@@ -204,6 +204,13 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
 # @noRd
 .jgN <- function(g) g@N
 
+# The LD reference a group was fitted against: a summary-statistics group's
+# own, NULL for an individual-level one, whose LD comes from its genotypes.
+# @noRd
+.jgLdRefOf <- function(g) {
+    if (methods::is(g, "SumStatsJointGroup")) .jgLdRef(g) else NULL
+}
+
 # The group restricted to the conditions `keep` marks: each condition's Y / Z
 # column goes with it, as does its trait position or sample size where those
 # are per condition. NULL when none is kept. Rebuilt through initialize(), so

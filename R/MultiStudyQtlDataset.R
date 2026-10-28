@@ -1,11 +1,12 @@
 # =============================================================================
 # MultiStudyQtlDataset S4 class
 # -----------------------------------------------------------------------------
-# Multi-study container that holds a named list of individual-level
-# QtlDataset objects plus an optional QtlSumStats collection for
-# summary-statistic-only studies. Used as the entry point for
-# multi-study pipelines (fineMappingPipeline, twasWeightsPipeline) that
-# orchestrate joint or per-study analyses across multiple cohorts.
+# Multi-study container: a SimpleList of individual-level QtlDataset objects,
+# keyed by study, plus an optional QtlSumStats collection for
+# summary-statistic-only studies. Used as the entry point for multi-study
+# pipelines (fineMappingPipeline, twasWeightsPipeline) that orchestrate joint
+# or per-study analyses across multiple cohorts. Being a List, it subsets,
+# indexes and maps like one: ms["s1"], ms[["s1"]], names(ms), lapply(ms, f).
 # =============================================================================
 
 #' @include QtlDataset.R qtlSumStats.R
@@ -21,6 +22,12 @@ setClassUnion("QtlSumStats_OR_NULL", c("QtlSumStats", "NULL"))
 #'   \code{QtlSumStats} collection of summary-statistic-only studies. Used as
 #'   the input to multi-study fine-mapping and colocboost-style analyses.
 #'
+#' It is a \code{\link[S4Vectors]{SimpleList}} of the individual-level
+#' studies, keyed by study name, so \code{length()}, \code{names()},
+#' \code{[[} and \code{[} address them as on any Bioconductor list;
+#' \code{[} keeps the summary-statistic studies whole and still requires two
+#' studies in total.
+#'
 #' At least two studies must be present in total, counting \code{qtlDatasets}
 #' entries plus the studies in \code{sumStats}.
 #'
@@ -29,17 +36,14 @@ setClassUnion("QtlSumStats_OR_NULL", c("QtlSumStats", "NULL"))
 #' validity). No cross-checking is performed against \code{sumStats} variant
 #' positions, since summary statistics are already computed and cannot be
 #' re-aligned at construction time.
-#' @slot qtlDatasets A named list of \code{QtlDataset} objects, keyed by study
-#'   identifier.
 #' @slot sumStats An optional \code{QtlSumStats} carrying additional
 #'   summary-statistic-only studies. \code{NULL} when absent.
 #' @export
 setClass(
     "MultiStudyQtlDataset",
-    representation(
-        qtlDatasets = "list",
-        sumStats = "QtlSumStats_OR_NULL"
-    ),
+    contains = "SimpleList",
+    representation(sumStats = "QtlSumStats_OR_NULL"),
+    prototype(elementType = "QtlDataset"),
     validity = function(object) .validateMultiStudyQtlDataset(object)
 )
 
@@ -48,9 +52,10 @@ setClass(
 # @noRd
 .validateMultiStudyQtlDataset <- function(object) {
     # Each stage only makes sense once the previous one holds: the study count
-    # reads slots the type checks just validated, and trait consistency reads
-    # across the studies the count check just confirmed.
-    slotErrors <- .msqdCheckDatasets(object@qtlDatasets)
+    # reads the list the first check just validated, and trait consistency
+    # reads across the studies the count check just confirmed. The element
+    # type is SimpleList's own check (elementType), which runs first.
+    slotErrors <- .msqdCheckDatasets(as.list(object))
     if (length(slotErrors) > 0L) {
         return(slotErrors)
     }
@@ -70,15 +75,22 @@ setClass(
     if (!isTRUE(res)) {
         return(str_c("'qtlDatasets' ", res))
     }
-    .msqdCheckDatasetTypes(qtlDatasets)
+    NULL
 }
 
+# SimpleList refuses an element of another class as well, but without naming
+# it, so the constructor checks first.
 # @noRd
-.msqdCheckDatasetTypes <- function(qtlDatasets) {
-    if (any(!map_lgl(qtlDatasets, .msqdIsQtlDataset))) {
-        return("every element of 'qtlDatasets' must be a QtlDataset")
+.msqdAssertDatasetTypes <- function(qtlDatasets) {
+    bad <- names(qtlDatasets)[!map_lgl(qtlDatasets, .msqdIsQtlDataset)]
+    if (length(bad) == 0L) {
+        return(invisible(NULL))
     }
-    NULL
+    abort(glue(
+        "every element of `qtlDatasets` must be a QtlDataset; ",
+        "{str_flatten(bad, ', ')} {if (length(bad) == 1L) 'is' else 'are'} ",
+        "not."
+    ))
 }
 
 # @noRd
@@ -89,7 +101,7 @@ setClass(
 # At least 2 studies in total (individual-level + summary-statistic).
 # @noRd
 .msqdCheckStudyCount <- function(object) {
-    nQtl <- length(object@qtlDatasets)
+    nQtl <- length(object)
     nSumstats <- if (is.null(object@sumStats)) {
         0L
     } else {
@@ -109,12 +121,12 @@ setClass(
 # identical rowRanges.
 # @noRd
 .msqdCheckTraitConsistency <- function(object) {
-    if (length(object@qtlDatasets) < 2L) {
+    if (length(object) < 2L) {
         return(NULL)
     }
-    traitRanges <- map(object@qtlDatasets, .msqdTraitRanges)
+    traitRanges <- map(as.list(object), .msqdTraitRanges)
     pairs <- utils::combn(seq_along(traitRanges), 2L)
-    dsNames <- names(object@qtlDatasets)
+    dsNames <- names(object)
     list_c(compact(map(
         seq_len(ncol(pairs)),
         .msqdPairErrors,
@@ -154,7 +166,7 @@ setClass(
 # One context's (trait, range) pairs in row order.
 # @noRd
 .msqdContextTraitRanges <- function(ctx, qd) {
-    se <- molecularTraits(qd, ctx)
+    se <- .qtlContextSe(qd, ctx)
     map(
         seq_along(rownames(se)),
         .msqdTraitRangePair,
@@ -184,10 +196,10 @@ setClass(
 # TRUE when trait `tid`'s ranges match across the two datasets.
 # @noRd
 .msqdRangesEqual <- function(tid, a, b) {
-    isTRUE(all.equal(
-        canonChrom(GenomicRanges::seqnames(a[[tid]])),
-        canonChrom(GenomicRanges::seqnames(b[[tid]]))
-    )) &&
+    identical(
+        as.character(GenomicRanges::seqnames(a[[tid]])),
+        as.character(GenomicRanges::seqnames(b[[tid]]))
+    ) &&
         GenomicRanges::start(a[[tid]]) == GenomicRanges::start(b[[tid]]) &&
         GenomicRanges::end(a[[tid]]) == GenomicRanges::end(b[[tid]])
 }
@@ -242,18 +254,59 @@ setClass(
 #' @export
 MultiStudyQtlDataset <- function(qtlDatasets, sumStats = NULL) {
     assertList(qtlDatasets, min.len = 1L, names = "unique")
-    obj <- new(
+    .msqdAssertDatasetTypes(qtlDatasets)
+    new(
         "MultiStudyQtlDataset",
-        qtlDatasets = qtlDatasets,
+        listData = qtlDatasets,
         sumStats = sumStats
     )
-    validObject(obj)
-    obj
 }
 
-#' @rdname qtlDatasets
+# Selecting studies keeps the summary-statistic ones whole, and re-checks the
+# result: the stock List subset does not run validity, and a selection below
+# two studies in total is not a multi-study dataset.
+setMethod("extractROWS", "MultiStudyQtlDataset", function(x, i) {
+    ans <- methods::callNextMethod()
+    validObject(ans)
+    ans
+})
+
+# Before it became a SimpleList the studies sat in a `qtlDatasets` slot, which
+# an object saved then still carries as an attribute; either way they are
+# rebuilt through the constructor, each one updated first.
+#' @rdname updateObject-methods
 #' @export
-setMethod("qtlDatasets", "MultiStudyQtlDataset", function(x) x@qtlDatasets)
+setMethod(
+    "updateObject",
+    "MultiStudyQtlDataset",
+    function(object, ..., verbose = FALSE) {
+        if (isTRUE(verbose)) {
+            message("updateObject(object = 'MultiStudyQtlDataset')")
+        }
+        studies <- attr(object, "qtlDatasets", exact = TRUE) %||%
+            attr(object, "listData", exact = TRUE)
+        sumStats <- .msqdSavedSumStats(object)
+        MultiStudyQtlDataset(
+            qtlDatasets = map(studies, updateObject, ..., verbose = verbose),
+            sumStats = if (is.null(sumStats)) {
+                NULL
+            } else {
+                updateObject(sumStats, ..., verbose = verbose)
+            }
+        )
+    }
+)
+
+# The summary statistics an object saved under any earlier definition holds,
+# NULL when it holds none. slot() rather than attr(): R stores a NULL slot as
+# a placeholder symbol, which attr() hands back unconverted.
+# @noRd
+.msqdSavedSumStats <- function(object) {
+    if (is.null(attr(object, "sumStats", exact = TRUE))) {
+        return(NULL)
+    }
+    methods::slot(object, "sumStats")
+}
 
 #' @rdname sumStats
 #' @export
@@ -266,7 +319,7 @@ setMethod("sumStats", "MultiStudyQtlDataset", function(x) x@sumStats)
 #' @rdname studyName
 #' @export
 setMethod("studyName", "MultiStudyQtlDataset", function(x) {
-    fromQtl <- names(x@qtlDatasets)
+    fromQtl <- names(x)
     fromSs <- if (is.null(x@sumStats)) {
         character(0)
     } else {
@@ -275,11 +328,10 @@ setMethod("studyName", "MultiStudyQtlDataset", function(x) {
     unique(c(fromQtl, fromSs))
 })
 
-
 #' @rdname show-methods
 #' @export
 setMethod("show", "MultiStudyQtlDataset", function(object) {
-    nQtl <- length(object@qtlDatasets)
+    nQtl <- length(object)
     ssEntries <- if (is.null(object@sumStats)) {
         0L
     } else {
@@ -293,7 +345,7 @@ setMethod("show", "MultiStudyQtlDataset", function(object) {
     if (nQtl > 0L) {
         cat(glue(
             "  Individual-level studies: ",
-            "{str_flatten(names(object@qtlDatasets), ', ')}\n",
+            "{str_flatten(names(object), ', ')}\n",
             .trim = FALSE
         ))
     }

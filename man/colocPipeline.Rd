@@ -58,14 +58,16 @@ two different things.}
 
 \item{returnGwasFineMapping}{Logical. When \code{TRUE}, attach the
 fine-mapping result computed from \code{gwasInput} on the returned object
-as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.}
+as attribute \code{"gwasFineMapping"}: for a \code{GwasSumStats}, one fit
+per set of rows a first-side region reaches. Default \code{FALSE}.}
 
 \item{enrichment}{Optional data.frame of per-pair enrichment factors with
 columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
 \code{enrichment}, and optionally \code{gwasContext} / \code{gwasTrait}
-(which the join uses when present, and which
-\code{\link{qtlEnrichmentPipeline}} emits for a QTL outcome side). Output
-of \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
+/ \code{gwasMethod} / \code{qtlMethod} (which the join uses when
+present; \code{\link{qtlEnrichmentPipeline}} emits all four, the context
+and trait set for a QTL outcome side). Output of
+\code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
 scored by enloc rather than coloc: the priors come from that table's
 \code{colocP1} / \code{colocP2} / \code{colocP12} columns, and the
 report gains \code{RCP} and \code{LCP}. Pairs without a matching
@@ -80,7 +82,9 @@ enrichment row fall back to the baseline priors with a warning. Default
   missing variants in the GWAS \code{SumStats} and the QTL fine-mapping
   input has additional variants; (2) the GWAS fine-mapping result contains
   variants not present in the QTL fine-mapping result. Pass \code{FALSE} to
-  use the FMRs as supplied.
+  use the FMRs as supplied; each fit is then scored whole, so a row
+  narrowed since its fit warns (condition class
+  \code{pecotmrFitCoverage}).
 
   How much of each effect's posterior survived that restriction is reported
   per result row as \code{qtlRetainedMass} / \code{gwasRetainedMass}; a low
@@ -101,7 +105,7 @@ enrichment adjustment reads them too.}
 }
 \value{
 A \code{\linkS4class{ColocResult}}: one element per tested
-  (first-side credible set, second-side credible set, block) pair, holding
+  (first-side credible set, second-side credible set) pair, holding
   that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
   metadata carries the identity columns (\code{study}, \code{context},
   \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasContext},
@@ -120,9 +124,10 @@ A \code{\linkS4class{ColocResult}}: one element per tested
   is what readers of enloc output expect to find.
 
   Project it with \code{\link{colocPairs}} (the flat table this
-  pipeline used to return, also available as \code{as.data.frame}),
-  \code{\link{colocVariants}}, \code{\link{colocCredibleSets}} or
-  \code{\link{colocGenes}}.
+  pipeline used to return), \code{\link{colocVariants}},
+  \code{\link{colocCredibleSets}} or \code{\link{colocGenes}}. Its
+  \code{seqinfo()} names the genome build the two sides name; sides
+  naming different builds are refused.
 }
 \description{
 Per-region pipeline that pairs two fine-mapping result
@@ -178,10 +183,43 @@ This pipeline preserves all three.
   }
 }
 
+\section{A region over several LD blocks}{
+ Each first-side region is
+  colocalized with ONE fit per second-side study and method, however many
+  of a GWAS study's LD blocks it reaches -- scoring it against each block
+  separately would split one region into as many colocalizations as it
+  has blocks, each truncating the region's effects to one block's
+  variants.
+  \itemize{
+    \item A \code{GwasSumStats} is fine-mapped once per set of rows a
+          region reaches, their statistics stitched together on their one
+          LD reference (rows on different references are refused). A
+          region inside one block reads that block's fit.
+    \item A \code{GwasFineMappingResult} was fine-mapped block by block.
+          Assuming no LD between blocks, the blocks a region reaches
+          collapse into one fit: every block's effects, each confined to
+          its own block (a Bayes factor of zero elsewhere), numbered on
+          from the blocks before it in row order.
+  }
+  The fit's \code{blockId} is then the stretch the blocks' ranges cover,
+  as \code{"chrom_start_end"} (see \code{region} in
+  \code{\linkS4class{GwasSumStats}}).
+
+  A region's variants that lie outside every loaded block of a GWAS
+  study it overlaps are left out of that fit, a sign that a block it
+  reaches was not loaded. Where those blocks' ranges were given
+  (\code{regionGiven}), the variants lie in a block that was not loaded,
+  and that is an error. Where the ranges are the span of the GWAS
+  variants, the variants may only be ones the GWAS lacks, so more than one
+  in a row past a block is a warning.
+}
+
 \section{LD reference compatibility check}{
- If
-  \code{ldReference(qtlFineMappingResult)} is non-\code{NULL}, it must be
-  the same LD reference as the one on \code{gwasInput}.
+ Rows can sit on different LD
+  references, so the check is per pair of rows coloc scores against each
+  other -- a QTL row and a GWAS row whose regions overlap. Where the QTL
+  row carries a reference, it must be the same LD reference as the GWAS
+  row's; rows that are never paired may differ.
   The two must be the same kind of reference. Two genotype panels must
   share their samples and allele orientation; two \code{LdMatrix} objects
   must agree on the LD they share; two \code{GenotypeMixture} objects must
@@ -190,9 +228,9 @@ This pipeline preserves all three.
   two sides separately normally leaves each reference trimmed to its own
   surviving variants, and LD is looked up per variant, so a partial overlap
   only warns (once per session). No shared variant at all, or a mismatch of
-  any of those, is a hard error. When the first side's \code{ldReference} is
-  \code{NULL} (individual-level fit), the validation is skipped on that side
-  and the second side's panel is what the result carries forward.
+  any of those, is a hard error. When a first-side row has no reference
+  (individual-level fit), the validation is skipped for it and the second
+  side's panel is what the result carries forward for its pairs.
 }
 
 \examples{

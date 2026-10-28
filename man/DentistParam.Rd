@@ -13,7 +13,7 @@ DentistParam(
   nIter = 10,
   gPvalueThreshold = 0.05,
   duprThreshold = 0.99,
-  numThreads = 1,
+  BPPARAM = SerialParam(),
   correctChenEtAlBug = TRUE,
   seed = NULL
 )
@@ -33,7 +33,10 @@ Default \code{0.4}.}
 
 \item{duprThreshold}{Duplicate r-squared threshold. Default \code{0.99}.}
 
-\item{numThreads}{Number of CPU cores. Default \code{1}.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the
+threads DENTIST's OpenMP loops use when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+thread. Default \code{SerialParam()}.}
 
 \item{correctChenEtAlBug}{Logical; apply the Chen et al. correction.
 Default \code{TRUE}.}

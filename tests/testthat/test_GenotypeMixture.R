@@ -18,10 +18,12 @@ test_that("GenotypeMixture aligns its panels to the variants they share", {
     expect_named(comps, c("a", "b"))
     expect_equal(map_int(comps, ncol), c(a = 40L, b = 60L))
     expect_equal(map_int(comps, nrow), c(a = nrow(p$full), b = nrow(p$full)))
+    # The canonical ids the shared ranges render, not the panels' labels.
     expect_identical(
         variantIds(mix),
-        as.character(SummarizedExperiment::rowRanges(p$full)$SNP)
+        pecotmr:::.grVariantIds(SummarizedExperiment::rowRanges(p$full))
     )
+    expect_true(all(str_detect(variantIds(mix), "^chr21:[0-9]+:[ACGT]+:")))
     # Each panel records its allele coding against the first's; these two
     # halves of one panel code every variant alike.
     expect_true(all(pecotmr:::.gmSign(mix) == 1))
@@ -354,10 +356,12 @@ test_that("an LD statistic reads a mixture's blocks as LdMatrix ones", {
     gr <- SummarizedExperiment::rowRanges(p$full)
     pos <- GenomicRanges::start(gr)
     cuts <- list(1:100, 101:250)
-    blocks <- data.frame(
-        chrom = "chr21",
-        start = c(pos[[1L]], pos[[101L]]),
-        end = c(pos[[100L]], pos[[250L]])
+    blocks <- GenomicRanges::GRanges(
+        "chr21",
+        IRanges::IRanges(
+            c(pos[[1L]], pos[[101L]]),
+            c(pos[[100L]], pos[[250L]])
+        )
     )
     lazy <- buildLdScore(mix, ldBlocks = blocks, genome = "hg19")
     expect_identical(ldReference(lazy), mix)

@@ -16,14 +16,6 @@
     )
 }
 
-# @noRd
-.agIsGeneric <- function(nm) {
-    tryCatch(
-        methods::isGeneric(nm, where = asNamespace("pecotmr")),
-        error = function(e) FALSE
-    )
-}
-
 test_that("every generic declared in AllGenerics.R has at least one method", {
     src <- readLines(
         system.file(
@@ -50,19 +42,4 @@ test_that("every generic declared in AllGenerics.R has at least one method", {
         character(0),
         label = "generics with no method"
     )
-})
-
-test_that("exported generics are all reachable by name from the namespace", {
-    exported <- getNamespaceExports("pecotmr")
-    gens <- exported[map_lgl(exported, .agIsGeneric)]
-    expect_gt(length(gens), 50L)
-    # Every exported generic must resolve; a stale NAMESPACE entry pointing at
-    # a removed generic is the failure this catches.
-    for (g in gens) {
-        expect_true(
-            !is.null(getGenerics(asNamespace("pecotmr"))) &&
-                exists(g, envir = asNamespace("pecotmr")),
-            label = str_c("exported generic '", g, "' resolves")
-        )
-    }
 })

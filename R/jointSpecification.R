@@ -20,7 +20,7 @@
         return(unique(as.character(data$study)))
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        indStudies <- names(qtlDatasets(data))
+        indStudies <- names(data)
         ss <- sumStats(data)
         ssStudies <- if (is.null(ss)) {
             character(0)
@@ -59,7 +59,7 @@
         return("sumstats")
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        if (is_in(studyName, names(qtlDatasets(data)))) {
+        if (is_in(studyName, names(data))) {
             return("individual")
         }
         ss <- sumStats(data)
@@ -105,7 +105,7 @@
         )))
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        indDatasets <- qtlDatasets(data)
+        indDatasets <- as.list(data)
         ss <- sumStats(data)
         if (is.null(studyName)) {
             fromInd <- .spConcat(
@@ -137,7 +137,7 @@
 # The trait ids present in one context of a QtlDataset.
 # @noRd
 .spTraitsInContext <- function(context, data) {
-    rownames(molecularTraits(data, context))
+    rownames(.qtlContextSe(data, context))
 }
 
 # Traits available in a single individual-level QtlDataset (optionally scoped).
@@ -153,18 +153,18 @@
     # Checked here rather than left to the accessor: `.spListTraits` answers
     # "which traits are in this scope", and an absent context is an empty
     # answer, not an error. The raw slot read this replaced returned NULL for
-    # an unknown context; molecularTraits() rejects one, so the empty case
+    # an unknown context; .qtlContextSe() rejects one, so the empty case
     # has to
     # be stated instead of falling out of a NULL.
     if (!is_in(context, contexts(data))) {
         return(character(0))
     }
-    rownames(molecularTraits(data, context))
+    rownames(.qtlContextSe(data, context))
 }
 
 # Traits across a MultiStudyQtlDataset (individual studies + sumstats).
 .spListTraitsMultiStudy <- function(data, studyName, context) {
-    indDatasets <- qtlDatasets(data)
+    indDatasets <- as.list(data)
     ss <- sumStats(data)
     # No study filter: aggregate across every component (individual + sumstats).
     # Must precede per-study branches so a present sumStats slot does not shadow
@@ -719,6 +719,66 @@ parseTraitIds <- function(traitId, data) {
     if (is.list(entry)) set_names(list(entry), s) else entry
 }
 
+# The traits a run selects in context `cx` of study `qd`: its share of the
+# parsed `traitId` (all of them when the selection leaves the context out),
+# else -- when no trait was named at all -- those `region` overlaps, else all.
+# @noRd
+.contextSelectedTraits <- function(cx, qd, traitId, region) {
+    se <- .qtlContextSe(qd, context = cx)
+    ids <- rownames(se)
+    if (!is.null(traitId)) {
+        intersect(ids, .selectedTraits(traitId, studyName(qd), cx) %||% ids)
+    } else if (!is.null(region)) {
+        rr <- SummarizedExperiment::rowRanges(se)
+        ids[IRanges::overlapsAny(rr, region)]
+    } else {
+        ids
+    }
+}
+
+# Whether context `cx` of study `qd` has a trait selected.
+# @noRd
+.contextHasSelectedTraits <- function(cx, qd, traitId, region) {
+    length(.contextSelectedTraits(cx, qd, traitId, region)) > 0L
+}
+
+# Whether study `qd` has a trait selected in a context it runs on. In a
+# multi-study run a study without one sits out, as one with none of its
+# contexts selected does, rather than failing the run.
+# @noRd
+.studyHasSelectedTraits <- function(qd, contexts, traitId, region) {
+    useCtx <- .selectedContexts(contexts, studyName(qd)) %||% contexts(qd)
+    any(map_lgl(
+        useCtx,
+        .contextHasSelectedTraits,
+        qd = qd,
+        traitId = traitId,
+        region = region
+    ))
+}
+
+# A multi-study run in which no component has a selected trait is refused:
+# each one without sits out, so the run would otherwise come back empty. An
+# embedded summary-statistics row counts when the selection keeps it. `cfg`
+# is the run's record, carrying the parsed selection and its `region`.
+# @noRd
+.msAssertTraitsSelected <- function(data, cfg, pipeline) {
+    inStudies <- map_lgl(
+        as.list(data),
+        .studyHasSelectedTraits,
+        contexts = cfg$contexts,
+        traitId = cfg$traitId,
+        region = cfg$region
+    )
+    ss <- sumStats(data)
+    inSumStats <- !is.null(ss) &&
+        any(.sumStatsRowsSelected(ss, cfg$contexts, cfg$traitId))
+    if (!any(inStudies) && !inSumStats) {
+        abort(glue("{pipeline}(MultiStudyQtlDataset): no traits selected."))
+    }
+    invisible(NULL)
+}
+
 # =============================================================================
 # Joint-specification dispatchers (merged from former R/jointDispatchers.R)
 # =============================================================================
@@ -829,7 +889,7 @@ parseTraitIds <- function(traitId, data) {
         context = as.character(data$context),
         trait = as.character(data$trait)
     )
-    allDf <- as.data.frame(
+    allDf <- .sumStatsDf(
         data,
         studyName = cols$study[[tupleRows[[1L]]]],
         context = cols$context[[tupleRows[[1L]]]],
@@ -867,7 +927,7 @@ parseTraitIds <- function(traitId, data) {
     errorLabel
 ) {
     i <- tupleRows[[kk]]
-    d <- as.data.frame(
+    d <- .sumStatsDf(
         data,
         studyName = cols$study[[i]],
         context = cols$context[[i]],
@@ -928,7 +988,7 @@ parseTraitIds <- function(traitId, data) {
 # Does context `cx` carry trait `tid`?
 # @noRd
 .ccContextHasTrait <- function(cx, data, tid) {
-    is_in(tid, rownames(molecularTraits(data, contexts = cx)))
+    is_in(tid, rownames(.qtlContextSe(data, context = cx)))
 }
 
 # Scoped contexts in which a trait is present; NULL if fewer than 2.
@@ -1019,7 +1079,9 @@ parseTraitIds <- function(traitId, data) {
     verbose,
     label,
     region = NULL,
-    residualizationParam
+    residualizationParam,
+    genotypeFilter,
+    phenotypeFilter = NULL
 ) {
     perTraitContexts <- .crossContextPerTrait(
         data,
@@ -1037,12 +1099,14 @@ parseTraitIds <- function(traitId, data) {
         tid,
         cisWindow,
         region,
-        residualizationParam
+        residualizationParam,
+        genotypeFilter
     )
     Yres <- .fmResidPheno(
         data,
         contexts = perTraitContexts,
         traitId = tid,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam
     )
     .crossContextAssemble(X, Yres, perTraitContexts, verbose, label, tid)
@@ -1094,9 +1158,11 @@ parseTraitIds <- function(traitId, data) {
     label,
     studyName,
     region = NULL,
-    residualizationParam
+    residualizationParam,
+    genotypeFilter,
+    phenotypeFilter = NULL
 ) {
-    se <- molecularTraits(data, contexts = cx)
+    se <- .qtlContextSe(data, context = cx)
     # scopedTraits is already region-restricted upstream (.runJointSpecs) when
     # region mode is used without an explicit traitId.
     traitsHere <- intersect(scopedTraits, rownames(se))
@@ -1109,14 +1175,23 @@ parseTraitIds <- function(traitId, data) {
         traitsHere,
         cisWindow,
         region,
-        residualizationParam
+        residualizationParam,
+        genotypeFilter
     )
     allY <- .fmResidPheno(
         data,
         contexts = cx,
         traitId = traitsHere,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam
     )
+    .crossTraitAssemble(allX, allY, traitsHere, se)
+}
+
+# The cross-trait X / Y on the samples they share, keeping only the samples
+# observed for every trait; NULL when fewer than two remain at either step.
+# @noRd
+.crossTraitAssemble <- function(allX, allY, traitsHere, se) {
     common <- intersect(rownames(allX), rownames(allY))
     if (length(common) < 2L) {
         return(NULL)
@@ -1145,7 +1220,8 @@ parseTraitIds <- function(traitId, data) {
     traitId,
     cisWindow,
     region,
-    residualizationParam
+    residualizationParam,
+    genotypeFilter
 ) {
     if (is.null(region)) {
         .fmResidGeno(
@@ -1153,14 +1229,16 @@ parseTraitIds <- function(traitId, data) {
             contexts = contexts,
             traitId = traitId,
             cisWindow = cisWindow,
-            residualizationParam = residualizationParam
+            residualizationParam = residualizationParam,
+            genotypeFilter = genotypeFilter
         )
     } else {
         .fmResidGeno(
             data,
             contexts = contexts,
             region = region,
-            residualizationParam = residualizationParam
+            residualizationParam = residualizationParam,
+            genotypeFilter = genotypeFilter
         )
     }
 }
@@ -1176,7 +1254,7 @@ parseTraitIds <- function(traitId, data) {
 # The (context, trait) tuples context `cx` contributes.
 # @noRd
 .composedTuplesForContext <- function(cx, data, scopedTraits) {
-    se <- molecularTraits(data, contexts = cx)
+    se <- .qtlContextSe(data, context = cx)
     # scopedTraits is region-restricted upstream (.runJointSpecs) if needed.
     map(intersect(scopedTraits, rownames(se)), .composedTuple, cx = cx)
 }
@@ -1242,7 +1320,9 @@ parseTraitIds <- function(traitId, data) {
     allTraits,
     cisWindow,
     region,
-    residualizationParam
+    residualizationParam,
+    genotypeFilter,
+    phenotypeFilter = NULL
 ) {
     # Genotypes first, as the inline version did: reading them is what
     # fails on a missing panel file, and that error must stay the one the
@@ -1253,12 +1333,14 @@ parseTraitIds <- function(traitId, data) {
         allTraits,
         cisWindow,
         region,
-        residualizationParam
+        residualizationParam,
+        genotypeFilter
     )
     resid <- .fmResidPheno(
         data,
         contexts = allContexts,
         traitId = allTraits,
+        phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam
     )
     list(
@@ -1283,7 +1365,9 @@ parseTraitIds <- function(traitId, data) {
     verbose,
     label,
     region = NULL,
-    residualizationParam
+    residualizationParam,
+    genotypeFilter,
+    phenotypeFilter = NULL
 ) {
     tuples <- .composedTuples(data, scope, studyName, verbose, label)
     if (is.null(tuples)) {
@@ -1297,19 +1381,26 @@ parseTraitIds <- function(traitId, data) {
         allTraits,
         cisWindow,
         region,
-        residualizationParam
+        residualizationParam,
+        genotypeFilter,
+        phenotypeFilter
     )
-    allX <- sides$X
-    YresList <- sides$YresList
+    .composedAlignXy(sides, tuples)
+}
+
+# X and the tuples' Y columns on the samples both sides share, without the
+# samples any Y column misses; NULL when fewer than two samples remain.
+# @noRd
+.composedAlignXy <- function(sides, tuples) {
     commonSamples <- reduce(
-        c(list(rownames(allX)), map(YresList, rownames)),
+        c(list(rownames(sides$X)), map(sides$YresList, rownames)),
         intersect
     )
     if (length(commonSamples) < 2L) {
         return(NULL)
     }
-    X <- allX[commonSamples, , drop = FALSE]
-    Y <- .composedYCols(YresList, tuples, commonSamples)
+    X <- sides$X[commonSamples, , drop = FALSE]
+    Y <- .composedYCols(sides$YresList, tuples, commonSamples)
     if (is.null(Y)) {
         return(NULL)
     }
@@ -1418,7 +1509,9 @@ parseTraitIds <- function(traitId, data) {
             entry = mergedEntries
         ),
         .jointCols(base),
-        list(ldReference = NULL)
+        # Merged entries sit on the rows they were keyed to, references and
+        # all.
+        list(ldReference = .rowLdRefs(base))
     )
     exec(QtlFineMappingResult, !!!qfmrArgs)
 }
@@ -1445,7 +1538,7 @@ parseTraitIds <- function(traitId, data) {
     # by-key / cross-study rebuilds keep the trait position instead of silently
     # dropping it. There is no `region` counterpart -- the fine-mapping window
     # retired (section 4.4) because the element's own span is the region and a
-    # stored window had no correct update rule under subsetRegion().
+    # stored window had no correct update rule when variants are narrowed.
     list(
         jointStudies = .jointStrCol("jointStudies", df),
         jointContexts = .jointStrCol("jointContexts", df),
@@ -1473,7 +1566,8 @@ parseTraitIds <- function(traitId, data) {
     reduce(kept, .msRbindNoLd, rbindFn = rbindFn)
 }
 
-# Accumulate per-study + sumstats results (tracking the embedded LD sketch).
+# Accumulate per-study + sumstats results; every row keeps its own LD
+# reference (none for an individual-level study's rows).
 # @noRd
 .msDriverAccumulate <- function(
     qtlDatasets,
@@ -1489,21 +1583,17 @@ parseTraitIds <- function(traitId, data) {
     )
     ssRes <- if (is.null(sumStats)) NULL else sumStatsFn(sumStats, cfg)
     if (is.null(ssRes)) {
-        return(list(out = fromStudies, embeddedLd = NULL))
+        return(fromStudies)
     }
-    embeddedLd <- ldReference(ssRes)
-    out <- if (is.null(fromStudies)) {
-        ssRes
-    } else {
-        rbindFn(fromStudies, ssRes, ldReference = embeddedLd)
+    if (is.null(fromStudies)) {
+        return(ssRes)
     }
-    list(out = out, embeddedLd = embeddedLd)
+    rbindFn(fromStudies, ssRes)
 }
 
-# Reconstruct the per-tuple result object from the accumulated rows.
-.msDriverPerTuple <- function(out, resultCtor, embeddedLd) {
-    # ldReference: NULL if all studies were individual-level; the embedded
-    # sumStats's ldReference otherwise.
+# Reconstruct the per-tuple result object from the accumulated rows, each on
+# the LD reference it had.
+.msDriverPerTuple <- function(out, resultCtor) {
     ctorArgs <- c(
         list(
             study = as.character(out$study),
@@ -1513,7 +1603,7 @@ parseTraitIds <- function(traitId, data) {
             entry = .collectionEntries(out)
         ),
         .jointCols(out),
-        list(ldReference = embeddedLd)
+        list(ldReference = .rowLdRefs(out))
     )
     exec(resultCtor, !!!ctorArgs)
 }
@@ -1538,18 +1628,16 @@ parseTraitIds <- function(traitId, data) {
     pipelineName,
     noun = "a result"
 ) {
-    acc <- .msDriverAccumulate(
-        qtlDatasets(data),
+    out <- .msDriverAccumulate(
+        as.list(data),
         sumStats(data),
         perStudyFn,
         sumStatsFn,
         cfg,
         rbindFn
     )
-    out <- acc$out
-    embeddedLd <- acc$embeddedLd
     perTupleResult <- if (!is.null(out)) {
-        .msDriverPerTuple(out, resultCtor, embeddedLd)
+        .msDriverPerTuple(out, resultCtor)
     } else {
         NULL
     }
@@ -1566,7 +1654,7 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(perTupleResult)) {
         return(jointResult)
     }
-    rbindFn(perTupleResult, jointResult, ldReference = embeddedLd)
+    rbindFn(perTupleResult, jointResult)
 }
 
 # Synthesize a jointSpecification for the AUTO-DETECTION path (no explicit
@@ -1635,7 +1723,7 @@ parseTraitIds <- function(traitId, data) {
         parsedJointSpec,
         cfg$data,
         dataForm = "individual",
-        pipeline = .fmJointPipeline(cfg, cfg$crossValidationParam, NULL),
+        pipeline = .fmJointPipeline(cfg, cfg$crossValidationParam),
         jointMethods = intersect(tokens, c("mvsusie", "fsusie")),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
@@ -1645,10 +1733,11 @@ parseTraitIds <- function(traitId, data) {
 
 # The FmJointPipeline a joint run fits under: the settings the fitters read
 # off the pipeline. Summary statistics pass the no-CV record (there are no
-# samples to hold out) and the collection's LD sketch; individual-level data
-# pass the caller's resolved CV record and no sketch.
+# samples to hold out); individual-level data pass the caller's resolved CV
+# record. The LD a group is fitted against is the group's own
+# (.jointRowsLdRef()), not a setting of the run.
 # @noRd
-.fmJointPipeline <- function(cfg, crossValidationParam, ldReference) {
+.fmJointPipeline <- function(cfg, crossValidationParam) {
     new(
         "FmJointPipeline",
         config = list(
@@ -1657,8 +1746,7 @@ parseTraitIds <- function(traitId, data) {
             crossValidationParam = crossValidationParam,
             verbose = cfg$verbose,
             fitRetention = cfg$fitRetention,
-            seed = cfg$seed,
-            ldReference = ldReference
+            seed = cfg$seed
         )
     )
 }
@@ -1677,7 +1765,9 @@ parseTraitIds <- function(traitId, data) {
         verbose = cfg$verbose,
         pipCutoffToSkip = cfg$screen,
         cache = cfg$fineMappingResult,
-        residualizationParam = cfg$residualizationParam
+        residualizationParam = cfg$residualizationParam,
+        genotypeFilter = cfg$genotypeFilter,
+        phenotypeFilter = cfg$phenotypeFilter
     )
 }
 
@@ -1695,11 +1785,7 @@ parseTraitIds <- function(traitId, data) {
         parsedJointSpec,
         cfg$data,
         dataForm = "sumstats",
-        pipeline = .fmJointPipeline(
-            cfg,
-            .cvResolve(CrossValidationParam()),
-            ldReference(cfg$data)
-        ),
+        pipeline = .fmJointPipeline(cfg, .cvResolve(CrossValidationParam())),
         jointMethods = intersect(tokens, c("mvsusie", "fsusie")),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
@@ -1730,7 +1816,7 @@ parseTraitIds <- function(traitId, data) {
     methodArgs,
     cfg
 ) {
-    qtlDatasets <- qtlDatasets(cfg$data)
+    qtlDatasets <- as.list(cfg$data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .fmMultiStudyWarnExcluded(specs$study, qtlDatasets, cfg$verbose)
     out <- if (length(specs$nonStudy) == 0L) {
@@ -1764,9 +1850,19 @@ parseTraitIds <- function(traitId, data) {
 .fmStudyJointResult <- function(qd, specs, tokens, methodArgs, cfg) {
     studyCfg <- list_assign(
         cfg,
-        data = .qtlApplyFilterOverrides(qd, cfg$genotypeFilterParam)
+        data = .qtlRestrictSamples(qd, cfg$genotypeFilter$keepSamples)
     )
     .fmDispatchJointSpecsQtlDataset(specs, tokens, methodArgs, studyCfg)
+}
+
+# A MultiStudyQtlDataset's summary statistics as its joint fits read them:
+# with `cfg$cisWindow` laid on the tuples the parsed selection keeps, as the
+# per-study recursion has its QtlSumStats run lay it. The joint fits read the
+# collection directly rather than recursing, so they lay it here.
+# @noRd
+.msJointSumStats <- function(ss, cfg, caller) {
+    rows <- which(.sumStatsRowsSelected(ss, cfg$contexts, cfg$traitId))
+    .qssApplyCisWindow(ss, cfg$cisWindow, caller, rows)
 }
 
 # Fine-map every spec on the summary-statistics component and rbind onto the
@@ -1795,7 +1891,10 @@ parseTraitIds <- function(traitId, data) {
         parsedJointSpec,
         tokens,
         methodArgs,
-        list_assign(cfg, data = sumStats)
+        list_assign(
+            cfg,
+            data = .msJointSumStats(sumStats, cfg, "fineMappingPipeline")
+        )
     )
     if (is.null(ssRes)) {
         return(out)
@@ -1803,7 +1902,7 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(out)) {
         return(ssRes)
     }
-    .rbindFineMappingResult(out, ssRes, ldReference = ldReference(ssRes))
+    .rbindFineMappingResult(out, ssRes)
 }
 
 
@@ -1937,8 +2036,7 @@ parseTraitIds <- function(traitId, data) {
             fitRetention = cfg$fitRetention,
             standardized = TRUE,
             verbose = cfg$verbose,
-            seed = cfg$seed,
-            ldReference = ldReference(cfg$data)
+            seed = cfg$seed
         )
     )
     .runJointSpecs(
@@ -1972,7 +2070,7 @@ parseTraitIds <- function(traitId, data) {
     methods,
     cfg
 ) {
-    qtlDatasets <- qtlDatasets(cfg$data)
+    qtlDatasets <- as.list(cfg$data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .twasMultiStudyWarnExcluded(specs$study, qtlDatasets, cfg$verbose)
     out <- if (length(specs$nonStudy) == 0L) {
@@ -2004,7 +2102,7 @@ parseTraitIds <- function(traitId, data) {
 # @noRd
 .twasStudyJointResult <- function(qd, specs, tokens, methods, cfg) {
     setup <- .twasJointSetup(
-        .qtlApplyFilterOverrides(qd, cfg$genotypeFilterParam),
+        .qtlRestrictSamples(qd, cfg$genotypeFilter$keepSamples),
         .twasNormalizeMethods(methods),
         cfg
     )
@@ -2044,7 +2142,10 @@ parseTraitIds <- function(traitId, data) {
         parsedJointSpec,
         tokens,
         .twasSumStatsMethodTokens(methods)$methodArgs,
-        list_assign(cfg, data = sumStats)
+        list_assign(
+            cfg,
+            data = .msJointSumStats(sumStats, cfg, "twasWeightsPipeline")
+        )
     )
     if (is.null(ssRes)) {
         return(out)
@@ -2052,7 +2153,7 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(out)) {
         return(ssRes)
     }
-    .rbindTwasWeights(out, ssRes, ldReference = ldReference(ssRes))
+    .rbindTwasWeights(out, ssRes)
 }
 
 
@@ -2119,7 +2220,7 @@ parseTraitIds <- function(traitId, data) {
     if (!length(hit)) {
         return(NULL)
     }
-    .rowParts(r, hit[[1L]])
+    .collectionEntry(r, hit[[1L]])
 }
 
 # The merged FM entry for base row `i`: gather that key's entry from every

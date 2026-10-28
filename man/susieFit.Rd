@@ -15,7 +15,7 @@ susieFit(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
-  region = NULL
+  blockId = NULL
 )
 
 \S4method{susieFit}{FineMappingRow}(x)
@@ -38,9 +38,8 @@ this trait; \code{NULL} matches all traits.}
 \item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
 this fine-mapping / weight method; \code{NULL} matches all methods.}
 
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
+\item{blockId}{GWAS fine-mapping results only: the \code{blockId} naming
+one LD block of a fit; \code{NULL} matches every block.}
 }
 \value{
 A list (the SuSiE fit object).

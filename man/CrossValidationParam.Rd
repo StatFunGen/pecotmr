@@ -8,7 +8,7 @@
 \usage{
 CrossValidationParam(
   folds = 0,
-  numThreads = 1,
+  BPPARAM = SerialParam(),
   samplePartition = NULL,
   maxVariants = NULL,
   weightMethods = NULL,
@@ -21,9 +21,12 @@ CrossValidationParam(
 \code{twasWeightsPipeline} used to default to \code{5}, which made an
 unspecified setting mean two different things.}
 
-\item{numThreads}{Integer. Parallel workers for the per-fold refits.
-\code{1} (default) is serial; \code{-1} uses all cores. Only consulted
-when \code{folds > 1}.}
+\item{BPPARAM}{A \code{BiocParallelParam} the per-fold refits run on;
+\code{SerialParam()} (default) runs them one at a time. Its workers draw
+from random-number streams seeded by the pipeline's \code{seed}, else by
+the param's own \code{RNGseed}, else by one draw from the session RNG,
+so a run gives the same numbers however many workers it has. Only
+consulted when \code{folds > 1}.}
 
 \item{samplePartition}{Optional pre-defined partition \code{data.frame}
 with columns \code{Sample} and \code{Fold}. When supplied, every method
@@ -55,13 +58,13 @@ A \code{CrossValidationParam} object, a \code{\link{MethodParam}}.
 How cross-validation runs, shared by
   \code{\link{fineMappingPipeline}} and \code{\link{twasWeightsPipeline}}.
 
-  \code{folds}, \code{numThreads}, \code{samplePartition} and
+  \code{folds}, \code{BPPARAM}, \code{samplePartition} and
   \code{fitFullData} mean the same thing in both. \code{maxVariants} and
   \code{weightMethods} are honoured by \code{\link{twasWeightsPipeline}}
   only and are \strong{ignored} by \code{\link{fineMappingPipeline}}, so
   one bundle can be handed to either pipeline unchanged.
 }
 \examples{
-CrossValidationParam(folds = 10, numThreads = 4)
+CrossValidationParam(folds = 10, BPPARAM = BiocParallel::SerialParam())
 CrossValidationParam(folds = 5, fitFullData = FALSE)
 }

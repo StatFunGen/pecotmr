@@ -3,56 +3,32 @@
 \docType{class}
 \name{fineMappingMethods}
 \alias{fineMappingMethods}
-\alias{fineMappingMethods<-}
 \alias{credibleSetParam}
-\alias{credibleSetParam<-}
 \alias{susieRssParam}
-\alias{susieRssParam<-}
 \alias{panelFilterParam}
-\alias{panelFilterParam<-}
 \alias{initializeWithSusieInf}
-\alias{initializeWithSusieInf<-}
 \alias{fitRetention}
-\alias{fitRetention<-}
 \alias{GwasFineMappingParam-class}
 \alias{GwasFineMappingParam}
 \alias{fineMappingMethods,GwasFineMappingParam-method}
-\alias{fineMappingMethods<-,GwasFineMappingParam-method}
 \alias{credibleSetParam,GwasFineMappingParam-method}
-\alias{credibleSetParam<-,GwasFineMappingParam-method}
 \alias{susieRssParam,GwasFineMappingParam-method}
-\alias{susieRssParam<-,GwasFineMappingParam-method}
 \alias{panelFilterParam,GwasFineMappingParam-method}
-\alias{panelFilterParam<-,GwasFineMappingParam-method}
 \alias{initializeWithSusieInf,GwasFineMappingParam-method}
-\alias{initializeWithSusieInf<-,GwasFineMappingParam-method}
 \alias{fitRetention,GwasFineMappingParam-method}
-\alias{fitRetention<-,GwasFineMappingParam-method}
 \title{Inline GWAS Fine-Mapping Settings}
 \usage{
 fineMappingMethods(x, ...)
 
-fineMappingMethods(x, ...) <- value
-
 credibleSetParam(x, ...)
-
-credibleSetParam(x, ...) <- value
 
 susieRssParam(x, ...)
 
-susieRssParam(x, ...) <- value
-
 panelFilterParam(x, ...)
-
-panelFilterParam(x, ...) <- value
 
 initializeWithSusieInf(x, ...)
 
-initializeWithSusieInf(x, ...) <- value
-
 fitRetention(x, ...)
-
-fitRetention(x, ...) <- value
 
 GwasFineMappingParam(
   methods = "susie",
@@ -65,34 +41,20 @@ GwasFineMappingParam(
 
 \S4method{fineMappingMethods}{GwasFineMappingParam}(x)
 
-\S4method{fineMappingMethods}{GwasFineMappingParam}(x) <- value
-
 \S4method{credibleSetParam}{GwasFineMappingParam}(x)
-
-\S4method{credibleSetParam}{GwasFineMappingParam}(x) <- value
 
 \S4method{susieRssParam}{GwasFineMappingParam}(x)
 
-\S4method{susieRssParam}{GwasFineMappingParam}(x) <- value
-
 \S4method{panelFilterParam}{GwasFineMappingParam}(x)
-
-\S4method{panelFilterParam}{GwasFineMappingParam}(x) <- value
 
 \S4method{initializeWithSusieInf}{GwasFineMappingParam}(x)
 
-\S4method{initializeWithSusieInf}{GwasFineMappingParam}(x) <- value
-
 \S4method{fitRetention}{GwasFineMappingParam}(x)
-
-\S4method{fitRetention}{GwasFineMappingParam}(x) <- value
 }
 \arguments{
 \item{x}{A \code{GwasFineMappingParam}.}
 
 \item{...}{Unused, present for generic consistency.}
-
-\item{value}{The replacement value for that setting.}
 
 \item{methods}{Fine-mapping methods, as a character vector or a
 \code{\link{FineMappingMethodsParam}} record. Default \code{"susie"}.}
@@ -124,8 +86,9 @@ result is handed back for other uses.}
 \code{GwasFineMappingParam} returns a
   \code{GwasFineMappingParam} object, a \code{\link{MethodParam}}.
   Each accessor returns that setting's value --- for the three nested
-  bundles, the \code{MethodParam} itself --- and each replacement form
-  returns a modified copy.
+  bundles, the \code{MethodParam} itself. Change a setting with
+  \code{x$<field> <- value} (the field for \code{fineMappingMethods()}
+  is \code{methods}), which returns a modified copy.
 }
 \description{
 How \code{\link{colocPipeline}} fine-maps \code{gwasInput}

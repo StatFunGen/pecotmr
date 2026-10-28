@@ -70,8 +70,7 @@ gwasSumStats <- loadGwasSumStatsFromManifest(
     manifest = data.frame(study = "gwas1", sumStatsPath = gwasTsv),
     genome = "hg38",
     ldReference = ldStem,
-    region = "chr22:10000000-19000000",
-    ldBlocks = blocks
+    which = blocks
 )
 gwasByRegion <- summaryStatsQc(
     gwasSumStats,
@@ -95,14 +94,14 @@ data(ctwasWeightsExample)
 # portable "pecotmr://extdata/<stem>" form afterwards -- the same two-step
 # every other bundled example uses. .resolveGenotypeResourcePath() turns it
 # back into a real path at read time, on whatever machine has the package.
-ctwasWeightsExample <- methods::initialize(
+ctwasWeightsExample <- pecotmr:::.withRowLdRefs(
     ctwasWeightsExample,
-    ldReference = pecotmr:::.asLdRef(.portableHandle(ldStem))
+    .portableHandle(ldStem)
 )
 
 stopifnot(
     path(pecotmr:::.ldRefHandle(
-        ldReference(ctwasWeightsExample)
+        ldReference(ctwasWeightsExample)[[1L]]
     )) ==
         asBundledResource(ldStem)
 )
@@ -112,7 +111,8 @@ stopifnot(
 # -----------------------------------------------------------------------------
 ctwasInputsExample <- assembleCtwasInputs(
     gwasSumStats = gwasByRegion,
-    twasWeights = list(ctwasWeightsExample)
+    twasWeights = list(ctwasWeightsExample),
+    method = "susie"
 )
 
 ctwasEstExample <- estCtwasGroupPriors(

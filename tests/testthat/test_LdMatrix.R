@@ -64,6 +64,13 @@ test_that("LdMatrix takes its variants from a table or a GRanges", {
     )
 })
 
+test_that("as.matrix() and as(x, 'matrix') return the correlation matrix", {
+    f <- .ldmFixture()
+    ld <- LdMatrix(cor(f$X), nSamples = nrow(f$X))
+    expect_identical(as.matrix(ld), ldMatrix(ld))
+    expect_identical(as(ld, "matrix"), ldMatrix(ld))
+})
+
 test_that("an unlabelled matrix without variants is refused", {
     f <- .ldmFixture()
     expect_error(LdMatrix(unname(f$R)), "`variants` is required")

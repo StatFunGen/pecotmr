@@ -5,19 +5,24 @@
 \alias{colocViews}
 \alias{colocPairs}
 \alias{colocVariants}
+\alias{colocPooledVariants}
 \alias{colocCredibleSets}
 \alias{colocGenes}
 \alias{colocPairs,ColocResult-method}
 \alias{colocVariants,ColocResult-method}
+\alias{colocPooledVariants,ColocResult-method}
 \alias{colocGenes,ColocResult-method}
 \alias{colocCredibleSets,ColocResult-method}
 \alias{colocPairs,ColocBoostResult-method}
 \alias{colocVariants,ColocBoostResult-method}
+\alias{colocPooledVariants,ColocBoostResult-method}
 \title{Colocalization Views}
 \usage{
 colocPairs(x, ...)
 
-colocVariants(x, pooled = FALSE, ...)
+colocVariants(x, ...)
+
+colocPooledVariants(x, ...)
 
 colocCredibleSets(x, coverage = 0.95, minPp4 = NULL, minAbsCorr = 0.8, ...)
 
@@ -25,7 +30,9 @@ colocGenes(x, ...)
 
 \S4method{colocPairs}{ColocResult}(x)
 
-\S4method{colocVariants}{ColocResult}(x, pooled = FALSE)
+\S4method{colocVariants}{ColocResult}(x)
+
+\S4method{colocPooledVariants}{ColocResult}(x)
 
 \S4method{colocGenes}{ColocResult}(x)
 
@@ -39,15 +46,14 @@ colocGenes(x, ...)
 
 \S4method{colocPairs}{ColocBoostResult}(x)
 
-\S4method{colocVariants}{ColocBoostResult}(x, pooled = FALSE)
+\S4method{colocVariants}{ColocBoostResult}(x)
+
+\S4method{colocPooledVariants}{ColocBoostResult}(x)
 }
 \arguments{
 \item{x}{A \code{ColocResult}.}
 
 \item{...}{Additional arguments passed on to methods.}
-
-\item{pooled}{Logical. \code{colocVariants()} only: pool to one row per
-(gene, variant) instead of per (pair, variant).}
 
 \item{coverage}{Cumulative \code{SNP.PP.H4} the credible set must reach.}
 
@@ -64,10 +70,13 @@ the five posterior probabilities, i.e. colocalization is the favoured
 hypothesis rather than merely a probable one.}
 }
 \value{
-A tibble at the requested granularity.
+\code{colocVariants()} and \code{colocPooledVariants()} a
+  \code{GRanges}, its columns in \code{mcols()};
+  \code{colocCredibleSets()} a \code{GRangesList}, one element per set;
+  the other views a \code{DataFrame}.
 }
 \description{
-The four views over a \code{\linkS4class{ColocResult}}. The
+The five views over a \code{\linkS4class{ColocResult}}. The
   object stores one element per tested (QTL credible set, GWAS credible set,
   block) pair; these accessors project it to the granularity a given
   analysis needs, rather than any one of them being the stored shape.
@@ -77,13 +86,19 @@ The four views over a \code{\linkS4class{ColocResult}}. The
       \code{$summary} granularity. Every testable pair is reported verbatim,
       including both halves of a credible set that straddles a block
       boundary; interpreting them is the caller's decision.}
-    \item{\code{colocVariants()}}{One row per (pair, variant), carrying
+    \item{\code{colocVariants()}}{One range per (pair, variant), carrying
       \code{colocPp = PP.H4.abf * SNP.PP.H4} -- the posterior that this
-      variant is the shared causal one. With \code{pooled = TRUE}, one row
-      per (gene, variant) pooled by the rule below.}
-    \item{\code{colocCredibleSets()}}{One row per coloc credible set: the
-      smallest set of variants whose cumulative \code{SNP.PP.H4} reaches
-      \code{coverage}. This is a THIRD variant set, not guaranteed to be a
+      variant is the shared causal one.}
+    \item{\code{colocPooledVariants()}}{One range per (gene, variant),
+      pooled across pairs by the rule below. A
+      \code{\linkS4class{ColocBoostResult}} pools per (analysis, variant)
+      instead, with the noisy-OR stage only.}
+    \item{\code{colocCredibleSets()}}{One element per coloc credible set:
+      the smallest set of variants whose cumulative \code{SNP.PP.H4}
+      reaches \code{coverage}, as ranges carrying their \code{SNP.PP.H4},
+      with the set's pair columns, \code{csSize}, \code{csCoverage},
+      \code{leadVariant}, \code{leadPp} and \code{purity} in
+      \code{mcols()}. This is a THIRD variant set, not guaranteed to be a
       subset of either input credible set, so its purity is recomputed from
       LD rather than inherited.}
     \item{\code{colocGenes()}}{One row per gene, pooled across pairs.}
@@ -108,6 +123,7 @@ res <- colocPipeline(
 )
 head(colocPairs(res))
 head(colocVariants(res))
+head(colocPooledVariants(res))
 colocGenes(res)
 head(colocCredibleSets(res, minPp4 = 0.001))
 }

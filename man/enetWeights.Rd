@@ -2,14 +2,17 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{enetWeights}
 \alias{enetWeights}
-\title{Compute TWAS weights via elastic net (glmnet, alpha = 0.5)}
+\title{Compute TWAS weights via elastic net (glmnet)}
 \usage{
-enetWeights(X, y, methodArgs = GlmnetOptions())
+enetWeights(X, y, alpha = 0.5, methodArgs = GlmnetOptions())
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
 \item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{alpha}{Elastic-net mixing in \code{[0, 1]}: the L1 share of the
+penalty. Default 0.5.}
 
 \item{methodArgs}{Additional arguments forwarded to
 \code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
@@ -19,11 +22,14 @@ list is refused, since it cannot be checked against the engine's formals.}
 Numeric vector of length \code{ncol(X)} of per-variant weights.
 }
 \description{
-Convenience wrapper for \code{\link{glmnetWeights}} with \code{alpha = 0.5}.
+Convenience wrapper for \code{\link{glmnetWeights}} at a mixing between the
+lasso and ridge, \code{alpha = 0.5} unless set.
 }
 \examples{
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:30]
 y <- eqtlRegionExample$yRes
 enetWeights(X, y)
+# A larger ridge share:
+enetWeights(X, y, alpha = 0.2)
 }

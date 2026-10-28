@@ -14,7 +14,7 @@ qtlEnrichment(
   impN = 25,
   doubleShrinkage = FALSE,
   besselCorrection = TRUE,
-  numThreads = 1,
+  BPPARAM = SerialParam(),
   verbose = TRUE,
   alignNames = TRUE,
   seed = NULL
@@ -48,8 +48,10 @@ enrichment estimate. Default \code{FALSE}.}
 \item{besselCorrection}{Logical. Apply Bessel's correction when estimating
 the sampling variance. Default \code{TRUE}.}
 
-\item{numThreads}{Number of Simultaneous running CPU threads for multiple
-imputation, default is 1.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the threads
+the multiple imputation runs on when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+thread. Default \code{SerialParam()}.}
 
 \item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
 
@@ -119,11 +121,10 @@ names(susieFits) <- paste0("fit", seq_along(susieFits))
 # Set other parameters
 impN <- 10
 lambda <- 1
-numThreads <- 1
 library(pecotmr)
 en <- qtlEnrichment(
   gwasPip, susieFits, lambda = lambda, impN = impN,
-  numThreads = numThreads)
+  BPPARAM = BiocParallel::SerialParam())
 
 }
 \seealso{

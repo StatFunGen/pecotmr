@@ -17,6 +17,8 @@ knitr::opts_chunk$set(
     fig.width = 7,
     fig.height = 4.5
 )
+hasRelatednessQc <- requireNamespace("plinkQC", quietly = TRUE) &&
+    requireNamespace("igraph", quietly = TRUE)
 ```
 
 ## Overview
@@ -43,18 +45,18 @@ are one more:
 
 Alongside them the object keeps a `colData` naming every sample and a
 `sampleMap` recording which of them each experiment observes — so contexts
-need not share a sample set — plus its own slots:
+need not share a sample set — plus one slot of its own, `studyName`. The
+genotype panel (a lazy PLINK1/PLINK2/VCF/GDS/BGEN source, read with
+`readGenotypes()`) is the `genotype` experiment, whose dosage assay reads
+through it.
 
-*  `study` — study identifier (length-1 character).
-*  `genotypes` — the genotype panel (a lazy PLINK1/PLINK2/VCF/GDS/BGEN source,
-    read with `readGenotypes()`) that the dosage assay reads through.
-*  QC thresholds — `mafCutoff`, `macCutoff`, `xvarCutoff`, `imissCutoff`,
-    `keepIndel`, `keepVariants`, `scaleResiduals`. Stored as **lazy** filters,
-    applied at genotype-extraction time.
+A `QtlDataset` holds data only. Which variants and samples an analysis
+keeps (`GenotypeFilterParam`) and how it residualizes
+(`ResidualizationParam`) are the pipelines' settings, applied to each block
+they extract.
 
 To restrict a dataset to a set of samples, subset it: `x[, samples, ]` narrows
-`colData` and `sampleMap` together, and keeps the class and its slots. The
-`keepSamples` constructor argument is shorthand for the same thing.
+`colData` and `sampleMap` together, and keeps the class and its slot.
 
 There are two ways to build a `QtlDataset`:
 
@@ -175,18 +177,16 @@ readr::write_tsv(manifest, manifestPath)
 qd <- loadQtlDatasetFromManifest(manifestPath)
 ```
 
-The QC thresholds are ordinary arguments (they are stored as lazy filters, not
-applied at load), for example:
+Loading applies no QC: the dataset holds the data as read, and a pipeline
+filters each block it extracts with its `genotypeFilterParam`, for example:
 
 ```{r qtl-manifest-qc}
-qdFiltered <- loadQtlDatasetFromManifest(
-    manifest,
-    genotypeFilterParam = GenotypeFilterParam(
-        mafCutoff = 0.01,
-        imissCutoff = 0.05,
-        keepIndel = FALSE
-    )
+qcFilter <- GenotypeFilterParam(
+    mafCutoff = 0.01,
+    imissCutoff = 0.05,
+    keepIndel = FALSE
 )
+# fineMappingPipeline(qd, methods = "susie", genotypeFilterParam = qcFilter)
 ```
 
 ## Constructing a QtlDataset manually
@@ -272,12 +272,12 @@ A MultiStudyQtlDataset can be manually constructed by building a named list of
 msdManual <- MultiStudyQtlDataset(
     qtlDatasets = list(StudyA = qd, StudyB = qdManual)
 )
-names(qtlDatasets(msdManual))
+names(msdManual)
 ```
 
 To attach a summary-only study, pass a `QtlSumStats` object to the `sumStats`
-argument. For the manifest form, supply `sumStatsManifest`, `genome`, and
-`ldReference`.
+argument. For the manifest form, supply `sumStatsManifest` and `genome`, plus
+`ldReference` unless the manifest gives each row an `ldReferencePath`.
 
 ## Excluding related samples
 
@@ -290,7 +290,7 @@ dataset is built — the pipelines do not model it.
 `filterRelatedness()` takes a kinship table — one row per pair, the shape
 PLINK's `--genome` or KING emits — and returns the individuals to **drop**:
 
-```{r relatedness, eval = requireNamespace("plinkQC", quietly = TRUE) && requireNamespace("igraph", quietly = TRUE)}
+```{r relatedness, eval = hasRelatednessQc}
 relatedness <- data.frame(
     IID1 = c(samples[1], samples[3], samples[5]),
     IID2 = c(samples[2], samples[4], samples[6]),
@@ -314,7 +314,11 @@ is described with `RelatednessColumnsParam()`:
 ```r
 filterRelatedness(
     relatedness,
-    columns = RelatednessColumnsParam(iid1 = "ID1", iid2 = "ID2", value = "KINSHIP")
+    columns = RelatednessColumnsParam(
+        iid1 = "ID1",
+        iid2 = "ID2",
+        value = "KINSHIP"
+    )
 )
 ```
 
@@ -322,10 +326,9 @@ Building the description rather than passing a bare list means a misspelled
 field is an error at the call site instead of a default silently left in
 place.
 
-The exclusion list is not applied for you — feed it to `keepSamples`, the
-constructor argument this vignette introduced above, or subset an existing
-dataset with `qd[, unrelated, ]`. Both narrow `colData` and `sampleMap`
-together.
+The exclusion list is not applied for you — subset the dataset with
+`qd[, unrelated, ]`, which narrows `colData` and `sampleMap` together, or
+hand it to a pipeline as `GenotypeFilterParam(keepSamples = unrelated)`.
 
 `analysisType` changes what is being maximised. The default,
 `"maximizeUnrelated"`, keeps the largest unrelated set. `"maximizeCases"`
@@ -338,16 +341,19 @@ the chunk above is skipped when they are not installed.
 
 ## Next steps
 
-Once built, the accessors extract data lazily, applying the stored QC filters
-at extraction time:
+Once built, the accessors read the data lazily. To read part of it, subset
+the dataset first:
 
 ```{r accessors}
 studyName(qd)
 contexts(qd)
-# Cis genotypes around a trait (+/- a window), QC applied on the fly:
-dim(genotypes(qd, traitId = "GENE1", cisWindow = 1e6))
-# Phenotype matrix for one context:
-dim(SummarizedExperiment::assay(molecularTraits(qd, contexts = "Muscle")))
+# Cis genotypes around a trait (+/- 1 Mb): narrow to the window, then read
+cisWindow <- traitPosition(qd, "GENE1") + 1e6
+dim(genotypes(qd[cisWindow, , ]))
+# Phenotypes for one context: a list keyed by context, each element the
+# context's SummarizedExperiment as stored.
+muscle <- molecularTraits(qd, context = "Muscle")[["Muscle"]]
+dim(SummarizedExperiment::assay(muscle))
 ```
 
 `QtlDataset` and `MultiStudyQtlDataset` are direct inputs to

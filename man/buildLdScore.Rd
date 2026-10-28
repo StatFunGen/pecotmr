@@ -27,8 +27,8 @@ buildLdScore(
   least two blocks and wants many more.}
 
 \item{ldBlocks}{With a genotype panel, the LD blocks to cut it into: a
-\code{GRanges}, or a data frame with columns \code{chrom}, \code{start}
-and \code{end}. Each block's LD is computed from the panel variants
+\code{GRanges}, or the path of a BED file, read as BED with a 0-based
+start. Each block's LD is computed from the panel variants
 inside it; variants outside every block are left out. Not used with
 \code{LdMatrix} blocks.}
 
@@ -78,8 +78,8 @@ Compute per-variant LD scores from an LD reference, block by
 panel <- readGenotypes(plink2Prefix = file.path(system.file("extdata",
   "ld_reference", "chr22", package = "pecotmr"),
   "protocol_example.LD.chr22"))
-blocks <- data.frame(chrom = "chr22", start = c(10000000, 15000001),
-  end = c(15000000, 19000000))
+blocks <- GenomicRanges::GRanges("chr22",
+  IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)))
 ldScore <- buildLdScore(panel, ldBlocks = blocks, genome = "hg38")
 ldScore
 head(S4Vectors::mcols(ldScore)$ldScores)

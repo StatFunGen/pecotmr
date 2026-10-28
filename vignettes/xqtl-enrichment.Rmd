@@ -82,9 +82,11 @@ par(op)
 ## Perform enrichment analysis
 
 `qtlEnrichmentPipeline()` takes the two fine-mapping collections directly and
-estimates, for every `(gwasStudy, qtlStudy, qtlContext)` combination, how
-enriched the molecular QTLs are among the GWAS causal variants. The GWAS
-collection must be RSS-derived (it carries an `ldReference`);
+estimates, for every combination of GWAS fit `(gwasStudy, gwasMethod)` and QTL
+unit `(qtlStudy, qtlContext, qtlMethod)`, how enriched the molecular QTLs are
+among the GWAS causal variants. Each fine-mapping method is its own fit: a
+GWAS study fine-mapped with two methods gives two PIP vectors, never one. The
+GWAS collection must be RSS-derived (every row carries an LD reference);
 `gwasFineMappingExample` already does.
 
 ```{r enrichment}
@@ -96,12 +98,11 @@ enrich_res <- qtlEnrichmentPipeline(
 enrich_res
 ```
 
-The result is a data frame with one row per
-`(gwasStudy, qtlStudy, qtlContext)` combination, giving the enrichment estimate
-(`enrichment`), its standard error (`enrichmentSe`), and the log-odds
-(`enrichmentLogOdds`). These enrichment priors can then be supplied to a
-colocalization analysis. This synthetic single-region example is for
-illustration only; stable enrichment estimates require many fine-mapped
+The result is a data frame with one row per such combination, giving the
+enrichment estimate (`enrichment`), its standard error (`enrichmentSe`), and
+the log-odds (`enrichmentLogOdds`). These enrichment priors can then be
+supplied to a colocalization analysis. This synthetic single-region example is
+for illustration only; stable enrichment estimates require many fine-mapped
 regions.
 
 ## Session information

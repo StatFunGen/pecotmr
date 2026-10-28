@@ -926,7 +926,7 @@ MashComponentParam <- function(
         return(list())
     }
     ctors <- .mashComponentCtors()
-    .nestedAssertEngines(given, ctors, NULL, "MashComponentParam")
+    .nestedAssertEngines(given, ctors, "MashComponentParam")
     imap(given, .nestedElement, ctors = ctors, label = "MashComponentParam")
 }
 
@@ -2545,20 +2545,29 @@ mergeMashData <- function(resData, oneData) {
 # lead (max PIP) variant.
 # @noRd
 .mashFmrMatrices <- function(obj, coverage) {
-    rawMe <- marginalEffects(obj)
-    rawCs <- credibleSets(obj, coverage = coverage)
-    if (!all(is_in(c("variant_id", "context", "beta", "se"), names(rawMe)))) {
+    # Both views are ranged; the pivot works on their per-variant columns.
+    rawMe <- as_tibble(
+        as.data.frame(S4Vectors::mcols(marginalEffects(obj)), optional = TRUE)
+    )
+    rawCs <- as_tibble(
+        as.data.frame(
+            S4Vectors::mcols(credibleSets(obj, coverage = coverage)),
+            optional = TRUE
+        )
+    )
+    cond <- .mashFmrConditionColumn(obj)
+    if (!all(is_in(c("variant_id", cond, "beta", "se"), names(rawMe)))) {
         msg <- glue(
-            "mashInput: marginalEffects() must return variant_id/context/",
-            "beta/se columns; a fine-mapping result with >= 2 contexts is ",
-            "required."
+            "mashInput: marginalEffects() must return variant_id/{cond}/",
+            "beta/se columns; a fine-mapping result with >= 2 ",
+            "{if (cond == 'study') 'studies' else 'contexts'} is required."
         )
         abort(msg)
     }
     pinned <- .mashFmrMethodPin(rawMe, rawCs)
     me <- pinned$me
     cs <- pinned$cs
-    contexts <- unique(me$context)
+    contexts <- unique(me[[cond]])
     variants <- unique(me$variant_id)
     empty <- matrix(
         NA_real_,
@@ -2566,13 +2575,21 @@ mergeMashData <- function(resData, oneData) {
         length(contexts),
         dimnames = list(variants, contexts)
     )
-    # One (variant, context) cell per long-format row; the rest stay NA.
-    cell <- cbind(match(me$variant_id, variants), match(me$context, contexts))
+    # One (variant, condition) cell per long-format row; the rest stay NA.
+    cell <- cbind(match(me$variant_id, variants), match(me[[cond]], contexts))
     list(
         b = replace(empty, cell, me$beta),
         s = replace(empty, cell, me$se),
-        strongRows = .mashFmrStrongRows(cs, variants)
+        strongRows = .mashFmrStrongRows(cs, variants, cond)
     )
+}
+
+# The column a fine-mapping result's conditions are read from. A QTL result's
+# are its contexts. A GWAS result has no context axis, so its conditions are
+# its studies -- as they are for a GwasSumStats.
+# @noRd
+.mashFmrConditionColumn <- function(obj) {
+    if (methods::is(obj, "GwasFineMappingResult")) "study" else "context"
 }
 
 # A multi-method fine-mapping result would duplicate (variant, context) cells;
@@ -2595,6 +2612,11 @@ mergeMashData <- function(resData, oneData) {
     list(me = me, cs = cs)
 }
 
+# @noRd
+.mashKeyNa <- function(v) {
+    replace(as.character(v), is.na(v), "\u0001NA")
+}
+
 # The max-PIP variant among one credible set's rows.
 # @noRd
 .mashLeadVariant <- function(rows, cs) {
@@ -2602,13 +2624,18 @@ mergeMashData <- function(resData, oneData) {
 }
 
 # Row indices (into `variants`) of each credible set's lead (max PIP) variant.
+# A set is named by its condition and its index -- and, for a GWAS study
+# fine-mapped block by block, its block, since set indices restart in each.
 # @noRd
-.mashFmrStrongRows <- function(cs, variants) {
+.mashFmrStrongRows <- function(cs, variants, cond = "context") {
     csCol <- names(cs)[str_detect(names(cs), "^cs_")]
     strongVar <- if (
         nrow(cs) > 0L && length(csCol) > 0L && is_in("pip", names(cs))
     ) {
-        grp <- interaction(cs$context, cs[[csCol[[1L]]]], drop = TRUE)
+        keys <- c(cond, intersect("blockId", names(cs)), csCol[[1L]])
+        # NA spelled out: the view NA-fills an axis a row lacks (a QTL row's
+        # blockId), and interaction() would drop every NA-keyed row.
+        grp <- interaction(map(as.list(cs[keys]), .mashKeyNa), drop = TRUE)
         map_chr(split(seq_len(nrow(cs)), grp), .mashLeadVariant, cs = cs)
     } else {
         character(0)
@@ -2739,7 +2766,8 @@ mergeMashData <- function(resData, oneData) {
 #'   fine-mapping result objects, one per region. Names disambiguate
 #'   rownames across regions (defaults to \code{region1}, \code{region2}, ...).
 #'   For \code{QtlSumStats} inputs \code{\link{summaryStatsQc}} must have been
-#'   run (the matrix builder rejects un-QC'd SumStats).
+#'   run (the matrix builder rejects un-QC'd SumStats). The conditions are a
+#'   QTL object's contexts and a GWAS object's studies.
 #' @param nRandom,nNull Per-object random / null sample sizes (default 10 each).
 #' @param excludeCondition Character vector of condition (column) names to drop.
 #' @param coverage Credible-set coverage for the strong selection on
@@ -2942,7 +2970,7 @@ mashInput <- function(
 #'   \code{\link{parseVariantId}} (with a synthetic-position fallback for ids
 #'   that do not encode coordinates); \code{A1} / \code{A2} / \code{N} are
 #'   placeholders because a Z-only input carries no alleles or sample sizes
-#'   (mash reads only Z). A pass-through \code{qcInfo} record is set so the
+#'   (mash reads only Z). Pass-through \code{qcOptions()} are set so the
 #'   result clears the mash QC gate.
 #' @param z Numeric matrix (variants x conditions). \code{rownames(z)} are
 #'   variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
@@ -2962,7 +2990,7 @@ mashInput <- function(
 #' @param genome Genome build. Default \code{"GRCh38"}.
 #' @param n Placeholder per-variant sample size. Default \code{1000}.
 #' @param a1,a2 Placeholder alleles. Defaults \code{"A"} / \code{"G"}.
-#' @param role Tag stored in the \code{qcInfo} record. Default \code{"mash"}.
+#' @param role Tag stored in the \code{qcOptions()}. Default \code{"mash"}.
 #' @return A \code{\link{QtlSumStats}} with one entry per condition (column).
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges IRanges
@@ -3034,7 +3062,7 @@ qtlSumStatsFromZMatrix <- function(
 #' @param genome Genome build. Default \code{"GRCh38"}.
 #' @param n Placeholder per-variant sample size. Default \code{1000}.
 #' @param a1,a2 Placeholder alleles. Defaults \code{"A"} / \code{"G"}.
-#' @param role Tag stored in the \code{qcInfo} record. Default \code{"mash"}.
+#' @param role Tag stored in the \code{qcOptions()}. Default \code{"mash"}.
 #' @return A \code{\link{QtlSumStats}} with one entry per condition (column).
 #' @seealso \code{\link{qtlSumStatsFromZMatrix}}, \code{\link{mashModelFit}}
 #' @importFrom GenomicRanges GRanges
@@ -3110,7 +3138,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # Decode chrom/pos from the variant ids, synthesising where they do not
 # parse. An unparseable id still needs a placeable coordinate: the GRanges
 # is keyed by the variant id, so the range only has to be unique and
-# ordered, not correct.
+# ordered, not correct. Chromosomes come out in UCSC style (chr1).
 # @noRd
 #' @importFrom rlang try_fetch
 .qszmCoords <- function(vids) {
@@ -3177,7 +3205,7 @@ qtlSumStatsFromBetaMatrix <- function(
         entry = entries,
         genome = genome,
         ldReference = ldReference,
-        qcInfo = list(role = role, entryAudit = vector("list", nCond))
+        qcOptions = list(role = role)
     )
 }
 
@@ -3262,10 +3290,10 @@ qtlSumStatsFromBetaMatrix <- function(
         )
         abort(msg)
     }
-    if (length(qcInfo(x)) == 0L) {
+    if (length(qcOptions(x)) == 0L) {
         msg <- glue(
             "mashPipeline: '{role}' SumStats has no QC info ",
-            "(length(qcInfo(x)) == 0L). ",
+            "(length(qcOptions(x)) == 0L). ",
             "Run summaryStatsQc() on the SumStats before passing it to ",
             "mashPipeline()."
         )
@@ -3384,8 +3412,11 @@ qtlSumStatsFromBetaMatrix <- function(
     } else {
         c("SNP", "Z")
     }
+    # One read per context. A GWAS study split by chromosome or LD block is
+    # several rows of one context (its study), and each read already stitches
+    # every row of it, so reading once per row would read the study k times.
     rows <- map(
-        rowsInBlock,
+        rowsInBlock[!duplicated(setup$contextCol[rowsInBlock])],
         .mashContextRow,
         x = x,
         setup = setup,
@@ -3393,19 +3424,11 @@ qtlSumStatsFromBetaMatrix <- function(
         resolvedScale = resolvedScale
     )
     contexts <- map_chr(rows, "context")
-    # A later row overwrites an earlier one sharing a context, as the keyed
-    # assignment did; the variant order is first-seen across all rows.
-    lastPerContext <- !duplicated(contexts, fromLast = TRUE)
+    # The variant order is first-seen across the contexts.
     list(
         variantOrder = unique(.mashConcatChr(map(rows, "snps"))),
-        perContextB = set_names(
-            map(rows[lastPerContext], "b"),
-            contexts[lastPerContext]
-        ),
-        perContextSe = set_names(
-            map(rows[lastPerContext], "se"),
-            contexts[lastPerContext]
-        )
+        perContextB = set_names(map(rows, "b"), contexts),
+        perContextSe = set_names(map(rows, "se"), contexts)
     )
 }
 
@@ -3440,7 +3463,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashRowDf <- function(x, rIdx, setup, requireCols) {
     if (setup$isQtl) {
-        as.data.frame(
+        .sumStatsDf(
             x,
             studyName = setup$studyCol[[rIdx]],
             context = setup$contextCol[[rIdx]],
@@ -3448,7 +3471,7 @@ qtlSumStatsFromBetaMatrix <- function(
             require = requireCols
         )
     } else {
-        as.data.frame(
+        .sumStatsDf(
             x,
             studyName = setup$studyCol[[rIdx]],
             require = requireCols

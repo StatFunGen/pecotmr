@@ -46,33 +46,37 @@ NULL
 #'   projection surface: both answer \code{\link{colocPairs}} and
 #'   \code{\link{colocVariants}}, so code that only needs "which variants
 #'   colocalized, and how strongly" works against either.
-#' @slot ldReference The LD reference the underlying fits were computed
-#'   against (a genotype panel, a \code{GenotypeMixture} or an
-#'   \code{LdMatrix}), or \code{NULL}. Shared by both subclasses: coloc and
-#'   ColocBoost report different statistics, but both are computed against a
-#'   reference and both are asked for it the same way.
+#'
+#'   Each subclass carries its own LD reference, and both answer
+#'   \code{\link{ldReference}}: a \code{ColocResult} holds the one reference
+#'   its pairs were computed against, a \code{ColocBoostResult} one per
+#'   reference its summary statistics were matched against.
 #' @export
-setClass(
-    "ColocResultBase",
-    contains = c("VIRTUAL", "RangedTupleList"),
-    representation(ldReference = "LdReference_OR_NULL"),
-    prototype(ldReference = NULL)
-)
-
-#' @rdname ldReference
-#' @export
-setMethod("ldReference", "ColocResultBase", function(x) x@ldReference)
+setClass("ColocResultBase", contains = c("VIRTUAL", "RangedTupleList"))
 
 #' @title Colocalization Result
 #' @description A collection of colocalization results, one element per tested
 #'   (QTL credible set, GWAS credible set, block) pair. Build the four views
 #'   with \code{\link{colocPairs}}, \code{\link{colocVariants}},
 #'   \code{\link{colocCredibleSets}} and \code{\link{colocGenes}}.
-#' @details The inherited \code{ldReference} is what
-#'   \code{colocCredibleSets()} uses to compute credible-set purity.
+#' @details The \code{ldReference} is what \code{colocCredibleSets()} uses to
+#'   compute credible-set purity, each pair's from its own reference.
+#' @slot ldReference A named list of the LD references the pairs were computed
+#'   against, each a genotype panel, a \code{GenotypeMixture} or an
+#'   \code{LdMatrix}, stored once apiece; the \code{ldReference} column of
+#'   \code{mcols} names the entry each pair used (\code{NA} for none).
 #' @seealso \code{\link{colocPipeline}}
 #' @export
-setClass("ColocResult", contains = "ColocResultBase")
+setClass(
+    "ColocResult",
+    contains = "ColocResultBase",
+    representation(ldReference = "list"),
+    prototype(ldReference = list())
+)
+
+#' @rdname ldReference
+#' @export
+setMethod("ldReference", "ColocResult", function(x) .ldRefsInUse(x))
 
 methods::setValidity("ColocResult", function(object) {
     .validateColocResult(object)
@@ -94,6 +98,7 @@ methods::setValidity("ColocResult", function(object) {
     if (!coll$isEmpty()) {
         return(coll$getMessages())
     }
+    coll$push(.ldRefDictProblems(object@ldReference, .ldRefKeys(object)))
     coll$push(.crCheckPpColumns(object))
     coll$push(.crCheckVariantColumn(object))
     coll$getMessages()
@@ -139,27 +144,18 @@ methods::setValidity("ColocResult", function(object) {
 
 # The per-variant layer is the whole point of the class, so an element without
 # it is rejected rather than tolerated -- a silently absent SNP.PP.H4 would
-# reproduce the exact gap this class exists to close.
+# reproduce the exact gap this class exists to close. The elements share one
+# variant metadata table, so they all have the column or none does.
 # @noRd
 .crCheckVariantColumn <- function(object) {
-    if (length(object) == 0L) {
-        return(NULL)
-    }
-    bad <- which(!map_lgl(as.list(object), .crHasSnpPp))
-    if (length(bad) == 0L) {
+    if (length(object) == 0L || .rtlHasVariantColumn(object, "SNP.PP.H4")) {
         return(NULL)
     }
     str_c(
         "element(s) ",
-        str_flatten(bad, ", "),
+        str_flatten(seq_along(object), ", "),
         " have no SNP.PP.H4 column in their variant metadata"
     )
-}
-
-# @noRd
-.crHasSnpPp <- function(g) {
-    md <- mcols(g, use.names = FALSE)
-    !is.null(md) && is_in("SNP.PP.H4", colnames(md))
 }
 
 # ---- accessors --------------------------------------------------------------
@@ -198,9 +194,14 @@ setMethod("show", "ColocResult", function(object) {
 #'   columns are \code{NA} for it.
 #' @param variants A list, parallel to \code{pairs}' rows, of per-pair data
 #'   frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.
-#' @param ldReference Optional genotype panel (see \code{\link{readGenotypes}})
-#'   for the LD reference, used by \code{\link{colocCredibleSets}} to
-#'   compute purity.
+#' @param ldReference Optional LD reference -- a genotype panel (see
+#'   \code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
+#'   \code{LdMatrix} -- for every pair, or a list with one per pair; used by
+#'   \code{\link{colocCredibleSets}} to compute purity. Each distinct
+#'   reference is stored once.
+#' @param metadata A list of free-form metadata about the collection,
+#'   as \code{metadata()} holds on any Bioconductor vector. Default
+#'   \code{list()}.
 #' @return A \code{ColocResult}.
 #' @examples
 #' pairs <- data.frame(
@@ -218,7 +219,12 @@ setMethod("show", "ColocResult", function(object) {
 #' ))
 #' ColocResult(pairs, variants)
 #' @export
-ColocResult <- function(pairs, variants, ldReference = NULL) {
+ColocResult <- function(
+    pairs,
+    variants,
+    ldReference = NULL,
+    metadata = list()
+) {
     pairs <- as.data.frame(pairs, stringsAsFactors = FALSE)
     if (!is.list(variants) || length(variants) != nrow(pairs)) {
         msg <- glue(
@@ -228,19 +234,20 @@ ColocResult <- function(pairs, variants, ldReference = NULL) {
         abort(msg)
     }
     elements <- map(variants, .crVariantsToGRanges)
+    dict <- .ldRefDict(.ldRefPerTuple(ldReference, nrow(pairs)))
     # Set unconditionally, including at zero rows: an empty result still has to
     # carry the column schema, or it fails validity and a caller reading
     # `result$PP.H4.abf` gets NULL exactly when there is nothing to report.
+    cols <- list_assign(as.list(pairs), ldReference = dict$keys)
     grl <- S4Vectors::`mcols<-`(
-        GenomicRanges::GRangesList(elements),
+        .rtlBindElements(elements),
         value = exec(
             S4Vectors::DataFrame,
-            !!!c(as.list(pairs), list(check.names = FALSE))
+            !!!c(cols, list(check.names = FALSE))
         )
     )
-    obj <- new("ColocResult", grl, ldReference = .asLdRef(ldReference))
-    validObject(obj)
-    obj
+    obj <- new("ColocResult", .rtlNamed(grl), ldReference = dict$refs)
+    .withMetadata(obj, metadata)
 }
 
 # One pair's variant table -> a GRanges carrying SNP.PP.H4 in its mcols.
@@ -332,22 +339,38 @@ ColocResult <- function(pairs, variants, ldReference = NULL) {
 
 #' @rdname colocViews
 #' @export
-setMethod("colocPairs", "ColocResult", function(x) {
+setMethod(
+    "colocPairs",
+    "ColocResult",
+    function(x) {
+        .asViewDataFrame(.crPairsTable(x = x))
+    }
+)
+
+# colocPairs() as a tibble, for the views built on it.
+# @noRd
+.crPairsTable <- function(x) {
     md <- mcols(x, use.names = FALSE)
     if (is.null(md) || length(x) == 0L) {
         return(tibble())
     }
     as_tibble(as.data.frame(md), .name_repair = "minimal")
+}
+
+#' @rdname colocViews
+#' @export
+setMethod("colocVariants", "ColocResult", function(x) {
+    # Ranged, placed by each row's variant id, so the view narrows with
+    # subsetByOverlaps().
+    .withGenome(.variantTableGRanges(.crLongVariants(x)), .oneBuild(x))
 })
 
 #' @rdname colocViews
 #' @export
-setMethod("colocVariants", "ColocResult", function(x, pooled = FALSE) {
+setMethod("colocPooledVariants", "ColocResult", function(x) {
     long <- .crLongVariants(x)
-    if (!isTRUE(pooled) || nrow(long) == 0L) {
-        return(long)
-    }
-    .crPoolVariants(long)
+    pooled <- if (nrow(long) == 0L) long else .crPoolVariants(long)
+    .withGenome(.variantTableGRanges(pooled), .oneBuild(x))
 })
 
 # One row per (pair, variant): the pair's metadata repeated across its
@@ -411,8 +434,18 @@ setMethod("colocVariants", "ColocResult", function(x, pooled = FALSE) {
 
 #' @rdname colocViews
 #' @export
-setMethod("colocGenes", "ColocResult", function(x) {
-    pairs <- colocPairs(x)
+setMethod(
+    "colocGenes",
+    "ColocResult",
+    function(x) {
+        .asViewDataFrame(.crGenesTable(x = x))
+    }
+)
+
+# colocGenes() as a tibble.
+# @noRd
+.crGenesTable <- function(x) {
+    pairs <- .crPairsTable(x)
     if (nrow(pairs) == 0L) {
         return(tibble())
     }
@@ -433,7 +466,7 @@ setMethod("colocGenes", "ColocResult", function(x) {
             nPairs = sum(.data$nPairs),
             .groups = "drop"
         )
-})
+}
 
 # ---- credible-set view ------------------------------------------------------
 
@@ -449,24 +482,81 @@ setMethod(
         minAbsCorr = 0.8,
         requireMaxH4 = FALSE
     ) {
-        keep <- .crPairFilter(x, minPp4, requireMaxH4)
-        if (length(keep) == 0L) {
-            return(tibble())
-        }
-        # Filtering happens BEFORE any LD work, so a stricter threshold costs
-        # strictly less -- which is the reason purity lives on the accessor
-        # rather than being precomputed at construction.
-        sets <- compact(map(keep, .crCsForPair, x = x, coverage = coverage))
-        if (length(sets) == 0L) {
-            return(tibble())
-        }
-        out <- bind_rows(sets)
-        .crApplyPurityFilter(
-            mutate(out, purity = .crPuritiesFor(out, ldReference(x))),
-            minAbsCorr
+        sets <- .crCredibleSets(
+            x = x,
+            coverage = coverage,
+            minPp4 = minPp4,
+            minAbsCorr = minAbsCorr,
+            requireMaxH4 = requireMaxH4
         )
+        .withGenome(.crSetsAsList(sets), .oneBuild(x))
     }
 )
+
+# The coloc credible sets: one record per set, its members' ranges and its
+# set-level row, filtered on the pair and then on purity.
+# @noRd
+.crCredibleSets <- function(
+    x,
+    coverage = 0.95,
+    minPp4 = NULL,
+    minAbsCorr = 0.8,
+    requireMaxH4 = FALSE
+) {
+    pairs <- .crPairFilter(x, minPp4, requireMaxH4)
+    # Filtering happens BEFORE any LD work, so a stricter threshold costs
+    # strictly less -- which is the reason purity lives on the accessor
+    # rather than being precomputed at construction.
+    sets <- compact(map(pairs, .crCsForPair, x = x, coverage = coverage))
+    if (length(sets) == 0L) {
+        return(list())
+    }
+    purity <- map_dbl(sets, .crSetPurity, refs = ldReference(x))
+    sets <- map2(sets, purity, .crWithPurity)
+    if (is.null(minAbsCorr)) {
+        return(sets)
+    }
+    # An unmeasurable purity does not drop a set: with no LD reference there is
+    # no evidence the set is impure, and silently discarding it would make the
+    # view depend on whether a sketch happened to be attached.
+    keep(sets, .crPureEnough, minAbsCorr = minAbsCorr)
+}
+
+# The sets as one GRangesList: each set's members its element, its set-level
+# columns that element's mcols.
+# @noRd
+.crSetsAsList <- function(sets) {
+    if (length(sets) == 0L) {
+        return(GenomicRanges::GRangesList())
+    }
+    S4Vectors::`mcols<-`(
+        .rtlBindElements(map(sets, "members")),
+        value = S4Vectors::DataFrame(
+            bind_rows(map(sets, "row")),
+            check.names = FALSE
+        )
+    )
+}
+
+# Purity of one set: the minimum absolute correlation among its members, one
+# LD extraction per set (section 3.7), against its own pair's reference. NA
+# when the pair has no LD reference to extract from -- reported honestly
+# rather than defaulted to a passing value.
+# @noRd
+.crSetPurity <- function(set, refs) {
+    .crPurityOne(.grVariantIds(set$members), set$row$ldReference, refs)
+}
+
+# @noRd
+.crWithPurity <- function(set, purity) {
+    list_assign(set, row = mutate(set$row, purity = purity))
+}
+
+# @noRd
+.crPureEnough <- function(set, minAbsCorr) {
+    p <- set$row$purity
+    is.na(p) || p >= minAbsCorr
+}
 
 # Which pairs survive the pair-level filters. Both conditions read columns
 # already stored on the pair, so neither costs anything to evaluate.
@@ -510,13 +600,15 @@ setMethod(
     members <- ord[seq_len(nKeep)]
     ids <- .grVariantIds(g[members])
     md <- as.data.frame(mcols(x, use.names = FALSE))[i, , drop = FALSE]
-    mutate(
-        as_tibble(md, .name_repair = "minimal"),
-        csSize = length(members),
-        csCoverage = cum[[nKeep]],
-        leadVariant = ids[[1L]],
-        leadPp = pp[ord][[1L]],
-        csVariants = list(ids)
+    list(
+        members = g[members],
+        row = mutate(
+            as_tibble(md, .name_repair = "minimal"),
+            csSize = length(members),
+            csCoverage = cum[[nKeep]],
+            leadVariant = ids[[1L]],
+            leadPp = pp[ord][[1L]]
+        )
     )
 }
 
@@ -532,20 +624,13 @@ setMethod(
     if (length(hit) == 0L) length(cum) else hit[[1L]]
 }
 
-# Purity per credible set: the minimum absolute correlation among its members,
-# one LD extraction per set (section 3.7). NA when there is no LD reference to
-# extract from -- reported honestly rather than defaulted to a passing value.
-# @noRd
-.crPuritiesFor <- function(out, ldReference) {
-    if (is.null(ldReference)) {
-        return(rep(NA_real_, nrow(out)))
-    }
-    map_dbl(out$csVariants, .crPurityOne, ldReference = ldReference)
-}
-
 # @noRd
 #' @importFrom rlang try_fetch
-.crPurityOne <- function(ids, ldReference) {
+.crPurityOne <- function(ids, key, refs) {
+    ldReference <- .ldRefForKey(key, refs)
+    if (is.null(ldReference)) {
+        return(NA_real_)
+    }
     # A singleton set has no pair to correlate, and susie treats it as pure.
     if (length(ids) < 2L) {
         return(1)
@@ -564,50 +649,3 @@ setMethod(
     }
     min(abs(ld[upper.tri(ld)]))
 }
-
-# @noRd
-.crApplyPurityFilter <- function(out, minAbsCorr) {
-    if (is.null(minAbsCorr)) {
-        return(out)
-    }
-    # An unmeasurable purity does not drop a set: with no LD reference there is
-    # no evidence the set is impure, and silently discarding it would make the
-    # view depend on whether a sketch happened to be attached.
-    keep <- is.na(out$purity) | out$purity >= minAbsCorr
-    out[keep, , drop = FALSE]
-}
-
-# ---- coercion ---------------------------------------------------------------
-
-#' @title Coerce a ColocResult to a data frame
-#' @description Returns the pair-level view, which is the flat table
-#'   \code{colocPipeline()} used to return directly. Provided so existing
-#'   consumers keep working; new code should call the view it actually wants
-#'   (see \code{\link{colocViews}}).
-#' @param x A \code{ColocResult}.
-#' @param row.names,optional Ignored; present for generic compatibility.
-#' @param ... Ignored.
-#' @return A data frame with one row per tested pair.
-#' @examples
-#' pairs <- data.frame(
-#'     study = "s1", context = "c1", trait = "g1", method = "susie",
-#'     gwasStudy = "G1", gwasContext = NA_character_,
-#'     gwasTrait = NA_character_, gwasMethod = "susie",
-#'     blockId = "chr1_1_1000",
-#'     qtlCs = 1L, gwasCs = 1L, nSnps = 2L,
-#'     PP.H0.abf = 0.1, PP.H1.abf = 0.1, PP.H2.abf = 0.1,
-#'     PP.H3.abf = 0.1, PP.H4.abf = 0.6
-#' )
-#' variants <- list(data.frame(
-#'     variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
-#'     SNP.PP.H4 = c(0.7, 0.3)
-#' ))
-#' as.data.frame(ColocResult(pairs, variants))
-#' @export
-setMethod(
-    "as.data.frame",
-    "ColocResult",
-    function(x, row.names = NULL, optional = FALSE, ...) {
-        as.data.frame(colocPairs(x))
-    }
-)

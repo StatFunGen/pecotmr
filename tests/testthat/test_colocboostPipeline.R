@@ -1,77 +1,5 @@
 context("colocboostPipeline")
 
-# ============================================================================
-# Legacy colocboostPipeline tests removed for the post-S4-refactor API.
-# ============================================================================
-#
-# This file previously contained ~100 test_that blocks targeting the legacy
-# colocboost pipeline API (rssData/ldData list-shape inputs, RegionalData
-# fixtures, qcRegionalData driver, colocboostAnalysis adapters, etc.). Every
-# block exercised functions and classes that no longer exist in pecotmr:
-#
-#   Functions removed:
-#     - colocboostAnalysis()         (direct colocboost adapter)
-#     - qcRegionalData()             (legacy QC driver)
-#     - regionDataToIndInput()       (now a .Deprecated() no-op)
-#     - regionDataToRssInput()       (now a .Deprecated() no-op)
-#     - regionDataToColocboostInput()
-#     - rssAnalysisPipeline()        (replaced by fineMappingPipeline)
-#     - rssBasicQc()                 (folded into summaryStatsQc)
-#     - loadRssData()                (replaced by SumStats constructors)
-#     - getrssinput(), getlddata(), getoutliernumber()
-#     - colocWrapper(), xqtlEnrichmentWrapper(), colocPostProcessor()
-#       (now .Deprecated() no-ops returning NULL)
-#     - .runColocboost()             (replaced by internal .cbRun(label, args))
-#     - buildLdArgs()                (replaced by internal .cbBuildLdArgs())
-#
-#   Classes removed:
-#     - RegionalData, MultivariateRegionalData
-#     - QcResult, AlleleQcResult
-#
-# The replacement API has a fundamentally different contract:
-#
-#   colocboostPipeline() is now an S4 generic dispatching on the QTL input
-#   class. Signatures live in R/colocboostPipeline.R:
-#
-#     setMethod("colocboostPipeline", "QtlDataset",         ...)
-#     setMethod("colocboostPipeline", "QtlSumStats",        ...)
-#     setMethod("colocboostPipeline", "MultiStudyQtlDataset", ...)
-#
-#   - QTL data is supplied as a QtlDataset / QtlSumStats / MultiStudyQtlDataset
-#     (DFrame-based S4 objects with an ldReference slot for sumstats inputs and
-#     residualizedGenotypes() / residualizedPhenotypes() accessors for
-#     individual-level inputs).
-#   - GWAS is supplied separately via the gwasSumStats = GwasSumStats(...)
-#     argument.
-#   - Individual-level QC (MAF / X-variance / sample missingness / event
-#     selection) lives on the QtlDataset constructor and is applied lazily
-#     by its accessors. There is no separate qcRegionalData() pass.
-#   - All summary-statistic QC lives in summaryStatsQc(). The pipeline
-#     rejects QtlSumStats / GwasSumStats whose qcInfo() is empty.
-#
-# Rewriting the legacy tests in place would require fabricating new
-# QtlDataset / QtlSumStats / GwasSumStats / MultiStudyQtlDataset fixtures
-# and asserting against a different result shape -- i.e. inventing new
-# coverage rather than porting existing coverage. That is out of scope
-# for this legacy-cleanup pass.
-#
-# New tests for the S4 colocboostPipeline() methods, summaryStatsQc(), and
-# the QtlDataset / QtlSumStats / GwasSumStats / MultiStudyQtlDataset
-# constructors should be added in dedicated files alongside this one
-# (e.g. test_colocboost_pipeline_qtl_dataset.R,
-# test_colocboost_pipeline_qtl_sumstats.R,
-# test_colocboost_pipeline_multitask.R). See:
-#
-#   - R/colocboostPipeline.R    (the new S4 generic + methods)
-#   - R/allClasses.R             (QtlDataset, QtlSumStats, GwasSumStats,
-#                                 MultiStudyQtlDataset, FineMappingRow)
-#   - R/allMethods.R             (constructors)
-#   - R/sumstatsQc.R            (summaryStatsQc, which is now the only
-#                                 summary-statistic QC entry point)
-#   - tests/testthat/test_sumstatsQc.R  (existing QC coverage)
-# ============================================================================
-
-# Sentinel test so the testthat context is non-empty.
 test_that("colocboostPipeline is exported as an S4 generic", {
     expect_true("colocboostPipeline" %in% getNamespaceExports("pecotmr"))
     expect_true(methods::isGeneric("colocboostPipeline"))
@@ -85,28 +13,9 @@ context("colocboostPipeline (S4 dispatch)")
 # ----------------------------------------------------------------------------
 # colocboost::colocboost is the heavy compute; we mock it to return a stub
 # result so the pipeline orchestration runs end-to-end. The helpers
-# (.cbBuildLdArgs, .cbMergeSumstatBundles,
-# .cbRequireMatchingLdRefs, .cbEmptyResult) are exercised directly.
+# (.cbBuildLdArgs, .cbMergeSumstatBundles, .cbResultLdRefs, .cbEmptyResult)
+# are exercised directly.
 # ===========================================================================
-
-.cbp_makeHandle <- function(snp_n = 6L, n_samples = 30L, sample_prefix = "s") {
-    new(
-        "GenotypeHandle",
-        path = "/tmp/cb",
-        format = "plink2",
-        snpInfo = data.frame(
-            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
-            CHR = rep("1", snp_n),
-            BP = seq(100L, by = 100L, length.out = snp_n),
-            A1 = rep("A", snp_n),
-            A2 = rep("G", snp_n),
-            stringsAsFactors = FALSE
-        ),
-        nSamples = n_samples,
-        sampleIds = paste0(sample_prefix, seq_len(n_samples)),
-        pgenPtr = NULL
-    )
-}
 
 .cbp_mockExtractor <- function(seed = 11, n_samples = 30L) {
     function(handle, snpIdx, meanImpute = TRUE) {
@@ -212,11 +121,11 @@ context("colocboostPipeline (S4 dispatch)")
         entry = list(gr),
         genome = "hg19",
         ldReference = .cbp_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        qcOptions = if (qc) list(step1 = "ok") else list()
     )
 }
 
-.cbp_makeGwasSumStats <- function(qc = TRUE) {
+.cbp_makeGwasSumStats <- function(qc = TRUE, ldReference = .cbp_makeHandle()) {
     gr <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(
@@ -235,9 +144,17 @@ context("colocboostPipeline (S4 dispatch)")
         studyName = "G1",
         entry = list(gr),
         genome = "hg19",
-        ldReference = .cbp_makeHandle(),
-        qcInfo = if (qc) list(step1 = "ok") else list()
+        ldReference = ldReference,
+        qcOptions = if (qc) list(step1 = "ok") else list()
     )
+}
+
+# An LdMatrix over the fixtures' five variants, so a side can be put on a
+# reference other than the shared genotype panel.
+.cbp_makeLdMatrix <- function(rho = 0.2) {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    r <- rho^abs(outer(1:5, 1:5, "-"))
+    LdMatrix(`dimnames<-`(r, list(ids, ids)))
 }
 
 # ===========================================================================
@@ -265,44 +182,21 @@ test_that(".cbBuildLdArgs: empty list returns empty list", {
     expect_equal(pecotmr:::.cbBuildLdArgs(list()), list())
 })
 
-test_that("SignalScreenParam enforces one metric and threads the right spec", {
-    expect_error(
-        SignalScreenParam(pip = 0.5, absZ = 5),
-        "only one screening metric"
+test_that(".cbResidualizedY skips a context whose residualization fails", {
+    # A failing context is skipped with a message naming it, so one bad
+    # context does not end the whole run.
+    local_mocked_bindings(
+        .qtlResidualizedPhenotypes = function(...) {
+            stop("no samples shared")
+        },
+        .package = "pecotmr"
     )
-    expect_equal(
-        pecotmr:::.screenResolve(SignalScreenParam(absZ = 5)),
-        list(metric = "absZ", cutoff = 5)
+    expect_message(
+        out <- pecotmr:::.cbResidualizedY(NULL, "brain", NULL, NULL),
+        "skipping context 'brain' (residualized phenotypes unavailable)",
+        fixed = TRUE
     )
-    expect_equal(
-        pecotmr:::.screenResolve(SignalScreenParam(bf = 100)),
-        list(metric = "bf", cutoff = 100)
-    )
-    # legacy pip scalar passes through as a bare numeric
-    expect_equal(pecotmr:::.screenResolve(SignalScreenParam(pip = 0.3)), 0.3)
-    expect_equal(
-        pecotmr:::.screenResolve(SignalScreenParam(pip = c(brain = 0.3))),
-        c(brain = 0.3)
-    ) # context-named pass-through
-    expect_null(pecotmr:::.screenResolve(SignalScreenParam()))
-})
-
-test_that(".cbResolveCutoff passes a screen object through uniformly", {
-    sc <- list(metric = "absZ", cutoff = 5)
-    expect_identical(pecotmr:::.cbResolveCutoff(sc, "brain"), sc)
-    expect_identical(pecotmr:::.cbResolveCutoff(sc, "blood"), sc)
-    expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "brain"), 0.3)
-    expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "blood"), 0) # unlisted ctx
-    expect_equal(pecotmr:::.cbResolveCutoff(0.5, "any"), 0.5)
-})
-
-test_that("enabling two screen metrics errors where it is written", {
-    # The constructor enforces it, so this fails at the call that builds the
-    # bundle -- before any pipeline runs.
-    expect_error(
-        SignalScreenParam(pip = 0.5, bf = 100),
-        "only one screening metric"
-    )
+    expect_null(out)
 })
 
 test_that(".cbRequireSumStatsQc: un-QCd input errors", {
@@ -323,39 +217,6 @@ test_that(".cbRequireSumStatsQc: QCd input passes", {
 })
 
 
-test_that(".cbRequireMatchingLdRefs: NULL sides are allowed", {
-    expect_silent(pecotmr:::.cbRequireMatchingLdRefs(
-        NULL,
-        .cbp_makeHandle()
-    ))
-    expect_silent(pecotmr:::.cbRequireMatchingLdRefs(
-        .cbp_makeHandle(),
-        NULL
-    ))
-})
-
-test_that(".cbRequireMatchingLdRefs: accepts differently trimmed panels", {
-    # Separate QC of the two sides trims one shared LD reference to two
-    # overlapping-but-unequal variant sets; the check reports, not refuses.
-    expect_warning(
-        expect_null(pecotmr:::.cbRequireMatchingLdRefs(
-            .cbp_makeHandle(snp_n = 4L),
-            .cbp_makeHandle(snp_n = 5L)
-        )),
-        "share 4 variant"
-    )
-})
-
-test_that(".cbRequireMatchingLdRefs: sample-set mismatch errors", {
-    expect_error(
-        pecotmr:::.cbRequireMatchingLdRefs(
-            .cbp_makeHandle(sample_prefix = "a"),
-            .cbp_makeHandle(sample_prefix = "b")
-        ),
-        "different sample sets"
-    )
-})
-
 test_that(".cbMergeSumstatBundles: empty input gives empty dict", {
     res <- pecotmr:::.cbMergeSumstatBundles(list())
     expect_equal(length(res$sumstat), 0L)
@@ -375,8 +236,9 @@ test_that(".cbMergeSumstatBundles: identical LD matrices are deduplicated", {
     expect_identical(res$ldArg, "LD")
 })
 
-test_that(".cbMergeSumstatBundles records factors and refuses a mix", {
-    f <- matrix(c(1, -1, 0.5, -0.5), 2)
+test_that(".cbMergeSumstatBundles records factors and turns a mix into LD", {
+    ids <- c("v1", "v2")
+    f <- matrix(c(1, -1, 0.5, -0.5), 2, dimnames = list(NULL, ids))
     factors <- list(
         a = list(sumstat = data.frame(z = 1:2), LD = f, isFactor = TRUE),
         b = list(sumstat = data.frame(z = 3:4), LD = f, isFactor = TRUE)
@@ -384,11 +246,18 @@ test_that(".cbMergeSumstatBundles records factors and refuses a mix", {
     res <- pecotmr:::.cbMergeSumstatBundles(factors)
     expect_identical(res$ldArg, "X_ref")
     expect_equal(length(res$LD), 1L)
-    mixed <- list_assign(factors, b = list_assign(factors$b, isFactor = FALSE))
-    expect_error(
-        pecotmr:::.cbMergeSumstatBundles(mixed),
-        "mix LD matrices and genotype factors"
+    # colocboost takes LD or X_ref, never both, so a run whose two sides use
+    # different kinds of reference gets the factor as its LD matrix.
+    ld <- matrix(c(1, 0.3, 0.3, 1), 2, dimnames = list(ids, ids))
+    mixed <- list_assign(
+        factors,
+        b = list(sumstat = data.frame(z = 3:4), LD = ld, isFactor = FALSE)
     )
+    res <- pecotmr:::.cbMergeSumstatBundles(mixed)
+    expect_identical(res$ldArg, "LD")
+    expect_equal(res$LD[[1L]], crossprod(f) / (nrow(f) - 1L))
+    expect_identical(res$LD[[2L]], ld)
+    expect_equal(unname(res$dict_sumstatLD[, "LD"]), 1:2)
 })
 
 test_that(".cbEmptyResult: is the internal per-analysis accumulator", {
@@ -433,7 +302,7 @@ test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked
     # ran" is read off the recorded timing rather than off a retained raw
     # object -- the timing is written whether or not the run produced sets.
     expect_s4_class(out, "ColocBoostResult")
-    expect_true(is_in("xqtl_coloc", names(computingTime(out)$Analysis)))
+    expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
     expect_true("X" %in% names(capturedArgs))
 })
 
@@ -443,17 +312,35 @@ test_that("colocboostPipeline(QtlDataset): no QTL bundle and no GWAS returns emp
         extractBlockGenotypes = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
-    # An impossible traitId narrows the phenotype matrix to zero columns;
-    # the bundle ends up NULL and the driver short-circuits.
+    # A signal screen no outcome clears skips every context; the bundle
+    # ends up NULL and the driver short-circuits.
     out <- suppressMessages(suppressWarnings(
         colocboostPipeline(
             qd,
             contexts = "brain",
-            traitId = "ENSG_DOES_NOT_EXIST",
+            signalScreenParam = SignalScreenParam(absZ = 1e6),
             xqtlColoc = TRUE
         )
     ))
-    expect_null(out$xqtl_coloc)
+    # No confidence set, and no analysis ran to be timed.
+    expect_s4_class(out, "ColocBoostResult")
+    expect_length(out, 0L)
+    expect_equal(nrow(computingTime(out)), 0L)
+})
+
+test_that("colocboostPipeline refuses a trait selection that matches nothing", {
+    # As fineMappingPipeline and twasWeightsPipeline do, rather than
+    # returning an empty result.
+    expect_error(
+        colocboostPipeline(.cbp_makeQtlDataset(), traitId = "nope"),
+        "colocboostPipeline(QtlDataset): no traits selected.",
+        fixed = TRUE
+    )
+    expect_error(
+        colocboostPipeline(.cbp_makeQtlSumStats(), traitId = "nope"),
+        "colocboostPipeline(QtlSumStats): no entries matched the ",
+        fixed = TRUE
+    )
 })
 
 # ===========================================================================
@@ -508,7 +395,7 @@ test_that("colocboostPipeline: jointGwas merges qtl + gwas sumstats and runs onc
             separateGwas = FALSE
         )
     )
-    expect_true(is_in("joint_gwas", names(computingTime(out)$Analysis)))
+    expect_true(is_in("joint_gwas", computingTime(out)$analysis))
 })
 
 test_that("colocboostPipeline: separateGwas runs once per GWAS study", {
@@ -549,7 +436,7 @@ test_that("colocboostPipeline: separateGwas runs once per GWAS study", {
     # The QTL side's LD travels with it, so the dict covers both sumstats.
     expect_equal(nrow(call$dict_sumstatLD), 2L)
     expect_true(
-        is_in("separate_gwas", names(computingTime(out)$Analysis))
+        is_in("separate_gwas", computingTime(out)$analysis)
     )
 })
 
@@ -610,86 +497,116 @@ test_that("colocboostPipeline: no analysis flag set is an error", {
     }
 })
 
-test_that("colocboostPipeline: GWAS ldReference mismatch errors in driver", {
+test_that("a GWAS on a different LD reference runs, and both are recorded", {
+    # The two sides need not share a reference: a GWAS panel with another
+    # sample set is matched against on its own rather than refused.
     ss <- .cbp_makeQtlSumStats()
-    # Build a GwasSumStats whose ldReference has a different sample set.
-    gh_diff <- .cbp_makeHandle(sample_prefix = "z")
-    gr <- GenomicRanges::GRanges(
-        seqnames = "chr1",
-        ranges = IRanges::IRanges(
-            start = seq(100L, by = 100L, length.out = 5L),
-            width = 1L
-        )
+    gs <- .cbp_makeGwasSumStats(
+        ldReference = .cbp_makeHandle(sample_prefix = "z")
     )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
-        A1 = rep("A", 5),
-        A2 = rep("G", 5),
-        Z = rnorm(5),
-        N = rep(1000L, 5)
-    )
-    gs <- GwasSumStats(
-        studyName = "G1",
-        entry = list(gr),
-        genome = "hg19",
-        ldReference = gh_diff,
-        qcInfo = list(step1 = "ok")
-    )
-    # .cbQtlSumStatsBundle reads the qtl sketch via extractBlockGenotypes
-    # before the LD-sketch mismatch check fires further down the driver, so
-    # mock the extractor here too.
+    seen <- list()
     local_mocked_bindings(
         extractBlockGenotypes = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
-    expect_error(
-        suppressMessages(
-            colocboostPipeline(
-                ss,
-                gwasSumStats = gs,
-                xqtlColoc = FALSE,
-                jointGwas = TRUE
-            )
-        ),
-        "different sample sets"
+    local_mocked_bindings(
+        colocboost = function(...) {
+            seen[[length(seen) + 1L]] <<- list(...)
+            list(jointly_run = TRUE)
+        },
+        .package = "colocboost"
     )
+    out <- suppressMessages(
+        colocboostPipeline(
+            ss,
+            gwasSumStats = gs,
+            xqtlColoc = FALSE,
+            jointGwas = TRUE
+        )
+    )
+    expect_equal(length(seen), 1L)
+    expect_equal(nrow(seen[[1L]]$dict_sumstatLD), 2L)
+    # Each outcome keys to the reference it was matched against.
+    refs <- ldReference(out)
+    expect_length(refs, 2L)
+    info <- out@outcomeInfo
+    keys <- info$ldReference[match(c("Q1:c1:t1", "G1"), info$name)]
+    expect_identical(refs[[keys[[1L]]]], ldReference(ss)[[1L]])
+    expect_identical(refs[[keys[[2L]]]], ldReference(gs)[[1L]])
+})
+
+test_that("a panel and an LdMatrix on opposite sides reach colocboost as LD", {
+    ss <- .cbp_makeQtlSumStats()
+    ldm <- .cbp_makeLdMatrix()
+    gs <- .cbp_makeGwasSumStats(ldReference = ldm)
+    seen <- list()
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            seen[[length(seen) + 1L]] <<- list(...)
+            list(jointly_run = TRUE)
+        },
+        .package = "colocboost"
+    )
+    out <- suppressMessages(
+        colocboostPipeline(
+            ss,
+            gwasSumStats = gs,
+            xqtlColoc = TRUE,
+            jointGwas = TRUE
+        )
+    )
+    nSumstats <- map_int(seen, function(call) length(call$sumstat))
+    xqtl <- seen[[which(nSumstats == 1L)]]
+    joint <- seen[[which(nSumstats == 2L)]]
+    # The QTL-only run has one kind of reference and keeps the panel's factor.
+    expect_null(xqtl$LD)
+    factor <- xqtl$X_ref[[1L]]
+    # colocboost takes LD or X_ref but not both, so the joint run gets the
+    # panel's factor as its LD matrix alongside the LdMatrix's own.
+    expect_null(joint$X_ref)
+    dict <- joint$dict_sumstatLD
+    expect_equal(
+        joint$LD[[dict[1L, "LD"]]],
+        crossprod(factor) / (nrow(factor) - 1L)
+    )
+    expect_equal(
+        unname(joint$LD[[dict[2L, "LD"]]]),
+        0.2^abs(outer(1:5, 1:5, "-"))
+    )
+    expect_identical(
+        unname(ldReference(out)),
+        list(ldReference(ss)[[1L]], ldm)
+    )
+})
+
+test_that(".cbResultLdRefs keys each outcome to its pair's reference", {
+    panel <- ldReference(.cbp_makeQtlSumStats())[[1L]]
+    ldm <- .cbp_makeLdMatrix()
+    pairs <- list(
+        `Q1:c1:t1` = list(ldReference = panel),
+        `Q1:c2:t1` = list(ldReference = panel),
+        G1 = list(ldReference = ldm)
+    )
+    out <- pecotmr:::.cbResultLdRefs(pairs)
+    # Each distinct reference once, however many outcomes used it.
+    expect_identical(out$refs, list(ld1 = panel, ld2 = ldm))
+    expect_equal(
+        out$keys,
+        c(`Q1:c1:t1` = "ld1", `Q1:c2:t1` = "ld1", G1 = "ld2")
+    )
+    # No pairs, no references.
+    none <- pecotmr:::.cbResultLdRefs(list())
+    expect_identical(none$refs, list())
+    expect_length(none$keys, 0L)
 })
 
 # ===========================================================================
 # GWAS case/control: optional nCase/nControl columns + effective-N wiring
 # ===========================================================================
-
-test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)", {
-    gr <- GenomicRanges::GRanges(
-        seqnames = "chr1",
-        ranges = IRanges::IRanges(
-            start = seq(100L, by = 100L, length.out = 5L),
-            width = 1L
-        )
-    )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
-        A1 = "A",
-        A2 = "G",
-        Z = rnorm(5),
-        N = rep(1000L, 5)
-    )
-    base <- list(
-        study = "G1",
-        entry = list(gr),
-        genome = "hg19",
-        ldReference = .cbp_makeHandle(),
-        qcInfo = list(ok = 1)
-    )
-    g0 <- exec(GwasSumStats, !!!base)
-    expect_false(any(
-        c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
-    ))
-    g1 <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
-    expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
-    expect_equal(g1$nCase, 500)
-    expect_equal(g1$nControl, 1500)
-})
 
 test_that("colocboost GWAS bundle: effective N for case/control, per-variant N otherwise", {
     gr <- GenomicRanges::GRanges(
@@ -711,7 +628,7 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
         entry = list(gr),
         genome = "hg19",
         ldReference = .cbp_makeHandle(),
-        qcInfo = list(ok = 1)
+        qcOptions = list(ok = 1)
     )
     local_mocked_bindings(
         extractBlockGenotypes = .cbp_mockExtractor(),
@@ -758,7 +675,11 @@ test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutof
     expect_null(pecotmr:::.cbPipSkipOutcomes(X, Yn, 0.5))
 })
 
-test_that(".cbResolveCutoff: scalar applies to all; named vector is per-context", {
+test_that(".cbResolveCutoff: screen/scalar uniform, named vector per context", {
+    # A resolved screen object applies to every context alike.
+    sc <- list(metric = "absZ", cutoff = 5)
+    expect_identical(pecotmr:::.cbResolveCutoff(sc, "brain"), sc)
+    expect_identical(pecotmr:::.cbResolveCutoff(sc, "blood"), sc)
     expect_equal(pecotmr:::.cbResolveCutoff(0.5, "brain"), 0.5)
     expect_equal(
         pecotmr:::.cbResolveCutoff(c(brain = 0.3, blood = 0.7), "blood"),
@@ -782,6 +703,47 @@ test_that(".cbResolveCutoff: scalar applies to all; named vector is per-context"
     )
 }
 
+test_that("colocboostPipeline(MultiStudy) refuses a trait no study carries", {
+    expect_error(
+        colocboostPipeline(.cbp_makeMultiStudy(), traitId = "nope"),
+        "colocboostPipeline(MultiStudyQtlDataset): no traits selected.",
+        fixed = TRUE
+    )
+    # A trait only the embedded sumstats carry still selects something.
+    expect_silent(pecotmr:::.cbMsAssertTraitsSelected(
+        .cbp_makeMultiStudy(),
+        NULL,
+        "t1"
+    ))
+})
+
+test_that("colocboostPipeline(MultiStudy): context selection skips a study", {
+    # As in fineMappingPipeline: a context only some studies have is skipped
+    # for the others, with a warning, and one no study has is refused.
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) list(stub = TRUE),
+        .package = "colocboost"
+    )
+    expect_warning(
+        out <- suppressMessages(colocboostPipeline(
+            .cbp_makeMultiStudy(),
+            contexts = "c1",
+            xqtlColoc = TRUE
+        )),
+        "study 'study1' is missing requested context\\(s\\): c1"
+    )
+    # Only the summary statistics' outcome reached colocboost.
+    expect_identical(out@outcomeInfo$name, "Q1:c1:t1")
+    expect_error(
+        colocboostPipeline(.cbp_makeMultiStudy(), contexts = "ghost"),
+        "no study has: ghost"
+    )
+})
+
 test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles + embedded sumstats", {
     mt <- .cbp_makeMultiStudy()
     capturedArgs <- NULL
@@ -803,7 +765,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles 
         separateGwas = FALSE
     ))
     expect_s4_class(out, "ColocBoostResult")
-    expect_true(is_in("xqtl_coloc", names(computingTime(out)$Analysis)))
+    expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
     # The individual study's outcome is prefixed "study1:" in the combined bundle.
     expect_true(any(grepl("study1:", names(capturedArgs$Y))))
 })
@@ -818,11 +780,16 @@ test_that(".cbRun: an engine failure is caught -> message + NULL", {
         colocboost = function(...) stop("engine boom"),
         .package = "colocboost"
     )
-    out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
-    expect_null(out$xqtl_coloc) # .cbRun caught (123-124)
+    expect_message(
+        out <- colocboostPipeline(qd, xqtlColoc = TRUE),
+        "xQTL-only ColocBoost failed"
+    )
+    # The run was attempted and timed, and contributes no confidence set.
+    expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
+    expect_length(out, 0L)
 })
 
-test_that(".cbIndividualBundle: multi-context bundle names + prefixes outcomes", {
+test_that(".cbIndividualBundle: multi-context outcomes get context prefixes", {
     qd <- .cbp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
     capturedArgs <- NULL
     local_mocked_bindings(
@@ -837,9 +804,21 @@ test_that(".cbIndividualBundle: multi-context bundle names + prefixes outcomes",
         .package = "colocboost"
     )
     out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
-    expect_true(is_in("xqtl_coloc", names(computingTime(out)$Analysis)))
-    # Two contexts -> two context-prefixed outcomes (covers the xMatch + naming).
-    expect_gte(length(capturedArgs$Y), 2L)
+    expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
+    # ENSG_A is in both contexts, so each outcome is prefixed with its context
+    # to tell the two apart, and colocboost is handed those names.
+    prefixed <- c("brain_ENSG_A", "liver_ENSG_A")
+    expect_identical(names(capturedArgs$Y), prefixed)
+    expect_identical(capturedArgs$outcome_names, prefixed)
+    # The contexts share genotypes and samples, so their X deduplicates to the
+    # first context's, and dict_YX maps both outcomes to it (the xMatch).
+    expect_identical(names(capturedArgs$X), "brain")
+    expect_identical(capturedArgs$dict_YX, cbind(Y = 1:2, X = c(1L, 1L)))
+    # Each prefixed name still resolves to the context and trait behind it.
+    info <- out@outcomeInfo
+    expect_identical(info$name, prefixed)
+    expect_identical(info$context, c("brain", "liver"))
+    expect_identical(info$trait, c("ENSG_A", "ENSG_A"))
 })
 
 test_that("colocboostPipeline(QtlDataset): unknown context errors", {
@@ -851,7 +830,7 @@ test_that("colocboostPipeline(QtlDataset): unknown context errors", {
     expect_error(
         colocboostPipeline(qd, contexts = "ghost", xqtlColoc = TRUE),
         "Unknown context"
-    ) # 209
+    )
 })
 
 test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcome -> empty", {
@@ -867,7 +846,9 @@ test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcom
             signalScreenParam = SignalScreenParam(pip = 0.9999)
         )
     ))
-    expect_null(out$xqtl_coloc) # 249-253 skip -> empty
+    # The screen leaves no outcome, so nothing runs and no set is reported.
+    expect_length(out, 0L)
+    expect_equal(nrow(computingTime(out)), 0L)
 })
 
 test_that(".cbPipSkipOutcomes: an outcome with < 2 observations is skipped", {
@@ -880,11 +861,11 @@ test_that(".cbPipSkipOutcomes: an outcome with < 2 observations is skipped", {
     )
     Y <- cbind(a = c(1, rep(NA, 29)), b = rnorm(30)) # col a: 1 obs (< 2)
     res <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
-    expect_true(is.null(res) || is.matrix(res)) # col a -> next (180)
+    expect_false(is_in("a", colnames(res)))
 })
 
 test_that(".cbSumstatPair: NULL / empty df -> NULL", {
-    expect_null(pecotmr:::.cbSumstatPair(NULL, .cbp_makeHandle())) # 317
+    expect_null(pecotmr:::.cbSumstatPair(NULL, .cbp_makeHandle()))
     expect_null(pecotmr:::.cbSumstatPair(data.frame(), .cbp_makeHandle()))
 })
 
@@ -894,14 +875,14 @@ test_that(".cbQtlSumStatsBundle: NULL / context / trait filters and empty result
         extractBlockGenotypes = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
-    expect_equal(pecotmr:::.cbQtlSumStatsBundle(NULL), list()) # 359
-    expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "c1"), 1L) # 363
-    expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, traitId = "t1"), 1L) # 366
-    expect_equal(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "ghost"), list()) # 368
+    expect_equal(pecotmr:::.cbQtlSumStatsBundle(NULL), list())
+    expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "c1"), 1L)
+    expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, traitId = "t1"), 1L)
+    expect_equal(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "ghost"), list())
 })
 
 test_that(".cbGwasSumStatsBundle: NULL -> empty list", {
-    expect_equal(pecotmr:::.cbGwasSumStatsBundle(NULL), list()) # 390
+    expect_equal(pecotmr:::.cbGwasSumStatsBundle(NULL), list())
 })
 
 test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:pos", {
@@ -917,9 +898,9 @@ test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:
         stringsAsFactors = FALSE
     )
     pair <- pecotmr:::.cbSumstatPair(df, h, varY = 0.7)
-    expect_true("var_y" %in% names(pair$sumstat)) # 350
+    expect_true("var_y" %in% names(pair$sumstat))
     expect_equal(unique(pair$sumstat$var_y), 0.7)
-    # NA variant_id -> formatVariantId fallback (322-323); no panel overlap -> NULL (330)
+    # NA variant_id -> formatVariantId fallback; no panel overlap -> NULL
     dfNA <- data.frame(
         variant_id = NA_character_,
         chrom = "chr1",
@@ -1026,22 +1007,45 @@ test_that(".cbHarmonizeAlleles aligns opposite-coded sumstats to one canonical (
     expect_equal(h$pairs$B$sumstat$z, -3) # B flipped to match
 })
 
-test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bundle is skipped", {
+test_that("colocboostPipeline(MultiStudy): a study with no bundle is skipped", {
     mt <- .cbp_makeMultiStudy() # qd (study1, ENSG_A) + ss (Q1, t1)
+    seen <- list()
     local_mocked_bindings(
         extractBlockGenotypes = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
-        colocboost = function(...) list(stub = TRUE),
+        colocboost = function(...) {
+            seen[[length(seen) + 1L]] <<- list(...)
+            list(stub = TRUE)
+        },
         .package = "colocboost"
     )
     # traitId="t1" matches the embedded sumstats but not the QtlDataset -> its
-    # per-study bundle is NULL and skipped (684); the sumstat side still runs.
+    # per-study bundle is NULL and skipped; the sumstat side still runs.
     out <- suppressMessages(suppressWarnings(
         colocboostPipeline(mt, traitId = "t1", xqtlColoc = TRUE)
     ))
-    expect_s4_class(out, "ColocBoostResult")
+    # One xQTL-only run over the summary statistics alone: no individual-level
+    # data reached colocboost, and no "study1:" outcome was named.
+    expect_length(seen, 1L)
+    call <- seen[[1L]]
+    expect_false(any(is_in(c("X", "Y", "dict_YX"), names(call))))
+    expect_identical(call$outcome_names, "Q1:c1:t1")
+    expect_identical(names(call$sumstat), "Q1:c1:t1")
+    # The result times that run and records only the summary-level outcome,
+    # keyed to the embedded sumstats' LD reference.
+    expect_identical(computingTime(out)$analysis, "xqtl_coloc")
+    expect_length(out, 0L)
+    info <- out@outcomeInfo
+    expect_identical(info$name, "Q1:c1:t1")
+    expect_identical(info$study, "Q1")
+    expect_identical(info$dataForm, "sumstats")
+    expect_length(ldReference(out), 1L)
+    expect_identical(
+        ldReference(out)[[info$ldReference]],
+        ldReference(sumStats(mt))[[1L]]
+    )
 })
 
 
@@ -1053,11 +1057,11 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
 # reference panel, on both the QTL and the GWAS sumstat sides.
 # ---------------------------------------------------------------------------
 
-# @noRd
-.cbf_qcd <- function() {
+# summaryStatsQc() of the bundled example, run once for the tests below.
+.cbf_ss <- local({
     data(qtlSumStatsExample, envir = environment())
     suppressMessages(summaryStatsQc(qtlSumStatsExample))
-}
+})
 
 # @noRd
 .cbf_n <- function(ss, ...) {
@@ -1069,12 +1073,12 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
 }
 
 test_that("colocboost sumstat bundle filters nothing by default", {
-    ss <- .cbf_qcd()
+    ss <- .cbf_ss
     expect_equal(.cbf_n(ss), sum(lengths(ss)))
 })
 
 test_that("colocboost sumstat bundle drops panel-rare variants", {
-    ss <- .cbf_qcd()
+    ss <- .cbf_ss
     full <- .cbf_n(ss)
     loose <- .cbf_n(ss, mafCutoff = 0.05)
     tight <- .cbf_n(ss, mafCutoff = 0.2)
@@ -1083,9 +1087,9 @@ test_that("colocboost sumstat bundle drops panel-rare variants", {
 })
 
 test_that("colocboost RSS cutoffs match .panelVariantFilter", {
-    ss <- .cbf_qcd()
+    ss <- .cbf_ss
     ids <- normalizeVariantId(
-        as.data.frame(
+        .sumStatsDf(
             ss,
             studyName = ss$study[[1L]],
             context = ss$context[[1L]],
@@ -1097,7 +1101,7 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
         expect_equal(
             .cbf_n(ss, mafCutoff = cut),
             length(.panelVariantFilter(
-                ldReference(ss),
+                ldReference(ss)[[1L]],
                 ids,
                 PanelFilterParam(mafCutoff = cut)
             )),
@@ -1107,8 +1111,8 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
 })
 
 test_that("colocboost RSS treats MAC as a MAF equivalent", {
-    ss <- .cbf_qcd()
-    nSamp <- ncol(ldReference(ss))
+    ss <- .cbf_ss
+    nSamp <- ncol(ldReference(ss)[[1L]])
     expect_equal(
         .cbf_n(ss, macCutoff = 0.1 * 2 * nSamp),
         .cbf_n(ss, mafCutoff = 0.1)
@@ -1116,7 +1120,7 @@ test_that("colocboost RSS treats MAC as a MAF equivalent", {
 })
 
 test_that("colocboost RSS honours a missingness cutoff", {
-    ss <- .cbf_qcd()
+    ss <- .cbf_ss
     expect_lt(.cbf_n(ss, imissCutoff = 0), sum(lengths(ss)))
     expect_equal(.cbf_n(ss, imissCutoff = 1), sum(lengths(ss)))
 })
@@ -1125,15 +1129,15 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
     # The row filter indexes df by the FULL-length variant id vector, so the
     # filtered set has to be passed to the LD build separately rather than by
     # shrinking that vector.
-    ss <- .cbf_qcd()
-    df <- as.data.frame(
+    ss <- .cbf_ss
+    df <- .sumStatsDf(
         ss,
         studyName = ss$study[[1L]],
         context = ss$context[[1L]],
         trait = ss$trait[[1L]],
         require = "Z"
     )
-    sketch <- ldReference(ss)
+    sketch <- ldReference(ss)[[1L]]
     pair <- suppressMessages(.cbSumstatPair(
         df = df,
         ldReference = sketch,
@@ -1157,7 +1161,7 @@ test_that("colocboost reads a panel's factor and its LdMatrix alike", {
     skip_if_not_installed("colocboost")
     data(qtlSumStatsMulticontextExample)
     ss <- suppressMessages(summaryStatsQc(qtlSumStatsMulticontextExample))
-    panel <- ldReference(ss)
+    panel <- ldReference(ss)[[1L]]
     withLd <- QtlSumStats(
         studyName = ss$study,
         context = ss$context,
@@ -1168,7 +1172,7 @@ test_that("colocboost reads a panel's factor and its LdMatrix alike", {
             unname(computeLd(panel)),
             variants = SummarizedExperiment::rowRanges(panel)
         ),
-        qcInfo = qcInfo(ss)
+        qcOptions = qcOptions(ss)
     )
     set.seed(1)
     viaPanel <- suppressWarnings(suppressMessages(colocboostPipeline(ss)))
@@ -1179,8 +1183,8 @@ test_that("colocboost reads a panel's factor and its LdMatrix alike", {
 })
 
 test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
-    ss <- .cbf_qcd()
-    df <- as.data.frame(
+    ss <- .cbf_ss
+    df <- .sumStatsDf(
         ss,
         studyName = ss$study[[1L]],
         context = ss$context[[1L]],
@@ -1189,7 +1193,7 @@ test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
     )
     expect_null(suppressMessages(.cbSumstatPair(
         df = df,
-        ldReference = ldReference(ss),
+        ldReference = ldReference(ss)[[1L]],
         cutoffs = list(mafCutoff = 0.99, macCutoff = 0, imissCutoff = 1)
     )))
 })
@@ -1255,7 +1259,8 @@ test_that("a MultiStudyQtlDataset with no embedded sumstats yields no pairs", {
     out <- pecotmr:::.cbMultiStudySumstats(
         multiStudyQtlDatasetExample,
         contexts = NULL,
-        traitId = NULL
+        traitId = NULL,
+        cisWindow = NULL
     )
     expect_equal(out$qtlPairs, list())
     expect_null(out$qtlLdReference)
@@ -1312,21 +1317,37 @@ test_that(".cbBuildContextXY skips a context with no shared samples", {
 
 test_that(".cbResidualizedX reports why genotypes were unavailable", {
     local_mocked_bindings(
-        residualizedGenotypes = function(...) stop("kaboom"),
+        .qtlResidualizedGenotypes = function(...) stop("kaboom"),
         .package = "pecotmr"
     )
     # The cause is chained via `parent`, not flattened into the text, so the
     # rendered message still shows it AND it stays reachable as a condition.
     # catch_cnd() rather than expect_message(), which returns NULL.
     cnd <- rlang::catch_cnd(
-        pecotmr:::.cbResidualizedX(NULL, "c1", NULL, NULL, NULL, NULL),
+        pecotmr:::.cbResidualizedX(
+            NULL,
+            "c1",
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            genotypeFilter = pecotmr:::.qtlResolveFilter()
+        ),
         classes = "message"
     )
     expect_match(conditionMessage(cnd), "residualized genotypes unavailable")
     expect_match(conditionMessage(cnd), "kaboom")
     expect_match(conditionMessage(cnd$parent), "kaboom")
     expect_null(suppressMessages(
-        pecotmr:::.cbResidualizedX(NULL, "c1", NULL, NULL, NULL, NULL)
+        pecotmr:::.cbResidualizedX(
+            NULL,
+            "c1",
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            genotypeFilter = pecotmr:::.qtlResolveFilter()
+        )
     ))
 })
 
@@ -1409,7 +1430,7 @@ test_that(".cbRunXqtlOnly runs on a summary-level QTL side alone", {
     expect_null(captured$dict_YX)
     expect_equal(names(captured$sumstat), c("qtlA", "qtlB"))
     expect_equal(captured$outcome_names, c("qtlA", "qtlB"))
-    # focalTrait is honored on the summary-level side too.
+    # A focal outcome is honored on the summary-level side too.
     expect_equal(captured$focal_outcome_idx, 2L)
     # Identical LD matrices dedupe to one, so the dict points both at it.
     expect_equal(unname(captured$dict_sumstatLD[, "LD"]), c(1L, 1L))
@@ -1463,12 +1484,12 @@ test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
         xqtlColoc = TRUE,
         jointGwas = FALSE,
         separateGwas = FALSE,
-        focalTrait = NULL,
+        focal = NULL,
         methodArgs = ColocboostOptions(),
         qtlSumstatBundle = qtlOnly
     ))
     expect_equal(called, "xqtl")
-    expect_false(is.null(computingTime(out)$Analysis$xqtl_coloc))
+    expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
 })
 
 test_that(".cbRunVariants warns instead of silently skipping an analysis", {
@@ -1491,7 +1512,7 @@ test_that(".cbRunVariants warns instead of silently skipping an analysis", {
             xqtlColoc = FALSE,
             jointGwas = TRUE,
             separateGwas = TRUE,
-            focalTrait = NULL,
+            focal = NULL,
             methodArgs = ColocboostOptions()
         ))
     )
@@ -1515,13 +1536,13 @@ test_that(".cbRunVariants warns when xqtlColoc has only GWAS sumstats", {
             xqtlColoc = TRUE,
             jointGwas = FALSE,
             separateGwas = FALSE,
-            focalTrait = NULL,
+            focal = NULL,
             methodArgs = ColocboostOptions(),
             qtlSumstatBundle = pecotmr:::.cbMergeSumstatBundles(list())
         )),
         "xqtlColoc = TRUE was requested"
     )
-    expect_null(computingTime(out)$Analysis$xqtl_coloc)
+    expect_false(is_in("xqtl_coloc", computingTime(out)$analysis))
 })
 
 test_that("ColocboostOptions() options reach the engine by name", {
@@ -1550,7 +1571,7 @@ test_that("ColocboostOptions() options reach the engine by name", {
         xqtlColoc = TRUE,
         jointGwas = FALSE,
         separateGwas = FALSE,
-        focalTrait = NULL,
+        focal = NULL,
         methodArgs = ColocboostOptions(M = 3L, stop_thresh = 0.02),
         qtlSumstatBundle = qtlOnly
     ))
@@ -1563,15 +1584,14 @@ test_that("ColocboostOptions() options reach the engine by name", {
 test_that(".cbAppendGwasPairs disambiguates a colliding study key", {
     local_mocked_bindings(
         .cbRequireSumStatsQc = function(...) invisible(NULL),
-        .cbGwasSumStatsBundle = function(gwasSumStats, cutoffs) {
+        .cbGwasSumStatsBundle = function(gwasSumStats, window, cutoffs) {
             list(dup = "GWAS")
         },
         .package = "pecotmr"
     )
     out <- pecotmr:::.cbAppendGwasPairs(
         list(dup = "QTL", other = "X"),
-        "notNull",
-        qtlLdReference = NULL
+        "notNull"
     )
     # The QTL pair keeps its key; the GWAS pair is suffixed rather than
     # overwriting it.
@@ -1591,8 +1611,8 @@ test_that("colocboostPipeline forwards residualizationParam to both sides", {
     # Y together, so a bundle that reached only the genotypes would
     # residualize the two against different covariate sets.
     data(qtlDatasetExample, envir = environment())
-    origG <- residualizedGenotypes
-    origP <- residualizedPhenotypes
+    origG <- pecotmr:::.qtlResidualizedGenotypes
+    origP <- pecotmr:::.qtlResidualizedPhenotypes
     seen <- new.env(parent = emptyenv())
     note <- function(which, ra) {
         assign(
@@ -1605,7 +1625,7 @@ test_that("colocboostPipeline forwards residualizationParam to both sides", {
         )
     }
     local_mocked_bindings(
-        residualizedGenotypes = function(
+        .qtlResidualizedGenotypes = function(
             x,
             ...,
             residualizationParam = ResidualizationParam()
@@ -1613,7 +1633,7 @@ test_that("colocboostPipeline forwards residualizationParam to both sides", {
             note("geno", residualizationParam)
             origG(x, ..., residualizationParam = residualizationParam)
         },
-        residualizedPhenotypes = function(
+        .qtlResidualizedPhenotypes = function(
             x,
             ...,
             residualizationParam = ResidualizationParam()
@@ -1630,4 +1650,397 @@ test_that("colocboostPipeline forwards residualizationParam to both sides", {
     )))
     expect_equal(unique(get("geno", envir = seen)), "FALSE")
     expect_equal(unique(get("pheno", envir = seen)), "FALSE")
+})
+
+# ===========================================================================
+# One outcome per GWAS study; the focal outcome
+# ===========================================================================
+
+# One GWAS study over three rows: two LD blocks on chr1 (100-300, 400-500)
+# and one on chr2.
+.cbp_makeBlockedGwas <- function() {
+    gr <- GenomicRanges::GRanges(
+        c(rep("chr1", 5L), "chr2"),
+        IRanges::IRanges(c(100L * (1:5), 100L), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = c(sprintf("chr1:%d:A:G", 100L * (1:5)), "chr2:100:A:G"),
+        A1 = rep("A", 6L),
+        A2 = rep("G", 6L),
+        Z = seq_len(6L) / 10,
+        N = rep(1000L, 6L)
+    )
+    GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .cbp_makeHandle(),
+        qcOptions = list(ok = 1),
+        region = GenomicRanges::GRanges(
+            c("chr1", "chr1", "chr2"),
+            IRanges::IRanges(c(1L, 301L, 1L), c(300L, 1000L, 1000L))
+        )
+    )
+}
+
+# Two GWAS studies over the fixtures' five chr1 variants.
+.cbp_makeTwoGwas <- function() {
+    gr <- .cbp_makeGwasSumStats()[[1L]]
+    GwasSumStats(
+        studyName = c("G1", "G2"),
+        entry = list(gr, gr),
+        genome = "hg19",
+        ldReference = .cbp_makeHandle(),
+        qcOptions = list(ok = 1)
+    )
+}
+
+test_that("a GWAS study is one outcome over the rows the QTL data reach", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    gws <- .cbp_makeBlockedGwas()
+    expect_equal(nrow(gws), 3L)
+    chr1 <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    # A window reaching both chr1 blocks gets their union as one outcome; the
+    # chr2 row is not read.
+    both <- pecotmr:::.cbGwasSumStatsBundle(
+        gws,
+        window = GenomicRanges::GRanges("chr1", IRanges::IRanges(150L, 450L))
+    )
+    expect_named(both, "G1")
+    expect_setequal(both$G1$sumstat$variant, chr1)
+    expect_equal(both$G1$study, "G1")
+    # A window inside one block reads that block alone.
+    one <- pecotmr:::.cbGwasSumStatsBundle(
+        gws,
+        window = GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, 200L))
+    )
+    expect_setequal(one$G1$sumstat$variant, chr1[1:3])
+    # A study none of whose rows the QTL data reach is left out, and said so.
+    expect_message(
+        none <- pecotmr:::.cbGwasSumStatsBundle(
+            gws,
+            window = GenomicRanges::GRanges("chr3", IRanges::IRanges(1L, 9L))
+        ),
+        "leaving out GWAS G1"
+    )
+    expect_length(none, 0L)
+})
+
+test_that("a GWAS study's overlapped rows must share one LD reference", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    gws <- pecotmr:::.withRowLdRefs(
+        .cbp_makeBlockedGwas(),
+        list(.cbp_makeHandle(), .cbp_makeLdMatrix(), .cbp_makeHandle())
+    )
+    expect_error(
+        pecotmr:::.cbGwasSumStatsBundle(
+            gws,
+            window = GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(150L, 450L)
+            )
+        ),
+        "GWAS study 'G1' the QTL data overlap use 2 different LD references"
+    )
+})
+
+test_that(".cbAssertFocalOutcome takes NULL or a named QTL vector", {
+    ok <- list(
+        NULL,
+        c(trait = "ENSG1"),
+        c(study = "S1", context = "brain", trait = "ENSG1")
+    )
+    for (x in ok) {
+        expect_invisible(pecotmr:::.cbAssertFocalOutcome(x, TRUE))
+    }
+    # A GWAS study name is not one: its separate run is the focal one.
+    bad <- list(
+        NA,
+        "G1",
+        1,
+        c("G1", "G2"),
+        c(gene = "ENSG1"),
+        c("brain", trait = "ENSG1"),
+        c(trait = NA_character_),
+        character(0),
+        list(trait = "ENSG1")
+    )
+    for (x in bad) {
+        expect_error(
+            pecotmr:::.cbAssertFocalOutcome(x, TRUE),
+            "must be NULL or a named"
+        )
+    }
+    # Only the xQTL-only run is ever focal on a QTL outcome.
+    expect_error(
+        pecotmr:::.cbAssertFocalOutcome(c(trait = "ENSG1"), FALSE),
+        "but .xqtlColoc. is FALSE"
+    )
+    expect_invisible(pecotmr:::.cbAssertFocalOutcome(NULL, FALSE))
+})
+
+test_that(".cbResolveFocal: the one QTL outcome named, or none", {
+    qtlInfo <- tibble::tibble(
+        name = c("brain_ENSG1", "liver_ENSG1", "Q1:c1:t1"),
+        study = c("S1", "S1", "Q1"),
+        context = c("brain", "liver", "c1"),
+        trait = c("ENSG1", "ENSG1", "t1")
+    )
+    resolve <- function(focal) pecotmr:::.cbResolveFocal(focal, qtlInfo)
+    expect_null(resolve(NULL))
+    # A QTL outcome, by as many parts as it takes to name one.
+    expect_equal(resolve(c(context = "brain", trait = "ENSG1")), "brain_ENSG1")
+    expect_equal(resolve(c(trait = "t1")), "Q1:c1:t1")
+    expect_error(resolve(c(trait = "ENSG1")), "matches 2 QTL")
+    expect_error(resolve(c(trait = "nope")), "matches no QTL")
+})
+
+test_that("the joint run is non-focal; focalOutcome reaches xQTL-only", {
+    seen <- list()
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            seen[[length(seen) + 1L]] <<- list(...)
+            list(stub = TRUE)
+        },
+        .package = "colocboost"
+    )
+    # Built once: the runs below differ only in their flags.
+    qtl <- .cbp_makeQtlSumStats()
+    oneGwas <- .cbp_makeGwasSumStats()
+    run <- function(gws, ...) {
+        seen <<- list()
+        suppressMessages(colocboostPipeline(qtl, gwasSumStats = gws, ...))
+        seen
+    }
+    # One GWAS: the joint run and its separate run fit the same outcomes,
+    # one non-focal and one focal on the GWAS.
+    calls <- run(
+        oneGwas,
+        xqtlColoc = FALSE,
+        jointGwas = TRUE,
+        separateGwas = TRUE
+    )
+    expect_length(calls, 2L)
+    expect_equal(calls[[1L]]$outcome_names, c("Q1:c1:t1", "G1"))
+    expect_null(calls[[1L]]$focal_outcome_idx)
+    expect_equal(calls[[2L]]$outcome_names, c("Q1:c1:t1", "G1"))
+    expect_equal(calls[[2L]]$focal_outcome_idx, 2L)
+    # Several GWAS studies leave the joint run non-focal too.
+    twoGwas <- run(.cbp_makeTwoGwas(), xqtlColoc = FALSE, jointGwas = TRUE)
+    expect_null(twoGwas[[1L]]$focal_outcome_idx)
+    # A QTL outcome is focal in the xQTL-only run, and only there.
+    calls <- run(oneGwas, jointGwas = TRUE, focalOutcome = c(trait = "t1"))
+    expect_equal(calls[[1L]]$focal_outcome_idx, 1L)
+    expect_null(calls[[2L]]$focal_outcome_idx)
+    expect_error(
+        run(
+            oneGwas,
+            xqtlColoc = FALSE,
+            jointGwas = TRUE,
+            focalOutcome = c(trait = "t1")
+        ),
+        "but .xqtlColoc. is FALSE"
+    )
+    expect_error(
+        run(oneGwas, jointGwas = TRUE, focalOutcome = "G1"),
+        "must be NULL or a named"
+    )
+})
+
+test_that("a QTL sumstat outcome records the tuple it came from", {
+    pairs <- list(
+        `Q1:c1:t1` = list(study = "Q1", context = "c1", trait = "t1"),
+        G1 = list(study = "G1")
+    )
+    bundle <- list(sumstat = list(`Q1:c1:t1` = 1, G1 = 2))
+    info <- pecotmr:::.cbOutcomeInfo(
+        NULL,
+        bundle,
+        FALSE,
+        c(`Q1:c1:t1` = "ld1", G1 = "ld1"),
+        pecotmr:::.cbPairsInfo(pairs)
+    )
+    expect_equal(info$study, c("Q1", "G1"))
+    expect_equal(info$context, c("c1", NA))
+    expect_equal(info$trait, c("t1", NA))
+})
+
+test_that("a focalOutcome vector with no QTL outcomes to match says so", {
+    noQtl <- tibble::tibble(
+        name = character(0),
+        study = character(0),
+        context = character(0),
+        trait = character(0)
+    )
+    expect_error(
+        pecotmr:::.cbResolveFocal(c(trait = "t1"), noQtl),
+        "The QTL outcomes are: none"
+    )
+})
+
+test_that("an outcome whose variants its LD reference lacks is left out", {
+    # The fixtures' LdMatrix holds chr1:100-500; these sit at 1100-1500.
+    ids <- sprintf("chr1:%d:A:G", 1100L + 100L * (0:4))
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(1100L + 100L * (0:4), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = ids,
+        A1 = rep("A", 5L),
+        A2 = rep("G", 5L),
+        Z = seq_len(5L) / 10,
+        N = rep(1000L, 5L)
+    )
+    qss <- QtlSumStats(
+        studyName = "Q1",
+        context = "c1",
+        trait = "t1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .cbp_makeLdMatrix(),
+        qcOptions = list(ok = 1)
+    )
+    expect_null(pecotmr:::.cbQtlEntryPair(1L, qss, NULL))
+    gws <- GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .cbp_makeLdMatrix(),
+        qcOptions = list(ok = 1)
+    )
+    expect_length(pecotmr:::.cbGwasSumStatsBundle(gws), 0L)
+})
+
+test_that(".cbQtlWindow places the QTL variants it can parse", {
+    asX <- function(ids) {
+        list(X = list(matrix(0, 2L, length(ids), dimnames = list(NULL, ids))))
+    }
+    # Nothing placed -- no QTL side, or only rsIDs -- leaves every GWAS row in.
+    expect_null(pecotmr:::.cbQtlWindow(NULL, list()))
+    expect_null(pecotmr:::.cbQtlWindow(asX(c("rs1", "rs2")), list()))
+    window <- pecotmr:::.cbQtlWindow(
+        asX(c("1:100:A:G", "rs2", "chr1:400:C:T")),
+        list()
+    )
+    expect_equal(as.character(GenomicRanges::seqnames(window)), "chr1")
+    expect_equal(GenomicRanges::start(window), 100L)
+    expect_equal(GenomicRanges::end(window), 400L)
+})
+
+test_that(".cbQtlVariants places the variants every QTL outcome reads", {
+    asX <- function(ids) {
+        list(X = list(matrix(0, 2L, length(ids), dimnames = list(NULL, ids))))
+    }
+    expect_null(pecotmr:::.cbQtlVariants(NULL, list()))
+    expect_null(pecotmr:::.cbQtlVariants(asX("rs1"), list()))
+    placed <- pecotmr:::.cbQtlVariants(
+        asX(c("1:100:A:G", "rs2")),
+        list(q1 = list(variantIds = c("chr1:100:A:G", "chr1:700:C:T")))
+    )
+    expect_identical(as.character(placed), c("chr1:100", "chr1:700"))
+})
+
+test_that("colocboost refuses QTL data reaching past a given block", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:5), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        A1 = "A",
+        A2 = "G",
+        Z = 1,
+        N = 100L
+    )
+    gws <- GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        qcOptions = list(ok = 1),
+        region = GenomicRanges::GRanges("chr1:1-550")
+    )
+    qtl <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(300L, 600L), width = 1L)
+    )
+    expect_error(
+        pecotmr:::.cbAppendGwasPairs(list(), gws, qtlVariants = qtl),
+        "the QTL data: 1 variant(s) past the end of block chr1:1-550",
+        fixed = TRUE
+    )
+    # Without QTL variants to place there is nothing to check.
+    expect_null(pecotmr:::.cbCheckBlockReach(NULL, gws))
+})
+
+test_that("colocboostPipeline(QtlSumStats) lays a cisWindow around traitPos", {
+    expect_error(
+        colocboostPipeline(.cbp_makeQtlSumStats(), cisWindow = 1000),
+        "colocboostPipeline: `cisWindow` is laid around each tuple's trait",
+        fixed = TRUE
+    )
+    # Naming a context reaches the same check: the window is laid on the
+    # tuples colocboost's own selection keeps.
+    expect_error(
+        colocboostPipeline(
+            .cbp_makeQtlSumStats(),
+            contexts = "c1",
+            cisWindow = 1000
+        ),
+        "colocboostPipeline: `cisWindow` is laid around each tuple's trait",
+        fixed = TRUE
+    )
+})
+
+test_that("colocboostPipeline(MSQD) lays cisWindow on its summary statistics", {
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    ss <- .cbp_makeQtlSumStats()
+    ss$traitPos <- GenomicRanges::GRanges("chr1:300")
+    mt <- MultiStudyQtlDataset(
+        qtlDatasets = list(
+            study1 = .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+        ),
+        sumStats = ss
+    )
+    pairs <- pecotmr:::.cbMultiStudySumstats(mt, NULL, NULL, 100)$qtlPairs
+    expect_identical(as.character(pairs[[1L]]$span), "chr1:200-400")
+    # A summary-statistics study without a trait position is an error, as it
+    # is on its own.
+    expect_error(
+        colocboostPipeline(.cbp_makeMultiStudy(), cisWindow = 100),
+        "colocboostPipeline: `cisWindow` is laid around each tuple's trait",
+        fixed = TRUE
+    )
+})
+
+# ===========================================================================
+# .cbToResultObject
+# ===========================================================================
+
+test_that("separate_gwas runs are keyed by gwasStudy", {
+    # The three analyses are not parallel: separate_gwas is a named list one
+    # level deeper, so without gwasStudy its sets would be indistinguishable.
+    raw <- list(
+        xqtl_coloc = NULL,
+        joint_gwas = NULL,
+        separate_gwas = list(G1 = .cbr_fake(), G2 = .cbr_fake()),
+        computing_time = list()
+    )
+    x <- .cbToResultObject(raw, .cbr_info())
+    expect_equal(nrow(x), 2L)
+    expect_equal(x$analysis, rep("separate_gwas", 2L))
+    expect_setequal(x$gwasStudy, c("G1", "G2"))
 })

@@ -39,6 +39,7 @@ test_that("lassosumRss runs successfully with valid input", {
     expect_true(all(is.finite(result$betaEst)))
     expect_equal(nrow(result$beta), p)
     expect_equal(ncol(result$beta), 20)
+    expect_length(result$conv, length(result$lambda))
 })
 
 test_that("lassosumRss with large lambda gives all-zero betas", {
@@ -65,7 +66,7 @@ test_that("lassosumRssWeights calls lassosumRss and returns betaEst", {
     stat <- list(b = bhat, n = rep(n, p), variantNames = .rrwIds(p))
     expected <- seq_len(p) * 0.02
     local_mocked_bindings(
-        .lassosumRssPath = function(bhat, ld, n, ...) {
+        .penalizedRssPath = function(bhat, ld, n, ...) {
             list(
                 beta = cbind(rep(0, length(bhat)), expected),
                 lambda = c(0.05, 0.01),
@@ -97,7 +98,7 @@ test_that("lassosumRssWeights clamps correlation input before scaling", {
     stat <- list(b = bhat, n = rep(n, p), variantNames = .rrwIds(p))
     captured <- NULL
     local_mocked_bindings(
-        .lassosumRssPath = function(bhat, ld, n, ...) {
+        .penalizedRssPath = function(bhat, ld, n, ...) {
             captured <<- bhat
             list(
                 beta = matrix(0, nrow = length(bhat), ncol = 2),

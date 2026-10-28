@@ -34,7 +34,8 @@ NULL
 #' @description For each LD block, find the SNP indices from a reference that
 #'   fall within the block boundaries.
 #' @param snpInfo A data.frame with columns CHR, BP.
-#' @param ldBlocks A \code{GRanges} of LD block intervals.
+#' @param ldBlocks The LD block intervals: a \code{GRanges}, or the path
+#'   of a BED file, read as BED with a 0-based start.
 #' @return A list of integer vectors, one per block.
 #' @keywords internal
 snpsPerBlock <- function(snpInfo, ldBlocks) {
@@ -967,10 +968,10 @@ NULL
     if (!is.null(ld$R)) {
         return(rawNtau * crossprod(ld$R * sqrt(d)) + ld$R)
     }
-    F <- ld$F
-    m1 <- nrow(F) - 1
-    gram <- tcrossprod(sweep(F, 2L, sqrt(d), "*"))
-    crossprod(F, rawNtau / m1 * (gram %*% F) + F) / m1
+    ldFactor <- ld$F
+    m1 <- nrow(ldFactor) - 1
+    gram <- tcrossprod(sweep(ldFactor, 2L, sqrt(d), "*"))
+    crossprod(ldFactor, rawNtau / m1 * (gram %*% ldFactor) + ldFactor) / m1
 }
 
 # One block's contribution to the GLS normal equations, L = X'Omega^-1 X and
@@ -2137,14 +2138,17 @@ sldscUnivariate <- function(
     if (!is.null(studyName)) {
         return(studyName)
     }
-    if (nrow(sumstats) != 1L) {
+    # Studies, not rows: a genome-wide study is one row per chromosome (or
+    # per LD block), and its accessors stitch those rows back together.
+    studies <- unique(as.character(sumstats$study))
+    if (length(studies) != 1L) {
         msg <- glue(
-            "`study` is required when the GwasSumStats has ",
-            "{nrow(sumstats)} entries."
+            "`studyName` is required when the GwasSumStats has ",
+            "{length(studies)} studies."
         )
         abort(msg)
     }
-    as.character(sumstats$study[[1L]])
+    studies
 }
 
 # Dispatch to the method-specific univariate estimator.
@@ -2235,11 +2239,10 @@ sldscUnivariate <- function(
 # Element-wise coordinate check. Coordinates are compared rather than variant
 # ids because the two sides routinely name the same variant differently
 # (rsid vs chr:pos:A2:A1), while the same variant always sits at the same
-# coordinate once the chr prefix is normalized.
+# coordinate.
 # @noRd
 .h2CheckPositions <- function(entry, ldRef, studyName) {
-    same <- withChrPrefix(as.character(seqnames(entry))) ==
-        withChrPrefix(as.character(seqnames(ldRef))) &
+    same <- as.character(seqnames(entry)) == as.character(seqnames(ldRef)) &
         start(entry) == start(ldRef)
     if (all(same)) {
         return(invisible(TRUE))
@@ -2292,7 +2295,7 @@ setMethod(
         studyName <- .estimateH2ResolveStudy(sumstats, studyName)
         .h2ValidateInputs(sumstats, studyName, ldRef, annotations)
         z <- z(sumstats, studyName = studyName)
-        rawN <- median(nSamples(sumstats, studyName = studyName))
+        rawN <- median(sampleSize(sumstats, studyName = studyName))
         M <- nSnps(sumstats, studyName = studyName)
         # Legacy heritability-wrapper correction (separate from the SuSiE RSS
         # binaryTraitModel handling in the fine-mapping pipeline).

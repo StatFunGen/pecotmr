@@ -31,7 +31,7 @@ fineMappingPipeline(data, ...)
   seed = NULL,
   mrmashPrior = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
-  naAction = c("drop", "impute"),
+  phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
   fitRetention = c("slim", "full"),
   dataType = NULL
@@ -60,7 +60,7 @@ fineMappingPipeline(data, ...)
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
-  naAction = c("drop", "impute"),
+  phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
   fitRetention = c("slim", "full"),
   dataType = NULL
@@ -71,6 +71,7 @@ fineMappingPipeline(data, ...)
   methods,
   contexts = NULL,
   traitId = NULL,
+  cisWindow = NULL,
   jointSpecification = NULL,
   initializeWithSusieInf = TRUE,
   credibleSetParam = CredibleSetParam(),
@@ -103,7 +104,10 @@ fineMappingPipeline(data, ...)
 }
 \arguments{
 \item{data}{A \code{QtlDataset}, \code{MultiStudyQtlDataset},
-\code{QtlSumStats}, or \code{GwasSumStats}.}
+\code{QtlSumStats}, or \code{GwasSumStats}. Each row of a
+\code{GwasSumStats} is fine-mapped as one region, so it should be an LD
+block (load one block, or split the study with a \code{region}); a row
+spanning more than 20 Mb, as a whole chromosome does, draws a warning.}
 
 \item{...}{Reserved for future per-method arguments.}
 
@@ -126,9 +130,9 @@ fineMappingPipeline(data, ...)
         even when fitting from a susieInf chain).
 }}
 
-\item{contexts}{Optional context selection; \code{NULL} (the default) uses
-every context. A character vector applies to every study: a context no
-study has is an error, and one only some studies lack is skipped for
+\item{contexts}{Optional context selection; \code{NULL} (the default)
+uses every context. A character vector applies to every study: a context
+no study has is an error, and one only some studies lack is skipped for
 those, with a warning. A list keyed by study name picks each study's
 contexts separately (\code{list(A = "liver")}); studies it does not name
 keep all of theirs.}
@@ -141,23 +145,30 @@ study's entry may itself be a list keyed by context
 (\code{list(A = list(brain = "ENSG1"))}). Studies and contexts the list
 does not name keep all of their traits. A joint fit spanning a study's
 contexts uses every trait selected in any of them, minus the (context,
-trait) pairs a per-context entry leaves out.}
+trait) pairs a per-context entry leaves out. In a MultiStudyQtlDataset
+a study left with no trait selected sits out; the run is refused only
+when no study or summary-statistics row has one.}
 
 \item{region}{Optional variant window for QtlDataset trait selection: a
-\code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
-with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
-\code{traitId}.}
+\code{GRanges}. Mutually exclusive with \code{traitId}.}
 
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's genomic
 position when extracting variants. Required when \code{traitId} is
-supplied. Mutually exclusive with \code{region}.}
+supplied. Mutually exclusive with \code{region}. For QtlSumStats:
+optional; each selected tuple is analysed over its \code{traitPos}
+\eqn{\pm} \code{cisWindow}, within its \code{region}, which is then
+the window its result records. Every selected tuple needs a
+\code{traitPos}. A MultiStudyQtlDataset applies it to each of its
+studies, individual-level or summary-statistics, as above.}
 
-\item{genotypeFilterParam}{Per-call overrides of the \code{QtlDataset}'s own
-filters, built with \code{\link{GenotypeFilterParam}}. A field left unset
-keeps the dataset's construct-time value, so
-\code{GenotypeFilterParam(mafCutoff = 0)} pins the cutoff at zero while
-\code{GenotypeFilterParam()} changes nothing. Applies to the
-\code{QtlDataset} method only.}
+\item{genotypeFilterParam}{Which variants and samples the run keeps, built
+with \code{\link{GenotypeFilterParam}}: its \code{keepSamples} narrows
+the dataset once, and its MAF, MAC, variance, missingness,
+\code{keepVariants} and \code{keepIndel} settings apply to each
+extracted block, against that block's samples. A field left unset
+filters nothing. A \code{QtlDataset} records no filter of its own, so
+this is the only one. \code{QtlDataset} and
+\code{MultiStudyQtlDataset} input only.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
 \code{FALSE} (default) fits each range independently and merges the
@@ -213,7 +224,7 @@ present are not refit.}
 
 \item{crossValidationParam}{Cross-validation settings, built with
   \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
-  CV), \code{numThreads} for the per-fold refits, and \code{samplePartition}
+  CV), \code{BPPARAM} for the per-fold refits, and \code{samplePartition}
   to reuse a fixed partition across methods. When \code{folds > 1} each
   method is refit on every fold's training samples and used to predict the
   held-out ones; the partition, the out-of-fold predictions and the metrics
@@ -301,8 +312,12 @@ priors. \code{NULL} uses the canonical prior instead.}
 which data-driven prior weights are zeroed; \code{NULL} disables the
 cutoff.}
 
-\item{naAction}{Character. How to handle missing values in the extracted
-phenotype/genotype data.}
+\item{phenotypeFilterParam}{The run's phenotype QC, built with
+\code{\link{PhenotypeFilterParam}}: how missing phenotype values are
+handled (unset drops the affected samples; \code{"impute"} fills each
+trait's mean; a fit cannot take \code{"keep"}) and whether outlier
+samples are dropped. Every fit of the run, joint ones included, reads
+its phenotypes under it.}
 
 \item{verbose}{Verbosity (0 silent, 1 default). Default \code{1}.}
 
@@ -317,9 +332,10 @@ either way --- its per-credible-set columns are governed by
 
 \item{dataType}{Optional assay / modality label for the phenotype the fit
 was run on (\code{"bulk_rnaseq"}, \code{"methylation"}), recorded as a
-per-row provenance column and published by \code{\link{exportToBed}} /
-\code{\link{exportToVcf}}. \code{NULL} (default) omits the column. It
-cannot be derived --- the input carries the values, not what they measure.}
+per-row provenance column and published by \code{\link{writeBed}} /
+\code{\link{writeGwasVcf}}. \code{NULL} (default) omits
+the column. It cannot be derived --- the input carries the values, not
+what they measure.}
 
 \item{panelFilterParam}{LD-reference-panel filters for the summary-statistics
 and GWAS methods, built with \code{\link{PanelFilterParam}}. See
@@ -359,10 +375,11 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
 A \code{QtlFineMappingResult} keyed by \code{(study, context,
   trait, method)} -- for \code{GwasSumStats} input, a
   \code{GwasFineMappingResult} keyed by \code{(study, method)} and range.
-  The \code{ldReference} slot is set automatically: \code{NULL}
-  for individual-level (QtlDataset / all-individual-level
-  MultiStudyQtlDataset) fits, the input's \code{ldReference} for RSS-derived
-  fits.
+  Each row records the LD reference its fit used: none for
+  individual-level (QtlDataset / all-individual-level
+  MultiStudyQtlDataset) fits, the reference of the input row it was fitted
+  from for RSS-derived fits. Its \code{seqinfo()} names the genome build
+  the inputs name; inputs naming different builds are refused.
 }
 \description{
 S4-dispatched per-region fine-mapping entry point that
@@ -431,7 +448,7 @@ S4-dispatched per-region fine-mapping entry point that
 \section{QC contract}{
  All \code{QtlSumStats} and \code{GwasSumStats} inputs
   must have been QC'd via \code{\link{summaryStatsQc}}; the pipeline errors
-  on inputs where \code{length(qcInfo(x)) == 0L}. \code{summaryStatsQc}
+  on inputs where \code{length(qcOptions(x)) == 0L}. \code{summaryStatsQc}
   also drops variants absent from the \code{ldReference}, so by the time
   per-entry processing runs every variant is guaranteed to be present in the
   LD panel and a local LD matrix can be built with
@@ -475,12 +492,14 @@ deliberately not ported here:
         the method column on the returned collection
         carries the bare token (\code{"susie"},
         \code{"susieInf"}, \code{"mvsusie"}, ...) only. QC
-        provenance is recorded on the sumstats' \code{qcInfo}.
+        provenance is recorded on the sumstats: \code{qcOptions()} and,
+        per row, \code{qcInfo()}.
   \item An entry that \code{summaryStatsQc(pipCutoffToSkip = ...)} screened
-        out (recorded as \code{qcInfo$entryAudit[[i]]$pipScreenSkipped}, and
-        emptied to 0 variants) is \strong{skipped}, not fit: it produces no
-        row and a message with the screen reason. An all-screened collection
-        yields a valid empty result rather than an error.
+        out (recorded in its row's \code{pipScreenSkipped} column of
+        \code{qcInfo()}, and emptied to 0 variants) is \strong{skipped},
+        not fit: it produces no row and a message with the screen reason.
+        An all-screened collection yields a valid empty result rather than
+        an error.
 }
 }
 
@@ -507,12 +526,11 @@ deliberately not ported here:
   Individual-level genotypes reach every fit centred and scaled to unit
   variance, so a posterior effect --- which is the prediction weight --- is
   on the standardized scale, and the published
-  \code{weight_standardized} records it. That scaling belongs to the
-  \code{QtlDataset} accessors, not to this pipeline: it is
-  \code{\link{residualizedGenotypes}} that applies it, governed by
-  \code{ResidualizationParam(scaleResiduals = )} per call with the
-  dataset's own \code{\link{scaleResiduals}} slot as the default. One
-  mechanism, one place, shared with \code{\link{twasWeightsPipeline}} and
+  \code{weight_standardized} records it. The residualization that applies
+  it (\code{\link{residualizedGenotypes}}) is governed by
+  \code{ResidualizationParam(scaleResiduals = )}, which defaults to
+  \code{TRUE}. One mechanism, one place, shared with
+  \code{\link{twasWeightsPipeline}} and
   \code{\link{colocboostPipeline}}. An RSS fit needs nothing done: its
   likelihood is written in standardized units already.
 

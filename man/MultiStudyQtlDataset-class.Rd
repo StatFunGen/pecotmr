@@ -10,6 +10,12 @@ S4 container for a multi-study QTL analysis: a collection of
   \code{QtlSumStats} collection of summary-statistic-only studies. Used as
   the input to multi-study fine-mapping and colocboost-style analyses.
 
+It is a \code{\link[S4Vectors]{SimpleList}} of the individual-level
+studies, keyed by study name, so \code{length()}, \code{names()},
+\code{[[} and \code{[} address them as on any Bioconductor list;
+\code{[} keeps the summary-statistic studies whole and still requires two
+studies in total.
+
 At least two studies must be present in total, counting \code{qtlDatasets}
 entries plus the studies in \code{sumStats}.
 
@@ -22,9 +28,6 @@ re-aligned at construction time.
 \section{Slots}{
 
 \describe{
-\item{\code{qtlDatasets}}{A named list of \code{QtlDataset} objects, keyed by study
-identifier.}
-
 \item{\code{sumStats}}{An optional \code{QtlSumStats} carrying additional
 summary-statistic-only studies. \code{NULL} when absent.}
 }}

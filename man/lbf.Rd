@@ -15,12 +15,13 @@ lbf(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A \code{tibble}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
-  collection method also carries the entry identity columns).
+A \code{GRanges}, one range per variant, whose \code{mcols()}
+  hold \code{variant_id} + \code{lbf_L1..lbf_LL} (the collection method
+  also carries the entry identity columns).
 }
 \description{
 The variant x effect matrix of single-effect log Bayes factors
-(\code{lbf_variable}, or fSuSiE's \code{lBF}) from the stored fit: one row
+(\code{lbf_variable}, or fSuSiE's \code{lBF}) from the stored fit: one range
 per variant, one \code{lbf_L<k>} column per effect. The per-variant scalar
 summary (max across effects) is the \code{logBF} column of
 \code{\link{topLoci}}; this accessor keeps the full per-effect breakdown.

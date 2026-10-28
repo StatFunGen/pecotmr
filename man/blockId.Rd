@@ -29,11 +29,13 @@ Return the LD-block identifier of each row of a collection
   on, so the returned vector is always the same length as \code{nrow(x)}
   and can be used to label or join rows directly.
 
-  It keys the external block manifest the blocks were defined in, and so
-  carries the true block BOUNDARIES --- unlike \code{range(x)}, which is
-  the span of the variants that survived QC. A collection with no block
-  axis (every QTL flavour) returns \code{NA} for every row rather than
-  erroring, so code that handles both flavours needs no class test.
+  It keys the external block manifest the blocks were defined in. The
+  block's BOUNDARIES are the \code{region} column, recorded as given or
+  computed in \code{regionGiven} (see \code{\linkS4class{GwasSumStats}})
+  --- unlike \code{range(x)}, which is the span of the variants that
+  survived QC. A collection with no block axis (every QTL flavour)
+  returns \code{NA} for every row rather than erroring, so code that
+  handles both flavours needs no class test.
 }
 \examples{
 data(gwasFineMappingExample, qtlFineMappingExample)

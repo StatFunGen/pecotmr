@@ -334,7 +334,7 @@ resolveLdInput <- function(
 #' @param dentistParam The DENTIST algorithm settings, built with
 #'   \code{\link{DentistParam}}: \code{pValueThreshold}, \code{propSVD},
 #'   \code{gcControl}, \code{nIter}, \code{gPvalueThreshold},
-#'   \code{duprThreshold}, \code{numThreads}, \code{correctChenEtAlBug}
+#'   \code{duprThreshold}, \code{BPPARAM}, \code{correctChenEtAlBug}
 #'   and \code{seed}. This is the same record
 #'   \code{\link{ldMismatchQc}} takes as
 #'   \code{method = DentistParam(...)}, so a setting means the same thing
@@ -529,7 +529,7 @@ dentist <- function(
         p$gcControl,
         as.integer(p$nIter),
         p$gPvalueThreshold,
-        as.integer(p$numThreads),
+        p$threads,
         p$correctChenEtAlBug,
         verboseIter,
         if (is.null(p$seed)) NULL else as.integer(p$seed)
@@ -593,7 +593,10 @@ dentist <- function(
 #' @param nIter Number of iterations. Default is 10.
 #' @param gPvalueThreshold Grouping p-value threshold. Default is 0.05.
 #' @param duprThreshold Duplicate r-squared threshold. Default is 0.99.
-#' @param numThreads Number of CPU cores. Default is 1.
+#' @param BPPARAM A \code{BiocParallelParam} whose workers number the
+#'   threads DENTIST's OpenMP loops use when they run on this machine
+#'   (\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+#'   thread. Default \code{SerialParam()}.
 #' @param correctChenEtAlBug Correct the original DENTIST operator! bug. Default
 #'   is TRUE.
 #' @param ldMethod Character string specifying the LD computation method when
@@ -626,11 +629,12 @@ dentistSingleWindow <- function(
     nIter = 10,
     gPvalueThreshold = 0.05,
     duprThreshold = 0.99,
-    numThreads = 1,
+    BPPARAM = SerialParam(),
     correctChenEtAlBug = TRUE,
     ldMethod = "sample",
     seed = NULL
 ) {
+    .assertBpparam(BPPARAM)
     ld <- .dentistLdInput(R, X, nSample, ldMethod)
     nSample <- ld$nSample
     .dentistValidateInput(zScore, ld)
@@ -640,7 +644,7 @@ dentistSingleWindow <- function(
         gcControl = gcControl,
         nIter = nIter,
         gPvalueThreshold = gPvalueThreshold,
-        numThreads = numThreads,
+        threads = .bpLocalThreads(BPPARAM, "dentistSingleWindow"),
         correctChenEtAlBug = correctChenEtAlBug,
         seed = seed
     )
@@ -1487,7 +1491,12 @@ slalom <- function(
 #' @param df Data frame. Contains information about Credible Sets for a specific
 #'   study and block.
 #' @param highCorrCols Character vector. Names of columns in df that represent
-#'   high correlations.
+#'   high correlations; a non-top CS whose value in any of them is 1 is
+#'   tagged. A CS's own column of \code{\link{extractCsInfo}}'s between-CS
+#'   correlations (\code{cs_corr_<i>} for row \code{i}, its self-correlation)
+#'   is never read, so passing every \code{cs_corr_*} column tags a CS only by
+#'   its correlation with the other sets. Rows are taken in
+#'   \code{extractCsInfo()}'s order.
 #'
 #' @return A modified data frame with additional columns attached to the
 #' diagnostic table:
@@ -1649,9 +1658,9 @@ autoDecision <- function(df, highCorrCols) {
 # reference this dominates: 43 observed multi-allelic positions produced 2969
 # imputed variants in one block before this guard.
 #
-# Keyed on canonical (chrom, pos) so a "chr1"/"1" difference does not read as
-# two different sites. A position with no GWAS observation still imputes every
-# panel form it has, multi-allelic included.
+# Keyed on (chrom, pos), which raiss() spells in UCSC style on both tables. A
+# position with no GWAS observation still imputes every panel form it has,
+# multi-allelic included.
 # @noRd
 .raissObservedPosition <- function(refPanel, knownZ) {
     n <- nrow(refPanel)
@@ -1664,10 +1673,10 @@ autoDecision <- function(df, highCorrCols) {
     )
 }
 
-# Canonical "chrom:pos" keys, so a "chr1"/"1" difference is one site.
+# "chrom:pos" keys.
 # @noRd
 .raissPositionKey <- function(chrom, pos) {
-    str_c(canonChrom(as.character(chrom)), ":", as.character(pos))
+    str_c(as.character(chrom), ":", as.character(pos))
 }
 
 # Imputation targets: panel rows the sumstats do not carry, minus the rows no
@@ -1988,27 +1997,54 @@ raissSingleMatrixFromX <- function(
 }
 
 # An LD reference brings its own variant table, which refPanel defaults to.
-# Known and imputed rows are merged on chrom, and the table labels
-# chromosomes canonically ("22"), so knownZscores has to as well; say so here
-# rather than in a failed join.
+# Known and imputed rows are merged on chrom, so known z-scores on none of the
+# reference's chromosomes have nothing to impute from; say so here rather
+# than in an empty join.
 # @noRd
 .raissRefPanelOf <- function(ref, knownZscores) {
     panel <- .refVariantsFromLdRef(ref)
-    sameLabels <- is.character(knownZscores$chrom) &&
-        any(is_in(knownZscores$chrom, panel$chrom))
-    if (!sameLabels) {
+    if (!any(is_in(knownZscores[["chrom"]], panel$chrom))) {
         abort(c(
-            str_c(
-                "`knownZscores$chrom` must use the LD reference's chromosome ",
-                "labels."
-            ),
+            "`knownZscores` shares no chromosome with the LD reference.",
             i = glue(
-                "They are canonical character labels, like ",
-                "'{panel$chrom[[1L]]}'."
+                "The reference covers ",
+                "{str_flatten(unique(panel$chrom), ', ')}."
             )
         ))
     }
     panel
+}
+
+# knownZscores as raiss() reads it: a table as given, or a summary-statistics
+# entry -- the GRanges sumStats() returns -- as the table summaryStatsQc()
+# builds from one.
+# @noRd
+.raissKnownTable <- function(knownZscores) {
+    if (!methods::is(knownZscores, "GRanges")) {
+        return(knownZscores)
+    }
+    need <- c("SNP", "A1", "A2", "Z")
+    absent <- setdiff(need, colnames(mcols(knownZscores)))
+    if (length(absent) > 0L) {
+        abort(c(
+            glue(
+                "`knownZscores` as a GRanges lacks column(s) ",
+                "{str_flatten(absent, ', ')}."
+            ),
+            i = "Pass a summary-statistics entry, as sumStats(x) returns it."
+        ))
+    }
+    .qcRaissKnownZ(.entryGrangesToDf(knownZscores))
+}
+
+# A table handed to raiss() with its `chrom` column in UCSC style, so its rows
+# meet the reference's and each other's on equal labels. NULL stays NULL.
+# @noRd
+.raissUcscChrom <- function(df) {
+    if (is.null(df) || is.null(df[["chrom"]])) {
+        return(df)
+    }
+    `[[<-`(df, "chrom", value = withChrPrefix(df[["chrom"]]))
 }
 
 # The genotypes' LD factor for refPanel's variants (see .ldRefFactor()), the
@@ -2042,11 +2078,15 @@ raissSingleMatrixFromX <- function(
 #'
 #' @param refPanel A data frame containing 'chrom', 'pos', 'variant_id', 'A1',
 #'   and 'A2'. Optional when the LD comes as an \code{LdMatrix} or a genotype
-#'   panel, whose own variants are used; \code{knownZscores} must then label
-#'   chromosomes canonically, as character (e.g. \code{"22"}). Required
-#'   with a plain \code{ldMatrix}, whose rows and columns follow it.
+#'   panel, whose own variants are used. Required with a plain
+#'   \code{ldMatrix}, whose rows and columns follow it.
 #' @param knownZscores A data frame containing 'chrom', 'pos', 'variant_id',
-#'   'A1', 'A2', and 'z' values.
+#'   'A1', 'A2', and 'z' values, or a summary-statistics \code{GRanges} --
+#'   one entry as \code{\link{sumStats}} returns it, with its \code{SNP},
+#'   \code{A1}, \code{A2} and \code{Z} columns. Here and in \code{refPanel}
+#'   a chromosome may be labelled in any style (\code{22}, \code{"22"},
+#'   \code{"chr22"}); both are read in UCSC style (\code{"chr22"}), which
+#'   the result uses.
 #' @param ldMatrix A square LD matrix over \code{refPanel}'s variants, in its
 #'   order, or an \code{LdMatrix} covering them. Provide either
 #'   \code{ldMatrix} or \code{genotypes}, not both.
@@ -2107,6 +2147,8 @@ raiss <- function(
     if (is.null(genotypes) && is.null(ldMatrix)) {
         abort("Provide either ldMatrix or genotypes.")
     }
+    knownZscores <- .raissUcscChrom(.raissKnownTable(knownZscores))
+    refPanel <- .raissUcscChrom(refPanel)
     ref <- .raissReferenceOf(ldMatrix, genotypes)
     if (!is.null(ref)) {
         refPanel <- refPanel %||% .raissRefPanelOf(ref, knownZscores)
@@ -2178,7 +2220,12 @@ setClass(
 #'   this and \code{mafCutoff} applies. Default \code{0}.
 #' @param imissCutoff Missingness ceiling for a target. Default \code{1}.
 #' @param flank Base pairs by which to widen the analysis-region window on
-#'   each side, retaining LD context for edge variants. Default \code{0}.
+#'   each side, retaining LD context for edge variants. The window never
+#'   widens into another row of the same study on its chromosome -- the
+#'   neighbouring LD block of a block-split GWAS -- since that row imputes
+#'   its own variants, nor past a row's block range where that was given
+#'   (\code{regionGiven}, see \code{\linkS4class{GwasSumStats}}). Default
+#'   \code{0}.
 #' @return A \code{RaissParam} object, a \code{\link{MethodParam}}.
 #' @seealso \code{\link{summaryStatsQc}}, \code{\link{raiss}}
 #' @examples
@@ -2244,10 +2291,17 @@ raissModel <- function(
     batch = TRUE,
     reportConditionNumber = FALSE
 ) {
-    sigTInv <- invertMatRecursive(sigT, lamb, rcond)
-    assertNumeric(zt)
+    # Checked before sigT is used: the inversion retries on any error, so a
+    # bad input would otherwise surface as base R's error from its third try.
+    # sigT is the known x known LD and sigIT the unknown x known LD, so both
+    # carry one column per known z-score.
+    assertNumeric(zt, min.len = 1L)
     assertNumeric(sigT)
     assertNumeric(sigIT)
+    k <- length(zt)
+    assertMatrix(sigT, nrows = k, ncols = k)
+    assertMatrix(sigIT, min.rows = 1L, ncols = k)
+    sigTInv <- invertMatRecursive(sigT, lamb, rcond)
     checks <- .raissInversionChecks(
         sigT,
         sigTInv,
@@ -2605,7 +2659,7 @@ setClass(
         nIter = "numeric",
         gPvalueThreshold = "numeric",
         duprThreshold = "numeric",
-        numThreads = "numeric",
+        BPPARAM = "BiocParallelParam",
         correctChenEtAlBug = "logical",
         seed = "numeric_OR_NULL"
     )
@@ -2626,7 +2680,10 @@ setClass(
 #' @param nIter Number of DENTIST iterations. Default \code{10}.
 #' @param gPvalueThreshold Grouping p-value threshold. Default \code{0.05}.
 #' @param duprThreshold Duplicate r-squared threshold. Default \code{0.99}.
-#' @param numThreads Number of CPU cores. Default \code{1}.
+#' @param BPPARAM A \code{BiocParallelParam} whose workers number the
+#'   threads DENTIST's OpenMP loops use when they run on this machine
+#'   (\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+#'   thread. Default \code{SerialParam()}.
 #' @param correctChenEtAlBug Logical; apply the Chen et al. correction.
 #'   Default \code{TRUE}.
 #' @param seed Integer or \code{NULL}. Random seed for the iteration.
@@ -2641,7 +2698,7 @@ DentistParam <- function(
     nIter = 10,
     gPvalueThreshold = 0.05,
     duprThreshold = 0.99,
-    numThreads = 1,
+    BPPARAM = SerialParam(),
     correctChenEtAlBug = TRUE,
     seed = NULL
 ) {
@@ -2653,7 +2710,7 @@ DentistParam <- function(
         nIter = nIter,
         gPvalueThreshold = gPvalueThreshold,
         duprThreshold = duprThreshold,
-        numThreads = numThreads,
+        BPPARAM = .assertBpparam(BPPARAM),
         correctChenEtAlBug = correctChenEtAlBug,
         seed = seed
     )
@@ -2811,10 +2868,7 @@ effectiveN <- function(nCase, nControl) {
 .entryGrangesToDf <- function(gr) {
     mc <- as.data.frame(S4Vectors::mcols(gr), stringsAsFactors = FALSE)
     out <- tibble(
-        chrom = str_remove(
-            as.character(GenomicRanges::seqnames(gr)),
-            regex("^chr", ignore_case = TRUE)
-        ),
+        chrom = as.character(GenomicRanges::seqnames(gr)),
         pos = GenomicRanges::start(gr)
     )
     bind_cols(out, mc)
@@ -3014,6 +3068,41 @@ effectiveN <- function(nCase, nControl) {
     mutate(df, z = .data$beta / .data$se)
 }
 
+# One tuple of a GwasSumStats / QtlSumStats collection as the flat table
+# .entryToSumstatDf() builds. `studyName` / `context` / `trait` select the
+# tuple as sumStats() does; a GWAS takes `studyName` only.
+# @noRd
+.sumStatsDf <- function(
+    x,
+    studyName = NULL,
+    context = NULL,
+    trait = NULL,
+    require = character(0),
+    derive = c("none", "zFromBetaSe")
+) {
+    .entryToSumstatDf(
+        sumStats(x, studyName = studyName, context = context, trait = trait),
+        require = require,
+        derive = derive,
+        label = .sumStatsDfLabel(x, studyName, context, trait)
+    )
+}
+
+# The tuple a .sumStatsDf() error names; "<auto>" marks a selector left to
+# resolve on its own.
+# @noRd
+.sumStatsDfLabel <- function(x, studyName, context, trait) {
+    parts <- c(
+        studyName %||% "<auto>",
+        context %||% "<auto>",
+        trait %||% "<auto>"
+    )
+    if (is(x, "GwasSumStats")) {
+        parts <- parts[[1L]]
+    }
+    glue("{class(x)[[1L]]}[{str_flatten(parts, '/')}]")
+}
+
 # Derive BETA and SE columns from signed Z when the entry has only Z.
 # Formula (Zhu et al. 2016 / RAISS):
 #   se   = 1 / sqrt(2 * maf * (1 - maf) * (N + z^2))
@@ -3157,42 +3246,17 @@ effectiveN <- function(nCase, nControl) {
     list(df = derived, audit = list(nDerived = sum(!is.na(se))))
 }
 
-# Drop variants whose (chrom, pos) overlaps any user-supplied skipRegion.
-# skipRegion may be a character vector of "chr:start-end" strings or a GRanges.
-# Parse one 'chr:start-end' skip-region string into a 1-row data.frame.
-.parseSkipRegionEntry <- function(s) {
-    m <- str_match(s, "^([^:]+):([0-9]+)-([0-9]+)$")[1L, ]
-    if (is.na(m[[1L]])) {
-        msg <- glue("skipRegion entry must be 'chr:start-end'; got '{s}'")
-        abort(msg)
-    }
-    tibble(
-        chrom = str_remove(m[[2L]], regex("^chr", ignore_case = TRUE)),
-        start = as.integer(m[[3L]]),
-        end = as.integer(m[[4L]])
-    )
-}
-
-# Normalise skipRegion (character vector or GRanges) to a chrom/start/end frame.
+# Drop variants whose (chrom, pos) overlaps any user-supplied skipRegion, a
+# GRanges -- as every window given in R is.
+# Normalise skipRegion to a chrom/start/end frame.
+# @noRd
 .parseSkipRegion <- function(skipRegion) {
-    if (is.character(skipRegion)) {
-        return(bind_rows(map(skipRegion, .parseSkipRegionEntry)))
-    }
-    if (methods::is(skipRegion, "GRanges")) {
-        return(tibble(
-            chrom = str_remove(
-                as.character(GenomicRanges::seqnames(skipRegion)),
-                regex("^chr", ignore_case = TRUE)
-            ),
-            start = GenomicRanges::start(skipRegion),
-            end = GenomicRanges::end(skipRegion)
-        ))
-    }
-    msg <- glue(
-        "skipRegion must be a character vector of 'chr:start-end' ",
-        "strings or a GRanges."
+    skipRegion <- .assertRegionGRanges(skipRegion, "`skipRegion`")
+    tibble(
+        chrom = as.character(GenomicRanges::seqnames(skipRegion)),
+        start = GenomicRanges::start(skipRegion),
+        end = GenomicRanges::end(skipRegion)
     )
-    abort(msg)
 }
 
 # Rows falling inside skip region `i`.
@@ -3206,10 +3270,7 @@ effectiveN <- function(nCase, nControl) {
         return(df)
     }
     parsed <- .parseSkipRegion(skipRegion)
-    dfChr <- str_remove(
-        as.character(df$chrom),
-        regex("^chr", ignore_case = TRUE)
-    )
+    dfChr <- as.character(df$chrom)
     dropMask <- reduce(
         map(
             seq_len(nrow(parsed)),
@@ -3398,9 +3459,10 @@ effectiveN <- function(nCase, nControl) {
 # Steps (in order; each contributes a count to audit):
 #   - coerceNumeric: cast signed columns to numeric (catches stray "0.5"
 #       strings). NA-introducing coercions are counted.
-#   - normalizeChr:   strip "chr"/"ch" prefix, uppercase X/Y/MT, map
-#       23->X, 24->Y, M->MT. Optional dropNonstandardChr removes rows
-#       whose CHR is outside 1..22, X, Y, MT after normalization.
+#   - normalizeChr:   spell chromosomes in UCSC style (withChrPrefix():
+#       23->chrX, 24->chrY, M/MT->chrM). Optional dropNonstandardChr
+#       removes rows whose chromosome is outside chr1..chr22, chrX, chrY,
+#       chrM after normalization.
 #   - dropMissData:   drop rows with NA in any vital column (chrom, pos,
 #       A1, A2, and at least one of Z / BETA).
 #   - dropPOutOfRange: drop rows where P < 0 or P > 1 (corrupt p-values).
@@ -3464,16 +3526,12 @@ effectiveN <- function(nCase, nControl) {
     if (!normalizeChr || !is_in("chrom", colnames(df))) {
         return(list(df = df, audit = list()))
     }
-    chr <- as.character(df$chrom) |>
-        str_remove(regex("^chr", ignore_case = TRUE)) |>
-        str_remove(regex("^ch", ignore_case = TRUE)) |>
-        str_to_upper() |>
-        canonChromLabel()
+    chr <- withChrPrefix(df$chrom)
     normalized <- mutate(df, chrom = chr)
     if (!dropNonstandardChr) {
         return(list(df = normalized, audit = list()))
     }
-    standardChrs <- c(as.character(seq_len(22)), "X", "Y", "MT")
+    standardChrs <- str_c("chr", c(as.character(seq_len(22)), "X", "Y", "M"))
     kept <- filter(normalized, is_in(chr, standardChrs))
     list(
         df = kept,
@@ -3632,7 +3690,7 @@ effectiveN <- function(nCase, nControl) {
 # filtered df, outlier count, and the full per-variant diagnostics table
 # (the data.frame returned by ldMismatchQc(), prepended with a
 # variant_id column for downstream joins). Callers record `diagnostics`
-# in the entry's qcInfo audit so the per-variant detail is available
+# in the entry's QC audit so the per-variant detail is available
 # for plotting / postprocessing instead of just the outlier count.
 # Panel LD for an entry's variants, via the shared LD-from-sketch helper (tuple
 # match with chr-prefix tolerance, strand-ambiguous variants kept), with the
@@ -3938,12 +3996,13 @@ effectiveN <- function(nCase, nControl) {
 # Internal: per-entry pipeline. Returns the cleaned GRanges and an audit list.
 # --- .runEntrySummaryStatsQc: RAISS imputation step helpers ----------------
 
-# Panel/dosage window indices for the entry, scoped per chromosome.
-.qcRaissWindowIdx <- function(df, ldReference, flank) {
-    # canonChrom on BOTH sides: the panel answers in its own seqnames
-    # convention, so the two are only comparable once canonicalized.
+# Panel/dosage window indices for the entry, scoped per chromosome. `clamp`
+# (see .ssqcRaissBounds) is the stretch of a chromosome the entry may impute
+# into when other rows of its study share that chromosome; the flank stops at
+# it.
+.qcRaissWindowIdx <- function(df, ldReference, flank, clamp = NULL) {
     bounds <- tibble(
-        chrom = canonChrom(as.character(df$chrom)),
+        chrom = as.character(df$chrom),
         pos = as.integer(df$pos)
     ) |>
         group_by(.data$chrom) |>
@@ -3951,7 +4010,8 @@ effectiveN <- function(nCase, nControl) {
             lo = min(.data$pos, na.rm = TRUE) - flank,
             hi = max(.data$pos, na.rm = TRUE) + flank,
             .groups = "drop"
-        )
+        ) |>
+        .qcRaissClampBounds(clamp)
     # inner_join keeps only sketch SNPs whose chromosome appears in df (the
     # old is_in(skChrom, names(loByChr)) guard); filter keeps those inside the
     # [lo, hi] window. idx carries the original sketch row positions.
@@ -3964,6 +4024,20 @@ effectiveN <- function(nCase, nControl) {
         inner_join(bounds, by = "chrom") |>
         filter(.data$bp >= .data$lo & .data$bp <= .data$hi) |>
         pull("idx")
+}
+
+# Narrow the flanked window to the entry's own stretch of the chromosome.
+# @noRd
+.qcRaissClampBounds <- function(bounds, clamp) {
+    if (is.null(clamp)) {
+        return(bounds)
+    }
+    on <- bounds$chrom == as.character(seqnames(clamp))
+    mutate(
+        bounds,
+        lo = if_else(on, pmax(.data$lo, start(clamp)), .data$lo),
+        hi = if_else(on, pmin(.data$hi, end(clamp)), .data$hi)
+    )
 }
 
 # Assemble refPanel, knownZ table, and scaled dosage for the window.
@@ -4244,7 +4318,7 @@ effectiveN <- function(nCase, nControl) {
 .qcRaissImpute <- function(df, ldReference, opts, lbl) {
     imputeBefore <- nrow(df)
     flank <- as.integer(opts$raissParam$flank)
-    windowIdx <- .qcRaissWindowIdx(df, ldReference, flank)
+    windowIdx <- .qcRaissWindowIdx(df, ldReference, flank, opts$raissBounds)
     if (length(windowIdx) == 0L) {
         .qcEmit(
             lbl,
@@ -5258,43 +5332,143 @@ effectiveN <- function(nCase, nControl) {
 # options; the per-entry fields are derived here rather than carried over from
 # the previous entry.
 # @noRd
-.ssqcRunEntry <- function(i, sumstats, opts, ldReference, isQtl) {
+.ssqcRunEntry <- function(i, sumstats, opts, refs, keys, isQtl, bounds) {
     .runEntrySummaryStatsQc(
         gr = .collectionEntry(sumstats, i),
-        ldReference = ldReference,
-        opts = .ssqcEntryOpts(opts, sumstats, i),
+        ldReference = .ldRefForKey(keys[[i]], refs),
+        opts = list_assign(
+            .ssqcEntryOpts(opts, sumstats, i),
+            raissBounds = bounds[[i]]
+        ),
         entryLabel = .ssqcEntryLabel(sumstats, i, isQtl)
     )
 }
 
-# Run the per-entry QC pipeline across all entries.
+# The stretch of its chromosome each row may impute into, or NULL for a row
+# with no window of its own that shares its chromosome with no other row of
+# its tuple. A study split into LD blocks is several rows on one chromosome,
+# and RAISS widening one row's window by `flank` would impute its neighbours'
+# variants -- a second, imputed copy of a variant the next row observes. So
+# each row keeps to its own window: the `region` it was given, which bounds it
+# whether or not its neighbours were loaded, else the midpoints between its
+# span and its neighbours'. Without a flank a row's window is its own
+# variants' span, which needs no bound.
+# @noRd
+.ssqcRaissBounds <- function(sumstats, opts) {
+    n <- nrow(sumstats)
+    if (!isTRUE(opts$impute) || as.integer(opts$raissParam$flank) <= 0L) {
+        return(vector("list", n))
+    }
+    chrom <- map_chr(as.list(sumstats), .rtlElementSeqname)
+    map(
+        seq_len(n),
+        .ssqcRowBounds,
+        group = str_c(.ssqcTupleKey(sumstats), chrom, sep = "\r"),
+        spans = range(sumstats),
+        blocks = .ssqcGivenBlocks(sumstats)
+    )
+}
+
+# Each row's given window, or NULL where it has none: a computed window is
+# only the span the midpoints are taken from.
+# @noRd
+.ssqcGivenBlocks <- function(sumstats) {
+    regions <- .rowRegions(sumstats)
+    map(seq_len(nrow(sumstats)), .ssqcGivenBlockAt, regions = regions)
+}
+
+# @noRd
+.ssqcGivenBlockAt <- function(i, regions) {
+    if (regions$regionGiven[[i]]) regions$region[i] else NULL
+}
+
+# The rows of one tuple: a GWAS study, or a QTL (study, context, trait).
+# @noRd
+.ssqcTupleKey <- function(sumstats) {
+    cols <- intersect(
+        c("study", "context", "trait"),
+        .tupleColumnNames(sumstats)
+    )
+    exec(str_c, !!!map(cols, .ssqcKeyPart, sumstats = sumstats), sep = "\r")
+}
+
+# @noRd
+.ssqcKeyPart <- function(col, sumstats) {
+    as.character(.tupleColumn(sumstats, col))
+}
+
+# @noRd
+.ssqcRowBounds <- function(i, group, spans, blocks) {
+    if (!is.null(blocks[[i]])) {
+        return(blocks[[i]])
+    }
+    if (is.na(group[[i]])) {
+        return(NULL)
+    }
+    sibs <- setdiff(which(group == group[[i]]), i)
+    if (length(sibs) == 0L) {
+        return(NULL)
+    }
+    .ssqcMidpointBounds(spans[[i]], unlist(spans[sibs], use.names = FALSE))
+}
+
+# Halfway to the nearest neighbour on each side; a neighbour overlapping the
+# row leaves it only its own span.
+# @noRd
+.ssqcMidpointBounds <- function(own, sib) {
+    s <- start(own)
+    e <- end(own)
+    if (any(start(sib) <= e & end(sib) >= s)) {
+        return(own)
+    }
+    below <- end(sib)[end(sib) < s]
+    above <- start(sib)[start(sib) > e]
+    GenomicRanges::GRanges(
+        seqnames(own),
+        IRanges::IRanges(
+            if (length(below) == 0L) 1L else (max(below) + s) %/% 2L + 1L,
+            if (length(above) == 0L) {
+                .Machine$integer.max
+            } else {
+                (e + min(above)) %/% 2L
+            }
+        )
+    )
+}
+
+# Run the per-entry QC pipeline across all entries, each against its own
+# row's LD reference.
 .ssqcRunEntries <- function(sumstats, opts) {
     isQtl <- methods::is(sumstats, "QtlSumStats")
-    # Panel filter, once for the shared LD reference and BEFORE any entry is
+    # Panel filter, once per distinct LD reference and BEFORE any entry is
     # harmonized, so a variant the panel cannot support is gone from the LD
     # and from the summary statistics alike.
-    ldReference <- .ssqcPrunePanel(
+    pruned <- map(
         ldReference(sumstats),
-        .panelCutoffs(opts$panelFilterParam),
-        "summaryStatsQc"
+        .ssqcPrunePanel,
+        cutoffs = .panelCutoffs(opts$panelFilterParam),
+        label = "summaryStatsQc"
     )
-    refGenome <- unique(unname(GenomeInfoDb::genome(sumstats)))
+    keys <- .ldRefKeys(sumstats)
     results <- map(
         seq_len(nrow(sumstats)),
         .ssqcRunEntry,
         sumstats = sumstats,
         opts = opts,
-        ldReference = ldReference,
-        isQtl = isQtl
+        refs = pruned,
+        keys = keys,
+        isQtl = isQtl,
+        bounds = .ssqcRaissBounds(sumstats, opts)
     )
     list(
         newEntries = map(results, "gr"),
         entryAudits = map(results, "audit"),
-        ldReference = ldReference
+        ldReferences = pruned,
+        keys = keys
     )
 }
 
-# One screen metric's cutoff as qcInfo echoes it. The bundle leaves an unset
+# One screen metric's cutoff as qcOptions echoes it. The bundle leaves an unset
 # metric absent; the echoed record has always spelled "off" as 0, and readers
 # like qcDiagnostics() index these four names, so the output shape is kept
 # even though the input is now one argument.
@@ -5303,9 +5477,8 @@ effectiveN <- function(nCase, nControl) {
     signalScreenParam[[metric]] %||% 0
 }
 
-# Assemble the qcInfo record (echoed options + per-entry audits).
-.ssqcBuildQcInfo <- function(
-    entryAudits,
+# Assemble the qcOptions record: the options QC ran with, echoed.
+.ssqcBuildQcOptions <- function(
     sumstatsFilterParam,
     panelFilterParam,
     signalScreenParam,
@@ -5348,60 +5521,110 @@ effectiveN <- function(nCase, nControl) {
             smallPFloor = sumstatsCleaningParam$smallPFloor,
             dropZeroEffect = sumstatsCleaningParam$dropZeroEffect,
             dropNonpositiveSe = sumstatsCleaningParam$dropNonpositiveSe
-        ),
-        entryAudit = entryAudits
+        )
     )
 }
 
-# Rebuild the SumStats object with QC'd entries, trimmed sketch, and qcInfo.
-.ssqcRebuild <- function(sumstats, newEntries, newLdReference, qcInfo) {
-    cols <- .tupleColumnNames(sumstats)
-    nSample <- if (is_in("nSample", cols)) {
-        as.numeric(sumstats$nSample)
+# Rebuild the SumStats object with QC'd entries, trimmed sketches (one per
+# row, as a list running parallel to `newEntries`), the qcOptions record and
+# each row's audit (the qcAudit column). Every column the constructor does
+# not rebuild itself is carried across as it was. So is each row's analysis
+# window: QC changes the variants, not where the window is -- the one given,
+# or the span the row was first built with -- and the span of what is left
+# is range(x).
+.ssqcRebuild <- function(
+    sumstats,
+    newEntries,
+    newLdReference,
+    qcOptions,
+    audits
+) {
+    rebuilt <- if (methods::is(sumstats, "GwasSumStats")) {
+        .ssqcRebuildGwas(sumstats, newEntries, newLdReference, qcOptions)
     } else {
-        NULL
+        .ssqcRebuildQtl(sumstats, newEntries, newLdReference, qcOptions)
     }
-    if (methods::is(sumstats, "GwasSumStats")) {
-        GwasSumStats(
-            studyName = as.character(sumstats$study),
-            entry = newEntries,
-            genome = unique(unname(GenomeInfoDb::genome(sumstats))),
-            ldReference = newLdReference,
-            varY = as.numeric(sumstats$varY),
-            nCase = if (is_in("nCase", cols)) {
-                as.numeric(sumstats$nCase)
-            } else {
-                NULL
-            },
-            nControl = if (is_in("nControl", cols)) {
-                as.numeric(sumstats$nControl)
-            } else {
-                NULL
-            },
-            nSample = nSample,
-            qcInfo = qcInfo,
-            # Carry the existing block keys through: the entries are already
-            # split, so without this the constructor re-derives them from
-            # seqname and every block on one chromosome collapses to one key.
-            blockId = if (is_in("blockId", cols)) {
-                as.character(sumstats$blockId)
-            } else {
-                NULL
-            }
-        )
-    } else {
-        QtlSumStats(
-            studyName = as.character(sumstats$study),
-            context = as.character(sumstats$context),
-            trait = as.character(sumstats$trait),
-            entry = newEntries,
-            genome = unique(unname(GenomeInfoDb::genome(sumstats))),
-            ldReference = newLdReference,
-            varY = as.numeric(sumstats$varY),
-            nSample = nSample,
-            qcInfo = qcInfo
-        )
+    audited <- `$<-`(rebuilt, "qcAudit", S4Vectors::SimpleList(audits))
+    .withRegionColumns(audited, .rowRegions(sumstats))
+}
+
+# @noRd
+.ssqcRebuildQtl <- function(sumstats, newEntries, newLdReference, qcOptions) {
+    QtlSumStats(
+        studyName = as.character(sumstats$study),
+        context = as.character(sumstats$context),
+        trait = as.character(sumstats$trait),
+        entry = newEntries,
+        genome = unique(unname(GenomeInfoDb::genome(sumstats))),
+        ldReference = newLdReference,
+        varY = as.numeric(sumstats$varY),
+        nSample = .ssqcNumericColumn(sumstats, "nSample"),
+        qcOptions = qcOptions,
+        traitPos = .ssqcColumnOrNull(sumstats, "traitPos"),
+        extraCols = .ssqcExtraCols(sumstats, .SSQC_QTL_COLUMNS)
+    )
+}
+
+# @noRd
+.ssqcRebuildGwas <- function(sumstats, newEntries, newLdReference, qcOptions) {
+    GwasSumStats(
+        studyName = as.character(sumstats$study),
+        entry = newEntries,
+        genome = unique(unname(GenomeInfoDb::genome(sumstats))),
+        ldReference = newLdReference,
+        varY = as.numeric(sumstats$varY),
+        nCase = .ssqcNumericColumn(sumstats, "nCase"),
+        nControl = .ssqcNumericColumn(sumstats, "nControl"),
+        nSample = .ssqcNumericColumn(sumstats, "nSample"),
+        qcOptions = qcOptions,
+        # Carry the existing block keys through: the entries are already
+        # split, so without this the constructor re-derives them from
+        # seqname and every block on one chromosome collapses to one key.
+        blockId = .ssqcColumnOrNull(sumstats, "blockId"),
+        extraCols = .ssqcExtraCols(sumstats, .SSQC_GWAS_COLUMNS)
+    )
+}
+
+# The columns each constructor builds from its own arguments. Anything else a
+# collection carries -- an `extraCols` column -- goes back in through
+# `extraCols`.
+# @noRd
+.SSQC_SHARED_COLUMNS <- c(
+    "study",
+    "varY",
+    "nSample",
+    "ldReference",
+    "region",
+    "regionGiven",
+    "qcAudit"
+)
+
+# @noRd
+.SSQC_QTL_COLUMNS <- c(.SSQC_SHARED_COLUMNS, "context", "trait", "traitPos")
+
+# @noRd
+.SSQC_GWAS_COLUMNS <- c(.SSQC_SHARED_COLUMNS, "nCase", "nControl", "blockId")
+
+# @noRd
+.ssqcExtraCols <- function(sumstats, known) {
+    extra <- setdiff(.tupleColumnNames(sumstats), known)
+    set_names(map(extra, .tupleColumn, x = sumstats), extra)
+}
+
+# @noRd
+.ssqcColumnOrNull <- function(sumstats, nm) {
+    if (!is_in(nm, .tupleColumnNames(sumstats))) {
+        return(NULL)
     }
+    .tupleColumn(sumstats, nm)
+}
+
+# @noRd
+.ssqcNumericColumn <- function(sumstats, nm) {
+    if (!is_in(nm, .tupleColumnNames(sumstats))) {
+        return(NULL)
+    }
+    as.numeric(.tupleColumn(sumstats, nm))
 }
 
 #' Run QC on a SumStats Collection
@@ -5418,10 +5641,12 @@ effectiveN <- function(nCase, nControl) {
 #' and optional RAISS imputation. No Bioconductor genome / dbSNP packages
 #' required.
 #'
-#' The returned collection has its \code{qcInfo} slot populated with a per-entry
-#' audit record (variant counts, drop counts at each step, which filters fired,
-#' etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
-#' \code{length(qcInfo(x)) == 0L}.
+#' The returned collection records the options QC ran with in its
+#' \code{qcOptions} slot, and what QC did to each row (variant counts, drop
+#' counts at each step, which filters fired, etc.) in its \code{qcAudit}
+#' column, read as a table with \code{\link{qcInfo}}. Fine-mapping and
+#' TWAS-weights pipelines reject SumStats inputs where
+#' \code{length(qcOptions(x)) == 0L}.
 #'
 #' Column-availability error contract: a non-zero \code{infoCutoff} requires
 #' every entry to carry an \code{INFO} column, and a non-zero \code{nCutoff}
@@ -5435,8 +5660,8 @@ effectiveN <- function(nCase, nControl) {
 #'   \code{\link{twasWeightsPipeline}} measure them on the RSS path, so one
 #'   number means the same thing wherever it is set. MAC is converted to a MAF
 #'   equivalent and the stricter of the two applies, matching
-#'   \code{\link{QtlDataset}}. Defaults (\code{0}, \code{0}, \code{1}) filter
-#'   nothing.
+#'   \code{\link{GenotypeFilterParam}}. Defaults (\code{0}, \code{0},
+#'   \code{1}) filter nothing.
 #'
 #'   The panel is filtered once, before any entry is harmonized, so a variant
 #'   the panel cannot support is absent from the LD used by kriging,
@@ -5473,8 +5698,7 @@ effectiveN <- function(nCase, nControl) {
 #'   lives here rather than being split into two that could disagree.
 #' @param keepVariants Optional character vector of variant IDs (SNP column) to
 #'   retain prior to harmonization.
-#' @param skipRegion Optional character vector of \code{"chr:start-end"}
-#'   strings, or a \code{GRanges}, of regions to drop.
+#' @param skipRegion Optional \code{GRanges} of regions to drop.
 #' @param signalScreenParam Whether to skip an entry before fitting it,
 #'   built with
 #'   \code{\link{SignalScreenParam}} --- the same bundle
@@ -5504,8 +5728,9 @@ effectiveN <- function(nCase, nControl) {
 #'   overridden and the override is logged. Inputs with no counts (quantitative
 #'   traits) are unchanged. The escape hatch \code{effectiveN = FALSE} restores
 #'   the raw \code{N} column (or, when there is no \code{N}, the raw total
-#'   \code{nCase + nControl}) with no override. \code{qcInfo$options$effectiveN}
-#'   records the setting and each entry's \code{nSource} is one of
+#'   \code{nCase + nControl}) with no override.
+#'   \code{qcOptions(x)$options$effectiveN} records the setting and each
+#'   row's \code{nSource} (a \code{\link{qcInfo}} column) is one of
 #'   \code{"effective"}, \code{"column"}, \code{"total"}, or \code{NA}.
 #' @param impute Logical (length 1). Run RAISS imputation against the
 #'   \code{ldReference}'s genotype panel as the last QC step, adding z-scores
@@ -5517,7 +5742,10 @@ effectiveN <- function(nCase, nControl) {
 #'   RAISS imputation scopes its reference panel to the analysis-region window
 #'   (so a per-chromosome / genome-wide \code{ldReference} does not materialize
 #'   its full dosage); \code{flank} widens that window by the given number of
-#'   base pairs on each side to retain LD context for edge variants.
+#'   base pairs on each side to retain LD context for edge variants, though
+#'   never into the stretch of another row of the same study, nor past a
+#'   block range that was given: a study split into LD blocks imputes each
+#'   block once, in its own row.
 #'
 #'   \code{mafCutoff}, \code{macCutoff} and \code{imissCutoff} bound which
 #'   panel variants RAISS will attempt to impute. Without them every rare
@@ -5547,8 +5775,8 @@ effectiveN <- function(nCase, nControl) {
 #'   \code{dropZeroEffect} and \code{dropNonpositiveSe}. Applied before any
 #'   filter or screen. Distinct from \code{sumstatsFilterParam}, which applies
 #'   quality thresholds to rows that are already well formed.
-#' @return A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries
-#'   and \code{qcInfo} populated.
+#' @return A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries,
+#'   \code{qcOptions} filled and each row's QC audit attached.
 #' @examples
 #' data(gwasSumStatsS4Example)
 #' summaryStatsQc(gwasSumStatsS4Example)
@@ -5628,8 +5856,7 @@ summaryStatsQc <- function(
 # The QC record and the rebuilt object around the filtered entries.
 # @noRd
 .ssqcAssemble <- function(sumstats, res, opts, signalScreenParam) {
-    qcInfo <- .ssqcBuildQcInfo(
-        res$entryAudits,
+    qcOptions <- .ssqcBuildQcOptions(
         sumstatsFilterParam = opts$sumstatsFilterParam,
         panelFilterParam = opts$panelFilterParam,
         signalScreenParam = signalScreenParam,
@@ -5639,10 +5866,23 @@ summaryStatsQc <- function(
         impute = opts$impute,
         sumstatsCleaningParam = opts$sumstatsCleaningParam
     )
-    # From the PRUNED panel, not the input's: narrowing the original again
-    # would hand back a sketch the panel filter never reached.
-    newLdReference <- .subsetLdRefToIds(res$ldReference, res$newEntries)
-    .ssqcRebuild(sumstats, res$newEntries, newLdReference, qcInfo)
+    # From the PRUNED panels, not the input's: narrowing an original again
+    # would hand back a sketch the panel filter never reached. Each is cut to
+    # the variants of the rows that use it.
+    trimmed <- imap(
+        res$ldReferences,
+        .ssqcTrimToRows,
+        entries = res$newEntries,
+        keys = res$keys
+    )
+    perRow <- map(res$keys, .ldRefForKey, refs = trimmed)
+    .ssqcRebuild(sumstats, res$newEntries, perRow, qcOptions, res$entryAudits)
+}
+
+# One LD reference cut to exactly the variants of the rows keyed to it.
+# @noRd
+.ssqcTrimToRows <- function(ldReference, key, entries, keys) {
+    .subsetLdRefToIds(ldReference, entries[is_in(keys, key)])
 }
 
 # ---- slidingWindowLoop callbacks (distance mode) ------------------------
@@ -5743,12 +5983,15 @@ summaryStatsQc <- function(
     if (df$p_value[i] > 1e-4) {
         return(TRUE)
     }
-    if (length(highCorrCols) == 0) {
+    # A CS's own column -- cs_corr_<i> in extractCsInfo()'s layout -- holds its
+    # self-correlation of 1, which says nothing about the other sets.
+    otherCols <- setdiff(highCorrCols, str_c("cs_corr_", i))
+    if (length(otherCols) == 0) {
         return(FALSE)
     }
     rowVals <- df |>
         filter(row_number() == i) |>
-        select(all_of(highCorrCols))
+        select(all_of(otherCols))
     any(rowVals == 1)
 }
 
@@ -5770,10 +6013,10 @@ summaryStatsQc <- function(
     is.na(df[[col]])
 }
 
-# One GRanges entry's canonical chromosome vector.
+# One GRanges entry's chromosome vector.
 # @noRd
 .entryChrom <- function(gr) {
-    canonChrom(as.character(GenomicRanges::seqnames(gr)))
+    as.character(GenomicRanges::seqnames(gr))
 }
 
 # One GRanges entry's integer start positions.

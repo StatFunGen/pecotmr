@@ -23,11 +23,13 @@
 # =============================================================================
 # TwasWeights S4 class
 # -----------------------------------------------------------------------------
-# DFrame-subclass collection keyed by the identity tuple (study, context,
-# trait, method). Each row holds a TwasWeightsRow payload (variant ids
-# + per-variant weight vector/matrix). Class-level slots:
-#   * ldReference   GenotypeHandle (NULL for individual-level fits, the
-#                LD-sketch handle for RSS-derived weights).
+# RangedTupleList collection keyed by the identity tuple (study, context,
+# trait, method). Each element is one row's variants, with their weights as
+# its `weight` mcols column; the fits, cross-validation and scale are columns
+# of the collection's own mcols. Class-level slots:
+#   * ldReference   the LD references RSS-derived weights used, each stored
+#                once; the ldReference mcols column names each row's (NA
+#                for weights learned from individual-level data).
 # Constructor + accessors below. The twasWeights pipeline helpers
 # (learnTwasWeights, CV, ensemble, etc.) follow at the bottom.
 # =============================================================================
@@ -36,14 +38,16 @@
 NULL
 
 #' @title TWAS Weights Collection
-#' @description S4 collection of TWAS weights keyed by the identity tuple
-#'   \code{(study, context, trait, method)}. Each entry is a
-#'   \code{TwasWeightsRow} carrying one method's weights for one
-#'   trait/context/study. Implements the \code{DFrame}-subclass collection
-#'   pattern.
+#' @description S4 collection of TWAS weights, one row per
+#'   \code{(study, context, trait, method)}: one method's weights for one
+#'   trait, context and study. Each element is a row's variants: a
+#'   \code{GRanges} whose \code{weight} column holds the weights.
 #'
-#' Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
-#' \code{entry}. Each \code{entry} is a \code{TwasWeightsRow}.
+#' Required \code{mcols()} columns: the identity tuple \code{study},
+#' \code{context}, \code{trait} and \code{method}, and each row's payload:
+#' its stored fits (\code{fits}), \code{cvResult}, \code{standardized} and
+#' \code{dataType}. The constructor also records \code{fitVariants}, the
+#' variants the weights were fitted on.
 #'
 #' Optional columns \code{jointStudies}, \code{jointContexts},
 #' \code{jointTraits} appear when the collection contains rows produced by a
@@ -52,16 +56,28 @@ NULL
 #' column lists the semicolon-joined members of the joined axis. For non-joint
 #' rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
 #' jointly across the identity-tuple columns and any present joint columns.
-#' @slot ldReference The LD reference the weights were derived against (a
-#'   genotype panel, a \code{GenotypeMixture} or an \code{LdMatrix}), or
-#'   \code{NULL} when the weights were learned from individual-level data.
-#'   Used downstream to check that pipelines combining results share one LD
-#'   reference.
+#' @slot ldReference A named list of the LD references the weights were
+#'   derived against, each a genotype panel, a \code{GenotypeMixture} or an
+#'   \code{LdMatrix}, stored once apiece; the \code{ldReference} column of
+#'   \code{mcols} names the entry each row used (\code{NA} for weights
+#'   learned from individual-level data). Used downstream to check that the
+#'   rows a pipeline combines share an LD reference.
+#' @section Narrowed rows: Each row records in its \code{fitVariants} column
+#'   the ids of the variants its weights were fitted on (none for a row
+#'   without a fit payload). A row narrowed since keeps its fits as they
+#'   were, so \code{cvResult()} and \code{methodFits()} warn, with condition
+#'   class \code{pecotmrFitCoverage}, when a row holds fewer variants than
+#'   they describe. So do the pipelines that read them:
+#'   \code{causalInferencePipeline()} when it selects weights by their
+#'   cross-validation, and \code{ctwasPipeline()} for rows whose SuSiE fit
+#'   renormalizes their weights. The weights themselves are narrowed with
+#'   the row and do not warn.
 #' @export
 setClass(
     "TwasWeights",
     contains = "RangedTupleList",
-    representation(ldReference = "LdReference_OR_NULL"),
+    representation(ldReference = "list"),
+    prototype(ldReference = list()),
     validity = function(object) .validateTwasWeights(object)
 )
 
@@ -100,7 +116,8 @@ setClass(
         .validateTraitPosColumn(object),
         .validateRegionColumn(object),
         .twasValidateJointCols(object, jointCols),
-        .twasValidateKeyUniqueness(object, jointCols)
+        .twasValidateKeyUniqueness(object, jointCols),
+        .ldRefDictProblems(object@ldReference, .ldRefKeys(object))
     )
 }
 
@@ -131,10 +148,7 @@ setClass(
 # @noRd
 .twasValidateKeyUniqueness <- function(object, jointCols) {
     keyCols <- c("study", "context", "trait", "method", jointCols)
-    # Extract key columns directly rather than via `object[, keyCols]`:
-    # column-subsetting preserves the TwasWeights class while dropping the
-    # required `entry` column, and older S4Vectors revalidates that
-    # intermediate, spuriously failing with "missing columns: entry".
+    # Read column by column: `[` takes no column index on a collection.
     keyTbl <- as_tibble(set_names(
         map(keyCols, .twasColumn, object = object),
         keyCols
@@ -152,9 +166,8 @@ setClass(
 # =============================================================================
 
 #' @title Create a TwasWeights Collection Object
-#' @description Construct a \code{TwasWeights} DFrame-subclass collection from
-#'   per-tuple vectors and a list of \code{TwasWeightsRow} payloads (one per
-#'   tuple).
+#' @description Construct a \code{TwasWeights} collection from per-tuple
+#'   vectors and a list of \code{TwasWeightsRow} payloads (one per tuple).
 #' @param studyName Character vector of study identifiers. Use the sentinel
 #'   \code{"joint"} for rows produced by a cross-study joint fit.
 #' @param context Character vector of context labels. Use \code{"joint"} for
@@ -171,8 +184,11 @@ setClass(
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
-#' @param ldReference An optional genotype panel (see
-#'   \code{\link{readGenotypes}}), or \code{NULL} for individual-level fits.
+#' @param ldReference The LD reference the weights were derived against --
+#'   a genotype panel (see \code{\link{readGenotypes}}), a
+#'   \code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
+#'   a list with one per row; \code{NULL} for individual-level fits. Each
+#'   distinct reference is stored once.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -181,9 +197,12 @@ setClass(
 #'   forward as provenance; not part of the identity key. \code{NULL}
 #'   (default) omits the column, and \code{\link{genomicRegion}} then
 #'   derives the window from the span of the variants present.
+#' @param metadata A list of free-form metadata about the collection,
+#'   as \code{metadata()} holds on any Bioconductor vector. Default
+#'   \code{list()}.
 #' @return A \code{TwasWeights} object.
 #' @examples
-#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+#' twe <- TwasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
 #'   weightStandardized = FALSE)
 #' tw <- TwasWeights(studyName = "s1", context = "brain", trait = "gene1",
@@ -203,7 +222,8 @@ TwasWeights <- function(
     jointTraits = NULL,
     traitPos = NULL,
     region = NULL,
-    ldReference = NULL
+    ldReference = NULL,
+    metadata = list()
 ) {
     .twasAssertArgs(
         studyName,
@@ -231,7 +251,10 @@ TwasWeights <- function(
         region,
         n
     )
-    .rtlNewValidated("TwasWeights", entry, cols, ldReference)
+    .withMetadata(
+        .rtlNewValidated("TwasWeights", entry, cols, ldReference),
+        metadata
+    )
 }
 
 # The identity and joint-axis arguments, checked. Mirrors
@@ -313,7 +336,7 @@ TwasWeights <- function(
             length(entry) != n
     ) {
         msg <- glue(
-            "`study`, `context`, `trait`, `method`, and `entry` must all ",
+            "`studyName`, `context`, `trait`, `method`, and `entry` must all ",
             "have the same length."
         )
         abort(msg)
@@ -349,11 +372,6 @@ TwasWeights <- function(
     abort(msg)
 }
 
-#' @rdname genomicRegion
-#' @export
-setMethod("genomicRegion", "TwasWeights", function(x) .getRegionColumn(x))
-
-
 #' @rdname traitPosition
 #' @export
 setMethod("traitPosition", "TwasWeights", function(x) {
@@ -374,7 +392,7 @@ setMethod("traitPosition", "TwasWeights", function(x) {
 #'   collection has a single row.
 #' @return A \code{TwasWeightsRow} object.
 #' @examples
-#' twe <- twasWeightsRow(
+#' twe <- TwasWeightsRow(
 #'   variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
 #'   cvResult = list(rsq = 0.5), weightStandardized = FALSE)
 #' tw <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",
@@ -385,7 +403,13 @@ setMethod("traitPosition", "TwasWeights", function(x) {
 #' @export
 setGeneric(
     "twasWeights",
-    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL
+    ) {
         standardGeneric("twasWeights")
     }
 )
@@ -395,16 +419,14 @@ setGeneric(
 setMethod(
     "twasWeights",
     "TwasWeights",
-    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
-        idx <- .tupleSelectRow(
-            x,
-            studyName,
-            context,
-            trait,
-            method,
-            cls = "TwasWeights"
-        )
-        x[idx]
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL
+    ) {
+        x[.twrSelectRowIndex(x, studyName, context, trait, method)]
     }
 )
 
@@ -414,14 +436,10 @@ setMethod(
     mcols(x[[i]])$weight
 }
 
-# The row payload a (study, context, trait, method) selector pins.
-#
-# Read directly rather than via twasWeights(): that accessor returns a
-# single-row collection, so routing the per-field accessors through it would
-# dispatch straight back into them.
+# The row a (study, context, trait, method) selector pins.
 # @noRd
-.twrSelectRowParts <- function(x, studyName, context, trait, method) {
-    idx <- .tupleSelectRow(
+.twrSelectRowIndex <- function(x, studyName, context, trait, method) {
+    .tupleSelectRow(
         x,
         studyName,
         context,
@@ -429,7 +447,19 @@ setMethod(
         method,
         cls = "TwasWeights"
     )
-    .twrRowParts(x, idx)
+}
+
+# The row payload that selector pins.
+#
+# Read directly rather than via twasWeights(): that accessor returns a
+# single-row collection, so routing the per-field accessors through it would
+# dispatch straight back into them.
+# @noRd
+.twrSelectRowParts <- function(x, studyName, context, trait, method) {
+    .twrRowParts(
+        x,
+        .twrSelectRowIndex(x, studyName, context, trait, method)
+    )
 }
 
 #' @rdname resolveWeights
@@ -469,7 +499,7 @@ setMethod(
 #'   this fine-mapping / weight method; \code{NULL} matches all methods.
 #' @return A numeric vector or matrix of weights.
 #' @examples
-#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+#' twe <- TwasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
 #'   weightStandardized = FALSE)
 #' weights(twe)
@@ -489,7 +519,13 @@ setMethod(
         ...
     ) {
         weights(
-            .twrSelectRowParts(object, studyName, context, trait, method)
+            .twrSelectRowParts(
+                object,
+                studyName,
+                context,
+                trait,
+                method
+            )
         )
     }
 )
@@ -506,7 +542,8 @@ setMethod(
         trait = NULL,
         method = NULL
     ) {
-        cvResult(.twrSelectRowParts(x, studyName, context, trait, method))
+        parts <- .twrSelectRowParts(x, studyName, context, trait, method)
+        cvResult(.fitCoverageChecked(parts, "cvResult()"))
     }
 )
 
@@ -522,24 +559,57 @@ setMethod(
         trait = NULL,
         method = NULL
     ) {
-        methodFits(.twrSelectRowParts(x, studyName, context, trait, method))
+        parts <- .twrSelectRowParts(x, studyName, context, trait, method)
+        methodFits(.fitCoverageChecked(parts, "methodFits()"))
     }
 )
+
+# Before rows recorded the variants their weights were fitted on, a
+# collection had no `fitVariants` column; a row saved then records the
+# variants it holds, and a row with no fit payload records none. The
+# inherited update runs either way, for the updates every collection shares.
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "TwasWeights",
+    function(object, ..., verbose = FALSE) {
+        if (isTRUE(verbose)) {
+            message("updateObject(object = 'TwasWeights')")
+        }
+        if (!is_in("fitVariants", .tupleColumnNames(object))) {
+            held <- map(seq_along(object), .twrBackfillFitVariants, x = object)
+            object <- `$<-`(object, "fitVariants", IRanges::CharacterList(held))
+        }
+        methods::callNextMethod(object, ..., verbose = verbose)
+    }
+)
+
+# @noRd
+.twrBackfillFitVariants <- function(i, x) {
+    md <- mcols(x, use.names = FALSE)
+    if (length(md$fits[[i]]) == 0L && is.null(md$cvResult[[i]])) {
+        return(character(0))
+    }
+    .grVariantIds(x[[i]])
+}
 
 #' @rdname weightStandardized
 #' @export
 setMethod(
     "weightStandardized",
     "TwasWeights",
-    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL
+    ) {
         isTRUE(
-            weightStandardized(.twrSelectRowParts(
-                x,
-                studyName,
-                context,
-                trait,
-                method
-            ))
+            weightStandardized(
+                .twrSelectRowParts(x, studyName, context, trait, method)
+            )
         )
     }
 )
@@ -549,14 +619,16 @@ setMethod(
 setMethod(
     "weightsDataType",
     "TwasWeights",
-    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
-        weightsDataType(.twrSelectRowParts(
-            x,
-            studyName,
-            context,
-            trait,
-            method
-        ))
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL
+    ) {
+        weightsDataType(
+            .twrSelectRowParts(x, studyName, context, trait, method)
+        )
     }
 )
 
@@ -584,7 +656,9 @@ setMethod("studyName", "TwasWeights", function(x) unique(as.character(x$study)))
 
 #' @rdname ldReference
 #' @export
-setMethod("ldReference", "TwasWeights", function(x) x@ldReference)
+setMethod("ldReference", "TwasWeights", function(x) {
+    .ldRefsInUse(x)
+})
 
 #' @rdname contexts
 #' @export
@@ -604,7 +678,6 @@ setMethod("methodNames", "TwasWeights", function(x) {
     unique(as.character(x$method))
 })
 
-
 #' @rdname show-methods
 #' @export
 setMethod("show", "TwasWeights", function(object) {
@@ -618,14 +691,12 @@ setMethod("show", "TwasWeights", function(object) {
             .trim = FALSE
         ))
     }
-    ldSrc <- if (is.null(object@ldReference)) {
+    ldSrc <- .ldRefsLabel(
+        ldReference(object),
         "NULL (individual-level fit)"
-    } else {
-        .ldRefLabel(object@ldReference)
-    }
+    )
     cat(glue("  LD reference: {ldSrc}\n", .trim = FALSE))
 })
-
 
 # =============================================================================
 # TwasWeights pipeline helpers (learnTwasWeights + CV + ensemble +
@@ -691,6 +762,7 @@ setMethod("show", "TwasWeights", function(object) {
         args = list(max.iter = 100)
     ),
     enet = list(fn = "enet_weights", impl = "enetWeights", args = list()),
+    ridge = list(fn = "ridge_weights", impl = "ridgeWeights", args = list()),
     lasso = list(
         fn = "lasso_weights",
         impl = "lassoWeights",
@@ -849,6 +921,7 @@ setMethod("show", "TwasWeights", function(object) {
     list(
         lasso = c("lassoWeights", "glmnetWeights", "glmnet::cv.glmnet"),
         enet = c("enetWeights", "glmnetWeights", "glmnet::cv.glmnet"),
+        ridge = c("ridgeWeights", "glmnetWeights", "glmnet::cv.glmnet"),
         scad = c("scadWeights", "ncvregWeights", "ncvreg::cv.ncvreg"),
         mcp = c("mcpWeights", "ncvregWeights", "ncvreg::cv.ncvreg"),
         l0learn = c("l0learnWeights", "L0Learn::L0Learn.cvfit"),
@@ -884,10 +957,12 @@ setMethod("show", "TwasWeights", function(object) {
 # Summary statistics: each chain ends in pecotmr's own RSS solver or an
 # upstream *.rss entry point, never the individual-level engine. pecotmr's
 # solvers are reached through their LD-source paths (.penalizedRssPath(),
-# .lassosumRssPath(), .prsCsRun(), .sdprRun()), which take the options of
-# penalizedRss(), lassosumRss(), prsCs() and sdpr() under the same names, so
+# .prsCsRun(), .sdprRun()), which take the options of penalizedRss() --
+# lassosumRss()'s are a subset -- prsCs() and sdpr() under the same names, so
 # a genotype reference can be used through its factor without forming the LD
-# matrix.
+# matrix. Every penalized method's path is .penalizedRssPath(): the penalty
+# reaches it as one record its wrapper built, so only the path's own options
+# (lambda, thr, maxiter) count as the method's.
 # @noRd
 .twasMethodChainsSumstat <- function() {
     list(
@@ -911,7 +986,19 @@ setMethod("show", "TwasWeights", function(object) {
         lasso = c(
             "lassosumRssWeights",
             ".rssShrinkGridWeights",
-            ".lassosumRssPath"
+            ".penalizedRssPath"
+        ),
+        enet = c(
+            "enetRssWeights",
+            ".penalizedRssWeights",
+            ".rssShrinkGridWeights",
+            ".penalizedRssPath"
+        ),
+        ridge = c(
+            "ridgeRssWeights",
+            ".penalizedRssWeights",
+            ".rssShrinkGridWeights",
+            ".penalizedRssPath"
         ),
         prsCs = c("prsCsWeights", ".prsCsRun"),
         dprGibbs = c("sdprWeights", ".sdprRun"),
@@ -960,6 +1047,8 @@ setMethod("show", "TwasWeights", function(object) {
         "solverInput",
         "LDs",
         "config",
+        "spec",
+        "label",
         "bInit",
         "vInit",
         "K"
@@ -1006,7 +1095,6 @@ setMethod("show", "TwasWeights", function(object) {
 .twasChainHopUnknown <- function(fm) {
     (length(fm) == 1L && is.na(fm[[1L]])) || is_in("...", fm)
 }
-
 
 # The implementation that runs one method on one input path.
 # @noRd
@@ -1732,10 +1820,11 @@ setMethod("show", "TwasWeights", function(object) {
 #'   maximum number of variants to use for CV purpose, to save computing time.
 #' @param variantsToKeep An optional integer to ensure that the listed variants
 #'   are kept in the CV when there is a limit on the maxNumVariants to use.
-#' @param numThreads The number of threads to use for parallel processing. If
-#'   set to -1, the function uses all available cores. If set to 0 or 1, no
-#'   parallel processing is performed. If set to 2 or more, parallel processing
-#'   is enabled with that many threads.
+#' @param BPPARAM A \code{BiocParallelParam} the folds run on;
+#'   \code{SerialParam()} (default) runs them one at a time. Each draws from
+#'   its own random-number stream, seeded by \code{seed}, else by the param's
+#'   own \code{RNGseed}, else by one draw from the session RNG, so a run
+#'   gives the same numbers however many workers it has.
 #' @param verbose Integer controlling verbosity level: 0 = suppress all
 #'   messages, 1 = suppress external package messages (default), 2 = show all
 #'   messages including those from external packages.
@@ -1746,11 +1835,9 @@ setMethod("show", "TwasWeights", function(object) {
 #'   for every other method the two behave alike.
 #' @param seed Integer or \code{NULL}. When supplied, seeds both the
 #'   main-process RNG (fold partitioning, variant sub-sampling) and the
-#'   parallel fold-fitting RNG via the \code{BiocParallel} \code{RNGseed}, so
-#'   results are reproducible even under multi-threading. The main-process
-#'   seed is scoped to the call, so the session RNG is left as it was found.
-#'   \code{NULL} (default) does not seed at all and uses the historical
-#'   parallel default.
+#'   streams the folds draw from (see \code{BPPARAM}). The main-process seed
+#'   is scoped to the call, so the session RNG is left as it was found.
+#'   \code{NULL} (default) seeds neither.
 #' @param fittedModelsCv Optional per-fold fine-mapping fits, as
 #'   \code{method -> fold_<j> -> fit}, from a \code{fineMappingPipeline()}
 #'   run with \code{cvFolds > 1}. SuSiE-family weight wrappers extract from a
@@ -1786,7 +1873,7 @@ setMethod("show", "TwasWeights", function(object) {
 #'   process.
 #' }
 #' @importFrom purrr map
-#' @importFrom BiocParallel bplapply multicoreWorkers MulticoreParam
+#' @importFrom BiocParallel SerialParam
 #' @importFrom quadprog solve.QP
 #' @examples
 #' data(multiTraitData)
@@ -1808,7 +1895,7 @@ twasWeightsCv <- function(
     weightMethods = NULL,
     maxNumVariants = NULL,
     variantsToKeep = NULL,
-    numThreads = 1,
+    BPPARAM = SerialParam(),
     verbose = 1,
     fitRetention = c("none", "slim", "full"),
     seed = NULL,
@@ -1824,7 +1911,7 @@ twasWeightsCv <- function(
     # .cvSubsampleVariants relies on `ncol(X) <= maxNumVariants` being FALSE
     # for it.
     assertNumber(maxNumVariants, lower = 1, null.ok = TRUE)
-    assertInt(numThreads)
+    .assertBpparam(BPPARAM)
     assertCount(verbose)
     fitRetention <- arg_match(fitRetention)
     assertInt(seed, null.ok = TRUE)
@@ -1836,7 +1923,7 @@ twasWeightsCv <- function(
         weightMethods = weightMethods,
         maxNumVariants = maxNumVariants,
         variantsToKeep = variantsToKeep,
-        numThreads = numThreads,
+        BPPARAM = BPPARAM,
         verbose = verbose,
         fitRetention = fitRetention,
         seed = seed,
@@ -1939,7 +2026,7 @@ twasWeightsCv <- function(
     weightMethods,
     maxNumVariants,
     variantsToKeep,
-    numThreads,
+    BPPARAM,
     verbose,
     fitRetention,
     seed,
@@ -1971,7 +2058,7 @@ twasWeightsCv <- function(
             fitRetention,
             verbose
         ),
-        numThreads = numThreads,
+        BPPARAM = BPPARAM,
         maxNumVariants = maxNumVariants,
         variantsToKeep = variantsToKeep,
         fitRetention = fitRetention,
@@ -2197,7 +2284,7 @@ twasWeightsCv <- function(
 # One TwasWeightsRow for a (variantIds, weights) pair with the shared flags.
 # @noRd
 .twasEntry <- function(variantIds, weights, fits, ctx) {
-    twasWeightsRow(
+    TwasWeightsRow(
         variantIds = variantIds,
         weights = weights,
         methodFits = fits,
@@ -2265,10 +2352,11 @@ twasWeightsCv <- function(
 #'   "enet_weights")) in which case default arguments will be used for all
 #'   methods. methods in the list can be either univariate (applied to each
 #'   column of Y) or multivariate (applied to the entire Y matrix).
-#' @param numThreads The number of threads to use for parallel processing. If
-#'   set to -1, the function uses all available cores. If set to 0 or 1, no
-#'   parallel processing is performed. If set to 2 or more, parallel processing
-#'   is enabled with that many threads.
+#' @param BPPARAM A \code{BiocParallelParam} the methods run on;
+#'   \code{SerialParam()} (default) runs them one at a time. Each draws from
+#'   its own random-number stream, seeded by \code{seed}, else by the param's
+#'   own \code{RNGseed}, else by one draw from the session RNG, so a run
+#'   gives the same numbers however many workers it has.
 #' @param fittedModels Named list of fitted SuSiE-family models, keyed by
 #'   token (\code{susie}, \code{susieInf}, \code{mvsusie}, \code{fsusie}).
 #'   Required whenever a SuSiE-family weight method is requested: those
@@ -2297,10 +2385,9 @@ twasWeightsCv <- function(
 #'   \code{\link{readGenotypes}}, a \code{GenotypeMixture} or an
 #'   \code{LdMatrix}) to record on the weights, or \code{NULL}.
 #' @param seed Integer or \code{NULL}. When supplied, seeds the main-process
-#'   RNG and the parallel method-fitting RNG via the \code{BiocParallel}
-#'   \code{RNGseed}, for reproducibility under multi-threading. The
+#'   RNG and the streams the methods draw from (see \code{BPPARAM}). The
 #'   main-process seed is scoped to the call, so the session RNG is left as it
-#'   was found. \code{NULL} (default) does not seed at all.
+#'   was found. \code{NULL} (default) seeds neither.
 #' @return A list where each element is named after a method and contains the
 #'   weight matrix produced by that method.
 #'
@@ -2328,7 +2415,7 @@ learnTwasWeights <- function(
     studyName = "",
     context = "",
     trait = "",
-    numThreads = 1,
+    BPPARAM = SerialParam(),
     fittedModels = NULL,
     fitRetention = c("none", "slim", "full"),
     weightStandardized = FALSE,
@@ -2340,7 +2427,7 @@ learnTwasWeights <- function(
     assertString(studyName)
     assertString(context)
     assertString(trait)
-    assertInt(numThreads)
+    .assertBpparam(BPPARAM)
     fitRetention <- arg_match(fitRetention)
     assertFlag(weightStandardized)
     assertString(weightsDataType, null.ok = TRUE)
@@ -2359,7 +2446,7 @@ learnTwasWeights <- function(
         studyName = studyName,
         context = context,
         trait = trait,
-        numThreads = numThreads,
+        BPPARAM = BPPARAM,
         fittedModels = fittedModels,
         fitRetention = fitRetention,
         weightStandardized = weightStandardized,
@@ -2383,14 +2470,6 @@ learnTwasWeights <- function(
     Y
 }
 
-# Number of BiocParallel workers to use: -1 means all available, otherwise the
-# requested count capped at what is available.
-# @noRd
-.twasResolveCores <- function(numThreads) {
-    avail <- multicoreWorkers()
-    min(if (numThreads == -1) avail else numThreads, avail)
-}
-
 # Variant ids for the weight rows: colnames(X), or synthetic variant_i labels.
 # @noRd
 .twasVariantIds <- function(X) {
@@ -2409,22 +2488,17 @@ learnTwasWeights <- function(
     colnames(X)
 }
 
-# Fit every weight method (parallel when >= 2 cores, else serial map), keyed by
-# method name.
+# Fit every weight method on BPPARAM's workers, keyed by method name.
 # @noRd
-.twasFitAllMethods <- function(weightMethods, ctx, numCores) {
-    weightsList <- if (numCores >= 2) {
-        bpParam <- .bpSeedParam(numCores, ctx$rngSeed)
-        bplapply(
-            names(weightMethods),
-            .computeMethodWeights,
-            weightMethods,
-            ctx,
-            BPPARAM = bpParam
-        )
-    } else {
-        map(names(weightMethods), .computeMethodWeights, weightMethods, ctx)
-    }
+.twasFitAllMethods <- function(weightMethods, ctx, BPPARAM) {
+    weightsList <- .bpMap(
+        names(weightMethods),
+        .computeMethodWeights,
+        weightMethods,
+        ctx,
+        BPPARAM = BPPARAM,
+        seed = ctx$rngSeed
+    )
     set_names(weightsList, names(weightMethods))
 }
 
@@ -2471,7 +2545,7 @@ learnTwasWeights <- function(
     studyName,
     context,
     trait,
-    numThreads,
+    BPPARAM,
     fittedModels,
     fitRetention,
     weightStandardized,
@@ -2503,11 +2577,7 @@ learnTwasWeights <- function(
         verbose = verbose,
         rngSeed = seed
     )
-    weightsList <- .twasFitAllMethods(
-        prepared,
-        ctx,
-        .twasResolveCores(numThreads)
-    ) |>
+    weightsList <- .twasFitAllMethods(prepared, ctx, BPPARAM) |>
         .twasApplyRownames(X)
     rows <- .buildTwasWeightEntries(weightsList, .twasVariantIds(X), ctx)
     .twasLearnResult(rows, ldReference)
@@ -2564,7 +2634,7 @@ learnTwasWeights <- function(
 #' data(multiTraitData)
 #' X <- multiTraitData$X[, 1:4]
 #' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:4))
-#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+#' twe <- TwasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
 #'   weightStandardized = FALSE)
 #' tw <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",
@@ -2584,8 +2654,8 @@ twasPredict <- function(X, weightsList) {
         # for compatibility with the legacy snake_case "<method>_predicted"
         # convention; ensembleWeights() rebinds the suffix.
         methodNames <- as.character(weightsList$method)
-        # The per-row weights live in each element's mcols now, so read them
-        # off the elements rather than a stored `entry` column.
+        # The per-row weights live in each element's mcols, so read them off
+        # the elements.
         wl <- set_names(
             map(seq_len(nrow(weightsList)), .twasRowWeights, x = weightsList),
             str_c(methodNames, "_weights")
@@ -2683,8 +2753,7 @@ estimateSparsity <- function(weightResults) {
     )
 }
 
-# Column `cn` of `object`, extracted via `[[` (preserves the required `entry`
-# column that `object[, cn]` would drop).
+# Column `cn` of `object`'s mcols.
 # @noRd
 .twasColumn <- function(cn, object) {
     .tupleColumn(object, cn)

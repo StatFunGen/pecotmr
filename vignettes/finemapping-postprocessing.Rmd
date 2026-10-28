@@ -66,12 +66,11 @@ its standard error. They are deliberately *not* called `beta`/`se`:
 under those names, so sharing them would let the two views be joined into a
 silent mix of posterior and marginal effects.
 
-Both are on the standardized genotype scale, because the `QtlDataset`
-accessors centre and scale every genotype column to unit variance before
-fitting — `residualizedGenotypes()` does it, governed by
-`ResidualizationParam(scaleResiduals = FALSE)` per call or the dataset's own
-`scaleResiduals` slot. The published `weight_standardized` records whichever
-way it resolved.
+Both are on the standardized genotype scale, because residualization centres
+and scales every genotype column to unit variance before fitting —
+`residualizedGenotypes()` does it, unless
+`ResidualizationParam(scaleResiduals = FALSE)` says otherwise. The published
+`weight_standardized` records whichever way it resolved.
 That is what makes a posterior effect comparable with a TWAS weight from any
 other method — they are all on the scale of the `X` the fitter was given, and
 on the same scale as the LD correlations and z-scores a TWAS Z is computed
@@ -211,13 +210,14 @@ When the flat tables are not enough — you want the per-effect posterior, or
 to re-derive PIPs under a different assumption — the underlying fit is
 available.
 
-`lbf()` returns the log Bayes factors, one row per variant and one
+`lbf()` returns the log Bayes factors, one range per variant and one
 column per single effect:
 
 ```{r lbf}
 lbf <- lbf(qtlFineMappingLbfExample)
-unit <- lbf[lbf$trait == lbf$trait[1] & lbf$context == lbf$context[1], ]
-lbfMatrix <- as.matrix(unit[, grep("^lbf_L", names(unit))])
+unit <- lbf[lbf$trait == lbf$trait[1] & lbf$context == lbf$context[1]]
+effects <- as.data.frame(S4Vectors::mcols(unit))
+lbfMatrix <- as.matrix(effects[, grep("^lbf_L", names(effects))])
 dim(lbfMatrix)
 ```
 
@@ -258,10 +258,10 @@ The summaries above are not stored by the fitter — they are derived from the
 raw SuSiE fit by a short chain that `fineMappingPipeline()` runs for you:
 
 ```
-postprocessFinemappingFits()   # per-method fits -> a post object
-  -> computeCsTables()         # credible sets from alpha, with purity
-  -> buildTopLoci()            # the flat one-row-per-variant table
-  -> formatFinemappingOutput() # assemble the result payload
+postprocessFinemappingFits()     # per-method fits -> a post object
+    -> computeCsTables()         # credible sets from alpha, with purity
+    -> buildTopLoci()            # the flat one-row-per-variant table
+    -> formatFinemappingOutput() # assemble the result payload
 ```
 
 Call them directly when you have SuSiE fits from elsewhere and want
@@ -274,45 +274,47 @@ Two smaller extractors sit at the row level and are what
 `credibleSetSummary()` is assembled from:
 
 - `extractCsInfo(fmRow, csNames, topLociTable, ldSource)` — per-credible-set
-  detail for one result row, including the between-variant correlations that
-  give `purity_min`, which is why it needs an `ldSource`.
+    detail for one result row, including the between-variant correlations that
+    give `purity_min`, which is why it needs an `ldSource`.
 - `extractTopPipInfo(fmRow, sumstats)` — the lead variant and its statistics,
-  joined against summary statistics.
+    joined against summary statistics.
 
 `susieResult()` unwraps a per-condition fit list into the single SuSiE
 object the other helpers expect.
 
 ## Writing results out
 
-Two generics cover every published format. `exportToVcf()` serialises a
-fine-mapping result — or summary statistics, or TWAS weights — to GWAS-VCF,
-the interchange format most external tools read: one record per variant, one
-sample per study or fitted model, and the statistics as FORMAT fields.
+Two writers cover every published format. `writeGwasVcf()` serialises a
+fine-mapping result, or summary statistics, or TWAS weights, to GWAS-VCF, the
+interchange format most external tools read: one record per variant, one
+sample per study or fitted model, and the statistics as FORMAT fields. It
+writes through VariantAnnotation, which has to be installed.
 
 ```{r vcf, eval=FALSE}
-exportToVcf(
+writeGwasVcf(
     qtlFineMappingExample,
-    outputPath = "finemapping.vcf.gz",
+    "finemapping.vcf.gz",
     context = "context_1"
 )
 ```
 
-It needs the `VariantAnnotation` package, which is a suggested dependency
-rather than a hard one.
+A GWAS study fine-mapped block by block is one fit, so its blocks are written
+as one sample, with a `BID` field naming each variant's block;
+`splitByBlock = TRUE` writes one file per block instead.
 
-`exportToBed()` writes the published long-format tables instead, one row per
+`writeBed()` writes the published long-format tables instead, one row per
 published observation, bgzipped and tabix-indexed when the path ends in `.gz`:
 
 ```{r bed, eval=FALSE}
 # the top-loci table: the posterior view joined to the marginal one
-exportToBed(qtlFineMappingExample, "top_loci.bed.gz")
+writeBed(qtlFineMappingExample, "top_loci.bed.gz")
 # every remaining column the view carries, after the published schema
-exportToBed(qtlFineMappingExample, "top_loci_full.bed.gz", columns = "all")
+writeBed(qtlFineMappingExample, "top_loci_full.bed.gz", columns = "all")
 # the fSuSiE table: one row per (context, credible set), carrying the fitted
 # curve at both resolutions -- the wavelet grid and its reinterpolation onto
 # the trait positions. `levels` keeps only one of the two.
-exportToBed(fsusieFineMappingExample, "fsusie.bed.gz", schema = "fsusie")
-exportToBed(fsusieFineMappingExample, "fsusie_grid.bed.gz",
+writeBed(fsusieFineMappingExample, "fsusie.bed.gz", schema = "fsusie")
+writeBed(fsusieFineMappingExample, "fsusie_grid.bed.gz",
     schema = "fsusie", levels = "wavelet")
 ```
 
@@ -329,7 +331,10 @@ file holds.
 ```{r read, eval=FALSE}
 res <- readFineMappingResult("top_loci.bed.gz")
 # only the variants of one region, from a tabix-indexed file
-res <- readFineMappingResult("top_loci.bed.gz", region = "chr22:32e6-33e6")
+res <- readFineMappingResult(
+    "top_loci.bed.gz",
+    which = GenomicRanges::GRanges("chr22:32000000-33000000")
+)
 ```
 
 It requires almost nothing: coordinate-encoding variant ids and a `PIP`.
@@ -354,11 +359,11 @@ which is why both schemas publish it as `WGT`.
 ## Next steps
 
 - [Fine-mapping](fine-mapping.html) — producing the results this vignette
-  consumes.
+    consumes.
 - [Colocalization](coloc-pipeline.html) — the model that answers whether an
-  overlap reflects a shared causal variant.
+    overlap reflects a shared causal variant.
 - [TWAS weights](twas-weights.html) — reusing a fine-mapping fit as a weight
-  method.
+    method.
 
 # Session info
 

@@ -5,14 +5,14 @@ context("GenotypeDosageSeed")
 # FORMAT/DS shapes, both SNPRelate storage orders, and SeqArray's 2-bit
 # planes.
 
+.vcfOverlapDs <- function() {
+    `[<-`(.vcfOverlapGt(), 1L, , value = c(0.1, 0.9, 1.8))
+}
+
 samples3 <- c("s1", "s2", "s3")
 
 .seedOf <- function(panel) {
     DelayedArray::seed(SummarizedExperiment::assay(panel, "dosage"))
-}
-
-.dose <- function(panel) {
-    unname(as.matrix(SummarizedExperiment::assay(panel, "dosage")))
 }
 
 # .vcfOverlapRecords() with one DS value per record: its first ALT allele's.

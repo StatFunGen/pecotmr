@@ -13,7 +13,7 @@ test_that("ColocBoostResult: one element per confidence set", {
     )
     expect_s4_class(x, "ColocBoostResult")
     expect_equal(nrow(x), 1L)
-    expect_equal(lengths(x), 1L)
+    expect_equal(unname(lengths(x)), 1L)
     expect_true(x$isColocalized)
 })
 
@@ -150,7 +150,10 @@ test_that("ColocBoostResult: reachable by range, not just identity", {
     )
     win <- GenomicRanges::GRanges("chr1", IRanges::IRanges(150, 250))
     expect_equal(length(IRanges::subsetByOverlaps(x, win)), 1L)
-    expect_equal(sum(lengths(subsetRegion(x, win))), 1L)
+    expect_equal(
+        sum(lengths(endoapply(x, IRanges::subsetByOverlaps, ranges = win))),
+        1L
+    )
 })
 
 test_that("colocBoostOutcomes: joins each outcome to its identity", {
@@ -176,31 +179,21 @@ test_that("regionVcp spans the region, not just set members", {
     expect_equal(sum(lengths(x)), 1L)
 })
 
-test_that("as.data.frame returns the set-level view", {
+test_that("colocPairs is the set-level view; as.data.frame is standard", {
     x <- ColocBoostResult(
         list(.cbr_fake()),
         "xqtl_coloc",
         outcomeInfo = .cbr_info()
     )
+    sets <- colocPairs(x)
+    expect_s4_class(sets, "DataFrame")
+    expect_equal(sets$cosId, "cos1:y1_y2")
+    expect_equal(sets$outcomes, "t1; t2")
+    # as.data.frame() is the inherited GRangesList coercion: one row per
+    # (set, variant), placed by its range.
     df <- as.data.frame(x)
-    expect_s3_class(df, "data.frame")
-    expect_equal(df$cosId, "cos1:y1_y2")
-    expect_equal(df$outcomes, "t1; t2")
-})
-
-test_that("separate_gwas runs are keyed by gwasStudy", {
-    # The three analyses are not parallel: separate_gwas is a named list one
-    # level deeper, so without gwasStudy its sets would be indistinguishable.
-    raw <- list(
-        xqtl_coloc = NULL,
-        joint_gwas = NULL,
-        separate_gwas = list(G1 = .cbr_fake(), G2 = .cbr_fake()),
-        computing_time = list()
-    )
-    x <- .cbToResultObject(raw, .cbr_info())
-    expect_equal(nrow(x), 2L)
-    expect_equal(x$analysis, rep("separate_gwas", 2L))
-    expect_setequal(x$gwasStudy, c("G1", "G2"))
+    expect_true(all(c("group", "seqnames", "start") %in% names(df)))
+    expect_equal(nrow(df), sum(lengths(x)))
 })
 
 test_that(".cbrFocalOutcome maps the no-focal sentinel to NA", {
@@ -321,7 +314,7 @@ test_that("show counts colocalized and outcome-only sets separately", {
 # Pooled variants, and the fallbacks for a result missing its summary tables
 # ===========================================================================
 
-test_that("colocVariants(pooled = TRUE) collapses to one row per variant", {
+test_that("colocPooledVariants collapses to one row per variant", {
     # Noisy-OR only: ColocBoost's sets are not per-block slices of one signal,
     # so there is no mutually-exclusive sum stage the way coloc has.
     x <- ColocBoostResult(
@@ -330,10 +323,11 @@ test_that("colocVariants(pooled = TRUE) collapses to one row per variant", {
         outcomeInfo = .cbr_info()
     )
     long <- colocVariants(x)
-    pooled <- colocVariants(x, pooled = TRUE)
-    expect_lte(nrow(pooled), nrow(long))
+    pooled <- colocPooledVariants(x)
+    expect_lte(length(pooled), length(long))
+    pooledCols <- as.data.frame(S4Vectors::mcols(pooled))
     expect_equal(
-        anyDuplicated(pooled[, c("analysis", "variant_id")]),
+        anyDuplicated(pooledCols[, c("analysis", "variant_id")]),
         0L
     )
     expect_true(all(pooled$vcp >= 0 & pooled$vcp <= 1))
@@ -365,7 +359,7 @@ test_that(".cbrTopVariable is NA when the id is absent from the table", {
     expect_true(is.na(.cbrTopVariable(NULL, "cos1")))
 })
 
-test_that("validity names missing identity and outcomeInfo columns", {
+test_that("validity names a missing identity column", {
     x <- ColocBoostResult(
         list(.cbr_fake()),
         "xqtl_coloc",
@@ -418,6 +412,9 @@ test_that("the views answer an empty collection with empty tables", {
     expect_equal(length(empty), 0L)
     expect_equal(nrow(.cbrLongVariants(empty)), 0L)
     expect_equal(nrow(colocBoostOutcomes(empty)), 0L)
+    expect_length(colocPooledVariants(empty), 0L)
+    expect_s4_class(colocBoostOutcomes(empty), "DataFrame")
+    expect_s4_class(colocPairs(colocboostResultExample), "DataFrame")
 })
 
 test_that("outcome info defaults to the empty frame and is not joined", {
@@ -443,6 +440,87 @@ test_that("validity names the outcomeInfo columns that are missing", {
     )
 })
 
+# A small LdMatrix to stand in for one side's reference.
+.cbr_ldm <- function(ids = c("chr1:100:C:T", "chr1:200:A:G")) {
+    LdMatrix(matrix(c(1, 0.2, 0.2, 1), 2, 2, dimnames = list(ids, ids)))
+}
+
+test_that("ColocBoostResult keeps a named LD reference per side", {
+    refs <- list(
+        qtl = .cbr_ldm(),
+        gwas = .cbr_ldm(c("chr1:300:G:A", "chr1:400:T:C"))
+    )
+    info <- mutate(
+        .cbr_info(),
+        dataForm = "sumstats",
+        ldReference = c("qtl", "gwas")
+    )
+    x <- ColocBoostResult(
+        list(.cbr_fake()),
+        "joint_gwas",
+        outcomeInfo = info,
+        ldReference = refs
+    )
+    expect_identical(ldReference(x), refs)
+    out <- colocBoostOutcomes(x)
+    expect_equal(
+        out$ldReference[match(c("t1", "t2"), out$outcome)],
+        c("qtl", "gwas")
+    )
+})
+
+test_that("ColocBoostResult with no LD reference holds an empty list", {
+    # An outcomeInfo without the column gets it, NA throughout.
+    x <- ColocBoostResult(
+        list(.cbr_fake()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_identical(ldReference(x), list())
+    expect_true(all(is.na(colocBoostOutcomes(x)$ldReference)))
+})
+
+test_that("ColocBoostResult refuses a lone LD reference", {
+    # Its name is what outcomeInfo keys on, so it is not made up.
+    expect_error(
+        ColocBoostResult(
+            list(.cbr_fake()),
+            "xqtl_coloc",
+            outcomeInfo = .cbr_info(),
+            ldReference = .cbr_ldm()
+        ),
+        "named list of LD references"
+    )
+})
+
+test_that("ColocBoostResult refuses an outcome keyed to a missing reference", {
+    info <- mutate(.cbr_info(), ldReference = c("qtl", "gwas"))
+    expect_error(
+        ColocBoostResult(
+            list(.cbr_fake()),
+            "joint_gwas",
+            outcomeInfo = info,
+            ldReference = list(qtl = .cbr_ldm())
+        ),
+        "not in ldReference: gwas"
+    )
+})
+
+test_that("validity wants uniquely named LD references", {
+    # The shared check every class with per-row references validates with.
+    problems <- function(refs) .ldRefDictProblems(refs, character(0))
+    expect_match(problems(list(.cbr_ldm())), "unique, non-empty names")
+    expect_match(
+        problems(list(a = .cbr_ldm(), a = .cbr_ldm())),
+        "unique, non-empty names"
+    )
+    expect_match(
+        problems(list(a = .cbr_ldm(), b = "panel")),
+        "not LD references: b"
+    )
+    expect_null(problems(list(a = .cbr_ldm())))
+})
+
 test_that("the region vcp skips runs that cannot supply one", {
     # Two ways a run is unusable: no vcp at all, and a vcp whose names are
     # missing so the variants cannot be placed.
@@ -456,4 +534,79 @@ test_that("the region vcp skips runs that cannot supply one", {
     ))
     expect_s4_class(gr, "GRanges")
     expect_equal(length(gr), 1L)
+})
+
+test_that("updateObject keys an old result's sumstat outcomes to its ref", {
+    ref <- .cbr_ldm()
+    info <- mutate(.cbr_info(), dataForm = c("sumstats", "individual"))
+    x <- ColocBoostResult(list(.cbr_fake()), "joint_gwas", outcomeInfo = info)
+    # As an earlier version saved it: one reference, no outcome keys.
+    old <- `slot<-`(x, "ldReference", check = FALSE, value = ref)
+    old <- `slot<-`(
+        old,
+        "outcomeInfo",
+        value = select(info, -any_of("ldReference"))
+    )
+    new <- updateObject(old)
+    expect_true(methods::validObject(new))
+    expect_identical(ldReference(new), list(ld1 = ref))
+    expect_identical(new@outcomeInfo$ldReference, c("ld1", NA))
+    # Saved before the slot was renamed, the reference sits in `ldSketch`.
+    sketched <- .savedUnder(old, c(ldSketch = "ldReference"))
+    expect_identical(updateObject(sketched), new)
+    # A current result is left as it is.
+    expect_identical(updateObject(x), x)
+})
+
+# ===========================================================================
+# computingTime(): one row per analysis that ran
+# ===========================================================================
+
+test_that("computingTime() tabulates each analysis: its runs and seconds", {
+    timing <- list(
+        Analysis = list(
+            xqtl_coloc = as.difftime(90, units = "secs"),
+            joint_gwas = NULL,
+            separate_gwas = list(
+                total = as.difftime(2, units = "mins"),
+                n_studies = 3L
+            )
+        )
+    )
+    x <- ColocBoostResult(
+        list(),
+        character(0),
+        outcomeInfo = .cbr_info(),
+        computingTime = timing
+    )
+    tab <- computingTime(x)
+    expect_s4_class(tab, "DataFrame")
+    # An analysis that did not run is no row.
+    expect_equal(tab$analysis, c("xqtl_coloc", "separate_gwas"))
+    expect_equal(tab$nRuns, c(1L, 3L))
+    expect_equal(tab$seconds, c(90, 120))
+})
+
+test_that("computingTime() has no rows when nothing was timed", {
+    tab <- computingTime(
+        ColocBoostResult(list(), character(0), outcomeInfo = .cbr_info())
+    )
+    expect_equal(nrow(tab), 0L)
+    expect_equal(colnames(tab), c("analysis", "nRuns", "seconds"))
+})
+
+test_that("a timing as a bare number, or without a total, still reads", {
+    expect_equal(pecotmr:::.cbrTimingSeconds(12.5), 12.5)
+    expect_true(is.na(pecotmr:::.cbrTimingSeconds(list(n_studies = 2L))))
+    expect_true(is.na(pecotmr:::.cbrTimingRuns(list(total = 3))))
+})
+
+test_that("ColocBoostResult() keeps the caller's metadata", {
+    x <- ColocBoostResult(
+        list(),
+        character(0),
+        outcomeInfo = .cbr_info(),
+        metadata = list(run = "r1")
+    )
+    expect_equal(S4Vectors::metadata(x), list(run = "r1"))
 })

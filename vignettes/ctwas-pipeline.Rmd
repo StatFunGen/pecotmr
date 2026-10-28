@@ -51,7 +51,7 @@ Inputs:
 | `gwasSumStats` | one `GwasSumStats` whose elements are LD blocks |
 | `twasWeights` | per-gene `TwasWeights` / `QtlFineMappingResult` |
 | `twasZ` | optional pre-computed per-gene Z from `causalInferencePipeline()` |
-| `fineMappingResult` | optional; enables the credible-set and PIP variant rescues |
+| `fineMappingResult` | optional `QtlFineMappingResult` for the rescues |
 
 ```{r load-packages}
 library(pecotmr)
@@ -61,7 +61,7 @@ library(pecotmr)
 
 `gwasSumStats` is **one** `GwasSumStats` object whose elements are LD
 blocks, keyed by its `blockId` column — not a list of per-block objects.
-Build it with `loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)` and
+Build it with `loadGwasSumStatsFromManifest(..., which = <blocks>)` and
 pass it through `summaryStatsQc()`.
 
 A single-block input is rejected: cTWAS estimates its group priors by EM
@@ -89,8 +89,7 @@ gwasSumStats <- loadGwasSumStatsFromManifest(
     manifest = data.frame(study = "gwas1", sumStatsPath = gwasTsv),
     genome = "hg38",
     ldReference = ldStem,
-    region = "chr22:10000000-19000000",
-    ldBlocks = blocks
+    which = blocks
 )
 gwasByRegion <- summaryStatsQc(
     gwasSumStats,
@@ -106,6 +105,7 @@ data(ctwasWeightsExample)
 res <- ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
+    method = "susie",
     ctwasPriorParam = CtwasPriorParam(
         thin = 1,
         niterPrefit = 3,
@@ -130,18 +130,18 @@ should carry into a real analysis:
 - `thin = 1` keeps every SNP (production runs thin to `0.1`).
 - `niterPrefit` / `niter` are cut to keep the vignette fast.
 - `min_nonSNP_PIP = 0` disables region screening. The bundled GWAS has no
-  genome-wide-significant signal, so the default (`0.5`) selects no region at
-  all and the result comes back empty. On real data, leave it alone.
+    genome-wide-significant signal, so the default (`0.5`) selects no region at
+    all and the result comes back empty. On real data, leave it alone.
 - `fallbackToPrefit = TRUE` recovers from the accurate-EM step returning
-  `NaN` on underpowered data by keeping the prefit estimates.
+    `NaN` on underpowered data by keeping the prefit estimates.
 
 ## Where genes come from
 
 `twasWeights` accepts two shapes:
 
 - a **flat** `TwasWeights` or `QtlFineMappingResult` (or a homogeneous list
-  of them) carrying `region` provenance. Each gene is assigned to its home
-  LD block by `start(region)`, matching cTWAS's own placement rule.
+    of them) carrying `region` provenance. Each gene is assigned to its home
+    LD block by `start(region)`, matching cTWAS's own placement rule.
 - a **pre-bucketed named list** keyed by `region_id`, used as-is.
 
 Blocks with no gene weights still contribute their SNP-level signal to the
@@ -166,13 +166,17 @@ scales with them. Four arguments trim each gene before cTWAS sees it:
 
 `csMinCor` and `pipRescue` mark variants as must-keep, so they survive
 the `maxVariants` cap. Both need a `fineMappingResult`; without one they
-are no-ops and the cap falls back to ordering by `abs(weight)`.
+are no-ops and the cap falls back to ordering by `abs(weight)`. With one,
+`fineMappingMethod` names which of its fine-mapping methods they read: a
+weight's own method, such as an ensemble, names no fine-mapping fit.
 
 ```{r ctwas-filters, eval=FALSE}
 ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
+    method = "susie",
     fineMappingResult = fmr,
+    fineMappingMethod = "susie",
     variantPruningParam = VariantPruningParam(
         weightCutoff = 1e-4,
         maxVariants = 1000,
@@ -185,7 +189,8 @@ ctwasPipeline(
 ## Reading the result
 
 `ctwasPipeline()` returns a `CtwasResult`: one row per
-`(gwasStudy, study, context, method)` run.
+`(gwasStudy, study, context, method)` run and cTWAS region, the way a
+`GwasFineMappingResult` holds a genome-wide fit as one row per LD block.
 
 ```{r ctwas-identity}
 methodNames(res)
@@ -213,10 +218,11 @@ has no real signal) and `cs` is `NA` because the gene falls in no credible
 set.
 
 `susieAlpha()` returns the per-single-effect alpha matrix behind those
-PIPs, and the EM group priors sit on each row's entry:
+PIPs, and the run's EM group priors sit in the `groupPriors` column, the
+same on every region of the run:
 
 ```{r ctwas-param}
-param <- ctwasGroupPriors(res$entry[[1]])
+param <- res$groupPriors[[1]]
 param$group_prior
 param$group_prior_var
 param$converged
@@ -224,7 +230,7 @@ param$converged
 
 By default the context-agnostic SNP background is dropped from the result,
 since it is the null the genes are being scored against rather than a
-finding. Pass `keepSnps = TRUE` to retain it as an extra row
+finding. Pass `keepSnps = TRUE` to retain it as extra rows, one per region
 (`study = context = "SNP"`), which makes the full cTWAS output
 reconstructable.
 
@@ -237,7 +243,8 @@ re-enter the chain without recomputing what came before.
 ```{r ctwas-granular}
 inputs <- assembleCtwasInputs(
     gwasSumStats = gwasByRegion,
-    twasWeights = list(ctwasWeightsExample)
+    twasWeights = list(ctwasWeightsExample),
+    method = "susie"
 )
 est <- estCtwasGroupPriors(
     inputs,
@@ -270,8 +277,8 @@ carries the SNP rows. `asCtwasResult()` is the step that structures the
 payload and drops them.
 
 ```{r ctwas-as-result}
-nrow(ctwasPosteriors(asCtwasResult(finemapped)))
-nrow(ctwasPosteriors(asCtwasResult(finemapped, keepSnps = TRUE)))
+length(ctwasPosteriors(asCtwasResult(finemapped)))
+length(ctwasPosteriors(asCtwasResult(finemapped, keepSnps = TRUE)))
 ```
 
 Each step's payload is also bundled, so you can enter anywhere:
@@ -314,9 +321,9 @@ high-PIP gene actually straddles a boundary.
 ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    method = NULL, # NULL: "ensemble" if present, else every method
+    method = NULL, # NULL: the TwasWeights' "ensemble" weights
     maxNumSingleEffects = 5,
-    ncore = 1,
+    BPPARAM = BiocParallel::SerialParam(),
     keepSnps = FALSE,
     ctwasPriorParam = CtwasPriorParam(
         thin = 0.1,
@@ -330,17 +337,18 @@ ctwasPipeline(
 )
 ```
 
-When `method` is `NULL` and several weight methods are present without an
-`"ensemble"`, each method runs as its own independent cTWAS run and
-contributes its own row-set.
+With `method = NULL` a run uses the TwasWeights' pre-combined `"ensemble"`
+weights. Weights without an ensemble, and a `QtlFineMappingResult` used as
+the weight source, leave the choice open, so the pipeline asks for `method`.
+Each run reads one method; compare methods by running each in turn.
 
 ## Next steps
 
 - [TWAS weights](twas-weights.html) — training the weights cTWAS consumes.
 - [TWAS Z-scores and MR](twas-zscore.html) — the per-gene Z that
-  `twasZ` optionally supplies here.
+    `twasZ` optionally supplies here.
 - [QC for summary statistics](rss-qc.html) — `summaryStatsQc()`, which
-  `gwasSumStats` must have been through.
+    `gwasSumStats` must have been through.
 
 # Session info
 

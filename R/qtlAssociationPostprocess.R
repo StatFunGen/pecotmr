@@ -166,7 +166,7 @@ QvalueOptions <- function(...) {
 # fdrThreshold stashed by qtlAssociationPostprocess. Uses the SAME package math
 # as the correction (p.adjust for the Bonferroni-adjusted per-variant p).
 .qapSignificanceMask <- function(x, method, threshold = NULL) {
-    recipe <- qcInfo(x)$associationPostprocess
+    recipe <- qcOptions(x)$associationPostprocess
     if (is.null(recipe)) {
         msg <- glue(
             "This QtlSumStats was not produced by ",
@@ -348,11 +348,10 @@ setMethod(
     }
 )
 
-# Rebuild a QtlSumStats with extra row columns added + a new qcInfo. Column
+# Rebuild a QtlSumStats with extra row columns added + new qcOptions. Column
 # assignment on the S4 subclass itself coerces per-element, so we coerce to a
-# plain DFrame, add the columns, and re-wrap (the same rebuild idiom as
-# subsetChr).
-.qapRebuild <- function(x, newCols, qcInfo) {
+# plain DFrame, add the columns, and re-wrap.
+.qapRebuild <- function(x, newCols, qcOptions) {
     # The collection is a GRangesList now, not a DFrame: the per-variant
     # GRanges are the elements and `newCols` are per-tuple metadata, so the
     # rebuild keeps the elements as-is and only rewrites mcols.
@@ -369,11 +368,11 @@ setMethod(
     } else {
         cbind(kept, S4Vectors::DataFrame(added, check.names = FALSE))
     }
-    # Rebuilding from as.list() starts from the elements' own seqinfo, so the
+    # Rebuilding from the elements starts from their own seqinfo, so the
     # build is written back explicitly -- it is collection-level state, and
     # there is no genome slot to carry it any more.
     built <- .withGenomeBuild(
-        GenomicRanges::GRangesList(as.list(x)),
+        .rtlJoinParts(list(x)),
         TRUE,
         unique(unname(GenomeInfoDb::genome(x)))
     )
@@ -382,7 +381,7 @@ setMethod(
         "QtlSumStats",
         grl,
         ldReference = ldReference(x),
-        qcInfo = qcInfo
+        qcOptions = qcOptions
     )
 }
 
@@ -442,7 +441,7 @@ setMethod(
         # annotateSignificance can reproduce significance cheaply (thresholds,
         # not flags).
         qc <- list_assign(
-            qcInfo(x),
+            qcOptions(x),
             associationPostprocess = list(
                 fdrThreshold = fdrThreshold,
                 mafCutoff = mafCutoff,

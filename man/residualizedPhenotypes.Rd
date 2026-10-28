@@ -9,47 +9,20 @@ residualizedPhenotypes(x, ...)
 
 \S4method{residualizedPhenotypes}{QtlDataset}(
   x,
-  contexts,
-  traitId = NULL,
-  region = NULL,
-  naAction = c("keep", "drop", "impute"),
-  outlierAction = c("keep", "drop"),
-  outlierPvalThreshold = 0.001,
-  outlierArgs = CovMcdOptions(),
+  context,
+  trait = NULL,
   residualizationParam = ResidualizationParam()
 )
 }
 \arguments{
 \item{x}{A \code{QtlDataset} object.}
 
-\item{...}{Selection arguments: \code{contexts} (required), \code{traitId},
-\code{region}, \code{phenotypeCovariatesToRemove},
-\code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
-(\code{"impute"}, the default, mean-imputes missing covariate cells;
-\code{"drop"} removes samples with any missing covariate).}
+\item{...}{Passed on to methods.}
 
-\item{contexts}{Character vector. Context(s) whose data to extract.}
+\item{context}{Character vector. Context(s) whose data to extract.}
 
-\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+\item{trait}{Character or \code{NULL}. Molecular trait / feature identifier
 to select; \code{NULL} matches all traits in the dataset.}
-
-\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
-Restrict variants to this region; \code{NULL} uses the full cis window /
-all regions.}
-
-\item{naAction}{Character. How to handle missing phenotype values: one of
-\code{"keep"}, \code{"drop"}, or \code{"impute"}.}
-
-\item{outlierAction}{Character. How to handle phenotype outliers: one of
-\code{"keep"} or \code{"drop"}.}
-
-\item{outlierPvalThreshold}{Numeric. Two-sided p-value threshold for flagging
-phenotype outliers. Default \code{1e-3}.}
-
-\item{outlierArgs}{Extra arguments for \code{robustbase::covMcd()}, the
-robust covariance estimator the outlier rule is built on, supplied with
-\code{\link{CovMcdOptions}} -- \code{alpha} in particular. Only
-consulted when \code{outlierAction = "drop"}.}
 
 \item{residualizationParam}{What the data is residualized on, built with
 \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
@@ -65,9 +38,11 @@ A named list of numeric matrices keyed by context.
 \description{
 Residualize the per-context phenotype matrices against the
   per-context phenotype covariates and the genotype covariates, for one or
-  more requested contexts.
+  more requested contexts. Missing values and outliers are left as they
+  are: they are a run's phenotype QC (\code{\link{PhenotypeFilterParam}}),
+  applied by the pipelines.
 }
 \examples{
 data(qtlDatasetExample)
-residualizedPhenotypes(qtlDatasetExample, contexts = "brain")
+residualizedPhenotypes(qtlDatasetExample, context = "brain")
 }

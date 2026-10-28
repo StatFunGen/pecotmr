@@ -298,9 +298,9 @@ strong credible set should not carry a condition on its own.
 
 The contrast design itself is built from `makePairwiseContrastCol()`, which
 sets +1 and −1 for a pair of conditions in a zero vector, and
-`fitMashContrast()`, which fits one feature's contrast. `mashPosteriorContrast()`
-calls both across all features and pairs, so you only need them directly when
-building a non-pairwise design.
+`fitMashContrast()`, which fits one feature's contrast.
+`mashPosteriorContrast()` calls both across all features and pairs, so you only
+need them directly when building a non-pairwise design.
 
 ## Utilities
 
@@ -320,9 +320,9 @@ The mash track ships a set of helpers for getting real data into shape:
 ## Next steps
 
 - [Building QtlSumStats objects](constructing-sumstats.html) — assembling
-  the multi-context input.
+    the multi-context input.
 - [TWAS weights](twas-weights.html) — where a mash prior is consumed, via
-  `MashPrior` and mr.mash.
+    `MashPrior` and mr.mash.
 
 # Session info
 

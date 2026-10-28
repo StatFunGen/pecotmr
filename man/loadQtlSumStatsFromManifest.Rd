@@ -8,7 +8,7 @@ loadQtlSumStatsFromManifest(
   manifest,
   genome = NULL,
   ldReference = NULL,
-  region = NULL,
+  which = NULL,
   minLdOverlapWarn = 0.5,
   columnMapping = NULL,
   sampleSelect = NULL,
@@ -21,26 +21,44 @@ loadQtlSumStatsFromManifest(
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study}, \code{context}, \code{trait} (required), \code{sumStatsPath}
 (required), \code{columnMapping} (optional), \code{nSample} (optional
-tuple-level total N), \code{varY} (optional), and the single-valued
-\code{genome} / \code{ldReferencePath}. When a row supplies \code{nSample},
+tuple-level total N), \code{varY} (optional), the single-valued
+\code{genome}, and \code{ldReferencePath}, which may differ between rows
+(each distinct reference is read once, for the chromosomes its rows
+cover, and stored once). When a row supplies \code{nSample},
 its sumstats file need not carry a per-variant \code{N} column;
 \code{\link{summaryStatsQc}} fills \code{N} from the scalar. (Unlike the
 GWAS loader, there are no \code{nCase}/\code{nControl} columns: molecular
-QTL traits are quantitative.)}
+QTL traits are quantitative.) Optional BED-style
+\code{chrom}/\code{start}/\code{end} columns, with a 0-based
+\code{start} as in BED, give each tuple its own window, read and kept as
+with \code{which}; a manifest that has them cannot also be given
+\code{which}. Optional \code{traitStart}/\code{traitEnd} columns, on
+the row's \code{chrom} and 0-based the same way, give the trait's
+position (\code{traitPos}).}
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 
 \item{ldReference}{A genotype panel (see \code{\link{readGenotypes}}) or
-spec; reconciled with an \code{ldReferencePath} column.}
+spec, used for every row; where a row also names an
+\code{ldReferencePath} the two must agree. Omit it to give each row the
+reference its \code{ldReferencePath} names.}
 
-\item{region, minLdOverlapWarn, columnMapping, sampleSelect, formatMapping}{As
-for \code{\link{loadGwasSumStatsFromManifest}}.}
+\item{which}{Optional analysis window shared by every tuple: a
+\code{GRanges}, or the path of a BED file, read as BED with a 0-based
+start. One window only, since a tuple has one: tuples with windows
+of their own give them in the manifest's columns. Only the variants
+inside it are read, when the file is tabix-indexed (otherwise the whole
+file is read, with a warning), and it is each tuple's \code{region} (see
+\code{\link{QtlSumStats}}).}
+
+\item{minLdOverlapWarn, columnMapping, sampleSelect, formatMapping}{As for
+\code{\link{loadGwasSumStatsFromManifest}}.}
 
 \item{traitColumn}{Optional column of the sumstats file naming the trait of
 each row (e.g. \code{"molecular_trait_id"} in a cis-QTL scan, which writes
 every gene into one table). When set, each manifest row keeps only the
 rows whose \code{traitColumn} equals that row's \code{trait}. Without it
-a multi-trait file loads whole, since \code{region} restriction needs a
+a multi-trait file loads whole, since \code{which} restriction needs a
 tabix index and neighbouring cis windows overlap regardless.}
 
 \item{variantIdAlleles}{Where to find the alleles when the file has no
@@ -72,5 +90,6 @@ ldStem <- file.path(system.file("extdata", "ld_reference", "chr22",
 manifest <- data.frame(study = "s1", context = "brain",
   trait = "ENSG1", sumStatsPath = tsv)
 loadQtlSumStatsFromManifest(manifest = manifest, genome = "hg38",
-  ldReference = ldStem, region = "chr22:10000000-19000000")
+  ldReference = ldStem,
+  which = GenomicRanges::GRanges("chr22:10000000-19000000"))
 }

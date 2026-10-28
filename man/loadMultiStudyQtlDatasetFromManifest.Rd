@@ -9,14 +9,12 @@ loadMultiStudyQtlDatasetFromManifest(
   sumStatsManifest = NULL,
   genome = NULL,
   ldReference = NULL,
-  region = NULL,
+  which = NULL,
   minLdOverlapWarn = 0.5,
   columnMapping = NULL,
   sampleSelect = NULL,
   formatMapping = NULL,
-  transposeCovariates = FALSE,
-  scaleResiduals = TRUE,
-  genotypeFilterParam = GenotypeFilterParam()
+  transposeCovariates = FALSE
 )
 }
 \arguments{
@@ -27,20 +25,13 @@ loadMultiStudyQtlDatasetFromManifest(
 \item{sumStatsManifest}{Optional QtlSumStats manifest (see
 \code{\link{loadQtlSumStatsFromManifest}}).}
 
-\item{genome, ldReference, region, minLdOverlapWarn}{Passed to the QtlSumStats
+\item{genome, ldReference, which, minLdOverlapWarn}{Passed to the QtlSumStats
 loader for \code{sumStatsManifest}.}
 
 \item{columnMapping, sampleSelect, formatMapping}{Passed to the QtlSumStats
 loader for \code{sumStatsManifest}.}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout).}
-
-\item{scaleResiduals}{Pass-through \code{\link{QtlDataset}} argument,
-applied to every study.}
-
-\item{genotypeFilterParam}{Pass-through \code{\link{QtlDataset}} filtering
-options, built with \code{\link{GenotypeFilterParam}} and applied to
-every study.}
 }
 \value{
 A \code{MultiStudyQtlDataset} object.

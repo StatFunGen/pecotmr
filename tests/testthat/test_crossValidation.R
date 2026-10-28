@@ -179,15 +179,24 @@ test_that("maxNumVariants with variantsToKeep retains the specified variants", {
 })
 
 test_that("a degenerate fold (empty train/test) is skipped, not errored", {
+    # One fold holding every sample leaves nothing to train on: the fold is
+    # skipped before any fit, so nothing is predicted or scored.
     d <- mkXY(n = 10)
     sp <- data.frame(Sample = rownames(d$X), Fold = rep(1L, nrow(d$X)))
+    fits <- 0L
+    countingFit <- function(...) {
+        fits <<- fits + 1L
+        mockFitFold(...)
+    }
     r <- suppressMessages(cv(
         d$X,
         d$Y,
         samplePartitions = sp,
-        fitFold = mockFitFold
+        fitFold = countingFit
     ))
-    expect_true(all(is.na(r$prediction[["mock_predicted"]])))
+    expect_equal(fits, 0L)
+    expect_length(r$prediction, 0L)
+    expect_length(r$performance, 0L)
 })
 
 test_that("zero-variance predictions yield NA metrics with a message", {
@@ -213,6 +222,7 @@ test_that("zero-variance predictions yield NA metrics with a message", {
 })
 
 test_that("the parallel fold path matches the serial one", {
+    skip_on_os("windows")
     d <- mkXY(n = 40, seed = 7)
     set.seed(1)
     r1 <- suppressMessages(cv(
@@ -220,7 +230,7 @@ test_that("the parallel fold path matches the serial one", {
         d$Y,
         fold = 4,
         fitFold = mockFitFold,
-        numThreads = 1
+        BPPARAM = BiocParallel::SerialParam()
     ))
     set.seed(1)
     r2 <- suppressMessages(cv(
@@ -228,7 +238,7 @@ test_that("the parallel fold path matches the serial one", {
         d$Y,
         fold = 4,
         fitFold = mockFitFold,
-        numThreads = 2
+        BPPARAM = BiocParallel::MulticoreParam(2)
     ))
     expect_equal(r1$prediction, r2$prediction)
 })
@@ -322,13 +332,68 @@ test_that("sample names are synthesized when neither matrix carries rownames", {
     expect_equal(rownames(out$Y), rownames(out$X))
 })
 
-test_that("numThreads = -1 asks BiocParallel for the worker count", {
-    # -1 means "all available"; anything else is capped at what is available.
-    expect_equal(
-        pecotmr:::.cvNumCores(-1),
-        BiocParallel::multicoreWorkers()
+test_that("BPPARAM must be a BiocParallelParam", {
+    expect_error(pecotmr:::.assertBpparam(2), "must be a BiocParallelParam")
+    expect_error(
+        CrossValidationParam(BPPARAM = 4),
+        "must be a BiocParallelParam"
     )
-    expect_equal(pecotmr:::.cvNumCores(1), 1)
+})
+
+test_that("the workers draw from a seeded copy of the caller's BPPARAM", {
+    bp <- BiocParallel::SerialParam()
+    # `seed` first, then the param's own RNGseed, and the caller's param is
+    # left as it was.
+    expect_identical(
+        BiocParallel::bpRNGseed(pecotmr:::.seededBpparam(bp, 7L)),
+        7L
+    )
+    expect_null(BiocParallel::bpRNGseed(bp))
+    own <- BiocParallel::SerialParam(RNGseed = 3L)
+    expect_identical(
+        BiocParallel::bpRNGseed(pecotmr:::.seededBpparam(own)),
+        3L
+    )
+    # Neither: one draw from the session RNG, so set.seed() still governs.
+    set.seed(11)
+    a <- BiocParallel::bpRNGseed(pecotmr:::.seededBpparam(bp))
+    set.seed(11)
+    b <- BiocParallel::bpRNGseed(pecotmr:::.seededBpparam(bp))
+    expect_identical(a, b)
+})
+
+test_that("a worker's error is raised with its own message", {
+    boom <- function(i) {
+        if (i == 2L) {
+            rlang::abort("element two failed")
+        }
+        i
+    }
+    expect_error(
+        pecotmr:::.bpMap(1:3, boom, BPPARAM = BiocParallel::SerialParam()),
+        "^element two failed$"
+    )
+    expect_identical(
+        pecotmr:::.bpMap(1:2, identity, BPPARAM = BiocParallel::SerialParam()),
+        list(1L, 2L)
+    )
+})
+
+test_that("a threaded engine counts only workers on this machine", {
+    expect_identical(
+        pecotmr:::.bpLocalThreads(BiocParallel::SerialParam(), "f"),
+        1L
+    )
+    expect_identical(
+        pecotmr:::.bpLocalThreads(BiocParallel::MulticoreParam(3), "f"),
+        3L
+    )
+    rlang::local_options(rlib_message_verbosity = "verbose")
+    expect_message(
+        n <- pecotmr:::.bpLocalThreads(BiocParallel::SnowParam(4), "f"),
+        "f: the workers of a SnowParam need not run on this machine"
+    )
+    expect_identical(n, 1L)
 })
 
 test_that("a seed makes a CV call reproducible without leaking RNG state", {
@@ -348,6 +413,21 @@ test_that("a seed makes a CV call reproducible without leaking RNG state", {
 
 test_that(".cvPartitionKey answers NULL when there is no partition to key", {
     expect_null(pecotmr:::.cvPartitionKey(NULL))
+})
+
+test_that(".cvPartitionKey ignores row order but not fold assignment", {
+    sp <- data.frame(Sample = c("s1", "s2", "s3"), Fold = c(1L, 2L, 1L))
+    shuffled <- sp[c(3, 1, 2), ]
+    expect_identical(
+        pecotmr:::.cvPartitionKey(sp),
+        pecotmr:::.cvPartitionKey(shuffled)
+    )
+    moved <- sp
+    moved$Fold <- c(1L, 1L, 2L)
+    expect_false(identical(
+        pecotmr:::.cvPartitionKey(sp),
+        pecotmr:::.cvPartitionKey(moved)
+    ))
 })
 
 test_that("sumstats inputs ignore residualization but refuse crossValidation", {
@@ -429,4 +509,47 @@ test_that("CrossValidationParam(fitFullData) is validated at construction", {
         ),
         "fitFullData"
     )
+})
+
+test_that("a BPPARAM other than SerialParam() is a cross-validation request", {
+    expect_silent(pecotmr:::.cvRefuseOnSumstats(
+        CrossValidationParam(BPPARAM = BiocParallel::SerialParam()),
+        "fineMappingPipeline",
+        "QtlSumStats"
+    ))
+    expect_error(
+        pecotmr:::.cvRefuseOnSumstats(
+            CrossValidationParam(BPPARAM = BiocParallel::MulticoreParam(2)),
+            "fineMappingPipeline",
+            "QtlSumStats"
+        ),
+        "Remove CrossValidationParam(BPPARAM)",
+        fixed = TRUE
+    )
+})
+
+test_that("a BiocParallel report without a worker error is raised as is", {
+    cnd <- structure(
+        class = c("bplist_error", "bperror", "error", "condition"),
+        list(message = "no element failed", call = NULL)
+    )
+    attr(cnd, "result") <- list(1L)
+    expect_error(pecotmr:::.bpRaiseFirstError(cnd), "no element failed")
+})
+
+# ===========================================================================
+# .cvSamplePartition and .cvMetricRow
+# ===========================================================================
+
+test_that(".cvSamplePartition partitions every sample into the requested folds", {
+    part <- pecotmr:::.cvSamplePartition(paste0("s", 1:20), fold = 4L)
+    expect_setequal(part$Sample, paste0("s", 1:20))
+    expect_setequal(sort(unique(part$Fold)), 1:4)
+    expect_equal(nrow(part), 20L)
+})
+
+test_that(".cvMetricRow: < 3 usable predictions -> all-NA row", {
+    expect_true(all(is.na(pecotmr:::.cvMetricRow(c(1, 2), c(1, 2)))))
+    ok <- pecotmr:::.cvMetricRow(c(1, 2, 3, 4, 5), c(1.1, 2, 2.9, 4, 5))
+    expect_false(is.na(ok[["rsq"]]))
 })

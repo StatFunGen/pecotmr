@@ -11,50 +11,10 @@
 #' @include AllGenerics.R
 NULL
 
-# Coerce an LD-block specification to the GRanges the splitters consume.
-#
-# Accepts a `GRanges`, a data.frame with chrom/start/end (plus an optional
-# `blockId`), or a path to a delimited file holding those columns.
+# Coerce an LD-block specification to the GRanges the splitters consume: a
+# GRanges, or the path of a BED file, read as BED. The rules are those of
+# every window argument (.asRegionRanges()).
 # @noRd
 .asLdBlockRanges <- function(x) {
-    if (methods::is(x, "GRanges")) {
-        return(x)
-    }
-    if (is.character(x) && length(x) == 1L) {
-        x <- .readManifest(x)
-    }
-    if (!is.data.frame(x)) {
-        msg <- glue(
-            "`ldBlocks` must be a GRanges, a data.frame with ",
-            "chrom/start/end, or a path to one (got {class(x)[[1L]]})."
-        )
-        abort(msg)
-    }
-    .ldBlockTableToRanges(x)
-}
-
-# One block per row. `blockId` is carried into mcols when present so the key
-# survives; without it the splitter falls back to the block's coordinates.
-# @noRd
-#' @importFrom checkmate assertNames
-.ldBlockTableToRanges <- function(df) {
-    assertNames(
-        colnames(df),
-        must.include = c("chrom", "start", "end"),
-        what = "colnames",
-        .var.name = "ldBlocks table"
-    )
-    exec(
-        GenomicRanges::GRanges,
-        seqnames = as.character(df$chrom),
-        ranges = IRanges::IRanges(
-            start = as.integer(df$start),
-            end = as.integer(df$end)
-        ),
-        !!!compact(list(
-            blockId = if (is_in("blockId", colnames(df))) {
-                as.character(df$blockId)
-            }
-        ))
-    )
+    .asRegionRanges(x, "`ldBlocks`")
 }

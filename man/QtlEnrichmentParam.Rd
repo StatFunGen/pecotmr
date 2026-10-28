@@ -42,7 +42,7 @@ A \code{QtlEnrichmentParam} object, a \code{\link{MethodParam}}.
 \description{
 The algorithmic settings \code{\link{qtlEnrichment}} takes,
   as one checked bundle. Everything else that function accepts --- the two
-  data arguments, \code{numThreads}, \code{seed}, \code{verbose}, and the
+  data arguments, \code{BPPARAM}, \code{seed}, \code{verbose}, and the
   \code{alignNames} switch --- is the pipeline's own business and is not
   settable here.
 }

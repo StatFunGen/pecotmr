@@ -17,14 +17,9 @@ Virtual base shared by \code{\linkS4class{ColocResult}} (from
   projection surface: both answer \code{\link{colocPairs}} and
   \code{\link{colocVariants}}, so code that only needs "which variants
   colocalized, and how strongly" works against either.
+
+  Each subclass carries its own LD reference, and both answer
+  \code{\link{ldReference}}: a \code{ColocResult} holds the one reference
+  its pairs were computed against, a \code{ColocBoostResult} one per
+  reference its summary statistics were matched against.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{ldReference}}{The LD reference the underlying fits were computed
-against (a genotype panel, a \code{GenotypeMixture} or an
-\code{LdMatrix}), or \code{NULL}. Shared by both subclasses: coloc and
-ColocBoost report different statistics, but both are computed against a
-reference and both are asked for it the same way.}
-}}
-

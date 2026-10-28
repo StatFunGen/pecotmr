@@ -30,7 +30,7 @@ context("qtlEnrichmentPipeline")
         format = "plink2",
         snpInfo = data.frame(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snp_n)),
-            CHR = rep("1", snp_n),
+            CHR = rep("chr1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
             A2 = rep("G", snp_n),
@@ -60,7 +60,7 @@ context("qtlEnrichmentPipeline")
         stringsAsFactors = FALSE
     )
     fit <- list(alpha = alpha, pip = setNames(pip, variant_ids), V = 0.1)
-    fineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
+    FineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
 }
 
 .qep_makeGwasFmr <- function(
@@ -161,7 +161,7 @@ test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
     gfmr <- GwasFineMappingResult(
         studyName = "G1",
         method = "susie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             variantIds = ids,
             susieFit = list(
                 alpha = matrix(1 / 50, nrow = 1L, ncol = 50L),
@@ -177,7 +177,7 @@ test_that("qtlEnrichmentPipeline: the real estimator fills the value columns", {
         context = "c1",
         trait = "t1",
         method = "susie",
-        entry = list(fineMappingRow(
+        entry = list(FineMappingRow(
             variantIds = ids,
             susieFit = list(
                 alpha = alpha,
@@ -305,7 +305,7 @@ test_that("qtlEnrichmentPipeline: NULL ldReference on the GWAS side errors", {
             gwasFineMappingResult = gfmr,
             qtlFineMappingResult = qfmr
         ),
-        "must have a non-NULL ldReference"
+        "row must have an ldReference"
     )
 })
 
@@ -409,7 +409,7 @@ test_that("qtlEnrichmentPipeline: qtlEnrichment failure produces a warning + ski
 test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema", {
     # Build a GwasFineMappingResult whose entries have empty fits so the PIP
     # vector is empty.
-    emptyEntry <- fineMappingRow(
+    emptyEntry <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(), # no pip -> .enrBuildGwasPipVector returns numeric(0)
         topLoci = data.frame(
@@ -440,8 +440,10 @@ test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema
             "gwasStudy",
             "gwasContext",
             "gwasTrait",
+            "gwasMethod",
             "qtlStudy",
             "qtlContext",
+            "qtlMethod",
             names(pecotmr:::.enrNaEnrichment())
         )
     )
@@ -544,9 +546,7 @@ test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context)
 # qtlEnrichment() — kernel wrapper + real C++ integration
 # These tests deliberately do NOT mock qtlEnrichmentCpp so the C++
 # kernel in src/qtl_enrichment.cpp gets coverage. The wrapper itself
-# (R/qtlEnrichmentPipeline.R::qtlEnrichment) is exercised here directly
-# rather than via the deprecated `computeQtlEnrichment` shim (which has
-# skip_on_covr()).
+# (R/qtlEnrichmentPipeline.R::qtlEnrichment) is exercised here directly.
 # ===========================================================================
 
 # Build a small (gwasPip, susieQtlRegions) fixture with a sparse causal
@@ -595,7 +595,7 @@ test_that("qtlEnrichment: real C++ kernel returns the expected keys (numGwas + p
         piQtl = 0.5,
         lambda = 1,
         impN = 5,
-        numThreads = 1,
+        BPPARAM = BiocParallel::SerialParam(),
         verbose = FALSE
     )
     expect_type(res, "list")
@@ -627,7 +627,7 @@ test_that("qtlEnrichment: a single MI round is estimable, not NaN", {
         numGwas = 5000,
         piQtl = 0.5,
         impN = 1,
-        numThreads = 1,
+        BPPARAM = BiocParallel::SerialParam(),
         verbose = FALSE,
         seed = 1L
     )
@@ -648,7 +648,7 @@ test_that("qtlEnrichment: numGwas omitted -> estimates piGwas from data + warns"
             susieQtlRegions = fx$susieQtlRegions,
             piQtl = 0.5,
             impN = 5,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
         ),
         "numGwas is not provided"
@@ -664,7 +664,7 @@ test_that("qtlEnrichment: piQtl omitted -> estimates from susieQtlRegions + warn
             susieQtlRegions = fx$susieQtlRegions,
             numGwas = 3000,
             impN = 5,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
         ),
         "piQtl is not provided"
@@ -681,7 +681,7 @@ test_that("qtlEnrichment: errors when piGwas resolves to zero", {
             gwasPip = zeroGwas,
             susieQtlRegions = fx$susieQtlRegions,
             piQtl = 0.5,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
         ),
         "No association signal found"
@@ -696,7 +696,7 @@ test_that("qtlEnrichment: errors when piQtl resolves to zero", {
             susieQtlRegions = fx$susieQtlRegions,
             numGwas = 5000,
             piQtl = 0,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
         ),
         "No QTL associated"
@@ -712,7 +712,7 @@ test_that("qtlEnrichment: errors when gwasPip has no names", {
             susieQtlRegions = fx$susieQtlRegions,
             numGwas = 5000,
             piQtl = 0.5,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
         ),
         "Variant names are missing in gwasPip"
@@ -728,14 +728,14 @@ test_that("qtlEnrichment: errors when susieQtlRegions$pip lacks names", {
             susieQtlRegions = fx$susieQtlRegions,
             numGwas = 5000,
             piQtl = 0.5,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
         ),
         "Variant names are missing in susieQtlRegions"
     )
 })
 
-test_that("qtlEnrichment: tracks unmatched QTL variants in the output", {
+test_that("qtlEnrichment: tracks unmatched QTL variants, either alignNames", {
     fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
     # Inject a couple of variant IDs into the QTL fit that don't exist
     # in the GWAS PIP vector.
@@ -743,33 +743,45 @@ test_that("qtlEnrichment: tracks unmatched QTL variants in the output", {
     newNames[1:2] <- c("1:9999:A:G", "1:9998:A:G")
     names(fx$susieQtlRegions$fit1$pip) <- newNames
     colnames(fx$susieQtlRegions$fit1$alpha) <- newNames
-    res <- qtlEnrichment(
-        gwasPip = fx$gwasPip,
-        susieQtlRegions = fx$susieQtlRegions,
-        numGwas = 3000,
-        piQtl = 0.5,
-        impN = 5,
-        numThreads = 1,
-        verbose = FALSE
-    )
-    expect_true("unused_xqtl_variants" %in% names(res))
+    # alignNames = FALSE is the cheap set-membership branch
+    # qtlEnrichmentPipeline uses once it has aligned the QTL names against
+    # the union GWAS panel; both branches report the two injected ids.
+    for (alignNames in c(TRUE, FALSE)) {
+        res <- qtlEnrichment(
+            gwasPip = fx$gwasPip,
+            susieQtlRegions = fx$susieQtlRegions,
+            numGwas = 3000,
+            piQtl = 0.5,
+            impN = 5,
+            BPPARAM = BiocParallel::SerialParam(),
+            verbose = FALSE,
+            alignNames = alignNames
+        )
+        expect_true(
+            all(
+                c("1:9999:A:G", "1:9998:A:G") %in%
+                    unlist(res$unused_xqtl_variants)
+            ),
+            info = str_c("alignNames = ", alignNames)
+        )
+    }
 })
 
 
 # ===========================================================================
-# qtlEnrichment(): verbose messages + alignNames = FALSE branch
+# qtlEnrichment(): verbose messages
 # ===========================================================================
 
 test_that("qtlEnrichment: verbose=TRUE emits 'Estimated piGwas'/'Estimated piQtl' messages", {
     # numGwas = NULL and piQtl = NULL both trigger data-estimation paths;
-    # with verbose = TRUE each emits a message (lines 391 and 407).
+    # with verbose = TRUE each emits a message.
     fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
     msgs <- testthat::capture_messages(
         suppressWarnings(qtlEnrichment(
             gwasPip = fx$gwasPip,
             susieQtlRegions = fx$susieQtlRegions,
             impN = 5,
-            numThreads = 1,
+            BPPARAM = BiocParallel::SerialParam(),
             verbose = TRUE
         ))
     )
@@ -777,34 +789,6 @@ test_that("qtlEnrichment: verbose=TRUE emits 'Estimated piGwas'/'Estimated piQtl
     expect_match(allMsgs, "Estimated piGwas")
     expect_match(allMsgs, "Estimated piQtl")
 })
-
-test_that("qtlEnrichment: alignNames=FALSE recomputes only the unmatched set", {
-    # Exercises the cheap set-membership branch (lines 438-444) used by
-    # qtlEnrichmentPipeline after it has already aligned QTL names against
-    # the union GWAS panel. Two injected names are absent from gwasPip, so
-    # the unmatched-variant accumulation (lines 441-442) runs.
-    fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
-    newNames <- names(fx$susieQtlRegions$fit1$pip)
-    newNames[1:2] <- c("1:9999:A:G", "1:9998:A:G")
-    names(fx$susieQtlRegions$fit1$pip) <- newNames
-    colnames(fx$susieQtlRegions$fit1$alpha) <- newNames
-    res <- qtlEnrichment(
-        gwasPip = fx$gwasPip,
-        susieQtlRegions = fx$susieQtlRegions,
-        numGwas = 3000,
-        piQtl = 0.5,
-        impN = 5,
-        numThreads = 1,
-        verbose = FALSE,
-        alignNames = FALSE
-    )
-    expect_true("unused_xqtl_variants" %in% names(res))
-    expect_true(any(
-        c("1:9999:A:G", "1:9998:A:G") %in%
-            unlist(res$unused_xqtl_variants)
-    ))
-})
-
 
 # ===========================================================================
 # .enrFlattenEnrichment(): shape coercion + NA fallbacks
@@ -861,7 +845,7 @@ test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with
     # Unnamed pip of length 2 against 3 variant ids -> ids come from
     # variantIds and length(ids) != length(pip) -> the block is skipped,
     # leaving no pieces -> numeric(0).
-    badEntry <- fineMappingRow(
+    badEntry <- FineMappingRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         susieFit = list(pip = c(0.1, 0.2)),
         topLoci = data.frame(
@@ -888,7 +872,7 @@ test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with
 # ===========================================================================
 
 test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
-    badEntry <- fineMappingRow(
+    badEntry <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(
@@ -914,44 +898,13 @@ test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
     )
 })
 
-test_that(".enrBuildQtlRegionsList: skips a fit with no V and no prior_variance", {
-    noVfit <- list(
-        alpha = matrix(c(0.6, 0.4), nrow = 1),
-        pip = setNames(c(0.6, 0.4), c("chr1:100:A:G", "chr1:200:A:G"))
-    )
-    entry <- fineMappingRow(
-        variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
-        susieFit = noVfit,
-        topLoci = data.frame(
-            variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
-            pip = c(0.6, 0.4),
-            stringsAsFactors = FALSE
-        )
-    )
-    qfmr <- QtlFineMappingResult(
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(entry),
-        ldReference = NULL
-    )
-    expect_equal(
-        length(pecotmr:::.enrBuildQtlRegionsList(
-            qfmr,
-            .qep_qtlIdent("Q1", "c1")
-        )),
-        0L
-    )
-})
-
 test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's variant ids", {
     unnamedPipFit <- list(
         alpha = matrix(c(0.6, 0.4), nrow = 1),
         pip = c(0.6, 0.4), # unnamed -> names assigned from variantIds
         V = 0.1
     )
-    entry <- fineMappingRow(
+    entry <- FineMappingRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         susieFit = unnamedPipFit,
         topLoci = data.frame(
@@ -1002,7 +955,7 @@ test_that("qtlEnrichmentPipeline: empty QTL collection errors with the no-triple
 test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies", {
     # Two GWAS studies -> each QTL tuple's alignment is computed for the
     # first study (cache miss) and served from cache for the second
-    # (alignTuple early-return branch, line 119).
+    # (alignTuple early-return branch).
     e1 <- .qep_makeFmEntry(
         variant_ids = sprintf("chr1:%d:A:G", 100L * (1:3)),
         pip = c(0.5, 0.2, 0.1)
@@ -1032,7 +985,7 @@ test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies
 
 test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and is skipped", {
     gfmr <- .qep_makeGwasFmr()
-    emptyQtlEntry <- fineMappingRow(
+    emptyQtlEntry <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(
@@ -1072,7 +1025,7 @@ test_that(".enrRunEnrichment turns a stored alignment failure into a warning", {
             k = 1L,
             alignedByTuple = list(cnd),
             qtlEnrichmentParam = QtlEnrichmentParam(),
-            numThreads = 1L,
+            BPPARAM = BiocParallel::SerialParam(),
             seed = NULL,
             verbose = FALSE,
             gwasFineMappingResult = NULL,
@@ -1157,5 +1110,113 @@ test_that("qtlEnrichmentPipeline refuses a bare list for qtlEnrichmentParam", {
             qtlEnrichmentParam = list(impN = 5)
         ),
         "must be built with QtlEnrichmentParam"
+    )
+})
+
+test_that("qtlEnrichmentPipeline refuses overlapping rows on two references", {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:9))
+    ldm <- function(rho) {
+        LdMatrix(`dimnames<-`(rho^abs(outer(1:9, 1:9, "-")), list(ids, ids)))
+    }
+    gfmr <- pecotmr:::.withRowLdRefs(.qep_makeGwasFmr(), ldm(0.2))
+    qfmr <- pecotmr:::.withRowLdRefs(.qep_makeQtlFmr(), ldm(0.8))
+    expect_error(
+        pecotmr:::.enrValidateInputs(gfmr, qfmr),
+        "disagree on the LD"
+    )
+})
+
+test_that("qtlEnrichmentPipeline keeps each fine-mapping method's fits apart", {
+    # The same GWAS blocks fine-mapped by two methods are two outcome PIP
+    # vectors, and the same QTL regions by two methods two annotations.
+    gwas <- .qep_makeGwasFmr(n_blocks = 2L)
+    gwas2 <- gwas
+    S4Vectors::mcols(gwas2)$method <- "ser"
+    gfmr <- combineFineMappingResults(gwas, gwas2)
+    qtl <- .qep_makeQtlFmr()
+    qtl2 <- qtl
+    S4Vectors::mcols(qtl2)$method <- "ser"
+    qfmr <- combineFineMappingResults(qtl, qtl2)
+    seen <- new.env()
+    seen$regions <- integer(0)
+    local_mocked_bindings(
+        qtlEnrichment = function(gwasPip, susieQtlRegions, ...) {
+            seen$regions <- c(seen$regions, length(susieQtlRegions))
+            .qep_mockEnrichment(2.0)(gwasPip, susieQtlRegions, ...)
+        },
+        .package = "pecotmr"
+    )
+    out <- qtlEnrichmentPipeline(
+        gwasFineMappingResult = gfmr,
+        qtlFineMappingResult = qfmr,
+        verbose = FALSE
+    )
+    expect_equal(nrow(out), 4L)
+    expect_setequal(
+        str_c(out$gwasMethod, out$qtlMethod, sep = "/"),
+        c("susie/susie", "susie/ser", "ser/susie", "ser/ser")
+    )
+    # Each annotation is one method's one region, counted once.
+    expect_true(all(seen$regions == 1L))
+    # The GWAS outcome is both blocks of its fit.
+    ident <- list(
+        study = "G1",
+        context = NA_character_,
+        trait = NA_character_,
+        method = "ser"
+    )
+    expect_length(pecotmr:::.enrBuildGwasPipVector(gfmr, ident), 6L)
+})
+
+# ===========================================================================
+# A narrowed row's PIPs are named by the variants of its fit
+# ===========================================================================
+
+test_that("enrichment names a narrowed row's PIPs by its fit's variants", {
+    vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    pip <- c(0.5, 0.3, 0.2)
+    fit <- list(pip = pip, alpha = matrix(pip, 1L), V = 1)
+    tl <- data.frame(variant_id = vids, pip = pip)
+    row <- FineMappingRow(vids, fit, tl)
+    gwas <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(row)
+    )
+    expect_equal(
+        pecotmr:::.enrRowPipVector(1L, endoapply(gwas, utils::head, 2L)),
+        set_names(pip, vids)
+    )
+    qtl <- QtlFineMappingResult(
+        studyName = "q1",
+        context = "c1",
+        trait = "g1",
+        method = "susie",
+        entry = list(row)
+    )
+    region <- pecotmr:::.enrRowRegion(1L, endoapply(qtl, utils::head, 2L))
+    expect_equal(region$pip, set_names(pip, vids))
+    expect_equal(region$prior_variance, 1)
+})
+
+test_that("qtlEnrichmentPipeline warns about narrowed fits on both sides", {
+    data(gwasFineMappingExample, qtlFineMappingExample)
+    cnd <- .fitCoverageCondition(qtlEnrichmentPipeline(
+        gwasFineMappingResult = endoapply(
+            gwasFineMappingExample,
+            utils::head,
+            2000L
+        ),
+        qtlFineMappingResult = endoapply(
+            qtlFineMappingExample,
+            utils::head,
+            2000L
+        ),
+        verbose = FALSE
+    ))
+    expect_s3_class(cnd, "pecotmrFitCoverage")
+    expect_match(
+        conditionMessage(cnd),
+        "qtlEnrichmentPipeline\\(\\): 2 row\\(s\\)"
     )
 })

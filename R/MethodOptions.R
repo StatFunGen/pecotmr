@@ -322,7 +322,6 @@ setClass("MethodOptions", contains = "SimpleList")
 # is no foreign signature to check against.
 # @noRd
 #' @importFrom rlang is_named
-#' @importFrom purrr map2_lgl
 #' @importFrom S4Vectors SimpleList metadata metadata<-
 .newMethodOptions <- function(
     callee,
@@ -524,24 +523,17 @@ setClass("MethodOptions", contains = "SimpleList")
 
 # --- nested per-engine bundles ---------------------------------------------
 
-# Every entry must have been built by a constructor its key accepts.
-# Checked before building so the message is the user's, not purrr's "In
-# index: 1. With name: foo." framing around it. The acceptable engines come
-# from the key's own constructor rather than from the key: several keys may
-# share one engine (lasso and enet are both glmnet). `engines` overrides
-# that for a key whose paths run more than one -- TWAS's lasso fits with
-# glmnet on individual data and with pecotmr's lassosum solver on summary
-# statistics, and either constructor is a legitimate way to configure it.
+# Every entry must have been built by its key's own constructor, or be a
+# plain list, which declares no engine. Checked before building so the
+# message is the user's, not purrr's "In index: 1. With name: foo." framing
+# around it. The engine to match comes from the key's constructor rather
+# than from the key: several keys may share one engine (lasso and enet are
+# both glmnet).
 # @noRd
-.nestedAssertEngines <- function(elements, ctors, engines, label) {
+.nestedAssertEngines <- function(elements, ctors, label) {
     declared <- map_chr(elements, .nestedDeclaredEngine)
-    allowed <- map(
-        names(elements),
-        .nestedAllowedEngines,
-        ctors = ctors,
-        engines = engines
-    )
-    mismatch <- which(!map2_lgl(declared, allowed, .nestedEngineMatches))
+    expected <- map_chr(names(elements), .nestedExpectedEngine, ctors = ctors)
+    mismatch <- which(!is.na(declared) & declared != expected)
     if (length(mismatch) == 0L) {
         return(invisible(NULL))
     }
@@ -549,25 +541,8 @@ setClass("MethodOptions", contains = "SimpleList")
     abort(glue(
         "{label}: the `{names(elements)[i]}` entry was built with the ",
         "constructor for '{declared[[i]]}', but `{names(elements)[i]}` ",
-        "uses the ",
-        "{str_flatten(sprintf(\"'%s'\", allowed[[i]]), ' or ')} ",
-        "constructor. ",
-        "{if (length(allowed[[i]]) > 1L) 'Pass one of those' else ",
-        "'Pass that'}, or a plain list."
+        "uses the '{expected[[i]]}' constructor. Pass that, or a plain list."
     ))
-}
-
-# A plain-list entry declares no engine, so nothing to match.
-# @noRd
-.nestedEngineMatches <- function(declared, allowed) {
-    is.na(declared) || is_in(declared, allowed)
-}
-
-# The engines a key accepts: the caller's list for that key when given,
-# otherwise the single one the key's own constructor produces.
-# @noRd
-.nestedAllowedEngines <- function(key, ctors, engines) {
-    engines[[key]] %||% .nestedExpectedEngine(key, ctors)
 }
 
 # The engine a key's own constructor produces, so an entry built by a

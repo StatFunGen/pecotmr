@@ -33,7 +33,9 @@ standardized genotypes, never formed as a matrix.}
 
 \item{gamma}{SCAD concavity parameter. Default 3.7.}
 
-\item{alpha}{Elastic-net mixing (1 = pure L1). Default 1.}
+\item{alpha}{Elastic-net mixing in \code{(0, 1]}: the SCAD share of
+the penalty, the rest a ridge term, as \code{\link{penalizedRss}}
+mixes them. Default 1, no ridge term.}
 
 \item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
 \code{"minFbeta"}.}

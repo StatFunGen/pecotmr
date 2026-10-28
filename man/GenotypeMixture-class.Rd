@@ -11,6 +11,10 @@
 \arguments{
 \item{object}{A \code{GenotypeMixture}.}
 }
+\value{
+\code{show} is called for its side effect and returns
+  \code{invisible(NULL)}.
+}
 \description{
 A \code{GenotypeMixture} uses several genotype panels (see
   \code{\link{readGenotypes}}) as one LD reference whose LD is the

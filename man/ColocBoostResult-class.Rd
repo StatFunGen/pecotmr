@@ -12,11 +12,20 @@ A collection of ColocBoost results, one element per confidence
 \section{Slots}{
 
 \describe{
+\item{\code{ldReference}}{A named list of the LD references the summary statistics
+were matched against, each a genotype panel, a \code{GenotypeMixture} or
+an \code{LdMatrix}, and each stored once however many outcomes used it.
+Empty when no summary statistics were analysed.}
+
 \item{\code{outcomeInfo}}{A data frame mapping each outcome \code{name} to its
-\code{study}, \code{context}, \code{trait} and \code{dataForm}. ColocBoost
-is given outcome names as bare labels, and those labels are lossy -- a
-trait is context-qualified only when ambiguous -- so the mapping is
-recorded when the names are minted rather than parsed back out later.}
+\code{study}, \code{context}, \code{trait}, \code{dataForm} and
+\code{ldReference}, the name of the \code{ldReference} entry its
+summary statistics were matched against (\code{NA} for an
+individual-level outcome, whose LD comes from its own genotypes).
+ColocBoost is given outcome names as bare labels, and those labels are
+lossy -- a trait is context-qualified only when ambiguous -- so the
+mapping is recorded when the names are minted rather than parsed back
+out later.}
 
 \item{\code{regionVcp}}{A \code{GRanges} of every variant in the analysed region
 carrying the marginal \code{vcp}. Collection-level: it spans the region,

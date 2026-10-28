@@ -4,7 +4,7 @@
 \alias{computeCoefficientsGlasso}
 \title{Compute initial mr.mash coefficients via group-lasso}
 \usage{
-computeCoefficientsGlasso(X, Y, standardize, numThreads, Xnew = NULL)
+computeCoefficientsGlasso(X, Y, standardize, Xnew = NULL)
 }
 \arguments{
 \item{X}{Numeric design matrix (samples x variants).}
@@ -13,8 +13,6 @@ computeCoefficientsGlasso(X, Y, standardize, numThreads, Xnew = NULL)
 
 \item{standardize}{Logical; standardize the columns of \code{X} before
 fitting.}
-
-\item{numThreads}{Integer; number of threads for the group-lasso fit.}
 
 \item{Xnew}{Optional new design matrix for prediction; \code{NULL} returns
 in-sample coefficients.}
@@ -31,6 +29,5 @@ Fit a group-lasso (one group per response) to obtain initial estimates of the
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:30]
 Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
-computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE,
-  numThreads = 1L, Xnew = NULL)
+computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE, Xnew = NULL)
 }

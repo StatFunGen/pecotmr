@@ -44,7 +44,7 @@ are traits rather than contexts.}
 
 \item{a1, a2}{Placeholder alleles. Defaults \code{"A"} / \code{"G"}.}
 
-\item{role}{Tag stored in the \code{qcInfo} record. Default \code{"mash"}.}
+\item{role}{Tag stored in the \code{qcOptions()}. Default \code{"mash"}.}
 }
 \value{
 A \code{\link{QtlSumStats}} with one entry per condition (column).
@@ -60,7 +60,7 @@ Assemble a per-condition \code{\link{QtlSumStats}} from a
   \code{\link{parseVariantId}} (with a synthetic-position fallback for ids
   that do not encode coordinates); \code{A1} / \code{A2} / \code{N} are
   placeholders because a Z-only input carries no alleles or sample sizes
-  (mash reads only Z). A pass-through \code{qcInfo} record is set so the
+  (mash reads only Z). Pass-through \code{qcOptions()} are set so the
   result clears the mash QC gate.
 }
 \examples{

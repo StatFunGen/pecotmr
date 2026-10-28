@@ -20,15 +20,16 @@ NULL
 #'   the chrom-meta file path (a display/provenance value); the per-chromosome
 #'   payload files live in \code{chromPaths}.
 #' @slot format Character, \code{"plink2"} or \code{"bgen"}.
-#' @slot snpInfo data.frame, SNP metadata read from the index/sidecar. For a
-#'   sharded handle this is the union across chromosomes (row-bound in the order
-#'   the shards were supplied), so \code{snpIdx} stays a single global index
-#'   space.
+#' @slot snpInfo data.frame, SNP metadata read from the index/sidecar, its
+#'   \code{CHR} in UCSC style whatever the file writes. For a sharded handle
+#'   this is the union across chromosomes (row-bound in the order the shards
+#'   were supplied), so \code{snpIdx} stays a single global index space.
 #' @slot nSamples Integer, number of samples.
 #' @slot sampleIds Character vector of sample identifiers.
 #' @slot pgenPtr Opaque pointer for PLINK2 reader state (NULL otherwise).
-#' @slot chromPaths Named character vector mapping canonical chromosome (e.g.
-#'   \code{"21"}, \code{"X"}) to the per-chromosome payload path/prefix. Empty
+#' @slot chromPaths Named character vector mapping each chromosome, in UCSC
+#'   style (e.g. \code{"chr21"}, \code{"chrX"}), to the per-chromosome
+#'   payload path/prefix. Empty
 #'   (\code{character(0)}) for a single-file handle; non-empty marks a
 #'   one-file-per-chromosome (sharded) handle whose extraction is routed by
 #'   chromosome.
@@ -133,16 +134,15 @@ setMethod("show", "GenotypeHandle", function(object) {
 #'   \code{NULL}.
 #' @param ldMeta Path to an LD-meta TSV file (columns \code{chrom},
 #'   \code{start}, \code{end}, \code{path}; the \code{path} column may be
-#'   comma-separated as \code{ld_file,bim_file}). Requires \code{region}. The
-#'   constructor resolves the row covering \code{region}, then delegates to the
+#'   comma-separated as \code{ld_file,bim_file}). Requires \code{block}. The
+#'   constructor resolves the row covering \code{block}, then delegates to the
 #'   appropriate file-based handler. When the resolved row points at PLINK2
 #'   or BGEN files, the corresponding reader is used; a row pointing
 #'   at a pre-computed LD matrix (\code{.cor.xz}) is refused, as pecotmr reads
 #'   no pre-computed LD from disk -- wrap such a matrix in an
 #'   \code{\link{LdMatrix}} instead.
-#' @param region Region specification for \code{ldMeta} lookup:
-#'   \code{"chr:start-end"} string or a one-row data.frame with \code{chrom},
-#'   \code{start}, \code{end}.
+#' @param block The \code{GRanges} window to look up in \code{ldMeta}; the
+#'   whole file of the row covering it is opened.
 #' @param genoMeta One-file-per-chromosome specification: a path to a
 #'   \code{#chr,path} meta file or a named character vector (names =
 #'   chromosomes, values = payload paths/prefixes). Optionally pass
@@ -150,8 +150,8 @@ setMethod("show", "GenotypeHandle", function(object) {
 #' @param chroms Optional character vector of chromosomes. With \code{genoMeta}
 #'   (a sharded, one-file-per-chromosome panel) only the shards whose chromosome
 #'   is listed are read, skipping the rest -- an I/O optimisation when the panel
-#'   is genome-wide but only a few chromosomes are needed. Chromosome labels are
-#'   compared canonically (\code{"chr1"}/\code{"1"} match, \code{23}/\code{X}
+#'   is genome-wide but only a few chromosomes are needed. Chromosome labels may
+#'   be in any style (\code{"chr1"}/\code{"1"} match, \code{23}/\code{X}
 #'   etc.). If none of the requested chromosomes are present in the panel, every
 #'   shard is read (so the caller's own absence check can report the mismatch).
 #'   Only meaningful with \code{genoMeta}; supplying it with any other source is
@@ -169,7 +169,7 @@ GenotypeHandle <- function(
     pvar = NULL,
     psam = NULL,
     ldMeta = NULL,
-    region = NULL,
+    block = NULL,
     genoMeta = NULL,
     chroms = NULL,
     format = NULL
@@ -182,7 +182,7 @@ GenotypeHandle <- function(
         pvar = pvar,
         psam = psam,
         ldMeta = ldMeta,
-        region = region
+        block = block
     )
     sources <- .ghResolveSources(
         path = path,
@@ -198,26 +198,25 @@ GenotypeHandle <- function(
         path = .readGenotypeHandle(path, format = format),
         plink2Prefix = .makePlink2Handle(plink2Prefix),
         plink2Triplet = .genotypeHandleFromPlink2Triplet(pgen, pvar, psam),
-        ldMeta = .genotypeHandleFromLdMeta(ldMeta, region),
+        ldMeta = .genotypeHandleFromLdMeta(ldMeta, block),
         genoMeta = .genotypeHandleFromChromMeta(genoMeta, chroms, format)
     )
 }
 
 # Validate the bed/bim/fam + pgen/pvar/psam triplet completeness and the
-# ldMeta<->region coupling. Returns list(bedComplete, pgenComplete).
+# ldMeta<->block coupling. Returns list(bedComplete, pgenComplete).
 # @noRd
-.ghValidateArgs <- function(bed, bim, fam, pgen, pvar, psam, ldMeta, region) {
+.ghValidateArgs <- function(bed, bim, fam, pgen, pvar, psam, ldMeta, block) {
     bedComplete <- .ghTrioComplete(bed, bim, fam, "bed/bim/fam")
     pgenComplete <- .ghTrioComplete(pgen, pvar, psam, "pgen/pvar/psam")
-    if (!is.null(ldMeta) && is.null(region)) {
-        msg <- glue(
-            "`ldMeta` requires a `region` (a 'chr:start-end' string or a ",
-            "one-row data.frame with chrom/start/end)."
-        )
-        abort(msg)
+    if (!is.null(ldMeta) && is.null(block)) {
+        abort("`ldMeta` requires `block`, the GRanges window to look up.")
     }
-    if (is.null(ldMeta) && !is.null(region)) {
-        abort("`region` is only meaningful when `ldMeta` is supplied.")
+    if (is.null(ldMeta) && !is.null(block)) {
+        abort("`block` is only meaningful when `ldMeta` is supplied.")
+    }
+    if (!is.null(block)) {
+        .assertRegionGRanges(block, "`block`")
     }
     list(bedComplete = bedComplete, pgenComplete = pgenComplete)
 }
@@ -288,7 +287,7 @@ GenotypeHandle <- function(
 .ghResolveLdPath <- function(ldMeta, region) {
     ldPaths <- regionalLdMeta(ldMeta, region)$intersections$LD_file_paths
     if (length(ldPaths) == 0L) {
-        regionStr <- deparse(region)
+        regionStr <- str_flatten(as.character(region), ", ")
         msg <- glue(
             "ldMeta: no LD-meta row covers region {regionStr} ",
             "in {ldMeta}."
@@ -296,7 +295,7 @@ GenotypeHandle <- function(
         abort(msg)
     }
     if (length(ldPaths) > 1L) {
-        regionStr <- deparse(region)
+        regionStr <- str_flatten(as.character(region), ", ")
         msg <- glue(
             "ldMeta: region {regionStr} spans multiple LD-meta rows; ",
             "only a region within one row is resolved. Restrict the region ",
@@ -306,7 +305,7 @@ GenotypeHandle <- function(
     }
     ldPath <- ldPaths[[1L]]
     if (str_detect(ldPath, regex("\\.cor(\\.xz)?$", ignore_case = TRUE))) {
-        regionStr <- deparse(region)
+        regionStr <- str_flatten(as.character(region), ", ")
         msg <- glue(
             "ldMeta: the LD-meta row for region {regionStr} points at a ",
             "pre-computed correlation matrix ({ldPath}). pecotmr does not ",
@@ -397,9 +396,9 @@ GenotypeHandle <- function(
 # One-file-per-chromosome (sharded) handle support
 # ---------------------------------------------------------------------------
 
-# Chromosome labels are canonicalized via canonChrom() (variantId.R) -- the
-# single chromosome normalizer used for @chromPaths routing keys and for
-# @snpInfo$CHR lookups, so both sides stay consistent (and X/Y/MT survive).
+# Chromosome labels are spelled in UCSC style (withChrPrefix(), variantId.R)
+# as a meta or a shard is read, so the @chromPaths routing keys and the
+# @snpInfo$CHR lookups compare exactly (and X/Y/M survive).
 
 # Per-chromosome shard map, tolerant of GenotypeHandle objects deserialized
 # from before the `chromPaths` slot existed (e.g. an RDS saved by an older
@@ -456,7 +455,7 @@ GenotypeHandle <- function(
             !is.null(names(genoMeta))
     ) {
         return(.metaCheckUniqueChrom(tibble(
-            chrom = names(genoMeta),
+            chrom = withChrPrefix(names(genoMeta)),
             path = unname(genoMeta)
         )))
     }
@@ -506,7 +505,7 @@ GenotypeHandle <- function(
     )
     base <- dirname(normalizePath(genoMeta))
     .metaCheckUniqueChrom(tibble(
-        chrom = as.character(meta[[chromCol]]),
+        chrom = withChrPrefix(meta[[chromCol]]),
         path = .metaResolvePaths(as.character(meta[[pathCol]]), base)
     ))
 }
@@ -608,10 +607,7 @@ GenotypeHandle <- function(
     if (is.null(chroms)) {
         return(parsed)
     }
-    keep <- is_in(
-        canonChrom(as.character(parsed$chrom)),
-        canonChrom(as.character(chroms))
-    )
+    keep <- is_in(parsed$chrom, withChrPrefix(chroms))
     if (any(keep)) filter(parsed, keep) else parsed
 }
 
@@ -650,7 +646,7 @@ GenotypeHandle <- function(
 # One shard's chromosome -> path mapping.
 # @noRd
 .chromShardPaths <- function(shard) {
-    chroms <- unique(canonChrom(snpInfo(shard)$CHR))
+    chroms <- unique(snpInfo(shard)$CHR)
     set_names(rep(path(shard), length(chroms)), chroms)
 }
 

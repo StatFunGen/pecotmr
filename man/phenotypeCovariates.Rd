@@ -5,14 +5,14 @@
 \alias{phenotypeCovariates,QtlDataset-method}
 \title{Get Per-Context Phenotype Covariates}
 \usage{
-phenotypeCovariates(x, contexts)
+phenotypeCovariates(x, context)
 
-\S4method{phenotypeCovariates}{QtlDataset}(x, contexts)
+\S4method{phenotypeCovariates}{QtlDataset}(x, context)
 }
 \arguments{
 \item{x}{A \code{QtlDataset} object.}
 
-\item{contexts}{Character vector of context names (subset of
+\item{context}{Character vector of context names (subset of
 \code{names(molecularTraits(x))}).}
 }
 \value{
@@ -24,5 +24,5 @@ Return per-context phenotype covariate matrices, taken from the
 }
 \examples{
 data(qtlDatasetExample)
-phenotypeCovariates(qtlDatasetExample, contexts = "brain")
+phenotypeCovariates(qtlDatasetExample, context = "brain")
 }

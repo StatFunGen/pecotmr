@@ -4,10 +4,10 @@
 \alias{readSldscFrq}
 \title{Read PLINK allele-frequency files (.frq) into one table}
 \usage{
-readSldscFrq(frqfileDir, plinkName = "ADSP_chr")
+readSldscFrq(path, plinkName = "ADSP_chr")
 }
 \arguments{
-\item{frqfileDir}{Character. Directory of `.frq` files.}
+\item{path}{Character. Directory of `.frq` files.}
 
 \item{plinkName}{Character. Filename prefix (files at
 `<plinkName><chr>.frq`). Falls back to all `*.frq` in the directory when

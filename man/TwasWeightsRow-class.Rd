@@ -3,10 +3,11 @@
 \docType{class}
 \name{TwasWeightsRow-class}
 \alias{TwasWeightsRow-class}
+\alias{coerce,TwasWeightsRow,GRanges-method}
 \title{TWAS Weights Row}
 \description{
 One row's worth of TWAS weights. Build one with
-  \code{\link{twasWeightsRow}} and pass a list of them as
+  \code{\link{TwasWeightsRow}} and pass a list of them as
   \code{\link{TwasWeights}}' \code{entry} argument.
 }
 \section{Slots}{
@@ -23,9 +24,20 @@ One row's worth of TWAS weights. Build one with
 \item{\code{weightStandardized}}{Whether the weights are on the standardized scale.}
 
 \item{\code{weightsDataType}}{Optional data-type label.}
+
+\item{\code{fitVariants}}{The ids of the variants the weights were fitted on, in
+the fit's own order, recorded when the row is built; empty for a row with
+no fit payload. A row narrowed to fewer variants keeps them, which is how
+reading its fits can tell they describe more variants than the row now
+holds.}
 }}
 
+\section{Coercion}{
+ \code{as(x, "GRanges")} gives the row's variants with
+  their \code{weight} column: the element a collection stores for it.
+}
+
 \seealso{
-\code{\link{twasWeightsRow}},
+\code{\link{TwasWeightsRow}},
   \code{\linkS4class{FineMappingRow}}
 }

@@ -340,7 +340,6 @@ prsCsWeights <- function(
 #' @param iter Number of iterations for MCMC. Default is 1000.
 #' @param burn Number of burn-in iterations for MCMC. Default is 200.
 #' @param thin Thinning interval for MCMC. Default is 5.
-#' @param numThreads Number of threads to use. Default is 1.
 #' @param optLlk Which likelihood to evaluate. 1 for equation 6 (slightly shrink
 #'   the correlation of SNPs) and 2 for equation 5 (SNPs genotyped on different
 #'   arrays in a separate cohort). Default is 1.
@@ -371,7 +370,6 @@ sdpr <- function(
     iter = 1000,
     burn = 200,
     thin = 5,
-    numThreads = 1,
     optLlk = 1,
     verbose = TRUE,
     seed = NULL
@@ -391,7 +389,6 @@ sdpr <- function(
         iter,
         burn,
         thin,
-        numThreads,
         optLlk,
         verbose,
         seed
@@ -416,7 +413,6 @@ sdpr <- function(
     iter,
     burn,
     thin,
-    numThreads,
     optLlk,
     verbose,
     seed
@@ -436,7 +432,9 @@ sdpr <- function(
         iter = as.integer(iter),
         burn = as.integer(burn),
         thin = as.integer(thin),
-        numThreads = as.integer(numThreads),
+        # The kernel's thread pool splits its work across LD blocks, and a
+        # window is always one block, so a second thread would sit idle.
+        numThreads = 1L,
         optLlk = as.integer(optLlk),
         verbose = verbose,
         seed = seed
@@ -536,7 +534,6 @@ sdprWeights <- function(
                 "iter",
                 "burn",
                 "thin",
-                "numThreads",
                 "optLlk",
                 "verbose",
                 "seed"
@@ -902,8 +899,10 @@ mrmashRssWeights <- function(
 #'   A method's individual-level and summary-statistic paths often run
 #'   DIFFERENT engines, and then each takes its own constructor:
 #'   \code{lassoWeights} fits with glmnet (\code{GlmnetOptions}) while
-#'   \code{lassosumRssWeights} runs pecotmr's lassosum solver
-#'   (\code{LassosumOptions}); \code{scadWeights} / \code{mcpWeights} /
+#'   \code{lassosumRssWeights} runs pecotmr's lassosum
+#'   (\code{LassosumOptions}); \code{enetWeights} / \code{ridgeWeights} fit
+#'   with glmnet too, while \code{enetRssWeights} / \code{ridgeRssWeights}
+#'   use \code{PenalizedRssOptions}; \code{scadWeights} / \code{mcpWeights} /
 #'   \code{l0learnWeights} use ncvreg and L0Learn while their \code{*Rss}
 #'   counterparts use \code{PenalizedRssOptions}; \code{dprGibbsWeights} uses
 #'   RcppDPR and \code{sdprWeights} uses \code{SdprOptions}. Splitting them is
@@ -974,7 +973,10 @@ GlmnetOptions <- function(...) {
             # lasso from enet from ridge -- so it belongs to the calling
             # wrapper. Refused here rather than in glmnetWeights() so the
             # failure lands where the value was written.
-            alpha = "the calling wrapper (lassoWeights, enetWeights)"
+            alpha = str_c(
+                "the calling wrapper: enetWeights' own `alpha`, or ",
+                "lassoWeights / ridgeWeights, which fix it"
+            )
         ),
         "GlmnetOptions"
     )
@@ -1217,12 +1219,31 @@ LassosumOptions <- function(...) {
 #' @export
 PenalizedRssOptions <- function(...) {
     extra <- list(...)
+    # The penalty and its shape belong to the calling wrapper: each one fixes
+    # its penalty, and those that let it vary take `alpha` / `gamma` /
+    # `lambda0` / `lambda2` / `maxSwaps` as their own arguments. `lambda`
+    # stays settable here, the only route to it for the wrappers without one.
     .configRefuseOwned(
         extra,
         c(
             bhat = "supplied from the data by the pipeline",
             R = "supplied from the data by the pipeline",
-            n = "supplied from the data by the pipeline"
+            n = "supplied from the data by the pipeline",
+            penalty = str_c(
+                "the calling wrapper, which fixes it (scadRssWeights, ",
+                "mcpRssWeights, ...)"
+            ),
+            alpha = str_c(
+                "the calling wrapper's `alpha` (enetRssWeights, ",
+                "scadRssWeights, mcpRssWeights); ridgeRssWeights fixes it at 0"
+            ),
+            gamma = str_c(
+                "the calling wrapper's `gamma` (scadRssWeights, ",
+                "mcpRssWeights)"
+            ),
+            lambda0 = "l0learnRssWeights' own `lambda0`",
+            lambda2 = "l0learnRssWeights' own `lambda2`",
+            maxSwaps = "l0learnRssWeights' own `maxSwaps`"
         ),
         "PenalizedRssOptions"
     )
@@ -1270,7 +1291,7 @@ MrmashOptions <- function(...) {
             mu1_init = "the wrapper's `bInit`",
             standardize = "the wrapper's `standardize`",
             update_V_method = "the wrapper's `updateVMethod`",
-            nthreads = "the wrapper's `numThreads`"
+            nthreads = "the wrapper's `BPPARAM`"
         ),
         "MrmashOptions"
     )
@@ -1443,9 +1464,12 @@ glmnetWeights <- function(X, y, alpha, methodArgs = GlmnetOptions()) {
     replace(eff.wgt, keep, coef(enet, s = "lambda.min")[2:(sum(keep) + 1)])
 }
 
-#' Compute TWAS weights via elastic net (glmnet, alpha = 0.5)
+#' Compute TWAS weights via elastic net (glmnet)
 #'
-#' Convenience wrapper for \code{\link{glmnetWeights}} with \code{alpha = 0.5}.
+#' Convenience wrapper for \code{\link{glmnetWeights}} at a mixing between the
+#' lasso and ridge, \code{alpha = 0.5} unless set.
+#' @param alpha Elastic-net mixing in \code{[0, 1]}: the L1 share of the
+#'   penalty. Default 0.5.
 #' @inheritParams glmnetWeights
 #' @return Numeric vector of length \code{ncol(X)} of per-variant weights.
 #' @examples
@@ -1453,10 +1477,30 @@ glmnetWeights <- function(X, y, alpha, methodArgs = GlmnetOptions()) {
 #' X <- eqtlRegionExample$X[, 1:30]
 #' y <- eqtlRegionExample$yRes
 #' enetWeights(X, y)
+#' # A larger ridge share:
+#' enetWeights(X, y, alpha = 0.2)
+#' @importFrom checkmate assertNumber
 #' @export
-enetWeights <- function(X, y, methodArgs = GlmnetOptions()) {
+enetWeights <- function(X, y, alpha = 0.5, methodArgs = GlmnetOptions()) {
     .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
-    glmnetWeights(X, y, 0.5, methodArgs = methodArgs)
+    assertNumber(alpha, lower = 0, upper = 1)
+    glmnetWeights(X, y, alpha, methodArgs = methodArgs)
+}
+
+#' Compute TWAS weights via ridge regression (glmnet, alpha = 0)
+#'
+#' Convenience wrapper for \code{\link{glmnetWeights}} with \code{alpha = 0}.
+#' @inheritParams glmnetWeights
+#' @return Numeric vector of length \code{ncol(X)} of per-variant weights.
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' ridgeWeights(X, y)
+#' @export
+ridgeWeights <- function(X, y, methodArgs = GlmnetOptions()) {
+    .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
+    glmnetWeights(X, y, 0, methodArgs = methodArgs)
 }
 
 #' Compute TWAS weights via lasso (glmnet, alpha = 1)
@@ -2278,7 +2322,10 @@ bayesRWeights <- function(
 #' \hat\beta / \sqrt{n}}.
 #'
 #' Based on Mak et al (2017) "Polygenic scores via penalized regression on
-#' summary statistics", Genetic Epidemiology 41(6):469-480.
+#' summary statistics", Genetic Epidemiology 41(6):469-480. It runs on the
+#' solver of \code{\link{penalizedRss}}, whose LASSO at \code{alpha = 1} is
+#' lassosum's coordinate descent: the same updates in the same order, so the
+#' same coefficients bit for bit.
 #'
 #' Internal: \code{\link{lassosumRssWeights}} is the public interface. It
 #' runs this over a grid of LD shrinkage values, forwards \code{lambda},
@@ -2291,7 +2338,7 @@ bayesRWeights <- function(
 #'   window), as in \code{susieR::susie_rss()}. If shrinkage is desired, apply
 #'   it before passing (e.g., \code{(1-s)*R + s*I}).
 #' @param n Sample size of the GWAS.
-#' @param lambda A vector of L1 penalty values. Default: 20 values from 0.001 to
+#' @param lambda A vector of L1 penalty values. Default: 20 values from 1e-4 to
 #'   0.1 on log scale.
 #' @param thr Convergence threshold. Default: 1e-4.
 #' @param maxiter Maximum number of iterations. Default: 10000.
@@ -2315,35 +2362,15 @@ lassosumRss <- function(
     thr = 1e-4,
     maxiter = 10000
 ) {
-    .lassosumRssPath(bhat, list(R = R), n, lambda, thr, maxiter)
-}
-
-# lassosumRss() on an LD source: the matrix, or a factor of it with its
-# shrinkage, which the factor solver applies without forming R.
-# @noRd
-.lassosumRssPath <- function(bhat, ld, n, lambda, thr, maxiter) {
-    assertNumeric(lambda, lower = 0, any.missing = FALSE)
-    assertNumber(thr, lower = 0, finite = TRUE)
-    assertCount(maxiter, positive = TRUE)
-    .rssSolvePath(
+    .penalizedRssPath(
         bhat,
-        ld,
+        list(R = R),
         n,
-        lambda,
-        .rssLassosumSolve,
-        solveArgs = list(thr = thr, maxiter = maxiter)
+        spec = .rssPenalty("lasso"),
+        lambda = lambda,
+        thr = thr,
+        maxiter = maxiter
     )
-}
-
-# .lassosumRssPath() with lassosumRss()'s own defaults under `args`, the
-# caller's options. A matrix takes exactly the path lassosumRss() does.
-# @noRd
-.lassosumRssOn <- function(bhat, ld, n, args) {
-    settings <- list_modify(
-        .formalDefaults(lassosumRss, c("lambda", "thr", "maxiter")),
-        !!!args
-    )
-    exec(.lassosumRssPath, bhat = bhat, ld = ld, n = n, !!!settings)
 }
 
 # The values `fn` declares as the defaults of its formals `fmlNames`,
@@ -2486,17 +2513,15 @@ lassosumRss <- function(
     )
 }
 
-# Per-`s` fit for one RSS method (`method` selects the solver + which `config`
-# fields apply). Returns list(beta, meta); l0learn's inner lambda0 sweep is
-# here.
+# Per-`s` fit for one RSS method: one penalized path at the wrapper's
+# penalty, or, for l0learn, one per value of its lambda0 grid. Returns
+# list(beta, meta).
 # @noRd
-.rssFitOne <- function(method, solverInput, ld, n, sVal, config) {
-    switch(
-        method,
-        lassosum = .rssFitLassosum(solverInput, ld, n, sVal, config),
-        penalized = .rssFitPenalized(solverInput, ld, n, sVal, config),
-        l0learn = .rssFitL0learn(solverInput, ld, n, sVal, config)
-    )
+.rssFitOne <- function(solverInput, ld, n, sVal, config) {
+    if (identical(config$method, "l0learn")) {
+        return(.rssFitL0learn(solverInput, ld, n, sVal, config))
+    }
+    .rssFitPenalized(solverInput, ld, n, sVal, config)
 }
 
 # Shared per-candidate frame for a single-path model: the shrinkage s and
@@ -2514,27 +2539,17 @@ lassosumRss <- function(
     )
 }
 
-# lassosum shrinkage path for one s, against `ld` shrunk to that s.
-# @noRd
-.rssFitLassosum <- function(solverInput, ld, n, sVal, config) {
-    model <- .lassosumRssOn(solverInput, ld, n, as.list(config$dotArgs))
-    list(beta = model$beta, meta = .rssPathMeta(sVal, model))
-}
-
-# ncvreg-penalized shrinkage path for one s, against `ld` shrunk to that s.
+# The penalized path for one s, against `ld` shrunk to that s: the wrapper's
+# penalty, `config$spec`, under the caller's path options.
 # @noRd
 .rssFitPenalized <- function(solverInput, ld, n, sVal, config) {
-    settings <- c(
-        list(
-            penalty = config$penalty,
-            gamma = config$gamma,
-            alpha = config$alpha,
-            lambda0 = config$lambda0,
-            lambda2 = config$lambda2
-        ),
-        as.list(config$dotArgs)
+    model <- .penalizedRssOn(
+        solverInput,
+        ld,
+        n,
+        config$spec,
+        config$options
     )
-    model <- .penalizedRssOn(solverInput, ld, n, settings)
     list(beta = model$beta, meta = .rssPathMeta(sVal, model))
 }
 
@@ -2561,10 +2576,10 @@ lassosumRss <- function(
 # Attach the method-specific selection attribute to the chosen coefficient
 # vector.
 # @noRd
-.rssFinalize <- function(method, bestBeta, sel, meta, config) {
+.rssFinalize <- function(bestBeta, sel, meta, config) {
     base <- c(mode = sel$mode, index = sel$index)
     selection <- switch(
-        method,
+        config$method,
         lassosum = c(
             base,
             s = meta$s[sel$index],
@@ -2572,19 +2587,20 @@ lassosumRss <- function(
         ),
         penalized = c(
             base,
-            penalty = config$penalty,
+            penalty = config$spec$penalty,
+            alpha = config$spec$alpha,
             s = meta$s[sel$index],
             lambda = meta$lambda[sel$index]
         ),
         l0learn = c(
             base,
-            penalty = config$penalty,
+            penalty = config$spec$penalty,
             s = meta$s[sel$index],
             lambda0 = meta$lambda0[sel$index],
             lambda = meta$lambda[sel$index]
         )
     )
-    attrName <- if (method == "lassosum") {
+    attrName <- if (config$method == "lassosum") {
         "lassosum_selection"
     } else {
         "penalized_rss_selection"
@@ -2644,8 +2660,8 @@ lassosumRss <- function(
 
 # One shrinkage level's fit against R_s = (1 - s) R + s I.
 # @noRd
-.rssFitAtS <- function(sVal, method, solverInput, ld, n, config) {
-    .rssFitOne(method, solverInput, .rssShrunkLd(ld, sVal), n, sVal, config)
+.rssFitAtS <- function(sVal, solverInput, ld, n, config) {
+    .rssFitOne(solverInput, .rssShrunkLd(ld, sVal), n, sVal, config)
 }
 
 # An LD source shrunk to R_s = (1 - s) R + s I: the source carries s to the
@@ -2661,14 +2677,15 @@ lassosumRss <- function(
 # statistics `stat` against the LD source `ld` (see .rssLdSource()).
 # Standardizes the stat -> solverInput conversion, the outer LD-shrinkage grid
 # over `s`, the candidate accumulation, and the ldQuadratic / minFbeta
-# selection. `method` + `config` pick the per-`s` solver (.rssFitOne) and the
-# finalizer (.rssFinalize); `fitRetention` how much of the search is kept.
+# selection. `config` is the run: `method` (which selection record the
+# weights carry; "l0learn" also sweeps `lambda0`), the penalty `spec`
+# (.rssPenalty()) and the caller's path `options`; `fitRetention` is how much
+# of the search is kept.
 # @noRd
 .rssShrinkGridWeights <- function(
     stat,
     ld,
     s,
-    method,
     config,
     selection = c("ldQuadratic", "minFbeta"),
     fitRetention = c("none", "slim", "full")
@@ -2682,7 +2699,6 @@ lassosumRss <- function(
     fits <- map(
         s,
         .rssFitAtS,
-        method = method,
         solverInput = solverInput,
         ld = ld,
         n = n,
@@ -2696,13 +2712,7 @@ lassosumRss <- function(
         .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
     }
     bestBeta <- as.numeric(selectorResult$beta)
-    weights <- .rssFinalize(
-        method,
-        bestBeta,
-        selectorResult,
-        candidateMeta,
-        config
-    )
+    weights <- .rssFinalize(bestBeta, selectorResult, candidateMeta, config)
     .rssAttachGridFit(
         weights,
         candidateBeta,
@@ -2815,8 +2825,11 @@ lassosumRssWeights <- function(
         stat,
         .rssLdSource(stat, ldReference, "lassosumRssWeights"),
         s,
-        "lassosum",
-        list(dotArgs = methodArgs),
+        list(
+            method = "lassosum",
+            spec = .rssPenalty("lasso"),
+            options = as.list(methodArgs)
+        ),
         selection,
         fitRetention
     )
@@ -2824,13 +2837,15 @@ lassosumRssWeights <- function(
 
 #' Penalized Regression on RSS (Summary Statistics) Objective
 #'
-#' Generalizes \code{lassosumRss()} to support LASSO, MCP, SCAD, L0, L0L1,
-#' and L0L2 penalties.  Uses coordinate descent on the objective
+#' The RSS penalized-regression solver: LASSO with its elastic-net and ridge
+#' mixtures, MCP, SCAD, L0, L0L1 and L0L2. Uses coordinate descent on the
+#' objective
 #' \deqn{\beta^T R \beta - 2 \beta^T z + \mathrm{penalty}(\beta)}
 #' where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta /
-#' \sqrt{n}}.
+#' \sqrt{n}}. \code{lassosumRss()} is its LASSO at \code{alpha = 1}.
 #'
-#' Internal: \code{\link{scadRssWeights}}, \code{\link{mcpRssWeights}} and
+#' Internal: \code{\link{enetRssWeights}}, \code{\link{ridgeRssWeights}},
+#' \code{\link{scadRssWeights}}, \code{\link{mcpRssWeights}} and
 #' \code{\link{l0learnRssWeights}} are the public interface, with
 #' \code{\link{lassosumRssWeights}} for the lasso. They run this over a grid
 #' of LD shrinkage values, forward its options through
@@ -2846,11 +2861,17 @@ lassosumRssWeights <- function(
 #' @param lambda Numeric vector of regularization parameter values along which
 #'   to trace a solution path (warm-started, largest-first). For LASSO/MCP/SCAD
 #'   this is the primary penalty strength; for L0 variants it controls the L1
-#'   component.
+#'   component. \code{NULL} (default) is 20 values from 1e-4 to 0.1 on a log
+#'   scale, divided by \code{max(alpha, 0.001)} as glmnet sizes its path, so
+#'   the L1 share spans the same range at any \code{alpha} and a ridge path
+#'   runs from 0.1 to 100.
 #' @param gamma Concavity parameter for MCP (default 3) or SCAD (default 3.7).
 #'   Ignored for LASSO and L0 variants.
-#' @param alpha Elastic-net mixing for MCP/SCAD: \eqn{l_1 = \lambda \alpha},
-#'   \eqn{l_2 = \lambda (1-\alpha)}. Default 1 (pure L1, no ridge).
+#' @param alpha Elastic-net mixing for LASSO, MCP and SCAD, in \code{[0, 1]}:
+#'   \eqn{l_1 = \lambda \alpha} and \eqn{l_2 = \lambda (1-\alpha)}, so the
+#'   penalty is \eqn{2 P(\beta; l_1) + l_2 \beta^T \beta}, glmnet's mixing.
+#'   Default 1, no ridge term. For LASSO, 0.5 is the elastic net and 0 ridge;
+#'   MCP and SCAD need \code{alpha > 0}. Ignored by the L0 variants.
 #' @param lambda0 L0 penalty weight (number of non-zeros). Required for L0
 #'   variants; ignored otherwise. Default 0.
 #' @param lambda2 L2 penalty weight for L0L2 variant. Default 0.
@@ -2877,7 +2898,7 @@ penalizedRss <- function(
     R,
     n,
     penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
-    lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
+    lambda = NULL,
     gamma = NULL,
     alpha = 1.0,
     lambda0 = 0,
@@ -2890,129 +2911,157 @@ penalizedRss <- function(
         bhat,
         list(R = R),
         n,
-        arg_match(penalty),
-        lambda,
-        gamma,
-        alpha,
-        lambda0,
-        lambda2,
-        thr,
-        maxiter,
-        maxSwaps
+        spec = .rssPenalty(
+            arg_match(penalty),
+            alpha = alpha,
+            gamma = gamma,
+            lambda0 = lambda0,
+            lambda2 = lambda2,
+            maxSwaps = maxSwaps
+        ),
+        lambda = lambda,
+        thr = thr,
+        maxiter = maxiter
     )
 }
 
-# penalizedRss() on an LD source: the matrix, or a factor of it with its
-# shrinkage, which the factor solver applies without forming R.
+# The penalty a fit minimizes, as one checked record: the solver's penalty
+# name, the elastic-net mixing `alpha`, the MCP / SCAD concavity `gamma`
+# (their usual default when NULL) and the L0 settings. Each weight wrapper
+# builds it from its own arguments before its shrinkage grid starts, so the
+# penalty is the wrapper's alone and only the path (lambda, thr, maxiter) is
+# left to the caller's options.
 # @noRd
-.penalizedRssPath <- function(
-    bhat,
-    ld,
-    n,
+#' @importFrom checkmate assertCount assertNumber
+.rssPenalty <- function(
     penalty,
-    lambda,
-    gamma,
-    alpha,
-    lambda0,
-    lambda2,
-    thr,
-    maxiter,
-    maxSwaps
+    alpha = 1,
+    gamma = NULL,
+    lambda0 = 0,
+    lambda2 = 0,
+    maxSwaps = 0
 ) {
-    # Default gamma per penalty
-    gamma <- gamma %||% switch(penalty, SCAD = 3.7, MCP = 3.0, 0.0)
+    .rssCheckAlpha(penalty, alpha)
+    assertNumber(gamma, finite = TRUE, null.ok = TRUE)
+    assertNumber(lambda0, lower = 0, finite = TRUE)
+    assertNumber(lambda2, lower = 0, finite = TRUE)
+    assertCount(maxSwaps)
+    list(
+        penalty = penalty,
+        alpha = alpha,
+        gamma = gamma %||% switch(penalty, SCAD = 3.7, MCP = 3.0, 0.0),
+        lambda0 = lambda0,
+        lambda2 = lambda2,
+        maxSwaps = maxSwaps
+    )
+}
+
+# `alpha` for `penalty`: a share in [0, 1], and above 0 for MCP and SCAD,
+# where 0 leaves only the ridge term, which ridgeRssWeights() fits.
+# @noRd
+.rssCheckAlpha <- function(penalty, alpha) {
+    assertNumber(alpha, lower = 0, upper = 1)
+    if (alpha == 0 && is_in(penalty, c("MCP", "SCAD"))) {
+        abort(glue(
+            "`alpha` must be above 0 for {penalty}: at 0 only the ridge term ",
+            "is left, which ridgeRssWeights() fits."
+        ))
+    }
+    invisible(NULL)
+}
+
+# penalizedRss() on an LD source: the matrix, or a factor of it with its
+# shrinkage, which the factor solver applies without forming R. `spec` is the
+# penalty (.rssPenalty()); the rest is the path, its default sized by the L1
+# share.
+# @noRd
+.penalizedRssPath <- function(bhat, ld, n, spec, lambda, thr, maxiter) {
+    lambda <- lambda %||% .rssDefaultLambda(spec$alpha)
+    assertNumeric(lambda, lower = 0, any.missing = FALSE)
+    assertNumber(thr, lower = 0, finite = TRUE)
+    assertCount(maxiter, positive = TRUE)
     .rssSolvePath(
         bhat,
         ld,
         n,
         lambda,
         .rssPenalizedSolve,
-        solveArgs = list(
-            penalty = penalty,
-            gamma = gamma,
-            alpha = alpha,
-            lambda0 = lambda0,
-            lambda2 = lambda2,
-            thr = thr,
-            maxiter = maxiter,
-            maxSwaps = maxSwaps
-        )
+        solveArgs = c(spec, list(thr = thr, maxiter = maxiter))
     )
 }
 
-# .penalizedRssPath() with penalizedRss()'s own defaults under `args`, the
-# caller's settings, which always name the penalty. A matrix takes exactly
-# the path penalizedRss() does.
+# The default lambda path: 20 values from 1e-4 to 0.1, sized for an L1
+# penalty on correlation-scale effects, divided by max(alpha, 0.001) as glmnet
+# sizes its own. The L1 share then spans the same range at any alpha, and a
+# ridge path (alpha = 0) runs from 0.1 to 100; at alpha = 1 it is the
+# lassosum default unchanged.
 # @noRd
-.penalizedRssOn <- function(bhat, ld, n, args) {
-    settings <- list_modify(
-        .formalDefaults(
-            penalizedRss,
-            c(
-                "lambda",
-                "gamma",
-                "alpha",
-                "lambda0",
-                "lambda2",
-                "thr",
-                "maxiter",
-                "maxSwaps"
-            )
-        ),
-        !!!args
+.rssDefaultLambda <- function(alpha) {
+    exp(seq(log(1e-4), log(0.1), length.out = 20L)) / max(alpha, 1e-3)
+}
+
+# .penalizedRssPath() for the penalty `spec` under the caller's path
+# `options` -- lambda, thr and maxiter, all an options bag may hold --
+# penalizedRss()'s own defaults filling the rest. A matrix takes exactly the
+# path penalizedRss() does.
+# @noRd
+.penalizedRssOn <- function(bhat, ld, n, spec, options) {
+    path <- list_modify(
+        .formalDefaults(penalizedRss, c("lambda", "thr", "maxiter")),
+        !!!options
     )
-    exec(.penalizedRssPath, bhat = bhat, ld = ld, n = n, !!!settings)
+    exec(
+        .penalizedRssPath,
+        bhat = bhat,
+        ld = ld,
+        n = n,
+        spec = spec,
+        !!!path
+    )
 }
 
 #' RSS Weights Helper for Penalized Methods
 #'
-#' Shared implementation for \code{scadRssWeights()} and \code{mcpRssWeights()}.
+#' Shared implementation for \code{scadRssWeights()}, \code{mcpRssWeights()},
+#' \code{enetRssWeights()} and \code{ridgeRssWeights()}.
 #' (\code{l0learnRssWeights()} uses the lower-level \code{.rssShrinkGridWeights}
 #' scaffold directly, since it sweeps an additional \code{lambda0} path.)
 #' Searches over a shrinkage grid \code{s} (LD matrix shrinkage \code{(1-s)R +
 #' sI}) and selects the best candidate via LD-quadratic pseudovalidation or
 #' minimum penalized objective.
 #'
-#' @param stat,ldReference,s,selection,penalty,gamma,alpha,lambda0,lambda2 See
-#'   the public wrappers for details.
+#' @param stat,ldReference,s,selection See the public wrappers for details.
+#' @param spec The penalty, built by the calling wrapper from its own
+#'   arguments (internal \code{.rssPenalty()}).
 #' @param fitRetention How much of the search is kept as the \code{"fit"}
 #'   attribute; see \code{\link{scadRssWeights}}.
 #' @param methodArgs Options forwarded to \code{penalizedRss}, built with
-#'   \code{\link{PenalizedRssOptions}}.
+#'   \code{\link{PenalizedRssOptions}}: the path only, since the penalty is
+#'   the wrapper's.
+#' @param label The calling wrapper's name, for its error messages.
 #' @return Numeric weight vector, one weight per variant of \code{stat}.
 #' @keywords internal
 .penalizedRssWeights <- function(
     stat,
     ldReference,
-    penalty,
+    spec,
     s = c(0.2, 0.5, 0.9, 1.0),
-    gamma = NULL,
-    alpha = 1.0,
-    lambda0 = 0,
-    lambda2 = 0,
     selection = c("ldQuadratic", "minFbeta"),
     fitRetention = c("none", "slim", "full"),
-    methodArgs = PenalizedRssOptions()
+    methodArgs = PenalizedRssOptions(),
+    label = str_c(str_to_lower(spec$penalty), "RssWeights")
 ) {
     .assertMethodOptions(methodArgs, "PenalizedRssOptions", "methodArgs")
     selection <- arg_match(selection)
     fitRetention <- arg_match(fitRetention)
     .rssShrinkGridWeights(
         stat,
-        .rssLdSource(
-            stat,
-            ldReference,
-            str_c(str_to_lower(penalty), "RssWeights")
-        ),
+        .rssLdSource(stat, ldReference, label),
         s,
-        "penalized",
         list(
-            penalty = penalty,
-            gamma = gamma,
-            alpha = alpha,
-            lambda0 = lambda0,
-            lambda2 = lambda2,
-            dotArgs = methodArgs
+            method = "penalized",
+            spec = spec,
+            options = as.list(methodArgs)
         ),
         selection,
         fitRetention
@@ -3038,7 +3087,9 @@ penalizedRss <- function(
 #' @param s Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
 #'   0.5, 0.9, 1.0)}.
 #' @param gamma SCAD concavity parameter. Default 3.7.
-#' @param alpha Elastic-net mixing (1 = pure L1). Default 1.
+#' @param alpha Elastic-net mixing in \code{(0, 1]}: the SCAD share of
+#'   the penalty, the rest a ridge term, as \code{\link{penalizedRss}}
+#'   mixes them. Default 1, no ridge term.
 #' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
 #'   \code{"minFbeta"}.
 #' @param methodArgs Options forwarded to the solver,
@@ -3079,15 +3130,13 @@ scadRssWeights <- function(
     fitRetention <- arg_match(fitRetention)
     assertList(stat)
     assertNumeric(s, lower = 0, any.missing = FALSE)
-    assertNumber(gamma, finite = TRUE)
-    assertNumber(alpha, finite = TRUE)
+    # Built before the grid starts, so a bad penalty fails here.
+    spec <- .rssPenalty("SCAD", alpha = alpha, gamma = gamma)
     .penalizedRssWeights(
         stat = stat,
         ldReference = ldReference,
-        penalty = "SCAD",
+        spec = spec,
         s = s,
-        gamma = gamma,
-        alpha = alpha,
         selection = selection,
         fitRetention = fitRetention,
         methodArgs = methodArgs
@@ -3113,7 +3162,9 @@ scadRssWeights <- function(
 #' @param s Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
 #'   0.5, 0.9, 1.0)}.
 #' @param gamma MCP concavity parameter. Default 3.
-#' @param alpha Elastic-net mixing (1 = pure L1). Default 1.
+#' @param alpha Elastic-net mixing in \code{(0, 1]}: the MCP share of
+#'   the penalty, the rest a ridge term, as \code{\link{penalizedRss}}
+#'   mixes them. Default 1, no ridge term.
 #' @param selection Selection strategy: \code{"ldQuadratic"} (default) or
 #'   \code{"minFbeta"}.
 #' @param methodArgs Options forwarded to the solver,
@@ -3154,18 +3205,139 @@ mcpRssWeights <- function(
     fitRetention <- arg_match(fitRetention)
     assertList(stat)
     assertNumeric(s, lower = 0, any.missing = FALSE)
-    assertNumber(gamma, finite = TRUE)
-    assertNumber(alpha, finite = TRUE)
+    # Built before the grid starts, so a bad penalty fails here.
+    spec <- .rssPenalty("MCP", alpha = alpha, gamma = gamma)
     .penalizedRssWeights(
         stat = stat,
         ldReference = ldReference,
-        penalty = "MCP",
+        spec = spec,
         s = s,
-        gamma = gamma,
-        alpha = alpha,
         selection = selection,
         fitRetention = fitRetention,
         methodArgs = methodArgs
+    )
+}
+
+#' Compute Elastic-Net Weights from Summary Statistics
+#'
+#' Fits the elastic net on the RSS objective -- the lasso penalty mixed with
+#' a ridge term, as glmnet mixes them -- searching over a shrinkage grid
+#' \code{s} and a lambda path. Model selection uses LD-quadratic
+#' pseudovalidation by default.
+#'
+#' \code{alpha} is the L1 share of the penalty: with \eqn{l_1 = \lambda
+#' \alpha} and \eqn{l_2 = \lambda (1 - \alpha)} the penalty is
+#' \eqn{2 l_1 \|\beta\|_1 + l_2 \beta^T \beta}, so \code{alpha = 1} is the
+#' lasso and \code{alpha = 0} ridge (\code{\link{ridgeRssWeights}}). The
+#' default lambda path is divided by \code{max(alpha, 0.001)}, as glmnet
+#' sizes its own, so the L1 share spans the same range at any \code{alpha}.
+#'
+#' The LD shrinkage adds a ridge term of its own, since
+#' \eqn{\beta^T R_s \beta = (1 - s) \beta^T R \beta + s \beta^T \beta}: every
+#' RSS lasso is already partly a ridge, and \code{alpha} adds a second ridge
+#' term that grows with \eqn{\lambda}. Expect the lasso and the elastic net
+#' to differ less on summary statistics than glmnet's do on genotypes.
+#'
+#' @param alpha Elastic-net mixing in \code{[0, 1]}: the L1 share of the
+#'   penalty. Default 0.5.
+#' @inheritParams scadRssWeights
+#' @inheritParams lassosumRssWeights
+#' @return A numeric vector of SNP coefficient weights. Unless
+#'   \code{fitRetention = "none"}, the search is attached as attribute
+#'   \code{"fit"}.
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' ss <- lapply(
+#'   seq_len(ncol(X)), function(j) coef(summary(lm(y ~ X[, j])))[2, 1:2])
+#' stat <- list(
+#'   b = vapply(ss, `[`, numeric(1), 1L),
+#'   seb = vapply(ss, `[`, numeric(1), 2L),
+#'   n = rep(nrow(X), ncol(X)),
+#'   variantNames = colnames(X)
+#' )
+#' enetRssWeights(stat, LdMatrix(cor(X)))
+#' # A larger ridge share:
+#' enetRssWeights(stat, LdMatrix(cor(X)), alpha = 0.2)
+#' @importFrom checkmate assertList assertNumeric
+#' @export
+enetRssWeights <- function(
+    stat,
+    ldReference,
+    alpha = 0.5,
+    s = c(0.2, 0.5, 0.9, 1.0),
+    selection = c("ldQuadratic", "minFbeta"),
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = PenalizedRssOptions()
+) {
+    .assertMethodOptions(methodArgs, "PenalizedRssOptions", "methodArgs")
+    fitRetention <- arg_match(fitRetention)
+    assertList(stat)
+    assertNumeric(s, lower = 0, any.missing = FALSE)
+    # Built before the grid starts, so a bad mixing fails here.
+    spec <- .rssPenalty("lasso", alpha = alpha)
+    .penalizedRssWeights(
+        stat = stat,
+        ldReference = ldReference,
+        spec = spec,
+        s = s,
+        selection = selection,
+        fitRetention = fitRetention,
+        methodArgs = methodArgs,
+        label = "enetRssWeights"
+    )
+}
+
+#' Compute Ridge Weights from Summary Statistics
+#'
+#' Fits ridge regression on the RSS objective, \code{\link{enetRssWeights}}
+#' at \code{alpha = 0}: the penalty is \eqn{\lambda \beta^T \beta}, and the
+#' default lambda path runs from 0.1 to 100. Searches over a shrinkage grid
+#' \code{s} as well, whose own ridge term \eqn{s \beta^T \beta} adds to it;
+#' model selection uses LD-quadratic pseudovalidation by default.
+#'
+#' @inheritParams scadRssWeights
+#' @inheritParams lassosumRssWeights
+#' @return A numeric vector of SNP coefficient weights. Unless
+#'   \code{fitRetention = "none"}, the search is attached as attribute
+#'   \code{"fit"}.
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' ss <- lapply(
+#'   seq_len(ncol(X)), function(j) coef(summary(lm(y ~ X[, j])))[2, 1:2])
+#' stat <- list(
+#'   b = vapply(ss, `[`, numeric(1), 1L),
+#'   seb = vapply(ss, `[`, numeric(1), 2L),
+#'   n = rep(nrow(X), ncol(X)),
+#'   variantNames = colnames(X)
+#' )
+#' ridgeRssWeights(stat, LdMatrix(cor(X)))
+#' @importFrom checkmate assertList assertNumeric
+#' @export
+ridgeRssWeights <- function(
+    stat,
+    ldReference,
+    s = c(0.2, 0.5, 0.9, 1.0),
+    selection = c("ldQuadratic", "minFbeta"),
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = PenalizedRssOptions()
+) {
+    .assertMethodOptions(methodArgs, "PenalizedRssOptions", "methodArgs")
+    fitRetention <- arg_match(fitRetention)
+    assertList(stat)
+    assertNumeric(s, lower = 0, any.missing = FALSE)
+    .penalizedRssWeights(
+        stat = stat,
+        ldReference = ldReference,
+        spec = .rssPenalty("lasso", alpha = 0),
+        s = s,
+        selection = selection,
+        fitRetention = fitRetention,
+        methodArgs = methodArgs,
+        label = "ridgeRssWeights"
     )
 }
 
@@ -3245,9 +3417,18 @@ l0learnRssWeights <- function(
     methodArgs = PenalizedRssOptions()
 ) {
     .assertMethodOptions(methodArgs, "PenalizedRssOptions", "methodArgs")
+    # Its own `lambda` is the path; one in the options would replace it.
+    .configRefuseOwned(
+        methodArgs,
+        c(lambda = "l0learnRssWeights' own `lambda`"),
+        "l0learnRssWeights"
+    )
     penalty <- arg_match(penalty)
     selection <- arg_match(selection)
     fitRetention <- arg_match(fitRetention)
+    # The L0 penalty, lambda0 left to the sweep over its grid.
+    spec <- .rssPenalty(penalty, lambda2 = lambda2, maxSwaps = maxSwaps)
+    assertNumeric(lambda0, lower = 0, finite = TRUE, any.missing = FALSE)
 
     # Default lambda (L1 component) depends on variant
     if (is.null(lambda)) {
@@ -3262,14 +3443,11 @@ l0learnRssWeights <- function(
         stat,
         .rssLdSource(stat, ldReference, "l0learnRssWeights"),
         s,
-        "l0learn",
         list(
-            penalty = penalty,
-            lambda = lambda,
+            method = "l0learn",
+            spec = spec,
             lambda0 = lambda0,
-            lambda2 = lambda2,
-            maxSwaps = maxSwaps,
-            dotArgs = methodArgs
+            options = list_assign(as.list(methodArgs), lambda = lambda)
         ),
         selection,
         fitRetention
@@ -3771,14 +3949,14 @@ dprAdaptiveGibbsWeights <- function(
 # Starting coefficients as a plain matrix: .mrmashInitCoefficients()
 # returns the fit it used, and only its Bhat is wanted here.
 # @noRd
-.mrmashInitB <- function(X, Y, bInitMethod, standardize, numThreads) {
+.mrmashInitB <- function(X, Y, bInitMethod, standardize, BPPARAM) {
     as.matrix(
         .mrmashInitCoefficients(
             X,
             Y,
             bInitMethod,
             standardize,
-            numThreads
+            BPPARAM
         )$Bhat
     )
 }
@@ -3797,7 +3975,7 @@ dprAdaptiveGibbsWeights <- function(
     bInitMethod,
     sumstats,
     standardize,
-    numThreads
+    threads
 ) {
     .mrmashRequirePackages()
     .assertMethodParam(prior, "MrmashPriorParam")
@@ -3810,7 +3988,7 @@ dprAdaptiveGibbsWeights <- function(
         canonicalPriorMatrices = priorOpts$canonicalPriorMatrices %||% FALSE
     )
     if (is.null(sumstats)) {
-        sumstats <- .mrmashComputeSumstats(X, Y, standardize, numThreads)
+        sumstats <- .mrmashComputeSumstats(X, Y, standardize, threads)
     }
     list(
         bInitMethod = .mrmashResolveBInit(Y, bInitMethod),
@@ -3850,8 +4028,12 @@ dprAdaptiveGibbsWeights <- function(
 #'   data. Default is FALSE. Used by the summary-statistic and initialisation
 #'   steps as well as the fit, so it is set here rather than in
 #'   \code{methodArgs}.
-#' @param numThreads The number of threads to use for parallel computation.
-#'   Default is 1. Used by the same three steps as \code{standardize}.
+#' @param BPPARAM A \code{BiocParallelParam}. The univariate glmnet fits that
+#'   initialise the coefficients run on its workers, and mr.mash's own
+#'   threads (the summary statistics and the fit) number its workers when
+#'   they run on this machine (\code{SerialParam}, \code{MulticoreParam});
+#'   for other backends mr.mash runs on one thread. Default
+#'   \code{SerialParam()}.
 #' @param methodArgs Options forwarded to \code{mr.mashr::mr.mash} under its
 #'   own names, built with \code{\link{MrmashOptions}}
 #'   (\code{update_w0}, \code{max_iter}, \code{tol}, \code{w0_threshold},
@@ -3912,9 +4094,11 @@ mrmashWrapper <- function(
     updateV = TRUE,
     updateVMethod = "full",
     standardize = FALSE,
-    numThreads = 1,
+    BPPARAM = SerialParam(),
     methodArgs = MrmashOptions()
 ) {
+    .assertBpparam(BPPARAM)
+    threads <- .bpLocalThreads(BPPARAM, "mrmashWrapper")
     setup <- .mrmashWrapperSetup(
         X = X,
         Y = Y,
@@ -3924,12 +4108,12 @@ mrmashWrapper <- function(
         bInitMethod = bInitMethod,
         sumstats = sumstats,
         standardize = standardize,
-        numThreads = numThreads
+        threads = threads
     )
     bInitMethod <- setup$bInitMethod
     priorBuilt <- setup$priorBuilt
     time1 <- proc.time()
-    bInit <- .mrmashInitB(X, Y, bInitMethod, standardize, numThreads)
+    bInit <- .mrmashInitB(X, Y, bInitMethod, standardize, BPPARAM)
     vInit <- .mrmashInitV(X, Y, V, updateV, updateVMethod)
     fitMrmash <- .mrmashFit(
         priorBuilt$S0,
@@ -3938,7 +4122,7 @@ mrmashWrapper <- function(
         X = X,
         Y = Y,
         standardize = standardize,
-        numThreads = numThreads,
+        threads = threads,
         updateVMethod = updateVMethod,
         methodArgs = methodArgs
     )
@@ -4003,13 +4187,13 @@ mrmashWrapper <- function(
 
 # Univariate summary statistics (Bhat/Shat) for the prior + init.
 # @noRd
-.mrmashComputeSumstats <- function(X, Y, standardize, numThreads) {
+.mrmashComputeSumstats <- function(X, Y, standardize, threads) {
     mr.mashr::compute_univariate_sumstats(
         X,
         Y,
         standardize = standardize,
         standardize.response = FALSE,
-        mc.cores = numThreads
+        mc.cores = threads
     )
 }
 
@@ -4020,14 +4204,13 @@ mrmashWrapper <- function(
     Y,
     bInitMethod,
     standardize,
-    numThreads
+    BPPARAM
 ) {
     if (bInitMethod == "glasso") {
         return(computeCoefficientsGlasso(
             X,
             Y,
             standardize = standardize,
-            numThreads = numThreads,
             Xnew = NULL
         ))
     }
@@ -4036,7 +4219,7 @@ mrmashWrapper <- function(
         Y,
         alpha = 0.5,
         standardize = standardize,
-        numThreads = numThreads,
+        BPPARAM = BPPARAM,
         Xnew = NULL
     )
 }
@@ -4093,7 +4276,7 @@ mrmashWrapper <- function(
     X,
     Y,
     standardize,
-    numThreads,
+    threads,
     updateVMethod,
     methodArgs
 ) {
@@ -4107,7 +4290,7 @@ mrmashWrapper <- function(
         update_V_method = updateVMethod,
         mu1_init = bInit,
         standardize = standardize,
-        nthreads = numThreads
+        nthreads = threads
     )
     user <- as.list(methodArgs)
     clash <- intersect(names(user), names(derived))
@@ -4146,7 +4329,6 @@ mrmashWrapper <- function(
 #' @param Y Numeric response matrix (samples x conditions).
 #' @param standardize Logical; standardize the columns of \code{X} before
 #'   fitting.
-#' @param numThreads Integer; number of threads for the group-lasso fit.
 #' @param Xnew Optional new design matrix for prediction; \code{NULL} returns
 #'   in-sample coefficients.
 #' @return A numeric matrix of initial coefficient estimates (variants x
@@ -4155,19 +4337,11 @@ mrmashWrapper <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
-#' computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE,
-#'   numThreads = 1L, Xnew = NULL)
-#' @importFrom checkmate assertFlag assertInt
+#' computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE, Xnew = NULL)
+#' @importFrom checkmate assertFlag
 #' @export
-computeCoefficientsGlasso <- function(
-    X,
-    Y,
-    standardize,
-    numThreads,
-    Xnew = NULL
-) {
+computeCoefficientsGlasso <- function(X, Y, standardize, Xnew = NULL) {
     assertFlag(standardize)
-    assertInt(numThreads)
     p <- ncol(X)
     r <- ncol(Y)
     conditionNames <- colnames(Y)
@@ -4239,33 +4413,28 @@ computeCoefficientsGlasso <- function(
 }
 
 # Initial mr.mash coefficients from one cv.glmnet per response. The fits are
-# independent, so with `numThreads` >= 2 they run in parallel, each worker on
-# its own seeded RNG stream (cv.glmnet draws its folds at random); one thread
-# runs them in turn on the session RNG, as before.
+# independent, so they run on BPPARAM's workers, each on its own seeded
+# random-number stream (cv.glmnet draws its folds at random). The data go by
+# position: a named `X` would be taken for bplapply()'s own X.
 # @noRd
 computeCoefficientsUnivGlmnet <- function(
     X,
     Y,
     alpha,
     standardize,
-    numThreads = 1L,
+    BPPARAM = SerialParam(),
     Xnew = NULL
 ) {
-    r <- ncol(Y)
-    out <- if (numThreads >= 2L) {
-        bplapply(
-            seq_len(r),
-            .linreg,
-            X = X,
-            Y = Y,
-            alpha = alpha,
-            standardize = standardize,
-            Xnew = Xnew,
-            BPPARAM = .bpSeedParam(numThreads)
-        )
-    } else {
-        map(seq_len(r), .linreg, X, Y, alpha, standardize, Xnew)
-    }
+    out <- .bpMap(
+        seq_len(ncol(Y)),
+        .linreg,
+        X,
+        Y,
+        alpha,
+        standardize,
+        Xnew,
+        BPPARAM = BPPARAM
+    )
 
     bhatList <- map(out, "bhat")
     Bhat <- exec(cbind, !!!bhatList)
@@ -4628,32 +4797,9 @@ buildMrmashPriorMatrices <- function(
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
-# `.rssSolvePath` solver for lassosum: RSS lasso over the ordered lambda path,
-# on the LD matrix or on a factor of it (never forming R).
-# @noRd
-.rssLassosumSolve <- function(z, lam, ld, thr, maxiter) {
-    if (!is.null(ld$F)) {
-        return(lassosumRssFactorCpp(
-            zR = z,
-            factorR = ld$F,
-            shrink = ld$shrink %||% 0,
-            lambdaR = lam,
-            thr = thr,
-            maxiter = as.integer(maxiter)
-        ))
-    }
-    lassosumRssCpp(
-        zR = z,
-        LD = list(blk1 = ld$R),
-        shrink = ld$shrink %||% 0,
-        lambdaR = lam,
-        thr = thr,
-        maxiter = as.integer(maxiter)
-    )
-}
-
-# `.rssSolvePath` solver for the penalized (MCP/SCAD/L0...) RSS path, on the
-# LD matrix or on a factor of it (never forming R).
+# `.rssSolvePath` solver for the penalized RSS path (lasso and its elastic-net
+# and ridge mixtures, MCP, SCAD, L0...), on the LD matrix or on a factor of it
+# (never forming R).
 # @noRd
 .rssPenalizedSolve <- function(
     z,
@@ -4700,17 +4846,13 @@ buildMrmashPriorMatrices <- function(
 # One L0Learn fit at lambda0 = `l0Val`: penalizedRss over the lambda path.
 # @noRd
 .rssL0LambdaFit <- function(l0Val, solverInput, ld, n, sVal, config) {
-    settings <- c(
-        list(
-            penalty = config$penalty,
-            lambda = config$lambda,
-            lambda0 = l0Val,
-            lambda2 = config$lambda2,
-            maxSwaps = config$maxSwaps
-        ),
-        as.list(config$dotArgs)
+    model <- .penalizedRssOn(
+        solverInput,
+        ld,
+        n,
+        list_assign(config$spec, lambda0 = l0Val),
+        config$options
     )
-    model <- .penalizedRssOn(solverInput, ld, n, settings)
     list(
         beta = model$beta,
         meta = mutate(.rssPathMeta(sVal, model), lambda0 = l0Val, .after = "s")

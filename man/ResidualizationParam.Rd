@@ -31,12 +31,10 @@ covariates. \code{NULL} (default) means unset, read as \code{TRUE}.}
 
 \item{scaleResiduals}{Logical. Scale each residual column to unit
 variance, which is what puts a fitted effect on the standardized
-genotype scale. \code{NULL} (default) means unset, and the accessors
-fall back to the dataset's own \code{\link{scaleResiduals}} slot
-(itself \code{TRUE} by default) --- so this is the per-call override of
-a per-object default, and the only knob the pipelines need: it reaches
-\code{\link{residualizedGenotypes}} already, which is the one point
-every individual-level fit draws its genotypes through.}
+genotype scale. \code{NULL} (default) means unset, read as
+\code{TRUE}. It is the only scale knob the pipelines need: it reaches
+\code{\link{residualizedGenotypes}}, the one point every
+individual-level fit draws its genotypes through.}
 
 \item{covariateNaAction}{How missing covariate values are handled when the
 design is assembled: \code{"impute"} or \code{"drop"}. \code{NULL}

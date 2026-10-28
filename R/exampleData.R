@@ -264,8 +264,8 @@ NULL
 #' @description A pre-QC'd \code{\link{QtlSumStats}} collection covering the
 #' same (study, context, trait) tuple as \code{\link{qtlDatasetExample}};
 #' the per-variant Z / BETA / SE / N values were computed from the synthetic
-#' phenotype by per-variant linear regression. The \code{ldReference} slot
-#' references the same toy PLINK1 panel.
+#' phenotype by per-variant linear regression. Its LD reference is the same
+#' toy PLINK1 panel.
 #'
 #' @format A \code{QtlSumStats} S4 collection with one row (study1, brain,
 #'   ENSG_example) backed by a GRanges of 200 chr22 variants.
@@ -319,8 +319,7 @@ NULL
 #' synthetic trait (\code{"trait1"}, N = 50,000). The signal pattern shares
 #' one causal variant with \code{\link{qtlSumStatsExample}} (for
 #' colocalization demos) and adds a second GWAS-only causal variant.
-#' The \code{ldReference} slot references the same toy PLINK1 panel used
-#' for the QTL example.
+#' Its LD reference is the same toy PLINK1 panel the QTL example uses.
 #'
 #' @format A \code{GwasSumStats} S4 collection with one row (trait1)
 #'   backed by a GRanges of 200 chr22 variants.

@@ -1,7 +1,3 @@
-# Tests migrated from test_h2ClassesSumstats.R
-
-# === Tests migrated from test_h2ClassesSumstats.R (H2Estimate) ===
-
 test_that("H2Estimate constructs with all slots", {
     obj <- new(
         "H2Estimate",
@@ -22,8 +18,6 @@ test_that("H2Estimate constructs with all slots", {
     expect_equal(methodNames(obj), "lder")
 })
 
-# show() smoke test, moved here from test_showMethods.R so the test
-# tree mirrors R/.
 test_that("show(H2Estimate) does not error", {
     h2 <- new(
         "H2Estimate",
@@ -78,4 +72,90 @@ test_that("H2Estimate types its optional slots", {
         h2(scoreStats = c(z = 1.5)),
         'invalid object for slot "scoreStats"'
     )
+})
+
+# ===========================================================================
+# H2Estimate accessors
+# ===========================================================================
+
+test_that("stratifiedHeritabilityEnrichment returns the enrichment slot", {
+    h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
+    result <- stratifiedHeritabilityEnrichment(h2_obj)
+    expect_true(is.data.frame(result))
+    expect_equal(result$annotation, c("annot1", "annot2"))
+})
+
+test_that("scoreStats returns the scoreStats slot", {
+    scoreStats <- list(
+        z = c(1.5, -0.8),
+        R = diag(2),
+        annotationNames = c("a1", "a2")
+    )
+    h2_obj <- new(
+        "H2Estimate",
+        estimate = 0.3,
+        estimateSe = 0.05,
+        intercept = 1.0,
+        interceptSe = 0.01,
+        localBlocks = NULL,
+        enrichment = NULL,
+        annotationJackknifeCoefs = NULL,
+        scoreStats = scoreStats,
+        method = "lder",
+        nSnps = 100L,
+        traitName = "test"
+    )
+    expect_identical(scoreStats(h2_obj), scoreStats)
+})
+
+test_that("accessors return NULL when slots are NULL", {
+    h2_obj <- new(
+        "H2Estimate",
+        estimate = 0.3,
+        estimateSe = 0.05,
+        intercept = 1.0,
+        interceptSe = 0.01,
+        localBlocks = NULL,
+        enrichment = NULL,
+        annotationJackknifeCoefs = NULL,
+        scoreStats = NULL,
+        method = "lder",
+        nSnps = 100L,
+        traitName = "test"
+    )
+    expect_null(localH2Blocks(h2_obj))
+    expect_null(stratifiedHeritabilityEnrichment(h2_obj))
+    expect_null(scoreStats(h2_obj))
+})
+
+test_that("updateObject() moves an H2Estimate's estimates off the old names", {
+    h2Obj <- new(
+        "H2Estimate",
+        estimate = 0.3,
+        estimateSe = 0.05,
+        intercept = 1.0,
+        interceptSe = 0.01,
+        localBlocks = data.frame(blockId = "b1", h2Local = 0.1, h2LocalSe = 0),
+        enrichment = NULL,
+        annotationJackknifeCoefs = matrix(0.2, nrow = 2L, ncol = 1L),
+        scoreStats = NULL,
+        method = "sldsc",
+        nSnps = 100L,
+        traitName = "test"
+    )
+    saved <- .savedUnder(
+        h2Obj,
+        c(
+            h2 = "estimate",
+            h2Se = "estimateSe",
+            local = "localBlocks",
+            tauBlocks = "annotationJackknifeCoefs"
+        )
+    )
+    # The inherited update alone drops slots the class no longer has, with a
+    # warning, and leaves the estimate empty.
+    expect_no_warning(up <- updateObject(saved))
+    expect_identical(up, h2Obj)
+    expect_identical(updateObject(h2Obj), h2Obj)
+    expect_message(updateObject(h2Obj, verbose = TRUE), "H2Estimate")
 })

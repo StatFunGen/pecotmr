@@ -8,34 +8,48 @@ loadGwasSumStatsFromManifest(
   manifest,
   genome = NULL,
   ldReference = NULL,
-  region = NULL,
+  which = NULL,
   minLdOverlapWarn = 0.5,
   columnMapping = NULL,
   sampleSelect = NULL,
-  formatMapping = NULL,
-  ldBlocks = NULL
+  formatMapping = NULL
 )
 }
 \arguments{
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study} (required, unique), \code{sumStatsPath} (required),
 \code{columnMapping} (optional), \code{nCase} / \code{nControl} (optional),
-\code{nSample} (optional study-level total N), \code{varY} (optional), and
-the single-valued \code{genome} / \code{ldReferencePath}. When a row
+\code{nSample} (optional study-level total N), \code{varY} (optional), the
+single-valued \code{genome}, and \code{ldReferencePath}, which may differ
+between studies (each distinct reference is read once, for the
+chromosomes its studies cover, and stored once). When a row
 supplies a study-level scalar (\code{nCase} + \code{nControl}, or
 \code{nSample}), its sumstats file need not carry a per-variant \code{N}
 column;
-\code{\link{summaryStatsQc}} fills \code{N} from the scalar.}
+\code{\link{summaryStatsQc}} fills \code{N} from the scalar. Optional
+BED-style \code{chrom}/\code{start}/\code{end} columns, with a 0-based
+\code{start} as in BED, give each study its own window, read and kept as
+with \code{which}; a manifest that has them cannot also be given
+\code{which}.}
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 
 \item{ldReference}{A genotype panel (see \code{\link{readGenotypes}}) or a
-spec (path/prefix/genoMeta); reconciled with an \code{ldReferencePath}
-column.}
+spec (path/prefix/genoMeta), used for every study; where a row also names
+an \code{ldReferencePath} the two must agree. Omit it to give each study
+the reference its \code{ldReferencePath} names.}
 
-\item{region}{Optional \code{chr:start-end} string, GRanges, or one-row
-data.frame restricting the variants read (honoured only for tabix-indexed
-text and bgzipped+tabixed VCF; ignored with a warning otherwise).}
+\item{which}{Optional analysis windows shared by every study, typically
+LD blocks: a \code{GRanges}, or the path of a BED file, read as BED
+with a 0-based start. Only the variants inside them are read, when the
+file is tabix-indexed text or a bgzipped + tabixed VCF (otherwise the
+whole file is read, with a warning), and each study is split into one
+element per window it has variants in, each window recorded as that
+element's \code{region}, as \code{\link{GwasSumStats}} does with its
+\code{region}; a named \code{GRanges} names the blocks. Without
+windows a genome-wide file splits
+into one element per chromosome; split by LD block, it has the
+granularity \code{\link{assembleCtwasInputs}} needs.}
 
 \item{minLdOverlapWarn}{Warn when the fraction of sumstats variants present
 in the LD reference falls below this (default 0.5).}
@@ -48,22 +62,16 @@ when a row has no \code{columnMapping}.}
 
 \item{formatMapping}{Optional GWAS-VCF FORMAT tag mapping (canonical stat ->
 FORMAT field), overriding ES/SE/LP/SS/EAF defaults.}
-
-\item{ldBlocks}{Optional LD-block specification (a \code{GRanges}, a
-data.frame with \code{chrom}/\code{start}/\code{end}, or a path to such
-a table). Without it a genome-wide file splits into one
-element per chromosome; with it, into one element per LD block, which is
-the granularity \code{\link{assembleCtwasInputs}} needs.}
 }
 \value{
 A \code{GwasSumStats} object.
 }
 \description{
 Build a \code{\link{GwasSumStats}} from a manifest with one row
-  per study. No QC is run (the result carries \code{qcInfo = list()}). Each
-  sumstats file needs a \code{z} column, or \code{beta}+\code{se} from which
-  the Wald z (\code{z = beta/se}) is derived when \code{z} is absent (a
-  supplied \code{z} takes precedence).
+  per study. No QC is run (the result carries empty \code{qcOptions()}).
+  Each sumstats file needs a \code{z} column, or \code{beta}+\code{se} from
+  which the Wald z (\code{z = beta/se}) is derived when \code{z} is absent
+  (a supplied \code{z} takes precedence).
 }
 \examples{
 gwasTsv <- system.file("extdata", "manifests",
@@ -72,5 +80,6 @@ ldStem <- file.path(system.file("extdata", "ld_reference", "chr22",
   package = "pecotmr"), "protocol_example.LD.chr22")
 manifest <- data.frame(study = "g1", sumStatsPath = gwasTsv)
 loadGwasSumStatsFromManifest(manifest = manifest, genome = "hg38",
-  ldReference = ldStem, region = "chr22:10000000-19000000")
+  ldReference = ldStem,
+  which = GenomicRanges::GRanges("chr22:10000000-19000000"))
 }

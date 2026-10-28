@@ -101,6 +101,7 @@ test_that("maximizeCases preferentially retains cases", {
     # Related pairs above threshold:
     #   C1-X1 (case-control), C2-X2 (case-control), C1-C2 (case-case),
     #   X1-X3 (control-control)
+    # C3-X3 and X2-X3 sit below it, so they exclude nobody.
     rel <- data.frame(
         IID1 = c("C1", "C2", "C1", "X1", "C3", "X2"),
         IID2 = c("X1", "X2", "C2", "X3", "X3", "X3"),
@@ -124,13 +125,47 @@ test_that("maximizeCases preferentially retains cases", {
     )
 
     expect_type(result, "character")
-    # Controls related to kept cases should be excluded preferentially
     retained <- setdiff(pheno$IID, result)
     retained_cases <- intersect(retained, pheno$IID[pheno$pheno == 1])
     retained_controls <- intersect(retained, pheno$IID[pheno$pheno == 0])
-    # We expect at least 2 of 3 cases kept, and controls sacrificed
-    expect_true(length(retained_cases) >= 2)
+    # A case is lost only to another case: C1-C2 costs one (plinkQC drops
+    # a lone pair's IID1, C1), and C3 is related to no case.
+    expect_setequal(retained_cases, c("C2", "C3"))
+    # The controls are sacrificed instead: X2 for its kinship with the
+    # retained C2, then X1 of the remaining related pair X1 / X3.
+    expect_setequal(result, c("C1", "X2", "X1"))
+    expect_equal(retained_controls, "X3")
     expect_true(noRelatedPairsRemain(rel, result, threshold))
+})
+
+test_that("maximizeCases ignores a case-control pair below the threshold", {
+    skip_if_not_installed("igraph")
+    skip_if_not_installed("plinkQC")
+    # Kinship 0.05 is not related at 0.125: nobody is excluded, as under
+    # maximizeUnrelated.
+    rel <- data.frame(
+        IID1 = "C1",
+        IID2 = "X1",
+        PI_HAT = 0.05,
+        stringsAsFactors = FALSE
+    )
+    pheno <- data.frame(
+        IID = c("C1", "X1"),
+        pheno = c(1, 0),
+        stringsAsFactors = FALSE
+    )
+    for (type in c("maximizeCases", "maximizeUnrelated")) {
+        expect_length(
+            filterRelatedness(
+                relatedness = rel,
+                relatednessThreshold = 0.125,
+                analysisType = type,
+                phenoData = pheno,
+                phenoCol = "pheno"
+            ),
+            0L
+        )
+    }
 })
 
 test_that("maximizeCases errors without phenoData", {

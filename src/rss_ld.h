@@ -1,6 +1,6 @@
 // rss_ld.h -- the LD a coordinate-descent RSS solve reads.
 //
-// The solvers in lassosum_rss.cpp and penalized_rss.cpp minimise
+// The solvers in penalized_rss.cpp minimise
 // beta'R_s beta - 2 beta'z + penalty(beta) for R_s = (1 - s) R + s I. They
 // only ever ask R_s four things: a diagonal entry, one entry of R_s beta for
 // the current beta, the effect of changing one coordinate, and (for the L0

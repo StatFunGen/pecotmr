@@ -5,18 +5,25 @@
 \alias{CtwasResult-class}
 \title{cTWAS Result Collection}
 \description{
-S4 collection of cTWAS runs keyed by the identity tuple
-  \code{(gwasStudy, study, context, method)}. Each row holds a
-  \code{\linkS4class{CtwasResultEntry}} payload -- fine-mapping posteriors,
-  the jointly-estimated group priors, and region metadata -- for one run.
+S4 collection of cTWAS runs, each keyed by the identity tuple
+  \code{(gwasStudy, study, context, method)} and split into one element per
+  cTWAS region, the way a \code{\linkS4class{GwasFineMappingResult}} holds
+  a genome-wide fit as one element per LD block. An element is a
+  \code{GRanges} of that region's gene (and, with \code{keepSnps}, SNP)
+  posteriors; \code{mcols()} carry the run identity, the region
+  (\code{blockId}), the region's per-effect susie alpha table
+  (\code{susieAlpha}), its region metadata (\code{regionInfo}) and the
+  run's jointly-estimated group priors (\code{groupPriors}), which repeat
+  on each of the run's rows.
 }
 \details{
 Unlike the QTL family, \code{trait} is not part of the key: a cTWAS
-  run is multi-gene, so genes live inside the payload. The optional
+  run is multi-gene, so genes live inside the elements. The optional
   \code{jointStudies} / \code{jointContexts} columns tag rows born from a
   multi-study or multi-context run and participate in the uniqueness key,
   exactly as in the \code{\linkS4class{TwasWeights}} and fine-mapping
-  families.
+  families. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
+  stack every region back into one \code{GRanges}.
 }
 \seealso{
 \code{\link{CtwasResult}} for the constructor and

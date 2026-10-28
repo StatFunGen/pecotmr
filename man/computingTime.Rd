@@ -15,7 +15,11 @@ computingTime(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A list of timings, empty when none were recorded.
+A \code{DataFrame}, one row per analysis that ran:
+  \code{analysis} (\code{xqtl_coloc}, \code{joint_gwas} or
+  \code{separate_gwas}), \code{nRuns} (1, or one per GWAS study for
+  \code{separate_gwas}) and \code{seconds}, their total wall-clock time.
+  No rows when none were recorded.
 }
 \description{
 The wall-clock timings colocboostPipeline recorded for each

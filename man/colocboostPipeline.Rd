@@ -16,7 +16,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  focalTrait = NULL,
+  focalOutcome = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
@@ -24,6 +24,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   panelFilterParam = PanelFilterParam(),
   signalScreenParam = SignalScreenParam(),
   alleleFlip = TRUE,
+  genotypeFilterParam = GenotypeFilterParam(),
+  phenotypeFilterParam = PhenotypeFilterParam(),
   residualizationParam = ResidualizationParam(),
   methodArgs = ColocboostOptions()
 )
@@ -33,7 +35,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   gwasSumStats = NULL,
   contexts = NULL,
   traitId = NULL,
-  focalTrait = NULL,
+  cisWindow = NULL,
+  focalOutcome = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
@@ -49,7 +52,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  focalTrait = NULL,
+  focalOutcome = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
@@ -57,6 +60,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   panelFilterParam = PanelFilterParam(),
   signalScreenParam = SignalScreenParam(),
   alleleFlip = TRUE,
+  genotypeFilterParam = GenotypeFilterParam(),
+  phenotypeFilterParam = PhenotypeFilterParam(),
   residualizationParam = ResidualizationParam(),
   methodArgs = ColocboostOptions()
 )
@@ -66,36 +71,59 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
 \code{MultiStudyQtlDataset}.}
 
 \item{gwasSumStats}{Optional \code{GwasSumStats} with the GWAS studies to
-colocalize against. \code{NULL} to skip GWAS colocalization.}
+colocalize against. \code{NULL} to skip GWAS colocalization. Each study
+is one outcome: the union of its rows that the QTL data overlap, so a
+study split by chromosome or LD block contributes just the one or two
+rows the QTL region reaches, and a study none of whose rows it reaches is
+left out. QTL variants outside every loaded block of a study the QTL data
+overlap are an error where the blocks' ranges were given
+(\code{regionGiven}, see \code{\linkS4class{GwasSumStats}}), since they
+lie in a block that was not loaded, and a warning for more than one in a
+row past a range computed from the GWAS variants. Those rows must share
+one LD reference, but it need not be the
+QTL side's: every outcome's summary statistics are matched against their
+own reference. When some references are genotype panels and others are
+\code{LdMatrix} objects, the runs that combine them pass colocboost the
+panels' LD as matrices, since colocboost takes LD matrices or reference
+genotypes but not both.}
 
 \item{...}{Required by the generic; the methods take no further arguments.}
 
-\item{contexts}{Optional character vector of context names to restrict the
-individual-level / QtlSumStats QTL analysis to. When \code{NULL} (default),
-every context present is used.}
+\item{contexts}{Optional character vector of context names to restrict
+the individual-level / QtlSumStats QTL analysis to. When \code{NULL}
+(default), every context present is used. A MultiStudyQtlDataset applies
+it to every study: a context no study has is an error, and one only some
+studies lack is skipped for those, with a warning.}
 
-\item{traitId}{Optional character vector of trait identifiers to restrict the
-analysis to. When supplied with an individual-level \code{QtlDataset}
-input, \code{cisWindow} is required (passed to
-\code{residualizedGenotypes} / \code{molecularTraits} for the
-variant-window selection).}
+\item{traitId}{Optional character vector of trait identifiers to restrict
+the analysis to. When supplied with an individual-level
+\code{QtlDataset} input, \code{cisWindow} is required: each trait's
+position \eqn{\pm} \code{cisWindow} is the variant window. In a
+MultiStudyQtlDataset a study carrying none of them sits out; the run is
+refused only when no study or summary-statistics row carries one.}
 
 \item{region}{Optional single-range \code{GRanges} describing the analysis
-window. Mutually exclusive with \code{traitId} (see the \code{QtlDataset}
-accessors). Individual-level input only: summary statistics carry no
-genotypes to window, so the \code{QtlSumStats} method does not take it
---- matching \code{\link{fineMappingPipeline}} and
-\code{\link{twasWeightsPipeline}}.}
+window. Mutually exclusive with \code{traitId}. Individual-level input
+only: a summary-statistics tuple
+keeps the window it was built with (its \code{region}), so the
+\code{QtlSumStats} method does not take one --- matching
+\code{\link{fineMappingPipeline}} and \code{\link{twasWeightsPipeline}}.}
 
-\item{cisWindow}{Optional cis window in basepairs; required with
-\code{traitId}, optional with \code{region}. Individual-level input
-only, as for \code{region}.}
+\item{cisWindow}{Optional cis window in basepairs. Individual-level
+input: required with \code{traitId}, optional with \code{region}.
+QtlSumStats input: each selected tuple is analysed over its
+\code{traitPos} \eqn{\pm} \code{cisWindow}, within its \code{region};
+every selected tuple needs a \code{traitPos}. A MultiStudyQtlDataset
+applies it to both kinds of study it holds.}
 
-\item{focalTrait}{Optional trait name; when supplied and present in the
-assembled outcome list, the colocboost xQTL-only run uses it as the focal
-outcome. Only \code{xqtlColoc} reads it: \code{jointGwas} is
-non-focal by construction and \code{separateGwas} always makes the
-GWAS study focal.}
+\item{focalOutcome}{The QTL outcome the \code{xqtlColoc} run treats as
+focal (colocboost's \code{focal_outcome_idx}): a named character vector
+with any of \code{study}, \code{context} and \code{trait} that
+identifies exactly one QTL outcome, e.g.
+\code{c(context = "brain", trait = "ENSG1")}. \code{NULL} (default) runs
+it non-focal. It needs \code{xqtlColoc = TRUE}: the \code{jointGwas} run
+is never focal, and each \code{separateGwas} run is focal on its own
+GWAS study.}
 
 \item{xqtlColoc, jointGwas, separateGwas}{Logical flags selecting which
 colocboost variants to run.}
@@ -107,8 +135,8 @@ analysis to; \code{NULL} (default) uses all samples.}
 summary-statistic sides against the LD reference panel, built with
 \code{\link{PanelFilterParam}}: a variant whose panel genotypes fall
 below its cutoffs is dropped before the LD matrix is built. The defaults
-filter nothing. See the Details section for how these relate to the
-individual-level cutoffs recorded on a \code{QtlDataset}.}
+filter nothing. Individual-level genotypes are filtered by
+\code{genotypeFilterParam} instead.}
 
 \item{signalScreenParam}{Individual-level pre-filter (ports the legacy
 \code{pip_cutoff_to_skip_ind}), built with
@@ -136,13 +164,27 @@ swaps recognized (flipping z / residualized dosage / LD to a shared
 coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
 swap is treated as a distinct variant.}
 
+\item{genotypeFilterParam}{Which individual-level variants and samples to
+keep, built with \code{\link{GenotypeFilterParam}}: its
+\code{keepSamples} narrows the dataset once, and its MAF, MAC,
+variance, missingness, \code{keepVariants} and \code{keepIndel}
+settings apply to each extracted block, as in
+\code{\link{fineMappingPipeline}}. The default filters nothing.
+\code{QtlDataset} and \code{MultiStudyQtlDataset} input only.}
+
+\item{phenotypeFilterParam}{The run's phenotype QC, built with
+\code{\link{PhenotypeFilterParam}}. colocboost takes missing phenotype
+values as they are, so unset keeps them; \code{"drop"} or
+\code{"impute"} applies that instead, and \code{outlierAction =
+"drop"} removes outlier samples. \code{QtlDataset} and
+\code{MultiStudyQtlDataset} input only.}
+
 \item{residualizationParam}{Covariate residualization settings for
 individual-level input, built with \code{\link{ResidualizationParam}}.
 Reaches both \code{\link{residualizedGenotypes}} and
 \code{\link{residualizedPhenotypes}}, so it governs what is regressed
 out of each side and --- through \code{scaleResiduals} --- whether the
-columns are scaled to unit variance. Previously absent, which left this
-pipeline on the dataset's own settings with no per-call say, unlike
+columns are scaled to unit variance, as in
 \code{\link{fineMappingPipeline}} and
 \code{\link{twasWeightsPipeline}}. \strong{Ignored} on
 \code{QtlSumStats} input, which has nothing to residualize.}
@@ -164,11 +206,15 @@ A \code{\linkS4class{ColocBoostResult}}: one element per
   \code{separate_gwas} runs. Outcome-specific (uncolocalized) sets are
   included with \code{isColocalized = FALSE}.
 
-  Project it with \code{\link{colocPairs}} (also available as
-  \code{as.data.frame}), \code{\link{colocVariants}} or
-  \code{\link{colocBoostOutcomes}}; timings are on
+  Project it with \code{\link{colocPairs}}, \code{\link{colocVariants}}
+  or \code{\link{colocBoostOutcomes}}; timings are on
   \code{\link{computingTime}} and the region-wide marginal
-  probabilities on \code{\link{regionVcp}}.
+  probabilities on \code{\link{regionVcp}}. \code{\link{ldReference}}
+  returns the LD references the summary statistics were matched against,
+  each stored once, and the \code{ldReference} column of
+  \code{colocBoostOutcomes()} names the one each outcome used. Its
+  \code{seqinfo()} names the genome build the inputs name; inputs naming
+  different builds are refused.
 }
 \description{
 Protocol-level multi-trait colocalization analysis using
@@ -178,10 +224,10 @@ Protocol-level multi-trait colocalization analysis using
           multi-context data. Per-context residualized X / Y are
           extracted from the dataset (filtering knobs on the
           constructor apply lazily inside the accessors).
-    \item \code{QtlSumStats} -- summary-statistic-only QTL data with a
-          shared LD reference (\code{ldReference}). Must already have
+    \item \code{QtlSumStats} -- summary-statistic-only QTL data with an
+          LD reference per row (\code{ldReference}). Must already have
           been passed through \code{\link{summaryStatsQc}} (the
-          pipeline rejects inputs whose \code{qcInfo()} is empty).
+          pipeline rejects inputs whose \code{qcOptions()} is empty).
           Every analysis variant is available on this input, including
           \code{xqtlColoc}, which colocalizes the QTL studies against
           each other with no GWAS involved.
@@ -199,11 +245,10 @@ for either side; colocboost has its own variable-selection algorithm.
 
   \itemize{
     \item Individual-level QC (MAF / MAC / X-variance / per-sample
-          missingness, sample / variant restrictions) lives on the
-          \code{QtlDataset} constructor and is applied lazily inside
-          \code{genotypes()} / \code{residualizedGenotypes()}.
-          The pipeline does \emph{not} run a separate
-          individual-level QC pass.
+          missingness, sample / variant restrictions) is
+          \code{genotypeFilterParam}, applied to each block of genotypes
+          the pipeline extracts. A \code{QtlDataset} records no filter
+          of its own.
     \item \code{panelFilterParam} acts at ANALYSIS time on the sumstat
           sides, measured against the \strong{LD reference panel}: a
           variant whose panel genotypes fall below its cutoffs is dropped
@@ -218,7 +263,7 @@ for either side; colocboost has its own variable-selection algorithm.
           imputation, etc.) lives in
           \code{\link{summaryStatsQc}}. The pipeline rejects any
           \code{QtlSumStats} or \code{GwasSumStats} where
-          \code{length(qcInfo(x)) == 0L}.
+          \code{length(qcOptions(x)) == 0L}.
   }
 }
 
@@ -230,15 +275,19 @@ for either side; colocboost has its own variable-selection algorithm.
           \code{gwasSumStats}. Works for either data form -- the
           individual-level contexts, the summary-level QTL studies, or
           both together when a \code{MultiStudyQtlDataset} carries a
-          mixture. This is the only variant that honors
-          \code{focalTrait}.
-    \item \code{jointGwas} (default \code{FALSE}): run a non-focal
-          colocboost model that combines all QTL contexts/studies
-          with the supplied \code{gwasSumStats} studies.
-    \item \code{separateGwas} (default \code{FALSE}): run one focal
-          colocboost model per GWAS study, where the GWAS is the
-          focal outcome.
+          mixture. Non-focal unless \code{focalOutcome} names one of its
+          QTL outcomes.
+    \item \code{jointGwas} (default \code{FALSE}): run one non-focal
+          colocboost model (colocboost's disease-agnostic mode) that
+          combines all QTL contexts/studies with the supplied
+          \code{gwasSumStats} studies, however many there are.
+    \item \code{separateGwas} (default \code{FALSE}): run one colocboost
+          model per GWAS study, focal on that study (the
+          disease-prioritized mode), even when there is only one.
   }
+  The flags combine freely, as in colocboost's own pipeline. With one
+  GWAS study, \code{jointGwas} and \code{separateGwas} fit the same
+  outcomes, one non-focal and one focal on the GWAS.
 }
 
 \examples{

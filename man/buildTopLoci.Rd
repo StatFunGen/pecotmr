@@ -56,7 +56,8 @@ carries no sample count: \code{n} is left \code{NA} for the per-variant
 
 \item{otherQuantities}{Optional list. Default is NULL.}
 
-\item{region}{Optional \code{"chr:start-end"} string. Default is NULL.}
+\item{region}{Optional \code{GRanges}: the window the fit covers, whose
+bounds the table records. Default is NULL.}
 
 \item{conditionIdx}{Integer or \code{NULL}. Index of the conditioned effect
 (per-condition output); \code{NULL} for the unconditioned fit.}

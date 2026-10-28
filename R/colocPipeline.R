@@ -203,8 +203,9 @@ setClass(
 #' @return \code{GwasFineMappingParam} returns a
 #'   \code{GwasFineMappingParam} object, a \code{\link{MethodParam}}.
 #'   Each accessor returns that setting's value --- for the three nested
-#'   bundles, the \code{MethodParam} itself --- and each replacement form
-#'   returns a modified copy.
+#'   bundles, the \code{MethodParam} itself. Change a setting with
+#'   \code{x$<field> <- value} (the field for \code{fineMappingMethods()}
+#'   is \code{methods}), which returns a modified copy.
 #' @examples
 #' GwasFineMappingParam(
 #'     credibleSetParam = CredibleSetParam(coverage = 0.9)
@@ -282,9 +283,40 @@ GwasFineMappingParam <- function(
 #'           inline fine-mapping.
 #'   }
 #'
-#' @section LD reference compatibility check: If
-#'   \code{ldReference(qtlFineMappingResult)} is non-\code{NULL}, it must be
-#'   the same LD reference as the one on \code{gwasInput}.
+#' @section A region over several LD blocks: Each first-side region is
+#'   colocalized with ONE fit per second-side study and method, however many
+#'   of a GWAS study's LD blocks it reaches -- scoring it against each block
+#'   separately would split one region into as many colocalizations as it
+#'   has blocks, each truncating the region's effects to one block's
+#'   variants.
+#'   \itemize{
+#'     \item A \code{GwasSumStats} is fine-mapped once per set of rows a
+#'           region reaches, their statistics stitched together on their one
+#'           LD reference (rows on different references are refused). A
+#'           region inside one block reads that block's fit.
+#'     \item A \code{GwasFineMappingResult} was fine-mapped block by block.
+#'           Assuming no LD between blocks, the blocks a region reaches
+#'           collapse into one fit: every block's effects, each confined to
+#'           its own block (a Bayes factor of zero elsewhere), numbered on
+#'           from the blocks before it in row order.
+#'   }
+#'   The fit's \code{blockId} is then the stretch the blocks' ranges cover,
+#'   as \code{"chrom_start_end"} (see \code{region} in
+#'   \code{\linkS4class{GwasSumStats}}).
+#'
+#'   A region's variants that lie outside every loaded block of a GWAS
+#'   study it overlaps are left out of that fit, a sign that a block it
+#'   reaches was not loaded. Where those blocks' ranges were given
+#'   (\code{regionGiven}), the variants lie in a block that was not loaded,
+#'   and that is an error. Where the ranges are the span of the GWAS
+#'   variants, the variants may only be ones the GWAS lacks, so more than one
+#'   in a row past a block is a warning.
+#'
+#' @section LD reference compatibility check: Rows can sit on different LD
+#'   references, so the check is per pair of rows coloc scores against each
+#'   other -- a QTL row and a GWAS row whose regions overlap. Where the QTL
+#'   row carries a reference, it must be the same LD reference as the GWAS
+#'   row's; rows that are never paired may differ.
 #'   The two must be the same kind of reference. Two genotype panels must
 #'   share their samples and allele orientation; two \code{LdMatrix} objects
 #'   must agree on the LD they share; two \code{GenotypeMixture} objects must
@@ -293,9 +325,9 @@ GwasFineMappingParam <- function(
 #'   two sides separately normally leaves each reference trimmed to its own
 #'   surviving variants, and LD is looked up per variant, so a partial overlap
 #'   only warns (once per session). No shared variant at all, or a mismatch of
-#'   any of those, is a hard error. When the first side's \code{ldReference} is
-#'   \code{NULL} (individual-level fit), the validation is skipped on that side
-#'   and the second side's panel is what the result carries forward.
+#'   any of those, is a hard error. When a first-side row has no reference
+#'   (individual-level fit), the validation is skipped for it and the second
+#'   side's panel is what the result carries forward for its pairs.
 #'
 #' @param qtlFineMappingResult The first side: a
 #'   \code{\link{QtlFineMappingResult}} or a
@@ -332,13 +364,15 @@ GwasFineMappingParam <- function(
 #'   two different things.
 #' @param returnGwasFineMapping Logical. When \code{TRUE}, attach the
 #'   fine-mapping result computed from \code{gwasInput} on the returned object
-#'   as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.
+#'   as attribute \code{"gwasFineMapping"}: for a \code{GwasSumStats}, one fit
+#'   per set of rows a first-side region reaches. Default \code{FALSE}.
 #' @param enrichment Optional data.frame of per-pair enrichment factors with
 #'   columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
 #'   \code{enrichment}, and optionally \code{gwasContext} / \code{gwasTrait}
-#'   (which the join uses when present, and which
-#'   \code{\link{qtlEnrichmentPipeline}} emits for a QTL outcome side). Output
-#'   of \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
+#'   / \code{gwasMethod} / \code{qtlMethod} (which the join uses when
+#'   present; \code{\link{qtlEnrichmentPipeline}} emits all four, the context
+#'   and trait set for a QTL outcome side). Output of
+#'   \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
 #'   scored by enloc rather than coloc: the priors come from that table's
 #'   \code{colocP1} / \code{colocP2} / \code{colocP12} columns, and the
 #'   report gains \code{RCP} and \code{LCP}. Pairs without a matching
@@ -352,7 +386,9 @@ GwasFineMappingParam <- function(
 #'   missing variants in the GWAS \code{SumStats} and the QTL fine-mapping
 #'   input has additional variants; (2) the GWAS fine-mapping result contains
 #'   variants not present in the QTL fine-mapping result. Pass \code{FALSE} to
-#'   use the FMRs as supplied.
+#'   use the FMRs as supplied; each fit is then scored whole, so a row
+#'   narrowed since its fit warns (condition class
+#'   \code{pecotmrFitCoverage}).
 #'
 #'   How much of each effect's posterior survived that restriction is reported
 #'   per result row as \code{qtlRetainedMass} / \code{gwasRetainedMass}; a low
@@ -369,7 +405,7 @@ GwasFineMappingParam <- function(
 #'   prior probabilities are set through \code{priors} instead, since the
 #'   enrichment adjustment reads them too.
 #' @return A \code{\linkS4class{ColocResult}}: one element per tested
-#'   (first-side credible set, second-side credible set, block) pair, holding
+#'   (first-side credible set, second-side credible set) pair, holding
 #'   that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
 #'   metadata carries the identity columns (\code{study}, \code{context},
 #'   \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasContext},
@@ -388,9 +424,10 @@ GwasFineMappingParam <- function(
 #'   is what readers of enloc output expect to find.
 #'
 #'   Project it with \code{\link{colocPairs}} (the flat table this
-#'   pipeline used to return, also available as \code{as.data.frame}),
-#'   \code{\link{colocVariants}}, \code{\link{colocCredibleSets}} or
-#'   \code{\link{colocGenes}}.
+#'   pipeline used to return), \code{\link{colocVariants}},
+#'   \code{\link{colocCredibleSets}} or \code{\link{colocGenes}}. Its
+#'   \code{seqinfo()} names the genome build the two sides name; sides
+#'   naming different builds are refused.
 #' @examples
 #' data(qtlFineMappingLbfExample)
 #' data(gwasFineMappingLbfExample)
@@ -440,7 +477,7 @@ colocPipeline <- function(
         returnGwasFineMapping = returnGwasFineMapping
     )
     if (length(gwasLbfByPair) == 0L) {
-        return(exec(.colocEarlyReturn, !!!shape))
+        return(.withGenome(exec(.colocEarlyReturn, !!!shape), prepared$build))
     }
     results <- .colocScoreAll(
         prepared,
@@ -450,7 +487,7 @@ colocPipeline <- function(
         priors = priors,
         alleleFlip = alleleFlip
     )
-    exec(.colocFinalize, results, !!!shape)
+    .withGenome(exec(.colocFinalize, results, !!!shape), prepared$build)
 }
 
 # Score every QTL tuple against the pre-extracted GWAS LBF matrices.
@@ -463,11 +500,16 @@ colocPipeline <- function(
     priors,
     alleleFlip
 ) {
+    qtlKeys <- if (!is.null(prepared$pairing)) {
+        .colocRowKeys(prepared$qtlFineMappingResult)
+    }
     list_flatten(map(
         seq_len(nrow(prepared$qtlFineMappingResult)),
         .colocScoreQtlTuple,
         qtlFineMappingResult = prepared$qtlFineMappingResult,
         gwasLbfByPair = gwasLbfByPair,
+        pairing = prepared$pairing,
+        qtlKeys = qtlKeys,
         colocLbfFilterParam = colocLbfFilterParam,
         useEnrichment = prepared$useEnrichment,
         enrichment = enrichment,
@@ -493,6 +535,11 @@ colocPipeline <- function(
     colocLbfFilterParam,
     priorsMissing
 ) {
+    # The genome build the two sides share, checked before any work.
+    build <- .inputsBuild(
+        list(qtlFineMappingResult, gwasInput),
+        "colocPipeline"
+    )
     .colocAssertGroups(priors, colocLbfFilterParam, methodArgs)
     .colocRefusePriorsWithEnrichment(priors, enrichment, priorsMissing)
     useEnrichment <- !is.null(enrichment)
@@ -502,21 +549,25 @@ colocPipeline <- function(
         enrichment = enrichment,
         useEnrichment = useEnrichment
     )
-    rawGwasFmr <- .colocResolveGwasFmr(gwasInput, gwasFineMappingParam)
-    .colocRequireMatchingLdRefs(
-        ldReference(qtlFineMappingResult),
-        ldReference(rawGwasFmr)
+    .colocCheckBlockReach(qtlFineMappingResult, gwasInput)
+    resolved <- .colocResolveGwasFmr(
+        gwasInput,
+        gwasFineMappingParam,
+        qtlFineMappingResult
     )
+    .colocRequireMatchingLdRefs(qtlFineMappingResult, resolved$fmr)
     adjusted <- .colocMaybeAdjustPips(
         adjustPips = adjustPips,
         qtlFineMappingResult = qtlFineMappingResult,
-        gwasFmr = rawGwasFmr
+        gwasFmr = resolved$fmr
     )
     list(
         ColocOptions = .colocEngineArgs(methodArgs, priors),
         useEnrichment = useEnrichment,
         qtlFineMappingResult = adjusted$qtlFineMappingResult,
-        gwasFmr = adjusted$gwasFmr
+        gwasFmr = adjusted$gwasFmr,
+        pairing = resolved$pairing,
+        build = build
     )
 }
 
@@ -583,7 +634,15 @@ colocPipeline <- function(
 # @noRd
 .colocValidateEnrichmentKeys <- function(enrichment) {
     idCols <- intersect(
-        c("gwasStudy", "gwasContext", "gwasTrait", "qtlStudy", "qtlContext"),
+        c(
+            "gwasStudy",
+            "gwasContext",
+            "gwasTrait",
+            "gwasMethod",
+            "qtlStudy",
+            "qtlContext",
+            "qtlMethod"
+        ),
         colnames(enrichment)
     )
     ids <- select(as_tibble(enrichment), all_of(idCols))
@@ -598,26 +657,117 @@ colocPipeline <- function(
 }
 
 # Resolve the second side to a fine-mapping collection (fine-map QC'd sumstats
-# when summary statistics are passed, whichever flavour they are).
+# when summary statistics are passed, whichever flavour they are), with the
+# pairing that says which of its fits each first-side row is scored against
+# -- NULL when that is decided by shared variants.
+#
+# A GWAS study split into LD blocks is fine-mapped once per set of blocks a
+# first-side region reaches, those blocks' statistics stitched together:
+# scoring a region against each block's own fit would split one region into
+# as many colocalizations as it has blocks. A region inside one block reads
+# that block's fit.
 # @noRd
-.colocResolveGwasFmr <- function(gwasInput, gwasFineMappingParam) {
+.colocResolveGwasFmr <- function(
+    gwasInput,
+    gwasFineMappingParam,
+    qtlFineMappingResult
+) {
     if (methods::is(gwasInput, "FineMappingResultBase")) {
         # Already fine-mapped: nothing in the bundle applies, so a setting
         # given here would be dropped rather than honoured.
         .colocAssertGwasFmrUnset(gwasFineMappingParam, class(gwasInput)[[1L]])
-        return(gwasInput)
+        return(list(fmr = gwasInput, pairing = NULL))
     }
     .assertMethodParam(
         gwasFineMappingParam,
         "GwasFineMappingParam"
     )
-    if (length(qcInfo(gwasInput)) == 0L) {
+    if (length(qcOptions(gwasInput)) == 0L) {
         msg <- glue(
             "colocPipeline: gwasInput ({class(gwasInput)[[1L]]}) has no QC ",
             "record. Call summaryStatsQc() first."
         )
         abort(msg)
     }
+    if (!methods::is(gwasInput, "GwasSumStats")) {
+        return(list(
+            fmr = .colocFineMapGwas(gwasInput, gwasFineMappingParam),
+            pairing = NULL
+        ))
+    }
+    sets <- .colocQtlRowSets(gwasInput, qtlFineMappingResult)
+    list(
+        fmr = .colocFineMapUnions(gwasInput, sets, gwasFineMappingParam),
+        pairing = tibble(
+            qtlKey = .colocRowKeys(qtlFineMappingResult)[sets$qtlRow],
+            key = str_c(sets$study, sets$blockId, sep = "\r")
+        )
+    )
+}
+
+# Each first-side row's variants against the LD blocks of the GWAS studies it
+# overlaps (.checkGwasBlockReach()). Only a GWAS second side has blocks.
+# @noRd
+.colocCheckBlockReach <- function(qtlFineMappingResult, gwasInput) {
+    if (
+        !methods::is(gwasInput, "GwasSumStats") &&
+            !methods::is(gwasInput, "GwasFineMappingResult")
+    ) {
+        return(invisible(NULL))
+    }
+    side <- .fmrSideName(qtlFineMappingResult)
+    labels <- map_chr(
+        seq_len(nrow(qtlFineMappingResult)),
+        .colocUnitLabel,
+        fmr = qtlFineMappingResult,
+        side = side
+    )
+    .checkGwasBlockReach(
+        set_names(as.list(qtlFineMappingResult), labels),
+        gwasInput,
+        "colocPipeline",
+        "regions of `qtlFineMappingResult`"
+    )
+}
+
+# @noRd
+.colocUnitLabel <- function(ri, fmr, side) {
+    .fmrTupleLabel(
+        side,
+        .colocTupleIdentity(fmr, ri),
+        block = .fmrIdentityAt(fmr, "blockId", ri)
+    )
+}
+
+# A first-side row's identity: its tuple, its block and the one chromosome it
+# sits on. The pairing keys rows by this rather than by index, since the PIP
+# reconciliation that follows drops rows sharing no variant with the other
+# side, and an index would then point at the wrong row.
+# @noRd
+.colocRowKeys <- function(fmr) {
+    cols <- intersect(
+        c(
+            "study",
+            "context",
+            "trait",
+            "method",
+            "blockId",
+            "jointStudies",
+            "jointContexts",
+            "jointTraits"
+        ),
+        .rtlTupleKeyCols(fmr)
+    )
+    str_c(
+        .rtlTupleKeys(mcols(fmr, use.names = FALSE), cols, n = nrow(fmr)),
+        map_chr(as.list(fmr), .rtlElementSeqname),
+        sep = "\r"
+    )
+}
+
+# Fine-map summary statistics with the bundle's settings.
+# @noRd
+.colocFineMapGwas <- function(gwasInput, gwasFineMappingParam) {
     # The bundle's terminal: fineMappingPipeline takes these as its own
     # arguments, so it is unrolled once, here.
     withSusieInf <- gwasFineMappingParam$initializeWithSusieInf %||% TRUE
@@ -631,6 +781,155 @@ colocPipeline <- function(
             PanelFilterParam(),
         initializeWithSusieInf = withSusieInf,
         fitRetention = gwasFineMappingParam$fitRetention %||% "slim"
+    )
+}
+
+# For each first-side row, the rows of each GWAS study its span reaches: one
+# row per (first-side row, study), with the block id the fit of those rows
+# goes by. Empty rows have no span and are never reached.
+# @noRd
+.colocQtlRowSets <- function(gws, qtlFineMappingResult) {
+    q <- .rowSpans(qtlFineMappingResult)
+    sets <- list_rbind(map(
+        seq_along(q$rows),
+        .colocRowSetsOf,
+        q = q,
+        index = .rowSpans(gws),
+        gws = gws,
+        regions = .rowRegions(gws)
+    ))
+    if (is.null(sets) || nrow(sets) == 0L) {
+        return(tibble(
+            qtlRow = integer(0),
+            study = character(0),
+            rows = list(),
+            blockId = character(0)
+        ))
+    }
+    sets
+}
+
+# @noRd
+.colocRowSetsOf <- function(k, q, index, gws, regions) {
+    hits <- sort(unique(
+        index$rows[.overlapsOnShared(index$spans, q$spans[k])]
+    ))
+    if (length(hits) == 0L) {
+        return(NULL)
+    }
+    studies <- as.character(gws$study)[hits]
+    byStudy <- unname(split(hits, factor(studies, levels = unique(studies))))
+    tibble(
+        qtlRow = rep(q$rows[[k]], length(byStudy)),
+        study = unique(studies),
+        rows = byStudy,
+        blockId = map_chr(
+            byStudy,
+            .colocUnionBlockId,
+            gws = gws,
+            regions = regions
+        )
+    )
+}
+
+# The block id a set of a study's rows is fine-mapped under. fineMappingPipeline
+# carries it over as it is, which is what lets each first-side row find its
+# own fit again afterwards.
+# @noRd
+.colocUnionBlockId <- function(rows, gws, regions) {
+    .colocMergedBlockId(
+        as.character(gws$blockId)[rows],
+        regions$region[rows]
+    )
+}
+
+# Fine-map each distinct set of rows once, however many first-side rows reach
+# it.
+# @noRd
+.colocFineMapUnions <- function(gws, sets, gwasFineMappingParam) {
+    unions <- slice(
+        sets,
+        which(!duplicated(str_c(sets$study, sets$blockId, sep = "\r")))
+    )
+    if (nrow(unions) == 0L) {
+        return(GwasFineMappingResult(
+            studyName = character(0),
+            method = character(0),
+            entry = list()
+        ))
+    }
+    .colocFineMapGwas(.colocUnionSumStats(gws, unions), gwasFineMappingParam)
+}
+
+# One row per set: its rows' statistics stitched together, on their one LD
+# reference, under the set's block id. Study-level values are read off the
+# set's first row, which every row of a study shares.
+# @noRd
+.colocUnionSumStats <- function(gws, unions) {
+    first <- map_int(unions$rows, 1L)
+    md <- mcols(gws)
+    stitched <- GwasSumStats(
+        studyName = unions$study,
+        entry = map(unions$rows, .ssStitchElements, x = gws),
+        genome = discard(unique(GenomeInfoDb::genome(gws)), is.na)[[1L]],
+        ldReference = map2(
+            unions$rows,
+            unions$study,
+            .colocUnionLdRef,
+            gws = gws
+        ),
+        varY = as.numeric(md$varY)[first],
+        nCase = .colocStudyValue(md, "nCase", first),
+        nControl = .colocStudyValue(md, "nControl", first),
+        nSample = .colocStudyValue(md, "nSample", first),
+        qcOptions = qcOptions(gws),
+        blockId = unions$blockId
+    )
+    .withRegionColumns(
+        stitched,
+        .colocUnionRegions(unions$rows, .rowRegions(gws))
+    )
+}
+
+# Each set's block range: the stretch its rows' ranges cover, given only when
+# every one of them was.
+# @noRd
+.colocUnionRegions <- function(sets, regions) {
+    list(
+        region = unname(unlist(.rtlBindElements(
+            map(sets, .colocSetRange, regions = regions)
+        ))),
+        regionGiven = map_lgl(sets, .colocSetGiven, regions = regions)
+    )
+}
+
+# @noRd
+.colocSetRange <- function(rows, regions) {
+    range(regions$region[rows])
+}
+
+# @noRd
+.colocSetGiven <- function(rows, regions) {
+    all(regions$regionGiven[rows])
+}
+
+# @noRd
+.colocStudyValue <- function(md, nm, rows) {
+    if (!is_in(nm, colnames(md))) {
+        return(NULL)
+    }
+    as.numeric(md[[nm]])[rows]
+}
+
+# @noRd
+.colocUnionLdRef <- function(rows, study, gws) {
+    .rowsSharedLdRef(
+        gws,
+        rows,
+        glue(
+            "colocPipeline: the rows of GWAS study '{study}' a QTL region ",
+            "reaches"
+        )
     )
 }
 
@@ -673,6 +972,10 @@ colocPipeline <- function(
 # intersectVariants() gives, and it replaces the older hand-rolled pass which
 # adjusted each side to the UNION of the other's variants -- a union is not an
 # intersection, so the two sides could still end up on different sets.
+#
+# The adjustment restricts each fit to the shared variants, which its row
+# then holds exactly. Only a fit scored as supplied can describe variants its
+# row no longer holds, and that warns.
 # @noRd
 .colocMaybeAdjustPips <- function(
     adjustPips,
@@ -683,25 +986,15 @@ colocPipeline <- function(
         qtlFineMappingResult = qtlFineMappingResult,
         gwasFmr = gwasFmr
     )
-    if (!isTRUE(adjustPips)) {
+    if (nrow(qtlFineMappingResult) == 0L || nrow(gwasFmr) == 0L) {
         return(unchanged)
     }
-    if (nrow(qtlFineMappingResult) == 0L || nrow(gwasFmr) == 0L) {
+    if (!isTRUE(adjustPips)) {
+        .fitCoverageCheckedAll(unchanged, "colocPipeline()")
         return(unchanged)
     }
     both <- intersectVariants(qtlFineMappingResult, gwasFmr)
     list(qtlFineMappingResult = both$x, gwasFmr = both$y)
-}
-
-# The LD reference the result carries forward, so colocCredibleSets() can
-# recompute purity (section 3.7) without being handed a sketch separately. The
-# two sides' sketches are already required to match by
-# .colocRequireMatchingLdRefs, so either one identifies the panel -- but a
-# first side fit on individual-level data carries none, and then the second
-# side's panel is the only one there is.
-# @noRd
-.colocLdRef <- function(qtlFineMappingResult, gwasFmr) {
-    ldReference(qtlFineMappingResult) %||% ldReference(gwasFmr)
 }
 
 # Empty-result early return (attaching the GWAS fine-mapping when requested).
@@ -713,19 +1006,18 @@ colocPipeline <- function(
     gwasInput,
     returnGwasFineMapping
 ) {
-    out <- .colocEmptyResult(
-        enriched = useEnrichment,
-        ldReference = .colocLdRef(qtlFineMappingResult, gwasFmr)
-    )
+    out <- .colocEmptyResult(enriched = useEnrichment)
     .colocAttachGwasFm(out, returnGwasFineMapping, gwasInput, gwasFmr)
 }
 
-# Score one QTL tuple against every pre-extracted GWAS pair -> summary rows.
+# Score one QTL tuple against each second-side fit it reaches -> summary rows.
 # @noRd
 .colocScoreQtlTuple <- function(
     qi,
     qtlFineMappingResult,
     gwasLbfByPair,
+    pairing,
+    qtlKeys,
     colocLbfFilterParam,
     useEnrichment,
     enrichment,
@@ -748,7 +1040,13 @@ colocPipeline <- function(
         effect = qLbfInfo$effect
     )
     compact(map(
-        gwasLbfByPair,
+        .colocGwasRecordsFor(
+            qtlKeys[[qi]],
+            colnames(qLbfInfo$lbf),
+            gwasLbfByPair,
+            pairing,
+            alleleFlip
+        ),
         .colocScorePairAt,
         qLbfInfo = qLbfInfo,
         q = scored,
@@ -769,7 +1067,8 @@ colocPipeline <- function(
         ident,
         list(
             parts = .fmrRowParts(fmr, qi),
-            label = .fmrTupleLabel(.fmrSideName(fmr), ident)
+            label = .fmrTupleLabel(.fmrSideName(fmr), ident),
+            ldReference = .rowLdRef(fmr, qi)
         )
     )
 }
@@ -853,9 +1152,16 @@ colocPipeline <- function(
     # $results is the per-variant layer that process_coloc_results() used to
     # consume and that this pipeline silently dropped. It is pivoted here, the
     # only place that knows which results column belongs to which summary row.
+    # The pair's LD reference rides along for colocCredibleSets()' purity:
+    # the two sides' are required to match, but a QTL side fit on
+    # individual-level data has none, and then the GWAS side's is the one.
     list(
         rows = rows,
-        variants = .crPivotColocResults(pairRes$results, nrow(rows))
+        variants = .crPivotColocResults(pairRes$results, nrow(rows)),
+        ldReference = rep(
+            list(q$ldReference %||% gInfo$ldReference),
+            nrow(rows)
+        )
     )
 }
 
@@ -934,12 +1240,15 @@ colocPipeline <- function(
     list(summary = summary, results = .colocEnlocResults(scored, aligned))
 }
 
-# One (QTL effect, GWAS effect) pair, which is enloc's signal cluster.
+# One (QTL effect, GWAS effect) pair, which is enloc's signal cluster. The
+# LBF matrices hold SuSiE's natural-log Bayes factors and enloc reads log10
+# ones, so they are converted here; read as log10 unconverted, every cluster's
+# PIPs came out sharper than SuSiE's own alpha.
 # @noRd
 .colocEnlocOneEffectPair <- function(i, j, aligned, priors) {
     .enlocScoreEffectPair(
-        qtlLog10Bf = aligned$qtl[i, ],
-        gwasLog10Bf = aligned$gwas[j, ],
+        qtlLog10Bf = aligned$qtl[i, ] / log(10),
+        gwasLog10Bf = aligned$gwas[j, ] / log(10),
         priors = priors
     )
 }
@@ -1048,11 +1357,7 @@ colocPipeline <- function(
     gwasInput,
     returnGwasFineMapping
 ) {
-    out <- .colocAssemble(
-        results,
-        useEnrichment,
-        .colocLdRef(qtlFineMappingResult, gwasFmr)
-    )
+    out <- .colocAssemble(results, useEnrichment)
     .colocAttachGwasFm(out, returnGwasFineMapping, gwasInput, gwasFmr)
 }
 
@@ -1066,18 +1371,20 @@ colocPipeline <- function(
     `attr<-`(out, "gwasFineMapping", gwasFmr)
 }
 
-# Row-bind + column-order the per-pair summary rows (empty result when none).
+# Row-bind + column-order the per-pair summary rows (empty result when none),
+# each pair on the LD reference it was scored against.
 # @noRd
-.colocAssemble <- function(results, useEnrichment, ldReference = NULL) {
+.colocAssemble <- function(results, useEnrichment) {
     if (length(results) == 0L) {
-        return(.colocEmptyResult(
-            enriched = useEnrichment,
-            ldReference = ldReference
-        ))
+        return(.colocEmptyResult(enriched = useEnrichment))
     }
     rows <- bind_rows(map(map(results, "rows"), .colocStandardiseRow))
     variants <- list_c(map(results, "variants"))
-    ColocResult(.colocOrderColumns(rows, useEnrichment), variants, ldReference)
+    ColocResult(
+        .colocOrderColumns(rows, useEnrichment),
+        variants,
+        ldReference = list_flatten(map(results, "ldReference"))
+    )
 }
 
 # Identity columns first, then everything coloc produced.
@@ -1104,12 +1411,19 @@ colocPipeline <- function(
 # Internal helpers
 # =============================================================================
 
-# LD-sketch compatibility check. Thin wrapper over the shared
-# `.requireMatchingLdRefs` helper (R/ld.R). Shared with
-# qtlEnrichmentPipeline.
+# LD-sketch compatibility check over the QTL / GWAS row pairs coloc scores
+# against each other -- those whose regions overlap -- each of which must
+# share an LD reference; rows that are never paired may sit on different
+# ones. Thin wrapper over the shared `.requireOverlapLdRefs` helper
+# (R/ld.R).
 # @noRd
-.colocRequireMatchingLdRefs <- function(qtlLd, gwasLd) {
-    .requireMatchingLdRefs(qtlLd, gwasLd, pipelineName = "colocPipeline")
+.colocRequireMatchingLdRefs <- function(qtlFineMappingResult, gwasFmr) {
+    .requireOverlapLdRefs(
+        qtlFineMappingResult,
+        gwasFmr,
+        pipelineName = "colocPipeline",
+        label = "qtlFineMappingResult"
+    )
 }
 
 # SuSiE credible-set concentration filter. Given a trimmed SuSiE fit
@@ -1183,7 +1497,10 @@ colocPipeline <- function(
         # The fit's own effect indices, which -- unlike coloc's idx1 / idx2 --
         # are stable across calls and blocks, so they are what identifies a
         # credible set in the result.
-        effect = keep
+        effect = keep,
+        # How many effects the fit has before filtering, which is what a
+        # collapse of several blocks numbers the next block's effects after.
+        nEffects = nrow(allRows)
     )
 }
 
@@ -1277,13 +1594,15 @@ colocPipeline <- function(
     as.numeric(mass)
 }
 
-# The entry's variant ids, when the matrix does not already name its columns.
+# The ids the fit was made with, when the matrix does not already name its
+# columns: the columns are the fit's variables, which a row narrowed since no
+# longer holds all of.
 # @noRd
 .colocLbfNamesFrom <- function(lbfMatrix, parts) {
     if (!is.null(colnames(lbfMatrix)) && !any(is.na(colnames(lbfMatrix)))) {
         return(lbfMatrix)
     }
-    vids <- .fmrPartsVariantIds(parts)
+    vids <- .partsFitIds(parts)
     if (length(vids) != ncol(lbfMatrix)) {
         return(lbfMatrix)
     }
@@ -1316,9 +1635,26 @@ colocPipeline <- function(
         .colocGwasLbfAt,
         gwasFmr = gwasFmr,
         blockIds = .colocGwasBlockIds(gwasFmr),
+        regions = .rowRegions(gwasFmr)$region,
+        fits = .colocGwasFitKeys(gwasFmr),
         side = .fmrSideName(gwasFmr),
         colocLbfFilterParam = colocLbfFilterParam
     ))
+}
+
+# Which fit each second-side row belongs to. A GWAS fit is every LD block of
+# one (study, method), and those rows are what a QTL region's blocks are
+# collapsed from; a QTL row is a fit of its own.
+# @noRd
+.colocGwasFitKeys <- function(gwasFmr) {
+    if (!methods::is(gwasFmr, "GwasFineMappingResult")) {
+        return(as.character(seq_len(nrow(gwasFmr))))
+    }
+    str_c(
+        .fmrIdentityColumn(gwasFmr, "study"),
+        .fmrIdentityColumn(gwasFmr, "method"),
+        sep = "\r"
+    )
 }
 
 # One second-side row's LBF matrix plus its identity, or NULL when the row has
@@ -1328,6 +1664,8 @@ colocPipeline <- function(
     ri,
     gwasFmr,
     blockIds,
+    regions,
+    fits,
     side,
     colocLbfFilterParam
 ) {
@@ -1348,10 +1686,131 @@ colocPipeline <- function(
             lbf = info$lbf,
             retainedMass = info$retainedMass,
             effect = info$effect,
+            nEffects = info$nEffects,
             blockId = blockId,
-            label = label
+            fit = fits[[ri]],
+            region = regions[ri],
+            label = label,
+            side = side,
+            ldKey = .ldRefKeys(gwasFmr)[[ri]],
+            ldReference = .rowLdRef(gwasFmr, ri)
         )
     )
+}
+
+# The second-side fits one QTL tuple is scored against: one record per fit,
+# however many LD blocks it spans. With a `pairing` -- the GWAS fine-mapped
+# here, once per set of rows a QTL region reaches -- that is the tuple's own
+# fits. Otherwise it is every fit sharing variants with the tuple, its
+# overlapped blocks collapsed into one.
+# @noRd
+.colocGwasRecordsFor <- function(
+    qKey,
+    qIds,
+    gwasLbfByPair,
+    pairing,
+    alleleFlip
+) {
+    if (!is.null(pairing)) {
+        return(keep(
+            gwasLbfByPair,
+            .colocRecordKeyIn,
+            keys = pairing$key[pairing$qtlKey == qKey]
+        ))
+    }
+    hits <- keep(
+        gwasLbfByPair,
+        .colocSharesVariants,
+        qIds = qIds,
+        alleleFlip = alleleFlip
+    )
+    fits <- map_chr(hits, "fit")
+    unname(map(
+        split(hits, factor(fits, levels = unique(fits))),
+        .colocCollapseBlocks
+    ))
+}
+
+# @noRd
+.colocRecordKeyIn <- function(rec, keys) {
+    is_in(str_c(rec$study, rec$blockId, sep = "\r"), keys)
+}
+
+# @noRd
+.colocSharesVariants <- function(rec, qIds, alleleFlip) {
+    m <- matchVariants(qIds, colnames(rec$lbf), allowFlip = alleleFlip)
+    length(m$idxA) > 0L
+}
+
+# The LD blocks of one GWAS fit a QTL region reaches, collapsed into the one
+# fit they make when there is no LD between blocks. The RSS likelihood then
+# factorizes over blocks, so an effect fitted in one block carries no evidence
+# about another's variants: the collapsed fit holds every block's effects,
+# each confined to its own block -- an LBF of -Inf, a Bayes factor of zero,
+# elsewhere -- and numbered on from the blocks before it, in row order. A fit
+# the region reaches in one block is that block's record as it is.
+# @noRd
+.colocCollapseBlocks <- function(recs) {
+    if (length(recs) == 1L) {
+        return(recs[[1L]])
+    }
+    ids <- unique(list_c(map(recs, .colocLbfIds)))
+    offsets <- cumsum(c(0L, map_int(recs, "nEffects")))[seq_along(recs)]
+    blockId <- .colocMergedBlockId(
+        map_chr(recs, "blockId"),
+        unlist(.rtlBindElements(map(recs, "region")))
+    )
+    list_assign(
+        recs[[1L]],
+        lbf = exec(rbind, !!!map(recs, .colocPadLbf, ids = ids)),
+        retainedMass = list_c(map(recs, "retainedMass")),
+        effect = list_c(map2(recs, offsets, .colocShiftEffects)),
+        nEffects = sum(map_int(recs, "nEffects")),
+        blockId = blockId,
+        label = .fmrTupleLabel(
+            recs[[1L]]$side,
+            recs[[1L]][c("study", "context", "trait", "method")],
+            block = blockId
+        ),
+        ldReference = .colocMergedLdRef(recs)
+    )
+}
+
+# @noRd
+.colocLbfIds <- function(rec) {
+    colnames(rec$lbf)
+}
+
+# One block's LBF rows over the collapsed fit's variants: -Inf off the block.
+# @noRd
+.colocPadLbf <- function(rec, ids) {
+    out <- matrix(-Inf, nrow(rec$lbf), length(ids), dimnames = list(NULL, ids))
+    out[, colnames(rec$lbf)] <- rec$lbf
+    out
+}
+
+# @noRd
+.colocShiftEffects <- function(rec, offset) {
+    rec$effect + offset
+}
+
+# The blocks' shared LD reference, or none when they sit on different ones.
+# @noRd
+.colocMergedLdRef <- function(recs) {
+    if (n_distinct(map_chr(recs, "ldKey")) > 1L) {
+        return(NULL)
+    }
+    recs[[1L]]$ldReference
+}
+
+# The block id of a fit over several LD blocks: the stretch their windows
+# cover, as "chrom_start_end". A single block keeps its own.
+# @noRd
+.colocMergedBlockId <- function(blockIds, regions) {
+    if (length(blockIds) == 1L) {
+        return(blockIds[[1L]])
+    }
+    .rtlOneRangeKey(range(regions))
 }
 
 # The LD block each GWAS fine-mapping row was computed on. The element's own
@@ -1395,7 +1854,7 @@ colocPipeline <- function(
 # do not have to special-case a NULL return. When `enriched = TRUE` the
 # enrichment + p12Used columns are appended (the enloc-mode schema).
 # @noRd
-.colocEmptyResult <- function(enriched = FALSE, ldReference = NULL) {
+.colocEmptyResult <- function(enriched = FALSE) {
     base <- tibble(
         study = character(0),
         context = character(0),
@@ -1419,11 +1878,7 @@ colocPipeline <- function(
         qtlRetainedMass = numeric(0),
         gwasRetainedMass = numeric(0)
     )
-    ColocResult(
-        mutate(base, !!!.colocEnrichmentCols(enriched, NULL)),
-        list(),
-        ldReference = ldReference
-    )
+    ColocResult(mutate(base, !!!.colocEnrichmentCols(enriched, NULL)), list())
 }
 
 # Look up this pair's enrichment factor in the user-supplied enrichment table.
@@ -1482,8 +1937,10 @@ colocPipeline <- function(
         gwasStudy = gInfo$study,
         gwasContext = gInfo$context,
         gwasTrait = gInfo$trait,
+        gwasMethod = gInfo$method,
         qtlStudy = q$study,
-        qtlContext = q$context
+        qtlContext = q$context,
+        qtlMethod = q$method
     )
     wanted[is_in(names(wanted), colnames(enrichment))]
 }
@@ -1582,9 +2039,9 @@ colocPipeline <- function(
 }
 
 # --- GwasFineMappingParam accessors ----------------------------------------
-# The nested getters return the Param itself, so a caller edits it with its
-# own replacement methods and hands it back:
-#   cs <- credibleSetParam(g); csCoverage(cs) <- 0.9; credibleSetParam(g) <- cs
+# The nested getters return the Param itself, so a caller edits it with `$<-`
+# and hands it back:
+#   cs <- g$credibleSetParam; cs$coverage <- 0.9; g$credibleSetParam <- cs
 
 #' @rdname GwasFineMappingParam
 setMethod("fineMappingMethods", "GwasFineMappingParam", function(x) {
@@ -1592,41 +2049,12 @@ setMethod("fineMappingMethods", "GwasFineMappingParam", function(x) {
 })
 
 #' @rdname GwasFineMappingParam
-setReplaceMethod(
-    "fineMappingMethods",
-    "GwasFineMappingParam",
-    function(x, value) {
-        x@methods <- value
-        validObject(x)
-        x
-    }
-)
-
-#' @rdname GwasFineMappingParam
 setMethod("credibleSetParam", "GwasFineMappingParam", function(x) {
     x@credibleSetParam
 })
 
 #' @rdname GwasFineMappingParam
-setReplaceMethod(
-    "credibleSetParam",
-    "GwasFineMappingParam",
-    function(x, value) {
-        x@credibleSetParam <- value
-        validObject(x)
-        x
-    }
-)
-
-#' @rdname GwasFineMappingParam
 setMethod("susieRssParam", "GwasFineMappingParam", function(x) x@susieRssParam)
-
-#' @rdname GwasFineMappingParam
-setReplaceMethod("susieRssParam", "GwasFineMappingParam", function(x, value) {
-    x@susieRssParam <- value
-    validObject(x)
-    x
-})
 
 #' @rdname GwasFineMappingParam
 setMethod("panelFilterParam", "GwasFineMappingParam", function(x) {
@@ -1634,41 +2062,12 @@ setMethod("panelFilterParam", "GwasFineMappingParam", function(x) {
 })
 
 #' @rdname GwasFineMappingParam
-setReplaceMethod(
-    "panelFilterParam",
-    "GwasFineMappingParam",
-    function(x, value) {
-        x@panelFilterParam <- value
-        validObject(x)
-        x
-    }
-)
-
-#' @rdname GwasFineMappingParam
 setMethod("initializeWithSusieInf", "GwasFineMappingParam", function(x) {
     x@initializeWithSusieInf
 })
 
 #' @rdname GwasFineMappingParam
-setReplaceMethod(
-    "initializeWithSusieInf",
-    "GwasFineMappingParam",
-    function(x, value) {
-        x@initializeWithSusieInf <- value
-        validObject(x)
-        x
-    }
-)
-
-#' @rdname GwasFineMappingParam
 setMethod("fitRetention", "GwasFineMappingParam", function(x) x@fitRetention)
-
-#' @rdname GwasFineMappingParam
-setReplaceMethod("fitRetention", "GwasFineMappingParam", function(x, value) {
-    x@fitRetention <- value
-    validObject(x)
-    x
-})
 
 #' @title Arguments For coloc's Bayes-Factor Scorer
 #' @description Options forwarded to \code{coloc::coloc.bf_bf}. The prior
@@ -1710,14 +2109,24 @@ ColocOptions <- function(overlap.min = NULL, trim_by_posterior = NULL, ...) {
 # Run coloc.bf_bf for an aligned pair, warning + NULL on failure.
 # @noRd
 #' @importFrom rlang try_fetch
+# An LBF matrix with coloc's "null" column: log BF 0, the null against itself.
+# Without one, coloc.bf_bf takes the LAST variant for the null and subtracts
+# its LBF from the others, which is NaN when that LBF is -Inf -- as it is for
+# an effect of a collapsed block fit that sits in another block. With one
+# nothing is shifted, so a single block's scores are unchanged.
+# @noRd
+.colocWithNull <- function(lbf) {
+    cbind(lbf, null = 0)
+}
+
 .colocRunPair <- function(aligned, p12Used, q, gInfo, p1, p2, ColocOptions) {
     # Engine-call exception: coloc's whole interface is two blocks -- this and
     # ColocOptions -- so a colocWrapper.R would hold ~50 lines against this
     # file's 1600. The engine boundary is stated here instead of split out.
     callArgs <- c(
         list(
-            aligned$qtl,
-            aligned$gwas,
+            .colocWithNull(aligned$qtl),
+            .colocWithNull(aligned$gwas),
             p1 = p1,
             p2 = p2,
             p12 = p12Used

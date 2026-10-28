@@ -10,9 +10,11 @@ combineFineMappingResults(..., ldReference = NULL)
 \item{...}{Two or more \code{FineMappingResultBase} objects, or a single
 \code{list} of them.}
 
-\item{ldReference}{Optional genotype panel (see
-\code{\link{readGenotypes}}) to attach to the
-combined collection. Default \code{NULL}. Applied when combining two or
+\item{ldReference}{Optional LD reference -- a genotype panel (see
+\code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
+\code{LdMatrix} -- that every row of the combined collection uses instead
+of its own. Default \code{NULL}: each row keeps the reference it had,
+and views of one source are stored once. Applied when combining two or
 more inputs; a single input is returned unchanged.}
 }
 \value{

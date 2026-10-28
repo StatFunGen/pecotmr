@@ -101,10 +101,6 @@
     )
 }
 
-.vcfOverlapDs <- function() {
-    `[<-`(.vcfOverlapGt(), 1L, , value = c(0.1, 0.9, 1.8))
-}
-
 # Keep only the GT subfield of each sample column.
 .vcfGtOnly <- function(records, samples = c("s1", "s2", "s3")) {
     gt <- lapply(records[samples], sub, pattern = ":.*$", replacement = "")

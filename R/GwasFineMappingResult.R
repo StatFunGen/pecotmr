@@ -8,7 +8,8 @@
 # range -- the genome-wide-across-blocks shape that
 # qtlEnrichmentPipeline / colocPipeline expect when sweeping a study
 # across LD blocks. Class-level slots:
-#   * ldReference   GenotypeHandle for the LD reference; required for the
+#   * ldReference   the LD references the fits used, each stored once; the
+#                ldReference mcols column names each row's. Required for the
 #                LD-block-indexed susieRSS workflow.
 # Methods that take per-row selectors accept (study, method) and ignore
 # context/trait (GWAS has no per-tuple context or trait axis).
@@ -83,8 +84,8 @@ setClass(
 .gfmrCheckTupleUniqueness <- function(object) {
     # Keyed on the element's RANGE rather than on a region_id label. The range
     # is intrinsic -- it cannot drift out of step with the variants the way a
-    # stored label can, and it stays correct after subsetRegion() narrows an
-    # element. Extract key columns directly rather than via `object[, keyCols]`:
+    # stored label can, and it stays correct after an element is narrowed.
+    # Extract key columns directly rather than via `object[, keyCols]`:
     # column-subsetting preserves the class, and older S4Vectors revalidates
     # that intermediate, spuriously failing.
     if (length(object) == 0L) {
@@ -95,7 +96,7 @@ setClass(
         map(keyCols, .gfmrColOf, object = object),
         keyCols
     )) |>
-        mutate(range = .rtlRangeKeys(object))
+        mutate(range = .keyEmptyElements(object, .rtlRangeKeys(object)))
     if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
         return("(study, method, range) tuple uniqueness violated")
     }
@@ -117,23 +118,25 @@ setClass(
 #'
 #'   Rows are identified by (\code{study}, \code{method}) plus the element's
 #'   own range, which is derived from the variants rather than stored, so it
-#'   cannot drift out of step with them and stays correct after
-#'   \code{\link{subsetRegion}}.
+#'   cannot drift out of step with them and stays correct when an element's
+#'   variants are narrowed.
 #' @param studyName Character vector of study identifiers (per tuple).
 #' @param method Character vector of fine-mapping method names (per tuple).
 #' @param entry List / \code{SimpleList} of \code{FineMappingRow} objects.
-#' @param blockId Optional character vector (per tuple) keying the external LD
-#'   block manifest, e.g. \code{"chr22_10516173_17414263"}. Provenance only,
-#'   not part of the identity key. Supply it when the block BOUNDARIES matter:
-#'   those are the one thing not recoverable from the variants, since adjacent
-#'   blocks' spans leave gaps.
+#' @param blockId Optional character vector (per tuple) naming each row's
+#'   block, e.g. \code{"chr22_10516173_17414263"}. Provenance only, not part
+#'   of the identity key, and a name only: a block's boundaries, which the
+#'   variants cannot give since adjacent blocks' spans leave gaps, go in
+#'   \code{region}. Where it is \code{NULL}, or \code{NA} for a row, the
+#'   row's \code{blockId} is its own span, as \code{"chrom_start_end"}, so
+#'   every row is named by its block.
 #' @param dataType Optional assay / modality label ("bulk_rnaseq",
 #'   "methylation"), recorded as a per-row provenance column. Length 1 or
 #'   one per row; \code{NULL} (default) omits the column.
 #' @param dataSource Optional per-row label for the kind of input the fit saw,
-#'   \code{"individual"} or \code{"sumstat"}. Recorded rather than derived: a
-#'   combined collection can hold rows of both kinds, and its single
-#'   \code{ldReference} cannot say which row came from which.
+#'   \code{"individual"} or \code{"sumstat"}. Where it is absent, the result
+#'   writers read a row's kind from its LD reference: a row with none saw
+#'   individual-level data.
 #' @param weightStandardized Optional per-row flag: whether the posterior
 #'   effect is on the STANDARDIZED genotype scale. The posterior effect IS the
 #'   prediction weight, so it carries the same scale question as a TWAS
@@ -141,21 +144,34 @@ setClass(
 #'   it standardizes genotypes before fitting, and the posterior mean is
 #'   reported on the scale of the \code{X} the fit was given. The argument
 #'   exists for a collection assembled by hand, where only the caller knows.
-#' @param ldReference An optional genotype panel (see
-#'   \code{\link{readGenotypes}}).
+#' @param ldReference The LD reference the fits were computed against -- a
+#'   genotype panel (see \code{\link{readGenotypes}}), a
+#'   \code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
+#'   a list with one per row; \code{NULL} for none. Each distinct reference is
+#'   stored once.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
 #' @param region Optional per-row analysis WINDOW (a \code{GRanges} or
 #'   \code{NULL}) -- the interval each row's fit was run over, carried
-#'   forward as provenance; not part of the identity key. \code{NULL}
-#'   (default) omits the column, and \code{\link{genomicRegion}} then
-#'   derives the window from the span of the variants present.
-#' @return A \code{GwasFineMappingResult} object.
+#'   forward as provenance; not part of the identity key. It is recorded as
+#'   given, so each range must contain its row's variants.
+#'   \code{\link{fineMappingPipeline}} always sets it, from the window of the
+#'   input row. \code{NULL} (default) omits the column, and
+#'   \code{\link{genomicRegion}} then derives the window from the span of the
+#'   variants present.
+#' @param metadata A list of free-form metadata about the collection,
+#'   as \code{metadata()} holds on any Bioconductor vector. Default
+#'   \code{list()}.
+#' @return A \code{GwasFineMappingResult} object. Its logical
+#'   \code{regionGiven} column says, per row, whether the window was given
+#'   or is the span of the variants; \code{\link{fineMappingPipeline}}
+#'   carries it over from the input. See \code{\linkS4class{GwasSumStats}}
+#'   for how the pipelines use it.
 #' @examples
 #' tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
 #'   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-#' fe <- fineMappingRow(
+#' fe <- FineMappingRow(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 #' GwasFineMappingResult(studyName = "t1", method = "susie", entry = list(fe))
 #' @export
@@ -169,41 +185,112 @@ GwasFineMappingResult <- function(
     dataType = NULL,
     dataSource = NULL,
     weightStandardized = NULL,
-    ldReference = NULL
+    ldReference = NULL,
+    metadata = list()
 ) {
     n <- length(studyName)
     if (length(method) != n || length(entry) != n) {
-        abort("`study`, `method`, and `entry` must all have the same length.")
+        abort(
+            "`studyName`, `method`, and `entry` must all have the same length."
+        )
     }
     entry <- map(entry, .asFmRowPayload)
     .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
+    .gfmrRefuseSplitFits(entry)
     cols <- list(
         study = as.character(studyName),
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(entry, susieFit)),
-        cvResult = S4Vectors::SimpleList(map(entry, cvResult))
+        cvResult = S4Vectors::SimpleList(map(entry, cvResult)),
+        fitVariants = IRanges::CharacterList(map(entry, .fmRowFitVariants))
     ) |>
-        .appendBlockIdCol(blockId, n) |>
+        .appendBlockIdCol(blockId %||% rep(NA_character_, n), n) |>
         .appendTraitPosCol(traitPos, n) |>
         .appendRegionCol(region, n) |>
         .appendFmProvenanceCols(dataType, dataSource, weightStandardized, n)
-    dfArgs <- c(cols, list(check.names = FALSE))
-    # Each entry's variants become one ELEMENT, its topLoci that element's
-    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
-    # splits by chromosome with its metadata row replicated.
+    .withMetadata(.gfmrBuild(entry, cols, region, ldReference), metadata)
+}
+
+# The validated collection from its entries and metadata columns. Each
+# entry's variants become one ELEMENT, its topLoci that element's inner
+# mcols, and its fit/cv payload outer mcols. A multi-seqname entry -- only a
+# fit-less one gets this far -- splits by chromosome with its metadata row
+# replicated.
+# @noRd
+.gfmrBuild <- function(entry, cols, region, ldReference) {
+    n <- length(entry)
+    dict <- .ldRefDict(.ldRefPerTuple(ldReference, n))
+    dfArgs <- c(cols, list(ldReference = dict$keys, check.names = FALSE))
     split <- .rtlSplitBySeqname(map(entry, variants))
-    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    pieces <- .rtlBindElements(split$entry)
     grl <- S4Vectors::`mcols<-`(
-        GenomicRanges::GRangesList(split$entry),
-        value = md[split$fromIdx, , drop = FALSE]
+        pieces,
+        value = .gfmrPieceMetadata(
+            exec(S4Vectors::DataFrame, !!!dfArgs),
+            split,
+            .gfmrGivenRegions(region, n),
+            pieces
+        )
     )
-    obj <- new(
-        "GwasFineMappingResult",
-        grl,
-        ldReference = .asLdRef(ldReference)
-    )
-    validObject(obj)
-    obj
+    new("GwasFineMappingResult", .rtlNamed(grl), ldReference = dict$refs)
+}
+
+# The window each entry was given: its `region`, when the caller passed one.
+# A `blockId` is a name, and gives no window.
+# @noRd
+.gfmrGivenRegions <- function(region, n) {
+    if (is.null(region)) {
+        return(list(ranges = .placeholderRanges(n), given = rep(FALSE, n)))
+    }
+    list(ranges = .bareRanges(region), given = rep(TRUE, n))
+}
+
+# Each piece's metadata row: its entry's, replicated across the pieces a
+# multi-chromosome entry splits into, and a blockId for every piece -- the
+# caller's, else the piece's own span as "chrom_start_end" -- so each row is
+# named by its block whether or not the caller named it. An empty piece spans
+# nothing and keeps NA. `regionGiven` records which pieces were given their
+# range. A row given none stores no `region`, where genomicRegion() reads its
+# span, unless another row was given one and the column has to exist.
+# @noRd
+.gfmrPieceMetadata <- function(md, split, given, pieces) {
+    out <- md[split$fromIdx, , drop = FALSE]
+    out$blockId <- coalesce(as.character(out$blockId), .rtlRangeKeys(pieces))
+    ranges <- given$ranges[split$fromIdx]
+    has <- given$given[split$fromIdx]
+    .refuseUncontainedRegions(ranges, has, pieces, "GwasFineMappingResult")
+    cols <- .regionColumns(ranges, has, .rowSpanRanges(pieces))
+    if (any(cols$regionGiven)) {
+        out$region <- cols$region
+    }
+    out$regionGiven <- cols$regionGiven
+    out
+}
+
+# A multi-chromosome entry is split into one row per chromosome, its metadata
+# copied onto each. Variants and their top-loci split cleanly, but a fit does
+# not: its effects span every variant it was given, so each piece would carry
+# the whole fit, and coloc and the enrichment would read it once per piece. An
+# entry carrying a fit must therefore lie on one chromosome -- one LD block,
+# as fineMappingPipeline's entries do.
+# @noRd
+.gfmrRefuseSplitFits <- function(entry) {
+    multi <- .multiChromosomeEntries(entry)
+    bad <- multi[map_lgl(entry[multi], .fmRowCarriesFit)]
+    if (length(bad) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "GwasFineMappingResult: `entry` element(s) ",
+        "{str_flatten(utils::head(bad, 5L), ', ')} span more than one ",
+        "chromosome but carry a single fit, which cannot be split across ",
+        "rows. Fine-map each LD block separately and pass one entry per block."
+    ))
+}
+
+# @noRd
+.fmRowCarriesFit <- function(e) {
+    length(susieFit(e)) > 0L || !is.null(cvResult(e))
 }
 
 # Internal: return integer row indices of `x` where every (column, value)
@@ -222,19 +309,27 @@ setMethod("contexts", "GwasFineMappingResult", function(x) NULL)
 #' @export
 setMethod("traitNames", "GwasFineMappingResult", function(x) NULL)
 
-# Per-tuple lookup keyed by (study, method, blockId). The generic
-# accepts the full set of selectors; `context` / `trait` are QTL-only and a
+# One fit, keyed by (study, method): a study fine-mapped block by block is one
+# row per LD block, so the fit is all of them; `blockId` picks one block by
+# name. The generic accepts
+# the full set of selectors; `context` / `trait` are QTL-only and a
 # GwasFineMappingResult refuses them rather than ignoring them, the same way
-# sumStats(GwasSumStats) does. `region` is the per-block disambiguator
-# for multi-block genome-wide collections.
+# sumStats(GwasSumStats) does.
 #' @rdname fineMappingResult
 #' @export
 setMethod(
     "fineMappingResult",
     "GwasFineMappingResult",
-    function(x, studyName = NULL, context = NULL, trait = NULL, method = NULL) {
+    function(
+        x,
+        studyName = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL,
+        blockId = NULL
+    ) {
         .gwasFmrRefuseQtlSelectors(context, trait)
-        x[.tupleSelectRowGwasFmr(x, studyName, method)]
+        x[.tupleSelectRowsGwasFmr(x, studyName, method, blockId)]
     }
 )
 
@@ -249,24 +344,11 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        region = NULL,
-        returnList = FALSE
+        blockId = NULL
     ) {
         .gwasFmrRefuseQtlSelectors(context, trait)
-        idx <- .tupleSelectRowGwasFmr(x, studyName, method, region)
-        pip <- .fmrRowPip(.fmrRowParts(x, idx))
-        if (!isTRUE(returnList)) {
-            return(pip)
-        }
-        # Documented as "a per-entry list keyed by identity tuple"; the QTL
-        # method has always honoured it and this one silently returned the
-        # flat vector. A GWAS row is keyed by (study, method).
-        set_names(
-            list(pip),
-            glue(
-                "{as.character(x$study)[idx]}|{as.character(x$method)[idx]}"
-            )
-        )
+        idx <- .tupleSelectRowGwasFmr(x, studyName, method, blockId)
+        .fmrRowPip(.fmrRowParts(x, idx))
     }
 )
 
@@ -290,7 +372,7 @@ setMethod(
         "GwasFineMappingResult has no context or trait axis, so ",
         "{str_flatten(sprintf('`%s`', bad), ' and ')} ",
         "{if (length(bad) == 1L) 'does' else 'do'} not select anything. ",
-        "Select with `study`, `method` and `region`."
+        "Select with `studyName`, `method` and `blockId`."
     ))
 }
 
@@ -301,7 +383,7 @@ setMethod(
 
 # Row selector for the base delegating accessors (credibleSets / topLoci /
 # marginalEffects / susieFit / variantIds live on
-# FineMappingResultBase, AllClasses.R). The Gwas selector threads `region`.
+# FineMappingResultBase, AllClasses.R). The Gwas selector threads `blockId`.
 setMethod(
     ".fmrSelectEntry",
     "GwasFineMappingResult",
@@ -311,14 +393,17 @@ setMethod(
         context = NULL,
         trait = NULL,
         method = NULL,
-        region = NULL
+        blockId = NULL
     ) {
         # No refusal here, unlike the public accessors: this is the blind
         # delegation point for the shared base accessors, and callers such
         # as the VCF writer thread a whole selector record through it
         # without knowing the class. The user-facing entry points are where
         # a QTL-only selector is a mistake worth reporting.
-        .fmrRowParts(x, .tupleSelectRowGwasFmr(x, studyName, method, region))
+        .fmrRowParts(
+            x,
+            .tupleSelectRowGwasFmr(x, studyName, method, blockId)
+        )
     }
 )
 
@@ -334,10 +419,6 @@ setMethod("show", "GwasFineMappingResult", function(object) {
             .trim = FALSE
         ))
     }
-    ldSrc <- if (is.null(object@ldReference)) {
-        "NULL"
-    } else {
-        .ldRefLabel(object@ldReference)
-    }
+    ldSrc <- .ldRefsLabel(ldReference(object), "NULL")
     cat(glue("  LD reference: {ldSrc}\n", .trim = FALSE))
 })

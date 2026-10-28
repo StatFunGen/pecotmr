@@ -10,9 +10,11 @@ combineTwasWeights(..., ldReference = NULL)
 \item{...}{Two or more \code{TwasWeights} objects, or a single \code{list} of
 them.}
 
-\item{ldReference}{Optional genotype panel (see \code{\link{readGenotypes}})
-to attach to the
-combined collection. Default \code{NULL}. Applied when combining two or
+\item{ldReference}{Optional LD reference -- a genotype panel (see
+\code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
+\code{LdMatrix} -- that every row of the combined collection uses instead
+of its own. Default \code{NULL}: each row keeps the reference it had,
+and views of one source are stored once. Applied when combining two or
 more inputs; a single input is returned unchanged.}
 }
 \value{
@@ -24,7 +26,7 @@ assembling per-gene weight sets into a single per-region collection for
 cTWAS. Joint-specification metadata columns are carried through.
 }
 \examples{
-twe <- twasWeightsRow(
+twe <- TwasWeightsRow(
   variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
   cvResult = list(rsq = 0.5), weightStandardized = FALSE)
 tw1 <- TwasWeights(studyName = "s1", context = "brain", trait = "g1",

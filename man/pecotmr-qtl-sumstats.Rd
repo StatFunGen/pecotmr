@@ -5,6 +5,7 @@
 \title{QTL Summary Statistics Handling}
 \description{
 Constructor and accessor methods for \code{QtlSumStats}, the
-  DFrame-subclass collection keyed by \code{(study, context, trait)}.
+  \code{RangedTupleList} collection keyed by \code{(study, context,
+  trait)}.
 }
 \keyword{internal}

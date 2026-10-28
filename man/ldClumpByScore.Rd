@@ -24,7 +24,7 @@ which case bigsnpr falls back to minor allele frequency computed from
 \code{X}.}
 
 \item{chr}{Integer or character vector of length \code{ncol(X)} giving the
-chromosome for each variant.}
+chromosome for each variant, in any style (\code{"chr1"} or \code{1}).}
 
 \item{pos}{Integer vector of length \code{ncol(X)} giving the base-pair
 position for each variant.}

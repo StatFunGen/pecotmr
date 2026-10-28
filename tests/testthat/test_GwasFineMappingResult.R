@@ -14,34 +14,69 @@ test_that("GwasFineMappingResult: builds a collection keyed by 2-tuple", {
     expect_equal(nrow(res), 2L)
 })
 
-test_that("GwasFineMappingResult: region is derived from the variants", {
-    # genomicRegion() reports the element's REALIZED variant span, not a nominal
-    # window parsed out of blockId. A stored window had no correct update
-    # rule under subsetRegion() and would quietly go stale; the span is in
-    # sync by construction.
+test_that("GwasFineMappingResult: a window comes from region, not blockId", {
+    # A blockId is a name, however it is spelled: it gives no window, so the
+    # rows keep their spans and nothing was given.
     e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
+    e2 <- .sc_makeFineMappingRow(2, offset = 1000L)
     res <- GwasFineMappingResult(
         studyName = c("g1", "g1"),
         method = c("susie", "susie"),
-        blockId = c("chr1_1_500", "chr2_600_900"),
+        blockId = c("chr1_1_500", "b2"),
         entry = list(e1, e2)
     )
-    reg <- genomicRegion(res)
-    expect_equal(as.character(GenomicRanges::seqnames(reg)), c("chr1", "chr1"))
-    expect_equal(GenomicRanges::start(reg), c(100L, 100L))
-    expect_equal(GenomicRanges::end(reg), c(300L, 200L))
-    # A synthetic blockId no longer produces a chrUn sentinel: with the span
-    # derived from the variants there is nothing to fabricate.
+    expect_identical(res$blockId, c("chr1_1_500", "b2"))
+    expect_identical(
+        as.character(genomicRegion(res)),
+        c("chr1:100-300", "chr1:1100-1200")
+    )
+    expect_identical(res$regionGiven, c(FALSE, FALSE))
+    # A window that leaves out its row's variants is not that row's window.
+    expect_error(
+        GwasFineMappingResult(
+            studyName = c("g1", "g1"),
+            method = c("susie", "susie"),
+            entry = list(e1, e2),
+            region = GenomicRanges::GRanges(
+                c("chr1", "chr2"),
+                IRanges::IRanges(c(1L, 600L), c(500L, 900L))
+            )
+        ),
+        "row 2: range chr2:600-900, variants at chr1:1100-1200",
+        fixed = TRUE
+    )
+    expect_error(
+        GwasFineMappingResult(
+            studyName = "g1",
+            method = "susie",
+            entry = list(e1),
+            region = GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(150L, 400L)
+            )
+        ),
+        "must contain the row's variants"
+    )
+    # With no range given there is no region column: genomicRegion() reads
+    # the span of the variants, which cannot drift out of step with them.
     res2 <- GwasFineMappingResult(
         studyName = "g1",
         method = "susie",
         entry = list(e1)
     )
-    expect_equal(
-        as.character(GenomicRanges::seqnames(genomicRegion(res2))),
-        "chr1"
+    expect_false("region" %in% colnames(S4Vectors::mcols(res2)))
+    expect_false(res2$regionGiven)
+    expect_identical(as.character(genomicRegion(res2)), "chr1:100-300")
+    # A `region` is given, whatever the blockId.
+    res3 <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(e1),
+        blockId = "b1",
+        region = GenomicRanges::GRanges("chr1", IRanges::IRanges(50L, 400L))
     )
+    expect_true(res3$regionGiven)
+    expect_identical(as.character(genomicRegion(res3)), "chr1:50-400")
 })
 
 
@@ -80,27 +115,6 @@ test_that("GwasFineMappingResult: errors on length mismatch", {
 })
 
 
-test_that("GwasFineMappingResult: same (study, method), other ranges", {
-    # Row identity is (study, method, range), so (study, method) may repeat as
-    # long as the two rows cover different genomic spans. This is the
-    # genome-wide-across-blocks shape that qtlEnrichmentPipeline +
-    # colocPipeline expect, and it now needs no label to disambiguate it.
-    e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(3, offset = 10000L)
-    res <- GwasFineMappingResult(
-        studyName = c("g1", "g1"),
-        method = c("susie", "susie"),
-        entry = list(e1, e2)
-    )
-    expect_s4_class(res, "GwasFineMappingResult")
-    expect_equal(nrow(res), 2L)
-    # No blockId was supplied, so the column is simply absent -- nothing
-    # synthesises a placeholder id any more.
-    expect_false(is_in("blockId", colnames(res)))
-    expect_equal(length(unique(.rtlRangeKeys(res))), 2L)
-})
-
-
 test_that("GwasFineMappingResult: rejects two rows covering the same range", {
     # Same (study, method) AND the same span: these are the same block, and no
     # blockId label can make them distinct -- which is the point of keying on
@@ -111,7 +125,7 @@ test_that("GwasFineMappingResult: rejects two rows covering the same range", {
         GwasFineMappingResult(
             studyName = c("g1", "g1"),
             method = c("susie", "susie"),
-            blockId = c("chr22_1_100", "chr22_200_300"),
+            blockId = c("blockA", "blockB"),
             entry = list(e1, e2)
         ),
         "uniqueness violated"
@@ -133,20 +147,6 @@ test_that("GwasFineMappingResult: errors when blockId length mismatches", {
     )
 })
 
-
-test_that("GwasFineMappingResult: show prints summary", {
-    e <- .sc_makeFineMappingRow(3)
-    res <- GwasFineMappingResult(
-        studyName = "g1",
-        method = "susie",
-        entry = list(e)
-    )
-    expect_output(show(res), "GwasFineMappingResult")
-})
-
-# ===========================================================================
-# TwasWeights collection
-# ===========================================================================
 
 # === Tests migrated from test_showMethods.R (GwasFineMappingResult) ===
 
@@ -177,19 +177,6 @@ test_that("show.GwasFineMappingResult reports the ldReference source", {
 
 # === Tests migrated from test_collectionAccessors.R (GwasFineMappingResult) ===
 
-test_that("GwasFineMappingResult: pip with study/method selectors", {
-    e1 <- .ca_makeFmEntry(3)
-    e2 <- .ca_makeFmEntry(4)
-    res <- GwasFineMappingResult(
-        studyName = c("g1", "g2"),
-        method = c("susie", "susie"),
-        entry = list(e1, e2)
-    )
-    pip <- pip(res, studyName = "g2", method = "susie")
-    expect_equal(length(pip), 4L)
-})
-
-
 test_that("GwasFineMappingResult: contexts/traitNames return NULL", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
@@ -209,7 +196,7 @@ test_that("GwasFineMappingResult: credibleSets/topLoci/susieFit/variantIds dispa
         method = "susie",
         entry = list(e)
     )
-    expect_equal(nrow(credibleSets(res)), 2L)
+    expect_equal(length(credibleSets(res)), 2L)
     # topLoci returns the projected posterior view (filtered by default
     # signalCutoff = 0.025; .ca_makeTopLoci sets all pip > 0.025 so all rows
     # survive). Compare on the projected shape, not the slot's raw shape.
@@ -225,11 +212,11 @@ test_that("GwasFineMappingResult: topLoci aggregates per-block rows genome-wide"
     # With no selectors topLoci now stacks both blocks, tagging each variant
     # with its blockId; context/trait are NA-filled (GWAS keys on region).
     e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
+    e2 <- .sc_makeFineMappingRow(2, offset = 1000L)
     res <- GwasFineMappingResult(
         studyName = c("g1", "g1"),
         method = c("susie", "susie"),
-        blockId = c("chr1:1-100", "chr1:200-300"),
+        blockId = c("chr1:1-500", "chr1:501-2000"),
         entry = list(e1, e2)
     )
     agg <- topLoci(res, signalCutoff = 0)
@@ -237,11 +224,11 @@ test_that("GwasFineMappingResult: topLoci aggregates per-block rows genome-wide"
     expect_equal(
         agg$blockId,
         c(
-            "chr1:1-100",
-            "chr1:1-100",
-            "chr1:1-100",
-            "chr1:200-300",
-            "chr1:200-300"
+            "chr1:1-500",
+            "chr1:1-500",
+            "chr1:1-500",
+            "chr1:501-2000",
+            "chr1:501-2000"
         )
     )
     expect_true(all(is.na(agg$context)))
@@ -249,49 +236,71 @@ test_that("GwasFineMappingResult: topLoci aggregates per-block rows genome-wide"
     expect_true("variant_id" %in% names(S4Vectors::mcols(agg)))
 })
 
-test_that("GwasFineMappingResult: topLoci region= selects a single block", {
+test_that("GwasFineMappingResult: topLoci picks one block by name or window", {
     e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
+    e2 <- .sc_makeFineMappingRow(2, offset = 1000L)
     res <- GwasFineMappingResult(
         studyName = c("g1", "g1"),
         method = c("susie", "susie"),
-        blockId = c("chr1:1-100", "chr1:200-300"),
+        blockId = c("chr1:1-500", "chr1:501-2000"),
         entry = list(e1, e2)
     )
-    # region= pins one row, so this hits the single-entry fast path (bare table).
+    # blockId= pins one row, so this hits the single-entry fast path (bare
+    # table).
     tl <- topLoci(
         res,
         studyName = "g1",
         method = "susie",
-        region = "chr1:200-300",
+        blockId = "chr1:501-2000",
         signalCutoff = 0
     )
     expect_equal(length(tl), 2L)
     expect_false("blockId" %in% names(S4Vectors::mcols(tl)))
+    # A window selects rows by subsetting the collection on its rows'
+    # analysis windows -- here, alone, the second block, whose variants span
+    # chr1:1100-1200.
+    byWindow <- topLoci(
+        res[IRanges::overlapsAny(
+            genomicRegion(res),
+            GenomicRanges::GRanges("chr1:1150-1500")
+        )],
+        signalCutoff = 0
+    )
+    expect_identical(as.character(byWindow), as.character(tl))
+    # A window over both blocks keeps both, which then aggregate.
+    both <- topLoci(
+        res[IRanges::overlapsAny(
+            genomicRegion(res),
+            GenomicRanges::GRanges("chr1:1-5000")
+        )],
+        signalCutoff = 0
+    )
+    expect_equal(length(both), 5L)
+    expect_true("blockId" %in% names(S4Vectors::mcols(both)))
 })
 
 test_that("GwasFineMappingResult: credibleSets aggregates CS across blocks", {
     e1 <- .sc_makeFineMappingRow(3)
-    e2 <- .sc_makeFineMappingRow(2)
+    e2 <- .sc_makeFineMappingRow(2, offset = 1000L)
     res <- GwasFineMappingResult(
         studyName = c("g1", "g1"),
         method = c("susie", "susie"),
-        blockId = c("chr1:1-100", "chr1:200-300"),
+        blockId = c("chr1:1-500", "chr1:501-2000"),
         entry = list(e1, e2)
     )
     cs <- credibleSets(res)
-    expect_equal(nrow(cs), 4L) # 2 CS members per block
+    expect_equal(length(cs), 4L) # 2 CS members per block
     expect_equal(
         cs$blockId,
-        c("chr1:1-100", "chr1:1-100", "chr1:200-300", "chr1:200-300")
+        c("chr1:1-500", "chr1:1-500", "chr1:501-2000", "chr1:501-2000")
     )
     expect_true(all(is.na(cs$context)))
-    # region= pins one block -> bare table
+    # blockId= pins one block -> bare table
     bare <- credibleSets(
         res,
         studyName = "g1",
         method = "susie",
-        region = "chr1:1-100"
+        blockId = "chr1:1-500"
     )
     expect_false("blockId" %in% names(bare))
 })
@@ -304,7 +313,7 @@ test_that("GwasFineMappingResult: .tupleSelectRowGwasFmr requires both selectors
         method = c("susie", "susie"),
         entry = list(e, e)
     )
-    expect_error(pip(res), "Pass `study` and `method`")
+    expect_error(pip(res), "Pass `studyName` and `method`")
     expect_error(
         pip(res, studyName = c("g1", "g2"), method = "susie"),
         "Must have length 1"
@@ -339,9 +348,11 @@ test_that("GwasFineMappingResult: marginalEffects with study/method selectors", 
     # Collection-level selection picks the g2 entry, then delegates to the
     # entry-level getMarginalEffects.
     me <- marginalEffects(res, studyName = "g2", method = "susie")
-    expect_s3_class(me, "data.frame")
-    expect_equal(nrow(me), 4L)
-    expect_true(all(c("variant_id", "beta", "se", "z", "p") %in% names(me)))
+    expect_s4_class(me, "GRanges")
+    expect_equal(length(me), 4L)
+    expect_true(all(
+        c("variant_id", "beta", "se", "z", "p") %in% names(S4Vectors::mcols(me))
+    ))
 })
 
 # ===========================================================================
@@ -380,21 +391,17 @@ test_that("validity names a missing entry payload column", {
     )
 })
 
-test_that("GwasFineMappingResult: pip(returnList) keys by study|method", {
-    # Documented as "a per-entry list keyed by identity tuple". The QTL
-    # method always honoured it; this one used to ignore the flag and hand
-    # back the flat vector, so the list branch had no test.
+test_that("GwasFineMappingResult: pip() reads the row the selectors pick", {
     res <- GwasFineMappingResult(
         studyName = c("g1", "g2"),
         method = c("susie", "susie"),
         entry = list(.ca_makeFmEntry(3), .ca_makeFmEntry(4))
     )
-    got <- pip(res, studyName = "g2", method = "susie", returnList = TRUE)
-    expect_type(got, "list")
-    expect_named(got, "g2|susie")
-    expect_equal(length(got[["g2|susie"]]), 4L)
-    # The flat vector is still what you get without the flag.
-    expect_false(is.list(pip(res, studyName = "g2", method = "susie")))
+    got <- pip(res, studyName = "g2", method = "susie")
+    expect_type(got, "double")
+    expect_length(got, 4L)
+    # One return type: the list form is gone with its switch.
+    expect_error(pip(res, studyName = "g2", returnList = TRUE), "unused")
 })
 
 test_that("GwasFineMappingResult: context / trait selectors are refused", {
@@ -441,4 +448,208 @@ test_that("GwasFineMappingResult: context / trait selectors are refused", {
         )),
         3L
     )
+})
+
+# ===========================================================================
+# A study fine-mapped block by block
+# ===========================================================================
+
+# One study fine-mapped in two LD blocks with two methods, plus a second
+# study in one block.
+.gfr_makeBlocked <- function() {
+    GwasFineMappingResult(
+        studyName = c("g1", "g1", "g1", "g1", "g2"),
+        method = c("susie", "susie", "ser", "ser", "susie"),
+        entry = list(
+            .sc_makeFineMappingRow(3),
+            .sc_makeFineMappingRow(3, offset = 10000L),
+            .sc_makeFineMappingRow(3),
+            .sc_makeFineMappingRow(3, offset = 10000L),
+            .sc_makeFineMappingRow(3)
+        ),
+        blockId = c(
+            "chr1_1_5000",
+            "chr1_5001_20000",
+            "chr1_1_5000",
+            "chr1_5001_20000",
+            "chr1_1_5000"
+        )
+    )
+}
+
+test_that("pip(GwasFineMappingResult) picks a block by name or window", {
+    x <- .gfr_makeBlocked()
+    named <- pip(
+        x,
+        studyName = "g1",
+        method = "susie",
+        blockId = "chr1_5001_20000"
+    )
+    near <- pip(
+        x[IRanges::overlapsAny(
+            genomicRegion(x),
+            GenomicRanges::GRanges("chr1:10100-10150")
+        )],
+        studyName = "g1",
+        method = "susie"
+    )
+    expect_identical(near, named)
+    expect_length(named, 3L)
+    expect_error(
+        pip(x, studyName = "g1", method = "susie"),
+        "pass `blockId` to disambiguate"
+    )
+})
+
+test_that("fineMappingResult returns every block of a fit, or the one named", {
+    x <- .gfr_makeBlocked()
+    fit <- fineMappingResult(x, studyName = "g1", method = "susie")
+    expect_s4_class(fit, "GwasFineMappingResult")
+    expect_equal(nrow(fit), 2L)
+    expect_identical(fit$blockId, c("chr1_1_5000", "chr1_5001_20000"))
+    one <- fineMappingResult(
+        x,
+        studyName = "g1",
+        method = "susie",
+        blockId = "chr1_5001_20000"
+    )
+    expect_equal(nrow(one), 1L)
+    expect_identical(one$blockId, "chr1_5001_20000")
+    # Subsetting on the rows' windows keeps the blocks a window overlaps.
+    near <- fineMappingResult(
+        x[IRanges::overlapsAny(
+            genomicRegion(x),
+            GenomicRanges::GRanges("chr1:10100-10150")
+        )],
+        studyName = "g1",
+        method = "susie"
+    )
+    expect_identical(near$blockId, "chr1_5001_20000")
+    # Selectors left unset are fine while they still name one fit.
+    expect_equal(nrow(fineMappingResult(x, studyName = "g2")), 1L)
+    expect_error(
+        fineMappingResult(x, studyName = "g1"),
+        "holds 2 \\(study, method\\) fits matching the selection"
+    )
+    expect_error(
+        fineMappingResult(x, studyName = "g1", method = "susie", blockId = "z"),
+        "No entry for \\(study='g1', method='susie', blockId='z'\\)"
+    )
+    expect_error(
+        fineMappingResult(x, method = "lasso"),
+        "No entry for \\(study='<any>', method='lasso'\\)"
+    )
+    expect_error(
+        fineMappingResult(x, studyName = "g1", context = "brain"),
+        "no context or trait axis"
+    )
+    expect_error(
+        fineMappingResult(x[0L], studyName = "g1"),
+        "has no rows"
+    )
+})
+
+test_that("a fit carried by a multi-chromosome entry is refused", {
+    # Splitting the entry by chromosome would copy its one fit onto every
+    # piece, and each piece would then be read as the whole fit.
+    ids <- c("chr1:100:A:G", "chr2:100:A:G")
+    tl <- data.frame(variant_id = ids, pip = c(0.6, 0.4))
+    fitted <- FineMappingRow(
+        variantIds = ids,
+        susieFit = list(pip = setNames(c(0.6, 0.4), ids)),
+        topLoci = tl
+    )
+    expect_error(
+        GwasFineMappingResult(
+            studyName = "g1",
+            method = "susie",
+            entry = list(fitted)
+        ),
+        "`entry` element\\(s\\) 1 span more than one chromosome but carry"
+    )
+    # Without a fit there is nothing to copy, and the entry splits as before.
+    bare <- FineMappingRow(variantIds = ids, susieFit = list(), topLoci = tl)
+    split <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(bare)
+    )
+    expect_equal(nrow(split), 2L)
+})
+
+test_that("filtering every variant out of a fit's blocks keeps them apart", {
+    skip_if_not_installed("plyranges")
+    x <- .gfr_makeBlocked()
+    # Each block becomes an empty row; its blockId keeps it distinct.
+    emptied <- dplyr::filter(x, pip > 2)
+    expect_equal(unname(lengths(emptied)), rep(0L, 5L))
+    expect_identical(emptied$blockId, x$blockId)
+})
+
+test_that("a row without a blockId is named by its own span", {
+    # Row identity is (study, method, range), so one (study, method) may hold
+    # two blocks over other spans -- the genome-wide-across-blocks shape that
+    # qtlEnrichmentPipeline + colocPipeline expect. The caller named neither
+    # row; each is named by the stretch its variants cover, the range its
+    # identity already keys on.
+    x <- GwasFineMappingResult(
+        studyName = c("g1", "g1"),
+        method = c("susie", "susie"),
+        entry = list(
+            .sc_makeFineMappingRow(3),
+            .sc_makeFineMappingRow(3, offset = 10000L)
+        )
+    )
+    expect_identical(x$blockId, c("chr1_100_300", "chr1_10100_10300"))
+    expect_identical(x$blockId, .rtlRangeKeys(x))
+    # A span filled in as the id was computed, not given.
+    expect_identical(x$regionGiven, c(FALSE, FALSE))
+    # A supplied id is kept, and an NA one filled.
+    y <- GwasFineMappingResult(
+        studyName = c("g1", "g1"),
+        method = c("susie", "susie"),
+        entry = list(
+            .sc_makeFineMappingRow(3),
+            .sc_makeFineMappingRow(3, offset = 10000L)
+        ),
+        blockId = c("blockA", NA)
+    )
+    expect_identical(y$blockId, c("blockA", "chr1_10100_10300"))
+    # Each chromosome piece of a fit-less entry gets its own span.
+    ids <- c("chr1:100:A:G", "chr2:500:A:G")
+    split <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(FineMappingRow(
+            ids,
+            susieFit = list(),
+            topLoci = data.frame(variant_id = ids, pip = c(0.6, 0.4))
+        ))
+    )
+    expect_identical(split$blockId, c("chr1_100_100", "chr2_500_500"))
+})
+
+test_that("GwasFineMappingResult() keeps the caller's metadata", {
+    res <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3)),
+        metadata = list(run = "r1")
+    )
+    expect_equal(S4Vectors::metadata(res), list(run = "r1"))
+})
+
+test_that("a fit-less entry split across chromosomes records no fit variants", {
+    # Its rows hold one chromosome each; with no fit there is nothing for a
+    # row to have narrowed, so none of them warns.
+    ids <- c("chr1:100:A:G", "chr2:200:C:T")
+    tl <- data.frame(variant_id = ids, pip = c(0.6, 0.4))
+    res <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(FineMappingRow(ids, NULL, tl))
+    )
+    expect_equal(nrow(res), 2L)
+    expect_equal(unname(lengths(res$fitVariants)), c(0L, 0L))
+    expect_no_warning(lbf(res))
 })

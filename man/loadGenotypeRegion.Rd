@@ -6,7 +6,7 @@
 \usage{
 loadGenotypeRegion(
   genotype,
-  region = NULL,
+  which = NULL,
   keepIndel = TRUE,
   keepVariantsPath = NULL,
   returnVariantInfo = FALSE,
@@ -17,7 +17,8 @@ loadGenotypeRegion(
 \arguments{
 \item{genotype}{Path to the genotype data file, or a PLINK prefix.}
 
-\item{region}{The target region in the format "chr:start-end".}
+\item{which}{Optional \code{GRanges}: load only the variants that overlap
+it. If NULL, loads every variant.}
 
 \item{keepIndel}{Whether to keep indel SNPs.}
 
@@ -51,5 +52,6 @@ dosages are automatically rescaled using the stored U_MIN/U_MAX values.
 \examples{
 stem <- sub("[.]bed$", "",
   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-loadGenotypeRegion(genotype = stem, region = "chr22:1-100000000")
+loadGenotypeRegion(genotype = stem,
+  which = GenomicRanges::GRanges("chr22:1-100000000"))
 }

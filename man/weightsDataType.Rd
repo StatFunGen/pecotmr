@@ -43,7 +43,7 @@ A character vector or NULL.
 Extract the data-type tag.
 }
 \examples{
-twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
+twe <- TwasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
   weightStandardized = FALSE)
 weightsDataType(twe)

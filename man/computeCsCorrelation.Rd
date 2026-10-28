@@ -13,7 +13,7 @@ computeCsCorrelation(x, ldSource, ...)
 \S4method{computeCsCorrelation}{FineMappingResultBase,QtlDataset}(x, ldSource)
 }
 \arguments{
-\item{x}{A \code{\link{fineMappingRow}} carrying the fit (credible-set
+\item{x}{A \code{\link{FineMappingRow}} carrying the fit (credible-set
 membership and PIP) and its variant ids.}
 
 \item{ldSource}{The object supplying the LD: a \code{QtlDataset}
@@ -30,7 +30,7 @@ A numeric \code{m x m} between-credible-set correlation matrix
 }
 \description{
 Compute the between-credible-set correlation matrix for a
-  \code{\link{fineMappingRow}} on demand from an LD source. The correlation
+  \code{\link{FineMappingRow}} on demand from an LD source. The correlation
   is a view over the fit-time LD, which lives on the data object --- a
   \code{QtlDataset}'s genotypes or a \code{QtlSumStats} / \code{GwasSumStats}
   LD reference --- and is deliberately never stored on the fit. An

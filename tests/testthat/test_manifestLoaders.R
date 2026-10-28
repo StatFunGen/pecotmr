@@ -14,8 +14,11 @@
     )
 }
 
+# Read once and shared: the panel is a value, and some forty tests take one.
+.toyLdRefPanel <- readGenotypes(plink1Prefix = .toyRefPrefix())
+
 .toyLdRef <- function() {
-    readGenotypes(plink1Prefix = .toyRefPrefix())
+    .toyLdRefPanel
 }
 
 # A small GWAS sumstats data.frame over real toy_ref chr22 variants.
@@ -200,7 +203,7 @@ test_that("loadGwasSumStatsFromManifest builds from a data.frame manifest", {
         c("SNP", "A1", "A2", "Z", "N") %in%
             colnames(S4Vectors::mcols(obj[[1L]]))
     ))
-    expect_equal(length(qcInfo(obj)), 0L) # loaders run no QC
+    expect_equal(length(qcOptions(obj)), 0L) # loaders run no QC
 })
 
 test_that("loadGwasSumStatsFromManifest reads a file and reconciles genome", {
@@ -262,22 +265,27 @@ test_that("tabix-indexed text honours the region", {
     tsv <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "s.tsv"))
     gz <- Rsamtools::bgzip(tsv, dest = paste0(tsv, ".gz"), overwrite = TRUE)
     Rsamtools::indexTabix(gz, seq = 1L, start = 2L, end = 2L, comment = "#")
-    df <- pecotmr:::.readSumStatsText(gz, "22:14560000-14565000", NULL, "lbl")
+    df <- pecotmr:::.readSumStatsText(
+        gz,
+        GenomicRanges::GRanges("22:14560000-14565000"),
+        NULL,
+        "lbl"
+    )
     expect_equal(nrow(df), 2L) # first two variants only
     expect_true(all(df$pos >= 14560000 & df$pos <= 14565000))
 })
 
-test_that("plain-text region is ignored with a warning", {
+test_that("plain text cannot narrow a read to the region", {
     tmp <- withr::local_tempdir()
     tsv <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "s.tsv"))
     expect_warning(
         df <- pecotmr:::.readSumStatsText(
             tsv,
-            "22:14560000-14565000",
+            GenomicRanges::GRanges("22:14560000-14565000"),
             NULL,
             "lbl"
         ),
-        "region ignored"
+        "the whole file is read"
     )
     expect_equal(nrow(df), 5L)
 })
@@ -380,6 +388,48 @@ test_that(".resolveSumstatCols derives the Wald z from beta/se", {
     out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl")
     expect_equal(out$Z, .toyGwasDf(4)$z) # Z == beta/se
     expect_true(all(c("BETA", "SE") %in% colnames(out))) # beta/se still attached
+})
+
+test_that("an af: key is directional AF; a maf: key is directionless", {
+    # Same source column, different declaration -> different meaning.
+    a <- suppressWarnings(.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(af = "effect_allele_frequency"),
+        "af"
+    ))
+    expect_equal(a$AF, 0.8)
+    expect_false("MAF" %in% names(a))
+    b <- suppressWarnings(.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(maf = "effect_allele_frequency"),
+        "maf"
+    ))
+    expect_false("AF" %in% names(b))
+    expect_equal(b$MAF, 0.8)
+})
+
+test_that("an undeclared af warns distinctly and yields no AF column", {
+    expect_warning(
+        out <- .resolveSumstatCols(
+            .afm_df("maf", 0.2),
+            .afm_cm(maf = "maf"),
+            "undeclared"
+        ),
+        "no effect-allele frequency declared"
+    )
+    expect_false("AF" %in% names(out))
+})
+
+test_that("a declared-but-unusable af warns with a different message", {
+    # Distinct from "undeclared": this is a data problem, not a mapping one.
+    expect_warning(
+        .resolveSumstatCols(
+            .afm_df("eaf", NA_real_),
+            .afm_cm(af = "eaf"),
+            "missing"
+        ),
+        "declared but its values are all missing"
+    )
 })
 
 test_that(".resolveSumstatCols keeps a supplied z over beta/se", {
@@ -748,6 +798,42 @@ test_that("loadQtlSumStatsFromManifest errors when a tuple has no N source", {
     path
 }
 
+test_that("a phenotype BED's chromosomes are read in UCSC style", {
+    tmp <- withr::local_tempdir()
+    path <- file.path(tmp, "ncbi.bed")
+    readr::write_tsv(
+        data.frame(
+            `#chr` = c("22", "MT"),
+            start = c(10L, 20L),
+            end = c(11L, 21L),
+            gene_id = c("gA", "gB"),
+            S1 = c(1, 2),
+            check.names = FALSE
+        ),
+        path
+    )
+    rr <- pecotmr:::.readPhenotypeBed(path)$rr
+    expect_identical(
+        as.character(GenomicRanges::seqnames(rr)),
+        c("chr22", "chrM")
+    )
+    expect_identical(GenomeInfoDb::seqlevelsStyle(rr), "UCSC")
+})
+
+test_that("a manifest's BED-style ranges are read in UCSC style", {
+    df <- data.frame(
+        chrom = c("22", "chrX"),
+        start = c(0L, 10L),
+        end = c(5L, 20L)
+    )
+    gr <- pecotmr:::.manifestRanges(df, "start", "end", "QTL", "window")
+    expect_identical(
+        as.character(GenomicRanges::seqnames(gr)),
+        c("chr22", "chrX")
+    )
+    expect_identical(GenomicRanges::start(gr), c(1L, 11L))
+})
+
 test_that("loadQtlDatasetFromManifest builds a single-study dataset", {
     tmp <- withr::local_tempdir()
     bed <- .writePhenoBed(file.path(tmp, "ctxA.bed"))
@@ -799,7 +885,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
     msd <- loadMultiStudyQtlDatasetFromManifest(manifest)
     expect_s4_class(msd, "MultiStudyQtlDataset")
     expect_true(methods::validObject(msd))
-    expect_equal(sort(names(qtlDatasets(msd))), c("study1", "study2"))
+    expect_equal(sort(names(msd)), c("study1", "study2"))
 })
 
 test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {
@@ -828,7 +914,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {
     )
     expect_true(methods::validObject(msd))
     expect_s4_class(msd@sumStats, "QtlSumStats")
-    expect_equal(names(qtlDatasets(msd)), "study1")
+    expect_equal(names(msd), "study1")
 })
 
 # ===========================================================================
@@ -905,7 +991,7 @@ test_that(".readGenotypePath reads a VCF as a panel", {
 test_that(".resolveLdRef accepts a genoMeta vector or path, rejects junk", {
     sharded <- pecotmr:::.resolveLdRef(c("22" = .toyRefPrefix()))
     expect_s4_class(sharded, "RangedSummarizedExperiment")
-    expect_true("22" %in% names(pecotmr:::.ldRefChromPaths(sharded)))
+    expect_true("chr22" %in% names(pecotmr:::.ldRefChromPaths(sharded)))
     expect_s4_class(
         pecotmr:::.resolveLdRef(.toyRefPrefix()),
         "RangedSummarizedExperiment"
@@ -934,12 +1020,12 @@ test_that(".materializeLdRef and .resolveGenotypes take a panel too", {
     )
 })
 
-test_that(".entriesChroms collects canonical chromosomes across entries", {
+test_that(".entriesChroms collects the chromosomes across entries", {
     a <- pecotmr:::.dfToEntryGranges(.toyGwasDf(3)) # chr22
     b <- .toyGwasDf(2)
     b$chrom <- "1"
     b <- pecotmr:::.dfToEntryGranges(b)
-    expect_setequal(pecotmr:::.entriesChroms(list(a, b)), c("22", "1"))
+    expect_setequal(pecotmr:::.entriesChroms(list(a, b)), c("chr22", "chr1"))
     expect_equal(pecotmr:::.entriesChroms(list()), character(0))
     expect_equal(pecotmr:::.entriesChroms(list(NULL)), character(0))
 })
@@ -954,7 +1040,7 @@ test_that(".materializeLdRef passes a handle through, restricts shards", {
     spec <- c("22" = .toyRefPrefix(), "21" = "/no/such/chr21/prefix")
     restricted <- pecotmr:::.materializeLdRef(spec, "22")
     expect_s4_class(restricted, "RangedSummarizedExperiment")
-    expect_equal(names(pecotmr:::.ldRefChromPaths(restricted)), "22")
+    expect_equal(names(pecotmr:::.ldRefChromPaths(restricted)), "chr22")
     expect_error(pecotmr:::.materializeLdRef(spec, c("22", "21")))
 })
 
@@ -1036,7 +1122,7 @@ test_that(".checkLdContainment warns when the sketch has no variant metadata", {
         nSamples = 0L,
         sampleIds = character(),
         pgenPtr = NULL,
-        chromPaths = c("22" = "/p")
+        chromPaths = c(chr22 = "/p")
     )
     gr <- pecotmr:::.dfToEntryGranges(.toyGwasDf(3))
     expect_warning(
@@ -1048,21 +1134,6 @@ test_that(".checkLdContainment warns when the sketch has no variant metadata", {
 # ===========================================================================
 # Coverage: region coercion and column-mapping errors
 # ===========================================================================
-
-test_that(".asGRegion coerces strings, GRanges, and data.frames", {
-    gr <- GenomicRanges::GRanges("22", IRanges::IRanges(1, 100))
-    expect_identical(pecotmr:::.asGRegion(gr), gr)
-    fromStr <- pecotmr:::.asGRegion("22:1-100")
-    expect_equal(GenomicRanges::start(fromStr), 1L)
-    fromDf <- pecotmr:::.asGRegion(data.frame(
-        chrom = "22",
-        start = 1,
-        end = 100
-    ))
-    expect_equal(as.character(GenomicRanges::seqnames(fromDf)), "22")
-    expect_error(pecotmr:::.asGRegion("not-a-region"), "chr:start-end")
-    expect_error(pecotmr:::.asGRegion(42L), "chr:start-end")
-})
 
 test_that(".readColumnMapping errors on bad inputs", {
     tmp <- withr::local_tempdir()
@@ -1132,7 +1203,7 @@ test_that("loadQtlSumStatsFromManifest attaches varY and honours region", {
         manifest,
         genome = "hg38",
         ldReference = .toyLdRef(),
-        region = data.frame(chrom = "22", start = 1, end = 5e7)
+        which = GenomicRanges::GRanges("22:1-50000000")
     ))
     expect_equal(as.numeric(obj$varY), 1.7)
 })
@@ -1247,7 +1318,8 @@ test_that("QtlDataset builder errors on inconsistent per-context paths", {
     samples = "study1",
     n = 5,
     dropSs = FALSE,
-    dropEs = FALSE
+    dropEs = FALSE,
+    reference = NULL
 ) {
     pos <- c(14560203, 14564328, 14850625, 14870204, 14878387)[seq_len(n)]
     ids <- c(
@@ -1274,6 +1346,7 @@ test_that("QtlDataset builder errors on inconsistent per-context paths", {
     )
     meta <- c(
         "##fileformat=VCFv4.2",
+        if (!is.null(reference)) str_c("##reference=", reference),
         unname(hdrFor[tags]),
         "##contig=<ID=22>",
         paste(
@@ -1350,6 +1423,54 @@ test_that("loadGwasSumStatsFromManifest reads a GWAS-VCF (A1=ALT, Z=ES/SE)", {
     expect_equal(mc$N, rep(10000, 5))
 })
 
+test_that("a GWAS-VCF's recorded build stands in for a missing genome", {
+    skip_if_not_installed("VariantAnnotation")
+    tmp <- withr::local_tempdir()
+    vcf <- .writeGwasVcf(file.path(tmp, "study1.vcf"), reference = "hg38")
+    manifest <- data.frame(study = "study1", sumStatsPath = vcf)
+    obj <- suppressWarnings(
+        loadGwasSumStatsFromManifest(manifest, ldReference = .toyLdRef())
+    )
+    expect_equal(unique(unname(GenomeInfoDb::genome(obj))), "hg38")
+    # A build that contradicts the file's is refused, not taken.
+    expect_error(
+        suppressWarnings(loadGwasSumStatsFromManifest(
+            manifest,
+            genome = "hg19",
+            ldReference = .toyLdRef()
+        )),
+        "`genome` is 'hg19', but the GWAS-VCF files record 'hg38'"
+    )
+})
+
+test_that("the given build and the VCFs' recorded ones reconcile", {
+    f <- pecotmr:::.manifestBuild
+    expect_equal(f("hg38", character(0), "f"), "hg38")
+    expect_equal(f("hg38", "hg38", "f"), "hg38")
+    expect_error(
+        f(NULL, c("hg19", "hg38"), "f"),
+        "record different genome builds \\(hg19, hg38\\)"
+    )
+    expect_error(f(NULL, character(0), "f"), "`genome` must be provided")
+})
+
+test_that("only a manifest's VCF paths are read for a build", {
+    skip_if_not_installed("VariantAnnotation")
+    tmp <- withr::local_tempdir()
+    df <- data.frame(
+        sumStatsPath = c(
+            .writeGwasVcf(file.path(tmp, "a.vcf"), reference = "hg38"),
+            .writeGwasVcf(file.path(tmp, "b.vcf")),
+            file.path(tmp, "c.tsv")
+        )
+    )
+    expect_equal(pecotmr:::.manifestVcfBuilds(df, tmp), "hg38")
+    expect_equal(
+        pecotmr:::.manifestVcfBuilds(df[3L, , drop = FALSE], tmp),
+        character(0)
+    )
+})
+
 test_that("GWAS-VCF sample selection is enforced for multi-sample files", {
     skip_if_not_installed("VariantAnnotation")
     tmp <- withr::local_tempdir()
@@ -1388,23 +1509,65 @@ test_that("GWAS-VCF sample selection is enforced for multi-sample files", {
     )
 })
 
-test_that("GWAS-VCF without SS errors", {
+test_that("GWAS-VCF without SS, or without ES/SE, errors", {
     skip_if_not_installed("VariantAnnotation")
     tmp <- withr::local_tempdir()
-    vcf <- .writeGwasVcf(file.path(tmp, "noss.vcf"), dropSs = TRUE)
-    manifest <- data.frame(
-        study = "study1",
-        sumStatsPath = vcf,
-        stringsAsFactors = FALSE
-    )
-    expect_error(
-        suppressWarnings(loadGwasSumStatsFromManifest(
-            manifest,
-            genome = "hg38",
-            ldReference = .toyLdRef()
-        )),
-        "SS"
-    )
+    # Each case drops fields the reader needs; the error names them.
+    cases <- list(SS = list(dropSs = TRUE), `ES and SE` = list(dropEs = TRUE))
+    for (field in names(cases)) {
+        vcf <- exec(
+            .writeGwasVcf,
+            tempfile(tmpdir = tmp, fileext = ".vcf"),
+            !!!cases[[field]]
+        )
+        manifest <- data.frame(
+            study = "study1",
+            sumStatsPath = vcf,
+            stringsAsFactors = FALSE
+        )
+        expect_error(
+            suppressWarnings(loadGwasSumStatsFromManifest(
+                manifest,
+                genome = "hg38",
+                ldReference = .toyLdRef()
+            )),
+            field,
+            info = field
+        )
+    }
+})
+
+# Drop the ES and SE subfields from one record (or leave a header line as-is).
+# @noRd
+.ezDropEsSe <- function(line) {
+    if (!str_starts(line, "chr1")) {
+        return(line)
+    }
+    fields <- str_split(line, "\t")[[1L]]
+    keys <- str_split(fields[[9L]], ":")[[1L]]
+    values <- str_split(fields[[10L]], ":")[[1L]]
+    keep <- !is_in(keys, c("ES", "SE"))
+    fields[[9L]] <- str_flatten(keys[keep], ":")
+    fields[[10L]] <- str_flatten(values[keep], ":")
+    str_flatten(fields, "\t")
+}
+
+test_that("a z-only GWAS-VCF reads without ES and SE", {
+    # Reading EZ was missing altogether, so a file whose ES/SE were derived
+    # upstream from z either lost that fact or, with no ES/SE at all, was
+    # refused outright.
+    skip_if_not_installed("VariantAnnotation")
+    out <- withr::local_tempfile(fileext = ".vcf")
+    writeGwasVcf(.ezss(TRUE), out)
+    lines <- readLines(out)
+    lines <- lines[!str_detect(lines, "^##FORMAT=<ID=(ES|SE),")]
+    lines <- map_chr(lines, .ezDropEsSe)
+    stripped <- withr::local_tempfile(fileext = ".vcf")
+    writeLines(lines, stripped)
+    back <- .readSumStatsVcf(stripped, NULL, NULL, NULL, "x")
+    expect_equal(back$Z, c(2.5, -1.2))
+    expect_true(all(back$z_supplied))
+    expect_false(is_in("BETA", names(back)))
 })
 
 test_that("GWAS-VCF region read: tabixed honours it, plain warns", {
@@ -1415,41 +1578,22 @@ test_that("GWAS-VCF region read: tabixed honours it, plain warns", {
     Rsamtools::indexTabix(gz, format = "vcf")
     df <- suppressWarnings(pecotmr:::.readSumStatsVcf(
         gz,
-        "22:14560000-14565000",
+        GenomicRanges::GRanges("22:14560000-14565000"),
         NULL,
         NULL,
         "lbl"
     ))
     expect_equal(nrow(df), 2L)
-    # Plain (non-indexed) VCF ignores the region with a warning.
+    # A plain (non-indexed) VCF is read whole, with a warning.
     expect_warning(
         pecotmr:::.readSumStatsVcf(
             vcf,
-            "22:14560000-14565000",
+            GenomicRanges::GRanges("22:14560000-14565000"),
             NULL,
             NULL,
             "lbl"
         ),
-        "region ignored"
-    )
-})
-
-test_that("GWAS-VCF without ES/SE errors", {
-    skip_if_not_installed("VariantAnnotation")
-    tmp <- withr::local_tempdir()
-    vcf <- .writeGwasVcf(file.path(tmp, "noes.vcf"), dropEs = TRUE)
-    manifest <- data.frame(
-        study = "study1",
-        sumStatsPath = vcf,
-        stringsAsFactors = FALSE
-    )
-    expect_error(
-        suppressWarnings(loadGwasSumStatsFromManifest(
-            manifest,
-            genome = "hg38",
-            ldReference = .toyLdRef()
-        )),
-        "ES and SE"
+        "the whole file is read"
     )
 })
 
@@ -1460,7 +1604,13 @@ test_that("GWAS-VCF region on an absent chromosome yields no rows", {
     gz <- Rsamtools::bgzip(vcf, dest = paste0(vcf, ".gz"), overwrite = TRUE)
     Rsamtools::indexTabix(gz, format = "vcf")
     df <- suppressWarnings(
-        pecotmr:::.readSumStatsVcf(gz, "99:1-100", NULL, NULL, "lbl")
+        pecotmr:::.readSumStatsVcf(
+            gz,
+            GenomicRanges::GRanges("99:1-100"),
+            NULL,
+            NULL,
+            "lbl"
+        )
     )
     expect_equal(nrow(df), 0L)
 })
@@ -1502,19 +1652,61 @@ test_that(".resolveLdRef passes through NULL and a handle", {
     expect_identical(pecotmr:::.resolveLdRef(h), h)
 })
 
-test_that("non-constant ldReferencePath column errors", {
+# The toy panel's 200-variant copy keyed by canonical ids: the same samples
+# and the toy GWAS variants, read from different files.
+.toyCanonicalPrefix <- function() {
+    sub(
+        "\\.bed$",
+        "",
+        system.file("extdata", "toy_canonical.bed", package = "pecotmr")
+    )
+}
+
+test_that("each study's ldReferencePath gives it its own LD reference", {
+    skip_if_not_installed("PlinkMatrix")
+    tmp <- withr::local_tempdir()
+    ss1 <- .writeSumstatsTsv(.toyGwasDf(3), file.path(tmp, "a.tsv"))
+    ss2 <- .writeSumstatsTsv(.toyGwasDf(3), file.path(tmp, "b.tsv"))
+    ss3 <- .writeSumstatsTsv(.toyGwasDf(3), file.path(tmp, "c.tsv"))
+    manifest <- data.frame(
+        study = c("a", "b", "c"),
+        sumStatsPath = c(ss1, ss2, ss3),
+        ldReferencePath = c(
+            .toyRefPrefix(),
+            .toyCanonicalPrefix(),
+            .toyRefPrefix()
+        ),
+        stringsAsFactors = FALSE
+    )
+    obj <- suppressWarnings(
+        loadGwasSumStatsFromManifest(manifest, genome = "hg38")
+    )
+    # Two distinct panels, each read once and stored once; studies a and c
+    # share the first.
+    refs <- ldReference(obj)
+    expect_length(refs, 2L)
+    keys <- obj$ldReference[match(c("a", "b", "c"), obj$study)]
+    expect_identical(keys[[1L]], keys[[3L]])
+    expect_false(identical(keys[[1L]], keys[[2L]]))
+    expect_match(
+        pecotmr:::.ldRefSource(refs[[keys[[2L]]]])$path,
+        "toy_canonical"
+    )
+})
+
+test_that("a manifest row with no LD reference errors", {
     tmp <- withr::local_tempdir()
     ss1 <- .writeSumstatsTsv(.toyGwasDf(3), file.path(tmp, "a.tsv"))
     ss2 <- .writeSumstatsTsv(.toyGwasDf(3), file.path(tmp, "b.tsv"))
     manifest <- data.frame(
         study = c("a", "b"),
         sumStatsPath = c(ss1, ss2),
-        ldReferencePath = c(.toyRefPrefix(), "other"),
+        ldReferencePath = c(.toyRefPrefix(), ""),
         stringsAsFactors = FALSE
     )
     expect_error(
         loadGwasSumStatsFromManifest(manifest, genome = "hg38"),
-        "must be constant"
+        "row\\(s\\) 2 have no `ldReferencePath`"
     )
 })
 
@@ -1524,10 +1716,23 @@ test_that("tabix region with absent chrom or empty range returns no rows", {
     gz <- Rsamtools::bgzip(tsv, dest = paste0(tsv, ".gz"), overwrite = TRUE)
     Rsamtools::indexTabix(gz, seq = 1L, start = 2L, end = 2L, comment = "#")
     expect_equal(
-        nrow(pecotmr:::.readSumStatsText(gz, "99:1-100", NULL, "l")),
+        nrow(pecotmr:::.readSumStatsText(
+            gz,
+            GenomicRanges::GRanges("99:1-100"),
+            NULL,
+            "l"
+        )),
         0L
     )
-    expect_equal(nrow(pecotmr:::.readSumStatsText(gz, "22:1-2", NULL, "l")), 0L)
+    expect_equal(
+        nrow(pecotmr:::.readSumStatsText(
+            gz,
+            GenomicRanges::GRanges("22:1-2"),
+            NULL,
+            "l"
+        )),
+        0L
+    )
 })
 
 test_that("phenotype BED missing required columns errors", {
@@ -1686,16 +1891,18 @@ test_that("loadGwasSumStatsFromManifest splits by LD block when asked", {
         "protocol_example.LD.chr22"
     )
     mf <- data.frame(study = "g1", sumStatsPath = gwasTsv)
-    region <- "chr22:10000000-19000000"
+    region <- GenomicRanges::GRanges("chr22:10000000-19000000")
 
     plain <- suppressWarnings(loadGwasSumStatsFromManifest(
         manifest = mf,
         genome = "hg38",
         ldReference = ldStem,
-        region = region
+        which = region
     ))
     expect_equal(length(plain), 1L)
-    expect_equal(plain$blockId, "chr22")
+    # The window names the row it gives, as a window of a split would.
+    expect_equal(plain$blockId, "chr22_10000000_19000000")
+    expect_true(plain$regionGiven)
 
     blocks <- GenomicRanges::GRanges(
         "chr22",
@@ -1706,14 +1913,40 @@ test_that("loadGwasSumStatsFromManifest splits by LD block when asked", {
         manifest = mf,
         genome = "hg38",
         ldReference = ldStem,
-        region = region,
-        ldBlocks = blocks
+        which = blocks
     ))
     expect_equal(length(split), 2L)
     expect_equal(split$blockId, c("blk1", "blk2"))
     expect_equal(split$study, c("g1", "g1"))
     # Same variants either way, just distributed across the blocks.
     expect_equal(sum(lengths(split)), sum(lengths(plain)))
+    # The same blocks read from a BED file, whose start is 0-based.
+    bedPath <- withr::local_tempfile(fileext = ".bed")
+    writeLines(
+        c("chr22\t9999999\t14999999\tblk1", "chr22\t14999999\t19000000\tblk2"),
+        bedPath
+    )
+    fromBed <- suppressWarnings(loadGwasSumStatsFromManifest(
+        manifest = mf,
+        genome = "hg38",
+        ldReference = ldStem,
+        which = bedPath
+    ))
+    expect_equal(fromBed$blockId, c("blk1", "blk2"))
+    expect_identical(
+        as.character(fromBed$region),
+        as.character(split$region)
+    )
+    # Given in R, a window is a GRanges; a string is taken for a path.
+    expect_error(
+        loadGwasSumStatsFromManifest(
+            manifest = mf,
+            genome = "hg38",
+            ldReference = ldStem,
+            which = "chr22:10000000-19000000"
+        ),
+        "no file exists at 'chr22:10000000-19000000'"
+    )
 })
 
 
@@ -1791,43 +2024,37 @@ test_that(".readTabixRegion returns a bare tibble for a headerless file", {
     # With no "#" header line there are no column names to build an empty
     # frame from, so the miss returns a column-less tibble.
     expect_length(Rsamtools::headerTabix(Rsamtools::TabixFile(bgz))$header, 0L)
-    out <- pecotmr:::.readTabixRegion(bgz, "chr9:1-100")
+    out <- pecotmr:::.readTabixRegion(bgz, GenomicRanges::GRanges("chr9:1-100"))
     expect_s3_class(out, "tbl_df")
     expect_equal(nrow(out), 0L)
     expect_equal(ncol(out), 0L)
 })
 
-test_that("manifest loaders guard the QtlDataset pass-through arguments", {
+test_that("manifest loaders guard their arguments; QC is not one of them", {
     mf <- system.file("extdata", "manifests", package = "pecotmr")
     skip_if(mf == "", "manifest fixtures unavailable")
+    # Loading applies no QC: the filter is a pipeline setting, and checks its
+    # own values when it is built.
     expect_error(
         loadQtlDatasetFromManifest(
             data.frame(),
-            genotypeFilterParam = GenotypeFilterParam(mafCutoff = -1)
+            genotypeFilterParam = GenotypeFilterParam()
         ),
-        "mafCutoff.*is not >= 0"
+        "unused argument"
     )
+    expect_error(GenotypeFilterParam(mafCutoff = -1), "mafCutoff.*is not >= 0")
     expect_error(
-        loadQtlDatasetFromManifest(
-            data.frame(),
-            genotypeFilterParam = GenotypeFilterParam(keepIndel = NA)
-        ),
+        GenotypeFilterParam(keepIndel = NA),
         "keepIndel.*May not be NA"
     )
-    # A bare list cannot be checked, so it is refused outright.
     expect_error(
-        loadQtlDatasetFromManifest(
-            data.frame(),
-            genotypeFilterParam = list(mafCutoff = 0.01)
-        ),
-        "must be built with GenotypeFilterParam"
+        GenotypeFilterParam(xvarCutoff = -1),
+        "xvarCutoff.*is not >= 0"
     )
+    # A bare list cannot be checked, so a run refuses it outright.
     expect_error(
-        loadQtlDatasetFromManifest(
-            data.frame(),
-            scaleResiduals = c(TRUE, TRUE)
-        ),
-        "scaleResiduals.*Must have length 1"
+        pecotmr:::.qtlResolveFilter(list(mafCutoff = 0.01)),
+        "must be built with GenotypeFilterParam"
     )
     expect_error(
         loadQtlDatasetFromManifest(data.frame(), studyName = 1L),
@@ -1839,13 +2066,6 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
             minLdOverlapWarn = 2
         ),
         "minLdOverlapWarn.*is not <= 1"
-    )
-    expect_error(
-        loadMultiStudyQtlDatasetFromManifest(
-            data.frame(),
-            genotypeFilterParam = GenotypeFilterParam(xvarCutoff = -1)
-        ),
-        "xvarCutoff.*is not >= 0"
     )
 })
 
@@ -1889,7 +2109,7 @@ test_that("manifest loaders guard the QtlDataset pass-through arguments", {
 test_that("a directional AF survives the GWAS-VCF round trip", {
     skip_if_not_installed("VariantAnnotation")
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(.afvcf_sumstats(), out)
+    writeGwasVcf(.afvcf_sumstats(), out)
     back <- .readSumStatsVcf(out, NULL, NULL, NULL, "x")
     # Unfolded, and under its own name -- 0.8 is an ALT frequency above 0.5,
     # which is exactly the case folding destroys.
@@ -1902,7 +2122,7 @@ test_that("a directional AF survives the GWAS-VCF round trip", {
 test_that("a GWAS-VCF with no AF has neither AF nor a folded one", {
     skip_if_not_installed("VariantAnnotation")
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(.afvcf_sumstats(af = NULL), out)
+    writeGwasVcf(.afvcf_sumstats(af = NULL), out)
     back <- .readSumStatsVcf(out, NULL, NULL, NULL, "x")
     expect_false(is_in("AF", names(back)))
     expect_false(is_in("MAF", names(back)))
@@ -1911,7 +2131,7 @@ test_that("a GWAS-VCF with no AF has neither AF nor a folded one", {
 test_that("an explicit formatMapping still redirects the AF slot", {
     skip_if_not_installed("VariantAnnotation")
     out <- withr::local_tempfile(fileext = ".vcf")
-    exportToVcf(.afvcf_sumstats(), out)
+    writeGwasVcf(.afvcf_sumstats(), out)
     # Reading the spec's AF field into the MAF slot on purpose: the caller
     # says this file's AF is not to be trusted as directional.
     back <- .readSumStatsVcf(
@@ -1923,4 +2143,109 @@ test_that("an explicit formatMapping still redirects the AF slot", {
     )
     expect_false(is_in("AF", names(back)))
     expect_equal(as.numeric(back$MAF), c(0.2, 0.3))
+})
+
+test_that("a manifest's BED-style columns give each row its window", {
+    gwasTsv <- system.file(
+        "extdata",
+        "manifests",
+        "protocol_example.twas.gwas_sumstats.chr22.tsv.gz",
+        package = "pecotmr"
+    )
+    ldStem <- file.path(
+        system.file("extdata", "ld_reference", "chr22", package = "pecotmr"),
+        "protocol_example.LD.chr22"
+    )
+    mf <- data.frame(
+        study = "g1",
+        sumStatsPath = gwasTsv,
+        chrom = "chr22",
+        start = 9999999L,
+        end = 19000000L
+    )
+    g <- suppressWarnings(loadGwasSumStatsFromManifest(
+        manifest = mf,
+        genome = "hg38",
+        ldReference = ldStem
+    ))
+    # The start is 0-based, as in BED.
+    expect_identical(as.character(g$region), "chr22:10000000-19000000")
+    expect_true(g$regionGiven)
+    expect_error(
+        loadGwasSumStatsFromManifest(
+            manifest = mf,
+            genome = "hg38",
+            ldReference = ldStem,
+            which = GenomicRanges::GRanges("chr22:1-2")
+        ),
+        "cannot give them too"
+    )
+    # A QTL row may also give its trait's position, on its `chrom`.
+    qmf <- data.frame(
+        study = "s1",
+        context = "c",
+        trait = "t",
+        sumStatsPath = gwasTsv,
+        chrom = "chr22",
+        start = 9999999L,
+        end = 19000000L,
+        traitStart = 15527999L,
+        traitEnd = 15528000L
+    )
+    q <- suppressWarnings(loadQtlSumStatsFromManifest(
+        manifest = qmf,
+        genome = "hg38",
+        ldReference = ldStem
+    ))
+    expect_identical(as.character(q$region), "chr22:10000000-19000000")
+    expect_true(q$regionGiven)
+    expect_identical(as.character(q$traitPos), "chr22:15528000")
+    # A QTL tuple has one window.
+    expect_error(
+        loadQtlSumStatsFromManifest(
+            manifest = qmf[, 1:4],
+            genome = "hg38",
+            ldReference = ldStem,
+            which = GenomicRanges::GRanges(c("chr22:1-10", "chr22:20-30"))
+        ),
+        "must be one window"
+    )
+    # A window needs all three columns, on every row.
+    expect_error(
+        loadGwasSumStatsFromManifest(
+            manifest = mf[, c("study", "sumStatsPath", "start", "end")],
+            genome = "hg38",
+            ldReference = ldStem
+        ),
+        "missing chrom"
+    )
+    holes <- rbind(
+        mf,
+        data.frame(
+            study = "g2",
+            sumStatsPath = gwasTsv,
+            chrom = "chr22",
+            start = NA,
+            end = 19000000L
+        )
+    )
+    expect_error(
+        loadGwasSumStatsFromManifest(
+            manifest = holes,
+            genome = "hg38",
+            ldReference = ldStem
+        ),
+        "row(s) 2 leave their window empty",
+        fixed = TRUE
+    )
+})
+
+test_that(".matchRegionSeqnames reads the windows a file holds, once", {
+    gr <- GenomicRanges::GRanges(
+        c("chr22", "chr22", "chr3"),
+        IRanges::IRanges(c(1L, 50L, 1L), c(100L, 200L, 10L))
+    )
+    m <- pecotmr:::.matchRegionSeqnames(gr, c("22", "21"))
+    expect_identical(as.character(m), "22:1-200")
+    expect_null(pecotmr:::.matchRegionSeqnames(gr[3L], "22"))
 })

@@ -4,7 +4,7 @@
 \alias{ColocResult}
 \title{Build a ColocResult}
 \usage{
-ColocResult(pairs, variants, ldReference = NULL)
+ColocResult(pairs, variants, ldReference = NULL, metadata = list())
 }
 \arguments{
 \item{pairs}{A data frame with one row per tested pair, carrying at least
@@ -18,9 +18,15 @@ columns are \code{NA} for it.}
 \item{variants}{A list, parallel to \code{pairs}' rows, of per-pair data
 frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.}
 
-\item{ldReference}{Optional genotype panel (see \code{\link{readGenotypes}})
-for the LD reference, used by \code{\link{colocCredibleSets}} to
-compute purity.}
+\item{ldReference}{Optional LD reference -- a genotype panel (see
+\code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
+\code{LdMatrix} -- for every pair, or a list with one per pair; used by
+\code{\link{colocCredibleSets}} to compute purity. Each distinct
+reference is stored once.}
+
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
 A \code{ColocResult}.

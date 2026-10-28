@@ -33,7 +33,9 @@ standardized genotypes, never formed as a matrix.}
 
 \item{gamma}{MCP concavity parameter. Default 3.}
 
-\item{alpha}{Elastic-net mixing (1 = pure L1). Default 1.}
+\item{alpha}{Elastic-net mixing in \code{(0, 1]}: the MCP share of
+the penalty, the rest a ridge term, as \code{\link{penalizedRss}}
+mixes them. Default 1, no ridge term.}
 
 \item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
 \code{"minFbeta"}.}

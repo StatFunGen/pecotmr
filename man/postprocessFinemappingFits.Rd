@@ -56,8 +56,8 @@ are governed by \code{credibleSetParam}'s \code{perCsColumns} instead.}
 carry on the result untouched (returned as the \code{otherQuantities}
 element). Default \code{NULL}.}
 
-\item{region}{Optional \code{"chr:start-end"} string naming the region the
-fits cover; recorded on the result. Default \code{NULL}.}
+\item{region}{Optional \code{GRanges}: the window the fits cover, recorded
+on the result. Default \code{NULL}.}
 
 \item{priorEffTol}{Numeric (length 1). Effects whose prior variance
 \code{V} is at or below this tolerance are dropped as unconverged before

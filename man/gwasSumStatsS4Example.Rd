@@ -13,8 +13,7 @@ A pre-QC'd \code{\link{GwasSumStats}} collection for one
 synthetic trait (\code{"trait1"}, N = 50,000). The signal pattern shares
 one causal variant with \code{\link{qtlSumStatsExample}} (for
 colocalization demos) and adds a second GWAS-only causal variant.
-The \code{ldReference} slot references the same toy PLINK1 panel used
-for the QTL example.
+Its LD reference is the same toy PLINK1 panel the QTL example uses.
 }
 \examples{
 data(gwasSumStatsS4Example)

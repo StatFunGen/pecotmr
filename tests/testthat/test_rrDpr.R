@@ -1,19 +1,6 @@
 context("regularized_regression - dpr")
 
 # ---- dprWeights ----
-test_that("dprWeights computes weights with VB fitting method", {
-    skip_if_not_installed("RcppDPR")
-    set.seed(42)
-    n <- 50
-    p <- 10
-    X <- matrix(rnorm(n * p), nrow = n)
-    y <- X[, 1] * 0.5 + rnorm(n)
-    result <- dprWeights(X, y, fittingMethod = "VB")
-    expect_equal(length(result), p)
-    expect_true(is.numeric(result))
-    expect_true(all(is.finite(result)))
-})
-
 test_that("dprWeights computes weights with Gibbs fitting method", {
     skip_if_not_installed("RcppDPR")
     set.seed(42)

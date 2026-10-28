@@ -14,8 +14,7 @@ sumStats(x, ...)
   studyName = NULL,
   context = NULL,
   trait = NULL,
-  annotateSignificance = NULL,
-  ranges = NULL
+  annotateSignificance = NULL
 )
 
 \S4method{sumStats}{MultiStudyQtlDataset}(x)
@@ -40,16 +39,8 @@ this trait; \code{NULL} matches all traits.}
 \code{"bonferroni_filtered"} / \code{"qvalue"}). When set on a QtlSumStats
 enriched by \code{\link{qtlAssociationPostprocess}}, a logical
 \code{significant} mcol for that method is added to the returned entry (the
-significance is derived on the fly, not stored). Flat export flattens this
-full entry GRanges (all mcols) directly; note
-\code{\link{as.data.frame}} is a fixed GWAS-schema view and does not
-carry the association columns.}
-
-\item{ranges}{A \code{GRanges} or \code{NULL} (default). A selected tuple can
-own several elements -- one per chromosome, since a multi-seqname entry is
-split at construction -- and they are stitched back into a single
-\code{GRanges}. Pass \code{ranges} to pull only the variants overlapping a
-region instead of the whole span; \code{NULL} returns everything.}
+significance is derived on the fly, not stored). Take a table of the
+whole entry, every mcol included, with \code{as.data.frame()}.}
 }
 \value{
 A \code{GRanges}, a \code{QtlSumStats}, or \code{NULL}.

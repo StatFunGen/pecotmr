@@ -7,7 +7,7 @@
 finemapCtwasRegions(
   screenResult,
   maxNumSingleEffects = 5L,
-  numThreads = 1L,
+  BPPARAM = SerialParam(),
   methodArgs = CtwasOptions()
 )
 }
@@ -16,7 +16,10 @@ finemapCtwasRegions(
 
 \item{maxNumSingleEffects}{Pass-through.}
 
-\item{numThreads}{Number of cores.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the cores
+ctwas's own \code{ncore} parallelism uses when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+core. Default \code{SerialParam()}.}
 
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
 with \code{\link{CtwasOptions}}. Names are checked against what
@@ -47,12 +50,11 @@ blocks <- GenomicRanges::GRanges("chr22",
   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
   blockId = c("chr22_1", "chr22_2"))
 gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-  ldReference = ldStem, region = "chr22:10000000-19000000",
-  ldBlocks = blocks)
+  ldReference = ldStem, which = blocks)
 gwasByRegion <- summaryStatsQc(gss,
   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
-  twasWeights = list(ctwasWeightsExample))
+  twasWeights = list(ctwasWeightsExample), method = "susie")
 est <- estCtwasGroupPriors(inp,
   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),

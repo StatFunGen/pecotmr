@@ -11,9 +11,18 @@ A collection of colocalization results, one element per tested
   \code{\link{colocCredibleSets}} and \code{\link{colocGenes}}.
 }
 \details{
-The inherited \code{ldReference} is what
-  \code{colocCredibleSets()} uses to compute credible-set purity.
+The \code{ldReference} is what \code{colocCredibleSets()} uses to
+  compute credible-set purity, each pair's from its own reference.
 }
+\section{Slots}{
+
+\describe{
+\item{\code{ldReference}}{A named list of the LD references the pairs were computed
+against, each a genotype panel, a \code{GenotypeMixture} or an
+\code{LdMatrix}, stored once apiece; the \code{ldReference} column of
+\code{mcols} names the entry each pair used (\code{NA} for none).}
+}}
+
 \seealso{
 \code{\link{colocPipeline}}
 }

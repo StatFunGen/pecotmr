@@ -9,13 +9,13 @@
 \arguments{
 \item{snpInfo}{data.frame with CHR and BP columns.}
 
-\item{region}{Character region string "chr:start-end".}
+\item{region}{A \code{GRanges} window, of one range or several.}
 }
 \value{
 Integer vector of matching SNP indices.
 }
 \description{
 Return 1-based indices into snpInfo for SNPs within a genomic
-  region string.
+  window.
 }
 \keyword{internal}

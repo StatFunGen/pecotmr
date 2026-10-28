@@ -11,7 +11,7 @@ ColocBoostResult(
   outcomeInfo = NULL,
   ldReference = NULL,
   computingTime = list(),
-  includeUncolocalized = TRUE
+  metadata = list()
 )
 }
 \arguments{
@@ -27,20 +27,27 @@ analysis each element came from.}
 naming the GWAS study for the per-study \code{separate_gwas} runs.}
 
 \item{outcomeInfo}{Data frame mapping outcome \code{name} to \code{study},
-\code{context}, \code{trait} and \code{dataForm}.}
+\code{context}, \code{trait} and \code{dataForm}, and optionally to
+\code{ldReference}, the name of the \code{ldReference} entry the
+outcome's summary statistics were matched against. Without that column
+every outcome gets \code{NA}.}
 
-\item{ldReference}{Optional genotype panel (see
-\code{\link{readGenotypes}}).}
+\item{ldReference}{Optional named list of the LD references the summary
+statistics were matched against: genotype panels (see
+\code{\link{readGenotypes}}), \code{GenotypeMixture} or \code{LdMatrix}
+objects.}
 
 \item{computingTime}{Optional list of per-analysis timings.}
 
-\item{includeUncolocalized}{Keep the outcome-specific (uncolocalized) sets
-as elements flagged \code{isColocalized = FALSE}. Default \code{TRUE}:
-dropping them at write time would make "no colocalization here" and "no
-signal here" indistinguishable downstream.}
+\item{metadata}{A list of free-form metadata about the collection,
+as \code{metadata()} holds on any Bioconductor vector. Default
+\code{list()}.}
 }
 \value{
-A \code{ColocBoostResult}.
+A \code{ColocBoostResult}. The outcome-specific (uncolocalized)
+  sets are kept as elements flagged \code{isColocalized = FALSE}, so "no
+  colocalization here" stays distinct from "no signal here";
+  \code{x[x$isColocalized]} keeps the colocalized ones.
 }
 \description{
 Assemble a \code{\linkS4class{ColocBoostResult}} from the raw

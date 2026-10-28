@@ -19,19 +19,19 @@ NULL
 #' @export
 setMethod(
     "readAnnotations",
-    signature(paths = "character"),
-    function(paths, snpRanges, annotationMeta = NULL, genome = "hg19") {
-        if (is.null(names(paths))) {
+    signature(path = "character"),
+    function(path, snpRanges, annotationMeta = NULL, genome = "hg19") {
+        if (is.null(names(path))) {
             msg <- glue(
-                "'paths' must be a named character vector (names = ",
+                "'path' must be a named character vector (names = ",
                 "annotation names)"
             )
             abort(msg)
         }
-        annotNames <- names(paths)
-        nAnnots <- length(paths)
+        annotNames <- names(path)
+        nAnnots <- length(path)
         annotMat <- .readAnnotMatrix(
-            paths,
+            path,
             snpRanges,
             annotNames,
             length(snpRanges),
@@ -41,7 +41,7 @@ setMethod(
             annotationMeta <- tibble(
                 name = annotNames,
                 tier = rep("candidate", nAnnots),
-                type = .readAnnotTypes(paths)
+                type = .readAnnotTypes(path)
             )
         }
         AnnotationMatrix(annotMat, snpRanges, annotationMeta, genome)

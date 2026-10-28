@@ -83,10 +83,11 @@
     glue("{side} ({str_flatten(shown, ', ')})")
 }
 
-# One collection ELEMENT, whichever shape `x` has. On a RangedTupleList the
-# elements are the container itself; the DFrame-backed collections still keep
-# them in an `entry` column. Both shapes coexist until every collection has
-# migrated, so polymorphic call sites go through here.
+# One row's payload, whichever collection `x` is -- what its constructor
+# takes as `entry`: for TWAS weights and fine-mapping results, the row parts
+# rebuilt from its element and the collection's mcols, where the fits sit;
+# for the summary-statistics collections, the element itself. A caller
+# taking either weight source reads its rows through here.
 # @noRd
 .collectionEntry <- function(x, i) {
     if (methods::is(x, "TwasWeights")) {
@@ -98,11 +99,11 @@
     x[[i]]
 }
 
-# ALL elements as a plain list, whichever shape `x` has.
+# Every row's payload (.collectionEntry()) as a plain list.
 # @noRd
 .collectionEntries <- function(x) {
-    # TwasWeights entries are derived views, so they have to be rebuilt one by
-    # one rather than read off as elements (which are bare GRanges).
+    # Weight and fine-mapping rows are rebuilt one by one: their elements
+    # alone are bare GRanges, without the fits.
     if (
         methods::is(x, "TwasWeights") ||
             methods::is(x, "FineMappingResultBase")
@@ -150,7 +151,7 @@
             return(1L)
         }
         msg <- glue(
-            "{cls} has {nrow(x)} entries. Pass `study`, `context`, ",
+            "{cls} has {nrow(x)} entries. Pass `studyName`, `context`, ",
             "`trait`, and `method` to select one."
         )
         abort(msg)
@@ -185,50 +186,102 @@
 }
 
 # Internal: resolve a (study, method, blockId) tuple to a single row
-# index of a GwasFineMappingResult collection. `region` may be NULL when
-# the (study, method) pair maps to a single row; otherwise it disambiguates
-# among per-block rows of a genome-wide collection.
+# index of a GwasFineMappingResult collection. `blockId` may be NULL when the
+# (study, method) pair maps to a single row; otherwise it names one of a
+# genome-wide collection's per-block rows.
+# @noRd
 #' @importFrom checkmate assertVector
-.tupleSelectRowGwasFmr <- function(x, studyName, method, region = NULL) {
+.tupleSelectRowGwasFmr <- function(
+    x,
+    studyName = NULL,
+    method = NULL,
+    blockId = NULL
+) {
     if (nrow(x) == 0L) {
         abort("GwasFineMappingResult has no rows.")
     }
-    anyUnset <- missing(studyName) ||
-        is.null(studyName) ||
-        missing(method) ||
-        is.null(method)
-    if (anyUnset) {
+    if (is.null(studyName) || is.null(method)) {
         if (nrow(x) == 1L) {
             return(1L)
         }
         msg <- glue(
-            "GwasFineMappingResult has {nrow(x)} entries. Pass `study` ",
+            "GwasFineMappingResult has {nrow(x)} entries. Pass `studyName` ",
             "and `method` to select one."
         )
         abort(msg)
     }
     assertVector(studyName, len = 1L)
     assertVector(method, len = 1L)
-    assertVector(region, len = 1L, null.ok = TRUE)
-    .tupleMatchGwas(x, studyName, method, region)
+    assertVector(blockId, len = 1L, null.ok = TRUE)
+    .tupleMatchGwas(x, studyName, method, blockId)
+}
+
+# Internal: every row of one (study, method) fit of a GwasFineMappingResult
+# -- one per LD block -- or the block `blockId` names. `study` and `method`
+# may be left NULL only while they still match a single (study, method)
+# pair; a selection spanning several fits is refused rather than returned as
+# if it were one.
+# @noRd
+.tupleSelectRowsGwasFmr <- function(x, studyName, method, blockId = NULL) {
+    if (nrow(x) == 0L) {
+        abort("GwasFineMappingResult has no rows.")
+    }
+    assertString(studyName, null.ok = TRUE)
+    assertString(method, null.ok = TRUE)
+    assertString(blockId, null.ok = TRUE)
+    idx <- .matchTupleRows(
+        x,
+        compact(list(study = studyName, method = method, blockId = blockId))
+    )
+    if (length(idx) == 0L) {
+        abort(glue(
+            "No entry for ",
+            "({.tupleGwasSelectionLabel(studyName, method, blockId)})."
+        ))
+    }
+    fits <- unique(str_c(
+        .fmrIdentityColumn(x, "study")[idx],
+        .fmrIdentityColumn(x, "method")[idx],
+        sep = "/"
+    ))
+    if (length(fits) > 1L) {
+        abort(glue(
+            "GwasFineMappingResult holds {length(fits)} (study, method) fits ",
+            "matching the selection ({str_flatten(fits, ', ')}); pass ",
+            "`studyName` and `method` to select one."
+        ))
+    }
+    idx
+}
+
+# The selectors as they appear in a no-match message; an unset study or
+# method matched anything.
+# @noRd
+.tupleGwasSelectionLabel <- function(studyName, method, blockId) {
+    parts <- c(
+        study = studyName %||% "<any>",
+        method = method %||% "<any>",
+        blockId = blockId
+    )
+    str_flatten(str_c(names(parts), "='", parts, "'"), ", ")
 }
 
 # Resolve a (study, method[, blockId]) tuple to a single row index.
 # @noRd
-.tupleMatchGwas <- function(x, studyName, method, region) {
+.tupleMatchGwas <- function(x, studyName, method, blockId) {
     keys <- c(
         list(study = studyName, method = method),
-        compact(list(blockId = region))
+        compact(list(blockId = blockId))
     )
     idx <- .matchTupleRows(x, keys)
     if (length(idx) == 0L) {
-        regionPart <- if (is.null(region)) {
+        blockPart <- if (is.null(blockId)) {
             ""
         } else {
-            glue(", region='{region}'")
+            glue(", blockId='{blockId}'")
         }
         msg <- glue(
-            "No entry for (study='{studyName}', method='{method}'{regionPart})."
+            "No entry for (study='{studyName}', method='{method}'{blockPart})."
         )
         abort(msg)
     }
@@ -238,17 +291,17 @@
     idx[[1L]]
 }
 
-# Multiple (study, method) rows matched: report the disambiguating regions.
+# Multiple (study, method) rows matched: report the blocks to choose from.
 # @noRd
 .tupleGwasAmbiguous <- function(x, studyName, method, idx) {
-    regions <- str_flatten(
+    blocks <- str_flatten(
         shQuote(as.character(x$blockId[idx])),
         ", "
     )
     msg <- glue(
         "GwasFineMappingResult has {length(idx)} rows matching ",
-        "(study='{studyName}', method='{method}'); pass `region` to ",
-        "disambiguate (available: {regions})."
+        "(study='{studyName}', method='{method}'); pass `blockId` to ",
+        "disambiguate (available: {blocks})."
     )
     abort(msg)
 }
@@ -257,23 +310,23 @@
 # given selectors. NULL selectors, and selectors naming a column the
 # collection lacks, are ignored -- QTL rows carry study/context/trait/method,
 # GWAS rows carry study/method/blockId -- so the same call works on either.
-# `region` matches the `blockId` column. Returns all rows when nothing
-# constrains. Unlike the single-row selectors above this never errors on
-# ambiguity; it is the aggregate counterpart used by topLoci().
+# Returns all rows when nothing constrains. Unlike the single-row selectors
+# above this never errors on ambiguity; it is the aggregate counterpart used
+# by topLoci().
 .fmrRowsMatching <- function(
     x,
     studyName = NULL,
     context = NULL,
     trait = NULL,
     method = NULL,
-    region = NULL
+    blockId = NULL
 ) {
     supplied <- compact(list(
         study = studyName,
         context = context,
         trait = trait,
         method = method,
-        blockId = region
+        blockId = blockId
     ))
     keys <- supplied[is_in(names(supplied), .tupleColumnNames(x))]
     if (length(keys) == 0L) {
@@ -332,23 +385,29 @@
 # it on demand, and that is what callers wanting current content should use.
 #
 # Spec 4.4 removed a stored column on the grounds that it "would quietly go
-# stale" under subsetRegion(). That argument holds for a SPAN, which is
+# stale" under subsetting. That argument holds for a SPAN, which is
 # current state and must track subsetting; it does not hold for a WINDOW,
 # which is provenance -- subsetting a fit's variants does not retroactively
 # change which interval was analysed.
 #
 # Falls back to the derived span for collections built before the column
 # existed (older saved objects, hand-built collections), so the accessor never
-# returns nothing where it used to return a range.
+# returns nothing where it used to return a range. So does a row a combine
+# padded with a placeholder (.naLikeColumn()), having no window of its own.
 # @noRd
 .getRegionColumn <- function(x) {
     if (nrow(x) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    if (is_in("region", .tupleColumnNames(x))) {
-        return(.tupleColumn(x, "region"))
+    if (!is_in("region", .tupleColumnNames(x))) {
+        return(unlist(range(x), use.names = FALSE))
     }
-    unlist(range(x), use.names = FALSE)
+    stored <- .tupleColumn(x, "region")
+    padded <- width(stored) == 0L
+    if (!any(padded)) {
+        return(stored)
+    }
+    .pickRegions(!padded, stored, .rowSpanRanges(x))
 }
 
 # Internal: append the optional `blockId` provenance column (no-op when NULL).
@@ -363,7 +422,7 @@
     }
     if (length(blockId) != n) {
         msg <- glue(
-            "`blockId` must have the same length as `study` ",
+            "`blockId` must have the same length as `studyName` ",
             "(got {length(blockId)} vs {n})."
         )
         abort(msg)
@@ -371,19 +430,15 @@
     c(cols, list(blockId = as.character(blockId)))
 }
 
-# Internal: normalize a caller-supplied window into the single GRanges the
-# `region` column stores, or NULL when there is none. Accepts whatever the
-# pipeline's `region` argument accepts (a "chr:start-end" string or a
-# GRanges); a multi-range window (jointRegions) is recorded as its overall
-# span, which is the interval the fit covered.
+# Internal: normalize a caller-supplied window -- a GRanges, as the
+# pipeline's `region` is -- into the single range the `region` column
+# stores, or NULL when there is none. A multi-range window (jointRegions) is
+# recorded as its overall span, which is the interval the fit covered.
 .asAnalysisWindow <- function(region) {
     if (is.null(region) || length(region) == 0L) {
         return(NULL)
     }
-    gr <- try_fetch(.asGRegion(region), error = function(cnd) NULL)
-    if (is.null(gr) || length(gr) == 0L) {
-        return(NULL)
-    }
+    gr <- .assertRegionGRanges(region)
     if (length(gr) == 1L) gr else range(gr)[1L]
 }
 
@@ -397,9 +452,6 @@
     rep(gr, n)
 }
 
-# Internal: append a validated `region` GRanges to a constructor's column list
-# (no-op when NULL). Shared by the TwasWeights / FineMappingResultBase
-# constructors so the provenance column is added identically everywhere.
 # Internal: an optional per-row provenance column. One helper for all three
 # (`dataType`, `dataSource`, `standardized`) since they differ only in name and
 # coercion.
@@ -439,6 +491,10 @@
     .appendProvenanceCol(cols, standardized, "standardized", n, as.logical)
 }
 
+# Internal: append a validated `region` GRanges to a constructor's column list
+# (no-op when NULL). Shared by the TwasWeights / FineMappingResultBase
+# constructors so the provenance column is added identically everywhere.
+# @noRd
 .appendRegionCol <- function(cols, region, n) {
     if (is.null(region)) {
         return(cols)
@@ -449,7 +505,7 @@
     if (length(region) != n) {
         abort("`region` must have the same length as `study`.")
     }
-    c(cols, list(region = region))
+    c(cols, list(region = .ucscRanges(region)))
 }
 
 # Internal: validate the optional `region` GRanges column (one range per row),
@@ -470,6 +526,382 @@
     character(0)
 }
 
+# Internal: `n` placeholder ranges, zero-width on "chrUn", for the rows of a
+# range column that have no range of their own: an empty element, or the rows
+# of a combined part that lacked the column. No real range is zero-width, so
+# that is what marks one.
+# @noRd
+.placeholderRanges <- function(n) {
+    GenomicRanges::GRanges(
+        rep("chrUn", n),
+        IRanges::IRanges(start = rep(1L, n), width = rep(0L, n))
+    )
+}
+
+# Internal: each element's span as one bare range (no seqinfo, strand or
+# metadata), or a placeholder for an empty element. An element sits on one
+# seqname, so strand aside its span is one range.
+# @noRd
+.rowSpanRanges <- function(x) {
+    spans <- range(x, ignore.strand = TRUE)
+    has <- lengths(spans) > 0L
+    flat <- unlist(spans, use.names = FALSE)
+    n <- length(spans)
+    GenomicRanges::GRanges(
+        replace(rep("chrUn", n), has, as.character(seqnames(flat))),
+        IRanges::IRanges(
+            start = replace(rep(1L, n), has, start(flat)),
+            end = replace(rep(0L, n), has, end(flat))
+        )
+    )
+}
+
+# Internal: per row, the range of `a` where `use` is TRUE, else that of `b`,
+# as bare ranges. `a` and `b` have one range per row.
+# @noRd
+.pickRegions <- function(use, a, b) {
+    GenomicRanges::GRanges(
+        if_else(use, as.character(seqnames(a)), as.character(seqnames(b))),
+        IRanges::IRanges(
+            start = if_else(use, start(a), start(b)),
+            end = if_else(use, end(a), end(b))
+        )
+    )
+}
+
+# Internal: a window argument -- a `region`, or h2's `ldBlocks` -- as the
+# GRanges of the windows it names. Given in an R call, a window is a GRanges,
+# 1-based like everything in Bioconductor; a table or a "chr:start-end"
+# string is refused rather than read, so no window is misread by one base. A
+# file follows its own standard: the path of a BED file is read as BED (see
+# .readBedWindows()).
+# @noRd
+.asRegionRanges <- function(x, what = "`region`") {
+    if (methods::is(x, "GRanges")) {
+        return(.ucscRanges(x))
+    }
+    if (!is.character(x) || length(x) != 1L) {
+        abort(c(
+            glue(
+                "{what} must be a GRanges or the path of a BED file ",
+                "(got {class(x)[[1L]]})."
+            ),
+            i = .regionArgHint()
+        ))
+    }
+    if (!file.exists(x)) {
+        abort(c(
+            glue("{what}: no file exists at '{x}'."),
+            i = .regionArgHint()
+        ))
+    }
+    .ucscRanges(.readBedWindows(x, what))
+}
+
+# Internal: a window argument that takes no file -- a pipeline's `region`,
+# or a QtlDataset's -- which must be a GRanges. It comes back in UCSC style,
+# so everything it is compared with inside is compared exactly.
+# @noRd
+.assertRegionGRanges <- function(x, what = "`region`") {
+    if (!methods::is(x, "GRanges")) {
+        abort(c(
+            glue("{what} must be a GRanges (got {class(x)[[1L]]})."),
+            i = .regionArgHint()
+        ))
+    }
+    .ucscRanges(x)
+}
+
+# Internal: how to give a window in an R call, for the errors refusing a
+# window argument of the wrong kind.
+# @noRd
+.regionArgHint <- function() {
+    str_c(
+        "A window given in R is a GRanges, which is 1-based: for example ",
+        "GenomicRanges::GRanges('chr22:1-100')."
+    )
+}
+
+# Internal: the variants of `g` inside the one window `win`. A variant sits at
+# its start.
+# @noRd
+.withinWindow <- function(g, win) {
+    same <- as.character(seqnames(g)) == as.character(seqnames(win))[[1L]]
+    g[same & start(g) >= start(win)[[1L]] & start(g) <= end(win)[[1L]]]
+}
+
+# Internal: `gr` as bare ranges, its seqnames and intervals alone.
+# @noRd
+.bareRanges <- function(gr) {
+    GenomicRanges::GRanges(
+        as.character(seqnames(gr)),
+        IRanges::IRanges(start = start(gr), end = end(gr))
+    )
+}
+
+# Internal: the `region` and `regionGiven` columns of a GWAS collection. A row
+# whose block range was given keeps it, and every other row takes the span
+# of its own variants. `given` holds one range per row and `has` says which
+# of them were given.
+# @noRd
+.regionColumns <- function(given, has, spans) {
+    list(region = .pickRegions(has, given, spans), regionGiven = has)
+}
+
+# Internal: refuse a window a fine-mapping result was given that leaves out
+# its own row's variants. The check on QTL variants (.checkGwasBlockReach())
+# takes a given window as the block's true boundary, so one that does not hold
+# its own variants would send it after a block that is not missing. A variant
+# sits at its start, so an indel's width cannot carry it past a window end.
+# `pieces` holds each row's variants, and `has` says which rows were given
+# `given`.
+# @noRd
+.refuseUncontainedRegions <- function(given, has, pieces, caller) {
+    check <- has & lengths(pieces) > 0L
+    if (!any(check)) {
+        return(invisible(NULL))
+    }
+    starts <- start(pieces[check])
+    chrom <- .rtlElementSeqnames(pieces[check])
+    lo <- min(starts)
+    hi <- max(starts)
+    inside <- as.character(seqnames(given[check])) == chrom &
+        start(given[check]) <= lo &
+        hi <= end(given[check])
+    if (all(inside)) {
+        return(invisible(NULL))
+    }
+    out <- !inside
+    rows <- glue(
+        "row {which(check)[out]}: range {as.character(given[check][out])}, ",
+        "variants at {chrom[out]}:{lo[out]}-{hi[out]}"
+    )
+    abort(c(
+        glue(
+            "{caller}: each row's `region` must contain the row's variants, ",
+            "since it is the window the row was fit over."
+        ),
+        set_names(utils::head(rows, 5L), rep("*", min(5L, length(rows))))
+    ))
+}
+
+# Internal: each row's analysis window and whether the user gave it, from the
+# `region` / `regionGiven` columns of a summary-statistic collection or a
+# fine-mapping result. A collection saved before the columns existed has no
+# stored window, and neither has a row a combine padded; such a row falls back
+# to its span and counts as computed.
+# @noRd
+.rowRegions <- function(x) {
+    spans <- .rowSpanRanges(x)
+    cols <- .tupleColumnNames(x)
+    if (!is_in("region", cols)) {
+        return(list(region = spans, regionGiven = rep(FALSE, length(spans))))
+    }
+    stored <- .tupleColumn(x, "region")
+    has <- width(stored) > 0L
+    given <- if (is_in("regionGiven", cols)) {
+        as.logical(.tupleColumn(x, "regionGiven"))
+    } else {
+        rep(FALSE, length(spans))
+    }
+    list(
+        region = .pickRegions(has, stored, spans),
+        regionGiven = has & !is.na(given) & given
+    )
+}
+
+# Internal: row `i`'s analysis window alone (see .rowRegions()), read off its
+# own column entry rather than every row's, for per-row lookups. NULL for an
+# empty row with no window stored.
+# @noRd
+.rowRegionAt <- function(x, i) {
+    if (is_in("region", .tupleColumnNames(x))) {
+        stored <- .tupleColumn(x, "region")[i]
+        if (width(stored) > 0L) {
+            return(.bareRanges(stored))
+        }
+    }
+    g <- x[[i]]
+    if (length(g) == 0L) {
+        return(NULL)
+    }
+    .bareRanges(range(g, ignore.strand = TRUE)[1L])
+}
+
+# Internal: set a GWAS collection's `region` / `regionGiven` columns, for the
+# rebuilds that know them better than the constructor can: a QC pass, a union
+# of blocks, a fine-mapping run, a file read back.
+# @noRd
+.withRegionColumns <- function(x, cols) {
+    md <- mcols(x, use.names = FALSE)
+    md$region <- cols$region
+    md$regionGiven <- as.logical(cols$regionGiven)
+    S4Vectors::`mcols<-`(x, value = md)
+}
+
+# ---- QTL variants past the GWAS blocks --------------------------------------
+# A QTL region is scored against every block of a GWAS study it overlaps,
+# merged into one. Its variants outside all of the study's loaded blocks are
+# left out of that merge, which is a sign a block it reaches was not loaded.
+# Past a block range the caller gave, they do lie in a block that was not
+# loaded, so that is an error. Past a range computed from the GWAS variants
+# they may only be variants the GWAS lacks, at a chromosome end or untyped,
+# so that is a warning, and only for more than one variant in a row.
+
+# Internal: check `units` -- a named list of variant positions (GRanges), one
+# per region the caller scores against `gws`, named as a message should call
+# it -- against the block ranges of each GWAS fit in `gws`. Each variant past
+# a fit's blocks counts against its nearest block, on the side it falls.
+# `caller` and `what` (the units, as a plural noun) word the messages.
+# @noRd
+.checkGwasBlockReach <- function(units, gws, caller, what) {
+    if (length(units) == 0L || nrow(gws) == 0L) {
+        return(invisible(NULL))
+    }
+    blocks <- .gwasBlockTable(gws)
+    issues <- list_rbind(imap(units, .unitBlockReach, blocks = blocks))
+    .reportBlockReach(issues, caller, what)
+}
+
+# Internal: the block ranges of `gws`, one per row with a range, each with
+# the GWAS fit it belongs to (its study, and method for a fine-mapping
+# result) and a label naming the block.
+# @noRd
+.gwasBlockTable <- function(gws) {
+    regions <- .rowRegions(gws)
+    keep <- width(regions$region) > 0L
+    region <- regions$region[keep]
+    chrom <- as.character(seqnames(region))
+    ids <- as.character(.tupleColumn(gws, "blockId"))[keep]
+    key <- str_c(chrom, start(region), end(region), sep = "_")
+    span <- str_c(chrom, ":", start(region), "-", end(region))
+    list(
+        ranges = .locusRanges(region),
+        given = regions$regionGiven[keep],
+        fit = .gwasFitLabels(gws)[keep],
+        # An id that only spells the range is not repeated beside it.
+        label = if_else(
+            is.na(ids) | ids == key,
+            span,
+            str_c(ids, " (", span, ")")
+        )
+    )
+}
+
+# @noRd
+.gwasFitLabels <- function(gws) {
+    study <- str_c("'", as.character(gws$study), "'")
+    if (!is_in("method", .tupleColumnNames(gws))) {
+        return(study)
+    }
+    str_c(study, " (", as.character(gws$method), ")")
+}
+
+# Internal: one unit's variants past each GWAS fit whose blocks they meet.
+# @noRd
+.unitBlockReach <- function(variants, unit, blocks) {
+    v <- .locusRanges(variants)
+    list_rbind(map(
+        unique(blocks$fit),
+        .unitFitReach,
+        v = v,
+        unit = unit,
+        blocks = blocks
+    ))
+}
+
+# @noRd
+#' @importFrom dplyr count
+.unitFitReach <- function(fit, v, unit, blocks) {
+    own <- which(blocks$fit == fit)
+    r <- blocks$ranges[own]
+    inside <- .overlapsOnShared(v, r)
+    if (!any(inside)) {
+        return(NULL)
+    }
+    chroms <- unique(as.character(seqnames(v))[inside])
+    out <- v[!inside & is_in(as.character(seqnames(v)), chroms)]
+    if (length(out) == 0L) {
+        return(NULL)
+    }
+    onChroms <- which(is_in(as.character(seqnames(r)), chroms))
+    hit <- own[onChroms][GenomicRanges::nearest(
+        .onSeqlevels(out, chroms),
+        .onSeqlevels(r[onChroms], chroms),
+        ignore.strand = TRUE
+    )]
+    count(
+        tibble(
+            unit = unit,
+            fit = fit,
+            block = blocks$label[hit],
+            given = blocks$given[hit],
+            side = if_else(
+                start(out) < start(blocks$ranges[hit]),
+                "start",
+                "end"
+            )
+        ),
+        .data$unit,
+        .data$fit,
+        .data$block,
+        .data$given,
+        .data$side
+    )
+}
+
+# Internal: abort over variants past a given range, else warn over runs of
+# more than one variant past a computed one.
+# @noRd
+.reportBlockReach <- function(issues, caller, what) {
+    if (is.null(issues) || nrow(issues) == 0L) {
+        return(invisible(NULL))
+    }
+    given <- filter(issues, .data$given)
+    if (nrow(given) > 0L) {
+        abort(c(
+            glue(
+                "{caller}: {what} reach past the LD blocks loaded for a GWAS ",
+                "study they overlap. Those blocks' ranges were given, so the ",
+                "variants past them lie in blocks that were not loaded."
+            ),
+            .blockReachLines(given),
+            i = "Load the neighbouring LD blocks of those studies too."
+        ))
+    }
+    computed <- filter(issues, !.data$given, .data$n > 1L)
+    if (nrow(computed) > 0L) {
+        warn(c(
+            glue(
+                "{caller}: {what} reach past the variants of a GWAS study ",
+                "they overlap. Those blocks' ranges are the span of the GWAS ",
+                "variants, so the variants past them may only be ones the ",
+                "GWAS lacks, or a block may not have been loaded."
+            ),
+            .blockReachLines(computed),
+            i = str_c(
+                "Give the GWAS its windows as a `region` to have this ",
+                "checked strictly."
+            )
+        ))
+    }
+    invisible(NULL)
+}
+
+# @noRd
+.blockReachLines <- function(issues) {
+    shown <- utils::head(issues, 5L)
+    lines <- glue(
+        "{shown$unit}: {shown$n} variant(s) past the {shown$side} of block ",
+        "{shown$block} of GWAS study {shown$fit}."
+    )
+    more <- nrow(issues) - nrow(shown)
+    set_names(
+        c(lines, if (more > 0L) glue("... and {more} more.")),
+        rep("*", length(lines) + (more > 0L))
+    )
+}
+
 # Internal: trait-position provenance. One GRanges per trait carrying the
 # molecular feature's OWN genomic coordinates (gene/peak range; TSS = start()),
 # distinct from the fine-mapping `region`. The true trait position cannot be
@@ -478,14 +910,13 @@
 # and TwasWeights. Mirrors the `region` helpers above; absent for GWAS.
 # traitPos is optional provenance: always known for a QtlDataset, but only known
 # for a QtlSumStats when the caller supplied it (it cannot be inferred from
-# summary statistics). When the column is absent we return a scalar NA rather
-# than an empty GRanges, so traitPosition() reports "no trait position"
-# honestly instead of a zero-length range.
+# summary statistics). When the column is absent the answer is an empty
+# GRanges -- no position, in the type every other answer has.
 .getTraitPosColumn <- function(x) {
     if (is_in("traitPos", .tupleColumnNames(x))) {
         .tupleColumn(x, "traitPos")
     } else {
-        NA
+        GenomicRanges::GRanges()
     }
 }
 
@@ -499,7 +930,7 @@
     if (length(traitPos) != n) {
         abort("`traitPos` must have the same length as `study`.")
     }
-    c(cols, list(traitPos = traitPos))
+    c(cols, list(traitPos = .ucscRanges(traitPos)))
 }
 
 #' @importFrom checkmate checkClass
@@ -520,13 +951,16 @@
 
 # Internal: a length-n "unknown" column matching the type of `exemplar`, used
 # to pad a collection that lacks an optional column before a union row-bind.
-# Character -> NA; GRanges -> a 0-width chrUn sentinel range; else NA.
+# Character -> NA; GRanges -> placeholder ranges; else NA.
 .naLikeColumn <- function(exemplar, n) {
     if (methods::is(exemplar, "GRanges")) {
-        return(GenomicRanges::GRanges(
-            rep("chrUn", n),
-            IRanges::IRanges(start = 1L, width = 0L)
-        ))
+        return(.placeholderRanges(n))
+    }
+    if (methods::is(exemplar, "CharacterList")) {
+        return(IRanges::CharacterList(rep(list(character(0)), n)))
+    }
+    if (methods::is(exemplar, "List")) {
+        return(S4Vectors::SimpleList(rep(list(NULL), n)))
     }
     if (is.character(exemplar)) {
         return(rep(NA_character_, n))
@@ -553,13 +987,14 @@
 # unioned, and a collection lacking an optional column (e.g. jointContexts or
 # region) is padded with `.naLikeColumn` -- so adding a column to a class flows
 # through combines automatically rather than being hand-listed at each site.
-# Preserves the concrete class and sets the `ldReference` slot explicitly (rbind
-# does not reliably carry it). Returns NULL when given no inputs. Every
-# collection is a RangedTupleList now, so this only drops the NULL parts and
-# hands off; the old DFrame path went with the rebase onto GRangesList.
+# Preserves the concrete class and rebuilds the LD references: every row keeps
+# its own (.ldRefCombine()), unless `ldReference` names one for all of them.
+# Returns NULL when given no inputs. Every collection is a RangedTupleList now,
+# so this only drops the NULL parts and hands off; the old DFrame path went
+# with the rebase onto GRangesList.
 #
 # `slots` carries the collection-level state a concrete subclass adds beyond
-# `ldReference` (SumStatsBase's `genome` / `qcInfo`). It is passed in rather
+# `ldReference` (SumStatsBase's `genome` / `qcOptions`). It is passed in rather
 # than read off `parts[[1L]]` because those slots describe the WHOLE collection,
 # so merging them is the caller's decision -- first-wins would silently drop the
 # other parts' QC audit.
@@ -567,13 +1002,15 @@
     parts,
     ldReference = NULL,
     slots = list(),
-    genome = NULL
+    genome = NULL,
+    fn = ".rbindCollections"
 ) {
     parts <- compact(parts)
     if (length(parts) == 0L) {
         return(NULL)
     }
-    .rbindRangedCollections(parts, ldReference, slots, genome)
+    dict <- .ldRefCombine(parts, ldReference, fn)
+    .rbindRangedCollections(parts, dict, slots, genome)
 }
 
 # Internal: aggregate a per-entry accessor across every row of a
@@ -600,32 +1037,23 @@
     context = NULL,
     trait = NULL,
     method = NULL,
-    region = NULL,
+    blockId = NULL,
     perEntry,
     onSingle = perEntry,
     viewArgs = list()
 ) {
-    single <- .fmrTrySingle(
-        x,
-        studyName,
-        context,
-        trait,
-        method,
-        region,
-        onSingle,
-        viewArgs
-    )
-    if (single$done) {
-        return(single$result)
-    }
-    idx <- .fmrRowsMatching(
-        x,
+    sel <- list(
         studyName = studyName,
         context = context,
         trait = trait,
         method = method,
-        region = region
+        blockId = blockId
     )
+    single <- .fmrTrySingle(x, sel, onSingle, viewArgs)
+    if (single$done) {
+        return(single$result)
+    }
+    idx <- exec(.fmrRowsMatching, x, !!!sel)
     meta <- .fmrRowMetadata(x)
     if (length(idx) == 0L) {
         return(.fmrEmptyOrError(single, meta))
@@ -655,38 +1083,18 @@
     slice(meta, integer(0))
 }
 
-# Attempt the single-entry fast path when any selector is supplied. Returns
-# list(done, result) on a successful single-select, else list(done = FALSE, sel)
-# carrying the selection error (or NULL when no selector was given).
+# Attempt the single-entry fast path when any of `selectors` -- the named row
+# selectors -- is supplied. Returns list(done, result) on a successful
+# single-select, else list(done = FALSE, sel) carrying the selection error
+# (or NULL when no selector was given).
 # @noRd
 #' @importFrom rlang try_fetch
-.fmrTrySingle <- function(
-    x,
-    studyName,
-    context,
-    trait,
-    method,
-    region,
-    onSingle,
-    viewArgs
-) {
-    anySelector <- !is.null(studyName) ||
-        !is.null(context) ||
-        !is.null(trait) ||
-        !is.null(method) ||
-        !is.null(region)
-    if (!anySelector) {
+.fmrTrySingle <- function(x, selectors, onSingle, viewArgs) {
+    if (length(compact(selectors)) == 0L) {
         return(list(done = FALSE, sel = NULL))
     }
     sel <- try_fetch(
-        .fmrSelectEntry(
-            x,
-            studyName = studyName,
-            context = context,
-            trait = trait,
-            method = method,
-            region = region
-        ),
+        exec(.fmrSelectEntry, x, !!!selectors),
         error = function(cnd) cnd
     )
     if (!inherits(sel, "error")) {
@@ -742,36 +1150,29 @@
 # @noRd
 .rbindRangedCollections <- function(
     parts,
-    ldReference,
+    dict,
     slots = list(),
     genome = NULL
 ) {
     cls <- class(parts[[1L]])[[1L]]
     allCols <- reduce(map(parts, .tupleColumnNames), union)
-    combined <- set_names(map(allCols, .rbindColumn, parts = parts), allCols)
+    # Each part keyed its rows into its own references, so the bound rows take
+    # the keys the combined references were built with.
+    combined <- list_assign(
+        set_names(map(allCols, .rbindColumn, parts = parts), allCols),
+        ldReference = dict$keys
+    )
     md <- exec(
         S4Vectors::DataFrame,
         !!!c(combined, list(check.names = FALSE))
     )
-    elements <- list_flatten(map(parts, as.list))
-    # Rebuilding from as.list() merges each part's seqinfo, so a part whose
-    # elements never had a build set would leave the result carrying both the
-    # real build and NA. The agreed build is written back explicitly to keep
+    # Joining the parts merges each part's seqinfo, so a part whose elements
+    # never had a build set would leave the result carrying both the real
+    # build and NA. The agreed build is written back explicitly to keep
     # seqinfo single-valued, which validity requires.
-    built <- .withGenomeBuild(
-        GenomicRanges::GRangesList(elements),
-        !is.null(genome),
-        genome
-    )
-    grl <- S4Vectors::`mcols<-`(built, value = md)
-    out <- exec(
-        methods::new,
-        cls,
-        grl,
-        !!!c(list(ldReference = ldReference), slots)
-    )
-    validObject(out)
-    out
+    built <- .withGenomeBuild(.rtlJoinParts(parts), !is.null(genome), genome)
+    grl <- .rtlNamed(S4Vectors::`mcols<-`(built, value = md))
+    exec(methods::new, cls, grl, !!!c(list(ldReference = dict$refs), slots))
 }
 
 # Concatenate column `cn` across all parts (NA-filling parts that lack it).
@@ -810,8 +1211,21 @@
         "FineMappingRow",
         variants = .rtlGatherElements(x, idx),
         susieFit = md$susieFit[[first]],
-        cvResult = md$cvResult[[first]]
+        cvResult = md$cvResult[[first]],
+        fitVariants = .mdFitVariants(md, idx)
     )
+}
+
+# The variants the fit of rows `idx` was made with, in its order: the first
+# row's, as the fit payload is, since rows split from one entry repeat both.
+# None for a collection saved before rows recorded them.
+# @noRd
+.mdFitVariants <- function(md, idx) {
+    fv <- md$fitVariants
+    if (is.null(fv)) {
+        return(character(0))
+    }
+    as.character(fv[[idx[[1L]]]])
 }
 
 # @noRd
@@ -867,18 +1281,8 @@
 }
 
 # @noRd
-.fmrRowMarginalEffects <- function(parts, maxPval = NULL) {
-    tl <- .fmrPartsTopLoci(parts)
-    if (nrow(tl) == 0L) {
-        return(.projectMarginalView(tl))
-    }
-    allRows <- .projectMarginalView(tl)
-    out <- if (is.null(maxPval) || nrow(allRows) == 0L) {
-        allRows
-    } else {
-        filter(allRows, !is.na(.data$p) & .data$p <= maxPval)
-    }
-    out
+.fmrRowMarginalEffects <- function(parts) {
+    .projectMarginalView(.fmrPartsTopLoci(parts))
 }
 
 # @noRd
@@ -918,15 +1322,27 @@
 }
 
 # @noRd
+# The fit's own log Bayes factors of the variants the row still holds, each
+# found in the fit by id; a row narrowed since the fit loses the columns of
+# the variants it dropped, and nothing is rescaled.
 .fmrRowLbf <- function(parts) {
     lbf <- .asLbfMatrix(susieFit(parts))
-    vids <- .fmrPartsVariantIds(parts)
-    if (is.null(lbf) || ncol(lbf) != length(vids)) {
+    if (is.null(lbf)) {
         return(tibble(variant_id = character(0)))
     }
-    wide <- as_tibble(t(as.matrix(lbf)), .name_repair = "minimal")
+    fitted <- .partsFitIds(parts, lbf)
+    if (ncol(lbf) != length(fitted)) {
+        return(tibble(variant_id = character(0)))
+    }
+    vids <- .fmrPartsVariantIds(parts)
+    col <- .fitColumnOf(vids, fitted)
+    held <- !is.na(col)
+    wide <- as_tibble(
+        t(as.matrix(lbf)[, col[held], drop = FALSE]),
+        .name_repair = "minimal"
+    )
     w <- `names<-`(wide, str_c("lbf_L", seq_len(ncol(wide))))
-    bind_cols(tibble(variant_id = as.character(vids)), w)
+    bind_cols(tibble(variant_id = as.character(vids[held])), w)
 }
 
 # @noRd
@@ -984,7 +1400,8 @@
         methodFits = md$fits[[first]],
         cvResult = md$cvResult[[first]],
         weightStandardized = isTRUE(md$standardized[[first]]),
-        weightsDataType = md$dataType[[first]]
+        weightsDataType = md$dataType[[first]],
+        fitVariants = .mdFitVariants(md, idx)
     )
 }
 
@@ -1014,15 +1431,173 @@
     list(variantIds = vids[ok], weights = w[ok])
 }
 
-# Class-aware row payload: the TwasWeights and fine-mapping shapes differ
-# (weights vs a susie fit), so callers that accept either weight source route
-# through here. Replaces the old .collectionEntry bridge.
+# ---- fit coverage ------------------------------------------------------------
+# A row keeps the fit it was built with when its variants are narrowed (to
+# those a GWAS also carries, say). The fit, and everything read off it, still
+# describes the run on all of its variants, so reading it from a row that
+# holds fewer warns. Nothing is rescaled: intersectVariants() is the explicit
+# way to restrict a fit.
+
+# The variants a row's stored fit was made with.
 # @noRd
-.rowParts <- function(x, i) {
-    if (methods::is(x, "TwasWeights")) {
-        return(.twrRowParts(x, i))
+.rowFitVariants <- function(parts) {
+    if (methods::is(parts, "TwasWeightsRow")) {
+        return(.twRowFitVariants(parts))
     }
-    .fmrRowParts(x, i)
+    .fmRowFitVariants(parts)
+}
+
+# The fit's variables in its own order: the ids the row recorded when it was
+# built, else the names the fit's matrix `mat` carries, else -- an unnamed fit
+# of a row saved before rows recorded them -- the row's variants as they are.
+# @noRd
+.partsFitIds <- function(parts, mat = NULL) {
+    recorded <- .rowFitVariants(parts)
+    if (length(recorded) > 0L) {
+        return(recorded)
+    }
+    colnames(mat) %||% variantIds(parts)
+}
+
+# How many of `fitted` are gone from `held`. A variant whose alleles
+# harmonization swapped is held under another id, so ids that do not match
+# exactly are matched allele-aware before they count as gone.
+# @noRd
+.lostFitVariantCount <- function(fitted, held) {
+    gone <- fitted[!is_in(fitted, held)]
+    if (length(gone) == 0L) {
+        return(0L)
+    }
+    matched <- matchVariants(gone, held, removeStrandAmbiguous = FALSE)
+    length(gone) - length(unique(matched$idxA))
+}
+
+# For each of `held`, its column in a fit made on `fitted` (NA when the fit
+# has none), matched the same allele-aware way.
+# @noRd
+.fitColumnOf <- function(held, fitted) {
+    col <- match(held, fitted)
+    miss <- which(is.na(col))
+    if (length(miss) == 0L) {
+        return(col)
+    }
+    m <- matchVariants(held[miss], fitted, removeStrandAmbiguous = FALSE)
+    replace(col, miss[m$idxA], m$idxB)
+}
+
+# `parts` unchanged, after warning when its row holds fewer variants than its
+# stored fit was made with.
+# @noRd
+.fitCoverageChecked <- function(parts, caller) {
+    fitted <- .rowFitVariants(parts)
+    lost <- .lostFitVariantCount(fitted, variantIds(parts))
+    if (lost > 0L) {
+        warn(
+            c(
+                glue(
+                    "{caller}: the stored fit was made with ",
+                    "{length(fitted)} variants, {lost} of which this row no ",
+                    "longer holds."
+                ),
+                i = .fitCoverageHint(parts)
+            ),
+            class = "pecotmrFitCoverage"
+        )
+    }
+    parts
+}
+
+# `x` unchanged, after warning once about every row that holds fewer variants
+# than its stored fit was made with.
+# @noRd
+.fitCoverageCheckedRows <- function(x, caller) {
+    .fitCoverageCheckedAll(list(x), caller)
+    invisible(x)
+}
+
+# Warn once about the narrowed rows of every collection in `xs`, so a
+# pipeline reading the fits of two inputs names all of them in one warning.
+# @noRd
+.fitCoverageCheckedAll <- function(xs, caller) {
+    labels <- map(xs, .narrowedRowLabels)
+    rows <- list_c(labels, ptype = character())
+    if (length(rows) == 0L) {
+        return(invisible(NULL))
+    }
+    warn(
+        c(
+            glue(
+                "{caller}: {length(rows)} row(s) hold fewer variants than ",
+                "their stored fit was made with."
+            ),
+            set_names(utils::head(rows, 5L), rep("*", min(5L, length(rows)))),
+            i = .fitCoverageHint(xs[[which(lengths(labels) > 0L)[[1L]]]])
+        ),
+        class = "pecotmrFitCoverage"
+    )
+    invisible(NULL)
+}
+
+# The labels of the rows of `x` that hold fewer variants than their stored
+# fit was made with. None when `x` records no fit variants, or is not a
+# collection at all: an optional input left NULL, or one the caller has yet
+# to validate, which this advisory check must not pre-empt.
+# @noRd
+.narrowedRowLabels <- function(x) {
+    if (!methods::is(x, "RangedTupleList")) {
+        return(character(0))
+    }
+    fv <- mcols(x, use.names = FALSE)$fitVariants
+    if (is.null(fv) || length(x) == 0L) {
+        return(character(0))
+    }
+    lost <- map_int(seq_along(x), .rowLostFitVariants, x = x, fv = fv)
+    short <- which(lost > 0L)
+    if (length(short) == 0L) {
+        return(character(0))
+    }
+    .pubRowLabels(x, short)
+}
+
+# @noRd
+.rowLostFitVariants <- function(i, x, fv) {
+    .lostFitVariantCount(as.character(fv[[i]]), .grVariantIds(x[[i]]))
+}
+
+# `expr` with its fit-coverage warnings muffled, for a caller that has
+# already warned about the rows `expr` reads -- a pipeline that runs itself
+# once per study, say.
+# @noRd
+.muffleFitCoverage <- function(expr) {
+    withCallingHandlers(
+        expr,
+        pecotmrFitCoverage = function(cnd) invokeRestart("muffleWarning")
+    )
+}
+
+# What to do about a narrowed row of `x`. Only fine-mapping results have a
+# way to restrict their fits, intersectVariants(); weights are refitted.
+# @noRd
+.fitCoverageHint <- function(x) {
+    restrict <- if (.isFineMappingPayload(x)) {
+        str_c(
+            "intersectVariants() restricts a fit to the variants two results ",
+            "share; otherwise refit on the variants kept."
+        )
+    } else {
+        "Refit on the variants kept to have fits that describe them."
+    }
+    str_c(
+        "The fit, and the values read from it, describe the original run on ",
+        "all of its variants, unchanged. ",
+        restrict
+    )
+}
+
+# @noRd
+.isFineMappingPayload <- function(x) {
+    methods::is(x, "FineMappingRow") ||
+        methods::is(x, "FineMappingResultBase")
 }
 
 # The per-variant weight vector of one row, whichever weight source it came
@@ -1107,6 +1682,19 @@
     abort(msg)
 }
 
+# The `entry` elements whose variants lie on more than one chromosome. A
+# collection element spans exactly one, so such an entry would be split into
+# one row per chromosome, each repeating the entry's identity and payload.
+# @noRd
+.multiChromosomeEntries <- function(entry) {
+    which(map_int(entry, .fmRowSeqnameCount) > 1L)
+}
+
+# @noRd
+.fmRowSeqnameCount <- function(e) {
+    n_distinct(as.character(seqnames(variants(e))))
+}
+
 # Shape-tolerant readers for values that may still be a legacy entry object
 # while the flip is in progress. Delete the entry branch (and these) once
 # nothing produces entries.
@@ -1133,7 +1721,8 @@
         fits = S4Vectors::SimpleList(map(entry, methodFits)),
         cvResult = S4Vectors::SimpleList(map(entry, cvResult)),
         standardized = map_lgl(entry, .twPayloadStandardized),
-        dataType = S4Vectors::SimpleList(map(entry, weightsDataType))
+        dataType = S4Vectors::SimpleList(map(entry, weightsDataType)),
+        fitVariants = IRanges::CharacterList(map(entry, .twRowFitVariants))
     )
 }
 
@@ -1141,15 +1730,14 @@
 # Combining summary-statistics collections
 # -----------------------------------------------------------------------------
 # A SumStatsBase subclass carries three COLLECTION-level slots -- ldReference,
-# genome and qcInfo -- on top of the elements and their mcols, so row-binding
+# genome and qcOptions -- on top of the elements and their mcols, so row-binding
 # per-block pieces back into one collection has to say what happens to each.
 # The rules live here once, shared by combineGwasSumStats() and
 # combineQtlSumStats(), so the two cannot drift:
 #
 #   genome    must agree; a mismatch is an error
-#   qcInfo    `entryAudit` concatenates in element order (it is indexed BY
-#             element); the rest is carried from the first part after checking
-#             the QC options agree
+#   qcOptions carried from the first part after checking the QC options
+#             agree; each row's audit is a column, so it binds with the rows
 #   ldReference  the panels union, read through the parts' shared GenotypeHandle
 #
 # The ldReference rule is the one that matters for correctness. A block-parallel
@@ -1185,9 +1773,17 @@
 # @noRd
 .rtlExtraSlots <- function(parts, fn) {
     own <- setdiff(.rtlOwnSlots(parts[[1L]]), "ldReference")
-    out <- compact(list(
-        qcInfo = if (is_in("qcInfo", own)) .ssCombineQcInfo(parts, fn)
-    ))
+    # discard(is.null), not compact(): parts no QC has run on merge to an
+    # empty qcOptions, which is a merged value -- compact() would drop it and
+    # report the slot as having no merge rule.
+    out <- discard(
+        list(
+            qcOptions = if (is_in("qcOptions", own)) {
+                .ssCombineQcOptions(parts, fn)
+            }
+        ),
+        is.null
+    )
     unknown <- setdiff(own, names(out))
     if (length(unknown) > 0L) {
         cls <- class(parts[[1L]])[[1L]]
@@ -1202,7 +1798,8 @@
 
 # Merge `parts` into one collection, reconciling every collection-level slot.
 # The single path behind `c()` / `append()` and the four combine*() wrappers.
-# A non-NULL `ldReference` overrides the unioned panel.
+# Every row keeps its own LD reference; a non-NULL `ldReference` is every
+# row's instead.
 # @noRd
 .combineTupleCollections <- function(parts, ldReference, fn) {
     .rtlRequireSameClass(parts, fn)
@@ -1212,9 +1809,10 @@
     genome <- .rtlCombineGenome(parts, fn)
     .rbindCollections(
         parts,
-        ldReference = ldReference %||% .combineLdRef(parts, fn),
+        ldReference = ldReference,
         slots = .rtlExtraSlots(parts, fn),
-        genome = genome
+        genome = genome,
+        fn = fn
     )
 }
 
@@ -1256,14 +1854,12 @@
     genomes
 }
 
-# qcInfo is collection-level EXCEPT `entryAudit`, which qcDiagnostics()
-# addresses BY element index -- so the audit concatenates in element order
-# while the rest is carried from the first part. Concatenation pads a part
-# whose audit is absent or short, because an audit that slipped out of step
-# with the elements would report another block's diagnostics.
+# qcOptions describes the whole collection, so it is carried from the first
+# part once every part is shown to have run the same QC. Each row's audit is
+# a column of mcols(), so it binds with the rows it describes.
 # @noRd
-.ssCombineQcInfo <- function(parts, fn) {
-    populated <- keep(parts, .ssHasQcInfo)
+.ssCombineQcOptions <- function(parts, fn) {
+    populated <- keep(parts, .ssHasQcOptions)
     if (length(populated) == 0L) {
         return(list())
     }
@@ -1271,39 +1867,24 @@
         msg <- glue(
             "{fn}: {length(parts) - length(populated)} of {length(parts)} ",
             "inputs carry no QC record. Run summaryStatsQc() on every input ",
-            "before combining, or the combined qcInfo would claim QC that ",
-            "only some elements went through."
+            "before combining, or the combined qcOptions would claim QC ",
+            "that only some elements went through."
         )
         abort(msg)
     }
     .ssCheckQcOptions(populated, fn)
-    list_assign(
-        qcInfo(populated[[1L]]),
-        entryAudit = list_flatten(map(parts, .ssEntryAudit))
-    )
+    qcOptions(populated[[1L]])
 }
 
 # @noRd
-.ssHasQcInfo <- function(x) length(qcInfo(x)) > 0L
-
-# One part's per-element audit, padded to its element count so positions stay
-# aligned with the elements they describe.
-# @noRd
-.ssEntryAudit <- function(x) {
-    audit <- qcInfo(x)$entryAudit %||% list()
-    n <- nrow(x)
-    if (length(audit) >= n) {
-        return(as.list(audit)[seq_len(n)])
-    }
-    c(as.list(audit), vector("list", n - length(audit)))
-}
+.ssHasQcOptions <- function(x) length(qcOptions(x)) > 0L
 
 # The QC options must match: a collection stitched from blocks filtered at
 # different MAF / INFO cutoffs has no single honest answer for "what QC ran",
 # and every downstream consumer reads that answer off one record.
 # @noRd
 .ssCheckQcOptions <- function(parts, fn) {
-    first <- qcInfo(parts[[1L]])$options
+    first <- qcOptions(parts[[1L]])$options
     same <- map_lgl(parts, .ssSameQcOptions, first = first)
     if (all(same)) {
         return(invisible(NULL))
@@ -1318,38 +1899,121 @@
 
 # @noRd
 .ssSameQcOptions <- function(x, first) {
-    identical(qcInfo(x)$options, first)
+    identical(qcOptions(x)$options, first)
 }
 
-# The union of the parts' LD panels. All-NULL stays NULL (an individual-level
-# collection has no panel); a mix is an error, because silently keeping the
-# panels that exist would leave elements harmonized against nothing.
+# The LD references of `parts`, row-bound: each row keeps the reference it
+# had, and a reference that is a view of another is stored as that one
+# (.ldRefMergeViews()). `override`, when given, is every row's reference
+# instead.
 # @noRd
-.combineLdRef <- function(parts, fn) {
-    sketches <- map(parts, ldReference)
-    present <- !map_lgl(sketches, is.null)
-    if (!any(present)) {
-        return(NULL)
+.ldRefCombine <- function(parts, override, fn) {
+    if (!is.null(override)) {
+        n <- sum(map_int(parts, length))
+        return(.ldRefDict(.ldRefPerTuple(override, n)))
     }
-    if (!all(present)) {
-        msg <- glue(
-            "{fn}: {sum(!present)} of {length(parts)} inputs carry no ",
-            "ldReference. Combine collections that all have an LD reference, ",
-            "or all have none."
-        )
-        abort(msg)
+    perRow <- list_flatten(map(parts, .rowLdRefs))
+    .ldRefMergeViews(.ldRefDict(perRow), fn)
+}
+
+# `dict` with every entry that is a view of another stored as that one, and
+# the rows re-keyed to it. Block-parallel pipelines narrow each piece's panel
+# to its own block, so binding the pieces back together would otherwise hold
+# one panel per block where there is one panel.
+#
+# Entries are taken widest first, and each joins the first group whose head
+# (its widest entry) it is a view of, or heads a new one. An entry so meets
+# the widest reference holding it before any narrower one, whatever order the
+# rows came in. Groups are numbered by their first row, so `ld1` stays the
+# first row's reference.
+# @noRd
+.ldRefMergeViews <- function(dict, fn) {
+    refs <- dict$refs
+    if (length(refs) <= 1L) {
+        return(dict)
     }
-    if (any(map_lgl(sketches, .ldIsMatrixRef))) {
-        return(.combineLdMatrixRefs(sketches, fn))
+    grouped <- reduce(
+        order(map_int(refs, .ldRefNVariants), decreasing = TRUE),
+        .ldRefAssignGroup,
+        refs = refs,
+        .init = list(heads = integer(0), group = integer(length(refs)))
+    )
+    seen <- unique(grouped$group)
+    group <- match(grouped$group, seen)
+    merged <- map(
+        seq_along(seen),
+        .ldRefGroupRef,
+        group = group,
+        heads = grouped$heads[seen],
+        refs = refs,
+        fn = fn
+    )
+    keys <- str_c("ld", seq_along(merged))
+    list(
+        refs = set_names(merged, keys),
+        keys = keys[group[match(dict$keys, names(refs))]]
+    )
+}
+
+# `grouped` extended by entry `i`: it joins the first group whose head it is
+# a view of, or heads a new group.
+# @noRd
+#' @importFrom purrr detect_index
+.ldRefAssignGroup <- function(grouped, i, refs) {
+    hit <- detect_index(grouped$heads, .ldRefHeadHolds, i = i, refs = refs)
+    if (hit == 0L) {
+        grouped$heads <- c(grouped$heads, i)
+        hit <- length(grouped$heads)
     }
-    if (any(map_lgl(sketches, .ldIsMixtureRef))) {
-        return(.combineMixtureRefs(sketches, fn))
+    grouped$group[[i]] <- hit
+    grouped
+}
+
+# @noRd
+.ldRefHeadHolds <- function(h, i, refs) {
+    .ldRefIsViewOf(refs[[i]], refs[[h]])
+}
+
+# TRUE when reference `x` can be stored as `of`: panels reading the same files
+# over the same samples, or an LdMatrix or mixture all of whose variants `of`
+# holds, with the same LD.
+# @noRd
+.ldRefIsViewOf <- function(x, of) {
+    if (.ldIsPanel(x) && .ldIsPanel(of)) {
+        return(.ssSameGenotypeSource(x, of))
     }
-    .ssCheckSameSource(sketches, fn)
-    chromPaths <- .ssUnionChromPaths(sketches, fn)
-    handles <- map(sketches, .ldRefHandle)
+    if (.ldIsMatrixRef(x) && .ldIsMatrixRef(of)) {
+        return(.ldmCoveredBy(x, of))
+    }
+    if (.ldIsMixtureRef(x) && .ldIsMixtureRef(of)) {
+        return(.ldRefVariantsCoveredBy(x, of) && .gmSameMixture(x, of))
+    }
+    FALSE
+}
+
+# The one reference group `g` is stored as. Panels from one source union. An
+# LdMatrix or mixture cannot be widened -- the LD between variants that
+# different members hold is in none of them -- so the group's head, which
+# holds every other member, stands for it.
+# @noRd
+.ldRefGroupRef <- function(g, group, heads, refs, fn) {
+    members <- unname(refs[group == g])
+    if (length(members) == 1L || !.ldIsPanel(members[[1L]])) {
+        return(refs[[heads[[g]]]])
+    }
+    .unionPanelRefs(members, fn)
+}
+
+# One panel standing for `panels`, which read the same files over the same
+# samples: a handle union keeps the first handle and widens its snpInfo, each
+# row's `fileIdx` addressing a position in THAT file, and a panel union binds
+# the parts over the first one's samples.
+# @noRd
+.unionPanelRefs <- function(panels, fn) {
+    chromPaths <- .ssUnionChromPaths(panels, fn)
+    handles <- map(panels, .ldRefHandle)
     if (any(map_lgl(handles, is.null))) {
-        return(.ssUnionPanels(sketches, chromPaths))
+        return(.ssUnionPanels(panels, chromPaths))
     }
     handle <- methods::initialize(
         handles[[1L]],
@@ -1385,7 +2049,7 @@
     )
     kept <- which(!duplicated(names(rr)))
     ord <- kept[order(
-        canonChrom(as.character(seqnames(rr)[kept])),
+        as.character(seqnames(rr)[kept]),
         start(rr)[kept]
     )]
     md <- S4Vectors::metadata(stacked)
@@ -1393,60 +2057,6 @@
         md$genotypeSource$chromPaths <- chromPaths
     }
     S4Vectors::`metadata<-`(stacked[ord, ], value = md)
-}
-
-# LdMatrix references, unlike panels, cannot be unioned: the LD between
-# variants held by different parts is recorded in neither. They combine only
-# when one of them already holds every other's variants with the same LD --
-# the same matrix, or one part that kept all of the others' variants.
-# Otherwise the caller passes the matrix covering them all as `ldReference`.
-# @noRd
-.combineLdMatrixRefs <- function(refs, fn) {
-    if (!all(map_lgl(refs, .ldIsMatrixRef))) {
-        msg <- glue(
-            "{fn}: inputs mix genotype-panel and LdMatrix references; ",
-            "combine collections that share one LD reference."
-        )
-        abort(msg)
-    }
-    widest <- refs[[which.max(map_int(refs, length))]]
-    if (all(map_lgl(refs, .ldmCoveredBy, by = widest))) {
-        return(widest)
-    }
-    abort(c(
-        glue(
-            "{fn}: the inputs' LdMatrix references cover different variants, ",
-            "and the LD between them is held by none."
-        ),
-        i = "Pass an LdMatrix covering all of their variants as `ldReference`."
-    ))
-}
-
-# Mixture references combine like LdMatrix ones: when one of them already
-# holds every other's variants and they average the same panels with the
-# same weights. Their panels stay lazy, so the widest mixture loses nothing.
-# @noRd
-.combineMixtureRefs <- function(refs, fn) {
-    if (!all(map_lgl(refs, .ldIsMixtureRef))) {
-        msg <- glue(
-            "{fn}: inputs mix GenotypeMixture references with other kinds; ",
-            "combine collections that share one LD reference."
-        )
-        abort(msg)
-    }
-    widest <- refs[[which.max(map_int(refs, .ldRefNVariants))]]
-    sameMix <- map_lgl(refs, .gmSameMixture, y = widest)
-    covered <- map_lgl(refs, .ldRefVariantsCoveredBy, by = widest)
-    if (all(sameMix & covered)) {
-        return(widest)
-    }
-    abort(c(
-        glue(
-            "{fn}: the inputs' GenotypeMixture references differ or cover ",
-            "different variants."
-        ),
-        i = "Pass the mixture covering all of their variants as `ldReference`."
-    ))
 }
 
 # TRUE when every variant of `x` is in `by`, coded the same way.
@@ -1512,24 +2122,6 @@
     abort(msg)
 }
 
-# Every panel must read from the same file(s) and samples: a handle union
-# keeps the first handle and widens its snpInfo, each row's `fileIdx`
-# addressing a position in THAT file, and a panel union binds the parts over
-# the first one's samples.
-# @noRd
-.ssCheckSameSource <- function(sketches, fn) {
-    same <- map_lgl(sketches, .ssSameGenotypeSource, first = sketches[[1L]])
-    if (all(same)) {
-        return(invisible(NULL))
-    }
-    msg <- glue(
-        "{fn}: inputs reference different genotype panels (input ",
-        "{which(!same)[[1L]]} differs from the first). Their LD references ",
-        "cannot be unioned."
-    )
-    abort(msg)
-}
-
 # @noRd
 .ssSameGenotypeSource <- function(x, first) {
     # chromPaths is deliberately NOT compared: two sketches trimmed from the
@@ -1563,7 +2155,7 @@
     si <- if (nrow(combined) > 0L && keyed) {
         deduped <- combined[!duplicated(combined$SNP), , drop = FALSE]
         deduped[
-            order(canonChrom(deduped$CHR), as.integer(deduped$BP)),
+            order(deduped$CHR, as.integer(deduped$BP)),
             ,
             drop = FALSE
         ]

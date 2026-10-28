@@ -11,6 +11,10 @@
 \arguments{
 \item{object}{An \code{LdMatrix}.}
 }
+\value{
+\code{show} is called for its side effect and returns
+  \code{invisible(NULL)}.
+}
 \description{
 An \code{LdMatrix} carries one LD correlation matrix together
   with the variants it describes, and can stand wherever pecotmr takes an

@@ -7,7 +7,7 @@
 estCtwasGroupPriors(
   inputs,
   ctwasPriorParam = CtwasPriorParam(),
-  numThreads = 1L,
+  BPPARAM = SerialParam(),
   methodArgs = CtwasOptions()
 )
 }
@@ -22,7 +22,10 @@ accurate EM iterations), \code{varStructure}, and
 on a degenerate input is recovered by re-running only the prefit step
 and returning those (typically finite) priors.}
 
-\item{numThreads}{Number of cores.}
+\item{BPPARAM}{A \code{BiocParallelParam} whose workers number the cores
+ctwas's own \code{ncore} parallelism uses when they run on this machine
+(\code{SerialParam}, \code{MulticoreParam}); any other backend gives one
+core. Default \code{SerialParam()}.}
 
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
 with \code{\link{CtwasOptions}}. Names are checked against what

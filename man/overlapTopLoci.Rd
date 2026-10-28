@@ -23,7 +23,9 @@ inputs. Default 0.025.}
 A \code{GRanges} keyed on the QTL variant
   (\code{variant_id, chrom, pos, A1, A2} in \code{mcols()}) with all other
   columns prefixed \code{qtl_} / \code{gwas_}. Zero ranges when there is no
-  allele-aware overlap. Take a table with \code{as.data.frame()}.
+  allele-aware overlap. Take a table with \code{as.data.frame()}. Its
+  \code{seqinfo()} names the genome build the two results name; results
+  naming different builds are refused.
 }
 \description{
 Intersect the top-loci tables of a \code{QtlFineMappingResult} and a
