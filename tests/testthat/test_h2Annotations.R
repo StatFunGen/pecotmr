@@ -425,3 +425,210 @@ test_that(".readLdscAnnot errors when CHR/BP columns are absent", {
         "must contain CHR and BP columns"
     )
 })
+
+# =============================================================================
+# fineMappingAnnotations (h2Annotations.R)
+# =============================================================================
+
+# An LD-score reference over `n` variants at chr1:100, 200, ..., named by
+# rsID, in `nBlocks` blocks with identity LD. `flip` lists variants it
+# stores with the alleles the other way round.
+.fma_ref <- function(n = 6L, nBlocks = 2L, flip = integer(0)) {
+    a1 <- rep("G", n)
+    a2 <- rep("A", n)
+    a1[flip] <- "A"
+    a2[flip] <- "G"
+    per <- n / nBlocks
+    LdScore(
+        ldBlocks = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(
+                start = (seq_len(nBlocks) - 1L) * per * 100L + 1L,
+                end = seq_len(nBlocks) * per * 100L
+            )
+        ),
+        snpInfo = data.frame(
+            SNP = paste0("rs", seq_len(n)),
+            CHR = "chr1",
+            BP = seq_len(n) * 100L,
+            A1 = a1,
+            A2 = a2
+        ),
+        nSamples = 1000L,
+        inSample = FALSE,
+        genome = "hg19",
+        ldScores = matrix(1, n, 1, dimnames = list(NULL, "base_l2")),
+        ldScoreWeights = rep(1, n),
+        ldMatrixList = lapply(seq_len(nBlocks), function(b) {
+            list(
+                R = diag(per),
+                snpIdx = as.integer((b - 1L) * per + seq_len(per))
+            )
+        })
+    )
+}
+
+# One gene's row over variants `idx` (ids chr1:<pos>:A:G) with PIPs `pip`,
+# 95% credible-set members `cs` and their purity.
+.fma_row <- function(idx, pip, cs, purity) {
+    ids <- sprintf("chr1:%d:A:G", idx * 100L)
+    FineMappingRow(
+        variantIds = ids,
+        susieFit = list(pip = stats::setNames(pip, ids)),
+        topLoci = data.frame(
+            variant_id = ids,
+            pip = pip,
+            cs_95 = ifelse(seq_along(idx) %in% cs, "susie_1", "susie_0"),
+            cs_95_purity = ifelse(seq_along(idx) %in% cs, purity, 0)
+        )
+    )
+}
+
+# Two genes of one context sharing variants 3 and 4.
+.fma_qtl <- function() {
+    QtlFineMappingResult(
+        studyName = c("Q", "Q"),
+        context = c("ctx", "ctx"),
+        trait = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(
+            .fma_row(1:4, c(0.7, 0.2, 0.05, 0.05), cs = 1:2, purity = 0.9),
+            .fma_row(3:6, c(0.6, 0.1, 0.2, 0.1), cs = c(1L, 3L), purity = 0.3)
+        )
+    )
+}
+
+.fma_col <- function(annot, type) {
+    unname(SummarizedExperiment::assay(annot, "annotations")[,
+        paste0("Q|ctx|susie|", type)
+    ])
+}
+
+test_that("fineMappingAnnotations builds max and summed PIP over the traits", {
+    annot <- fineMappingAnnotations(.fma_qtl(), .fma_ref())
+    # Variant 3 carries both genes: 0.05 and 0.6.
+    expect_equal(.fma_col(annot, "maxCpp"), c(0.7, 0.2, 0.6, 0.1, 0.2, 0.1))
+    expect_equal(.fma_col(annot, "sumPip"), c(0.7, 0.2, 0.65, 0.15, 0.2, 0.1))
+    expect_equal(.fma_col(annot, "highPip"), c(1, 0, 1, 0, 0, 0))
+    expect_equal(.fma_col(annot, "credibleSet"), c(1, 1, 1, 0, 1, 0))
+})
+
+test_that("fineMappingAnnotations rows follow the reference", {
+    ref <- .fma_ref()
+    annot <- fineMappingAnnotations(.fma_qtl(), ref)
+    expect_identical(nrow(annot), length(ref))
+    expect_identical(
+        GenomicRanges::start(SummarizedExperiment::rowRanges(annot)),
+        GenomicRanges::start(ref)
+    )
+    meta <- as.data.frame(SummarizedExperiment::colData(annot))
+    expect_identical(
+        meta$name,
+        paste0("Q|ctx|susie|", c("maxCpp", "sumPip", "credibleSet", "highPip"))
+    )
+    expect_identical(unique(meta$tier), "candidate")
+    expect_identical(
+        meta$type,
+        c("continuous", "continuous", "binary", "binary")
+    )
+    baseline <- fineMappingAnnotations(.fma_qtl(), ref, tier = "baseline")
+    expect_identical(
+        unique(SummarizedExperiment::colData(baseline)$tier),
+        "baseline"
+    )
+})
+
+test_that("fineMappingAnnotations matches a reference variant stored flipped", {
+    annot <- fineMappingAnnotations(.fma_qtl(), .fma_ref(flip = 1L))
+    expect_equal(.fma_col(annot, "maxCpp")[[1L]], 0.7)
+})
+
+test_that("fineMappingAnnotations takes the coverage, purity and threshold", {
+    qtl <- .fma_qtl()
+    ref <- .fma_ref()
+    pure <- fineMappingAnnotations(
+        qtl,
+        ref,
+        types = "credibleSet",
+        minPurity = 0.5
+    )
+    expect_equal(.fma_col(pure, "credibleSet"), c(1, 1, 0, 0, 0, 0))
+    low <- fineMappingAnnotations(
+        qtl,
+        ref,
+        types = "highPip",
+        pipThreshold = 0.2
+    )
+    expect_equal(.fma_col(low, "highPip"), c(1, 1, 1, 0, 1, 0))
+    # No credible sets were stored at 70% coverage.
+    expect_warning(
+        none <- fineMappingAnnotations(
+            qtl,
+            ref,
+            types = c("maxCpp", "credibleSet"),
+            coverage = 0.7
+        ),
+        "dropping 1 column"
+    )
+    expect_identical(colnames(none), "Q|ctx|susie|maxCpp")
+})
+
+test_that("fineMappingAnnotations refuses bad arguments", {
+    expect_error(
+        fineMappingAnnotations(.fma_qtl(), .fma_ref(), types = "meanPip"),
+        "must be one of"
+    )
+    expect_error(
+        fineMappingAnnotations(.fma_qtl(), .fma_ref(), tier = "tested"),
+        "must be one of"
+    )
+    expect_error(fineMappingAnnotations(.fma_qtl(), list()), "LdStatistic")
+})
+
+test_that("estimateH2 takes fineMappingAnnotations as candidates", {
+    n <- 40L
+    ref <- .fma_ref(n = n, nBlocks = 4L)
+    set.seed(5)
+    df <- data.frame(
+        SNP = paste0("rs", seq_len(n)),
+        CHR = "chr1",
+        BP = seq_len(n) * 100L,
+        A1 = "G",
+        A2 = "A",
+        Z = stats::rnorm(n, sd = 1.5),
+        N = 50000
+    )
+    ss <- GwasSumStats(
+        studyName = "t",
+        entry = list(.dfToGwasGr(df)),
+        genome = "hg19",
+        ldReference = makeTestGwasGenotypeHandle()
+    )
+    qtl <- QtlFineMappingResult(
+        "Q",
+        "ctx",
+        "g1",
+        "susie",
+        list(.fma_row(
+            seq(2L, n, by = 3L),
+            rep(0.3, length(seq(2L, n, by = 3L))),
+            cs = 1:3,
+            purity = 0.9
+        ))
+    )
+    annot <- fineMappingAnnotations(
+        qtl,
+        ref,
+        types = c("maxCpp", "credibleSet")
+    )
+    for (method in c("sldsc", "gldsc")) {
+        z <- scoreStats(estimateH2(
+            ss,
+            ref,
+            method = method,
+            annotations = annot
+        ))$z
+        expect_length(z, 2L)
+        expect_true(all(is.finite(z)), info = method)
+    }
+})

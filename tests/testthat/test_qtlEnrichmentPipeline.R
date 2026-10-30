@@ -224,7 +224,7 @@ test_that("qtlEnrichmentPipeline: keys a QTL outcome side by its trait", {
         ldReference = .qep_makeHandle()
     )
     local_mocked_bindings(
-        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .qtlEnrichmentCoded = .qep_mockEnrichment(2.0),
         .package = "pecotmr"
     )
     out <- qtlEnrichmentPipeline(
@@ -239,7 +239,7 @@ test_that("qtlEnrichmentPipeline: keys a QTL outcome side by its trait", {
 
 test_that("qtlEnrichmentPipeline: pairs two GWAS collections", {
     local_mocked_bindings(
-        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .qtlEnrichmentCoded = .qep_mockEnrichment(2.0),
         .package = "pecotmr"
     )
     out <- qtlEnrichmentPipeline(
@@ -261,7 +261,7 @@ test_that("qtlEnrichmentPipeline: a QTL outcome may carry no ldReference", {
     # The RSS-derived requirement is a GWAS-side contract; an individual-level
     # QTL outcome has no panel to check.
     local_mocked_bindings(
-        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .qtlEnrichmentCoded = .qep_mockEnrichment(2.0),
         .package = "pecotmr"
     )
     out <- qtlEnrichmentPipeline(
@@ -339,7 +339,7 @@ test_that("qtlEnrichmentPipeline: returns one row per (gwasStudy, qtlStudy, qtlC
     gfmr <- .qep_makeGwasFmr()
     qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
     local_mocked_bindings(
-        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .qtlEnrichmentCoded = .qep_mockEnrichment(2.0),
         .package = "pecotmr"
     )
     out <- qtlEnrichmentPipeline(
@@ -372,7 +372,7 @@ test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a con
     gfmr <- .qep_makeGwasFmr()
     capturedRegions <- list()
     local_mocked_bindings(
-        qtlEnrichment = function(gwasPip, susieQtlRegions, ...) {
+        .qtlEnrichmentCoded = function(gwasPip, susieQtlRegions, ...) {
             capturedRegions[[length(capturedRegions) + 1L]] <<- susieQtlRegions
             .qep_mockEnrichment(2.0)()
         },
@@ -393,7 +393,7 @@ test_that("qtlEnrichmentPipeline: qtlEnrichment failure produces a warning + ski
     gfmr <- .qep_makeGwasFmr()
     qfmr <- .qep_makeQtlFmr()
     local_mocked_bindings(
-        qtlEnrichment = function(...) stop("synthetic failure"),
+        .qtlEnrichmentCoded = function(...) stop("synthetic failure"),
         .package = "pecotmr"
     )
     expect_warning(
@@ -509,9 +509,115 @@ test_that(".enrBuildGwasPipVector: conflicting PIPs across blocks errors", {
         ldReference = .qep_makeHandle()
     )
     expect_error(
-        pecotmr:::.enrBuildGwasPipVector(g, .qep_gwasIdent("G1")),
+        pecotmr:::.enrBuildGwasPipVector(g, .qep_gwasIdent("G1"), "error"),
         "conflicting PIPs"
     )
+})
+
+# ===========================================================================
+# qtlEnrichmentPipeline(): a variant repeated across GWAS blocks
+# ===========================================================================
+
+# Two GWAS blocks sharing their boundary variant chr1:200, to which each
+# block's fit gives its own PIP. `region` gives the blocks' windows.
+.qep_boundaryGwasFmr <- function(region = NULL, pips = c(0.3, 0.6)) {
+    e1 <- .qep_makeFmEntry(
+        variant_ids = c("chr1:100:A:G", "chr1:200:A:G"),
+        pip = c(0.5, pips[[1L]])
+    )
+    e2 <- .qep_makeFmEntry(
+        variant_ids = c("chr1:200:A:G", "chr1:300:A:G"),
+        pip = c(pips[[2L]], 0.1)
+    )
+    GwasFineMappingResult(
+        studyName = c("G1", "G1"),
+        method = c("susie", "susie"),
+        entry = list(e1, e2),
+        region = region,
+        ldReference = .qep_makeHandle()
+    )
+}
+
+.qep_windows <- function(starts, ends) {
+    GenomicRanges::GRanges("chr1", IRanges::IRanges(starts, ends))
+}
+
+# The GWAS PIP vector qtlEnrichmentPipeline() hands the estimator.
+.qep_capturedGwasPip <- function(gwasFmr, ...) {
+    captured <- NULL
+    mock <- .qep_mockEnrichment()
+    local_mocked_bindings(
+        .qtlEnrichmentCoded = function(gwasPip, susieQtlRegions, ...) {
+            # The pipeline hands the PIPs with their variants; named here as
+            # the variants' ids.
+            variants <- list(...)$gwasVariants
+            captured <<- set_names(
+                gwasPip,
+                pecotmr:::.variantTableIds(variants)
+            )
+            mock(gwasPip, susieQtlRegions, ...)
+        },
+        .package = "pecotmr"
+    )
+    qtlEnrichmentPipeline(gwasFmr, .qep_makeQtlFmr(), verbose = FALSE, ...)
+    captured
+}
+
+test_that("qtlEnrichmentPipeline: keeps the largest of conflicting PIPs", {
+    pip <- .qep_capturedGwasPip(.qep_boundaryGwasFmr())
+    expect_equal(
+        pip,
+        c(`chr1:100:A:G` = 0.5, `chr1:200:A:G` = 0.6, `chr1:300:A:G` = 0.1)
+    )
+})
+
+test_that("qtlEnrichmentPipeline: duplicatePips = 'error' refuses conflicts", {
+    expect_error(
+        .qep_capturedGwasPip(.qep_boundaryGwasFmr(), duplicatePips = "error"),
+        "'chr1:200:A:G' appears with conflicting PIPs"
+    )
+    expect_error(
+        .qep_capturedGwasPip(.qep_boundaryGwasFmr(), duplicatePips = "first"),
+        "must be one of"
+    )
+})
+
+test_that("qtlEnrichmentPipeline: 'blockEnd' keeps the block ending at the variant", {
+    # The upstream block's window ends at chr1:200; the downstream one starts
+    # there.
+    pip <- .qep_capturedGwasPip(
+        .qep_boundaryGwasFmr(.qep_windows(c(1, 200), c(200, 400))),
+        duplicatePips = "blockEnd"
+    )
+    expect_equal(pip[["chr1:200:A:G"]], 0.3)
+    expect_length(pip, 3L)
+})
+
+test_that("qtlEnrichmentPipeline: 'blockEnd' refuses a copy it cannot choose", {
+    # No window given, or none ending at the variant: nothing to decide by.
+    for (region in list(NULL, .qep_windows(c(1, 150), c(250, 400)))) {
+        expect_error(
+            .qep_capturedGwasPip(
+                .qep_boundaryGwasFmr(region),
+                duplicatePips = "blockEnd"
+            ),
+            "cannot choose between them: 0 of its blocks"
+        )
+    }
+})
+
+test_that("qtlEnrichmentPipeline: agreeing copies merge under every policy", {
+    for (policy in c("max", "error", "blockEnd")) {
+        pip <- .qep_capturedGwasPip(
+            .qep_boundaryGwasFmr(pips = c(0.3, 0.3)),
+            duplicatePips = policy
+        )
+        expect_equal(
+            pip,
+            c(`chr1:100:A:G` = 0.5, `chr1:200:A:G` = 0.3, `chr1:300:A:G` = 0.1),
+            info = policy
+        )
+    }
 })
 
 test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes for a (study, context) hit", {
@@ -680,6 +786,7 @@ test_that("qtlEnrichment: errors when piGwas resolves to zero", {
         qtlEnrichment(
             gwasPip = zeroGwas,
             susieQtlRegions = fx$susieQtlRegions,
+            numGwas = 5000,
             piQtl = 0.5,
             BPPARAM = BiocParallel::SerialParam(),
             verbose = FALSE
@@ -767,6 +874,721 @@ test_that("qtlEnrichment: tracks unmatched QTL variants, either alignNames", {
     }
 })
 
+
+# One-hot QTL fixtures for the enrichment kernel. Every alpha row puts all of
+# its mass on one variant, so each imputation round samples the same variants
+# whatever the random stream: the estimates are exactly reproducible, and do
+# not depend on how a standard library implements std::discrete_distribution.
+
+.qeh_ids <- function(n = 200L) {
+    sprintf("chr1:%d:A:G", 100L * seq_len(n))
+}
+
+# A GWAS PIP vector over .qeh_ids(): background 0.001, with high PIPs on the
+# last ten variants.
+.qeh_gwasPip <- function() {
+    stats::setNames(
+        c(
+            rep(0.001, 190),
+            0.9,
+            0.8,
+            0.5,
+            0.3,
+            0.2,
+            0.1,
+            0.05,
+            0.02,
+            0.01,
+            0.6
+        ),
+        .qeh_ids()
+    )
+}
+
+# A region over variants `idx` of the GWAS panel whose effects each sit on the
+# variant at position `hits[l]` within the region. `ids` relabels the region's
+# variants, e.g. to put some outside the GWAS panel.
+.qeh_oneHotRegion <- function(
+    idx,
+    hits,
+    priorVariance = c(0.5, 0.2)[seq_along(hits)],
+    ids = .qeh_ids()[idx]
+) {
+    alpha <- matrix(0, length(hits), length(idx))
+    alpha[cbind(seq_along(hits), hits)] <- 1
+    list(
+        alpha = alpha,
+        pip = stats::setNames(as.numeric(colSums(alpha) > 0), ids),
+        prior_variance = priorVariance
+    )
+}
+
+# Three regions: r1's effects sit on variants 191 (GWAS PIP 0.9) and 152, r2's
+# on 192 (0.8) and 195 (0.2), r3's on two background variants.
+.qeh_oneHotRegions <- function() {
+    list(
+        r1 = .qeh_oneHotRegion(150:200, c(42, 3)),
+        r2 = .qeh_oneHotRegion(170:200, c(23, 26)),
+        r3 = .qeh_oneHotRegion(1:60, c(5, 40))
+    )
+}
+
+# ===========================================================================
+# qtlEnrichment(): pinned estimates, null fits, fit validation, threads
+# Built on the one-hot fixtures above, whose sampling is
+# deterministic.
+# ===========================================================================
+
+.qep_oneHotRun <- function(
+    regions = .qeh_oneHotRegions(),
+    numGwas = 5000,
+    piQtl = 0.01,
+    ...
+) {
+    qtlEnrichment(
+        .qeh_gwasPip(),
+        regions,
+        numGwas = numGwas,
+        piQtl = piQtl,
+        impN = 3,
+        seed = 1L,
+        verbose = FALSE,
+        ...
+    )
+}
+
+test_that("qtlEnrichment: one-hot fixture reproduces the pinned estimates", {
+    # Recorded from the kernel before its fits were integer-coded and null
+    # fits allowed. Without shrinkage the shrunk and unshrunk a1 coincide.
+    pinned <- c(
+        `Intercept` = -21.896577386392181,
+        `sd (intercept)` = 11.186832846318783,
+        `Enrichment (no shrinkage)` = 19.284745626108926,
+        `Enrichment (w/ shrinkage)` = 19.284745626108926,
+        `sd (no shrinkage)` = 13.735002410315799,
+        `sd (w/ shrinkage)` = 13.735002410315799,
+        `Alternative (coloc) p1` = 3.0624743716206618e-10,
+        `Alternative (coloc) p2` = 0.0093161918064975369,
+        `Alternative (coloc) p12` = 0.00068380819350246172,
+        `Effective MI rounds` = 3
+    )
+    res <- .qep_oneHotRun(lambda = 0)
+    expect_equal(unlist(res[names(pinned)]), pinned, tolerance = 1e-10)
+})
+
+test_that("qtlEnrichment: one-hot fixture reproduces the pinned shrunk a1", {
+    keys <- c(
+        "Enrichment (no shrinkage)",
+        "Enrichment (w/ shrinkage)",
+        "sd (no shrinkage)",
+        "sd (w/ shrinkage)"
+    )
+    single <- .qep_oneHotRun(lambda = 1)
+    double <- .qep_oneHotRun(
+        lambda = 1,
+        doubleShrinkage = TRUE,
+        besselCorrection = FALSE
+    )
+    expect_equal(
+        unname(unlist(single[keys])),
+        c(
+            19.284745626108926,
+            0.10168582132370414,
+            13.735002410315799,
+            0.99736008393071596
+        ),
+        tolerance = 1e-10
+    )
+    expect_equal(
+        unname(unlist(double[keys])),
+        c(
+            19.284745626108926,
+            0.050977308844208112,
+            13.735002410315799,
+            0.70617157949200415
+        ),
+        tolerance = 1e-10
+    )
+})
+
+test_that("qtlEnrichment: a null QTL fit samples nothing instead of aborting", {
+    keys <- c(
+        "Intercept",
+        "Enrichment (no shrinkage)",
+        "sd (no shrinkage)",
+        "Alternative (coloc) p12"
+    )
+    base <- .qep_oneHotRun(lambda = 0)
+    # Every effect of prior variance 0: the kernel used to stop on this.
+    nullFit <- .qeh_oneHotRegion(61:80, c(1, 2), priorVariance = c(0, 0))
+    res <- .qep_oneHotRun(
+        c(.qeh_oneHotRegions(), list(n = nullFit)),
+        lambda = 0
+    )
+    expect_equal(unlist(res[keys]), unlist(base[keys]))
+    expect_equal(res[["Null QTL fits"]], 1L)
+    # A fit already trimmed to its non-null effects has a 0-row alpha.
+    trimmed <- list(
+        alpha = matrix(0, 0L, 3L),
+        pip = stats::setNames(rep(0, 3), .qeh_ids()[61:63]),
+        prior_variance = numeric(0)
+    )
+    res <- .qep_oneHotRun(
+        c(.qeh_oneHotRegions(), list(n = trimmed)),
+        lambda = 0
+    )
+    expect_equal(unlist(res[keys]), unlist(base[keys]))
+})
+
+test_that("qtlEnrichment: refuses a tuple made only of null fits", {
+    nullFit <- .qeh_oneHotRegion(1:10, c(1, 2), priorVariance = c(0, 0))
+    expect_error(.qep_oneHotRun(list(a = nullFit)), "nothing to sample")
+})
+
+test_that("qtlEnrichment: refuses malformed fits, naming them", {
+    ok <- .qeh_oneHotRegion(1:10, c(1, 2))
+    run <- function(bad) .qep_oneHotRun(list(good = ok, bad = bad))
+    # A null_weight fit carries one more alpha column than it has variants.
+    extraColumn <- ok
+    extraColumn$alpha <- cbind(ok$alpha, 0)
+    expect_error(run(extraColumn), "bad: alpha has 11 columns for 10 pip")
+    shortV <- ok
+    shortV$prior_variance <- 0.5
+    expect_error(run(shortV), "bad: alpha has 2 rows for 1 prior variances")
+    infV <- ok
+    infV$prior_variance <- c(Inf, 0.2)
+    expect_error(run(infV), "bad: prior variances must be finite")
+    nanAlpha <- ok
+    nanAlpha$alpha[1, 2] <- NaN
+    expect_error(run(nanAlpha), "bad: alpha must be finite and non-negative")
+    negativeAlpha <- ok
+    negativeAlpha$alpha[1, 1:2] <- c(1.1, -0.1)
+    expect_error(
+        run(negativeAlpha),
+        "bad: alpha must be finite and non-negative"
+    )
+    offSum <- ok
+    offSum$alpha[1, ] <- offSum$alpha[1, ] / 2
+    expect_error(run(offSum), "bad: an alpha row of positive prior variance")
+})
+
+test_that("qtlEnrichment: estimates do not depend on the thread count", {
+    skip_on_os("windows")
+    fx <- .qep_makeRealKernelInputs()
+    run <- function(bp) {
+        qtlEnrichment(
+            fx$gwasPip,
+            fx$susieQtlRegions,
+            numGwas = 5000,
+            piQtl = 0.5,
+            impN = 6,
+            BPPARAM = bp,
+            seed = 7L,
+            verbose = FALSE
+        )
+    }
+    expect_identical(
+        run(BiocParallel::SerialParam()),
+        run(BiocParallel::MulticoreParam(2))
+    )
+})
+
+test_that("qtlEnrichment: verbose = FALSE is silent", {
+    expect_silent(.qep_oneHotRun())
+})
+
+test_that("qtlEnrichment: reports per-round diagnostics", {
+    # r4's second effect sits on a variant the GWAS vector does not carry:
+    # one of the eight variants sampled each round.
+    r4 <- .qeh_oneHotRegion(
+        1:10,
+        c(3, 7),
+        ids = c(.qeh_ids()[1:5], sprintf("chr2:%d:C:T", 1:5))
+    )
+    regions <- c(.qeh_oneHotRegions(), list(r4 = r4))
+    res <- .qep_oneHotRun(regions, lambda = 0)
+    expect_equal(res[["Missing proportion per MI round"]], rep(1 / 8, 3))
+    expect_identical(res[["EM converged per MI round"]], rep(TRUE, 3))
+    expect_identical(res[["Null QTL fits"]], 0L)
+    expect_identical(
+        res$unused_xqtl_variants$r4,
+        sprintf("chr2:%d:C:T", 1:5)
+    )
+    expect_null(res$unused_xqtl_variants$r1)
+    msgs <- testthat::capture_messages(qtlEnrichment(
+        .qeh_gwasPip(),
+        regions,
+        numGwas = 5000,
+        piQtl = 0.01,
+        impN = 3,
+        seed = 1L,
+        verbose = TRUE
+    ))
+    expect_match(
+        paste(msgs, collapse = ""),
+        "missing from the GWAS PIP vector: 0.125"
+    )
+})
+
+# An R transcription of fastenloc's enrichment estimator
+# (github.com/xqwen/fastenloc, src/controller.cc: run_EM and the
+# multiple-imputation post-processing of enrich_est), to check the C++ kernel
+# against the original method. It takes the variants each imputation round
+# samples directly, so a test can feed it what a one-hot fixture (above)
+# makes every round of the kernel sample.
+
+# One round's EM. `gwasPip` and `eqtlSample` run over every variant fastenloc
+# reads, GWAS and QTL alike; a QTL variant the GWAS file lacks has GWAS PIP 0.
+.flr_runEm <- function(gwasPip, eqtlSample, pGwas, pEqtl, totalSnp) {
+    a0 <- log(pGwas / (1 - pGwas))
+    a1 <- 0
+    r0 <- exp(a0)
+    r1 <- exp(a0 + a1)
+    rm <- pGwas / (1 - pGwas)
+    val <- gwasPip
+    val[val == 1] <- 1 - 1e-8
+    odds <- val / (1 - val)
+    sampled <- eqtlSample == 1
+    repeat {
+        e0g0 <- (1 - pGwas) * (1 - pEqtl)
+        e0g1 <- (1 - pEqtl) * pGwas
+        e1g0 <- (1 - pGwas) * pEqtl
+        e1g1 <- pGwas * pEqtl
+        post0 <- r0 * (odds[!sampled] / rm)
+        post0 <- post0 / (1 + post0)
+        post1 <- r1 * (odds[sampled] / rm)
+        post1 <- post1 / (1 + post1)
+        e0g1 <- e0g1 + sum(post0)
+        e0g0 <- e0g0 + sum(1 - post0)
+        e1g1 <- e1g1 + sum(post1)
+        e1g0 <- e1g0 + sum(1 - post1)
+        e0g0 <- e0g0 + totalSnp - (e0g0 + e0g1 + e1g0 + e1g1)
+        a1New <- log(e1g1 * e0g0 / (e1g0 * e0g1))
+        if (abs(a1New - a1) < 0.01) {
+            # fastenloc keeps the previous iteration's a0 here.
+            return(c(
+                a0 = a0,
+                a1 = a1New,
+                v0 = 1 / e0g1 + 1 / e0g0,
+                v1 = 1 / e0g0 + 1 / e1g0 + 1 / e1g1 + 1 / e0g1
+            ))
+        }
+        a1 <- a1New
+        a0 <- log(e0g1 / e0g0)
+        r0 <- exp(a0)
+        r1 <- exp(a0 + a1)
+    }
+}
+
+# The post-processing of the rounds' estimates (a matrix with rows a0, a1, v0,
+# v1): outlier removal on the shrunk a1, which fastenloc's command line always
+# applies; Rubin's rules; the intercept from the unshrunk a1; double
+# shrinkage; and the coloc priors from the intercept and the shrunk a1.
+# `lambda` is fastenloc's -s, where 0 means no shrinkage (a prior variance of
+# 1e16). fastenloc takes the outliers' population sd in one pass; two passes
+# give the same value without its cancellation.
+.flr_combine <- function(rounds, pGwas, pEqtl, lambda) {
+    pv <- if (lambda == 0) 1e16 else 1 / lambda
+    shrunk <- rounds["a1", ] * pv / (pv + rounds["v1", ])
+    mu <- mean(shrunk)
+    sdev <- sqrt(mean((shrunk - mu)^2))
+    rounds <- rounds[, !(abs(shrunk - mu) > 3 * sdev), drop = FALSE]
+    m <- ncol(rounds)
+    a0 <- rounds["a0", ]
+    a1 <- rounds["a1", ]
+    v1 <- rounds["v1", ]
+    postA1 <- a1 * pv / (pv + v1)
+    postVar <- 1 / (1 / pv + 1 / v1)
+    sd0 <- sqrt(mean(rounds["v0", ]) + stats::var(a0) * (m + 1) / m)
+    sd1 <- sqrt(mean(v1) + stats::var(a1) * (m + 1) / m)
+    sd1Shrink <- sqrt(mean(postVar) + stats::var(postA1) * (m + 1) / m)
+    intercept <- log(pGwas / (1 + pEqtl * exp(mean(a1)) - pEqtl - pGwas))
+    a1Shrink <- pv * mean(postA1) / (pv + sd1Shrink^2)
+    sd1Shrink <- sqrt(1 / (1 / pv + 1 / sd1Shrink^2))
+    c(
+        `Intercept` = intercept,
+        `sd (intercept)` = sd0,
+        `Enrichment (no shrinkage)` = mean(a1),
+        `Enrichment (w/ shrinkage)` = a1Shrink,
+        `sd (no shrinkage)` = sd1,
+        `sd (w/ shrinkage)` = sd1Shrink,
+        `Alternative (coloc) p1` = (1 - pEqtl) *
+            exp(intercept) /
+            (1 + exp(intercept)),
+        `Alternative (coloc) p2` = pEqtl / (1 + exp(intercept + a1Shrink)),
+        `Alternative (coloc) p12` = pEqtl *
+            exp(intercept + a1Shrink) /
+            (1 + exp(intercept + a1Shrink)),
+        `Effective MI rounds` = m
+    )
+}
+
+# fastenloc on qtlEnrichment()'s inputs, every round sampling the variant ids
+# `sampled`. Its variants are the GWAS ones plus the QTL ones they lack, its
+# total is -total_variants raised to their number, and its priors are the
+# GWAS and QTL PIP mass over that total.
+.flr_reference <- function(
+    gwasPip,
+    regions,
+    sampled,
+    numGwas = NULL,
+    lambda = 1,
+    impN = 3
+) {
+    qtlIds <- unique(unlist(
+        lapply(regions, function(x) names(x$pip)),
+        use.names = FALSE
+    ))
+    variants <- c(names(gwasPip), setdiff(qtlIds, names(gwasPip)))
+    pip <- c(unname(gwasPip), rep(0, length(variants) - length(gwasPip)))
+    totalSnp <- max(if (is.null(numGwas)) 0 else numGwas, length(variants))
+    pGwas <- sum(gwasPip) / totalSnp
+    pEqtl <- sum(unlist(lapply(regions, `[[`, "pip"))) / totalSnp
+    round <- .flr_runEm(
+        pip,
+        as.integer(variants %in% sampled),
+        pGwas,
+        pEqtl,
+        totalSnp
+    )
+    rounds <- matrix(
+        round,
+        nrow = length(round),
+        ncol = impN,
+        dimnames = list(names(round), NULL)
+    )
+    .flr_combine(rounds, pGwas, pEqtl, lambda)
+}
+
+# The variants every round samples from one-hot regions: the hit of each
+# effect with positive prior variance.
+.flr_oneHotSamples <- function(regions) {
+    unlist(
+        lapply(regions, function(x) {
+            alpha <- x$alpha[x$prior_variance > 0, , drop = FALSE]
+            names(x$pip)[max.col(alpha, ties.method = "first")]
+        }),
+        use.names = FALSE
+    )
+}
+
+# ===========================================================================
+# qtlEnrichment(): fastenloc semantics
+# Checked against the R transcription of fastenloc above. fastenloc's EM keeps the previous iteration's
+# intercept at convergence, so only sd (intercept) is not compared.
+# ===========================================================================
+
+# The one-hot regions plus r4, whose effects sit on a GWAS variant and on
+# chr2:2, a variant the GWAS vector lacks; chr2:1 and chr2:3-5 are QTL-only
+# variants no round samples.
+.qep_qtlOnlyRegions <- function() {
+    r4 <- .qeh_oneHotRegion(
+        1:10,
+        c(3, 7),
+        ids = c(.qeh_ids()[1:5], sprintf("chr2:%d:C:T", 1:5))
+    )
+    c(.qeh_oneHotRegions(), list(r4 = r4))
+}
+
+.qep_parityKeys <- function() {
+    c(
+        "Intercept",
+        "Enrichment (no shrinkage)",
+        "Enrichment (w/ shrinkage)",
+        "sd (no shrinkage)",
+        "sd (w/ shrinkage)",
+        "Alternative (coloc) p1",
+        "Alternative (coloc) p2",
+        "Alternative (coloc) p12",
+        "Effective MI rounds"
+    )
+}
+
+test_that("qtlEnrichment: matches fastenloc, QTL-only variants included", {
+    keys <- .qep_parityKeys()
+    for (regions in list(.qeh_oneHotRegions(), .qep_qtlOnlyRegions())) {
+        for (numGwas in list(5000, NULL)) {
+            for (lambda in c(1, 0.5, 0)) {
+                info <- paste0(
+                    length(regions),
+                    " regions, numGwas = ",
+                    deparse(numGwas),
+                    ", lambda = ",
+                    lambda
+                )
+                reference <- .flr_reference(
+                    .qeh_gwasPip(),
+                    regions,
+                    .flr_oneHotSamples(regions),
+                    numGwas = numGwas,
+                    lambda = lambda
+                )
+                res <- suppressWarnings(qtlEnrichment(
+                    .qeh_gwasPip(),
+                    regions,
+                    numGwas = numGwas,
+                    lambda = lambda,
+                    impN = 3,
+                    doubleShrinkage = TRUE,
+                    besselCorrection = FALSE,
+                    seed = 1L,
+                    verbose = FALSE
+                ))
+                expect_equal(
+                    unlist(res[keys]),
+                    reference[keys],
+                    tolerance = 1e-8,
+                    info = info
+                )
+            }
+        }
+    }
+})
+
+test_that("qtlEnrichment: the intercept uses the unshrunk enrichment", {
+    res <- .qep_oneHotRun(lambda = 1)
+    piGwas <- sum(.qeh_gwasPip()) / 5000
+    a1 <- res[["Enrichment (no shrinkage)"]]
+    expect_equal(
+        res[["Intercept"]],
+        log(piGwas / (1 + 0.01 * exp(a1) - 0.01 - piGwas))
+    )
+    a01 <- res[["Intercept"]] + res[["Enrichment (w/ shrinkage)"]]
+    expect_equal(res[["Alternative (coloc) p12"]], 0.01 * plogis(a01))
+})
+
+test_that("qtlEnrichment: a QTL-only variant counts as a GWAS PIP of 0", {
+    # Padding gwasPip with zeros for the QTL-only variants, at a fixed
+    # variant total, changes nothing but the diagnostics.
+    regions <- .qep_qtlOnlyRegions()
+    padded <- c(
+        .qeh_gwasPip(),
+        stats::setNames(rep(0, 5), sprintf("chr2:%d:C:T", 1:5))
+    )
+    keys <- c(.qep_parityKeys(), "sd (intercept)")
+    asGiven <- .qep_oneHotRun(regions, lambda = 1)
+    res <- qtlEnrichment(
+        padded,
+        regions,
+        numGwas = 5000,
+        piQtl = 0.01,
+        impN = 3,
+        seed = 1L,
+        verbose = FALSE
+    )
+    expect_equal(unlist(res[keys]), unlist(asGiven[keys]), tolerance = 1e-10)
+    expect_equal(res[["Missing proportion per MI round"]], rep(0, 3))
+    expect_equal(asGiven[["Missing proportion per MI round"]], rep(1 / 8, 3))
+})
+
+test_that("qtlEnrichment: estimates do not depend on variant or region order", {
+    keys <- c(.qep_parityKeys(), "sd (intercept)")
+    regions <- .qep_qtlOnlyRegions()
+    base <- .qep_oneHotRun(regions, lambda = 1)
+    gwasPip <- .qeh_gwasPip()
+    res <- qtlEnrichment(
+        rev(gwasPip),
+        rev(regions),
+        numGwas = 5000,
+        piQtl = 0.01,
+        impN = 3,
+        seed = 1L,
+        verbose = FALSE
+    )
+    expect_equal(unlist(res[keys]), unlist(base[keys]), tolerance = 1e-10)
+})
+
+test_that("qtlEnrichment: the variant total is the GWAS and QTL-only variants", {
+    regions <- .qep_qtlOnlyRegions()
+    # 200 GWAS variants and 5 QTL-only ones.
+    expect_warning(
+        res <- qtlEnrichment(
+            .qeh_gwasPip(),
+            regions,
+            piQtl = 0.01,
+            impN = 3,
+            seed = 1L,
+            verbose = FALSE
+        ),
+        "numGwas is not provided. Using the 205 distinct variants"
+    )
+    at205 <- .qep_oneHotRun(regions, numGwas = 205)
+    keys <- .qep_parityKeys()
+    expect_equal(unlist(res[keys]), unlist(at205[keys]))
+    expect_warning(
+        below <- .qep_oneHotRun(regions, numGwas = 100),
+        "numGwas \\(100\\) is smaller than the 205 distinct variants"
+    )
+    expect_equal(unlist(below[keys]), unlist(at205[keys]))
+})
+
+test_that("qtlEnrichment: piQtl defaults to the summed QTL PIPs over the total", {
+    regions <- .qep_qtlOnlyRegions()
+    expect_warning(
+        estimated <- qtlEnrichment(
+            .qeh_gwasPip(),
+            regions,
+            numGwas = 5000,
+            impN = 3,
+            seed = 1L,
+            verbose = FALSE
+        ),
+        "piQtl is not provided"
+    )
+    # Four regions of two one-hot effects: 8 units of PIP.
+    supplied <- .qep_oneHotRun(regions, piQtl = 8 / 5000)
+    keys <- c(.qep_parityKeys(), "sd (intercept)")
+    expect_equal(unlist(estimated[keys]), unlist(supplied[keys]))
+})
+
+test_that("qtlEnrichment: refuses priors that do not sum to below 1", {
+    expect_error(
+        .qep_oneHotRun(piQtl = 0.9999),
+        "must sum to less than 1. Supply numGwas"
+    )
+})
+
+test_that("qtlEnrichment: refuses a variant total too small for the data", {
+    # Every GWAS variant is sampled, so no variant is left that is neither
+    # QTL nor causal: the EM's (0, 0) cell is negative.
+    ids <- .qeh_ids(2L)
+    fit <- list(
+        alpha = diag(2),
+        pip = stats::setNames(c(1, 1), ids),
+        prior_variance = c(0.5, 0.2)
+    )
+    expect_error(
+        suppressWarnings(qtlEnrichment(
+            stats::setNames(c(0.5, 0.5), ids),
+            list(a = fit),
+            piQtl = 0.1,
+            impN = 3,
+            seed = 1L,
+            verbose = FALSE
+        )),
+        "variant total is too small for the data in 3 of 3 MI round"
+    )
+})
+
+# ===========================================================================
+# qtlEnrichment(): aligning QTL variant names to the GWAS vector
+# ===========================================================================
+
+# `regions` with the pip names at positions `at` of region `name` replaced.
+.qep_renameIds <- function(regions, name, at, ids) {
+    nm <- names(regions[[name]]$pip)
+    nm[at] <- ids
+    names(regions[[name]]$pip) <- nm
+    regions
+}
+
+.qep_estimates <- function(res) {
+    unlist(res[c(.qep_parityKeys(), "sd (intercept)")])
+}
+
+test_that("qtlEnrichment: aligns swapped and reformatted QTL ids to GWAS ids", {
+    regions <- .qeh_oneHotRegions()
+    # r1's effects sit on chr1:19100 and chr1:15200 (positions 42 and 3),
+    # r2's first on chr1:19200 (position 23).
+    renamed <- .qep_renameIds(
+        regions,
+        "r1",
+        c(42, 3),
+        c("chr1:19100:G:A", "1_15200_A_G")
+    )
+    renamed <- .qep_renameIds(renamed, "r2", 23, "chr1:19200:G:A")
+    base <- .qep_oneHotRun(regions)
+    aligned <- .qep_oneHotRun(renamed)
+    expect_equal(.qep_estimates(aligned), .qep_estimates(base))
+    expect_true(all(vapply(aligned$unused_xqtl_variants, is.null, TRUE)))
+    # Unaligned, the three names match nothing and count as QTL-only.
+    unaligned <- .qep_oneHotRun(renamed, alignNames = FALSE)
+    expect_setequal(
+        unlist(unaligned$unused_xqtl_variants),
+        c("chr1:19100:G:A", "1_15200_A_G", "chr1:19200:G:A")
+    )
+    expect_false(isTRUE(all.equal(
+        .qep_estimates(unaligned),
+        .qep_estimates(base)
+    )))
+})
+
+test_that("qtlEnrichment: an unparseable id leaves the others allele-aware", {
+    # An rsID among a tuple's names used to turn the whole match into exact
+    # string identity, leaving the swapped ids unmatched.
+    withRsid <- .qep_renameIds(.qeh_oneHotRegions(), "r1", 10, "rs999")
+    swapped <- .qep_renameIds(withRsid, "r1", 42, "chr1:19100:G:A")
+    res <- .qep_oneHotRun(swapped)
+    expect_identical(res$unused_xqtl_variants$r1, "rs999")
+    expect_equal(
+        .qep_estimates(res),
+        .qep_estimates(.qep_oneHotRun(withRsid))
+    )
+})
+
+test_that("qtlEnrichment: an exactly spelled GWAS id beats a swapped twin", {
+    # The GWAS vector carries chr1:19100 in both orientations, with
+    # different PIPs; each QTL spelling must take its own.
+    gwasPip <- c(.qeh_gwasPip(), `chr1:19100:G:A` = 0.05)
+    run <- function(regions, alignNames) {
+        qtlEnrichment(
+            gwasPip,
+            regions,
+            numGwas = 5000,
+            piQtl = 0.01,
+            impN = 3,
+            seed = 1L,
+            verbose = FALSE,
+            alignNames = alignNames
+        )
+    }
+    regions <- .qeh_oneHotRegions()
+    swapped <- .qep_renameIds(regions, "r1", 42, "chr1:19100:G:A")
+    for (x in list(regions, swapped)) {
+        expect_equal(
+            .qep_estimates(run(x, TRUE)),
+            .qep_estimates(run(x, FALSE))
+        )
+    }
+    expect_false(isTRUE(all.equal(
+        .qep_estimates(run(regions, TRUE)),
+        .qep_estimates(run(swapped, TRUE))
+    )))
+})
+
+test_that("qtlEnrichment: matches a tuple's ids allele-aware in one call", {
+    calls <- 0L
+    local_mocked_bindings(
+        .matchVariantTables = function(a, b, ...) {
+            calls <<- calls + 1L
+            list(idxA = integer(0), idxB = integer(0), sign = numeric(0))
+        },
+        .package = "pecotmr"
+    )
+    # Every name spelled as a GWAS id: nothing is left to match.
+    .qep_oneHotRun()
+    expect_identical(calls, 0L)
+    # Swapped ids in all three regions: one call for the tuple.
+    renamed <- .qep_renameIds(.qeh_oneHotRegions(), "r1", 42, "chr1:19100:G:A")
+    renamed <- .qep_renameIds(renamed, "r2", 26, "chr1:19500:G:A")
+    renamed <- .qep_renameIds(renamed, "r3", 5, "chr1:500:G:A")
+    .qep_oneHotRun(renamed)
+    expect_identical(calls, 1L)
+})
+
+test_that("qtlEnrichment: refuses gwasPip naming a variant twice", {
+    gwasPip <- .qeh_gwasPip()
+    expect_error(
+        qtlEnrichment(
+            c(gwasPip, gwasPip[1]),
+            .qeh_oneHotRegions(),
+            numGwas = 5000,
+            piQtl = 0.01,
+            verbose = FALSE
+        ),
+        "names variant 'chr1:100:A:G' more than once"
+    )
+})
 
 # ===========================================================================
 # qtlEnrichment(): verbose messages
@@ -972,7 +1794,7 @@ test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies
     )
     qfmr <- .qep_makeQtlFmr()
     local_mocked_bindings(
-        qtlEnrichment = .qep_mockEnrichment(2.0),
+        .qtlEnrichmentCoded = .qep_mockEnrichment(2.0),
         .package = "pecotmr"
     )
     out <- qtlEnrichmentPipeline(
@@ -1021,9 +1843,10 @@ test_that(".enrRunEnrichment turns a stored alignment failure into a warning", {
     expect_warning(
         out <- pecotmr:::.enrRunEnrichment(
             1L,
-            gwasPip = NULL,
+            outcome = NULL,
+            outcomeAt = NULL,
             k = 1L,
-            alignedByTuple = list(cnd),
+            prep = list(aligned = list(cnd), annotations = list(NULL)),
             qtlEnrichmentParam = QtlEnrichmentParam(),
             BPPARAM = BiocParallel::SerialParam(),
             seed = NULL,
@@ -1043,8 +1866,7 @@ test_that(".enrBuildQtlRegionsList reads prior variance under either name", {
     run <- function(fit) {
         local_mocked_bindings(
             .enrMatchRows = function(qtlFmr, ident) 1L,
-            .fmrRowParts = function(qtlFmr, i) "parts",
-            susieFit = function(parts) fit,
+            .fmrFitsAt = function(x, idx) list(fit),
             .package = "pecotmr"
         )
         pecotmr:::.enrBuildQtlRegionsList("fmr", "ident")
@@ -1140,7 +1962,7 @@ test_that("qtlEnrichmentPipeline keeps each fine-mapping method's fits apart", {
     seen <- new.env()
     seen$regions <- integer(0)
     local_mocked_bindings(
-        qtlEnrichment = function(gwasPip, susieQtlRegions, ...) {
+        .qtlEnrichmentCoded = function(gwasPip, susieQtlRegions, ...) {
             seen$regions <- c(seen$regions, length(susieQtlRegions))
             .qep_mockEnrichment(2.0)(gwasPip, susieQtlRegions, ...)
         },
@@ -1175,7 +1997,7 @@ test_that("qtlEnrichmentPipeline keeps each fine-mapping method's fits apart", {
 test_that("enrichment names a narrowed row's PIPs by its fit's variants", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
     pip <- c(0.5, 0.3, 0.2)
-    fit <- list(pip = pip, alpha = matrix(pip, 1L), V = 1)
+    fit <- list(pip = set_names(pip, vids), alpha = matrix(pip, 1L), V = 1)
     tl <- data.frame(variant_id = vids, pip = pip)
     row <- FineMappingRow(vids, fit, tl)
     gwas <- GwasFineMappingResult(
@@ -1197,6 +2019,22 @@ test_that("enrichment names a narrowed row's PIPs by its fit's variants", {
     region <- pecotmr:::.enrRowRegion(1L, endoapply(qtl, utils::head, 2L))
     expect_equal(region$pip, set_names(pip, vids))
     expect_equal(region$prior_variance, 1)
+    # A narrowed row whose fit names none has nothing to name them by.
+    unnamed <- QtlFineMappingResult(
+        studyName = "q1",
+        context = "c1",
+        trait = "g1",
+        method = "susie",
+        entry = list(FineMappingRow(
+            vids,
+            list(pip = pip, alpha = fit$alpha, V = 1),
+            tl
+        ))
+    )
+    expect_error(
+        pecotmr:::.enrRowRegion(1L, endoapply(unnamed, utils::head, 2L)),
+        "does not name its variables"
+    )
 })
 
 test_that("qtlEnrichmentPipeline warns about narrowed fits on both sides", {

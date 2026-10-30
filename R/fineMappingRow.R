@@ -28,10 +28,11 @@ NULL
 #'   columns are the per-variant \code{topLoci} values.
 #' @slot susieFit The stored fine-mapping fit, or \code{NULL}.
 #' @slot cvResult Cross-validation payload, or \code{NULL}.
-#' @slot fitVariants The ids of the variants the stored fit was made with, in
-#'   the fit's own order, recorded when the row is built; empty for a row with
-#'   no fit. A row narrowed to fewer variants keeps them, which is how reading
-#'   the fit can tell it describes more variants than the row now holds.
+#' @slot derivedColumns The credible-set columns (\code{cs_<coverage>} and
+#'   their \code{_purity} partners) the row does not store because its fit
+#'   reproduces them exactly, followed by \code{"method=<tag>"}, the method
+#'   tag of their labels; every view derives them back. Empty when it stores
+#'   all it was given.
 #' @section Coercion: \code{as(x, "GRanges")} gives the row's variants with
 #'   their per-variant \code{topLoci} columns: the element a collection
 #'   stores for it.
@@ -44,9 +45,13 @@ setClass(
         variants = "GRanges",
         susieFit = "ANY",
         cvResult = "ANY",
-        fitVariants = "character"
+        derivedColumns = "character"
     ),
-    prototype(susieFit = NULL, cvResult = NULL, fitVariants = character(0))
+    prototype(
+        susieFit = NULL,
+        cvResult = NULL,
+        derivedColumns = character(0)
+    )
 )
 
 #' @importFrom checkmate makeAssertCollection assertList
@@ -120,15 +125,346 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (nrow(tl) > 0L && is_in("variant_id", names(tl))) {
         .fmRowCheckIdOrder(vids, as.character(tl$variant_id))
     }
-    gr <- .fmRowAttachPayload(bare, tl)
-    fitted <- length(susieFit) > 0L || !is.null(cvResult)
+    .fmRowBuild(bare, susieFit, tl, cvResult)
+}
+
+# The row from its variant ranges `bare` and the checked table `tl`. The
+# row's variants are its fit's variables, in the fit's order, unless it is a
+# narrowed row trimFineMappingResult() rebuilds, whose fit names them.
+# @noRd
+.fmRowBuild <- function(bare, susieFit, tl, cvResult) {
+    # Placed once: both checks below read the fit at these columns.
+    cols <- .fitColumnsFor(bare, susieFit)
+    gr <- .fmRowDropFitPip(.fmRowAttachPayload(bare, tl), susieFit, cols)
+    cs <- .fmRowDropFitCs(gr, susieFit, cols)
     new(
         "FineMappingRow",
-        variants = gr,
+        variants = cs$variants,
         susieFit = susieFit,
         cvResult = cvResult,
-        fitVariants = if (fitted) .grVariantIds(bare) else character(0)
+        derivedColumns = cs$derived
     )
+}
+
+# The per-variant pip column is not stored when the fit reproduces it
+# exactly: every reader restores it from the fit
+# (.fmRowRestoredVariants()), and storing it twice doubles the PIPs a
+# genome-wide collection holds. A pip the fit does not reproduce -- a row
+# without a fit, or one whose table was edited -- is kept as it is, and so is
+# one outside the place the readers restore it to (.fmRowPipSlot()), so a
+# table comes back with its columns in the order it was given.
+# @noRd
+.fmRowDropFitPip <- function(gr, fit, cols = .fitColumnsFor(gr, fit)) {
+    md <- mcols(gr, use.names = FALSE)
+    if (length(gr) == 0L || !is_in("pip", colnames(md))) {
+        return(gr)
+    }
+    rest <- md[, colnames(md) != "pip", drop = FALSE]
+    if (.fmRowPipSlot(colnames(rest)) != match("pip", colnames(md)) - 1L) {
+        return(gr)
+    }
+    derived <- .fitPipFor(fit, cols)
+    if (is.null(derived) || !identical(derived, as.numeric(md$pip))) {
+        return(gr)
+    }
+    md$pip <- NULL
+    `mcols<-`(gr, value = md)
+}
+
+# The PIP the fit gives the variants at its columns `cols`
+# (.fitColumnsFor()); NULL when the fit carries no PIP vector, or the
+# variants could not be placed in it.
+# @noRd
+.fitPipFor <- function(fit, cols) {
+    pip <- if (is.list(fit)) fit[["pip"]] else NULL
+    if (!is.numeric(pip) || is.null(cols)) {
+        return(NULL)
+    }
+    as.numeric(pip)[cols]
+}
+
+# How many of a row's variant columns `cn` precede its pip: those up to
+# `marginal_p`, else up to `A2`, which is where the fine-mapping table puts
+# it; a table with neither has it first.
+# @noRd
+.fmRowPipSlot <- function(cn) {
+    anchor <- intersect(c("marginal_p", "A2"), cn)
+    if (length(anchor) == 0L) {
+        return(0L)
+    }
+    match(anchor[[1L]], cn)
+}
+
+# How many of a row's variant columns `cn` precede its credible-set block:
+# those up to `logBF`, where buildTopLoci() puts it; in a table without one (a
+# trimmed row, see trimFineMappingResult()), those up to `pip`, or up to
+# where the pip goes when it is not stored either.
+# @noRd
+.fmRowCsSlot <- function(cn) {
+    for (anchor in c("logBF", "pip")) {
+        if (is_in(anchor, cn)) {
+            return(match(anchor, cn))
+        }
+    }
+    .fmRowPipSlot(cn)
+}
+
+# A row's variants with every column the constructor dropped derived back
+# from its fit: the recorded credible-set columns, then the pip.
+# @noRd
+.fmRowRestoredVariants <- function(row) {
+    .fmRowRestoreFitPip(.fmRowRestoreFitCs(variants(row), row), row)
+}
+
+# `gr` with the pip column the constructor dropped restored from the fit of
+# `row`: added after `marginal_p` (else after `A2`), where the fine-mapping
+# table puts it, or filled where a collection joining rows with and without
+# it left NA. A row whose fit gives no PIP is returned as it is.
+# @noRd
+.fmRowRestoreFitPip <- function(gr, row) {
+    md <- mcols(gr, use.names = FALSE)
+    has <- is_in("pip", colnames(md))
+    if (length(gr) == 0L || (has && !anyNA(md$pip))) {
+        return(gr)
+    }
+    fit <- susieFit(row)
+    if (!is.numeric(if (is.list(fit)) fit[["pip"]])) {
+        return(gr)
+    }
+    derived <- .fitPipFor(fit, .fitColumnsPlaced(gr, fit))
+    if (has) {
+        md$pip <- coalesce(as.numeric(md$pip), derived)
+        return(`mcols<-`(gr, value = md))
+    }
+    .fmRowInsertColumns(gr, list(pip = derived), .fmRowPipSlot(colnames(md)))
+}
+
+# The fit's columns of the variants `gr`, for restoring what the row does not
+# store: an error when they cannot be placed in it (.fitColumnsFor()), since
+# the values the row left to its fit would then be lost without a word.
+# @noRd
+.fitColumnsPlaced <- function(gr, fit) {
+    cols <- .fitColumnsFor(gr, fit)
+    if (is.null(cols)) {
+        .abortUnnamedNarrowedFit(length(gr), .fitWidth(fit))
+    }
+    cols
+}
+
+# `gr` with the columns `cols` inserted after its first `at` variant columns.
+# @noRd
+.fmRowInsertColumns <- function(gr, cols, at) {
+    md <- mcols(gr, use.names = FALSE)
+    `mcols<-`(
+        gr,
+        value = cbind(
+            md[, seq_len(at), drop = FALSE],
+            S4Vectors::DataFrame(cols, check.names = FALSE),
+            md[, setdiff(seq_len(ncol(md)), seq_len(at)), drop = FALSE]
+        )
+    )
+}
+
+# The credible-set columns are not stored either when the fit reproduces
+# them exactly, which is the common case: buildTopLoci() wrote them from the
+# very credible sets the fit keeps (its `sets`, and `sets_secondary` for the
+# other coverages), labelled with the method tag its labels carry. The whole
+# block --
+# every coverage's cs_<C> label, then every cs_<C>_purity, highest coverage
+# first, right after `logBF` as buildTopLoci() lays it out (see
+# .fmRowCsSlot()) -- goes or stays
+# together. It stays whenever the fit cannot give it back exactly: a fit
+# without the credible sets of every coverage (an untrimmed fit with no
+# recorded coverage, a fractional coverage), a table relabelled after the
+# fact (adjustPips()), a row narrowed past its fit's variants, a table not
+# laid out as buildTopLoci() lays it out. Returns the variants and the
+# record of what went.
+# @noRd
+.fmRowDropFitCs <- function(gr, fit, cols = .fitColumnsFor(gr, fit)) {
+    kept <- list(variants = gr, derived = character(0))
+    md <- mcols(gr, use.names = FALSE)
+    block <- .fmRowCsBlock(colnames(md))
+    if (length(gr) == 0L || length(block) == 0L || !is.list(fit)) {
+        return(kept)
+    }
+    labelCols <- names(block$labels)
+    tag <- .fmRowCsLabelTag(md[, labelCols, drop = FALSE])
+    derived <- .fitCsColumns(fit, labelCols, tag, cols, length(gr))
+    if (is.null(derived)) {
+        return(kept)
+    }
+    stored <- as.list(md[, names(derived), drop = FALSE])
+    if (!.fmRowSameCsColumns(stored, derived)) {
+        return(kept)
+    }
+    list(
+        variants = `mcols<-`(
+            gr,
+            value = md[, setdiff(colnames(md), names(derived)), drop = FALSE]
+        ),
+        derived = c(labelCols, str_c("method=", tag))
+    )
+}
+
+# The method tag of a table's credible-set labels ("<tag>_<k>"), read off the
+# labels themselves; NULL unless they all carry the same one.
+# @noRd
+.fmRowCsLabelTag <- function(labels) {
+    values <- unique(as.character(unlist(as.list(labels), use.names = FALSE)))
+    tags <- unique(str_remove(values[!is.na(values)], "_[0-9]+$"))
+    if (length(tags) != 1L || !nzchar(tags)) {
+        return(NULL)
+    }
+    tags
+}
+
+# A row's record of derived credible-set columns, parsed: the cs_<C> label
+# columns, highest coverage first, and the method tag their labels carry,
+# which the record ends with as "method=<tag>".
+# @noRd
+.fmRowCsRecord <- function(record) {
+    tagAt <- str_detect(record, "^method=")
+    list(
+        labels = record[!tagAt],
+        tag = if (any(tagAt)) str_remove(record[tagAt][[1L]], "^method=")
+    )
+}
+
+# The credible-set block of a table with variant columns `cn`, when it is laid
+# out as buildTopLoci() lays it out: the cs_<C> labels by decreasing coverage
+# then their purities, contiguous, where .fmRowCsSlot() puts them. NULL
+# otherwise.
+# @noRd
+.fmRowCsBlock <- function(cn) {
+    labelCols <- cn[str_detect(cn, "^cs_[0-9]+$")]
+    if (length(labelCols) == 0L) {
+        return(NULL)
+    }
+    coverage <- as.numeric(str_remove(labelCols, "^cs_")) / 100
+    labelCols <- labelCols[order(coverage, decreasing = TRUE)]
+    expected <- c(labelCols, str_c(labelCols, "_purity"))
+    at <- .fmRowCsSlot(setdiff(cn, expected))
+    if (!identical(cn[at + seq_along(expected)], expected)) {
+        return(NULL)
+    }
+    list(labels = set_names(sort(coverage, decreasing = TRUE), labelCols))
+}
+
+# Whether the stored credible-set columns are exactly the derived ones:
+# labels compared as text, purities as numbers.
+# @noRd
+.fmRowSameCsColumns <- function(stored, derived) {
+    isLabel <- !str_detect(names(derived), "_purity$")
+    asStored <- c(
+        map(stored[isLabel], as.character),
+        map(stored[!isLabel], as.numeric)
+    )
+    identical(asStored[names(derived)], derived)
+}
+
+# The credible-set columns `labelCols` (cs_<C>, highest coverage first) and
+# their purities, as buildTopLoci() derives them from the fit's credible sets
+# at each coverage, for the variants at the fit's columns `col`
+# (.fitColumnsFor()) of a row of `n` variants. NULL when the fit cannot give
+# them: no method tag, a coverage it kept no credible sets for, or a variant
+# it was not made with or could not be placed in it.
+# @noRd
+.fitCsColumns <- function(fit, labelCols, tag, col, n) {
+    if (is.null(tag) || is.null(col) || anyNA(col)) {
+        return(NULL)
+    }
+    perCoverage <- map(
+        as.numeric(str_remove(labelCols, "^cs_")) / 100,
+        .fitCsAtCoverage,
+        fit = fit,
+        nV = coalesce(.fitWidth(fit), n)
+    )
+    if (any(map_lgl(perCoverage, is.null))) {
+        return(NULL)
+    }
+    c(
+        set_names(
+            map(perCoverage, function(p) .btlCsLabel(p$effect[col], tag)),
+            labelCols
+        ),
+        set_names(
+            map(perCoverage, function(p) p$purity[col]),
+            str_c(labelCols, "_purity")
+        )
+    )
+}
+
+# One coverage's per-variable effect index and purity, as .btlCsMembership()
+# computes them, from the credible sets the fit keeps for that coverage; NULL
+# when it keeps none.
+# @noRd
+.fitCsAtCoverage <- function(coverage, fit, nV) {
+    sets <- .csSetsForCoverage(fit, coverage)
+    if (is.null(sets)) {
+        return(NULL)
+    }
+    tables <- list(list(sets = sets))
+    position <- .fmCsIdxAtCoverage(coverage, coverage, tables, nV, quiet = TRUE)
+    list(
+        effect = .fmEffectIdxAtCoverage(coverage, position, coverage, tables),
+        purity = .fmPurityAtCoverage(coverage, position, coverage, tables)
+    )
+}
+
+# `gr` with the credible-set columns `row` records as derived restored from
+# its fit: inserted where .fmRowCsSlot() puts them where they are absent
+# (before the pip is restored, so that slot is the one they were dropped
+# from), filled where a
+# collection joining rows with and without them left them NA.
+# @noRd
+.fmRowRestoreFitCs <- function(gr, row) {
+    record <- .fmRowCsRecord(.fmRowDerivedColumns(row))
+    md <- mcols(gr, use.names = FALSE)
+    if (length(record$labels) == 0L || length(gr) == 0L) {
+        return(gr)
+    }
+    wanted <- c(record$labels, str_c(record$labels, "_purity"))
+    if (all(map_lgl(wanted, .fmRowColumnFilled, md = md))) {
+        return(gr)
+    }
+    fit <- susieFit(row)
+    derived <- .fitCsColumns(
+        fit,
+        record$labels,
+        record$tag,
+        .fitColumnsPlaced(gr, fit),
+        length(gr)
+    )
+    if (is.null(derived)) {
+        return(gr)
+    }
+    present <- intersect(names(derived), colnames(md))
+    if (length(present) == 0L) {
+        return(.fmRowInsertColumns(gr, derived, .fmRowCsSlot(colnames(md))))
+    }
+    for (nm in present) {
+        if (all(is.na(md[[nm]]))) {
+            md[[nm]] <- derived[[nm]]
+        }
+    }
+    `mcols<-`(gr, value = md)
+}
+
+# Whether `md` has column `nm` with a value somewhere: a column absent, or
+# all NA where a collection joined rows with and without it, is restored.
+# @noRd
+.fmRowColumnFilled <- function(nm, md) {
+    is_in(nm, colnames(md)) && !all(is.na(md[[nm]]))
+}
+
+# The credible-set columns a row records as derived. A row saved before rows
+# recorded them has no such slot, and derives none.
+# @noRd
+.fmRowDerivedColumns <- function(x) {
+    if (!methods::.hasSlot(x, "derivedColumns")) {
+        return(character(0))
+    }
+    x@derivedColumns
 }
 
 # The row a cross-validation-only fit leaves (CrossValidationParam(fitFullData =
@@ -522,10 +858,20 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # matrix.
 .csEffectLogBf <- function(fit, Lidx) {
     lbf <- fit$lbf_variable
-    if (is.null(lbf) || !is.matrix(lbf) || is.na(Lidx) || Lidx > nrow(lbf)) {
+    if (is.null(lbf) || !is.matrix(lbf) || is.na(Lidx)) {
         return(NA_real_)
     }
-    lv <- keep(as.numeric(lbf[Lidx, ]), is.finite)
+    row <- if (.namedByEffect(lbf)) {
+        match(str_c("L", Lidx), rownames(lbf))
+    } else if (Lidx <= nrow(lbf)) {
+        Lidx
+    } else {
+        NA_integer_
+    }
+    if (is.na(row)) {
+        return(NA_real_)
+    }
+    lv <- keep(as.numeric(lbf[row, ]), is.finite)
     if (length(lv) == 0L) {
         return(NA_real_)
     }
@@ -543,13 +889,13 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # stored fit. The credible-set index in the `cs` label doubles as the effect (L)
 # index for susie-family fits (unfiltered CS are ordered by effect).
 # @noRd
-.csSummaryFit <- function(tl, fit, coverage) {
+.csSummaryFit <- function(tl, fit, coverage, fitIds = colnames(fit$alpha)) {
     csCol <- str_c("cs_", coverage * 100)
     purCol <- str_c(csCol, "_purity")
     if (is.null(tl) || nrow(tl) == 0L) {
         return(.emptyCsSummary())
     }
-    specs <- .csSummarySpecs(tl, fit, coverage, csCol)
+    specs <- .csSummarySpecs(tl, fit, coverage, csCol, fitIds)
     if (length(specs) == 0L) {
         return(.emptyCsSummary())
     }
@@ -575,23 +921,24 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # membership. Falls back to enumerating the per-variant cs_<cov> column (the
 # labelled members only) for a minimal or hand-built fit with no sets.
 # @noRd
-.csSummarySpecs <- function(tl, fit, coverage, csCol) {
+.csSummarySpecs <- function(tl, fit, coverage, csCol, fitIds) {
     setsObj <- .csSetsForCoverage(fit, coverage)
     hasSets <- !is.null(setsObj) &&
         !is.null(setsObj$cs) &&
         length(setsObj$cs) > 0L
     if (hasSets) {
-        return(.csSpecsFromFit(setsObj, fit, tl, csCol))
+        return(.csSpecsFromFit(setsObj, fit, tl, csCol, fitIds))
     }
     .csSpecsFromColumn(tl, csCol)
 }
 
 # Complete per-CS specs from the fit's credible sets. Member POSITIONS map to
-# variant ids through the alpha column names; the effect index comes from the
-# sets$cs "L<k>" names.
+# variant ids through `fitIds`, the variables the fit was made with in its
+# order (a trimmed fit's vectors carry no names); the effect index comes from
+# the sets$cs "L<k>" names.
 # @noRd
-.csSpecsFromFit <- function(setsObj, fit, tl, csCol) {
-    vn <- colnames(fit$alpha)
+.csSpecsFromFit <- function(setsObj, fit, tl, csCol, fitIds) {
+    vn <- fitIds
     eff <- .fmEffectIndices(setsObj$cs)
     tag <- .csMethodTag(tl, fit, csCol)
     map(
@@ -684,7 +1031,8 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # mean-purity, plus the resolved column names.
 # @noRd
 .csSummaryContext <- function(tl, fit, coverage, csCol, purCol) {
-    Vvec <- if (!is.null(fit$V)) as.numeric(fit$V) else NULL
+    # Names kept: a trimmed fit's V is named by effect id (.csEffectV()).
+    Vvec <- if (!is.null(fit$V)) set_names(as.numeric(fit$V), names(fit$V))
     sp <- fit$sets$purity
     mc <- if (is.null(sp)) {
         character(0)
@@ -765,11 +1113,22 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # V: the effect's prior variance (NA when out of range / unavailable).
 # @noRd
 .csEffectV <- function(Vvec, Lidx) {
-    if (!is.null(Vvec) && !is.na(Lidx) && Lidx <= length(Vvec)) {
-        Vvec[Lidx]
-    } else {
-        NA_real_
+    if (is.null(Vvec) || is.na(Lidx)) {
+        return(NA_real_)
     }
+    # A trimmed fit keeps only its effects of positive prior variance, named
+    # by effect id, so V[k] would be some other effect's; read it by name.
+    if (.namedByEffect(Vvec)) {
+        return(unname(as.numeric(Vvec[str_c("L", Lidx)])))
+    }
+    if (Lidx <= length(Vvec)) Vvec[Lidx] else NA_real_
+}
+
+# TRUE when a per-effect vector or matrix rows carry "L<k>" effect ids.
+# @noRd
+.namedByEffect <- function(x) {
+    nm <- if (is.matrix(x)) rownames(x) else names(x)
+    length(nm) > 0L && all(str_detect(nm, "^L[0-9]+$"))
 }
 
 # cs_log10bf: strongest member logBF (NA when the column is absent).
@@ -1648,7 +2007,7 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
         length(fitted)
     )
     newTopLoci <- .adjustPipsRebuildTopLoci(
-        .fmeTopLociFromElement(variants(x)),
+        .fmrPartsTopLoci(x),
         fit,
         common
     )
@@ -1679,9 +2038,6 @@ setMethod("susieFit", "FineMappingRow", function(x) x@susieFit)
 #' @rdname cvResult
 #' @export
 setMethod("cvResult", "FineMappingRow", function(x) x@cvResult)
-
-# @noRd
-.fmRowFitVariants <- function(x) x@fitVariants
 
 #' @rdname show-methods
 #' @export
@@ -1718,4 +2074,6 @@ setMethod("variants", "FineMappingRow", function(x) x@variants)
 #' @aliases coerce,FineMappingRow,GRanges-method
 #' @usage NULL
 #' @exportMethod coerce
-setAs("FineMappingRow", "GRanges", function(from) variants(from))
+setAs("FineMappingRow", "GRanges", function(from) {
+    .fmRowRestoredVariants(from)
+})

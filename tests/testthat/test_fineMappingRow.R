@@ -514,21 +514,21 @@ test_that("adjustPips errors when alpha's width matches neither variant count", 
 
 test_that("adjustPips restricts a narrowed row's fit by the fit's own ids", {
     # The row holds variants 3:6 of the six its fit was made with. The kept
-    # ones are found among the fit's columns by id, not by their position in
-    # the row, which would pick the fit's columns 1:2.
+    # ones are found among the fit's columns by the names the fit gives them,
+    # not by their position in the row, which would pick the fit's columns
+    # 1:2.
     vids <- paste0("chr1:", 1:6, ":A:G")
     entry <- .makeAdjustEntry(vids)
     narrowed <- methods::new(
         "FineMappingRow",
         variants = variants(entry)[3:6],
-        susieFit = susieFit(entry),
-        fitVariants = vids
+        susieFit = susieFit(entry)
     )
     adj <- adjustPips(narrowed, vids[3:4])
     alpha <- susieFit(entry)$alpha[, 3:4]
     expect_equal(variantIds(adj), vids[3:4])
     expect_equal(unname(susieFit(adj)$alpha), unname(alpha / rowSums(alpha)))
-    expect_equal(pecotmr:::.fmRowFitVariants(adj), vids[3:4])
+    expect_length(susieFit(adj)$pip, 2L)
 })
 
 test_that("adjustPips refuses a row holding a variant its fit never had", {
@@ -540,19 +540,6 @@ test_that("adjustPips refuses a row holding a variant its fit never had", {
     expect_error(
         pecotmr:::.adjustPipsFitIdx(c(fitted[[1L]], "chr1:900:A:G"), fitted),
         "1 of the row's variants are not among the 3 its fit was made with"
-    )
-})
-
-test_that("a row records its fit's variants only when it carries a fit", {
-    vids <- paste0("chr1:", 1:3, ":A:G")
-    tl <- data.frame(variant_id = vids, pip = c(0.5, 0.3, 0.2))
-    fitted <- FineMappingRow(vids, list(pip = tl$pip), tl)
-    expect_equal(pecotmr:::.fmRowFitVariants(fitted), vids)
-    cvOnly <- FineMappingRow(vids, NULL, tl, cvResult = list(r2 = 0.1))
-    expect_equal(pecotmr:::.fmRowFitVariants(cvOnly), vids)
-    expect_equal(
-        pecotmr:::.fmRowFitVariants(FineMappingRow(vids, list(), tl)),
-        character(0)
     )
 })
 
@@ -1734,4 +1721,165 @@ test_that("a fit whose prior variances all vanished labels nothing", {
     )
     adj <- adjustPips(entry, vids[1:3])
     expect_equal(.fmrRowTopLoci(adj, raw = TRUE)$cs_95, rep("susie_0", 3L))
+})
+
+# ===========================================================================
+# A row stores no per-variant pip column when its fit reproduces it: every
+# view restores it from the fit. These tests rebuild each bundled example --
+# saved with the column -- through FineMappingRow() and check that nothing a
+# caller can see changes.
+# ===========================================================================
+
+.fpd_hasStoredPip <- function(x) {
+    "pip" %in% .fmStoredColumns(x)
+}
+
+.fpd_csColumns <- c(
+    "cs_95",
+    "cs_70",
+    "cs_50",
+    "cs_95_purity",
+    "cs_70_purity",
+    "cs_50_purity"
+)
+
+test_that("a rebuilt row stores no pip its fit reproduces", {
+    x <- .fmLoadExample("qtlFineMappingExample")
+    expect_true(.fpd_hasStoredPip(x))
+    expect_false(.fpd_hasStoredPip(.fmRebuildExample(x)))
+})
+
+test_that("a rebuilt row stores no credible-set column its fit reproduces", {
+    x <- .fmLoadExample("qtlFineMappingExample")
+    expect_true(all(.fpd_csColumns %in% .fmStoredColumns(x)))
+    new <- .fmRebuildExample(x)
+    expect_false(any(.fpd_csColumns %in% .fmStoredColumns(new)))
+    # The row as GRanges derives them back, in buildTopLoci()'s order.
+    restored <- as(.fmExampleRow(x, 1L), "GRanges")
+    expect_identical(
+        colnames(S4Vectors::mcols(restored)),
+        colnames(S4Vectors::mcols(x[[1L]]))
+    )
+})
+
+test_that("credible-set columns the fit cannot give back are stored", {
+    inputs <- .fmExampleRowInputs(.fmLoadExample("qtlFineMappingExample"), 1L)
+    stored <- function(inputs) {
+        row <- do.call(FineMappingRow, inputs)
+        q <- QtlFineMappingResult("s", "c", "t", "susie", list(row))
+        intersect(.fpd_csColumns, .fmStoredColumns(q))
+    }
+    # Without the secondary credible sets the 0.7 and 0.5 columns have no
+    # source, and the block is kept whole.
+    noSecondary <- inputs
+    noSecondary$susieFit$sets_secondary <- NULL
+    expect_identical(stored(noSecondary), .fpd_csColumns)
+    # Nor is a relabelled column re-derived over.
+    relabelled <- inputs
+    relabelled$topLoci$cs_70 <- sub("_[0-9]+$", "_9", relabelled$topLoci$cs_70)
+    expect_identical(stored(relabelled), .fpd_csColumns)
+    row <- do.call(FineMappingRow, relabelled)
+    expect_identical(
+        S4Vectors::mcols(as(row, "GRanges"))$cs_70,
+        relabelled$topLoci$cs_70
+    )
+    # A table with only some of the block is not laid out as the fit writes
+    # it.
+    partial <- inputs
+    partial$topLoci$cs_50_purity <- NULL
+    expect_identical(stored(partial), setdiff(.fpd_csColumns, "cs_50_purity"))
+})
+
+test_that("every view of a rebuilt example is unchanged", {
+    for (name in .fmExampleNames()) {
+        old <- .fmLoadExample(name)
+        new <- .fmRebuildExample(old)
+        same <- function(f) {
+            expect_equal(f(new), f(old), info = name)
+        }
+        same(function(x) topLoci(x))
+        same(function(x) topLoci(x, signalCutoff = 0))
+        same(function(x) topLoci(x, signalCutoff = 0.1, minPurity = 0.5))
+        for (coverage in c(0.95, 0.7, 0.5)) {
+            same(function(x) credibleSets(x, coverage = coverage))
+        }
+        same(function(x) credibleSetSummary(x))
+        same(function(x) marginalEffects(x))
+        same(flattenTupleRanges)
+        same(function(x) as(x, "GRanges"))
+    }
+})
+
+test_that("pip() of a rebuilt row comes from its fit", {
+    old <- .fmLoadExample("gwasFineMappingExample")
+    new <- .fmRebuildExample(old)
+    expect_equal(pip(new), pip(old))
+    expect_false(anyNA(pip(new)))
+})
+
+test_that("the BED writer writes the same table for a rebuilt example", {
+    for (name in c("qtlFineMappingExample", "gwasFineMappingExample")) {
+        old <- .fmLoadExample(name)
+        paths <- c(withr::local_tempfile(), withr::local_tempfile())
+        writeBed(old, paths[[1L]], signalCutoff = 0)
+        writeBed(.fmRebuildExample(old), paths[[2L]], signalCutoff = 0)
+        expect_identical(
+            readLines(paths[[2L]]),
+            readLines(paths[[1L]]),
+            info = name
+        )
+    }
+})
+
+test_that("a flatten / nest round trip keeps the pip column dropped", {
+    new <- .fmRebuildExample(.fmLoadExample("qtlFineMappingExample"))
+    flat <- flattenTupleRanges(new)
+    expect_true("pip" %in% colnames(S4Vectors::mcols(flat)))
+    expect_true(all(.fpd_csColumns %in% colnames(S4Vectors::mcols(flat))))
+    back <- nestTupleRanges(flat, new)
+    expect_false(.fpd_hasStoredPip(back))
+    expect_false(any(.fpd_csColumns %in% .fmStoredColumns(back)))
+    expect_equal(
+        topLoci(back, signalCutoff = 0),
+        topLoci(new, signalCutoff = 0)
+    )
+    # A verb that changes the PIPs keeps its own values.
+    halved <- flat
+    S4Vectors::mcols(halved)$pip <- S4Vectors::mcols(halved)$pip / 2
+    edited <- nestTupleRanges(halved, new)
+    expect_true(.fpd_hasStoredPip(edited))
+    expect_equal(
+        S4Vectors::mcols(topLoci(edited, signalCutoff = 0))$pip,
+        S4Vectors::mcols(topLoci(new, signalCutoff = 0))$pip / 2
+    )
+})
+
+test_that("a pip its fit does not give is stored", {
+    inputs <- .fmExampleRowInputs(.fmLoadExample("qtlFineMappingExample"), 1L)
+    inputs$topLoci$pip <- inputs$topLoci$pip / 2
+    edited <- do.call(FineMappingRow, inputs)
+    expect_equal(
+        S4Vectors::mcols(as(edited, "GRanges"))$pip,
+        inputs$topLoci$pip
+    )
+    # No fit at all: the table's pip is the only one there is.
+    bare <- FineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
+        susieFit = list(),
+        topLoci = data.frame(
+            variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+            pip = c(0.9, 0.1)
+        )
+    )
+    expect_equal(S4Vectors::mcols(as(bare, "GRanges"))$pip, c(0.9, 0.1))
+})
+
+test_that("a collection joining saved and rebuilt rows reads every pip", {
+    old <- .fmLoadExample("qtlFineMappingLbfExample")
+    new <- .fmRebuildExample(old)
+    mixed <- c(old[1L], new[2L])
+    expect_equal(
+        topLoci(mixed, signalCutoff = 0),
+        topLoci(old, signalCutoff = 0)
+    )
 })

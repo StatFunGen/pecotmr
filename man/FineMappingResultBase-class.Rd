@@ -25,12 +25,15 @@ pipeline combines share an LD reference.}
 }}
 
 \section{Narrowed rows}{
- Each row records in its \code{fitVariants} column
-  the ids of the variants its fit was made with (none for a row without a
-  fit). A row narrowed since -- by \code{endoapply()} or \code{[[<-} --
-  keeps its fit as it was, so every reader of the fit warns, with
-  condition class \code{pecotmrFitCoverage}, when a row holds fewer
-  variants than its fit describes. The readers are the accessors
+ A row is built from its fit, holding the fit's
+  variables in the fit's order, so its fit is read off it by position. A
+  row narrowed since -- by \code{endoapply()} or \code{[[<-} -- keeps its
+  fit as it was, and is found in the fit by the names the fit gives its
+  variables (a narrowed row whose fit names none, such as a trimmed fit,
+  cannot be read). Every reader of the fit warns, with condition class
+  \code{pecotmrFitCoverage}, when a row holds fewer variants than its fit
+  describes. A row replaced by one of the same length is read by
+  position. The readers are the accessors
   (\code{susieFit()}, \code{lbf()}, \code{cvResult()},
   \code{credibleSetSummary()} and the fSuSiE views),
   \code{computeCsCorrelation()}, \code{susieResult()},

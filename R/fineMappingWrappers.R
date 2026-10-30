@@ -1394,14 +1394,17 @@ setMethod(
 }
 
 # Per-variant CS index at coverage `targetCov` (0 = not in any CS; on overlap
-# the smallest cs_idx wins).
+# the smallest cs_idx wins). A variant in several sets warns unless `quiet`,
+# which re-deriving a stored table's columns sets: buildTopLoci() warned when
+# it first wrote them.
 # @noRd
 .fmCsIdxAtCoverage <- function(
     targetCov,
     coverageValues,
     csTables,
     nV,
-    variantNames = NULL
+    variantNames = NULL,
+    quiet = FALSE
 ) {
     empty <- integer(nV)
     hit <- which(abs(coverageValues - targetCov) < 1e-12)
@@ -1433,8 +1436,10 @@ setMethod(
     winnerAt <- variantOf[firstPerVariant]
     out <- .fmScatter(empty, winnerAt, winners)
     bestSize <- .fmScatter(rep(Inf, nV), winnerAt, setSizes[winners])
-    memb <- split(csOf, factor(variantOf, levels = seq_len(nV)))
-    .fmWarnMultiCs(memb, out, bestSize, sets, variantNames)
+    if (!quiet) {
+        memb <- split(csOf, factor(variantOf, levels = seq_len(nV)))
+        .fmWarnMultiCs(memb, out, bestSize, sets, variantNames)
+    }
     out
 }
 
@@ -1527,7 +1532,7 @@ setMethod(
 .fmPurityAtCoverage <- function(targetCov, idxVec, coverageValues, csTables) {
     h <- which(abs(coverageValues - targetCov) < 1e-12)
     pv <- if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
-    map_dbl(idxVec, .csPurityAt, pv = pv)
+    .csPurityAt(idxVec, pv)
 }
 
 #' Build the unified top-loci table for one fit and one method
@@ -5213,14 +5218,15 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     )
 }
 
-# Purity value for the i-th index (0 out of range / NA).
+# Purity value for each index `i` (0 out of range / NA), vectorised: it runs
+# once per variant of every fit.
 # @noRd
 .csPurityAt <- function(i, pv) {
-    if (i <= 0L || i > length(pv)) {
-        return(0)
-    }
-    v <- pv[i]
-    if (is.na(v)) 0 else as.numeric(v)
+    out <- numeric(length(i))
+    inRange <- i > 0L & i <= length(pv)
+    v <- as.numeric(pv[i[inRange]])
+    out[inRange] <- replace(v, is.na(v), 0)
+    out
 }
 
 # Max of the finite entries of x (NA when none).

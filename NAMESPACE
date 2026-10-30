@@ -209,6 +209,7 @@ export(filterInvalidSummaryStat)
 export(filterMixtureComponents)
 export(filterRelatedness)
 export(filterVariantsByLdReference)
+export(fineMappingAnnotations)
 export(fineMappingMethods)
 export(fineMappingPipeline)
 export(fineMappingResult)
@@ -377,6 +378,7 @@ export(testedAnnotations)
 export(topLoci)
 export(traitNames)
 export(traitPosition)
+export(trimFineMappingResult)
 export(twasPredict)
 export(twasWeights)
 export(twasWeightsCv)
@@ -697,7 +699,6 @@ importFrom(checkmate,
 )
 importFrom(dplyr,
   across,
-  add_count,
   all_of,
   any_of,
   arrange,
@@ -759,6 +760,7 @@ importFrom(purrr,
   map,
   map2,
   map2_dbl,
+  map2_lgl,
   map_chr,
   map_dbl,
   map_dfr,
@@ -778,6 +780,7 @@ importFrom(purrr,
 importFrom(quadprog,solve.QP)
 importFrom(readr,
   col_character,
+  col_integer,
   cols,
   read_lines,
   read_table
@@ -822,12 +825,14 @@ importFrom(stats,
   setNames,
   var
 )
+importFrom(stringi,stri_split_fixed)
 importFrom(stringr,
   fixed,
   regex,
   str_c,
   str_detect,
   str_ends,
+  str_extract,
   str_flatten,
   str_length,
   str_match,
@@ -870,6 +875,11 @@ importFrom(utils,
   combn,
   head
 )
-importFrom(vctrs,vec_duplicate_detect)
+importFrom(vctrs,
+  vec_duplicate_detect,
+  vec_group_id,
+  vec_match,
+  vec_unique_loc
+)
 importFrom(vroom,vroom)
 useDynLib(pecotmr, .registration = TRUE)

@@ -69,10 +69,10 @@ extern "C" SEXP _pecotmr_prsCsFactorCpp(SEXP a, SEXP b, SEXP phi, SEXP bhat, SEX
   END_CPP11
 }
 // qtl_enrichment.cpp
-cpp11::writable::list qtlEnrichmentCpp(SEXP rGwasPip, SEXP rQtlSusieFit, double piGwas, double piQtl, int ImpN, double shrinkageLambda, bool doubleShrinkage, bool besselCorrection, int numThreads, cpp11::sexp seed);
-extern "C" SEXP _pecotmr_qtlEnrichmentCpp(SEXP rGwasPip, SEXP rQtlSusieFit, SEXP piGwas, SEXP piQtl, SEXP ImpN, SEXP shrinkageLambda, SEXP doubleShrinkage, SEXP besselCorrection, SEXP numThreads, SEXP seed) {
+cpp11::writable::list qtlEnrichmentCpp(SEXP rGwasPip, SEXP rQtlSusieFit, double piGwas, double piQtl, double totalVariants, int ImpN, double shrinkageLambda, bool doubleShrinkage, bool besselCorrection, int numThreads, cpp11::sexp seed);
+extern "C" SEXP _pecotmr_qtlEnrichmentCpp(SEXP rGwasPip, SEXP rQtlSusieFit, SEXP piGwas, SEXP piQtl, SEXP totalVariants, SEXP ImpN, SEXP shrinkageLambda, SEXP doubleShrinkage, SEXP besselCorrection, SEXP numThreads, SEXP seed) {
   BEGIN_CPP11
-    return cpp11::as_sexp(qtlEnrichmentCpp(cpp11::as_cpp<cpp11::decay_t<SEXP>>(rGwasPip), cpp11::as_cpp<cpp11::decay_t<SEXP>>(rQtlSusieFit), cpp11::as_cpp<cpp11::decay_t<double>>(piGwas), cpp11::as_cpp<cpp11::decay_t<double>>(piQtl), cpp11::as_cpp<cpp11::decay_t<int>>(ImpN), cpp11::as_cpp<cpp11::decay_t<double>>(shrinkageLambda), cpp11::as_cpp<cpp11::decay_t<bool>>(doubleShrinkage), cpp11::as_cpp<cpp11::decay_t<bool>>(besselCorrection), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
+    return cpp11::as_sexp(qtlEnrichmentCpp(cpp11::as_cpp<cpp11::decay_t<SEXP>>(rGwasPip), cpp11::as_cpp<cpp11::decay_t<SEXP>>(rQtlSusieFit), cpp11::as_cpp<cpp11::decay_t<double>>(piGwas), cpp11::as_cpp<cpp11::decay_t<double>>(piQtl), cpp11::as_cpp<cpp11::decay_t<double>>(totalVariants), cpp11::as_cpp<cpp11::decay_t<int>>(ImpN), cpp11::as_cpp<cpp11::decay_t<double>>(shrinkageLambda), cpp11::as_cpp<cpp11::decay_t<bool>>(doubleShrinkage), cpp11::as_cpp<cpp11::decay_t<bool>>(besselCorrection), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
   END_CPP11
 }
 // sdpr.cpp
@@ -108,7 +108,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_penalizedRssFactorCpp",        (DL_FUNC) &_pecotmr_penalizedRssFactorCpp,        12},
     {"_pecotmr_prsCsCpp",                     (DL_FUNC) &_pecotmr_prsCsCpp,                     12},
     {"_pecotmr_prsCsFactorCpp",               (DL_FUNC) &_pecotmr_prsCsFactorCpp,               12},
-    {"_pecotmr_qtlEnrichmentCpp",             (DL_FUNC) &_pecotmr_qtlEnrichmentCpp,             10},
+    {"_pecotmr_qtlEnrichmentCpp",             (DL_FUNC) &_pecotmr_qtlEnrichmentCpp,             11},
     {"_pecotmr_sdprCpp",                      (DL_FUNC) &_pecotmr_sdprCpp,                      17},
     {"_pecotmr_sdprFactorCpp",                (DL_FUNC) &_pecotmr_sdprFactorCpp,                17},
     {"_pecotmr_vcfGtDosageCpp",               (DL_FUNC) &_pecotmr_vcfGtDosageCpp,                2},

@@ -186,8 +186,16 @@ setMethod("genomicRegion", "RangedTupleList", function(x) {
     if (length(object) == 0L) {
         return(TRUE)
     }
-    spans <- lengths(range(object))
-    bad <- which(spans > 1L)
+    # Compared as integer (seqname, strand) codes against each element's first
+    # range: range() would paste a string key for every range of a
+    # genome-wide collection to find the same thing.
+    flat <- unlist(object, use.names = FALSE)
+    n <- lengths(object)
+    key <- as.integer(seqnames(flat)) *
+        3L +
+        as.integer(BiocGenerics::strand(flat))
+    firstKey <- rep(key[(cumsum(n) - n + 1L)[n > 0L]], n[n > 0L])
+    bad <- unique(rep(seq_along(object), n)[key != firstKey])
     if (length(bad) == 0L) {
         return(TRUE)
     }
@@ -608,11 +616,23 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 # per element made building the keys cost a millisecond a row.
 # @noRd
 .rtlFirstSpans <- function(x) {
-    spans <- range(x)
-    n <- lengths(spans)
+    # Each element sits on one (seqname, strand) (.rtlCheckSingleSpan()), so
+    # its span is its smallest start to its largest end there: taken from
+    # integer vectors, where range() would paste a key for every range.
+    n <- lengths(x)
     has <- n > 0L
-    flat <- unlist(spans, use.names = FALSE)
-    list(first = flat[(cumsum(n) - n + 1L)[has]], has = has)
+    flat <- unlist(x, use.names = FALSE)
+    group <- rep(seq_along(x), n)
+    first <- (cumsum(n) - n + 1L)[has]
+    starts <- vapply(split(start(flat), group), min, integer(1))
+    ends <- vapply(split(end(flat), group), max, integer(1))
+    spans <- GenomicRanges::GRanges(
+        seqnames(flat)[first],
+        IRanges::IRanges(starts, ends),
+        strand = BiocGenerics::strand(flat)[first],
+        seqinfo = GenomeInfoDb::seqinfo(flat)
+    )
+    list(first = spans, has = has)
 }
 
 # The key of the first range of `g`, a span: callers pass range() of a
@@ -691,9 +711,11 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 #'       both in one \code{qcInfo} record have it split between the two.
 #'       Their genome build is in \code{seqinfo()}; ones saved with it in a
 #'       \code{genome} slot have it moved there.
-#'     \item Fine-mapping results and TWAS weights record the variants each
-#'       row was fitted on in a \code{fitVariants} column; ones saved without
-#'       it have it filled in from their fits.
+#'     \item TWAS weights record the variants each row was fitted on in a
+#'       \code{fitVariants} column; ones saved without it have it filled in
+#'       from their fits. Fine-mapping results no longer record them (a row's
+#'       variants are its fit's variables); ones saved with the column have
+#'       it dropped.
 #'     \item A \code{CtwasResult} holds one element per region; one saved as a
 #'       table of whole runs is rebuilt.
 #'     \item A \code{QtlDataset} no longer stores run settings (genotype
@@ -1262,7 +1284,11 @@ flattenTupleRanges <- function(x) {
         )
         abort(msg)
     }
-    gr <- .rtlGatherElements(x, seq_len(length(x)))
+    gr <- if (methods::is(x, "FineMappingResultBase")) {
+        .fmrGatherVariants(x, seq_len(length(x)))
+    } else {
+        .rtlGatherElements(x, seq_len(length(x)))
+    }
     md <- mcols(x, use.names = FALSE)
     if (is.null(md) || ncol(md) == 0L || length(gr) == 0L) {
         return(gr)
@@ -1342,7 +1368,56 @@ nestTupleRanges <- function(flat, template) {
     }
     keys <- .rtlNestKeys(flat, template, .rtlTupleKeyCols(template))
     elements <- map(keys$wanted, .rtlPickByKey, flat = flat, have = keys$have)
+    if (methods::is(template, "FineMappingResultBase")) {
+        elements <- .fmrDropRestoredColumns(elements, template)
+    }
     .rtlRebuild(template, elements, seq_len(length(template)))
+}
+
+# Re-nested fine-mapping elements without the columns flattening derived back
+# (see flattenTupleRanges()): the pip, unless the template stored it, and the
+# credible-set columns each row records as derived -- each only while the
+# row's fit still gives exactly those values, so a column a verb changed is
+# kept.
+# @noRd
+.fmrDropRestoredColumns <- function(elements, template) {
+    storedPip <- .rtlHasVariantColumn(template, "pip")
+    map2(
+        elements,
+        seq_along(elements),
+        .fmrDropRestoredAt,
+        template = template,
+        storedPip = storedPip
+    )
+}
+
+# @noRd
+.fmrDropRestoredAt <- function(g, i, template, storedPip) {
+    parts <- .fmrRowParts(template, i)
+    recorded <- .fmRowDerivedColumns(parts)
+    if (length(g) == 0L) {
+        md <- mcols(g, use.names = FALSE)
+        labelCols <- .fmRowCsRecord(recorded)$labels
+        derived <- c(
+            if (storedPip) character(0) else "pip",
+            labelCols,
+            str_c(labelCols, "_purity")
+        )
+        return(`mcols<-`(
+            g,
+            value = md[, setdiff(colnames(md), derived), drop = FALSE]
+        ))
+    }
+    fit <- susieFit(parts)
+    cols <- .fitColumnsFor(g, fit)
+    if (!storedPip) {
+        g <- .fmRowDropFitPip(g, fit, cols)
+    }
+    if (length(recorded) == 0L) {
+        return(g)
+    }
+    cs <- .fmRowDropFitCs(g, fit, cols)
+    if (identical(cs$derived, recorded)) cs$variants else g
 }
 
 # Element and range keys for re-nesting. The identity tuple alone keys an

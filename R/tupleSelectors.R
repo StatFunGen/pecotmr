@@ -1209,16 +1209,127 @@
     first <- idx[[1L]]
     new(
         "FineMappingRow",
-        variants = .rtlGatherElements(x, idx),
+        variants = if (length(idx) == 1L) {
+            .rtlGatherElements(x, idx)
+        } else {
+            .fmrGatherVariants(x, idx)
+        },
         susieFit = md$susieFit[[first]],
         cvResult = md$cvResult[[first]],
-        fitVariants = .mdFitVariants(md, idx)
+        derivedColumns = .mdDerivedColumns(md, idx)
     )
 }
 
-# The variants the fit of rows `idx` was made with, in its order: the first
-# row's, as the fit payload is, since rows split from one entry repeat both.
-# None for a collection saved before rows recorded them.
+# The credible-set columns rows `idx` record as derived: the first row's, as
+# with the fit. None for a collection saved before rows recorded them.
+# @noRd
+.mdDerivedColumns <- function(md, idx) {
+    dc <- md$derivedColumns
+    if (is.null(dc)) {
+        return(character(0))
+    }
+    as.character(dc[[idx[[1L]]]])
+}
+
+# The elements of rows `idx`, concatenated, each with the columns its own fit
+# gives back restored (.fmRowRestoredVariants()) -- before they are joined,
+# since a joined entry keeps only the first row's fit.
+# @noRd
+.fmrGatherVariants <- function(x, idx) {
+    gr <- .rtlGatherElements(x, idx)
+    if (length(gr) == 0L) {
+        return(gr)
+    }
+    pip <- mcols(gr, use.names = FALSE)$pip
+    recorded <- mcols(x, use.names = FALSE)$derivedColumns
+    anyRecorded <- !is.null(recorded) && any(lengths(recorded[idx]) > 0L)
+    if (!is.null(pip) && !anyNA(pip) && !anyRecorded) {
+        return(gr)
+    }
+    restored <- .fmrRestoreAbsentColumns(x, idx, gr)
+    if (!is.null(restored)) {
+        return(restored)
+    }
+    pieces <- map(idx, .fmrRowVariantsAt, x = x)
+    suppressWarnings(exec(c, !!!unname(pieces)))
+}
+
+# The joined elements `gr` of rows `idx` with their pip and credible-set
+# columns restored in one pass -- each row giving plain vectors, inserted
+# once -- when no row stores any of those columns and every row records the
+# same ones as derived: a trimmed collection, the genome-wide case. NULL
+# otherwise, and when some row's fit cannot give them, for the row-by-row
+# restore (.fmRowRestoredVariants()) to handle.
+# @noRd
+.fmrRestoreAbsentColumns <- function(x, idx, gr) {
+    md <- mcols(x, use.names = FALSE)
+    records <- if (is.null(md$derivedColumns)) {
+        rep(list(character(0)), length(idx))
+    } else {
+        map(idx, function(i) as.character(md$derivedColumns[[i]]))
+    }
+    if (!all(map_lgl(records, identical, records[[1L]]))) {
+        return(NULL)
+    }
+    record <- .fmRowCsRecord(records[[1L]])
+    csCols <- c(record$labels, str_c(record$labels, "_purity"))
+    cn <- colnames(mcols(gr, use.names = FALSE))
+    if (any(is_in(c("pip", csCols), cn))) {
+        return(NULL)
+    }
+    pieces <- map(idx, .fmrRowDerivedColumns, x = x, record = record)
+    if (any(map_lgl(pieces, is.null))) {
+        return(NULL)
+    }
+    joined <- map(
+        set_names(names(pieces[[1L]])),
+        function(nm) unlist(map(pieces, nm), use.names = FALSE)
+    )
+    out <- gr
+    if (length(record$labels) > 0L) {
+        out <- .fmRowInsertColumns(out, joined[csCols], .fmRowCsSlot(cn))
+    }
+    .fmRowInsertColumns(
+        out,
+        joined["pip"],
+        .fmRowPipSlot(colnames(mcols(out, use.names = FALSE)))
+    )
+}
+
+# Row i's credible-set columns `record` names, then its pip, as its fit gives
+# them; NULL when the fit gives no PIPs or not those sets. Positional for a
+# row holding all of its fit, so no id is rendered.
+# @noRd
+.fmrRowDerivedColumns <- function(i, x, record) {
+    fit <- mcols(x, use.names = FALSE)$susieFit[[i]]
+    pip <- if (is.list(fit)) fit[["pip"]]
+    if (!is.numeric(pip)) {
+        return(NULL)
+    }
+    n <- length(x[[i]])
+    cols <- if (.rowHoldsFit(n, length(pip))) {
+        seq_len(n)
+    } else {
+        .fitColumnsPlaced(x[[i]], fit)
+    }
+    cs <- list()
+    if (length(record$labels) > 0L) {
+        cs <- .fitCsColumns(fit, record$labels, record$tag, cols, n)
+        if (is.null(cs)) {
+            return(NULL)
+        }
+    }
+    c(cs, list(pip = as.numeric(pip)[cols]))
+}
+
+# @noRd
+.fmrRowVariantsAt <- function(i, x) {
+    .fmRowRestoredVariants(.fmrRowParts(x, i))
+}
+
+# The variants the fits of TWAS rows `idx` were made with, in their order:
+# the first row's, as the fit payload is, since rows split from one entry
+# repeat both. None for a collection saved before rows recorded them.
 # @noRd
 .mdFitVariants <- function(md, idx) {
     fv <- md$fitVariants
@@ -1245,7 +1356,7 @@
 
 # @noRd
 .fmrPartsTopLoci <- function(parts) {
-    .fmeTopLociFromElement(variants(.asFmRowPayload(parts)))
+    .fmeTopLociFromElement(.fmRowRestoredVariants(.asFmRowPayload(parts)))
 }
 
 # ---- per-row views ----------------------------------------------------------
@@ -1347,7 +1458,13 @@
 
 # @noRd
 .fmrRowCredibleSetSummary <- function(parts, coverage = 0.95) {
-    .csSummaryFit(.fmrPartsTopLoci(parts), susieFit(parts), coverage)
+    fit <- susieFit(parts)
+    .csSummaryFit(
+        .fmrPartsTopLoci(parts),
+        fit,
+        coverage,
+        .partsFitIds(parts, fit$alpha)
+    )
 }
 
 # @noRd
@@ -1437,26 +1554,172 @@
 # describes the run on all of its variants, so reading it from a row that
 # holds fewer warns. Nothing is rescaled: intersectVariants() is the explicit
 # way to restrict a fit.
+#
+# A fine-mapping row is built from its fit, holding the fit's variables in the
+# fit's order (FineMappingRow()), so a row as long as its fit is read off it
+# by position, with no id compared; only a row narrowed since -- shorter than
+# its fit -- is found in the fit by the names the fit gives its variables.
 
-# The variants a row's stored fit was made with.
+# How many variables `fit` was made with: the length of its PIP vector, else
+# the columns of `mat` (one of its matrices) when given, else of its `alpha`.
+# The PIPs come first because a null_weight fit's effect matrices carry one
+# more column, the null, which is no variable. NA for a fit that gives none
+# of them: no fit, or a merged entry's list of per-region fits.
 # @noRd
-.rowFitVariants <- function(parts) {
-    if (methods::is(parts, "TwasWeightsRow")) {
-        return(.twRowFitVariants(parts))
+.fitWidth <- function(fit, mat = NULL) {
+    pip <- if (is.list(fit)) fit[["pip"]]
+    if (is.numeric(pip)) {
+        return(length(pip))
     }
-    .fmRowFitVariants(parts)
+    if (!is.null(mat)) {
+        return(ncol(mat))
+    }
+    alpha <- if (is.list(fit)) fit[["alpha"]]
+    if (!is.null(dim(alpha))) {
+        return(ncol(alpha))
+    }
+    NA_integer_
 }
 
-# The fit's variables in its own order: the ids the row recorded when it was
-# built, else the names the fit's matrix `mat` carries, else -- an unnamed fit
-# of a row saved before rows recorded them -- the row's variants as they are.
+# The names `fit` gives its variables: those of its PIP vector, else of the
+# columns of `mat` (one of its matrices) when given, else of its `alpha`.
+# NULL when it gives none, as a trimmed fit of a row not narrowed does not
+# (trimFineMappingResult()).
+# @noRd
+.fitVariableNames <- function(fit, mat = NULL) {
+    if (!is.list(fit)) {
+        return(colnames(mat))
+    }
+    names(fit[["pip"]]) %||% colnames(mat) %||% colnames(fit[["alpha"]])
+}
+
+# Whether a row of `n` variants holds all of a fit of `width` variables. A fit
+# of unknown width is taken to describe the row as it is.
+# @noRd
+.rowHoldsFit <- function(n, width) {
+    is.na(width) || n == width
+}
+
+# For each variant of `gr`, its column among the variables of `fit` (or of
+# its matrix `mat`): positional when `gr` holds all of them, else found by
+# the names the fit gives them (.fitColumnOf(); NA for a variant it was not
+# made with). NULL when `gr` is narrowed and the fit names none, which
+# leaves nothing to place the variants by.
+# @noRd
+.fitColumnsFor <- function(gr, fit, mat = NULL) {
+    n <- length(gr)
+    if (.rowHoldsFit(n, .fitWidth(fit, mat))) {
+        return(seq_len(n))
+    }
+    fitted <- .fitVariableNames(fit, mat)
+    if (is.null(fitted)) {
+        return(NULL)
+    }
+    .fitColumnOf(.grVariantIds(gr), fitted)
+}
+
+# The fit's variables in its own order. For a fine-mapping row holding all of
+# them, its own variants; for one narrowed since, the names the fit (or its
+# matrix `mat`) gives them -- an error when it gives none. For a TWAS row, the
+# ids it recorded when it was built, else the names `mat` carries, else the
+# row's variants as they are.
 # @noRd
 .partsFitIds <- function(parts, mat = NULL) {
-    recorded <- .rowFitVariants(parts)
-    if (length(recorded) > 0L) {
-        return(recorded)
+    if (methods::is(parts, "TwasWeightsRow")) {
+        recorded <- .twRowFitVariants(parts)
+        if (length(recorded) > 0L) {
+            return(recorded)
+        }
+        return(colnames(mat) %||% variantIds(parts))
     }
-    colnames(mat) %||% variantIds(parts)
+    fit <- susieFit(parts)
+    n <- length(variants(parts))
+    width <- .fitWidth(fit, mat)
+    if (.rowHoldsFit(n, width)) {
+        return(variantIds(parts))
+    }
+    .fitVariableNames(fit, mat) %||% .abortUnnamedNarrowedFit(n, width)
+}
+
+# The variants of the fits `fits` of rows `idx` of a fine-mapping collection,
+# in each fit's order, read for all the rows at once as one variant table
+# (.variantTable()), row after row: list(table, n), `n` each row's count (NA
+# for a row placed nowhere, which contributes none). A fit's variants are the
+# names it gives its PIPs; else, for a row holding all of its fit, the row's
+# own variants, read off its ranges without rendering an id; else, for a
+# narrowed row, the names the fit gives its variables, or `unplaced(i)`.
+# @noRd
+#' @importFrom purrr map2_lgl
+.fmrRowsFitVariants <- function(x, idx, fits, unplaced) {
+    n <- unname(lengths(x))[idx]
+    named <- map(fits, function(fit) names(fit[["pip"]]))
+    holds <- map2_lgl(n, map_int(fits, .fitWidth), .rowHoldsFit)
+    fromRows <- map_lgl(named, is.null) & holds
+    for (k in which(map_lgl(named, is.null) & !holds)) {
+        named[k] <- list(.fitVariableNames(fits[[k]]) %||% unplaced(idx[[k]]))
+    }
+    len <- ifelse(fromRows, n, lengths(named))
+    len[!fromRows & map_lgl(named, is.null)] <- NA_integer_
+    if (all(fromRows)) {
+        return(list(
+            table = .variantTable(.rtlGatherElements(x, idx)),
+            n = as.integer(len)
+        ))
+    }
+    counts <- replace(len, is.na(len), 0L)
+    offset <- cumsum(c(0L, counts))[seq_along(counts)]
+    at <- function(ks) {
+        unlist(
+            map(ks, function(k) offset[[k]] + seq_len(counts[[k]])),
+            use.names = FALSE
+        )
+    }
+    total <- sum(counts)
+    out <- list(
+        chrom = rep(NA_character_, total),
+        pos = rep(NA_integer_, total),
+        A2 = rep(NA_character_, total),
+        A1 = rep(NA_character_, total)
+    )
+    fill <- function(out, where, tab) {
+        for (f in names(out)) {
+            out[[f]][where] <- tab[[f]]
+        }
+        out
+    }
+    if (any(fromRows)) {
+        out <- fill(
+            out,
+            at(which(fromRows)),
+            .variantTable(.rtlGatherElements(x, idx[fromRows]))
+        )
+    }
+    byName <- which(!fromRows & !is.na(len))
+    if (length(byName) > 0L) {
+        out <- fill(
+            out,
+            at(byName),
+            .idsVariantTable(unlist(named[byName], use.names = FALSE))
+        )
+    }
+    list(table = out, n = as.integer(len))
+}
+
+# The fits of rows `idx` of a fine-mapping collection, as a list.
+# @noRd
+.fmrFitsAt <- function(x, idx) {
+    as.list(mcols(x, use.names = FALSE)$susieFit[idx])
+}
+
+# @noRd
+.abortUnnamedNarrowedFit <- function(n, width) {
+    abort(glue(
+        "The row holds {n} variants but its fit was made with {width}, and ",
+        "the fit does not name its variables, so the row's variants cannot ",
+        "be placed in it. Narrow the row before trimming it ",
+        "(trimFineMappingResult() keeps the names of a narrowed row's fit), ",
+        "or refit on the variants kept."
+    ))
 }
 
 # How many of `fitted` are gone from `held`. A variant whose alleles
@@ -1476,6 +1739,11 @@
 # has none), matched the same allele-aware way.
 # @noRd
 .fitColumnOf <- function(held, fitted) {
+    # The usual case, a row holding exactly its fit's variables in order,
+    # needs no hashing.
+    if (identical(held, fitted)) {
+        return(seq_along(held))
+    }
     col <- match(held, fitted)
     miss <- which(is.na(col))
     if (length(miss) == 0L) {
@@ -1485,19 +1753,36 @@
     replace(col, miss[m$idxA], m$idxB)
 }
 
+# How many of the variables a row's fit was made with the row no longer
+# holds, with the fit's size: a fine-mapping row is short by however many
+# fewer variants it holds than its fit has; a TWAS row by the recorded ids it
+# no longer holds.
+# @noRd
+.partsLostFitVariants <- function(parts) {
+    if (methods::is(parts, "TwasWeightsRow")) {
+        fitted <- .twRowFitVariants(parts)
+        return(list(
+            width = length(fitted),
+            lost = .lostFitVariantCount(fitted, variantIds(parts))
+        ))
+    }
+    width <- .fitWidth(susieFit(parts))
+    n <- length(variants(parts))
+    list(width = width, lost = if (is.na(width)) 0L else max(width - n, 0L))
+}
+
 # `parts` unchanged, after warning when its row holds fewer variants than its
 # stored fit was made with.
 # @noRd
 .fitCoverageChecked <- function(parts, caller) {
-    fitted <- .rowFitVariants(parts)
-    lost <- .lostFitVariantCount(fitted, variantIds(parts))
-    if (lost > 0L) {
+    short <- .partsLostFitVariants(parts)
+    if (short$lost > 0L) {
         warn(
             c(
                 glue(
                     "{caller}: the stored fit was made with ",
-                    "{length(fitted)} variants, {lost} of which this row no ",
-                    "longer holds."
+                    "{short$width} variants, {short$lost} of which this row ",
+                    "no longer holds."
                 ),
                 i = .fitCoverageHint(parts)
             ),
@@ -1539,20 +1824,31 @@
 }
 
 # The labels of the rows of `x` that hold fewer variants than their stored
-# fit was made with. None when `x` records no fit variants, or is not a
-# collection at all: an optional input left NULL, or one the caller has yet
-# to validate, which this advisory check must not pre-empt.
+# fit was made with: for fine-mapping rows, those shorter than their fit,
+# which needs no ids; for TWAS rows, those missing some of the variants they
+# recorded. None when `x` has no fits to compare, or is not a collection at
+# all: an optional input left NULL, or one the caller has yet to validate,
+# which this advisory check must not pre-empt.
 # @noRd
 .narrowedRowLabels <- function(x) {
-    if (!methods::is(x, "RangedTupleList")) {
+    if (!methods::is(x, "RangedTupleList") || length(x) == 0L) {
         return(character(0))
     }
-    fv <- mcols(x, use.names = FALSE)$fitVariants
-    if (is.null(fv) || length(x) == 0L) {
-        return(character(0))
+    md <- mcols(x, use.names = FALSE)
+    if (.isFineMappingPayload(x)) {
+        if (is.null(md$susieFit)) {
+            return(character(0))
+        }
+        width <- map_int(as.list(md$susieFit), .fitWidth)
+        short <- which(!is.na(width) & lengths(x) < width)
+    } else {
+        fv <- md$fitVariants
+        if (is.null(fv)) {
+            return(character(0))
+        }
+        lost <- map_int(seq_along(x), .rowLostFitVariants, x = x, fv = fv)
+        short <- which(lost > 0L)
     }
-    lost <- map_int(seq_along(x), .rowLostFitVariants, x = x, fv = fv)
-    short <- which(lost > 0L)
     if (length(short) == 0L) {
         return(character(0))
     }

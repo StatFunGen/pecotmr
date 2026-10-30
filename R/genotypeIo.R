@@ -1189,15 +1189,80 @@ resolvePlink2Paths <- function(prefix) {
     list(pgen = pgen, pvar = pvar, psam = psam)
 }
 
-#' Read .pvar or .pvar.zst into a data.frame via pgenlibr.
+#' Read .pvar or .pvar.zst into a data.frame.
 #'
-#' Uses pgenlibr::NewPvar() to parse the file (handles both plain .pvar and
-#' zstd-compressed .pvar.zst natively, no external CLI required).
+#' A plain-text .pvar with a #CHROM header -- what PLINK2 writes -- is read as
+#' one tab-separated table. Anything else (a zstd-compressed .pvar.zst, a
+#' header-less .bim-style .pvar) is read through pgenlibr::NewPvar(), which
+#' reads every format PLINK2 does but one variant per call: about 40
+#' microseconds a variant, eight minutes for a 12-million-variant panel.
 #'
 #' @param pvarPath Path to .pvar or .pvar.zst file.
 #' @return data.frame with columns: chrom, id, pos, A2 (REF), A1 (ALT).
 #' @noRd
 readPvar <- function(pvarPath) {
+    .readPvarTable(pvarPath) %||% .readPvarByVariant(pvarPath)
+}
+
+# A plain-text .pvar read as a table, as pgenlibr reads it: the first ALT
+# allele of a multi-allelic variant is A1. NULL for a file this cannot read
+# (compressed, or with no #CHROM header naming the five columns).
+# @noRd
+#' @importFrom vroom vroom
+#' @importFrom readr cols col_character col_integer
+.readPvarTable <- function(pvarPath) {
+    if (str_detect(pvarPath, "\\.zst$")) {
+        return(NULL)
+    }
+    header <- .pvarHeader(pvarPath)
+    required <- c("CHROM", "POS", "ID", "REF", "ALT")
+    if (is.null(header) || !all(is_in(required, header$columns))) {
+        return(NULL)
+    }
+    tbl <- vroom(
+        pvarPath,
+        delim = "\t",
+        skip = header$lines,
+        col_names = header$columns,
+        col_select = all_of(required),
+        col_types = cols(.default = col_character(), POS = col_integer()),
+        na = character(),
+        quote = "",
+        comment = "",
+        progress = FALSE
+    )
+    tibble(
+        chrom = tbl$CHROM,
+        id = tbl$ID,
+        pos = tbl$POS,
+        A2 = tbl$REF,
+        A1 = str_remove(tbl$ALT, ",.*$")
+    )
+}
+
+# The .pvar's column names, from its #CHROM header line, and how many lines
+# (## meta lines and the header) precede the variants; NULL without one.
+# @noRd
+.pvarHeader <- function(pvarPath) {
+    con <- file(pvarPath, "r")
+    on.exit(close(con), add = TRUE)
+    lines <- 0L
+    repeat {
+        line <- readLines(con, n = 1L, warn = FALSE)
+        if (length(line) == 0L || !str_detect(line, "^#")) {
+            return(NULL)
+        }
+        lines <- lines + 1L
+        if (str_detect(line, "^#CHROM")) {
+            columns <- str_split(str_remove(line, "^#"), "\t")[[1L]]
+            return(list(columns = columns, lines = lines))
+        }
+    }
+}
+
+# Any .pvar pgenlibr reads, a variant at a time.
+# @noRd
+.readPvarByVariant <- function(pvarPath) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
         abort("Package 'pgenlibr' is required.")
     }

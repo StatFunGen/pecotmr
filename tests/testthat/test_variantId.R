@@ -390,23 +390,82 @@ test_that("matchVariants reports sign -1 for an allele swap", {
     expect_equal(m$sign, -1)
 })
 
-test_that("matchVariants handles strand-ambiguous (A/T) swaps with the QC heuristic", {
-    # A lone A/T swap has no unambiguous strand flip to corroborate a strand
-    # interpretation, so (mirroring summaryStatsQc) it is treated as a plain
-    # allele swap and kept with sign -1, not dropped.
+test_that("matchVariants judges each strand-ambiguous (A/T) swap on its own", {
+    # An A/T vs T/A pair is a swap or a strand flip and nothing says which:
+    # it is dropped by default, whatever else the batch holds ...
     m <- pecotmr:::matchVariants("chr1:100:A:T", "chr1:100:T:A")
-    expect_equal(m$idxA, 1L)
-    expect_equal(m$sign, -1)
-
-    # When the batch contains a genuine unambiguous strand flip ([1]), the
-    # ambiguous A/T swap ([2]) is dropped as untrustworthy by default ...
+    expect_length(m$idxA, 0L)
     a <- c("chr1:100:A:C", "chr2:200:A:T")
     b <- c("chr1:100:T:G", "chr2:200:T:A")
     expect_equal(pecotmr:::matchVariants(a, b)$idxA, 1L)
-    # ... but is kept when ambiguity checking is disabled.
+    # ... and kept as a swap (sign -1) when ambiguity checking is disabled.
+    m <- pecotmr:::matchVariants(
+        "chr1:100:A:T",
+        "chr1:100:T:A",
+        removeStrandAmbiguous = FALSE
+    )
+    expect_equal(m$idxA, 1L)
+    expect_equal(m$sign, -1)
     expect_equal(
         sort(pecotmr:::matchVariants(a, b, removeStrandAmbiguous = FALSE)$idxA),
         c(1L, 2L)
+    )
+    # An exact A/T pair is no ambiguity at all.
+    expect_equal(
+        pecotmr:::matchVariants("chr1:100:A:T", "chr1:100:A:T")$sign,
+        1
+    )
+})
+
+test_that("matchVariants matches within maxDistance only when alleles agree", {
+    a <- c("chr1:100:A:G", "chr1:500:C:T")
+    b <- c("chr1:103:A:G", "chr1:520:C:T", "chr1:101:A:C")
+    # The same position by default.
+    expect_length(pecotmr:::matchVariants(a, b)$idxA, 0L)
+    # Within 5 bp: the A:G copy, not the A:C variant beside it.
+    m <- pecotmr:::matchVariants(a, b, maxDistance = 5L)
+    expect_equal(m$idxA, 1L)
+    expect_equal(m$idxB, 1L)
+    m <- pecotmr:::matchVariants(a, b, maxDistance = 20L)
+    expect_equal(m$idxA, c(1L, 2L))
+    expect_equal(m$idxB, c(1L, 2L))
+    # A swapped copy in the window matches with sign -1; a window never
+    # crosses chromosomes.
+    expect_equal(
+        pecotmr:::matchVariants(
+            "chr1:100:A:G",
+            "chr1:102:G:A",
+            maxDistance = 2L
+        )$sign,
+        -1
+    )
+    expect_length(
+        pecotmr:::matchVariants(
+            "chr1:100:A:G",
+            "chr2:100:A:G",
+            maxDistance = 10L
+        )$idxA,
+        0L
+    )
+})
+
+test_that("matchVariants takes GRanges of variants", {
+    ids <- c("chr1:100:A:G", "chr1:200:C:T")
+    # Ensembl-style seqnames; the first variant stored with its alleles
+    # swapped.
+    gr <- GenomicRanges::GRanges(
+        c("1", "1"),
+        IRanges::IRanges(c(100L, 200L), width = 1L),
+        A2 = c("G", "C"),
+        A1 = c("A", "T")
+    )
+    m <- pecotmr:::matchVariants(gr, ids)
+    expect_equal(m$idxA, 1:2)
+    expect_equal(m$sign, c(-1, 1))
+    expect_equal(pecotmr:::matchVariants(gr, ids, allowFlip = FALSE)$idxA, 2L)
+    expect_error(
+        pecotmr:::matchVariants(GenomicRanges::granges(gr), ids),
+        "A1 and A2"
     )
 })
 

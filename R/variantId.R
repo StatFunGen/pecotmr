@@ -61,10 +61,17 @@ canonChromLabel <- function(x) {
 #' @return Character vector of UCSC-style chromosome names.
 #' @noRd
 withChrPrefix <- function(x) {
-    bare <- str_remove(as.character(x), regex("^chr", ignore_case = TRUE))
+    # Worked out once per distinct label: a variant table has millions of
+    # rows but a few dozen chromosomes.
+    labels <- unique(as.character(x))
+    bare <- str_remove(labels, regex("^chr", ignore_case = TRUE))
     canon <- canonChrom(bare)
     standard <- is_in(canon, .STANDARD_CHROMS)
-    str_c("chr", if_else(standard, str_replace(canon, "^MT$", "M"), bare))
+    out <- str_c(
+        "chr",
+        if_else(standard, str_replace(canon, "^MT$", "M"), bare)
+    )
+    out[match(as.character(x), labels)]
 }
 
 # The chromosomes withChrPrefix() spells as UCSC does, in canonChrom() form.
@@ -147,7 +154,17 @@ chromOrder <- function(x) {
 #' @param x Character vector of variant IDs.
 #' @return Character vector with build suffix removed.
 #' @noRd
-stripBuildSuffix <- function(x) str_remove(x, "(:|_)b[0-9]+$")
+stripBuildSuffix <- function(x) {
+    # The regex only where a suffix could be: nearly no id carries one, and
+    # a fixed-string scan costs a fraction of a regex over millions of ids.
+    candidate <- which(
+        str_detect(x, fixed(":b")) | str_detect(x, fixed("_b"))
+    )
+    if (length(candidate) == 0L) {
+        return(x)
+    }
+    replace(x, candidate, str_remove(x[candidate], "(:|_)b[0-9]+$"))
+}
 
 #' Test whether allele pairs are single-nucleotide (SNP, not indel).
 #'
@@ -308,11 +325,7 @@ parseVariantId <- function(ids) {
         return(.parseVariantIdDf(ids))
     }
     convention <- detectVariantConvention(ids)
-    # Normalize: convert underscores to colons, strip build suffix.
-    normalized <- stripBuildSuffix(str_replace_all(ids, "_", ":"))
-    # Split into exactly 4 fields via a single vectorized regex match; a
-    # non-matching id yields an all-NA capture row (mirrors strcapture).
-    m <- str_match(normalized, "^([^:]+):([^:]+):([^:]+):([^:]+)")
+    m <- .variantIdFields(ids)
     data <- tibble(
         chrom = withChrPrefix(m[, 2L]),
         pos = as.integer(m[, 3L]),
@@ -320,6 +333,16 @@ parseVariantId <- function(ids) {
         A1 = m[, 5L]
     )
     `attr<-`(data, "convention", convention)
+}
+
+# The fields of variant ids as every parser reads them: underscores read as
+# colons and a build suffix dropped, then exactly 4 fields split by a single
+# vectorized regex match. A non-matching id yields an all-NA capture row
+# (mirrors strcapture).
+# @noRd
+.variantIdFields <- function(ids) {
+    normalized <- stripBuildSuffix(str_replace_all(ids, fixed("_"), ":"))
+    str_match(normalized, "^([^:]+):([^:]+):([^:]+):([^:]+)")
 }
 
 # `[[<-` rather than mutate(): callers hand this frame straight through from
@@ -412,7 +435,14 @@ formatVariantId <- function(
     }
     # UCSC style is pecotmr's own; the bare form is for a consumer that wants
     # it (canonChrom keeps X/Y/MT as strings).
-    chromOut <- if (chrPrefix) withChrPrefix(chrom) else canonChrom(chrom)
+    # Over the distinct labels only: millions of variants, a few dozen
+    # chromosomes (withChrPrefix() does the same).
+    chromOut <- if (chrPrefix) {
+        withChrPrefix(chrom)
+    } else {
+        labels <- unique(chrom)
+        canonChrom(labels)[match(chrom, labels)]
+    }
     str_c(chromOut, ":", pos, alleleSep, A2, alleleSep, A1)
 }
 
@@ -448,8 +478,19 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
     assertCharacter(ids)
     assertFlag(chrPrefix)
     assertList(convention, null.ok = TRUE)
-    parsed <- parseVariantId(ids)
     out <- as.character(ids)
+    # An id already in the canonical form re-formats to itself, and a
+    # genotype panel's millions of ids usually all are: one regex finds them,
+    # where parsing and re-rendering every one costs several times as much.
+    todo <- if (chrPrefix && is.null(convention)) {
+        which(!str_detect(out, .CANONICAL_VARIANT_ID))
+    } else {
+        seq_along(out)
+    }
+    if (length(todo) == 0L) {
+        return(out)
+    }
+    parsed <- parseVariantId(out[todo])
     # Only re-format ids that parsed into a chrom + pos; leave unparseable ids
     # (e.g. rsIDs) unchanged rather than emitting "chrNA:..." garbage.
     ok <- !is.na(parsed$chrom) & !is.na(parsed$pos)
@@ -473,8 +514,14 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
             chrPrefix = chrPrefix
         )
     }
-    replace(out, ok, reformatted)
+    replace(out, todo[ok], reformatted)
 }
+
+# The ids normalizeVariantId() returns unchanged in its default convention: a
+# UCSC chromosome, a position without leading zeros, and two alleles, with
+# no build suffix and no underscore.
+# @noRd
+.CANONICAL_VARIANT_ID <- "^chr(1[0-9]|2[0-2]|[1-9]|X|Y|M):[1-9][0-9]*:[^:_]+:[^:_]+$"
 
 # Complement a DNA allele string (A<->T, C<->G) for strand flipping.
 # @noRd
@@ -521,8 +568,10 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
 #' @param flip Whether the alleles must be flipped: A <--> T & C <--> G, in
 #'   which case corresponding `colToFlip` are multiplied by -1. Default is
 #'   `TRUE`.
-#' @param removeStrandAmbiguous Whether to remove strand SNPs (if any). Default
-#'   is `TRUE`.
+#' @param removeStrandAmbiguous Whether to drop a strand-ambiguous match (A/T
+#'   or C/G alleles, where a strand flip and an allele swap look the same).
+#'   Each target-reference pair is judged on its own, whatever else is being
+#'   harmonized; an exact A/T match is kept. Default is `TRUE`.
 #' @param flipStrand Whether to output the variants after strand flip. Default
 #'   is `FALSE`.
 #' @param removeUnmatched Whether to remove unmatched variants. Default is
@@ -680,17 +729,45 @@ harmonizeAlleles <- function(
     list(targetData = trimmedTarget, refVariants = trimmedRef)
 }
 
-# Inner-join target + reference on (chrom, pos).
+# Target + reference rows paired at the same (chrom, pos) by the matching
+# engine (.variantPairs()), laid out as an inner join on (chrom, pos) lays
+# them out: the target's columns, then the reference's other columns, the ones
+# both carry suffixed ".target" / ".ref".
 # @noRd
+#' @importFrom dplyr bind_cols
 .harmonizeJoin <- function(targetData, refVariants) {
-    inner_join(
-        targetData,
-        refVariants,
-        by = c("chrom", "pos"),
-        suffix = c(".target", ".ref")
-    ) |>
+    pairs <- .variantPairs(
+        .frameVariantTable(targetData),
+        .frameVariantTable(refVariants)
+    )
+    keys <- c("chrom", "pos")
+    left <- targetData[pairs$query, , drop = FALSE]
+    right <- refVariants[pairs$subject, , drop = FALSE]
+    right <- right[, !is_in(colnames(right), keys), drop = FALSE]
+    both <- setdiff(intersect(colnames(left), colnames(right)), keys)
+    colnames(left) <- .suffixed(colnames(left), both, ".target")
+    colnames(right) <- .suffixed(colnames(right), both, ".ref")
+    bind_cols(left, right, .name_repair = "minimal") |>
         as_tibble(.name_repair = "minimal") |>
         .sanitizeNames()
+}
+
+# `nm` with `suffix` appended to the names in `which`.
+# @noRd
+.suffixed <- function(nm, which, suffix) {
+    hit <- !is.na(nm) & is_in(nm, which)
+    replace(nm, hit, str_c(nm[hit], suffix))
+}
+
+# The variant table (.variantTable()) of a parsed chrom/pos/A2/A1 frame.
+# @noRd
+.frameVariantTable <- function(df) {
+    list(
+        chrom = as.character(df$chrom),
+        pos = as.integer(df$pos),
+        A2 = as.character(df$A2),
+        A1 = as.character(df$A1)
+    )
 }
 
 # Empty-match early return (warning + zeroed qcCounts).
@@ -748,90 +825,56 @@ harmonizeAlleles <- function(
         .harmonizeMatchFlags()
 }
 
-# Exact / sign-flip / strand-flip / INDEL / ID-match indicators, consuming the
-# uppercased alleles and strand complements from the earlier pipe stages.
+# Exact / sign-flip / strand-flip / INDEL / ID-match indicators, as the
+# matching engine decides them (.variantPairFlags()), on the uppercased
+# alleles from the earlier pipe stages.
 # @noRd
 .harmonizeMatchFlags <- function(matchResult) {
-    matchResult |>
-        mutate(
-            strand_unambiguous = if_else(
-                (.data$A1.target == "A" & .data$A2.target == "T") |
-                    (.data$A1.target == "T" & .data$A2.target == "A") |
-                    (.data$A1.target == "C" & .data$A2.target == "G") |
-                    (.data$A1.target == "G" & .data$A2.target == "C"),
-                FALSE,
-                TRUE
-            )
-        ) |>
-        mutate(
-            exact_match = .data$A1.target == .data$A1.ref &
-                .data$A2.target == .data$A2.ref
-        ) |>
-        mutate(
-            sign_flip = ((.data$A1.target == .data$A2.ref &
-                .data$A2.target == .data$A1.ref) |
-                (.data$A1.target == .data$flip2.ref &
-                    .data$A2.target == .data$flip1.ref)) &
-                (.data$A1.target != .data$A1.ref &
-                    .data$A2.target != .data$A2.ref)
-        ) |>
-        mutate(
-            strand_flip = ((.data$A1.target == .data$flip1.ref &
-                .data$A2.target == .data$flip2.ref) |
-                (.data$A1.target == .data$flip2.ref &
-                    .data$A2.target == .data$flip1.ref)) &
-                (.data$A1.target != .data$A1.ref &
-                    .data$A2.target != .data$A2.ref)
-        ) |>
-        mutate(
-            INDEL = (.data$A2.target == "I" |
-                .data$A2.target == "D" |
-                str_length(.data$A2.target) > 1L |
-                str_length(.data$A1.target) > 1L)
-        ) |>
-        mutate(
-            ID_match = ((.data$A2.target == "D" | .data$A2.target == "I") &
-                (str_length(.data$A1.ref) > 1L |
-                    str_length(.data$A2.ref) > 1L))
-        )
+    f <- .variantPairFlags(
+        matchResult$A1.target,
+        matchResult$A2.target,
+        matchResult$A1.ref,
+        matchResult$A2.ref
+    )
+    mutate(
+        matchResult,
+        strand_unambiguous = f$strandUnambiguous,
+        exact_match = f$exact,
+        sign_flip = f$signFlip,
+        strand_flip = f$strandFlip,
+        INDEL = f$indel,
+        ID_match = f$idMatch
+    )
 }
 
-# Strand-ambiguity resolution: disable the A/T-C/G guard when the caller opted
-# out, and when no unambiguous strand flip survives (ambiguous variants then
-# fall through as exact / sign-flip cases rather than being dropped).
+# Strand-ambiguity resolution: the A/T-C/G guard is off when the caller opted
+# out. Otherwise each pair is judged on its own: an ambiguous pair is not
+# rescued by the rest of the batch having no strand flip.
 # @noRd
 .harmonizeResolveAmbiguity <- function(matchResult, removeStrandAmbiguous) {
-    relaxed <- if (removeStrandAmbiguous) {
-        matchResult
-    } else {
-        mutate(matchResult, strand_unambiguous = TRUE)
+    if (removeStrandAmbiguous) {
+        return(matchResult)
     }
-    if (any(relaxed$strand_flip & relaxed$strand_unambiguous)) {
-        return(relaxed)
-    }
-    mutate(relaxed, strand_unambiguous = TRUE)
+    mutate(matchResult, strand_unambiguous = TRUE)
 }
 
-# Compute the keep flag (strand-flip vs non-strand-flip rules); drop indels when
-# requested.
+# The keep flag, as the matching engine decides it (.variantPairKeep()); the
+# strand guard is already in `strand_unambiguous`.
 # @noRd
 .harmonizeKeepRule <- function(matchResult, removeIndels) {
-    ruled <- matchResult |>
-        mutate(
-            keep = if_else(
-                .data$strand_flip,
-                true = .data$strand_unambiguous |
-                    .data$exact_match |
-                    .data$ID_match,
-                false = .data$exact_match |
-                    .data$sign_flip |
-                    .data$ID_match
-            )
-        )
-    if (!removeIndels) {
-        return(ruled)
-    }
-    mutate(ruled, keep = if_else(.data$INDEL, FALSE, .data$keep))
+    keep <- .variantPairKeep(
+        list(
+            strandUnambiguous = matchResult$strand_unambiguous,
+            exact = matchResult$exact_match,
+            signFlip = matchResult$sign_flip,
+            strandFlip = matchResult$strand_flip,
+            indel = matchResult$INDEL,
+            idMatch = matchResult$ID_match
+        ),
+        removeStrandAmbiguous = TRUE,
+        removeIndels = removeIndels
+    )
+    mutate(matchResult, keep = keep)
 }
 
 # Reduce the join to at most one reference row per TARGET variant.
@@ -856,34 +899,14 @@ harmonizeAlleles <- function(
 # the rule.
 # @noRd
 .harmonizeResolveTargets <- function(matchResult) {
-    tidx <- matchResult[[.haTargetIdx]]
-    hit <- which(matchResult$keep)
-    # Fast path: one reference row per target is the overwhelmingly common
-    # case, and it needs no grouping at all.
-    if (anyDuplicated(tidx[hit]) == 0L) {
-        return(matchResult)
-    }
-    conflicted <- .harmonizeConflictedTargets(
-        tidx[hit],
-        matchResult$sign_flip[hit]
-    )
-    resolved <- hit[
-        !is_in(tidx[hit], conflicted) & !duplicated(tidx[hit])
-    ]
     # Named apart from the column it replaces: `keep = keep` inside mutate()
     # reads the column, not this vector, and silently changes nothing.
-    resolvedKeep <- replace(rep(FALSE, nrow(matchResult)), resolved, TRUE)
+    resolvedKeep <- .variantPairResolve(
+        matchResult[[.haTargetIdx]],
+        matchResult$keep,
+        matchResult$sign_flip
+    )
     mutate(matchResult, keep = resolvedKeep)
-}
-
-# Target indices whose reference matches disagree about the allele-swap sign.
-# @noRd
-.harmonizeConflictedTargets <- function(tidx, signFlip) {
-    tibble(tidx = tidx, signFlip = signFlip) |>
-        group_by(.data$tidx) |>
-        summarise(nSigns = n_distinct(.data$signFlip), .groups = "drop") |>
-        filter(.data$nSigns > 1L) |>
-        pull("tidx")
 }
 
 # Named per-row conditional column transforms for the harmonize across() calls.
@@ -1104,6 +1127,192 @@ harmonizeAlleles <- function(
     }
 }
 
+# =============================================================================
+# The variant matching engine
+# -----------------------------------------------------------------------------
+# Variants are paired by position first -- overlaps of width-1 ranges, so a
+# window (`maxDistance`) costs nothing extra -- and their alleles decided
+# second, pair by pair: exact, ref/alt swap (sign -1), strand flip, the I/D
+# codes. matchVariants() and harmonizeAlleles() both decide through it, so the
+# two cannot disagree about which variants match.
+# =============================================================================
+
+# A variant table: canonical chromosome labels, positions and both alleles,
+# from a GRanges (A1/A2 metadata columns), variant ids, or a chrom/pos/A2/A1
+# data.frame (parseVariantId()). Chromosomes are relabelled over their distinct
+# values only (withChrPrefix()), so a genome-wide GRanges costs one pass.
+# @noRd
+.variantTable <- function(x) {
+    if (methods::is(x, "GRanges")) {
+        mc <- mcols(x, use.names = FALSE)
+        if (!all(is_in(c("A1", "A2"), colnames(mc)))) {
+            abort("A GRanges of variants needs A1 and A2 metadata columns.")
+        }
+        labels <- withChrPrefix(as.character(GenomeInfoDb::seqlevels(x)))
+        return(list(
+            chrom = labels[as.integer(seqnames(x))],
+            pos = start(x),
+            A2 = as.character(mc$A2),
+            A1 = as.character(mc$A1)
+        ))
+    }
+    p <- parseVariantId(x)
+    list(
+        chrom = as.character(p$chrom),
+        pos = as.integer(p$pos),
+        A2 = as.character(p$A2),
+        A1 = as.character(p$A1)
+    )
+}
+
+# The pairs of variants of tables `a` and `b` on one chromosome at most
+# `maxDistance` bp apart, as list(query, subject) indices, in query then
+# subject order -- the order a join on (chrom, pos) gives. A variant with no
+# chromosome or position pairs with none.
+# @noRd
+#' @importFrom IRanges findOverlaps IRanges
+.variantPairs <- function(a, b, maxDistance = 0L) {
+    levels <- unique(c(a$chrom, b$chrom))
+    levels <- levels[!is.na(levels)]
+    ra <- .variantPairRanges(a, levels)
+    rb <- .variantPairRanges(b, levels)
+    hits <- findOverlaps(
+        ra$gr,
+        rb$gr,
+        maxgap = as.integer(maxDistance) - 1L,
+        ignore.strand = TRUE
+    )
+    q <- ra$rows[S4Vectors::queryHits(hits)]
+    sbj <- rb$rows[S4Vectors::subjectHits(hits)]
+    o <- order(q, sbj)
+    list(query = q[o], subject = sbj[o])
+}
+
+# @noRd
+.variantPairRanges <- function(x, levels) {
+    rows <- which(!is.na(x$chrom) & !is.na(x$pos))
+    gr <- GenomicRanges::GRanges(
+        factor(x$chrom[rows], levels = levels),
+        IRanges(x$pos[rows], width = 1L)
+    )
+    list(gr = gr, rows = rows)
+}
+
+# `x` upper-cased, over its distinct values (alleles are few).
+# @noRd
+.upperAlleles <- function(x) {
+    u <- unique(x)
+    str_to_upper(u)[match(x, u)]
+}
+
+# The allele relationship of each pair of a target variant (alleles `a1t`,
+# `a2t`) with a reference variant (`a1r`, `a2r`): exact; a ref/alt swap, or a
+# swap of the complements (`signFlip`); a strand flip; an indel; an I/D-coded
+# target meeting a reference indel (`idMatch`); and whether the target's
+# alleles leave the strand undecidable (A/T, C/G). Case-insensitive.
+# @noRd
+.variantPairFlags <- function(a1t, a2t, a1r, a2r) {
+    a1t <- .upperAlleles(a1t)
+    a2t <- .upperAlleles(a2t)
+    a1r <- .upperAlleles(a1r)
+    a2r <- .upperAlleles(a2r)
+    flip1 <- .strandFlip(a1r)
+    flip2 <- .strandFlip(a2r)
+    differ <- a1t != a1r & a2t != a2r
+    list(
+        strandUnambiguous = !((a1t == "A" & a2t == "T") |
+            (a1t == "T" & a2t == "A") |
+            (a1t == "C" & a2t == "G") |
+            (a1t == "G" & a2t == "C")),
+        exact = a1t == a1r & a2t == a2r,
+        signFlip = ((a1t == a2r & a2t == a1r) |
+            (a1t == flip2 & a2t == flip1)) &
+            differ,
+        strandFlip = ((a1t == flip1 & a2t == flip2) |
+            (a1t == flip2 & a2t == flip1)) &
+            differ,
+        indel = a2t == "I" |
+            a2t == "D" |
+            str_length(a2t) > 1L |
+            str_length(a1t) > 1L,
+        idMatch = (a2t == "D" | a2t == "I") &
+            (str_length(a1r) > 1L | str_length(a2r) > 1L)
+    )
+}
+
+# Whether each pair matches: a strand flip only when the target's alleles
+# decide the strand (each pair judged on its own), an exact pair, or an I/D
+# match; any other pair when exact, swapped or I/D-matched. Indels are refused
+# when `removeIndels`. NA where an allele is missing.
+# @noRd
+.variantPairKeep <- function(flags, removeStrandAmbiguous, removeIndels) {
+    decided <- if (removeStrandAmbiguous) flags$strandUnambiguous else TRUE
+    keep <- ifelse(
+        flags$strandFlip,
+        decided | flags$exact | flags$idMatch,
+        flags$exact | flags$signFlip | flags$idMatch
+    )
+    if (removeIndels) {
+        keep <- ifelse(flags$indel, FALSE, keep)
+    }
+    keep
+}
+
+# `keep` with each target settled on at most one reference variant. A target
+# whose kept pairs disagree about the swap sign is undecidable and dropped --
+# its effect direction would depend on the reference's row order --; one whose
+# pairs agree keeps the first. Unchanged when no target has two.
+# @noRd
+#' @importFrom vctrs vec_unique_loc
+.variantPairResolve <- function(query, keep, signFlip) {
+    hit <- which(keep)
+    target <- query[hit]
+    if (anyDuplicated(target) == 0L) {
+        return(keep)
+    }
+    distinctSigns <- vec_unique_loc(data.frame(
+        target = target,
+        sign = signFlip[hit]
+    ))
+    nSigns <- tabulate(target[distinctSigns], nbins = max(target))
+    resolved <- hit[nSigns[target] == 1L & !duplicated(target)]
+    replace(rep(FALSE, length(keep)), resolved, TRUE)
+}
+
+# The matched (a, b) pairs of variant tables `a` and `b`: paired within
+# `maxDistance`, decided by their alleles, each target settled on one
+# reference variant, and each reference variant (its alleles as given)
+# claimed by the first target only. list(idxA, idxB, sign), by idxA.
+# @noRd
+.matchVariantTables <- function(
+    a,
+    b,
+    maxDistance = 0L,
+    removeStrandAmbiguous = TRUE,
+    removeIndels = FALSE
+) {
+    pairs <- .variantPairs(a, b, maxDistance)
+    q <- pairs$query
+    sbj <- pairs$subject
+    if (length(q) == 0L) {
+        return(.matchVariantsEmpty())
+    }
+    flags <- .variantPairFlags(a$A1[q], a$A2[q], b$A1[sbj], b$A2[sbj])
+    keep <- .variantPairKeep(flags, removeStrandAmbiguous, removeIndels)
+    kept <- which(.variantPairResolve(q, keep, flags$signFlip) %in% TRUE)
+    claimed <- kept[vec_unique_loc(data.frame(
+        chrom = b$chrom[sbj[kept]],
+        pos = b$pos[sbj[kept]],
+        A2 = b$A2[sbj[kept]],
+        A1 = b$A1[sbj[kept]]
+    ))]
+    list(
+        idxA = q[claimed],
+        idxB = sbj[claimed],
+        sign = as.numeric(ifelse(flags$signFlip[claimed], -1, 1))
+    )
+}
+
 #' Allele-aware variant matcher (match by chrom/pos/ref/alt, not id string)
 #'
 #' The single matching primitive for the package: given two sets of variant
@@ -1116,14 +1325,16 @@ harmonizeAlleles <- function(
 #' classification to \code{harmonizeAlleles}): an allele swap is matched and
 #' reported with \code{sign = -1} so callers can sign-flip a paired effect / z /
 #' weight; strand flips are resolved; and strand-ambiguous (A/T, C/G) matches
-#' are dropped when \code{removeStrandAmbiguous = TRUE}.
+#' are dropped when \code{removeStrandAmbiguous = TRUE}, each pair judged on
+#' its own.
 #'
 #' When ids cannot be parsed into chrom/pos/ref/alt (e.g. rsIDs), the matcher
 #' falls back to exact string identity with \code{sign = 1} (no allele awareness
 #' is possible without alleles).
 #'
-#' @param idsA,idsB Character vectors of variant IDs, or data.frames with
-#'   chrom/pos/A2/A1 columns (A2 = ref, A1 = alt).
+#' @param idsA,idsB Character vectors of variant IDs, data.frames with
+#'   chrom/pos/A2/A1 columns (A2 = ref, A1 = alt), or GRanges of variants with
+#'   A1/A2 metadata columns.
 #' @param allowFlip When TRUE (default) match by (chrom, pos) with ref/alt swap
 #'   and strand handling, reporting \code{sign = -1} for a swap. When FALSE,
 #'   match on exact alleles only (canonicalized format; \code{sign} always +1)
@@ -1131,6 +1342,9 @@ harmonizeAlleles <- function(
 #' @param removeStrandAmbiguous Drop strand-ambiguous (A/T, C/G) matches.
 #'   Default TRUE (mirrors summaryStatsQc).
 #' @param removeIndels Drop indels. Default FALSE.
+#' @param maxDistance Largest distance in bp between the positions of two
+#'   variants that may match; their alleles must still agree. Default 0: the
+#'   same position.
 #' @return A list of three equal-length vectors describing the matched pairs:
 #'   \code{idxA} / \code{idxB} (indices into \code{idsA} / \code{idsB}) and
 #'   \code{sign} (+1 exact, -1 allele-swap). At most one pair per \code{idsA}
@@ -1141,9 +1355,11 @@ matchVariants <- function(
     idsB,
     allowFlip = TRUE,
     removeStrandAmbiguous = TRUE,
-    removeIndels = FALSE
+    removeIndels = FALSE,
+    maxDistance = 0L
 ) {
-    if (!allowFlip) {
+    ranged <- methods::is(idsA, "GRanges") || methods::is(idsB, "GRanges")
+    if (!allowFlip && !ranged && maxDistance == 0L) {
         # Exact-allele matching: canonicalize the id FORMAT (chr-prefix +
         # separator, rsID-safe) but keep allele order, then match by exact
         # string identity, so a ref/alt swap does NOT match (sign is always +1).
@@ -1152,9 +1368,9 @@ matchVariants <- function(
             .matchVariantKeyOf(idsB)
         ))
     }
-    dfA <- parseVariantId(idsA)
-    dfB <- parseVariantId(idsB)
-    if (.matchVariantsUnparseable(dfA, dfB)) {
+    tabA <- .variantTable(idsA)
+    tabB <- .variantTable(idsB)
+    if (!ranged && .matchVariantsUnparseable(tabA, tabB)) {
         # rsID / unparseable ids: exact string identity only (no allele
         # awareness). data.frame inputs have no string form to fall back to.
         if (is.data.frame(idsA) || is.data.frame(idsB)) {
@@ -1162,7 +1378,32 @@ matchVariants <- function(
         }
         return(.matchVariantsExact(as.character(idsA), as.character(idsB)))
     }
-    .matchVariantsHarmonized(dfA, dfB, removeIndels, removeStrandAmbiguous)
+    if (!allowFlip) {
+        return(.matchVariantTablesExact(tabA, tabB, maxDistance))
+    }
+    .matchVariantTables(
+        tabA,
+        tabB,
+        maxDistance,
+        removeStrandAmbiguous,
+        removeIndels
+    )
+}
+
+# Pairs with exactly the same alleles in the same order (sign +1): the first
+# reference variant for each target, within `maxDistance`.
+# @noRd
+.matchVariantTablesExact <- function(a, b, maxDistance = 0L) {
+    pairs <- .variantPairs(a, b, maxDistance)
+    q <- pairs$query
+    sbj <- pairs$subject
+    same <- which(a$A2[q] == b$A2[sbj] & a$A1[q] == b$A1[sbj])
+    first <- same[!duplicated(q[same])]
+    list(
+        idxA = q[first],
+        idxB = sbj[first],
+        sign = rep(1, length(first))
+    )
 }
 
 # The empty match result.
@@ -1186,51 +1427,186 @@ matchVariants <- function(
 # TRUE when either parsed side lacks usable chrom/pos (rsID / unparseable ids).
 # @noRd
 .matchVariantsUnparseable <- function(dfA, dfB) {
-    nrow(dfA) == 0L ||
-        nrow(dfB) == 0L ||
+    length(dfA$pos) == 0L ||
+        length(dfB$pos) == 0L ||
         anyNA(dfA$chrom) ||
         anyNA(dfA$pos) ||
         anyNA(dfB$chrom) ||
         anyNA(dfB$pos)
 }
 
-# Allele-aware match via harmonizeAlleles, reading the matched pairs + swap sign
-# back out of the injected sentinel columns.
+# The variant table (.variantTable()) of variant ids, read as parseVariantId()
+# reads them (NA fields for an id that does not parse). A canonical id
+# ("chr1:100:A:G") is split on its separator, at a fraction of the cost of the
+# regex every other spelling takes: a genome-wide panel holds millions.
 # @noRd
-.matchVariantsHarmonized <- function(
-    dfA,
-    dfB,
-    removeIndels,
-    removeStrandAmbiguous
-) {
-    # Inject sentinel index/sign columns so the matched pairs and the swap sign
-    # can be read straight back out of harmonizeAlleles without re-deriving
-    # them.
-    tagA <- mutate(dfA, .mvTidx = seq_len(nrow(dfA)), .mvSign = 1)
-    tagB <- mutate(dfB, .mvRidx = seq_len(nrow(dfB)))
-    res <- suppressWarnings(harmonizeAlleles(
-        targetData = tagA,
-        refVariants = tagB,
-        colToFlip = ".mvSign",
-        matchMinProp = 0,
-        removeDups = TRUE,
-        flipStrand = FALSE,
-        removeIndels = removeIndels,
-        removeStrandAmbiguous = removeStrandAmbiguous,
-        removeUnmatched = TRUE
-    ))
-    h <- res$harmonizedData
-    if (is.null(h) || nrow(h) == 0L) {
-        return(.matchVariantsEmpty())
+#' @importFrom stringi stri_split_fixed
+.idsVariantTable <- function(ids) {
+    ids <- as.character(ids)
+    canon <- str_detect(ids, .CANONICAL_VARIANT_ID)
+    canon[is.na(canon)] <- FALSE
+    if (all(canon)) {
+        return(.canonicalVariantTable(ids))
     }
-    # One row per A id, sign-conflicting ids already dropped: harmonizeAlleles
-    # resolves that (see .harmonizeResolveTargets), so there is nothing to
-    # decide a second time here.
-    list(
-        idxA = as.integer(h$.mvTidx),
-        idxB = as.integer(h$.mvRidx),
-        sign = as.numeric(h$.mvSign)
+    out <- list(
+        chrom = rep(NA_character_, length(ids)),
+        pos = rep(NA_integer_, length(ids)),
+        A2 = rep(NA_character_, length(ids)),
+        A1 = rep(NA_character_, length(ids))
     )
+    if (any(canon)) {
+        fields <- .canonicalVariantTable(ids[canon])
+        for (nm in names(out)) {
+            out[[nm]][canon] <- fields[[nm]]
+        }
+    }
+    p <- parseVariantId(ids[!canon])
+    out$chrom[!canon] <- as.character(p$chrom)
+    out$pos[!canon] <- as.integer(p$pos)
+    out$A2[!canon] <- as.character(p$A2)
+    out$A1[!canon] <- as.character(p$A1)
+    .unparsedAsSpelled(out, ids)
+}
+
+# A variant table's rows whose id did not parse (an rsID), each made a variant
+# of its own: on a chromosome named after the id, at position 1, with the id
+# as its A2 and no A1. Such a variant pairs only with the same spelling, and
+# matches it exactly, so an id without coordinates is matched by its spelling
+# while the rest are matched by their variants.
+# @noRd
+.unparsedAsSpelled <- function(tab, ids) {
+    bad <- which(is.na(tab$chrom) | is.na(tab$pos))
+    if (length(bad) == 0L) {
+        return(tab)
+    }
+    spelled <- !is.na(ids[bad])
+    bad <- bad[spelled]
+    tab$chrom[bad] <- str_c(.UNPARSED_CHROM, ids[bad])
+    tab$pos[bad] <- 1L
+    tab$A2[bad] <- ids[bad]
+    tab$A1[bad] <- ""
+    tab
+}
+
+# The chromosome-name prefix of the variants .unparsedAsSpelled() makes.
+.UNPARSED_CHROM <- "<id>"
+
+# The ids of a variant table's variants: rendered from their fields, or the
+# spelling of an id that did not parse (.unparsedAsSpelled()).
+# @noRd
+.variantTableIds <- function(tab) {
+    ids <- formatVariantId(tab$chrom, tab$pos, tab$A2, tab$A1)
+    spelled <- which(str_starts(tab$chrom, fixed(.UNPARSED_CHROM)))
+    replace(ids, spelled, tab$A2[spelled])
+}
+
+# The number of variants in a variant table.
+# @noRd
+.variantTableSize <- function(tab) {
+    length(tab$pos)
+}
+
+# A variant table as a data.frame keyed by every field, for hashing variants
+# (vctrs) without rendering ids.
+# @noRd
+.variantKeyFrame <- function(tab) {
+    data.frame(chrom = tab$chrom, pos = tab$pos, A2 = tab$A2, A1 = tab$A1)
+}
+
+# Variant tables joined, in order.
+# @noRd
+.bindVariantTables <- function(tables) {
+    fields <- c("chrom", "pos", "A2", "A1")
+    set_names(
+        map(fields, function(f) unlist(map(tables, f), use.names = FALSE)),
+        fields
+    )
+}
+
+# The fields of canonical ids, split on ":".
+# @noRd
+.canonicalVariantTable <- function(ids) {
+    m <- stri_split_fixed(ids, ":", n = 4L, simplify = TRUE)
+    list(
+        chrom = m[, 1L],
+        pos = as.integer(m[, 2L]),
+        A2 = m[, 3L],
+        A1 = m[, 4L]
+    )
+}
+
+# A variant table subset to rows `i`.
+# @noRd
+.variantTableRows <- function(tab, i) {
+    map(tab, function(col) col[i])
+}
+
+# A panel's variant table, computed on first use: parsing a genome-wide
+# panel's ids costs seconds, and when every id matched against it is spelled
+# as a panel id, none is needed.
+# @noRd
+.lazyVariantTable <- function(panel) {
+    tab <- NULL
+    function() {
+        if (is.null(tab)) {
+            tab <<- .idsVariantTable(panel)
+        }
+        tab
+    }
+}
+
+# Match variant tables `query` to a `panel`: each query variant's index in the
+# panel, or NA. A variant with exactly a panel variant's alleles takes that
+# one; the rest are matched allele-aware by the matching engine
+# (.matchVariantTables(): ref/alt swap, strand), once per distinct variant.
+# Strand-ambiguous pairs are matched, since the callers carry orientation-free
+# values such as PIPs.
+# @noRd
+#' @importFrom vctrs vec_match vec_group_id
+.alignTablesToPanel <- function(query, panel) {
+    qf <- .variantKeyFrame(query)
+    idx <- vec_match(qf, .variantKeyFrame(panel))
+    unmatched <- which(is.na(idx) & !is.na(query$pos))
+    if (length(unmatched) == 0L) {
+        return(idx)
+    }
+    group <- vec_group_id(qf[unmatched, , drop = FALSE])
+    first <- unmatched[match(seq_len(attr(group, "n")), group)]
+    m <- .matchVariantTables(
+        .variantTableRows(query, first),
+        panel,
+        removeStrandAmbiguous = FALSE
+    )
+    hit <- rep(NA_integer_, length(first))
+    hit[m$idxA] <- m$idxB
+    idx[unmatched] <- hit[as.vector(group)]
+    idx
+}
+
+# Match variant ids to a panel of variant ids: each id's index in `panel`, or
+# NA. An id spelled exactly as a panel id takes that one; the rest that parse
+# are matched by their variants (.alignTablesToPanel()), and an id that does
+# not parse (an rsID) only by its spelling. `panelTable` supplies the panel's
+# variant table (see .lazyVariantTable()).
+# @noRd
+.alignIdsToPanel <- function(
+    ids,
+    panel,
+    panelTable = .lazyVariantTable(panel)
+) {
+    idx <- match(ids, panel)
+    unmatched <- which(is.na(idx))
+    if (length(unmatched) == 0L) {
+        return(idx)
+    }
+    rest <- .idsVariantTable(ids[unmatched])
+    parsed <- which(!is.na(rest$chrom) & !is.na(rest$pos))
+    if (length(parsed) == 0L) {
+        return(idx)
+    }
+    at <- .alignTablesToPanel(.variantTableRows(rest, parsed), panelTable())
+    idx[unmatched[parsed]] <- at
+    idx
 }
 
 #' Classify variant type from allele strings
