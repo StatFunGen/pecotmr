@@ -36,8 +36,8 @@ prsCsFactorCpp <- function(a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thi
   .Call(`_pecotmr_prsCsFactorCpp`, a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thin, verbose, seed)
 }
 
-qtlEnrichmentCpp <- function(rGwasPip, rQtlSusieFit, piGwas, piQtl, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed) {
-  .Call(`_pecotmr_qtlEnrichmentCpp`, rGwasPip, rQtlSusieFit, piGwas, piQtl, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed)
+qtlEnrichmentCpp <- function(rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed) {
+  .Call(`_pecotmr_qtlEnrichmentCpp`, rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed)
 }
 
 sdprCpp <- function(bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, numThreads, optLlk, verbose, seed) {

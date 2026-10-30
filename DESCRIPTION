@@ -51,6 +51,7 @@ Imports:
     Rsamtools,
     S4Arrays,
     S4Vectors,
+    stringi,
     stringr,
     SummarizedExperiment,
     susieR (>= 0.16.4),

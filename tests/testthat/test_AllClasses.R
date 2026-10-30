@@ -705,12 +705,13 @@ test_that("variantIds on an empty collection defers too", {
     endoapply(x, utils::head, k)
 }
 
-test_that("a fine-mapping row keeps its fit's variants when narrowed", {
+test_that("a narrowed fine-mapping row keeps its fit whole", {
     x <- .rc_makeFmr(.rc_vids(1:10))
-    expect_equal(as.character(x$fitVariants[[1L]]), .rc_vids(1:10))
+    expect_false("fitVariants" %in% colnames(S4Vectors::mcols(x)))
     narrowed <- .alc_narrowed(x, 4L)
     expect_length(narrowed[[1L]], 4L)
-    expect_equal(as.character(narrowed$fitVariants[[1L]]), .rc_vids(1:10))
+    expect_warning(fit <- susieFit(narrowed), "no longer holds")
+    expect_length(fit$pip, 10L)
 })
 
 test_that("reading a narrowed row's fit warns and returns it unchanged", {
@@ -762,74 +763,36 @@ test_that("intersectVariants restricts a narrowed row's fit by id", {
     expect_equal(colnames(fit$alpha), .rc_vids(11:30))
     kept <- susieFit(x)$alpha[, .rc_vids(11:30)]
     expect_equal(unname(fit$alpha), unname(kept / rowSums(kept)))
-    expect_equal(as.character(out$fitVariants[[1L]]), .rc_vids(11:30))
+    expect_length(out[[1L]], 20L)
+    expect_length(fit$pip, 20L)
 })
 
-test_that("updateObject() backfills the variants each fit was made with", {
+test_that("updateObject() drops the fitVariants column older rows saved", {
     x <- .rc_makeFmr(.rc_vids(1:10))
     saved <- x
-    saved$fitVariants <- NULL
-    expect_equal(
-        as.character(updateObject(saved)$fitVariants[[1L]]),
-        .rc_vids(1:10)
-    )
-    # A row narrowed before it was saved: its fit still names all ten.
-    savedNarrowed <- .alc_narrowed(x, 4L)
-    savedNarrowed$fitVariants <- NULL
-    up <- updateObject(savedNarrowed)
-    expect_equal(as.character(up$fitVariants[[1L]]), .rc_vids(1:10))
-    expect_warning(susieFit(up), "no longer holds")
+    saved$fitVariants <- IRanges::CharacterList(list(.rc_vids(1:10)))
+    up <- updateObject(saved)
+    expect_false("fitVariants" %in% colnames(S4Vectors::mcols(up)))
+    expect_identical(up, x)
+    # A row narrowed before it was saved still reads its whole fit.
+    savedNarrowed <- .alc_narrowed(saved, 4L)
+    expect_warning(fit <- susieFit(updateObject(savedNarrowed)), "no longer")
+    expect_length(fit$pip, 10L)
     # A current collection is left as it is.
-    expect_identical(updateObject(x)$fitVariants, x$fitVariants)
+    expect_identical(updateObject(x), x)
     expect_message(updateObject(x, verbose = TRUE), "updateObject")
 })
 
-test_that("updateObject() backfills fitVariants and keys LD rows in one call", {
+test_that("updateObject() drops fitVariants and keys LD rows in one call", {
     x <- .rc_makeFmr(.rc_vids(1:10))
     saved <- x
-    saved$fitVariants <- NULL
+    saved$fitVariants <- IRanges::CharacterList(list(.rc_vids(1:10)))
     up <- updateObject(.savedWithLdSketch(saved, NULL))
     expect_true(validObject(up))
-    expect_equal(as.character(up$fitVariants[[1L]]), .rc_vids(1:10))
+    expect_false("fitVariants" %in% colnames(S4Vectors::mcols(up)))
     expect_identical(ldReference(up), list())
     expect_true(is.na(up$ldReference))
     expect_identical(updateObject(up), up)
-})
-
-test_that("updateObject(): an unnamed fit records its row, no fit none", {
-    vids <- .rc_vids(1:3)
-    tl <- data.frame(variant_id = vids, pip = c(0.5, 0.3, 0.2))
-    saved <- QtlFineMappingResult(
-        studyName = c("s1", "s2"),
-        context = c("c1", "c1"),
-        trait = c("g1", "g1"),
-        method = c("susie", "susie"),
-        entry = list(
-            FineMappingRow(vids, list(pip = c(0.5, 0.3, 0.2)), tl),
-            FineMappingRow(vids, NULL, tl)
-        )
-    )
-    saved$fitVariants <- NULL
-    up <- updateObject(saved)
-    expect_equal(as.character(up$fitVariants[[1L]]), vids)
-    expect_equal(as.character(up$fitVariants[[2L]]), character(0))
-})
-
-test_that(".fitNamedVariants reads a fit's names, never susieR's null column", {
-    f <- pecotmr:::.fitNamedVariants
-    expect_equal(f(NULL), character(0))
-    expect_equal(f(list()), character(0))
-    # A null_weight fit: one more effect-matrix column, named "null".
-    alpha <- matrix(0.5, 1L, 3L, dimnames = list(NULL, c("v1", "v2", "null")))
-    expect_equal(f(list(alpha = alpha)), c("v1", "v2"))
-    expect_equal(
-        f(list(pip = c(v1 = 0.1, v2 = 0.2), alpha = alpha)),
-        c("v1", "v2")
-    )
-    lbfMat <- matrix(0, 1L, 2L, dimnames = list(NULL, c("a", "b")))
-    expect_equal(f(list(lbf_variable = lbfMat)), c("a", "b"))
-    # fSuSiE names its variables on csd_X.
-    expect_equal(f(list(csd_X = c(x1 = 1, x2 = 2))), c("x1", "x2"))
 })
 
 # ===========================================================================
@@ -1075,12 +1038,25 @@ test_that("a flip complements AF but leaves MAF and N alone", {
     data(qtlSumStatsExample)
     x <- qtlSumStatsExample
     swapped <- .alc_replacementGr(x, swap = TRUE, payload = 0.3)
+    p <- parseVariantId(variantIds(x))
+    ambiguous <- paste0(p$A2, p$A1) %in% c("AT", "TA", "CG", "GC")
     # An allele swap sends af -> 1 - af. maf is min(af, 1 - af) and the
     # sample size is a count, so both are swap-invariant -- complementing
     # them would corrupt them.
-    expect_equal(unique(af(fillFromReference(x, swapped, "AF"))), 0.7)
-    expect_equal(unique(maf(fillFromReference(x, swapped, "MAF"))), 0.3)
-    expect_equal(unique(sampleSize(fillFromReference(x, swapped, "N"))), 0.3)
+    filledAf <- af(fillFromReference(x, swapped, "AF"))
+    expect_equal(unique(filledAf[!ambiguous]), 0.7)
+    expect_equal(
+        unique(maf(fillFromReference(x, swapped, "MAF"))[!ambiguous]),
+        0.3
+    )
+    expect_equal(
+        unique(sampleSize(fillFromReference(x, swapped, "N"))[!ambiguous]),
+        0.3
+    )
+    # A swapped A/T or C/G variant is a swap or a strand flip and nothing says
+    # which, so it is not filled.
+    expect_true(any(ambiguous))
+    expect_false(any(filledAf[ambiguous] %in% c(0.3, 0.7)))
 })
 
 test_that("fillFromReference requires A1/A2 and says which column it read", {
@@ -1482,4 +1458,174 @@ test_that("fsusieAffectedRegions on a collection of non-fSuSiE entries is an emp
         entry = list(e)
     )
     expect_equal(length(fsusieAffectedRegions(res)), 0L)
+})
+
+# ===========================================================================
+# trimFineMappingResult: roles
+# ===========================================================================
+
+test_that("trimFineMappingResult trims by role, picked by class", {
+    gwas <- trimFineMappingResult(.fmLoadExample("gwasFineMappingExample"))
+    expect_setequal(names(susieFit(gwas)), c("pip", "sets", "sets_secondary"))
+    qtl <- trimFineMappingResult(.fmLoadExample("qtlFineMappingExample"))
+    expect_setequal(
+        names(susieFit(qtl)),
+        c("alpha", "V", "pip", "sets", "sets_secondary")
+    )
+    # Either class can play either role.
+    asAnnotation <- trimFineMappingResult(
+        .fmLoadExample("gwasFineMappingExample"),
+        role = "annotation"
+    )
+    expect_true("alpha" %in% names(susieFit(asAnnotation)))
+    # The fit's class survives, so dispatch on it does too.
+    expect_identical(
+        class(susieFit(qtl)),
+        class(susieFit(.fmLoadExample("qtlFineMappingExample")))
+    )
+})
+
+test_that("trimFineMappingResult refuses an unknown role or input", {
+    x <- .fmLoadExample("qtlFineMappingExample")
+    expect_error(trimFineMappingResult(x, role = "both"), "must be one of")
+    expect_error(trimFineMappingResult(list()), "GwasFineMappingResult")
+})
+
+test_that("an annotation trim keeps the effects of positive prior variance", {
+    x <- .fmLoadExample("gwasFineMappingExample")
+    inputs <- .fmExampleRowInputs(x, 1L)
+    inputs$susieFit$V[c(3L, 5L)] <- 0
+    edited <- GwasFineMappingResult(
+        studyName = "s",
+        method = "susie",
+        entry = list(do.call(FineMappingRow, inputs)),
+        ldReference = ldReference(x)
+    )
+    fit <- susieFit(trimFineMappingResult(edited, role = "annotation"))
+    kept <- setdiff(seq_along(inputs$susieFit$V), c(3L, 5L))
+    expect_identical(rownames(fit$alpha), paste0("L", kept))
+    expect_identical(names(fit$V), paste0("L", kept))
+    expect_equal(unname(fit$alpha), unname(inputs$susieFit$alpha[kept, ]))
+    # The credible-set summary reads each effect's V by its id: positionally,
+    # L4 would get L5's.
+    full <- credibleSetSummary(edited)
+    trimmed <- credibleSetSummary(trimFineMappingResult(edited, "annotation"))
+    keptCs <- full$effect_id != "L3"
+    expect_equal(trimmed$V[keptCs], full$V[keptCs])
+    expect_true(is.na(trimmed$V[!keptCs]))
+})
+
+test_that("a fit with no effect of positive prior variance keeps no rows", {
+    x <- .fmLoadExample("qtlFineMappingExample")
+    inputs <- .fmExampleRowInputs(x, 1L)
+    inputs$susieFit$V[] <- 0
+    null <- QtlFineMappingResult(
+        "s",
+        "c",
+        "t",
+        "susie",
+        list(do.call(FineMappingRow, inputs))
+    )
+    fit <- susieFit(trimFineMappingResult(null))
+    expect_identical(dim(fit$alpha), c(0L, ncol(inputs$susieFit$alpha)))
+    expect_length(fit$V, 0L)
+})
+
+# ===========================================================================
+# trimFineMappingResult: what a trimmed collection keeps
+# ===========================================================================
+
+test_that("trimming keeps names, the genome, LD references and metadata", {
+    x <- .fmLoadExample("qtlFineMappingExample")
+    S4Vectors::metadata(x) <- list(source = "test")
+    trimmed <- trimFineMappingResult(x)
+    expect_identical(names(trimmed), names(x))
+    expect_identical(GenomeInfoDb::seqinfo(trimmed), GenomeInfoDb::seqinfo(x))
+    expect_identical(ldReference(trimmed), ldReference(x))
+    expect_identical(S4Vectors::metadata(trimmed), list(source = "test"))
+    expect_identical(studyName(trimmed), studyName(x))
+})
+
+test_that("a trimmed collection stores only the variant identities", {
+    for (name in c("qtlFineMappingExample", "gwasFineMappingExample")) {
+        x <- .fmLoadExample(name)
+        trimmed <- trimFineMappingResult(x)
+        expect_setequal(.fmStoredColumns(trimmed), c("A1", "A2"))
+        expect_lt(utils::object.size(trimmed), utils::object.size(x) / 2)
+        expect_null(S4Vectors::mcols(trimmed)$cvResult[[1L]])
+    }
+})
+
+test_that("a trimmed collection reports the same PIPs and credible sets", {
+    cols <- c("pip", "cs_95", "cs_70", "cs_50", "cs_95_purity")
+    for (name in c("qtlFineMappingExample", "gwasFineMappingExample")) {
+        x <- .fmLoadExample(name)
+        trimmed <- trimFineMappingResult(x)
+        expect_equal(
+            S4Vectors::mcols(topLoci(trimmed, signalCutoff = 0))[cols],
+            S4Vectors::mcols(topLoci(x, signalCutoff = 0))[cols],
+            info = name
+        )
+        kept <- function(gr) {
+            S4Vectors::mcols(gr) <- S4Vectors::mcols(gr)[
+                c("variant_id", "pip", "cs_70")
+            ]
+            gr
+        }
+        expect_equal(
+            kept(credibleSets(trimmed, coverage = 0.7)),
+            kept(credibleSets(x, coverage = 0.7)),
+            info = name
+        )
+    }
+})
+
+test_that("trimming a trimmed collection changes nothing", {
+    trimmed <- trimFineMappingResult(.fmLoadExample("gwasFineMappingExample"))
+    expect_identical(trimFineMappingResult(trimmed), trimmed)
+    expect_identical(
+        trimFineMappingResult(trimmed, role = "outcome"),
+        trimmed
+    )
+})
+
+test_that("a narrowed row trims to a fit that names its variables", {
+    # A row narrowed before trimming is found in its fit by name, so its
+    # trimmed fit keeps them; any other row's goes unnamed.
+    x <- .rc_makeFmr(.rc_vids(1:10))
+    narrowed <- endoapply(x, utils::tail, 4L)
+    trimmed <- trimFineMappingResult(narrowed, role = "annotation")
+    expect_warning(fit <- susieFit(trimmed), "no longer holds")
+    expect_equal(names(fit$pip), .rc_vids(1:10))
+    expect_null(names(susieFit(trimFineMappingResult(x))$pip))
+    expect_equal(
+        suppressWarnings(topLoci(trimmed))$pip,
+        suppressWarnings(topLoci(narrowed))$pip
+    )
+})
+
+test_that("a trimmed row narrowed afterwards cannot be read", {
+    # Its fit names no variables, so the PIPs it left to the fit have nowhere
+    # to come back from.
+    trimmed <- trimFineMappingResult(.rc_makeFmr(.rc_vids(1:10)))
+    narrowed <- endoapply(trimmed, utils::tail, 4L)
+    expect_error(topLoci(narrowed), "does not name its variables")
+})
+
+test_that("enrichment estimates are the same from trimmed collections", {
+    gwas <- .fmLoadExample("gwasFineMappingExample")
+    qtl <- .fmLoadExample("qtlFineMappingExample")
+    run <- function(g, q) {
+        suppressWarnings(qtlEnrichmentPipeline(
+            g,
+            q,
+            qtlEnrichmentParam = QtlEnrichmentParam(numGwas = 1e5, impN = 5),
+            seed = 1L,
+            verbose = FALSE
+        ))
+    }
+    expect_equal(
+        run(trimFineMappingResult(gwas), trimFineMappingResult(qtl)),
+        run(gwas, qtl)
+    )
 })

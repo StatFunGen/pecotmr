@@ -27,8 +27,8 @@ NULL
 #'   NULL if unstratified. Two shapes are possible, depending on which route
 #'   produced the estimate:
 #'   \describe{
-#'     \item{partitioned}{tau-based enrichment of the baseline annotations
-#'       (\code{computeBaselineEnrichment}, \code{.gldscEnrichmentDf}), with
+#'     \item{partitioned}{enrichment of the user's baseline annotations
+#'       from their partitioned heritabilities \eqn{A'A\tau}, with
 #'       columns \code{annotation}, \code{tau}, \code{tauSe},
 #'       \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
 #'       \code{propH2}, \code{propSnps}.}

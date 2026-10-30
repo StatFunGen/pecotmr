@@ -598,7 +598,7 @@ test_that("QtlFineMappingResult() keeps the caller's metadata", {
     )
 })
 
-test_that("each row records the variants its fit was made with", {
+test_that("rows record no fit variants: a row is its fit's variables", {
     row <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         studyName = "s1",
@@ -607,14 +607,13 @@ test_that("each row records the variants its fit was made with", {
         method = "susie",
         entry = list(row)
     )
-    expect_s4_class(res$fitVariants, "CharacterList")
-    expect_equal(
-        as.character(res$fitVariants[[1L]]),
-        pecotmr:::.fmRowFitVariants(row)
-    )
+    expect_false("fitVariants" %in% colnames(S4Vectors::mcols(res)))
+    expect_identical(susieFit(res), susieFit(row))
 })
 
 test_that("cvResult() of a narrowed row warns and returns it unchanged", {
+    # A row is narrowed when it holds fewer variants than its fit has, so
+    # it is the fit that tells.
     tl <- data.frame(
         variant_id = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
         pip = c(0.5, 0.3, 0.2)
@@ -625,7 +624,12 @@ test_that("cvResult() of a narrowed row warns and returns it unchanged", {
         context = "c1",
         trait = "t1",
         method = "susie",
-        entry = list(FineMappingRow(tl$variant_id, NULL, tl, cvResult = cv))
+        entry = list(FineMappingRow(
+            tl$variant_id,
+            list(pip = tl$pip),
+            tl,
+            cvResult = cv
+        ))
     )
     narrowed <- endoapply(res, utils::head, 2L)
     expect_warning(

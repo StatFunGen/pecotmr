@@ -600,6 +600,31 @@ test_that("flattenTupleRanges drops non-broadcastable payload columns", {
     expect_true(is_in(".study", colnames(mcols(flat))))
 })
 
+test_that("flattenTupleRanges restores a trimmed collection's PIPs and sets", {
+    # A trimmed row stores neither: every row's come back from its fit, and
+    # they are the values the untrimmed collection stores.
+    for (name in .fmExampleNames()) {
+        x <- .fmLoadExample(name)
+        trimmed <- S4Vectors::mcols(flattenTupleRanges(trimFineMappingResult(
+            x
+        )))
+        full <- S4Vectors::mcols(flattenTupleRanges(x))
+        shared <- intersect(
+            colnames(trimmed),
+            c(
+                "pip",
+                grep("^cs_[0-9]+(_purity)?$", colnames(full), value = TRUE)
+            )
+        )
+        expect_true("pip" %in% shared, info = name)
+        expect_equal(
+            as.data.frame(trimmed[shared]),
+            as.data.frame(full[shared]),
+            info = name
+        )
+    }
+})
+
 test_that("flattenTupleRanges rejects a non-collection", {
     expect_error(
         flattenTupleRanges(GenomicRanges::GRanges()),

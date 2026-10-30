@@ -20,10 +20,11 @@ columns are the per-variant \code{topLoci} values.}
 
 \item{\code{cvResult}}{Cross-validation payload, or \code{NULL}.}
 
-\item{\code{fitVariants}}{The ids of the variants the stored fit was made with, in
-the fit's own order, recorded when the row is built; empty for a row with
-no fit. A row narrowed to fewer variants keeps them, which is how reading
-the fit can tell it describes more variants than the row now holds.}
+\item{\code{derivedColumns}}{The credible-set columns (\code{cs_<coverage>} and
+their \code{_purity} partners) the row does not store because its fit
+reproduces them exactly, followed by \code{"method=<tag>"}, the method
+tag of their labels; every view derives them back. Empty when it stores
+all it was given.}
 }}
 
 \section{Coercion}{

@@ -16,12 +16,15 @@ QtlEnrichmentParam(
 )
 }
 \arguments{
-\item{numGwas}{Number of GWAS variants used to estimate \code{piGwas}.
-\code{NULL} (default) estimates it from the data, which is biased unless
-the outcome PIP vector really is genome-wide.}
+\item{numGwas}{The total number of variants the GWAS tested (fastenloc's
+\code{-total_variants}), over which \code{piGwas} and \code{piQtl} are
+estimated. \code{NULL} (default) uses the number of distinct variants in
+the outcome PIP vector and the annotation fits, with a warning; that is
+biased unless the outcome PIP vector really is genome-wide.}
 
 \item{piQtl}{Per-variant prior of being a causal QTL variant. \code{NULL}
-(default) estimates it from the data.}
+(default) estimates it as fastenloc does: the annotation fits' summed
+PIPs over the variant total (see \code{numGwas}).}
 
 \item{lambda}{Shrinkage parameter, shrinking the enrichment estimate
 towards zero as in ridge regression. \code{0} applies no shrinkage.

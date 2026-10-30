@@ -1121,14 +1121,13 @@ test_that(".checkGwasBlockReach words what it finds", {
     pip <- c(0.5, 0.3, 0.2)
     full <- FineMappingRow(
         .ts_fitted,
-        list(pip = pip),
+        list(pip = set_names(pip, .ts_fitted)),
         data.frame(variant_id = .ts_fitted, pip = pip)
     )
     methods::new(
         "FineMappingRow",
         variants = variants(full)[keep],
-        susieFit = susieFit(full),
-        fitVariants = .ts_fitted
+        susieFit = susieFit(full)
     )
 }
 
@@ -1179,33 +1178,62 @@ test_that(".mdFitVariants reads a group's first row, nothing for old rows", {
     )
 })
 
-test_that(".partsFitIds: the recorded ids, else the fit's, else the row's", {
+test_that(".partsFitIds: the row's own ids, else the fit's names", {
+    # A row holding all of its fit is its fit's variables, read by position.
+    full <- .ts_fitRow()
+    expect_equal(pecotmr:::.partsFitIds(full), .ts_fitted)
+    # A narrowed row's fit names them, wherever it keeps the names.
     expect_equal(pecotmr:::.partsFitIds(.ts_fitRow(1:2)), .ts_fitted)
-    unrecorded <- methods::new(
+    named <- matrix(0, 1L, 3L, dimnames = list(NULL, rev(.ts_fitted)))
+    fitless <- methods::new(
         "FineMappingRow",
-        variants = variants(.ts_fitRow()),
+        variants = variants(full)[1:2],
         susieFit = NULL
     )
-    named <- matrix(0, 1L, 3L, dimnames = list(NULL, rev(.ts_fitted)))
-    expect_equal(pecotmr:::.partsFitIds(unrecorded, named), rev(.ts_fitted))
-    expect_equal(pecotmr:::.partsFitIds(unrecorded), .ts_fitted)
+    expect_equal(pecotmr:::.partsFitIds(fitless, named), rev(.ts_fitted))
+    # A narrowed row whose fit names none cannot be placed in it.
+    unnamed <- methods::new(
+        "FineMappingRow",
+        variants = variants(full)[1:2],
+        susieFit = list(pip = c(0.5, 0.3, 0.2))
+    )
+    expect_error(
+        pecotmr:::.partsFitIds(unnamed),
+        "holds 2 variants but its fit was made with 3"
+    )
 })
 
-test_that("a row records fit variants only when it carries a fit", {
+test_that(".fitColumnsFor reads a row holding its whole fit by position", {
+    f <- pecotmr:::.fitColumnsFor
+    gr <- variants(.ts_fitRow())
+    fit <- list(pip = c(0.5, 0.3, 0.2))
+    expect_equal(f(gr, fit), 1:3)
+    # Narrowed: by the fit's names, or not at all without them.
+    expect_equal(f(gr[2:3], list(pip = set_names(fit$pip, .ts_fitted))), 2:3)
+    expect_null(f(gr[2:3], fit))
+    # A fit of unknown width describes the row as it is.
+    expect_equal(f(gr[2:3], NULL), 1:2)
+})
+
+test_that(".fitWidth counts the fit's variables, never the null column", {
+    f <- pecotmr:::.fitWidth
+    alpha <- matrix(0.25, 1L, 4L)
+    expect_equal(f(list(pip = c(0.1, 0.2, 0.3), alpha = alpha)), 3L)
+    expect_equal(f(list(alpha = alpha)), 4L)
+    expect_equal(f(list(), alpha), 4L)
+    expect_true(is.na(f(NULL)))
+    expect_true(is.na(f(list(list(pip = 1)))))
+})
+
+test_that("a TWAS row records fit variants only when it carries a fit", {
     w <- c(0.1, 0.2, 0.3)
     withCv <- TwasWeightsRow(.ts_fitted, w, cvResult = list(r2 = 0.5))
-    expect_equal(pecotmr:::.rowFitVariants(withCv), .ts_fitted)
-    # Weights alone are no fit payload, and topLoci alone no fit.
+    expect_equal(pecotmr:::.twRowFitVariants(withCv), .ts_fitted)
+    # Weights alone are no fit payload.
     expect_equal(
-        pecotmr:::.rowFitVariants(TwasWeightsRow(.ts_fitted, w)),
+        pecotmr:::.twRowFitVariants(TwasWeightsRow(.ts_fitted, w)),
         character(0)
     )
-    fitless <- FineMappingRow(
-        .ts_fitted,
-        NULL,
-        data.frame(variant_id = .ts_fitted, pip = c(0.5, 0.3, 0.2))
-    )
-    expect_equal(pecotmr:::.rowFitVariants(fitless), character(0))
 })
 
 test_that(".fitCoverageChecked warns about a narrowed row and returns it", {
@@ -1238,12 +1266,12 @@ test_that(".fitCoverageCheckedRows names at most five narrowed rows", {
     ))
 })
 
-test_that(".fitCoverageCheckedRows is silent without a record or rows", {
+test_that(".fitCoverageCheckedRows is silent without a fit or rows", {
     x <- .ts_narrowedCollection(1L)
     expect_no_warning(pecotmr:::.fitCoverageCheckedRows(x[0], "f()"))
-    unrecorded <- x
-    unrecorded$fitVariants <- NULL
-    expect_no_warning(pecotmr:::.fitCoverageCheckedRows(unrecorded, "f()"))
+    fitless <- x
+    fitless$susieFit <- S4Vectors::SimpleList(list(NULL))
+    expect_no_warning(pecotmr:::.fitCoverageCheckedRows(fitless, "f()"))
     # An optional input left out is nothing to check.
     expect_no_warning(pecotmr:::.fitCoverageCheckedRows(NULL, "f()"))
 })
@@ -1354,13 +1382,17 @@ test_that(".naLikeColumn pads a list column with empty entries of its kind", {
     expect_null(sl[[1L]])
 })
 
-test_that("binding a collection saved before fitVariants pads the column", {
-    x <- .ts_narrowedCollection(2L)
-    old <- x[1L]
-    old$fitVariants <- NULL
-    out <- pecotmr:::.rbindCollections(list(old, x[2L]))
-    expect_s4_class(out$fitVariants, "CharacterList")
-    expect_equal(unname(lengths(out$fitVariants)), c(0L, 3L))
+test_that("binding a collection saved before derivedColumns pads the column", {
+    x <- .fmRebuildExample(.fmLoadExample("qtlFineMappingExample"))
+    recorded <- which(lengths(x$derivedColumns) > 0L)[[1L]]
+    old <- x[-recorded]
+    old$derivedColumns <- NULL
+    out <- pecotmr:::.rbindCollections(list(old, x[recorded]))
+    expect_s4_class(out$derivedColumns, "CharacterList")
+    expect_equal(
+        unname(lengths(out$derivedColumns)),
+        c(rep(0L, nrow(old)), length(x$derivedColumns[[recorded]]))
+    )
 })
 
 # ===========================================================================

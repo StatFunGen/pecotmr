@@ -910,12 +910,15 @@ setMethod(
 #'   \code{mcols} names the entry each row used (\code{NA} for a fit derived
 #'   from individual-level data). Used downstream to check that the rows a
 #'   pipeline combines share an LD reference.
-#' @section Narrowed rows: Each row records in its \code{fitVariants} column
-#'   the ids of the variants its fit was made with (none for a row without a
-#'   fit). A row narrowed since -- by \code{endoapply()} or \code{[[<-} --
-#'   keeps its fit as it was, so every reader of the fit warns, with
-#'   condition class \code{pecotmrFitCoverage}, when a row holds fewer
-#'   variants than its fit describes. The readers are the accessors
+#' @section Narrowed rows: A row is built from its fit, holding the fit's
+#'   variables in the fit's order, so its fit is read off it by position. A
+#'   row narrowed since -- by \code{endoapply()} or \code{[[<-} -- keeps its
+#'   fit as it was, and is found in the fit by the names the fit gives its
+#'   variables (a narrowed row whose fit names none, such as a trimmed fit,
+#'   cannot be read). Every reader of the fit warns, with condition class
+#'   \code{pecotmrFitCoverage}, when a row holds fewer variants than its fit
+#'   describes. A row replaced by one of the same length is read by
+#'   position. The readers are the accessors
 #'   (\code{susieFit()}, \code{lbf()}, \code{cvResult()},
 #'   \code{credibleSetSummary()} and the fSuSiE views),
 #'   \code{computeCsCorrelation()}, \code{susieResult()},
@@ -1024,8 +1027,8 @@ setMethod(
     )
     `[[<-`(
         withCv,
-        "fitVariants",
-        value = IRanges::CharacterList(map(entries, .fmRowFitVariants))
+        "derivedColumns",
+        value = IRanges::CharacterList(map(entries, .fmRowDerivedColumns))
     )
 }
 
@@ -1033,12 +1036,15 @@ setMethod(
 # identity column and collection-level slot.
 # @noRd
 .fmrFromEntries <- function(x, entries) {
-    grl <- `mcols<-`(
-        .rtlBindElements(map(entries, variants)),
-        value = .withEntryPayload(mcols(x, use.names = FALSE), entries)
+    # .rtlRebuild() carries the names, seqinfo (the genome build) and every
+    # slot -- the rows keep their keys in mcols, so the references go across
+    # as is -- and only the payload columns are new.
+    rebuilt <- .rtlRebuild(x, map(entries, variants), seq_len(length(x)))
+    withPayload <- `mcols<-`(
+        rebuilt,
+        value = .withEntryPayload(mcols(rebuilt, use.names = FALSE), entries)
     )
-    # The rows keep their keys in mcols, so the references go across as is.
-    new(class(x), grl, ldReference = x@ldReference)
+    S4Vectors::`metadata<-`(withPayload, value = S4Vectors::metadata(x))
 }
 
 # TRUE when an entry shares at least one variant with `keepVariants`, matched
@@ -1050,6 +1056,164 @@ setMethod(
         as.character(keepVariants)
     )
     length(matched$idxA) > 0L
+}
+
+# ---- Trimming a collection to what its role reads ---------------------------
+
+#' @title Trim A Fine-Mapping Collection To What Its Role Reads
+#' @description Keep, of each row's fit, only what a fine-mapping collection
+#'   is read for in its \code{role}, so a genome-wide collection fits in
+#'   memory. Nothing is sampled or summarized ahead of time: a trimmed
+#'   collection gives the same enrichment estimates as the untrimmed one, and
+#'   can still be resampled.
+#'
+#'   \describe{
+#'     \item{\code{"outcome"}}{The side whose PIPs are scanned, as in
+#'       \code{\link{qtlEnrichmentPipeline}}'s \code{gwasFineMappingResult}:
+#'       each fit keeps its \code{pip} and its credible sets (\code{sets},
+#'       \code{sets_secondary}).}
+#'     \item{\code{"annotation"}}{The side whose single effects are sampled,
+#'       as in \code{qtlFineMappingResult}: each fit also keeps \code{alpha}
+#'       and the prior variances \code{V} of its effects of positive prior
+#'       variance -- the only ones the enrichment samples -- with rows and
+#'       entries named by effect id (\code{"L<k>"}). A fit with no such
+#'       effect keeps a zero-row \code{alpha}.}
+#'   }
+#'
+#'   Each row's per-variant columns are cut to the identity columns, the
+#'   PIPs and the credible-set columns, and those two are stored only where
+#'   the trimmed fit cannot give them back. The posterior summaries, marginal
+#'   statistics and per-fit metadata columns go, so \code{\link{topLoci}} of a
+#'   trimmed collection reports PIPs and credible sets only. The
+#'   cross-validation results go as well, so a trimmed collection cannot feed
+#'   \code{\link{twasWeightsPipeline}}. Identity columns, names, the genome
+#'   build, LD references and \code{metadata()} are kept. Trimming a trimmed
+#'   collection changes nothing.
+#' @param x A \code{\link{GwasFineMappingResult}} or
+#'   \code{\link{QtlFineMappingResult}}.
+#' @param role \code{"outcome"} or \code{"annotation"}. \code{NULL} (default)
+#'   picks by class: \code{"outcome"} for a \code{GwasFineMappingResult},
+#'   \code{"annotation"} for a \code{QtlFineMappingResult}.
+#' @return \code{x}, trimmed.
+#' @examples
+#' data(qtlFineMappingExample)
+#' trimmed <- trimFineMappingResult(qtlFineMappingExample)
+#' names(susieFit(trimmed))
+#' c(
+#'     before = utils::object.size(qtlFineMappingExample),
+#'     after = utils::object.size(trimmed)
+#' )
+#' @importFrom checkmate assertMultiClass
+#' @importFrom rlang arg_match0
+#' @export
+trimFineMappingResult <- function(x, role = NULL) {
+    assertMultiClass(x, c("GwasFineMappingResult", "QtlFineMappingResult"))
+    role <- role %||%
+        if (methods::is(x, "GwasFineMappingResult")) "outcome" else "annotation"
+    role <- arg_match0(role, c("outcome", "annotation"))
+    entries <- map(seq_len(nrow(x)), .trimRow, x = x, role = role)
+    .fmrFromEntries(x, entries)
+}
+
+# Row i of `x`, trimmed for `role`: its fit trimmed, its cross-validation
+# results dropped, and its table cut to the PIPs and credible-set columns,
+# which the row builder stores only where the trimmed fit cannot give them
+# back. Each variant id is held once, by the row's ranges and alleles: the
+# trimmed fit's vectors go unnamed, read by position, except for a row
+# narrowed since its fit, which is found in the fit by name, so its fit keeps
+# the names of its variables (.partsFitIds()).
+# @noRd
+.trimRow <- function(i, x, role) {
+    parts <- .fmrRowParts(x, i)
+    gr <- variants(parts)
+    if (length(gr) == 0L) {
+        return(parts)
+    }
+    tl <- .fmrPartsTopLoci(parts)
+    csCols <- names(tl)[str_detect(names(tl), "^cs_[0-9]+(_purity)?$")]
+    fit <- susieFit(parts)
+    fitIds <- if (.rowHoldsFit(length(gr), .fitWidth(fit))) {
+        NULL
+    } else {
+        .partsFitIds(parts)
+    }
+    .fmRowBuild(
+        `mcols<-`(
+            GenomicRanges::granges(gr, use.mcols = FALSE),
+            value = mcols(gr, use.names = FALSE)[, c("A1", "A2"), drop = FALSE]
+        ),
+        .trimFit(fit, role, fitIds),
+        tl[intersect(c("variant_id", "pip", csCols), names(tl))],
+        NULL
+    )
+}
+
+# A fit cut to what `role` reads (see trimFineMappingResult()), its PIPs and
+# effect columns named by `fitIds` (a narrowed row's) or unnamed. A fit that
+# is not a list -- none at all -- is left as it is.
+# @noRd
+.trimFit <- function(fit, role, fitIds = NULL) {
+    if (!is.list(fit) || length(fit) == 0L) {
+        return(fit)
+    }
+    kept <- compact(list(
+        pip = .trimNamed(fit[["pip"]], fitIds),
+        sets = fit[["sets"]],
+        sets_secondary = .trimSecondarySets(fit[["sets_secondary"]])
+    ))
+    if (role == "annotation") {
+        kept <- c(.trimEffects(fit, fitIds), kept)
+    }
+    `class<-`(kept, class(fit))
+}
+
+# `pip` named by `fitIds`, or unnamed when there are none to name it by.
+# @noRd
+.trimNamed <- function(pip, fitIds) {
+    if (is.null(pip)) {
+        return(NULL)
+    }
+    `names<-`(pip, if (length(fitIds) == length(pip)) fitIds)
+}
+
+# The credible sets of each other coverage, without the per-coverage copies
+# of the PIPs and the rest that a fit's sets_secondary may carry: only the
+# sets are read (.csSetsForCoverage()).
+# @noRd
+.trimSecondarySets <- function(sec) {
+    if (length(sec) == 0L) {
+        return(NULL)
+    }
+    map(sec, function(s) list(sets = s$sets))
+}
+
+# The alpha rows and prior variances of the fit's effects of positive prior
+# variance, named by effect id, and alpha's columns by `fitIds` when given.
+# An already trimmed fit's names are its ids.
+# @noRd
+.trimEffects <- function(fit, fitIds = NULL) {
+    alpha <- fit[["alpha"]]
+    priorVariance <- fit[["V"]] %||% fit[["prior_variance"]]
+    if (is.null(alpha) || is.null(priorVariance)) {
+        return(list())
+    }
+    alpha <- as.matrix(alpha)
+    ids <- if (.namedByEffect(alpha)) {
+        rownames(alpha)
+    } else {
+        str_c("L", seq_len(nrow(alpha)))
+    }
+    keep <- which(as.numeric(priorVariance) > 0)
+    list(
+        alpha = `dimnames<-`(
+            alpha[keep, , drop = FALSE],
+            list(
+                ids[keep],
+                if (length(fitIds) == ncol(alpha)) fitIds
+            )
+        ),
+        V = set_names(as.numeric(priorVariance)[keep], ids[keep])
+    )
 }
 
 # =============================================================================
@@ -1434,12 +1598,10 @@ setMethod(
     }
 )
 
-# Before rows recorded the variants their fits were made with, a collection
-# had no `fitVariants` column. A fine-mapping fit names its own variants, so
-# each row's are read off it; a row whose fit names none (a
-# cross-validation-only row, or an unnamed fit) records what it holds, and a
-# row with no fit records none. The inherited update runs either way, for
-# the updates every collection shares.
+# Collections saved while rows recorded the variants their fits were made
+# with carry a `fitVariants` column. A row's variants are its fit's
+# variables, read by position, so the column is dropped. The inherited update
+# runs either way, for the updates every collection shares.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -1449,45 +1611,14 @@ setMethod(
         if (isTRUE(verbose)) {
             message(str_c("updateObject(object = '", class(object)[[1L]], "')"))
         }
-        if (!is_in("fitVariants", .tupleColumnNames(object))) {
-            fv <- map(seq_along(object), .fmrBackfillFitVariants, x = object)
-            object <- `$<-`(object, "fitVariants", IRanges::CharacterList(fv))
+        md <- mcols(object, use.names = FALSE)
+        if (is_in("fitVariants", colnames(md))) {
+            md$fitVariants <- NULL
+            object <- `mcols<-`(object, value = md)
         }
         methods::callNextMethod(object, ..., verbose = verbose)
     }
 )
-
-# @noRd
-.fmrBackfillFitVariants <- function(i, x) {
-    md <- mcols(x, use.names = FALSE)
-    fit <- md$susieFit[[i]]
-    if (length(fit) == 0L && is.null(md$cvResult[[i]])) {
-        return(character(0))
-    }
-    named <- .fitNamedVariants(fit)
-    if (length(named) > 0L) {
-        return(normalizeVariantId(named))
-    }
-    .grVariantIds(x[[i]])
-}
-
-# The variant names a fine-mapping fit carries: its PIPs' names, else the
-# columns of its effect matrices (SuSiE, mvSuSiE) or of csd_X (fSuSiE); none
-# for an unnamed fit. A null_weight fit gives its effect matrices one more
-# column, which susieR names "null"; that is no variant.
-# @noRd
-.fitNamedVariants <- function(fit) {
-    if (!is.list(fit)) {
-        return(character(0))
-    }
-    named <- as.character(
-        names(fit[["pip"]]) %||%
-            colnames(fit[["alpha"]]) %||%
-            colnames(fit[["lbf_variable"]]) %||%
-            names(fit[["csd_X"]])
-    )
-    named[named != "null"]
-}
 
 #' @rdname traitPosition
 #' @examples
