@@ -270,7 +270,10 @@ setMethod(
 #'     ldScores = matrix(1, length(fm), 1, dimnames = list(NULL, "base_l2")),
 #'     ldScoreWeights = rep(1, length(fm))
 #' )
-#' annot <- fineMappingAnnotations(qtlFineMappingExample, ref, pipThreshold = 0.1)
+#' annot <- fineMappingAnnotations(
+#'     qtlFineMappingExample, ref,
+#'     pipThreshold = 0.1
+#' )
 #' colnames(annot)
 #' @importFrom checkmate assertMultiClass assertClass assertNumber
 #' @importFrom rlang arg_match arg_match0
@@ -287,11 +290,11 @@ fineMappingAnnotations <- function(
 ) {
     assertMultiClass(x, c("QtlFineMappingResult", "GwasFineMappingResult"))
     assertClass(ldRef, "LdStatistic")
-    types <- arg_match(types, multiple = TRUE)
+    chosenTypes <- arg_match(types, multiple = TRUE)
     assertNumber(coverage, lower = 0, upper = 1)
     assertNumber(minPurity, lower = 0, upper = 1, null.ok = TRUE)
     assertNumber(pipThreshold, lower = 0, upper = 1)
-    tier <- arg_match0(tier, c("candidate", "baseline"))
+    chosenTier <- arg_match0(tier, c("candidate", "baseline"))
     # The reference's variants, read off its ranges and alleles.
     refTable <- .variantTable(ldRef)
     tuples <- .enrAnnotationTuples(x)
@@ -301,16 +304,16 @@ fineMappingAnnotations <- function(
         x = x,
         tuples = tuples,
         refTable = refTable,
-        types = types,
+        types = chosenTypes,
         coverage = coverage,
         minPurity = minPurity,
         pipThreshold = pipThreshold
     )
     mat <- .fmaDropEmptyColumns(exec(cbind, !!!columns))
     colTypes <- str_extract(colnames(mat), "[^|]+$")
-    meta <- data.frame(
+    meta <- tibble(
         name = colnames(mat),
-        tier = rep(tier, ncol(mat)),
+        tier = rep(chosenTier, ncol(mat)),
         type = if_else(
             is_in(colTypes, c("maxCpp", "sumPip")),
             "continuous",
@@ -355,28 +358,19 @@ fineMappingAnnotations <- function(
         },
         highPip = as.numeric(maxPip >= pipThreshold)
     )[types]
-    mat <- exec(cbind, !!!out)
-    colnames(mat) <- str_c(.fmaUnitName(tuples, k), "|", types)
-    mat
+    named <- set_names(out, str_c(.fmaUnitName(tuples, k), "|", types))
+    exec(cbind, !!!named)
 }
 
 # A reference-length vector holding the largest (`f = "max"`) or the sum
 # (`"sum"`) of the values at each reference index `at`, 0 where none falls.
-# @noRd
+#' @importFrom dplyr summarise
+#' @noRd
 .fmaScatter <- function(M, at, values, f) {
-    out <- numeric(M)
-    if (length(at) == 0L) {
-        return(out)
-    }
-    if (f == "sum") {
-        sums <- rowsum(values, at)
-        out[as.integer(rownames(sums))] <- sums[, 1L]
-        return(out)
-    }
-    o <- order(at, -values)
-    first <- o[!duplicated(at[o])]
-    out[at[first]] <- values[first]
-    out
+    combine <- switch(f, max = max, sum = sum)
+    byIndex <- tibble(at = at, value = values) |>
+        summarise(value = combine(.data$value), .by = "at")
+    replace(numeric(M), byIndex$at, byIndex$value)
 }
 
 # 1 for the reference variants (at their indices `at`) in a credible set of
@@ -390,7 +384,7 @@ fineMappingAnnotations <- function(
         return(out)
     }
     labels <- as.character(md[[csCol]])
-    inCs <- !is.na(labels) &
+    labelled <- !is.na(labels) &
         str_length(labels) > 0L &
         !str_detect(labels, "_0$")
     purCol <- str_c(csCol, "_purity")
@@ -401,11 +395,13 @@ fineMappingAnnotations <- function(
             "{coverage}; minPurity filter skipped."
         ))
     }
-    if (!is.null(minPurity) && hasPurity) {
+    pure <- if (!is.null(minPurity) && hasPurity) {
         purity <- as.numeric(md[[purCol]])
-        inCs <- inCs & !is.na(purity) & purity >= minPurity
+        !is.na(purity) & purity >= minPurity
+    } else {
+        TRUE
     }
-    members <- at[inCs]
+    members <- at[labelled & pure]
     replace(out, members[!is.na(members)], 1)
 }
 
@@ -413,8 +409,18 @@ fineMappingAnnotations <- function(
 # collection does not have.
 # @noRd
 .fmaUnitName <- function(tuples, k) {
-    axes <- unlist(tuples[k, c("qtlStudy", "qtlContext", "qtlMethod")])
+    axes <- map_chr(
+        c("qtlStudy", "qtlContext", "qtlMethod"),
+        .fmaTupleAxis,
+        tuples = tuples,
+        k = k
+    )
     str_flatten(axes[!is.na(axes)], "|")
+}
+
+# @noRd
+.fmaTupleAxis <- function(column, tuples, k) {
+    as.character(tuples[[column]][[k]])
 }
 
 # The columns with at least one non-zero entry, warning about the rest.

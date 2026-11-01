@@ -2558,3 +2558,35 @@ test_that(".updatePanel refuses a saved panel it cannot read again", {
     expect_s3_class(cnd, "pecotmrUnreadablePanel")
     expect_match(conditionMessage(cnd), "no longer hold every variant")
 })
+
+# --- .pvarHeader / .readPvarTable: where the variants start -----------------
+
+.gio_pvar <- function(lines) {
+    path <- tempfile(fileext = ".pvar")
+    writeLines(lines, path)
+    path
+}
+
+test_that(".pvarHeader finds the #CHROM line after the meta lines", {
+    meta <- sprintf("##contig=<ID=chr%d>", 1:5)
+    path <- .gio_pvar(c(meta, "#CHROM\tPOS\tID\tREF\tALT", "1\t10\tv1\tA\tG"))
+    header <- pecotmr:::.pvarHeader(path)
+    expect_identical(header$columns, c("CHROM", "POS", "ID", "REF", "ALT"))
+    expect_identical(header$lines, 6L)
+    # Past the first window it reads a wider one.
+    expect_identical(pecotmr:::.pvarHeader(path, window = 2L), header)
+})
+
+test_that(".pvarHeader is NULL without a header before the variants", {
+    noHeader <- .gio_pvar(c("##fileformat=PVARv1.0", "1\t10\tv1\tA\tG"))
+    expect_null(pecotmr:::.pvarHeader(noHeader))
+    metaOnly <- .gio_pvar(c("##fileformat=PVARv1.0", "##source=test"))
+    expect_null(pecotmr:::.pvarHeader(metaOnly))
+    expect_null(pecotmr:::.pvarHeader(metaOnly, window = 1L))
+})
+
+test_that(".readPvarTable declines what it cannot read as a table", {
+    expect_null(pecotmr:::.readPvarTable("panel.pvar.zst"))
+    path <- .gio_pvar(c("#CHROM\tPOS\tID", "1\t10\tv1"))
+    expect_null(pecotmr:::.readPvarTable(path))
+})

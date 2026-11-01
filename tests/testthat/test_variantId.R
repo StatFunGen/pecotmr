@@ -1168,3 +1168,11 @@ test_that("normalizeVariantId: argument guards fire", {
         "convention.*Must be of type 'list'"
     )
 })
+
+test_that(".alignIdsToPanel leaves an id that is missing unmatched", {
+    panel <- c("chr1:100:A:G", "chr1:200:C:T")
+    expect_identical(
+        pecotmr:::.alignIdsToPanel(c("chr1:200:C:T", NA), panel),
+        c(2L, NA)
+    )
+})

@@ -167,8 +167,7 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is.null(derived) || !identical(derived, as.numeric(md$pip))) {
         return(gr)
     }
-    md$pip <- NULL
-    `mcols<-`(gr, value = md)
+    `mcols<-`(gr, value = rest)
 }
 
 # The PIP the fit gives the variants at its columns `cols`
@@ -201,12 +200,11 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # where the pip goes when it is not stored either.
 # @noRd
 .fmRowCsSlot <- function(cn) {
-    for (anchor in c("logBF", "pip")) {
-        if (is_in(anchor, cn)) {
-            return(match(anchor, cn))
-        }
+    anchor <- intersect(c("logBF", "pip"), cn)
+    if (length(anchor) == 0L) {
+        return(.fmRowPipSlot(cn))
     }
-    .fmRowPipSlot(cn)
+    match(anchor[[1L]], cn)
 }
 
 # A row's variants with every column the constructor dropped derived back
@@ -233,8 +231,12 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     }
     derived <- .fitPipFor(fit, .fitColumnsPlaced(gr, fit))
     if (has) {
-        md$pip <- coalesce(as.numeric(md$pip), derived)
-        return(`mcols<-`(gr, value = md))
+        filled <- `[[<-`(
+            md,
+            "pip",
+            value = coalesce(as.numeric(md$pip), derived)
+        )
+        return(`mcols<-`(gr, value = filled))
     }
     .fmRowInsertColumns(gr, list(pip = derived), .fmRowPipSlot(colnames(md)))
 }
@@ -310,7 +312,7 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # labels themselves; NULL unless they all carry the same one.
 # @noRd
 .fmRowCsLabelTag <- function(labels) {
-    values <- unique(as.character(unlist(as.list(labels), use.names = FALSE)))
+    values <- unique(list_c(map(as.list(labels), as.character)))
     tags <- unique(str_remove(values[!is.na(values)], "_[0-9]+$"))
     if (length(tags) != 1L || !nzchar(tags)) {
         return(NULL)
@@ -336,12 +338,12 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # otherwise.
 # @noRd
 .fmRowCsBlock <- function(cn) {
-    labelCols <- cn[str_detect(cn, "^cs_[0-9]+$")]
-    if (length(labelCols) == 0L) {
+    found <- cn[str_detect(cn, "^cs_[0-9]+$")]
+    if (length(found) == 0L) {
         return(NULL)
     }
-    coverage <- as.numeric(str_remove(labelCols, "^cs_")) / 100
-    labelCols <- labelCols[order(coverage, decreasing = TRUE)]
+    coverage <- as.numeric(str_remove(found, "^cs_")) / 100
+    labelCols <- found[order(coverage, decreasing = TRUE)]
     expected <- c(labelCols, str_c(labelCols, "_purity"))
     at <- .fmRowCsSlot(setdiff(cn, expected))
     if (!identical(cn[at + seq_along(expected)], expected)) {
@@ -384,14 +386,27 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     }
     c(
         set_names(
-            map(perCoverage, function(p) .btlCsLabel(p$effect[col], tag)),
+            map(perCoverage, .fitCsLabelsAt, col = col, tag = tag),
             labelCols
         ),
         set_names(
-            map(perCoverage, function(p) p$purity[col]),
+            map(perCoverage, .fitCsPurityAt, col = col),
             str_c(labelCols, "_purity")
         )
     )
+}
+
+# One coverage's credible-set labels (.fitCsAtCoverage()) for the variants at
+# the fit's columns `col`.
+# @noRd
+.fitCsLabelsAt <- function(perCoverage, col, tag) {
+    .btlCsLabel(perCoverage$effect[col], tag)
+}
+
+# One coverage's credible-set purities for the variants at `col`.
+# @noRd
+.fitCsPurityAt <- function(perCoverage, col) {
+    perCoverage$purity[col]
 }
 
 # One coverage's per-variable effect index and purity, as .btlCsMembership()
@@ -442,12 +457,18 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (length(present) == 0L) {
         return(.fmRowInsertColumns(gr, derived, .fmRowCsSlot(colnames(md))))
     }
-    for (nm in present) {
-        if (all(is.na(md[[nm]]))) {
-            md[[nm]] <- derived[[nm]]
-        }
+    filled <- reduce(present, .fmRowFillColumn, derived = derived, .init = md)
+    `mcols<-`(gr, value = filled)
+}
+
+# `md` with its column `nm` taken from `derived` when it is all NA, as a
+# collection joining rows with and without it leaves it.
+# @noRd
+.fmRowFillColumn <- function(md, nm, derived) {
+    if (!all(is.na(md[[nm]]))) {
+        return(md)
     }
-    `mcols<-`(gr, value = md)
+    `[[<-`(md, nm, value = derived[[nm]])
 }
 
 # Whether `md` has column `nm` with a value somewhere: a column absent, or

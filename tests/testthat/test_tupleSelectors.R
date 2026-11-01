@@ -1301,6 +1301,160 @@ test_that(".narrowedRowLabels labels the narrowed rows and no others", {
     )
 })
 
+test_that(".narrowedRowLabels finds none where rows record no fit", {
+    tw <- .ts_weights()
+    S4Vectors::mcols(tw)$fitVariants <- NULL
+    expect_identical(pecotmr:::.narrowedRowLabels(tw), character(0))
+    fm <- .ts_narrowedCollection(1L)
+    S4Vectors::mcols(fm)$susieFit <- NULL
+    expect_identical(pecotmr:::.narrowedRowLabels(fm), character(0))
+})
+
+test_that(".partsFitIds: a TWAS row's recorded ids, else its weights' names", {
+    w <- c(0.1, 0.2, 0.3)
+    recorded <- TwasWeightsRow(.ts_fitted, w, cvResult = list(r2 = 0.5))
+    expect_equal(pecotmr:::.partsFitIds(recorded), .ts_fitted)
+    plain <- TwasWeightsRow(.ts_fitted, w)
+    expect_equal(pecotmr:::.partsFitIds(plain), .ts_fitted)
+    mat <- matrix(0, 1L, 3L, dimnames = list(NULL, rev(.ts_fitted)))
+    expect_equal(pecotmr:::.partsFitIds(plain, mat), rev(.ts_fitted))
+})
+
+# ===========================================================================
+# Rows' variants gathered with the columns their fits give back
+# ===========================================================================
+
+# A row on `.ts_fitted` whose table gives the PIPs `tablePip`: the
+# constructor stores none when they are the fit's own.
+.ts_pipRow <- function(pip, tablePip = pip) {
+    FineMappingRow(
+        .ts_fitted,
+        list(pip = pip),
+        data.frame(variant_id = .ts_fitted, pip = tablePip)
+    )
+}
+
+# A collection of one row per entry of `entry`.
+.ts_rows <- function(entry) {
+    n <- length(entry)
+    QtlFineMappingResult(
+        studyName = sprintf("s%d", seq_len(n)),
+        context = rep("c1", n),
+        trait = rep("g1", n),
+        method = rep("susie", n),
+        entry = entry
+    )
+}
+
+test_that("a group of rows gathers their variants with the PIPs restored", {
+    x <- .ts_rows(list(
+        .ts_pipRow(c(0.5, 0.3, 0.2)),
+        .ts_pipRow(c(0.1, 0.2, 0.7))
+    ))
+    expect_false("pip" %in% .fmStoredColumns(x))
+    parts <- pecotmr:::.fmrRowParts(x, 1:2)
+    expect_length(variants(parts), 6L)
+    expect_equal(
+        S4Vectors::mcols(variants(parts))$pip,
+        c(0.5, 0.3, 0.2, 0.1, 0.2, 0.7)
+    )
+})
+
+test_that("rows storing different columns are restored row by row", {
+    # The second row's table disagrees with its fit, so it keeps its pip.
+    x <- .ts_rows(list(
+        .ts_pipRow(c(0.5, 0.3, 0.2)),
+        .ts_pipRow(c(0.1, 0.2, 0.7), tablePip = c(0.9, 0.05, 0.05))
+    ))
+    gr <- pecotmr:::.fmrGatherVariants(x, 1:2)
+    expect_equal(
+        S4Vectors::mcols(gr)$pip,
+        c(0.5, 0.3, 0.2, 0.9, 0.05, 0.05)
+    )
+})
+
+test_that("rows whose fits give back nothing are gathered as they are", {
+    gr <- variants(.ts_pipRow(c(0.5, 0.3, 0.2)))
+    fitless <- methods::new(
+        "FineMappingRow",
+        variants = gr,
+        susieFit = list(alpha = matrix(1 / 3, 1L, 3L))
+    )
+    x <- .ts_rows(list(fitless, fitless))
+    out <- pecotmr:::.fmrGatherVariants(x, 1:2)
+    expect_length(out, 6L)
+    expect_null(S4Vectors::mcols(out)$pip)
+})
+
+test_that("rows recording other derived columns are restored row by row", {
+    gr <- variants(.ts_pipRow(c(0.5, 0.3, 0.2)))
+    fit <- list(pip = c(0.5, 0.3, 0.2))
+    plain <- methods::new("FineMappingRow", variants = gr, susieFit = fit)
+    # Recorded credible-set columns its fit, keeping no sets, cannot give.
+    recorded <- methods::new(
+        "FineMappingRow",
+        variants = gr,
+        susieFit = fit,
+        derivedColumns = c("cs_95", "method=susie")
+    )
+    mixed <- .ts_rows(list(plain, recorded))
+    expect_null(pecotmr:::.fmrRestoreAbsentColumns(
+        mixed,
+        1:2,
+        pecotmr:::.rtlGatherElements(mixed, 1:2)
+    ))
+    expect_equal(
+        S4Vectors::mcols(pecotmr:::.fmrGatherVariants(mixed, 1:2))$pip,
+        rep(c(0.5, 0.3, 0.2), 2L)
+    )
+    alike <- .ts_rows(list(recorded, recorded))
+    expect_null(pecotmr:::.fmrRestoreAbsentColumns(
+        alike,
+        1:2,
+        pecotmr:::.rtlGatherElements(alike, 1:2)
+    ))
+})
+
+test_that("gathering rows that hold no variants gives none", {
+    x <- .ts_rows(list(pecotmr:::.fmCvOnlyRow(), pecotmr:::.fmCvOnlyRow()))
+    expect_length(pecotmr:::.fmrGatherVariants(x, 1:2), 0L)
+})
+
+test_that("a narrowed row's restored PIPs are found in its fit by name", {
+    x <- .ts_rows(list(.ts_fitRow(1:2), .ts_fitRow(2:3)))
+    expect_equal(
+        S4Vectors::mcols(pecotmr:::.fmrGatherVariants(x, 1:2))$pip,
+        c(0.5, 0.3, 0.3, 0.2)
+    )
+})
+
+test_that("rows' fit variants come from their ranges or their fits' names", {
+    x <- .ts_rows(list(.ts_pipRow(c(0.5, 0.3, 0.2)), .ts_fitRow(2:3)))
+    vars <- pecotmr:::.fmrRowsFitVariants(
+        x,
+        1:2,
+        pecotmr:::.fmrFitsAt(x, 1:2),
+        "skip"
+    )
+    expect_identical(vars$n, c(3L, 3L))
+    expect_identical(
+        pecotmr:::.variantTableIds(vars$table),
+        c(.ts_fitted, .ts_fitted)
+    )
+})
+
+test_that("a narrowed row whose fit names nothing is skipped or refused", {
+    x <- .ts_narrowedCollection(2L)
+    fits <- pecotmr:::.fmrFitsAt(x, 1:2)
+    skipped <- pecotmr:::.fmrRowsFitVariants(x, 1:2, fits, "skip")
+    expect_identical(skipped$n, c(NA_integer_, NA_integer_))
+    expect_identical(pecotmr:::.variantTableSize(skipped$table), 0L)
+    expect_error(
+        pecotmr:::.fmrRowsFitVariants(x, 1:2, fits, "error"),
+        "cannot be placed"
+    )
+})
+
 test_that(".fitCoverageCheckedAll names every input's narrowed rows at once", {
     fm <- .ts_narrowedCollection(2L)
     cnd <- tryCatch(
@@ -1468,4 +1622,54 @@ test_that("topLoci surfaces the mvsusie lfsr through the projector", {
     out <- .fmrRowTopLoci(e, signalCutoff = 0)
     expect_true(is_in("lfsr", names(out)))
     expect_equal(out$lfsr, c(0.001, 0.02))
+})
+
+# ===========================================================================
+# Column builders and checks
+# ===========================================================================
+
+test_that(".appendProvenanceCol recycles one value and refuses a misfit", {
+    add <- pecotmr:::.appendProvenanceCol
+    expect_identical(add(list(), NULL, "dataType", 3L), list())
+    expect_identical(
+        add(list(), "eqtl", "dataType", 2L),
+        list(dataType = c("eqtl", "eqtl"))
+    )
+    expect_error(
+        add(list(), c("a", "b"), "dataType", 3L),
+        "`dataType` must be length 1 or the same length as `study`"
+    )
+})
+
+test_that(".validateRegionColumn names a region column that is not ranges", {
+    x <- .ts_rows(list(.ts_pipRow(c(0.5, 0.3, 0.2))))
+    expect_identical(pecotmr:::.validateRegionColumn(x), character(0))
+    md <- S4Vectors::mcols(x)
+    md$region <- "chr1:1-10"
+    methods::slot(x, "elementMetadata", check = FALSE) <- md
+    expect_match(pecotmr:::.validateRegionColumn(x), "^'region' column")
+})
+
+test_that(".fmrRowLbf reads none from a fit its row cannot be placed in", {
+    gr <- variants(.ts_pipRow(c(0.5, 0.3, 0.2)))
+    pip <- c(0.5, 0.3, 0.2)
+    # A log Bayes factor matrix narrower than the fit's PIPs.
+    narrow <- methods::new(
+        "FineMappingRow",
+        variants = gr,
+        susieFit = list(pip = pip, lbf_variable = matrix(0, 1L, 2L))
+    )
+    expect_identical(nrow(pecotmr:::.fmrRowLbf(narrow)), 0L)
+    none <- methods::new("FineMappingRow", variants = gr, susieFit = list())
+    expect_identical(nrow(pecotmr:::.fmrRowLbf(none)), 0L)
+})
+
+test_that(".ssCombineGenome is NA when no part records a build", {
+    expect_identical(
+        pecotmr:::.ssCombineGenome(
+            list(GenomicRanges::GRanges("chr1:1-2")),
+            "f"
+        ),
+        NA_character_
+    )
 })

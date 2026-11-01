@@ -1108,10 +1108,17 @@ setMethod(
 #' @export
 trimFineMappingResult <- function(x, role = NULL) {
     assertMultiClass(x, c("GwasFineMappingResult", "QtlFineMappingResult"))
-    role <- role %||%
-        if (methods::is(x, "GwasFineMappingResult")) "outcome" else "annotation"
-    role <- arg_match0(role, c("outcome", "annotation"))
-    entries <- map(seq_len(nrow(x)), .trimRow, x = x, role = role)
+    byClass <- if (methods::is(x, "GwasFineMappingResult")) {
+        "outcome"
+    } else {
+        "annotation"
+    }
+    chosen <- arg_match0(
+        role %||% byClass,
+        c("outcome", "annotation"),
+        arg_nm = "role"
+    )
+    entries <- map(seq_len(nrow(x)), .trimRow, x = x, role = chosen)
     .fmrFromEntries(x, entries)
 }
 
@@ -1161,10 +1168,8 @@ trimFineMappingResult <- function(x, role = NULL) {
         sets = fit[["sets"]],
         sets_secondary = .trimSecondarySets(fit[["sets_secondary"]])
     ))
-    if (role == "annotation") {
-        kept <- c(.trimEffects(fit, fitIds), kept)
-    }
-    `class<-`(kept, class(fit))
+    effects <- if (role == "annotation") .trimEffects(fit, fitIds) else list()
+    `class<-`(c(effects, kept), class(fit))
 }
 
 # `pip` named by `fitIds`, or unnamed when there are none to name it by.
@@ -1184,7 +1189,12 @@ trimFineMappingResult <- function(x, role = NULL) {
     if (length(sec) == 0L) {
         return(NULL)
     }
-    map(sec, function(s) list(sets = s$sets))
+    map(sec, .trimSetsOnly)
+}
+
+# @noRd
+.trimSetsOnly <- function(secondary) {
+    list(sets = secondary$sets)
 }
 
 # The alpha rows and prior variances of the fit's effects of positive prior
@@ -1192,12 +1202,11 @@ trimFineMappingResult <- function(x, role = NULL) {
 # An already trimmed fit's names are its ids.
 # @noRd
 .trimEffects <- function(fit, fitIds = NULL) {
-    alpha <- fit[["alpha"]]
     priorVariance <- fit[["V"]] %||% fit[["prior_variance"]]
-    if (is.null(alpha) || is.null(priorVariance)) {
+    if (is.null(fit[["alpha"]]) || is.null(priorVariance)) {
         return(list())
     }
-    alpha <- as.matrix(alpha)
+    alpha <- as.matrix(fit[["alpha"]])
     ids <- if (.namedByEffect(alpha)) {
         rownames(alpha)
     } else {
@@ -1612,11 +1621,15 @@ setMethod(
             message(str_c("updateObject(object = '", class(object)[[1L]], "')"))
         }
         md <- mcols(object, use.names = FALSE)
-        if (is_in("fitVariants", colnames(md))) {
-            md$fitVariants <- NULL
-            object <- `mcols<-`(object, value = md)
+        current <- if (is_in("fitVariants", colnames(md))) {
+            `mcols<-`(
+                object,
+                value = md[, colnames(md) != "fitVariants", drop = FALSE]
+            )
+        } else {
+            object
         }
-        methods::callNextMethod(object, ..., verbose = verbose)
+        methods::callNextMethod(current, ..., verbose = verbose)
     }
 )
 

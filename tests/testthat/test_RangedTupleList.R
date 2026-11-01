@@ -1273,3 +1273,28 @@ test_that("genomicRegion() is each row's span unless a region was stored", {
     expect_identical(genomicRegion(x), stored)
     expect_length(genomicRegion(x[0]), 0L)
 })
+
+test_that("nesting a flattened trimmed collection leaves its fits' columns", {
+    # A trimmed collection leaves its pip and credible-set columns to its
+    # fits; flattening restores them, and re-nesting drops them again once
+    # the fits give them back exactly.
+    trimmed <- trimFineMappingResult(.fmLoadExample("qtlFineMappingExample"))
+    recorded <- S4Vectors::mcols(trimmed)$derivedColumns[[1L]]
+    expect_true(length(recorded) > 0L)
+    flat <- flattenTupleRanges(trimmed)
+    derived <- c("pip", "cs_95", "cs_95_purity")
+    expect_true(all(derived %in% colnames(S4Vectors::mcols(flat))))
+    nested <- nestTupleRanges(flat, trimmed)
+    expect_false(any(derived %in% .fmStoredColumns(nested)))
+    expect_equal(
+        topLoci(nested, signalCutoff = 0),
+        topLoci(trimmed, signalCutoff = 0)
+    )
+    # A credible-set column a verb changed no longer matches the fits, so it
+    # is stored as it was changed.
+    relabelled <- flat
+    S4Vectors::mcols(relabelled)$cs_95 <- "susie_0"
+    kept <- nestTupleRanges(relabelled, trimmed)
+    expect_true("cs_95" %in% .fmStoredColumns(kept))
+    expect_true(all(S4Vectors::mcols(unlist(kept))$cs_95 == "susie_0"))
+})

@@ -180,12 +180,12 @@ qtlEnrichmentPipeline <- function(
 ) {
     .assertMethodParam(qtlEnrichmentParam, "QtlEnrichmentParam")
     .assertBpparam(BPPARAM)
-    duplicatePips <- arg_match(duplicatePips)
+    pipRule <- arg_match(duplicatePips)
     .enrValidateInputs(gwasFineMappingResult, qtlFineMappingResult)
     prep <- .enrPrepare(
         gwasFineMappingResult,
         qtlFineMappingResult,
-        duplicatePips
+        pipRule
     )
     gwasTuples <- prep$gwasTuples
     qtlTuples <- prep$qtlTuples
@@ -393,10 +393,10 @@ qtlEnrichmentPipeline <- function(
     BPPARAM,
     seed,
     verbose,
-    gwasFineMappingResult = gwasFineMappingResult,
-    gwasTuples = gwasTuples,
-    qtlFineMappingResult = qtlFineMappingResult,
-    qtlTuples = qtlTuples
+    gwasFineMappingResult,
+    gwasTuples,
+    qtlFineMappingResult,
+    qtlTuples
 ) {
     outcome <- prep$outcomes[[gi]]
     if (length(outcome$pip) == 0L) {
@@ -409,8 +409,11 @@ qtlEnrichmentPipeline <- function(
         return(list())
     }
     # Where each union variant sits in this outcome's PIP vector.
-    outcomeAt <- rep(NA_integer_, .variantTableSize(prep$union$table))
-    outcomeAt[prep$union$of[[gi]]] <- seq_along(outcome$pip)
+    outcomeAt <- replace(
+        rep(NA_integer_, .variantTableSize(prep$union$table)),
+        prep$union$of[[gi]],
+        seq_along(outcome$pip)
+    )
     compact(map(
         seq_len(nrow(qtlTuples)),
         .enrScoreTuple,
@@ -442,10 +445,10 @@ qtlEnrichmentPipeline <- function(
     BPPARAM,
     seed,
     verbose,
-    gwasFineMappingResult = gwasFineMappingResult,
-    gwasTuples = gwasTuples,
-    qtlFineMappingResult = qtlFineMappingResult,
-    qtlTuples = qtlTuples
+    gwasFineMappingResult,
+    gwasTuples,
+    qtlFineMappingResult,
+    qtlTuples
 ) {
     if (length(prep$annotations[[k]]$regions) == 0L) {
         msg <- glue(
@@ -517,33 +520,18 @@ qtlEnrichmentPipeline <- function(
     qtlFineMappingResult,
     qtlTuples
 ) {
-    aligned <- prep$aligned[[k]]
-    annotation <- prep$annotations[[k]]
     try_fetch(
-        {
-            if (inherits(aligned, "condition")) {
-                cnd_signal(aligned)
-            }
-            nullFits <- .enrValidateFits(annotation$regions)
-            coded <- .enrCodeAligned(
-                annotation,
-                outcomeAt[aligned],
-                aligned,
-                prep$union$table
-            )
-            exec(
-                .qtlEnrichmentCoded,
-                gwasPip = outcome$pip,
-                susieQtlRegions = annotation$regions,
-                coded = coded,
-                nullFits = nullFits,
-                gwasVariants = outcome$table,
-                BPPARAM = BPPARAM,
-                seed = seed,
-                verbose = verbose,
-                !!!qtlEnrichmentParam
-            )
-        },
+        .enrFitPair(
+            prep$aligned[[k]],
+            prep$annotations[[k]],
+            outcome,
+            outcomeAt,
+            prep$union$table,
+            qtlEnrichmentParam,
+            BPPARAM,
+            seed,
+            verbose
+        ),
         error = function(cnd) {
             eMsg <- conditionMessage(cnd)
             msg <- glue(
@@ -555,6 +543,45 @@ qtlEnrichmentPipeline <- function(
             warn(msg)
             NULL
         }
+    )
+}
+
+# The enrichment of one (outcome, annotation tuple) pair: the tuple's regions
+# coded against the outcome through the precomputed alignment `aligned`
+# (an error from aligning the tuple, kept as a value, is raised here).
+# @noRd
+.enrFitPair <- function(
+    aligned,
+    annotation,
+    outcome,
+    outcomeAt,
+    unionTable,
+    qtlEnrichmentParam,
+    BPPARAM,
+    seed,
+    verbose
+) {
+    if (inherits(aligned, "condition")) {
+        cnd_signal(aligned)
+    }
+    nullFits <- .enrValidateFits(annotation$regions)
+    coded <- .enrCodeAligned(
+        annotation,
+        outcomeAt[aligned],
+        aligned,
+        unionTable
+    )
+    exec(
+        .qtlEnrichmentCoded,
+        gwasPip = outcome$pip,
+        susieQtlRegions = annotation$regions,
+        coded = coded,
+        nullFits = nullFits,
+        gwasVariants = outcome$table,
+        BPPARAM = BPPARAM,
+        seed = seed,
+        verbose = verbose,
+        !!!qtlEnrichmentParam
     )
 }
 
@@ -608,22 +635,19 @@ qtlEnrichmentPipeline <- function(
 # is read once per tuple however many genes it has. Used by qtlEnrichment(),
 # whose interface is named vectors; the pipeline aligns variant tables
 # (.alignTablesToPanel()).
-# @noRd
+#' @importFrom vctrs vec_chop
+#' @noRd
 .enrAlignRegions <- function(
     regions,
     panel,
-    panelTable = .lazyVariantTable(panel)
+    panelTable = .idsVariantTable(panel)
 ) {
     ids <- map(regions, .enrRegionIds)
-    flat <- as.character(unlist(ids, use.names = FALSE))
+    flat <- as.character(list_c(ids))
     idx <- .alignIdsToPanel(flat, panel, panelTable)
     matched <- !is.na(idx)
     aligned <- replace(flat, matched, panel[idx[matched]])
-    regionOf <- factor(
-        rep(seq_along(regions), lengths(ids)),
-        levels = seq_along(regions)
-    )
-    map2(regions, unname(split(aligned, regionOf)), .enrRenamePip)
+    map2(regions, vec_chop(aligned, sizes = lengths(ids)), .enrRenamePip)
 }
 
 # A region with its pip renamed (an unnamed pip has nothing to rename).
@@ -648,14 +672,14 @@ qtlEnrichmentPipeline <- function(
         gwasFmr,
         idx[usable],
         fits[usable],
-        unplaced = function(i) NULL
+        onUnplaced = "skip"
     )
-    pips <- map(fits[usable], function(fit) as.numeric(fit$pip))
+    pips <- map(map(fits[usable], "pip"), as.numeric)
     n <- vars$n
     lined <- !is.na(n) & n == lengths(pips)
     held <- rep(lined[!is.na(n)], n[!is.na(n)])
     list(
-        pip = unlist(pips[lined], use.names = FALSE),
+        pip = list_c(pips[lined]),
         table = .variantTableRows(vars$table, which(held)),
         row = rep(idx[usable][lined], n[lined])
     )
@@ -713,25 +737,18 @@ qtlEnrichmentPipeline <- function(
 #' @noRd
 .enrCollapseDuplicateVariants <- function(pieces, duplicatePips, gwasFmr) {
     group <- vec_group_id(.variantKeyFrame(pieces$table))
-    first <- which(!duplicated(group))
+    first <- vec_unique_loc(group)
     if (length(first) == length(group)) {
         return(list(pip = pieces$pip, table = pieces$table))
     }
-    out <- list(
+    collapsed <- list(
         pip = pieces$pip[first],
         table = .variantTableRows(pieces$table, first)
     )
-    copied <- which(is_in(group, group[duplicated(group)]))
-    distinctPips <- copied[vec_unique_loc(data.frame(
-        group = group[copied],
-        pip = round(pieces$pip[copied], 12)
-    ))]
-    nPips <- tabulate(group[distinctPips], nbins = attr(group, "n"))
-    conflicting <- which(nPips > 1L)
-    if (length(conflicting) == 0L) {
-        return(out)
+    copies <- .enrConflictingCopies(group, pieces$pip)
+    if (length(copies) == 0L) {
+        return(collapsed)
     }
-    copies <- copied[is_in(group[copied], conflicting)]
     resolved <- switch(
         duplicatePips,
         error = .enrAbortConflictingPips(
@@ -740,10 +757,24 @@ qtlEnrichmentPipeline <- function(
         max = .enrMaxPips(pieces, copies, group),
         blockEnd = .enrBlockEndPips(pieces, copies, group, gwasFmr)
     )
-    # `out` holds each group once, in the order of first appearance, which
-    # is the order of the group ids.
-    out$pip[as.integer(names(resolved))] <- resolved
-    out
+    # `collapsed` holds each group once, in the order of first appearance,
+    # which is the order of the group ids.
+    list_assign(
+        collapsed,
+        pip = replace(collapsed$pip, as.integer(names(resolved)), resolved)
+    )
+}
+
+# The positions of every copy of each variant whose copies' PIPs conflict
+# (differ to 12 digits); `group` is the variant at each position.
+#' @importFrom vctrs vec_duplicate_detect
+#' @importFrom dplyr filter n_distinct pull
+#' @noRd
+.enrConflictingCopies <- function(group, pip) {
+    copied <- which(vec_duplicate_detect(group))
+    tibble(at = copied, group = group[copied], pip = round(pip[copied], 12)) |>
+        filter(n_distinct(.data$pip) > 1L, .by = "group") |>
+        pull("at")
 }
 
 # @noRd
@@ -757,9 +788,12 @@ qtlEnrichmentPipeline <- function(
 }
 
 # The largest PIP of each conflicting variant, named by its group.
-# @noRd
+#' @importFrom dplyr summarise
+#' @noRd
 .enrMaxPips <- function(pieces, copies, group) {
-    vapply(split(pieces$pip[copies], group[copies]), max, numeric(1))
+    best <- tibble(group = group[copies], pip = pieces$pip[copies]) |>
+        summarise(pip = max(.data$pip), .by = "group")
+    set_names(best$pip, best$group)
 }
 
 # The PIP of each conflicting variant's copy from the one block whose given
@@ -775,21 +809,30 @@ qtlEnrichmentPipeline <- function(
         given &
         as.character(seqnames(windows)) == pieces$table$chrom[copies] &
         end(windows) == pieces$table$pos[copies]
-    nAtEnd <- vapply(split(atEnd, group[copies]), sum, integer(1))
-    undecided <- names(nAtEnd)[nAtEnd != 1L]
-    if (length(undecided) > 0L) {
-        which1 <- copies[group[copies] == as.integer(undecided[[1L]])][[1L]]
-        id <- .variantTableIds(.variantTableRows(pieces$table, which1))
-        msg <- glue(
-            "qtlEnrichmentPipeline: variant '{id}' appears with ",
-            "conflicting PIPs across GWAS blocks, and duplicatePips = ",
-            "\"blockEnd\" cannot choose between them: ",
-            "{nAtEnd[[undecided[[1L]]]]} of its blocks were given a window ",
-            "ending at it, where one must be."
-        )
-        abort(msg)
+    undecided <- tibble(group = group[copies], atEnd = atEnd) |>
+        summarise(nAtEnd = sum(.data$atEnd), .by = "group") |>
+        filter(.data$nAtEnd != 1L) |>
+        arrange(.data$group)
+    if (nrow(undecided) > 0L) {
+        .enrAbortUndecidedBlockEnd(pieces, copies, group, undecided)
     }
     set_names(pieces$pip[copies][atEnd], group[copies][atEnd])
+}
+
+# The first variant `undecided` lists (its group and how many of its blocks'
+# windows end at it), refused for duplicatePips = "blockEnd".
+# @noRd
+.enrAbortUndecidedBlockEnd <- function(pieces, copies, group, undecided) {
+    first <- copies[group[copies] == undecided$group[[1L]]][[1L]]
+    id <- .variantTableIds(.variantTableRows(pieces$table, first))
+    msg <- glue(
+        "qtlEnrichmentPipeline: variant '{id}' appears with ",
+        "conflicting PIPs across GWAS blocks, and duplicatePips = ",
+        "\"blockEnd\" cannot choose between them: ",
+        "{undecided$nAtEnd[[1L]]} of its blocks were given a window ",
+        "ending at it, where one must be."
+    )
+    abort(msg)
 }
 
 # The union of the outcome tuples' variants, and each tuple's variants' index
@@ -802,14 +845,18 @@ qtlEnrichmentPipeline <- function(
         n <- .variantTableSize(tables[[1L]])
         return(list(table = tables[[1L]], of = list(seq_len(n))))
     }
-    all <- .bindVariantTables(tables)
-    frame <- .variantKeyFrame(all)
-    union <- .variantTableRows(all, vec_unique_loc(frame))
-    unionFrame <- .variantKeyFrame(union)
+    joined <- .bindVariantTables(tables)
+    union <- .variantTableRows(joined, vec_unique_loc(.variantKeyFrame(joined)))
     list(
         table = union,
-        of = map(tables, function(t) vec_match(.variantKeyFrame(t), unionFrame))
+        of = map(tables, .enrUnionIndex, unionFrame = .variantKeyFrame(union))
     )
+}
+
+# Each variant of `table`'s index in the union's key frame `unionFrame`.
+# @noRd
+.enrUnionIndex <- function(table, unionFrame) {
+    vec_match(.variantKeyFrame(table), unionFrame)
 }
 
 # One annotation tuple's region fits for qtlEnrichment -- alpha, pip and the
@@ -828,11 +875,16 @@ qtlEnrichmentPipeline <- function(
         qtlFmr,
         idx[usable],
         fits[usable],
-        unplaced = function(i) .partsFitIds(.fmrRowParts(qtlFmr, i))
+        onUnplaced = "error"
     )
-    regions <- map(fits[usable], .enrRegionOf)
-    names(regions) <- names(qtlFmr)[idx[usable]]
-    list(regions = regions, table = vars$table, n = vars$n)
+    list(
+        regions = set_names(
+            map(fits[usable], .enrRegionOf),
+            names(qtlFmr)[idx[usable]]
+        ),
+        table = vars$table,
+        n = vars$n
+    )
 }
 
 # Rows `idx`'s region payloads for qtlEnrichment with their PIPs named by
@@ -842,28 +894,27 @@ qtlEnrichmentPipeline <- function(
 .enrRegionsAt <- function(qtlFmr, idx) {
     fits <- .fmrFitsAt(qtlFmr, idx)
     usable <- which(map_lgl(fits, .enrHasRegion))
-    out <- vector("list", length(idx))
     if (length(usable) == 0L) {
-        return(out)
+        return(vector("list", length(idx)))
     }
     vars <- .fmrRowsFitVariants(
         qtlFmr,
         idx[usable],
         fits[usable],
-        unplaced = function(i) .partsFitIds(.fmrRowParts(qtlFmr, i))
+        onUnplaced = "error"
     )
-    ids <- split(
-        .variantTableIds(vars$table),
-        factor(rep(seq_along(usable), vars$n), levels = seq_along(usable))
-    )
-    out[usable] <- map2(
+    regions <- map2(
         map(fits[usable], .enrRegionOf),
-        unname(ids),
-        function(region, ids) {
-            list_assign(region, pip = set_names(region$pip, ids))
-        }
+        vec_chop(.variantTableIds(vars$table), sizes = vars$n),
+        .enrNamedRegion
     )
-    out
+    replace(vector("list", length(idx)), usable, regions)
+}
+
+# A region payload with its PIPs named by `ids`.
+# @noRd
+.enrNamedRegion <- function(region, ids) {
+    list_assign(region, pip = set_names(region$pip, ids))
 }
 
 # One row's region payload for qtlEnrichment (see .enrRegionsAt()).
@@ -880,9 +931,7 @@ qtlEnrichmentPipeline <- function(
     if (length(idx) == 0L) {
         return(list())
     }
-    regions <- .enrRegionsAt(qtlFmr, idx)
-    names(regions) <- names(qtlFmr)[idx]
-    compact(regions)
+    compact(set_names(.enrRegionsAt(qtlFmr, idx), names(qtlFmr)[idx]))
 }
 
 # Whether `fit` carries what a region payload needs.
@@ -912,38 +961,31 @@ qtlEnrichmentPipeline <- function(
 #' @noRd
 .enrCodeAligned <- function(annotation, outcomeIdx, unionIdx, unionTable) {
     absent <- which(is.na(outcomeIdx))
-    codes <- outcomeIdx - 1L
-    nQtlOnly <- 0L
-    if (length(absent) > 0L) {
-        own <- .variantTableRows(annotation$table, absent)
-        inUnion <- !is.na(unionIdx[absent])
-        key <- own
-        if (any(inUnion)) {
-            fromUnion <- .variantTableRows(
-                unionTable,
-                unionIdx[absent][inUnion]
-            )
-            for (nm in names(key)) {
-                key[[nm]][inUnion] <- fromUnion[[nm]]
-            }
-        }
-        group <- vec_group_id(.variantKeyFrame(key))
-        codes[absent] <- -as.vector(group)
-        nQtlOnly <- attr(group, "n")
-    }
-    regionOf <- factor(
-        rep(seq_along(annotation$regions), annotation$n),
-        levels = seq_along(annotation$regions)
-    )
+    group <- .enrAbsentGroups(annotation$table, absent, unionIdx, unionTable)
+    codes <- replace(outcomeIdx - 1L, absent, -as.vector(group))
     list(
         fits = map2(
             annotation$regions,
-            unname(split(codes, regionOf)),
+            vec_chop(codes, sizes = annotation$n),
             .enrCodedFit
         ),
         unmatched = NULL,
-        nQtlOnly = nQtlOnly
+        nQtlOnly = attr(group, "n")
     )
+}
+
+# The group id (vctrs) of each of the tuple's variables `absent` from the
+# outcome: one per distinct variant -- the union's variant where the union
+# holds it, else the tuple's own.
+# @noRd
+.enrAbsentGroups <- function(table, absent, unionIdx, unionTable) {
+    inUnion <- !is.na(unionIdx[absent])
+    key <- .variantTableWithRows(
+        .variantTableRows(table, absent),
+        which(inUnion),
+        .variantTableRows(unionTable, unionIdx[absent][inUnion])
+    )
+    vec_group_id(.variantKeyFrame(key))
 }
 
 # Pull one enrichment field from qtlEnrichment's list output as a scalar numeric
@@ -1209,22 +1251,21 @@ qtlEnrichment <- function(
     seed = NULL,
     gwasVariants = NULL
 ) {
-    # As in fastenloc, the variant universe is every GWAS variant plus every
-    # QTL variant the GWAS vector does not carry, which has GWAS PIP 0.
-    totalVariants <- .enrTotalVariants(
+    priors <- .enrPriors(
+        gwasPip,
+        susieQtlRegions,
+        coded$nQtlOnly,
         numGwas,
-        length(gwasPip) + coded$nQtlOnly
+        piQtl,
+        verbose
     )
-    piGwas <- .enrEstimatePiGwas(gwasPip, totalVariants, numGwas, verbose)
-    piQtl <- .enrEstimatePiQtl(susieQtlRegions, piQtl, totalVariants, verbose)
-    .enrValidatePi(piGwas, piQtl)
     # cpp11 requires exact integer types for int parameters.
     en <- qtlEnrichmentCpp(
         rGwasPip = as.numeric(gwasPip),
         rQtlSusieFit = coded$fits,
-        piGwas = piGwas,
-        piQtl = piQtl,
-        totalVariants = totalVariants,
+        piGwas = priors$piGwas,
+        piQtl = priors$piQtl,
+        totalVariants = priors$totalVariants,
         ImpN = as.integer(impN),
         shrinkageLambda = lambda,
         doubleShrinkage = doubleShrinkage,
@@ -1240,6 +1281,31 @@ qtlEnrichment <- function(
         `Null QTL fits` = nullFits,
         unused_xqtl_variants = coded$unmatched
     )
+}
+
+# The variant total and the two priors the enrichment is taken over, checked.
+# As in fastenloc, the variant universe is every GWAS variant plus every QTL
+# variant the GWAS vector does not carry (`nQtlOnly` of them), which has GWAS
+# PIP 0.
+# @noRd
+.enrPriors <- function(
+    gwasPip,
+    susieQtlRegions,
+    nQtlOnly,
+    numGwas,
+    piQtl,
+    verbose
+) {
+    totalVariants <- .enrTotalVariants(numGwas, length(gwasPip) + nQtlOnly)
+    piGwas <- .enrEstimatePiGwas(gwasPip, totalVariants, numGwas, verbose)
+    qtlPrior <- .enrEstimatePiQtl(
+        susieQtlRegions,
+        piQtl,
+        totalVariants,
+        verbose
+    )
+    .enrValidatePi(piGwas, qtlPrior)
+    list(totalVariants = totalVariants, piGwas = piGwas, piQtl = qtlPrior)
 }
 
 # The variant total both priors are taken over: fastenloc's -total_variants,
@@ -1298,12 +1364,12 @@ qtlEnrichment <- function(
         "inside of credible sets or signal clusters."
     )
     warn(msg)
-    piQtl <- sum(map_dbl(susieQtlRegions, .enrPipSum)) / totalVariants
+    estimate <- sum(map_dbl(susieQtlRegions, .enrPipSum)) / totalVariants
     if (verbose) {
-        piQtlR <- round(piQtl, 5)
+        piQtlR <- round(estimate, 5)
         inform(glue("Estimated piQtl: {piQtlR}\n", .trim = FALSE))
     }
-    piQtl
+    estimate
 }
 
 # @noRd
@@ -1391,7 +1457,7 @@ qtlEnrichment <- function(
     if (length(problems) > 0L) {
         abort(c(
             "qtlEnrichment: malformed QTL fit(s):",
-            set_names(utils::head(unlist(problems), 5L), "x")
+            set_names(utils::head(map_chr(problems, as.character), 5L), "x")
         ))
     }
     nullFit <- map_lgl(susieQtlRegions, .enrIsNullFit)
@@ -1465,25 +1531,28 @@ qtlEnrichment <- function(
 # @noRd
 .enrCodeRegions <- function(regions, gwasNames) {
     ids <- map(regions, .enrRegionIds)
-    flat <- as.character(unlist(ids, use.names = FALSE))
+    flat <- as.character(list_c(ids))
     idx <- match(flat, gwasNames)
     absent <- is.na(idx)
     qtlOnly <- unique(flat[absent])
-    codes <- idx - 1L
-    codes[absent] <- -match(flat[absent], qtlOnly)
-    regionOf <- factor(
-        rep(seq_along(regions), lengths(ids)),
-        levels = seq_along(regions)
-    )
-    unmatched <- map(
-        unname(split(flat[absent], regionOf[absent])),
-        .enrNullIfEmpty
+    codes <- if_else(absent, -match(flat, qtlOnly), idx - 1L)
+    sizes <- lengths(ids)
+    unmatched <- map2(
+        vec_chop(flat, sizes = sizes),
+        vec_chop(absent, sizes = sizes),
+        .enrAbsentNames
     )
     list(
-        fits = map2(regions, unname(split(codes, regionOf)), .enrCodedFit),
+        fits = map2(regions, vec_chop(codes, sizes = sizes), .enrCodedFit),
         unmatched = set_names(unmatched, names(regions)),
         nQtlOnly = length(qtlOnly)
     )
+}
+
+# A region's variable names `ids` the GWAS lacks (`absent`), or NULL for none.
+# @noRd
+.enrAbsentNames <- function(ids, absent) {
+    .enrNullIfEmpty(ids[absent])
 }
 
 # @noRd
@@ -1500,12 +1569,12 @@ qtlEnrichment <- function(
 # and the variables' integer codes.
 # @noRd
 .enrCodedFit <- function(x, codes) {
-    alpha <- x$alpha
-    if (!is.double(alpha)) {
-        storage.mode(alpha) <- "double"
-    }
     list(
-        alpha = alpha,
+        alpha = if (is.double(x$alpha)) {
+            x$alpha
+        } else {
+            `storage.mode<-`(x$alpha, value = "double")
+        },
         prior_variance = as.numeric(x$prior_variance),
         codes = as.integer(codes)
     )

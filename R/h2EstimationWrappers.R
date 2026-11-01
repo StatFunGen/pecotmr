@@ -417,8 +417,7 @@ NULL
 # @noRd
 .h2SpansOnes <- function(B) {
     decomp <- qr(crossprod(B))
-    beta <- qr.coef(decomp, colSums(B))
-    beta[is.na(beta)] <- 0
+    beta <- coalesce(qr.coef(decomp, colSums(B)), 0)
     max(abs(1 - as.vector(B %*% beta))) < 1e-6
 }
 
@@ -744,7 +743,8 @@ NULL
         1e-8
     )
     w <- 1 / (2 * mu^2)
-    ldCand <- exec(rbind, !!!map(blockStats, "ldCand"))
+    blockCands <- map(blockStats, "ldCand")
+    ldCand <- exec(rbind, !!!blockCands)
     Ub <- .h2EfficientScoreBlocks(
         N * lam * ldCand,
         cbind(N * lam * design$ldAnnot, N),
@@ -769,16 +769,7 @@ lderUnivariate <- function(
 ) {
     rough <- !inSample(eigenRef)
     baselineMat <- .h2DesignMat(annotations)
-    # One pass over the blocks, each decomposed only while its statistics are
-    # taken, so a reference read from a panel holds one block at a time.
-    blockStats <- map(
-        .ldEigenBlocks(eigenRef),
-        .lderBlockStats,
-        eigenRef = eigenRef,
-        z = z,
-        baselineMat = baselineMat,
-        candMat = .h2CandidateMat(annotations)
-    )
+    blockStats <- .lderAllBlockStats(eigenRef, z, baselineMat, annotations)
     design <- .lderDesign(blockStats, baselineMat)
     M <- length(design$x)
     fit <- .lderGetRes(
@@ -809,6 +800,21 @@ lderUnivariate <- function(
             fit,
             n
         )
+    )
+}
+
+# Each LD block's LDER statistics, in one pass over the blocks, each
+# decomposed only while its statistics are taken, so a reference read from a
+# panel holds one block at a time.
+# @noRd
+.lderAllBlockStats <- function(eigenRef, z, baselineMat, annotations) {
+    map(
+        .ldEigenBlocks(eigenRef),
+        .lderBlockStats,
+        eigenRef = eigenRef,
+        z = z,
+        baselineMat = baselineMat,
+        candMat = .h2CandidateMat(annotations)
     )
 }
 
@@ -1008,11 +1014,11 @@ NULL
         A = A,
         N = N
     )
-    jkCoefs <- exec(rbind, !!!map(loo, "tau"))
+    taus <- map(loo, "tau")
     list(
         h2Se = .jackknifeSeFromLoo(map_dbl(loo, "h2")),
         intSe = .jackknifeSeFromLoo(map_dbl(loo, "intercept")),
-        annotationJackknifeCoefs = jkCoefs
+        annotationJackknifeCoefs = exec(rbind, !!!taus)
     )
 }
 
@@ -1061,14 +1067,22 @@ NULL
 # baseline and trusted the plug-in Omega.
 .gldscScoreStats <- function(contrib, coef) {
     left <- reduce(map(contrib, "L"), `+`)
-    lX <- reduce(map(contrib, function(cb) t(cb$cand$UX)), `+`)
+    lX <- reduce(map(contrib, .gldscCandidateCross), `+`)
     ridge <- 1e-8 * mean(abs(diag(left)))
     beta <- solve(left + diag(ridge, nrow(left)), lX)
-    Ub <- exec(
-        rbind,
-        !!!map(contrib, .gldscCandidateBlock, coef = coef, beta = beta)
+    blockScores <- map(
+        contrib,
+        .gldscCandidateBlock,
+        coef = coef,
+        beta = beta
     )
-    .h2BlockScoreStats(Ub)
+    .h2BlockScoreStats(exec(rbind, !!!blockScores))
+}
+
+# One block's candidate cross-products X' Omega^-1 l_c, design by candidate.
+# @noRd
+.gldscCandidateCross <- function(cb) {
+    t(cb$cand$UX)
 }
 
 # Each LD block's efficient score for every candidate (a blocks x candidates
@@ -1083,11 +1097,11 @@ NULL
 # signal -- and it needs no refit. `blockOf` gives each observation's block.
 # @noRd
 .h2EfficientScoreBlocks <- function(gC, G, info, e, blockOf) {
-    gC <- as.matrix(gC)
+    grad <- as.matrix(gC)
     gtg <- crossprod(G, G * info)
     ridge <- 1e-8 * mean(abs(diag(gtg)))
-    beta <- solve(gtg + diag(ridge, ncol(G)), crossprod(G, gC * info))
-    rowsum((gC - G %*% beta) * e, blockOf)
+    beta <- solve(gtg + diag(ridge, ncol(G)), crossprod(G, grad * info))
+    rowsum((grad - G %*% beta) * e, blockOf)
 }
 
 # Candidate score statistics from each LD block's score (a blocks x
@@ -1099,12 +1113,12 @@ NULL
 # is. The candidates' correlation is that of their block scores.
 # @noRd
 .h2BlockScoreStats <- function(Ub) {
-    Ub <- as.matrix(Ub)
-    nB <- nrow(Ub)
-    U <- colSums(Ub)
-    centered <- sweep(Ub, 2L, U / nB)
+    blockScores <- as.matrix(Ub)
+    nB <- nrow(blockScores)
+    U <- colSums(blockScores)
+    centered <- sweep(blockScores, 2L, U / nB)
     V <- nB / (nB - 1) * colSums(centered^2)
-    R <- if (ncol(Ub) == 1L) {
+    R <- if (ncol(blockScores) == 1L) {
         matrix(1, 1, 1)
     } else {
         Rc <- stats::cov2cor(crossprod(centered))
@@ -1509,10 +1523,10 @@ NULL
         return(list(enrichment = NULL, scoreStats = NULL))
     }
     lam <- design$lam
-    gradient <- function(scaled) scaled * lam^2 - lam / nPanel
-    ldCand <- exec(rbind, !!!map(blockData, "ldCand"))
-    gC <- gradient(sweep(ldCand, 2L, colSums(candMat), "/"))
-    G <- cbind(gradient(design$ldAnnotScaled), lam / n)
+    blockCands <- map(blockData, "ldCand")
+    ldCand <- exec(rbind, !!!blockCands)
+    gC <- .shdlGradient(sweep(ldCand, 2L, colSums(candMat), "/"), lam, nPanel)
+    G <- cbind(.shdlGradient(design$ldAnnotScaled, lam, nPanel), lam / n)
     Ub <- .h2EfficientScoreBlocks(
         gC,
         G,
@@ -1526,6 +1540,14 @@ NULL
         sc$scoreZ,
         sc$R
     )
+}
+
+# The derivative of each eigen-direction's modelled variance in an
+# annotation's heritability, from the annotation's LD scores scaled by its
+# size: l_ia lam_i^2 / M_a - lam_i / nPanel.
+# @noRd
+.shdlGradient <- function(scaled, lam, nPanel) {
+    scaled * lam^2 - lam / nPanel
 }
 
 # =============================================================================
@@ -1729,7 +1751,7 @@ sldscUnivariate <- function(
     parts <- attr(fit, "scoreParts")
     ldCand <- .h2StratifiedScores(ldRef, candMat)[parts$keep, , drop = FALSE]
     blockOf <- rep(seq_along(blockIdx), lengths(blockIdx))[
-        order(unlist(blockIdx, use.names = FALSE))
+        order(list_c(blockIdx))
     ]
     Ub <- .h2EfficientScoreBlocks(
         ldCand,
@@ -1896,18 +1918,23 @@ sldscUnivariate <- function(
         w0 = w0
     )
     fit <- .sldscCoefToFit(c(step2$coef, intercept), n, A)
-    # What the candidate score test reads (.sldscCandidateScores()): the
-    # step-2 regression, with the intercept step 1 estimated as a column so
-    # the candidates are residualized on it too.
     `attr<-`(
         fit,
         "scoreParts",
-        list(
-            keep = rep(TRUE, length(chi2)),
-            design = cbind(scores, 1),
-            w = step2$w,
-            resid = as.vector(chi2 - intercept - scores %*% step2$coef)
-        )
+        .sldscUnivariateScoreParts(chi2, scores, intercept, step2)
+    )
+}
+
+# What the candidate score test reads (.sldscCandidateScores()) of a
+# univariate fit: the step-2 regression, with the intercept step 1 estimated
+# as a column so the candidates are residualized on it too.
+# @noRd
+.sldscUnivariateScoreParts <- function(chi2, scores, intercept, step2) {
+    list(
+        keep = rep(TRUE, length(chi2)),
+        design = cbind(scores, 1),
+        w = step2$w,
+        resid = as.vector(chi2 - intercept - scores %*% step2$coef)
     )
 }
 
@@ -2034,10 +2061,11 @@ sldscUnivariate <- function(
         A = A,
         nIter = nIter
     )
+    taus <- map(loo, "tau")
     list(
         h2Se = .jackknifeSeFromLoo(map_dbl(loo, "h2")),
         intSe = .jackknifeSeFromLoo(map_dbl(loo, "intercept")),
-        annotationJackknifeCoefs = exec(rbind, !!!map(loo, "tau"))
+        annotationJackknifeCoefs = exec(rbind, !!!taus)
     )
 }
 

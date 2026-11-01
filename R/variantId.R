@@ -521,7 +521,10 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
 # UCSC chromosome, a position without leading zeros, and two alleles, with
 # no build suffix and no underscore.
 # @noRd
-.CANONICAL_VARIANT_ID <- "^chr(1[0-9]|2[0-2]|[1-9]|X|Y|M):[1-9][0-9]*:[^:_]+:[^:_]+$"
+.CANONICAL_VARIANT_ID <- str_c(
+    "^chr(1[0-9]|2[0-2]|[1-9]|X|Y|M)",
+    ":[1-9][0-9]*:[^:_]+:[^:_]+$"
+)
 
 # Complement a DNA allele string (A<->T, C<->G) for strand flipping.
 # @noRd
@@ -741,13 +744,20 @@ harmonizeAlleles <- function(
         .frameVariantTable(refVariants)
     )
     keys <- c("chrom", "pos")
+    # Indexed, not slice()d: a caller's frame may carry NA or "" column
+    # names, which dplyr refuses.
     left <- targetData[pairs$query, , drop = FALSE]
-    right <- refVariants[pairs$subject, , drop = FALSE]
-    right <- right[, !is_in(colnames(right), keys), drop = FALSE]
+    right <- refVariants[
+        pairs$subject,
+        !is_in(colnames(refVariants), keys),
+        drop = FALSE
+    ]
     both <- setdiff(intersect(colnames(left), colnames(right)), keys)
-    colnames(left) <- .suffixed(colnames(left), both, ".target")
-    colnames(right) <- .suffixed(colnames(right), both, ".ref")
-    bind_cols(left, right, .name_repair = "minimal") |>
+    bind_cols(
+        set_names(left, .suffixed(colnames(left), both, ".target")),
+        set_names(right, .suffixed(colnames(right), both, ".ref")),
+        .name_repair = "minimal"
+    ) |>
         as_tibble(.name_repair = "minimal") |>
         .sanitizeNames()
 }
@@ -1172,10 +1182,9 @@ harmonizeAlleles <- function(
 # @noRd
 #' @importFrom IRanges findOverlaps IRanges
 .variantPairs <- function(a, b, maxDistance = 0L) {
-    levels <- unique(c(a$chrom, b$chrom))
-    levels <- levels[!is.na(levels)]
-    ra <- .variantPairRanges(a, levels)
-    rb <- .variantPairRanges(b, levels)
+    chromLevels <- setdiff(c(a$chrom, b$chrom), NA)
+    ra <- .variantPairRanges(a, chromLevels)
+    rb <- .variantPairRanges(b, chromLevels)
     hits <- findOverlaps(
         ra$gr,
         rb$gr,
@@ -1212,31 +1221,31 @@ harmonizeAlleles <- function(
 # alleles leave the strand undecidable (A/T, C/G). Case-insensitive.
 # @noRd
 .variantPairFlags <- function(a1t, a2t, a1r, a2r) {
-    a1t <- .upperAlleles(a1t)
-    a2t <- .upperAlleles(a2t)
-    a1r <- .upperAlleles(a1r)
-    a2r <- .upperAlleles(a2r)
-    flip1 <- .strandFlip(a1r)
-    flip2 <- .strandFlip(a2r)
-    differ <- a1t != a1r & a2t != a2r
+    t1 <- .upperAlleles(a1t)
+    t2 <- .upperAlleles(a2t)
+    r1 <- .upperAlleles(a1r)
+    r2 <- .upperAlleles(a2r)
+    flip1 <- .strandFlip(r1)
+    flip2 <- .strandFlip(r2)
+    differ <- t1 != r1 & t2 != r2
     list(
-        strandUnambiguous = !((a1t == "A" & a2t == "T") |
-            (a1t == "T" & a2t == "A") |
-            (a1t == "C" & a2t == "G") |
-            (a1t == "G" & a2t == "C")),
-        exact = a1t == a1r & a2t == a2r,
-        signFlip = ((a1t == a2r & a2t == a1r) |
-            (a1t == flip2 & a2t == flip1)) &
+        strandUnambiguous = !((t1 == "A" & t2 == "T") |
+            (t1 == "T" & t2 == "A") |
+            (t1 == "C" & t2 == "G") |
+            (t1 == "G" & t2 == "C")),
+        exact = t1 == r1 & t2 == r2,
+        signFlip = ((t1 == r2 & t2 == r1) |
+            (t1 == flip2 & t2 == flip1)) &
             differ,
-        strandFlip = ((a1t == flip1 & a2t == flip2) |
-            (a1t == flip2 & a2t == flip1)) &
+        strandFlip = ((t1 == flip1 & t2 == flip2) |
+            (t1 == flip2 & t2 == flip1)) &
             differ,
-        indel = a2t == "I" |
-            a2t == "D" |
-            str_length(a2t) > 1L |
-            str_length(a1t) > 1L,
-        idMatch = (a2t == "D" | a2t == "I") &
-            (str_length(a1r) > 1L | str_length(a2r) > 1L)
+        indel = t2 == "I" |
+            t2 == "D" |
+            str_length(t2) > 1L |
+            str_length(t1) > 1L,
+        idMatch = (t2 == "D" | t2 == "I") &
+            (str_length(r1) > 1L | str_length(r2) > 1L)
     )
 }
 
@@ -1247,15 +1256,15 @@ harmonizeAlleles <- function(
 # @noRd
 .variantPairKeep <- function(flags, removeStrandAmbiguous, removeIndels) {
     decided <- if (removeStrandAmbiguous) flags$strandUnambiguous else TRUE
-    keep <- ifelse(
+    allelesMatch <- if_else(
         flags$strandFlip,
         decided | flags$exact | flags$idMatch,
         flags$exact | flags$signFlip | flags$idMatch
     )
-    if (removeIndels) {
-        keep <- ifelse(flags$indel, FALSE, keep)
+    if (!removeIndels) {
+        return(allelesMatch)
     }
-    keep
+    if_else(flags$indel, FALSE, allelesMatch)
 }
 
 # `keep` with each target settled on at most one reference variant. A target
@@ -1270,7 +1279,7 @@ harmonizeAlleles <- function(
     if (anyDuplicated(target) == 0L) {
         return(keep)
     }
-    distinctSigns <- vec_unique_loc(data.frame(
+    distinctSigns <- vec_unique_loc(tibble(
         target = target,
         sign = signFlip[hit]
     ))
@@ -1299,17 +1308,14 @@ harmonizeAlleles <- function(
     }
     flags <- .variantPairFlags(a$A1[q], a$A2[q], b$A1[sbj], b$A2[sbj])
     keep <- .variantPairKeep(flags, removeStrandAmbiguous, removeIndels)
-    kept <- which(.variantPairResolve(q, keep, flags$signFlip) %in% TRUE)
-    claimed <- kept[vec_unique_loc(data.frame(
-        chrom = b$chrom[sbj[kept]],
-        pos = b$pos[sbj[kept]],
-        A2 = b$A2[sbj[kept]],
-        A1 = b$A1[sbj[kept]]
-    ))]
+    kept <- which(is_in(.variantPairResolve(q, keep, flags$signFlip), TRUE))
+    claimed <- kept[vec_unique_loc(
+        .variantKeyFrame(.variantTableRows(b, sbj[kept]))
+    )]
     list(
         idxA = q[claimed],
         idxB = sbj[claimed],
-        sign = as.numeric(ifelse(flags$signFlip[claimed], -1, 1))
+        sign = if_else(flags$signFlip[claimed], -1, 1)
     )
 }
 
@@ -1440,32 +1446,46 @@ matchVariants <- function(
 # ("chr1:100:A:G") is split on its separator, at a fraction of the cost of the
 # regex every other spelling takes: a genome-wide panel holds millions.
 # @noRd
-#' @importFrom stringi stri_split_fixed
 .idsVariantTable <- function(ids) {
-    ids <- as.character(ids)
-    canon <- str_detect(ids, .CANONICAL_VARIANT_ID)
-    canon[is.na(canon)] <- FALSE
+    spelled <- as.character(ids)
+    canon <- coalesce(str_detect(spelled, .CANONICAL_VARIANT_ID), FALSE)
     if (all(canon)) {
-        return(.canonicalVariantTable(ids))
+        return(.canonicalVariantTable(spelled))
     }
-    out <- list(
-        chrom = rep(NA_character_, length(ids)),
-        pos = rep(NA_integer_, length(ids)),
-        A2 = rep(NA_character_, length(ids)),
-        A1 = rep(NA_character_, length(ids))
+    withCanon <- .variantTableWithRows(
+        .naVariantTable(length(spelled)),
+        which(canon),
+        .canonicalVariantTable(spelled[canon])
     )
-    if (any(canon)) {
-        fields <- .canonicalVariantTable(ids[canon])
-        for (nm in names(out)) {
-            out[[nm]][canon] <- fields[[nm]]
-        }
-    }
-    p <- parseVariantId(ids[!canon])
-    out$chrom[!canon] <- as.character(p$chrom)
-    out$pos[!canon] <- as.integer(p$pos)
-    out$A2[!canon] <- as.character(p$A2)
-    out$A1[!canon] <- as.character(p$A1)
-    .unparsedAsSpelled(out, ids)
+    parsed <- .variantTableWithRows(
+        withCanon,
+        which(!canon),
+        .variantTable(spelled[!canon])
+    )
+    .unparsedAsSpelled(parsed, spelled)
+}
+
+# A variant table of `n` variants with every field missing.
+# @noRd
+.naVariantTable <- function(n) {
+    list(
+        chrom = rep(NA_character_, n),
+        pos = rep(NA_integer_, n),
+        A2 = rep(NA_character_, n),
+        A1 = rep(NA_character_, n)
+    )
+}
+
+# The variant table `tab` with its rows `rows` taken, in order, from the
+# variant table `from`.
+# @noRd
+.variantTableWithRows <- function(tab, rows, from) {
+    map2(tab, from[names(tab)], .replaceRows, rows = rows)
+}
+
+# @noRd
+.replaceRows <- function(column, values, rows) {
+    replace(column, rows, values)
 }
 
 # A variant table's rows whose id did not parse (an rsID), each made a variant
@@ -1475,17 +1495,16 @@ matchVariants <- function(
 # while the rest are matched by their variants.
 # @noRd
 .unparsedAsSpelled <- function(tab, ids) {
-    bad <- which(is.na(tab$chrom) | is.na(tab$pos))
-    if (length(bad) == 0L) {
+    bad <- (is.na(tab$chrom) | is.na(tab$pos)) & !is.na(ids)
+    if (!any(bad)) {
         return(tab)
     }
-    spelled <- !is.na(ids[bad])
-    bad <- bad[spelled]
-    tab$chrom[bad] <- str_c(.UNPARSED_CHROM, ids[bad])
-    tab$pos[bad] <- 1L
-    tab$A2[bad] <- ids[bad]
-    tab$A1[bad] <- ""
-    tab
+    list(
+        chrom = if_else(bad, str_c(.UNPARSED_CHROM, ids), tab$chrom),
+        pos = if_else(bad, 1L, tab$pos),
+        A2 = if_else(bad, ids, tab$A2),
+        A1 = if_else(bad, "", tab$A1)
+    )
 }
 
 # The chromosome-name prefix of the variants .unparsedAsSpelled() makes.
@@ -1506,27 +1525,34 @@ matchVariants <- function(
     length(tab$pos)
 }
 
-# A variant table as a data.frame keyed by every field, for hashing variants
+# A variant table as a tibble keyed by every field, for hashing variants
 # (vctrs) without rendering ids.
 # @noRd
 .variantKeyFrame <- function(tab) {
-    data.frame(chrom = tab$chrom, pos = tab$pos, A2 = tab$A2, A1 = tab$A1)
+    tibble(chrom = tab$chrom, pos = tab$pos, A2 = tab$A2, A1 = tab$A1)
 }
 
 # Variant tables joined, in order.
 # @noRd
 .bindVariantTables <- function(tables) {
-    fields <- c("chrom", "pos", "A2", "A1")
-    set_names(
-        map(fields, function(f) unlist(map(tables, f), use.names = FALSE)),
-        fields
+    map(
+        set_names(c("chrom", "pos", "A2", "A1")),
+        .joinedField,
+        parts = tables
     )
+}
+
+# Field `field` of each of `parts`, joined into one vector.
+# @noRd
+.joinedField <- function(field, parts) {
+    unname(list_c(map(parts, field)))
 }
 
 # The fields of canonical ids, split on ":".
 # @noRd
+#' @importFrom stringr str_split_fixed
 .canonicalVariantTable <- function(ids) {
-    m <- stri_split_fixed(ids, ":", n = 4L, simplify = TRUE)
+    m <- str_split_fixed(ids, fixed(":"), 4L)
     list(
         chrom = m[, 1L],
         pos = as.integer(m[, 2L]),
@@ -1538,21 +1564,7 @@ matchVariants <- function(
 # A variant table subset to rows `i`.
 # @noRd
 .variantTableRows <- function(tab, i) {
-    map(tab, function(col) col[i])
-}
-
-# A panel's variant table, computed on first use: parsing a genome-wide
-# panel's ids costs seconds, and when every id matched against it is spelled
-# as a panel id, none is needed.
-# @noRd
-.lazyVariantTable <- function(panel) {
-    tab <- NULL
-    function() {
-        if (is.null(tab)) {
-            tab <<- .idsVariantTable(panel)
-        }
-        tab
-    }
+    map(tab, `[`, i)
 }
 
 # Match variant tables `query` to a `panel`: each query variant's index in the
@@ -1565,10 +1577,10 @@ matchVariants <- function(
 #' @importFrom vctrs vec_match vec_group_id
 .alignTablesToPanel <- function(query, panel) {
     qf <- .variantKeyFrame(query)
-    idx <- vec_match(qf, .variantKeyFrame(panel))
-    unmatched <- which(is.na(idx) & !is.na(query$pos))
+    exact <- vec_match(qf, .variantKeyFrame(panel))
+    unmatched <- which(is.na(exact) & !is.na(query$pos))
     if (length(unmatched) == 0L) {
-        return(idx)
+        return(exact)
     }
     group <- vec_group_id(qf[unmatched, , drop = FALSE])
     first <- unmatched[match(seq_len(attr(group, "n")), group)]
@@ -1577,36 +1589,35 @@ matchVariants <- function(
         panel,
         removeStrandAmbiguous = FALSE
     )
-    hit <- rep(NA_integer_, length(first))
-    hit[m$idxA] <- m$idxB
-    idx[unmatched] <- hit[as.vector(group)]
-    idx
+    hit <- replace(rep(NA_integer_, length(first)), m$idxA, m$idxB)
+    replace(exact, unmatched, hit[as.vector(group)])
 }
 
 # Match variant ids to a panel of variant ids: each id's index in `panel`, or
 # NA. An id spelled exactly as a panel id takes that one; the rest that parse
 # are matched by their variants (.alignTablesToPanel()), and an id that does
-# not parse (an rsID) only by its spelling. `panelTable` supplies the panel's
-# variant table (see .lazyVariantTable()).
+# not parse (an rsID) only by its spelling. `panelTable` is the panel's
+# variant table; as a default argument it is read only when some id is not
+# spelled as a panel id, since parsing a genome-wide panel's ids costs
+# seconds.
 # @noRd
 .alignIdsToPanel <- function(
     ids,
     panel,
-    panelTable = .lazyVariantTable(panel)
+    panelTable = .idsVariantTable(panel)
 ) {
-    idx <- match(ids, panel)
-    unmatched <- which(is.na(idx))
+    exact <- match(ids, panel)
+    unmatched <- which(is.na(exact))
     if (length(unmatched) == 0L) {
-        return(idx)
+        return(exact)
     }
     rest <- .idsVariantTable(ids[unmatched])
     parsed <- which(!is.na(rest$chrom) & !is.na(rest$pos))
     if (length(parsed) == 0L) {
-        return(idx)
+        return(exact)
     }
-    at <- .alignTablesToPanel(.variantTableRows(rest, parsed), panelTable())
-    idx[unmatched[parsed]] <- at
-    idx
+    at <- .alignTablesToPanel(.variantTableRows(rest, parsed), panelTable)
+    replace(exact, unmatched[parsed], at)
 }
 
 #' Classify variant type from allele strings

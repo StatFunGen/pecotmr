@@ -1250,8 +1250,8 @@
     if (!is.null(restored)) {
         return(restored)
     }
-    pieces <- map(idx, .fmrRowVariantsAt, x = x)
-    suppressWarnings(exec(c, !!!unname(pieces)))
+    pieces <- unname(map(idx, .fmrRowVariantsAt, x = x))
+    suppressWarnings(exec(c, !!!pieces))
 }
 
 # The joined elements `gr` of rows `idx` with their pip and credible-set
@@ -1262,12 +1262,7 @@
 # restore (.fmRowRestoredVariants()) to handle.
 # @noRd
 .fmrRestoreAbsentColumns <- function(x, idx, gr) {
-    md <- mcols(x, use.names = FALSE)
-    records <- if (is.null(md$derivedColumns)) {
-        rep(list(character(0)), length(idx))
-    } else {
-        map(idx, function(i) as.character(md$derivedColumns[[i]]))
-    }
+    records <- map(idx, .mdDerivedColumns, md = mcols(x, use.names = FALSE))
     if (!all(map_lgl(records, identical, records[[1L]]))) {
         return(NULL)
     }
@@ -1281,18 +1276,16 @@
     if (any(map_lgl(pieces, is.null))) {
         return(NULL)
     }
-    joined <- map(
-        set_names(names(pieces[[1L]])),
-        function(nm) unlist(map(pieces, nm), use.names = FALSE)
-    )
-    out <- gr
-    if (length(record$labels) > 0L) {
-        out <- .fmRowInsertColumns(out, joined[csCols], .fmRowCsSlot(cn))
+    joined <- map(set_names(names(pieces[[1L]])), .joinedField, parts = pieces)
+    withCs <- if (length(record$labels) > 0L) {
+        .fmRowInsertColumns(gr, joined[csCols], .fmRowCsSlot(cn))
+    } else {
+        gr
     }
     .fmRowInsertColumns(
-        out,
+        withCs,
         joined["pip"],
-        .fmRowPipSlot(colnames(mcols(out, use.names = FALSE)))
+        .fmRowPipSlot(colnames(mcols(withCs, use.names = FALSE)))
     )
 }
 
@@ -1312,12 +1305,13 @@
     } else {
         .fitColumnsPlaced(x[[i]], fit)
     }
-    cs <- list()
-    if (length(record$labels) > 0L) {
-        cs <- .fitCsColumns(fit, record$labels, record$tag, cols, n)
-        if (is.null(cs)) {
-            return(NULL)
-        }
+    cs <- if (length(record$labels) > 0L) {
+        .fitCsColumns(fit, record$labels, record$tag, cols, n)
+    } else {
+        list()
+    }
+    if (is.null(cs)) {
+        return(NULL)
     }
     c(cs, list(pip = as.numeric(pip)[cols]))
 }
@@ -1647,62 +1641,86 @@
 # for a row placed nowhere, which contributes none). A fit's variants are the
 # names it gives its PIPs; else, for a row holding all of its fit, the row's
 # own variants, read off its ranges without rendering an id; else, for a
-# narrowed row, the names the fit gives its variables, or `unplaced(i)`.
+# narrowed row, the names the fit gives its variables. A narrowed row whose
+# fit names none is placed nowhere when `onUnplaced` is "skip", and is an
+# error when it is "error" (.abortUnnamedNarrowedFit()).
 # @noRd
-#' @importFrom purrr map2_lgl
-.fmrRowsFitVariants <- function(x, idx, fits, unplaced) {
+#' @importFrom purrr map2_lgl pmap
+.fmrRowsFitVariants <- function(x, idx, fits, onUnplaced = c("skip", "error")) {
+    rule <- arg_match(onUnplaced)
     n <- unname(lengths(x))[idx]
-    named <- map(fits, function(fit) names(fit[["pip"]]))
-    holds <- map2_lgl(n, map_int(fits, .fitWidth), .rowHoldsFit)
-    fromRows <- map_lgl(named, is.null) & holds
-    for (k in which(map_lgl(named, is.null) & !holds)) {
-        named[k] <- list(.fitVariableNames(fits[[k]]) %||% unplaced(idx[[k]]))
-    }
-    len <- ifelse(fromRows, n, lengths(named))
-    len[!fromRows & map_lgl(named, is.null)] <- NA_integer_
-    if (all(fromRows)) {
-        return(list(
-            table = .variantTable(.rtlGatherElements(x, idx)),
-            n = as.integer(len)
-        ))
-    }
-    counts <- replace(len, is.na(len), 0L)
-    offset <- cumsum(c(0L, counts))[seq_along(counts)]
-    at <- function(ks) {
-        unlist(
-            map(ks, function(k) offset[[k]] + seq_len(counts[[k]])),
-            use.names = FALSE
-        )
-    }
-    total <- sum(counts)
-    out <- list(
-        chrom = rep(NA_character_, total),
-        pos = rep(NA_integer_, total),
-        A2 = rep(NA_character_, total),
-        A1 = rep(NA_character_, total)
+    widths <- map_int(fits, .fitWidth)
+    pipNames <- map(fits, .fitPipNames)
+    fromRows <- map_lgl(pipNames, is.null) & map2_lgl(n, widths, .rowHoldsFit)
+    named <- pmap(
+        list(pipNames, fits, fromRows, n, widths),
+        .fmrRowFitNames,
+        onUnplaced = rule
     )
-    fill <- function(out, where, tab) {
-        for (f in names(out)) {
-            out[[f]][where] <- tab[[f]]
-        }
-        out
+    len <- if_else(
+        fromRows | !map_lgl(named, is.null),
+        if_else(fromRows, n, lengths(named)),
+        NA_integer_
+    )
+    if (all(fromRows)) {
+        return(list(table = .variantTable(.rtlGatherElements(x, idx)), n = len))
     }
-    if (any(fromRows)) {
-        out <- fill(
-            out,
-            at(which(fromRows)),
+    list(table = .fmrRowsFitTable(x, idx, named, fromRows, len), n = len)
+}
+
+# @noRd
+.fitPipNames <- function(fit) {
+    names(fit[["pip"]])
+}
+
+# The names one row's fit gives its variants (see .fmrRowsFitVariants()): its
+# PIPs' names, or none for a row read off its own ranges (`fromRows`); else,
+# for a narrowed row, the names the fit gives its variables.
+# @noRd
+.fmrRowFitNames <- function(pipNames, fit, fromRows, n, width, onUnplaced) {
+    if (!is.null(pipNames) || fromRows) {
+        return(pipNames)
+    }
+    named <- .fitVariableNames(fit)
+    if (is.null(named) && onUnplaced == "error") {
+        .abortUnnamedNarrowedFit(n, width)
+    }
+    named
+}
+
+# The variant table of rows `idx` (see .fmrRowsFitVariants()), row after row:
+# the rows read off their own ranges in one read, and the rest from the names
+# their fits give in one parse, each placed at its rows' slots.
+# @noRd
+.fmrRowsFitTable <- function(x, idx, named, fromRows, len) {
+    counts <- coalesce(len, 0L)
+    starts <- cumsum(c(0L, counts))[seq_along(counts)]
+    empty <- .naVariantTable(sum(counts))
+    withRows <- if (any(fromRows)) {
+        .variantTableWithRows(
+            empty,
+            .rowSlots(which(fromRows), starts, counts),
             .variantTable(.rtlGatherElements(x, idx[fromRows]))
         )
+    } else {
+        empty
     }
     byName <- which(!fromRows & !is.na(len))
-    if (length(byName) > 0L) {
-        out <- fill(
-            out,
-            at(byName),
-            .idsVariantTable(unlist(named[byName], use.names = FALSE))
-        )
+    if (length(byName) == 0L) {
+        return(withRows)
     }
-    list(table = out, n = as.integer(len))
+    .variantTableWithRows(
+        withRows,
+        .rowSlots(byName, starts, counts),
+        .idsVariantTable(list_c(named[byName]))
+    )
+}
+
+# The positions rows `ks` take in a table of rows laid out row after row,
+# row k starting after `starts[k]` and holding `counts[k]`.
+# @noRd
+.rowSlots <- function(ks, starts, counts) {
+    rep(starts[ks], counts[ks]) + sequence(counts[ks])
 }
 
 # The fits of rows `idx` of a fine-mapping collection, as a list.

@@ -585,6 +585,38 @@ test_that("fineMappingAnnotations refuses bad arguments", {
     expect_error(fineMappingAnnotations(.fma_qtl(), list()), "LdStatistic")
 })
 
+test_that("fineMappingAnnotations skips a purity filter it has no purity for", {
+    ids <- sprintf("chr1:%d:A:G", 1:4 * 100L)
+    pip <- c(0.7, 0.2, 0.05, 0.05)
+    # Labels without purities: the row stores them as given.
+    row <- FineMappingRow(
+        variantIds = ids,
+        susieFit = list(pip = stats::setNames(pip, ids)),
+        topLoci = data.frame(
+            variant_id = ids,
+            pip = pip,
+            cs_95 = c("susie_1", "susie_1", "susie_0", "susie_0")
+        )
+    )
+    qtl <- QtlFineMappingResult(
+        studyName = "Q",
+        context = "ctx",
+        trait = "g1",
+        method = "susie",
+        entry = list(row)
+    )
+    expect_warning(
+        annot <- fineMappingAnnotations(
+            qtl,
+            .fma_ref(),
+            types = "credibleSet",
+            minPurity = 0.5
+        ),
+        "no purity column 'cs_95_purity'"
+    )
+    expect_equal(.fma_col(annot, "credibleSet"), c(1, 1, 0, 0, 0, 0))
+})
+
 test_that("estimateH2 takes fineMappingAnnotations as candidates", {
     n <- 40L
     ref <- .fma_ref(n = n, nBlocks = 4L)

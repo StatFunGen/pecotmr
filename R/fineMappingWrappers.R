@@ -5222,11 +5222,12 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # once per variant of every fit.
 # @noRd
 .csPurityAt <- function(i, pv) {
-    out <- numeric(length(i))
     inRange <- i > 0L & i <= length(pv)
-    v <- as.numeric(pv[i[inRange]])
-    out[inRange] <- replace(v, is.na(v), 0)
-    out
+    replace(
+        numeric(length(i)),
+        inRange,
+        coalesce(as.numeric(pv[i[inRange]]), 0)
+    )
 }
 
 # Max of the finite entries of x (NA when none).

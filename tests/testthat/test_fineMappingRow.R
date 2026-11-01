@@ -1883,3 +1883,98 @@ test_that("a collection joining saved and rebuilt rows reads every pip", {
         topLoci(old, signalCutoff = 0)
     )
 })
+
+# ===========================================================================
+# Restoring the columns a row leaves to its fit: where nothing is restored
+# ===========================================================================
+
+.fmr_ids <- c("chr1:100:A:G", "chr1:200:C:T")
+
+# A row's variants as stored, from a fit that gives none of its columns
+# back, so the table's pip and credible-set columns all stay.
+.fmr_storedVariants <- function() {
+    variants(FineMappingRow(
+        .fmr_ids,
+        list(),
+        data.frame(
+            variant_id = .fmr_ids,
+            pip = c(0.4, 0.6),
+            cs_95 = c("susie_1", "susie_0"),
+            cs_95_purity = c(0.9, 0)
+        )
+    ))
+}
+
+test_that("the pip and credible-set slots follow their anchor columns", {
+    expect_identical(pecotmr:::.fmRowPipSlot(c("variant_id", "beta")), 0L)
+    expect_identical(pecotmr:::.fmRowPipSlot(c("A2", "marginal_p", "x")), 2L)
+    expect_identical(pecotmr:::.fmRowCsSlot(c("A2", "logBF", "x")), 2L)
+    expect_identical(pecotmr:::.fmRowCsSlot(c("A2", "pip", "x")), 2L)
+    expect_identical(pecotmr:::.fmRowCsSlot(c("A2", "x")), 1L)
+})
+
+test_that("credible-set labels give a method tag only when they share one", {
+    tag <- pecotmr:::.fmRowCsLabelTag
+    expect_identical(
+        tag(S4Vectors::DataFrame(cs_95 = c("susie_1", "susie_0"))),
+        "susie"
+    )
+    expect_null(tag(S4Vectors::DataFrame(cs_95 = c("susie_1", "fsusie_1"))))
+    expect_null(tag(S4Vectors::DataFrame(cs_95 = c("_1", "_2"))))
+})
+
+test_that("a fit gives no credible-set columns it cannot place or label", {
+    fit <- list(pip = c(0.5, 0.5))
+    cols <- pecotmr:::.fitCsColumns
+    expect_null(cols(fit, "cs_95", NULL, 1:2, 2L))
+    expect_null(cols(fit, "cs_95", "susie", NULL, 2L))
+    expect_null(cols(fit, "cs_95", "susie", c(1L, NA), 2L))
+    # Nor without the credible sets of the coverage asked for.
+    expect_null(cols(fit, "cs_95", "susie", 1:2, 2L))
+})
+
+test_that("restoring leaves what a row stores, or its fit cannot give", {
+    gr <- .fmr_storedVariants()
+    row <- methods::new(
+        "FineMappingRow",
+        variants = gr,
+        susieFit = list(pip = c(0.4, 0.6)),
+        derivedColumns = c("cs_95", "method=susie")
+    )
+    # Every credible-set column it records is stored.
+    expect_identical(pecotmr:::.fmRowRestoreFitCs(gr, row), gr)
+    # Without them, a fit with no credible sets gives nothing back.
+    bare <- gr
+    S4Vectors::mcols(bare) <- S4Vectors::mcols(gr)[, c("A1", "A2", "pip")]
+    expect_identical(pecotmr:::.fmRowRestoreFitCs(bare, row), bare)
+    # A fit with no PIPs gives no pip back.
+    noPip <- bare
+    S4Vectors::mcols(noPip) <- S4Vectors::mcols(gr)[, c("A1", "A2")]
+    fitless <- methods::new(
+        "FineMappingRow",
+        variants = noPip,
+        susieFit = list(alpha = matrix(0.5, 1L, 2L))
+    )
+    expect_identical(pecotmr:::.fmRowRestoreFitPip(noPip, fitless), noPip)
+})
+
+test_that(".fmRowFillColumn fills only a column left all NA", {
+    md <- S4Vectors::DataFrame(a = c(1, 2), b = c(NA_real_, NA_real_))
+    derived <- list(a = c(9, 9), b = c(3, 4))
+    expect_identical(pecotmr:::.fmRowFillColumn(md, "a", derived), md)
+    filled <- pecotmr:::.fmRowFillColumn(md, "b", derived)
+    expect_identical(filled$b, c(3, 4))
+    expect_identical(filled$a, md$a)
+})
+
+test_that("a row saved before rows recorded derived columns derives none", {
+    row <- FineMappingRow(
+        .fmr_ids,
+        list(pip = c(0.4, 0.6)),
+        data.frame(variant_id = .fmr_ids, pip = c(0.4, 0.6))
+    )
+    old <- row
+    attr(old, "derivedColumns") <- NULL
+    expect_false(methods::.hasSlot(old, "derivedColumns"))
+    expect_identical(pecotmr:::.fmRowDerivedColumns(old), character(0))
+})

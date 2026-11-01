@@ -622,13 +622,14 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
     n <- lengths(x)
     has <- n > 0L
     flat <- unlist(x, use.names = FALSE)
-    group <- rep(seq_along(x), n)
     first <- (cumsum(n) - n + 1L)[has]
-    starts <- vapply(split(start(flat), group), min, integer(1))
-    ends <- vapply(split(end(flat), group), max, integer(1))
+    # min()/max() of a list of starts/ends are taken per element, in C.
     spans <- GenomicRanges::GRanges(
         seqnames(flat)[first],
-        IRanges::IRanges(starts, ends),
+        IRanges::IRanges(
+            unname(min(start(x)[has])),
+            unname(max(end(x)[has]))
+        ),
         strand = BiocGenerics::strand(flat)[first],
         seqinfo = GenomeInfoDb::seqinfo(flat)
     )
@@ -1367,9 +1368,11 @@ nestTupleRanges <- function(flat, template) {
         abort(msg)
     }
     keys <- .rtlNestKeys(flat, template, .rtlTupleKeyCols(template))
-    elements <- map(keys$wanted, .rtlPickByKey, flat = flat, have = keys$have)
-    if (methods::is(template, "FineMappingResultBase")) {
-        elements <- .fmrDropRestoredColumns(elements, template)
+    picked <- map(keys$wanted, .rtlPickByKey, flat = flat, have = keys$have)
+    elements <- if (methods::is(template, "FineMappingResultBase")) {
+        .fmrDropRestoredColumns(picked, template)
+    } else {
+        picked
     }
     .rtlRebuild(template, elements, seq_len(length(template)))
 }
@@ -1410,14 +1413,12 @@ nestTupleRanges <- function(flat, template) {
     }
     fit <- susieFit(parts)
     cols <- .fitColumnsFor(g, fit)
-    if (!storedPip) {
-        g <- .fmRowDropFitPip(g, fit, cols)
-    }
+    slim <- if (storedPip) g else .fmRowDropFitPip(g, fit, cols)
     if (length(recorded) == 0L) {
-        return(g)
+        return(slim)
     }
-    cs <- .fmRowDropFitCs(g, fit, cols)
-    if (identical(cs$derived, recorded)) cs$variants else g
+    cs <- .fmRowDropFitCs(slim, fit, cols)
+    if (identical(cs$derived, recorded)) cs$variants else slim
 }
 
 # Element and range keys for re-nesting. The identity tuple alone keys an

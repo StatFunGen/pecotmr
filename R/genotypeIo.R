@@ -1241,23 +1241,28 @@ readPvar <- function(pvarPath) {
 }
 
 # The .pvar's column names, from its #CHROM header line, and how many lines
-# (## meta lines and the header) precede the variants; NULL without one.
-# @noRd
-.pvarHeader <- function(pvarPath) {
-    con <- file(pvarPath, "r")
-    on.exit(close(con), add = TRUE)
-    lines <- 0L
-    repeat {
-        line <- readLines(con, n = 1L, warn = FALSE)
-        if (length(line) == 0L || !str_detect(line, "^#")) {
-            return(NULL)
-        }
-        lines <- lines + 1L
-        if (str_detect(line, "^#CHROM")) {
-            columns <- str_split(str_remove(line, "^#"), "\t")[[1L]]
-            return(list(columns = columns, lines = lines))
-        }
+# (## meta lines and the header) precede the variants; NULL without one. Read
+# in windows of growing size: a header of thousands of ## lines (a VCF's
+# contigs) costs a few reads, and a short one reads little.
+#' @importFrom readr read_lines
+#' @importFrom dplyr cumall
+#' @noRd
+.pvarHeader <- function(pvarPath, window = 1024L) {
+    top <- read_lines(pvarPath, n_max = window, progress = FALSE)
+    # The meta lines: the run of "#" lines the file starts with.
+    meta <- cumall(str_starts(top, "#"))
+    header <- which(meta & str_starts(top, "#CHROM"))
+    if (length(header) > 0L) {
+        line <- top[[header[[1L]]]]
+        return(list(
+            columns = str_split_1(str_remove(line, "^#"), "\t"),
+            lines = header[[1L]]
+        ))
     }
+    if (!all(meta) || length(top) < window) {
+        return(NULL)
+    }
+    .pvarHeader(pvarPath, window * 8L)
 }
 
 # Any .pvar pgenlibr reads, a variant at a time.

@@ -91,6 +91,9 @@ ref <- LdScore(
     ldScores = matrix(1, length(fm), 1, dimnames = list(NULL, "base_l2")),
     ldScoreWeights = rep(1, length(fm))
 )
-annot <- fineMappingAnnotations(qtlFineMappingExample, ref, pipThreshold = 0.1)
+annot <- fineMappingAnnotations(
+    qtlFineMappingExample, ref,
+    pipThreshold = 0.1
+)
 colnames(annot)
 }

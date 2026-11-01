@@ -2058,3 +2058,101 @@ test_that("qtlEnrichmentPipeline warns about narrowed fits on both sides", {
         "qtlEnrichmentPipeline\\(\\): 2 row\\(s\\)"
     )
 })
+
+# ===========================================================================
+# Regions as the kernel reads them
+# ===========================================================================
+
+test_that(".enrRenamePip renames a named pip and leaves an unnamed one", {
+    unnamed <- list(pip = c(0.4, 0.6))
+    expect_identical(pecotmr:::.enrRenamePip(unnamed, c("a", "b")), unnamed)
+    named <- list(pip = c(x = 0.4, y = 0.6))
+    expect_identical(
+        names(pecotmr:::.enrRenamePip(named, c("a", "b"))$pip),
+        c("a", "b")
+    )
+})
+
+test_that(".enrCodeAligned codes an absent variant by the union's variant", {
+    # Variables 2 and 3 are one variant, spelled with its alleles swapped: the
+    # outcome lacks it and the union holds it (row 2), so both take one code.
+    # Variable 4 is in neither and keeps a code of its own.
+    annotation <- list(
+        regions = list(
+            r1 = list(
+                alpha = matrix(0.25, 1L, 4L),
+                prior_variance = 1
+            )
+        ),
+        table = list(
+            chrom = rep("chr1", 4L),
+            pos = c(100L, 200L, 200L, 300L),
+            A2 = c("A", "C", "T", "G"),
+            A1 = c("G", "T", "C", "A")
+        ),
+        n = 4L
+    )
+    union <- list(
+        chrom = c("chr1", "chr1"),
+        pos = c(100L, 200L),
+        A2 = c("A", "C"),
+        A1 = c("G", "T")
+    )
+    coded <- pecotmr:::.enrCodeAligned(
+        annotation,
+        outcomeIdx = c(1L, NA, NA, NA),
+        unionIdx = c(1L, 2L, 2L, NA),
+        unionTable = union
+    )
+    expect_identical(coded$fits[[1L]]$codes, c(0L, -1L, -1L, -2L))
+    expect_identical(coded$nQtlOnly, 2L)
+})
+
+test_that(".enrCodedFit hands the kernel double alpha and integer codes", {
+    fit <- pecotmr:::.enrCodedFit(
+        list(alpha = matrix(1L, 1L, 2L), prior_variance = 1L),
+        c(0, 1)
+    )
+    expect_type(fit$alpha, "double")
+    expect_identical(dim(fit$alpha), c(1L, 2L))
+    expect_type(fit$prior_variance, "double")
+    expect_identical(fit$codes, c(0L, 1L))
+})
+
+test_that(".enrValidateFits names a fit whose alpha is not a numeric matrix", {
+    expect_error(
+        pecotmr:::.enrValidateFits(list(
+            gene1 = list(alpha = "a", pip = 1, prior_variance = 1)
+        )),
+        "gene1: alpha is not a numeric matrix"
+    )
+})
+
+test_that(".enrReportDiagnostics warns of unconverged rounds, reports the rest", {
+    en <- list(
+        `EM converged per MI round` = c(TRUE, FALSE),
+        `Missing proportion per MI round` = c(0.1, 0.3),
+        `EM iterations per MI round` = c(10L, 1000L),
+        `Effective MI rounds` = 1L
+    )
+    expect_warning(
+        msgs <- testthat::capture_messages(pecotmr:::.enrReportDiagnostics(
+            en,
+            nullFits = 1L,
+            nFits = 3L,
+            verbose = TRUE
+        )),
+        "did not converge within 1000 iterations in 1 of 2"
+    )
+    shown <- paste(msgs, collapse = "")
+    expect_match(shown, "1 of 3 QTL fits have no effect")
+    expect_match(shown, "Outlier filtering removed 1 MI round")
+    # Quietly, the warning alone.
+    expect_warning(
+        quiet <- testthat::capture_messages(
+            pecotmr:::.enrReportDiagnostics(en, 1L, 3L, verbose = FALSE)
+        ),
+        "did not converge"
+    )
+    expect_length(quiet, 0L)
+})

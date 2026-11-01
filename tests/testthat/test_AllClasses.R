@@ -1485,6 +1485,21 @@ test_that("trimFineMappingResult trims by role, picked by class", {
     )
 })
 
+test_that("trimming passes over what has nothing to trim", {
+    # A cross-validation-only row holds no variants and no fit.
+    cvOnly <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "g1",
+        method = "susie",
+        entry = list(pecotmr:::.fmCvOnlyRow())
+    )
+    expect_identical(lengths(trimFineMappingResult(cvOnly)), lengths(cvOnly))
+    expect_null(pecotmr:::.trimFit(NULL, "outcome"))
+    expect_identical(pecotmr:::.trimFit(list(), "annotation"), list())
+    expect_null(pecotmr:::.trimNamed(NULL, "chr1:100:A:G"))
+})
+
 test_that("trimFineMappingResult refuses an unknown role or input", {
     x <- .fmLoadExample("qtlFineMappingExample")
     expect_error(trimFineMappingResult(x, role = "both"), "must be one of")
