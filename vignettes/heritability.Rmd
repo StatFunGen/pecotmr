@@ -281,14 +281,21 @@ annot <- readAnnotations(
 
 The `tier` column decides how each annotation is used: `"baseline"`
 annotations enter the model and get an enrichment estimate, while
-`"candidate"` annotations are scored against the fitted baseline (the sHDL
-score test, via `scoreStats()`).
+`"candidate"` annotations are scored against the fitted baseline, one score
+test each, via `scoreStats()`. Every estimator calibrates that test by the
+spread of its LD blocks' scores, as it does its standard errors, so it stays
+valid when the regression weights are only approximately right. Molecular QTL
+annotations built by `fineMappingAnnotations()` from fine-mapping results are
+candidates by default.
 
-One structural caveat: a set of baseline annotations that exactly partitions
-the variants is rank-deficient by construction, because the model's implicit
-all-ones base annotation is then their sum. Real baseline models — the LDSC
-baselineLD set, for instance — use overlapping annotations and do not have
-this problem.
+All four estimators fit the same baseline design. An all-ones base
+annotation is added ahead of the baseline annotations unless they already
+cover every variant between them, as a partition of the genome does. Without
+it the variants no annotation covers would be modelled as carrying no
+heritability. Beside the base, an annotation's coefficient is its excess over
+the genome-wide rate, which is negative for a depleted annotation. Annotations
+may overlap; each one's heritability is taken from the overlap-aware
+partition \(A'A\tau\), and only the annotations you supplied are reported.
 
 ## Postprocessing external polyfun runs
 

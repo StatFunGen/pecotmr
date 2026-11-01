@@ -202,7 +202,9 @@ GwasFineMappingResult <- function(
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(entry, susieFit)),
         cvResult = S4Vectors::SimpleList(map(entry, cvResult)),
-        fitVariants = IRanges::CharacterList(map(entry, .fmRowFitVariants))
+        derivedColumns = IRanges::CharacterList(
+            map(entry, .fmRowDerivedColumns)
+        )
     ) |>
         .appendBlockIdCol(blockId %||% rep(NA_character_, n), n) |>
         .appendTraitPosCol(traitPos, n) |>

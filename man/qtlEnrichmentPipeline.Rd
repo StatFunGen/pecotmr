@@ -10,7 +10,8 @@ qtlEnrichmentPipeline(
   qtlEnrichmentParam = QtlEnrichmentParam(),
   BPPARAM = SerialParam(),
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  duplicatePips = c("max", "error", "blockEnd")
 )
 }
 \arguments{
@@ -29,10 +30,21 @@ checked.}
 its workers. Default \code{SerialParam()}.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed forwarded to
-\code{\link{qtlEnrichment}} for reproducible multiple imputation.
-\code{NULL} (default) draws a nondeterministic seed.}
+\code{\link{qtlEnrichment}} for reproducible multiple imputation; every
+(outcome, annotation) pair is run with this same seed. \code{NULL}
+(default) draws a nondeterministic seed per pair.}
 
 \item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
+
+\item{duplicatePips}{How to resolve a variant to which the outcome's LD
+blocks give different PIPs, as adjacent blocks sharing a boundary variant
+do when each block's fit gives it its own. Copies that agree are always
+merged. \code{"max"} (default) keeps the largest PIP. \code{"blockEnd"}
+keeps the copy from the block whose window was given (see
+\code{\link{genomicRegion}}) and ends at the variant --- the upstream of
+two blocks sharing it --- and errors when no single block qualifies.
+\code{"error"} refuses. fastenloc does none of these: it keeps the last
+copy's PIP but counts every copy towards the GWAS prior.}
 }
 \value{
 A tibble with one row per (outcome fit, annotation unit) pair.

@@ -162,6 +162,15 @@ with $P_{\text{eQTL}}$ the per-variant QTL prior:
 p_2 = P_{\text{eQTL}}\,\bigl(1 - \sigma(a_0 + a_1)\bigr), \quad
 p_{12} = P_{\text{eQTL}}\,\sigma(a_0 + a_1) \]
 
+As in `fastenloc`, $P_{\text{eQTL}}$ and the GWAS prior $P_{\text{GWAS}}$ are
+PIP mass per variant: the QTL fits' summed PIPs, and the GWAS PIPs' sum, over
+the total number of variants the GWAS tested (`QtlEnrichmentParam(numGwas =)`).
+The intercept is the one that keeps the GWAS prior at that rate given the
+unshrunk enrichment $\hat a_1$,
+$a_0 = \log\{P_{\text{GWAS}} / (1 + P_{\text{eQTL}} e^{\hat a_1} -
+P_{\text{eQTL}} - P_{\text{GWAS}})\}$, while the priors above use the shrunk
+$a_1$.
+
 `qtlEnrichmentPipeline()` carries all three out as the `colocP1`, `colocP2`
 and `colocP12` columns, so the table you pass already holds them. Because the
 enrichment determines the priors, supplying `priors` as well is an error

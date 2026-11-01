@@ -313,6 +313,7 @@ reference:
       - susieFit
       - topLoci
       - traitPosition
+      - trimFineMappingResult
       - variantIds
       - intersectVariants
       - resolveWeights
@@ -735,6 +736,7 @@ reference:
       - computeSldscAnnotSd
       - computeSldscMRef
       - readAnnotations
+      - fineMappingAnnotations
       - readSldscTrait
       - readSldscAnnot
       - readSldscFrq

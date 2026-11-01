@@ -83,9 +83,11 @@ Bring an object saved by an earlier version of pecotmr up to
       both in one \code{qcInfo} record have it split between the two.
       Their genome build is in \code{seqinfo()}; ones saved with it in a
       \code{genome} slot have it moved there.
-    \item Fine-mapping results and TWAS weights record the variants each
-      row was fitted on in a \code{fitVariants} column; ones saved without
-      it have it filled in from their fits.
+    \item TWAS weights record the variants each row was fitted on in a
+      \code{fitVariants} column; ones saved without it have it filled in
+      from their fits. Fine-mapping results no longer record them (a row's
+      variants are its fit's variables); ones saved with the column have
+      it dropped.
     \item A \code{CtwasResult} holds one element per region; one saved as a
       table of whole runs is rebuilt.
     \item A \code{QtlDataset} no longer stores run settings (genotype

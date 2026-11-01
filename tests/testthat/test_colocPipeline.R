@@ -2130,9 +2130,14 @@ test_that("an unnamed LBF matrix is named by the variants of its fit", {
         context = "c1",
         trait = "g1",
         method = "susie",
-        entry = list(FineMappingRow(vids, list(pip = tl$pip), tl))
+        entry = list(FineMappingRow(
+            vids,
+            list(pip = set_names(tl$pip, vids)),
+            tl
+        ))
     )
-    # The row holds two of the three variants the fit's columns are.
+    # The row holds two of the three variants the fit's columns are, found
+    # by the names the fit gives them.
     parts <- pecotmr:::.fmrRowParts(endoapply(res, utils::head, 2L), 1L)
     named <- pecotmr:::.colocLbfNamesFrom(matrix(c(1, 2, 3), 1L), parts)
     expect_equal(colnames(named), vids)

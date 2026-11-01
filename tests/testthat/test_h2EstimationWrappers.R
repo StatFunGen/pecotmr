@@ -352,13 +352,23 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
         )
     }
     hdl <- pecotmr:::hdlUnivariate
-    for (an in list(NULL, annot)) {
-        expect_equal(
-            suppressWarnings(hdl(z, n, lazyEigen, an, TRUE)),
-            suppressWarnings(hdl(z, n, storedEigen, an, TRUE)),
-            tolerance = 1e-6
-        )
+    expect_equal(
+        suppressWarnings(hdl(z, n, lazyEigen, NULL, TRUE)),
+        suppressWarnings(hdl(z, n, storedEigen, NULL, TRUE)),
+        tolerance = 1e-6
+    )
+    # Stratified, this fixture (a 100-sample panel, so the intercept sits at
+    # its bound) leaves the likelihood flat along the base / annotation
+    # ridge: the two optima have the same likelihood to 1e-7 but sit apart
+    # along it, so only the total heritability is pinned down.
+    stratifiedH2 <- function(ref) {
+        suppressWarnings(hdl(z, n, ref, annot, TRUE))$h2
     }
+    expect_equal(
+        stratifiedH2(lazyEigen),
+        stratifiedH2(storedEigen),
+        tolerance = 1e-3
+    )
     # The truncated decompositions HDL conventionally uses agree too.
     lazy9 <- buildLdEigen(
         fx$panel,
@@ -367,11 +377,7 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
         eigenvalueTruncation = 0.9
     )
     stored9 <- buildLdEigen(fx$ld, genome = "hg19", eigenvalueTruncation = 0.9)
-    expect_equal(
-        suppressWarnings(hdl(z, n, lazy9, annot, TRUE)),
-        suppressWarnings(hdl(z, n, stored9, annot, TRUE)),
-        tolerance = 1e-6
-    )
+    expect_equal(stratifiedH2(lazy9), stratifiedH2(stored9), tolerance = 1e-3)
 })
 
 # ===========================================================================
@@ -455,33 +461,6 @@ test_that("h2EstimateToSldscTrait creates 1-row dummy when annotationJackknifeCo
 # ===========================================================================
 # Helper: GwasSumStats matched to a reference panel
 # ===========================================================================
-
-makeTestGwasGenotypeHandle <- function() {
-    new(
-        "GenotypeHandle",
-        path = "/tmp/test",
-        format = "plink2",
-        snpInfo = data.frame(),
-        nSamples = 0L,
-        sampleIds = character(),
-        pgenPtr = NULL
-    )
-}
-
-.dfToGwasGr <- function(df) {
-    gr <- GenomicRanges::GRanges(
-        seqnames = df$CHR,
-        ranges = IRanges::IRanges(start = df$BP, width = 1L)
-    )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = df$SNP,
-        A1 = df$A1,
-        A2 = df$A2,
-        Z = df$Z,
-        N = df$N
-    )
-    gr
-}
 
 makeTestSumstatsForRef <- function(
     ref,
@@ -612,6 +591,43 @@ test_that("estimateH2 rejects annotations that do not cover the reference", {
     expect_error(
         estimateH2(ss, ref, method = "lder", annotations = annot),
         "`annotations` carries 10 variant\\(s\\)"
+    )
+})
+
+test_that("estimateH2 rejects annotations at other coordinates or in another order", {
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
+    annot <- makeTestAnnotations()
+    # The right count of rows is not enough: the estimators read annotation
+    # rows by the reference's variant order.
+    relocate <- function(starts) {
+        AnnotationMatrix(
+            SummarizedExperiment::assay(annot, "annotations"),
+            GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(starts, width = 1L)
+            ),
+            as.data.frame(SummarizedExperiment::colData(annot)),
+            genome = "hg19"
+        )
+    }
+    expect_error(
+        estimateH2(
+            ss,
+            ref,
+            method = "lder",
+            annotations = relocate(GenomicRanges::start(ref) + 1L)
+        ),
+        "`annotations` and the LD reference disagree at 20 of 20 position"
+    )
+    expect_error(
+        estimateH2(
+            ss,
+            ref,
+            method = "lder",
+            annotations = relocate(rev(GenomicRanges::start(ref)))
+        ),
+        "`annotations` and the LD reference disagree"
     )
 })
 
@@ -927,71 +943,6 @@ test_that(".jackknifeSeFromLoo equals the pseudo-value jackknife", {
         pecotmr:::.jackknifeSeFromLoo(looMeans),
         sqrt(var(pseudo) / n)
     )
-})
-
-# =============================================================================
-# computeBaselineEnrichment
-# =============================================================================
-
-test_that("computeBaselineEnrichment computes enrichment and propSnps", {
-    M <- 100
-    baseline_mat <- matrix(0, nrow = M, ncol = 2)
-    baseline_mat[1:50, 1] <- 1
-    baseline_mat[, 2] <- 1
-    tau <- c(0.01, 0.005)
-    tauSe <- c(0.002, 0.001)
-    h2 <- 0.5
-    annot_names <- c("annot1", "base")
-    res <- pecotmr:::computeBaselineEnrichment(
-        tau,
-        tauSe,
-        NULL,
-        baseline_mat,
-        annot_names,
-        h2
-    )
-    expect_s3_class(res, "data.frame")
-    expected_cols <- c(
-        "annotation",
-        "tau",
-        "tauSe",
-        "enrichment",
-        "enrichmentSe",
-        "enrichmentP",
-        "propH2",
-        "propSnps"
-    )
-    expect_named(res, expected_cols)
-    expect_equal(nrow(res), 2)
-    expect_equal(res$enrichment, tau * M / h2)
-    expect_equal(res$propSnps, c(0.5, 1.0))
-})
-
-test_that("computeBaselineEnrichment uses jackknife blocks when provided", {
-    M <- 100
-    nBlocks <- 5
-    baseline_mat <- matrix(0, nrow = M, ncol = 2)
-    baseline_mat[1:50, 1] <- 1
-    baseline_mat[, 2] <- 1
-    tau <- c(0.01, 0.005)
-    tauSe <- c(0.002, 0.001)
-    h2 <- 0.5
-    annot_names <- c("annot1", "base")
-    annotationJackknifeCoefs <- matrix(
-        rep(tau, each = nBlocks),
-        nrow = nBlocks,
-        ncol = 2
-    )
-    res <- pecotmr:::computeBaselineEnrichment(
-        tau,
-        tauSe,
-        annotationJackknifeCoefs,
-        baseline_mat,
-        annot_names,
-        h2
-    )
-    # With constant annotationJackknifeCoefs, enrichmentSe should be 0
-    expect_equal(res$enrichmentSe, c(0, 0))
 })
 
 # =============================================================================
@@ -1404,11 +1355,12 @@ makeCoverageAnnot <- function(
     AnnotationMatrix(mat, snp_gr, meta, genome = "hg19")
 }
 
-# The three estimators, each with the reference it reads and the baseline
+# The four estimators, each with the reference it reads and the baseline
 # its annotations take. An all-ones baseline makes the LDER and HDL
-# eigenvalue-score column the eigenvalue itself; for g-LDSC it would repeat
-# the base LD score column and leave the design singular, so g-LDSC takes a
-# half-on/half-off baseline instead.
+# eigenvalue-score column the eigenvalue itself; for g-LDSC and S-LDSC it
+# would repeat the base LD score column and leave the design singular, so
+# they take a half-on/half-off baseline instead. S-LDSC reports its local
+# heritability per variant rather than per block (`perBlockLocal`).
 .h2Runs <- list(
     lder = list(
         fn = pecotmr:::lderUnivariate,
@@ -1424,6 +1376,12 @@ makeCoverageAnnot <- function(
         fn = pecotmr:::hdlUnivariate,
         ref = "eigen_ref",
         baseline = "ones"
+    ),
+    sldsc = list(
+        fn = pecotmr:::sldscUnivariate,
+        ref = "ld_score_ref",
+        baseline = "spatial",
+        perBlockLocal = FALSE
     )
 )
 
@@ -1487,6 +1445,9 @@ test_that("lderUnivariate intercept is near zero for well-calibrated data", {
 
 test_that("each univariate estimator with local = TRUE returns per-block h2", {
     for (method in names(.h2Runs)) {
+        if (isFALSE(.h2Runs[[method]]$perBlockLocal)) {
+            next
+        }
         res <- .h2Run(method, dat, local = TRUE)
         expect_true(is.data.frame(res$local), info = method)
         expect_true(
@@ -1543,6 +1504,9 @@ test_that("each univariate estimator reports enrichment and score statistics", {
 
 test_that("each estimator with annotations and local = TRUE gives local h2", {
     for (method in names(.h2Runs)) {
+        if (isFALSE(.h2Runs[[method]]$perBlockLocal)) {
+            next
+        }
         annot <- .h2RunAnnot(method, dat_annot, 1L)
         res <- .h2Run(method, dat_annot, annotations = annot, local = TRUE)
         expect_true(is.data.frame(res$local), info = method)
@@ -1742,6 +1706,261 @@ test_that("lderUnivariate recovers a known h2 (deterministic, seed = 1)", {
     ests <- replicate(30, lderUnivariate(d$simZ(uni), d$N, d$eigenRef)$h2)
     expect_lt(abs(mean(ests) - 0.4), 0.05)
     expect_equal(mean(ests), 0.389, tolerance = 0.04)
+})
+
+# ===========================================================================
+# Candidate-annotation score tests: calibration and power
+#
+# A candidate's score is calibrated by the spread of its LD blocks' scores, so
+# under the null its z is close to N(0, 1) whatever the regression weights
+# get wrong. Both LD-score estimators are checked through estimateH2().
+# ===========================================================================
+
+# A half-on/half-off baseline annotation plus the candidate `cand`.
+.h2ScoreAnnot <- function(M, cand) {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(start = as.integer(seq_len(M) * 100L), width = 1L)
+    )
+    mat <- cbind(half = as.integer(seq_len(M) <= M / 2), cand = cand)
+    meta <- data.frame(
+        name = c("half", "cand"),
+        tier = c("baseline", "candidate"),
+        type = "binary"
+    )
+    AnnotationMatrix(mat, gr, meta, genome = "hg19")
+}
+
+# Simulated z-scores over the recovery reference as a GwasSumStats.
+.h2ScoreSumstats <- function(d, z) {
+    df <- data.frame(
+        SNP = paste0("rs", seq_len(d$M)),
+        CHR = "chr1",
+        BP = as.integer(seq_len(d$M) * 100L),
+        A1 = "A",
+        A2 = "G",
+        Z = z,
+        N = d$N
+    )
+    GwasSumStats(
+        studyName = "sim",
+        entry = list(.dfToGwasGr(df)),
+        genome = "hg19",
+        ldReference = makeTestGwasGenotypeHandle()
+    )
+}
+
+# The reference each method reads.
+.h2MethodRef <- function(d, method) {
+    if (method %in% c("lder", "hdl")) d$eigenRef else d$scoreRef
+}
+
+# Score z of a random 30% candidate whose variants carry `enrich` times the
+# per-variant heritability of the rest, for each method, over `nRep` traits.
+.h2CandidateZ <- function(
+    d,
+    enrich,
+    nRep,
+    methods = c("sldsc", "gldsc", "lder", "hdl")
+) {
+    t(replicate(nRep, {
+        cand <- stats::rbinom(d$M, 1, 0.3)
+        perSnp <- 0.3 / d$M * ifelse(cand == 1L, enrich, 1)
+        ss <- .h2ScoreSumstats(d, d$simZ(perSnp))
+        annot <- .h2ScoreAnnot(d$M, cand)
+        vapply(
+            methods,
+            function(m) {
+                scoreStats(suppressWarnings(estimateH2(
+                    ss,
+                    .h2MethodRef(d, m),
+                    method = m,
+                    annotations = annot
+                )))$z
+            },
+            numeric(1)
+        )
+    }))
+}
+
+test_that("candidate score z is calibrated under the null", {
+    d <- .h2RecoveryRefs(nBlocks = 20L)
+    set.seed(11)
+    z <- .h2CandidateZ(d, enrich = 1, nRep = 60L)
+    for (method in colnames(z)) {
+        expect_lt(abs(mean(z[, method])), 0.25)
+        expect_gt(stats::sd(z[, method]), 0.7)
+        expect_lt(stats::sd(z[, method]), 1.35)
+    }
+})
+
+test_that("candidate score z detects an enriched candidate", {
+    d <- .h2RecoveryRefs(nBlocks = 20L)
+    set.seed(12)
+    z <- .h2CandidateZ(d, enrich = 4, nRep = 15L)
+    expect_gt(mean(z[, "gldsc"]), 3)
+    # LDER and HDL read the same eigen-decomposition, and on this reference
+    # detect it less sharply than g-LDSC's GLS does.
+    expect_gt(mean(z[, "lder"]), 1.5)
+    expect_gt(mean(z[, "hdl"]), 1.5)
+    # S-LDSC spends its weight on the base score and so tests less sharply
+    # on a reference this small, but still points the right way.
+    expect_gt(mean(z[, "sldsc"]), 0.5)
+})
+
+# ===========================================================================
+# The baseline design: an all-ones base column unless the baseline spans it
+# ===========================================================================
+
+# A baseline of the given columns over the recovery reference.
+.h2BaselineOf <- function(d, cols) {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(start = as.integer(seq_len(d$M) * 100L), width = 1L)
+    )
+    AnnotationMatrix(
+        cols,
+        gr,
+        data.frame(name = colnames(cols), tier = "baseline", type = "binary"),
+        genome = "hg19"
+    )
+}
+
+.h2FitAll <- function(d, ss, annotations) {
+    lapply(
+        set_names(c("lder", "hdl", "gldsc", "sldsc")),
+        function(m) {
+            suppressWarnings(estimateH2(
+                ss,
+                .h2MethodRef(d, m),
+                method = m,
+                annotations = annotations
+            ))
+        }
+    )
+}
+
+test_that("every estimator fits a lone annotation beside a base column", {
+    # One annotation and the partition it makes with its complement span the
+    # same designs once the base is added; without it, LDER and HDL used to
+    # model the uncovered half as carrying no heritability.
+    d <- .h2RecoveryRefs(nBlocks = 10L)
+    half <- as.integer(seq_len(d$M) <= d$M / 2)
+    set.seed(9)
+    ss <- .h2ScoreSumstats(d, d$simZ(ifelse(half == 1L, 0.5, 0.2) / d$M))
+    lone <- .h2FitAll(d, ss, .h2BaselineOf(d, cbind(half = half)))
+    pair <- .h2FitAll(
+        d,
+        ss,
+        .h2BaselineOf(d, cbind(half = half, rest = 1L - half))
+    )
+    for (m in c("lder", "hdl")) {
+        expect_equal(
+            heritabilityEstimate(lone[[m]]),
+            heritabilityEstimate(pair[[m]]),
+            tolerance = 1e-3,
+            info = m
+        )
+        lonePart <- stratifiedHeritabilityEnrichment(lone[[m]])
+        pairPart <- stratifiedHeritabilityEnrichment(pair[[m]])
+        expect_equal(
+            lonePart$enrichment,
+            pairPart$enrichment[pairPart$annotation == "half"],
+            tolerance = 1e-3,
+            info = m
+        )
+    }
+    # Only the user's annotations are reported, never the added base.
+    for (m in names(lone)) {
+        expect_identical(
+            stratifiedHeritabilityEnrichment(lone[[m]])$annotation,
+            "half",
+            info = m
+        )
+    }
+})
+
+test_that("an all-ones baseline fits as the unstratified model does", {
+    d <- .h2RecoveryRefs(nBlocks = 10L)
+    set.seed(9)
+    ss <- .h2ScoreSumstats(d, d$simZ(rep(0.35 / d$M, d$M)))
+    ones <- .h2FitAll(d, ss, .h2BaselineOf(d, cbind(ones = rep(1L, d$M))))
+    none <- .h2FitAll(d, ss, NULL)
+    for (m in names(ones)) {
+        # S-LDSC's one design column is then the all-ones annotation's
+        # stratified score, formed from the LD, rather than the stored base
+        # score: the two agree to rounding of the LD.
+        expect_equal(
+            heritabilityEstimate(ones[[m]]),
+            heritabilityEstimate(none[[m]]),
+            tolerance = 1e-4,
+            info = m
+        )
+        expect_equal(
+            stratifiedHeritabilityEnrichment(ones[[m]])$enrichment,
+            1,
+            tolerance = 1e-6,
+            info = m
+        )
+    }
+})
+
+test_that("HDL can estimate a depleted annotation", {
+    # Beside the base an annotation's parameter is its excess over the
+    # genome-wide rate; a lower bound of 0 used to forbid depletion.
+    d <- .h2RecoveryRefs(nBlocks = 10L)
+    half <- as.integer(seq_len(d$M) <= d$M / 2)
+    set.seed(4)
+    ss <- .h2ScoreSumstats(d, d$simZ(ifelse(half == 1L, 0.1, 0.6) / d$M))
+    fit <- suppressWarnings(estimateH2(
+        ss,
+        d$eigenRef,
+        method = "hdl",
+        annotations = .h2BaselineOf(d, cbind(half = half))
+    ))
+    part <- stratifiedHeritabilityEnrichment(fit)
+    expect_lt(part$tau, 0)
+    expect_lt(part$enrichment, 1)
+})
+
+test_that("S-LDSC's candidate score test needs the reference's LD", {
+    # The recovery reference's scores, without the LD they came from.
+    d <- .h2RecoveryRefs(nBlocks = 4L)
+    ref <- LdScore(
+        ldBlocks = ldBlocks(d$scoreRef),
+        snpInfo = data.frame(
+            SNP = paste0("rs", seq_len(d$M)),
+            CHR = "chr1",
+            BP = as.integer(seq_len(d$M) * 100L),
+            A1 = "A",
+            A2 = "G"
+        ),
+        nSamples = 500000L,
+        inSample = FALSE,
+        genome = "hg19",
+        ldScores = S4Vectors::mcols(d$scoreRef)$ldScores,
+        ldScoreWeights = rep(1, d$M)
+    )
+    # Candidates only: the unstratified fit needs no LD, the score does.
+    cand <- matrix(stats::rbinom(d$M, 1, 0.3), dimnames = list(NULL, "cand"))
+    annot <- AnnotationMatrix(
+        cand,
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(as.integer(seq_len(d$M) * 100L), width = 1L)
+        ),
+        data.frame(name = "cand", tier = "candidate", type = "binary"),
+        genome = "hg19"
+    )
+    expect_error(
+        estimateH2(
+            .h2ScoreSumstats(d, stats::rnorm(d$M)),
+            ref,
+            method = "sldsc",
+            annotations = annot
+        ),
+        "candidate-annotation score test needs each LD block's LD"
+    )
 })
 
 test_that("gldscUnivariate recovers a known h2 (deterministic, seed = 1)", {
@@ -2033,9 +2252,8 @@ test_that("partitioned S-LDSC reproduces the original ldsc to 1e-5", {
     ref <- .h2ParityRef()$score
     M <- length(ref)
     inA <- as.integer(seq_len(M) <= M / 2)
-    baselineMat <- matrix(inA, ncol = 1, dimnames = list(NULL, "annotA"))
-    scores <- pecotmr:::.sldscScoreMatrix(ref, baselineMat, M)
     A <- cbind(base = 1, annotA = inA)
+    scores <- pecotmr:::.sldscScoreMatrix(ref, A)
 
     reference <- list(
         list(
@@ -2088,11 +2306,7 @@ test_that("the two S-LDSC routes differ, as the original ldsc's do", {
     inA <- as.integer(seq_len(M) <= M / 2)
     part <- pecotmr:::.sldscFit(
         z^2,
-        pecotmr:::.sldscScoreMatrix(
-            ref,
-            matrix(inA, ncol = 1, dimnames = list(NULL, "annotA")),
-            M
-        ),
+        pecotmr:::.sldscScoreMatrix(ref, cbind(base = 1, annotA = inA)),
         scores[, 1],
         10000,
         cbind(base = 1, annotA = inA),
@@ -2264,7 +2478,7 @@ test_that("the chi2 filter is abandoned when too few variants survive it", {
     )
     expect_setequal(
         names(out),
-        c("tau", "h2", "estH", "intercept", "coef")
+        c("tau", "h2", "intercept", "coef")
     )
     expect_false(is.na(out$h2))
 })
@@ -2311,7 +2525,7 @@ test_that("the partitioned chi2 filter is abandoned when too few survive", {
     )
     expect_setequal(
         names(out),
-        c("tau", "h2", "estH", "intercept", "coef")
+        c("tau", "h2", "intercept", "coef")
     )
 })
 
@@ -2391,19 +2605,6 @@ test_that(".lderLocalBlock reports NA for a block too small to fit", {
     expect_true(is.na(out$h2LocalSe))
 })
 
-test_that(".h2Enrichment names unnamed annotation columns positionally", {
-    baselineMat <- matrix(c(1, 0, 1, 1), nrow = 2L)
-    expect_null(colnames(baselineMat))
-    out <- pecotmr:::.h2Enrichment(
-        baselineMat,
-        tau = c(0.1, 0.2),
-        tauSe = c(0.01, 0.02),
-        annotationJackknifeCoefs = matrix(c(0.1, 0.2, 0.1, 0.2), nrow = 2L),
-        h2 = 0.3
-    )
-    expect_equal(out$annotation, c("annot_1", "annot_2"))
-})
-
 test_that(".sldscBlockIndex errors when no block covers a variant", {
     n <- 6L
     snpInfo <- data.frame(
@@ -2455,7 +2656,7 @@ test_that(".sldscIrwls derives its own starting weights when none are given", {
         intercept = 1,
         w0 = NULL
     )
-    expect_setequal(names(fit), c("coef", "intercept"))
+    expect_setequal(names(fit), c("coef", "intercept", "w"))
     expect_true(all(is.finite(fit$coef)))
 })
 

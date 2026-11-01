@@ -3487,7 +3487,10 @@ test_that("extractCsInfo names a narrowed row's sets by the fit's variants", {
     tl <- data.frame(variant_id = vids, pip = pip, z = c(1, 4, 2, 0.5))
     fe <- .testFineMappingRow(
         variantIds = vids,
-        susieFit = list(pip = pip, sets = list(cs = list(L_1 = c(2L, 3L)))),
+        susieFit = list(
+            pip = set_names(pip, vids),
+            sets = list(cs = list(L_1 = c(2L, 3L)))
+        ),
         topLoci = tl
     )
     narrowed <- endoapply(fe, utils::tail, 3L)
@@ -3519,7 +3522,7 @@ test_that("computeCsCorrelation of a narrowed row warns, on the fit's sets", {
         variantIds = vids,
         susieFit = list(
             sets = list(cs = list(L_1 = 1:3, L_2 = 90:91)),
-            pip = rep(0.01, length(vids))
+            pip = set_names(rep(0.01, length(vids)), vids)
         )
     )
     full <- computeCsCorrelation(fe, ss)

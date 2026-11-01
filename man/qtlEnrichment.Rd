@@ -21,19 +21,23 @@ qtlEnrichment(
 )
 }
 \arguments{
-\item{gwasPip}{This is a vector of GWAS PIP, genome-wide.}
+\item{gwasPip}{A named vector of GWAS PIPs, one per variant, ideally
+genome-wide.}
 
-\item{susieQtlRegions}{This is a list of SuSiE fitted objects per QTL unit
-analyzed}
+\item{susieQtlRegions}{A named list of SuSiE fits, one per QTL unit
+analyzed (e.g. a gene), each with \code{alpha}, a named \code{pip} and
+\code{prior_variance}.}
 
-\item{numGwas}{This parameter is highly important if GWAS input does not
-contain all SNPs interrogated (e.g., in some cases, only fine-mapped geomic
-regions are included). Then users must pick a value of total_variants and
-estimate piGwas beforehand by: sum(gwasPip$pip)/numGwas. If numGwas is
-null, piGwas would be sum(gwasPip$pip)/total_variants.}
+\item{numGwas}{The total number of variants the GWAS tested (fastenloc's
+\code{-total_variants}). It matters whenever \code{gwasPip} does not
+carry every variant tested, e.g. when it covers only fine-mapped blocks.
+\code{NULL} (default) uses the number of distinct variants in
+\code{gwasPip} and the QTL fits, with a warning; a value below that number
+is raised to it.}
 
-\item{piQtl}{This parameter can be safely left to default if your input QTL
-data has enough regions to estimate it.}
+\item{piQtl}{Per-variant prior of being a causal QTL variant. \code{NULL}
+(default) estimates it as fastenloc does, from the fits' summed PIPs over
+the variant total.}
 
 \item{lambda}{Similar to the shrinkage parameter used in ridge regression. It
 takes any non-negative value and shrinks the enrichment estimate towards 0.
@@ -55,12 +59,13 @@ thread. Default \code{SerialParam()}.}
 
 \item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
 
-\item{alignNames}{Logical; when TRUE (default) QTL pip names are aligned to
-the GWAS variant-naming convention via \code{matchVariants}. Set FALSE when
-the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
-aligns each QTL tuple once against the union GWAS panel rather than
-re-aligning per GWAS study); only the cheap per-study unmatched set is then
-recomputed, skipping the costly \code{harmonizeAlleles} pass.}
+\item{alignNames}{Logical; when TRUE (default) a QTL pip name not spelled
+as any \code{gwasPip} name is matched, allele-aware (id format, ref/alt
+swap, strand), to the GWAS variants at its position, and takes the name
+of the one it matches. Set FALSE when the caller has already aligned them
+(e.g. \code{qtlEnrichmentPipeline} aligns each QTL tuple once against
+the union GWAS panel rather than re-aligning per GWAS study); the names
+are then matched to \code{gwasPip} exactly as given.}
 
 \item{seed}{Integer or \code{NULL}. Base random seed for the multiple-
 imputation sampler; each imputation round derives its own seed from it, so
@@ -73,10 +78,17 @@ A named list of enrichment parameter estimates, carrying the
   \code{sd (intercept)}, \code{Enrichment (no shrinkage)},
   \code{Enrichment (w/ shrinkage)}, \code{sd (no shrinkage)},
   \code{sd (w/ shrinkage)}, \code{Alternative (coloc) p1} / \code{p2} /
-  \code{p12} and \code{Effective MI rounds} -- plus
-  \code{unused_xqtl_variants}, the QTL variants of each region that no GWAS
-  variant matched. The names are the original fastenloc's;
-  \code{\link{qtlEnrichmentPipeline}} is what renames them to a tidy table.
+  \code{p12} and \code{Effective MI rounds} -- plus diagnostics:
+  \code{Missing proportion per MI round}, the share of each round's sampled
+  QTL variants that \code{gwasPip} does not carry (they enter with GWAS
+  PIP 0);
+  \code{EM converged per MI round}; \code{EM iterations per MI round},
+  how many EM iterations each round took; \code{Null QTL fits}, the number of
+  fits with no effect of positive prior variance, which contribute no
+  sampled variants; and \code{unused_xqtl_variants}, the QTL variants of
+  each region that no GWAS variant matched. The estimate names are the
+  original fastenloc's; \code{\link{qtlEnrichmentPipeline}} is what renames
+  them to a tidy table.
 }
 \description{
 Largely follows from fastenloc
@@ -93,38 +105,50 @@ Largely follows from fastenloc
 \details{
 Uses output of \code{\link[susieR]{susie}} from the \code{susieR}
   package.
+
+  As in fastenloc, the variants the estimate is taken over are every
+  variant of \code{gwasPip} plus every QTL variant \code{gwasPip} does not
+  carry. The latter have GWAS PIP 0, so each one sampled in an imputation
+  round counts as a QTL variant that is not causal for the GWAS trait. The
+  variant total is \code{numGwas}, raised to the number of those variants
+  when smaller; \code{piGwas} is \code{sum(gwasPip)} over it and, unless
+  supplied, \code{piQtl} is the fits' summed PIPs over it. The intercept is
+  derived from \code{piGwas}, \code{piQtl} and the unshrunk enrichment,
+  and the coloc priors from that intercept and the shrunk enrichment, both
+  as fastenloc does. One difference remains: fastenloc's EM keeps the
+  previous iteration's intercept at convergence where this one updates it,
+  which changes only \code{sd (intercept)}.
 }
 \examples{
-
-# Simulate fake data for gwasPip
-nGwasPip <- 1000
-gwasPip <- runif(nGwasPip)
-names(gwasPip) <- paste0("snp", 1:nGwasPip)
-# Simulate fake data for a single SuSiEFit object
-simulateSusiefit <- function(n, p) {
-  pip <- runif(n)
-  names(pip) <- paste0("snp", 1:n)
-  alpha <- t(matrix(runif(n * p), nrow = n))
-  alpha <- t(apply(alpha, 1, function(row) row / sum(row)))
+set.seed(1)
+# GWAS PIPs for 2000 variants of a GWAS that tested one million: mostly
+# near zero, with two strong signals.
+ids <- sprintf("chr1:\%d:A:G", 1000 * seq_len(2000))
+gwasPip <- stats::setNames(stats::rbeta(2000, 0.05, 100), ids)
+gwasPip[c(300, 1200)] <- c(0.95, 0.6)
+# A SuSiE-like fit per gene: two single effects over the gene's variants,
+# each concentrated on a few of them.
+simulateFit <- function(idx, hits) {
+  alpha <- matrix(1e-4, length(hits), length(idx))
+  alpha[cbind(seq_along(hits), hits)] <- 1
+  alpha <- alpha / rowSums(alpha)
   list(
-    pip = pip,
     alpha = alpha,
-    prior_variance = runif(p)
+    pip = stats::setNames(1 - apply(1 - alpha, 2, prod), ids[idx]),
+    prior_variance = c(0.4, 0.1)
   )
 }
-# Simulate multiple SuSiEFit objects
-nSusieFits <- 2
-susieFits <- replicate(
-  nSusieFits, simulateSusiefit(nGwasPip, 10), simplify = FALSE)
-# Add these fits to a list, providing names to each element
-names(susieFits) <- paste0("fit", seq_along(susieFits))
-# Set other parameters
-impN <- 10
-lambda <- 1
-library(pecotmr)
+susieFits <- list(
+  gene1 = simulateFit(251:350, c(50, 10)),
+  gene2 = simulateFit(1151:1250, c(50, 80)),
+  gene3 = simulateFit(1601:1700, c(20, 70))
+)
 en <- qtlEnrichment(
-  gwasPip, susieFits, lambda = lambda, impN = impN,
-  BPPARAM = BiocParallel::SerialParam())
+  gwasPip, susieFits,
+  numGwas = 1e6, impN = 10, seed = 1,
+  BPPARAM = BiocParallel::SerialParam(), verbose = FALSE
+)
+en[["Enrichment (w/ shrinkage)"]]
 
 }
 \seealso{

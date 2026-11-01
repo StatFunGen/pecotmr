@@ -600,6 +600,31 @@ test_that("flattenTupleRanges drops non-broadcastable payload columns", {
     expect_true(is_in(".study", colnames(mcols(flat))))
 })
 
+test_that("flattenTupleRanges restores a trimmed collection's PIPs and sets", {
+    # A trimmed row stores neither: every row's come back from its fit, and
+    # they are the values the untrimmed collection stores.
+    for (name in .fmExampleNames()) {
+        x <- .fmLoadExample(name)
+        trimmed <- S4Vectors::mcols(flattenTupleRanges(trimFineMappingResult(
+            x
+        )))
+        full <- S4Vectors::mcols(flattenTupleRanges(x))
+        shared <- intersect(
+            colnames(trimmed),
+            c(
+                "pip",
+                grep("^cs_[0-9]+(_purity)?$", colnames(full), value = TRUE)
+            )
+        )
+        expect_true("pip" %in% shared, info = name)
+        expect_equal(
+            as.data.frame(trimmed[shared]),
+            as.data.frame(full[shared]),
+            info = name
+        )
+    }
+})
+
 test_that("flattenTupleRanges rejects a non-collection", {
     expect_error(
         flattenTupleRanges(GenomicRanges::GRanges()),
@@ -1247,4 +1272,29 @@ test_that("genomicRegion() is each row's span unless a region was stored", {
     x$region <- stored
     expect_identical(genomicRegion(x), stored)
     expect_length(genomicRegion(x[0]), 0L)
+})
+
+test_that("nesting a flattened trimmed collection leaves its fits' columns", {
+    # A trimmed collection leaves its pip and credible-set columns to its
+    # fits; flattening restores them, and re-nesting drops them again once
+    # the fits give them back exactly.
+    trimmed <- trimFineMappingResult(.fmLoadExample("qtlFineMappingExample"))
+    recorded <- S4Vectors::mcols(trimmed)$derivedColumns[[1L]]
+    expect_true(length(recorded) > 0L)
+    flat <- flattenTupleRanges(trimmed)
+    derived <- c("pip", "cs_95", "cs_95_purity")
+    expect_true(all(derived %in% colnames(S4Vectors::mcols(flat))))
+    nested <- nestTupleRanges(flat, trimmed)
+    expect_false(any(derived %in% .fmStoredColumns(nested)))
+    expect_equal(
+        topLoci(nested, signalCutoff = 0),
+        topLoci(trimmed, signalCutoff = 0)
+    )
+    # A credible-set column a verb changed no longer matches the fits, so it
+    # is stored as it was changed.
+    relabelled <- flat
+    S4Vectors::mcols(relabelled)$cs_95 <- "susie_0"
+    kept <- nestTupleRanges(relabelled, trimmed)
+    expect_true("cs_95" %in% .fmStoredColumns(kept))
+    expect_true(all(S4Vectors::mcols(unlist(kept))$cs_95 == "susie_0"))
 })

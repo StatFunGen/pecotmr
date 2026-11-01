@@ -4789,9 +4789,15 @@ test_that("twasWeightsPipeline refuses a phenotype QC its fits cannot take", {
 # ===========================================================================
 
 # The stub fine-mapping result with its rows narrowed to two of their three
-# variants.
+# variants. A row is narrowed when it holds fewer variants than its fit has,
+# so the stub fits carry the PIPs of all three.
 .tp_narrowedFineMapping <- function(...) {
-    endoapply(.tp_makeStubFineMappingResult(...), utils::head, 2L)
+    x <- .tp_makeStubFineMappingResult(...)
+    x$susieFit <- S4Vectors::SimpleList(map(
+        as.list(x$susieFit),
+        function(fit) c(fit, list(pip = c(0.9, 0.5, 0.1)))
+    ))
+    endoapply(x, utils::head, 2L)
 }
 
 test_that("each twasWeightsPipeline method warns about narrowed fits", {

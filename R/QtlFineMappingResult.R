@@ -25,9 +25,8 @@ NULL
 #' Required \code{mcols()} columns: the identity tuple \code{study},
 #' \code{context}, \code{trait} and \code{method}, which is unique, and
 #' each row's stored fit \code{susieFit} and cross-validation result
-#' \code{cvResult}. The constructor also records \code{fitVariants}, the
-#' variants each fit was made with. There is no LD-block axis: a trait's fit
-#' is one row wherever its window falls.
+#' \code{cvResult}. There is no LD-block axis: a trait's fit is one row
+#' wherever its window falls.
 #'
 #' Optional columns \code{jointStudies}, \code{jointContexts},
 #' \code{jointTraits} appear when the collection contains rows produced by a
@@ -352,7 +351,9 @@ QtlFineMappingResult <- function(
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(payloads, susieFit)),
         cvResult = S4Vectors::SimpleList(map(payloads, cvResult)),
-        fitVariants = IRanges::CharacterList(map(payloads, .fmRowFitVariants))
+        derivedColumns = IRanges::CharacterList(
+            map(payloads, .fmRowDerivedColumns)
+        )
     )
     withJoint <- .qfmrAppendJointCols(
         baseCols,

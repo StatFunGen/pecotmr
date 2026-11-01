@@ -639,7 +639,7 @@ test_that("GwasFineMappingResult() keeps the caller's metadata", {
     expect_equal(S4Vectors::metadata(res), list(run = "r1"))
 })
 
-test_that("a fit-less entry split across chromosomes records no fit variants", {
+test_that("a fit-less entry split across chromosomes reads without warning", {
     # Its rows hold one chromosome each; with no fit there is nothing for a
     # row to have narrowed, so none of them warns.
     ids <- c("chr1:100:A:G", "chr2:200:C:T")
@@ -650,6 +650,6 @@ test_that("a fit-less entry split across chromosomes records no fit variants", {
         entry = list(FineMappingRow(ids, NULL, tl))
     )
     expect_equal(nrow(res), 2L)
-    expect_equal(unname(lengths(res$fitVariants)), c(0L, 0L))
+    expect_false("fitVariants" %in% colnames(S4Vectors::mcols(res)))
     expect_no_warning(lbf(res))
 })

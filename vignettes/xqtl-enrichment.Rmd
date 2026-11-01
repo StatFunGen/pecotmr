@@ -105,6 +105,28 @@ supplied to a colocalization analysis. This synthetic single-region example is
 for illustration only; stable enrichment estimates require many fine-mapped
 regions.
 
+## The variant total
+
+As in `fastENLOC`, both priors are PIP mass per variant: the GWAS prior is the
+GWAS PIPs' sum, and the QTL prior the QTL fits' summed PIPs, over the total
+number of variants the GWAS tested. QTL variants the GWAS PIP vector lacks take
+part with GWAS PIP 0. A GWAS fine-mapping collection usually covers only its
+fine-mapped blocks, far fewer variants than were tested, so pass that total as
+`numGwas`, `fastENLOC`'s `-total_variants`. Without it the pipeline uses the
+number of distinct variants in the two inputs and warns, as it did above;
+that overstates both priors unless the GWAS PIPs are genome-wide.
+
+```{r enrichment-num-gwas, eval = FALSE}
+qtlEnrichmentPipeline(
+    gwasFineMappingResult = gwasFmr,
+    qtlFineMappingResult = qtlFmr,
+    # e.g. the number of variants in the GWAS summary statistics
+    qtlEnrichmentParam = QtlEnrichmentParam(numGwas = 12e6),
+    BPPARAM = BiocParallel::MulticoreParam(8),
+    seed = 1
+)
+```
+
 ## Session information
 
 Here are some details about the computing environment, including the versions

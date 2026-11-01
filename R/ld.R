@@ -1175,7 +1175,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (length(tbls) == 0L) {
         return(NULL)
     }
-    af <- list_rbind(tbls)
+    af <- if (length(tbls) == 1L) tbls[[1L]] else list_rbind(tbls)
     list(
         nSamples = as.integer(max(as.numeric(af$obs_ct), na.rm = TRUE) %/% 2),
         af = select(af, all_of(c("id", "alt_freq")))
@@ -2360,9 +2360,19 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     )
 }
 
-# Each non-empty row's span, with the row it belongs to.
+# Each non-empty row's span, with the row it belongs to. A collection's
+# element sits on one (seqname, strand), so its span is one range, read off
+# integer vectors (.rtlFirstSpans()) where range() would take minutes on a
+# genome-wide collection.
 # @noRd
 .rowSpans <- function(x) {
+    if (methods::is(x, "RangedTupleList")) {
+        spans <- .rtlFirstSpans(x)
+        return(list(
+            spans = .locusRanges(spans$first),
+            rows = unname(which(spans$has))
+        ))
+    }
     rr <- range(x)
     list(
         spans = .locusRanges(unlist(rr, use.names = FALSE)),

@@ -1,6 +1,6 @@
 # Fixtures shared by the LD-statistic tests (LdEigen, LdScore, LdStatistic),
-# the heritability tests (h2EstimationWrappers, H2Estimate) and
-# test_genotypeHandle.R.
+# the heritability tests (h2EstimationWrappers, H2Estimate, h2Annotations)
+# and test_genotypeHandle.R.
 
 # =============================================================================
 # Test data helpers
@@ -149,4 +149,36 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
         nSnps = 100L,
         traitName = "test"
     )
+}
+
+# =============================================================================
+# GWAS summary statistics over a reference's variants (shared by the
+# heritability and fine-mapping annotation tests)
+# =============================================================================
+
+makeTestGwasGenotypeHandle <- function() {
+    new(
+        "GenotypeHandle",
+        path = "/tmp/test",
+        format = "plink2",
+        snpInfo = data.frame(),
+        nSamples = 0L,
+        sampleIds = character(),
+        pgenPtr = NULL
+    )
+}
+
+.dfToGwasGr <- function(df) {
+    gr <- GenomicRanges::GRanges(
+        seqnames = df$CHR,
+        ranges = IRanges::IRanges(start = df$BP, width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = df$SNP,
+        A1 = df$A1,
+        A2 = df$A2,
+        Z = df$Z,
+        N = df$N
+    )
+    gr
 }

@@ -144,3 +144,84 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
     }
     fit
 }
+
+# ---- The bundled fine-mapping examples, rebuilt row by row -------------
+# Shared by the row and trimming tests: each example row goes back through
+# FineMappingRow(), so a test can compare a collection built today with one
+# saved by an earlier pecotmr, or rebuild a row with its fit edited.
+
+# The bundled fine-mapping examples, by name.
+.fmExampleNames <- function() {
+    c(
+        "qtlFineMappingExample",
+        "qtlFineMappingLbfExample",
+        "qtlFineMappingPairedExample",
+        "gwasFineMappingExample",
+        "gwasFineMappingLbfExample",
+        "fsusieFineMappingExample",
+        "mvsusieFineMappingExample"
+    )
+}
+
+.fmLoadExample <- function(name) {
+    env <- new.env()
+    data(list = name, package = "pecotmr", envir = env)
+    get(name, envir = env)
+}
+
+# Row i of `x` as FineMappingRow() takes it: its element's columns as the
+# topLoci table, plus its stored fit.
+.fmExampleRowInputs <- function(x, i) {
+    el <- x[[i]]
+    md <- as.data.frame(S4Vectors::mcols(el), optional = TRUE)
+    ids <- sprintf(
+        "%s:%d:%s:%s",
+        as.character(GenomicRanges::seqnames(el)),
+        GenomicRanges::start(el),
+        md$A2,
+        md$A1
+    )
+    list(
+        variantIds = ids,
+        susieFit = S4Vectors::mcols(x)$susieFit[[i]],
+        topLoci = cbind(variant_id = ids, md),
+        cvResult = S4Vectors::mcols(x)$cvResult[[i]]
+    )
+}
+
+# Row i of `x` rebuilt through FineMappingRow().
+.fmExampleRow <- function(x, i) {
+    do.call(FineMappingRow, .fmExampleRowInputs(x, i))
+}
+
+# `x` rebuilt row by row, keeping its identity columns.
+.fmRebuildExample <- function(x) {
+    md <- S4Vectors::mcols(x)
+    entry <- lapply(seq_len(nrow(x)), .fmExampleRow, x = x)
+    col <- function(nm) if (nm %in% colnames(md)) md[[nm]] else NULL
+    if (methods::is(x, "GwasFineMappingResult")) {
+        return(GwasFineMappingResult(
+            studyName = md$study,
+            method = md$method,
+            entry = entry,
+            blockId = col("blockId"),
+            traitPos = col("traitPos"),
+            ldReference = ldReference(x)
+        ))
+    }
+    QtlFineMappingResult(
+        studyName = md$study,
+        context = md$context,
+        trait = md$trait,
+        method = md$method,
+        entry = entry,
+        jointContexts = col("jointContexts"),
+        traitPos = col("traitPos"),
+        ldReference = ldReference(x)
+    )
+}
+
+# The per-variant columns collection `x` stores.
+.fmStoredColumns <- function(x) {
+    colnames(S4Vectors::mcols(unlist(x, use.names = FALSE)))
+}
