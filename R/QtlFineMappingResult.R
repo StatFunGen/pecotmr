@@ -350,7 +350,7 @@ QtlFineMappingResult <- function(
         trait = as.character(trait),
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(payloads, susieFit)),
-        cvResult = S4Vectors::SimpleList(map(payloads, cvResult)),
+        cvResult = S4Vectors::SimpleList(map(payloads, .fmRowCvStored)),
         derivedColumns = IRanges::CharacterList(
             map(payloads, .fmRowDerivedColumns)
         )

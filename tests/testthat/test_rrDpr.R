@@ -29,3 +29,23 @@ test_that("dprWeights warns and zero-pads when X has zero-variance columns", {
     expect_equal(length(result), p)
     expect_equal(result[8], 0)
 })
+
+test_that("dprWeights' slim fit drops the copy of the genotypes", {
+    skip_if_not_installed("RcppDPR")
+    set.seed(42)
+    X <- matrix(rnorm(500), nrow = 50)
+    colnames(X) <- sprintf("chr1:%d:A:G", seq_len(10))
+    y <- X[, 1] * 0.5 + rnorm(50)
+    slim <- attr(
+        dprWeights(X, y, fittingMethod = "VB", fitRetention = "slim"),
+        "fit"
+    )
+    expect_null(slim$x)
+    expect_equal(slim$variantIds, colnames(X))
+    full <- attr(
+        dprWeights(X, y, fittingMethod = "VB", fitRetention = "full"),
+        "fit"
+    )
+    expect_true(is.matrix(full$x))
+    expect_equal(pecotmr:::.twasFitVariantIds(full), colnames(X))
+})

@@ -108,3 +108,34 @@ test_that("glmnetWeights produces non-zero weights for correlated data", {
     expect_length(w, p)
     expect_true(any(w != 0))
 })
+
+test_that("glmnetWeights keeps the selected fit or the whole path", {
+    skip_if_not_installed("glmnet")
+    set.seed(42)
+    X <- matrix(rnorm(500), nrow = 50)
+    colnames(X) <- sprintf("chr1:%d:A:G", seq_len(10))
+    X[, 4] <- 1
+    y <- X[, 1] * 0.5 + rnorm(50)
+    fitted <- colnames(X)[-4]
+    set.seed(1)
+    none <- suppressWarnings(glmnetWeights(X, y, alpha = 1))
+    expect_null(attr(none, "fit"))
+    set.seed(1)
+    slim <- suppressWarnings(lassoWeights(X, y, fitRetention = "slim"))
+    expect_equal(as.numeric(slim), as.numeric(none))
+    fit <- attr(slim, "fit")
+    expect_named(
+        fit,
+        c("coef", "intercept", "lambda", "cvm", "cvsd", "variantIds")
+    )
+    expect_equal(fit$coef, as.numeric(slim)[-4])
+    expect_equal(fit$variantIds, fitted)
+    full <- attr(
+        suppressWarnings(ridgeWeights(X, y, fitRetention = "full")),
+        "fit"
+    )
+    expect_s3_class(full, "cv.glmnet")
+    # The path names its variants, so no second copy is added.
+    expect_null(full$variantIds)
+    expect_equal(pecotmr:::.twasFitVariantIds(full), fitted)
+})

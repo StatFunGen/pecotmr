@@ -5,6 +5,12 @@
 // lassosum (Mak et al 2017) is its LASSO at alpha = 1: the same updates in the
 // same order, so the same coefficients bit for bit.
 //
+// The LASSO updates follow lassosum's elnet()
+// (https://github.com/tshmak/lassosum, Copyright (c) 2016 tshmak, MIT), and
+// the L0 swap step is ported from L0Learn's CDL012Swaps.cpp
+// (https://github.com/hazimehh/L0Learn, Copyright (c) 2021 Hussein Hazimeh,
+// MIT). Their license notice is in inst/COPYRIGHTS.
+//
 // Objective (smooth part): min_beta  beta'R beta - 2 beta'z + penalty(beta)
 // where R is the LD matrix shrunk to R_s = (1 - s) R + s I (s = `shrink`;
 // 0 for an LD matrix already shrunk) and z = bhat / sqrt(n).

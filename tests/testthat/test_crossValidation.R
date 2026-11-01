@@ -44,6 +44,29 @@ mkXY <- function(n = 30, p = 6, k = 1, seed = 1) {
     list(X = X, Y = Y)
 }
 
+test_that("the CV codec leaves shapes it does not split as they are", {
+    ids <- c("s1", "s2", "s3")
+    expect_identical(
+        pecotmr:::.cvUnnameRows(c(0.1, 0.2, 0.3), ids),
+        c(0.1, 0.2, 0.3)
+    )
+    named <- matrix(1:3, 3L, 1L, dimnames = list(ids, NULL))
+    expect_identical(pecotmr:::.cvNameRows(named, ids), named)
+    # A TWAS matrix of predictions, one column per condition, keeps its row
+    # names, whatever its width.
+    for (k in 1:2) {
+        cv <- list(
+            predictions = matrix(seq_len(3L * k), 3L, k, dimnames = list(ids))
+        )
+        expect_identical(pecotmr:::.cvNamePredictions(cv, ids), cv)
+    }
+    # A collection saved before partitions were shared has no dictionary.
+    data(qtlFineMappingExample)
+    old <- qtlFineMappingExample
+    attr(old, "cvPartition") <- NULL
+    expect_identical(pecotmr:::.cvPartitionDict(old), list())
+})
+
 test_that("input is validated", {
     d <- mkXY()
     expect_error(
@@ -552,4 +575,192 @@ test_that(".cvMetricRow: < 3 usable predictions -> all-NA row", {
     expect_true(all(is.na(pecotmr:::.cvMetricRow(c(1, 2), c(1, 2)))))
     ok <- pecotmr:::.cvMetricRow(c(1, 2, 3, 4, 5), c(1.1, 2, 2.9, 4, 5))
     expect_false(is.na(ok[["rsq"]]))
+})
+
+# ---- CV results in a collection ----------------------------------------------
+# A CV run's rows share its fold partition and the order its predictions are
+# held in; a collection keeps each such pair once (.cvStoredColumn()).
+
+.cvp_partition <- function() {
+    tibble::tibble(
+        Sample = c("s3", "s1", "s4", "s2"),
+        Fold = c(1L, 1L, 2L, 2L)
+    )
+}
+
+# One method's fine-mapping CV payload (its `prediction` matrices name the
+# samples by row), as fineMappingPipeline() attaches it to a row.
+.cvp_fm <- function(key = "susie", sp = .cvp_partition()) {
+    pred <- matrix(
+        c(0.1, 0.2, 0.3, 0.4),
+        4L,
+        1L,
+        dimnames = list(c("s1", "s2", "s3", "s4"), "y1")
+    )
+    list(
+        samplePartition = sp,
+        prediction = set_names(list(pred), str_c(key, "_predicted")),
+        performance = set_names(
+            list(matrix(0.5, 1L, 6L)),
+            str_c(key, "_performance")
+        )
+    )
+}
+
+# One condition's TWAS CV payload (its `predictions` vector names them).
+.cvp_twas <- function(sp = .cvp_partition()) {
+    list(
+        samplePartition = sp,
+        predictions = c(s1 = 0.1, s2 = 0.2, s3 = 0.3, s4 = 0.4),
+        metrics = c(corr = 0.5, rsq = 0.25),
+        foldFits = NULL
+    )
+}
+
+test_that("a CV payload splits from its partition and joins back as it was", {
+    for (payload in list(.cvp_fm(), .cvp_twas())) {
+        s <- pecotmr:::.cvSplitPartition(payload)
+        expect_null(s$stored$samplePartition)
+        expect_identical(s$partition$samplePartition, payload$samplePartition)
+        expect_identical(s$partition$sampleIds, c("s1", "s2", "s3", "s4"))
+        expect_identical(
+            pecotmr:::.cvJoinPartition(s$stored, s$partition),
+            payload
+        )
+    }
+    # Stored without the sample names the partition entry holds.
+    fm <- pecotmr:::.cvSplitPartition(.cvp_fm())$stored
+    expect_null(rownames(fm$prediction$susie_predicted))
+    expect_equal(colnames(fm$prediction$susie_predicted), "y1")
+    twas <- pecotmr:::.cvSplitPartition(.cvp_twas())$stored
+    expect_null(names(twas$predictions))
+})
+
+test_that("a split keeps the samples outside every fold, in place", {
+    # A supplied partition may leave samples out; their predictions stay.
+    payload <- .cvp_fm(sp = .cvp_partition()[1:3, ])
+    s <- pecotmr:::.cvSplitPartition(payload)
+    expect_identical(s$partition$sampleIds, c("s1", "s2", "s3", "s4"))
+    expect_identical(pecotmr:::.cvJoinPartition(s$stored, s$partition), payload)
+})
+
+test_that("a merged row's regions split and join one by one", {
+    payload <- list(region1 = .cvp_fm(), region2 = NULL)
+    s <- pecotmr:::.cvSplitPartition(payload)
+    expect_named(s$partition, c("region1", "region2"))
+    expect_null(s$partition$region2)
+    expect_identical(pecotmr:::.cvJoinPartition(s$stored, s$partition), payload)
+})
+
+test_that("a payload with no partition is stored as it is", {
+    for (payload in list(NULL, list(rsq = 0.5), list(samplePartition = NULL))) {
+        s <- pecotmr:::.cvSplitPartition(payload)
+        expect_identical(s$stored, payload)
+        expect_null(s$partition)
+        expect_identical(pecotmr:::.cvJoinPartition(payload, NULL), payload)
+    }
+})
+
+# Two fine-mapping rows of one CV run: they share its partition.
+.cvp_fmr <- function(sp = .cvp_partition()) {
+    tl <- data.frame(variant_id = "chr1:100:A:G", pip = 0.5)
+    QtlFineMappingResult(
+        studyName = c("S", "S"),
+        context = c("C", "C"),
+        trait = c("T", "T"),
+        method = c("susie", "susieInf"),
+        entry = list(
+            FineMappingRow("chr1:100:A:G", list(), tl, .cvp_fm("susie", sp)),
+            FineMappingRow(
+                "chr1:100:A:G",
+                list(),
+                tl,
+                .cvp_fm("susie_inf", sp)
+            )
+        )
+    )
+}
+
+.cvp_cvOf <- function(x, method) {
+    cvResult(x, studyName = "S", context = "C", trait = "T", method = method)
+}
+
+test_that("a collection keeps each CV partition once; its rows get it back", {
+    fmr <- .cvp_fmr()
+    expect_length(pecotmr:::.cvPartitionDict(fmr), 1L)
+    expect_equal(fmr$cvPartition, c("cv1", "cv1"))
+    stored <- fmr$cvResult[[1L]]
+    expect_null(stored$samplePartition)
+    expect_null(rownames(stored$prediction$susie_predicted))
+    expect_identical(.cvp_cvOf(fmr, "susie"), .cvp_fm("susie"))
+    # A subset keeps it, and a combine keeps one copy of what both share.
+    expect_identical(
+        cvResult(fmr[2L], method = "susieInf"),
+        .cvp_fm("susie_inf")
+    )
+    both <- c(fmr[1L], fmr[2L])
+    expect_length(pecotmr:::.cvPartitionDict(both), 1L)
+    expect_identical(.cvp_cvOf(both, "susieInf"), .cvp_fm("susie_inf"))
+    # A different partition is a second entry.
+    other <- .cvp_fmr(sp = .cvp_partition()[c(2L, 1L, 3L, 4L), ])
+    expect_length(pecotmr:::.cvPartitionDict(c(fmr[1L], other[2L])), 2L)
+    # Every row's key must name an entry.
+    expect_error(
+        {
+            fmr$cvPartition <- c("cv1", "cv9")
+            validObject(fmr)
+        },
+        "cv9"
+    )
+})
+
+test_that("TwasWeights keeps each CV partition once; its rows get it back", {
+    rows <- list(
+        TwasWeightsRow("chr1:100:A:G", 0.1, cvResult = .cvp_twas()),
+        TwasWeightsRow("chr1:100:A:G", 0.2, cvResult = .cvp_twas())
+    )
+    tw <- TwasWeights(
+        studyName = c("S", "S"),
+        context = c("C", "C"),
+        trait = c("T", "T"),
+        method = c("lasso", "enet"),
+        entry = rows
+    )
+    expect_length(pecotmr:::.cvPartitionDict(tw), 1L)
+    expect_null(names(tw$cvResult[[1L]]$predictions))
+    expect_identical(.cvp_cvOf(tw, "enet"), .cvp_twas())
+})
+
+# Row `i`'s CV as the collection hands it out.
+.cvp_rowCv <- function(i, x) {
+    cvResult(pecotmr:::.collectionEntry(x, i))
+}
+
+test_that("updateObject() keeps a saved collection's CV partitions once", {
+    fmr <- .cvp_fmr()
+    tw <- TwasWeights(
+        studyName = "S",
+        context = "C",
+        trait = "T",
+        method = "lasso",
+        entry = list(
+            TwasWeightsRow("chr1:100:A:G", 0.1, cvResult = .cvp_twas())
+        )
+    )
+    # As saved before rows shared their partitions: each row's own, in full,
+    # and no key or dictionary. A TwasWeights was then saved one row per
+    # method, which already holds each row's full cvResult.
+    full <- map(seq_along(fmr), .cvp_rowCv, x = fmr)
+    savedFmr <- fmr
+    savedFmr$cvPartition <- NULL
+    savedFmr$cvResult <- S4Vectors::SimpleList(full)
+    attr(savedFmr, "cvPartition") <- NULL
+    expect_identical(map(seq_along(savedFmr), .cvp_rowCv, x = savedFmr), full)
+    savedTw <- .savedTwasPerMethod(tw)
+    attr(savedTw, "cvPartition") <- NULL
+    for (case in list(list(fmr, savedFmr), list(tw, savedTw))) {
+        up <- updateObject(case[[2L]])
+        expect_identical(up, case[[1L]])
+        expect_identical(updateObject(up), up)
+    }
 })

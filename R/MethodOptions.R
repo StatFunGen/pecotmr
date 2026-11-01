@@ -72,6 +72,11 @@ NULL
 #' @export
 setClass("MethodOptions", contains = "SimpleList")
 
+# A record is spliced into an engine call as !!!as.list(record), never as
+# !!!record: rlang copies an S4 list into a list by out[[i]] <- x[[i]], which
+# deletes the element when the value is NULL, so a record whose last setting
+# is NULL fails to splice.
+
 # Resolve "pkg::fn" to the function, or NULL when there is nothing to resolve:
 # a package that is not installed, or `callee = NULL` for a bundle pecotmr owns
 # outright. A missing Suggests package is not an error here -- building an
@@ -222,13 +227,13 @@ setClass("MethodOptions", contains = "SimpleList")
 }
 
 # The Options-constructor names declared by every TWAS method that fills
-# one capability field.
+# one capability field, every backend's for a method with several.
 # @noRd
 .twasCtorNamesFor <- function(caps, field) {
-    unlist(compact(map(
+    unname(unlist(compact(map(
         compact(map(caps, field)),
-        .twasImplCtorName
-    )))
+        .twasImplCtorNames
+    ))))
 }
 
 # TWAS stores pecotmr implementations rather than callees, and each one

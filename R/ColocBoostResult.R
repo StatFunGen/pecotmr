@@ -231,7 +231,11 @@ setMethod(
         refs <- map(old, .updateLdRefOrKeep)
     } else {
         dict <- .ldRefDict(list(.updateLdRefOrKeep(old)))
-        key <- if (length(dict$refs) == 0L) NA_character_ else dict$keys[[1L]]
+        key <- if (length(dict$entries) == 0L) {
+            NA_character_
+        } else {
+            dict$keys[[1L]]
+        }
         info <- mutate(
             info,
             ldReference = if_else(
@@ -240,10 +244,11 @@ setMethod(
                 NA_character_
             )
         )
-        refs <- dict$refs
+        refs <- dict$entries
     }
-    updated <- `slot<-`(object, "ldReference", check = FALSE, value = refs)
-    `slot<-`(updated, "outcomeInfo", value = info)
+    methods::slot(object, "ldReference", check = FALSE) <- refs
+    methods::slot(object, "outcomeInfo") <- info
+    object
 }
 
 # ---- construction -----------------------------------------------------------

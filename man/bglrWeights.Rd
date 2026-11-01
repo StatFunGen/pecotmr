@@ -12,6 +12,7 @@ bglrWeights(
   burnIn,
   thin,
   etaArgs = list(),
+  fitRetention = c("none", "slim", "full"),
   methodArgs = BglrOptions()
 )
 }
@@ -31,13 +32,21 @@ bglrWeights(
 \item{etaArgs}{Optional named list of additional arguments included in the
 `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).}
 
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing, \code{"slim"} and \code{"full"} the fitted \code{BGLR} object,
+which keeps no copy of the data, so the two retaining levels behave
+alike here.}
+
 \item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
 with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights.
+A numeric vector of length `ncol(X)` of variant weights, with the
+  fit attached as attribute \code{"fit"} unless
+  \code{fitRetention = "none"}.
 }
 \description{
 Internal helper that fits a `BGLR::BGLR` linear regression with a single

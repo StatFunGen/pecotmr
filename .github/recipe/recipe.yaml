@@ -55,12 +55,14 @@ requirements:
     - r-ctwas
     - r-dbi
     - r-dplyr
+    - r-fdrtool
     - r-flashier
     - r-fsusier
     - r-gbj
     - r-glmnet
     - r-glue
     - r-harmonicmeanp
+    - r-hibayes
     - r-igraph
     - r-l0learn
     - r-magrittr
@@ -129,12 +131,14 @@ requirements:
     - r-ctwas
     - r-dbi
     - r-dplyr
+    - r-fdrtool
     - r-flashier
     - r-fsusier
     - r-gbj
     - r-glmnet
     - r-glue
     - r-harmonicmeanp
+    - r-hibayes
     - r-igraph
     - r-l0learn
     - r-magrittr
@@ -176,7 +180,7 @@ tests:
       - R -e "library('pecotmr')"
 
 about:
-  license: MIT
+  license: GPL-3.0-only
   license_file: LICENSE
   summary: pecotmr implements pair-wise enrichment, colocalization, TWAS and Mendelian Randomization to integrate QTL and GWAS analysis based on a fine-mapped single effects model.
   homepage: https://github.com/StatFunGen/pecotmr

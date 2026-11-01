@@ -54,11 +54,11 @@ steps as well as the fit, so it is set here rather than in
 \code{methodArgs}.}
 
 \item{BPPARAM}{A \code{BiocParallelParam}. The univariate glmnet fits that
-initialise the coefficients run on its workers, and mr.mash's own
-threads (the summary statistics and the fit) number its workers when
-they run on this machine (\code{SerialParam}, \code{MulticoreParam});
-for other backends mr.mash runs on one thread. Default
-\code{SerialParam()}.}
+initialise the coefficients run on its workers, and the summary
+statistics use as many cores as it has workers when they run on this
+machine (\code{SerialParam}, \code{MulticoreParam}); for other backends
+they use one. The mr.mash fit itself always runs on one thread (see
+\code{\link{MrmashOptions}}). Default \code{SerialParam()}.}
 
 \item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash} under its
 own names, built with \code{\link{MrmashOptions}}

@@ -46,3 +46,34 @@ test_that("l0learnWeights passes nGamma through to L0Learn.cvfit", {
     expect_equal(captured$args$nGamma, 3)
     expect_equal(captured$args$penalty, "L0L2")
 })
+
+test_that("l0learnWeights keeps the selected fit or the whole search", {
+    skip_if_not_installed("L0Learn")
+    set.seed(42)
+    X <- matrix(rnorm(500), nrow = 50)
+    colnames(X) <- sprintf("chr1:%d:A:G", seq_len(10))
+    y <- X[, 1] * 0.5 + rnorm(50)
+    set.seed(1)
+    none <- l0learnWeights(X, y)
+    set.seed(1)
+    slim <- l0learnWeights(X, y, fitRetention = "slim")
+    expect_equal(as.numeric(slim), as.numeric(none))
+    fit <- attr(slim, "fit")
+    expect_named(
+        fit,
+        c(
+            "coef",
+            "intercept",
+            "gamma",
+            "lambda",
+            "cvMean",
+            "cvSd",
+            "variantIds"
+        )
+    )
+    expect_equal(fit$coef, as.numeric(slim))
+    full <- attr(l0learnWeights(X, y, fitRetention = "full"), "fit")
+    expect_s3_class(full, "L0LearnCV")
+    # L0Learn names none of its variants, so the fit takes them once.
+    expect_equal(full$variantIds, colnames(X))
+})

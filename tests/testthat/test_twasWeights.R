@@ -72,22 +72,21 @@ mockSusie <- function(...) {
 # learnTwasWeights matrix); promote those back to a 1-column matrix here
 # so test assertions on nrow/ncol/rownames keep working.
 .weightsByMethod <- function(tw, method) {
-    shortName <- sub("_?[Ww]eights$", "", method)
-    idx <- which(as.character(tw$method) == shortName)
+    shortName <- pecotmr:::.twasMethodToken(sub("_?[Ww]eights$", "", method))
+    cells <- pecotmr:::.twasCells(tw)
+    idx <- which(cells$method == shortName)
     if (length(idx) == 0L) {
         return(NULL)
     }
-    # The entry is a derived view now: ask the collection for it rather than
-    # reaching into a stored `entry` column that no longer exists.
-    entry <- twasWeights(
-        tw,
-        studyName = as.character(tw$study)[[idx[[1L]]]],
-        context = as.character(tw$context)[[idx[[1L]]]],
-        trait = as.character(tw$trait)[[idx[[1L]]]],
+    # One (gene, method) cell, read through the collection's accessors.
+    sel <- list(
+        studyName = cells$study[[idx[[1L]]]],
+        context = cells$context[[idx[[1L]]]],
+        trait = cells$trait[[idx[[1L]]]],
         method = shortName
     )
-    w <- weights(entry)
-    vids <- variantIds(entry)
+    w <- exec(weights, tw, !!!sel)
+    vids <- exec(variantIds, tw, !!!sel)
     if (is.numeric(w) && is.null(dim(w))) {
         nm <- names(w)
         if (is.null(nm) && length(vids) == length(w)) {
@@ -601,7 +600,9 @@ test_that("learnTwasWeights runs susie + susieInf from supplied fits", {
             )
         )
     )
-    expect_equal(methodNames(result), c("susie", "susie_inf"))
+    # One spelling per method: learnTwasWeights' snake_case label becomes
+    # the camelCase token.
+    expect_equal(methodNames(result), c("susie", "susieInf"))
 })
 
 
@@ -829,7 +830,7 @@ test_that("twasPredict with single variant", {
 
 # === Tests migrated from test_s4Constructors.R (TwasWeights) ===
 
-test_that("TwasWeights: builds a collection keyed by 4-tuple", {
+test_that("TwasWeights: builds one row per gene, its methods an axis", {
     e1 <- .sc_makeTwasWeightsRow()
     e2 <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
@@ -840,7 +841,8 @@ test_that("TwasWeights: builds a collection keyed by 4-tuple", {
         entry = list(e1, e2)
     )
     expect_s4_class(tw, "TwasWeights")
-    expect_equal(nrow(tw), 2L)
+    # One row per gene, its methods an axis.
+    expect_equal(nrow(tw), 1L)
     expect_setequal(methodNames(tw), c("lasso", "enet"))
 })
 
@@ -861,7 +863,7 @@ test_that("TwasWeights: studyName / contexts / traitNames / methodNames", {
 })
 
 
-test_that("TwasWeights: rejects duplicate 4-tuples", {
+test_that("TwasWeights: rejects two weights for one gene's method", {
     e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
@@ -871,7 +873,24 @@ test_that("TwasWeights: rejects duplicate 4-tuples", {
             method = c("lasso", "lasso"),
             entry = list(e, e)
         ),
-        "uniqueness violated"
+        "more than one set of weights for one method"
+    )
+})
+
+test_that("TwasWeights: rejects a gene whose methods span chromosomes", {
+    # A gene's row is one element; its methods are one cis fit.
+    expect_error(
+        TwasWeights(
+            studyName = c("s1", "s1"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            method = c("lasso", "enet"),
+            entry = list(
+                TwasWeightsRow("chr1:100:A:G", 0.1),
+                TwasWeightsRow("chr2:100:A:G", 0.2)
+            )
+        ),
+        "more than one chromosome"
     )
 })
 
@@ -924,7 +943,7 @@ test_that("TwasWeights: twasWeights extracts the entry for a tuple", {
     )
     expect_s4_class(picked, "TwasWeights")
     expect_equal(nrow(picked), 1L)
-    expect_equal(as.character(picked$method), "enet")
+    expect_equal(methodNames(picked), "enet")
     expect_identical(variantIds(picked), .twrPartsVariantIds(e2))
     expect_equal(unname(weights(picked)), unname(weights(e2)))
 })
@@ -982,7 +1001,8 @@ test_that("show.TwasWeights prints entry/study/context/trait/method counts", {
         entry = list(e, e)
     )
     out <- capture.output(show(tw))
-    expect_true(any(grepl("TwasWeights: 2 entries", out)))
+    # Two contexts are two genes, each with one method's weights.
+    expect_true(any(grepl("TwasWeights: 2 genes, 2 entries", out)))
     expect_true(any(grepl("1 studies.*2 contexts.*1 traits.*2 methods", out)))
 })
 
@@ -1257,7 +1277,7 @@ test_that("TwasWeights: per-tuple weights/cvResult/methodFits/ldReference", {
             trait = "t1",
             method = "lasso"
         ),
-        w1
+        set_names(w1, sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     expect_equal(
         cvResult(
@@ -1338,9 +1358,14 @@ test_that(".prepareSusieWeightMethods writes supplied fits onto the method args"
     wm <- pecotmr:::.prepareSusieWeightMethods(
         weightMethods = list(
             susie_weights = list(),
-            susie_inf_weights = list()
+            susie_inf_weights = list(),
+            mvsusie_weights = list()
         ),
-        fittedModels = list(susie = susieFit, susieInf = infFit)
+        fittedModels = list(
+            susie = susieFit,
+            susieInf = infFit,
+            mvsusie = list(coef = matrix(0, 8L, 2L))
+        )
     )
 
     # Each supplied fit is class-tagged and lands on its own method's args.
@@ -1349,6 +1374,9 @@ test_that(".prepareSusieWeightMethods writes supplied fits onto the method args"
     expect_true("susieInf" %in% class(wm$susie_inf_weights$susieInfFit))
     expect_true("susie" %in% class(wm$susie_weights$susieFit))
     expect_null(wm$susie_weights$model_init)
+    # Every token with an adapter is resolved, not susie / susieInf alone:
+    # the gate accepted an mvsusie fit in fittedModels that never arrived.
+    expect_true("mvsusie" %in% class(wm$mvsusie_weights$mvsusieFit))
 })
 
 # ===========================================================================
@@ -1371,53 +1399,38 @@ test_that("twasWeightsCv: warns when no random seed has been set", {
     )
 })
 
-test_that("twasWeightsCv: mvsusie per-fold reweighted prior is plumbed (verbose=2)", {
+test_that("twasWeightsCv scores a fine-mapping method with its fold weights", {
+    # A SuSiE-family method never fine-maps, so each fold is scored with the
+    # weights its own fine-mapping fit gave rather than by refitting.
     set.seed(42)
     n <- 24
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
     colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     rownames(X) <- paste0("s", seq_len(n))
-    Y <- matrix(rnorm(n * 2), nrow = n)
-    colnames(Y) <- c("y1", "y2")
-    rownames(Y) <- rownames(X)
-
-    captured <- list()
-    local_mocked_bindings(
-        mvsusieWeights = function(X, Y, ...) {
-            captured[[length(captured) + 1]] <<- list(...)
-            matrix(
-                0,
-                nrow = ncol(X),
-                ncol = ncol(Y),
-                dimnames = list(colnames(X), colnames(Y))
-            )
-        }
-    )
-    prior_cv <- list(matrix(1, 2, 2), matrix(2, 2, 2))
-    set.seed(1)
-    # A SuSiE-family token needs that fold's own fit; the fitter is mocked
-    # here, so a stub per fold is enough to reach the per-fold prior path.
+    Y <- matrix(rnorm(n), nrow = n, dimnames = list(rownames(X), "y1"))
     sp <- suppressMessages(twasWeightsCv(X, Y, fold = 2))$samplePartition
-    foldFits <- list(fold_1 = "FIT1", fold_2 = "FIT2")
-    attr(foldFits, "partitionKey") <- pecotmr:::.cvPartitionKey(sp)
-    result <- suppressMessages(twasWeightsCv(
+    fw <- matrix(
+        c(1, 0, 0, 0, 0, 1, 0, 0),
+        p,
+        2L,
+        dimnames = list(colnames(X), c("fold_1", "fold_2"))
+    )
+    attr(fw, "partitionKey") <- pecotmr:::.cvPartitionKey(sp)
+    local_mocked_bindings(susieWeights = function(...) abort("refit"))
+    out <- suppressMessages(twasWeightsCv(
         X,
         Y,
         samplePartitions = sp,
-        weightMethods = list(mvsusieWeights = list()),
-        reweightedMixturePriorCv = prior_cv,
-        fittedModelsCv = list(mvsusie = foldFits),
-        verbose = 2
+        weightMethods = list(susie_weights = list()),
+        foldWeights = list(susie = fw),
+        verbose = 0
     ))
-    expect_true("prediction" %in% names(result))
-    # the per-fold prior_variance was forwarded to the multivariate fitter
-    expect_true(any(map_lgl(
-        captured,
-        function(a) {
-            "prior_variance" %in% names(a)
-        }
-    )))
+    pred <- out$prediction[["susie_predicted"]]
+    held1 <- sp$Sample[sp$Fold == 1L]
+    held2 <- sp$Sample[sp$Fold == 2L]
+    expect_equal(unname(pred[held1, 1L]), unname(X[held1, 1L]))
+    expect_equal(unname(pred[held2, 1L]), unname(X[held2, 2L]))
 })
 
 test_that("twasWeightsCv forwards fitRetention to a fitter that takes it", {
@@ -1520,25 +1533,30 @@ test_that("learnTwasWeights: multivariate fitter, fitRetention + verbose=2", {
     expect_equal(captured[[1]]$fitRetention, "slim")
 })
 
-test_that("a method that takes no fitRetention is left alone", {
-    # Retention is passed only to a weight function that declares it; one
-    # that does not keeps nothing, and must not be handed the argument.
+test_that("a run keeping fits hands its retention to every method", {
+    # Every weight method takes fitRetention, so a run that keeps fits passes
+    # its level on; one that keeps none leaves the method's own default.
     d <- makeData(n = 30, p = 6)
-    seen <- NULL
-    local_mocked_bindings(
-        bayesRWeights = function(X, y, ...) {
-            seen <<- names(list(...))
-            rep(0, ncol(X))
-        }
-    )
-    result <- suppressMessages(learnTwasWeights(
-        d$X,
-        d$Y,
-        weightMethods = list(bayesRWeights = list()),
-        fitRetention = "slim"
-    ))
-    expect_true(is(result, "TwasWeights"))
-    expect_false("fitRetention" %in% seen)
+    run <- function(keep) {
+        seen <- NULL
+        local_mocked_bindings(
+            bayesRWeights = function(X, y, ...) {
+                seen <<- list(...)$fitRetention %||% "unset"
+                rep(0, ncol(X))
+            },
+            .env = environment()
+        )
+        result <- suppressMessages(learnTwasWeights(
+            d$X,
+            d$Y,
+            weightMethods = list(bayesRWeights = list()),
+            fitRetention = keep
+        ))
+        expect_true(is(result, "TwasWeights"))
+        seen
+    }
+    expect_equal(run("slim"), "slim")
+    expect_equal(run("none"), "unset")
 })
 
 test_that("learnTwasWeights: univariate fitter runs under verbose=2", {
@@ -1615,10 +1633,10 @@ test_that("twasPredict: accepts a TwasWeights S4 collection", {
 test_that("validity names the missing key and payload columns", {
     data(twasWeightsExample)
     bad <- twasWeightsExample
-    S4Vectors::mcols(bad)$method <- NULL
+    S4Vectors::mcols(bad)$study <- NULL
     expect_error(
         methods::validObject(bad),
-        "missing elements \\{'method'\\}"
+        "missing elements \\{'study'\\}"
     )
     expect_true(methods::validObject(twasWeightsExample))
     bad2 <- twasWeightsExample
@@ -1794,35 +1812,70 @@ test_that("twasPredict: weightsList must be a list or TwasWeights", {
 # fineMappingPipeline's own CV retained each fold's fit.
 # ---------------------------------------------------------------------------
 
-test_that("twasWeightsCv cross-validates susie from the retained fold fits", {
+test_that("twasWeightsCv cross-validates susie from its fold weights", {
     f <- .twcvFixture
     out <- suppressMessages(twasWeightsCv(
         f$X,
         f$Y,
         samplePartitions = f$slice$samplePartition,
         weightMethods = list(susie_weights = list()),
-        fittedModelsCv = list(susie = f$slice$foldFits),
+        foldWeights = list(susie = f$foldWeights),
         verbose = 0
     ))
-    expect_true(all(c("prediction", "performance") %in% names(out)))
-    expect_false(is.null(out$prediction))
+    # Each fold scored with the weights its own fit gave reproduces the
+    # fine-mapping CV's out-of-fold predictions.
+    expect_false(anyNA(f$foldWeights))
+    expect_equal(
+        out$prediction$susie_predicted,
+        f$cv$prediction$susie_predicted
+    )
+    expect_null(out$foldWeights)
 })
 
-test_that(".twasFoldFit injects the fold's fit, else leaves the args alone", {
-    f <- pecotmr:::.twasFoldFit
-    ff <- list(susie = list(fold_1 = "FIT1", fold_2 = "FIT2"))
-    a <- f(list(), "susie_weights", 2L, ff)
-    expect_identical(a$susieFit, "FIT2")
-    args <- list(X = 1)
-    # No CV payload at all.
-    expect_identical(f(args, "susie_weights", 1L, NULL), args)
-    # A method with no fine-mapping adapter is untouched.
-    expect_identical(f(args, "lasso_weights", 1L, ff), args)
-    # The token is present but carries no folds, so there is nothing to add.
-    expect_identical(f(args, "susie", 1L, list(susie = list())), args)
+test_that(".twasFoldWeightsW reads a fold's weights, aligned to its X", {
+    f <- pecotmr:::.twasFoldWeightsW
+    Xtr <- matrix(0, 3L, 2L, dimnames = list(NULL, c("a", "c")))
+    Ytr <- matrix(0, 3L, 2L)
+    fw <- matrix(
+        1:6,
+        3L,
+        2L,
+        dimnames = list(c("a", "b", "c"), c("fold_1", "fold_2"))
+    )
+    # The fold's column, on the fold's variants, for every outcome.
+    expect_equal(
+        f("susie_weights", 2L, Xtr, Ytr, list(susie = fw)),
+        matrix(c(4, 6, 4, 6), 2L, 2L, dimnames = list(c("a", "c"), NULL))
+    )
+    # Not a fine-mapping method, no weights, or no such fold: none given.
+    expect_null(f("lasso_weights", 1L, Xtr, Ytr, list(susie = fw)))
+    expect_null(f("susie_weights", 1L, Xtr, Ytr, NULL))
+    expect_null(f("susie_weights", 3L, Xtr, Ytr, list(susie = fw)))
+    # Weights naming no variants cannot be aligned.
+    expect_error(
+        f("susie_weights", 1L, Xtr, Ytr, list(susie = `rownames<-`(fw, NULL))),
+        "do not name their variants"
+    )
+    # A method with weights of its own per outcome takes them from a third
+    # axis, matched to the columns of Y by name.
+    fw3 <- array(
+        1:12,
+        c(3L, 2L, 2L),
+        dimnames = list(c("a", "b", "c"), c("fold_1", "fold_2"), c("y1", "y2"))
+    )
+    Ytr2 <- matrix(0, 3L, 2L, dimnames = list(NULL, c("y2", "y1")))
+    expect_equal(
+        f("mvsusie_weights", 1L, Xtr, Ytr2, list(mvsusie = fw3)),
+        matrix(c(7, 9, 1, 3), 2L, 2L, dimnames = list(c("a", "c"), NULL))
+    )
+    Ytr3 <- matrix(0, 3L, 1L, dimnames = list(NULL, "y3"))
+    expect_error(
+        f("mvsusie_weights", 1L, Xtr, Ytr3, list(mvsusie = fw3)),
+        "no outcome y3"
+    )
 })
 
-test_that("twasWeightsCv refuses fold fits from a different partition", {
+test_that("twasWeightsCv refuses fold weights from a different partition", {
     f <- .twcvFixture
     wm <- list(susie = list())
 
@@ -1834,13 +1887,13 @@ test_that("twasWeightsCv refuses fold fits from a different partition", {
             f$Y,
             weightMethods = wm,
             verbose = 0,
-            fittedModelsCv = list(susie = f$slice$foldFits)
+            foldWeights = list(susie = f$foldWeights)
         )),
         "needs the fold partition"
     )
 
-    # (b) fits with no fingerprint cannot be shown to match.
-    unkeyed <- f$slice$foldFits
+    # (b) weights with no fingerprint cannot be shown to match.
+    unkeyed <- f$foldWeights
     attr(unkeyed, "partitionKey") <- NULL
     expect_error(
         suppressMessages(twasWeightsCv(
@@ -1849,7 +1902,7 @@ test_that("twasWeightsCv refuses fold fits from a different partition", {
             weightMethods = wm,
             verbose = 0,
             samplePartitions = f$slice$samplePartition,
-            fittedModelsCv = list(susie = unkeyed)
+            foldWeights = list(susie = unkeyed)
         )),
         "no partition fingerprint"
     )
@@ -1865,7 +1918,7 @@ test_that("twasWeightsCv refuses fold fits from a different partition", {
             weightMethods = wm,
             verbose = 0,
             samplePartitions = other$samplePartition,
-            fittedModelsCv = list(susie = f$slice$foldFits)
+            foldWeights = list(susie = f$foldWeights)
         )),
         "trained on a different fold partition"
     )
@@ -1928,7 +1981,39 @@ test_that("learnTwasWeights refuses a susie token with no fit", {
     )))
 })
 
-test_that("twasWeightsCv refuses a susie token with no per-fold fits", {
+test_that("learnTwasWeights extracts mvSuSiE weights from a supplied fit", {
+    skip_if_not_installed("mvsusieR")
+    # Every multivariate method is called with X and Y. The real
+    # mvsusieWeights() refused them, which only mocks of it that took X and Y
+    # hid, so a joint mvSuSiE fit never reached TWAS.
+    set.seed(1)
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:3))
+    X <- matrix(rbinom(60L, 2L, 0.3), 20L, 3L, dimnames = list(NULL, ids))
+    Y <- matrix(rnorm(40L), 20L, 2L, dimnames = list(NULL, c("c1", "c2")))
+    coefs <- matrix(
+        c(0, 0.5, 0, 0, 0, 0, 0.2, 0),
+        nrow = 4L,
+        dimnames = list(c("(Intercept)", ids), colnames(Y))
+    )
+    local_mocked_bindings(
+        coef.mvsusie = function(...) coefs,
+        .package = "mvsusieR"
+    )
+    fit <- structure(
+        list(pip = set_names(c(0.9, 0.1, 0.8), ids)),
+        class = "mvsusie"
+    )
+    tw <- suppressMessages(learnTwasWeights(
+        X,
+        Y,
+        weightMethods = list(mvsusie_weights = list()),
+        fittedModels = list(mvsusie = fit),
+        verbose = 0
+    ))
+    expect_equal(weights(tw), coefs[-1L, ])
+})
+
+test_that("twasWeightsCv refuses a susie token with no per-fold weights", {
     f <- .twcvFixture
     expect_error(
         suppressMessages(twasWeightsCv(
@@ -1938,7 +2023,7 @@ test_that("twasWeightsCv refuses a susie token with no per-fold fits", {
             weightMethods = list(susie_weights = list()),
             verbose = 0
         )),
-        "never run fine-mapping themselves.*needs that fold's own fit"
+        "never run fine-mapping themselves.*own fit gave"
     )
 })
 
@@ -2023,7 +2108,10 @@ test_that(".twasSusieTokensRequested matches both method spellings", {
     LD[abs(row(LD) - col(LD)) == 1] <- 0.3
     ids <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
     list(
-        ldReference = LdMatrix(`dimnames<-`(LD, list(ids, ids))),
+        ldReference = LdMatrix(
+            `dimnames<-`(LD, list(ids, ids)),
+            nSamples = 500L
+        ),
         stat = list(
             b = rnorm(p) * 0.1,
             seb = rep(0.05, p),
@@ -2174,6 +2262,12 @@ test_that("per-class checking rejects a name only the other path accepts", {
 # The exported *Options constructor that method `token` resolves to on input
 # path `path`, by name: NA when the method does not run on that path, "?"
 # when what it resolves to is not an exported *Options constructor.
+takesMethodArgs <- function(token, path) {
+    impl <- pecotmr:::.twasMethodImplFor(token, path)
+    fn <- get(impl, envir = asNamespace("pecotmr"))
+    is_in("methodArgs", names(formals(fn)))
+}
+
 optionsCtorName <- function(token, path) {
     ctor <- pecotmr:::.twasMethodCtorFor(token, path)
     if (is.null(ctor)) {
@@ -2206,6 +2300,9 @@ test_that("the TWAS Options registry is derived from each implementation", {
             pecotmr:::.twasConfigurableMethods(),
             pecotmr:::.twasMethodsFor(path)
         )
+        # An implementation without `methodArgs` takes every setting as its
+        # own argument (LDpred2), so it has no constructor to resolve.
+        toks <- toks[map_lgl(toks, takesMethodArgs, path = path)]
         ctorNames <- map_chr(toks, optionsCtorName, path = path)
         expect_equal(
             toks[is.na(ctorNames) | ctorNames == "?"],
@@ -2230,6 +2327,14 @@ test_that("each method's Options constructor is resolved per input path", {
     # prsCs has no individual implementation; its one constructor is the
     # summary-statistics one.
     expect_equal(optionsCtorName("prsCs", "QtlSumStats"), "PrsCsOptions")
+    # The lasso's default engine on summary statistics is pecotmr's, and
+    # bigsnpr's takes its own constructor; LDpred2 takes none.
+    expect_equal(
+        pecotmr:::.twasImplCtorName("lassosumRssWeights", "bigsnpr"),
+        "BigsnprOptions"
+    )
+    expect_null(pecotmr:::.twasMethodCtorFor("ldpred2Auto", "QtlSumStats"))
+    expect_true(is_in("ldpred2Grid", pecotmr:::.twasMethodsFor("QtlSumStats")))
     # A method that does not run on a path has no constructor there.
     expect_null(pecotmr:::.twasMethodCtorFor("dprVb", "QtlSumStats"))
     expect_null(pecotmr:::.twasMethodCtorFor("prsCs", "QtlDataset"))
@@ -2268,10 +2373,10 @@ test_that(".twasCanonicalShortName maps a function name back, else passes on", {
     expect_equal(f("unknownThing", map), "unknownThing")
 })
 
-test_that(".twasFoldFitsFor answers NULL when no spelling is present", {
-    f <- pecotmr:::.twasFoldFitsFor
+test_that(".twasFoldWeightsFor answers NULL when no spelling is present", {
+    f <- pecotmr:::.twasFoldWeightsFor
     expect_null(f(NULL, "susie"))
-    # A CV payload keyed by something else is not this token's fits.
+    # A CV payload keyed by something else is not this token's weights.
     expect_null(f(list(somethingElse = list()), "susie"))
 })
 
@@ -2302,21 +2407,144 @@ test_that("TwasWeights() keeps the caller's metadata", {
     expect_equal(S4Vectors::metadata(tw), list(run = "r1"))
 })
 
-test_that("a weights row records its fit variants only with a fit payload", {
+# A slim fit's shape: coefficients, and the variants they were fitted on.
+.tw_fit <- list(coef = c(0.1, 0.2, 0.3), variantIds = .tw_ids)
+
+# Two LD references over .tw_ids that differ.
+.tw_ldPair <- function() {
+    R <- diag(3)
+    dimnames(R) <- list(.tw_ids, .tw_ids)
+    list(LdMatrix(R), LdMatrix(R * 0.9 + 0.1))
+}
+
+# A gene's two methods, fitted with `...`.
+.tw_twoMethods <- function(...) {
+    row <- TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))
+    TwasWeights(
+        studyName = c("s1", "s1"),
+        context = c("c1", "c1"),
+        trait = c("g1", "g1"),
+        method = c("lasso", "enet"),
+        entry = list(row, row),
+        ...
+    )
+}
+
+.tw_dropFirst <- function(g) {
+    g[-1L]
+}
+
+test_that("TwasWeights refuses per-cell ranges that are not one per cell", {
+    rows <- list(TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3)))
+    one <- function(traitPos) {
+        TwasWeights(
+            studyName = "s1",
+            context = "c1",
+            trait = "g1",
+            method = "lasso",
+            entry = rows,
+            traitPos = traitPos
+        )
+    }
+    expect_error(one("chr1:100"), "must be a GRanges")
+    two <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(1L, 5L), width = 1L)
+    )
+    expect_error(one(two), "same length as `study`")
+})
+
+test_that("a gene's methods must share their LD reference and window", {
+    ld <- .tw_ldPair()
+    expect_error(
+        .tw_twoMethods(ldReference = ld),
+        "different LD references"
+    )
+    expect_error(
+        .tw_twoMethods(
+            traitPos = GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(c(100L, 900L), width = 1L)
+            )
+        ),
+        "different `traitPos` values"
+    )
+})
+
+test_that("an empty TwasWeights has no cell to select", {
+    tw <- .tw_collection(list(TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))))
+    expect_error(
+        pecotmr:::.twrSelectCell(tw[0], "s1", "c1", "g1", "lasso"),
+        "has no rows"
+    )
+})
+
+test_that("validity refuses a row holding a method twice", {
+    bad <- .tw_twoMethods()
+    md <- attr(bad, "elementMetadata")
+    md$methods <- IRanges::CharacterList(c("lasso", "lasso"))
+    attr(bad, "elementMetadata") <- md
+    expect_identical(
+        pecotmr:::.twasValidateMethods(bad),
+        "a row holds one set of weights per method"
+    )
+})
+
+test_that("combining TwasWeights takes a given LD reference for every row", {
+    ld <- .tw_ldPair()[[1L]]
+    tw <- .tw_collection(list(TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))))
+    out <- combineTwasWeights(tw, ldReference = ld)
+    expect_identical(ldReference(out), list(ld1 = ld))
+})
+
+test_that("an element operation re-aligns a sparse method's weights", {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:6))
+    w <- c(0, 0, 0.5, 0, 0, 0)
+    tw <- .tw_collection(list(TwasWeightsRow(ids, w)))
+    expect_false(is.null(S4Vectors::mcols(tw)$weightTensor[[1L]]$sparse))
+    dropped <- endoapply(tw, .tw_dropFirst)
+    expect_identical(
+        unname(weights(pecotmr:::.twrCellParts(dropped, 1L, "lasso"))),
+        w[-1L]
+    )
+})
+
+test_that("flattening handles no rows and a method without weights", {
+    tw <- .tw_collection(list(TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))))
+    expect_length(flattenTupleRanges(tw[0]), 0L)
+    noWeights <- .tw_collection(list(TwasWeightsRow(.tw_ids, NULL)))
+    flat <- flattenTupleRanges(noWeights)
+    expect_true(all(is.na(S4Vectors::mcols(flat)$weight)))
+    back <- nestTupleRanges(flat, noWeights)
+    expect_null(weights(pecotmr:::.twrCellParts(back, 1L, "lasso")))
+})
+
+test_that("a weights row reads the variants it was fitted on off its fit", {
     tw <- .tw_collection(list(
-        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4)),
-        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), methodFits = .tw_fit),
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4))
     ))
-    expect_s4_class(tw$fitVariants, "CharacterList")
-    expect_equal(as.character(tw$fitVariants[[1L]]), .tw_ids)
-    expect_equal(as.character(tw$fitVariants[[2L]]), character(0))
+    # The collection keeps no second copy of them.
+    expect_false(is_in("fitVariants", colnames(mcols(tw))))
+    fitOf <- function(trait) {
+        methodFits(
+            tw,
+            studyName = "s1",
+            context = "c1",
+            trait = trait,
+            method = "lasso"
+        )
+    }
+    expect_equal(pecotmr:::.twasFitVariantIds(fitOf("g1")), .tw_ids)
+    # A row kept without a fit has nothing to read them from.
+    expect_equal(pecotmr:::.twasFitVariantIds(fitOf("g2")), character(0))
+    expect_length(pecotmr:::.twasNarrowedCellLabels(tw), 0L)
 })
 
 test_that("cvResult() and methodFits() of a narrowed row warn", {
-    fits <- list(lasso = list(lambda = 0.1))
     cv <- list(r2 = 0.4)
     tw <- .tw_collection(list(
-        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), fits, cv)
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), .tw_fit, cv)
     ))
     narrowed <- endoapply(tw, utils::head, 2L)
     expect_warning(
@@ -2328,35 +2556,68 @@ test_that("cvResult() and methodFits() of a narrowed row warn", {
         outFits <- methodFits(narrowed),
         "methodFits\\(\\): .* Refit on the variants kept"
     )
-    expect_identical(outFits, fits)
+    expect_identical(outFits, .tw_fit)
     expect_no_warning(cvResult(tw))
     expect_no_warning(methodFits(tw))
+    # Kept without a fit, a narrowed row has nothing to compare with.
+    bare <- .tw_collection(list(
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = cv)
+    ))
+    expect_no_warning(cvResult(endoapply(bare, utils::head, 2L)))
 })
 
-test_that("updateObject() backfills a fitted row's held variants", {
+test_that("updateObject() folds a saved per-method collection by gene", {
     tw <- .tw_collection(list(
-        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4)),
-        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), .tw_fit, list(r2 = 0.4))
     ))
-    saved <- tw
-    saved$fitVariants <- NULL
+    saved <- .savedTwasPerMethod(
+        tw,
+        extra = list(fitVariants = IRanges::CharacterList(list(.tw_ids)))
+    )
     up <- updateObject(saved)
-    expect_equal(as.character(up$fitVariants[[1L]]), .tw_ids)
-    expect_equal(as.character(up$fitVariants[[2L]]), character(0))
+    expect_false(is_in("fitVariants", colnames(mcols(up))))
+    expect_identical(up, tw)
     # A current collection is left as it is.
-    expect_identical(updateObject(tw)$fitVariants, tw$fitVariants)
+    expect_identical(updateObject(tw), tw)
     expect_message(updateObject(tw, verbose = TRUE), "TwasWeights")
 })
 
-test_that("updateObject() backfills held variants and keys LD rows at once", {
+test_that("updateObject() drops the variant ids saved weights carry", {
+    # Rows stored every weight named by its variant id -- a third copy of
+    # every id, and most of the weight column's size. The accessors name them
+    # on the way out instead.
+    data(twasWeightsExample, envir = environment())
+    saved <- .savedTwasPerMethod(twasWeightsExample, named = TRUE)
+    up <- updateObject(saved)
+    expect_identical(up, twasWeightsExample)
+    expect_lt(
+        length(serialize(up, NULL)),
+        length(serialize(saved, NULL))
+    )
+})
+
+test_that("updateObject() folds a saved collection held in its old slot", {
+    # Folding reads the LD references, so it runs once the saved `ldSketch`
+    # slot has been brought up to date.
+    tw <- .tw_collection(list(TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3))))
+    saved <- .savedWithLdSketch(.savedTwasPerMethod(tw, named = TRUE), NULL)
+    up <- updateObject(saved)
+    expect_true(validObject(up))
+    expect_identical(up, tw)
+    expect_identical(updateObject(up), up)
+})
+
+test_that("updateObject() drops saved fit variants and keys LD rows at once", {
     tw <- .tw_collection(list(
         TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), cvResult = list(r2 = 0.4))
     ))
-    saved <- tw
-    saved$fitVariants <- NULL
+    saved <- .savedTwasPerMethod(
+        tw,
+        extra = list(fitVariants = IRanges::CharacterList(list(.tw_ids)))
+    )
     up <- updateObject(.savedWithLdSketch(saved, NULL))
     expect_true(validObject(up))
-    expect_equal(as.character(up$fitVariants[[1L]]), .tw_ids)
+    expect_false(is_in("fitVariants", colnames(mcols(up))))
     expect_identical(ldReference(up), list())
     expect_true(is.na(up$ldReference))
     expect_identical(updateObject(up), up)
@@ -2461,4 +2722,247 @@ test_that("ser is reachable as a TWAS method", {
         ),
         "nothing to configure here"
     )
+})
+
+test_that("an alphabet method's chain is its default backend's", {
+    expect_equal(
+        pecotmr:::.twasMethodChainFor("bayesR", "QtlDataset"),
+        c(
+            "bayesRWeights",
+            "bayesAlphabetWeights",
+            ".alphabetQggFit",
+            "qgg::gbayes"
+        )
+    )
+    expect_equal(
+        pecotmr:::.twasMethodChainFor("bayesB", "QtlSumStats")[[3L]],
+        ".alphabetHibayesRssFit"
+    )
+    # The names a plain list may set are every backend's: BGLR's R2 and
+    # hibayes' dfvg both reach bayesB, and the pipeline's own backend none.
+    skip_if_not_installed("BGLR")
+    skip_if_not_installed("hibayes")
+    accepted <- pecotmr:::.twasChainAccepted("bayesB", "QtlDataset")
+    expect_true(all(is_in(c("R2", "dfvg"), accepted)))
+    expect_false(is_in("backend", accepted))
+})
+
+# ---- flat views -------------------------------------------------------------
+
+# One gene with a two-column (fSuSiE-like) weight matrix and a weight vector
+# on three of its four variants.
+.tw_flatGene <- function() {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:4))
+    w <- matrix(
+        c(0.1, 0, 0.3, 0.4, 0, 0.6, 0.7, 0),
+        4L,
+        2L,
+        dimnames = list(NULL, c("f1", "f2"))
+    )
+    TwasWeights(
+        studyName = c("S", "S"),
+        context = c("c", "c"),
+        trait = c("t", "t"),
+        method = c("fsusie", "lasso"),
+        entry = list(
+            TwasWeightsRow(ids, w),
+            TwasWeightsRow(ids[1:3], c(0.5, 0, 0.2))
+        )
+    )
+}
+
+.tw_flatSel <- list(studyName = "S", context = "c", trait = "t")
+
+test_that("reordering a gene's variants keeps each method's own weights", {
+    # lasso holds three of the gene's four variants; reversed, they are no
+    # longer the first three of the row.
+    tw <- .tw_flatGene()
+    before <- weights(pecotmr:::.twrCellParts(tw, 1L, "lasso"))
+    reversed <- endoapply(tw, rev)
+    after <- weights(pecotmr:::.twrCellParts(reversed, 1L, "lasso"))
+    expect_identical(after[names(before)], before)
+})
+
+
+test_that("a TwasWeights flattens to one range per variant and method", {
+    data(twasWeightsExample, envir = environment())
+    x <- twasWeightsExample
+    flat <- flattenTupleRanges(x)
+    cells <- .twasCells(x)
+    expect_setequal(unique(flat$.method), cells$method)
+    expect_true(all(is.na(flat$.weightColumn)))
+    m <- cells$method[[1L]]
+    key <- list(
+        studyName = cells$study[[1L]],
+        context = cells$context[[1L]],
+        trait = cells$trait[[1L]],
+        method = m
+    )
+    expect_equal(
+        flat$weight[flat$.method == m],
+        unname(exec(weights, x, !!!key))
+    )
+    expect_identical(nestTupleRanges(flat, x), x)
+})
+
+test_that("a weight matrix flattens to one block per column and back", {
+    tw <- .tw_flatGene()
+    flat <- flattenTupleRanges(tw)
+    expect_equal(
+        flat$.weightColumn[flat$.method == "fsusie"],
+        rep(c("f1", "f2"), each = 4L)
+    )
+    expect_identical(nestTupleRanges(flat, tw), tw)
+})
+
+test_that("nesting keeps each method's surviving weights", {
+    tw <- .tw_flatGene()
+    flat <- flattenTupleRanges(tw)
+    kept <- nestTupleRanges(flat[flat$weight != 0], tw)
+    expect_equal(
+        exec(weights, kept, !!!.tw_flatSel, method = "lasso"),
+        c(`chr1:100:A:G` = 0.5, `chr1:300:A:G` = 0.2)
+    )
+    # A matrix weight dropped from one column while its variant kept the
+    # other is 0, as a method's weight is wherever it has none.
+    fs <- exec(weights, kept, !!!.tw_flatSel, method = "fsusie")
+    expect_equal(nrow(fs), 4L)
+    expect_equal(fs["chr1:200:A:G", ], c(f1 = 0, f2 = 0.6))
+})
+
+test_that("filter() and select() keep a TwasWeights' weights", {
+    skip_if_not_installed("plyranges")
+    tw <- .tw_flatGene()
+    lasso <- dplyr::filter(tw, .method == "lasso")
+    # The other method keeps its entry, with no variants.
+    expect_equal(nrow(.twasCells(lasso)), 2L)
+    expect_length(
+        exec(variantIds, lasso, !!!.tw_flatSel, method = "fsusie"),
+        0L
+    )
+    # A selection cannot drop the weights or the alleles naming a variant.
+    picked <- dplyr::select(tw, A1)
+    expect_identical(
+        exec(weights, picked, !!!.tw_flatSel, method = "lasso"),
+        exec(weights, tw, !!!.tw_flatSel, method = "lasso")
+    )
+})
+
+# ---- fits dictionary --------------------------------------------------------
+
+# A joint mr.mash fit's rows: one per context, every one holding the same fit
+# and, with cross-validation, the same per-fold fits.
+.tw_jointRows <- function(withFolds = FALSE) {
+    cv <- if (withFolds) {
+        list(
+            predictions = c(s1 = 0.1, s2 = 0.2),
+            metrics = c(rsq = 0.3),
+            foldFits = list(fold_1 = list(w0 = 0.5), fold_2 = list(w0 = 0.6))
+        )
+    }
+    row <- TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), .tw_fit, cv)
+    TwasWeights(
+        studyName = c("s1", "s1"),
+        context = c("c1", "c2"),
+        trait = c("g1", "g1"),
+        method = c("mrmash", "mrmash"),
+        entry = list(row, row),
+        jointContexts = c("c1;c2", "c1;c2")
+    )
+}
+
+test_that("a fit the rows of a joint fit share is stored once", {
+    tw <- .tw_jointRows()
+    expect_length(.fitDict(tw), 1L)
+    keys <- unlist(S4Vectors::mcols(tw)$fits)
+    expect_identical(keys[[1L]], keys[[2L]])
+    for (ctx in c("c1", "c2")) {
+        expect_identical(
+            methodFits(tw, "s1", ctx, "g1", "mrmash"),
+            .tw_fit
+        )
+    }
+})
+
+test_that("per-fold fits are stored once and read back in place", {
+    tw <- .tw_jointRows(withFolds = TRUE)
+    # One full-data fit and one set of per-fold fits.
+    expect_length(.fitDict(tw), 2L)
+    cv <- cvResult(tw, "s1", "c2", "g1", "mrmash")
+    expect_identical(
+        cv$foldFits,
+        list(fold_1 = list(w0 = 0.5), fold_2 = list(w0 = 0.6))
+    )
+    expect_identical(names(cv), c("predictions", "metrics", "foldFits"))
+})
+
+# `x` as saved one row per gene before rows shared their fits: each method's
+# fit in its row's `fits` cell, the per-fold fits inside its cvResult, no
+# `foldFits` column and no dictionary.
+.tw_savedInlineFits <- function(x) {
+    md <- S4Vectors::mcols(x, use.names = FALSE)
+    cells <- .twasCells(x)
+    k <- list_c(map(lengths(md$methods), seq_len))
+    md$fits <- .tw_byRow(
+        map2(cells$row, k, .tw_inlineFit, x = x, md = md),
+        cells$row,
+        md$methods
+    )
+    md$cvResult <- .tw_byRow(
+        map2(cells$row, k, .tw_inlineCv, x = x, md = md),
+        cells$row,
+        md$methods
+    )
+    md$foldFits <- NULL
+    saved <- x
+    attr(saved, "elementMetadata") <- md
+    attr(saved, "fits") <- NULL
+    saved
+}
+
+# Per-cell values regrouped into per-row lists named by method.
+.tw_byRow <- function(values, rows, methods) {
+    S4Vectors::SimpleList(map2(
+        unname(split(values, rows)),
+        as.list(methods),
+        set_names
+    ))
+}
+
+.tw_inlineFit <- function(row, k, x, md) {
+    .fitEntry(md$fits[[row]][[k]], x)
+}
+
+.tw_inlineCv <- function(row, k, x, md) {
+    stored <- md$cvResult[[row]][[k]]
+    folds <- .fitEntry(md$foldFits[[row]][[k]], x)
+    if (is.null(folds)) stored else purrr::list_assign(stored, foldFits = folds)
+}
+
+test_that("updateObject() moves a gene's saved fits into the dictionary", {
+    tw <- .tw_jointRows(withFolds = TRUE)
+    saved <- .tw_savedInlineFits(tw)
+    expect_false(methods::.hasSlot(saved, "fits"))
+    up <- updateObject(saved)
+    expect_identical(up, tw)
+    expect_identical(updateObject(up), up)
+})
+
+test_that("combining keeps one copy of a fit the parts share", {
+    tw <- .tw_jointRows()
+    both <- combineTwasWeights(tw[1L], tw[2L])
+    expect_length(.fitDict(both), 1L)
+    expect_identical(both, tw)
+})
+
+test_that("a subset keeps only the fits its rows name", {
+    other <- list(coef = c(0.4, 0.5, 0.6), variantIds = .tw_ids)
+    tw <- .tw_collection(list(
+        TwasWeightsRow(.tw_ids, c(0.1, 0.2, 0.3), .tw_fit),
+        TwasWeightsRow(.tw_ids, c(0.4, 0.5, 0.6), other)
+    ))
+    expect_length(.fitDict(tw), 2L)
+    second <- tw[2L]
+    expect_length(.fitDict(second), 1L)
+    expect_identical(methodFits(second, "s1", "c1", "g2", "lasso"), other)
 })

@@ -23,16 +23,64 @@ NULL
 # =============================================================================
 
 #' @title Estimate SNP Heritability
-#' @description Estimate SNP heritability from GWAS summary statistics using
-#'   one of four methods: S-LDSC, g-LDSC, LDER, or HDL/sHDL. Supplying
-#'   \code{annotations} makes any of them stratified.
-#' @param sumstats A \code{GwasSumStats} object.
-#' @param ldRef An \code{LdStatistic} object (method-appropriate subclass):
-#'   an \code{\link{LdScore}} for \code{"sldsc"} / \code{"gldsc"}, an
-#'   \code{\link{LdEigen}} for \code{"lder"} / \code{"hdl"}. Build either
-#'   from loaded LD with \code{\link{buildLdScore}} /
-#'   \code{\link{buildLdEigen}}.
-#' @param method Character, one of \code{"lder"} (the default),
+#' @description Estimate SNP heritability, genome-wide from GWAS summary
+#'   statistics or per trait in its cis window from QTL summary statistics.
+#'   From a \code{GwasSumStats} and an LD reference, one of four methods
+#'   (S-LDSC, g-LDSC, LDER, or HDL/sHDL) gives one genome-wide estimate;
+#'   supplying \code{annotations} makes any of them stratified. From a
+#'   \code{QtlSumStats}, one of three methods (LAVA, HDL-L or FastHer) gives
+#'   one estimate per selected (study, context, trait) row, each from the
+#'   row's own statistics and LD reference.
+#' @details Each per-trait method is written from its authors' published
+#'   estimator and reports what they report:
+#'   \describe{
+#'     \item{\code{"lava"}}{(default) LAVA's univariate estimator (Werme et
+#'       al. 2022): the adjusted \eqn{R^2} of the trait on the standardized
+#'       LD components that hold 99\% of the LD variance (at least 2, at
+#'       most 0.75 times the sample size), with the F test of no
+#'       heritability. The estimate is scaled by \eqn{(N_{ref} - K - 1) /
+#'       (N_{ref} - 1)} for a reference of \eqn{N_{ref}} samples and
+#'       \eqn{K} components, a correction LAVA describes but leaves off.
+#'       LAVA itself withholds the estimate where \eqn{K} exceeds a tenth of
+#'       the sample size, which a cis window's components usually do at QTL
+#'       sample sizes; it is reported here at any \eqn{K}. On real genotypes
+#'       its error past that point was about twice that below it, still
+#'       below HDL-L's. The estimate can be negative.}
+#'     \item{\code{"hdlL"}}{HDL-L (Li et al. 2025): the likelihood of the
+#'       statistics rotated onto the LD eigenvectors that cover 99\% of the
+#'       trace, in the heritability and an intercept, with a term for the
+#'       reference's sampling noise. Its p-value is the likelihood ratio
+#'       against no heritability; \code{intercept} is the fitted intercept.
+#'       \code{NA} where no fit converges and beats that null.}
+#'     \item{\code{"fastHer"}}{FastHer (Svishcheva 2025): the maximum
+#'       likelihood of an infinitesimal model for the study samples,
+#'       computed in the LD eigenbasis, with a standard error from the
+#'       expected information; \code{scale} is the fitted phenotypic
+#'       variance relative to its standardized value, about 1 when the model
+#'       fits. HEELS (Li, Mazumder and Lin 2023) maximizes the same
+#'       likelihood by iteration. The likelihood assumes in-sample LD and is
+#'       undefined when the reference's rank, or the statistics' squared
+#'       norm in the LD's metric, reaches the sample size, as it can with an
+#'       external reference larger than the study; such traits are
+#'       \code{NA}, with a warning.}
+#'   }
+#'   Every per-trait method assumes the LD reference matches the population
+#'   of the statistics, as the QC step (\code{\link{summaryStatsQc}})
+#'   checks. LAVA and HDL-L read the reference's sample size, so an
+#'   \code{\link{LdMatrix}} reference must record \code{nSamples}. A trait
+#'   whose window holds no variants is \code{NA}, with a warning.
+#' @param sumstats A \code{GwasSumStats}, or a \code{QtlSumStats} that has
+#'   been through \code{\link{summaryStatsQc}}, each row with an LD
+#'   reference.
+#' @param ldRef For a \code{GwasSumStats}, an \code{LdStatistic} object
+#'   (method-appropriate subclass): an \code{\link{LdScore}} for
+#'   \code{"sldsc"} / \code{"gldsc"}, an \code{\link{LdEigen}} for
+#'   \code{"lder"} / \code{"hdl"}. Build either from loaded LD with
+#'   \code{\link{buildLdScore}} / \code{\link{buildLdEigen}}. Omitted for a
+#'   \code{QtlSumStats}, whose rows carry their own.
+#' @param method Character. For a \code{QtlSumStats}, one of \code{"lava"}
+#'   (the default), \code{"hdlL"} or \code{"fastHer"} (see Details). For a
+#'   \code{GwasSumStats}, one of \code{"lder"} (the default),
 #'   \code{"sldsc"}, \code{"gldsc"} or \code{"hdl"}:
 #'   \describe{
 #'     \item{\code{"sldsc"}}{Stratified LD score regression (Finucane et al.
@@ -47,15 +95,31 @@ NULL
 #'       stratified as sHDL. Models reference-panel noise explicitly, so it
 #'       shrinks hard when \code{nRef} is small.}
 #'   }
-#' @param annotations An \code{AnnotationMatrix} object, or NULL for
-#'   unstratified estimation.
-#' @param local Logical, whether to compute per-block local estimates.
-#' @param estimatorArgs Optional named list of estimator-specific options
-#'   (\code{lambda} for lder / gldsc / hdl, \code{nIter} for sldsc).
+#' @param annotations For a \code{GwasSumStats}, an \code{AnnotationMatrix}
+#'   object, or NULL for unstratified estimation.
+#' @param estimatorArgs For a \code{GwasSumStats}, an optional named list of
+#'   estimator-specific options (\code{nIter} for sldsc).
 #' @param ... Additional method-specific arguments.
-#' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
-#'   to this study; \code{NULL} matches all studies.
-#' @return An \code{H2Estimate} object.
+#' @param studyName For a \code{GwasSumStats}, the study to estimate (length
+#'   1), or \code{NULL} when it holds one.
+#' @return An \code{\linkS4class{H2Estimate}}. From a \code{GwasSumStats},
+#'   one row: the study's genome-wide estimate, whose element holds no
+#'   ranges. From a \code{QtlSumStats}, one row per selected (study,
+#'   context, trait), whose element is the window it covers.
+#' @references Werme J, van der Sluis S, Posthuma D, de Leeuw CA (2022). An
+#'   integrated framework for local genetic correlation analysis. Nature
+#'   Genetics 54, 274-282.
+#'
+#'   Li Y, Pawitan Y, Shen X (2025). An enhanced framework for local genetic
+#'   correlation analysis. Nature Genetics. doi:10.1038/s41588-025-02123-3.
+#'
+#'   Svishcheva GR (2025). FastHer: a fast and accurate estimator of local
+#'   heritability from GWAS summary statistics. bioRxiv.
+#'   doi:10.64898/2025.12.24.696369.
+#'
+#'   Li H, Mazumder R, Lin X (2023). Accurate and efficient estimation of
+#'   local heritability using summary statistics and the linkage
+#'   disequilibrium matrix. Nature Communications 14, 7954.
 #' @examples
 #' data(ldScoreExample)
 #' # The estimators index the z-scores by the reference's own variant order,
@@ -75,6 +139,10 @@ NULL
 #'   genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
 #'   ldReference = panel)
 #' estimateH2(ss, ldScoreExample, method = "sldsc")
+#'
+#' # Per-trait cis heritability, each row against its own LD reference.
+#' data(qtlSumStatsExample)
+#' estimateH2(qtlSumStatsExample)
 #' @export
 setGeneric(
     "estimateH2",
@@ -83,7 +151,6 @@ setGeneric(
         ldRef,
         method = "lder",
         annotations = NULL,
-        local = FALSE,
         ...
     ) {
         standardGeneric("estimateH2")
@@ -219,10 +286,15 @@ setGeneric("readGenotypes", function(path, format = NULL, ...) {
 #'   objects. Names become annotation names.
 #' @param snpRanges A \code{GRanges} object defining SNP positions.
 #' @param annotationMeta A \code{data.frame} with annotation metadata (name,
-#'   tier, type). If NULL, auto-detected from file format.
+#'   tier, type). If NULL, every annotation is a candidate, and its type is
+#'   continuous for a BigWig signal, binary for BED intervals, and for an
+#'   S-LDSC \code{.annot} column binary when its values are 0 and 1,
+#'   continuous otherwise.
 #' @param genome Character, genome build.
 #' @param ... Additional arguments.
-#' @return An \code{AnnotationMatrix} object.
+#' @return An \code{AnnotationMatrix} object. Its annotation matrix is stored
+#'   sparse (a \code{dgCMatrix}) when that is smaller than dense, as for
+#'   mostly-zero binary annotations.
 #' @examples
 #' bedFile <- tempfile(fileext = ".bed")
 #' writeLines("chr1\t100\t500\tregion1", bedFile)
@@ -241,20 +313,23 @@ setGeneric(
 # Accessor generics
 # =============================================================================
 
-#' @title Get Local Estimates
-#' @description Extract per-block local estimates from a result object.
-#' @param object An \code{H2Estimate} object.
-#' @return A \code{data.frame} of local estimates, or NULL.
-#' @examples
-#' data(h2EstimateExample)
-#' localH2Blocks(h2EstimateExample)
-#' @export
-setGeneric("localH2Blocks", function(object) standardGeneric("localH2Blocks"))
-
 #' @title Get Enrichment Estimates
-#' @description Extract annotation enrichment estimates from a result object.
+#' @description Extract the per-annotation enrichment of an
+#'   \code{H2Estimate}'s stratified estimates. Two shapes are possible,
+#'   depending on the route that produced an estimate:
+#'   \describe{
+#'     \item{partitioned}{tau-based enrichment of the baseline annotations,
+#'       with columns \code{annotation}, \code{tau}, \code{tauSe},
+#'       \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
+#'       \code{propH2}, \code{propSnps}.}
+#'     \item{score test}{the score test over the tested (candidate)
+#'       annotations, with columns \code{annotation}, \code{scoreZ},
+#'       \code{scoreP}.}
+#'   }
 #' @param object An \code{H2Estimate} object.
-#' @return A \code{data.frame} of enrichment estimates, or NULL.
+#' @return A tibble with one row per annotation of each stratified estimate,
+#'   led by the estimate's identity (\code{study}, \code{context},
+#'   \code{trait}, \code{method}); no rows when none is stratified.
 #' @examples
 #' data(h2EstimateExample)
 #' stratifiedHeritabilityEnrichment(h2EstimateExample)
@@ -264,9 +339,13 @@ setGeneric("stratifiedHeritabilityEnrichment", function(object) {
 })
 
 #' @title Get Score Statistics
-#' @description Extract score statistics for candidate annotations.
+#' @description Extract score statistics for candidate annotations, suitable
+#'   for input to \code{susieRss}.
 #' @param object An \code{H2Estimate} object.
-#' @return A list with \code{z} and \code{R}, or NULL.
+#' @return A list with one entry per estimate: \code{NULL} when it tested no
+#'   candidate annotations, otherwise a list of \code{z} (each candidate's
+#'   score z), \code{R} (the scores' correlation matrix) and
+#'   \code{annotationNames}.
 #' @examples
 #' data(h2EstimateExample)
 #' scoreStats(h2EstimateExample)
@@ -474,8 +553,8 @@ setGeneric("af", function(x, ...) standardGeneric("af"))
 
 #' @title Get Number of SNPs
 #' @description Number of SNPs in a \code{GwasSumStats} or \code{QtlSumStats}
-#'   entry, selected by its identity tuple, or the number of variants an
-#'   \code{H2Estimate} was computed over.
+#'   entry, selected by its identity tuple, or the number of variants each of
+#'   an \code{H2Estimate}'s estimates was computed over.
 #' @param x A \code{GwasSumStats}, \code{QtlSumStats} or \code{H2Estimate}
 #'   object.
 #' @param ... Class-specific selection arguments.
@@ -485,7 +564,7 @@ setGeneric("af", function(x, ...) standardGeneric("af"))
 #'   this context; \code{NULL} matches all contexts.
 #' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
 #'   this trait; \code{NULL} matches all traits.
-#' @return Integer.
+#' @return Integer; for an \code{H2Estimate}, one per estimate.
 #' @export
 setGeneric("nSnps", function(x, ...) standardGeneric("nSnps"))
 
@@ -1136,6 +1215,8 @@ setGeneric("credibleSets", function(x, ...) standardGeneric("credibleSets"))
 #' @param ... Reserved for future use.
 #' @return A \code{list} with \code{variantIds} (character) and \code{weights}
 #'   (numeric) of equal length; both empty when no usable weights are present.
+#'   A method whose weights are a matrix (one column per fSuSiE feature or
+#'   outcome) returns that matrix as \code{weights}, one row per variant id.
 #' @examples
 #' data(twasWeightsExample)
 #' w <- resolveWeights(twasWeightsExample, studyName = "protocol_example",
@@ -1188,16 +1269,31 @@ setGeneric("ctwasPosteriors", function(x, ...) {
 setGeneric("susieAlpha", function(x, ...) standardGeneric("susieAlpha"))
 
 #' @title Get cTWAS Group Prior Parameters
-#' @description Return the estimated \code{group_prior} / \code{group_prior_var}
-#'   of a \code{\link{CtwasResultEntry}}.
-#' @param x A \code{CtwasResultEntry}.
+#' @description Return the group priors a cTWAS run's EM step estimated
+#'   across all its regions: each group's prior inclusion probability
+#'   (\code{group_prior}) and prior effect variance
+#'   (\code{group_prior_var}).
+#' @param x A \code{CtwasResultEntry} or \code{CtwasResult}.
 #' @param ... Reserved for future use.
-#' @return The stored parameter object (typically a list), or \code{NULL}.
+#' @return On a \code{CtwasResultEntry}, the stored parameter object
+#'   (typically ctwas's \code{param} list), or \code{NULL}. On a
+#'   \code{CtwasResult}, a tibble with one row per run and group, led by the
+#'   run identity (\code{gwasStudy}, \code{study}, \code{context},
+#'   \code{method}, and the joint columns when present), then \code{group},
+#'   \code{group_size}, \code{group_prior} and \code{group_prior_var}. A
+#'   value the run did not record is \code{NA}, a run with no priors has no
+#'   rows, and each context of a joint run lists the priors they share.
 #' @examples
+#' priors <- list(group_prior = c(SNP = 1e-4, brain = 0.01),
+#'   group_prior_var = c(SNP = 10, brain = 20))
 #' cre <- CtwasResultEntry(
-#'   posteriors = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
-#'   susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
+#'   posteriors = GenomicRanges::GRanges("chr1",
+#'     IRanges::IRanges(100L, width = 1L), id = "g1", susie_pip = 0.9),
+#'   groupPriors = priors)
 #' ctwasGroupPriors(cre)
+#' cr <- CtwasResult(gwasStudy = "gwas1", studyName = "s1",
+#'   context = "brain", method = "susie", entry = list(cre))
+#' ctwasGroupPriors(cr)
 #' @export
 setGeneric("ctwasGroupPriors", function(x, ...) {
     standardGeneric("ctwasGroupPriors")
@@ -1271,8 +1367,8 @@ setGeneric("fullFit", function(x, ...) standardGeneric("fullFit"))
 setGeneric("cvFits", function(x, ...) standardGeneric("cvFits"))
 
 #' @title Get Method Names
-#' @description Extract the method name(s) an object was produced with: one
-#'   per entry for a collection, a single name for one estimate.
+#' @description Extract the unique method name(s) an object was produced
+#'   with.
 #' @param x A \code{QtlFineMappingResult}, \code{GwasFineMappingResult},
 #'   \code{TwasWeights}, \code{CtwasResult} or \code{H2Estimate} object.
 #' @return Character vector.
@@ -1491,9 +1587,11 @@ setGeneric("writeBed", function(obj, filename, ...) {
 # =============================================================================
 
 #' @title Get Study Identifier
-#' @description Return the study identifier carried by a \code{QtlDataset}.
-#' @param x A \code{QtlDataset} object.
-#' @return Character (length 1).
+#' @description Return the study identifier carried by a \code{QtlDataset},
+#'   or the unique studies of a \code{CtwasResult} or \code{H2Estimate}.
+#' @param x A \code{QtlDataset}, \code{CtwasResult} or \code{H2Estimate}
+#'   object.
+#' @return Character: length 1 for a \code{QtlDataset}.
 #' @export
 setGeneric("studyName", function(x) standardGeneric("studyName"))
 
@@ -1511,12 +1609,10 @@ setGeneric("contexts", function(x) standardGeneric("contexts"))
 
 #' @title Get Unique Trait Names
 #' @description Return the unique trait identifiers carried by a collection
-#'   class (e.g., \code{QtlSumStats}), the trait names of an
-#'   \code{\link{SldscData}}, or the single trait label an
-#'   \code{H2Estimate} was computed for.
+#'   class (e.g., \code{QtlSumStats} or \code{H2Estimate}, whose GWAS
+#'   estimates have none) or the trait names of an \code{\link{SldscData}}.
 #' @param x The object.
-#' @return Character vector of unique trait names; length 1 for an
-#'   \code{H2Estimate}.
+#' @return Character vector of unique trait names.
 #' @examples
 #' data(qtlSumStatsExample)
 #' traitNames(qtlSumStatsExample)
@@ -1839,10 +1935,11 @@ setGeneric("mixtureWeights", function(x) {
 })
 
 #' @title Get Per-Block tau Matrix
-#' @description Return the per-block jackknife tau matrix carried by an
-#'   \code{H2Estimate}.
+#' @description Return the per-block jackknife tau matrix of each of an
+#'   \code{H2Estimate}'s estimates.
 #' @param x An \code{H2Estimate}.
-#' @return A numeric matrix or NULL.
+#' @return A list with one entry per estimate: a numeric matrix (blocks x
+#'   annotations) for a stratified estimate, otherwise \code{NULL}.
 #' @examples
 #' data(h2EstimateExample)
 #' annotationJackknifeCoefs(h2EstimateExample)
@@ -1851,11 +1948,11 @@ setGeneric("annotationJackknifeCoefs", function(x) {
     standardGeneric("annotationJackknifeCoefs")
 })
 
-#' @title Get Global SNP Heritability
-#' @description Return the global SNP heritability estimate carried by an
-#'   \code{H2Estimate}.
+#' @title Get SNP Heritability
+#' @description Return the SNP heritability of each of an
+#'   \code{H2Estimate}'s estimates.
 #' @param x An \code{H2Estimate}.
-#' @return Numeric (length 1).
+#' @return Numeric, one per estimate.
 #' @examples
 #' data(h2EstimateExample)
 #' heritabilityEstimate(h2EstimateExample)
@@ -1865,10 +1962,10 @@ setGeneric("heritabilityEstimate", function(x) {
 })
 
 #' @title Get Heritability Standard Error
-#' @description Return the standard error of the global SNP heritability
-#'   estimate carried by an \code{H2Estimate}.
+#' @description Return the standard error of each of an \code{H2Estimate}'s
+#'   heritability estimates.
 #' @param x An \code{H2Estimate}.
-#' @return Numeric (length 1).
+#' @return Numeric, one per estimate.
 #' @examples
 #' data(h2EstimateExample)
 #' heritabilityEstimateSe(h2EstimateExample)
@@ -1878,11 +1975,12 @@ setGeneric("heritabilityEstimateSe", function(x) {
 })
 
 #' @title Get LD-Score Regression Intercept
-#' @description Return the regression intercept carried by an
-#'   \code{H2Estimate}. Values above 1 indicate confounding or sample overlap
-#'   rather than polygenic signal.
+#' @description Return the fitted intercept of each of an
+#'   \code{H2Estimate}'s estimates, \code{NA} for a method without one. An
+#'   S-LDSC intercept above 1 indicates confounding or sample overlap rather
+#'   than polygenic signal.
 #' @param x An \code{H2Estimate}.
-#' @return Numeric (length 1).
+#' @return Numeric, one per estimate.
 #' @examples
 #' data(h2EstimateExample)
 #' heritabilityIntercept(h2EstimateExample)
@@ -1892,10 +1990,10 @@ setGeneric("heritabilityIntercept", function(x) {
 })
 
 #' @title Get Intercept Standard Error
-#' @description Return the standard error of the regression intercept carried
-#'   by an \code{H2Estimate}.
+#' @description Return the standard error of each of an \code{H2Estimate}'s
+#'   fitted intercepts.
 #' @param x An \code{H2Estimate}.
-#' @return Numeric (length 1).
+#' @return Numeric, one per estimate.
 #' @examples
 #' data(h2EstimateExample)
 #' heritabilityInterceptSe(h2EstimateExample)
@@ -2088,9 +2186,11 @@ setGeneric("sldscResults", function(x, trait = NULL, ...) {
 
 #' @title Colocalization Views
 #' @description The five views over a \code{\linkS4class{ColocResult}}. The
-#'   object stores one element per tested (QTL credible set, GWAS credible set,
-#'   block) pair; these accessors project it to the granularity a given
-#'   analysis needs, rather than any one of them being the stored shape.
+#'   object stores one element per scored group (a QTL row against a GWAS
+#'   row in one block) and, nested in it, one row per tested (QTL credible
+#'   set, GWAS credible set) pair; these accessors project it to the
+#'   granularity a given analysis needs, rather than any one of them being
+#'   the stored shape.
 #'
 #'   \describe{
 #'     \item{\code{colocPairs()}}{One row per tested pair -- coloc's native

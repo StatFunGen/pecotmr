@@ -15,15 +15,20 @@
 # the cached per-region LD panels. Those two duties are why the token cannot
 # simply be the backing genotype file: every block on a chromosome shares that
 # file, so each block was handed the FIRST block's LD panel. The tokens are
-# per-region sentinels under the session tempdir instead, and are therefore
-# gone when a saved object is read back -- `.ctwasResolveLdPaths()` re-mints
-# one per region on the way in and re-keys the loader cache onto them, so no
-# path from the building machine is ever baked into the .rda.
+# per-region sentinels under the session tempdir instead. The .rda does carry
+# them -- the building machine's tempdir paths -- but they are gone when a
+# saved object is read back, and `.ctwasResolveLdPaths()` re-mints one per
+# region on the way in and re-keys the loader cache onto them, so the stored
+# paths are never read.
 #
 # Run from the package root:
 #   Rscript inst/scripts/build_ctwas_examples.R
 # =============================================================================
 
+# Without source references: a payload's functions would otherwise carry
+# their whole source file into the .rda (the loader factories also strip
+# them, so this is what keeps any other function in a payload clean).
+options(keep.source = FALSE)
 devtools::load_all(".", quiet = TRUE)
 
 # A bundled stem as the portable reference the serialized objects carry, so

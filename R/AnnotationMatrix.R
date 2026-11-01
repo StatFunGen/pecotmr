@@ -28,6 +28,11 @@ NULL
 #'   together -- and \code{\link{baselineAnnotations}} /
 #'   \code{\link{testedAnnotations}}
 #'   are column subsets rather than reconstructions.
+#'
+#'   The annotation matrix may be sparse (a \code{dgCMatrix}):
+#'   \code{\link{readAnnotations}} stores it so when that is smaller, as for
+#'   mostly-zero binary annotations, and the heritability estimators read
+#'   it either way.
 #' @importClassesFrom SummarizedExperiment RangedSummarizedExperiment
 #' @export
 setClass(

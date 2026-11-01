@@ -13,11 +13,12 @@ annotationJackknifeCoefs(x)
 \item{x}{An \code{H2Estimate}.}
 }
 \value{
-A numeric matrix or NULL.
+A list with one entry per estimate: a numeric matrix (blocks x
+  annotations) for a stratified estimate, otherwise \code{NULL}.
 }
 \description{
-Return the per-block jackknife tau matrix carried by an
-  \code{H2Estimate}.
+Return the per-block jackknife tau matrix of each of an
+  \code{H2Estimate}'s estimates.
 }
 \examples{
 data(h2EstimateExample)

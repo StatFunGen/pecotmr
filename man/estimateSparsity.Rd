@@ -22,8 +22,8 @@ Computes an empirical estimate of the proportion of non-zero effects
 at zero (spike) plus continuous components (slab), and learns the mixture
 proportions via variational EM. The sparsity estimate \code{1 - pi[1]} is the
 empirical Bayes estimate of the non-null proportion, which can be used as a
-data-driven prior for the inclusion probability parameters (\code{pi} for
-bayesC, \code{probIn} for BayesB) of spike-and-slab Bayesian methods.
+data-driven prior for the inclusion probability, \code{pi}, of the
+spike-and-slab Bayesian methods (bayesB and bayesC).
 }
 \examples{
 estimateSparsity(list(mrash_weights = structure(c(0.1, 0, 0.3),

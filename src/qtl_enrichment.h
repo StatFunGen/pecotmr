@@ -1,3 +1,10 @@
+// qtl_enrichment.h -- QTL enrichment in GWAS signals, estimated by EM over
+// causal variants imputed from the QTL SuSiE fits.
+//
+// Adapted from fastenloc (https://github.com/xqwen/fastenloc), Copyright (C)
+// Xiaoquan Wen, distributed under the GNU General Public License, version 3
+// or (at your option) any later version. See inst/COPYRIGHTS.
+
 #ifndef QTL_ENRICHMENT_HPP
 #define QTL_ENRICHMENT_HPP
 #include <cpp11.hpp>

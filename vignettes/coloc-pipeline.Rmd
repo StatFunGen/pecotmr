@@ -34,9 +34,10 @@ Inputs:
 - **GWAS input** — either a `GwasSumStats` (fine-mapping run internally) or a
 `GwasFineMappingResult` (used directly).
 
-The output is a `ColocResult`: one element per tested
-`(QTL credible set, GWAS credible set, block)` pair, holding that pair's
-aligned variants. Pair-level posteriors (`PP.H0.abf` … `PP.H4.abf`) and the
+The output is a `ColocResult`: one element per scored group (a QTL row
+against a GWAS row in one block), holding the group's aligned variants once,
+with one row per tested `(QTL credible set, GWAS credible set)` pair nested
+in it. Pair-level posteriors (`PP.H0.abf` … `PP.H4.abf`) and each pair's
 per-variant `SNP.PP.H4` are both kept, and four accessors project the object
 to whichever granularity an analysis needs — see
 [Reading the result](#reading-the-result).

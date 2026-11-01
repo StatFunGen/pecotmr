@@ -939,14 +939,47 @@ test_that(".ucscRanges merges two spellings of one chromosome", {
     expect_identical(unname(GenomeInfoDb::genome(out)), c("hg38", "hg38"))
 })
 
-test_that(".ucscEntries renames every element and keeps a NULL one", {
-    out <- pecotmr:::.ucscEntries(list(
+test_that(".canonEntries renames every element and keeps a NULL one", {
+    out <- pecotmr:::.canonEntries(list(
         a = GenomicRanges::GRanges("22", IRanges::IRanges(1L, width = 1L)),
         b = NULL
     ))
     expect_identical(names(out), c("a", "b"))
     expect_identical(as.character(GenomicRanges::seqnames(out$a)), "chr22")
     expect_null(out$b)
+})
+
+test_that("alleles enter in upper case; labels keep their spelling", {
+    # A lowercase allele column made a row's id disagree with its alleles once
+    # harmonization uppercased them, and failed exact joins on either.
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = "rs1a",
+        A1 = "g",
+        A2 = "a"
+    )
+    out <- pecotmr:::.canonEntries(list(gr))[[1L]]
+    expect_identical(out$A1, "G")
+    expect_identical(out$A2, "A")
+    expect_identical(out$SNP, "rs1a")
+    # The id utilities agree: parsed and rendered alleles are upper case.
+    parsed <- parseVariantId(c("chr1:100:a:g", "rs1"))
+    expect_identical(parsed$A2, c("A", NA))
+    expect_identical(parsed$A1, c("G", NA))
+    expect_identical(
+        pecotmr:::formatVariantId("1", 100L, "a", "g"),
+        "chr1:100:A:G"
+    )
+    expect_identical(
+        normalizeVariantId(c("1:100:a:g", "rs1")),
+        c("chr1:100:A:G", "rs1")
+    )
+    df <- parseVariantId(data.frame(chrom = 1, pos = 100, A2 = "a", A1 = "g"))
+    expect_identical(c(df$A2, df$A1), c("A", "G"))
+    expect_identical(
+        pecotmr:::detectVariantConvention("chr1:100_a_g")$alleleSep,
+        "_"
+    )
 })
 
 test_that(".ucscExperiment renames an experiment's rowRanges only", {
@@ -964,6 +997,35 @@ test_that(".ucscExperiment renames an experiment's rowRanges only", {
     expect_identical(GenomeInfoDb::seqlevels(out), "chrX")
     expect_identical(SummarizedExperiment::assay(out), m)
     expect_identical(pecotmr:::.ucscExperiment(out), out)
+})
+
+test_that(".canonExperiment also puts a panel's alleles in upper case", {
+    # A panel built outside pecotmr reaches every pipeline through .asLdRef(),
+    # and a QtlDataset's genotypes through its constructor; both land here.
+    m <- matrix(1, 1L, 1L, dimnames = list("v", "s"))
+    panel <- SummarizedExperiment::SummarizedExperiment(
+        list(x = m),
+        rowRanges = GenomicRanges::GRanges(
+            "22",
+            IRanges::IRanges(9L, width = 1L),
+            A1 = "g",
+            A2 = "a"
+        )
+    )
+    out <- pecotmr:::.asLdRef(panel)
+    mc <- S4Vectors::mcols(SummarizedExperiment::rowRanges(out))
+    expect_identical(c(mc$A1, mc$A2), c("G", "A"))
+    expect_identical(GenomeInfoDb::seqlevels(out), "chr22")
+    expect_identical(SummarizedExperiment::assay(out), m)
+    # An experiment with no alleles, a phenotype's, is only renamed; one
+    # with no rowRanges at all (QtlDataset accepts it) passes through.
+    plain <- SummarizedExperiment::SummarizedExperiment(
+        list(x = m),
+        rowRanges = GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 1L))
+    )
+    expect_identical(pecotmr:::.canonExperiment(plain), plain)
+    bare <- SummarizedExperiment::SummarizedExperiment(list(x = m))
+    expect_identical(pecotmr:::.canonExperiment(bare), bare)
 })
 
 # ===========================================================================

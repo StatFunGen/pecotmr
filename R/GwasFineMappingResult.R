@@ -201,7 +201,7 @@ GwasFineMappingResult <- function(
         study = as.character(studyName),
         method = as.character(method),
         susieFit = S4Vectors::SimpleList(map(entry, susieFit)),
-        cvResult = S4Vectors::SimpleList(map(entry, cvResult)),
+        cvResult = S4Vectors::SimpleList(map(entry, .fmRowCvStored)),
         derivedColumns = IRanges::CharacterList(
             map(entry, .fmRowDerivedColumns)
         )
@@ -222,7 +222,16 @@ GwasFineMappingResult <- function(
 .gfmrBuild <- function(entry, cols, region, ldReference) {
     n <- length(entry)
     dict <- .ldRefDict(.ldRefPerTuple(ldReference, n))
-    dfArgs <- c(cols, list(ldReference = dict$keys, check.names = FALSE))
+    cv <- .cvStoredColumn(as.list(cols[["cvResult"]]))
+    fitted <- .dictBuild(as.list(cols[["susieFit"]]), .FIT_DICT_PREFIX)
+    dfArgs <- c(
+        list_assign(cols, cvResult = cv$cvResult, susieFit = fitted$keys),
+        list(
+            ldReference = dict$keys,
+            cvPartition = cv$keys,
+            check.names = FALSE
+        )
+    )
     split <- .rtlSplitBySeqname(map(entry, variants))
     pieces <- .rtlBindElements(split$entry)
     grl <- S4Vectors::`mcols<-`(
@@ -234,7 +243,13 @@ GwasFineMappingResult <- function(
             pieces
         )
     )
-    new("GwasFineMappingResult", .rtlNamed(grl), ldReference = dict$refs)
+    new(
+        "GwasFineMappingResult",
+        .rtlStored("GwasFineMappingResult", .rtlNamed(grl)),
+        ldReference = dict$entries,
+        cvPartition = cv$entries,
+        fits = fitted$entries
+    )
 }
 
 # The window each entry was given: its `region`, when the caller passed one.

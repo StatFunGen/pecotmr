@@ -14,7 +14,7 @@ qtlAssociationPostprocess(x, ...)
   cisWindow = 0,
   methods = c("permutation", "bonferroni"),
   pvalueCol = "P",
-  afCol = "af",
+  afCol = "AF",
   qvalueArgs = QvalueOptions()
 )
 }
@@ -26,7 +26,7 @@ qtlAssociationPostprocess(x, ...)
 \item{fdrThreshold}{Event- and variant-level FDR threshold (default 0.05).}
 
 \item{mafCutoff}{Minor-allele-frequency cutoff for the FILTERED Bonferroni
-flavour (fold of the per-variant \code{af} mcol). \code{0} disables it.}
+flavour (fold of the per-variant \code{AF} mcol). \code{0} disables it.}
 
 \item{cisWindow}{cis-window (bp) for the FILTERED Bonferroni flavour, applied
 to the per-variant \code{tss_distance}/\code{tes_distance} mcols. \code{0}
@@ -42,7 +42,8 @@ no stored column -- it is a significance query (see
 \code{significantQtls}).}
 
 \item{pvalueCol, afCol}{Entry mcol names for the per-variant p-value / allele
-frequency (defaults \code{"P"} / \code{"af"}).}
+frequency (defaults \code{"P"} / \code{"AF"}, the columns a
+\code{QtlSumStats} stores them in).}
 
 \item{qvalueArgs}{Extra arguments for \code{qvalue::qvalue()}, built with
 \code{\link{QvalueOptions}} -- the \code{pi0.method} / \code{lambda}

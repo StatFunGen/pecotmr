@@ -372,17 +372,19 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # Normalise an LD-reference input to the shape the slot holds: a panel or an
 # LdMatrix as given, a bare GenotypeHandle wrapped into a panel -- so a sketch
 # and QtlDataset's genotype experiment end up being the same object with
-# different provenance rather than two spellings of one idea.
+# different provenance rather than two spellings of one idea. A panel leaves
+# in pecotmr's spelling (UCSC chromosomes, upper-case alleles), as one built
+# outside pecotmr may not arrive in it.
 # @noRd
 .asLdRef <- function(x) {
     if (is.null(x) || .ldIsMatrixRef(x) || .ldIsMixtureRef(x)) {
         return(x)
     }
     if (methods::is(x, "RangedSummarizedExperiment")) {
-        return(x)
+        return(.canonExperiment(x))
     }
     if (methods::is(x, "GenotypeHandle")) {
-        return(.genotypeExperiment(x))
+        return(.canonExperiment(.genotypeExperiment(x)))
     }
     abort(glue(
         "`ldReference` must be a genotype panel (see readGenotypes()), a ",
@@ -453,47 +455,27 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     map(unname(ldReference), .asLdRef)
 }
 
-# Each distinct reference among `perRow` once, named ld1, ld2, ... in order
-# of first use, and every row's key into them (NA for an LD-free row).
+# The ldReference row dictionary (see the row dictionaries in
+# tupleSelectors.R): the slot holds each distinct reference once, named ld1,
+# ld2, ..., and the `ldReference` mcols column names every row's.
+# @noRd
+.LD_REF_DICT <- list(
+    slot = "ldReference",
+    keyCol = "ldReference",
+    prefix = "ld"
+)
+
+# Each distinct reference among `perRow` once, and every row's key into them
+# (NA for an LD-free row).
 # @noRd
 .ldRefDict <- function(perRow) {
-    present <- which(!map_lgl(perRow, is.null))
-    ids <- .ldRefIdentities(perRow[present])
-    firstIdx <- which(!duplicated(ids))
-    keys <- str_c("ld", seq_along(firstIdx))
-    rowKeys <- replace(
-        rep(NA_character_, length(perRow)),
-        present,
-        keys[match(ids, ids[firstIdx])]
-    )
-    refs <- if (length(firstIdx) == 0L) {
-        list()
-    } else {
-        set_names(perRow[present[firstIdx]], keys)
-    }
-    list(refs = refs, keys = rowKeys)
-}
-
-# A content identity per reference, so equal references -- the same object
-# handed to every row, or two equal copies -- collapse to one entry. Hashed
-# once per distinct object rather than per row: a large LdMatrix shared by
-# every row is read once, not once per row.
-# @noRd
-#' @importFrom rlang hash obj_address
-.ldRefIdentities <- function(refs) {
-    if (length(refs) == 0L) {
-        return(character(0))
-    }
-    addresses <- map_chr(refs, obj_address)
-    firstOfAddress <- !duplicated(addresses)
-    hashes <- map_chr(refs[firstOfAddress], hash)
-    hashes[match(addresses, addresses[firstOfAddress])]
+    .dictBuild(perRow, .LD_REF_DICT$prefix)
 }
 
 # Each row's key into its collection's LD references (NA for an LD-free row).
 # @noRd
 .ldRefKeys <- function(x) {
-    mcols(x, use.names = FALSE)$ldReference %||% rep(NA_character_, length(x))
+    .dictKeys(x, .LD_REF_DICT)
 }
 
 # What a collection reports as its LD references: the entries some row names,
@@ -514,7 +496,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.list(refs) || is.object(refs)) {
         .abortSavedLdRef(x)
     }
-    .ldRefsUsed(refs, .ldRefKeys(x))
+    .dictUsed(refs, .ldRefKeys(x))
 }
 
 # @noRd
@@ -528,18 +510,10 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     ))
 }
 
-# The entries of `refs` some key in `keys` names.
-# @noRd
-.ldRefsUsed <- function(refs, keys) {
-    used <- refs[is_in(names(refs), keys)]
-    if (length(used) == 0L) list() else used
-}
-
 # Every row's LD reference, NULL for an LD-free row.
 # @noRd
 .rowLdRefs <- function(x) {
-    refs <- ldReference(x)
-    map(.ldRefKeys(x), .ldRefForKey, refs = refs)
+    map(.ldRefKeys(x), .dictEntryFor, entries = ldReference(x))
 }
 
 # Result records tagged with the LD reference of the input row they came
@@ -555,15 +529,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # written first and the keys second, so the object is only validated once
 # the two agree.
 # @noRd
-#' @importFrom methods slot<-
 .withRowLdRefs <- function(x, ldReference) {
-    dict <- .ldRefDict(.ldRefPerTuple(ldReference, length(x)))
-    md <- mcols(x, use.names = FALSE)
-    md[["ldReference"]] <- dict$keys
-    S4Vectors::`mcols<-`(
-        `slot<-`(x, "ldReference", check = FALSE, value = dict$refs),
-        value = md
-    )
+    .withRowDict(x, .LD_REF_DICT, .ldRefPerTuple(ldReference, length(x)))
 }
 
 # `object` as saved before its references became per-row -- one reference,
@@ -584,12 +551,11 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.list(old) || is.object(old)) {
         return(.withRowLdRefs(object, .updateLdRefOrKeep(old)))
     }
-    `slot<-`(
-        object,
-        "ldReference",
-        check = FALSE,
-        value = map(old, .updateLdRefOrKeep)
+    methods::slot(object, "ldReference", check = FALSE) <- map(
+        old,
+        .updateLdRefOrKeep
     )
+    object
 }
 
 # A collection's LD reference as saved, brought up to date (.updatePanel()).
@@ -614,12 +580,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # Row `i`'s LD reference, or NULL for an LD-free row.
 # @noRd
 .rowLdRef <- function(x, i) {
-    .ldRefForKey(.ldRefKeys(x)[[i]], ldReference(x))
-}
-
-# @noRd
-.ldRefForKey <- function(key, refs) {
-    if (is.na(key)) NULL else refs[[key]]
+    .dictEntryFor(.ldRefKeys(x)[[i]], ldReference(x))
 }
 
 # What is wrong with an LD-reference list and the keys pointing into it, or
@@ -627,31 +588,18 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # repeated one leaves a row pointing at nothing, or at two references.
 # @noRd
 .ldRefDictProblems <- function(refs, keys) {
-    if (length(refs) > 0L) {
-        nms <- names(refs)
-        badNames <- is.null(nms) ||
-            anyNA(nms) ||
-            any(nms == "") ||
-            anyDuplicated(nms) > 0L
-        if (badNames) {
-            return("ldReference entries must have unique, non-empty names")
-        }
-        bad <- nms[!map_lgl(refs, .ldIsReference)]
-        if (length(bad) > 0L) {
-            return(str_c(
-                "ldReference entries that are not LD references: ",
-                str_flatten(bad, ", ")
-            ))
-        }
+    named <- .dictNameProblem(refs, "ldReference")
+    if (!is.null(named)) {
+        return(named)
     }
-    unknown <- setdiff(keys[!is.na(keys)], names(refs))
-    if (length(unknown) == 0L) {
-        return(NULL)
+    bad <- names(refs)[!map_lgl(refs, .ldIsReference)]
+    if (length(bad) > 0L) {
+        return(str_c(
+            "ldReference entries that are not LD references: ",
+            str_flatten(bad, ", ")
+        ))
     }
-    str_c(
-        "rows name LD reference(s) not in ldReference: ",
-        str_flatten(unknown, ", ")
-    )
+    .dictKeyProblem(refs, keys, "ldReference", "LD reference(s)")
 }
 
 # The GenotypeHandle a panel reads through, or NULL when it reads through
@@ -795,14 +743,15 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 }
 
 # A panel cut to the variants `keep` marks (a mask or positions). A panel
-# whose rows are exactly its seed's, cut to an ordered subset, has the seed
-# cut too -- a GenotypeHandle trimmed, a VCF, GDS or PLINK1 seed cut to the
-# records the kept rows read -- so the cut panel's seed does not carry the
-# dropped variants' metadata (see .emptyPanel()); its rowRanges, samples,
-# colData and recorded metadata are its own, cut alike, so no sidecar is read
-# again. Any other cut -- of a panel that is itself a row subset, of one held
-# in memory or whose handle predates fileIdx, or one that reorders or repeats
-# rows -- is taken from its assay, which then reads only those rows.
+# whose rows are its seed's, or a row subset of them, cut to rows the seed
+# holds in order, has the seed cut too -- a GenotypeHandle trimmed, a VCF,
+# GDS or PLINK1 seed cut to the records the kept rows read -- so the cut
+# panel's seed does not carry the dropped variants' metadata (see
+# .emptyPanel()); its rowRanges, samples, colData and recorded metadata are
+# its own, cut alike, so no sidecar is read again. Any other cut -- of a
+# panel held in memory or whose handle predates fileIdx, or one that
+# reorders or repeats the seed's rows -- is taken from its assay, which then
+# reads only those rows.
 # @noRd
 .panelSubsetRows <- function(panel, keep) {
     keepIdx <- if (is.logical(keep)) which(keep) else as.integer(keep)
@@ -824,24 +773,66 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # or NULL when the seed cannot be cut so (see .panelSubsetRows()).
 # @noRd
 .panelCutDosage <- function(panel, keepIdx) {
+    rows <- .panelSeedRows(panel)
+    if (is.null(rows)) {
+        return(NULL)
+    }
+    seedRows <- rows[keepIdx]
     if (
-        length(keepIdx) >= nrow(panel) ||
-            is.unsorted(keepIdx, strictly = TRUE)
+        is.unsorted(seedRows, strictly = TRUE) ||
+            length(seedRows) >= .panelFullDims(panel)[[1L]]
     ) {
         return(NULL)
     }
     seed <- .panelSeed(panel)
-    if (
-        methods::is(seed, "GenotypeDosageSeed") &&
-            identical(rownames(panel), dimnames(seed)[[1L]])
-    ) {
-        return(DelayedArray::DelayedArray(.gdSeedRows(seed, keepIdx)))
+    if (methods::is(seed, "GenotypeDosageSeed")) {
+        return(DelayedArray::DelayedArray(.gdSeedRows(seed, seedRows)))
     }
     handle <- .ldRefHandle(panel)
-    if (is.null(handle) || !.panelRowsAreHandle(panel, handle)) {
+    if (is.null(handle) || !is_in("fileIdx", names(snpInfo(handle)))) {
         return(NULL)
     }
-    genotypeDelayedArray(.subsetGenotypeHandle(handle, keepIdx))
+    genotypeDelayedArray(.subsetGenotypeHandle(handle, seedRows))
+}
+
+# A panel's rows as rows of its dosage seed (.panelSeedIndex()), or NULL.
+# @noRd
+.panelSeedRows <- function(panel) {
+    .panelSeedIndex(panel)[[1L]]
+}
+
+# A panel's rows and columns as positions in its dosage seed: all of each,
+# in order, when its dosages are the seed's own; the indices of the one
+# subset that takes them from it otherwise. NULL when its dosages are held
+# another way (in memory, or behind other delayed operations). Positions,
+# not names: a seed keeps no row names, and a panel's rows may have been
+# renamed.
+# @noRd
+.panelSeedIndex <- function(panel) {
+    dosage <- SummarizedExperiment::assay(
+        panel,
+        "dosage",
+        withDimnames = FALSE
+    )
+    if (!methods::is(dosage, "DelayedArray")) {
+        return(NULL)
+    }
+    if (DelayedArray::isPristine(dosage)) {
+        return(list(seq_len(nrow(dosage)), seq_len(ncol(dosage))))
+    }
+    node <- methods::slot(dosage, "seed")
+    if (
+        !methods::is(node, "DelayedSubset") ||
+            methods::is(methods::slot(node, "seed"), "DelayedOp")
+    ) {
+        return(NULL)
+    }
+    whole <- dim(methods::slot(node, "seed"))
+    index <- methods::slot(node, "index")
+    list(
+        index[[1L]] %||% seq_len(whole[[1L]]),
+        index[[2L]] %||% seq_len(whole[[2L]])
+    )
 }
 
 # A panel's dimensions before any subsetting: its dosage seed's, or its own
@@ -850,15 +841,6 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 .panelFullDims <- function(panel) {
     seed <- .panelSeed(panel)
     if (is.null(seed)) dim(panel) else dim(seed)
-}
-
-# TRUE when a panel's rows are its handle's own, in order, and the handle can
-# be trimmed (it records each variant's file position).
-# @noRd
-.panelRowsAreHandle <- function(panel, handle) {
-    si <- snpInfo(handle)
-    is_in("fileIdx", names(si)) &&
-        identical(rownames(panel), normalizeVariantId(as.character(si$SNP)))
 }
 
 # A panel with no variants, held in memory. `x[integer(0), ]` would drop the
@@ -982,9 +964,12 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     }
     if (methods::is(x, "RangedSummarizedExperiment")) {
         # A panel built outside pecotmr may spell its chromosomes otherwise.
-        return(.ucscRanges(SummarizedExperiment::rowRanges(x)))
+        # Its file labels are put back where it keeps them as its rownames.
+        return(.withPanelLabels(
+            .ucscRanges(SummarizedExperiment::rowRanges(x))
+        ))
     }
-    .genotypeSnpRanges(x, normalizeVariantId(as.character(snpInfo(x)$SNP)))
+    .withPanelLabels(.genotypeSnpRanges(x, .panelRowNames(snpInfo(x))))
 }
 
 # How many variants an LD reference covers.
@@ -1014,12 +999,49 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # misses the variant it just harmonized.
 # @noRd
 .ldRefMatchIds <- function(x) {
+    gr <- .ldRefRanges(x)
+    mc <- S4Vectors::mcols(gr)
+    # Rendered from the reference's own ranges and alleles, in the canonical
+    # form harmonization gives every id (UCSC chromosome, colons, upper-case
+    # alleles), so a variant meets it however the file labelled it: lower
+    # case, underscores, a tag where an allele belongs, or an rsID, which
+    # names no position to match on. A reference without alleles has only
+    # its labels.
+    if (is.null(mc$A1) || is.null(mc$A2)) {
+        return(.ldRefLabels(x))
+    }
+    .grVariantIds(gr)
+}
+
+# A reference's own labels, in the canonical form: an id whose allele fields
+# are tags is repaired from the A2/A1 columns, and an rsID passes through.
+# @noRd
+.ldRefLabels <- function(x) {
     mc <- S4Vectors::mcols(.ldRefRanges(x))
     ids <- as.character(mc$SNP)
-    if (is.null(mc$A1) || is.null(mc$A2)) {
-        return(ids)
+    repaired <- if (is.null(mc$A1) || is.null(mc$A2)) {
+        ids
+    } else {
+        .repairVariantIds(ids, as.character(mc$A2), as.character(mc$A1))
     }
-    .repairVariantIds(ids, as.character(mc$A2), as.character(mc$A1))
+    normalizeVariantId(repaired)
+}
+
+# The keys reference `x` is matched by for the query ids `ids`: its rendered
+# ids (.ldRefMatchIds()), which chrom:pos:ref:alt ids meet by position and
+# alleles; or its labels when the query is itself labels (rsIDs), which
+# carry no position to match on.
+# @noRd
+.ldRefKeysFor <- function(x, ids) {
+    if (.areVariantLabels(ids)) .ldRefLabels(x) else .ldRefMatchIds(x)
+}
+
+# TRUE when ids cannot be read as chrom:pos:ref:alt, as matchVariants() then
+# falls back to matching them as strings.
+# @noRd
+.areVariantLabels <- function(ids) {
+    parsed <- parseVariantId(ids)
+    nrow(parsed) == 0L || anyNA(parsed$chrom) || anyNA(parsed$pos)
 }
 
 # Per-variant chromosome.
@@ -1195,7 +1217,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     rr <- SummarizedExperiment::rowRanges(panel)
     mc <- S4Vectors::mcols(rr)
     mc$AF <- as.numeric(record$af$alt_freq)[
-        match(as.character(mc$SNP), record$af$id)
+        match(.panelLabels(rr), record$af$id)
     ]
     withAf <- SummarizedExperiment::`rowRanges<-`(
         panel,
@@ -1285,11 +1307,11 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 
 # Match requested ids to the panel; NULL if none match. Returns kept ids/order.
 .ldFromRefMatch <- function(ldReference, variantIds, label, onMissing) {
-    # Match by (chrom, pos, allele) tuple with an exact id-string fallback for
-    # rsID panels; the caller's original ids and order are preserved.
+    # Match by (chrom, pos, allele) tuple, or by label for a query of labels;
+    # the caller's original ids and order are preserved.
     m <- matchVariants(
         variantIds,
-        .ldRefMatchIds(ldReference),
+        .ldRefKeysFor(ldReference, variantIds),
         removeStrandAmbiguous = FALSE
     )
     nMissing <- length(variantIds) - length(m$idxA)
@@ -1348,7 +1370,6 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (is.null(matched)) {
         return(NULL)
     }
-    ldMat <- .ldRefLdAt(ldReference, matched$idx)
     # The match above is allele-aware, so a panel entry whose alleles are
     # swapped relative to the caller's id still matches -- but the dosage it
     # returns counts the OTHER allele, which negates every correlation that
@@ -1356,16 +1377,58 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     # the caller's frame exactly as `.cbFlipPairToCanonical()` does:
     # LD_ij -> sign_i * sign_j * LD_ij. A no-op on a harmonized panel, where
     # every sign is +1.
-    signed <- if (any(matched$sign < 0)) {
-        ldMat * outer(matched$sign, matched$sign)
-    } else {
-        ldMat
-    }
-    named <- `dimnames<-`(signed, list(matched$keptIds, matched$keptIds))
+    ldMat <- .ldSignFlipped(
+        .ldRefLdAt(ldReference, matched$idx),
+        matched$sign
+    )
+    dimnames(ldMat) <- list(matched$keptIds, matched$keptIds)
     if (onMissing == "drop") {
-        return(`attr<-`(named, "keptVariantIds", matched$keptIds))
+        attr(ldMat, "keptVariantIds") <- matched$keptIds
     }
-    named
+    ldMat
+}
+
+# `R` with each variant's rows and columns multiplied by its allele sign,
+# LD_ij -> sign_i * sign_j * LD_ij: the flipped variants' rows and columns
+# are negated where they stand, so a flip costs only those rows.
+# @noRd
+.ldSignFlipped <- function(R, sign) {
+    flip <- which(sign < 0)
+    if (length(flip) == 0L) {
+        return(R)
+    }
+    R[flip, ] <- -R[flip, , drop = FALSE]
+    R[, flip] <- -R[, flip, drop = FALSE]
+    R
+}
+
+# An LdMatrix's LD over `variantIds`, matched and allele-aligned as
+# .ldFromRef() aligns its matrix, as a packed LD source (.ldSourceRows()):
+# its block, read packed from the LdMatrix's storage, with each variant's
+# allele sign applied as the source is read, so the p x p matrix is never
+# formed. `onMissing` is .ldFromRef()'s, with the ids kept recorded the same
+# way.
+# @noRd
+.ldPackedFromRef <- function(
+    ldReference,
+    variantIds,
+    label,
+    onMissing = c("error", "drop")
+) {
+    .ldFromRefValidate(ldReference, label)
+    onMissing <- arg_match(onMissing)
+    matched <- .ldFromRefMatch(ldReference, variantIds, label, onMissing)
+    if (is.null(matched)) {
+        return(NULL)
+    }
+    ld <- list(
+        P = .ldmPackedBlock(ldReference, matched$idx),
+        sign = matched$sign
+    )
+    if (onMissing == "drop") {
+        attr(ld, "keptVariantIds") <- matched$keptIds
+    }
+    ld
 }
 
 # The factor of a genotype reference's LD over `variantIds` (see
@@ -1406,7 +1469,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # @noRd
 .ldRefLdAt <- function(ldReference, idx) {
     if (.ldIsMatrixRef(ldReference)) {
-        return(unname(ldMatrix(ldReference)[idx, idx, drop = FALSE]))
+        return(.ldmBlock(ldReference, idx))
     }
     if (.ldIsMixtureRef(ldReference)) {
         return(.gmLdAt(ldReference, idx))
@@ -1497,15 +1560,35 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 
 # ---------- LD rows a stripe at a time ----------
 #
-# An LD source is one block's LD in any of three forms: the matrix itself,
-# list(R = ); a factor of it, list(F = ) with R = crossprod(F) / (m - 1); or
-# an eigendecomposition, list(vectors = , values = ) with R = V diag(values)
-# V'. The helpers below read R's rows from any of them, so a computation over
-# R's rows never needs the matrix whole.
+# An LD source is one block's LD in any of four forms: the matrix itself,
+# list(R = ); an LdMatrix's packed block, list(P = , sign = ), a dspMatrix
+# read with each variant's allele sign (.ldPackedFromRef()); a factor of it,
+# list(F = ) with R = crossprod(F) / (m - 1); or an eigendecomposition,
+# list(vectors = , values = ) with R = V diag(values) V'. The helpers below
+# read R's rows from any of them, so a computation over R's rows never needs
+# the matrix whole. A source of any form may also carry `eigen`, its R's
+# eigendecomposition, computed once for a computation that reads R's
+# spectrum many times (.ldSourceEigen()).
 
 # How many of R's rows a stripe holds.
 # @noRd
 .ldStripeSize <- function() 256L
+
+# The LD of an LD source as a base matrix, for an engine that takes nothing
+# else.
+# @noRd
+.ldSourceMatrix <- function(ld) {
+    if (!is.null(ld$R)) {
+        return(ld$R)
+    }
+    if (!is.null(ld$P)) {
+        return(.ldSignFlipped(methods::as(ld$P, "matrix"), ld$sign))
+    }
+    if (!is.null(ld$F)) {
+        return(crossprod(ld$F) / (nrow(ld$F) - 1))
+    }
+    tcrossprod(sweep(ld$vectors, 2L, ld$values, "*"), ld$vectors)
+}
 
 # The number of variants an LD source covers.
 # @noRd
@@ -1513,10 +1596,30 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$R)) {
         return(nrow(ld$R))
     }
+    if (!is.null(ld$P)) {
+        return(nrow(ld$P))
+    }
     if (!is.null(ld$F)) {
         return(ncol(ld$F))
     }
     nrow(ld$vectors)
+}
+
+# The eigendecomposition of an LD source's R: the one the source carries as
+# `eigen`, its own when it is one, a factor's from its thin SVD
+# (.ldFactorEigen()), or eigen() of the matrix, unpacked first when packed.
+# @noRd
+.ldSourceEigen <- function(ld) {
+    if (!is.null(ld$eigen)) {
+        return(ld$eigen)
+    }
+    if (!is.null(ld$vectors)) {
+        return(ld[c("values", "vectors")])
+    }
+    if (!is.null(ld$F)) {
+        return(.ldFactorEigen(ld$F))
+    }
+    eigen(.ldSourceMatrix(ld), symmetric = TRUE)
 }
 
 # Rows `rows` of an LD source's R, without forming the rest.
@@ -1525,6 +1628,9 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$R)) {
         return(ld$R[rows, , drop = FALSE])
     }
+    if (!is.null(ld$P)) {
+        return(.ldPackedRows(ld, rows))
+    }
     if (!is.null(ld$F)) {
         return(
             crossprod(ld$F[, rows, drop = FALSE], ld$F) / (nrow(ld$F) - 1)
@@ -1532,6 +1638,27 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     }
     scaled <- sweep(ld$vectors[rows, , drop = FALSE], 2L, ld$values, "*")
     tcrossprod(scaled, ld$vectors)
+}
+
+# Rows `rows` of a packed LD source's matrix, read from its triangle by the
+# Matrix package and signed.
+# @noRd
+.ldPackedRows <- function(ld, rows) {
+    block <- methods::as(ld$P[rows, , drop = FALSE], "matrix")
+    ld$sign[rows] * sweep(block, 2L, ld$sign, "*")
+}
+
+# An LD source cut to the variants at `idx`, in that order: the matrix's
+# block, the packed triangle's, or the factor's columns.
+# @noRd
+.ldSourceSubset <- function(ld, idx) {
+    if (!is.null(ld$R)) {
+        return(list(R = ld$R[idx, idx, drop = FALSE]))
+    }
+    if (!is.null(ld$P)) {
+        return(list(P = ld$P[idx, idx, drop = FALSE], sign = ld$sign[idx]))
+    }
+    list(F = ld$F[, idx, drop = FALSE])
 }
 
 # (R o R) A -- R squared element-wise, times A -- for an LD source: column a
@@ -1589,14 +1716,82 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     )
 }
 
-# b' R b for each column b of B, from an LD matrix or a factor of it:
-# ||F b||^2 / (m - 1), never forming R.
+# R B for an LD source, never forming R from its packed triangle, a factor
+# or a decomposition. The packed triangle's product (the Matrix package's)
+# costs a pass over it per column of B, so it serves a few columns; a step
+# with many unpacks the block first (.ldSourceMatrix()).
+# @noRd
+.ldSourceTimes <- function(ld, B) {
+    B <- as.matrix(B)
+    if (!is.null(ld$R)) {
+        return(ld$R %*% B)
+    }
+    if (!is.null(ld$P)) {
+        return(ld$sign * methods::as(ld$P %*% (ld$sign * B), "matrix"))
+    }
+    if (!is.null(ld$F)) {
+        return(crossprod(ld$F, ld$F %*% B) / (nrow(ld$F) - 1))
+    }
+    ld$vectors %*% (ld$values * crossprod(ld$vectors, B))
+}
+
+# b' R b for each column b of B, from an LD source: ||F b||^2 / (m - 1) for
+# a factor, never forming R.
 # @noRd
 .ldQuadForms <- function(ld, B) {
-    if (!is.null(ld$R)) {
-        return(colSums(B * (ld$R %*% B)))
+    if (!is.null(ld$F)) {
+        return(colSums((ld$F %*% B)^2) / (nrow(ld$F) - 1))
     }
-    colSums((ld$F %*% B)^2) / (nrow(ld$F) - 1)
+    colSums(B * .ldSourceTimes(ld, B))
+}
+
+# `nDraws` draws from N(0, R), as the columns of a p x nDraws matrix: F' e /
+# sqrt(m - 1) for a factor, exact without forming R, and otherwise through
+# R's eigendecomposition (.ldSourceEigen()), which takes the zero eigenvalues
+# a reference smaller than the number of variants leaves.
+# @noRd
+#' @importFrom stats rnorm
+.ldSourceDraws <- function(ld, nDraws) {
+    if (!is.null(ld$F)) {
+        e <- matrix(rnorm(nrow(ld$F) * nDraws), nrow(ld$F), nDraws)
+        return(crossprod(ld$F, e) / sqrt(nrow(ld$F) - 1))
+    }
+    ev <- .ldSourceEigen(ld)
+    e <- matrix(rnorm(length(ev$values) * nDraws), length(ev$values), nDraws)
+    ev$vectors %*% (sqrt(pmax(ev$values, 0)) * e)
+}
+
+# Schafer and Strimmer's (2005) intensity for shrinking a correlation matrix
+# estimated from `nSamples` samples toward the identity: the summed sampling
+# variance of the off-diagonal correlations, (1 - r^2)^2 / (nSamples - 1)
+# each, over their summed squares, capped at 1. R's rows are read a stripe
+# at a time, so a factor never forms R. With no off-diagonal correlation at
+# all (a single variant, or none in LD) there is nothing to shrink, and 1
+# leaves R as it is.
+# @noRd
+.ldShrinkIntensity <- function(ld, nSamples) {
+    p <- .ldSourceSize(ld)
+    starts <- seq.int(1L, p, by = .ldStripeSize())
+    sums <- map(starts, .ldShrinkStripeSums, ld = ld, p = p)
+    squares <- sum(map_dbl(sums, "squares"))
+    if (squares == 0) {
+        return(1)
+    }
+    variances <- sum(map_dbl(sums, "variances"))
+    min(1, variances / (nSamples - 1) / squares)
+}
+
+# One stripe of R's rows: the sums of r^2 and of (1 - r^2)^2 off the
+# diagonal.
+# @noRd
+.ldShrinkStripeSums <- function(start, ld, p) {
+    rows <- seq.int(start, min(start + .ldStripeSize() - 1L, p))
+    r2 <- .ldSourceRows(ld, rows)^2
+    r2[cbind(seq_along(rows), rows)] <- NA
+    list(
+        squares = sum(r2, na.rm = TRUE),
+        variances = sum((1 - r2)^2, na.rm = TRUE)
+    )
 }
 
 # ---------- LD reference: per-variant statistics and filtering ----------
@@ -2169,8 +2364,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
         return(TRUE)
     }
     probe <- unique(round(seq(1, n, length.out = min(n, 200L))))
-    xR <- ldMatrix(x)[xIdx[probe], xIdx[probe], drop = FALSE]
-    yR <- ldMatrix(y)[yIdx[probe], yIdx[probe], drop = FALSE]
+    xR <- .ldmBlock(x, xIdx[probe])
+    yR <- .ldmBlock(y, yIdx[probe])
     max(abs(xR - yR)) <= tol
 }
 
@@ -2275,8 +2470,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     nullPolicy
 ) {
     .requireMatchingLdRefs(
-        .ldRefForKey(qtlKey, qtlRefs),
-        .ldRefForKey(gwasKey, gwasRefs),
+        .dictEntryFor(qtlKey, qtlRefs),
+        .dictEntryFor(gwasKey, gwasRefs),
         pipelineName = pipelineName,
         label = glue("{label} row {qtlRow} (with gwas row {gwasRow})"),
         nullPolicy = nullPolicy

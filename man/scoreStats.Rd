@@ -13,10 +13,14 @@ scoreStats(object)
 \item{object}{An \code{H2Estimate} object.}
 }
 \value{
-A list with \code{z} and \code{R}, or NULL.
+A list with one entry per estimate: \code{NULL} when it tested no
+  candidate annotations, otherwise a list of \code{z} (each candidate's
+  score z), \code{R} (the scores' correlation matrix) and
+  \code{annotationNames}.
 }
 \description{
-Extract score statistics for candidate annotations.
+Extract score statistics for candidate annotations, suitable
+  for input to \code{susieRss}.
 }
 \examples{
 data(h2EstimateExample)

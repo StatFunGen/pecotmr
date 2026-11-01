@@ -41,6 +41,8 @@ one LD block; \code{NULL} (default) leaves it unconstrained.}
 \value{
 A \code{list} with \code{variantIds} (character) and \code{weights}
   (numeric) of equal length; both empty when no usable weights are present.
+  A method whose weights are a matrix (one column per fSuSiE feature or
+  outcome) returns that matrix as \code{weights}, one row per variant id.
 }
 \description{
 Return an aligned \code{(variantIds, weights)} pair from a

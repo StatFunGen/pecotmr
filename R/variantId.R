@@ -78,6 +78,16 @@ withChrPrefix <- function(x) {
 # @noRd
 .STANDARD_CHROMS <- c(as.character(seq_len(22L)), "X", "Y", "MT")
 
+# Allele letters in upper case, the one spelling pecotmr holds, as UCSC style
+# is for chromosomes: every allele that enters -- read from a file, parsed
+# from a variant id, or given in a constructor's table -- comes through here
+# once, so alleles and the ids rendered from them compare exactly. Allele
+# fields only: a variant label such as an rsID keeps its file's spelling.
+# @noRd
+.canonAllele <- function(x) {
+    str_to_upper(as.character(x))
+}
+
 # `gr` with its chromosomes in UCSC style, for ranges entering from outside:
 # a constructor's ranges, a range argument. Strand, metadata columns and the
 # genome build are kept, and ranges already in UCSC style come back as they
@@ -109,11 +119,38 @@ withChrPrefix <- function(x) {
     .withGenome(out, .oneBuild(gr))
 }
 
-# A collection constructor's `entry` list with every element's chromosomes in
-# UCSC style; a NULL element stays NULL.
+# A collection constructor's `entry` list in pecotmr's one spelling: every
+# element's chromosomes in UCSC style and its alleles in upper case; a NULL
+# element stays NULL.
 # @noRd
-.ucscEntries <- function(entry) {
-    map(as.list(entry), .ucscRanges)
+.canonEntries <- function(entry) {
+    map(map(as.list(entry), .ucscRanges), .canonAlleleMcols)
+}
+
+# `gr` with its A1 / A2 metadata columns in upper case. Anything but ranges
+# carrying them passes through.
+# @noRd
+.canonAlleleMcols <- function(gr) {
+    if (!methods::is(gr, "GenomicRanges")) {
+        return(gr)
+    }
+    mc <- S4Vectors::mcols(gr)
+    cols <- intersect(c("A1", "A2"), colnames(mc))
+    if (length(cols) == 0L) {
+        return(gr)
+    }
+    S4Vectors::`mcols<-`(
+        gr,
+        value = reduce(cols, .withCanonAlleleCol, .init = mc)
+    )
+}
+
+# `tbl` with allele column `nm` in upper case. `value =` named: tibble's
+# `[[<-` method carries an extra `j` formal, so a third POSITIONAL argument
+# binds to `j` and the write silently misfires.
+# @noRd
+.withCanonAlleleCol <- function(tbl, nm) {
+    `[[<-`(tbl, nm, value = .canonAllele(tbl[[nm]]))
 }
 
 # A context or genotype experiment with its rowRanges in UCSC style, so a
@@ -131,6 +168,22 @@ withChrPrefix <- function(x) {
         se,
         value = .ucscRanges(SummarizedExperiment::rowRanges(se))
     )
+}
+
+# An experiment in pecotmr's one spelling: rowRanges in UCSC style and, for a
+# genotype panel, its A1 / A2 columns in upper case. A panel read by pecotmr
+# is already so; one built outside it may not be.
+# @noRd
+.canonExperiment <- function(se) {
+    ucsc <- .ucscExperiment(se)
+    if (!methods::is(ucsc, "RangedSummarizedExperiment")) {
+        return(ucsc)
+    }
+    rr <- SummarizedExperiment::rowRanges(ucsc)
+    if (!any(is_in(c("A1", "A2"), colnames(S4Vectors::mcols(rr))))) {
+        return(ucsc)
+    }
+    SummarizedExperiment::`rowRanges<-`(ucsc, value = .canonAlleleMcols(rr))
 }
 
 #' Order key for chromosome identifiers.
@@ -280,7 +333,12 @@ detectVariantConvention <- function(ids) {
     # Detect allele separator: check if variant uses underscores between allele
     # fields This catches both full underscore ("1_100_A_G") and mixed
     # ("chr1:100_A_G") formats
-    alleleSep <- if (str_detect(idClean, "_[ATCGID*]+_[ATCGID*]+$")) {
+    alleleSep <- if (
+        str_detect(
+            idClean,
+            regex("_[ATCGID*]+_[ATCGID*]+$", ignore_case = TRUE)
+        )
+    ) {
         "_"
     } else {
         ":"
@@ -329,8 +387,8 @@ parseVariantId <- function(ids) {
     data <- tibble(
         chrom = withChrPrefix(m[, 2L]),
         pos = as.integer(m[, 3L]),
-        A2 = m[, 4L],
-        A1 = m[, 5L]
+        A2 = .canonAllele(m[, 4L]),
+        A1 = .canonAllele(m[, 5L])
     )
     `attr<-`(data, "convention", convention)
 }
@@ -345,15 +403,21 @@ parseVariantId <- function(ids) {
     str_match(normalized, "^([^:]+):([^:]+):([^:]+):([^:]+)")
 }
 
-# `[[<-` rather than mutate(): callers hand this frame straight through from
-# a user-supplied table, which may carry NA or "" column names -- and
-# dplyr refuses to transform such a frame at all.
+# The variant key of a table in pecotmr's spelling: chromosome in UCSC style,
+# integer position, alleles in upper case. `[[<-` rather than mutate():
+# callers hand this frame straight through from a user-supplied table, which
+# may carry NA or "" column names -- and dplyr refuses to transform such a
+# frame at all.
 # @noRd
-.withCanonicalCoords <- function(ids) {
+.withCanonicalKey <- function(ids) {
     # `value =` named: tibble's `[[<-` method carries an extra `j` formal, so a
     # third POSITIONAL argument binds to `j` and the write silently misfires.
     coerced <- `[[<-`(ids, "chrom", value = withChrPrefix(ids$chrom))
-    `[[<-`(coerced, "pos", value = as.integer(ids$pos))
+    reduce(
+        intersect(c("A2", "A1"), names(coerced)),
+        .withCanonAlleleCol,
+        .init = `[[<-`(coerced, "pos", value = as.integer(ids$pos))
+    )
 }
 
 # Parse a data.frame of already-split ids: resolve the 4 identity columns
@@ -382,7 +446,7 @@ parseVariantId <- function(ids) {
         hasBuild = FALSE,
         example = NA_character_
     )
-    `attr<-`(.withCanonicalCoords(named), "convention", conv)
+    `attr<-`(.withCanonicalKey(named), "convention", conv)
 }
 
 #' Format variant ID strings from component columns
@@ -399,8 +463,8 @@ parseVariantId <- function(ids) {
 #'
 #' @param chrom Integer or character chromosome (e.g., 1 or "chr1").
 #' @param pos Integer position.
-#' @param A2 Character reference allele.
-#' @param A1 Character alternate/effect allele.
+#' @param A2 Character reference allele (written in upper case).
+#' @param A1 Character alternate/effect allele (written in upper case).
 #' @param chrPrefix Logical. \code{TRUE} (default) spells the chromosome in UCSC
 #'   style (\code{chr1}, \code{chrX}, \code{chrM}); \code{FALSE} writes it
 #'   bare (\code{1}, \code{X}, \code{MT}). Ignored if \code{convention} is
@@ -443,7 +507,17 @@ formatVariantId <- function(
         labels <- unique(chrom)
         canonChrom(labels)[match(chrom, labels)]
     }
-    str_c(chromOut, ":", pos, alleleSep, A2, alleleSep, A1)
+    # Alleles upper case as everywhere in pecotmr, so an id rendered from a
+    # file's lowercase alleles names the variant as the parsed one does.
+    str_c(
+        chromOut,
+        ":",
+        pos,
+        alleleSep,
+        .canonAllele(A2),
+        alleleSep,
+        .canonAllele(A1)
+    )
 }
 
 #' Re-format variant IDs to a chosen output convention
@@ -518,12 +592,12 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
 }
 
 # The ids normalizeVariantId() returns unchanged in its default convention: a
-# UCSC chromosome, a position without leading zeros, and two alleles, with
-# no build suffix and no underscore.
+# UCSC chromosome, a position without leading zeros, and two alleles in upper
+# case (.canonAllele()), with no build suffix and no underscore.
 # @noRd
 .CANONICAL_VARIANT_ID <- str_c(
     "^chr(1[0-9]|2[0-2]|[1-9]|X|Y|M)",
-    ":[1-9][0-9]*:[^:_]+:[^:_]+$"
+    ":[1-9][0-9]*:[^:_a-z]+:[^:_a-z]+$"
 )
 
 # Complement a DNA allele string (A<->T, C<->G) for strand flipping.
@@ -564,13 +638,13 @@ normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
 #'   frequency like \code{af}. Default \code{character()} does no complementing,
 #'   so non-RSS callers are unchanged. Distinct from \code{colToFlip}:
 #'   frequencies are complemented, signed effects are sign-flipped.
-#' @param matchMinProp Minimum proportion of variants in the smallest data to be
-#'   matched, otherwise stops with an error. Default is 20%.
-#' @param removeDups Whether to remove duplicates, default is TRUE.
+#' @param matchMinProp The harmonized result must hold at least this
+#'   proportion of \code{refVariants}' rows, otherwise it stops with an
+#'   error. Default is 20%.
+#' @param removeDups Whether to drop duplicate (chrom, pos, variant ID) rows
+#'   after matching, keeping the first with a warning. Default is
+#'   \code{FALSE}; duplicates that remain are an error.
 #' @param removeIndels Whether to remove INDELs, default is FALSE.
-#' @param flip Whether the alleles must be flipped: A <--> T & C <--> G, in
-#'   which case corresponding `colToFlip` are multiplied by -1. Default is
-#'   `TRUE`.
 #' @param removeStrandAmbiguous Whether to drop a strand-ambiguous match (A/T
 #'   or C/G alleles, where a strand flip and an allele swap look the same).
 #'   Each target-reference pair is judged on its own, whatever else is being

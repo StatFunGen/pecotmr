@@ -57,11 +57,15 @@ test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
         entry = list(e),
         ldReference = gh
     )
-    # The reference is a panel; the handle it reads through is its seed.
+    # The reference is a panel; the handle it reads through is its seed,
+    # which keeps only the columns reading needs.
     refs <- ldReference(res)
     expect_named(refs, res$ldReference)
     expect_s4_class(refs[[1L]], "RangedSummarizedExperiment")
-    expect_identical(pecotmr:::.ldRefHandle(refs[[1L]]), gh)
+    expect_identical(
+        pecotmr:::.ldRefHandle(refs[[1L]]),
+        pecotmr:::.readingHandle(gh)
+    )
 })
 
 

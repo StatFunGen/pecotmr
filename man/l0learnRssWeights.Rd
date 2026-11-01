@@ -12,7 +12,7 @@ l0learnRssWeights(
   lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
   lambda = NULL,
   lambda2 = 0,
-  selection = c("ldQuadratic", "minFbeta"),
+  selection = c("heldOut", "ldQuadratic", "minFbeta"),
   maxSwaps = 100,
   fitRetention = c("none", "slim", "full"),
   methodArgs = PenalizedRssOptions()
@@ -45,8 +45,13 @@ Default \code{"L0"}.}
 
 \item{lambda2}{L2 penalty weight (for L0L2). Default 0.}
 
-\item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
-\code{"minFbeta"}.}
+\item{selection}{How the returned candidate is chosen (see Details of
+\code{\link{lassosumRssWeights}}). \code{"heldOut"} (default) scores
+every candidate on held-out summary statistics and needs the
+reference's sample size, so an \code{\link{LdMatrix}} must record
+\code{nSamples}. \code{"ldQuadratic"} is lassosum's pseudovalidation and
+needs the \code{fdrtool} package. \code{"minFbeta"} picks the smallest
+objective, for debugging.}
 
 \item{maxSwaps}{Maximum swap rounds per lambda. Default 100.}
 
@@ -73,7 +78,8 @@ A numeric vector of SNP coefficient weights. Unless
 \description{
 Fits L0-penalized regression (with optional L1/L2 components) on the RSS
 objective, searching over a shrinkage grid \code{s} and lambda0 path. Model
-selection uses LD-quadratic pseudovalidation by default.
+selection uses held-out summary statistics by default (see
+\code{\link{lassosumRssWeights}}).
 }
 \details{
 The swap optimization from L0Learn is included: after coordinate descent
@@ -92,5 +98,5 @@ stat <- list(
   n = rep(nrow(X), ncol(X)),
   variantNames = colnames(X)
 )
-l0learnRssWeights(stat, LdMatrix(cor(X)))
+l0learnRssWeights(stat, LdMatrix(cor(X), nSamples = nrow(X)))
 }

@@ -17,7 +17,10 @@ prsCs(
   nBurnin = 500,
   thin = 5,
   verbose = FALSE,
-  seed = NULL
+  seed = NULL,
+  shrinkCorr = 1,
+  raoBlackwell = FALSE,
+  nChains = 1
 )
 }
 \arguments{
@@ -47,12 +50,30 @@ standardize the effect sizes by MAF. Default is NULL.}
 \item{verbose}{Whether to print verbose output. Default is FALSE.}
 
 \item{seed}{Random seed for reproducibility. Default is NULL.}
+
+\item{shrinkCorr}{The LD shrinkage \eqn{c}: the sampler reads
+\eqn{cR + (1 - c)I}. Default 1, none.}
+
+\item{raoBlackwell}{Report the blocks' conditional posterior means,
+averaged over the kept iterations, rather than the draws' average.
+Default \code{FALSE}.}
+
+\item{nChains}{The number of chains, from seeds \code{seed},
+\code{seed + 1}, ... (each drawn when \code{seed} is \code{NULL}).
+A single chain warns when its posterior mean effects' squares sum past
+twice the squared marginal effects, a sign that it diverged. With more
+than one, a chain stops once a kept draw's squared effects do, and is
+dropped, and the rest are filtered and averaged as LDpred2's vignette
+does (see \code{\link{ldpred2AutoWeights}}). Default 1.}
 }
 \value{
 A list containing the posterior estimates: - betaEst: Posterior
   estimates of SNP effect sizes. - psiEst: Posterior estimates of psi
   (shrinkage parameters). - sigmaEst: Posterior estimate of the residual
   variance. - phiEst: Posterior estimate of the global shrinkage parameter.
+  With several chains, these are the kept chains' means, and
+  \code{chains} records each chain's seed and whether it diverged and was
+  kept.
 }
 \description{
 This function is a wrapper for the PRS-CS method implemented in C++. It takes

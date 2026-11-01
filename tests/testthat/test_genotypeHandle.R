@@ -758,10 +758,8 @@ test_that("genotypeDelayedArray values match genotypes transposed", {
     truth <- t(pecotmr:::.dosageMatrix(gh, 1:5, meanImpute = FALSE))
     got <- as.matrix(da[1:5, 1:4])
     expect_equal(unname(got), unname(truth[, 1:4]))
-    expect_identical(
-        rownames(got),
-        normalizeVariantId(snpInfo(gh)$SNP[1:5])
-    )
+    # The seed names no variants: a panel's rowRanges name them.
+    expect_null(rownames(got))
     expect_identical(colnames(got), sampleIds(gh)[1:4])
 })
 
@@ -813,13 +811,13 @@ test_that("nothing is read until a block is actually touched", {
     # The point of the seed: a panel can be described without being read.
     gh <- .gh_pgenHandle()
     reads <- 0L
-    # Captured before mocking: calling extractBlockGenotypes by name inside
-    # the mock would re-enter the mock, not the reader.
-    realExtract <- extractBlockGenotypes
+    # Captured before mocking: calling .handleDosage by name inside the mock
+    # would re-enter the mock, not the reader.
+    realRead <- pecotmr:::.handleDosage
     local_mocked_bindings(
-        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+        .handleDosage = function(handle, snpIdx) {
             reads <<- reads + 1L
-            realExtract(handle, snpIdx = snpIdx, meanImpute = meanImpute)
+            realRead(handle, snpIdx)
         },
         .package = "pecotmr"
     )
@@ -836,11 +834,11 @@ test_that("nothing is read until a block is actually touched", {
 test_that("only the requested variants are read", {
     gh <- .gh_pgenHandle()
     seen <- integer(0)
-    realExtract <- extractBlockGenotypes
+    realRead <- pecotmr:::.handleDosage
     local_mocked_bindings(
-        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+        .handleDosage = function(handle, snpIdx) {
             seen <<- c(seen, length(snpIdx))
-            realExtract(handle, snpIdx = snpIdx, meanImpute = meanImpute)
+            realRead(handle, snpIdx)
         },
         .package = "pecotmr"
     )
@@ -848,6 +846,17 @@ test_that("only the requested variants are read", {
     invisible(as.matrix(da[1:5, 1:4]))
     expect_true(all(seen <= 5L))
     expect_lt(sum(seen), nrow(snpInfo(gh)))
+})
+
+test_that("genotypeDelayedArray leaves the handle it is given whole", {
+    # The seed keeps a copy cut to the columns reading needs; the caller's
+    # handle keeps every column.
+    gh <- .gh_pgenHandle()
+    before <- snpInfo(gh)
+    da <- genotypeDelayedArray(gh)
+    expect_identical(snpInfo(gh), before)
+    seedHandle <- pecotmr:::.ghSeedHandle(DelayedArray::seed(da))
+    expect_identical(names(snpInfo(seedHandle)), "fileIdx")
 })
 
 test_that("genotypeDelayedArray rejects a non-handle", {

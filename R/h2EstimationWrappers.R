@@ -1,19 +1,31 @@
 # =============================================================================
 # Heritability Estimation Wrappers
 # -----------------------------------------------------------------------------
-# Consolidated entry points for univariate heritability estimation. Three
-# methods are exposed via the `estimateH2` S4 generic:
+# Consolidated entry points for univariate heritability estimation: both
+# `estimateH2` methods, with the estimators they call.
 #
+# From GWAS summary statistics, one genome-wide estimate per study:
 #   * gLDSC (Generalized LD Score Regression, Xiong et al. 2024)
 #   * HDL/sHDL (High-Definition Likelihood, Ning et al. 2020 + Zhao 2023)
 #   * LDER (LD Eigenvalue Regression, Song et al. 2022)
+#   * S-LDSC (stratified LD score regression, Finucane et al. 2015)
+#
+# From QTL summary statistics, one cis estimate per gene:
+#   * LAVA (Werme et al. 2022)
+#   * HDL-L (Li et al. 2025)
+#   * FastHer (Svishcheva 2025; HEELS, Li et al. 2023, maximizes the same
+#     likelihood)
+#
+# The estimators are pecotmr's own implementations rather than an external
+# engine, so the entry points live beside them instead of in a *Pipeline.R
+# file.
 #
 # Plus shared utilities (block ops, WLS, jackknife SE, enrichment,
 # genome-build checks, tauStar standardization, meta-analysis) and the
 # converter that bridges H2Estimate results into the sLDSC postprocessing
 # pipeline.
 #
-# The H2Estimate result class itself lives in R/h2Estimate.R.
+# The H2Estimate result class itself lives in R/H2Estimate.R.
 # =============================================================================
 
 #' @title Shared Utilities for Heritability Estimation
@@ -333,8 +345,8 @@ RmaOptions <- function(...) {
 
 #' @title LDER: LD Eigenvalue Regression
 #' @description Estimate heritability using LD eigenvalue regression (Song et
-#'   al. 2022). Supports univariate global and local estimation, with optional
-#'   annotation stratification.
+#'   al. 2022): one genome-wide estimate, with optional annotation
+#'   stratification.
 #' @name pecotmr-h2-lder
 #' @keywords internal
 #' @references
@@ -476,7 +488,6 @@ NULL
     A,
     tau,
     tauBlocks,
-    localDf,
     scoreStats
 ) {
     if (is.null(A)) {
@@ -485,7 +496,7 @@ NULL
             tauSe = h2Se,
             annotationJackknifeCoefs = NULL
         )
-        return(.h2Result(h2, jkRes, intercept, h2, localDf, NULL, scoreStats))
+        return(.h2Result(h2, jkRes, intercept, h2, NULL, scoreStats))
     }
     report <- .h2StratifiedReport(A, tau, tauBlocks)
     jkRes <- list(
@@ -493,15 +504,7 @@ NULL
         tauSe = report$tauSe,
         annotationJackknifeCoefs = report$annotationJackknifeCoefs
     )
-    .h2Result(
-        h2,
-        jkRes,
-        intercept,
-        report$tau,
-        localDf,
-        report$enrichment,
-        scoreStats
-    )
+    .h2Result(h2, jkRes, intercept, report$tau, report$enrichment, scoreStats)
 }
 
 # Per-block whitened statistics x_i = (u_i'z)/sqrt(lam_i) and stratified
@@ -526,6 +529,15 @@ NULL
     )
 }
 
+# Rows `idx` of an annotation matrix, dense: the matrix may be stored sparse
+# (.annotStored()), and each estimator computes on its block as a base matrix.
+# Its column and row sums read either form (Matrix's colSums()/rowSums()).
+# @noRd
+#' @importFrom Matrix colSums rowSums
+.denseBlock <- function(A, idx) {
+    methods::as(A[idx, , drop = FALSE], "matrix")
+}
+
 # One block's eigenvalue scores sum_k V_ki^2 a_k for each column of
 # `annotMat`, with a zero row for each zero-eigenvalue direction the
 # decomposition does not list: every use multiplies a direction's row by its
@@ -534,10 +546,7 @@ NULL
     if (is.null(annotMat)) {
         return(NULL)
     }
-    listed <- crossprod(
-        dec$vectors^2,
-        annotMat[dec$snpIdx, , drop = FALSE]
-    )
+    listed <- crossprod(dec$vectors^2, .denseBlock(annotMat, dec$snpIdx))
     rbind(listed, matrix(0, dec$nNull, ncol(annotMat)))
 }
 
@@ -692,41 +701,6 @@ NULL
     sqrt((n - 1) / n * sum((v - mean(v))^2))
 }
 
-# Local heritability for one block: single-slope fit with intercept fixed at
-# the global inflation; h2Local = tau * (block directions).
-.lderLocalBlock <- function(bs, b, N, a) {
-    d <- bs$lam
-    if (length(d) < 3) {
-        return(tibble(
-            blockId = b,
-            h2Local = NA_real_,
-            h2LocalSe = NA_real_
-        ))
-    }
-    chi2 <- bs$x^2
-    w <- 1 / (2 * pmax(chi2, 1)^2)
-    slope <- sum(w * d * (chi2 - (N * a + 1))) / sum(w * d^2)
-    info <- sum(w * (N * d)^2)
-    tibble(
-        blockId = b,
-        h2Local = slope / N * length(d),
-        h2LocalSe = length(d) / sqrt(max(info, 1e-10))
-    )
-}
-
-# Per-block local heritability (NULL unless requested).
-.lderLocal <- function(blockStats, N, a) {
-    bind_rows(
-        map(
-            seq_along(blockStats),
-            .lderLocalRow,
-            blockStats = blockStats,
-            N = N,
-            a = a
-        )
-    )
-}
-
 # LDER candidate-annotation score statistics against the fitted baseline:
 # the regression of chi2 = x^2 on mu = N lam (l_a tau) + N a + 1, scored for
 # each candidate's column N lam l_c with the weights 1 / (2 mu^2) and the
@@ -760,13 +734,7 @@ NULL
     )
 }
 
-lderUnivariate <- function(
-    z,
-    n,
-    eigenRef,
-    annotations = NULL,
-    local = FALSE
-) {
+lderUnivariate <- function(z, n, eigenRef, annotations = NULL) {
     rough <- !inSample(eigenRef)
     baselineMat <- .h2DesignMat(annotations)
     blockStats <- .lderAllBlockStats(eigenRef, z, baselineMat, annotations)
@@ -783,7 +751,6 @@ lderUnivariate <- function(
         TRUE
     )
     jk <- .lderJackknife(blockStats, baselineMat, n, M, design$M_a, rough, TRUE)
-    localDf <- if (local) .lderLocal(blockStats, n, fit$a) else NULL
     .h2FitResult(
         h2 = fit$h2,
         h2Se = jk$h2Se,
@@ -792,7 +759,6 @@ lderUnivariate <- function(
         A = baselineMat,
         tau = fit$tau,
         tauBlocks = jk$annotationJackknifeCoefs,
-        localDf = localDf,
         scoreStats = .lderCandidateScores(
             blockStats,
             annotations,
@@ -845,15 +811,7 @@ lderUnivariate <- function(
 
 
 # Assemble the shared H2Estimate-style result list (used by all methods).
-.h2Result <- function(
-    h2,
-    jkRes,
-    intercept,
-    tau,
-    localDf,
-    enrichmentDf,
-    scoreStats
-) {
+.h2Result <- function(h2, jkRes, intercept, tau, enrichmentDf, scoreStats) {
     list(
         h2 = h2,
         h2Se = jkRes$se[1],
@@ -862,7 +820,6 @@ lderUnivariate <- function(
         tau = tau,
         tauSe = jkRes$tauSe,
         annotationJackknifeCoefs = jkRes$annotationJackknifeCoefs,
-        local = localDf,
         enrichment = enrichmentDf,
         scoreStats = scoreStats
     )
@@ -913,8 +870,8 @@ NULL
 # a time (.ldSquaredProduct()).
 .gldscBlockDesign <- function(block, panel, z, A, candMat) {
     idx <- block$idx
-    Ab <- A[idx, , drop = FALSE]
-    Cb <- if (!is.null(candMat)) candMat[idx, , drop = FALSE]
+    Ab <- .denseBlock(A, idx)
+    Cb <- if (!is.null(candMat)) .denseBlock(candMat, idx)
     scores <- .ldSquaredProduct(.ldStatBlockLd(block, panel), cbind(Ab, Cb))
     nA <- ncol(Ab)
     list(
@@ -966,7 +923,6 @@ NULL
     list(
         L = crossprod(Pw, P),
         R = as.vector(crossprod(Pw, Py)),
-        p = length(block$idx),
         cand = .gldscCandidatePieces(om, design$ldCand, P, Py)
     )
 }
@@ -1019,32 +975,6 @@ NULL
         h2Se = .jackknifeSeFromLoo(map_dbl(loo, "h2")),
         intSe = .jackknifeSeFromLoo(map_dbl(loo, "intercept")),
         annotationJackknifeCoefs = exec(rbind, !!!taus)
-    )
-}
-
-# Local heritability for one LD block: a per-block GLS on [1 | base LD score],
-# whose normal equations are the leading 2 x 2 of the block's own;
-# h2Local = tau_base * (block SNPs), SE from the GLS coefficient covariance.
-.gldscLocalBlock <- function(cb, b, N) {
-    L <- cb$L[1:2, 1:2]
-    coef <- solve(L, cb$R[1:2])
-    covTau <- (solve(L) / N^2)[2, 2]
-    tibble(
-        blockId = b,
-        h2Local = coef[2] / N * cb$p,
-        h2LocalSe = sqrt(max(covTau, 0)) * cb$p
-    )
-}
-
-# Per-block local heritability (NULL unless requested).
-.gldscLocal <- function(contrib, N) {
-    bind_rows(
-        map(
-            seq_along(contrib),
-            .gldscLocalRow,
-            contrib = contrib,
-            N = N
-        )
     )
 }
 
@@ -1127,13 +1057,7 @@ NULL
     list(scoreZ = unname(U / sqrt(pmax(V, .Machine$double.xmin))), R = R)
 }
 
-gldscUnivariate <- function(
-    z,
-    n,
-    ldRef,
-    annotations = NULL,
-    local = FALSE
-) {
+gldscUnivariate <- function(z, n, ldRef, annotations = NULL) {
     if (!.ldScoreHasLd(ldRef)) {
         abort(c(
             "g-LDSC needs each LD block's LD, and this LdScore carries none.",
@@ -1170,7 +1094,7 @@ gldscUnivariate <- function(
     right <- reduce(map(contrib, "R"), `+`)
     fit <- .gldscEstimate(left, right, A, n)
     jk <- .gldscJackknife(contrib, left, right, A, n)
-    .gldscResult(fit, jk, annotations, contrib, local, n, M, A)
+    .gldscResult(fit, jk, annotations, contrib, A)
 }
 
 # The candidate-annotation score statistics, when candidates were supplied.
@@ -1190,8 +1114,8 @@ gldscUnivariate <- function(
     )
 }
 
-# Assemble the gldscUnivariate return (enrichment, local, candidate scores).
-.gldscResult <- function(fit, jk, annotations, contrib, local, n, M, A) {
+# Assemble the gldscUnivariate return (enrichment, candidate scores).
+.gldscResult <- function(fit, jk, annotations, contrib, A) {
     .h2FitResult(
         h2 = fit$h2,
         h2Se = jk$h2Se,
@@ -1200,7 +1124,6 @@ gldscUnivariate <- function(
         A = if (is.null(.h2BaselineMat(annotations))) NULL else A,
         tau = fit$tau,
         tauBlocks = jk$annotationJackknifeCoefs,
-        localDf = if (local) .gldscLocal(contrib, n) else NULL,
         scoreStats = .gldscCandidateScores(annotations, contrib, fit)
     )
 }
@@ -1404,8 +1327,8 @@ NULL
     invisible(TRUE)
 }
 
-# Baseline modeled variance lamh2_i at the fitted parameters (for local h2 and
-# the sHDL candidate score test).
+# Baseline modeled variance lamh2_i at the fitted parameters (for the sHDL
+# candidate score test).
 .hdlBaselineVar <- function(design, ft, n, nSamples, lim = exp(-10)) {
     s <- as.vector(design$ldAnnotScaled %*% ft$h2a)
     pmax(
@@ -1447,66 +1370,374 @@ NULL
 }
 
 # =============================================================================
-# HDL local heritability + sHDL candidate score test
+# HDL-L: one locus's heritability with its own intercept
 # =============================================================================
 
-# Local h2 for one block: MLE of the block's genome-wide-scaled h2 with the
-# intercept fixed at the global fit; SE from the Gaussian-variance Fisher
-# information sum((dlamh2/dh2)^2 / (2 lamh2^2)).
-.hdlLocalBlock <- function(bd, b, n, nSamples, int, M, lim = exp(-10)) {
-    # `intercept`, not `int`: optimize() would partially match `int` to its
-    # own `interval` argument.
-    h2 <- optimize(
-        .hdlLocalNll,
-        c(0, 1),
-        bd = bd,
-        M = M,
-        nSamples = nSamples,
-        intercept = int,
+# HDL-L's fit of one locus (HDL's HDL.L()), from the standardized marginal
+# effects `corInput` (z / sqrt(n)) and the locus' LD source `ld` from a
+# reference of `nRef` samples: the rotated effects bstar = V' corInput over the
+# eigenvalues that cover 99% of the trace, with modelled variance h2 / M lam^2
+# - h2 lam / nRef + intercept lam / n (.hdlLocusVar()), h2 and the intercept
+# fitted together from HDL.L()'s grid of starting values. Returns h2, the
+# intercept, HDL.L()'s p-value for h2 (the likelihood ratio against the
+# intercept-only null of the chosen start, on one degree of freedom) and the
+# number of eigenpairs used. All three are NA when no fit both converges and
+# beats the null, where HDL.L() itself stops with an error.
+# @noRd
+#' @importFrom stats pchisq
+.hdlLocusFit <- function(corInput, ld, n, nRef) {
+    dec <- .hdlLocusEigen(ld)
+    data <- list(
+        lam = dec$values,
+        bstar = as.vector(crossprod(dec$vectors, corInput)),
         n = n,
-        lim = lim
-    )$minimum
-    lamh2 <- .hdlLocalVar(h2, bd, M, nSamples, int, n, lim)
-    g <- bd$lam^2 / M - bd$lam / nSamples
-    info <- sum(g^2 / (2 * lamh2^2))
-    tibble(
-        blockId = b,
-        h2Local = h2,
-        h2LocalSe = 1 / sqrt(max(info, 1e-10))
+        nRef = nRef,
+        M = length(corInput)
+    )
+    fits <- pmap(
+        .hdlLocusStarts(corInput, ld, n),
+        .hdlLocusFitOne,
+        data = data
+    )
+    none <- list(
+        h2 = NA_real_,
+        intercept = NA_real_,
+        p = NA_real_,
+        nComponents = length(dec$values)
+    )
+    accepted <- map_lgl(fits, "accepted")
+    if (!any(accepted)) {
+        return(none)
+    }
+    best <- fits[[which.max(replace(map_dbl(fits, "value"), !accepted, -Inf))]]
+    list_modify(
+        none,
+        h2 = best$par[[1L]],
+        intercept = best$par[[2L]],
+        p = pchisq(2 * (best$value - best$nullValue), 1, lower.tail = FALSE)
     )
 }
 
-# Modeled variance of one block's bstar^2 at local heritability `h2`, the
-# intercept fixed at the global fit; floored at `lim`.
+# The locus' eigenpairs, cut where they first cover more than 99% of the
+# trace (HDL.L()'s eigen.cut, the trace being the number of variants), or
+# all of them when they never do.
 # @noRd
-.hdlLocalVar <- function(h2, bd, M, nSamples, intercept, n, lim) {
+.hdlLocusEigen <- function(ld) {
+    dec <- if (!is.null(ld$F)) {
+        .ldFactorEigen(ld$F)
+    } else {
+        eigen(ld$R, symmetric = TRUE)
+    }
+    share <- cumsum(dec$values) / .ldSourceSize(ld)
+    keep <- if (share[[length(share)]] > 0.99) {
+        which(share > 0.99)[[1L]]
+    } else {
+        length(share)
+    }
+    list(
+        values = dec$values[seq_len(keep)],
+        vectors = dec$vectors[, seq_len(keep), drop = FALSE]
+    )
+}
+
+# HDL.L()'s starting values, in the order its loops try them: h2 from the
+# weighted LD-score regression, 0 and 0.5; the intercept 1, 0.5, 1.5 and 0;
+# the finite-difference step 1e-5, 1e-8 and 1e-16, innermost.
+# @noRd
+.hdlLocusStarts <- function(corInput, ld, n) {
+    starts <- expand.grid(
+        ndeps = c(1e-5, 1e-8, 1e-16),
+        intercept = c(1, 0.5, 1.5, 0),
+        h2 = c(.hdlLocusLdscH2(corInput, ld, n), 0, 0.5)
+    )
+    starts[c("h2", "intercept", "ndeps")]
+}
+
+# HDL.L()'s LD-score regression start: corInput^2 on the locus' LD scores,
+# by least squares and then weighted by 1 / (h2 l / M + 1 / n)^2 from that
+# fit, its slope times M. Where every LD score is the same (one variant, or
+# no LD) there is no slope, and the start is 0, already one of the others.
+# @noRd
+#' @importFrom stats lm coef
+.hdlLocusLdscH2 <- function(corInput, ld, n) {
+    M <- length(corInput)
+    ldScore <- as.vector(.ldSquaredProduct(ld, matrix(1, M, 1L)))
+    sq <- corInput^2
+    olsH2 <- coef(lm(sq ~ ldScore))[[2L]] * M
+    if (!is.finite(olsH2)) {
+        return(0)
+    }
+    w <- 1 / (olsH2 * ldScore / M + 1 / n)^2
+    coef(lm(sq ~ ldScore, weights = w))[[2L]] * M
+}
+
+# One start: HDL.L()'s fit of (h2, intercept) and of the intercept-only null,
+# by L-BFGS-B on the log-likelihood (h2 in [0, 1], the intercept in [0, 20]).
+# The fit counts when both converge and the full fit beats the null.
+# @noRd
+#' @importFrom stats optim
+.hdlLocusFitOne <- function(h2, intercept, ndeps, data) {
+    control <- list(factr = 1e-8, maxit = 1000, trace = 0, fnscale = -1)
+    opt <- optim(
+        c(h2, intercept),
+        .hdlLocusLl,
+        data = data,
+        method = "L-BFGS-B",
+        lower = c(0, 0),
+        upper = c(1, 20),
+        control = c(control, list(ndeps = c(ndeps, ndeps * 100)))
+    )
+    null <- optim(
+        intercept,
+        .hdlLocusNullLl,
+        data = data,
+        method = "L-BFGS-B",
+        lower = 0,
+        upper = 20,
+        control = c(control, list(ndeps = ndeps * 100))
+    )
+    list(
+        par = opt$par,
+        value = opt$value,
+        nullValue = null$value,
+        accepted = opt$convergence == 0 &&
+            null$convergence == 0 &&
+            opt$value > null$value
+    )
+}
+
+# HDL.L()'s log-likelihood of the locus at (h2, intercept), the modelled
+# variance floored at exp(-18).
+# @noRd
+.hdlLocusLl <- function(param, data) {
+    lamh2 <- .hdlLocusVar(
+        param[[1L]],
+        data,
+        data$M,
+        data$nRef,
+        param[[2L]],
+        data$n,
+        exp(-18)
+    )
+    -(sum(log(lamh2)) + sum(data$bstar^2 / lamh2)) / 2
+}
+
+# The modelled variance of a locus's rotated effects `bd$bstar` at
+# heritability `h2` and `intercept`, for M variants, a reference of
+# `nSamples` and a study of `n`; floored at `lim`.
+# @noRd
+.hdlLocusVar <- function(h2, bd, M, nSamples, intercept, n, lim) {
     pmax(
         h2 / M * bd$lam^2 - h2 * bd$lam / nSamples + intercept * bd$lam / n,
         lim
     )
 }
 
-# Gaussian negative log-likelihood (up to a constant) of one block's bstar at
-# local heritability `h2` -- what .hdlLocalBlock() minimizes.
+# The same at h2 = 0.
 # @noRd
-.hdlLocalNll <- function(h2, bd, M, nSamples, intercept, n, lim) {
-    lamh2 <- .hdlLocalVar(h2, bd, M, nSamples, intercept, n, lim)
-    sum(log(lamh2) + bd$bstar^2 / lamh2)
+.hdlLocusNullLl <- function(intercept, data) {
+    .hdlLocusLl(c(0, intercept), data)
 }
 
-# Per-block local heritability (NULL unless requested).
-.hdlLocal <- function(blockData, n, nSamples, int, M) {
-    bind_rows(
-        map(
-            seq_along(blockData),
-            .hdlLocalRow,
-            blockData = blockData,
-            n = n,
-            nSamples = nSamples,
-            int = int,
-            M = M
-        )
+# =============================================================================
+# Per-gene cis heritability: one window's estimate (for estimateH2() on a
+# QtlSumStats, below)
+# =============================================================================
+
+# Each per-gene method's estimator of one window, from the window's
+# z, per-variant sample sizes and LD source (.rssLdSource(), carrying the
+# reference's sample size).
+# @noRd
+.cisH2Estimators <- c(
+    lava = ".cisH2Lava",
+    hdlL = ".cisH2HdlL",
+    fastHer = ".cisH2FastHer"
+)
+
+# One window's result; what a method does not report stays NA.
+# @noRd
+.cisH2Result <- function(
+    nComponents,
+    h2 = NA_real_,
+    h2Se = NA_real_,
+    p = NA_real_,
+    intercept = NA_real_,
+    scale = NA_real_
+) {
+    list(
+        h2 = h2,
+        h2Se = h2Se,
+        p = p,
+        nComponents = as.integer(nComponents),
+        intercept = intercept,
+        scale = scale
     )
+}
+
+# The window's LD eigenpairs with positive eigenvalues, largest first: from
+# the thin SVD of a factor, or the matrix's own decomposition.
+# @noRd
+.cisH2Eigen <- function(ld) {
+    dec <- if (!is.null(ld$F)) {
+        .ldFactorEigen(ld$F)
+    } else {
+        eigen(ld$R, symmetric = TRUE)
+    }
+    keep <- dec$values > 0
+    list(
+        values = dec$values[keep],
+        vectors = dec$vectors[, keep, drop = FALSE]
+    )
+}
+
+# LAVA's univariate local heritability, implemented from the estimator as
+# Werme et al. (2022, Methods) and LAVA's documentation describe it: LAVA's
+# code is not licensed for reuse, and none of it is used here. The marginal
+# correlations r_j = z_j / sqrt(z_j^2 + n_j - 2) are projected onto the K
+# standardized LD components of .lavaComponents() (no estimate with fewer
+# than 2): delta = Lambda_K^-1/2 Q_K' r. h2 is the adjusted R^2,
+# delta'delta - K sigma with sigma = (1 - delta'delta) / (n - K - 1) for the
+# mean sample size n, times the reference correction (nRef - K - 1) /
+# (nRef - 1) that LAVA's release notes describe; p is the F test of
+# delta = 0 on the corrected statistic. LAVA withholds h2 where K / n
+# exceeds 0.1; it is reported here at any K, since a cis window's K usually
+# does. Where delta'delta reaches 1, the LD contradicts the statistics and
+# both are NA.
+# @noRd
+#' @importFrom stats pf
+.cisH2Lava <- function(z, nVariant, ld) {
+    dec <- .cisH2Eigen(ld)
+    n <- mean(nVariant)
+    K <- .lavaComponents(dec$values, n)
+    if (K < 2L) {
+        return(.cisH2Result(K))
+    }
+    r <- z / sqrt(z^2 + nVariant - 2)
+    top <- seq_len(K)
+    delta <- crossprod(dec$vectors[, top, drop = FALSE], r) /
+        sqrt(dec$values[top])
+    dtd <- sum(delta^2)
+    if (dtd >= 1) {
+        return(.cisH2Result(K))
+    }
+    sigma <- (1 - dtd) / (n - K - 1)
+    scale <- (ld$nSamples - K - 1) / (ld$nSamples - 1)
+    p <- pf(dtd / sigma * scale / K, K, n - K - 1, lower.tail = FALSE)
+    .cisH2Result(K, h2 = (dtd - K * sigma) * scale, p = p)
+}
+
+# LAVA's number of LD components for a mean sample size n, as its
+# documentation gives them: the first K whose eigenvalues hold 99% of the
+# variance, at most floor(0.75 n), or 2 if that is less.
+# @noRd
+.lavaComponents <- function(values, n) {
+    held <- cumsum(values) / sum(values)
+    as.integer(min(which(held >= 0.99)[[1L]], max(floor(0.75 * n), 2L)))
+}
+
+# HDL-L's estimate (.hdlLocusFit()) from the z and per-variant sample sizes:
+# HDL.L()'s effects z_j / sqrt(n_j) and its median sample size.
+# @noRd
+.cisH2HdlL <- function(z, nVariant, ld) {
+    fit <- .hdlLocusFit(
+        z / sqrt(nVariant),
+        ld,
+        median(nVariant),
+        ld$nSamples
+    )
+    .cisH2Result(
+        fit$nComponents,
+        h2 = fit$h2,
+        p = fit$p,
+        intercept = fit$intercept
+    )
+}
+
+# FastHer's local heritability (Svishcheva 2025), the maximum-likelihood
+# estimate HEELS (Li, Mazumder and Lin 2023) reaches by iteration, following
+# FastHer's R code (MIT; see inst/COPYRIGHTS) for the inputs, the eigen cut
+# and the standard error, with d profiled out of the likelihood instead of
+# FastHer's joint optimization: the n study samples' y ~ N(0, d (h2 X X' / m +
+# (1 - h2) I)) over the window's m variants, in the eigenbasis of the LD with
+# X'X = n R, X'y = sqrt(n) z and y'y = n. As FastHer does, z is rescaled to
+# the harmonic mean n of the per-variant sizes and the eigenpairs are kept
+# down to the one that reaches 99.999% of the trace (r of them). With a_k =
+# (Q'z)_k^2 / lambda_k and S their sum, the likelihood needs r < n and S < n,
+# which in-sample LD guarantees; the estimate is NA otherwise. d is profiled
+# out, h2 maximized over [0, 1), and its standard error is FastHer's, from
+# the expected information in (h2, d).
+# @noRd
+#' @importFrom stats optimize
+.cisH2FastHer <- function(z, nVariant, ld) {
+    n <- 1 / mean(1 / nVariant)
+    dec <- .fastHerEigen(.cisH2Eigen(ld))
+    r <- length(dec$values)
+    a <- as.vector(crossprod(dec$vectors, z * sqrt(n / nVariant)))^2 /
+        dec$values
+    if (r >= n || sum(a) >= n) {
+        return(.cisH2Result(r))
+    }
+    ck <- n * dec$values / length(z) - 1
+    h2 <- optimize(
+        .fastHerProfileLl,
+        c(0, 1 - 1e-9),
+        a = a,
+        ck = ck,
+        n = n,
+        maximum = TRUE,
+        tol = 1e-10
+    )$maximum
+    d <- .fastHerScale(h2, a, ck, n)
+    .cisH2Result(r, h2 = h2, h2Se = .fastHerSe(h2, d, ck, n), scale = d)
+}
+
+# FastHer's eigenpairs: those down to the one at which the eigenvalues reach
+# 99.999% of their sum, and any tied with it.
+# @noRd
+.fastHerEigen <- function(dec) {
+    held <- cumsum(dec$values) / sum(dec$values)
+    keep <- dec$values >= dec$values[[which(held > 0.99999)[[1L]]]]
+    list(
+        values = dec$values[keep],
+        vectors = dec$vectors[, keep, drop = FALSE]
+    )
+}
+
+# FastHer's log-likelihood at h2 with d at its maximum given h2
+# (.fastHerScale()), up to a constant.
+# @noRd
+.fastHerProfileLl <- function(h2, a, ck, n) {
+    W <- 1 + h2 * ck
+    d <- .fastHerScale(h2, a, ck, n)
+    -(sum(log(W)) + (n - length(a)) * log(1 - h2) + n * log(d)) / 2
+}
+
+# d's maximum given h2: (sum(a / W) + (n - S) / (1 - h2)) / n.
+# @noRd
+.fastHerScale <- function(h2, a, ck, n) {
+    (sum(a / (1 + h2 * ck)) + (n - sum(a)) / (1 - h2)) / n
+}
+
+# h2's standard error from the expected information in (h2, d), FastHer's:
+# with K = ck / W, I_hh = (sum(K^2) + (n - r) / (1 - h2)^2) / 2, I_dd = n /
+# (2 d^2) and I_hd = (sum(K) - (n - r) / (1 - h2)) / (2 d). With n > r the
+# information is positive definite.
+# @noRd
+.fastHerSe <- function(h2, d, ck, n) {
+    K <- ck / (1 + h2 * ck)
+    rest <- (n - length(ck)) / (1 - h2)
+    info <- matrix(
+        c(
+            sum(K^2) + rest / (1 - h2),
+            (sum(K) - rest) / d,
+            (sum(K) - rest) / d,
+            n / d^2
+        ),
+        2L,
+        2L
+    ) /
+        2
+    sqrt(solve(info)[[1L, 1L]])
 }
 
 # sHDL candidate-annotation score statistics. Each eigen-direction's rotated
@@ -1554,13 +1785,7 @@ NULL
 # hdlUnivariate -- orchestrator
 # =============================================================================
 
-hdlUnivariate <- function(
-    z,
-    n,
-    eigenRef,
-    annotations = NULL,
-    local = FALSE
-) {
+hdlUnivariate <- function(z, n, eigenRef, annotations = NULL) {
     M <- length(eigenRef)
     nPanel <- ldPanelNSamples(eigenRef)
     baselineMat <- .h2DesignMat(annotations)
@@ -1577,7 +1802,6 @@ hdlUnivariate <- function(
     design <- .hdlDesign(blockData, M, baselineMat)
     ft <- .hdlFit(design, n, nPanel)
     jk <- .hdlJackknife(blockData, M, baselineMat, n, nPanel)
-    localDf <- if (local) .hdlLocal(blockData, n, nPanel, ft$int, M) else NULL
     .h2FitResult(
         h2 = ft$h2,
         h2Se = jk$h2Se,
@@ -1586,7 +1810,6 @@ hdlUnivariate <- function(
         A = baselineMat,
         tau = ft$h2a / design$M_a,
         tauBlocks = sweep(jk$h2aBlocks, 2L, design$M_a, "/"),
-        localDf = localDf,
         scoreStats = .hdlCandidateScores(
             blockData,
             nPanel,
@@ -1698,14 +1921,7 @@ NULL
 NULL
 
 # @noRd
-sldscUnivariate <- function(
-    z,
-    n,
-    ldRef,
-    annotations = NULL,
-    local = FALSE,
-    nIter = 2L
-) {
+sldscUnivariate <- function(z, n, ldRef, annotations = NULL, nIter = 2L) {
     M <- length(ldRef)
     chi2 <- z^2
     # Same design g-LDSC uses (.h2DesignMat()), so `crossprod(A)` is the
@@ -1726,7 +1942,6 @@ sldscUnivariate <- function(
         A = if (is.null(.h2BaselineMat(annotations))) NULL else A,
         tau = fit$tau,
         tauBlocks = jk$annotationJackknifeCoefs,
-        localDf = if (local) .sldscLocal(chi2, baseScore, fit) else NULL,
         scoreStats = scoreStats
     )
 }
@@ -1820,7 +2035,7 @@ sldscUnivariate <- function(
 # @noRd
 .h2BlockAnnotScores <- function(block, panel, annotMat, nRef) {
     idx <- block$idx
-    Ab <- annotMat[idx, , drop = FALSE]
+    Ab <- .denseBlock(annotMat, idx)
     raw <- .ldSquaredProduct(.ldStatBlockLd(block, panel), Ab)
     list(idx = idx, values = .ldscUnbiasedSum(raw, colSums(Ab), nRef))
 }
@@ -2084,18 +2299,6 @@ sldscUnivariate <- function(
     )
 }
 
-# Per-variant local h2 contribution: the fitted non-intercept signal spread
-# over the variant's own LD score.
-# @noRd
-.sldscLocal <- function(chi2, baseScore, fit) {
-    tibble(
-        variantIdx = seq_along(chi2),
-        chi2 = chi2,
-        ldScore = baseScore,
-        h2Local = fit$tau[[1L]] * pmax(baseScore, 0)
-    )
-}
-
 # =============================================================================
 # estimateH2 -- main dispatch
 # =============================================================================
@@ -2125,7 +2328,6 @@ sldscUnivariate <- function(
     n,
     ldRef,
     annotations,
-    local,
     estimatorArgs = list()
 ) {
     # `estimatorArgs` rather than `...`: the estimators take different
@@ -2135,7 +2337,7 @@ sldscUnivariate <- function(
     # ridge `lambda` here that nothing read -- the original LDER and HDL
     # implementations have no such penalty, and the function behind it had no
     # callers.
-    base <- list(z, n, ldRef, annotations, local)
+    base <- list(z, n, ldRef, annotations)
     fn <- switch(
         method,
         "lder" = lderUnivariate,
@@ -2228,21 +2430,34 @@ sldscUnivariate <- function(
     abort(msg)
 }
 
-# Wrap a univariate estimator result list into an H2Estimate S4 object.
-.h2EstimateFromResult <- function(result, method, M, studyName) {
-    new(
-        "H2Estimate",
-        estimate = result$h2,
-        estimateSe = result$h2Se,
-        intercept = result$intercept %||% NA_real_,
-        interceptSe = result$interceptSe %||% NA_real_,
-        localBlocks = result$local,
-        enrichment = result$enrichment,
-        annotationJackknifeCoefs = result$annotationJackknifeCoefs,
-        scoreStats = result$scoreStats,
-        method = method,
-        nSnps = as.integer(M),
-        traitName = studyName
+# A univariate estimator's result as an H2Estimate of one genome-wide
+# estimate, one row for the study. The estimate covers the whole reference,
+# which spans more chromosomes than an element may, so its element holds no
+# ranges; the row takes the reference's genome.
+# @noRd
+.h2EstimateFromResult <- function(result, method, M, studyName, ldRef) {
+    .h2EstimateNew(
+        list(GenomicRanges::GRanges()),
+        list(
+            study = studyName,
+            context = NA_character_,
+            trait = NA_character_,
+            method = method,
+            h2 = unname(result$h2),
+            h2_se = unname(result$h2Se),
+            intercept = unname(result$intercept %||% NA_real_),
+            intercept_se = unname(result$interceptSe %||% NA_real_),
+            p_value = NA_real_,
+            n_snps = as.integer(M),
+            n_components = NA_integer_,
+            scale = NA_real_
+        ),
+        list(
+            enrichment = list(result$enrichment),
+            jackknife = list(result$annotationJackknifeCoefs),
+            score_stats = list(result$scoreStats)
+        ),
+        ldRef
     )
 }
 
@@ -2256,7 +2471,6 @@ setMethod(
         ldRef,
         method = "lder",
         annotations = NULL,
-        local = FALSE,
         studyName = NULL,
         estimatorArgs = list()
     ) {
@@ -2277,10 +2491,9 @@ setMethod(
             n,
             ldRef,
             annotations,
-            local,
             estimatorArgs = estimatorArgs
         )
-        .h2EstimateFromResult(result, method, M, studyName)
+        .h2EstimateFromResult(result, method, M, studyName, ldRef)
     }
 )
 
@@ -2301,6 +2514,209 @@ setMethod(
         abort(msg)
     }
     invisible(TRUE)
+}
+
+# =============================================================================
+# estimateH2 on QTL summary statistics -- one cis estimate per gene
+# =============================================================================
+
+#' @rdname estimateH2
+#' @param contexts For a \code{QtlSumStats}: optional context selection, as
+#'   \code{\link{twasWeightsPipeline}} takes it; \code{NULL} (the default)
+#'   uses every context.
+#' @param traitId For a \code{QtlSumStats}: optional trait selection, as
+#'   \code{\link{twasWeightsPipeline}} takes it; \code{NULL} (the default)
+#'   uses every trait.
+#' @param cisWindow For a \code{QtlSumStats}: optionally, each selected row
+#'   is analysed over its \code{traitPos} \eqn{\pm} \code{cisWindow}, within
+#'   its \code{region}. Every selected row then needs a \code{traitPos}.
+#' @param BPPARAM For a \code{QtlSumStats}: a \code{BiocParallelParam} over
+#'   the selected rows, each row's estimate on one worker. Default
+#'   \code{SerialParam()}.
+#' @export
+#' @importFrom BiocParallel SerialParam
+setMethod(
+    "estimateH2",
+    signature(sumstats = "QtlSumStats", ldRef = "missing"),
+    function(
+        sumstats,
+        ldRef,
+        method = "lava",
+        annotations = NULL,
+        contexts = NULL,
+        traitId = NULL,
+        cisWindow = NULL,
+        BPPARAM = SerialParam()
+    ) {
+        method <- arg_match(method, names(.cisH2Estimators))
+        .cisH2AssertInput(sumstats, annotations)
+        selection <- .qssSelection(
+            sumstats,
+            contexts,
+            traitId,
+            cisWindow,
+            "estimateH2"
+        )
+        fits <- .bpMap(
+            .cisH2SelectedRows(selection),
+            .cisH2Row,
+            data = selection$data,
+            method = method,
+            BPPARAM = BPPARAM
+        )
+        out <- .h2EstimateNew(
+            map(fits, "window"),
+            as.list(list_rbind(map(fits, "values"))),
+            .h2NoObjects(length(fits)),
+            sumstats
+        )
+        .cisH2WarnEmpty(out)
+        .cisH2WarnUndefined(out, method)
+        out
+    }
+)
+
+# The input a cis estimate needs: QC'd QTL summary statistics, and none of
+# the genome-wide estimators' annotations.
+# @noRd
+.cisH2AssertInput <- function(data, annotations) {
+    if (length(qcOptions(data)) == 0L) {
+        abort(glue(
+            "estimateH2: the QtlSumStats has no QC record (qcOptions() ",
+            "is empty). Call summaryStatsQc() first and pass the QC-applied ",
+            "result."
+        ))
+    }
+    if (!is.null(annotations)) {
+        abort(c(
+            str_c(
+                "estimateH2: a cis estimate from QTL summary statistics takes ",
+                "no `annotations`."
+            ),
+            i = str_c(
+                "They partition a genome-wide estimate from GWAS summary ",
+                "statistics."
+            )
+        ))
+    }
+    invisible(NULL)
+}
+
+# The rows the selection keeps, refusing an empty selection.
+# @noRd
+.cisH2SelectedRows <- function(selection) {
+    rows <- which(.sumStatsRowsSelected(
+        selection$data,
+        selection$contexts,
+        selection$traitId
+    ))
+    if (length(rows) == 0L) {
+        abort(glue(
+            "estimateH2: no rows matched the supplied contexts / traitId ",
+            "filters."
+        ))
+    }
+    rows
+}
+
+# One row's estimate, from its z and per-variant sample sizes against its LD
+# reference's block for those variants: the window it covers, and its values.
+# @noRd
+.cisH2Row <- function(i, data, method) {
+    st <- as.character(data$study[[i]])
+    ctx <- as.character(data$context[[i]])
+    tr <- as.character(data$trait[[i]])
+    label <- glue("estimateH2: study='{st}', context='{ctx}', trait='{tr}'")
+    df <- .sumStatsDf(
+        data,
+        studyName = st,
+        context = ctx,
+        trait = tr,
+        require = c("Z", "N"),
+        derive = "zFromBetaSe"
+    )
+    fit <- .cisH2Fit(df, .rowLdRef(data, i), method, label)
+    list(
+        window = .rowRegionAt(data, i),
+        values = tibble(
+            study = st,
+            context = ctx,
+            trait = tr,
+            method = method,
+            h2 = fit$h2,
+            h2_se = fit$h2Se,
+            intercept = fit$intercept,
+            intercept_se = NA_real_,
+            p_value = fit$p,
+            n_snps = nrow(df),
+            n_components = fit$nComponents,
+            scale = fit$scale
+        )
+    )
+}
+
+# One row's fit by `method`; NA when its window holds no variants, as there
+# is nothing to estimate from.
+# @noRd
+.cisH2Fit <- function(df, ldReference, method, label) {
+    if (nrow(df) == 0L) {
+        return(.cisH2Result(NA_integer_))
+    }
+    ld <- .cisH2LdSource(df$variant_id, ldReference, method, label)
+    exec(.cisH2Estimators[[method]], z = df$z, nVariant = df$N, ld = ld)
+}
+
+# The row's LD source (.rssLdSource()) for its variants, refusing a missing
+# reference, and for the methods that read the reference's sample size, a
+# reference that does not record it.
+# @noRd
+.cisH2LdSource <- function(ids, ldReference, method, label) {
+    if (is.null(ldReference)) {
+        abort(glue("{label}: the row has no LD reference."))
+    }
+    ld <- .rssLdSource(list(variantNames = ids), ldReference, label)
+    if (is_in(method, c("lava", "hdlL")) && is.na(ld$nSamples)) {
+        abort(c(
+            glue(
+                "{label}: method = \"{method}\" reads the LD reference's ",
+                "sample size."
+            ),
+            i = "Build the LdMatrix with `nSamples`."
+        ))
+    }
+    ld
+}
+
+# A gene whose window holds no variants has no estimate; one warning lists
+# them.
+# @noRd
+.cisH2WarnEmpty <- function(out) {
+    empty <- out$n_snps == 0L
+    if (!any(empty)) {
+        return(invisible(NULL))
+    }
+    warn(glue(
+        "estimateH2: {sum(empty)} of {length(empty)} gene(s) hold no ",
+        "variants in their window; their h2 is NA: ",
+        "{str_flatten(out$trait[empty], ', ')}."
+    ))
+}
+
+# FastHer's likelihood is undefined for some genes (see estimateH2()); one
+# warning lists them.
+# @noRd
+.cisH2WarnUndefined <- function(out, method) {
+    undefined <- identical(method, "fastHer") & is.na(out$h2) & out$n_snps > 0L
+    if (!any(undefined)) {
+        return(invisible(NULL))
+    }
+    warn(glue(
+        "estimateH2: FastHer's likelihood is undefined for ",
+        "{sum(undefined)} of {nrow(out)} gene(s), whose LD reference's rank ",
+        "or statistics reach the sample size (an external reference larger ",
+        "than the study); their h2 is NA: ",
+        "{str_flatten(out$trait[undefined], ', ')}."
+    ))
 }
 
 # =============================================================================
@@ -2391,7 +2807,7 @@ setMethod(
 .h2BlockStratScores <- function(block, ldRef, annotMat, nRef) {
     dec <- .ldEigenBlockAt(block, ldRef)
     idx <- dec$snpIdx
-    Ab <- annotMat[idx, , drop = FALSE]
+    Ab <- .denseBlock(annotMat, idx)
     raw <- .ldSquaredProduct(dec[c("vectors", "values")], cbind(1, Ab))
     list(
         idx = idx,
@@ -2446,9 +2862,8 @@ setMethod(
     }
 )
 
-# H2Estimate accessor methods (localH2Blocks /
-# stratifiedHeritabilityEnrichment / scoreStats) live
-# in R/h2Estimate.R alongside the class definition.
+# H2Estimate accessor methods (stratifiedHeritabilityEnrichment /
+# scoreStats) live in R/H2Estimate.R alongside the class definition.
 
 # =============================================================================
 # Converter: H2Estimate -> sldsc_wrapper list format
@@ -2460,8 +2875,10 @@ setMethod(
 #'   expected by \code{\link{standardizeSldscTrait}} and
 #'   \code{\link{metaSldscRandom}}. This bridges the h2 estimation methods
 #'   (LDER, gLDSC, HDL) into the sldscWrapper.R postprocessing pipeline.
-#' @param h2Est An \code{H2Estimate} object with enrichment and
-#'   \code{annotationJackknifeCoefs}.
+#' @param h2Est An \code{H2Estimate} holding one stratified estimate, with
+#'   its enrichment table and \code{annotationJackknifeCoefs}. Select one
+#'   from several by its identity columns, e.g.
+#'   \code{x[x$study == "trait1"]}.
 #' @return A named list matching the format of \code{\link{readSldscTrait}}:
 #'   \describe{
 #'     \item{categories}{Character vector of annotation names}
@@ -2482,8 +2899,9 @@ setMethod(
 #' @export
 h2EstimateToSldscTrait <- function(h2Est) {
     assertClass(h2Est, "H2Estimate")
-
-    enrichDf <- stratifiedHeritabilityEnrichment(h2Est)
+    .h2AssertOneEstimate(h2Est)
+    md <- mcols(h2Est, use.names = FALSE)
+    enrichDf <- md$enrichment[[1L]]
     if (is.null(enrichDf)) {
         msg <- glue(
             "H2Estimate has no enrichment results. ",
@@ -2493,9 +2911,8 @@ h2EstimateToSldscTrait <- function(h2Est) {
     }
 
     cats <- as.character(enrichDf$annotation)
-    nCats <- length(cats)
 
-    rawTau <- annotationJackknifeCoefs(h2Est)
+    rawTau <- md$jackknife[[1L]]
     # Without per-block estimates the point estimates stand in as one block.
     jkCoefs <- `colnames<-`(
         rawTau %||% matrix(enrichDf$tau, nrow = 1),
@@ -2512,10 +2929,25 @@ h2EstimateToSldscTrait <- function(h2Est) {
         enrichmentP = set_names(enrichDf$enrichmentP, cats),
         propH2 = set_names(enrichDf$propH2, cats),
         propSnps = set_names(enrichDf$propSnps, cats),
-        h2g = heritabilityEstimate(h2Est),
+        h2g = md$h2[[1L]],
         annotationJackknifeCoefs = jkCoefs,
         nBlocks = nBlocks
     )
+}
+
+# An error unless the H2Estimate holds one estimate.
+# @noRd
+.h2AssertOneEstimate <- function(h2Est) {
+    if (length(h2Est) == 1L) {
+        return(invisible(h2Est))
+    }
+    abort(c(
+        glue(
+            "h2EstimateToSldscTrait: the H2Estimate holds {length(h2Est)} ",
+            "estimates; it converts one."
+        ),
+        i = "Select one by its identity, e.g. `x[x$study == \"trait1\"]`."
+    ))
 }
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
@@ -2537,23 +2969,11 @@ h2EstimateToSldscTrait <- function(h2Est) {
     .lderGetRes(d$x, d$lam, d$ldAnnot, N, M, M_aFull, rough, twostage)
 }
 
-# One LDER local-heritability row for block `b`.
-# @noRd
-.lderLocalRow <- function(b, blockStats, N, a) {
-    .lderLocalBlock(blockStats[[b]], b, N, a)
-}
-
 # One g-LDSC delete-one-block jackknife fold: re-solve the normal equations with
 # block `cb`'s Omega-weighted contribution removed.
 # @noRd
 .gldscLooEstimate <- function(cb, left, right, A, N) {
     .gldscEstimate(left - cb$L, right - cb$R, A, N)
-}
-
-# One g-LDSC local-heritability row for block `b`.
-# @noRd
-.gldscLocalRow <- function(b, contrib, N) {
-    .gldscLocalBlock(contrib[[b]], b, N)
 }
 
 # g-LDSC leave-one-block-out standardized candidate score vector for block `b`.
@@ -2569,10 +2989,4 @@ h2EstimateToSldscTrait <- function(h2Est) {
         nSamples,
         warnOnBound = FALSE
     )
-}
-
-# One HDL local-heritability row for block `b`.
-# @noRd
-.hdlLocalRow <- function(b, blockData, n, nSamples, int, M) {
-    .hdlLocalBlock(blockData[[b]], b, n, nSamples, int, M)
 }

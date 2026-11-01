@@ -22,6 +22,19 @@ computed against, each a genotype panel, a \code{GenotypeMixture} or an
 \code{mcols} names the entry each row used (\code{NA} for a fit derived
 from individual-level data). Used downstream to check that the rows a
 pipeline combines share an LD reference.}
+
+\item{\code{cvPartition}}{A named list of the cross-validation fold partitions the
+rows' results share, each with the order of the samples its out-of-fold
+predictions are held for, stored once apiece; the \code{cvPartition}
+column of \code{mcols} names the entry each row's result used
+(\code{NA} for a row without one). \code{cvResult()} returns a row's
+result with its partition and sample names in place.}
+
+\item{\code{fits}}{A named list of the rows' fits, stored once apiece: the rows of
+a joint fit, one per condition, all name one entry. The
+\code{susieFit} column of \code{mcols} names each row's entry
+(\code{NA} for a row without a fit); \code{susieFit()} returns it in
+place.}
 }}
 
 \section{Narrowed rows}{

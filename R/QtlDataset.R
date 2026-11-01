@@ -381,8 +381,9 @@ QtlDataset <- function(
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
 ) {
     handle <- .qtlValidateInputs(phenotypes, genotypes)
-    # Every experiment's rowRanges in UCSC style, so the dataset's traits and
-    # variants meet every other range pecotmr holds exactly.
+    # Every experiment's rowRanges in UCSC style, and the genotypes' alleles
+    # in upper case, so the dataset's traits and variants meet every other
+    # range pecotmr holds exactly.
     experiments <- map(
         c(
             set_names(
@@ -391,7 +392,7 @@ QtlDataset <- function(
             ),
             as.list(phenotypes)
         ),
-        .ucscExperiment
+        .canonExperiment
     )
     mae <- MultiAssayExperiment::MultiAssayExperiment(
         experiments = experiments,

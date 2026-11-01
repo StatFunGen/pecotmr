@@ -2,67 +2,89 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesAlphabetWeights}
 \alias{bayesAlphabetWeights}
-\title{Extract Coefficients From Bayesian Linear Regression}
+\title{Bayesian Alphabet TWAS Weights}
 \usage{
 bayesAlphabetWeights(
   X,
   y,
   method,
-  Z = NULL,
-  h2 = NULL,
-  nit = 5000,
-  nburn = 1000,
-  nthin = 5,
-  methodArgs = QggOptions()
+  backend = NULL,
+  pi = NULL,
+  nIter = 5000,
+  nBurnin = 1000,
+  thin = 5,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = NULL
 )
 }
 \arguments{
-\item{X}{A numeric matrix of genotypes.}
+\item{X}{A numeric matrix of genotypes (samples x variants).}
 
-\item{y}{A numeric vector of phenotypes.}
+\item{y}{A numeric vector of phenotypes, one per row of \code{X}.}
 
-\item{method}{A character string declaring the method/prior to be used.
-Options are bayesN, bayesL, bayesA, bayesC, or bayesR.}
+\item{method}{The prior: \code{"bayesA"}, \code{"bayesB"},
+\code{"bayesC"}, \code{"bayesL"}, \code{"bayesN"} or \code{"bayesR"}.}
 
-\item{Z}{An optional numeric matrix of covariates.}
+\item{backend}{The engine, one the method has (see Description);
+\code{NULL} picks the method's default.}
 
-\item{h2}{Numeric or \code{NULL}. Prior heritability for the sampler;
-\code{NULL} lets \code{qgg} estimate it.}
+\item{pi}{For \code{bayesB} and \code{bayesC}, the prior proportion of
+non-null effects, where each engine's estimate of it starts; \code{NULL}
+gives 0.2 for \code{bayesB} and 0.1 for \code{bayesC}. Refused for the
+other methods.}
 
-\item{nit}{Integer. Total number of MCMC iterations. Default \code{5000}.}
+\item{nIter}{Integer. Total number of MCMC iterations, burn-in included,
+on every engine. Default \code{5000}.}
 
-\item{nburn}{Integer. Number of burn-in iterations discarded. Default
-\code{1000}.}
+\item{nBurnin}{Integer. Number of burn-in iterations discarded; less than
+\code{nIter}. Default \code{1000}.}
 
-\item{nthin}{Integer. Thinning interval for retained MCMC samples. Default
+\item{thin}{Integer. Thinning interval for retained MCMC samples. Default
 \code{5}.}
 
-\item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
-with \code{\link{QggOptions}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the posterior summaries, as a list of the
+effects' posterior means (\code{coef}, over the variants fitted) and,
+where the backend reports them, their posterior inclusion probabilities
+(\code{pip}); \code{"full"} the backend's whole fitted object. Either
+names the variants it was fitted on.}
+
+\item{methodArgs}{Options for the backend's engine, built with its
+constructor: \code{\link{QggOptions}}, \code{\link{BglrOptions}} or
+\code{\link{HibayesOptions}}. \code{NULL} keeps the engine's defaults.
+A bare list is refused: it cannot be checked against the engine, so a
+misspelled option would be silently ignored.}
 }
 \value{
-A vector containing the weights to be applied to each genotype in
-  predicting the phenotype.
+A numeric vector of weights, one per variant (column of
+  \code{X}); columns dropped for zero variance receive weight 0. Unless
+  \code{fitRetention = "none"} the fit is attached as attribute
+  \code{"fit"}.
 }
 \description{
-This function performs Bayesian linear regression using the `gbayes` function
-from the `qgg` package. It then returns the estimated slopes.
+Fits a Bayesian linear regression of \code{y} on \code{X} under one of
+the "Bayesian alphabet" priors and returns the posterior mean effects.
+Each method runs on several engines, chosen by \code{backend}:
+\itemize{
+  \item \code{bayesA} (a scaled-t prior), \code{bayesC} (spike and slab
+    with one slab variance), \code{bayesN} (Gaussian, ridge-like) and
+    \code{bayesR} (a mixture of normals): \code{"qgg"} (default,
+    \code{qgg::gbayes}) or \code{"hibayes"} (\code{hibayes::ibrm}).
+  \item \code{bayesB} (spike and slab with a variance per variant):
+    \code{"bglr"} (default, \code{BGLR::BGLR}) or \code{"hibayes"}.
+  \item \code{bayesL} (the Bayesian LASSO): \code{"qgg"} (default),
+    \code{"bglr"} or \code{"hibayes"}, the last two in Park and
+    Casella's form.
 }
-\details{
-This function fits a Bayesian linear regression model with a range
-  of priors.
+The same settings reach every engine: \code{nIter}, \code{nBurnin},
+\code{thin} and \code{pi} are renamed to each engine's own spelling, and
+everything else goes through \code{methodArgs}, built with the backend's
+own constructor.
 }
 \examples{
-X <- matrix(rnorm(100000), nrow = 1000)
-Z <- matrix(round(runif(3000, 0, 0.8), 0), nrow = 1000)
-set1 <- sample(seq_len(ncol(X)), 5)
-set2 <- sample(seq_len(ncol(X)), 5)
-sets <- list(set1, set2)
-g <- rowSums(X[, c(set1, set2)])
-e <- rnorm(nrow(X), mean = 0, sd = 1)
-y <- g + e
-bayesLWeights(y = y, X = X, Z = Z)
-bayesRWeights(y = y, X = X, Z = Z)
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bayesAlphabetWeights(X, y, "bayesR", nIter = 1000, nBurnin = 200)
 }

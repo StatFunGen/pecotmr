@@ -1594,9 +1594,9 @@ test_that("posterior_mean is colSums(alpha*mu) when the fit records no scale", {
     inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = c(0.8, 0.6))
     out <- .runBuildTopLoci(inp, method = "susie")
     expected_mean <- colSums(inp$fit$alpha * inp$fit$mu)
-    expected_se <- sqrt(pmax(
-        colSums(inp$fit$alpha * inp$fit$mu2) - expected_mean^2,
-        0
+    # The single effects' variances add (susieR's posterior SD).
+    expected_se <- sqrt(colSums(
+        inp$fit$alpha * inp$fit$mu2 - (inp$fit$alpha * inp$fit$mu)^2
     ))
     # Match per variant index by looking up via variant string.
     for (i in seq_along(variant_ids)) {
@@ -1634,12 +1634,20 @@ test_that("posterior_mean and posterior_sd are on the SUPPLIED X scale", {
         X_column_scale_factors = c(0.5, 2, 4)
     )
     meanStd <- colSums(fit$alpha * fit$mu)
-    sdStd <- sqrt(pmax(colSums(fit$alpha * fit$mu2) - meanStd^2, 0))
+    sdStd <- sqrt(colSums(fit$alpha * fit$mu2 - (fit$alpha * fit$mu)^2))
     post <- pecotmr:::.btlPosterior(fit, NULL, nV)
     expect_equal(post$postMean, meanStd / fit$X_column_scale_factors)
     # An SD rescales the way its mean does, but the mu2 identity only holds
     # in the units mu2 is stored in -- so it is computed there, then divided.
     expect_equal(post$postSd, sdStd / fit$X_column_scale_factors)
+    # The single effects' variances add, as in susieR's own posterior SD.
+    # Both effects weigh every variant here, so squaring the summed mean
+    # instead would differ.
+    expect_equal(post$postSd, susieR::susie_get_posterior_sd(fit))
+    expect_false(isTRUE(all.equal(
+        sdStd,
+        sqrt(pmax(colSums(fit$alpha * fit$mu2) - meanStd^2, 0))
+    )))
 
     # susieInf / susieAsh carry an infinitesimal term that coef.susie adds in;
     # dropping it would silently change what the posterior effect means.
@@ -2148,10 +2156,22 @@ test_that("trimFinemappingFit (susie) trims to selected effects and keeps scalar
     expect_equal(tr$V, 1)
     expect_equal(tr$theta, c(1, 2))
     expect_equal(tr$omega_weights, c(0.5, 0.5))
-    expect_equal(tr$X_column_scale_factors, c(1, 1))
+    # All-1 scale factors are not stored; the readers take absent for 1s.
+    expect_null(tr$X_column_scale_factors)
+    expect_equal(pecotmr:::.fitScaleFactors(tr, 2L), c(1, 1))
+    # Factors that rescale are kept.
+    scaled <- pecotmr:::trimFinemappingFit(
+        list_assign(fit, X_column_scale_factors = c(2, 0.5)),
+        eff,
+        "susie",
+        csTables
+    )
+    expect_equal(scaled$X_column_scale_factors, c(2, 0.5))
     expect_equal(tr$niter, 5)
     expect_equal(tr$max_L, 2L)
     expect_equal(tr$n_effects, 2L)
+    # The kept effect's own index, which its row no longer gives.
+    expect_equal(tr$effect_index, 1L)
     expect_equal(class(tr), "susie")
     # secondary tables drop the pip element
     expect_length(tr$sets_secondary, 1L)
@@ -2188,6 +2208,15 @@ test_that("trimFinemappingFit keeps non-effect-indexed reconciliation fields", {
     expect_true(tr[["converged"]])
     expect_equal(tr[["pi"]], c(0.4, 0.6))
     expect_equal(tr[["XtXr"]], c(1.5, 2.5))
+    # Uniform prior weights are not stored: absent is what every reader takes
+    # for uniform.
+    uniform <- pecotmr:::trimFinemappingFit(
+        list_assign(fit, pi = c(0.5, 0.5)),
+        pecotmr:::selectEffects(fit),
+        "susie",
+        csTables
+    )
+    expect_null(uniform[["pi"]])
 
     # A fit missing them trims cleanly rather than storing NULLs.
     bare <- fit[setdiff(
@@ -2222,7 +2251,7 @@ test_that("trimFinemappingFit (fsusie) retains coef and sets the fsusie/susie cl
     expect_null(tr$V)
 })
 
-test_that("trimFinemappingFit (mvsusie) slices 3-D mu/mu2/mu2_diag/clfsr and stores coef", {
+test_that("trimFinemappingFit slices mvsusie's 3-D arrays and stores coef", {
     skip_if_not_installed("mvsusieR")
     L <- 2L
     p <- 3L
@@ -2254,10 +2283,48 @@ test_that("trimFinemappingFit (mvsusie) slices 3-D mu/mu2/mu2_diag/clfsr and sto
     tr <- pecotmr:::trimFinemappingFit(fit, eff, "mvsusie", csTables)
     expect_equal(dim(tr$mu), c(1L, p, R))
     expect_equal(dim(tr$mu2), c(1L, p, R))
-    expect_equal(dim(tr$mu2_diag), c(1L, p, R))
+    # mu2_diag has no reader once topLoci is built.
+    expect_null(tr$mu2_diag)
     expect_equal(dim(tr$clfsr), c(1L, p, R))
     expect_equal(tr$coef, fake_coef[-1, , drop = FALSE])
     expect_equal(class(tr), c("mvsusie", "susie"))
+})
+
+test_that("trimFinemappingFit keeps an mvsusie fit with only null effects", {
+    skip_if_not_installed("mvsusieR")
+    # With no effect to report, mvsusieR leaves NA where the lfsr arrays go;
+    # slicing that as an L x p x R array failed the whole fine-mapping run.
+    L <- 2L
+    p <- 3L
+    R <- 2L
+    fit <- list(
+        pip = setNames(
+            rep(0, p),
+            c("chr1:1:A:G", "chr1:2:A:G", "chr1:3:A:G")
+        ),
+        alpha = matrix(1 / p, L, p),
+        mu = array(0, dim = c(L, p, R)),
+        mu2 = array(0, dim = c(L, p, R)),
+        mu2_diag = array(0, dim = c(L, p, R)),
+        V = c(0, 0),
+        conditional_lfsr = NA_real_,
+        niter = 3
+    )
+    eff <- pecotmr:::selectEffects(fit)
+    expect_length(eff, 0L)
+    csTables <- list(list(
+        sets = list(cs = list()),
+        cs_corr = NULL,
+        pip = fit$pip
+    ))
+    local_mocked_bindings(
+        coef.mvsusie = function(...) matrix(0, p + 1L, R),
+        .package = "mvsusieR"
+    )
+    tr <- pecotmr:::trimFinemappingFit(fit, eff, "mvsusie", csTables)
+    expect_null(tr$clfsr)
+    expect_equal(nrow(tr$alpha), 0L)
+    expect_equal(tr$coef, matrix(0, p, R))
 })
 
 # ---- postprocessFinemappingFit S3 methods ----
@@ -2438,7 +2505,7 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
     skip_if_not_installed("mvsusieR")
     local_mocked_bindings(
         mvsusie = function(X, Y, prior_variance, coverage, ...) {
-            list(tag = "mv", coverage = coverage)
+            list(tag = "mv", coverage = coverage, dots = list(...))
         },
         .package = "mvsusieR"
     )
@@ -2450,6 +2517,29 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
     )
     expect_equal(r$tag, "mv")
     expect_equal(r$coverage, 0.9)
+    # L is pecotmr's to set (MvsusieOptions refuses it), so it always
+    # reaches the engine; L_greedy only when one is given.
+    expect_equal(r$dots, list(L = 10L))
+    r <- fitMvsusie(
+        matrix(0, 4, 2),
+        matrix(0, 4, 2),
+        prior_variance = 1,
+        L = 3L,
+        L_greedy = 2L
+    )
+    expect_equal(r$dots, list(L = 3L, L_greedy = 2L))
+    # A record whose last setting is NULL reaches the engine whole: rlang's
+    # splice of the record itself would drop that NULL.
+    r <- fitMvsusie(
+        matrix(0, 4, 2),
+        matrix(0, 4, 2),
+        prior_variance = 1,
+        methodArgs = MvsusieOptions(max_iter = 50, residual_variance = NULL)
+    )
+    expect_equal(
+        r$dots,
+        list(L = 10L, max_iter = 50, residual_variance = NULL)
+    )
 })
 
 test_that(".fmFitSusieRss rejects a non-named-list rssControl", {
@@ -2526,13 +2616,26 @@ test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
     skip_if_not_installed("mvsusieR")
     local_mocked_bindings(
         mvsusie_rss = function(Z, R, N, prior_variance, coverage, ...) {
-            list(tag = "rss", N = N)
+            list(tag = "rss", N = N, dots = list(...))
         },
         .package = "mvsusieR"
     )
     r <- fitMvsusieRss(matrix(0, 2, 1), diag(2), N = 100, prior_variance = 1)
     expect_equal(r$tag, "rss")
     expect_equal(r$N, 100)
+    expect_equal(r$dots, list(L = 10L))
+    r <- fitMvsusieRss(
+        matrix(0, 2, 1),
+        diag(2),
+        N = 100,
+        prior_variance = 1,
+        L = 3L,
+        L_greedy = 2L
+    )
+    expect_equal(r$dots, list(L = 3L, L_greedy = 2L))
+    # Supplied by pecotmr, so the options bag refuses it, as MvsusieOptions
+    # does.
+    expect_error(MvsusieRssOptions(L = 3), "maxNumSingleEffects")
 })
 
 test_that("fitFsusie forwards arguments to fsusieR::susiF", {
@@ -2756,7 +2859,7 @@ test_that("mvsusieWeights errors when mvsusieR package is not available", {
         "mvsusieR is installed; skipping missing-package test"
     )
 
-    expect_error(mvsusieWeights(mvsusieFit = NULL), "mvsusieR")
+    expect_error(mvsusieWeights(mvsusieFit = list(alpha = 1)), "mvsusieR")
 })
 
 test_that("mvsusieWeights refuses to fine-map when no fit is supplied", {
@@ -2789,6 +2892,70 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
     result <- mvsusieWeights(mvsusieFit = "precomputed_fit")
     expect_equal(dim(result), c(p, R))
     expect_equal(result, fake_coef[-1, ])
+})
+
+test_that("mvsusieWeights keeps the fit, naming its variants once", {
+    skip_if_not(
+        requireNamespace("mvsusieR", quietly = TRUE),
+        "mvsusieR not installed"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:3))
+    coefs <- matrix(
+        rnorm(8),
+        nrow = 4L,
+        dimnames = list(c("(Intercept)", ids), c("c1", "c2"))
+    )
+    local_mocked_bindings(
+        coef.mvsusie = function(...) coefs,
+        .package = "mvsusieR"
+    )
+    # A fit naming none of its variants takes the weights' row names.
+    kept <- mvsusieWeights(
+        mvsusieFit = list(alpha = matrix(0.5, 1L, 3L)),
+        fitRetention = "slim"
+    )
+    expect_equal(attr(kept, "fit")$variantIds, ids)
+    # One that names them keeps its own names alone.
+    named <- list(pip = set_names(c(0.1, 0.2, 0.3), ids))
+    expect_identical(
+        attr(mvsusieWeights(mvsusieFit = named, fitRetention = "full"), "fit"),
+        named
+    )
+    expect_null(attr(mvsusieWeights(mvsusieFit = named), "fit"))
+})
+
+test_that("mvsusieWeights accepts the X and Y learnTwasWeights passes", {
+    skip_if_not(
+        requireNamespace("mvsusieR", quietly = TRUE),
+        "mvsusieR not installed"
+    )
+    # learnTwasWeights() calls every multivariate method with X and Y. As a
+    # pure extractor mvsusieWeights() had dropped them, so a real fit never
+    # reached TWAS.
+    coefs <- matrix(rnorm(8), nrow = 4L)
+    local_mocked_bindings(
+        coef.mvsusie = function(...) coefs,
+        .package = "mvsusieR"
+    )
+    X <- matrix(0, 5L, 3L)
+    Y <- matrix(0, 5L, 2L)
+    expect_identical(
+        mvsusieWeights(X = X, Y = Y, mvsusieFit = "precomputed_fit"),
+        mvsusieWeights(mvsusieFit = "precomputed_fit")
+    )
+})
+
+test_that("mvsusieWeights reads a trimmed fit's precomputed weights", {
+    # Trimming drops the intercept and all but the kept effects, so
+    # coef.mvsusie() cannot run on the fit a fine-mapping result stores; the
+    # trim records the full fit's weights as `coef` instead.
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:3))
+    coefs <- matrix(c(0.5, 0, 0, 0, 0.2, 0), 3L, dimnames = list(ids, NULL))
+    trimmed <- structure(
+        list(alpha = matrix(1 / 3, 1L, 3L), coef = coefs),
+        class = c("mvsusie", "susie")
+    )
+    expect_identical(mvsusieWeights(mvsusieFit = trimmed), coefs)
 })
 
 .fw_makeFsusieFit <- function(
@@ -2894,6 +3061,45 @@ test_that("fsusieWeights matches fsusieR's own out_prep reconstruction (post_pro
         )
     }
     expect_lt(maxErr, 1e-8)
+})
+
+test_that("fsusieWeights undoes the response scaling fsusieR records", {
+    skip_if_not_installed("fsusieR")
+    skip_if_not_installed("wavethresh")
+    fit <- .fw_fsusieDefault$fit
+    nWac <- fit$n_wac
+    # What an fsusieR that standardizes the response keeps on the fit: a
+    # factor per wavelet coefficient and one per position.
+    set.seed(5)
+    scaled <- fit
+    scaled$csd_Yf <- runif(nWac, 0.5, 2)
+    scaled$csd_Y_pos <- runif(nWac, 0.5, 2)
+    W <- fsusieWeights(fsusieFit = scaled)
+    # fsusieR's own fitted_func (post_processing = "none", its
+    # operation_on_susiF_obj.R): collapse over SNPs, scale each coefficient
+    # by csd_Yf, invert the wavelet transform, scale each position by
+    # csd_Y_pos. Summed over effects, that is the weights' column sums.
+    perScale <- "mixture_normal_per_scale" %in%
+        class(fsusieR::get_G_prior(fit))
+    indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
+    cIdx <- if (perScale) indxLst[[length(indxLst)]] else nWac
+    temp <- wavethresh::wd(rep(0, nWac))
+    curve <- numeric(nWac)
+    for (l in seq_along(fit$fitted_wc)) {
+        wc <- as.numeric((fit$alpha[[l]] / fit$csd_X) %*% fit$fitted_wc[[l]])
+        wc <- wc * scaled$csd_Yf
+        temp$D <- wc[-cIdx]
+        temp$C[length(temp$C)] <- wc[cIdx]
+        curve <- curve + wavethresh::wr(temp) * scaled$csd_Y_pos
+    }
+    expect_equal(unname(colSums(W)), curve, tolerance = 1e-8)
+    # A fit without the factors was never scaled.
+    expect_false(isTRUE(all.equal(W, fsusieWeights(fsusieFit = fit))))
+    # A factor that does not fit the basis is refused, not recycled.
+    expect_error(
+        fsusieWeights(fsusieFit = `$<-`(scaled, "csd_Yf", scaled$csd_Yf[-1])),
+        "`csd_Yf` has"
+    )
 })
 
 test_that("fsusieWeights concentrates weight on the causal SNPs", {
@@ -4767,7 +4973,6 @@ test_that(".fmFoldWeightsMv: NULL mvPrior uses buildMvsusieMixturePrior", {
             mvsusieWeights = function(mvsusieFit) {
                 matrix(0, 2, 2, dimnames = list(c("v1", "v2"), NULL))
             },
-            .fmLeanFoldFit = function(fit, token) NULL,
             .package = "pecotmr"
         )
         pecotmr:::.fmFoldWeightsMv(Xtr, Ytr, 0.95, NULL, NULL)

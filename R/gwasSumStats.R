@@ -216,7 +216,7 @@ GwasSumStats <- function(
         abort("`studyName`, `entry`, and `genome` are all required.")
     }
     varY <- .gwasValidateArgs(studyName, entry, genome, varY)
-    entry <- .ucscEntries(entry)
+    entry <- .ssEntries(entry)
     cols <- list(
         study = as.character(studyName),
         varY = varY
@@ -230,7 +230,7 @@ GwasSumStats <- function(
         .sumStatsNewValidated(
             "GwasSumStats",
             grl,
-            dict$refs,
+            dict$entries,
             genome,
             qcOptions
         ),
@@ -294,7 +294,7 @@ GwasSumStats <- function(
     )
     methods::new(
         Class,
-        built,
+        .rtlStored(Class, built),
         ldReference = ldReference,
         qcOptions = as.list(qcOptions)
     )

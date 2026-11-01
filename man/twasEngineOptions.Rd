@@ -5,6 +5,9 @@
 \alias{GlmnetOptions}
 \alias{QggOptions}
 \alias{BglrOptions}
+\alias{HibayesOptions}
+\alias{HibayesRssOptions}
+\alias{BayesAlphabetRssOptions}
 \alias{DprOptions}
 \alias{NcvregOptions}
 \alias{L0learnOptions}
@@ -12,6 +15,7 @@
 \alias{MrashRssOptions}
 \alias{PrsCsOptions}
 \alias{LassosumOptions}
+\alias{BigsnprOptions}
 \alias{PenalizedRssOptions}
 \alias{SdprOptions}
 \alias{MrmashOptions}
@@ -23,6 +27,12 @@ GlmnetOptions(...)
 QggOptions(...)
 
 BglrOptions(...)
+
+HibayesOptions(...)
+
+HibayesRssOptions(...)
+
+BayesAlphabetRssOptions(...)
 
 DprOptions(...)
 
@@ -37,6 +47,8 @@ MrashRssOptions(...)
 PrsCsOptions(...)
 
 LassosumOptions(...)
+
+BigsnprOptions(...)
 
 PenalizedRssOptions(...)
 
@@ -62,7 +74,9 @@ Options forwarded to the engine behind a TWAS weight method,
   DIFFERENT engines, and then each takes its own constructor:
   \code{lassoWeights} fits with glmnet (\code{GlmnetOptions}) while
   \code{lassosumRssWeights} runs pecotmr's lassosum
-  (\code{LassosumOptions}); \code{enetWeights} / \code{ridgeWeights} fit
+  (\code{LassosumOptions}), or with \code{backend = "bigsnpr"} bigsnpr's
+  lassosum2 (\code{BigsnprOptions}, whose \code{delta} grid comes from
+  the wrapper's \code{s}); \code{enetWeights} / \code{ridgeWeights} fit
   with glmnet too, while \code{enetRssWeights} / \code{ridgeRssWeights}
   use \code{PenalizedRssOptions}; \code{scadWeights} / \code{mcpWeights} /
   \code{l0learnWeights} use ncvreg and L0Learn while their \code{*Rss}
@@ -70,6 +84,18 @@ Options forwarded to the engine behind a TWAS weight method,
   RcppDPR and \code{sdprWeights} uses \code{SdprOptions}. Splitting them is
   what lets each be checked exactly, rather than against a union in which
   an option meant for the other path would pass and then be dropped.
+
+  The Bayesian alphabet methods run on several engines each, chosen with
+  their \code{backend}, and each engine takes its own constructor:
+  \code{QggOptions} for qgg on either path, \code{BglrOptions} for BGLR,
+  \code{HibayesOptions} for hibayes on individual-level data and
+  \code{HibayesRssOptions} on summary statistics, and
+  \code{BayesAlphabetRssOptions} for pecotmr's own summary-statistics
+  sampler. Their wrappers set the iterations, burn-in, thinning and prior
+  inclusion probability themselves (\code{nIter}, \code{nBurnin},
+  \code{thin}, \code{pi}), so every constructor refuses its engine's
+  spelling of them, and hibayes' \code{seed} (drawn from R's random
+  number generator) and \code{threads} (one).
 
   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
   check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
@@ -91,6 +117,10 @@ Options forwarded to the engine behind a TWAS weight method,
   enabling it would nest two frameworks and oversubscribe the machine.
   The glasso and univariate-glmnet \code{mr.mash} initialisations are
   single-threaded for the same reason.
+
+  \code{MrmashOptions} and \code{MrmashRssOptions} refuse
+  \code{nthreads}: mr.mash itself runs on one thread, because on macOS
+  its worker threads can later hang R inside the OpenMP runtime.
 }
 \examples{
 GlmnetOptions(nfolds = 10)

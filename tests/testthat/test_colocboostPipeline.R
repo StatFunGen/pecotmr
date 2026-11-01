@@ -18,39 +18,14 @@ context("colocboostPipeline (S4 dispatch)")
 # ===========================================================================
 
 .cbp_mockExtractor <- function(seed = 11, n_samples = 30L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle))
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -280,7 +255,7 @@ test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked
     qd <- .cbp_makeQtlDataset()
     capturedArgs <- NULL
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -309,7 +284,7 @@ test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked
 test_that("colocboostPipeline(QtlDataset): no QTL bundle and no GWAS returns empty result", {
     qd <- .cbp_makeQtlDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     # A signal screen no outcome clears skips every context; the bundle
@@ -376,7 +351,7 @@ test_that("colocboostPipeline: jointGwas merges qtl + gwas sumstats and runs onc
     gs <- .cbp_makeGwasSumStats()
     capturedArgs <- NULL
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -403,7 +378,7 @@ test_that("colocboostPipeline: separateGwas runs once per GWAS study", {
     gs <- .cbp_makeGwasSumStats()
     seen <- list()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -443,7 +418,7 @@ test_that("colocboostPipeline: separateGwas runs once per GWAS study", {
 test_that("separateGwas refuses a QTL-only sumstat input", {
     ss <- .cbp_makeQtlSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     # Guarded on GWAS presence, not on "any summary statistics": the old
@@ -468,7 +443,7 @@ test_that("separateGwas refuses a QTL-only sumstat input", {
 test_that("colocboostPipeline: no analysis flag set is an error", {
     ss <- .cbp_makeQtlSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     # All three FALSE is the one combination that is not a request. It used
@@ -506,7 +481,7 @@ test_that("a GWAS on a different LD reference runs, and both are recorded", {
     )
     seen <- list()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -541,7 +516,7 @@ test_that("a panel and an LdMatrix on opposite sides reach colocboost as LD", {
     gs <- .cbp_makeGwasSumStats(ldReference = ldm)
     seen <- list()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -631,7 +606,7 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
         qcOptions = list(ok = 1)
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
@@ -721,7 +696,7 @@ test_that("colocboostPipeline(MultiStudy): context selection skips a study", {
     # As in fineMappingPipeline: a context only some studies have is skipped
     # for the others, with a warning, and one no study has is refused.
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -748,7 +723,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles 
     mt <- .cbp_makeMultiStudy()
     capturedArgs <- NULL
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -773,7 +748,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles 
 test_that(".cbRun: an engine failure is caught -> message + NULL", {
     qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -793,7 +768,7 @@ test_that(".cbIndividualBundle: multi-context outcomes get context prefixes", {
     qd <- .cbp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
     capturedArgs <- NULL
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -824,7 +799,7 @@ test_that(".cbIndividualBundle: multi-context outcomes get context prefixes", {
 test_that("colocboostPipeline(QtlDataset): unknown context errors", {
     qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     expect_error(
@@ -836,7 +811,7 @@ test_that("colocboostPipeline(QtlDataset): unknown context errors", {
 test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcome -> empty", {
     qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     out <- suppressMessages(suppressWarnings(
@@ -872,7 +847,7 @@ test_that(".cbSumstatPair: NULL / empty df -> NULL", {
 test_that(".cbQtlSumStatsBundle: NULL / context / trait filters and empty result", {
     ss <- .cbp_makeQtlSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     expect_equal(pecotmr:::.cbQtlSumStatsBundle(NULL), list())
@@ -887,7 +862,7 @@ test_that(".cbGwasSumStatsBundle: NULL -> empty list", {
 
 test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:pos", {
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     h <- .cbp_makeHandle() # panel SNPs v1..v6
@@ -916,7 +891,7 @@ test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:
 
 test_that(".cbSumstatPair canonicalizes variant ids to chr-prefixed for name alignment", {
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     h <- .cbp_makeHandle(snp_n = 3L)
@@ -1011,7 +986,7 @@ test_that("colocboostPipeline(MultiStudy): a study with no bundle is skipped", {
     mt <- .cbp_makeMultiStudy() # qd (study1, ENSG_A) + ss (Q1, t1)
     seen <- list()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -1697,7 +1672,7 @@ test_that("colocboostPipeline forwards residualizationParam to both sides", {
 
 test_that("a GWAS study is one outcome over the rows the QTL data reach", {
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     gws <- .cbp_makeBlockedGwas()
@@ -1731,7 +1706,7 @@ test_that("a GWAS study is one outcome over the rows the QTL data reach", {
 
 test_that("a GWAS study's overlapped rows must share one LD reference", {
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     gws <- pecotmr:::.withRowLdRefs(
@@ -1804,7 +1779,7 @@ test_that(".cbResolveFocal: the one QTL outcome named, or none", {
 test_that("the joint run is non-focal; focalOutcome reaches xQTL-only", {
     seen <- list()
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     local_mocked_bindings(
@@ -2004,7 +1979,7 @@ test_that("colocboostPipeline(QtlSumStats) lays a cisWindow around traitPos", {
 
 test_that("colocboostPipeline(MSQD) lays cisWindow on its summary statistics", {
     local_mocked_bindings(
-        extractBlockGenotypes = .cbp_mockExtractor(),
+        .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     ss <- .cbp_makeQtlSumStats()

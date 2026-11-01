@@ -201,23 +201,37 @@ QtlSumStats <- function(
     n <- length(studyName)
     varY <- .qssValidateArgs(context, trait, entry, genome, varY, n)
     windows <- .qssWindows(region, n)
-    entry <- .qssWithinWindows(.ucscEntries(entry), windows) |>
+    entry <- .qssWithinWindows(.ssEntries(entry), windows) |>
         .qssAddTraitDistances(traitPos, n)
     cols <- .qssBaseCols(studyName, context, trait, varY) |>
         .qssAppendNSample(nSample, n) |>
         .appendTraitPosCol(traitPos, n) |>
         .qssAppendExtras(extraCols)
     dict <- .ldRefDict(.ldRefPerTuple(ldReference, n))
-    dfArgs <- c(cols, list(ldReference = dict$keys, check.names = FALSE))
+    grl <- .qssElements(entry, cols, dict$keys, windows)
+    .withMetadata(
+        .sumStatsNewValidated(
+            "QtlSumStats",
+            grl,
+            dict$entries,
+            genome,
+            qcOptions
+        ),
+        metadata
+    )
+}
+
+# The collection's elements: each tuple's entry split by seqname, each piece
+# with its tuple's row of `cols` and LD reference key (`ldKeys`), and its
+# analysis window.
+# @noRd
+.qssElements <- function(entry, cols, ldKeys, windows) {
+    dfArgs <- c(cols, list(ldReference = ldKeys, check.names = FALSE))
     split <- .rtlSplitBySeqname(entry)
     pieces <- .rtlBindElements(split$entry)
-    grl <- S4Vectors::`mcols<-`(
+    S4Vectors::`mcols<-`(
         pieces,
         value = .qssPieceMetadata(dfArgs, split, pieces, windows)
-    )
-    .withMetadata(
-        .sumStatsNewValidated("QtlSumStats", grl, dict$refs, genome, qcOptions),
-        metadata
     )
 }
 

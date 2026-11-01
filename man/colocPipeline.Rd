@@ -104,10 +104,12 @@ prior probabilities are set through \code{priors} instead, since the
 enrichment adjustment reads them too.}
 }
 \value{
-A \code{\linkS4class{ColocResult}}: one element per tested
-  (first-side credible set, second-side credible set) pair, holding
-  that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
-  metadata carries the identity columns (\code{study}, \code{context},
+A \code{\linkS4class{ColocResult}}: one element per scored group
+  -- a first-side row against a second-side row in one block -- holding
+  the group's aligned variants once, and one row per tested (first-side
+  credible set, second-side credible set) pair in \code{colocPairs()},
+  with the pair's \code{SNP.PP.H4} over those variants. The pair rows
+  carry the identity columns (\code{study}, \code{context},
   \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasContext},
   \code{gwasTrait}, \code{gwasMethod}), the block and stable
   credible-set ids (\code{blockId}, \code{qtlCs}, \code{gwasCs}), the

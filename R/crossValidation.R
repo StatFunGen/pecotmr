@@ -114,6 +114,7 @@ NULL
     preds <- map(ff$weights, .cvFoldPrediction, Xte = Xte)
     list(
         preds = preds,
+        weights = if (cv$keepFoldWeights) ff$weights,
         fits = if (identical(fitRetention, "none")) list() else ff$fits
     )
 }
@@ -136,7 +137,8 @@ NULL
 # out-of-fold predictions into full-Y matrices, scores them with .cvMetricRow,
 # and keys the output via .cvOutputKey(). `maxNumVariants` (optional) randomly
 # subsamples variants up front to bound compute; `BPPARAM` runs the folds
-# (SerialParam() one at a time).
+# (SerialParam() one at a time). `keepFoldWeights` adds each fold's weights
+# to the output as `foldWeights`, for a caller that stores them.
 #' @importFrom BiocParallel SerialParam
 #' @importFrom stats sd lm cor
 #' @importFrom dplyr n_distinct
@@ -153,7 +155,8 @@ NULL
     variantsToKeep = NULL,
     fitRetention = c("none", "slim", "full"),
     verbose = 1,
-    seed = NULL
+    seed = NULL,
+    keepFoldWeights = FALSE
 ) {
     fitRetention <- arg_match(fitRetention)
     .applySeed(seed)
@@ -176,18 +179,32 @@ NULL
         fitFold = fitFold,
         fitFoldCtx = fitFoldCtx,
         fitRetention = fitRetention,
+        keepFoldWeights = keepFoldWeights,
         verbose = verbose,
         rngSeed = seed
     )
     foldResults <- .cvRunFolds(foldIds, cvState, BPPARAM)
-    agg <- .cvAggregate(foldResults, Y, verbose)
-    list(
-        samplePartition = samplePartition,
+    .cvOutput(cvState, foldResults, st)
+}
+
+# The engine's result from its folds': the partition, the out-of-fold
+# predictions and their scores, the fits kept, and each fold's weights when
+# the caller asked for them. `st` is when the folds started.
+# @noRd
+.cvOutput <- function(cvState, foldResults, st) {
+    agg <- .cvAggregate(foldResults, cvState$Y, cvState$verbose)
+    foldIds <- cvState$foldIds
+    out <- list(
+        samplePartition = cvState$samplePartition,
         prediction = agg$prediction,
         performance = agg$performance,
         foldFits = .cvCollectFoldFits(foldResults, foldIds),
         timeElapsed = proc.time() - st
     )
+    if (!cvState$keepFoldWeights) {
+        return(out)
+    }
+    list_assign(out, foldWeights = .cvCollectFoldWeights(foldResults, foldIds))
 }
 
 # Validate inputs, coerce a vector Y to a one-column matrix, and set stable
@@ -568,6 +585,13 @@ NULL
     compact(fr$fits)
 }
 
+# Every fold's weight matrices (method key -> variants x outcomes, rows named
+# by the fold's training variants), keyed fold_<j> like the fits.
+# @noRd
+.cvCollectFoldWeights <- function(foldResults, foldIds) {
+    set_names(map(foldResults, "weights"), str_c("fold_", foldIds))
+}
+
 # Test-fold prediction from one method's weight matrix W: align to the test
 # genotype columns, then Xte %*% W. NULL for a missing/non-overlapping W.
 # @noRd
@@ -787,4 +811,226 @@ CrossValidationParam <- function(
     }
     # folds = 0 (or 1) is the no-op default.
     !(length(x) == 1L && !is.na(x) && is.numeric(x) && (x == 0 || x == 1))
+}
+
+# =============================================================================
+# Cross-validation results in a collection
+# -----------------------------------------------------------------------------
+# A CV run's rows -- one per method and condition -- share its fold partition
+# and the order its out-of-fold predictions are held in. A collection keeps
+# each such pair once, in its cvPartition dictionary (see the row dictionaries
+# in tupleSelectors.R); every row keeps its predictions without sample names
+# and a key to the pair it shares. The rows a collection hands out get both
+# back (.cvJoinPartition()), so they carry the CV their payload was built
+# with.
+# =============================================================================
+
+# @noRd
+.CV_PARTITION_DICT <- list(
+    slot = "cvPartition",
+    keyCol = "cvPartition",
+    prefix = "cv"
+)
+
+# A collection's shared CV partitions; none for one saved before the slot
+# existed, whose rows still hold their own.
+# @noRd
+.cvPartitionDict <- function(x) {
+    if (!methods::.hasSlot(x, "cvPartition")) {
+        return(list())
+    }
+    x@cvPartition
+}
+
+# What is wrong with a collection's CV partitions and its rows' keys into
+# them, or NULL.
+# @noRd
+.cvPartitionProblems <- function(x) {
+    .dictProblems(
+        .cvPartitionDict(x),
+        .dictKeys(x, .CV_PARTITION_DICT),
+        "cvPartition",
+        "CV partition(s)"
+    )
+}
+
+# The partition row `i` of a collection with mcols `md` shares, NULL for a
+# row with none (or a collection saved before rows kept a key).
+# @noRd
+.mdCvPartition <- function(x, md, i) {
+    keys <- md[["cvPartition"]]
+    if (is.null(keys)) {
+        return(NULL)
+    }
+    .dictEntryFor(keys[[i]], .cvPartitionDict(x))
+}
+
+# Every row's shared partition, NULL for a row with none.
+# @noRd
+.rowCvPartitions <- function(x) {
+    map(
+        .dictKeys(x, .CV_PARTITION_DICT),
+        .dictEntryFor,
+        entries = .cvPartitionDict(x)
+    )
+}
+
+# The CV partitions of `parts`, row-bound: each row keeps the one it had.
+# @noRd
+.cvPartitionCombine <- function(parts) {
+    perRow <- list_flatten(map(parts, .rowCvPartitions))
+    .dictBuild(perRow, .CV_PARTITION_DICT$prefix)
+}
+
+# A collection's cvResult column for `cvs`, one row's CV each: the rows as
+# they store them (.cvSplitPartition()), every row's key into the partitions
+# they share, and those partitions once each.
+# @noRd
+.cvStoredColumn <- function(cvs) {
+    split <- map(cvs, .cvSplitPartition)
+    dict <- .dictBuild(map(split, "partition"), .CV_PARTITION_DICT$prefix)
+    list(
+        cvResult = S4Vectors::SimpleList(map(split, "stored")),
+        keys = dict$keys,
+        entries = dict$entries
+    )
+}
+
+# One row's CV as a collection stores it, and the partition it shares: a
+# merged row's per-region payloads each split, and a payload with no
+# partition stays as it is.
+# @noRd
+.cvSplitPartition <- function(cv) {
+    if (!.cvIsPerRegion(cv)) {
+        return(.cvSplitPayload(cv))
+    }
+    split <- map(cv, .cvSplitPayload)
+    shared <- map(split, "partition")
+    list(
+        stored = map(split, "stored"),
+        partition = if (all(map_lgl(shared, is.null))) NULL else shared
+    )
+}
+
+# One CV payload without its partition and with its predictions unnamed, and
+# what it shares: the partition and the samples its predictions were held
+# for, in their order.
+# @noRd
+.cvSplitPayload <- function(cv) {
+    sp <- if (is.list(cv)) cv[["samplePartition"]]
+    if (!is.data.frame(sp)) {
+        return(list(stored = cv, partition = NULL))
+    }
+    ids <- .cvPredictionIds(cv)
+    list(
+        stored = list_assign(
+            .cvUnnamePredictions(cv, ids),
+            samplePartition = zap()
+        ),
+        partition = list(samplePartition = sp, sampleIds = ids)
+    )
+}
+
+# The samples a payload's out-of-fold predictions are held for, in their
+# order: a fine-mapping payload names them as the rows of its `prediction`
+# matrices, a TWAS payload as the elements of its `predictions` vector. A
+# TWAS matrix of predictions (one column per condition) is stored as it is,
+# its rows named.
+# @noRd
+.cvPredictionIds <- function(cv) {
+    if (length(cv[["prediction"]]) > 0L) {
+        return(rownames(cv[["prediction"]][[1L]]))
+    }
+    names(cv[["predictions"]])
+}
+
+# @noRd
+.cvUnnamePredictions <- function(cv, ids) {
+    if (length(cv[["prediction"]]) > 0L) {
+        unnamed <- map(cv[["prediction"]], .cvUnnameRows, ids = ids)
+        return(list_assign(cv, prediction = unnamed))
+    }
+    p <- cv[["predictions"]]
+    if (is.null(p) || !identical(names(p), ids)) {
+        return(cv)
+    }
+    list_assign(cv, predictions = unname(p))
+}
+
+# @noRd
+.cvUnnameRows <- function(m, ids) {
+    if (!is.matrix(m) || !identical(rownames(m), ids)) {
+        return(m)
+    }
+    `rownames<-`(m, NULL)
+}
+
+# A row's stored CV with the partition it shares put back: the partition
+# first, as every CV payload holds it, and the predictions named again.
+# @noRd
+.cvJoinPartition <- function(stored, partition) {
+    if (is.null(partition)) {
+        return(stored)
+    }
+    if (is_in("samplePartition", names(partition))) {
+        return(.cvJoinPayload(stored, partition))
+    }
+    map2(stored, partition, .cvJoinPayload)
+}
+
+# @noRd
+.cvJoinPayload <- function(stored, partition) {
+    if (is.null(partition)) {
+        return(stored)
+    }
+    c(
+        list(samplePartition = partition[["samplePartition"]]),
+        .cvNamePredictions(stored, partition[["sampleIds"]])
+    )
+}
+
+# @noRd
+.cvNamePredictions <- function(cv, ids) {
+    if (is.null(ids)) {
+        return(cv)
+    }
+    if (length(cv[["prediction"]]) > 0L) {
+        named <- map(cv[["prediction"]], .cvNameRows, ids = ids)
+        return(list_assign(cv, prediction = named))
+    }
+    p <- cv[["predictions"]]
+    if (
+        is.null(p) ||
+            is.matrix(p) ||
+            !is.null(names(p)) ||
+            length(p) != length(ids)
+    ) {
+        return(cv)
+    }
+    list_assign(cv, predictions = set_names(p, ids))
+}
+
+# @noRd
+.cvNameRows <- function(m, ids) {
+    if (!is.matrix(m) || !is.null(rownames(m)) || nrow(m) != length(ids)) {
+        return(m)
+    }
+    `rownames<-`(m, ids)
+}
+
+# A collection saved while each row held its own CV partition and named
+# predictions, with each partition kept once, as collections now store them.
+# A collection whose rows already key into its partitions is left as is.
+# @noRd
+.cvSharePartitions <- function(object) {
+    cols <- .tupleColumnNames(object)
+    if (!is_in("cvResult", cols) || is_in("cvPartition", cols)) {
+        return(object)
+    }
+    md <- mcols(object, use.names = FALSE)
+    cv <- .cvStoredColumn(as.list(md$cvResult))
+    md$cvResult <- cv$cvResult
+    md$cvPartition <- cv$keys
+    methods::slot(object, "cvPartition", check = FALSE) <- cv$entries
+    S4Vectors::`mcols<-`(object, value = md)
 }

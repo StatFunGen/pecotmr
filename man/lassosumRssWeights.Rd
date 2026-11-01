@@ -7,10 +7,11 @@
 lassosumRssWeights(
   stat,
   ldReference,
-  s = c(0.2, 0.5, 0.9, 1),
-  selection = c("ldQuadratic", "minFbeta"),
+  backend = NULL,
+  s = NULL,
+  selection = c("heldOut", "ldQuadratic", "minFbeta"),
   fitRetention = c("none", "slim", "full"),
-  methodArgs = LassosumOptions()
+  methodArgs = NULL
 )
 }
 \arguments{
@@ -26,12 +27,37 @@ to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{LdMatrix}}. A genotype reference's LD is used through its
 standardized genotypes, never formed as a matrix.}
 
-\item{s}{Numeric vector of shrinkage parameters to search over. Default:
-\code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.}
+\item{backend}{\code{"pecotmr"} (default), pecotmr's lassosum, or
+\code{"bigsnpr"}, bigsnpr's lassosum2 (Prive et al. 2020) on the LD
+matrix, written to a temporary file for the call (formed from the
+genotypes for a genotype reference). lassosum2 fits the same objective
+with \eqn{\delta = s / (1 - s)}; its fits are rescaled by
+\eqn{1 + \delta} to lassosum's and recorded in lassosum's \code{s},
+and it traces its own lambda path down from the largest marginal
+effect. It reports no objective, so it has no
+\code{selection = "minFbeta"}, and its \code{"fit"} path counts each
+fit's \code{iterations} instead of \code{fbeta}, \code{loss} and
+\code{conv}. It is slow: \code{snp_lassosum2()} times each fit with
+\code{system.time()}, which first runs a full garbage collection of
+the R session, so a run costs one collection per grid point however
+few the variants, and \code{selection = "heldOut"} runs the grid five
+times. With the defaults that is 600 collections, minutes per call in
+a session with pecotmr loaded. \code{"pecotmr"} fits the same
+objective without that cost.}
 
-\item{selection}{Selection strategy. Default \code{"ldQuadratic"} uses
-\eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
-\code{"minFbeta"} is retained as an explicit alternative for debugging.}
+\item{s}{Numeric vector of shrinkage parameters to search over.
+\code{NULL} (default) is \code{c(0.2, 0.5, 0.9, 1.0)} on pecotmr,
+following Mak et al (2017) and OTTERS, and lassosum2's own grid,
+\eqn{\delta = 0.001, 0.01, 0.1, 1}, on bigsnpr, where every \code{s}
+must lie strictly between 0 and 1.}
+
+\item{selection}{How the returned candidate is chosen (see Details of
+\code{\link{lassosumRssWeights}}). \code{"heldOut"} (default) scores
+every candidate on held-out summary statistics and needs the
+reference's sample size, so an \code{\link{LdMatrix}} must record
+\code{nSamples}. \code{"ldQuadratic"} is lassosum's pseudovalidation and
+needs the \code{fdrtool} package. \code{"minFbeta"} picks the smallest
+objective, for debugging.}
 
 \item{fitRetention}{How much of the search is kept as the \code{"fit"}
 attribute of the returned weights. \code{"none"} (default) attaches
@@ -42,10 +68,13 @@ non-zero coefficients \code{nparams}, with \code{selected} marking the
 candidate returned. \code{"full"} also keeps \code{beta}, the
 candidates' coefficients (variants x candidates, in the rows' order).}
 
-\item{methodArgs}{Options forwarded to the solver,
-\code{\link{lassosumRss}}, built with \code{\link{LassosumOptions}}. A
-bare list is refused: it cannot be checked against the engine, so a
-misspelled option would be silently ignored.}
+\item{methodArgs}{Options forwarded to the solver: for pecotmr,
+\code{\link{lassosumRss}}'s, built with \code{\link{LassosumOptions}};
+for bigsnpr, \code{snp_lassosum2()}'s, built with
+\code{\link{BigsnprOptions}}. \code{NULL} (default) is the backend's
+constructor with its defaults. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be silently
+ignored.}
 }
 \value{
 A numeric vector of the posterior SNP coefficients at the best (s,
@@ -56,20 +85,39 @@ A numeric vector of the posterior SNP coefficients at the best (s,
 Searches over a grid of shrinkage parameters \code{s} (default:
 \code{c(0.2, 0.5, 0.9, 1.0)}, matching the original lassosum and OTTERS).
 For each \code{s}, the LD matrix is shrunk as \code{(1-s)*R + s*I}, then
-\code{lassosumRss()} is called across the lambda path. Candidate selection
-defaults to the LD-only quadratic pseudovalidation score
-\deqn{\frac{c^T \beta}{\sqrt{\beta^T R \beta}}}
-evaluated on the supplied LD matrix \code{R}. This uses the same candidate
-beta path as \code{lassosumRss()}, but scores each candidate directly from
-summary-statistics correlation \code{c} and LD, without requiring genotype.
+\code{lassosumRss()} is called across the lambda path. One candidate
+(\code{s}, lambda) is returned, by default the one that scores best on
+held-out summary statistics.
 }
 \details{
-The original lassosum pseudovalidation can be written as an LD quadratic
-score after centering and standardizing the reference matrix columns by the
-same per-variant scale:
-\deqn{\mathrm{score}(\beta) = \frac{c^T \beta}{\sqrt{\beta^T R \beta}}.}
-This implementation therefore uses the supplied LD matrix directly for
-selection. \code{min(fbeta)} is retained only as an explicit debug option.
+\code{selection = "heldOut"} splits the statistics four times into a
+training part, 75\% of the samples, and its held-out remainder, drawing
+each split from the statistics and the LD as PUMAS does (Zhao et al.
+2021). The path is refit on each training part, every candidate is scored
+on the held-out part by
+\deqn{\frac{c_h^T \beta}{\sqrt{\beta^T \hat\Sigma \beta}}, \quad
+  \hat\Sigma = (1 - w) R + w I,}
+and the full-data fit at the (\code{s}, lambda) with the best mean score
+is returned. \eqn{w} is the Schafer-Strimmer intensity for a correlation
+matrix from the reference's sample size. A reference smaller than the
+number of variants misses directions of the true LD, and the
+least-penalized fits put weight exactly there, so scoring against
+\eqn{R} itself would keep choosing them. The splits use R's random number
+generator, so \code{set.seed()} makes the weights reproducible. The score
+does not change with \eqn{\beta}'s scale, so candidates that differ only
+in scale tie on it, as the ridge's do at \eqn{s = 1}, where each fit is
+\eqn{c / (1 + \lambda)}. Of tied candidates, the one explaining the most
+held-out variance, \eqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta} averaged
+over the splits, is returned, and the first in the grid where that ties
+too.
+
+\code{selection = "ldQuadratic"} is lassosum's pseudovalidation (Mak et
+al. 2017): the in-sample score
+\eqn{\tilde c^T \beta / \sqrt{\beta^T R \beta}}, with each marginal
+correlation shrunk by its local false discovery rate,
+\eqn{\tilde c = c (1 - \mathrm{lfdr})}, from \code{fdrtool} as upstream
+lassosum computes it. Of candidates tied on it, the first in the grid is
+returned.
 }
 \examples{
 data(eqtlRegionExample)
@@ -83,6 +131,8 @@ stat <- list(
   n = rep(nrow(X), ncol(X)),
   variantNames = colnames(X)
 )
-w <- lassosumRssWeights(stat, LdMatrix(cor(X)), fitRetention = "slim")
+ld <- LdMatrix(cor(X), nSamples = nrow(X))
+set.seed(1)
+w <- lassosumRssWeights(stat, ld, fitRetention = "slim")
 head(attr(w, "fit")$path)
 }

@@ -3,7 +3,7 @@
 \name{heritabilityEstimate}
 \alias{heritabilityEstimate}
 \alias{heritabilityEstimate,H2Estimate-method}
-\title{Get Global SNP Heritability}
+\title{Get SNP Heritability}
 \usage{
 heritabilityEstimate(x)
 
@@ -13,11 +13,11 @@ heritabilityEstimate(x)
 \item{x}{An \code{H2Estimate}.}
 }
 \value{
-Numeric (length 1).
+Numeric, one per estimate.
 }
 \description{
-Return the global SNP heritability estimate carried by an
-  \code{H2Estimate}.
+Return the SNP heritability of each of an
+  \code{H2Estimate}'s estimates.
 }
 \examples{
 data(h2EstimateExample)

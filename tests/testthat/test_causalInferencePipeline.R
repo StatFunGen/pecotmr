@@ -26,39 +26,14 @@ context("causalInferencePipeline")
 }
 
 .cip_mockExtractor <- function(seed = 7, n_samples = 30L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle))
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -214,7 +189,7 @@ test_that(".cipRequireMatchingLdRefs: NULL twas-side ldReference is allowed", {
         ldReference = NULL
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -295,7 +270,7 @@ test_that(".cipRequireMatchingLdRefs: rows that never meet may differ", {
 test_that("causalInferencePipeline: returns GRanges with TWAS Z per tuple", {
     tw <- .cip_makeTwasWeights()
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -322,7 +297,7 @@ test_that("causalInferencePipeline: with both inputs, MR fields are populated", 
     tw <- .cip_makeTwasWeights()
     fmr <- .cip_makeQtlFmr()
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -345,7 +320,7 @@ test_that("causalInferencePipeline: with both inputs, MR fields are populated", 
 test_that("causalInferencePipeline: FMR-only path extracts weights from topLoci$betahat", {
     fmr <- .cip_makeQtlFmr()
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -379,7 +354,7 @@ test_that("causalInferencePipeline: combineMethods appends combined rows", {
         ldReference = .cip_makeHandle()
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -536,7 +511,7 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
         ldReference = .cip_makeHandle()
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -569,7 +544,7 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
         ldReference = .cip_makeHandle()
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -602,7 +577,7 @@ test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods
         ldReference = .cip_makeHandle()
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     out <- causalInferencePipeline(
@@ -1211,7 +1186,7 @@ test_that(".cipComputeTwasZ reconciles a chr-prefix mismatch (previously dropped
     h@snpInfo$A1 <- rep("G", 3)
     g <- .cip_gwasDf(idsGwas, z = c(2, -1.5, 0.8))
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     res <- pecotmr:::.cipComputeTwasZ(c(0.2, -0.1, 0.3), idsWt, g, h)
@@ -1435,6 +1410,44 @@ test_that(".cipComputeMrCsAware: naResult on empty / no-CS / no-overlap / low-cp
         .package = "pecotmr"
     )
     isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, cpipCutoff = 0.5))
+})
+
+test_that(".cipExtractWeights scores one column of weights, not several", {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    w <- c(0.1, 0.05, -0.2, 0.3, 0.0)
+    weightsOf <- function(weights) {
+        TwasWeights(
+            studyName = "Q1",
+            context = "c1",
+            trait = "t1",
+            method = "susie",
+            entry = list(TwasWeightsRow(variantIds = ids, weights = weights)),
+            ldReference = .cip_makeHandle()
+        )
+    }
+    one <- pecotmr:::.cipExtractWeights(
+        weightsOf(matrix(w, ncol = 1L, dimnames = list(NULL, "susie"))),
+        NULL,
+        "Q1",
+        "c1",
+        "t1",
+        "susie",
+        useFmr = FALSE
+    )
+    expect_equal(one$weights, w)
+    expect_warning(
+        several <- pecotmr:::.cipExtractWeights(
+            weightsOf(cbind(w, -w)),
+            NULL,
+            "Q1",
+            "c1",
+            "t1",
+            "susie",
+            useFmr = FALSE
+        ),
+        "a matrix with 2 columns"
+    )
+    expect_null(several)
 })
 
 test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
@@ -1941,6 +1954,7 @@ test_that(".cipCvMetric returns NA when the CV result cannot be read", {
 })
 
 test_that("CV selection warns once about narrowed weights; scoring does not", {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
     tw <- TwasWeights(
         studyName = rep("Q1", 2),
         context = rep("c1", 2),
@@ -1948,13 +1962,15 @@ test_that("CV selection warns once about narrowed weights; scoring does not", {
         method = c("susie", "lasso"),
         entry = list(
             TwasWeightsRow(
-                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
+                variantIds = ids,
                 weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
+                methodFits = list(variantIds = ids),
                 cvResult = list(metrics = c(rsq = 0.2, pval = 0.001))
             ),
             TwasWeightsRow(
-                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
+                variantIds = ids,
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
+                methodFits = list(variantIds = ids),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
             )
         ),
@@ -1962,7 +1978,7 @@ test_that("CV selection warns once about narrowed weights; scoring does not", {
     )
     narrowed <- endoapply(tw, utils::head, 4L)
     local_mocked_bindings(
-        extractBlockGenotypes = .cip_mockExtractor(),
+        .handleDosage = .cip_mockExtractor(),
         .package = "pecotmr"
     )
     selected <- .fitCoverageMessages(causalInferencePipeline(
@@ -2126,4 +2142,17 @@ test_that("a gene is scored once per GWAS study, over the rows it overlaps", {
     ))
     expect_equal(length(out), 1L)
     expect_equal(as.character(S4Vectors::mcols(out)$gwasStudy), "G1")
+})
+
+test_that("a TWAS z against an LdMatrix reads its packed LD", {
+    data(eqtlRegionExample, envir = environment())
+    X <- eqtlRegionExample$X[, 1:8]
+    ldm <- LdMatrix(cor(X), nSamples = 100)
+    ids <- colnames(X)[c(3L, 1L, 7L)]
+    w <- c(0.2, -0.1, 0.05)
+    z <- c(1.2, -0.4, 2.1)
+    expect_equal(
+        pecotmr:::.cipTwasZ(w, z, ldm, ids),
+        twasZ(weights = w, z = z, R = pecotmr:::.ldFromRef(ldm, ids, "test"))
+    )
 })

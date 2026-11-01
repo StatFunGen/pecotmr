@@ -34,15 +34,23 @@ An \code{LdMatrix} carries one LD correlation matrix together
   filters, DENTIST, ldsc's unbiased \eqn{r^2}, HDL -- use \code{nSamples}
   and \code{AF} when they are supplied and refuse otherwise.
 
-  Validity checks the matrix's shape and labels, that its diagonal is 1,
-  that its entries lie in \eqn{[-1, 1]}, and its symmetry on an evenly
-  spaced subset of entries. It does not check positive semi-definiteness,
-  which costs an eigendecomposition; run \code{\link{checkLd}} for that.
+  The matrix is stored packed: its upper triangle, half the room of the
+  full matrix. A step that reads part of it -- a block, a row, one
+  product -- reads the packed triangle; a step that passes over it many
+  times (the RSS weight methods, PRS-CS, SDPR, DENTIST, an
+  eigendecomposition) unpacks the block it needs once, for that step.
+  \code{\link{ldMatrix}} hands it out whole, labelled by the variant ids.
+
+  Validity checks the matrix's shape, that its diagonal is 1 and that its
+  entries lie in \eqn{[-1, 1]}. It does not check positive
+  semi-definiteness, which costs an eigendecomposition; run
+  \code{\link{checkLd}} for that.
 }
 \section{Slots}{
 
 \describe{
-\item{\code{correlation}}{The correlation matrix, its dimnames the variant ids.}
+\item{\code{correlation}}{The correlation matrix, packed symmetric (a
+\code{dspMatrix}), its rows the variants in order.}
 
 \item{\code{nSamples}}{Integer, the number of independent samples the LD is
 worth, or \code{NA} when unknown. For one panel this is its sample size.

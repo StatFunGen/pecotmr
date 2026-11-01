@@ -136,13 +136,17 @@ test_that("lassosumRssWeights defaults to LD-quadratic selection", {
                 lambda = c(0.05, 0.01),
                 fbeta = c(5, 1)
             )
-        }
+        },
+        # fdrtool cannot estimate a null from four correlations; at lfdr 0
+        # the score is c'b / sqrt(b'Rb) itself.
+        .lassosumLfdr = function(corInput) rep(0, length(corInput))
     )
 
     result <- lassosumRssWeights(
         stat = stat,
         ldReference = .rrwLdMatrix(R),
-        s = 0.5
+        s = 0.5,
+        selection = "ldQuadratic"
     )
     expect_equal(c(result), expected)
     expect_equal(
@@ -167,13 +171,15 @@ test_that("lassosumRssWeights uses first-max tie behavior for LD-quadratic selec
                 lambda = c(0.05, 0.01),
                 fbeta = c(2, 1)
             )
-        }
+        },
+        .lassosumLfdr = function(corInput) rep(0, length(corInput))
     )
 
     result <- lassosumRssWeights(
         stat = stat,
         ldReference = .rrwLdMatrix(R),
-        s = 0.5
+        s = 0.5,
+        selection = "ldQuadratic"
     )
     expect_equal(c(result), c(1, 0, 0))
     expect_equal(
@@ -215,7 +221,7 @@ test_that("lassosumRssWeights still supports explicit min(fbeta)", {
     )
 })
 
-test_that("bayes_{n,l,a,c,r}_weights each dispatch to bayesAlphabetWeights with correct method", {
+test_that("each bayes*Weights hands bayesAlphabetWeights its method", {
     set.seed(42)
     X <- matrix(rnorm(50), nrow = 10)
     y <- rnorm(10)
@@ -223,6 +229,7 @@ test_that("bayes_{n,l,a,c,r}_weights each dispatch to bayesAlphabetWeights with 
         list(fn = bayesNWeights, expected = "bayesN"),
         list(fn = bayesLWeights, expected = "bayesL"),
         list(fn = bayesAWeights, expected = "bayesA"),
+        list(fn = bayesBWeights, expected = "bayesB"),
         list(fn = bayesCWeights, expected = "bayesC"),
         list(fn = bayesRWeights, expected = "bayesR")
     )
@@ -289,3 +296,25 @@ test_that("mrashWeights leaves the prior grid to mr.ash unless one is given", {
 })
 
 gc()
+
+test_that("each bayes*RssWeights hands bayesAlphabetRssWeights its method", {
+    wrappers <- list(
+        bayesA = bayesARssWeights,
+        bayesB = bayesBRssWeights,
+        bayesC = bayesCRssWeights,
+        bayesL = bayesLRssWeights,
+        bayesN = bayesNRssWeights,
+        bayesR = bayesRRssWeights
+    )
+    for (m in names(wrappers)) {
+        captured <- NULL
+        local_mocked_bindings(
+            bayesAlphabetRssWeights = function(stat, ldReference, method, ...) {
+                captured <<- method
+                0
+            }
+        )
+        wrappers[[m]](list(), NULL)
+        expect_equal(captured, m, label = m)
+    }
+})

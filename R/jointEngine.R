@@ -794,15 +794,15 @@ setMethod(
 }
 
 # Reshape a twasWeightsCv() result into the single joint entry's cvResult: the
-# out-of-fold prediction matrix, the per-condition metric rows, and the per-fold
-# mr.mash fits (named fold_<j>) that fineMappingPipeline's mvSuSiE path
-# consumes.
+# out-of-fold prediction matrix, the per-condition metric rows, and -- for
+# mr.mash only, the one method whose fold fits are read -- the per-fold fits
+# (named fold_<j>) fineMappingPipeline builds each fold's mvSuSiE prior from.
 .jointTwasCvResult <- function(cv, token) {
     if (is.null(cv)) {
         return(NULL)
     }
     ffKey <- str_c(token, "_weights")
-    foldFits <- if (!is.null(cv$foldFits)) {
+    foldFits <- if (.twasKeepsFoldFits(token) && !is.null(cv$foldFits)) {
         ff <- map(cv$foldFits, ffKey)
         if (all(map_lgl(ff, is.null))) NULL else ff
     } else {
@@ -832,11 +832,14 @@ setMethod(
     if (is.null(fineMappingCv) || is.null(fineMappingCv$prediction)) {
         return(NULL)
     }
+    # The fine-mapping CV names its tables by the method's key (susie_inf),
+    # which differs from the twas token (susieInf) for some methods.
+    key <- .fmTwasMethodKey(token)
     base <- str_remove(
         names(fineMappingCv$prediction),
         "(_predicted|Predicted)$"
     )
-    hit <- which(base == token)
+    hit <- which(base == key)
     if (length(hit) == 0L) {
         return(NULL)
     }
@@ -844,7 +847,7 @@ setMethod(
         names(fineMappingCv$performance),
         "(_performance|Performance)$"
     )
-    pHit <- which(pBase == token)
+    pHit <- which(pBase == key)
     list(
         samplePartition = fineMappingCv$samplePartition,
         predictions = fineMappingCv$prediction[[hit[[1L]]]],
@@ -852,12 +855,15 @@ setMethod(
             fineMappingCv$performance[[pHit[[1L]]]]
         } else {
             NULL
-        },
-        # The fine-mapping CV refits the method on each fold's training rows;
-        # those fits are what let a SuSiE-family method be cross-validated at
-        # all now that its weight wrappers never fit.
-        foldFits = fineMappingCv$foldFits
+        }
     )
+}
+
+# Whether a TWAS method's cross-validation keeps its per-fold fits: only
+# mr.mash's are read (fineMappingPipeline's per-fold mvSuSiE priors).
+# @noRd
+.twasKeepsFoldFits <- function(token) {
+    identical(token, "mrmash")
 }
 
 # (individual, twas) -> ONE weight method fit over the group's conditions, as
@@ -902,7 +908,8 @@ setMethod(
             fittedModels,
             cfg,
             stdz,
-            nCond
+            nCond,
+            token
         )
         cvRes <- .jointTwasCv(Xc, Yc, wm, ma, full$W, args, cfg, token)
         # One per-condition entry: that condition's weight column + the shared
@@ -917,6 +924,13 @@ setMethod(
         )
     }
 )
+
+# The first of `keys` that `lst` holds, or NULL.
+# @noRd
+.jointTwasSuppliedArgs <- function(lst, keys) {
+    hit <- intersect(keys, names(lst))
+    if (length(hit) == 0L) NULL else lst[[hit[[1L]]]]
+}
 
 # Resolve the method args for a TWAS token: prefer the unified methodList, else
 # the explicit-jointSpec methodArgs; inject an FM-derived fit; compute a
@@ -933,15 +947,12 @@ setMethod(
     cfg,
     stdz
 ) {
-    supplied <- if (
-        !is.null(args$methodList) && is_in(methodKey, names(args$methodList))
-    ) {
-        args$methodList[[methodKey]]
-    } else if (!is.null(args$methodArgs)) {
-        args$methodArgs[[methodKey]]
-    } else {
-        NULL
-    }
+    # A method's arguments sit under its .twasMethodMap list key
+    # (bayes_r_weights), which differs from its engine key (bayesR_weights)
+    # for every multi-word token, so both are looked up.
+    keys <- unique(c(methodKey, .twasMethodMap[[token]]$fn))
+    supplied <- .jointTwasSuppliedArgs(args$methodList, keys) %||%
+        .jointTwasSuppliedArgs(args$methodArgs, keys)
     # FM-fit injection: an FM-derived token extracts its weights from the
     # precomputed fine-mapping fit rather than refitting.
     withFit <- .jointTwasInjectFit(
@@ -973,6 +984,10 @@ setMethod(
 # Spike-and-slab pi from an internal mr.ash fit (self-contained per method).
 # @noRd
 .jointTwasSpikeSlabPi <- function(ma, token, Xc, Yc, cond, cfg, stdz) {
+    # A pi the caller set wins, and then no mr.ash fit is needed.
+    if (!is.null(ma$pi)) {
+        return(ma)
+    }
     mrA <- learnTwasWeights(
         Xc,
         Yc,
@@ -986,23 +1001,18 @@ setMethod(
         verbose = 0,
         seed = cfg$seed
     )
-    piHat <- as.numeric(estimateSparsity(mrA))
-    list_assign(
-        ma,
-        !!!compact(list(
-            pi = if (token == "bayesC" && is.null(ma$pi)) piHat,
-            probIn = if (token == "bayesB" && is.null(ma$probIn)) piHat
-        ))
-    )
+    list_assign(ma, pi = as.numeric(estimateSparsity(mrA)))
 }
 
-# The retention level a joint fit runs at. The engine always keeps its fit --
-# the joint layers downstream read it -- so "none" from the pipeline means
-# "keep the least we can", not "keep nothing".
+# The retention level a joint fit runs at. The engine keeps its fit -- the
+# joint layers downstream read it -- so "none" from the pipeline means "keep
+# the least we can", not "keep nothing". A fine-mapping token's fit is the
+# fineMappingResult's own, which its TWAS rows keep none of
+# (.twasRowRetention()).
 # @noRd
-.jointRetentionLevel <- function(cfg) {
+.jointRetentionLevel <- function(cfg, token = NULL) {
     level <- cfg$fitRetention %||% "slim"
-    if (identical(level, "none")) "slim" else level
+    .twasRowRetention(token, if (identical(level, "none")) "slim" else level)
 }
 
 # The mr.mash RSS fit of one summary-statistics joint group, with the caller's
@@ -1038,12 +1048,13 @@ setMethod(
     fittedModels,
     cfg,
     stdz,
-    nCond
+    nCond,
+    token
 ) {
     if (!.jointFitsFullData(cfg)) {
         return(list(W = NULL, fitParts = NULL, vids = colnames(Xc)))
     }
-    retention <- .jointRetentionLevel(cfg)
+    retention <- .jointRetentionLevel(cfg, token)
     verbose <- if (is.null(cfg$verbose)) 1 else cfg$verbose
     tw <- learnTwasWeights(
         Xc,
@@ -1151,7 +1162,7 @@ setMethod(
 # twasWeightsCv() over this cell, with the CV settings resolved from the
 # per-call args first and the pipeline config as the fallback.
 # @noRd
-.jointTwasRunCv <- function(Xc, Yc, wm, args, cfg, cvFolds) {
+.jointTwasRunCv <- function(Xc, Yc, wm, args, cfg, cvFolds, token) {
     cv <- cfg$crossValidationParam %||% list()
     maxCv <- if ((cv$maxVariants %||% -1) <= 0) {
         Inf
@@ -1164,7 +1175,7 @@ setMethod(
         fold = cvFolds,
         samplePartitions = args$samplePartition %||% cv$samplePartition,
         weightMethods = wm,
-        fitRetention = "slim",
+        fitRetention = if (.twasKeepsFoldFits(token)) "slim" else "none",
         maxNumVariants = maxCv,
         BPPARAM = cv$BPPARAM %||% SerialParam(),
         dataDrivenPriorMatricesCv = args$dataDrivenPriorMatricesCv,
@@ -1190,7 +1201,7 @@ setMethod(
     }
     .jointTwasLeakageWarn(args, ma)
     .jointTwasCvResult(
-        .jointTwasRunCv(Xc, Yc, wm, args, cfg, cvFolds),
+        .jointTwasRunCv(Xc, Yc, wm, args, cfg, cvFolds, token),
         token
     )
 }
@@ -1301,15 +1312,16 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         return(list())
     }
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
-    compact(map(
+    map(
         scopedTraits,
-        .enumCrossContextGroupFor,
+        .deferGroups,
+        builder = .enumCrossContextGroupFor,
         data = data,
         studyName = studyName,
         scopedContexts = scopedContexts,
         args = args,
         verbose = verbose
-    ))
+    )
 }
 
 # One trait's cross-context group, or NULL when it has no usable (X, Y).
@@ -1481,15 +1493,16 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     scopedContexts <- scope$contexts[[studyName]]
     scopedTraits <- scope$traits[[studyName]]
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
-    compact(map(
+    map(
         scopedContexts,
-        .enumCrossTraitGroupFor,
+        .deferGroups,
+        builder = .enumCrossTraitGroupFor,
         data = data,
         studyName = studyName,
         scopedTraits = scopedTraits,
         args = args,
         verbose = verbose
-    ))
+    )
 }
 
 # One context's cross-trait group, or NULL when it has no usable (X, Y).
@@ -1801,15 +1814,16 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         s = studyName,
         cx = cx
     )
-    compact(map(
+    map(
         traits,
-        .enumUnivariateGroupFor,
+        .deferGroups,
+        builder = .enumUnivariateGroupFor,
         data = data,
         args = args,
         studyName = studyName,
         cx = cx,
         phenotypeFilter = phenotypeFilter
-    ))
+    )
 }
 
 # One (context, trait) univariate group, or NULL when fewer than two samples
@@ -1940,7 +1954,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# The group's fine-mapping fits + CV, keyed on its first condition. Empty when
+# The group's fine-mapping fits, read off its first condition's row (every
+# condition's row of a joint fit keys the one fit), and its CV. Empty when
 # the caller supplied no fine-mapping result.
 # @noRd
 .twasGroupFmArgs <- function(args, cond) {
@@ -1960,8 +1975,69 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         } else {
             .twasFitsForRegion(af, bi, nR)
         },
-        fineMappingCv = .twasCvResultFor(fmRes, s1, c1, t1)
+        fineMappingCv = .twasGroupFmCv(fmRes, cond)
     )
+}
+
+# The group's fine-mapping CV with one prediction column and one performance
+# row per condition, in the group's order -- the shape .jointTwasCvResult()
+# gives, which the per-condition slice indexes. A joint fit stores each
+# condition's slice on that condition's row, so the first row alone covered
+# only the first condition. A method is handed off only when every condition
+# carries its CV, and only from one fold partition.
+# @noRd
+.twasGroupFmCv <- function(fmRes, cond) {
+    cvs <- pmap(
+        list(
+            studyName = as.character(cond$study),
+            context = as.character(cond$context),
+            trait = as.character(cond$trait)
+        ),
+        .twasCvResultFor,
+        fineMappingResult = fmRes
+    )
+    if (length(cvs) == 1L) {
+        return(cvs[[1L]])
+    }
+    if (any(map_lgl(cvs, is.null))) {
+        return(NULL)
+    }
+    .twasCheckGroupPartitions(map(cvs, "samplePartition"), cond)
+    list(
+        samplePartition = cvs[[1L]]$samplePartition,
+        prediction = .twasCvBindKeys(map(cvs, "prediction"), cbind),
+        performance = .twasCvBindKeys(map(cvs, "performance"), rbind)
+    )
+}
+
+# The conditions of one joint group were cross-validated together, so their
+# fine-mapping rows share one fold partition. Rows from separate runs would
+# pair out-of-fold predictions made on different folds.
+# @noRd
+.twasCheckGroupPartitions <- function(partitions, cond) {
+    if (all(map_lgl(partitions, identical, partitions[[1L]]))) {
+        return(invisible(NULL))
+    }
+    labels <- str_c(cond$study, cond$context, cond$trait, sep = ":")
+    abort(glue(
+        "twasWeightsPipeline: the fine-mapping cross-validation of ",
+        "{str_c(labels, collapse = ', ')} used different fold partitions; ",
+        "a joint group needs the CV of one joint fit."
+    ))
+}
+
+# Per key every condition carries, the conditions' pieces bound into one
+# matrix: cbind for sample x condition predictions, rbind for condition x
+# metric performance.
+# @noRd
+.twasCvBindKeys <- function(pieces, bind) {
+    keys <- reduce(map(pieces, names), intersect)
+    set_names(map(keys, .twasCvBindKey, pieces = pieces, bind = bind), keys)
+}
+
+# @noRd
+.twasCvBindKey <- function(key, pieces, bind) {
+    exec(bind, !!!map(pieces, key))
 }
 
 # The fold partition every method in this group is scored on. A fine-mapping
@@ -2033,16 +2109,42 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # @noRd
 .jointEntryRecords <- function(entries, method, grp, data) {
     cond <- grp$cond
+    n <- min(length(entries), nrow(cond))
     recs <- map(
-        seq_len(min(length(entries), nrow(cond))),
+        seq_len(n),
         .jointEntryRecordAt,
         entries = entries,
         cond = cond,
         method = method,
         grp = grp,
-        data = data
+        data = data,
+        jointIndex = .jointIndexOf(entries[seq_len(n)], grp)
     )
     compact(recs)
+}
+
+# Each entry's position in its joint fit's condition axis: its rank among the
+# group's fitted conditions, as a condition the SER screen dropped has no
+# entry. NA for a group that is not a joint fit.
+# @noRd
+.jointIndexOf <- function(entries, grp) {
+    out <- rep(NA_integer_, length(entries))
+    if (!.jointGroupIsJoint(grp)) {
+        return(out)
+    }
+    fitted <- !map_lgl(entries, is.null)
+    replace(out, fitted, seq_len(sum(fitted)))
+}
+
+# Whether group `grp` joins conditions (a joint* axis is set).
+# @noRd
+.jointGroupIsJoint <- function(grp) {
+    any(map_lgl(list(grp$js, grp$jc, grp$jt), .jointAxisIsSet))
+}
+
+# @noRd
+.jointAxisIsSet <- function(value) {
+    length(value) == 1L && !is.na(value)
 }
 
 # Run one dispatch cell: enumerate joint groups, fit each method (S4 dispatch on
@@ -2060,16 +2162,49 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     } else {
         scope$traitSelection
     }
-    groups <- .jcEnumerate(cell)(data, scope, args) |>
+    doEnsemble <- is(pipeline, "TwasJointPipeline") &&
+        isTRUE(.jpConfig(pipeline)$ensembleParam$enabled)
+    perUnit <- map(
+        .jcEnumerate(cell)(data, scope, args),
+        .jointCellUnit,
+        selection = selection,
+        minGroup = .jcMinGroup(cell),
+        pipeline = pipeline,
+        data = data,
+        tokens = tokens,
+        args = args,
+        doEnsemble = doEnsemble
+    )
+    fitted <- discard(perUnit, is.null)
+    if (length(fitted) == 0L) {
+        return(NULL)
+    }
+    construct(pipeline, .jeConcat(fitted))
+}
+
+# One enumerated unit built, filtered and fitted: the records of its groups,
+# or NULL when none survives the selection and the minimum size. The unit is
+# built here, inside the loop, so its residualized X is let go before the next
+# unit's is built.
+# @noRd
+.jointCellUnit <- function(
+    unit,
+    selection,
+    minGroup,
+    pipeline,
+    data,
+    tokens,
+    args,
+    doEnsemble
+) {
+    groups <- .unitGroups(unit) |>
         map(.jointGroupSelect, traitId = selection) |>
         compact() |>
-        keep(.jointGroupMeetsMin, minGroup = .jcMinGroup(cell))
+        keep(.jointGroupMeetsMin, minGroup = minGroup)
     if (length(groups) == 0L) {
         return(NULL)
     }
-    doEnsemble <- is(pipeline, "TwasJointPipeline") &&
-        isTRUE(.jpConfig(pipeline)$ensembleParam$enabled)
-    records <- list_flatten(map(
+    list_flatten(map(
         groups,
         .jointCellGroup,
         pipeline = pipeline,
@@ -2078,7 +2213,31 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         args = args,
         doEnsemble = doEnsemble
     ))
-    construct(pipeline, records)
+}
+
+# A unit of joint groups not built yet: the function that builds it, and its
+# arguments, `x` first. The individual-level enumerators return these, so a
+# unit's residualized X and Y exist only while its groups are fitted rather
+# than every unit's being held at once. A unit is one group, or a context's
+# principal components, which share one X.
+# @noRd
+.deferGroups <- function(x, builder, ...) {
+    list(builder = builder, args = list(x, ...))
+}
+
+# The groups of an enumerated unit: built when it was deferred, as given when
+# it was enumerated built (the summary-statistics groups, which hold no X).
+# @noRd
+.unitGroups <- function(unit) {
+    built <- if (is(unit, "JointGroup")) {
+        unit
+    } else {
+        exec(unit$builder, !!!unit$args)
+    }
+    if (is(built, "JointGroup")) {
+        return(list(built))
+    }
+    compact(as.list(built))
 }
 
 # The group less any (context, trait) condition a per-context `traitId`
@@ -2139,7 +2298,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         ldReference = .jgLdRefOf(g)
     )
     fitArgs <- .twasGroupArgs(g, pipeline, args)
-    fitArgs$af <- .jointAfForGroup(data, g, args$genotypeFilter)
+    # Allele frequencies go into fine-mapping's topLoci; TWAS never reads
+    # them, and computing them reads the group's genotypes a second time.
+    fitArgs$af <- if (is(pipeline, "FmJointPipeline")) {
+        .jointAfForGroup(data, g, args$genotypeFilter)
+    }
     fitArgs$region <- args$region
     perTokenEntries <- compact(set_names(
         map(
@@ -2395,15 +2558,17 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         return(list())
     }
     phenotypeFilter <- .jointPhenotypeFilter(args)
-    .jeConcat(map(
+    # One unit per context: its components share the context's one X.
+    map(
         scope$contexts[[studyName]],
-        .enumTopPcForContext,
+        .deferGroups,
+        builder = .enumTopPcForContext,
         data = data,
         scope = scope,
         args = args,
         studyName = studyName,
         phenotypeFilter = phenotypeFilter
-    ))
+    )
 }
 
 # @noRd
@@ -2763,10 +2928,32 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 .jointBuildRecordPart <- function(rec, constructor) {
     jointCols <- c("jointStudies", "jointContexts", "jointTraits")
     absent <- jointCols[map_lgl(rec[jointCols], .jointAxisIsAbsent)]
-    kept <- rec[setdiff(names(rec), absent)]
+    kept <- rec[setdiff(names(rec), c(absent, "study", "jointIndex"))]
     # `list_assign()`, not `list_modify()`: the entry payload is itself a
-    # list, and list_modify would merge into it rather than wrap it.
-    exec(constructor, !!!list_assign(kept, entry = list(rec$entry)))
+    # list, and list_modify would merge into it rather than wrap it. The
+    # study goes in under the constructor's own name, not by partial
+    # matching.
+    part <- exec(
+        constructor,
+        !!!list_assign(kept, studyName = rec$study, entry = list(rec$entry))
+    )
+    .withJointIndex(part, rec$jointIndex)
+}
+
+# `x`, one row of one method, recording its position in its joint fit's
+# condition axis (`jointIndex`, internal). A row from no joint fit records
+# none, so a collection holding no joint rows has no such column.
+# @noRd
+.withJointIndex <- function(x, jointIndex) {
+    if (is.null(jointIndex) || is.na(jointIndex)) {
+        return(x)
+    }
+    value <- if (methods::is(x, "TwasWeights")) {
+        IRanges::IntegerList(jointIndex)
+    } else {
+        jointIndex
+    }
+    `$<-`(x, "jointIndex", value)
 }
 
 # TRUE when tuple row `r`'s study keeps context `cx` and trait `tid` in scope.
@@ -2789,7 +2976,15 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # (.jointGroupWindow(): an explicit region, else the union of its traits' cis
 # windows).
 # @noRd
-.jointEntryRecordAt <- function(i, entries, cond, method, grp, data) {
+.jointEntryRecordAt <- function(
+    i,
+    entries,
+    cond,
+    method,
+    grp,
+    data,
+    jointIndex
+) {
     e <- entries[[i]]
     if (is.null(e)) {
         return(NULL)
@@ -2811,7 +3006,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         region = grp$region,
         # The reference the group was fitted against, so each result row
         # keeps it; NULL for an individual-level group.
-        ldReference = grp$ldReference
+        ldReference = grp$ldReference,
+        jointIndex = jointIndex[[i]]
     )
 }
 

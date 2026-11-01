@@ -221,6 +221,25 @@ test_that("buildLdScore keeps per-block LD matrices for g-LDSC by default", {
     )
 })
 
+test_that("an LdScore stores block matrices packed and hands them out whole", {
+    ld <- makeTestLdMatrixBlocks(sizes = c(4L, 3L))
+    scores <- buildLdScore(ld)
+    stored <- methods::slot(scores, "ldMatrixList")
+    expect_s4_class(stored[[1L]]$R, "dspMatrix")
+    mats <- ldMatrixList(scores)
+    expect_true(is.matrix(mats[[1L]]$R))
+    expect_identical(mats[[1L]]$R, unname(ldMatrix(ld[[1L]])))
+})
+
+test_that("updateObject packs the block matrices of a saved LdScore", {
+    scores <- buildLdScore(makeTestLdMatrixBlocks(sizes = c(4L, 3L)))
+    saved <- scores
+    methods::slot(saved, "ldMatrixList") <- ldMatrixList(scores)
+    expect_true(is.matrix(methods::slot(saved, "ldMatrixList")[[1L]]$R))
+    expect_identical(updateObject(saved), scores)
+    expect_identical(updateObject(scores), scores)
+})
+
 test_that("buildLdScore defaults weights to 1/max(l2, 1)", {
     ld <- makeTestLdMatrix(n = 6L)
     ref <- buildLdScore(ld)

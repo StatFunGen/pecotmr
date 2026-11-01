@@ -60,8 +60,11 @@ produce the fits.}
 \item{fitRetention}{How much of each per-method fit is kept on the result:
 \code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
 payload downstream needs, \code{"full"} keeps the whole fitted object.
-Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
-for every other method the two behave alike.}
+Every method keeps a fit, which names the variants it was fitted on.
+\code{"slim"} and \code{"full"} differ for mr.mash, glmnet
+(\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
+\code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
+and the DPR methods; for the others the two behave alike.}
 
 \item{weightStandardized}{Logical. Whether the supplied \code{X} / \code{Y}
 are already standardized. Default \code{FALSE}.}
@@ -83,8 +86,10 @@ main-process seed is scoped to the call, so the session RNG is left as it
 was found. \code{NULL} (default) seeds neither.}
 }
 \value{
-A list where each element is named after a method and contains the
-  weight matrix produced by that method.
+A \code{TwasWeights} with one row, for the (\code{studyName},
+  \code{context}, \code{trait}) gene, holding each method's weights, fit
+  and cross-validation. Its methods are named by camelCase token: a
+  method given as \code{susie_inf_weights} is \code{"susieInf"}.
 }
 \description{
 Applies specified weight methods to the datasets X and Y, returning weight

@@ -684,42 +684,16 @@ test_that(".qtlBuildResidualizationDesign: intersects sample sets across blocks"
 # requested snpIdx, drawing dosages from a per-handle-deterministic seed so
 # the same indices always give the same numbers.
 .qh_mockExtractor <- function(seed = 42, n_samples = 12L, n_snp = 6L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         # Build a (n_samples x n_snp) dosage matrix for the whole panel; the
         # caller's snpIdx subsets columns.
         panel <- matrix(
             rbinom(n_samples * n_snp, 2, 0.3),
             nrow = n_samples,
-            ncol = n_snp,
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = n_snp
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        # Build the SE in variants x samples orientation (matches the real impl).
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -744,7 +718,7 @@ test_that("a NULL residualization bundle scales, as an unset field does", {
 test_that(".qtlExtractBlock: returns dosage matrix with kept variants and samples", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd)
@@ -766,7 +740,7 @@ test_that(".qtlExtractBlock: empty snpIdx returns a zero-column block", {
 test_that(".qtlExtractBlock: keepVariants restriction narrows the returned set", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(
@@ -780,7 +754,7 @@ test_that(".qtlExtractBlock: keepSamples restriction narrows the returned set", 
     qd <- .qh_makeDataset()
     qd <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:6))
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd)
@@ -791,7 +765,7 @@ test_that(".qtlExtractBlock: per-call samples arg further narrows the sample set
     qd <- .qh_makeDataset()
     qd <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:6))
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd, samples = c("s1", "s3", "s5"))
@@ -801,7 +775,7 @@ test_that(".qtlExtractBlock: per-call samples arg further narrows the sample set
 test_that(".qtlExtractBlock: keepVariants with empty intersection returns empty block", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(
@@ -819,7 +793,7 @@ test_that(".qtlExtractBlock: keepIndel = FALSE drops multi-base (indel) variants
         a2 = replace(rep("G", 6L), 4L, "GC")
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(
@@ -832,7 +806,7 @@ test_that(".qtlExtractBlock: keepIndel = FALSE drops multi-base (indel) variants
 test_that(".qtlExtractBlock: keepIndel = TRUE (default) keeps indel variants", {
     qd <- .qh_makeDataset(a1 = replace(rep("A", 6L), 2L, "AT"))
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd)
@@ -851,7 +825,7 @@ test_that(".qtlExtractBlock: mafCutoff drops low-MAF variants", {
     # drops everything.
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd, filter = .qh_filter(mafCutoff = 0.51))
@@ -862,7 +836,7 @@ test_that(".qtlExtractBlock: mafCutoff retains variants above the threshold", {
     # realized MAFs include 0.458 and 0.5
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd, filter = .qh_filter(mafCutoff = 0.4))
@@ -873,47 +847,29 @@ test_that(".qtlExtractBlock: mafCutoff retains variants above the threshold", {
 # Deterministic dosage panel so the directional (un-folded) effect-allele
 # frequency is exactly known: rs1 = 0.70, rs2 = 0.20, rs3 = 0.50, rest 0.
 .qh_directionalExtractor <- function() {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         panel <- matrix(
             0,
             nrow = length(sampleIds(handle)),
             ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            # The fixture labels variant k "rsk"; a panel's seed keeps no
+            # labels, so its columns are named by position.
+            dimnames = list(
+                sampleIds(handle),
+                str_c("rs", seq_len(nrow(snpInfo(handle))))
+            )
         )
         panel[, "rs1"] <- c(2, 2, 2, 2, 1, 1, 1, 1, 1, 1) # sum 14 -> p = 0.70
         panel[, "rs2"] <- c(1, 1, 1, 1, 0, 0, 0, 0, 0, 0) # sum  4 -> p = 0.20
         panel[, "rs3"] <- 1 # sum 10 -> p = 0.50
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = S4Vectors::DataFrame(
-                sampleId = sampleIds(handle),
-                row.names = sampleIds(handle)
-            )
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
 test_that(".qtlExtractBlock: returns directional af; maf is its minor-allele fold", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd)
@@ -925,7 +881,7 @@ test_that(".qtlExtractBlock: returns directional af; maf is its minor-allele fol
 test_that("af: returns directional effect-allele frequency (not folded to MAF)", {
     qd <- .qh_makeDataset(n_samples = 10L)
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_directionalExtractor(),
+        .handleDosage = .qh_directionalExtractor(),
         .package = "pecotmr"
     )
     af <- af(qd)
@@ -939,7 +895,7 @@ test_that("af: returns directional effect-allele frequency (not folded to MAF)",
 test_that("maf stays folded while af is directional (they fold into each other)", {
     qd <- .qh_makeDataset(n_samples = 10L)
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_directionalExtractor(),
+        .handleDosage = .qh_directionalExtractor(),
         .package = "pecotmr"
     )
     af <- af(qd)
@@ -1033,39 +989,14 @@ context("QtlDataset residualization methods")
 }
 
 .qr_mockExtractor <- function(seed = 42, n_samples = 12L, n_snp = 6L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * n_snp, 2, 0.3),
             nrow = n_samples,
-            ncol = n_snp,
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = n_snp
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -1177,7 +1108,7 @@ test_that("residualizedGenotypes: unknown context errors", {
 test_that("residualizedGenotypes: empty genotype block short-circuits to G", {
     qd <- .qr_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     # region with no SNPs in the panel.
@@ -1193,7 +1124,7 @@ test_that("residualizedGenotypes: empty genotype block short-circuits to G", {
 test_that("residualizedGenotypes: produces residualized matrix shape", {
     qd <- .qr_makeDataset(contexts = "brain")
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     G <- residualizedGenotypes(qd, context = "brain")
@@ -1209,7 +1140,7 @@ test_that("residualizedGenotypes: produces residualized matrix shape", {
 test_that("residualizedGenotypes: residualizes only against selected pheno covariate", {
     qd <- .qr_makeDataset(contexts = "brain")
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     G <- residualizedGenotypes(
@@ -1228,7 +1159,7 @@ test_that("residualizedGenotypes: residualizes only against selected pheno covar
 test_that("residualizedGenotypes: respects residualizePhenotype = FALSE", {
     qd <- .qr_makeDataset(contexts = "brain")
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     # When pheno is disabled, the design becomes intercept-only, so the result
@@ -1259,7 +1190,7 @@ test_that("residualizedGenotypes refuses a bare list for the bundle", {
 test_that("residualizedGenotypes: joint-context mode intersects samples", {
     qd <- .qr_makeDataset(contexts = c("brain", "liver"))
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     G <- residualizedGenotypes(qd, context = c("brain", "liver"))
@@ -1276,7 +1207,7 @@ test_that("residualizedGenotypes: includes genotype covariates when supplied", {
     )
     qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     G <- residualizedGenotypes(
@@ -1303,7 +1234,7 @@ test_that("residualizedGenotypes: mean-imputes missing covariates by default", {
     gc[3, "pc1"] <- NA # missing covariate cell
     qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     # Default covariateNaAction = "impute": no error, all 12 samples retained.
@@ -1328,7 +1259,7 @@ test_that("residualizedGenotypes: covariateNaAction='drop' removes samples with 
     gc[3, "pc1"] <- NA
     qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     G <- residualizedGenotypes(
@@ -1835,6 +1766,21 @@ test_that("updateObject renames study and reads saved genotypes again", {
     )
 })
 
+test_that("updateObject drops the copies of labels saved genotypes kept", {
+    data(qtlDatasetExample)
+    current <- .qtlGenotypeSe(qtlDatasetExample)
+    saved <- .savedLabelledPanel(current)
+    expect_false(is.null(SummarizedExperiment::rowData(saved)$SNP))
+    old <- .qtlWithGenotypeHandle(qtlDatasetExample, saved)
+    geno <- .qtlGenotypeSe(updateObject(old))
+    expect_identical(
+        SummarizedExperiment::rowRanges(geno),
+        .dropRedundantLabels(SummarizedExperiment::rowRanges(current))
+    )
+    expect_null(dimnames(.panelSeed(geno))[[1L]])
+    expect_identical(dimnames(geno), dimnames(current))
+})
+
 test_that("updateObject refuses a QtlDataset whose genotypes cannot be read", {
     data(qtlDatasetExample)
     current <- .qtlGenotypeSe(qtlDatasetExample)
@@ -2053,7 +1999,7 @@ test_that(".qtlExtractBlock: keepIndel = FALSE with an all-indel panel returns a
     # Every variant a multi-base allele, so the indel filter drops them all.
     qd <- .qh_makeDataset(a1 = rep("AT", 6L))
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(
@@ -2071,7 +2017,7 @@ test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-
     # none are panel samples
     qd <- pecotmr:::.qtlRestrictSamples(qd, c("zzz1", "zzz2"))
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_mockExtractor(),
+        .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(qd)
@@ -2086,7 +2032,7 @@ test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-
 # per-sample imiss filter), and s2/rs2 carries a single scattered NA that
 # survives the filter (exercising the mean-impute loop).
 .qh_naExtractor <- function() {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         ns <- length(sampleIds(handle))
         nv <- nrow(snpInfo(handle))
         set.seed(123L)
@@ -2094,34 +2040,13 @@ test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-
             rbinom(ns * nv, 2, 0.4),
             nrow = ns,
             ncol = nv,
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            # The fixture labels variant k "rsk"; a panel's seed keeps no
+            # labels, so its columns are named by position.
+            dimnames = list(sampleIds(handle), str_c("rs", seq_len(nv)))
         )
         panel["s1", ] <- NA_real_ # fully missing sample -> dropped by imiss
         panel["s2", "rs2"] <- NA_real_ # scattered NA -> kept then mean-imputed
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = S4Vectors::DataFrame(
-                sampleId = sampleIds(handle),
-                row.names = sampleIds(handle)
-            )
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -2129,7 +2054,7 @@ test_that(".qtlExtractBlock: imissCutoff drops high-missingness samples and mean
     # s1 (100% NA) dropped; s2 (1 NA) kept then imputed
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_naExtractor(),
+        .handleDosage = .qh_naExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(
@@ -2144,7 +2069,7 @@ test_that(".qtlExtractBlock: imissCutoff drops high-missingness samples and mean
 
 # Extractor with one constant (zero-variance) column to drive the xvar filter.
 .qh_lowVarExtractor <- function() {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         ns <- length(sampleIds(handle))
         nv <- nrow(snpInfo(handle))
         set.seed(99L)
@@ -2152,40 +2077,19 @@ test_that(".qtlExtractBlock: imissCutoff drops high-missingness samples and mean
             rbinom(ns * nv, 2, 0.4),
             nrow = ns,
             ncol = nv,
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            # The fixture labels variant k "rsk"; a panel's seed keeps no
+            # labels, so its columns are named by position.
+            dimnames = list(sampleIds(handle), str_c("rs", seq_len(nv)))
         )
         panel[, "rs1"] <- 1L # constant column -> variance 0
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = S4Vectors::DataFrame(
-                sampleId = sampleIds(handle),
-                row.names = sampleIds(handle)
-            )
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
 test_that(".qtlExtractBlock: xvarCutoff drops near-constant (low-variance) variants", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
-        extractBlockGenotypes = .qh_lowVarExtractor(),
+        .handleDosage = .qh_lowVarExtractor(),
         .package = "pecotmr"
     )
     blk <- pecotmr:::.qtlExtractBlock(
@@ -2396,7 +2300,7 @@ test_that("residualizedGenotypes: errors when genotypes and covariates share no 
     )
     qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
     local_mocked_bindings(
-        extractBlockGenotypes = .qr_mockExtractor(),
+        .handleDosage = .qr_mockExtractor(),
         .package = "pecotmr"
     )
     expect_error(
@@ -2511,15 +2415,17 @@ test_that("the sampleMap records which samples each context observes", {
 test_that("the genotype experiment describes variants the way the readers do", {
     qd <- .qm_makeDataset()
     gr <- SummarizedExperiment::rowRanges(pecotmr:::.qtlGenotypeSe(qd))
-    si <- snpInfo(genotypeHandle(qd))
+    si <- snpInfo(.qr_makeHandle())
     expect_equal(length(gr), nrow(si))
-    # Same shape as extractBlockGenotypes() returns, so ranges from the two
-    # actually overlap rather than silently missing on a chr prefix.
+    # Spelled with the chr prefix, as extractBlockGenotypes() spells them, so
+    # ranges from the two actually overlap rather than silently missing on it.
     expect_true(all(str_detect(
         as.character(GenomicRanges::seqnames(gr)),
         "^chr"
     )))
-    expect_equal(colnames(S4Vectors::mcols(gr)), c("SNP", "A1", "A2"))
+    # The file's labels name the rows, so no SNP column repeats them.
+    expect_equal(colnames(S4Vectors::mcols(gr)), c("A1", "A2"))
+    expect_equal(names(gr), si$SNP)
     expect_equal(GenomicRanges::start(gr), as.integer(si$BP))
 })
 
@@ -2628,11 +2534,11 @@ test_that("a context may not be called 'genotype'", {
 })
 
 test_that("replacing the handle moves the assay's seed with it", {
-    # The handle is held twice -- slot and seed -- which is what makes the
-    # assay lazy. Moving one without the other would have the dosages
-    # describing a different panel from the one the accessors read.
+    # The handle lives in one place, the assay's seed, so replacing it moves
+    # the seed the dosages read through. A seed's handle keeps no variant
+    # table to build a panel from, so the replacement is a whole handle.
     qd <- .qm_makeDataset()
-    handle <- genotypeHandle(qd)
+    handle <- .qr_makeHandle()
     # A bundled resource that resolves: building the panel looks beside it
     # for a sketch's .afreq sidecar.
     handle@path <- "pecotmr://extdata/toy_ref"
@@ -2720,8 +2626,9 @@ test_that("QtlDataset accepts the panel readGenotypes returns", {
     )
     expect_s4_class(qd, "QtlDataset")
     # The slot keeps the handle either way: it is the seed the dosage assay
-    # reads through, not a second copy of the panel.
-    expect_identical(genotypeHandle(qd), gh)
+    # reads through, not a second copy of the panel, so its variant table
+    # keeps only the columns reading needs.
+    expect_identical(genotypeHandle(qd), pecotmr:::.readingHandle(gh))
     expect_equal(
         dim(qd),
         dim(.qh_makeDataset(contexts = "brain"))

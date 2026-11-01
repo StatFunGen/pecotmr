@@ -855,8 +855,8 @@ NULL
         chrom = as.character(df[[resolved$chrom]]),
         pos = as.integer(df[[resolved$pos]]),
         SNP = as.character(df[[resolved$variant_id]]),
-        A1 = as.character(df[[resolved$A1]]),
-        A2 = as.character(df[[resolved$A2]])
+        A1 = .canonAllele(df[[resolved$A1]]),
+        A2 = .canonAllele(df[[resolved$A2]])
     )
 }
 
@@ -1063,8 +1063,8 @@ NULL
         chrom = as.character(GenomicRanges::seqnames(rr)),
         pos = unname(as.integer(GenomicRanges::start(rr))),
         SNP = names(rr),
-        A1 = .mlFirstAlts(altList),
-        A2 = unname(as.character(VariantAnnotation::ref(vcf))),
+        A1 = .canonAllele(.mlFirstAlts(altList)),
+        A2 = .canonAllele(unname(as.character(VariantAnnotation::ref(vcf)))),
         Z = z$z,
         z_supplied = z$supplied,
         N = fld$N

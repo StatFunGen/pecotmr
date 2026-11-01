@@ -1424,6 +1424,12 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
     )
 }
 
+# An individual-level enumerator's units built into the groups the engine
+# fits, as .runJointCell() builds them one unit at a time.
+.je_build <- function(units) {
+    pecotmr:::.jeConcat(map(units, pecotmr:::.unitGroups))
+}
+
 test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
     scope <- list(
         studies = "S",
@@ -1464,7 +1470,7 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
         },
         .package = "pecotmr"
     )
-    g <- pecotmr:::.enumCrossContextIndividual(NULL, scope)
+    g <- .je_build(pecotmr:::.enumCrossContextIndividual(NULL, scope))
     expect_length(g, 1L) # only G1 survives
     expect_s4_class(g[[1L]], "IndividualJointGroup")
     expect_equal(as.character(.jgConditions(g[[1L]])$context), c("c1", "c2"))
@@ -1577,7 +1583,7 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
         },
         .package = "pecotmr"
     )
-    g <- pecotmr:::.enumCrossTraitIndividual(NULL, scope)
+    g <- .je_build(pecotmr:::.enumCrossTraitIndividual(NULL, scope))
     expect_length(g, 1L)
     expect_equal(as.character(.jgConditions(g[[1L]])$context), c("c1", "c1"))
     expect_equal(as.character(.jgConditions(g[[1L]])$trait), c("G1", "G2"))
@@ -1742,10 +1748,11 @@ test_that(".enumTopPcIndividual enumerates only the studies in scope", {
         .package = "pecotmr"
     )
     scope <- list(studies = "study1", contexts = list(study1 = c("a", "b")))
-    expect_identical(
-        pecotmr:::.enumTopPcIndividual(qd, scope),
-        list("a", "b")
-    )
+    # One unit per context, built only when the engine reaches it.
+    units <- pecotmr:::.enumTopPcIndividual(qd, scope)
+    expect_length(units, 2L)
+    expect_length(seen, 0L)
+    expect_identical(.je_build(units), list("a", "b"))
     expect_identical(seen$a$study, "study1")
     # The joint engine's own phenotype QC when the run supplied none.
     expect_identical(seen$a$filter$naAction, "drop")
@@ -1787,7 +1794,7 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
         },
         .package = "pecotmr"
     )
-    g <- pecotmr:::.enumUnivariateIndividual(NULL, scope)
+    g <- .je_build(pecotmr:::.enumUnivariateIndividual(NULL, scope))
     expect_length(g, 4L) # 2 ctx x 2 traits
     expect_true(all(
         map_int(g, function(x) nrow(.jgConditions(x))) == 1L
@@ -1829,7 +1836,10 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
         },
         .package = "pecotmr"
     )
-    expect_length(pecotmr:::.enumUnivariateIndividual(NULL, scope), 0L)
+    expect_length(
+        .je_build(pecotmr:::.enumUnivariateIndividual(NULL, scope)),
+        0L
+    )
 })
 
 test_that(".enumUnivariateIndividual: study not in scope -> empty", {
@@ -2083,7 +2093,7 @@ test_that("fitJointGroup(SumStats, Fm): a reweighted-prior residual variance is 
     expect_false(is.null(captured)) # residual_variance set
 })
 
-test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
+test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b pi", {
     set.seed(22)
     n <- 30L
     X <- matrix(
@@ -2119,15 +2129,15 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
             estimatePi = TRUE
         )
     )
-    capturedProbIn <- NULL
+    capturedPi <- NULL
     local_mocked_bindings(
         mrashWeights = function(X, y, ...) {
             out <- matrix(0.05, ncol(X), 1L, dimnames = list(colnames(X), NULL))
             attr(out, "fit") <- list(pi = c(0.7, 0.2, 0.1))
             out
         },
-        bayesBWeights = function(X, y, probIn, ...) {
-            capturedProbIn <<- probIn
+        bayesBWeights = function(X, y, pi, ...) {
+            capturedPi <<- pi
             matrix(0, ncol(X), 1L, dimnames = list(colnames(X), NULL))
         },
         .package = "pecotmr"
@@ -2138,7 +2148,70 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
         "bayesB",
         list(methodList = list(bayes_b_weights = list()))
     )
-    expect_equal(as.numeric(capturedProbIn), 1 - 0.7, tolerance = 1e-8)
+    expect_equal(as.numeric(capturedPi), 1 - 0.7, tolerance = 1e-8)
+})
+
+test_that("fitJointGroup(twas): a method's own arguments reach its fit", {
+    # They sit under the method's list key (bayes_b_weights), not its
+    # engine key (bayesB_weights), and were looked up only under the latter,
+    # so every multi-word method silently lost them. A pi the caller set
+    # also wins over the estimate, which then needs no mr.ash fit.
+    set.seed(22)
+    n <- 30L
+    X <- matrix(
+        rnorm(n * 3),
+        n,
+        3,
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (1:3))
+        )
+    )
+    Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", seq_len(n)), "c1"))
+    g <- new(
+        "IndividualJointGroup",
+        conditions = data.frame(
+            study = "S",
+            context = "c1",
+            trait = "g",
+            stringsAsFactors = FALSE
+        ),
+        X = X,
+        Y = Y
+    )
+    pipe <- new(
+        "TwasJointPipeline",
+        config = list(
+            crossValidationParam = list(
+                folds = 0L,
+                threads = 1,
+                maxVariants = -1
+            ),
+            ensembleParam = list(enabled = FALSE),
+            estimatePi = TRUE
+        )
+    )
+    capturedPi <- NULL
+    local_mocked_bindings(
+        mrashWeights = function(X, y, ...) {
+            stop("no mr.ash fit is needed for a caller's pi")
+            out <- matrix(0.05, ncol(X), 1L, dimnames = list(colnames(X), NULL))
+            attr(out, "fit") <- list(pi = c(0.7, 0.2, 0.1))
+            out
+        },
+        bayesBWeights = function(X, y, pi, ...) {
+            capturedPi <<- pi
+            matrix(0, ncol(X), 1L, dimnames = list(colnames(X), NULL))
+        },
+        .package = "pecotmr"
+    )
+    pecotmr:::fitJointGroup(
+        g,
+        pipe,
+        "bayesB",
+        list(methodList = list(bayes_b_weights = list(pi = 0.3)))
+    )
+    expect_equal(capturedPi, 0.3)
 })
 
 test_that("fitJointGroup(SumStats, twas): a vector weight without rownames falls back to Z rows", {
@@ -2240,7 +2313,7 @@ test_that(".runJointCell: twas ensemble layer adds 'ensemble' rows on top of >= 
         tokens = c("lasso", "enet")
     )
     expect_s4_class(res, "TwasWeights")
-    expect_true("ensemble" %in% as.character(res$method))
+    expect_true("ensemble" %in% methodNames(res))
 })
 
 test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
@@ -2367,6 +2440,27 @@ test_that(".jointTwasCvResult: NULL cv and empty/absent payloads degrade gracefu
     expect_null(pecotmr:::.jointTwasCvResult(cv2, "mrmash")$predictions)
 })
 
+test_that(".jointTwasCvResult keeps fold fits for mr.mash only", {
+    # mr.mash's fold fits seed each fold's mvSuSiE prior; no other method's
+    # fold fit is ever read, so none is kept.
+    cv <- list(
+        samplePartition = data.frame(Sample = "s1", Fold = 1L),
+        prediction = list(),
+        performance = list(),
+        foldFits = list(
+            fold_1 = list(
+                lasso_weights = list(a = 1),
+                mrmash_weights = list(b = 2)
+            )
+        )
+    )
+    expect_null(pecotmr:::.jointTwasCvResult(cv, "lasso")$foldFits)
+    expect_equal(
+        pecotmr:::.jointTwasCvResult(cv, "mrmash")$foldFits,
+        list(fold_1 = list(b = 2))
+    )
+})
+
 test_that(".twasFmHandoffCv: a token absent from the FM CV predictions -> NULL", {
     fmCv <- list(
         samplePartition = data.frame(Sample = "s1", Fold = 1L),
@@ -2442,7 +2536,14 @@ test_that(".twasGroupArgs: takes the CV partition from the fine-mapping CV when 
         ) {
             list()
         },
-        .twasCvResultFor = function(fmRes, s, c, t) list(samplePartition = sp),
+        .twasCvResultFor = function(
+            fineMappingResult,
+            studyName,
+            context,
+            trait
+        ) {
+            list(samplePartition = sp)
+        },
         .package = "pecotmr"
     )
     out <- pecotmr:::.twasGroupArgs(g, pipe, list(fineMappingResult = "FMR"))
@@ -2457,6 +2558,24 @@ test_that(".runJointCell: a token whose fitter returns NULL is skipped", {
         .package = "pecotmr"
     )
     expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie"))
+})
+
+test_that(".runJointCell reads allele frequencies for fine-mapping only", {
+    # They go into fine-mapping's topLoci. TWAS never reads them, and
+    # computing them reads each group's genotypes a second time.
+    cell <- .je_synthCell(list(.je_mkGroup("G1")))
+    local_mocked_bindings(
+        fitJointGroup = function(...) NULL,
+        .jointAfForGroup = function(...) abort("read the genotypes again"),
+        .package = "pecotmr"
+    )
+    twas <- new("TwasJointPipeline", config = list())
+    expect_null(pecotmr:::.runJointCell(cell, twas, NULL, NULL, "mrmash"))
+    fm <- new("FmJointPipeline", config = list(coverage = 0.95))
+    expect_error(
+        pecotmr:::.runJointCell(cell, fm, NULL, NULL, "mvsusie"),
+        "read the genotypes again"
+    )
 })
 
 test_that(".runJointSpecs: region mode without traitId restricts scoped traits to the locus", {
@@ -2740,6 +2859,125 @@ test_that("a fine-mapping CV handoff tolerates missing performance", {
     expect_equal(f(cv, "susie")$metrics, "PERF")
 })
 
+test_that("a fine-mapping CV handoff finds methods whose key differs", {
+    # fineMappingPipeline names its CV tables by the method key (susie_inf),
+    # not the twas token (susieInf); the handoff matches on the key.
+    cv <- list(
+        samplePartition = "SP",
+        prediction = set_names(
+            list("INF", "ASH"),
+            c("susie_inf_predicted", "susie_ash_predicted")
+        ),
+        performance = set_names(
+            list("INF_PERF", "ASH_PERF"),
+            c("susie_inf_performance", "susie_ash_performance")
+        )
+    )
+    inf <- pecotmr:::.twasFmHandoffCv(cv, "susieInf")
+    expect_equal(inf$predictions, "INF")
+    expect_equal(inf$metrics, "INF_PERF")
+    expect_equal(pecotmr:::.twasFmHandoffCv(cv, "susieAsh")$metrics, "ASH_PERF")
+})
+
+# A joint mvSuSiE fine-mapping row for context `ctx`, carrying that context's
+# slice of the joint CV (one prediction column, one performance row).
+.je_fmCvRow <- function(ctx, sp, pred, perf, withCv = TRUE) {
+    ids <- c("chr1:100:A:G", "chr1:200:A:G")
+    cv <- list(
+        samplePartition = sp,
+        prediction = list(
+            mvsusie_predicted = matrix(
+                as.numeric(pred),
+                ncol = 1L,
+                dimnames = list(sp$Sample, ctx)
+            )
+        ),
+        performance = list(
+            mvsusie_performance = matrix(
+                as.numeric(perf),
+                nrow = 1L,
+                dimnames = list(
+                    ctx,
+                    c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
+                )
+            )
+        )
+    )
+    FineMappingRow(
+        variantIds = ids,
+        susieFit = list(),
+        topLoci = data.frame(variant_id = ids, pip = c(0.9, 0.1)),
+        cvResult = if (withCv) cv else NULL
+    )
+}
+
+.je_fmCvResult <- function(rows) {
+    QtlFineMappingResult(
+        studyName = rep("S", 2L),
+        context = c("brain", "liver"),
+        trait = rep("G", 2L),
+        method = rep("mvsusie", 2L),
+        entry = rows
+    )
+}
+
+.je_fmCvSp <- data.frame(Sample = paste0("s", 1:4), Fold = c(1L, 1L, 2L, 2L))
+
+test_that("a joint group's fine-mapping CV covers each of its conditions", {
+    sp <- .je_fmCvSp
+    fmr <- .je_fmCvResult(list(
+        .je_fmCvRow("brain", sp, 1:4, 1:6),
+        .je_fmCvRow("liver", sp, 5:8, 7:12)
+    ))
+    # The group's order, not the result's, sets the column order.
+    cond <- tibble(
+        study = c("S", "S"),
+        context = c("liver", "brain"),
+        trait = c("G", "G")
+    )
+    cv <- pecotmr:::.twasGroupFmCv(fmr, cond)
+    pred <- cv$prediction$mvsusie_predicted
+    expect_equal(colnames(pred), c("liver", "brain"))
+    expect_equal(unname(pred[, "liver"]), as.numeric(5:8))
+    expect_equal(
+        rownames(cv$performance$mvsusie_performance),
+        c("liver", "brain")
+    )
+    # The first condition's row alone held one column, so the engine's
+    # per-condition slice ran out of bounds at the second condition.
+    second <- pecotmr:::.sliceTwasCvResultToCondition(
+        pecotmr:::.twasFmHandoffCv(cv, "mvsusie"),
+        2L
+    )
+    expect_equal(unname(second$predictions), as.numeric(1:4))
+    expect_equal(unname(second$metrics), as.numeric(1:6))
+})
+
+test_that("a joint group's fine-mapping CV needs one partition throughout", {
+    sp <- .je_fmCvSp
+    cond <- tibble(
+        study = c("S", "S"),
+        context = c("brain", "liver"),
+        trait = c("G", "G")
+    )
+    # A condition with no CV hands off nothing.
+    partial <- .je_fmCvResult(list(
+        .je_fmCvRow("brain", sp, 1:4, 1:6),
+        .je_fmCvRow("liver", sp, 5:8, 7:12, withCv = FALSE)
+    ))
+    expect_null(pecotmr:::.twasGroupFmCv(partial, cond))
+    # Rows from separate runs pair predictions made on different folds.
+    sp2 <- mutate(sp, Fold = c(2L, 1L, 2L, 1L))
+    mixed <- .je_fmCvResult(list(
+        .je_fmCvRow("brain", sp, 1:4, 1:6),
+        .je_fmCvRow("liver", sp2, 5:8, 7:12)
+    ))
+    expect_error(
+        pecotmr:::.twasGroupFmCv(mixed, cond),
+        "S:brain:G, S:liver:G used different fold partitions"
+    )
+})
+
 
 test_that("joint specs accumulate by rbinding distinct tuples", {
     # runJointSpecs folds each spec's result into the accumulator; the tuple
@@ -3017,11 +3255,11 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         contexts = list(S1 = "cA"),
         traits = list(S1 = "t1")
     )
-    pecotmr:::.enumUnivariateIndividual(
+    .je_build(pecotmr:::.enumUnivariateIndividual(
         NULL,
         scope,
         list(region = GenomicRanges::GRanges("chr1:1-1000"))
-    )
+    ))
     # An explicit region replaces the trait-anchored cis window entirely --
     # neither traitId nor cisWindow is passed down.
     expect_equal(seen$region, GenomicRanges::GRanges("chr1:1-1000"))
@@ -3510,4 +3748,59 @@ test_that("a cross-context sumstats group refuses rows on two references", {
         pecotmr:::.enumCrossContextSumstats(ss, scope),
         "jointCrossContext \\(QtlSumStats\\): a joint fit uses one LD"
     )
+})
+
+# ---- joint-fit positions ----------------------------------------------------
+
+test_that(".jointIndexOf numbers a joint group's fitted conditions", {
+    entries <- list(NULL, "a", "b")
+    joint <- list(js = NA_character_, jc = "c1;c2;c3", jt = NA_character_)
+    expect_identical(pecotmr:::.jointIndexOf(entries, joint), c(NA, 1L, 2L))
+    single <- list(js = NA_character_, jc = NA_character_, jt = NA_character_)
+    expect_identical(
+        pecotmr:::.jointIndexOf(entries, single),
+        rep(NA_integer_, 3L)
+    )
+})
+
+# One engine record for context `ctx` of a cross-context group.
+.je_record <- function(ctx, entry, jointIndex, joint = "c1;c2") {
+    list(
+        study = "S",
+        context = ctx,
+        trait = "t1",
+        method = "m",
+        entry = entry,
+        jointStudies = NA_character_,
+        jointContexts = joint,
+        jointTraits = NA_character_,
+        traitPos = NULL,
+        region = NULL,
+        ldReference = NULL,
+        jointIndex = jointIndex
+    )
+}
+
+test_that("a joint fit's rows record their position in it", {
+    fm <- .sc_makeFineMappingRow(3)
+    res <- pecotmr:::.buildJointResult(
+        QtlFineMappingResult,
+        list(.je_record("c1", fm, 1L), .je_record("c2", fm, 2L))
+    )
+    expect_identical(S4Vectors::mcols(res)$jointIndex, c(1L, 2L))
+    tw <- TwasWeightsRow("chr1:100:A:G", 0.1)
+    res <- pecotmr:::.buildJointResult(
+        TwasWeights,
+        list(.je_record("c1", tw, 1L), .je_record("c2", tw, 2L))
+    )
+    expect_identical(
+        as.list(S4Vectors::mcols(res)$jointIndex),
+        list(1L, 2L)
+    )
+    # Rows from no joint fit record none.
+    plain <- pecotmr:::.buildJointResult(
+        QtlFineMappingResult,
+        list(.je_record("c1", fm, NA_integer_, joint = NA_character_))
+    )
+    expect_false(is_in("jointIndex", colnames(S4Vectors::mcols(plain))))
 })

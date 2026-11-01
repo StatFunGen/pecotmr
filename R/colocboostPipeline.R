@@ -2108,7 +2108,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbResultLdRefs <- function(pairs) {
     dict <- .ldRefDict(map(unname(pairs), "ldReference"))
-    list(refs = dict$refs, keys = set_names(dict$keys, names(pairs)))
+    list(refs = dict$entries, keys = set_names(dict$keys, names(pairs)))
 }
 
 # The separate-GWAS run bundles, keyed by GWAS label. The runs are FOCAL: each

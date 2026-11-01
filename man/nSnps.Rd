@@ -28,12 +28,12 @@ this context; \code{NULL} matches all contexts.}
 this trait; \code{NULL} matches all traits.}
 }
 \value{
-Integer.
+Integer; for an \code{H2Estimate}, one per estimate.
 }
 \description{
 Number of SNPs in a \code{GwasSumStats} or \code{QtlSumStats}
-  entry, selected by its identity tuple, or the number of variants an
-  \code{H2Estimate} was computed over.
+  entry, selected by its identity tuple, or the number of variants each of
+  an \code{H2Estimate}'s estimates was computed over.
 }
 \examples{
 data(qtlSumStatsExample)

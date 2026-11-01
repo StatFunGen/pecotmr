@@ -541,12 +541,9 @@ test_that("updateObject keys an old result's sumstat outcomes to its ref", {
     info <- mutate(.cbr_info(), dataForm = c("sumstats", "individual"))
     x <- ColocBoostResult(list(.cbr_fake()), "joint_gwas", outcomeInfo = info)
     # As an earlier version saved it: one reference, no outcome keys.
-    old <- `slot<-`(x, "ldReference", check = FALSE, value = ref)
-    old <- `slot<-`(
-        old,
-        "outcomeInfo",
-        value = select(info, -any_of("ldReference"))
-    )
+    old <- x
+    methods::slot(old, "ldReference", check = FALSE) <- ref
+    methods::slot(old, "outcomeInfo") <- select(info, -any_of("ldReference"))
     new <- updateObject(old)
     expect_true(methods::validObject(new))
     expect_identical(ldReference(new), list(ld1 = ref))

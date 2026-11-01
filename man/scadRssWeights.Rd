@@ -10,7 +10,7 @@ scadRssWeights(
   s = c(0.2, 0.5, 0.9, 1),
   gamma = 3.7,
   alpha = 1,
-  selection = c("ldQuadratic", "minFbeta"),
+  selection = c("heldOut", "ldQuadratic", "minFbeta"),
   fitRetention = c("none", "slim", "full"),
   methodArgs = PenalizedRssOptions()
 )
@@ -37,8 +37,13 @@ standardized genotypes, never formed as a matrix.}
 the penalty, the rest a ridge term, as \code{\link{penalizedRss}}
 mixes them. Default 1, no ridge term.}
 
-\item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
-\code{"minFbeta"}.}
+\item{selection}{How the returned candidate is chosen (see Details of
+\code{\link{lassosumRssWeights}}). \code{"heldOut"} (default) scores
+every candidate on held-out summary statistics and needs the
+reference's sample size, so an \code{\link{LdMatrix}} must record
+\code{nSamples}. \code{"ldQuadratic"} is lassosum's pseudovalidation and
+needs the \code{fdrtool} package. \code{"minFbeta"} picks the smallest
+objective, for debugging.}
 
 \item{fitRetention}{How much of the search is kept as the \code{"fit"}
 attribute of the returned weights. \code{"none"} (default) attaches
@@ -62,8 +67,8 @@ A numeric vector of SNP coefficient weights. Unless
 }
 \description{
 Fits SCAD-penalized regression on the RSS objective, searching over a
-shrinkage grid \code{s} and lambda path. Model selection uses LD-quadratic
-pseudovalidation by default.
+shrinkage grid \code{s} and lambda path. Model selection uses held-out
+summary statistics by default (see \code{\link{lassosumRssWeights}}).
 }
 \examples{
 data(eqtlRegionExample)
@@ -77,5 +82,5 @@ stat <- list(
   n = rep(nrow(X), ncol(X)),
   variantNames = colnames(X)
 )
-scadRssWeights(stat, LdMatrix(cor(X)))
+scadRssWeights(stat, LdMatrix(cor(X), nSamples = nrow(X)))
 }

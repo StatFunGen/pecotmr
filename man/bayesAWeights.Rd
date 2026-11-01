@@ -2,47 +2,57 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesAWeights}
 \alias{bayesAWeights}
-\title{BayesA TWAS weights (t-distribution prior)}
+\title{BayesA TWAS weights (scaled-t prior)}
 \usage{
 bayesAWeights(
   X,
   y,
-  Z = NULL,
-  h2 = NULL,
-  nit = 5000,
-  nburn = 1000,
-  nthin = 5,
-  methodArgs = QggOptions()
+  backend = c("qgg", "hibayes"),
+  nIter = 5000,
+  nBurnin = 1000,
+  thin = 5,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = NULL
 )
 }
 \arguments{
-\item{X}{Numeric genotype / design matrix (samples x variants).}
+\item{X}{A numeric matrix of genotypes (samples x variants).}
 
-\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+\item{y}{A numeric vector of phenotypes, one per row of \code{X}.}
 
-\item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
+\item{backend}{\code{"qgg"} (default) or \code{"hibayes"}.}
 
-\item{h2}{Numeric or \code{NULL}. Prior heritability; \code{NULL}
-leaves the engine's own default.}
+\item{nIter}{Integer. Total number of MCMC iterations, burn-in included,
+on every engine. Default \code{5000}.}
 
-\item{nit}{Integer. Total MCMC iterations. Default \code{5000}.}
+\item{nBurnin}{Integer. Number of burn-in iterations discarded; less than
+\code{nIter}. Default \code{1000}.}
 
-\item{nburn}{Integer. Burn-in iterations. Default \code{1000}.}
+\item{thin}{Integer. Thinning interval for retained MCMC samples. Default
+\code{5}.}
 
-\item{nthin}{Integer. Thinning interval for retained MCMC samples.
-Default \code{5}.}
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the posterior summaries, as a list of the
+effects' posterior means (\code{coef}, over the variants fitted) and,
+where the backend reports them, their posterior inclusion probabilities
+(\code{pip}); \code{"full"} the backend's whole fitted object. Either
+names the variants it was fitted on.}
 
-\item{methodArgs}{Options forwarded to \code{qgg::gbayes}, built
-with \code{\link{QggOptions}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+\item{methodArgs}{Options for the backend's engine:
+\code{\link{QggOptions}} for qgg, \code{\link{HibayesOptions}} for
+hibayes. \code{NULL} keeps the engine's defaults.}
 }
 \value{
-A numeric vector of effect-size weights, one per variant (column of
+A numeric vector of weights, one per variant (column of
   \code{X}); columns dropped for zero variance receive weight 0.
+  Unless \code{fitRetention = "none"} the fit is attached as
+  attribute \code{"fit"}.
 }
 \description{
-Use t-distribution as prior.
+Fits the BayesA prior, a normal on each effect whose
+  variance is drawn per variant (a scaled-t), through
+  \code{\link{bayesAlphabetWeights}}.
 }
 \examples{
 data(eqtlRegionExample)

@@ -1,3 +1,10 @@
+// qtl_enrichment.cpp -- cpp11 entry point for the QTL enrichment estimate
+// (qtl_enrichment.h).
+//
+// Adapted from fastenloc (https://github.com/xqwen/fastenloc), Copyright (C)
+// Xiaoquan Wen, distributed under the GNU General Public License, version 3
+// or (at your option) any later version. See inst/COPYRIGHTS.
+
 #include "qtl_enrichment.h"
 
 // `rGwasPip` holds the GWAS PIP values; `rQtlSusieFit` is a list of fits, each

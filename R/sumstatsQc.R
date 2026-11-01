@@ -42,7 +42,13 @@ NULL
     } else {
         as_tibble(x)
     }
-    select(df, all_of(c("chrom", "pos", "alt", "ref")))
+    # Alleles in upper case, so the two sources' keys meet whatever case
+    # each was given in.
+    mutate(
+        select(df, all_of(c("chrom", "pos", "alt", "ref"))),
+        alt = .canonAllele(.data$alt),
+        ref = .canonAllele(.data$ref)
+    )
 }
 
 # Canonical per-variant key from sorted alleles, so strand/allele flips collide.
@@ -245,10 +251,7 @@ resolveLdInput <- function(
 # One window's LD: the matrix's diagonal block, or the factor's columns.
 # @noRd
 .dentistLdSlice <- function(ld, idx) {
-    if (is.null(ld$F)) {
-        return(list(R = ld$R[idx, idx, drop = FALSE]))
-    }
-    list(F = ld$F[, idx, drop = FALSE])
+    .ldSourceSubset(ld, idx)
 }
 
 # The LD a DENTIST run reads, with the sample size it needs. Genotypes under
@@ -483,11 +486,7 @@ dentist <- function(
         return(list(zScore = zScore, ld = ld, dedupRes = NULL))
     }
     rThreshold <- round(sqrt(duprThreshold) * 1000) / 1000
-    dedupRes <- if (is.null(ld$F)) {
-        .findDuplicateVariants(zScore, ld$R, rThreshold)
-    } else {
-        .findDuplicateVariantsFactor(zScore, ld$F, rThreshold)
-    }
+    dedupRes <- .findDuplicateVariants(zScore, ld, rThreshold)
     numDup <- sum(dedupRes$dupBearer != -1)
     if (numDup > 0) {
         nZ <- length(zScore)
@@ -499,11 +498,7 @@ dentist <- function(
     }
     list(
         zScore = dedupRes$filteredZ,
-        ld = if (is.null(ld$F)) {
-            list(R = dedupRes$filteredLD)
-        } else {
-            list(F = dedupRes$filteredFactor)
-        },
+        ld = dedupRes$filteredLd,
         dedupRes = dedupRes
     )
 }
@@ -636,27 +631,64 @@ dentistSingleWindow <- function(
 ) {
     .assertBpparam(BPPARAM)
     ld <- .dentistLdInput(R, X, nSample, ldMethod)
-    nSample <- ld$nSample
+    .dentistOnSource(
+        zScore,
+        ld,
+        ld$nSample,
+        list(
+            pValueThreshold = pValueThreshold,
+            propSVD = propSVD,
+            gcControl = gcControl,
+            nIter = nIter,
+            gPvalueThreshold = gPvalueThreshold,
+            duprThreshold = duprThreshold,
+            BPPARAM = BPPARAM,
+            correctChenEtAlBug = correctChenEtAlBug,
+            seed = seed
+        )
+    )
+}
+
+# dentistSingleWindow()'s tuning arguments, the settings .dentistOnSource()
+# reads.
+# @noRd
+.dentistSettingNames <- function() {
+    c(
+        "pValueThreshold",
+        "propSVD",
+        "gcControl",
+        "nIter",
+        "gPvalueThreshold",
+        "duprThreshold",
+        "BPPARAM",
+        "correctChenEtAlBug",
+        "seed"
+    )
+}
+
+# dentistSingleWindow() on an LD source (.ldSourceRows()) whose reference has
+# `nSample` samples, under `settings` (.dentistSettingNames()).
+# @noRd
+.dentistOnSource <- function(zScore, ld, nSample, settings) {
     .dentistValidateInput(zScore, ld)
     p <- list(
-        pValueThreshold = pValueThreshold,
-        propSVD = propSVD,
-        gcControl = gcControl,
-        nIter = nIter,
-        gPvalueThreshold = gPvalueThreshold,
-        threads = .bpLocalThreads(BPPARAM, "dentistSingleWindow"),
-        correctChenEtAlBug = correctChenEtAlBug,
-        seed = seed
+        pValueThreshold = settings$pValueThreshold,
+        propSVD = settings$propSVD,
+        gcControl = settings$gcControl,
+        nIter = settings$nIter,
+        gPvalueThreshold = settings$gPvalueThreshold,
+        threads = .bpLocalThreads(settings$BPPARAM, "dentistSingleWindow"),
+        correctChenEtAlBug = settings$correctChenEtAlBug,
+        seed = settings$seed
     )
-    orgZscore <- zScore
-    dedup <- .dentistDedup(zScore, ld, duprThreshold)
+    dedup <- .dentistDedup(zScore, ld, settings$duprThreshold)
     imputed <- .dentistRunImpute(dedup$ld, nSample, dedup$zScore, p)
-    res <- if (duprThreshold < 1.0) {
-        addDupsBackDentist(orgZscore, imputed, dedup$dedupRes)
+    res <- if (settings$duprThreshold < 1.0) {
+        addDupsBackDentist(zScore, imputed, dedup$dedupRes)
     } else {
         imputed
     }
-    .dentistOutlierStat(res, pValueThreshold)
+    .dentistOutlierStat(res, settings$pValueThreshold)
 }
 
 # --- addDupsBackDentist helpers ---------------------------------------------
@@ -1316,24 +1348,38 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
 
 # --- slalom helpers ---------------------------------------------------------
 
-# Lead-variant LD column. From genotypes under the sample estimator it is read
-# off X's LD factor -- crossprod(F, F[, lead]) / (n - 1), computeLd()'s column
-# exactly -- without forming the p x p matrix. The population and GCTA
-# estimators treat missing calls their own way, so they still build it
-# through resolveLdInput(), as dentist does.
+# The LD slalom() reads. From genotypes under the sample estimator it is X's
+# LD factor, from which the lead's column is read without forming the p x p
+# matrix. The population and GCTA estimators treat missing calls their own
+# way, so they still build the matrix through resolveLdInput(), as dentist
+# does.
 #' @importFrom checkmate assertMatrix
-.slalomLeadR <- function(zScore, R, X, leadIdx, ldMethod) {
+.slalomLdSource <- function(zScore, R, X, ldMethod) {
     if (is.null(R) && identical(ldMethod, "sample")) {
         factor <- .ldFactorFromDosage(as.matrix(X))
         assertMatrix(factor, ncols = length(zScore))
-        lead <- crossprod(factor, factor[, leadIdx, drop = FALSE])
-        # The lead's correlation with itself is 1 exactly, as on the
-        # matrix's unit diagonal, not 1 give or take rounding.
-        return(replace(drop(lead) / (nrow(factor) - 1), leadIdx, 1))
+        return(list(F = factor))
     }
     R <- resolveLdInput(R = R, X = X, ldMethod = ldMethod)$R
     assertMatrix(R, nrows = length(zScore), ncols = length(zScore))
-    R[, leadIdx]
+    list(R = R)
+}
+
+# The lead variant's LD column: a matrix's own column, or read off a packed
+# triangle or a factor -- crossprod(F, F[, lead]) / (n - 1), computeLd()'s
+# column exactly -- without forming the rest.
+# @noRd
+.slalomLeadColumn <- function(ld, leadIdx) {
+    if (!is.null(ld$R)) {
+        return(ld$R[, leadIdx])
+    }
+    lead <- drop(.ldSourceRows(ld, leadIdx))
+    if (is.null(ld$F)) {
+        return(lead)
+    }
+    # The lead's correlation with itself is 1 exactly, as on the matrix's
+    # unit diagonal, not 1 give or take rounding.
+    replace(lead, leadIdx, 1)
 }
 
 # DENTIST-S outlier statistic against the lead variant.
@@ -1450,6 +1496,29 @@ slalom <- function(
     ldMethod = "sample"
 ) {
     .ldRequireOneSource(R, X)
+    .slalomOnSource(
+        zScore,
+        .slalomLdSource(zScore, R, X, ldMethod),
+        standardError,
+        abfPriorVariance,
+        nlog10pDentistSThreshold,
+        r2Threshold,
+        leadVariantChoice
+    )
+}
+
+# slalom() on an LD source (.ldSourceRows()), of which it reads the lead
+# variant's column only.
+# @noRd
+.slalomOnSource <- function(
+    zScore,
+    ld,
+    standardError,
+    abfPriorVariance,
+    nlog10pDentistSThreshold,
+    r2Threshold,
+    leadVariantChoice
+) {
     # One-sided p-value matching the original Python (stats.norm.cdf): lead is
     # the most negative z-score when leadVariantChoice == "pvalue".
     pvalue <- pnorm(zScore)
@@ -1466,7 +1535,7 @@ slalom <- function(
     } else {
         which.max(prob)
     }
-    rLead <- .slalomLeadR(zScore, R, X, leadIdx, ldMethod)
+    rLead <- .slalomLeadColumn(ld, leadIdx)
     ds <- .slalomDentistS(
         zScore,
         rLead,
@@ -2037,14 +2106,20 @@ raissSingleMatrixFromX <- function(
     .qcRaissKnownZ(.entryGrangesToDf(knownZscores))
 }
 
-# A table handed to raiss() with its `chrom` column in UCSC style, so its rows
-# meet the reference's and each other's on equal labels. NULL stays NULL.
+# A table handed to raiss() in pecotmr's spelling -- `chrom` in UCSC style,
+# alleles in upper case -- so its rows meet the reference's and each other's
+# on equal labels. `variant_id` is a label (an rsID, or a file's own spelling
+# of chrom:pos:A2:A1) and stays as given. NULL stays NULL.
 # @noRd
-.raissUcscChrom <- function(df) {
+.raissCanon <- function(df) {
     if (is.null(df) || is.null(df[["chrom"]])) {
         return(df)
     }
-    `[[<-`(df, "chrom", value = withChrPrefix(df[["chrom"]]))
+    reduce(
+        intersect(c("A1", "A2"), names(df)),
+        .withCanonAlleleCol,
+        .init = `[[<-`(df, "chrom", value = withChrPrefix(df[["chrom"]]))
+    )
 }
 
 # The genotypes' LD factor for refPanel's variants (see .ldRefFactor()), the
@@ -2147,8 +2222,8 @@ raiss <- function(
     if (is.null(genotypes) && is.null(ldMatrix)) {
         abort("Provide either ldMatrix or genotypes.")
     }
-    knownZscores <- .raissUcscChrom(.raissKnownTable(knownZscores))
-    refPanel <- .raissUcscChrom(refPanel)
+    knownZscores <- .raissCanon(.raissKnownTable(knownZscores))
+    refPanel <- .raissCanon(refPanel)
     ref <- .raissReferenceOf(ldMatrix, genotypes)
     if (!is.null(ref)) {
         refPanel <- refPanel %||% .raissRefPanelOf(ref, knownZscores)
@@ -2441,19 +2516,20 @@ mergeRaissDf <- function(raissDf, knownZscores) {
         # Remove the extra columns produced by the join (z.x, z.y).
         select(-all_of(c("z.x", "z.y"))) |>
         arrange(.data$pos)
-    # Imputed variants' beta / se are NA to avoid confusion, since they are not
-    # imputed. Both are optional (knownZscores may omit them), so guard on
-    # column presence explicitly rather than relying on a data.frame silently
-    # creating an all-NA column on `$col[mask] <- NA`.
-    observed <- resolved$Var == -1
+    # Imputed variants' beta / se are NA to avoid confusion, since only z is
+    # imputed; an observed variant (Var == -1) keeps its own. Both are
+    # optional (knownZscores may omit them), so guard on column presence
+    # explicitly rather than relying on a data.frame silently creating an
+    # all-NA column on `$col[mask] <- NA`.
+    imputed <- resolved$Var != -1
     mutate(
         resolved,
         !!!compact(list(
             beta = if (is_in("beta", colnames(resolved))) {
-                replace(resolved$beta, observed, NA)
+                replace(resolved$beta, imputed, NA)
             },
             se = if (is_in("se", colnames(resolved))) {
-                replace(resolved$se, observed, NA)
+                replace(resolved$se, imputed, NA)
             }
         ))
     )
@@ -2785,14 +2861,7 @@ ldMismatchQc <- function(
     method = c("slalom", "dentist"),
     ldMethod = "sample"
 ) {
-    # `method` carries both the choice and its options: a bare name resolves
-    # to that engine with no options set, a constructor result to that engine
-    # configured. One value, so the two cannot disagree.
-    chosen <- .resolveEngineChoice(
-        if (is.character(method)) method[[1L]] else method,
-        names(.ldMismatchCtors()),
-        "method"
-    )
+    chosen <- .ldMismatchEngine(method)
     engineParam <- chosen$args
     if (chosen$engine == "dentist") {
         callArgs <- list_modify(
@@ -2811,19 +2880,64 @@ ldMismatchQc <- function(
             list(zScore, R = R, X = X, ldMethod = ldMethod),
             !!!engineParam
         )
-        qcResults <- exec(slalom, !!!callArgs)
-        # Standardize output: slalom uses "outliers", rename to "outlier" for
-        # consistency
-        raw <- qcResults$data
-        renameOutliers <- is_in("outliers", colnames(raw)) &&
-            !is_in("outlier", colnames(raw))
-        result <- if (renameOutliers) {
-            rename(raw, outlier = "outliers")
-        } else {
-            raw
-        }
-        return(result)
+        return(.slalomOutliers(exec(slalom, !!!callArgs)))
     }
+}
+
+# The mismatch QC engine `method` names: a bare name resolves to that engine
+# with no options set, a constructor result to that engine configured. One
+# value carries both, so the two cannot disagree.
+# @noRd
+.ldMismatchEngine <- function(method) {
+    .resolveEngineChoice(
+        if (is.character(method)) method[[1L]] else method,
+        names(.ldMismatchCtors()),
+        "method"
+    )
+}
+
+# slalom()'s table with its "outliers" column named "outlier", as
+# ldMismatchQc() reports both methods.
+# @noRd
+.slalomOutliers <- function(qcResults) {
+    raw <- qcResults$data
+    renameOutliers <- is_in("outliers", colnames(raw)) &&
+        !is_in("outlier", colnames(raw))
+    if (renameOutliers) rename(raw, outlier = "outliers") else raw
+}
+
+# ldMismatchQc() on an LD source (.ldSourceRows()) rather than a matrix or
+# genotypes: summaryStatsQc hands it a genotype reference's factor or an
+# LdMatrix's packed block. SLALOM reads one column of it; DENTIST passes over
+# it many times, so a packed block is unpacked once for the run. Each
+# method's settings not given in `method` take its own defaults.
+# @noRd
+.ldMismatchQcOn <- function(zScore, ld, nSample, method) {
+    chosen <- .ldMismatchEngine(method)
+    if (chosen$engine == "dentist") {
+        settings <- list_modify(
+            .formalDefaults(dentistSingleWindow, .dentistSettingNames()),
+            !!!chosen$args
+        )
+        whole <- if (is.null(ld$F)) list(R = .ldSourceMatrix(ld)) else ld
+        return(.dentistOnSource(zScore, whole, nSample, settings))
+    }
+    settings <- list_modify(
+        c(
+            list(standardError = rep(1, length(zScore))),
+            .formalDefaults(
+                slalom,
+                c(
+                    "abfPriorVariance",
+                    "nlog10pDentistSThreshold",
+                    "r2Threshold",
+                    "leadVariantChoice"
+                )
+            )
+        ),
+        !!!chosen$args
+    )
+    .slalomOutliers(exec(.slalomOnSource, zScore, ld, !!!settings))
 }
 
 #' Effective sample size for a case/control study
@@ -2939,10 +3053,10 @@ effectiveN <- function(nCase, nControl) {
         "z_supplied"
     )
     use <- intersect(c(baseCols, optCols), colnames(df))
-    S4Vectors::`mcols<-`(
+    .canonAlleleMcols(S4Vectors::`mcols<-`(
         gr,
         value = S4Vectors::DataFrame(select(df, all_of(use)))
-    )
+    ))
 }
 
 # -----------------------------------------------------------------------------
@@ -3140,35 +3254,21 @@ effectiveN <- function(nCase, nControl) {
     )
 }
 
-# Internal: identify LD-correlated duplicate variants. Walks the LD
-# matrix left-to-right, marking each variant as either a unique anchor
-# (dupBearer == -1) or a duplicate of an earlier anchor (dupBearer == k,
-# the anchor's index). Returns filtered z / LD plus per-variant
-# bookkeeping that DENTIST's addDupsBackDentist uses to splice the
-# dropped variants back into the output.
+# Internal: identify LD-correlated duplicate variants. Walks the LD source
+# `ld` (.ldSourceRows()) left-to-right, marking each variant as either a
+# unique anchor (dupBearer == -1) or a duplicate of an earlier anchor
+# (dupBearer == k, the anchor's index). The walk reads the LD a stripe of
+# rows at a time, so a packed triangle or a factor never forms the p x p
+# matrix. Returns the filtered z and LD source plus per-variant bookkeeping
+# that DENTIST's addDupsBackDentist uses to splice the dropped variants back
+# into the output.
 .findDuplicateVariants <- function(z, ld, rThreshold) {
-    walk <- .dupWalk(z, rThreshold, list(R = ld))
+    walk <- .dupWalk(z, rThreshold, ld)
     kept <- walk$dupBearer == -1
     c(
         list(
             filteredZ = z[kept],
-            filteredLD = ld[kept, kept, drop = FALSE]
-        ),
-        walk
-    )
-}
-
-# .findDuplicateVariants() from a factor of the LD: the same walk, its LD rows
-# computed a stripe at a time from the factor, so the p x p matrix is never
-# formed; the duplicates are dropped from the factor's columns.
-# @noRd
-.findDuplicateVariantsFactor <- function(z, factor, rThreshold) {
-    walk <- .dupWalk(z, rThreshold, list(F = factor))
-    kept <- walk$dupBearer == -1
-    c(
-        list(
-            filteredZ = z[kept],
-            filteredFactor = factor[, kept, drop = FALSE]
+            filteredLd = .ldSourceSubset(ld, which(kept))
         ),
         walk
     )
@@ -3702,17 +3802,18 @@ effectiveN <- function(nCase, nControl) {
 # leaves the drop to onMissing here, so they are dropped here (keeping df
 # aligned with the returned LD) rather than aborting the run.
 #
-# Returns list(R, X, df, dropped): a genotype reference gives X, the factor of
-# its LD (.ldFactorFromRef()), which the mismatch QC reads directly; an
-# LdMatrix gives the matrix R. Both are NULL when no variant is
-# panel-supported, and `df` is empty then -- each caller shapes its own empty
-# result. .qcPanelLdMatrix() turns either into the matrix for a step that
-# needs one.
+# Returns list(ld, df, dropped): `ld` is the LD source (.ldSourceRows()) the
+# checks read -- a genotype reference's factor (.ldFactorFromRef()), or an
+# LdMatrix's packed block (.ldPackedFromRef()), which each check unpacks
+# only if it passes over it many times. It is NULL when no variant is
+# panel-supported, and `df` is empty then -- each caller shapes its own
+# empty result.
+# .qcPanelLdMatrix() forms the matrix for a step that needs one.
 # @noRd
 .qcPanelSupportedLd <- function(df, ldReference, label) {
     nIn <- nrow(df)
     isFactor <- .ldIsGenotypeRef(ldReference)
-    ldFrom <- if (isFactor) .ldFactorFromRef else .ldFromRef
+    ldFrom <- if (isFactor) .ldFactorFromRef else .ldPackedFromRef
     raw <- ldFrom(ldReference, df$SNP, label = label, onMissing = "drop")
     if (is.null(raw)) {
         return(list(df = df[0L, , drop = FALSE], dropped = nIn))
@@ -3727,14 +3828,14 @@ effectiveN <- function(nCase, nControl) {
             dropped = nIn - length(keptIds)
         )
     }
-    c(if (isFactor) list(X = ld) else list(R = ld), supported)
+    c(list(ld = if (isFactor) list(F = ld) else ld), supported)
 }
 
-# The LD matrix of a .qcPanelSupportedLd() result, formed from its factor
-# when that is what the reference gave.
+# The LD matrix of a .qcPanelSupportedLd() result, for a step that takes
+# nothing else (kriging_rss).
 # @noRd
 .qcPanelLdMatrix <- function(panel) {
-    panel$R %||% (crossprod(panel$X) / (nrow(panel$X) - 1))
+    .ldSourceMatrix(panel$ld)
 }
 
 # DENTIST truncates its SVD at a rank bounded by the panel's real size, so it
@@ -3759,7 +3860,7 @@ effectiveN <- function(nCase, nControl) {
             ldReference,
             "summaryStatsQc: ldMismatchQcMethod"
         )
-    if (is.null(panel$R) && is.null(panel$X)) {
+    if (is.null(panel$ld)) {
         return(list(
             df = panel$df,
             outliers = 0L,
@@ -3769,14 +3870,13 @@ effectiveN <- function(nCase, nControl) {
     }
     df <- panel$df
     variantIds <- df$SNP
-    # A genotype reference's factor goes in as X: SLALOM reads only the lead
-    # column of it.
-    qc <- ldMismatchQc(
-        zScore = df$Z,
-        R = panel$R,
-        X = panel$X,
-        nSample = .qcMismatchNSample(ldReference, method),
-        method = method
+    # The panel's LD source goes in as it is: SLALOM reads only the lead's
+    # column of it, and DENTIST reads it a block at a time.
+    qc <- .ldMismatchQcOn(
+        df$Z,
+        panel$ld,
+        .qcMismatchNSample(ldReference, method),
+        method
     )
     # slalom / dentist can leave NA in the outlier column when their
     # per-variant statistic is undefined (e.g. a degenerate dentist
@@ -4533,7 +4633,7 @@ effectiveN <- function(nCase, nControl) {
             ldReference,
             "summaryStatsQc: kriging prefilter"
         )
-    if (is.null(panel$R) && is.null(panel$X)) {
+    if (is.null(panel$ld)) {
         return(list(
             df = panel$df,
             count = 0L,
@@ -5161,13 +5261,12 @@ effectiveN <- function(nCase, nControl) {
     }
     # Match on the (chrom, pos, allele) tuple rather than the raw id string.
     # The entry ids have just been canonicalized to chr:pos:A2:A1 by the QC
-    # above, while panel ids are passed through verbatim by
-    # `.repairVariantIds()` whenever their allele fields are already valid DNA
-    # -- so a panel keyed chr:pos:A1:A2 (which is how a PLINK .bim writes ids;
-    # a .pvar writes REF:ALT and is therefore already canonical) matches
-    # nothing under string equality and the panel is silently emptied. This is
-    # the matcher `.ldFromRefMatch()` and every other LD lookup already use.
-    panelIds <- .ldRefMatchIds(ldReference)
+    # above, and the panel is keyed the same way, rendered from its ranges
+    # and alleles however its file labelled them: a PLINK .bim writes
+    # chr:pos:A1:A2, and an rsID names no position at all, so under string
+    # equality either would match nothing and the panel would be silently
+    # emptied. Entries that carry labels (rsIDs) are matched by label.
+    panelIds <- .ldRefKeysFor(ldReference, unique(ids))
     matched <- matchVariants(
         panelIds,
         unique(ids),
@@ -5335,7 +5434,7 @@ effectiveN <- function(nCase, nControl) {
 .ssqcRunEntry <- function(i, sumstats, opts, refs, keys, isQtl, bounds) {
     .runEntrySummaryStatsQc(
         gr = .collectionEntry(sumstats, i),
-        ldReference = .ldRefForKey(keys[[i]], refs),
+        ldReference = .dictEntryFor(keys[[i]], refs),
         opts = list_assign(
             .ssqcEntryOpts(opts, sumstats, i),
             raissBounds = bounds[[i]]
@@ -5875,7 +5974,7 @@ summaryStatsQc <- function(
         entries = res$newEntries,
         keys = res$keys
     )
-    perRow <- map(res$keys, .ldRefForKey, refs = trimmed)
+    perRow <- map(res$keys, .dictEntryFor, entries = trimmed)
     .ssqcRebuild(sumstats, res$newEntries, perRow, qcOptions, res$entryAudits)
 }
 

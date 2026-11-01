@@ -218,14 +218,20 @@ has no real signal) and `cs` is `NA` because the gene falls in no credible
 set.
 
 `susieAlpha()` returns the per-single-effect alpha matrix behind those
-PIPs, and the run's EM group priors sit in the `groupPriors` column, the
-same on every region of the run:
+PIPs. The group priors are the run's one genome-wide estimate: the EM step
+fits them across every region, and each region is then fine-mapped under
+them. `ctwasGroupPriors()` lists them once per run, one row per group with
+its size, prior inclusion probability and prior effect variance:
 
 ```{r ctwas-param}
-param <- res$groupPriors[[1]]
-param$group_prior
-param$group_prior_var
-param$converged
+ctwasGroupPriors(res)
+```
+
+The rest of the EM output, iteration traces and convergence flag included,
+sits in the `groupPriors` column, the same on every region of the run:
+
+```{r ctwas-em}
+res$groupPriors[[1]]$converged
 ```
 
 By default the context-agnostic SNP background is dropped from the result,

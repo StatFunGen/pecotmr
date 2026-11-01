@@ -443,10 +443,10 @@ NULL
 #' Derived from the de-identified \code{protocol_example} toy data
 #' (gene ENSG00000130538, chr22); all identifiers are synthetic.
 #'
-#' @format A \code{TwasWeights} collection with 11 rows (one per method:
-#'   \code{mrash}, \code{susie}, \code{susie_inf}, \code{enet}, \code{lasso},
-#'   \code{mcp}, \code{scad}, \code{l0learn}, \code{bayes_r}, \code{bayes_c},
-#'   \code{ensemble}).
+#' @format A \code{TwasWeights} collection with one row, the gene, holding
+#'   11 methods: \code{mrash}, \code{susie}, \code{susieInf}, \code{enet},
+#'   \code{lasso}, \code{mcp}, \code{scad}, \code{l0learn}, \code{bayesR},
+#'   \code{bayesC} and \code{ensemble}.
 #'
 #' @keywords data
 #'
@@ -738,15 +738,17 @@ NULL
 #'
 #' @docType data
 #'
-#' @description A small synthetic \code{H2Estimate} (the output of
-#' \code{\link{estimateH2}}) carrying the SNP heritability, intercept, and a
-#' per-annotation enrichment table. Intended for the \code{H2Estimate}
-#' accessors and \code{\link{h2EstimateToSldscTrait}}. All identifiers are
-#' synthetic.
+#' @description A stratified g-LDSC estimate from \code{\link{estimateH2}},
+#' on \code{\link{ldScoreExample}}, of a GWAS simulated on that reference's
+#' LD with one baseline annotation carrying three times the per-variant
+#' heritability of the rest, and one candidate annotation scored against the
+#' fit. Intended for the \code{H2Estimate} accessors and
+#' \code{\link{h2EstimateToSldscTrait}}. Built by
+#' \code{inst/scripts/build_h2_estimate_example.R}.
 #'
-#' @format An \code{H2Estimate} object with \code{h2}, \code{h2Se},
-#'   \code{intercept}, an \code{enrichment} data frame, and
-#'   \code{annotationJackknifeCoefs}.
+#' @format An \code{H2Estimate} holding one estimate (study \code{trait1},
+#'   method \code{gldsc}), which carries an enrichment table, the annotation
+#'   jackknife matrix and a candidate's score statistics.
 #' @keywords data
 #'
 #' @examples

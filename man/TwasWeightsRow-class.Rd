@@ -24,12 +24,6 @@ One row's worth of TWAS weights. Build one with
 \item{\code{weightStandardized}}{Whether the weights are on the standardized scale.}
 
 \item{\code{weightsDataType}}{Optional data-type label.}
-
-\item{\code{fitVariants}}{The ids of the variants the weights were fitted on, in
-the fit's own order, recorded when the row is built; empty for a row with
-no fit payload. A row narrowed to fewer variants keeps them, which is how
-reading its fits can tell they describe more variants than the row now
-holds.}
 }}
 
 \section{Coercion}{

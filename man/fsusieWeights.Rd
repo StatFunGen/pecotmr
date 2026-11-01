@@ -48,12 +48,17 @@ per-SNP posterior-mean wavelet effects \code{fitted_wc[[l]]}
 (\code{nSNP x n_wac}) and inclusion probabilities \code{alpha[[l]]}. Because
 the inverse wavelet transform \code{wr()} is linear, the posterior-mean
 prediction pushes through to a per-SNP, per-feature weight matrix:
-\deqn{W[j, f] = \sum_l alpha[[l]][j] \cdot
-  \mathrm{wr}\!\left(fitted\_wc[[l]][j, ] / csd\_X[j]\right)[f].}
+\deqn{W[j, f] = csd\_Y\_pos[f] \sum_l alpha[[l]][j] \cdot
+  \mathrm{wr}\!\left(csd\_Yf \cdot fitted\_wc[[l]][j, ] / csd\_X[j]
+  \right)[f].}
 This is the exact analog of \code{coef.susie} for scalar SuSiE (all SNPs,
 alpha-weighted), which spreads weight across the credible set -- more robust
 for out-of-sample TWAS than fSuSiE's in-sample lead-SNP summary
-(\code{update_cal_indf}).
+(\code{update_cal_indf}). \code{csd_Yf} and \code{csd_Y_pos} undo the
+response standardization fsusieR records when it scales the response
+(its \code{standardize_Y}), per wavelet coefficient and per position, so
+the weights are in the response's own units; a fit that records neither
+was never scaled.
 }
 \details{
 The reconstruction uses the raw posterior wavelet coefficients

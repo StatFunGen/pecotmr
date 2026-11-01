@@ -319,7 +319,8 @@ test_that("qtlAssociationPostprocess skips genes whose entry has no variants", {
 })
 
 test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_filtered", {
-    # Fixture entries: af = (.30, .20, .005, .40), tss/tes_distance = (0, 500, 9e5, 2e6).
+    # Fixture entries: AF = (.30, .20, .005, .40),
+    # tss/tes_distance = (0, 500, 9e5, 2e6).
     # With mafCutoff 0.01 + cisWindow 1e6 the filtered set keeps only v1, v2
     # (v3 fails MAF, v4 is outside the cis window); the filtered count is 30.
     x <- .qapDefaultFixture
@@ -338,6 +339,29 @@ test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_
     expect_true(all(
         r$p_bonferroni_min_filtered <= r$p_bonferroni_min_original + 1e-12
     ))
+})
+
+test_that("a requested filter refuses entries without its column", {
+    # afCol defaulted to "af" while a QtlSumStats stores AF, so the MAF filter
+    # found no column and silently kept every variant in the "filtered" set.
+    x <- .qapDefaultFixture
+    expect_error(
+        qtlAssociationPostprocess(
+            x,
+            mafCutoff = 0.01,
+            methods = "bonferroni",
+            afCol = "af"
+        ),
+        "needs the per-variant column\\(s\\) af"
+    )
+    expect_error(
+        .qapRequireFilterCols(S4Vectors::DataFrame(AF = 0.3), 0, 1e6, "AF", 1L),
+        "tss_distance, tes_distance"
+    )
+    # An entry with no variants has nothing to filter.
+    expect_null(
+        .qapRequireFilterCols(S4Vectors::DataFrame(), 0.01, 1e6, "AF", 0L)
+    )
 })
 
 test_that("significantQtls(bonferroni_filtered) applies the derived rule on the filtered set", {
@@ -366,7 +390,7 @@ test_that("significantQtls(bonferroni_filtered) applies the derived rule on the 
     expect_equal(length(sig), expN)
     # Every returned variant satisfies the filtered keep rule (MAF and the
     # cis window).
-    af <- S4Vectors::mcols(sig)$af
+    af <- S4Vectors::mcols(sig)$AF
     expect_true(all(pmin(af, 1 - af) > 0.01))
     expect_true(all(
         S4Vectors::mcols(sig)$tss_distance >= -1e6 &

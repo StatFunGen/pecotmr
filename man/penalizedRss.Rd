@@ -52,10 +52,11 @@ variants; ignored otherwise. Default 0.}
 
 \item{lambda2}{L2 penalty weight for L0L2 variant. Default 0.}
 
-\item{thr}{Convergence threshold. Default 1e-4.}
+\item{thr}{Convergence threshold. Default 1e-4. The ridge, solved
+exactly, does not use it.}
 
 \item{maxiter}{Maximum coordinate descent iterations per lambda. Default
-10000.}
+10000. The ridge, solved exactly, does not use it.}
 
 \item{maxSwaps}{Maximum swap rounds for L0 variants. Default 100. Set to 0 to
 disable swaps.}
@@ -78,7 +79,10 @@ mixtures, MCP, SCAD, L0, L0L1 and L0L2. Uses coordinate descent on the
 objective
 \deqn{\beta^T R \beta - 2 \beta^T z + \mathrm{penalty}(\beta)}
 where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta /
-\sqrt{n}}. \code{lassosumRss()} is its LASSO at \code{alpha = 1}.
+\sqrt{n}}. \code{lassosumRss()} is its LASSO at \code{alpha = 1}. The
+ridge (LASSO at \code{alpha = 0}) has a closed form instead,
+\eqn{(R + \lambda I)^{-1} z}, which is read for the whole path from one
+eigendecomposition of \eqn{R}.
 }
 \details{
 Internal: \code{\link{enetRssWeights}}, \code{\link{ridgeRssWeights}},

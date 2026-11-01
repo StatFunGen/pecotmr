@@ -4,19 +4,35 @@
 \alias{ridgeWeights}
 \title{Compute TWAS weights via ridge regression (glmnet, alpha = 0)}
 \usage{
-ridgeWeights(X, y, methodArgs = GlmnetOptions())
+ridgeWeights(
+  X,
+  y,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = GlmnetOptions()
+)
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
 \item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
 
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the selected fit, as a list of its coefficients
+(\code{coef}, over the variants fitted), \code{intercept},
+\code{lambda} and cross-validated error there (\code{cvm},
+\code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
+every \code{lambda}'s coefficients. Either names the variants it was
+fitted on.}
+
 \item{methodArgs}{Additional arguments forwarded to
 \code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
 list is refused, since it cannot be checked against the engine's formals.}
 }
 \value{
-Numeric vector of length \code{ncol(X)} of per-variant weights.
+Numeric vector of length \code{ncol(X)} of per-variant weights,
+  with the fit attached as attribute \code{"fit"} unless
+  \code{fitRetention = "none"}.
 }
 \description{
 Convenience wrapper for \code{\link{glmnetWeights}} with \code{alpha = 0}.

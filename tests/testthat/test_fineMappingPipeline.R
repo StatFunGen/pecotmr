@@ -31,39 +31,14 @@ context("fineMappingPipeline")
 }
 
 .fmp_mockExtractor <- function(seed = 3, n_samples = 40L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle))
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -350,12 +325,22 @@ test_that(".fmNormalizeMethods: char-vector form deduplicates + seeds susie L de
     expect_equal(res$methodArgs$susie$L, 10L)
     expect_null(res$methodArgs$susie$L_greedy)
     expect_equal(res$methodArgs$susieInf$L, 10L)
-    # Non-susie-family tokens are left untouched.
+    # mvSuSiE is SuSiE-family too. MvsusieOptions refuses `L` as pecotmr's to
+    # supply, and this seeding is the only way it arrives.
+    expect_equal(
+        pecotmr:::.fmNormalizeMethods(
+            c("mvsusie"),
+            maxNumSingleEffects = 3L,
+            inputKind = "QtlDataset"
+        )$methodArgs$mvsusie$L,
+        3L
+    )
+    # fSuSiE takes maxNumSingleEffects as a formal of its own instead.
     expect_length(
         pecotmr:::.fmNormalizeMethods(
-            "mvsusie",
+            "fsusie",
             inputKind = "QtlDataset"
-        )$methodArgs$mvsusie,
+        )$methodArgs$fsusie,
         0L
     )
 })
@@ -796,7 +781,7 @@ test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
 
 test_that("fineMappingPipeline(QtlDataset): univariate rows record traitPos", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -843,7 +828,7 @@ test_that("fineMappingPipeline(QtlDataset): univariate rows record traitPos", {
 test_that(".fmAfForX: returns directional effect-allele af aligned to colnames(X)", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .package = "pecotmr"
     )
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 100000L))
@@ -922,7 +907,7 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
         )
     }
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = recordingPostprocess,
         .package = "pecotmr"
@@ -946,7 +931,7 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
 test_that("fineMappingPipeline(QtlDataset): seed argument is accepted and runs", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -1010,10 +995,20 @@ test_that("fineMappingPipeline(QtlDataset, usePCA): rows keyed topPC{i}", {
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B", "ENSG_C")
     )
+    # The PCA path builds a window's block from all the context's traits; the
+    # univariate fits, from one trait each.
+    realBlock <- pecotmr:::.fmResidGenoBlock
+    pcaBuilds <- 0L
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
+        .fmResidGenoBlock = function(ctx, traits, ...) {
+            if (length(traits) > 1L) {
+                pcaBuilds <<- pcaBuilds + 1L
+            }
+            realBlock(ctx, traits, ...)
+        },
         .package = "pecotmr"
     )
     res <- suppressMessages(
@@ -1033,6 +1028,9 @@ test_that("fineMappingPipeline(QtlDataset, usePCA): rows keyed topPC{i}", {
     expect_equal(sum(pcRows), 2L)
     expect_setequal(as.character(res$trait)[pcRows], c("topPC1", "topPC2"))
     expect_setequal(as.character(res$method)[pcRows], "susie")
+    # The PCs differ only in the response, so they share their window's
+    # block: one build for the window, not one per PC.
+    expect_equal(pcaBuilds, 1L)
 })
 
 test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
@@ -1191,7 +1189,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univ
     # Stateful screen: reject the first block (ENSG_A), keep the rest (ENSG_B).
     seen <- 0L
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmSerScreen = function(X, y, cutoff) {
@@ -1222,7 +1220,7 @@ test_that("fineMappingPipeline(QtlDataset): CV folds attach a cvResult", {
     # real buildTopLoci requires). CV runs its own real .fmFitSusieIndiv, so the
     # cvResult is genuine.
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1252,10 +1250,32 @@ test_that("fineMappingPipeline(QtlDataset): CV folds attach a cvResult", {
     expect_false(anyNA(cv$prediction[["susie_predicted"]]))
 })
 
+test_that("a CV run keeps each fold's weights on the row's own variants", {
+    # Unmocked, so the fold weights are the ones the fold fits gave and the
+    # row's variants are the ones the folds were fit over.
+    data(qtlDatasetExample, envir = environment())
+    res <- suppressMessages(fineMappingPipeline(
+        qtlDatasetExample,
+        methods = "susie",
+        cisWindow = 50000L,
+        initializeWithSusieInf = FALSE,
+        crossValidationParam = CrossValidationParam(folds = 3),
+        verbose = 0,
+        seed = 1
+    ))
+    stored <- res$cvResult[[1L]]$foldWeights
+    expect_null(rownames(stored))
+    row <- pecotmr:::.collectionEntry(res, 1L)
+    fw <- cvResult(row)$foldWeights
+    expect_identical(rownames(fw), variantIds(row))
+    expect_equal(colnames(fw), c("fold_1", "fold_2", "fold_3"))
+    expect_false(anyNA(fw))
+})
+
 test_that("fineMappingPipeline(QtlDataset): no CV folds leaves cvResult NULL", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -1310,7 +1330,13 @@ test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake metho
     )
     expect_named(
         cv,
-        c("samplePartition", "prediction", "performance", "foldFits")
+        c(
+            "samplePartition",
+            "prediction",
+            "performance",
+            "foldWeights",
+            "variantIds"
+        )
     )
     expect_setequal(colnames(cv$samplePartition), c("Sample", "Fold"))
     # Keyed by the TWAS snake method name (adapter methodKey base).
@@ -1429,8 +1455,17 @@ test_that("fineMappingPipeline(QtlDataset): fsusie with single trait rejected", 
 # without actually fitting. Returns a stub fit object tagged with the input
 # shape so the test can assert it was constructed as expected.
 .fmp_mockMvsusie <- function() {
-    function(X, Y, prior_variance, coverage) {
-        list(token = "mvsusie", n_X_cols = ncol(X), n_Y_cols = ncol(Y))
+    # L / L_greedy are refused by MvsusieOptions as pipeline-owned, so record
+    # what arrives for a test to assert.
+    function(X, Y, prior_variance, coverage, L = NULL, L_greedy = NULL) {
+        list(
+            token = "mvsusie",
+            n_X_cols = ncol(X),
+            n_Y_cols = ncol(Y),
+            coverage = coverage,
+            L = L,
+            L_greedy = L_greedy
+        )
     }
 }
 .fmp_mockMixturePrior <- function() {
@@ -1457,7 +1492,7 @@ test_that("fineMappingPipeline(QtlDataset): fsusie with single trait rejected", 
 test_that("fineMappingPipeline(QtlDataset): mvsusie multi-trait single-context dispatch", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1499,7 +1534,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie multi-trait single-context d
 test_that("fineMappingPipeline(QtlDataset): mvsusie multi-context single-trait dispatch", {
     qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1523,7 +1558,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip drops null contexts 
         traits = "ENSG_A"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         # Drop the middle context (liver); keep brain + heart.
         .fmSerScreenColumns = function(X, Y, cutoff) c(TRUE, FALSE, TRUE),
@@ -1551,7 +1586,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips mvsusie when <
     # susie runs alongside so the result still has rows after mvsusie is skipped.
     qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmSerScreen = function(X, y, cutoff) TRUE, # keep univariate susie
@@ -1580,7 +1615,7 @@ test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips mvsusie when <
 test_that("fineMappingPipeline(QtlDataset): mvsusie both multi falls back to per-context multi-trait", {
     qd <- .fmp_qdTwoCtxAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1632,7 +1667,7 @@ test_that("fineMappingPipeline(QtlDataset): multi-trait auto-detection USES the 
     )
     sawMixturePrior <- FALSE
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         rescaleCovW0 = function(w0) c(K = 1),
         .package = "pecotmr"
@@ -1666,7 +1701,7 @@ test_that("fineMappingPipeline(QtlDataset): multi-trait without mrmashPrior keep
     sawMixturePrior <- FALSE
     sawCanonical <- FALSE
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1715,7 +1750,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie resume cache short-circuits 
     )
     mv_calls <- 0
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1742,7 +1777,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie resume cache short-circuits 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joint row per trait", {
     qd <- .fmp_qdTwoCtxAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1775,7 +1810,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joi
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' + univariate compose without double-fitting mvsusie", {
     qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -1808,7 +1843,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' + univariate com
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' with only one context skips with message", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1833,7 +1868,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' with only one co
 test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' produces one joint row per context", {
     qd <- .fmp_qdTwoCtxAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1861,7 +1896,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' produces one joint
 test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' with fsusie wires fsusieR::susiF", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1899,7 +1934,7 @@ test_that("fineMappingPipeline(QtlDataset): fsusie receives the CredibleSetParam
     # ran at its own default. The mocked susiF records what it was handed.
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1927,10 +1962,43 @@ test_that("fineMappingPipeline(QtlDataset): fsusie receives the CredibleSetParam
     expect_equal(recorded$min_purity, 0.4)
 })
 
+test_that("fineMappingPipeline passes mvsusie the CredibleSetParam settings", {
+    # The same gap fsusie had: MvsusieOptions refuses L / L_greedy as
+    # pipeline-owned, but only the univariate SuSiE tokens were seeded, so
+    # mvsusie always ran at its own default of ten effects.
+    qd <- .fmp_qdAB
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        mvsusie = .fmp_mockMvsusie(),
+        create_mixture_prior = .fmp_mockMixturePrior(),
+        .package = "mvsusieR"
+    )
+    res <- suppressMessages(
+        fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            cisWindow = 1000L,
+            credibleSetParam = CredibleSetParam(
+                maxNumSingleEffects = 3L,
+                maxNumSingleEffectsGreedy = 2L,
+                coverage = 0.9
+            )
+        )
+    )
+    recorded <- susieFit(res[1, ])$payload
+    expect_equal(recorded$L, 3L)
+    expect_equal(recorded$L_greedy, 2L)
+    expect_equal(recorded$coverage, 0.9)
+})
+
 test_that("fineMappingPipeline(QtlDataset): fsusie multi-trait per context dispatch", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -1978,7 +2046,7 @@ test_that("fineMappingPipeline(QtlDataset): fsusie multi-trait per context dispa
 
 test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across constituent QtlDatasets", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2022,7 +2090,7 @@ test_that("fineMappingPipeline(MultiStudy): list selections stay per study", {
         )
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2048,7 +2116,7 @@ test_that("fineMappingPipeline(MultiStudy): list selections stay per study", {
 
 test_that("fineMappingPipeline(QtlDataset): trait chosen per context", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2124,7 +2192,7 @@ test_that("fineMappingPipeline(MSQD): L / Lgreedy reach the per-study fit", {
     capX <- new.env(parent = emptyenv())
     capRss <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(capture = capX),
         .fmFitSusieRss = .fmp_mockFitRssDiag(capture = capRss),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -2154,7 +2222,7 @@ test_that("fineMappingPipeline(MSQD): L / Lgreedy reach the per-study fit", {
 
 test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges per region in each study", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2187,7 +2255,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges 
 
 test_that("fineMappingPipeline(MSQD): embedded sumstats record ldReference", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -2213,7 +2281,7 @@ test_that("fineMappingPipeline(MSQD): embedded sumstats record ldReference", {
 
 test_that("fineMappingPipeline(*SumStats): runs with mocked RSS fitters", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2265,7 +2333,7 @@ test_that("fineMappingPipeline(QtlSumStats): empty selection rejected", {
 
 test_that("fineMappingPipeline(GwasSumStats): a blockId gives no window", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2295,7 +2363,7 @@ test_that("fineMappingPipeline(GwasSumStats): a blockId gives no window", {
 
 test_that("fineMappingPipeline(GwasSumStats): a range keeps its origin", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2395,7 +2463,7 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
         )
     }
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = recording,
         .package = "pecotmr"
@@ -2487,7 +2555,7 @@ test_that("fineMappingPipeline(GwasSumStats): mixed screened + real keeps only t
         )
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2553,7 +2621,7 @@ test_that("fineMappingPipeline(QtlSumStats): a screened trait is skipped gracefu
 
 test_that("fineMappingPipeline(*SumStats): serFallback keeps a reliable fit", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2576,7 +2644,7 @@ test_that("fineMappingPipeline(*SumStats): serFallback keeps a reliable fit", {
 
 test_that("fineMappingPipeline(*SumStats): unreliable R falls back to SER", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2600,7 +2668,7 @@ test_that("fineMappingPipeline(*SumStats): unreliable R falls back to SER", {
 test_that("fineMappingPipeline(*SumStats): serFallback=FALSE changes nothing", {
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = TRUE, capture = cap),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2628,7 +2696,7 @@ test_that("fineMappingPipeline(*SumStats): SusieRssParam reaches the fitter", {
     # through unrestricted, and with no control the fitter sees NULL.
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(capture = cap),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2664,7 +2732,7 @@ test_that("fineMappingPipeline(*SumStats): SusieRssParam reaches the fitter", {
 
 test_that("fineMappingPipeline(*SumStats): keepFullFit='all' retains the fit", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2686,7 +2754,7 @@ test_that("fineMappingPipeline(*SumStats): keepFullFit='all' retains the fit", {
 test_that("fineMappingPipeline(QtlSumStats): top-level L / Lgreedy reach the susie fit", {
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(capture = cap),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2711,7 +2779,7 @@ test_that("fineMappingPipeline(QtlSumStats): top-level L / Lgreedy reach the sus
 test_that("fineMappingPipeline(QtlSumStats): per-method L beats the top-level L", {
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRssDiag(capture = cap),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2738,7 +2806,7 @@ test_that("fineMappingPipeline(GwasSumStats): non-RSS family rejected by capabil
 
 test_that("fineMappingPipeline(*SumStats): ser runs via .fmFitSusieSer", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieSer = .fmp_mockFitSer(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -2830,7 +2898,7 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-joins contexts", {
     # share the cross-context RSS fit, each tagged with the co-fit membership.
     ss <- .fmp_makeMultiCtxQtlSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -2870,7 +2938,7 @@ test_that("fineMappingPipeline(QtlSumStats): cache hit short-circuits the RSS fi
     )
     rss_calls <- 0
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = function(...) {
             rss_calls <<- rss_calls + 1L
             .fmp_mockFitRss()(...)
@@ -2918,7 +2986,7 @@ test_that("fineMappingPipeline(GwasSumStats): cache hit short-circuits the RSS f
     )
     rss_calls <- 0
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = function(...) {
             rss_calls <<- rss_calls + 1L
             .fmp_mockFitRss()(...)
@@ -2961,7 +3029,7 @@ test_that("fineMappingPipeline(GwasSumStats): wrong-shape cache (QtlFineMappingR
     )
     rss_calls <- 0
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = function(...) {
             rss_calls <<- rss_calls + 1L
             .fmp_mockFitRss()(...)
@@ -3002,7 +3070,7 @@ test_that("fineMappingPipeline(QtlDataset): cache hit avoids the fitter", {
     )
     fitter_calls <- 0
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = function(...) {
             fitter_calls <<- fitter_calls + 1L
             .fmp_mockFitIndiv()(...)
@@ -3194,7 +3262,7 @@ test_that("fineMappingPipeline(QtlDataset): region + cisWindow is rejected", {
 test_that("fineMappingPipeline(QtlDataset): jointRegions=FALSE merges per-region fits", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -3227,7 +3295,7 @@ test_that("fineMappingPipeline(QtlDataset): jointRegions=FALSE merges per-region
 test_that("fineMappingPipeline(QtlDataset): jointRegions=TRUE fits one concatenated block", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -3259,7 +3327,7 @@ test_that("fineMappingPipeline(QtlDataset): jointRegions=TRUE fits one concatena
 test_that("fineMappingPipeline(QtlDataset): mvsusie jointRegions=FALSE merges per-region fits", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -3293,7 +3361,7 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie jointRegions=FALSE merges pe
 test_that("fineMappingPipeline(QtlDataset): fsusie jointRegions=FALSE merges per-region fits", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -3327,7 +3395,7 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec + jointRegions=FALSE merge
     # tested, and each further trait only repeats them.
     qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -3509,7 +3577,7 @@ test_that("fineMappingPipeline(QtlSumStats): joint spec plus per-entry susie", {
     )
     local_mocked_bindings(
         .fmDispatchJointSpecsQtlSumStats = function(...) jr,
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -3594,7 +3662,7 @@ test_that("MultiStudyQtlDataset forwards the mvsusie prior settings", {
 
 test_that("fineMappingPipeline(MSQD) lays cisWindow on its sumstats", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3681,7 +3749,7 @@ test_that("fineMappingPipeline(MultiStudy): joint spec, rest per component", {
     )
     local_mocked_bindings(
         .fmDispatchJointSpecsMultiStudy = function(...) jr,
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3704,7 +3772,7 @@ test_that("fineMappingPipeline(MultiStudy): an unselected component sits out", {
     # none of its tuples and contributes no rows.
     mt <- .fmp_msqd
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3736,7 +3804,7 @@ test_that("fineMappingPipeline(MultiStudy): trait selection skips a study", {
     # the traits sits out, and the run is refused only when none carries any.
     mt <- .fmp_msqd
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
@@ -3848,7 +3916,13 @@ test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitte
     )
     expect_named(
         cv,
-        c("samplePartition", "prediction", "performance", "foldFits")
+        c(
+            "samplePartition",
+            "prediction",
+            "performance",
+            "foldWeights",
+            "variantIds"
+        )
     )
     expect_true("mvsusie_performance" %in% names(cv$performance))
     expect_equal(dim(cv$prediction[["mvsusie_predicted"]]), c(n, R))
@@ -3947,7 +4021,7 @@ test_that(".fmWeightsCv: fold prior else mvPrior; weightless folds give NA", {
     # (all 1) on the test variants; fold 2 has its own prior but its fit
     # returns no weights; fold 3 has no prior of its own, so it takes the
     # full-data mvPrior, and its weights share no variant with the test
-    # genotypes. Each fold fit records the prior it was handed.
+    # genotypes. The mocked fit records the prior each fold was handed.
     set.seed(3)
     X <- matrix(
         rbinom(60, 2, 0.4),
@@ -3962,6 +4036,7 @@ test_that(".fmWeightsCv: fold prior else mvPrior; weightless folds give NA", {
         "1" = list(priorVariance = diag(2)),
         "2" = list(priorVariance = diag(2) * 2)
     )
+    seen <- new.env(parent = emptyenv())
     local_mocked_bindings(
         .fmFoldWeights = function(
             token,
@@ -3974,12 +4049,12 @@ test_that(".fmWeightsCv: fold prior else mvPrior; weightless folds give NA", {
         ) {
             trained <- sp$Fold[is_in(sp$Sample, rownames(Xtr))]
             heldOut <- setdiff(sp$Fold, trained)
+            seen[[as.character(heldOut)]] <- mvPrior
             if (heldOut == 2L) {
                 return(NULL)
             }
             vars <- if (heldOut == 1L) colnames(Xtr) else "not_a_variant"
-            W <- matrix(1, length(vars), ncol(Ytr), dimnames = list(vars, NULL))
-            `attr<-`(W, "fit", list(prior = mvPrior))
+            matrix(1, length(vars), ncol(Ytr), dimnames = list(vars, NULL))
         },
         .package = "pecotmr"
     )
@@ -3995,10 +4070,13 @@ test_that(".fmWeightsCv: fold prior else mvPrior; weightless folds give NA", {
         mvPriorCv = foldPriors
     )
     # A fold takes its own prior when mvPriorCv has one, else mvPrior.
-    expect_identical(cv$foldFits$fold_1$mvsusie$prior, foldPriors[["1"]])
-    expect_identical(cv$foldFits$fold_3$mvsusie$prior, fullPrior)
-    # A fold whose fit returns no weights keeps no fit either.
-    expect_length(cv$foldFits$fold_2, 0L)
+    expect_identical(seen[["1"]], foldPriors[["1"]])
+    expect_identical(seen[["2"]], foldPriors[["2"]])
+    expect_identical(seen[["3"]], fullPrior)
+    # A fold whose fit returns no weights keeps none: NA, not zero.
+    fw <- pecotmr:::.fmSliceCv(cv, "mvsusie")$foldWeights
+    expect_true(all(is.na(fw[, "fold_2"])))
+    expect_equal(unname(fw[, "fold_1"]), c(1, 1))
     # Only fold 1 predicts: X %*% W, the dosage row sums. NULL weights (fold
     # 2) and weights on no test variant (fold 3) leave their samples NA ...
     pred <- cv$prediction[["mvsusie_predicted"]]
@@ -4017,7 +4095,7 @@ test_that(".fmWeightsCv: fold prior else mvPrior; weightless folds give NA", {
 
 test_that("fineMappingPipeline(*SumStats): susieInf RSS chain (mocked)", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -4111,16 +4189,20 @@ test_that(".fmWeightsCv fills Y rownames and reports per-fold fit failures", {
     )
 })
 
-test_that("fineMappingPipeline CV retains a lean per-fold fit", {
+test_that("fineMappingPipeline CV keeps each fold's weights, not its fit", {
+    # Only the weights are ever read: TWAS cross-validates a SuSiE-family
+    # method from them, and nothing reads the fold's fit itself.
     f <- .twcvFixture
-    expect_false(is.null(f$cv$foldFits))
-    expect_equal(names(f$cv$foldFits), c("fold_1", "fold_2", "fold_3"))
-    # lean: only the fields the weight extractors read
-    fit1 <- f$cv$foldFits[["fold_1"]][["susie"]]
-    expect_true(all(c("pip", "alpha", "mu") %in% names(fit1)))
-    expect_false("lbf_variable" %in% names(fit1))
-    # and it slices per method onto the row payload
-    expect_equal(names(f$slice$foldFits), c("fold_1", "fold_2", "fold_3"))
+    expect_null(f$cv$foldFits)
+    fw <- f$slice$foldWeights
+    expect_equal(
+        dimnames(fw),
+        list(colnames(f$X), c("fold_1", "fold_2", "fold_3"))
+    )
+    expect_identical(
+        attr(fw, "partitionKey"),
+        pecotmr:::.cvPartitionKey(f$slice$samplePartition)
+    )
 })
 
 # --- method-level branches (drive the pipeline methods with mocked fitters) ---
@@ -4150,7 +4232,7 @@ test_that(".fmAfForX returns NULL when af yields nothing", {
 test_that("fineMappingPipeline(QtlDataset): a valid context is honored", {
     qd <- .fmp_qdTwoCtxA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -4171,7 +4253,7 @@ test_that("fineMappingPipeline(QtlDataset): a valid context is honored", {
 
 test_that("fineMappingPipeline(QtlDataset): region selects traits by rowRanges overlap", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
@@ -4193,7 +4275,7 @@ test_that("fineMappingPipeline(QtlDataset): region selects traits by rowRanges o
 test_that("fineMappingPipeline(QtlDataset): too few shared samples errors", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         # residualized X carries a sample absent from Y -> < 2 shared samples
         .fmResidGeno = function(x, ...) {
             matrix(
@@ -4222,7 +4304,7 @@ test_that("fineMappingPipeline(QtlDataset): too few shared samples errors", {
 test_that("fineMappingPipeline(QtlDataset): errors when no tuple produces a result", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmSerScreen = function(...) FALSE, # screen out every block
         .package = "pecotmr"
     )
@@ -4240,7 +4322,7 @@ test_that("fineMappingPipeline(QtlDataset): errors when no tuple produces a resu
 test_that("fineMappingPipeline(QtlDataset): usePCA skips single-trait contexts", {
     qd <- .fmp_qdA
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmSerScreen = function(...) TRUE,
@@ -4298,7 +4380,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): jointSpec with no intersec
 test_that("fineMappingPipeline(QtlDataset): usePCA skips a context whose PCA yields no scores", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmTopPcScores = function(...) NULL, # PCA yields no scores
@@ -4329,7 +4411,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA reuses a cached PC entry", {
         ))
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmTopPcScores = function(Y, nPCs) {
@@ -4357,7 +4439,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA reuses a cached PC entry", {
 test_that("fineMappingPipeline(QtlDataset): usePCA + region uses the region genotype block", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmSerScreen = function(...) TRUE,
@@ -4378,7 +4460,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA + region uses the region geno
 test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block with too few shared samples", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmResidGeno = function(x, ...) {
             matrix(
                 0,
@@ -4406,7 +4488,7 @@ test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block with too few
 test_that("fineMappingPipeline(QtlDataset): usePCA skips a PC block screened out by SER", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmSerScreen = function(...) FALSE, # the PC block is screened out
         .fmDispatchJointSpecsQtlDataset = function(...) .fmp_jr(),
         .package = "pecotmr"
@@ -4507,10 +4589,6 @@ test_that(".fmExtractZn keeps z, ids and n aligned after filtering", {
     keep <- is_in(unfiltered$variantIds, filtered$variantIds)
     expect_equal(filtered$z, unfiltered$z[keep])
     expect_equal(filtered$variantIds, unfiltered$variantIds[keep])
-})
-
-test_that(".fmLeanFoldFit passes a NULL fit straight through", {
-    expect_null(pecotmr:::.fmLeanFoldFit(NULL, "susie"))
 })
 
 test_that(".fmPerStudy / .fmSumStats answer NULL when no method fits the kind", {
@@ -4846,12 +4924,12 @@ test_that("every recursion forwards each cfg field its callee accepts", {
         ),
         list(
             site = ".twasPerStudy",
-            builder = ".twasMsCfg",
+            builder = ".twasPipelineMultiStudy",
             callee = ".twasPipelineQtlDataset"
         ),
         list(
             site = ".twasSumStats",
-            builder = ".twasMsCfg",
+            builder = ".twasPipelineMultiStudy",
             callee = ".twasPipelineQtlSumStats"
         )
     )
@@ -4903,7 +4981,7 @@ test_that("QtlDataset: a CV-only run keeps the CV and skips the full fit", {
     # The full-data post-processor stops the test if it is reached: a
     # cross-validation-only run must not fit, or summarize, the full data.
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmPostprocessOne = function(...) stop("the full-data fit ran"),
         .package = "pecotmr"
     )
@@ -5742,7 +5820,7 @@ test_that(".fmWarnChromosomeRows flags rows spanning a chromosome's worth", {
 
 test_that("fineMappingPipeline(QtlSumStats): cisWindow sets each window", {
     local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
+        .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieRss = .fmp_mockFitRss(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"

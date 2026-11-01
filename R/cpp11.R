@@ -28,24 +28,32 @@ penalizedRssFactorCpp <- function(zR, factorR, shrink, lambdaR, penaltyStr, gamm
   .Call(`_pecotmr_penalizedRssFactorCpp`, zR, factorR, shrink, lambdaR, penaltyStr, gamma, alpha, lambda0, lambda2, thr, maxiter, maxSwaps)
 }
 
-prsCsCpp <- function(a, b, phi, bhat, maf, n, ldBlk, nIter, nBurnin, thin, verbose, seed) {
-  .Call(`_pecotmr_prsCsCpp`, a, b, phi, bhat, maf, n, ldBlk, nIter, nBurnin, thin, verbose, seed)
-}
-
-prsCsFactorCpp <- function(a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thin, verbose, seed) {
-  .Call(`_pecotmr_prsCsFactorCpp`, a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thin, verbose, seed)
-}
-
 qtlEnrichmentCpp <- function(rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed) {
   .Call(`_pecotmr_qtlEnrichmentCpp`, rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed)
 }
 
-sdprCpp <- function(bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, numThreads, optLlk, verbose, seed) {
-  .Call(`_pecotmr_sdprCpp`, bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, numThreads, optLlk, verbose, seed)
+prsCsCpp <- function(a, b, phi, bhat, maf, n, ldBlk, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track) {
+  .Call(`_pecotmr_prsCsCpp`, a, b, phi, bhat, maf, n, ldBlk, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track)
 }
 
-sdprFactorCpp <- function(bhatR, factorR, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, numThreads, optLlk, verbose, seed) {
-  .Call(`_pecotmr_sdprFactorCpp`, bhatR, factorR, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, numThreads, optLlk, verbose, seed)
+prsCsFactorCpp <- function(a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track) {
+  .Call(`_pecotmr_prsCsFactorCpp`, a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track)
+}
+
+sdprCpp <- function(bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track) {
+  .Call(`_pecotmr_sdprCpp`, bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track)
+}
+
+sdprFactorCpp <- function(bhatR, factorR, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track) {
+  .Call(`_pecotmr_sdprFactorCpp`, bhatR, factorR, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track)
+}
+
+bayesAlphabetFactorCpp <- function(bhat, factorR, weights, n, method, legarra, pi, h2, nIter, nBurnin, thin, verbose, seed, shrinkCorr, allowJumpSign, raoBlackwell, track) {
+  .Call(`_pecotmr_bayesAlphabetFactorCpp`, bhat, factorR, weights, n, method, legarra, pi, h2, nIter, nBurnin, thin, verbose, seed, shrinkCorr, allowJumpSign, raoBlackwell, track)
+}
+
+ldpred2FactorCpp <- function(bhat, factorR, n, automatic, p, h2, sparse, shrinkCorr, allowJumpSign, pLower, pUpper, meanLd, nIter, nBurnin, verbose, seed) {
+  .Call(`_pecotmr_ldpred2FactorCpp`, bhat, factorR, n, automatic, p, h2, sparse, shrinkCorr, allowJumpSign, pLower, pUpper, meanLd, nIter, nBurnin, verbose, seed)
 }
 
 vcfGtDosageCpp <- function(gt, alleles) {

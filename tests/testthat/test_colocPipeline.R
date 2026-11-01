@@ -294,7 +294,7 @@ test_that("colocPipeline: returns one row per (QTL tuple, GWAS tuple) pair", {
         qtlFineMappingResult = qfmr,
         gwasInput = gfmr
     ))
-    expect_equal(nrow(out), 4L) # 2 QTL tuples * 2 GWAS tuples
+    expect_equal(nrow(colocPairs(out)), 4L) # 2 QTL tuples * 2 GWAS tuples
     expect_setequal(out$study, "Q1")
     expect_setequal(out$context, c("c1", "c2"))
     expect_setequal(out$gwasStudy, c("G1", "G2"))
@@ -356,7 +356,7 @@ test_that("colocPipeline: pairs two QTL fine-mapping results", {
         qtlFineMappingResult = qfmr,
         gwasInput = other
     ))
-    expect_equal(nrow(out), 2L)
+    expect_equal(nrow(colocPairs(out)), 2L)
     expect_setequal(out$gwasStudy, "Q2")
     expect_setequal(out$gwasContext, "c1")
     expect_setequal(out$gwasTrait, c("t1", "t2"))
@@ -370,7 +370,7 @@ test_that("colocPipeline: pairs two GWAS fine-mapping results", {
         qtlFineMappingResult = first,
         gwasInput = second
     ))
-    expect_equal(nrow(out), 1L)
+    expect_equal(nrow(colocPairs(out)), 1L)
     expect_equal(as.character(out$study), "G1")
     expect_equal(as.character(out$gwasStudy), "G2")
     # Neither side has a context or trait axis, so all four are reported as NA
@@ -526,9 +526,9 @@ test_that("colocPipeline: empty result has the documented schema", {
     out <- suppressWarnings(
         colocPipeline(qtlFineMappingResult = qfmr, gwasInput = gfmr)
     )
-    expect_equal(nrow(out), 0L)
+    expect_equal(nrow(colocPairs(out)), 0L)
     expect_setequal(
-        colnames(out),
+        colnames(colocPairs(out)),
         c(
             "study",
             "context",
@@ -618,6 +618,36 @@ test_that(".colocExtractLbfFromEntry: filterLbfCs subsets by cs_index", {
         )
     )
     expect_equal(nrow(out$lbf), 2L)
+})
+
+test_that(".colocExtractLbfFromEntry: a trimmed fit's sets select by row", {
+    # Trimming keeps effects 1 and 3 of three, on rows 1 and 2, while
+    # cs_index still numbers them 1 and 3: used as rows, effect 3 ran past
+    # the end of the LBF matrix.
+    vids <- sprintf("chr1:%d:A:G", 100L * (1:4))
+    lbf <- matrix(c(5, 0, 0, 0, 0, 0, 4, 0), 2L, byrow = TRUE)
+    fit <- list(
+        alpha = matrix(0.25, 2L, 4L, dimnames = list(NULL, vids)),
+        pip = set_names(c(0.9, 0.1, 0.5, 0.2), vids),
+        V = c(0.1, 0.1),
+        lbf_variable = `colnames<-`(lbf, vids),
+        effect_index = c(1L, 3L),
+        sets = list(cs_index = 3L)
+    )
+    e <- FineMappingRow(
+        variantIds = vids,
+        susieFit = fit,
+        topLoci = data.frame(variant_id = vids, pip = fit$pip)
+    )
+    out <- pecotmr:::.colocExtractLbfFromEntry(
+        e,
+        colocLbfFilterParam = ColocLbfFilterParam(filterLbfCs = TRUE)
+    )
+    expect_equal(unname(out$lbf), lbf[2L, , drop = FALSE])
+    # The result names the set by the effect's own index, as its L3 label
+    # does, and a later block's effects are numbered after it.
+    expect_equal(out$effect, 3L)
+    expect_equal(out$nEffects, 3L)
 })
 
 test_that(".colocAlignLbf: aligned matrices share the common variant set", {
@@ -717,8 +747,10 @@ test_that(".colocLookupEnrichment: returns NA when no row matches", {
 test_that(".colocEmptyResult(enriched=TRUE): includes enrichment + p12Used schema", {
     out <- pecotmr:::.colocEmptyResult(enriched = TRUE)
     expect_s4_class(out, "ColocResult")
-    expect_equal(nrow(out), 0L)
-    expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))
+    expect_equal(nrow(colocPairs(out)), 0L)
+    expect_true(all(
+        c("enrichment", "p12Used") %in% colnames(colocPairs(out))
+    ))
 })
 
 
@@ -794,14 +826,14 @@ test_that("colocPipeline: enrichment takes table priors and reports RCP/LCP", {
     # Enrichment mode scores every (QTL effect, GWAS effect) pair itself
     # rather than calling coloc.bf_bf, so the fixture's 2 x 2 effects give
     # four rows; the mock used elsewhere collapses them to one.
-    expect_equal(nrow(out), 4L)
-    expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))
-    expect_equal(unique(out$enrichment), 2.0)
+    pairs <- colocPairs(out)
+    expect_equal(nrow(pairs), 4L)
+    expect_true(all(c("enrichment", "p12Used") %in% colnames(pairs)))
+    expect_equal(unique(pairs$enrichment), 2.0)
     # qtlEnrichmentPipeline derives p12 = P_eqtl * expit(a0 + a1) the way
     # fastenloc does; the pipeline uses that, rather than scaling a default.
-    expect_equal(unique(out$p12Used), 2.5e-5)
+    expect_equal(unique(pairs$p12Used), 2.5e-5)
     # RCP and LCP are reported alongside the hypotheses.
-    pairs <- colocPairs(out)
     expect_true(all(c("RCP", "LCP") %in% colnames(pairs)))
     # The two names for the same quantities: fastenloc's RCP is the posterior
     # of one shared causal variant, and LCP adds the distinct-variant case.
@@ -914,12 +946,13 @@ test_that("colocPipeline: an enrichment miss warns and drops to plain priors", {
         )
     )
     expect_match(w, "no enrichment entry", all = FALSE)
-    expect_equal(nrow(out), 4L)
+    pairs <- colocPairs(out)
+    expect_equal(nrow(pairs), 4L)
     # A miss means there is no enrichment estimate for this pair, so it is
     # scored with the unconditional priors rather than a fabricated factor
     # of zero applied to a default.
-    expect_true(is.na(unique(out$enrichment)))
-    expect_equal(unique(out$p12Used), 5e-6)
+    expect_true(is.na(unique(pairs$enrichment)))
+    expect_equal(unique(pairs$p12Used), 5e-6)
 })
 
 # --- returnGwasFineMapping attached on the empty-pair early return ----------
@@ -995,7 +1028,7 @@ test_that("colocPipeline: skips a QTL entry with no usable LBF", {
         )
     )
     # bad entry (c1) skipped; only the good entry (c2) yields a row.
-    expect_equal(nrow(out), 1L)
+    expect_equal(nrow(colocPairs(out)), 1L)
     expect_equal(unique(out$context), "c2")
 })
 
@@ -1320,15 +1353,16 @@ test_that("colocPipeline reports the retained mass of the scored effects", {
         gwasInput = gfmr,
         adjustPips = TRUE
     ))
-    skip_if(nrow(out) == 0L, "fixture produced no coloc pairs")
-    expect_true(is_in("qtlRetainedMass", colnames(out)))
+    pairs <- colocPairs(out)
+    skip_if(nrow(pairs) == 0L, "fixture produced no coloc pairs")
+    expect_true(is_in("qtlRetainedMass", colnames(pairs)))
     expect_true(all(
-        is.na(out$qtlRetainedMass) |
-            (out$qtlRetainedMass >= 0 & out$qtlRetainedMass <= 1)
+        is.na(pairs$qtlRetainedMass) |
+            (pairs$qtlRetainedMass >= 0 & pairs$qtlRetainedMass <= 1)
     ))
     expect_true(all(
-        is.na(out$gwasRetainedMass) |
-            (out$gwasRetainedMass >= 0 & out$gwasRetainedMass <= 1)
+        is.na(pairs$gwasRetainedMass) |
+            (pairs$gwasRetainedMass >= 0 & pairs$gwasRetainedMass <= 1)
     ))
 })
 

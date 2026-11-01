@@ -39,6 +39,25 @@ test_that("CtwasResult: constructor keyed by (gwasStudy, study, context, method)
     expect_equal(studyName(cr), "Q1")
 })
 
+test_that("CtwasResult: c() appends runs, their tables kept", {
+    run <- function(context, entry) {
+        CtwasResult(
+            gwasStudy = "D1",
+            studyName = "Q1",
+            context = context,
+            method = "susie",
+            entry = list(entry)
+        )
+    }
+    brain <- run("brain", .cr_entry())
+    liver <- run("liver", .cr_entry(ids = "g3", pip = 0.5))
+    both <- c(brain, liver)
+    expect_s4_class(both, "CtwasResult")
+    expect_identical(as.character(both$context), c("brain", "liver"))
+    expect_identical(both$regionInfo, c(brain$regionInfo, liver$regionInfo))
+    expect_identical(length(ctwasPosteriors(both)), 3L)
+})
+
 test_that("CtwasResult: ctwasPosteriors aggregates rows tagged with run identity", {
     cr <- CtwasResult(
         gwasStudy = c("D1", "D1"),
@@ -300,6 +319,123 @@ test_that("a run splits into one element per cTWAS region", {
     )
     expect_equal(one$blockId, "chr2_1_1000")
     expect_s4_class(one, "CtwasResult")
+})
+
+# ===========================================================================
+# One set of group priors per run
+# ===========================================================================
+
+test_that("a run's rows must carry one set of group priors", {
+    run <- function(chrom, prior, method = "susie") {
+        gr <- GenomicRanges::GRanges(
+            chrom,
+            IRanges::IRanges(100L, width = 1L),
+            id = "g1",
+            susie_pip = 0.9
+        )
+        CtwasResult(
+            gwasStudy = "D1",
+            studyName = "Q1",
+            context = "brain",
+            method = method,
+            entry = list(CtwasResultEntry(
+                posteriors = gr,
+                groupPriors = list(group_prior = c(gene = prior))
+            ))
+        )
+    }
+    # Fitted chromosome by chromosome: one identity, two fits.
+    expect_error(
+        c(run("chr1", 0.01), run("chr2", 0.05)),
+        "\\(D1, Q1, brain, susie\\) carry different group priors"
+    )
+    # Under distinct identities they are two runs.
+    both <- c(run("chr1", 0.01), run("chr2", 0.05, method = "lasso"))
+    expect_equal(methodNames(both), c("susie", "lasso"))
+    # One fit's regions taken apart and put back together are still one run.
+    whole <- CtwasResult(
+        gwasStudy = "D1",
+        studyName = "Q1",
+        context = "brain",
+        method = "susie",
+        entry = list(.cr_twoRegionEntry())
+    )
+    expect_equal(length(c(whole[1L], whole[2L])), 2L)
+})
+
+test_that("ctwasGroupPriors() tabulates each run's priors once, by group", {
+    prior <- list(
+        group_prior = c(SNP = 1e-4, brain = 0.01),
+        group_prior_var = c(SNP = 10, brain = 20),
+        group_size = c(SNP = 5000, brain = 30),
+        converged = TRUE
+    )
+    cr <- CtwasResult(
+        gwasStudy = c("D1", "D1"),
+        studyName = c("Q1", "Q1"),
+        context = c("brain", "liver"),
+        method = c("susie", "susie"),
+        entry = list(.cr_entry(prior = prior), .cr_entry(ids = "g3", pip = 0.5))
+    )
+    tab <- ctwasGroupPriors(cr)
+    expect_s3_class(tab, "tbl_df")
+    expect_named(
+        tab,
+        c(
+            "gwasStudy",
+            "study",
+            "context",
+            "method",
+            "group",
+            "group_size",
+            "group_prior",
+            "group_prior_var"
+        )
+    )
+    # The liver run recorded no priors, so it adds no rows.
+    expect_equal(tab$context, c("brain", "brain"))
+    expect_equal(tab$group, c("SNP", "brain"))
+    expect_equal(tab$group_size, c(5000, 30))
+    expect_equal(tab$group_prior, c(1e-4, 0.01))
+    expect_equal(tab$group_prior_var, c(10, 20))
+    # No run with priors: no rows, the same columns.
+    expect_equal(ctwasGroupPriors(cr[2L]), tab[0L, ])
+    # A run over two regions is listed once; what it did not record is NA.
+    two <- CtwasResult(
+        gwasStudy = "D1",
+        studyName = "Q1",
+        context = "brain",
+        method = "susie",
+        entry = list(.cr_twoRegionEntry())
+    )
+    expect_equal(length(two), 2L)
+    expect_equal(
+        ctwasGroupPriors(two)[, c("group", "group_prior", "group_prior_var")],
+        tibble::tibble(
+            group = "gene",
+            group_prior = 0.01,
+            group_prior_var = NA_real_
+        )
+    )
+})
+
+test_that("ctwasGroupPriors() lists a joint run's shared priors per context", {
+    prior <- list(group_prior = c(SNP = 1e-4, brain = 0.01, liver = 0.02))
+    cr <- CtwasResult(
+        gwasStudy = c("D1", "D1"),
+        studyName = c("Q1", "Q1"),
+        context = c("brain", "liver"),
+        method = c("susie", "susie"),
+        entry = list(
+            .cr_entry(prior = prior),
+            .cr_entry(ids = "g3", pip = 0.5, prior = prior)
+        ),
+        jointContexts = c("brain,liver", "brain,liver")
+    )
+    tab <- ctwasGroupPriors(cr)
+    expect_equal(tab$context, rep(c("brain", "liver"), each = 3L))
+    expect_equal(unique(tab$jointContexts), "brain,liver")
+    expect_equal(tab$group_prior, rep(c(1e-4, 0.01, 0.02), 2L))
 })
 
 test_that("updateObject rebuilds a CtwasResult saved as a table of runs", {

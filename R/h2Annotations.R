@@ -41,24 +41,53 @@ setMethod(
             annotationMeta <- tibble(
                 name = annotNames,
                 tier = rep("candidate", nAnnots),
-                type = .readAnnotTypes(path)
+                type = .readAnnotTypes(path, annotMat)
             )
         }
-        AnnotationMatrix(annotMat, snpRanges, annotationMeta, genome)
+        AnnotationMatrix(
+            .annotStored(annotMat),
+            snpRanges,
+            annotationMeta,
+            genome
+        )
     }
 )
 
-# Auto-detected annotation types (continuous for BigWig, else binary). Unnamed
-# so the tibble column carries no element names (tibble, unlike data.frame,
-# would otherwise keep the paths' names on the column).
+# Auto-detected annotation types: continuous for a BigWig signal, binary for
+# BED intervals, and for an LDSC .annot column whichever its values say (0 / 1
+# is binary). Unnamed so the tibble column carries no element names (tibble,
+# unlike data.frame, would otherwise keep the paths' names on the column).
 # @noRd
-.readAnnotTypes <- function(paths) {
-    unname(map_chr(paths, .annotType))
+.readAnnotTypes <- function(paths, annotMat) {
+    unname(map2_chr(paths, seq_along(paths), .annotType, annotMat = annotMat))
 }
 
 # @noRd
-.annotType <- function(p) {
-    if (.annotDetectFormat(p) == "bigwig") "continuous" else "binary"
+.annotType <- function(p, j, annotMat) {
+    fmt <- .annotDetectFormat(p)
+    if (fmt == "bigwig") {
+        return("continuous")
+    }
+    values <- annotMat[, j]
+    if (fmt == "bed" || all(is_in(values, c(0, 1)) | is.na(values))) {
+        return("binary")
+    }
+    "continuous"
+}
+
+# `A`, the variant x annotation matrix, as a sparse dgCMatrix when that is
+# smaller than the dense matrix -- as binary annotations, mostly zero, are --
+# and as it is otherwise. A sparse matrix costs 12 bytes a stored value (a
+# double and its row index) plus 4 a column; a dense one 4 a cell when it is
+# integer or logical and 8 when it is double.
+# @noRd
+.annotStored <- function(A) {
+    stored <- sum(A != 0 | is.na(A))
+    cellBytes <- if (is.integer(A) || is.logical(A)) 4 else 8
+    if (12 * stored + 4 * (ncol(A) + 1) >= cellBytes * length(A)) {
+        return(A)
+    }
+    methods::as(A, "CsparseMatrix")
 }
 
 # @noRd

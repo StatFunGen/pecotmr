@@ -3,60 +3,41 @@
 \docType{class}
 \name{H2Estimate-class}
 \alias{H2Estimate-class}
-\title{Heritability Estimate}
+\title{Heritability Estimates}
 \description{
-Container for univariate heritability estimation results. Holds
-  global, local, and annotation-stratified estimates.
+Heritability estimates from \code{\link{estimateH2}}, one row
+  each, keyed by the identity tuple \code{(study, context, trait,
+  method)}: a genome-wide estimate from GWAS summary statistics, one per
+  study, whose \code{context} and \code{trait} are \code{NA}, or a trait's
+  cis estimate from QTL summary statistics. A cis estimate's element is the
+  window it covers. A genome-wide estimate covers its whole LD reference,
+  more chromosomes than an element may span, so its element holds no
+  ranges.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{estimate}}{Numeric, global SNP heritability estimate.}
-
-\item{\code{estimateSe}}{Numeric, standard error of global h2.}
-
-\item{\code{intercept}}{Numeric, confounding intercept estimate (NA if method does
-not estimate one).}
-
-\item{\code{interceptSe}}{Numeric, SE of intercept.}
-
-\item{\code{localBlocks}}{A \code{data.frame} with per-block local
-heritability estimates
-(columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}). NULL if
-\code{local = FALSE}.}
-
-\item{\code{enrichment}}{A \code{data.frame} of per-annotation enrichment results,
-NULL if unstratified. Two shapes are possible, depending on which route
-produced the estimate:
-\describe{
-  \item{partitioned}{enrichment of the user's baseline annotations
-    from their partitioned heritabilities \eqn{A'A\tau}, with
-    columns \code{annotation}, \code{tau}, \code{tauSe},
-    \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
-    \code{propH2}, \code{propSnps}.}
-  \item{score test}{the score test over the tested (candidate)
-    annotations, with columns \code{annotation}, \code{scoreZ},
-    \code{scoreP}.}
-}}
-
-\item{\code{annotationJackknifeCoefs}}{A numeric matrix
-(nBlocks x n_annotations) of per-block
-jackknife tau values. Required for Gazal tauStar standardization
-downstream. NULL if not available (e.g., unstratified analysis).}
-
-\item{\code{scoreStats}}{A list with score statistics for candidate annotations,
-suitable for input to \code{susieRss}. Contains:
-\describe{
-  \item{z}{Numeric vector of z-scores for each candidate annotation}
-  \item{R}{Correlation matrix of the score statistics}
-  \item{annotationNames}{Character vector of candidate annotation names}
+\details{
+Besides the identity, \code{mcols()} hold each estimate's values:
+  \describe{
+    \item{\code{h2}, \code{h2_se}}{The heritability and its standard
+      error.}
+    \item{\code{intercept}, \code{intercept_se}}{The fitted intercept and
+      its standard error.}
+    \item{\code{p_value}}{The test of no heritability.}
+    \item{\code{n_snps}}{The variants the estimate used.}
+    \item{\code{n_components}}{The LD components or eigenpairs a cis
+      estimate used.}
+    \item{\code{scale}}{FastHer's fitted phenotypic variance relative to
+      its standardized value.}
+    \item{\code{enrichment}}{The per-annotation enrichment table of a
+      stratified estimate (\code{\link{stratifiedHeritabilityEnrichment}}).}
+    \item{\code{jackknife}}{The per-block jackknife matrix of the
+      annotation coefficients (\code{\link{annotationJackknifeCoefs}}).}
+    \item{\code{score_stats}}{The candidate annotations' score statistics
+      (\code{\link{scoreStats}}).}
+  }
+  A value a method does not report is \code{NA}, and an object it does not
+  produce is \code{NULL}. The accessors return one value per estimate, in
+  row order.
 }
-NULL if no candidate annotations provided.}
-
-\item{\code{method}}{Character string identifying the estimation method.}
-
-\item{\code{nSnps}}{Integer, number of SNPs used in estimation.}
-
-\item{\code{traitName}}{Character string for trait identifier.}
-}}
-
+\seealso{
+\code{\link{estimateH2}}, which builds one.
+}

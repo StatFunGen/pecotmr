@@ -28,6 +28,21 @@ test_that("as(row, 'GRanges') is the element a collection stores", {
 # adjustPips: renormalize PIPs on a kept subset of variants
 # =============================================================================
 
+test_that("fold fits become fold weights whatever each fold kept", {
+    noFolds <- list(metrics = c(rsq = 0.2))
+    expect_identical(pecotmr:::.cvPayloadFoldWeights(noFolds, "v1"), noFolds)
+    expect_null(pecotmr:::.foldFitWeights(NULL))
+    coef <- matrix(c(0.5, -0.2), 2L, 1L, dimnames = list(c("v1", "v2"), "y"))
+    expect_identical(
+        pecotmr:::.foldFitWeights(list(coef = coef)),
+        c(v1 = 0.5, v2 = -0.2)
+    )
+    expect_identical(
+        pecotmr:::.alignFoldWeights(NULL, c("v1", "v2")),
+        c(NA_real_, NA_real_)
+    )
+})
+
 test_that("adjustPips renormalizes PIPs on a kept FineMappingRow subset", {
     vids <- paste0("chr1:", 1:6, ":A:G")
     entry <- .makeAdjustEntry(vids)
@@ -325,11 +340,53 @@ test_that("FineMappingRow: adjustPips subsets mu2 and recomputes posterior_sd", 
     expect_s4_class(adj, "FineMappingRow")
     # mu2 carried through the variant subsetting alongside lbf/mu.
     expect_equal(ncol(susieFit(adj)$mu2), 3L)
-    # posterior_mean / posterior_sd recomputed from the subset alpha/mu/mu2.
-    expect_equal(nrow(.fmrPartsTopLoci(adj)), 3L)
-    expect_true("posterior_sd" %in% names(.fmrPartsTopLoci(adj)))
-    expect_equal(length(.fmrPartsTopLoci(adj)$posterior_sd), 3L)
-    expect_true(all(.fmrPartsTopLoci(adj)$posterior_sd >= 0))
+    # posterior_mean / posterior_sd recomputed from the subset alpha/mu/mu2,
+    # the single effects' variances adding.
+    tl <- .fmrPartsTopLoci(adj)
+    sub <- susieFit(adj)
+    expect_equal(nrow(tl), 3L)
+    expect_equal(tl$posterior_mean, as.numeric(colSums(sub$alpha * sub$mu)))
+    expect_equal(
+        tl$posterior_sd,
+        as.numeric(sqrt(colSums(
+            sub$alpha * sub$mu2 - (sub$alpha * sub$mu)^2
+        )))
+    )
+})
+
+test_that("adjustPips reports the posterior on topLoci's scale", {
+    # mu and mu2 are stored for the standardized X, and buildTopLoci() divides
+    # by X_column_scale_factors. The recomputation did not, so adjusted rows
+    # switched to standardized units.
+    vids <- paste0("chr1:", 1:4, ":A:G")
+    alpha <- matrix(c(0.7, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 0.1), 2L, byrow = TRUE)
+    mu <- matrix(c(1, 2, 3, 4, -1, -2, -3, -4), 2L, byrow = TRUE)
+    mu2 <- mu^2 + 0.5
+    sf <- c(2, 4, 5, 10)
+    entry <- FineMappingRow(
+        variantIds = vids,
+        susieFit = list(
+            pip = as.numeric(1 - apply(1 - alpha, 2, prod)),
+            alpha = alpha,
+            mu = mu,
+            mu2 = mu2,
+            X_column_scale_factors = sf
+        ),
+        topLoci = data.frame(variant_id = vids, pip = 0.5)
+    )
+    tl <- .fmrPartsTopLoci(adjustPips(entry, vids[1:3]))
+    sub <- susieFit(adjustPips(entry, vids[1:3]))
+    expect_equal(
+        tl$posterior_mean,
+        as.numeric(colSums(sub$alpha * sub$mu) / sf[1:3])
+    )
+    expect_equal(
+        tl$posterior_sd,
+        as.numeric(
+            sqrt(colSums(sub$alpha * sub$mu2 - (sub$alpha * sub$mu)^2)) /
+                sf[1:3]
+        )
+    )
 })
 
 test_that("credibleSets / topLoci minPurity filters CS by purity, independent of coverage + pip", {
@@ -1193,6 +1250,174 @@ test_that("topLoci must list the variants in the same order", {
 })
 
 # ===========================================================================
+# Fold weights: the row holds their variant ids once
+# ===========================================================================
+
+.fmr_cv <- function(ids, folds = 2L) {
+    fw <- matrix(
+        seq_len(length(ids) * folds) / 10,
+        length(ids),
+        folds,
+        dimnames = list(ids, str_c("fold_", seq_len(folds)))
+    )
+    list(
+        samplePartition = data.frame(Sample = "s1", Fold = 1L),
+        foldWeights = fw
+    )
+}
+
+.fmr_tl <- function(ids) {
+    data.frame(variant_id = ids, pip = rep(0.1, length(ids)))
+}
+
+test_that("a row stores its own fold weights unnamed; cvResult() names them", {
+    vids <- .fmr_vids(3L)
+    cv <- .fmr_cv(vids)
+    row <- FineMappingRow(vids, NULL, .fmr_tl(vids), cvResult = cv)
+    expect_null(rownames(pecotmr:::.fmRowCvStored(row)$foldWeights))
+    expect_identical(cvResult(row), cv)
+    # Weights on other variants keep their ids: a cross-validation-only row
+    # has no variants to name them by, and a row in another order cannot
+    # name them positionally.
+    cvOnly <- pecotmr:::.fmCvOnlyRow(cv)
+    expect_identical(pecotmr:::.fmRowCvStored(cvOnly), cv)
+    expect_identical(cvResult(cvOnly), cv)
+    swapped <- FineMappingRow(rev(vids), NULL, .fmr_tl(rev(vids)), cv)
+    expect_identical(cvResult(swapped), cv)
+    # A payload of any other shape passes through.
+    other <- FineMappingRow(vids, NULL, .fmr_tl(vids), list(rsq = 0.5))
+    expect_identical(cvResult(other), list(rsq = 0.5))
+})
+
+test_that("a merged row names each region's fold weights by its variants", {
+    a <- .fmr_vids(3L)[1:2]
+    b <- .fmr_vids(3L)[3L]
+    rows <- list(
+        FineMappingRow(a, NULL, .fmr_tl(a), cvResult = .fmr_cv(a)),
+        FineMappingRow(b, NULL, .fmr_tl(b), cvResult = .fmr_cv(b))
+    )
+    merged <- pecotmr:::.fmMergeEntries(rows)
+    stored <- pecotmr:::.fmRowCvStored(merged)
+    expect_named(stored, c("region1", "region2"))
+    expect_null(rownames(stored$region1$foldWeights))
+    expect_null(rownames(stored$region2$foldWeights))
+    expect_identical(
+        cvResult(merged),
+        list(region1 = .fmr_cv(a), region2 = .fmr_cv(b))
+    )
+    # A region without CV leaves the others unable to say whose variants
+    # they cover, so they keep their ids.
+    rows[[2L]] <- FineMappingRow(b, NULL, .fmr_tl(b))
+    partial <- pecotmr:::.fmMergeEntries(rows)
+    expect_identical(
+        pecotmr:::.fmRowCvStored(partial),
+        list(region1 = .fmr_cv(a), region2 = NULL)
+    )
+    expect_identical(cvResult(partial), pecotmr:::.fmRowCvStored(partial))
+})
+
+# ===========================================================================
+# topLoci in a collection: stored compact, handed out plain
+# ===========================================================================
+
+# A topLoci table in the order the fine-mapping post-processor writes it.
+.fmr_fullTl <- function(ids, p = NULL) {
+    z <- seq(-2, 2, length.out = length(ids))
+    tibble::tibble(
+        variant_id = ids,
+        N = rep(100, length(ids)),
+        marginal_z = z,
+        marginal_z_supplied = rep(FALSE, length(ids)),
+        marginal_p = p %||% pecotmr:::.fmDerivedP(z),
+        pip = seq(0.1, 0.5, length.out = length(ids)),
+        cs_95 = c("susie_1", rep("susie_0", length(ids) - 1L)),
+        method = rep("susie", length(ids))
+    )
+}
+
+.fmr_tlRes <- function(tl) {
+    ids <- tl$variant_id
+    QtlFineMappingResult(
+        studyName = "S",
+        context = "C",
+        trait = "T",
+        method = "susie",
+        entry = list(FineMappingRow(ids, list(pip = tl$pip), tl))
+    )
+}
+
+test_that("a collection stores topLoci compactly and hands it back plain", {
+    tl <- .fmr_fullTl(.fmr_vids(6L))
+    res <- .fmr_tlRes(tl)
+    stored <- mcols(unlist(res, use.names = FALSE))
+    # marginal_p is the p marginal_z gives, and the pip the fit's, so both
+    # are left out ...
+    expect_false(any(is_in(c("marginal_p", "pip"), colnames(stored))))
+    # ... and the repeating columns are run-length encoded, the rest plain.
+    expect_s4_class(stored$N, "Rle")
+    expect_s4_class(stored$cs_95, "Rle")
+    expect_s4_class(stored$method, "Rle")
+    expect_true(is.numeric(stored$marginal_z))
+    # The row handed out holds them plain, marginal_p back in its place.
+    back <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, 1L))
+    expect_identical(back[names(tl)], tl)
+    expect_identical(
+        names(back)[1:8],
+        c(
+            "variant_id",
+            "chrom",
+            "pos",
+            "A1",
+            "A2",
+            "N",
+            "marginal_z",
+            "marginal_z_supplied"
+        )
+    )
+    expect_equal(match("marginal_p", names(back)), 9L)
+})
+
+test_that("a supplied marginal_p that differs from the derived one is kept", {
+    ids <- .fmr_vids(4L)
+    p <- c(0.01, 0.2, 0.5, 0.9)
+    res <- .fmr_tlRes(.fmr_fullTl(ids, p = p))
+    stored <- mcols(unlist(res, use.names = FALSE))
+    expect_equal(as.vector(stored$marginal_p), p)
+    back <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, 1L))
+    expect_equal(back$marginal_p, p)
+})
+
+test_that("marginal_p out of its place, or without marginal_z, is kept", {
+    md <- S4Vectors::DataFrame(
+        marginal_p = 0.5,
+        marginal_z = 0,
+        marginal_z_supplied = FALSE
+    )
+    expect_identical(pecotmr:::.fmDropDerivedP(md), md)
+    noZ <- S4Vectors::DataFrame(marginal_p = 0.5)
+    expect_identical(pecotmr:::.fmDropDerivedP(noZ), noZ)
+    expect_true(is.na(pecotmr:::.fmDerivedPPosition("pip")))
+    # Without marginal_z_supplied, marginal_p sits right after marginal_z.
+    expect_equal(
+        pecotmr:::.fmDerivedPPosition(c("N", "marginal_z", "pip")),
+        3L
+    )
+})
+
+test_that("updateObject() stores a saved collection's topLoci compactly", {
+    res <- .fmr_tlRes(.fmr_fullTl(.fmr_vids(6L)))
+    # As saved before collections stored topLoci compactly.
+    flat <- unlist(res, use.names = FALSE)
+    plain <- pecotmr:::.fmPlainElement(flat)
+    saved <- res
+    attr(saved, "unlistData") <- plain
+    expect_false(methods::is(mcols(unlist(saved))$N, "Rle"))
+    up <- updateObject(saved)
+    expect_identical(up, res)
+    expect_identical(updateObject(up), up)
+})
+
+# ===========================================================================
 # adjustPips: fits this code cannot slice safely
 # ===========================================================================
 
@@ -1321,6 +1546,60 @@ test_that("the summary carries the fit's true (gapped) effect index", {
     big <- s[s$n_variants == 3L, , drop = FALSE]
     expect_equal(big$effect_id, "L2")
     expect_equal(big$cs, "susie_2")
+})
+
+test_that("a trimmed fit's summary reads each set's own effect", {
+    # Trimming keeps the non-null effects, so effects 1 and 3 of three sit on
+    # rows 1 and 2. Looking V and the log BF up by effect index read past the
+    # end for L3, and would have read L3's row for an L2.
+    vn <- str_c("chr1:", (1:4) * 100, ":A:G")
+    fit <- list(
+        pip = c(0.6, 0.3, 0.05, 0.05),
+        alpha = matrix(
+            c(0.7, 0.1, 0.1, 0.1, 0.1, 0.7, 0.1, 0.1),
+            2L,
+            byrow = TRUE,
+            dimnames = list(NULL, vn)
+        ),
+        lbf_variable = matrix(c(3, 0, 0, 0, 0, 2, 0, 0), 2L, byrow = TRUE),
+        V = c(0.4, 0.2),
+        effect_index = c(1L, 3L),
+        sets = list(
+            cs = list(L1 = 1L, L3 = 2L),
+            cs_index = c(1L, 3L),
+            requested_coverage = 0.95
+        )
+    )
+    class(fit) <- "susie"
+    tl <- data.frame(
+        variant_id = vn,
+        pip = fit$pip,
+        logBF = c(3, 2, 0, 0),
+        cs_95 = c("susie_1", "susie_3", "susie_0", "susie_0")
+    )
+    s <- .csSummaryFit(tl, fit, 0.95)
+    s <- s[order(s$effect_id), , drop = FALSE]
+    expect_equal(s$effect_id, c("L1", "L3"))
+    expect_equal(s$V, c(0.4, 0.2))
+    expect_equal(
+        s$cs_log_bf,
+        c(log(mean(exp(c(3, 0, 0, 0)))), log(mean(exp(c(0, 2, 0, 0)))))
+    )
+})
+
+test_that("adjustPips names a trimmed fit's rebuilt sets by effect", {
+    # The rebuilt sets took their L<k> names and cs_index from varAlpha's
+    # rows, so on a trimmed fit holding effects 1 and 3 an L3 came back as
+    # L2 -- relabelling topLoci's susie_3 as susie_2.
+    varAlpha <- matrix(c(0.9, 0.1, 0.1, 0.9), 2L, byrow = TRUE)
+    sets <- .adjustPipsCsAtCoverage(varAlpha, c(0.4, 0.2), 0.8, c(1L, 3L))
+    expect_equal(names(sets$cs), c("L1", "L3"))
+    expect_equal(sets$cs_index, c(1L, 3L))
+    fit <- list(V = c(0.4, 0.2), effect_index = c(1L, 3L))
+    expect_equal(
+        .adjustPipsCsLabels(varAlpha, fit$V, "cs_80", "susie", 2L, c(1L, 3L)),
+        c("susie_1", "susie_3")
+    )
 })
 
 test_that("a fit with no stored sets falls back to the per-variant column", {
@@ -1754,11 +2033,13 @@ test_that("a rebuilt row stores no credible-set column its fit reproduces", {
     expect_true(all(.fpd_csColumns %in% .fmStoredColumns(x)))
     new <- .fmRebuildExample(x)
     expect_false(any(.fpd_csColumns %in% .fmStoredColumns(new)))
-    # The row as GRanges derives them back, in buildTopLoci()'s order.
+    # The row as GRanges derives them back, in buildTopLoci()'s order: the
+    # order the example's own row hands them out in.
     restored <- as(.fmExampleRow(x, 1L), "GRanges")
+    held <- as(pecotmr:::.fmrRowParts(x, 1L), "GRanges")
     expect_identical(
         colnames(S4Vectors::mcols(restored)),
-        colnames(S4Vectors::mcols(x[[1L]]))
+        colnames(S4Vectors::mcols(held))
     )
 })
 

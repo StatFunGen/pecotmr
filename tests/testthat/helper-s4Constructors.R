@@ -225,7 +225,7 @@
             A1 = "A",
             A2 = "G",
             P = pv,
-            af = c(0.30, 0.20, 0.005, 0.40), # v3 fails MAF 0.01
+            AF = c(0.30, 0.20, 0.005, 0.40), # v3 fails MAF 0.01
             tss_distance = c(0L, 500L, 900000L, 2000000L), # v4 outside 1Mb cis
             tes_distance = c(0L, 500L, 900000L, 2000000L),
             qvalue = c(pBeta[i] / 5, 0.30, 0.60, 0.90)

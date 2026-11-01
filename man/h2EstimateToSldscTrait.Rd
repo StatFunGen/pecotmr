@@ -7,8 +7,10 @@
 h2EstimateToSldscTrait(h2Est)
 }
 \arguments{
-\item{h2Est}{An \code{H2Estimate} object with enrichment and
-\code{annotationJackknifeCoefs}.}
+\item{h2Est}{An \code{H2Estimate} holding one stratified estimate, with
+its enrichment table and \code{annotationJackknifeCoefs}. Select one
+from several by its identity columns, e.g.
+\code{x[x$study == "trait1"]}.}
 }
 \value{
 A named list matching the format of \code{\link{readSldscTrait}}:

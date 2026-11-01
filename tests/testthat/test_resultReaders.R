@@ -203,16 +203,16 @@ test_that("TWAS weights round-trip through a published BED", {
         "fine-mapping-derived"
     )
     back <- readTwasWeights(path)
-    # Fine-mapping-derived rows are skipped on export, so fewer rows come
-    # back than went out -- that is the writer's rule, not a reader loss.
-    expect_lt(nrow(back), nrow(twasWeightsExample))
-    md <- S4Vectors::mcols(back)
-    for (i in seq_len(nrow(back))) {
+    # Fine-mapping-derived entries are skipped on export, so fewer come back
+    # than went out -- that is the writer's rule, not a reader loss.
+    cells <- .twasCells(back)
+    expect_lt(nrow(cells), nrow(.twasCells(twasWeightsExample)))
+    for (i in seq_len(nrow(cells))) {
         key <- list(
-            studyName = as.character(md$study[[i]]),
-            context = as.character(md$context[[i]]),
-            trait = as.character(md$trait[[i]]),
-            method = as.character(md$method[[i]])
+            studyName = cells$study[[i]],
+            context = cells$context[[i]],
+            trait = cells$trait[[i]],
+            method = cells$method[[i]]
         )
         was <- exec(resolveWeights, twasWeightsExample, !!!key)
         now <- exec(resolveWeights, back, !!!key)
@@ -223,15 +223,8 @@ test_that("TWAS weights round-trip through a published BED", {
             tolerance = 1e-10
         )
     }
-    expect_equal(
-        genomicRegion(back),
-        genomicRegion(twasWeightsExample)[
-            match(
-                as.character(md$method),
-                as.character(S4Vectors::mcols(twasWeightsExample)$method)
-            )
-        ]
-    )
+    # One gene: its window survives the round trip.
+    expect_equal(genomicRegion(back), genomicRegion(twasWeightsExample))
 })
 
 # ---- multi-row tables -----------------------------------------------------
