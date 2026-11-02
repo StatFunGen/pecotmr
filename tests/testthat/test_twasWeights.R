@@ -239,7 +239,7 @@ test_that("twasPredict: names without _weights suffix are kept unchanged", {
     expect_equal(names(res), "custom_method")
 })
 
-test_that("twasPredict: multi-column weights produce multi-column predictions", {
+test_that("twasPredict: multi-column weights give multi-column predictions", {
     set.seed(42)
     n <- 15
     p <- 5
@@ -450,7 +450,7 @@ test_that("twasWeightsCv: character weightMethods are accepted", {
 # CV with real lassoWeights (integration test)
 # ---------------------------------------------------------------------------
 
-test_that("twasWeightsCv: basic CV with lassoWeights produces correct metrics structure", {
+test_that("twasWeightsCv with lassoWeights gives the metrics' structure", {
     skip_if_not_installed("glmnet")
     d <- makeData(n = 50, p = 10)
 
@@ -606,7 +606,7 @@ test_that("learnTwasWeights runs susie + susieInf from supplied fits", {
 })
 
 
-test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", {
+test_that("twasWeightsCv: NA in Y drops those samples from the metrics", {
     set.seed(42)
     n <- 30
     p <- 5
@@ -618,7 +618,8 @@ test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", 
     colnames(Y) <- "outcome"
     Y[c(3, 11, 17), 1] <- NA # introduce NAs
 
-    # Mock to return non-zero (so prediction has nonzero variance and lm_fit runs)
+    # Mock to return non-zero (so prediction has nonzero variance and lm_fit
+    # runs)
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) {
             w <- rep(0, ncol(X))
@@ -672,7 +673,8 @@ test_that("twasWeightsCv: dataDrivenPriorMatricesCv is plumbed through", {
     )
     # mrmashWeights mock should have been called and received the per-fold prior
     # matrix under the camelCase name that actually binds mrmashWrapper's
-    # `dataDrivenPriorMatrices` argument (the snake_case form was a latent no-op).
+    # `dataDrivenPriorMatrices` argument (the snake_case form was a latent
+    # no-op).
     expect_true(length(captured_args) >= 1)
     expect_true(any(map_lgl(
         captured_args,
@@ -1027,7 +1029,7 @@ test_that("show.TwasWeights reports ldReference when present", {
 #
 # ===========================================================================
 
-test_that(".normalizeCvFolds: list cvFolds + samplePartition are mutually exclusive", {
+test_that(".normalizeCvFolds: a cvFolds list excludes samplePartition", {
     expect_error(
         pecotmr:::.normalizeCvFolds(
             cvFolds = list(c("s1", "s2"), c("s3", "s4")),
@@ -1037,7 +1039,7 @@ test_that(".normalizeCvFolds: list cvFolds + samplePartition are mutually exclus
     )
 })
 
-test_that(".normalizeCvFolds: samplePartition must have Sample and Fold columns", {
+test_that(".normalizeCvFolds: samplePartition needs Sample and Fold", {
     expect_error(
         pecotmr:::.normalizeCvFolds(samplePartition = data.frame(a = 1, b = 2)),
         "must have columns"
@@ -1143,7 +1145,7 @@ test_that(".normalizeCvFolds: character fold-id vectors are used as-is", {
     expect_equal(nrow(res$samplePartition), 4L)
 })
 
-test_that(".normalizeCvFolds: integer cvFolds returns NULL partition + nFolds = k", {
+test_that(".normalizeCvFolds: integer cvFolds gives no partition, nFolds k", {
     res <- pecotmr:::.normalizeCvFolds(cvFolds = 5)
     expect_null(res$samplePartition)
     expect_equal(res$nFolds, 5L)
@@ -1191,7 +1193,7 @@ test_that("TwasWeights: joint* column length must match study", {
     )
 })
 
-test_that("TwasWeights: weightStandardized/weightsDataType/variantIds delegate to the entry", {
+test_that("TwasWeights row accessors delegate to the entry", {
     e1 <- TwasWeightsRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
@@ -1338,7 +1340,7 @@ test_that("TwasWeights: validity does not recurse on key subset (#546)", {
 #
 # ===========================================================================
 
-test_that(".resolveMethodFunction: unresolvable key falls back to the key itself", {
+test_that(".resolveMethodFunction returns an unresolvable key as it is", {
     expect_equal(
         pecotmr:::.resolveMethodFunction("no_such_fn_xyz"),
         "no_such_fn_xyz"
@@ -1351,7 +1353,7 @@ test_that(".resolveMethodFunction: unresolvable key falls back to the key itself
 #
 # ===========================================================================
 
-test_that(".prepareSusieWeightMethods writes supplied fits onto the method args", {
+test_that(".prepareSusieWeightMethods puts supplied fits in the method args", {
     infFit <- makeFakeSusieFit(p = 8, maxNumSingleEffects = 3, inf = TRUE)
     susieFit <- makeFakeSusieFit(p = 8, maxNumSingleEffects = 5)
 
@@ -1472,7 +1474,7 @@ test_that("twasWeightsCv forwards fitRetention to a fitter that takes it", {
     )))
 })
 
-test_that("twasWeightsCv: univariate fitter runs under verbose=2 (no quiet wrapper)", {
+test_that("twasWeightsCv runs a univariate fitter unquieted at verbose = 2", {
     d <- makeData(n = 30, p = 6)
     local_mocked_bindings(
         lassoWeights = function(X, y, ...) {
@@ -2636,7 +2638,7 @@ test_that("estimateSparsity: legacy list input reads attr(.,'fit')$pi", {
     expect_equal(estimateSparsity(weightResults), 1 - 0.6, tolerance = 1e-12)
 })
 
-test_that("estimateSparsity: TwasWeights collection input reads from the mrash entry", {
+test_that("estimateSparsity reads a TwasWeights collection's mrash entry", {
     entry <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         weights = c(0.1, 0, 0.3),
@@ -2668,7 +2670,7 @@ test_that("estimateSparsity: TwasWeights without mrash entry errors", {
     )
 })
 
-test_that("estimateSparsity: TwasWeights with mrash entry but no fit$pi errors", {
+test_that("estimateSparsity errors on an mrash entry without fit$pi", {
     entry <- TwasWeightsRow(
         variantIds = c("chr1:100:A:G"),
         weights = c(0.1),

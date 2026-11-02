@@ -183,7 +183,7 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
 # twasWeightsPipeline(QtlDataset)
 # ===========================================================================
 
-test_that("twasWeightsPipeline(QtlDataset): runs end-to-end with mocked solvers", {
+test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
     mocks <- c(
         list(.handleDosage = .tp_mockExtractor()),
@@ -322,7 +322,7 @@ test_that("twasWeightsPipeline refuses a backend it cannot honour", {
     )
 })
 
-test_that("twasWeightsPipeline(QtlDataset): mafCutoff/xvarCutoff overrides tighten the variant set", {
+test_that("mafCutoff and xvarCutoff overrides tighten the TWAS variant set", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     exec(
         local_mocked_bindings,
@@ -689,7 +689,7 @@ test_that("twasWeightsPipeline(QtlSumStats) checks backend too", {
     )
 }
 
-test_that("twasWeightsPipeline(QtlSumStats): runs end-to-end with mocked solvers", {
+test_that("twasWeightsPipeline(QtlSumStats) runs end to end, mocked solvers", {
     ss <- .tp_makeQtlSumStats()
     mocks <- c(
         list(.handleDosage = .tp_mockExtractor()),
@@ -724,7 +724,7 @@ test_that("twasWeightsPipeline(QtlSumStats): individual-only method rejected", {
     )
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): empty contexts/trait filter errors", {
+test_that("twasWeightsPipeline(QtlSumStats) errors on an empty filter", {
     ss <- .tp_makeQtlSumStats()
     expect_error(
         twasWeightsPipeline(ss, methods = "lasso", traitId = "ghost"),
@@ -737,7 +737,7 @@ test_that("twasWeightsPipeline(QtlSumStats): empty contexts/trait filter errors"
     )
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): per-method failure surfaces as warning + skip", {
+test_that("sumstat TWAS: a method's failure warns and is skipped", {
     ss <- .tp_makeQtlSumStats()
     mocks <- c(
         list(.handleDosage = .tp_mockExtractor()),
@@ -835,7 +835,7 @@ test_that("gate: fsusie now has a TWAS-weight extractor (accepted with FMR)", {
     )
 })
 
-test_that("gate: fsusie on QtlSumStats delegates to .fmCheckMethodCapabilities", {
+test_that("gate: fsusie on QtlSumStats goes to .fmCheckMethodCapabilities", {
     ss <- .tp_makeQtlSumStats()
     fmr <- .tp_makeStubFineMappingResult(
         studyName = "s1",
@@ -909,7 +909,7 @@ test_that("gate: QtlDataset + susie + fineMappingResult threads the susieFit", {
     expect_true(sawFit)
 })
 
-test_that("gate: QtlSumStats + susie + fineMappingResult threads the susieRssFit", {
+test_that("gate: susie with a fineMappingResult passes susieRssFit", {
     ss <- .tp_makeQtlSumStats()
     fmr <- .tp_makeStubFineMappingResult(
         studyName = "s1",
@@ -947,7 +947,7 @@ test_that("gate: QtlSumStats + susie + fineMappingResult threads the susieRssFit
     expect_equal(fitsSeen, 1L)
 })
 
-test_that("gate: QtlSumStats + susieAsh + fineMappingResult threads the susieAshRssFit", {
+test_that("gate: susieAsh with a fineMappingResult passes susieAshRssFit", {
     ss <- .tp_makeQtlSumStats()
     fmr <- .tp_makeStubFineMappingResult(
         studyName = "s1",
@@ -1067,7 +1067,7 @@ test_that("twasWeightsPipeline(QtlDataset): mvsusie gives a row per context", {
     expect_equal(mvCalls, 1L)
 })
 
-test_that("twasWeightsPipeline(QtlDataset): mr.mash multivariate path with 2 traits x 2 contexts", {
+test_that("mr.mash multivariate TWAS with 2 traits x 2 contexts", {
     qd <- .tp_makeQtlDataset(
         contexts = c("brain", "liver"),
         traits = c("ENSG_A", "ENSG_B")
@@ -1103,7 +1103,7 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash multivariate path with 2 tra
     expect_setequal(methodNames(res), "mrmash")
 })
 
-test_that("twasWeightsPipeline(QtlDataset): mr.mash retains its fit parts in the fits slot", {
+test_that("mr.mash TWAS keeps its fit parts in the fits slot", {
     # The multivariate dispatch retains fits so the mr.mash fit
     # parts (the shared fit fineMappingPipeline consumes to build the mvSuSiE
     # prior) land on the entry's `fits` slot.
@@ -1198,7 +1198,7 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash retains its fit parts in the
     )
 }
 
-test_that("twasWeightsPipeline(QtlSumStats): mvsusie multivariate path returns one row per context", {
+test_that("sumstat mvsusie TWAS returns one row per context", {
     ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
     fmr <- .tp_makeStubFineMappingResult(
         studyName = "s1",
@@ -1252,7 +1252,7 @@ test_that("twasWeightsPipeline(QtlSumStats): mvsusie multivariate path returns o
     expect_true(shapesSeen[[1L]]$sawFit)
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): mr.mash multivariate solver failure surfaces as warning + empty result", {
+test_that("sumstat mr.mash TWAS: a solver failure warns, result empty", {
     ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
     mocks <- list(
         .handleDosage = .tp_mockExtractor(),
@@ -1286,7 +1286,7 @@ test_that("twasWeightsPipeline(QtlSumStats): mr.mash multivariate solver failure
     )
 }
 
-test_that("twasWeightsPipeline(QtlDataset): full cache hit avoids all weight fitting", {
+test_that("twasWeightsPipeline: a full cache hit fits no weights", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     cached <- TwasWeights(
         studyName = "study1",
@@ -1321,7 +1321,7 @@ test_that("twasWeightsPipeline(QtlDataset): full cache hit avoids all weight fit
     expect_equal(fits, 0L) # the cached entry short-circuited the fit
 })
 
-test_that("twasWeightsPipeline(QtlDataset): partial cache hit fits only missing methods", {
+test_that("twasWeightsPipeline: a partial cache hit fits only the rest", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     # Cache covers `lasso` but `enet` is missing -> only enetWeights is called.
     cached <- TwasWeights(
@@ -1643,7 +1643,7 @@ test_that("ensembleWeights: multi-dataset with different methods errors", {
 # alternatives" below.
 # ===========================================================================
 
-test_that("ensembleWeights: does not return ensemble_performance (in-sample R^2 omitted)", {
+test_that("ensembleWeights omits ensemble_performance (in-sample R^2)", {
     cv <- makeCvResult(n = 300, K = 5, seed = 13)
     res <- ensembleWeights(cv, Y = cv$.y)
 
@@ -1651,7 +1651,7 @@ test_that("ensembleWeights: does not return ensemble_performance (in-sample R^2 
     expect_false("ensemble_performance" %in% names(res))
 })
 
-test_that("ensembleWeights: per-method R^2 values are sensible (between 0 and 1)", {
+test_that("ensembleWeights: per-method R^2 values lie between 0 and 1", {
     cv <- makeCvResult(n = 200, K = 4, seed = 21)
     res <- ensembleWeights(cv, Y = cv$.y)
 
@@ -1744,7 +1744,7 @@ test_that("ensembleWeights: all zero-variance methods errors", {
 #  Weight combination (sum of zeta_k * w_k: see "Solver alternatives")
 # ===========================================================================
 
-test_that("ensembleWeights: NULL twas_weight_list returns NULL ensembleTwasWeights", {
+test_that("ensembleWeights: a NULL weight list gives NULL ensemble weights", {
     cv <- makeCvResult(n = 50, K = 3, seed = 1)
     res <- ensembleWeights(cv, Y = cv$.y, twasWeightList = NULL)
     expect_null(res$ensembleTwasWeights)
@@ -1949,7 +1949,8 @@ test_that("ensembleWeights: solver='glmnet' respects alpha parameter", {
     expect_true(all(res_ridge$methodCoef >= 0))
     expect_equal(sum(res_ridge$methodCoef), 1, tolerance = 1e-6)
 
-    # Lasso should be at least as sparse as ridge (fewer or equal non-zero coefs)
+    # Lasso should be at least as sparse as ridge (fewer or equal non-zero
+    # coefs)
     n_nonzero_lasso <- sum(res_lasso$methodCoef > 1e-8)
     n_nonzero_ridge <- sum(res_ridge$methodCoef > 1e-8)
     expect_true(n_nonzero_lasso <= n_nonzero_ridge)
@@ -2039,7 +2040,7 @@ test_that(".twasCheckMethodCapabilities: empty token list is a no-op", {
     ))
 })
 
-test_that(".twasCheckMethodCapabilities: individual-only token + QtlDataset is fine", {
+test_that("capability check: an individual-only token on QtlDataset is fine", {
     expect_silent(pecotmr:::.twasCheckMethodCapabilities(
         c("lasso", "enet"),
         "QtlDataset"
@@ -2050,7 +2051,7 @@ test_that(".twasCheckMethodCapabilities: individual-only token + QtlDataset is f
     ))
 })
 
-test_that(".twasCheckMethodCapabilities: sumstat-only token + QtlDataset errors", {
+test_that("capability check: a sumstat-only token on QtlDataset errors", {
     # prsCs has sumstatImpl only -- not legal for QtlDataset.
     expect_error(
         pecotmr:::.twasCheckMethodCapabilities("prsCs", "QtlDataset"),
@@ -2058,7 +2059,7 @@ test_that(".twasCheckMethodCapabilities: sumstat-only token + QtlDataset errors"
     )
 })
 
-test_that(".twasCheckMethodCapabilities: individual-only token + QtlSumStats errors", {
+test_that("capability check: an individual-only token on QtlSumStats errors", {
     # dprVb has individualImpl only -- not legal for QtlSumStats.
     expect_error(
         pecotmr:::.twasCheckMethodCapabilities("dprVb", "QtlSumStats"),
@@ -2066,7 +2067,7 @@ test_that(".twasCheckMethodCapabilities: individual-only token + QtlSumStats err
     )
 })
 
-test_that(".twasCheckMethodCapabilities: unknown token errors with the full menu", {
+test_that("capability check: an unknown token errors with the full menu", {
     expect_error(
         pecotmr:::.twasCheckMethodCapabilities("bogus", "QtlDataset"),
         "unknown method token"
@@ -2101,7 +2102,7 @@ test_that(".twasCheckMultivariateY: mvsusie passes when traits >= 2", {
     ))
 })
 
-test_that(".twasCheckMultivariateY: mvsusie/mrmash error with single trait, single context", {
+test_that(".twasCheckMultivariateY refuses mvsusie, mrmash on one condition", {
     expect_error(
         pecotmr:::.twasCheckMultivariateY(
             c("mvsusie", "mrmash"),
@@ -2203,7 +2204,7 @@ test_that(".twasFineMappingFits: refuses a non-result input", {
     )
 })
 
-test_that(".twasFineMappingFits: pulls matching (study,context,trait) susie fit", {
+test_that(".twasFineMappingFits pulls the matching tuple's susie fit", {
     e_susie <- .tw_makeFmEntry("susie")
     e_susieInf <- .tw_makeFmEntry("susieInf")
     res <- QtlFineMappingResult(
@@ -2258,8 +2259,8 @@ test_that(".twasFineMappingFits: ignores non-susie methods (e.g. lasso)", {
         context = "c1",
         trait = "t1"
     )
-    # Only susie should be picked up; lasso is not in the susie/susieInf/susieAsh
-    # canonical menu.
+    # Only susie should be picked up; lasso is not in the
+    # susie/susieInf/susieAsh canonical menu.
     expect_equal(names(out), "susie")
 })
 
@@ -2286,7 +2287,7 @@ test_that(".twasRegionLabel / .twasFitsForRegion select per-region fits", {
     )
 })
 
-test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region CV df", {
+test_that(".twasMergeRegionEntries stacks weights, builds a per-region CV", {
     mk <- function(vids, w, rsq) {
         TwasWeightsRow(
             variantIds = vids,
@@ -2448,7 +2449,7 @@ test_that("twasWeightsPipeline: per-region and joint fits span both regions", {
     }
 })
 
-test_that("twasWeightsPipeline(QtlDataset): mr.mash jointRegions=FALSE concatenates per-region weights", {
+test_that("mr.mash with jointRegions = FALSE joins per-region weights", {
     # One trait over two contexts is the multivariate group mr.mash fits.
     qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
     exec(
@@ -2503,7 +2504,7 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash jointRegions=FALSE concatena
 # handed-over methods.
 # ===========================================================================
 
-test_that(".twasCvResultFor merges per-method cvResult across a tuple's entries", {
+test_that(".twasCvResultFor merges each method's cvResult over a tuple", {
     tl <- data.frame(
         variant_id = "chr1:100:A:G",
         pip = 0.5,
@@ -2572,7 +2573,7 @@ test_that(".twasCvResultFor returns NULL when no entry carries CV", {
 })
 
 
-test_that(".unpackMashPrior routes a MashPrior into the internal CV arguments", {
+test_that(".unpackMashPrior routes a MashPrior into the CV arguments", {
     unpack <- pecotmr:::.unpackMashPrior
     U <- list(U1 = diag(2))
     sp <- data.frame(
@@ -2641,7 +2642,7 @@ test_that(".unpackMashPrior routes a MashPrior into the internal CV arguments", 
 # .rbindTwasWeights
 # -----------------------------------------------------------------------------
 
-test_that(".rbindTwasWeights: concatenates two collections and rejects non-TwasWeights", {
+test_that(".rbindTwasWeights joins two collections, refuses other classes", {
     out <- pecotmr:::.rbindTwasWeights(
         .tp_tw(method = "lasso"),
         .tp_tw(method = "enet")
@@ -2656,12 +2657,13 @@ test_that(".rbindTwasWeights: concatenates two collections and rejects non-TwasW
     )
 })
 
-test_that("combineTwasWeights: variadic and list forms row-bind; guards empty/mixed", {
+test_that("combineTwasWeights binds variadic and list forms; guards inputs", {
     tw1 <- .tp_tw(trait = "g1")
     tw2 <- .tp_tw(trait = "g2")
     tw3 <- .tp_tw(trait = "g3")
     expect_equal(nrow(combineTwasWeights(tw1, tw2)), 2L) # variadic
-    expect_equal(nrow(combineTwasWeights(list(tw1, tw2, tw3))), 3L) # single list
+    # single list
+    expect_equal(nrow(combineTwasWeights(list(tw1, tw2, tw3))), 3L)
     expect_equal(nrow(combineTwasWeights(tw1)), 1L) # single -> as-is
     expect_s4_class(combineTwasWeights(tw1, tw2), "TwasWeights")
     expect_error(combineTwasWeights(), "nothing to combine")
@@ -2686,14 +2688,14 @@ test_that(".twasMergeRegionEntries: all-NULL entries -> NULL", {
 # .twasNormalizeMethods / .twasTokensFromMethodList / .twasIsMultivariateToken
 # -----------------------------------------------------------------------------
 
-test_that(".twasNormalizeMethods: a fine-mapping token without a learner gets a stub entry", {
+test_that(".twasNormalizeMethods stubs a fine-mapping token with no learner", {
     norm <- pecotmr:::.twasNormalizeMethods(c("lasso", "fsusie"))
     expect_true("fsusie" %in% norm$tokens)
     expect_true("fsusie_weights" %in% names(norm$methodList))
     expect_equal(norm$methodList$fsusie_weights, list())
 })
 
-test_that(".twasTokensFromMethodList: unknown snake keys fall back to the bare name", {
+test_that(".twasTokensFromMethodList: an unknown snake key stays bare", {
     toks <- pecotmr:::.twasTokensFromMethodList(
         list(susie_inf_weights = list(), totally_made_up_weights = list())
     )
@@ -2701,7 +2703,7 @@ test_that(".twasTokensFromMethodList: unknown snake keys fall back to the bare n
     expect_true("totally_made_up" %in% toks) # unknown -> fallback
 })
 
-test_that(".twasIsMultivariateToken: TWAS table, FM table, and unknown tokens", {
+test_that(".twasIsMultivariateToken: TWAS, FM and unknown tokens", {
     expect_true(pecotmr:::.twasIsMultivariateToken("mrmash")) # TWAS table
     expect_true(pecotmr:::.twasIsMultivariateToken("mvsusie")) # FM table
     expect_false(pecotmr:::.twasIsMultivariateToken("lasso"))
@@ -2734,7 +2736,7 @@ test_that(".twasCvResultFor: NULL / non-FMR / no-match all return NULL", {
     expect_null(pecotmr:::.twasCvResultFor(fmr, "study1", "brain", "OTHER"))
 })
 
-test_that(".twasCvResultFor: a multi-region (per-region list) cvResult is unwrapped", {
+test_that(".twasCvResultFor unwraps a per-region cvResult list", {
     sp <- data.frame(
         Sample = paste0("s", 1:4),
         Fold = rep(1:2, 2),
@@ -2777,7 +2779,7 @@ test_that(".twasCvResultFor: a multi-region (per-region list) cvResult is unwrap
 # Ensemble stacking solver fallbacks (quadprog + lbfgsb: failure & all-zero)
 # -----------------------------------------------------------------------------
 
-test_that(".solveEnsembleQuadprog: solver failure and all-zero solution fall back to equal weights", {
+test_that(".solveEnsembleQuadprog: failure or all-zero gives equal weights", {
     P <- matrix(rnorm(20), 10, 2)
     y <- rnorm(10)
     local_mocked_bindings(
@@ -2797,7 +2799,7 @@ test_that(".solveEnsembleQuadprog: solver failure and all-zero solution fall bac
     expect_equal(z2, c(0.5, 0.5))
 })
 
-test_that(".solveEnsembleLbfgsb: solver failure and all-zero solution fall back to equal weights", {
+test_that(".solveEnsembleLbfgsb: failure or all-zero gives equal weights", {
     P <- matrix(rnorm(20), 10, 2)
     y <- rnorm(10)
     local_mocked_bindings(
@@ -2879,7 +2881,7 @@ test_that("ensembleWeights: too few complete observations errors", {
     )
 })
 
-test_that("ensembleWeights: only one method with signal -> it gets full weight", {
+test_that("ensembleWeights: the one method with signal gets full weight", {
     samp <- paste0("s", 1:30)
     y <- rnorm(30)
     names(y) <- samp
@@ -2900,7 +2902,7 @@ test_that("ensembleWeights: only one method with signal -> it gets full weight",
     expect_equal(unname(res$methodCoef[["b"]]), 0)
 })
 
-test_that("ensembleWeights: twasWeightList non-list and dimension-mismatch warnings", {
+test_that("ensembleWeights warns on a non-list or mismatched twasWeightList", {
     samp <- paste0("s", 1:30)
     y <- rnorm(30)
     names(y) <- samp
@@ -3033,7 +3035,7 @@ test_that("QtlDataset: CrossValidationParam(fitFullData) reaches the engine", {
     expect_null(cfg$fitFullData)
 })
 
-test_that("twasWeightsPipeline(QtlDataset): mashPrior with no mrmash warns and is ignored", {
+test_that("a mashPrior without mrmash warns and is ignored", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     exec(
         local_mocked_bindings,
@@ -3058,7 +3060,7 @@ test_that("twasWeightsPipeline(QtlDataset): mashPrior with no mrmash warns and i
     )
 })
 
-test_that("twasWeightsPipeline(QtlDataset): mashPrior full prior is threaded into mr.mash args", {
+test_that("a full mashPrior reaches mr.mash's arguments", {
     qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
     ddpm <- list(U = list(comp = diag(2)))
     captured <- NULL
@@ -3089,7 +3091,7 @@ test_that("twasWeightsPipeline(QtlDataset): mashPrior full prior is threaded int
     expect_identical(captured, ddpm)
 })
 
-test_that("twasWeightsPipeline(QtlDataset): jointSpec mr.mash + univariate lasso both run", {
+test_that("jointSpec mr.mash and univariate lasso both run", {
     qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
     jointRes <- .tp_tw(
         studyName = "study1",
@@ -3124,8 +3126,9 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec mr.mash + univariate lasso
     expect_true("lasso" %in% methodNames(res)) # from per-tuple loop
 })
 
-test_that("twasWeightsPipeline(QtlDataset): region selects overlapping traits", {
-    qd <- .tp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B")) # @1000, @2000
+test_that("twasWeightsPipeline's region selects overlapping traits", {
+    # @1000, @2000
+    qd <- .tp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
     exec(
         local_mocked_bindings,
         !!!c(
@@ -3151,7 +3154,7 @@ test_that("twasWeightsPipeline(QtlDataset): region selects overlapping traits", 
 # twasWeightsPipeline(QtlSumStats): remaining branches
 # -----------------------------------------------------------------------------
 
-test_that("twasWeightsPipeline(QtlSumStats): NULL methods uses the default RSS preset", {
+test_that("sumstat TWAS: NULL methods uses the default RSS preset", {
     ss <- .tp_makeQtlSumStats()
     exec(
         local_mocked_bindings,
@@ -3177,7 +3180,7 @@ test_that("twasWeightsPipeline(QtlSumStats): NULL methods uses the default RSS p
     expect_setequal(methodNames(res), c("lasso", "prsCs", "dprGibbs"))
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): named-list methods and invalid type", {
+test_that("sumstat TWAS: named-list methods, and an invalid type", {
     ss <- .tp_makeQtlSumStats()
     exec(
         local_mocked_bindings,
@@ -3230,7 +3233,7 @@ test_that("twasWeightsPipeline(QtlSumStats): trait selects matching rows", {
     expect_equal(methodNames(res), "lasso")
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): multivariate mr.mash returns a column per context", {
+test_that("sumstat multivariate mr.mash returns a column per context", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L) # 2 contexts of (s1, t1)
     exec(
         local_mocked_bindings,
@@ -3254,7 +3257,7 @@ test_that("twasWeightsPipeline(QtlSumStats): multivariate mr.mash returns a colu
     expect_equal(nrow(res), 2L) # one row per context
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): fine-mapping method absent from fineMappingResult errors", {
+test_that("sumstat TWAS errors on an FM method absent from the FM result", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L)
     # A fine-mapping result that does NOT contain an mvsusie fit (only susie).
     fmr <- .tp_makeStubFineMappingResult(
@@ -3288,7 +3291,7 @@ test_that("twasWeightsPipeline(QtlSumStats): fine-mapping method absent from fin
     MultiStudyQtlDataset(qtlDatasets = list(study1 = qd), sumStats = ss)
 }
 
-test_that("twasWeightsPipeline(MultiStudyQtlDataset): per-study options are not dropped", {
+test_that("multi-study TWAS keeps per-study options", {
     # residualization and fit retention were declared on the multi-study
     # method and never reached the record its components run with, and the
     # QtlDataset-only options rode `...` into the embedded QtlSumStats call.
@@ -3392,7 +3395,7 @@ test_that("MultiStudyQtlDataset takes every component argument", {
     )
 })
 
-test_that("twasWeightsPipeline(MultiStudyQtlDataset): a misspelled option errors", {
+test_that("multi-study TWAS errors on a misspelled option", {
     # The method no longer takes `...`, so a typo cannot be swallowed.
     expect_error(
         twasWeightsPipeline(
@@ -3446,7 +3449,7 @@ test_that("twasWeightsPipeline(MSQD) rbinds both, lays cisWindow on sumstats", {
     )
 })
 
-test_that("twasWeightsPipeline(MultiStudyQtlDataset): region + cisWindow is rejected", {
+test_that("multi-study TWAS refuses region with cisWindow", {
     mt <- .tp_makeMultiStudy()
     expect_error(
         twasWeightsPipeline(
@@ -3493,7 +3496,7 @@ test_that("twasWeightsPipeline(MultiStudy): trait selection skips a study", {
     )
 })
 
-test_that("twasWeightsPipeline(MultiStudyQtlDataset): jointSpec-only mr.mash returns the joint result", {
+test_that("multi-study jointSpec-only mr.mash returns the joint result", {
     mt <- .tp_makeMultiStudy()
     jointRes <- .tp_tw(
         studyName = "s1",
@@ -3521,7 +3524,7 @@ test_that("twasWeightsPipeline(MultiStudyQtlDataset): jointSpec-only mr.mash ret
     }
 })
 
-test_that("twasWeightsPipeline(MultiStudyQtlDataset): jointSpec mr.mash + univariate lasso are combined", {
+test_that("multi-study TWAS combines jointSpec mr.mash and univariate lasso", {
     mt <- .tp_makeMultiStudy()
     jointRes <- .tp_tw(
         studyName = "s1",
@@ -3572,7 +3575,7 @@ test_that(".twasCheckFineMappingMethods: empty token list is a no-op", {
     ))
 })
 
-test_that(".twasCvResultFor: an entry whose nested CV carries no partition is skipped", {
+test_that(".twasCvResultFor skips an entry whose CV has no partition", {
     nested <- list(
         region1 = list(prediction = list(susie_predicted = matrix(0, 1, 1)))
     )
@@ -3592,7 +3595,7 @@ test_that(".twasCvResultFor: an entry whose nested CV carries no partition is sk
     expect_null(pecotmr:::.twasCvResultFor(fmr, "S", "c1", "t1"))
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): jointSpec mr.mash-only with no fits errors", {
+test_that("sumstat jointSpec mr.mash-only with no fits errors", {
     ss <- .tp_makeQtlSumStats()
     local_mocked_bindings(
         .twasDispatchJointSpecsQtlSumStats = function(...) NULL,
@@ -3608,7 +3611,7 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec mr.mash-only with no fits
     )
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): jointSpec mr.mash + univariate lasso combine", {
+test_that("sumstat TWAS combines jointSpec mr.mash and univariate lasso", {
     ss <- .tp_makeQtlSumStats()
     jointRes <- .tp_tw(
         studyName = "s1",
@@ -3666,7 +3669,7 @@ test_that("twasWeightsPipeline(QtlSumStats): mr.mash skips 1-context traits", {
     expect_setequal(traitNames(res), "t1") # only t1
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): a mismatched SNP order in a multivariate group errors", {
+test_that("sumstat TWAS errors on mismatched SNP order in a joint group", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L) # (s1, t1) x 2 ctx
     calls <- 0L
     local_mocked_bindings(
@@ -3709,7 +3712,7 @@ test_that("ensembleWeights: partial sample overlap emits a message", {
     )
 })
 
-test_that("ensembleWeights: contextIndex beyond Y matrix columns errors (named path)", {
+test_that("ensembleWeights errors on a contextIndex past Y's columns", {
     samp <- paste0("s", 1:30)
     pb <- list(
         a_predicted = matrix(rnorm(30), 30, 1, dimnames = list(samp, NULL)),
@@ -3726,7 +3729,7 @@ test_that("ensembleWeights: contextIndex beyond Y matrix columns errors (named p
     )
 })
 
-test_that("ensembleWeights: vector (non-matrix) method weights are coerced to a column", {
+test_that("ensembleWeights makes a method's weight vector a column", {
     samp <- paste0("s", 1:30)
     y <- rnorm(30)
     names(y) <- samp
@@ -3757,7 +3760,7 @@ test_that("ensembleWeights: vector (non-matrix) method weights are coerced to a 
     expect_length(res$ensembleTwasWeights, 3L)
 })
 
-test_that(".solveEnsembleNnls: solver failure and all-zero fall back to equal weights", {
+test_that(".solveEnsembleNnls: failure or all-zero gives equal weights", {
     skip_if_not_installed("nnls")
     P <- matrix(rnorm(20), 10, 2)
     y <- rnorm(10)
@@ -4417,7 +4420,7 @@ test_that("a fine-mapping method's TWAS rows keep none of its fit", {
     expect_identical(pecotmr:::.jointRetentionLevel(cfg, "mrmash"), "slim")
 })
 
-test_that("twasWeightsPipeline: fitRetention='full' says so when unhonourable", {
+test_that("twasWeightsPipeline says when fitRetention = 'full' can't be kept", {
     # Not every method distinguishes the levels; for the rest "full" would be
     # silently indistinguishable from "slim". The SuSiE family keeps no fit
     # on its rows either way: the fine-mapping result holds it.
@@ -4582,7 +4585,7 @@ test_that("twasWeightsPipeline(QtlDataset): usePCA adds top-PC rows", {
     expect_true(all(is_in(c("ENSG_A", "ENSG_B"), pcs)))
 })
 
-test_that("a multivariate method needs every MultiStudy component multivariate", {
+test_that("a multivariate method needs every study to be multivariate", {
     # mvsusie / mr.mash / fsusie fit one model across a tuple's traits and
     # contexts, so each component they run on must supply a multivariate Y.
     uni <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")

@@ -218,7 +218,7 @@ test_that("ctwasPipeline: rejects un-QCd GwasSumStats in any region", {
     )
 })
 
-test_that("ctwasPipeline: rejects twasWeights keys not present in gwasSumStats", {
+test_that("ctwasPipeline refuses twasWeights keys absent from gwasSumStats", {
     skip_if_not_installed("ctwas")
     ss <- .ctp_makeGwasSumstats()
     tw <- .ctp_makeTwasWeights()
@@ -234,7 +234,7 @@ test_that("ctwasPipeline: rejects twasWeights keys not present in gwasSumStats",
     )
 })
 
-test_that("assembleCtwasInputs: allows twasWeights keys to be a subset of gwasSumStats", {
+test_that("assembleCtwasInputs accepts a subset of gwasSumStats' keys", {
     ss <- .ctp_makeGwasSumstats()
     tw <- .ctp_makeTwasWeights()
     local_mocked_bindings(
@@ -260,11 +260,12 @@ test_that("assembleCtwasInputs: allows twasWeights keys to be a subset of gwasSu
     expect_true(all(grepl("^block1\\|", names(inputs$weights))))
 })
 
-test_that("assembleCtwasInputs: accepts a QtlFineMappingResult weight source (topLoci posterior effect)", {
+test_that("assembleCtwasInputs takes a QtlFineMappingResult weight source", {
     ss <- .ctp_makeGwasSumstats()
-    # The FMR topLoci posterior effect is on the STANDARDIZED scale, so it matches
-    # a standardized TwasWeights carrying the same effect vector (both skip cTWAS's
-    # variance scaling). Compare against that, not the default (unstandardized) one.
+    # The FMR topLoci posterior effect is on the STANDARDIZED scale, so it
+    # matches a standardized TwasWeights carrying the same effect vector (both
+    # skip cTWAS's variance scaling). Compare against that, not the default
+    # (unstandardized) one.
     tw_std <- TwasWeights(
         studyName = "Q1",
         context = "c1",
@@ -292,7 +293,8 @@ test_that("assembleCtwasInputs: accepts a QtlFineMappingResult weight source (to
         twasWeights = list(block1 = fmr, block2 = fmr),
         method = "susie"
     )
-    # Same gene keys, and the resolved weights match the standardized TwasWeights.
+    # Same gene keys, and the resolved weights match the standardized
+    # TwasWeights.
     expect_equal(names(ifmr$weights), names(itw$weights))
     expect_true(length(ifmr$weights) > 0L)
     expect_equal(ifmr$weights[[1L]], itw$weights[[1L]])
@@ -369,7 +371,7 @@ test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
     expect_equal(entry$p1, 500L)
 })
 
-test_that("ctwasPipeline: a bare TwasWeights is a FLAT source, placed by region", {
+test_that("ctwasPipeline places a bare TwasWeights (flat source) by region", {
     skip_if_not_installed("ctwas")
     # A bare TwasWeights is now accepted as a flat weight source and placed into
     # LD blocks by region; the fixture carries no region, so placement errors
@@ -530,7 +532,7 @@ test_that(".ctwasBuildZSnp: leaves variants absent from the panel untouched", {
     expect_equal(none$z, plain$z)
 })
 
-test_that(".ctwasFilterVariants: a CS member the fine-mapping spells flipped still survives the cap", {
+test_that(".ctwasFilterVariants: CS member spelled flipped survives the cap", {
     # The weights arrive in the panel frame, the fine-mapping auxiliaries in
     # the fine-mapping result's. An exact-string join lost the credible-set
     # member's must-keep protection, so the cap dropped the variant the
@@ -605,7 +607,7 @@ test_that(".ctwasBuildSingleRegionInfo: a given region bounds the block", {
     expect_equal(ri$stop, 1001L)
 })
 
-test_that(".ctwasBuildSingleRegionInfo: uses the block entry span, not the wider shared LD sketch", {
+test_that(".ctwasBuildSingleRegionInfo: block span, not the shared sketch's", {
     # Regression: many LD blocks can share one whole-chromosome LD payload, so
     # the sketch span (here BP 100-1200) is NOT the block's span. The entry
     # here covers only 200-400; region bounds must follow the entry, otherwise
@@ -663,7 +665,7 @@ test_that(".ctwasBuildSingleRegionInfo: multi-chromosome block entry errors", {
     )
 })
 
-test_that(".ctwasSnpInfoForBlock: returns ctwas-required columns chrom/id/pos/alt/ref", {
+test_that(".ctwasSnpInfoForBlock gives ctwas's chrom/id/pos/alt/ref columns", {
     df <- pecotmr:::.ctwasSnpInfoForBlock(.ctp_makeHandle())
     # ctwas's read_snp_info_files asserts these exact column names
     expect_setequal(colnames(df), c("chrom", "id", "pos", "alt", "ref"))
@@ -1003,7 +1005,7 @@ test_that(".ctwasPlaceByAnchor: a block holds its whole window", {
     )
 })
 
-test_that(".ctwasIsPreBucketed / .ctwasCombineWeightSources: dispatch flat vs pre-bucketed", {
+test_that(".ctwasCombineWeightSources tells flat from pre-bucketed sources", {
     tw <- .ctp_makeTwasWeights()
     grid <- list(block1 = 1, block2 = 2)
     expect_true(pecotmr:::.ctwasIsPreBucketed(list(block1 = tw))) # named list
@@ -1016,7 +1018,7 @@ test_that(".ctwasIsPreBucketed / .ctwasCombineWeightSources: dispatch flat vs pr
     )
 })
 
-test_that(".ctwasBucketWeights: places a flat 2-gene source into its home blocks", {
+test_that(".ctwasBucketWeights places a flat 2-gene source in its blocks", {
     mkE <- function() {
         TwasWeightsRow(
             variantIds = map_chr(1:5, .ctp_snpId),
@@ -1131,7 +1133,7 @@ test_that(".ctwasRunToRows: single-context run -> one row, no jointContexts", {
     )
 })
 
-test_that(".ctwasRunToRows: multi-context run -> per-context rows sharing jointContexts + param", {
+test_that(".ctwasRunToRows: multi-context run -> rows sharing jointContexts", {
     ids <- c(
         "blk|Q1|brain|gA|susie",
         "blk|Q1|brain|gB|susie",
@@ -1160,7 +1162,7 @@ test_that(".ctwasRunToRows: multi-context run -> per-context rows sharing jointC
     )
 })
 
-test_that(".ctwasRunToRows: rejects multi-context runs with unshared gene sets", {
+test_that(".ctwasRunToRows refuses multi-context runs with unshared genes", {
     run <- .ctp_runResult(
         c("blk|Q1|brain|gA|susie", "blk|Q1|liver|gC|susie"),
         c(0.9, 0.8),
@@ -1197,7 +1199,7 @@ test_that(".ctwasRunToRows: susieAlpha subset mirrors finemap per context", {
     expect_true("susie_alpha" %in% names(sa))
 })
 
-test_that(".ctwasRunToRows: keepSnps adds a dedicated SNP row; default drops SNPs", {
+test_that(".ctwasRunToRows: keepSnps adds a SNP row; by default none", {
     ids <- c("blk|Q1|c1|gA|susie", "blk|Q1|c1|gB|susie")
     run <- .ctp_runResult(
         ids,
@@ -1209,7 +1211,8 @@ test_that(".ctwasRunToRows: keepSnps adds a dedicated SNP row; default drops SNP
     rowsOff <- pecotmr:::.ctwasRunToRows(run, "D1", "susie")
     expect_length(rowsOff, 1L)
     expect_true(all(ctwasPosteriors(rowsOff[[1L]]$entry)$type == "gene"))
-    # keepSnps: one extra study = context = "SNP" row carrying the SNP background.
+    # keepSnps: one extra study = context = "SNP" row carrying the SNP
+    # background.
     rowsOn <- pecotmr:::.ctwasRunToRows(run, "D1", "susie", keepSnps = TRUE)
     expect_length(rowsOn, 2L)
     snpRow <- rowsOn[[2L]]
@@ -1324,10 +1327,10 @@ test_that(".ctwasHarmonizeWeights: sign-flips weights for swapped A1/A2", {
         variant_id = panel$snpInfo$id,
         stringsAsFactors = FALSE
     )
-    # Variant 1: alleles match panel ("1:100:C:T" — same A2/A1 ordering)
-    # Variant 2: A1/A2 swapped vs panel ("1:200:A:G" — flips relative to "1:200:G:A")
-    # Output variant_id values are rebuilt via formatVariantId(), which
-    # always emits a `chr` prefix.
+    # Variant 1: alleles match panel ("1:100:C:T" — same A2/A1 ordering) Variant
+    # 2: A1/A2 swapped vs panel ("1:200:A:G" — flips relative to "1:200:G:A")
+    # Output variant_id values are rebuilt via formatVariantId(), which always
+    # emits a `chr` prefix.
     res <- pecotmr:::.ctwasHarmonizeWeights(
         origVids = c("1:100:C:T", "1:200:A:G"),
         origW = c(0.5, 0.3),
@@ -1447,7 +1450,7 @@ test_that(".ctwasRenormalizeSusieWeights: honours a non-uniform prior", {
     )
 })
 
-test_that(".ctwasSnpInfoForGwasBlock: restricts panel snpInfo to block GWAS variants", {
+test_that(".ctwasSnpInfoForGwasBlock keeps the block's GWAS variants", {
     # Block 1's GWAS rows (variants 1..6) against the whole 12-variant panel.
     ss <- .ctp_makeGwasSumstats(blockIds = "block1")
     panelInfo <- data.frame(
@@ -1587,19 +1590,19 @@ test_that(".ctwasPanelWeightLd: a panel's factor, or the R it carries", {
     # A sketch gives its factor: the LD over vids without forming it.
     viaFactor <- pecotmr:::.ctwasPanelWeightLd(panel, vids)
     expect_null(viaFactor$R)
-    expect_identical(colnames(viaFactor$F), vids)
+    expect_identical(colnames(viaFactor$ldFactor), vids)
     expect_equal(
-        crossprod(viaFactor$F) / (nrow(viaFactor$F) - 1),
+        crossprod(viaFactor$ldFactor) / (nrow(viaFactor$ldFactor) - 1),
         full[vids, vids]
     )
     # A panel that already carries R is sliced, not re-read.
     withR <- pecotmr:::.ctwasPanelWeightLd(c(panel, list(R = full)), vids)
-    expect_null(withR$F)
+    expect_null(withR$ldFactor)
     expect_equal(withR$R, full[vids, vids])
     # An LdMatrix has no factor to give: its matrix is read over vids.
     ldPanel <- pecotmr:::.ctwasPanelFor(LdMatrix(full, nSamples = 30))
     viaMatrix <- pecotmr:::.ctwasPanelWeightLd(ldPanel, vids)
-    expect_null(viaMatrix$F)
+    expect_null(viaMatrix$ldFactor)
     expect_equal(viaMatrix$R, full[vids, vids])
 })
 
@@ -1822,7 +1825,7 @@ test_that("a saved payload holds each region's LD once, and no source", {
 # Input-assembly shape checks via assembleCtwasInputs (no ctwas engine needed)
 # ===========================================================================
 
-test_that("assembleCtwasInputs: assembles the documented input shape for ctwas", {
+test_that("assembleCtwasInputs builds ctwas's documented input shape", {
     inp <- .ctp_makeMultiBlockInputs()
     local_mocked_bindings(
         .handleDosage = .ctp_mockExtractor(),
@@ -1944,10 +1947,11 @@ test_that(".ctwasTwasZForStudy refuses a choice the run cannot make", {
 })
 
 # ===========================================================================
-# Step-wise dispatch: estCtwasGroupPriors → screenCtwasRegions → finemapCtwasRegions
+# Step-wise dispatch: estCtwasGroupPriors → screenCtwasRegions →
+# finemapCtwasRegions
 # ===========================================================================
 
-test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and accumulates state", {
+test_that("ctwasPipeline runs assemble, est, screen, finemap; keeps state", {
     skip_if_not_installed("ctwas")
     inp <- .ctp_makeMultiBlockInputs()
     capturedAssemble <- list()
@@ -2047,7 +2051,7 @@ test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and
     ))
 })
 
-test_that("ctwasPipeline: keepSnps retains the SNP background as a dedicated row", {
+test_that("ctwasPipeline keepSnps keeps the SNP background as its own row", {
     skip_if_not_installed("ctwas")
     inp <- .ctp_makeMultiBlockInputs()
     local_mocked_bindings(
@@ -2197,7 +2201,7 @@ test_that("mergeCtwasBoundaryRegions passes no unnamed argument to ctwas", {
     expect_false(any(names(captured) == ""))
 })
 
-test_that("mergeCtwasBoundaryRegions: no-LD path uses postprocess_region_merging_noLD", {
+test_that("mergeCtwasBoundaryRegions without LD uses the noLD merge", {
     skip_if_not_installed("ctwas")
     usedNoLd <- FALSE
     local_mocked_bindings(
@@ -2215,7 +2219,7 @@ test_that("mergeCtwasBoundaryRegions: no-LD path uses postprocess_region_merging
     expect_equal(out$finemap_res$susie_pip, 0.99)
 })
 
-test_that("ctwasPipeline: mergeBoundary = TRUE re-fine-maps and flows into CtwasResult", {
+test_that("ctwasPipeline mergeBoundary re-fine-maps into the CtwasResult", {
     skip_if_not_installed("ctwas")
     inp <- .ctp_makeMultiBlockInputs()
     merged <- FALSE
@@ -2286,7 +2290,7 @@ test_that("ctwasPipeline: mergeBoundary = TRUE re-fine-maps and flows into Ctwas
 # ===========================================================================
 # asCtwasResult — structure a granular finemap result (the wrapper path)
 # ===========================================================================
-test_that("asCtwasResult: structures a granular finemap result into a CtwasResult", {
+test_that("asCtwasResult turns a granular finemap result into a CtwasResult", {
     fmr <- .ctp_finemapResult()
     fmr$z_snp$study <- "D1" # GWAS study read from z_snp
     cr <- asCtwasResult(fmr)
@@ -2325,7 +2329,7 @@ test_that("asCtwasResult: errors when the weights mix methods", {
     expect_error(asCtwasResult(fmr), "mixes weight methods")
 })
 
-test_that("estCtwasGroupPriors: fallbackToPrefit recovers from accurate-EM NaN divergence", {
+test_that("fallbackToPrefit recovers from accurate-EM NaN divergence", {
     skip_if_not_installed("ctwas")
     inp <- .ctp_makeMultiBlockInputs()
     # Mock est_param to throw the documented NaN error, and fit_EM to
@@ -2389,10 +2393,10 @@ test_that("estCtwasGroupPriors: fallbackToPrefit recovers from accurate-EM NaN d
     expect_equal(unname(est$param$group_prior_var), c(4.0, 5.0))
 })
 
-test_that("estCtwasGroupPriors fallback drops degenerate regions before fit_EM", {
-    # Regression for the ctwas >= 0.6.0 breakage: the prefit fallback used to hand
-    # ALL regions to ctwas::fit_EM, so a degenerate region (empty gid/sid, whose
-    # `sid` ctwas::extract_region_data now requires) crashed with
+test_that("the prior fallback drops degenerate regions before fit_EM", {
+    # Regression for the ctwas >= 0.6.0 breakage: the prefit fallback used to
+    # hand ALL regions to ctwas::fit_EM, so a degenerate region (empty gid/sid,
+    # whose `sid` ctwas::extract_region_data now requires) crashed with
     # "regiondata$sid ... target is NULL". The fallback must mirror est_param's
     # min_var / min_gene skip and fit only the qualifying regions.
     skip_if_not_installed("ctwas")
@@ -2401,7 +2405,8 @@ test_that("estCtwasGroupPriors fallback drops degenerate regions before fit_EM",
     local_mocked_bindings(
         assemble_region_data = function(...) {
             list(
-                good = list(gid = "t1", sid = c("s1", "s2")), # 1 gene + 2 SNPs -> kept
+                # 1 gene + 2 SNPs -> kept
+                good = list(gid = "t1", sid = c("s1", "s2")),
                 degenerate = list(gid = character(0), sid = NULL)
             )
         }, # no variables    -> dropped
@@ -2432,7 +2437,8 @@ test_that("estCtwasGroupPriors fallback drops degenerate regions before fit_EM",
         ),
         ctwasPriorParam = CtwasPriorParam(fallbackToPrefit = TRUE)
     )
-    # only the qualifying region reached fit_EM; the degenerate region was filtered
+    # only the qualifying region reached fit_EM; the degenerate region was
+    # filtered
     expect_equal(seen, "good")
     # ...but every region is still accounted for in the returned p_single_effect
     expect_setequal(
@@ -2441,14 +2447,15 @@ test_that("estCtwasGroupPriors fallback drops degenerate regions before fit_EM",
     )
 })
 
-test_that("(real ctwas) prefit fallback skips a degenerate region fit_EM would reject", {
+test_that("real ctwas: prefit fallback skips a region fit_EM would reject", {
     # No-mock guard for the ctwas >= 0.6.0 contract. Runs the REAL ctwas::fit_EM
     # (via .ctwasFitPrefitEm) on a genuine assemble_region_data fixture with one
     # valid region (1 gene, 108 SNPs) and one degenerate region (0 genes/SNPs,
-    # unset `sid`). Handing the degenerate region to fit_EM crashes ctwas >= 0.6.0
-    # in extract_region_data ("regiondata$sid ... target is NULL"); the fallback
-    # must filter it. Unlike the mocked tests above, this exercises the real engine,
-    # so it would catch a FUTURE ctwas contract change (which the mocks cannot).
+    # unset `sid`). Handing the degenerate region to fit_EM crashes ctwas >=
+    # 0.6.0 in extract_region_data ("regiondata$sid ... target is NULL"); the
+    # fallback must filter it. Unlike the mocked tests above, this exercises the
+    # real engine, so it would catch a FUTURE ctwas contract change (which the
+    # mocks cannot).
     skip_if_not_installed("ctwas")
     region_data <- readRDS(test_path(
         "test_data",
@@ -2466,14 +2473,15 @@ test_that("(real ctwas) prefit fallback skips a degenerate region fit_EM would r
         ),
         "EM did not converge in 3 iterations"
     )
-    # the prefit EM ran on the valid region only and returns finite real group priors
+    # the prefit EM ran on the valid region only and returns finite real group
+    # priors
     expect_true("SNP" %in% names(res$group_prior))
     expect_true(all(is.finite(res$group_prior)))
     # every region (valid + degenerate) is still listed in p_single_effect
     expect_setequal(res$p_single_effect$region_id, names(region_data))
 })
 
-test_that("estCtwasGroupPriors / screenCtwasRegions / finemapCtwasRegions can be called independently", {
+test_that("the three ctwas stages can each be called on their own", {
     skip_if_not_installed("ctwas")
     inp <- .ctp_makeMultiBlockInputs()
     local_mocked_bindings(
@@ -2553,7 +2561,7 @@ test_that("estCtwasGroupPriors / screenCtwasRegions / finemapCtwasRegions can be
 # (mocked tests only construct the closures, never invoke them).
 # ===========================================================================
 
-test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", {
+test_that("ctwasPipeline end to end on the real engine and bundled panel", {
     skip_if_not_installed("ctwas")
     data(gwasSumStatsS4Example)
     data(qtlDatasetExample)
@@ -2680,7 +2688,7 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
 #   3. minPipCutoff     — high-PIP rescue (must-keep)
 #   4. maxNumVariants   — per-gene cap, prioritized by PIP then |w|
 
-test_that(".ctwasFilterVariants: twasWeightCutoff drops low-magnitude variants", {
+test_that(".ctwasFilterVariants: twasWeightCutoff drops small weights", {
     vids <- sprintf("chr1:%d:A:G", 100L * (1:6))
     w <- c(0.5, 0.001, 0.3, 0.0005, -0.4, 0)
     out <- pecotmr:::.ctwasFilterVariants(
@@ -2712,7 +2720,7 @@ test_that(".ctwasFilterVariants: maxNumVariants caps by |w| when no PIP", {
     expect_setequal(out$vids, c("chr1:200:A:G", "chr1:400:A:G", "chr1:300:A:G"))
 })
 
-test_that(".ctwasFilterVariants: minPipCutoff rescues high-PIP variants from cap", {
+test_that(".ctwasFilterVariants: minPipCutoff saves high-PIP variants", {
     vids <- sprintf("chr1:%d:A:G", 100L * (1:5))
     w <- c(0.5, 0.4, 0.3, 0.2, 0.1)
     finemapAux <- list(
@@ -2733,7 +2741,7 @@ test_that(".ctwasFilterVariants: minPipCutoff rescues high-PIP variants from cap
     expect_setequal(out$vids, c("chr1:300:A:G", "chr1:500:A:G"))
 })
 
-test_that(".ctwasFilterVariants: csMinCor rescues high-purity CS members from cap", {
+test_that(".ctwasFilterVariants: csMinCor saves high-purity CS members", {
     vids <- sprintf("chr1:%d:A:G", 100L * (1:6))
     w <- c(0.5, 0.4, 0.3, 0.2, 0.1, 0.05)
     finemapAux <- list(
@@ -2818,7 +2826,7 @@ test_that(".ctwasBuildWeights: the variant cap and weight cutoff apply", {
 # mergeCtwasBoundaryRegions (step 4: boundary-gene region merging)
 # ===========================================================================
 
-test_that("mergeCtwasBoundaryRegions: no first-pass finemap_res returns unchanged", {
+test_that("mergeCtwasBoundaryRegions: no first-pass finemap_res, no change", {
     skip_if_not_installed("ctwas")
     fmr <- list(finemap_res = NULL, region_data = "rd")
     expect_message(
@@ -2829,7 +2837,7 @@ test_that("mergeCtwasBoundaryRegions: no first-pass finemap_res returns unchange
     expect_identical(suppressMessages(mergeCtwasBoundaryRegions(fmr0)), fmr0)
 })
 
-test_that("mergeCtwasBoundaryRegions: LD path forwards carried state + splices updated_*", {
+test_that("boundary merge with LD carries state and splices updated_*", {
     skip_if_not_installed("ctwas")
     captured <- NULL
     local_mocked_bindings(
@@ -2889,7 +2897,7 @@ test_that("mergeCtwasBoundaryRegions: LD path forwards carried state + splices u
 # guard would surface a different error).
 # ===========================================================================
 
-test_that("assembleCtwasInputs: an unnamed twasWeights list is a FLAT source (needs region)", {
+test_that("an unnamed twasWeights list is a flat source needing a region", {
     skip_if_not_installed("ctwas")
     ss <- .ctp_makeGwasSumstats()
     tw <- .ctp_makeTwasWeights() # no region provenance
@@ -2918,7 +2926,7 @@ test_that("assembleCtwasInputs: rejects a non-GwasSumStats gwas input", {
     )
 })
 
-test_that("assembleCtwasInputs: rejects a weight source that is neither TwasWeights nor QtlFineMappingResult", {
+test_that("assembleCtwasInputs refuses a weight source of any other class", {
     skip_if_not_installed("ctwas")
     ss <- .ctp_makeGwasSumstats()
     expect_error(
@@ -2963,7 +2971,7 @@ test_that("assembleCtwasInputs: the rescue source is a QtlFineMappingResult", {
     )
 })
 
-test_that("assembleCtwasInputs: skips a block whose TwasWeights lacks the resolved method", {
+test_that("assembleCtwasInputs skips a block lacking the resolved method", {
     skip_if_not_installed("ctwas")
     ss <- .ctp_makeGwasSumstats()
     ids5 <- map_chr(1:5, .ctp_snpId)
@@ -3008,7 +3016,7 @@ test_that(".ctwasFilterMethod: returns NULL when no row matches the method", {
 # .ctwasHarmonizeWeights early NULL returns
 # ===========================================================================
 
-test_that(".ctwasHarmonizeWeights: returns NULL when there is nothing to parse", {
+test_that(".ctwasHarmonizeWeights: NULL when there is nothing to parse", {
     panel <- .ctp_makeAllelePanel()
     refVariants <- data.frame(
         chrom = panel$snpInfo$chrom,
@@ -3050,7 +3058,7 @@ test_that(".ctwasHarmonizeWeights: returns NULL when harmonizeAlleles fails", {
 # .ctwasBuildWeights: per-gene skip branches + variance / renorm paths
 # ===========================================================================
 
-test_that(".ctwasBuildWeights: skips a gene when harmonization yields nothing", {
+test_that(".ctwasBuildWeights skips a gene harmonization leaves empty", {
     local_mocked_bindings(
         .ctwasHarmonizeWeights = function(...) NULL,
         .package = "pecotmr"
@@ -3064,7 +3072,7 @@ test_that(".ctwasBuildWeights: skips a gene when harmonization yields nothing", 
     )
 })
 
-test_that(".ctwasBuildWeights: skips a gene when no variant survives gwasSnpIds intersect", {
+test_that(".ctwasBuildWeights skips a gene with no variant in gwasSnpIds", {
     expect_length(
         pecotmr:::.ctwasBuildWeights(
             .ctp_makeTwasWeights(),
@@ -3075,7 +3083,7 @@ test_that(".ctwasBuildWeights: skips a gene when no variant survives gwasSnpIds 
     )
 })
 
-test_that(".ctwasBuildWeights: SuSiE renormalization fires when variants are dropped", {
+test_that(".ctwasBuildWeights renormalizes SuSiE when variants are dropped", {
     panel <- .ctp_makeLdPanel()
     ids4 <- map_chr(1:4, .ctp_snpId)
     bogus <- "chr1:99900:G:A" # absent from the 6-SNP panel
@@ -3113,7 +3121,7 @@ test_that(".ctwasBuildWeights: SuSiE renormalization fires when variants are dro
     )
 })
 
-test_that(".ctwasBuildWeights: errors when the LD panel lacks a kept variant's variance", {
+test_that(".ctwasBuildWeights errors on a kept variant missing its variance", {
     panel <- .ctp_makeLdPanel()
     panel$variance <- panel$variance[1:4] # drop variance for ids 5, 6
     expect_error(
@@ -3122,7 +3130,7 @@ test_that(".ctwasBuildWeights: errors when the LD panel lacks a kept variant's v
     )
 })
 
-test_that(".ctwasBuildWeights: skips a gene when the filter removes every variant", {
+test_that(".ctwasBuildWeights skips a gene the filter empties", {
     expect_length(
         pecotmr:::.ctwasBuildWeights(
             .ctp_makeTwasWeights(),
@@ -3165,7 +3173,7 @@ test_that(".ctwasGetFinemapAux: parses pip + cs_95 membership + purity", {
     expect_equal(aux$csPurity, c(0.95, 0.7))
 })
 
-test_that(".ctwasGetFinemapAux: cs_95 without a purity column yields NA purity", {
+test_that(".ctwasGetFinemapAux: cs_95 without purity column gives NA purity", {
     tl <- data.frame(
         variant_id = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         pip = c(0.1, 0.5, 0.9),
@@ -3249,7 +3257,7 @@ test_that(".ctwasFixMolecularId: rows without a gene id are left alone", {
     expect_identical(pecotmr:::.ctwasFixMolecularId(snps), snps)
 })
 
-test_that(".ctwasGetFinemapAux: NULL input, no-match tuple, and empty topLoci all return NULL", {
+test_that(".ctwasGetFinemapAux: NULL input, no match or empty topLoci: NULL", {
     expect_null(pecotmr:::.ctwasGetFinemapAux(NULL, "Q1", "c1", "t1"))
     tl <- data.frame(
         variant_id = "chr1:100:A:G",
@@ -3292,7 +3300,7 @@ test_that(".ctwasFilterVariants: returns NULL for an empty variant set", {
     ))
 })
 
-test_that(".ctwasSnpInfoForGwasBlock: returns an empty frame when the block has no SNP ids", {
+test_that(".ctwasSnpInfoForGwasBlock: empty frame for a block with no SNPs", {
     # GRanges entry with no mcols -> no SNP column -> blockIds is empty.
     gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
     gss <- GwasSumStats(
@@ -3334,7 +3342,7 @@ test_that(".ctwasCombineWeightSources: type + emptiness guards; FMR list", {
     )
 })
 
-test_that(".ctwasGwasStudy / .ctwasGwasStudyFromZSnp: NA when no study present", {
+test_that(".ctwasGwasStudy and .ctwasGwasStudyFromZSnp: NA with no study", {
     expect_true(is.na(pecotmr:::.ctwasGwasStudy(list(
         a = data.frame(study = NA_character_)
     ))))
@@ -3344,7 +3352,7 @@ test_that(".ctwasGwasStudy / .ctwasGwasStudyFromZSnp: NA when no study present",
     ))))
 })
 
-test_that(".ctwasSubsetById / .ctwasSubsetSnp: NULL on empty / no type column", {
+test_that(".ctwasSubsetById, .ctwasSubsetSnp: NULL on empty or no type", {
     df <- data.frame(
         id = c("a", "b"),
         type = c("gene", "SNP"),
@@ -3352,7 +3360,8 @@ test_that(".ctwasSubsetById / .ctwasSubsetSnp: NULL on empty / no type column", 
     )
     expect_null(pecotmr:::.ctwasSubsetById(df, "zzz"))
     expect_null(pecotmr:::.ctwasSubsetById(NULL, "a"))
-    expect_null(pecotmr:::.ctwasSubsetSnp(data.frame(id = "a"))) # no type column
+    # no type column
+    expect_null(pecotmr:::.ctwasSubsetSnp(data.frame(id = "a")))
     expect_equal(nrow(pecotmr:::.ctwasSubsetSnp(df)), 1L)
 })
 
@@ -3368,7 +3377,7 @@ test_that(".ctwasRowsToResult / .ctwasMethodFromWeights: empty-input guards", {
     )
 })
 
-test_that(".ctwasRunToRows: empty weights -> no rows; a context mixing studies errors", {
+test_that(".ctwasRunToRows: no weights, no rows; mixed-study context errors", {
     expect_equal(
         pecotmr:::.ctwasRunToRows(
             list(weights = setNames(list(), character(0))),
@@ -3393,7 +3402,7 @@ test_that(".ctwasRunToRows: empty weights -> no rows; a context mixing studies e
     )
 })
 
-test_that(".ctwasBucketWeights: unplaced genes warn + drop; empty blocks skipped", {
+test_that(".ctwasBucketWeights warns on unplaced genes; skips empty blocks", {
     mkE <- function() {
         TwasWeightsRow(
             variantIds = map_chr(1:5, .ctp_snpId),
@@ -3466,7 +3475,7 @@ test_that("assembleCtwasInputs: single-block + NULL twasWeights guards", {
     )
 })
 
-test_that("weight-source / method / gwas-study guards reject degenerate input", {
+test_that("weight-source, method and GWAS-study guards refuse bad input", {
     expect_error(
         pecotmr:::.ctwasRequireNamedLists(.ctp_makeGwasSumstats(), 42),
         "must be a TwasWeights"
@@ -3478,7 +3487,7 @@ test_that("weight-source / method / gwas-study guards reject degenerate input", 
     )
 })
 
-test_that("finemapCtwasRegions: an empty screened-region set returns a NULL finemap", {
+test_that("finemapCtwasRegions: no screened regions gives a NULL finemap", {
     skip_if_not_installed("ctwas")
     screenStub <- list(
         screened_region_data = list(),
@@ -3594,7 +3603,7 @@ test_that("finemapCtwasRegions runs from the bundled est payload", {
 # than surfacing an S4 dispatch error from deep inside.
 # =============================================================================
 
-test_that("ctwas LD assembly reports a missing LD sketch like everything else", {
+test_that("ctwas LD assembly reports a missing LD sketch like the rest", {
     expect_error(
         pecotmr:::.ctwasPanelFor(NULL),
         "carries no ldReference"
@@ -3860,7 +3869,8 @@ test_that("each weight entry must be a TwasWeights or QtlFineMappingResult", {
     # fail later inside the assembly with a far less specific message.
     expect_error(
         pecotmr:::.ctwasValidateWeightEntries(list(r1 = "not a TwasWeights")),
-        "twasWeights\\[\\['r1'\\]\\] must be a TwasWeights or QtlFineMappingResult"
+        "twasWeights[['r1']] must be a TwasWeights or QtlFineMappingResult",
+        fixed = TRUE
     )
 })
 

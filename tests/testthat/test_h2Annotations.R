@@ -452,7 +452,8 @@ test_that("readAnnotations reads a BigWig file as a continuous annotation", {
 })
 
 test_that(".readLdscAnnot errors when CHR/BP columns are absent", {
-    # The annotation column is present but the positional CHR/BP columns are not.
+    # The annotation column is present but the positional CHR/BP columns are
+    # not.
     annot_df <- data.frame(
         SNP = c("rs1", "rs2"),
         CM = 0,

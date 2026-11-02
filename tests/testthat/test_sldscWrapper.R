@@ -6,8 +6,9 @@
 #
 # The reader functions (readSldscTrait/readSldscAnnot/readSldscFrq) do file I/O
 # and are tested against real fixture files. The compute functions
-# (computeSldscMRef/computeSldscAnnotSd/isBinarySldscAnnot/standardizeSldscTrait)
-# operate on an in-memory SldscData and are tested with in-memory fixtures.
+# (computeSldscMRef, computeSldscAnnotSd, isBinarySldscAnnot,
+# standardizeSldscTrait) operate on an in-memory SldscData and are tested with
+# in-memory fixtures.
 
 # =============================================================================
 # File-based fixtures for the readers
@@ -250,7 +251,7 @@ test_that("readSldscFrq stacks per-chromosome .frq into one table", {
     expect_equal(nrow(df), 100L)
 })
 
-test_that("readSldscFrq falls back to a generic .frq glob when the prefix misses", {
+test_that("readSldscFrq falls back to a .frq glob when the prefix misses", {
     dir <- withr::local_tempdir()
     for (chr in 1:2) {
         .make_frq(dir, chr, plinkName = "other_chr")
@@ -393,7 +394,7 @@ test_that("computeSldscMRef applies the MAF cutoff", {
     expect_equal(M, 2L) # rs1, rs3
 })
 
-test_that("computeSldscMRef falls back to annot row count when frq absent and mafCutoff = 0", {
+test_that("computeSldscMRef counts annot rows without frq at mafCutoff 0", {
     expect_equal(
         computeSldscMRef(.sldscMkData(withFrq = FALSE), mafCutoff = 0),
         6L
@@ -717,7 +718,7 @@ test_that("metaSldscRandom meta-analyzes tauStar, enrichment and enrichstat", {
     )
 }
 
-test_that("sldscSubsetMeta metas a chosen trait/category subset with the four blocks", {
+test_that("sldscSubsetMeta metas chosen traits and categories, four blocks", {
     res <- list(
         per_trait = list(
             t1 = .sms_makeWideTrait(),
@@ -732,11 +733,12 @@ test_that("sldscSubsetMeta metas a chosen trait/category subset with the four bl
         c("tau_star_single", "tau_star_joint", "enrichment", "enrichstat")
     )
     expect_equal(names(out$tau_star_single), "A_0") # only the chosen category
-    expect_equal(out$tau_star_single[["A_0"]]$nTraits, 2L) # only the chosen traits
+    # only the chosen traits
+    expect_equal(out$tau_star_single[["A_0"]]$nTraits, 2L)
     expect_true(is.finite(out$tau_star_joint[["A_0"]]$mean))
 })
 
-test_that("sldscSubsetMeta defaults categories from params and validates traits", {
+test_that("sldscSubsetMeta takes default categories, validates traits", {
     res <- list(
         per_trait = list(t1 = .sms_makeWideTrait(), t2 = .sms_makeWideTrait()),
         params = list(target_categories = c("A_0", "B_0"))
@@ -796,7 +798,7 @@ test_that("metaSldscRandom skips NULL entries and NULL summaries", {
     expect_equal(result$nTraits, 2L)
 })
 
-test_that("metaSldscRandom skips a trait whose summary lacks the quantity columns", {
+test_that("metaSldscRandom skips a trait whose summary lacks quantities", {
     valid <- .makePerTraitMeta(
         nTraits = 2,
         means = c(1e-5, 2e-5),

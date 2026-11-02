@@ -258,7 +258,7 @@ prsCs <- function(
 # One PRS-CS chain, on the LD matrix or a factor of it.
 # @noRd
 .prsCsChain <- function(settings, ld, seed, track) {
-    if (is.null(ld$F)) {
+    if (is.null(ld$ldFactor)) {
         return(exec(
             prsCsCpp,
             !!!settings,
@@ -270,7 +270,7 @@ prsCs <- function(
     exec(
         prsCsFactorCpp,
         !!!settings,
-        factorR = ld$F,
+        factorR = ld$ldFactor,
         seed = seed,
         track = track
     )
@@ -525,7 +525,7 @@ sdpr <- function(
 # One SDPR chain, on the LD matrix (a one-block list) or a factor of it.
 # @noRd
 .sdprChain <- function(settings, ld, seed, track) {
-    if (is.null(ld$F)) {
+    if (is.null(ld$ldFactor)) {
         return(exec(
             sdprCpp,
             !!!settings,
@@ -534,7 +534,13 @@ sdpr <- function(
             track = track
         ))
     }
-    exec(sdprFactorCpp, !!!settings, factorR = ld$F, seed = seed, track = track)
+    exec(
+        sdprFactorCpp,
+        !!!settings,
+        factorR = ld$ldFactor,
+        seed = seed,
+        track = track
+    )
 }
 
 # Validate the SDPR settings: M >= 4 (SDPR uses M-2 indexing in sample_V;
@@ -1269,7 +1275,7 @@ BayesAlphabetRssOptions <- function(...) {
         extra,
         c(
             bhat = "supplied from the data by the pipeline",
-            F = "supplied from the data by the pipeline",
+            ldFactor = "supplied from the data by the pipeline",
             n = "supplied from the data by the pipeline",
             nPerVariant = "supplied from the data by the pipeline",
             method = "the wrapper's `method` (the function called)",
@@ -3031,7 +3037,7 @@ bayesAlphabetRssWeights <- function(
     callArgs <- list_modify(
         list(
             bhat = bhat,
-            F = ld$F,
+            ldFactor = ld$ldFactor,
             n = n,
             method = method,
             nIter = nIter,
@@ -3062,7 +3068,7 @@ bayesAlphabetRssWeights <- function(
 #' hibayes' for \code{bayesB} (as BayesBpi), and for \code{bayesL} either.
 #'
 #' @param bhat The standardized marginal effects.
-#' @param F The factor of the LD (k x p).
+#' @param ldFactor The factor F of the LD (k x p).
 #' @param n The sample size.
 #' @param method The prior, as in \code{\link{bayesAlphabetRssWeights}}.
 #' @param nIter,nBurnin,thin The chain's iterations (burn-in included),
@@ -3108,7 +3114,7 @@ bayesAlphabetRssWeights <- function(
 #' @keywords internal
 bayesAlphabetRss <- function(
     bhat,
-    F,
+    ldFactor,
     n,
     method,
     nIter = 5000,
@@ -3144,7 +3150,7 @@ bayesAlphabetRss <- function(
     )
     data <- .alphabetData(
         bhat,
-        F,
+        ldFactor,
         n,
         nPerVariant,
         perVariantWeights,
@@ -3170,16 +3176,16 @@ bayesAlphabetRss <- function(
 # @noRd
 .alphabetData <- function(
     bhat,
-    F,
+    ldFactor,
     n,
     nPerVariant,
     perVariantWeights,
     ldProjection
 ) {
-    projected <- .alphabetProjected(bhat, F, ldProjection)
+    projected <- .alphabetProjected(bhat, ldFactor, ldProjection)
     list(
         bhat = projected$bhat,
-        factorR = projected$F,
+        factorR = projected$ldFactor,
         weights = .alphabetRssWeightsFor(
             bhat,
             n,
@@ -3197,23 +3203,26 @@ bayesAlphabetRss <- function(
 # lambda / (lambda + a) of the effects, so their part outside the reference
 # LD's span -- left by a reference smaller than the window, or unlike the
 # study -- never enters, nor does the runaway it drives through the variance
-# updates. From the thin SVD of F (.ldFactorEigen()), over the r directions
-# with a positive eigenvalue, the LD is the factor
+# updates. From the thin SVD of `ldFactor` (.ldFactorEigen()), over the r
+# directions with a positive eigenvalue, the LD is the factor
 # sqrt(r) diag(lambda / sqrt(lambda + a)) V' and a zero row, so that the
 # sampler's normalization by its rows less one holds. NULL `a` leaves the
-# effects and F as they are.
+# effects and `ldFactor` as they are.
 # @noRd
-.alphabetProjected <- function(bhat, F, a) {
+.alphabetProjected <- function(bhat, ldFactor, a) {
     if (is.null(a)) {
-        return(list(bhat = bhat, F = F))
+        return(list(bhat = bhat, ldFactor = ldFactor))
     }
-    ev <- .ldFactorEigen(F)
+    ev <- .ldFactorEigen(ldFactor)
     kept <- ev$values > sqrt(.Machine$double.eps) * max(ev$values)
     lambda <- ev$values[kept]
     V <- ev$vectors[, kept, drop = FALSE]
     list(
         bhat = as.numeric(V %*% (lambda / (lambda + a) * crossprod(V, bhat))),
-        F = rbind(sqrt(length(lambda)) * (lambda / sqrt(lambda + a)) * t(V), 0)
+        ldFactor = rbind(
+            sqrt(length(lambda)) * (lambda / sqrt(lambda + a)) * t(V),
+            0
+        )
     )
 }
 
@@ -3885,7 +3894,8 @@ ldpred2GridWeights <- function(
         abort("Package 'bigsnpr' is required for backend = \"bigsnpr\".")
     }
     R <- .rssShrunkMatrix(
-        inp$ld$R %||% (crossprod(inp$ld$F) / (nrow(inp$ld$F) - 1)),
+        inp$ld$R %||%
+            (crossprod(inp$ld$ldFactor) / (nrow(inp$ld$ldFactor) - 1)),
         shrinkCorr
     )
     corr <- bigsnpr::as_SFBM(
@@ -3987,7 +3997,7 @@ ldpred2GridWeights <- function(
 .ldpred2PecotmrAutoChain <- function(pInit, inp, config, meanLd) {
     run <- ldpred2FactorCpp(
         inp$bhat,
-        inp$ld$F,
+        inp$ld$ldFactor,
         inp$n,
         TRUE,
         pInit,
@@ -4045,7 +4055,7 @@ ldpred2GridWeights <- function(
 .ldpred2PecotmrGridPoint <- function(p, h2, sparse, inp, config) {
     run <- ldpred2FactorCpp(
         inp$bhat,
-        inp$ld$F,
+        inp$ld$ldFactor,
         inp$n,
         FALSE,
         p,
@@ -4598,7 +4608,7 @@ lassosumRss <- function(
     if (missing(n) || n <= 0) {
         abort("Please provide a valid sample size using 'n'.")
     }
-    assertVector(bhat, len = ncol(ld$F))
+    assertVector(bhat, len = ncol(ld$ldFactor))
     invisible(NULL)
 }
 
@@ -4740,7 +4750,7 @@ lassosumRss <- function(
 .rssLdSource <- function(stat, ldReference, label) {
     ids <- .rssStatVariantIds(stat, label)
     ld <- if (.ldIsGenotypeRef(ldReference)) {
-        list(F = .ldFactorFromRef(ldReference, ids, label))
+        list(ldFactor = .ldFactorFromRef(ldReference, ids, label))
     } else {
         list(R = .ldFromRef(ldReference, ids, label))
     }
@@ -7231,11 +7241,11 @@ buildMrmashPriorMatrices <- function(
         maxiter = as.integer(maxiter),
         maxSwaps = as.integer(maxSwaps)
     )
-    if (!is.null(ld$F)) {
+    if (!is.null(ld$ldFactor)) {
         return(exec(
             penalizedRssFactorCpp,
             zR = z,
-            factorR = ld$F,
+            factorR = ld$ldFactor,
             shrink = ld$shrink %||% 0,
             !!!settings
         ))

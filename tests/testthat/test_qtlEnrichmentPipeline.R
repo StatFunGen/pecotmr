@@ -335,7 +335,7 @@ test_that("qtlEnrichmentPipeline: ldReference mismatch errors", {
 # Per-study / per-context iteration via mocked qtlEnrichment
 # ===========================================================================
 
-test_that("qtlEnrichmentPipeline: returns one row per (gwasStudy, qtlStudy, qtlContext) triple", {
+test_that("enrichment returns a row per (gwasStudy, qtlStudy, qtlContext)", {
     gfmr <- .qep_makeGwasFmr()
     qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
     local_mocked_bindings(
@@ -354,7 +354,7 @@ test_that("qtlEnrichmentPipeline: returns one row per (gwasStudy, qtlStudy, qtlC
     expect_equal(out$enrichment, c(2.0, 2.0))
 })
 
-test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a context label", {
+test_that("qtlEnrichmentPipeline tells apart QTL studies sharing a context", {
     # Build a QtlFineMappingResult with two studies (Q1, Q2) both
     # tagging the same context "shared_ctx". Per-study filtering must
     # keep them separate (a context-only filter would merge them and
@@ -389,7 +389,7 @@ test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a con
     expect_true(all(lengths(capturedRegions) == 1L))
 })
 
-test_that("qtlEnrichmentPipeline: qtlEnrichment failure produces a warning + skip", {
+test_that("qtlEnrichmentPipeline warns and skips when qtlEnrichment fails", {
     gfmr <- .qep_makeGwasFmr()
     qfmr <- .qep_makeQtlFmr()
     local_mocked_bindings(
@@ -406,7 +406,7 @@ test_that("qtlEnrichmentPipeline: qtlEnrichment failure produces a warning + ski
     expect_equal(nrow(out), 0L)
 })
 
-test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema", {
+test_that("qtlEnrichmentPipeline: empty inputs give the empty schema", {
     # Build a GwasFineMappingResult whose entries have empty fits so the PIP
     # vector is empty.
     emptyEntry <- FineMappingRow(
@@ -582,7 +582,7 @@ test_that("qtlEnrichmentPipeline: duplicatePips = 'error' refuses conflicts", {
     )
 })
 
-test_that("qtlEnrichmentPipeline: 'blockEnd' keeps the block ending at the variant", {
+test_that("qtlEnrichmentPipeline 'blockEnd' keeps the block ending there", {
     # The upstream block's window ends at chr1:200; the downstream one starts
     # there.
     pip <- .qep_capturedGwasPip(
@@ -620,7 +620,7 @@ test_that("qtlEnrichmentPipeline: agreeing copies merge under every policy", {
     }
 })
 
-test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes for a (study, context) hit", {
+test_that(".enrBuildQtlRegionsList gives each entry's fit for a hit", {
     qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
     out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, .qep_qtlIdent("Q1", "c1"))
     expect_equal(length(out), 1L)
@@ -628,7 +628,7 @@ test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes for a (study, c
     expect_true(!is.null(out[[1L]]$pip))
 })
 
-test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context) tuple is absent", {
+test_that(".enrBuildQtlRegionsList: an empty list for an absent tuple", {
     qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
     # Correct context but wrong study -> no hit, even though context exists.
     expect_equal(
@@ -692,7 +692,7 @@ test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context)
     )
 }
 
-test_that("qtlEnrichment: real C++ kernel returns the expected keys (numGwas + piQtl supplied)", {
+test_that("qtlEnrichment: the C++ kernel returns the expected keys", {
     fx <- .qep_makeRealKernelInputs()
     res <- qtlEnrichment(
         gwasPip = fx$gwasPip,
@@ -746,7 +746,7 @@ test_that("qtlEnrichment: a single MI round is estimable, not NaN", {
     ))))
 })
 
-test_that("qtlEnrichment: numGwas omitted -> estimates piGwas from data + warns", {
+test_that("qtlEnrichment without numGwas estimates piGwas and warns", {
     fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
     expect_warning(
         res <- qtlEnrichment(
@@ -762,7 +762,7 @@ test_that("qtlEnrichment: numGwas omitted -> estimates piGwas from data + warns"
     expect_type(res, "list")
 })
 
-test_that("qtlEnrichment: piQtl omitted -> estimates from susieQtlRegions + warns", {
+test_that("qtlEnrichment without piQtl estimates it from the QTL fits, warns", {
     fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
     expect_warning(
         res <- qtlEnrichment(
@@ -1273,9 +1273,9 @@ test_that("qtlEnrichment: reports per-round diagnostics", {
 }
 
 # ===========================================================================
-# qtlEnrichment(): fastenloc semantics
-# Checked against the R transcription of fastenloc above. fastenloc's EM keeps the previous iteration's
-# intercept at convergence, so only sd (intercept) is not compared.
+# qtlEnrichment(): fastenloc semantics Checked against the R transcription of
+# fastenloc above. fastenloc's EM keeps the previous iteration's intercept at
+# convergence, so only sd (intercept) is not compared.
 # ===========================================================================
 
 # The one-hot regions plus r4, whose effects sit on a GWAS variant and on
@@ -1398,7 +1398,7 @@ test_that("qtlEnrichment: estimates do not depend on variant or region order", {
     expect_equal(unlist(res[keys]), unlist(base[keys]), tolerance = 1e-10)
 })
 
-test_that("qtlEnrichment: the variant total is the GWAS and QTL-only variants", {
+test_that("qtlEnrichment: the variant total is GWAS plus QTL-only variants", {
     regions <- .qep_qtlOnlyRegions()
     # 200 GWAS variants and 5 QTL-only ones.
     expect_warning(
@@ -1422,7 +1422,7 @@ test_that("qtlEnrichment: the variant total is the GWAS and QTL-only variants", 
     expect_equal(unlist(below[keys]), unlist(at205[keys]))
 })
 
-test_that("qtlEnrichment: piQtl defaults to the summed QTL PIPs over the total", {
+test_that("qtlEnrichment: piQtl defaults to summed QTL PIPs over the total", {
     regions <- .qep_qtlOnlyRegions()
     expect_warning(
         estimated <- qtlEnrichment(
@@ -1594,7 +1594,7 @@ test_that("qtlEnrichment: refuses gwasPip naming a variant twice", {
 # qtlEnrichment(): verbose messages
 # ===========================================================================
 
-test_that("qtlEnrichment: verbose=TRUE emits 'Estimated piGwas'/'Estimated piQtl' messages", {
+test_that("qtlEnrichment(verbose = TRUE) reports the estimated priors", {
     # numGwas = NULL and piQtl = NULL both trigger data-estimation paths;
     # with verbose = TRUE each emits a message.
     fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
@@ -1663,7 +1663,7 @@ test_that(".enrBuildGwasPipVector: unknown study yields numeric(0)", {
     )
 })
 
-test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with variantIds", {
+test_that(".enrBuildGwasPipVector skips a block whose pips miscount ids", {
     # Unnamed pip of length 2 against 3 variant ids -> ids come from
     # variantIds and length(ids) != length(pip) -> the block is skipped,
     # leaving no pieces -> numeric(0).
@@ -1720,7 +1720,7 @@ test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
     )
 })
 
-test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's variant ids", {
+test_that(".enrBuildQtlRegionsList names an unnamed pip by the entry's ids", {
     unnamedPipFit <- list(
         alpha = matrix(c(0.6, 0.4), nrow = 1),
         pip = c(0.6, 0.4), # unnamed -> names assigned from variantIds
@@ -1755,7 +1755,7 @@ test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's varian
 # and the per-tuple "no usable QTL regions" skip
 # ===========================================================================
 
-test_that("qtlEnrichmentPipeline: empty QTL collection errors with the no-triples message", {
+test_that("qtlEnrichmentPipeline errors on an empty QTL collection", {
     gfmr <- .qep_makeGwasFmr()
     qfmrEmpty <- QtlFineMappingResult(
         studyName = character(0),
@@ -1774,7 +1774,7 @@ test_that("qtlEnrichmentPipeline: empty QTL collection errors with the no-triple
     )
 })
 
-test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies", {
+test_that("qtlEnrichmentPipeline reuses the alignTuple cache across studies", {
     # Two GWAS studies -> each QTL tuple's alignment is computed for the
     # first study (cache miss) and served from cache for the second
     # (alignTuple early-return branch).
@@ -1805,7 +1805,7 @@ test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies
     expect_setequal(out$gwasStudy, c("G1", "G2"))
 })
 
-test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and is skipped", {
+test_that("qtlEnrichmentPipeline warns, skips a tuple without QTL regions", {
     gfmr <- .qep_makeGwasFmr()
     emptyQtlEntry <- FineMappingRow(
         variantIds = "chr1:100:A:G",
@@ -2129,7 +2129,7 @@ test_that(".enrValidateFits names a fit whose alpha is not a numeric matrix", {
     )
 })
 
-test_that(".enrReportDiagnostics warns of unconverged rounds, reports the rest", {
+test_that(".enrReportDiagnostics warns of unconverged rounds, reports rest", {
     en <- list(
         `EM converged per MI round` = c(TRUE, FALSE),
         `Missing proportion per MI round` = c(0.1, 0.3),

@@ -102,7 +102,7 @@ test_that("combinePValues: errors when pvals and zScores lengths disagree", {
     )
 })
 
-test_that("combinePValues: derives p-values from z-scores when only z is given", {
+test_that("combinePValues derives p-values from z-scores when only z given", {
     z <- c(-2.5, 1.0, 3.0)
     res <- combinePValues(zScores = z, methods = "acat")
     expected_p <- 2 * pnorm(-abs(z))
@@ -261,7 +261,7 @@ test_that("combinePValues dispatches HMP through the unified menu", {
     expect_lte(res$results$hmp$pval, 1)
 })
 
-test_that("combinePValues dispatches poolr methods (fisher/stouffer/invchisq)", {
+test_that("combinePValues dispatches poolr's fisher, stouffer, invchisq", {
     skip_if_not_installed("poolr")
     res <- combinePValues(
         pvals = c(0.01, 0.05, 0.1),

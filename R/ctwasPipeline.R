@@ -3266,7 +3266,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     map_dbl(prepared, .ctwasWeightVariance, ld = ld)
 }
 
-# The block's LD over `vids`, for weight variances: list(F = ) holding a
+# The block's LD over `vids`, for weight variances: list(ldFactor = ) holding a
 # genotype reference's factor (.ldRefFactor()), or list(R = ) holding the
 # matrix a panel already carries -- a caller who computed it, or a payload it
 # travelled with -- or an LdMatrix's.
@@ -3285,7 +3285,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     if (.ldIsGenotypeRef(ldPanel$sketch)) {
         factor <- .ldRefFactor(ldPanel$sketch, idx)
-        return(list(F = `colnames<-`(factor, vids)))
+        return(list(ldFactor = `colnames<-`(factor, vids)))
     }
     list(R = .ctwasPanelLdFor(ldPanel, idx, vids))
 }
@@ -3293,8 +3293,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # One gene's weight variance w'Rw from .ctwasPanelWeightLd()'s LD.
 # @noRd
 .ctwasWeightVariance <- function(g, ld) {
-    if (!is.null(ld$F)) {
-        f <- ld$F[, g$vids, drop = FALSE]
+    if (!is.null(ld$ldFactor)) {
+        f <- ld$ldFactor[, g$vids, drop = FALSE]
         return(sum((f %*% g$w)^2) / (nrow(f) - 1))
     }
     r <- ld$R[g$vids, g$vids, drop = FALSE]
@@ -3654,27 +3654,27 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
-# The twasZ rows for GWAS study `gwasStudy`. One with no gwasStudy column, or
-# a run whose GWAS names no study but whose twasZ holds just one, is used
-# whole.
+# The twasZ rows for the run's GWAS study `gwasStudyName` -- named apart from
+# the rows' gwasStudy column, which the filter reads. One with no gwasStudy
+# column, or a run whose GWAS names no study but whose twasZ holds just one,
+# is used whole.
 # @noRd
-#' @importFrom rlang .env
-.ctwasTwasZForStudy <- function(rows, gwasStudy) {
+.ctwasTwasZForStudy <- function(rows, gwasStudyName) {
     if (!is_in("gwasStudy", names(rows))) {
         return(rows)
     }
     studies <- unique(as.character(rows$gwasStudy))
-    if (is.na(gwasStudy) && length(studies) > 1L) {
+    if (is.na(gwasStudyName) && length(studies) > 1L) {
         abort(glue(
             "assembleCtwasInputs: `twasZ` holds several GWAS studies ",
             "({str_flatten(studies, ', ')}) and `gwasSumStats` names none, ",
             "so which z-scores apply is ambiguous."
         ))
     }
-    if (is.na(gwasStudy)) {
+    if (is.na(gwasStudyName)) {
         return(rows)
     }
-    filter(rows, .data$gwasStudy == .env$gwasStudy)
+    filter(rows, .data$gwasStudy == gwasStudyName)
 }
 
 # Every weighted gene must have exactly one twasZ z.

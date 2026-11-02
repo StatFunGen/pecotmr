@@ -208,7 +208,7 @@ test_that("computeLdScores LdEigen returns a non-negative base_l2 column", {
     expect_true(all(result[, "base_l2"] >= 0))
 })
 
-test_that("computeLdScores LdEigen with annotations returns base + annotation columns", {
+test_that("computeLdScores(LdEigen) with annotations: base + annotations", {
     eigen_ref <- makeTestEigenRef()
     annot <- makeTestAnnotations()
     result <- computeLdScores(eigen_ref, annotations = annot)
@@ -420,13 +420,13 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
 # computeLdScores for LdScore
 # ===========================================================================
 
-test_that("computeLdScores LdScore without annotations returns stored ld_scores", {
+test_that("computeLdScores(LdScore) without annotations: stored ld_scores", {
     score_ref <- makeTestScoreRef()
     result <- computeLdScores(score_ref)
     expect_identical(result, mcols(score_ref)$ldScores)
 })
 
-test_that("computeLdScores LdScore with annotations but no ld_matrix_list errors", {
+test_that("computeLdScores(LdScore) errors on annotations without matrices", {
     score_ref <- makeTestScoreRef(with_ld_matrices = FALSE)
     annot <- makeTestAnnotations()
     expect_error(
@@ -491,7 +491,7 @@ test_that("h2EstimateToSldscTrait converts one estimate", {
     )
 })
 
-test_that("h2EstimateToSldscTrait creates 1-row dummy when annotationJackknifeCoefs is NULL", {
+test_that("h2EstimateToSldscTrait makes a 1-row dummy for NULL jackknife", {
     h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
     h2_obj$jackknife <- list(NULL)
     result <- h2EstimateToSldscTrait(h2_obj)
@@ -632,7 +632,7 @@ test_that("estimateH2 rejects a sumstats at different coordinates", {
     )
 })
 
-test_that("estimateH2 rejects a sumstats holding the right variants in the wrong order", {
+test_that("estimateH2 refuses sumstats with the right variants out of order", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
     reordered <- .reposition(
@@ -658,7 +658,7 @@ test_that("estimateH2 rejects annotations that do not cover the reference", {
     )
 })
 
-test_that("estimateH2 rejects annotations at other coordinates or in another order", {
+test_that("estimateH2 refuses annotations elsewhere or in another order", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
     annot <- makeTestAnnotations()
@@ -969,7 +969,7 @@ test_that("estimateH2 with a varY correction runs without error", {
 # computeLdScores for LdScore WITH annotations
 # ===========================================================================
 
-test_that("computeLdScores LdScore with annotations and ld_matrix_list returns correct matrix", {
+test_that("computeLdScores(LdScore) with annotations and matrices is right", {
     score_ref <- makeTestScoreRef(with_ld_matrices = TRUE)
     annot <- makeTestAnnotations()
     result <- computeLdScores(score_ref, annotations = annot)
@@ -1603,10 +1603,11 @@ test_that(".rmaMeta errors when means and ses differ in length", {
 })
 
 # ---------------------------------------------------------------------------
-# h2EstimateToSldscTrait — annotationJackknifeCoefs present but without column names
+# h2EstimateToSldscTrait — annotationJackknifeCoefs present but without column
+# names
 # ---------------------------------------------------------------------------
 
-test_that("h2EstimateToSldscTrait assigns category names to unnamed annotationJackknifeCoefs", {
+test_that("h2EstimateToSldscTrait names unnamed jackknife categories", {
     h2_obj <- makeTestH2Estimate(with_enrichment = TRUE)
     tb <- annotationJackknifeCoefs(h2_obj)[[1]]
     colnames(tb) <- NULL
@@ -2779,7 +2780,7 @@ test_that("estimateH2 reads a study split across LD blocks as one study", {
     set.seed(seed)
     win <- G[, (seed - 1) * 300 + 1:300]
     ref <- sample(nrow(win), 150)
-    F <- pecotmr:::.ldFactorFromDosage(win[ref, ])
+    ldFactor <- pecotmr:::.ldFactorFromDosage(win[ref, ])
     study <- setdiff(seq_len(nrow(win)), ref)
     Xs <- scale(win[study, ])
     Xs[!is.finite(Xs)] <- 0
@@ -2788,8 +2789,8 @@ test_that("estimateH2 reads a study split across LD blocks as one study", {
     y <- g * sqrt(h2 / var(g)) + rnorm(length(g), sd = sqrt(1 - h2))
     corInput <- as.numeric(cor(Xs, y))
     list(
-        F = F,
-        R = crossprod(F) / (nrow(F) - 1),
+        ldFactor = ldFactor,
+        R = crossprod(ldFactor) / (nrow(ldFactor) - 1),
         corInput = replace(corInput, !is.finite(corInput), 0),
         n = length(study)
     )
@@ -2810,7 +2811,12 @@ test_that(".hdlLocusFit reproduces HDL.L()'s per-locus heritability", {
         )
         # The factor's eigenpairs come from its SVD, equal to rounding.
         expect_equal(
-            pecotmr:::.hdlLocusFit(fx$corInput, list(F = fx$F), fx$n, 150L)$h2,
+            pecotmr:::.hdlLocusFit(
+                fx$corInput,
+                list(ldFactor = fx$ldFactor),
+                fx$n,
+                150L
+            )$h2,
             want[[i]],
             tolerance = 1e-6
         )
@@ -2857,7 +2863,7 @@ test_that(".cisH2Lava is LAVA's adjusted R^2 and F test, reference-corrected", {
     fit <- pecotmr:::.cisH2Lava(
         z,
         rep(fx$n, length(z)),
-        list(F = fx$F, nSamples = 150L)
+        list(ldFactor = fx$ldFactor, nSamples = 150L)
     )
     # LAVA's published estimator, through the matrix's own eigenpairs.
     e <- eigen(fx$R, symmetric = TRUE)
@@ -2883,17 +2889,17 @@ test_that(".cisH2Lava is NA with one LD component or contradicting LD", {
     fit <- pecotmr:::.cisH2Lava(
         c(2, 2),
         c(100, 100),
-        list(F = cbind(x, x), nSamples = 8L)
+        list(ldFactor = cbind(x, x), nSamples = 8L)
     )
     expect_true(is.na(fit$h2) && is.na(fit$p))
     expect_equal(fit$nComponents, 1L)
     # Uncorrelated variants whose correlations with the trait are each near
     # 1: their squares sum past 1, which the LD rules out.
-    F <- cbind(c(1, 1, -1, -1), c(1, -1, 1, -1))
+    ldFactor <- cbind(c(1, 1, -1, -1), c(1, -1, 1, -1))
     fit <- pecotmr:::.cisH2Lava(
         c(30, 30),
         c(100, 100),
-        list(F = F, nSamples = 4L)
+        list(ldFactor = ldFactor, nSamples = 4L)
     )
     expect_true(is.na(fit$h2) && is.na(fit$p))
 })
@@ -2936,14 +2942,22 @@ test_that(".cisH2FastHer is the individual-level maximum likelihood", {
 
 test_that(".cisH2FastHer is NA where its likelihood is undefined", {
     set.seed(10)
-    F <- matrix(rnorm(60 * 30), 60, 30)
+    ldFactor <- matrix(rnorm(60 * 30), 60, 30)
     # A reference of rank 30 for a study of 20.
     expect_true(is.na(
-        pecotmr:::.cisH2FastHer(rnorm(30), rep(20, 30), list(F = F))$h2
+        pecotmr:::.cisH2FastHer(
+            rnorm(30),
+            rep(20, 30),
+            list(ldFactor = ldFactor)
+        )$h2
     ))
     # Statistics larger than the sample size allows.
     expect_true(is.na(
-        pecotmr:::.cisH2FastHer(rep(20, 30), rep(100, 30), list(F = F))$h2
+        pecotmr:::.cisH2FastHer(
+            rep(20, 30),
+            rep(100, 30),
+            list(ldFactor = ldFactor)
+        )$h2
     ))
 })
 

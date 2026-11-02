@@ -31,7 +31,7 @@ test_that(".matchTupleRows: empty keys returns every row index", {
     expect_equal(pecotmr:::.matchTupleRows(df, list()), c(1L, 2L))
 })
 
-test_that(".matchTupleRows: AND-matches across multiple (column, value) pairs", {
+test_that(".matchTupleRows AND-matches several (column, value) pairs", {
     df <- .ts_coll(
         study = c("s1", "s1", "s2"),
         context = c("c1", "c2", "c1"),
@@ -73,7 +73,7 @@ test_that(".tupleSelectRow: zero-row input errors with the class label", {
     )
 })
 
-test_that(".tupleSelectRow: single-row collection returns 1L without selectors", {
+test_that(".tupleSelectRow returns 1L for a one-row collection", {
     one <- .ts_coll(
         study = "s1",
         context = "c1",
@@ -84,7 +84,7 @@ test_that(".tupleSelectRow: single-row collection returns 1L without selectors",
     expect_equal(pecotmr:::.tupleSelectRow(one), 1L)
 })
 
-test_that(".tupleSelectRow: multi-row + missing selectors errors with row count", {
+test_that(".tupleSelectRow: several rows, no selectors: errors with count", {
     multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -138,7 +138,7 @@ test_that(".tupleSelectRow: matching tuple returns first row index", {
     )
 })
 
-test_that(".tupleSelectRow: missing tuple errors with the 4-tuple in the message", {
+test_that(".tupleSelectRow names the missing 4-tuple in its error", {
     multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -343,7 +343,7 @@ test_that(".fmrRowsMatching: a vector selector matches any listed value", {
 # .fmrRowMetadata (stable 8-column identity frame)
 # ===========================================================================
 
-test_that(".fmrRowMetadata: emits all eight identity columns, NA-filling absent ones", {
+test_that(".fmrRowMetadata gives all eight identity columns, NA if absent", {
     qtl <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -424,7 +424,7 @@ test_that(".rbindAligned: identical columns rbind and preserve type", {
     expect_equal(out$b, c("x", "y"))
 })
 
-test_that(".rbindAligned: differing columns align on the union, NA-filling gaps", {
+test_that(".rbindAligned aligns differing columns on the union, NA in gaps", {
     p1 <- data.frame(a = 1L, b = "x", stringsAsFactors = FALSE)
     p2 <- data.frame(a = 2L, c = "z", stringsAsFactors = FALSE)
     out <- pecotmr:::.rbindAligned(list(p1, p2))
@@ -437,7 +437,7 @@ test_that(".rbindAligned: differing columns align on the union, NA-filling gaps"
 # ===========================================================================
 # Coverage: region-column + rbind helpers
 # ===========================================================================
-test_that(".naLikeColumn: a non-character/non-GRanges exemplar pads with logical NA", {
+test_that(".naLikeColumn pads any other exemplar with logical NA", {
     expect_identical(pecotmr:::.naLikeColumn(TRUE, 3L), rep(NA, 3L))
 })
 
@@ -483,7 +483,7 @@ test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {
     )
 })
 
-test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPos", {
+test_that(".validateTraitPosColumn: non-GRanges, wrong-length traitPos", {
     expect_equal(
         pecotmr:::.validateTraitPosColumn(.ts_coll(traitPos = c("x", "y"))),
         str_c(

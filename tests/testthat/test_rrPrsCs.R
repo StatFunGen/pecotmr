@@ -198,8 +198,8 @@ test_that("PRS-CS draws beta from the same posterior off a factor of the LD", {
     # N(A^-1 bhat, A^-1 / n) with A = R + I.
     set.seed(12)
     X <- matrix(rbinom(30 * 40, 2, 0.3), 30, 40)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
     effects <- replace(numeric(40), c(4, 20), c(0.2, -0.15))
     bhat <- as.vector(R %*% effects) + rnorm(40, sd = 0.03)
     n <- 200L
@@ -217,7 +217,7 @@ test_that("PRS-CS draws beta from the same posterior off a factor of the LD", {
                 bhat,
                 NULL,
                 n,
-                F,
+                ldFactor,
                 1L,
                 0L,
                 1L,
@@ -256,7 +256,7 @@ test_that("PRS-CS draws beta from the same posterior off a factor of the LD", {
         )
     }
     dense <- chain(pecotmr:::prsCsCpp, list(R), 1L)
-    factor <- chain(pecotmr:::prsCsFactorCpp, F, 2L)
+    factor <- chain(pecotmr:::prsCsFactorCpp, ldFactor, 2L)
     expect_equal(factor$sigmaEst, dense$sigmaEst, tolerance = 0.01)
     expect_gt(cor(dense$betaEst, factor$betaEst), 0.9)
 })
@@ -316,11 +316,11 @@ test_that("prsCs runs with the local shape a below and at 0.5", {
 .prsCsShrinkFixture <- function() {
     set.seed(13)
     X <- matrix(rbinom(30 * 20, 2, 0.3), 30, 20)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
     bhat <- as.vector(R %*% replace(numeric(20), 5, 0.2)) +
         rnorm(20, sd = 0.03)
-    list(F = F, R = R, bhat = bhat)
+    list(ldFactor = ldFactor, R = R, bhat = bhat)
 }
 
 # One PRS-CS iteration on `ld`, from psi = 1 and sigma = 1.
@@ -357,7 +357,13 @@ test_that("PRS-CS reads the shrunk LD and reports conditional means", {
     f <- .prsCsShrinkFixture()
     want <- solve(0.8 * f$R + 0.2 * diag(20) + diag(20), f$bhat)
     dense <- .prsCsOneSweep(pecotmr:::prsCsCpp, list(f$R), f$bhat, 0.8, TRUE)
-    factor <- .prsCsOneSweep(pecotmr:::prsCsFactorCpp, f$F, f$bhat, 0.8, TRUE)
+    factor <- .prsCsOneSweep(
+        pecotmr:::prsCsFactorCpp,
+        f$ldFactor,
+        f$bhat,
+        0.8,
+        TRUE
+    )
     expect_equal(dense$betaEst, want, tolerance = 1e-10)
     expect_equal(factor$betaEst, want, tolerance = 1e-10)
     # Without, the iteration reports its draw: the mean plus noise.
@@ -372,7 +378,7 @@ test_that("a tracked PRS-CS chain fits correlations through the shrunk LD", {
     shrunk <- 0.8 * f$R + 0.2 * diag(20)
     for (route in list(
         list(pecotmr:::prsCsCpp, list(f$R)),
-        list(pecotmr:::prsCsFactorCpp, f$F)
+        list(pecotmr:::prsCsFactorCpp, f$ldFactor)
     )) {
         fit <- .prsCsOneSweep(route[[1]], route[[2]], f$bhat, 0.8, FALSE, TRUE)
         expect_false(fit$diverged)

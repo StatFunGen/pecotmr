@@ -6,10 +6,11 @@ context("regularized_regression - LDpred2")
 # tight LD are not identified from the panel's 100 samples, so the fits are
 # compared by their fitted correlations R b, averaged over seeds.
 .ld2FittedMean <- function(fit, R, seeds) {
-    rowMeans(sapply(seeds, function(sd) {
+    fitted <- map(seeds, function(sd) {
         set.seed(sd)
         as.vector(R %*% fit())
-    }))
+    })
+    reduce(fitted, `+`) / length(seeds)
 }
 
 test_that("pecotmr's LDpred2-grid sampler agrees with bigsnpr's", {
@@ -61,10 +62,10 @@ test_that("an LDpred2 chain stops once its effects outgrow the statistics", {
     # Statistics of 1e-6 on one sample each leave the prior's draws, of
     # variance near 1, far above twice the statistics' sum of squares.
     set.seed(6)
-    F <- scale(matrix(rnorm(40 * 5), 40, 5))
+    ldFactor <- scale(matrix(rnorm(40 * 5), 40, 5))
     run <- pecotmr:::ldpred2FactorCpp(
         rep(1e-6, 5),
-        F,
+        ldFactor,
         rep(1, 5),
         FALSE,
         1,
@@ -82,7 +83,7 @@ test_that("an LDpred2 chain stops once its effects outgrow the statistics", {
     )
     expect_true(run$diverged)
     stat <- list(z = rep(1e-6, 5), n = rep(1, 5), variantNames = .rrwIds(5))
-    ld <- .rrwLdMatrix(crossprod(F) / 39, nSamples = 40L)
+    ld <- .rrwLdMatrix(crossprod(ldFactor) / 39, nSamples = 40L)
     skip_if_not_installed("bigsnpr")
     expect_error(
         ldpred2GridWeights(stat, ld, p = 1, h2 = 1, sparse = FALSE),
@@ -96,11 +97,11 @@ test_that("an LDpred2 chain stops once its effects outgrow the statistics", {
 
 test_that("pecotmr's LDpred2 sampler checks its input and reports progress", {
     set.seed(7)
-    F <- scale(matrix(rnorm(40 * 5), 40, 5))
+    ldFactor <- scale(matrix(rnorm(40 * 5), 40, 5))
     run <- function(n, verbose) {
         pecotmr:::ldpred2FactorCpp(
             rep(0.3, 5),
-            F,
+            ldFactor,
             n,
             FALSE,
             0.5,

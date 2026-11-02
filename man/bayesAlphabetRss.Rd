@@ -6,7 +6,7 @@
 \usage{
 bayesAlphabetRss(
   bhat,
-  F,
+  ldFactor,
   n,
   method,
   nIter = 5000,
@@ -28,7 +28,7 @@ bayesAlphabetRss(
 \arguments{
 \item{bhat}{The standardized marginal effects.}
 
-\item{F}{The factor of the LD (k x p).}
+\item{ldFactor}{The factor F of the LD (k x p).}
 
 \item{n}{The sample size.}
 

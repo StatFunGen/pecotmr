@@ -522,7 +522,7 @@ setMethod(
     if (!is.null(block$eigen)) {
         return(block$eigen[c("vectors", "values")])
     }
-    list(F = .ldRefFactor(ldReference, block$rows))
+    list(ldFactor = .ldRefFactor(ldReference, block$rows))
 }
 
 # A block's eigendecomposition, keeping the leading components that carry

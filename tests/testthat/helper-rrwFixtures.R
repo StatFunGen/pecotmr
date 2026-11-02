@@ -121,12 +121,12 @@
     d <- .rrwPanelStat()
     # Noise drawn through the factor, F'e / sqrt(k - 1), has covariance R
     # even where R is singular, as it is here.
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    k <- nrow(F)
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    k <- nrow(ldFactor)
     set.seed(3)
-    effects <- replace(numeric(ncol(F)), c(3, 20), c(4, -3))
-    signal <- crossprod(F, F %*% effects) / (k - 1)
-    noise <- crossprod(F, rnorm(k)) / sqrt(k - 1)
+    effects <- replace(numeric(ncol(ldFactor)), c(3, 20), c(4, -3))
+    signal <- crossprod(ldFactor, ldFactor %*% effects) / (k - 1)
+    noise <- crossprod(ldFactor, rnorm(k)) / sqrt(k - 1)
     d$stat$z <- as.vector(signal + noise)
     d
 }

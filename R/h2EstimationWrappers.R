@@ -876,7 +876,7 @@ NULL
     if (!is.null(ld$R)) {
         return(rawNtau * crossprod(ld$R * sqrt(d)) + ld$R)
     }
-    ldFactor <- ld$F
+    ldFactor <- ld$ldFactor
     m1 <- nrow(ldFactor) - 1
     gram <- tcrossprod(sweep(ldFactor, 2L, sqrt(d), "*"))
     crossprod(ldFactor, rawNtau / m1 * (gram %*% ldFactor) + ldFactor) / m1
@@ -1395,8 +1395,8 @@ NULL
 # all of them when they never do.
 # @noRd
 .hdlLocusEigen <- function(ld) {
-    dec <- if (!is.null(ld$F)) {
-        .ldFactorEigen(ld$F)
+    dec <- if (!is.null(ld$ldFactor)) {
+        .ldFactorEigen(ld$ldFactor)
     } else {
         eigen(ld$R, symmetric = TRUE)
     }
@@ -1550,8 +1550,8 @@ NULL
 # the thin SVD of a factor, or the matrix's own decomposition.
 # @noRd
 .cisH2Eigen <- function(ld) {
-    dec <- if (!is.null(ld$F)) {
-        .ldFactorEigen(ld$F)
+    dec <- if (!is.null(ld$ldFactor)) {
+        .ldFactorEigen(ld$ldFactor)
     } else {
         eigen(ld$R, symmetric = TRUE)
     }

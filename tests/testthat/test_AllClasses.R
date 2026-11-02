@@ -476,7 +476,7 @@ test_that("a record of left-out columns the variants hold is refused", {
 # FineMappingResultBase: adjustPips zero-row short-circuit
 # ===========================================================================
 
-test_that("FineMappingResultBase: adjustPips on a zero-row collection returns the input unchanged", {
+test_that("adjustPips returns a zero-row fine-mapping collection unchanged", {
     e <- .alc_makeFmEntry(3)
     res <- GwasFineMappingResult(
         studyName = "g1",
@@ -511,7 +511,7 @@ test_that("topLoci() has no type switch: the stored table stays internal", {
     expect_error(topLoci(.alc_makeFmr2(), raw = TRUE), "unused argument")
 })
 
-test_that("QtlFineMappingResult: topLoci aggregates entries when selectors do not pin one", {
+test_that("QtlFineMappingResult topLoci aggregates unless selectors pin one", {
     # Two entries, no selectors: the old behaviour errored ("2 entries; pass
     # study/context/trait/method"). Now it stacks the per-variant tables,
     # prefixed with the row identity so variants stay attributable.
@@ -539,7 +539,7 @@ test_that("QtlFineMappingResult: topLoci aggregates entries when selectors do no
     expect_equal(sum(names(S4Vectors::mcols(agg)) == "method"), 1L)
 })
 
-test_that("QtlFineMappingResult: topLoci with a full tuple keeps the bare (id-free) table", {
+test_that("topLoci for a full tuple gives the bare, id-free table", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
@@ -578,10 +578,10 @@ test_that("QtlFineMappingResult: topLoci aggregates only the matching subset", {
     expect_equal(unique(sub$context), "c2")
 })
 
-test_that("QtlFineMappingResult: topLoci on a single-row collection still carries identity columns", {
+test_that("topLoci on a one-row collection still carries identity columns", {
     # A no-selector call takes the aggregate path even for one row, so the PIP
-    # table has a uniform shape (identity columns present) whatever the row count
-    # -- callers don't special-case single-entry results.
+    # table has a uniform shape (identity columns present) whatever the row
+    # count -- callers don't special-case single-entry results.
     row <- .sc_makeFineMappingRow(4)
     res <- QtlFineMappingResult(
         studyName = "s1",
@@ -605,11 +605,12 @@ test_that("QtlFineMappingResult: topLoci on a single-row collection still carrie
 })
 
 test_that("aggregate view: empty per-entry views give empty ranges", {
-    # .alc_makeFmEntry has no credible sets, so credibleSets aggregates to nothing.
+    # .alc_makeFmEntry has no credible sets, so credibleSets aggregates to
+    # nothing.
     expect_length(credibleSets(.alc_makeFmr2()), 0L)
 })
 
-test_that("FineMappingResultBase aggregate view: a no-match selector re-raises the selection error", {
+test_that("an aggregate view re-raises a no-match selector's error", {
     expect_error(credibleSets(.alc_makeFmr2(), studyName = "nope"), "entries")
 })
 
@@ -1158,7 +1159,7 @@ test_that("adjustPips keeps the names its rows had", {
     expect_equal(names(adjustPips(x, keep)), c("first", "second"))
 })
 
-test_that("adjustPips on a FineMappingResultBase collection renormalizes each entry", {
+test_that("adjustPips renormalizes each entry of a fine-mapping collection", {
     vidsA <- paste0("chr1:", 1:6, ":A:G")
     vidsB <- paste0("chr1:", 3:8, ":A:G")
     entryA <- .makeAdjustEntry(vidsA)
@@ -1251,7 +1252,7 @@ test_that("an empty collection has no variants", {
     expect_equal(pecotmr:::.rcAllVariants(empty), character(0))
 })
 
-test_that("retained mass is NULL for a fit that never went through reconciliation", {
+test_that("retained mass is NULL for a fit never reconciled", {
     # NULL rather than a vector of 1s: nothing was dropped, so there is no
     # mass to report.
     expect_null(pecotmr:::.rcFitRetainedMass(NULL))
@@ -1642,7 +1643,7 @@ test_that("a result's ranged views carry its genome build", {
 # Collection aggregates: lbf, credibleSetSummary and the fSuSiE accessors
 # ===========================================================================
 
-test_that("lbf aggregates over a collection, carrying identity + NA-filling ragged effects", {
+test_that("lbf over a collection: identity kept, ragged effects NA-filled", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
     mkEntry <- function(maxNumSingleEffects) {
         lbf <- matrix(
@@ -1664,8 +1665,9 @@ test_that("lbf aggregates over a collection, carrying identity + NA-filling ragg
             )
         )
     }
-    # Two entries with different effect counts (L = 2 vs 3) exercise the NA-fill of
-    # the ragged lbf_L<k> columns described in the collection method's contract.
+    # Two entries with different effect counts (L = 2 vs 3) exercise the NA-fill
+    # of the ragged lbf_L<k> columns described in the collection method's
+    # contract.
     res <- QtlFineMappingResult(
         studyName = c("s1", "s1"),
         context = c("brain", "blood"),
@@ -1682,11 +1684,13 @@ test_that("lbf aggregates over a collection, carrying identity + NA-filling ragg
     expect_equal(length(w), 6L) # 2 entries x 3 variants
     expect_setequal(unique(w$context), c("brain", "blood"))
     expect_true("lbf_L3" %in% names(S4Vectors::mcols(w)))
-    expect_true(all(is.na(w$lbf_L3[w$context == "brain"]))) # L = 2 entry: no effect 3
-    expect_true(all(!is.na(w$lbf_L3[w$context == "blood"]))) # L = 3 entry: present
+    # L = 2 entry: no effect 3
+    expect_true(all(is.na(w$lbf_L3[w$context == "brain"])))
+    # L = 3 entry: present
+    expect_true(all(!is.na(w$lbf_L3[w$context == "blood"])))
 })
 
-test_that("credibleSetSummary aggregates across a collection with entry identity", {
+test_that("credibleSetSummary aggregates a collection with entry identity", {
     mkEntry <- function() {
         vn <- c("chr1:100:A:G", "chr1:200:C:T")
         tl <- data.frame(
@@ -1721,7 +1725,7 @@ test_that("fsusieCredibleBand on a result with no fSuSiE fit is empty ranges", {
     expect_length(cb, 0L)
 })
 
-test_that("fsusieCredibleBand + fsusieAffectedRegions aggregate across a collection", {
+test_that("fsusieCredibleBand, fsusieAffectedRegions aggregate a collection", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     fit <- .fsa_fits$none # one fit, read by both rows
@@ -1761,7 +1765,7 @@ test_that("fsusieCredibleBand + fsusieAffectedRegions aggregate across a collect
     expect_setequal(unique(S4Vectors::mcols(gr)$context), c("brain", "blood"))
 })
 
-test_that("fsusieAffectedRegions on a collection of non-fSuSiE entries is an empty GRanges", {
+test_that("fsusieAffectedRegions of non-fSuSiE entries is an empty GRanges", {
     e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(pip = 0.5),

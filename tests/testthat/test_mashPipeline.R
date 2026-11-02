@@ -274,7 +274,7 @@ test_that("makePairwiseContrastCol preserves template names", {
     expect_equal(names(out), c("x", "y", "z"))
 })
 
-test_that("makePairwiseContrastCol overwrites pre-existing values in template", {
+test_that("makePairwiseContrastCol overwrites values already in the template", {
     tmpl <- setNames(c(5, -3, 7), c("a", "b", "c"))
     out <- makePairwiseContrastCol(c("a", "c"), tmpl)
     expect_equal(out[["a"]], 1) # was 5, now 1
@@ -332,7 +332,7 @@ test_that("sliceMashData restricts data$snp to intersection of snps argument", {
 # metaAnalysisPerCondition
 # ---------------------------------------------------------------------------
 
-test_that("metaAnalysisPerCondition returns single-effect p-value when only one feature passes filter", {
+test_that("metaAnalysisPerCondition: one passing feature gives its own p", {
     feat <- "var1"
     cols <- c("mean_contrast_brain_vs_blood")
     es <- matrix(0.5, nrow = 1, ncol = 1, dimnames = list(feat, cols))
@@ -359,7 +359,7 @@ test_that("metaAnalysisPerCondition returns single-effect p-value when only one 
     expect_true(all(is.na(out$I2)))
 })
 
-test_that("metaAnalysisPerCondition returns NA pvalue when SE cutoff drops everything", {
+test_that("metaAnalysisPerCondition: NA p when the SE cutoff drops all", {
     feat <- c("chr1:100:A:G", "chr1:200:A:G")
     cols <- "mean_contrast_brain_vs_blood"
     es <- matrix(c(0.1, 0.2), nrow = 2, ncol = 1, dimnames = list(feat, cols))
@@ -370,7 +370,7 @@ test_that("metaAnalysisPerCondition returns NA pvalue when SE cutoff drops every
     expect_true(all(is.na(out$meta_effect)))
 })
 
-test_that("metaAnalysisPerCondition runs DerSimonian-Laird when >=2 effects survive", {
+test_that("metaAnalysisPerCondition runs DerSimonian-Laird on 2+ effects", {
     feat <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     cols <- "mean_contrast_brain_vs_blood"
     es <- matrix(
@@ -387,7 +387,8 @@ test_that("metaAnalysisPerCondition runs DerSimonian-Laird when >=2 effects surv
     )
     out <- metaAnalysisPerCondition(es, se)
     expect_equal(nrow(out), 2L)
-    # All three effects survive (SE = 0.1 > 0): meta_effect and meta_se populated
+    # All three effects survive (SE = 0.1 > 0): meta_effect and meta_se
+    # populated
     expect_false(any(is.na(out$meta_effect)))
     expect_false(any(is.na(out$meta_se)))
     expect_false(any(is.na(out$tau2)))
@@ -396,7 +397,7 @@ test_that("metaAnalysisPerCondition runs DerSimonian-Laird when >=2 effects surv
     expect_true(all(out$I2 >= 0 & out$I2 <= 1))
 })
 
-test_that("metaAnalysisPerCondition unique-condition extraction handles >2 conditions", {
+test_that("metaAnalysisPerCondition extracts conditions when there are 3+", {
     feat <- "chr1:100:A:G"
     cols <- c(
         "mean_contrast_brain_vs_blood",
@@ -415,7 +416,7 @@ test_that("metaAnalysisPerCondition unique-condition extraction handles >2 condi
 # updateMashModelCov — works on a hand-built mock fitted_g (no mashr dep)
 # ---------------------------------------------------------------------------
 
-test_that("updateMashModelCov drops dropped conditions + resizes remaining cov matrices", {
+test_that("updateMashModelCov drops conditions, resizes the rest's matrices", {
     R <- 3L
     samples <- c("brain", "blood", "muscle")
     U <- list(
@@ -476,7 +477,7 @@ test_that("fitMashContrast returns NULL when fewer than 2 tested conditions", {
     expect_null(fitMashContrast(1L, origMean, pm, pv))
 })
 
-test_that("fitMashContrast: 2-tested-conditions fast path yields one pairwise contrast", {
+test_that("fitMashContrast: 2 tested conditions give one pairwise contrast", {
     origMean <- matrix(
         c(0.5, 0.3, 0),
         nrow = 1,
@@ -506,7 +507,7 @@ test_that("fitMashContrast: 2-tested-conditions fast path yields one pairwise co
     expect_equal(out[["mean_contrast_a_vs_b"]], 0.5 - 0.3)
 })
 
-test_that("fitMashContrast: 3-tested-conditions yields deviation + pairwise contrasts", {
+test_that("fitMashContrast: 3 tested conditions give deviation + pairwise", {
     origMean <- matrix(
         c(0.5, 0.3, -0.2),
         nrow = 1,
@@ -576,13 +577,15 @@ test_that("fitMashContrast applies deviation + pairwise group adjustments", {
     pv <- array(0, dim = c(4, 4, 1), dimnames = list(conds, conds, NULL))
     pv[,, 1] <- diag(4) * 0.1
     # a,b share group 1 (replicates); c is its own group 2; d ungrouped (0).
-    # Non-NULL grouping triggers `grouping <- grouping[tested]`, the >2-condition
-    # deviation re-weighting loop, and the pairwise group-adjustment loop.
+    # Non-NULL grouping triggers `grouping <- grouping[tested]`, the
+    # >2-condition deviation re-weighting loop, and the pairwise
+    # group-adjustment loop.
     grouping <- setNames(c(1L, 1L, 2L, 0L), conds)
     out <- fitMashContrast(1L, origMean, pm, pv, grouping = grouping)
     expect_s3_class(out, "data.frame")
     expect_equal(nrow(out), 1L)
-    # feature_id + 4 deviation + choose(4,2)=6 pairwise = 10 contrasts -> 31 cols.
+    # feature_id + 4 deviation + choose(4,2)=6 pairwise = 10 contrasts -> 31
+    # cols.
     expect_equal(ncol(out), 31L)
     contrastSuffix <- sub("^(mean|se|p)_contrast_", "", names(out))
     expect_true(any(grepl("_deviation$", contrastSuffix)))
@@ -596,7 +599,7 @@ test_that("fitMashContrast applies deviation + pairwise group adjustments", {
 # else branch, distinct from the no-dimnames positional-slice branch)
 # ---------------------------------------------------------------------------
 
-test_that("updateMashModelCov slices named data-driven cov matrices by sample", {
+test_that("updateMashModelCov slices named data-driven matrices by sample", {
     allSamples <- c("brain", "blood", "muscle")
     ddMat <- matrix(seq_len(9), 3, 3, dimnames = list(allSamples, allSamples))
     U <- list(identity = diag(1, 3), dataDriven = ddMat)
@@ -607,7 +610,8 @@ test_that("updateMashModelCov slices named data-driven cov matrices by sample", 
         allSamples = allSamples,
         samples = c("brain", "muscle")
     )
-    # The named data-driven matrix is sliced by name: cov[[d]][samples, samples].
+    # The named data-driven matrix is sliced by name: cov[[d]][samples,
+    # samples].
     expect_equal(dim(m2$fitted_g$Ulist$dataDriven), c(2L, 2L))
     expect_equal(
         m2$fitted_g$Ulist$dataDriven,
@@ -622,7 +626,7 @@ test_that("updateMashModelCov slices named data-driven cov matrices by sample", 
 # metaAnalysisPerCondition — conditions matching no contrast column are skipped
 # ---------------------------------------------------------------------------
 
-test_that("metaAnalysisPerCondition skips conditions whose name matches no column", {
+test_that("metaAnalysisPerCondition skips conditions matching no column", {
     # The condition "x$y" is a derived condition name; used as a grep() pattern
     # the embedded `$` anchor matches nothing, exercising the
     # `if (length(idx) == 0) next` skip branch.
@@ -741,7 +745,7 @@ test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
     )
 })
 
-test_that("mashPipeline passes supplied residualCorrelation + priorCovariances through", {
+test_that("mashPipeline passes residualCorrelation, priorCovariances on", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     ss <- .mpSs
@@ -878,7 +882,7 @@ test_that("a supplied residualCorrelation wins over the method", {
 # mashResidualCorrelation — the Vhat estimator extracted from mashPipeline.
 # ---------------------------------------------------------------------------
 
-test_that("mashResidualCorrelation(identity) is an identity of the right size", {
+test_that("mashResidualCorrelation(identity) is a right-sized identity", {
     skip_if_not_installed("mashr")
     ss <- .mpSs
     v <- mashResidualCorrelation(
@@ -901,7 +905,8 @@ test_that("mashResidualCorrelation(simple) returns a null correlation matrix", {
         )
     ))
     expect_equal(dim(v), c(3L, 3L))
-    expect_equal(unname(diag(v)), rep(1, 3), tolerance = 1e-8) # a correlation matrix
+    # a correlation matrix
+    expect_equal(unname(diag(v)), rep(1, 3), tolerance = 1e-8)
     expect_true(isSymmetric(unname(v)))
 })
 
@@ -918,7 +923,7 @@ test_that("mashResidualCorrelation(simple) errors without a null entry", {
     )
 })
 
-test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", {
+test_that("mashResidualCorrelation(simpleSpecific) gives a null correlation", {
     skip_if_not_installed("mashr")
     ss <- .mpSs
     v <- suppressMessages(suppressWarnings(
@@ -932,7 +937,7 @@ test_that("mashResidualCorrelation(simpleSpecific) returns a null correlation", 
     expect_equal(unname(diag(v)), rep(1, 3), tolerance = 1e-6)
 })
 
-test_that("mashResidualCorrelation(corshrink) returns a 3x3 correlation matrix", {
+test_that("mashResidualCorrelation(corshrink) gives a 3x3 correlation", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("CorShrink")
     ss <- .mpSs
@@ -1236,7 +1241,7 @@ test_that("mashCovarianceComponents default builds all non-udr components", {
     expect_gt(length(.mpDefaultComps), length(one))
 })
 
-test_that("mashCovarianceComponents feeds mashPriorCovariances (same components)", {
+test_that("mashCovarianceComponents feeds mashPriorCovariances", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     ss <- .mpSs
@@ -1281,7 +1286,7 @@ test_that("mashCovarianceComponents rejects unknown components", {
     )
 })
 
-test_that("mashPriorCovariances refines supplied priorComponents (pipeline mode)", {
+test_that("mashPriorCovariances refines supplied priorComponents", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     ss <- .mpSs
@@ -1318,7 +1323,7 @@ test_that("mashPriorCovariances validates priorComponents", {
     )
 })
 
-test_that("mashPipeline result == composing the two extracted building blocks", {
+test_that("mashPipeline equals composing its two building blocks", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
     ss <- .mpSs
@@ -1363,7 +1368,7 @@ test_that(".mashAsUlist unwraps the wrapper and passes a bare Ulist through", {
     expect_null(pecotmr:::.mashAsUlist(NULL))
 })
 
-test_that(".mashAsUlist does not mistake a covariance named U for the wrapper", {
+test_that(".mashAsUlist doesn't mistake a covariance named U for a wrapper", {
     # A genuine Ulist entry named "U" is a matrix, not a list, which is what
     # keeps the two shapes distinguishable.
     ulist <- list(U = diag(3), identity = diag(3))
@@ -1388,7 +1393,7 @@ test_that("fitMashContrast consumes a mashPosterior result", {
 # metaAnalysisPerCondition
 # ---------------------------------------------------------------------------
 
-test_that("metaAnalysisPerCondition: threads metaMethod (DL default unchanged)", {
+test_that("metaAnalysisPerCondition passes metaMethod on (DL by default)", {
     es <- matrix(
         rnorm(12),
         6,
@@ -1432,7 +1437,7 @@ test_that("metaAnalysisPerCondition: threads metaMethod (DL default unchanged)",
     list(pm = pm, pv = pv, orig = orig)
 }
 
-test_that("mashPosteriorContrast: deviation + pairwise columns, rownames preserved", {
+test_that("mashPosteriorContrast: deviation + pairwise columns, rows named", {
     f <- .mpc_fixture()
     res <- mashPosteriorContrast(f$pm, f$pv, f$orig)
     expect_equal(nrow(res), 5L)
@@ -1450,7 +1455,7 @@ test_that("mashPosteriorContrast: deviation + pairwise columns, rownames preserv
     expect_false(is.unsorted(match(kinds, c("mean", "se", "p"))))
 })
 
-test_that("mashPosteriorContrast: features with < 2 tested conditions are dropped", {
+test_that("mashPosteriorContrast drops features tested in under 2 conditions", {
     f <- .mpc_fixture()
     f$orig[2, ] <- 0 # feature 2 has no tested condition
     f$orig[4, c(2, 3)] <- 0 # feature 4 has only 1 tested condition
@@ -1480,7 +1485,7 @@ test_that("mashPosteriorContrast: grouping is forwarded to fitMashContrast", {
     mashPosteriorContrast(f$pm, f$pv, f$orig)
 }
 
-test_that("calculateFeatureScores: one Z per condition from deviation contrasts", {
+test_that("calculateFeatureScores: a Z per condition from deviations", {
     cr <- .fs_contrast()
     fs <- calculateFeatureScores(cr, metaMethod = "REML")
     expect_setequal(fs$condition, c("Ast", "Mic", "Oli"))
@@ -1490,7 +1495,7 @@ test_that("calculateFeatureScores: one Z per condition from deviation contrasts"
     expect_equal(nrow(calculateFeatureScores(data.frame(x = 1))), 0L)
 })
 
-test_that("nSignificantScore: fraction of significant deviation contrasts in [0,1]", {
+test_that("nSignificantScore: share of significant deviations, in [0,1]", {
     cr <- .fs_contrast()
     ns <- nSignificantScore(cr, pCutoff = 0.5)
     expect_setequal(ns$condition, c("Ast", "Mic", "Oli"))
@@ -1541,7 +1546,7 @@ test_that("calculateFeatureScores: NA when a condition's se column is absent", {
     expect_true(is.na(out$zScore))
 })
 
-test_that("calculateFeatureScores: NA when no finite (effect, se) pair remains", {
+test_that("calculateFeatureScores: NA when no finite effect, se pair remains", {
     cr <- data.frame(
         mean_contrast_Ast_deviation = c(1, 2),
         se_contrast_Ast_deviation = c(0, -1)
@@ -1549,13 +1554,13 @@ test_that("calculateFeatureScores: NA when no finite (effect, se) pair remains",
     expect_true(is.na(calculateFeatureScores(cr)$zScore))
 })
 
-test_that("nSignificantScore: empty result when there are no deviation p-value columns", {
+test_that("nSignificantScore is empty without deviation p-value columns", {
     out <- nSignificantScore(data.frame(foo = 1:3, bar = 4:6))
     expect_equal(nrow(out), 0L)
     expect_named(out, c("condition", "ratio"))
 })
 
-test_that("scoreFromCs: falls back to the single pairwise contrast when no deviation column", {
+test_that("scoreFromCs uses the lone pairwise contrast without deviations", {
     fm <- data.frame(
         cs_order = c(1, 1, 0),
         pip = c(0.9, 0.5, 0.1),
@@ -1569,11 +1574,12 @@ test_that("scoreFromCs: falls back to the single pairwise contrast when no devia
         feature_id = c("chr1:100:A:G", "chr1:200:A:G"),
         stringsAsFactors = FALSE
     )
-    # condition "Xyz" has no deviation column; exactly one pairwise contrast exists.
+    # condition "Xyz" has no deviation column; exactly one pairwise contrast
+    # exists.
     expect_true(is.finite(scoreFromCs(fm, cr, condition = "Xyz")))
 })
 
-test_that("scoreFromCs: NA when neither a deviation nor a single pairwise column exists", {
+test_that("scoreFromCs: NA with no deviation and no lone pairwise column", {
     fm <- data.frame(
         cs_order = c(1, 0),
         pip = c(0.9, 0.1),
@@ -1975,7 +1981,7 @@ test_that("filterInvalidSummaryStat replaces NaN/Inf in sbhat", {
     expect_equal(unname(result$sbhat[3, "a"]), 1000)
 })
 
-test_that("filterInvalidSummaryStat filters by missing_rate when null.b present", {
+test_that("filterInvalidSummaryStat filters by missing_rate given null.b", {
     dat <- list(
         bhat = data.frame(a = c(0, 0, 1, 2), b = c(0, 0, 0, 3)),
         sbhat = data.frame(a = c(1, 1, 1, 1), b = c(1, 1, 1, 1)),
@@ -1990,7 +1996,7 @@ test_that("filterInvalidSummaryStat filters by missing_rate when null.b present"
     expect_equal(nrow(result$bhat), 2) # rows 3 and 4 survive
 })
 
-test_that("filterInvalidSummaryStat filters by missing_rate when random.b present", {
+test_that("filterInvalidSummaryStat filters by missing_rate given random.b", {
     dat <- list(
         bhat = data.frame(a = c(0, 1, 2), b = c(0, 1, 3)),
         sbhat = data.frame(a = c(1, 1, 1), b = c(1, 1, 1)),
@@ -2005,7 +2011,7 @@ test_that("filterInvalidSummaryStat filters by missing_rate when random.b presen
     expect_true(nrow(result$bhat) < 3)
 })
 
-test_that("filterInvalidSummaryStat btoz with .b and .s pattern creates condition.z", {
+test_that("filterInvalidSummaryStat btoz: .b and .s columns make condition.z", {
     dat <- list(
         strong.b = data.frame(a = c(1, 2), b = c(3, 4)),
         strong.s = data.frame(a = c(0.1, 0.2), b = c(0.3, 0.4))
@@ -2028,7 +2034,7 @@ test_that("filterInvalidSummaryStat btoz with .b and .s pattern creates conditio
     )
 })
 
-test_that("filterInvalidSummaryStat btoz when bhat/sbhat data is NULL creates NULL z", {
+test_that("filterInvalidSummaryStat btoz: NULL bhat/sbhat makes a NULL z", {
     dat <- list(
         strong.b = NULL,
         strong.s = data.frame(a = c(0.1))
@@ -2044,7 +2050,7 @@ test_that("filterInvalidSummaryStat btoz when bhat/sbhat data is NULL creates NU
     expect_null(result$strong.z)
 })
 
-test_that("filterInvalidSummaryStat btoz without .b/.s pattern creates generic z", {
+test_that("filterInvalidSummaryStat btoz without .b/.s makes a generic z", {
     dat <- list(
         bhat = data.frame(a = c(1, 2, 3)),
         sbhat = data.frame(a = c(0.5, 1, 0.5))
@@ -2059,7 +2065,7 @@ test_that("filterInvalidSummaryStat btoz without .b/.s pattern creates generic z
     expect_equal(as.numeric(result$z[, 1]), c(2, 2, 6))
 })
 
-test_that("filterInvalidSummaryStat btoz creates NULL z when bhat is NULL (no .b suffix)", {
+test_that("filterInvalidSummaryStat btoz: NULL z for NULL bhat (no .b)", {
     dat <- list(
         bhat = NULL,
         sbhat = data.frame(a = c(0.1))
@@ -2074,7 +2080,7 @@ test_that("filterInvalidSummaryStat btoz creates NULL z when bhat is NULL (no .b
     expect_null(result$z)
 })
 
-test_that("filterInvalidSummaryStat btoz filters strong.z by significance cutoff", {
+test_that("filterInvalidSummaryStat btoz filters strong.z by significance", {
     dat <- list(
         strong.b = data.frame(
             a = c(1, 0.01, 0.02, 2),
@@ -2112,7 +2118,7 @@ test_that("filterInvalidSummaryStat processes z directly with null component", {
     expect_true(all(!is.infinite(result$null$z)))
 })
 
-test_that("filterInvalidSummaryStat z path applies significance cutoff to strong.z", {
+test_that("filterInvalidSummaryStat z path cuts strong.z by significance", {
     dat <- list(
         strong = list(
             z = data.frame(a = c(10, 0.1, 0.2), b = c(0.1, 0.1, 0.1))
@@ -2133,7 +2139,7 @@ test_that("filterInvalidSummaryStat z path with filterByMissingRate", {
     expect_equal(nrow(result$random$z), 2)
 })
 
-test_that("filterInvalidSummaryStat processes bhat/sbhat without filterByMissingRate when no null.b/random.b", {
+test_that("filterInvalidSummaryStat skips missing rate without null/random.b", {
     dat <- list(
         bhat = data.frame(a = c(1, NaN, 3), b = c(Inf, 2, -Inf)),
         sbhat = data.frame(a = c(0.1, NA, 0.3), b = c(0.1, 0.2, NaN))
@@ -2149,7 +2155,7 @@ test_that("filterInvalidSummaryStat processes bhat/sbhat without filterByMissing
     expect_equal(unname(result$sbhat[3, "b"]), 1000)
 })
 
-test_that("filterInvalidSummaryStat with filterByMissingRate=NULL keeps all rows even with null.b", {
+test_that("filterByMissingRate = NULL keeps every row even with null.b", {
     dat <- list(
         bhat = data.frame(a = c(0, 0, 1), b = c(0, 0, 1)),
         sbhat = data.frame(a = c(1, 1, 1), b = c(1, 1, 1)),
@@ -2240,7 +2246,7 @@ test_that("filterMixtureComponents drops zero matrices, renormalizes weights", {
     expect_true(result$w["comp2"] > 0.3)
 })
 
-test_that("filterMixtureComponents subsets 3x3 matrices to 2x2 and removes filtered condition names", {
+test_that("filterMixtureComponents cuts 3x3 to 2x2 and drops their names", {
     U <- list(
         comp1 = matrix(
             c(1, 0.1, 0, 0.1, 2, 0, 0, 0, 3),
@@ -2428,7 +2434,7 @@ test_that("mashRandNullSample NULL input returns NULL", {
     expect_null(result)
 })
 
-test_that("mashRandNullSample warns when no null variants found (all abs_z > 2)", {
+test_that("mashRandNullSample warns with no null variants (all abs_z > 2)", {
     dat <- list(
         z = data.frame(
             cond1 = c(5, 6, 7, 8, 9),
@@ -2469,7 +2475,7 @@ test_that("mashRandNullSample warns when not enough null data", {
     expect_equal(length(result$null), 0)
 })
 
-test_that("mashRandNullSample errors when excludeCondition not found (z path)", {
+test_that("mashRandNullSample errors on an unknown excludeCondition (z)", {
     dat <- list(
         z = data.frame(cond1 = 1:5, cond2 = 1:5)
     )
@@ -2496,7 +2502,7 @@ test_that("mashRandNullSample errors when excludeCondition not found (z path)", 
     )
 })
 
-test_that("mashRandNullSample errors when excludeCondition not found (bhat path)", {
+test_that("mashRandNullSample errors on an unknown excludeCondition (bhat)", {
     dat <- list(
         bhat = data.frame(cond1 = 1:5, cond2 = 1:5),
         sbhat = data.frame(cond1 = rep(1, 5), cond2 = rep(1, 5))
@@ -2641,7 +2647,7 @@ test_that(".mashSumStatsToMatrices: auto falls back to Z when no BETA/SE", {
     expect_true(all(out$s == 1 | out$s == 1000))
 })
 
-test_that(".mashSumStatsToMatrices: inputScale='beta' errors when BETA missing", {
+test_that(".mashSumStatsToMatrices: inputScale 'beta' errors without BETA", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
@@ -2656,7 +2662,7 @@ test_that(".mashSumStatsToMatrices: inputScale='beta' errors when BETA missing",
     )
 })
 
-test_that(".mashSumStatsToMatrices: inputScale='z' forces Z+1 even when BETA present", {
+test_that(".mashSumStatsToMatrices: inputScale 'z' forces Z+1 despite BETA", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
@@ -2703,7 +2709,7 @@ test_that(".mashSumStatsToMatrices: inputScale='z' errors when Z missing", {
     )
 })
 
-test_that(".mashObjectMatrices errors when marginal effects lack the required columns", {
+test_that(".mashObjectMatrices errors when marginal effects lack a column", {
     res <- QtlFineMappingResult(
         studyName = "s",
         context = "brain",
@@ -2738,7 +2744,7 @@ test_that(".mashObjectMatrices errors when marginal effects lack the required co
     )
 })
 
-test_that(".mashObjectMatrices warns and pins the first method on a multi-method result", {
+test_that(".mashObjectMatrices warns, pins the first of several methods", {
     res <- QtlFineMappingResult(
         studyName = c("s", "s"),
         context = c("brain", "liver"),
@@ -2756,7 +2762,7 @@ test_that(".mashObjectMatrices warns and pins the first method on a multi-method
     )
 })
 
-test_that(".mashObjectPartitions errors when < 2 conditions remain after excludeCondition", {
+test_that(".mashObjectPartitions errors when under 2 conditions remain", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
@@ -2780,7 +2786,7 @@ test_that(".mashObjectPartitions errors when < 2 conditions remain after exclude
     )
 })
 
-test_that(".mashObjectPartitions warns when no variants match the independent-variant list", {
+test_that(".mashObjectPartitions warns when no independent variant matches", {
     ss <- .mssm_makeQtlSumStats(function(i, n) {
         list(
             SNP = sprintf("chr1:%d:A:G", 100L * seq_len(n)),
@@ -2810,7 +2816,7 @@ test_that(".mashObjectPartitions warns when no variants match the independent-va
     )
 })
 
-test_that(".mashSumStatsToMatrices on bundled multicontext fixture: shape and rowname format", {
+test_that(".mashSumStatsToMatrices on the multicontext fixture: shape, names", {
     data(qtlSumStatsMulticontextExample)
     out <- pecotmr:::.mashSumStatsToMatrices(
         qtlSumStatsMulticontextExample,
@@ -2828,7 +2834,7 @@ test_that(".mashSumStatsToMatrices on bundled multicontext fixture: shape and ro
     expect_true(all(out$s < 1))
 })
 
-test_that(".mashSumStatsToMatrices fills missing variants with bhat=0 / sbhat=1000", {
+test_that(".mashSumStatsToMatrices pads missing variants, bhat 0, sbhat 1000", {
     set.seed(42L)
     gh <- new(
         "GenotypeHandle",
@@ -2888,7 +2894,7 @@ test_that(".mashSumStatsToMatrices fills missing variants with bhat=0 / sbhat=10
     expect_true(all(out$s[, "ctx1"] < 1))
 })
 
-test_that(".mashSumStatsToMatrices disambiguates rownames across (study, trait) blocks", {
+test_that(".mashSumStatsToMatrices disambiguates names across study, trait", {
     set.seed(7L)
     gh <- new(
         "GenotypeHandle",
@@ -3183,7 +3189,7 @@ test_that("qtlSumStatsFromZMatrix: one row per context, Z preserved verbatim", {
     expect_equal(S4Vectors::mcols(liver)$Z, unname(z[, 2]))
 })
 
-test_that("qtlSumStatsFromZMatrix: decodes chrom/pos from ids, synthesises when they don't parse", {
+test_that("qtlSumStatsFromZMatrix reads chrom/pos from ids, else makes them", {
     z <- matrix(
         rnorm(2),
         ncol = 1,
@@ -3232,7 +3238,7 @@ test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcOptions", {
     expect_null(mcols(qss)$qcAudit)
 })
 
-test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait pairs", {
+test_that("qtlSumStatsFromZMatrix: columns map to traits or context x trait", {
     z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("geneA", "geneB")))
     # columns as traits: constant context, one trait per column
     qss <- qtlSumStatsFromZMatrix(
@@ -3256,7 +3262,7 @@ test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait 
     expect_equal(as.character(qss2$trait), c("geneA", "geneA"))
 })
 
-test_that("qtlSumStatsFromZMatrix: a condition label of the wrong length errors", {
+test_that("qtlSumStatsFromZMatrix errors on a wrong-length condition label", {
     z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("a", "b")))
     expect_error(
         qtlSumStatsFromZMatrix(
@@ -3269,7 +3275,7 @@ test_that("qtlSumStatsFromZMatrix: a condition label of the wrong length errors"
     )
 })
 
-test_that("qtlSumStatsFromZMatrix: rejects non-matrix input and unlabelled conditions", {
+test_that("qtlSumStatsFromZMatrix refuses a non-matrix, unlabelled columns", {
     expect_error(
         qtlSumStatsFromZMatrix(1:5, studyName = "s1", ldReference = .qszm_gh()),
         "variants x conditions matrix"
@@ -3282,7 +3288,7 @@ test_that("qtlSumStatsFromZMatrix: rejects non-matrix input and unlabelled condi
     )
 })
 
-test_that("qtlSumStatsFromBetaMatrix: one entry per context, BETA/SE/Z mcols set", {
+test_that("qtlSumStatsFromBetaMatrix: an entry per context with BETA, SE, Z", {
     d <- .qszmBeta()
     qss <- qtlSumStatsFromBetaMatrix(
         d$bhat,
@@ -3303,7 +3309,7 @@ test_that("qtlSumStatsFromBetaMatrix: one entry per context, BETA/SE/Z mcols set
     expect_equal(mc$Z, unname(d$bhat[, 1] / d$shat[, 1]))
 })
 
-test_that("qtlSumStatsFromBetaMatrix: feeds .mashSumStatsToMatrices on both scales", {
+test_that("qtlSumStatsFromBetaMatrix feeds mash matrices on both scales", {
     d <- .qszmBeta()
     qss <- qtlSumStatsFromBetaMatrix(
         d$bhat,
@@ -3318,7 +3324,7 @@ test_that("qtlSumStatsFromBetaMatrix: feeds .mashSumStatsToMatrices on both scal
     expect_equal(unname(mz$b), unname(d$bhat / d$shat))
 })
 
-test_that("qtlSumStatsFromBetaMatrix: validates matrices and matching dimensions", {
+test_that("qtlSumStatsFromBetaMatrix checks matrices and their dimensions", {
     d <- .qszmBeta()
     expect_error(
         qtlSumStatsFromBetaMatrix(1:5, d$shat, "s1", .qszm_gh()),
@@ -3334,7 +3340,7 @@ test_that("qtlSumStatsFromBetaMatrix: validates matrices and matching dimensions
     )
 })
 
-test_that("qtlSumStatsFromBetaMatrix: NULL rownames -> synthetic ids; placeholders set", {
+test_that("qtlSumStatsFromBetaMatrix: no rownames, so placeholder ids", {
     bhat <- matrix(rnorm(4), nrow = 2, dimnames = list(NULL, c("x", "y")))
     shat <- matrix(
         abs(rnorm(4)) + 0.1,
@@ -3447,7 +3453,7 @@ test_that("mashInput: a fine-mapping result with no credible set: no strong", {
     expect_equal(nrow(out$random.z), 3L)
 })
 
-test_that("mashInput: multiple regions accumulate rows and disambiguate names", {
+test_that("mashInput: several regions add rows and disambiguate names", {
     fmr <- .mi_makeFmr()
     one <- mashInput(
         list(a = fmr),
@@ -3505,7 +3511,7 @@ test_that("mashInput: rejects a non-SumStats/non-FineMapping element", {
     expect_error(mashInput(list()), "non-empty list")
 })
 
-test_that("mashInput: independentVariants restricts random/null pool (strong untouched)", {
+test_that("mashInput: independentVariants limits the random/null pool only", {
     fmr <- .mi_makeFmr() # 6 variants chr1:100..600, 2 contexts
     vids <- paste0("chr1:", 100 * seq_len(6), ":A:G")
     indep <- vids[1:3] # only the first three are "independent"
@@ -3517,7 +3523,8 @@ test_that("mashInput: independentVariants restricts random/null pool (strong unt
         sigPCutoff = 0.5,
         seed = 7
     )
-    # random / null variant ids (strip the "_g" region suffix) must lie in indep.
+    # random / null variant ids (strip the "_g" region suffix) must lie in
+    # indep.
     rn_ids <- sub("_g$", "", rownames(out$random.z))
     expect_true(length(rn_ids) > 0L && all(rn_ids %in% indep))
     if (!is.null(out$null.z)) {
@@ -3527,10 +3534,11 @@ test_that("mashInput: independentVariants restricts random/null pool (strong unt
     expect_true(nrow(out$strong.z) >= 1L)
 })
 
-test_that("mashInput: independentVariants matches across allele flip + chr prefix", {
+test_that("mashInput: independentVariants matches across flips, chr prefix", {
     fmr <- .mi_makeFmr()
     # same positions as the first three variants, but ref/alt swapped and the
-    # chr prefix dropped -- matchVariants must still match them (not a string cmp).
+    # chr prefix dropped -- matchVariants must still match them (not a string
+    # cmp).
     indep_flipped <- c("1:100:G:A", "1:200:G:A", "1:300:G:A")
     out <- mashInput(
         list(g = fmr),
@@ -3618,7 +3626,7 @@ test_that(".mashPrefixRownames leaves an absent or empty matrix alone", {
     expect_identical(pecotmr:::.mashPrefixRownames(empty, "ctx"), empty)
 })
 
-test_that(".mashProcessZ skips the missing-rate filter when none is asked for", {
+test_that(".mashProcessZ skips the missing-rate filter unless asked", {
     # A NULL filterByMissingRate means "clean the values, keep every row".
     z <- matrix(c(1, NA, 3, 4), nrow = 2, dimnames = list(c("v1", "v2"), NULL))
     out <- pecotmr:::.mashProcessZ(z, NULL)

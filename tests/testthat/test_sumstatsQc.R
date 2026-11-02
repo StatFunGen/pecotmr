@@ -1825,7 +1825,8 @@ test_that("CS with diffuse signal contains many variants", {
 
     result <- slalom(zScore = z, R = R)
 
-    # Uniform PIPs => need at least ceiling(0.95 * n) = 10 variants for 95% coverage
+    # Uniform PIPs => need at least ceiling(0.95 * n) = 10 variants for 95%
+    # coverage
     expect_equal(length(result$summary$cs95), n)
 })
 
@@ -2384,7 +2385,8 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
     # harmonization drops it. With the screen running *after* harmonization it
     # never sees the strong off-panel signal, so the remaining weak variants
     # fail the PIP screen and the region is skipped (empty). (Pre-harmonization
-    # screening would have kept the region on the strength of the off-panel hit.)
+    # screening would have kept the region on the strength of the off-panel
+    # hit.)
     gr <- .ssQ_makeEntryGr(
         c("rs1", "rs2", "rs3", "rsX"),
         positions = c(100L, 200L, 300L, 9999L)
@@ -2411,7 +2413,8 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
 
 test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
     # Same harmonized variants, screen disabled (no metric set): the three
-    # panel-matched variants survive (behavior-invariance for the screen-off path).
+    # panel-matched variants survive (behavior-invariance for the screen-off
+    # path).
     gr <- .ssQ_makeEntryGr(
         c("rs1", "rs2", "rs3", "rsX"),
         positions = c(100L, 200L, 300L, 9999L)
@@ -2445,7 +2448,8 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
         ranges = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = c("chr1:100:G:A", "chr1:200:A:G", "chr1:300:G:A"), # pos200 input-orientation
+        # pos200 input-orientation
+        SNP = c("chr1:100:G:A", "chr1:200:A:G", "chr1:300:G:A"),
         A1 = c("A", "G", "A"), # pos200 swapped relative to panel (A1=A)
         A2 = c("G", "A", "G"),
         Z = c(1.0, 2.0, 1.5),
@@ -2455,9 +2459,10 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
 }
 
 test_that("summaryStatsQc: harmonization re-keys SNP and sign-flips Z", {
-    # pos200 is allele-swapped vs the panel, so harmonization sign-flips its Z and
-    # the SNP must be re-keyed to the panel-orientation id (chr1:200:G:A), not
-    # left at the input-orientation chr1:200:A:G. Exact matches are unchanged.
+    # pos200 is allele-swapped vs the panel, so harmonization sign-flips its Z
+    # and the SNP must be re-keyed to the panel-orientation id (chr1:200:G:A),
+    # not left at the input-orientation chr1:200:A:G. Exact matches are
+    # unchanged.
     ss <- GwasSumStats(
         studyName = "g1",
         entry = list(.ssQ_makeFlipEntryGr()),
@@ -2917,7 +2922,8 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts -> raw total", {
 })
 
 test_that("summaryStatsQc(effectiveN=TRUE): study scalars fill all variants", {
-    # Entry has an N column but NO per-variant N_CASE/N_CONTROL; the scalars win.
+    # Entry has an N column but NO per-variant N_CASE/N_CONTROL; the scalars
+    # win.
     gr <- .ssQ_makeEntryGr()
     ss <- GwasSumStats(
         studyName = "g1",
@@ -2934,7 +2940,8 @@ test_that("summaryStatsQc(effectiveN=TRUE): study scalars fill all variants", {
 })
 
 test_that("summaryStatsQc: study nSample is the level-4 fallback", {
-    # Entry with NO per-variant N and NO case/control; only a study nSample scalar.
+    # Entry with NO per-variant N and NO case/control; only a study nSample
+    # scalar.
     gr <- .ssQ_makeEntryGr()
     mc <- S4Vectors::mcols(gr)
     mc$N <- NULL # remove per-variant N
@@ -2991,7 +2998,8 @@ test_that("summaryStatsQc: counts beat nSample, and an N column beats it", {
     res1 <- summaryStatsQc(ss1)
     expect_equal(.ssQ_entryNByPos(res1[[1L]]), c(360, 640, 510, 750))
     expect_identical(res1$qcAudit[[1L]]$nSource, "effective")
-    # per-variant N column present alongside nSample (no counts) -> N wins (column).
+    # per-variant N column present alongside nSample (no counts) -> N wins
+    # (column).
     ss2 <- GwasSumStats(
         studyName = "g1",
         entry = list(.ssQ_makeEntryGr()),
@@ -3034,8 +3042,9 @@ test_that("summaryStatsQc: quantitative QtlSumStats: no effective N", {
 # ===========================================================================
 
 test_that("summaryStatsQc: ldMismatchQcMethod 'dentist' walks the LD branch", {
-    # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so the
-    # post-harmonization re-keyed SNP resolves against the panel for z-mismatch QC.
+    # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so
+    # the post-harmonization re-keyed SNP resolves against the panel for
+    # z-mismatch QC.
     ss <- GwasSumStats(
         studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
@@ -3110,9 +3119,9 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS, records counts", {
 test_that("summaryStatsQc: impute scopes panel/dosage to the region", {
     # Sketch spans rs1..rs8 (pos 100..800); the entry observes only rs1..rs4
     # (100..400). With the default flank the impute window is [100, 400], so the
-    # dosage must be materialized for just those 4 panel variants -- NOT the whole
-    # 8-variant sketch (the bug that makes --impute unusable on a per-chromosome
-    # sketch: it built dosage for seq_len(nrow(sketchSnpInfo))).
+    # dosage must be materialized for just those 4 panel variants -- NOT the
+    # whole 8-variant sketch (the bug that makes --impute unusable on a
+    # per-chromosome sketch: it built dosage for seq_len(nrow(sketchSnpInfo))).
     #
     # Observed at extractBlockGenotypes: the single reader every dosage path
     # funnels through, including the DelayedArray seed behind assay(). The
@@ -3972,7 +3981,8 @@ test_that(".asScreen canonicalizes screen specs", {
     expect_equal(pecotmr:::.asScreen(0.9), list(metric = "pip", cutoff = 0.9))
     sc <- list(metric = "logBf", cutoff = 3)
     expect_identical(pecotmr:::.asScreen(sc), sc)
-    expect_null(pecotmr:::.asScreen(list(metric = "bf", cutoff = 0))) # explicit off
+    # explicit off
+    expect_null(pecotmr:::.asScreen(list(metric = "bf", cutoff = 0)))
 })
 
 test_that(".applyEntryScreen: absZ skips / retains on max|Z|, no fit", {
@@ -4276,7 +4286,7 @@ test_that("the duplicate scan reads a factor and a packed LD as the LD", {
         P = Matrix::pack(Matrix::forceSymmetric(d$R, uplo = "U")),
         sign = rep(1, nrow(d$R))
     )
-    for (ld in list(list(F = f), packed)) {
+    for (ld in list(list(ldFactor = f), packed)) {
         other <- pecotmr:::.findDuplicateVariants(d$z, ld, 0.995)
         for (k in c("filteredZ", "dupBearer", "corABS", "sign", "minValue")) {
             expect_equal(other[[k]], viaR[[k]], tolerance = 1e-10)
@@ -4889,8 +4899,8 @@ test_that("mergeVariantInfo (data.frame): all = TRUE returns the union", {
     out <- mergeVariantInfo(v1, v2, all = TRUE)
     expect_s3_class(out, "data.frame")
     expect_setequal(colnames(out), c("chrom", "pos", "alt", "ref"))
-    # The flipped row2 collapses onto v1's orientation, so only the genuinely new
-    # variant (chrom 3) is added to the 3 from v1.
+    # The flipped row2 collapses onto v1's orientation, so only the genuinely
+    # new variant (chrom 3) is added to the 3 from v1.
     expect_equal(nrow(out), 4L)
     flipped <- out[out$chrom == "1" & out$pos == 200, ]
     expect_equal(flipped$alt, "C")
@@ -5279,7 +5289,8 @@ test_that("raissSingleMatrixFromX emits no-known / no-unknown messages", {
         N = c(1000L, 1000L, 1000L)
     )
     if (withAf) {
-        # A post-harmonization (directional) AF -- what the merge must re-attach.
+        # A post-harmonization (directional) AF -- what the merge must
+        # re-attach.
         df$AF <- c(0.10, 0.25, 0.40)
     }
     impDf <- data.frame(
@@ -5357,7 +5368,8 @@ test_that("raissModel flags an inversion the rcond cutoff truncated", {
 test_that(".safeSvd stops when all singular values fall below tolerance", {
     set.seed(1)
     mat <- matrix(rnorm(20), nrow = 5, ncol = 4)
-    # tol >= 1 forces even the largest (ratio == 1) singular value below threshold.
+    # tol >= 1 forces even the largest (ratio == 1) singular value below
+    # threshold.
     expect_error(
         pecotmr:::.safeSvd(mat, tol = 2),
         "below the tolerance threshold"
@@ -5466,7 +5478,8 @@ test_that("summaryStatsQc: emit() drops the label for an empty study id", {
 
 test_that("summaryStatsQc: the N filter emits its message and rollup", {
     gr <- .ssQ_makeEntryGr()
-    S4Vectors::mcols(gr)$N <- c(1000L, 1010L, 1005L, 100000L) # last is an N outlier
+    # last is an N outlier
+    S4Vectors::mcols(gr)$N <- c(1000L, 1010L, 1005L, 100000L)
     ss <- GwasSumStats(
         studyName = "g1",
         entry = list(gr),
@@ -5630,7 +5643,8 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
         },
         .package = "pecotmr"
     )
-    # rs5/rs6 (pos 500/600) are beyond the observed range; widen the impute window.
+    # rs5/rs6 (pos 500/600) are beyond the observed range; widen the impute
+    # window.
     res <- summaryStatsQc(
         ss,
         impute = TRUE,
@@ -5850,9 +5864,11 @@ test_that("dentistSingleWindow summarizes the cpp11 rsqExceed field", {
             duprThreshold = 1.0
         )
     )
-    expect_true(any(grepl("rsq values exceeded 1", seen))) # summary from the data
+    # summary from the data
+    expect_true(any(grepl("rsq values exceeded 1", seen)))
     expect_true(any(grepl("Max reported: 1.1", seen))) # max(rsqExceed)
-    # The post-warning code (renames, outlier stat, z_diff drop) ran successfully.
+    # The post-warning code (renames, outlier stat, z_diff drop) ran
+    # successfully.
     expect_equal(nrow(res), m)
     expect_equal(res$original_z, z)
     expect_true(all(
@@ -5890,10 +5906,10 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
         "installed susieR has no kriging_rss"
     )
     # All eight genotype columns load on one common factor (pairwise rho ~0.7),
-    # so LD predicts a shared sign. rs4's z has the opposite sign to its strongly
-    # correlated neighbours -- a genuine allele switch. krigingOutlierQc flags it,
-    # so the QC step sign-flips its Z in place (the nKr > 0 branch) and RETAINS
-    # the row.
+    # so LD predicts a shared sign. rs4's z has the opposite sign to its
+    # strongly correlated neighbours -- a genuine allele switch.
+    # krigingOutlierQc flags it, so the QC step sign-flips its Z in place (the
+    # nKr > 0 branch) and RETAINS the row.
     corrExtractor <- function(handle, snpIdx) {
         set.seed(42)
         n <- length(sampleIds(handle))
@@ -7324,7 +7340,7 @@ test_that("mismatch QC reads a packed LD as it reads the matrix", {
         unname(d$R[, lead])
     )
     viaF <- pecotmr:::.slalomLeadColumn(
-        list(F = pecotmr:::.ldFactorFromDosage(d$X)),
+        list(ldFactor = pecotmr:::.ldFactorFromDosage(d$X)),
         lead
     )
     expect_identical(viaF[[lead]], 1)

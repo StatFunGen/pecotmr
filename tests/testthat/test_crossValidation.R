@@ -307,7 +307,7 @@ test_that("X without rownames inherits the sample names (from Y)", {
     expect_equal(rownames(r$prediction$mock_predicted), rownames(d$Y))
 })
 
-test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds the cap", {
+test_that("maxNumVariants subsamples variantsToKeep when it exceeds the cap", {
     d <- mkXY(p = 6)
     expect_message(
         cv(
@@ -323,7 +323,7 @@ test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds
     )
 })
 
-test_that("a NULL per-method weight matrix yields an all-NA prediction, not an error", {
+test_that("a NULL method weight matrix predicts all NA, not an error", {
     d <- mkXY()
     fit_with_null <- function(Xtr, Ytr, j, ...) {
         list(
@@ -564,7 +564,7 @@ test_that("a BiocParallel report without a worker error is raised as is", {
 # .cvSamplePartition and .cvMetricRow
 # ===========================================================================
 
-test_that(".cvSamplePartition partitions every sample into the requested folds", {
+test_that(".cvSamplePartition puts every sample in the requested folds", {
     part <- pecotmr:::.cvSamplePartition(paste0("s", 1:20), fold = 4L)
     expect_setequal(part$Sample, paste0("s", 1:20))
     expect_setequal(sort(unique(part$Fold)), 1:4)

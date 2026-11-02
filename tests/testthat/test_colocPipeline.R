@@ -425,7 +425,7 @@ test_that("colocPipeline: rejects an un-QCd QtlSumStats second side", {
     )
 })
 
-test_that("colocPipeline: resolves GwasSumStats via fineMappingPipeline (mocked)", {
+test_that("colocPipeline fine-maps GwasSumStats via fineMappingPipeline", {
     qfmr <- .cp_makeQtlFmr()
     gss <- .cp_makeGwasSumstats()
     local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
@@ -671,7 +671,7 @@ test_that(".colocAlignLbf: aligned matrices share the common variant set", {
     expect_setequal(colnames(aligned$gwas), c("chr1:20:A:G", "chr1:30:A:G"))
 })
 
-test_that(".colocAlignLbf aligns non-autosomal columns across a chr-prefix difference", {
+test_that(".colocAlignLbf aligns non-autosomal columns across chr prefixes", {
     # chrX ids: alignVariantNames' numeric-chrom regex could not parse these and
     # fell back to a raw intersect (no overlap); tuple matching resolves them.
     q <- matrix(
@@ -699,7 +699,7 @@ test_that(".colocStandardiseRow: fills in missing PP columns with NA", {
 # .colocLookupEnrichment
 # ===========================================================================
 
-test_that(".colocLookupEnrichment: returns the value for a (gwasStudy, qtlStudy, qtlContext) hit", {
+test_that(".colocLookupEnrichment finds a (GWAS, QTL study, context) value", {
     enr <- data.frame(
         gwasStudy = c("G1", "G2"),
         qtlStudy = c("Q1", "Q1"),
@@ -744,7 +744,7 @@ test_that(".colocLookupEnrichment: returns NA when no row matches", {
 # .colocEmptyResult(enriched = TRUE)
 # ===========================================================================
 
-test_that(".colocEmptyResult(enriched=TRUE): includes enrichment + p12Used schema", {
+test_that(".colocEmptyResult(enriched = TRUE) has enrichment + p12Used", {
     out <- pecotmr:::.colocEmptyResult(enriched = TRUE)
     expect_s4_class(out, "ColocResult")
     expect_equal(nrow(colocPairs(out)), 0L)
@@ -1054,7 +1054,7 @@ test_that("colocPipeline: skips a pair with no shared variants", {
 
 # --- .colocFilterCsByConcentration -----------------------------------------
 
-test_that(".colocFilterCsByConcentration: keeps narrow CS, drops diffuse ones", {
+test_that(".colocFilterCsByConcentration keeps narrow CSs, drops diffuse", {
     fit <- list(alpha = matrix(0.1, nrow = 3, ncol = 10)) # 10 variants
     # maxSize = ncol * coverage * concentration = 10 * 0.5 * 0.5 = 2.5
     local_mocked_bindings(
@@ -1110,7 +1110,7 @@ test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
     expect_setequal(colnames(out$lbf), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
-test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)", {
+test_that(".colocExtractLbfFromEntry stacks nested fSuSiE lBF (fit[[1]])", {
     m1 <- matrix(
         rnorm(8),
         2,
@@ -1224,10 +1224,11 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
         )
     )
     expect_equal(nrow(out$lbf), 1L)
-    expect_equal(as.numeric(out$lbf), c(2, 5, 8, 11)) # row 2 of matrix(1:12, 3, 4)
+    # row 2 of matrix(1:12, 3, 4)
+    expect_equal(as.numeric(out$lbf), c(2, 5, 8, 11))
 })
 
-test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit lacks them", {
+test_that(".colocExtractLbfFromEntry names columns by variantIds if unnamed", {
     fit <- list(lbf_variable = matrix(1:8, 2, 4)) # no dimnames
     e <- FineMappingRow(
         variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
@@ -1245,7 +1246,7 @@ test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit 
     expect_equal(colnames(out$lbf), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
-test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named", {
+test_that(".colocExtractLbfFromEntry: NULL when every column is NA-named", {
     fit <- list(
         lbf_variable = matrix(
             1:8,

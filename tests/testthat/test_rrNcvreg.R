@@ -14,7 +14,7 @@ test_that("ncvregWeights computes weights with SCAD penalty", {
     expect_true(all(is.finite(result)))
 })
 
-test_that("ncvregWeights warns and zero-pads when X has zero-variance columns", {
+test_that("ncvregWeights warns, zero-pads X's zero-variance columns", {
     skip_if_not_installed("ncvreg")
     set.seed(42)
     n <- 50

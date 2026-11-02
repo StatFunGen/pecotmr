@@ -14,8 +14,8 @@ test_that("prsCsWeights hands the PRS-CS sampler the right arguments", {
     bhat <- rnorm(p, sd = 0.1)
     R <- diag(p)
     # Heterogeneous n with median != mean: this lets the test catch a regression
-    # that swapped median(stat$n) for mean(stat$n) or sum(stat$n).
-    # sorted: 10, 20, 30, 40, 50, 60, 70, 80, 90, 1000 -> median = 55, mean = 145.
+    # that swapped median(stat$n) for mean(stat$n) or sum(stat$n). sorted: 10,
+    # 20, 30, 40, 50, 60, 70, 80, 90, 1000 -> median = 55, mean = 145.
     stat <- list(
         b = bhat,
         n = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 1000),
@@ -155,7 +155,7 @@ test_that("lassosumRssWeights defaults to LD-quadratic selection", {
     )
 })
 
-test_that("lassosumRssWeights uses first-max tie behavior for LD-quadratic selection", {
+test_that("lassosumRssWeights breaks LD-quadratic ties at the first maximum", {
     p <- 3
     stat <- list(
         cor = c(0.3, 0.3, 0),

@@ -891,8 +891,8 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     # pre-shrunk matrix would.
     set.seed(8)
     X <- matrix(rbinom(80 * 120, 2, 0.3), 80, 120)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
     beta <- replace(numeric(120), c(5, 40, 90), c(0.3, -0.2, 0.25))
     z <- as.vector(R %*% beta) + rnorm(120, sd = 0.05)
     lambda <- exp(seq(log(0.1), log(0.001), length.out = 8))
@@ -943,7 +943,7 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
                 label = label
             )
             expect_equal(
-                exec(pecotmr:::penalizedRssFactorCpp, z, F, s, !!!args),
+                exec(pecotmr:::penalizedRssFactorCpp, z, ldFactor, s, !!!args),
                 dense,
                 tolerance = 1e-8,
                 label = label
@@ -955,7 +955,7 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     l0Fit <- function(lambda2) {
         pecotmr:::penalizedRssFactorCpp(
             z,
-            F,
+            ldFactor,
             0.2,
             lambdaR = lambda,
             penaltyStr = "L0L2",
@@ -980,9 +980,9 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
     # with arrays).
     set.seed(7)
     X <- matrix(rbinom(40 * 120, 2, 0.3), 40, 120)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
-    p <- ncol(F)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    p <- ncol(ldFactor)
     effects <- replace(numeric(p), c(5, 40, 90), c(0.3, -0.25, 0.2))
     bhat <- as.vector(R %*% effects) + rnorm(p, sd = 0.02)
     sizes <- sample(c(400, 500, 600), p, replace = TRUE)
@@ -1022,14 +1022,14 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
     for (nm in names(cases)) {
         args <- list_modify(base, !!!cases[[nm]])
         expect_equal(
-            exec(pecotmr:::sdprFactorCpp, factorR = F, !!!args),
+            exec(pecotmr:::sdprFactorCpp, factorR = ldFactor, !!!args),
             exec(pecotmr:::sdprCpp, LD = list(R), !!!args),
             tolerance = 1e-8,
             label = nm
         )
     }
     expect_error(
-        exec(pecotmr:::sdprFactorCpp, factorR = F[, -1], !!!base),
+        exec(pecotmr:::sdprFactorCpp, factorR = ldFactor[, -1], !!!base),
         "The LD factor has 119 columns but there are 120 effects"
     )
 })

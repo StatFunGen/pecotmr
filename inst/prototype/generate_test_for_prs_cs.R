@@ -33,7 +33,7 @@ var_y <- var(y)
 sigmasq_init <- 1.5
 
 # Run PRS CS
-maf = rep(0.5, length(b.hat)) # fake MAF
+maf <- rep(0.5, length(b.hat)) # fake MAF
 LD <- list(blk1 = R.hat)
 sumstats <- list(BETA = b.hat, MAF = maf)
 write.table(

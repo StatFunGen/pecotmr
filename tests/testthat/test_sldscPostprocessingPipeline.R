@@ -159,7 +159,8 @@ test_that("pipeline skips targets beyond a trait's single runs", {
     )
     traits <- list(
         traitX = list(
-            single = list(.sldscMkRun(c("annot_A_0", "baselineLD_0"))), # only 1 run
+            # only 1 run
+            single = list(.sldscMkRun(c("annot_A_0", "baselineLD_0"))),
             joint = .sldscMkRun(c("annot_A_0", "annot_B_0", "baselineLD_0"))
         )
     )

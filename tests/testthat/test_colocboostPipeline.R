@@ -251,7 +251,7 @@ test_that(".cbEmptyResult: is the internal per-analysis accumulator", {
 # colocboostPipeline(QtlDataset)
 # ===========================================================================
 
-test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked engine", {
+test_that("colocboostPipeline(QtlDataset): xQTL-only run, mocked engine", {
     qd <- .cbp_makeQtlDataset()
     capturedArgs <- NULL
     local_mocked_bindings(
@@ -281,7 +281,7 @@ test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked
     expect_true("X" %in% names(capturedArgs))
 })
 
-test_that("colocboostPipeline(QtlDataset): no QTL bundle and no GWAS returns empty result", {
+test_that("colocboostPipeline(QtlDataset): no QTL bundle, no GWAS -> empty", {
     qd <- .cbp_makeQtlDataset()
     local_mocked_bindings(
         .handleDosage = .cbp_mockExtractor(),
@@ -346,7 +346,7 @@ test_that("colocboostPipeline(ANY): unsupported input class errors", {
 # Driver: jointGwas / separateGwas paths via QtlSumStats + GwasSumStats
 # ===========================================================================
 
-test_that("colocboostPipeline: jointGwas merges qtl + gwas sumstats and runs once", {
+test_that("jointGwas colocboost merges QTL and GWAS sumstats, runs once", {
     ss <- .cbp_makeQtlSumStats()
     gs <- .cbp_makeGwasSumStats()
     capturedArgs <- NULL
@@ -583,7 +583,7 @@ test_that(".cbResultLdRefs keys each outcome to its pair's reference", {
 # GWAS case/control: optional nCase/nControl columns + effective-N wiring
 # ===========================================================================
 
-test_that("colocboost GWAS bundle: effective N for case/control, per-variant N otherwise", {
+test_that("GWAS bundle N: effective for case/control, else per-variant", {
     gr <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(
@@ -622,7 +622,7 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
 # pipCutoffToSkip: per-context single-trait (L=1 SuSiE) outcome skip
 # ===========================================================================
 
-test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutoff", {
+test_that(".cbPipSkipOutcomes keeps signal, drops noise, honours the cutoff", {
     skip_if_not_installed("susieR")
     set.seed(1)
     n <- 200L
@@ -719,7 +719,7 @@ test_that("colocboostPipeline(MultiStudy): context selection skips a study", {
     )
 })
 
-test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles + embedded sumstats", {
+test_that("colocboostPipeline(MultiStudyQtlDataset) joins studies + sumstats", {
     mt <- .cbp_makeMultiStudy()
     capturedArgs <- NULL
     local_mocked_bindings(
@@ -741,7 +741,8 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles 
     ))
     expect_s4_class(out, "ColocBoostResult")
     expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
-    # The individual study's outcome is prefixed "study1:" in the combined bundle.
+    # The individual study's outcome is prefixed "study1:" in the combined
+    # bundle.
     expect_true(any(grepl("study1:", names(capturedArgs$Y))))
 })
 
@@ -808,7 +809,7 @@ test_that("colocboostPipeline(QtlDataset): unknown context errors", {
     )
 })
 
-test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcome -> empty", {
+test_that("colocboost: pipCutoffToSkip dropping every outcome -> empty", {
     qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     local_mocked_bindings(
         .handleDosage = .cbp_mockExtractor(),
@@ -844,7 +845,7 @@ test_that(".cbSumstatPair: NULL / empty df -> NULL", {
     expect_null(pecotmr:::.cbSumstatPair(data.frame(), .cbp_makeHandle()))
 })
 
-test_that(".cbQtlSumStatsBundle: NULL / context / trait filters and empty result", {
+test_that(".cbQtlSumStatsBundle: NULL, context, trait filters; empty result", {
     ss <- .cbp_makeQtlSumStats()
     local_mocked_bindings(
         .handleDosage = .cbp_mockExtractor(),
@@ -860,7 +861,7 @@ test_that(".cbGwasSumStatsBundle: NULL -> empty list", {
     expect_equal(pecotmr:::.cbGwasSumStatsBundle(NULL), list())
 })
 
-test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:pos", {
+test_that(".cbSumstatPair: varY sets var_y; NA ids fall back to chr:pos", {
     local_mocked_bindings(
         .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
@@ -889,13 +890,14 @@ test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:
     expect_null(pecotmr:::.cbSumstatPair(dfNA, h))
 })
 
-test_that(".cbSumstatPair canonicalizes variant ids to chr-prefixed for name alignment", {
+test_that(".cbSumstatPair gives chr-prefixed ids so names align", {
     local_mocked_bindings(
         .handleDosage = .cbp_mockExtractor(),
         .package = "pecotmr"
     )
     h <- .cbp_makeHandle(snp_n = 3L)
-    h@snpInfo$SNP <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G") # chr-prefixed panel
+    # chr-prefixed panel
+    h@snpInfo$SNP <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     # sumstat carries the same variants without the "chr" prefix; the pipeline
     # should canonicalize them so the sumstat / LD ids align by name with other
     # sources (previously the returned ids kept the caller's convention).
@@ -913,7 +915,7 @@ test_that(".cbSumstatPair canonicalizes variant ids to chr-prefixed for name ali
     expect_identical(colnames(pair$LD), pair$sumstat$variant)
 })
 
-test_that(".cbFlipPairToCanonical flips z + LD for swapped variants, relabels to canonical", {
+test_that(".cbFlipPairToCanonical flips swapped variants' z and LD, relabels", {
     ss <- data.frame(
         z = c(2, -1),
         n = c(1000, 1000),
@@ -922,11 +924,13 @@ test_that(".cbFlipPairToCanonical flips z + LD for swapped variants, relabels to
     )
     LD <- matrix(c(1, 0.5, 0.5, 1), 2, dimnames = list(ss$variant, ss$variant))
     p <- list(sumstat = ss, LD = LD, variantIds = ss$variant)
-    canonical <- c("chr1:100:G:A", "chr1:200:C:T") # variant 1 swapped, 2 identical
+    # variant 1 swapped, 2 identical
+    canonical <- c("chr1:100:G:A", "chr1:200:C:T")
     out <- pecotmr:::.cbFlipPairToCanonical(p, canonical)
     expect_equal(out$sumstat$variant, c("chr1:100:G:A", "chr1:200:C:T"))
     expect_equal(out$sumstat$z, c(-2, -1)) # v1 z flipped; v2 unchanged
-    expect_equal(out$LD["chr1:100:G:A", "chr1:200:C:T"], -0.5) # one endpoint flipped
+    # one endpoint flipped
+    expect_equal(out$LD["chr1:100:G:A", "chr1:200:C:T"], -0.5)
     expect_equal(unname(diag(out$LD)), c(1, 1)) # diagonal preserved
 })
 
@@ -951,20 +955,21 @@ test_that(".cbFlipPairToCanonical negates a factor's swapped columns", {
     )
 })
 
-test_that(".cbFlipMatrixToCanonical negates residualized dosage for swapped columns", {
+test_that(".cbFlipMatrixToCanonical negates swapped columns' dosage", {
     X <- matrix(
         c(1, -1, 2, 0.5, -0.5, 1),
         nrow = 3,
         dimnames = list(paste0("s", 1:3), c("chr1:100:A:G", "chr1:200:C:T"))
     )
-    canonical <- c("chr1:100:G:A", "chr1:200:C:T") # col 1 swapped, col 2 identical
+    # col 1 swapped, col 2 identical
+    canonical <- c("chr1:100:G:A", "chr1:200:C:T")
     out <- pecotmr:::.cbFlipMatrixToCanonical(X, canonical)
     expect_equal(colnames(out), c("chr1:100:G:A", "chr1:200:C:T"))
     expect_equal(unname(out[, "chr1:100:G:A"]), -c(1, -1, 2)) # negated
     expect_equal(unname(out[, "chr1:200:C:T"]), c(0.5, -0.5, 1))
 })
 
-test_that(".cbHarmonizeAlleles aligns opposite-coded sumstats to one canonical (invariance)", {
+test_that(".cbHarmonizeAlleles aligns opposite-coded sumstats canonically", {
     mkPair <- function(v, z) {
         ss <- data.frame(z = z, n = 1000, variant = v, stringsAsFactors = FALSE)
         list(
@@ -973,10 +978,12 @@ test_that(".cbHarmonizeAlleles aligns opposite-coded sumstats to one canonical (
             variantIds = v
         )
     }
-    # Same locus, opposite ref/alt coding across two sumstats, same underlying z.
+    # Same locus, opposite ref/alt coding across two sumstats, same underlying
+    # z.
     pairs <- list(A = mkPair("chr1:100:A:G", 3), B = mkPair("chr1:100:G:A", 3))
     h <- pecotmr:::.cbHarmonizeAlleles(NULL, pairs)
-    expect_equal(h$pairs$A$sumstat$variant, "chr1:100:A:G") # first-seen = canonical
+    # first-seen = canonical
+    expect_equal(h$pairs$A$sumstat$variant, "chr1:100:A:G")
     expect_equal(h$pairs$B$sumstat$variant, "chr1:100:A:G") # B relabeled to it
     expect_equal(h$pairs$A$sumstat$z, 3) # A already canonical
     expect_equal(h$pairs$B$sumstat$z, -3) # B flipped to match

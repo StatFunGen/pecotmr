@@ -448,8 +448,12 @@ test_that("lassosumRss is penalizedRss's lasso at alpha = 1, bit for bit", {
 # variants.
 .prs_lowRankLd <- function() {
     set.seed(5)
-    F <- pecotmr:::.ldFactorFromDosage(matrix(rbinom(30 * 50, 2, 0.4), 30, 50))
-    list(F = F, R = crossprod(F) / (nrow(F) - 1))
+    ldFactor <- pecotmr:::.ldFactorFromDosage(matrix(
+        rbinom(30 * 50, 2, 0.4),
+        30,
+        50
+    ))
+    list(ldFactor = ldFactor, R = crossprod(ldFactor) / (nrow(ldFactor) - 1))
 }
 
 test_that("a ridge is solved in closed form, on the matrix or a factor", {
@@ -461,7 +465,10 @@ test_that("a ridge is solved in closed form, on the matrix or a factor", {
             cbind,
             !!!map(lambda, .prs_ridgeExact, R = d$R, z = z, s = s)
         )
-        for (ld in list(list(R = d$R, shrink = s), list(F = d$F, shrink = s))) {
+        for (ld in list(
+            list(R = d$R, shrink = s),
+            list(ldFactor = d$ldFactor, shrink = s)
+        )) {
             fit <- pecotmr:::.rssRidgeSolve(z, lambda, ld)
             expect_equal(fit$beta, exact, tolerance = 1e-10)
             expect_identical(fit$conv, rep(1L, 3L))
@@ -505,7 +512,7 @@ test_that("a ridge that nothing makes invertible is the minimum-norm fit", {
     minNorm <- ev$vectors[, kept] %*%
         (crossprod(ev$vectors[, kept], z) / ev$values[kept])
     # At s = lambda = 0 the LD's null space is unpenalized.
-    for (ld in list(list(R = d$R), list(F = d$F))) {
+    for (ld in list(list(R = d$R), list(ldFactor = d$ldFactor))) {
         expect_equal(
             pecotmr:::.rssRidgeSolve(z, 0, ld)$beta,
             minNorm,

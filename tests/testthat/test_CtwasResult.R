@@ -24,7 +24,7 @@ context("CtwasResult")
     )
 }
 
-test_that("CtwasResult: constructor keyed by (gwasStudy, study, context, method)", {
+test_that("CtwasResult rows are keyed by (gwasStudy, study, context, method)", {
     cr <- CtwasResult(
         gwasStudy = c("D1", "D1"),
         studyName = c("Q1", "Q1"),
@@ -58,7 +58,7 @@ test_that("CtwasResult: c() appends runs, their tables kept", {
     expect_identical(length(ctwasPosteriors(both)), 3L)
 })
 
-test_that("CtwasResult: ctwasPosteriors aggregates rows tagged with run identity", {
+test_that("ctwasPosteriors aggregates rows tagged with run identity", {
     cr <- CtwasResult(
         gwasStudy = c("D1", "D1"),
         studyName = c("Q1", "Q1"),
@@ -79,7 +79,7 @@ test_that("CtwasResult: ctwasPosteriors aggregates rows tagged with run identity
     expect_equal(fm$context, c("brain", "brain", "liver"))
 })
 
-test_that("CtwasResult: susieAlpha aggregates the per-effect table with identity", {
+test_that("susieAlpha aggregates the per-effect table with identity", {
     cr <- CtwasResult(
         gwasStudy = c("D1", "D1"),
         studyName = c("Q1", "Q1"),

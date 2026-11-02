@@ -69,7 +69,7 @@ test_that("adjustPips errors when the intersection is empty", {
     )
 })
 
-test_that("adjustPips tolerates a chr-prefix difference between entry and keepVariants", {
+test_that("adjustPips tolerates a chr-prefix difference with keepVariants", {
     vids <- paste0("chr1:", 1:6, ":A:G")
     entry <- .makeAdjustEntry(vids)
     keep <- paste0("1:", 2:5, ":A:G") # same variants, no "chr" prefix
@@ -81,7 +81,7 @@ test_that("adjustPips tolerates a chr-prefix difference between entry and keepVa
 
 # === Tests migrated from test_s4Constructors.R (FineMappingRow) ===
 
-test_that("FineMappingRow: constructor stores slots and accessors return them", {
+test_that("FineMappingRow stores its slots and the accessors return them", {
     tl <- .sc_makeTopLoci(3)
     tl$variant_id <- sprintf("chr9:%d:A:G", 100L * (1:3))
     entry <- FineMappingRow(
@@ -107,7 +107,7 @@ test_that("FineMappingRow: pip returns named pip vector keyed by variant_id", {
     expect_equal(names(pip), paste0("chr1:", 100 * 1:3, ":A:G"))
 })
 
-test_that("FineMappingRow: resolveWeights returns topLoci posterior effect aligned to variant_id", {
+test_that("resolveWeights gives the row's posterior effect by variant_id", {
     entry <- .sc_makeFineMappingRow(3) # topLoci posterior_mean = 0.05 for all
     wr <- .fmrRowResolveWeights(entry)
     expect_equal(wr$variantIds, paste0("chr1:", 100 * 1:3, ":A:G"))
@@ -145,10 +145,10 @@ test_that("FineMappingRow: credibleSets filters to rows in any credible set", {
     expect_equal(nrow(res), 2L)
 })
 
-test_that("FineMappingRow: credibleSets/topLoci surface the directional af column", {
+test_that("a row's credibleSets and topLoci carry the directional af", {
     # Regression: the posterior view must carry the topLoci `af` (effect-allele
-    # frequency) through to .fmrRowCs() / .fmrRowTopLoci(), not drop it to NA. The
-    # value is directional (0.87 > 0.5), so a folded MAF would be a bug.
+    # frequency) through to .fmrRowCs() / .fmrRowTopLoci(), not drop it to NA.
+    # The value is directional (0.87 > 0.5), so a folded MAF would be a bug.
     entry <- .sc_makeFineMappingRow(3)
     cs <- .fmrRowCs(entry)
     expect_true("af" %in% names(cs))
@@ -160,7 +160,7 @@ test_that("FineMappingRow: credibleSets/topLoci surface the directional af colum
     expect_equal(unname(tl$af), rep(0.87, nrow(tl)))
 })
 
-test_that("FineMappingRow: validity errors when topLoci is missing required cols", {
+test_that("FineMappingRow validity errors on topLoci missing a column", {
     expect_error(
         FineMappingRow(
             variantIds = "chr1:100:A:G",
@@ -257,7 +257,7 @@ test_that("show.FineMappingRow reports variant count and CS count", {
 
 # === credibleSets empty / cs-less topLoci projections ===
 
-test_that("FineMappingRow: credibleSets returns empty posterior view when topLoci is empty", {
+test_that("credibleSets of a row with empty topLoci is an empty view", {
     entry <- FineMappingRow(
         variantIds = character(0),
         susieFit = list(),
@@ -273,7 +273,7 @@ test_that("FineMappingRow: credibleSets returns empty posterior view when topLoc
     expect_true(all(c("variant_id", "pip") %in% names(res)))
 })
 
-test_that("FineMappingRow: credibleSets returns empty posterior view when the cs column is absent", {
+test_that("credibleSets of a row without its cs column is an empty view", {
     tl <- data.frame(
         variant_id = c("chr9:100:A:G", "chr9:200:A:G"),
         pip = c(0.1, 0.2),
@@ -308,7 +308,7 @@ test_that("FineMappingRow: adjustPips errors when susieFit lacks alpha", {
     )
 })
 
-test_that("FineMappingRow: adjustPips subsets mu2 and recomputes posterior_sd", {
+test_that("adjustPips on a row subsets mu2 and recomputes posterior_sd", {
     vids <- paste0("chr1:", 1:5, ":A:G")
     p <- length(vids)
     L <- 2L
@@ -389,8 +389,9 @@ test_that("adjustPips reports the posterior on topLoci's scale", {
     )
 })
 
-test_that("credibleSets / topLoci minPurity filters CS by purity, independent of coverage + pip", {
-    # Two 0.95 credible sets: CS1 (v1,v2) pure (0.9), CS2 (v3,v4) impure (0.3); v5 non-CS.
+test_that("minPurity filters CSs by purity alone, not coverage or pip", {
+    # Two 0.95 credible sets: CS1 (v1,v2) pure (0.9), CS2 (v3,v4) impure (0.3);
+    # v5 non-CS.
     vn <- paste0("chr1:", (1:5) * 100, ":A:G")
     L <- 2L
     P <- 5L
@@ -418,7 +419,8 @@ test_that("credibleSets / topLoci minPurity filters CS by purity, independent of
     tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
     e <- FineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
 
-    # credibleSets: minPurity is orthogonal to coverage -> keeps only the pure CS members
+    # credibleSets: minPurity is orthogonal to coverage -> keeps only the pure
+    # CS members
     expect_equal(nrow(.fmrRowCs(e, coverage = 0.95)), 4L)
     expect_equal(
         .fmrRowCs(e, coverage = 0.95, minPurity = 0.8)$variant_id,
@@ -430,7 +432,8 @@ test_that("credibleSets / topLoci minPurity filters CS by purity, independent of
         .fmrRowTopLoci(e, signalCutoff = 0, minPurity = 0.8)$variant_id,
         vn[c(1, 2, 5)]
     )
-    expect_equal(nrow(.fmrRowTopLoci(e, signalCutoff = 0)), 5L) # default (NULL) unchanged
+    # default (NULL) unchanged
+    expect_equal(nrow(.fmrRowTopLoci(e, signalCutoff = 0)), 5L)
 })
 
 # ===========================================================================
@@ -478,7 +481,7 @@ test_that("credibleSets / topLoci minPurity filters CS by purity, independent of
     )
 }
 
-test_that("adjustPips renormalizes stored alpha, honouring a non-uniform prior", {
+test_that("adjustPips renormalizes alpha, honouring a non-uniform prior", {
     vids <- paste0("chr1:", 1:6, ":A:G")
     prior <- c(0.5, 0.2, 0.1, 0.1, 0.05, 0.05)
     built <- .makeNonUniformPriorEntry(vids, prior)
@@ -556,7 +559,7 @@ test_that("adjustPips keeps the null_weight column in the renormalization", {
     expect_equal(unname(adjAlpha), unname(expected / rowSums(expected)))
 })
 
-test_that("adjustPips errors when alpha's width matches neither variant count", {
+test_that("adjustPips errors when alpha's width matches no variant count", {
     vids <- paste0("chr1:", 1:4, ":A:G")
     entry <- .makeAdjustEntry(vids)
     fit <- .fmrPartsSusieFit(entry)
@@ -680,7 +683,8 @@ test_that("adjustPips subsets mvsusie-shaped coef rows and 3-D clfsr", {
 
 test_that("lbf returns the wide variant x effect lbf matrix", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
-    lbf <- matrix(c(3.0, 2.5, 0.1, 0.1, 0.1, 2.0), nrow = 2, byrow = TRUE) # L=2 x p=3
+    # L=2 x p=3
+    lbf <- matrix(c(3.0, 2.5, 0.1, 0.1, 0.1, 2.0), nrow = 2, byrow = TRUE)
     fit <- list(
         alpha = matrix(0.2, 2, 3),
         mu = matrix(0.1, 2, 3),
@@ -723,7 +727,7 @@ test_that("lbf is empty when the fit carries no lbf matrix", {
 # when R/credibleSetSummary.R was folded in)
 # ===========================================================================
 
-test_that("credibleSetSummary returns one row per CS with size/purity/V/logBF/lead", {
+test_that("credibleSetSummary gives each CS's size, purity, V, logBF, lead", {
     vn <- paste0("chr1:", (1:5) * 100, ":A:G")
     L <- 2L
     P <- 5L
@@ -777,7 +781,8 @@ test_that("credibleSetSummary returns one row per CS with size/purity/V/logBF/le
     expect_equal(s$V, c(0.8, 0.5))
     # cs_log10bf = max member logBF (per-variant max single-effect lbf)
     expect_equal(s$cs_log10bf, c(3.0, 2.0))
-    # cs_log_bf = true per-effect single-effect logBF = logSumExp(lbf[L, ]) - log(P)
+    # cs_log_bf = true per-effect single-effect logBF = logSumExp(lbf[L, ]) -
+    # log(P)
     expect_equal(s$cs_log_bf, c(1.9597, 1.2031), tolerance = 1e-3)
     # cs_pip = summed member PIP (inclusion mass captured)
     expect_equal(s$cs_pip, c(1.1, 0.8), tolerance = 1e-6)
@@ -810,9 +815,9 @@ test_that("credibleSetSummary is empty when there are no credible sets", {
     expect_equal(nrow(.fmrRowCredibleSetSummary(e)), 0L)
 })
 
-test_that("credibleSetSummary is empty when the requested coverage column is absent", {
-    # topLoci carries only cs_95 / cs_70 / cs_50; asking for coverage 0.99 finds no
-    # cs_99 column -> the .csSummaryFit guard returns the empty summary.
+test_that("credibleSetSummary is empty without the requested coverage column", {
+    # topLoci carries only cs_95 / cs_70 / cs_50; asking for coverage 0.99 finds
+    # no cs_99 column -> the .csSummaryFit guard returns the empty summary.
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
     tl <- data.frame(
         variant_id = vn,
@@ -826,9 +831,10 @@ test_that("credibleSetSummary is empty when the requested coverage column is abs
     expect_equal(nrow(.fmrRowCredibleSetSummary(e, coverage = 0.99)), 0L)
 })
 
-test_that("credibleSetSummary reports NA cs_log_bf when the fit carries no lbf matrix", {
-    # A trimmed fit drops lbf_variable: the per-effect single-effect logBF degrades
-    # to NA while the max-member cs_log10bf still comes from the topLoci.
+test_that("credibleSetSummary: NA cs_log_bf when the fit has no lbf matrix", {
+    # A trimmed fit drops lbf_variable: the per-effect single-effect logBF
+    # degrades to NA while the max-member cs_log10bf still comes from the
+    # topLoci.
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
     tl <- data.frame(
         variant_id = vn,
@@ -849,7 +855,7 @@ test_that("credibleSetSummary reports NA cs_log_bf when the fit carries no lbf m
     expect_equal(s$cs_log10bf, 2.5)
 })
 
-test_that("credibleSetSummary reports NA cs_log_bf when the effect's lbf row is all non-finite", {
+test_that("credibleSetSummary: NA cs_log_bf for an all-non-finite lbf row", {
     # effect 1's lbf row is entirely -Inf, so the finite subset is empty and the
     # logSumExp path short-circuits to NA.
     vn <- c("chr1:100:A:G", "chr1:200:C:T")
@@ -872,7 +878,7 @@ test_that("credibleSetSummary reports NA cs_log_bf when the effect's lbf row is 
 # test_fsusieAccessors.R when R/fsusieAccessors.R was folded in)
 # ===========================================================================
 
-test_that("fsusieCredibleBand returns a long effect + band table (lower <= effect <= upper)", {
+test_that("fsusieCredibleBand gives a long table, lower <= effect <= upper", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     cb <- .fmrRowFsusieCredibleBand(.fsa_entry(.fsa_fits$none))
@@ -934,7 +940,7 @@ test_that("trimmed fSuSiE keeps curves, bands and coloc inputs", {
     }
 })
 
-test_that("fsusieAffectedRegions returns a GRanges with cs / purity / direction", {
+test_that("fsusieAffectedRegions gives a GRanges of cs, purity, direction", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     gr <- .fmrRowFsusieAffectedRegions(.fsa_entry(
@@ -947,13 +953,13 @@ test_that("fsusieAffectedRegions returns a GRanges with cs / purity / direction"
         c("cs", "purity", "direction") %in% names(S4Vectors::mcols(gr))
     ))
     expect_true(all(S4Vectors::mcols(gr)$direction %in% c("pos", "neg", NA)))
-    # purity sourced from the entry's cs_95_purity (matched by CS variant membership),
-    # NOT the (nonexistent) fit$purity slot
+    # purity sourced from the entry's cs_95_purity (matched by CS variant
+    # membership), NOT the (nonexistent) fit$purity slot
     expect_true(all(S4Vectors::mcols(gr)$purity == 0.85))
     expect_true(all(grepl("^fsusie_", S4Vectors::mcols(gr)$cs)))
 })
 
-test_that("fsusie accessors degrade to empty for a non-fSuSiE / trimmed fit (no wavelet slots)", {
+test_that("fsusie accessors are empty for a fit without wavelet slots", {
     e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(pip = 0.5),
@@ -1029,7 +1035,7 @@ test_that("fsusieTraitEffects evaluates the curve at each joint trait", {
     )
 })
 
-test_that("fsusieTraitEffects refuses a fit whose positions and names disagree", {
+test_that("fsusieTraitEffects refuses a fit whose positions, names disagree", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     fit <- .fsa_fits$none
@@ -1065,11 +1071,12 @@ test_that("fsusieTraitEffects returns zero rows for a non-fsusie fit", {
 })
 
 test_that(".fsusieChrom returns NA when the fit has no named variants", {
-    expect_true(is.na(pecotmr:::.fsusieChrom(list(csd_X = c(1, 2, 3))))) # unnamed
+    # unnamed
+    expect_true(is.na(pecotmr:::.fsusieChrom(list(csd_X = c(1, 2, 3)))))
     expect_true(is.na(pecotmr:::.fsusieChrom(list()))) # no csd_X
 })
 
-test_that(".fsusieCsMapFromTopLoci falls back to index labels when topLoci lacks CS columns", {
+test_that(".fsusieCsMapFromTopLoci uses index labels without CS columns", {
     fit <- list(
         cs = list(1L, 2L),
         csd_X = stats::setNames(1:3, paste0("chr1:", 1:3 * 100, ":A:G"))
@@ -1077,7 +1084,8 @@ test_that(".fsusieCsMapFromTopLoci falls back to index labels when topLoci lacks
     m <- pecotmr:::.fsusieCsMapFromTopLoci(fit, topLoci = NULL)
     expect_equal(unname(m$label), c("fsusie_1", "fsusie_2"))
     expect_true(all(is.na(m$purity)))
-    # a topLoci missing the required cs_95 / cs_95_purity columns takes the same path
+    # a topLoci missing the required cs_95 / cs_95_purity columns takes the same
+    # path
     m2 <- pecotmr:::.fsusieCsMapFromTopLoci(
         fit,
         topLoci = data.frame(variant_id = "x")
@@ -1085,8 +1093,8 @@ test_that(".fsusieCsMapFromTopLoci falls back to index labels when topLoci lacks
     expect_equal(unname(m2$label), c("fsusie_1", "fsusie_2"))
 })
 
-# A minimal object that passes .isFsusieFit (the wavelet-slot gate) so the band /
-# affected-region degradation paths can be exercised with the (untrimmed) band
+# A minimal object that passes .isFsusieFit (the wavelet-slot gate) so the band
+# / affected-region degradation paths can be exercised with the (untrimmed) band
 # computation replaced by a mock returning a controlled, degenerate fit.
 .fsa_fakeFit <- function() {
     list(fitted_wc2 = 1, fitted_func = list(1), outing_grid = 1:2, alpha = 1)
@@ -1119,7 +1127,7 @@ test_that("fsusieCredibleBand skips NULL effect bands and degrades to empty", {
     expect_equal(nrow(.fmrRowFsusieCredibleBand(.fsa_bareEntry())), 0L)
 })
 
-test_that("fsusieAffectedRegions degrades to empty when affected_reg finds nothing", {
+test_that("fsusieAffectedRegions is empty when affected_reg finds nothing", {
     skip_if_not_installed("fsusieR")
     testthat::local_mocked_bindings(
         .fsusiePopulateCredibleBand = function(fit) {
@@ -1138,7 +1146,7 @@ test_that("fsusieAffectedRegions degrades to empty when affected_reg finds nothi
     expect_equal(length(.fmrRowFsusieAffectedRegions(.fsa_bareEntry())), 0L)
 })
 
-test_that("fsusieAffectedRegions yields NA direction for a region outside the grid", {
+test_that("fsusieAffectedRegions: NA direction for a region off the grid", {
     skip_if_not_installed("fsusieR")
     testthat::local_mocked_bindings(
         .fsusiePopulateCredibleBand = function(fit) {
@@ -1150,8 +1158,8 @@ test_that("fsusieAffectedRegions yields NA direction for a region outside the gr
         },
         .package = "pecotmr"
     )
-    # Region [500, 600] lies outside the grid [100, 200]: no grid points fall in it,
-    # so the per-region effect-direction summary is NA.
+    # Region [500, 600] lies outside the grid [100, 200]: no grid points fall in
+    # it, so the per-region effect-direction summary is NA.
     testthat::local_mocked_bindings(
         affected_reg = function(...) {
             data.frame(CS = 1L, Start = 500, End = 600)
@@ -1164,7 +1172,7 @@ test_that("fsusieAffectedRegions yields NA direction for a region outside the gr
     expect_true(is.na(S4Vectors::mcols(gr)$direction))
 })
 
-test_that("credibleSets warns when the coverage has no purity column to filter on", {
+test_that("credibleSets warns when the coverage has no purity column", {
     # minPurity is orthogonal to coverage, so asking for it at a coverage that
     # produced no credible sets leaves nothing to filter. Skipping silently
     # would look like "the filter ran and kept everything".

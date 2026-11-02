@@ -43,7 +43,8 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
             r$q_bonferroni_min_original <= 1
     ))
 
-    # Filtered flavour present and uses the smaller test count (n_variants_filtered).
+    # Filtered flavour present and uses the smaller test count
+    # (n_variants_filtered).
     expect_true(all(
         c(
             "p_bonferroni_min_filtered",
@@ -68,7 +69,7 @@ test_that("q-values come from qvalue::qvalue, not a hand-rolled fallback", {
     )
 })
 
-test_that("permutation nominal threshold == stats::qbeta of the empirical cutoff", {
+test_that("permutation nominal threshold is qbeta of the empirical cutoff", {
     x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
@@ -94,7 +95,8 @@ test_that("significantQtls (bonferroni) matches the derived threshold rule", {
     expect_s4_class(sig, "GRanges")
     expect_true("trait" %in% names(S4Vectors::mcols(sig)))
 
-    # Reproduce the rule: variants with P*n_variants <= max(p_bonf_min over FDR-sig genes).
+    # Reproduce the rule: variants with P*n_variants <= max(p_bonf_min over
+    # FDR-sig genes).
     fdr <- as.numeric(r$fdr_bonferroni_min_original)
     sigGenes <- which(fdr < 0.5)
     expect_gt(length(sigGenes), 0)
@@ -147,7 +149,7 @@ test_that(".qapSafeQvalue retries both qvalue-native degenerate cases", {
     }
 })
 
-test_that(".qapSafeQvalue re-raises a non-native qvalue error (no hand-rolled q)", {
+test_that(".qapSafeQvalue re-raises a non-native qvalue error", {
     skip_if_not_installed("qvalue")
     testthat::local_mocked_bindings(
         qvalue = function(p, ...) stop("some unrelated numerical failure"),
@@ -159,9 +161,10 @@ test_that(".qapSafeQvalue re-raises a non-native qvalue error (no hand-rolled q)
     )
 })
 
-test_that("permutation nominal threshold is NA for every gene when none pass FDR", {
-    # An impossibly small FDR threshold leaves no q_beta-significant gene, so the
-    # empirical p_beta bracketing is empty and every nominal threshold is NA.
+test_that("permutation nominal threshold is NA when no gene passes FDR", {
+    # An impossibly small FDR threshold leaves no q_beta-significant gene, so
+    # the empirical p_beta bracketing is empty and every nominal threshold is
+    # NA.
     r <- qtlAssociationPostprocess(
         .qapDefaultFixture,
         fdrThreshold = 1e-300,
@@ -211,7 +214,8 @@ test_that("significantQtls (permutation) skips genes with an NA threshold", {
     expect_true(any(!is.na(thr))) # ... alongside non-NA genes
     sig <- significantQtls(r, "permutation")
     expect_s4_class(sig, "GRanges")
-    # Gene 1 contributes nothing; total is the sum over the non-NA-threshold genes.
+    # Gene 1 contributes nothing; total is the sum over the non-NA-threshold
+    # genes.
     expN <- sum(map_int(
         seq_len(nrow(r)),
         function(i) {
@@ -235,7 +239,8 @@ test_that("significantQtls (permutation) errors without a nominal threshold", {
 })
 
 test_that("significantQtls (bonferroni) errors when its columns are absent", {
-    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation") # no bonferroni
+    # no bonferroni
+    r <- qtlAssociationPostprocess(.qapDefaultFixture, methods = "permutation")
     expect_error(significantQtls(r, "bonferroni_original"), "columns absent")
 })
 
@@ -248,7 +253,8 @@ test_that("significantQtls (qvalue) selects variants by their qvalue mcol", {
     )
     sig <- significantQtls(r, "qvalue", threshold = 0.1)
     expect_s4_class(sig, "GRanges")
-    # Reproduce: within genes whose event q_beta < 0.1, variants with qvalue < 0.1.
+    # Reproduce: within genes whose event q_beta < 0.1, variants with qvalue <
+    # 0.1.
     qb <- as.numeric(r$q_beta)
     sigGenes <- which(qb < 0.1)
     expect_gt(length(sigGenes), 0)
@@ -264,7 +270,8 @@ test_that("significantQtls (qvalue) selects variants by their qvalue mcol", {
 
 test_that("significantQtls (qvalue) errors when no event q column exists", {
     # Drop p_beta so permutation adds no q_beta, and skip bonferroni so there is
-    # no q_bonferroni_min_original either -- yet the object is still postprocessed.
+    # no q_bonferroni_min_original either -- yet the object is still
+    # postprocessed.
     r <- qtlAssociationPostprocess(
         .qapWithout("p_beta"),
         methods = "permutation"
@@ -274,7 +281,7 @@ test_that("significantQtls (qvalue) errors when no event q column exists", {
     expect_error(significantQtls(r, "qvalue"), "event q-value column")
 })
 
-test_that("significantQtls returns an empty GRanges when nothing is significant", {
+test_that("significantQtls: an empty GRanges when nothing is significant", {
     r <- qtlAssociationPostprocess(
         .qapDefaultFixture,
         mafCutoff = 0.01,
@@ -285,7 +292,7 @@ test_that("significantQtls returns an empty GRanges when nothing is significant"
     expect_length(sig, 0)
 })
 
-# ---- qtlAssociationPostprocess: required-column + empty-entry guards ----------
+# ---- qtlAssociationPostprocess: required-column + empty-entry guards ---------
 
 test_that("qtlAssociationPostprocess requires n_variants for Bonferroni", {
     expect_error(
@@ -297,7 +304,7 @@ test_that("qtlAssociationPostprocess requires n_variants for Bonferroni", {
     )
 })
 
-test_that("qtlAssociationPostprocess requires n_variants_filtered when filtering", {
+test_that("qtlAssociationPostprocess needs n_variants_filtered to filter", {
     expect_error(
         qtlAssociationPostprocess(
             .qapWithout("n_variants_filtered"),
@@ -318,7 +325,7 @@ test_that("qtlAssociationPostprocess skips genes whose entry has no variants", {
     expect_true(all(!is.na(pmin1[-1]))) # every other gene is finite
 })
 
-test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_filtered", {
+test_that("filtered Bonferroni: drops failing variants, n_variants_filtered", {
     # Fixture entries: AF = (.30, .20, .005, .40),
     # tss/tes_distance = (0, 500, 9e5, 2e6).
     # With mafCutoff 0.01 + cisWindow 1e6 the filtered set keeps only v1, v2
@@ -364,7 +371,7 @@ test_that("a requested filter refuses entries without its column", {
     )
 })
 
-test_that("significantQtls(bonferroni_filtered) applies the derived rule on the filtered set", {
+test_that("bonferroni_filtered significance applies to the filtered set", {
     x <- .qapDefaultFixture
     r <- qtlAssociationPostprocess(
         x,
@@ -378,7 +385,8 @@ test_that("significantQtls(bonferroni_filtered) applies the derived rule on the 
     sigGenes <- which(!is.na(fdr) & fdr < 0.5)
     expect_gt(length(sigGenes), 0) # signal genes pass
     varThr <- max(as.numeric(r$p_bonferroni_min_filtered)[sigGenes])
-    # only MAF/cis-passing variants (v1,v2) with P*n_filtered <= threshold qualify
+    # only MAF/cis-passing variants (v1,v2) with P*n_filtered <= threshold
+    # qualify
     expN <- sum(map_int(
         seq_len(nrow(r)),
         function(i) {

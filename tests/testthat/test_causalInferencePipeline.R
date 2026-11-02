@@ -130,7 +130,7 @@ test_that("causalInferencePipeline: rejects un-QCd GwasSumStats", {
     )
 })
 
-test_that("causalInferencePipeline: requires at least one of twasWeights/fineMappingResult", {
+test_that("causalInferencePipeline needs twasWeights or fineMappingResult", {
     expect_error(
         causalInferencePipeline(gwasSumStats = .cip_makeGwasSumstats()),
         "at least one of"
@@ -147,7 +147,7 @@ test_that("causalInferencePipeline: rejects non-TwasWeights twasWeights arg", {
     )
 })
 
-test_that("causalInferencePipeline: rejects GwasFineMappingResult for the QTL slot", {
+test_that("causalInferencePipeline refuses a GWAS result in the QTL slot", {
     e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(),
@@ -293,7 +293,7 @@ test_that("causalInferencePipeline: returns GRanges with TWAS Z per tuple", {
 # Happy path: TwasWeights + matching QtlFineMappingResult enables MR
 # ===========================================================================
 
-test_that("causalInferencePipeline: with both inputs, MR fields are populated", {
+test_that("causalInferencePipeline fills MR fields given both inputs", {
     tw <- .cip_makeTwasWeights()
     fmr <- .cip_makeQtlFmr()
     local_mocked_bindings(
@@ -317,7 +317,7 @@ test_that("causalInferencePipeline: with both inputs, MR fields are populated", 
 # Fine-mapping-only path: weights come from topLoci$betahat
 # ===========================================================================
 
-test_that("causalInferencePipeline: FMR-only path extracts weights from topLoci$betahat", {
+test_that("FMR-only causal inference takes weights from topLoci$betahat", {
     fmr <- .cip_makeQtlFmr()
     local_mocked_bindings(
         .handleDosage = .cip_mockExtractor(),
@@ -382,7 +382,7 @@ test_that(".cipZToSe: falls back to vector of 1 when maf/n are NA", {
     expect_equal(res, c(1, 1))
 })
 
-test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, SS-TWAS keeps all", {
+test_that(".cipFilterEligibleMethods gates rsq and pval; SS-TWAS keeps all", {
     mkEntry <- function(rsq, pval = 0.01) {
         TwasWeightsRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
@@ -404,7 +404,8 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
         "rsq",
         c("adj_rsq_pval", "pval")
     )
-    # rsq gate only: G keeps susie(.20)+lasso(.50); enet(.05) out; G2(.01) dropped.
+    # rsq gate only: G keeps susie(.20)+lasso(.50); enet(.05) out; G2(.01)
+    # dropped.
     f1 <- pecotmr:::.cipFilterEligibleMethods(
         qtlRows,
         mt,
@@ -465,7 +466,7 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
     )
 })
 
-test_that(".cipSelectBestMethod: max-rsq finite Z, NA/Inf re-selection, SS-TWAS keeps all", {
+test_that(".cipSelectBestMethod picks max-rsq finite Z; SS-TWAS keeps all", {
     lk <- c("S\rc1\rG\rsusie" = 0.5, "S\rc1\rG\rlasso" = 0.2)
     df <- data.frame(
         qtlStudy = "S",
@@ -490,7 +491,7 @@ test_that(".cipSelectBestMethod: max-rsq finite Z, NA/Inf re-selection, SS-TWAS 
     expect_equal(nrow(pecotmr:::.cipSelectBestMethod(df, lkNA)), 2L)
 })
 
-test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per group", {
+test_that("causal inference picks each group's max-rsq method (rsqCutoff)", {
     tw <- TwasWeights(
         studyName = rep("Q1", 2),
         context = rep("c1", 2),
@@ -522,7 +523,7 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
     expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
 })
 
-test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection", {
+test_that("causalInferencePipeline reselects a method on NA/Inf TWAS-Z", {
     tw <- TwasWeights(
         studyName = rep("Q1", 2),
         context = rep("c1", 2),
@@ -556,7 +557,7 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
     expect_true(is.finite(S4Vectors::mcols(out)$twasZ))
 })
 
-test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods", {
+test_that("causalInferencePipeline: rsqPvalCutoff drops high-CV-pval methods", {
     tw <- TwasWeights(
         studyName = rep("Q1", 2),
         context = rep("c1", 2),
@@ -809,7 +810,7 @@ test_that("twasZ: combineMethods K=1 returns the per-tuple p-value unchanged", {
     expect_equal(res$combined$input$nValid, 1L)
 })
 
-test_that("twasZ: combineMethods K>=2 forwards to combinePValues with correlation", {
+test_that("twasZ passes K>=2 methods to combinePValues with correlation", {
     d <- .tz_makeLd()
     set.seed(11)
     W <- cbind(method_a = rnorm(d$p), method_b = rnorm(d$p))
@@ -1072,7 +1073,7 @@ test_that(".cipCsAwareAlign: exposure scale follows the GWAS, both ways", {
 # dropped the variant.
 # ---------------------------------------------------------------------------
 
-test_that(".cipComputeMr matches across a chr-prefix difference (tuple match)", {
+test_that(".cipComputeMr matches across a chr-prefix difference", {
     tl <- data.frame(
         variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         pip = c(0.9, 0.9),
@@ -1091,7 +1092,7 @@ test_that(".cipComputeMr matches across a chr-prefix difference (tuple match)", 
     expect_true(is.finite(res$waldRatio))
 })
 
-test_that(".cipComputeMr includes an allele-swapped GWAS variant and flips the sign", {
+test_that(".cipComputeMr keeps an allele-swapped GWAS variant, sign flipped", {
     tl <- data.frame(
         variant_id = "chr1:100:A:G",
         pip = 0.9,
@@ -1108,8 +1109,9 @@ test_that(".cipComputeMr includes an allele-swapped GWAS variant and flips the s
         .cip_gwasDf("chr1:100:A:G", z = 2.0),
         pipCutoff = 0.5
     )
-    # Same locus, ref/alt swapped on the GWAS side (same |z|): previously dropped
-    # (id-string mismatch); now matched with sign -1, negating the Wald ratio.
+    # Same locus, ref/alt swapped on the GWAS side (same |z|): previously
+    # dropped (id-string mismatch); now matched with sign -1, negating the Wald
+    # ratio.
     rSwap <- pecotmr:::.cipComputeMr(
         NULL,
         .cip_gwasDf("chr1:100:G:A", z = 2.0),
@@ -1119,7 +1121,7 @@ test_that(".cipComputeMr includes an allele-swapped GWAS variant and flips the s
     expect_equal(rSwap$waldRatio, -rSame$waldRatio)
 })
 
-test_that(".cipComputeMr with alleleFlip = FALSE drops an allele-swapped GWAS variant", {
+test_that(".cipComputeMr(alleleFlip = FALSE) drops a swapped GWAS variant", {
     tl <- data.frame(
         variant_id = "chr1:100:A:G",
         pip = 0.9,
@@ -1131,7 +1133,8 @@ test_that(".cipComputeMr with alleleFlip = FALSE drops an allele-swapped GWAS va
         .cipTopLociTable = function(x) tl,
         .package = "pecotmr"
     )
-    # GWAS variant is the ref/alt swap; with flipping disabled it is not matched.
+    # GWAS variant is the ref/alt swap; with flipping disabled it is not
+    # matched.
     rSwap <- pecotmr:::.cipComputeMr(
         NULL,
         .cip_gwasDf("chr1:100:G:A", z = 2.0),
@@ -1177,7 +1180,7 @@ test_that(".cipComputeTwasZ gives a Z from a panel's factor or an LdMatrix", {
     expect_equal(viaPanel, viaMatrix)
 })
 
-test_that(".cipComputeTwasZ reconciles a chr-prefix mismatch (previously dropped)", {
+test_that(".cipComputeTwasZ reconciles a chr-prefix mismatch", {
     idsGwas <- c("1:100:A:G", "1:200:A:G", "1:300:A:G") # GWAS / panel coding
     idsWt <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G") # QTL weight ids
     h <- .cip_makeHandle(snp_n = 3L)
@@ -1272,7 +1275,7 @@ test_that(".cipComputeMrCsAware: CS-aware composite Wald + heterogeneity", {
     expect_equal(res$nCs, 2L) # both CSs clear cpip
 })
 
-test_that(".cipComputeMrCsAware: credible-set column found via the ^cs fallback", {
+test_that(".cipComputeMrCsAware finds the CS column by the ^cs fallback", {
     # The shape a stored result has: no bare `cs`, and cs_95 holding
     # "<method>_<idx>" labels rather than integers.
     tl <- data.frame(
@@ -1360,7 +1363,7 @@ test_that("the MR paths abort naming the exposure columns they lack", {
     )
 })
 
-test_that(".cipComputeMrCsAware: naResult on empty / no-CS / no-overlap / low-cpip", {
+test_that(".cipComputeMrCsAware: NA on empty, no CS, no overlap, low cpip", {
     g <- .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:4)))
     isNa <- function(r) expect_true(is.na(r$waldRatio))
     local_mocked_bindings(
@@ -1530,7 +1533,7 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
     expect_null(out)
 })
 
-test_that(".cipCombineAcrossMethods: a single-method group yields no combined rows", {
+test_that(".cipCombineAcrossMethods: one-method groups give no combined rows", {
     gr <- pecotmr:::.cipDfToGranges(data.frame(
         qtlStudy = "Q1",
         context = "c1",
@@ -1676,7 +1679,7 @@ test_that("selecting the best method over an empty frame is a no-op", {
     expect_equal(nrow(pecotmr:::.cipSelectBestMethod(df0, c(a = 1))), 0L)
 })
 
-test_that("a credible set below the cumulative-PIP cutoff contributes nothing", {
+test_that("a credible set below the cumulative-PIP cutoff adds nothing", {
     # cpip is the SUM of member PIPs; a set that does not reach the cutoff is
     # dropped rather than contributing a poorly-supported Wald ratio.
     inst <- tibble(

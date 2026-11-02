@@ -119,42 +119,18 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
     )
 }
 
-# Split the comma-joined path column into LD (+ optional bim) path columns.
+# The genotype files the rows `intersectionRows` spans name, each found as
+# written or beside the TSV (.findValidFilePaths()).
 # @noRd
-.regionalLdParsePaths <- function(genomicData) {
-    parts <- str_split(genomicData$path, ",", simplify = TRUE)
-    pathNames <- if (ncol(parts) == 2) {
-        c("LD_file_path", "bim_file_path")
-    } else {
-        "LD_file_path"
-    }
-    filePath <- `names<-`(
-        as_tibble(parts, .name_repair = "minimal"),
-        pathNames
-    )
-    bind_cols(genomicData, filePath) |>
-        select(-any_of("path"))
-}
-
-# Resolve the LD (and optional bim) file paths for the intersected rows.
 .regionalLdExtractPaths <- function(
     ldReferenceMetaFile,
     genomicData,
     intersectionRows
 ) {
-    ldPaths <- .findValidFilePaths(
+    .findValidFilePaths(
         ldReferenceMetaFile,
-        extractFilePaths(genomicData, intersectionRows, "LD_file_path")
+        extractFilePaths(genomicData, intersectionRows, "path")
     )
-    bimPaths <- if (is_in("bim_file_path", names(genomicData))) {
-        .findValidFilePaths(
-            ldReferenceMetaFile,
-            extractFilePaths(genomicData, intersectionRows, "bim_file_path")
-        )
-    } else {
-        NULL
-    }
-    list(ldPaths = ldPaths, bimPaths = bimPaths)
 }
 
 # A metadata row recorded as start=0, end=0 covers the whole chromosome
@@ -171,17 +147,15 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
     )
 }
 
-#' Find LD blocks overlapping a query region from a metadata TSV file.
+#' Find the rows of an LD-meta TSV that overlap a query region.
 #'
-#' @param ldReferenceMetaFile TSV with columns chrom, start, end, path. The path
-#'   column may be comma-separated: "ld_file,bim_file".
+#' @param ldReferenceMetaFile TSV with columns chrom, start, end, path, each
+#'   path a genotype file, as written or relative to the TSV.
 #' @param region A \code{GRanges} window.
 #' @param completeCoverageRequired If TRUE, error when the region extends beyond
 #'   available LD blocks.
-#' @return A list with: intersections (LD_file_paths, bimFilePaths), ldMetaData,
-#'   and parsed region.
-#' @importFrom stringr str_split
-#' @importFrom dplyr select
+#' @return A list with: intersections (startIndex, endIndex and the rows'
+#'   paths), ldMetaData, and the parsed region.
 #' @importFrom vroom vroom
 #' @noRd
 regionalLdMeta <- function(
@@ -195,37 +169,34 @@ regionalLdMeta <- function(
     ) |>
         mutate(chrom = withChrPrefix(.data$chrom)) |>
         .ldMetaWidenWholeChrom() |>
-        orderDedupRegions() |>
-        .regionalLdParsePaths()
-    region <- orderDedupRegions(.regionTable(region))
+        orderDedupRegions()
+    query <- orderDedupRegions(.regionTable(region))
     intersectionRows <- findIntersectionRows(
         genomicData,
-        region$chrom,
-        region$start,
-        region$end
+        query$chrom,
+        query$start,
+        query$end
     )
     if (completeCoverageRequired) {
         validateSelectedRegion(
             intersectionRows$startRow,
             intersectionRows$endRow,
-            region$start,
-            region$end
+            query$start,
+            query$end
         )
     }
-    paths <- .regionalLdExtractPaths(
-        ldReferenceMetaFile,
-        genomicData,
-        intersectionRows
-    )
     list(
         intersections = list(
             startIndex = intersectionRows$startRow,
             endIndex = intersectionRows$endRow,
-            LD_file_paths = paths$ldPaths,
-            bimFilePaths = paths$bimPaths
+            paths = .regionalLdExtractPaths(
+                ldReferenceMetaFile,
+                genomicData,
+                intersectionRows
+            )
         ),
         ldMetaData = genomicData,
-        region = region
+        region = query
     )
 }
 
@@ -306,9 +277,8 @@ resolveLdSource <- function(path) {
         return(direct)
     }
     meta <- .resolveLdReadMeta(path)
-    # Strip the comma-separated bim path, then resolve relative to the meta dir.
-    rawPath <- str_remove(meta$path[1], ",.*$")
-    resolved <- file.path(dirname(path), rawPath)
+    # A row's path is relative to the metadata file's directory.
+    resolved <- file.path(dirname(path), meta$path[1])
     genoType <- .resolveLdGenotypeType(resolved, path)
     if (!is.null(genoType)) {
         return(genoType)
@@ -1562,8 +1532,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 #
 # An LD source is one block's LD in any of four forms: the matrix itself,
 # list(R = ); an LdMatrix's packed block, list(P = , sign = ), a dspMatrix
-# read with each variant's allele sign (.ldPackedFromRef()); a factor of it,
-# list(F = ) with R = crossprod(F) / (m - 1); or an eigendecomposition,
+# read with each variant's allele sign (.ldPackedFromRef()); a factor F of it,
+# list(ldFactor = ) with R = crossprod(F) / (m - 1); or an eigendecomposition,
 # list(vectors = , values = ) with R = V diag(values) V'. The helpers below
 # read R's rows from any of them, so a computation over R's rows never needs
 # the matrix whole. A source of any form may also carry `eigen`, its R's
@@ -1584,8 +1554,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$P)) {
         return(.ldSignFlipped(methods::as(ld$P, "matrix"), ld$sign))
     }
-    if (!is.null(ld$F)) {
-        return(crossprod(ld$F) / (nrow(ld$F) - 1))
+    if (!is.null(ld$ldFactor)) {
+        return(crossprod(ld$ldFactor) / (nrow(ld$ldFactor) - 1))
     }
     tcrossprod(sweep(ld$vectors, 2L, ld$values, "*"), ld$vectors)
 }
@@ -1599,8 +1569,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$P)) {
         return(nrow(ld$P))
     }
-    if (!is.null(ld$F)) {
-        return(ncol(ld$F))
+    if (!is.null(ld$ldFactor)) {
+        return(ncol(ld$ldFactor))
     }
     nrow(ld$vectors)
 }
@@ -1616,8 +1586,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$vectors)) {
         return(ld[c("values", "vectors")])
     }
-    if (!is.null(ld$F)) {
-        return(.ldFactorEigen(ld$F))
+    if (!is.null(ld$ldFactor)) {
+        return(.ldFactorEigen(ld$ldFactor))
     }
     eigen(.ldSourceMatrix(ld), symmetric = TRUE)
 }
@@ -1631,9 +1601,10 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$P)) {
         return(.ldPackedRows(ld, rows))
     }
-    if (!is.null(ld$F)) {
+    if (!is.null(ld$ldFactor)) {
         return(
-            crossprod(ld$F[, rows, drop = FALSE], ld$F) / (nrow(ld$F) - 1)
+            crossprod(ld$ldFactor[, rows, drop = FALSE], ld$ldFactor) /
+                (nrow(ld$ldFactor) - 1)
         )
     }
     scaled <- sweep(ld$vectors[rows, , drop = FALSE], 2L, ld$values, "*")
@@ -1658,7 +1629,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$P)) {
         return(list(P = ld$P[idx, idx, drop = FALSE], sign = ld$sign[idx]))
     }
-    list(F = ld$F[, idx, drop = FALSE])
+    list(ldFactor = ld$ldFactor[, idx, drop = FALSE])
 }
 
 # (R o R) A -- R squared element-wise, times A -- for an LD source: column a
@@ -1729,8 +1700,10 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!is.null(ld$P)) {
         return(ld$sign * methods::as(ld$P %*% (ld$sign * B), "matrix"))
     }
-    if (!is.null(ld$F)) {
-        return(crossprod(ld$F, ld$F %*% B) / (nrow(ld$F) - 1))
+    if (!is.null(ld$ldFactor)) {
+        return(
+            crossprod(ld$ldFactor, ld$ldFactor %*% B) / (nrow(ld$ldFactor) - 1)
+        )
     }
     ld$vectors %*% (ld$values * crossprod(ld$vectors, B))
 }
@@ -1739,8 +1712,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # a factor, never forming R.
 # @noRd
 .ldQuadForms <- function(ld, B) {
-    if (!is.null(ld$F)) {
-        return(colSums((ld$F %*% B)^2) / (nrow(ld$F) - 1))
+    if (!is.null(ld$ldFactor)) {
+        return(colSums((ld$ldFactor %*% B)^2) / (nrow(ld$ldFactor) - 1))
     }
     colSums(B * .ldSourceTimes(ld, B))
 }
@@ -1752,9 +1725,13 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # @noRd
 #' @importFrom stats rnorm
 .ldSourceDraws <- function(ld, nDraws) {
-    if (!is.null(ld$F)) {
-        e <- matrix(rnorm(nrow(ld$F) * nDraws), nrow(ld$F), nDraws)
-        return(crossprod(ld$F, e) / sqrt(nrow(ld$F) - 1))
+    if (!is.null(ld$ldFactor)) {
+        e <- matrix(
+            rnorm(nrow(ld$ldFactor) * nDraws),
+            nrow(ld$ldFactor),
+            nDraws
+        )
+        return(crossprod(ld$ldFactor, e) / sqrt(nrow(ld$ldFactor) - 1))
     }
     ev <- .ldSourceEigen(ld)
     e <- matrix(rnorm(length(ev$values) * nDraws), length(ev$values), nDraws)

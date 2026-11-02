@@ -106,7 +106,7 @@ test_that("bayesLWeights on BGLR forwards model = 'BL' to BGLR::BGLR", {
     expect_equal(captured$thin, 3)
 })
 
-test_that("bayesAlphabetWeights forwards method to qgg::gbayes for all alphabet variants", {
+test_that("bayesAlphabetWeights passes every alphabet method to qgg::gbayes", {
     skip_if_not_installed("qgg")
     set.seed(42)
     X <- matrix(rnorm(50), nrow = 10)

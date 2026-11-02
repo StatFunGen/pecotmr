@@ -209,8 +209,8 @@ resolveLdInput <- function(
 }
 
 # Run DENTIST on a single window, unpacking the shared tuning parameters.
-# `ld` is .dentistLdInput()'s list(R) or list(F); a factor goes in as X, which
-# dentistSingleWindow() reads without forming the LD.
+# `ld` is .dentistLdInput()'s list(R) or list(ldFactor); a factor goes in as
+# X, which dentistSingleWindow() reads without forming the LD.
 .dentistCallSingle <- function(zScore, ld, nSample, dentistParam) {
     # dentistSingleWindow is what DentistParam() is built for -- ldMismatchQc
     # splices the same bundle into it -- so the tunables travel as one value
@@ -219,7 +219,7 @@ resolveLdInput <- function(
         dentistSingleWindow,
         zScore,
         R = ld$R,
-        X = ld$F,
+        X = ld$ldFactor,
         nSample = nSample,
         !!!dentistParam
     )
@@ -265,7 +265,10 @@ resolveLdInput <- function(
     .ldRequireOneSource(R, X)
     if (is.null(R) && identical(ldMethod, "sample")) {
         X <- as.matrix(X)
-        return(list(F = .ldFactorFromDosage(X), nSample = nSample %||% nrow(X)))
+        return(list(
+            ldFactor = .ldFactorFromDosage(X),
+            nSample = nSample %||% nrow(X)
+        ))
     }
     ld <- resolveLdInput(
         R = R,
@@ -457,11 +460,11 @@ dentist <- function(
         )
         warn(msg)
     }
-    if (!is.null(ld$F)) {
-        if (ncol(ld$F) != length(zScore)) {
+    if (!is.null(ld$ldFactor)) {
+        if (ncol(ld$ldFactor) != length(zScore)) {
             abort(glue(
                 "The genotypes must have one column per z-score ",
-                "({ncol(ld$F)} columns, {length(zScore)} z-scores)."
+                "({ncol(ld$ldFactor)} columns, {length(zScore)} z-scores)."
             ))
         }
         return(invisible(NULL))
@@ -509,14 +512,14 @@ dentist <- function(
 .dentistRunImpute <- function(ld, nSample, zScore, p) {
     verboseIter <- getOption("pecotmr.dentist.verbose", FALSE)
     # The factor kernel imputes from the LD's factor without forming it.
-    kernel <- if (is.null(ld$F)) {
+    kernel <- if (is.null(ld$ldFactor)) {
         dentistIterativeImpute
     } else {
         dentistIterativeImputeFactor
     }
     raw <- kernel(
         # cpp11 requires exact integer types for int parameters
-        ld$R %||% ld$F,
+        ld$R %||% ld$ldFactor,
         as.integer(nSample),
         zScore,
         p$pValueThreshold,
@@ -1358,7 +1361,7 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
     if (is.null(R) && identical(ldMethod, "sample")) {
         factor <- .ldFactorFromDosage(as.matrix(X))
         assertMatrix(factor, ncols = length(zScore))
-        return(list(F = factor))
+        return(list(ldFactor = factor))
     }
     R <- resolveLdInput(R = R, X = X, ldMethod = ldMethod)$R
     assertMatrix(R, nrows = length(zScore), ncols = length(zScore))
@@ -1374,7 +1377,7 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
         return(ld$R[, leadIdx])
     }
     lead <- drop(.ldSourceRows(ld, leadIdx))
-    if (is.null(ld$F)) {
+    if (is.null(ld$ldFactor)) {
         return(lead)
     }
     # The lead's correlation with itself is 1 exactly, as on the matrix's
@@ -2919,7 +2922,7 @@ ldMismatchQc <- function(
             .formalDefaults(dentistSingleWindow, .dentistSettingNames()),
             !!!chosen$args
         )
-        whole <- if (is.null(ld$F)) list(R = .ldSourceMatrix(ld)) else ld
+        whole <- if (is.null(ld$ldFactor)) list(R = .ldSourceMatrix(ld)) else ld
         return(.dentistOnSource(zScore, whole, nSample, settings))
     }
     settings <- list_modify(
@@ -3828,7 +3831,7 @@ effectiveN <- function(nCase, nControl) {
             dropped = nIn - length(keptIds)
         )
     }
-    c(list(ld = if (isFactor) list(F = ld) else ld), supported)
+    c(list(ld = if (isFactor) list(ldFactor = ld) else ld), supported)
 }
 
 # The LD matrix of a .qcPanelSupportedLd() result, for a step that takes

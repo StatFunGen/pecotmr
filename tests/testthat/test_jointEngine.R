@@ -1,9 +1,10 @@
-# Tests for R/jointEngine.R — the unified joint-analysis engine. A joint fit over
-# N conditions is SLICED into N per-context rows (real study/context/trait) that
-# carry the ";"-joined co-fit members in jointStudies/jointContexts/jointTraits
-# as provenance — exactly like running the univariate method per context, except
-# the per-context rows share PIP/CS (fm) / the joint fit (twas). The fits are
-# mocked so these assert the engine wiring (per-context expansion), not the fit.
+# Tests for R/jointEngine.R — the unified joint-analysis engine. A joint fit
+# over N conditions is SLICED into N per-context rows (real study/context/trait)
+# that carry the ";"-joined co-fit members in
+# jointStudies/jointContexts/jointTraits as provenance — exactly like running
+# the univariate method per context, except the per-context rows share PIP/CS
+# (fm) / the joint fit (twas). The fits are mocked so these assert the engine
+# wiring (per-context expansion), not the fit.
 
 .je_mkGroup <- function(tid, n = 10L) {
     X <- matrix(
@@ -115,8 +116,8 @@ test_that(".runJointCell: cross-context FM expands to per-context rows", {
 test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
     # The joint engine's fitJointGroup frame does not lexically see the pipeline
     # method's fullFit params, so they must ride the FmJointPipeline config.
-    # Assert the three flags reach .fmPostprocessOne verbatim (buildTopLoci's own
-    # fullFit column construction is covered in test_fineMappingWrappers.R).
+    # Assert the three flags reach .fmPostprocessOne verbatim (buildTopLoci's
+    # own fullFit column construction is covered in test_fineMappingWrappers.R).
     set.seed(1)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new(
@@ -186,7 +187,7 @@ test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
     expect_true(isTRUE(captured$includeAllCs)) # keep filtered-out CS
 })
 
-test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", {
+test_that(".runJointCell: cross-context FM uses the per-fold mr.mash prior", {
     set.seed(2)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new(
@@ -202,7 +203,8 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     )
 
     # Prior mr.mash CV payload. Looked up by the FIXED axes (study=S, trait=G1)
-    # with context match-any, so a per-context OR a legacy "joint" row both match.
+    # with context match-any, so a per-context OR a legacy "joint" row both
+    # match.
     U <- list(K = diag(2))
     fp <- list(
         dataDrivenPriorMatrices = list(U = U, w = c(K = 1)),
@@ -280,7 +282,8 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L) # per-context rows
-    # Per-fold priors built (one per fold) + threaded into CV, sharing the folds.
+    # Per-fold priors built (one per fold) + threaded into CV, sharing the
+    # folds.
     expect_false(is.null(captured$mvPriorCv))
     expect_equal(names(captured$mvPriorCv), c("1", "2"))
     expect_identical(captured$samplePartition, sp)
@@ -370,7 +373,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     )
 }
 
-test_that(".runJointCell: cross-context twas expands to per-context weight vectors", {
+test_that(".runJointCell: cross-context TWAS gives per-context weights", {
     set.seed(3)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new(
@@ -408,7 +411,7 @@ test_that(".runJointCell: cross-context twas expands to per-context weight vecto
     expect_false(is.null(methodFits(pecotmr:::.collectionEntry(res, 1L))))
 })
 
-test_that(".runJointCell: cross-context twas attaches per-condition CV slices", {
+test_that(".runJointCell: cross-context TWAS attaches per-condition CV", {
     set.seed(4)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new(
@@ -437,14 +440,15 @@ test_that(".runJointCell: cross-context twas attaches per-condition CV slices", 
     )
     expect_equal(nrow(res), 2L)
     cv <- cvResult(pecotmr:::.collectionEntry(res, 1L))
-    expect_equal(names(cv$foldFits), c("fold_1", "fold_2")) # shared per-fold fits
+    # shared per-fold fits
+    expect_equal(names(cv$foldFits), c("fold_1", "fold_2"))
     expect_false(is.null(cv$predictions)) # this context's slice
     expect_false(is.null(cv$samplePartition))
     # per-context vector
     expect_false(is.matrix(weights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
-test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", {
+test_that(".runJointCell: cross-context TWAS CV-only rows (no full fit)", {
     set.seed(5)
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new(
@@ -519,7 +523,7 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
     )
 }
 
-test_that(".runJointCell: cross-context FM sumstats (mvsusie_rss) -> per-context", {
+test_that(".runJointCell: cross-context FM sumstats -> per-context rows", {
     # The group carries the LD reference; supply the matrix it derives.
     local_mocked_bindings(
         .ldFromRef = .je_mockSsLd,
@@ -553,10 +557,11 @@ test_that(".runJointCell: cross-context FM sumstats (mvsusie_rss) -> per-context
     expect_equal(nrow(res), 2L)
     expect_equal(as.character(res$context), c("c1", "c2"))
     expect_equal(as.character(res$jointContexts), c("c1;c2", "c1;c2"))
-    expect_equal(captured$N, 110) # median(c(100, 120)) passed once to mvsusie_rss
+    # median(c(100, 120)) passed once to mvsusie_rss
+    expect_equal(captured$N, 110)
 })
 
-test_that(".runJointCell: cross-context twas sumstats (mr.mash.rss) -> per-context", {
+test_that(".runJointCell: cross-context TWAS sumstats -> per-context rows", {
     # The group carries the LD reference; supply the matrix it derives.
     local_mocked_bindings(
         .ldFromRef = .je_mockSsLd,
@@ -595,7 +600,7 @@ test_that(".runJointCell: cross-context twas sumstats (mr.mash.rss) -> per-conte
     expect_false(is.null(methodFits(pecotmr:::.collectionEntry(res, 1L))))
 })
 
-test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regression)", {
+test_that("fitJointGroup(SumStats, Twas): real mr.mash.rss reads stat$n", {
     skip_if_not_installed("mr.mashr")
     # The sibling tests above mock mrmashRssWeights, so the real reader
     # (.mrmashRssStats, which keys on stat$n) was never exercised. The method
@@ -669,7 +674,7 @@ test_that(".lookupJointCell: present cells resolve, absent cells error", {
 
 # ---- cross-study pattern (study jointed; sumstats-only) ---------------------
 
-test_that(".runJointCell: cross-study (twas sumstats) -> per-study rows + jointStudies", {
+test_that(".runJointCell: cross-study TWAS -> per-study rows, jointStudies", {
     # The group carries the LD reference; supply the matrix it derives.
     local_mocked_bindings(
         .ldFromRef = .je_mockSsLd,
@@ -731,7 +736,8 @@ test_that(".runJointCell: cross-study (twas sumstats) -> per-study rows + jointS
     )
     expect_s4_class(res, "TwasWeights")
     expect_equal(nrow(res), 2L)
-    expect_equal(as.character(res$study), c("S1", "S2")) # study is the jointed axis
+    # study is the jointed axis
+    expect_equal(as.character(res$study), c("S1", "S2"))
     expect_equal(as.character(res$context), c("brain", "brain"))
     expect_equal(as.character(res$trait), c("G1", "G1"))
     expect_equal(as.character(res$jointStudies), c("S1;S2", "S1;S2"))
@@ -802,7 +808,8 @@ test_that(".runJointCell: composed (context + trait vary) -> per-tuple rows", {
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 3L) # one row per tuple
     expect_equal(as.character(res$study), rep("S", 3L)) # constant -> fixed
-    expect_equal(as.character(res$context), c("c1", "c1", "c2")) # real per-tuple
+    # real per-tuple
+    expect_equal(as.character(res$context), c("c1", "c1", "c2"))
     expect_equal(as.character(res$trait), c("gA", "gB", "gA"))
     # Both varying axes carry their provenance member list on every row.
     expect_equal(as.character(res$jointContexts), rep("c1;c2", 3L))
@@ -975,7 +982,7 @@ test_that("fitJointGroup(Individual, Fm): fsusie keeps one entry", {
     expect_equal(entries[[1L]]@susieFit$trait_positions, c(100, 200))
 })
 
-test_that("fitJointGroup(Individual, Fm): fsusie without pos errors; unknown token errors", {
+test_that("joint FM refuses fsusie without pos and an unknown token", {
     X <- matrix(
         0,
         6,
@@ -1002,7 +1009,7 @@ test_that("fitJointGroup(Individual, Fm): fsusie without pos errors; unknown tok
     )
 })
 
-test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple rows", {
+test_that(".runJointCell: composed sumstats -> per-tuple rows", {
     # The group carries the LD reference; supply the matrix it derives.
     local_mocked_bindings(
         .ldFromRef = .je_mockSsLd,
@@ -1132,7 +1139,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
     })
 }
 
-test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble entries", {
+test_that(".twasEnsembleLayer: 2+ passing methods -> per-condition ensembles", {
     set.seed(1)
     g <- .je_ensGroup()
     pte <- list(
@@ -1160,7 +1167,7 @@ test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble en
     expect_equal(sum(coef), 1, tolerance = 1e-6)
 })
 
-test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", {
+test_that(".twasEnsembleLayer: under 2 methods past the R^2 cutoff -> NULL", {
     set.seed(2)
     g <- .je_ensGroup()
     pte <- list(
@@ -1185,7 +1192,7 @@ test_that(".twasEnsembleLayer: < 2 methods pass the R^2 cutoff -> NULL (skip)", 
 
 # ---- engine twas fitter (fitJointGroup on a TwasJointPipeline) --------------
 
-test_that("fitJointGroup(twas): leakage warning when a full-data mr.mash prior is reused across folds", {
+test_that("joint TWAS warns of leakage reusing a full-data mr.mash prior", {
     set.seed(3)
     g <- .je_mkGroup("G1")
     pipe <- new(
@@ -1221,7 +1228,7 @@ test_that("fitJointGroup(twas): leakage warning when a full-data mr.mash prior i
     )
 })
 
-test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal mr.ash fit", {
+test_that("joint TWAS estimates spike-and-slab pi from an internal mr.ash", {
     set.seed(4)
     n <- 30L
     X <- matrix(
@@ -1280,7 +1287,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
     expect_equal(as.numeric(capturedPi), 1 - 0.8, tolerance = 1e-8)
 })
 
-test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (handoff, no re-CV)", {
+test_that("joint TWAS: an FM-derived method reuses fine-mapping's CV", {
     set.seed(5)
     g <- .je_mkGroup("G1") # 2 conditions (c1, c2)
     pipe <- new(
@@ -1358,9 +1365,10 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
 # -----------------------------------------------------------------------------
 # The dispatch table stores each enumerator in a JointDispatchCell@enumerate
 # slot; the pipeline reaches them via `cell@enumerate(...)`. covr cannot trace a
-# function invoked through such a stored reference, so these call the enumerators
-# DIRECTLY (pecotmr:::.enum*) with the per-group X/Y/Z builders mocked, asserting
-# the enumeration wiring (scope gating + per-group conditions).
+# function invoked through such a stored reference, so these call the
+# enumerators DIRECTLY (pecotmr:::.enum*) with the per-group X/Y/Z builders
+# mocked, asserting the enumeration wiring (scope gating + per-group
+# conditions).
 # =============================================================================
 
 # A QtlSumStats-shaped data.frame: the sumstat enumerators only touch
@@ -1477,7 +1485,7 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
     expect_equal(as.character(.jgConditions(g[[1L]])$trait), c("G1", "G1"))
 })
 
-test_that(".enumCrossContextIndividual: study not in scope / < 2 contexts -> empty", {
+test_that(".enumCrossContextIndividual: out-of-scope, under 2 contexts: none", {
     local_mocked_bindings(studyName = function(data) "S", .package = "pecotmr")
     expect_length(
         pecotmr:::.enumCrossContextIndividual(
@@ -1499,7 +1507,7 @@ test_that(".enumCrossContextIndividual: study not in scope / < 2 contexts -> emp
     )
 })
 
-test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contexts", {
+test_that(".enumCrossContextSumstats groups study, trait with 2+ contexts", {
     df <- .je_ssDf(studies = "S", contexts = c("c1", "c2"), traits = "t1")
     scope <- list(
         studies = "S",
@@ -1525,7 +1533,8 @@ test_that(".enumCrossContextSumstats: < 2 contexts and < 2 tuple rows skip", {
         .ldFromRef = .je_mockLd,
         .package = "pecotmr"
     )
-    # study scoped to two contexts but only one row present -> < 2 tupleRows skip
+    # study scoped to two contexts but only one row present -> < 2 tupleRows
+    # skip
     df <- .je_ssDf(studies = "S", contexts = "c1", traits = "t1")
     scope <- list(
         studies = "S",
@@ -1542,7 +1551,7 @@ test_that(".enumCrossContextSumstats: < 2 contexts and < 2 tuple rows skip", {
     expect_length(pecotmr:::.enumCrossContextSumstats(df, scope2), 0L)
 })
 
-test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + pos", {
+test_that(".enumCrossTraitIndividual: a group per context with 2+ traits", {
     scope <- list(
         studies = "S",
         contexts = list(S = c("c1", "c2")),
@@ -1602,7 +1611,7 @@ test_that(".enumCrossTraitIndividual: study not in scope -> empty", {
     )
 })
 
-test_that(".enumCrossTraitSumstats: groups per (study, context) with >= 2 traits", {
+test_that(".enumCrossTraitSumstats groups study, context with 2+ traits", {
     df <- .je_ssDf(studies = "S", contexts = "c1", traits = c("t1", "t2"))
     scope <- list(
         studies = "S",
@@ -1623,7 +1632,7 @@ test_that(".enumCrossTraitSumstats: groups per (study, context) with >= 2 traits
     expect_length(pecotmr:::.enumCrossTraitSumstats(df1, scope), 0L)
 })
 
-test_that(".enumCrossStudySumstats: group per (context, trait) in >= 2 studies", {
+test_that(".enumCrossStudySumstats groups context, trait in 2+ studies", {
     df <- .je_ssDf(studies = c("S1", "S2"), contexts = "c1", traits = "t1")
     scope <- list(
         studies = c("S1", "S2"),
@@ -1648,7 +1657,7 @@ test_that(".enumCrossStudySumstats: group per (context, trait) in >= 2 studies",
     expect_length(pecotmr:::.enumCrossStudySumstats(df, scope1), 0L)
 })
 
-test_that(".enumComposedIndividual: one group joining every (context, trait) tuple", {
+test_that(".enumComposedIndividual: one group of every (context, trait)", {
     scope <- list(
         studies = "S",
         contexts = list(S = c("c1", "c2")),
@@ -1758,7 +1767,7 @@ test_that(".enumTopPcIndividual enumerates only the studies in scope", {
     expect_identical(seen$a$filter$naAction, "drop")
 })
 
-test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)", {
+test_that(".enumUnivariateIndividual: a 1-condition group per context, trait", {
     scope <- list(
         studies = "S",
         contexts = list(S = c("c1", "c2")),
@@ -1924,7 +1933,7 @@ test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
 # fitJointGroup branches not covered by the happy-path tests above
 # =============================================================================
 
-test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached", {
+test_that("fitJointGroup(Individual, Fm) attaches fsusie's per-fold CV", {
     set.seed(20)
     n <- 8L
     X <- matrix(
@@ -1983,7 +1992,7 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
     expect_length(entries, 1L)
 })
 
-test_that("fitJointGroup(Individual, Fm): SER pre-screen skips when < 2 survivors", {
+test_that("fitJointGroup(Individual, Fm): SER screen skips under 2 survivors", {
     g <- .je_mkGroup("G1")
     pipe <- new("FmJointPipeline", config = list(coverage = 0.95, verbose = 1))
     local_mocked_bindings(
@@ -1998,7 +2007,7 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen skips when < 2 survivor
     expect_true(all(map_lgl(entries, is.null))) # all-NULL (skipped)
 })
 
-test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of conditions", {
+test_that("fitJointGroup(Individual, Fm): SER screen keeps some conditions", {
     set.seed(21)
     n <- 10L
     X <- matrix(
@@ -2034,7 +2043,8 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of condi
     )
     local_mocked_bindings(
         .fmScreenActive = function(cut) TRUE,
-        .fmSerScreenColumns = function(X, Y, cut) c(TRUE, FALSE, TRUE), # drop c2
+        # drop c2
+        .fmSerScreenColumns = function(X, Y, cut) c(TRUE, FALSE, TRUE),
         fitMvsusie = function(...) list(),
         .fmPostprocessOne = .je_mockPostprocess,
         .package = "pecotmr"
@@ -2061,7 +2071,7 @@ test_that("fitJointGroup(SumStats, Fm): fsusie and unknown tokens error", {
     )
 })
 
-test_that("fitJointGroup(SumStats, Fm): a reweighted-prior residual variance is threaded", {
+test_that("fitJointGroup(SumStats, Fm) passes a reweighted residual variance", {
     # The group carries the LD reference; supply the matrix it derives.
     local_mocked_bindings(
         .ldFromRef = .je_mockSsLd,
@@ -2214,7 +2224,7 @@ test_that("fitJointGroup(twas): a method's own arguments reach its fit", {
     expect_equal(capturedPi, 0.3)
 })
 
-test_that("fitJointGroup(SumStats, twas): a vector weight without rownames falls back to Z rows", {
+test_that("joint sumstat TWAS: an unnamed weight vector takes Z's rows", {
     # The group carries the LD reference; supply the matrix it derives.
     local_mocked_bindings(
         .ldFromRef = .je_mockSsLd,
@@ -2261,7 +2271,7 @@ test_that(".runJointCell: empty enumeration -> NULL", {
     expect_null(pecotmr:::.runJointCell(emptyCell, pipe, NULL, NULL, "mvsusie"))
 })
 
-test_that(".runJointCell: a fitter returning all-NULL entries yields no rows -> NULL", {
+test_that(".runJointCell: a fitter's all-NULL entries give no rows: NULL", {
     cell <- .je_synthCell(list(.je_mkGroup("G1")))
     pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
     local_mocked_bindings(
@@ -2278,7 +2288,7 @@ test_that(".runJointCell: a fitter returning all-NULL entries yields no rows -> 
     expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie"))
 })
 
-test_that(".runJointCell: twas ensemble layer adds 'ensemble' rows on top of >= 2 methods", {
+test_that(".runJointCell adds 'ensemble' rows on top of 2+ TWAS methods", {
     set.seed(30)
     cell <- .je_synthCell(list(.je_ensGroup(n = 40L, nCond = 2L)))
     pipe <- new(
@@ -2369,7 +2379,7 @@ test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
     expect_true(all(map_lgl(ens, is.null)))
 })
 
-test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's variant ids", {
+test_that(".twasEnsembleLayer names unnamed weights by a method's variants", {
     set.seed(33)
     g <- .je_ensGroup(nCond = 1L)
     pte <- list(
@@ -2386,7 +2396,8 @@ test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's 
             alpha
         ) {
             list(
-                ensembleTwasWeights = as.numeric(rep(0.1, ncol(.jgX(g)))), # no names
+                # no names
+                ensembleTwasWeights = as.numeric(rep(0.1, ncol(.jgX(g)))),
                 methodCoef = c(0.5, 0.5),
                 methodPerformance = c(0.8, 0.7)
             )
@@ -2414,14 +2425,15 @@ test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's 
 # Small slicers, .jointTwasCvResult, .twasFmHandoffCv, construct, .runJointSpecs
 # =============================================================================
 
-test_that(".fmSliceCvCondition / .sliceTwasCvResultToCondition: NULL passes through", {
+test_that(".fmSliceCvCondition, .sliceTwasCvResultToCondition pass NULL", {
     expect_null(pecotmr:::.fmSliceCvCondition(NULL, 1L))
     expect_null(pecotmr:::.sliceTwasCvResultToCondition(NULL, 1L))
 })
 
-test_that(".jointTwasCvResult: NULL cv and empty/absent payloads degrade gracefully", {
+test_that(".jointTwasCvResult copes with NULL CV and empty payloads", {
     expect_null(pecotmr:::.jointTwasCvResult(NULL, "mrmash"))
-    # Empty prediction/performance lists and all-NULL foldFits -> NULL components.
+    # Empty prediction/performance lists and all-NULL foldFits -> NULL
+    # components.
     cv <- list(
         samplePartition = data.frame(Sample = "s1", Fold = 1L),
         prediction = list(),
@@ -2461,7 +2473,7 @@ test_that(".jointTwasCvResult keeps fold fits for mr.mash only", {
     )
 })
 
-test_that(".twasFmHandoffCv: a token absent from the FM CV predictions -> NULL", {
+test_that(".twasFmHandoffCv: NULL for a token the FM CV did not predict", {
     fmCv <- list(
         samplePartition = data.frame(Sample = "s1", Fold = 1L),
         prediction = list(susie_predicted = matrix(0, 1, 1)),
@@ -2510,7 +2522,7 @@ test_that(".runJointSpecs: no methods or no specs -> NULL", {
 # is NULL, and .runJointSpecs' region-mode trait restriction.
 # =============================================================================
 
-test_that(".twasGroupArgs: takes the CV partition from the fine-mapping CV when none is set", {
+test_that(".twasGroupArgs takes fine-mapping's CV partition when none is set", {
     g <- .je_mkGroup("G1") # IndividualJointGroup
     pipe <- new(
         "TwasJointPipeline",
@@ -2578,7 +2590,7 @@ test_that(".runJointCell reads allele frequencies for fine-mapping only", {
     )
 })
 
-test_that(".runJointSpecs: region mode without traitId restricts scoped traits to the locus", {
+test_that(".runJointSpecs: region mode without traitId keeps locus traits", {
     pipe <- new("FmJointPipeline", config = list(ldReference = NULL))
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 100))
     captured <- NULL
@@ -3465,7 +3477,7 @@ test_that(".jointCvPartition rejects a partition conflicting with the CV's", {
     )
 })
 
-test_that(".twasEnsembleCollect answers empty parts when no token contributes", {
+test_that(".twasEnsembleCollect gives empty parts when no token contributes", {
     # No tokens means nothing to gather, which is empty containers of the
     # right shape rather than NULL.
     out <- pecotmr:::.twasEnsembleCollect(NULL, list(), character(0))

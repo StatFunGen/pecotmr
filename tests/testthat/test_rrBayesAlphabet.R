@@ -156,7 +156,7 @@ test_that("a hibayes fit leaves the caller's random stream where it was", {
 })
 
 # ---- bayesAlphabetWeights zero-variance handling ----
-test_that("bayesAlphabetWeights warns and zero-pads when X has zero-variance columns", {
+test_that("bayesAlphabetWeights warns, zero-pads X's zero-variance columns", {
     skip_if_not_installed("qgg")
     d <- .baXy()
     X <- d$X
@@ -287,8 +287,8 @@ test_that("pecotmr's sampler lands where the matrix engines do", {
     # rank 22 of 40, so the effects of variants in perfect LD are not
     # identified and two runs of one engine split them differently; their
     # fitted marginal effects R b are what the engines must agree on.
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    fitted <- function(b) as.vector(crossprod(F, F %*% b))
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    fitted <- function(b) as.vector(crossprod(ldFactor, ldFactor %*% b))
     agree <- function(method, other) {
         cor(fitted(run(method, "pecotmr")), fitted(run(method, other)))
     }
@@ -315,10 +315,10 @@ test_that("pecotmr's Legarra bayesL matches qgg's individual-level fit", {
     effects <- replace(numeric(p), c(5, 18), c(0.25, -0.2))
     Xs <- scale(X)
     y <- as.vector(Xs %*% effects + rnorm(n, sd = 0.95))
-    F <- pecotmr:::.ldFactorFromDosage(X)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
     native <- pecotmr:::bayesAlphabetRss(
         as.vector(cor(Xs, y)),
-        F,
+        ldFactor,
         n,
         "bayesL",
         nIter = 3000,
@@ -435,16 +435,16 @@ test_that("pecotmr's sampler stays finite on statistics unlike the LD", {
 
 test_that("SDPR's projection reads R (R + aI)^-1 R and R (R + aI)^-1 bhat", {
     d <- .rrwPanelStatLd()
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    R <- unname(crossprod(F) / (nrow(F) - 1))
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    R <- unname(crossprod(ldFactor) / (nrow(ldFactor) - 1))
     bhat <- d$stat$z / sqrt(500)
     toSpan <- R %*% solve(R + 0.1 * diag(nrow(R)))
-    projected <- pecotmr:::.alphabetProjected(bhat, F, 0.1)
-    ldOf <- function(x) crossprod(x$F) / (nrow(x$F) - 1)
+    projected <- pecotmr:::.alphabetProjected(bhat, ldFactor, 0.1)
+    ldOf <- function(x) crossprod(x$ldFactor) / (nrow(x$ldFactor) - 1)
     expect_equal(ldOf(projected), toSpan %*% R, tolerance = 1e-8)
     expect_equal(projected$bhat, as.vector(toSpan %*% bhat), tolerance = 1e-8)
     # At a = 0 it keeps R, and the statistics' part in R's span.
-    hard <- pecotmr:::.alphabetProjected(bhat, F, 0)
+    hard <- pecotmr:::.alphabetProjected(bhat, ldFactor, 0)
     expect_equal(ldOf(hard), R, tolerance = 1e-8)
     expect_equal(
         hard$bhat,
@@ -452,8 +452,8 @@ test_that("SDPR's projection reads R (R + aI)^-1 R and R (R + aI)^-1 bhat", {
         tolerance = 1e-8
     )
     expect_identical(
-        pecotmr:::.alphabetProjected(bhat, F, NULL),
-        list(bhat = bhat, F = F)
+        pecotmr:::.alphabetProjected(bhat, ldFactor, NULL),
+        list(bhat = bhat, ldFactor = ldFactor)
     )
 })
 
@@ -469,12 +469,12 @@ test_that("BayesAlphabetRssOptions sets SDPR's projection or turns it off", {
             methodArgs = methodArgs
         )
     }
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     direct <- function(ldProjection) {
         set.seed(7)
         pecotmr:::bayesAlphabetRss(
             d$stat$z / sqrt(500),
-            F,
+            ldFactor,
             500,
             "bayesN",
             nIter = 300,
@@ -505,12 +505,12 @@ test_that("BayesAlphabetRssOptions sets SDPR's projection or turns it off", {
 
 test_that("pecotmr's sampler reports progress and refuses bad input", {
     d <- .rrwPanelStatLd()
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     bhat <- d$stat$z / sqrt(500)
     out <- capture.output(
         fit <- pecotmr:::bayesAlphabetRss(
             bhat,
-            F,
+            ldFactor,
             500,
             "bayesN",
             nIter = 100,
@@ -522,7 +522,7 @@ test_that("pecotmr's sampler reports progress and refuses bad input", {
     expect_error(
         pecotmr:::bayesAlphabetRss(
             bhat,
-            F,
+            ldFactor,
             500,
             "bayesN",
             perVariantWeights = TRUE,
@@ -531,11 +531,11 @@ test_that("pecotmr's sampler reports progress and refuses bad input", {
         "one sample size per variant"
     )
     # The entry point checks what the R side already does, for a direct call.
-    w <- rep(500, ncol(F))
+    w <- rep(500, ncol(ldFactor))
     expect_error(
         pecotmr:::bayesAlphabetFactorCpp(
             bhat,
-            F,
+            ldFactor,
             w,
             500L,
             "bayesX",
@@ -557,7 +557,7 @@ test_that("pecotmr's sampler reports progress and refuses bad input", {
     expect_error(
         pecotmr:::bayesAlphabetFactorCpp(
             bhat[-1],
-            F,
+            ldFactor,
             w,
             500L,
             "bayesN",
@@ -583,16 +583,16 @@ test_that("pecotmr's sampler reports progress and refuses bad input", {
 # The factor of c R + (1 - c) I for R = F'F / (k - 1): F's rows scaled by
 # sqrt(c) stacked on the identity's scaled by sqrt(1 - c), all rescaled for
 # the k + p - 1 that the sampler divides by.
-.baShrunkFactor <- function(F, c) {
-    k <- nrow(F)
-    p <- ncol(F)
-    sqrt(k + p - 1) * rbind(sqrt(c / (k - 1)) * F, sqrt(1 - c) * diag(p))
+.baShrunkFactor <- function(ldFactor, c) {
+    k <- nrow(ldFactor)
+    p <- ncol(ldFactor)
+    sqrt(k + p - 1) * rbind(sqrt(c / (k - 1)) * ldFactor, sqrt(1 - c) * diag(p))
 }
 
-# One run of pecotmr's sampler on the factor `F`.
+# One run of pecotmr's sampler on the factor `ldFactor`.
 .baFactorRun <- function(
     bhat,
-    F,
+    ldFactor,
     method = "bayesA",
     pi = 0,
     shrinkCorr = 1,
@@ -602,8 +602,8 @@ test_that("pecotmr's sampler reports progress and refuses bad input", {
 ) {
     pecotmr:::bayesAlphabetFactorCpp(
         bhat,
-        F,
-        rep(500, ncol(F)),
+        ldFactor,
+        rep(500, ncol(ldFactor)),
         500L,
         method,
         FALSE,
@@ -626,11 +626,11 @@ test_that("pecotmr's sampler reads the shrunk LD", {
     # on F runs as the unshrunk sampler on a factor of c R + (1 - c) I, draw
     # for draw up to rounding.
     d <- .rrwPanelStatLd()
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     bhat <- d$stat$z / sqrt(500)
     expect_equal(
-        .baFactorRun(bhat, F, shrinkCorr = 0.9),
-        .baFactorRun(bhat, .baShrunkFactor(F, 0.9)),
+        .baFactorRun(bhat, ldFactor, shrinkCorr = 0.9),
+        .baFactorRun(bhat, .baShrunkFactor(ldFactor, 0.9)),
         tolerance = 1e-8
     )
 })
@@ -639,23 +639,29 @@ test_that("pecotmr's sampler refuses a sign jump only when asked", {
     # A lone variant with a strong statistic never draws the other sign, so
     # refusing jumps changes nothing there; a null one's draws do jump.
     set.seed(16)
-    F <- matrix(rnorm(50), 50, 1)
+    ldFactor <- matrix(rnorm(50), 50, 1)
     expect_identical(
-        .baFactorRun(0.5, F, allowJumpSign = FALSE),
-        .baFactorRun(0.5, F)
+        .baFactorRun(0.5, ldFactor, allowJumpSign = FALSE),
+        .baFactorRun(0.5, ldFactor)
     )
     expect_false(identical(
-        .baFactorRun(0, F, allowJumpSign = FALSE)$betaEst,
-        .baFactorRun(0, F)$betaEst
+        .baFactorRun(0, ldFactor, allowJumpSign = FALSE)$betaEst,
+        .baFactorRun(0, ldFactor)$betaEst
     ))
 })
 
 test_that("pecotmr's Rao-Blackwellized sampler runs the same chain", {
     d <- .rrwPanelStatLd()
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     bhat <- d$stat$z / sqrt(500)
-    draws <- .baFactorRun(bhat, F, "bayesC", pi = 0.1)
-    means <- .baFactorRun(bhat, F, "bayesC", pi = 0.1, raoBlackwell = TRUE)
+    draws <- .baFactorRun(bhat, ldFactor, "bayesC", pi = 0.1)
+    means <- .baFactorRun(
+        bhat,
+        ldFactor,
+        "bayesC",
+        pi = 0.1,
+        raoBlackwell = TRUE
+    )
     chain <- c("pip", "pi", "residualVariance")
     expect_identical(means[chain], draws[chain])
     expect_false(identical(means$betaEst, draws$betaEst))
@@ -664,12 +670,12 @@ test_that("pecotmr's Rao-Blackwellized sampler runs the same chain", {
 
 test_that("pecotmr's sampler averages several chains over the kept ones", {
     d <- .rrwPanelStatLd()
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     bhat <- d$stat$z / sqrt(500)
     set.seed(8)
     fit <- pecotmr:::bayesAlphabetRss(
         bhat,
-        F,
+        ldFactor,
         500,
         "bayesA",
         nIter = 300,
@@ -687,7 +693,7 @@ test_that("pecotmr's sampler averages several chains over the kept ones", {
     expect_false(any(fit$chains$diverged))
     kept <- fit$chains$kept
     singles <- map(seeds[kept], function(seed) {
-        .baFactorRun(bhat, F, seed = seed)
+        .baFactorRun(bhat, ldFactor, seed = seed)
     })
     expect_equal(
         fit$betaEst,
@@ -701,11 +707,11 @@ test_that("every engine reads the wrapper's shrunk LD", {
     shrunk <- LdMatrix(0.9 * R + 0.1 * diag(nrow(R)), nSamples = ncol(d$panel))
     # pecotmr's sampler takes the shrinkage itself, on the factor.
     ld <- pecotmr:::.rssLdSource(d$stat, d$panel, "test")
-    bhat <- pecotmr:::.rssMarginalCor(d$stat, n = 500, p = ncol(ld$F))
+    bhat <- pecotmr:::.rssMarginalCor(d$stat, n = 500, p = ncol(ld$ldFactor))
     set.seed(4)
     want <- pecotmr:::bayesAlphabetRss(
         bhat,
-        ld$F,
+        ld$ldFactor,
         500,
         "bayesA",
         nIter = 300,
@@ -774,11 +780,11 @@ test_that("pecotmr's sampler errors when every one of its chains diverges", {
     # Statistics of 1e-6 leave the draws near the prior's, far past twice
     # the statistics' sum of squares.
     set.seed(17)
-    F <- matrix(rnorm(50 * 3), 50, 3)
+    ldFactor <- matrix(rnorm(50 * 3), 50, 3)
     run <- function(n) {
         pecotmr:::bayesAlphabetRss(
             rep(1e-6, 3),
-            F,
+            ldFactor,
             n,
             "bayesA",
             nIter = 60,
@@ -801,10 +807,10 @@ test_that("hibayes' form sends a refused jump to the null class", {
     # refused jump zeroes the effect and drops it from the slab, which
     # changes the chain.
     d <- .rrwPanelStatLd()
-    F <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     bhat <- d$stat$z / sqrt(500)
     expect_false(identical(
-        .baFactorRun(bhat, F, "bayesB", pi = 0.2, allowJumpSign = FALSE),
-        .baFactorRun(bhat, F, "bayesB", pi = 0.2)
+        .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2, allowJumpSign = FALSE),
+        .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2)
     ))
 })

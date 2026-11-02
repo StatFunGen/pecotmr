@@ -133,14 +133,13 @@ setMethod("show", "GenotypeHandle", function(object) {
 #' @param pgen,pvar,psam Explicit paths to the PLINK2 triplet, or all
 #'   \code{NULL}.
 #' @param ldMeta Path to an LD-meta TSV file (columns \code{chrom},
-#'   \code{start}, \code{end}, \code{path}; the \code{path} column may be
-#'   comma-separated as \code{ld_file,bim_file}). Requires \code{block}. The
-#'   constructor resolves the row covering \code{block}, then delegates to the
-#'   appropriate file-based handler. When the resolved row points at PLINK2
-#'   or BGEN files, the corresponding reader is used; a row pointing
-#'   at a pre-computed LD matrix (\code{.cor.xz}) is refused, as pecotmr reads
-#'   no pre-computed LD from disk -- wrap such a matrix in an
-#'   \code{\link{LdMatrix}} instead.
+#'   \code{start}, \code{end}, \code{path}, each path a genotype file).
+#'   Requires \code{block}. The constructor resolves the row covering
+#'   \code{block}, then delegates to the appropriate file-based handler. When
+#'   the resolved row points at PLINK2 or BGEN files, the corresponding reader
+#'   is used; a row pointing at a pre-computed LD matrix (\code{.cor.xz}) is
+#'   refused, as pecotmr reads no pre-computed LD from disk -- wrap such a
+#'   matrix in an \code{\link{LdMatrix}} instead.
 #' @param block The \code{GRanges} window to look up in \code{ldMeta}; the
 #'   whole file of the row covering it is opened.
 #' @param genoMeta One-file-per-chromosome specification: a path to a
@@ -285,7 +284,7 @@ GenotypeHandle <- function(
 # erroring on no-coverage, multi-row spans, or a pre-computed .cor(.xz) matrix.
 # @noRd
 .ghResolveLdPath <- function(ldMeta, region) {
-    ldPaths <- regionalLdMeta(ldMeta, region)$intersections$LD_file_paths
+    ldPaths <- regionalLdMeta(ldMeta, region)$intersections$paths
     if (length(ldPaths) == 0L) {
         regionStr <- str_flatten(as.character(region), ", ")
         msg <- glue(

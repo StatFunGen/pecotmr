@@ -1,7 +1,7 @@
 context("regularized_regression - l0learn")
 
 # ---- l0learnWeights ----
-test_that("l0learnWeights warns and zero-pads when X has zero-variance columns", {
+test_that("l0learnWeights warns, zero-pads X's zero-variance columns", {
     skip_if_not_installed("L0Learn")
     set.seed(42)
     n <- 50

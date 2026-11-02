@@ -1,7 +1,7 @@
 context("regularized_regression - mrash")
 
 # ---- mrashWeights ----
-test_that("mrashWeights subsets a user-supplied beta.init of length ncol(X) by keep", {
+test_that("mrashWeights subsets a full-length beta.init by keep", {
     skip_if_not_installed("glmnet")
     set.seed(42)
     n <- 50
