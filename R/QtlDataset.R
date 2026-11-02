@@ -1402,8 +1402,9 @@ CovMcdOptions <- function(...) {
         inform(msg)
         return(fallback)
     }
+    user <- as.list(outlierArgs)
     mcd <- try_fetch(
-        exec(robustbase::covMcd, Y, !!!as.list(outlierArgs)),
+        exec(robustbase::covMcd, Y, !!!user),
         error = function(cnd) {
             msg <- glue(
                 "outlier detection: robustbase's MCD estimator failed; ",

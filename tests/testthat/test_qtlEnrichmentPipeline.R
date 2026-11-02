@@ -2005,8 +2005,9 @@ test_that("enrichment names a narrowed row's PIPs by its fit's variants", {
         method = "susie",
         entry = list(row)
     )
+    piece <- pecotmr:::.enrPipTablesAt(endoapply(gwas, utils::head, 2L), 1L)
     expect_equal(
-        pecotmr:::.enrRowPipVector(1L, endoapply(gwas, utils::head, 2L)),
+        set_names(piece$pip, pecotmr:::.variantTableIds(piece$table)),
         set_names(pip, vids)
     )
     qtl <- QtlFineMappingResult(
@@ -2016,9 +2017,9 @@ test_that("enrichment names a narrowed row's PIPs by its fit's variants", {
         method = "susie",
         entry = list(row)
     )
-    region <- pecotmr:::.enrRowRegion(1L, endoapply(qtl, utils::head, 2L))
-    expect_equal(region$pip, set_names(pip, vids))
-    expect_equal(region$prior_variance, 1)
+    region <- pecotmr:::.enrRegionsAt(endoapply(qtl, utils::head, 2L), 1L)
+    expect_equal(region[[1L]]$pip, set_names(pip, vids))
+    expect_equal(region[[1L]]$prior_variance, 1)
     # A narrowed row whose fit names none has nothing to name them by.
     unnamed <- QtlFineMappingResult(
         studyName = "q1",
@@ -2032,7 +2033,7 @@ test_that("enrichment names a narrowed row's PIPs by its fit's variants", {
         ))
     )
     expect_error(
-        pecotmr:::.enrRowRegion(1L, endoapply(unnamed, utils::head, 2L)),
+        pecotmr:::.enrRegionsAt(endoapply(unnamed, utils::head, 2L), 1L),
         "does not name its variables"
     )
 })

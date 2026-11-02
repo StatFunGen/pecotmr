@@ -1348,8 +1348,9 @@ readPvar <- function(pvarPath) {
 }
 
 # A plain-text .pvar read as a table, as pgenlibr reads it: the first ALT
-# allele of a multi-allelic variant is A1. NULL for a file this cannot read
-# (compressed, or with no #CHROM header naming the five columns).
+# allele of a multi-allelic variant is A1, and the alleles are upper case
+# (.canonAllele()), as .readPvarByVariant() gives them. NULL for a file this
+# cannot read (compressed, or with no #CHROM header naming the five columns).
 # @noRd
 #' @importFrom vroom vroom
 #' @importFrom readr cols col_character col_integer
@@ -1378,8 +1379,8 @@ readPvar <- function(pvarPath) {
         chrom = tbl$CHROM,
         id = tbl$ID,
         pos = tbl$POS,
-        A2 = tbl$REF,
-        A1 = str_remove(tbl$ALT, ",.*$")
+        A2 = .canonAllele(tbl$REF),
+        A1 = .canonAllele(str_remove(tbl$ALT, ",.*$"))
     )
 }
 

@@ -61,36 +61,6 @@ snpsPerBlock <- function(snpInfo, ldBlocks) {
 }
 
 # =============================================================================
-# Baseline enrichment computation
-# =============================================================================
-
-# Enrichment SE: jackknife over per-block enrichment (preferred) or the
-# delta-method fallback tauSe * M / |h2| when no blocks are available.
-# @noRd
-.baselineEnrichmentSe <- function(annotationJackknifeCoefs, tauSe, M_a, M, h2) {
-    if (is.null(annotationJackknifeCoefs)) {
-        return(tauSe * M / abs(h2))
-    }
-    nBlocks <- nrow(annotationJackknifeCoefs)
-    rawH2 <- as.vector(annotationJackknifeCoefs %*% M_a)
-    # A zero block h2 would divide the enrichment to Inf; NA drops the block
-    # from the jackknife mean instead.
-    h2Blocks <- replace(rawH2, rawH2 == 0, NA)
-    enrichmentBlocks <- sweep(
-        annotationJackknifeCoefs,
-        1,
-        h2Blocks,
-        FUN = "/"
-    ) *
-        M
-    enrichmentMean <- colMeans(enrichmentBlocks, na.rm = TRUE)
-    enrichmentVar <- (nBlocks - 1) /
-        nBlocks *
-        colSums(sweep(enrichmentBlocks, 2, enrichmentMean)^2, na.rm = TRUE)
-    sqrt(enrichmentVar)
-}
-
-# =============================================================================
 # Genome build utilities
 # =============================================================================
 
@@ -270,12 +240,13 @@ RmaOptions <- function(...) {
         "({conditionMessage(e)}); falling back to DL."
     )
     warn(msg)
+    user <- as.list(metaArgs)
     exec(
         metafor::rma,
         yi = means,
         sei = ses,
         method = "DL",
-        !!!as.list(metaArgs)
+        !!!user
     )
 }
 
@@ -311,13 +282,14 @@ RmaOptions <- function(...) {
     # DL (closed-form DerSimonian-Laird) is the last-resort estimator: run it
     # directly and let any error propagate. Only the iterative estimators get a
     # tryCatch fallback to DL.
+    user <- as.list(metaArgs)
     fit <- if (identical(method, "DL")) {
         exec(
             metafor::rma,
             yi = means,
             sei = ses,
             method = "DL",
-            !!!as.list(metaArgs)
+            !!!user
         )
     } else {
         try_fetch(
@@ -326,7 +298,7 @@ RmaOptions <- function(...) {
                 yi = means,
                 sei = ses,
                 method = method,
-                !!!as.list(metaArgs)
+                !!!user
             ),
             error = function(cnd) {
                 .rmaMetaFallbackToDL(cnd, means, ses, method, metaArgs)

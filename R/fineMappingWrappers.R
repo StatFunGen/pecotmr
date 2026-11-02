@@ -2838,6 +2838,7 @@ fitMvsusie <- function(
     assertNumber(coverage, lower = 0, upper = 1)
     assertCount(L, positive = TRUE)
     assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(
             list(
@@ -2849,7 +2850,7 @@ fitMvsusie <- function(
             ),
             compact(list(L_greedy = L_greedy))
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     exec(mvsusieR::mvsusie, !!!callArgs)
 }
@@ -2902,6 +2903,7 @@ fitMvsusieRss <- function(
     assertNumber(coverage, lower = 0, upper = 1)
     assertCount(L, positive = TRUE)
     assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(
             list(
@@ -2914,7 +2916,7 @@ fitMvsusieRss <- function(
             ),
             compact(list(L_greedy = L_greedy))
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     exec(mvsusieR::mvsusie_rss, !!!callArgs)
 }
@@ -3051,6 +3053,7 @@ buildMvsusieMixturePrior <- function(
         "methodArgs"
     )
     arm <- .mvMixtureArm(R, conditionNames, mixtureMatrices, mixtureWeights)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(
             arm,
@@ -3059,7 +3062,7 @@ buildMvsusieMixturePrior <- function(
                 weights_tol = weightsTol
             ))
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     exec(mvsusieR::create_mixture_prior, !!!callArgs)
 }
@@ -3117,9 +3120,10 @@ fitFsusie <- function(
         cov_lev = covLev,
         min_purity = minPurity
     ))
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(list(X = X, Y = Y, pos = pos), owned),
-        !!!as.list(methodArgs)
+        !!!user
     )
     exec(fsusieR::susiF, !!!callArgs)
 }
@@ -5927,12 +5931,13 @@ krigingOutlierQc <- function(
     }
     # susieR kriging RSS diagnostic (kriging_rss(z, R, n)): s defaults to
     # estimate_s_rss(); logLR matches susieR's allele-switch selection.
+    user <- as.list(methodArgs)
     cd <- exec(
         susieR::kriging_rss,
         z = zScore,
         R = R,
         n = n,
-        !!!as.list(methodArgs)
+        !!!user
     )$conditional_dist
     condMean <- as.numeric(cd$condmean)
     zStdDiff <- as.numeric(cd$z_std_diff)

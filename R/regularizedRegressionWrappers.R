@@ -63,6 +63,7 @@ mrashRssWeights <- function(
     shat <- as.numeric(stat$seb %||% numeric(0))
     z <- .mrashRssZ(stat)
     s0 <- s0 %||% .mrashRssDefaultGrid(n, z, shat, varY)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             bhat = as.numeric(stat$b %||% numeric(0)),
@@ -77,7 +78,7 @@ mrashRssWeights <- function(
             # it is given, which would otherwise be the caller's.
             w0 = (w0 %||% rep(1 / length(s0), length(s0))) + 0
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     model <- exec(mr.ash.rss, !!!callArgs)
     if (identical(fitRetention, "none")) {
@@ -332,6 +333,7 @@ prsCsWeights <- function(
     n <- median(stat$n)
     bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
     .rssValidateSource(bhat, ld, n)
+    user <- as.list(methodArgs)
     settings <- list_modify(
         .formalDefaults(
             prsCs,
@@ -350,7 +352,7 @@ prsCsWeights <- function(
                 "nChains"
             )
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     model <- exec(.prsCsRun, bhat = bhat, ld = ld, n = n, !!!settings)
     if (identical(fitRetention, "none")) {
@@ -609,6 +611,7 @@ sdprWeights <- function(
     n <- median(stat$n)
     bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
     .rssValidateSource(bhat, ld, n)
+    user <- as.list(methodArgs)
     settings <- list_modify(
         .formalDefaults(
             sdpr,
@@ -630,7 +633,7 @@ sdprWeights <- function(
                 "nChains"
             )
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     model <- exec(.sdprRun, bhat = bhat, ld = ld, n = n, !!!settings)
     if (identical(fitRetention, "none")) {
@@ -1716,6 +1719,7 @@ fitGlmnetCv <- function(
     # explicit NULL would reach cv.glmnet and override its default with
     # nothing. methodArgs is spliced last, so a user value wins over the
     # caller's -- these are literal defaults, not pecotmr-owned arguments.
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(
             list(x = x, y = y, alpha = alpha),
@@ -1726,7 +1730,7 @@ fitGlmnetCv <- function(
                 nfolds = nfolds
             ))
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     exec(glmnet::cv.glmnet, !!!callArgs)
 }
@@ -2310,6 +2314,7 @@ bayesAlphabetWeights <- function(
     if (!is.null(pi)) {
         methodArgs <- .methodOptionsWith(methodArgs, "QggOptions", pi = pi)
     }
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             y = y,
@@ -2319,7 +2324,7 @@ bayesAlphabetWeights <- function(
             nburn = nBurnin,
             nthin = thin
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     exec(qgg::gbayes, !!!callArgs)
 }
@@ -2378,6 +2383,7 @@ bayesAlphabetWeights <- function(
         )
     }
     ids <- as.character(seq_len(nrow(X)))
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             formula = y ~ 1,
@@ -2392,7 +2398,7 @@ bayesAlphabetWeights <- function(
             threads = 1L,
             verbose = FALSE
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     withr::with_preserve_seed(exec(hibayes::ibrm, !!!callArgs))
 }
@@ -2887,6 +2893,7 @@ bayesAlphabetRssWeights <- function(
     }
     inp <- .alphabetRssDense(stat, ldReference, shrinkCorr)
     qin <- .alphabetQggInputs(inp)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             stat = qin$stat,
@@ -2897,7 +2904,7 @@ bayesAlphabetRssWeights <- function(
             nburn = nBurnin,
             nthin = thin
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     fit <- exec(qgg::gbayes, !!!callArgs)
     list(
@@ -2975,6 +2982,7 @@ bayesAlphabetRssWeights <- function(
         )
     }
     inp <- .alphabetRssDense(stat, ldReference, shrinkCorr)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             sumstat = data.frame(
@@ -2996,7 +3004,7 @@ bayesAlphabetRssWeights <- function(
             threads = 1L,
             verbose = FALSE
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     fit <- withr::with_preserve_seed(exec(hibayes::sbrm, !!!callArgs))
     list(betaEst = as.numeric(fit$alpha), backend = "hibayes")
@@ -3019,6 +3027,7 @@ bayesAlphabetRssWeights <- function(
     n <- median(stat$n)
     bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
     .rssValidateSource(bhat, ld, n)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             bhat = bhat,
@@ -3032,7 +3041,7 @@ bayesAlphabetRssWeights <- function(
             nPerVariant = stat$n,
             shrinkCorr = shrinkCorr
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     c(exec(bayesAlphabetRss, !!!callArgs), list(backend = "pecotmr"))
 }
@@ -5882,6 +5891,7 @@ ncvregWeights <- function(
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "ncvregWeights")
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             X = X[, keep, drop = FALSE],
@@ -5889,7 +5899,7 @@ ncvregWeights <- function(
             penalty = penalty,
             nfolds = nfolds
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     fit <- exec(ncvreg::cv.ncvreg, !!!callArgs)
     coefs <- as.numeric(coef(fit, lambda = fit$lambda.min))
@@ -6054,6 +6064,7 @@ l0learnWeights <- function(
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "l0learnWeights")
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             x = X[, keep, drop = FALSE],
@@ -6061,7 +6072,7 @@ l0learnWeights <- function(
             penalty = penalty,
             nFolds = nFolds
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     fit <- exec(L0Learn::L0Learn.cvfit, !!!callArgs)
     best <- .l0learnBest(fit)
@@ -6153,6 +6164,7 @@ bglrWeights <- function(
     saveAt <- str_c(tmpdir, .Platform$file.sep)
 
     eta <- list(c(list(X = X[, keep, drop = FALSE], model = model), etaArgs))
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             y = y,
@@ -6163,7 +6175,7 @@ bglrWeights <- function(
             saveAt = saveAt,
             verbose = FALSE
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     fit <- exec(BGLR::BGLR, !!!callArgs)
     weights <- replace(eff.wgt, keep, as.numeric(fit$ETA[[1]]$b))
@@ -6225,6 +6237,7 @@ dprWeights <- function(
     zeros <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "dprWeights")
     w <- matrix(1, nrow = nrow(X), ncol = 1)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         list(
             y = y,
@@ -6233,7 +6246,7 @@ dprWeights <- function(
             rotate_variables = FALSE,
             fitting_method = fittingMethod
         ),
-        !!!as.list(methodArgs)
+        !!!user
     )
     fit <- exec(RcppDPR::fit_model, !!!callArgs)
     eff.wgt <- replace(zeros, keep, as.numeric(fit$beta + fit$alpha))
@@ -7150,11 +7163,12 @@ buildMrmashPriorMatrices <- function(
         canonicalPriorMatrices,
         canonicalCovs
     )
+    user <- as.list(expandCovs)
     S0 <- exec(
         mr.mashr::expand_covs,
         S0_raw,
         priorGrid,
-        !!!as.list(expandCovs)
+        !!!user
     )
     list(S0 = S0, priorGrid = priorGrid)
 }
@@ -7171,10 +7185,11 @@ buildMrmashPriorMatrices <- function(
     if (!isTRUE(canonicalPriorMatrices)) {
         return(dataDrivenPriorMatrices$U)
     }
+    user <- as.list(canonicalCovs)
     canonical <- exec(
         mr.mashr::compute_canonical_covs,
         K,
-        !!!as.list(canonicalCovs)
+        !!!user
     )
     if (is.null(dataDrivenPriorMatrices)) {
         return(canonical)

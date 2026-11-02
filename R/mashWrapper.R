@@ -34,10 +34,11 @@
         "null",
         inputScale = inputScale
     )
+    user <- as.list(corArgs)
     exec(
         mashr::estimate_null_correlation_simple,
         .mashSetData(nullMats$b, nullMats$s, alpha, NULL, mashDataArgs),
-        !!!as.list(corArgs)
+        !!!user
     )
 }
 
@@ -65,21 +66,7 @@
     mashDataArgs,
     corArgs
 ) {
-    if (is.null(sumStatsList$random)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'mle' requires a 'random' entry ",
-            "in `sumStatsList`."
-        )
-        abort(msg)
-    }
-    if (is.null(priorCovariances)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'mle' requires ",
-            "`priorCovariances` ",
-            "(the prior U the EM refines V against)."
-        )
-        abort(msg)
-    }
+    .mashCheckMleInputs(sumStatsList, priorCovariances)
     priorCovariances <- .mashAsUlist(priorCovariances)
     randomMats <- .mashSumStatsToMatrices(
         sumStatsList$random,
@@ -95,15 +82,38 @@
         NULL,
         mashDataArgs
     )
+    user <- as.list(corArgs)
     fit <- exec(
         mashr::mash_estimate_corr_em,
         dsub,
         priorCovariances,
         max_iter = maxIter,
         details = TRUE,
-        !!!as.list(corArgs)
+        !!!user
     )
     fit$V
+}
+
+# What method 'mle' needs: a 'random' set of z-scores to refine V on, and the
+# prior U the EM refines it against.
+# @noRd
+.mashCheckMleInputs <- function(sumStatsList, priorCovariances) {
+    if (is.null(sumStatsList$random)) {
+        msg <- glue(
+            "mashResidualCorrelation: method 'mle' requires a 'random' entry ",
+            "in `sumStatsList`."
+        )
+        abort(msg)
+    }
+    if (is.null(priorCovariances)) {
+        msg <- glue(
+            "mashResidualCorrelation: method 'mle' requires ",
+            "`priorCovariances` ",
+            "(the prior U the EM refines V against)."
+        )
+        abort(msg)
+    }
+    invisible(NULL)
 }
 
 # methods 'corshrink' / 'simpleSpecific': estimate V on the null z-matrix. The
@@ -146,8 +156,9 @@
         )
         abort(msg)
     }
+    user <- as.list(corArgs)
     as.matrix(
-        exec(CorShrink::CorShrinkData, nullZ, !!!as.list(corArgs))$cor
+        exec(CorShrink::CorShrinkData, nullZ, !!!user)$cor
     )
 }
 
@@ -240,13 +251,14 @@
             componentArgs = componentArgs
         )
     }
+    user <- as.list(mashArgs)
     w <- result$w %||%
         mashr::get_estimated_pi(exec(
             mashr::mash,
             mashData,
             Ulist = result$U,
             outputlevel = 1,
-            !!!as.list(mashArgs)
+            !!!user
         ))
     list(U = result$U, w = w, loglik = result$loglik)
 }
@@ -884,12 +896,13 @@ mashModelFit <- function(
         inputScale,
         mashDataArgs
     )
+    user <- as.list(mashArgs)
     exec(
         mashr::mash,
         mashData,
         Ulist = priorCovariances,
         outputlevel = outputLevel,
-        !!!as.list(mashArgs)
+        !!!user
     )
 }
 
@@ -975,11 +988,12 @@ mashPosterior <- function(
     )
     vhat <- if (is.null(ex$vhat)) diag(rep(1, ncol(ex$b))) else ex$vhat
     mashData <- .mashSetData(ex$b, ex$s, alpha, vhat, mashDataArgs)
+    user <- as.list(posteriorArgs)
     exec(
         mashr::mash_compute_posterior_matrices,
         ex$model,
         mashData,
         output_posterior_cov = outputPosteriorCov,
-        !!!as.list(posteriorArgs)
+        !!!user
     )
 }

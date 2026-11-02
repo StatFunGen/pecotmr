@@ -2664,3 +2664,26 @@ test_that(".readPvarTable declines what it cannot read as a table", {
     path <- .gio_pvar(c("#CHROM\tPOS\tID", "1\t10\tv1"))
     expect_null(pecotmr:::.readPvarTable(path))
 })
+
+test_that("readPvar gives upper-case alleles whichever way it reads", {
+    want <- tibble::tibble(
+        chrom = "1",
+        id = c("rs1", "rs2"),
+        pos = c(100L, 200L),
+        A2 = c("A", "C"),
+        A1 = c("G", "T")
+    )
+    # A plain-text file with a header is read as a table; a multi-allelic
+    # variant's first ALT is its A1.
+    plain <- .gio_pvar(c(
+        "#CHROM\tPOS\tID\tREF\tALT",
+        "1\t100\trs1\ta\tg",
+        "1\t200\trs2\tc\tt,a"
+    ))
+    expect_equal(pecotmr:::readPvar(plain), want)
+    # A header-less one, in .bim column order, goes through pgenlibr.
+    skip_if_not_installed("pgenlibr")
+    headerless <- .gio_pvar(c("1\trs1\t0\t100\tg\ta", "1\trs2\t0\t200\tt\tc"))
+    expect_null(pecotmr:::.readPvarTable(headerless))
+    expect_equal(pecotmr:::readPvar(headerless), want)
+})

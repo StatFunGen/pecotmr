@@ -2561,17 +2561,10 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # genome-wide collection.
 # @noRd
 .rowSpans <- function(x) {
-    if (methods::is(x, "RangedTupleList")) {
-        spans <- .rtlFirstSpans(x)
-        return(list(
-            spans = .locusRanges(spans$first),
-            rows = unname(which(spans$has))
-        ))
-    }
-    rr <- range(x)
+    spans <- .rtlFirstSpans(x)
     list(
-        spans = .locusRanges(unlist(rr, use.names = FALSE)),
-        rows = rep(seq_along(rr), lengths(rr))
+        spans = .locusRanges(spans$first),
+        rows = unname(which(spans$has))
     )
 }
 
@@ -2998,13 +2991,14 @@ ldPruneByCorrelation <- function(
     .ldPruneSnprelateCreateGds(tmpGds, X, snpNames, p)
     gds <- SNPRelate::snpgdsOpen(tmpGds, allow.duplicate = TRUE)
     on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
+    user <- as.list(methodArgs)
     keepList <- exec(
         SNPRelate::snpgdsLDpruning,
         gds,
         method = "corr",
         ld.threshold = corThres,
         verbose = verbose,
-        !!!as.list(methodArgs)
+        !!!user
     )
     keepIds <- sort(unname(list_c(keepList)))
     X.new <- X[, keepIds, drop = FALSE]
