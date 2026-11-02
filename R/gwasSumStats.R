@@ -216,7 +216,7 @@ GwasSumStats <- function(
         abort("`studyName`, `entry`, and `genome` are all required.")
     }
     varY <- .gwasValidateArgs(studyName, entry, genome, varY)
-    entry <- .ucscEntries(entry)
+    entry <- .ssEntries(entry)
     cols <- list(
         study = as.character(studyName),
         varY = varY
@@ -230,7 +230,7 @@ GwasSumStats <- function(
         .sumStatsNewValidated(
             "GwasSumStats",
             grl,
-            dict$refs,
+            dict$entries,
             genome,
             qcOptions
         ),
@@ -265,17 +265,14 @@ GwasSumStats <- function(
 # need no fallback either.
 # @noRd
 .gwasPieceMetadata <- function(dfArgs, split, pieces) {
+    regionCols <- .regionColumns(
+        split$given,
+        split$hasGiven,
+        .rowSpanRanges(pieces)
+    )
     cbind(
         exec(S4Vectors::DataFrame, !!!dfArgs)[split$fromIdx, , drop = FALSE],
-        exec(
-            S4Vectors::DataFrame,
-            blockId = split$blockId,
-            !!!.regionColumns(
-                split$given,
-                split$hasGiven,
-                .rowSpanRanges(pieces)
-            )
-        )
+        exec(S4Vectors::DataFrame, blockId = split$blockId, !!!regionCols)
     )
 }
 
@@ -294,7 +291,7 @@ GwasSumStats <- function(
     )
     methods::new(
         Class,
-        built,
+        .rtlStored(Class, built),
         ldReference = ldReference,
         qcOptions = as.list(qcOptions)
     )

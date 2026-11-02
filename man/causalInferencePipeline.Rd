@@ -32,7 +32,11 @@ computation.}
 \item{fineMappingResult}{Optional \code{\link{QtlFineMappingResult}}. When
 supplied, drives the MR computation and (when \code{twasWeights = NULL})
 the TWAS-Z weights via the SuSiE-style coefficients on each entry's
-\code{topLoci}.}
+\code{topLoci}. MR reads the fine-mapping row of the same
+\code{(study, context, trait, method)} as the TWAS row, so it runs only
+for TWAS methods that are also fine-mapping methods (such as
+\code{susie}); the MR columns of every other method's rows are
+\code{NA}.}
 
 \item{weightSelectionParam}{How one TWAS method's weights are picked per
 \code{(study, context, trait, gwasStudy)} tuple, built with

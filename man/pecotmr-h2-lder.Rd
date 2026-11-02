@@ -5,8 +5,8 @@
 \title{LDER: LD Eigenvalue Regression}
 \description{
 Estimate heritability using LD eigenvalue regression (Song et
-  al. 2022). Supports univariate global and local estimation, with optional
-  annotation stratification.
+  al. 2022): one genome-wide estimate, with optional annotation
+  stratification.
 
 Estimate SNP heritability by LD eigenvalue regression (Song et
   al. 2022). Within each LD block the z-scores are whitened in the

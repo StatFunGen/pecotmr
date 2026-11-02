@@ -1064,11 +1064,12 @@ sldscSubsetMeta <- function(
         return(NULL)
     }
     present <- colsHave[avail]
+    presentCols <- set_names(
+        map(srcCols[avail], .sldscColumnOf, df = df),
+        present
+    )
     list(
-        summary = tibble(
-            target = df$target,
-            !!!set_names(map(srcCols[avail], .sldscColumnOf, df = df), present)
-        )
+        summary = tibble(target = df$target, !!!presentCols)
     )
 }
 

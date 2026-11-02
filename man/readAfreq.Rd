@@ -10,8 +10,10 @@ readAfreq(path)
 \item{path}{File prefix (without .afreq extension).}
 }
 \value{
-A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq,
-  obs_ct. alt_freq is the frequency of the A1 (ALT/effect) allele.
+A data.frame with columns: chrom (as the file spells it), id, A2
+  (REF) and A1 (ALT), in upper case as pecotmr holds every allele,
+  alt_freq and obs_ct. alt_freq is the frequency of the A1 (ALT/effect)
+  allele.
 }
 \description{
 Read a PLINK2 allele frequency file (.afreq or .afreq.zst)

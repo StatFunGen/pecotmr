@@ -323,8 +323,8 @@ test_that("a block's LD and decomposition are read as stored", {
     stored <- list(idx = seq_along(idx), R = want)
     lazy <- list(idx = seq_along(idx), rows = idx)
     expect_equal(pecotmr:::.ldStatBlockLd(stored, NULL), list(R = want))
-    F <- pecotmr:::.ldStatBlockLd(lazy, fx$panel)$F
-    expect_equal(unname(crossprod(F)) / (nrow(F) - 1), want)
+    ldFactor <- pecotmr:::.ldStatBlockLd(lazy, fx$panel)$ldFactor
+    expect_equal(unname(crossprod(ldFactor)) / (nrow(ldFactor) - 1), want)
     # 140 variants and 100 samples: the SVD lists 100 directions and counts
     # the other 40, whose eigenvalue is exactly zero, unless they would be
     # truncated away anyway.

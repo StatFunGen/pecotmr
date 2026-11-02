@@ -862,7 +862,12 @@ test_that("elements bind into the object GRangesList() builds", {
     S4Vectors::mcols(plainColumn)$x <- 0.3
     cases <- list(
         columnNames = list(namedColumn, plainColumn),
-        fineMapping = as.list(qtlFineMappingExample),
+        # A collection stores topLoci run-length encoded; the rows it hands
+        # out, which the constructors pass, hold them plain.
+        fineMapping = map(
+            as.list(qtlFineMappingExample),
+            pecotmr:::.rtlPlainMcols
+        ),
         sumStats = as.list(qtlSumStatsMulticontextExample),
         withEmpty = list(
             .rtl_mk("chr1", 1),
@@ -1036,6 +1041,43 @@ test_that("updateObject keys every row of an old collection to its reference", {
     sketched <- .savedWithLdSketch(mc, panel)
     expect_error(ldReference(sketched), "updateObject")
     expect_identical(updateObject(sketched), new)
+})
+
+test_that("flattenTupleRanges hands out fine-mapping columns plain", {
+    # A collection stores its topLoci columns compactly; the ranges it
+    # flattens to carry them as its rows hand them out.
+    data(qtlFineMappingExample)
+    md <- S4Vectors::mcols(flattenTupleRanges(qtlFineMappingExample))
+    expect_false(any(map_lgl(as.list(md), methods::is, "Rle")))
+    expect_true(is_in("marginal_p", colnames(md)))
+})
+
+test_that("updateObject leaves the collection it is given as it was", {
+    data(qtlSumStatsMulticontextExample)
+    mc <- qtlSumStatsMulticontextExample
+    panel <- ldReference(mc)[[1L]]
+    old <- .savedWithOneLdRef(mc, panel)
+    md <- attr(old, "elementMetadata")
+    invisible(updateObject(old))
+    expect_identical(methods::slot(old, "ldReference"), panel)
+    expect_identical(attr(old, "elementMetadata"), md)
+})
+
+test_that("updateObject drops the copies of labels a saved reference kept", {
+    data(qtlSumStatsMulticontextExample)
+    mc <- qtlSumStatsMulticontextExample
+    panel <- ldReference(mc)[[1L]]
+    saved <- .savedLabelledPanel(panel)
+    expect_false(is.null(SummarizedExperiment::rowData(saved)$SNP))
+    old <- mc
+    methods::slot(old, "ldReference", check = FALSE) <- list(ld1 = saved)
+    ref <- ldReference(updateObject(old))[[1L]]
+    expect_identical(
+        SummarizedExperiment::rowRanges(ref),
+        .dropRedundantLabels(SummarizedExperiment::rowRanges(panel))
+    )
+    expect_null(dimnames(.panelSeed(ref))[[1L]])
+    expect_identical(dimnames(ref), dimnames(panel))
 })
 
 test_that("updateObject marks every row of an old LD-free collection LD-free", {
@@ -1297,4 +1339,51 @@ test_that("nesting a flattened trimmed collection leaves its fits' columns", {
     kept <- nestTupleRanges(relabelled, trimmed)
     expect_true("cs_95" %in% .fmStoredColumns(kept))
     expect_true(all(S4Vectors::mcols(unlist(kept))$cs_95 == "susie_0"))
+})
+
+# ---- Run-length storage of variant metadata ----------------------------------
+
+test_that("a column is stored as an Rle only where that is smaller", {
+    md <- S4Vectors::DataFrame(
+        constant = rep(5, 10),
+        varying = as.numeric(1:10),
+        label = rep(c("a", "b"), each = 5),
+        flag = c(rep(TRUE, 9), NA),
+        f = factor(rep("x", 10))
+    )
+    out <- pecotmr:::.rtlRleWhereSmaller(
+        md,
+        c("constant", "varying", "label", "flag", "f", "absent")
+    )
+    expect_s4_class(out$constant, "Rle")
+    expect_s4_class(out$label, "Rle")
+    expect_s4_class(out$flag, "Rle")
+    expect_true(is.numeric(out$varying))
+    # A column with attributes (a factor) stays as it is.
+    expect_identical(out$f, md$f)
+    # Decoding gives the plain columns back exactly.
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1:10, width = 1L))
+    plain <- pecotmr:::.rtlPlainMcols(S4Vectors::`mcols<-`(gr, value = out))
+    expect_identical(as.list(mcols(plain)), as.list(md))
+    # A GRanges with nothing encoded passes through.
+    expect_identical(pecotmr:::.rtlPlainMcols(gr), gr)
+})
+
+test_that("elements taken out of a collection join on the fast path", {
+    # Run-length encoded columns are not plain vectors, so the first join
+    # attempt declines them; decoded, they join as plain elements would.
+    mk <- function(start, v) {
+        GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(start, width = 1L),
+            x = v
+        )
+    }
+    encoded <- list(mk(1:3, S4Vectors::Rle(c(1, 1, 2))), mk(4:5, c(3, 4)))
+    plain <- list(mk(1:3, c(1, 1, 2)), mk(4:5, c(3, 4)))
+    expect_null(pecotmr:::.rtlJoinPlainElements(encoded))
+    expect_identical(
+        pecotmr:::.rtlBindElements(encoded),
+        pecotmr:::.rtlBindElements(plain)
+    )
 })

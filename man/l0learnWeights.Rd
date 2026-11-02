@@ -4,7 +4,14 @@
 \alias{l0learnWeights}
 \title{Compute Weights Using L0Learn}
 \usage{
-l0learnWeights(X, y, penalty = "L0", nFolds = 5, methodArgs = L0learnOptions())
+l0learnWeights(
+  X,
+  y,
+  penalty = "L0",
+  nFolds = 5,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = L0learnOptions()
+)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -16,13 +23,24 @@ l0learnWeights(X, y, penalty = "L0", nFolds = 5, methodArgs = L0learnOptions())
 
 \item{nFolds}{Number of cross-validation folds. Default is 5.}
 
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the selected fit, as a list of its coefficients
+(\code{coef}, over the variants fitted), \code{intercept},
+\code{gamma}, \code{lambda} and cross-validated error there
+(\code{cvMean}, \code{cvSd}); \code{"full"} the whole
+\code{L0Learn.cvfit} object, with every candidate's coefficients.
+Either names the variants it was fitted on, in \code{variantIds}.}
+
 \item{methodArgs}{Options forwarded to \code{L0Learn::L0Learn.cvfit}, built
 with \code{\link{L0learnOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights.
+A numeric vector of length `ncol(X)` of variant weights, with the
+  fit attached as attribute \code{"fit"} unless
+  \code{fitRetention = "none"}.
 }
 \description{
 Fits an L0-regularized linear regression model via `L0Learn::L0Learn.cvfit`

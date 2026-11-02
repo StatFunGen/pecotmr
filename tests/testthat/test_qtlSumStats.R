@@ -11,7 +11,7 @@ test_that("QtlSumStats: minimal single-tuple object builds and validates", {
     expect_equal(nrow(obj), 1L)
 })
 
-test_that("QtlSumStats: multi-tuple object is keyed by (study, context, trait)", {
+test_that("a multi-tuple QtlSumStats is keyed by (study, context, trait)", {
     obj <- QtlSumStats(
         studyName = c("s1", "s1", "s2"),
         context = c("c1", "c2", "c1"),
@@ -63,7 +63,7 @@ test_that("QtlSumStats: errors when required args are missing", {
     expect_error(QtlSumStats(studyName = "s1", context = "c1"), "all required")
 })
 
-test_that("QtlSumStats: errors on length mismatch among study/context/trait/entry", {
+test_that("QtlSumStats errors when its identity and entry lengths differ", {
     expect_error(
         QtlSumStats(
             studyName = c("s1", "s2"),
@@ -165,7 +165,7 @@ test_that("QtlSumStats: errors when varY or nSample length is not 1 or n", {
     }
 })
 
-test_that("QtlSumStats: optional nSample column is absent by default, attached and recycled when supplied", {
+test_that("QtlSumStats nSample: absent by default, recycled when supplied", {
     bare <- .qtlMakeOne()
     expect_false("nSample" %in% names(bare)) # schema unchanged by default
     obj <- QtlSumStats(
@@ -264,7 +264,7 @@ test_that("contexts / traitNames return unique values across tuples", {
     expect_setequal(traitNames(obj), c("t1", "t2"))
 })
 
-test_that("accessors require (study, context, trait) when collection has >1 entry", {
+test_that("accessors need the full tuple when the collection has 2+ entries", {
     obj <- QtlSumStats(
         studyName = c("s1", "s2"),
         context = c("c1", "c1"),
@@ -478,9 +478,10 @@ test_that("constructor derives tss/tes distance from a point trait position", {
     expect_equal(mc$tss_distance, mc$tes_distance)
 })
 
-test_that("constructor derives distinct tss/tes distance for a multi-base trait", {
+test_that("a multi-base trait gets distinct tss and tes distances", {
     gr <- .qtlMakeEntryGr(3, start_at = 100L, step = 100L) # 100,200,300
-    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(200L, 400L)) # TSS 200, TES 400
+    # TSS 200, TES 400
+    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(200L, 400L))
     x <- QtlSumStats(
         studyName = "s",
         context = "c",
@@ -494,7 +495,7 @@ test_that("constructor derives distinct tss/tes distance for a multi-base trait"
     expect_equal(mc$tes_distance, c(100, 200, 300) - 400)
 })
 
-test_that("no traitPos -> no distance columns; existing distance is preserved", {
+test_that("no traitPos, no distance columns; a given distance is kept", {
     z <- .qtlMakeOne(n = 3)
     expect_null(S4Vectors::mcols(sumStats(z))$tss_distance)
 

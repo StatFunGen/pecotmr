@@ -1592,11 +1592,16 @@ parseTraitIds <- function(traitId, data) {
 }
 
 # Reconstruct the per-tuple result object from the accumulated rows, each on
-# the LD reference it had.
+# the LD reference it had. A TwasWeights is already that: row-binding
+# regroups its entries by gene, and every row keeps its window, trait
+# position and LD reference.
 .msDriverPerTuple <- function(out, resultCtor) {
+    if (methods::is(out, "TwasWeights")) {
+        return(out)
+    }
     ctorArgs <- c(
         list(
-            study = as.character(out$study),
+            studyName = as.character(out$study),
             context = as.character(out$context),
             trait = as.character(out$trait),
             method = as.character(out$method),
@@ -1952,38 +1957,100 @@ parseTraitIds <- function(traitId, data) {
 # TWAS-weights dispatchers
 # =============================================================================
 
-# Merge per-region TwasWeights collections (same keys across regions) into one
-# by concatenating each (study, context, trait, method) row's entry via
-# .twasMergeRegionEntries (stacked weights + flat per-region cvResult).
+# Merge per-region TwasWeights collections into one by concatenating each
+# entry across the regions that fitted it (.twasMergeRegionEntries: stacked
+# weights + flat per-region cvResult). Entries are matched on (study,
+# context, trait, joint*, method) over EVERY region, so one that a region
+# lacks is kept and two joint groups stay apart. A merged entry keeps its
+# trait position and LD reference, and its window spans the windows it was
+# fitted over.
 # @noRd
 .twasMergeResultsByKey <- function(results, regionLabels) {
-    base <- results[[1L]]
-    n <- length(base$method)
-    if (n == 0L) {
-        return(base)
-    }
-    baseKeys <- .mergeResultKeyOf(base)
-    mergedEntries <- map(
-        seq_len(n),
-        .twasMergedEntryAt,
-        results = results,
-        baseKeys = baseKeys,
-        regionLabels = regionLabels
+    inputs <- map(results, .twasAllCellInputs)
+    stacked <- list(
+        keys = bind_rows(map(inputs, "keys")),
+        method = list_c(map(inputs, "method"), ptype = character()),
+        entry = list_flatten(map(inputs, "entry")),
+        traitPos = .twasJoinRanges(map(inputs, "traitPos"), inputs),
+        region = .twasJoinRanges(map(inputs, "region"), inputs),
+        ldRefs = list_flatten(map(inputs, "ldRefs")),
+        jointIndex = .twasJoinJointIndex(inputs),
+        block = rep(seq_along(inputs), map_int(inputs, .twasInputCells))
     )
-    # Passthrough columns (joint keys + region + traitPos) are per-row
-    # properties of `base`, which aligns row-for-row with mergedEntries; splice
-    # them so a multi-region merge preserves provenance instead of dropping it.
-    twArgs <- c(
-        list(
-            study = as.character(base$study),
-            context = as.character(base$context),
-            trait = as.character(base$trait),
-            method = as.character(base$method),
-            entry = mergedEntries
+    groups <- unname(split(
+        seq_along(stacked$method),
+        as.integer(vctrs::vec_group_id(
+            bind_cols(stacked$keys, .method = stacked$method)
+        ))
+    ))
+    first <- map_int(groups, .twasFirstCell)
+    merged <- list(
+        keys = stacked$keys[first, ],
+        method = stacked$method[first],
+        entry = map(
+            groups,
+            .twasMergedGroupEntry,
+            stacked = stacked,
+            regionLabels = regionLabels
         ),
-        .jointCols(base)
+        traitPos = stacked$traitPos[first],
+        region = .twasMergedWindows(stacked$region, groups),
+        ldRefs = stacked$ldRefs[first],
+        jointIndex = .twasMergedJointIndex(stacked$jointIndex, groups)
     )
-    exec(TwasWeights, !!!twArgs)
+    .withMetadata(.twasNewValidated(merged), S4Vectors::metadata(results[[1L]]))
+}
+
+# The merged entry of one group of stacked cells (one entry, several regions).
+# @noRd
+.twasMergedGroupEntry <- function(group, stacked, regionLabels) {
+    .twasMergeRegionEntries(
+        stacked$entry[group],
+        regionLabels[stacked$block[group]]
+    )
+}
+
+# Each group's joint-fit position: the one its regions agree on, else NA (a
+# region's screen can drop different conditions). NULL when no cell has one.
+# @noRd
+.twasMergedJointIndex <- function(jointIndex, groups) {
+    if (is.null(jointIndex)) {
+        return(NULL)
+    }
+    map_int(groups, .twasGroupJointIndex, jointIndex = jointIndex)
+}
+
+# @noRd
+.twasGroupJointIndex <- function(group, jointIndex) {
+    v <- unique(jointIndex[group])
+    if (length(v) == 1L) v else NA_integer_
+}
+
+# Each group's window: the span of its regions' windows (NULL for none).
+# @noRd
+.twasMergedWindows <- function(region, groups) {
+    if (is.null(region)) {
+        return(NULL)
+    }
+    windowSpans <- map(groups, .twasWindowSpan, region = region)
+    suppressWarnings(exec(c, !!!windowSpans))
+}
+
+# @noRd
+.twasWindowSpan <- function(group, region) {
+    gr <- region[group]
+    known <- gr[!.twasIsPlaceholder(gr)]
+    if (length(known) == 0L) {
+        return(gr[1L])
+    }
+    span <- range(known, ignore.strand = TRUE)
+    if (length(span) != 1L) {
+        abort(glue(
+            "TwasWeights: an entry was fitted over windows on ",
+            "{length(span)} chromosomes; a row's window is one range."
+        ))
+    }
+    span
 }
 
 # ---- TWAS joint dispatch ----------------------------------------------------
@@ -2230,15 +2297,6 @@ parseTraitIds <- function(traitId, data) {
 .fmMergedEntryAt <- function(i, results, baseKeys) {
     perRegion <- map(results, .mergeEntryForKey, key = baseKeys[[i]])
     .fmMergeEntries(compact(perRegion))
-}
-
-# The merged TWAS entry for base row `i`: gather + concatenate that key's entry
-# across regions, keeping region labels aligned to the surviving entries.
-# @noRd
-.twasMergedEntryAt <- function(i, results, baseKeys, regionLabels) {
-    perRegion <- map(results, .mergeEntryForKey, key = baseKeys[[i]])
-    keep <- !map_lgl(perRegion, is.null)
-    .twasMergeRegionEntries(perRegion[keep], regionLabels[keep])
 }
 
 # TRUE when a parsed joint spec includes the `study` axis.

@@ -2,7 +2,6 @@ Encoding: UTF-8
 Type: Package
 Package: pecotmr
 Version: 0.9.4
-Date: 2026-02-28
 Title: Post-GWAS enrichment, colocalization, TWAS and Mendelian Randomization to integrate molecular QTL and GWAS
 Description: The majority of the statistical models in pecotmr are based on fine-mapped single effects described in Wang G et al (2020) JRSS-B. It also incorporates wrappers to a series of useful TWAS methods as well as utility functions for QTL and GWAS integration.
 URL: https://statfungen.github.io/pecotmr, https://github.com/StatFunGen/pecotmr
@@ -12,7 +11,8 @@ Authors@R: c(person("Gao Wang",role = c("cre","aut"),
                   person("Daniel Nachun", role = "aut",
                   email = "dnachun@stanford.edu"),
                   person("StatFunGen Lab", role = "ctb"))
-License: MIT + file LICENSE
+License: GPL-3
+Copyright: See the file inst/COPYRIGHTS for code included from other projects.
 biocViews:
     StatisticalMethod,
     GenomeWideAssociation,
@@ -51,6 +51,7 @@ Imports:
     Rsamtools,
     S4Arrays,
     S4Vectors,
+    SparseArray,
     stringr,
     SummarizedExperiment,
     susieR (>= 0.16.4),
@@ -74,6 +75,7 @@ Suggests:
     ctwas,
     DBI,
     ebnm,
+    fdrtool,
     flashier,
     fsusieR,
     GBJ,
@@ -81,6 +83,7 @@ Suggests:
     gdsfmt,
     glmnet,
     harmonicmeanp,
+    hibayes,
     igraph,
     knitr,
     L0Learn,
@@ -138,8 +141,6 @@ Collate:
     'CtwasResult.R'
     'GenotypeDosageSeed.R'
     'GwasFineMappingResult.R'
-    'MethodOptions.R'
-    'MethodParam.R'
     'H2Estimate.R'
     'JointGroup.R'
     'LdBlocks.R'
@@ -147,6 +148,8 @@ Collate:
     'LdEigen.R'
     'LdScore.R'
     'MashPrior.R'
+    'MethodOptions.R'
+    'MethodParam.R'
     'qtlSumStats.R'
     'QtlDataset.R'
     'MultiStudyQtlDataset.R'

@@ -187,19 +187,16 @@ setMethod(
         joined,
         across(any_of(signedCols), partial(.overlapApplySign, sign = rowSign))
     )
-    relabelled <- mutate(
-        signed,
-        !!!compact(list(
-            af = if (is_in("af", names(signed))) {
-                if_else(
-                    signed$.sign < 0 & !is.na(signed$af),
-                    1 - signed$af,
-                    signed$af
-                )
-            }
-        )),
-        variant_id = .data$canon_vid
-    )
+    afCol <- compact(list(
+        af = if (is_in("af", names(signed))) {
+            if_else(
+                signed$.sign < 0 & !is.na(signed$af),
+                1 - signed$af,
+                signed$af
+            )
+        }
+    ))
+    relabelled <- mutate(signed, !!!afCol, variant_id = .data$canon_vid)
     select(
         relabelled,
         all_of(setdiff(names(relabelled), c(coordCols, "canon_vid", ".sign")))

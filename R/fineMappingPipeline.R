@@ -586,23 +586,21 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     maxNumSingleEffects,
     maxNumSingleEffectsGreedy
 ) {
-    seeded <- intersect(tokens, c("susie", "susieInf", "susieAsh"))
+    seeded <- intersect(tokens, c("susie", "susieInf", "susieAsh", "mvsusie"))
     if (length(seeded) == 0L) {
         return(methodArgs)
     }
-    list_assign(
-        methodArgs,
-        !!!set_names(
-            map(
-                seeded,
-                .fmSeedTokenDefaults,
-                methodArgs = methodArgs,
-                maxNumSingleEffects = maxNumSingleEffects,
-                maxNumSingleEffectsGreedy = maxNumSingleEffectsGreedy
-            ),
-            seeded
-        )
+    seededArgs <- set_names(
+        map(
+            seeded,
+            .fmSeedTokenDefaults,
+            methodArgs = methodArgs,
+            maxNumSingleEffects = maxNumSingleEffects,
+            maxNumSingleEffectsGreedy = maxNumSingleEffectsGreedy
+        ),
+        seeded
     )
+    list_assign(methodArgs, !!!seededArgs)
 }
 
 # One token's kwargs with L / L_greedy filled in where the caller left them
@@ -1712,33 +1710,34 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     list(xRegions = .makeXRegions(region, jointRegions))
 }
 
-# Rows of a TwasWeights whose method is mr.mash and whose identity matches
-# every axis the caller FIXED. A NULL axis means "do not filter on it".
+# The mr.mash entries (rows of .twasCells()) of a TwasWeights whose identity
+# matches every axis the caller FIXED. A NULL axis means "do not filter on
+# it".
 # @noRd
-.fmMrmashSelector <- function(mrmashPrior, studyName, trait, context) {
+.fmMrmashCells <- function(mrmashPrior, studyName, trait, context) {
+    cells <- .twasCells(mrmashPrior)
     axes <- compact(list(study = studyName, trait = trait, context = context))
-    reduce(
+    sel <- reduce(
         names(axes),
         .fmMrmashNarrow,
-        mrmashPrior = mrmashPrior,
+        cells = cells,
         axes = axes,
-        .init = as.character(mrmashPrior$method) == "mrmash"
+        .init = cells$method == "mrmash"
     )
+    cells[sel, ]
 }
 
-# `.tupleColumn()` not `[[`: on a RangedTupleList `[[` extracts an ELEMENT
-# (the variant set), while the identity axes live in mcols.
 # @noRd
-.fmMrmashNarrow <- function(sel, axis, mrmashPrior, axes) {
-    sel & as.character(.tupleColumn(mrmashPrior, axis)) == axes[[axis]]
+.fmMrmashNarrow <- function(sel, axis, cells, axes) {
+    sel & is_in(cells[[axis]], axes[[axis]])
 }
 
 # Locate the retained mr.mash fit payload {dataDrivenPriorMatrices, w0, V} for
 # one (study, trait[, context]) inside a `TwasWeights` collection from a prior
 # mr.mash twasWeightsPipeline run (the producer side of the mvSuSiE data-driven
-# prior). The joint fit is attached to a single mrmash row of the group (the
-# other rows carry fits = NULL), so scan the matching mrmash rows and return the
-# first non-NULL payload. The fit may span more conditions than the mvsusie
+# prior). Every mrmash row of the group keys the one joint fit, so the first
+# matching row with a fit has it; a row kept without one (fitRetention =
+# "none") is passed over. The fit may span more conditions than the mvsusie
 # block fits -- `.buildMvsusieReweightedPrior(include_indices=)` subsets it.
 #
 # Each axis is optional: a NULL axis is NOT filtered (match-any). A joint fit is
@@ -1761,9 +1760,9 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     # Each per-context mr.mash row of a joint group carries the SHARED joint
     # fit, so the consumer matches the FIXED axes and leaves the jointed axis
     # NULL (match-any). study/trait/context = NULL means "skip that axis".
-    sel <- .fmMrmashSelector(mrmashPrior, studyName, trait, context)
-    for (i in which(sel)) {
-        f <- methodFits(.twrRowParts(mrmashPrior, i))
+    cells <- .fmMrmashCells(mrmashPrior, studyName, trait, context)
+    for (row in cells$row) {
+        f <- methodFits(.twrCellParts(mrmashPrior, row, "mrmash"))
         if (!is.null(f)) return(f)
     }
     NULL
@@ -1785,9 +1784,9 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     if (is.null(mrmashPrior)) {
         return(NULL)
     }
-    sel <- .fmMrmashSelector(mrmashPrior, studyName, trait, context)
-    for (i in which(sel)) {
-        cv <- cvResult(.twrRowParts(mrmashPrior, i))
+    cells <- .fmMrmashCells(mrmashPrior, studyName, trait, context)
+    for (row in cells$row) {
+        cv <- cvResult(.twrCellParts(mrmashPrior, row, "mrmash"))
         if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
     }
     NULL
@@ -2025,13 +2024,11 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     if (length(present) == 0L) {
         return(tl)
     }
-    mutate(
-        tl,
-        !!!set_names(
-            map(present, .fmRelabelColumn, tl = tl, offsets = offsets, i = i),
-            present
-        )
+    relabelledCols <- set_names(
+        map(present, .fmRelabelColumn, tl = tl, offsets = offsets, i = i),
+        present
     )
+    mutate(tl, !!!relabelledCols)
 }
 
 # Renumber per-region credible-set columns so region-local cs indices do not
@@ -2068,19 +2065,34 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     isFormal <- is_in(names(args), setdiff(fm, "methodArgs"))
     c(
         args[isFormal],
-        list(methodArgs = .methodConfigLike(target, args[!isFormal]))
+        list(
+            methodArgs = .methodConfigLike(
+                target,
+                args[!isFormal],
+                fn,
+                args$backend
+            )
+        )
     )
 }
 
 # Wrap the remainder in the record the target's `methodArgs` expects, so a
 # target that demands a constructor gets one rather than the bare list it
 # would refuse. The constructor is read off the target's own default --
-# `methodArgs = MvsusieOptions()` names it, as every target's default does --
-# so this needs no registry and cannot drift from the signature.
+# `methodArgs = MvsusieOptions()` names it, as nearly every target's default
+# does -- so this needs no registry and cannot drift from the signature. A
+# target that runs on several engines (the Bayesian alphabet) defaults it to
+# NULL instead, and takes the constructor of `backend` (or of its default
+# backend) from the TWAS registry.
 # @noRd
-.methodConfigLike <- function(target, extra) {
+.methodConfigLike <- function(target, extra, fn = NULL, backend = NULL) {
     d <- formals(target)$methodArgs
-    exec(match.fun(as.character(d[[1L]])), !!!extra)
+    ctor <- if (is.call(d)) {
+        as.character(d[[1L]])
+    } else {
+        .twasImplCtorName(fn, backend)
+    }
+    exec(match.fun(ctor), !!!extra)
 }
 
 # Merge per-method user kwargs onto a base arg list. `userArgs` is the
@@ -2092,7 +2104,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     if (length(userArgs) == 0L) {
         return(baseArgs)
     }
-    list_modify(baseArgs, !!!compact(userArgs))
+    givenArgs <- compact(userArgs)
+    list_modify(baseArgs, !!!givenArgs)
 }
 
 # .fmFitSusieIndiv / .fmFitSusieRss / .fmFitSusieSer (single SuSiE fits) now
@@ -2206,28 +2219,6 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     NULL
 }
 
-# The minimal fold-fit payload: exactly the fields the weight extractors
-# read, so K folds x (study, context, trait) does not retain K full SuSiE fits.
-# `trimFinemappingFit()` is the credible-set-driven trimmer for the fit stored
-# on a row; a fold fit has no credible sets to key on and is only ever used to
-# re-extract weights, so it keeps a smaller set.
-# @noRd
-.fmLeanFoldFit <- function(fit, token) {
-    if (is.null(fit)) {
-        return(NULL)
-    }
-    keep <- c(
-        "pip",
-        "alpha",
-        "mu",
-        "X_column_scale_factors",
-        "theta",
-        "coef",
-        "V"
-    )
-    lean <- fit[intersect(keep, names(fit))]
-    `class<-`(lean, unique(c(token, class(fit))))
-}
 
 # Per-fold univariate-susie-family weights (susie / susieInf / susieAsh).
 # @noRd
@@ -2246,8 +2237,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         susieInf = susieInfWeights(susieInfFit = fit),
         susieAsh = susieAshWeights(susieAshFit = fit)
     )
-    out <- .fmAsMat(set_names(as.numeric(w), colnames(Xtr)))
-    `attr<-`(out, "fit", .fmLeanFoldFit(fit, token))
+    .fmAsMat(set_names(as.numeric(w), colnames(Xtr)))
 }
 
 # Per-fold fsusie weights.
@@ -2259,14 +2249,9 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         list(X = Xtr, Y = Ytr, pos = pos, covLev = coverage),
         userArgs
     )
-    fit <- exec(fitFsusie, !!!.splitMethodArgs(fitFsusie, fsArgs))
-    W <- fsusieWeights(fsusieFit = fit, variantIds = colnames(Xtr))
-    out <- as.matrix(W)
-    # fSuSiE cannot be re-extracted from a trimmed fit, so the precomputed
-    # weight matrix rides along as `coef` the same way the row-level trimmer
-    # does it.
-    withCoef <- list_assign(fit, coef = out)
-    `attr<-`(out, "fit", .fmLeanFoldFit(withCoef, "fsusie"))
+    fitFsusieArgs <- .splitMethodArgs(fitFsusie, fsArgs)
+    fit <- exec(fitFsusie, !!!fitFsusieArgs)
+    as.matrix(fsusieWeights(fsusieFit = fit, variantIds = colnames(Xtr)))
 }
 
 # Per-fold fine-mapping fit for the CV engine. `ctx` carries mvPrior, mvPriorCv,
@@ -2303,16 +2288,11 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         j = j,
         verbose = verbose
     )
-    list(
-        weights = set_names(map(results, "weights"), keys),
-        fits = compact(set_names(map(results, "fit"), keys))
-    )
+    # Weights only: the fold's fit is never read (.fmCvResult()).
+    list(weights = set_names(results, keys), fits = list())
 }
 
-# One token's fold result. The CV engine's fitFold contract is
-# list(weights = <key -> matrix>, fits = <key -> fitted model>); the fold
-# helpers attach their (lean) fit to the weight matrix, so it is split back
-# out here rather than stripped in place.
+# One token's fold weights (variants x outcomes), or NULL when its fit failed.
 # @noRd
 .fmFoldTokenResult <- function(
     tk,
@@ -2325,7 +2305,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     j,
     verbose
 ) {
-    w <- try_fetch(
+    try_fetch(
         .fmFoldWeights(
             tk,
             Xtr,
@@ -2346,13 +2326,6 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
             }
             NULL
         }
-    )
-    if (is.null(w)) {
-        return(list(weights = NULL, fit = NULL))
-    }
-    list(
-        weights = `attr<-`(w, "fit", NULL),
-        fit = attr(w, "fit")
     )
 }
 
@@ -2405,30 +2378,24 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         BPPARAM = BPPARAM,
         verbose = verbose,
         seed = seed,
-        # Retained so twasWeightsCv can cross-validate a SuSiE-family method:
-        # those wrappers extract from a supplied fit and never refit, so the
-        # fold's own fit is the only thing that makes per-fold extraction
-        # possible.
-        fitRetention = "slim"
+        keepFoldWeights = TRUE
     )
-    .fmCvResult(res)
+    .fmCvResult(res, colnames(X))
 }
 
-# The cross-validation result, with the sample partition recorded on the
-# fold fits. Recorded at the producer so a consumer can refuse fits trained
-# on a different split; without it a mismatched partition would leak
-# held-out samples into training and inflate the CV metrics.
+# The cross-validation result: each fold's weights rather than its fit,
+# since a SuSiE-family method is cross-validated from the weights its fold
+# fit gave and nothing reads the fit itself. `variantIds` are the variants
+# the folds were fit over -- the row's own -- which the per-method slice
+# aligns every fold's weights to.
 # @noRd
-.fmCvResult <- function(res) {
+.fmCvResult <- function(res, variantIds) {
     list(
         samplePartition = res$samplePartition,
         prediction = res$prediction,
         performance = res$performance,
-        foldFits = `attr<-`(
-            res$foldFits,
-            "partitionKey",
-            .cvPartitionKey(res$samplePartition)
-        )
+        foldWeights = res$foldWeights,
+        variantIds = variantIds
     )
 }
 
@@ -2449,21 +2416,36 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         samplePartition = cv$samplePartition,
         prediction = cv$prediction[pk],
         performance = cv$performance[mk],
-        foldFits = .fmSliceFoldFits(cv$foldFits, key)
+        foldWeights = .fmSliceFoldWeights(cv, key)
     )
 }
 
-# One method's per-fold fits, keyed by fold, from the full CV payload.
+# One method's fold weights: a variants x folds matrix on the variants the
+# folds were fit over, zero where a fold had no weight for a variant and NA
+# throughout for a fold whose fit failed, with the fingerprint of the
+# partition the folds were drawn from, so a consumer can refuse weights
+# trained on a different split. The row they are attached to drops the ids
+# when they are its own (.cvStoredFoldWeights()).
 # @noRd
-.fmSliceFoldFits <- function(foldFits, key) {
-    if (is.null(foldFits) || length(foldFits) == 0L) {
+.fmSliceFoldWeights <- function(cv, key) {
+    fw <- cv$foldWeights
+    if (length(fw) == 0L) {
         return(NULL)
     }
-    out <- map(foldFits, key)
-    if (all(map_lgl(out, is.null))) {
-        return(NULL)
+    cols <- map(fw, .fmFoldWeightColumn, key = key, variantIds = cv$variantIds)
+    W <- `dimnames<-`(exec(cbind, !!!cols), list(cv$variantIds, names(fw)))
+    `attr<-`(W, "partitionKey", .cvPartitionKey(cv$samplePartition))
+}
+
+# One fold's weights for method `key`, on `variantIds`.
+# @noRd
+.fmFoldWeightColumn <- function(fold, key, variantIds) {
+    w <- fold[[key]]
+    if (is.null(w)) {
+        return(rep(NA_real_, length(variantIds)))
     }
-    `attr<-`(out, "partitionKey", attr(foldFits, "partitionKey"))
+    hit <- match(rownames(w), variantIds)
+    replace(numeric(length(variantIds)), hit[!is.na(hit)], w[!is.na(hit), 1L])
 }
 
 # Rebuild a FineMappingRow with a cvResult attached (the class is immutable).
@@ -2677,79 +2659,92 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     c(cachedRows, computed)
 }
 
-# Fit one PCA X window for (ctx, pcName): residualize genotype, align to the
-# PC scores, SER pre-screen, then univariate-susie .fmFitXBlock. Returns
-# list() when too few shared samples or the window screens out (soft skip).
+# One window's fits for every top PC of a context, as pcName -> block entry
+# (list() for a PC whose block is skipped). The window's genotype block is the
+# same for each PC -- they differ only in the response -- so it is built, and
+# its allele frequencies read, once rather than once per PC.
 # @noRd
-.fmPcaBlockFit <- function(rg, ctx, traits, pcName, pcY, samples, cfg) {
+.fmPcaRegionFits <- function(rg, ctx, traits, scores, cfg) {
+    pcNames <- colnames(scores)
+    skipped <- set_names(rep(list(list()), length(pcNames)), pcNames)
     X <- .fmResidGenoBlock(
         ctx,
         traits,
         rg,
-        samples,
+        rownames(scores),
         data = cfg$data,
         cisWindow = cfg$cisWindow,
         residualizationParam = cfg$residualizationParam,
         genotypeFilter = cfg$genotypeFilter
     )
-    common <- intersect(rownames(X), names(pcY))
+    common <- intersect(rownames(X), rownames(scores))
     if (length(common) < 2L) {
-        return(list())
+        return(skipped)
     }
     Xb <- X[common, , drop = FALSE]
-    if (!.fmSerScreen(Xb, pcY[common], cfg$screen)) {
-        return(list())
+    shared <- scores[common, , drop = FALSE]
+    pass <- map_lgl(pcNames, .fmPcaPassesScreen, Xb = Xb, scores = shared, cfg)
+    if (!any(pass)) {
+        return(skipped)
     }
-    afVec <- .fmAfForX(
-        cfg$data,
-        Xb,
-        genotypeFilter = cfg$genotypeFilter,
-        traitId = traits,
-        region = rg,
-        cisWindow = cfg$cisWindow
+    blk <- list(
+        X = Xb,
+        af = .fmAfForX(
+            cfg$data,
+            Xb,
+            genotypeFilter = cfg$genotypeFilter,
+            traitId = traits,
+            region = rg,
+            cisWindow = cfg$cisWindow
+        ),
+        window = .fmBlockWindow(rg, ctx, traits, cfg)
     )
-    # The PC path never chains susieInf: a PC is not a trait whose fit the
-    # susieInf stage is defined for.
+    fits <- map(pcNames[pass], .fmPcaBlockFit, blk, shared, ctx, cfg)
+    pcFits <- set_names(fits, pcNames[pass])
+    list_assign(skipped, !!!pcFits)
+}
+
+# Whether one PC's response clears the SER pre-screen on a window's block.
+# @noRd
+.fmPcaPassesScreen <- function(pcName, Xb, scores, cfg) {
+    .fmSerScreen(Xb, scores[, pcName], cfg$screen)
+}
+
+# One PC's univariate-susie fit on a window's shared block. The PC path never
+# chains susieInf: a PC is not a trait whose fit the susieInf stage is defined
+# for.
+# @noRd
+.fmPcaBlockFit <- function(pcName, blk, scores, ctx, cfg) {
     .fmFitXBlockP(
-        Xb,
-        pcY[common],
+        blk$X,
+        scores[, pcName],
         "susie",
         FALSE,
         ctx,
         pcName,
-        afVec,
+        blk$af,
         cfg,
-        region = .fmBlockWindow(rg, ctx, traits, cfg)
+        region = blk$window
     )
 }
 
-# Row-records for one PC pseudo-trait: a cache hit, else per-window fits merged
-# into the single "susie" token (trait = the PC name).
+# Row-records for one PC pseudo-trait: its cached row, else its per-window
+# fits merged into the single "susie" token (trait = the PC name).
 # @noRd
-.fmPcaScoreRows <- function(pcName, ctx, traits, scores, cfg) {
-    cached <- .fmCacheLookup(
-        cfg$fineMappingResult,
-        cfg$study,
-        ctx,
-        pcName,
-        "susie"
-    )
-    if (!is.null(cached)) {
-        return(list(.fmQtlRow(cfg$study, ctx, pcName, "susie", cached)))
+.fmPcaPcRows <- function(pcName, ctx, cached, perRegion, cfg) {
+    if (!is.null(cached[[pcName]])) {
+        return(list(
+            .fmQtlRow(cfg$study, ctx, pcName, "susie", cached[[pcName]])
+        ))
     }
-    pcY <- scores[, pcName]
-    samples <- rownames(scores)
-    blockEntries <- map(
-        cfg$xRegions,
-        .fmPcaBlockFit,
-        ctx = ctx,
-        traits = traits,
-        pcName = pcName,
-        pcY = pcY,
-        samples = samples,
-        cfg = cfg
-    )
+    blockEntries <- map(perRegion, pluck, pcName, .default = list())
     .fmMergeTokenRows(cfg$study, ctx, pcName, "susie", blockEntries)
+}
+
+# One PC's entry in the resume cache, or NULL.
+# @noRd
+.fmPcaCacheLookup <- function(pcName, ctx, cfg) {
+    .fmCacheLookup(cfg$fineMappingResult, cfg$study, ctx, pcName, "susie")
 }
 
 # All usePCA row-records for one context: PCA-reduce the multi-trait phenotype
@@ -2780,12 +2775,39 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
             "({nTr} traits) ..."
         ))
     }
+    .fmPcaRows(ctx, traits, scores, cfg)
+}
+
+# A context's top-PC rows: a PC in the resume cache as cached, the rest fit
+# window by window.
+# @noRd
+.fmPcaRows <- function(ctx, traits, scores, cfg) {
+    pcNames <- colnames(scores)
+    cached <- set_names(
+        map(pcNames, .fmPcaCacheLookup, ctx = ctx, cfg = cfg),
+        pcNames
+    )
+    toFit <- pcNames[map_lgl(cached, is.null)]
+    # Windows outermost, so each window's block is built once for all the
+    # PCs and released before the next window's.
+    perRegion <- if (length(toFit) == 0L) {
+        list()
+    } else {
+        map(
+            cfg$xRegions,
+            .fmPcaRegionFits,
+            ctx = ctx,
+            traits = traits,
+            scores = scores[, toFit, drop = FALSE],
+            cfg = cfg
+        )
+    }
     list_flatten(map(
-        colnames(scores),
-        .fmPcaScoreRows,
+        pcNames,
+        .fmPcaPcRows,
         ctx = ctx,
-        traits = traits,
-        scores = scores,
+        cached = cached,
+        perRegion = perRegion,
         cfg = cfg
     ))
 }
@@ -3813,7 +3835,7 @@ setMethod(
                 rep(fromData, 4L),
                 c("Z", "R", "N", "prior_variance")
             ),
-            csHome["coverage"]
+            csHome
         ),
         "fsusieR::susiF" = c(
             set_names(rep(fromData, 3L), c("X", "Y", "pos")),

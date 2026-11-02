@@ -18,9 +18,10 @@ mrashWeights(
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
-nothing, \code{"slim"} and \code{"full"} attach the fitted model. This
-engine keeps no trimmable intermediates, so the two retaining levels
-behave alike here.}
+nothing, \code{"slim"} the fitted model without its copy of the data
+(\code{data}) or the order it updated the variants in each iteration
+(\code{update.order}), \code{"full"} the whole fitted model. Either
+names the variants it was fitted on.}
 
 \item{methodArgs}{Options forwarded to \code{susieR::mr.ash}, built
 with \code{\link{MrashOptions}}. A bare list is refused: it cannot be

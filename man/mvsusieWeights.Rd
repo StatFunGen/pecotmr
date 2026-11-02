@@ -4,13 +4,30 @@
 \alias{mvsusieWeights}
 \title{Compute mvSuSiE TWAS weights}
 \usage{
-mvsusieWeights(mvsusieFit = NULL)
+mvsusieWeights(
+  X = NULL,
+  Y = NULL,
+  mvsusieFit = NULL,
+  fitRetention = c("none", "slim", "full")
+)
 }
 \arguments{
-\item{mvsusieFit}{A fitted mvSuSiE object. Required.}
+\item{X, Y}{Unused; accepted so that \code{learnTwasWeights()} can call
+every multivariate weight method with its genotype and phenotype
+matrices, as it does \code{fsusieWeights()}.}
+
+\item{mvsusieFit}{A fitted mvSuSiE object, or the trimmed one a
+fine-mapping result stores, whose precomputed \code{coef} is read.
+Required.}
+
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing, \code{"slim"} and \code{"full"} the fit the weights were
+extracted from, as given. It names the variants it was fitted on.}
 }
 \value{
-Matrix of variant weights.
+Matrix of variant weights, with the fit attached as attribute
+  \code{"fit"} unless \code{fitRetention = "none"}.
 }
 \description{
 Extracts coefficients from an existing mvSuSiE fit. This never fits

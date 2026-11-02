@@ -381,8 +381,9 @@ QtlDataset <- function(
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
 ) {
     handle <- .qtlValidateInputs(phenotypes, genotypes)
-    # Every experiment's rowRanges in UCSC style, so the dataset's traits and
-    # variants meet every other range pecotmr holds exactly.
+    # Every experiment's rowRanges in UCSC style, and the genotypes' alleles
+    # in upper case, so the dataset's traits and variants meet every other
+    # range pecotmr holds exactly.
     experiments <- map(
         c(
             set_names(
@@ -391,7 +392,7 @@ QtlDataset <- function(
             ),
             as.list(phenotypes)
         ),
-        .ucscExperiment
+        .canonExperiment
     )
     mae <- MultiAssayExperiment::MultiAssayExperiment(
         experiments = experiments,
@@ -596,7 +597,8 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
 # @noRd
 .qtlSampleMap <- function(experiments) {
     parts <- imap(experiments, .qtlSampleMapPart)
-    exec(rbind, !!!unname(parts))
+    sampleMapParts <- unname(parts)
+    exec(rbind, !!!sampleMapParts)
 }
 
 # One experiment's slice of the sampleMap.
@@ -1401,8 +1403,9 @@ CovMcdOptions <- function(...) {
         inform(msg)
         return(fallback)
     }
+    user <- as.list(outlierArgs)
     mcd <- try_fetch(
-        exec(robustbase::covMcd, Y, !!!as.list(outlierArgs)),
+        exec(robustbase::covMcd, Y, !!!user),
         error = function(cnd) {
             msg <- glue(
                 "outlier detection: robustbase's MCD estimator failed; ",

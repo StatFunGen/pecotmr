@@ -113,6 +113,22 @@ delayedAssign(".jsQd", .js_makeQtlDataset())
 # Scope helpers
 # -----------------------------------------------------------------------------
 
+test_that("a merged row's window spans its known windows, on one chromosome", {
+    unknown <- GenomicRanges::GRanges(
+        c("chrUn", "chrUn"),
+        IRanges::IRanges(c(1L, 1L), width = 0L)
+    )
+    expect_identical(pecotmr:::.twasWindowSpan(1:2, unknown), unknown[1L])
+    twoChrom <- GenomicRanges::GRanges(
+        c("chr1", "chr2"),
+        IRanges::IRanges(c(1L, 1L), width = 10L)
+    )
+    expect_error(
+        pecotmr:::.twasWindowSpan(1:2, twoChrom),
+        "windows on 2 chromosomes"
+    )
+})
+
 test_that(".spListStudies / .spListContexts / .spListTraits: QtlDataset", {
     qd <- .js_makeQtlDataset(
         studyName = "S1",
@@ -338,7 +354,7 @@ test_that("parseTraitIds: doubly-nested study->context validates per context", {
 # Pipeline-level wiring: jointSpecification accepted on all three methods
 # -----------------------------------------------------------------------------
 
-test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher is wired", {
+test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher wired", {
     # Composed dispatcher accepts axes = c("context", "trait") for individual-
     # level input. On the fake fixture the genotype I/O fails when the
     # dispatcher reaches the extractor, which proves the dispatcher was
@@ -359,7 +375,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher is wired",
     )
 })
 
-test_that("fineMappingPipeline(QtlDataset): composed joint rejects axes with 'study'", {
+test_that("fineMappingPipeline(QtlDataset): composed joint refuses 'study'", {
     qd <- .js_makeQtlDataset(
         studyName = "A",
         contexts = c("brain", "liver"),
@@ -376,7 +392,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint rejects axes with 'st
     )
 })
 
-test_that("fineMappingPipeline(QtlDataset): study-axis on individual data errors", {
+test_that("fineMappingPipeline(QtlDataset): study axis on individual errors", {
     qd <- .js_makeQtlDataset(
         studyName = "A",
         contexts = c("brain", "liver"),
@@ -393,7 +409,7 @@ test_that("fineMappingPipeline(QtlDataset): study-axis on individual data errors
     )
 })
 
-test_that("fineMappingPipeline(QtlDataset): invalid jointSpec errors before fit", {
+test_that("fineMappingPipeline(QtlDataset): bad jointSpec errors before fit", {
     qd <- .js_makeQtlDataset(studyName = "A")
     expect_error(
         fineMappingPipeline(
@@ -406,7 +422,7 @@ test_that("fineMappingPipeline(QtlDataset): invalid jointSpec errors before fit"
     )
 })
 
-test_that("twasWeightsPipeline(QtlDataset): study-axis on individual data errors", {
+test_that("twasWeightsPipeline(QtlDataset): study axis on individual errors", {
     qd <- .js_makeQtlDataset(
         studyName = "A",
         contexts = c("brain", "liver"),
@@ -461,39 +477,14 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 }
 
 .jd_mockExtractor <- function(seed = 11, n_samples = 30L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle))
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -550,8 +541,16 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 }
 
 .jd_mockMvsusieRss <- function() {
-    function(Z, R, N, prior_variance, coverage) {
-        list(token = "mvsusieRss", nVariants = nrow(Z), nOutcomes = ncol(Z))
+    # The real mvsusie_rss passes its `...` on to mvsusie, which is how L and
+    # L_greedy (the pipeline's CredibleSetParam) arrive; recorded for tests.
+    function(Z, R, N, prior_variance, coverage, L = NULL, L_greedy = NULL) {
+        list(
+            token = "mvsusieRss",
+            nVariants = nrow(Z),
+            nOutcomes = ncol(Z),
+            L = L,
+            L_greedy = L_greedy
+        )
     }
 }
 
@@ -632,14 +631,14 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 # fineMappingPipeline joint dispatch: QtlSumStats
 # =============================================================================
 
-test_that("fineMappingPipeline(QtlSumStats): jointSpec='context' fits one joint per (study, trait)", {
+test_that("fineMappingPipeline(QtlSumStats): context joint per study x trait", {
     ss <- .jd_makeQtlSumStats(
         studies = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         .fmPostprocessOne = .jd_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -652,19 +651,22 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='context' fits one joint 
         fineMappingPipeline(
             ss,
             methods = "mvsusie",
-            jointSpecification = "context"
+            jointSpecification = "context",
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 3L)
         )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L) # per-context rows
     expect_setequal(as.character(res$context), c("c1", "c2")) # REAL contexts
     expect_true(all(grepl("c1;c2|c2;c1", as.character(res$jointContexts))))
+    # maxNumSingleEffects reaches the joint RSS fit, as it does susie_rss.
+    expect_equal(susieFit(res[1, ])$payload$L, 3L)
 })
 
-test_that("fineMappingPipeline(QtlSumStats): jointSpec='context' with only one context skips", {
+test_that("fineMappingPipeline(QtlSumStats): one context skips context joint", {
     ss <- .jd_makeQtlSumStats(studies = "Q1", contexts = "c1", traits = "t1")
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         .fmPostprocessOne = .jd_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -685,14 +687,14 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='context' with only one c
     )
 })
 
-test_that("fineMappingPipeline(QtlSumStats): jointSpec='trait' fits one joint per (study, context)", {
+test_that("fineMappingPipeline(QtlSumStats): trait joint per study x context", {
     ss <- .jd_makeQtlSumStats(
         studies = "Q1",
         contexts = "c1",
         traits = c("t1", "t2")
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         .fmPostprocessOne = .jd_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -713,7 +715,7 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='trait' fits one joint pe
     expect_setequal(as.character(res$trait), c("t1", "t2"))
 })
 
-test_that("fineMappingPipeline(QtlSumStats): jointSpec='trait' with fsusie errors (no RSS variant)", {
+test_that("fineMappingPipeline(QtlSumStats): trait joint refuses fsusie", {
     ss <- .jd_makeQtlSumStats(
         studies = "Q1",
         contexts = "c1",
@@ -729,14 +731,14 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='trait' with fsusie error
     )
 })
 
-test_that("fineMappingPipeline(QtlSumStats): jointSpec='study' fits one joint per (context, trait)", {
+test_that("fineMappingPipeline(QtlSumStats): study joint per context x trait", {
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = "c1",
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         .fmPostprocessOne = .jd_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -757,14 +759,14 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='study' fits one joint pe
     expect_setequal(as.character(res$study), c("Q1", "Q2"))
 })
 
-test_that("fineMappingPipeline(QtlSumStats): composed jointSpec axes={'study','context'} fits", {
+test_that("fineMappingPipeline(QtlSumStats): study+context joint fits", {
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         .fmPostprocessOne = .jd_mockPostprocess(),
         .package = "pecotmr"
     )
@@ -788,7 +790,7 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec axes={'study','c
     expect_setequal(as.character(res$context), c("c1", "c2"))
 })
 
-test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie", {
+test_that("fineMappingPipeline(QtlSumStats): composed joint rejects fsusie", {
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = c("c1", "c2"),
@@ -853,14 +855,14 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie",
     )
 }
 
-test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' fits mr.mash per trait", {
+test_that("twasWeightsPipeline(QtlDataset): context joint mr.mash per trait", {
     qd <- .jd_makeQtlDataset(
         studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashWeights = .jd_mockMrmashWeights(),
         .package = "pecotmr"
     )
@@ -878,14 +880,14 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' fits mr.mash per
     expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
 })
 
-test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' with only one context skips", {
+test_that("twasWeightsPipeline(QtlDataset): one context skips context joint", {
     qd <- .jd_makeQtlDataset(
         studyName = "Q1",
         contexts = "c1",
         traits = c("t1", "t2")
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashWeights = .jd_mockMrmashWeights(),
         .package = "pecotmr"
     )
@@ -902,14 +904,14 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' with only one co
     )
 })
 
-test_that("twasWeightsPipeline(QtlDataset): jointSpec='trait' fits mr.mash per context", {
+test_that("twasWeightsPipeline(QtlDataset): trait joint mr.mash per context", {
     qd <- .jd_makeQtlDataset(
         studyName = "Q1",
         contexts = "c1",
         traits = c("t1", "t2")
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashWeights = .jd_mockMrmashWeights(),
         .package = "pecotmr"
     )
@@ -927,14 +929,14 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='trait' fits mr.mash per c
     expect_true("jointTraits" %in% pecotmr:::.tupleColumnNames(res))
 })
 
-test_that("twasWeightsPipeline(QtlDataset): composed jointSpec axes=c('context','trait') fits", {
+test_that("twasWeightsPipeline(QtlDataset): context+trait joint fits", {
     qd <- .jd_makeQtlDataset(
         studyName = "Q1",
         contexts = c("c1", "c2"),
         traits = c("t1", "t2")
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashWeights = .jd_mockMrmashWeights(),
         .package = "pecotmr"
     )
@@ -952,7 +954,7 @@ test_that("twasWeightsPipeline(QtlDataset): composed jointSpec axes=c('context',
     expect_setequal(as.character(res$trait), c("t1", "t2"))
 })
 
-test_that("twasWeightsPipeline(QtlDataset): composed jointSpec including 'study' errors", {
+test_that("twasWeightsPipeline(QtlDataset): composed joint with study errors", {
     qd <- .jd_makeQtlDataset(
         studyName = "Q1",
         contexts = c("c1", "c2"),
@@ -973,14 +975,14 @@ test_that("twasWeightsPipeline(QtlDataset): composed jointSpec including 'study'
 # twasWeightsPipeline joint dispatch: QtlSumStats
 # =============================================================================
 
-test_that("twasWeightsPipeline(QtlSumStats): jointSpec='context' fits mr.mash.rss per (study, trait)", {
+test_that("twasWeightsPipeline(QtlSumStats): context joint per study x trait", {
     ss <- .jd_makeQtlSumStats(
         studies = "Q1",
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashRssWeights = .jd_mockMrmashRssWeights(),
         .package = "pecotmr"
     )
@@ -997,14 +999,14 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='context' fits mr.mash.rs
     expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): jointSpec='trait' fits mr.mash.rss per (study, context)", {
+test_that("twasWeightsPipeline(QtlSumStats): trait joint per study x context", {
     ss <- .jd_makeQtlSumStats(
         studies = "Q1",
         contexts = "c1",
         traits = c("t1", "t2")
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashRssWeights = .jd_mockMrmashRssWeights(),
         .package = "pecotmr"
     )
@@ -1020,14 +1022,14 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='trait' fits mr.mash.rss 
     expect_setequal(as.character(res$trait), c("t1", "t2"))
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): jointSpec='study' fits mr.mash.rss per (context, trait)", {
+test_that("twasWeightsPipeline(QtlSumStats): study joint per context x trait", {
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = "c1",
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashRssWeights = .jd_mockMrmashRssWeights(),
         .package = "pecotmr"
     )
@@ -1043,14 +1045,14 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='study' fits mr.mash.rss 
     expect_setequal(as.character(res$study), c("Q1", "Q2"))
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): composed jointSpec axes=c('study','context') fits", {
+test_that("twasWeightsPipeline(QtlSumStats): study+context joint fits", {
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = c("c1", "c2"),
         traits = "t1"
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .jd_mockExtractor(),
+        .handleDosage = .jd_mockExtractor(),
         mrmashRssWeights = .jd_mockMrmashRssWeights(),
         .package = "pecotmr"
     )
@@ -1119,18 +1121,20 @@ test_that(".sp* helpers: MultiStudy per-study context/trait routing", {
     expect_setequal(pecotmr:::.spListContexts(mt, "indA"), "brain")
     expect_setequal(pecotmr:::.spListContexts(mt), c("brain", "DLPFC")) # all
     expect_equal(pecotmr:::.spListContexts(mt, "nope"), character(0))
-    expect_setequal(pecotmr:::.spListTraits(mt, studyName = "ssC"), "g3") # ss branch
+    # The sumstats branch.
+    expect_setequal(pecotmr:::.spListTraits(mt, studyName = "ssC"), "g3")
     expect_setequal(
         pecotmr:::.spListTraits(mt, studyName = "indA"),
         c("g1", "g2")
     )
     expect_equal(pecotmr:::.spListTraits(mt, studyName = "nope"), character(0))
     # study = NULL aggregates ALL traits across individual + sumstats components
-    # (regression guard: a present sumStats slot must not shadow the QtlDatasets).
+    # (Regression guard: a present sumStats slot must not shadow the
+    # QtlDatasets.)
     expect_setequal(pecotmr:::.spListTraits(mt), c("g1", "g2", "g3"))
 })
 
-test_that(".spListTraits: study=NULL on a sumstats-free MultiStudy aggregates traits", {
+test_that(".spListTraits: no study on a sumstats-free MultiStudy aggregates", {
     qdA <- .js_makeQtlDataset(
         studyName = "indA",
         contexts = "brain",
@@ -1142,7 +1146,8 @@ test_that(".spListTraits: study=NULL on a sumstats-free MultiStudy aggregates tr
         traits = "g3"
     )
     mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
-    expect_setequal(pecotmr:::.spListTraits(mt), c("g1", "g2", "g3")) # aggregate
+    # Aggregated over the studies.
+    expect_setequal(pecotmr:::.spListTraits(mt), c("g1", "g2", "g3"))
 })
 
 test_that(".sp* helpers: unsupported class raises a labelled error", {
@@ -1198,7 +1203,8 @@ test_that("parseContexts: malformed inputs error", {
         pecotmr:::parseContexts(list(S1 = character(0)), qd),
         "non-empty character vector"
     )
-    expect_error(pecotmr:::parseContexts(list("brain"), qd), "named list") # unnamed
+    # Unnamed.
+    expect_error(pecotmr:::parseContexts(list("brain"), qd), "named list")
     expect_error(pecotmr:::parseContexts(42, qd), "`contexts` must be NULL")
 })
 
@@ -1253,7 +1259,7 @@ test_that("parseTraitIds: malformed inputs error", {
 # .fmResolveSpecScope: scope$study / scope$context / scope$trait + filters
 # -----------------------------------------------------------------------------
 
-test_that(".fmResolveSpecScope: scope + contexts + traitIds filters intersect", {
+test_that(".fmResolveSpecScope: scope, contexts and traitIds intersect", {
     qd <- .js_makeQtlDataset(
         studyName = "S1",
         contexts = c("brain", "liver"),
@@ -1421,7 +1427,7 @@ test_that("a multi-study run is refused only when no component has a trait", {
 # .buildJointSumstatZMatrix: SNP-order mismatch error
 # -----------------------------------------------------------------------------
 
-test_that(".buildJointSumstatZMatrix: a mismatched SNP order across entries errors", {
+test_that(".buildJointSumstatZMatrix: entries in different SNP orders error", {
     df <- data.frame(
         study = "S",
         context = c("c1", "c2"),
@@ -1461,7 +1467,7 @@ test_that(".buildJointSumstatZMatrix: a mismatched SNP order across entries erro
 # Individual X/Y builders: the skip paths (return NULL / message branches)
 # -----------------------------------------------------------------------------
 
-test_that(".buildIndividualCrossContextXy: skips when a trait spans < 2 contexts", {
+test_that(".buildIndividualCrossContextXy: skips a trait in < 2 contexts", {
     se1 <- .js_makeSe(traits = "g1") # g1 present
     se0 <- .js_makeSe(traits = "other") # g1 absent
     local_mocked_bindings(
@@ -1573,7 +1579,7 @@ test_that(".fmTraitsInRegion keeps overlapping traits; NULL keeps all", {
     ) # NULL region -> unchanged
 })
 
-test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, complete)", {
+test_that(".buildIndividualCrossTraitXy: < 2 traits, region, complete skip", {
     se2 <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
     samp <- paste0("s", 1:6)
     # < 2 scoped traits in the context -> NULL.
@@ -1685,7 +1691,7 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
 # .enumerateComposedSumstatGroups: empty scope + all-axes (no complement)
 # -----------------------------------------------------------------------------
 
-test_that(".enumerateComposedSumstatGroups: empty scope -> NULL; no complement -> one block", {
+test_that(".enumerateComposedSumstatGroups: empty scope and no complement", {
     df <- data.frame(
         study = "S",
         context = c("c1", "c2"),
@@ -1716,7 +1722,7 @@ test_that(".enumerateComposedSumstatGroups: empty scope -> NULL; no complement -
 # .fmSynthesizeJointSpec
 # -----------------------------------------------------------------------------
 
-test_that(".fmSynthesizeJointSpec: trait wins over context; single/single -> empty", {
+test_that(".fmSynthesizeJointSpec: trait beats context; single axes -> empty", {
     expect_equal(pecotmr:::.fmSynthesizeJointSpec(3L, 2L)[[1L]]$axes, "trait")
     expect_equal(pecotmr:::.fmSynthesizeJointSpec(2L, 1L)[[1L]]$axes, "context")
     expect_equal(pecotmr:::.fmSynthesizeJointSpec(1L, 1L), list())
@@ -1804,7 +1810,7 @@ test_that(".twasMergeResultsByKey: merges per-region TwasWeights entries", {
 # Multi-region QtlDataset dispatch (xRegions length 2 -> merge path)
 # -----------------------------------------------------------------------------
 
-test_that(".twasDispatchJointSpecsQtlDataset: two region blocks are merged by key", {
+test_that(".twasDispatchJointSpecsQtlDataset: two blocks merge by key", {
     r1 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(50, 250))
     r2 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(300, 500))
     parsed <- list(list(axes = "context", scope = NULL))
@@ -1841,7 +1847,7 @@ test_that(".twasDispatchJointSpecsQtlDataset: two region blocks are merged by ke
 # .twasDispatchJointSpecsMultiStudy (leaf dispatchers mocked)
 # -----------------------------------------------------------------------------
 
-test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components, study spec to sumstats", {
+test_that(".fmDispatchJointSpecsMultiStudy: study specs go to sumstats", {
     qd <- .js_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -1894,7 +1900,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: routes non-study specs to components
     expect_equal(nrow(out), 2L) # indA row + ssC row
 })
 
-test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot messages", {
+test_that(".fmDispatchJointSpecsMultiStudy: study spec, no sumStats: message", {
     qdA <- .js_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -1905,7 +1911,8 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
         contexts = c("c1", "c2"),
         traits = "t1"
     )
-    mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB)) # no ss
+    # No sumstats.
+    mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
     parsed <- list(list(axes = "study", scope = NULL))
     expect_message(
         out <- pecotmr:::.fmDispatchJointSpecsMultiStudy(
@@ -1919,7 +1926,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec with no sumStats slot mes
     expect_null(out)
 })
 
-test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and rbinds", {
+test_that(".twasDispatchJointSpecsMultiStudy: routes and rbinds by axis", {
     qd <- .jd_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -1967,7 +1974,7 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and r
     expect_equal(nrow(out), 2L)
 })
 
-test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats -> message + NULL", {
+test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats: NULL", {
     qdA <- .jd_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -2008,7 +2015,7 @@ test_that(".sp* QtlDataset: mismatched study / absent context return empty", {
     expect_equal(pecotmr:::.spListTraits(qd, context = "nope"), character(0))
 })
 
-test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context", {
+test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip", {
     se <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
     local_mocked_bindings(
         .qtlContextSe = function(data, context) se,
@@ -2043,7 +2050,7 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context",
     )))
 })
 
-test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA rows skip", {
+test_that(".buildComposedIndividualXy: disjoint, missing or NA rows skip", {
     samp <- paste0("s", 1:6)
     se <- .js_makeSe(traits = c("g1", "g2"), samples = samp)
     scope <- list(
@@ -2171,7 +2178,7 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
     )))
 })
 
-test_that(".fmMergeResultsByKey: a key missing from a later region contributes nothing", {
+test_that(".fmMergeResultsByKey: a key a later region lacks adds nothing", {
     twoRow <- QtlFineMappingResult(
         studyName = c("S", "S"),
         context = c("c1", "c2"),
@@ -2234,7 +2241,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
     expect_equal(nrow(res), 2L) # the two region blocks merged by key
 })
 
-test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; all-NULL -> NULL", {
+test_that(".fmDispatchJointSpecsQtlDataset: one region direct; all-NULL NULL", {
     qd <- .jd_makeQtlDataset(
         studyName = "Q1",
         contexts = c("c1", "c2"),
@@ -2270,7 +2277,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
     )) # all-NULL
 })
 
-test_that(".twasMergeResultsByKey: a key absent from a later region contributes nothing", {
+test_that(".twasMergeResultsByKey keeps an entry whichever regions hold it", {
     twoRow <- TwasWeights(
         studyName = c("S", "S"),
         context = c("c1", "c2"),
@@ -2287,37 +2294,80 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         trait = "t1",
         method = "lasso",
         entry = list(TwasWeightsRow(
-            variantIds = "chr1:100:A:G",
-            weights = 0.1
+            variantIds = "chr1:300:A:G",
+            weights = 0.3
         ))
     )
     out <- pecotmr:::.twasMergeResultsByKey(list(twoRow, oneRow), c("rA", "rB"))
     expect_equal(nrow(out), 2L) # c2 kept from the first region
+    # Keys came from the first region alone, so one only a later region
+    # held was lost.
+    out <- pecotmr:::.twasMergeResultsByKey(list(oneRow, twoRow), c("rA", "rB"))
+    expect_setequal(as.character(out$context), c("c1", "c2"))
 })
 
-test_that(".twasMergedEntryAt concatenates one key's entry across regions", {
-    data(twasWeightsExample)
-    tw <- twasWeightsExample
-    keys <- pecotmr:::.mergeResultKeyOf(tw)
-    m <- pecotmr:::.twasMergedEntryAt(1L, list(tw, tw), keys, c("rA", "rB"))
-    expect_s4_class(m, "TwasWeightsRow")
-    expect_equal(names(methodFits(m)), c("rA", "rB"))
-    # Same table twice: the merged entry carries both regions' variants.
-    one <- pecotmr:::.twasMergedEntryAt(1L, list(tw), keys, "rA")
-    expect_equal(
-        length(pecotmr:::.twrPartsVariantIds(m)),
-        2L * length(pecotmr:::.twrPartsVariantIds(one))
+test_that(".twasMergeResultsByKey concatenates one entry across regions", {
+    one <- function(pos, w) {
+        TwasWeights(
+            studyName = "S",
+            context = "c1",
+            trait = "t1",
+            method = "lasso",
+            entry = list(TwasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", pos),
+                weights = w
+            )),
+            region = GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(min(pos), max(pos))
+            )
+        )
+    }
+    out <- pecotmr:::.twasMergeResultsByKey(
+        list(one(c(100L, 200L), c(0.1, 0.2)), one(c(300L, 400L), c(0.3, 0.4))),
+        c("rA", "rB")
     )
+    expect_equal(nrow(out), 1L)
+    m <- pecotmr:::.twrCellParts(out, 1L, "lasso")
+    expect_equal(names(methodFits(m)), c("rA", "rB"))
+    expect_equal(unname(weights(m)), c(0.1, 0.2, 0.3, 0.4))
+    # The merged window spans both regions' windows; it used to be dropped.
+    expect_equal(start(genomicRegion(out)), 100L)
+    expect_equal(end(genomicRegion(out)), 400L)
+})
+
+test_that(".twasMergeResultsByKey keeps two joint groups of one gene apart", {
+    group <- function(jointContexts, w) {
+        TwasWeights(
+            studyName = "S",
+            context = "c1",
+            trait = "t1",
+            method = "mrmash",
+            entry = list(TwasWeightsRow(
+                variantIds = "chr1:100:A:G",
+                weights = w
+            )),
+            jointContexts = jointContexts
+        )
+    }
+    perRegion <- function(w) {
+        combineTwasWeights(group("c1,c2", w), group("c1,c3", w + 1))
+    }
+    out <- pecotmr:::.twasMergeResultsByKey(
+        list(perRegion(0.1), perRegion(0.2)),
+        c("rA", "rB")
+    )
+    expect_equal(nrow(out), 2L)
 })
 
 test_that(".mergeEntryForKey gives NULL for a region lacking the tuple", {
     # NULL, not an empty row: a region that never fitted the tuple must not
-    # dilute the merged weights with zeros.
-    data(twasWeightsExample)
-    tw <- twasWeightsExample
-    key <- pecotmr:::.mergeResultKeyOf(tw)[[1L]]
-    expect_s4_class(pecotmr:::.mergeEntryForKey(tw, key), "TwasWeightsRow")
-    expect_null(pecotmr:::.mergeEntryForKey(tw, "nope\rx\ry\rz"))
+    # dilute the merged entry. Only the fine-mapping merge keys rows this way.
+    data(qtlFineMappingExample)
+    fm <- qtlFineMappingExample
+    key <- pecotmr:::.mergeResultKeyOf(fm)[[1L]]
+    expect_false(is.null(pecotmr:::.mergeEntryForKey(fm, key)))
+    expect_null(pecotmr:::.mergeEntryForKey(fm, "nope\rx\ry\rz"))
 })
 
 
@@ -2488,4 +2538,33 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
     for (got in seen) {
         expect_identical(got, pf)
     }
+})
+
+test_that(".twasMergeResultsByKey keeps a position its regions agree on", {
+    region <- function(pos, idx) {
+        pecotmr:::.withJointIndex(
+            TwasWeights(
+                studyName = "S",
+                context = "c1",
+                trait = "t1",
+                method = "mrmash",
+                entry = list(
+                    TwasWeightsRow(sprintf("chr1:%d:A:G", pos), 0.1)
+                ),
+                jointContexts = "c1;c2"
+            ),
+            idx
+        )
+    }
+    out <- pecotmr:::.twasMergeResultsByKey(
+        list(region(100L, 2L), region(200L, 2L)),
+        c("rA", "rB")
+    )
+    expect_identical(as.list(S4Vectors::mcols(out)$jointIndex), list(2L))
+    # Regions whose screens kept different conditions leave it unknown.
+    out <- pecotmr:::.twasMergeResultsByKey(
+        list(region(100L, 1L), region(200L, 2L)),
+        c("rA", "rB")
+    )
+    expect_null(S4Vectors::mcols(out)$jointIndex)
 })

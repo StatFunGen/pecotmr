@@ -65,6 +65,16 @@ setClassUnion(
 #'   \code{x[[i]]} is that tuple's summary statistics and the identity columns
 #'   live in \code{mcols(x)}. There is no \code{entry} column: what used to be
 #'   \code{x$entry[[i]]} is now simply \code{x[[i]]}.
+#' @details The rows are stored compactly: a column recomputed exactly from
+#'   the others (\code{SNP} from the variant's position and alleles,
+#'   \code{BETA} and \code{SE} from \code{Z}, \code{MAF} and \code{N},
+#'   \code{P} from \code{Z}) is left out, and the stored variants' metadata
+#'   (\code{derivedColumns}) names those they leave out; \code{N},
+#'   \code{N_CASE}, \code{N_CONTROL} and \code{z_supplied} are run-length
+#'   encoded where that is smaller. \code{x[[i]]}, \code{as.list()},
+#'   \code{lapply()}, \code{\link{sumStats}} and the per-variant accessors
+#'   hand the rows out with every column back. \code{unlist()} hands them out
+#'   as stored, and a collection built from them puts the columns back.
 #' @slot ldReference A named list of the LD references the rows were
 #'   harmonized against and every pipeline reads LD from, each a genotype
 #'   panel (see \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}}
@@ -92,7 +102,9 @@ setClass(
 )
 
 methods::setValidity("SumStatsBase", function(object) {
-    .ldRefDictProblems(object@ldReference, .ldRefKeys(object)) %||% TRUE
+    .ldRefDictProblems(object@ldReference, .ldRefKeys(object)) %||%
+        .ssDerivedProblems(object) %||%
+        TRUE
 })
 
 # TRUE when two elements share both their identity tuple AND their span.
@@ -107,7 +119,8 @@ methods::setValidity("SumStatsBase", function(object) {
     md <- mcols(object)
     tupleKey <- map(tupleCols, .ssKeyColumn, md = md)
     rangeKey <- .keyEmptyElements(object, .rtlRangeKeys(object))
-    keys <- exec(str_c, !!!c(tupleKey, list(rangeKey)), sep = "|")
+    keyParts <- c(tupleKey, list(rangeKey))
+    keys <- exec(str_c, !!!keyParts, sep = "|")
     anyDuplicated(keys) > 0L
 }
 
@@ -163,6 +176,267 @@ methods::setValidity("SumStatsBase", function(object) {
     }
     gr[onWindowChrom & IRanges::overlapsAny(gr, win)]
 }
+
+# =============================================================================
+# Summary statistics stored compactly
+# -----------------------------------------------------------------------------
+# A summary-statistic collection stores its variants' columns compactly and
+# hands them out plain, so a reader sees the columns the rows were given:
+# - SNP is left out when every label is the id rendered from its variant's
+#   position and alleles, as every QC'd collection's is;
+# - BETA, SE and P are left out when recomputing them as QC derives them --
+#   BETA and SE from Z, MAF and N, P from Z -- gives them back exactly;
+# - MAF and AF keep no names, which only repeated the variant ids;
+# - N, N_CASE, N_CONTROL and z_supplied are run-length encoded where that is
+#   smaller.
+# The stored variants record the columns they leave out in their metadata
+# (`derivedColumns`), so a column the source never had is not taken for one
+# left out, and the record goes wherever the stored variants go: unlist(x),
+# and any piece of it, carries it, and a collection built from them puts the
+# columns back. x[[i]], as.list(), lapply(), sumStats() and the readers built
+# on them hand out every column (.ssPlainElement()).
+# =============================================================================
+
+# Variant columns in the order a row holds them (.dfToEntryGranges()).
+# @noRd
+.SS_COLUMNS <- c(
+    "SNP",
+    "A1",
+    "A2",
+    "Z",
+    "N",
+    "AF",
+    "MAF",
+    "INFO",
+    "BETA",
+    "SE",
+    "P",
+    "N_CASE",
+    "N_CONTROL",
+    "z_supplied"
+)
+
+# The columns a row may leave out, in the order they are put back, each
+# with the columns it is recomputed from.
+# @noRd
+.SS_DERIVED <- list(
+    SNP = c("A1", "A2"),
+    BETA = c("Z", "MAF", "N"),
+    SE = c("Z", "MAF", "N"),
+    P = "Z"
+)
+
+# The columns stored run-length encoded where that is smaller.
+# @noRd
+.SS_RLE <- c("N", "N_CASE", "N_CONTROL", "z_supplied")
+
+# `grl` as a summary-statistic collection stores it (see above). Columns its
+# variants leave out already are put back first, so storing a stored
+# collection again changes nothing.
+# @noRd
+.ssStored <- function(grl) {
+    flat <- .ssPlainElement(unlist(grl, use.names = FALSE))
+    md <- .ssUnnamedFrequencies(mcols(flat, use.names = FALSE))
+    left <- .ssLeftOutColumns(flat, md)
+    kept <- md[, setdiff(colnames(md), left), drop = FALSE]
+    stored <- .ssWithLeftOut(
+        S4Vectors::`mcols<-`(flat, value = .rtlRleWhereSmaller(kept, .SS_RLE)),
+        left
+    )
+    S4Vectors::`mcols<-`(
+        IRanges::relist(
+            stored,
+            IRanges::PartitioningByEnd(
+                cumsum(lengths(grl)),
+                names = names(grl)
+            )
+        ),
+        value = mcols(grl, use.names = FALSE)
+    )
+}
+
+# `x`'s rows as a bare GRangesList, every column back (.ssPlainFlat()).
+# @noRd
+.ssPlainRows <- function(x) {
+    IRanges::relist(
+        .rtlGatherElements(x, seq_along(x)),
+        IRanges::PartitioningByEnd(cumsum(lengths(x)), names = names(x))
+    )
+}
+
+# The columns stored variants `gr` leave out, as their metadata records.
+# @noRd
+.ssLeftOut <- function(gr) {
+    as.character(S4Vectors::metadata(gr)$derivedColumns)
+}
+
+# `gr` recording that it leaves out columns `left` (none: no record).
+# @noRd
+.ssWithLeftOut <- function(gr, left) {
+    md <- S4Vectors::metadata(gr)
+    md$derivedColumns <- if (length(left) > 0L) left
+    S4Vectors::`metadata<-`(gr, value = md)
+}
+
+# Variants as a summary-statistic collection stores them, `gr` -- a row, a
+# piece of one, or unlist() of a collection -- with every column back
+# (.ssPlainFlat()) and no record left of any it left out. Anything but
+# ranges passes through.
+# @noRd
+.ssPlainElement <- function(gr) {
+    if (!methods::is(gr, "GenomicRanges")) {
+        return(gr)
+    }
+    .ssWithLeftOut(.ssPlainFlat(gr, .ssLeftOut(gr)), character(0))
+}
+
+# A constructor's entries with every column back (.ssPlainElement()), in
+# the canonical seqname and allele styles (.canonEntries()).
+# @noRd
+.ssEntries <- function(entry) {
+    .canonEntries(map(as.list(entry), .ssPlainElement))
+}
+
+# The variants of rows as stored, `flat`, with every column back: those run-
+# length encoded decoded, and those in `left` that it lacks recomputed, each
+# put in its place.
+# @noRd
+.ssPlainFlat <- function(flat, left) {
+    plain <- .rtlPlainMcols(flat)
+    md <- mcols(plain, use.names = FALSE)
+    missing <- setdiff(intersect(names(.SS_DERIVED), left), colnames(md))
+    if (length(missing) == 0L) {
+        return(plain)
+    }
+    S4Vectors::`mcols<-`(
+        plain,
+        value = reduce(missing, .ssPutBack, .init = md, flat = plain)
+    )
+}
+
+# `md` with column `col` recomputed and put where a row holds it.
+# @noRd
+.ssPutBack <- function(md, col, flat) {
+    cn <- colnames(md)
+    md[[col]] <- .ssDerive(col, flat, md)
+    md[, append(cn, col, after = .ssPlaceOf(col, cn)), drop = FALSE]
+}
+
+# Column `col` recomputed from the others: the id rendered from the variant's
+# position and alleles, or BETA, SE or P as QC derives them
+# (.zToBetaSe(), .zToPvalue()).
+# @noRd
+.ssDerive <- function(col, flat, md) {
+    if (col == "SNP") {
+        return(.grVariantIds(flat))
+    }
+    if (col == "P") {
+        return(.zToPvalue(md$Z))
+    }
+    .zToBetaSe(md$Z, md$MAF, md$N)[[str_to_lower(col)]]
+}
+
+# The columns of `md` (the variants of `flat`) a collection leaves out: each
+# recomputes to exactly what it holds, and putting them back puts each in its
+# place again.
+# @noRd
+.ssLeftOutColumns <- function(flat, md) {
+    left <- keep(names(.SS_DERIVED), .ssReproduces, flat = flat, md = md)
+    restored <- reduce(
+        left,
+        .ssPlaceName,
+        .init = setdiff(colnames(md), left)
+    )
+    if (!identical(restored, colnames(md))) {
+        return(character(0))
+    }
+    left
+}
+
+# TRUE when `md` holds column `col` and the columns it is recomputed from,
+# and recomputing it gives back exactly what it holds.
+# @noRd
+.ssReproduces <- function(col, flat, md) {
+    needed <- c(col, .SS_DERIVED[[col]])
+    if (nrow(md) == 0L || !all(is_in(needed, colnames(md)))) {
+        return(FALSE)
+    }
+    identical(md[[col]], .ssDerive(col, flat, md))
+}
+
+# Column names `cn` with `col` put in its place among them.
+# @noRd
+.ssPlaceName <- function(cn, col) {
+    append(cn, col, after = .ssPlaceOf(col, cn))
+}
+
+# Where column `col` goes among columns `cn`: after the last of them a row
+# holds before it (.SS_COLUMNS), or first.
+# @noRd
+.ssPlaceOf <- function(col, cn) {
+    before <- .SS_COLUMNS[seq_len(match(col, .SS_COLUMNS) - 1L)]
+    max(c(0L, match(before, cn)), na.rm = TRUE)
+}
+
+# `md` with the names of its MAF and AF columns dropped.
+# @noRd
+.ssUnnamedFrequencies <- function(md) {
+    reduce(
+        intersect(c("MAF", "AF"), colnames(md)),
+        .ssUnnameColumn,
+        .init = md
+    )
+}
+
+# @noRd
+.ssUnnameColumn <- function(md, cn) {
+    md[[cn]] <- unname(md[[cn]])
+    md
+}
+
+# What is wrong with the record of the columns `object`'s variants leave
+# out, or NULL: it names only columns they may leave out, and none they hold.
+# @noRd
+.ssDerivedProblems <- function(object) {
+    flat <- unlist(object, use.names = FALSE)
+    left <- .ssLeftOut(flat)
+    held <- colnames(mcols(flat))
+    bad <- union(setdiff(left, names(.SS_DERIVED)), intersect(left, held))
+    if (length(bad) == 0L) {
+        return(NULL)
+    }
+    str_c(
+        "derivedColumns names columns the variants cannot leave out: ",
+        str_flatten(bad, ", ")
+    )
+}
+
+#' @rdname SumStatsBase-class
+#' @param x A summary-statistics collection.
+#' @param i The row: a position or an element name.
+#' @param exact Passed on to the element lookup.
+#' @importFrom S4Vectors getListElement
+#' @export
+setMethod("getListElement", "SumStatsBase", function(x, i, exact = TRUE) {
+    .ssPlainElement(methods::callNextMethod())
+})
+
+#' @rdname SumStatsBase-class
+#' @param use.names Whether the list keeps the element names.
+#' @export
+setMethod("as.list", "SumStatsBase", function(x, use.names = TRUE) {
+    as.list(.ssPlainRows(x), use.names = use.names)
+})
+
+#' @rdname SumStatsBase-class
+#' @param X A summary-statistics collection.
+#' @param FUN The function applied to each row's variants.
+#' @param ... Passed on to \code{FUN}.
+#' @importFrom BiocGenerics lapply
+#' @export
+setMethod("lapply", "SumStatsBase", function(X, FUN, ...) {
+    lapply(as.list(X), FUN, ...)
+})
 
 # The build recorded in seqinfo must be exactly one non-NA value. A missing
 # build is an error rather than a default: every downstream liftover / LD
@@ -399,7 +673,8 @@ setMethod(
 # that slot as an attribute; it is split into the `qcOptions` slot and the
 # `qcAudit` column. An object older still held its genome build in a
 # `genome` slot (.ssMigrateGenome()). An object that old needs the updates
-# every collection shares too, so the inherited update runs either way.
+# every collection shares too, so the inherited update runs either way. Its
+# rows are then stored as they are today (.ssRestored()).
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -413,13 +688,22 @@ setMethod(
         if (!is.null(old)) {
             object <- .ssMigrateQcInfo(object, old)
         }
-        methods::callNextMethod(
+        .ssRestored(methods::callNextMethod(
             .ssMigrateGenome(object),
             ...,
             verbose = verbose
-        )
+        ))
     }
 )
+
+# `x` with its rows stored as a collection stores them today (.ssStored()):
+# an object saved before held every column in full. `x` itself when they
+# are stored so already.
+# @noRd
+.ssRestored <- function(x) {
+    restored <- .rtlFinish(x, .ssPlainRows(x), seq_along(x))
+    if (identical(restored, x)) x else restored
+}
 
 # Before the genome build moved into seqinfo(), summary statistics held it
 # in a `genome` slot; an object saved then still carries it as an
@@ -910,6 +1194,17 @@ setMethod(
 #'   \code{mcols} names the entry each row used (\code{NA} for a fit derived
 #'   from individual-level data). Used downstream to check that the rows a
 #'   pipeline combines share an LD reference.
+#' @slot cvPartition A named list of the cross-validation fold partitions the
+#'   rows' results share, each with the order of the samples its out-of-fold
+#'   predictions are held for, stored once apiece; the \code{cvPartition}
+#'   column of \code{mcols} names the entry each row's result used
+#'   (\code{NA} for a row without one). \code{cvResult()} returns a row's
+#'   result with its partition and sample names in place.
+#' @slot fits A named list of the rows' fits, stored once apiece: the rows of
+#'   a joint fit, one per condition, all name one entry. The
+#'   \code{susieFit} column of \code{mcols} names each row's entry
+#'   (\code{NA} for a row without a fit); \code{susieFit()} returns it in
+#'   place.
 #' @section Narrowed rows: A row is built from its fit, holding the fit's
 #'   variables in the fit's order, so its fit is read off it by position. A
 #'   row narrowed since -- by \code{endoapply()} or \code{[[<-} -- keeps its
@@ -933,12 +1228,15 @@ setMethod(
 setClass(
     "FineMappingResultBase",
     contains = c("VIRTUAL", "RangedTupleList"),
-    representation(ldReference = "list"),
-    prototype(ldReference = list())
+    representation(ldReference = "list", cvPartition = "list", fits = "list"),
+    prototype(ldReference = list(), cvPartition = list(), fits = list())
 )
 
 methods::setValidity("FineMappingResultBase", function(object) {
-    .ldRefDictProblems(object@ldReference, .ldRefKeys(object)) %||% TRUE
+    .ldRefDictProblems(object@ldReference, .ldRefKeys(object)) %||%
+        .cvPartitionProblems(object) %||%
+        .fitProblems(object, "susieFit") %||%
+        TRUE
 })
 
 #' @rdname studyName
@@ -1009,42 +1307,57 @@ setMethod(
     }
 )
 
-# The collection's identity columns plus the per-entry payload columns.
+# The collection's identity columns plus the per-entry payload columns, with
+# the CV as `cv` (.cvStoredColumn()) stores it and each fit as its key into
+# the fits dictionary (`fitKeys`).
 # @noRd
-.withEntryPayload <- function(md, entries) {
+.withEntryPayload <- function(md, entries, cv, fitKeys) {
     # `[[<-` not cbind(): the collection may already carry these columns, and
     # they must be REPLACED -- cbind would append a second copy of each, which
     # every reader then shadows with the stale one.
-    withFit <- `[[<-`(
-        md,
-        "susieFit",
-        value = S4Vectors::SimpleList(map(entries, susieFit))
-    )
-    withCv <- `[[<-`(
-        withFit,
-        "cvResult",
-        value = S4Vectors::SimpleList(map(entries, cvResult))
-    )
+    withFit <- `[[<-`(md, "susieFit", value = fitKeys)
+    withCv <- `[[<-`(withFit, "cvResult", value = cv$cvResult)
+    withKeys <- `[[<-`(withCv, "cvPartition", value = cv$keys)
     `[[<-`(
-        withCv,
+        withKeys,
         "derivedColumns",
         value = IRanges::CharacterList(map(entries, .fmRowDerivedColumns))
     )
 }
 
 # Rebuild a fine-mapping collection from adjusted entries, keeping every
-# identity column and collection-level slot.
+# identity column, row name and collection-level slot.
 # @noRd
 .fmrFromEntries <- function(x, entries) {
-    # .rtlRebuild() carries the names, seqinfo (the genome build) and every
-    # slot -- the rows keep their keys in mcols, so the references go across
-    # as is -- and only the payload columns are new.
-    rebuilt <- .rtlRebuild(x, map(entries, variants), seq_len(length(x)))
-    withPayload <- `mcols<-`(
-        rebuilt,
-        value = .withEntryPayload(mcols(rebuilt, use.names = FALSE), entries)
+    # The stored CV, not cvResult()'s view of it: that names the fold weights,
+    # whose ids the rows hold once.
+    cv <- .cvStoredColumn(map(entries, .fmRowCvStored))
+    fitted <- .dictBuild(map(entries, susieFit), .FIT_DICT_PREFIX)
+    # seqinfo carries the genome build, which elements rebuilt bare lose.
+    grl <- `mcols<-`(
+        .rtlRestoreSeqinfo(.rtlBindElements(map(entries, variants)), x),
+        value = .withEntryPayload(
+            mcols(x, use.names = FALSE),
+            entries,
+            cv,
+            fitted$keys
+        )
     )
-    S4Vectors::`metadata<-`(withPayload, value = S4Vectors::metadata(x))
+    # Every slot goes across -- the rows keep their keys in mcols, so the LD
+    # references go as they are -- but the dictionaries the entries now fill.
+    ownSlots <- .rtlOwnSlots(x)
+    slotArgs <- list_assign(
+        set_names(map(ownSlots, .rtlGetSlot, x = x), ownSlots),
+        cvPartition = cv$entries,
+        fits = fitted$entries
+    )
+    rebuilt <- exec(
+        methods::new,
+        class(x),
+        .rtlStored(class(x), .rtlNamedLike(grl, x, seq_along(x))),
+        !!!slotArgs
+    )
+    S4Vectors::`metadata<-`(rebuilt, value = S4Vectors::metadata(x))
 }
 
 # TRUE when an entry shares at least one variant with `keepVariants`, matched
@@ -1199,7 +1512,8 @@ trimFineMappingResult <- function(x, role = NULL) {
 
 # The alpha rows and prior variances of the fit's effects of positive prior
 # variance, named by effect id, and alpha's columns by `fitIds` when given.
-# An already trimmed fit's names are its ids.
+# An already trimmed fit's names are its ids; a fit trimmed when it was stored
+# records its effects (.fitEffectIndex()).
 # @noRd
 .trimEffects <- function(fit, fitIds = NULL) {
     priorVariance <- fit[["V"]] %||% fit[["prior_variance"]]
@@ -1210,7 +1524,7 @@ trimFineMappingResult <- function(x, role = NULL) {
     ids <- if (.namedByEffect(alpha)) {
         rownames(alpha)
     } else {
-        str_c("L", seq_len(nrow(alpha)))
+        str_c("L", .fitEffectIndex(fit, nrow(alpha)))
     }
     keep <- which(as.numeric(priorVariance) > 0)
     list(
@@ -1345,7 +1659,7 @@ setMethod(
 # and carried on the fit.
 # @noRd
 .rcMassForRow <- function(i, x) {
-    fit <- mcols(x)$susieFit[[i]]
+    fit <- .fitEntry(mcols(x)$susieFit[[i]], x)
     mass <- .rcFitRetainedMass(fit)
     if (is.null(mass)) {
         return(NULL)
@@ -1629,9 +1943,93 @@ setMethod(
         } else {
             object
         }
-        methods::callNextMethod(current, ..., verbose = verbose)
+        # The storage steps rebuild the collection, so they run once the
+        # inherited update has brought its slots up to date.
+        updated <- methods::callNextMethod(
+            .fmrFoldFitsToWeights(current),
+            ...,
+            verbose = verbose
+        )
+        .fmrStoreTopLoci(.fmrShareFits(.cvSharePartitions(updated)))
     }
 )
+
+# A collection saved before rows shared their fits holds each row's fit in
+# its `susieFit` cell. They move to the fits dictionary, where the rows of a
+# joint fit share one entry.
+# @noRd
+#' @importFrom methods slot<-
+.fmrShareFits <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    if (is.character(md$susieFit)) {
+        return(object)
+    }
+    fitted <- .dictBuild(as.list(md$susieFit), .FIT_DICT_PREFIX)
+    md$susieFit <- fitted$keys
+    methods::slot(object, "fits", check = FALSE) <- fitted$entries
+    S4Vectors::`mcols<-`(object, value = md)
+}
+
+# A saved collection's topLoci as collections now store them, compact
+# (.fmrCompactTopLoci()): rebuilding its elements stores them so.
+# @noRd
+.fmrStoreTopLoci <- function(object) {
+    flat <- unlist(object, use.names = FALSE)
+    .rtlWithVariantMcols(object, mcols(flat, use.names = FALSE))
+}
+
+# A saved collection whose CV kept per-fold fits, with each turned into the
+# per-fold weights rows now keep (.cvFoldFitsToWeights()).
+# @noRd
+.fmrFoldFitsToWeights <- function(object) {
+    cvs <- as.list(mcols(object, use.names = FALSE)$cvResult)
+    if (!any(map_lgl(cvs, .cvHasFoldFits))) {
+        return(object)
+    }
+    ids <- map(seq_along(object), .fmrRowVariantIdsAt, x = object)
+    `$<-`(
+        object,
+        "cvResult",
+        S4Vectors::SimpleList(map2(cvs, ids, .cvFoldFitsToWeights))
+    )
+}
+
+# Whether a saved row's CV (one payload, or one per region) has fold fits.
+# @noRd
+.cvHasFoldFits <- function(cv) {
+    if (.cvIsPerRegion(cv)) {
+        return(any(map_lgl(cv, .cvPayloadHasFoldFits)))
+    }
+    .cvPayloadHasFoldFits(cv)
+}
+
+# @noRd
+.cvPayloadHasFoldFits <- function(cv) {
+    !is.null(cv$foldFits)
+}
+
+# @noRd
+.fmrRowVariantIdsAt <- function(i, x) {
+    .grVariantIds(x[[i]])
+}
+
+# The variant names a fine-mapping fit carries: its PIPs' names, else the
+# columns of its effect matrices (SuSiE, mvSuSiE) or of csd_X (fSuSiE); none
+# for an unnamed fit. A null_weight fit gives its effect matrices one more
+# column, which susieR names "null"; that is no variant.
+# @noRd
+.fitNamedVariants <- function(fit) {
+    if (!is.list(fit)) {
+        return(character(0))
+    }
+    named <- as.character(
+        names(fit[["pip"]]) %||%
+            colnames(fit[["alpha"]]) %||%
+            colnames(fit[["lbf_variable"]]) %||%
+            names(fit[["csd_X"]])
+    )
+    named[named != "null"]
+}
 
 #' @rdname traitPosition
 #' @examples

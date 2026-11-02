@@ -76,7 +76,7 @@ test_that("computeW0 handles all-zero Bhat by returning uniform weights", {
 })
 
 
-test_that("computeW0 distributes weight based on nonzero rows when ncomps > 1", {
+test_that("computeW0 weights by nonzero rows when ncomps > 1", {
     # 2 out of 4 rows have nonzero entries
     Bhat <- matrix(0, nrow = 4, ncol = 2)
     Bhat[1, 1] <- 1
@@ -210,7 +210,7 @@ test_that("MrmashPriorParam refuses a priorGrid that is not a vector", {
 })
 
 
-test_that("mrmashWrapper errors when no prior matrices and canonical_priorMatrices is FALSE", {
+test_that("mrmashWrapper errors with no data-driven or canonical prior", {
     skip_if_not_installed("glmnet")
     skip_if_not_installed("mr.mashr")
     X <- matrix(rnorm(12), nrow = 3, ncol = 4)
@@ -227,7 +227,7 @@ test_that("mrmashWrapper errors when no prior matrices and canonical_priorMatric
 })
 
 
-test_that("mrmashWrapper warns when Y has missing and B_init_method is glasso", {
+test_that("mrmashWrapper warns on missing Y with glasso initialisation", {
     skip_if_not_installed("glmnet")
     skip_if_not_installed("mr.mashr")
     set.seed(42)
@@ -418,8 +418,9 @@ test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
 # test_fineMappingWrappers.R.
 # =============================================================================
 
-# (Shared .rrwXy / .rrwStatLd / .rrwMulti fixtures live in helper-rrwFixtures.R
-#  so test_fineMappingWrappers.R can reuse them for the SuSiE weight extractors.)
+# (Shared .rrwXy / .rrwStatLd / .rrwMulti fixtures live in
+#  helper-rrwFixtures.R so test_fineMappingWrappers.R can reuse them for
+#  the SuSiE weight extractors.)
 
 # -------------------------------- individual --------------------------------
 
@@ -569,15 +570,16 @@ test_that("mrashWeights returns length-p weights and can retain the fit", {
 test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
-    mc <- list(nit = 200, nburn = 20, nthin = 1)
-    wN <- exec(bayesNWeights, !!!c(list(f$X, f$y), mc))
+    mc <- list(nIter = 200, nBurnin = 20, thin = 1)
+    fitArgs <- c(list(f$X, f$y), mc)
+    wN <- exec(bayesNWeights, !!!fitArgs)
     expect_length(wN, f$p)
     expect_true(is.numeric(wN))
     expect_true(all(is.finite(wN)))
-    expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
-    expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
-    expect_length(exec(bayesCWeights, !!!c(list(f$X, f$y), mc)), f$p)
-    expect_length(exec(bayesRWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesLWeights, !!!fitArgs), f$p)
+    expect_length(exec(bayesAWeights, !!!fitArgs), f$p)
+    expect_length(exec(bayesCWeights, !!!fitArgs), f$p)
+    expect_length(exec(bayesRWeights, !!!fitArgs), f$p)
 })
 
 test_that("buildMrmashPriorMatrices exposes expand_covs' zeromat", {
@@ -612,7 +614,8 @@ test_that("buildMrmashPriorMatrices exposes expand_covs' zeromat", {
 test_that("bayesAlphabetWeights forwards every MCMC control to gbayes", {
     # `nthin` was declared and documented (default 5) but never put in
     # callArgs, so every fit silently ran at gbayes's own nthin = 1 while
-    # its siblings nit and nburn were forwarded.
+    # its siblings nit and nburn were forwarded. gbayes runs nit + nburn
+    # iterations, so the total nIter reaches it net of the burn-in.
     seen <- NULL
     local_mocked_bindings(
         gbayes = function(...) {
@@ -626,11 +629,11 @@ test_that("bayesAlphabetWeights forwards every MCMC control to gbayes", {
         f$X,
         f$y,
         method = "bayesN",
-        nit = 300,
-        nburn = 30,
-        nthin = 7
+        nIter = 300,
+        nBurnin = 30,
+        thin = 7
     ))
-    expect_equal(seen$nit, 300)
+    expect_equal(seen$nit, 270)
     expect_equal(seen$nburn, 30)
     expect_equal(seen$nthin, 7)
 })
@@ -688,11 +691,15 @@ test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
 
 # --------------------------- RSS weight wrappers ----------------------------
 
-test_that("lassosumRssWeights returns length-p weights and records the selection", {
+test_that("lassosumRssWeights returns p weights and records the selection", {
     f <- .rrwStatLd()
+    set.seed(1)
     w <- lassosumRssWeights(f$stat, f$ldReference)
     expect_length(w, f$p)
-    expect_equal(unname(attr(w, "lassosum_selection")["mode"]), "ldQuadratic")
+    expect_equal(unname(attr(w, "lassosum_selection")["mode"]), "heldOut")
+    # The held-out splits come from R's random number generator.
+    set.seed(1)
+    expect_identical(lassosumRssWeights(f$stat, f$ldReference), w)
     expect_length(
         lassosumRssWeights(f$stat, f$ldReference, selection = "minFbeta"),
         f$p
@@ -748,8 +755,9 @@ test_that("PenalizedRssOptions refuses the settings its wrappers own", {
         "lambda2",
         "maxSwaps"
     )) {
+        ownedArg <- set_names(list(1), nm)
         expect_error(
-            exec(PenalizedRssOptions, !!!set_names(list(1), nm)),
+            exec(PenalizedRssOptions, !!!ownedArg),
             str_c(nm, " is supplied by pecotmr"),
             label = nm
         )
@@ -782,7 +790,11 @@ test_that("prsCsWeights and sdprWeights attach the sampler's estimates", {
         methodArgs = prsOpts
     )
     prsFit <- attr(prsSlim, "fit")
-    expect_named(prsFit, c("betaEst", "psiEst", "sigmaEst", "phiEst"))
+    expect_named(
+        prsFit,
+        c("betaEst", "psiEst", "sigmaEst", "phiEst", "variantIds")
+    )
+    expect_equal(prsFit$variantIds, f$stat$variantNames)
     expect_equal(as.numeric(prsSlim), as.numeric(prsNone))
     expect_equal(prsFit$betaEst, as.numeric(prsNone))
     expect_length(prsFit$psiEst, f$p)
@@ -801,7 +813,8 @@ test_that("prsCsWeights and sdprWeights attach the sampler's estimates", {
         fitRetention = "full",
         methodArgs = sdprOpts
     )
-    expect_named(attr(sdprFull, "fit"), c("betaEst", "h2"))
+    expect_named(attr(sdprFull, "fit"), c("betaEst", "h2", "variantIds"))
+    expect_equal(attr(sdprFull, "fit")$variantIds, f$stat$variantNames)
     expect_length(attr(sdprFull, "fit")$h2, 1L)
     expect_equal(as.numeric(sdprFull), as.numeric(sdprNone))
     expect_error(
@@ -813,15 +826,19 @@ test_that("prsCsWeights and sdprWeights attach the sampler's estimates", {
 test_that("lassosumRssWeights keeps its search: path at slim, beta at full", {
     f <- .rrwStatLd()
     s <- c(0.5, 1)
+    # One seed per call, so the three draw the same held-out splits.
+    set.seed(1)
     none <- lassosumRssWeights(f$stat, f$ldReference, s = s)
     expect_null(attr(none, "fit"))
+    set.seed(1)
     slim <- lassosumRssWeights(
         f$stat,
         f$ldReference,
         s = s,
         fitRetention = "slim"
     )
-    expect_named(attr(slim, "fit"), "path")
+    expect_named(attr(slim, "fit"), c("path", "variantIds"))
+    expect_equal(attr(slim, "fit")$variantIds, f$stat$variantNames)
     path <- attr(slim, "fit")$path
     expect_named(
         path,
@@ -835,6 +852,7 @@ test_that("lassosumRssWeights keeps its search: path at slim, beta at full", {
     sel <- attr(slim, "lassosum_selection")
     expect_equal(path$s[path$selected], as.numeric(sel[["s"]]))
     expect_equal(path$lambda[path$selected], as.numeric(sel[["lambda"]]))
+    set.seed(1)
     full <- lassosumRssWeights(
         f$stat,
         f$ldReference,
@@ -875,8 +893,8 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     # pre-shrunk matrix would.
     set.seed(8)
     X <- matrix(rbinom(80 * 120, 2, 0.3), 80, 120)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
     beta <- replace(numeric(120), c(5, 40, 90), c(0.3, -0.2, 0.25))
     z <- as.vector(R %*% beta) + rnorm(120, sd = 0.05)
     lambda <- exp(seq(log(0.1), log(0.001), length.out = 8))
@@ -927,7 +945,7 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
                 label = label
             )
             expect_equal(
-                exec(pecotmr:::penalizedRssFactorCpp, z, F, s, !!!args),
+                exec(pecotmr:::penalizedRssFactorCpp, z, ldFactor, s, !!!args),
                 dense,
                 tolerance = 1e-8,
                 label = label
@@ -939,7 +957,7 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     l0Fit <- function(lambda2) {
         pecotmr:::penalizedRssFactorCpp(
             z,
-            F,
+            ldFactor,
             0.2,
             lambdaR = lambda,
             penaltyStr = "L0L2",
@@ -964,9 +982,9 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
     # with arrays).
     set.seed(7)
     X <- matrix(rbinom(40 * 120, 2, 0.3), 40, 120)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
-    p <- ncol(F)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    p <- ncol(ldFactor)
     effects <- replace(numeric(p), c(5, 40, 90), c(0.3, -0.25, 0.2))
     bhat <- as.vector(R %*% effects) + rnorm(p, sd = 0.02)
     sizes <- sample(c(400, 500, 600), p, replace = TRUE)
@@ -986,10 +1004,11 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
         iter = 100L,
         burn = 25L,
         thin = 5L,
-        numThreads = 1L,
         optLlk = 1L,
         verbose = FALSE,
-        seed = 11L
+        seed = 11L,
+        raoBlackwell = FALSE,
+        track = FALSE
     )
     cases <- list(
         llk1 = list(),
@@ -1003,16 +1022,17 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
         )
     )
     for (nm in names(cases)) {
-        args <- list_modify(base, !!!cases[[nm]])
+        caseSettings <- cases[[nm]]
+        args <- list_modify(base, !!!caseSettings)
         expect_equal(
-            exec(pecotmr:::sdprFactorCpp, factorR = F, !!!args),
+            exec(pecotmr:::sdprFactorCpp, factorR = ldFactor, !!!args),
             exec(pecotmr:::sdprCpp, LD = list(R), !!!args),
             tolerance = 1e-8,
             label = nm
         )
     }
     expect_error(
-        exec(pecotmr:::sdprFactorCpp, factorR = F[, -1], !!!base),
+        exec(pecotmr:::sdprFactorCpp, factorR = ldFactor[, -1], !!!base),
         "The LD factor has 119 columns but there are 120 effects"
     )
 })
@@ -1044,23 +1064,12 @@ test_that("prsCsWeights and sdprWeights hand the engine z / sqrt(n)", {
 # Statistics over the first p variants of the test genotype panel, with the
 # same LD as an LdMatrix: a weight method must read the panel's LD (through
 # its standardized genotypes) as it reads the matrix.
-.rrwPanelStat <- function(p = 40) {
-    panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
-    ids <- names(SummarizedExperiment::rowRanges(panel))[seq_len(p)]
-    R <- pecotmr:::.ldFromRef(panel, ids, "test")
-    set.seed(3)
-    effects <- replace(numeric(p), c(3, 20), c(4, -3))
-    z <- as.vector(R %*% effects) + rnorm(p)
-    list(
-        panel = panel,
-        ldMatrix = LdMatrix(R, nSamples = ncol(panel)),
-        stat = list(z = z, n = rep(500, p), variantNames = ids)
-    )
-}
-
 test_that("RSS weights read a genotype panel's LD as they read the matrix", {
     # The panel route gives the solvers the panel's factor and never forms
-    # the LD matrix; it must land on the matrix route's weights.
+    # the LD matrix; it must land on the matrix route's weights. Held-out
+    # selection draws its splits through the factor on one route and the
+    # matrix's eigenvectors on the other, so a deterministic selection
+    # compares the fits.
     d <- .rrwPanelStat()
     fns <- list(
         lassosum = lassosumRssWeights,
@@ -1070,8 +1079,8 @@ test_that("RSS weights read a genotype panel's LD as they read the matrix", {
     )
     for (nm in names(fns)) {
         expect_equal(
-            fns[[nm]](d$stat, d$panel),
-            fns[[nm]](d$stat, d$ldMatrix),
+            fns[[nm]](d$stat, d$panel, selection = "minFbeta"),
+            fns[[nm]](d$stat, d$ldMatrix, selection = "minFbeta"),
             tolerance = 1e-6,
             label = nm
         )
@@ -1087,7 +1096,9 @@ test_that("RSS weights read a genotype panel's LD as they read the matrix", {
     )
     # SDPR runs its own sampler on the low-rank form of its matrices, so a
     # seeded chain lands on the matrix route's. A 50-component mixture
-    # rather than the default 1000 keeps the chains quick.
+    # rather than the default 1000 keeps the chains quick, and statistics
+    # consistent with the LD keep them from diverging.
+    d <- .rrwPanelStatLd()
     for (optLlk in 1:2) {
         opts <- SdprOptions(
             iter = 100,
@@ -1234,6 +1245,21 @@ test_that(".lassosumClampCor scales values with |cor| >= 1 below 1", {
 test_that(".lassosumFirstMax returns the first index of the maximum", {
     expect_equal(pecotmr:::.lassosumFirstMax(c(1, 3, 3, 2)), 2L)
     expect_equal(pecotmr:::.lassosumFirstMax(c(5, 1, 2)), 1L)
+    # A tie to rounding is a tie; a real difference is not.
+    expect_equal(pecotmr:::.lassosumFirstMax(c(1, 3, 3 + 1e-14, 2)), 2L)
+    expect_equal(pecotmr:::.lassosumFirstMax(c(1, 3, 3 + 1e-6, 2)), 3L)
+    expect_equal(pecotmr:::.lassosumFirstMax(c(-Inf, -Inf)), 1L)
+})
+
+test_that("held-out selection breaks a tie in correlation by variance", {
+    pick <- pecotmr:::.rssHeldOutPick
+    # Candidates 2 to 4 tie on the correlation, to rounding; of them, 3
+    # explains the most held-out variance.
+    expect_equal(pick(c(0.1, 0.5, 0.5 + 1e-15, 0.5), c(9, 0.2, 0.3, 0.1)), 3L)
+    # A real difference in correlation wins whatever the variance.
+    expect_equal(pick(c(0.1, 0.5, 0.6, 0.5), c(9, 0.2, 0.1, 0.3)), 3L)
+    # Tied on both, the first in the grid.
+    expect_equal(pick(c(0.4, 0.5, 0.5), c(1, 0.2, 0.2)), 2L)
 })
 
 test_that(".lassosumSelectMinFbeta picks the minimum-fbeta candidate", {
@@ -1248,14 +1274,107 @@ test_that(".lassosumSelectMinFbeta picks the minimum-fbeta candidate", {
     expect_equal(r$beta, cb[, 2])
 })
 
-test_that(".lassosumSelectLdQuadratic scores candidates by c'b / sqrt(b'Rb)", {
-    f <- .rrwStatLd()
+test_that(".lassosumSelectLdQuadratic shrinks c by its lfdr like lassosum", {
+    skip_if_not_installed("fdrtool")
+    # Five strong correlations among 300; candidate 1 fits those five,
+    # candidate 2 is the least-squares direction c itself (R = I), which
+    # the raw in-sample score always prefers.
     set.seed(8)
-    cb <- matrix(rnorm(f$p * 4), f$p, 4)
-    r <- pecotmr:::.lassosumSelectLdQuadratic(cb, f$stat$b, list(R = f$LD))
+    p <- 300L
+    corInput <- c(rnorm(p - 5L, sd = 0.03), 0.3, -0.25, 0.2, 0.28, -0.3)
+    signal <- replace(numeric(p), (p - 4L):p, sign(corInput[(p - 4L):p]))
+    cb <- unname(cbind(signal, corInput))
+    lfdr <- fdrtool::fdrtool(
+        corInput,
+        statistic = "correlation",
+        plot = FALSE,
+        verbose = FALSE
+    )$lfdr
+    score <- function(cVec) colSums(cVec * cb) / sqrt(colSums(cb^2))
+    expect_equal(which.max(score(corInput)), 2L)
+    want <- which.max(score(corInput * (1 - lfdr)))
+    expect_equal(want, 1L)
+    r <- pecotmr:::.lassosumSelectLdQuadratic(cb, corInput, list(R = diag(p)))
     expect_equal(r$mode, "ldQuadratic")
-    expect_true(r$index %in% seq_len(4))
-    expect_equal(r$beta, cb[, r$index])
+    expect_equal(r$index, want)
+    expect_equal(r$beta, cb[, want])
+})
+
+test_that(".rssShrunkLdScore scores c'b against LD shrunk toward I", {
+    R <- matrix(c(1, 0.5, 0.5, 1), 2, 2)
+    cb <- cbind(c(1, 1), c(1, -1), c(0, 0))
+    corInput <- c(0.2, 0.1)
+    w <- 0.3
+    want <- colSums(corInput * cb[, 1:2]) /
+        sqrt((1 - w) * colSums(cb[, 1:2] * (R %*% cb[, 1:2])) + w * 2)
+    expect_equal(
+        pecotmr:::.rssShrunkLdScore(cb, corInput, list(R = R), w),
+        c(want, -Inf)
+    )
+})
+
+test_that("held-out selection needs the LD reference's sample size", {
+    f <- .rrwStatLd()
+    unsized <- LdMatrix(f$LD)
+    expect_error(
+        lassosumRssWeights(f$stat, unsized),
+        "lassosumRssWeights: selection = \"heldOut\" needs the LD reference's"
+    )
+    expect_error(
+        mcpRssWeights(f$stat, unsized),
+        "mcpRssWeights: selection = \"heldOut\" needs the LD reference's"
+    )
+    expect_length(
+        lassosumRssWeights(f$stat, unsized, selection = "minFbeta"),
+        f$p
+    )
+})
+
+test_that("held-out selection draws its splits through a panel's factor", {
+    d <- .rrwPanelStat()
+    set.seed(2)
+    w <- lassosumRssWeights(d$stat, d$panel)
+    expect_equal(unname(attr(w, "lassosum_selection")["mode"]), "heldOut")
+    expect_length(w, length(d$stat$z))
+    expect_true(all(is.finite(w)))
+})
+
+test_that("held-out selection avoids the fit a small reference cannot judge", {
+    # Real genotypes: statistics from 250 people, LD from 100 others, over
+    # 200 variants. The least-penalized fit loads on directions of the LD
+    # the 100-person reference cannot see, and lassosum's in-sample score
+    # keeps choosing it. Held-out selection, with the LD shrunk for the
+    # reference's size, must pick a sparser fit that predicts the remaining
+    # people better.
+    data(eqtlRegionExample, envir = environment())
+    G <- eqtlRegionExample$X
+    af <- colMeans(G) / 2
+    G <- G[, pmin(af, 1 - af) > 0.05][, 1001:1200]
+    Gs <- scale(G)
+    set.seed(11)
+    g <- as.numeric(Gs %*% replace(numeric(200), c(40, 150), c(1, -0.8)))
+    y <- g * sqrt(0.15 / var(g)) + rnorm(nrow(G), sd = sqrt(0.85))
+    perm <- sample(nrow(G))
+    study <- perm[1:250]
+    test <- perm[351:415]
+    R <- cor(G[perm[251:350], ])
+    stat <- list(
+        cor = as.numeric(cor(G[study, ], y[study])),
+        n = rep(250, 200),
+        variantNames = colnames(G)
+    )
+    w <- lassosumRssWeights(
+        stat,
+        LdMatrix(R, nSamples = 100L),
+        fitRetention = "full"
+    )
+    fit <- attr(w, "fit")
+    loosest <- which(
+        fit$path$s == 0.2 & fit$path$lambda == min(fit$path$lambda)
+    )
+    accuracy <- function(b) cor(as.numeric(Gs[test, ] %*% b), g[test])
+    expect_lt(sum(w != 0), fit$path$nparams[loosest])
+    expect_gt(accuracy(as.numeric(w)), accuracy(fit$beta[, loosest]))
 })
 
 test_that("computeCovDiag returns a diagonal condition covariance", {
@@ -1266,7 +1385,7 @@ test_that("computeCovDiag returns a diagonal condition covariance", {
     expect_equal(unname(diag(cv)), unname(apply(m$Y, 2, var)))
 })
 
-test_that("buildMrmashPriorMatrices builds an expanded S0 list and a prior grid", {
+test_that("buildMrmashPriorMatrices builds an expanded S0 and a prior grid", {
     skip_if_not_installed("mr.mashr")
     set.seed(9)
     res <- buildMrmashPriorMatrices(
@@ -1283,7 +1402,7 @@ test_that("buildMrmashPriorMatrices builds an expanded S0 list and a prior grid"
     )))
 })
 
-test_that("buildMrmashPriorMatrices errors without canonical or data-driven priors", {
+test_that("buildMrmashPriorMatrices needs a canonical or data-driven prior", {
     skip_if_not_installed("mr.mashr")
     expect_error(
         buildMrmashPriorMatrices(
@@ -1339,12 +1458,12 @@ test_that("MCMC / optimiser control arguments are guarded", {
         "thin.*Must be >= 1"
     )
     expect_error(
-        bayesBWeights(NULL, NULL, probIn = 2),
-        "probIn.*is not <= 1"
+        bayesBWeights(NULL, NULL, pi = 2),
+        "pi.*is not <= 1"
     )
     expect_error(
-        bLassoWeights(NULL, NULL, burnIn = -1),
-        "burnIn.*Must be >= 0"
+        bayesLWeights(NULL, NULL, nBurnin = -1),
+        "nBurnin.*Must be >= 0"
     )
     expect_error(
         dprGibbsWeights(NULL, NULL, sStep = 0),
@@ -1443,6 +1562,43 @@ test_that("MrmashOptions takes mr.mash's own argument names", {
     expect_equal(ma$max_iter, 10)
     # The renamed pecotmr spellings are gone; mr.mash's names are the contract.
     expect_error(MrmashOptions(maxIter = 10), "unknown argument")
+})
+
+test_that("MrmashOptions and MrmashRssOptions refuse nthreads", {
+    skip_if_not_installed("mr.mashr")
+    expect_error(MrmashOptions(nthreads = 2L), "`nthreads` cannot be set")
+    expect_error(MrmashRssOptions(nthreads = 2L), "`nthreads` cannot be set")
+})
+
+test_that("mr.mash and mr.mash.rss fit on one thread", {
+    # mr.mash names its thread count only when it runs more than one, so its
+    # verbose header pins single-threading on both paths. The header prints
+    # only with verbose = TRUE, so it also shows that mrmashWeights() hands
+    # mr.mash's own options on to the engine (it once spliced them into
+    # mrmashWrapper's arguments, which have none of those names).
+    skip_if_not_installed("mr.mashr")
+    skip_if_not_installed("glmnet")
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    individual <- capture.output(suppressWarnings(suppressMessages(
+        mrmashWeights(
+            X = m$X,
+            Y = m$Y,
+            methodArgs = MrmashOptions(
+                canonicalPriorMatrices = TRUE,
+                verbose = TRUE,
+                max_iter = 2
+            )
+        )
+    )))
+    rss <- capture.output(suppressWarnings(mrmashRssWeights(
+        m$stat,
+        m$ldReference,
+        methodArgs = MrmashRssOptions(verbose = TRUE, max_iter = 2)
+    )))
+    for (out in list(individual, rss)) {
+        expect_match(out, "Fitting the optimization algorithm", all = FALSE)
+        expect_no_match(out, "RcppParallel threads")
+    }
 })
 
 test_that("mrmashWrapper refuses to let methodArgs override derived values", {

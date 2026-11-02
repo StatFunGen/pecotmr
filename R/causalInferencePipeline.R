@@ -67,7 +67,11 @@ NULL
 #' @param fineMappingResult Optional \code{\link{QtlFineMappingResult}}. When
 #'   supplied, drives the MR computation and (when \code{twasWeights = NULL})
 #'   the TWAS-Z weights via the SuSiE-style coefficients on each entry's
-#'   \code{topLoci}.
+#'   \code{topLoci}. MR reads the fine-mapping row of the same
+#'   \code{(study, context, trait, method)} as the TWAS row, so it runs only
+#'   for TWAS methods that are also fine-mapping methods (such as
+#'   \code{susie}); the MR columns of every other method's rows are
+#'   \code{NA}.
 #' @param weightSelectionParam How one TWAS method's weights are picked per
 #'   \code{(study, context, trait, gwasStudy)} tuple, built with
 #'   \code{\link{WeightSelectionParam}}: \code{cutoff} (minimum
@@ -636,11 +640,13 @@ causalInferencePipeline <- function(
 # (so MR has something to attach).
 .cipBuildQtlWorkList <- function(twasWeights, fineMappingResult) {
     if (!is.null(twasWeights)) {
+        # One tuple per entry: a TwasWeights row holds a gene's methods.
+        cells <- .twasCells(twasWeights)
         df <- tibble(
-            qtlStudy = as.character(twasWeights$study),
-            context = as.character(twasWeights$context),
-            trait = as.character(twasWeights$trait),
-            method = as.character(twasWeights$method)
+            qtlStudy = cells$study,
+            context = cells$context,
+            trait = cells$trait,
+            method = cells$method
         )
     } else {
         df <- tibble(
@@ -860,6 +866,17 @@ causalInferencePipeline <- function(
         return(NULL)
     }
     wr <- resolveWeights(ent)
+    single <- .singleWeightColumn(wr$weights)
+    if (is.null(single)) {
+        warn(glue(
+            "causalInferencePipeline: the weights of (study={studyName}, ",
+            "context={context}, trait={trait}, method={method}) are a matrix ",
+            "with {ncol(wr$weights)} columns, and a tuple is scored with one ",
+            "weight vector; skipping."
+        ))
+        return(NULL)
+    }
+    wr$weights <- single
     if (length(wr$variantIds) == 0L) {
         warn(glue(
             "causalInferencePipeline: no weights resolved for ",
@@ -881,13 +898,9 @@ causalInferencePipeline <- function(
     trait,
     method
 ) {
-    tuple <- list(
-        study = studyName,
-        context = context,
-        trait = trait,
-        method = method
-    )
-    if (length(.matchTupleRows(twasWeights, tuple)) == 0L) {
+    cells <- .twasCells(twasWeights)
+    hit <- .twasCellIndex(cells, studyName, context, trait, method)
+    if (length(hit) == 0L) {
         return(NULL)
     }
     twasWeights(
@@ -968,8 +981,9 @@ causalInferencePipeline <- function(
 }
 
 # twasZ() of weights `w` against GWAS z-scores `z` over the GWAS variants
-# `gwasIds`, needing w'Rw only: a genotype reference gives its LD factor, so
-# the p x p LD is never formed; an LdMatrix gives the matrix.
+# `gwasIds` (`w` and `z` in their order), needing w'Rw only: a genotype
+# reference gives its LD factor and an LdMatrix its packed triangle, so the
+# p x p LD is never formed.
 # @noRd
 .cipTwasZ <- function(w, z, gwasLd, gwasIds) {
     label <- "causalInferencePipeline"
@@ -980,7 +994,13 @@ causalInferencePipeline <- function(
             X = .ldFactorFromRef(gwasLd, gwasIds, label)
         ))
     }
-    twasZ(weights = w, z = z, R = .ldFromRef(gwasLd, gwasIds, label))
+    weights <- .twasZPrepWeights(unname(w), z)
+    ld <- .ldPackedFromRef(gwasLd, gwasIds, label)
+    .twasZStatistics(
+        weights,
+        z,
+        crossprod(weights, .ldSourceTimes(ld, weights))
+    )
 }
 
 # Report how many QTL weight variants failed to match the GWAS sumstats.
@@ -1720,6 +1740,13 @@ twasZ <- function(
         D = D,
         nSketch = nSketch
     )$covY
+    .twasZStatistics(weights, z, covY, combineMethods)
+}
+
+# twasZ()'s statistics from the weights' covariance under the LD,
+# covY = W' R W, however that was computed.
+# @noRd
+.twasZStatistics <- function(weights, z, covY, combineMethods = NULL) {
     ySd <- sqrt(diag(covY))
     stats <- as.numeric(crossprod(weights, as.numeric(z)))
     zVec <- stats / ySd

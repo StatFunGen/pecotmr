@@ -21,11 +21,15 @@ handle on demand, so an assay can describe a panel far larger than memory.
 \section{Slots}{
 
 \describe{
-\item{\code{handle}}{The \code{\link{GenotypeHandle}} to read through.}
+\item{\code{handle}}{The \code{\link{GenotypeHandle}} to read through. Its
+variant table keeps only the columns reading needs, since a panel's
+rowRanges describe its variants.}
 
 \item{\code{dm}}{Integer length-2 dimensions (variants, samples).}
 
-\item{\code{dn}}{List of dimnames (variant ids, sample ids).}
+\item{\code{dn}}{Dimnames, empty: a panel's rowRanges name the variants (a seed
+saved earlier may still hold them), and the samples come from the
+handle.}
 }}
 
 \keyword{internal}

@@ -632,6 +632,40 @@ test_that("Merge operation is correct for mergeRaissDf", {
     expect_true(all(c("chr21", "chr22") %in% merged_df$chrom))
 })
 
+test_that("mergeRaissDf keeps observed beta / se and blanks the imputed", {
+    # Only z is imputed, so an imputed variant has no beta or se of its own.
+    # The mask was inverted: the observed variants (Var == -1) lost theirs.
+    imputed <- data.frame(
+        chrom = "chr22",
+        pos = 200,
+        variant_id = "chr22:200:A:T",
+        A1 = "A",
+        A2 = "T",
+        z = 1.1,
+        Var = 0.3,
+        raissLdScore = 12,
+        raissR2 = 0.7
+    )
+    known <- data.frame(
+        chrom = "chr22",
+        pos = c(100, 300),
+        variant_id = c("chr22:100:A:T", "chr22:300:A:T"),
+        A1 = "A",
+        A2 = "T",
+        z = c(2, -3),
+        beta = c(0.2, -0.3),
+        se = c(0.1, 0.1)
+    )
+    merged <- mergeRaissDf(imputed, known)
+    expect_equal(
+        merged$variant_id,
+        c(known$variant_id[1], imputed$variant_id, known$variant_id[2])
+    )
+    expect_equal(merged$beta, c(0.2, NA, -0.3))
+    expect_equal(merged$se, c(0.1, NA, 0.1))
+    expect_equal(merged$Var, c(-1, 0.3, -1))
+})
+
 generateFroTestData <- function(seed = 1) {
     set.seed(seed)
     return(data.frame(
@@ -1791,7 +1825,8 @@ test_that("CS with diffuse signal contains many variants", {
 
     result <- slalom(zScore = z, R = R)
 
-    # Uniform PIPs => need at least ceiling(0.95 * n) = 10 variants for 95% coverage
+    # Uniform PIPs => need at least ceiling(0.95 * n) = 10 variants for 95%
+    # coverage
     expect_equal(length(result$summary$cs95), n)
 })
 
@@ -2290,39 +2325,14 @@ context("summaryStatsQc")
 }
 
 .ssQ_mockExtractor <- function(seed = 13, n_samples = 60L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle))
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -2345,7 +2355,7 @@ test_that("mafCutoff > 0 with no frequency skips the filter, not the run", {
     # mocked variant sits near MAF 0.3, so nothing is dropped there.
     ss <- .ssQ_makeGwasSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     expect_warning(
@@ -2375,7 +2385,8 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
     # harmonization drops it. With the screen running *after* harmonization it
     # never sees the strong off-panel signal, so the remaining weak variants
     # fail the PIP screen and the region is skipped (empty). (Pre-harmonization
-    # screening would have kept the region on the strength of the off-panel hit.)
+    # screening would have kept the region on the strength of the off-panel
+    # hit.)
     gr <- .ssQ_makeEntryGr(
         c("rs1", "rs2", "rs3", "rsX"),
         positions = c(100L, 200L, 300L, 9999L)
@@ -2402,7 +2413,8 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
 
 test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
     # Same harmonized variants, screen disabled (no metric set): the three
-    # panel-matched variants survive (behavior-invariance for the screen-off path).
+    # panel-matched variants survive (behavior-invariance for the screen-off
+    # path).
     gr <- .ssQ_makeEntryGr(
         c("rs1", "rs2", "rs3", "rsX"),
         positions = c(100L, 200L, 300L, 9999L)
@@ -2436,7 +2448,8 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
         ranges = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = c("chr1:100:G:A", "chr1:200:A:G", "chr1:300:G:A"), # pos200 input-orientation
+        # pos200 input-orientation
+        SNP = c("chr1:100:G:A", "chr1:200:A:G", "chr1:300:G:A"),
         A1 = c("A", "G", "A"), # pos200 swapped relative to panel (A1=A)
         A2 = c("G", "A", "G"),
         Z = c(1.0, 2.0, 1.5),
@@ -2446,9 +2459,10 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
 }
 
 test_that("summaryStatsQc: harmonization re-keys SNP and sign-flips Z", {
-    # pos200 is allele-swapped vs the panel, so harmonization sign-flips its Z and
-    # the SNP must be re-keyed to the panel-orientation id (chr1:200:G:A), not
-    # left at the input-orientation chr1:200:A:G. Exact matches are unchanged.
+    # pos200 is allele-swapped vs the panel, so harmonization sign-flips its Z
+    # and the SNP must be re-keyed to the panel-orientation id (chr1:200:G:A),
+    # not left at the input-orientation chr1:200:A:G. Exact matches are
+    # unchanged.
     ss <- GwasSumStats(
         studyName = "g1",
         entry = list(.ssQ_makeFlipEntryGr()),
@@ -2579,16 +2593,8 @@ test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants", {
         ldReference = .ssQ_makeHandleVid()
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
-        ldMismatchQc = function(
-            zScore,
-            R = NULL,
-            X = NULL,
-            nSample = NULL,
-            method = c("slalom", "dentist"),
-            ldMethod = "sample",
-            ...
-        ) {
+        .handleDosage = .ssQ_mockExtractor(),
+        .ldMismatchQcOn = function(zScore, ld, nSample, method) {
             data.frame(
                 original_z = zScore,
                 outlier = rep(FALSE, length(zScore)),
@@ -2624,16 +2630,8 @@ test_that("summaryStatsQc: ldMismatchQc reconciles a chr-prefix difference", {
         ldReference = h
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
-        ldMismatchQc = function(
-            zScore,
-            R = NULL,
-            X = NULL,
-            nSample = NULL,
-            method = c("slalom", "dentist"),
-            ldMethod = "sample",
-            ...
-        ) {
+        .handleDosage = .ssQ_mockExtractor(),
+        .ldMismatchQcOn = function(zScore, ld, nSample, method) {
             data.frame(
                 original_z = zScore,
                 outlier = rep(FALSE, length(zScore)),
@@ -2924,7 +2922,8 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts -> raw total", {
 })
 
 test_that("summaryStatsQc(effectiveN=TRUE): study scalars fill all variants", {
-    # Entry has an N column but NO per-variant N_CASE/N_CONTROL; the scalars win.
+    # Entry has an N column but NO per-variant N_CASE/N_CONTROL; the scalars
+    # win.
     gr <- .ssQ_makeEntryGr()
     ss <- GwasSumStats(
         studyName = "g1",
@@ -2941,7 +2940,8 @@ test_that("summaryStatsQc(effectiveN=TRUE): study scalars fill all variants", {
 })
 
 test_that("summaryStatsQc: study nSample is the level-4 fallback", {
-    # Entry with NO per-variant N and NO case/control; only a study nSample scalar.
+    # Entry with NO per-variant N and NO case/control; only a study nSample
+    # scalar.
     gr <- .ssQ_makeEntryGr()
     mc <- S4Vectors::mcols(gr)
     mc$N <- NULL # remove per-variant N
@@ -2998,7 +2998,8 @@ test_that("summaryStatsQc: counts beat nSample, and an N column beats it", {
     res1 <- summaryStatsQc(ss1)
     expect_equal(.ssQ_entryNByPos(res1[[1L]]), c(360, 640, 510, 750))
     expect_identical(res1$qcAudit[[1L]]$nSource, "effective")
-    # per-variant N column present alongside nSample (no counts) -> N wins (column).
+    # per-variant N column present alongside nSample (no counts) -> N wins
+    # (column).
     ss2 <- GwasSumStats(
         studyName = "g1",
         entry = list(.ssQ_makeEntryGr()),
@@ -3041,8 +3042,9 @@ test_that("summaryStatsQc: quantitative QtlSumStats: no effective N", {
 # ===========================================================================
 
 test_that("summaryStatsQc: ldMismatchQcMethod 'dentist' walks the LD branch", {
-    # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so the
-    # post-harmonization re-keyed SNP resolves against the panel for z-mismatch QC.
+    # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so
+    # the post-harmonization re-keyed SNP resolves against the panel for
+    # z-mismatch QC.
     ss <- GwasSumStats(
         studyName = "g1",
         entry = list(.ssQ_makeEntryGr(
@@ -3053,7 +3055,7 @@ test_that("summaryStatsQc: ldMismatchQcMethod 'dentist' walks the LD branch", {
         ldReference = .ssQ_makeHandleVid(snp_n = 8L)
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     res <- suppressWarnings(summaryStatsQc(ss, ldMismatchQcMethod = "dentist"))
@@ -3082,17 +3084,17 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS, records counts", {
     )
 
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .raissGenotypePath = function(
             refPanel,
             knownZscores,
             genotypeMatrix,
             p
         ) {
-            # Pretend RAISS imputed two of the missing panel variants (rs5, rs6)
-            # with synthetic z-scores.
+            # Pretend RAISS imputed two of the missing panel variants (pos 500,
+            # 600: rs5, rs6) with synthetic z-scores.
             added <- refPanel[
-                refPanel$variant_id %in% c("rs5", "rs6"),
+                refPanel$pos %in% c(500L, 600L),
                 ,
                 drop = FALSE
             ]
@@ -3117,9 +3119,9 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS, records counts", {
 test_that("summaryStatsQc: impute scopes panel/dosage to the region", {
     # Sketch spans rs1..rs8 (pos 100..800); the entry observes only rs1..rs4
     # (100..400). With the default flank the impute window is [100, 400], so the
-    # dosage must be materialized for just those 4 panel variants -- NOT the whole
-    # 8-variant sketch (the bug that makes --impute unusable on a per-chromosome
-    # sketch: it built dosage for seq_len(nrow(sketchSnpInfo))).
+    # dosage must be materialized for just those 4 panel variants -- NOT the
+    # whole 8-variant sketch (the bug that makes --impute unusable on a
+    # per-chromosome sketch: it built dosage for seq_len(nrow(sketchSnpInfo))).
     #
     # Observed at extractBlockGenotypes: the single reader every dosage path
     # funnels through, including the DelayedArray seed behind assay(). The
@@ -3138,9 +3140,9 @@ test_that("summaryStatsQc: impute scopes panel/dosage to the region", {
     )
     inner <- .ssQ_mockExtractor(n_samples = 60L)
     local_mocked_bindings(
-        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+        .handleDosage = function(handle, snpIdx) {
             cap$idx <- c(cap$idx, list(snpIdx))
-            inner(handle, snpIdx, meanImpute)
+            inner(handle, snpIdx)
         },
         raiss = function(...) NULL,
         .package = "pecotmr"
@@ -3170,7 +3172,7 @@ test_that("summaryStatsQc: impute with a NULL raiss records 0 imputed", {
     )
 
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         raiss = function(...) NULL,
         .package = "pecotmr"
     )
@@ -3186,7 +3188,7 @@ test_that("summaryStatsQc: impute with a NULL raiss records 0 imputed", {
 test_that("summaryStatsQc: QC track emits per-step messages and a rollup", {
     ss <- .ssQ_makeGwasSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     msgs <- capture_messages(summaryStatsQc(ss))
@@ -3205,7 +3207,7 @@ test_that("summaryStatsQc: QC track emits per-step messages and a rollup", {
 test_that("summaryStatsQc: skipped steps are omitted from the rollup", {
     ss <- .ssQ_makeGwasSumStats()
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     msgs <- capture_messages(
@@ -3236,7 +3238,7 @@ test_that("summaryStatsQc: QtlSumStats log lines carry the tuple label", {
         ldReference = .ssQ_makeHandle()
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     msgs <- capture_messages(summaryStatsQc(qss))
@@ -3297,39 +3299,14 @@ context("sumstatsQc internal helpers")
 }
 
 .ssh_mockExtractor <- function(seed = 42, n_samples = 30L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(snpInfo(handle)),
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nrow(snpInfo(handle))
         )
-        sub <- panel[, snpIdx, drop = FALSE]
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        cd <- S4Vectors::DataFrame(
-            sampleId = sampleIds(handle),
-            row.names = sampleIds(handle)
-        )
-        dosage <- t(sub)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = cd
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
@@ -3371,6 +3348,12 @@ test_that(".dfToEntryGranges: rebuilds the GRanges with canonical mcols", {
         colnames(S4Vectors::mcols(gr)),
         c("SNP", "A1", "A2", "Z", "N")
     )
+    # Alleles enter in upper case, as the chromosomes enter in UCSC style.
+    lower <- pecotmr:::.dfToEntryGranges(
+        mutate(df, A1 = c("a", "t"), A2 = c("g", "c"))
+    )
+    expect_identical(lower$A1, c("A", "T"))
+    expect_identical(lower$A2, c("G", "C"))
 })
 
 test_that(".dfToEntryGranges: derives SNP from variant_id when SNP is absent", {
@@ -3407,7 +3390,9 @@ test_that(".refVariantsFromLdRef: extracts chr/pos/alleles from snpInfo", {
     rv <- pecotmr:::.refVariantsFromLdRef(h)
     expect_equal(rv$chrom, rep("chr1", 6))
     expect_equal(rv$pos, c(100L, 200L, 300L, 400L, 500L, 600L))
-    expect_equal(rv$variant_id, paste0("rs", 1:6))
+    # Rendered from the panel's position and alleles (A2 the reference), not
+    # its rsID labels, which name no position a harmonized id could meet.
+    expect_equal(rv$variant_id, sprintf("chr1:%d:G:A", rv$pos))
     expect_equal(rv$A1, rep("A", 6))
     expect_equal(rv$A2, rep("G", 6))
 })
@@ -3707,7 +3692,7 @@ test_that(".applyLdMismatchQcToEntry: drops variants absent from the sketch", {
     # leaves the drop to .ldFromRef's onMissing, so the z-mismatch lookup
     # drops it (recording the count) instead of aborting the run.
     local_mocked_bindings(
-        extractBlockGenotypes = .ssh_mockExtractor(),
+        .handleDosage = .ssh_mockExtractor(),
         .package = "pecotmr"
     )
     df <- data.frame(
@@ -3730,7 +3715,7 @@ test_that(".qcKrigingFlip: drops a panel-unsupported variant, no abort", {
     # Same contract at the kriging prefilter: the orphan (no sketch entry) is
     # dropped and counted, and the run continues on the panel-supported subset.
     local_mocked_bindings(
-        extractBlockGenotypes = .ssh_mockExtractor(),
+        .handleDosage = .ssh_mockExtractor(),
         .package = "pecotmr"
     )
     df <- data.frame(
@@ -3754,7 +3739,7 @@ test_that(".qcKrigingFlip: no-orphan entry is unchanged (drop is a no-op)", {
     # When every variant has a sketch entry, nothing is dropped and the result
     # matches the pre-change behaviour (panelUnsupportedDropped == 0).
     local_mocked_bindings(
-        extractBlockGenotypes = .ssh_mockExtractor(),
+        .handleDosage = .ssh_mockExtractor(),
         .package = "pecotmr"
     )
     df <- data.frame(
@@ -3778,7 +3763,7 @@ test_that("the kriging and mismatch checks read an entry's panel once", {
     # Both run on the same panel-supported variants, so the reference is read
     # once for the two, and the panel's drop is recorded once.
     local_mocked_bindings(
-        extractBlockGenotypes = .ssh_mockExtractor(),
+        .handleDosage = .ssh_mockExtractor(),
         .package = "pecotmr"
     )
     reads <- 0L
@@ -3910,7 +3895,7 @@ test_that("kriging and LD-mismatch QC accept every harmonized variant", {
     handle <- .ssTwin_makeHandle()
     opts <- .ssTwin_opts()
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(n_samples = 60L),
+        .handleDosage = .ssQ_mockExtractor(n_samples = 60L),
         .package = "pecotmr"
     )
     harm <- suppressMessages(
@@ -3927,7 +3912,7 @@ test_that("kriging and LD-mismatch QC accept every harmonized variant", {
 test_that("the fine-mapping LD build accepts every harmonized variant", {
     handle <- .ssTwin_makeHandle()
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(n_samples = 60L),
+        .handleDosage = .ssQ_mockExtractor(n_samples = 60L),
         .package = "pecotmr"
     )
     harm <- suppressMessages(pecotmr:::.qcHarmonizeEntry(
@@ -3959,21 +3944,13 @@ test_that(".applyLdMismatchQcToEntry: NA slalom outlier flags are kept", {
         N = rep(1000L, length(vids)),
         stringsAsFactors = FALSE
     )
-    # Also mock extractBlockGenotypes: the entry-side helper extracts
-    # dosages from the LD sketch before delegating to ldMismatchQc, and the
-    # fixture handle points at a fake /tmp/sketch.gds path with no real
-    # GDS file behind it.
+    # Also mock the dosage reader: the entry-side helper reads dosages from
+    # the LD sketch before delegating to .ldMismatchQcOn, and the fixture
+    # handle points at a fake /tmp/sketch.gds path with no real GDS file
+    # behind it.
     local_mocked_bindings(
-        extractBlockGenotypes = .ssh_mockExtractor(),
-        ldMismatchQc = function(
-            zScore,
-            R = NULL,
-            X = NULL,
-            nSample = NULL,
-            method = c("slalom", "dentist"),
-            ldMethod = "sample",
-            ...
-        ) {
+        .handleDosage = .ssh_mockExtractor(),
+        .ldMismatchQcOn = function(zScore, ld, nSample, method) {
             data.frame(
                 original_z = zScore,
                 outlier = c(FALSE, TRUE, NA, NA),
@@ -4004,7 +3981,8 @@ test_that(".asScreen canonicalizes screen specs", {
     expect_equal(pecotmr:::.asScreen(0.9), list(metric = "pip", cutoff = 0.9))
     sc <- list(metric = "logBf", cutoff = 3)
     expect_identical(pecotmr:::.asScreen(sc), sc)
-    expect_null(pecotmr:::.asScreen(list(metric = "bf", cutoff = 0))) # explicit off
+    # explicit off
+    expect_null(pecotmr:::.asScreen(list(metric = "bf", cutoff = 0)))
 })
 
 test_that(".applyEntryScreen: absZ skips / retains on max|Z|, no fit", {
@@ -4299,20 +4277,25 @@ test_that("dentist from genotypes matches DENTIST on their LD per window", {
     expect_equal(viaX, viaR, tolerance = 1e-8)
 })
 
-test_that("the duplicate scan reads a factor as it reads the LD", {
+test_that("the duplicate scan reads a factor and a packed LD as the LD", {
     d <- .dentistFactorData()
     f <- pecotmr:::.ldFactorFromDosage(d$X)
-    viaR <- pecotmr:::.findDuplicateVariants(d$z, d$R, 0.995)
-    viaF <- pecotmr:::.findDuplicateVariantsFactor(d$z, f, 0.995)
+    viaR <- pecotmr:::.findDuplicateVariants(d$z, list(R = d$R), 0.995)
     expect_gt(sum(viaR$dupBearer != -1), 0L)
-    for (k in c("filteredZ", "dupBearer", "corABS", "sign", "minValue")) {
-        expect_equal(viaF[[k]], viaR[[k]], tolerance = 1e-10)
-    }
-    kept <- viaF$filteredFactor
-    expect_equal(
-        unname(crossprod(kept) / (nrow(kept) - 1)),
-        unname(viaR$filteredLD)
+    packed <- list(
+        P = Matrix::pack(Matrix::forceSymmetric(d$R, uplo = "U")),
+        sign = rep(1, nrow(d$R))
     )
+    for (ld in list(list(ldFactor = f), packed)) {
+        other <- pecotmr:::.findDuplicateVariants(d$z, ld, 0.995)
+        for (k in c("filteredZ", "dupBearer", "corABS", "sign", "minValue")) {
+            expect_equal(other[[k]], viaR[[k]], tolerance = 1e-10)
+        }
+        expect_equal(
+            unname(pecotmr:::.ldSourceMatrix(other$filteredLd)),
+            unname(viaR$filteredLd$R)
+        )
+    }
 })
 
 # ===========================================================================
@@ -4339,13 +4322,14 @@ test_that("dentistSingleWindow returns one row per z-score under each option", {
         "outlier"
     )
     for (nm in names(options)) {
+        windowOptions <- options[[nm]]
         expect_warning(
             res <- exec(
                 dentistSingleWindow,
                 data$z_scores,
                 R = data$ldMat,
                 nSample = data$nSample,
-                !!!options[[nm]]
+                !!!windowOptions
             ),
             "below 2000",
             info = nm
@@ -4916,8 +4900,8 @@ test_that("mergeVariantInfo (data.frame): all = TRUE returns the union", {
     out <- mergeVariantInfo(v1, v2, all = TRUE)
     expect_s3_class(out, "data.frame")
     expect_setequal(colnames(out), c("chrom", "pos", "alt", "ref"))
-    # The flipped row2 collapses onto v1's orientation, so only the genuinely new
-    # variant (chrom 3) is added to the 3 from v1.
+    # The flipped row2 collapses onto v1's orientation, so only the genuinely
+    # new variant (chrom 3) is added to the 3 from v1.
     expect_equal(nrow(out), 4L)
     flipped <- out[out$chrom == "1" & out$pos == 200, ]
     expect_equal(flipped$alt, "C")
@@ -5306,7 +5290,8 @@ test_that("raissSingleMatrixFromX emits no-known / no-unknown messages", {
         N = c(1000L, 1000L, 1000L)
     )
     if (withAf) {
-        # A post-harmonization (directional) AF -- what the merge must re-attach.
+        # A post-harmonization (directional) AF -- what the merge must
+        # re-attach.
         df$AF <- c(0.10, 0.25, 0.40)
     }
     impDf <- data.frame(
@@ -5384,7 +5369,8 @@ test_that("raissModel flags an inversion the rcond cutoff truncated", {
 test_that(".safeSvd stops when all singular values fall below tolerance", {
     set.seed(1)
     mat <- matrix(rnorm(20), nrow = 5, ncol = 4)
-    # tol >= 1 forces even the largest (ratio == 1) singular value below threshold.
+    # tol >= 1 forces even the largest (ratio == 1) singular value below
+    # threshold.
     expect_error(
         pecotmr:::.safeSvd(mat, tol = 2),
         "below the tolerance threshold"
@@ -5493,7 +5479,8 @@ test_that("summaryStatsQc: emit() drops the label for an empty study id", {
 
 test_that("summaryStatsQc: the N filter emits its message and rollup", {
     gr <- .ssQ_makeEntryGr()
-    S4Vectors::mcols(gr)$N <- c(1000L, 1010L, 1005L, 100000L) # last is an N outlier
+    # last is an N outlier
+    S4Vectors::mcols(gr)$N <- c(1000L, 1010L, 1005L, 100000L)
     ss <- GwasSumStats(
         studyName = "g1",
         entry = list(gr),
@@ -5590,7 +5577,7 @@ test_that("summaryStatsQc: kriging QC records its audit and rollup", {
         ldReference = .ssQ_makeHandleVid(snp_n = 8L)
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     msgs <- capture_messages(
@@ -5637,7 +5624,7 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
         ldReference = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L)
     )
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .raissGenotypePath = function(
             refPanel,
             knownZscores,
@@ -5645,7 +5632,7 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
             p
         ) {
             added <- refPanel[
-                refPanel$variant_id %in% c("rs5", "rs6"),
+                refPanel$pos %in% c(500L, 600L),
                 ,
                 drop = FALSE
             ]
@@ -5657,7 +5644,8 @@ test_that("summaryStatsQc: impute assembles BETA/SE/N, median-fills N", {
         },
         .package = "pecotmr"
     )
-    # rs5/rs6 (pos 500/600) are beyond the observed range; widen the impute window.
+    # rs5/rs6 (pos 500/600) are beyond the observed range; widen the impute
+    # window.
     res <- summaryStatsQc(
         ss,
         impute = TRUE,
@@ -5793,7 +5781,7 @@ test_that("summaryStatsQc: the rollup enumerates every removed step", {
     # needs a dosage source; the mock puts every variant near MAF 0.3, well
     # clear of the 0.01 cutoff, leaving the audited drop counts study-side.
     local_mocked_bindings(
-        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .handleDosage = .ssQ_mockExtractor(),
         .package = "pecotmr"
     )
     msgs <- capture_messages(
@@ -5877,9 +5865,11 @@ test_that("dentistSingleWindow summarizes the cpp11 rsqExceed field", {
             duprThreshold = 1.0
         )
     )
-    expect_true(any(grepl("rsq values exceeded 1", seen))) # summary from the data
+    # summary from the data
+    expect_true(any(grepl("rsq values exceeded 1", seen)))
     expect_true(any(grepl("Max reported: 1.1", seen))) # max(rsqExceed)
-    # The post-warning code (renames, outlier stat, z_diff drop) ran successfully.
+    # The post-warning code (renames, outlier stat, z_diff drop) ran
+    # successfully.
     expect_equal(nrow(res), m)
     expect_equal(res$original_z, z)
     expect_true(all(
@@ -5917,44 +5907,19 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
         "installed susieR has no kriging_rss"
     )
     # All eight genotype columns load on one common factor (pairwise rho ~0.7),
-    # so LD predicts a shared sign. rs4's z has the opposite sign to its strongly
-    # correlated neighbours -- a genuine allele switch. krigingOutlierQc flags it,
-    # so the QC step sign-flips its Z in place (the nKr > 0 branch) and RETAINS
-    # the row.
-    corrExtractor <- function(handle, snpIdx, meanImpute = TRUE) {
+    # so LD predicts a shared sign. rs4's z has the opposite sign to its
+    # strongly correlated neighbours -- a genuine allele switch.
+    # krigingOutlierQc flags it, so the QC step sign-flips its Z in place (the
+    # nKr > 0 branch) and RETAINS the row.
+    corrExtractor <- function(handle, snpIdx) {
         set.seed(42)
         n <- length(sampleIds(handle))
         k <- length(snpIdx)
         f <- rnorm(n) # shared latent factor
-        M <- exec(
-            cbind,
-            !!!map(seq_len(k), function(j) {
-                sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
-            })
-        )
-        rr <- GenomicRanges::GRanges(
-            seqnames = paste0("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        dosage <- t(M)
-        rownames(dosage) <- snpInfo(handle)$SNP[snpIdx]
-        colnames(dosage) <- sampleIds(handle)
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = S4Vectors::DataFrame(
-                sampleId = sampleIds(handle),
-                row.names = sampleIds(handle)
-            )
-        )
+        factorCols <- map(seq_len(k), function(j) {
+            sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
+        })
+        exec(cbind, !!!factorCols)
     }
     gr <- .ssQ_makeEntryGr(
         snp_ids = paste0("rs", 1:8),
@@ -5973,7 +5938,7 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
         ldReference = .ssQ_makeHandleVid(snp_n = 8L, n_samples = 300L)
     )
     local_mocked_bindings(
-        extractBlockGenotypes = corrExtractor,
+        .handleDosage = corrExtractor,
         .package = "pecotmr"
     )
     res <- suppressWarnings(
@@ -6040,6 +6005,37 @@ test_that(".subsetLdRefToIds keeps exactly the entries' variants", {
         normalizeVariantId(sub$SNP),
         normalizeVariantId(si$SNP[sel])
     )
+})
+
+test_that("QC keeps the variants of an rsID-labelled panel it matched", {
+    # The panel was keyed by its labels, which a harmonized id never equals,
+    # so QC kept every variant and emptied the panel.
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )[1:50, ]
+    rr <- SummarizedExperiment::rowRanges(panel)
+    set.seed(1)
+    gr <- GenomicRanges::GRanges(
+        GenomicRanges::seqnames(rr),
+        IRanges::IRanges(GenomicRanges::start(rr), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = pecotmr:::.grVariantIds(rr),
+        A1 = rr$A1,
+        A2 = rr$A2,
+        Z = rnorm(50L),
+        N = 5000L,
+        MAF = runif(50L, 0.05, 0.5)
+    )
+    gs <- GwasSumStats(
+        studyName = "G",
+        entry = list(gr),
+        ldReference = panel,
+        genome = "hg19"
+    )
+    qc <- suppressMessages(summaryStatsQc(gs))
+    expect_gt(length(unlist(qc)), 0L)
+    expect_equal(nrow(ldReference(qc)[[1L]]), length(unlist(qc)))
 })
 
 test_that(".subsetLdRefToRange / .subsetLdRefToIds are NULL-safe", {
@@ -6131,7 +6127,6 @@ test_that(".ssqcPrunePanel prunes the RSE sketch's seed handle, not the view", {
     # the seed -- the real-flow shape the bare-handle tests do not exercise.
     h <- .ssqcPanelHandle()
     maf <- .ssqcPanelMaf(h)
-    ids <- as.character(snpInfo(h)$SNP)
     cutoff <- stats::median(maf, na.rm = TRUE)
     rse <- pecotmr:::.genotypeExperiment(h)
     expect_s4_class(rse, "RangedSummarizedExperiment")
@@ -6140,10 +6135,12 @@ test_that(".ssqcPrunePanel prunes the RSE sketch's seed handle, not the view", {
         list(mafCutoff = cutoff, macCutoff = 0, imissCutoff = 1),
         "test"
     ))
+    # The seed's handle keeps each variant's file position, which is its row
+    # in the whole file's handle.
     seed <- pecotmr:::.ldRefHandle(pruned)
     expect_setequal(
-        as.character(snpInfo(seed)$SNP),
-        ids[!is.na(maf) & maf >= cutoff]
+        snpInfo(seed)$fileIdx,
+        which(!is.na(maf) & maf >= cutoff)
     )
 })
 
@@ -6166,10 +6163,7 @@ test_that("summaryStatsQc: mafCutoff drops panel-rare observed variants", {
     # ... and the panel carried on the result -- the seed handle every LD
     # read keys off, not just the row view -- holds no sub-cutoff variant.
     seed <- pecotmr:::.ldRefHandle(ldReference(out)[[1L]])
-    keptMaf <- maf[match(
-        as.character(snpInfo(seed)$SNP),
-        as.character(snpInfo(h)$SNP)
-    )]
+    keptMaf <- maf[snpInfo(seed)$fileIdx]
     expect_true(all(keptMaf >= cutoff))
 })
 
@@ -6255,7 +6249,8 @@ test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
     set.seed(1)
     nS <- 100L
     af <- c(runif(20L, 0.2, 0.4), runif(20L, 0.002, 0.01))
-    dosage <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
+    dosageCols <- map(af, function(f) rbinom(nS, 2L, f))
+    dosage <- exec(cbind, !!!dosageCols)
     ids <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     colnames(dosage) <- ids
     dosage[1:60, 3] <- NA
@@ -7326,5 +7321,65 @@ test_that(".entryToSumstatDf: require = c('Z', 'N') errors when missing", {
     expect_error(
         pecotmr:::.entryToSumstatDf(sumStats(ss), require = c("Z", "N")),
         "no N mcol"
+    )
+})
+
+test_that("mismatch QC reads a packed LD as it reads the matrix", {
+    d <- .dentistFactorData()
+    packed <- list(
+        P = Matrix::pack(Matrix::forceSymmetric(d$R, uplo = "U")),
+        sign = rep(1, nrow(d$R))
+    )
+    lead <- 3L
+    expect_identical(
+        pecotmr:::.slalomLeadColumn(list(R = d$R), lead),
+        d$R[, lead]
+    )
+    expect_equal(
+        pecotmr:::.slalomLeadColumn(packed, lead),
+        unname(d$R[, lead])
+    )
+    viaF <- pecotmr:::.slalomLeadColumn(
+        list(ldFactor = pecotmr:::.ldFactorFromDosage(d$X)),
+        lead
+    )
+    expect_identical(viaF[[lead]], 1)
+    expect_equal(unname(viaF), unname(d$R[, lead]), tolerance = 1e-10)
+    for (method in list("slalom", SlalomParam(r2Threshold = 0.3))) {
+        expect_equal(
+            pecotmr:::.ldMismatchQcOn(d$z, packed, NULL, method),
+            ldMismatchQc(zScore = d$z, R = d$R, method = method)
+        )
+    }
+    dentist <- DentistParam(nIter = 2)
+    expect_equal(
+        suppressWarnings(pecotmr:::.ldMismatchQcOn(d$z, packed, d$n, dentist)),
+        suppressWarnings(ldMismatchQc(
+            zScore = d$z,
+            R = d$R,
+            nSample = d$n,
+            method = dentist
+        ))
+    )
+})
+
+test_that("the QC panel keeps an LdMatrix's LD packed", {
+    data(eqtlRegionExample, envir = environment())
+    X <- eqtlRegionExample$X[, 1:8]
+    ldm <- LdMatrix(cor(X), nSamples = 100)
+    ids <- colnames(X)
+    df <- data.frame(
+        SNP = c(ids[[2L]], "chr22:1:A:G", ids[[5L]]),
+        Z = c(1, 2, 3)
+    )
+    panel <- pecotmr:::.qcPanelSupportedLd(df, ldm, "test")
+    expect_equal(panel$dropped, 1L)
+    expect_s4_class(panel$ld$P, "dspMatrix")
+    expect_equal(nrow(panel$ld$P), 2L)
+    expect_null(panel$ld$R)
+    # Kriging, which takes nothing but the matrix, gets it whole.
+    expect_equal(
+        pecotmr:::.qcPanelLdMatrix(panel),
+        unname(pecotmr:::.ldFromRef(ldm, ids[c(2L, 5L)], "test"))
     )
 })

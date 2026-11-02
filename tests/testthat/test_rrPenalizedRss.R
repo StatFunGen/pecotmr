@@ -131,7 +131,7 @@ test_that("mcpRssWeights / scadRssWeights recover the signal direction", {
     for (pen in names(fns)) {
         w <- fns[[pen]](
             stat = stat,
-            ldReference = .rrwLdMatrix(R),
+            ldReference = .rrwLdMatrix(R, nSamples = n),
             s = c(0.5, 0.9)
         )
         expect_equal(length(w), p, info = pen)
@@ -153,7 +153,7 @@ test_that("penalizedRss L0 recovers signal direction", {
     stat <- list(b = bhat, n = rep(n, p), variantNames = .rrwIds(p))
     w <- l0learnRssWeights(
         stat = stat,
-        ldReference = .rrwLdMatrix(R),
+        ldReference = .rrwLdMatrix(R, nSamples = n),
         penalty = "L0",
         s = c(0.5, 0.9),
         lambda0 = exp(seq(log(0.001), log(0.5), length.out = 5))
@@ -174,7 +174,11 @@ test_that("scadRssWeights / mcpRssWeights return p weights with attributes", {
     stat <- list(b = bhat, n = rep(n, p), variantNames = .rrwIds(p))
     fns <- list(SCAD = scadRssWeights, MCP = mcpRssWeights)
     for (pen in names(fns)) {
-        w <- fns[[pen]](stat = stat, ldReference = .rrwLdMatrix(R), s = 0.5)
+        w <- fns[[pen]](
+            stat = stat,
+            ldReference = .rrwLdMatrix(R, nSamples = n),
+            s = 0.5
+        )
         expect_equal(length(w), p, info = pen)
         expect_true(is.numeric(w), info = pen)
         sel <- attr(w, "penalized_rss_selection")
@@ -192,7 +196,7 @@ test_that("l0learnRssWeights returns correct-length vector with attributes", {
     stat <- list(b = bhat, n = rep(n, p), variantNames = .rrwIds(p))
     w <- l0learnRssWeights(
         stat = stat,
-        ldReference = .rrwLdMatrix(R),
+        ldReference = .rrwLdMatrix(R, nSamples = n),
         penalty = "L0",
         s = 0.5,
         lambda0 = c(0.01, 0.1)
@@ -433,6 +437,88 @@ test_that("lassosumRss is penalizedRss's lasso at alpha = 1, bit for bit", {
     expect_identical(lassosum$fbeta, lasso$fbeta)
 })
 
+# The ridge's minimizer at shrinkage s and penalty l, from its normal
+# equations ((1 - s) R + (s + l) I) beta = z.
+.prs_ridgeExact <- function(l, R, z, s) {
+    solve((1 - s) * R + (s + l) * diag(nrow(R)), z)
+}
+
+# A 30-sample reference over 50 variants: an LD of rank below its size, as
+# a small reference gives it, so a factor's thin SVD spans only part of the
+# variants.
+.prs_lowRankLd <- function() {
+    set.seed(5)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(matrix(
+        rbinom(30 * 50, 2, 0.4),
+        30,
+        50
+    ))
+    list(ldFactor = ldFactor, R = crossprod(ldFactor) / (nrow(ldFactor) - 1))
+}
+
+test_that("a ridge is solved in closed form, on the matrix or a factor", {
+    d <- .prs_lowRankLd()
+    z <- as.numeric(d$R %*% rnorm(50, sd = 0.05)) + rnorm(50, sd = 0.02)
+    lambda <- c(2, 0.5, 0.1)
+    for (s in c(0, 0.3)) {
+        exactBetas <- map(lambda, .prs_ridgeExact, R = d$R, z = z, s = s)
+        exact <- exec(cbind, !!!exactBetas)
+        for (ld in list(
+            list(R = d$R, shrink = s),
+            list(ldFactor = d$ldFactor, shrink = s)
+        )) {
+            fit <- pecotmr:::.rssRidgeSolve(z, lambda, ld)
+            expect_equal(fit$beta, exact, tolerance = 1e-10)
+            expect_identical(fit$conv, rep(1L, 3L))
+            bb <- colSums(fit$beta^2)
+            loss <- (1 - s) *
+                colSums(fit$beta * (d$R %*% fit$beta)) +
+                s * bb -
+                2 * colSums(z * fit$beta)
+            expect_equal(fit$loss, loss, tolerance = 1e-10)
+            expect_equal(fit$fbeta, loss + lambda * bb, tolerance = 1e-10)
+        }
+    }
+    # penalizedRss() at alpha = 0 takes it: the minimum coordinate descent
+    # converges to.
+    descent <- pecotmr:::penalizedRssCpp(
+        z,
+        list(d$R),
+        0,
+        lambda,
+        "lasso",
+        0,
+        0,
+        0,
+        0,
+        1e-13,
+        100000L,
+        0L
+    )
+    expect_equal(
+        penalizedRss(z * 10, d$R, 100, alpha = 0, lambda = lambda)$beta,
+        descent$beta,
+        tolerance = 1e-8
+    )
+})
+
+test_that("a ridge that nothing makes invertible is the minimum-norm fit", {
+    d <- .prs_lowRankLd()
+    z <- as.numeric(d$R %*% rnorm(50))
+    ev <- eigen(d$R, symmetric = TRUE)
+    kept <- ev$values > 1e-8
+    minNorm <- ev$vectors[, kept] %*%
+        (crossprod(ev$vectors[, kept], z) / ev$values[kept])
+    # At s = lambda = 0 the LD's null space is unpenalized.
+    for (ld in list(list(R = d$R), list(ldFactor = d$ldFactor))) {
+        expect_equal(
+            pecotmr:::.rssRidgeSolve(z, 0, ld)$beta,
+            minNorm,
+            tolerance = 1e-8
+        )
+    }
+})
+
 # ---- enetRssWeights / ridgeRssWeights ----------------------------------------
 
 # Twelve variants, two of them causal, as summary statistics with their LD.
@@ -448,7 +534,7 @@ test_that("lassosumRss is penalizedRss's lasso at alpha = 1, bit for bit", {
             n = rep(n, p),
             variantNames = .rrwIds(p)
         ),
-        ld = .rrwLdMatrix(cor(X))
+        ld = .rrwLdMatrix(cor(X), nSamples = n)
     )
 }
 
@@ -463,8 +549,12 @@ test_that("enetRssWeights mixes at alpha and is lassosum at alpha = 1", {
         unname(attr(other, "penalized_rss_selection")["alpha"]),
         "0.2"
     )
+    # One seed per call, so both draw the same held-out splits.
+    set.seed(3)
+    atOne <- enetRssWeights(f$stat, f$ld, alpha = 1)
+    set.seed(3)
     expect_equal(
-        as.numeric(enetRssWeights(f$stat, f$ld, alpha = 1)),
+        as.numeric(atOne),
         as.numeric(lassosumRssWeights(f$stat, f$ld))
     )
     expect_error(enetRssWeights(f$stat, f$ld, alpha = 2), "alpha.*<= 1")
@@ -490,6 +580,59 @@ test_that("ridgeRssWeights fits the alpha = 0 mixing over the ridge path", {
     )
 })
 
+test_that("a ridge's fits at s = 1, alike but for scale, are told apart", {
+    # At s = 1 each fit is c / (1 + lambda), so all tie on the selection's
+    # correlation. Held-out selection lets the variance each explains set
+    # the scale, so its pick does not depend on the grid's order; lassosum's
+    # pseudovalidation takes the grid's first.
+    f <- .prs_weightsInput()
+    lambda <- c(0.1, 0.3, 1, 3, 10)
+    picked <- function(lambda, selection = "heldOut") {
+        set.seed(4)
+        w <- ridgeRssWeights(
+            f$stat,
+            f$ld,
+            s = 1,
+            selection = selection,
+            methodArgs = PenalizedRssOptions(lambda = lambda)
+        )
+        as.numeric(attr(w, "penalized_rss_selection")[["lambda"]])
+    }
+    expect_equal(picked(lambda), picked(rev(lambda)))
+    skip_if_not_installed("fdrtool")
+    # fdrtool warns that 12 statistics are few to fit its null on.
+    expect_equal(suppressWarnings(picked(lambda, "ldQuadratic")), 0.1)
+    expect_equal(suppressWarnings(picked(rev(lambda), "ldQuadratic")), 10)
+})
+
+test_that("a ridge's whole search shares one decomposition of the LD", {
+    f <- .prs_weightsInput()
+    source <- pecotmr:::.rssLdSource(f$stat, f$ld, "test")
+    carried <- pecotmr:::.rssSolverSource(
+        source,
+        pecotmr:::.rssPenalty("lasso", alpha = 0)
+    )
+    expect_identical(carried$eigen, eigen(source$R, symmetric = TRUE))
+    # Any other penalty reads the source as it is.
+    expect_identical(
+        pecotmr:::.rssSolverSource(
+            source,
+            pecotmr:::.rssPenalty("lasso", alpha = 0.5)
+        ),
+        source
+    )
+    # Four shrinkage levels, each refit on four held-out splits, and the
+    # splits' draws: one decomposition.
+    computed <- 0L
+    decompose <- pecotmr:::.ldSourceEigen
+    local_mocked_bindings(.ldSourceEigen = function(ld) {
+        computed <<- computed + is.null(ld$eigen)
+        decompose(ld)
+    })
+    ridgeRssWeights(f$stat, f$ld)
+    expect_identical(computed, 1L)
+})
+
 test_that("scadRssWeights and mcpRssWeights refuse alpha = 0 before fitting", {
     f <- .prs_weightsInput()
     cnd <- tryCatch(scadRssWeights(f$stat, f$ld, alpha = 0), error = identity)
@@ -510,6 +653,18 @@ test_that("l0learnRssWeights takes its lambda path only as its own argument", {
         ),
         "lambda is supplied by pecotmr.*l0learnRssWeights' own `lambda`"
     )
+})
+
+test_that("l0learnRssWeights' L1 grid is the caller's or the penalty's", {
+    lambdaFor <- pecotmr:::.l0learnRssLambda
+    # L0L1 sweeps ten values on a log scale; the others have no L1 term.
+    expect_equal(
+        lambdaFor(NULL, "L0L1"),
+        exp(seq(log(0.0001), log(0.1), length.out = 10))
+    )
+    expect_equal(lambdaFor(NULL, "L0"), 0)
+    expect_equal(lambdaFor(NULL, "L0L2"), 0)
+    expect_equal(lambdaFor(c(0.01, 0.02), "L0L1"), c(0.01, 0.02))
 })
 
 test_that(".rssPenalty checks a penalty once and fills MCP / SCAD's gamma", {

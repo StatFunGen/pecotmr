@@ -235,9 +235,12 @@ BoundaryMergeParam <- function(
 #'   \code{pecotmrFitCoverage}): the fit no longer lines up with the row's
 #'   variants, so its weights are not renormalized over the variants kept.
 #' @param twasZ Optional \code{GRanges} of TWAS Z-scores (output of
-#'   \code{\link{causalInferencePipeline}}). When supplied, the per-(trait,
-#'   context) Z is used as the \code{z_gene} input to \code{ctwas_sumstats} so
-#'   it is not recomputed.
+#'   \code{\link{causalInferencePipeline}}). When supplied, each weighted
+#'   gene's Z -- the row of its \code{(qtlStudy, context, trait, method)}
+#'   for the GWAS study of \code{gwasSumStats} -- is used as the
+#'   \code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
+#'   Every weighted gene needs exactly one; rows for other genes, methods or
+#'   GWAS studies are ignored.
 #' @param fineMappingResult Optional \code{QtlFineMappingResult}: the genes'
 #'   own fine-mapping, whose per-variant PIP and credible-set membership the
 #'   CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
@@ -557,38 +560,80 @@ assembleCtwasInputs <- function(
         variantPruningParam,
         "VariantPruningParam"
     )
+    inp <- .ctwasResolveInputs(
+        gwasSumStats,
+        twasWeights,
+        twasZ,
+        fineMappingResult,
+        fineMappingMethod,
+        method
+    )
+    regionIds <- names(inp$gwasSumStats)
+    fp <- .ctwasFirstPass(
+        regionIds,
+        inp$gwasSumStats,
+        inp$twasWeights,
+        inp$globalPanelInfo
+    )
+    weightsList <- .ctwasSecondPass(
+        regionIds,
+        inp$twasWeights,
+        inp$method,
+        fp,
+        inp$fineMappingResult,
+        .ctwasPruningCutoffs(variantPruningParam),
+        unique(list_c(map(fp$zSnpPieces, "id")))
+    )
+    .ctwasAssembleResult(
+        regionIds,
+        fp,
+        weightsList,
+        list(twasZ = twasZ, gwasStudy = inp$gwasStudy),
+        inp$method
+    )
+}
+
+# The inputs of assembleCtwasInputs(), checked and resolved in the order a bad
+# one should fail: the GWAS split by block with its panel summary, the weights
+# placed on those blocks, the fine-mapping source and the weight method.
+# @noRd
+.ctwasResolveInputs <- function(
+    gwasSumStats,
+    twasWeights,
+    twasZ,
+    fineMappingResult,
+    fineMappingMethod,
+    method
+) {
     .ctwasValidateGwasList(gwasSumStats)
     globalPanelInfo <- .ctwasGlobalPanelInfo(gwasSumStats)
-    gwasSumStats <- .ctwasGwasByBlock(gwasSumStats)
-    twasWeights <- .ctwasResolveAndValidateWeights(twasWeights, gwasSumStats)
+    # Only a supplied twasZ needs the run's one GWAS study, to pick its rows.
+    gwasStudy <- if (is.null(twasZ)) {
+        NA_character_
+    } else {
+        .ctwasGwasStudy(gwasSumStats)
+    }
+    byBlock <- .ctwasGwasByBlock(gwasSumStats)
+    twasWeights <- .ctwasResolveAndValidateWeights(twasWeights, byBlock)
     .ctwasValidateOptional(twasZ, fineMappingResult)
     fineMappingResult <- .ctwasRescueSource(
         fineMappingResult,
         fineMappingMethod
     )
-    regionIds <- names(gwasSumStats)
     resolvedMethod <- .ctwasResolveMethod(twasWeights, method)
     .ctwasCheckFitCoverage(
         twasWeights,
         resolvedMethod,
         "assembleCtwasInputs()"
     )
-    fp <- .ctwasFirstPass(
-        regionIds,
-        gwasSumStats,
-        twasWeights,
-        globalPanelInfo
+    list(
+        gwasSumStats = byBlock,
+        twasWeights = twasWeights,
+        globalPanelInfo = globalPanelInfo,
+        gwasStudy = gwasStudy,
+        fineMappingResult = fineMappingResult,
+        method = resolvedMethod
     )
-    weightsList <- .ctwasSecondPass(
-        regionIds,
-        twasWeights,
-        resolvedMethod,
-        fp,
-        fineMappingResult,
-        .ctwasPruningCutoffs(variantPruningParam),
-        unique(list_c(map(fp$zSnpPieces, "id")))
-    )
-    .ctwasAssembleResult(regionIds, fp, weightsList, twasZ, resolvedMethod)
 }
 
 # The bundle's terminal: .ctwasBuildWeights and below take scalars, under the
@@ -1005,7 +1050,7 @@ assembleCtwasInputs <- function(
     regionIds,
     fp,
     weightsList,
-    twasZ,
+    supplied,
     resolvedMethod
 ) {
     # The ctwas engine indexes its input frames POSITIONALLY (`df[, "col"]` must
@@ -1024,8 +1069,8 @@ assembleCtwasInputs <- function(
     )
     list(
         z_snp = zSnp,
-        z_gene = if (!is.null(twasZ)) {
-            .ctwasBuildZGene(twasZ)
+        z_gene = if (!is.null(supplied$twasZ)) {
+            .ctwasBuildZGene(supplied$twasZ, weightsList, supplied$gwasStudy)
         } else {
             .ctwasGeneZ(weightsList, zSnp)
         },
@@ -1395,17 +1440,18 @@ mergeCtwasBoundaryRegions <- function(
 # ctwas actually returned).
 # @noRd
 .ctwasApplyMergeResult <- function(finemapResult, res) {
+    regionUpdates <- compact(list(
+        region_data = res$updated_region_data,
+        region_info = res$updated_region_info,
+        LD_map = res$updated_LD_map,
+        snp_map = res$updated_snp_map
+    ))
     list_assign(
         finemapResult,
         finemap_res = res$updated_finemap_res,
         susie_alpha_res = res$updated_susie_alpha_res,
         merge_res = res,
-        !!!compact(list(
-            region_data = res$updated_region_data,
-            region_info = res$updated_region_info,
-            LD_map = res$updated_LD_map,
-            snp_map = res$updated_snp_map
-        ))
+        !!!regionUpdates
     )
 }
 
@@ -1551,7 +1597,7 @@ mergeCtwasBoundaryRegions <- function(
 # @noRd
 .ctwasResolveMethod <- function(twasWeights, method = NULL) {
     sources <- .ctwasWeightSources(twasWeights)
-    available <- unique(.ctwasConcatChr(map(sources, .ctwasMethodsOf)))
+    available <- unique(.ctwasConcatChr(map(sources, methodNames)))
     if (length(available) == 0L) {
         abort("ctwasPipeline: the weight sources carry no method entries.")
     }
@@ -1620,19 +1666,19 @@ mergeCtwasBoundaryRegions <- function(
     )
 }
 
-# The rows of TwasWeights `tw` fitted by `method` whose stored fit is a SuSiE
-# fit, or NULL when it has none.
+# The entries of TwasWeights `tw` fitted by `method` whose stored fit is a
+# SuSiE fit, or NULL when it has none.
 # @noRd
 .ctwasSusieFitRows <- function(tw, method) {
-    fits <- mcols(tw, use.names = FALSE)$fits
-    susie <- map_lgl(seq_along(tw), .ctwasRowHasSusieFit, fits = fits)
-    rows <- which(as.character(tw$method) == method & susie)
-    if (length(rows) == 0L) NULL else tw[rows]
+    cells <- .twasCells(tw)
+    cells <- cells[cells$method == method, ]
+    susie <- map2_lgl(cells$row, cells$method, .ctwasCellHasSusieFit, x = tw)
+    if (!any(susie)) NULL else .twasKeepCells(tw, cells[susie, ])
 }
 
 # @noRd
-.ctwasRowHasSusieFit <- function(i, fits) {
-    .ctwasIsSusieFit(fits[[i]])
+.ctwasCellHasSusieFit <- function(row, method, x) {
+    .ctwasIsSusieFit(methodFits(.twrCellParts(x, row, method)))
 }
 
 # @noRd
@@ -1868,12 +1914,6 @@ mergeCtwasBoundaryRegions <- function(
     .ctwasBucketWeights(twasWeights, gwasSumStats)
 }
 
-# Extract the character vector of method names carried by a weight source
-# (NULL-safe: a NULL source contributes no methods).
-# @noRd
-.ctwasMethodsOf <- function(tw) {
-    if (is.null(tw)) NULL else as.character(tw$method)
-}
 
 # The single GWAS (disease) study a cTWAS run models. cTWAS solves one disease
 # per run (the z_snp carries a single z per SNP), so the input blocks must all
@@ -2394,19 +2434,22 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     .ctwasRowsToResult(rows)
 }
 
-# Subset a TwasWeights collection to rows whose `method` matches the
-# resolved method. Used to enforce the "one ctwas gene per (study,
-# context, trait)" semantics -- the legacy pipeline fed a single
-# best-CV-method weight per gene; the new S4 TwasWeights may carry
-# many methods, but ctwas should only see one.
+# Cut a weight source to the resolved method, or NULL when it has none of it.
+# Used to enforce the "one ctwas gene per (study, context, trait)" semantics
+# -- the legacy pipeline fed a single best-CV-method weight per gene; the S4
+# TwasWeights may carry many methods, but ctwas should only see one. A
+# TwasWeights is cut along its method axis, a fine-mapping result by row.
 # @noRd
 .ctwasFilterMethod <- function(tw, method) {
-    keep <- which(as.character(tw$method) == method)
-    if (length(keep) == 0L) {
+    if (!is_in(method, methodNames(tw))) {
         return(NULL)
+    }
+    if (methods::is(tw, "TwasWeights")) {
+        return(.twasKeepMethods(tw, method))
     }
     # Row subset carries every column forward (joint* / region / ...); the old
     # hand-listed rebuild silently dropped them.
+    keep <- which(as.character(tw$method) == method)
     methods::initialize(tw[keep, ], ldReference = ldReference(tw))
 }
 
@@ -2500,9 +2543,9 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 .ctwasBuildSingleRegionInfo <- function(regionId, gss) {
     # The window is the block's own -- NOT the LD sketch's span. When many
     # blocks share one whole-chromosome LD payload (the common one-file-per-chr
-    # layout), snpInfo(ldReference) spans the entire chromosome, so every region
-    # would collapse to the same whole-chromosome [start, stop] and every SNP
-    # would be assigned to every region (inflating SNP group_size N-fold and
+    # layout), the LD reference's variants span the entire chromosome, so every
+    # region would collapse to the same whole-chromosome [start, stop] and every
+    # SNP would be assigned to every region (inflating SNP group_size N-fold and
     # diluting the gene prior to ~0).
     #
     # Emptiness is checked FIRST: a block with no variants has nothing for
@@ -2659,18 +2702,20 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     # `alpha`, not `lbf_variable`: renormalization restricts the stored
     # per-effect alpha, which already carries the fit's prior.
-    needed <- c("alpha", "mu", "X_column_scale_factors")
+    # Not X_column_scale_factors: a stored fit drops them when all are 1.
+    needed <- c("alpha", "mu")
     all(is_in(needed, names(fits)))
 }
 
 # Renormalize SuSiE TWAS weights over the kept variant set. When some
 # variants got dropped by allele harmonization / panel intersection,
 # the posterior `alpha` values from the original fit no longer sum to
-# 1 over the kept variants. We re-softmax `lbf_variable[, keptIdx]`
-# into a renormalized alpha, sign-flip the rows of `mu[, keptIdx]` to
-# match the panel's allele frame (carrying over the per-variant sign
-# flip already applied to `harmonizedW`), and recompute the per-variant
-# weight as `colSums(alpha * mu_subset) / X_column_scale_factors_subset`.
+# 1 over the kept variants. We restrict each effect's stored `alpha` to
+# `keptIdx` and renormalize it (.ctwasRenormAlpha()), sign-flip the columns
+# of `mu[, keptIdx]` to match the panel's allele frame (carrying over the
+# per-variant sign flip already applied to `harmonizedW`), and recompute the
+# per-variant weight as
+# `colSums(alpha * mu_subset) / X_column_scale_factors_subset`.
 # Returns the new weight vector (length = length(keptIdx)), or NULL if
 # the fit's dimensions don't line up with the entry's variantIds.
 # @noRd
@@ -2681,13 +2726,34 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     keptIdx,
     harmonizedW
 ) {
-    # Fields are READ with `[[`: `$` on a list falls back to prefix matching,
-    # so `fits$mu` would silently return `mu2` on a fit that has no `mu`.
-    rawAlpha <- fits[["alpha"]]
-    mu <- fits[["mu"]]
-    xCol <- fits[["X_column_scale_factors"]]
-    if (is.null(rawAlpha) || is.null(mu) || is.null(xCol)) {
+    if (!.ctwasRenormalizable(fits, length(origVids))) {
         return(NULL)
+    }
+    # Per-variant sign flip applied by allele harmonization. NaN signs
+    # (origW == 0) default to +1.
+    rawSign <- sign(harmonizedW / origW[keptIdx])
+    signFlip <- replace(rawSign, !is.finite(rawSign), 1)
+    newAlpha <- .ctwasRenormAlpha(as.matrix(fits[["alpha"]]), keptIdx)
+    if (is.null(newAlpha)) {
+        return(NULL)
+    }
+    muSub <- sweep(fits[["mu"]][, keptIdx, drop = FALSE], 2L, signFlip, `*`)
+    rawScale <- .fitScaleFactors(fits, length(origVids))[keptIdx]
+    # Guard against zero scale factors (shouldn't happen in practice).
+    xColSub <- replace(rawScale, rawScale == 0, 1)
+    as.numeric(colSums(newAlpha * muSub) / xColSub)
+}
+
+# Whether a fit's weights can be recomputed from its alpha and mu over a
+# subset of its `p` variants. Fields are READ with `[[`: `$` on a list falls
+# back to prefix matching, so `fits$mu` would silently return `mu2` on a fit
+# that has no `mu`.
+# @noRd
+.ctwasRenormalizable <- function(fits, p) {
+    alpha <- fits[["alpha"]]
+    mu <- fits[["mu"]]
+    if (is.null(alpha) || is.null(mu)) {
+        return(FALSE)
     }
     # susieInf / susieAsh carry an infinitesimal term: coef.susie is
     # colSums(alpha * mu) / scale + theta / scale. Recomputing the weight from
@@ -2695,31 +2761,20 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     # means. Leave those fits to the plain subset-w-and-R path, which is
     # unbiased and only loses power.
     if (!is.null(fits[["theta"]]) || !is.null(fits[["omega_weights"]])) {
-        return(NULL)
+        return(FALSE)
     }
-    alpha <- as.matrix(rawAlpha)
-    if (
-        ncol(alpha) != length(origVids) ||
-            ncol(mu) != length(origVids) ||
-            length(xCol) != length(origVids)
-    ) {
-        # Fit-vs-entry dimension mismatch -- including a null_weight fit, whose
-        # alpha carries an extra column. Skip rather than mis-slice.
-        return(NULL)
+    # An mvSuSiE mu is L x p x R. .ctwasRenormFit() cuts it to the row's own
+    # condition when the row records its position in the fit; one that
+    # records none takes that same path.
+    if (length(dim(mu)) > 2L) {
+        return(FALSE)
     }
-    # Per-variant sign flip applied by allele harmonization. NaN signs
-    # (origW == 0) default to +1.
-    rawSign <- sign(harmonizedW / origW[keptIdx])
-    signFlip <- replace(rawSign, !is.finite(rawSign), 1)
-    newAlpha <- .ctwasRenormAlpha(alpha, keptIdx)
-    if (is.null(newAlpha)) {
-        return(NULL)
-    }
-    muSub <- sweep(mu[, keptIdx, drop = FALSE], 2L, signFlip, `*`)
-    rawScale <- xCol[keptIdx]
-    # Guard against zero scale factors (shouldn't happen in practice).
-    xColSub <- replace(rawScale, rawScale == 0, 1)
-    as.numeric(colSums(newAlpha * muSub) / xColSub)
+    # A fit-vs-entry dimension mismatch -- including a null_weight fit, whose
+    # alpha carries an extra column -- is skipped rather than mis-sliced.
+    # Absent scale factors are 1s (.fitScaleFactors()), which always fit.
+    xCol <- fits[["X_column_scale_factors"]]
+    nScale <- if (is.null(xCol)) p else length(xCol)
+    all(c(ncol(as.matrix(alpha)), ncol(as.matrix(mu)), nScale) == p)
 }
 
 # Restrict each single-effect posterior to `keptIdx` and renormalize. The
@@ -2821,7 +2876,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         )
     )
     prepared <- compact(map(
-        seq_len(nrow(twasWeights)),
+        .ctwasWeightUnits(twasWeights),
         .ctwasGenePrepared,
         twasWeights = twasWeights,
         ctx = ctx
@@ -2832,10 +2887,50 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         .ctwasGeneEntryFor,
         spanInfo = spanInfo
     )
-    # Later genes overwrite an earlier one sharing a key, which is what the
-    # `out[[g$key]] <- ...` loop did.
-    keyed <- set_names(map(genes, "entry"), map_chr(genes, "key"))
-    keyed[!duplicated(names(keyed), fromLast = TRUE)]
+    keys <- map_chr(genes, "key")
+    .ctwasRequireUniqueGenes(keys)
+    set_names(map(genes, "entry"), keys)
+}
+
+# One unit per weight vector a source holds: each (row, method) entry of a
+# TwasWeights, each row of a fine-mapping result.
+# @noRd
+.ctwasWeightUnits <- function(x) {
+    if (methods::is(x, "TwasWeights")) {
+        cells <- .twasCells(x)
+        return(map2(cells$row, cells$method, .ctwasUnit))
+    }
+    map2(seq_len(nrow(x)), as.character(x$method), .ctwasUnit)
+}
+
+# @noRd
+.ctwasUnit <- function(row, method) {
+    list(row = row, method = method)
+}
+
+# The payload of one unit: a TwasWeights entry, or a fine-mapping row.
+# @noRd
+.ctwasUnitParts <- function(x, unit) {
+    if (methods::is(x, "TwasWeights")) {
+        return(.twrCellParts(x, unit$row, unit$method))
+    }
+    .collectionEntry(x, unit$row)
+}
+
+# Two weight vectors for one (study, context, trait, method) -- rows that
+# differ only in their joint group -- would both be modeled under one gene
+# id. Refuse, rather than keep whichever came last.
+# @noRd
+.ctwasRequireUniqueGenes <- function(keys) {
+    dup <- unique(keys[duplicated(keys)])
+    if (length(dup) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "ctwasPipeline: the weights hold more than one fit of ",
+        "{str_flatten(dup, ', ')} (rows that differ only in their joint ",
+        "group). cTWAS models one weight vector per gene, so keep one."
+    ))
 }
 
 # Panel variant info in the (chrom/pos/A2/A1/variant_id) frame harmonizeAlleles
@@ -2851,13 +2946,15 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
-# study/context/trait/method identity for gene row `i` + its collection key.
+# study/context/trait/method identity for one unit (.ctwasWeightUnits()) + its
+# collection key.
 # @noRd
-.ctwasGeneMeta <- function(twasWeights, i) {
+.ctwasGeneMeta <- function(twasWeights, unit) {
+    i <- unit$row
     studyName <- as.character(twasWeights$study)[[i]]
     context <- as.character(twasWeights$context)[[i]]
     trait <- as.character(twasWeights$trait)[[i]]
-    method <- as.character(twasWeights$method)[[i]]
+    method <- unit$method
     list(
         study = studyName,
         context = context,
@@ -2876,6 +2973,20 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # @noRd
 .ctwasAlignGeneWeights <- function(parts, refVariants, panelSnps) {
     wr <- .rowResolveWeights(parts)
+    single <- .singleWeightColumn(wr$weights)
+    if (is.null(single)) {
+        inform(
+            str_c(
+                "ctwasPipeline: weights with several columns (one per ",
+                "feature or outcome) give no single weight per variant for ",
+                "cTWAS to model, so those genes are skipped."
+            ),
+            .frequency = "once",
+            .frequency_id = "pecotmrCtwasMatrixWeights"
+        )
+        return(NULL)
+    }
+    wr$weights <- single
     if (length(wr$variantIds) == 0L) {
         return(NULL)
     }
@@ -2899,12 +3010,77 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
+# The fit a gene's weights are renormalized with: the TWAS row's own, else --
+# a fine-mapping method's rows keep none (.twasRowRetention()) -- that
+# method's fit for the gene in `fmr`, the fine-mapping result the run was
+# given, cut to the gene's own condition when it is one of a joint fit's
+# (.ctwasConditionFit()). A fine-mapping row as the weight source has none
+# by design (.rowFits()).
+# @noRd
+.ctwasRenormFit <- function(parts, fmr, meta) {
+    own <- .rowFits(parts)
+    token <- .twasFmTokenFor(meta$method)
+    if (
+        !is.null(own) || is.na(token) || !methods::is(parts, "TwasWeightsRow")
+    ) {
+        return(own)
+    }
+    if (is.null(fmr)) {
+        inform(
+            str_c(
+                "ctwasPipeline: a fine-mapping method's weights are ",
+                "renormalized over the variants kept from that method's fit ",
+                "in `fineMappingResult`; none was given, so they are used ",
+                "as they are."
+            ),
+            .frequency = "once",
+            .frequency_id = "pecotmrCtwasRenormFit"
+        )
+        return(NULL)
+    }
+    idx <- .matchTupleRows(
+        fmr,
+        list(study = meta$study, context = meta$context, trait = meta$trait)
+    )
+    fmTokens <- map_chr(as.character(fmr$method)[idx], .twasFmTokenFor)
+    hit <- idx[is_in(fmTokens, token)]
+    if (length(hit) == 0L) {
+        return(NULL)
+    }
+    .ctwasConditionFit(
+        .fmrPartsSusieFit(.fmrRowParts(fmr, hit[[1L]])),
+        .fmrJointIndexAt(fmr, hit[[1L]])
+    )
+}
+
+# A joint fit cut to one of its conditions: an mvSuSiE mu is L x p x R, and
+# the row's position `r` in the fit's condition axis picks its own L x p. A
+# fit with no condition axis, or a row recording no position, is kept whole.
+# @noRd
+.ctwasConditionFit <- function(fit, r) {
+    mu <- fit[["mu"]]
+    if (length(dim(mu)) <= 2L || is.na(r)) {
+        return(fit)
+    }
+    d <- dim(mu)
+    own <- array(mu[,, r], dim = d[1:2], dimnames = dimnames(mu)[1:2])
+    list_assign(fit, mu = own)
+}
+
+# Row `i`'s position in its joint fit's condition axis, NA for a row from no
+# joint fit (or one that records none).
+# @noRd
+.fmrJointIndexAt <- function(x, i) {
+    jointIndex <- mcols(x, use.names = FALSE)$jointIndex
+    if (is.null(jointIndex)) NA_integer_ else jointIndex[[i]]
+}
+
 # Steps 3-4: SuSiE alpha renormalization (when the kept variant set shrank the
 # fit) and variance scaling for non-standardized weights (w * sqrt(per-variant
-# genotype variance from the LD panel)). Returns the adjusted weight vector.
+# genotype variance from the LD panel)). `fits` is what .ctwasRenormFit()
+# found. Returns the adjusted weight vector.
 # @noRd
-.ctwasAdjustGeneWeights <- function(parts, aligned, spanVariance) {
-    fits <- .rowFits(parts)
+.ctwasAdjustGeneWeights <- function(parts, aligned, spanVariance, fits) {
     shrank <- length(aligned$keptIdx) < length(aligned$origVids)
     # A NULL renormalization means the fit could not be re-keyed onto the
     # kept variants, so the harmonized weights stand as they are.
@@ -2998,31 +3174,22 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # (PIP/CS + magnitude + cap) -> entry. Returns list(key, entry), or NULL when
 # the gene contributes no usable variants.
 # @noRd
-.ctwasGenePrepared <- function(i, twasWeights, ctx) {
+.ctwasGenePrepared <- function(unit, twasWeights, ctx) {
     # Polymorphic: the weight source may be a TwasWeights or a
     # fine-mapping result, so the payload comes from the class-aware bridge.
-    parts <- .collectionEntry(twasWeights, i)
+    parts <- .ctwasUnitParts(twasWeights, unit)
     aligned <- .ctwasAlignGeneWeights(parts, ctx$refVariants, ctx$panelSnps)
     if (is.null(aligned)) {
         return(NULL)
     }
-    w <- .ctwasAdjustGeneWeights(parts, aligned, ctx$spanVariance)
-    meta <- .ctwasGeneMeta(twasWeights, i)
-    finemapAux <- .ctwasGetFinemapAux(
-        ctx$fineMappingResult,
-        meta$study,
-        meta$context,
-        meta$trait
+    meta <- .ctwasGeneMeta(twasWeights, unit)
+    w <- .ctwasAdjustGeneWeights(
+        parts,
+        aligned,
+        ctx$spanVariance,
+        .ctwasRenormFit(parts, ctx$fineMappingResult, meta)
     )
-    kept <- .ctwasFilterVariants(
-        vids = aligned$vids,
-        w = w,
-        finemapAux = finemapAux,
-        twasWeightCutoff = ctx$cutoffs$twasWeightCutoff,
-        csMinCor = ctx$cutoffs$csMinCor,
-        minPipCutoff = ctx$cutoffs$minPipCutoff,
-        maxNumVariants = ctx$cutoffs$maxNumVariants
-    )
+    kept <- .ctwasGeneKept(aligned$vids, w, meta, ctx)
     if (length(kept) < 1L) {
         return(NULL)
     }
@@ -3044,6 +3211,28 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         w = kept$w[inRegion],
         spanVids = kept$vids,
         meta = meta
+    )
+}
+
+# The gene's variants `vids` that pass the smart filter -- fine-mapping PIP
+# and credible-set membership, weight magnitude, the cap -- with their
+# weights (.ctwasFilterVariants()).
+# @noRd
+.ctwasGeneKept <- function(vids, w, meta, ctx) {
+    finemapAux <- .ctwasGetFinemapAux(
+        ctx$fineMappingResult,
+        meta$study,
+        meta$context,
+        meta$trait
+    )
+    .ctwasFilterVariants(
+        vids = vids,
+        w = w,
+        finemapAux = finemapAux,
+        twasWeightCutoff = ctx$cutoffs$twasWeightCutoff,
+        csMinCor = ctx$cutoffs$csMinCor,
+        minPipCutoff = ctx$cutoffs$minPipCutoff,
+        maxNumVariants = ctx$cutoffs$maxNumVariants
     )
 }
 
@@ -3078,7 +3267,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     map_dbl(prepared, .ctwasWeightVariance, ld = ld)
 }
 
-# The block's LD over `vids`, for weight variances: list(F = ) holding a
+# The block's LD over `vids`, for weight variances: list(ldFactor = ) holding a
 # genotype reference's factor (.ldRefFactor()), or list(R = ) holding the
 # matrix a panel already carries -- a caller who computed it, or a payload it
 # travelled with -- or an LdMatrix's.
@@ -3097,7 +3286,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     }
     if (.ldIsGenotypeRef(ldPanel$sketch)) {
         factor <- .ldRefFactor(ldPanel$sketch, idx)
-        return(list(F = `colnames<-`(factor, vids)))
+        return(list(ldFactor = `colnames<-`(factor, vids)))
     }
     list(R = .ctwasPanelLdFor(ldPanel, idx, vids))
 }
@@ -3105,8 +3294,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # One gene's weight variance w'Rw from .ctwasPanelWeightLd()'s LD.
 # @noRd
 .ctwasWeightVariance <- function(g, ld) {
-    if (!is.null(ld$F)) {
-        f <- ld$F[, g$vids, drop = FALSE]
+    if (!is.null(ld$ldFactor)) {
+        f <- ld$ldFactor[, g$vids, drop = FALSE]
         return(sum((f %*% g$w)^2) / (nrow(f) - 1))
     }
     r <- ld$R[g$vids, g$vids, drop = FALSE]
@@ -3150,9 +3339,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             "'{id}' have no GWAS z-score."
         ))
     }
+    z <- as.numeric(crossprod(wgt, zs)) / sqrt(entry$wgt_var)
+    .ctwasZGeneRow(entry, id, z)
+}
+
+# A gene's z_gene row as ctwas reads it: its weight id, its z, and the type,
+# context and group its weights carry.
+# @noRd
+.ctwasZGeneRow <- function(entry, id, z) {
     tibble(
         id = id,
-        z = as.numeric(crossprod(wgt, zs)) / sqrt(entry$wgt_var),
+        z = z,
         type = entry$type,
         context = entry$context,
         group = str_c(entry$context, "|", entry$type)
@@ -3408,27 +3605,99 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     list(vids = vids[keepIdx], w = w[keepIdx])
 }
 
-# Build z_gene data.frame from a TWAS-Z GRanges (output of
-# causalInferencePipeline). One row per (qtlStudy, context, trait,
-# method, gwasStudy) tuple.
+# z_gene from a supplied TWAS-Z GRanges (output of causalInferencePipeline):
+# each weighted gene's z, from the twasZ row of its (study, context, trait,
+# method) for the run's GWAS study, under the gene's weight id with the
+# columns ctwas reads (.ctwasZGeneRow()). ctwas keeps only the genes whose
+# weight id z_gene names, so a weighted gene with no z is refused rather than
+# dropped. Rows for other genes, methods or GWAS studies are not this run's.
 # @noRd
-.ctwasBuildZGene <- function(twasZ) {
-    mc <- as.data.frame(S4Vectors::mcols(twasZ))
+.ctwasBuildZGene <- function(twasZ, weightsList, gwasStudy) {
+    if (length(weightsList) == 0L) {
+        return(NULL)
+    }
+    rows <- .ctwasTwasZForStudy(
+        as_tibble(as.data.frame(S4Vectors::mcols(twasZ))),
+        gwasStudy
+    )
+    keys <- str_c(
+        rows$qtlStudy,
+        "|",
+        rows$context,
+        "|",
+        rows$trait,
+        "|",
+        rows$method
+    )
+    geneKeys <- map_chr(unname(weightsList), .ctwasEntryKey)
+    .ctwasRequireOneZ(names(weightsList), geneKeys, keys)
+    zs <- as.numeric(rows$twasZ)[match(geneKeys, keys)]
     # Base data.frame (not tibble): z_gene is indexed positionally by the ctwas
     # engine (df[, "col"] -> vector); a tibble breaks it. See
     # .ctwasSnpInfoForBlock.
-    data.frame(
-        id = as.character(glue(
-            "{mc$qtlStudy}|{mc$context}|{mc$trait}|{mc$method}"
-        )),
-        z = as.numeric(mc$twasZ),
-        type = as.character(mc$context),
-        context = as.character(mc$context),
-        gene_name = as.character(mc$trait),
-        study = as.character(mc$qtlStudy),
-        method = as.character(mc$method),
-        stringsAsFactors = FALSE
+    as.data.frame(list_rbind(pmap(
+        list(weightsList, names(weightsList), zs),
+        .ctwasZGeneRow
+    )))
+}
+
+# A gene's (study, context, trait, method) key, as twasZ identifies it.
+# @noRd
+.ctwasEntryKey <- function(entry) {
+    str_c(
+        entry$study,
+        "|",
+        entry$context,
+        "|",
+        entry$gene_name,
+        "|",
+        entry$method
     )
+}
+
+# The twasZ rows for the run's GWAS study `gwasStudyName` -- named apart from
+# the rows' gwasStudy column, which the filter reads. One with no gwasStudy
+# column, or a run whose GWAS names no study but whose twasZ holds just one,
+# is used whole.
+# @noRd
+.ctwasTwasZForStudy <- function(rows, gwasStudyName) {
+    if (!is_in("gwasStudy", names(rows))) {
+        return(rows)
+    }
+    studies <- unique(as.character(rows$gwasStudy))
+    if (is.na(gwasStudyName) && length(studies) > 1L) {
+        abort(glue(
+            "assembleCtwasInputs: `twasZ` holds several GWAS studies ",
+            "({str_flatten(studies, ', ')}) and `gwasSumStats` names none, ",
+            "so which z-scores apply is ambiguous."
+        ))
+    }
+    if (is.na(gwasStudyName)) {
+        return(rows)
+    }
+    filter(rows, .data$gwasStudy == gwasStudyName)
+}
+
+# Every weighted gene must have exactly one twasZ z.
+# @noRd
+.ctwasRequireOneZ <- function(ids, geneKeys, keys) {
+    missing <- ids[!is_in(geneKeys, keys)]
+    if (length(missing) > 0L) {
+        abort(glue(
+            "assembleCtwasInputs: `twasZ` has no z-score for ",
+            "{length(missing)} weighted gene(s), e.g. ",
+            "{str_flatten(utils::head(missing, 3L), ', ')}. ctwas would drop ",
+            "them; supply their TWAS z-scores or leave `twasZ` NULL."
+        ))
+    }
+    repeated <- unique(keys[duplicated(keys) & is_in(keys, geneKeys)])
+    if (length(repeated) > 0L) {
+        abort(glue(
+            "assembleCtwasInputs: `twasZ` has more than one z-score for ",
+            "{str_flatten(utils::head(repeated, 3L), ', ')}."
+        ))
+    }
+    invisible(NULL)
 }
 
 # A cTWAS payload's `LD_file` token does double duty: ctwas asserts the file
@@ -3520,9 +3789,16 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # cache travels on the function object itself, as its `ldPanelsByRegion`
 # attribute: .ctwasLoadRegionLd() reads it back through sys.function(), and
 # .ctwasCachedPanels() reads the same attribute, so the cache has one home.
+# The function goes without its source references: a payload is saved, and
+# a function loaded with them would carry its whole source file along.
 # @noRd
+#' @importFrom utils removeSource
 .ctwasMultiBlockLdLoader <- function(ldPanelsByRegion) {
-    `attr<-`(.ctwasLoadRegionLd, "ldPanelsByRegion", ldPanelsByRegion)
+    `attr<-`(
+        removeSource(.ctwasLoadRegionLd),
+        "ldPanelsByRegion",
+        ldPanelsByRegion
+    )
 }
 
 # The LD loader ctwas calls: region `LD_file`'s full LD, from the panel cache
@@ -3535,10 +3811,22 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     .ctwasPanelLd(.ctwasLoaderPanel(sys.function(), LD_file, "LD loader"))
 }
 
-# Multi-block SNP-info loader for ctwas. Mirrors the LD loader.
+# Multi-block SNP-info loader for ctwas. Mirrors the LD loader, but carries
+# only each panel's snpInfo: a saved payload would otherwise hold every
+# region's LD twice, once on each loader.
 # @noRd
 .ctwasMultiBlockSnpInfoLoader <- function(ldPanelsByRegion) {
-    `attr<-`(.ctwasLoadRegionSnpInfo, "ldPanelsByRegion", ldPanelsByRegion)
+    `attr<-`(
+        removeSource(.ctwasLoadRegionSnpInfo),
+        "ldPanelsByRegion",
+        map(ldPanelsByRegion, .ctwasSnpInfoPanel)
+    )
+}
+
+# The part of a cached panel the SNP-info loader reads.
+# @noRd
+.ctwasSnpInfoPanel <- function(panel) {
+    list(snpInfo = panel$snpInfo)
 }
 
 # The snpInfo loader ctwas calls, reading the same attribute.

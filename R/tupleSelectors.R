@@ -99,15 +99,17 @@
     x[[i]]
 }
 
-# Every row's payload (.collectionEntry()) as a plain list.
+# Every row's payload (.collectionEntry()) as a plain list; for TWAS weights,
+# every cell's -- one per (row, method), as .twasCells() lists them.
 # @noRd
 .collectionEntries <- function(x) {
-    # Weight and fine-mapping rows are rebuilt one by one: their elements
-    # alone are bare GRanges, without the fits.
-    if (
-        methods::is(x, "TwasWeights") ||
-            methods::is(x, "FineMappingResultBase")
-    ) {
+    if (methods::is(x, "TwasWeights")) {
+        cells <- .twasCells(x)
+        return(map2(cells$row, cells$method, .twrCellParts, x = x))
+    }
+    # Fine-mapping rows are rebuilt one by one: their elements alone are bare
+    # GRanges, without the fits.
+    if (methods::is(x, "FineMappingResultBase")) {
         return(map(seq_len(nrow(x)), .collectionEntry, x = x))
     }
     as.list(x)
@@ -987,17 +989,19 @@
 # unioned, and a collection lacking an optional column (e.g. jointContexts or
 # region) is padded with `.naLikeColumn` -- so adding a column to a class flows
 # through combines automatically rather than being hand-listed at each site.
-# Preserves the concrete class and rebuilds the LD references: every row keeps
-# its own (.ldRefCombine()), unless `ldReference` names one for all of them.
+# Preserves the concrete class and rebuilds its row dictionaries: every row
+# keeps its own LD reference (.ldRefCombine()), unless `ldReference` names one
+# for all of them, and its own CV partition (.cvPartitionCombine()); a class
+# that holds none (CtwasResult, H2Estimate) gets none.
 # Returns NULL when given no inputs. Every collection is a RangedTupleList now,
 # so this only drops the NULL parts and hands off; the old DFrame path went
 # with the rebase onto GRangesList.
 #
 # `slots` carries the collection-level state a concrete subclass adds beyond
-# `ldReference` (SumStatsBase's `genome` / `qcOptions`). It is passed in rather
-# than read off `parts[[1L]]` because those slots describe the WHOLE collection,
-# so merging them is the caller's decision -- first-wins would silently drop the
-# other parts' QC audit.
+# its row dictionaries (SumStatsBase's `genome` / `qcOptions`). It is passed in
+# rather than read off `parts[[1L]]` because those slots describe the WHOLE
+# collection, so merging them is the caller's decision -- first-wins would
+# silently drop the other parts' QC audit.
 .rbindCollections <- function(
     parts,
     ldReference = NULL,
@@ -1009,8 +1013,23 @@
     if (length(parts) == 0L) {
         return(NULL)
     }
-    dict <- .ldRefCombine(parts, ldReference, fn)
-    .rbindRangedCollections(parts, dict, slots, genome)
+    # A gene's methods from different parts share its row.
+    if (methods::is(parts[[1L]], "TwasWeights")) {
+        return(.twasCombine(parts, ldReference))
+    }
+    cls <- class(parts[[1L]])[[1L]]
+    dicts <- compact(list(
+        ldReference = if (methods::.hasSlot(parts[[1L]], "ldReference")) {
+            .ldRefCombine(parts, ldReference, fn)
+        },
+        cvPartition = if (is_in("cvPartition", methods::slotNames(cls))) {
+            .cvPartitionCombine(parts)
+        },
+        fits = if (is_in("fits", methods::slotNames(cls))) {
+            .fmrFitCombine(parts)
+        }
+    ))
+    .rbindRangedCollections(parts, dicts, slots, genome)
 }
 
 # Internal: aggregate a per-entry accessor across every row of a
@@ -1150,29 +1169,46 @@
 # @noRd
 .rbindRangedCollections <- function(
     parts,
-    dict,
+    dicts = list(),
     slots = list(),
     genome = NULL
 ) {
     cls <- class(parts[[1L]])[[1L]]
     allCols <- reduce(map(parts, .tupleColumnNames), union)
-    # Each part keyed its rows into its own references, so the bound rows take
-    # the keys the combined references were built with.
-    combined <- list_assign(
-        set_names(map(allCols, .rbindColumn, parts = parts), allCols),
-        ldReference = dict$keys
+    combined <- set_names(map(allCols, .rbindColumn, parts = parts), allCols)
+    # Each part keyed its rows into its own dictionaries, so the bound rows
+    # take the keys the combined dictionaries were built with, in the column
+    # each names (its slot's own name unless it says otherwise).
+    keyCols <- map2_chr(dicts, names(dicts), .dictKeyColOf)
+    dictKeys <- set_names(map(dicts, "keys"), keyCols)
+    combined <- list_assign(combined, !!!dictKeys)
+    dataFrameArgs <- c(
+        map(combined, .rbindAsDataFrameColumn),
+        list(check.names = FALSE)
     )
-    md <- exec(
-        S4Vectors::DataFrame,
-        !!!c(combined, list(check.names = FALSE))
-    )
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     # Joining the parts merges each part's seqinfo, so a part whose elements
     # never had a build set would leave the result carrying both the real
     # build and NA. The agreed build is written back explicitly to keep
     # seqinfo single-valued, which validity requires.
     built <- .withGenomeBuild(.rtlJoinParts(parts), !is.null(genome), genome)
     grl <- .rtlNamed(S4Vectors::`mcols<-`(built, value = md))
-    exec(methods::new, cls, grl, !!!c(list(ldReference = dict$refs), slots))
+    slotArgs <- c(map(dicts, "entries"), slots)
+    exec(methods::new, cls, .rtlStored(cls, grl), !!!slotArgs)
+}
+
+# @noRd
+#' @importFrom purrr map2_chr
+.dictKeyColOf <- function(dict, slot) {
+    dict$keyCol %||% slot
+}
+
+# A bound column as DataFrame() takes it: a bare list (a cTWAS run's tables,
+# an H2Estimate's enrichment tables) as one list column, which DataFrame()
+# would otherwise refuse or spread into columns.
+# @noRd
+.rbindAsDataFrameColumn <- function(v) {
+    if (is.list(v) && !is.object(v)) I(v) else v
 }
 
 # Concatenate column `cn` across all parts (NA-filling parts that lack it).
@@ -1214,8 +1250,11 @@
         } else {
             .fmrGatherVariants(x, idx)
         },
-        susieFit = md$susieFit[[first]],
-        cvResult = md$cvResult[[first]],
+        susieFit = .fitEntry(md$susieFit[[first]], x),
+        cvResult = .cvJoinPartition(
+            md$cvResult[[first]],
+            .mdCvPartition(x, md, first)
+        ),
         derivedColumns = .mdDerivedColumns(md, idx)
     )
 }
@@ -1294,7 +1333,7 @@
 # row holding all of its fit, so no id is rendered.
 # @noRd
 .fmrRowDerivedColumns <- function(i, x, record) {
-    fit <- mcols(x, use.names = FALSE)$susieFit[[i]]
+    fit <- .fitEntry(mcols(x, use.names = FALSE)$susieFit[[i]], x)
     pip <- if (is.list(fit)) fit[["pip"]]
     if (!is.numeric(pip)) {
         return(NULL)
@@ -1319,18 +1358,6 @@
 # @noRd
 .fmrRowVariantsAt <- function(i, x) {
     .fmRowRestoredVariants(.fmrRowParts(x, i))
-}
-
-# The variants the fits of TWAS rows `idx` were made with, in their order:
-# the first row's, as the fit payload is, since rows split from one entry
-# repeat both. None for a collection saved before rows recorded them.
-# @noRd
-.mdFitVariants <- function(md, idx) {
-    fv <- md$fitVariants
-    if (is.null(fv)) {
-        return(character(0))
-    }
-    as.character(fv[[idx[[1L]]]])
 }
 
 # @noRd
@@ -1497,23 +1524,22 @@
     list(variantIds = vids[ok], weights = w[ok])
 }
 
-# The stored payload of one TwasWeights row. Mirrors .fmrRowParts: weights are
-# the element's inner mcols, the rest is outer mcols.
+# The payload of method `method` of TwasWeights row `idx` (a TwasWeightsRow,
+# .twrCellParts()). A row holding a single method needs none named.
 # @noRd
-.twrRowParts <- function(x, idx) {
-    md <- mcols(x, use.names = FALSE)
-    first <- idx[[1L]]
-    gr <- .rtlGatherElements(x, idx)
-    new(
-        "TwasWeightsRow",
-        variants = gr,
-        weights = mcols(gr, use.names = FALSE)$weight,
-        methodFits = md$fits[[first]],
-        cvResult = md$cvResult[[first]],
-        weightStandardized = isTRUE(md$standardized[[first]]),
-        weightsDataType = md$dataType[[first]],
-        fitVariants = .mdFitVariants(md, idx)
-    )
+.twrRowParts <- function(x, idx, method = NULL) {
+    row <- idx[[1L]]
+    methods <- as.character(mcols(x, use.names = FALSE)$methods[[row]])
+    if (is.null(method)) {
+        if (length(methods) != 1L) {
+            abort(glue(
+                "TwasWeights row {row} holds {length(methods)} methods; name ",
+                "the one to read."
+            ))
+        }
+        method <- methods
+    }
+    .twrCellParts(x, row, method)
 }
 
 # @noRd
@@ -1522,7 +1548,8 @@
 }
 
 # The weight vector aligned to the row's variant ids -- what resolveWeights
-# produced from a TwasWeightsRow.
+# produced from a TwasWeightsRow. A weight matrix (variants x K) keeps its
+# columns.
 # @noRd
 .twrRowResolveWeights <- function(parts) {
     empty <- list(variantIds = character(0), weights = numeric(0))
@@ -1530,6 +1557,9 @@
     raw <- weights(parts)
     if (length(vids) == 0L || is.null(raw)) {
         return(empty)
+    }
+    if (is.matrix(raw)) {
+        return(.twrResolveMatrix(vids, raw, empty))
     }
     w <- as.numeric(raw)
     if (length(w) != length(vids)) {
@@ -1540,6 +1570,23 @@
         return(empty)
     }
     list(variantIds = vids[ok], weights = w[ok])
+}
+
+# A weight matrix's rows aligned to the variant ids, its columns kept; a row
+# with a missing id or weight is dropped.
+# @noRd
+.twrResolveMatrix <- function(vids, raw, empty) {
+    if (nrow(raw) != length(vids)) {
+        return(empty)
+    }
+    ok <- !is.na(vids) & rowSums(is.na(raw)) == 0L
+    if (!any(ok)) {
+        return(empty)
+    }
+    list(
+        variantIds = vids[ok],
+        weights = `rownames<-`(raw[ok, , drop = FALSE], NULL)
+    )
 }
 
 # ---- fit coverage ------------------------------------------------------------
@@ -1723,10 +1770,12 @@
     rep(starts[ks], counts[ks]) + sequence(counts[ks])
 }
 
-# The fits of rows `idx` of a fine-mapping collection, as a list.
+# The fits of rows `idx` of a fine-mapping collection, as a list, from the
+# fits dictionary its rows key into.
 # @noRd
 .fmrFitsAt <- function(x, idx) {
-    as.list(mcols(x, use.names = FALSE)$susieFit[idx])
+    keys <- as.list(mcols(x, use.names = FALSE)$susieFit[idx])
+    map(keys, .fitEntry, x = x)
 }
 
 # @noRd
@@ -1843,39 +1892,48 @@
 
 # The labels of the rows of `x` that hold fewer variants than their stored
 # fit was made with: for fine-mapping rows, those shorter than their fit,
-# which needs no ids; for TWAS rows, those missing some of the variants they
-# recorded. None when `x` has no fits to compare, or is not a collection at
-# all: an optional input left NULL, or one the caller has yet to validate,
-# which this advisory check must not pre-empt.
+# which needs no ids; for TWAS weights, the (gene, method) cells missing some
+# of the variants their fits name. None when `x` has no fits to compare, or
+# is not a collection at all: an optional input left NULL, or one the caller
+# has yet to validate, which this advisory check must not pre-empt.
 # @noRd
 .narrowedRowLabels <- function(x) {
     if (!methods::is(x, "RangedTupleList") || length(x) == 0L) {
         return(character(0))
     }
-    md <- mcols(x, use.names = FALSE)
-    if (.isFineMappingPayload(x)) {
-        if (is.null(md$susieFit)) {
-            return(character(0))
-        }
-        width <- map_int(as.list(md$susieFit), .fitWidth)
-        short <- which(!is.na(width) & lengths(x) < width)
-    } else {
-        fv <- md$fitVariants
-        if (is.null(fv)) {
-            return(character(0))
-        }
-        lost <- map_int(seq_along(x), .rowLostFitVariants, x = x, fv = fv)
-        short <- which(lost > 0L)
+    if (methods::is(x, "TwasWeights")) {
+        return(.twasNarrowedCellLabels(x))
     }
+    md <- mcols(x, use.names = FALSE)
+    if (!.isFineMappingPayload(x) || is.null(md$susieFit)) {
+        return(character(0))
+    }
+    width <- map_int(.fmrFitsAt(x, seq_along(x)), .fitWidth)
+    short <- which(!is.na(width) & lengths(x) < width)
     if (length(short) == 0L) {
         return(character(0))
     }
     .pubRowLabels(x, short)
 }
 
+# The labels of the cells of TWAS weights `x` whose method holds fewer
+# variants than its stored fit names (.twasFitVariantIds()).
 # @noRd
-.rowLostFitVariants <- function(i, x, fv) {
-    .lostFitVariantCount(as.character(fv[[i]]), .grVariantIds(x[[i]]))
+#' @importFrom purrr map2_int
+.twasNarrowedCellLabels <- function(x) {
+    cells <- .twasCells(x)
+    lost <- map2_int(cells$row, cells$method, .twasCellLostFitVariants, x = x)
+    short <- cells[lost > 0L, ]
+    str_c(short$study, "|", short$context, "|", short$trait, "|", short$method)
+}
+
+# @noRd
+.twasCellLostFitVariants <- function(row, method, x) {
+    parts <- .twrCellParts(x, row, method)
+    .lostFitVariantCount(
+        .twasFitVariantIds(methodFits(parts)),
+        .grVariantIds(variants(parts))
+    )
 }
 
 # `expr` with its fit-coverage warnings muffled, for a caller that has
@@ -1922,6 +1980,20 @@
         return(.twrRowResolveWeights(parts))
     }
     .fmrRowResolveWeights(parts)
+}
+
+# Resolved `weights` as one weight per variant: a vector as it is, a
+# one-column matrix its column; NULL for a matrix of several columns (one per
+# feature or outcome), which gives no single weight per variant.
+# @noRd
+.singleWeightColumn <- function(weights) {
+    if (!is.matrix(weights)) {
+        return(weights)
+    }
+    if (ncol(weights) != 1L) {
+        return(NULL)
+    }
+    weights[, 1L]
 }
 
 # The cross-validated / per-method fits of one row, or NULL for a
@@ -2027,19 +2099,6 @@
     variantIds(e)
 }
 
-# The non-variant half of each TWAS row payload, as outer mcols columns.
-# Objects of arbitrary shape (fits, cvResult, dataType) ride in SimpleLists.
-# @noRd
-.twRowPayloadCols <- function(entry) {
-    list(
-        fits = S4Vectors::SimpleList(map(entry, methodFits)),
-        cvResult = S4Vectors::SimpleList(map(entry, cvResult)),
-        standardized = map_lgl(entry, .twPayloadStandardized),
-        dataType = S4Vectors::SimpleList(map(entry, weightsDataType)),
-        fitVariants = IRanges::CharacterList(map(entry, .twRowFitVariants))
-    )
-}
-
 # =============================================================================
 # Combining summary-statistics collections
 # -----------------------------------------------------------------------------
@@ -2079,14 +2138,18 @@
     invisible(NULL)
 }
 
-# The collection-level slots BEYOND ldReference that a combine has to merge, for
-# whatever concrete class `parts` are. A slot describes the whole collection,
+# The collection-level slots BEYOND the row dictionaries (ldReference,
+# cvPartition) that a combine has to merge, for whatever concrete class `parts`
+# are. A slot describes the whole collection,
 # so first-wins would silently drop the other parts' state; each gets its own
 # rule and an unrecognised slot is an error rather than a quiet default, so
 # adding one to a class cannot slip through a combine unnoticed.
 # @noRd
 .rtlExtraSlots <- function(parts, fn) {
-    own <- setdiff(.rtlOwnSlots(parts[[1L]]), "ldReference")
+    own <- setdiff(
+        .rtlOwnSlots(parts[[1L]]),
+        c("ldReference", "cvPartition", "fits")
+    )
     # discard(is.null), not compact(): parts no QC has run on merge to an
     # empty qcOptions, which is a merged value -- compact() would drop it and
     # report the slot as having no merge rule.
@@ -2216,6 +2279,222 @@
     identical(qcOptions(x)$options, first)
 }
 
+# -----------------------------------------------------------------------------
+# Row dictionaries
+# -----------------------------------------------------------------------------
+# A value several rows of a collection share -- an LD reference, a joint fit,
+# a cross-validation fold partition -- is kept ONCE, in a named list in a
+# collection-level slot, and every row names its entry in an mcols column (NA
+# for a row with none). The key travels with the rows on subsetting as every
+# per-row value does, and a bind re-keys the rows into one combined list, so
+# no row holds its own copy. A dictionary is described by a spec: a list of
+# the slot, the key column, and the prefix its entry names are numbered
+# after.
+
+# Each distinct value among `perRow` once, named <prefix>1, <prefix>2, ... in
+# order of first use, and every row's key into them (NA for a NULL row).
+# @noRd
+.dictBuild <- function(perRow, prefix) {
+    present <- which(!map_lgl(perRow, is.null))
+    ids <- .dictIdentities(perRow[present])
+    firstIdx <- which(!duplicated(ids))
+    names <- str_c(prefix, seq_along(firstIdx))
+    keys <- replace(
+        rep(NA_character_, length(perRow)),
+        present,
+        names[match(ids, ids[firstIdx])]
+    )
+    entries <- if (length(firstIdx) == 0L) {
+        list()
+    } else {
+        set_names(perRow[present[firstIdx]], names)
+    }
+    list(entries = entries, keys = keys)
+}
+
+# A content identity per value, so equal values -- the same object handed to
+# every row, or two equal copies -- collapse to one entry. Hashed once per
+# distinct object rather than per row: a large value shared by every row is
+# read once, not once per row.
+# @noRd
+#' @importFrom rlang hash obj_address
+.dictIdentities <- function(values) {
+    if (length(values) == 0L) {
+        return(character(0))
+    }
+    addresses <- map_chr(values, obj_address)
+    firstOfAddress <- !duplicated(addresses)
+    hashes <- map_chr(values[firstOfAddress], hash)
+    hashes[match(addresses, addresses[firstOfAddress])]
+}
+
+# Each row's key into dictionary `spec` (NA for a row with no entry); for a
+# key column holding several keys a row, as TWAS weights hold one per method,
+# every key.
+# @noRd
+.dictKeys <- function(x, spec) {
+    keys <- mcols(x, use.names = FALSE)[[spec$keyCol]]
+    if (is.null(keys)) {
+        return(rep(NA_character_, length(x)))
+    }
+    if (methods::is(keys, "List")) {
+        return(unlist(keys, use.names = FALSE))
+    }
+    keys
+}
+
+# The entries of `entries` some key in `keys` names: what a collection
+# reports, so a subset does not report the entries its rows left behind.
+# @noRd
+.dictUsed <- function(entries, keys) {
+    used <- entries[is_in(names(entries), keys)]
+    if (length(used) == 0L) list() else used
+}
+
+# The entry `key` names in `entries`, NULL for a row with none (NA).
+# @noRd
+.dictEntryFor <- function(key, entries) {
+    if (is.na(key)) NULL else entries[[key]]
+}
+
+# `x` with dictionary `spec` rebuilt from `perRow`, one value (or NULL) per
+# row. The slot is written first and the keys second, so the object is only
+# validated once the two agree.
+# @noRd
+#' @importFrom methods slot<-
+.withRowDict <- function(x, spec, perRow) {
+    dict <- .dictBuild(perRow, spec$prefix)
+    md <- mcols(x, use.names = FALSE)
+    md[[spec$keyCol]] <- dict$keys
+    methods::slot(x, spec$slot, check = FALSE) <- dict$entries
+    S4Vectors::`mcols<-`(x, value = md)
+}
+
+# What is wrong with a dictionary's entries and the keys pointing into them,
+# or NULL. An entry's name is what a key points at, so an unnamed, blank or
+# repeated one leaves a row pointing at nothing, or at two entries.
+# @noRd
+.dictProblems <- function(entries, keys, slot, what) {
+    .dictNameProblem(entries, slot) %||%
+        .dictKeyProblem(entries, keys, slot, what)
+}
+
+# @noRd
+.dictNameProblem <- function(entries, slot) {
+    if (length(entries) == 0L) {
+        return(NULL)
+    }
+    nms <- names(entries)
+    if (
+        is.null(nms) || anyNA(nms) || any(nms == "") || anyDuplicated(nms) > 0L
+    ) {
+        return(str_c(slot, " entries must have unique, non-empty names"))
+    }
+    NULL
+}
+
+# @noRd
+.dictKeyProblem <- function(entries, keys, slot, what) {
+    unknown <- setdiff(keys[!is.na(keys)], names(entries))
+    if (length(unknown) == 0L) {
+        return(NULL)
+    }
+    str_c(
+        "rows name ",
+        what,
+        " not in ",
+        slot,
+        ": ",
+        str_flatten(unknown, ", ")
+    )
+}
+
+# -----------------------------------------------------------------------------
+# Fits in a collection
+# -----------------------------------------------------------------------------
+# A collection keeps every fit its rows hold once per distinct value, in its
+# `fits` dictionary, and each row names its entry: a fine-mapping row in its
+# `susieFit` column, a TWAS row per method in `fits` (the full-data fit) and
+# `foldFits` (its cross-validation's per-fold fits). The rows of a joint fit
+# hold the same fit, so it is stored once rather than once per condition.
+
+# @noRd
+.FIT_DICT_PREFIX <- "fit"
+
+# A collection's fits; none for one saved before the slot existed, whose
+# rows still hold their own.
+# @noRd
+.fitDict <- function(x) {
+    if (!methods::.hasSlot(x, "fits")) {
+        return(list())
+    }
+    x@fits
+}
+
+# The fit `key` names in `x`'s dictionary, NULL for a row with none (NA).
+# @noRd
+.fitEntry <- function(key, x) {
+    .dictEntryFor(key, .fitDict(x))
+}
+
+# What is wrong with a collection's fits and the keys its columns `keyCols`
+# hold into them, or NULL.
+# @noRd
+.fitProblems <- function(x, keyCols) {
+    keys <- list_c(c(
+        list(character(0)),
+        map(keyCols, .fitKeysIn, x = x)
+    ))
+    .dictProblems(.fitDict(x), keys, "fits", "fit(s)")
+}
+
+# @noRd
+.fitKeysIn <- function(keyCol, x) {
+    .fitKeysOfColumn(keyCol, mcols(x, use.names = FALSE))
+}
+
+# The keys column `keyCol` of mcols `md` holds. A column holding fits rather
+# than keys -- a collection saved before rows shared them, which
+# updateObject() folds -- holds none.
+# @noRd
+.fitKeysOfColumn <- function(keyCol, md) {
+    col <- md[[keyCol]]
+    if (methods::is(col, "CharacterList")) {
+        return(unlist(col, use.names = FALSE))
+    }
+    if (is.character(col)) col else character(0)
+}
+
+# The entries of a fits dictionary `entries` the rows with mcols `md` name:
+# what a subset keeps, so it holds its own rows' fits and not every row's.
+# @noRd
+.fitsInUse <- function(entries, md) {
+    if (length(entries) == 0L || is.null(md)) {
+        return(entries)
+    }
+    keyCols <- intersect(c("susieFit", "fits", "foldFits"), colnames(md))
+    keys <- list_c(c(
+        list(character(0)),
+        map(keyCols, .fitKeysOfColumn, md = md)
+    ))
+    .dictUsed(entries, keys)
+}
+
+# The fits dictionary of fine-mapping collections `parts`, row-bound: each
+# row keeps the fit it had, and equal fits are stored once.
+# @noRd
+.fmrFitCombine <- function(parts) {
+    perRow <- list_flatten(map(parts, .fmrRowFits))
+    c(.dictBuild(perRow, .FIT_DICT_PREFIX), list(keyCol = "susieFit"))
+}
+
+# Every row's fit, NULL for a row with none.
+# @noRd
+.fmrRowFits <- function(x) {
+    keys <- as.character(mcols(x, use.names = FALSE)$susieFit)
+    map(keys, .fitEntry, x = x)
+}
+
 # The LD references of `parts`, row-bound: each row keeps the reference it
 # had, and a reference that is a view of another is stored as that one
 # (.ldRefMergeViews()). `override`, when given, is every row's reference
@@ -2242,7 +2521,7 @@
 # first row's reference.
 # @noRd
 .ldRefMergeViews <- function(dict, fn) {
-    refs <- dict$refs
+    refs <- dict$entries
     if (length(refs) <= 1L) {
         return(dict)
     }
@@ -2264,7 +2543,7 @@
     )
     keys <- str_c("ld", seq_along(merged))
     list(
-        refs = set_names(merged, keys),
+        entries = set_names(merged, keys),
         keys = keys[group[match(dict$keys, names(refs))]]
     )
 }
@@ -2319,58 +2598,79 @@
 }
 
 # One panel standing for `panels`, which read the same files over the same
-# samples: a handle union keeps the first handle and widens its snpInfo, each
-# row's `fileIdx` addressing a position in THAT file, and a panel union binds
-# the parts over the first one's samples.
+# samples: their rows, each once, in genomic order, over the first panel's
+# samples. A variant is told by the id rendered from its position and
+# alleles, as file labels need not be unique. Parts that hold the same
+# variants union to the first.
 # @noRd
 .unionPanelRefs <- function(panels, fn) {
+    panels <- map(panels, .ssAsPanel)
     chromPaths <- .ssUnionChromPaths(panels, fn)
-    handles <- map(panels, .ldRefHandle)
-    if (any(map_lgl(handles, is.null))) {
-        return(.ssUnionPanels(panels, chromPaths))
+    ranges <- map(panels, SummarizedExperiment::rowRanges)
+    ids <- map(ranges, .grVariantIds)
+    if (all(map_lgl(ids, identical, ids[[1L]]))) {
+        return(panels[[1L]])
     }
-    handle <- methods::initialize(
-        handles[[1L]],
-        snpInfo = .ssUnionSnpInfo(handles),
-        chromPaths = chromPaths
-    )
-    .asLdRef(handle)
-}
-
-# The union of panels from one source that read through no handle -- a VCF,
-# GDS or PLINK1 panel, or a per-chromosome set of them: their rows, each
-# once, in genomic order, over the first panel's samples. The parts' assays
-# are bound, not read. Parts that are all the same panel union to it.
-# @noRd
-.ssUnionPanels <- function(panels, chromPaths) {
+    rr <- .bindPanelRanges(ranges)
+    kept <- which(!duplicated(list_c(ids)))
+    ord <- kept[order(as.character(seqnames(rr)[kept]), start(rr)[kept])]
     first <- panels[[1L]]
-    if (all(map_lgl(map(panels, rownames), identical, rownames(first)))) {
-        return(first)
-    }
-    rr <- suppressWarnings(
-        exec(c, !!!unname(map(panels, SummarizedExperiment::rowRanges)))
-    )
-    stacked <- SummarizedExperiment::SummarizedExperiment(
-        assays = list(
-            dosage = exec(
-                BiocGenerics::rbind,
-                !!!unname(map(panels, .seDosage))
-            )
-        ),
-        rowRanges = rr,
-        colData = SummarizedExperiment::colData(first),
-        metadata = S4Vectors::metadata(first)
-    )
-    kept <- which(!duplicated(names(rr)))
-    ord <- kept[order(
-        as.character(seqnames(rr)[kept]),
-        start(rr)[kept]
-    )]
-    md <- S4Vectors::metadata(stacked)
+    md <- S4Vectors::metadata(first)
     if (!is.null(md$genotypeSource)) {
         md$genotypeSource$chromPaths <- chromPaths
     }
-    S4Vectors::`metadata<-`(stacked[ord, ], value = md)
+    SummarizedExperiment::SummarizedExperiment(
+        assays = list(dosage = .ssUnionDosage(panels, ord, chromPaths)),
+        rowRanges = rr[ord],
+        colData = SummarizedExperiment::colData(first),
+        metadata = md
+    )
+}
+
+# A bare GenotypeHandle, which an LD reference was before it was a panel,
+# as the panel over it; a panel as it is.
+# @noRd
+.ssAsPanel <- function(x) {
+    if (methods::is(x, "GenotypeHandle")) .asLdRef(x) else x
+}
+
+# The dosages of a union: rows `ord` of the parts' rows in turn, over the
+# first part's samples. Parts that each read through a handle are read
+# through one, the first handle with a variant table of those rows' reading
+# columns (each `fileIdx` addresses a position in THAT file). Other parts --
+# a VCF, GDS or PLINK1 panel, or a per-chromosome set of them -- have their
+# assays bound, not read.
+# @noRd
+.ssUnionDosage <- function(panels, ord, chromPaths) {
+    handles <- map(panels, .ldRefHandle)
+    seedRows <- map(panels, .panelSeedRows)
+    if (
+        !all(map_lgl(handles, .ssRowsAddressFile)) ||
+            any(map_lgl(seedRows, is.null))
+    ) {
+        dosages <- unname(map(panels, .seDosage))
+        bound <- exec(BiocGenerics::rbind, !!!dosages)
+        return(bound[ord, , drop = FALSE])
+    }
+    handle <- methods::initialize(
+        handles[[1L]],
+        snpInfo = list_rbind(map2(handles, seedRows, .ssReadRows))[ord, ],
+        chromPaths = chromPaths
+    )
+    genotypeDelayedArray(handle)[, colnames(panels[[1L]]), drop = FALSE]
+}
+
+# TRUE for a handle whose variant table records each variant's position in
+# its file, so its rows can be moved into another handle's table.
+# @noRd
+.ssRowsAddressFile <- function(handle) {
+    !is.null(handle) && is_in("fileIdx", names(snpInfo(handle)))
+}
+
+# Rows `rows` of a handle's variant table.
+# @noRd
+.ssReadRows <- function(handle, rows) {
+    as_tibble(slice(snpInfo(handle), rows))
 }
 
 # TRUE when every variant of `x` is in `by`, coded the same way.
@@ -2455,29 +2755,3 @@
 .ssSampleIds <- function(x) {
     if (methods::is(x, "GenotypeHandle")) sampleIds(x) else colnames(x)
 }
-
-# The parts' snpInfo rows, de-duplicated by variant id and returned in genomic
-# order so the unioned panel reads like one built over the whole span. The
-# first handle's data-frame class is preserved: a handle built with a base
-# data.frame keeps one, because some downstream readers index snpInfo
-# positionally and a tibble column is a one-column list there.
-# @noRd
-.ssUnionSnpInfo <- function(handles) {
-    first <- snpInfo(handles[[1L]])
-    combined <- list_rbind(map(handles, .ssHandleSnpInfo))
-    keyed <- all(is_in(c("SNP", "CHR", "BP"), names(combined)))
-    si <- if (nrow(combined) > 0L && keyed) {
-        deduped <- combined[!duplicated(combined$SNP), , drop = FALSE]
-        deduped[
-            order(deduped$CHR, as.integer(deduped$BP)),
-            ,
-            drop = FALSE
-        ]
-    } else {
-        combined
-    }
-    if (inherits(first, "tbl_df")) si else as.data.frame(si)
-}
-
-# @noRd
-.ssHandleSnpInfo <- function(h) as_tibble(snpInfo(h))

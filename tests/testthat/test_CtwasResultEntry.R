@@ -38,7 +38,7 @@ test_that("as(entry, 'GRanges') gives placed posteriors only", {
     )
 })
 
-test_that("CtwasResultEntry: an empty entry is valid and its accessors return NULL", {
+test_that("an empty CtwasResultEntry is valid; its accessors return NULL", {
     e <- CtwasResultEntry()
     expect_s4_class(e, "CtwasResultEntry")
     expect_null(ctwasPosteriors(e))

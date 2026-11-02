@@ -133,14 +133,13 @@ setMethod("show", "GenotypeHandle", function(object) {
 #' @param pgen,pvar,psam Explicit paths to the PLINK2 triplet, or all
 #'   \code{NULL}.
 #' @param ldMeta Path to an LD-meta TSV file (columns \code{chrom},
-#'   \code{start}, \code{end}, \code{path}; the \code{path} column may be
-#'   comma-separated as \code{ld_file,bim_file}). Requires \code{block}. The
-#'   constructor resolves the row covering \code{block}, then delegates to the
-#'   appropriate file-based handler. When the resolved row points at PLINK2
-#'   or BGEN files, the corresponding reader is used; a row pointing
-#'   at a pre-computed LD matrix (\code{.cor.xz}) is refused, as pecotmr reads
-#'   no pre-computed LD from disk -- wrap such a matrix in an
-#'   \code{\link{LdMatrix}} instead.
+#'   \code{start}, \code{end}, \code{path}, each path a genotype file).
+#'   Requires \code{block}. The constructor resolves the row covering
+#'   \code{block}, then delegates to the appropriate file-based handler. When
+#'   the resolved row points at PLINK2 or BGEN files, the corresponding reader
+#'   is used; a row pointing at a pre-computed LD matrix (\code{.cor.xz}) is
+#'   refused, as pecotmr reads no pre-computed LD from disk -- wrap such a
+#'   matrix in an \code{\link{LdMatrix}} instead.
 #' @param block The \code{GRanges} window to look up in \code{ldMeta}; the
 #'   whole file of the row covering it is opened.
 #' @param genoMeta One-file-per-chromosome specification: a path to a
@@ -285,7 +284,7 @@ GenotypeHandle <- function(
 # erroring on no-coverage, multi-row spans, or a pre-computed .cor(.xz) matrix.
 # @noRd
 .ghResolveLdPath <- function(ldMeta, region) {
-    ldPaths <- regionalLdMeta(ldMeta, region)$intersections$LD_file_paths
+    ldPaths <- regionalLdMeta(ldMeta, region)$intersections$paths
     if (length(ldPaths) == 0L) {
         regionStr <- str_flatten(as.character(region), ", ")
         msg <- glue(
@@ -832,9 +831,13 @@ setMethod("nSamples", "GenotypeHandle", function(x) x@nSamples)
 #' Lets genotype dosages back a \code{DelayedArray} that reads through the
 #' handle on demand, so an assay can describe a panel far larger than memory.
 #'
-#' @slot handle The \code{\link{GenotypeHandle}} to read through.
+#' @slot handle The \code{\link{GenotypeHandle}} to read through. Its
+#'   variant table keeps only the columns reading needs, since a panel's
+#'   rowRanges describe its variants.
 #' @slot dm Integer length-2 dimensions (variants, samples).
-#' @slot dn List of dimnames (variant ids, sample ids).
+#' @slot dn Dimnames, empty: a panel's rowRanges name the variants (a seed
+#'   saved earlier may still hold them), and the samples come from the
+#'   handle.
 #' @name GhSeed-class
 #' @keywords internal
 setClass(
@@ -860,6 +863,18 @@ setMethod("dimnames", "GhSeed", function(x) {
 # @noRd
 .ghSeedHandle <- function(x) x@handle
 
+# `x` as a seed is built today -- its handle cut to the columns reading needs
+# (.readingHandle()), no row names -- or NULL when it is built so already.
+# @noRd
+.slimGhSeed <- function(x) {
+    handle <- .ghSeedHandle(x)
+    reading <- .readingHandle(handle)
+    if (identical(reading, handle) && is.null(dimnames(x)[[1L]])) {
+        return(NULL)
+    }
+    methods::initialize(x, handle = reading, dn = list(NULL, NULL))
+}
+
 #' @rdname GhSeed-class
 #' @importFrom S4Arrays extract_array
 setMethod("extract_array", "GhSeed", function(x, index) {
@@ -872,12 +887,9 @@ setMethod("extract_array", "GhSeed", function(x, index) {
     if (length(i) == 0L || length(j) == 0L) {
         return(matrix(numeric(0), length(i), length(j)))
     }
-    se <- extractBlockGenotypes(
-        .ghSeedHandle(x),
-        snpIdx = i,
-        meanImpute = FALSE
-    )
-    as.matrix(SummarizedExperiment::assay(se, "dosage"))[, j, drop = FALSE]
+    # Read as stored, unlabelled: a panel's rowRanges, not its seed, describe
+    # its variants.
+    t(.handleDosage(.ghSeedHandle(x), i))[, j, drop = FALSE]
 })
 
 #' Genotype dosages as a lazily-read DelayedArray
@@ -902,18 +914,15 @@ genotypeDelayedArray <- function(handle) {
         )
         abort(msg)
     }
-    si <- snpInfo(handle)
     seed <- methods::new(
         "GhSeed",
-        handle = handle,
-        dm = c(nrow(si), as.integer(nSamples(handle))),
-        # Only the variant axis is stored; the sample axis is derived from the
-        # handle in the dimnames() method above, so the ~10k sample ids are not
-        # duplicated between dn[[2]] and handle@sampleIds.
-        dn = list(
-            normalizeVariantId(as.character(si$SNP)),
-            NULL
-        )
+        # Its variant table keeps only the columns reading needs.
+        handle = .readingHandle(handle),
+        dm = c(nrow(snpInfo(handle)), as.integer(nSamples(handle))),
+        # Neither axis is stored: a panel's rowRanges name the variants, and
+        # the dimnames() method above derives the sample axis from the handle,
+        # so neither the variant ids nor the ~10k sample ids are duplicated.
+        dn = list(NULL, NULL)
     )
     DelayedArray::DelayedArray(seed)
 }

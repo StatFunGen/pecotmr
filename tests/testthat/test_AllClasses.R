@@ -57,7 +57,7 @@ context("AllClasses (virtual base classes)")
     )
 }
 
-.alc_makeFmEntry <- function(n = 3) {
+.alc_makeFmEntry <- function(n = 3, fit = list()) {
     tl <- data.frame(
         variant_id = paste0("chr1:", 100 * seq_len(n), ":A:G"),
         chrom = rep("1", n),
@@ -77,7 +77,7 @@ context("AllClasses (virtual base classes)")
     )
     FineMappingRow(
         variantIds = tl$variant_id,
-        susieFit = list(),
+        susieFit = fit,
         topLoci = tl
     )
 }
@@ -332,10 +332,151 @@ test_that("updateObject() leaves a current summary-statistics object as is", {
 })
 
 # ===========================================================================
+# Summary statistics stored compactly
+# ===========================================================================
+
+# Variants as QC leaves them: each labelled with the id rendered from its
+# position and alleles, P, BETA and SE derived from Z (and MAF and N), one
+# sample size, and MAF named by the ids, as the example builders name it.
+.alc_derivedGr <- function() {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(seq(100L, by = 100L, length.out = 4L), width = 1L),
+        A1 = rep("A", 4L),
+        A2 = rep("G", 4L)
+    )
+    ids <- pecotmr:::.grVariantIds(gr)
+    z <- c(1.5, -0.4, 2.2, 0.1)
+    maf <- c(0.1, 0.25, 0.4, 0.3)
+    derived <- pecotmr:::.zToBetaSe(z, maf, rep(5000L, 4L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = ids,
+        A1 = rep("A", 4L),
+        A2 = rep("G", 4L),
+        Z = z,
+        N = rep(5000L, 4L),
+        MAF = set_names(maf, ids),
+        BETA = derived$beta,
+        SE = derived$se,
+        P = pecotmr:::.zToPvalue(z)
+    )
+    gr
+}
+
+.alc_gwasOf <- function(gr, studyName = "g1") {
+    GwasSumStats(studyName = studyName, entry = list(gr), genome = "hg19")
+}
+
+test_that("summary statistics leave out what recomputes and hand it back", {
+    gr <- .alc_derivedGr()
+    x <- .alc_gwasOf(gr)
+    stored <- unlist(x, use.names = FALSE)
+    expect_identical(
+        colnames(S4Vectors::mcols(stored)),
+        c("A1", "A2", "Z", "N", "MAF")
+    )
+    expect_identical(
+        S4Vectors::metadata(stored)$derivedColumns,
+        c("SNP", "BETA", "SE", "P")
+    )
+    expect_s4_class(S4Vectors::mcols(stored)$N, "Rle")
+    want <- S4Vectors::mcols(gr)
+    want$MAF <- unname(want$MAF)
+    expect_identical(S4Vectors::mcols(x[[1L]]), want)
+    expect_null(S4Vectors::metadata(x[[1L]])$derivedColumns)
+    expect_identical(as.list(x)[[1L]], x[[1L]])
+    expect_identical(unname(lapply(x, length)), list(4L))
+    expect_identical(sumStats(x), x[[1L]])
+})
+
+test_that("a derived column out of its usual place is kept", {
+    # P recomputes exactly, but it sits before N here, and putting it back
+    # where a row holds it would reorder the columns, so nothing is left out.
+    gr <- .alc_derivedGr()
+    md <- S4Vectors::mcols(gr)
+    S4Vectors::mcols(gr) <- md[c("SNP", "A1", "A2", "Z", "P", "N", "MAF")]
+    stored <- unlist(.alc_gwasOf(gr), use.names = FALSE)
+    expect_true(is_in("P", colnames(S4Vectors::mcols(stored))))
+    expect_null(S4Vectors::metadata(stored)$derivedColumns)
+})
+
+test_that("a column the source never had is not handed back", {
+    gr <- .alc_derivedGr()
+    S4Vectors::mcols(gr)$P <- NULL
+    x <- .alc_gwasOf(gr)
+    expect_false(is_in("P", colnames(S4Vectors::mcols(x[[1L]]))))
+    expect_null(pval(x))
+})
+
+test_that("labels and values that do not recompute exactly are kept", {
+    gr <- .alc_derivedGr()
+    S4Vectors::mcols(gr)$SNP <- str_c("rs", 1:4)
+    S4Vectors::mcols(gr)$P <- pmax(S4Vectors::mcols(gr)$P, 0.05)
+    stored <- unlist(.alc_gwasOf(gr), use.names = FALSE)
+    expect_true(all(is_in(c("SNP", "P"), colnames(S4Vectors::mcols(stored)))))
+    expect_identical(
+        S4Vectors::metadata(stored)$derivedColumns,
+        c("BETA", "SE")
+    )
+    expect_identical(S4Vectors::mcols(stored)$SNP, str_c("rs", 1:4))
+})
+
+test_that("a collection built from unlist() gets the columns left out back", {
+    x <- .alc_gwasOf(.alc_derivedGr())
+    again <- .alc_gwasOf(unlist(x, use.names = FALSE))
+    expect_identical(again[[1L]], x[[1L]])
+})
+
+test_that("a rebuild keeps a column the caller dropped", {
+    x <- .alc_gwasOf(.alc_derivedGr())
+    el <- x[[1L]]
+    S4Vectors::mcols(el)$P <- NULL
+    x[[1L]] <- el
+    expect_false(is_in("P", colnames(S4Vectors::mcols(x[[1L]]))))
+    expect_identical(
+        colnames(S4Vectors::mcols(x[[1L]])),
+        setdiff(colnames(S4Vectors::mcols(el)), "P")
+    )
+})
+
+test_that("stored and plain collections combine with every column", {
+    a <- .alc_gwasOf(.alc_derivedGr(), "a")
+    gr <- .alc_derivedGr()
+    S4Vectors::mcols(gr)$SNP <- str_c("rs", 1:4)
+    b <- .alc_gwasOf(gr, "b")
+    both <- combineGwasSumStats(a, b)
+    expect_identical(both[[1L]], a[[1L]])
+    expect_identical(both[[2L]], b[[1L]])
+})
+
+test_that("updateObject() stores a collection saved in full compactly", {
+    x <- .alc_gwasOf(.alc_derivedGr())
+    saved <- x
+    methods::slot(saved, "unlistData") <- pecotmr:::.ssPlainElement(
+        unlist(x, use.names = FALSE)
+    )
+    up <- updateObject(saved)
+    expect_identical(
+        unlist(up, use.names = FALSE),
+        unlist(x, use.names = FALSE)
+    )
+    expect_identical(up[[1L]], x[[1L]])
+})
+
+test_that("a record of left-out columns the variants hold is refused", {
+    x <- .alc_gwasOf(.alc_derivedGr())
+    flat <- unlist(x, use.names = FALSE)
+    S4Vectors::metadata(flat)$derivedColumns <- c("SNP", "A1")
+    bad <- x
+    methods::slot(bad, "unlistData", check = FALSE) <- flat
+    expect_error(methods::validObject(bad), "cannot leave out: A1")
+})
+
+# ===========================================================================
 # FineMappingResultBase: adjustPips zero-row short-circuit
 # ===========================================================================
 
-test_that("FineMappingResultBase: adjustPips on a zero-row collection returns the input unchanged", {
+test_that("adjustPips returns a zero-row fine-mapping collection unchanged", {
     e <- .alc_makeFmEntry(3)
     res <- GwasFineMappingResult(
         studyName = "g1",
@@ -370,7 +511,7 @@ test_that("topLoci() has no type switch: the stored table stays internal", {
     expect_error(topLoci(.alc_makeFmr2(), raw = TRUE), "unused argument")
 })
 
-test_that("QtlFineMappingResult: topLoci aggregates entries when selectors do not pin one", {
+test_that("QtlFineMappingResult topLoci aggregates unless selectors pin one", {
     # Two entries, no selectors: the old behaviour errored ("2 entries; pass
     # study/context/trait/method"). Now it stacks the per-variant tables,
     # prefixed with the row identity so variants stay attributable.
@@ -398,7 +539,7 @@ test_that("QtlFineMappingResult: topLoci aggregates entries when selectors do no
     expect_equal(sum(names(S4Vectors::mcols(agg)) == "method"), 1L)
 })
 
-test_that("QtlFineMappingResult: topLoci with a full tuple keeps the bare (id-free) table", {
+test_that("topLoci for a full tuple gives the bare, id-free table", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
@@ -437,10 +578,10 @@ test_that("QtlFineMappingResult: topLoci aggregates only the matching subset", {
     expect_equal(unique(sub$context), "c2")
 })
 
-test_that("QtlFineMappingResult: topLoci on a single-row collection still carries identity columns", {
+test_that("topLoci on a one-row collection still carries identity columns", {
     # A no-selector call takes the aggregate path even for one row, so the PIP
-    # table has a uniform shape (identity columns present) whatever the row count
-    # -- callers don't special-case single-entry results.
+    # table has a uniform shape (identity columns present) whatever the row
+    # count -- callers don't special-case single-entry results.
     row <- .sc_makeFineMappingRow(4)
     res <- QtlFineMappingResult(
         studyName = "s1",
@@ -464,11 +605,12 @@ test_that("QtlFineMappingResult: topLoci on a single-row collection still carrie
 })
 
 test_that("aggregate view: empty per-entry views give empty ranges", {
-    # .alc_makeFmEntry has no credible sets, so credibleSets aggregates to nothing.
+    # .alc_makeFmEntry has no credible sets, so credibleSets aggregates to
+    # nothing.
     expect_length(credibleSets(.alc_makeFmr2()), 0L)
 })
 
-test_that("FineMappingResultBase aggregate view: a no-match selector re-raises the selection error", {
+test_that("an aggregate view re-raises a no-match selector's error", {
     expect_error(credibleSets(.alc_makeFmr2(), studyName = "nope"), "entries")
 })
 
@@ -767,15 +909,52 @@ test_that("intersectVariants restricts a narrowed row's fit by id", {
     expect_length(fit$pip, 20L)
 })
 
+# A row's fit, as the collection hands it out.
+.alc_rowFit <- function(i, x) {
+    susieFit(.fmrRowParts(x, i))
+}
+
+# `x` as saved before rows shared their fits: each row's fit in its own
+# `susieFit` cell, and no fits dictionary.
+.alc_savedInlineFits <- function(x) {
+    saved <- x
+    md <- attr(saved, "elementMetadata")
+    md$susieFit <- S4Vectors::SimpleList(map(seq_along(x), .alc_rowFit, x = x))
+    attr(saved, "elementMetadata") <- md
+    attr(saved, "fits") <- NULL
+    saved
+}
+
+# ...and while rows recorded the variants their fits were made with, in a
+# `fitVariants` column.
+.alc_savedWithFitVariants <- function(x, fitVariants) {
+    saved <- .alc_savedInlineFits(x)
+    md <- attr(saved, "elementMetadata")
+    md$fitVariants <- IRanges::CharacterList(fitVariants)
+    attr(saved, "elementMetadata") <- md
+    saved
+}
+
+test_that("updateObject() leaves the object it is given as it was", {
+    saved <- .alc_savedInlineFits(.rc_makeFmr(.rc_vids(1:10)))
+    md <- attr(saved, "elementMetadata")
+    updated <- updateObject(saved)
+    expect_length(updated@fits, 1L)
+    expect_null(attr(saved, "fits"))
+    expect_identical(attr(saved, "elementMetadata"), md)
+})
+
 test_that("updateObject() drops the fitVariants column older rows saved", {
     x <- .rc_makeFmr(.rc_vids(1:10))
-    saved <- x
-    saved$fitVariants <- IRanges::CharacterList(list(.rc_vids(1:10)))
+    saved <- .alc_savedWithFitVariants(x, list(.rc_vids(1:10)))
     up <- updateObject(saved)
     expect_false("fitVariants" %in% colnames(S4Vectors::mcols(up)))
     expect_identical(up, x)
     # A row narrowed before it was saved still reads its whole fit.
-    savedNarrowed <- .alc_narrowed(saved, 4L)
+    savedNarrowed <- .alc_savedWithFitVariants(
+        .alc_narrowed(x, 4L),
+        list(.rc_vids(1:10))
+    )
     expect_warning(fit <- susieFit(updateObject(savedNarrowed)), "no longer")
     expect_length(fit$pip, 10L)
     # A current collection is left as it is.
@@ -785,14 +964,142 @@ test_that("updateObject() drops the fitVariants column older rows saved", {
 
 test_that("updateObject() drops fitVariants and keys LD rows in one call", {
     x <- .rc_makeFmr(.rc_vids(1:10))
-    saved <- x
-    saved$fitVariants <- IRanges::CharacterList(list(.rc_vids(1:10)))
+    saved <- .alc_savedWithFitVariants(x, list(.rc_vids(1:10)))
     up <- updateObject(.savedWithLdSketch(saved, NULL))
     expect_true(validObject(up))
     expect_false("fitVariants" %in% colnames(S4Vectors::mcols(up)))
     expect_identical(ldReference(up), list())
     expect_true(is.na(up$ldReference))
     expect_identical(updateObject(up), up)
+})
+
+# A saved row's per-fold SuSiE fit over `ids`: one effect, weights alpha * mu.
+.alc_foldFit <- function(ids, alpha, mu) {
+    list(
+        pip = alpha,
+        alpha = matrix(alpha, 1L, dimnames = list(NULL, ids)),
+        mu = matrix(mu, 1L, dimnames = list(NULL, ids))
+    )
+}
+
+.alc_savedCv <- function(foldFits) {
+    list(
+        samplePartition = data.frame(Sample = c("a", "b"), Fold = 1:2),
+        prediction = list(),
+        performance = list(),
+        foldFits = `attr<-`(foldFits, "partitionKey", "key")
+    )
+}
+
+# `x` as saved while rows kept per-fold fits: each row's CV in full in the
+# column, before rows shared their partitions, so with no partition key or
+# dictionary.
+.alc_savedWithFoldFits <- function(x) {
+    full <- map(seq_along(x), .alc_rowCv, x = x)
+    saved <- x
+    saved$cvPartition <- NULL
+    saved$cvResult <- S4Vectors::SimpleList(full)
+    attr(saved, "cvPartition") <- NULL
+    saved
+}
+
+# Row `i`'s CV as the collection hands it out.
+.alc_rowCv <- function(i, x) {
+    cvResult(pecotmr:::.collectionEntry(x, i))
+}
+
+test_that("updateObject() turns saved per-fold fits into per-fold weights", {
+    vids <- .rc_vids(1:3)
+    tl <- data.frame(variant_id = vids, pip = c(0.5, 0.3, 0.2))
+    # Fold 2's fit saw two of the three variants, as a capped CV's does.
+    cv <- .alc_savedCv(list(
+        fold_1 = .alc_foldFit(vids, c(0.5, 0.3, 0.2), c(1, 2, 3)),
+        fold_2 = .alc_foldFit(vids[c(1L, 3L)], c(0.6, 0.4), c(1, 1))
+    ))
+    saved <- .alc_savedWithFoldFits(QtlFineMappingResult(
+        studyName = "s1",
+        context = "c1",
+        trait = "g1",
+        method = "susie",
+        entry = list(FineMappingRow(vids, list(pip = tl$pip), tl, cv))
+    ))
+    up <- updateObject(saved)
+    stored <- up$cvResult[[1L]]
+    expect_null(stored$foldFits)
+    expect_null(rownames(stored$foldWeights))
+    want <- matrix(
+        c(0.5, 0.6, 0.6, 0.6, 0, 0.4),
+        3L,
+        2L,
+        dimnames = list(vids, c("fold_1", "fold_2"))
+    )
+    expect_equal(
+        cvResult(pecotmr:::.collectionEntry(up, 1L))$foldWeights,
+        `attr<-`(want, "partitionKey", "key")
+    )
+    expect_identical(updateObject(up), up)
+})
+
+test_that("updateObject() keeps fold weights' ids where the row has none", {
+    vids <- .rc_vids(1:3)
+    a <- vids[1:2]
+    cvA <- .alc_savedCv(list(fold_1 = .alc_foldFit(a, c(0.5, 0.5), c(1, 2))))
+    cvB <- .alc_savedCv(list(fold_1 = .alc_foldFit(vids[3L], 0.4, 1)))
+    merged <- pecotmr:::.fmMergeEntries(list(
+        FineMappingRow(a, NULL, data.frame(variant_id = a, pip = 0.1), cvA),
+        FineMappingRow(
+            vids[3L],
+            NULL,
+            data.frame(variant_id = vids[3L], pip = 0.1),
+            cvB
+        )
+    ))
+    saved <- .alc_savedWithFoldFits(QtlFineMappingResult(
+        studyName = c("s1", "s1"),
+        context = c("c1", "c1"),
+        trait = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(pecotmr:::.fmCvOnlyRow(cvA), merged)
+    ))
+    up <- updateObject(saved)
+    # A cross-validation-only row holds no variants: its weights keep their
+    # fits' ids.
+    expect_equal(
+        up$cvResult[[1L]]$foldWeights,
+        `attr<-`(
+            matrix(c(0.5, 1), 2L, 1L, dimnames = list(a, "fold_1")),
+            "partitionKey",
+            "key"
+        )
+    )
+    # A merged row's regions together name its variants, so they drop theirs.
+    regions <- up$cvResult[[2L]]
+    expect_null(regions$region1$foldFits)
+    expect_equal(dim(regions$region1$foldWeights), c(2L, 1L))
+    expect_null(rownames(regions$region1$foldWeights))
+    expect_equal(
+        rownames(
+            cvResult(pecotmr:::.collectionEntry(up, 2L))$region2$foldWeights
+        ),
+        vids[3L]
+    )
+})
+
+test_that(".fitNamedVariants reads a fit's names, never susieR's null column", {
+    f <- pecotmr:::.fitNamedVariants
+    expect_equal(f(NULL), character(0))
+    expect_equal(f(list()), character(0))
+    # A null_weight fit: one more effect-matrix column, named "null".
+    alpha <- matrix(0.5, 1L, 3L, dimnames = list(NULL, c("v1", "v2", "null")))
+    expect_equal(f(list(alpha = alpha)), c("v1", "v2"))
+    expect_equal(
+        f(list(pip = c(v1 = 0.1, v2 = 0.2), alpha = alpha)),
+        c("v1", "v2")
+    )
+    lbfMat <- matrix(0, 1L, 2L, dimnames = list(NULL, c("a", "b")))
+    expect_equal(f(list(lbf_variable = lbfMat)), c("a", "b"))
+    # fSuSiE names its variables on csd_X.
+    expect_equal(f(list(csd_X = c(x1 = 1, x2 = 2))), c("x1", "x2"))
 })
 
 # ===========================================================================
@@ -837,7 +1144,22 @@ test_that("adjustPips drops non-overlapping entries and says so", {
     expect_equal(as.character(mcols(out)$study), "s1")
 })
 
-test_that("adjustPips on a FineMappingResultBase collection renormalizes each entry", {
+test_that("adjustPips keeps the names its rows had", {
+    # As every rebuild does: the result used to come back unnamed. Names a
+    # caller set stay too.
+    x <- .ac_twoEntry()
+    expect_false(is.null(names(x)))
+    expect_message(
+        out <- adjustPips(x, .rc_vids(1:5)),
+        "dropping 1 of 2 entries"
+    )
+    expect_equal(names(out), names(x)[1L])
+    names(x) <- c("first", "second")
+    keep <- c(.rc_vids(1:5), sprintf("chr9:%d:A:G", 100L * 1:5))
+    expect_equal(names(adjustPips(x, keep)), c("first", "second"))
+})
+
+test_that("adjustPips renormalizes each entry of a fine-mapping collection", {
     vidsA <- paste0("chr1:", 1:6, ":A:G")
     vidsB <- paste0("chr1:", 3:8, ":A:G")
     entryA <- .makeAdjustEntry(vidsA)
@@ -930,7 +1252,7 @@ test_that("an empty collection has no variants", {
     expect_equal(pecotmr:::.rcAllVariants(empty), character(0))
 })
 
-test_that("retained mass is NULL for a fit that never went through reconciliation", {
+test_that("retained mass is NULL for a fit never reconciled", {
     # NULL rather than a vector of 1s: nothing was dropped, so there is no
     # mass to report.
     expect_null(pecotmr:::.rcFitRetainedMass(NULL))
@@ -1321,7 +1643,7 @@ test_that("a result's ranged views carry its genome build", {
 # Collection aggregates: lbf, credibleSetSummary and the fSuSiE accessors
 # ===========================================================================
 
-test_that("lbf aggregates over a collection, carrying identity + NA-filling ragged effects", {
+test_that("lbf over a collection: identity kept, ragged effects NA-filled", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
     mkEntry <- function(maxNumSingleEffects) {
         lbf <- matrix(
@@ -1343,8 +1665,9 @@ test_that("lbf aggregates over a collection, carrying identity + NA-filling ragg
             )
         )
     }
-    # Two entries with different effect counts (L = 2 vs 3) exercise the NA-fill of
-    # the ragged lbf_L<k> columns described in the collection method's contract.
+    # Two entries with different effect counts (L = 2 vs 3) exercise the NA-fill
+    # of the ragged lbf_L<k> columns described in the collection method's
+    # contract.
     res <- QtlFineMappingResult(
         studyName = c("s1", "s1"),
         context = c("brain", "blood"),
@@ -1361,11 +1684,13 @@ test_that("lbf aggregates over a collection, carrying identity + NA-filling ragg
     expect_equal(length(w), 6L) # 2 entries x 3 variants
     expect_setequal(unique(w$context), c("brain", "blood"))
     expect_true("lbf_L3" %in% names(S4Vectors::mcols(w)))
-    expect_true(all(is.na(w$lbf_L3[w$context == "brain"]))) # L = 2 entry: no effect 3
-    expect_true(all(!is.na(w$lbf_L3[w$context == "blood"]))) # L = 3 entry: present
+    # L = 2 entry: no effect 3
+    expect_true(all(is.na(w$lbf_L3[w$context == "brain"])))
+    # L = 3 entry: present
+    expect_true(all(!is.na(w$lbf_L3[w$context == "blood"])))
 })
 
-test_that("credibleSetSummary aggregates across a collection with entry identity", {
+test_that("credibleSetSummary aggregates a collection with entry identity", {
     mkEntry <- function() {
         vn <- c("chr1:100:A:G", "chr1:200:C:T")
         tl <- data.frame(
@@ -1400,7 +1725,7 @@ test_that("fsusieCredibleBand on a result with no fSuSiE fit is empty ranges", {
     expect_length(cb, 0L)
 })
 
-test_that("fsusieCredibleBand + fsusieAffectedRegions aggregate across a collection", {
+test_that("fsusieCredibleBand, fsusieAffectedRegions aggregate a collection", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     fit <- .fsa_fits$none # one fit, read by both rows
@@ -1440,7 +1765,7 @@ test_that("fsusieCredibleBand + fsusieAffectedRegions aggregate across a collect
     expect_setequal(unique(S4Vectors::mcols(gr)$context), c("brain", "blood"))
 })
 
-test_that("fsusieAffectedRegions on a collection of non-fSuSiE entries is an empty GRanges", {
+test_that("fsusieAffectedRegions of non-fSuSiE entries is an empty GRanges", {
     e <- FineMappingRow(
         variantIds = "chr1:100:A:G",
         susieFit = list(pip = 0.5),
@@ -1643,4 +1968,59 @@ test_that("enrichment estimates are the same from trimmed collections", {
         run(trimFineMappingResult(gwas), trimFineMappingResult(qtl)),
         run(gwas, qtl)
     )
+})
+
+# ---- fits dictionary --------------------------------------------------------
+
+# The two rows of a joint fit, one per context, holding the same fit.
+.alc_jointFmr <- function() {
+    e <- .alc_makeFmEntry(fit = list(pip = c(0.9, 0.8, 0.7), V = c(1, 0.5)))
+    QtlFineMappingResult(
+        studyName = c("Q1", "Q1"),
+        context = c("c1", "c2"),
+        trait = c("t1", "t1"),
+        method = c("mvsusie", "mvsusie"),
+        entry = list(e, e),
+        jointContexts = c("c1;c2", "c1;c2")
+    )
+}
+
+test_that("a fit the rows of a joint fit share is stored once", {
+    x <- .alc_jointFmr()
+    expect_length(.fitDict(x), 1L)
+    expect_identical(.alc_rowFit(1L, x), .alc_rowFit(2L, x))
+    expect_identical(
+        .alc_rowFit(1L, x),
+        list(pip = c(0.9, 0.8, 0.7), V = c(1, 0.5))
+    )
+})
+
+test_that("updateObject() moves saved inline fits into the dictionary", {
+    x <- .alc_jointFmr()
+    up <- updateObject(.alc_savedInlineFits(x))
+    expect_identical(up, x)
+    expect_identical(updateObject(up), up)
+})
+
+test_that("combining keeps one copy of a fit the parts share", {
+    x <- .alc_jointFmr()
+    both <- combineFineMappingResults(x[1L], x[2L])
+    expect_length(.fitDict(both), 1L)
+    expect_identical(both, x)
+})
+
+test_that("a subset keeps only the fits its rows name", {
+    one <- list(pip = c(0.9, 0.8, 0.7))
+    two <- list(pip = c(0.1, 0.2, 0.3))
+    x <- QtlFineMappingResult(
+        studyName = c("Q1", "Q1"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t2"),
+        method = c("susie", "susie"),
+        entry = list(.alc_makeFmEntry(fit = one), .alc_makeFmEntry(fit = two))
+    )
+    expect_length(.fitDict(x), 2L)
+    second <- x[2L]
+    expect_length(.fitDict(second), 1L)
+    expect_identical(.alc_rowFit(1L, second), two)
 })

@@ -269,6 +269,58 @@ test_that("readAnnotations with LDSC annot file creates AnnotationMatrix", {
 })
 
 
+test_that("readAnnotations stores mostly-zero annotations sparse", {
+    skip_if_not_installed("rtracklayer")
+    bed_file <- tempfile(fileext = ".bed")
+    on.exit(unlink(bed_file), add = TRUE)
+    writeLines("chr1\t100\t500\tregion1", bed_file)
+    snp_gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(
+            start = seq(50L, by = 100L, length.out = 40L),
+            width = 1
+        )
+    )
+    result <- readAnnotations(c(enhancer = bed_file), snp_gr)
+    stored <- assay(result, "annotations")
+    expect_s4_class(stored, "dgCMatrix")
+    expect_equal(as.numeric(stored[, 1]), as.numeric(seq_len(40) %in% 2:5))
+    expect_equal(colnames(stored), "enhancer")
+})
+
+test_that("an LDSC annot column is typed by its values", {
+    snp_gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(start = c(100, 200, 300), width = 1)
+    )
+    annotFile <- function(score) {
+        f <- tempfile(fileext = ".annot")
+        write.table(
+            data.frame(
+                CHR = 1,
+                BP = c(100, 200, 300),
+                SNP = str_c("rs", 1:3),
+                CM = 0,
+                my_score = score
+            ),
+            f,
+            sep = "\t",
+            row.names = FALSE,
+            quote = FALSE
+        )
+        f
+    }
+    binary <- readAnnotations(c(my_score = annotFile(c(1, 0, 1))), snp_gr)
+    expect_equal(SummarizedExperiment::colData(binary)$type, "binary")
+    continuous <- readAnnotations(
+        c(my_score = annotFile(c(0.2, 0.7, 1.5))),
+        snp_gr
+    )
+    expect_equal(SummarizedExperiment::colData(continuous)$type, "continuous")
+    # Dense values are kept dense.
+    expect_true(is.matrix(assay(continuous, "annotations")))
+})
+
 test_that("readAnnotations uses the provided annotationMeta", {
     annot_df <- data.frame(
         CHR = c(1, 1),
@@ -400,7 +452,8 @@ test_that("readAnnotations reads a BigWig file as a continuous annotation", {
 })
 
 test_that(".readLdscAnnot errors when CHR/BP columns are absent", {
-    # The annotation column is present but the positional CHR/BP columns are not.
+    # The annotation column is present but the positional CHR/BP columns are
+    # not.
     annot_df <- data.frame(
         SNP = c("rs1", "rs2"),
         CM = 0,
@@ -659,7 +712,7 @@ test_that("estimateH2 takes fineMappingAnnotations as candidates", {
             ref,
             method = method,
             annotations = annot
-        ))$z
+        ))[[1L]]$z
         expect_length(z, 2L)
         expect_true(all(is.finite(z)), info = method)
     }

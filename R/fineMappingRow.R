@@ -141,7 +141,7 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         "FineMappingRow",
         variants = cs$variants,
         susieFit = susieFit,
-        cvResult = cvResult,
+        cvResult = .cvStoredFoldWeights(cvResult, .grVariantIds(bare)),
         derivedColumns = cs$derived
     )
 }
@@ -875,24 +875,16 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # The per-effect single-effect log Bayes factor: log of the average (over the
 # flat prior) of the effect's per-variant Bayes factors, i.e.
 # logSumExp(lbf_variable[L, ]) - log(p). This is the principled per-CS evidence,
-# unlike the max-member per-variant logBF. NA when the fit carries no lbf
-# matrix.
-.csEffectLogBf <- function(fit, Lidx) {
+# unlike the max-member per-variant logBF. `effRow` is the effect's row of
+# lbf_variable. NA when the fit carries no lbf matrix.
+.csEffectLogBf <- function(fit, effRow) {
     lbf <- fit$lbf_variable
-    if (is.null(lbf) || !is.matrix(lbf) || is.na(Lidx)) {
+    if (
+        is.null(lbf) || !is.matrix(lbf) || is.na(effRow) || effRow > nrow(lbf)
+    ) {
         return(NA_real_)
     }
-    row <- if (.namedByEffect(lbf)) {
-        match(str_c("L", Lidx), rownames(lbf))
-    } else if (Lidx <= nrow(lbf)) {
-        Lidx
-    } else {
-        NA_integer_
-    }
-    if (is.na(row)) {
-        return(NA_real_)
-    }
-    lv <- keep(as.numeric(lbf[row, ]), is.finite)
+    lv <- keep(as.numeric(lbf[effRow, ]), is.finite)
     if (length(lv) == 0L) {
         return(NA_real_)
     }
@@ -1090,6 +1082,8 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     }
     Lidx <- spec$eff
     Lname <- if (!is.na(Lidx)) str_c("L", Lidx) else NA_character_
+    # The effect's row in the fit's arrays, which a trimmed fit has compacted.
+    effRow <- .fitEffectRows(ctx$fit, Lidx)
     lead <- which.max(m$pip)
     tibble(
         cs = spec$lab,
@@ -1100,11 +1094,11 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         n_variants = length(spec$ids),
         purity_min = .csPurityMin(m, ctx$purCol),
         purity_mean = .csPurityMean(ctx$meanPur, Lname),
-        V = .csEffectV(ctx$Vvec, Lidx),
+        V = .csEffectV(ctx$Vvec, effRow),
         # cs_log10bf: the strongest MEMBER variant's logBF (max over the CS).
         cs_log10bf = .csLog10Bf(m),
         # cs_log_bf: the true per-EFFECT single-effect log Bayes factor.
-        cs_log_bf = .csEffectLogBf(ctx$fit, Lidx),
+        cs_log_bf = .csEffectLogBf(ctx$fit, effRow),
         # cs_pip: total posterior inclusion mass captured by the CS.
         cs_pip = suppressWarnings(sum(as.numeric(m$pip), na.rm = TRUE)),
         # cs_mean_effect: mean effect over the CS members CONDITIONAL on the
@@ -1131,18 +1125,15 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     }
 }
 
-# V: the effect's prior variance (NA when out of range / unavailable).
+# V: the prior variance at the effect's row `effRow` (NA when out of range /
+# unavailable).
 # @noRd
-.csEffectV <- function(Vvec, Lidx) {
-    if (is.null(Vvec) || is.na(Lidx)) {
-        return(NA_real_)
+.csEffectV <- function(Vvec, effRow) {
+    if (!is.null(Vvec) && !is.na(effRow) && effRow <= length(Vvec)) {
+        as.numeric(Vvec[[effRow]])
+    } else {
+        NA_real_
     }
-    # A trimmed fit keeps only its effects of positive prior variance, named
-    # by effect id, so V[k] would be some other effect's; read it by name.
-    if (.namedByEffect(Vvec)) {
-        return(unname(as.numeric(Vvec[str_c("L", Lidx)])))
-    }
-    if (Lidx <= length(Vvec)) Vvec[Lidx] else NA_real_
 }
 
 # TRUE when a per-effect vector or matrix rows carry "L<k>" effect ids.
@@ -1343,18 +1334,16 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     alpha <- .adjustPipsRenormAlpha(spec$alpha, cols)
     nKeep <- length(keepIdx)
     varAlpha <- alpha[, seq_len(nKeep), drop = FALSE]
-    subset <- list_assign(
-        fit,
-        !!!compact(list(
-            alpha = alpha,
-            pip = as.numeric(1 - apply(1 - varAlpha, 2L, prod)),
-            null_index = if (length(spec$nullIdx) > 0L) nKeep + 1L,
-            # Recorded BEFORE renormalization: after it every row sums to 1,
-            # so the share that survived is only knowable at this point. This
-            # is the §3.6 diagnostic -- always reported, never a filter.
-            retained_mass = .adjustPipsRetainedMass(spec$alpha, cols)
-        ))
-    )
+    subsetFields <- compact(list(
+        alpha = alpha,
+        pip = as.numeric(1 - apply(1 - varAlpha, 2L, prod)),
+        null_index = if (length(spec$nullIdx) > 0L) nKeep + 1L,
+        # Recorded BEFORE renormalization: after it every row sums to 1,
+        # so the share that survived is only knowable at this point. This
+        # is the §3.6 diagnostic -- always reported, never a filter.
+        retained_mass = .adjustPipsRetainedMass(spec$alpha, cols)
+    ))
+    subset <- list_assign(fit, !!!subsetFields)
     .adjustPipsRebuildAllSets(
         .adjustPipsSubsetVariantSlots(subset, keepIdx, cols, nVariants),
         varAlpha
@@ -1482,28 +1471,26 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     p <- list(keepIdx = keepIdx, cols = cols, nVariants = nVariants)
     # compact(): a slot the fit never carried subsets to NULL, and adding it
     # back as an explicit NULL element is not the same as leaving it out.
-    list_assign(
-        fit,
-        !!!compact(list(
-            lbf_variable = .adjustPipsCols(
-                fit[["lbf_variable"]],
-                p,
-                "lbf_variable"
-            ),
-            mu = .adjustPipsCols(fit[["mu"]], p, "mu"),
-            mu2 = .adjustPipsCols(fit[["mu2"]], p, "mu2"),
-            mu2_diag = .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag"),
-            clfsr = .adjustPipsCols(fit[["clfsr"]], p, "clfsr"),
-            coef = .adjustPipsRows(fit[["coef"]], p, "coef"),
-            X_column_scale_factors = .adjustPipsVec(
-                fit[["X_column_scale_factors"]],
-                p,
-                "X_column_scale_factors"
-            ),
-            XtXr = .adjustPipsVec(fit[["XtXr"]], p, "XtXr"),
-            pi = .adjustPipsVec(fit[["pi"]], p, "pi")
-        ))
-    )
+    adjustedFields <- compact(list(
+        lbf_variable = .adjustPipsCols(
+            fit[["lbf_variable"]],
+            p,
+            "lbf_variable"
+        ),
+        mu = .adjustPipsCols(fit[["mu"]], p, "mu"),
+        mu2 = .adjustPipsCols(fit[["mu2"]], p, "mu2"),
+        mu2_diag = .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag"),
+        clfsr = .adjustPipsCols(fit[["clfsr"]], p, "clfsr"),
+        coef = .adjustPipsRows(fit[["coef"]], p, "coef"),
+        X_column_scale_factors = .adjustPipsVec(
+            fit[["X_column_scale_factors"]],
+            p,
+            "X_column_scale_factors"
+        ),
+        XtXr = .adjustPipsVec(fit[["XtXr"]], p, "XtXr"),
+        pi = .adjustPipsVec(fit[["pi"]], p, "pi")
+    ))
+    list_assign(fit, !!!adjustedFields)
 }
 
 # Index set for a slot measured along its variant axis: `nVariants` selects the
@@ -1568,31 +1555,31 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # stale.
 # @noRd
 .adjustPipsRebuildAllSets <- function(fit, varAlpha) {
-    list_assign(
-        fit,
-        !!!compact(list(
-            sets = if (!is.null(fit[["sets"]])) {
-                .adjustPipsCsAtCoverage(
-                    varAlpha,
-                    fit[["V"]],
-                    .adjustPipsCoverage(fit[["sets"]])
-                )
-            },
-            sets_secondary = if (!is.null(fit[["sets_secondary"]])) {
-                map(
-                    fit[["sets_secondary"]],
-                    .adjustPipsRebuildSecondary,
-                    varAlpha = varAlpha,
-                    V = fit[["V"]]
-                )
-            }
-        ))
-    )
+    csFields <- compact(list(
+        sets = if (!is.null(fit[["sets"]])) {
+            .adjustPipsCsAtCoverage(
+                varAlpha,
+                fit[["V"]],
+                .adjustPipsCoverage(fit[["sets"]]),
+                .fitEffectIndex(fit, nrow(varAlpha))
+            )
+        },
+        sets_secondary = if (!is.null(fit[["sets_secondary"]])) {
+            map(
+                fit[["sets_secondary"]],
+                .adjustPipsRebuildSecondary,
+                varAlpha = varAlpha,
+                V = fit[["V"]],
+                effectIndex = .fitEffectIndex(fit, nrow(varAlpha))
+            )
+        }
+    ))
+    list_assign(fit, !!!csFields)
 }
 
 # Rebuild one secondary-coverage credible-set table at its own coverage.
 # @noRd
-.adjustPipsRebuildSecondary <- function(entry, varAlpha, V) {
+.adjustPipsRebuildSecondary <- function(entry, varAlpha, V, effectIndex) {
     if (is.null(entry$sets)) {
         return(entry)
     }
@@ -1601,7 +1588,8 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         sets = .adjustPipsCsAtCoverage(
             varAlpha,
             V,
-            .adjustPipsCoverage(entry$sets)
+            .adjustPipsCoverage(entry$sets),
+            effectIndex
         )
     )
 }
@@ -1623,16 +1611,24 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # Smallest-prefix credible sets from a renormalized alpha, in susie_get_cs's
 # shape. Effects at or below `priorTol` prior variance are skipped, matching
 # susie_get_cs's own V filter; purity is left NULL (no LD available here).
+# Each set is named for its effect's own index (`effectIndex`, by row of
+# varAlpha), which a trimmed fit no longer numbers by row.
 # @noRd
-.adjustPipsCsAtCoverage <- function(varAlpha, V, coverage, priorTol = 1e-9) {
+.adjustPipsCsAtCoverage <- function(
+    varAlpha,
+    V,
+    coverage,
+    effectIndex = seq_len(nrow(varAlpha)),
+    priorTol = 1e-9
+) {
     idx <- if (is.null(V)) seq_len(nrow(varAlpha)) else which(V > priorTol)
     cs <- set_names(
         map(idx, .adjustPipsOneCs, varAlpha = varAlpha, coverage = coverage),
-        str_c("L", idx)
+        str_c("L", effectIndex[idx])
     )
     list(
         cs = cs,
-        cs_index = as.integer(idx),
+        cs_index = as.integer(effectIndex[idx]),
         coverage = map_dbl(
             seq_along(idx),
             .adjustPipsCsMass,
@@ -1725,7 +1721,14 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 
 # @noRd
 .adjustPipsRelabelColumn <- function(csCol, varAlpha, fit, label, nRow) {
-    .adjustPipsCsLabels(varAlpha, fit[["V"]], csCol, label, nRow)
+    .adjustPipsCsLabels(
+        varAlpha,
+        fit[["V"]],
+        csCol,
+        label,
+        nRow,
+        .fitEffectIndex(fit, nrow(varAlpha))
+    )
 }
 
 # @noRd
@@ -1736,9 +1739,9 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # Membership labels at the coverage encoded in the column name: "<method>_<k>"
 # for members of effect k, "<method>_0" for variants in no credible set.
 # @noRd
-.adjustPipsCsLabels <- function(varAlpha, V, csCol, label, n) {
+.adjustPipsCsLabels <- function(varAlpha, V, csCol, label, n, effectIndex) {
     coverage <- as.numeric(str_remove(csCol, "^cs_")) / 100
-    sets <- .adjustPipsCsAtCoverage(varAlpha, V, coverage)
+    sets <- .adjustPipsCsAtCoverage(varAlpha, V, coverage, effectIndex)
     if (length(sets$cs) == 0L) {
         return(rep(str_c(label, "_0"), n))
     }
@@ -1793,22 +1796,21 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     ) {
         return(newTopLoci)
     }
-    posteriorMean <- as.numeric(colSums(alphaMat * muMat))
+    # Back on the scale buildTopLoci() reports, as mu and mu2 are stored in
+    # the units of the standardized X.
+    scaleFactors <- .fitScaleFactors(fit, ncol(alphaMat))
+    posteriorMean <- as.numeric(colSums(alphaMat * muMat) / scaleFactors)
     mu2Mat <- if (!is.null(fit[["mu2"]])) as.matrix(fit[["mu2"]]) else NULL
-    mutate(
-        newTopLoci,
-        posterior_mean = posteriorMean,
-        !!!compact(list(
-            posterior_sd = if (
-                !is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))
-            ) {
-                as.numeric(sqrt(pmax(
-                    colSums(alphaMat * mu2Mat) - posteriorMean^2,
-                    0
-                )))
-            }
-        ))
-    )
+    sdCol <- compact(list(
+        posterior_sd = if (
+            !is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))
+        ) {
+            as.numeric(
+                .susiePosteriorSd(alphaMat, muMat, mu2Mat) / scaleFactors
+            )
+        }
+    ))
+    mutate(newTopLoci, posterior_mean = posteriorMean, !!!sdCol)
 }
 
 
@@ -1878,7 +1880,8 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         logBF = .tlCol(tl, "logBF", "numeric")
     )
     extras <- .projectPosteriorExtraCols(tl)
-    mutate(out, !!!set_names(map(extras, .tlColumnOf, tl = tl), extras))
+    extraCols <- set_names(map(extras, .tlColumnOf, tl = tl), extras)
+    mutate(out, !!!extraCols)
 }
 
 # @noRd
@@ -1999,19 +2002,99 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 .fmeIdentityCols <- c("variant_id", "chrom", "pos", "A1", "A2")
 
 # Rebuild the canonical topLoci table from an element: the identity columns are
-# re-rendered from the range and alleles, the rest come straight from mcols.
+# re-rendered from the range and alleles, the rest come from mcols as the row
+# holds them (.fmPlainElement()).
 # @noRd
 .fmeTopLociFromElement <- function(gr) {
     if (length(gr) == 0L) {
         return(as_tibble(list(variant_id = character(0), pip = numeric(0))))
     }
-    mc <- as.list(mcols(gr))
+    mc <- as.list(mcols(.fmPlainElement(gr)))
     identity <- list(
         variant_id = .grVariantIds(gr),
         chrom = as.character(seqnames(gr)),
         pos = as.integer(start(gr))
     )
     as_tibble(c(identity, mc), .name_repair = "minimal")
+}
+
+# =============================================================================
+# topLoci in a collection
+# -----------------------------------------------------------------------------
+# A fine-mapping collection stores topLoci compactly: marginal_p is left out
+# where it is the 2 * pnorm(-|z|) that .btlMarginal() derives when the source
+# gave none, and every payload column is run-length encoded where that is
+# smaller (.rtlRleWhereSmaller()). The rows it hands out get plain columns and
+# marginal_p back (.fmPlainElement()), so topLoci() reads the same either way.
+# =============================================================================
+
+# The marginal p-value of z, as .btlMarginal() derives it.
+# @noRd
+.fmDerivedP <- function(z) {
+    2 * stats::pnorm(-abs(z))
+}
+
+# A fine-mapping collection's elements as it stores them.
+# @noRd
+.fmrCompactTopLoci <- function(grl) {
+    flat <- unlist(grl, use.names = FALSE)
+    md <- .fmDropDerivedP(mcols(flat, use.names = FALSE))
+    compact <- .rtlRleWhereSmaller(md, setdiff(colnames(md), .fmeIdentityCols))
+    bare <- IRanges::relist(
+        S4Vectors::`mcols<-`(flat, value = compact),
+        IRanges::PartitioningByEnd(cumsum(lengths(grl)), names = names(grl))
+    )
+    S4Vectors::`mcols<-`(bare, value = mcols(grl, use.names = FALSE))
+}
+
+# `md` without marginal_p when every value is the one marginal_z gives and
+# the column sits where .fmPlainElement() puts it back.
+# @noRd
+.fmDropDerivedP <- function(md) {
+    cn <- colnames(md)
+    at <- .fmDerivedPPosition(setdiff(cn, "marginal_p"))
+    if (is.na(at) || !identical(match("marginal_p", cn), at)) {
+        return(md)
+    }
+    p <- as.vector(md[["marginal_p"]])
+    if (!identical(p, .fmDerivedP(as.vector(md[["marginal_z"]])))) {
+        return(md)
+    }
+    md[, cn != "marginal_p", drop = FALSE]
+}
+
+# Where marginal_p goes among columns `cn` that lack it: after
+# marginal_z_supplied, else after marginal_z; NA without marginal_z.
+# @noRd
+.fmDerivedPPosition <- function(cn) {
+    if (!is_in("marginal_z", cn)) {
+        return(NA_integer_)
+    }
+    anchor <- if (is_in("marginal_z_supplied", cn)) {
+        "marginal_z_supplied"
+    } else {
+        "marginal_z"
+    }
+    match(anchor, cn) + 1L
+}
+
+# `gr` as a row holds it: plain metadata columns, and marginal_p back where
+# its collection left it out.
+# @noRd
+.fmPlainElement <- function(gr) {
+    plain <- .rtlPlainMcols(gr)
+    md <- mcols(plain, use.names = FALSE)
+    at <- .fmDerivedPPosition(colnames(md))
+    if (is.na(at) || is_in("marginal_p", colnames(md))) {
+        return(plain)
+    }
+    before <- seq_len(at - 1L)
+    restored <- cbind(
+        md[, before, drop = FALSE],
+        S4Vectors::DataFrame(marginal_p = .fmDerivedP(md[["marginal_z"]])),
+        md[, setdiff(seq_len(ncol(md)), before), drop = FALSE]
+    )
+    S4Vectors::`mcols<-`(plain, value = restored)
 }
 
 #' @rdname adjustPips
@@ -2032,8 +2115,9 @@ setMethod("adjustPips", "FineMappingRow", function(x, keepVariants) {
         fit,
         common
     )
-    # cvResult is sample-indexed (partition + held-out predictions), not
-    # variant-indexed, so it carries through a variant-subsetting unchanged.
+    # cvResult carries through unchanged: its predictions are indexed by
+    # sample, and its fold weights, which cvResult() names, describe the fold
+    # fits' own variants, as fitVariants does the fit's.
     FineMappingRow(
         variantIds = common,
         susieFit = fit,
@@ -2058,7 +2142,160 @@ setMethod("susieFit", "FineMappingRow", function(x) x@susieFit)
 
 #' @rdname cvResult
 #' @export
-setMethod("cvResult", "FineMappingRow", function(x) x@cvResult)
+setMethod("cvResult", "FineMappingRow", function(x) {
+    .cvNamedFoldWeights(x@cvResult, variantIds(x))
+})
+
+# The CV a row stores, as a collection keeps it (cvResult() names the fold
+# weights on the way out).
+# @noRd
+.fmRowCvStored <- function(x) x@cvResult
+
+# A row's CV with its fold weights' rows named by the row's variants, where
+# the row stored them without names (.cvStoredFoldWeights()). A multi-region
+# row keeps one payload per region, whose unnamed weights cover the regions'
+# variants in order.
+# @noRd
+.cvNamedFoldWeights <- function(cv, ids) {
+    if (!.cvIsPerRegion(cv)) {
+        return(.cvNameFoldWeights(cv, ids))
+    }
+    n <- map_int(cv, .cvFoldWeightRows)
+    if (any(n == 0L) || sum(n) != length(ids)) {
+        return(cv)
+    }
+    map2(cv, split(ids, rep(seq_along(n), n)), .cvNameFoldWeights)
+}
+
+# One CV payload with its unnamed fold weights named by `ids`.
+# @noRd
+.cvNameFoldWeights <- function(cv, ids) {
+    fw <- cv$foldWeights
+    if (!is.matrix(fw) || !is.null(rownames(fw)) || nrow(fw) != length(ids)) {
+        return(cv)
+    }
+    list_assign(cv, foldWeights = `rownames<-`(fw, ids))
+}
+
+# @noRd
+.cvFoldWeightRows <- function(cv) {
+    fw <- cv$foldWeights
+    if (is.matrix(fw) && is.null(rownames(fw))) nrow(fw) else 0L
+}
+
+# The CV as a row stores it. Fold weights on the row's own variants, in its
+# order, drop their rownames: the row holds those ids once, and cvResult()
+# names them. Any others keep theirs, such as those of a cross-validation-only
+# row, which has no variants. A merged row's per-region payloads drop theirs
+# only when together they name its variants in order.
+# @noRd
+.cvStoredFoldWeights <- function(cv, ids) {
+    if (!is.list(cv)) {
+        return(cv)
+    }
+    if (!.cvIsPerRegion(cv)) {
+        return(.cvUnnameFoldWeights(cv, ids))
+    }
+    held <- map(unname(cv), .cvFoldWeightIds)
+    if (!identical(list_c(held, ptype = character()), ids)) {
+        return(cv)
+    }
+    map2(cv, held, .cvUnnameFoldWeights)
+}
+
+# One CV payload with its fold weights unnamed, when they are named `ids`.
+# @noRd
+.cvUnnameFoldWeights <- function(cv, ids) {
+    fw <- cv$foldWeights
+    if (!is.matrix(fw) || !identical(rownames(fw), ids)) {
+        return(cv)
+    }
+    list_assign(cv, foldWeights = `rownames<-`(fw, NULL))
+}
+
+# @noRd
+.cvFoldWeightIds <- function(cv) {
+    rownames(cv$foldWeights)
+}
+
+# Whether `cv` holds one CV payload per region, as a merged row keeps them
+# (.fmMergeEntries()), rather than a single payload.
+# @noRd
+.cvIsPerRegion <- function(cv) {
+    length(cv) > 0L &&
+        !is_in("samplePartition", names(cv)) &&
+        all(map_lgl(cv, .cvIsRegionPayload))
+}
+
+# @noRd
+.cvIsRegionPayload <- function(x) {
+    is.null(x) || (is.list(x) && is_in("samplePartition", names(x)))
+}
+
+# A saved row's CV with its per-fold fits turned into the per-fold weights
+# rows now keep: each fold's coefficients, then stored as a new row stores
+# them (.cvStoredFoldWeights()). A single payload's weights align to the row's
+# variants, or, for a row with none, to its fits' own; a multi-region row's
+# payloads keep the variants their fits carried, since the row does not
+# record which of its variants each region holds.
+# @noRd
+.cvFoldFitsToWeights <- function(cv, ids) {
+    converted <- if (.cvIsPerRegion(cv)) {
+        map(cv, .cvPayloadFoldWeights, ids = character(0))
+    } else {
+        .cvPayloadFoldWeights(cv, ids)
+    }
+    .cvStoredFoldWeights(converted, ids)
+}
+
+# @noRd
+.cvPayloadFoldWeights <- function(cv, ids) {
+    ff <- cv$foldFits
+    if (is.null(ff)) {
+        return(cv)
+    }
+    named <- map(ff, .foldFitWeights)
+    on <- if (length(ids) > 0L) {
+        ids
+    } else {
+        unique(list_c(map(unname(named), names), ptype = ""))
+    }
+    alignedWeights <- map(named, .alignFoldWeights, on = on)
+    W <- `dimnames<-`(
+        exec(cbind, !!!alignedWeights),
+        list(on, names(ff))
+    )
+    list_assign(
+        cv,
+        foldFits = zap(),
+        foldWeights = `attr<-`(W, "partitionKey", attr(ff, "partitionKey"))
+    )
+}
+
+# One fold fit's coefficients, named by variant: the precomputed `coef` of an
+# mvSuSiE / fSuSiE fit, else SuSiE's alpha * mu over its scale factors.
+# @noRd
+.foldFitWeights <- function(fit) {
+    if (is.null(fit)) {
+        return(NULL)
+    }
+    if (is.matrix(fit$coef)) {
+        return(set_names(fit$coef[, 1L], rownames(fit$coef)))
+    }
+    ids <- names(fit$pip) %||% colnames(fit$alpha)
+    set_names(.susieCoefWeights(fit), ids)
+}
+
+# Named fold weights on `on`: zero for a variant the fold had no weight for,
+# NA throughout for a fold with no fit.
+# @noRd
+.alignFoldWeights <- function(w, on) {
+    if (is.null(w)) {
+        return(rep(NA_real_, length(on)))
+    }
+    hit <- match(names(w), on)
+    replace(numeric(length(on)), hit[!is.na(hit)], w[!is.na(hit)])
+}
 
 #' @rdname show-methods
 #' @export

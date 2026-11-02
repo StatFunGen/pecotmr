@@ -24,8 +24,10 @@ Pre-computed LD scores for each SNP. Used by S-LDSC and
 \describe{
 \item{\code{ldMatrixList}}{For g-LDSC: a list of per-block LD correlation (R)
 matrices used to compute the FGLS residual covariance, kept when the
-scores were built from \code{LdMatrix} blocks. Empty for a scores-only
-object, and for one built from a genotype panel, which reads each
-block's LD from the panel instead (see \code{\linkS4class{LdStatistic}}).}
+scores were built from \code{LdMatrix} blocks, each stored packed (its
+upper triangle) and handed out whole by \code{\link{ldMatrixList}}.
+Empty for a scores-only object, and for one built from a genotype
+panel, which reads each block's LD from the panel instead (see
+\code{\linkS4class{LdStatistic}}).}
 }}
 

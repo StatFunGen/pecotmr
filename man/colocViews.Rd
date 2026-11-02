@@ -77,9 +77,11 @@ hypothesis rather than merely a probable one.}
 }
 \description{
 The five views over a \code{\linkS4class{ColocResult}}. The
-  object stores one element per tested (QTL credible set, GWAS credible set,
-  block) pair; these accessors project it to the granularity a given
-  analysis needs, rather than any one of them being the stored shape.
+  object stores one element per scored group (a QTL row against a GWAS
+  row in one block) and, nested in it, one row per tested (QTL credible
+  set, GWAS credible set) pair; these accessors project it to the
+  granularity a given analysis needs, rather than any one of them being
+  the stored shape.
 
   \describe{
     \item{\code{colocPairs()}}{One row per tested pair -- coloc's native

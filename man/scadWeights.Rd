@@ -4,7 +4,13 @@
 \alias{scadWeights}
 \title{Compute Weights Using SCAD-Penalized Regression}
 \usage{
-scadWeights(X, y, nfolds = 5, methodArgs = NcvregOptions())
+scadWeights(
+  X,
+  y,
+  nfolds = 5,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = NcvregOptions()
+)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
@@ -13,13 +19,24 @@ scadWeights(X, y, nfolds = 5, methodArgs = NcvregOptions())
 
 \item{nfolds}{Number of cross-validation folds. Default is 5.}
 
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the selected fit, as a list of its coefficients
+(\code{coef}, over the variants fitted), \code{intercept},
+\code{lambda} and cross-validated error there (\code{cve},
+\code{cvse}); \code{"full"} the whole \code{cv.ncvreg} object, with
+every \code{lambda}'s coefficients but without its copy of \code{X}.
+Either names the variants it was fitted on.}
+
 \item{methodArgs}{Options forwarded to \code{ncvreg::cv.ncvreg}, built
 with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be
 silently ignored.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights.
+A numeric vector of length `ncol(X)` of variant weights, with the
+  fit attached as attribute \code{"fit"} unless
+  \code{fitRetention = "none"}.
 }
 \description{
 Fits a SCAD-penalized linear regression model via `ncvreg::cv.ncvreg` and

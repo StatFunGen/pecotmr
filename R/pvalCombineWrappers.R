@@ -184,11 +184,12 @@ pvalGbj <- function(zScores, R, method, methodArgs = GbjOptions()) {
         gbj_omni = GBJ::OMNI_ss,
         .abortUnknownMethod("GBJ", method)
     )
+    user <- as.list(methodArgs)
     result <- exec(
         fn,
         test_stats = zScores,
         cor_mat = R,
-        !!!as.list(methodArgs)
+        !!!user
     )
     pvalName <- switch(
         method,
@@ -214,13 +215,14 @@ pvalAspu <- function(
             "Package 'aSPU' is required for this method."
         )
     }
+    user <- as.list(methodArgs)
     switch(
         method,
         aspu = exec(
             aSPU::aSPUs,
             Zs = zScores,
             corSNP = R,
-            !!!as.list(methodArgs)
+            !!!user
         )$pvs["aSPUs"],
         # GATES2's only formals are the two pecotmr supplies, so there is
         # nothing for a caller to configure here.

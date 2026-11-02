@@ -80,7 +80,7 @@ test_that("GwasFineMappingResult: a window comes from region, not blockId", {
 })
 
 
-test_that("GwasFineMappingResult: validity does not recurse on key subset (#546)", {
+test_that("GWAS result validity does not recurse on a key subset (#546)", {
     # The validity method builds a key-column data.frame to check tuple
     # uniqueness. Doing so via `object[, keyCols]` preserves the
     # GwasFineMappingResult class while dropping the required `entry` column;
@@ -189,7 +189,7 @@ test_that("GwasFineMappingResult: contexts/traitNames return NULL", {
 })
 
 
-test_that("GwasFineMappingResult: credibleSets/topLoci/susieFit/variantIds dispatch", {
+test_that("GWAS result dispatch: credibleSets, topLoci, susieFit, variantIds", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
         studyName = "g1",
@@ -207,7 +207,7 @@ test_that("GwasFineMappingResult: credibleSets/topLoci/susieFit/variantIds dispa
     expect_equal(length(variantIds(res)), 3L)
 })
 
-test_that("GwasFineMappingResult: topLoci aggregates per-block rows genome-wide", {
+test_that("GwasFineMappingResult topLoci aggregates per-block rows", {
     # A genome-wide collection: same (study, method) across two region blocks.
     # With no selectors topLoci now stacks both blocks, tagging each variant
     # with its blockId; context/trait are NA-filled (GWAS keys on region).
@@ -306,7 +306,7 @@ test_that("GwasFineMappingResult: credibleSets aggregates CS across blocks", {
 })
 
 
-test_that("GwasFineMappingResult: .tupleSelectRowGwasFmr requires both selectors for multi-row", {
+test_that(".tupleSelectRowGwasFmr needs both selectors for several rows", {
     e <- .ca_makeFmEntry(3)
     res <- GwasFineMappingResult(
         studyName = c("g1", "g2"),
@@ -337,7 +337,7 @@ test_that("GwasFineMappingResult: studyName/methodNames inherit from base", {
 })
 
 
-test_that("GwasFineMappingResult: marginalEffects with study/method selectors", {
+test_that("GwasFineMappingResult marginalEffects by study, method selector", {
     e1 <- .ca_makeFmEntry(3)
     e2 <- .ca_makeFmEntry(4)
     res <- GwasFineMappingResult(

@@ -123,7 +123,7 @@ test_that(".plink1TripletStem: errors on non-character input", {
     )
 })
 
-test_that("GenotypeHandle: pgen/pvar/psam triplet with matching stems builds plink2 handle", {
+test_that("a pgen/pvar/psam triplet with one stem builds a PLINK2 handle", {
     skip_if_not_installed("pgenlibr")
     h <- GenotypeHandle(
         pgen = paste0(plink_prefix, ".pgen"),
@@ -134,7 +134,7 @@ test_that("GenotypeHandle: pgen/pvar/psam triplet with matching stems builds pli
     expect_equal(genotypeFormat(h), "plink2")
 })
 
-test_that(".genotypeHandleFromPlink2Triplet: accepts .pvar.zst by stripping the .zst", {
+test_that(".genotypeHandleFromPlink2Triplet strips .zst from a .pvar.zst", {
     skip_if_not_installed("pgenlibr")
     # The stems agree once the .zst is stripped, so the call gets past the
     # stem check and fails only in the reader, on the files not existing.
@@ -329,7 +329,7 @@ test_that("GenotypeHandle constructs and validates every format it reads", {
 # The named-vector handle is built and checked with its extraction routing
 # in test_genotypeIo.R.
 # ===========================================================================
-test_that("genoMeta meta-file resolves payloads relative to its own directory", {
+test_that("a genoMeta file resolves payloads relative to its directory", {
     skip_if_not_installed("pgenlibr")
     # A meta file living in test_data referencing payloads by basename only.
     metafile <- file.path(test_data_dir, "tmp_chrom_meta_relative.tsv")
@@ -347,7 +347,7 @@ test_that("genoMeta meta-file resolves payloads relative to its own directory", 
     expect_equal(nrow(snpInfo(h)), 2L * 349L)
 })
 
-test_that(".parseChromMeta matches chrom/path columns by name (order- and extra-column-tolerant)", {
+test_that(".parseChromMeta matches chrom/path columns by name, any order", {
     mk <- function(lines) {
         f <- tempfile(fileext = ".tsv")
         writeLines(lines, f)
@@ -371,7 +371,7 @@ test_that(".parseChromMeta matches chrom/path columns by name (order- and extra-
     expect_equal(m2$path, c("/abs/a.bed", "/abs/b.bed"))
 })
 
-test_that(".parseChromMeta falls back to the first two columns when no alias header matches", {
+test_that(".parseChromMeta uses the first two columns if no header matches", {
     mk <- function(lines) {
         f <- tempfile(fileext = ".tsv")
         writeLines(lines, f)
@@ -384,7 +384,7 @@ test_that(".parseChromMeta falls back to the first two columns when no alias hea
     expect_equal(m$path, c("/abs/a.bed", "/abs/b.bed"))
 })
 
-test_that(".parseChromMeta errors when a chromosome maps to multiple payloads", {
+test_that(".parseChromMeta errors when a chromosome maps to several payloads", {
     mk <- function(lines) {
         f <- tempfile(fileext = ".tsv")
         writeLines(lines, f)
@@ -499,7 +499,8 @@ test_that("genoMeta chroms reads only the requested shard", {
     only21 <- GenotypeHandle(genoMeta = meta, chroms = "21")
     expect_equal(names(chromPaths(only21)), "chr21")
     expect_equal(nrow(snpInfo(only21)), 349L)
-    # chr21 is the first shard, so the kept rows/fileIdx match the full handle's.
+    # chr21 is the first shard, so the kept rows/fileIdx match the full
+    # handle's.
     expect_equal(snpInfo(only21)$SNP, snpInfo(full)$SNP[1:349])
     expect_equal(snpInfo(only21)$fileIdx, snpInfo(full)$fileIdx[1:349])
 })
@@ -533,8 +534,8 @@ test_that("genoMeta chroms falls back to all shards when none match", {
 
 test_that("genoMeta chroms skips a shard whose file does not exist", {
     skip_if_not_installed("pgenlibr")
-    # A bogus chr21 payload proves the skip: restricting to chr22 must never open
-    # it, while requesting chr21 too fails on the missing files.
+    # A bogus chr21 payload proves the skip: restricting to chr22 must never
+    # open it, while requesting chr21 too fails on the missing files.
     meta <- c(
         "22" = file.path(test_data_dir, "test_variants_chr22.pgen"),
         "21" = "/no/such/chr21/prefix"
@@ -562,14 +563,11 @@ test_that("chroms is rejected for a non-genoMeta source", {
 # without crafting whole on-disk meta layouts.
 # ===========================================================================
 
-test_that(".genotypeHandleFromLdMeta errors when no LD-meta row covers the region", {
+test_that(".genotypeHandleFromLdMeta errors when no row covers the region", {
     local_mocked_bindings(
         regionalLdMeta = function(...) {
             list(
-                intersections = list(
-                    LD_file_paths = character(0),
-                    bimFilePaths = NULL
-                )
+                intersections = list(paths = character(0))
             )
         },
         .package = "pecotmr"
@@ -580,14 +578,11 @@ test_that(".genotypeHandleFromLdMeta errors when no LD-meta row covers the regio
     )
 })
 
-test_that(".genotypeHandleFromLdMeta errors when the region spans multiple rows", {
+test_that(".genotypeHandleFromLdMeta errors when the region spans rows", {
     local_mocked_bindings(
         regionalLdMeta = function(...) {
             list(
-                intersections = list(
-                    LD_file_paths = c("/tmp/a.bed", "/tmp/b.bed"),
-                    bimFilePaths = NULL
-                )
+                intersections = list(paths = c("/tmp/a.bed", "/tmp/b.bed"))
             )
         },
         .package = "pecotmr"
@@ -598,14 +593,11 @@ test_that(".genotypeHandleFromLdMeta errors when the region spans multiple rows"
     )
 })
 
-test_that(".genotypeHandleFromLdMeta errors on an unsupported payload extension", {
+test_that(".genotypeHandleFromLdMeta errors on an unsupported extension", {
     local_mocked_bindings(
         regionalLdMeta = function(...) {
             list(
-                intersections = list(
-                    LD_file_paths = "/tmp/foo.txt",
-                    bimFilePaths = NULL
-                )
+                intersections = list(paths = "/tmp/foo.txt")
             )
         },
         .package = "pecotmr"
@@ -655,7 +647,7 @@ test_that(".genotypeHandleFromChromMeta errors when the meta has no rows", {
 # prefix sidecar probing, and the unresolvable-format error.
 # ===========================================================================
 
-test_that(".resolveGenotypeShard honours explicit plink2 format and .pgen extension", {
+test_that(".resolveGenotypeShard honours a plink2 format and .pgen extension", {
     skip_if_not_installed("pgenlibr")
     h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink2")
     expect_s4_class(h1, "GenotypeHandle")
@@ -695,7 +687,7 @@ test_that(".resolveGenotypeShard refuses a VCF, GDS or PLINK1 shard", {
     )
 })
 
-test_that(".resolveGenotypeShard probes the .pgen sidecar for an extension-less prefix", {
+test_that(".resolveGenotypeShard probes .pgen for an extension-less prefix", {
     # Only a .pgen sidecar exists (no .bed) so the prefix-probe routes to
     # plink2; mock the reader so we exercise the dispatch, not real IO.
     p <- tempfile()
@@ -758,10 +750,8 @@ test_that("genotypeDelayedArray values match genotypes transposed", {
     truth <- t(pecotmr:::.dosageMatrix(gh, 1:5, meanImpute = FALSE))
     got <- as.matrix(da[1:5, 1:4])
     expect_equal(unname(got), unname(truth[, 1:4]))
-    expect_identical(
-        rownames(got),
-        normalizeVariantId(snpInfo(gh)$SNP[1:5])
-    )
+    # The seed names no variants: a panel's rowRanges name them.
+    expect_null(rownames(got))
     expect_identical(colnames(got), sampleIds(gh)[1:4])
 })
 
@@ -785,19 +775,20 @@ test_that("the seed answers an empty extraction on either axis", {
     )
 })
 
-test_that("genotypeDelayedArray stores the sample axis once, derives it on read", {
-    # The sample ids are an anonymous projection dimension and would otherwise be
-    # duplicated between GhSeed@dn[[2]] and handle@sampleIds. The seed stores only
-    # the variant axis; dimnames() derives the sample axis from the handle.
+test_that("genotypeDelayedArray stores samples once, derives them on read", {
+    # The sample ids are an anonymous projection dimension and would otherwise
+    # be duplicated between GhSeed@dn[[2]] and handle@sampleIds. The seed stores
+    # only the variant axis; dimnames() derives the sample axis from the handle.
     gh <- .gh_pgenHandle()
     seed <- genotypeDelayedArray(gh)@seed
     expect_null(seed@dn[[2L]]) # not stored
-    expect_identical(dimnames(seed)[[2L]], as.character(sampleIds(gh))) # derived
+    # derived
+    expect_identical(dimnames(seed)[[2L]], as.character(sampleIds(gh)))
     expect_identical(dimnames(seed)[[1L]], seed@dn[[1L]]) # variant axis stored
     expect_equal(dim(seed)[[2L]], length(dimnames(seed)[[2L]])) # dm consistent
 })
 
-test_that(".emptyGenotypeHandle empties the sample axis as well as the variants", {
+test_that(".emptyGenotypeHandle empties the samples as well as the variants", {
     gh <- .gh_pgenHandle()
     e <- pecotmr:::.emptyGenotypeHandle(gh)
     expect_equal(nrow(snpInfo(e)), 0L)
@@ -813,13 +804,13 @@ test_that("nothing is read until a block is actually touched", {
     # The point of the seed: a panel can be described without being read.
     gh <- .gh_pgenHandle()
     reads <- 0L
-    # Captured before mocking: calling extractBlockGenotypes by name inside
-    # the mock would re-enter the mock, not the reader.
-    realExtract <- extractBlockGenotypes
+    # Captured before mocking: calling .handleDosage by name inside the mock
+    # would re-enter the mock, not the reader.
+    realRead <- pecotmr:::.handleDosage
     local_mocked_bindings(
-        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+        .handleDosage = function(handle, snpIdx) {
             reads <<- reads + 1L
-            realExtract(handle, snpIdx = snpIdx, meanImpute = meanImpute)
+            realRead(handle, snpIdx)
         },
         .package = "pecotmr"
     )
@@ -836,11 +827,11 @@ test_that("nothing is read until a block is actually touched", {
 test_that("only the requested variants are read", {
     gh <- .gh_pgenHandle()
     seen <- integer(0)
-    realExtract <- extractBlockGenotypes
+    realRead <- pecotmr:::.handleDosage
     local_mocked_bindings(
-        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+        .handleDosage = function(handle, snpIdx) {
             seen <<- c(seen, length(snpIdx))
-            realExtract(handle, snpIdx = snpIdx, meanImpute = meanImpute)
+            realRead(handle, snpIdx)
         },
         .package = "pecotmr"
     )
@@ -848,6 +839,17 @@ test_that("only the requested variants are read", {
     invisible(as.matrix(da[1:5, 1:4]))
     expect_true(all(seen <= 5L))
     expect_lt(sum(seen), nrow(snpInfo(gh)))
+})
+
+test_that("genotypeDelayedArray leaves the handle it is given whole", {
+    # The seed keeps a copy cut to the columns reading needs; the caller's
+    # handle keeps every column.
+    gh <- .gh_pgenHandle()
+    before <- snpInfo(gh)
+    da <- genotypeDelayedArray(gh)
+    expect_identical(snpInfo(gh), before)
+    seedHandle <- pecotmr:::.ghSeedHandle(DelayedArray::seed(da))
+    expect_identical(names(snpInfo(seedHandle)), "fileIdx")
 })
 
 test_that("genotypeDelayedArray rejects a non-handle", {

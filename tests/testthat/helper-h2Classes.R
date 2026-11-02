@@ -106,6 +106,8 @@ makeTestLdMatrixBlocks <- function(
     list(panel = panel, blocks = blocks, ld = ld)
 }
 
+# One genome-wide LDER estimate, stratified (with an enrichment table and a
+# jackknife matrix) unless `with_enrichment = FALSE`.
 makeTestH2Estimate <- function(with_enrichment = TRUE) {
     enrich <- if (with_enrichment) {
         data.frame(
@@ -135,19 +137,28 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
         NULL
     }
 
-    new(
-        "H2Estimate",
-        estimate = 0.3,
-        estimateSe = 0.05,
-        intercept = 1.01,
-        interceptSe = 0.02,
-        localBlocks = NULL,
-        enrichment = enrich,
-        annotationJackknifeCoefs = annotationJackknifeCoefs,
-        scoreStats = NULL,
-        method = "lder",
-        nSnps = 100L,
-        traitName = "test"
+    .h2EstimateNew(
+        list(GenomicRanges::GRanges()),
+        list(
+            study = "test",
+            context = NA_character_,
+            trait = NA_character_,
+            method = "lder",
+            h2 = 0.3,
+            h2_se = 0.05,
+            intercept = 1.01,
+            intercept_se = 0.02,
+            p_value = NA_real_,
+            n_snps = 100L,
+            n_components = NA_integer_,
+            scale = NA_real_
+        ),
+        list(
+            enrichment = list(enrich),
+            jackknife = list(annotationJackknifeCoefs),
+            score_stats = list(NULL)
+        ),
+        GenomicRanges::GRanges()
     )
 }
 

@@ -13,11 +13,11 @@ heritabilityEstimateSe(x)
 \item{x}{An \code{H2Estimate}.}
 }
 \value{
-Numeric (length 1).
+Numeric, one per estimate.
 }
 \description{
-Return the standard error of the global SNP heritability
-  estimate carried by an \code{H2Estimate}.
+Return the standard error of each of an \code{H2Estimate}'s
+  heritability estimates.
 }
 \examples{
 data(h2EstimateExample)

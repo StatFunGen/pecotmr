@@ -13,10 +13,23 @@ stratifiedHeritabilityEnrichment(object)
 \item{object}{An \code{H2Estimate} object.}
 }
 \value{
-A \code{data.frame} of enrichment estimates, or NULL.
+A tibble with one row per annotation of each stratified estimate,
+  led by the estimate's identity (\code{study}, \code{context},
+  \code{trait}, \code{method}); no rows when none is stratified.
 }
 \description{
-Extract annotation enrichment estimates from a result object.
+Extract the per-annotation enrichment of an
+  \code{H2Estimate}'s stratified estimates. Two shapes are possible,
+  depending on the route that produced an estimate:
+  \describe{
+    \item{partitioned}{tau-based enrichment of the baseline annotations,
+      with columns \code{annotation}, \code{tau}, \code{tauSe},
+      \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
+      \code{propH2}, \code{propSnps}.}
+    \item{score test}{the score test over the tested (candidate)
+      annotations, with columns \code{annotation}, \code{scoreZ},
+      \code{scoreP}.}
+  }
 }
 \examples{
 data(h2EstimateExample)

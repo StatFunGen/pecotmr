@@ -13,15 +13,18 @@ twasWeights(x, studyName = NULL, context = NULL, trait = NULL, method = NULL)
 \item{x}{A \code{TwasWeights} object.}
 
 \item{studyName, context, trait, method}{Single character identifiers. All
-required when the collection has more than one row; optional when the
-collection has a single row.}
+required when the collection holds more than one entry; optional when
+it holds one. The method may be given in snake_case
+(\code{susie_inf}).}
 }
 \value{
-A \code{TwasWeightsRow} object.
+A \code{TwasWeights} holding that one entry; read it with
+  \code{\link[=weights-methods]{weights}}, \code{\link{methodFits}} or
+  \code{\link{cvResult}}.
 }
 \description{
-Return the \code{TwasWeightsRow} for one \code{(study,
-  context, trait, method)} row of a \code{TwasWeights} collection.
+Return one \code{(study, context, trait, method)} entry of a
+  \code{TwasWeights} collection: its gene's row, cut to that method.
 }
 \examples{
 twe <- TwasWeightsRow(

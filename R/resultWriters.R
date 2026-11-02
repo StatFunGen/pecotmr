@@ -85,7 +85,8 @@ NULL
     if (length(present) == 0L) {
         return(rep("", nrow(df)))
     }
-    exec(str_c, !!!map(as.list(df[present]), .pubKeyPart), sep = "\r")
+    keyParts <- map(as.list(df[present]), .pubKeyPart)
+    exec(str_c, !!!keyParts, sep = "\r")
 }
 
 # The same key read off a COLLECTION's tuple columns, so a long-format view's
@@ -95,11 +96,8 @@ NULL
 # @noRd
 .pubCollectionKey <- function(x, cols) {
     present <- intersect(cols, .tupleColumnNames(x))
-    exec(
-        str_c,
-        !!!map(map(present, .pubTupleColumn, x = x), .pubKeyPart),
-        sep = "\r"
-    )
+    keyParts <- map(map(present, .pubTupleColumn, x = x), .pubKeyPart)
+    exec(str_c, !!!keyParts, sep = "\r")
 }
 
 # @noRd
@@ -269,15 +267,18 @@ NULL
 # from range(x) when no `region` column was recorded, and a variant-less row
 # contributes no range -- so the derived vector would be SHORTER than the
 # collection and indexing it by row number would read a neighbour's window.
+#
+# `labels` names the incomplete units (rows of a fine-mapping result, entries
+# of a TwasWeights) out of `total` of them.
 # @noRd
-.pubRequireFullFit <- function(x, incomplete, what) {
-    if (length(incomplete) == 0L) {
-        return(invisible(x))
+.pubRequireFullFit <- function(labels, total, what, unit) {
+    if (length(labels) == 0L) {
+        return(invisible(NULL))
     }
     abort(glue(
-        "{what}: {length(incomplete)} of {nrow(x)} row(s) carry no ",
+        "{what}: {length(labels)} of {total} {unit} carry no ",
         "full-data fit, only cross-validation results -- ",
-        "{str_flatten(.pubRowLabels(x, incomplete), ', ')}. Fold-level ",
+        "{str_flatten(labels, ', ')}. Fold-level ",
         "results cannot be published (fold membership is sample-level ",
         "information), so refit with ",
         "`CrossValidationParam(fitFullData = TRUE)` and export that. ",
@@ -285,18 +286,24 @@ NULL
     ))
 }
 
-# Rows of a TwasWeights with no full-data weights: a CV-only row has an empty
-# element AND no `weight` metadata column (TwasWeightsRow() drops the column
-# when `weights` is NULL).
+# Refuse a TwasWeights with an entry that has no full-data weights: a CV-only
+# entry has no variants, or no weights (TwasWeightsRow() takes `weights =
+# NULL`).
 # @noRd
-.twbIncompleteRows <- function(x) {
-    which(
-        lengths(x) == 0L | !map_lgl(seq_len(nrow(x)), .twbRowHasWeights, x = x)
+.twbRequireFullFit <- function(view, what) {
+    incomplete <- which(!map_lgl(view$entries, .twbCellHasWeights))
+    .pubRequireFullFit(
+        .twbCellLabels(view$cells, incomplete),
+        nrow(view$cells),
+        what,
+        "entries"
     )
 }
 
 # @noRd
-.twbRowHasWeights <- function(i, x) !is.null(mcols(x[[i]])$weight)
+.twbCellHasWeights <- function(entry) {
+    length(variants(entry)) > 0L && !is.null(weights(entry))
+}
 
 # Rows of a fine-mapping result with no fitted variants: what a
 # cross-validation only run (CrossValidationParam(fitFullData = FALSE)) leaves
@@ -311,6 +318,52 @@ NULL
 .pubRowLabels <- function(x, rows) {
     keys <- .pubCollectionKey(x, .PUB_ROW_COLS)
     str_replace_all(keys[rows], "\r", "|")
+}
+
+# ---- shared: TWAS entries ---------------------------------------------------
+
+# What both TWAS formats publish: one entry per (row, method) of the
+# collection. `cells` is .twasCells() -- each entry's row and identity --
+# and `entries` holds each one as a TwasWeightsRow, whose variants carry that
+# method's weight.
+# @noRd
+.twbCellView <- function(x) {
+    cells <- .twasCells(x)
+    list(
+        cells = cells,
+        entries = map2(cells$row, cells$method, .twrCellParts, x = x)
+    )
+}
+
+# Identity labels for the named entries, for an error message.
+# @noRd
+.twbCellLabels <- function(cells, idx) {
+    parts <- map(as.list(cells[idx, .PUB_ROW_COLS]), .pubKeyPart)
+    exec(str_c, !!!parts, sep = "|")
+}
+
+# Indices of the entries whose identity equals every supplied selector. A
+# method may be given in either spelling (susie_inf or susieInf).
+# @noRd
+.twbMatchingCells <- function(cells, studyName, context, trait, method) {
+    selectors <- compact(list(
+        study = studyName,
+        context = context,
+        trait = trait,
+        method = if (!is.null(method)) .twasMethodToken(method)
+    ))
+    reduce(
+        names(selectors),
+        .twbNarrowCells,
+        cells = cells,
+        selectors = selectors,
+        .init = seq_len(nrow(cells))
+    )
+}
+
+# @noRd
+.twbNarrowCells <- function(idx, axis, cells, selectors) {
+    idx[is_in(cells[[axis]][idx], selectors[[axis]])]
 }
 
 # ---- shared: genomic order --------------------------------------------------
@@ -1498,27 +1551,38 @@ setMethod(
         method = NULL
     ) {
         .vcfRequireVariantAnnotation()
-        .pubRequireFullFit(obj, .twbIncompleteRows(obj), "writeGwasVcf")
-        rows <- .pubMatchingRows(obj, studyName, context, trait, method)
-        if (length(rows) == 0L) {
-            abort("writeGwasVcf: no rows match the supplied selectors.")
+        view <- .twbCellView(obj)
+        .twbRequireFullFit(view, "writeGwasVcf")
+        cells <- .twbMatchingCells(
+            view$cells,
+            studyName,
+            context,
+            trait,
+            method
+        )
+        if (length(cells) == 0L) {
+            abort("writeGwasVcf: no entries match the supplied selectors.")
         }
         # The same rule the BED path applies, and for the same reason: a
         # fine-mapping method's "weights" are the posterior re-expressed, so
         # the fine-mapping result says strictly more. This path used to publish
         # them, which made the two formats disagree about what a weights file
         # contains.
-        rows <- intersect(rows, .twbExportableRows(obj, "writeGwasVcf"))
-        if (length(rows) == 0L) {
+        cells <- intersect(
+            cells,
+            .twbExportableCells(view$cells, "writeGwasVcf")
+        )
+        if (length(cells) == 0L) {
             abort(str_c(
-                "writeGwasVcf: every selected row is fine-mapping-derived, so ",
-                "there is nothing to write as weights. Write the ",
+                "writeGwasVcf: every selected entry is fine-mapping-derived, ",
+                "so there is nothing to write as weights. Write the ",
                 "fine-mapping result."
             ))
         }
         .twvWriteSamples(
             obj,
-            .twvSampleSpecs(obj, rows),
+            view,
+            .twvSampleSpecs(view, cells),
             sampleName,
             filename
         )
@@ -1534,12 +1598,12 @@ setMethod(
 # a dozen methods for one gene -- a dozen near-identical files would be the
 # wrong shape for the same information.
 # @noRd
-.twvWriteSamples <- function(x, samples, sampleName, outputPath) {
-    gr <- .twvVariantUnion(x, samples)
+.twvWriteSamples <- function(x, view, samples, sampleName, outputPath) {
+    gr <- .twvVariantUnion(view, samples)
     ids <- .grVariantIds(gr)
     mc <- mcols(gr)
-    wgt <- .twvWeightMatrix(x, samples, ids)
-    meta <- .twbRowMetadata(x)
+    wgt <- .twvWeightMatrix(view, samples, ids)
+    meta <- .twbCellMetadata(x, view)
     sn <- .twvSampleNames(samples, meta, sampleName)
     .writeVcfImpl(
         chrom = as.character(seqnames(gr)),
@@ -1588,11 +1652,15 @@ setMethod(
 # @noRd
 .twvSampleMetaRow <- function(j, samples, meta, nWeighted, x) {
     s <- samples[[j]]
-    ident <- slice(meta, s$row)
+    ident <- slice(meta, s$cell)
     fields <- .pubPerFitFields(x, s$row, NULL)
-    # A weight-matrix column is a member of a joint fit, so `trait` names the
-    # member while `joint_traits` keeps the membership. Assigned rather than
-    # bound, so there is one `trait` field and not a repaired duplicate.
+    # The method, its scale and its data type belong to the entry, not to the
+    # row. A weight-matrix column is a member of a joint fit, so `trait` names
+    # the member while `joint_traits` keeps the membership. Assigned rather
+    # than bound, so each field appears once and not as a repaired duplicate.
+    fields$method <- ident$method
+    fields$data_type <- ident$dataType
+    fields$weight_standardized <- ident$standardized
     fields$trait <- .twbTraitOf(s$label, ident$trait)
     bind_cols(tibble(total_variants = nWeighted[[j]]), as_tibble(fields))
 }
@@ -1619,41 +1687,50 @@ setMethod(
     )
 }
 
-# One sample spec per (collection row, weight column): the row it reads, which
-# weight column, and that column's label. A plain weight vector contributes one
-# sample; a weight MATRIX (fSuSiE collapses a functional fit to variants x
-# features) contributes one per column.
+# One sample spec per (entry, weight column): the entry it reads (`cell`, in
+# the view), the collection row that entry sits on, which weight column, and
+# that column's label. A plain weight vector contributes one sample; a weight
+# MATRIX (fSuSiE collapses a functional fit to variants x features)
+# contributes one per column.
 # @noRd
-.twvSampleSpecs <- function(x, rows) {
-    list_flatten(map(rows, .twvRowSampleSpecs, x = x))
+.twvSampleSpecs <- function(view, cells) {
+    list_flatten(map(cells, .twvCellSampleSpecs, view = view))
 }
 
 # @noRd
-.twvRowSampleSpecs <- function(i, x) {
-    # .pubRequireFullFit() has already established that every row has weights.
-    labels <- .twbWeightLabels(mcols(x[[i]])$weight)
-    map(seq_along(labels), .twvOneSampleSpec, row = i, labels = labels)
+.twvCellSampleSpecs <- function(cell, view) {
+    # .twbRequireFullFit() has already established that every entry has
+    # weights.
+    labels <- .twbWeightLabels(weights(view$entries[[cell]]))
+    map(
+        seq_along(labels),
+        .twvOneSampleSpec,
+        cell = cell,
+        row = view$cells$row[[cell]],
+        labels = labels
+    )
 }
 
 # @noRd
-.twvOneSampleSpec <- function(k, row, labels) {
-    list(row = row, column = k, label = labels[[k]])
+.twvOneSampleSpec <- function(k, cell, row, labels) {
+    list(cell = cell, row = row, column = k, label = labels[[k]])
 }
 
 # The union of every selected model's variants, in genomic order. The weight
-# mcols is dropped first: it is numeric on one row and a matrix on another, and
-# c() on GRanges requires one mcols schema.
+# mcols is dropped first: it is numeric on one entry and a matrix on another,
+# and c() on GRanges requires one mcols schema.
 # @noRd
-.twvVariantUnion <- function(x, samples) {
-    rows <- unique(map_int(samples, "row"))
-    all <- exec(c, !!!map(rows, .twvRowAlleles, x = x))
+.twvVariantUnion <- function(view, samples) {
+    cells <- unique(map_int(samples, "cell"))
+    cellAlleles <- map(view$entries[cells], .twvCellAlleles)
+    all <- exec(c, !!!cellAlleles)
     gr <- all[!duplicated(.grVariantIds(all))]
     gr[genomicOrder(as.character(seqnames(gr)), start(gr))]
 }
 
 # @noRd
-.twvRowAlleles <- function(i, x) {
-    gr <- x[[i]]
+.twvCellAlleles <- function(entry) {
+    gr <- variants(entry)
     S4Vectors::`mcols<-`(
         gr,
         value = mcols(gr)[, c("A1", "A2"), drop = FALSE]
@@ -1663,16 +1740,19 @@ setMethod(
 # The nVariant x nSample weight matrix: one column per model, placed onto the
 # union by variant id.
 # @noRd
-.twvWeightMatrix <- function(x, samples, unionIds) {
-    exec(
-        cbind,
-        !!!map(samples, .twvSampleColumn, x = x, unionIds = unionIds)
+.twvWeightMatrix <- function(view, samples, unionIds) {
+    sampleCols <- map(
+        samples,
+        .twvSampleColumn,
+        view = view,
+        unionIds = unionIds
     )
+    exec(cbind, !!!sampleCols)
 }
 
 # @noRd
-.twvSampleColumn <- function(s, x, unionIds) {
-    gr <- x[[s$row]]
+.twvSampleColumn <- function(s, view, unionIds) {
+    gr <- variants(view$entries[[s$cell]])
     out <- rep(NA_real_, length(unionIds))
     out[match(.grVariantIds(gr), unionIds)] <-
         .twbWeightColumn(s$column, mcols(gr)$weight)
@@ -1692,7 +1772,7 @@ setMethod(
 
 # @noRd
 .twvSampleLabel <- function(s, meta) {
-    ident <- slice(meta, s$row)
+    ident <- slice(meta, s$cell)
     tags <- c(ident$study, ident$context, ident$trait, ident$method)
     if (!is.na(s$label)) {
         tags <- c(tags, s$label)
@@ -2632,7 +2712,12 @@ setMethod(
         schema <- arg_match(schema)
         levels <- arg_match(levels, multiple = TRUE)
         assertString(filename)
-        .pubRequireFullFit(obj, .fmbIncompleteRows(obj), "writeBed")
+        .pubRequireFullFit(
+            .pubRowLabels(obj, .fmbIncompleteRows(obj)),
+            nrow(obj),
+            "writeBed",
+            "row(s)"
+        )
         if (identical(schema, "fsusie")) {
             return(.pubWriteTable(
                 .fmbFsusieTable(obj, columns, levels, coverage),
@@ -2666,15 +2751,16 @@ setMethod(
 # @noRd
 .TWB_WEIGHT_SOURCE <- c("A1", "A2", "weight")
 
-# A zero-row frame naming every variant-level column ANY row's variants carry.
-# `columns` resolves against this rather than against one row, because the
-# published schema must not vary row by row: a column one row has and another
-# lacks has to become an NA cell, not a column that appears halfway down.
+# A zero-row frame naming every variant-level column ANY entry's variants
+# carry. `columns` resolves against this rather than against one entry,
+# because the published schema must not vary entry by entry: a column one
+# has and another lacks has to become an NA cell, not a column that appears
+# halfway down.
 # @noRd
-.twbVariantColumns <- function(x) {
+.twbVariantColumns <- function(view) {
     nms <- unique(list_c(c(
         list(character(0)),
-        map(seq_len(nrow(x)), .twbRowVariantColumns, x = x)
+        map(view$entries, .twbCellVariantColumns)
     )))
     as_tibble(
         set_names(rep(list(character()), length(nms)), nms),
@@ -2683,67 +2769,43 @@ setMethod(
 }
 
 # @noRd
-.twbRowVariantColumns <- function(i, x) colnames(mcols(x[[i]]))
+.twbCellVariantColumns <- function(entry) colnames(mcols(variants(entry)))
 
-# Per-row identity and payload provenance, as a tibble parallel to the
-# collection's rows. The identity axes are mcols columns on a TwasWeights, not
-# element fields, so they are read through `.tupleColumn()`.
+# Per-entry identity and payload provenance, as a tibble parallel to the
+# view's entries. The method, its scale and its data type are the entry's;
+# the data source and the joint membership are its row's.
 # @noRd
-.twbRowMetadata <- function(x) {
+.twbCellMetadata <- function(x, view) {
+    rows <- view$cells$row
     tibble(
-        study = .pubTupleColumn("study", x),
-        trait = .pubTupleColumn("trait", x),
-        context = .pubTupleColumn("context", x),
-        method = .pubTupleColumn("method", x),
-        standardized = .twbColumnOr(x, "standardized", as.logical, NA),
-        dataType = .twbListColumn(x, "dataType"),
-        dataSource = .pubDataSourceOf(x),
-        jointStudies = .twbColumnOr(
-            x,
-            "jointStudies",
-            as.character,
-            NA_character_
-        ),
-        jointContexts = .twbColumnOr(
-            x,
-            "jointContexts",
-            as.character,
-            NA_character_
-        ),
-        jointTraits = .twbColumnOr(
-            x,
-            "jointTraits",
-            as.character,
-            NA_character_
-        )
+        study = view$cells$study,
+        trait = view$cells$trait,
+        context = view$cells$context,
+        method = view$cells$method,
+        standardized = map_lgl(view$entries, weightStandardized),
+        dataType = map_chr(view$entries, .twbCellDataType),
+        dataSource = .pubDataSourceOf(x)[rows],
+        jointStudies = .twbColumnOr(x, "jointStudies")[rows],
+        jointContexts = .twbColumnOr(x, "jointContexts")[rows],
+        jointTraits = .twbColumnOr(x, "jointTraits")[rows]
     )
 }
 
-# An mcols column read through `coerce`, or a recycled default when the
-# collection does not carry it.
+# A character mcols column, or NA for every row when the collection does not
+# carry it.
 # @noRd
-.twbColumnOr <- function(x, nm, coerce, default) {
+.twbColumnOr <- function(x, nm) {
     if (!is_in(nm, .tupleColumnNames(x))) {
-        return(rep(default, nrow(x)))
+        return(rep(NA_character_, nrow(x)))
     }
-    coerce(.tupleColumn(x, nm))
+    as.character(.tupleColumn(x, nm))
 }
 
-# A per-row List column flattened to one string per row.
-#
-# No absent-column branch, unlike `.twbColumnOr()` above: this is only ever
-# asked for `dataType`, which `TwasWeights()` materializes for every row even
-# when no row declares one -- and that constructor is the only way to build
-# the class, so the column is always there.
+# An entry's data type as one string: absent becomes NA, and several values
+# are ";"-packed rather than silently truncated.
 # @noRd
-.twbListColumn <- function(x, nm) {
-    map_chr(as.list(.tupleColumn(x, nm)), .twbScalarChr)
-}
-
-# One List cell as a single string: an absent value becomes NA, and a
-# multi-value cell is ";"-packed rather than silently truncated.
-# @noRd
-.twbScalarChr <- function(v) {
+.twbCellDataType <- function(entry) {
+    v <- weightsDataType(entry)
     if (length(v) == 0L) NA_character_ else .pubPack(v)
 }
 
@@ -2768,30 +2830,30 @@ setMethod(
 
 # Fine-mapping methods have no business in a weights export: their "weights"
 # are the fine-mapping posterior re-expressed, so the fine-mapping result says
-# strictly more. Those rows are skipped with a message rather than written.
+# strictly more. Those entries are skipped with a message rather than written.
+# A method may be named by token (susieInf, as a pipeline labels it) or by
+# snake key (susie_inf, as learnTwasWeights() takes it), so both are matched.
 # @noRd
-.TWB_FINE_MAPPING_METHODS <- c(
-    "susie",
-    "susie_inf",
-    "susie_ash",
-    "mvsusie",
-    "fsusie"
-)
+.twbIsFineMappingMethod <- function(methods) {
+    !is.na(map_chr(as.character(methods), .twasFmTokenFor))
+}
 
+# Indices of the entries `cells` (.twasCells()) that are not fine-mapping
+# derived.
 # @noRd
-.twbExportableRows <- function(x, label = "writeBed") {
-    methods <- .pubTupleColumn("method", x)
-    skip <- which(is_in(methods, .TWB_FINE_MAPPING_METHODS))
+.twbExportableCells <- function(cells, label = "writeBed") {
+    skip <- which(.twbIsFineMappingMethod(cells$method))
     if (length(skip) > 0L) {
         inform(glue(
             "{label}: skipping {length(skip)} fine-mapping-derived ",
-            "row(s) ({str_flatten(unique(methods[skip]), ', ')}). Those ",
+            "{if (length(skip) == 1L) 'entry' else 'entries'} ",
+            "({str_flatten(unique(cells$method[skip]), ', ')}). Those ",
             "weights are the fine-mapping posterior re-expressed -- export ",
             "the fine-mapping result instead, which carries the posterior, ",
             "its standard error and the credible sets."
         ))
     }
-    setdiff(seq_len(nrow(x)), skip)
+    setdiff(seq_len(nrow(cells)), skip)
 }
 
 # One (row, weight column) block of the weights table: every variant of the
@@ -2853,10 +2915,13 @@ setMethod(
     if (is.na(label)) trait else label
 }
 
+# The blocks of entry `cell` of the view. Its window and its LD reference are
+# its row's.
 # @noRd
-.twbWeightRows <- function(i, x, meta, regions, regionIds, schema, added) {
-    gr <- x[[i]]
+.twbWeightRows <- function(cell, view, x, meta, regions, schema, added) {
+    gr <- variants(view$entries[[cell]])
     w <- mcols(gr)$weight
+    i <- view$cells$row[[cell]]
     labels <- .twbWeightLabels(w)
     list_rbind(map(
         seq_along(labels),
@@ -2864,11 +2929,11 @@ setMethod(
         gr = gr,
         w = w,
         labels = labels,
-        ident = slice(meta, i),
+        ident = slice(meta, cell),
         win = list(
-            id = .pubRegionIds(regions)[[i]],
-            start = start(regions)[[i]] - 1L,
-            end = end(regions)[[i]]
+            id = regions$id[[i]],
+            start = start(regions$ranges)[[i]] - 1L,
+            end = end(regions$ranges)[[i]]
         ),
         af = .twbVariantAf(.rowLdRef(x, i), gr),
         schema = schema,
@@ -2893,26 +2958,26 @@ setMethod(
 }
 
 # @noRd
-.twbWeightsTable <- function(x, columns, coverage) {
-    rows <- .twbExportableRows(x)
-    if (length(rows) == 0L) {
+.twbWeightsTable <- function(x, columns, coverage, view = .twbCellView(x)) {
+    cells <- .twbExportableCells(view$cells)
+    if (length(cells) == 0L) {
         abort(str_c(
-            "writeBed: every row is fine-mapping-derived, so there is ",
+            "writeBed: every entry is fine-mapping-derived, so there is ",
             "nothing to write as weights. Export the fine-mapping result."
         ))
     }
     schema <- .pubSchema(.pubCsColumns(tibble(), coverage))
     regions <- genomicRegion(x)
     pieces <- compact(map(
-        rows,
+        cells,
         .twbWeightRows,
+        view = view,
         x = x,
-        meta = .twbRowMetadata(x),
-        regions = regions,
-        regionIds = .pubRegionIds(regions),
+        meta = .twbCellMetadata(x, view),
+        regions = list(ranges = regions, id = .pubRegionIds(regions)),
         schema = schema,
         added = .pubViewColumns(
-            .twbVariantColumns(x),
+            .twbVariantColumns(view),
             columns,
             .TWB_WEIGHT_SOURCE
         )
@@ -2940,9 +3005,10 @@ setMethod(
         extraColumns = NULL
     ) {
         assertString(filename)
-        .pubRequireFullFit(obj, .twbIncompleteRows(obj), "writeBed")
+        view <- .twbCellView(obj)
+        .twbRequireFullFit(view, "writeBed")
         .pubWriteTable(
-            .twbWeightsTable(obj, columns, coverage),
+            .twbWeightsTable(obj, columns, coverage, view),
             filename,
             naString = "NA",
             index = TRUE,

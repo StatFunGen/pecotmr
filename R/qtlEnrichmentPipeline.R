@@ -690,16 +690,6 @@ qtlEnrichmentPipeline <- function(
     is.list(fit) && !is.null(fit$pip)
 }
 
-# One row's PIP vector keyed by variant id (see .enrPipTablesAt()).
-# @noRd
-.enrRowPipVector <- function(i, gwasFmr) {
-    piece <- .enrPipTablesAt(gwasFmr, i)
-    if (length(piece$pip) == 0L) {
-        return(NULL)
-    }
-    set_names(piece$pip, .variantTableIds(piece$table))
-}
-
 # One outcome fit's PIPs and variants: every row of the collection carrying
 # that identity -- the fit's LD blocks -- joined. A variant several rows carry
 # is resolved by `duplicatePips` -- which is why the identity is the full fit
@@ -915,12 +905,6 @@ qtlEnrichmentPipeline <- function(
 # @noRd
 .enrNamedRegion <- function(region, ids) {
     list_assign(region, pip = set_names(region$pip, ids))
-}
-
-# One row's region payload for qtlEnrichment (see .enrRegionsAt()).
-# @noRd
-.enrRowRegion <- function(i, qtlFmr) {
-    .enrRegionsAt(qtlFmr, i)[[1L]]
 }
 
 # The per-(study, context) list of region fits with named PIPs, as

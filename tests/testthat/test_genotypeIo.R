@@ -17,7 +17,7 @@ test_that("Test loadGenotypeRegion", {
     sample_ids <- read_delim(
         "test_data/protocol_example.genotype.fam",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     ) %>%
         pull(X1)
     expect_equal(nrow(res), length(sample_ids))
@@ -27,17 +27,17 @@ test_that("Test loadGenotypeRegion", {
 test_that("Test loadGenotypeRegion no indels", {
     res <- loadGenotypeRegion(
         "test_data/protocol_example.genotype",
-        keepIndel = F
+        keepIndel = FALSE
     )
     bim_file <- read_delim(
         "test_data/protocol_example.genotype.bim",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     )
     sample_ids <- read_delim(
         "test_data/protocol_example.genotype.fam",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     ) %>%
         pull(X1)
     expect_equal(nrow(res), length(sample_ids))
@@ -63,13 +63,13 @@ test_that("Test loadGenotypeRegion with region", {
     sample_ids <- read_delim(
         "test_data/protocol_example.genotype.fam",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     ) %>%
         pull(X1)
     snp_ids <- read_delim(
         "test_data/protocol_example.genotype.bim",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     ) %>%
         pull(X2)
     expect_equal(nrow(res), length(sample_ids))
@@ -82,17 +82,17 @@ test_that("Test loadGenotypeRegion with region and no indels", {
     res <- loadGenotypeRegion(
         "test_data/protocol_example.genotype",
         which = GenomicRanges::GRanges("chr22:20689453-20845958"),
-        keepIndel = F
+        keepIndel = FALSE
     )
     bim_file <- read_delim(
         "test_data/protocol_example.genotype.bim",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     )[1:8, ]
     sample_ids <- read_delim(
         "test_data/protocol_example.genotype.fam",
         delim = "\t",
-        col_names = F
+        col_names = FALSE
     ) %>%
         pull(X1)
     expect_equal(nrow(res), length(sample_ids))
@@ -189,7 +189,8 @@ test_that("readStochasticMeta reads afreq.zst format", {
 
 test_that("findStochasticMeta prefers afreq over afreq.zst", {
     td <- test_path("test_data")
-    # Both .afreq and .afreq.zst exist; findStochasticMeta should return .afreq first
+    # Both .afreq and .afreq.zst exist; findStochasticMeta should return .afreq
+    # first
     result <- pecotmr:::findStochasticMeta(file.path(
         td,
         "test_harmonize_regions"
@@ -245,7 +246,7 @@ test_that("readStochasticMeta returns NULL for nonexistent file", {
 
 # --- loadGenotypeRegion stochastic inversion test ---
 
-test_that("loadGenotypeRegion applies stochastic inversion with explicit sidecar", {
+test_that("loadGenotypeRegion applies stochastic inversion with a sidecar", {
     td <- test_path("test_data")
     metaPath <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
     smeta <- pecotmr:::readStochasticMeta(metaPath)
@@ -271,7 +272,8 @@ test_that("loadGenotypeRegion applies stochastic inversion with explicit sidecar
         file.path(td, "protocol_example.genotype"),
         which = GenomicRanges::GRanges("chr22:20689453-20845958")
     )
-    # protocol_example has no sidecar, so raw values are unchanged (integer dosages)
+    # protocol_example has no sidecar, so raw values are unchanged (integer
+    # dosages)
     expect_true(all(raw == round(raw), na.rm = TRUE))
 
     # The inverted matrix should NOT be all integers (u_min != 0 or u_max != 2)
@@ -705,7 +707,8 @@ test_that("readGenotypes reads PLINK1, VCF and GDS files as panels", {
         gds = list(gds_path)
     )
     for (format in names(sources)) {
-        panel <- exec(readGenotypes, !!!sources[[format]])
+        sourceArgs <- sources[[format]]
+        panel <- exec(readGenotypes, !!!sourceArgs)
         expect_s4_class(panel, "RangedSummarizedExperiment")
         expect_equal(dim(panel), c(n_variants, n_samples), info = format)
         expect_equal(
@@ -933,9 +936,9 @@ test_that("extractBlockGenotypes mean-imputes a missing call on request", {
         expect_equal(nrow(snpInfo(shard)), n21 + n22)
         # A chr21 request routes to the chr21 payload (== single-file chr21).
         expect_equal(.shardDose(shard, 1:5), .shardDose(ref21, 1:5))
-        # A chr22 request routes to the chr22 payload, and the global->local index
-        # conversion lines up with the single-file chr22 handle. (PLINK2 is
-        # positional, so this is the key check for that backend.)
+        # A chr22 request routes to the chr22 payload, and the global->local
+        # index conversion lines up with the single-file chr22 handle. (PLINK2
+        # is positional, so this is the key check for that backend.)
         expect_equal(
             .shardDose(shard, (n21 + 1):(n21 + 5)),
             .shardDose(ref22, 1:5)
@@ -961,7 +964,8 @@ test_that("extractBlockGenotypes mean-imputes a missing call on request", {
                 )),
                 c("chr21", "chr21", "chr22", "chr22")
             )
-            # Requested order preserved; each half matches its single-file source.
+            # Requested order preserved; each half matches its single-file
+            # source.
             expect_equal(dm[1:2, ], .shardDose(ref21, 1:2))
             expect_equal(dm[3:4, ], .shardDose(ref22, 1:2))
         }
@@ -1061,7 +1065,7 @@ test_that("a PLINK1 panel errors when its trio is absent", {
     )
 })
 
-# --- .extractBlockSharded: empty block + missing-chromosome stop -------------
+# --- sharded handle: empty block + missing-chromosome stop ------------------
 
 test_that("extractBlockGenotypes on a sharded handle handles an empty block", {
     skip_if_not_installed("pgenlibr")
@@ -1259,7 +1263,7 @@ test_that("resolvePlink2Paths errors when .psam is missing", {
 
 # --- readStochasticMeta: generic format missing required columns -------------
 
-test_that("readStochasticMeta errors when generic file lacks required columns", {
+test_that("readStochasticMeta errors when a file lacks required columns", {
     tmp <- tempfile(fileext = ".tsv")
     on.exit(unlink(tmp), add = TRUE)
     writeLines(c("foo\tbar", "1\t2"), tmp)
@@ -1343,7 +1347,7 @@ test_that(".withFileIdx + readers attach a sequential fileIdx to snpInfo", {
     expect_identical(si$fileIdx, seq_len(nrow(si)))
 })
 
-test_that(".subsetGenotypeHandle keeps PLINK2 reads correct for kept variants", {
+test_that(".subsetGenotypeHandle keeps PLINK2 reads right for kept variants", {
     h <- readGenotypeHandle(
         test_path("test_data/test_variants"),
         format = "plink2"
@@ -1351,8 +1355,8 @@ test_that(".subsetGenotypeHandle keeps PLINK2 reads correct for kept variants", 
     si <- snpInfo(h)
     want <- c(2L, 4L, 5L, 9L)
     dosFull <- pecotmr:::.dosageMatrix(h, want, meanImpute = TRUE)
-    # Keep a reordered superset so the wanted variants move to NEW row positions;
-    # fileIdx must rescue the (now-shifted) positional PLINK2 read.
+    # Keep a reordered superset so the wanted variants move to NEW row
+    # positions; fileIdx must rescue the (now-shifted) positional PLINK2 read.
     keep <- c(9L, 5L, 4L, 2L, 7L, 1L)
     hSub <- pecotmr:::.subsetGenotypeHandle(h, keep)
     expect_equal(nrow(snpInfo(hSub)), length(keep))
@@ -1362,7 +1366,7 @@ test_that(".subsetGenotypeHandle keeps PLINK2 reads correct for kept variants", 
     expect_equal(unname(dosFull), unname(dosSub))
 })
 
-test_that(".subsetGenotypeHandle is NULL-safe and a no-op when nothing dropped", {
+test_that(".subsetGenotypeHandle is NULL-safe; a no-op when nothing dropped", {
     expect_null(pecotmr:::.subsetGenotypeHandle(NULL, TRUE))
     h <- readGenotypeHandle(
         test_path("test_data/test_variants"),
@@ -1512,8 +1516,12 @@ test_that("the panel's assay is delayed and its seed is the handle", {
         test_path("test_data", "test_variants"),
         format = "plink2"
     )
-    # Equal, not identical: each read opens its own pgen pointer.
-    expect_equal(pecotmr:::.ldRefHandle(panel), handle)
+    # Equal, not identical: each read opens its own pgen pointer. The seed's
+    # handle keeps only the columns reading needs.
+    expect_equal(
+        pecotmr:::.ldRefHandle(panel),
+        pecotmr:::.readingHandle(handle)
+    )
 })
 
 test_that("a panel answers panel questions without the handle", {
@@ -1758,7 +1766,8 @@ test_that("readGenotypes names its keyword sources, not `...`", {
     for (nm in sources) {
         err <- tryCatch(
             {
-                exec(readGenotypes, !!!set_names(list("nope"), nm))
+                badArg <- set_names(list("nope"), nm)
+                exec(readGenotypes, !!!badArg)
                 NULL
             },
             error = function(e) conditionMessage(e)
@@ -2172,7 +2181,7 @@ test_that("a VCF panel names its variants and records where it came from", {
     # A record keeps its own ID when it has one and a single ALT allele;
     # every other row is named by its alleles.
     expect_equal(
-        rr$SNP,
+        pecotmr:::.panelLabels(rr),
         c(
             "chr22:100:A:G",
             "rs2",
@@ -2223,7 +2232,7 @@ test_that("vcfArgs reach the read of the records", {
         readGenotypes(vcf, vcfArgs = list(row.names = FALSE))
     )
     expect_equal(
-        SummarizedExperiment::rowRanges(panel)$SNP[2:3],
+        pecotmr:::.panelLabels(SummarizedExperiment::rowRanges(panel))[2:3],
         c("chr22:200:ACGTA:A", "chr22:202:G:T")
     )
 })
@@ -2389,6 +2398,32 @@ test_that("a PLINK1 panel reads the dosages snpStats reads", {
     )
 })
 
+test_that("a panel's alleles read in upper case whatever the file's case", {
+    # Alleles enter in upper case, as chromosomes enter in UCSC style, so a
+    # lowercase file names its variants as every other source does. toy_ref's
+    # labels are rsIDs on chromosome 22, so lowercasing its .bim lines
+    # changes only the alleles.
+    skip_if_not_installed("PlinkMatrix")
+    src <- str_remove(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr"),
+        "\\.bed$"
+    )
+    stem <- file.path(withr::local_tempdir(), "lower")
+    file.copy(str_c(src, ".bed"), str_c(stem, ".bed"))
+    file.copy(str_c(src, ".fam"), str_c(stem, ".fam"))
+    writeLines(
+        str_to_lower(readLines(str_c(src, ".bim"))),
+        str_c(stem, ".bim")
+    )
+    alleles <- function(p) {
+        S4Vectors::mcols(SummarizedExperiment::rowRanges(p))[, c("A1", "A2")]
+    }
+    lower <- readGenotypes(plink1Prefix = stem)
+    upper <- readGenotypes(plink1Prefix = src)
+    expect_identical(alleles(lower), alleles(upper))
+    expect_identical(rownames(lower), rownames(upper))
+})
+
 # ---- Per-chromosome sets ---------------------------------------------------
 
 test_that("a per-chromosome VCF, GDS or PLINK1 set stacks into one panel", {
@@ -2542,6 +2577,50 @@ test_that(".updatePanel leaves a current panel, or no panel, as it is", {
     expect_identical(.updatePanel(plink2), plink2)
 })
 
+test_that(".updatePanel drops the copies of labels a saved panel kept", {
+    skip_if_not_installed("pgenlibr")
+    stem <- test_path("test_data", "test_variants")
+    plink2 <- readGenotypes(stem, format = "plink2")
+    saved <- .savedLabelledPanel(
+        plink2,
+        readGenotypeHandle(stem, format = "plink2")
+    )
+    slim <- .updatePanel(saved)
+    expect_identical(
+        SummarizedExperiment::rowRanges(slim),
+        SummarizedExperiment::rowRanges(plink2)
+    )
+    seed <- .panelSeed(slim)
+    expect_identical(names(snpInfo(.ghSeedHandle(seed))), "fileIdx")
+    expect_null(dimnames(seed)[[1L]])
+    expect_identical(dimnames(slim), dimnames(plink2))
+    expect_equal(
+        as.matrix(SummarizedExperiment::assay(slim)[1:5, ]),
+        as.matrix(SummarizedExperiment::assay(plink2)[1:5, ])
+    )
+    expect_identical(.updatePanel(slim), slim)
+    # A panel cut from a saved one keeps its rows and samples, in order.
+    cut <- saved[c(7L, 2L, 9L), 3:1]
+    slimCut <- .updatePanel(cut)
+    expect_null(dimnames(.panelSeed(slimCut))[[1L]])
+    expect_identical(dimnames(slimCut), dimnames(cut))
+    expect_equal(
+        as.matrix(SummarizedExperiment::assay(slimCut)),
+        as.matrix(SummarizedExperiment::assay(cut))
+    )
+})
+
+test_that(".updatePanel drops the row names of a VCF, GDS or PLINK1 seed", {
+    stem <- test_path("test_data", "test_variants")
+    plink1 <- readGenotypes(stem, format = "plink1")
+    slim <- .updatePanel(.savedLabelledPanel(plink1))
+    expect_identical(.panelSeed(slim), .panelSeed(plink1))
+    expect_identical(
+        SummarizedExperiment::rowRanges(slim),
+        SummarizedExperiment::rowRanges(plink1)
+    )
+})
+
 test_that(".updatePanel refuses a saved panel it cannot read again", {
     stem <- test_path("test_data", "test_variants")
     fresh <- readGenotypes(stem, format = "plink1")
@@ -2589,4 +2668,27 @@ test_that(".readPvarTable declines what it cannot read as a table", {
     expect_null(pecotmr:::.readPvarTable("panel.pvar.zst"))
     path <- .gio_pvar(c("#CHROM\tPOS\tID", "1\t10\tv1"))
     expect_null(pecotmr:::.readPvarTable(path))
+})
+
+test_that("readPvar gives upper-case alleles whichever way it reads", {
+    want <- tibble::tibble(
+        chrom = "1",
+        id = c("rs1", "rs2"),
+        pos = c(100L, 200L),
+        A2 = c("A", "C"),
+        A1 = c("G", "T")
+    )
+    # A plain-text file with a header is read as a table; a multi-allelic
+    # variant's first ALT is its A1.
+    plain <- .gio_pvar(c(
+        "#CHROM\tPOS\tID\tREF\tALT",
+        "1\t100\trs1\ta\tg",
+        "1\t200\trs2\tc\tt,a"
+    ))
+    expect_equal(pecotmr:::readPvar(plain), want)
+    # A header-less one, in .bim column order, goes through pgenlibr.
+    skip_if_not_installed("pgenlibr")
+    headerless <- .gio_pvar(c("1\trs1\t0\t100\tg\ta", "1\trs2\t0\t200\tt\tc"))
+    expect_null(pecotmr:::.readPvarTable(headerless))
+    expect_equal(pecotmr:::readPvar(headerless), want)
 })

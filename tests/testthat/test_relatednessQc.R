@@ -16,7 +16,7 @@ noRelatedPairsRemain <- function(
     all(kept[[value]] < threshold)
 }
 
-test_that("maximizeUnrelated removes related individuals and leaves clean set", {
+test_that("maximizeUnrelated drops related individuals, leaving a clean set", {
     skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
@@ -189,7 +189,7 @@ test_that("maximizeCases errors without phenoData", {
     )
 })
 
-test_that("maximizeCases excludes a control listed as IID1 paired with a kept case", {
+test_that("maximizeCases drops a control listed as IID1 beside a kept case", {
     skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 

@@ -120,7 +120,9 @@ delayedAssign(
         verbose = 0,
         seed = 1
     )
-    list(X = X, Y = Y, cv = cv, slice = pecotmr:::.fmSliceCv(cv, "susie"))
+    slice <- pecotmr:::.fmSliceCv(cv, "susie")
+    # The fold weights as cvResult() hands them out: named by variant.
+    list(X = X, Y = Y, cv = cv, slice = slice, foldWeights = slice$foldWeights)
 }
 
 # Built once: each build runs a susie fit per fold, and the tests only read
@@ -169,10 +171,11 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
     get(name, envir = env)
 }
 
-# Row i of `x` as FineMappingRow() takes it: its element's columns as the
-# topLoci table, plus its stored fit.
+# Row i of `x` as FineMappingRow() takes it: its element's columns, as the
+# row hands them out, as the topLoci table, plus its fit and CV.
 .fmExampleRowInputs <- function(x, i) {
-    el <- x[[i]]
+    parts <- pecotmr:::.fmrRowParts(x, i)
+    el <- as(parts, "GRanges")
     md <- as.data.frame(S4Vectors::mcols(el), optional = TRUE)
     ids <- sprintf(
         "%s:%d:%s:%s",
@@ -183,9 +186,9 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
     )
     list(
         variantIds = ids,
-        susieFit = S4Vectors::mcols(x)$susieFit[[i]],
+        susieFit = susieFit(parts),
         topLoci = cbind(variant_id = ids, md),
-        cvResult = S4Vectors::mcols(x)$cvResult[[i]]
+        cvResult = cvResult(parts)
     )
 }
 

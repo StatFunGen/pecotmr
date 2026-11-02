@@ -26,6 +26,9 @@ all survive a plyranges round trip.
 \details{
 A tuple with no surviving ranges becomes an empty element rather than being
 dropped, so the collection keeps its shape and its metadata stays aligned.
+A \code{\link{TwasWeights}} is nested by (row, \code{.method}): each
+method keeps its surviving ranges and their \code{weight}, and a method
+left with none keeps its entry, with no variants.
 }
 \examples{
 data(qtlFineMappingExample)

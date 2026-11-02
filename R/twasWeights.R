@@ -23,10 +23,11 @@
 # =============================================================================
 # TwasWeights S4 class
 # -----------------------------------------------------------------------------
-# RangedTupleList collection keyed by the identity tuple (study, context,
-# trait, method). Each element is one row's variants, with their weights as
-# its `weight` mcols column; the fits, cross-validation and scale are columns
-# of the collection's own mcols. Class-level slots:
+# RangedTupleList collection keyed by (study, context, trait[, joint*]): one
+# row per gene, holding every method fitted for it (see "Per-gene rows"
+# below). Each element is the union of the row's methods' variants; the
+# weights, fits, cross-validation and scale are columns of the collection's
+# own mcols, kept per method. Class-level slots:
 #   * ldReference   the LD references RSS-derived weights used, each stored
 #                once; the ldReference mcols column names each row's (NA
 #                for weights learned from individual-level data).
@@ -39,45 +40,62 @@ NULL
 
 #' @title TWAS Weights Collection
 #' @description S4 collection of TWAS weights, one row per
-#'   \code{(study, context, trait, method)}: one method's weights for one
-#'   trait, context and study. Each element is a row's variants: a
-#'   \code{GRanges} whose \code{weight} column holds the weights.
+#'   \code{(study, context, trait)} -- a gene -- holding the weights of every
+#'   method fitted for it. Each element is the union of the row's methods'
+#'   variants; a method fitted on fewer of them, or in another order, keeps
+#'   its own. The weights form a variants x methods x weight-column tensor,
+#'   stored dense for the methods most of whose weights are nonzero and
+#'   sparse for the rest. One method of one gene is what a
+#'   \code{\link{TwasWeightsRow}} holds: the constructor takes one per
+#'   \code{(study, context, trait, method)}, and the accessors select one by
+#'   \code{method}.
 #'
-#' Required \code{mcols()} columns: the identity tuple \code{study},
-#' \code{context}, \code{trait} and \code{method}, and each row's payload:
-#' its stored fits (\code{fits}), \code{cvResult}, \code{standardized} and
-#' \code{dataType}. The constructor also records \code{fitVariants}, the
-#' variants the weights were fitted on.
+#' Required \code{mcols()} columns: the identity \code{study},
+#' \code{context} and \code{trait}, and each row's \code{methods} with
+#' their weights (\code{weightTensor}), fits (\code{fits}, and the
+#' per-fold fits of their cross-validation in \code{foldFits}),
+#' \code{cvResult}, \code{standardized} and \code{dataType}.
 #'
 #' Optional columns \code{jointStudies}, \code{jointContexts},
-#' \code{jointTraits} appear when the collection contains rows produced by a
-#' \code{jointSpecification}-driven joint fit. For such a row, the corresponding
-#' identity-tuple column carries the sentinel \code{"joint"} and the joint
-#' column lists the semicolon-joined members of the joined axis. For non-joint
-#' rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
-#' jointly across the identity-tuple columns and any present joint columns.
+#' \code{jointTraits} appear when the collection holds weights from a
+#' \code{jointSpecification}-driven joint fit: they list the semicolon-joined
+#' members of the joined axis, \code{NA_character_} for a row from no joint
+#' fit. A row is unique on its identity together with any joint columns, so
+#' one gene's weights from a joint fit and from fits of its own are two rows.
 #' @slot ldReference A named list of the LD references the weights were
 #'   derived against, each a genotype panel, a \code{GenotypeMixture} or an
 #'   \code{LdMatrix}, stored once apiece; the \code{ldReference} column of
 #'   \code{mcols} names the entry each row used (\code{NA} for weights
 #'   learned from individual-level data). Used downstream to check that the
 #'   rows a pipeline combines share an LD reference.
-#' @section Narrowed rows: Each row records in its \code{fitVariants} column
-#'   the ids of the variants its weights were fitted on (none for a row
-#'   without a fit payload). A row narrowed since keeps its fits as they
-#'   were, so \code{cvResult()} and \code{methodFits()} warn, with condition
-#'   class \code{pecotmrFitCoverage}, when a row holds fewer variants than
-#'   they describe. So do the pipelines that read them:
+#' @slot cvPartition A named list of the cross-validation fold partitions the
+#'   rows' results share, each with the order of the samples its out-of-fold
+#'   predictions are held for, stored once apiece; the \code{cvPartition}
+#'   column of \code{mcols} names the entry each row's result used
+#'   (\code{NA} for a row without one). \code{cvResult()} returns a row's
+#'   result with its partition and sample names in place.
+#' @slot fits A named list of the methods' fits, and of the per-fold fits
+#'   of their cross-validation, stored once apiece: the rows of a joint fit
+#'   all name one entry. The \code{fits} and \code{foldFits} columns of
+#'   \code{mcols} name each method's entries (\code{NA} for none);
+#'   \code{methodFits()} and \code{cvResult()} return them in place.
+#' @section Narrowed rows: A row's stored fit names the variants its weights
+#'   were fitted on, where its engine keeps them or in a \code{variantIds}
+#'   element. A row narrowed since keeps its fits as they were, so
+#'   \code{cvResult()} and \code{methodFits()} warn, with condition class
+#'   \code{pecotmrFitCoverage}, when a row holds fewer variants than they
+#'   describe. So do the pipelines that read them:
 #'   \code{causalInferencePipeline()} when it selects weights by their
 #'   cross-validation, and \code{ctwasPipeline()} for rows whose SuSiE fit
 #'   renormalizes their weights. The weights themselves are narrowed with
-#'   the row and do not warn.
+#'   the row and do not warn, and a row kept without a fit
+#'   (\code{fitRetention = "none"}) has nothing to compare them with.
 #' @export
 setClass(
     "TwasWeights",
     contains = "RangedTupleList",
-    representation(ldReference = "list"),
-    prototype(ldReference = list()),
+    representation(ldReference = "list", cvPartition = "list", fits = "list"),
+    prototype(ldReference = list(), cvPartition = list(), fits = list()),
     validity = function(object) .validateTwasWeights(object)
 )
 
@@ -90,7 +108,7 @@ setClass(
     coll <- makeAssertCollection()
     assertNames(
         .tupleColumnNames(object),
-        must.include = c("study", "context", "trait", "method"),
+        must.include = c("study", "context", "trait"),
         what = "colnames",
         .var.name = "mcols",
         add = coll
@@ -117,8 +135,26 @@ setClass(
         .validateRegionColumn(object),
         .twasValidateJointCols(object, jointCols),
         .twasValidateKeyUniqueness(object, jointCols),
-        .ldRefDictProblems(object@ldReference, .ldRefKeys(object))
+        .twasValidateMethods(object),
+        .ldRefDictProblems(object@ldReference, .ldRefKeys(object)),
+        .cvPartitionProblems(object),
+        .fitProblems(object, c("fits", "foldFits"))
     )
+}
+
+# A row holds each of its methods once.
+# @noRd
+.twasValidateMethods <- function(object) {
+    methods <- map(as.list(.tupleColumn(object, "methods")), as.character)
+    if (any(map_lgl(methods, .twasHasDuplicate))) {
+        return("a row holds one set of weights per method")
+    }
+    character()
+}
+
+# @noRd
+.twasHasDuplicate <- function(v) {
+    anyDuplicated(v) > 0L
 }
 
 # The per-entry payload columns. The variants and their weights are the
@@ -126,7 +162,15 @@ setClass(
 # present and parallel to them.
 # @noRd
 .twasValidateEntries <- function(object) {
-    payload <- c("fits", "cvResult", "standardized", "dataType")
+    payload <- c(
+        "methods",
+        "weightTensor",
+        "fits",
+        "foldFits",
+        "cvResult",
+        "standardized",
+        "dataType"
+    )
     missingCols <- setdiff(payload, .tupleColumnNames(object))
     if (length(missingCols) > 0L) {
         return(str_c(
@@ -144,10 +188,10 @@ setClass(
     map_chr(bad, .twasBadColMsg, object = object)
 }
 
-# (study, context, trait, method[, joint*]) tuple uniqueness.
+# (study, context, trait[, joint*]) uniqueness: one row per gene.
 # @noRd
 .twasValidateKeyUniqueness <- function(object, jointCols) {
-    keyCols <- c("study", "context", "trait", "method", jointCols)
+    keyCols <- c("study", "context", "trait", jointCols)
     # Read column by column: `[` takes no column index on a collection.
     keyTbl <- as_tibble(set_names(
         map(keyCols, .twasColumn, object = object),
@@ -155,8 +199,8 @@ setClass(
     ))
     if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
         str_c(
-            "(study, context, trait, method[, joint*]) tuple uniqueness ",
-            "violated"
+            "(study, context, trait[, joint*]) uniqueness violated: one row ",
+            "per gene"
         )
     } else {
         character()
@@ -166,37 +210,40 @@ setClass(
 # =============================================================================
 
 #' @title Create a TwasWeights Collection Object
-#' @description Construct a \code{TwasWeights} collection from per-tuple
-#'   vectors and a list of \code{TwasWeightsRow} payloads (one per tuple).
-#' @param studyName Character vector of study identifiers. Use the sentinel
-#'   \code{"joint"} for rows produced by a cross-study joint fit.
-#' @param context Character vector of context labels. Use \code{"joint"} for
-#'   rows produced by a cross-context joint fit.
-#' @param trait Character vector of trait identifiers. Use \code{"joint"} for
-#'   rows produced by a cross-trait joint fit.
-#' @param method Character vector of TWAS weight method names.
+#' @description Construct a \code{TwasWeights} collection from per-entry
+#'   vectors and a list of \code{TwasWeightsRow} payloads, one per (study,
+#'   context, trait, method) entry. The entries of one gene -- one (study,
+#'   context, trait) and joint group -- become one row, its methods an axis.
+#' @param studyName Character vector of study identifiers. A joint fit's
+#'   entries keep their own study, context and trait, and record the group in
+#'   \code{jointStudies}, \code{jointContexts} or \code{jointTraits}.
+#' @param context Character vector of context labels.
+#' @param trait Character vector of trait identifiers.
+#' @param method Character vector of TWAS weight method names. A snake_case
+#'   name is stored as its camelCase token (\code{susie_inf} as
+#'   \code{susieInf}); a gene holds one entry per method.
 #' @param entry List / \code{SimpleList} of \code{TwasWeightsRow} objects.
-#' @param jointStudies Optional character vector (length \code{length(study)})
-#'   listing the semicolon-joined studies participating in each row's
-#'   cross-study joint fit, or \code{NA_character_} for non-joint rows. When
-#'   \code{NULL} (default) the column is omitted.
+#' @param jointStudies Optional character vector (one per entry) listing the
+#'   semicolon-joined studies participating in each entry's cross-study joint
+#'   fit, or \code{NA_character_} for non-joint entries. When \code{NULL}
+#'   (default) the column is omitted.
 #' @param jointContexts Optional character vector for cross-context joints. Same
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
 #' @param ldReference The LD reference the weights were derived against --
 #'   a genotype panel (see \code{\link{readGenotypes}}), a
-#'   \code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
-#'   a list with one per row; \code{NULL} for individual-level fits. Each
-#'   distinct reference is stored once.
-#' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
-#'   \code{NULL}), carried forward as provenance; not part of the identity key.
-#'   \code{NULL} (default) omits the column.
-#' @param region Optional per-row analysis WINDOW (a \code{GRanges} or
-#'   \code{NULL}) -- the interval each row's fit was run over, carried
-#'   forward as provenance; not part of the identity key. \code{NULL}
-#'   (default) omits the column, and \code{\link{genomicRegion}} then
-#'   derives the window from the span of the variants present.
+#'   \code{GenotypeMixture} or an \code{LdMatrix} -- used for every entry,
+#'   or a list with one per entry; \code{NULL} for individual-level fits.
+#'   Each distinct reference is stored once, and a gene's methods share one.
+#' @param traitPos Optional per-entry trait genomic anchor (a \code{GRanges}
+#'   or \code{NULL}), carried forward as provenance; not part of the
+#'   identity key. \code{NULL} (default) omits the column.
+#' @param region Optional per-entry analysis WINDOW (a \code{GRanges} or
+#'   \code{NULL}) -- the interval each fit was run over, carried forward as
+#'   provenance; not part of the identity key. A gene's methods share one.
+#'   \code{NULL} (default) omits the column, and \code{\link{genomicRegion}}
+#'   then derives the window from the span of the variants present.
 #' @param metadata A list of free-form metadata about the collection,
 #'   as \code{metadata()} holds on any Bioconductor vector. Default
 #'   \code{list()}.
@@ -238,23 +285,25 @@ TwasWeights <- function(
     n <- .twasCheckRowLengths(studyName, context, trait, method, entry)
     entry <- map(entry, .asTwRowPayload)
     .checkRowPayloads(entry, "TwasWeightsRow", "TWAS-weight")
-    cols <- .twasMetadataCols(
-        studyName,
-        context,
-        trait,
-        method,
-        entry,
-        jointStudies,
-        jointContexts,
-        jointTraits,
-        traitPos,
-        region,
-        n
+    cells <- list(
+        keys = .twasCellKeys(
+            studyName,
+            context,
+            trait,
+            list(
+                jointStudies = jointStudies,
+                jointContexts = jointContexts,
+                jointTraits = jointTraits
+            ),
+            n
+        ),
+        method = .twasMethodToken(as.character(method)),
+        entry = entry,
+        traitPos = .twasCheckedRanges(traitPos, n, "traitPos"),
+        region = .twasCheckedRanges(region, n, "region"),
+        ldRefs = .ldRefPerTuple(ldReference, n)
     )
-    .withMetadata(
-        .rtlNewValidated("TwasWeights", entry, cols, ldReference),
-        metadata
-    )
+    .withMetadata(.twasNewValidated(cells), metadata)
 }
 
 # The identity and joint-axis arguments, checked. Mirrors
@@ -285,44 +334,36 @@ TwasWeights <- function(
     assertCharacter(jointTraits, null.ok = TRUE)
 }
 
-# The outer-mcols columns for a TwasWeights: the four identity columns, the
-# per-row payload columns, then the optional joint axes and trait position.
+# Every cell's identity: study, context and trait, and the joint axes
+# supplied (each one value per cell).
 # @noRd
-.twasMetadataCols <- function(
-    studyName,
-    context,
-    trait,
-    method,
-    entry,
-    jointStudies,
-    jointContexts,
-    jointTraits,
-    traitPos,
-    region,
-    n
-) {
-    baseCols <- c(
+.twasCellKeys <- function(studyName, context, trait, joints, n) {
+    supplied <- compact(joints)
+    walk2(names(supplied), supplied, .twasCheckJointColLength, n = n)
+    as_tibble(c(
         list(
             study = as.character(studyName),
             context = as.character(context),
-            trait = as.character(trait),
-            method = as.character(method)
+            trait = as.character(trait)
         ),
-        .twRowPayloadCols(entry)
-    )
-    withJoint <- .twasAppendJointCols(
-        baseCols,
-        jointStudies,
-        jointContexts,
-        jointTraits,
-        n
-    )
-    .appendRegionCol(.appendTraitPosCol(withJoint, traitPos, n), region, n)
+        map(supplied, as.character)
+    ))
 }
 
+# A per-cell range argument (`traitPos`, `region`): NULL, or a GRanges with
+# one range per cell.
 # @noRd
-.twPayloadStandardized <- function(p) {
-    weightStandardized(p)
+.twasCheckedRanges <- function(gr, n, what) {
+    if (is.null(gr)) {
+        return(NULL)
+    }
+    if (!methods::is(gr, "GRanges")) {
+        abort(glue("`{what}` must be a GRanges (one range per row) or NULL."))
+    }
+    if (length(gr) != n) {
+        abort(glue("`{what}` must have the same length as `study`."))
+    }
+    gr
 }
 
 # Require study/context/trait/method/entry to share one length; returns it.
@@ -344,24 +385,6 @@ TwasWeights <- function(
     n
 }
 
-# Append any supplied joint* provenance columns (each length n) as character.
-# @noRd
-.twasAppendJointCols <- function(
-    cols,
-    jointStudies,
-    jointContexts,
-    jointTraits,
-    n
-) {
-    supplied <- compact(list(
-        jointStudies = jointStudies,
-        jointContexts = jointContexts,
-        jointTraits = jointTraits
-    ))
-    walk2(names(supplied), supplied, .twasCheckJointColLength, n = n)
-    c(cols, map(supplied, as.character))
-}
-
 # Each joint-provenance column must be one value per row.
 # @noRd
 .twasCheckJointColLength <- function(nm, val, n) {
@@ -370,6 +393,969 @@ TwasWeights <- function(
     }
     msg <- glue("`{nm}` must have the same length as `study`.")
     abort(msg)
+}
+
+# =============================================================================
+# Per-gene rows
+# -----------------------------------------------------------------------------
+# A TwasWeights row is one (study, context, trait[, joint*]) -- a gene -- and
+# holds every method fitted for it. Its element is the union of its methods'
+# variants. Their weights form a variants x methods x K tensor, K being a
+# method's weight columns (one for a weight vector), held in two parts: a
+# dense array for the methods most of whose weights are nonzero, an
+# SVT_SparseArray for the rest, each method placed by its measured density. A
+# method fitted on other variants than the union, or in another order,
+# records its own as positions in the union. Fits, cross-validation, scale
+# and data type are kept per method. One method of one row -- a cell -- is
+# what a TwasWeightsRow holds, what the constructor takes and what the
+# accessors read (.twrCellParts()).
+# =============================================================================
+
+# Weight methods are named by their camelCase token (susieInf, bayesR), the
+# one spelling a row's method axis holds; a snake_case label such as
+# learnTwasWeights() derives from a method function (susie_inf) maps onto it.
+# @noRd
+.twasMethodToken <- function(method) {
+    str_replace_all(method, "_[a-z0-9]", .twasUpperTail)
+}
+
+# @noRd
+.twasUpperTail <- function(x) {
+    str_to_upper(str_sub(x, 2L))
+}
+
+# `expr`, without the warning SparseArray raises after its calls on builds
+# linked to LLVM's libomp: it pauses the OpenMP runtime after every call, and
+# libomp reports a pause of a runtime already paused as a failure. Nothing
+# else is muffled.
+# @noRd
+.svtQuiet <- function(expr) {
+    withCallingHandlers(expr, warning = .svtMuffleOmpPause)
+}
+
+# @noRd
+.svtMuffleOmpPause <- function(w) {
+    if (str_detect(conditionMessage(w), "omp_pause_resource\\(\\) failed")) {
+        invokeRestart("muffleWarning")
+    }
+}
+
+# ---- building rows from cells ------------------------------------------------
+
+# The collection the cells `cells` build: one row per distinct identity, in
+# order of first appearance. `cells` holds, one per cell, the identity
+# (`keys`), the method, the TwasWeightsRow (`entry`), the trait position and
+# region (GRanges, or NULL for none) and the LD reference (`ldRefs`).
+# @noRd
+.twasNewValidated <- function(cells) {
+    byRow <- unname(split(
+        seq_along(cells$method),
+        as.integer(vctrs::vec_group_id(cells$keys))
+    ))
+    .twasRefuseRepeatedMethods(byRow, cells)
+    first <- map_int(byRow, .twasFirstCell)
+    stores <- map(
+        byRow,
+        .twasRowStore,
+        entries = cells$entry,
+        methods = cells$method
+    )
+    .twasRefuseMultiChromosome(stores)
+    fitted <- .twasStoredFits(
+        map(cells$entry, methodFits),
+        map(cells$entry, cvResult)
+    )
+    cv <- .cvStoredColumn(fitted$cv)
+    dict <- .ldRefDict(.twasRowLdRefs(cells$ldRefs, byRow, first))
+    cols <- c(
+        .twasRowCols(cells, byRow, first, stores, cv, fitted),
+        list(ldReference = dict$keys, check.names = FALSE)
+    )
+    grl <- S4Vectors::`mcols<-`(
+        .rtlBindElements(map(stores, "variants")),
+        value = exec(S4Vectors::DataFrame, !!!cols)
+    )
+    new(
+        "TwasWeights",
+        .rtlNamed(grl),
+        ldReference = dict$entries,
+        cvPartition = cv$entries,
+        fits = fitted$entries
+    )
+}
+
+# The cells' fits `fits` and the per-fold fits of their CV `cvs` as the fits
+# dictionary holds them, each distinct one once, with each cell's keys into
+# it; and the cells' CV without the per-fold fits, which the dictionary now
+# holds.
+# @noRd
+.twasStoredFits <- function(fits, cvs) {
+    folds <- map(cvs, .cvFoldFits)
+    dict <- .dictBuild(c(fits, folds), .FIT_DICT_PREFIX)
+    n <- length(fits)
+    list(
+        fits = dict$keys[seq_len(n)],
+        foldFits = dict$keys[n + seq_len(n)],
+        entries = dict$entries,
+        cv = map2(cvs, folds, .cvWithoutFoldFits)
+    )
+}
+
+# A CV payload's per-fold fits (mr.mash keeps them), NULL for none.
+# @noRd
+.cvFoldFits <- function(cv) {
+    if (is.list(cv) && !is.data.frame(cv)) cv[["foldFits"]]
+}
+
+# @noRd
+.cvWithoutFoldFits <- function(cv, folds) {
+    if (is.null(folds)) cv else list_assign(cv, foldFits = zap())
+}
+
+# @noRd
+.twasFirstCell <- function(idx) {
+    idx[[1L]]
+}
+
+# A gene holds one set of weights per method.
+# @noRd
+.twasRefuseRepeatedMethods <- function(byRow, cells) {
+    repeated <- keep(byRow, .twasHasRepeatedMethod, methods = cells$method)
+    if (length(repeated) == 0L) {
+        return(invisible(NULL))
+    }
+    i <- repeated[[1L]][[1L]]
+    key <- str_flatten(discard(map_chr(cells$keys, i), is.na), "|")
+    abort(glue(
+        "TwasWeights: '{key}' has more than one set of weights for one ",
+        "method; a (study, context, trait, method[, joint*]) holds one."
+    ))
+}
+
+# @noRd
+.twasHasRepeatedMethod <- function(idx, methods) {
+    anyDuplicated(methods[idx]) > 0L
+}
+
+# One gene's store: its methods' union of variants, their weights as a
+# tensor, and their scale and data type by method.
+# @noRd
+.twasRowStore <- function(idx, entries, methods) {
+    rowEntries <- set_names(entries[idx], methods[idx])
+    union <- .twasUnionVariants(rowEntries)
+    ids <- .grVariantIds(union)
+    placed <- map(rowEntries, .twasPlacedWeights, ids = ids)
+    list(
+        variants = union,
+        tensor = .twasTensor(placed, length(ids)),
+        standardized = map_lgl(rowEntries, weightStandardized),
+        dataType = map(rowEntries, weightsDataType)
+    )
+}
+
+# The variants of every method of a row, each once, in order of first
+# appearance, carrying their identity columns only.
+# @noRd
+.twasUnionVariants <- function(rowEntries) {
+    grs <- map(unname(rowEntries), .twasIdentityVariants)
+    flat <- suppressWarnings(exec(c, !!!grs))
+    flat[!duplicated(.grVariantIds(flat))]
+}
+
+# @noRd
+.twasIdentityVariants <- function(e) {
+    gr <- variants(e)
+    md <- mcols(gr, use.names = FALSE)
+    S4Vectors::`mcols<-`(
+        gr,
+        value = md[, colnames(md) != "weight", drop = FALSE]
+    )
+}
+
+# One method's weights on the row's variants `ids`: its own variants' rows
+# filled and zero elsewhere, with what reading them back needs. `positions`
+# is NULL when the method holds the row's variants in their order.
+# @noRd
+.twasPlacedWeights <- function(e, ids) {
+    own <- .grVariantIds(variants(e))
+    hit <- match(own, ids)
+    w <- .unnamedWeights(weights(e))
+    list(
+        w = if (is.null(w)) NULL else .twasFillRows(w, hit, length(ids)),
+        positions = if (identical(hit, seq_along(ids))) NULL else hit,
+        isMatrix = is.matrix(w),
+        columns = colnames(w)
+    )
+}
+
+# The row's methods' weights as a tensor in two parts, and where each method
+# sits in it: `part` ("dense", "sparse", or "none" for a method without
+# weights), `slice` along the method axis of that part, and `K`.
+# @noRd
+#' @importClassesFrom SparseArray SVT_SparseArray
+.twasTensor <- function(placed, n) {
+    K <- map_int(placed, .twasPlacedK)
+    part <- rep("none", length(K))
+    part[K > 0L] <- "sparse"
+    part[K > 0L & map_lgl(placed, .twasIsDense)] <- "dense"
+    slice <- integer(length(K))
+    slice[part == "dense"] <- seq_len(sum(part == "dense"))
+    slice[part == "sparse"] <- seq_len(sum(part == "sparse"))
+    list(
+        dense = .twasPartArray(placed[part == "dense"], n),
+        sparse = .twasSparsePart(placed[part == "sparse"], n),
+        part = unname(part),
+        slice = unname(slice),
+        K = unname(K),
+        isMatrix = unname(map_lgl(placed, "isMatrix")),
+        columns = discard(map(placed, "columns"), is.null),
+        variants = discard(map(placed, "positions"), is.null)
+    )
+}
+
+# `w` (a vector or a variants x K matrix) as rows `hit` of an n x K matrix of
+# zeros.
+# @noRd
+.twasFillRows <- function(w, hit, n) {
+    m <- if (is.matrix(w)) w else matrix(w, ncol = 1L)
+    full <- matrix(0, n, ncol(m))
+    full[hit, ] <- m
+    full
+}
+
+# @noRd
+.twasPlacedK <- function(p) {
+    if (is.null(p$w)) 0L else ncol(p$w)
+}
+
+# Dense when at least two thirds of the weights are nonzero: a stored
+# nonzero costs about 12 bytes in an SVT_SparseArray, a dense one 8.
+# @noRd
+.twasIsDense <- function(p) {
+    nonzero <- sum(p$w != 0 | is.na(p$w))
+    3 * nonzero >= 2 * length(p$w)
+}
+
+# The methods `placed` as one variants x methods x K array, K padded with
+# zeros to the widest; NULL for none.
+# @noRd
+.twasPartArray <- function(placed, n) {
+    if (length(placed) == 0L) {
+        return(NULL)
+    }
+    K <- max(map_int(placed, .twasPlacedK))
+    arr <- array(0, c(n, length(placed), K))
+    for (j in seq_along(placed)) {
+        arr[, j, seq_len(ncol(placed[[j]]$w))] <- placed[[j]]$w
+    }
+    arr
+}
+
+# @noRd
+.twasSparsePart <- function(placed, n) {
+    arr <- .twasPartArray(placed, n)
+    if (is.null(arr)) {
+        return(NULL)
+    }
+    .svtQuiet(methods::as(arr, "SVT_SparseArray"))
+}
+
+# Each row's LD reference: the one its cells share. A gene's methods were fit
+# against one reference; cells on different ones are refused.
+# @noRd
+.twasRowLdRefs <- function(ldRefs, byRow, first) {
+    ids <- .dictIdentities(ldRefs)
+    ids[map_lgl(ldRefs, is.null)] <- NA_character_
+    mixed <- keep(byRow, .twasRowDisagrees, values = ids)
+    if (length(mixed) > 0L) {
+        abort(glue(
+            "TwasWeights: the methods of one (study, context, trait) were fit ",
+            "against different LD references; a row holds one."
+        ))
+    }
+    ldRefs[first]
+}
+
+# @noRd
+.twasRowDisagrees <- function(idx, values) {
+    length(unique(values[idx])) > 1L
+}
+
+# The outer columns of the rows `byRow` groups the cells into: the identity of
+# each row's first cell, its methods and their payloads, and the trait
+# position and region its cells share.
+# @noRd
+.twasRowCols <- function(cells, byRow, first, stores, cv, fitted) {
+    n <- length(byRow)
+    payload <- list(
+        methods = IRanges::CharacterList(
+            map(byRow, .twasPick, values = cells$method)
+        ),
+        weightTensor = S4Vectors::SimpleList(map(stores, "tensor")),
+        fits = IRanges::CharacterList(
+            map(byRow, .twasPick, values = fitted$fits)
+        ),
+        foldFits = IRanges::CharacterList(
+            map(byRow, .twasPick, values = fitted$foldFits)
+        ),
+        cvResult = S4Vectors::SimpleList(
+            map(byRow, .twasRowCv, cv = cv, methods = cells$method)
+        ),
+        cvPartition = IRanges::CharacterList(
+            map(byRow, .twasPick, values = cv$keys)
+        ),
+        standardized = S4Vectors::SimpleList(map(stores, "standardized")),
+        dataType = S4Vectors::SimpleList(map(stores, "dataType"))
+    )
+    # Assigned, not listed: a NULL in the list would still name a column.
+    payload$jointIndex <- .twasRowJointIndex(cells$jointIndex, byRow)
+    traitPos <- .twasRowRanges(cells$traitPos, byRow, "traitPos")
+    region <- .twasRowRanges(cells$region, byRow, "region")
+    c(as.list(cells$keys[first, ]), payload) |>
+        .appendTraitPosCol(traitPos, n) |>
+        .appendRegionCol(region, n)
+}
+
+# The rows' cells' joint-fit positions, or NULL (no column) when no cell is
+# from a joint fit.
+# @noRd
+.twasRowJointIndex <- function(jointIndex, byRow) {
+    if (is.null(jointIndex) || all(is.na(jointIndex))) {
+        return(NULL)
+    }
+    IRanges::IntegerList(map(byRow, .twasPick, values = jointIndex))
+}
+
+# @noRd
+.twasPick <- function(idx, values) {
+    values[idx]
+}
+
+# A row's stored CV, by method.
+# @noRd
+.twasRowCv <- function(idx, cv, methods) {
+    set_names(as.list(cv$cvResult)[idx], methods[idx])
+}
+
+# The range a row's cells share for `what` (trait position or region): the
+# placeholder of a cell given none is unknown, and the cells that know one
+# must agree. NULL when no cell has the column.
+# @noRd
+.twasRowRanges <- function(gr, byRow, what) {
+    if (is.null(gr)) {
+        return(NULL)
+    }
+    known <- !.twasIsPlaceholder(gr)
+    labels <- replace(as.character(gr), !known, NA_character_)
+    mixed <- keep(byRow, .twasRowDisagreesKnown, values = labels)
+    if (length(mixed) > 0L) {
+        abort(glue(
+            "TwasWeights: the methods of one (study, context, trait) carry ",
+            "different `{what}` values; a row holds one."
+        ))
+    }
+    gr[map_int(byRow, .twasFirstKnown, known = known)]
+}
+
+# The placeholder range a combine pads a missing range column with.
+# @noRd
+.twasIsPlaceholder <- function(gr) {
+    as.character(GenomicRanges::seqnames(gr)) == "chrUn" & width(gr) == 0L
+}
+
+# @noRd
+.twasRowDisagreesKnown <- function(idx, values) {
+    length(unique(discard(values[idx], is.na))) > 1L
+}
+
+# @noRd
+.twasFirstKnown <- function(idx, known) {
+    hit <- idx[known[idx]]
+    if (length(hit) == 0L) idx[[1L]] else hit[[1L]]
+}
+
+# ---- reading cells -----------------------------------------------------------
+
+# Every cell of `x`, one per (row, method), in row order: its row, its method
+# and its row's identity columns.
+# @noRd
+.twasCells <- function(x) {
+    md <- mcols(x, use.names = FALSE)
+    methods <- map(as.list(md$methods), as.character)
+    rows <- rep(seq_along(methods), lengths(methods))
+    ident <- intersect(.TWAS_KEY_COLUMNS, colnames(md))
+    identCols <- set_names(
+        map(ident, .twasRowValues, md = md, rows = rows),
+        ident
+    )
+    tibble(
+        row = rows,
+        method = list_c(methods, ptype = character()),
+        !!!identCols
+    )
+}
+
+# The identity columns a row is keyed by.
+# @noRd
+.TWAS_KEY_COLUMNS <- c(
+    "study",
+    "context",
+    "trait",
+    "jointStudies",
+    "jointContexts",
+    "jointTraits"
+)
+
+# @noRd
+.twasRowValues <- function(cn, md, rows) {
+    as.character(md[[cn]])[rows]
+}
+
+# One cell as a TwasWeightsRow: the method's variants and weights, and its
+# fit, cross-validation, scale and data type.
+# @noRd
+.twrCellParts <- function(x, row, method) {
+    md <- mcols(x, use.names = FALSE)
+    tensor <- md$weightTensor[[row]]
+    union <- .rtlGatherElements(x, row)
+    positions <- tensor$variants[[method]] %||% seq_along(union)
+    k <- match(method, as.character(md$methods[[row]]))
+    w <- .twasCellWeights(tensor, k, method, positions)
+    gr <- union[positions]
+    new(
+        "TwasWeightsRow",
+        variants = S4Vectors::`mcols<-`(
+            gr,
+            value = `[[<-`(mcols(gr, use.names = FALSE), "weight", value = w)
+        ),
+        weights = w,
+        methodFits = .fitEntry(md$fits[[row]][[k]], x),
+        cvResult = .twasCellCv(x, md, row, k),
+        weightStandardized = isTRUE(md$standardized[[row]][[method]]),
+        weightsDataType = md$dataType[[row]][[method]]
+    )
+}
+
+# Method `method`'s weights (the k-th of its row) on its own variants: a
+# vector, or a variants x K matrix when that is what it was given. K = 0 is
+# either no weights (NULL) or a matrix with no columns, such as a joint fit
+# that kept no conditions.
+# @noRd
+.twasCellWeights <- function(tensor, k, method, positions) {
+    K <- tensor$K[[k]]
+    if (K == 0L) {
+        if (!tensor$isMatrix[[k]]) {
+            return(NULL)
+        }
+        return(matrix(numeric(0), length(positions), 0L))
+    }
+    j <- tensor$slice[[k]]
+    block <- if (identical(tensor$part[[k]], "dense")) {
+        tensor$dense[positions, j, seq_len(K), drop = FALSE]
+    } else {
+        .svtQuiet(methods::as(
+            tensor$sparse[positions, j, seq_len(K), drop = FALSE],
+            "array"
+        ))
+    }
+    w <- matrix(as.numeric(block), length(positions), K)
+    if (!tensor$isMatrix[[k]]) {
+        return(as.numeric(w))
+    }
+    `colnames<-`(w, tensor$columns[[method]])
+}
+
+# The k-th method of row `row`'s cross-validation, its shared partition and
+# per-fold fits put back.
+# @noRd
+.twasCellCv <- function(x, md, row, k) {
+    stored <- md$cvResult[[row]][[k]]
+    key <- md$cvPartition[[row]][[k]]
+    cv <- .cvJoinPartition(stored, .dictEntryFor(key, .cvPartitionDict(x)))
+    folds <- .fitEntry(md$foldFits[[row]][[k]], x)
+    if (is.null(folds)) cv else list_assign(cv, foldFits = folds)
+}
+
+# ---- selecting cells ---------------------------------------------------------
+
+# The cell (a row of .twasCells()) a (study, context, trait, method) selector
+# pins. All four are needed unless `x` holds a single cell; the first match
+# wins, and the joint axes do not select, as for any collection.
+# @noRd
+#' @importFrom checkmate assertVector
+.twrSelectCell <- function(x, studyName, context, trait, method) {
+    cells <- .twasCells(x)
+    if (nrow(cells) == 0L) {
+        abort("TwasWeights has no rows.")
+    }
+    selectors <- list(studyName, context, trait, method)
+    if (any(map_lgl(selectors, is.null))) {
+        if (nrow(cells) == 1L) {
+            return(cells[1L, ])
+        }
+        abort(glue(
+            "TwasWeights has {nrow(cells)} entries. Pass `studyName`, ",
+            "`context`, `trait`, and `method` to select one."
+        ))
+    }
+    walk(selectors, assertVector, len = 1L)
+    hit <- .twasCellIndex(cells, studyName, context, trait, method)
+    if (length(hit) == 0L) {
+        abort(glue(
+            "No entry for (study='{studyName}', context='{context}', ",
+            "trait='{trait}', method='{method}')."
+        ))
+    }
+    cells[hit[[1L]], ]
+}
+
+# Indices of the cells (rows of .twasCells()) a (study, context, trait,
+# method) selector matches, the method in either spelling; empty for none.
+# @noRd
+.twasCellIndex <- function(cells, studyName, context, trait, method) {
+    which(
+        cells$study == studyName &
+            cells$context == context &
+            cells$trait == trait &
+            cells$method == .twasMethodToken(method)
+    )
+}
+
+# The constructor's inputs for cells `cells` of `x` (rows of .twasCells()).
+# @noRd
+.twasCellInputs <- function(x, cells) {
+    md <- mcols(x, use.names = FALSE)
+    rows <- cells$row
+    list(
+        keys = cells[intersect(.TWAS_KEY_COLUMNS, names(cells))],
+        method = cells$method,
+        entry = map2(rows, cells$method, .twrCellParts, x = x),
+        traitPos = if (is_in("traitPos", colnames(md))) md$traitPos[rows],
+        region = if (is_in("region", colnames(md))) md$region[rows],
+        ldRefs = .rowLdRefs(x)[rows],
+        jointIndex = .twasCellJointIndex(md, cells)
+    )
+}
+
+# Each cell's position in its joint fit's condition axis (NA for a cell from
+# no joint fit), or NULL when no row of the collection is from one.
+# @noRd
+.twasCellJointIndex <- function(md, cells) {
+    if (!is_in("jointIndex", colnames(md))) {
+        return(NULL)
+    }
+    map2_int(cells$row, cells$method, .twasCellJointIndexAt, md = md)
+}
+
+# @noRd
+.twasCellJointIndexAt <- function(row, method, md) {
+    k <- match(method, as.character(md$methods[[row]]))
+    as.integer(md$jointIndex[[row]][[k]])
+}
+
+# `x` cut to its cells `cells`, rebuilt so each row keeps only those.
+# @noRd
+.twasKeepCells <- function(x, cells) {
+    .withMetadata(
+        .twasNewValidated(.twasCellInputs(x, cells)),
+        S4Vectors::metadata(x)
+    )
+}
+
+# `x` with only the methods `methods` (camelCase tokens).
+# @noRd
+.twasKeepMethods <- function(x, methods) {
+    cells <- .twasCells(x)
+    .twasKeepCells(x, cells[is_in(cells$method, methods), ])
+}
+
+# ---- combining ---------------------------------------------------------------
+
+# Collections `parts` as one: their cells regrouped, so the methods one gene
+# has in different parts share its row. A non-NULL `ldReference` is every
+# row's reference instead.
+# @noRd
+.twasCombine <- function(parts, ldReference) {
+    inputs <- map(parts, .twasAllCellInputs)
+    joined <- list(
+        keys = bind_rows(map(inputs, "keys")),
+        method = list_c(map(inputs, "method"), ptype = character()),
+        entry = list_flatten(map(inputs, "entry")),
+        traitPos = .twasJoinRanges(map(inputs, "traitPos"), inputs),
+        region = .twasJoinRanges(map(inputs, "region"), inputs),
+        ldRefs = list_flatten(map(inputs, "ldRefs")),
+        jointIndex = .twasJoinJointIndex(inputs)
+    )
+    if (!is.null(ldReference)) {
+        joined$ldRefs <- .ldRefPerTuple(ldReference, length(joined$method))
+    }
+    .withMetadata(.twasNewValidated(joined), S4Vectors::metadata(parts[[1L]]))
+}
+
+# The parts' cells' joint-fit positions joined, NA for a part's cells from no
+# joint fit; NULL when no part has any.
+# @noRd
+.twasJoinJointIndex <- function(inputs) {
+    if (all(map_lgl(map(inputs, "jointIndex"), is.null))) {
+        return(NULL)
+    }
+    list_c(map(inputs, .twasInputJointIndex), ptype = integer())
+}
+
+# @noRd
+.twasInputJointIndex <- function(input) {
+    input$jointIndex %||% rep(NA_integer_, length(input$method))
+}
+
+# @noRd
+.twasAllCellInputs <- function(x) {
+    .twasCellInputs(x, .twasCells(x))
+}
+
+# The parts' range columns joined, a part without the column padded with
+# placeholders as a combine pads it; NULL when no part has it.
+# @noRd
+.twasJoinRanges <- function(grs, inputs) {
+    if (all(map_lgl(grs, is.null))) {
+        return(NULL)
+    }
+    n <- map_int(inputs, .twasInputCells)
+    padded <- map2(grs, n, .twasRangesOrPlaceholder)
+    paddedRanges <- unname(padded)
+    suppressWarnings(exec(c, !!!paddedRanges))
+}
+
+# @noRd
+.twasInputCells <- function(input) {
+    length(input$method)
+}
+
+# @noRd
+.twasRangesOrPlaceholder <- function(gr, n) {
+    gr %||% .placeholderRanges(n)
+}
+
+# ---- rebuilt elements --------------------------------------------------------
+
+# `md` (the outer columns of rows `keep` of `x`) with each row's tensor
+# realigned to its rebuilt element in `bare`: weights follow their variants by
+# id, a variant the element no longer holds drops out of every method, and one
+# it gained has no weight.
+# @noRd
+.twasRealignedMcols <- function(x, md, bare, keep) {
+    old <- map(keep, .twasElementIds, grl = x)
+    new <- map(seq_along(bare), .twasElementIds, grl = bare)
+    md$weightTensor <- S4Vectors::SimpleList(pmap(
+        list(
+            as.list(md$weightTensor),
+            map(as.list(md$methods), as.character),
+            old,
+            new
+        ),
+        .twasRealignTensor
+    ))
+    md
+}
+
+# @noRd
+.twasElementIds <- function(i, grl) {
+    .grVariantIds(grl[[i]])
+}
+
+# One row's tensor, its methods `methods`, on variants `new` instead of
+# `old`.
+# @noRd
+.twasRealignTensor <- function(tensor, methods, old, new) {
+    if (identical(old, new)) {
+        return(tensor)
+    }
+    at <- match(new, old)
+    dense <- .twasTakeRows(tensor$dense, at)
+    sparse <- .twasTakeRows(.twasDensePart(tensor$sparse), at)
+    list_assign(
+        tensor,
+        dense = dense,
+        sparse = if (is.null(sparse)) {
+            NULL
+        } else {
+            .svtQuiet(methods::as(sparse, "SVT_SparseArray"))
+        },
+        variants = discard(
+            map(
+                set_names(methods),
+                .twasRemappedPositions,
+                tensor = tensor,
+                n = length(old),
+                at = at
+            ),
+            is.null
+        )
+    )
+}
+
+# @noRd
+.twasDensePart <- function(part) {
+    if (is.null(part)) NULL else .svtQuiet(methods::as(part, "array"))
+}
+
+# Rows `at` of array `arr` (zero where `at` is NA).
+# @noRd
+.twasTakeRows <- function(arr, at) {
+    if (is.null(arr)) {
+        return(NULL)
+    }
+    d <- dim(arr)
+    out <- array(0, c(length(at), d[[2L]], d[[3L]]))
+    kept <- which(!is.na(at))
+    out[kept, , ] <- arr[at[kept], , , drop = FALSE]
+    out
+}
+
+# Method `method`'s positions among a row's new variants: its old ones (all
+# `n`, in order, when it held the row's variants as they were) mapped through
+# `at`, those dropped gone; NULL when it holds the new variants in order.
+# @noRd
+.twasRemappedPositions <- function(method, tensor, n, at) {
+    old <- tensor$variants[[method]] %||% seq_len(n)
+    moved <- match(old, at)
+    moved <- moved[!is.na(moved)]
+    if (identical(moved, seq_along(at))) NULL else moved
+}
+
+# ---- flat views --------------------------------------------------------------
+
+# `x` as flattenTupleRanges() hands a TwasWeights out: one range per (variant,
+# method, weight column), carrying that weight, the row's identity columns
+# (dotted) and `.method`. `.weightColumn` names a weight-matrix column (an
+# fSuSiE feature, an outcome) and is NA for a plain weight vector.
+# @noRd
+.twasFlatten <- function(x) {
+    md <- mcols(x, use.names = FALSE)
+    cells <- .twasCells(x)
+    blocks <- list_flatten(map2(
+        cells$row,
+        cells$method,
+        .twasFlatCell,
+        x = x,
+        md = md,
+        keyCols = .rtlTupleKeyCols(x)
+    ))
+    if (length(blocks) == 0L) {
+        return(.rtlGatherElements(x, seq_len(length(x))))
+    }
+    blockRanges <- unname(blocks)
+    suppressWarnings(exec(c, !!!blockRanges))
+}
+
+# @noRd
+.twasFlatCell <- function(row, method, x, md, keyCols) {
+    gr <- variants(.twrCellParts(x, row, method))
+    w <- mcols(gr, use.names = FALSE)$weight
+    labels <- .twbWeightLabels(w)
+    ident <- set_names(
+        map(keyCols, .twasRowValue, md = md, row = row),
+        map_chr(keyCols, .rtlDotName)
+    )
+    map(
+        seq_along(labels),
+        .twasFlatBlock,
+        gr = gr,
+        w = w,
+        labels = labels,
+        ident = ident,
+        method = method
+    )
+}
+
+# @noRd
+.twasRowValue <- function(nm, md, row) {
+    md[[nm]][[row]]
+}
+
+# One weight column of one entry as flat ranges.
+# @noRd
+.twasFlatBlock <- function(k, gr, w, labels, ident, method) {
+    n <- length(gr)
+    own <- mcols(gr, use.names = FALSE)
+    added <- c(
+        list(
+            weight = if (is.null(w)) {
+                rep(NA_real_, n)
+            } else {
+                .twbWeightColumn(k, w)
+            }
+        ),
+        map(ident, rep, length.out = n),
+        list(.method = rep(method, n), .weightColumn = rep(labels[[k]], n))
+    )
+    `mcols<-`(
+        gr,
+        value = cbind(
+            own[, colnames(own) != "weight", drop = FALSE],
+            DataFrame(added, check.names = FALSE)
+        )
+    )
+}
+
+# The columns a flat TwasWeights needs to be nested back, beyond the
+# identity columns: the weights and where they belong.
+# @noRd
+.TWAS_FLAT_COLUMNS <- c("weight", ".method", ".weightColumn")
+
+# `flat` (a flattened `template`, possibly filtered or mutated) nested back
+# into `template`'s entries: each entry keeps the ranges carrying its row's
+# identity and its method, with their weights. An entry left with none is
+# kept, with no variants.
+# @noRd
+.twasNest <- function(flat, template) {
+    md <- mcols(template, use.names = FALSE)
+    keyCols <- .rtlTupleKeyCols(template)
+    cells <- .twasCells(template)
+    fmd <- mcols(flat, use.names = FALSE)
+    wanted <- str_c(
+        .rtlTupleKeys(md, keyCols, length(template))[cells$row],
+        cells$method,
+        sep = "\r"
+    )
+    have <- str_c(
+        .rtlTupleKeys(fmd, map_chr(keyCols, .rtlDotName), length(flat)),
+        as.character(fmd$.method),
+        sep = "\r"
+    )
+    inputs <- .twasCellInputs(template, cells)
+    inputs$entry <- map2(
+        inputs$entry,
+        wanted,
+        .twasNestCell,
+        flat = flat,
+        have = have,
+        drop = c(map_chr(keyCols, .rtlDotName), .TWAS_FLAT_COLUMNS)
+    )
+    .withMetadata(.twasNewValidated(inputs), S4Vectors::metadata(template))
+}
+
+# Entry `entry` rebuilt from its ranges in `flat`, its payload kept.
+# @noRd
+.twasNestCell <- function(entry, key, flat, have, drop) {
+    picked <- flat[which(have == key)]
+    pmd <- mcols(picked, use.names = FALSE)
+    ids <- .grVariantIds(picked)
+    first <- !duplicated(ids)
+    gr <- `mcols<-`(
+        picked[first],
+        value = pmd[first, setdiff(colnames(pmd), drop), drop = FALSE]
+    )
+    w <- .twasNestWeights(weights(entry), pmd, ids, first)
+    new(
+        "TwasWeightsRow",
+        variants = `mcols<-`(
+            gr,
+            value = `[[<-`(mcols(gr, use.names = FALSE), "weight", value = w)
+        ),
+        weights = w,
+        methodFits = methodFits(entry),
+        cvResult = cvResult(entry),
+        weightStandardized = weightStandardized(entry),
+        weightsDataType = weightsDataType(entry)
+    )
+}
+
+# An entry's weights from its flat ranges, in the shape `shape` (its weights
+# before flattening) had. A matrix weight a predicate dropped from one column
+# while the variant kept another is 0, as a method's weight is wherever it
+# has none.
+# @noRd
+.twasNestWeights <- function(shape, pmd, ids, first) {
+    if (is.null(shape)) {
+        return(NULL)
+    }
+    if (is.null(dim(shape))) {
+        return(as.numeric(pmd$weight[first]))
+    }
+    labels <- .twbWeightLabels(shape)
+    kept <- ids[first]
+    w <- matrix(0, length(kept), length(labels))
+    w[cbind(match(ids, kept), match(pmd$.weightColumn, labels))] <- pmd$weight
+    `colnames<-`(w, colnames(shape))
+}
+
+# ---- saved collections -------------------------------------------------------
+
+# A collection saved with one row per (study, context, trait, method), its
+# methods folded into gene rows; one saved per gene is left as it is.
+# @noRd
+.twasFoldMethodRows <- function(object) {
+    cols <- .tupleColumnNames(object)
+    if (!is_in("method", cols) || is_in("methods", cols)) {
+        return(object)
+    }
+    .withMetadata(
+        .twasNewValidated(.twasLegacyCellInputs(object)),
+        S4Vectors::metadata(object)
+    )
+}
+
+# The constructor's inputs for a saved per-method collection, one cell per
+# saved row.
+# @noRd
+.twasLegacyCellInputs <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    keyCols <- intersect(.TWAS_KEY_COLUMNS, colnames(md))
+    list(
+        keys = as_tibble(set_names(
+            map(keyCols, .twasMdCharacter, md = md),
+            keyCols
+        )),
+        method = .twasMethodToken(as.character(md$method)),
+        entry = map(seq_along(object), .twasLegacyRow, x = object, md = md),
+        traitPos = if (is_in("traitPos", colnames(md))) md$traitPos,
+        region = if (is_in("region", colnames(md))) md$region,
+        ldRefs = .rowLdRefs(object)
+    )
+}
+
+# @noRd
+.twasMdCharacter <- function(cn, md) {
+    as.character(md[[cn]])
+}
+
+# Saved row `i` as the TwasWeightsRow it was built from: its weights the
+# element's `weight` column, its payload the row's columns.
+# @noRd
+.twasLegacyRow <- function(i, x, md) {
+    gr <- .rtlGatherElements(x, i)
+    mc <- mcols(gr, use.names = FALSE)
+    w <- .unnamedWeights(mc$weight)
+    new(
+        "TwasWeightsRow",
+        variants = S4Vectors::`mcols<-`(
+            gr,
+            value = `[[<-`(mc, "weight", value = w)
+        ),
+        weights = w,
+        methodFits = md$fits[[i]],
+        cvResult = .cvJoinPartition(md$cvResult[[i]], .mdCvPartition(x, md, i)),
+        weightStandardized = isTRUE(md$standardized[[i]]),
+        weightsDataType = md$dataType[[i]]
+    )
+}
+
+# A gene's methods sit on one chromosome: its row is one element.
+# @noRd
+.twasRefuseMultiChromosome <- function(stores) {
+    spans <- map_int(stores, .twasChromosomeCount)
+    if (all(spans <= 1L)) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "TwasWeights: row {which(spans > 1L)[[1L]]} holds variants on more ",
+        "than one chromosome; a (study, context, trait) is one cis fit."
+    ))
+}
+
+# @noRd
+.twasChromosomeCount <- function(store) {
+    n_distinct(as.character(GenomicRanges::seqnames(store$variants)))
 }
 
 #' @rdname traitPosition
@@ -384,13 +1370,16 @@ setMethod("traitPosition", "TwasWeights", function(x) {
 # writes second silently destroys the other. Do not "simplify" this @rdname
 # back to the generic's own name.
 #' @title Get a Single TWAS Weights Entry
-#' @description Return the \code{TwasWeightsRow} for one \code{(study,
-#'   context, trait, method)} row of a \code{TwasWeights} collection.
+#' @description Return one \code{(study, context, trait, method)} entry of a
+#'   \code{TwasWeights} collection: its gene's row, cut to that method.
 #' @param x A \code{TwasWeights} object.
 #' @param studyName,context,trait,method Single character identifiers. All
-#'   required when the collection has more than one row; optional when the
-#'   collection has a single row.
-#' @return A \code{TwasWeightsRow} object.
+#'   required when the collection holds more than one entry; optional when
+#'   it holds one. The method may be given in snake_case
+#'   (\code{susie_inf}).
+#' @return A \code{TwasWeights} holding that one entry; read it with
+#'   \code{\link[=weights-methods]{weights}}, \code{\link{methodFits}} or
+#'   \code{\link{cvResult}}.
 #' @examples
 #' twe <- TwasWeightsRow(
 #'   variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
@@ -426,40 +1415,22 @@ setMethod(
         trait = NULL,
         method = NULL
     ) {
-        x[.twrSelectRowIndex(x, studyName, context, trait, method)]
+        .twasKeepCells(
+            x,
+            .twrSelectCell(x, studyName, context, trait, method)
+        )
     }
 )
 
-# The weights of one row, read straight off that element's mcols.
-# @noRd
-.twasRowWeights <- function(i, x) {
-    mcols(x[[i]])$weight
-}
-
-# The row a (study, context, trait, method) selector pins.
-# @noRd
-.twrSelectRowIndex <- function(x, studyName, context, trait, method) {
-    .tupleSelectRow(
-        x,
-        studyName,
-        context,
-        trait,
-        method,
-        cls = "TwasWeights"
-    )
-}
-
-# The row payload that selector pins.
+# The cell payload that selector pins.
 #
 # Read directly rather than via twasWeights(): that accessor returns a
-# single-row collection, so routing the per-field accessors through it would
-# dispatch straight back into them.
+# single-cell collection, so routing the per-field accessors through it
+# would dispatch straight back into them.
 # @noRd
 .twrSelectRowParts <- function(x, studyName, context, trait, method) {
-    .twrRowParts(
-        x,
-        .twrSelectRowIndex(x, studyName, context, trait, method)
-    )
+    cell <- .twrSelectCell(x, studyName, context, trait, method)
+    .twrCellParts(x, cell$row, cell$method)
 }
 
 #' @rdname resolveWeights
@@ -564,10 +1535,12 @@ setMethod(
     }
 )
 
-# Before rows recorded the variants their weights were fitted on, a
-# collection had no `fitVariants` column; a row saved then records the
-# variants it holds, and a row with no fit payload records none. The
-# inherited update runs either way, for the updates every collection shares.
+# A collection saved with one row per (study, context, trait, method) holds
+# a gene's methods in rows of their own; they are folded into its row
+# (.twasFoldMethodRows()), which also drops what saved rows carried that rows
+# no longer do -- variant ids on the weights, a `fitVariants` column, each
+# row's own CV partition. The inherited update runs either way, for the
+# updates every collection shares.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -577,21 +1550,48 @@ setMethod(
         if (isTRUE(verbose)) {
             message("updateObject(object = 'TwasWeights')")
         }
-        if (!is_in("fitVariants", .tupleColumnNames(object))) {
-            held <- map(seq_along(object), .twrBackfillFitVariants, x = object)
-            object <- `$<-`(object, "fitVariants", IRanges::CharacterList(held))
-        }
-        methods::callNextMethod(object, ..., verbose = verbose)
+        # A collection saved with one row per method is rebuilt per gene,
+        # which stores everything as rows now hold it. Its LD references are
+        # brought up to date first, as the rebuild reads them, and the
+        # inherited update then runs on the rebuilt collection.
+        folded <- .twasFoldMethodRows(.updateRowLdRefs(object))
+        methods::callNextMethod(.twasShareFits(folded), ..., verbose = verbose)
     }
 )
 
+# A collection saved one row per gene before rows shared their fits holds
+# each method's fit in its `fits` cell and mr.mash's per-fold fits in its
+# cvResult. Both move to the fits dictionary, where the rows of a joint fit
+# share one entry.
 # @noRd
-.twrBackfillFitVariants <- function(i, x) {
-    md <- mcols(x, use.names = FALSE)
-    if (length(md$fits[[i]]) == 0L && is.null(md$cvResult[[i]])) {
-        return(character(0))
+#' @importFrom methods slot<-
+.twasShareFits <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    if (!is_in("methods", colnames(md)) || is_in("foldFits", colnames(md))) {
+        return(object)
     }
-    .grVariantIds(x[[i]])
+    n <- lengths(md$methods)
+    rowOf <- rep(seq_along(n), n)
+    fitted <- .twasStoredFits(
+        list_flatten(map(as.list(md$fits), unname)),
+        list_flatten(map(as.list(md$cvResult), unname))
+    )
+    md$fits <- .twasKeysByRow(fitted$fits, rowOf)
+    md$foldFits <- .twasKeysByRow(fitted$foldFits, rowOf)
+    md$cvResult <- S4Vectors::SimpleList(map2(
+        unname(split(fitted$cv, rowOf)),
+        as.list(md$methods),
+        set_names
+    ))
+    cols <- colnames(md)
+    order <- append(setdiff(cols, "foldFits"), "foldFits", match("fits", cols))
+    methods::slot(object, "fits", check = FALSE) <- fitted$entries
+    S4Vectors::`mcols<-`(object, value = md[, order])
+}
+
+# @noRd
+.twasKeysByRow <- function(keys, rowOf) {
+    IRanges::CharacterList(unname(split(keys, rowOf)))
 }
 
 #' @rdname weightStandardized
@@ -675,19 +1675,23 @@ setMethod("traitNames", "TwasWeights", function(x) {
 #' @rdname methodNames
 #' @export
 setMethod("methodNames", "TwasWeights", function(x) {
-    unique(as.character(x$method))
+    unique(.twasCells(x)$method)
 })
 
 #' @rdname show-methods
 #' @export
 setMethod("show", "TwasWeights", function(object) {
-    cat(glue("TwasWeights: {nrow(object)} entries\n", .trim = FALSE))
+    cells <- .twasCells(object)
+    cat(glue(
+        "TwasWeights: {nrow(object)} genes, {nrow(cells)} entries\n",
+        .trim = FALSE
+    ))
     if (nrow(object) > 0L) {
         cat(glue(
-            "  {n_distinct(object$study)} studies, ",
-            "{n_distinct(object$context)} contexts, ",
-            "{n_distinct(object$trait)} traits, ",
-            "{n_distinct(object$method)} methods\n",
+            "  {n_distinct(cells$study)} studies, ",
+            "{n_distinct(cells$context)} contexts, ",
+            "{n_distinct(cells$trait)} traits, ",
+            "{n_distinct(cells$method)} methods\n",
             .trim = FALSE
         ))
     }
@@ -775,7 +1779,7 @@ setMethod("show", "TwasWeights", function(object) {
     ),
     bayesL = list(
         fn = "bayes_l_weights",
-        impl = "bLassoWeights",
+        impl = "bayesLWeights",
         args = list()
     ),
     bayesA = list(
@@ -796,11 +1800,6 @@ setMethod("show", "TwasWeights", function(object) {
     bayesN = list(
         fn = "bayes_n_weights",
         impl = "bayesNWeights",
-        args = list()
-    ),
-    bLasso = list(
-        fn = "b_lasso_weights",
-        impl = "bLassoWeights",
         args = list()
     ),
     dprVb = list(
@@ -933,13 +1932,12 @@ setMethod("show", "TwasWeights", function(object) {
             "buildMrmashPriorMatrices",
             "mr.mashr::mr.mash"
         ),
-        bayesA = c("bayesAWeights", "bayesAlphabetWeights", "qgg::gbayes"),
-        bayesC = c("bayesCWeights", "bayesAlphabetWeights", "qgg::gbayes"),
-        bayesN = c("bayesNWeights", "bayesAlphabetWeights", "qgg::gbayes"),
-        bayesR = c("bayesRWeights", "bayesAlphabetWeights", "qgg::gbayes"),
-        bayesB = c("bayesBWeights", "bglrWeights", "BGLR::BGLR"),
-        bayesL = c("bLassoWeights", "bglrWeights", "BGLR::BGLR"),
-        bLasso = c("bLassoWeights", "bglrWeights", "BGLR::BGLR"),
+        bayesA = .alphabetChains("bayesA", "individual"),
+        bayesB = .alphabetChains("bayesB", "individual"),
+        bayesC = .alphabetChains("bayesC", "individual"),
+        bayesL = .alphabetChains("bayesL", "individual"),
+        bayesN = .alphabetChains("bayesN", "individual"),
+        bayesR = .alphabetChains("bayesR", "individual"),
         dprVb = c("dprVbWeights", "dprWeights", "RcppDPR::fit_model"),
         dprGibbs = c(
             "dprGibbsWeights",
@@ -966,42 +1964,38 @@ setMethod("show", "TwasWeights", function(object) {
 # @noRd
 .twasMethodChainsSumstat <- function() {
     list(
-        scad = c(
-            "scadRssWeights",
-            ".penalizedRssWeights",
-            ".rssShrinkGridWeights",
-            ".penalizedRssPath"
-        ),
-        mcp = c(
-            "mcpRssWeights",
-            ".penalizedRssWeights",
-            ".rssShrinkGridWeights",
-            ".penalizedRssPath"
-        ),
+        scad = .penalizedRssChain("scadRssWeights"),
+        mcp = .penalizedRssChain("mcpRssWeights"),
         l0learn = c(
             "l0learnRssWeights",
             ".rssShrinkGridWeights",
             ".penalizedRssPath"
         ),
-        lasso = c(
-            "lassosumRssWeights",
-            ".rssShrinkGridWeights",
-            ".penalizedRssPath"
+        lasso = list(
+            pecotmr = c(
+                "lassosumRssWeights",
+                ".rssShrinkGridWeights",
+                ".penalizedRssPath"
+            ),
+            bigsnpr = c(
+                "lassosumRssWeights",
+                ".lassosum2Weights",
+                "bigsnpr::snp_lassosum2"
+            )
         ),
-        enet = c(
-            "enetRssWeights",
-            ".penalizedRssWeights",
-            ".rssShrinkGridWeights",
-            ".penalizedRssPath"
-        ),
-        ridge = c(
-            "ridgeRssWeights",
-            ".penalizedRssWeights",
-            ".rssShrinkGridWeights",
-            ".penalizedRssPath"
-        ),
+        enet = .penalizedRssChain("enetRssWeights"),
+        ridge = .penalizedRssChain("ridgeRssWeights"),
         prsCs = c("prsCsWeights", ".prsCsRun"),
+        # LDpred2's settings are all its wrappers' own arguments.
+        ldpred2Auto = "ldpred2AutoWeights",
+        ldpred2Grid = "ldpred2GridWeights",
         dprGibbs = c("sdprWeights", ".sdprRun"),
+        bayesA = .alphabetChains("bayesA", "sumstat"),
+        bayesB = .alphabetChains("bayesB", "sumstat"),
+        bayesC = .alphabetChains("bayesC", "sumstat"),
+        bayesL = .alphabetChains("bayesL", "sumstat"),
+        bayesN = .alphabetChains("bayesN", "sumstat"),
+        bayesR = .alphabetChains("bayesR", "sumstat"),
         mrash = c("mrashRssWeights", "susieR::mr.ash.rss"),
         mrmash = c(
             "mrmashRssWeights",
@@ -1011,13 +2005,90 @@ setMethod("show", "TwasWeights", function(object) {
     )
 }
 
+# A penalized RSS method's chain: its wrapper, the shared penalized dispatcher,
+# the shrinkage grid and the path every penalty solves.
+# @noRd
+.penalizedRssChain <- function(wrapper) {
+    c(
+        wrapper,
+        ".penalizedRssWeights",
+        ".rssShrinkGridWeights",
+        ".penalizedRssPath"
+    )
+}
+
+# A Bayesian alphabet method's chains on one data path, one per backend:
+# the method's wrapper, the shared dispatcher, the engine's adapter and the
+# engine.
+# @noRd
+.alphabetChains <- function(method, path) {
+    backends <- names(.alphabetBackends[[path]][[method]])
+    set_names(
+        map(backends, .alphabetChain, method = method, path = path),
+        backends
+    )
+}
+
+# @noRd
+.alphabetChain <- function(backend, method, path) {
+    c(
+        .twasMethodCapabilities[[method]][[str_c(path, "Impl")]],
+        .alphabetDispatchers[[path]],
+        .alphabetFitters[[path]][[backend]],
+        .alphabetEngineCallees[[path]][[backend]]
+    )
+}
+
+# The function every alphabet method's wrapper hands its fit to, per path.
+# @noRd
+.alphabetDispatchers <- c(
+    individual = "bayesAlphabetWeights",
+    sumstat = "bayesAlphabetRssWeights"
+)
+
+# The engine each backend's adapter reaches, with any pecotmr hop between,
+# per data path.
+# @noRd
+.alphabetEngineCallees <- list(
+    individual = list(
+        qgg = "qgg::gbayes",
+        bglr = c("bglrWeights", "BGLR::BGLR"),
+        hibayes = "hibayes::ibrm"
+    ),
+    sumstat = list(
+        qgg = "qgg::gbayes",
+        hibayes = "hibayes::sbrm",
+        pecotmr = "bayesAlphabetRss"
+    )
+)
+
 # The chain for one token and input class, or NULL when the token has no path
-# for that class.
+# for that class. A method with several backends has a chain per backend,
+# and this is its default backend's.
 # @noRd
 .twasMethodChainFor <- function(token, inputKind) {
+    chains <- .twasMethodChainsOf(token, inputKind)
+    if (!is.list(chains)) {
+        return(chains)
+    }
+    chains[[1L]]
+}
+
+# Every chain a token has on one input class: a vector for a method with one
+# implementation, a list keyed by backend for one with several.
+# @noRd
+.twasMethodChainsOf <- function(token, inputKind) {
     chains <- .twasMethodChains()
     side <- if (identical(inputKind, "QtlDataset")) "individual" else "sumstat"
     chains[[side]][[token]]
+}
+
+# Names twasWeightsPipeline() sets for each method from its own arguments.
+# Refused as method options even where a `...` hop leaves the rest of a
+# method's bundle unchecked (see .methodsEntryNameProblem).
+# @noRd
+.twasPipelineOwnedArgs <- function() {
+    "backend"
 }
 
 # Argument names that are data or plumbing rather than settable options, so
@@ -1025,6 +2096,7 @@ setMethod("show", "TwasWeights", function(object) {
 # @noRd
 .twasChainDataArgs <- function() {
     c(
+        .twasPipelineOwnedArgs(),
         "X",
         "Y",
         "y",
@@ -1075,10 +2147,12 @@ setMethod("show", "TwasWeights", function(object) {
 }
 
 # Every name legal for a token on one input class: the union of formals along
-# its chain. NULL when a hop takes `...`, since anything then reaches it.
+# its chain, or along every backend's chain for a method with several, whose
+# own constructors check a record exactly. NULL when a hop takes `...`, since
+# anything then reaches it.
 # @noRd
 .twasChainAccepted <- function(token, inputKind) {
-    chain <- .twasMethodChainFor(token, inputKind)
+    chain <- unique(unlist(.twasMethodChainsOf(token, inputKind)))
     if (is.null(chain)) {
         return(NULL)
     }
@@ -1119,7 +2193,24 @@ setMethod("show", "TwasWeights", function(object) {
 # summary statistics, dprGibbs is RcppDPR then SDPR -- so a hand-written
 # registry has to restate a pairing the implementation already declares.
 # @noRd
-.twasImplCtorName <- function(impl) {
+#
+# An implementation that runs on several engines (the Bayesian alphabet)
+# defaults `methodArgs` to NULL and has a constructor per backend, from
+# .alphabetBackends: this answers `backend`'s, or the default's when NULL.
+# @noRd
+.twasImplCtorName <- function(impl, backend = NULL) {
+    nms <- .twasImplCtorNames(impl)
+    if (length(nms) <= 1L) {
+        return(nms)
+    }
+    unname(nms[[backend %||% names(nms)[[1L]]]])
+}
+
+# Every Options constructor an implementation takes: the one its `methodArgs`
+# default names, or one per backend, keyed by backend. NULL for an
+# implementation that takes none.
+# @noRd
+.twasImplCtorNames <- function(impl) {
     if (is.null(impl)) {
         return(NULL)
     }
@@ -1131,10 +2222,47 @@ setMethod("show", "TwasWeights", function(object) {
         return(NULL)
     }
     default <- formals(fn)$methodArgs
-    if (!is.call(default)) {
+    if (is.call(default)) {
+        return(as.character(default[[1L]]))
+    }
+    .twasImplBackendCtors(impl)
+}
+
+# The constructors of an implementation with several backends, keyed by
+# backend: found through the method and data path whose implementation it
+# is. NULL for any other implementation.
+# @noRd
+.twasImplBackendCtors <- function(impl) {
+    found <- compact(map(
+        c("individual", "sumstat"),
+        .twasPathBackendCtors,
+        impl = impl
+    ))
+    if (length(found) == 0L) NULL else found[[1L]]
+}
+
+# The backend constructors of the method whose implementation on `path` is
+# `impl`, or NULL.
+# @noRd
+.twasPathBackendCtors <- function(path, impl) {
+    caps <- .twasMethodCapabilities
+    hit <- names(caps)[map_lgl(
+        caps,
+        .twasCapUsesImpl,
+        field = str_c(path, "Impl"),
+        impl = impl
+    )]
+    if (length(hit) == 0L) {
         return(NULL)
     }
-    as.character(default[[1L]])
+    ctors <- .methodBackends[[path]][[hit[[1L]]]]
+    # A method whose engines take no Options constructor (LDpred2).
+    if (all(is.na(ctors))) NULL else ctors
+}
+
+# @noRd
+.twasCapUsesImpl <- function(cap, field, impl) {
+    identical(cap[[field]], impl)
 }
 
 # The constructor itself. Deliberately separate from the name: the
@@ -1152,11 +2280,18 @@ setMethod("show", "TwasWeights", function(object) {
     )
 }
 
-# One method's Options constructor on one input path; NULL when the method
-# does not run on that path at all.
+# One method's Options constructor on one input path -- its default
+# backend's, for a method with several; NULL when the method does not run on
+# that path at all.
 # @noRd
 .twasMethodCtorFor <- function(token, inputKind) {
     .twasImplCtor(.twasMethodImplFor(token, inputKind))
+}
+
+# Every Options constructor one method takes on one input path, by name.
+# @noRd
+.twasMethodCtorNamesFor <- function(token, inputKind) {
+    .twasImplCtorNames(.twasMethodImplFor(token, inputKind))
 }
 
 # Every TWAS weight method that runs on one input path: the configurable
@@ -1207,6 +2342,37 @@ setMethod("show", "TwasWeights", function(object) {
         ))
     }
     NULL
+}
+
+# `backend` given as a method option. The pipeline owns it, keyed by method
+# (.twasPipelineOwnedArgs), so the refusal says where it goes. The example
+# uses the caller's own choice when it is one of the method's backends on
+# this input.
+# @noRd
+.twasBackendArgHint <- function(token, entry, inputKind) {
+    if (!is_in("backend", names(entry))) {
+        return("")
+    }
+    side <- if (identical(inputKind, "QtlDataset")) "individual" else "sumstat"
+    choices <- names(.methodBackends[[side]][[token]])
+    if (length(choices) == 0L) {
+        return(glue(
+            " `backend` is twasWeightsPipeline()'s own argument, and {token} ",
+            "has one implementation on {inputKind}, so there is no backend ",
+            "to choose."
+        ))
+    }
+    given <- entry$backend
+    example <- if (length(given) == 1L && is_in(given, choices)) {
+        given
+    } else {
+        choices[[1L]]
+    }
+    glue(
+        " Choose it with twasWeightsPipeline()'s own `backend` argument, ",
+        "keyed by method: backend = c({token} = \"{example}\"). ",
+        "{token} on {inputKind} offers {str_flatten(choices, ', ')}."
+    )
 }
 
 # Map short method names and presets to weightMethods lists.
@@ -1436,14 +2602,17 @@ setMethod("show", "TwasWeights", function(object) {
 }
 
 # The canonical fine-mapping token behind a weight-method name, accepting the
-# token itself (`susieInf`), its camelCase weight function (`susieInfWeights`)
-# and its snake_case registry key (`susie_inf_weights`). Stripping the suffix
-# is not enough on its own: that turns `susie_inf_weights` into `susie_inf`,
-# which is not the registry's token.
+# token itself (`susieInf`), its camelCase weight function (`susieInfWeights`),
+# its snake_case registry key (`susie_inf_weights`) and that key's row label
+# (`susie_inf`). Stripping the suffix is not enough on its own: that turns
+# `susie_inf_weights` into `susie_inf`, which is not the registry's token.
 # @noRd
 .twasFmTokenFor <- function(method) {
     methodKeys <- map_chr(.twasFineMappingMethodAdapters, "methodKey")
-    hit <- names(methodKeys)[methodKeys == method]
+    rowLabels <- str_remove(methodKeys, "_weights$")
+    hit <- names(methodKeys)[which(
+        methodKeys == method | rowLabels == method
+    )]
     if (length(hit) == 1L) {
         return(hit)
     }
@@ -1479,21 +2648,21 @@ setMethod("show", "TwasWeights", function(object) {
     weightMethods[[nm]]
 }
 
-# The per-fold fits supplied for `token`, under any of its spellings. The gate
-# and `.twasFoldFit()` must agree on this, or the gate can refuse fits the
-# fold lookup would have found.
+# The per-fold weights supplied for `token`, under any of its spellings. The
+# gate and .twasFoldWeightsW() must agree on this, or the gate can refuse
+# weights the fold lookup would have found.
 # @noRd
-.twasFoldFitsFor <- function(fittedModelsCv, token) {
-    if (is.null(fittedModelsCv)) {
+.twasFoldWeightsFor <- function(foldWeights, token) {
+    if (is.null(foldWeights)) {
         return(NULL)
     }
     adapter <- .twasFineMappingMethodAdapters[[token]]
     spellings <- c(token, adapter$methodKey, adapter$weightFn)
-    hit <- spellings[is_in(spellings, names(fittedModelsCv))]
+    hit <- spellings[is_in(spellings, names(foldWeights))]
     if (length(hit) == 0L) {
         return(NULL)
     }
-    fittedModelsCv[[hit[[1]]]]
+    foldWeights[[hit[[1]]]]
 }
 
 # The SuSiE-family methods requested in `weightMethods`, as canonical tokens.
@@ -1536,95 +2705,50 @@ setMethod("show", "TwasWeights", function(object) {
     abort(msg)
 }
 
-# Resolve the incoming susie / susieInf fits for the weight run: prefer a fit
-# carried on the method args, else one from `fittedModels`, tagging each with
-# its fine-mapping class. Returns list(susieFit, susieInfFit, hasSusie,
-# hasSusieInf, susieName, susieInfName) -- the names being the spellings the
-# caller actually used, so the write-back lands where the fitter will look.
-# @noRd
-.twasResolveSusieFits <- function(weightMethods, fittedModels) {
-    susieName <- .twasMethodNameFor(weightMethods, "susie")
-    susieInfName <- .twasMethodNameFor(weightMethods, "susieInf")
-    hasSusie <- !is.na(susieName)
-    hasSusieInf <- !is.na(susieInfName)
-    argSusie <- if (hasSusie) {
-        weightMethods[[susieName]][["susieFit"]]
-    } else {
-        NULL
-    }
-    argSusieInf <- if (hasSusieInf) {
-        weightMethods[[susieInfName]][["susieInfFit"]]
-    } else {
-        NULL
-    }
-    # A fit the caller passed in the method arguments wins; otherwise the
-    # pipeline's already-fitted model, if it produced one.
-    susieRaw <- argSusie %||% fittedModels[["susie"]]
-    susieInfRaw <- argSusieInf %||% fittedModels[["susieInf"]]
-    susieFit <- if (is.null(susieRaw)) {
-        NULL
-    } else {
-        .setFinemappingFitClass(susieRaw, "susie")
-    }
-    susieInfFit <- if (is.null(susieInfRaw)) {
-        NULL
-    } else {
-        .setFinemappingFitClass(susieInfRaw, "susieInf")
-    }
-    list(
-        susieFit = susieFit,
-        susieInfFit = susieInfFit,
-        hasSusie = hasSusie,
-        hasSusieInf = hasSusieInf,
-        susieName = susieName,
-        susieInfName = susieInfName
-    )
-}
-
-# Write the resolved susie / susieInf fits back onto the method args. Deriving
-# susie's arguments from a susieInf fit belongs to fine-mapping, not here: it
-# prepares a susie *fit* (model_init, unmappable_effects), which
-# `susieWeights()` neither accepts nor runs.
-# @noRd
-.twasWriteBackSusieFits <- function(weightMethods, r) {
-    withInf <- if (!is.null(r$susieInfFit) && r$hasSusieInf) {
-        .twasSetMethodArg(
-            weightMethods,
-            r$susieInfName,
-            "susieInfFit",
-            r$susieInfFit
-        )
-    } else {
-        weightMethods
-    }
-    if (is.null(r$susieFit) || !r$hasSusie) {
-        return(withInf)
-    }
-    .twasSetMethodArg(withInf, r$susieName, "susieFit", r$susieFit)
-}
-
 # One method's argument list with `arg` set, leaving every other method and
 # every other argument of that method untouched.
 # @noRd
 .twasSetMethodArg <- function(weightMethods, method, arg, value) {
-    updated <- list_assign(
-        weightMethods[[method]],
-        !!!set_names(list(value), arg)
-    )
-    list_assign(weightMethods, !!!set_names(list(updated), method))
+    argValue <- set_names(list(value), arg)
+    updated <- list_assign(weightMethods[[method]], !!!argValue)
+    methodEntry <- set_names(list(updated), method)
+    list_assign(weightMethods, !!!methodEntry)
 }
 
-# Resolve the supplied susie / susieInf fits onto the method args. This never
-# fine-maps: the SuSiE-family weight methods extract from a fit that
-# fineMappingPipeline() produced, and a missing one is an error, not a cue to
-# fit here.
+# Resolve the supplied fine-mapping fits onto the method args, for every
+# token with an adapter. This never fine-maps: the SuSiE-family weight methods
+# extract from a fit that fineMappingPipeline() produced, and a missing one is
+# an error, not a cue to fit here.
 # @noRd
 .prepareSusieWeightMethods <- function(weightMethods, fittedModels = NULL) {
-    if (is.null(fittedModels)) {
-        fittedModels <- list()
+    reduce(
+        names(.twasFineMappingMethodAdapters),
+        .twasResolveTokenFit,
+        fittedModels = fittedModels %||% list(),
+        .init = weightMethods
+    )
+}
+
+# One token's fit on its method's args, tagged with its fine-mapping class: a
+# fit the caller put there wins, else the one in `fittedModels`. It is written
+# under the spelling the caller used, where the extractor will look.
+# @noRd
+.twasResolveTokenFit <- function(weightMethods, token, fittedModels) {
+    nm <- .twasMethodNameFor(weightMethods, token)
+    if (is.na(nm)) {
+        return(weightMethods)
     }
-    r <- .twasResolveSusieFits(weightMethods, fittedModels)
-    .twasWriteBackSusieFits(weightMethods, r)
+    fitArg <- .twasFineMappingMethodAdapters[[token]]$fitArg
+    fit <- weightMethods[[nm]][[fitArg]] %||% fittedModels[[token]]
+    if (is.null(fit)) {
+        return(weightMethods)
+    }
+    .twasSetMethodArg(
+        weightMethods,
+        nm,
+        fitArg,
+        .setFinemappingFitClass(fit, token)
+    )
 }
 
 # Per-fold TWAS weight fit for the CV engine. `ctx` carries weightMethods,
@@ -1675,62 +2799,66 @@ setMethod("show", "TwasWeights", function(object) {
 # Per-fold priors bound to a multivariate fitter's camelCase args (mr.mash
 # data-driven matrices / mvsusie reweighted mixture prior for fold `j`).
 # @noRd
-.twasFoldPriors <- function(
-    args,
-    method,
-    j,
-    dataDrivenPriorMatricesCv,
-    reweightedMixturePriorCv
-) {
-    list_assign(
-        args,
-        !!!compact(list(
-            dataDrivenPriorMatrices = if (
-                !is.null(dataDrivenPriorMatricesCv) &&
-                    is_in(method, c("mrmash_weights", "mrmashWeights"))
-            ) {
-                dataDrivenPriorMatricesCv[[j]]
-            },
-            prior_variance = if (
-                !is.null(reweightedMixturePriorCv) &&
-                    is_in(method, c("mvsusie_weights", "mvsusieWeights"))
-            ) {
-                reweightedMixturePriorCv[[j]]
-            }
-        ))
-    )
+.twasFoldPriors <- function(args, method, j, dataDrivenPriorMatricesCv) {
+    priorUpdates <- compact(list(
+        dataDrivenPriorMatrices = if (
+            !is.null(dataDrivenPriorMatricesCv) &&
+                is_in(method, c("mrmash_weights", "mrmashWeights"))
+        ) {
+            dataDrivenPriorMatricesCv[[j]]
+        }
+    ))
+    list_assign(args, !!!priorUpdates)
 }
 
-# Inject the fold's own fine-mapping fit for a SuSiE-family method. Those
-# weight wrappers extract from a supplied fit and never fine-map, so a fold
-# can only be scored if fineMappingPipeline's CV retained that fold's fit
-# (`fittedModelsCv`, keyed method -> fold_<j>).
+# A SuSiE-family method's weights for fold `j`, from fineMappingPipeline's CV
+# (`foldWeights`: method -> variants x folds, rows named by variant, or
+# variants x folds x outcomes): those methods extract from a fit and never
+# fine-map, so a fold can only be scored with the weights its own fit gave.
+# Aligned to the fold's training variants (zero where the fit had none), one
+# column per outcome, or NULL when the method is not a fine-mapping one or
+# has no weights for the fold.
 # @noRd
-.twasFoldFit <- function(args, method, j, fittedModelsCv) {
-    if (is.null(fittedModelsCv)) {
-        return(args)
-    }
+.twasFoldWeightsW <- function(method, j, Xtr, Ytr, foldWeights) {
     mk <- .twasFmTokenFor(method)
-    if (is.na(mk)) {
-        return(args)
-    }
-    adapter <- .twasFineMappingMethodAdapters[[mk]]
-    perFold <- .twasFoldFitsFor(fittedModelsCv, mk)
-    if (is.null(perFold)) {
-        return(args)
-    }
+    fw <- if (is.na(mk)) NULL else .twasFoldWeightsFor(foldWeights, mk)
     key <- str_c("fold_", j)
-    fit <- if (is_in(key, names(perFold))) {
-        perFold[[key]]
-    } else if (length(perFold) >= j) {
-        perFold[[j]]
-    } else {
-        NULL
+    if (is.null(fw) || !is_in(key, colnames(fw))) {
+        return(NULL)
     }
-    if (is.null(fit)) {
-        return(args)
+    if (is.null(rownames(fw))) {
+        abort(glue(
+            "twasWeightsCv: the per-fold weights for '{mk}' do not name their ",
+            "variants, so they cannot be aligned to X. Take them through ",
+            "cvResult(), which names them."
+        ))
     }
-    list_assign(args, !!!set_names(list(fit), adapter$fitArg))
+    perOutcome <- .twasFoldOutcomeWeights(fw, key, Ytr, mk)
+    hit <- match(rownames(fw), colnames(Xtr))
+    W <- matrix(0, ncol(Xtr), ncol(Ytr), dimnames = list(colnames(Xtr), NULL))
+    W[hit[!is.na(hit)], ] <- perOutcome[!is.na(hit), , drop = FALSE]
+    W
+}
+
+# Fold `key`'s weights as variants x outcomes. A variants x folds matrix
+# holds one weight per variant, which every outcome shares, as it does for a
+# univariate fit; a variants x folds x outcomes array, as mvSuSiE gives, holds
+# each outcome's own, matched to the columns of Y by name.
+# @noRd
+.twasFoldOutcomeWeights <- function(fw, key, Ytr, mk) {
+    if (length(dim(fw)) != 3L) {
+        return(matrix(fw[, key], nrow(fw), ncol(Ytr)))
+    }
+    outcomes <- colnames(Ytr)
+    missing <- setdiff(outcomes, dimnames(fw)[[3L]])
+    if (length(missing) > 0L) {
+        missingStr <- str_flatten(missing, ", ")
+        abort(glue(
+            "twasWeightsCv: the per-fold weights for '{mk}' have no outcome ",
+            "{missingStr}. Name the third axis by the columns of Y."
+        ))
+    }
+    matrix(fw[, key, outcomes], nrow(fw), length(outcomes))
 }
 
 # One fold's multivariate weight fit; returns list(W, fit).
@@ -1740,17 +2868,13 @@ setMethod("show", "TwasWeights", function(object) {
         args,
         method,
         j,
-        ctx$dataDrivenPriorMatricesCv,
-        ctx$reweightedMixturePriorCv
+        ctx$dataDrivenPriorMatricesCv
     )
-    retaining <- !identical(ctx$fitRetention, "none") &&
-        is_in("fitRetention", names(formals(fnName)))
-    fitArgs <- list_assign(
-        withPriors,
-        !!!compact(list(
-            fitRetention = if (retaining) ctx$fitRetention
-        ))
-    )
+    retaining <- !identical(ctx$fitRetention, "none")
+    retentionArg <- compact(list(
+        fitRetention = if (retaining) ctx$fitRetention
+    ))
+    fitArgs <- list_assign(withPriors, !!!retentionArg)
     callArgs <- .twasWeightCallArgs(fnName, list(X = Xtr, Y = Ytr), fitArgs)
     W <- if (ctx$verbose < 2) {
         .quietEval(exec(fnName, !!!callArgs))
@@ -1782,9 +2906,12 @@ setMethod("show", "TwasWeights", function(object) {
 # path. Returns list(mk, W, fit) keyed by the canonical method key `mk`.
 # @noRd
 .twasFoldMethodWeights <- function(method, args, Xtr, Ytr, j, ctx) {
-    fnName <- .resolveMethodFunction(method, args)
-    args <- .twasFoldFit(args, method, j, ctx$fittedModelsCv)
     mk <- str_remove(method, "_weights$|Weights$")
+    given <- .twasFoldWeightsW(method, j, Xtr, Ytr, ctx$foldWeights)
+    if (!is.null(given)) {
+        return(list(mk = mk, W = given, fit = NULL))
+    }
+    fnName <- .resolveMethodFunction(method, args)
     fit <- if (is_in(method, ctx$multivariateWeightMethods)) {
         .twasFoldMultivariate(method, fnName, args, Xtr, Ytr, j, ctx)
     } else {
@@ -1831,23 +2958,29 @@ setMethod("show", "TwasWeights", function(object) {
 #' @param fitRetention How much of each per-method fit is kept on the result:
 #'   \code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
 #'   payload downstream needs, \code{"full"} keeps the whole fitted object.
-#'   Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
-#'   for every other method the two behave alike.
+#'   Every method keeps a fit, which names the variants it was fitted on.
+#'   \code{"slim"} and \code{"full"} differ for mr.mash, glmnet
+#'   (\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
+#'   \code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
+#'   and the DPR methods; for the others the two behave alike.
 #' @param seed Integer or \code{NULL}. When supplied, seeds both the
 #'   main-process RNG (fold partitioning, variant sub-sampling) and the
 #'   streams the folds draw from (see \code{BPPARAM}). The main-process seed
 #'   is scoped to the call, so the session RNG is left as it was found.
 #'   \code{NULL} (default) seeds neither.
-#' @param fittedModelsCv Optional per-fold fine-mapping fits, as
-#'   \code{method -> fold_<j> -> fit}, from a \code{fineMappingPipeline()}
-#'   run with \code{cvFolds > 1}. SuSiE-family weight wrappers extract from a
-#'   supplied fit and never fine-map, so this is what makes cross-validating
-#'   them possible; it must have been produced on \code{samplePartitions},
-#'   since a fit trained on different folds would leak held-out samples.
+#' @param foldWeights Optional per-fold weights of fine-mapping methods, as
+#'   \code{method -> variants x folds} matrix (rows named by variant, columns
+#'   \code{fold_<j>}): the \code{foldWeights} of the \code{cvResult} a
+#'   \code{fineMappingPipeline()} run with \code{cvFolds > 1} records. Every
+#'   column of \code{Y} shares those weights; a method with weights of its own
+#'   for each outcome, such as mvSuSiE, takes a variants x folds x outcomes
+#'   array instead, its third axis named by the columns of \code{Y}.
+#'   SuSiE-family weight wrappers extract from a fit and never fine-map, so a
+#'   fold's own weights are what make cross-validating them possible; they
+#'   must have been produced on \code{samplePartitions}, since weights
+#'   trained on different folds would leak held-out samples.
 #' @param dataDrivenPriorMatricesCv Optional list, one element per fold, of
 #'   data-driven prior matrices for the mr.mash learner.
-#' @param reweightedMixturePriorCv Optional list, one element per fold, of
-#'   reweighted mixture priors for the mvSuSiE learner.
 #' @return A list with the following components:
 #' \itemize{
 #'   \item `samplePartition`: A dataframe showing the sample partitioning used
@@ -1880,8 +3013,9 @@ setMethod("show", "TwasWeights", function(object) {
 #' X <- multiTraitData$X[, 1:80]
 #' Y <- multiTraitData$Y
 #' # A cross-validated method is refit on each fold's training rows. The
-#' # SuSiE family never fine-maps, so it needs each fold's own fit, passed
-#' # as `fittedModelsCv` from a fineMappingPipeline() run with cvFolds > 1.
+#' # SuSiE family never fine-maps, so it needs each fold's own weights,
+#' # passed as `foldWeights` from a fineMappingPipeline() run with
+#' # cvFolds > 1.
 #' twasWeightsCv(X, Y[, 1, drop = FALSE], fold = 3,
 #'   weightMethods = list(lasso_weights = list()))
 #' @importFrom checkmate assertDataFrame assertNumber assertInt
@@ -1900,8 +3034,7 @@ twasWeightsCv <- function(
     fitRetention = c("none", "slim", "full"),
     seed = NULL,
     dataDrivenPriorMatricesCv = NULL,
-    reweightedMixturePriorCv = NULL,
-    fittedModelsCv = NULL
+    foldWeights = NULL
 ) {
     # X / Y / fold are asserted downstream in .cvPrepareData; these are the
     # arguments nothing else checks.
@@ -1928,8 +3061,7 @@ twasWeightsCv <- function(
         fitRetention = fitRetention,
         seed = seed,
         dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
-        reweightedMixturePriorCv = reweightedMixturePriorCv,
-        fittedModelsCv = fittedModelsCv
+        foldWeights = foldWeights
     )
 }
 
@@ -1952,26 +3084,26 @@ twasWeightsCv <- function(
 # fingerprint (see .cvPartitionKey); a fit carrying none is refused too, since
 # it cannot be shown to match.
 # @noRd
-.twasCheckFoldFitPartition <- function(fittedModelsCv, samplePartitions) {
-    if (is.null(fittedModelsCv) || length(fittedModelsCv) == 0L) {
+.twasCheckFoldWeightsPartition <- function(foldWeights, samplePartitions) {
+    if (is.null(foldWeights) || length(foldWeights) == 0L) {
         return(invisible(NULL))
     }
     if (is.null(samplePartitions)) {
         msg <- glue(
-            "twasWeightsCv: `fittedModelsCv` needs the fold partition those ",
-            "fits were trained on. Pass the fine-mapping CV's ",
+            "twasWeightsCv: `foldWeights` needs the fold partition those ",
+            "weights were trained on. Pass the fine-mapping CV's ",
             "`samplePartition` as `samplePartitions`; a freshly drawn ",
-            "partition would score each fold with a fit that saw its ",
+            "partition would score each fold with weights that saw its ",
             "held-out samples."
         )
         abort(msg)
     }
     want <- .cvPartitionKey(samplePartitions)
-    for (m in names(fittedModelsCv)) {
-        got <- attr(fittedModelsCv[[m]], "partitionKey")
+    for (m in names(foldWeights)) {
+        got <- attr(foldWeights[[m]], "partitionKey")
         if (is.null(got)) {
             msg <- glue(
-                "twasWeightsCv: the per-fold fits for '{m}' carry no ",
+                "twasWeightsCv: the per-fold weights for '{m}' carry no ",
                 "partition fingerprint, so they cannot be shown to match ",
                 "`samplePartitions`. Take them from a fineMappingPipeline() ",
                 "run with cvFolds > 1."
@@ -1980,9 +3112,9 @@ twasWeightsCv <- function(
         }
         if (!identical(got, want)) {
             msg <- glue(
-                "twasWeightsCv: the per-fold fits for '{m}' were trained on ",
-                "a different fold partition than the one being scored. Use ",
-                "the fine-mapping CV's own `samplePartition`."
+                "twasWeightsCv: the per-fold weights for '{m}' were trained ",
+                "on a different fold partition than the one being scored. ",
+                "Use the fine-mapping CV's own `samplePartition`."
             )
             abort(msg)
         }
@@ -1996,8 +3128,7 @@ twasWeightsCv <- function(
 .twasCvFoldCtx <- function(
     weightMethods,
     dataDrivenPriorMatricesCv,
-    reweightedMixturePriorCv,
-    fittedModelsCv,
+    foldWeights,
     fitRetention,
     verbose
 ) {
@@ -2008,8 +3139,7 @@ twasWeightsCv <- function(
         weightMethods = weightMethods,
         multivariateWeightMethods = .twasCvMultivariateMethods,
         dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
-        reweightedMixturePriorCv = reweightedMixturePriorCv,
-        fittedModelsCv = fittedModelsCv,
+        foldWeights = foldWeights,
         fitRetention = fitRetention,
         verbose = verbose
     )
@@ -2031,12 +3161,11 @@ twasWeightsCv <- function(
     fitRetention,
     seed,
     dataDrivenPriorMatricesCv,
-    reweightedMixturePriorCv,
-    fittedModelsCv
+    foldWeights
 ) {
     weightMethods <- .twasCvResolveMethods(
         weightMethods,
-        fittedModelsCv,
+        foldWeights,
         samplePartitions,
         seed,
         verbose
@@ -2053,8 +3182,7 @@ twasWeightsCv <- function(
         fitFoldCtx = .twasCvFoldCtx(
             weightMethods,
             dataDrivenPriorMatricesCv,
-            reweightedMixturePriorCv,
-            fittedModelsCv,
+            foldWeights,
             fitRetention,
             verbose
         ),
@@ -2074,22 +3202,23 @@ twasWeightsCv <- function(
 # @noRd
 .twasCvResolveMethods <- function(
     weightMethods,
-    fittedModelsCv,
+    foldWeights,
     samplePartitions,
     seed,
     verbose
 ) {
-    .twasCheckFoldFitPartition(fittedModelsCv, samplePartitions)
+    .twasCheckFoldWeightsPartition(foldWeights, samplePartitions)
     .twasRequireSusieFits(
         weightMethods,
-        available = .twasFoldFitAvailable,
+        available = .twasFoldWeightsAvailable,
         fnLabel = "twasWeightsCv",
         how = str_c(
-            "Cross-validation refits on each fold, so it needs that fold's ",
-            "own fit: pass `fittedModelsCv = list(<token> = <fold fits>)` ",
-            "from a fineMappingPipeline() run with cvFolds > 1."
+            "Cross-validation refits on each fold, so it needs the weights ",
+            "that fold's own fit gave: pass `foldWeights = list(<token> = ",
+            "<fold weights>)` from a fineMappingPipeline() run with ",
+            "cvFolds > 1."
         ),
-        fittedModelsCv = fittedModelsCv
+        foldWeights = foldWeights
     )
     if (is.null(seed) && !exists(".Random.seed") && verbose >= 1) {
         inform(str_c(
@@ -2100,10 +3229,10 @@ twasWeightsCv <- function(
     .twasAsMethodRecord(weightMethods)
 }
 
-# Whether `fittedModelsCv` carries per-fold fits for `tk`.
+# Whether `foldWeights` carries per-fold weights for `tk`.
 # @noRd
-.twasFoldFitAvailable <- function(tk, fittedModelsCv) {
-    !is.null(.twasFoldFitsFor(fittedModelsCv, tk))
+.twasFoldWeightsAvailable <- function(tk, foldWeights) {
+    !is.null(.twasFoldWeightsFor(foldWeights, tk))
 }
 
 # Fit one TWAS weight method by name against the filtered design matrix,
@@ -2119,11 +3248,7 @@ twasWeightsCv <- function(
     }
     userArgs <- weightMethods[[methodName]]
     fnName <- .resolveMethodFunction(methodName, userArgs)
-    fitArgs <- .twasApplyRetainFit(
-        userArgs,
-        fnName,
-        ctx$fitRetention
-    )
+    fitArgs <- .twasApplyRetainFit(userArgs, ctx$fitRetention)
     fit <- .twasFitWeightsMatrix(fnName, fitArgs, ctx, methodName)
     embedded <- .embedWeights(
         fit$weights,
@@ -2159,15 +3284,11 @@ twasWeightsCv <- function(
     "fsusieWeights"
 )
 
-# Pass the retention level down to the target weight function, when it takes
-# one and the caller is keeping fits at all. A target that does not take
-# `fitRetention` keeps nothing, which is what "no such argument" means.
+# Pass the retention level down to the target weight function when the caller
+# is keeping fits at all; every weight method takes `fitRetention`.
 # @noRd
-.twasApplyRetainFit <- function(args, fnName, fitRetention) {
+.twasApplyRetainFit <- function(args, fitRetention) {
     if (identical(fitRetention, "none")) {
-        return(args)
-    }
-    if (!is_in("fitRetention", names(formals(fnName)))) {
         return(args)
     }
     list_assign(args, fitRetention = args$fitRetention %||% fitRetention)
@@ -2366,8 +3487,11 @@ twasWeightsCv <- function(
 #' @param fitRetention How much of each per-method fit is kept on the result:
 #'   \code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
 #'   payload downstream needs, \code{"full"} keeps the whole fitted object.
-#'   Only the mr.mash methods distinguish \code{"slim"} from \code{"full"};
-#'   for every other method the two behave alike.
+#'   Every method keeps a fit, which names the variants it was fitted on.
+#'   \code{"slim"} and \code{"full"} differ for mr.mash, glmnet
+#'   (\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
+#'   \code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
+#'   and the DPR methods; for the others the two behave alike.
 #' @param verbose Integer controlling verbosity level: 0 = suppress all
 #'   messages, 1 = suppress external package messages (default), 2 = show all
 #'   messages including those from external packages.
@@ -2388,8 +3512,10 @@ twasWeightsCv <- function(
 #'   RNG and the streams the methods draw from (see \code{BPPARAM}). The
 #'   main-process seed is scoped to the call, so the session RNG is left as it
 #'   was found. \code{NULL} (default) seeds neither.
-#' @return A list where each element is named after a method and contains the
-#'   weight matrix produced by that method.
+#' @return A \code{TwasWeights} with one row, for the (\code{studyName},
+#'   \code{context}, \code{trait}) gene, holding each method's weights, fit
+#'   and cross-validation. Its methods are named by camelCase token: a
+#'   method given as \code{susie_inf_weights} is \code{"susieInf"}.
 #'
 #' @examples
 #' data(multiTraitData)
@@ -2650,15 +3776,13 @@ twasPredict <- function(X, weightsList) {
         .var.name = "weightsList"
     )
     if (is(weightsList, "TwasWeights")) {
-        # Per-row weights vector/matrix payloads. Use the method name as key
-        # for compatibility with the legacy snake_case "<method>_predicted"
-        # convention; ensembleWeights() rebinds the suffix.
-        methodNames <- as.character(weightsList$method)
-        # The per-row weights live in each element's mcols, so read them off
-        # the elements.
+        # Every (gene, method) cell's weights, keyed by the method name for
+        # the legacy "<method>_predicted" convention; ensembleWeights()
+        # rebinds the suffix.
+        cells <- .twasCells(weightsList)
         wl <- set_names(
-            map(seq_len(nrow(weightsList)), .twasRowWeights, x = weightsList),
-            str_c(methodNames, "_weights")
+            map2(cells$row, cells$method, .twasCellWeightsAt, x = weightsList),
+            str_c(cells$method, "_weights")
         )
     } else {
         wl <- weightsList
@@ -2676,8 +3800,8 @@ twasPredict <- function(X, weightsList) {
 #' at zero (spike) plus continuous components (slab), and learns the mixture
 #' proportions via variational EM. The sparsity estimate \code{1 - pi[1]} is the
 #' empirical Bayes estimate of the non-null proportion, which can be used as a
-#' data-driven prior for the inclusion probability parameters (\code{pi} for
-#' bayesC, \code{probIn} for BayesB) of spike-and-slab Bayesian methods.
+#' data-driven prior for the inclusion probability, \code{pi}, of the
+#' spike-and-slab Bayesian methods (bayesB and bayesC).
 #'
 #' @param weightResults Named list of weight vectors or matrices as returned by
 #'   \code{\link{learnTwasWeights}}. The mr.ash element should have a
@@ -2694,8 +3818,8 @@ estimateSparsity <- function(weightResults) {
     if (is(weightResults, "TwasWeights")) {
         # Method names on the new TwasWeights collection are bare tokens
         # ("mrash"), not the snake_case _weights suffix form.
-        methods <- as.character(weightResults$method)
-        idx <- which(methods == "mrash")
+        cells <- .twasCells(weightResults)
+        idx <- which(cells$method == "mrash")
         if (length(idx) == 0L) {
             msg <- glue(
                 "mr.ash entry not found in TwasWeights. Run ",
@@ -2705,7 +3829,9 @@ estimateSparsity <- function(weightResults) {
             )
             abort(msg)
         }
-        fit <- methodFits(.twrRowParts(weightResults, idx[[1L]]))
+        fit <- methodFits(
+            .twrCellParts(weightResults, cells$row[[idx[[1L]]]], "mrash")
+        )
         if (is.null(fit) || is.null(fit$pi)) {
             msg <- glue(
                 "mr.ash fit object not found. Run learnTwasWeights() with ",
@@ -2846,6 +3972,12 @@ estimateSparsity <- function(weightResults) {
         return(named)
     }
     `attr<-`(named, "fit", fit)
+}
+
+# The weights of method `method` of row `row` of `x`.
+# @noRd
+.twasCellWeightsAt <- function(row, method, x) {
+    weights(.twrCellParts(x, row, method))
 }
 
 # X %*% w for one weight vector/matrix (coerced to a 1-column matrix if needed).

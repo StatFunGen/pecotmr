@@ -62,6 +62,13 @@ test_that("LdMatrix takes its variants from a table or a GRanges", {
         as.character(GenomicRanges::seqnames(fromRanges))[[1L]],
         "chr22"
     )
+    # Alleles enter in upper case; the labels stay as given.
+    lower <- .ldmTable(f$ids)
+    lower$A1 <- str_to_lower(lower$A1)
+    lower$A2 <- str_to_lower(lower$A2)
+    fromLower <- LdMatrix(unname(f$R), variants = lower)
+    expect_identical(S4Vectors::mcols(fromLower)$A1, parseVariantId(f$ids)$A1)
+    expect_identical(variantIds(fromLower), f$ids)
 })
 
 test_that("as.matrix() and as(x, 'matrix') return the correlation matrix", {
@@ -171,8 +178,11 @@ test_that("validity catches a part changed after construction", {
     relabelled@correlation <- `dimnames<-`(f$R, list(rev(f$ids), rev(f$ids)))
     expect_error(validObject(relabelled), "names must be the variant ids")
     withNa <- ld
-    withNa@correlation[1, 2] <- NA
+    withNa@correlation <- `[<-`(ldMatrix(ld), 1, 2, NA)
     expect_error(validObject(withNa), "holds missing values")
+    packedNa <- ld
+    packedNa@correlation <- .packedLd(`[<-`(ldMatrix(ld), 1, 2, NA))
+    expect_error(validObject(packedNa), "holds missing values")
     noSize <- ld
     noSize@nSamples <- 0L
     expect_error(validObject(noSize), "one positive count")
@@ -286,12 +296,40 @@ test_that("a mixture needs LdMatrix components and valid weights", {
     )
 })
 
-test_that("a Matrix-package matrix is made dense", {
+test_that("a Matrix-package matrix is taken, and handed back dense", {
     skip_if_not_installed("Matrix")
     f <- .ldmFixture()
     ld <- LdMatrix(Matrix::Matrix(f$R), nSamples = 10)
     expect_true(is.matrix(ldMatrix(ld)))
     expect_equal(ldMatrix(ld), f$R)
+})
+
+test_that("the matrix is stored packed and read back exactly", {
+    f <- .ldmFixture()
+    ld <- LdMatrix(f$R, nSamples = 10)
+    expect_s4_class(ld@correlation, "dspMatrix")
+    expect_null(dimnames(ld@correlation)[[1L]])
+    expect_identical(ldMatrix(ld), f$R)
+    idx <- c(5L, 2L, 7L)
+    expect_identical(.ldmBlock(ld, idx), unname(f$R[idx, idx]))
+    # A matrix packed by its lower triangle is read the same way.
+    lower <- ld
+    lower@correlation <- Matrix::pack(
+        Matrix::forceSymmetric(unname(f$R), uplo = "L")
+    )
+    expect_identical(.ldmBlock(lower, idx), unname(f$R[idx, idx]))
+})
+
+test_that("updateObject packs an LdMatrix saved with a full matrix", {
+    f <- .ldmFixture()
+    ld <- LdMatrix(f$R, nSamples = 10)
+    saved <- ld
+    saved@correlation <- f$R
+    # Read as saved, the full matrix serves as the packed one does.
+    expect_identical(ldMatrix(saved), f$R)
+    expect_identical(.ldmBlock(saved, c(3L, 1L)), unname(f$R[c(3, 1), c(3, 1)]))
+    expect_identical(updateObject(saved), ld)
+    expect_identical(updateObject(ld), ld)
 })
 
 test_that("show reports the size, a mixture and missing frequencies", {
@@ -306,4 +344,32 @@ test_that("show reports the size, a mixture and missing frequencies", {
         mixtureWeights = c(0.5, 0.5)
     )
     expect_true(any(grepl("mixture of 2 panels", capture.output(show(mix)))))
+})
+
+test_that("an LdMatrix's blocks are read packed, whichever triangle it holds", {
+    f <- .ldmFixture()
+    ld <- LdMatrix(f$R, nSamples = 10)
+    idx <- c(5L, 2L, 7L)
+    want <- unname(f$R[idx, idx])
+    block <- pecotmr:::.ldmPackedBlock(ld, idx)
+    expect_s4_class(block, "dspMatrix")
+    expect_equal(methods::as(block, "matrix"), want)
+    # One saved before packing reads the same.
+    saved <- ld
+    saved@correlation <- f$R
+    expect_equal(
+        methods::as(pecotmr:::.ldmPackedBlock(saved, idx), "matrix"),
+        want
+    )
+    # One packed by its lower triangle too: the Matrix package misreads a
+    # lower triangle under indices out of order, so it is read transposed.
+    lower <- ld
+    lower@correlation <- Matrix::pack(
+        Matrix::forceSymmetric(unname(f$R), uplo = "L")
+    )
+    shuffled <- c(8L, 1L, 4L)
+    expect_equal(
+        pecotmr:::.ldmBlock(lower, shuffled),
+        unname(f$R[shuffled, shuffled])
+    )
 })

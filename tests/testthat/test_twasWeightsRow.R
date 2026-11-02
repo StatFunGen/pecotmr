@@ -26,31 +26,17 @@ test_that("TwasWeightsRow: constructor and accessors round-trip", {
         .twrPartsVariantIds(e),
         c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     )
-    expect_equal(weights(e), c(0.1, -0.2, 0.05))
+    # Named by the row's variants, whose ids the row holds once; the stored
+    # weights carry no copy of them.
+    expect_equal(
+        weights(e),
+        set_names(c(0.1, -0.2, 0.05), .twrPartsVariantIds(e))
+    )
+    expect_null(names(S4Vectors::mcols(e@variants)$weight))
     expect_equal(methodFits(e), list(model = "lasso"))
     expect_equal(cvResult(e), list(rsq = 0.4))
     expect_true(isTRUE(weightStandardized(e)))
     expect_equal(weightsDataType(e), "expression")
-})
-
-test_that("TwasWeightsRow: resolveWeights returns the aligned (variantIds, weights) pair", {
-    e <- TwasWeightsRow(
-        variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
-        weights = c(0.1, -0.2, 0.05)
-    )
-    wr <- .twrRowResolveWeights(e)
-    expect_equal(
-        wr$variantIds,
-        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
-    )
-    expect_equal(wr$weights, c(0.1, -0.2, 0.05))
-    # length mismatch (defensive) -> empty
-    e2 <- TwasWeightsRow(
-        variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
-        weights = c(0.1, -0.2)
-    )
-    e2@weights <- matrix(0, 2, 2) # flattens to length 4 != 2 ids
-    expect_length(.twrRowResolveWeights(e2)$variantIds, 0L)
 })
 
 
@@ -160,4 +146,70 @@ test_that("an empty variant set is allowed", {
     )
     expect_s4_class(e, "TwasWeightsRow")
     expect_equal(length(.twrPartsVariantIds(e)), 0L)
+})
+
+# ===========================================================================
+# The variants a stored fit was made on
+# ===========================================================================
+
+.twr_ids <- c("chr1:100:A:G", "chr1:200:C:T")
+
+test_that("a fit's variants are read where its engine names them", {
+    f <- pecotmr:::.twasFitVariantIds
+    named <- set_names(c(0.1, 0.2), .twr_ids)
+    path <- matrix(0, 2L, 3L, dimnames = list(.twr_ids, NULL))
+    geno <- matrix(0, 3L, 2L, dimnames = list(NULL, .twr_ids))
+    expect_equal(f(list(coef = c(0.1, 0.2), variantIds = .twr_ids)), .twr_ids)
+    # glmnet's path, ncvreg's past its intercept, qgg's and BGLR's effects.
+    expect_equal(f(list(glmnet.fit = list(beta = path))), .twr_ids)
+    intercept <- matrix(0, 1L, 3L, dimnames = list("(Intercept)", NULL))
+    expect_equal(f(list(fit = list(beta = rbind(intercept, path)))), .twr_ids)
+    expect_equal(f(list(bm = named)), .twr_ids)
+    expect_equal(f(list(ETA = list(list(b = named)))), .twr_ids)
+    # mr.ash's and DPR's copies of the genotypes, a SuSiE fit's names.
+    expect_equal(f(list(data = list(X = geno))), .twr_ids)
+    expect_equal(f(list(x = geno)), .twr_ids)
+    expect_equal(f(list(pip = named)), .twr_ids)
+    # A row joined from regions: each region's variants in turn.
+    regions <- list(
+        r1 = list(variantIds = .twr_ids[[1L]]),
+        r2 = list(variantIds = .twr_ids[[2L]])
+    )
+    expect_equal(f(regions), .twr_ids)
+    # Nothing names them, or there is no fit.
+    expect_equal(f(list(coef = c(0.1, 0.2))), character(0))
+    expect_equal(f(NULL), character(0))
+})
+
+test_that("a kept fit takes the variant ids only when it names none", {
+    g <- pecotmr:::.withFitVariantIds
+    expect_equal(g(list(coef = c(0.1, 0.2)), .twr_ids)$variantIds, .twr_ids)
+    # One that already names them keeps its own names alone.
+    named <- list(pip = set_names(c(0.1, 0.9), .twr_ids))
+    expect_identical(g(named, rev(.twr_ids)), named)
+    expect_null(g(NULL, .twr_ids))
+    expect_identical(g(list(coef = 1), NULL), list(coef = 1))
+    # An engine's class survives the addition.
+    classed <- structure(list(coef = c(0.1, 0.2)), class = "someEngineFit")
+    expect_s3_class(g(classed, .twr_ids), "someEngineFit")
+    # On weights, only a fit they carry is touched.
+    w <- `attr<-`(c(0.1, 0.2), "fit", list(coef = c(0.1, 0.2)))
+    expect_equal(
+        attr(pecotmr:::.withWeightsFitIds(w, .twr_ids), "fit")$variantIds,
+        .twr_ids
+    )
+    expect_identical(
+        pecotmr:::.withWeightsFitIds(c(0.1, 0.2), .twr_ids),
+        c(0.1, 0.2)
+    )
+})
+
+test_that("updateObject() drops a row's saved fitVariants slot", {
+    row <- TwasWeightsRow(.twr_ids, c(0.1, 0.2))
+    saved <- `attr<-`(row, "fitVariants", .twr_ids)
+    up <- updateObject(saved)
+    expect_null(attr(up, "fitVariants", exact = TRUE))
+    expect_identical(up, row)
+    expect_identical(updateObject(row), row)
+    expect_message(updateObject(row, verbose = TRUE), "TwasWeightsRow")
 })

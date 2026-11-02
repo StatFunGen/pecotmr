@@ -13,12 +13,13 @@ heritabilityIntercept(x)
 \item{x}{An \code{H2Estimate}.}
 }
 \value{
-Numeric (length 1).
+Numeric, one per estimate.
 }
 \description{
-Return the regression intercept carried by an
-  \code{H2Estimate}. Values above 1 indicate confounding or sample overlap
-  rather than polygenic signal.
+Return the fitted intercept of each of an
+  \code{H2Estimate}'s estimates, \code{NA} for a method without one. An
+  S-LDSC intercept above 1 indicates confounding or sample overlap rather
+  than polygenic signal.
 }
 \examples{
 data(h2EstimateExample)

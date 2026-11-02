@@ -6,23 +6,28 @@
 \title{TWAS Weights Collection}
 \description{
 S4 collection of TWAS weights, one row per
-  \code{(study, context, trait, method)}: one method's weights for one
-  trait, context and study. Each element is a row's variants: a
-  \code{GRanges} whose \code{weight} column holds the weights.
+  \code{(study, context, trait)} -- a gene -- holding the weights of every
+  method fitted for it. Each element is the union of the row's methods'
+  variants; a method fitted on fewer of them, or in another order, keeps
+  its own. The weights form a variants x methods x weight-column tensor,
+  stored dense for the methods most of whose weights are nonzero and
+  sparse for the rest. One method of one gene is what a
+  \code{\link{TwasWeightsRow}} holds: the constructor takes one per
+  \code{(study, context, trait, method)}, and the accessors select one by
+  \code{method}.
 
-Required \code{mcols()} columns: the identity tuple \code{study},
-\code{context}, \code{trait} and \code{method}, and each row's payload:
-its stored fits (\code{fits}), \code{cvResult}, \code{standardized} and
-\code{dataType}. The constructor also records \code{fitVariants}, the
-variants the weights were fitted on.
+Required \code{mcols()} columns: the identity \code{study},
+\code{context} and \code{trait}, and each row's \code{methods} with
+their weights (\code{weightTensor}), fits (\code{fits}, and the
+per-fold fits of their cross-validation in \code{foldFits}),
+\code{cvResult}, \code{standardized} and \code{dataType}.
 
 Optional columns \code{jointStudies}, \code{jointContexts},
-\code{jointTraits} appear when the collection contains rows produced by a
-\code{jointSpecification}-driven joint fit. For such a row, the corresponding
-identity-tuple column carries the sentinel \code{"joint"} and the joint
-column lists the semicolon-joined members of the joined axis. For non-joint
-rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
-jointly across the identity-tuple columns and any present joint columns.
+\code{jointTraits} appear when the collection holds weights from a
+\code{jointSpecification}-driven joint fit: they list the semicolon-joined
+members of the joined axis, \code{NA_character_} for a row from no joint
+fit. A row is unique on its identity together with any joint columns, so
+one gene's weights from a joint fit and from fits of its own are two rows.
 }
 \section{Slots}{
 
@@ -33,18 +38,32 @@ derived against, each a genotype panel, a \code{GenotypeMixture} or an
 \code{mcols} names the entry each row used (\code{NA} for weights
 learned from individual-level data). Used downstream to check that the
 rows a pipeline combines share an LD reference.}
+
+\item{\code{cvPartition}}{A named list of the cross-validation fold partitions the
+rows' results share, each with the order of the samples its out-of-fold
+predictions are held for, stored once apiece; the \code{cvPartition}
+column of \code{mcols} names the entry each row's result used
+(\code{NA} for a row without one). \code{cvResult()} returns a row's
+result with its partition and sample names in place.}
+
+\item{\code{fits}}{A named list of the methods' fits, and of the per-fold fits
+of their cross-validation, stored once apiece: the rows of a joint fit
+all name one entry. The \code{fits} and \code{foldFits} columns of
+\code{mcols} name each method's entries (\code{NA} for none);
+\code{methodFits()} and \code{cvResult()} return them in place.}
 }}
 
 \section{Narrowed rows}{
- Each row records in its \code{fitVariants} column
-  the ids of the variants its weights were fitted on (none for a row
-  without a fit payload). A row narrowed since keeps its fits as they
-  were, so \code{cvResult()} and \code{methodFits()} warn, with condition
-  class \code{pecotmrFitCoverage}, when a row holds fewer variants than
-  they describe. So do the pipelines that read them:
+ A row's stored fit names the variants its weights
+  were fitted on, where its engine keeps them or in a \code{variantIds}
+  element. A row narrowed since keeps its fits as they were, so
+  \code{cvResult()} and \code{methodFits()} warn, with condition class
+  \code{pecotmrFitCoverage}, when a row holds fewer variants than they
+  describe. So do the pipelines that read them:
   \code{causalInferencePipeline()} when it selects weights by their
   cross-validation, and \code{ctwasPipeline()} for rows whose SuSiE fit
   renormalizes their weights. The weights themselves are narrowed with
-  the row and do not warn.
+  the row and do not warn, and a row kept without a fit
+  (\code{fitRetention = "none"}) has nothing to compare them with.
 }
 

@@ -51,12 +51,80 @@
     rep(list(one), n)
 }
 
-test_that("ColocResult: stores one element per pair with its variants", {
+# A group's variants as they are.
+.cr_same <- function(g) {
+    g
+}
+
+# A group's variants in reverse order, as an element operation may leave
+# them.
+.cr_reversed <- function(g) {
+    rev(g)
+}
+
+# `x` as saved before a ColocResult held one element per scored group: one
+# element per pair, carrying its variants and SNP.PP.H4, and the pair's
+# columns in mcols. Attributes are written directly, as a saved object
+# holds them: that layout no longer validates.
+.cr_savedPerPair <- function(x) {
+    pairs <- colocPairs(x)
+    group <- pecotmr:::.crPairGroups(x)
+    pp <- as.list(pecotmr:::.crPairPp(x))
+    elements <- map2(as.list(x)[group], pp, .cr_withPp)
+    saved <- x
+    attr(saved, "unlistData") <- unlist(
+        GenomicRanges::GRangesList(unname(elements)),
+        use.names = FALSE
+    )
+    attr(saved, "partitioning") <- IRanges::PartitioningByEnd(
+        cumsum(lengths(elements)),
+        names = NULL
+    )
+    attr(saved, "elementMetadata") <- S4Vectors::DataFrame(
+        as.data.frame(pairs),
+        check.names = FALSE
+    )
+    saved
+}
+
+.cr_withPp <- function(g, pp) {
+    S4Vectors::mcols(g)$SNP.PP.H4 <- as.numeric(pp)
+    g
+}
+
+test_that("ColocResult: stores one element per scored group", {
     x <- ColocResult(.cr_pairs(), .cr_variants())
     expect_s4_class(x, "ColocResult")
     expect_equal(nrow(x), 1L)
     expect_equal(unname(lengths(x)), 3L)
-    expect_equal(x$PP.H4.abf, 0.6)
+    expect_equal(colocPairs(x)$PP.H4.abf, 0.6)
+})
+
+test_that("ColocResult: a group's pairs share its variants, stored once", {
+    pairs <- rbind(.cr_pairs(), .cr_pairs(gwasCs = 2L, pp4 = 0.3))
+    x <- ColocResult(pairs, .cr_variants(2L, pp = c(0.2, 0.5, 0.3)))
+    expect_equal(length(x), 1L)
+    expect_equal(unname(lengths(x)), 3L)
+    expect_equal(nrow(colocPairs(x)), 2L)
+    expect_equal(colocPairs(x)$gwasCs, c(1L, 2L))
+    # Pairs over other variants, or in another block, are their own group.
+    other <- rbind(pairs, .cr_pairs(blockId = "chr1_1001_2000"))
+    y <- ColocResult(other, .cr_variants(3L))
+    expect_equal(length(y), 2L)
+    expect_equal(nrow(colocPairs(y)), 3L)
+})
+
+test_that("an element operation keeps pairs' posteriors with the variants", {
+    pairs <- rbind(.cr_pairs(), .cr_pairs(gwasCs = 2L, pp4 = 0.3))
+    variants <- list(
+        .cr_variants(pp = c(0.6, 0.3, 0.1))[[1L]],
+        .cr_variants(pp = c(0.2, 0.5, 0.3))[[1L]]
+    )
+    x <- ColocResult(pairs, variants)
+    reordered <- endoapply(x, .cr_reversed)
+    long <- S4Vectors::mcols(colocVariants(reordered))
+    expect_equal(long$variant_id[1:3], rev(.cr_variants()[[1L]]$variant_id))
+    expect_equal(long$SNP.PP.H4, c(0.1, 0.3, 0.6, 0.3, 0.5, 0.2))
 })
 
 test_that("ColocResult: keeps each pair's LD reference", {
@@ -90,7 +158,7 @@ test_that("ColocResult: rejects a variants list that is not parallel", {
 test_that("ColocResult: an empty result still carries the column schema", {
     x <- ColocResult(.cr_pairs()[0, , drop = FALSE], list())
     expect_equal(nrow(x), 0L)
-    expect_true(is_in("PP.H4.abf", colnames(x)))
+    expect_true(is_in("PP.H4.abf", colnames(colocPairs(x))))
     expect_equal(nrow(colocPairs(x)), 0L)
 })
 
@@ -268,6 +336,29 @@ test_that(".crPivotColocResults: maps results column K to summary row K", {
     expect_equal(out[[2L]]$SNP.PP.H4, c(0.2, 0.8))
 })
 
+test_that(".crPivotColocResults: reads a lone pair's SNP.PP.H4.abf", {
+    # coloc.bf_bf names the column SNP.PP.H4.abf, not .row1, when it scores
+    # a single pair -- every region with one kept effect on each side.
+    results <- data.frame(
+        snp = c("chr1:100:A:G", "chr1:200:C:T"),
+        SNP.PP.H4.abf = c(0.7, 0.3)
+    )
+    out <- .crPivotColocResults(results, 1L)
+    expect_equal(out[[1L]]$variant_id, results$snp)
+    expect_equal(out[[1L]]$SNP.PP.H4, c(0.7, 0.3))
+})
+
+test_that("a pair coloc scores alone keeps its variants", {
+    skip_if_not_installed("coloc")
+    ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    bf1 <- matrix(c(2, 0.5, -1), 1L, 3L, dimnames = list(NULL, ids))
+    bf2 <- matrix(c(1.5, 0.2, -0.5), 1L, 3L, dimnames = list(NULL, ids))
+    res <- suppressWarnings(coloc::coloc.bf_bf(bf1, bf2))
+    out <- .crPivotColocResults(res$results, 1L)
+    expect_equal(out[[1L]]$variant_id, ids)
+    expect_equal(sum(out[[1L]]$SNP.PP.H4), 1, tolerance = 1e-8)
+})
+
 test_that(".crPivotColocResults: empty results give empty variant tables", {
     out <- .crPivotColocResults(NULL, 2L)
     expect_length(out, 2L)
@@ -416,22 +507,83 @@ test_that("validity names missing pair columns", {
 
 test_that("validity names missing posterior columns", {
     bad <- ColocResult(.cr_pairs(), .cr_variants())
-    mcols(bad)$PP.H4.abf <- NULL
+    flat <- unlist(bad$pairs, use.names = FALSE)
+    flat$PP.H4.abf <- NULL
+    md <- mcols(bad)
+    md$pairs <- IRanges::relist(flat, bad$pairs)
     expect_error(
-        methods::validObject(bad),
+        {
+            mcols(bad) <- md
+            methods::validObject(bad)
+        },
         "missing posterior columns: .*missing elements \\{'PP.H4.abf'\\}"
     )
 })
 
-test_that("validity names elements whose variants lack SNP.PP.H4", {
-    # The expectation wraps the ASSIGNMENT: `[[<-` on the GRangesList
-    # re-validates, so the object never survives long enough for a separate
-    # validObject() call to see it.
+test_that("validity names pairs whose SNP.PP.H4 misses their variants", {
     bad <- ColocResult(.cr_pairs(), .cr_variants())
+    flat <- unlist(bad$pairs, use.names = FALSE)
+    flat$SNP.PP.H4 <- IRanges::NumericList(c(0.5, 0.5))
+    md <- mcols(bad)
+    md$pairs <- IRanges::relist(flat, bad$pairs)
     expect_error(
-        mcols(bad[[1L]])$SNP.PP.H4 <- NULL,
-        "have no SNP.PP.H4 column in their variant metadata"
+        {
+            mcols(bad) <- md
+            methods::validObject(bad)
+        },
+        "not aligned to their element's variants"
     )
+})
+
+test_that("validity refuses pairs that are not one table per element", {
+    bad <- ColocResult(.cr_pairs(), .cr_variants())
+    md <- mcols(bad)
+    md$pairs <- as.list(md$pairs)
+    expect_error(
+        {
+            mcols(bad) <- md
+            methods::validObject(bad)
+        },
+        "must be a SplitDataFrameList"
+    )
+})
+
+test_that("ColocResult: refuses variant tables with different columns", {
+    pairs <- rbind(.cr_pairs(), .cr_pairs(gwasCs = 2L))
+    variants <- .cr_variants(2L)
+    variants[[2L]]$extra <- 1
+    expect_error(ColocResult(pairs, variants), "carry the same columns")
+})
+
+test_that("an element operation that keeps the variants keeps the pairs", {
+    pairs <- rbind(.cr_pairs(), .cr_pairs(gwasCs = 2L, pp4 = 0.3))
+    x <- ColocResult(pairs, .cr_variants(2L, pp = c(0.2, 0.5, 0.3)))
+    same <- endoapply(x, .cr_same)
+    expect_equal(colocPairs(same), colocPairs(x))
+    expect_equal(colocVariants(same), colocVariants(x))
+})
+
+test_that("updateObject folds a result saved with one LD reference", {
+    ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+    ldm <- LdMatrix(
+        matrix(0.1, 3, 3, dimnames = list(ids, ids)) + diag(0.9, 3)
+    )
+    x <- ColocResult(.cr_pairs(), .cr_variants(), ldReference = ldm)
+    saved <- .cr_savedPerPair(x)
+    methods::slot(saved, "ldReference", check = FALSE) <- ldm
+    md <- attr(saved, "elementMetadata")
+    md$ldReference <- NULL
+    attr(saved, "elementMetadata") <- md
+    up <- updateObject(saved)
+    expect_identical(ldReference(up), list(ld1 = ldm))
+    expect_identical(colocPairs(up), colocPairs(x))
+})
+
+test_that("updateObject folds a result saved one element per pair", {
+    pairs <- rbind(.cr_pairs(), .cr_pairs(gwasCs = 2L, pp4 = 0.3))
+    x <- ColocResult(pairs, .cr_variants(2L))
+    expect_identical(updateObject(.cr_savedPerPair(x)), x)
+    expect_identical(updateObject(x), x)
 })
 
 

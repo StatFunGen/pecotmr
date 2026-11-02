@@ -72,7 +72,7 @@ test_that("parseVariantId: a chrom/pos/A2/A1 frame is read in UCSC style", {
     expect_equal(attr(res, "convention")$hasChr, TRUE)
 })
 
-test_that("parseVariantId: data.frame input with >=4 columns assigns positional names", {
+test_that("parseVariantId names a 4+ column data frame's columns by position", {
     df <- data.frame(
         c1 = "1",
         c2 = "100",
@@ -94,7 +94,7 @@ test_that("parseVariantId: data.frame input with >=4 columns assigns positional 
 # .repairVariantIds
 # ===========================================================================
 
-test_that(".repairVariantIds: rebuilds a tag-allele id from the allele columns", {
+test_that(".repairVariantIds rebuilds a tag-allele id from allele columns", {
     ids <- c("chr21:13988152:INS:T", "chr21:13988153:DEL:T")
     expect_equal(
         pecotmr:::.repairVariantIds(ids, A2 = c("A", "GT"), A1 = c("AT", "G")),
@@ -127,7 +127,7 @@ test_that(".repairVariantIds: preserves the ids' own naming convention", {
     )
 })
 
-test_that(".repairVariantIds: keeps the id when the alleles cannot replace it", {
+test_that(".repairVariantIds keeps an id the alleles cannot replace", {
     ids <- c("chr1:100:INS:T", "chr1:200:INS:T", "chr1:300:INS:T")
     expect_equal(
         pecotmr:::.repairVariantIds(
@@ -469,7 +469,7 @@ test_that("matchVariants takes GRanges of variants", {
     )
 })
 
-test_that("matchVariants matches non-autosomal variants (chrX, chr23 synonym)", {
+test_that("matchVariants matches non-autosomal variants (chrX as chr23)", {
     m <- pecotmr:::matchVariants(
         c("chrX:100:A:G", "chr23:200:C:T"),
         c("X:100:A:G", "X:200:C:T")
@@ -518,7 +518,7 @@ test_that("matchVariants accepts data.frame (chrom/pos/A2/A1) input", {
     expect_equal(m$sign, 1)
 })
 
-test_that("matchVariants allowFlip = FALSE matches exact alleles only (no swap)", {
+test_that("matchVariants(allowFlip = FALSE) matches exact alleles only", {
     # chr-prefix / separator still reconcile ...
     m1 <- pecotmr:::matchVariants(
         "chr1:100:A:G",
@@ -566,7 +566,7 @@ test_that("harmonizeAlleles warns and returns empty when nothing overlaps", {
     expect_equal(attr(res, "qcCounts")$considered, 0L)
 })
 
-test_that("harmonizeAlleles removeUnmatched = FALSE retains unmatched target variants", {
+test_that("harmonizeAlleles(removeUnmatched = FALSE) keeps unmatched rows", {
     tgt <- .vid_df(c("1", "1"), c(100, 200), c("A", "A"), c("G", "G"))
     res <- pecotmr:::harmonizeAlleles(
         tgt,
@@ -603,7 +603,7 @@ test_that("harmonizeAlleles complements colToComplement on an allele swap", {
     expect_equal(res$harmonizedData$z, -2)
 })
 
-test_that("harmonizeAlleles errors when colToFlip / colToComplement are absent", {
+test_that("harmonizeAlleles errors without colToFlip or colToComplement", {
     tgt <- .vid_df("1", 100, "A", "G")
     expect_error(
         pecotmr:::harmonizeAlleles(
@@ -637,7 +637,7 @@ test_that("harmonizeAlleles errors when too few variants clear matchMinProp", {
     )
 })
 
-test_that("harmonizeAlleles errors on duplicate variant IDs when removeDups = FALSE", {
+test_that("harmonizeAlleles errors on duplicate ids when removeDups = FALSE", {
     tgt <- .vid_df(c("1", "1"), c(100, 100), c("A", "A"), c("G", "G"))
     expect_error(
         pecotmr:::harmonizeAlleles(
@@ -649,7 +649,7 @@ test_that("harmonizeAlleles errors on duplicate variant IDs when removeDups = FA
     )
 })
 
-test_that("harmonizeAlleles removeDups = TRUE drops duplicates with a warning", {
+test_that("harmonizeAlleles(removeDups = TRUE) drops duplicates, warning", {
     tgt <- .vid_df(c("1", "1"), c(100, 100), c("A", "A"), c("G", "G"))
     expect_warning(
         res <- pecotmr:::harmonizeAlleles(
@@ -825,7 +825,8 @@ test_that("harmonizeAlleles: strips a conflicting variant_id from target", {
         matchMinProp = 0
     )
     expect_equal(nrow(res$harmonizedData), 2L)
-    # The input variant_id was stripped; the returned id is rebuilt from QC'd alleles.
+    # The input variant_id was stripped; the returned id is rebuilt from QC'd
+    # alleles.
     expect_false(any(c("old1", "old2") %in% res$harmonizedData$variant_id))
 })
 
@@ -939,14 +940,47 @@ test_that(".ucscRanges merges two spellings of one chromosome", {
     expect_identical(unname(GenomeInfoDb::genome(out)), c("hg38", "hg38"))
 })
 
-test_that(".ucscEntries renames every element and keeps a NULL one", {
-    out <- pecotmr:::.ucscEntries(list(
+test_that(".canonEntries renames every element and keeps a NULL one", {
+    out <- pecotmr:::.canonEntries(list(
         a = GenomicRanges::GRanges("22", IRanges::IRanges(1L, width = 1L)),
         b = NULL
     ))
     expect_identical(names(out), c("a", "b"))
     expect_identical(as.character(GenomicRanges::seqnames(out$a)), "chr22")
     expect_null(out$b)
+})
+
+test_that("alleles enter in upper case; labels keep their spelling", {
+    # A lowercase allele column made a row's id disagree with its alleles once
+    # harmonization uppercased them, and failed exact joins on either.
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = "rs1a",
+        A1 = "g",
+        A2 = "a"
+    )
+    out <- pecotmr:::.canonEntries(list(gr))[[1L]]
+    expect_identical(out$A1, "G")
+    expect_identical(out$A2, "A")
+    expect_identical(out$SNP, "rs1a")
+    # The id utilities agree: parsed and rendered alleles are upper case.
+    parsed <- parseVariantId(c("chr1:100:a:g", "rs1"))
+    expect_identical(parsed$A2, c("A", NA))
+    expect_identical(parsed$A1, c("G", NA))
+    expect_identical(
+        pecotmr:::formatVariantId("1", 100L, "a", "g"),
+        "chr1:100:A:G"
+    )
+    expect_identical(
+        normalizeVariantId(c("1:100:a:g", "rs1")),
+        c("chr1:100:A:G", "rs1")
+    )
+    df <- parseVariantId(data.frame(chrom = 1, pos = 100, A2 = "a", A1 = "g"))
+    expect_identical(c(df$A2, df$A1), c("A", "G"))
+    expect_identical(
+        pecotmr:::detectVariantConvention("chr1:100_a_g")$alleleSep,
+        "_"
+    )
 })
 
 test_that(".ucscExperiment renames an experiment's rowRanges only", {
@@ -964,6 +998,35 @@ test_that(".ucscExperiment renames an experiment's rowRanges only", {
     expect_identical(GenomeInfoDb::seqlevels(out), "chrX")
     expect_identical(SummarizedExperiment::assay(out), m)
     expect_identical(pecotmr:::.ucscExperiment(out), out)
+})
+
+test_that(".canonExperiment also puts a panel's alleles in upper case", {
+    # A panel built outside pecotmr reaches every pipeline through .asLdRef(),
+    # and a QtlDataset's genotypes through its constructor; both land here.
+    m <- matrix(1, 1L, 1L, dimnames = list("v", "s"))
+    panel <- SummarizedExperiment::SummarizedExperiment(
+        list(x = m),
+        rowRanges = GenomicRanges::GRanges(
+            "22",
+            IRanges::IRanges(9L, width = 1L),
+            A1 = "g",
+            A2 = "a"
+        )
+    )
+    out <- pecotmr:::.asLdRef(panel)
+    mc <- S4Vectors::mcols(SummarizedExperiment::rowRanges(out))
+    expect_identical(c(mc$A1, mc$A2), c("G", "A"))
+    expect_identical(GenomeInfoDb::seqlevels(out), "chr22")
+    expect_identical(SummarizedExperiment::assay(out), m)
+    # An experiment with no alleles, a phenotype's, is only renamed; one
+    # with no rowRanges at all (QtlDataset accepts it) passes through.
+    plain <- SummarizedExperiment::SummarizedExperiment(
+        list(x = m),
+        rowRanges = GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 1L))
+    )
+    expect_identical(pecotmr:::.canonExperiment(plain), plain)
+    bare <- SummarizedExperiment::SummarizedExperiment(list(x = m))
+    expect_identical(pecotmr:::.canonExperiment(bare), bare)
 })
 
 # ===========================================================================

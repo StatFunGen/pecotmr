@@ -26,9 +26,11 @@ NULL
 #'   panel, subsets freely.
 #' @slot ldMatrixList For g-LDSC: a list of per-block LD correlation (R)
 #'   matrices used to compute the FGLS residual covariance, kept when the
-#'   scores were built from \code{LdMatrix} blocks. Empty for a scores-only
-#'   object, and for one built from a genotype panel, which reads each
-#'   block's LD from the panel instead (see \code{\linkS4class{LdStatistic}}).
+#'   scores were built from \code{LdMatrix} blocks, each stored packed (its
+#'   upper triangle) and handed out whole by \code{\link{ldMatrixList}}.
+#'   Empty for a scores-only object, and for one built from a genotype
+#'   panel, which reads each block's LD from the panel instead (see
+#'   \code{\linkS4class{LdStatistic}}).
 #' @export
 setClass(
     "LdScore",
@@ -114,9 +116,40 @@ LdScore <- function(
         ldBlocks = .asLdBlockRanges(ldBlocks),
         nSamples = as.integer(nSamples),
         inSample = isTRUE(inSample),
-        ldMatrixList = ldMatrixList
+        ldMatrixList = map(ldMatrixList, .ldScorePackedBlock)
     )
 }
+
+# A stored block with its LD matrix packed (.packedLd()), or unpacked
+# (.unpackedLd()) to hand out or compute with.
+# @noRd
+.ldScorePackedBlock <- function(block) {
+    list_assign(block, R = .packedLd(block$R))
+}
+
+# @noRd
+.ldScoreUnpackedBlock <- function(block) {
+    list_assign(block, R = .unpackedLd(block$R))
+}
+
+# An LdScore saved before its block matrices were stored packed has them
+# packed.
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "LdScore",
+    function(object, ..., verbose = FALSE) {
+        object <- methods::callNextMethod()
+        blocks <- object@ldMatrixList
+        packed <- map(blocks, .ldScorePackedBlock)
+        if (identical(packed, blocks)) {
+            return(object)
+        }
+        object@ldMatrixList <- packed
+        object
+    }
+)
 
 #' @importFrom checkmate assertCount assertFlag
 #' @title Build an LdScore from an LD reference
@@ -286,7 +319,7 @@ buildLdScore <- function(
 
 # @noRd
 .ldScoreKeepMatrix <- function(block, snpIdx) {
-    list(R = block$R, snpIdx = as.integer(snpIdx))
+    list(R = .packedLd(block$R), snpIdx = as.integer(snpIdx))
 }
 
 # The conventional LDSC heteroskedasticity weight, with the score floored at
@@ -345,7 +378,7 @@ setMethod("show", "LdScore", function(object) {
 
 # @noRd
 .ldScoreStoredBlock <- function(block) {
-    list(idx = block$snpIdx, R = block$R)
+    list(idx = block$snpIdx, R = .unpackedLd(block$R))
 }
 
 # ---- subsetting -------------------------------------------------------------
@@ -371,7 +404,7 @@ setMethod("extractROWS", "LdScore", function(x, i) {
 #' @export
 setMethod("ldMatrixList", "LdScore", function(x) {
     if (is.null(x@ldReference)) {
-        return(x@ldMatrixList)
+        return(map(x@ldMatrixList, .ldScoreUnpackedBlock))
     }
     map(.ldScoreBlocks(x), .ldScorePanelMatrix, ldReference = x@ldReference)
 })

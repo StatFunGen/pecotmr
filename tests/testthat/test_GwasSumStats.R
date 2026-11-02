@@ -639,7 +639,7 @@ test_that("combineGwasSumStats() row-binds per-block pieces in order", {
 })
 
 
-test_that("combineGwasSumStats() accepts a list and passes a lone input through", {
+test_that("combineGwasSumStats() takes a list, passes a lone input through", {
     a <- makeGwasBlock("chr1_1_1000", 100L)
     b <- makeGwasBlock("chr1_1001_2000", 1100L)
     expect_identical(
@@ -945,7 +945,7 @@ test_that("GwasSumStats() keeps the caller's metadata and QC options", {
 # nCase and nControl
 # ===========================================================================
 
-test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)", {
+test_that("GwasSumStats nCase and nControl are optional, absent by default", {
     gr <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(
@@ -971,7 +971,8 @@ test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)
     expect_false(any(
         c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
     ))
-    g1 <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
+    caseControlArgs <- c(base, list(nCase = 500, nControl = 1500))
+    g1 <- exec(GwasSumStats, !!!caseControlArgs)
     expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
     expect_equal(g1$nCase, 500)
     expect_equal(g1$nControl, 1500)

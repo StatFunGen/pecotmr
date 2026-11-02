@@ -8,7 +8,7 @@ ridgeRssWeights(
   stat,
   ldReference,
   s = c(0.2, 0.5, 0.9, 1),
-  selection = c("ldQuadratic", "minFbeta"),
+  selection = c("heldOut", "ldQuadratic", "minFbeta"),
   fitRetention = c("none", "slim", "full"),
   methodArgs = PenalizedRssOptions()
 )
@@ -29,8 +29,13 @@ standardized genotypes, never formed as a matrix.}
 \item{s}{Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
 0.5, 0.9, 1.0)}.}
 
-\item{selection}{Selection strategy: \code{"ldQuadratic"} (default) or
-\code{"minFbeta"}.}
+\item{selection}{How the returned candidate is chosen (see Details of
+\code{\link{lassosumRssWeights}}). \code{"heldOut"} (default) scores
+every candidate on held-out summary statistics and needs the
+reference's sample size, so an \code{\link{LdMatrix}} must record
+\code{nSamples}. \code{"ldQuadratic"} is lassosum's pseudovalidation and
+needs the \code{fdrtool} package. \code{"minFbeta"} picks the smallest
+objective, for debugging.}
 
 \item{fitRetention}{How much of the search is kept as the \code{"fit"}
 attribute of the returned weights. \code{"none"} (default) attaches
@@ -57,7 +62,17 @@ Fits ridge regression on the RSS objective, \code{\link{enetRssWeights}}
 at \code{alpha = 0}: the penalty is \eqn{\lambda \beta^T \beta}, and the
 default lambda path runs from 0.1 to 100. Searches over a shrinkage grid
 \code{s} as well, whose own ridge term \eqn{s \beta^T \beta} adds to it;
-model selection uses LD-quadratic pseudovalidation by default.
+model selection uses held-out summary statistics by default (see
+\code{\link{lassosumRssWeights}}).
+}
+\details{
+Every fit is exact: the ridge has the closed form
+\eqn{((1 - s) R + (s + \lambda) I)^{-1} z}, read from one
+eigendecomposition of the window's LD that every shrinkage level, lambda
+and held-out refit shares (for a genotype reference, from the singular
+value decomposition of its standardized genotypes, never forming the LD).
+The coordinate-descent settings \code{thr} and \code{maxiter} in
+\code{methodArgs} therefore do not apply.
 }
 \examples{
 data(eqtlRegionExample)
@@ -71,5 +86,5 @@ stat <- list(
   n = rep(nrow(X), ncol(X)),
   variantNames = colnames(X)
 )
-ridgeRssWeights(stat, LdMatrix(cor(X)))
+ridgeRssWeights(stat, LdMatrix(cor(X), nSamples = nrow(X)))
 }

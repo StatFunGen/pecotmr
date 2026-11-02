@@ -366,7 +366,8 @@ test_that("loadGwasSumStatsFromManifest reads per-variant N_CASE/N_CONTROL", {
     expect_s4_class(obj, "GwasSumStats")
     mc <- S4Vectors::mcols(obj[[1L]])
     expect_true(all(c("N_CASE", "N_CONTROL") %in% colnames(mc)))
-    expect_false("N" %in% colnames(mc)) # effective N is derived later by summaryStatsQc
+    # effective N is derived later by summaryStatsQc
+    expect_false("N" %in% colnames(mc))
     expect_equal(as.integer(mc$N_CASE), rep(1000L, 5))
 })
 
@@ -387,7 +388,8 @@ test_that(".resolveSumstatCols derives the Wald z from beta/se", {
     df$z <- NULL # no z column
     out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl")
     expect_equal(out$Z, .toyGwasDf(4)$z) # Z == beta/se
-    expect_true(all(c("BETA", "SE") %in% colnames(out))) # beta/se still attached
+    # beta/se still attached
+    expect_true(all(c("BETA", "SE") %in% colnames(out)))
 })
 
 test_that("an af: key is directional AF; a maf: key is directionless", {
@@ -479,7 +481,8 @@ test_that(".resolveSumstatCols allows no N when allowNoN = TRUE", {
     df$n_sample <- NULL # no per-variant N, no counts
     out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl", allowNoN = TRUE)
     expect_false("N" %in% colnames(out)) # built without N ...
-    expect_true(all(c("SNP", "A1", "A2", "Z") %in% colnames(out))) # ... core kept
+    # ... core kept
+    expect_true(all(c("SNP", "A1", "A2", "Z") %in% colnames(out)))
 })
 
 test_that("loadGwasSumStatsFromManifest builds from a study nSample scalar", {
@@ -1515,10 +1518,11 @@ test_that("GWAS-VCF without SS, or without ES/SE, errors", {
     # Each case drops fields the reader needs; the error names them.
     cases <- list(SS = list(dropSs = TRUE), `ES and SE` = list(dropEs = TRUE))
     for (field in names(cases)) {
+        caseArgs <- cases[[field]]
         vcf <- exec(
             .writeGwasVcf,
             tempfile(tmpdir = tmp, fileext = ".vcf"),
-            !!!cases[[field]]
+            !!!caseArgs
         )
         manifest <- data.frame(
             study = "study1",

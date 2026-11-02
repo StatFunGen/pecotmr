@@ -39,9 +39,12 @@ was narrowed since that fit warns (condition class
 variants, so its weights are not renormalized over the variants kept.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
-\code{\link{causalInferencePipeline}}). When supplied, the per-(trait,
-context) Z is used as the \code{z_gene} input to \code{ctwas_sumstats} so
-it is not recomputed.}
+\code{\link{causalInferencePipeline}}). When supplied, each weighted
+gene's Z -- the row of its \code{(qtlStudy, context, trait, method)}
+for the GWAS study of \code{gwasSumStats} -- is used as the
+\code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
+Every weighted gene needs exactly one; rows for other genes, methods or
+GWAS studies are ignored.}
 
 \item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the genes'
 own fine-mapping, whose per-variant PIP and credible-set membership the

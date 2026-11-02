@@ -35,7 +35,7 @@ by `(study, context, trait, method)`, one element per tuple).
 |---|---|
 | `QtlDataset` | Univariate: LASSO, elastic net, ridge, mr.ash, MCP, SCAD, L0Learn, Bayesian alphabet, DPR. Multivariate: mr.mash, mvsusie |
 | `MultiStudyQtlDataset` | Iterates over embedded studies; same methods as `QtlDataset` |
-| `QtlSumStats` | RSS-only: LASSO, elastic net, ridge, mr.ash, MCP, SCAD, L0Learn, DPR, PRS-CS, P+T. Multivariate: mr.mash, mvsusie |
+| `QtlSumStats` | RSS-only: LASSO, elastic net, ridge, mr.ash, MCP, SCAD, L0Learn, Bayesian alphabet, DPR, PRS-CS, LDpred2, P+T. Multivariate: mr.mash, mvsusie |
 
 ```{r load-packages}
 library(pecotmr)
@@ -142,9 +142,10 @@ to the call for a single QtlDataset.
 ## Multiple weight methods at once
 
 Pass a character vector to fit several methods on the same fold split and
-return them as separate `(method)` rows in the collection. Fine-mapping methods
-(`susie`, `susieInf`, `susieAsh`, `mvsusie`) can only be included if their
-results are present in the object passed to the `fineMappingResult` argument:
+return them as the methods of each gene's row in the collection. Fine-mapping
+methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) can only be included if
+their results are present in the object passed to the `fineMappingResult`
+argument:
 
 ```{r multimethod, eval=FALSE}
 # TWAS-regression only — no fineMappingResult needed.
@@ -239,9 +240,10 @@ The families, and the `methods =` name each answers to:
 | Family | `methods =` | Function |
 |---|---|---|
 | Penalized regression | `lasso`, `enet`, `ridge`, `mcp`, `scad`, `l0learn` | `lassoWeights()`, `enetWeights()`, `ridgeWeights()`, … |
-| Bayesian alphabet | `bayesA` … `bayesR`, `bLasso` | `bayesAWeights()`, `bLassoWeights()`, … |
+| Bayesian alphabet | `bayesA` … `bayesR` | `bayesAWeights()`, `bayesARssWeights()`, … |
 | Dirichlet process regression | `dprVb`, `dprGibbs`, `dprAdaptiveGibbs` | `dprVbWeights()`, `dprGibbsWeights()`, … |
 | PRS-CS | `prsCs` (sumstats input only) | `prsCsWeights()` |
+| LDpred2 | `ldpred2Auto`, `ldpred2Grid` (sumstats input only) | `ldpred2AutoWeights()`, `ldpred2GridWeights()` |
 | mr.mash / mr.ash | `mrmash`, `mrash` | `mrmashWeights()`, `mrashWeights()` |
 | SuSiE family | `susie`, `susieInf`, `susieAsh`, `mvsusie`, `fsusie` | `susieWeights()`, `mvsusieWeights()`, … |
 
@@ -253,25 +255,74 @@ Most families have an RSS counterpart taking summary statistics and an LD
 reference instead of `X`/`y` — `lassosumRssWeights()` for `lasso`,
 `enetRssWeights()` and `ridgeRssWeights()` for `enet` and `ridge`,
 `mcpRssWeights()`, `sdprWeights()` (SDPR) for `dprGibbs`, `susieRssWeights()`,
-and so on; the Bayesian alphabet, `dprVb` and `dprAdaptiveGibbs` have none.
+`bayesARssWeights()` through `bayesRRssWeights()` for the Bayesian alphabet,
+and so on; `dprVb` and `dprAdaptiveGibbs` have none.
 `enet` mixes the lasso and ridge penalties at `alpha = 0.5` on either input;
 `methods = list(enet = list(alpha = 0.3))` sets another mixing. Those are what
 `twasWeightsPipeline()` calls when the input is a `QtlSumStats`. The LD
 reference is the same `ldReference` the rest of the package takes: a genotype
 panel from `readGenotypes()`, a `GenotypeMixture` or an `LdMatrix`, matched to
-the statistics by their `variantNames`. lassosum, the penalized methods, PRS-CS
-and SDPR use a genotype reference through its standardized genotypes without
-forming the LD matrix; the mr.ash and mr.mash engines take the matrix, which is
+the statistics by their `variantNames`. lassosum, the penalized methods,
+PRS-CS, SDPR and pecotmr's own Bayesian alphabet sampler use a genotype
+reference through its standardized genotypes without forming the LD matrix;
+the mr.ash and mr.mash engines, qgg and hibayes take the matrix, which is
 formed over the statistics' variants.
+
+Each Bayesian alphabet method runs on several engines, chosen with `backend`.
+On individual-level data, `bayesB` defaults to BGLR and the others to qgg,
+with hibayes available for all. On summary statistics, a genotype reference
+defaults to pecotmr's sampler, and an `LdMatrix` to qgg (`bayesA`, `bayesC`,
+`bayesN`, `bayesR`) or hibayes (`bayesB`, `bayesL`). The pipeline takes the
+choice per method: `twasWeightsPipeline(..., backend = c(bayesR = "hibayes"))`.
+LDpred2 defaults the same way, to pecotmr's sampler on a genotype reference
+and to bigsnpr on an `LdMatrix`. `lasso` also runs on bigsnpr's lassosum2
+(`backend = "bigsnpr"`), which takes its own settings in `BigsnprOptions()`.
+
+Every alphabet engine reads the LD shrunk toward the identity,
+`shrinkCorr` R + (1 - `shrinkCorr`) I, with `shrinkCorr = 0.95` by default,
+the LDpred2 vignette's: a reference with fewer people than the window has
+variants lacks directions the statistics have, and without shrinkage the
+alphabet's effects can grow without bound along them. A small or mismatched
+reference does better with less, down to 0.4; the study's own genotypes as
+the reference need none. pecotmr's sampler also reads the statistics through
+SDPR's likelihood by default: the LD as R (R + aI)^-1^ R and the marginal
+effects as R (R + aI)^-1^ b, with a = 0.1, which drops the part of the
+effects the reference LD cannot explain, the part those effects grow along.
+`BayesAlphabetRssOptions(ldProjection = NULL)` turns it off.
+
+PRS-CS, SDPR, pecotmr's Bayesian alphabet sampler and LDpred2 share
+LDpred2's sampler options. `nChains` runs several chains and averages those
+that LDpred2's own filter keeps; `raoBlackwell = TRUE` averages each
+effect's conditional posterior mean rather than its draws; `shrinkCorr`
+shrinks the LD toward the identity (PRS-CS, the alphabet and LDpred2); and
+`allowJumpSign = FALSE` refuses a draw whose sign differs from the effect's
+(the alphabet and LDpred2). Each method takes them in its options, as in
+`prsCsWeights(stat, ldReference, methodArgs = PrsCsOptions(nChains = 4))`;
+the alphabet takes `shrinkCorr` as an argument of its own, since it applies
+to every engine.
 
 Several of these engines estimate more than the weights, and
 `fitRetention = "slim"` keeps it as the `"fit"` attribute of the weights they
 return: SDPR's heritability estimate (`h2`), PRS-CS's posterior shrinkage
-parameters (`psiEst`, `sigmaEst`, `phiEst`), and for lassosum and the
-penalized methods the search itself --- `path` has one row per LD shrinkage
-`s` and penalty `lambda`, with the objective (`fbeta`), `loss`, convergence
-flag and number of non-zero weights, and marks the candidate returned.
-`fitRetention = "full"` adds each candidate's coefficients.
+parameters (`psiEst`, `sigmaEst`, `phiEst`), LDpred2-auto's chains (each
+one's starting `p`, its estimates of `p` and `h2`, and whether it was kept)
+with the inclusion probabilities, LDpred2-grid's grid of `p`, `h2` and
+`sparse`, and for lassosum and the penalized methods the search itself ---
+`path` has one row per LD shrinkage `s` and penalty `lambda`, with the
+objective (`fbeta`), `loss`, convergence flag and number of non-zero
+weights, and marks the candidate returned. `fitRetention = "full"` adds each
+candidate's coefficients.
+
+These methods, and LDpred2-grid, pick the returned candidate on held-out
+summary statistics:
+the statistics are split into training and held-out parts, the path is refit
+on each training part, and every candidate is scored on the held-out part.
+The scoring shrinks the LD toward the identity by an amount set by the
+reference's sample size, because a reference smaller than the number of
+variants misses directions of the true LD, and the least-penalized fits put
+weight exactly there. An `LdMatrix` therefore needs `nSamples`, and the
+splits are random, so `set.seed()` makes the weights reproducible.
+`selection = "ldQuadratic"` is lassosum's own pseudovalidation instead.
 
 ```{r rss-fit}
 # An LdMatrix is keyed by chrom:pos:A2:A1 variant ids.
@@ -283,7 +334,12 @@ stat <- list(
     n = rep(n, p),
     variantNames = ids
 )
-w <- lassosumRssWeights(stat, LdMatrix(R), fitRetention = "slim")
+set.seed(1)
+w <- lassosumRssWeights(
+    stat,
+    LdMatrix(R, nSamples = n),
+    fitRetention = "slim"
+)
 head(attr(w, "fit")$path)
 ```
 
@@ -362,32 +418,34 @@ twasWeightsPipeline(
 
 ## Reading the result
 
-`TwasWeights` is a `GRangesList` subclass keyed by the 4-tuple
-`(study, context, trait, method)` — one element per tuple, holding the
-variants its weights are aligned to. The tuple and the per-tuple payloads are
-`mcols()` columns, reached with `$`:
+`TwasWeights` is a `GRangesList` subclass with one element per gene — its
+`(study, context, trait)`, plus the group of a joint fit — holding the
+variants its methods' weights are aligned to. A gene's methods are an axis of
+its row, listed by `methodNames()`; the identity is in `mcols()` columns,
+reached with `$`:
 
 ```{r tw-shape}
 tw
 colnames(tw)
-tw$method
+methodNames(tw)
 ```
 
-`as.data.frame()` gives the long per-variant view across every method at once,
-which is usually what you want for inspection:
+`as(tw, "GRanges")` gives the long per-variant view across every method at
+once — one range per variant and method, carrying its `weight` and
+`.method` — which is usually what you want for inspection:
 
 ```{r tw-table}
-head(as.data.frame(tw), 3)
+head(as.data.frame(as(tw, "GRanges")), 3)
 ```
 
-To pull one method's weights, pass the tuple to the accessor:
+To pull one method's weights, pass the gene and the method to the accessor:
 
 ```{r tw-one-tuple}
 key <- list(
     studyName = tw$study[[1L]],
     context = tw$context[[1L]],
     trait = tw$trait[[1L]],
-    method = tw$method[[1L]]
+    method = methodNames(tw)[[1L]]
 )
 w <- do.call(weights, c(list(tw), key))
 length(w)
@@ -432,9 +490,10 @@ writeBed(tw, "weights.bed.gz")
 ```
 
 Both export the **full-data fit only**, and refuse an object that has none —
-`crossValidationParam = CrossValidationParam(fitFullData = FALSE)` produces rows
-holding nothing but cross-validation results, and those cannot be published:
-they describe held-out folds, and fold membership is sample-level information.
+`crossValidationParam = CrossValidationParam(fitFullData = FALSE)` produces
+entries holding nothing but cross-validation results, and those cannot be
+published: they describe held-out folds, and fold membership is sample-level
+information.
 For the same reason neither exporter writes CV metrics. Those stay on the
 object:
 
@@ -449,7 +508,7 @@ cv <- cvResult(
 cv$performance # per-method metric matrix: corr, rsq, adj_rsq, pval, RMSE, MAE
 ```
 
-Fine-mapping-derived rows (`susie`, `susie_inf`, `susie_ash`, `mvsusie`,
+Fine-mapping-derived entries (`susie`, `susieInf`, `susieAsh`, `mvsusie`,
 `fsusie`) are skipped with a message by **both** exporters, because their
 "weights" are the fine-mapping posterior re-expressed — export the
 fine-mapping result instead, which carries the posterior, its standard error

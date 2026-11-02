@@ -239,6 +239,31 @@ setMethod(
     methods::initialize(handle, snpInfo = slice(si, keepIdx))
 }
 
+# The columns of a handle's variant table that reading its genotypes needs:
+# each variant's position in its file (fileIdx) and, for BGEN, the record
+# and allele it reads. A handle over one file per chromosome also keeps CHR,
+# which routes each variant to its file.
+.HANDLE_READ_COLUMNS <- c("fileIdx", "bgen_offset", "bgen_size", "bgen_allele")
+
+# `handle` with only the columns of its variant table that reading needs
+# (.HANDLE_READ_COLUMNS), as a panel's seed keeps it: the panel's rowRanges
+# describe its variants.
+# @noRd
+.readingHandle <- function(handle) {
+    si <- snpInfo(handle)
+    routed <- length(.genotypeChromPaths(handle)) > 0L
+    drop <- setdiff(names(si), c(if (routed) "CHR", .HANDLE_READ_COLUMNS))
+    if (length(drop) == 0L) {
+        return(handle)
+    }
+    # Set as a slot, as initialize() would refuse a handle saved in a format
+    # no handle reads today, which must still be cut so the panel over it
+    # can be read again (.updatePanel()). The replacement form copies the
+    # handle: `slot<-`() called directly would cut the caller's own.
+    methods::slot(handle, "snpInfo") <- select(si, -all_of(drop))
+    handle
+}
+
 #' @keywords internal
 .makePlink2Handle <- function(path) {
     if (!requireNamespace("pgenlibr", quietly = TRUE)) {
@@ -307,24 +332,35 @@ setMethod(
 #' @importFrom purrr map2 map set_names
 #' @keywords internal
 extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
+    # An empty request is answered without reaching a reader, which need not
+    # accept one.
+    if (length(snpIdx) == 0L) {
+        return(.emptyBlockSe(sampleIds(handle)))
+    }
+    geno <- .handleDosage(handle, snpIdx)
+    .blockGenotypesToSe(
+        if (meanImpute) .meanImputeGeno(geno) else geno,
+        handle,
+        snpIdx
+    )
+}
+
+# The samples x variants dosages of a handle's variants at `snpIdx` (never
+# an empty request), as read: neither imputed nor labelled. It reads only
+# the columns of the handle's variant table that find each variant in its
+# file (.HANDLE_READ_COLUMNS), which are all a panel's seed keeps.
+# @noRd
+.handleDosage <- function(handle, snpIdx) {
     # One-file-per-chromosome handle: route by chromosome to the right file.
     # `.genotypeChromPaths` tolerates handles deserialized before the slot
     # existed (treated as single-file).
     if (length(.genotypeChromPaths(handle)) > 0L) {
-        return(.extractBlockSharded(handle, snpIdx, meanImpute = meanImpute))
-    }
-    # An empty request is answered without reaching a reader, which need not
-    # accept one, as the sharded branch above already answers it.
-    if (length(snpIdx) == 0L) {
-        return(.emptyBlockSe(sampleIds(handle)))
+        return(.handleDosageSharded(handle, snpIdx))
     }
     # Read ascending, then put the columns back in the requested order. See
     # .restoreRequestedOrder() for why this is not merely tidiness.
     ord <- order(.genotypeFilePos(handle, snpIdx))
-    raw <- .extractBlockByFormat(handle, snpIdx[ord])
-    ordered <- .restoreRequestedOrder(raw, ord)
-    geno <- if (meanImpute) .meanImputeGeno(ordered) else ordered
-    .blockGenotypesToSe(geno, handle, snpIdx)
+    .restoreRequestedOrder(.extractBlockByFormat(handle, snpIdx[ord]), ord)
 }
 
 # Position of each requested variant in the underlying file. snpInfo rows are
@@ -384,7 +420,10 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     .withLdProjection(
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
-            rowRanges = .genotypeSnpRanges(genotypes, rownames(dosage)),
+            rowRanges = .genotypeSnpRanges(
+                genotypes,
+                .panelRowNames(snpInfo(genotypes))
+            ),
             colData = cd,
             metadata = list(genotypeSource = .genotypeSourceRecord(genotypes))
         ),
@@ -424,23 +463,85 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # =============================================================================
 
 # `panel` as a panel built today: read again from its files when it was
-# saved before the changes above, else `panel` itself -- as for one that
-# reads through no handle (a VCF, GDS or PLINK1 panel built since, or one
-# held in memory). A bare GenotypeHandle, which an LD reference was before
-# it was a panel, is taken as the panel over it.
+# saved before the changes above, else without the copies of its variants'
+# labels a panel saved before this version kept (.slimPanel()) -- as is
+# one that reads through no handle (a VCF, GDS or PLINK1 panel built since,
+# or one held in memory). A bare GenotypeHandle, which an LD reference was
+# before it was a panel, is taken as the panel over it, a mixture has each
+# of its panels slimmed, and an LdMatrix is brought up to date
+# (updateObject()).
 # @noRd
 .updatePanel <- function(panel) {
     panel <- .asLdRef(panel)
+    if (.ldIsMixtureRef(panel)) {
+        return(.slimMixture(panel))
+    }
+    if (.ldIsMatrixRef(panel)) {
+        return(updateObject(panel))
+    }
     handle <- .ldRefHandle(panel)
-    if (is.null(handle)) {
+    if (!is.null(handle)) {
+        source <- .genotypeSourceRecord(handle)
+        recorded <- !is.null(S4Vectors::metadata(panel)$genotypeSource)
+        if (!recorded || is_in(source$format, .DOSAGE_PANEL_FORMATS)) {
+            return(.rereadPanel(panel, source))
+        }
+    }
+    .slimPanel(panel)
+}
+
+# `panel` without the copies of its variants' labels that a panel saved
+# before this version kept: an SNP column repeating its row names, row names
+# on its dosage seed, and the columns of a handle's variant table that
+# reading does not need (.readingHandle()). One that keeps none, and an
+# LdMatrix, are returned as they are.
+# @noRd
+.slimPanel <- function(panel) {
+    if (!methods::is(panel, "RangedSummarizedExperiment")) {
         return(panel)
     }
-    source <- .genotypeSourceRecord(handle)
-    recorded <- !is.null(S4Vectors::metadata(panel)$genotypeSource)
-    if (recorded && !is_in(source$format, .DOSAGE_PANEL_FORMATS)) {
+    rr <- SummarizedExperiment::rowRanges(panel)
+    labelled <- .dropRedundantLabels(rr)
+    if (!identical(labelled, rr)) {
+        SummarizedExperiment::rowRanges(panel) <- labelled
+    }
+    dosage <- .slimPanelDosage(panel)
+    if (is.null(dosage)) {
         return(panel)
     }
-    .rereadPanel(panel, source)
+    SummarizedExperiment::assay(panel, "dosage", withDimnames = FALSE) <-
+        dosage
+    panel
+}
+
+# `panel`'s dosage assay over its seed slimmed (.slimSeed()), the same rows
+# and columns of it; NULL when the seed is slim already or out of reach
+# (.panelSeedIndex()).
+# @noRd
+.slimPanelDosage <- function(panel) {
+    slim <- .slimSeed(.panelSeed(panel))
+    index <- .panelSeedIndex(panel)
+    if (is.null(slim) || is.null(index)) {
+        return(NULL)
+    }
+    whole <- DelayedArray::DelayedArray(slim)
+    if (identical(index, map(dim(whole), seq_len))) {
+        return(whole)
+    }
+    whole[index[[1L]], index[[2L]], drop = FALSE]
+}
+
+# A dosage seed without the copies .slimPanel() drops, or NULL when it keeps
+# none or is not a seed pecotmr builds.
+# @noRd
+.slimSeed <- function(seed) {
+    if (methods::is(seed, "GhSeed")) {
+        return(.slimGhSeed(seed))
+    }
+    if (methods::is(seed, "GenotypeDosageSeed")) {
+        return(.slimDosageSeed(seed))
+    }
+    NULL
 }
 
 # `panel` read again from `source`, the record of where its genotypes come
@@ -569,6 +670,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     .snpInfoRanges(snpInfo(genotypes), variantIds)
 }
 
+# A panel's row names for the variants of table `si`: each file label in
+# the canonical form (an rsID kept as it is). Its seed keeps none: a panel's
+# rowRanges name its rows.
+# @noRd
+.panelRowNames <- function(si) {
+    normalizeVariantId(as.character(si$SNP))
+}
+
 # A panel's variants snpInfo-style, one row per rowRanges element: SNP (the
 # file's own ids), CHR, BP, A1, A2. The inverse of .snpInfoRanges(), so
 # genotypes from any backend answer alike.
@@ -576,7 +685,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 .rangesSnpInfo <- function(gr) {
     mc <- S4Vectors::mcols(gr)
     tibble(
-        SNP = as.character(mc$SNP),
+        SNP = .panelLabels(gr),
         CHR = as.character(seqnames(gr)),
         BP = as.integer(start(gr)),
         A1 = as.character(mc$A1),
@@ -586,18 +695,74 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 # The rowRanges of variants described snpInfo-style (SNP, CHR, BP, A1, A2),
 # named `variantIds`: a handle's, or a VCF, GDS or PLINK1 panel's rows. Every
-# reader spells CHR in UCSC style as it reads the file.
+# reader spells CHR in UCSC style as it reads the file. The file's labels are
+# kept in an SNP column only when some differs from the names they give the
+# rows; otherwise the names are the labels (.panelLabels()).
 # @noRd
 .snpInfoRanges <- function(si, variantIds) {
-    `names<-`(
-        GenomicRanges::GRanges(
-            seqnames = as.character(si$CHR),
-            ranges = IRanges::IRanges(as.integer(si$BP), width = 1L),
-            SNP = as.character(si$SNP),
-            A1 = as.character(si$A1),
-            A2 = as.character(si$A2)
-        ),
-        variantIds
+    labels <- as.character(si$SNP)
+    gr <- GenomicRanges::GRanges(
+        seqnames = as.character(si$CHR),
+        ranges = IRanges::IRanges(as.integer(si$BP), width = 1L),
+        A1 = as.character(si$A1),
+        A2 = as.character(si$A2)
+    )
+    if (!identical(labels, variantIds)) {
+        gr <- .withLabelColumn(gr, labels)
+    }
+    `names<-`(gr, variantIds)
+}
+
+# A panel's rows' file labels: its SNP column where it keeps one, else its
+# row names, which are then those labels.
+# @noRd
+.panelLabels <- function(gr) {
+    labels <- S4Vectors::mcols(gr)$SNP
+    if (is.null(labels)) names(gr) else as.character(labels)
+}
+
+# `gr` (a panel's rowRanges) with its file labels as its first column, SNP,
+# as readers of a panel's variants take them.
+# @noRd
+.withPanelLabels <- function(gr) {
+    if (is_in("SNP", colnames(S4Vectors::mcols(gr)))) {
+        return(gr)
+    }
+    .withLabelColumn(gr, names(gr))
+}
+
+# Panels' rowRanges as one GRanges, the parts' rows in turn. Their file
+# labels are kept in an SNP column only when some differs from its row name,
+# as for one panel (.snpInfoRanges()), so parts that keep the column bind
+# with parts that do not.
+# @noRd
+.bindPanelRanges <- function(grs) {
+    labelledRanges <- unname(map(grs, .withPanelLabels))
+    .dropRedundantLabels(
+        suppressWarnings(exec(c, !!!labelledRanges))
+    )
+}
+
+# `gr` (a panel's rowRanges) without its SNP column when every label in it
+# is its row's name.
+# @noRd
+.dropRedundantLabels <- function(gr) {
+    mc <- S4Vectors::mcols(gr)
+    labels <- mc$SNP
+    if (is.null(labels) || !identical(as.character(labels), names(gr))) {
+        return(gr)
+    }
+    S4Vectors::`mcols<-`(gr, value = mc[setdiff(colnames(mc), "SNP")])
+}
+
+# @noRd
+.withLabelColumn <- function(gr, labels) {
+    S4Vectors::`mcols<-`(
+        gr,
+        value = cbind(
+            S4Vectors::DataFrame(SNP = labels),
+            S4Vectors::mcols(gr, use.names = FALSE)
+        )
     )
 }
 
@@ -635,69 +800,52 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     )
 }
 
-# Extract one chromosome's block from a sharded handle: reslice the handle to
-# that chrom's file + SNP subset and delegate to extractBlockGenotypes.
+# .handleDosage() for a one-file-per-chromosome (sharded) handle. `snpIdx`
+# index its unified variant table; they are grouped by chromosome, each
+# group read from its chromosome's file (.chromDosage()), and the columns
+# put back in the requested order.
 # @noRd
-.extractBlockForChrom <- function(
-    chrom,
-    posInReq,
-    handle,
-    snpIdx,
-    unifiedChr,
-    meanImpute
-) {
+.handleDosageSharded <- function(handle, snpIdx) {
+    unifiedChr <- snpInfo(handle)$CHR
+    groups <- split(seq_along(snpIdx), unifiedChr[snpIdx])
+    blocks <- map2(
+        names(groups),
+        groups,
+        .chromDosage,
+        handle = handle,
+        snpIdx = snpIdx,
+        unifiedChr = unifiedChr
+    )
+    dosageBlocks <- unname(blocks)
+    exec(cbind, !!!dosageBlocks)[,
+        order(unname(list_c(groups))),
+        drop = FALSE
+    ]
+}
+
+# One chromosome's dosages from a sharded handle, read through a transient
+# single-file view of that chromosome's file holding the chromosome's rows of
+# the unified table, so positional backends like PLINK2 stay valid.
+# @noRd
+.chromDosage <- function(chrom, posInReq, handle, snpIdx, unifiedChr) {
     if (!is_in(chrom, names(chromPaths(handle)))) {
         msg <- glue(
             "extractBlockGenotypes: no per-chromosome file for chromosome ",
             "'{chrom}' (have: ",
-            "{str_flatten(names(handle@chromPaths), collapse = ', ')})."
+            "{str_flatten(names(chromPaths(handle)), collapse = ', ')})."
         )
         abort(msg)
     }
     blockGlobal <- which(unifiedChr == chrom) # file-order global indices
-    localIdx <- match(snpIdx[posInReq], blockGlobal)
-    th <- methods::initialize(
+    view <- methods::initialize(
         handle,
-        path = handle@chromPaths[[chrom]],
-        snpInfo = slice(handle@snpInfo, blockGlobal),
+        path = chromPaths(handle)[[chrom]],
+        snpInfo = slice(snpInfo(handle), blockGlobal),
         pgenPtr = NULL,
         # Treated as single-file: the view addresses one chromosome's payload.
         chromPaths = character(0)
     )
-    extractBlockGenotypes(th, localIdx, meanImpute = meanImpute)
-}
-
-# Extract a block from a one-file-per-chromosome (sharded) handle. The global
-# snpIdx index the unified @snpInfo; we group them by chromosome, route each
-# group to its per-chromosome payload via a transient single-file view (with
-# the chromosome-local snpInfo so positional backends like PLINK2 stay valid),
-# then row-bind across chromosomes (samples identical by construction) and
-# restore the requested order. A single-chromosome request -- the common cis
-# case -- returns its one SE directly.
-#' @keywords internal
-.extractBlockSharded <- function(handle, snpIdx, meanImpute = TRUE) {
-    sampleIds <- sampleIds(handle)
-    if (length(snpIdx) == 0L) {
-        return(.emptyBlockSe(sampleIds))
-    }
-    unifiedChr <- snpInfo(handle)$CHR
-    groups <- split(seq_along(snpIdx), unifiedChr[snpIdx])
-    ses <- set_names(
-        map2(
-            names(groups),
-            groups,
-            .extractBlockForChrom,
-            handle = handle,
-            snpIdx = snpIdx,
-            unifiedChr = unifiedChr,
-            meanImpute = meanImpute
-        ),
-        names(groups)
-    )
-    if (length(ses) == 1L) {
-        return(ses[[1L]])
-    }
-    .combineShardedSes(ses, groups)
+    .handleDosage(view, match(snpIdx[posInReq], blockGlobal))
 }
 
 # Empty-block SE (no variants) carrying the handle's sample dimension.
@@ -713,22 +861,6 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         assays = list(dosage = empty),
         rowRanges = GRanges(),
         colData = DataFrame(sampleId = sampleIds, row.names = sampleIds)
-    )
-}
-
-# Combine per-chromosome SEs at the assay/rowRanges level (rbind-ing the SEs
-# trips on disjoint seqlevels) and restore the requested snpIdx order.
-# @noRd
-.combineShardedSes <- function(ses, groups) {
-    ord <- order(unname(list_c(groups)))
-    dosages <- map(ses, .seDosage)
-    combinedDos <- exec(rbind, !!!dosages)[ord, , drop = FALSE]
-    rowRangesList <- unname(map(ses, SummarizedExperiment::rowRanges))
-    combinedGr <- suppressWarnings(exec(c, !!!rowRangesList))[ord]
-    SummarizedExperiment(
-        assays = list(dosage = combinedDos),
-        rowRanges = combinedGr,
-        colData = SummarizedExperiment::colData(ses[[1L]])
     )
 }
 
@@ -980,17 +1112,21 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 #' @importFrom SummarizedExperiment assay
 readBim <- function(bed) {
     bimf <- str_c(.genotypeStem(bed), ".bim")
-    `colnames<-`(
-        vroom(bimf, col_names = FALSE),
+    # Typed columns: left to guess, a column of "T" alleles reads as logical.
+    bim <- `colnames<-`(
+        vroom(bimf, col_names = FALSE, col_types = "ccdicc"),
         c("chrom", "id", "gpos", "pos", "a1", "a0")
     )
+    mutate(bim, a1 = .canonAllele(.data$a1), a0 = .canonAllele(.data$a0))
 }
 
 #' Read a PLINK2 allele frequency file (.afreq or .afreq.zst)
 #'
 #' @param path File prefix (without .afreq extension).
-#' @return A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq,
-#'   obs_ct. alt_freq is the frequency of the A1 (ALT/effect) allele.
+#' @return A data.frame with columns: chrom (as the file spells it), id, A2
+#'   (REF) and A1 (ALT), in upper case as pecotmr holds every allele,
+#'   alt_freq and obs_ct. alt_freq is the frequency of the A1 (ALT/effect)
+#'   allele.
 #' @importFrom vroom vroom
 #' @importFrom archive archive_read
 #' @importFrom dplyr rename select
@@ -1019,14 +1155,18 @@ readAfreq <- function(path) {
 # here, so the file need not be named *.afreq.
 # @noRd
 .readAfreqFile <- function(file) {
+    # All-character, typed below: left to guess, an all-"T" allele column
+    # reads as logical and a numeric chromosome as a number.
+    asText <- cols(.default = col_character())
     af <- if (str_detect(file, "\\.zst$")) {
         vroom(
             archive_read(file, format = "raw", filter = "zstd"),
             delim = "\t",
+            col_types = asText,
             show_col_types = FALSE
         )
     } else {
-        vroom(file, delim = "\t", show_col_types = FALSE)
+        vroom(file, delim = "\t", col_types = asText, show_col_types = FALSE)
     }
     # PLINK2 .afreq: REF = A2, ALT = A1, ALT_FREQS = A1 (effect allele)
     # frequency
@@ -1042,7 +1182,7 @@ readAfreq <- function(path) {
     # A stochastic-genotype .afreq also carries U_MIN / U_MAX, which
     # invertMinmaxScaling() needs for an exact min-max inversion.
     stochastic <- is_in("U_MIN", colnames(renamed))
-    cols <- c(
+    keep <- c(
         c("chrom", "id", "A2", "A1", "alt_freq", "obs_ct"),
         if (stochastic) c("u_min", "u_max")
     )
@@ -1051,7 +1191,12 @@ readAfreq <- function(path) {
     } else {
         renamed
     }
-    select(out, all_of(cols))
+    mutate(
+        select(out, all_of(keep)),
+        A2 = .canonAllele(.data$A2),
+        A1 = .canonAllele(.data$A1),
+        across(any_of(c("alt_freq", "obs_ct", "u_min", "u_max")), as.numeric)
+    )
 }
 
 #' Read stochastic genotype sidecar metadata (U_MIN/U_MAX).
@@ -1205,8 +1350,9 @@ readPvar <- function(pvarPath) {
 }
 
 # A plain-text .pvar read as a table, as pgenlibr reads it: the first ALT
-# allele of a multi-allelic variant is A1. NULL for a file this cannot read
-# (compressed, or with no #CHROM header naming the five columns).
+# allele of a multi-allelic variant is A1, and the alleles are upper case
+# (.canonAllele()), as .readPvarByVariant() gives them. NULL for a file this
+# cannot read (compressed, or with no #CHROM header naming the five columns).
 # @noRd
 #' @importFrom vroom vroom
 #' @importFrom readr cols col_character col_integer
@@ -1235,8 +1381,8 @@ readPvar <- function(pvarPath) {
         chrom = tbl$CHROM,
         id = tbl$ID,
         pos = tbl$POS,
-        A2 = tbl$REF,
-        A1 = str_remove(tbl$ALT, ",.*$")
+        A2 = .canonAllele(tbl$REF),
+        A1 = .canonAllele(str_remove(tbl$ALT, ",.*$"))
     )
 }
 
@@ -1279,8 +1425,8 @@ readPvar <- function(pvarPath) {
         chrom = map_chr(idx, .pvarChrom, pvar = pvar),
         id = map_chr(idx, .pvarId, pvar = pvar),
         pos = map_int(idx, .pvarPos, pvar = pvar),
-        A2 = map_chr(idx, .pvarAlleleCode, pvar = pvar, k = 1L),
-        A1 = map_chr(idx, .pvarAlleleCode, pvar = pvar, k = 2L)
+        A2 = .canonAllele(map_chr(idx, .pvarAlleleCode, pvar = pvar, k = 1L)),
+        A1 = .canonAllele(map_chr(idx, .pvarAlleleCode, pvar = pvar, k = 2L))
     )
 }
 
@@ -1341,15 +1487,12 @@ refVariantInfo <- function(source, which = NULL) {
     paths <- resolvePlink2Paths(dataPath)
     info <- readPvar(paths$pvar)
     afreq <- readAfreq(dataPath)
-    mutate(
-        info,
-        chrom = withChrPrefix(.data$chrom),
-        !!!compact(list(
-            allele_freq = if (!is.null(afreq)) {
-                afreq$alt_freq[match(info$id, afreq$id)]
-            }
-        ))
-    )
+    afCol <- compact(list(
+        allele_freq = if (!is.null(afreq)) {
+            afreq$alt_freq[match(info$id, afreq$id)]
+        }
+    ))
+    mutate(info, chrom = withChrPrefix(.data$chrom), !!!afCol)
 }
 
 # plink1 variant info from the .bim (col5 = A1, col6 = A2).
@@ -1424,8 +1567,14 @@ refVariantInfo <- function(source, which = NULL) {
 #' @importFrom readr read_lines
 #' @noRd
 matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
+    # All-character: left to guess, an all-"T" allele column reads as
+    # logical; parseVariantId() types chrom and pos itself.
     keepRaw <- try_fetch(
-        as.data.frame(vroom(keepVariantsPath, show_col_types = FALSE)),
+        as.data.frame(vroom(
+            keepVariantsPath,
+            col_types = cols(.default = col_character()),
+            show_col_types = FALSE
+        )),
         error = function(cnd) NULL
     )
     if (
@@ -1439,34 +1588,24 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
         ids <- read_lines(keepVariantsPath)
         keepVariants <- parseVariantId(ids)
     }
-    viChrom <- variantInfo$chrom
     hasAlleles <- is_in("A1", names(keepVariants)) &&
         is_in("A2", names(keepVariants)) &&
         !any(is.na(keepVariants$A1)) &&
         !any(is.na(keepVariants$A2))
-    if (hasAlleles) {
-        is_in(
-            str_c(
-                viChrom,
-                variantInfo$pos,
-                variantInfo$A2,
-                variantInfo$A1,
-                sep = ":"
-            ),
-            str_c(
-                keepVariants$chrom,
-                keepVariants$pos,
-                keepVariants$A2,
-                keepVariants$A1,
-                sep = ":"
-            )
-        )
-    } else {
-        is_in(
-            str_c(viChrom, variantInfo$pos, sep = ":"),
-            str_c(keepVariants$chrom, keepVariants$pos, sep = ":")
-        )
+    is_in(
+        .keepVariantKey(variantInfo, hasAlleles),
+        .keepVariantKey(keepVariants, hasAlleles)
+    )
+}
+
+# A variant table's keep-list match key: chrom:pos:A2:A1 when the keep list
+# names alleles, chrom:pos when it names positions only.
+# @noRd
+.keepVariantKey <- function(tbl, withAlleles) {
+    if (withAlleles) {
+        return(str_c(tbl$chrom, tbl$pos, tbl$A2, tbl$A1, sep = ":"))
     }
+    str_c(tbl$chrom, tbl$pos, sep = ":")
 }
 
 #' Load genotype data for a specific region
@@ -1731,8 +1870,8 @@ loadGenotypeRegion <- function(
     allele <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.allele"))
     allelesSplit <- str_split(allele, "/")
     # `[` (single-bracket) so a missing second allele yields NA, not an error.
-    a1 <- map_chr(allelesSplit, `[`, 1L)
-    a2 <- map_chr(allelesSplit, `[`, 2L)
+    a1 <- .canonAllele(map_chr(allelesSplit, `[`, 1L))
+    a2 <- .canonAllele(map_chr(allelesSplit, `[`, 2L))
     tibble(
         SNP = snpId,
         CHR = withChrPrefix(chr),
@@ -1946,8 +2085,8 @@ loadGenotypeRegion <- function(
         SNP = if_else(named, index$rsid, ids),
         CHR = withChrPrefix(index$chromosome),
         BP = as.integer(index$position),
-        A1 = index$allele2,
-        A2 = index$allele1,
+        A1 = .canonAllele(index$allele2),
+        A2 = .canonAllele(index$allele1),
         bgen_offset = as.numeric(index$file_start_position),
         bgen_size = as.numeric(index$size_in_bytes),
         bgen_allele = rep(2L, nrow(index))
@@ -1963,8 +2102,8 @@ loadGenotypeRegion <- function(
         SNP = formatVariantId(chrom, pos, alleles[[1L]], others),
         CHR = withChrPrefix(chrom),
         BP = as.integer(pos),
-        A1 = others,
-        A2 = alleles[[1L]],
+        A1 = .canonAllele(others),
+        A2 = .canonAllele(alleles[[1L]]),
         bgen_offset = as.numeric(offset),
         bgen_size = as.numeric(size),
         bgen_allele = seq_along(others) + 1L
@@ -2202,7 +2341,7 @@ loadGenotypeRegion <- function(
     dosage <- DelayedArray::DelayedArray(seed)
     SummarizedExperiment::SummarizedExperiment(
         assays = list(dosage = dosage),
-        rowRanges = .snpInfoRanges(rows, rownames(dosage)),
+        rowRanges = .snpInfoRanges(rows, .panelRowNames(rows)),
         colData = S4Vectors::DataFrame(row.names = colnames(dosage)),
         metadata = list(
             genotypeSource = list(
@@ -2229,8 +2368,10 @@ loadGenotypeRegion <- function(
         ))
     }
     record <- rep(seq_len(nrow(records)), nAlt)
-    a1 <- as.character(list_c(records$alt))
-    a2 <- records$ref[record]
+    # Upper case here, after .vcfRecordIds() has matched VariantAnnotation's
+    # synthetic ids against the alleles as the file spells them.
+    a1 <- .canonAllele(list_c(records$alt))
+    a2 <- .canonAllele(records$ref[record])
     named <- !is.na(records$id) & !multi
     tibble(
         SNP = if_else(
@@ -2269,10 +2410,7 @@ loadGenotypeRegion <- function(
             ranges = IRanges(records$pos, records$end),
             posRank = .positionRank(records$chrom, records$pos)
         ),
-        dn = list(
-            normalizeVariantId(rows$SNP),
-            as.character(VariantAnnotation::samples(header))
-        )
+        dn = list(NULL, as.character(VariantAnnotation::samples(header)))
     )
     .dosageSeedPanel(seed, rows, "vcf", path(file))
 }
@@ -2474,7 +2612,7 @@ loadGenotypeRegion <- function(
         rowRecord = rows$record,
         rowAllele = rows$allele,
         records = IRanges(rows$record, width = 1L),
-        dn = list(normalizeVariantId(rows$SNP), meta$sampleIds)
+        dn = list(NULL, meta$sampleIds)
     )
     .dosageSeedPanel(seed, rows, "gds", path)
 }
@@ -2505,7 +2643,7 @@ loadGenotypeRegion <- function(
         rowRecord = rows$record,
         rowAllele = rows$allele,
         records = IRanges(start = cumsum(counts) - counts + 1L, width = counts),
-        dn = list(normalizeVariantId(rows$SNP), meta$sampleIds)
+        dn = list(NULL, meta$sampleIds)
     )
     .dosageSeedPanel(seed, rows, "gds", path)
 }
@@ -2619,7 +2757,7 @@ loadGenotypeRegion <- function(
         rowRecord = seq_len(nVariants),
         rowAllele = rep(1L, nVariants),
         records = IRanges(seq_len(nVariants), width = 1L),
-        dn = list(normalizeVariantId(meta$snpInfo$SNP), meta$sampleIds)
+        dn = list(NULL, meta$sampleIds)
     )
     .dosageSeedPanel(seed, meta$snpInfo, "plink1", stem)
 }
@@ -2661,8 +2799,8 @@ loadGenotypeRegion <- function(
         SNP = bim$SNP,
         CHR = withChrPrefix(bim$CHR),
         BP = as.integer(bim$BP),
-        A1 = bim$A1,
-        A2 = bim$A2
+        A1 = .canonAllele(bim$A1),
+        A2 = .canonAllele(bim$A2)
     )
     list(
         snpInfo = snpInfo,
@@ -2680,15 +2818,14 @@ loadGenotypeRegion <- function(
 # @noRd
 .stackDosagePanels <- function(panels, format, metaPath, paths) {
     .stackCheckSamples(panels, paths)
-    rowRangesList <- unname(map(panels, SummarizedExperiment::rowRanges))
+    dosages <- unname(map(panels, .seDosage))
     SummarizedExperiment::SummarizedExperiment(
         assays = list(
-            dosage = exec(
-                BiocGenerics::rbind,
-                !!!unname(map(panels, .seDosage))
-            )
+            dosage = exec(BiocGenerics::rbind, !!!dosages)
         ),
-        rowRanges = suppressWarnings(exec(c, !!!rowRangesList)),
+        rowRanges = .bindPanelRanges(
+            map(panels, SummarizedExperiment::rowRanges)
+        ),
         colData = SummarizedExperiment::colData(panels[[1L]]),
         metadata = list(
             genotypeSource = list(

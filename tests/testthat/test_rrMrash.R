@@ -1,7 +1,7 @@
 context("regularized_regression - mrash")
 
 # ---- mrashWeights ----
-test_that("mrashWeights subsets a user-supplied beta.init of length ncol(X) by keep", {
+test_that("mrashWeights subsets a full-length beta.init by keep", {
     skip_if_not_installed("glmnet")
     set.seed(42)
     n <- 50
@@ -42,3 +42,22 @@ test_that("mrashWeights warns and zero-pads when X has zero-variance columns", {
 })
 
 gc()
+
+test_that("mrashWeights' slim fit drops the copy of the data", {
+    set.seed(42)
+    X <- matrix(rnorm(500), nrow = 50)
+    colnames(X) <- sprintf("chr1:%d:A:G", seq_len(10))
+    y <- X[, 1] * 0.5 + rnorm(50)
+    set.seed(1)
+    slim <- attr(mrashWeights(X, y, fitRetention = "slim"), "fit")
+    expect_s3_class(slim, "mr.ash")
+    expect_false(any(is_in(c("data", "update.order"), names(slim))))
+    # estimateSparsity() reads the mixture weights it keeps.
+    expect_true(is.numeric(slim$pi))
+    expect_equal(slim$variantIds, colnames(X))
+    set.seed(1)
+    full <- attr(mrashWeights(X, y, fitRetention = "full"), "fit")
+    expect_true(is.list(full$data))
+    expect_null(full$variantIds)
+    expect_equal(pecotmr:::.twasFitVariantIds(full), colnames(X))
+})

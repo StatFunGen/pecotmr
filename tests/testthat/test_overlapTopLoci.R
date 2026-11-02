@@ -32,7 +32,7 @@ context("overlapTopLoci")
     )
 }
 
-test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-flip", {
+test_that("overlapTopLoci joins QTL x GWAS allele-aware, flipping signs", {
     # QTL: two contexts, variants v1 (chr1:100:A:G) and v2 (chr1:200:A:G).
     q1 <- .ot_entry(.ot_tl(
         c("chr1:100:A:G", "chr1:200:A:G"),
@@ -77,7 +77,8 @@ test_that("overlapTopLoci joins QTL x GWAS with allele-aware matching + sign-fli
     expect_true(all(c("variant_id", "chrom", "pos", "A1", "A2") %in% cols))
     expect_true(any(grepl("^qtl_", cols)) && any(grepl("^gwas_", cols)))
     expect_false(any(grepl("^qtl_(chrom|pos|A1|A2)$", cols)))
-    # 2 shared variants x 2 QTL contexts x 1 GWAS study = 4 rows (wide cross-product)
+    # 2 shared variants x 2 QTL contexts x 1 GWAS study = 4 rows (wide
+    # cross-product)
     expect_equal(length(ov), 4L)
     expect_setequal(unique(ov$variant_id), c("chr1:100:A:G", "chr1:200:A:G"))
     # per-context QTL rows preserved
@@ -154,7 +155,8 @@ test_that("overlapTopLoci returns an empty merge when a side has no signal", {
         method = "susie",
         entry = list(g)
     )
-    # signalCutoff above every pip (0.9) -> both top-loci tables empty -> emptyMerge.
+    # signalCutoff above every pip (0.9) -> both top-loci tables empty ->
+    # emptyMerge.
     df <- overlapTopLoci(qtl, gwas, signalCutoff = 0.99)
     expect_equal(length(df), 0L)
     cols <- names(S4Vectors::mcols(df))

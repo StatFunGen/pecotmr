@@ -14,10 +14,8 @@ setClass("TsTestCollection", contains = "RangedTupleList")
         rep(list(GenomicRanges::GRanges()), n)
     )
     if (length(cols) > 0L) {
-        S4Vectors::mcols(grl) <- exec(
-            S4Vectors::DataFrame,
-            !!!c(cols, list(check.names = FALSE))
-        )
+        dataFrameArgs <- c(cols, list(check.names = FALSE))
+        S4Vectors::mcols(grl) <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     }
     methods::new("TsTestCollection", grl)
 }
@@ -31,7 +29,7 @@ test_that(".matchTupleRows: empty keys returns every row index", {
     expect_equal(pecotmr:::.matchTupleRows(df, list()), c(1L, 2L))
 })
 
-test_that(".matchTupleRows: AND-matches across multiple (column, value) pairs", {
+test_that(".matchTupleRows AND-matches several (column, value) pairs", {
     df <- .ts_coll(
         study = c("s1", "s1", "s2"),
         context = c("c1", "c2", "c1"),
@@ -73,7 +71,7 @@ test_that(".tupleSelectRow: zero-row input errors with the class label", {
     )
 })
 
-test_that(".tupleSelectRow: single-row collection returns 1L without selectors", {
+test_that(".tupleSelectRow returns 1L for a one-row collection", {
     one <- .ts_coll(
         study = "s1",
         context = "c1",
@@ -84,7 +82,7 @@ test_that(".tupleSelectRow: single-row collection returns 1L without selectors",
     expect_equal(pecotmr:::.tupleSelectRow(one), 1L)
 })
 
-test_that(".tupleSelectRow: multi-row + missing selectors errors with row count", {
+test_that(".tupleSelectRow: several rows, no selectors: errors with count", {
     multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -138,7 +136,7 @@ test_that(".tupleSelectRow: matching tuple returns first row index", {
     )
 })
 
-test_that(".tupleSelectRow: missing tuple errors with the 4-tuple in the message", {
+test_that(".tupleSelectRow names the missing 4-tuple in its error", {
     multi <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -343,7 +341,7 @@ test_that(".fmrRowsMatching: a vector selector matches any listed value", {
 # .fmrRowMetadata (stable 8-column identity frame)
 # ===========================================================================
 
-test_that(".fmrRowMetadata: emits all eight identity columns, NA-filling absent ones", {
+test_that(".fmrRowMetadata gives all eight identity columns, NA if absent", {
     qtl <- .ts_coll(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -424,7 +422,7 @@ test_that(".rbindAligned: identical columns rbind and preserve type", {
     expect_equal(out$b, c("x", "y"))
 })
 
-test_that(".rbindAligned: differing columns align on the union, NA-filling gaps", {
+test_that(".rbindAligned aligns differing columns on the union, NA in gaps", {
     p1 <- data.frame(a = 1L, b = "x", stringsAsFactors = FALSE)
     p2 <- data.frame(a = 2L, c = "z", stringsAsFactors = FALSE)
     out <- pecotmr:::.rbindAligned(list(p1, p2))
@@ -437,7 +435,7 @@ test_that(".rbindAligned: differing columns align on the union, NA-filling gaps"
 # ===========================================================================
 # Coverage: region-column + rbind helpers
 # ===========================================================================
-test_that(".naLikeColumn: a non-character/non-GRanges exemplar pads with logical NA", {
+test_that(".naLikeColumn pads any other exemplar with logical NA", {
     expect_identical(pecotmr:::.naLikeColumn(TRUE, 3L), rep(NA, 3L))
 })
 
@@ -483,7 +481,7 @@ test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {
     )
 })
 
-test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPos", {
+test_that(".validateTraitPosColumn: non-GRanges, wrong-length traitPos", {
     expect_equal(
         pecotmr:::.validateTraitPosColumn(.ts_coll(traitPos = c("x", "y"))),
         str_c(
@@ -564,6 +562,37 @@ test_that("chromosome paths union when they agree and abort when they clash", {
 })
 
 
+test_that(".singleWeightColumn takes a one-column matrix as its column", {
+    expect_identical(pecotmr:::.singleWeightColumn(c(1, 2)), c(1, 2))
+    one <- matrix(c(1, 2), ncol = 1L, dimnames = list(NULL, "susie"))
+    expect_identical(pecotmr:::.singleWeightColumn(one), c(1, 2))
+    expect_null(pecotmr:::.singleWeightColumn(cbind(c(1, 2), c(3, 4))))
+})
+
+test_that("a collection saved without a key column or a fits slot reads", {
+    data(qtlSumStatsExample, qtlFineMappingExample)
+    noKeys <- qtlSumStatsExample
+    md <- attr(noKeys, "elementMetadata")
+    md$ldReference <- NULL
+    attr(noKeys, "elementMetadata") <- md
+    expect_identical(
+        pecotmr:::.ldRefKeys(noKeys),
+        rep(NA_character_, length(noKeys))
+    )
+    noFits <- qtlFineMappingExample
+    attr(noFits, "fits") <- NULL
+    expect_identical(pecotmr:::.fitDict(noFits), list())
+})
+
+test_that("bare handles, as LD references were saved, union as panels", {
+    skip_if_not_installed("pgenlibr")
+    stem <- test_path("test_data", "test_variants")
+    h <- readGenotypeHandle(stem, format = "plink2")
+    out <- pecotmr:::.unionPanelRefs(list(h, h), "combineX")
+    expect_s4_class(out, "RangedSummarizedExperiment")
+    expect_identical(dim(out), c(nrow(snpInfo(h)), length(sampleIds(h))))
+})
+
 test_that("panels read through no handle union their rows", {
     # A PLINK1, VCF or GDS panel has no handle whose snpInfo could be
     # widened, so the parts' assays are bound: each variant once, in genomic
@@ -578,8 +607,9 @@ test_that("panels read through no handle union their rows", {
         pecotmr:::.ldRefDict(list(a, b)),
         "combineX"
     )
+    expect_identical(names(merged), c("entries", "keys"))
     expect_identical(merged$keys, c("ld1", "ld1"))
-    out <- merged$refs$ld1
+    out <- merged$entries$ld1
     expect_identical(rownames(out), rownames(panel)[1:8])
     expect_equal(
         as.matrix(SummarizedExperiment::assay(out, "dosage")),
@@ -590,12 +620,12 @@ test_that("panels read through no handle union their rows", {
         pecotmr:::.ldRefSource(panel)$path
     )
     # The same panel twice is that panel.
-    expect_identical(pecotmr:::.ssUnionPanels(list(a, a), character(0)), a)
+    expect_identical(pecotmr:::.unionPanelRefs(list(a, a), "combineX"), a)
     apart <- pecotmr:::.ldRefMergeViews(
         pecotmr:::.ldRefDict(list(a, readGenotypes(plink2Prefix = stem))),
         "combineX"
     )
-    expect_length(apart$refs, 2L)
+    expect_length(apart$entries, 2L)
 })
 
 
@@ -621,9 +651,13 @@ test_that("an empty collection coerces to itself, not to a row", {
         pecotmr:::.asFmRowPayload(qtlFineMappingExample),
         "FineMappingRow"
     )
-    expect_s4_class(
+    # A TWAS collection holding a single (gene, method) does too; one with
+    # more methods names none to read.
+    lasso <- pecotmr:::.twasKeepMethods(twasWeightsExample, "lasso")
+    expect_s4_class(pecotmr:::.asTwRowPayload(lasso), "TwasWeightsRow")
+    expect_error(
         pecotmr:::.asTwRowPayload(twasWeightsExample),
-        "TwasWeightsRow"
+        "holds 11 methods; name the one to read"
     )
     # Anything that is not a collection passes straight through.
     expect_equal(pecotmr:::.asFmRowPayload(42), 42)
@@ -792,7 +826,7 @@ test_that("LdMatrix views are stored as the one covering them, in any order", {
         pecotmr:::.ldRefDict(list(ld[1:2], ld[2:3])),
         "combine"
     )
-    expect_length(apart$refs, 2L)
+    expect_length(apart$entries, 2L)
     # With the matrix covering both among them, both are stored as it,
     # wherever it comes.
     orders <- list(
@@ -805,7 +839,7 @@ test_that("LdMatrix views are stored as the one covering them, in any order", {
             pecotmr:::.ldRefDict(parts),
             "combine"
         )
-        expect_identical(merged$refs, list(ld1 = ld))
+        expect_identical(merged$entries, list(ld1 = ld))
         expect_identical(merged$keys, rep("ld1", 3L))
     }
 })
@@ -819,7 +853,7 @@ test_that("binding stores an LdMatrix another part's covers as that one", {
         pecotmr:::.ldRefDict(list(wide, narrow, wide)),
         "probe"
     )
-    expect_identical(merged$refs, list(ld1 = wide))
+    expect_identical(merged$entries, list(ld1 = wide))
     expect_identical(merged$keys, c("ld1", "ld1", "ld1"))
     # Matrices that do not nest are different references, and stay apart.
     other <- LdMatrix(
@@ -829,14 +863,14 @@ test_that("binding stores an LdMatrix another part's covers as that one", {
         pecotmr:::.ldRefDict(list(wide, other)),
         "probe"
     )
-    expect_length(apart$refs, 2L)
+    expect_length(apart$entries, 2L)
     # A panel and a matrix are never views of one source.
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     kinds <- pecotmr:::.ldRefMergeViews(
         pecotmr:::.ldRefDict(list(wide, panel)),
         "probe"
     )
-    expect_length(kinds$refs, 2L)
+    expect_length(kinds$entries, 2L)
 })
 
 test_that("binding stores a mixture another part's covers as that one", {
@@ -848,7 +882,7 @@ test_that("binding stores a mixture another part's covers as that one", {
         pecotmr:::.ldRefDict(list(mix[1:200], mix, mix[100:349])),
         "probe"
     )
-    expect_identical(merged$refs, list(ld1 = mix))
+    expect_identical(merged$entries, list(ld1 = mix))
     expect_identical(merged$keys, c("ld1", "ld1", "ld1"))
     # The same panels weighted differently are another mixture.
     reweighted <- GenotypeMixture(halves, mixtureWeights = c(0.4, 0.6))
@@ -856,7 +890,7 @@ test_that("binding stores a mixture another part's covers as that one", {
         pecotmr:::.ldRefDict(list(mix, reweighted[1:200])),
         "probe"
     )
-    expect_length(apart$refs, 2L)
+    expect_length(apart$entries, 2L)
 })
 
 # ===========================================================================
@@ -1166,18 +1200,6 @@ test_that(".fitColumnOf finds each held variant's column in the fit", {
     expect_equal(f(c("chr1:200:T:C", "chr1:900:A:G"), .ts_fitted), c(2L, NA))
 })
 
-test_that(".mdFitVariants reads a group's first row, nothing for old rows", {
-    md <- S4Vectors::DataFrame(
-        fitVariants = IRanges::CharacterList(list(c("a", "b"), c("a", "b")))
-    )
-    # Rows split from one entry repeat its fit and its variants alike.
-    expect_equal(pecotmr:::.mdFitVariants(md, c(1L, 2L)), c("a", "b"))
-    expect_equal(
-        pecotmr:::.mdFitVariants(S4Vectors::DataFrame(x = 1:2), 1L),
-        character(0)
-    )
-})
-
 test_that(".partsFitIds: the row's own ids, else the fit's names", {
     # A row holding all of its fit is its fit's variables, read by position.
     full <- .ts_fitRow()
@@ -1227,13 +1249,20 @@ test_that(".fitWidth counts the fit's variables, never the null column", {
 
 test_that("a TWAS row records fit variants only when it carries a fit", {
     w <- c(0.1, 0.2, 0.3)
-    withCv <- TwasWeightsRow(.ts_fitted, w, cvResult = list(r2 = 0.5))
-    expect_equal(pecotmr:::.twRowFitVariants(withCv), .ts_fitted)
-    # Weights alone are no fit payload.
+    # A weights row reads them off its fit.
+    withFit <- TwasWeightsRow(
+        .ts_fitted,
+        w,
+        methodFits = list(variantIds = .ts_fitted)
+    )
+    expect_equal(pecotmr:::.twRowFitVariants(withFit), .ts_fitted)
+    # Weights alone, or with only their cross-validation, are no fit.
     expect_equal(
         pecotmr:::.twRowFitVariants(TwasWeightsRow(.ts_fitted, w)),
         character(0)
     )
+    withCv <- TwasWeightsRow(.ts_fitted, w, cvResult = list(r2 = 0.5))
+    expect_equal(pecotmr:::.twRowFitVariants(withCv), character(0))
 })
 
 test_that(".fitCoverageChecked warns about a narrowed row and returns it", {
@@ -1270,7 +1299,7 @@ test_that(".fitCoverageCheckedRows is silent without a fit or rows", {
     x <- .ts_narrowedCollection(1L)
     expect_no_warning(pecotmr:::.fitCoverageCheckedRows(x[0], "f()"))
     fitless <- x
-    fitless$susieFit <- S4Vectors::SimpleList(list(NULL))
+    fitless$susieFit <- NA_character_
     expect_no_warning(pecotmr:::.fitCoverageCheckedRows(fitless, "f()"))
     # An optional input left out is nothing to check.
     expect_no_warning(pecotmr:::.fitCoverageCheckedRows(NULL, "f()"))
@@ -1284,7 +1313,12 @@ test_that(".fitCoverageCheckedRows is silent without a fit or rows", {
         trait = "g1",
         method = "lasso",
         entry = list(
-            TwasWeightsRow(.ts_fitted, c(0.1, 0.2, 0.3), cvResult = list())
+            TwasWeightsRow(
+                .ts_fitted,
+                c(0.1, 0.2, 0.3),
+                methodFits = list(variantIds = .ts_fitted),
+                cvResult = list()
+            )
         )
     )
     endoapply(tw, `[`, keep)
@@ -1295,9 +1329,10 @@ test_that(".narrowedRowLabels labels the narrowed rows and no others", {
     expect_length(labels, 2L)
     expect_match(labels, "^s[12]\\|c1\\|g1\\|susie")
     expect_identical(pecotmr:::.narrowedRowLabels(.ts_weights()), character(0))
+    # A TWAS collection's cells are labelled (study, context, trait, method).
     expect_identical(
         pecotmr:::.narrowedRowLabels(.ts_weights(1:2)),
-        pecotmr:::.pubRowLabels(.ts_weights(1:2), 1L)
+        "w1|c1|g1|lasso"
     )
 })
 
@@ -1672,4 +1707,60 @@ test_that(".ssCombineGenome is NA when no part records a build", {
         ),
         NA_character_
     )
+})
+
+test_that("a row dictionary keeps each shared value once and keys every row", {
+    # The facility the LD references use, for any value rows share: equal
+    # values -- the same object or an equal copy -- are one entry.
+    a <- list(w = 1:3)
+    b <- list(w = 4:6)
+    d <- pecotmr:::.dictBuild(list(a, NULL, b, a, list(w = 1:3)), "fit")
+    expect_identical(d$entries, list(fit1 = a, fit2 = b))
+    expect_identical(d$keys, c("fit1", NA, "fit2", "fit1", "fit1"))
+    expect_identical(pecotmr:::.dictBuild(list(NULL), "fit")$entries, list())
+    # What a subset reports: only the entries its rows name.
+    expect_identical(
+        pecotmr:::.dictUsed(d$entries, c("fit2", NA)),
+        list(fit2 = b)
+    )
+    expect_identical(pecotmr:::.dictUsed(d$entries, NA_character_), list())
+    expect_null(pecotmr:::.dictEntryFor(NA_character_, d$entries))
+    expect_identical(pecotmr:::.dictEntryFor("fit2", d$entries), b)
+    # Validity: every key resolves, and entries are uniquely named.
+    expect_null(pecotmr:::.dictProblems(d$entries, d$keys, "fits", "fit(s)"))
+    expect_match(
+        pecotmr:::.dictProblems(d$entries, "fit9", "fits", "fit(s)"),
+        "rows name fit\\(s\\) not in fits: fit9"
+    )
+    expect_match(
+        pecotmr:::.dictProblems(unname(d$entries), d$keys, "fits", "fit(s)"),
+        "fits entries must have unique, non-empty names"
+    )
+})
+
+test_that(".twrRowResolveWeights aligns weights to the variant ids", {
+    ids <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
+    wr <- .twrRowResolveWeights(TwasWeightsRow(ids, c(0.1, -0.2, 0.05)))
+    expect_equal(wr$variantIds, ids)
+    expect_equal(wr$weights, c(0.1, -0.2, 0.05))
+    # A weight matrix keeps its columns, one row per variant; it used to
+    # flatten to a length no variant set has, and so resolve to nothing.
+    w <- matrix(c(0.1, 0, 0.3, 0.4, 0.5, 0.6), 3L, 2L)
+    colnames(w) <- c("f1", "f2")
+    wr <- .twrRowResolveWeights(TwasWeightsRow(ids, w))
+    expect_equal(wr$variantIds, ids)
+    expect_equal(wr$weights, w)
+    # A weight vector that does not match the variants (defensive) -> empty.
+    bad <- TwasWeightsRow(ids[1:2], c(0.1, -0.2))
+    bad@weights <- c(0.1, -0.2, 0.3)
+    expect_length(.twrRowResolveWeights(bad)$variantIds, 0L)
+    # So does a weight matrix whose rows do not match them, which weights()
+    # hands back as it is.
+    badMatrix <- TwasWeightsRow(ids[1:2], matrix(c(0.1, -0.2), 2L, 1L))
+    badMatrix@weights <- matrix(c(0.1, -0.2, 0.3), 3L, 1L)
+    expect_length(.twrRowResolveWeights(badMatrix)$variantIds, 0L)
+    expect_identical(weights(badMatrix), badMatrix@weights)
+    # A weight matrix of missing values resolves to nothing.
+    allNa <- TwasWeightsRow(ids, matrix(NA_real_, 3L, 2L))
+    expect_length(.twrRowResolveWeights(allNa)$variantIds, 0L)
 })

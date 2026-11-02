@@ -17,7 +17,9 @@ export("maf<-")
 export("sampleSize<-")
 export(AnnotationMatrix)
 export(AspuOptions)
+export(BayesAlphabetRssOptions)
 export(BglrOptions)
+export(BigsnprOptions)
 export(BoundaryMergeParam)
 export(ColocBoostResult)
 export(ColocLbfFilterParam)
@@ -60,6 +62,8 @@ export(GlmnetOptions)
 export(GwasFineMappingParam)
 export(GwasFineMappingResult)
 export(GwasSumStats)
+export(HibayesOptions)
+export(HibayesRssOptions)
 export(KrigingOptions)
 export(L0learnOptions)
 export(LassosumOptions)
@@ -135,14 +139,20 @@ export(annotationJackknifeCoefs)
 export(asCtwasResult)
 export(assembleCtwasInputs)
 export(autoDecision)
-export(bLassoWeights)
 export(baselineAnnotations)
+export(bayesARssWeights)
 export(bayesAWeights)
+export(bayesAlphabetRssWeights)
 export(bayesAlphabetWeights)
+export(bayesBRssWeights)
 export(bayesBWeights)
+export(bayesCRssWeights)
 export(bayesCWeights)
+export(bayesLRssWeights)
 export(bayesLWeights)
+export(bayesNRssWeights)
 export(bayesNWeights)
+export(bayesRRssWeights)
 export(bayesRWeights)
 export(blockId)
 export(buildLdEigen)
@@ -260,13 +270,14 @@ export(ldMismatchQc)
 export(ldPanelNSamples)
 export(ldPruneByCorrelation)
 export(ldReference)
+export(ldpred2AutoWeights)
+export(ldpred2GridWeights)
 export(learnTwasWeights)
 export(loadGenotypeRegion)
 export(loadGwasSumStatsFromManifest)
 export(loadMultiStudyQtlDatasetFromManifest)
 export(loadQtlDatasetFromManifest)
 export(loadQtlSumStatsFromManifest)
-export(localH2Blocks)
 export(maf)
 export(makePairwiseContrastCol)
 export(marginalEffects)
@@ -503,12 +514,14 @@ exportMethods(fullFit)
 exportMethods(genomicRegion)
 exportMethods(genotypeCovariates)
 exportMethods(genotypes)
+exportMethods(getListElement)
 exportMethods(heritabilityEstimate)
 exportMethods(heritabilityEstimateSe)
 exportMethods(heritabilityIntercept)
 exportMethods(heritabilityInterceptSe)
 exportMethods(inSample)
 exportMethods(intersectVariants)
+exportMethods(lapply)
 exportMethods(lbf)
 exportMethods(ldBlocks)
 exportMethods(ldMatrix)
@@ -516,7 +529,6 @@ exportMethods(ldMatrixList)
 exportMethods(ldPanelNSamples)
 exportMethods(ldReference)
 exportMethods(length)
-exportMethods(localH2Blocks)
 exportMethods(longForm)
 exportMethods(maf)
 exportMethods(marginalEffects)
@@ -575,15 +587,18 @@ exportMethods(writeGwasVcf)
 exportMethods(z)
 importClassesFrom(BiocParallel,BiocParallelParam)
 importClassesFrom(GenomicRanges,GRanges)
+importClassesFrom(Matrix,dspMatrix)
 importClassesFrom(MultiAssayExperiment,MultiAssayExperiment)
 importClassesFrom(S4Vectors,DataFrame)
 importClassesFrom(S4Vectors,List)
 importClassesFrom(S4Vectors,SimpleList)
 importClassesFrom(S4Vectors,Vector)
 importClassesFrom(S4Vectors,character_OR_NULL)
+importClassesFrom(SparseArray,SVT_SparseArray)
 importClassesFrom(SummarizedExperiment,RangedSummarizedExperiment)
 importFrom(BiocGenerics,
   colnames,
+  lapply,
   ncol,
   nrow,
   path,
@@ -620,6 +635,10 @@ importFrom(IRanges,
   trim
 )
 importFrom(MASS,ginv)
+importFrom(Matrix,
+  colSums,
+  rowSums
+)
 importFrom(MultiAssayExperiment,
   ExperimentList,
   MultiAssayExperiment,
@@ -648,8 +667,10 @@ importFrom(S4Vectors,
   DataFrame,
   SimpleList,
   bindROWS,
+  elementNROWS,
   endoapply,
   extractROWS,
+  getListElement,
   mcols,
   metadata,
   normalizeSingleBracketSubscript,
@@ -760,7 +781,9 @@ importFrom(purrr,
   list_rbind,
   map,
   map2,
+  map2_chr,
   map2_dbl,
+  map2_int,
   map2_lgl,
   map_chr,
   map_dbl,
@@ -768,6 +791,7 @@ importFrom(purrr,
   map_int,
   map_lgl,
   partial,
+  pluck,
   pmap,
   possibly,
   pwalk,
@@ -817,11 +841,13 @@ importFrom(stats,
   optimize,
   pcauchy,
   pchisq,
+  pf,
   pnorm,
   predict,
   pt,
   qnorm,
   quantile,
+  rnorm,
   sd,
   setNames,
   var
@@ -874,7 +900,9 @@ importFrom(tidyselect,all_of)
 importFrom(tools,file_ext)
 importFrom(utils,
   combn,
-  head
+  head,
+  removeSource,
+  tail
 )
 importFrom(vctrs,
   vec_chop,

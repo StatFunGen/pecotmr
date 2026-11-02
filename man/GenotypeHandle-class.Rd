@@ -28,14 +28,13 @@ GenotypeHandle(
 \code{NULL}.}
 
 \item{ldMeta}{Path to an LD-meta TSV file (columns \code{chrom},
-\code{start}, \code{end}, \code{path}; the \code{path} column may be
-comma-separated as \code{ld_file,bim_file}). Requires \code{block}. The
-constructor resolves the row covering \code{block}, then delegates to the
-appropriate file-based handler. When the resolved row points at PLINK2
-or BGEN files, the corresponding reader is used; a row pointing
-at a pre-computed LD matrix (\code{.cor.xz}) is refused, as pecotmr reads
-no pre-computed LD from disk -- wrap such a matrix in an
-\code{\link{LdMatrix}} instead.}
+\code{start}, \code{end}, \code{path}, each path a genotype file).
+Requires \code{block}. The constructor resolves the row covering
+\code{block}, then delegates to the appropriate file-based handler. When
+the resolved row points at PLINK2 or BGEN files, the corresponding reader
+is used; a row pointing at a pre-computed LD matrix (\code{.cor.xz}) is
+refused, as pecotmr reads no pre-computed LD from disk -- wrap such a
+matrix in an \code{\link{LdMatrix}} instead.}
 
 \item{block}{The \code{GRanges} window to look up in \code{ldMeta}; the
 whole file of the row covering it is opened.}

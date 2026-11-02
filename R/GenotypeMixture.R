@@ -130,7 +130,7 @@ setValidity("GenotypeMixture", function(object) {
 #' @export
 GenotypeMixture <- function(panels, mixtureWeights) {
     .gmAssertPanels(panels)
-    panels <- map(map(panels, .asLdRef), .ucscExperiment)
+    panels <- map(panels, .asLdRef)
     if (!all(map_lgl(panels, .gmIsPanel))) {
         abort("Every element of `panels` must be a genotype panel.")
     }
@@ -217,7 +217,8 @@ GenotypeMixture <- function(panels, mixtureWeights) {
 # One row per sample of every panel, recording its cohort.
 # @noRd
 .gmColData <- function(experiments) {
-    exec(rbind, !!!unname(imap(experiments, .gmColDataPart)))
+    colDataParts <- unname(imap(experiments, .gmColDataPart))
+    exec(rbind, !!!colDataParts)
 }
 
 # @noRd
@@ -232,7 +233,8 @@ GenotypeMixture <- function(panels, mixtureWeights) {
 # The sampleMap: each panel's samples under their cohort-prefixed names.
 # @noRd
 .gmSampleMap <- function(experiments) {
-    exec(rbind, !!!unname(imap(experiments, .gmSampleMapPart)))
+    sampleMapParts <- unname(imap(experiments, .gmSampleMapPart))
+    exec(rbind, !!!sampleMapParts)
 }
 
 # @noRd
@@ -311,6 +313,18 @@ setMethod("subsetByAssay", "GenotypeMixture", function(x, y) {
     MultiAssayExperiment::`experiments<-`(x, value = ExperimentList(comps))
 }
 
+# The mixture with each of its panels slimmed as .updatePanel() slims a
+# panel (.slimPanel()), or as it is when none changes.
+# @noRd
+.slimMixture <- function(x) {
+    panels <- .gmComponents(x)
+    slim <- map(panels, .slimPanel)
+    if (identical(slim, panels)) {
+        return(x)
+    }
+    MultiAssayExperiment::`experiments<-`(x, value = ExperimentList(slim))
+}
+
 # One panel's rows `i`. With no rows left it is held in memory with its
 # samples, which the sampleMap names, so an empty mixture does not carry its
 # panels' seeds (see .emptyPanel()).
@@ -380,14 +394,17 @@ setMethod("show", "GenotypeMixture", function(object) {
 # panel's allele coding relative to the first's.
 # @noRd
 .gmSign <- function(x) {
-    exec(cbind, !!!unname(map(.gmComponents(x), .gmComponentSign)))
+    componentSigns <- unname(map(.gmComponents(x), .gmComponentSign))
+    exec(cbind, !!!componentSigns)
 }
 
 # The mixture's variants: the first panel's ranges, with the SNP / A1 / A2
 # columns that identify them.
 # @noRd
 .gmRanges <- function(x) {
-    rr <- SummarizedExperiment::rowRanges(.gmComponents(x)[[1L]])
+    rr <- .withPanelLabels(
+        SummarizedExperiment::rowRanges(.gmComponents(x)[[1L]])
+    )
     S4Vectors::`mcols<-`(
         rr,
         value = S4Vectors::mcols(rr)[, c("SNP", "A1", "A2")]
@@ -423,10 +440,11 @@ setMethod("show", "GenotypeMixture", function(object) {
 
 # @noRd
 .gmAddLd <- function(acc, k, x, idx) {
-    s <- .gmSign(x)[idx, k]
     term <- mixtureWeights(x)[[k]] *
-        unname(.ldRefLdAt(.gmComponents(x)[[k]], idx)) *
-        outer(s, s)
+        .ldSignFlipped(
+            unname(.ldRefLdAt(.gmComponents(x)[[k]], idx)),
+            .gmSign(x)[idx, k]
+        )
     if (is.null(acc)) term else acc + term
 }
 
@@ -442,9 +460,11 @@ setMethod("show", "GenotypeMixture", function(object) {
         needMissing = needMissing,
         step = step
     )
+    mafs <- unname(map(each, "maf"))
+    missRates <- unname(map(each, "missRate"))
     list(
-        maf = exec(pmin, !!!unname(map(each, "maf"))),
-        missRate = if (needMissing) exec(pmax, !!!unname(map(each, "missRate")))
+        maf = exec(pmin, !!!mafs),
+        missRate = if (needMissing) exec(pmax, !!!missRates)
     )
 }
 
@@ -484,11 +504,12 @@ setMethod("show", "GenotypeMixture", function(object) {
 # @noRd
 .gmFactor <- function(x, idx) {
     blocks <- map(seq_along(.gmComponents(x)), .gmFactorBlock, x = x, idx = idx)
-    stacked <- exec(
-        rbind,
-        !!!blocks,
-        !!!map2(blocks, unname(mixtureWeights(x)), .gmMonomorphicRows)
+    monomorphicRows <- map2(
+        blocks,
+        unname(mixtureWeights(x)),
+        .gmMonomorphicRows
     )
+    stacked <- exec(rbind, !!!blocks, !!!monomorphicRows)
     stacked * sqrt(nrow(stacked) - 1)
 }
 

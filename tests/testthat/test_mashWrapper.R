@@ -73,7 +73,7 @@ test_that("mashPosterior outputPosteriorCov = FALSE omits PosteriorCov", {
     expect_equal(ncol(post$PosteriorMean), 3L)
 })
 
-test_that("mashPosterior(excludeCondition) drops the condition from model + output", {
+test_that("mashPosterior(excludeCondition) drops it from model and output", {
     skip_if_not_installed("mashr")
     ss <- .mwSs
     conds <- colnames(.mashSumStatsToMatrices(ss, "strong")$b)
@@ -118,7 +118,7 @@ test_that("mashModelFit: SimpleList input + default (NULL) vhat", {
     expect_s3_class(m, "mash")
 })
 
-test_that("mashPosterior: default (NULL) vhat and excludeCondition dropping every condition", {
+test_that("mashPosterior: NULL vhat, and excluding every condition", {
     skip_if_not_installed("mashr")
     ss <- .mwSs
     model <- .mwModel
@@ -307,7 +307,7 @@ test_that("mashPosterior forwards posteriorArgs", {
     expect_equal(seen$pi_thresh, 1e-8)
 })
 
-test_that("UdFitOptions checks unconstrained.update's value, not just its name", {
+test_that("UdFitOptions checks unconstrained.update's value, not its name", {
     skip_if_not_installed("udr")
     # udr validates the NAME but not the value: compute_penalty() is two
     # `if (update.type == ...)` branches with no else, so an unrecognised

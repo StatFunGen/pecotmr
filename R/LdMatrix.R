@@ -11,6 +11,11 @@
 #' @include AllGenerics.R
 NULL
 
+# An LdMatrix's correlation: packed symmetric (a dspMatrix), or a base
+# matrix in one saved before packing, which updateObject() packs.
+#' @importClassesFrom Matrix dspMatrix
+setClassUnion("matrix_OR_dspMatrix", c("matrix", "dspMatrix"))
+
 #' @title LD Correlation Matrix
 #' @description An \code{LdMatrix} carries one LD correlation matrix together
 #'   with the variants it describes, and can stand wherever pecotmr takes an
@@ -30,12 +35,20 @@ NULL
 #'   filters, DENTIST, ldsc's unbiased \eqn{r^2}, HDL -- use \code{nSamples}
 #'   and \code{AF} when they are supplied and refuse otherwise.
 #'
-#'   Validity checks the matrix's shape and labels, that its diagonal is 1,
-#'   that its entries lie in \eqn{[-1, 1]}, and its symmetry on an evenly
-#'   spaced subset of entries. It does not check positive semi-definiteness,
-#'   which costs an eigendecomposition; run \code{\link{checkLd}} for that.
+#'   The matrix is stored packed: its upper triangle, half the room of the
+#'   full matrix. A step that reads part of it -- a block, a row, one
+#'   product -- reads the packed triangle; a step that passes over it many
+#'   times (the RSS weight methods, PRS-CS, SDPR, DENTIST, an
+#'   eigendecomposition) unpacks the block it needs once, for that step.
+#'   \code{\link{ldMatrix}} hands it out whole, labelled by the variant ids.
 #'
-#' @slot correlation The correlation matrix, its dimnames the variant ids.
+#'   Validity checks the matrix's shape, that its diagonal is 1 and that its
+#'   entries lie in \eqn{[-1, 1]}. It does not check positive
+#'   semi-definiteness, which costs an eigendecomposition; run
+#'   \code{\link{checkLd}} for that.
+#'
+#' @slot correlation The correlation matrix, packed symmetric (a
+#'   \code{dspMatrix}), its rows the variants in order.
 #' @slot nSamples Integer, the number of independent samples the LD is
 #'   worth, or \code{NA} when unknown. For one panel this is its sample size.
 #'   For a mixture it is \eqn{1 / \sum_k w_k^2 / n_k}, the size of a single
@@ -44,13 +57,14 @@ NULL
 #'   with; empty for a single panel's LD.
 #' @seealso \code{\link{LdMatrix}} to build one, \code{\link{checkLd}}.
 #' @importClassesFrom GenomicRanges GRanges
+#' @importClassesFrom Matrix dspMatrix
 #' @importFrom S4Vectors extractROWS normalizeSingleBracketSubscript
 #' @export
 setClass(
     "LdMatrix",
     contains = "GRanges",
     slots = c(
-        correlation = "matrix",
+        correlation = "matrix_OR_dspMatrix",
         nSamples = "integer",
         mixtureWeights = "numeric"
     ),
@@ -89,14 +103,17 @@ setValidity("LdMatrix", function(object) {
     )
 }
 
-# The matrix must be square over exactly the object's variants, labelled by
-# their ids: every consumer looks LD up by id, so a matrix whose labels drift
-# from the variant table would hand back some other variant's LD.
+# The matrix must be square over exactly the object's variants. A packed one
+# is labelled by them; a base matrix -- in an LdMatrix saved before packing --
+# carries their ids as dimnames, and every consumer looks LD up by id, so
+# labels drifting from the variant table would hand back some other
+# variant's LD.
 # @noRd
 .ldmCheckShape <- function(object) {
     R <- object@correlation
     p <- length(object)
-    if (!is.numeric(R) || nrow(R) != p || ncol(R) != p) {
+    numeric <- methods::is(R, "dspMatrix") || is.numeric(R)
+    if (!numeric || nrow(R) != p || ncol(R) != p) {
         return(glue(
             "`correlation` is {nrow(R)} x {ncol(R)} but there are {p} ",
             "variant(s); it must be numeric and square over them."
@@ -105,7 +122,7 @@ setValidity("LdMatrix", function(object) {
     # An empty matrix has no labels to check: subsetting to zero variants
     # leaves NULL dimnames, which is as labelled as nothing gets.
     ids <- as.character(S4Vectors::mcols(object)$SNP)
-    if (p == 0L) {
+    if (p == 0L || methods::is(R, "dspMatrix")) {
         return(character())
     }
     if (
@@ -120,11 +137,16 @@ setValidity("LdMatrix", function(object) {
 }
 
 # A correlation matrix has a unit diagonal, entries in [-1, 1] and is
-# symmetric. Symmetry is checked on an evenly spaced block of rows and
-# columns: comparing a large matrix with its transpose costs another copy of
-# it, and the strided block catches a wrong input just as well.
+# symmetric. A packed one is symmetric as stored, so its stored triangle is
+# checked whole. A base one's symmetry is checked on an evenly spaced block
+# of rows and columns: comparing a large matrix with its transpose costs
+# another copy of it, and the strided block catches a wrong input just as
+# well.
 # @noRd
 .ldmCheckValues <- function(R, tol = 1e-6) {
+    if (methods::is(R, "dspMatrix")) {
+        return(.ldmCheckPacked(R, tol))
+    }
     p <- nrow(R)
     if (!is.numeric(R) || p == 0L || nrow(R) != ncol(R)) {
         return(character())
@@ -141,12 +163,39 @@ setValidity("LdMatrix", function(object) {
             "`correlation`'s diagonal is not 1."
         }
     )
+    c(problems, .ldmCheckSymmetric(R, tol))
+}
+
+# @noRd
+.ldmCheckSymmetric <- function(R, tol = 1e-6) {
+    p <- nrow(R)
     probe <- unique(round(seq(1, p, length.out = min(p, 200L))))
     block <- R[probe, probe, drop = FALSE]
     if (max(abs(block - t(block))) > tol) {
-        problems <- c(problems, "`correlation` is not symmetric.")
+        return("`correlation` is not symmetric.")
     }
-    problems
+    character()
+}
+
+# @noRd
+.ldmCheckPacked <- function(R, tol) {
+    values <- R@x
+    if (anyNA(values)) {
+        return("`correlation` holds missing values.")
+    }
+    if (length(values) == 0L) {
+        return(character())
+    }
+    span <- range(values)
+    diagonal <- Matrix::diag(R)
+    c(
+        if (span[[1L]] < -1 - tol || span[[2L]] > 1 + tol) {
+            "`correlation` holds entries outside [-1, 1]."
+        },
+        if (max(abs(diagonal - 1)) > tol) {
+            "`correlation`'s diagonal is not 1."
+        }
+    )
 }
 
 # @noRd
@@ -256,14 +305,15 @@ LdMatrix <- function(
     methods::new(
         "LdMatrix",
         gr,
-        correlation = R,
+        correlation = .packedLd(R),
         nSamples = as.integer(round(nSamples)),
         mixtureWeights = as.numeric(mixtureWeights)
     )
 }
 
-# A plain numeric matrix: a Matrix-package matrix is made dense, as every
-# consumer works on one.
+# A plain numeric matrix: a Matrix-package matrix is made dense first, to be
+# checked as one and then packed (.packedLd()). Symmetry is checked here,
+# before packing keeps only the upper triangle.
 # @noRd
 #' @importFrom checkmate assertMatrix
 .ldmAsMatrix <- function(correlation) {
@@ -276,6 +326,12 @@ LdMatrix <- function(
         any.missing = FALSE,
         .var.name = "correlation"
     )
+    if (nrow(correlation) == ncol(correlation) && nrow(correlation) > 0L) {
+        asymmetric <- .ldmCheckSymmetric(correlation)
+        if (length(asymmetric) > 0L) {
+            abort(asymmetric)
+        }
+    }
     correlation
 }
 
@@ -425,13 +481,15 @@ LdMatrix <- function(
         seqnames = withChrPrefix(as.character(tbl$chrom)),
         ranges = IRanges::IRanges(as.integer(tbl$pos), width = 1L)
     )
-    S4Vectors::`mcols<-`(
+    # Alleles in upper case as every reader spells them; the labels (SNP, the
+    # matrix's dimnames) stay as given.
+    .canonAlleleMcols(S4Vectors::`mcols<-`(
         `names<-`(gr, tbl$SNP),
         value = S4Vectors::DataFrame(
             select(tbl, -all_of(c("chrom", "pos"))),
             row.names = NULL
         )
-    )
+    ))
 }
 
 # ---- mixtures ---------------------------------------------------------------
@@ -458,12 +516,11 @@ LdMatrix <- function(
         aligned = aligned,
         w = w
     )
-    ids <- rownames(ref@correlation)[common]
     gr <- .ldmMixtureVariants(ref[common], components, aligned, w)
     methods::new(
         "LdMatrix",
         gr,
-        correlation = `dimnames<-`(R, list(ids, ids)),
+        correlation = .packedLd(R),
         nSamples = .ldmMixtureN(map_int(components, nSamples), w),
         mixtureWeights = w
     )
@@ -524,7 +581,7 @@ LdMatrix <- function(
 # allele, which negates each of its correlations.
 # @noRd
 .ldmAlignedR <- function(x, aligned) {
-    R <- unname(x@correlation[aligned$idx, aligned$idx, drop = FALSE])
+    R <- .ldmBlock(x, aligned$idx)
     if (all(aligned$sign > 0)) {
         return(R)
     }
@@ -591,15 +648,69 @@ LdMatrix <- function(
 setMethod("extractROWS", "LdMatrix", function(x, i) {
     i <- normalizeSingleBracketSubscript(i, x)
     ans <- methods::callNextMethod(x, i)
-    ans@correlation <- x@correlation[i, i, drop = FALSE]
+    ans@correlation <- .packedLd(.ldmBlock(x, i))
     ans
 })
+
+# ---- packed storage ----------------------------------------------------------
+
+# `R`, a symmetric correlation matrix, packed: its upper triangle, the room
+# of half the full matrix, without dimnames (an LdMatrix's variants name its
+# rows). A matrix packed already is left as it is.
+# @noRd
+.packedLd <- function(R) {
+    if (methods::is(R, "dspMatrix")) {
+        return(R)
+    }
+    Matrix::pack(Matrix::forceSymmetric(unname(R), uplo = "U"))
+}
+
+# `R` as a base matrix: unpacked when packed (.packedLd()), as it is when it
+# is a base matrix already -- one saved before packing.
+# @noRd
+.unpackedLd <- function(R) {
+    if (methods::is(R, "dspMatrix")) methods::as(R, "matrix") else R
+}
+
+# The block of `x`'s correlations over variants `idx`, as a base matrix
+# without dimnames: the packed block .ldmPackedBlock() reads, unpacked. The
+# whole matrix in order is unpacked as it is stored.
+# @noRd
+.ldmBlock <- function(x, idx) {
+    R <- x@correlation
+    if (!methods::is(R, "dspMatrix")) {
+        return(unname(R[idx, idx, drop = FALSE]))
+    }
+    if (identical(as.integer(idx), seq_len(nrow(R)))) {
+        return(methods::as(R, "matrix"))
+    }
+    methods::as(.ldmPackedBlock(x, idx), "matrix")
+}
+
+# The block of `x`'s correlations over variants `idx`, packed: the Matrix
+# package's subsetting of the stored triangle, which keeps the block packed.
+# It reads the upper triangle, the one an LdMatrix stores: Matrix 1.7
+# misreads a lower one under indices out of order, so one saved that way is
+# transposed (the same matrix, packed by its upper triangle) first.
+# @noRd
+.ldmPackedBlock <- function(x, idx) {
+    R <- x@correlation
+    if (!methods::is(R, "dspMatrix")) {
+        return(.packedLd(R[idx, idx, drop = FALSE]))
+    }
+    upper <- if (identical(R@uplo, "U")) R else Matrix::t(R)
+    upper[idx, idx, drop = FALSE]
+}
 
 # ---- accessors --------------------------------------------------------------
 
 #' @rdname ldMatrix
 #' @export
-setMethod("ldMatrix", "LdMatrix", function(x) x@correlation)
+setMethod("ldMatrix", "LdMatrix", function(x) {
+    R <- .unpackedLd(x@correlation)
+    ids <- as.character(S4Vectors::mcols(x)$SNP)
+    if (length(ids) == 0L) R else `dimnames<-`(R, list(ids, ids))
+})
 
 #' @rdname ldMatrix
 #' @importFrom S4Arrays as.matrix
@@ -616,6 +727,21 @@ setAs("LdMatrix", "matrix", function(from) ldMatrix(from))
 #' @rdname nSamples
 #' @export
 setMethod("nSamples", "LdMatrix", function(x, ...) x@nSamples)
+
+# An LdMatrix saved before its matrix was stored packed has it packed.
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "LdMatrix",
+    function(object, ..., verbose = FALSE) {
+        object <- methods::callNextMethod()
+        if (!methods::is(object@correlation, "dspMatrix")) {
+            object@correlation <- .packedLd(object@correlation)
+        }
+        object
+    }
+)
 
 #' @rdname mixtureWeights
 #' @export

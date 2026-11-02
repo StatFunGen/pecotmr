@@ -9,7 +9,10 @@
 # region_id), the region's per-effect susie alpha table (`susieAlpha`), its
 # region metadata (`regionInfo`) and the run's jointly-estimated group priors
 # (`groupPriors`, repeated on each of the run's rows, as a GWAS fit's
-# settings repeat on its blocks).
+# settings repeat on its blocks). Those priors are the run's one genome-wide
+# estimate -- its EM step fits them across every region, then fine-maps each
+# region under them -- so validity requires a run's rows to carry the same
+# priors, and ctwasGroupPriors() tabulates them once per run.
 #
 # Unlike the QTL family, `trait` is NOT a key -- cTWAS is multi-gene per run,
 # so genes live inside the elements. Optional joint columns (jointStudies,
@@ -38,7 +41,11 @@ NULL
 #'   multi-study or multi-context run and participate in the uniqueness key,
 #'   exactly as in the \code{\linkS4class{TwasWeights}} and fine-mapping
 #'   families. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
-#'   stack every region back into one \code{GRanges}.
+#'   stack every region back into one \code{GRanges}. The group priors are
+#'   the run's one genome-wide estimate, fitted across all its regions, so a
+#'   run's rows must carry the same priors: rows of one identity whose
+#'   priors differ came from separately fitted runs and are refused.
+#'   \code{\link{ctwasGroupPriors}} tabulates them once per run.
 #' @seealso \code{\link{CtwasResult}} for the constructor and
 #'   \code{\link{ctwasPipeline}} for the pipeline that builds one.
 #' @export
@@ -79,7 +86,8 @@ setClass(
     jointCols <- intersect(c("jointStudies", "jointContexts"), cols)
     problems <- c(
         .ctwasResCheckJointCols(object, jointCols),
-        .ctwasResCheckTupleUniqueness(object, jointCols)
+        .ctwasResCheckTupleUniqueness(object, jointCols),
+        .ctwasResCheckRunPriors(object, jointCols)
     )
     if (length(problems) == 0L) TRUE else problems
 }
@@ -115,6 +123,40 @@ setClass(
         ))
     }
     NULL
+}
+
+# A run's regions are fine-mapped under the group priors its one EM fit
+# estimated across all of them, so its rows carry the same priors. Rows of one
+# identity whose priors differ came from separately fitted runs -- c() of
+# per-chromosome runs, say -- which that identity cannot tell apart.
+# @noRd
+#' @importFrom purrr map2_lgl
+.ctwasResCheckRunPriors <- function(object, jointCols) {
+    md <- mcols(object, use.names = FALSE)
+    first <- .ctwasRunFirstRows(md, c(.CTWAS_ID_COLS, jointCols))
+    priors <- as.list(md$groupPriors)
+    mixed <- unique(first[!map2_lgl(priors, priors[first], identical)])
+    if (length(mixed) == 0L) {
+        return(NULL)
+    }
+    ids <- as_tibble(as.data.frame(md[mixed, .CTWAS_ID_COLS, drop = FALSE]))
+    runs <- glue(
+        "({ids$gwasStudy}, {ids$study}, {ids$context}, {ids$method})"
+    )
+    str_c(
+        "run(s) ",
+        str_flatten(utils::head(runs, 5L), ", "),
+        " carry different group priors on their rows; a run's regions ",
+        "share the priors of its one EM fit, so separately fitted runs ",
+        "need distinct identities"
+    )
+}
+
+# Each row's run, as the first row sharing its identity.
+# @noRd
+.ctwasRunFirstRows <- function(md, keyCols) {
+    keys <- .rtlTupleKeys(md, keyCols, nrow(md))
+    match(keys, keys)
 }
 
 # @noRd
@@ -189,19 +231,17 @@ CtwasResult <- function(
     walk2(names(supplied), supplied, .ctwasCheckJointColLength, n = n)
     entries <- as.list(entry)
     walk(seq_along(entries), .ctwasAssertEntry, entries = entries)
-    identity <- exec(
-        S4Vectors::DataFrame,
-        !!!c(
-            list(
-                gwasStudy = as.character(gwasStudy),
-                study = as.character(studyName),
-                context = as.character(context),
-                method = as.character(method)
-            ),
-            map(supplied, as.character),
-            list(check.names = FALSE)
-        )
+    dataFrameArgs <- c(
+        list(
+            gwasStudy = as.character(gwasStudy),
+            study = as.character(studyName),
+            context = as.character(context),
+            method = as.character(method)
+        ),
+        map(supplied, as.character),
+        list(check.names = FALSE)
     )
+    identity <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     .withMetadata(
         .ctwasNewResult(identity, map(entries, .ctwasSplitRun)),
         metadata
@@ -323,16 +363,14 @@ CtwasResult <- function(
     reps <- rep(seq_along(runs), map_int(runs, .ctwasRunSize))
     pieces <- c("susieAlpha", "regionInfo", "groupPriors")
     payload <- set_names(map(pieces, .ctwasPayloadColumn, runs = runs), pieces)
+    dataFrameArgs <- c(
+        list(blockId = list_c(map(runs, "blockId")) %||% character(0)),
+        payload,
+        list(check.names = FALSE)
+    )
     md <- cbind(
         identity[reps, , drop = FALSE],
-        exec(
-            S4Vectors::DataFrame,
-            !!!c(
-                list(blockId = list_c(map(runs, "blockId")) %||% character(0)),
-                payload,
-                list(check.names = FALSE)
-            )
-        )
+        exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     )
     elements <- list_flatten(map(runs, "elements"))
     grl <- S4Vectors::`mcols<-`(.rtlBindElements(unname(elements)), value = md)
@@ -406,7 +444,8 @@ setMethod("contexts", "CtwasResult", function(x) {
     if (length(parts) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    ranges <- exec(c, !!!map(unname(parts), GenomicRanges::granges))
+    partRanges <- map(unname(parts), GenomicRanges::granges)
+    ranges <- exec(c, !!!partRanges)
     out <- S4Vectors::`mcols<-`(
         ranges,
         value = S4Vectors::DataFrame(
@@ -428,6 +467,58 @@ setMethod("ctwasPosteriors", "CtwasResult", function(x) {
 setMethod("susieAlpha", "CtwasResult", function(x) {
     .ctwasAggregateRows(x, as.list(x$susieAlpha))
 })
+
+#' @rdname ctwasGroupPriors
+#' @export
+setMethod("ctwasGroupPriors", "CtwasResult", function(x) {
+    md <- mcols(x, use.names = FALSE)
+    idCols <- c(
+        .CTWAS_ID_COLS,
+        intersect(c("jointStudies", "jointContexts"), colnames(md))
+    )
+    runs <- unique(.ctwasRunFirstRows(md, idCols))
+    ids <- as_tibble(as.data.frame(md[runs, idCols, drop = FALSE]))
+    priors <- as.list(md$groupPriors)[runs]
+    list_rbind(c(
+        list(bind_cols(ids[0L, ], .ctwasPriorTable(NULL))),
+        map(seq_along(runs), .ctwasRunPriorRows, ids = ids, priors = priors)
+    ))
+})
+
+# One run's identity beside its priors, one row per group.
+# @noRd
+.ctwasRunPriorRows <- function(i, ids, priors) {
+    groups <- .ctwasPriorTable(priors[[i]])
+    bind_cols(slice(ids, rep(i, nrow(groups))), groups)
+}
+
+# ctwas's EM output (its `param` list) as one row per group. ctwas names
+# group_prior, group_prior_var and group_size by group, so the groups are
+# group_prior's and the other two are matched to them by name: NA where the
+# run recorded none.
+# @noRd
+#' @importFrom purrr pluck
+.ctwasPriorTable <- function(param) {
+    prior <- pluck(param, "group_prior")
+    groups <- names(prior) %||% rep(NA_character_, length(prior))
+    tibble(
+        group = groups,
+        group_size = .ctwasPriorByGroup(pluck(param, "group_size"), groups),
+        group_prior = as.numeric(unname(prior)),
+        group_prior_var = .ctwasPriorByGroup(
+            pluck(param, "group_prior_var"),
+            groups
+        )
+    )
+}
+
+# @noRd
+.ctwasPriorByGroup <- function(values, groups) {
+    if (is.null(names(values))) {
+        return(rep(NA_real_, length(groups)))
+    }
+    as.numeric(unname(values[groups]))
+}
 
 #' @rdname show-methods
 #' @export

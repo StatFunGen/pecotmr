@@ -12,6 +12,7 @@ twasWeightsPipeline(data, ...)
 \S4method{twasWeightsPipeline}{QtlDataset}(
   data,
   methods = "default",
+  backend = NULL,
   contexts = NULL,
   traitId = NULL,
   region = NULL,
@@ -38,6 +39,7 @@ twasWeightsPipeline(data, ...)
 \S4method{twasWeightsPipeline}{QtlSumStats}(
   data,
   methods = NULL,
+  backend = NULL,
   contexts = NULL,
   traitId = NULL,
   cisWindow = NULL,
@@ -54,6 +56,7 @@ twasWeightsPipeline(data, ...)
 \S4method{twasWeightsPipeline}{MultiStudyQtlDataset}(
   data,
   methods = "default",
+  backend = NULL,
   contexts = NULL,
   traitId = NULL,
   region = NULL,
@@ -92,6 +95,19 @@ embedded \code{QtlSumStats}, then rbinds the results.}
 default is \code{c("lasso", "prsCs", "dprGibbs")}, which there run
 lassosum, PRS-CS and SDPR; the fine-mapping methods are not in it, and
 are requested by name together with a \code{fineMappingResult}.}
+
+\item{backend}{The engine a method with several runs on, as a named
+character vector keyed by method, e.g.
+\code{c(bayesR = "hibayes", bayesL = "bglr")}; \code{NULL} (the
+default) leaves every method on its default. The Bayesian alphabet
+methods have several (see \code{\link{bayesAlphabetWeights}}), and on
+summary statistics so do \code{lasso} (\code{"pecotmr"} or
+\code{"bigsnpr"}, which is slow: see \code{\link{lassosumRssWeights}})
+and \code{ldpred2Auto} and \code{ldpred2Grid}
+(\code{"bigsnpr"} or \code{"pecotmr"}). Naming a
+method that is not being run, one with a single implementation, or an
+engine the method lacks on the input is an error, and so is a
+\code{backend} inside a \code{methods} entry.}
 
 \item{contexts}{Optional context selection; \code{NULL} (the default)
 uses every context. A character vector applies to every study: a context
@@ -163,14 +179,15 @@ so a row narrowed since its fit warns (condition class
 \code{pecotmrFitCoverage}).}
 
 \item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache. For each
-requested \code{(study, context, trait, method)} tuple already present in
-this collection, the cached \code{TwasWeightsRow} is copied through and
-the corresponding weight fit is skipped. Only the un-cached method subset
-is fit; the cached and fresh entries are concatenated in the returned
-collection. Per-tuple matching mirrors the \code{fineMappingResult} cache
-in \code{\link{fineMappingPipeline}}. Multivariate dispatch
-(\code{mvsusie}, \code{mr.mash}) is unaffected because those methods
-produce one fit jointly across multiple \code{(context, trait)} columns.}
+requested \code{(study, context, trait, method)} entry already present in
+this collection, the cached entry is copied through and the
+corresponding weight fit is skipped. Only the un-cached methods are fit;
+the cached and fresh entries are combined in the returned collection.
+Per-entry matching mirrors the \code{fineMappingResult} cache in
+\code{\link{fineMappingPipeline}}. A multivariate method
+(\code{mvsusie}, \code{mr.mash}) fits a group of contexts together, so
+its group is resumed only when the cache holds every context's entry;
+otherwise the whole group is refit.}
 
 \item{mashPrior}{Optional \code{\link{MashPrior}} (or coercible) supplying
 data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
@@ -223,12 +240,22 @@ components fitted per context when \code{usePCA = TRUE} (default
   takes, which has no \code{"none"} --- its \code{susieFit} slot is part
   of the returned object's contract.
 
-  \code{"full"} is honoured by the mr.mash engines and, on summary
-  statistics, by \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
-  \code{mcp} and \code{l0learn}, whose full fit also keeps every candidate's
-  coefficients; every other method keeps its fit whole or not at all.
-  Requesting \code{"full"} for a run where no method can honour it is an
-  error, and a mixed run warns rather than dropping it in silence.}
+  Every method keeps a fit, and the fit names the variants it was fitted
+  on. \code{"full"} is honoured by the mr.mash engines; on summary
+  statistics also by \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+  \code{mcp} and \code{l0learn}, whose full fit keeps every candidate's
+  coefficients; and on individual-level data by \code{lasso}, \code{enet},
+  \code{ridge}, \code{scad}, \code{mcp}, \code{l0learn}, the Bayesian
+  alphabet, \code{mrash} and the DPR methods, whose full fit is the
+  engine's whole object where the slim one keeps the selected fit or the
+  posterior summaries, without any copy of the data. Every other method
+  keeps its fit whole or not at all, except the fine-mapping methods
+  (\code{susie}, \code{susieInf}, \code{susieAsh}, \code{mvsusie},
+  \code{fsusie}), whose rows keep none: their weights come from the
+  \code{fineMappingResult}'s fit, which is where \code{ctwasPipeline()}
+  reads it. Requesting \code{"full"} for a run where no method can honour
+  it is an error, and a mixed run warns rather than dropping it in
+  silence.}
 
 \item{residualizationParam}{Covariate residualization settings, built with
   \code{\link{ResidualizationParam}} and forwarded to
@@ -275,9 +302,10 @@ built with
 above.}
 }
 \value{
-A \code{\link{TwasWeights}} collection keyed by \code{(study,
-  context, trait, method)}. Each row's LD reference is none for
-  individual-level fits and that of the input row(s) for RSS-derived fits.
+A \code{\link{TwasWeights}} collection with one row per gene --
+  \code{(study, context, trait)} and joint group -- holding its methods.
+  Each row's LD reference is none for individual-level fits and that of
+  the input row(s) for RSS-derived fits.
   Its \code{seqinfo()} names the genome build the inputs name; inputs
   naming different builds are refused.
 }
@@ -300,11 +328,16 @@ Method-restriction rules (enforced):
         (require at least two traits OR at least two contexts).
   \item \code{prsCs} runs only on summary statistics, so it is rejected
         on \code{QtlDataset} input.
-  \item \code{dprVb}, \code{dprAdaptiveGibbs} and the Bayesian alphabet
-        (\code{bayesA}, \code{bayesB}, \code{bayesC}, \code{bayesL},
-        \code{bayesN}, \code{bayesR}, \code{bLasso}) run only on
-        individual-level data, so they are rejected on \code{QtlSumStats}
-        input.
+  \item \code{dprVb} and \code{dprAdaptiveGibbs} run only on
+        individual-level data, so they are rejected on
+        \code{QtlSumStats} input.
+  \item The Bayesian alphabet (\code{bayesA}, \code{bayesB},
+        \code{bayesC}, \code{bayesL}, \code{bayesN}, \code{bayesR})
+        runs on both, each method on several engines chosen with
+        \code{backend}: see \code{\link{bayesAlphabetWeights}} and
+        \code{\link{bayesAlphabetRssWeights}}. On summary statistics
+        a row with a genotype reference defaults to pecotmr's own
+        sampler, which reads its factor of the LD.
   \item \code{lasso}, \code{enet} and \code{ridge} are glmnet on
         individual-level data and the penalized RSS solver on summary
         statistics. \code{enet} mixes the two penalties at

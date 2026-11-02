@@ -20,23 +20,24 @@ TwasWeights(
 )
 }
 \arguments{
-\item{studyName}{Character vector of study identifiers. Use the sentinel
-\code{"joint"} for rows produced by a cross-study joint fit.}
+\item{studyName}{Character vector of study identifiers. A joint fit's
+entries keep their own study, context and trait, and record the group in
+\code{jointStudies}, \code{jointContexts} or \code{jointTraits}.}
 
-\item{context}{Character vector of context labels. Use \code{"joint"} for
-rows produced by a cross-context joint fit.}
+\item{context}{Character vector of context labels.}
 
-\item{trait}{Character vector of trait identifiers. Use \code{"joint"} for
-rows produced by a cross-trait joint fit.}
+\item{trait}{Character vector of trait identifiers.}
 
-\item{method}{Character vector of TWAS weight method names.}
+\item{method}{Character vector of TWAS weight method names. A snake_case
+name is stored as its camelCase token (\code{susie_inf} as
+\code{susieInf}); a gene holds one entry per method.}
 
 \item{entry}{List / \code{SimpleList} of \code{TwasWeightsRow} objects.}
 
-\item{jointStudies}{Optional character vector (length \code{length(study)})
-listing the semicolon-joined studies participating in each row's
-cross-study joint fit, or \code{NA_character_} for non-joint rows. When
-\code{NULL} (default) the column is omitted.}
+\item{jointStudies}{Optional character vector (one per entry) listing the
+semicolon-joined studies participating in each entry's cross-study joint
+fit, or \code{NA_character_} for non-joint entries. When \code{NULL}
+(default) the column is omitted.}
 
 \item{jointContexts}{Optional character vector for cross-context joints. Same
 shape as \code{jointStudies}.}
@@ -44,21 +45,21 @@ shape as \code{jointStudies}.}
 \item{jointTraits}{Optional character vector for cross-trait joints. Same
 shape as \code{jointStudies}.}
 
-\item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
-\code{NULL}), carried forward as provenance; not part of the identity key.
-\code{NULL} (default) omits the column.}
+\item{traitPos}{Optional per-entry trait genomic anchor (a \code{GRanges}
+or \code{NULL}), carried forward as provenance; not part of the
+identity key. \code{NULL} (default) omits the column.}
 
-\item{region}{Optional per-row analysis WINDOW (a \code{GRanges} or
-\code{NULL}) -- the interval each row's fit was run over, carried
-forward as provenance; not part of the identity key. \code{NULL}
-(default) omits the column, and \code{\link{genomicRegion}} then
-derives the window from the span of the variants present.}
+\item{region}{Optional per-entry analysis WINDOW (a \code{GRanges} or
+\code{NULL}) -- the interval each fit was run over, carried forward as
+provenance; not part of the identity key. A gene's methods share one.
+\code{NULL} (default) omits the column, and \code{\link{genomicRegion}}
+then derives the window from the span of the variants present.}
 
 \item{ldReference}{The LD reference the weights were derived against --
 a genotype panel (see \code{\link{readGenotypes}}), a
-\code{GenotypeMixture} or an \code{LdMatrix} -- used for every row, or
-a list with one per row; \code{NULL} for individual-level fits. Each
-distinct reference is stored once.}
+\code{GenotypeMixture} or an \code{LdMatrix} -- used for every entry,
+or a list with one per entry; \code{NULL} for individual-level fits.
+Each distinct reference is stored once, and a gene's methods share one.}
 
 \item{metadata}{A list of free-form metadata about the collection,
 as \code{metadata()} holds on any Bioconductor vector. Default
@@ -68,8 +69,10 @@ as \code{metadata()} holds on any Bioconductor vector. Default
 A \code{TwasWeights} object.
 }
 \description{
-Construct a \code{TwasWeights} collection from per-tuple
-  vectors and a list of \code{TwasWeightsRow} payloads (one per tuple).
+Construct a \code{TwasWeights} collection from per-entry
+  vectors and a list of \code{TwasWeightsRow} payloads, one per (study,
+  context, trait, method) entry. The entries of one gene -- one (study,
+  context, trait) and joint group -- become one row, its methods an axis.
 }
 \examples{
 twe <- TwasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),

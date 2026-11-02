@@ -21,7 +21,9 @@ sdpr(
   thin = 5,
   optLlk = 1,
   verbose = TRUE,
-  seed = NULL
+  seed = NULL,
+  raoBlackwell = FALSE,
+  nChains = 1
 )
 }
 \arguments{
@@ -64,10 +66,19 @@ arrays in a separate cohort). Default is 1.}
 
 \item{seed}{Integer or \code{NULL}. Random seed for the Gibbs sampler;
 \code{NULL} leaves the RNG state unchanged.}
+
+\item{raoBlackwell}{Report \eqn{\eta} times the effects' conditional
+posterior means, averaged over the kept iterations, rather than the
+draws' average. Default \code{FALSE}.}
+
+\item{nChains}{The number of chains, from seeds \code{seed},
+\code{seed + 1}, ...; they are tested for divergence and, with more
+than one, combined as \code{\link{prsCs}}'s are. Default 1.}
 }
 \value{
 A list with \code{betaEst} (the estimated effect sizes) and
-  \code{h2} (the estimated heritability).
+  \code{h2} (the estimated heritability), and with several chains
+  \code{chains} as \code{\link{prsCs}} records it.
 }
 \description{
 This function is a wrapper for the SDPR C++ implementation, which performs
@@ -86,5 +97,11 @@ This function wraps a rewritten and adapted version of the SDPR C++
   robust Bayesian nonparametric method for prediction of complex traits
   using summary statistics", PLoS Genetics 17(7): e1009697.
   \doi{10.1371/journal.pgen.1009697}
+
+  It departs from the original where a window has few causal variants.
+  A lone causal variant is drawn jointly, as several are; the original's
+  closed-form draw let the global scale of the effects run away. That
+  scale has an N(1, 1) prior where the original's is flat, under which a
+  window that drew no causal variant tended to stay null.
 }
 \keyword{internal}

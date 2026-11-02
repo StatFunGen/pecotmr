@@ -16,14 +16,19 @@ objects. Names become annotation names.}
 \item{snpRanges}{A \code{GRanges} object defining SNP positions.}
 
 \item{annotationMeta}{A \code{data.frame} with annotation metadata (name,
-tier, type). If NULL, auto-detected from file format.}
+tier, type). If NULL, every annotation is a candidate, and its type is
+continuous for a BigWig signal, binary for BED intervals, and for an
+S-LDSC \code{.annot} column binary when its values are 0 and 1,
+continuous otherwise.}
 
 \item{genome}{Character, genome build.}
 
 \item{...}{Additional arguments.}
 }
 \value{
-An \code{AnnotationMatrix} object.
+An \code{AnnotationMatrix} object. Its annotation matrix is stored
+  sparse (a \code{dgCMatrix}) when that is smaller than dense, as for
+  mostly-zero binary annotations.
 }
 \description{
 Read genomic annotations from files (BED, BigWig, S-LDSC .annot

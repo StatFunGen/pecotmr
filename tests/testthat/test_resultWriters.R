@@ -80,6 +80,27 @@ makeTestFineMappingResult <- function(n = 5) {
 # Fine-mapping result to VCF
 # =============================================================================
 
+test_that("a weights export reads the joint columns a collection carries", {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:3))
+    row <- TwasWeightsRow(ids, c(0.1, 0.2, 0.3))
+    tw <- TwasWeights(
+        studyName = c("s1", "s1"),
+        context = c("c1", "c2"),
+        trait = c("g1", "g1"),
+        method = c("mrmash", "mrmash"),
+        entry = list(row, row),
+        jointContexts = c("c1;c2", "c1;c2")
+    )
+    expect_identical(
+        pecotmr:::.twbColumnOr(tw, "jointContexts"),
+        c("c1;c2", "c1;c2")
+    )
+    expect_identical(
+        pecotmr:::.twbColumnOr(tw, "jointTraits"),
+        rep(NA_character_, 2L)
+    )
+})
+
 test_that("writeGwasVcf(FineMapping): emits PIP + CS FORMAT fields", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Biostrings")
@@ -263,11 +284,12 @@ test_that("writeGwasVcf(FineMapping): each split flag emits one VCF per tag", {
     )
     d <- withr::local_tempdir()
     for (case in names(cases)) {
+        caseFlags <- cases[[case]]$flags
         paths <- exec(
             writeGwasVcf,
             fmr,
             file.path(d, str_c(case, ".vcf")),
-            !!!cases[[case]]$flags
+            !!!caseFlags
         )
         expect_equal(length(paths), 2L, info = case)
         expect_true(
@@ -1079,14 +1101,12 @@ test_that("writeBed writes the published TWAS-weight schema", {
     # the posterior columns a weights table has nothing to say about are gone
     expect_false(any(c("PIP", "LBF", "CS95") %in% names(tbl)))
     # one row per (model, variant): 168 variants each
-    # 2 of the 11 rows are fine-mapping-derived and are skipped
+    # 2 of the 11 entries are fine-mapping-derived and are skipped
     expect_identical(nrow(tbl), 9L * 168L)
+    methods <- .twasCells(twasWeightsExample)$method
     expect_setequal(
         unique(tbl$method),
-        setdiff(
-            as.character(S4Vectors::mcols(twasWeightsExample)$method),
-            .TWB_FINE_MAPPING_METHODS
-        )
+        methods[!.twbIsFineMappingMethod(methods)]
     )
     expect_true(all(tbl$end == tbl$start + 1L))
     expect_false(is.unsorted(tbl$start))
@@ -1251,17 +1271,17 @@ test_that("writeGwasVcf narrows TWAS models with the identity selectors", {
     expect_length(header[-seq_len(9L)], 1L)
     expect_error(
         writeGwasVcf(twasWeightsExample, out, method = "nope"),
-        "no rows match"
+        "no entries match"
     )
     # Selecting a fine-mapping method leaves nothing exportable, which is a
-    # different refusal from "no rows match".
+    # different refusal from "no entries match".
     expect_error(
         suppressMessages(writeGwasVcf(
             twasWeightsExample,
             out,
             method = "susie"
         )),
-        "every selected row is fine-mapping-derived"
+        "every selected entry is fine-mapping-derived"
     )
 })
 
@@ -1712,17 +1732,16 @@ test_that("every weight row being fine-mapping-derived is an error", {
     # Those weights are the fine-mapping posterior re-expressed, so there is
     # nothing left to write once they are skipped.
     data(twasWeightsExample, envir = environment())
-    fm <- twasWeightsExample[
-        is_in(
-            as.character(twasWeightsExample$method),
-            .TWB_FINE_MAPPING_METHODS
-        )
-    ]
-    expect_gt(nrow(fm), 0L)
+    methods <- methodNames(twasWeightsExample)
+    fm <- .twasKeepMethods(
+        twasWeightsExample,
+        methods[.twbIsFineMappingMethod(methods)]
+    )
+    expect_gt(nrow(.twasCells(fm)), 0L)
     out <- withr::local_tempfile(fileext = ".bed")
     expect_error(
         suppressMessages(writeBed(fm, out)),
-        "every row is fine-mapping-derived"
+        "every entry is fine-mapping-derived"
     )
 })
 
@@ -1757,10 +1776,7 @@ test_that("both formats skip fine-mapping-derived weight rows alike", {
     # fine-mapping result says strictly more.
     skip_if_not_installed("VariantAnnotation")
     data(twasWeightsExample, envir = environment())
-    derived <- is_in(
-        as.character(twasWeightsExample$method),
-        .TWB_FINE_MAPPING_METHODS
-    )
+    derived <- .twbIsFineMappingMethod(.twasCells(twasWeightsExample)$method)
     expect_gt(sum(derived), 0L)
     out <- withr::local_tempfile(fileext = ".vcf")
     expect_message(
@@ -1771,10 +1787,29 @@ test_that("both formats skip fine-mapping-derived weight rows alike", {
     samples <- str_split(header, "\t")[[1L]][-seq_len(9L)]
     expect_length(samples, sum(!derived))
     # None of the samples names a fine-mapping method.
-    expect_false(any(str_detect(
-        samples,
-        str_c("\\|", .TWB_FINE_MAPPING_METHODS, "$", collapse = "|")
+    expect_false(any(.twbIsFineMappingMethod(
+        stringr::str_extract(samples, "[^|]+$")
     )))
+})
+
+test_that("fine-mapping rows are skipped under either spelling of the method", {
+    # A pipeline labels a row by token (susieInf), learnTwasWeights() by snake
+    # key (susie_inf). The skip list held only the snake keys, so a pipeline's
+    # SuSiE-inf and SuSiE-ash rows were exported as weights.
+    expect_equal(
+        .twbIsFineMappingMethod(c(
+            "susieInf",
+            "susie_inf",
+            "susieAsh",
+            "susie_ash",
+            "susie",
+            "mvsusie",
+            "fsusie",
+            "lasso",
+            "ensemble"
+        )),
+        c(rep(TRUE, 7L), FALSE, FALSE)
+    )
 })
 
 test_that("a weights export reads AF off the collection's LD panel", {
@@ -1786,16 +1821,14 @@ test_that("a weights export reads AF off the collection's LD panel", {
     data(ctwasWeightsExample, twasWeightsExample, envir = environment())
     panel <- ldReference(ctwasWeightsExample)[[1L]]
     expect_false(is.null(panel))
-    lasso <- twasWeightsExample[
-        as.character(twasWeightsExample$method) == "lasso"
-    ]
+    lasso <- .twasKeepMethods(twasWeightsExample, "lasso")
     expect_equal(nrow(lasso), 1L)
     exported <- function(ref) {
         withPanel <- TwasWeights(
             studyName = as.character(lasso$study),
             context = as.character(lasso$context),
             trait = as.character(lasso$trait),
-            method = as.character(lasso$method),
+            method = "lasso",
             entry = list(.twrRowParts(lasso, 1L)),
             ldReference = ref
         )
@@ -1807,7 +1840,7 @@ test_that("a weights export reads AF off the collection's LD panel", {
     rr <- SummarizedExperiment::rowRanges(panel)
     expect_equal(tbl$AF, rr$AF[match(tbl$ID, .grVariantIds(rr))])
     expect_false(anyNA(tbl$AF))
-    keep <- c("SNP", "A1", "A2")
+    keep <- setdiff(colnames(SummarizedExperiment::rowData(panel)), "AF")
     noAf <- SummarizedExperiment::`rowData<-`(
         panel,
         value = SummarizedExperiment::rowData(panel)[, keep]
@@ -1847,7 +1880,7 @@ test_that("a sumstats collection with no Z publishes no EZ", {
 # ---------------------------------------------------------------------------
 
 # A multi-trait weight matrix on a panel that records allele frequency: the
-# two shapes the single-trait fixtures never exercise. `mr_mash` because the
+# two shapes the single-trait fixtures never exercise. `mrmash` because the
 # matrix-weight fixture is a susie fit, which both exporters refuse as
 # fine-mapping-derived -- a joint TWAS fit is the case that reaches the
 # matrix paths at all.
@@ -1870,7 +1903,7 @@ test_that("a sumstats collection with no Z publishes no EZ", {
         studyName = "S1",
         context = "ctx",
         trait = "tA",
-        method = "mr_mash",
+        method = "mrmash",
         entry = list(TwasWeightsRow(
             variantIds = vids[seq_len(nVariant)],
             weights = w[seq_len(nVariant), , drop = FALSE]
@@ -1899,8 +1932,8 @@ test_that("a joint fit's VCF samples carry the weight-column label", {
     chrom <- hdr[str_starts(hdr, "#CHROM")]
     # The label is appended to the row's identity, so two weight columns of
     # one row stay two distinguishable samples.
-    expect_match(chrom, "S1\\|ctx\\|tA\\|mr_mash\\|tA")
-    expect_match(chrom, "S1\\|ctx\\|tA\\|mr_mash\\|tB")
+    expect_match(chrom, "S1\\|ctx\\|tA\\|mrmash\\|tA")
+    expect_match(chrom, "S1\\|ctx\\|tA\\|mrmash\\|tB")
 })
 
 test_that("a recorded data_source wins over the derived one", {
@@ -1990,7 +2023,7 @@ test_that("a weight matrix with no columns publishes a header-only file", {
             weightStandardized = FALSE
         ))
     )
-    expect_length(.twbWeightLabels(mcols(tw[[1L]])$weight), 0L)
+    expect_length(.twbWeightLabels(weights(.twrCellParts(tw, 1L, "lasso"))), 0L)
     expect_null(.twbWeightsTable(tw, NULL, NULL))
     out <- withr::local_tempfile(fileext = ".bed")
     writeBed(tw, out)

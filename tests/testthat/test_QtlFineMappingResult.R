@@ -18,7 +18,7 @@ test_that("QtlFineMappingResult: builds a collection keyed by 4-tuple", {
 })
 
 
-test_that("QtlFineMappingResult: validity does not recurse on key subset (#546)", {
+test_that("QTL result validity does not recurse on a key subset (#546)", {
     # The validity method builds a key-column data.frame to check tuple
     # uniqueness. Doing so via `object[, keyCols]` preserves the
     # QtlFineMappingResult class while dropping the required `entry` column;
@@ -57,11 +57,15 @@ test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
         entry = list(e),
         ldReference = gh
     )
-    # The reference is a panel; the handle it reads through is its seed.
+    # The reference is a panel; the handle it reads through is its seed,
+    # which keeps only the columns reading needs.
     refs <- ldReference(res)
     expect_named(refs, res$ldReference)
     expect_s4_class(refs[[1L]], "RangedSummarizedExperiment")
-    expect_identical(pecotmr:::.ldRefHandle(refs[[1L]]), gh)
+    expect_identical(
+        pecotmr:::.ldRefHandle(refs[[1L]]),
+        pecotmr:::.readingHandle(gh)
+    )
 })
 
 
@@ -145,7 +149,7 @@ test_that("QtlFineMappingResult: fineMappingResult errors on missing tuple", {
 })
 
 
-test_that("QtlFineMappingResult: single-row collection allows omitting selectors", {
+test_that("a one-row QtlFineMappingResult needs no selectors", {
     e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         studyName = "s1",
@@ -196,8 +200,8 @@ test_that("QtlFineMappingResult: accepts jointContexts column", {
 
 test_that("QtlFineMappingResult: jointStudies + jointTraits combine cleanly", {
     e <- .sc_makeFineMappingRow(3)
-    # Three per-context rows sharing the real (s1, c1, t1) tuple, each a slice of
-    # a different joint fit: univariate; a cross-study+trait mvsusieRss; a
+    # Three per-context rows sharing the real (s1, c1, t1) tuple, each a slice
+    # of a different joint fit: univariate; a cross-study+trait mvsusieRss; a
     # cross-context mvsusie. The joint* tags carry each fit's co-fit membership.
     res <- QtlFineMappingResult(
         studyName = c("s1", "s1", "s1"),
@@ -261,7 +265,7 @@ test_that("QtlFineMappingResult: length-mismatched joint vector errors", {
 
 # === Tests migrated from test_showMethods.R (QtlFineMappingResult) ===
 
-test_that("show.QtlFineMappingResult prints entry/study/context/trait/method counts", {
+test_that("show() prints a QtlFineMappingResult's entry and identity counts", {
     res <- QtlFineMappingResult(
         studyName = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -292,7 +296,7 @@ test_that("show.QtlFineMappingResult reports the ldReference source", {
 
 # === Tests migrated from test_collectionAccessors.R (QtlFineMappingResult) ===
 
-test_that("QtlFineMappingResult: pip returns named pip vector for selected tuple", {
+test_that("pip gives the selected tuple's named PIP vector", {
     e1 <- .ca_makeFmEntry(3)
     e2 <- .ca_makeFmEntry(4)
     res <- QtlFineMappingResult(
@@ -330,8 +334,9 @@ test_that("QtlFineMappingResult: pip() is one named numeric vector", {
 })
 
 
-test_that("QtlFineMappingResult: credibleSets aggregates every entry's credible sets with identity columns", {
-    # e1 (n=3) has cs_95 = susie_1/susie_1/susie_0 -> 2 CS members; e2 (n=2) -> 2.
+test_that("credibleSets aggregates every entry's sets with identity columns", {
+    # e1 (n=3) has cs_95 = susie_1/susie_1/susie_0 -> 2 CS members; e2 (n=2) ->
+    # 2.
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
@@ -360,7 +365,7 @@ test_that("QtlFineMappingResult: credibleSets aggregates every entry's credible 
     expect_equal(length(bare), 2L)
 })
 
-test_that("QtlFineMappingResult: marginalEffects aggregates every entry with identity columns", {
+test_that("marginalEffects aggregates every entry with identity columns", {
     e1 <- .sc_makeFineMappingRow(3)
     e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
@@ -406,7 +411,7 @@ test_that("QtlFineMappingResult: variantIds reads the entry's variantIds", {
 })
 
 
-test_that("QtlFineMappingResult: studyName/contexts/traitNames/methodNames are unique", {
+test_that("studyName, contexts, traitNames, methodNames are each unique", {
     e <- .ca_makeFmEntry(3)
     res <- QtlFineMappingResult(
         studyName = c("s1", "s1", "s2"),

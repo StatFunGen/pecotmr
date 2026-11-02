@@ -404,10 +404,12 @@ GwasFineMappingParam <- function(
 #'   \code{coloc::coloc.bf_bf}, built with \code{\link{ColocOptions}}. The
 #'   prior probabilities are set through \code{priors} instead, since the
 #'   enrichment adjustment reads them too.
-#' @return A \code{\linkS4class{ColocResult}}: one element per tested
-#'   (first-side credible set, second-side credible set) pair, holding
-#'   that pair's aligned variants with their \code{SNP.PP.H4}. Pair-level
-#'   metadata carries the identity columns (\code{study}, \code{context},
+#' @return A \code{\linkS4class{ColocResult}}: one element per scored group
+#'   -- a first-side row against a second-side row in one block -- holding
+#'   the group's aligned variants once, and one row per tested (first-side
+#'   credible set, second-side credible set) pair in \code{colocPairs()},
+#'   with the pair's \code{SNP.PP.H4} over those variants. The pair rows
+#'   carry the identity columns (\code{study}, \code{context},
 #'   \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasContext},
 #'   \code{gwasTrait}, \code{gwasMethod}), the block and stable
 #'   credible-set ids (\code{blockId}, \code{qtlCs}, \code{gwasCs}), the
@@ -1310,9 +1312,11 @@ colocPipeline <- function(
     sm <- .colocRenameNsnps(
         as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
     )
+    identityCols <- .colocRowIdentity(q, gInfo)
+    enrichmentCols <- .colocEnrichmentCols(useEnrichment, p12Info)
     mutate(
         sm,
-        !!!.colocRowIdentity(q, gInfo),
+        !!!identityCols,
         # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is
         # exactly what retainedMass runs parallel to -- so the mass reported
         # here is the mass of the two effects this row actually scores, not a
@@ -1343,7 +1347,7 @@ colocPipeline <- function(
             fill = NA_integer_
         ),
         blockId = gInfo$blockId %||% NA_character_,
-        !!!.colocEnrichmentCols(useEnrichment, p12Info)
+        !!!enrichmentCols
     )
 }
 
@@ -1433,8 +1437,9 @@ colocPipeline <- function(
 # spans fewer than 25% of the locus variants -- this prunes diffuse
 # signals before they reach coloc.bf_bf.
 #
-# Returns an integer vector of kept effect indices (empty when nothing
-# survives), or errors when susieR is unavailable.
+# Returns the kept effects as rows of the fit's arrays (empty when nothing
+# survives): susie_get_cs() names sets by row, which on a trimmed fit is not
+# the effect's own index. Errors when susieR is unavailable.
 # @noRd
 #' @importFrom susieR susie_get_cs
 #' @importFrom purrr map_lgl
@@ -1490,6 +1495,7 @@ colocPipeline <- function(
     if (ncol(lbfMatrix) == 0L) {
         return(NULL)
     }
+    effectIndex <- .fitEffectIndex(fit, nrow(allRows))
     list(
         lbf = lbfMatrix,
         variantIds = colnames(lbfMatrix),
@@ -1497,10 +1503,11 @@ colocPipeline <- function(
         # The fit's own effect indices, which -- unlike coloc's idx1 / idx2 --
         # are stable across calls and blocks, so they are what identifies a
         # credible set in the result.
-        effect = keep,
-        # How many effects the fit has before filtering, which is what a
-        # collapse of several blocks numbers the next block's effects after.
-        nEffects = nrow(allRows)
+        effect = effectIndex[keep],
+        # The largest effect index the fit has before filtering, which is
+        # what a collapse of several blocks numbers the next block's effects
+        # after.
+        nEffects = max(c(nrow(allRows), effectIndex))
     )
 }
 
@@ -1557,9 +1564,12 @@ colocPipeline <- function(
         isTRUE(colocLbfFilterParam$filterLbfCs) &&
             is.null(colocLbfFilterParam$secondary)
     ) {
+        # cs_index numbers the effects as the credible sets do, which the
+        # rows of a trimmed fit no longer do.
         csIdx <- fit[["sets"]][["cs_index"]]
         if (!is.null(csIdx) && length(csIdx) > 0L) {
-            return(csIdx)
+            rows <- .fitEffectRows(fit, csIdx)
+            return(rows[!is.na(rows)])
         }
     } else if (!is.null(colocLbfFilterParam$secondary)) {
         secIdx <- try_fetch(
@@ -1760,9 +1770,10 @@ colocPipeline <- function(
         map_chr(recs, "blockId"),
         unlist(.rtlBindElements(map(recs, "region")))
     )
+    paddedLbf <- map(recs, .colocPadLbf, ids = ids)
     list_assign(
         recs[[1L]],
-        lbf = exec(rbind, !!!map(recs, .colocPadLbf, ids = ids)),
+        lbf = exec(rbind, !!!paddedLbf),
         retainedMass = list_c(map(recs, "retainedMass")),
         effect = list_c(map2(recs, offsets, .colocShiftEffects)),
         nEffects = sum(map_int(recs, "nEffects")),
@@ -1878,7 +1889,8 @@ colocPipeline <- function(
         qtlRetainedMass = numeric(0),
         gwasRetainedMass = numeric(0)
     )
-    ColocResult(mutate(base, !!!.colocEnrichmentCols(enriched, NULL)), list())
+    enrichmentCols <- .colocEnrichmentCols(enriched, NULL)
+    ColocResult(mutate(base, !!!enrichmentCols), list())
 }
 
 # Look up this pair's enrichment factor in the user-supplied enrichment table.
@@ -1974,7 +1986,8 @@ colocPipeline <- function(
         ),
         colnames(sm)
     )
-    mutate(sm, !!!set_names(map(missing, .colocMissingColumn), missing))
+    missingCols <- set_names(map(missing, .colocMissingColumn), missing)
+    mutate(sm, !!!missingCols)
 }
 
 # @noRd

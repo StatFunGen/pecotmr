@@ -4,7 +4,13 @@
 \alias{enetWeights}
 \title{Compute TWAS weights via elastic net (glmnet)}
 \usage{
-enetWeights(X, y, alpha = 0.5, methodArgs = GlmnetOptions())
+enetWeights(
+  X,
+  y,
+  alpha = 0.5,
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = GlmnetOptions()
+)
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
@@ -14,12 +20,23 @@ enetWeights(X, y, alpha = 0.5, methodArgs = GlmnetOptions())
 \item{alpha}{Elastic-net mixing in \code{[0, 1]}: the L1 share of the
 penalty. Default 0.5.}
 
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the selected fit, as a list of its coefficients
+(\code{coef}, over the variants fitted), \code{intercept},
+\code{lambda} and cross-validated error there (\code{cvm},
+\code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
+every \code{lambda}'s coefficients. Either names the variants it was
+fitted on.}
+
 \item{methodArgs}{Additional arguments forwarded to
 \code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
 list is refused, since it cannot be checked against the engine's formals.}
 }
 \value{
-Numeric vector of length \code{ncol(X)} of per-variant weights.
+Numeric vector of length \code{ncol(X)} of per-variant weights,
+  with the fit attached as attribute \code{"fit"} unless
+  \code{fitRetention = "none"}.
 }
 \description{
 Convenience wrapper for \code{\link{glmnetWeights}} at a mixing between the

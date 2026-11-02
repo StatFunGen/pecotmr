@@ -30,14 +30,12 @@ traitNames(x)
 \item{x}{The object.}
 }
 \value{
-Character vector of unique trait names; length 1 for an
-  \code{H2Estimate}.
+Character vector of unique trait names.
 }
 \description{
 Return the unique trait identifiers carried by a collection
-  class (e.g., \code{QtlSumStats}), the trait names of an
-  \code{\link{SldscData}}, or the single trait label an
-  \code{H2Estimate} was computed for.
+  class (e.g., \code{QtlSumStats} or \code{H2Estimate}, whose GWAS
+  estimates have none) or the trait names of an \code{\link{SldscData}}.
 }
 \examples{
 data(qtlSumStatsExample)

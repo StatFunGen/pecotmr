@@ -45,7 +45,8 @@ record's rank among those starting at its position; for a GDS, an
 holding it; for a PLINK1 fileset, an \code{IRanges} of each variant's
 position in the \code{.bed}.}
 
-\item{\code{dn}}{List of dimnames (variant ids, sample ids).}
+\item{\code{dn}}{List of dimnames: no variant names (a panel's rowRanges name
+its rows) and the sample ids.}
 }}
 
 \keyword{internal}

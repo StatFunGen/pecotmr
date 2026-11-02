@@ -79,23 +79,17 @@ QvalueOptions <- function(...) {
         exec(qvalue::qvalue, p, !!!extra)$qvalues,
         error = function(cnd) {
             if (str_detect(conditionMessage(cnd), "missing or infinite")) {
-                exec(
-                    qvalue::qvalue,
-                    p,
-                    !!!list_assign(extra, lambda = 0)
-                )$qvalues
+                fixedLambdaArgs <- list_assign(extra, lambda = 0)
+                exec(qvalue::qvalue, p, !!!fixedLambdaArgs)$qvalues
             } else if (str_detect(conditionMessage(cnd), "pi0 <= 0")) {
                 maxP <- max(p, na.rm = TRUE)
                 lambdaSeq <- seq(0, min(0.9, maxP * 0.95), length.out = 10)
-                exec(
-                    qvalue::qvalue,
-                    p,
-                    !!!list_assign(
-                        extra,
-                        lambda = lambdaSeq,
-                        pi0.method = "bootstrap"
-                    )
-                )$qvalues
+                bootstrapArgs <- list_assign(
+                    extra,
+                    lambda = lambdaSeq,
+                    pi0.method = "bootstrap"
+                )
+                exec(qvalue::qvalue, p, !!!bootstrapArgs)$qvalues
             } else {
                 # The cause is chained via `parent`, so it is no longer
                 # interpolated into the message.
@@ -143,21 +137,39 @@ QvalueOptions <- function(...) {
 }
 
 # Per-variant MAF + cis-window keep mask (the FILTERED-flavour restriction) from
-# an entry's af / tss_distance / tes_distance mcols. Shared by the correction
+# an entry's AF / tss_distance / tes_distance mcols. Shared by the correction
 # and the significance derivation so the filtered set is defined once.
 .qapFilterKeep <- function(mc, mafCutoff, cisWindow, afCol, nVar) {
-    byMaf <- if (mafCutoff > 0 && !is.null(mc[[afCol]])) {
+    .qapRequireFilterCols(mc, mafCutoff, cisWindow, afCol, nVar)
+    byMaf <- if (mafCutoff > 0) {
         pmin(mc[[afCol]], 1 - mc[[afCol]]) > mafCutoff
     } else {
         rep(TRUE, nVar)
     }
-    inCis <- cisWindow > 0 &&
-        !is.null(mc$tss_distance) &&
-        !is.null(mc$tes_distance)
-    if (!inCis) {
+    if (cisWindow <= 0) {
         return(byMaf)
     }
     byMaf & (mc$tss_distance >= -cisWindow & mc$tes_distance <= cisWindow)
+}
+
+# A filter the caller asked for needs its columns. Skipping it instead -- as
+# a wrong `afCol` once did -- reports unfiltered results as the filtered ones.
+# An entry with no variants has nothing to filter.
+# @noRd
+.qapRequireFilterCols <- function(mc, mafCutoff, cisWindow, afCol, nVar) {
+    needed <- c(
+        if (mafCutoff > 0) afCol,
+        if (cisWindow > 0) c("tss_distance", "tes_distance")
+    )
+    missing <- setdiff(needed, names(mc))
+    if (length(missing) == 0L || nVar == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "qtlAssociationPostprocess: the filtered correction needs the ",
+        "per-variant column(s) {str_flatten(missing, ', ')}, which the ",
+        "entries do not carry."
+    ))
 }
 
 # Per-gene logical masks of significant variants under a correction method (the
@@ -379,7 +391,7 @@ setMethod(
     grl <- S4Vectors::`mcols<-`(built, value = md)
     methods::new(
         "QtlSumStats",
-        grl,
+        .rtlStored("QtlSumStats", grl),
         ldReference = ldReference(x),
         qcOptions = qcOptions
     )
@@ -388,7 +400,7 @@ setMethod(
 #' @rdname qtlAssociationPostprocess
 #' @param fdrThreshold Event- and variant-level FDR threshold (default 0.05).
 #' @param mafCutoff Minor-allele-frequency cutoff for the FILTERED Bonferroni
-#'   flavour (fold of the per-variant \code{af} mcol). \code{0} disables it.
+#'   flavour (fold of the per-variant \code{AF} mcol). \code{0} disables it.
 #' @param cisWindow cis-window (bp) for the FILTERED Bonferroni flavour, applied
 #'   to the per-variant \code{tss_distance}/\code{tes_distance} mcols. \code{0}
 #'   disables it. When either \code{mafCutoff} or \code{cisWindow} is > 0 the
@@ -401,7 +413,8 @@ setMethod(
 #'   no stored column -- it is a significance query (see
 #'   \code{significantQtls}).
 #' @param pvalueCol,afCol Entry mcol names for the per-variant p-value / allele
-#'   frequency (defaults \code{"P"} / \code{"af"}).
+#'   frequency (defaults \code{"P"} / \code{"AF"}, the columns a
+#'   \code{QtlSumStats} stores them in).
 #' @param qvalueArgs Extra arguments for \code{qvalue::qvalue()}, built with
 #'   \code{\link{QvalueOptions}} -- the \code{pi0.method} / \code{lambda}
 #'   pair in particular, which sets how the null proportion is estimated.
@@ -416,7 +429,7 @@ setMethod(
         cisWindow = 0,
         methods = c("permutation", "bonferroni"),
         pvalueCol = "P",
-        afCol = "af",
+        afCol = "AF",
         qvalueArgs = QvalueOptions()
     ) {
         .assertMethodOptions(qvalueArgs, "QvalueOptions", "qvalueArgs")

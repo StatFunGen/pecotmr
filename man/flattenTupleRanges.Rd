@@ -36,6 +36,12 @@ Non-atomic \code{mcols} columns -- the per-element \code{susieFit} /
 range, so there is no row to broadcast them onto. Use the accessors
 (\code{\link{susieFit}}, \code{\link{cvResult}}) for those.
 
+A \code{\link{TwasWeights}} row holds a gene's methods, so it flattens to
+one range per (variant, method, weight column). Each carries that
+method's \code{weight} and \code{.method}; \code{.weightColumn} names the
+column of a weight matrix (an fSuSiE feature, an outcome) and is
+\code{NA} for a plain weight vector.
+
 \code{as(x, "GRanges")} is the same conversion.
 }
 \examples{

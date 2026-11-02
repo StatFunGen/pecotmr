@@ -1,0 +1,239 @@
+pecotmr is distributed under the GNU General Public License, version 3
+(GPL-3); the license text is in the file LICENSE of the source repository and
+in R's share/licenses/GPL-3. pecotmr includes code from the projects below,
+each under a license compatible with GPL-3.
+
+
+1. SDPR
+   https://github.com/eldronzhou/SDPR
+   Copyright (C) the SDPR authors (Geyu Zhou and Hongyu Zhao, Zhao Lab, Yale
+   University). License: GPL-3.
+   - src/rss_mcmc.h, src/rss_mcmc.cpp: the SDPR sections, derived from
+     SDPR's sampler and LD preparation (mcmc.cpp) and rebuilt on pecotmr's
+     shared sampler code, with GSL and SSE replaced by Armadillo and the
+     entry points by cpp11; the shared gaussian_draw() follows the joint
+     draw of SDPR's sample_beta().
+
+2. fastenloc
+   https://github.com/xqwen/fastenloc
+   Copyright (C) Xiaoquan Wen. License: GPL-3 or (at your option) any later
+   version.
+   - src/qtl_enrichment.cpp, src/qtl_enrichment.h: adapted from fastenloc's
+     imputation and EM steps.
+   - R/enloc.R: the colocalization priors and scoring (enrichment
+     parameters, the GWAS log10 Bayes factors and the per-pair cases),
+     ported from fastenloc's controller.cc.
+
+3. PRS-CS
+   https://github.com/getian107/PRScs
+   Copyright (c) 2018 Tian Ge. License: MIT (text below).
+   - src/rss_mcmc.h, src/rss_mcmc.cpp: the PRS-CS sections, derived from
+     PRS-CS's Python sampler (mcmc_gtb.py) and rebuilt on pecotmr's shared
+     sampler code; gigrnd() is ported from PRS-CS's gigrnd.py, and
+     DenseLdBlock::draw() follows PRS-CS's draw of a block's effects.
+
+4. qgg
+   https://github.com/psoerensen/qgg
+   Copyright (C) the qgg authors (Peter Soerensen, Palle Duun Rohde, Izel
+   Fourie Soerensen). License: GPL-3.
+   - src/rss_mcmc.h, src/rss_mcmc.cpp: in the Bayesian alphabet sections,
+     the priors and updates of bayesA, bayesC, bayesN and bayesR follow CRAN
+     qgg 1.1.6's summary-statistics sampler (sbayes()), and Legarra et al.'s
+     bayesL its individual-level one (bayes()); rinvgauss() follows its
+     inverse-Gaussian sampler.
+
+5. hibayes
+   https://github.com/YinLiLin/hibayes
+   Copyright (C) the hibayes authors (Lilin Yin, Haohao Zhang, Xiaolei Liu).
+   License: GPL-3.
+   - src/rss_mcmc.h, src/rss_mcmc.cpp: in the Bayesian alphabet sections,
+     the priors and updates of bayesB (BayesBpi) and Park and Casella's
+     bayesL follow hibayes' summary-statistics sampler (SBayesD()).
+
+6. L0Learn
+   https://github.com/hazimehh/L0Learn
+   Copyright (c) 2021 Hussein Hazimeh. License: MIT (text below).
+   - src/penalized_rss.cpp: the L0 swap step, ported from CDL012Swaps.cpp.
+
+7. lassosum
+   https://github.com/tshmak/lassosum
+   Copyright (c) 2016 tshmak. License: MIT according to its LICENSE file
+   (text below); its DESCRIPTION declares GPL-3.
+   - src/penalized_rss.cpp: the LASSO coordinate updates follow lassosum's
+     elnet().
+   - R/regularizedRegressionWrappers.R: the pseudovalidation of the
+     penalized summary-statistics path (the local-fdr shrinkage of the
+     correlations and the score, after pseudovalidate.lassosum.pipeline.R
+     and pseudovalidation.R) and the path's ordering and records (after
+     lassosum.R).
+
+8. bigsnpr
+   https://github.com/privefl/bigsnpr
+   Copyright (c) Florian Prive. License: GPL-3.
+   - src/rss_mcmc.h, src/rss_mcmc.cpp: the LDpred2 sections, derived from
+     LDpred2's samplers (ldpred2.cpp, ldpred2-auto.cpp) and rebuilt on
+     pecotmr's shared sampler code, reading the LD as a factor.
+   - R/regularizedRegressionWrappers.R: LDpred2-auto's chain filter and
+     LDpred2-grid's grid, after the LDpred2 vignette.
+   - R/variantId.R: harmonizeAlleles()'s matched-proportion check and
+     parameter descriptions, after snp_match().
+
+9. DENTIST
+   https://github.com/Yves-CHEN/DENTIST
+   (C) 2018 Wenhan Chen, Zhihong Zhu and Jian Yang. License: GNU Lesser
+   General Public License, version 3 (its LICENSE file; its README states
+   GPL-3).
+   - src/dentist_iterative_impute.cpp: DENTIST's iterative imputation and
+     random partitioning.
+   - R/sumstatsQc.R: DENTIST's segmentation of a region into windows, its
+     duplicate detection and its restoring of duplicates (after DENTIST.h,
+     storage.cpp and invoker.h).
+   - R/ld.R: the GCTA-style LD estimate (after bfileOperations.cpp).
+
+10. LD score regression (ldsc)
+    https://github.com/bulik/ldsc
+    Copyright (C) 2014-2015 Brendan Bulik-Sullivan and Hilary Finucane.
+    License: GPL-3.
+    - R/h2EstimationWrappers.R: stratified LD score regression, its weights
+      and iteratively reweighted least squares (after
+      ldscore/regressions.py and ldscore/irwls.py).
+    - R/LdScore.R: the unbiased r^2 (after ldscore/ldscore.py).
+
+11. HDL and HDL-L
+    https://github.com/zhenin/HDL
+    Copyright (C) the HDL authors (Zheng Ning, Xia Shen; HDL-L: Yuying Li,
+    Xia Shen). License: GPL-3 or (at your option) any later version.
+    - R/h2EstimationWrappers.R: the HDL likelihood and fit (after llfun.R
+      and HDL.h2.R) and HDL-L's per-locus fit (after HDL.L.R).
+
+12. LDER
+    https://github.com/shuangsong0110/LDER
+    Copyright (c) 2021 Shuang Song. License: MIT according to its LICENSE
+    file (text below); its DESCRIPTION declares GPL-3.
+    - R/h2EstimationWrappers.R: the LDER estimator (after get.res.R,
+      ldscore.R and lder.R).
+
+13. gLDSC
+    https://github.com/xzw20046/gldsc
+    Copyright (c) 2023 Zewei Xiong. License: MIT (text below).
+    - R/h2EstimationWrappers.R: the generalized LD score regression
+      estimator (after middle_fun.R and gldsc.R).
+
+14. FastHer
+    https://github.com/gulsvi/FastHer
+    Copyright (c) 2025 Gulnara R. Svishcheva. License: MIT (text below), as
+    its DESCRIPTION declares; the repository has no license file or
+    copyright line, so the line above gives its author and year.
+    - R/h2EstimationWrappers.R: the local heritability's inputs, eigen cut
+      and standard error (after fasther.R).
+
+15. RAiSS
+    https://gitlab.pasteur.fr/statistical-genetics/raiss
+    Copyright (c) 2019 Institut Pasteur. License: MIT (text below).
+    - R/sumstatsQc.R: the summary-statistics imputation and its output
+      filtering (after raiss/stat_models.py and
+      raiss/filter_format_output.py).
+
+16. SLALOM
+    https://github.com/mkanai/slalom
+    Copyright (c) 2022 Masahiro Kanai. License: MIT (text below).
+    - R/sumstatsQc.R: slalom() and its approximate Bayes factors, credible
+      set and DENTIST-S statistics (after slalom.py).
+
+17. FUSION
+    https://github.com/gusevlab/fusion_twas
+    Copyright (C) the FUSION authors (Alexander Gusev et al.). License:
+    GPL-3.
+    - R/regularizedRegressionWrappers.R: the elastic-net weights and the
+      zero-variance filter (after FUSION.compute_weights.R).
+    - R/variantId.R: the strand and allele checks of harmonizeAlleles()
+      (after FUSION.assoc_test.R's allele.qc()).
+
+18. ACAT and STAAR
+    https://github.com/yaowuliu/ACAT, https://github.com/xihaoli/STAAR
+    Copyright (C) Yaowu Liu (ACAT); Xihao Li, Zilin Li, Wenbo Wang, Han
+    Chen and Yuxin Yuan (STAAR). License: GPL-3.
+    - R/pvalCombineWrappers.R: pvalAcat(), the Cauchy combination (after
+      ACAT.R and STAAR's CCT.R).
+
+19. cTWAS
+    https://github.com/xinhe-lab/multigroup_ctwas
+    Copyright (c) 2020 Siming Zhao, Wesley Crouse, Sheng Qian, Kaixuan Luo,
+    Matthew Stephens and Xin He. License: MIT (text below).
+    - R/ctwasPipeline.R: the gene z-scores (after compute_gene_z()) and the
+      region filtering and thinning of the parameter estimation (after
+      est_param()).
+
+20. xqtl-protocol
+    https://github.com/StatFunGen/xqtl-protocol
+    Copyright (c) 2021 Gao Wang. License: MIT (text below).
+    - R/relatednessQc.R: the relatedness filter (after GWAS_QC.R).
+    - R/mashPipeline.R, R/mashWrapper.R: the mash data preparation,
+      contrasts, posterior summaries and prior fitting (after the MASH
+      notebooks).
+
+21. fsusieR
+    https://github.com/stephenslab/fsusieR
+    Copyright (c) 2023-2025, William R.P. Denault, Peter Carbonetto, Gao
+    Wang and Matthew Stephens. License: BSD 3-Clause (text below).
+    - R/fineMappingWrappers.R: the credible sets' purity (after
+      cal_purity()) and the wavelet back-transform of the weights (after
+      operation_on_susiF_obj.R).
+
+22. mr.mashr
+    https://github.com/stephenslab/mr.mashr
+    Copyright (c) 2020-2025 Fabio Morgante, Jason Willwerscheid, Gao Wang,
+    Deborah Kunkel, Peter Carbonetto and Matthew Stephens. License: MIT
+    (text below).
+    - R/regularizedRegressionWrappers.R: the description of mr.mash's fit in
+      mrmashWrapper()'s documentation (after mr_mash.R).
+
+
+MIT License (items 3, 6, 7, 12, 13, 14, 15, 16, 19, 20 and 22, with the
+copyright lines given above)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+BSD 3-Clause License (item 21, with the copyright line given above)
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

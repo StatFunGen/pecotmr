@@ -7,6 +7,29 @@
     list(a = panel[, 1:40], b = panel[, 41:100], full = panel)
 }
 
+test_that(".updatePanel drops the copies of labels a mixture's panels kept", {
+    p <- .gmPanels()
+    mix <- GenotypeMixture(list(a = p$a, b = p$b), mixtureWeights = c(0.3, 0.7))
+    panels <- pecotmr:::.gmComponents(mix)
+    saved <- MultiAssayExperiment::`experiments<-`(
+        mix,
+        value = MultiAssayExperiment::ExperimentList(
+            map(panels, .savedLabelledPanel)
+        )
+    )
+    first <- pecotmr:::.gmComponents(saved)[[1L]]
+    expect_false(is.null(dimnames(pecotmr:::.panelSeed(first))[[1L]]))
+    slim <- pecotmr:::.updatePanel(saved)
+    slimFirst <- pecotmr:::.gmComponents(slim)[[1L]]
+    expect_null(dimnames(pecotmr:::.panelSeed(slimFirst))[[1L]])
+    expect_identical(dimnames(slimFirst), dimnames(panels[[1L]]))
+    expect_equal(
+        as.matrix(SummarizedExperiment::assay(slimFirst)[1:5, ]),
+        as.matrix(SummarizedExperiment::assay(panels[[1L]])[1:5, ])
+    )
+    expect_identical(pecotmr:::.updatePanel(slim), slim)
+})
+
 test_that("GenotypeMixture aligns its panels to the variants they share", {
     p <- .gmPanels()
     mix <- GenotypeMixture(list(a = p$a, b = p$b), mixtureWeights = c(0.3, 0.7))

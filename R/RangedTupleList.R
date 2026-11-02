@@ -286,7 +286,8 @@ setMethod("genomicRegion", "RangedTupleList", function(x) {
     if (length(cols) == 0L || length(grl) == 0L) {
         return(NULL)
     }
-    parts <- exec(cbind, !!!map(cols, .rtlNameColumn, md = md))
+    namedCols <- map(cols, .rtlNameColumn, md = md)
+    parts <- exec(cbind, !!!namedCols)
     keys <- apply(parts, 1L, .rtlJoinNameParts)
     shared <- is_in(keys, keys[duplicated(keys)])
     if (!any(shared)) {
@@ -331,7 +332,24 @@ setMethod("genomicRegion", "RangedTupleList", function(x) {
     # during initialize(), and a subclass's validity method reads its identity
     # columns and slots. Building the object bare and filling it in afterwards
     # trips that check on the way past.
-    bare <- .rtlBindElements(elements)
+    .rtlFinish(x, .rtlBindElements(.rtlPlainElements(x, elements)), keep)
+}
+
+# `elements` as rows of `x` hold them before it stores them: a summary-
+# statistic collection's each with the columns it leaves out put back
+# (.ssPlainElement()), as one taken from stored variants may lack them.
+# @noRd
+.rtlPlainElements <- function(x, elements) {
+    if (!methods::is(x, "SumStatsBase")) {
+        return(elements)
+    }
+    map(elements, .ssPlainElement)
+}
+
+# `x`'s collection-level state -- seqinfo, outer mcols (rows `keep`), names
+# and slots -- put on the bare GRangesList `bare`, as the rebuilt `x`.
+# @noRd
+.rtlFinish <- function(x, bare, keep) {
     # seqinfo is collection-level state, exactly like the slots below: it
     # carries the genome build. A rebuild from bare elements starts with the
     # seqlevels those elements happen to span -- none at all when everything
@@ -339,21 +357,61 @@ setMethod("genomicRegion", "RangedTupleList", function(x) {
     # to nothing would silently discard the build.
     withSeqinfo <- .rtlRestoreSeqinfo(bare, x)
     md <- mcols(x, use.names = FALSE)
-    grl <- if (is.null(md)) {
+    rowsMd <- if (is.null(md)) NULL else md[keep, , drop = FALSE]
+    if (methods::is(x, "TwasWeights")) {
+        # A TWAS row's weights sit beside its element, not in it, so they
+        # follow its variants into the rebuilt element by id.
+        rowsMd <- .twasRealignedMcols(x, rowsMd, bare, keep)
+    }
+    if (methods::is(x, "ColocResult")) {
+        # So do a coloc group's pairs' SNP.PP.H4.
+        rowsMd <- .crRealignedMcols(x, rowsMd, bare, keep)
+    }
+    grl <- if (is.null(rowsMd)) {
         withSeqinfo
     } else {
-        S4Vectors::`mcols<-`(withSeqinfo, value = md[keep, , drop = FALSE])
+        S4Vectors::`mcols<-`(withSeqinfo, value = rowsMd)
     }
-    # The rebuilt elements keep the names they had -- the caller may have set
-    # their own -- and an unnamed collection is named off its identity.
-    grl <- if (is.null(names(x))) {
-        .rtlNamed(grl)
-    } else {
-        `names<-`(grl, names(x)[keep])
-    }
+    grl <- .rtlNamedLike(grl, x, keep)
     ownSlots <- .rtlOwnSlots(x)
     slotArgs <- set_names(map(ownSlots, .rtlGetSlot, x = x), ownSlots)
-    exec(methods::new, class(x), grl, !!!slotArgs)
+    # A fit is mostly one row's own, so a subset keeps only the fits its rows
+    # name; the shared dictionaries keep their few entries whole.
+    if (is_in("fits", ownSlots)) {
+        slotArgs$fits <- .fitsInUse(
+            slotArgs$fits,
+            mcols(grl, use.names = FALSE)
+        )
+    }
+    exec(methods::new, class(x), .rtlStored(class(x), grl), !!!slotArgs)
+}
+
+# `grl`, rebuilt from rows `keep` of `x`, with the names those rows had -- the
+# caller may have set their own -- or, when `x` is unnamed, named off its
+# identity.
+# @noRd
+.rtlNamedLike <- function(grl, x, keep) {
+    if (is.null(names(x))) {
+        return(.rtlNamed(grl))
+    }
+    `names<-`(grl, names(x)[keep])
+}
+
+# `x` with its elements' variant metadata replaced by `flatMcols`, one row per
+# variant of unlist(x): the variants, outer mcols and slots stay as they are.
+# Relisting the joined variants costs one pass, where taking the elements
+# apart costs milliseconds an element.
+# @noRd
+.rtlWithVariantMcols <- function(x, flatMcols) {
+    flat <- S4Vectors::`mcols<-`(
+        unlist(x, use.names = FALSE),
+        value = flatMcols
+    )
+    bare <- IRanges::relist(
+        flat,
+        IRanges::PartitioningByEnd(cumsum(lengths(x)), names = names(x))
+    )
+    .rtlFinish(x, bare, seq_along(x))
 }
 
 # @noRd
@@ -371,9 +429,16 @@ setMethod("genomicRegion", "RangedTupleList", function(x) {
 # for a bare `unlist(x)`. Validity is not the cost (0.1 ms) -- the rebuild is.
 #
 # Nothing here re-validates: the elements came out of a collection that was
-# validated when it was built.
+# validated when it was built. The variants come out as the rows hand them
+# out (.rtlPlain()).
 # @noRd
 .rtlGatherElements <- function(x, idx) {
+    .rtlPlain(x, .rtlGatherStored(x, idx))
+}
+
+# The variants of rows `idx` of `x`, joined, as stored.
+# @noRd
+.rtlGatherStored <- function(x, idx) {
     if (length(idx) == 0L) {
         return(unlist(x, use.names = FALSE)[0L])
     }
@@ -481,8 +546,24 @@ setMethod("[", "RangedTupleList", function(x, i, j, ..., drop = TRUE) {
         )
         abort(msg)
     }
-    methods::callNextMethod(x, i, ..., drop = drop)
+    .rtlPruneFits(methods::callNextMethod(x, i, ..., drop = drop))
 })
+
+# `x` keeping only the fits its rows name (.fitsInUse()): a fit is mostly one
+# row's own, so a subset should not carry every other row's. The shared
+# dictionaries keep their few entries whole.
+# @noRd
+#' @importFrom methods slot<-
+.rtlPruneFits <- function(x) {
+    if (!methods::.hasSlot(x, "fits")) {
+        return(x)
+    }
+    methods::slot(x, "fits", check = FALSE) <- .fitsInUse(
+        x@fits,
+        mcols(x, use.names = FALSE)
+    )
+    x
+}
 
 #' @rdname RangedTupleList-methods
 #' @export
@@ -712,11 +793,10 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 #'       both in one \code{qcInfo} record have it split between the two.
 #'       Their genome build is in \code{seqinfo()}; ones saved with it in a
 #'       \code{genome} slot have it moved there.
-#'     \item TWAS weights record the variants each row was fitted on in a
-#'       \code{fitVariants} column; ones saved without it have it filled in
-#'       from their fits. Fine-mapping results no longer record them (a row's
-#'       variants are its fit's variables); ones saved with the column have
-#'       it dropped.
+#'     \item Fine-mapping results and TWAS weights no longer record the
+#'       variants each row was fitted on: a row reads them off its fit. One
+#'       saved with a \code{fitVariants} column (or, for TWAS weights, slot)
+#'       has it dropped.
 #'     \item A \code{CtwasResult} holds one element per region; one saved as a
 #'       table of whole runs is rebuilt.
 #'     \item A \code{QtlDataset} no longer stores run settings (genotype
@@ -731,9 +811,11 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 #'       an LD reference stores its blocks' LD itself, and gets none; one
 #'       saved with the reference's sample size as \code{nRef} has it moved
 #'       to \code{nSamples}.
-#'     \item An \code{H2Estimate} saved with its estimates under the slots'
-#'       earlier names (\code{h2}, \code{h2Se}, \code{local},
-#'       \code{tauBlocks}) has them moved to the current ones.
+#'     \item An \code{H2Estimate} saved when it held one estimate in slots
+#'       (also under their earlier names \code{h2}, \code{h2Se},
+#'       \code{local}, \code{tauBlocks}) is rebuilt as a collection of that
+#'       estimate. The per-block local estimates some held are dropped, with
+#'       a warning: the genome-wide estimators make one estimate per study.
 #'   }
 #' @param object A collection (summary statistics, fine-mapping results, TWAS
 #'   weights, a colocalization or cTWAS result), a \code{QtlDataset}, a
@@ -788,7 +870,8 @@ setMethod(
     }
     value <- methods::slot(object, from)
     attr(object, from) <- NULL
-    `slot<-`(object, to, check = FALSE, value = value)
+    methods::slot(object, to, check = FALSE) <- value
+    object
 }
 
 # -----------------------------------------------------------------------------
@@ -804,7 +887,8 @@ setMethod(
 # @noRd
 .rtlGrlWithMetadata <- function(payloads, cols) {
     split <- .rtlSplitBySeqname(map(payloads, variants))
-    md <- exec(S4Vectors::DataFrame, !!!c(cols, list(check.names = FALSE)))
+    dataFrameArgs <- c(cols, list(check.names = FALSE))
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     S4Vectors::`mcols<-`(
         .rtlBindElements(split$entry),
         value = md[split$fromIdx, , drop = FALSE]
@@ -819,14 +903,119 @@ setMethod(
 # @noRd
 .rtlNewValidated <- function(Class, payloads, cols, ldReference) {
     dict <- .ldRefDict(.ldRefPerTuple(ldReference, length(payloads)))
+    cv <- .cvStoredColumn(as.list(cols[["cvResult"]]))
+    fitted <- .dictBuild(as.list(cols[["susieFit"]]), .FIT_DICT_PREFIX)
+    stored <- list_assign(
+        cols,
+        cvResult = cv$cvResult,
+        susieFit = fitted$keys
+    )
+    grl <- .rtlNamed(.rtlGrlWithMetadata(
+        payloads,
+        c(stored, list(ldReference = dict$keys, cvPartition = cv$keys))
+    ))
     new(
         Class,
-        .rtlNamed(.rtlGrlWithMetadata(
-            payloads,
-            c(cols, list(ldReference = dict$keys))
-        )),
-        ldReference = dict$refs
+        .rtlStored(Class, grl),
+        ldReference = dict$entries,
+        cvPartition = cv$entries,
+        fits = fitted$entries
     )
+}
+
+# -----------------------------------------------------------------------------
+# Run-length storage of variant metadata
+# -----------------------------------------------------------------------------
+# A variant-metadata column that repeats -- a value fixed for a whole row, a
+# sentinel most variants share -- takes less room as an Rle. A class chooses
+# which of its columns may be stored so (.rtlStored()); each one is, where
+# that is smaller, and the rows a collection hands out decode them
+# (.rtlPlainMcols()).
+
+# `grl` as a collection of class `cls` stores it: a fine-mapping collection
+# keeps its topLoci columns compact (.fmrCompactTopLoci()), a summary-
+# statistic one its variant columns (.ssStored()), any other as is.
+# @noRd
+.rtlStored <- function(cls, grl) {
+    if (methods::extends(cls, "SumStatsBase")) {
+        return(.ssStored(grl))
+    }
+    if (!methods::extends(cls, "FineMappingResultBase")) {
+        return(grl)
+    }
+    .fmrCompactTopLoci(grl)
+}
+
+# `gr`, variants of `x`'s rows as stored, as its rows hand them out: with a
+# fine-mapping collection's topLoci columns plain (.fmPlainElement()) or a
+# summary-statistic one's variant columns (.ssPlainElement()), any other's
+# as they are.
+# @noRd
+.rtlPlain <- function(x, gr) {
+    if (methods::is(x, "SumStatsBase")) {
+        return(.ssPlainElement(gr))
+    }
+    if (!methods::is(x, "FineMappingResultBase")) {
+        return(gr)
+    }
+    .fmPlainElement(gr)
+}
+
+# `md` with each column in `cols` stored as an Rle where that is smaller.
+# @noRd
+.rtlRleWhereSmaller <- function(md, cols) {
+    reduce(intersect(cols, colnames(md)), .rtlRleColumn, .init = md)
+}
+
+# A run costs its value plus a four-byte length, a plain element its value
+# alone. A column with attributes (a factor, a matrix) stays as it is; one
+# already encoded is measured again as the values it holds.
+# @noRd
+.rtlRleColumn <- function(md, cn) {
+    v <- md[[cn]]
+    v <- if (.rtlIsRle(v)) as.vector(v) else v
+    if (!is.atomic(v) || !is.null(attributes(v)) || length(v) == 0L) {
+        return(md)
+    }
+    r <- S4Vectors::Rle(v)
+    size <- .rtlValueBytes(v)
+    md[[cn]] <- if (S4Vectors::nrun(r) * (size + 4) < length(v) * size) {
+        r
+    } else {
+        v
+    }
+    md
+}
+
+# @noRd
+.rtlValueBytes <- function(v) {
+    if (is.integer(v) || is.logical(v)) 4 else 8
+}
+
+# `gr` with its run-length encoded metadata columns as the plain vectors
+# they encode.
+# @noRd
+.rtlPlainMcols <- function(gr) {
+    md <- mcols(gr, use.names = FALSE)
+    encoded <- names(keep(as.list(md), .rtlIsRle))
+    if (length(encoded) == 0L) {
+        return(gr)
+    }
+    S4Vectors::`mcols<-`(
+        gr,
+        value = reduce(encoded, .rtlDecodeColumn, .init = md)
+    )
+}
+
+# @noRd
+.rtlIsRle <- function(v) {
+    methods::is(v, "Rle")
+}
+
+# @noRd
+.rtlDecodeColumn <- function(md, cn) {
+    md[[cn]] <- as.vector(md[[cn]])
+    md
 }
 
 # -----------------------------------------------------------------------------
@@ -846,6 +1035,12 @@ setMethod(
 # @noRd
 .rtlBindElements <- function(elements) {
     flat <- suppressWarnings(.rtlJoinPlainElements(elements))
+    if (is.null(flat)) {
+        # Elements taken out of a collection carry its run-length encoded
+        # columns, which the plain join takes once they are decoded.
+        plain <- map(unname(as.list(elements)), .rtlPlainMcols)
+        flat <- suppressWarnings(.rtlJoinPlainElements(plain))
+    }
     if (is.null(flat)) {
         return(GenomicRanges::GRangesList(elements))
     }
@@ -867,13 +1062,20 @@ setMethod(
 # silenced as GRangesList() silences them (.rtlBindElements()).
 # @noRd
 .rtlJoinParts <- function(parts) {
-    flats <- unname(map(parts, unlist, use.names = FALSE))
+    flats <- unname(map(parts, .rtlPlainFlat))
     flat <- suppressWarnings(exec(c, !!!flats))
     ends <- cumsum(list_c(map(parts, .rtlElementLengths), ptype = integer()))
     IRanges::relist(
         flat,
         IRanges::PartitioningByEnd(ends, names = .rtlJoinedNames(parts))
     )
+}
+
+# A collection's variants joined, as its rows hand them out (.rtlPlain()):
+# parts stored in different ways join on the same columns.
+# @noRd
+.rtlPlainFlat <- function(x) {
+    .rtlGatherElements(x, seq_along(x))
 }
 
 # @noRd
@@ -1268,6 +1470,12 @@ setMethod(
 #' range, so there is no row to broadcast them onto. Use the accessors
 #' (\code{\link{susieFit}}, \code{\link{cvResult}}) for those.
 #'
+#' A \code{\link{TwasWeights}} row holds a gene's methods, so it flattens to
+#' one range per (variant, method, weight column). Each carries that
+#' method's \code{weight} and \code{.method}; \code{.weightColumn} names the
+#' column of a weight matrix (an fSuSiE feature, an outcome) and is
+#' \code{NA} for a plain weight vector.
+#'
 #' \code{as(x, "GRanges")} is the same conversion.
 #'
 #' @param x A \code{RangedTupleList}.
@@ -1285,6 +1493,9 @@ flattenTupleRanges <- function(x) {
         )
         abort(msg)
     }
+    if (methods::is(x, "TwasWeights")) {
+        return(.twasFlatten(x))
+    }
     gr <- if (methods::is(x, "FineMappingResultBase")) {
         .fmrGatherVariants(x, seq_len(length(x)))
     } else {
@@ -1294,7 +1505,7 @@ flattenTupleRanges <- function(x) {
     if (is.null(md) || ncol(md) == 0L || length(gr) == 0L) {
         return(gr)
     }
-    tupleCols <- names(md)[map_lgl(as.list(md), is.atomic)]
+    tupleCols <- .rtlTupleKeyCols(x)
     if (length(tupleCols) == 0L) {
         return(gr)
     }
@@ -1344,6 +1555,9 @@ setAs("RangedTupleList", "GRanges", function(from) {
 #'
 #' A tuple with no surviving ranges becomes an empty element rather than being
 #' dropped, so the collection keeps its shape and its metadata stays aligned.
+#' A \code{\link{TwasWeights}} is nested by (row, \code{.method}): each
+#' method keeps its surviving ranges and their \code{weight}, and a method
+#' left with none keeps its entry, with no variants.
 #'
 #' @param flat A \code{GRanges} produced by \code{flattenTupleRanges} (possibly
 #'   filtered or mutated).
@@ -1366,6 +1580,9 @@ nestTupleRanges <- function(flat, template) {
     if (!methods::is(flat, "GRanges")) {
         msg <- glue("`flat` must be a GRanges (got {class(flat)[[1L]]}).")
         abort(msg)
+    }
+    if (methods::is(template, "TwasWeights")) {
+        return(.twasNest(flat, template))
     }
     keys <- .rtlNestKeys(flat, template, .rtlTupleKeyCols(template))
     picked <- map(keys$wanted, .rtlPickByKey, flat = flat, have = keys$have)
@@ -1466,7 +1683,13 @@ nestTupleRanges <- function(flat, template) {
     # No is.null() arm: see ncol() above -- mcols() answers a zero-column
     # DataFrame, and names() of one is already character(0).
     md <- mcols(x, use.names = FALSE)
-    names(md)[map_lgl(as.list(md), is.atomic)]
+    # A fine-mapping row's `susieFit` and `cvPartition` hold its keys into the
+    # fits and CV-partition dictionaries: payloads, like the others not
+    # broadcast onto ranges.
+    setdiff(
+        names(md)[map_lgl(as.list(md), is.atomic)],
+        c("susieFit", "cvPartition")
+    )
 }
 
 # One key string per row. With no identity columns every range belongs to the
@@ -1477,7 +1700,8 @@ nestTupleRanges <- function(flat, template) {
     if (length(present) == 0L) {
         return(rep("", n))
     }
-    exec(str_c, !!!map(present, .rtlKeyPart, md = md), sep = "\r")
+    keyParts <- map(present, .rtlKeyPart, md = md)
+    exec(str_c, !!!keyParts, sep = "\r")
 }
 
 # NA is mapped to a sentinel rather than left alone: str_c() propagates NA, so
@@ -1609,10 +1833,17 @@ group_by.RangedTupleList <- function(.data, ...) {
 }
 
 # Put back any identity column a selection dropped. Without them the ranges
-# carry no tuple and every one would fall into the first element.
+# carry no tuple and every one would fall into the first element. A
+# TwasWeights also keeps its weights, the method and column they belong to,
+# and the alleles that name each variant.
 # @noRd
 .rtlRestoreKeys <- function(out, flat, template) {
-    dotted <- map_chr(.rtlTupleKeyCols(template), .rtlDotName)
+    dotted <- c(
+        map_chr(.rtlTupleKeyCols(template), .rtlDotName),
+        if (methods::is(template, "TwasWeights")) {
+            c(.TWAS_FLAT_COLUMNS, "A1", "A2")
+        }
+    )
     missing <- setdiff(
         intersect(dotted, colnames(mcols(flat))),
         colnames(mcols(out))

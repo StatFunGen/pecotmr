@@ -53,7 +53,8 @@ NULL
 #'   \code{IRanges} of the columns (or SeqArray's 2-bit planes) of the node
 #'   holding it; for a PLINK1 fileset, an \code{IRanges} of each variant's
 #'   position in the \code{.bed}.
-#' @slot dn List of dimnames (variant ids, sample ids).
+#' @slot dn List of dimnames: no variant names (a panel's rowRanges name
+#'   its rows) and the sample ids.
 #' @name GenotypeDosageSeed-class
 #' @keywords internal
 #' @importClassesFrom S4Vectors Vector
@@ -69,6 +70,17 @@ setClass(
         dn = "list"
     )
 )
+
+# `x` without row names, as a seed is built today, or NULL when it has
+# none.
+# @noRd
+.slimDosageSeed <- function(x) {
+    dn <- dimnames(x)
+    if (is.null(dn[[1L]])) {
+        return(NULL)
+    }
+    methods::initialize(x, dn = list(NULL, dn[[2L]]))
+}
 
 #' @rdname GenotypeDosageSeed-class
 setMethod("dim", "GenotypeDosageSeed", function(x) {

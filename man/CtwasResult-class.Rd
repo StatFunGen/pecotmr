@@ -23,7 +23,11 @@ Unlike the QTL family, \code{trait} is not part of the key: a cTWAS
   multi-study or multi-context run and participate in the uniqueness key,
   exactly as in the \code{\linkS4class{TwasWeights}} and fine-mapping
   families. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
-  stack every region back into one \code{GRanges}.
+  stack every region back into one \code{GRanges}. The group priors are
+  the run's one genome-wide estimate, fitted across all its regions, so a
+  run's rows must carry the same priors: rows of one identity whose
+  priors differ came from separately fitted runs and are refused.
+  \code{\link{ctwasGroupPriors}} tabulates them once per run.
 }
 \seealso{
 \code{\link{CtwasResult}} for the constructor and

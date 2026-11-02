@@ -16,7 +16,8 @@ the identity columns of both sides (\code{study}, \code{context},
 columns are \code{NA} for it.}
 
 \item{variants}{A list, parallel to \code{pairs}' rows, of per-pair data
-frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.}
+frames with a \code{variant_id} column and a \code{SNP.PP.H4} column,
+all with the same columns.}
 
 \item{ldReference}{Optional LD reference -- a genotype panel (see
 \code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
@@ -35,6 +36,11 @@ A \code{ColocResult}.
 Assemble a \code{\linkS4class{ColocResult}} from a pair-level
   table and the per-pair variant tables that go with it. Callers normally
   get one from \code{\link{colocPipeline}} rather than building it directly.
+}
+\details{
+Pairs that share their identity columns, block, LD reference and
+  variants are one scored group, an element of the result; the group's
+  variants are stored once.
 }
 \examples{
 pairs <- data.frame(

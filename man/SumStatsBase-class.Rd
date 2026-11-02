@@ -3,7 +3,32 @@
 \docType{class}
 \name{SumStatsBase-class}
 \alias{SumStatsBase-class}
+\alias{getListElement,SumStatsBase-method}
+\alias{as.list,SumStatsBase-method}
+\alias{lapply,SumStatsBase-method}
 \title{Summary Statistics Base Class}
+\usage{
+\S4method{getListElement}{SumStatsBase}(x, i, exact = TRUE)
+
+\S4method{as.list}{SumStatsBase}(x, use.names = TRUE)
+
+\S4method{lapply}{SumStatsBase}(X, FUN, ...)
+}
+\arguments{
+\item{x}{A summary-statistics collection.}
+
+\item{i}{The row: a position or an element name.}
+
+\item{exact}{Passed on to the element lookup.}
+
+\item{use.names}{Whether the list keeps the element names.}
+
+\item{X}{A summary-statistics collection.}
+
+\item{FUN}{The function applied to each row's variants.}
+
+\item{...}{Passed on to \code{FUN}.}
+}
 \description{
 Virtual base class for QTL and GWAS summary statistics
   collections. Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats})
@@ -15,6 +40,18 @@ Virtual base class for QTL and GWAS summary statistics
   \code{x[[i]]} is that tuple's summary statistics and the identity columns
   live in \code{mcols(x)}. There is no \code{entry} column: what used to be
   \code{x$entry[[i]]} is now simply \code{x[[i]]}.
+}
+\details{
+The rows are stored compactly: a column recomputed exactly from
+  the others (\code{SNP} from the variant's position and alleles,
+  \code{BETA} and \code{SE} from \code{Z}, \code{MAF} and \code{N},
+  \code{P} from \code{Z}) is left out, and the stored variants' metadata
+  (\code{derivedColumns}) names those they leave out; \code{N},
+  \code{N_CASE}, \code{N_CONTROL} and \code{z_supplied} are run-length
+  encoded where that is smaller. \code{x[[i]]}, \code{as.list()},
+  \code{lapply()}, \code{\link{sumStats}} and the per-variant accessors
+  hand the rows out with every column back. \code{unlist()} hands them out
+  as stored, and a collection built from them puts the columns back.
 }
 \section{Slots}{
 

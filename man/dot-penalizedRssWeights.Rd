@@ -9,7 +9,7 @@
   ldReference,
   spec,
   s = c(0.2, 0.5, 0.9, 1),
-  selection = c("ldQuadratic", "minFbeta"),
+  selection = c("heldOut", "ldQuadratic", "minFbeta"),
   fitRetention = c("none", "slim", "full"),
   methodArgs = PenalizedRssOptions(),
   label = str_c(str_to_lower(spec$penalty), "RssWeights")
@@ -39,7 +39,7 @@ Shared implementation for \code{scadRssWeights()}, \code{mcpRssWeights()},
 (\code{l0learnRssWeights()} uses the lower-level \code{.rssShrinkGridWeights}
 scaffold directly, since it sweeps an additional \code{lambda0} path.)
 Searches over a shrinkage grid \code{s} (LD matrix shrinkage \code{(1-s)R +
-sI}) and selects the best candidate via LD-quadratic pseudovalidation or
-minimum penalized objective.
+sI}) and selects the best candidate on held-out summary statistics, by
+lassosum's pseudovalidation, or by the minimum penalized objective.
 }
 \keyword{internal}

@@ -69,6 +69,7 @@ NULL
         ))
     }
     fields <- str_split(lines, "\t", simplify = TRUE)
+    blockIdCol <- compact(list(blockId = if (ncol(fields) > 3L) fields[, 4L]))
     exec(
         GenomicRanges::GRanges,
         seqnames = fields[, 1L],
@@ -76,7 +77,7 @@ NULL
             start = as.integer(fields[, 2L]) + 1L,
             end = as.integer(fields[, 3L])
         ),
-        !!!compact(list(blockId = if (ncol(fields) > 3L) fields[, 4L]))
+        !!!blockIdCol
     )
 }
 
@@ -855,8 +856,8 @@ NULL
         chrom = as.character(df[[resolved$chrom]]),
         pos = as.integer(df[[resolved$pos]]),
         SNP = as.character(df[[resolved$variant_id]]),
-        A1 = as.character(df[[resolved$A1]]),
-        A2 = as.character(df[[resolved$A2]])
+        A1 = .canonAllele(df[[resolved$A1]]),
+        A2 = .canonAllele(df[[resolved$A2]])
     )
 }
 
@@ -901,6 +902,8 @@ NULL
 .buildSumstatOut <- function(df, resolved, z, n, mapping, label) {
     claimed <- .sumstatClaimedCols(mapping)
     present <- .sumstatOptionalSources(df, mapping, label, claimed)
+    sampleSizeCols <- .sumstatSampleSizeCols(df, n)
+    numericCols <- map(present, .sumstatNumericColumn, df = df)
     result <- mutate(
         .sumstatIdentityCols(df, resolved),
         Z = if (z$hasZ) {
@@ -913,8 +916,8 @@ NULL
         # it, a supplied z and a Wald z computed from beta/se are both just
         # `Z`.
         z_supplied = z$hasZ,
-        !!!.sumstatSampleSizeCols(df, n),
-        !!!map(present, .sumstatNumericColumn, df = df)
+        !!!sampleSizeCols,
+        !!!numericCols
     )
     .warnAfProvenance(
         result,
@@ -1042,12 +1045,10 @@ NULL
 # per-study FORMAT fields ES/SE/LP/SS/EAF, with Z = ES / SE.
 # @noRd
 .vcfToSumstatDf <- function(vcf, sampleSelect, formatMapping, label) {
-    fmap <- list_modify(
-        .gwasVcfFormatDefaults,
-        !!!compact(
-            if (is.null(formatMapping)) list() else as.list(formatMapping)
-        )
+    formatOverrides <- compact(
+        if (is.null(formatMapping)) list() else as.list(formatMapping)
     )
+    fmap <- list_modify(.gwasVcfFormatDefaults, !!!formatOverrides)
     rr <- SummarizedExperiment::rowRanges(vcf)
     altList <- VariantAnnotation::alt(vcf)
     sample <- .pickVcfSample(colnames(vcf), sampleSelect, label)
@@ -1063,13 +1064,14 @@ NULL
         chrom = as.character(GenomicRanges::seqnames(rr)),
         pos = unname(as.integer(GenomicRanges::start(rr))),
         SNP = names(rr),
-        A1 = .mlFirstAlts(altList),
-        A2 = unname(as.character(VariantAnnotation::ref(vcf))),
+        A1 = .canonAllele(.mlFirstAlts(altList)),
+        A2 = .canonAllele(unname(as.character(VariantAnnotation::ref(vcf)))),
         Z = z$z,
         z_supplied = z$supplied,
         N = fld$N
     )
-    mutate(out, !!!.vcfOptionalSumstatCols(fld))
+    optionalCols <- .vcfOptionalSumstatCols(fld)
+    mutate(out, !!!optionalCols)
 }
 
 # A GWAS-VCF must yield a z (supplied, or derivable from ES and SE) and a
@@ -2239,18 +2241,15 @@ loadQtlSumStatsFromManifest <- function(
         minLdOverlapWarn,
         check = .qtlSumStatsCheckContainment
     )
-    exec(
-        QtlSumStats,
-        !!!.qtlSumStatsArgs(
-            df,
-            entries,
-            genome,
-            ldReference,
-            nSample$nSampleCol
-        ),
-        region = windows$perRow %||% windows$shared,
-        traitPos = .manifestTraitPos(df, "QtlSumStats")
+    qtlSumStatsArgs <- .qtlSumStatsArgs(
+        df,
+        entries,
+        genome,
+        ldReference,
+        nSample$nSampleCol,
+        windows
     )
+    exec(QtlSumStats, !!!qtlSumStatsArgs)
 }
 
 # A QTL load's windows (.manifestWindows()). A tuple has one window, so the
@@ -2331,14 +2330,23 @@ loadQtlSumStatsFromManifest <- function(
 
 # Assemble the QtlSumStats() argument list from a canonicalised manifest.
 # @noRd
-.qtlSumStatsArgs <- function(df, entries, genome, ldReference, nSampleCol) {
+.qtlSumStatsArgs <- function(
+    df,
+    entries,
+    genome,
+    ldReference,
+    nSampleCol,
+    windows
+) {
     args <- list(
         study = as.character(df$study),
         context = as.character(df$context),
         trait = as.character(df$trait),
         entry = entries,
         genome = genome,
-        ldReference = ldReference
+        ldReference = ldReference,
+        region = windows$perRow %||% windows$shared,
+        traitPos = .manifestTraitPos(df, "QtlSumStats")
     )
     c(
         args,

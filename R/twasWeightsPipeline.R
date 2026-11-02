@@ -181,9 +181,11 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #   multivariate    Whether the method requires multi-trait / multi-context
 #                   structure (mvsusie / mrmash / mvsusieRss / mrmashRss).
 #
-# Per the design: BGLR / qgg "Bayes alphabet" methods (bayes_a/b/c/l/n/r,
-# b_lasso) are individual-only until the qgg CRAN release adds qBayes
-# sumstat support. dpr_gibbs has the SDPR sumstat counterpart;
+# The Bayesian alphabet (bayesA/B/C/L/N/R) runs on several engines per data
+# path, and so do the lasso and LDpred2 on summary statistics; their
+# implementations take `backend`, and .methodBackends records which engines
+# and Options constructors each method has. dpr_gibbs has the
+# SDPR sumstat counterpart;
 # dpr_vb / dpr_adaptive_gibbs remain individual-only. lasso, enet and ridge
 # are glmnet on individual data and the penalized RSS solver on summary
 # statistics, at alpha = 1, 0.5 (or the caller's) and 0. prsCs has no
@@ -252,46 +254,53 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
-    # qgg Bayes alphabet -- individual-only until qgg CRAN release.
+    # The Bayesian alphabet: several engines per path (.alphabetBackends).
     bayesA = list(
         individualImpl = "bayesAWeights",
-        sumstatImpl = NULL,
+        sumstatImpl = "bayesARssWeights",
         multivariate = FALSE
     ),
     bayesB = list(
         individualImpl = "bayesBWeights",
-        sumstatImpl = NULL,
+        sumstatImpl = "bayesBRssWeights",
         multivariate = FALSE
     ),
     bayesC = list(
         individualImpl = "bayesCWeights",
-        sumstatImpl = NULL,
+        sumstatImpl = "bayesCRssWeights",
         multivariate = FALSE
     ),
     bayesL = list(
-        individualImpl = "bLassoWeights",
-        sumstatImpl = NULL,
+        individualImpl = "bayesLWeights",
+        sumstatImpl = "bayesLRssWeights",
         multivariate = FALSE
     ),
     bayesN = list(
         individualImpl = "bayesNWeights",
-        sumstatImpl = NULL,
+        sumstatImpl = "bayesNRssWeights",
         multivariate = FALSE
     ),
     bayesR = list(
         individualImpl = "bayesRWeights",
-        sumstatImpl = NULL,
-        multivariate = FALSE
-    ),
-    bLasso = list(
-        individualImpl = "bLassoWeights",
-        sumstatImpl = NULL,
+        sumstatImpl = "bayesRRssWeights",
         multivariate = FALSE
     ),
     # Sumstat-only Bayesian shrinkage (no individual-level analogue).
     prsCs = list(
         individualImpl = NULL,
         sumstatImpl = "prsCsWeights",
+        multivariate = FALSE
+    ),
+    # LDpred2, on summary statistics only, on bigsnpr or pecotmr's sampler
+    # (.methodBackends).
+    ldpred2Auto = list(
+        individualImpl = NULL,
+        sumstatImpl = "ldpred2AutoWeights",
+        multivariate = FALSE
+    ),
+    ldpred2Grid = list(
+        individualImpl = NULL,
+        sumstatImpl = "ldpred2GridWeights",
         multivariate = FALSE
     )
 )
@@ -368,7 +377,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         return(list(key = tk, args = methods[[tk]]))
     }
     snake <- names(base)[[1L]]
-    merged <- list_modify(base[[snake]], !!!compact(methods[[tk]]))
+    givenSettings <- compact(methods[[tk]])
+    merged <- list_modify(base[[snake]], !!!givenSettings)
     # `impl` tells .resolveMethodFunction which function backs the token;
     # without it the bare token is used, which is not a function.
     list(
@@ -413,7 +423,6 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         "bayesB",
         "bayesC",
         "bayesN",
-        "bLasso",
         "dprVb",
         "dprGibbs",
         "dprAdaptiveGibbs",
@@ -446,7 +455,6 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         bayesB = "bayesB",
         bayesC = "bayesC",
         bayesN = "bayesN",
-        bLasso = "bLasso",
         dprVb = "dprVb",
         dprGibbs = "dprGibbs",
         dprAdaptiveGibbs = "dprAdaptiveGibbs",
@@ -456,13 +464,24 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         mvsusie = "mvsusie",
         mrmash = "mrmash",
         prsCs = "prsCs",
+        ldpred2Auto = "ldpred2Auto",
+        ldpred2Grid = "ldpred2Grid",
         fsusie = "fsusie"
     )
-    unname(map_chr(
+    # Every method's own list key too (bayes_r_weights -> bayesR), read off
+    # .twasMethodMap and matched whole: the table above spells the
+    # multi-word tokens only in camelCase, so the keys .twasMethodLookup()
+    # itself writes for them came back as unknown tokens ("bayes_r"), while
+    # a bare snake_case token stays unknown.
+    canonical <- map_chr(
         snake,
         .twasCanonicalMethod,
         snakeToCanonical = snakeToCanonical
-    ))
+    )
+    fromMap <- set_names(names(.twasMethodMap), map_chr(.twasMethodMap, "fn"))
+    hit <- is_in(names(methodList), names(fromMap))
+    canonical[hit] <- fromMap[names(methodList)[hit]]
+    unname(canonical)
 }
 
 # Enforce input-class / method compatibility against the TWAS
@@ -908,19 +927,16 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     if (!is(twasWeights, "TwasWeights")) {
         return(NULL)
     }
-    idx <- .matchTupleRows(
-        twasWeights,
-        list(
-            study = studyName,
-            context = context,
-            trait = trait,
-            method = method
-        )
-    )
-    if (length(idx) == 0L) {
+    cells <- .twasCells(twasWeights)
+    hit <- .twasCellIndex(cells, studyName, context, trait, method)
+    if (length(hit) == 0L) {
         return(NULL)
     }
-    .twrRowParts(twasWeights, idx[[1L]])
+    .twrCellParts(
+        twasWeights,
+        cells$row[[hit[[1L]]]],
+        cells$method[[hit[[1L]]]]
+    )
 }
 
 # Convert a fine-mapping result (single-method susie/susie_inf row matched
@@ -1091,11 +1107,16 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'         (require at least two traits OR at least two contexts).
 #'   \item \code{prsCs} runs only on summary statistics, so it is rejected
 #'         on \code{QtlDataset} input.
-#'   \item \code{dprVb}, \code{dprAdaptiveGibbs} and the Bayesian alphabet
-#'         (\code{bayesA}, \code{bayesB}, \code{bayesC}, \code{bayesL},
-#'         \code{bayesN}, \code{bayesR}, \code{bLasso}) run only on
-#'         individual-level data, so they are rejected on \code{QtlSumStats}
-#'         input.
+#'   \item \code{dprVb} and \code{dprAdaptiveGibbs} run only on
+#'         individual-level data, so they are rejected on
+#'         \code{QtlSumStats} input.
+#'   \item The Bayesian alphabet (\code{bayesA}, \code{bayesB},
+#'         \code{bayesC}, \code{bayesL}, \code{bayesN}, \code{bayesR})
+#'         runs on both, each method on several engines chosen with
+#'         \code{backend}: see \code{\link{bayesAlphabetWeights}} and
+#'         \code{\link{bayesAlphabetRssWeights}}. On summary statistics
+#'         a row with a genotype reference defaults to pecotmr's own
+#'         sampler, which reads its factor of the LD.
 #'   \item \code{lasso}, \code{enet} and \code{ridge} are glmnet on
 #'         individual-level data and the penalized RSS solver on summary
 #'         statistics. \code{enet} mixes the two penalties at
@@ -1136,6 +1157,18 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   default is \code{c("lasso", "prsCs", "dprGibbs")}, which there run
 #'   lassosum, PRS-CS and SDPR; the fine-mapping methods are not in it, and
 #'   are requested by name together with a \code{fineMappingResult}.
+#' @param backend The engine a method with several runs on, as a named
+#'   character vector keyed by method, e.g.
+#'   \code{c(bayesR = "hibayes", bayesL = "bglr")}; \code{NULL} (the
+#'   default) leaves every method on its default. The Bayesian alphabet
+#'   methods have several (see \code{\link{bayesAlphabetWeights}}), and on
+#'   summary statistics so do \code{lasso} (\code{"pecotmr"} or
+#'   \code{"bigsnpr"}, which is slow: see \code{\link{lassosumRssWeights}})
+#'   and \code{ldpred2Auto} and \code{ldpred2Grid}
+#'   (\code{"bigsnpr"} or \code{"pecotmr"}). Naming a
+#'   method that is not being run, one with a single implementation, or an
+#'   engine the method lacks on the input is an error, and so is a
+#'   \code{backend} inside a \code{methods} entry.
 #' @param contexts Optional context selection; \code{NULL} (the default)
 #'   uses every context. A character vector applies to every study: a context
 #'   no study has is an error, and one only some studies lack is skipped for
@@ -1216,14 +1249,15 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   so a row narrowed since its fit warns (condition class
 #'   \code{pecotmrFitCoverage}).
 #' @param twasWeights Optional \code{\link{TwasWeights}} resume cache. For each
-#'   requested \code{(study, context, trait, method)} tuple already present in
-#'   this collection, the cached \code{TwasWeightsRow} is copied through and
-#'   the corresponding weight fit is skipped. Only the un-cached method subset
-#'   is fit; the cached and fresh entries are concatenated in the returned
-#'   collection. Per-tuple matching mirrors the \code{fineMappingResult} cache
-#'   in \code{\link{fineMappingPipeline}}. Multivariate dispatch
-#'   (\code{mvsusie}, \code{mr.mash}) is unaffected because those methods
-#'   produce one fit jointly across multiple \code{(context, trait)} columns.
+#'   requested \code{(study, context, trait, method)} entry already present in
+#'   this collection, the cached entry is copied through and the
+#'   corresponding weight fit is skipped. Only the un-cached methods are fit;
+#'   the cached and fresh entries are combined in the returned collection.
+#'   Per-entry matching mirrors the \code{fineMappingResult} cache in
+#'   \code{\link{fineMappingPipeline}}. A multivariate method
+#'   (\code{mvsusie}, \code{mr.mash}) fits a group of contexts together, so
+#'   its group is resumed only when the cache holds every context's entry;
+#'   otherwise the whole group is refit.
 #' @param mashPrior Optional \code{\link{MashPrior}} (or coercible) supplying
 #'   data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.
 #' @param usePCA Logical (length 1). Individual-level data only: a
@@ -1245,12 +1279,22 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   takes, which has no \code{"none"} --- its \code{susieFit} slot is part
 #'   of the returned object's contract.
 #'
-#'   \code{"full"} is honoured by the mr.mash engines and, on summary
-#'   statistics, by \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
-#'   \code{mcp} and \code{l0learn}, whose full fit also keeps every candidate's
-#'   coefficients; every other method keeps its fit whole or not at all.
-#'   Requesting \code{"full"} for a run where no method can honour it is an
-#'   error, and a mixed run warns rather than dropping it in silence.
+#'   Every method keeps a fit, and the fit names the variants it was fitted
+#'   on. \code{"full"} is honoured by the mr.mash engines; on summary
+#'   statistics also by \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+#'   \code{mcp} and \code{l0learn}, whose full fit keeps every candidate's
+#'   coefficients; and on individual-level data by \code{lasso}, \code{enet},
+#'   \code{ridge}, \code{scad}, \code{mcp}, \code{l0learn}, the Bayesian
+#'   alphabet, \code{mrash} and the DPR methods, whose full fit is the
+#'   engine's whole object where the slim one keeps the selected fit or the
+#'   posterior summaries, without any copy of the data. Every other method
+#'   keeps its fit whole or not at all, except the fine-mapping methods
+#'   (\code{susie}, \code{susieInf}, \code{susieAsh}, \code{mvsusie},
+#'   \code{fsusie}), whose rows keep none: their weights come from the
+#'   \code{fineMappingResult}'s fit, which is where \code{ctwasPipeline()}
+#'   reads it. Requesting \code{"full"} for a run where no method can honour
+#'   it is an error, and a mixed run warns rather than dropping it in
+#'   silence.
 #' @param phenotypeFilterParam The run's phenotype QC, built with
 #'   \code{\link{PhenotypeFilterParam}}: how missing phenotype values are
 #'   handled (unset drops the affected samples; \code{"impute"} fills each
@@ -1330,9 +1374,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   governs the main-process draws.
 #' @param ... Reserved for method-specific arguments.
 #'
-#' @return A \code{\link{TwasWeights}} collection keyed by \code{(study,
-#'   context, trait, method)}. Each row's LD reference is none for
-#'   individual-level fits and that of the input row(s) for RSS-derived fits.
+#' @return A \code{\link{TwasWeights}} collection with one row per gene --
+#'   \code{(study, context, trait)} and joint group -- holding its methods.
+#'   Each row's LD reference is none for individual-level fits and that of
+#'   the input row(s) for RSS-derived fits.
 #'   Its \code{seqinfo()} names the genome build the inputs name; inputs
 #'   naming different builds are refused.
 #' @examples
@@ -1516,6 +1561,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
 .twasPipelineQtlDataset <- function(
     data,
     methods = "default",
+    backend = NULL,
     contexts = NULL,
     traitId = NULL,
     region = NULL,
@@ -1582,6 +1628,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     resolvedTokens <- .twasQdsResolveTokens(
         jointSpecification,
         methods,
+        backend,
         fineMappingResult,
         .cvResolve(crossValidationParam),
         data
@@ -1762,6 +1809,7 @@ setMethod(
 .twasQdsResolveTokens <- function(
     jointSpecification,
     methods,
+    backend,
     fineMappingResult,
     cvCfg,
     data
@@ -1773,6 +1821,7 @@ setMethod(
         .twasMethodListArgs(norm$methodList),
         "QtlDataset"
     )
+    .twasCheckBackend(backend, norm$tokens, "individual")
     .twasCheckFineMappingMethods(
         norm$tokens,
         fineMappingResult,
@@ -1780,7 +1829,75 @@ setMethod(
         cvFolds = cvCfg$folds,
         fitFullData = cvCfg$fitFullData
     )
+    norm$methodList <- .twasInjectBackends(norm$methodList, backend)
     list(parsedJointSpec = parsedJointSpec, norm = norm)
+}
+
+# Check the pipeline's `backend`: a named character vector keyed by the
+# methods being run, each naming an engine that method has on `path`.
+# @noRd
+.twasCheckBackend <- function(backend, tokens, path) {
+    if (is.null(backend)) {
+        return(invisible(NULL))
+    }
+    if (!is.character(backend) || !is_named(backend)) {
+        abort(str_c(
+            "`backend` must be a named character vector keyed by method, ",
+            "e.g. c(bayesR = \"hibayes\")."
+        ))
+    }
+    stray <- setdiff(names(backend), tokens)
+    if (length(stray) > 0L) {
+        abort(glue(
+            "`backend` names methods that are not being run: ",
+            "{str_flatten(stray, ', ')}."
+        ))
+    }
+    walk(names(backend), .twasCheckOneBackend, backend = backend, path = path)
+    invisible(NULL)
+}
+
+# One `backend` entry: the method must have several engines on `path`, and
+# the entry must name one of them.
+# @noRd
+.twasCheckOneBackend <- function(token, backend, path) {
+    choices <- names(.methodBackends[[path]][[token]])
+    if (length(choices) == 0L) {
+        abort(glue(
+            "`backend`: {token} has one implementation on this input, so ",
+            "there is no backend to choose."
+        ))
+    }
+    if (!is_in(backend[[token]], choices)) {
+        abort(glue(
+            "`backend` for {token} must be one of ",
+            "{str_flatten(choices, ', ')} on this input."
+        ))
+    }
+    invisible(NULL)
+}
+
+# The pipeline's `backend` choices, added to the arguments of the methods
+# they name. Done after the caller's own arguments are checked, which refuse
+# a `backend` there.
+# @noRd
+.twasInjectBackends <- function(methodList, backend) {
+    if (is.null(backend)) {
+        return(methodList)
+    }
+    reduce(
+        names(backend),
+        .twasInjectOneBackend,
+        backend = backend,
+        .init = methodList
+    )
+}
+
+# @noRd
+.twasInjectOneBackend <- function(methodList, token, backend) {
+    key <- .twasMethodMap[[token]]$fn
+    methodList[[key]]$backend <- backend[[token]]
+    methodList
 }
 
 # TWAS's phenotype QC: a weight fit cannot take a missing phenotype, so an
@@ -2114,6 +2231,7 @@ setMethod(
     function(
         data,
         methods = NULL,
+        backend = NULL,
         contexts = NULL,
         traitId = NULL,
         cisWindow = NULL,
@@ -2141,6 +2259,7 @@ setMethod(
         res <- .twasPipelineQtlSumStats(
             data = data,
             methods = methods,
+            backend = backend,
             contexts = contexts,
             traitId = traitId,
             cisWindow = cisWindow,
@@ -2212,6 +2331,7 @@ setMethod(
 .twasPipelineQtlSumStats <- function(
     data,
     methods,
+    backend,
     contexts,
     traitId,
     cisWindow,
@@ -2228,6 +2348,7 @@ setMethod(
     # both need, so each names them once.
     jointCfg <- list(
         data = inputs$data,
+        backend = backend,
         contexts = inputs$contexts,
         traitId = inputs$traitId,
         weightsDataType = weightsDataType,
@@ -2382,8 +2503,59 @@ setMethod(
     tm <- .twasSumStatsMethodTokens(methods)
     .twasCheckMethodCapabilities(tm$tokens, "QtlSumStats")
     .twasCheckMethodArgsForInput(tm$methodArgs, "QtlSumStats")
+    .twasCheckBackend(cfg$backend, tm$tokens, "sumstat")
+    .twasCheckPecotmrLd(cfg$backend, cfg$data)
     .twasCheckFineMappingMethods(tm$tokens, fineMappingResult, "QtlSumStats")
-    .twasQssJointPhase(parsedJointSpec, tm$tokens, tm$methodArgs, cfg)
+    methodArgs <- .twasInjectTokenBackends(tm$methodArgs, cfg$backend)
+    .twasQssJointPhase(parsedJointSpec, tm$tokens, methodArgs, cfg)
+}
+
+# pecotmr's samplers for the alphabet and LDpred2 read only a genotype
+# reference's factor of the LD (.rssFactorOnlyMethods()), so a `backend`
+# naming one is refused when any of the input's LD references is an LD
+# matrix, before any row runs. The lasso's pecotmr engine reads either.
+# @noRd
+.twasCheckPecotmrLd <- function(backend, data) {
+    chosen <- intersect(
+        names(backend)[backend == "pecotmr"],
+        .rssFactorOnlyMethods()
+    )
+    if (length(chosen) == 0L) {
+        return(invisible(NULL))
+    }
+    refs <- ldReference(data)
+    if (all(map_lgl(refs, .ldIsGenotypeRef))) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "`backend` = \"pecotmr\" for {str_flatten(chosen, ', ')} reads a ",
+        "genotype reference's factor of the LD, but this input has an LD ",
+        "matrix among its LD references."
+    ))
+}
+
+# The pipeline's `backend` choices added to the summary-statistics methods'
+# arguments, which are keyed by method.
+# @noRd
+.twasInjectTokenBackends <- function(methodArgs, backend) {
+    if (is.null(backend)) {
+        return(methodArgs)
+    }
+    reduce(
+        names(backend),
+        .twasInjectTokenBackend,
+        backend = backend,
+        .init = methodArgs
+    )
+}
+
+# @noRd
+.twasInjectTokenBackend <- function(methodArgs, token, backend) {
+    methodArgs[[token]] <- list_assign(
+        as.list(methodArgs[[token]] %||% list()),
+        backend = backend[[token]]
+    )
+    methodArgs
 }
 
 # Resolve the selected rows, partition tokens into univariate vs multivariate,
@@ -2532,17 +2704,26 @@ setMethod(
     )
 }
 
-# The pipeline's fitRetention for a summary-statistics weight function that
-# takes one, unless the caller set it for that method; a function without the
-# argument keeps no fit. "none" is passed on too, unlike on the
-# individual-level path: the fine-mapping adapters here keep a slim fit
-# unless told otherwise, so leaving it unset would not drop it.
+# The pipeline's fitRetention for a summary-statistics weight function, unless
+# the caller set it for that method; every weight method takes one. "none" is
+# passed on too, unlike on the individual-level path: the fine-mapping
+# adapters here keep a slim fit unless told otherwise, so leaving it unset
+# would not drop it.
 # @noRd
-.twasQssRetainArgs <- function(args, fnName, fitRetention) {
-    if (!is_in("fitRetention", names(formals(fnName)))) {
-        return(args)
-    }
+.twasQssRetainArgs <- function(args, fitRetention) {
     list_assign(args, fitRetention = args$fitRetention %||% fitRetention)
+}
+
+# The retention level of `token`'s TWAS rows. A fine-mapping method's weights
+# are extracted from the fineMappingResult's fit, so its rows keep none
+# rather than a second copy of it; cTWAS reads it from the fine-mapping
+# result.
+# @noRd
+.twasRowRetention <- function(token, fitRetention) {
+    if (isTRUE(is_in(token, names(.twasFineMappingMethodAdapters)))) {
+        return("none")
+    }
+    fitRetention
 }
 
 # Run a weight function, warning (with `errPrefix`) and returning NULL on error.
@@ -2807,7 +2988,19 @@ setMethod(
         .twasWarnNoFitUniv(tk, st, ctx, tr)
         return(NULL)
     }
-    list_assign(baseArgs, !!!set_names(list(fit), spec$adapter$rssFitArg))
+    fitArg <- set_names(list(fit), spec$adapter$rssFitArg)
+    list_assign(baseArgs, !!!fitArg)
+}
+
+# A method with several engines on summary statistics runs a row on the
+# pipeline's choice, else on the default for the row's LD reference: set
+# here, before the row's options are built with that engine's constructor.
+# @noRd
+.twasQssRowBackend <- function(userArgs, tk, ldReference) {
+    if (is.null(.methodBackends$sumstat[[tk]]) || !is.null(userArgs$backend)) {
+        return(userArgs)
+    }
+    list_assign(userArgs, backend = .rssBackend(tk, NULL, ldReference))
 }
 
 # Fit one univariate method for one entry -> a row record, or NULL on skip.
@@ -2838,11 +3031,12 @@ setMethod(
     if (is.null(userArgs)) {
         return(NULL)
     }
+    userArgs <- .twasQssRowBackend(userArgs, tk, fitCtx$ldReference)
     weights <- .twasTryWeights(
         spec$fn,
         fitCtx$stat,
         fitCtx$ldReference,
-        .twasQssRetainArgs(userArgs, spec$fn, fitRetention),
+        .twasQssRetainArgs(userArgs, .twasRowRetention(tk, fitRetention)),
         .twasFitErrUniv(tk, st, ctx, tr)
     )
     if (is.null(weights)) {
@@ -3139,15 +3333,15 @@ setMethod(
     fitRetention,
     fineMappingResult
 ) {
+    rowRetention <- .twasRowRetention(tk, fitRetention)
     baseArgs <- .twasQssRetainArgs(
         .twasMrmashRetainDefaults(
             .twasUserArgs(methodArgs, tk),
             spec$adapter,
             tk,
-            fitRetention
+            rowRetention
         ),
-        spec$fn,
-        fitRetention
+        rowRetention
     )
     if (is.null(spec$adapter)) {
         return(baseArgs)
@@ -3270,7 +3464,8 @@ setMethod(
         .twasWarnNoFitMv(tk, st, tr)
         return(NULL)
     }
-    list_assign(userArgs, !!!set_names(list(fit), spec$adapter$rssFitArg))
+    fitArg <- set_names(list(fit), spec$adapter$rssFitArg)
+    list_assign(userArgs, !!!fitArg)
 }
 
 # Warning for a missing multivariate fine-mapping fit.
@@ -3293,9 +3488,8 @@ setMethod(
     )
 }
 
-# One row record per context from a fitted multivariate weight matrix. The
-# underlying joint fit is shared on the first row only; the remaining rows
-# reference it by leaving fits NULL.
+# One row record per context from a fitted multivariate weight matrix. Every
+# context's row keeps the joint fit, which the collection stores once.
 # @noRd
 .twasMvContextRows <- function(
     weights,
@@ -3373,6 +3567,7 @@ setMethod(
         jointSpecification = NULL,
         fitRetention = cfg$fitRetention,
         methods = cfg$methods,
+        backend = cfg$backend,
         contexts = .selectedContexts(cfg$contexts, s),
         traitId = .studyTraitIdArg(cfg$traitId, s),
         region = cfg$region,
@@ -3416,6 +3611,7 @@ setMethod(
         jointSpecification = NULL,
         fitRetention = cfg$fitRetention,
         methods = cfg$methods,
+        backend = cfg$backend,
         contexts = NULL,
         traitId = NULL,
         cisWindow = cfg$cisWindow,
@@ -3462,15 +3658,36 @@ setMethod(
 }
 
 # The methods whose "full" fit keeps more than their "slim" one, on one input
-# path: mr.mash's whole fit, and on summary statistics the shrinkage-grid
+# path. On summary statistics: mr.mash's whole fit and the shrinkage-grid
 # methods' candidate coefficients (lassosumRssWeights() and the penalized
-# RSS weights).
+# RSS weights). On individual-level data: the engines' whole fitted objects,
+# where "slim" keeps the selected fit or the posterior summaries (glmnet,
+# ncvreg, L0Learn, the Bayesian alphabet), or drops a copy of the data
+# (mr.ash, DPR); and mr.mash's whole fit.
 # @noRd
 .twasFullDetailTokens <- function(inputKind) {
     if (identical(inputKind, "QtlSumStats")) {
         return(c("mrmash", "lasso", "enet", "ridge", "scad", "mcp", "l0learn"))
     }
-    "mrmash"
+    c(
+        "mrmash",
+        "lasso",
+        "enet",
+        "ridge",
+        "scad",
+        "mcp",
+        "l0learn",
+        "mrash",
+        "dprGibbs",
+        "dprVb",
+        "dprAdaptiveGibbs",
+        "bayesA",
+        "bayesB",
+        "bayesC",
+        "bayesL",
+        "bayesN",
+        "bayesR"
+    )
 }
 
 # ---- MultiStudyQtlDataset pipeline worker + phase helpers ------------------
@@ -3535,6 +3752,7 @@ setMethod(
 .twasPipelineMultiStudy <- function(
     data,
     methods = "default",
+    backend = NULL,
     contexts = NULL,
     traitId = NULL,
     region = NULL,
@@ -3577,8 +3795,9 @@ setMethod(
         jointRegions,
         "twasWeightsPipeline(MultiStudyQtlDataset)"
     )
-    cfg <- .twasMsCfg(
+    cfg <- list(
         methods = methods,
+        backend = backend,
         contexts = parseContexts(contexts, data),
         traitId = parseTraitIds(traitId, data),
         region = region,
@@ -3623,7 +3842,8 @@ setMethod(
 }
 
 # The MultiStudyQtlDataset joint record, derived from the record the
-# per-component recursion receives (`cfg`, .twasMsCfg()): the settings each
+# per-component recursion receives (`cfg`, which .twasPipelineMultiStudy()
+# builds): the settings each
 # component's own QtlDataset run fits under (.twasJointCfg()), plus the
 # collection and the two filters the components apply. Deriving it, rather
 # than re-listing the settings, keeps the per-study joint fits on exactly the
@@ -3736,8 +3956,9 @@ setMethod(
 }
 
 # Run the per-study / per-component recursion via the shared multi-study driver.
-# `cfg` is the `.twasMsCfg()` record of the settings each component re-runs
-# with.
+# `cfg` is the record of the settings each component re-runs with, which
+# .twasPipelineMultiStudy() builds and the driver hands to .twasPerStudy /
+# .twasSumStats.
 # @noRd
 .twasMsDriver <- function(data, jointResult, cfg) {
     .multiStudyPipelineDriver(
@@ -3750,60 +3971,6 @@ setMethod(
         TwasWeights,
         "twasWeightsPipeline",
         noun = "weights"
-    )
-}
-
-# The settings the per-study / per-component recursion re-runs each component
-# with, as the record .multiStudyPipelineDriver() hands to .twasPerStudy /
-# .twasSumStats.
-# @noRd
-.twasMsCfg <- function(
-    methods,
-    contexts,
-    traitId,
-    region,
-    cisWindow,
-    jointRegions,
-    fineMappingResult,
-    twasWeights,
-    phenotypeFilterParam,
-    verbose,
-    crossValidationParam,
-    ensembleParam,
-    seed,
-    genotypeFilterParam,
-    panelFilterParam,
-    mashPrior,
-    estimatePi,
-    usePCA,
-    nPCs,
-    fitRetention,
-    weightsDataType,
-    residualizationParam
-) {
-    list(
-        methods = methods,
-        contexts = contexts,
-        traitId = traitId,
-        region = region,
-        cisWindow = cisWindow,
-        jointRegions = jointRegions,
-        fineMappingResult = fineMappingResult,
-        twasWeights = twasWeights,
-        phenotypeFilterParam = phenotypeFilterParam,
-        verbose = verbose,
-        crossValidationParam = crossValidationParam,
-        ensembleParam = ensembleParam,
-        seed = seed,
-        genotypeFilterParam = genotypeFilterParam,
-        panelFilterParam = panelFilterParam,
-        mashPrior = mashPrior,
-        estimatePi = estimatePi,
-        usePCA = usePCA,
-        nPCs = nPCs,
-        fitRetention = fitRetention,
-        weightsDataType = weightsDataType,
-        residualizationParam = residualizationParam
     )
 }
 
@@ -4531,17 +4698,26 @@ ensembleWeights <- function(
     .ensembleAccumulateWeights(wtList, wtKeys, matched, zeta)
 }
 
-# Coerce a weight vector/matrix to a (variants x contexts) matrix.
+# Coerce a weight vector/matrix to a (variants x contexts) matrix, a vector's
+# names becoming its rownames.
 # @noRd
 .ensembleAsMatrix <- function(w) {
-    if (is.matrix(w)) w else matrix(w, ncol = 1)
+    if (is.matrix(w)) {
+        return(w)
+    }
+    matrix(w, ncol = 1, dimnames = list(names(w), NULL))
 }
 
-# One method's zeta-scaled contribution, or NULL when its weight matrix does
-# not line up with the first one's shape.
+# One method's zeta-scaled contribution, in the first method's variant order
+# (`ids`), or NULL when its weight matrix does not line up with the first
+# one's shape.
 # @noRd
-.ensembleWeightTerm <- function(i, wtList, wtKeys, zeta, shape) {
-    wMat <- .ensembleAsMatrix(wtList[[wtKeys[i]]])
+.ensembleWeightTerm <- function(i, wtList, wtKeys, zeta, shape, ids) {
+    wMat <- .ensembleAlignWeights(
+        .ensembleAsMatrix(wtList[[wtKeys[i]]]),
+        ids,
+        wtKeys[i]
+    )
     if (!identical(dim(wMat), shape)) {
         wtKey <- wtKeys[i]
         msg <- glue(
@@ -4552,6 +4728,24 @@ ensembleWeights <- function(
         return(NULL)
     }
     zeta[i] * wMat
+}
+
+# `wMat` in the variant order `ids`, when both name their variants: adding
+# by position would add one variant's weight to another's. Weights on other
+# variants are refused; unnamed ones can only be taken in the order given.
+# @noRd
+.ensembleAlignWeights <- function(wMat, ids, key) {
+    own <- rownames(wMat)
+    if (is.null(ids) || is.null(own)) {
+        return(wMat)
+    }
+    if (anyDuplicated(own) > 0L || !setequal(own, ids)) {
+        abort(glue(
+            "ensembleWeights: the weights of '{key}' are on other variants ",
+            "than the first method's; give every method the same variants."
+        ))
+    }
+    wMat[ids, , drop = FALSE]
 }
 
 # Zeta-weighted sum of the matched weight matrices; univariate -> named vector.
@@ -4568,7 +4762,8 @@ ensembleWeights <- function(
             wtList = wtList,
             wtKeys = wtKeys,
             zeta = zeta,
-            shape = shape
+            shape = shape,
+            ids = rownames(firstWt)
         )),
         `+`,
         .init = matrix(
@@ -4758,9 +4953,8 @@ ensembleWeights <- function(
     .twasCacheLookup(twasWeights, st, ctx, tr, tk)
 }
 
-# One context row (`kk`) of a fitted multivariate weight matrix. The shared
-# joint
-# fit rides on the first row only; later rows leave fits NULL.
+# One context row (`kk`) of a fitted multivariate weight matrix, with the
+# shared joint fit.
 # @noRd
 .twasMvContextRow <- function(
     kk,
@@ -4781,7 +4975,7 @@ ensembleWeights <- function(
         TwasWeightsRow(
             variantIds = mvStat$variantIds,
             weights = as.numeric(weights[, kk]),
-            methodFits = if (kk == 1L) fitAttr else NULL,
+            methodFits = fitAttr,
             cvResult = NULL,
             weightStandardized = TRUE,
             weightsDataType = weightsDataType

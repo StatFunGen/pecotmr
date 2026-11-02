@@ -19,11 +19,6 @@ NULL
 #' @slot cvResult Cross-validation payload, or \code{NULL}.
 #' @slot weightStandardized Whether the weights are on the standardized scale.
 #' @slot weightsDataType Optional data-type label.
-#' @slot fitVariants The ids of the variants the weights were fitted on, in
-#'   the fit's own order, recorded when the row is built; empty for a row with
-#'   no fit payload. A row narrowed to fewer variants keeps them, which is how
-#'   reading its fits can tell they describe more variants than the row now
-#'   holds.
 #' @section Coercion: \code{as(x, "GRanges")} gives the row's variants with
 #'   their \code{weight} column: the element a collection stores for it.
 #' @seealso \code{\link{TwasWeightsRow}},
@@ -37,16 +32,14 @@ setClass(
         methodFits = "ANY",
         cvResult = "ANY",
         weightStandardized = "logical",
-        weightsDataType = "ANY",
-        fitVariants = "character"
+        weightsDataType = "ANY"
     ),
     prototype(
         weights = NULL,
         methodFits = NULL,
         cvResult = NULL,
         weightStandardized = FALSE,
-        weightsDataType = NULL,
-        fitVariants = character(0)
+        weightsDataType = NULL
     )
 )
 
@@ -110,7 +103,7 @@ TwasWeightsRow <- function(
 ) {
     vids <- as.character(variantIds)
     gr <- .variantIdsToGRanges(vids, "variantIds")
-    w <- weights
+    w <- .unnamedWeights(weights)
     if (!is.null(w) && is.null(dim(w)) && length(w) != length(gr)) {
         msg <- glue(
             "length(weights) is {length(w)} but {length(gr)} variants were ",
@@ -129,7 +122,6 @@ TwasWeightsRow <- function(
         gr,
         value = `[[<-`(mcols(gr, use.names = FALSE), "weight", value = w)
     )
-    fitted <- length(methodFits) > 0L || !is.null(cvResult)
     new(
         "TwasWeightsRow",
         variants = withWeight,
@@ -137,10 +129,28 @@ TwasWeightsRow <- function(
         methodFits = methodFits,
         cvResult = cvResult,
         weightStandardized = isTRUE(weightStandardized),
-        weightsDataType = weightsDataType,
-        fitVariants = if (fitted) .grVariantIds(gr) else character(0)
+        weightsDataType = weightsDataType
     )
 }
+
+# A row saved while rows recorded the variants their weights were fitted on
+# carries a `fitVariants` slot; the fits name their variants now, so the slot
+# is dropped.
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "TwasWeightsRow",
+    function(object, ..., verbose = FALSE) {
+        if (isTRUE(verbose)) {
+            message("updateObject(object = 'TwasWeightsRow')")
+        }
+        if (!is.null(attr(object, "fitVariants", exact = TRUE))) {
+            object <- `attr<-`(object, "fitVariants", NULL)
+        }
+        methods::callNextMethod(object, ..., verbose = verbose)
+    }
+)
 
 
 # ---- field accessors --------------------------------------------------------
@@ -153,7 +163,35 @@ setMethod("variantIds", "TwasWeightsRow", function(x) {
 
 #' @rdname weights-methods
 #' @export
-setMethod("weights", "TwasWeightsRow", function(object, ...) object@weights)
+setMethod("weights", "TwasWeightsRow", function(object, ...) {
+    .namedWeights(object@weights, .grVariantIds(object@variants))
+})
+
+# Weights as a row stores them: without the variant ids as names, which the
+# row's variants already hold -- every id would otherwise be stored a third
+# time. A matrix keeps its column labels (conditions, or fSuSiE's features).
+# @noRd
+.unnamedWeights <- function(w) {
+    if (is.null(w)) {
+        return(w)
+    }
+    if (is.null(dim(w))) {
+        return(unname(w))
+    }
+    `rownames<-`(w, NULL)
+}
+
+# Stored weights named by their variants again, as the accessors return them.
+# @noRd
+.namedWeights <- function(w, ids) {
+    if (is.null(w)) {
+        return(w)
+    }
+    if (is.null(dim(w))) {
+        return(if (length(w) == length(ids)) set_names(w, ids) else w)
+    }
+    if (nrow(w) == length(ids)) `rownames<-`(w, ids) else w
+}
 
 #' @rdname methodFits
 #' @export
@@ -163,8 +201,76 @@ setMethod("methodFits", "TwasWeightsRow", function(x) x@methodFits)
 #' @export
 setMethod("cvResult", "TwasWeightsRow", function(x) x@cvResult)
 
+# The variants a row's stored fit was made on, read off the fit itself; none
+# for a row kept without a fit.
 # @noRd
-.twRowFitVariants <- function(x) x@fitVariants
+.twRowFitVariants <- function(x) .twasFitVariantIds(x@methodFits)
+
+# ---- the variants a stored fit was made on ----------------------------------
+
+# The variants a TWAS method's stored fit was made on. A fit records them once:
+# where its engine already names them, or in the `variantIds` element
+# .withFitVariantIds() gives a fit that names none. A row joined from several
+# regions stores a list of the regions' fits, whose variants run on in turn.
+# None for no fit, or one that names nothing.
+# @noRd
+.twasFitVariantIds <- function(fit) {
+    if (!is.list(fit)) {
+        return(character(0))
+    }
+    ids <- .twasFitOwnIds(fit)
+    if (length(ids) > 0L || !all(map_lgl(fit, is.list))) {
+        return(ids)
+    }
+    list_c(map(unname(fit), .twasFitOwnIds), ptype = character())
+}
+
+# One fit's variants: its `variantIds`, else where its engine names them --
+# glmnet's and ncvreg's coefficient paths, qgg's and BGLR's effect vectors,
+# mr.ash's and DPR's copies of the genotypes, a SuSiE-family fit's own names.
+# @noRd
+.twasFitOwnIds <- function(fit) {
+    ids <- fit[["variantIds"]] %||%
+        rownames(pluck(fit, "glmnet.fit", "beta")) %||%
+        .twasNcvregFitIds(fit) %||%
+        names(fit[["bm"]]) %||%
+        names(pluck(fit, "ETA", 1L, "b")) %||%
+        colnames(pluck(fit, "data", "X")) %||%
+        colnames(fit[["x"]])
+    if (is.null(ids)) {
+        return(.fitNamedVariants(fit))
+    }
+    as.character(ids)
+}
+
+# ncvreg names its coefficient path's rows, the intercept's among them.
+# @noRd
+.twasNcvregFitIds <- function(fit) {
+    ids <- rownames(pluck(fit, "fit", "beta"))
+    ids[ids != "(Intercept)"]
+}
+
+# `fit` naming the variants it was made on: as it is when its engine already
+# names them (or it is no list to name them in, or there are no ids to give
+# it), else with `ids` as one `variantIds` element -- a single copy, however
+# many per-variant values the fit holds.
+# @noRd
+.withFitVariantIds <- function(fit, ids) {
+    if (!is.list(fit) || is.null(ids) || length(.twasFitOwnIds(fit)) > 0L) {
+        return(fit)
+    }
+    `[[<-`(fit, "variantIds", value = as.character(ids))
+}
+
+# Weights `w` with the fit they carry, if any, naming its variants.
+# @noRd
+.withWeightsFitIds <- function(w, ids) {
+    fit <- attr(w, "fit", exact = TRUE)
+    if (is.null(fit)) {
+        return(w)
+    }
+    `attr<-`(w, "fit", .withFitVariantIds(fit, ids))
+}
 
 #' @rdname weightStandardized
 #' @export

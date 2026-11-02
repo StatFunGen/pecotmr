@@ -5,14 +5,21 @@
 \alias{ColocResult-class}
 \title{Colocalization Result}
 \description{
-A collection of colocalization results, one element per tested
-  (QTL credible set, GWAS credible set, block) pair. Build the four views
-  with \code{\link{colocPairs}}, \code{\link{colocVariants}},
-  \code{\link{colocCredibleSets}} and \code{\link{colocGenes}}.
+A collection of colocalization results, one element per scored
+  group: a QTL row against a GWAS row in one block, whose credible-set
+  pairs coloc scores together over the same aligned variants. Build the
+  four views with \code{\link{colocPairs}} (one row per pair),
+  \code{\link{colocVariants}}, \code{\link{colocCredibleSets}} and
+  \code{\link{colocGenes}}.
 }
 \details{
-The \code{ldReference} is what \code{colocCredibleSets()} uses to
-  compute credible-set purity, each pair's from its own reference.
+Each element holds its group's variants once. Its identity and
+  block are columns of \code{mcols()}, and its pairs the \code{pairs}
+  column: one table per group, one row per credible-set pair, with the
+  pair's \code{SNP.PP.H4} aligned to the group's variants. So
+  \code{length()} counts groups; \code{colocPairs()} has a row per pair.
+  The \code{ldReference} is what \code{colocCredibleSets()} uses to
+  compute credible-set purity, each group's from its own reference.
 }
 \section{Slots}{
 
@@ -20,7 +27,7 @@ The \code{ldReference} is what \code{colocCredibleSets()} uses to
 \item{\code{ldReference}}{A named list of the LD references the pairs were computed
 against, each a genotype panel, a \code{GenotypeMixture} or an
 \code{LdMatrix}, stored once apiece; the \code{ldReference} column of
-\code{mcols} names the entry each pair used (\code{NA} for none).}
+\code{mcols} names the entry each group used (\code{NA} for none).}
 }}
 
 \seealso{

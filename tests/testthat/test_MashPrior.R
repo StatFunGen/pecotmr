@@ -1,6 +1,7 @@
 # Tests for R/MashPrior.R — the data-driven (mash) prior bundle: full-data prior
 # (fullFit) + per-fold cross-validated priors (cvFits) consumed by
-# twasWeightsPipeline (mr.mash) and, transitively, fineMappingPipeline (mvSuSiE).
+# twasWeightsPipeline (mr.mash) and, transitively, fineMappingPipeline
+# (mvSuSiE).
 
 test_that("MashPrior: construct + accessors (full + cv)", {
     U <- list(U1 = diag(2))

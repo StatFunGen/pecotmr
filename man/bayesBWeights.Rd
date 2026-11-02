@@ -2,50 +2,60 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesBWeights}
 \alias{bayesBWeights}
-\title{Compute Weights Using BayesB}
+\title{BayesB TWAS weights (spike and slab, a variance per variant)}
 \usage{
 bayesBWeights(
   X,
   y,
-  nIter = 10000,
-  burnIn = 2000,
+  backend = c("bglr", "hibayes"),
+  pi = 0.2,
+  nIter = 5000,
+  nBurnin = 1000,
   thin = 5,
-  probIn = 0.2,
-  methodArgs = BglrOptions()
+  fitRetention = c("none", "slim", "full"),
+  methodArgs = NULL
 )
 }
 \arguments{
-\item{X}{A numeric matrix of predictors.}
+\item{X}{A numeric matrix of genotypes (samples x variants).}
 
-\item{y}{A numeric response vector.}
+\item{y}{A numeric vector of phenotypes, one per row of \code{X}.}
 
-\item{nIter}{Number of MCMC iterations. Default is 10000.}
+\item{backend}{\code{"bglr"} (default) or \code{"hibayes"}.}
 
-\item{burnIn}{Number of burn-in iterations. Default is 2000.}
+\item{pi}{The prior proportion of non-null effects, where each engine's
+estimate of it starts. Default \code{0.2}.}
 
-\item{thin}{Thinning interval. Default is 5.}
+\item{nIter}{Integer. Total number of MCMC iterations, burn-in included,
+on every engine. Default \code{5000}.}
 
-\item{probIn}{Prior inclusion probability for each marker. Default is 0.2.}
+\item{nBurnin}{Integer. Number of burn-in iterations discarded; less than
+\code{nIter}. Default \code{1000}.}
 
-\item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
-with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+\item{thin}{Integer. Thinning interval for retained MCMC samples. Default
+\code{5}.}
+
+\item{fitRetention}{How much of the fit is kept as the \code{"fit"}
+attribute of the returned weights: \code{"none"} (default) attaches
+nothing; \code{"slim"} the posterior summaries, as a list of the
+effects' posterior means (\code{coef}, over the variants fitted) and,
+where the backend reports them, their posterior inclusion probabilities
+(\code{pip}); \code{"full"} the backend's whole fitted object. Either
+names the variants it was fitted on.}
+
+\item{methodArgs}{Options for the backend's engine:
+\code{\link{BglrOptions}} for BGLR, \code{\link{HibayesOptions}} for
+hibayes. \code{NULL} keeps the engine's defaults.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights.
+A numeric vector of weights, one per variant (column of
+  \code{X}); columns dropped for zero variance receive weight 0.
+  Unless \code{fitRetention = "none"} the fit is attached as
+  attribute \code{"fit"}.
 }
 \description{
-Fits a BayesB linear regression model via `BGLR::BGLR` and returns the
-posterior mean of the marker effects. BayesB places a "spike-and-slab"
-mixture prior on each marker effect, with a scaled-t slab.
-}
-\details{
-Defaults for `nIter`, `burnIn`, and `thin` are larger than BGLR's package
-defaults to better accommodate the high LD typical of cis-eQTL windows; see
-Kim et al. (2022) which observed that the BGLR defaults can be inadequate
-under correlated predictors. Override these arguments to recover the package
-defaults if desired.
+Fits the BayesB prior, a point mass at zero mixed with a
+  scaled-t slab, through \code{\link{bayesAlphabetWeights}}.
 }
 \examples{
 data(eqtlRegionExample)

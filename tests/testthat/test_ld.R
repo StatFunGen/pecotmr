@@ -28,7 +28,7 @@ test_that("orderDedupRegions orders and deduplicates across chromosomes", {
     expect_true(all(diff(result$start[result$chrom == result$chrom[1]]) >= 0))
 })
 
-test_that("orderDedupRegions sorts X/Y/MT after autosomes and keeps chrom a string", {
+test_that("orderDedupRegions puts X/Y/MT after autosomes; chrom stays text", {
     df <- data.frame(
         chrom = c("chrX", "chr2", "chr1", "chrM"),
         start = c(1L, 1L, 1L, 1L),
@@ -217,6 +217,21 @@ test_that("checkLd eigenfix does nothing when matrix is already PD", {
 geno_test_data_dir <- test_path("test_data")
 geno_region_all <- GenomicRanges::GRanges("chr21:17513228-17592874")
 
+# An LD-meta TSV beside the genotype fixtures, one row per (start, end, path)
+# on chr1, removed when the calling test ends.
+.ldr_ldMeta <- function(name, rows, env = parent.frame()) {
+    path <- file.path(geno_test_data_dir, name)
+    writeLines(
+        c(
+            str_c("chrom", "start", "end", "path", sep = "\t"),
+            str_c("1", rows$start, rows$end, rows$path, sep = "\t")
+        ),
+        path
+    )
+    withr::defer(unlink(path), envir = env)
+    path
+}
+
 test_that("resolveLdSource tells the format of the genotypes metadata names", {
     # One row per chromosome naming its genotype file or PLINK prefix,
     # resolved beside the metadata file.
@@ -252,20 +267,9 @@ test_that("resolveLdSource tells a file's format as readGenotypes does", {
 test_that("resolveLdSource refuses a row pointing at pre-computed LD", {
     # pecotmr reads LD only from genotypes, so a row naming a .cor.xz matrix
     # is an error rather than a source type.
-    meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_pre_tmp.tsv")
-    on.exit(unlink(meta_file), add = TRUE)
-    writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
-    cat(
-        paste(
-            "chr1",
-            "1000",
-            "1200",
-            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
-            sep = "\t"
-        ),
-        "\n",
-        file = meta_file,
-        append = TRUE
+    meta_file <- .ldr_ldMeta(
+        "ld_meta_resolve_pre_tmp.tsv",
+        list(start = 1000L, end = 1200L, path = "block_1.cor.xz")
     )
     expect_error(
         pecotmr:::resolveLdSource(meta_file),
@@ -345,77 +349,53 @@ test_that("resolveGenotypePathForRegion takes a window on one chromosome", {
 })
 
 # ===========================================================================
-# regionalLdMeta: real .cor.xz fixtures
+# regionalLdMeta: rows naming genotype files
 # ===========================================================================
 
-test_that("regionalLdMeta returns correct file paths for single block", {
-    meta_file <- file.path(
-        geno_test_data_dir,
-        "ld_meta_regional_single_tmp.tsv"
-    )
-    on.exit(unlink(meta_file), add = TRUE)
-    lines <- c(
-        paste("chrom", "start", "end", "path", sep = "\t"),
-        paste(
-            "1",
-            "1000",
-            "1200",
-            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
-            sep = "\t"
-        ),
-        paste(
-            "1",
-            "1200",
-            "1400",
-            "LD_block_2.chr1_1200_1400.float16.txt.xz,LD_block_2.chr1_1200_1400.float16.bim",
-            sep = "\t"
+# Three chr1 blocks, each naming one of the genotype fixtures.
+.ldr_blockFiles <- c(
+    "test_variants.pgen",
+    "test_variants.vcf.gz",
+    "test_variants.gds"
+)
+
+test_that("regionalLdMeta returns the file of the block a region falls in", {
+    meta_file <- .ldr_ldMeta(
+        "ld_meta_regional_single_tmp.tsv",
+        list(
+            start = c(1000L, 1200L),
+            end = c(1200L, 1400L),
+            path = .ldr_blockFiles[1:2]
         )
     )
-    writeLines(lines, meta_file)
     result <- pecotmr:::regionalLdMeta(
         meta_file,
         GenomicRanges::GRanges("chr1:1050-1150")
     )
-    expect_true(is.list(result))
-    expect_true(length(result$intersections$LD_file_paths) >= 1)
-    # All returned paths should exist
-    expect_true(all(file.exists(result$intersections$LD_file_paths)))
-    expect_true(all(file.exists(result$intersections$bimFilePaths)))
+    # Found beside the metadata file, which names it relative to itself.
+    expect_identical(
+        result$intersections$paths,
+        file.path(geno_test_data_dir, "test_variants.pgen")
+    )
 })
 
-test_that("regionalLdMeta spans multiple blocks for wide region", {
-    meta_file <- file.path(geno_test_data_dir, "ld_meta_regional_multi_tmp.tsv")
-    on.exit(unlink(meta_file), add = TRUE)
-    lines <- c(
-        paste("chrom", "start", "end", "path", sep = "\t"),
-        paste(
-            "1",
-            "1000",
-            "1200",
-            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
-            sep = "\t"
-        ),
-        paste(
-            "1",
-            "1200",
-            "1400",
-            "LD_block_2.chr1_1200_1400.float16.txt.xz,LD_block_2.chr1_1200_1400.float16.bim",
-            sep = "\t"
-        ),
-        paste(
-            "1",
-            "1400",
-            "1600",
-            "LD_block_3.chr1_1400_1600.float16.txt.xz,LD_block_3.chr1_1400_1600.float16.bim",
-            sep = "\t"
+test_that("regionalLdMeta returns every block's file a region spans", {
+    meta_file <- .ldr_ldMeta(
+        "ld_meta_regional_multi_tmp.tsv",
+        list(
+            start = c(1000L, 1200L, 1400L),
+            end = c(1200L, 1400L, 1600L),
+            path = .ldr_blockFiles
         )
     )
-    writeLines(lines, meta_file)
     result <- pecotmr:::regionalLdMeta(
         meta_file,
         GenomicRanges::GRanges("chr1:1000-1500")
     )
-    expect_true(length(result$intersections$LD_file_paths) >= 2)
+    expect_identical(
+        result$intersections$paths,
+        file.path(geno_test_data_dir, .ldr_blockFiles)
+    )
 })
 
 # ===========================================================================
@@ -599,7 +579,7 @@ test_that("ldPruneByCorrelation keeps all columns when uncorrelated", {
     expect_equal(colnames(result$X.new), colnames(X))
 })
 
-test_that("ldPruneByCorrelation preserves colnames for single remaining column", {
+test_that("ldPruneByCorrelation keeps the name of a lone remaining column", {
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 3), nrow = n)
@@ -622,7 +602,7 @@ test_that("ldPruneByCorrelation keeps a single column, with nothing to prune", {
     expect_identical(res$filter.id, 1L)
 })
 
-test_that("ldPruneByCorrelation strict threshold removes at least as many as lenient", {
+test_that("ldPruneByCorrelation: a strict cutoff removes at least as many", {
     set.seed(42)
     n <- 100
     p <- 5
@@ -666,7 +646,7 @@ test_that("dropCollinearColumns removes single problematic column", {
     expect_false("chr1:300:A:G" %in% colnames(result))
 })
 
-test_that("dropCollinearColumns variance strategy removes lowest variance column", {
+test_that("dropCollinearColumns(variance) drops the lowest-variance column", {
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
@@ -718,7 +698,7 @@ test_that("dropCollinearColumns correlation drops the highest-sum candidate", {
     expect_identical(result, X[, -2L])
 })
 
-test_that("dropCollinearColumns responseCorrelation strategy removes lowest |cor| with response", {
+test_that("dropCollinearColumns drops the column least correlated with y", {
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
@@ -734,7 +714,7 @@ test_that("dropCollinearColumns responseCorrelation strategy removes lowest |cor
     expect_true("chr1:100:A:G" %in% colnames(result))
 })
 
-test_that("dropCollinearColumns errors on responseCorrelation without response", {
+test_that("dropCollinearColumns: responseCorrelation needs a response", {
     X <- matrix(rnorm(60), 20, 3)
     colnames(X) <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     expect_error(
@@ -760,7 +740,7 @@ test_that("dropCollinearColumns errors on invalid strategy", {
     )
 })
 
-test_that("dropCollinearColumns preserves column name when single column remains", {
+test_that("dropCollinearColumns keeps the name of a lone remaining column", {
     set.seed(42)
     X <- matrix(rnorm(40), nrow = 20, ncol = 2)
     colnames(X) <- c("keeper", "removed")
@@ -787,7 +767,7 @@ test_that("dropCollinearColumns is silent by default", {
 # enforceDesignFullRank (unexported)
 # ===========================================================================
 
-test_that("enforceDesignFullRank handles rank-deficient design via correlation fallback", {
+test_that("enforceDesignFullRank's correlation fallback fixes deficient rank", {
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 4), nrow = n, ncol = 4)
@@ -884,7 +864,7 @@ test_that("findValidFilePath errors when both paths are invalid", {
     )
 })
 
-test_that("findValidFilePath returns reference when target is invalid but reference exists", {
+test_that("findValidFilePath falls back to an existing reference", {
     result <- pecotmr:::.findValidFilePath(
         referenceFilePath = .ldBed,
         targetFilePath = "/totally/bogus/path.txt"
@@ -1064,7 +1044,8 @@ test_that("computeLd gcta agrees with sample method on complete data", {
     R_sample <- computeLd(X, method = "sample")
     R_gcta <- computeLd(X, method = "gcta")
 
-    # With no missing data, GCTA and sample should be close (differ by N vs N-1 denom)
+    # With no missing data, GCTA and sample should be close (differ by N vs N-1
+    # denom)
     expect_true(max(abs(R_sample - R_gcta)) < 0.05)
 })
 
@@ -1170,52 +1151,43 @@ test_that("findIntersectionRows errors when region falls in a coverage gap", {
 })
 
 test_that("regionalLdMeta handles whole-chromosome 0:0 sentinel rows", {
-    meta_file <- file.path(geno_test_data_dir, "ld_meta_wholechrom_tmp.tsv")
-    on.exit(unlink(meta_file), add = TRUE)
-    writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
-    cat(
-        paste(
-            "1",
-            "0",
-            "0",
-            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
-            sep = "\t"
-        ),
-        "\n",
-        file = meta_file,
-        append = TRUE
+    meta_file <- .ldr_ldMeta(
+        "ld_meta_wholechrom_tmp.tsv",
+        list(start = 0L, end = 0L, path = .ldr_blockFiles[[1L]])
     )
     result <- pecotmr:::regionalLdMeta(
         meta_file,
         GenomicRanges::GRanges("chr1:1000-1190")
     )
-    expect_true(length(result$intersections$LD_file_paths) >= 1)
-    expect_true(all(file.exists(result$intersections$LD_file_paths)))
+    expect_identical(
+        result$intersections$paths,
+        file.path(geno_test_data_dir, .ldr_blockFiles[[1L]])
+    )
     # 0:0 sentinel row should have had its end set to Inf internally
     expect_true(is.infinite(max(result$ldMetaData$end)))
 })
 
 test_that("regionalLdMeta validates complete coverage when required", {
-    meta_file <- file.path(geno_test_data_dir, "ld_meta_complete_tmp.tsv")
-    on.exit(unlink(meta_file), add = TRUE)
-    lines <- c(
-        paste("chrom", "start", "end", "path", sep = "\t"),
-        paste(
-            "1",
-            "1000",
-            "1200",
-            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
-            sep = "\t"
-        )
+    meta_file <- .ldr_ldMeta(
+        "ld_meta_complete_tmp.tsv",
+        list(start = 1000L, end = 1200L, path = .ldr_blockFiles[[1L]])
     )
-    writeLines(lines, meta_file)
     # Region fully inside block 1 -> validateSelectedRegion passes
     result <- pecotmr:::regionalLdMeta(
         meta_file,
         GenomicRanges::GRanges("chr1:1050-1150"),
         completeCoverageRequired = TRUE
     )
-    expect_true(length(result$intersections$LD_file_paths) >= 1)
+    expect_length(result$intersections$paths, 1L)
+    # One reaching past the block's end is not covered.
+    expect_error(
+        pecotmr:::regionalLdMeta(
+            meta_file,
+            GenomicRanges::GRanges("chr1:1050-1300"),
+            completeCoverageRequired = TRUE
+        ),
+        "not fully covered"
+    )
 })
 
 # =============================================================================
@@ -1294,7 +1266,8 @@ test_that(".ldFromRef still errors on a variant absent after reconciling", {
         format = "plink2"
     )
     pid <- as.character(snpInfo(h)$SNP)
-    # request the prefix-stripped form (forces reconciliation) plus one truly-absent variant
+    # request the prefix-stripped form (forces reconciliation) plus one
+    # truly-absent variant
     req <- c(sub("^chr", "", pid[1]), "21_99999999_A_G")
     expect_error(
         pecotmr:::.ldFromRef(h, req),
@@ -1336,47 +1309,22 @@ test_that(".ldFromRef rejects an ldReference that is not a genotype panel", {
 
 # @noRd
 .lds_mockExtractor <- function(seed = 7, nSamples = 30L) {
-    function(handle, snpIdx, meanImpute = TRUE) {
+    function(handle, snpIdx) {
         set.seed(seed)
         nSnp <- nrow(snpInfo(handle))
         panel <- matrix(
             rbinom(nSamples * nSnp, 2, 0.3),
             nrow = nSamples,
-            ncol = nSnp,
-            dimnames = list(sampleIds(handle), snpInfo(handle)$SNP)
+            ncol = nSnp
         )
-        rr <- GenomicRanges::GRanges(
-            seqnames = str_c("chr", snpInfo(handle)$CHR[snpIdx]),
-            ranges = IRanges::IRanges(
-                start = snpInfo(handle)$BP[snpIdx],
-                width = 1L
-            )
-        )
-        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = snpInfo(handle)$SNP[snpIdx],
-            A1 = snpInfo(handle)$A1[snpIdx],
-            A2 = snpInfo(handle)$A2[snpIdx]
-        )
-        dosage <- t(panel[, snpIdx, drop = FALSE])
-        dimnames(dosage) <- list(
-            snpInfo(handle)$SNP[snpIdx],
-            sampleIds(handle)
-        )
-        SummarizedExperiment::SummarizedExperiment(
-            assays = list(dosage = dosage),
-            rowRanges = rr,
-            colData = S4Vectors::DataFrame(
-                sampleId = sampleIds(handle),
-                row.names = sampleIds(handle)
-            )
-        )
+        panel[, snpIdx, drop = FALSE]
     }
 }
 
 test_that(".ldFromRef returns a symmetric unit-diagonal LD matrix", {
     h <- .lds_makeHandle()
     local_mocked_bindings(
-        extractBlockGenotypes = .lds_mockExtractor(),
+        .handleDosage = .lds_mockExtractor(),
         .package = "pecotmr"
     )
     ids <- c("chr1:200:A:G", "chr1:400:A:G", "chr1:500:A:G")
@@ -1395,7 +1343,7 @@ test_that(".ldFromRef negates LD for a variant the panel spells flipped", {
     # against a caller whose alleles were oriented the other way.
     h <- .lds_makeHandle()
     local_mocked_bindings(
-        extractBlockGenotypes = .lds_mockExtractor(),
+        .handleDosage = .lds_mockExtractor(),
         .package = "pecotmr"
     )
     same <- c("chr1:200:A:G", "chr1:400:A:G", "chr1:500:A:G")
@@ -1415,15 +1363,18 @@ test_that(".ldFromRef negates LD for a variant the panel spells flipped", {
 test_that(".ldFromRef leaves LD untouched when every allele agrees", {
     h <- .lds_makeHandle()
     local_mocked_bindings(
-        extractBlockGenotypes = .lds_mockExtractor(),
+        .handleDosage = .lds_mockExtractor(),
         .package = "pecotmr"
     )
     ids <- c("chr1:200:A:G", "chr1:400:A:G")
     # The sample correlation of the very dosages the panel serves for those
     # variants: with no allele to flip, no sign may change.
     served <- .lds_mockExtractor()(h, c(2L, 4L))
-    direct <- cor(t(SummarizedExperiment::assay(served, "dosage")))
-    expect_equal(pecotmr:::.ldFromRef(h, ids), direct, tolerance = 1e-12)
+    expect_equal(
+        unname(pecotmr:::.ldFromRef(h, ids)),
+        cor(served),
+        tolerance = 1e-12
+    )
 })
 
 test_that(".ldFromRef errors on a variant the panel does not carry", {
@@ -1745,7 +1696,7 @@ test_that("dropCollinearColumns prints verbose messages for each strategy", {
 # Additional coverage: enforceDesignFullRank verbose / fallback branches
 # =============================================================================
 
-test_that("enforceDesignFullRank verbose: batch-removal success + iterative path", {
+test_that("enforceDesignFullRank verbose: batch removal and iterative path", {
     set.seed(11)
     X <- matrix(rnorm(80 * 4), 80, 4)
     X[, 4] <- X[, 1] + X[, 2] # rank deficient, fixable by removing one column
@@ -1764,11 +1715,12 @@ test_that("enforceDesignFullRank verbose: batch-removal success + iterative path
     expect_equal(qr(full_design)$rank, ncol(full_design))
 })
 
-test_that("enforceDesignFullRank verbose: constant covariate triggers fallback", {
+test_that("enforceDesignFullRank verbose: a constant covariate falls back", {
     set.seed(12)
     X <- matrix(rnorm(60 * 3), 60, 3) # X itself is full rank
     colnames(X) <- c("a", "b", "c")
-    C <- matrix(1, 60, 1) # constant -> collinear with intercept, not fixable via X
+    # constant -> collinear with intercept, not fixable via X
+    C <- matrix(1, 60, 1)
     # Iterative path finds no removable X column (break), then the correlation
     # fallback runs over each threshold; design stays rank-deficient throughout.
     expect_message(
@@ -1790,7 +1742,8 @@ test_that("enforceDesignFullRank verbose: batch removal insufficient path", {
     colnames(X) <- c("a", "b", "c", "d")
     C <- matrix(1, 60, 1) # constant covariate keeps design deficient
     # Removing the QR-flagged X column cannot restore full rank (C is constant),
-    # so the batch-removal "insufficient" branch fires and skips iterative pruning.
+    # so the batch-removal "insufficient" branch fires and skips iterative
+    # pruning.
     expect_message(
         result <- enforceDesignFullRank(
             X,
@@ -1817,7 +1770,7 @@ test_that("ldClumpByScore prints verbose message for single-variant input", {
     )
 })
 
-test_that("ldClumpByScore accepts a pre-built FBM and reports retained count (verbose)", {
+test_that("ldClumpByScore takes a pre-built FBM, reports what it keeps", {
     skip_if_not_installed("bigsnpr")
     skip_if_not_installed("bigstatsr")
     set.seed(1)
@@ -1918,7 +1871,7 @@ test_that("the genotype-code backends refuse dosages rather than round them", {
     )
 })
 
-test_that("computeLd errors when a non-internal backend is paired with non-sample method", {
+test_that("computeLd errors on an external backend with a non-sample method", {
     set.seed(1)
     X <- matrix(rbinom(100 * 3, 2, 0.3), 100, 3)
     colnames(X) <- paste0("rs", 1:3)
@@ -1946,7 +1899,8 @@ test_that("computeLd errors when a non-internal backend is paired with non-sampl
     set.seed(11)
     nS <- 100L
     af <- c(rep(0.35, 5L), rep(0.004, 5L))
-    d <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
+    dosageCols <- map(af, function(f) rbinom(nS, 2L, f))
+    d <- exec(cbind, !!!dosageCols)
     colnames(d) <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     d[1:80, 2] <- NA
     d
@@ -2303,16 +2257,38 @@ test_that("panel identity uses the allele-repaired ids for comparison", {
     dna <- c("chr1:100:A:G")
     expect_equal(pecotmr:::.repairVariantIds(dna, A2 = "C", A1 = "T"), dna)
 
-    # And an rsID panel passes through unchanged -- `.ldFromRefMatch()`
-    # falls back to exact id matching for those, so rewriting them would
-    # break the match rather than fix it.
+    # An rsID panel is keyed by the ids rendered from its ranges and
+    # alleles, which harmonized ids meet; its labels key a query of labels.
     panel <- readGenotypes(
         system.file("extdata", "toy_ref.bed", package = "pecotmr")
     )
     expect_equal(
         pecotmr:::.ldRefMatchIds(panel),
+        pecotmr:::.grVariantIds(SummarizedExperiment::rowRanges(panel))
+    )
+    expect_equal(
+        pecotmr:::.ldRefKeysFor(panel, rownames(panel)[1:3]),
         pecotmr:::.ldRefVariantIds(panel)
     )
+})
+
+test_that("an rsID panel is matched by position and alleles", {
+    # Keyed by its labels, it matched no harmonized id, so every LD lookup
+    # against it came back empty.
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )[1:20, ]
+    ids <- pecotmr:::.grVariantIds(SummarizedExperiment::rowRanges(panel))
+    m <- pecotmr:::.ldFromRefMatch(panel, ids[c(3L, 1L)], "lookup", "error")
+    expect_equal(m$idx, c(3L, 1L))
+    # A query of its labels still meets them.
+    m <- pecotmr:::.ldFromRefMatch(
+        panel,
+        rownames(panel)[c(3L, 1L)],
+        "lookup",
+        "error"
+    )
+    expect_equal(m$idx, c(3L, 1L))
 })
 
 # ===========================================================================
@@ -2757,6 +2733,27 @@ test_that("a PLINK1 panel cut to a few variants keeps only those", {
     expect_equal(.dose(readRDS(saved)), .dose(cut))
 })
 
+test_that("a panel that is already a subset is cut over its seed too", {
+    # Positions, not names, say which seed rows a panel holds, so a row or
+    # column subset is cut over the seed's own rows.
+    skip_if_not_installed("PlinkMatrix")
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    seedRows <- function(x) dim(pecotmr:::.panelSeed(x))[[1L]]
+    rows <- pecotmr:::.panelSubsetRows(panel[1:100, ], c(2L, 5L, 9L))
+    expect_equal(seedRows(rows), 3L)
+    expect_equal(.dose(rows), .dose(panel[c(2L, 5L, 9L), ]))
+    cols <- pecotmr:::.panelSubsetRows(panel[, 1:20], 4:6)
+    expect_equal(dim(cols), c(3L, 20L))
+    expect_equal(seedRows(cols), 3L)
+    expect_equal(.dose(cols), .dose(panel[4:6, 1:20]))
+    # A panel that reorders its seed's rows is cut from its assay instead.
+    reversed <- pecotmr:::.panelSubsetRows(panel[10:1, ], 1:3)
+    expect_equal(seedRows(reversed), nrow(panel))
+    expect_equal(.dose(reversed), .dose(panel[10:8, ]))
+})
+
 test_that("ldReference cross-checks are no-ops when a side has no variants", {
     # A zero-variant panel -- what an emptied object carries -- contradicts
     # nothing, so there is nothing to compare and the check returns quietly.
@@ -3114,11 +3111,11 @@ test_that("the same-reference check compares LdMatrix objects by their LD", {
 test_that("the LD's eigenvalues come from its factor's thin SVD", {
     set.seed(4)
     X <- matrix(rbinom(30 * 50, 2, 0.3), 30, 50)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
-    dec <- pecotmr:::.ldFactorEigen(F)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    dec <- pecotmr:::.ldFactorEigen(ldFactor)
     # The SVD lists min(m, p) directions; the rest of R's are exactly zero.
-    expect_equal(dec$nNull, 50L - nrow(F))
+    expect_equal(dec$nNull, 50L - nrow(ldFactor))
     expect_equal(length(dec$values) + dec$nNull, 50L)
     expect_equal(dec$values[1:25], eigen(R, symmetric = TRUE)$values[1:25])
     expect_equal(dec$vectors %*% (dec$values * t(dec$vectors)), R)
@@ -3127,20 +3124,105 @@ test_that("the LD's eigenvalues come from its factor's thin SVD", {
 test_that("R o R products read the same from a matrix, factor or eigenpairs", {
     set.seed(5)
     X <- matrix(rbinom(40 * 600, 2, 0.4), 40, 600)
-    F <- pecotmr:::.ldFactorFromDosage(X)
-    R <- crossprod(F) / (nrow(F) - 1)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
     e <- eigen(R, symmetric = TRUE)
     eig <- list(vectors = e$vectors, values = e$values)
     A <- cbind(1, runif(600), rbinom(600, 1, 0.3))
     want <- (R^2) %*% A
     # 600 variants are read in three stripes, the last one partial.
-    expect_equal(pecotmr:::.ldSquaredProduct(list(F = F), A), want)
+    expect_equal(
+        pecotmr:::.ldSquaredProduct(list(ldFactor = ldFactor), A),
+        want
+    )
     expect_equal(pecotmr:::.ldSquaredProduct(list(R = R), A), want)
     expect_equal(pecotmr:::.ldSquaredProduct(eig, A), want)
-    expect_equal(pecotmr:::.ldSourceRows(list(F = F), 3:5), R[3:5, ])
+    expect_equal(
+        pecotmr:::.ldSourceRows(list(ldFactor = ldFactor), 3:5),
+        R[3:5, ]
+    )
     expect_equal(pecotmr:::.ldSourceRows(eig, 3:5), R[3:5, ])
-    expect_equal(pecotmr:::.ldSourceSize(list(F = F)), 600L)
+    expect_equal(pecotmr:::.ldSourceSize(list(ldFactor = ldFactor)), 600L)
     expect_equal(pecotmr:::.ldSourceSize(eig), 600L)
+})
+
+test_that("the shrink intensity reads the same from a matrix or a factor", {
+    set.seed(5)
+    X <- matrix(rbinom(40 * 600, 2, 0.4), 40, 600)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    off <- R[upper.tri(R)]
+    want <- min(1, sum((1 - off^2)^2) / 39 / sum(off^2))
+    # 600 variants are read in three stripes, the last one partial.
+    expect_equal(pecotmr:::.ldShrinkIntensity(list(R = R), 40L), want)
+    expect_equal(
+        pecotmr:::.ldShrinkIntensity(list(ldFactor = ldFactor), 40L),
+        want
+    )
+    # A larger reference is shrunk less; one variant has nothing to shrink.
+    expect_lt(pecotmr:::.ldShrinkIntensity(list(R = R), 400L), want)
+    expect_equal(pecotmr:::.ldShrinkIntensity(list(R = matrix(1)), 40L), 1)
+})
+
+test_that("draws from N(0, R) come through a factor or a matrix", {
+    set.seed(6)
+    X <- matrix(rbinom(30 * 50, 2, 0.4), 30, 50)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    # A factor's draws are F' e / sqrt(m - 1), exactly.
+    set.seed(1)
+    draws <- pecotmr:::.ldSourceDraws(list(ldFactor = ldFactor), 3L)
+    set.seed(1)
+    e <- matrix(rnorm(nrow(ldFactor) * 3L), nrow(ldFactor), 3L)
+    expect_equal(draws, crossprod(ldFactor, e) / sqrt(nrow(ldFactor) - 1))
+    # A matrix's come through its eigendecomposition, which takes the zero
+    # eigenvalues of a 30-sample LD over 50 variants: their covariance is R.
+    many <- pecotmr:::.ldSourceDraws(list(R = R), 20000L)
+    expect_equal(dim(many), c(50L, 20000L))
+    expect_lt(max(abs(tcrossprod(many) / 20000 - R)), 0.06)
+})
+
+test_that("an LD source's eigendecomposition comes from any of its forms", {
+    set.seed(6)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(matrix(
+        rbinom(30 * 50, 2, 0.4),
+        30,
+        50
+    ))
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    whole <- eigen(R, symmetric = TRUE)
+    expect_identical(pecotmr:::.ldSourceEigen(list(R = R)), whole)
+    # A factor's comes from its thin SVD: R's non-zero spectrum, in fewer
+    # directions than variants, and R itself.
+    thin <- pecotmr:::.ldSourceEigen(list(ldFactor = ldFactor))
+    expect_lt(length(thin$values), 50L)
+    expect_equal(
+        thin$values[thin$values > 1e-8],
+        whole$values[whole$values > 1e-8],
+        tolerance = 1e-10
+    )
+    expect_equal(
+        tcrossprod(sweep(thin$vectors, 2L, thin$values, "*"), thin$vectors),
+        R,
+        tolerance = 1e-10
+    )
+    # A decomposition is its own; one a source carries is read as it is,
+    # and its draws are the matrix's.
+    expect_identical(
+        pecotmr:::.ldSourceEigen(list(
+            vectors = thin$vectors,
+            values = thin$values
+        )),
+        list(values = thin$values, vectors = thin$vectors)
+    )
+    expect_identical(pecotmr:::.ldSourceEigen(list(R = R, eigen = thin)), thin)
+    set.seed(1)
+    drawn <- pecotmr:::.ldSourceDraws(list(R = R), 3L)
+    set.seed(1)
+    expect_identical(
+        pecotmr:::.ldSourceDraws(list(R = R, eigen = whole), 3L),
+        drawn
+    )
 })
 
 test_that("a sketch's .afreq sidecar is read beside a file of any format", {
@@ -3264,9 +3346,9 @@ test_that(".ldRefDict stores each distinct reference once and keys every row", {
     b <- .ldr_ldm(rho = 0.5)
     # An equal copy built separately is the same reference, not a second one.
     dict <- pecotmr:::.ldRefDict(list(a, NULL, b, a, .ldr_ldm()))
-    expect_identical(dict$refs, list(ld1 = a, ld2 = b))
+    expect_identical(dict$entries, list(ld1 = a, ld2 = b))
     expect_identical(dict$keys, c("ld1", NA, "ld2", "ld1", "ld1"))
-    expect_identical(pecotmr:::.ldRefDict(list(NULL))$refs, list())
+    expect_identical(pecotmr:::.ldRefDict(list(NULL))$entries, list())
 })
 
 test_that("a collection keeps each row on its own reference, stored once", {
@@ -3504,4 +3586,125 @@ test_that("filterVariantsByLdReference filters via a PLINK metadata file", {
     expect_true(length(result$idx) == length(result$data))
     # Fake variants should be filtered out
     expect_true(length(result$data) <= length(variant_ids))
+})
+
+# ---- packed LD sources -------------------------------------------------------
+
+test_that("an LD source answers the same in every form", {
+    set.seed(3)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(matrix(rnorm(60 * 6), 60, 6))
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    dec <- eigen(R, symmetric = TRUE)
+    packed <- Matrix::pack(Matrix::forceSymmetric(R, uplo = "U"))
+    forms <- list(
+        R = list(R = R),
+        P = list(P = packed, sign = rep(1, 6L)),
+        ldFactor = list(ldFactor = ldFactor),
+        eigen = list(vectors = dec$vectors, values = dec$values)
+    )
+    B <- matrix(rnorm(12), 6, 2)
+    for (nm in names(forms)) {
+        ld <- forms[[nm]]
+        expect_equal(
+            unname(pecotmr:::.ldSourceMatrix(ld)),
+            unname(R),
+            tolerance = 1e-10,
+            label = nm
+        )
+        expect_equal(
+            unname(pecotmr:::.ldSourceTimes(ld, B)),
+            unname(R %*% B),
+            tolerance = 1e-10,
+            label = nm
+        )
+        expect_equal(
+            pecotmr:::.ldQuadForms(ld, B),
+            colSums(B * (R %*% B)),
+            tolerance = 1e-10,
+            label = nm
+        )
+        expect_equal(
+            unname(pecotmr:::.ldSourceRows(ld, c(5L, 2L))),
+            unname(R[c(5, 2), ]),
+            tolerance = 1e-10,
+            label = nm
+        )
+        expect_equal(pecotmr:::.ldSourceSize(ld), 6L, label = nm)
+    }
+    idx <- c(4L, 1L, 6L)
+    for (nm in c("R", "P", "ldFactor")) {
+        cut <- pecotmr:::.ldSourceSubset(forms[[nm]], idx)
+        expect_equal(
+            unname(pecotmr:::.ldSourceMatrix(cut)),
+            unname(R[idx, idx]),
+            tolerance = 1e-10,
+            label = nm
+        )
+    }
+    # A packed source reads each variant with its allele sign.
+    sign <- c(1, -1, 1, 1, -1, 1)
+    signed <- list(P = packed, sign = sign)
+    flipped <- R * outer(sign, sign)
+    expect_equal(unname(pecotmr:::.ldSourceMatrix(signed)), unname(flipped))
+    expect_equal(
+        unname(pecotmr:::.ldSourceRows(signed, c(2L, 5L))),
+        unname(flipped[c(2, 5), ])
+    )
+    expect_equal(
+        unname(pecotmr:::.ldSourceTimes(signed, B)),
+        unname(flipped %*% B)
+    )
+    expect_equal(
+        unname(pecotmr:::.ldSourceMatrix(
+            pecotmr:::.ldSourceSubset(signed, idx)
+        )),
+        unname(flipped[idx, idx])
+    )
+    # Held-out draws decompose the same matrix either way.
+    set.seed(1)
+    whole <- pecotmr:::.ldSourceDraws(forms$R, 3L)
+    set.seed(1)
+    expect_identical(pecotmr:::.ldSourceDraws(forms$P, 3L), whole)
+})
+
+test_that("a sign flip negates the flipped variants' rows and columns", {
+    R <- matrix(c(1, 0.5, 0.2, 0.5, 1, -0.3, 0.2, -0.3, 1), 3L)
+    flip <- c(1, -1, 1)
+    expect_equal(pecotmr:::.ldSignFlipped(R, flip), R * outer(flip, flip))
+    expect_identical(pecotmr:::.ldSignFlipped(R, rep(1, 3L)), R)
+})
+
+test_that(".ldPackedFromRef reads an LdMatrix's block as .ldFromRef does", {
+    data(eqtlRegionExample, envir = environment())
+    X <- eqtlRegionExample$X[, 1:8]
+    ldm <- LdMatrix(cor(X), nSamples = 10)
+    ids <- colnames(X)[c(6L, 2L, 4L)]
+    # An id given with its alleles swapped reads its rows and columns
+    # negated, as .ldFromRef() reads them.
+    parts <- str_split_fixed(ids[[2L]], ":", 4L)
+    ids[[2L]] <- str_c(
+        parts[, 1L],
+        parts[, 2L],
+        parts[, 4L],
+        parts[, 3L],
+        sep = ":"
+    )
+    src <- pecotmr:::.ldPackedFromRef(ldm, ids, "test")
+    expect_s4_class(src$P, "dspMatrix")
+    expect_equal(nrow(src$P), 3L)
+    expect_equal(
+        pecotmr:::.ldSourceMatrix(src),
+        unname(pecotmr:::.ldFromRef(ldm, ids, "test"))
+    )
+    absent <- "chr22:1:A:G"
+    kept <- pecotmr:::.ldPackedFromRef(
+        ldm,
+        c(ids, absent),
+        "test",
+        onMissing = "drop"
+    )
+    expect_identical(attr(kept, "keptVariantIds"), ids)
+    expect_null(
+        pecotmr:::.ldPackedFromRef(ldm, absent, "test", onMissing = "drop")
+    )
 })

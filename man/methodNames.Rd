@@ -27,8 +27,8 @@ methodNames(x)
 Character vector.
 }
 \description{
-Extract the method name(s) an object was produced with: one
-  per entry for a collection, a single name for one estimate.
+Extract the unique method name(s) an object was produced
+  with.
 }
 \examples{
 data(h2EstimateExample)

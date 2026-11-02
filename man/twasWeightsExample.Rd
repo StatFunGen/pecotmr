@@ -5,10 +5,10 @@
 \alias{twasWeightsExample}
 \title{Example TWAS Weights (Multiple Methods)}
 \format{
-A \code{TwasWeights} collection with 11 rows (one per method:
-  \code{mrash}, \code{susie}, \code{susie_inf}, \code{enet}, \code{lasso},
-  \code{mcp}, \code{scad}, \code{l0learn}, \code{bayes_r}, \code{bayes_c},
-  \code{ensemble}).
+A \code{TwasWeights} collection with one row, the gene, holding
+  11 methods: \code{mrash}, \code{susie}, \code{susieInf}, \code{enet},
+  \code{lasso}, \code{mcp}, \code{scad}, \code{l0learn}, \code{bayesR},
+  \code{bayesC} and \code{ensemble}.
 }
 \description{
 A \code{\link{TwasWeights}} collection holding per-variant TWAS

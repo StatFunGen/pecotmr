@@ -93,7 +93,7 @@ test_that("lassosumRssWeights recovers signal direction on simulated data", {
     )
     w <- lassosumRssWeights(
         stat = stat,
-        ldReference = .rrwLdMatrix(R),
+        ldReference = .rrwLdMatrix(R, nSamples = n),
         s = c(0.2, 0.5, 0.9)
     )
     expect_equal(length(w), p)

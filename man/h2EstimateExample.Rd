@@ -5,16 +5,18 @@
 \alias{h2EstimateExample}
 \title{Example Heritability Estimate}
 \format{
-An \code{H2Estimate} object with \code{h2}, \code{h2Se},
-  \code{intercept}, an \code{enrichment} data frame, and
-  \code{annotationJackknifeCoefs}.
+An \code{H2Estimate} holding one estimate (study \code{trait1},
+  method \code{gldsc}), which carries an enrichment table, the annotation
+  jackknife matrix and a candidate's score statistics.
 }
 \description{
-A small synthetic \code{H2Estimate} (the output of
-\code{\link{estimateH2}}) carrying the SNP heritability, intercept, and a
-per-annotation enrichment table. Intended for the \code{H2Estimate}
-accessors and \code{\link{h2EstimateToSldscTrait}}. All identifiers are
-synthetic.
+A stratified g-LDSC estimate from \code{\link{estimateH2}},
+on \code{\link{ldScoreExample}}, of a GWAS simulated on that reference's
+LD with one baseline annotation carrying three times the per-variant
+heritability of the rest, and one candidate annotation scored against the
+fit. Intended for the \code{H2Estimate} accessors and
+\code{\link{h2EstimateToSldscTrait}}. Built by
+\code{inst/scripts/build_h2_estimate_example.R}.
 }
 \examples{
 data(h2EstimateExample)

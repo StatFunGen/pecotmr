@@ -543,7 +543,8 @@ setValidity("MethodsSelectionParam", function(object) {
     merged <- shared
     for (nm in names(own)) {
         merged[[nm]] <- if (is.list(own[[nm]]) && is.list(shared[[nm]])) {
-            list_modify(shared[[nm]], !!!own[[nm]])
+            ownSettings <- own[[nm]]
+            list_modify(shared[[nm]], !!!ownSettings)
         } else {
             own[[nm]]
         }
@@ -904,11 +905,17 @@ setValidity("MethodsSelectionParam", function(object) {
     if (identical(cls, "FineMappingMethodsParam")) {
         return(.fmExpectedEngine(token, inputKind))
     }
-    ctor <- .twasMethodCtorFor(token, inputKind)
-    if (is.null(ctor)) {
+    ctors <- .twasMethodCtorNamesFor(token, inputKind)
+    if (is.null(ctors)) {
         return(NULL)
     }
-    .methodsRecordEngine(ctor)
+    # A method with several backends takes any of their constructors.
+    unique(unlist(map(ctors, .methodsCtorNameEngine)))
+}
+
+# @noRd
+.methodsCtorNameEngine <- function(ctorName) {
+    .methodsRecordEngine(get(ctorName, envir = asNamespace("pecotmr")))
 }
 
 # @noRd
@@ -953,12 +960,13 @@ setValidity("MethodsSelectionParam", function(object) {
     }
     want <- .methodsExpectedEngine(cls, nm, inputKind)
     got <- metadata(v)$engine
-    if (is.null(want) || is.null(got) || identical(got, want)) {
+    if (is.null(want) || is.null(got) || is_in(got, want)) {
         return(character(0))
     }
+    wantStr <- str_flatten(str_c("'", want, "'"), " or ")
     glue(
         "`{slotName}${nm}` was built with the constructor for '{got}', but ",
-        "{nm} on {inputKind} uses the '{want}' constructor"
+        "{nm} on {inputKind} uses the {wantStr} constructor"
     )
 }
 
@@ -971,18 +979,47 @@ setValidity("MethodsSelectionParam", function(object) {
     if (.isMethodOptions(v) || !is.list(v) || length(v) == 0L) {
         return(character(0))
     }
-    accepted <- .methodsPathAccepted(cls, nm, inputKind)
-    if (is.null(accepted)) {
-        return(character(0))
-    }
-    unknown <- setdiff(names(v), accepted)
+    unknown <- .methodsUnknownNames(cls, nm, inputKind, names(v))
     if (length(unknown) == 0L) {
         return(character(0))
     }
-    glue(
-        "`{slotName}${nm}`: unknown argument(s) ",
-        "{str_flatten(unknown, ', ')} for {nm} on {inputKind}."
+    str_c(
+        glue(
+            "`{slotName}${nm}`: unknown argument(s) ",
+            "{str_flatten(unknown, ', ')} for {nm} on {inputKind}."
+        ),
+        .methodsUnknownArgHint(cls, nm, v, inputKind)
     )
+}
+
+# The names one method cannot take on one path. A chain with a `...` hop
+# accepts any name, so only the names its pipeline sets for every method
+# are refused there.
+# @noRd
+.methodsUnknownNames <- function(cls, token, inputKind, given) {
+    accepted <- .methodsPathAccepted(cls, token, inputKind)
+    if (is.null(accepted)) {
+        return(intersect(given, .methodsPipelineOwned(cls)))
+    }
+    setdiff(given, accepted)
+}
+
+# @noRd
+.methodsPipelineOwned <- function(cls) {
+    if (identical(cls, "FineMappingMethodsParam")) {
+        return(character(0))
+    }
+    .twasPipelineOwnedArgs()
+}
+
+# Where a refused name belongs, when it is a pipeline argument rather than a
+# method option. Only TWAS has one: `backend`.
+# @noRd
+.methodsUnknownArgHint <- function(cls, token, entry, inputKind) {
+    if (identical(cls, "FineMappingMethodsParam")) {
+        return("")
+    }
+    .twasBackendArgHint(token, entry, inputKind)
 }
 
 # A record carries the input classes it is for (see .engineInputType), so a

@@ -183,22 +183,23 @@ prepareSusieFromInfArgs <- function(
 ) {
     unmappableEffects <- arg_match(unmappableEffects)
     L <- args[["L"]] %||% length(susieInfFit$V)
+    missingDefaults <- compact(list(
+        refine = if (is.null(args[["refine"]])) refineDefault,
+        convergence_method = if (unmappableEffects == "ash") {
+            args[["convergence_method"]] %||% "pip"
+        },
+        # Clamped, not passed through raw: a caller's L_greedy above the
+        # number of inf effects would ask susie for effects it cannot warm-
+        # start.
+        L_greedy = if (!is.null(args[["L_greedy"]])) {
+            min(length(susieInfFit$V), L)
+        }
+    ))
     list_assign(
         args,
         unmappable_effects = unmappableEffects,
         model_init = susieInfFit,
-        !!!compact(list(
-            refine = if (is.null(args[["refine"]])) refineDefault,
-            convergence_method = if (unmappableEffects == "ash") {
-                args[["convergence_method"]] %||% "pip"
-            },
-            # Clamped, not passed through raw: a caller's L_greedy above the
-            # number of inf effects would ask susie for effects it cannot warm-
-            # start.
-            L_greedy = if (!is.null(args[["L_greedy"]])) {
-                min(length(susieInfFit$V), L)
-            }
-        ))
+        !!!missingDefaults
     )
 }
 
@@ -208,7 +209,8 @@ prepareSusieFromInfArgs <- function(
 # works on lists, not on the S4 SimpleList a constructor returns.
 # @noRd
 .fmChainStageArgs <- function(shared, stage) {
-    list_modify(as.list(shared), !!!compact(as.list(stage)))
+    stageSettings <- compact(as.list(stage))
+    list_modify(as.list(shared), !!!stageSettings)
 }
 
 # The three argument bundles of a two-stage chain, each checked against the
@@ -830,6 +832,37 @@ selectEffects <- function(fit, priorEffTol = 1e-9) {
     }
 }
 
+# The effect index of each row of a fit's effect arrays. A trimmed fit keeps
+# only its non-null effects and records which they were; an untrimmed fit
+# holds them all, in order.
+# @noRd
+.fitEffectIndex <- function(fit, nRows) {
+    as.integer(.fitRecordedEffects(fit) %||% seq_len(nRows))
+}
+
+# The rows of a fit's effect arrays that hold effects `eff`, as numbered by
+# the credible sets' L<k> names: NA for an effect the fit no longer holds.
+# @noRd
+.fitEffectRows <- function(fit, eff) {
+    idx <- .fitRecordedEffects(fit)
+    if (is.null(idx)) {
+        return(eff)
+    }
+    match(eff, idx)
+}
+
+# The effects a trimmed fit records it kept: trimFineMappingResult() names
+# alpha's rows by them (.trimEffects()), trimFinemappingFit() lists them in
+# `effect_index`. NULL for an untrimmed fit.
+# @noRd
+.fitRecordedEffects <- function(fit) {
+    alpha <- fit[["alpha"]]
+    if (is.matrix(alpha) && .namedByEffect(alpha)) {
+        return(as.integer(str_remove(rownames(alpha), "^L")))
+    }
+    fit[["effect_index"]]
+}
+
 .asEffectMatrix <- function(x) {
     if (is.null(x)) {
         return(matrix(numeric(0), nrow = 0))
@@ -1021,7 +1054,8 @@ computeCsTable <- function(
     } else {
         list(X = dataX)
     }
-    sets <- exec(susie_get_cs, !!!c(list(fit), csArgs, ldArg))
+    getCsArgs <- c(list(fit), csArgs, ldArg)
+    sets <- exec(susie_get_cs, !!!getCsArgs)
     list(sets = sets, pip = fit$pip)
 }
 
@@ -1321,7 +1355,8 @@ setMethod(
         scale = scale,
         alphaOnly = alphaOnly
     )
-    mutate(cols, !!!.fmwConcat(perEffect))
+    effectCols <- .fmwConcat(perEffect)
+    mutate(cols, !!!effectCols)
 }
 
 # Concatenate per-item lists, empty-safe.
@@ -1827,11 +1862,12 @@ buildTopLoci <- function(
 
 
 # The per-variant standardization factors susie divides its coefficients by,
-# or 1 where the fit records none -- an RSS fit has no X to scale, and a fit
-# run with `standardize = FALSE` records all-1s. Read with `[[`: `$` on a list
-# falls back to prefix matching.
+# or 1 where the fit records none -- an RSS fit has no X to scale, a fit run
+# with `standardize = FALSE` records all-1s, and a stored (trimmed) fit drops
+# all-1s (.storedScaleFactors()). Every reader of the factors goes through
+# here. Read with `[[`: `$` on a list falls back to prefix matching.
 # @noRd
-.btlScaleFactors <- function(fit, nV) {
+.fitScaleFactors <- function(fit, nV) {
     sf <- fit[["X_column_scale_factors"]]
     if (is.null(sf) || !is.numeric(sf) || length(sf) != nV) {
         return(rep(1, nV))
@@ -1868,7 +1904,7 @@ buildTopLoci <- function(
     alpha <- as.matrix(fit$alpha)
     mu <- .fmSliceCond(fit$mu, conditionIdx)
     mu2 <- .fmSliceCond(fit$mu2, conditionIdx)
-    scaleFactors <- .btlScaleFactors(fit, nV)
+    scaleFactors <- .fitScaleFactors(fit, nV)
     infinitesimal <- .btlInfinitesimal(fit, nV)
     meanStd <- if (!is.null(mu) && all(dim(alpha) == dim(mu))) {
         colSums(alpha * mu) + infinitesimal
@@ -1883,14 +1919,10 @@ buildTopLoci <- function(
     # Zero for every method that has no infinitesimal component.
     postTheta <- infinitesimal / scaleFactors
     postSd <- if (!is.null(mu2) && all(dim(alpha) == dim(mu2))) {
-        # From the STANDARDIZED mean, then rescaled: an SD rescales the same
-        # way its mean does, but the mu2 identity only holds in the units mu2
-        # is stored in.
-        sdStd <- sqrt(pmax(
-            colSums(alpha * mu2) - colSums(alpha * mu)^2,
-            0
-        ))
-        sdStd / scaleFactors
+        # From the STANDARDIZED moments, then rescaled: an SD rescales the
+        # same way its mean does, but the mu2 identity only holds in the
+        # units mu2 is stored in.
+        .susiePosteriorSd(alpha, mu, mu2) / scaleFactors
     } else {
         rep(NA_real_, nV)
     }
@@ -1909,6 +1941,16 @@ buildTopLoci <- function(
         postTheta = postTheta,
         logBF = logBF
     )
+}
+
+# A variant's posterior SD from the single effects' moments, on the scale mu
+# and mu2 are stored in. The effects are independent in the variational
+# posterior, so their variances add: each is alpha * mu2 - (alpha * mu)^2, as
+# susieR::susie_get_posterior_sd() sums them. Subtracting the square of the
+# summed mean instead would treat the effects as one.
+# @noRd
+.susiePosteriorSd <- function(alpha, mu, mu2) {
+    sqrt(pmax(colSums(alpha * mu2 - (alpha * mu)^2), 0))
 }
 
 # Parse variant IDs to chrom/pos/A1/A2; error on missing or invalid coordinates.
@@ -1970,7 +2012,7 @@ buildTopLoci <- function(
     p <- if (!is.null(sumstats$p)) {
         as.numeric(sumstats$p)
     } else if (any(!is.na(z))) {
-        2 * stats::pnorm(-abs(z))
+        .fmDerivedP(z)
     } else {
         rep(NA_real_, nV)
     }
@@ -2400,6 +2442,9 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
             NULL
         },
         V = if (!is.null(fit$V)) fit$V[effectIdx] else NULL,
+        # The kept effects' own indices: the rows above no longer number
+        # them, while the credible sets' L<k> names still do.
+        effect_index = as.integer(effectIdx),
         niter = fit$niter,
         max_L = nrow(alpha),
         n_effects = nrow(alpha)
@@ -2409,17 +2454,27 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 # Optional slots common to susie/mvsusie: column scales, posterior mu/mu2
 # (L x p, or L x p x R for multivariate), theta, omega_weights.
 .trimAddCommon <- function(trimmed, fit, effectIdx) {
-    withCommon <- list_assign(
-        trimmed,
-        !!!compact(list(
-            X_column_scale_factors = fit$X_column_scale_factors,
-            mu = .trimEffectSlice(fit$mu, effectIdx),
-            mu2 = .trimEffectSlice(fit$mu2, effectIdx),
-            theta = fit$theta,
-            omega_weights = fit$omega_weights
-        ))
-    )
+    commonFields <- compact(list(
+        X_column_scale_factors = .storedScaleFactors(
+            fit[["X_column_scale_factors"]]
+        ),
+        mu = .trimEffectSlice(fit$mu, effectIdx),
+        mu2 = .trimEffectSlice(fit$mu2, effectIdx),
+        theta = fit$theta,
+        omega_weights = fit$omega_weights
+    ))
+    withCommon <- list_assign(trimmed, !!!commonFields)
     .trimAddScalars(withCommon, fit)
+}
+
+# A fit's column scale factors as stored: NULL when every factor is 1 -- X
+# was not rescaled -- which .fitScaleFactors() reads back as 1.
+# @noRd
+.storedScaleFactors <- function(sf) {
+    if (is.null(sf) || isTRUE(all(sf == 1))) {
+        return(NULL)
+    }
+    sf
 }
 
 # The selected effects of a posterior array, which is L x p for a univariate
@@ -2459,17 +2514,23 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 }
 
 # Copy one non-effect-indexed field from `fit` onto `trimmed`, when present.
+# Uniform prior weights are not stored: absent is what every reader takes
+# for uniform.
 # @noRd
 .trimCopyField <- function(trimmed, nm, fit) {
     value <- fit[[nm]]
+    if (identical(nm, "pi") && length(value) > 0L) {
+        if (isTRUE(all(value == value[[1L]]))) {
+            return(trimmed)
+        }
+    }
     if (is.null(value)) {
         return(trimmed)
     }
-    list_assign(trimmed, !!!set_names(list(value), nm))
+    namedValue <- set_names(list(value), nm)
+    list_assign(trimmed, !!!namedValue)
 }
 
-# mvsusie-specific slots: per-effect mu2_diag, the coefficient matrix, and the
-# conditional lfsr array.
 # fSuSiE: the fields the wavelet reconstruction would otherwise take with
 # it. The base trimmed fit already keeps alpha, lbf_variable and the sets for
 # coloc; these carry the fitted curve, its credible band and the functional
@@ -2496,24 +2557,33 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
         ),
         names(populated)
     )
-    list_assign(trimmed, !!!populated[keep])
+    keptFields <- populated[keep]
+    list_assign(trimmed, !!!keptFields)
 }
 
+# mvsusie-specific slots: the coefficient matrix and the conditional lfsr
+# array (re-summarizing the stored fit reads it per condition). mu2_diag has
+# no reader once topLoci is built, so it is not stored.
+# @noRd
 .trimAddMvsusie <- function(trimmed, fit, effectIdx) {
-    list_assign(
-        trimmed,
-        !!!compact(list(
-            mu2_diag = if (!is.null(fit$mu2_diag)) {
-                fit$mu2_diag[effectIdx, , , drop = FALSE]
-            },
-            coef = if (requireNamespace("mvsusieR", quietly = TRUE)) {
-                mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
-            },
-            clfsr = if (!is.null(fit$conditional_lfsr)) {
-                fit$conditional_lfsr[effectIdx, , , drop = FALSE]
-            }
-        ))
-    )
+    mvFields <- compact(list(
+        coef = if (requireNamespace("mvsusieR", quietly = TRUE)) {
+            mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
+        },
+        clfsr = .trimEffectArray(fit$conditional_lfsr, effectIdx)
+    ))
+    list_assign(trimmed, !!!mvFields)
+}
+
+# The selected effects of an L x p x R array, or NULL when the fit holds none:
+# a fit whose every effect is null carries NA where mvsusieR would put the
+# lfsr arrays, having no effect to report them for.
+# @noRd
+.trimEffectArray <- function(x, effectIdx) {
+    if (length(dim(x)) != 3L) {
+        return(NULL)
+    }
+    x[effectIdx, , , drop = FALSE]
 }
 
 #' Format Fine-mapping Post-processing for Protocol Output
@@ -2732,6 +2802,13 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #'   to \code{mvsusieR::create_mixture_prior()} and defaults to the
 #'   canonical mixture over the conditions it is given.
 #' @param coverage Credible set coverage (default 0.95).
+#' @param L Maximum number of single effects (default 10).
+#'   \code{fineMappingPipeline()} sets it from \code{maxNumSingleEffects} on
+#'   its \code{\link{CredibleSetParam}}.
+#' @param L_greedy The effect count mvsusieR's greedy loop starts from and
+#'   grows by, up to \code{L}, or \code{NULL} (default) to fit all \code{L}
+#'   at once. \code{fineMappingPipeline()} sets it from
+#'   \code{maxNumSingleEffectsGreedy}.
 #' @param methodArgs Options forwarded to \code{mvsusieR::mvsusie}, built
 #'   with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be silently
@@ -2755,18 +2832,27 @@ fitMvsusie <- function(
     Y,
     prior_variance,
     coverage = 0.95,
+    L = 10L,
+    L_greedy = NULL,
     methodArgs = MvsusieOptions()
 ) {
     .assertMethodOptions(methodArgs, "MvsusieOptions", "methodArgs")
     assertNumber(coverage, lower = 0, upper = 1)
+    assertCount(L, positive = TRUE)
+    assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
-        list(
-            X = X,
-            Y = Y,
-            prior_variance = prior_variance,
-            coverage = coverage
+        c(
+            list(
+                X = X,
+                Y = Y,
+                prior_variance = prior_variance,
+                coverage = coverage,
+                L = L
+            ),
+            compact(list(L_greedy = L_greedy))
         ),
-        !!!methodArgs
+        !!!user
     )
     exec(mvsusieR::mvsusie, !!!callArgs)
 }
@@ -2782,6 +2868,7 @@ fitMvsusie <- function(
 #' @param N Scalar sample size (median across conditions when N varies).
 #' @param prior_variance Prior variance matrix.
 #' @param coverage Credible set coverage (default 0.95).
+#' @inheritParams fitMvsusie
 #' @param methodArgs Options forwarded to \code{mvsusieR::mvsusie_rss},
 #'   built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 #'   its own constructor, since it is a different function from
@@ -2809,20 +2896,29 @@ fitMvsusieRss <- function(
     N,
     prior_variance,
     coverage = 0.95,
+    L = 10L,
+    L_greedy = NULL,
     methodArgs = MvsusieRssOptions()
 ) {
     .assertMethodOptions(methodArgs, "MvsusieRssOptions", "methodArgs")
     assertNumber(N, lower = 0, finite = TRUE)
     assertNumber(coverage, lower = 0, upper = 1)
+    assertCount(L, positive = TRUE)
+    assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
-        list(
-            Z = Z,
-            R = R,
-            N = N,
-            prior_variance = prior_variance,
-            coverage = coverage
+        c(
+            list(
+                Z = Z,
+                R = R,
+                N = N,
+                prior_variance = prior_variance,
+                coverage = coverage,
+                L = L
+            ),
+            compact(list(L_greedy = L_greedy))
         ),
-        !!!methodArgs
+        !!!user
     )
     exec(mvsusieR::mvsusie_rss, !!!callArgs)
 }
@@ -2959,6 +3055,7 @@ buildMvsusieMixturePrior <- function(
         "methodArgs"
     )
     arm <- .mvMixtureArm(R, conditionNames, mixtureMatrices, mixtureWeights)
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(
             arm,
@@ -2967,7 +3064,7 @@ buildMvsusieMixturePrior <- function(
                 weights_tol = weightsTol
             ))
         ),
-        !!!methodArgs
+        !!!user
     )
     exec(mvsusieR::create_mixture_prior, !!!callArgs)
 }
@@ -3025,9 +3122,10 @@ fitFsusie <- function(
         cov_lev = covLev,
         min_purity = minPurity
     ))
+    user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(list(X = X, Y = Y, pos = pos), owned),
-        !!!methodArgs
+        !!!user
     )
     exec(fsusieR::susiF, !!!callArgs)
 }
@@ -3042,7 +3140,11 @@ fitFsusie <- function(
 # (zero the intercept, then coef.susie without the intercept row).
 # @noRd
 .susieCoefWeights <- function(fit) {
-    coef.susie(list_assign(fit, intercept = 0))[-1]
+    coef.susie(list_assign(
+        fit,
+        intercept = 0,
+        X_column_scale_factors = .fitScaleFactors(fit, length(fit$pip))
+    ))[-1]
 }
 
 # Shared helper for susie/susieAsh/susieInf weight extraction: the
@@ -3093,7 +3195,7 @@ fitFsusie <- function(
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    `attr<-`(weights, "fit", fit)
+    `attr<-`(weights, "fit", .withFitVariantIds(fit, colnames(X)))
 }
 
 #' Compute single-effect (SER) TWAS weights
@@ -3137,7 +3239,7 @@ serWeights <- function(
     .susieExtractWeights(
         serFit,
         X,
-        requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu"),
         token = "ser",
         fitRetention = fitRetention
     )
@@ -3175,7 +3277,7 @@ susieWeights <- function(
     .susieExtractWeights(
         susieFit,
         X,
-        requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu"),
         token = "susie",
         fitRetention = fitRetention
     )
@@ -3213,7 +3315,7 @@ susieAshWeights <- function(
     .susieExtractWeights(
         susieAshFit,
         X,
-        requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu", "theta"),
         token = "susieAsh",
         fitRetention = fitRetention
     )
@@ -3262,7 +3364,7 @@ susieInfWeights <- function(
     .susieExtractWeights(
         susieInfFit,
         X,
-        requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu", "theta"),
         token = "susieInf",
         fitRetention = fitRetention
     )
@@ -3276,7 +3378,8 @@ susieInfWeights <- function(
     nVariants,
     requiredFields,
     token = "susie",
-    fitRetention = c("none", "slim", "full")
+    fitRetention = c("none", "slim", "full"),
+    variantIds = NULL
 ) {
     fitRetention <- arg_match(fitRetention)
     if (is.null(fit)) {
@@ -3304,7 +3407,7 @@ susieInfWeights <- function(
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    `attr<-`(weights, "fit", fit)
+    `attr<-`(weights, "fit", .withFitVariantIds(fit, variantIds))
 }
 
 #' Compute SuSiE-RSS TWAS weights
@@ -3353,9 +3456,10 @@ susieRssWeights <- function(
     .susieRssExtractWeights(
         fit = susieRssFit,
         nVariants = .rssVariantCount(stat, ldReference, "susieRssWeights"),
-        requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu"),
         token = "susie",
-        fitRetention = fitRetention
+        fitRetention = fitRetention,
+        variantIds = stat[["variantNames"]]
     )
 }
 
@@ -3395,9 +3499,10 @@ susieInfRssWeights <- function(
     .susieRssExtractWeights(
         fit = susieInfRssFit,
         nVariants = .rssVariantCount(stat, ldReference, "susieInfRssWeights"),
-        requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu", "theta"),
         token = "susieInf",
-        fitRetention = fitRetention
+        fitRetention = fitRetention,
+        variantIds = stat[["variantNames"]]
     )
 }
 
@@ -3437,19 +3542,31 @@ susieAshRssWeights <- function(
     .susieRssExtractWeights(
         fit = susieAshRssFit,
         nVariants = .rssVariantCount(stat, ldReference, "susieAshRssWeights"),
-        requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+        requiredFields = c("alpha", "mu", "theta"),
         token = "susieAsh",
-        fitRetention = fitRetention
+        fitRetention = fitRetention,
+        variantIds = stat[["variantNames"]]
     )
 }
+
 #' Compute mvSuSiE TWAS weights
 #'
 #' Extracts coefficients from an existing mvSuSiE fit. This never fits
 #' mvSuSiE itself: fine-mapping belongs to \code{fineMappingPipeline()}, and a
 #' missing fit is an error rather than an invitation to refit.
 #'
-#' @param mvsusieFit A fitted mvSuSiE object. Required.
-#' @return Matrix of variant weights.
+#' @param X,Y Unused; accepted so that \code{learnTwasWeights()} can call
+#'   every multivariate weight method with its genotype and phenotype
+#'   matrices, as it does \code{fsusieWeights()}.
+#' @param mvsusieFit A fitted mvSuSiE object, or the trimmed one a
+#'   fine-mapping result stores, whose precomputed \code{coef} is read.
+#'   Required.
+#' @param fitRetention How much of the fit is kept as the \code{"fit"}
+#'   attribute of the returned weights: \code{"none"} (default) attaches
+#'   nothing, \code{"slim"} and \code{"full"} the fit the weights were
+#'   extracted from, as given. It names the variants it was fitted on.
+#' @return Matrix of variant weights, with the fit attached as attribute
+#'   \code{"fit"} unless \code{fitRetention = "none"}.
 #' @examples
 #' \donttest{
 #' # Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
@@ -3463,10 +3580,13 @@ susieAshRssWeights <- function(
 #' mvsusieWeights(mvsusieFit = fit)
 #' }
 #' @export
-mvsusieWeights <- function(mvsusieFit = NULL) {
-    if (!requireNamespace("mvsusieR", quietly = TRUE)) {
-        abort("Package 'mvsusieR' is required.")
-    }
+mvsusieWeights <- function(
+    X = NULL,
+    Y = NULL,
+    mvsusieFit = NULL,
+    fitRetention = c("none", "slim", "full")
+) {
+    fitRetention <- arg_match(fitRetention)
     if (is.null(mvsusieFit)) {
         msg <- glue(
             "mvsusieWeights: `mvsusieFit` is required. This extracts weights ",
@@ -3475,7 +3595,29 @@ mvsusieWeights <- function(mvsusieFit = NULL) {
         )
         abort(msg)
     }
-    mvsusieR::coef.mvsusie(mvsusieFit)[-1, , drop = FALSE]
+    weights <- .mvsusieFitCoef(mvsusieFit)
+    if (identical(fitRetention, "none")) {
+        return(weights)
+    }
+    `attr<-`(
+        weights,
+        "fit",
+        .withFitVariantIds(mvsusieFit, rownames(weights))
+    )
+}
+
+# The variants x conditions weights of an mvSuSiE fit. A trimmed fit (as
+# fineMappingPipeline stores it) carries them in `$coef`, computed before
+# trimming dropped the intercept and the effects coef.mvsusie() sums over.
+# @noRd
+.mvsusieFitCoef <- function(fit) {
+    if (is.list(fit) && is.matrix(fit$coef)) {
+        return(fit$coef)
+    }
+    if (!requireNamespace("mvsusieR", quietly = TRUE)) {
+        abort("Package 'mvsusieR' is required.")
+    }
+    mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
 }
 
 # One wavelet basis row: inverse-DWT (wr) of the unit coefficient vector e_k,
@@ -3517,12 +3659,17 @@ mvsusieWeights <- function(mvsusieFit = NULL) {
 #' (\code{nSNP x n_wac}) and inclusion probabilities \code{alpha[[l]]}. Because
 #' the inverse wavelet transform \code{wr()} is linear, the posterior-mean
 #' prediction pushes through to a per-SNP, per-feature weight matrix:
-#' \deqn{W[j, f] = \sum_l alpha[[l]][j] \cdot
-#'   \mathrm{wr}\!\left(fitted\_wc[[l]][j, ] / csd\_X[j]\right)[f].}
+#' \deqn{W[j, f] = csd\_Y\_pos[f] \sum_l alpha[[l]][j] \cdot
+#'   \mathrm{wr}\!\left(csd\_Yf \cdot fitted\_wc[[l]][j, ] / csd\_X[j]
+#'   \right)[f].}
 #' This is the exact analog of \code{coef.susie} for scalar SuSiE (all SNPs,
 #' alpha-weighted), which spreads weight across the credible set -- more robust
 #' for out-of-sample TWAS than fSuSiE's in-sample lead-SNP summary
-#' (\code{update_cal_indf}).
+#' (\code{update_cal_indf}). \code{csd_Yf} and \code{csd_Y_pos} undo the
+#' response standardization fsusieR records when it scales the response
+#' (its \code{standardize_Y}), per wavelet coefficient and per position, so
+#' the weights are in the response's own units; a fit that records neither
+#' was never scaled.
 #'
 #' The reconstruction uses the raw posterior wavelet coefficients
 #' \code{fitted_wc}, so it is independent of the \code{post_processing} mode
@@ -3594,7 +3741,13 @@ fsusieWeights <- function(
     csdX <- as.numeric(fit$csd_X)
     alphaList <- .fsusieAlphaList(fit$alpha)
     S <- .fsusieSynthesisMatrix(fit$n_wac, .fsusieScaleCols(fit))
+    # fitted_wc lives in fsusieR's standardized response space: each wavelet
+    # coefficient is scaled back before the inverse transform (the rows of
+    # S) and each position after it (the columns of W), as fsusieR's own
+    # fitted_func is.
+    S <- sweep(S, 1L, .fsusieResponseScale(fit, "csd_Yf", nrow(S)), `*`)
     W <- .fsusieComputeW(fit, alphaList, csdX, S) |>
+        sweep(2L, .fsusieResponseScale(fit, "csd_Y_pos", ncol(S)), `*`) |>
         .fsusieWeightsNames(
             fit,
             variantIds,
@@ -3605,7 +3758,25 @@ fsusieWeights <- function(
     if (identical(fitRetention, "none")) {
         return(W)
     }
-    `attr<-`(W, "fit", fit)
+    `attr<-`(W, "fit", .withFitVariantIds(fit, rownames(W)))
+}
+
+# The response standardization fsusieR recorded on the fit, one factor per
+# wavelet coefficient (csd_Yf) or per position (csd_Y_pos). An fsusieR that
+# did not scale the response records neither, so the factor is 1.
+# @noRd
+.fsusieResponseScale <- function(fit, part, n) {
+    s <- fit[[part]]
+    if (is.null(s)) {
+        return(rep(1, n))
+    }
+    if (length(s) != n) {
+        abort(glue(
+            "fsusieWeights: the fit's `{part}` has {length(s)} values for ",
+            "its {n} wavelet coefficients."
+        ))
+    }
+    as.numeric(s)
 }
 
 # Row names only mean the variants when there is one per row of the matrix.
@@ -3626,7 +3797,11 @@ fsusieWeights <- function(
     }
     W <- .withRownamesIfSized(fsusieFit$coef, variantIds)
     if (!identical(fitRetention, "none")) {
-        return(`attr<-`(W, "fit", fsusieFit))
+        return(`attr<-`(
+            W,
+            "fit",
+            .withFitVariantIds(fsusieFit, rownames(W))
+        ))
     }
     W
 }
@@ -3810,7 +3985,11 @@ mvsusieRssWeights <- function(
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    `attr<-`(weights, "fit", mvsusieRssFit)
+    `attr<-`(
+        weights,
+        "fit",
+        .withFitVariantIds(mvsusieRssFit, stat[["variantNames"]])
+    )
 }
 
 # The supplied fit must describe the LD block it is being extracted against;
@@ -4343,15 +4522,17 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             refineDefault = if (token == "susie") TRUE else NULL,
             unmappableEffects = if (token == "susieAsh") "ash" else "none"
         )
+        chainedSettings <- compact(chainedArgs)
         list_assign(
-            list_modify(baseArgs, !!!compact(chainedArgs)),
+            list_modify(baseArgs, !!!chainedSettings),
             X = X,
             y = y,
             coverage = coverage
         )
     } else {
+        tokenDefaults <- .fmSusieTokenDefaults(token)
         .fmMergeUserArgs(
-            list_assign(baseArgs, !!!.fmSusieTokenDefaults(token)),
+            list_assign(baseArgs, !!!tokenDefaults),
             userArgs
         )
     }
@@ -4469,8 +4650,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         refineDefault = if (token == "susie") TRUE else NULL,
         unmappableEffects = if (token == "susieAsh") "ash" else "none"
     )
+    chainedSettings <- compact(chainedArgs)
     list_assign(
-        list_modify(baseArgs, !!!compact(chainedArgs)),
+        list_modify(baseArgs, !!!chainedSettings),
         z = z,
         !!!ldArgs,
         n = n,
@@ -4480,8 +4662,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 
 # Non-chained fit: token-specific defaults then the user methodArgs merge.
 .fmRssNonChainedArgs <- function(baseArgs, token, userArgs) {
+    tokenDefaults <- .fmSusieTokenDefaults(token)
     .fmMergeUserArgs(
-        list_assign(baseArgs, !!!.fmSusieTokenDefaults(token)),
+        list_assign(baseArgs, !!!tokenDefaults),
         userArgs
     )
 }
@@ -5113,14 +5296,12 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     } else if (identical(keepFullFit, "all")) {
         f$fit
     }
-    sf <- list_assign(
-        .fmrPartsSusieFit(ent),
-        !!!compact(list(
-            R_reliability_flag = f$flag,
-            serFallbackUsed = isTRUE(f$flag),
-            multiEffectFit = multiEffectFit
-        ))
-    )
+    fallbackFields <- compact(list(
+        R_reliability_flag = f$flag,
+        serFallbackUsed = isTRUE(f$flag),
+        multiEffectFit = multiEffectFit
+    ))
+    sf <- list_assign(.fmrPartsSusieFit(ent), !!!fallbackFields)
     # A row is immutable: rebuild it with the amended fit rather than
     # assigning into it. The variants and topLoci are unchanged, so this
     # round-trips them through the same builder the caller used.
@@ -5541,15 +5722,13 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             mvPrior$priorVariance
         }
     )
-    withPrior <- list_assign(
-        baseArgs,
-        !!!compact(list(residual_variance = mvPrior$residualVariance))
-    )
+    priorArgs <- compact(list(residual_variance = mvPrior$residualVariance))
+    withPrior <- list_assign(baseArgs, !!!priorArgs)
     mvArgs <- .fmMergeUserArgs(withPrior, userArgs)
-    fit <- exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, mvArgs))
+    fitMvsusieArgs <- .splitMethodArgs(fitMvsusie, mvArgs)
+    fit <- exec(fitMvsusie, !!!fitMvsusieArgs)
     raw <- as.matrix(mvsusieWeights(mvsusieFit = fit))
-    W <- `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
-    `attr<-`(W, "fit", .fmLeanFoldFit(fit, "mvsusie"))
+    `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
 }
 
 #' @rdname fineMappingMethodOptions
@@ -5755,12 +5934,13 @@ krigingOutlierQc <- function(
     }
     # susieR kriging RSS diagnostic (kriging_rss(z, R, n)): s defaults to
     # estimate_s_rss(); logLR matches susieR's allele-switch selection.
+    user <- as.list(methodArgs)
     cd <- exec(
         susieR::kriging_rss,
         z = zScore,
         R = R,
         n = n,
-        !!!as.list(methodArgs)
+        !!!user
     )$conditional_dist
     condMean <- as.numeric(cd$condmean)
     zStdDiff <- as.numeric(cd$z_std_diff)

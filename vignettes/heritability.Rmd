@@ -33,11 +33,17 @@ and what they need:
 | `"hdl"` | High-definition likelihood (Ning 2020) | `LdEigen` |
 
 Supplying `annotations` makes any of them stratified, adding a
-per-annotation enrichment table.
+per-annotation enrichment table. These estimators are genome-wide: each
+gives one estimate per study. Given QTL summary statistics instead,
+`estimateH2()` estimates each gene's heritability in its cis window. Either
+way the result is an `H2Estimate`, a collection with one row per estimate:
+its identity (`study`, `context`, `trait`, `method`) and values (`h2`,
+`h2_se`, ...) are columns, and a cis estimate's element is the window it
+covers.
 
 There is a second, separate track in the package: when stratified LDSC has
 already been run externally by [polyfun][pf], `sldscPostprocessingPipeline()`
-postprocesses those outputs. Both are covered below.
+postprocesses those outputs. Both tracks are covered below.
 
 [pf]: https://github.com/omerwe/polyfun
 
@@ -394,6 +400,39 @@ alongside polyfun runs:
 ```{r bridge}
 names(h2EstimateToSldscTrait(strat))
 ```
+
+## Per-gene cis heritability
+
+Given a `QtlSumStats`, `estimateH2()` estimates each trait's heritability
+in its cis window: one estimate per (study, context, trait) row, from the
+row's own statistics and LD reference, so it takes no `ldRef`. Each method
+reports what its authors report, and `NA` where they report nothing:
+
+| `method` | Approach | Reports |
+|---|---|---|
+| `"lava"` | LAVA (Werme 2022): adjusted R^2 on LD components | h2, p |
+| `"hdlL"` | HDL-L (Li 2025): likelihood with an intercept | h2, p, intercept |
+| `"fastHer"` | FastHer (Svishcheva 2025): maximum likelihood | h2, SE, scale |
+
+```{r cis-h2}
+data(qtlSumStatsExample)
+cis <- estimateH2(qtlSumStatsExample)
+cis
+cis[[1]]
+heritabilityIntercept(estimateH2(qtlSumStatsExample, method = "hdlL"))
+```
+
+Each row's element is the window its estimate covers: the row's `region`,
+or with `cisWindow` the trait's position widened by that much on each side.
+LAVA, the default, projects the statistics onto the LD components that hold
+99% of the LD variance and corrects for the reference's size. LAVA itself
+withholds its estimate where the components outnumber a tenth of the sample
+size, which a cis window's usually do at QTL sample sizes; `estimateH2()`
+reports it at any size. LAVA and HDL-L read the reference's sample size, so
+an `LdMatrix` reference must record `nSamples`. FastHer's likelihood
+assumes in-sample LD (HEELS maximizes the same one): where the reference's
+rank or the statistics reach the study's sample size, as with an external
+reference larger than the study, its estimate is `NA`, with a warning.
 
 ## Next steps
 

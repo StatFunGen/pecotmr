@@ -3,6 +3,10 @@
 //
 // This code reproduces the original DENTIST binary's algorithm and logic,
 // using Armadillo (LAPACK) for eigendecomposition and GCTA-style LD computation.
+//
+// Derived from DENTIST (https://github.com/Yves-CHEN/DENTIST), (C) 2018
+// Wenhan Chen, Zhihong Zhu and Jian Yang, distributed under the GNU Lesser
+// General Public License, version 3. See inst/COPYRIGHTS.
 #include <cpp11.hpp>
 #include <cpp11armadillo.hpp>
 #include <omp.h>

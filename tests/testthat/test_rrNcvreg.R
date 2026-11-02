@@ -14,7 +14,7 @@ test_that("ncvregWeights computes weights with SCAD penalty", {
     expect_true(all(is.finite(result)))
 })
 
-test_that("ncvregWeights warns and zero-pads when X has zero-variance columns", {
+test_that("ncvregWeights warns, zero-pads X's zero-variance columns", {
     skip_if_not_installed("ncvreg")
     set.seed(42)
     n <- 50
@@ -41,4 +41,29 @@ test_that("mcpWeights computes weights and dispatches to ncvregWeights", {
     expect_equal(nrow(result), p)
     expect_equal(ncol(result), 1)
     expect_true(all(is.finite(result)))
+})
+
+test_that("ncvregWeights keeps the selected fit or the path without X", {
+    skip_if_not_installed("ncvreg")
+    set.seed(42)
+    X <- matrix(rnorm(500), nrow = 50)
+    colnames(X) <- sprintf("chr1:%d:A:G", seq_len(10))
+    y <- X[, 1] * 0.5 + rnorm(50)
+    set.seed(1)
+    none <- scadWeights(X, y)
+    set.seed(1)
+    slim <- scadWeights(X, y, fitRetention = "slim")
+    expect_equal(as.numeric(slim), as.numeric(none))
+    fit <- attr(slim, "fit")
+    expect_named(
+        fit,
+        c("coef", "intercept", "lambda", "cve", "cvse", "variantIds")
+    )
+    expect_equal(fit$variantIds, colnames(X))
+    full <- attr(mcpWeights(X, y, fitRetention = "full"), "fit")
+    expect_s3_class(full, "cv.ncvreg")
+    # Its standardized copy of the genotypes is not kept.
+    expect_null(full$fit$X)
+    expect_null(full$variantIds)
+    expect_equal(pecotmr:::.twasFitVariantIds(full), colnames(X))
 })

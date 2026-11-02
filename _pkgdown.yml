@@ -442,7 +442,6 @@ reference:
       - heritabilityEstimateSe
       - heritabilityIntercept
       - heritabilityInterceptSe
-      - localH2Blocks
       - methodNames
       - nSnps
       - scoreStats
@@ -657,9 +656,17 @@ reference:
       - bayesLWeights
       - bayesNWeights
       - bayesRWeights
-      - bLassoWeights
+      - bayesAlphabetRssWeights
+      - bayesARssWeights
+      - bayesBRssWeights
+      - bayesCRssWeights
+      - bayesLRssWeights
+      - bayesNRssWeights
+      - bayesRRssWeights
       - prsCsWeights
       - sdprWeights
+      - ldpred2AutoWeights
+      - ldpred2GridWeights
       - dprWeights
 
   - subtitle: "mr.mash / mr.ash"

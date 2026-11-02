@@ -118,13 +118,13 @@ setClass(
         seqnames = withChrPrefix(as.character(snpInfo$CHR)),
         ranges = IRanges::IRanges(as.integer(snpInfo$BP), width = 1L)
     )
-    labelled <- S4Vectors::`mcols<-`(
+    labelled <- .canonAlleleMcols(S4Vectors::`mcols<-`(
         `names<-`(gr, as.character(snpInfo$SNP)),
         value = S4Vectors::DataFrame(
             select(snpInfo, -any_of(c("CHR", "BP"))),
             row.names = NULL
         )
-    )
+    ))
     .withGenomeBuild(
         labelled,
         !is.null(genome) && length(genome) == 1L && nzchar(genome),
@@ -458,12 +458,7 @@ setMethod(
         }
         object <- .renameSavedSlots(object, c(nRef = "nSamples"))
         if (!methods::.hasSlot(object, "ldReference")) {
-            object <- `slot<-`(
-                object,
-                "ldReference",
-                check = FALSE,
-                value = NULL
-            )
+            methods::slot(object, "ldReference", check = FALSE) <- NULL
         }
         methods::callNextMethod(object, ..., verbose = verbose)
     }
@@ -527,7 +522,7 @@ setMethod(
     if (!is.null(block$eigen)) {
         return(block$eigen[c("vectors", "values")])
     }
-    list(F = .ldRefFactor(ldReference, block$rows))
+    list(ldFactor = .ldRefFactor(ldReference, block$rows))
 }
 
 # A block's eigendecomposition, keeping the leading components that carry

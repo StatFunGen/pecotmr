@@ -78,12 +78,13 @@ test_that("sdpr runs with a per-variant sample size or an array vector", {
         array = list(array = rep(1, p))
     )
     for (nm in names(extras)) {
+        extraArgs <- extras[[nm]]
         result <- exec(
             sdpr,
             bhat = bhat,
             R = R,
             n = 100,
-            !!!extras[[nm]],
+            !!!extraArgs,
             iter = 50,
             burn = 10,
             thin = 2,
@@ -121,6 +122,119 @@ test_that("sdpr recovers signal direction on simulated genotype data", {
     expect_true(all(is.finite(result$betaEst)))
     # Correlation with truth should be positive (signal recovery)
     expect_gt(cor(result$betaEst, beta_true), 0.3)
+})
+
+# SDPR on 20 variants (n = 500), two of them causal.
+.sdprTwoCausalFit <- function(seed, raoBlackwell = FALSE, nChains = 1) {
+    set.seed(2025)
+    n <- 500
+    p <- 20
+    X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+    y <- X[, c(3, 10)] %*% c(0.4, -0.3) + rnorm(n)
+    sdpr(
+        bhat = as.vector(cor(y, X)),
+        R = cor(X),
+        n = n,
+        iter = 200,
+        burn = 50,
+        thin = 5,
+        verbose = FALSE,
+        seed = seed,
+        raoBlackwell = raoBlackwell,
+        nChains = nChains
+    )
+}
+
+test_that("Rao-Blackwellized SDPR runs the same chain", {
+    draws <- .sdprTwoCausalFit(42L)
+    means <- .sdprTwoCausalFit(42L, raoBlackwell = TRUE)
+    expect_identical(means$h2, draws$h2)
+    expect_false(identical(means$betaEst, draws$betaEst))
+    expect_gt(cor(means$betaEst, draws$betaEst), 0.95)
+})
+
+test_that("sdpr errors when every one of several chains diverges", {
+    # Statistics of 1e-6 on one sample leave the draws near the prior's, far
+    # past twice the statistics' sum of squares.
+    expect_error(
+        sdpr(
+            rep(1e-6, 5),
+            diag(5),
+            1,
+            iter = 30,
+            burn = 10,
+            thin = 5,
+            verbose = FALSE,
+            seed = 3L,
+            nChains = 2
+        ),
+        "sdpr: every chain diverged"
+    )
+})
+
+test_that("sdpr averages several chains over the kept ones", {
+    # SDPR's first sweeps draw far past the divergence test's bound before
+    # settling, which the test, past the burn-in, leaves alone.
+    many <- .sdprTwoCausalFit(4L, nChains = 3)
+    expect_equal(many$chains$seed, c(4, 5, 6))
+    expect_false(any(many$chains$diverged))
+    kept <- many$chains$kept
+    singles <- map(4:6, .sdprTwoCausalFit)[kept]
+    expect_equal(
+        many$betaEst,
+        reduce(map(singles, "betaEst"), `+`) / sum(kept)
+    )
+    expect_equal(many$h2, reduce(map(singles, "h2"), `+`) / sum(kept))
+})
+
+# A window of 30 variants in LD (n = 600) whose 15th variant alone has a
+# standardized effect explaining `h2` of the trait, fitted by SDPR.
+.sdprLoneCausalFit <- function(seed, h2) {
+    set.seed(seed)
+    n <- 600
+    p <- 30
+    X <- matrix(rbinom(n * p, 2, 0.3), n, p)
+    for (j in 2:p) {
+        X[, j] <- ifelse(runif(n) < 0.6, X[, j - 1], X[, j])
+    }
+    X <- scale(X)
+    y <- X[, 15] * sqrt(h2) + rnorm(n, sd = sqrt(1 - h2))
+    sdpr(
+        bhat = as.vector(cor(X, y)),
+        R = cor(X),
+        n = n,
+        M = 20,
+        iter = 600,
+        burn = 100,
+        thin = 5,
+        verbose = FALSE,
+        seed = 1L
+    )
+}
+
+test_that("sdpr recovers a lone causal variant's effect and h2", {
+    # A lone causal variant is drawn as several are, so eta's update reads
+    # N beta'A'bhat. The original's closed-form draw took eta times that,
+    # which centred eta near eta^2: on such a window the effect and h2 ran
+    # away (h2 in the tens of thousands here). The truth is an effect of
+    # sqrt(0.1) and h2 = 0.1.
+    result <- .sdprLoneCausalFit(1001, 0.1)
+    expect_gt(result$h2, 0.03)
+    expect_lt(result$h2, 0.3)
+    expect_gt(result$betaEst[15], 0.15)
+    expect_lt(result$betaEst[15], 0.6)
+})
+
+test_that("sdpr finds a weak lone causal variant rather than staying null", {
+    # Every chain starts with no causal variant, and while a sweep includes
+    # none, eta is drawn from its prior alone. The original's flat prior, in
+    # effect N(0, 1e6), put |eta| in the hundreds, which made every
+    # inclusion unlikely, so the chain stayed null. On this window (causal
+    # z = 4.8, h2 = 0.03) all of 500 seeds found the variant under the
+    # N(1, 1) prior and 4 of 100 under the original's.
+    result <- .sdprLoneCausalFit(2003, 0.03)
+    expect_gt(result$h2, 0.01)
+    expect_lt(result$h2, 0.2)
 })
 
 # ---- sdpr verbose output ----
@@ -199,4 +313,31 @@ test_that("sdprWeights calls sdpr and returns beta_est", {
     )
     expect_equal(length(result), p)
     expect_true(is.numeric(result))
+})
+
+test_that("sdpr runs on a factor that carries no LD at all", {
+    # Every variant monomorphic: the factor has rank 0, so B and A vanish and
+    # nothing is heritable.
+    fit <- pecotmr:::sdprFactorCpp(
+        bhatR = rep(0.01, 5),
+        factorR = matrix(0, 10, 5),
+        n = 100L,
+        perVariantSampleSize = NULL,
+        array = NULL,
+        a = 0.1,
+        c = 1,
+        M = 20L,
+        a0k = 0.5,
+        b0k = 0.5,
+        iter = 50L,
+        burn = 10L,
+        thin = 1L,
+        optLlk = 1L,
+        verbose = FALSE,
+        seed = 1L,
+        raoBlackwell = FALSE,
+        track = FALSE
+    )
+    expect_equal(fit$h2, 0)
+    expect_true(all(is.finite(fit$betaEst)))
 })

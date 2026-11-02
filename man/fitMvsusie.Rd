@@ -9,6 +9,8 @@ fitMvsusie(
   Y,
   prior_variance,
   coverage = 0.95,
+  L = 10L,
+  L_greedy = NULL,
   methodArgs = MvsusieOptions()
 )
 }
@@ -24,6 +26,15 @@ to \code{mvsusieR::create_mixture_prior()} and defaults to the
 canonical mixture over the conditions it is given.}
 
 \item{coverage}{Credible set coverage (default 0.95).}
+
+\item{L}{Maximum number of single effects (default 10).
+\code{fineMappingPipeline()} sets it from \code{maxNumSingleEffects} on
+its \code{\link{CredibleSetParam}}.}
+
+\item{L_greedy}{The effect count mvsusieR's greedy loop starts from and
+grows by, up to \code{L}, or \code{NULL} (default) to fit all \code{L}
+at once. \code{fineMappingPipeline()} sets it from
+\code{maxNumSingleEffectsGreedy}.}
 
 \item{methodArgs}{Options forwarded to \code{mvsusieR::mvsusie}, built
 with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be

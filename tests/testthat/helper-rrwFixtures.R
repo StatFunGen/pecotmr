@@ -42,7 +42,13 @@
         var_y = 1,
         variantNames = colnames(LD)
     )
-    list(stat = stat, LD = LD, ldReference = LdMatrix(LD), p = p, n = n)
+    list(
+        stat = stat,
+        LD = LD,
+        ldReference = LdMatrix(LD, nSamples = n),
+        p = p,
+        n = n
+    )
 }
 
 # Multi-context (variants x conditions) fixture for mr.mash / mvSuSiE wrappers.
@@ -59,14 +65,12 @@
     B[2, ] <- rnorm(K, sd = 2)
     Y <- X %*% B + matrix(rnorm(n * K), n, K)
     colnames(Y) <- paste0("ctx", seq_len(K))
-    Z <- exec(
-        cbind,
-        !!!map(seq_len(K), function(k) {
-            map_dbl(seq_len(p), function(j) {
-                summary(lm(Y[, k] ~ X[, j]))$coefficients[2, 3]
-            })
+    marginalZ <- map(seq_len(K), function(k) {
+        map_dbl(seq_len(p), function(j) {
+            summary(lm(Y[, k] ~ X[, j]))$coefficients[2, 3]
         })
-    )
+    })
+    Z <- exec(cbind, !!!marginalZ)
     colnames(Z) <- colnames(Y)
     list(
         X = X,
@@ -81,11 +85,46 @@
 
 # Variant ids chr1:100:A:G, chr1:200:A:G, ... for p variants, and an LdMatrix
 # over `R` named by them, for tests that build their own statistics and LD.
+# `nSamples` is the reference size held-out selection reads.
 .rrwIds <- function(p) {
     sprintf("chr1:%d:A:G", 100L * seq_len(p))
 }
 
-.rrwLdMatrix <- function(R) {
+.rrwLdMatrix <- function(R, nSamples = NA_integer_) {
     ids <- .rrwIds(nrow(R))
-    LdMatrix(`dimnames<-`(R, list(ids, ids)))
+    LdMatrix(`dimnames<-`(R, list(ids, ids)), nSamples = nSamples)
+}
+
+# A genotype panel's first `p` variants, the LD matrix it gives, and
+# statistics with two strong effects, for the RSS weights that read either.
+.rrwPanelStat <- function(p = 40) {
+    panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
+    ids <- names(SummarizedExperiment::rowRanges(panel))[seq_len(p)]
+    R <- pecotmr:::.ldFromRef(panel, ids, "test")
+    set.seed(3)
+    effects <- replace(numeric(p), c(3, 20), c(4, -3))
+    z <- as.vector(R %*% effects) + rnorm(p)
+    list(
+        panel = panel,
+        ldMatrix = LdMatrix(R, nSamples = ncol(panel)),
+        stat = list(z = z, n = rep(500, p), variantNames = ids)
+    )
+}
+
+# .rrwPanelStat()'s panel and LD, with statistics whose noise has the LD's
+# covariance, as real marginal statistics do: the samplers that estimate a
+# residual variance or diverge from them need statistics consistent with the
+# LD.
+.rrwPanelStatLd <- function() {
+    d <- .rrwPanelStat()
+    # Noise drawn through the factor, F'e / sqrt(k - 1), has covariance R
+    # even where R is singular, as it is here.
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
+    k <- nrow(ldFactor)
+    set.seed(3)
+    effects <- replace(numeric(ncol(ldFactor)), c(3, 20), c(4, -3))
+    signal <- crossprod(ldFactor, ldFactor %*% effects) / (k - 1)
+    noise <- crossprod(ldFactor, rnorm(k)) / sqrt(k - 1)
+    d$stat$z <- as.vector(signal + noise)
+    d
 }

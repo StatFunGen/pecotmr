@@ -1,10 +1,11 @@
 # =============================================================================
 # ColocResult S4 class
 # -----------------------------------------------------------------------------
-# The output of colocPipeline / colocboostPipeline. One ELEMENT per tested
-# (QTL credible set x GWAS credible set x block) pair, holding that pair's
-# aligned variants; the pair-level statistics live in outer mcols and the
-# per-variant ones in inner mcols.
+# The output of colocPipeline. One ELEMENT per scored group -- a QTL row
+# against a GWAS row in one block, the credible-set pairs one coloc.bf_bf call
+# scores -- holding the group's aligned variants once. Every pair of a group
+# is scored over the same aligned variants, so they are stored once rather
+# than once per pair.
 #
 # Why a class and not the flat tibble it replaces: the pair / variant /
 # credible-set / gene "tiers" are not four shapes of table, they are four VIEWS
@@ -13,10 +14,12 @@
 # unrecoverable -- which is exactly how the per-variant layer got lost when
 # process_coloc_results() was dropped.
 #
-#   element      the aligned variants of one pair
-#   inner mcols  per-variant: SNP.PP.H4
-#   outer mcols  per-pair: identity tuple, blockId, PP.H0..PP.H4, nSnps,
-#                retained alpha mass (both sides), enrichment / p12Used
+#   element      the aligned variants of one scored group (A1, A2)
+#   outer mcols  per group: identity tuple of both sides, blockId, the LD
+#                reference key, and `pairs` -- one table per group, one row
+#                per credible-set pair: qtlCs, gwasCs, nSnps, PP.H0..PP.H4,
+#                retained alpha mass (both sides), enrichment / p12Used, and
+#                the pair's SNP.PP.H4, aligned to the group's variants
 #   slots        ldReference, for the credible-set view's purity calculation
 #
 # Nothing is filtered at write time (spec 5.3): every testable pair and every
@@ -55,16 +58,23 @@ NULL
 setClass("ColocResultBase", contains = c("VIRTUAL", "RangedTupleList"))
 
 #' @title Colocalization Result
-#' @description A collection of colocalization results, one element per tested
-#'   (QTL credible set, GWAS credible set, block) pair. Build the four views
-#'   with \code{\link{colocPairs}}, \code{\link{colocVariants}},
-#'   \code{\link{colocCredibleSets}} and \code{\link{colocGenes}}.
-#' @details The \code{ldReference} is what \code{colocCredibleSets()} uses to
-#'   compute credible-set purity, each pair's from its own reference.
+#' @description A collection of colocalization results, one element per scored
+#'   group: a QTL row against a GWAS row in one block, whose credible-set
+#'   pairs coloc scores together over the same aligned variants. Build the
+#'   four views with \code{\link{colocPairs}} (one row per pair),
+#'   \code{\link{colocVariants}}, \code{\link{colocCredibleSets}} and
+#'   \code{\link{colocGenes}}.
+#' @details Each element holds its group's variants once. Its identity and
+#'   block are columns of \code{mcols()}, and its pairs the \code{pairs}
+#'   column: one table per group, one row per credible-set pair, with the
+#'   pair's \code{SNP.PP.H4} aligned to the group's variants. So
+#'   \code{length()} counts groups; \code{colocPairs()} has a row per pair.
+#'   The \code{ldReference} is what \code{colocCredibleSets()} uses to
+#'   compute credible-set purity, each group's from its own reference.
 #' @slot ldReference A named list of the LD references the pairs were computed
 #'   against, each a genotype panel, a \code{GenotypeMixture} or an
 #'   \code{LdMatrix}, stored once apiece; the \code{ldReference} column of
-#'   \code{mcols} names the entry each pair used (\code{NA} for none).
+#'   \code{mcols} names the entry each group used (\code{NA} for none).
 #' @seealso \code{\link{colocPipeline}}
 #' @export
 setClass(
@@ -99,27 +109,20 @@ methods::setValidity("ColocResult", function(object) {
         return(coll$getMessages())
     }
     coll$push(.ldRefDictProblems(object@ldReference, .ldRefKeys(object)))
-    coll$push(.crCheckPpColumns(object))
-    coll$push(.crCheckVariantColumn(object))
+    coll$push(.crCheckPairColumns(object))
     coll$getMessages()
+}
+
+# The columns every pair of a group shares: both sides' identity and the
+# block.
+# @noRd
+.crGroupCols <- function() {
+    c(.crGeneCols(), "blockId")
 }
 
 # @noRd
 .crRequiredCols <- function() {
-    c(
-        "study",
-        "context",
-        "trait",
-        "method",
-        "gwasStudy",
-        "gwasContext",
-        "gwasTrait",
-        "gwasMethod",
-        "blockId",
-        "qtlCs",
-        "gwasCs",
-        "nSnps"
-    )
+    c(.crGroupCols(), "pairs")
 }
 
 # @noRd
@@ -127,34 +130,39 @@ methods::setValidity("ColocResult", function(object) {
     str_c("PP.H", 0:4, ".abf")
 }
 
-# The posterior columns are a distinct contract from the identity columns
-# above, so they keep their own wording.
+# The columns each pair's row must carry. The posteriors are a distinct
+# contract from the identity columns, so a missing one keeps its own wording.
+# The per-variant layer is the whole point of the class, so a pair without
+# SNP.PP.H4 -- or with one not aligned to its group's variants -- is rejected
+# rather than tolerated.
 # @noRd
-.crCheckPpColumns <- function(object) {
+.crCheckPairColumns <- function(object) {
+    pairs <- mcols(object, use.names = FALSE)$pairs
+    if (!methods::is(pairs, "SplitDataFrameList")) {
+        return("`pairs` must be a SplitDataFrameList, one table per element")
+    }
+    flat <- unlist(pairs, use.names = FALSE)
     res <- checkNames(
-        colnames(mcols(object, use.names = FALSE)),
-        must.include = .crPpCols(),
+        colnames(flat),
+        must.include = c(.crPpCols(), "qtlCs", "gwasCs", "SNP.PP.H4"),
         what = "colnames"
     )
-    if (isTRUE(res)) {
-        return(NULL)
+    if (!isTRUE(res)) {
+        return(str_c("missing posterior columns: ", res))
     }
-    str_c("missing posterior columns: ", res)
+    .crCheckPairVariants(object, flat$SNP.PP.H4, elementNROWS(pairs))
 }
 
-# The per-variant layer is the whole point of the class, so an element without
-# it is rejected rather than tolerated -- a silently absent SNP.PP.H4 would
-# reproduce the exact gap this class exists to close. The elements share one
-# variant metadata table, so they all have the column or none does.
 # @noRd
-.crCheckVariantColumn <- function(object) {
-    if (length(object) == 0L || .rtlHasVariantColumn(object, "SNP.PP.H4")) {
+.crCheckPairVariants <- function(object, snpPp, pairsPerGroup) {
+    bad <- which(lengths(snpPp) != rep(lengths(object), pairsPerGroup))
+    if (length(bad) == 0L) {
         return(NULL)
     }
     str_c(
-        "element(s) ",
-        str_flatten(seq_along(object), ", "),
-        " have no SNP.PP.H4 column in their variant metadata"
+        "pair(s) ",
+        str_flatten(bad, ", "),
+        " have SNP.PP.H4 not aligned to their element's variants"
     )
 }
 
@@ -163,17 +171,24 @@ methods::setValidity("ColocResult", function(object) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "ColocResult", function(object) {
-    cat(class(object), "with", length(object), "colocalized pair(s)\n")
+    pairs <- .crPairsTable(object)
+    cat(
+        class(object),
+        "with",
+        nrow(pairs),
+        "colocalized pair(s) in",
+        length(object),
+        "scored group(s)\n"
+    )
     if (length(object) == 0L) {
         return(invisible(NULL))
     }
-    md <- mcols(object, use.names = FALSE)
-    cat("  studies     :", str_flatten(unique(md$study), ", "), "\n")
-    cat("  paired with :", str_flatten(unique(md$gwasStudy), ", "), "\n")
-    cat("  variants    :", sum(lengths(object)), "across all pairs\n")
+    cat("  studies     :", str_flatten(unique(pairs$study), ", "), "\n")
+    cat("  paired with :", str_flatten(unique(pairs$gwasStudy), ", "), "\n")
+    cat("  variants    :", sum(lengths(object)), "across all groups\n")
     cat(
         "  max PP.H4   :",
-        format(max(md$PP.H4.abf, na.rm = TRUE), digits = 4),
+        format(max(pairs$PP.H4.abf, na.rm = TRUE), digits = 4),
         "\n"
     )
     invisible(NULL)
@@ -185,6 +200,9 @@ setMethod("show", "ColocResult", function(object) {
 #' @description Assemble a \code{\linkS4class{ColocResult}} from a pair-level
 #'   table and the per-pair variant tables that go with it. Callers normally
 #'   get one from \code{\link{colocPipeline}} rather than building it directly.
+#' @details Pairs that share their identity columns, block, LD reference and
+#'   variants are one scored group, an element of the result; the group's
+#'   variants are stored once.
 #' @param pairs A data frame with one row per tested pair, carrying at least
 #'   the identity columns of both sides (\code{study}, \code{context},
 #'   \code{trait}, \code{method} and \code{gwasStudy}, \code{gwasContext},
@@ -193,7 +211,8 @@ setMethod("show", "ColocResult", function(object) {
 #'   \code{PP.H4.abf}. A GWAS side has no context or trait axis, so those two
 #'   columns are \code{NA} for it.
 #' @param variants A list, parallel to \code{pairs}' rows, of per-pair data
-#'   frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.
+#'   frames with a \code{variant_id} column and a \code{SNP.PP.H4} column,
+#'   all with the same columns.
 #' @param ldReference Optional LD reference -- a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{GenotypeMixture} or an
 #'   \code{LdMatrix} -- for every pair, or a list with one per pair; used by
@@ -233,33 +252,29 @@ ColocResult <- function(
         )
         abort(msg)
     }
-    elements <- map(variants, .crVariantsToGRanges)
+    tables <- .crVariantTables(variants)
     dict <- .ldRefDict(.ldRefPerTuple(ldReference, nrow(pairs)))
-    # Set unconditionally, including at zero rows: an empty result still has to
-    # carry the column schema, or it fails validity and a caller reading
-    # `result$PP.H4.abf` gets NULL exactly when there is nothing to report.
-    cols <- list_assign(as.list(pairs), ldReference = dict$keys)
+    pairs$ldReference <- dict$keys
+    groups <- .crGroups(pairs, tables)
     grl <- S4Vectors::`mcols<-`(
-        .rtlBindElements(elements),
-        value = exec(
-            S4Vectors::DataFrame,
-            !!!c(cols, list(check.names = FALSE))
-        )
+        .rtlBindElements(map(tables[groups$first], .crGroupVariants)),
+        value = .crGroupMcols(pairs, tables, groups)
     )
-    obj <- new("ColocResult", .rtlNamed(grl), ldReference = dict$refs)
+    obj <- new("ColocResult", .rtlNamed(grl), ldReference = dict$entries)
     .withMetadata(obj, metadata)
 }
 
-# One pair's variant table -> a GRanges carrying SNP.PP.H4 in its mcols.
-#
-# The ids are parsed back into ranges rather than stored as strings, per the
-# rule that a variant id is a RENDERING of (range, alleles) and never the
-# stored identity -- that is what lets subsetByOverlaps() reach coloc results
-# at all.
+# Each pair's variant table as a data frame with a variant_id and a
+# SNP.PP.H4 column, all with the same columns (the per-variant columns a
+# group's pairs carry side by side).
 # @noRd
-.crVariantsToGRanges <- function(v) {
-    v <- as.data.frame(v, stringsAsFactors = FALSE)
-    missingCols <- setdiff(c("variant_id", "SNP.PP.H4"), colnames(v))
+.crVariantTables <- function(variants) {
+    tables <- map(variants, as.data.frame, stringsAsFactors = FALSE)
+    required <- colnames(.crEmptyVariants())
+    missingCols <- setdiff(
+        required,
+        reduce(map(tables, colnames), intersect, .init = required)
+    )
     if (length(missingCols) > 0L) {
         msg <- glue(
             "each `variants` element needs columns ",
@@ -267,19 +282,94 @@ ColocResult <- function(
         )
         abort(msg)
     }
-    gr <- .variantIdsToGRanges(as.character(v$variant_id), what = "variant_id")
-    # The A1 / A2 columns .variantIdsToGRanges() attaches ARE the variant
-    # identity: range plus alleles is what an id renders, so overwriting mcols
-    # wholesale here would leave the element unable to name its own variants.
-    # Append instead.
-    keep <- setdiff(colnames(v), "variant_id")
-    extra <- exec(
-        S4Vectors::DataFrame,
-        !!!c(as.list(v[keep]), list(check.names = FALSE))
+    if (n_distinct(map_chr(tables, .crColumnKey)) > 1L) {
+        abort("every `variants` element must carry the same columns.")
+    }
+    tables
+}
+
+# @noRd
+.crColumnKey <- function(v) {
+    str_flatten(colnames(v), "\r")
+}
+
+# Which scored group each pair is in: pairs that share their identity
+# columns, block, LD reference and variants, in order of first appearance.
+# `first` is each group's first pair, `order` the pairs group by group.
+# @noRd
+.crGroups <- function(pairs, tables) {
+    keys <- str_c(
+        .rtlTupleKeys(pairs, c(.crGroupCols(), "ldReference"), nrow(pairs)),
+        map_chr(tables, .crVariantSetKey),
+        sep = "\r"
     )
-    S4Vectors::`mcols<-`(
-        gr,
-        value = cbind(mcols(gr, use.names = FALSE), extra)
+    groupKeys <- unique(keys)
+    of <- match(keys, groupKeys)
+    list(of = of, first = match(groupKeys, keys), order = order(of))
+}
+
+# @noRd
+.crVariantSetKey <- function(v) {
+    rlang::hash(as.character(v$variant_id))
+}
+
+# One group's variants as ranges with their alleles, parsed from the ids:
+# a variant id is a RENDERING of (range, alleles) and never the stored
+# identity, which is what lets subsetByOverlaps() reach coloc results at all.
+# @noRd
+.crGroupVariants <- function(v) {
+    .variantIdsToGRanges(as.character(v$variant_id), what = "variant_id")
+}
+
+# The groups' outer columns: the identity, block and LD reference key their
+# pairs share, then `pairs`.
+# @noRd
+.crGroupMcols <- function(pairs, tables, groups) {
+    shared <- intersect(c(.crGroupCols(), "ldReference"), colnames(pairs))
+    dataFrameArgs <- c(
+        as.list(pairs[groups$first, shared, drop = FALSE]),
+        list(check.names = FALSE)
+    )
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
+    # Assigned, not passed to DataFrame(), which would spread the tables.
+    md$pairs <- .crPairsColumn(pairs, tables, groups)
+    md
+}
+
+# Each group's pairs as one table: every other column of `pairs`, and each
+# pair's per-variant columns -- SNP.PP.H4 and any other -- as list columns
+# aligned to the group's variants.
+# @noRd
+.crPairsColumn <- function(pairs, tables, groups) {
+    ord <- groups$order
+    own <- setdiff(colnames(pairs), c(.crGroupCols(), "ldReference"))
+    perVariant <- setdiff(
+        colnames(if (length(tables) > 0L) tables[[1L]] else .crEmptyVariants()),
+        "variant_id"
+    )
+    dataFrameArgs <- c(
+        as.list(pairs[ord, own, drop = FALSE]),
+        set_names(
+            map(perVariant, .crPerVariantList, tables = tables[ord]),
+            perVariant
+        ),
+        list(check.names = FALSE)
+    )
+    flat <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
+    S4Vectors::splitAsList(
+        flat,
+        factor(groups$of[ord], levels = seq_along(groups$first))
+    )
+}
+
+# Column `cn` of each table, as one list column entry per pair.
+# @noRd
+.crPerVariantList <- function(cn, tables) {
+    values <- unname(map(tables, cn))
+    flat <- if (length(values) == 0L) numeric(0) else list_c(values)
+    IRanges::relist(
+        flat,
+        IRanges::PartitioningByEnd(cumsum(lengths(values)))
     )
 }
 
@@ -301,8 +391,8 @@ ColocResult <- function(
 
 # @noRd
 .crPivotOne <- function(k, results) {
-    col <- str_c("SNP.PP.H4.row", k)
-    if (!is_in(col, colnames(results))) {
+    col <- .crPairPpColumn(k, colnames(results))
+    if (is.null(col)) {
         return(.crEmptyVariants())
     }
     tibble(
@@ -311,10 +401,124 @@ ColocResult <- function(
     )
 }
 
+# The column of coloc's per-variant results holding pair `k`'s SNP.PP.H4, or
+# NULL when it holds none. coloc names it SNP.PP.H4.row<k> when it scored
+# several pairs and SNP.PP.H4.abf when it scored one (coloc.bf_bf).
+# @noRd
+.crPairPpColumn <- function(k, cols) {
+    found <- intersect(
+        c(str_c("SNP.PP.H4.row", k), if (k == 1L) "SNP.PP.H4.abf"),
+        cols
+    )
+    if (length(found) == 0L) NULL else found[[1L]]
+}
+
 # @noRd
 .crEmptyVariants <- function() {
     tibble(variant_id = character(0), SNP.PP.H4 = numeric(0))
 }
+
+# ---- element operations and saved objects ----------------------------------
+
+# `rowsMd`, the outer columns of `x`'s rows `keep`, with each pair's
+# per-variant columns following its group's variants into `bare`, the
+# rebuilt elements, by variant id: an element operation -- endoapply(), sort(),
+# a filter() -- may drop or reorder a group's variants.
+# @noRd
+.crRealignedMcols <- function(x, rowsMd, bare, keep) {
+    old <- unname(.crElementIds(x)[keep])
+    new <- unname(.crElementIds(bare))
+    if (identical(old, new)) {
+        return(rowsMd)
+    }
+    rowsMd$pairs <- .crRealignPairs(rowsMd$pairs, map2(new, old, match))
+    rowsMd
+}
+
+# `pairs` with each pair's per-variant columns taken at its group's positions
+# `pos` of the rebuilt variants among the old.
+# @noRd
+.crRealignPairs <- function(pairs, pos) {
+    flat <- unlist(pairs, use.names = FALSE)
+    at <- pos[rep(seq_along(pos), elementNROWS(pairs))]
+    listCols <- names(keep(as.list(flat), methods::is, "List"))
+    IRanges::relist(
+        reduce(listCols, .crRealignColumn, .init = flat, at = at),
+        pairs
+    )
+}
+
+# @noRd
+.crRealignColumn <- function(flat, cn, at) {
+    values <- map2(as.list(flat[[cn]]), at, `[`)
+    flat[[cn]] <- IRanges::relist(
+        list_c(values, ptype = numeric()),
+        IRanges::PartitioningByEnd(cumsum(lengths(values)))
+    )
+    flat
+}
+
+# A ColocResult saved with one element per credible-set pair -- each holding
+# the pair's variants and SNP.PP.H4 -- folded into one element per scored
+# group (ColocResult()). A current one is returned as it is.
+# @noRd
+.crFoldSavedPairs <- function(object) {
+    object <- .renameSavedSlots(object, c(ldSketch = "ldReference"))
+    md <- attr(object, "elementMetadata")
+    if (is_in("pairs", colnames(md))) {
+        return(object)
+    }
+    elements <- as.list(as(object, "CompressedGRangesList"))
+    pairs <- as.data.frame(md, optional = TRUE)
+    pairs$ldReference <- NULL
+    folded <- ColocResult(
+        pairs,
+        map(elements, .crSavedVariants),
+        ldReference = .crSavedPairRefs(object, md),
+        metadata = S4Vectors::metadata(object)
+    )
+    `attr<-`(folded, "gwasFineMapping", attr(object, "gwasFineMapping"))
+}
+
+# A saved pair's variant table: its ids, rendered from ranges and alleles,
+# and its per-variant columns.
+# @noRd
+.crSavedVariants <- function(el) {
+    mc <- as.data.frame(mcols(el, use.names = FALSE), optional = TRUE)
+    as_tibble(
+        c(
+            list(variant_id = .grVariantIds(el)),
+            as.list(mc[setdiff(colnames(mc), c("A1", "A2"))])
+        ),
+        .name_repair = "minimal"
+    )
+}
+
+# The LD reference each saved pair used: its key's entry, or the one
+# reference an object saved before references were per row held.
+# @noRd
+.crSavedPairRefs <- function(object, md) {
+    old <- methods::slot(object, "ldReference")
+    if (!is.list(old) || is.object(old)) {
+        return(rep(list(old), nrow(md)))
+    }
+    keys <- md$ldReference %||% rep(NA_character_, nrow(md))
+    map(as.character(keys), .dictEntryFor, entries = old)
+}
+
+#' @rdname updateObject-methods
+#' @export
+setMethod(
+    "updateObject",
+    "ColocResult",
+    function(object, ..., verbose = FALSE) {
+        methods::callNextMethod(
+            .crFoldSavedPairs(object),
+            ...,
+            verbose = verbose
+        )
+    }
+)
 
 # ---- views ------------------------------------------------------------------
 
@@ -347,14 +551,53 @@ setMethod(
     }
 )
 
-# colocPairs() as a tibble, for the views built on it.
+# colocPairs() as a tibble, for the views built on it: one row per pair, its
+# group's identity and block, its own columns, then its group's LD reference
+# key -- the per-variant columns left in `pairs`.
 # @noRd
 .crPairsTable <- function(x) {
     md <- mcols(x, use.names = FALSE)
-    if (is.null(md) || length(x) == 0L) {
+    if (is.null(md)) {
         return(tibble())
     }
-    as_tibble(as.data.frame(md), .name_repair = "minimal")
+    group <- .crPairGroups(x)
+    flat <- unlist(md$pairs, use.names = FALSE)
+    own <- flat[, !map_lgl(as.list(flat), methods::is, "List"), drop = FALSE]
+    shared <- intersect(.crGroupCols(), colnames(md))
+    bind_cols(
+        as_tibble(
+            as.data.frame(md[group, shared, drop = FALSE], optional = TRUE),
+            .name_repair = "minimal"
+        ),
+        as_tibble(
+            as.data.frame(own, optional = TRUE),
+            .name_repair = "minimal"
+        ),
+        tibble(ldReference = as.character(md$ldReference)[group]),
+        .name_repair = "minimal"
+    )
+}
+
+# The group each pair is in, pair by pair.
+# @noRd
+#' @importFrom S4Vectors elementNROWS
+.crPairGroups <- function(x) {
+    rep(seq_along(x), elementNROWS(mcols(x, use.names = FALSE)$pairs))
+}
+
+# Each pair's SNP.PP.H4, pair by pair, aligned to its group's variants.
+# @noRd
+.crPairPp <- function(x) {
+    unlist(mcols(x, use.names = FALSE)$pairs, use.names = FALSE)$SNP.PP.H4
+}
+
+# Each element's variant ids, element by element.
+# @noRd
+.crElementIds <- function(grl) {
+    split(
+        .grVariantIds(unlist(grl, use.names = FALSE)),
+        factor(rep(seq_along(grl), lengths(grl)), levels = seq_along(grl))
+    )
 }
 
 #' @rdname colocViews
@@ -373,7 +616,7 @@ setMethod("colocPooledVariants", "ColocResult", function(x) {
     .withGenome(.variantTableGRanges(pooled), .oneBuild(x))
 })
 
-# One row per (pair, variant): the pair's metadata repeated across its
+# One row per (pair, variant): the pair's columns repeated across its group's
 # variants, plus colocPp -- the posterior that THIS variant is the shared
 # causal one, PP.H4 for the pair times the variant's share within it.
 # @noRd
@@ -381,14 +624,15 @@ setMethod("colocPooledVariants", "ColocResult", function(x) {
     if (length(x) == 0L) {
         return(tibble())
     }
-    md <- as.data.frame(mcols(x, use.names = FALSE))
-    n <- lengths(x)
-    pairIdx <- rep(seq_len(length(x)), n)
-    flat <- unlist(x, use.names = FALSE)
-    snpPp <- as.numeric(mcols(flat, use.names = FALSE)$SNP.PP.H4)
-    as_tibble(md[pairIdx, , drop = FALSE], .name_repair = "minimal") |>
+    pairs <- .crPairsTable(x)
+    group <- .crPairGroups(x)
+    snpPp <- as.numeric(unlist(.crPairPp(x), use.names = FALSE))
+    pairs[rep(seq_len(nrow(pairs)), lengths(x)[group]), , drop = FALSE] |>
         mutate(
-            variant_id = .grVariantIds(flat),
+            variant_id = list_c(
+                .crElementIds(x)[group],
+                ptype = character()
+            ),
             SNP.PP.H4 = snpPp,
             colocPp = .data$PP.H4.abf * snpPp
         )
@@ -503,11 +747,17 @@ setMethod(
     minAbsCorr = 0.8,
     requireMaxH4 = FALSE
 ) {
-    pairs <- .crPairFilter(x, minPp4, requireMaxH4)
+    view <- list(
+        x = x,
+        pairs = .crPairsTable(x),
+        group = .crPairGroups(x),
+        pp = as.list(.crPairPp(x))
+    )
+    kept <- .crPairFilter(view$pairs, minPp4, requireMaxH4)
     # Filtering happens BEFORE any LD work, so a stricter threshold costs
     # strictly less -- which is the reason purity lives on the accessor
     # rather than being precomputed at construction.
-    sets <- compact(map(pairs, .crCsForPair, x = x, coverage = coverage))
+    sets <- compact(map(kept, .crCsForPair, view = view, coverage = coverage))
     if (length(sets) == 0L) {
         return(list())
     }
@@ -558,14 +808,14 @@ setMethod(
     is.na(p) || p >= minAbsCorr
 }
 
-# Which pairs survive the pair-level filters. Both conditions read columns
-# already stored on the pair, so neither costs anything to evaluate.
+# Which pairs -- rows of the colocPairs() table `md` -- survive the
+# pair-level filters. Both conditions read columns already stored on the
+# pair, so neither costs anything to evaluate.
 # @noRd
-.crPairFilter <- function(x, minPp4, requireMaxH4) {
-    if (length(x) == 0L) {
+.crPairFilter <- function(md, minPp4, requireMaxH4) {
+    if (nrow(md) == 0L) {
         return(integer(0))
     }
-    md <- as.data.frame(mcols(x, use.names = FALSE))
     byPp4 <- if (is.null(minPp4)) {
         rep(TRUE, nrow(md))
     } else {
@@ -587,23 +837,31 @@ setMethod(
 # This is a THIRD variant set -- section 3.7 -- not guaranteed to be a subset of
 # either input credible set, which is why nothing about it can be inherited
 # from the QTL or GWAS fine-mapping.
+#
+# `view` holds the result `x`, its colocPairs() table `pairs`, each pair's
+# group and each pair's SNP.PP.H4 (`pp`).
 # @noRd
-.crCsForPair <- function(i, x, coverage) {
-    g <- x[[i]]
+.crCsForPair <- function(i, view, coverage) {
+    g <- view$x[[view$group[[i]]]]
     if (length(g) == 0L) {
         return(NULL)
     }
-    pp <- as.numeric(mcols(g, use.names = FALSE)$SNP.PP.H4)
+    pp <- as.numeric(view$pp[[i]])
     ord <- order(pp, decreasing = TRUE)
     cum <- cumsum(pp[ord])
     nKeep <- .crFirstAtLeast(cum, coverage)
     members <- ord[seq_len(nKeep)]
     ids <- .grVariantIds(g[members])
-    md <- as.data.frame(mcols(x, use.names = FALSE))[i, , drop = FALSE]
     list(
-        members = g[members],
+        members = S4Vectors::`mcols<-`(
+            g[members],
+            value = cbind(
+                mcols(g[members], use.names = FALSE),
+                S4Vectors::DataFrame(SNP.PP.H4 = pp[members])
+            )
+        ),
         row = mutate(
-            as_tibble(md, .name_repair = "minimal"),
+            view$pairs[i, , drop = FALSE],
             csSize = length(members),
             csCoverage = cum[[nKeep]],
             leadVariant = ids[[1L]],
@@ -627,7 +885,7 @@ setMethod(
 # @noRd
 #' @importFrom rlang try_fetch
 .crPurityOne <- function(ids, key, refs) {
-    ldReference <- .ldRefForKey(key, refs)
+    ldReference <- .dictEntryFor(key, refs)
     if (is.null(ldReference)) {
         return(NA_real_)
     }
