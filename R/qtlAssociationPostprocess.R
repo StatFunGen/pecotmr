@@ -79,23 +79,17 @@ QvalueOptions <- function(...) {
         exec(qvalue::qvalue, p, !!!extra)$qvalues,
         error = function(cnd) {
             if (str_detect(conditionMessage(cnd), "missing or infinite")) {
-                exec(
-                    qvalue::qvalue,
-                    p,
-                    !!!list_assign(extra, lambda = 0)
-                )$qvalues
+                fixedLambdaArgs <- list_assign(extra, lambda = 0)
+                exec(qvalue::qvalue, p, !!!fixedLambdaArgs)$qvalues
             } else if (str_detect(conditionMessage(cnd), "pi0 <= 0")) {
                 maxP <- max(p, na.rm = TRUE)
                 lambdaSeq <- seq(0, min(0.9, maxP * 0.95), length.out = 10)
-                exec(
-                    qvalue::qvalue,
-                    p,
-                    !!!list_assign(
-                        extra,
-                        lambda = lambdaSeq,
-                        pi0.method = "bootstrap"
-                    )
-                )$qvalues
+                bootstrapArgs <- list_assign(
+                    extra,
+                    lambda = lambdaSeq,
+                    pi0.method = "bootstrap"
+                )
+                exec(qvalue::qvalue, p, !!!bootstrapArgs)$qvalues
             } else {
                 # The cause is chained via `parent`, so it is no longer
                 # interpolated into the message.

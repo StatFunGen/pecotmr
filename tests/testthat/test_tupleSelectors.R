@@ -14,10 +14,8 @@ setClass("TsTestCollection", contains = "RangedTupleList")
         rep(list(GenomicRanges::GRanges()), n)
     )
     if (length(cols) > 0L) {
-        S4Vectors::mcols(grl) <- exec(
-            S4Vectors::DataFrame,
-            !!!c(cols, list(check.names = FALSE))
-        )
+        dataFrameArgs <- c(cols, list(check.names = FALSE))
+        S4Vectors::mcols(grl) <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     }
     methods::new("TsTestCollection", grl)
 }

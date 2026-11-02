@@ -42,10 +42,8 @@ setClass(
         ))
     }
     .mashValidateComponents(v, "MashPriorParam")
-    exec(
-        MashComponentParam,
-        !!!set_names(rep(list(list()), length(v)), v)
-    )
+    emptyComponents <- set_names(rep(list(list()), length(v)), v)
+    exec(MashComponentParam, !!!emptyComponents)
 }
 
 # "none" has no constructor, so it is the absent engine: NULL. The default
@@ -1124,7 +1122,8 @@ MashComponentParam <- function(
     if (!iid) {
         defaults$unconstrained.update <- "ed"
     }
-    list_modify(defaults, !!!compact(as.list(fitOpts)))
+    fitSettings <- compact(as.list(fitOpts))
+    list_modify(defaults, !!!fitSettings)
 }
 
 # One half of a covUdr selection, defaulting to that half's empty bundle:
@@ -2156,16 +2155,14 @@ filterInvalidSummaryStat <- function(
     if (is.null(datList[[bhat]]) || is.null(datList[[sbhat]])) {
         return(datList)
     }
-    reset <- list_assign(
-        datList,
-        !!!set_names(
-            list(
-                .mashReplaceValues(datList[[bhat]], 0),
-                .mashReplaceValues(datList[[sbhat]], 1000)
-            ),
-            c(bhat, sbhat)
-        )
+    resetValues <- set_names(
+        list(
+            .mashReplaceValues(datList[[bhat]], 0),
+            .mashReplaceValues(datList[[sbhat]], 1000)
+        ),
+        c(bhat, sbhat)
     )
+    reset <- list_assign(datList, !!!resetValues)
     hasNullOrRandom <- is_in("null.b", names(reset)) ||
         is_in("random.b", names(reset))
     if (!hasNullOrRandom || is.null(filterByMissingRate)) {
@@ -2173,19 +2170,17 @@ filterInvalidSummaryStat <- function(
     }
     proportionNonzero <- apply(reset[[bhat]], 1, .mashRowNonzeroRate)
     keep <- proportionNonzero >= filterByMissingRate
-    list_assign(
-        reset,
-        !!!set_names(
-            # `drop = FALSE`: one surviving variant would collapse these
-            # to vectors, and they go back into the mash data list where
-            # mashr expects an N x R matrix.
-            list(
-                reset[[bhat]][keep, , drop = FALSE],
-                reset[[sbhat]][keep, , drop = FALSE]
-            ),
-            c(bhat, sbhat)
-        )
+    keptRows <- set_names(
+        # `drop = FALSE`: one surviving variant would collapse these
+        # to vectors, and they go back into the mash data list where
+        # mashr expects an N x R matrix.
+        list(
+            reset[[bhat]][keep, , drop = FALSE],
+            reset[[sbhat]][keep, , drop = FALSE]
+        ),
+        c(bhat, sbhat)
     )
+    list_assign(reset, !!!keptRows)
 }
 
 # Derive z = bhat / sbhat (into a `<condition>.z` or `z` slot) and apply the
@@ -2206,7 +2201,8 @@ filterInvalidSummaryStat <- function(
     } else {
         list(NULL)
     }
-    withZ <- list_assign(datList, !!!set_names(zValue, zName))
+    zEntry <- set_names(zValue, zName)
+    withZ <- list_assign(datList, !!!zEntry)
     if (!is_in("strong.z", names(withZ)) || is.null(sigPCutoff)) {
         return(withZ)
     }
@@ -2235,18 +2231,16 @@ filterInvalidSummaryStat <- function(
     processed <- if (length(components) == 0L) {
         datList
     } else {
-        list_assign(
-            datList,
-            !!!set_names(
-                map(
-                    components,
-                    .mashProcessPartition,
-                    datList = datList,
-                    filterByMissingRate = filterByMissingRate
-                ),
-                components
-            )
+        processedParts <- set_names(
+            map(
+                components,
+                .mashProcessPartition,
+                datList = datList,
+                filterByMissingRate = filterByMissingRate
+            ),
+            components
         )
+        list_assign(datList, !!!processedParts)
     }
     if (
         is.null(processed$strong) ||
@@ -2443,13 +2437,11 @@ mashRandNullSample <- function(
             abort(msg)
         }
         keys <- intersect(names(dat), c("z", "bhat", "sbhat"))
-        dat <- list_assign(
-            dat,
-            !!!set_names(
-                map(dat[keys], .mashDropConditions, drop = excludeCondition),
-                keys
-            )
+        keptConditions <- set_names(
+            map(dat[keys], .mashDropConditions, drop = excludeCondition),
+            keys
         )
+        dat <- list_assign(dat, !!!keptConditions)
     }
     .mashExtractOneData(dat, nRandom, nNull)
 }
@@ -2931,10 +2923,8 @@ mashInput <- function(
     if (length(needs) == 0L) {
         return(combined)
     }
-    list_assign(
-        combined,
-        !!!set_names(map(combined[needs], .mashAsOneRow), needs)
-    )
+    oneRowEntries <- set_names(map(combined[needs], .mashAsOneRow), needs)
+    list_assign(combined, !!!oneRowEntries)
 }
 
 # @noRd
@@ -3269,8 +3259,10 @@ qtlSumStatsFromBetaMatrix <- function(
     setup <- .mashBlockSetup(x)
     resolvedScale <- .mashResolveScale(x, role, inputScale)
     blocks <- .mashBuildBlockMatrices(x, setup, resolvedScale)
-    bhat <- exec(rbind, !!!blocks$bhat)
-    shat <- exec(rbind, !!!blocks$shat)
+    bhatBlocks <- blocks$bhat
+    bhat <- exec(rbind, !!!bhatBlocks)
+    shatBlocks <- blocks$shat
+    shat <- exec(rbind, !!!shatBlocks)
     # bhat NA -> 0, shat NA / <= 0 -> 1000 (the mash_set_data
     # zero_Bhat_Shat_reset convention; missing-cell variants do not drive the
     # fit).

@@ -2032,7 +2032,8 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(region)) {
         return(NULL)
     }
-    suppressWarnings(exec(c, !!!map(groups, .twasWindowSpan, region = region)))
+    windowSpans <- map(groups, .twasWindowSpan, region = region)
+    suppressWarnings(exec(c, !!!windowSpans))
 }
 
 # @noRd

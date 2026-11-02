@@ -4322,13 +4322,14 @@ test_that("dentistSingleWindow returns one row per z-score under each option", {
         "outlier"
     )
     for (nm in names(options)) {
+        windowOptions <- options[[nm]]
         expect_warning(
             res <- exec(
                 dentistSingleWindow,
                 data$z_scores,
                 R = data$ldMat,
                 nSample = data$nSample,
-                !!!options[[nm]]
+                !!!windowOptions
             ),
             "below 2000",
             info = nm
@@ -5915,12 +5916,10 @@ test_that("summaryStatsQc kriging QC sign-flips and keeps a bad variant", {
         n <- length(sampleIds(handle))
         k <- length(snpIdx)
         f <- rnorm(n) # shared latent factor
-        exec(
-            cbind,
-            !!!map(seq_len(k), function(j) {
-                sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
-            })
-        )
+        factorCols <- map(seq_len(k), function(j) {
+            sqrt(0.7) * f + sqrt(0.3) * rnorm(n)
+        })
+        exec(cbind, !!!factorCols)
     }
     gr <- .ssQ_makeEntryGr(
         snp_ids = paste0("rs", 1:8),
@@ -6250,7 +6249,8 @@ test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
     set.seed(1)
     nS <- 100L
     af <- c(runif(20L, 0.2, 0.4), runif(20L, 0.002, 0.01))
-    dosage <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
+    dosageCols <- map(af, function(f) rbinom(nS, 2L, f))
+    dosage <- exec(cbind, !!!dosageCols)
     ids <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     colnames(dosage) <- ids
     dosage[1:60, 3] <- NA

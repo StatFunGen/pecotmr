@@ -183,22 +183,23 @@ prepareSusieFromInfArgs <- function(
 ) {
     unmappableEffects <- arg_match(unmappableEffects)
     L <- args[["L"]] %||% length(susieInfFit$V)
+    missingDefaults <- compact(list(
+        refine = if (is.null(args[["refine"]])) refineDefault,
+        convergence_method = if (unmappableEffects == "ash") {
+            args[["convergence_method"]] %||% "pip"
+        },
+        # Clamped, not passed through raw: a caller's L_greedy above the
+        # number of inf effects would ask susie for effects it cannot warm-
+        # start.
+        L_greedy = if (!is.null(args[["L_greedy"]])) {
+            min(length(susieInfFit$V), L)
+        }
+    ))
     list_assign(
         args,
         unmappable_effects = unmappableEffects,
         model_init = susieInfFit,
-        !!!compact(list(
-            refine = if (is.null(args[["refine"]])) refineDefault,
-            convergence_method = if (unmappableEffects == "ash") {
-                args[["convergence_method"]] %||% "pip"
-            },
-            # Clamped, not passed through raw: a caller's L_greedy above the
-            # number of inf effects would ask susie for effects it cannot warm-
-            # start.
-            L_greedy = if (!is.null(args[["L_greedy"]])) {
-                min(length(susieInfFit$V), L)
-            }
-        ))
+        !!!missingDefaults
     )
 }
 
@@ -208,7 +209,8 @@ prepareSusieFromInfArgs <- function(
 # works on lists, not on the S4 SimpleList a constructor returns.
 # @noRd
 .fmChainStageArgs <- function(shared, stage) {
-    list_modify(as.list(shared), !!!compact(as.list(stage)))
+    stageSettings <- compact(as.list(stage))
+    list_modify(as.list(shared), !!!stageSettings)
 }
 
 # The three argument bundles of a two-stage chain, each checked against the
@@ -1052,7 +1054,8 @@ computeCsTable <- function(
     } else {
         list(X = dataX)
     }
-    sets <- exec(susie_get_cs, !!!c(list(fit), csArgs, ldArg))
+    getCsArgs <- c(list(fit), csArgs, ldArg)
+    sets <- exec(susie_get_cs, !!!getCsArgs)
     list(sets = sets, pip = fit$pip)
 }
 
@@ -1352,7 +1355,8 @@ setMethod(
         scale = scale,
         alphaOnly = alphaOnly
     )
-    mutate(cols, !!!.fmwConcat(perEffect))
+    effectCols <- .fmwConcat(perEffect)
+    mutate(cols, !!!effectCols)
 }
 
 # Concatenate per-item lists, empty-safe.
@@ -2450,18 +2454,16 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 # Optional slots common to susie/mvsusie: column scales, posterior mu/mu2
 # (L x p, or L x p x R for multivariate), theta, omega_weights.
 .trimAddCommon <- function(trimmed, fit, effectIdx) {
-    withCommon <- list_assign(
-        trimmed,
-        !!!compact(list(
-            X_column_scale_factors = .storedScaleFactors(
-                fit[["X_column_scale_factors"]]
-            ),
-            mu = .trimEffectSlice(fit$mu, effectIdx),
-            mu2 = .trimEffectSlice(fit$mu2, effectIdx),
-            theta = fit$theta,
-            omega_weights = fit$omega_weights
-        ))
-    )
+    commonFields <- compact(list(
+        X_column_scale_factors = .storedScaleFactors(
+            fit[["X_column_scale_factors"]]
+        ),
+        mu = .trimEffectSlice(fit$mu, effectIdx),
+        mu2 = .trimEffectSlice(fit$mu2, effectIdx),
+        theta = fit$theta,
+        omega_weights = fit$omega_weights
+    ))
+    withCommon <- list_assign(trimmed, !!!commonFields)
     .trimAddScalars(withCommon, fit)
 }
 
@@ -2525,7 +2527,8 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
     if (is.null(value)) {
         return(trimmed)
     }
-    list_assign(trimmed, !!!set_names(list(value), nm))
+    namedValue <- set_names(list(value), nm)
+    list_assign(trimmed, !!!namedValue)
 }
 
 # fSuSiE: the fields the wavelet reconstruction would otherwise take with
@@ -2554,7 +2557,8 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
         ),
         names(populated)
     )
-    list_assign(trimmed, !!!populated[keep])
+    keptFields <- populated[keep]
+    list_assign(trimmed, !!!keptFields)
 }
 
 # mvsusie-specific slots: the coefficient matrix and the conditional lfsr
@@ -2562,15 +2566,13 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 # no reader once topLoci is built, so it is not stored.
 # @noRd
 .trimAddMvsusie <- function(trimmed, fit, effectIdx) {
-    list_assign(
-        trimmed,
-        !!!compact(list(
-            coef = if (requireNamespace("mvsusieR", quietly = TRUE)) {
-                mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
-            },
-            clfsr = .trimEffectArray(fit$conditional_lfsr, effectIdx)
-        ))
-    )
+    mvFields <- compact(list(
+        coef = if (requireNamespace("mvsusieR", quietly = TRUE)) {
+            mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
+        },
+        clfsr = .trimEffectArray(fit$conditional_lfsr, effectIdx)
+    ))
+    list_assign(trimmed, !!!mvFields)
 }
 
 # The selected effects of an L x p x R array, or NULL when the fit holds none:
@@ -4520,15 +4522,17 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             refineDefault = if (token == "susie") TRUE else NULL,
             unmappableEffects = if (token == "susieAsh") "ash" else "none"
         )
+        chainedSettings <- compact(chainedArgs)
         list_assign(
-            list_modify(baseArgs, !!!compact(chainedArgs)),
+            list_modify(baseArgs, !!!chainedSettings),
             X = X,
             y = y,
             coverage = coverage
         )
     } else {
+        tokenDefaults <- .fmSusieTokenDefaults(token)
         .fmMergeUserArgs(
-            list_assign(baseArgs, !!!.fmSusieTokenDefaults(token)),
+            list_assign(baseArgs, !!!tokenDefaults),
             userArgs
         )
     }
@@ -4646,8 +4650,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         refineDefault = if (token == "susie") TRUE else NULL,
         unmappableEffects = if (token == "susieAsh") "ash" else "none"
     )
+    chainedSettings <- compact(chainedArgs)
     list_assign(
-        list_modify(baseArgs, !!!compact(chainedArgs)),
+        list_modify(baseArgs, !!!chainedSettings),
         z = z,
         !!!ldArgs,
         n = n,
@@ -4657,8 +4662,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 
 # Non-chained fit: token-specific defaults then the user methodArgs merge.
 .fmRssNonChainedArgs <- function(baseArgs, token, userArgs) {
+    tokenDefaults <- .fmSusieTokenDefaults(token)
     .fmMergeUserArgs(
-        list_assign(baseArgs, !!!.fmSusieTokenDefaults(token)),
+        list_assign(baseArgs, !!!tokenDefaults),
         userArgs
     )
 }
@@ -5290,14 +5296,12 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     } else if (identical(keepFullFit, "all")) {
         f$fit
     }
-    sf <- list_assign(
-        .fmrPartsSusieFit(ent),
-        !!!compact(list(
-            R_reliability_flag = f$flag,
-            serFallbackUsed = isTRUE(f$flag),
-            multiEffectFit = multiEffectFit
-        ))
-    )
+    fallbackFields <- compact(list(
+        R_reliability_flag = f$flag,
+        serFallbackUsed = isTRUE(f$flag),
+        multiEffectFit = multiEffectFit
+    ))
+    sf <- list_assign(.fmrPartsSusieFit(ent), !!!fallbackFields)
     # A row is immutable: rebuild it with the amended fit rather than
     # assigning into it. The variants and topLoci are unchanged, so this
     # round-trips them through the same builder the caller used.
@@ -5718,12 +5722,11 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             mvPrior$priorVariance
         }
     )
-    withPrior <- list_assign(
-        baseArgs,
-        !!!compact(list(residual_variance = mvPrior$residualVariance))
-    )
+    priorArgs <- compact(list(residual_variance = mvPrior$residualVariance))
+    withPrior <- list_assign(baseArgs, !!!priorArgs)
     mvArgs <- .fmMergeUserArgs(withPrior, userArgs)
-    fit <- exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, mvArgs))
+    fitMvsusieArgs <- .splitMethodArgs(fitMvsusie, mvArgs)
+    fit <- exec(fitMvsusie, !!!fitMvsusieArgs)
     raw <- as.matrix(mvsusieWeights(mvsusieFit = fit))
     `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
 }

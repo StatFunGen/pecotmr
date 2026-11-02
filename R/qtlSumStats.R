@@ -253,16 +253,14 @@ QtlSumStats <- function(
     } else {
         windows[split$fromIdx]
     }
+    regionCols <- .regionColumns(
+        given,
+        rep(!is.null(windows), n),
+        .rowSpanRanges(pieces)
+    )
     cbind(
         exec(S4Vectors::DataFrame, !!!dfArgs)[split$fromIdx, , drop = FALSE],
-        exec(
-            S4Vectors::DataFrame,
-            !!!.regionColumns(
-                given,
-                rep(!is.null(windows), n),
-                .rowSpanRanges(pieces)
-            )
-        )
+        exec(S4Vectors::DataFrame, !!!regionCols)
     )
 }
 

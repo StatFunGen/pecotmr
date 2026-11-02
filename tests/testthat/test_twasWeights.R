@@ -1732,46 +1732,44 @@ test_that(".twasMethodRows keeps a per-outcome context vector", {
 test_that("twasWeightsCv: argument guards fire", {
     d <- generateXY(seed = 1)
     base <- list(X = d$X, Y = d$Y, fold = 2, weightMethods = list())
+    badPartitions <- list_modify(base, samplePartitions = 1L)
     expect_error(
-        exec(
-            twasWeightsCv,
-            !!!list_modify(base, !!!list(samplePartitions = 1L))
-        ),
+        exec(twasWeightsCv, !!!badPartitions),
         "samplePartitions.*Must be of type 'data.frame'"
     )
+    zeroVariants <- list_modify(base, maxNumVariants = 0)
     expect_error(
-        exec(twasWeightsCv, !!!list_modify(base, !!!list(maxNumVariants = 0))),
+        exec(twasWeightsCv, !!!zeroVariants),
         "maxNumVariants.*is not >= 1"
     )
+    badBpparam <- list_modify(base, BPPARAM = 2)
     expect_error(
-        exec(twasWeightsCv, !!!list_modify(base, !!!list(BPPARAM = 2))),
+        exec(twasWeightsCv, !!!badBpparam),
         "must be a BiocParallelParam"
     )
+    badRetention <- list_modify(base, fitRetention = "sometimes")
     expect_error(
-        exec(
-            twasWeightsCv,
-            !!!list_modify(base, !!!list(fitRetention = "sometimes"))
-        ),
+        exec(twasWeightsCv, !!!badRetention),
         "must be one of"
     )
+    badSeed <- list_modify(base, seed = "x")
     expect_error(
-        exec(twasWeightsCv, !!!list_modify(base, !!!list(seed = "x"))),
+        exec(twasWeightsCv, !!!badSeed),
         "seed.*Must be of type 'single integerish value'"
     )
     # Inf is the documented "no cap" sentinel and must still be accepted.
+    infVariants <- list_modify(base, maxNumVariants = Inf)
     expect_no_error(
-        exec(twasWeightsCv, !!!list_modify(base, !!!list(maxNumVariants = Inf)))
+        exec(twasWeightsCv, !!!infVariants)
     )
 })
 
 test_that("learnTwasWeights: argument guards fire", {
     d <- generateXY(seed = 1)
     base <- list(X = d$X, Y = d$Y, weightMethods = list())
+    badStudyName <- list_modify(base, studyName = 1L)
     expect_error(
-        exec(
-            learnTwasWeights,
-            !!!list_modify(base, !!!list(studyName = 1L))
-        ),
+        exec(learnTwasWeights, !!!badStudyName),
         "studyName.*Must be of type 'string'"
     )
     # Called directly, not via modifyList(): modifyList() DROPS an element
@@ -1785,18 +1783,14 @@ test_that("learnTwasWeights: argument guards fire", {
         ),
         "weightStandardized.*Must be of type 'logical flag'"
     )
+    badDataType <- list_modify(base, weightsDataType = 1L)
     expect_error(
-        exec(
-            learnTwasWeights,
-            !!!list_modify(base, !!!list(weightsDataType = 1L))
-        ),
+        exec(learnTwasWeights, !!!badDataType),
         "weightsDataType.*Must be of type 'string'"
     )
+    badMethods <- list_modify(base, weightMethods = 1L)
     expect_error(
-        exec(
-            learnTwasWeights,
-            !!!list_modify(base, !!!list(weightMethods = 1L))
-        ),
+        exec(learnTwasWeights, !!!badMethods),
         "weightMethods.*One of the following must apply"
     )
 })

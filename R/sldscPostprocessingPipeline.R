@@ -632,7 +632,8 @@ sldscPostprocessingPipeline <- function(
     ))
     nmOld <- c("mean", "se", "p")
     nmNew <- str_c(label, str_to_upper(str_sub(nmOld, 1, 1)), str_sub(nmOld, 2))
-    rename(df, !!!set_names(nmOld, nmNew))
+    renameMap <- set_names(nmOld, nmNew)
+    rename(df, !!!renameMap)
 }
 
 # One category's meta row.

@@ -465,10 +465,8 @@ test_that("colocboostPipeline: no analysis flag set is an error", {
             c("xqtlColoc", "jointGwas", "separateGwas")
         )
         args[[flag]] <- TRUE
-        expect_silent(exec(
-            pecotmr:::.cbAssertAnyRun,
-            !!!set_names(unname(args), NULL)
-        ))
+        unnamedArgs <- set_names(unname(args), NULL)
+        expect_silent(exec(pecotmr:::.cbAssertAnyRun, !!!unnamedArgs))
     }
 })
 
@@ -610,7 +608,8 @@ test_that("GWAS bundle N: effective for case/control, else per-variant", {
         .package = "pecotmr"
     )
     # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
-    gcc <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
+    caseControlArgs <- c(base, list(nCase = 500, nControl = 1500))
+    gcc <- exec(GwasSumStats, !!!caseControlArgs)
     bcc <- pecotmr:::.cbGwasSumStatsBundle(gcc)
     expect_true(all(bcc[["G1"]]$sumstat$n == 4 / (1 / 500 + 1 / 1500)))
     # quantitative (no nCase/nControl) -> per-variant N (1000)

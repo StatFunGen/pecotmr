@@ -286,7 +286,8 @@ setMethod("genomicRegion", "RangedTupleList", function(x) {
     if (length(cols) == 0L || length(grl) == 0L) {
         return(NULL)
     }
-    parts <- exec(cbind, !!!map(cols, .rtlNameColumn, md = md))
+    namedCols <- map(cols, .rtlNameColumn, md = md)
+    parts <- exec(cbind, !!!namedCols)
     keys <- apply(parts, 1L, .rtlJoinNameParts)
     shared <- is_in(keys, keys[duplicated(keys)])
     if (!any(shared)) {
@@ -886,7 +887,8 @@ setMethod(
 # @noRd
 .rtlGrlWithMetadata <- function(payloads, cols) {
     split <- .rtlSplitBySeqname(map(payloads, variants))
-    md <- exec(S4Vectors::DataFrame, !!!c(cols, list(check.names = FALSE)))
+    dataFrameArgs <- c(cols, list(check.names = FALSE))
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     S4Vectors::`mcols<-`(
         .rtlBindElements(split$entry),
         value = md[split$fromIdx, , drop = FALSE]
@@ -1698,7 +1700,8 @@ nestTupleRanges <- function(flat, template) {
     if (length(present) == 0L) {
         return(rep("", n))
     }
-    exec(str_c, !!!map(present, .rtlKeyPart, md = md), sep = "\r")
+    keyParts <- map(present, .rtlKeyPart, md = md)
+    exec(str_c, !!!keyParts, sep = "\r")
 }
 
 # NA is mapped to a sentinel rather than left alone: str_c() propagates NA, so

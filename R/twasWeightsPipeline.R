@@ -377,7 +377,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         return(list(key = tk, args = methods[[tk]]))
     }
     snake <- names(base)[[1L]]
-    merged <- list_modify(base[[snake]], !!!compact(methods[[tk]]))
+    givenSettings <- compact(methods[[tk]])
+    merged <- list_modify(base[[snake]], !!!givenSettings)
     # `impl` tells .resolveMethodFunction which function backs the token;
     # without it the bare token is used, which is not a function.
     list(
@@ -2987,7 +2988,8 @@ setMethod(
         .twasWarnNoFitUniv(tk, st, ctx, tr)
         return(NULL)
     }
-    list_assign(baseArgs, !!!set_names(list(fit), spec$adapter$rssFitArg))
+    fitArg <- set_names(list(fit), spec$adapter$rssFitArg)
+    list_assign(baseArgs, !!!fitArg)
 }
 
 # A method with several engines on summary statistics runs a row on the
@@ -3462,7 +3464,8 @@ setMethod(
         .twasWarnNoFitMv(tk, st, tr)
         return(NULL)
     }
-    list_assign(userArgs, !!!set_names(list(fit), spec$adapter$rssFitArg))
+    fitArg <- set_names(list(fit), spec$adapter$rssFitArg)
+    list_assign(userArgs, !!!fitArg)
 }
 
 # Warning for a missing multivariate fine-mapping fit.

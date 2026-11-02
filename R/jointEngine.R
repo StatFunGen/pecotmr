@@ -410,7 +410,8 @@ setMethod(
         ),
         args$methodArgs[["fsusie"]]
     )
-    raw <- exec(fitFsusie, !!!.splitMethodArgs(fitFsusie, fitArgs))
+    fitFsusieArgs <- .splitMethodArgs(fitFsusie, fitArgs)
+    raw <- exec(fitFsusie, !!!fitFsusieArgs)
     list_assign(
         raw,
         coef = try_fetch(
@@ -595,7 +596,8 @@ setMethod(
         compact(list(residual_variance = mvPrior$residualVariance))
     )
     fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[["mvsusie"]])
-    exec(fitMvsusie, !!!.splitMethodArgs(fitMvsusie, fitArgs)) |>
+    fitMvsusieArgs <- .splitMethodArgs(fitMvsusie, fitArgs)
+    exec(fitMvsusie, !!!fitMvsusieArgs) |>
         .setFinemappingFitClass("mvsusie")
 }
 
@@ -752,10 +754,8 @@ setMethod(
     ) |>
         c(compact(list(residual_variance = mvPrior$residualVariance)))
     fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[["mvsusie"]])
-    fit <- exec(
-        fitMvsusieRss,
-        !!!.splitMethodArgs(fitMvsusieRss, fitArgs)
-    )
+    fitMvsusieRssArgs <- .splitMethodArgs(fitMvsusieRss, fitArgs)
+    fit <- exec(fitMvsusieRss, !!!fitMvsusieRssArgs)
     .setFinemappingFitClass(fit, "mvsusie")
 }
 
@@ -978,7 +978,8 @@ setMethod(
     ) {
         return(ma)
     }
-    list_assign(ma, !!!set_names(list(fittedModels[[token]]), adapter$fitArg))
+    fittedArg <- set_names(list(fittedModels[[token]]), adapter$fitArg)
+    list_assign(ma, !!!fittedArg)
 }
 
 # Spike-and-slab pi from an internal mr.ash fit (self-contained per method).
@@ -1937,7 +1938,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     }
     cfg <- .jpConfig(pipeline)
     cond <- .jgConditions(g)
-    out <- list_assign(args, !!!.twasGroupFmArgs(args, cond))
+    groupFmArgs <- .twasGroupFmArgs(args, cond)
+    out <- list_assign(args, !!!groupFmArgs)
     cv <- cfg$crossValidationParam %||% list()
     cvF <- cv$folds %||% 0L
     if (cvF <= 1L || !is(g, "IndividualJointGroup")) {
@@ -2037,7 +2039,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # @noRd
 .twasCvBindKey <- function(key, pieces, bind) {
-    exec(bind, !!!map(pieces, key))
+    keyValues <- map(pieces, key)
+    exec(bind, !!!keyValues)
 }
 
 # The fold partition every method in this group is scored on. A fine-mapping
@@ -2232,7 +2235,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     built <- if (is(unit, "JointGroup")) {
         unit
     } else {
-        exec(unit$builder, !!!unit$args)
+        unitArgs <- unit$args
+        exec(unit$builder, !!!unitArgs)
     }
     if (is(built, "JointGroup")) {
         return(list(built))
@@ -2933,10 +2937,12 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     # list, and list_modify would merge into it rather than wrap it. The
     # study goes in under the constructor's own name, not by partial
     # matching.
-    part <- exec(
-        constructor,
-        !!!list_assign(kept, studyName = rec$study, entry = list(rec$entry))
+    constructorArgs <- list_assign(
+        kept,
+        studyName = rec$study,
+        entry = list(rec$entry)
     )
+    part <- exec(constructor, !!!constructorArgs)
     .withJointIndex(part, rec$jointIndex)
 }
 

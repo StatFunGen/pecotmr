@@ -284,11 +284,12 @@ test_that("writeGwasVcf(FineMapping): each split flag emits one VCF per tag", {
     )
     d <- withr::local_tempdir()
     for (case in names(cases)) {
+        caseFlags <- cases[[case]]$flags
         paths <- exec(
             writeGwasVcf,
             fmr,
             file.path(d, str_c(case, ".vcf")),
-            !!!cases[[case]]$flags
+            !!!caseFlags
         )
         expect_equal(length(paths), 2L, info = case)
         expect_true(

@@ -590,19 +590,17 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     if (length(seeded) == 0L) {
         return(methodArgs)
     }
-    list_assign(
-        methodArgs,
-        !!!set_names(
-            map(
-                seeded,
-                .fmSeedTokenDefaults,
-                methodArgs = methodArgs,
-                maxNumSingleEffects = maxNumSingleEffects,
-                maxNumSingleEffectsGreedy = maxNumSingleEffectsGreedy
-            ),
-            seeded
-        )
+    seededArgs <- set_names(
+        map(
+            seeded,
+            .fmSeedTokenDefaults,
+            methodArgs = methodArgs,
+            maxNumSingleEffects = maxNumSingleEffects,
+            maxNumSingleEffectsGreedy = maxNumSingleEffectsGreedy
+        ),
+        seeded
     )
+    list_assign(methodArgs, !!!seededArgs)
 }
 
 # One token's kwargs with L / L_greedy filled in where the caller left them
@@ -2026,13 +2024,11 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     if (length(present) == 0L) {
         return(tl)
     }
-    mutate(
-        tl,
-        !!!set_names(
-            map(present, .fmRelabelColumn, tl = tl, offsets = offsets, i = i),
-            present
-        )
+    relabelledCols <- set_names(
+        map(present, .fmRelabelColumn, tl = tl, offsets = offsets, i = i),
+        present
     )
+    mutate(tl, !!!relabelledCols)
 }
 
 # Renumber per-region credible-set columns so region-local cs indices do not
@@ -2108,7 +2104,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     if (length(userArgs) == 0L) {
         return(baseArgs)
     }
-    list_modify(baseArgs, !!!compact(userArgs))
+    givenArgs <- compact(userArgs)
+    list_modify(baseArgs, !!!givenArgs)
 }
 
 # .fmFitSusieIndiv / .fmFitSusieRss / .fmFitSusieSer (single SuSiE fits) now
@@ -2252,7 +2249,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         list(X = Xtr, Y = Ytr, pos = pos, covLev = coverage),
         userArgs
     )
-    fit <- exec(fitFsusie, !!!.splitMethodArgs(fitFsusie, fsArgs))
+    fitFsusieArgs <- .splitMethodArgs(fitFsusie, fsArgs)
+    fit <- exec(fitFsusie, !!!fitFsusieArgs)
     as.matrix(fsusieWeights(fsusieFit = fit, variantIds = colnames(Xtr)))
 }
 
@@ -2702,7 +2700,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         window = .fmBlockWindow(rg, ctx, traits, cfg)
     )
     fits <- map(pcNames[pass], .fmPcaBlockFit, blk, shared, ctx, cfg)
-    list_assign(skipped, !!!set_names(fits, pcNames[pass]))
+    pcFits <- set_names(fits, pcNames[pass])
+    list_assign(skipped, !!!pcFits)
 }
 
 # Whether one PC's response clears the SER pre-screen on a window's block.

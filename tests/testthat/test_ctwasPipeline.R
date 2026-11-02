@@ -2811,7 +2811,8 @@ test_that(".ctwasBuildWeights: the variant cap and weight cutoff apply", {
             entry = list(TwasWeightsRow(variantIds = vids, weights = cs[[1L]])),
             ldReference = gh
         )
-        wl <- exec(pecotmr:::.ctwasBuildWeights, tw, ldPanel, !!!cs[[2L]])
+        secondCase <- cs[[2L]]
+        wl <- exec(pecotmr:::.ctwasBuildWeights, tw, ldPanel, !!!secondCase)
         expect_equal(wl[[1L]]$n_wgt, 3L, info = nm)
         expect_equal(nrow(wl[[1L]]$wgt), 3L, info = nm)
         expect_equal(

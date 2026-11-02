@@ -217,7 +217,8 @@ GenotypeMixture <- function(panels, mixtureWeights) {
 # One row per sample of every panel, recording its cohort.
 # @noRd
 .gmColData <- function(experiments) {
-    exec(rbind, !!!unname(imap(experiments, .gmColDataPart)))
+    colDataParts <- unname(imap(experiments, .gmColDataPart))
+    exec(rbind, !!!colDataParts)
 }
 
 # @noRd
@@ -232,7 +233,8 @@ GenotypeMixture <- function(panels, mixtureWeights) {
 # The sampleMap: each panel's samples under their cohort-prefixed names.
 # @noRd
 .gmSampleMap <- function(experiments) {
-    exec(rbind, !!!unname(imap(experiments, .gmSampleMapPart)))
+    sampleMapParts <- unname(imap(experiments, .gmSampleMapPart))
+    exec(rbind, !!!sampleMapParts)
 }
 
 # @noRd
@@ -392,7 +394,8 @@ setMethod("show", "GenotypeMixture", function(object) {
 # panel's allele coding relative to the first's.
 # @noRd
 .gmSign <- function(x) {
-    exec(cbind, !!!unname(map(.gmComponents(x), .gmComponentSign)))
+    componentSigns <- unname(map(.gmComponents(x), .gmComponentSign))
+    exec(cbind, !!!componentSigns)
 }
 
 # The mixture's variants: the first panel's ranges, with the SNP / A1 / A2
@@ -457,9 +460,11 @@ setMethod("show", "GenotypeMixture", function(object) {
         needMissing = needMissing,
         step = step
     )
+    mafs <- unname(map(each, "maf"))
+    missRates <- unname(map(each, "missRate"))
     list(
-        maf = exec(pmin, !!!unname(map(each, "maf"))),
-        missRate = if (needMissing) exec(pmax, !!!unname(map(each, "missRate")))
+        maf = exec(pmin, !!!mafs),
+        missRate = if (needMissing) exec(pmax, !!!missRates)
     )
 }
 
@@ -499,11 +504,12 @@ setMethod("show", "GenotypeMixture", function(object) {
 # @noRd
 .gmFactor <- function(x, idx) {
     blocks <- map(seq_along(.gmComponents(x)), .gmFactorBlock, x = x, idx = idx)
-    stacked <- exec(
-        rbind,
-        !!!blocks,
-        !!!map2(blocks, unname(mixtureWeights(x)), .gmMonomorphicRows)
+    monomorphicRows <- map2(
+        blocks,
+        unname(mixtureWeights(x)),
+        .gmMonomorphicRows
     )
+    stacked <- exec(rbind, !!!blocks, !!!monomorphicRows)
     stacked * sqrt(nrow(stacked) - 1)
 }
 

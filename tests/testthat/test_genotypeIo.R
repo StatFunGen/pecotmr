@@ -707,7 +707,8 @@ test_that("readGenotypes reads PLINK1, VCF and GDS files as panels", {
         gds = list(gds_path)
     )
     for (format in names(sources)) {
-        panel <- exec(readGenotypes, !!!sources[[format]])
+        sourceArgs <- sources[[format]]
+        panel <- exec(readGenotypes, !!!sourceArgs)
         expect_s4_class(panel, "RangedSummarizedExperiment")
         expect_equal(dim(panel), c(n_variants, n_samples), info = format)
         expect_equal(
@@ -1765,7 +1766,8 @@ test_that("readGenotypes names its keyword sources, not `...`", {
     for (nm in sources) {
         err <- tryCatch(
             {
-                exec(readGenotypes, !!!set_names(list("nope"), nm))
+                badArg <- set_names(list("nope"), nm)
+                exec(readGenotypes, !!!badArg)
                 NULL
             },
             error = function(e) conditionMessage(e)

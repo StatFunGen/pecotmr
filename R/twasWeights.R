@@ -784,10 +784,14 @@ TwasWeights <- function(
     methods <- map(as.list(md$methods), as.character)
     rows <- rep(seq_along(methods), lengths(methods))
     ident <- intersect(.TWAS_KEY_COLUMNS, colnames(md))
+    identCols <- set_names(
+        map(ident, .twasRowValues, md = md, rows = rows),
+        ident
+    )
     tibble(
         row = rows,
         method = list_c(methods, ptype = character()),
-        !!!set_names(map(ident, .twasRowValues, md = md, rows = rows), ident)
+        !!!identCols
     )
 }
 
@@ -1017,7 +1021,8 @@ TwasWeights <- function(
     }
     n <- map_int(inputs, .twasInputCells)
     padded <- map2(grs, n, .twasRangesOrPlaceholder)
-    suppressWarnings(exec(c, !!!unname(padded)))
+    paddedRanges <- unname(padded)
+    suppressWarnings(exec(c, !!!paddedRanges))
 }
 
 # @noRd
@@ -1138,7 +1143,8 @@ TwasWeights <- function(
     if (length(blocks) == 0L) {
         return(.rtlGatherElements(x, seq_len(length(x))))
     }
-    suppressWarnings(exec(c, !!!unname(blocks)))
+    blockRanges <- unname(blocks)
+    suppressWarnings(exec(c, !!!blockRanges))
 }
 
 # @noRd
@@ -2703,11 +2709,10 @@ setMethod("show", "TwasWeights", function(object) {
 # every other argument of that method untouched.
 # @noRd
 .twasSetMethodArg <- function(weightMethods, method, arg, value) {
-    updated <- list_assign(
-        weightMethods[[method]],
-        !!!set_names(list(value), arg)
-    )
-    list_assign(weightMethods, !!!set_names(list(updated), method))
+    argValue <- set_names(list(value), arg)
+    updated <- list_assign(weightMethods[[method]], !!!argValue)
+    methodEntry <- set_names(list(updated), method)
+    list_assign(weightMethods, !!!methodEntry)
 }
 
 # Resolve the supplied fine-mapping fits onto the method args, for every
@@ -2795,17 +2800,15 @@ setMethod("show", "TwasWeights", function(object) {
 # data-driven matrices / mvsusie reweighted mixture prior for fold `j`).
 # @noRd
 .twasFoldPriors <- function(args, method, j, dataDrivenPriorMatricesCv) {
-    list_assign(
-        args,
-        !!!compact(list(
-            dataDrivenPriorMatrices = if (
-                !is.null(dataDrivenPriorMatricesCv) &&
-                    is_in(method, c("mrmash_weights", "mrmashWeights"))
-            ) {
-                dataDrivenPriorMatricesCv[[j]]
-            }
-        ))
-    )
+    priorUpdates <- compact(list(
+        dataDrivenPriorMatrices = if (
+            !is.null(dataDrivenPriorMatricesCv) &&
+                is_in(method, c("mrmash_weights", "mrmashWeights"))
+        ) {
+            dataDrivenPriorMatricesCv[[j]]
+        }
+    ))
+    list_assign(args, !!!priorUpdates)
 }
 
 # A SuSiE-family method's weights for fold `j`, from fineMappingPipeline's CV
@@ -2868,12 +2871,10 @@ setMethod("show", "TwasWeights", function(object) {
         ctx$dataDrivenPriorMatricesCv
     )
     retaining <- !identical(ctx$fitRetention, "none")
-    fitArgs <- list_assign(
-        withPriors,
-        !!!compact(list(
-            fitRetention = if (retaining) ctx$fitRetention
-        ))
-    )
+    retentionArg <- compact(list(
+        fitRetention = if (retaining) ctx$fitRetention
+    ))
+    fitArgs <- list_assign(withPriors, !!!retentionArg)
     callArgs <- .twasWeightCallArgs(fnName, list(X = Xtr, Y = Ytr), fitArgs)
     W <- if (ctx$verbose < 2) {
         .quietEval(exec(fnName, !!!callArgs))

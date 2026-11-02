@@ -189,7 +189,8 @@ test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
         list(.handleDosage = .tp_mockExtractor()),
         .tp_mockIndividualWeights()
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(
         twasWeightsPipeline(
             qd,
@@ -246,7 +247,8 @@ test_that("twasWeightsPipeline hands each method the backend it names", {
             rep(0, ncol(X))
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     suppressMessages(twasWeightsPipeline(
         qd,
         methods = c("bayesR", "bayesC"),
@@ -324,14 +326,12 @@ test_that("twasWeightsPipeline refuses a backend it cannot honour", {
 
 test_that("mafCutoff and xvarCutoff overrides tighten the TWAS variant set", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     call <- function(...) {
         suppressMessages(twasWeightsPipeline(
             qd,
@@ -378,7 +378,8 @@ test_that("twasWeightsPipeline(QtlDataset): context narrows the context loop", {
         list(.handleDosage = .tp_mockExtractor()),
         .tp_mockIndividualWeights()
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(
         twasWeightsPipeline(
             qd,
@@ -413,7 +414,8 @@ test_that("twasWeightsPipeline(QtlDataset): trait chosen per context", {
         list(.handleDosage = .tp_mockExtractor()),
         .tp_mockIndividualWeights()
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(twasWeightsPipeline(
         .tp_twoContextStudy("A"),
         methods = list(lasso = list()),
@@ -437,7 +439,8 @@ test_that("twasWeightsPipeline(MultiStudy): list selections stay per study", {
         list(.handleDosage = .tp_mockExtractor()),
         .tp_mockIndividualWeights()
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     mt <- MultiStudyQtlDataset(
         qtlDatasets = list(
             A = .tp_twoContextStudy("A"),
@@ -695,7 +698,8 @@ test_that("twasWeightsPipeline(QtlSumStats) runs end to end, mocked solvers", {
         list(.handleDosage = .tp_mockExtractor()),
         .tp_mockSumstatWeights()
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     # Method tokens are the bare short names; the QtlSumStats dispatch
     # resolves them to the *Rss impl via the .twasMethodCapabilities table.
     # Fine-mapping methods (susie / susieInf / etc.) require a
@@ -747,7 +751,8 @@ test_that("sumstat TWAS: a method's failure warns and is skipped", {
     mocks$lassosumRssWeights <- function(stat, ldReference, ...) {
         stop("synthetic test failure")
     }
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     # All entries fail -> the per-method-warning fires *and* the pipeline
     # then errors out (no rows produced). Capture both.
     expect_error(
@@ -890,7 +895,8 @@ test_that("gate: QtlDataset + susie + fineMappingResult threads the susieFit", {
             rep(0, ncol(X))
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             qd,
@@ -932,7 +938,8 @@ test_that("gate: susie with a fineMappingResult passes susieRssFit", {
             rep(0, length(stat$variantNames))
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             ss,
@@ -968,7 +975,8 @@ test_that("gate: susieAsh with a fineMappingResult passes susieAshRssFit", {
             rep(0, length(stat$variantNames))
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             ss,
@@ -998,7 +1006,8 @@ test_that("gate: missing matching tuple in fineMappingResult warns and skips", {
         list(.handleDosage = .tp_mockExtractor()),
         .tp_mockSumstatWeights()
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     expect_error(
         suppressWarnings(suppressMessages(
             twasWeightsPipeline(
@@ -1043,7 +1052,8 @@ test_that("twasWeightsPipeline(QtlDataset): mvsusie gives a row per context", {
             )
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             qd,
@@ -1083,7 +1093,8 @@ test_that("mr.mash multivariate TWAS with 2 traits x 2 contexts", {
             )
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             qd,
@@ -1144,7 +1155,8 @@ test_that("mr.mash TWAS keeps its fit parts in the fits slot", {
             w
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             qd,
@@ -1229,7 +1241,8 @@ test_that("sumstat mvsusie TWAS returns one row per context", {
             )
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             ss,
@@ -1260,7 +1273,8 @@ test_that("sumstat mr.mash TWAS: a solver failure warns, result empty", {
             stop("synthetic multivariate failure")
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     # All multivariate fits fail -> no rows -> the pipeline errors out at the
     # end, surfacing the per-group warning along the way.
     expect_error(
@@ -1303,7 +1317,8 @@ test_that("twasWeightsPipeline: a full cache hit fits no weights", {
             rep(0, ncol(X))
         })
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(
         twasWeightsPipeline(
             qd,
@@ -1346,7 +1361,8 @@ test_that("twasWeightsPipeline: a partial cache hit fits only the rest", {
             }
         )
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(
         twasWeightsPipeline(
             qd,
@@ -1386,7 +1402,8 @@ test_that("twasWeightsPipeline(QtlSumStats): cache hit on a per-tuple basis", {
         rssCalls <<- rssCalls + 1L
         rep(0, length(stat$variantNames))
     }
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             ss,
@@ -1479,7 +1496,8 @@ test_that("twasWeightsPipeline: mr.mash and mvSuSiE fit side by side", {
             mkW(X, Y)
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             qd,
@@ -2407,14 +2425,12 @@ test_that("twasWeightsPipeline(QtlDataset): region + cisWindow is rejected", {
 
 test_that("twasWeightsPipeline: per-region and joint fits span both regions", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     regions <- GenomicRanges::GRanges(
         "chr1",
         IRanges::IRanges(c(50L, 1050L), c(1050L, 2050L))
@@ -2452,23 +2468,21 @@ test_that("twasWeightsPipeline: per-region and joint fits span both regions", {
 test_that("mr.mash with jointRegions = FALSE joins per-region weights", {
     # One trait over two contexts is the multivariate group mr.mash fits.
     qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                mrmashWeights = function(X, Y, ...) {
-                    matrix(
-                        0,
-                        nrow = ncol(X),
-                        ncol = ncol(Y),
-                        dimnames = list(colnames(X), colnames(Y))
-                    )
-                }
-            ),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            mrmashWeights = function(X, Y, ...) {
+                matrix(
+                    0,
+                    nrow = ncol(X),
+                    ncol = ncol(Y),
+                    dimnames = list(colnames(X), colnames(Y))
+                )
+            }
+        ),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     regions <- GenomicRanges::GRanges(
         "chr1",
         IRanges::IRanges(c(50L, 1050L), c(1050L, 2050L))
@@ -3037,14 +3051,12 @@ test_that("QtlDataset: CrossValidationParam(fitFullData) reaches the engine", {
 
 test_that("a mashPrior without mrmash warns and is ignored", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     expect_warning(
         suppressMessages(twasWeightsPipeline(
             qd,
@@ -3100,17 +3112,15 @@ test_that("jointSpec mr.mash and univariate lasso both run", {
         method = "mrmash",
         jointContexts = "brain,liver"
     )
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                .twasDispatchJointSpecsQtlDataset = function(...) jointRes
-            ),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            .twasDispatchJointSpecsQtlDataset = function(...) jointRes
+        ),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
         methods = c("mrmash", "lasso"),
@@ -3129,14 +3139,12 @@ test_that("jointSpec mr.mash and univariate lasso both run", {
 test_that("twasWeightsPipeline's region selects overlapping traits", {
     # @1000, @2000
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(900, 1600))
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
@@ -3156,23 +3164,21 @@ test_that("twasWeightsPipeline's region selects overlapping traits", {
 
 test_that("sumstat TWAS: NULL methods uses the default RSS preset", {
     ss <- .tp_makeQtlSumStats()
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                prsCsWeights = function(stat, ldReference, ...) {
-                    rep(0, length(stat$variantNames))
-                }
-            ),
-            # .tp_mockSumstatWeights() already mocks sdprWeights. Passing a
-            # binding to local_mocked_bindings() twice makes it record the
-            # first mock as the "original", so unwinding restores the mock
-            # instead of the real function and it leaks for the session.
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            prsCsWeights = function(stat, ldReference, ...) {
+                rep(0, length(stat$variantNames))
+            }
+        ),
+        # .tp_mockSumstatWeights() already mocks sdprWeights. Passing a
+        # binding to local_mocked_bindings() twice makes it record the
+        # first mock as the "original", so unwinding restores the mock
+        # instead of the real function and it leaks for the session.
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(ss, methods = NULL, verbose = 0)
     ))
@@ -3182,14 +3188,12 @@ test_that("sumstat TWAS: NULL methods uses the default RSS preset", {
 
 test_that("sumstat TWAS: named-list methods, and an invalid type", {
     ss <- .tp_makeQtlSumStats()
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(
             ss,
@@ -3217,14 +3221,12 @@ test_that("twasWeightsPipeline(QtlSumStats): trait selects matching rows", {
         ldReference = .tp_makeHandle(snp_n = 20L),
         qcOptions = list(step1 = "ok")
     )
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(ss, methods = "lasso", traitId = "t2", verbose = 0)
     ))
@@ -3235,21 +3237,19 @@ test_that("twasWeightsPipeline(QtlSumStats): trait selects matching rows", {
 
 test_that("sumstat multivariate mr.mash returns a column per context", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L) # 2 contexts of (s1, t1)
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                mrmashRssWeights = function(stat, ldReference, ...) {
-                    k <- if (is.matrix(stat$z)) ncol(stat$z) else 1L
-                    ids <- stat$variantNames
-                    matrix(0, length(ids), k, dimnames = list(ids, NULL))
-                }
-            ),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            mrmashRssWeights = function(stat, ldReference, ...) {
+                k <- if (is.matrix(stat$z)) ncol(stat$z) else 1L
+                ids <- stat$variantNames
+                matrix(0, length(ids), k, dimnames = list(ids, NULL))
+            }
+        ),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(ss, methods = "mrmash", verbose = 0)
     ))
@@ -3408,15 +3408,13 @@ test_that("multi-study TWAS errors on a misspelled option", {
 })
 
 test_that("twasWeightsPipeline(MSQD) rbinds both, lays cisWindow on sumstats", {
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         .tp_makeMultiStudy(),
         methods = "lasso",
@@ -3465,15 +3463,13 @@ test_that("multi-study TWAS refuses region with cisWindow", {
 test_that("twasWeightsPipeline(MultiStudy): trait selection skips a study", {
     # A trait vector applies to every component: one carrying none of the
     # traits sits out, and the run is refused only when none carries any.
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     mt <- .tp_makeMultiStudy()
     fit <- function(traitId) {
         suppressMessages(twasWeightsPipeline(
@@ -3533,18 +3529,16 @@ test_that("multi-study TWAS combines jointSpec mr.mash and univariate lasso", {
         method = "mrmash",
         jointContexts = "c1,c2"
     )
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                .twasDispatchJointSpecsMultiStudy = function(...) jointRes
-            ),
-            .tp_mockIndividualWeights(),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            .twasDispatchJointSpecsMultiStudy = function(...) jointRes
+        ),
+        .tp_mockIndividualWeights(),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         mt,
         methods = c("mrmash", "lasso"),
@@ -3620,17 +3614,15 @@ test_that("sumstat TWAS combines jointSpec mr.mash and univariate lasso", {
         method = "mrmash",
         jointContexts = "c1,c2"
     )
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                .twasDispatchJointSpecsQtlSumStats = function(...) jointRes
-            ),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            .twasDispatchJointSpecsQtlSumStats = function(...) jointRes
+        ),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         ss,
         methods = c("mrmash", "lasso"),
@@ -4559,14 +4551,12 @@ test_that("twasWeightsPipeline(QtlDataset): usePCA adds top-PC rows", {
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B")
     )
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     withPc <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
         methods = "lasso",
@@ -4664,22 +4654,20 @@ test_that("twasWeightsPipeline: multivariate resume is all-or-nothing", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L) # 2 contexts of (s1, t1)
     calls <- new.env(parent = emptyenv())
     calls$n <- 0L
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(
-                .handleDosage = .tp_mockExtractor(),
-                mrmashRssWeights = function(stat, ldReference, ...) {
-                    calls$n <- calls$n + 1L
-                    k <- if (is.matrix(stat$z)) ncol(stat$z) else 1L
-                    ids <- stat$variantNames
-                    matrix(0, length(ids), k, dimnames = list(ids, NULL))
-                }
-            ),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            mrmashRssWeights = function(stat, ldReference, ...) {
+                calls$n <- calls$n + 1L
+                k <- if (is.matrix(stat$z)) ncol(stat$z) else 1L
+                ids <- stat$variantNames
+                matrix(0, length(ids), k, dimnames = list(ids, NULL))
+            }
+        ),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
 
     # Cold run: one joint fit spans both contexts of the group.
     cold <- suppressMessages(suppressWarnings(
@@ -4757,14 +4745,12 @@ test_that("a summary-statistics run records the standardized scale itself", {
         twasWeightsPipeline(ss, methods = "lasso", weightStandardized = FALSE),
         "unused argument"
     )
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
         twasWeightsPipeline(ss, methods = "lasso", verbose = 0)
     ))
@@ -4773,14 +4759,12 @@ test_that("a summary-statistics run records the standardized scale itself", {
 
 test_that("twasWeightsPipeline(QtlDataset) records the accessor's scale", {
     qd <- .tp_makeQtlDataset(traits = "ENSG_A")
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockIndividualWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockIndividualWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     recorded <- function(...) {
         res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
             qd,
@@ -4960,14 +4944,12 @@ test_that("a multivariate TWAS group refuses contexts on two LD references", {
 })
 
 test_that("twasWeightsPipeline(QtlSumStats) lays a cisWindow around traitPos", {
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     # The entry's variants sit every 100 bp from chr1:100 to chr1:800 and the
     # trait at chr1:400, so the fit keeps the variants within `cisWindow` of
     # it; with no window it keeps them all.
@@ -5010,14 +4992,12 @@ test_that("twasWeightsPipeline(QtlSumStats) lays a cisWindow around traitPos", {
 })
 
 test_that("twasWeightsPipeline(QtlSumStats) records traitPos and its window", {
-    exec(
-        local_mocked_bindings,
-        !!!c(
-            list(.handleDosage = .tp_mockExtractor()),
-            .tp_mockSumstatWeights(),
-            list(.package = "pecotmr")
-        )
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
     )
+    exec(local_mocked_bindings, !!!mockArgs)
     # A per-tuple fit's row carries its input's trait position and the window
     # the cisWindow laid around it, as a joint fit's row does.
     ss <- .tp_makeQtlSumStats(traitPos = GenomicRanges::GRanges("chr1:400"))
@@ -5167,7 +5147,8 @@ test_that("the enet mixing reaches the individual-level wrapper", {
             rep(0, ncol(X))
         }
     )
-    exec(local_mocked_bindings, !!!c(mocks, list(.package = "pecotmr")))
+    mockArgs <- c(mocks, list(.package = "pecotmr"))
+    exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(twasWeightsPipeline(
         .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A"),
         methods = list(enet = list(alpha = 0.3)),

@@ -945,12 +945,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         variant = keptIds,
         stringsAsFactors = FALSE
     )
-    mutate(
-        ss,
-        !!!compact(list(
-            var_y = if (!is.null(varY) && !is.na(varY)) varY
-        ))
-    )
+    varYCol <- compact(list(
+        var_y = if (!is.null(varY) && !is.na(varY)) varY
+    ))
+    mutate(ss, !!!varYCol)
 }
 
 # Resolve a sumstat entry's variant ids, falling back to the canonical
@@ -1349,14 +1347,13 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # slot no analysis filled keeps the skeleton's own (empty) value.
 # @noRd
 .cbMergeRuns <- function(empty, runs) {
+    runResults <- map(runs, "result")
+    runTimes <- map(runs, "time")
     list_assign(
-        list_assign(empty, !!!map(runs, "result")),
+        list_assign(empty, !!!runResults),
         computing_time = list_assign(
             empty$computing_time,
-            Analysis = list_assign(
-                empty$computing_time$Analysis,
-                !!!map(runs, "time")
-            )
+            Analysis = list_assign(empty$computing_time$Analysis, !!!runTimes)
         )
     )
 }
@@ -2040,13 +2037,14 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ))
     parsed <- parseVariantId(ids)
     ok <- !is.na(parsed$chrom) & !is.na(parsed$pos)
+    pairRanges <- unname(map(compact(map(qtlPairs, "span")), .locusRanges))
     placed <- exec(
         c,
         GenomicRanges::GRanges(
             parsed$chrom[ok],
             IRanges::IRanges(parsed$pos[ok], width = 1L)
         ),
-        !!!unname(map(compact(map(qtlPairs, "span")), .locusRanges))
+        !!!pairRanges
     )
     if (length(placed) == 0L) {
         return(NULL)
@@ -2589,19 +2587,17 @@ setMethod(
     if (length(combinedX) == 0L) {
         return(NULL)
     }
+    shiftedDicts <- map(
+        seq_along(subs),
+        .cbShiftStudyDict,
+        subs = subs,
+        xOffsets = xOffsets,
+        yOffsets = yOffsets
+    )
     list(
         X = combinedX,
         Y = .cbConcat(map(subs, "Y")),
-        dict_YX = exec(
-            rbind,
-            !!!map(
-                seq_along(subs),
-                .cbShiftStudyDict,
-                subs = subs,
-                xOffsets = xOffsets,
-                yOffsets = yOffsets
-            )
-        ),
+        dict_YX = exec(rbind, !!!shiftedDicts),
         outcomeNames = .cbConcat(map(subs, "outcomeNames")),
         outcomeInfo = bind_rows(map(subs, "outcomeInfo"))
     )

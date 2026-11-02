@@ -65,14 +65,12 @@
     B[2, ] <- rnorm(K, sd = 2)
     Y <- X %*% B + matrix(rnorm(n * K), n, K)
     colnames(Y) <- paste0("ctx", seq_len(K))
-    Z <- exec(
-        cbind,
-        !!!map(seq_len(K), function(k) {
-            map_dbl(seq_len(p), function(j) {
-                summary(lm(Y[, k] ~ X[, j]))$coefficients[2, 3]
-            })
+    marginalZ <- map(seq_len(K), function(k) {
+        map_dbl(seq_len(p), function(j) {
+            summary(lm(Y[, k] ~ X[, j]))$coefficients[2, 3]
         })
-    )
+    })
+    Z <- exec(cbind, !!!marginalZ)
     colnames(Z) <- colnames(Y)
     list(
         X = X,

@@ -597,7 +597,8 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
 # @noRd
 .qtlSampleMap <- function(experiments) {
     parts <- imap(experiments, .qtlSampleMapPart)
-    exec(rbind, !!!unname(parts))
+    sampleMapParts <- unname(parts)
+    exec(rbind, !!!sampleMapParts)
 }
 
 # One experiment's slice of the sampleMap.

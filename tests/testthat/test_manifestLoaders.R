@@ -1518,10 +1518,11 @@ test_that("GWAS-VCF without SS, or without ES/SE, errors", {
     # Each case drops fields the reader needs; the error names them.
     cases <- list(SS = list(dropSs = TRUE), `ES and SE` = list(dropEs = TRUE))
     for (field in names(cases)) {
+        caseArgs <- cases[[field]]
         vcf <- exec(
             .writeGwasVcf,
             tempfile(tmpdir = tmp, fileext = ".vcf"),
-            !!!cases[[field]]
+            !!!caseArgs
         )
         manifest <- data.frame(
             study = "study1",

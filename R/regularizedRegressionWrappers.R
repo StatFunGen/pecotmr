@@ -709,13 +709,15 @@ mrmashWeights <- function(
         # mrmashWrapper's `prior` group and the rest to its `methodArgs`, as
         # neither is a top-level argument of mrmashWrapper.
         split <- .mrmashSplitPriorArgs(as.list(methodArgs))
+        priorArgs <- split$prior
+        optionArgs <- split$rest
         mrmashFit <- exec(
             mrmashWrapper,
             X,
             Y,
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
-            prior = exec(MrmashPriorParam, !!!split$prior),
-            methodArgs = exec(MrmashOptions, !!!split$rest)
+            prior = exec(MrmashPriorParam, !!!priorArgs),
+            methodArgs = exec(MrmashOptions, !!!optionArgs)
         )
     }
     out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, , drop = FALSE]
@@ -1959,10 +1961,8 @@ mrashWeights <- function(
     XKeep <- X[, keep, drop = FALSE]
     # as.list(): list_assign() rejects a MethodOptions outright as `.x`, the
     # same S4-SimpleList seam that makes c() append it instead of splicing.
-    argsList <- list_assign(
-        as.list(methodArgs),
-        !!!.mrashBetaInit(methodArgs, XKeep, y, X, keep)
-    )
+    betaInit <- .mrashBetaInit(methodArgs, XKeep, y, X, keep)
+    argsList <- list_assign(as.list(methodArgs), !!!betaInit)
     fit.mr.ash <- exec(mr.ash, X = XKeep, y = y, !!!argsList)
     # Zero-variance columns were never fitted and keep a zero weight.
     eff.wgt <- replace(
@@ -4186,10 +4186,12 @@ ldpred2GridWeights <- function(
 # @noRd
 .ldpred2AutoWeightsFrom <- function(chains, fitRetention, label) {
     kept <- .mcmcKeptChains(chains, label)
-    beta <- rowMeans(exec(cbind, !!!map(chains[kept], "betaEst")))
+    keptBetas <- map(chains[kept], "betaEst")
+    beta <- rowMeans(exec(cbind, !!!keptBetas))
     if (identical(fitRetention, "none")) {
         return(beta)
     }
+    keptPostps <- map(chains[kept], "postp")
     fit <- list(
         chains = tibble(
             pInit = map_dbl(chains, "pInit"),
@@ -4198,12 +4200,13 @@ ldpred2GridWeights <- function(
             diverged = map_lgl(chains, "diverged"),
             kept = kept
         ),
-        postp = rowMeans(exec(cbind, !!!map(chains[kept], "postp"))),
+        postp = rowMeans(exec(cbind, !!!keptPostps)),
         p = mean(map_dbl(chains[kept], "p")),
         h2 = mean(map_dbl(chains[kept], "h2"))
     )
     if (identical(fitRetention, "full")) {
-        fit$beta <- exec(cbind, !!!map(chains, "betaEst"))
+        chainBetas <- map(chains, "betaEst")
+        fit$beta <- exec(cbind, !!!chainBetas)
     }
     `attr<-`(beta, "fit", fit)
 }
@@ -4509,9 +4512,11 @@ lassosumRss <- function(
         refit = refit,
         w = w
     )
+    corScores <- map(scores, "cor")
+    explainedScores <- map(scores, "explained")
     idx <- .rssHeldOutPick(
-        rowMeans(exec(cbind, !!!map(scores, "cor"))),
-        rowMeans(exec(cbind, !!!map(scores, "explained")))
+        rowMeans(exec(cbind, !!!corScores)),
+        rowMeans(exec(cbind, !!!explainedScores))
     )
     list(beta = candidateBeta[, idx], index = idx, mode = "heldOut")
 }
@@ -4528,7 +4533,8 @@ lassosumRss <- function(
     share <- .rssHeldOutTrainShare()
     trainCor <- .lassosumClampCor(corInput + noise[, k])
     heldCor <- (corInput - share * trainCor) / (1 - share)
-    beta <- exec(refit$fn, trainCor = trainCor, share = share, !!!refit$args)
+    refitArgs <- refit$args
+    beta <- exec(refit$fn, trainCor = trainCor, share = share, !!!refitArgs)
     moments <- .rssShrunkLdMoments(beta, heldCor, ld, w)
     list(
         cor = .rssCorrelationScore(moments),
@@ -4557,7 +4563,8 @@ lassosumRss <- function(
         n = share * n,
         config = config
     )
-    exec(cbind, !!!map(fits, "beta"))
+    fitBetas <- map(fits, "beta")
+    exec(cbind, !!!fitBetas)
 }
 
 # Held-out selection draws the reference's sampling noise, so it needs the
@@ -4843,7 +4850,8 @@ lassosumRss <- function(
         n = n,
         config = config
     )
-    candidateBeta <- exec(cbind, !!!map(fits, "beta"))
+    fitBetas <- map(fits, "beta")
+    candidateBeta <- exec(cbind, !!!fitBetas)
     candidateMeta <- bind_rows(map(fits, "meta"))
     selectorResult <- .rssShrinkGridSelect(
         selection,
@@ -5146,13 +5154,14 @@ lassosumRssWeights <- function(
 # in lassosum's s and lambda. A fit that diverged is NA.
 # @noRd
 .lassosum2Run <- function(inp, engine, config) {
+    lassosumOptions <- config$options
     fits <- exec(
         bigsnpr::snp_lassosum2,
         engine$corr,
         .bigsnprDfBeta(inp),
         delta = config$delta,
         ncores = 1,
-        !!!config$options
+        !!!lassosumOptions
     )
     grid <- attr(fits, "grid_param")
     list(
@@ -6722,7 +6731,8 @@ mrmashWrapper <- function(
         verbose = FALSE,
         w0_threshold = 1e-8
     )
-    exec(mr.mashr::mr.mash, !!!c(derived, list_modify(defaults, !!!user)))
+    mrMashArgs <- c(derived, list_modify(defaults, !!!user))
+    exec(mr.mashr::mr.mash, !!!mrMashArgs)
 }
 
 # @noRd

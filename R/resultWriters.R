@@ -85,7 +85,8 @@ NULL
     if (length(present) == 0L) {
         return(rep("", nrow(df)))
     }
-    exec(str_c, !!!map(as.list(df[present]), .pubKeyPart), sep = "\r")
+    keyParts <- map(as.list(df[present]), .pubKeyPart)
+    exec(str_c, !!!keyParts, sep = "\r")
 }
 
 # The same key read off a COLLECTION's tuple columns, so a long-format view's
@@ -95,11 +96,8 @@ NULL
 # @noRd
 .pubCollectionKey <- function(x, cols) {
     present <- intersect(cols, .tupleColumnNames(x))
-    exec(
-        str_c,
-        !!!map(map(present, .pubTupleColumn, x = x), .pubKeyPart),
-        sep = "\r"
-    )
+    keyParts <- map(map(present, .pubTupleColumn, x = x), .pubKeyPart)
+    exec(str_c, !!!keyParts, sep = "\r")
 }
 
 # @noRd
@@ -1724,7 +1722,8 @@ setMethod(
 # @noRd
 .twvVariantUnion <- function(view, samples) {
     cells <- unique(map_int(samples, "cell"))
-    all <- exec(c, !!!map(view$entries[cells], .twvCellAlleles))
+    cellAlleles <- map(view$entries[cells], .twvCellAlleles)
+    all <- exec(c, !!!cellAlleles)
     gr <- all[!duplicated(.grVariantIds(all))]
     gr[genomicOrder(as.character(seqnames(gr)), start(gr))]
 }
@@ -1742,10 +1741,13 @@ setMethod(
 # union by variant id.
 # @noRd
 .twvWeightMatrix <- function(view, samples, unionIds) {
-    exec(
-        cbind,
-        !!!map(samples, .twvSampleColumn, view = view, unionIds = unionIds)
+    sampleCols <- map(
+        samples,
+        .twvSampleColumn,
+        view = view,
+        unionIds = unionIds
     )
+    exec(cbind, !!!sampleCols)
 }
 
 # @noRd

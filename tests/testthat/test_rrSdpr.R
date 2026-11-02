@@ -78,12 +78,13 @@ test_that("sdpr runs with a per-variant sample size or an array vector", {
         array = list(array = rep(1, p))
     )
     for (nm in names(extras)) {
+        extraArgs <- extras[[nm]]
         result <- exec(
             sdpr,
             bhat = bhat,
             R = R,
             n = 100,
-            !!!extras[[nm]],
+            !!!extraArgs,
             iter = 50,
             burn = 10,
             thin = 2,

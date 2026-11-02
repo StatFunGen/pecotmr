@@ -543,7 +543,8 @@ setValidity("MethodsSelectionParam", function(object) {
     merged <- shared
     for (nm in names(own)) {
         merged[[nm]] <- if (is.list(own[[nm]]) && is.list(shared[[nm]])) {
-            list_modify(shared[[nm]], !!!own[[nm]])
+            ownSettings <- own[[nm]]
+            list_modify(shared[[nm]], !!!ownSettings)
         } else {
             own[[nm]]
         }

@@ -571,14 +571,15 @@ test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
     skip_if_not_installed("qgg")
     f <- .rrwXy()
     mc <- list(nIter = 200, nBurnin = 20, thin = 1)
-    wN <- exec(bayesNWeights, !!!c(list(f$X, f$y), mc))
+    fitArgs <- c(list(f$X, f$y), mc)
+    wN <- exec(bayesNWeights, !!!fitArgs)
     expect_length(wN, f$p)
     expect_true(is.numeric(wN))
     expect_true(all(is.finite(wN)))
-    expect_length(exec(bayesLWeights, !!!c(list(f$X, f$y), mc)), f$p)
-    expect_length(exec(bayesAWeights, !!!c(list(f$X, f$y), mc)), f$p)
-    expect_length(exec(bayesCWeights, !!!c(list(f$X, f$y), mc)), f$p)
-    expect_length(exec(bayesRWeights, !!!c(list(f$X, f$y), mc)), f$p)
+    expect_length(exec(bayesLWeights, !!!fitArgs), f$p)
+    expect_length(exec(bayesAWeights, !!!fitArgs), f$p)
+    expect_length(exec(bayesCWeights, !!!fitArgs), f$p)
+    expect_length(exec(bayesRWeights, !!!fitArgs), f$p)
 })
 
 test_that("buildMrmashPriorMatrices exposes expand_covs' zeromat", {
@@ -754,8 +755,9 @@ test_that("PenalizedRssOptions refuses the settings its wrappers own", {
         "lambda2",
         "maxSwaps"
     )) {
+        ownedArg <- set_names(list(1), nm)
         expect_error(
-            exec(PenalizedRssOptions, !!!set_names(list(1), nm)),
+            exec(PenalizedRssOptions, !!!ownedArg),
             str_c(nm, " is supplied by pecotmr"),
             label = nm
         )
@@ -1020,7 +1022,8 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
         )
     )
     for (nm in names(cases)) {
-        args <- list_modify(base, !!!cases[[nm]])
+        caseSettings <- cases[[nm]]
+        args <- list_modify(base, !!!caseSettings)
         expect_equal(
             exec(pecotmr:::sdprFactorCpp, factorR = ldFactor, !!!args),
             exec(pecotmr:::sdprCpp, LD = list(R), !!!args),

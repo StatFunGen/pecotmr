@@ -120,24 +120,22 @@
     entries <- .collectionEntries(x)
     grs <- map(entries, .savedTwasElement, named = named)
     flat <- suppressWarnings(exec(c, !!!grs))
-    md <- exec(
-        S4Vectors::DataFrame,
-        !!!c(
-            list(
-                study = cells$study,
-                context = cells$context,
-                trait = cells$trait,
-                method = cells$method,
-                fits = S4Vectors::SimpleList(map(entries, methodFits)),
-                cvResult = S4Vectors::SimpleList(map(entries, cvResult)),
-                standardized = map_lgl(entries, weightStandardized),
-                dataType = S4Vectors::SimpleList(map(entries, weightsDataType)),
-                ldReference = rep(NA_character_, nrow(cells))
-            ),
-            extra,
-            list(check.names = FALSE)
-        )
+    dataFrameArgs <- c(
+        list(
+            study = cells$study,
+            context = cells$context,
+            trait = cells$trait,
+            method = cells$method,
+            fits = S4Vectors::SimpleList(map(entries, methodFits)),
+            cvResult = S4Vectors::SimpleList(map(entries, cvResult)),
+            standardized = map_lgl(entries, weightStandardized),
+            dataType = S4Vectors::SimpleList(map(entries, weightsDataType)),
+            ldReference = rep(NA_character_, nrow(cells))
+        ),
+        extra,
+        list(check.names = FALSE)
     )
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     saved <- x
     attr(saved, "unlistData") <- flat
     attr(saved, "partitioning") <- IRanges::PartitioningByEnd(

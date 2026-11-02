@@ -155,10 +155,8 @@ setClass(
 # The result takes its genome from `seqinfoOf`.
 # @noRd
 .h2EstimateNew <- function(elements, values, objects, seqinfoOf) {
-    md <- exec(
-        S4Vectors::DataFrame,
-        !!!c(values, map(objects, I), list(check.names = FALSE))
-    )
+    dataFrameArgs <- c(values, map(objects, I), list(check.names = FALSE))
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     grl <- .rtlRestoreSeqinfo(.rtlBindElements(elements), seqinfoOf)
     new("H2Estimate", .rtlNamed(S4Vectors::`mcols<-`(grl, value = md)))
 }

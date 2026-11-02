@@ -181,34 +181,23 @@
 ) {
     npc <- nPcs %||% (ncol(mashData$Bhat) - 1)
     canonical <- if (is_in("canonical", components)) {
-        exec(
-            mashr::cov_canonical,
-            mashData,
-            !!!compact(.mashComponentArgs("canonical", componentArgs))
-        )
+        canonicalArgs <- compact(.mashComponentArgs("canonical", componentArgs))
+        exec(mashr::cov_canonical, mashData, !!!canonicalArgs)
     }
     pca <- if (is_in("pca", components)) {
-        exec(
-            mashr::cov_pca,
-            mashData,
-            npc = npc,
-            !!!compact(.mashComponentArgs("pca", componentArgs))
-        )
+        pcaArgs <- compact(.mashComponentArgs("pca", componentArgs))
+        exec(mashr::cov_pca, mashData, npc = npc, !!!pcaArgs)
     }
     flash <- if (is_in("flash", components)) {
-        exec(
-            mashr::cov_flash,
-            mashData,
-            !!!compact(.mashComponentArgs("flash", componentArgs))
-        )
+        flashArgs <- compact(.mashComponentArgs("flash", componentArgs))
+        exec(mashr::cov_flash, mashData, !!!flashArgs)
     }
     flashNonneg <- if (is_in("flashNonneg", components)) {
-        exec(
-            mashr::cov_flash,
-            mashData,
-            factors = "nonneg",
-            !!!compact(.mashComponentArgs("flashNonneg", componentArgs))
-        )
+        flashNonnegArgs <- compact(.mashComponentArgs(
+            "flashNonneg",
+            componentArgs
+        ))
+        exec(mashr::cov_flash, mashData, factors = "nonneg", !!!flashNonnegArgs)
     }
     list(
         canonical = canonical,
@@ -724,12 +713,8 @@ CorShrinkOptions <- function(...) {
 # mixture weights. Returns list(U, w = NULL, loglik = NULL).
 # @noRd
 .mashEngineCovEd <- function(mashData, dataDriven, engineArgs = NULL) {
-    U.ed <- exec(
-        mashr::cov_ed,
-        mashData,
-        Ulist_init = dataDriven,
-        !!!compact(as.list(engineArgs %||% list()))
-    )
+    edArgs <- compact(as.list(engineArgs %||% list()))
+    U.ed <- exec(mashr::cov_ed, mashData, Ulist_init = dataDriven, !!!edArgs)
     list(U = U.ed, w = NULL, loglik = NULL)
 }
 

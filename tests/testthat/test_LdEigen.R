@@ -211,20 +211,24 @@ test_that("LdEigen: argument guards fire", {
         nSamples = 500L,
         eigenList = eigen_list
     )
+    badSnpInfo <- list_modify(ok, snpInfo = "not-a-df")
     expect_error(
-        exec(LdEigen, !!!list_modify(ok, !!!list(snpInfo = "not-a-df"))),
+        exec(LdEigen, !!!badSnpInfo),
         "snpInfo.*Must be of type 'data.frame'"
     )
+    badEigenList <- list_modify(ok, eigenList = "not-a-list")
     expect_error(
-        exec(LdEigen, !!!list_modify(ok, !!!list(eigenList = "not-a-list"))),
+        exec(LdEigen, !!!badEigenList),
         "eigenList.*Must be of type 'list'"
     )
+    zeroSamples <- list_modify(ok, nSamples = 0L)
     expect_error(
-        exec(LdEigen, !!!list_modify(ok, !!!list(nSamples = 0L))),
+        exec(LdEigen, !!!zeroSamples),
         "nSamples.*Must be >= 1"
     )
+    textSamples <- list_modify(ok, nSamples = "500")
     expect_error(
-        exec(LdEigen, !!!list_modify(ok, !!!list(nSamples = "500"))),
+        exec(LdEigen, !!!textSamples),
         "nSamples.*Must be of type 'count'"
     )
 })

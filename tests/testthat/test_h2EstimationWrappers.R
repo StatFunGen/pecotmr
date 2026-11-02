@@ -1397,13 +1397,11 @@ makeCoverageAnnot <- function(
         stringsAsFactors = FALSE
     )
     if (nCand > 0L) {
-        cand <- exec(
-            cbind,
-            !!!map(
-                seq_len(nCand),
-                function(k) as.numeric(rbinom(n_snps, 1, 0.3 + 0.1 * k))
-            )
+        candidateCols <- map(
+            seq_len(nCand),
+            function(k) as.numeric(rbinom(n_snps, 1, 0.3 + 0.1 * k))
         )
+        cand <- exec(cbind, !!!candidateCols)
         mat <- cbind(mat, cand)
         meta <- rbind(
             meta,

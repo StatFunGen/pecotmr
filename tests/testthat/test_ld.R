@@ -1899,7 +1899,8 @@ test_that("computeLd errors on an external backend with a non-sample method", {
     set.seed(11)
     nS <- 100L
     af <- c(rep(0.35, 5L), rep(0.004, 5L))
-    d <- exec(cbind, !!!map(af, function(f) rbinom(nS, 2L, f)))
+    dosageCols <- map(af, function(f) rbinom(nS, 2L, f))
+    d <- exec(cbind, !!!dosageCols)
     colnames(d) <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
     d[1:80, 2] <- NA
     d

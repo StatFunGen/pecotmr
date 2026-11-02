@@ -1180,26 +1180,21 @@
     # take the keys the combined dictionaries were built with, in the column
     # each names (its slot's own name unless it says otherwise).
     keyCols <- map2_chr(dicts, names(dicts), .dictKeyColOf)
-    combined <- list_assign(
-        combined,
-        !!!set_names(map(dicts, "keys"), keyCols)
+    dictKeys <- set_names(map(dicts, "keys"), keyCols)
+    combined <- list_assign(combined, !!!dictKeys)
+    dataFrameArgs <- c(
+        map(combined, .rbindAsDataFrameColumn),
+        list(check.names = FALSE)
     )
-    md <- exec(
-        S4Vectors::DataFrame,
-        !!!c(map(combined, .rbindAsDataFrameColumn), list(check.names = FALSE))
-    )
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     # Joining the parts merges each part's seqinfo, so a part whose elements
     # never had a build set would leave the result carrying both the real
     # build and NA. The agreed build is written back explicitly to keep
     # seqinfo single-valued, which validity requires.
     built <- .withGenomeBuild(.rtlJoinParts(parts), !is.null(genome), genome)
     grl <- .rtlNamed(S4Vectors::`mcols<-`(built, value = md))
-    exec(
-        methods::new,
-        cls,
-        .rtlStored(cls, grl),
-        !!!c(map(dicts, "entries"), slots)
-    )
+    slotArgs <- c(map(dicts, "entries"), slots)
+    exec(methods::new, cls, .rtlStored(cls, grl), !!!slotArgs)
 }
 
 # @noRd
@@ -2653,7 +2648,8 @@
         !all(map_lgl(handles, .ssRowsAddressFile)) ||
             any(map_lgl(seedRows, is.null))
     ) {
-        bound <- exec(BiocGenerics::rbind, !!!unname(map(panels, .seDosage)))
+        dosages <- unname(map(panels, .seDosage))
+        bound <- exec(BiocGenerics::rbind, !!!dosages)
         return(bound[ord, , drop = FALSE])
     }
     handle <- methods::initialize(

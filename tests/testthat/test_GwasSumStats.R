@@ -971,7 +971,8 @@ test_that("GwasSumStats nCase and nControl are optional, absent by default", {
     expect_false(any(
         c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
     ))
-    g1 <- exec(GwasSumStats, !!!c(base, list(nCase = 500, nControl = 1500)))
+    caseControlArgs <- c(base, list(nCase = 500, nControl = 1500))
+    g1 <- exec(GwasSumStats, !!!caseControlArgs)
     expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
     expect_equal(g1$nCase, 500)
     expect_equal(g1$nControl, 1500)

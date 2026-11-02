@@ -326,13 +326,11 @@ ColocResult <- function(
 # @noRd
 .crGroupMcols <- function(pairs, tables, groups) {
     shared <- intersect(c(.crGroupCols(), "ldReference"), colnames(pairs))
-    md <- exec(
-        S4Vectors::DataFrame,
-        !!!c(
-            as.list(pairs[groups$first, shared, drop = FALSE]),
-            list(check.names = FALSE)
-        )
+    dataFrameArgs <- c(
+        as.list(pairs[groups$first, shared, drop = FALSE]),
+        list(check.names = FALSE)
     )
+    md <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     # Assigned, not passed to DataFrame(), which would spread the tables.
     md$pairs <- .crPairsColumn(pairs, tables, groups)
     md
@@ -349,17 +347,15 @@ ColocResult <- function(
         colnames(if (length(tables) > 0L) tables[[1L]] else .crEmptyVariants()),
         "variant_id"
     )
-    flat <- exec(
-        S4Vectors::DataFrame,
-        !!!c(
-            as.list(pairs[ord, own, drop = FALSE]),
-            set_names(
-                map(perVariant, .crPerVariantList, tables = tables[ord]),
-                perVariant
-            ),
-            list(check.names = FALSE)
-        )
+    dataFrameArgs <- c(
+        as.list(pairs[ord, own, drop = FALSE]),
+        set_names(
+            map(perVariant, .crPerVariantList, tables = tables[ord]),
+            perVariant
+        ),
+        list(check.names = FALSE)
     )
+    flat <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     S4Vectors::splitAsList(
         flat,
         factor(groups$of[ord], levels = seq_along(groups$first))

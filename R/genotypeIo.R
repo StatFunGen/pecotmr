@@ -737,8 +737,9 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # with parts that do not.
 # @noRd
 .bindPanelRanges <- function(grs) {
+    labelledRanges <- unname(map(grs, .withPanelLabels))
     .dropRedundantLabels(
-        suppressWarnings(exec(c, !!!unname(map(grs, .withPanelLabels))))
+        suppressWarnings(exec(c, !!!labelledRanges))
     )
 }
 
@@ -815,7 +816,8 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         snpIdx = snpIdx,
         unifiedChr = unifiedChr
     )
-    exec(cbind, !!!unname(blocks))[,
+    dosageBlocks <- unname(blocks)
+    exec(cbind, !!!dosageBlocks)[,
         order(unname(list_c(groups))),
         drop = FALSE
     ]
@@ -1485,15 +1487,12 @@ refVariantInfo <- function(source, which = NULL) {
     paths <- resolvePlink2Paths(dataPath)
     info <- readPvar(paths$pvar)
     afreq <- readAfreq(dataPath)
-    mutate(
-        info,
-        chrom = withChrPrefix(.data$chrom),
-        !!!compact(list(
-            allele_freq = if (!is.null(afreq)) {
-                afreq$alt_freq[match(info$id, afreq$id)]
-            }
-        ))
-    )
+    afCol <- compact(list(
+        allele_freq = if (!is.null(afreq)) {
+            afreq$alt_freq[match(info$id, afreq$id)]
+        }
+    ))
+    mutate(info, chrom = withChrPrefix(.data$chrom), !!!afCol)
 }
 
 # plink1 variant info from the .bim (col5 = A1, col6 = A2).
@@ -2819,12 +2818,10 @@ loadGenotypeRegion <- function(
 # @noRd
 .stackDosagePanels <- function(panels, format, metaPath, paths) {
     .stackCheckSamples(panels, paths)
+    dosages <- unname(map(panels, .seDosage))
     SummarizedExperiment::SummarizedExperiment(
         assays = list(
-            dosage = exec(
-                BiocGenerics::rbind,
-                !!!unname(map(panels, .seDosage))
-            )
+            dosage = exec(BiocGenerics::rbind, !!!dosages)
         ),
         rowRanges = .bindPanelRanges(
             map(panels, SummarizedExperiment::rowRanges)

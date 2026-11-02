@@ -119,7 +119,8 @@ methods::setValidity("SumStatsBase", function(object) {
     md <- mcols(object)
     tupleKey <- map(tupleCols, .ssKeyColumn, md = md)
     rangeKey <- .keyEmptyElements(object, .rtlRangeKeys(object))
-    keys <- exec(str_c, !!!c(tupleKey, list(rangeKey)), sep = "|")
+    keyParts <- c(tupleKey, list(rangeKey))
+    keys <- exec(str_c, !!!keyParts, sep = "|")
     anyDuplicated(keys) > 0L
 }
 

@@ -4966,8 +4966,9 @@ test_that("buildMvsusieMixturePrior: methodArgs forwarded, list refused", {
 
 test_that("MvsusieMixturePriorOptions refuses the arguments the builder owns", {
     for (owned in c("mixture_prior", "R", "include_indices", "weights_tol")) {
+        ownedArg <- set_names(list(1), owned)
         expect_error(
-            exec(MvsusieMixturePriorOptions, !!!set_names(list(1), owned)),
+            exec(MvsusieMixturePriorOptions, !!!ownedArg),
             "supplied by pecotmr"
         )
     }

@@ -1312,9 +1312,11 @@ colocPipeline <- function(
     sm <- .colocRenameNsnps(
         as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
     )
+    identityCols <- .colocRowIdentity(q, gInfo)
+    enrichmentCols <- .colocEnrichmentCols(useEnrichment, p12Info)
     mutate(
         sm,
-        !!!.colocRowIdentity(q, gInfo),
+        !!!identityCols,
         # idx1 / idx2 index the LBF rows handed to coloc.bf_bf, which is
         # exactly what retainedMass runs parallel to -- so the mass reported
         # here is the mass of the two effects this row actually scores, not a
@@ -1345,7 +1347,7 @@ colocPipeline <- function(
             fill = NA_integer_
         ),
         blockId = gInfo$blockId %||% NA_character_,
-        !!!.colocEnrichmentCols(useEnrichment, p12Info)
+        !!!enrichmentCols
     )
 }
 
@@ -1768,9 +1770,10 @@ colocPipeline <- function(
         map_chr(recs, "blockId"),
         unlist(.rtlBindElements(map(recs, "region")))
     )
+    paddedLbf <- map(recs, .colocPadLbf, ids = ids)
     list_assign(
         recs[[1L]],
-        lbf = exec(rbind, !!!map(recs, .colocPadLbf, ids = ids)),
+        lbf = exec(rbind, !!!paddedLbf),
         retainedMass = list_c(map(recs, "retainedMass")),
         effect = list_c(map2(recs, offsets, .colocShiftEffects)),
         nEffects = sum(map_int(recs, "nEffects")),
@@ -1886,7 +1889,8 @@ colocPipeline <- function(
         qtlRetainedMass = numeric(0),
         gwasRetainedMass = numeric(0)
     )
-    ColocResult(mutate(base, !!!.colocEnrichmentCols(enriched, NULL)), list())
+    enrichmentCols <- .colocEnrichmentCols(enriched, NULL)
+    ColocResult(mutate(base, !!!enrichmentCols), list())
 }
 
 # Look up this pair's enrichment factor in the user-supplied enrichment table.
@@ -1982,7 +1986,8 @@ colocPipeline <- function(
         ),
         colnames(sm)
     )
-    mutate(sm, !!!set_names(map(missing, .colocMissingColumn), missing))
+    missingCols <- set_names(map(missing, .colocMissingColumn), missing)
+    mutate(sm, !!!missingCols)
 }
 
 # @noRd

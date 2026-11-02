@@ -461,10 +461,8 @@ test_that("a ridge is solved in closed form, on the matrix or a factor", {
     z <- as.numeric(d$R %*% rnorm(50, sd = 0.05)) + rnorm(50, sd = 0.02)
     lambda <- c(2, 0.5, 0.1)
     for (s in c(0, 0.3)) {
-        exact <- exec(
-            cbind,
-            !!!map(lambda, .prs_ridgeExact, R = d$R, z = z, s = s)
-        )
+        exactBetas <- map(lambda, .prs_ridgeExact, R = d$R, z = z, s = s)
+        exact <- exec(cbind, !!!exactBetas)
         for (ld in list(
             list(R = d$R, shrink = s),
             list(ldFactor = d$ldFactor, shrink = s)

@@ -1334,18 +1334,16 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     alpha <- .adjustPipsRenormAlpha(spec$alpha, cols)
     nKeep <- length(keepIdx)
     varAlpha <- alpha[, seq_len(nKeep), drop = FALSE]
-    subset <- list_assign(
-        fit,
-        !!!compact(list(
-            alpha = alpha,
-            pip = as.numeric(1 - apply(1 - varAlpha, 2L, prod)),
-            null_index = if (length(spec$nullIdx) > 0L) nKeep + 1L,
-            # Recorded BEFORE renormalization: after it every row sums to 1,
-            # so the share that survived is only knowable at this point. This
-            # is the §3.6 diagnostic -- always reported, never a filter.
-            retained_mass = .adjustPipsRetainedMass(spec$alpha, cols)
-        ))
-    )
+    subsetFields <- compact(list(
+        alpha = alpha,
+        pip = as.numeric(1 - apply(1 - varAlpha, 2L, prod)),
+        null_index = if (length(spec$nullIdx) > 0L) nKeep + 1L,
+        # Recorded BEFORE renormalization: after it every row sums to 1,
+        # so the share that survived is only knowable at this point. This
+        # is the §3.6 diagnostic -- always reported, never a filter.
+        retained_mass = .adjustPipsRetainedMass(spec$alpha, cols)
+    ))
+    subset <- list_assign(fit, !!!subsetFields)
     .adjustPipsRebuildAllSets(
         .adjustPipsSubsetVariantSlots(subset, keepIdx, cols, nVariants),
         varAlpha
@@ -1473,28 +1471,26 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     p <- list(keepIdx = keepIdx, cols = cols, nVariants = nVariants)
     # compact(): a slot the fit never carried subsets to NULL, and adding it
     # back as an explicit NULL element is not the same as leaving it out.
-    list_assign(
-        fit,
-        !!!compact(list(
-            lbf_variable = .adjustPipsCols(
-                fit[["lbf_variable"]],
-                p,
-                "lbf_variable"
-            ),
-            mu = .adjustPipsCols(fit[["mu"]], p, "mu"),
-            mu2 = .adjustPipsCols(fit[["mu2"]], p, "mu2"),
-            mu2_diag = .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag"),
-            clfsr = .adjustPipsCols(fit[["clfsr"]], p, "clfsr"),
-            coef = .adjustPipsRows(fit[["coef"]], p, "coef"),
-            X_column_scale_factors = .adjustPipsVec(
-                fit[["X_column_scale_factors"]],
-                p,
-                "X_column_scale_factors"
-            ),
-            XtXr = .adjustPipsVec(fit[["XtXr"]], p, "XtXr"),
-            pi = .adjustPipsVec(fit[["pi"]], p, "pi")
-        ))
-    )
+    adjustedFields <- compact(list(
+        lbf_variable = .adjustPipsCols(
+            fit[["lbf_variable"]],
+            p,
+            "lbf_variable"
+        ),
+        mu = .adjustPipsCols(fit[["mu"]], p, "mu"),
+        mu2 = .adjustPipsCols(fit[["mu2"]], p, "mu2"),
+        mu2_diag = .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag"),
+        clfsr = .adjustPipsCols(fit[["clfsr"]], p, "clfsr"),
+        coef = .adjustPipsRows(fit[["coef"]], p, "coef"),
+        X_column_scale_factors = .adjustPipsVec(
+            fit[["X_column_scale_factors"]],
+            p,
+            "X_column_scale_factors"
+        ),
+        XtXr = .adjustPipsVec(fit[["XtXr"]], p, "XtXr"),
+        pi = .adjustPipsVec(fit[["pi"]], p, "pi")
+    ))
+    list_assign(fit, !!!adjustedFields)
 }
 
 # Index set for a slot measured along its variant axis: `nVariants` selects the
@@ -1559,28 +1555,26 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # stale.
 # @noRd
 .adjustPipsRebuildAllSets <- function(fit, varAlpha) {
-    list_assign(
-        fit,
-        !!!compact(list(
-            sets = if (!is.null(fit[["sets"]])) {
-                .adjustPipsCsAtCoverage(
-                    varAlpha,
-                    fit[["V"]],
-                    .adjustPipsCoverage(fit[["sets"]]),
-                    .fitEffectIndex(fit, nrow(varAlpha))
-                )
-            },
-            sets_secondary = if (!is.null(fit[["sets_secondary"]])) {
-                map(
-                    fit[["sets_secondary"]],
-                    .adjustPipsRebuildSecondary,
-                    varAlpha = varAlpha,
-                    V = fit[["V"]],
-                    effectIndex = .fitEffectIndex(fit, nrow(varAlpha))
-                )
-            }
-        ))
-    )
+    csFields <- compact(list(
+        sets = if (!is.null(fit[["sets"]])) {
+            .adjustPipsCsAtCoverage(
+                varAlpha,
+                fit[["V"]],
+                .adjustPipsCoverage(fit[["sets"]]),
+                .fitEffectIndex(fit, nrow(varAlpha))
+            )
+        },
+        sets_secondary = if (!is.null(fit[["sets_secondary"]])) {
+            map(
+                fit[["sets_secondary"]],
+                .adjustPipsRebuildSecondary,
+                varAlpha = varAlpha,
+                V = fit[["V"]],
+                effectIndex = .fitEffectIndex(fit, nrow(varAlpha))
+            )
+        }
+    ))
+    list_assign(fit, !!!csFields)
 }
 
 # Rebuild one secondary-coverage credible-set table at its own coverage.
@@ -1807,19 +1801,16 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     scaleFactors <- .fitScaleFactors(fit, ncol(alphaMat))
     posteriorMean <- as.numeric(colSums(alphaMat * muMat) / scaleFactors)
     mu2Mat <- if (!is.null(fit[["mu2"]])) as.matrix(fit[["mu2"]]) else NULL
-    mutate(
-        newTopLoci,
-        posterior_mean = posteriorMean,
-        !!!compact(list(
-            posterior_sd = if (
-                !is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))
-            ) {
-                as.numeric(
-                    .susiePosteriorSd(alphaMat, muMat, mu2Mat) / scaleFactors
-                )
-            }
-        ))
-    )
+    sdCol <- compact(list(
+        posterior_sd = if (
+            !is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))
+        ) {
+            as.numeric(
+                .susiePosteriorSd(alphaMat, muMat, mu2Mat) / scaleFactors
+            )
+        }
+    ))
+    mutate(newTopLoci, posterior_mean = posteriorMean, !!!sdCol)
 }
 
 
@@ -1889,7 +1880,8 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         logBF = .tlCol(tl, "logBF", "numeric")
     )
     extras <- .projectPosteriorExtraCols(tl)
-    mutate(out, !!!set_names(map(extras, .tlColumnOf, tl = tl), extras))
+    extraCols <- set_names(map(extras, .tlColumnOf, tl = tl), extras)
+    mutate(out, !!!extraCols)
 }
 
 # @noRd
@@ -2268,8 +2260,9 @@ setMethod("cvResult", "FineMappingRow", function(x) {
     } else {
         unique(list_c(map(unname(named), names), ptype = ""))
     }
+    alignedWeights <- map(named, .alignFoldWeights, on = on)
     W <- `dimnames<-`(
-        exec(cbind, !!!map(named, .alignFoldWeights, on = on)),
+        exec(cbind, !!!alignedWeights),
         list(on, names(ff))
     )
     list_assign(

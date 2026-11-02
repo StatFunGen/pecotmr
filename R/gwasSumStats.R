@@ -265,17 +265,14 @@ GwasSumStats <- function(
 # need no fallback either.
 # @noRd
 .gwasPieceMetadata <- function(dfArgs, split, pieces) {
+    regionCols <- .regionColumns(
+        split$given,
+        split$hasGiven,
+        .rowSpanRanges(pieces)
+    )
     cbind(
         exec(S4Vectors::DataFrame, !!!dfArgs)[split$fromIdx, , drop = FALSE],
-        exec(
-            S4Vectors::DataFrame,
-            blockId = split$blockId,
-            !!!.regionColumns(
-                split$given,
-                split$hasGiven,
-                .rowSpanRanges(pieces)
-            )
-        )
+        exec(S4Vectors::DataFrame, blockId = split$blockId, !!!regionCols)
     )
 }
 

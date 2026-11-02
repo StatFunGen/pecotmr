@@ -231,19 +231,17 @@ CtwasResult <- function(
     walk2(names(supplied), supplied, .ctwasCheckJointColLength, n = n)
     entries <- as.list(entry)
     walk(seq_along(entries), .ctwasAssertEntry, entries = entries)
-    identity <- exec(
-        S4Vectors::DataFrame,
-        !!!c(
-            list(
-                gwasStudy = as.character(gwasStudy),
-                study = as.character(studyName),
-                context = as.character(context),
-                method = as.character(method)
-            ),
-            map(supplied, as.character),
-            list(check.names = FALSE)
-        )
+    dataFrameArgs <- c(
+        list(
+            gwasStudy = as.character(gwasStudy),
+            study = as.character(studyName),
+            context = as.character(context),
+            method = as.character(method)
+        ),
+        map(supplied, as.character),
+        list(check.names = FALSE)
     )
+    identity <- exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     .withMetadata(
         .ctwasNewResult(identity, map(entries, .ctwasSplitRun)),
         metadata
@@ -365,16 +363,14 @@ CtwasResult <- function(
     reps <- rep(seq_along(runs), map_int(runs, .ctwasRunSize))
     pieces <- c("susieAlpha", "regionInfo", "groupPriors")
     payload <- set_names(map(pieces, .ctwasPayloadColumn, runs = runs), pieces)
+    dataFrameArgs <- c(
+        list(blockId = list_c(map(runs, "blockId")) %||% character(0)),
+        payload,
+        list(check.names = FALSE)
+    )
     md <- cbind(
         identity[reps, , drop = FALSE],
-        exec(
-            S4Vectors::DataFrame,
-            !!!c(
-                list(blockId = list_c(map(runs, "blockId")) %||% character(0)),
-                payload,
-                list(check.names = FALSE)
-            )
-        )
+        exec(S4Vectors::DataFrame, !!!dataFrameArgs)
     )
     elements <- list_flatten(map(runs, "elements"))
     grl <- S4Vectors::`mcols<-`(.rtlBindElements(unname(elements)), value = md)
@@ -448,7 +444,8 @@ setMethod("contexts", "CtwasResult", function(x) {
     if (length(parts) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    ranges <- exec(c, !!!map(unname(parts), GenomicRanges::granges))
+    partRanges <- map(unname(parts), GenomicRanges::granges)
+    ranges <- exec(c, !!!partRanges)
     out <- S4Vectors::`mcols<-`(
         ranges,
         value = S4Vectors::DataFrame(

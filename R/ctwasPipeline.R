@@ -1440,17 +1440,18 @@ mergeCtwasBoundaryRegions <- function(
 # ctwas actually returned).
 # @noRd
 .ctwasApplyMergeResult <- function(finemapResult, res) {
+    regionUpdates <- compact(list(
+        region_data = res$updated_region_data,
+        region_info = res$updated_region_info,
+        LD_map = res$updated_LD_map,
+        snp_map = res$updated_snp_map
+    ))
     list_assign(
         finemapResult,
         finemap_res = res$updated_finemap_res,
         susie_alpha_res = res$updated_susie_alpha_res,
         merge_res = res,
-        !!!compact(list(
-            region_data = res$updated_region_data,
-            region_info = res$updated_region_info,
-            LD_map = res$updated_LD_map,
-            snp_map = res$updated_snp_map
-        ))
+        !!!regionUpdates
     )
 }
 
