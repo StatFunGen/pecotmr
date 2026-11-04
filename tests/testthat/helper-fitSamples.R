@@ -1,7 +1,9 @@
 # Real PLINK2 genotypes under a dataset whose contexts observe only 30 of the
 # panel's 100 samples, and one of whose traits (g2) is missing a value for five
 # of those: what a fit's samples are differs from the panel's and between
-# traits.
+# traits. Each context draws its own phenotypes: identical ones would make a
+# joint fit's residual covariance singular, and mr.mash's result on it depends
+# on the platform's rounding.
 .fitSamplesDataset <- function(
     panel = readGenotypes(
         plink2Prefix = file.path(test_path("test_data"), "test_variants")
@@ -10,15 +12,12 @@
     samples <- colnames(panel)[1:30]
     traits <- c("g1", "g2", "g3")
     set.seed(1)
-    y <- matrix(
-        rnorm(length(traits) * length(samples)),
-        nrow = length(traits),
-        dimnames = list(traits, samples)
-    )
-    y["g2", 1:5] <- NA
+    brain <- .fitSamplesExpression(traits, samples)
+    age <- rnorm(length(samples))
+    liver <- .fitSamplesExpression(traits, samples)
     at <- GenomicRanges::start(SummarizedExperiment::rowRanges(panel))[[100L]]
     se <- SummarizedExperiment::SummarizedExperiment(
-        assays = list(expression = y),
+        assays = list(expression = brain),
         rowRanges = `names<-`(
             GenomicRanges::GRanges(
                 "chr21",
@@ -26,16 +25,26 @@
             ),
             traits
         ),
-        colData = S4Vectors::DataFrame(
-            age = rnorm(length(samples)),
-            row.names = samples
-        )
+        colData = S4Vectors::DataFrame(age = age, row.names = samples)
     )
+    seLiver <- se
+    SummarizedExperiment::assay(seLiver, "expression") <- liver
     QtlDataset(
         studyName = "s",
         genotypes = panel,
-        phenotypes = list(brain = se, liver = se)
+        phenotypes = list(brain = se, liver = seLiver)
     )
+}
+
+# One context's phenotypes, g2 missing for the first five samples.
+.fitSamplesExpression <- function(traits, samples) {
+    y <- matrix(
+        rnorm(length(traits) * length(samples)),
+        nrow = length(traits),
+        dimnames = list(traits, samples)
+    )
+    y["g2", 1:5] <- NA
+    y
 }
 
 # The same genotypes, their file naming every variant by an rsID.

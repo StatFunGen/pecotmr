@@ -1723,6 +1723,70 @@ test_that("mrmashWrapper refuses to let methodArgs override derived values", {
     )
 })
 
+test_that("near-duplicate contexts get a floor on V's eigenvalues", {
+    skip_if_not_installed("mr.mashr")
+    set.seed(1)
+    X <- matrix(rnorm(60 * 4), 60, 4)
+    y <- rnorm(60)
+    nearDuplicate <- cbind(y, y + 1e-5 * rnorm(60))
+    initV <- function(Y, floorValue = 1e-3) {
+        pecotmr:::.mrmashInitV(X, Y, NULL, TRUE, "full", floorValue)
+    }
+    eigenRatio <- function(V) {
+        values <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
+        min(values) / max(values)
+    }
+    expect_warning(floored <- initV(nearDuplicate), "close to singular")
+    expect_false(floored$updateV)
+    expect_equal(eigenRatio(floored$V), 1e-3, tolerance = 1e-3)
+    # The floor is relative: rescaling Y rescales V, not the decision.
+    expect_warning(scaled <- initV(1e3 * nearDuplicate), "close to singular")
+    expect_equal(eigenRatio(scaled$V), 1e-3, tolerance = 1e-3)
+    # Distinct contexts keep V as it was estimated, and its update.
+    distinct <- cbind(y, rnorm(60))
+    expect_no_warning(kept <- initV(distinct))
+    expect_true(kept$updateV)
+    expect_equal(
+        kept$V,
+        pecotmr:::.mrmashComputeVInit(X, distinct, FALSE)
+    )
+    # A user's floor decides whether they count as near-duplicate.
+    expect_warning(initV(distinct, 0.99), "close to singular")
+})
+
+test_that("vEigenFloor reaches the wrapper and stops short of mr.mash", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not_installed("glmnet")
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    fitWith <- function(floorValue) {
+        mrmashWeights(
+            X = m$X,
+            Y = m$Y,
+            methodArgs = MrmashOptions(
+                canonicalPriorMatrices = TRUE,
+                vEigenFloor = floorValue
+            )
+        )
+    }
+    expect_warning(
+        suppressMessages(fitWith(0.99)),
+        "vEigenFloor = 0.99"
+    )
+    expect_no_warning(
+        suppressMessages(fitWith(0)),
+        message = "close to singular"
+    )
+})
+
+test_that("vEigenFloor must be one fraction, on the individual path only", {
+    skip_if_not_installed("mr.mashr")
+    for (bad in list(-0.1, 1, NA_real_, c(1e-6, 1e-5), "small")) {
+        expect_error(MrmashOptions(vEigenFloor = bad), "must be one number")
+    }
+    expect_equal(as.list(MrmashOptions(vEigenFloor = 0))$vEigenFloor, 0)
+    expect_error(MrmashRssOptions(vEigenFloor = 1e-6))
+})
+
 test_that("a flat prior name is routed into the prior group", {
     # The pipeline spells per-token kwargs flat, so mrmashWeights routes
     # prior-construction names into mrmashWrapper's `prior` record.

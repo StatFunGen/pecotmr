@@ -1083,6 +1083,13 @@ mrmashRssWeights <- function(
 #'   \code{MrmashOptions} and \code{MrmashRssOptions} refuse
 #'   \code{nthreads}: mr.mash itself runs on one thread, because on macOS
 #'   its worker threads can later hang R inside the OpenMP runtime.
+#'
+#'   \code{MrmashOptions} also takes \code{vEigenFloor}, which is
+#'   \code{\link{mrmashWrapper}}'s rather than mr.mash's: the smallest
+#'   eigenvalue the estimated residual covariance may have, as a fraction of
+#'   its spectral norm. Default \code{1e-3}. Below it, as near-duplicate
+#'   contexts make it, the eigenvalues are raised to the floor, the covariance
+#'   is not updated during the fit, and a warning says so.
 #' @param ... Arguments for the engine, under its own names.
 #' @return A \code{\link{MethodOptions}} object.
 #' @examples
@@ -1590,6 +1597,7 @@ MrmashOptions <- function(...) {
         "MrmashOptions"
     )
     .configRefuseUnavailable(extra, .mrmashUnavailable(), "MrmashOptions")
+    .mrmashCheckVEigenFloor(extra$vEigenFloor)
     .newMethodOptions(
         "mr.mashr::mr.mash",
         defaults = list(),
@@ -1599,12 +1607,30 @@ MrmashOptions <- function(...) {
         # The bag is split before the engine sees it: .mrmashSplitPriorArgs
         # routes the prior-covariance names to MrmashPriorParam() and the rest
         # to mr.mash. So the accepted set is both, read from the live
-        # formals of each rather than transcribed.
+        # formals of each rather than transcribed, plus the wrapper's own
+        # vEigenFloor, which never reaches mr.mash.
         accepted = unique(c(
             .engineAcceptedNames("mr.mashr::mr.mash"),
-            names(formals(MrmashPriorParam))
+            names(formals(MrmashPriorParam)),
+            "vEigenFloor"
         ))
     )
+}
+
+# @noRd
+.mrmashCheckVEigenFloor <- function(vEigenFloor) {
+    if (is.null(vEigenFloor)) {
+        return(invisible(NULL))
+    }
+    isFraction <- is.numeric(vEigenFloor) &&
+        length(vEigenFloor) == 1L &&
+        !is.na(vEigenFloor) &&
+        vEigenFloor >= 0 &&
+        vEigenFloor < 1
+    if (!isFraction) {
+        abort("MrmashOptions: `vEigenFloor` must be one number in [0, 1).")
+    }
+    invisible(NULL)
 }
 
 #' @rdname twasEngineOptions
@@ -6556,7 +6582,9 @@ dprAdaptiveGibbsWeights <- function(
 #'   (\code{update_w0}, \code{max_iter}, \code{tol}, \code{w0_threshold},
 #'   \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
 #'   residual covariance, the coefficient initialisation --- cannot be set
-#'   here.
+#'   here. It also takes the wrapper's own \code{vEigenFloor}, the floor on
+#'   the estimated residual covariance's eigenvalues; see
+#'   \code{\link{twasEngineOptions}}.
 #'
 #' @param V Optional residual covariance matrix (conditions x conditions), or
 #'   \code{NULL} to estimate it.
@@ -6631,7 +6659,14 @@ mrmashWrapper <- function(
     priorBuilt <- setup$priorBuilt
     time1 <- proc.time()
     bInit <- .mrmashInitB(X, Y, bInitMethod, standardize, BPPARAM)
-    vInit <- .mrmashInitV(X, Y, V, updateV, updateVMethod)
+    vInit <- .mrmashInitV(
+        X,
+        Y,
+        V,
+        updateV,
+        updateVMethod,
+        as.list(methodArgs)$vEigenFloor %||% 1e-3
+    )
     fitMrmash <- .mrmashFit(
         priorBuilt$S0,
         bInit,
@@ -6740,10 +6775,13 @@ mrmashWrapper <- function(
     )
 }
 
-# Robust residual-covariance init. Returns list(V, updateV); a rank-deficient V
-# is ridge-regularized and its update disabled.
+# Robust residual-covariance init. Returns list(V, updateV); a V whose smallest
+# eigenvalue is under vEigenFloor times its spectral norm has its eigenvalues
+# raised to that floor and its update disabled, since updating would take it
+# back to singular. Near-duplicate contexts make such a V, and mr.mash's ELBO
+# can turn NaN on one.
 # @noRd
-.mrmashInitV <- function(X, Y, V, updateV, updateVMethod) {
+.mrmashInitV <- function(X, Y, V, updateV, updateVMethod, vEigenFloor) {
     if (!is.null(V)) {
         return(list(V = V, updateV = updateV))
     }
@@ -6751,8 +6789,21 @@ mrmashWrapper <- function(
     if (updateVMethod == "diagonal") {
         return(list(V = diag(diag(V)), updateV = updateV))
     }
-    if (any(eigen(V)$values < 1e-8)) {
-        return(list(V = V + diag(1e-8, nrow(V)), updateV = FALSE))
+    eigenvalues <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
+    floorValue <- vEigenFloor * max(eigenvalues)
+    if (min(eigenvalues) < floorValue) {
+        warn(glue(
+            "mrmashWrapper: the residual covariance of Y is close to singular ",
+            "(smallest / largest eigenvalue ",
+            "{signif(min(eigenvalues) / max(eigenvalues), 3)}), as ",
+            "near-duplicate contexts make it. Raising its eigenvalues to ",
+            "vEigenFloor = {vEigenFloor} of the largest and not updating it ",
+            "during the fit; `vEigenFloor` in MrmashOptions() sets the floor."
+        ))
+        return(list(
+            V = V + diag(floorValue - min(eigenvalues), nrow(V)),
+            updateV = FALSE
+        ))
     }
     list(V = V, updateV = updateV)
 }
@@ -6785,6 +6836,7 @@ mrmashWrapper <- function(
 # from `methodArgs` under mr.mash's own names, with pecotmr's defaults
 # underneath.
 # @noRd
+#' @importFrom purrr discard_at
 .mrmashFit <- function(
     S0,
     bInit,
@@ -6808,7 +6860,8 @@ mrmashWrapper <- function(
         # One thread: see .mrmashUnavailable().
         nthreads = 1L
     )
-    user <- as.list(methodArgs)
+    # vEigenFloor is the wrapper's own, read by .mrmashInitV().
+    user <- discard_at(as.list(methodArgs), "vEigenFloor")
     clash <- intersect(names(user), names(derived))
     if (length(clash) > 0L) {
         abort(glue(

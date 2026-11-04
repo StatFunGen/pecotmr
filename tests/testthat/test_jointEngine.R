@@ -1920,15 +1920,16 @@ test_that("joint fits share one read, allele frequencies included", {
     ))
     expect_s4_class(run$result, "QtlFineMappingResult")
     expect_equal(run$reads, 1L)
-    # g2 is missing the first five of the 30 samples observed, so a fit has 25,
-    # and the panel spells its ids with underscores.
+    # g2 is missing the first five of the 30 samples observed, so a fit has 25.
+    # Results name a variant by its range and alleles, not the file's label.
     top <- S4Vectors::mcols(topLoci(run$result))
     geno <- as.matrix(genotypes(data))
     onFit <- colMeans(geno[6:30, , drop = FALSE], na.rm = TRUE) / 2
-    expect_equal(
-        top$af,
-        unname(onFit[match(top$variant_id, chartr("_", ":", names(onFit)))])
+    ids <- pecotmr:::.ldRefMatchIds(
+        pecotmr:::.qtlGenotypeSe(data),
+        seq_len(ncol(geno))
     )
+    expect_equal(top$af, unname(onFit[match(top$variant_id, ids)]))
 })
 
 test_that("a joint unit plans its genotypes on the samples it fits", {
