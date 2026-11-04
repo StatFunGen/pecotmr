@@ -64,8 +64,8 @@ payload downstream needs, \code{"full"} keeps the whole fitted object.
 Every method keeps a fit, which names the variants it was fitted on.
 \code{"slim"} and \code{"full"} differ for mr.mash, glmnet
 (\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
-\code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
-and the DPR methods; for the others the two behave alike.}
+\code{mcp}), \code{l0learn}, the Bayesian alphabet and \code{mrash};
+for the others the two behave alike.}
 
 \item{seed}{Integer or \code{NULL}. When supplied, seeds both the
 main-process RNG (fold partitioning, variant sub-sampling) and the

@@ -23,16 +23,15 @@ through \code{\link{summaryStatsQc}}.}
 
 \item{twasWeights}{The per-gene weight source. Either (a) a FLAT
 \code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a homogeneous
-list of them) carrying \code{region} provenance -- each gene is placed into
-its home LD block internally by \code{start(region)} (matching cTWAS's
-\code{p0} assignment rule); or (b) a pre-bucketed NAMED LIST keyed by
-\code{region_id} (keys a SUBSET of \code{gwasSumStats}'s), used as-is.
-Blocks without any TWAS weights still contribute their SNP-level signal to
-ctwas's joint group prior estimate (the legacy whole-chromosome pattern
-where only a few of many LD blocks carry gene weights). A gene whose cis
-span straddles a block boundary is homed by its single anchor; the
-cross-block signal is cTWAS's boundary-gene concern
-(\code{\link{mergeCtwasBoundaryRegions}}), not placement. A
+list of them), each gene read with the LD block holding most of its
+weight; or (b) a pre-bucketed NAMED LIST keyed by \code{region_id} (keys a
+SUBSET of \code{gwasSumStats}'s), used as-is. A gene's \code{traitPos}, if
+it has one, gives its coordinates in the results, which are otherwise the
+span of its weight variants.
+Blocks without any TWAS weights do not feed the group priors by default:
+cTWAS skips regions with fewer genes than its \code{min_gene}, 1. To let
+their SNP-level signal in, set \code{min_gene = 0} in
+\code{\link{CtwasEstParamOptions}}. A
 \code{TwasWeights} row of the run's method that carries a SuSiE fit and
 was narrowed since that fit warns (condition class
 \code{pecotmrFitCoverage}): the fit no longer lines up with the row's
@@ -78,8 +77,9 @@ matrix, built with \code{\link{VariantPruningParam}}:
 \value{
 A list with elements \code{z_snp}, \code{z_gene} (NULL when no
   \code{twasZ}), \code{weights}, \code{region_info}, \code{snp_map},
-  \code{LD_map}, \code{LD_loader_fun}, \code{snpinfo_loader_fun}, and
-  \code{resolvedMethod}.
+  \code{LD_map}, \code{LD_loader_fun}, \code{snpinfo_loader_fun},
+  \code{resolvedMethod}, and \code{gwas_n}, the GWAS's median sample size
+  (\code{NA} when it records none).
 }
 \description{
 Builds the per-block ctwas-shape input set (\code{z_snp},

@@ -66,4 +66,10 @@ test_that("ncvregWeights keeps the selected fit or the path without X", {
     expect_null(full$fit$X)
     expect_null(full$variantIds)
     expect_equal(pecotmr:::.twasFitVariantIds(full), colnames(X))
+    withX <- attr(
+        mcpWeights(X, y, fitRetention = "full", retainX = TRUE),
+        "fit"
+    )
+    expect_true(is.matrix(withX$fit$X))
+    expect_equal(pecotmr:::.twasFitVariantIds(withX), colnames(X))
 })

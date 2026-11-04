@@ -46,8 +46,9 @@ disables it).}
   \emph{and} against the panel. It has always been a single knob, so it
   lives here rather than being split into two that could disagree.}
 
-\item{keepVariants}{Optional character vector of variant IDs (SNP column) to
-retain prior to harmonization.}
+\item{keepVariants}{Optional character vector of variant IDs or rsIDs to
+retain prior to harmonization. Alleles match in either order and on either
+strand, and an rsID is matched against the \code{SNP} column.}
 
 \item{skipRegion}{Optional \code{GRanges} of regions to drop.}
 

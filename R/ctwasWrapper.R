@@ -121,6 +121,86 @@
     )
 }
 
+# cTWAS's summary of a run's priors, each gene group's enrichment over the SNP
+# group and each group's share of the heritability, at the GWAS's sample size.
+# NULL where there is nothing to summarize: no group sizes, or a prior the EM
+# left non-finite, on which cTWAS's enrichment test stops.
+# @noRd
+.ctwasGroupSummary <- function(param, gwasN) {
+    numbers <- c(param$group_prior, param$group_prior_var, param$group_size)
+    if (
+        is.null(param$group_size) ||
+            !is_in("SNP", names(param$group_prior)) ||
+            !all(is.finite(numbers)) ||
+            !requireNamespace("ctwas", quietly = TRUE)
+    ) {
+        return(NULL)
+    }
+    ctwas::summarize_param(param, gwas_n = gwasN %||% NA_real_)
+}
+
+#' Combine cTWAS PIPs across a gene's molecular traits
+#'
+#' @description One row per gene with cTWAS's combined PIP, the probability that
+#'   the gene is causal through any of the molecular traits and contexts
+#'   modelled for it, from \code{ctwas::combine_gene_pips()}. The combination
+#'   needs the per-effect probabilities of a run, so it reads
+#'   \code{\link{susieAlpha}}, and a run is combined on its own: results of
+#'   several GWAS studies or methods are not mixed.
+#' @param x A \code{\link{CtwasResult}}.
+#' @param mapping \code{NULL}, or a \code{data.frame} mapping molecular traits
+#'   to genes, with columns \code{molecular_id} and \code{gene_name}. Without
+#'   it the rows are the molecular ids, so a gene's expression and splicing
+#'   traits, whose ids differ, stay apart. With it the rows are the genes, and
+#'   traits it does not map are dropped.
+#' @return A tibble led by the run (\code{gwasStudy}, \code{method}) and the
+#'   gene (\code{molecular_id}, or \code{gene_name} with a \code{mapping}), then
+#'   \code{combined_pip}, \code{combined_cs_id}, and for each study and context
+#'   \code{{study}_{context}_pip} and \code{{study}_{context}_cs_id}, \code{NA}
+#'   where that context holds no trait of the gene. Highest PIP first within a
+#'   run.
+#' @examples
+#' data(ctwasFinemapExample)
+#' ctwasCombinedPips(asCtwasResult(ctwasFinemapExample))
+#' @importFrom dplyr group_split
+#' @export
+ctwasCombinedPips <- function(x, mapping = NULL) {
+    if (!methods::is(x, "CtwasResult")) {
+        abort("`x` must be a CtwasResult.")
+    }
+    if (!requireNamespace("ctwas", quietly = TRUE)) {
+        abort("Package 'ctwas' is required for ctwasCombinedPips.")
+    }
+    runs <- group_split(
+        .ctwasRowTable(susieAlpha(x)),
+        .data$gwasStudy,
+        .data$method
+    )
+    list_rbind(map(runs, .ctwasRunCombinedPips, mapping = mapping))
+}
+
+# One run's combined PIPs. cTWAS names its per-context columns after the
+# `context` column, so that column names the study too.
+# @noRd
+.ctwasRunCombinedPips <- function(run, mapping) {
+    combined <- .ctwasQuietly(
+        ctwas::combine_gene_pips,
+        list(
+            susie_alpha_res = as.data.frame(mutate(
+                run,
+                context = str_c(.data$study, "_", .data$context)
+            )),
+            mapping_table = mapping,
+            group_by = if (is.null(mapping)) "molecular_id" else "gene_name",
+            by = "context"
+        )
+    )
+    bind_cols(
+        tibble(gwasStudy = run$gwasStudy[[1L]], method = run$method[[1L]]),
+        as_tibble(combined)
+    )
+}
+
 #' Screen cTWAS regions
 #'
 #' @description Step 3 of the three-step \code{\link{ctwasPipeline}}: runs

@@ -377,7 +377,11 @@ test_that("a constructor is unchecked only when its engine takes dots", {
             next
         }
         out <- paste(capture.output(show(rec)), collapse = " ")
-        if (grepl("NOT checked", out)) unchecked <- c(unchecked, n)
+        # An absent package is a third, legitimate reason a record cannot be
+        # checked, whichever engine it is for.
+        if (grepl("NOT checked", out) && !grepl("is not installed", out)) {
+            unchecked <- c(unchecked, n)
+        }
     }
     # Each of these reaches an engine whose formals include `...`; where a
     # constructor serves several engines (poolr's three tests), one of them
@@ -394,8 +398,6 @@ test_that("a constructor is unchecked only when its engine takes dots", {
         QvalueOptions = "qvalue::qvalue",
         RmaOptions = "metafor::rma"
     )
-    # Only count the ones whose package is actually installed: an absent
-    # package is a third, legitimate reason a record cannot be checked.
     installed <- keep(dotEngines, .maPkgAvailable)
     expect_setequal(intersect(unchecked, names(dotEngines)), names(installed))
     extra <- setdiff(unchecked, names(dotEngines))

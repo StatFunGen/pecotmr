@@ -16,7 +16,9 @@ loadQtlDatasetFromManifest(
 \item{manifest}{A data.frame or a path to a manifest file. Recognised columns
 (canonical camelCase; snake_case aliases accepted): \code{context}
 (required), \code{phenotypePath} (required, bgzipped BED),
-\code{covariatePath} (optional, per-context covariates), and the
+\code{covariatePath} (optional, per-context covariates),
+\code{dataType} (optional, each context's molecular type, as for
+\code{\link{QtlDataset}}; a blank cell records none), and the
 single-valued \code{study} / \code{genotypePath} /
 \code{genotypeCovariatePath}.}
 

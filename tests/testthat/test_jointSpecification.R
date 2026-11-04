@@ -1,6 +1,166 @@
 # Tests for the joint-specification grammar and input-argument parsers
 # (R/jointSpecification.R).
 
+# The (X, Y) a joint fit is on, as the engine makes them: its phenotypes first,
+# then, if it can be fit at all, its genotypes on the samples they leave.
+.js_residGeno <- function(
+    data,
+    contexts,
+    traits,
+    cisWindow,
+    region,
+    residualizationParam,
+    genotypeFilter,
+    samples
+) {
+    if (is.null(region)) {
+        return(pecotmr:::.fmResidGeno(
+            data,
+            contexts = contexts,
+            traitId = traits,
+            cisWindow = cisWindow,
+            samples = samples,
+            residualizationParam = residualizationParam,
+            genotypeFilter = genotypeFilter
+        ))
+    }
+    pecotmr:::.fmResidGeno(
+        data,
+        contexts = contexts,
+        region = region,
+        samples = samples,
+        residualizationParam = residualizationParam,
+        genotypeFilter = genotypeFilter
+    )
+}
+
+.js_crossContextXy <- function(
+    data,
+    tid,
+    scopedContexts,
+    cisWindow,
+    verbose,
+    label,
+    region = NULL,
+    residualizationParam = ResidualizationParam(),
+    genotypeFilter = pecotmr:::.qtlResolveFilter(),
+    phenotypeFilter = NULL
+) {
+    planned <- pecotmr:::.crossContextPlan(
+        data,
+        tid,
+        scopedContexts,
+        verbose,
+        label,
+        residualizationParam,
+        phenotypeFilter
+    )
+    if (is.null(planned)) {
+        return(NULL)
+    }
+    pecotmr:::.crossContextAssemble(
+        .js_residGeno(
+            data,
+            planned$perTraitContexts,
+            tid,
+            cisWindow,
+            region,
+            residualizationParam,
+            genotypeFilter,
+            planned$fitSamples
+        ),
+        planned$Yres,
+        planned$perTraitContexts,
+        planned$fitSamples,
+        planned$report
+    )
+}
+
+.js_crossTraitXy <- function(
+    data,
+    cx,
+    scopedTraits,
+    cisWindow,
+    verbose,
+    label,
+    studyName,
+    region = NULL,
+    residualizationParam = ResidualizationParam(),
+    genotypeFilter = pecotmr:::.qtlResolveFilter(),
+    phenotypeFilter = NULL
+) {
+    planned <- pecotmr:::.crossTraitPlan(
+        data,
+        cx,
+        scopedTraits,
+        studyName,
+        verbose,
+        label,
+        residualizationParam,
+        phenotypeFilter
+    )
+    if (is.null(planned)) {
+        return(NULL)
+    }
+    pecotmr:::.crossTraitAssemble(
+        .js_residGeno(
+            data,
+            cx,
+            planned$traitsHere,
+            cisWindow,
+            region,
+            residualizationParam,
+            genotypeFilter,
+            planned$fitSamples
+        ),
+        planned$allY,
+        planned$traitsHere,
+        planned$se
+    )
+}
+
+.js_composedXy <- function(
+    data,
+    scope,
+    studyName,
+    cisWindow,
+    verbose,
+    label,
+    region = NULL,
+    residualizationParam = ResidualizationParam(),
+    genotypeFilter = pecotmr:::.qtlResolveFilter(),
+    phenotypeFilter = NULL
+) {
+    planned <- pecotmr:::.composedPlan(
+        data,
+        scope,
+        studyName,
+        verbose,
+        label,
+        residualizationParam,
+        phenotypeFilter
+    )
+    if (is.null(planned)) {
+        return(NULL)
+    }
+    pecotmr:::.composedAlignXy(
+        list(
+            X = .js_residGeno(
+                data,
+                planned$allContexts,
+                planned$allTraits,
+                cisWindow,
+                region,
+                residualizationParam,
+                genotypeFilter,
+                planned$fitSamples
+            ),
+            YresList = planned$YresList
+        ),
+        planned$tuples
+    )
+}
+
 # -----------------------------------------------------------------------------
 # Fixture builders
 # -----------------------------------------------------------------------------
@@ -356,13 +516,16 @@ test_that("parseTraitIds: doubly-nested study->context validates per context", {
 
 test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher wired", {
     # Composed dispatcher accepts axes = c("context", "trait") for individual-
-    # level input. On the fake fixture the genotype I/O fails when the
-    # dispatcher reaches the extractor, which proves the dispatcher was
+    # level input. Reaching the composed builder proves the dispatcher was
     # invoked (rather than the previous stub error).
     qd <- .js_makeQtlDataset(
         studyName = "A",
         contexts = c("brain", "liver"),
         traits = c("ENSG_A", "ENSG_B")
+    )
+    local_mocked_bindings(
+        .composedPlan = function(...) abort("composed builder reached"),
+        .package = "pecotmr"
     )
     expect_error(
         fineMappingPipeline(
@@ -371,7 +534,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint dispatcher wired", {
             cisWindow = 1000L,
             jointSpecification = list(c("context", "trait"))
         ),
-        "File does not exist"
+        "composed builder reached"
     )
 })
 
@@ -477,14 +640,14 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 }
 
 .jd_mockExtractor <- function(seed = 11, n_samples = 30L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -1467,7 +1630,7 @@ test_that(".buildJointSumstatZMatrix: entries in different SNP orders error", {
 # Individual X/Y builders: the skip paths (return NULL / message branches)
 # -----------------------------------------------------------------------------
 
-test_that(".buildIndividualCrossContextXy: skips a trait in < 2 contexts", {
+test_that("a cross-context (X, Y): skips a trait in < 2 contexts", {
     se1 <- .js_makeSe(traits = "g1") # g1 present
     se0 <- .js_makeSe(traits = "other") # g1 absent
     local_mocked_bindings(
@@ -1476,7 +1639,7 @@ test_that(".buildIndividualCrossContextXy: skips a trait in < 2 contexts", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXy(
+    expect_null(suppressMessages(.js_crossContextXy(
         NULL,
         "g1",
         c("c1", "c2"),
@@ -1486,7 +1649,7 @@ test_that(".buildIndividualCrossContextXy: skips a trait in < 2 contexts", {
     )))
 })
 
-test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
+test_that("a cross-context (X, Y): region path + complete-case skip", {
     se <- .js_makeSe(traits = "g1", samples = paste0("s", 1:6))
     samp <- paste0("s", 1:6)
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000))
@@ -1516,7 +1679,7 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXy(
+    expect_null(suppressMessages(.js_crossContextXy(
         NULL,
         "g1",
         c("c1", "c2"),
@@ -1527,7 +1690,7 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
     )))
 })
 
-test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
+test_that("a cross-context (X, Y): too few shared samples skips", {
     se <- .js_makeSe(traits = "g1", samples = paste0("s", 1:6))
     local_mocked_bindings(
         .qtlContextSe = function(data, context) se,
@@ -1554,7 +1717,7 @@ test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXy(
+    expect_null(suppressMessages(.js_crossContextXy(
         NULL,
         "g1",
         c("c1", "c2"),
@@ -1562,6 +1725,47 @@ test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
         verbose = 1,
         label = "X"
     )))
+})
+
+test_that(".crossContextFitSamples skips when too few samples are shared", {
+    Yres <- list(
+        c1 = matrix(0, 2, 1, dimnames = list(c("s1", "s2"), "g1")),
+        c2 = matrix(0, 2, 1, dimnames = list(c("s2", "s3"), "g1"))
+    )
+    expect_message(
+        res <- pecotmr:::.crossContextFitSamples(
+            Yres,
+            c("c1", "c2"),
+            list(verbose = 1, label = "lbl", tid = "g1")
+        ),
+        "trait 'g1' has too few shared samples across contexts"
+    )
+    expect_null(res)
+})
+
+test_that(".msStudySpecs narrows a joint spec's scope to one component", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    spec <- function(scope) list(axes = "context", scope = scope)
+    # No scope, or one the component holds all of, stands as it is.
+    expect_identical(
+        pecotmr:::.msStudySpecs(list(spec(NULL)), qd),
+        list(spec(NULL))
+    )
+    # What it holds is kept, as re-parsing refuses what the data lacks.
+    expect_identical(
+        pecotmr:::.msStudySpecs(
+            list(spec(list(context = c("brain", "elsewhere")))),
+            qd
+        ),
+        list(spec(list(context = "brain")))
+    )
+    # A scope naming only what other components hold leaves this one no spec.
+    expect_length(
+        pecotmr:::.msStudySpecs(list(spec(list(study = "elsewhere"))), qd),
+        0L
+    )
+    expect_length(pecotmr:::.msStudySpecs(NULL, qd), 0L)
 })
 
 test_that(".fmTraitsInRegion keeps overlapping traits; NULL keeps all", {
@@ -1579,7 +1783,7 @@ test_that(".fmTraitsInRegion keeps overlapping traits; NULL keeps all", {
     ) # NULL region -> unchanged
 })
 
-test_that(".buildIndividualCrossTraitXy: < 2 traits, region, complete skip", {
+test_that("a cross-trait (X, Y): < 2 traits, region, complete skip", {
     se2 <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
     samp <- paste0("s", 1:6)
     # < 2 scoped traits in the context -> NULL.
@@ -1587,7 +1791,7 @@ test_that(".buildIndividualCrossTraitXy: < 2 traits, region, complete skip", {
         .qtlContextSe = function(data, context) se2,
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
+    expect_null(suppressMessages(.js_crossTraitXy(
         NULL,
         "cx",
         "g1",
@@ -1620,7 +1824,7 @@ test_that(".buildIndividualCrossTraitXy: < 2 traits, region, complete skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
+    expect_null(suppressMessages(.js_crossTraitXy(
         NULL,
         "cx",
         c("g1", "g2"),
@@ -1632,7 +1836,7 @@ test_that(".buildIndividualCrossTraitXy: < 2 traits, region, complete skip", {
     )))
 })
 
-test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
+test_that("a composed (X, Y): skip branches and single-context wrap", {
     se <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
     samp <- paste0("s", 1:6)
     scope <- list(contexts = list(S = "c1"), traits = list(S = c("g1", "g2")))
@@ -1659,7 +1863,7 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
         },
         .package = "pecotmr"
     )
-    out <- suppressMessages(pecotmr:::.buildComposedIndividualXy(
+    out <- suppressMessages(.js_composedXy(
         NULL,
         scope,
         "S",
@@ -1677,7 +1881,7 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
+    expect_null(suppressMessages(.js_composedXy(
         NULL,
         scope1,
         "S",
@@ -1827,7 +2031,9 @@ test_that(".twasDispatchJointSpecsQtlDataset: two blocks merge by key", {
         )
     }
     local_mocked_bindings(
-        .twasJointSpecRegion = function(...) mkRegionRes(),
+        .twasJointSpecRegionWork = function(...) {
+            pecotmr:::.qtlWorkValue(mkRegionRes())
+        },
         .package = "pecotmr"
     )
     res <- pecotmr:::.twasDispatchJointSpecsQtlDataset(
@@ -2015,7 +2221,7 @@ test_that(".sp* QtlDataset: mismatched study / absent context return empty", {
     expect_equal(pecotmr:::.spListTraits(qd, context = "nope"), character(0))
 })
 
-test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip", {
+test_that("a cross-trait (X, Y): disjoint X/Y samples skip", {
     se <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
     local_mocked_bindings(
         .qtlContextSe = function(data, context) se,
@@ -2039,7 +2245,7 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
+    expect_null(suppressMessages(.js_crossTraitXy(
         NULL,
         "cx",
         c("g1", "g2"),
@@ -2050,7 +2256,7 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip", {
     )))
 })
 
-test_that(".buildComposedIndividualXy: disjoint, missing or NA rows skip", {
+test_that("a composed (X, Y): disjoint, missing or NA rows skip", {
     samp <- paste0("s", 1:6)
     se <- .js_makeSe(traits = c("g1", "g2"), samples = samp)
     scope <- list(
@@ -2090,7 +2296,7 @@ test_that(".buildComposedIndividualXy: disjoint, missing or NA rows skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
+    expect_null(suppressMessages(.js_composedXy(
         NULL,
         scope,
         "S",
@@ -2124,7 +2330,7 @@ test_that(".buildComposedIndividualXy: disjoint, missing or NA rows skip", {
         }, # no g1/g2
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
+    expect_null(suppressMessages(.js_composedXy(
         NULL,
         list(contexts = list(S = c("c1", "c2")), traits = list(S = "g1")),
         "S",
@@ -2168,7 +2374,7 @@ test_that(".buildComposedIndividualXy: disjoint, missing or NA rows skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
+    expect_null(suppressMessages(.js_composedXy(
         NULL,
         list(contexts = list(S = c("c1", "c2")), traits = list(S = "g1")),
         "S",
@@ -2227,7 +2433,9 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
         )
     }
     local_mocked_bindings(
-        .fmDispatchJointSpecRegion = function(...) mkRes(),
+        .fmJointSpecRegionWork = function(...) {
+            pecotmr:::.qtlWorkValue(mkRes())
+        },
         .fmMergeEntries = function(entries) entries[[1L]],
         .package = "pecotmr"
     )
@@ -2255,7 +2463,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: one region direct; all-NULL NULL", {
         entry = list(.js_fmEntry("chr1:100:A:G"))
     )
     local_mocked_bindings(
-        .fmDispatchJointSpecRegion = function(...) res1,
+        .fmJointSpecRegionWork = function(...) pecotmr:::.qtlWorkValue(res1),
         .package = "pecotmr"
     )
     out <- pecotmr:::.fmDispatchJointSpecsQtlDataset(
@@ -2266,7 +2474,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: one region direct; all-NULL NULL", {
     )
     expect_identical(out, res1) # length-1 short-circuit
     local_mocked_bindings(
-        .fmDispatchJointSpecRegion = function(...) NULL,
+        .fmJointSpecRegionWork = function(...) pecotmr:::.qtlWorkValue(NULL),
         .package = "pecotmr"
     )
     expect_null(pecotmr:::.fmDispatchJointSpecsQtlDataset(
@@ -2465,6 +2673,133 @@ test_that(".msFoldStudyResults answers NULL when every fold is empty", {
     expect_null(pecotmr:::.msFoldStudyResults(list(NULL, NULL), NULL))
 })
 
+test_that("the joint builders filter genotypes on the samples fit", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    rp <- ResidualizationParam()
+    filter <- pecotmr:::.qtlResolveFilter(GenotypeFilterParam(mafCutoff = 0.05))
+    pf <- pecotmr:::.jointPhenotypeFilter(list())
+    window <- .fitSamplesWindow()
+    # g2 misses five samples, which a fit on it cannot use.
+    contexts <- .js_crossContextXy(
+        qd,
+        "g2",
+        c("brain", "liver"),
+        NULL,
+        0,
+        "lbl",
+        region = window,
+        residualizationParam = rp,
+        genotypeFilter = filter,
+        phenotypeFilter = pf
+    )
+    traits <- .js_crossTraitXy(
+        qd,
+        "brain",
+        c("g1", "g2"),
+        NULL,
+        0,
+        "lbl",
+        "s",
+        region = window,
+        residualizationParam = rp,
+        genotypeFilter = filter,
+        phenotypeFilter = pf
+    )
+    composed <- .js_composedXy(
+        qd,
+        list(
+            contexts = list(s = c("brain", "liver")),
+            traits = list(s = c("g1", "g2"))
+        ),
+        "s",
+        NULL,
+        0,
+        "lbl",
+        region = window,
+        residualizationParam = rp,
+        genotypeFilter = filter,
+        phenotypeFilter = pf
+    )
+    fitSamples <- rownames(contexts$Y)
+    expect_length(fitSamples, 25L)
+    for (xy in list(contexts, traits, composed)) {
+        expect_setequal(rownames(xy$Y), fitSamples)
+        .expectFitOn(
+            xy$X,
+            fitSamples,
+            pecotmr:::.fmResidGeno(
+                qd,
+                rp,
+                filter,
+                contexts = "brain",
+                region = window,
+                samples = fitSamples
+            )
+        )
+    }
+})
+
+test_that("a joint fit with too few samples to fit reads no genotypes", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    local_mocked_bindings(
+        .handleDosage = function(...) abort("read genotypes"),
+        .fmResidPheno = function(data, contexts, traitId, ...) {
+            y <- matrix(
+                c(1, NA),
+                ncol = length(traitId),
+                nrow = 2L,
+                dimnames = list(c("s1", "s2"), traitId)
+            )
+            if (length(contexts) == 1L) {
+                return(y)
+            }
+            set_names(rep(list(y), length(contexts)), contexts)
+        },
+        .package = "pecotmr"
+    )
+    filter <- pecotmr:::.qtlResolveFilter()
+    expect_null(.js_crossContextXy(
+        qd,
+        "g1",
+        c("brain", "liver"),
+        NULL,
+        1,
+        "lbl",
+        region = .fitSamplesWindow(),
+        residualizationParam = ResidualizationParam(),
+        genotypeFilter = filter
+    )) |>
+        suppressMessages()
+    expect_null(.js_crossTraitXy(
+        qd,
+        "brain",
+        c("g1", "g2"),
+        NULL,
+        0,
+        "lbl",
+        "s",
+        region = .fitSamplesWindow(),
+        residualizationParam = ResidualizationParam(),
+        genotypeFilter = filter
+    ))
+    expect_null(.js_composedXy(
+        qd,
+        list(
+            contexts = list(s = "brain"),
+            traits = list(s = c("g1", "g2"))
+        ),
+        "s",
+        NULL,
+        0,
+        "lbl",
+        region = .fitSamplesWindow(),
+        residualizationParam = ResidualizationParam(),
+        genotypeFilter = filter
+    ))
+})
+
 test_that("the joint builders read phenotypes under the run's phenotype QC", {
     # The cross-context, cross-trait and composed assemblies each read their
     # phenotypes through .fmResidPheno(); the run's resolved filter has to
@@ -2478,7 +2813,7 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
         .crossContextPerTrait = function(...) c("c1", "c2"),
         .crossTraitTooFew = function(...) FALSE,
         .qtlContextSe = function(data, context) se,
-        .buildResidGeno = function(...) {
+        .fmResidGeno = function(...) {
             matrix(0, 3, 1, dimnames = list(samp, "v1"))
         },
         .fmResidPheno = function(
@@ -2489,7 +2824,15 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
             ...
         ) {
             seen[[length(seen) + 1L]] <<- phenotypeFilter
-            NULL
+            matrix(0, 3, 1, dimnames = list(samp, "t1"))
+        },
+        .crossContextFitSamples = function(...) samp,
+        .composedFitSamples = function(...) samp,
+        .composedTuples = function(...) {
+            list(
+                list(context = "c1", trait = "t1"),
+                list(context = "c2", trait = "t2")
+            )
         },
         .crossContextAssemble = function(...) "cc",
         .crossTraitAssemble = function(...) "ct",
@@ -2501,7 +2844,7 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
         genotypeFilter = pecotmr:::.qtlResolveFilter(),
         phenotypeFilter = pf
     )
-    pecotmr:::.buildIndividualCrossContextXy(
+    .js_crossContextXy(
         NULL,
         "t1",
         c("c1", "c2"),
@@ -2512,7 +2855,7 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
         genotypeFilter = common$genotypeFilter,
         phenotypeFilter = pf
     )
-    pecotmr:::.buildIndividualCrossTraitXy(
+    .js_crossTraitXy(
         NULL,
         "c1",
         c("t1", "t2"),
@@ -2524,14 +2867,13 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
         genotypeFilter = common$genotypeFilter,
         phenotypeFilter = pf
     )
-    pecotmr:::.composedResidualized(
+    pecotmr:::.composedPlan(
         NULL,
-        c("c1", "c2"),
-        c("t1", "t2"),
-        1e5,
         NULL,
+        "S",
+        0,
+        "lbl",
         common$residualizationParam,
-        common$genotypeFilter,
         pf
     )
     expect_length(seen, 3L)

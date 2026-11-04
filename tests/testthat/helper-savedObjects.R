@@ -129,7 +129,7 @@
             fits = S4Vectors::SimpleList(map(entries, methodFits)),
             cvResult = S4Vectors::SimpleList(map(entries, cvResult)),
             standardized = map_lgl(entries, weightStandardized),
-            dataType = S4Vectors::SimpleList(map(entries, weightsDataType)),
+            dataType = S4Vectors::SimpleList(map(entries, dataType)),
             ldReference = rep(NA_character_, nrow(cells))
         ),
         extra,

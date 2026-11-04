@@ -339,7 +339,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     }
     geno <- .handleDosage(handle, snpIdx)
     .blockGenotypesToSe(
-        if (meanImpute) .meanImputeGeno(geno) else geno,
+        if (meanImpute) .qtlMeanImpute(geno) else geno,
         handle,
         snpIdx
     )
@@ -348,19 +348,23 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # The samples x variants dosages of a handle's variants at `snpIdx` (never
 # an empty request), as read: neither imputed nor labelled. It reads only
 # the columns of the handle's variant table that find each variant in its
-# file (.HANDLE_READ_COLUMNS), which are all a panel's seed keeps.
+# file (.HANDLE_READ_COLUMNS), which are all a panel's seed keeps. `sampleIdx`,
+# ascending positions, reads only those samples; NULL reads every one.
 # @noRd
-.handleDosage <- function(handle, snpIdx) {
+.handleDosage <- function(handle, snpIdx, sampleIdx = NULL) {
     # One-file-per-chromosome handle: route by chromosome to the right file.
     # `.genotypeChromPaths` tolerates handles deserialized before the slot
     # existed (treated as single-file).
     if (length(.genotypeChromPaths(handle)) > 0L) {
-        return(.handleDosageSharded(handle, snpIdx))
+        return(.handleDosageSharded(handle, snpIdx, sampleIdx))
     }
     # Read ascending, then put the columns back in the requested order. See
     # .restoreRequestedOrder() for why this is not merely tidiness.
     ord <- order(.genotypeFilePos(handle, snpIdx))
-    .restoreRequestedOrder(.extractBlockByFormat(handle, snpIdx[ord]), ord)
+    .restoreRequestedOrder(
+        .extractBlockByFormat(handle, snpIdx[ord], sampleIdx),
+        ord
+    )
 }
 
 # Position of each requested variant in the underlying file. snpInfo rows are
@@ -768,12 +772,12 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 # Dispatch block extraction to the format-specific backend (samples x variants).
 # @noRd
-.extractBlockByFormat <- function(handle, snpIdx) {
+.extractBlockByFormat <- function(handle, snpIdx, sampleIdx = NULL) {
     fmt <- genotypeFormat(handle)
     switch(
         fmt,
-        "plink2" = .extractBlockPlink2(handle, snpIdx),
-        "bgen" = .extractBlockBgen(handle, snpIdx),
+        "plink2" = .extractBlockPlink2(handle, snpIdx, sampleIdx),
+        "bgen" = .extractBlockBgen(handle, snpIdx, sampleIdx),
         .abortUnsupportedFormat(fmt, "extractBlockGenotypes")
     )
 }
@@ -805,7 +809,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # group read from its chromosome's file (.chromDosage()), and the columns
 # put back in the requested order.
 # @noRd
-.handleDosageSharded <- function(handle, snpIdx) {
+.handleDosageSharded <- function(handle, snpIdx, sampleIdx = NULL) {
     unifiedChr <- snpInfo(handle)$CHR
     groups <- split(seq_along(snpIdx), unifiedChr[snpIdx])
     blocks <- map2(
@@ -814,7 +818,8 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         .chromDosage,
         handle = handle,
         snpIdx = snpIdx,
-        unifiedChr = unifiedChr
+        unifiedChr = unifiedChr,
+        sampleIdx = sampleIdx
     )
     dosageBlocks <- unname(blocks)
     exec(cbind, !!!dosageBlocks)[,
@@ -827,7 +832,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # single-file view of that chromosome's file holding the chromosome's rows of
 # the unified table, so positional backends like PLINK2 stay valid.
 # @noRd
-.chromDosage <- function(chrom, posInReq, handle, snpIdx, unifiedChr) {
+.chromDosage <- function(
+    chrom,
+    posInReq,
+    handle,
+    snpIdx,
+    unifiedChr,
+    sampleIdx = NULL
+) {
     if (!is_in(chrom, names(chromPaths(handle)))) {
         msg <- glue(
             "extractBlockGenotypes: no per-chromosome file for chromosome ",
@@ -845,7 +857,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         # Treated as single-file: the view addresses one chromosome's payload.
         chromPaths = character(0)
     )
-    .handleDosage(view, match(snpIdx[posInReq], blockGlobal))
+    .handleDosage(view, match(snpIdx[posInReq], blockGlobal), sampleIdx)
 }
 
 # Empty-block SE (no variants) carrying the handle's sample dimension.
@@ -866,7 +878,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 #' @importFrom rlang try_fetch
-.extractBlockPlink2 <- function(handle, snpIdx) {
+.extractBlockPlink2 <- function(handle, snpIdx, sampleIdx = NULL) {
     # pgenlibr::ReadList returns ALT dosage = A1 dosage in pecotmr convention.
     # The cached @pgenPtr does not survive saveRDS/readRDS (external pointers
     # become stale), so we re-open from path() on the fly if the cached
@@ -882,7 +894,10 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     # A sharded handle routes through a transient view with pgenPtr = NULL (one
     # pgen per chromosome), and a deserialized pointer is stale; open a fresh
     # pgen up front in those cases rather than provoking a caught read error.
-    ptr <- pgenPtr(handle) %||% pgenlibr::NewPgen(paths$pgen)
+    # So does a read of some samples: a pgen is restricted when it is opened,
+    # and the cached one was opened for all of them.
+    cached <- if (is.null(sampleIdx)) pgenPtr(handle)
+    ptr <- cached %||% pgenlibr::NewPgen(paths$pgen, sample_subset = sampleIdx)
     geno <- try_fetch(
         pgenlibr::ReadList(
             ptr,
@@ -890,7 +905,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
             meanimpute = FALSE
         ),
         error = function(cnd) {
-            reopened <- pgenlibr::NewPgen(paths$pgen)
+            reopened <- pgenlibr::NewPgen(paths$pgen, sample_subset = sampleIdx)
             pgenlibr::ReadList(
                 reopened,
                 variant_subset = variantSubset,
@@ -995,23 +1010,6 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         A2 = snpInfo$A2,
         A1 = snpInfo$A1
     )
-}
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-#' @keywords internal
-.meanImputeGeno <- function(geno) {
-    naMask <- is.na(geno)
-    if (!any(naMask)) {
-        return(geno)
-    }
-    # One fill over the whole matrix rather than a copy per column: geno is
-    # samples x variants, so rebuilding it column by column is the expensive
-    # way to say this.
-    means <- colMeans(geno, na.rm = TRUE)
-    replace(geno, naMask, means[col(geno)[naMask]])
 }
 
 # =============================================================================
@@ -1561,8 +1559,9 @@ refVariantInfo <- function(source, which = NULL) {
         pos <= parsed$end[r]
 }
 
-#' Match variant_info against a whitelist file, returning logical index. Uses
-#' parse_variant_id() from misc.R to handle all variant ID formats.
+#' Match variant_info against a whitelist file, returning logical index. The
+#' file is a table with chrom and pos columns, or one variant id per line in
+#' any format parseVariantId() reads, or one label (rsID) per line.
 #' @importFrom vroom vroom
 #' @importFrom readr read_lines
 #' @noRd
@@ -1582,30 +1581,80 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
             is_in("chrom", names(keepRaw)) &&
             is_in("pos", names(keepRaw))
     ) {
-        keepVariants <- parseVariantId(keepRaw)
-    } else {
-        # Fall back to reading as single-column variant IDs
-        ids <- read_lines(keepVariantsPath)
-        keepVariants <- parseVariantId(ids)
+        return(.keepByVariant(variantInfo, parseVariantId(keepRaw)))
     }
-    hasAlleles <- is_in("A1", names(keepVariants)) &&
-        is_in("A2", names(keepVariants)) &&
-        !any(is.na(keepVariants$A1)) &&
-        !any(is.na(keepVariants$A2))
-    is_in(
-        .keepVariantKey(variantInfo, hasAlleles),
-        .keepVariantKey(keepVariants, hasAlleles)
-    )
+    # Fall back to reading as single-column variant IDs
+    .keepByIds(variantInfo, read_lines(keepVariantsPath))
 }
 
-# A variant table's keep-list match key: chrom:pos:A2:A1 when the keep list
-# names alleles, chrom:pos when it names positions only.
+# The panel variants a list of ids names. An id that gives a position and real
+# alleles is matched by them; any other is matched against the panel's labels,
+# which is all an rsID, or an id with a tag where an allele belongs, can be
+# matched by. A header line matches nothing. Every keep list decides through
+# this: a file, and the keepVariants of a genotype filter, of summaryStatsQc()
+# and of adjustPips().
 # @noRd
-.keepVariantKey <- function(tbl, withAlleles) {
-    if (withAlleles) {
-        return(str_c(tbl$chrom, tbl$pos, tbl$A2, tbl$A1, sep = ":"))
+.keepByIds <- function(variantInfo, ids) {
+    keepVariants <- parseVariantId(ids)
+    isLabel <- is.na(keepVariants$pos) |
+        !.isDnaAllele(keepVariants$A1) |
+        !.isDnaAllele(keepVariants$A2)
+    .keepByVariant(variantInfo, keepVariants) |
+        .keepByLabel(variantInfo, ids[isLabel])
+}
+
+# .keepByIds() for variants known only by their ids, as a fit's are: where each
+# is and its alleles are read off the id.
+# @noRd
+.keepIdsNamed <- function(variantIds, ids) {
+    .keepByIds(mutate(parseVariantId(variantIds), id = variantIds), ids)
+}
+
+# The panel variants a parsed keep list names: by position and alleles, or by
+# position alone when the list does not give every variant's alleles.
+# @noRd
+.keepByVariant <- function(variantInfo, keepVariants) {
+    located <- keepVariants[
+        !is.na(keepVariants$chrom) & !is.na(keepVariants$pos),
+        ,
+        drop = FALSE
+    ]
+    hasAlleles <- is_in("A1", names(located)) &&
+        is_in("A2", names(located)) &&
+        !anyNA(located$A1) &&
+        !anyNA(located$A2)
+    if (!hasAlleles) {
+        return(is_in(
+            str_c(variantInfo$chrom, variantInfo$pos, sep = ":"),
+            str_c(located$chrom, located$pos, sep = ":")
+        ))
     }
-    str_c(tbl$chrom, tbl$pos, sep = ":")
+    # A keep list asks only whether a variant is named, and no sign is applied:
+    # a variant listed in both allele orders or held twice is no conflict, and
+    # an A/T variant spelled T/A is the same variant.
+    matched <- matchVariants(
+        variantInfo,
+        located,
+        removeStrandAmbiguous = FALSE,
+        allPairs = TRUE
+    )
+    is_in(seq_len(nrow(variantInfo)), matched$idxA)
+}
+
+# The panel variants a list of labels names, by the file's own variant ids.
+# @noRd
+.keepByLabel <- function(variantInfo, labels) {
+    # Most lists hold none, and matching parses every label of the panel.
+    if (length(labels) == 0L) {
+        return(rep(FALSE, nrow(variantInfo)))
+    }
+    matched <- matchVariants(
+        variantInfo$id,
+        labels,
+        removeStrandAmbiguous = FALSE,
+        allPairs = TRUE
+    )
+    is_in(seq_len(nrow(variantInfo)), matched$idxA)
 }
 
 #' Load genotype data for a specific region
@@ -1620,8 +1669,15 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
 #' @param genotype Path to the genotype data file, or a PLINK prefix.
 #' @param which Optional \code{GRanges}: load only the variants that overlap
 #'   it. If NULL, loads every variant.
-#' @param keepIndel Whether to keep indel SNPs.
-#' @param keepVariantsPath Path to a file listing variants to keep.
+#' @param keepIndel Whether to keep variants other than SNPs. A SNP has exactly
+#'   one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*}
+#'   and \code{N} count as indels.
+#' @param keepVariantsPath Path to a file listing variants to keep: a table
+#'   with \code{chrom} and \code{pos} columns, with their alleles in \code{A2}
+#'   and \code{A1} or without any, or one variant id or rsID per line. Alleles
+#'   match in either order and on either strand; a table without alleles keeps
+#'   every variant at each position, and an rsID is matched against the
+#'   file's own variant ids.
 #' @param returnVariantInfo If TRUE, return a list with X (dosage matrix) and
 #'   variant_info (data.frame). If FALSE (default), return only the dosage
 #'   matrix.
@@ -1655,7 +1711,10 @@ loadGenotypeRegion <- function(
         format = .requireGenotypeFormat(genotype, "loadGenotypeRegion")
     )
     variants <- .rangesSnpInfo(SummarizedExperiment::rowRanges(panel))
-    snpIdx <- .loadGenoSnpIdx(variants, which)
+    inRegion <- .loadGenoSnpIdx(variants, which)
+    # Apply the indel and whitelist filters to the variant index before any
+    # dosage is read, so only the requested variants are loaded.
+    snpIdx <- .loadGenoKeepIdx(variants, inRegion, keepIndel, keepVariantsPath)
     # Samples x variants matrix (pecotmr convention), its columns named by
     # the file's own variant ids; callers handle missing.
     extracted <- list(
@@ -1668,9 +1727,8 @@ loadGenotypeRegion <- function(
             .snpInfoToVariantInfo(slice(variants, snpIdx))
         )
     )
-    filtered <- .loadGenoPostFilter(extracted, keepIndel, keepVariantsPath)
     result <- .loadGenoInvertStochastic(
-        filtered,
+        extracted,
         genotype,
         stochasticMetaPath,
         stochasticMetaFormat
@@ -1715,35 +1773,22 @@ loadGenotypeRegion <- function(
     )
 }
 
-# Apply the indel-drop and variant-whitelist post-filters to (X, variant_info).
+# Restrict the SNP indices to the variants kept by the indel and whitelist
+# filters. Runs before the dosage read, so filtered-out variants are never
+# loaded.
 # @noRd
-.loadGenoPostFilter <- function(result, keepIndel, keepVariantsPath) {
-    snpOnly <- if (keepIndel) {
-        result
+.loadGenoKeepIdx <- function(variants, snpIdx, keepIndel, keepVariantsPath) {
+    if (keepIndel && is.null(keepVariantsPath)) {
+        return(snpIdx)
+    }
+    info <- .snpInfoToVariantInfo(slice(variants, snpIdx))
+    passesIndel <- keepIndel | isSnpAlleles(info$A1, info$A2)
+    onKeepList <- if (is.null(keepVariantsPath)) {
+        TRUE
     } else {
-        .loadGenoSubsetVariants(
-            result,
-            isSnpAlleles(result$variant_info$A1, result$variant_info$A2)
-        )
+        matchVariantsToKeep(info, keepVariantsPath)
     }
-    if (is.null(keepVariantsPath)) {
-        return(snpOnly)
-    }
-    .loadGenoSubsetVariants(
-        snpOnly,
-        matchVariantsToKeep(snpOnly$variant_info, keepVariantsPath)
-    )
-}
-
-# Subset a loaded (X, variant_info) pair along the variant axis, keeping the
-# dosage columns and the metadata rows in step.
-# @noRd
-.loadGenoSubsetVariants <- function(result, keep) {
-    list_assign(
-        result,
-        X = result$X[, keep, drop = FALSE],
-        variant_info = result$variant_info[keep, , drop = FALSE]
-    )
+    snpIdx[passesIndel & onKeepList]
 }
 
 # Restore a stochastic sketch's original scale from its metadata sidecar.
@@ -2189,9 +2234,9 @@ loadGenotypeRegion <- function(
 
 # The samples x variants dosages of the handle's variants at `snpIdx`: each
 # record read once, its probabilities decompressed and decoded for the
-# alleles its rows ask about.
+# alleles its rows ask about and the samples at `sampleIdx` (NULL: all of them).
 # @noRd
-.extractBlockBgen <- function(handle, snpIdx) {
+.extractBlockBgen <- function(handle, snpIdx, sampleIdx = NULL) {
     si <- slice(snpInfo(handle), snpIdx)
     path <- .genotypeReadPath(handle)
     header <- .bgenReadHeader(path)
@@ -2204,7 +2249,8 @@ loadGenotypeRegion <- function(
         si = si,
         con = con,
         header = header,
-        nSamples = handle@nSamples
+        nSamples = handle@nSamples,
+        sampleIdx = sampleIdx
     )
     out <- exec(cbind, !!!blocks)
     # The blocks hold the rows grouped by record; put them back in `si`'s
@@ -2220,26 +2266,45 @@ loadGenotypeRegion <- function(
 
 # One record's dosage columns, for the rows of `si` that read it.
 # @noRd
-.bgenRecordDosage <- function(offset, si, con, header, nSamples) {
+.bgenRecordDosage <- function(
+    offset,
+    si,
+    con,
+    header,
+    nSamples,
+    sampleIdx = NULL
+) {
     rows <- .bgenRowsOf(offset, si)
     record <- .bgenReadRecord(con, offset, si$bgen_size[[rows[[1L]]]])
     if (header$layout == 1L) {
-        return(.bgenLayout1Dosage(record, header$compression, nSamples))
+        return(.bgenLayout1Dosage(
+            record,
+            header$compression,
+            nSamples,
+            sampleIdx
+        ))
     }
     probabilities <- .bgenProbabilityData(record, header$compression)
     bgenDosageCpp(
         probabilities,
         as.integer(nSamples),
-        as.integer(si$bgen_allele[rows])
+        as.integer(si$bgen_allele[rows]),
+        as.integer(sampleIdx)
     )
 }
 
 # A layout-1 record's dosage column: per sample three 16-bit probabilities,
 # of the genotypes AA, AB and BB, each out of 32768, zlib-compressed or
 # stored as they are. The second allele's expected count is P(AB) + 2 P(BB);
-# a sample whose three are all zero is missing.
+# a sample whose three are all zero is missing. Every sample's six bytes sit at
+# a known place, so only those at `sampleIdx` (NULL: all of them) are converted.
 # @noRd
-.bgenLayout1Dosage <- function(record, compression, nSamples) {
+.bgenLayout1Dosage <- function(
+    record,
+    compression,
+    nSamples,
+    sampleIdx = NULL
+) {
     at <- .bgenParseIdentifying(record, layout = 1L)$genotypeStart
     nBytes <- 6 * nSamples
     data <- if (compression == 0L) {
@@ -2251,11 +2316,19 @@ loadGenotypeRegion <- function(
     if (length(data) != nBytes) {
         abort("A layout-1 BGEN record holds the wrong amount of data.")
     }
+    wanted <- if (is.null(sampleIdx)) {
+        data
+    } else {
+        data[sequence(
+            rep(6L, length(sampleIdx)),
+            from = 6L * (sampleIdx - 1L) + 1L
+        )]
+    }
     p <- matrix(
         readBin(
-            data,
+            wanted,
             "integer",
-            n = 3 * nSamples,
+            n = length(wanted) / 2L,
             size = 2L,
             signed = FALSE,
             endian = "little"

@@ -34,6 +34,9 @@ NULL
 #'       estimate used.}
 #'     \item{\code{scale}}{FastHer's fitted phenotypic variance relative to
 #'       its standardized value.}
+#'     \item{\code{reference_overlap}}{The share of the study's samples LAVA
+#'       took to be in the LD reference (\code{referenceOverlap} in
+#'       \code{\link{estimateH2}}).}
 #'     \item{\code{enrichment}}{The per-annotation enrichment table of a
 #'       stratified estimate (\code{\link{stratifiedHeritabilityEnrichment}}).}
 #'     \item{\code{jackknife}}{The per-block jackknife matrix of the
@@ -66,7 +69,8 @@ setClass(
     p_value = "double",
     n_snps = "integer",
     n_components = "integer",
-    scale = "double"
+    scale = "double",
+    reference_overlap = "double"
 )
 
 # The objects an estimate carries, each NULL when it has none.
@@ -277,7 +281,8 @@ setMethod("stratifiedHeritabilityEnrichment", "H2Estimate", function(object) {
 )
 
 # An H2Estimate saved when it held one estimate in slots is rebuilt as a
-# collection of one.
+# collection of one; one saved before estimates recorded the reference overlap
+# has none to record.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -290,9 +295,25 @@ setMethod(
         if (.h2SavedInSlots(object)) {
             object <- .h2FromSlots(.renameSavedSlots(object, .H2_RENAMED_SLOTS))
         }
+        object <- .h2WithOverlapColumn(object)
         methods::callNextMethod(object, ..., verbose = verbose)
     }
 )
+
+# @noRd
+.h2WithOverlapColumn <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    if (is_in("reference_overlap", colnames(md))) {
+        return(object)
+    }
+    S4Vectors::`mcols<-`(
+        object,
+        value = cbind(
+            md,
+            S4Vectors::DataFrame(reference_overlap = rep(NA_real_, nrow(md)))
+        )
+    )
+}
 
 # @noRd
 .h2SavedInSlots <- function(object) {
@@ -326,7 +347,8 @@ setMethod(
             p_value = NA_real_,
             n_snps = methods::slot(object, "nSnps"),
             n_components = NA_integer_,
-            scale = NA_real_
+            scale = NA_real_,
+            reference_overlap = NA_real_
         ),
         list(
             enrichment = list(methods::slot(object, "enrichment")),

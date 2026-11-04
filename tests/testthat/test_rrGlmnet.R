@@ -48,9 +48,12 @@ test_that("glmnetWeights errors when all columns are constant", {
     X <- matrix(rep(seq_len(p), each = n), nrow = n, ncol = p)
     y <- rnorm(n)
 
-    expect_error(
-        glmnetWeights(X, y, alpha = 1),
-        "matrix with 2 or more columns"
+    expect_warning(
+        expect_error(
+            glmnetWeights(X, y, alpha = 1),
+            "matrix with 2 or more columns"
+        ),
+        "dropping 5 zero-variance"
     )
 })
 
@@ -138,4 +141,22 @@ test_that("glmnetWeights keeps the selected fit or the whole path", {
     # The path names its variants, so no second copy is added.
     expect_null(full$variantIds)
     expect_equal(pecotmr:::.twasFitVariantIds(full), fitted)
+    # Its stored calls name the data rather than holding it...
+    expect_identical(full$call$x, quote(x))
+    expect_identical(full$glmnet.fit$call$x, quote(x))
+    expect_identical(full$call$y, quote(y))
+    # ...unless asked to keep it, and the coefficients do not depend on that.
+    withX <- attr(
+        suppressWarnings(
+            ridgeWeights(X, y, fitRetention = "full", retainX = TRUE)
+        ),
+        "fit"
+    )
+    expect_true(is.matrix(withX$call$x))
+    expect_gt(
+        length(serialize(withX$call, NULL)) -
+            length(serialize(full$call, NULL)),
+        length(serialize(X[, fitted], NULL))
+    )
+    expect_equal(dim(withX$glmnet.fit$beta), dim(full$glmnet.fit$beta))
 })

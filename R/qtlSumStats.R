@@ -160,6 +160,12 @@ NULL
 #' @param metadata A list of free-form metadata about the collection,
 #'   as \code{metadata()} holds on any Bioconductor vector. Default
 #'   \code{list()}.
+#' @param dataType Optional molecular type of each tuple (\code{"expression"},
+#'   \code{"splicing"}, \code{"methylation"}): free text, length 1 or one per
+#'   tuple. The statistics cannot say what was measured, so pipelines read it
+#'   from here and record it on what they fit, and \code{\link{ctwasPipeline}}
+#'   models each type as its own. Read by \code{\link{dataType}}. \code{NULL}
+#'   (default) omits the column.
 #' @return A \code{QtlSumStats} object.
 #' @examples
 #' panel <- readGenotypes(
@@ -183,7 +189,8 @@ QtlSumStats <- function(
     traitPos = NULL,
     region = NULL,
     extraCols = list(),
-    metadata = list()
+    metadata = list(),
+    dataType = NULL
 ) {
     if (
         missing(studyName) ||
@@ -206,6 +213,7 @@ QtlSumStats <- function(
     cols <- .qssBaseCols(studyName, context, trait, varY) |>
         .qssAppendNSample(nSample, n) |>
         .appendTraitPosCol(traitPos, n) |>
+        .appendProvenanceCol(dataType, "dataType", n) |>
         .qssAppendExtras(extraCols)
     dict <- .ldRefDict(.ldRefPerTuple(ldReference, n))
     grl <- .qssElements(entry, cols, dict$keys, windows)

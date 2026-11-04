@@ -1511,6 +1511,7 @@ NULL
         "phenotype_file"
     ),
     covariatePath = c("covariatePath", "covariate_path", "cov_path", "covPath"),
+    dataType = c("dataType", "data_type"),
     study = c("study", "study_id", "studyId"),
     genotypePath = c(
         "genotypePath",
@@ -1562,8 +1563,44 @@ NULL
         studyName = studyName,
         genotypes = genotypes,
         phenotypes = phenotypes,
-        genotypeCovariates = genoCov
+        genotypeCovariates = genoCov,
+        dataType = .manifestContextTypes(rows, studyName)
     )
+}
+
+# The molecular type each context declares, named by context, or NULL when
+# none does. A context's rows may leave it blank, but cannot disagree.
+# @noRd
+#' @importFrom dplyr distinct filter
+.manifestContextTypes <- function(rows, studyName) {
+    if (!is_in("dataType", names(rows))) {
+        return(NULL)
+    }
+    typed <- filter(
+        distinct(tibble(
+            context = as.character(rows$context),
+            dataType = .manifestDataType(rows$dataType)
+        )),
+        !is.na(.data$dataType)
+    )
+    clash <- unique(typed$context[duplicated(typed$context)])
+    if (length(clash) > 0L) {
+        abort(glue(
+            "Context(s) {str_flatten(clash, ', ')} (study '{studyName}') ",
+            "declare several dataType values."
+        ))
+    }
+    if (nrow(typed) == 0L) {
+        return(NULL)
+    }
+    set_names(typed$dataType, typed$context)
+}
+
+# A manifest's dataType column, a blank cell recording none.
+# @noRd
+#' @importFrom dplyr na_if
+.manifestDataType <- function(values) {
+    na_if(as.character(values), "")
 }
 
 # The SummarizedExperiment for one context: exactly one phenotypePath (+ at most
@@ -1681,7 +1718,9 @@ NULL
 #' @param manifest A data.frame or a path to a manifest file. Recognised columns
 #'   (canonical camelCase; snake_case aliases accepted): \code{context}
 #'   (required), \code{phenotypePath} (required, bgzipped BED),
-#'   \code{covariatePath} (optional, per-context covariates), and the
+#'   \code{covariatePath} (optional, per-context covariates),
+#'   \code{dataType} (optional, each context's molecular type, as for
+#'   \code{\link{QtlDataset}}; a blank cell records none), and the
 #'   single-valued \code{study} / \code{genotypePath} /
 #'   \code{genotypeCovariatePath}.
 #' @param studyName Study identifier; reconciled with a \code{study} column.
@@ -1785,6 +1824,7 @@ loadQtlDatasetFromManifest <- function(
     ),
     nSample = c("nSample", "n_sample"),
     varY = c("varY", "var_y"),
+    dataType = c("dataType", "data_type"),
     genome = c("genome"),
     ldReferencePath = c("ldReferencePath", "ld_reference_path", "ld_reference"),
     traitStart = c("traitStart", "trait_start"),
@@ -2148,7 +2188,9 @@ loadGwasSumStatsFromManifest <- function(
 #' @param manifest A data.frame or path. Columns (snake_case aliases accepted):
 #'   \code{study}, \code{context}, \code{trait} (required), \code{sumStatsPath}
 #'   (required), \code{columnMapping} (optional), \code{nSample} (optional
-#'   tuple-level total N), \code{varY} (optional), the single-valued
+#'   tuple-level total N), \code{varY} (optional), \code{dataType} (optional,
+#'   each tuple's molecular type, as for \code{\link{QtlSumStats}}; a blank
+#'   cell records none), the single-valued
 #'   \code{genome}, and \code{ldReferencePath}, which may differ between rows
 #'   (each distinct reference is read once, for the chromosomes its rows
 #'   cover, and stored once). When a row supplies \code{nSample},
@@ -2352,7 +2394,10 @@ loadQtlSumStatsFromManifest <- function(
         args,
         compact(list(
             nSample = nSampleCol,
-            varY = if (is_in("varY", names(df))) as.numeric(df$varY)
+            varY = if (is_in("varY", names(df))) as.numeric(df$varY),
+            dataType = if (is_in("dataType", names(df))) {
+                .manifestDataType(df$dataType)
+            }
         ))
     )
 }

@@ -1764,3 +1764,99 @@ test_that(".twrRowResolveWeights aligns weights to the variant ids", {
     allNa <- TwasWeightsRow(ids, matrix(NA_real_, 3L, 2L))
     expect_length(.twrRowResolveWeights(allNa)$variantIds, 0L)
 })
+
+# ===========================================================================
+# The molecular type a result's rows take from their data
+# ===========================================================================
+
+test_that(".rowDataTypes reads the data a row was fitted on", {
+    data(qtlFineMappingExample, envir = environment())
+    x <- qtlFineMappingExample[1L]
+    md <- S4Vectors::mcols(x, use.names = FALSE)
+    study <- as.character(md$study)
+    context <- as.character(md$context)
+    trait <- as.character(md$trait)
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = "rs1",
+        A1 = "A",
+        A2 = "G",
+        Z = 1,
+        N = 100L
+    )
+    sumStats <- function(context, trait, dataType) {
+        QtlSumStats(
+            studyName = study,
+            context = context,
+            trait = trait,
+            entry = list(gr),
+            genome = "hg38",
+            dataType = dataType
+        )
+    }
+    # Nothing recorded, or no data at all, as for a GWAS.
+    expect_true(is.na(pecotmr:::.rowDataTypes(x, NULL)))
+    expect_true(is.na(pecotmr:::.rowDataTypes(
+        x,
+        sumStats(context, trait, NULL)
+    )))
+    # A QtlSumStats answers per (study, context, trait).
+    expect_equal(
+        pecotmr:::.rowDataTypes(x, sumStats(context, trait, "splicing")),
+        "splicing"
+    )
+    expect_true(is.na(
+        pecotmr:::.rowDataTypes(x, sumStats(context, "other", "splicing"))
+    ))
+    # A joint row takes the one type its members share, and none if they differ.
+    joint <- x
+    S4Vectors::mcols(joint)$context <- "joint"
+    S4Vectors::mcols(joint)$jointContexts <- "a;b"
+    typedRows <- c(
+        sumStats("a", trait, "expression"),
+        sumStats("b", trait, "expression")
+    )
+    expect_equal(pecotmr:::.rowDataTypes(joint, typedRows), "expression")
+    mixed <- c(
+        sumStats("a", trait, "expression"),
+        sumStats("b", trait, "splicing")
+    )
+    expect_true(is.na(pecotmr:::.rowDataTypes(joint, mixed)))
+    # One no member records adds nothing to the question.
+    partial <- c(
+        sumStats("a", trait, "expression"),
+        sumStats("b", trait, NA_character_)
+    )
+    expect_equal(pecotmr:::.rowDataTypes(joint, partial), "expression")
+})
+
+test_that(".dataTypeTable reads every kind of data", {
+    data(qtlDatasetExample, envir = environment())
+    typed <- QtlDataset(
+        studyName = "gtex",
+        genotypes = pecotmr:::.qtlGenotypeSe(qtlDatasetExample),
+        phenotypes = as.list(
+            MultiAssayExperiment::experiments(qtlDatasetExample)
+        )["brain"],
+        dataType = "expression"
+    )
+    expect_equal(
+        pecotmr:::.dataTypeTable(typed),
+        tibble::tibble(key = "gtex\rbrain", dataType = "expression")
+    )
+    expect_equal(nrow(pecotmr:::.dataTypeTable(qtlDatasetExample)), 0L)
+    ms <- MultiStudyQtlDataset(
+        qtlDatasets = list(gtex = typed, study1 = qtlDatasetExample)
+    )
+    expect_equal(pecotmr:::.dataTypeTable(ms), pecotmr:::.dataTypeTable(typed))
+    expect_equal(nrow(pecotmr:::.dataTypeTable(NULL)), 0L)
+})
+
+test_that("every collection answers dataType(), NA where none is recorded", {
+    data(qtlFineMappingExample, envir = environment())
+    expect_true(all(is.na(dataType(qtlFineMappingExample))))
+    expect_length(dataType(qtlFineMappingExample), nrow(qtlFineMappingExample))
+    typed <- qtlFineMappingExample[1L]
+    S4Vectors::mcols(typed)$dataType <- "expression"
+    expect_equal(dataType(typed), "expression")
+})

@@ -121,6 +121,13 @@ Options forwarded to the engine behind a TWAS weight method,
   \code{MrmashOptions} and \code{MrmashRssOptions} refuse
   \code{nthreads}: mr.mash itself runs on one thread, because on macOS
   its worker threads can later hang R inside the OpenMP runtime.
+
+  \code{MrmashOptions} also takes \code{vEigenFloor}, which is
+  \code{\link{mrmashWrapper}}'s rather than mr.mash's: the smallest
+  eigenvalue the estimated residual covariance may have, as a fraction of
+  its spectral norm. Default \code{1e-3}. Below it, as near-duplicate
+  contexts make it, the eigenvalues are raised to the floor, the covariance
+  is not updated during the fit, and a warning says so.
 }
 \examples{
 GlmnetOptions(nfolds = 10)

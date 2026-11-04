@@ -65,7 +65,9 @@ own names, built with \code{\link{MrmashOptions}}
 (\code{update_w0}, \code{max_iter}, \code{tol}, \code{w0_threshold},
 \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
 residual covariance, the coefficient initialisation --- cannot be set
-here.}
+here. It also takes the wrapper's own \code{vEigenFloor}, the floor on
+the estimated residual covariance's eigenvalues; see
+\code{\link{twasEngineOptions}}.}
 }
 \value{
 A mr.mash fit, stored as a list with some or all of the following

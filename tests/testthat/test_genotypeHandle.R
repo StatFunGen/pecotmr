@@ -808,9 +808,9 @@ test_that("nothing is read until a block is actually touched", {
     # would re-enter the mock, not the reader.
     realRead <- pecotmr:::.handleDosage
     local_mocked_bindings(
-        .handleDosage = function(handle, snpIdx) {
+        .handleDosage = function(handle, snpIdx, sampleIdx = NULL) {
             reads <<- reads + 1L
-            realRead(handle, snpIdx)
+            realRead(handle, snpIdx, sampleIdx)
         },
         .package = "pecotmr"
     )
@@ -824,21 +824,27 @@ test_that("nothing is read until a block is actually touched", {
     expect_gt(reads, 0L)
 })
 
-test_that("only the requested variants are read", {
+test_that("only the requested variants and samples are read", {
     gh <- .gh_pgenHandle()
     seen <- integer(0)
+    seenSamples <- list()
     realRead <- pecotmr:::.handleDosage
     local_mocked_bindings(
-        .handleDosage = function(handle, snpIdx) {
+        .handleDosage = function(handle, snpIdx, sampleIdx = NULL) {
             seen <<- c(seen, length(snpIdx))
-            realRead(handle, snpIdx)
+            seenSamples <<- c(seenSamples, list(sampleIdx))
+            realRead(handle, snpIdx, sampleIdx)
         },
         .package = "pecotmr"
     )
     da <- genotypeDelayedArray(gh)
-    invisible(as.matrix(da[1:5, 1:4]))
+    block <- as.matrix(da[1:5, c(4L, 1L, 1L)])
     expect_true(all(seen <= 5L))
     expect_lt(sum(seen), nrow(snpInfo(gh)))
+    # Each distinct sample once, in file order, and the block laid out as asked.
+    expect_identical(unique(seenSamples), list(c(1L, 4L)))
+    whole <- as.matrix(da[1:5, ])
+    expect_equal(unname(block), unname(whole[, c(4L, 1L, 1L)]))
 })
 
 test_that("genotypeDelayedArray leaves the handle it is given whole", {

@@ -82,7 +82,7 @@ test_that("an LDpred2 chain stops once its effects outgrow the statistics", {
         1L
     )
     expect_true(run$diverged)
-    stat <- list(z = rep(1e-6, 5), n = rep(1, 5), variantNames = .rrwIds(5))
+    stat <- list(cor = rep(1e-6, 5), n = rep(1, 5), variantNames = .rrwIds(5))
     ld <- .rrwLdMatrix(crossprod(ldFactor) / 39, nSamples = 40L)
     skip_if_not_installed("bigsnpr")
     expect_error(
@@ -212,12 +212,12 @@ test_that("LDpred2's heritability defaults to the window's LAVA estimate", {
         w <- ldpred2GridWeights(d$stat, d$panel, p = 0.1, fitRetention = "slim")
         sort(unique(attr(w, "fit")$path$h2))
     }
-    local_mocked_bindings(.cisH2Lava = function(...) list(h2 = 0.2))
+    local_mocked_bindings(.lavaFit = function(...) list(h2 = 0.2))
     expect_equal(gridH2(), 0.2 * c(0.3, 0.7, 1, 1.4))
     # Where LAVA gives no estimate, or a negative one, the grid scales
     # bigsnpr's floor.
     for (h2 in c(NA_real_, -0.05)) {
-        local_mocked_bindings(.cisH2Lava = function(...) list(h2 = h2))
+        local_mocked_bindings(.lavaFit = function(...) list(h2 = h2))
         expect_equal(gridH2(), 1e-3 * c(0.3, 0.7, 1, 1.4))
     }
     # LAVA reads the reference's sample size.

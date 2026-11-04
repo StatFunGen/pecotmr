@@ -5,7 +5,8 @@
 \alias{ctwasWeightsExample}
 \title{Example cTWAS-formatted TWAS Weights}
 \format{
-A \code{TwasWeights} collection with one row, method \code{susie}.
+A \code{TwasWeights} collection with one row, method \code{susie},
+  its \code{\link{dataType}} \code{"expression"}.
 }
 \description{
 A \code{\link{TwasWeights}} collection formatted for the cTWAS

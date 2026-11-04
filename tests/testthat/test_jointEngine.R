@@ -308,7 +308,6 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash prior", {
     trait,
     fitRetention,
     weightStandardized,
-    weightsDataType,
     verbose,
     ...
 ) {
@@ -1434,8 +1433,40 @@ test_that("joint TWAS: an FM-derived method reuses fine-mapping's CV", {
 
 # An individual-level enumerator's units built into the groups the engine
 # fits, as .runJointCell() builds them one unit at a time.
-.je_build <- function(units) {
-    pecotmr:::.jeConcat(map(units, pecotmr:::.unitGroups))
+.je_build <- function(units, data = NULL, args = list()) {
+    pecotmr:::.jeConcat(map(units, .je_buildUnit, data = data, args = args))
+}
+
+.je_buildUnit <- function(unit, data, args) {
+    if (is(unit, "JointGroup")) {
+        return(pecotmr:::.unitGroups(unit))
+    }
+    hasWindow <- !is.null(args$region) || !is.null(args$cisWindow)
+    spec <- if (hasWindow) {
+        pecotmr:::.unitSpec(unit, data, args)
+    } else {
+        pecotmr:::.qtlFitSpec(NULL, unit$xContexts, unit$samples)
+    }
+    run <- list(
+        dataset = data,
+        filter = args$genotypeFilter,
+        residualizationParam = args$residualizationParam,
+        withAf = FALSE
+    )
+    pecotmr:::.unitGroups(unit, pecotmr:::.qtlFitBlock(spec, run, NULL))
+}
+
+# Stands in for a window's residualized genotypes.
+.je_X <- function(...) {
+    matrix(
+        0,
+        4,
+        2,
+        dimnames = list(
+            paste0("s", 1:4),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
+    )
 }
 
 test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
@@ -1446,28 +1477,19 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
     )
     local_mocked_bindings(
         studyName = function(data) "S",
-        .buildIndividualCrossContextXy = function(
-            data,
-            tid,
-            scopedContexts,
-            cisWindow,
-            verbose,
-            label,
-            region = NULL,
-            ...
-        ) {
+        .crossContextPlan = function(data, tid, ...) {
             if (tid == "G2") {
                 return(NULL)
             } # skip branch
-            X <- matrix(
-                0,
-                4,
-                2,
-                dimnames = list(
-                    paste0("s", 1:4),
-                    c("chr1:100:A:G", "chr1:200:A:G")
-                )
+            list(
+                perTraitContexts = c("c1", "c2"),
+                Yres = list(),
+                fitSamples = paste0("s", 1:4),
+                report = list()
             )
+        },
+        .fmResidGeno = .je_X,
+        .crossContextAssemble = function(X, ...) {
             Y <- matrix(
                 0,
                 4,
@@ -1559,36 +1581,26 @@ test_that(".enumCrossTraitIndividual: a group per context with 2+ traits", {
     )
     local_mocked_bindings(
         studyName = function(data) "S",
-        .buildIndividualCrossTraitXy = function(
-            data,
-            cx,
-            scopedTraits,
-            cisWindow,
-            verbose,
-            label,
-            studyName,
-            region = NULL,
-            ...
-        ) {
+        .crossTraitPlan = function(data, cx, ...) {
             if (cx == "c2") {
                 return(NULL)
             } # skip branch
-            X <- matrix(
-                0,
-                4,
-                2,
-                dimnames = list(
-                    paste0("s", 1:4),
-                    c("chr1:100:A:G", "chr1:200:A:G")
-                )
+            list(
+                se = .je_mkSe(),
+                traitsHere = c("G1", "G2"),
+                allY = NULL,
+                fitSamples = paste0("s", 1:4)
             )
+        },
+        .fmResidGeno = .je_X,
+        .crossTraitAssemble = function(X, allY, traitsHere, se) {
             Y <- matrix(
                 0,
                 4,
                 2,
                 dimnames = list(paste0("s", 1:4), c("G1", "G2"))
             )
-            list(X = X, Y = Y, traitsHere = c("G1", "G2"), se = .je_mkSe())
+            list(X = X, Y = Y, traitsHere = traitsHere, se = se)
         },
         .package = "pecotmr"
     )
@@ -1665,36 +1677,28 @@ test_that(".enumComposedIndividual: one group of every (context, trait)", {
     )
     local_mocked_bindings(
         studyName = function(data) "S",
-        .buildComposedIndividualXy = function(
-            data,
-            scope,
-            studyName,
-            cisWindow,
-            verbose,
-            label,
-            region = NULL,
-            ...
-        ) {
+        .composedPlan = function(...) {
+            list(
+                tuples = list(),
+                allContexts = c("c1", "c2"),
+                allTraits = c("gA", "gB"),
+                YresList = list(),
+                fitSamples = paste0("s", 1:4)
+            )
+        },
+        .fmResidGeno = .je_X,
+        .composedAlignXy = function(sides, tuples) {
             Y <- matrix(
                 0,
                 4,
                 3,
                 dimnames = list(paste0("s", 1:4), c("c1:gA", "c1:gB", "c2:gA"))
             )
-            X <- matrix(
-                0,
-                4,
-                2,
-                dimnames = list(
-                    paste0("s", 1:4),
-                    c("chr1:100:A:G", "chr1:200:A:G")
-                )
-            )
-            list(X = X, Y = Y, tuples = list())
+            list(X = sides$X, Y = Y, tuples = list())
         },
         .package = "pecotmr"
     )
-    g <- pecotmr:::.enumComposedIndividual(NULL, scope)
+    g <- .je_build(pecotmr:::.enumComposedIndividual(NULL, scope))
     expect_length(g, 1L)
     expect_equal(
         as.character(.jgConditions(g[[1L]])$context),
@@ -1709,7 +1713,7 @@ test_that(".enumComposedIndividual: one group of every (context, trait)", {
 test_that(".enumComposedIndividual: study not in scope / NULL xy -> empty", {
     local_mocked_bindings(
         studyName = function(data) "S",
-        .buildComposedIndividualXy = function(...) NULL,
+        .composedPlan = function(...) NULL,
         .package = "pecotmr"
     )
     expect_length(
@@ -1742,29 +1746,50 @@ test_that(".enumTopPcIndividual enumerates only the studies in scope", {
         list()
     )
     seen <- list()
+    samp <- paste0("s", 1:5)
     local_mocked_bindings(
-        .enumTopPcForContext = function(
-            cx,
+        .enumContextTraits = function(...) c("g1", "g2"),
+        .fmResidPheno = function(
             data,
-            scope,
-            args,
-            studyName,
-            phenotypeFilter
+            contexts,
+            traitId,
+            phenotypeFilter,
+            ...
         ) {
-            seen[[cx]] <<- list(study = studyName, filter = phenotypeFilter)
-            list(cx)
+            seen[[contexts]] <<- phenotypeFilter
+            matrix(
+                as.numeric(1:10),
+                5,
+                2,
+                dimnames = list(samp, traitId)
+            )
+        },
+        .fmTopPcScores = function(Y, nPCs) {
+            matrix(as.numeric(1:5), 5, 1, dimnames = list(samp, "topPC1"))
+        },
+        .fmResidGeno = function(...) {
+            abort("built a top-PC unit's X when enumerating")
         },
         .package = "pecotmr"
     )
     scope <- list(studies = "study1", contexts = list(study1 = c("a", "b")))
-    # One unit per context, built only when the engine reaches it.
+    # One unit per context, its phenotypes in hand and its X not built yet.
     units <- pecotmr:::.enumTopPcIndividual(qd, scope)
     expect_length(units, 2L)
-    expect_length(seen, 0L)
-    expect_identical(.je_build(units), list("a", "b"))
-    expect_identical(seen$a$study, "study1")
+    expect_equal(units[[1L]]$samples, samp)
+    expect_equal(units[[1L]]$xTraits, c("g1", "g2"))
     # The joint engine's own phenotype QC when the run supplied none.
-    expect_identical(seen$a$filter$naAction, "drop")
+    expect_identical(seen$a$naAction, "drop")
+    X <- matrix(0, 5, 2, dimnames = list(samp, c("chr1:1:A:G", "chr1:2:A:G")))
+    built <- pecotmr:::.unitGroups(units[[1L]], list(X = X))
+    expect_length(built, 1L)
+    expect_identical(.jgConditions(built[[1L]])$trait, "topPC1")
+    # A single trait, or no usable components, leaves no unit.
+    local_mocked_bindings(
+        .enumContextTraits = function(...) "g1",
+        .package = "pecotmr"
+    )
+    expect_length(pecotmr:::.enumTopPcIndividual(qd, scope), 0L)
 })
 
 test_that(".enumUnivariateIndividual: a 1-condition group per context, trait", {
@@ -1849,6 +1874,111 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
         .je_build(pecotmr:::.enumUnivariateIndividual(NULL, scope)),
         0L
     )
+})
+
+test_that("a univariate group's genotypes are filtered on the samples fit", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    filter <- pecotmr:::.qtlResolveFilter(GenotypeFilterParam(mafCutoff = 0.05))
+    args <- list(
+        region = .fitSamplesWindow(),
+        residualizationParam = ResidualizationParam(),
+        genotypeFilter = filter
+    )
+    scope <- list(
+        studies = "s",
+        contexts = list(s = "brain"),
+        traits = list(s = c("g1", "g2", "g3"))
+    )
+    units <- pecotmr:::.enumUnivariateIndividual(qd, scope, args)
+    g2 <- .je_build(units[2L], qd, args)[[1L]]
+    fitSamples <- rownames(pecotmr:::.jgY(g2))
+    expect_length(fitSamples, 25L)
+    .expectFitOn(
+        pecotmr:::.jgX(g2),
+        fitSamples,
+        pecotmr:::.fmResidGeno(
+            qd,
+            args$residualizationParam,
+            filter,
+            contexts = "brain",
+            region = args$region,
+            samples = fitSamples
+        )
+    )
+})
+
+test_that("joint fits share one read, allele frequencies included", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mvsusieR")
+    data <- .fitSamplesDataset()
+    run <- .countBlocks(fineMappingPipeline(
+        data,
+        methods = "mvsusie",
+        region = .fitSamplesWindow(),
+        seed = 1L
+    ))
+    expect_s4_class(run$result, "QtlFineMappingResult")
+    expect_equal(run$reads, 1L)
+    # g2 is missing the first five of the 30 samples observed, so a fit has 25.
+    # Results name a variant by its range and alleles, not the file's label.
+    top <- S4Vectors::mcols(topLoci(run$result))
+    geno <- as.matrix(genotypes(data))
+    onFit <- colMeans(geno[6:30, , drop = FALSE], na.rm = TRUE) / 2
+    ids <- pecotmr:::.ldRefMatchIds(
+        pecotmr:::.qtlGenotypeSe(data),
+        seq_len(ncol(geno))
+    )
+    expect_equal(top$af, unname(onFit[match(top$variant_id, ids)]))
+})
+
+test_that("a joint unit plans its genotypes on the samples it fits", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    args <- list(
+        region = .fitSamplesWindow(),
+        residualizationParam = ResidualizationParam(),
+        genotypeFilter = pecotmr:::.qtlResolveFilter(),
+        phenotypeFilter = pecotmr:::.jointPhenotypeFilter(list()),
+        verbose = 0
+    )
+    scope <- list(
+        studies = "s",
+        contexts = list(s = c("brain", "liver")),
+        traits = list(s = c("g1", "g2", "g3"))
+    )
+    # g2 misses the first five of the 30 samples observed. No genotypes yet.
+    local_mocked_bindings(
+        .handleDosage = function(...) abort("read genotypes when planning"),
+        .package = "pecotmr"
+    )
+    samples <- colnames(qd[["brain"]])
+    onFit <- samples[6:30]
+    crossContext <- pecotmr:::.enumCrossContextIndividual(qd, scope, args)
+    expect_equal(
+        map(crossContext, "samples"),
+        list(samples, onFit, samples)
+    )
+    expect_equal(crossContext[[2L]]$xContexts, c("brain", "liver"))
+    expect_equal(crossContext[[2L]]$xTraits, "g2")
+    crossTrait <- pecotmr:::.enumCrossTraitIndividual(qd, scope, args)
+    expect_equal(map(crossTrait, "samples"), list(onFit, onFit))
+    expect_equal(crossTrait[[1L]]$xContexts, "brain")
+    expect_equal(crossTrait[[1L]]$xTraits, c("g1", "g2", "g3"))
+    composed <- pecotmr:::.enumComposedIndividual(qd, scope, args)
+    expect_length(composed, 1L)
+    expect_equal(composed[[1L]]$samples, onFit)
+    expect_equal(composed[[1L]]$xContexts, c("brain", "liver"))
+    # Its spec names that: the window the run asked for, on those contexts.
+    spec <- pecotmr:::.unitSpec(composed[[1L]], qd, args)
+    expect_equal(spec$window, args$region)
+    expect_equal(spec$contexts, c("brain", "liver"))
+    # What cannot be fit is no unit at all, so it asks for no genotypes.
+    tooFew <- list_assign(scope, traits = list(s = "g1"))
+    expect_length(pecotmr:::.enumCrossTraitIndividual(qd, tooFew, args), 0L)
+    # A group already built has its own genotypes.
+    g <- .je_mkGroup("G1")
+    expect_null(pecotmr:::.unitSpec(g, qd, args))
 })
 
 test_that(".enumUnivariateIndividual: study not in scope -> empty", {
@@ -2572,22 +2702,21 @@ test_that(".runJointCell: a token whose fitter returns NULL is skipped", {
     expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie"))
 })
 
-test_that(".runJointCell reads allele frequencies for fine-mapping only", {
-    # They go into fine-mapping's topLoci. TWAS never reads them, and
-    # computing them reads each group's genotypes a second time.
-    cell <- .je_synthCell(list(.je_mkGroup("G1")))
-    local_mocked_bindings(
-        fitJointGroup = function(...) NULL,
-        .jointAfForGroup = function(...) abort("read the genotypes again"),
-        .package = "pecotmr"
+test_that(".jointAfForGroup reads a group's frequencies off its block", {
+    g <- .je_mkGroup("G1")
+    ids <- colnames(pecotmr:::.jgX(g))
+    block <- list(
+        X = pecotmr:::.jgX(g)[, rev(ids), drop = FALSE],
+        af = rev(seq_along(ids)) / 10
     )
-    twas <- new("TwasJointPipeline", config = list())
-    expect_null(pecotmr:::.runJointCell(cell, twas, NULL, NULL, "mrmash"))
-    fm <- new("FmJointPipeline", config = list(coverage = 0.95))
-    expect_error(
-        pecotmr:::.runJointCell(cell, fm, NULL, NULL, "mvsusie"),
-        "read the genotypes again"
-    )
+    expect_equal(pecotmr:::.jointAfForGroup(g, block), seq_along(ids) / 10)
+    # TWAS has none on its blocks, and a group already built has no block.
+    expect_null(pecotmr:::.jointAfForGroup(
+        g,
+        list(X = pecotmr:::.jgX(g), af = NULL)
+    ))
+    expect_null(pecotmr:::.jointAfForGroup(g, NULL))
+    expect_null(pecotmr:::.jointAfForGroup("not a group", block))
 })
 
 test_that(".runJointSpecs: region mode without traitId keeps locus traits", {
@@ -3032,9 +3161,9 @@ test_that(".runJointSpecs row-binds TWAS results across specs", {
     calls <- 0L
     local_mocked_bindings(
         .jpConfig = function(pipeline) list(ldReference = NULL),
-        .runOneJointSpec = function(...) {
+        .jointSpecWork = function(...) {
             calls <<- calls + 1L
-            str_c("R", calls)
+            pecotmr:::.qtlWorkValue(str_c("R", calls))
         },
         .rbindTwasWeights = function(out, res, ldReference) {
             str_c(out, "+", res)
@@ -3059,9 +3188,9 @@ test_that(".runJointSpecs row-binds fine-mapping results across specs", {
     calls <- 0L
     local_mocked_bindings(
         .jpConfig = function(pipeline) list(ldReference = NULL),
-        .runOneJointSpec = function(...) {
+        .jointSpecWork = function(...) {
             calls <<- calls + 1L
-            str_c("F", calls)
+            pecotmr:::.qtlWorkValue(str_c("F", calls))
         },
         .rbindFineMappingResult = function(out, res, ldReference) {
             str_c(out, "&", res)
@@ -3085,8 +3214,8 @@ test_that(".runJointSpecs row-binds fine-mapping results across specs", {
 test_that(".runJointSpecs skips a spec that produced nothing", {
     local_mocked_bindings(
         .jpConfig = function(pipeline) list(ldReference = NULL),
-        .runOneJointSpec = function(spec, ...) {
-            if (spec == "s1") NULL else "KEPT"
+        .jointSpecWork = function(spec, ...) {
+            pecotmr:::.qtlWorkValue(if (spec != "s1") "KEPT")
         },
         .rbindTwasWeights = function(out, res, ldReference) {
             str_c(out, "+", res)
@@ -3267,11 +3396,12 @@ test_that(".enumUnivariateIndividual reads a region instead of a cis window", {
         contexts = list(S1 = "cA"),
         traits = list(S1 = "t1")
     )
-    .je_build(pecotmr:::.enumUnivariateIndividual(
+    args <- list(region = GenomicRanges::GRanges("chr1:1-1000"))
+    .je_build(
+        pecotmr:::.enumUnivariateIndividual(NULL, scope, args),
         NULL,
-        scope,
-        list(region = GenomicRanges::GRanges("chr1:1-1000"))
-    ))
+        args
+    )
     # An explicit region replaces the trait-anchored cis window entirely --
     # neither traitId nor cisWindow is passed down.
     expect_equal(seen$region, GenomicRanges::GRanges("chr1:1-1000"))
@@ -3484,26 +3614,6 @@ test_that(".twasEnsembleCollect gives empty parts when no token contributes", {
     expect_identical(out$preds, list())
     expect_identical(out$wts, list())
     expect_identical(out$rsq, c())
-})
-
-test_that(".jointAfForGroup is NULL without a QtlDataset or individual group", {
-    data(qtlDatasetExample)
-    X <- matrix(
-        c(0, 1, 2, 1, 2, 0),
-        nrow = 3,
-        dimnames = list(c("s1", "s2", "s3"), c("chr1:100:A:T", "chr1:200:C:G"))
-    )
-    g <- new(
-        "IndividualJointGroup",
-        conditions = tibble(study = "s", context = "c", trait = "t"),
-        X = X,
-        Y = matrix(1:3, ncol = 1, dimnames = list(c("s1", "s2", "s3"), "c:t"))
-    )
-    # Not a QtlDataset -> no af rather than an error.
-    expect_null(.jointAfForGroup(NULL, g))
-    # Anything but an individual group has no design matrix to read
-    # frequencies from.
-    expect_null(.jointAfForGroup(qtlDatasetExample, "not a group"))
 })
 
 test_that(".jointMrmashRssWeights passes the caller's mr.mash options", {
@@ -3815,4 +3925,36 @@ test_that("a joint fit's rows record their position in it", {
         list(.je_record("c1", fm, NA_integer_, joint = NA_character_))
     )
     expect_false(is_in("jointIndex", colnames(S4Vectors::mcols(plain))))
+})
+
+test_that(".enumComposedIndividualGroup needs two samples both sides share", {
+    X <- matrix(1, 1L, 1L, dimnames = list("s1", "v1"))
+    planned <- list(
+        YresList = list(c1 = matrix(1, 1L, 1L, dimnames = list("s1", "t1"))),
+        tuples = NULL
+    )
+    expect_null(pecotmr:::.enumComposedIndividualGroup("study", planned, X))
+})
+
+test_that(".deferTopPc plans nothing when the traits give no scores", {
+    local_mocked_bindings(
+        .enumContextTraits = function(cx, data, scope, studyName) c("a", "b"),
+        .fmResidPheno = function(...) NULL,
+        .package = "pecotmr"
+    )
+    expect_null(
+        pecotmr:::.deferTopPc("brain", NULL, NULL, list(), "study", NULL)
+    )
+})
+
+test_that(".jointRetainX asks only a method that can hold X", {
+    retain <- pecotmr:::.jointRetainX
+    expect_true(retain(list(retainX = TRUE), "lasso"))
+    expect_false(retain(list(retainX = FALSE), "lasso"))
+    # The sumstats joint record carries no such setting.
+    expect_false(retain(list(), "lasso"))
+    # A fine-mapping token's rows keep no fit.
+    expect_false(retain(list(retainX = TRUE), "susie"))
+    # Beside a method that holds X, one that has none is not asked.
+    expect_false(retain(list(retainX = TRUE), "bayesR"))
 })

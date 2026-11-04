@@ -178,8 +178,8 @@ setClass(
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
-#' @param dataType Optional assay / modality label ("bulk_rnaseq",
-#'   "methylation"), recorded as a per-row provenance column. Length 1 or
+#' @param dataType Optional molecular type ("expression", "methylation"),
+#'   recorded as a per-row provenance column. Length 1 or
 #'   one per row; \code{NULL} (default) omits the column.
 #' @param dataSource Optional per-row label for the kind of input the fit saw,
 #'   \code{"individual"} or \code{"sumstat"}. Where it is absent, the result

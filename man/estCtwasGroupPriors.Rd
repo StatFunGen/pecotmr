@@ -40,7 +40,11 @@ Step 2 of the three-step \code{\link{ctwasPipeline}}: assembles
   \code{region_data} from the inputs and runs \code{ctwas::est_param} (prefit
   EM + accurate EM) to estimate the group prior probabilities and prior
   variances. Returns the input state plus \code{region_data},
-  \code{boundary_genes}, \code{z_gene}, and \code{param}.
+  \code{boundary_genes}, \code{z_gene}, and \code{param}. A context with
+  fewer genes than \code{min_group_size} gets no prior: cTWAS leaves it out
+  of the fit, and a warning names it. To keep it, lower
+  \code{min_group_size} in both \code{\link{CtwasRegionDataOptions}} and
+  \code{\link{CtwasEstParamOptions}}.
 }
 \examples{
 data(ctwasInputsExample)

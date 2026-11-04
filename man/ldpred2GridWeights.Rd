@@ -23,8 +23,8 @@ ldpred2GridWeights(
 \item{stat}{A list of summary statistics: \code{n} (per-variant sample
 sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 \code{b} with \code{seb}, or \code{b} alone, taken as already
-standardized. The sampler reads z / sqrt(n) for each variant's own
-sample size.}
+standardized. The sampler reads the correlation each z stands for,
+z / sqrt(z^2 + n - 2), for each variant's own sample size.}
 
 \item{ldReference}{The LD reference the statistics' variants are matched
 to by \code{stat$variantNames}: a genotype panel (see

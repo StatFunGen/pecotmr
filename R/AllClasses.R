@@ -1361,14 +1361,10 @@ setMethod(
 }
 
 # TRUE when an entry shares at least one variant with `keepVariants`, matched
-# the same (chrom, pos, allele) way adjustPips() itself matches them.
+# the same way adjustPips() itself matches them.
 # @noRd
 .fmrEntryOverlaps <- function(entry, keepVariants) {
-    matched <- matchVariants(
-        .fmrPartsVariantIds(entry),
-        as.character(keepVariants)
-    )
-    length(matched$idxA) > 0L
+    any(.keepIdsNamed(.fmrPartsVariantIds(entry), as.character(keepVariants)))
 }
 
 # ---- Trimming a collection to what its role reads ---------------------------
@@ -1835,7 +1831,8 @@ setMethod("fsusieAffectedRegions", "FineMappingResultBase", function(x) {
     if (length(grs) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    .withGenome(exec(c, !!!grs), .oneBuild(x))
+    # Each row knows only its own chromosome, which c() warns of.
+    .withGenome(suppressWarnings(exec(c, !!!grs)), .oneBuild(x))
 })
 
 #' @rdname topLoci

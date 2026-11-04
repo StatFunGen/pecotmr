@@ -1104,20 +1104,22 @@ computeCsTable <- function(
     max(R[sets[[l]], sets[[k]]])
 }
 
-# GRanges spanning the fit's variants (parsed from chrom:pos in the ids).
+# GRanges spanning the fit's variants, read from their ids.
 .csVariantRegion <- function(variantIds) {
-    parts <- str_split(variantIds, ":", simplify = TRUE)
-    chrom <- unique(parts[, 1L])
+    parsed <- parseVariantId(variantIds)
+    chrom <- unique(parsed$chrom)
     if (length(chrom) != 1L) {
         abort(glue(
             "computeCsCorrelation(): the fit variants span multiple ",
             "chromosomes ({str_flatten(chrom, ', ')})."
         ))
     }
-    pos <- as.integer(parts[, 2L])
     GenomicRanges::GRanges(
         seqnames = chrom,
-        ranges = IRanges::IRanges(start = min(pos), end = max(pos))
+        ranges = IRanges::IRanges(
+            start = min(parsed$pos),
+            end = max(parsed$pos)
+        )
     )
 }
 

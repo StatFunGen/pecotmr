@@ -21,7 +21,9 @@ loadQtlSumStatsFromManifest(
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study}, \code{context}, \code{trait} (required), \code{sumStatsPath}
 (required), \code{columnMapping} (optional), \code{nSample} (optional
-tuple-level total N), \code{varY} (optional), the single-valued
+tuple-level total N), \code{varY} (optional), \code{dataType} (optional,
+each tuple's molecular type, as for \code{\link{QtlSumStats}}; a blank
+cell records none), the single-valued
 \code{genome}, and \code{ldReferencePath}, which may differ between rows
 (each distinct reference is read once, for the chromosomes its rows
 cover, and stored once). When a row supplies \code{nSample},

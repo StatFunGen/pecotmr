@@ -18,8 +18,8 @@ lassosumRssWeights(
 \item{stat}{A list of summary statistics: \code{n} (per-variant sample
 sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 \code{b} with \code{seb}, or \code{b} alone, taken as already
-standardized. The engine receives the standardized effects z / sqrt(n),
-with n the median of \code{n}.}
+standardized. The engine receives the correlation each z stands for,
+z / sqrt(z^2 + n - 2), with n the median of \code{n}.}
 
 \item{ldReference}{The LD reference the statistics' variants are matched
 to by \code{stat$variantNames}: a genotype panel (see
@@ -94,8 +94,8 @@ held-out summary statistics.
 training part, 75\% of the samples, and its held-out remainder, drawing
 each split from the statistics and the LD as PUMAS does (Zhao et al.
 2021). The path is refit on each training part, every candidate is scored
-on the held-out part by
-\deqn{\frac{c_h^T \beta}{\sqrt{\beta^T \hat\Sigma \beta}}, \quad
+on the held-out part by the variance of it that it explains,
+\deqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta, \quad
   \hat\Sigma = (1 - w) R + w I,}
 and the full-data fit at the (\code{s}, lambda) with the best mean score
 is returned. \eqn{w} is the Schafer-Strimmer intensity for a correlation
@@ -103,13 +103,16 @@ matrix from the reference's sample size. A reference smaller than the
 number of variants misses directions of the true LD, and the
 least-penalized fits put weight exactly there, so scoring against
 \eqn{R} itself would keep choosing them. The splits use R's random number
-generator, so \code{set.seed()} makes the weights reproducible. The score
-does not change with \eqn{\beta}'s scale, so candidates that differ only
-in scale tie on it, as the ridge's do at \eqn{s = 1}, where each fit is
-\eqn{c / (1 + \lambda)}. Of tied candidates, the one explaining the most
-held-out variance, \eqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta} averaged
-over the splits, is returned, and the first in the grid where that ties
-too.
+generator, so \code{set.seed()} makes the weights reproducible.
+
+PUMAS scores by the correlation with the held-out part,
+\eqn{c_h^T \beta / \sqrt{\beta^T \hat\Sigma \beta}}, which here only breaks
+ties. It does not change with \eqn{\beta}'s scale, so it lets a fit win at
+\eqn{s} near 1, where the LD is nearly ignored and every tag of a signal
+keeps its marginal weight, with a predicted variance thousands of times the
+trait's. A candidate whose fit is empty in a split or on the full data is
+returned only if every candidate's is, and the first in the grid wins a tie
+on both scores.
 
 \code{selection = "ldQuadratic"} is lassosum's pseudovalidation (Mak et
 al. 2017): the in-sample score

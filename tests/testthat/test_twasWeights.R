@@ -1229,7 +1229,7 @@ test_that("TwasWeights row accessors delegate to the entry", {
         method = "enet"
     ))
     expect_equal(
-        weightsDataType(
+        dataType(
             tw,
             studyName = "s1",
             context = "c1",
@@ -2961,4 +2961,62 @@ test_that("a subset keeps only the fits its rows name", {
     second <- tw[2L]
     expect_length(.fitDict(second), 1L)
     expect_identical(methodFits(second, "s1", "c1", "g2", "lasso"), other)
+})
+
+test_that("learnTwasWeights keeps a fit's X only at full, and only if asked", {
+    skip_if_not_installed("glmnet")
+    set.seed(1)
+    X <- matrix(
+        rnorm(300),
+        nrow = 30,
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 1:10))
+    )
+    Y <- matrix(X[, 1] + rnorm(30), ncol = 1, dimnames = list(NULL, "y"))
+    fitAt <- function(...) {
+        tw <- suppressMessages(learnTwasWeights(
+            X,
+            Y,
+            weightMethods = "lasso",
+            studyName = "s",
+            context = "c",
+            trait = "y",
+            ...,
+            verbose = 0,
+            seed = 1L
+        ))
+        methodFits(
+            tw,
+            studyName = "s",
+            context = "c",
+            trait = "y",
+            method = "lasso"
+        )
+    }
+    expect_identical(fitAt(fitRetention = "full")$call$x, quote(x))
+    expect_true(is.matrix(fitAt(fitRetention = "full", retainX = TRUE)$call$x))
+    expect_error(fitAt(retainX = TRUE), "requires `fitRetention", fixed = TRUE)
+    # Nothing to keep: refused before any fit, the engine not even installed.
+    expect_error(
+        learnTwasWeights(
+            X,
+            Y,
+            weightMethods = list(
+                bayes_r_weights = list(),
+                mrmash_weights = list()
+            ),
+            fitRetention = "full",
+            retainX = TRUE
+        ),
+        "hold none"
+    )
+    expect_silent(pecotmr:::.twasAssertKeepsX(list(lassoWeights = list())))
+    # One method with a copy is enough; the other loses nothing.
+    expect_silent(pecotmr:::.twasAssertKeepsX(
+        list(lasso_weights = list(), bayes_r_weights = list())
+    ))
+    expect_error(
+        fitAt(fitRetention = "slim", retainX = TRUE),
+        "requires `fitRetention",
+        fixed = TRUE
+    )
 })

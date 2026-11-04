@@ -68,7 +68,7 @@ columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
 present; \code{\link{qtlEnrichmentPipeline}} emits all four, the context
 and trait set for a QTL outcome side). Output of
 \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
-scored by enloc rather than coloc: the priors come from that table's
+scored with enloc's priors: they come from that table's
 \code{colocP1} / \code{colocP2} / \code{colocP12} columns, and the
 report gains \code{RCP} and \code{LCP}. Pairs without a matching
 enrichment row fall back to the baseline priors with a warning. Default
@@ -117,7 +117,7 @@ A \code{\linkS4class{ColocResult}}: one element per scored group
   \code{hit1}, \code{hit2}, \code{PP.H0.abf} \ldots \code{PP.H4.abf}) and
   the reconciliation diagnostics \code{qtlRetainedMass} /
   \code{gwasRetainedMass}. When \code{enrichment} is supplied the pair is
-  scored by enloc instead, and four further columns appear:
+  scored with enloc's priors, and four further columns appear:
   \code{enrichment} and \code{p12Used} report the per-pair factor and the
   shared-signal prior enloc derived, while \code{RCP} and \code{LCP} are
   enloc's regional and locus colocalisation probabilities. Those two are

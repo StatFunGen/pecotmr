@@ -494,22 +494,54 @@ setMethod("ctwasGroupPriors", "CtwasResult", function(x) {
 
 # ctwas's EM output (its `param` list) as one row per group. ctwas names
 # group_prior, group_prior_var and group_size by group, so the groups are
-# group_prior's and the other two are matched to them by name: NA where the
-# run recorded none.
+# group_prior's and everything else is matched to them by name: NA where the
+# run recorded none. .ctwasScoredParam() added each group's study, context and
+# type, and cTWAS's summary of the priors, whose enrichment reads the gene
+# groups against the SNP group, which so has none of its own.
 # @noRd
 #' @importFrom purrr pluck
 .ctwasPriorTable <- function(param) {
     prior <- pluck(param, "group_prior")
     groups <- names(prior) %||% rep(NA_character_, length(prior))
+    info <- pluck(param, "group_info")
+    summarized <- pluck(param, "group_summary")
     tibble(
-        group = groups,
+        group = .ctwasGroupLabel(groups),
+        group_study = .ctwasGroupField(info, "study", groups),
+        group_context = .ctwasGroupField(info, "context", groups),
+        group_type = .ctwasGroupField(info, "type", groups),
         group_size = .ctwasPriorByGroup(pluck(param, "group_size"), groups),
         group_prior = as.numeric(unname(prior)),
         group_prior_var = .ctwasPriorByGroup(
             pluck(param, "group_prior_var"),
             groups
+        ),
+        log_enrichment = .ctwasPriorByGroup(
+            pluck(summarized, "log_enrichment"),
+            groups
+        ),
+        log_enrichment_se = .ctwasPriorByGroup(
+            pluck(summarized, "log_enrichment_se"),
+            groups
+        ),
+        enrichment_p = .ctwasPriorByGroup(
+            pluck(summarized, "enrichment_pval"),
+            groups
+        ),
+        group_pve = .ctwasPriorByGroup(pluck(summarized, "group_pve"), groups),
+        prop_heritability = .ctwasPriorByGroup(
+            pluck(summarized, "prop_heritability"),
+            groups
         )
     )
+}
+
+# @noRd
+.ctwasGroupField <- function(info, field, groups) {
+    if (is.null(info)) {
+        return(rep(NA_character_, length(groups)))
+    }
+    info[[field]][match(groups, info$group)]
 }
 
 # @noRd

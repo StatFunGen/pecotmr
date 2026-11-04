@@ -551,6 +551,22 @@ test_that("a BPPARAM other than SerialParam() is a cross-validation request", {
     )
 })
 
+test_that(".bpMap keeps the cause of an error a worker's own map() wrapped", {
+    wrapped <- function(i) purrr::map(1:2, stop, "the real cause")
+    cnd <- tryCatch(
+        pecotmr:::.bpMap(1:2, wrapped, BPPARAM = BiocParallel::SerialParam()),
+        error = identity
+    )
+    expect_match(conditionMessage(cnd), "the real cause", fixed = TRUE)
+    expect_match(conditionMessage(cnd), "In index: 1", fixed = TRUE)
+    # A worker's error with no cause of its own stays as it was.
+    plain <- function(i) stop("plain")
+    expect_error(
+        pecotmr:::.bpMap(1:2, plain, BPPARAM = BiocParallel::SerialParam()),
+        "plain"
+    )
+})
+
 test_that("a BiocParallel report without a worker error is raised as is", {
     cnd <- structure(
         class = c("bplist_error", "bperror", "error", "condition"),

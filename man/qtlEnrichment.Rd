@@ -12,7 +12,7 @@ qtlEnrichment(
   piQtl = NULL,
   lambda = 1,
   impN = 25,
-  doubleShrinkage = FALSE,
+  doubleShrinkage = TRUE,
   besselCorrection = TRUE,
   BPPARAM = SerialParam(),
   verbose = TRUE,
@@ -46,8 +46,9 @@ strong shrinkage. The default value is set to 1.0.}
 
 \item{impN}{Rounds of multiple imputation to draw QTL from, default is 25.}
 
-\item{doubleShrinkage}{Logical. Apply the double-shrinkage correction to the
-enrichment estimate. Default \code{FALSE}.}
+\item{doubleShrinkage}{Logical. Shrink each imputation round's estimate and
+then the combined one, as fastenloc does; \code{FALSE} shrinks only the
+combined one. Default \code{TRUE}.}
 
 \item{besselCorrection}{Logical. Apply Bessel's correction when estimating
 the sampling variance. Default \code{TRUE}.}

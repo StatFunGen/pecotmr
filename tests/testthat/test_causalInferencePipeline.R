@@ -26,14 +26,14 @@ context("causalInferencePipeline")
 }
 
 .cip_mockExtractor <- function(seed = 7, n_samples = 30L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 

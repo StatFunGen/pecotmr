@@ -151,7 +151,8 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
             p_value = NA_real_,
             n_snps = 100L,
             n_components = NA_integer_,
-            scale = NA_real_
+            scale = NA_real_,
+            reference_overlap = NA_real_
         ),
         list(
             enrichment = list(enrich),

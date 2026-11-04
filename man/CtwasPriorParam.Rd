@@ -10,7 +10,7 @@ CtwasPriorParam(
   thin = 0.1,
   niterPrefit = 3L,
   niter = 30L,
-  varStructure = c("shared_type", "shared_context", "shared_nonSNP", "shared_all",
+  varStructure = c("shared_nonSNP", "shared_all", "shared_type", "shared_context",
     "independent"),
   fallbackToPrefit = FALSE
 )
@@ -26,9 +26,15 @@ which variants enter a gene's weight matrix.}
 
 \item{niter}{Integer. Iterations for the accurate EM. Default \code{30}.}
 
-\item{varStructure}{How the prior variance is shared across groups; one of
-\code{"shared_type"} (default), \code{"shared_context"},
-\code{"shared_nonSNP"}, \code{"shared_all"} or \code{"independent"}.}
+\item{varStructure}{How the prior variance is shared across groups, a group
+being a study, context and molecular type (see
+\code{\link{ctwasPipeline}}). \code{"shared_nonSNP"} (default) pools it
+across the gene groups, so a group with few causal genes borrows from the
+others, and keeps the variants' apart. \code{"shared_all"} pools the
+variants in as well, \code{"shared_type"} pools the groups of each
+molecular type, \code{"shared_context"} those of each study and context,
+and \code{"independent"} gives each group its own. With one type per study
+and context, \code{"shared_context"} is \code{"independent"}.}
 
 \item{fallbackToPrefit}{Logical. When the accurate EM returns NaN on
 underpowered data, fall back to the prefit estimates rather than failing.

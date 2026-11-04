@@ -36,7 +36,7 @@ test_that("TwasWeightsRow: constructor and accessors round-trip", {
     expect_equal(methodFits(e), list(model = "lasso"))
     expect_equal(cvResult(e), list(rsq = 0.4))
     expect_true(isTRUE(weightStandardized(e)))
-    expect_equal(weightsDataType(e), "expression")
+    expect_equal(dataType(e), "expression")
 })
 
 

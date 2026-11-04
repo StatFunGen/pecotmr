@@ -300,7 +300,7 @@ test_that("penalizedRss reproduces glmnet's elastic-net path on exact LD", {
             lambda = lam,
             standardize = FALSE,
             intercept = FALSE,
-            thresh = 1e-14
+            control = list(thresh = 1e-14)
         )
         expect_equal(
             rss$beta,
@@ -581,9 +581,9 @@ test_that("ridgeRssWeights fits the alpha = 0 mixing over the ridge path", {
 })
 
 test_that("a ridge's fits at s = 1, alike but for scale, are told apart", {
-    # At s = 1 each fit is c / (1 + lambda), so all tie on the selection's
-    # correlation. Held-out selection lets the variance each explains set
-    # the scale, so its pick does not depend on the grid's order; lassosum's
+    # At s = 1 each fit is c / (1 + lambda), so all tie on a correlation.
+    # Held-out selection lets the variance each explains set the scale, so
+    # its pick does not depend on the grid's order; lassosum's
     # pseudovalidation takes the grid's first.
     f <- .prs_weightsInput()
     lambda <- c(0.1, 0.3, 1, 3, 10)

@@ -99,9 +99,10 @@ enrich_res
 ```
 
 The result is a data frame with one row per such combination, giving the
-enrichment estimate (`enrichment`), its standard error (`enrichmentSe`), and
-the log-odds (`enrichmentLogOdds`). These enrichment priors can then be
-supplied to a colocalization analysis. This synthetic single-region example is
+log-odds enrichment (`enrichmentLogOdds`), its standard error on that scale
+(`enrichmentSe`), and the same estimate as a multiplicative factor minus one
+(`enrichment`). These enrichment priors can then be supplied to a
+colocalization analysis. This synthetic single-region example is
 for illustration only; stable enrichment estimates require many fine-mapped
 regions.
 

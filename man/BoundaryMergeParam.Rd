@@ -7,14 +7,14 @@
 \title{Boundary-Region Merge Settings}
 \usage{
 BoundaryMergeParam(
-  enabled = FALSE,
+  enabled = TRUE,
   pipThreshold = 0.5,
   filterCs = FALSE,
   maxSnp = Inf
 )
 }
 \arguments{
-\item{enabled}{Logical. Run the merge step. Default \code{FALSE}; the
+\item{enabled}{Logical. Run the merge step. Default \code{TRUE}; the
 other three fields are read only when this is \code{TRUE}.}
 
 \item{pipThreshold}{Numeric. PIP threshold for selecting which boundary
@@ -29,10 +29,13 @@ to be selected. Default \code{FALSE}.}
 A \code{BoundaryMergeParam} object, a \code{\link{MethodParam}}.
 }
 \description{
-Whether a high-PIP gene whose cis window straddles an
-  LD-block boundary has its adjacent regions merged and re-fine-mapped
-  after each run (\code{\link{mergeCtwasBoundaryRegions}}).
+Whether a high-PIP gene whose weights cross an LD-block
+  boundary has its regions merged and re-fine-mapped after each run
+  (\code{\link{mergeCtwasBoundaryRegions}}). A first pass fine-maps such a
+  gene with the LD of one block only, whatever its z-score drew from the
+  other, and can call a gene whose real signal is a variant in that other
+  block; merging is what removes those calls.
 }
 \examples{
-BoundaryMergeParam(enabled = TRUE, pipThreshold = 0.8)
+BoundaryMergeParam(pipThreshold = 0.8)
 }

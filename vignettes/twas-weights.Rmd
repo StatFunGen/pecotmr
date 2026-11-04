@@ -316,7 +316,10 @@ candidate's coefficients.
 These methods, and LDpred2-grid, pick the returned candidate on held-out
 summary statistics:
 the statistics are split into training and held-out parts, the path is refit
-on each training part, and every candidate is scored on the held-out part.
+on each training part, and every candidate is scored by how much of the
+held-out part's variance it explains. Unlike a correlation, that score depends
+on the weights' scale, so a fit that nearly ignores the LD and predicts far
+more variance than the trait has does not win.
 The scoring shrinks the LD toward the identity by an amount set by the
 reference's sample size, because a reference smaller than the number of
 variants misses directions of the true LD, and the least-penalized fits put
@@ -330,7 +333,7 @@ ids <- sprintf("chr1:%d:A:G", 100L * seq_len(p))
 R <- cor(X)
 dimnames(R) <- list(ids, ids)
 stat <- list(
-    z = as.vector(cor(X, y)) * sqrt(n),
+    cor = as.vector(cor(X, y)),
     n = rep(n, p),
     variantNames = ids
 )
@@ -404,7 +407,6 @@ twasWeightsPipeline(
         phenotypeCovariates = NULL,
         genotypeCovariates = NULL
     ),
-    weightsDataType = NULL,
     phenotypeFilterParam = PhenotypeFilterParam(naAction = "drop")
 )
 ```
@@ -450,7 +452,7 @@ key <- list(
 w <- do.call(weights, c(list(tw), key))
 length(w)
 do.call(weightStandardized, c(list(tw), key)) # TRUE from the pipeline
-do.call(weightsDataType, c(list(tw), key)) # tag carried through for reporting
+do.call(dataType, c(list(tw), key)) # what the data recorded, if anything
 ```
 
 `weightStandardized()` is `TRUE` for anything the pipeline fitted: genotypes
@@ -471,7 +473,10 @@ the LD correlations and z-scores behind a TWAS Z already use.
 matrix for multivariate ones. The remaining payloads are keyed the same way:
 `variantIds()` for the aligned variant set, `cvResult()` for the
 cross-validation record (`rsq`, `r`, predicted values), and `methodFits()` for
-the full fit object when the pipeline kept fits (`fitRetention != "none"`).
+the fit object when the pipeline kept fits (`fitRetention != "none"`). A fit
+never holds a copy of the genotypes, which can be its largest part, unless
+asked: `fitRetention = "full"` keeps everything else the engine returned, and
+`retainX = TRUE` with it keeps that copy too.
 `resolveWeights()` returns the weights and their variant IDs together, which
 is the form the downstream TWAS and MR steps consume.
 

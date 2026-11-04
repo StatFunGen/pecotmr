@@ -1037,12 +1037,13 @@ test_that("SDPR on a factor of the LD draws as it does on the matrix", {
     )
 })
 
-test_that("prsCsWeights and sdprWeights hand the engine z / sqrt(n)", {
+test_that("prsCsWeights and sdprWeights hand the engine correlations", {
     # Both upstream tools fit the standardized marginal effects, so a z-only
     # stat (the QtlSumStats shape) and b with its standard error both reach
     # the engine on that scale.
     f <- .rrwStatLd()
-    want <- as.numeric(f$stat$z) / sqrt(f$n)
+    z <- as.numeric(f$stat$z)
+    want <- z / sqrt(z^2 + f$n - 2)
     local_mocked_bindings(
         .prsCsRun = function(bhat, ld, n, ...) list(betaEst = bhat),
         .sdprRun = function(bhat, ld, n, ...) list(betaEst = bhat)
@@ -1059,6 +1060,32 @@ test_that("prsCsWeights and sdprWeights hand the engine z / sqrt(n)", {
         expect_equal(prsCsWeights(stat, f$ldReference), want)
         expect_equal(sdprWeights(stat, f$ldReference), want)
     }
+})
+
+test_that("a QTL past r^2 = 0.5 reaches the engines as a correlation", {
+    # z / sqrt(n) passes 1 there, and the standard error the matrix engines
+    # read, sqrt((1 - bhat^2) / (n - 2)), used to come out NaN.
+    data(eqtlRegionExample, envir = environment())
+    X <- eqtlRegionExample$X[, 1:30]
+    X <- X[, apply(X, 2L, sd) > 0]
+    set.seed(17)
+    Xs <- scale(X)
+    y <- sqrt(0.7) * Xs[, 1L] + rnorm(nrow(Xs), sd = sqrt(0.3))
+    r <- as.vector(cor(Xs, y))
+    n <- nrow(Xs)
+    stat <- list(
+        z = r * sqrt((n - 2) / (1 - r^2)),
+        n = rep(n, length(r)),
+        variantNames = colnames(X)
+    )
+    expect_gt(max(abs(stat$z)) / sqrt(n), 1)
+    ld <- LdMatrix(cor(X), nSamples = n)
+    dense <- pecotmr:::.alphabetRssDense(stat, ld, 0.95)
+    expect_equal(dense$bhat, r)
+    expect_true(all(is.finite(dense$seb)))
+    skip_if_not_installed("qgg")
+    w <- bayesCRssWeights(stat, ld, "qgg", nIter = 200, nBurnin = 50)
+    expect_true(all(is.finite(w)))
 })
 
 # Statistics over the first p variants of the test genotype panel, with the
@@ -1208,7 +1235,7 @@ test_that(".rssMarginalCor reads cor / z / b and validates length", {
     )
     expect_equal(
         pecotmr:::.rssMarginalCor(list(z = f$stat$z), n = f$n, p = f$p),
-        as.numeric(f$stat$z) / sqrt(f$n)
+        as.numeric(f$stat$z) / sqrt(as.numeric(f$stat$z)^2 + f$n - 2)
     )
     expect_equal(
         pecotmr:::.rssMarginalCor(list(b = f$stat$b), n = f$n, p = f$p),
@@ -1221,7 +1248,19 @@ test_that(".rssMarginalCor reads cor / z / b and validates length", {
             n = f$n,
             p = f$p
         ),
-        as.numeric(f$stat$z) / sqrt(f$n)
+        as.numeric(f$stat$z) / sqrt(as.numeric(f$stat$z)^2 + f$n - 2)
+    )
+    # The correlation behind a t statistic, exactly, however strong: reading
+    # z / sqrt(n) instead would put it past 1.
+    r <- c(-0.9, 0.1, 0.8)
+    n <- 50
+    expect_equal(
+        pecotmr:::.rssMarginalCor(
+            list(z = r * sqrt((n - 2) / (1 - r^2))),
+            n = n,
+            p = 3L
+        ),
+        r
     )
     expect_error(
         pecotmr:::.rssMarginalCor(list(), n = f$n, p = f$p),
@@ -1251,15 +1290,81 @@ test_that(".lassosumFirstMax returns the first index of the maximum", {
     expect_equal(pecotmr:::.lassosumFirstMax(c(-Inf, -Inf)), 1L)
 })
 
-test_that("held-out selection breaks a tie in correlation by variance", {
+test_that("held-out selection picks on variance, then on correlation", {
     pick <- pecotmr:::.rssHeldOutPick
-    # Candidates 2 to 4 tie on the correlation, to rounding; of them, 3
-    # explains the most held-out variance.
-    expect_equal(pick(c(0.1, 0.5, 0.5 + 1e-15, 0.5), c(9, 0.2, 0.3, 0.1)), 3L)
-    # A real difference in correlation wins whatever the variance.
-    expect_equal(pick(c(0.1, 0.5, 0.6, 0.5), c(9, 0.2, 0.1, 0.3)), 3L)
+    # A real difference in the variance wins whatever the correlation.
+    expect_equal(pick(c(0.9, 0.5, 0.6), c(-3, 0.2, 0.4)), 3L)
+    expect_equal(pick(c(0.9, 0.5, 0.6), c(0.5, 0.2, 0.4)), 1L)
+    # Candidates 2 to 4 tie on the variance, to rounding; of them, 3 has the
+    # best correlation.
+    expect_equal(pick(c(0.9, 0.5, 0.7, 0.6), c(-1, 0.3, 0.3 + 1e-15, 0.3)), 3L)
     # Tied on both, the first in the grid.
-    expect_equal(pick(c(0.4, 0.5, 0.5), c(1, 0.2, 0.2)), 2L)
+    expect_equal(pick(c(0.4, 0.5, 0.5), c(0.1, 0.2, 0.2)), 2L)
+})
+
+test_that("held-out selection passes over an empty fit while another exists", {
+    pick <- pecotmr:::.rssHeldOutPick
+    # An empty fit explains nothing, which beats every fit that overshoots.
+    expect_equal(pick(c(-Inf, 0.2, 0.3), c(0, -0.1, -0.2)), 2L)
+    # With nothing else left, the first in the grid.
+    expect_equal(pick(c(-Inf, -Inf), c(0, 0)), 1L)
+    # Empty on the full data but the best in every split: the fit returned
+    # would be empty, so the next one is. Candidate 1's splits fit the
+    # statistics themselves; candidate 2's are the same, heavily shrunk.
+    corInput <- c(0.3, 0.1, -0.1, 0.2)
+    refit <- list(
+        fn = function(trainCor, share) cbind(trainCor, 0.01 * trainCor),
+        args = list()
+    )
+    sel <- function(candidates) {
+        set.seed(1)
+        pecotmr:::.rssSelectHeldOut(
+            candidates,
+            corInput,
+            list(R = diag(4), nSamples = 1000L),
+            100,
+            refit
+        )$index
+    }
+    expect_equal(sel(cbind(corInput, 0.01 * corInput)), 1L)
+    expect_equal(sel(cbind(numeric(4), 0.01 * corInput)), 2L)
+})
+
+test_that("held-out selection refuses a fit far larger than the trait", {
+    # Real genotypes, a window of strong LD and one causal variant with many
+    # tags. The fit at s = 1 scores best on correlation, and a pick on
+    # correlation takes it, but its predicted variance is about 10,000.
+    data(eqtlRegionExample, envir = environment())
+    G <- eqtlRegionExample$X
+    af <- colMeans(G) / 2
+    G <- G[, pmin(af, 1 - af) > 0.05][, 1301:1500]
+    Gs <- scale(G)
+    h2 <- 0.6
+    set.seed(1)
+    g <- as.numeric(Gs %*% replace(numeric(200), 1, 1))
+    y <- g * sqrt(h2 / var(g)) + rnorm(nrow(G), sd = sqrt(1 - h2))
+    study <- sample(nrow(G), 300L)
+    R <- cor(G[study, ])
+    stat <- list(
+        cor = as.numeric(cor(G[study, ], y[study])),
+        n = rep(300, 200),
+        variantNames = colnames(G)
+    )
+    w <- lassosumRssWeights(
+        stat,
+        LdMatrix(R, nSamples = 300L),
+        s = c(0.2, 1),
+        fitRetention = "full"
+    )
+    predicted <- function(b) sum(b * (R %*% b))
+    fit <- attr(w, "fit")
+    atOne <- fit$beta[, which(fit$path$s == 1)[20L]]
+    expect_gt(predicted(atOne), 100 * h2)
+    expect_lt(predicted(as.numeric(w)), 2 * h2)
+    expect_equal(
+        as.numeric(attr(w, "lassosum_selection")[["s"]]),
+        0.2
+    )
 })
 
 test_that(".lassosumSelectMinFbeta picks the minimum-fbeta candidate", {
@@ -1618,6 +1723,70 @@ test_that("mrmashWrapper refuses to let methodArgs override derived values", {
     )
 })
 
+test_that("near-duplicate contexts get a floor on V's eigenvalues", {
+    skip_if_not_installed("mr.mashr")
+    set.seed(1)
+    X <- matrix(rnorm(60 * 4), 60, 4)
+    y <- rnorm(60)
+    nearDuplicate <- cbind(y, y + 1e-5 * rnorm(60))
+    initV <- function(Y, floorValue = 1e-3) {
+        pecotmr:::.mrmashInitV(X, Y, NULL, TRUE, "full", floorValue)
+    }
+    eigenRatio <- function(V) {
+        values <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
+        min(values) / max(values)
+    }
+    expect_warning(floored <- initV(nearDuplicate), "close to singular")
+    expect_false(floored$updateV)
+    expect_equal(eigenRatio(floored$V), 1e-3, tolerance = 1e-3)
+    # The floor is relative: rescaling Y rescales V, not the decision.
+    expect_warning(scaled <- initV(1e3 * nearDuplicate), "close to singular")
+    expect_equal(eigenRatio(scaled$V), 1e-3, tolerance = 1e-3)
+    # Distinct contexts keep V as it was estimated, and its update.
+    distinct <- cbind(y, rnorm(60))
+    expect_no_warning(kept <- initV(distinct))
+    expect_true(kept$updateV)
+    expect_equal(
+        kept$V,
+        pecotmr:::.mrmashComputeVInit(X, distinct, FALSE)
+    )
+    # A user's floor decides whether they count as near-duplicate.
+    expect_warning(initV(distinct, 0.99), "close to singular")
+})
+
+test_that("vEigenFloor reaches the wrapper and stops short of mr.mash", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not_installed("glmnet")
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    fitWith <- function(floorValue) {
+        mrmashWeights(
+            X = m$X,
+            Y = m$Y,
+            methodArgs = MrmashOptions(
+                canonicalPriorMatrices = TRUE,
+                vEigenFloor = floorValue
+            )
+        )
+    }
+    expect_warning(
+        suppressMessages(fitWith(0.99)),
+        "vEigenFloor = 0.99"
+    )
+    expect_no_warning(
+        suppressMessages(fitWith(0)),
+        message = "close to singular"
+    )
+})
+
+test_that("vEigenFloor must be one fraction, on the individual path only", {
+    skip_if_not_installed("mr.mashr")
+    for (bad in list(-0.1, 1, NA_real_, c(1e-6, 1e-5), "small")) {
+        expect_error(MrmashOptions(vEigenFloor = bad), "must be one number")
+    }
+    expect_equal(as.list(MrmashOptions(vEigenFloor = 0))$vEigenFloor, 0)
+    expect_error(MrmashRssOptions(vEigenFloor = 1e-6))
+})
+
 test_that("a flat prior name is routed into the prior group", {
     # The pipeline spells per-token kwargs flat, so mrmashWeights routes
     # prior-construction names into mrmashWrapper's `prior` record.
@@ -1626,4 +1795,49 @@ test_that("a flat prior name is routed into the prior group", {
     )
     expect_equal(names(split$prior), "canonicalPriorMatrices")
     expect_equal(names(split$rest), "max_iter")
+})
+
+test_that(".assertRetainX takes TRUE only for a full fit", {
+    check <- pecotmr:::.assertRetainX
+    expect_silent(check(TRUE, "full"))
+    expect_silent(check(FALSE, "full"))
+    for (level in c("none", "slim")) {
+        expect_silent(check(FALSE, level))
+        expect_error(
+            check(TRUE, level),
+            sprintf("requires `fitRetention = \"full\"`, not \"%s\"", level),
+            fixed = TRUE
+        )
+    }
+    expect_error(check(NA, "full"), "retainX")
+    expect_error(check("yes", "full"), "retainX")
+})
+
+test_that("each weight function holding X rejects retainX unless full", {
+    X <- matrix(0, 4L, 2L)
+    y <- numeric(4L)
+    rejects <- function(fn, ...) {
+        expect_error(
+            fn(X, y, ..., retainX = TRUE),
+            "requires `fitRetention",
+            fixed = TRUE
+        )
+        expect_error(
+            fn(X, y, ..., fitRetention = "slim", retainX = TRUE),
+            "requires `fitRetention",
+            fixed = TRUE
+        )
+    }
+    rejects(glmnetWeights, alpha = 1)
+    rejects(lassoWeights)
+    rejects(enetWeights)
+    rejects(ridgeWeights)
+    rejects(pecotmr:::ncvregWeights, penalty = "MCP")
+    rejects(scadWeights)
+    rejects(mcpWeights)
+    rejects(mrashWeights)
+    rejects(dprWeights)
+    rejects(dprVbWeights)
+    rejects(dprGibbsWeights)
+    rejects(dprAdaptiveGibbsWeights)
 })

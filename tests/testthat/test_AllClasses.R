@@ -1144,6 +1144,16 @@ test_that("adjustPips drops non-overlapping entries and says so", {
     expect_equal(as.character(mcols(out)$study), "s1")
 })
 
+test_that("adjustPips finds an entry listed in both allele orders", {
+    # A one-to-one match refuses both orders, which reads as disjoint sets.
+    bothOrders <- c(.rc_vids(1:5), sprintf("chr1:%d:G:A", 100L * 1:5))
+    expect_message(
+        out <- adjustPips(.ac_twoEntry(), bothOrders),
+        "dropping 1 of 2 entries"
+    )
+    expect_equal(as.character(mcols(out)$study), "s1")
+})
+
 test_that("adjustPips keeps the names its rows had", {
     # As every rebuild does: the result used to come back unnamed. Names a
     # caller set stay too.
@@ -1365,16 +1375,16 @@ test_that("a flip complements AF but leaves MAF and N alone", {
     # An allele swap sends af -> 1 - af. maf is min(af, 1 - af) and the
     # sample size is a count, so both are swap-invariant -- complementing
     # them would corrupt them.
-    filledAf <- af(fillFromReference(x, swapped, "AF"))
+    filled <- function(column) {
+        expect_warning(
+            fillFromReference(x, swapped, column),
+            "16 of 200 selected variant\\(s\\) are not in `reference`"
+        )
+    }
+    filledAf <- af(filled("AF"))
     expect_equal(unique(filledAf[!ambiguous]), 0.7)
-    expect_equal(
-        unique(maf(fillFromReference(x, swapped, "MAF"))[!ambiguous]),
-        0.3
-    )
-    expect_equal(
-        unique(sampleSize(fillFromReference(x, swapped, "N"))[!ambiguous]),
-        0.3
-    )
+    expect_equal(unique(maf(filled("MAF"))[!ambiguous]), 0.3)
+    expect_equal(unique(sampleSize(filled("N"))[!ambiguous]), 0.3)
     # A swapped A/T or C/G variant is a swap or a strand flip and nothing says
     # which, so it is not filled.
     expect_true(any(ambiguous))
@@ -1763,6 +1773,20 @@ test_that("fsusieCredibleBand, fsusieAffectedRegions aggregate a collection", {
             names(S4Vectors::mcols(gr))
     ))
     expect_setequal(unique(S4Vectors::mcols(gr)$context), c("brain", "blood"))
+})
+
+test_that("fsusieAffectedRegions combines rows on several chromosomes", {
+    data(mvsusieFineMappingExample)
+    two <- mvsusieFineMappingExample
+    expect_identical(nrow(two), 2L)
+    local_mocked_bindings(
+        .fsusieEntryAffectedRegions = function(i, x) {
+            GenomicRanges::GRanges(str_c("chr", i, ":1-9"))
+        },
+        .package = "pecotmr"
+    )
+    expect_no_warning(gr <- suppressMessages(fsusieAffectedRegions(two)))
+    expect_equal(as.character(gr), c("chr1:1-9", "chr2:1-9"))
 })
 
 test_that("fsusieAffectedRegions of non-fSuSiE entries is an empty GRanges", {

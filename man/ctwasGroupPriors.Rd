@@ -23,10 +23,18 @@ On a \code{CtwasResultEntry}, the stored parameter object
   (typically ctwas's \code{param} list), or \code{NULL}. On a
   \code{CtwasResult}, a tibble with one row per run and group, led by the
   run identity (\code{gwasStudy}, \code{study}, \code{context},
-  \code{method}, and the joint columns when present), then \code{group},
-  \code{group_size}, \code{group_prior} and \code{group_prior_var}. A
-  value the run did not record is \code{NA}, a run with no priors has no
-  rows, and each context of a joint run lists the priors they share.
+  \code{method}, and the joint columns when present). Then \code{group},
+  named \code{{study}_{context}_{type}}, with \code{group_study},
+  \code{group_context} and \code{group_type} since those underscores cannot
+  be split back, \code{group_size}, \code{group_prior} and
+  \code{group_prior_var}. Then cTWAS's summary of them
+  (\code{ctwas::summarize_param()}): \code{log_enrichment},
+  \code{log_enrichment_se} and \code{enrichment_p}, each gene group against
+  the SNP group by a one-sided Fisher test, and \code{group_pve} and
+  \code{prop_heritability}, the heritability the group explains and its share
+  of what all groups explain, at the GWAS's median sample size. A value the
+  run did not record is \code{NA}, a run with no priors has no rows, and each
+  context of a joint run lists the priors they share.
 }
 \description{
 Return the group priors a cTWAS run's EM step estimated

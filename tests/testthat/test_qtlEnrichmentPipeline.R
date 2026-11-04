@@ -983,7 +983,7 @@ test_that("qtlEnrichment: one-hot fixture reproduces the pinned shrunk a1", {
         "sd (no shrinkage)",
         "sd (w/ shrinkage)"
     )
-    single <- .qep_oneHotRun(lambda = 1)
+    single <- .qep_oneHotRun(lambda = 1, doubleShrinkage = FALSE)
     double <- .qep_oneHotRun(
         lambda = 1,
         doubleShrinkage = TRUE,
@@ -1618,8 +1618,8 @@ test_that("qtlEnrichment(verbose = TRUE) reports the estimated priors", {
 
 test_that(".enrFlattenEnrichment: reads the estimator's own field names", {
     out <- pecotmr:::.enrFlattenEnrichment(.qep_mockEnrichment(2.0)())
-    # enrichment is expm1 of the log-odds, so colocPipeline's
-    # p12 * (1 + enrichment) is the enloc prior p12 * exp(a1).
+    # enrichment is expm1 of the log-odds, reported for reading only; coloc
+    # scores with the colocP1, colocP2 and colocP12 columns.
     expect_equal(out$enrichment, 2.0)
     expect_equal(out$enrichmentLogOdds, log(3))
     expect_equal(out$enrichmentSe, 0.1)
@@ -1898,7 +1898,7 @@ test_that("QtlEnrichmentParam carries the estimator's tunable settings", {
     )
     expect_equal(a$lambda, 1.0)
     expect_equal(a$impN, 25)
-    expect_false(a$doubleShrinkage)
+    expect_true(a$doubleShrinkage)
     expect_true(a$besselCorrection)
 })
 

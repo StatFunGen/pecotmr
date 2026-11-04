@@ -222,18 +222,26 @@ stripBuildSuffix <- function(x) {
 #' Test whether allele pairs are single-nucleotide (SNP, not indel).
 #'
 #' Returns TRUE for each pair where both alleles are exactly one of A, T, C, G.
+#' This is the package's one definition: every \code{keepIndel} and
+#' \code{removeIndels} treats anything else as an indel, including \code{I}/
+#' \code{D} codes, \code{*} and \code{N}.
 #' @param a1 Character vector of first alleles.
 #' @param a2 Character vector of second alleles.
 #' @return Logical vector, TRUE if the variant is a SNP.
 #' @noRd
 isSnpAlleles <- function(a1, a2) {
-    isSnp <- str_length(a1) == 1L &
-        str_length(a2) == 1L &
-        str_detect(a1, "^[ATCG]$") &
-        str_detect(a2, "^[ATCG]$")
-    # str_length(NA)/str_detect(NA) yield NA where base nchar/grepl gave FALSE;
-    # preserve the base "NA allele is not a SNP" behavior.
+    isSnp <- str_detect(a1, "^[ATCG]$") & str_detect(a2, "^[ATCG]$")
+    # str_detect(NA) yields NA where base grepl gave FALSE; preserve the base
+    # "NA allele is not a SNP" behavior.
     replace_na(isSnp, FALSE)
+}
+
+# Whether each allele is written in DNA bases, in either case: not a tag where
+# an allele belongs, and not missing.
+# @noRd
+.isDnaAllele <- function(alleles) {
+    isDna <- str_detect(alleles, regex("^[ACGT]+$", ignore_case = TRUE))
+    replace_na(isDna, FALSE)
 }
 
 #' Re-render variant ids whose allele slot holds a tag instead of an allele.
@@ -269,10 +277,9 @@ isSnpAlleles <- function(a1, a2) {
         return(ids)
     }
     p <- parseVariantId(ids)
-    dna <- regex("^[ACGT]+$", ignore_case = TRUE)
     tagged <- !is.na(p$A1) &
         !is.na(p$A2) &
-        !replace_na(str_detect(p$A1, dna) & str_detect(p$A2, dna), FALSE)
+        !(.isDnaAllele(p$A1) & .isDnaAllele(p$A2))
     repair <- tagged & !is.na(A2) & !is.na(A1) & A2 != "" & A1 != ""
     if (!any(repair)) {
         return(ids)
@@ -1290,9 +1297,10 @@ harmonizeAlleles <- function(
 
 # The allele relationship of each pair of a target variant (alleles `a1t`,
 # `a2t`) with a reference variant (`a1r`, `a2r`): exact; a ref/alt swap, or a
-# swap of the complements (`signFlip`); a strand flip; an indel; an I/D-coded
-# target meeting a reference indel (`idMatch`); and whether the target's
-# alleles leave the strand undecidable (A/T, C/G). Case-insensitive.
+# swap of the complements (`signFlip`); a strand flip; an indel (a target that
+# isSnpAlleles() does not call a SNP); an I/D-coded target meeting a reference
+# indel (`idMatch`); and whether the target's alleles leave the strand
+# undecidable (A/T, C/G). Case-insensitive.
 # @noRd
 .variantPairFlags <- function(a1t, a2t, a1r, a2r) {
     t1 <- .upperAlleles(a1t)
@@ -1314,10 +1322,7 @@ harmonizeAlleles <- function(
         strandFlip = ((t1 == flip1 & t2 == flip2) |
             (t1 == flip2 & t2 == flip1)) &
             differ,
-        indel = t2 == "I" |
-            t2 == "D" |
-            str_length(t2) > 1L |
-            str_length(t1) > 1L,
+        indel = !is.na(t1) & !is.na(t2) & !isSnpAlleles(t1, t2),
         idMatch = (t2 == "D" | t2 == "I") &
             (str_length(r1) > 1L | str_length(r2) > 1L)
     )
@@ -1363,16 +1368,16 @@ harmonizeAlleles <- function(
 }
 
 # The matched (a, b) pairs of variant tables `a` and `b`: paired within
-# `maxDistance`, decided by their alleles, each target settled on one
-# reference variant, and each reference variant (its alleles as given)
-# claimed by the first target only. list(idxA, idxB, sign), by idxA.
+# `maxDistance` and decided by their alleles, then made one-to-one
+# (.variantPairsSettled()) unless `allPairs`. list(idxA, idxB, sign), by idxA.
 # @noRd
 .matchVariantTables <- function(
     a,
     b,
     maxDistance = 0L,
     removeStrandAmbiguous = TRUE,
-    removeIndels = FALSE
+    removeIndels = FALSE,
+    allPairs = FALSE
 ) {
     pairs <- .variantPairs(a, b, maxDistance)
     q <- pairs$query
@@ -1382,15 +1387,25 @@ harmonizeAlleles <- function(
     }
     flags <- .variantPairFlags(a$A1[q], a$A2[q], b$A1[sbj], b$A2[sbj])
     keep <- .variantPairKeep(flags, removeStrandAmbiguous, removeIndels)
-    kept <- which(is_in(.variantPairResolve(q, keep, flags$signFlip), TRUE))
-    claimed <- kept[vec_unique_loc(
-        .variantKeyFrame(.variantTableRows(b, sbj[kept]))
-    )]
+    chosen <- if (allPairs) {
+        which(is_in(keep, TRUE))
+    } else {
+        .variantPairsSettled(q, sbj, keep, flags$signFlip, b)
+    }
     list(
-        idxA = q[claimed],
-        idxB = sbj[claimed],
-        sign = if_else(flags$signFlip[claimed], -1, 1)
+        idxA = q[chosen],
+        idxB = sbj[chosen],
+        sign = if_else(flags$signFlip[chosen], -1, 1)
     )
+}
+
+# The pairs `keep` marks that leave each target settled on one reference
+# variant and each reference variant (its alleles as given) claimed by the
+# first target only.
+# @noRd
+.variantPairsSettled <- function(q, sbj, keep, signFlip, b) {
+    kept <- which(is_in(.variantPairResolve(q, keep, signFlip), TRUE))
+    kept[vec_unique_loc(.variantKeyFrame(.variantTableRows(b, sbj[kept])))]
 }
 
 #' Allele-aware variant matcher (match by chrom/pos/ref/alt, not id string)
@@ -1425,10 +1440,14 @@ harmonizeAlleles <- function(
 #' @param maxDistance Largest distance in bp between the positions of two
 #'   variants that may match; their alleles must still agree. Default 0: the
 #'   same position.
+#' @param allPairs With \code{allowFlip}, return every pair whose alleles
+#'   match rather than a one-to-one join: for asking only whether a variant
+#'   is in a set, where a variant listed in both allele orders, or held
+#'   twice, is no conflict. Default FALSE.
 #' @return A list of three equal-length vectors describing the matched pairs:
 #'   \code{idxA} / \code{idxB} (indices into \code{idsA} / \code{idsB}) and
 #'   \code{sign} (+1 exact, -1 allele-swap). At most one pair per \code{idsA}
-#'   entry; unmatched entries are omitted.
+#'   entry unless \code{allPairs}; unmatched entries are omitted.
 #' @noRd
 matchVariants <- function(
     idsA,
@@ -1436,7 +1455,8 @@ matchVariants <- function(
     allowFlip = TRUE,
     removeStrandAmbiguous = TRUE,
     removeIndels = FALSE,
-    maxDistance = 0L
+    maxDistance = 0L,
+    allPairs = FALSE
 ) {
     ranged <- methods::is(idsA, "GRanges") || methods::is(idsB, "GRanges")
     if (!allowFlip && !ranged && maxDistance == 0L) {
@@ -1466,7 +1486,8 @@ matchVariants <- function(
         tabB,
         maxDistance,
         removeStrandAmbiguous,
-        removeIndels
+        removeIndels,
+        allPairs
     )
 }
 

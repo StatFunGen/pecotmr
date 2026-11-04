@@ -57,7 +57,17 @@ test_that("mrashWeights' slim fit drops the copy of the data", {
     expect_equal(slim$variantIds, colnames(X))
     set.seed(1)
     full <- attr(mrashWeights(X, y, fitRetention = "full"), "fit")
+    # All of the engine's object but its copy of X, so it names its variants.
     expect_true(is.list(full$data))
-    expect_null(full$variantIds)
+    expect_null(full$data$X)
+    expect_false(is.null(full$update.order))
+    expect_equal(full$variantIds, colnames(X))
     expect_equal(pecotmr:::.twasFitVariantIds(full), colnames(X))
+    withX <- attr(
+        mrashWeights(X, y, fitRetention = "full", retainX = TRUE),
+        "fit"
+    )
+    expect_identical(colnames(withX$data$X), colnames(X))
+    expect_null(withX$variantIds)
+    expect_equal(pecotmr:::.twasFitVariantIds(withX), colnames(X))
 })

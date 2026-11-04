@@ -20,9 +20,6 @@ each under a license compatible with GPL-3.
    version.
    - src/qtl_enrichment.cpp, src/qtl_enrichment.h: adapted from fastenloc's
      imputation and EM steps.
-   - R/enloc.R: the colocalization priors and scoring (enrichment
-     parameters, the GWAS log10 Bayes factors and the per-pair cases),
-     ported from fastenloc's controller.cc.
 
 3. PRS-CS
    https://github.com/getian107/PRScs

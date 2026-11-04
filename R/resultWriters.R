@@ -2805,7 +2805,7 @@ setMethod(
 # are ";"-packed rather than silently truncated.
 # @noRd
 .twbCellDataType <- function(entry) {
-    v <- weightsDataType(entry)
+    v <- dataType(entry)
     if (length(v) == 0L) NA_character_ else .pubPack(v)
 }
 

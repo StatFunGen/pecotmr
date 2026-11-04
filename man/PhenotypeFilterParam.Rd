@@ -16,7 +16,8 @@ PhenotypeFilterParam(
 \arguments{
 \item{naAction}{How missing phenotype values are handled: \code{"drop"}
 the samples with any missing value among the selected traits,
-\code{"impute"} each trait's mean, or \code{"keep"} them as they are.}
+\code{"impute"} each trait's mean, or \code{"keep"} them, each trait
+fit on the samples it has (colocboost only).}
 
 \item{outlierAction}{\code{"keep"} or \code{"drop"} samples flagged as
 multivariate outliers by a robust (MCD) Mahalanobis distance, computed
@@ -46,7 +47,8 @@ How a run of \code{\link{fineMappingPipeline}},
   its default when the run resolves the bundle. \code{naAction} resolves
   to the pipeline's own policy: fine-mapping and TWAS fits cannot take a
   missing phenotype, so they drop the affected samples (and refuse
-  \code{"keep"}), while colocboost receives the phenotypes as they are.
+  \code{"keep"}), while colocboost keeps them, fitting each trait on the
+  samples that have a value for it.
   Outliers are kept unless \code{outlierAction = "drop"}.
 }
 

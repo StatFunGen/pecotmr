@@ -36,7 +36,7 @@ not record them. Each FILLS IN the corresponding column when the file
 lacks it; a value that disagrees with what the file does record is an
 error rather than a silent override.}
 
-\item{dataType}{Optional assay / modality label, same fill-in rule.}
+\item{dataType}{Optional molecular type, same fill-in rule.}
 
 \item{weightStandardized}{Whether the published posterior effect
 (\code{WGT}) is on the standardized genotype scale. Required when the

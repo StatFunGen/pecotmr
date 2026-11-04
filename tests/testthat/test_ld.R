@@ -455,11 +455,14 @@ test_that("enforceDesignFullRank fallback to correlation pruning works", {
     )
     colnames(X) <- sprintf("chr1:%d:A:G", 100L * seq_len(ncol(X)))
     C <- matrix(rnorm(n), n, 1)
-    result <- enforceDesignFullRank(
-        X,
-        C,
-        strategy = "correlation",
-        maxIterations = 2L
+    expect_warning(
+        result <- enforceDesignFullRank(
+            X,
+            C,
+            strategy = "correlation",
+            maxIterations = 2L
+        ),
+        "maxIterations reached"
     )
     full_design <- cbind(1, result, C)
     expect_equal(qr(full_design)$rank, ncol(full_design))
@@ -944,7 +947,10 @@ test_that("computeLd population method handles column with all NA", {
     X[, 2] <- NA
     colnames(X) <- paste0("rs", 1:5)
 
-    R <- computeLd(X, method = "population")
+    expect_warning(
+        R <- computeLd(X, method = "population"),
+        "heterogeneous missingness"
+    )
     expect_equal(dim(R), c(5L, 5L))
     expect_equal(unname(diag(R)), rep(1, 5))
     expect_equal(R[2, 4], 0)
@@ -992,7 +998,10 @@ test_that("computeLd with heavy missingness still produces valid matrix", {
     expect_true(all(!is.na(R)))
     expect_equal(unname(diag(R)), rep(1, 5))
 
-    R_pop <- computeLd(X, method = "population")
+    expect_warning(
+        R_pop <- computeLd(X, method = "population"),
+        "heterogeneous missingness"
+    )
     expect_true(all(!is.na(R_pop)))
     expect_equal(unname(diag(R_pop)), rep(1, 5))
 })
@@ -1309,7 +1318,7 @@ test_that(".ldFromRef rejects an ldReference that is not a genotype panel", {
 
 # @noRd
 .lds_mockExtractor <- function(seed = 7, nSamples = 30L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         nSnp <- nrow(snpInfo(handle))
         panel <- matrix(
@@ -1317,7 +1326,7 @@ test_that(".ldFromRef rejects an ldReference that is not a genotype panel", {
             nrow = nSamples,
             ncol = nSnp
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -3091,8 +3100,11 @@ test_that("the same-reference check compares LdMatrix objects by their LD", {
     pr <- .ldrefPair()
     a <- pr$ld[1:200]
     b <- pr$ld[150:349]
-    expect_no_error(
-        pecotmr:::.requireMatchingLdRefs(a, b, "pipe")
+    # Those two share only part of their variants, reported once per session.
+    rlang::reset_warning_verbosity("pecotmrLdReferenceOverlap-pipe")
+    expect_warning(
+        pecotmr:::.requireMatchingLdRefs(a, b, "pipe"),
+        "share 51 variant"
     )
     other <- LdMatrix(
         diag(200),

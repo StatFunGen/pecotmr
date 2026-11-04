@@ -23,7 +23,7 @@ One row's worth of TWAS weights. Build one with
 
 \item{\code{weightStandardized}}{Whether the weights are on the standardized scale.}
 
-\item{\code{weightsDataType}}{Optional data-type label.}
+\item{\code{weightsDataType}}{Optional molecular type.}
 }}
 
 \section{Coercion}{

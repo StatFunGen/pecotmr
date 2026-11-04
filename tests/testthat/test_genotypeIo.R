@@ -624,6 +624,56 @@ test_that("loadGenotypeRegion filters by keep_variants_path for plink2", {
     expect_equal(ncol(result), 3L)
 })
 
+test_that("loadGenotypeRegion keeps the dosages a full load reads", {
+    skip_if_not_installed("pgenlibr")
+    td <- test_path("test_data")
+    full <- loadGenotypeRegion(
+        file.path(td, "test_variants"),
+        returnVariantInfo = TRUE
+    )
+    keep_file <- tempfile(fileext = ".tsv")
+    on.exit(unlink(keep_file), add = TRUE)
+    keep_df <- full$variant_info[c(2, 5, 9), c("chrom", "pos", "A2", "A1")]
+    vroom::vroom_write(keep_df, keep_file, delim = "\t")
+    kept <- loadGenotypeRegion(
+        file.path(td, "test_variants"),
+        keepVariantsPath = keep_file,
+        returnVariantInfo = TRUE
+    )
+    expect_equal(kept$X, full$X[, c(2, 5, 9), drop = FALSE])
+    expect_equal(
+        kept$variant_info,
+        full$variant_info[c(2, 5, 9), , drop = FALSE]
+    )
+})
+
+test_that("loadGenotypeRegion reads only the variants its filters keep", {
+    skip_if_not_installed("pgenlibr")
+    genotype <- file.path(test_path("test_data"), "test_variants")
+    info <- loadGenotypeRegion(genotype, returnVariantInfo = TRUE)$variant_info
+    keepFile <- withr::local_tempfile(fileext = ".tsv")
+    vroom::vroom_write(
+        info[c(2, 5, 9), c("chrom", "pos", "A2", "A1")],
+        keepFile,
+        delim = "\t"
+    )
+    expectVariantsRead <- function(nVariants, ...) {
+        testthat::local_mocked_bindings(
+            .extractBlockPlink2 = function(handle, snpIdx, sampleIdx = NULL) {
+                expect_length(snpIdx, nVariants)
+                matrix(0, nrow = nSamples(handle), ncol = length(snpIdx))
+            },
+            .package = "pecotmr"
+        )
+        expect_equal(ncol(loadGenotypeRegion(genotype, ...)), nVariants)
+    }
+    expectVariantsRead(3L, keepVariantsPath = keepFile)
+    expectVariantsRead(
+        sum(nchar(info$A1) == 1L & nchar(info$A2) == 1L),
+        keepIndel = FALSE
+    )
+})
+
 test_that("loadGenotypeRegion attaches afreq info for plink2", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
@@ -791,6 +841,139 @@ test_that("loadGenotypeRegion drops every format's indels", {
         expect_true(all(nchar(result$variant_info$A1) == 1), info = path)
         expect_true(all(nchar(result$variant_info$A2) == 1), info = path)
     }
+})
+
+# Keep lists are matched against a panel holding a palindromic SNP (rs200), two
+# variants at one site (300), an indel (rs400), a variant held twice (500), a
+# site held in both allele orders (600) and a tag for an allele in an id (700).
+keepListPanel <- tibble::tibble(
+    chrom = "chr1",
+    id = c(
+        "chr1:100:A:G",
+        "rs200",
+        "chr1:300:C:T",
+        "chr1:300:C:A",
+        "rs400",
+        "chr1:500:A:G",
+        "chr1:500:A:G",
+        "chr1:600:A:G",
+        "chr1:600:G:A",
+        "chr1:700:INS:T"
+    ),
+    pos = c(100L, 200L, 300L, 300L, 400L, 500L, 500L, 600L, 600L, 700L),
+    A2 = c("A", "A", "C", "C", "A", "A", "A", "A", "G", "A"),
+    A1 = c("G", "T", "T", "A", "AT", "G", "G", "G", "A", "AT")
+)
+keepListHeader <- "chrom\tpos\tA2\tA1"
+
+# Which rows of keepListPanel a keep-list file of these lines names.
+keptRows <- function(...) {
+    path <- withr::local_tempfile(lines = c(...))
+    which(pecotmr:::matchVariantsToKeep(keepListPanel, path))
+}
+
+test_that("a keep list matches alleles in either order and on either strand", {
+    expect_equal(keptRows(keepListHeader, "chr1\t100\tG\tA"), 1L)
+    expect_equal(keptRows(keepListHeader, "chr1\t100\tT\tC"), 1L)
+    expect_equal(keptRows(keepListHeader, "chr1\t100\tC\tT"), 1L)
+    expect_equal(keptRows(keepListHeader, "chr1\t400\tAT\tA"), 5L)
+    # A palindrome spelled the other way is the same variant: no sign is taken.
+    expect_equal(keptRows(keepListHeader, "chr1\t200\tT\tA"), 2L)
+    # At a site with two variants, only the one named; none for other alleles.
+    expect_equal(keptRows(keepListHeader, "chr1\t300\tA\tC"), 4L)
+    expect_length(keptRows(keepListHeader, "chr1\t100\tA\tC"), 0L)
+    # Variant ids are read the same way, whatever their format.
+    expect_equal(keptRows("chr1:100:G:A", "1_300_A_C"), c(1L, 4L))
+})
+
+test_that("a variant named or held twice stays on a keep list", {
+    # Listed in both allele orders, which would disagree about its sign.
+    expect_equal(
+        keptRows(keepListHeader, "chr1\t100\tA\tG", "chr1\t100\tG\tA"),
+        1L
+    )
+    # Held twice by the panel: complex.bgen does this, with different dosages.
+    expect_equal(keptRows(keepListHeader, "chr1\t500\tA\tG"), 6:7)
+    expect_equal(keptRows(keepListHeader, "chr1\t600\tA\tG"), 8:9)
+})
+
+test_that("a keep list without alleles keeps every variant at a position", {
+    expect_equal(keptRows("chrom\tpos", "chr1\t300"), 3:4)
+})
+
+test_that("a keep list's header line and unplaced rows match nothing", {
+    # Neither costs the rest of the list its alleles or its matches.
+    expect_equal(keptRows("variant_id", "chr1:300:C:A"), 4L)
+    expect_equal(
+        keptRows(keepListHeader, "chr1\t300\tC\tA", "chr1\tNA\tC\tT"),
+        4L
+    )
+})
+
+test_that("a keep list's rsIDs are matched against the panel's labels", {
+    expect_equal(keptRows("rs200", "rs400"), c(2L, 5L))
+    expect_equal(keptRows("chr1:100:A:G", "rs400"), c(1L, 5L))
+    expect_length(keptRows("rs999"), 0L)
+    # A variant labelled by rsID is still found by position and alleles.
+    expect_equal(keptRows("chr1:200:A:T"), 2L)
+    expect_equal(keptRows(keepListHeader, "chr1\t400\tA\tAT"), 5L)
+    # An id with a tag for an allele is found by that label, as the variant is
+    # by its real alleles.
+    expect_equal(keptRows("chr1:700:INS:T"), 10L)
+    expect_equal(keptRows("chr1:700:A:AT"), 10L)
+})
+
+test_that("a keep list's tagged id meets the label however it is spelled", {
+    # Every label of this panel can be read, so matchVariants() parses them.
+    panel <- tibble::tibble(
+        chrom = "chr1",
+        id = c("chr1:100:A:G", "chr1:700:INS:T"),
+        pos = c(100L, 700L),
+        A2 = "A",
+        A1 = c("G", "AT")
+    )
+    for (id in c("chr1:700:INS:T", "1_700_INS_T", "chr1:700:T:INS")) {
+        expect_equal(which(pecotmr:::.keepByIds(panel, id)), 2L, info = id)
+    }
+})
+
+test_that("loadGenotypeRegion reads a swapped keep list in every format", {
+    skip_if_not_installed("PlinkMatrix")
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("VariantAnnotation")
+    skip_if_not_installed("SNPRelate")
+    skip_if_not_installed("gdsfmt")
+    expectSwappedListRead <- function(path, which = NULL) {
+        full <- loadGenotypeRegion(path, which, returnVariantInfo = TRUE)
+        rows <- c(2L, 5L)
+        vi <- full$variant_info[rows, ]
+        keepFile <- withr::local_tempfile(fileext = ".tsv")
+        vroom::vroom_write(
+            tibble::tibble(
+                chrom = vi$chrom,
+                pos = vi$pos,
+                A2 = vi$A1,
+                A1 = vi$A2
+            ),
+            keepFile,
+            delim = "\t"
+        )
+        expect_equal(
+            loadGenotypeRegion(path, which, keepVariantsPath = keepFile),
+            full$X[, rows, drop = FALSE],
+            info = path
+        )
+    }
+    window <- GenomicRanges::GRanges("chr21:17513228-17518122")
+    for (path in c(
+        plink_prefix,
+        paste0(plink_prefix, ".bed"),
+        vcf_path,
+        gds_path
+    )) {
+        expectSwappedListRead(path, window)
+    }
+    expectSwappedListRead(.bgw_fixture(n = 6L, nVar = 8L)$path)
 })
 
 test_that("loadGenotypeRegion errors on an empty region", {
@@ -1326,7 +1509,7 @@ test_that("loadGenotypeRegion keeps imputed dosages without a sidecar", {
     # sidecar are an imputed file's, not a sketch's: returned untouched, and
     # without a warning about restoring a scale they never had.
     testthat::local_mocked_bindings(
-        .extractBlockPlink2 = function(handle, snpIdx) {
+        .extractBlockPlink2 = function(handle, snpIdx, sampleIdx = NULL) {
             matrix(0.5, nrow = nSamples(handle), ncol = length(snpIdx))
         },
         .package = "pecotmr"
@@ -2088,13 +2271,16 @@ test_that("a BGEN file serves every genotype route", {
 
 test_that("the BGEN dosage kernel checks what it is given", {
     expect_error(
-        pecotmr:::bgenDosageCpp(as.raw(1:5), 1L, 2L),
+        pecotmr:::bgenDosageCpp(as.raw(1:5), 1L, 2L, integer(0)),
         "truncated"
     )
     # A record claiming more genotypes than its data could hold is refused
     # before they are enumerated: ploidy 63 with 65535 alleles, one byte.
     corrupt <- as.raw(c(1, 0, 0, 0, 255, 255, 63, 63, 63, 0, 8, 0))
-    expect_error(pecotmr:::bgenDosageCpp(corrupt, 1L, 1L), "truncated")
+    expect_error(
+        pecotmr:::bgenDosageCpp(corrupt, 1L, 1L, integer(0)),
+        "truncated"
+    )
 })
 
 test_that("the BGEN dosage kernel reads any ploidy and allele count", {
@@ -2110,13 +2296,123 @@ test_that("the BGEN dosage kernel reads any ploidy and allele count", {
     }
     # All the mass on (0,2,1): two copies of allele 2, one of allele 3.
     expect_equal(
-        pecotmr:::bgenDosageCpp(triploid(7L), 1L, c(2L, 3L)),
+        pecotmr:::bgenDosageCpp(triploid(7L), 1L, c(2L, 3L), integer(0)),
         matrix(c(2, 1), 1L)
     )
     # On the implied last genotype, (0,0,3).
     expect_equal(
-        pecotmr:::bgenDosageCpp(triploid(10L), 1L, c(1L, 3L)),
+        pecotmr:::bgenDosageCpp(triploid(10L), 1L, c(1L, 3L), integer(0)),
         matrix(c(0, 3), 1L)
+    )
+})
+
+test_that("the BGEN dosage kernel decodes only the samples asked for", {
+    # Two unphased diploid samples with two alleles, 8 bits per probability:
+    # all the mass on (2,0) for the first and on (1,1) for the second.
+    record <- as.raw(c(2, 0, 0, 0, 2, 0, 2, 2, 2, 2, 0, 8, 255, 0, 0, 255))
+    kernel <- pecotmr:::bgenDosageCpp
+    expect_equal(kernel(record, 2L, 2L, integer(0)), matrix(c(0, 1), 2L))
+    expect_equal(kernel(record, 2L, 2L, 1L), matrix(0, 1L))
+    expect_equal(kernel(record, 2L, 2L, 2L), matrix(1, 1L))
+    expect_error(kernel(record, 2L, 2L, c(2L, 1L)), "ascending")
+    expect_error(kernel(record, 2L, 2L, c(1L, 1L)), "ascending")
+    expect_error(kernel(record, 2L, 2L, 3L), "ascending")
+    expect_error(kernel(record, 2L, 2L, 0L), "ascending")
+    # A skip past the end of the data is caught, as a read past it is.
+    expect_error(kernel(record[1:13], 2L, 2L, 2L), "ends early")
+    expect_error(kernel(record[1:14], 2L, 2L, 2L), "ends early")
+    # Nothing after the last sample asked for is read.
+    expect_equal(kernel(record[1:14], 2L, 2L, 1L), matrix(0, 1L))
+})
+
+test_that("the BGEN reader reads some samples as all of them have them", {
+    skip_if_not_installed("DBI")
+    skip_if_not_installed("RSQLite")
+    expectSameSamples <- function(handle, rows, samples, info) {
+        expect_identical(
+            pecotmr:::.extractBlockBgen(handle, rows, samples),
+            pecotmr:::.extractBlockBgen(handle, rows)[samples, , drop = FALSE],
+            info = info
+        )
+    }
+    # Any bit depth: a skip lands part-way through a byte.
+    for (bits in c(3L, 8L, 13L, 16L)) {
+        fx <- .bgw_fixture(n = 9L, nVar = 5L, bits = bits)
+        handle <- readGenotypeHandle(fx$path)
+        expectSameSamples(handle, c(4L, 1L), c(2L, 5L, 9L), bits)
+        expectSameSamples(handle, c(4L, 1L), 1L, bits)
+    }
+    # Layout 1, compressed or not.
+    for (compression in 0:1) {
+        fx <- .bgw_fixture(n = 9L, compression = compression, layout = 1L)
+        handle <- readGenotypeHandle(fx$path)
+        expectSameSamples(handle, 3:1, c(2L, 5L, 9L), compression)
+    }
+    # Mixed ploidy, phased records and several alleles per record.
+    for (name in c("complex.bgen", "haplotypes.bgen")) {
+        handle <- suppressWarnings(
+            readGenotypeHandle(test_path("test_data", "bgen", name))
+        )
+        rows <- seq_len(nrow(snpInfo(handle)))
+        expectSameSamples(handle, rows, c(2L, 4L), name)
+    }
+})
+
+test_that("every format reads some samples as the whole panel has them", {
+    skip_if_not_installed("PlinkMatrix")
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("VariantAnnotation")
+    skip_if_not_installed("SNPRelate")
+    skip_if_not_installed("gdsfmt")
+    paths <- c(
+        plink2 = plink_prefix,
+        plink1 = paste0(plink_prefix, ".bed"),
+        vcf = vcf_path,
+        gds = gds_path,
+        bgen = .bgw_fixture(n = 12L, nVar = 8L)$path
+    )
+    rows <- c(4L, 1L, 2L)
+    # In any order, and repeated, as DelayedArray may ask.
+    samples <- c(9L, 2L, 2L, 6L)
+    for (format in names(paths)) {
+        panel <- readGenotypes(paths[[format]])
+        dosage <- SummarizedExperiment::assay(panel, "dosage")
+        expect_equal(
+            as.matrix(dosage[rows, samples]),
+            as.matrix(dosage[rows, ])[, samples],
+            info = format
+        )
+        expect_equal(
+            pecotmr:::.ldRefDosage(
+                panel,
+                rows,
+                meanImpute = FALSE,
+                sampleIdx = c(2L, 6L)
+            ),
+            pecotmr:::.ldRefDosage(panel, rows, meanImpute = FALSE)[
+                c(2L, 6L),
+            ],
+            info = format
+        )
+    }
+})
+
+test_that("a PLINK2 read of some samples returns only those", {
+    skip_if_not_installed("pgenlibr")
+    handle <- readGenotypeHandle(plink_prefix, format = "plink2")
+    whole <- pecotmr:::.extractBlockPlink2(handle, 1:3)
+    some <- pecotmr:::.extractBlockPlink2(handle, 1:3, c(2L, 7L))
+    expect_equal(dim(some), c(2L, 3L))
+    expect_equal(some, whole[c(2L, 7L), , drop = FALSE])
+    # Per-chromosome files route the samples to each file's read.
+    sharded <- readGenotypes(
+        genoMeta = c("21" = file.path(test_data_dir, "test_variants.pgen")),
+        format = "plink2"
+    )
+    dosage <- SummarizedExperiment::assay(sharded, "dosage")
+    expect_equal(
+        unname(as.matrix(dosage[1:3, c(2L, 7L)])),
+        unname(t(some))
     )
 })
 

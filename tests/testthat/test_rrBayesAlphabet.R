@@ -437,7 +437,7 @@ test_that("SDPR's projection reads R (R + aI)^-1 R and R (R + aI)^-1 bhat", {
     d <- .rrwPanelStatLd()
     ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
     R <- unname(crossprod(ldFactor) / (nrow(ldFactor) - 1))
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     toSpan <- R %*% solve(R + 0.1 * diag(nrow(R)))
     projected <- pecotmr:::.alphabetProjected(bhat, ldFactor, 0.1)
     ldOf <- function(x) crossprod(x$ldFactor) / (nrow(x$ldFactor) - 1)
@@ -473,7 +473,7 @@ test_that("BayesAlphabetRssOptions sets SDPR's projection or turns it off", {
     direct <- function(ldProjection) {
         set.seed(7)
         pecotmr:::bayesAlphabetRss(
-            d$stat$z / sqrt(500),
+            pecotmr:::.zToCor(d$stat$z, 500),
             ldFactor,
             500,
             "bayesN",
@@ -506,7 +506,7 @@ test_that("BayesAlphabetRssOptions sets SDPR's projection or turns it off", {
 test_that("pecotmr's sampler reports progress and refuses bad input", {
     d <- .rrwPanelStatLd()
     ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     out <- capture.output(
         fit <- pecotmr:::bayesAlphabetRss(
             bhat,
@@ -627,7 +627,7 @@ test_that("pecotmr's sampler reads the shrunk LD", {
     # for draw up to rounding.
     d <- .rrwPanelStatLd()
     ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     expect_equal(
         .baFactorRun(bhat, ldFactor, shrinkCorr = 0.9),
         .baFactorRun(bhat, .baShrunkFactor(ldFactor, 0.9)),
@@ -653,7 +653,7 @@ test_that("pecotmr's sampler refuses a sign jump only when asked", {
 test_that("pecotmr's Rao-Blackwellized sampler runs the same chain", {
     d <- .rrwPanelStatLd()
     ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     draws <- .baFactorRun(bhat, ldFactor, "bayesC", pi = 0.1)
     means <- .baFactorRun(
         bhat,
@@ -671,7 +671,7 @@ test_that("pecotmr's Rao-Blackwellized sampler runs the same chain", {
 test_that("pecotmr's sampler averages several chains over the kept ones", {
     d <- .rrwPanelStatLd()
     ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     set.seed(8)
     fit <- pecotmr:::bayesAlphabetRss(
         bhat,
@@ -808,7 +808,7 @@ test_that("hibayes' form sends a refused jump to the null class", {
     # changes the chain.
     d <- .rrwPanelStatLd()
     ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     expect_false(identical(
         .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2, allowJumpSign = FALSE),
         .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2)

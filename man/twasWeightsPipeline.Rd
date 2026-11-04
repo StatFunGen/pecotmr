@@ -29,8 +29,8 @@ twasWeightsPipeline(data, ...)
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
+  retainX = FALSE,
   residualizationParam = ResidualizationParam(),
-  weightsDataType = NULL,
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
   seed = NULL
@@ -47,7 +47,6 @@ twasWeightsPipeline(data, ...)
   fineMappingResult = NULL,
   twasWeights = NULL,
   fitRetention = c("slim", "none", "full"),
-  weightsDataType = NULL,
   verbose = 1L,
   panelFilterParam = PanelFilterParam(),
   crossValidationParam = CrossValidationParam()
@@ -72,7 +71,7 @@ twasWeightsPipeline(data, ...)
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
-  weightsDataType = NULL,
+  retainX = FALSE,
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
   residualizationParam = ResidualizationParam(),
@@ -91,10 +90,21 @@ embedded \code{QtlSumStats}, then rbinds the results.}
 
 \item{methods}{A character vector of short method names, a preset string
 (\code{"default"} or \code{"fastDefault"}), or a named list of
-\code{<method>_weights = args} entries. For QtlSumStats input the
-default is \code{c("lasso", "prsCs", "dprGibbs")}, which there run
-lassosum, PRS-CS and SDPR; the fine-mapping methods are not in it, and
-are requested by name together with a \code{fineMappingResult}.}
+\code{<method>_weights = args} entries. On individual-level input the
+default is \code{"default"}, which is \code{"fastDefault"} (\code{susie},
+\code{susieInf}, \code{mrash}, \code{enet}, \code{lasso}, \code{mcp},
+\code{scad} and \code{l0learn}) with \code{bayesR} and \code{bayesC}.
+\code{susie} and \code{susieInf} read their fits from a
+\code{fineMappingResult}, so either preset skips them, with a warning,
+where no \code{fineMappingResult} holds them; naming them outside a preset
+without one is an error. For QtlSumStats input
+the default, which either preset also names, is
+\code{c("lasso", "prsCs", "dprGibbs")}, which there run lassosum, PRS-CS
+and SDPR; the fine-mapping methods are not in it, and are requested by
+name together with a \code{fineMappingResult}. A
+multivariate method (\code{mrmash}, \code{mvsusie}, \code{fsusie}) fits
+the selected contexts and traits together and any other method each
+(context, trait) alone, so the two kinds can be requested at once.}
 
 \item{backend}{The engine a method with several runs on, as a named
 character vector keyed by method, e.g.
@@ -248,14 +258,23 @@ components fitted per context when \code{usePCA = TRUE} (default
   \code{ridge}, \code{scad}, \code{mcp}, \code{l0learn}, the Bayesian
   alphabet, \code{mrash} and the DPR methods, whose full fit is the
   engine's whole object where the slim one keeps the selected fit or the
-  posterior summaries, without any copy of the data. Every other method
-  keeps its fit whole or not at all, except the fine-mapping methods
-  (\code{susie}, \code{susieInf}, \code{susieAsh}, \code{mvsusie},
-  \code{fsusie}), whose rows keep none: their weights come from the
-  \code{fineMappingResult}'s fit, which is where \code{ctwasPipeline()}
-  reads it. Requesting \code{"full"} for a run where no method can honour
-  it is an error, and a mixed run warns rather than dropping it in
-  silence.}
+  posterior summaries, without any copy of \code{X} unless \code{retainX}
+  asks for it. Every other method keeps its fit whole or not at all, except
+  the fine-mapping methods (\code{susie}, \code{susieInf},
+  \code{susieAsh}, \code{mvsusie}, \code{fsusie}), whose rows keep none:
+  their weights come from the \code{fineMappingResult}'s fit, which is where
+  \code{ctwasPipeline()} reads it. Requesting \code{"full"} for a run where
+  no method can honour it is an error, and a mixed run warns rather than
+  dropping it in silence.}
+
+\item{retainX}{Logical. Keep a fit's copy of \code{X}, which can be its
+largest part, at \code{fitRetention = "full"} (default \code{FALSE}). An
+error at any other \code{fitRetention}, and on a run where no method's fit
+has a copy: only \code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+\code{mcp}, \code{mrash} and the DPR methods do. No fine-mapping fit holds
+one, so \code{\link{fineMappingPipeline}} has no such argument, and summary
+statistics have no \code{X}: on a \code{MultiStudyQtlDataset} it reaches
+the individual-level studies.}
 
 \item{residualizationParam}{Covariate residualization settings, built with
   \code{\link{ResidualizationParam}} and forwarded to
@@ -274,9 +293,6 @@ components fitted per context when \code{usePCA = TRUE} (default
   so refusing a non-default value would reject the default bundle; CV is
   off by default, so a non-default value there is an explicit request for
   something the input cannot do.}
-
-\item{weightsDataType}{Optional data-type label recorded on every
-\code{TwasWeightsRow$dataType} (e.g. \code{"expression"}).}
 
 \item{phenotypeFilterParam}{The run's phenotype QC, built with
 \code{\link{PhenotypeFilterParam}}: how missing phenotype values are

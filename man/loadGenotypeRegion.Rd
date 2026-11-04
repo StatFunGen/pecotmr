@@ -20,9 +20,16 @@ loadGenotypeRegion(
 \item{which}{Optional \code{GRanges}: load only the variants that overlap
 it. If NULL, loads every variant.}
 
-\item{keepIndel}{Whether to keep indel SNPs.}
+\item{keepIndel}{Whether to keep variants other than SNPs. A SNP has exactly
+one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*}
+and \code{N} count as indels.}
 
-\item{keepVariantsPath}{Path to a file listing variants to keep.}
+\item{keepVariantsPath}{Path to a file listing variants to keep: a table
+with \code{chrom} and \code{pos} columns, with their alleles in \code{A2}
+and \code{A1} or without any, or one variant id or rsID per line. Alleles
+match in either order and on either strand; a table without alleles keeps
+every variant at each position, and an rsID is matched against the
+file's own variant ids.}
 
 \item{returnVariantInfo}{If TRUE, return a list with X (dosage matrix) and
 variant_info (data.frame). If FALSE (default), return only the dosage

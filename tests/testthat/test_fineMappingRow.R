@@ -79,6 +79,27 @@ test_that("adjustPips tolerates a chr-prefix difference with keepVariants", {
     expect_equal(ncol(susieFit(adj)$lbf_variable), 4)
 })
 
+test_that("adjustPips matches keepVariants as every keep list is matched", {
+    vids <- c(
+        "chr1:1:A:G",
+        "chr1:2:A:T",
+        "chr1:3:C:T",
+        "chr1:4:C:A",
+        "chr1:5:G:C"
+    )
+    entry <- .makeAdjustEntry(vids)
+    keep <- c(
+        "chr1:1:G:A", # swapped alleles
+        "chr1:2:T:A", # a palindrome spelled the other way
+        "chr1:3:C:T", # listed in both allele orders
+        "chr1:3:T:C",
+        "rs9" # an rsID among the ids does not stop them being read
+    )
+    adj <- adjustPips(entry, keep)
+    expect_equal(variantIds(adj), vids[1:3])
+    expect_equal(ncol(susieFit(adj)$lbf_variable), 3)
+})
+
 # === Tests migrated from test_s4Constructors.R (FineMappingRow) ===
 
 test_that("FineMappingRow stores its slots and the accessors return them", {

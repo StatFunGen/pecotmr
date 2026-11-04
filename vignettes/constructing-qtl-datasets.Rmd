@@ -137,6 +137,7 @@ are also accepted and normalized on read.
 | `context` (alias `cond`) | yes | context / condition label |
 | `phenotypePath` (alias `path`) | yes | bgzipped or plain BED phenotype file |
 | `covariatePath` (alias `cov_path`) | no | per-context covariate table |
+| `dataType` (alias `data_type`) | no | molecular type, e.g. `expression` |
 | `study` | single-valued | study identifier (may also be an argument) |
 | `genotypePath` (alias `genotype_prefix`) | single-valued | genotype file or PLINK prefix (may also be an argument) |
 | `genotypeCovariatePath` | no, single-valued | genotype-derived covariates applied to all contexts |

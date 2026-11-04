@@ -16,8 +16,9 @@
 #
 # Cross-type comparison: tau* (Gazal et al. 2017 standardization) is the
 # cross-type comparable statistic. Use tau* to rank or meta-analyze annotations
-# that mix binary and continuous types. E (proportion-based enrichment) is
-# scale-dependent for continuous annotations and is only comparable within type.
+# that mix binary and continuous types. E (proportion-based enrichment) moves
+# with where a continuous annotation's zero is, though not with its scale, and
+# is only comparable within type.
 
 # ---- internal helpers ----
 

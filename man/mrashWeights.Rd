@@ -8,6 +8,7 @@ mrashWeights(
   X,
   y,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = MrashOptions()
 )
 }
@@ -20,8 +21,11 @@ mrashWeights(
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing, \code{"slim"} the fitted model without its copy of the data
 (\code{data}) or the order it updated the variants in each iteration
-(\code{update.order}), \code{"full"} the whole fitted model. Either
-names the variants it was fitted on.}
+(\code{update.order}), \code{"full"} the whole fitted model but for its
+copy of \code{X}. Each names the variants it was fitted on.}
+
+\item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
+(default \code{FALSE}). An error at any other \code{fitRetention}.}
 
 \item{methodArgs}{Options forwarded to \code{susieR::mr.ash}, built
 with \code{\link{MrashOptions}}. A bare list is refused: it cannot be

@@ -165,7 +165,6 @@ Collate:
     'crossValidation.R'
     'ctwasPipeline.R'
     'ctwasWrapper.R'
-    'enloc.R'
     'exampleData.R'
     'fineMappingRow.R'
     'fineMappingWrappers.R'

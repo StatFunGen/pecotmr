@@ -15,6 +15,7 @@
             n_snps = 100L,
             n_components = NA_integer_,
             scale = NA_real_,
+            reference_overlap = NA_real_,
             enrichment = list(NULL),
             jackknife = list(NULL),
             score_stats = list(NULL)
@@ -157,6 +158,24 @@ test_that("updateObject() rebuilds an H2Estimate saved in slots as a row", {
         )
     )
     expect_identical(updateObject(older), up)
+})
+
+test_that("updateObject() gives an estimate saved without an overlap NA", {
+    current <- .h2Est()
+    saved <- S4Vectors::`mcols<-`(
+        current,
+        value = S4Vectors::mcols(current, use.names = FALSE)[
+            setdiff(
+                colnames(S4Vectors::mcols(current)),
+                "reference_overlap"
+            )
+        ]
+    )
+    expect_error(validObject(saved), "reference_overlap")
+    up <- updateObject(saved)
+    expect_true(validObject(up))
+    expect_true(is.na(S4Vectors::mcols(up)$reference_overlap))
+    expect_identical(updateObject(current), current)
 })
 
 test_that("updateObject() drops the per-block local estimates", {

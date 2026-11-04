@@ -14,6 +14,7 @@ learnTwasWeights(
   BPPARAM = SerialParam(),
   fittedModels = NULL,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   weightStandardized = FALSE,
   weightsDataType = NULL,
   ldReference = NULL,
@@ -59,18 +60,26 @@ produce the fits.}
 
 \item{fitRetention}{How much of each per-method fit is kept on the result:
 \code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
-payload downstream needs, \code{"full"} keeps the whole fitted object.
+payload downstream needs, \code{"full"} keeps the whole fitted object but
+for any copy of \code{X}.
 Every method keeps a fit, which names the variants it was fitted on.
 \code{"slim"} and \code{"full"} differ for mr.mash, glmnet
 (\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
-\code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
-and the DPR methods; for the others the two behave alike.}
+\code{mcp}), \code{l0learn}, the Bayesian alphabet and \code{mrash};
+for the others the two behave alike.}
+
+\item{retainX}{Logical. Keep a fit's copy of \code{X}, for the methods whose
+fit has one (\code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+\code{mcp}, \code{mrash} and the DPR methods), at
+\code{fitRetention = "full"} (default \code{FALSE}). An error at any
+other \code{fitRetention}, and when no method in \code{weightMethods} has
+such a copy.}
 
 \item{weightStandardized}{Logical. Whether the supplied \code{X} / \code{Y}
 are already standardized. Default \code{FALSE}.}
 
-\item{weightsDataType}{Character or \code{NULL}. Data-type label recorded on
-the weights (e.g. \code{"individual"}).}
+\item{weightsDataType}{Character or \code{NULL}. The molecular type recorded
+on the weights (e.g. \code{"expression"}).}
 
 \item{ldReference}{An LD reference (a genotype panel, see
 \code{\link{readGenotypes}}, a \code{GenotypeMixture} or an

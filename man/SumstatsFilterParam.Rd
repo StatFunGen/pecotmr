@@ -14,8 +14,9 @@ SumstatsFilterParam(
 )
 }
 \arguments{
-\item{removeIndels}{Logical. Drop insertions and deletions. Default
-\code{FALSE}.}
+\item{removeIndels}{Logical. Drop variants other than SNPs. A SNP has exactly
+one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*} and
+\code{N} count as indels. Default \code{FALSE}.}
 
 \item{removeStrandAmbiguous}{Logical. Drop strand-ambiguous variants (A/T
 and C/G). Default \code{TRUE}.}

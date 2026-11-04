@@ -29,7 +29,8 @@ context("colocPipeline")
 .cp_makeFmEntry <- function(
     variant_ids = paste0("chr1:", 100 * (1:5), ":A:G"),
     withLbf = TRUE,
-    n_eff = 2L
+    n_eff = 2L,
+    lbf = NULL
 ) {
     pip <- seq(0.9, by = -0.15, length.out = length(variant_ids))
     n <- length(variant_ids)
@@ -61,12 +62,13 @@ context("colocPipeline")
         V = rep(0.05, n_eff)
     )
     if (withLbf) {
-        fit$lbf_variable <- matrix(
-            rnorm(n_eff * length(variant_ids)),
-            nrow = n_eff,
-            ncol = length(variant_ids),
-            dimnames = list(NULL, variant_ids)
-        )
+        fit$lbf_variable <- lbf %||%
+            matrix(
+                rnorm(n_eff * length(variant_ids)),
+                nrow = n_eff,
+                ncol = length(variant_ids),
+                dimnames = list(NULL, variant_ids)
+            )
     }
     FineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
 }
@@ -815,7 +817,6 @@ test_that("colocPipeline: enrichment takes table priors and reports RCP/LCP", {
         colocP12 = 2.5e-5,
         stringsAsFactors = FALSE
     )
-    local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
     out <- suppressWarnings(
         colocPipeline(
             qtlFineMappingResult = qfmr,
@@ -823,9 +824,7 @@ test_that("colocPipeline: enrichment takes table priors and reports RCP/LCP", {
             enrichment = enr
         )
     )
-    # Enrichment mode scores every (QTL effect, GWAS effect) pair itself
-    # rather than calling coloc.bf_bf, so the fixture's 2 x 2 effects give
-    # four rows; the mock used elsewhere collapses them to one.
+    # Every (QTL effect, GWAS effect) pair of the fixture's 2 x 2 effects.
     pairs <- colocPairs(out)
     expect_equal(nrow(pairs), 4L)
     expect_true(all(c("enrichment", "p12Used") %in% colnames(pairs)))
@@ -845,6 +844,145 @@ test_that("colocPipeline: enrichment takes table priors and reports RCP/LCP", {
         pairs$PP.H3.abf +
         pairs$PP.H4.abf
     expect_equal(probs, rep(1, nrow(pairs)))
+})
+
+test_that("colocPipeline: enrichment table priors reach coloc by trait", {
+    enr <- data.frame(
+        gwasStudy = "G1",
+        qtlStudy = "Q1",
+        qtlContext = "c1",
+        enrichment = 2.0,
+        colocP1 = 3e-4,
+        colocP2 = 7e-4,
+        colocP12 = 2.5e-5,
+        stringsAsFactors = FALSE
+    )
+    got <- pecotmr:::.colocResolvePriors(
+        .cp_side("G1"),
+        .cp_side("Q1", "c1"),
+        TRUE,
+        enr,
+        ColocPriorParam()
+    )
+    # colocP1 is fastenloc's GWAS-only prior and colocP2 its QTL-only one,
+    # while coloc's p1 goes with its first trait, the QTL side.
+    expect_equal(got$p1, 7e-4)
+    expect_equal(got$p2, 3e-4)
+    expect_equal(got$p12Used, 2.5e-5)
+})
+
+# The priors qtlEnrichmentPipeline derives, as fastenloc's set_enrich_params
+# computes them, with both LBFs scored over the same five variants.
+.cp_enlocPriors <- function(a0 = log(1e-4), a1 = 5, pQtl = 1e-3) {
+    list(
+        pi1e = stats::plogis(a0 + a1),
+        pi1ne = stats::plogis(a0),
+        pQtl = pQtl,
+        table = data.frame(
+            gwasStudy = "G1",
+            qtlStudy = "Q1",
+            qtlContext = "c1",
+            enrichment = expm1(a1),
+            colocP1 = (1 - pQtl) * stats::plogis(a0),
+            colocP2 = pQtl * (1 - stats::plogis(a0 + a1)),
+            colocP12 = pQtl * stats::plogis(a0 + a1)
+        )
+    )
+}
+
+.cp_enlocRun <- function(qtlLbf, gwasLbf, pr = .cp_enlocPriors()) {
+    ids <- paste0("chr1:", 100 * (1:5), ":A:G")
+    entry <- function(lbf) {
+        .cp_makeFmEntry(
+            ids,
+            n_eff = 1L,
+            lbf = matrix(lbf, 1L, dimnames = list(NULL, ids))
+        )
+    }
+    suppressWarnings(colocPipeline(
+        qtlFineMappingResult = .cp_makeQtlFmr(entries = list(entry(qtlLbf))),
+        gwasInput = .cp_makeGwasFmr(entries = list(entry(gwasLbf))),
+        enrichment = pr$table
+    ))
+}
+
+test_that("colocPipeline: enrichment mode reads each side's evidence", {
+    flat <- numeric(5)
+    atFirst <- c(30, 0, 0, 0, 0)
+    atSecond <- c(0, 30, 0, 0, 0)
+    pairs <- function(q, g) colocPairs(.cp_enlocRun(q, g))
+    # No GWAS signal is not a colocalization, whatever the enrichment.
+    none <- pairs(flat, flat)
+    expect_gt(none$PP.H0.abf, 0.9)
+    expect_lt(none$LCP, 0.01)
+    qtlOnly <- pairs(atFirst, flat)
+    # coloc's H1 is its first trait alone, the QTL side.
+    expect_gt(qtlOnly$PP.H1.abf, 0.9)
+    expect_lt(qtlOnly$LCP, 0.1)
+    # Nor does a QTL effect without evidence count as certainly present.
+    gwasOnly <- pairs(flat, atFirst)
+    expect_gt(gwasOnly$PP.H2.abf, 0.5)
+    expect_lt(gwasOnly$LCP, 0.5)
+    expect_gt(pairs(atFirst, atFirst)$RCP, 0.99)
+    apart <- pairs(atFirst, atSecond)
+    expect_lt(apart$RCP, 0.01)
+    expect_gt(apart$LCP, 0.99)
+})
+
+test_that("colocPipeline: enrichment mode agrees with fastenloc's cases", {
+    pr <- .cp_enlocPriors()
+    # fastenloc's PIPs from Bayes factors (sigCluster::compute_pip) and its
+    # four configurations (controller.cc, compute_coloc_prob_exact).
+    fastenloc <- function(lq, lg) {
+        bfQ <- exp(lq)
+        bfG <- exp(lg)
+        pip <- pr$pQtl * bfQ / (pr$pQtl * sum(bfQ) + 1 - pr$pQtl)
+        rest <- 1 - sum(pip)
+        ne <- pr$pi1ne
+        e <- pr$pi1e
+        cases <- c(
+            (1 - ne)^5 * rest,
+            ne * (1 - ne)^4 * sum(bfG) * rest,
+            (1 - e) * (1 - ne)^4 * sum(pip),
+            ne * (1 - e) * (1 - ne)^3 * (sum(bfG) * sum(pip) - sum(bfG * pip)),
+            e * (1 - ne)^4 * sum(bfG * pip)
+        )
+        cases / sum(cases)
+    }
+    lq <- c(4, 1, 0.5, 0, 0)
+    lg <- c(3, 2, 0, 0.2, 0)
+    got <- colocPairs(.cp_enlocRun(lq, lg))
+    # Equal up to fastenloc's factor of 1 - p1 - p2 - p12 on H0 and on H3's
+    # inverse, here about 1e-3. fastenloc's second case is GWAS only, which
+    # is coloc's H2, its second trait alone.
+    expect_equal(
+        c(
+            got$PP.H0.abf,
+            got$PP.H2.abf,
+            got$PP.H1.abf,
+            got$PP.H3.abf,
+            got$PP.H4.abf
+        ),
+        fastenloc(lq, lg),
+        tolerance = 2e-3
+    )
+})
+
+test_that("colocPipeline: enrichment mode's variant layer matches coloc's", {
+    out <- .cp_enlocRun(c(6, 5, 0, 0, 0), c(6, 4, 0, 0, 0))
+    pair <- colocPairs(out)
+    variants <- S4Vectors::mcols(colocVariants(out))
+    # SNP.PP.H4 is a variant's share of H4, so colocPp sums to RCP rather than
+    # to its square, and a credible set can reach its coverage.
+    expect_equal(sum(variants$colocPp), pair$RCP)
+    expect_equal(sum(variants$SNP.PP.H4), 1)
+    expect_gt(length(colocCredibleSets(out, coverage = 0.95, minPp4 = 0)), 0L)
+})
+
+test_that("colocPipeline: enrichment mode scores a very strong signal", {
+    # 5000 on the natural-log scale overflows a plain Bayes factor.
+    out <- .cp_enlocRun(c(30, 0, 0, 0, 0), c(5000, 0, 0, 0, 0))
+    expect_gt(colocPairs(out)$RCP, 0.99)
 })
 
 test_that("colocPipeline: an enrichment table without the priors is refused", {
@@ -947,7 +1085,7 @@ test_that("colocPipeline: an enrichment miss warns and drops to plain priors", {
     )
     expect_match(w, "no enrichment entry", all = FALSE)
     pairs <- colocPairs(out)
-    expect_equal(nrow(pairs), 4L)
+    expect_equal(nrow(pairs), 1L)
     # A miss means there is no enrichment estimate for this pair, so it is
     # scored with the unconditional priors rather than a fabricated factor
     # of zero applied to a default.
@@ -2000,26 +2138,6 @@ test_that(".colocWithNull adds coloc's null column at log BF 0", {
     expect_identical(
         pecotmr:::.colocWithNull(m),
         cbind(m, null = 0)
-    )
-})
-
-test_that("enloc reads SuSiE's natural-log Bayes factors as such", {
-    # With a flat GWAS effect the colocalization mass follows the QTL PIPs,
-    # which must be SuSiE's softmax over natural-log Bayes factors.
-    lbf <- c(2, 1, 0)
-    aligned <- list(
-        qtl = matrix(lbf, 1L, dimnames = list(NULL, c("a", "b", "c"))),
-        gwas = matrix(0, 1L, 3L, dimnames = list(NULL, c("a", "b", "c")))
-    )
-    out <- pecotmr:::.colocEnlocOneEffectPair(
-        1L,
-        1L,
-        aligned,
-        list(p1 = 1e-4, p2 = 1e-4, p12 = 5e-6)
-    )
-    expect_equal(
-        unname(out$scp / sum(out$scp)),
-        exp(lbf) / sum(exp(lbf))
     )
 })
 

@@ -92,14 +92,14 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
 }
 
 .tp_mockExtractor <- function(seed = 1, n_samples = 40L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -182,6 +182,93 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
 # ===========================================================================
 # twasWeightsPipeline(QtlDataset)
 # ===========================================================================
+
+test_that("twasWeightsPipeline reads each window once and shares its X", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    run <- .countBlocks(twasWeightsPipeline(
+        qd,
+        methods = "lasso",
+        region = .fitSamplesWindow(),
+        seed = 1L
+    ))
+    expect_s4_class(run$result, "TwasWeights")
+    expect_equal(nrow(run$result), 6L)
+    # One read across 2 contexts and 3 traits, of only the samples they observe.
+    expect_equal(run$reads, 1L)
+    expect_equal(run$samples[[1L]], 1:30)
+    # In each context: one X for g1 and g3, and one for g2's different samples.
+    expect_equal(run$builds, 4L)
+    # Row order does not depend on how the fits were grouped.
+    expect_equal(
+        as.character(S4Vectors::mcols(run$result)$trait),
+        rep(c("g1", "g2", "g3"), times = 2L)
+    )
+})
+
+test_that("twasWeightsPipeline reads a window once across its paths", {
+    skip_if_not_installed("pgenlibr")
+    window <- .fitSamplesWindow()
+    pca <- .countBlocks(twasWeightsPipeline(
+        .fitSamplesDataset(),
+        methods = "lasso",
+        region = window,
+        usePCA = TRUE,
+        nPCs = 1L,
+        phenotypeFilterParam = PhenotypeFilterParam(naAction = "impute"),
+        seed = 1L
+    ))
+    expect_equal(pca$reads, 1L)
+    skip_if_not_installed("mr.mashr")
+    # cv.glmnet warns that 30 samples are few per fold.
+    bySpec <- .countBlocks(suppressWarnings(twasWeightsPipeline(
+        .fitSamplesDataset(),
+        methods = c("lasso", "mrmash"),
+        jointSpecification = "context",
+        region = window,
+        seed = 1L
+    )))
+    expect_equal(bySpec$reads, 1L)
+    expect_setequal(methodNames(bySpec$result), c("lasso", "mrmash"))
+})
+
+test_that("a multi-study TWAS run reads a window once per component", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mr.mashr")
+    run <- .countBlocks(suppressWarnings(twasWeightsPipeline(
+        .fitSamplesTwoStudies(),
+        methods = c("lasso", "mrmash"),
+        jointSpecification = "context",
+        region = .fitSamplesWindow(),
+        seed = 1L
+    )))
+    expect_equal(run$reads, 2L)
+    expect_setequal(methodNames(run$result), c("lasso", "mrmash"))
+    expect_setequal(
+        as.character(S4Vectors::mcols(run$result)$study),
+        c("s", "s2")
+    )
+})
+
+test_that("a panel of rsIDs gives the weights of one labelled by position", {
+    skip_if_not_installed("pgenlibr")
+    window <- .fitSamplesWindow()
+    byId <- suppressMessages(twasWeightsPipeline(
+        .fitSamplesDataset(),
+        methods = "lasso",
+        region = window,
+        seed = 1L
+    ))
+    byRs <- suppressMessages(twasWeightsPipeline(
+        .fitSamplesDataset(.rsIdPanel()),
+        methods = "lasso",
+        region = window,
+        seed = 1L
+    ))
+    expect_equal(nrow(byRs), nrow(byId))
+    expect_equal(variantIds(byRs[1L, ]), variantIds(byId[1L, ]))
+    expect_true(all(startsWith(variantIds(byRs[1L, ]), "chr21:")))
+})
 
 test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
@@ -1987,6 +2074,225 @@ test_that(".twasNormalizeMethods: NULL falls through to the 'default' preset", {
     expect_equal(sort(names(res$methodList)), sort(default_names))
 })
 
+test_that("a preset string names its methods, however they are read", {
+    fast <- c(
+        "susie",
+        "susieInf",
+        "mrash",
+        "enet",
+        "lasso",
+        "mcp",
+        "scad",
+        "l0learn"
+    )
+    full <- c(fast, "bayesR", "bayesC")
+    for (preset in list(list("fastDefault", fast), list("default", full))) {
+        norm <- pecotmr:::.twasNormalizeMethods(preset[[1L]])
+        expect_equal(norm$tokens, preset[[2L]])
+        expect_setequal(
+            pecotmr:::.twasTokensFromMethodList(norm$methodList),
+            preset[[2L]]
+        )
+        expect_equal(
+            pecotmr:::.twasMethodTokensFromArg(preset[[1L]]),
+            preset[[2L]]
+        )
+    }
+    # Named methods are not presets, even one at a time.
+    expect_equal(pecotmr:::.twasMethodTokensFromArg("lasso"), "lasso")
+    expect_equal(pecotmr:::.twasNormalizeMethods("lasso")$tokens, "lasso")
+})
+
+test_that("a preset skips the fine-mapping methods no result holds", {
+    runs <- pecotmr:::.twasRunMethods
+    fast <- pecotmr:::.twasExpandPresets("fastDefault")
+    both <- c("susie", "susieInf")
+    expect_warning(
+        out <- runs("fastDefault", NULL),
+        paste(
+            "the \"fastDefault\" preset is skipping susie, susieInf,",
+            "because no `fineMappingResult` holds their fits"
+        ),
+        fixed = TRUE
+    )
+    expect_equal(out, setdiff(fast, both))
+    # No `methods` is the default preset.
+    expect_warning(out <- runs(NULL, NULL), "\"default\" preset is skipping")
+    expect_equal(
+        out,
+        setdiff(pecotmr:::.twasExpandPresets("default"), both)
+    )
+    # A result holding one leaves only the other to skip.
+    onlySusie <- .tp_makeStubFineMappingResult(method = "susie")
+    expect_warning(
+        out <- runs("fastDefault", onlySusie),
+        "skipping susieInf, because"
+    )
+    expect_equal(out, setdiff(fast, "susieInf"))
+    # A result holding them both, or methods named outside a preset: no skip.
+    expect_no_warning(
+        out <- runs("fastDefault", .tp_makeStubFineMappingResult(method = both))
+    )
+    expect_equal(out, fast)
+    expect_no_warning(out <- runs(both, NULL))
+    expect_equal(out, both)
+})
+
+test_that("naming a fine-mapping method without its fits still stops", {
+    qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    expect_error(
+        twasWeightsPipeline(qd, methods = c("susie", "lasso")),
+        "susie are fine-mapping methods",
+        fixed = TRUE
+    )
+})
+
+test_that("a preset over a collection gives each kind of input its own list", {
+    preset <- pecotmr:::.twasMsPreset
+    fmr <- .tp_makeStubFineMappingResult(method = c("susie", "susieInf"))
+    expect_equal(preset("lasso", TRUE, NULL), "lasso")
+    expect_equal(
+        preset("fastDefault", FALSE, fmr),
+        pecotmr:::.twasExpandPresets("fastDefault")
+    )
+    expect_warning(
+        withoutFits <- preset("fastDefault", FALSE, NULL),
+        "preset is skipping susie, susieInf"
+    )
+    expect_equal(
+        withoutFits,
+        setdiff(
+            pecotmr:::.twasExpandPresets("fastDefault"),
+            c("susie", "susieInf")
+        )
+    )
+    both <- preset("default", TRUE, fmr)
+    expect_setequal(
+        pecotmr:::.methodsParamResolve(both, "QtlDataset")$tokens,
+        pecotmr:::.twasExpandPresets("default")
+    )
+    expect_setequal(
+        pecotmr:::.methodsParamResolve(both, "QtlSumStats")$tokens,
+        c("lasso", "prsCs", "dprGibbs")
+    )
+})
+
+test_that("a preset fits every method it names", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("L0Learn")
+    data <- .fitSamplesDataset()
+    window <- .fitSamplesWindow()
+    fineMapped <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        data,
+        methods = c("susie", "susieInf"),
+        region = window,
+        seed = 1L
+    )))
+    res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
+        data,
+        methods = "fastDefault",
+        fineMappingResult = fineMapped,
+        region = window,
+        seed = 1L
+    )))
+    expect_setequal(
+        methodNames(res),
+        c(
+            "susie",
+            "susieInf",
+            "mrash",
+            "enet",
+            "lasso",
+            "mcp",
+            "scad",
+            "l0learn"
+        )
+    )
+    # Over a collection, on each of its studies.
+    studies <- .fitSamplesTwoStudies()
+    fineMappedBoth <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        studies,
+        methods = c("susie", "susieInf"),
+        region = window,
+        seed = 1L
+    )))
+    across <- suppressWarnings(suppressMessages(twasWeightsPipeline(
+        studies,
+        methods = "fastDefault",
+        fineMappingResult = fineMappedBoth,
+        region = window,
+        seed = 1L
+    )))
+    expect_setequal(methodNames(across), methodNames(res))
+    expect_setequal(
+        as.character(S4Vectors::mcols(across)$study),
+        c("s", "s2")
+    )
+})
+
+test_that("a preset runs without the fine-mapping methods it cannot read", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("L0Learn")
+    window <- .fitSamplesWindow()
+    res <- expect_warning(
+        suppressMessages(twasWeightsPipeline(
+            .fitSamplesDataset(),
+            methods = "fastDefault",
+            region = window,
+            seed = 1L
+        )),
+        "preset is skipping susie, susieInf"
+    )
+    expect_setequal(
+        methodNames(res),
+        c("mrash", "enet", "lasso", "mcp", "scad", "l0learn")
+    )
+    # Over a collection, once.
+    warnings <- character()
+    across <- withCallingHandlers(
+        suppressMessages(twasWeightsPipeline(
+            .fitSamplesTwoStudies(),
+            methods = "fastDefault",
+            region = window,
+            seed = 1L
+        )),
+        warning = function(cnd) {
+            warnings <<- c(warnings, conditionMessage(cnd))
+            invokeRestart("muffleWarning")
+        }
+    )
+    expect_equal(sum(str_detect(warnings, "preset is skipping")), 1L)
+    expect_setequal(methodNames(across), methodNames(res))
+})
+
+test_that("on summary statistics a preset names the input's own defaults", {
+    preset <- pecotmr:::.twasSumStatsPreset
+    expect_null(preset("default"))
+    expect_null(preset("fastDefault"))
+    expect_null(preset(NULL))
+    expect_equal(preset("lasso"), "lasso")
+    expect_equal(preset(c("lasso", "prsCs")), c("lasso", "prsCs"))
+    expect_equal(preset(list(lasso = list())), list(lasso = list()))
+    seen <- list()
+    local_mocked_bindings(
+        .twasPipelineQtlSumStats = function(data, methods, ...) {
+            seen <<- list(methods = methods)
+            abort("reached the worker")
+        },
+        .package = "pecotmr"
+    )
+    # No warning that a preset's own methods keep too little: it names these.
+    expect_error(
+        twasWeightsPipeline(
+            .tp_makeQtlSumStats(),
+            methods = "fastDefault",
+            fitRetention = "full"
+        ),
+        "reached the worker"
+    )
+    expect_null(seen$methods)
+})
+
 test_that(".twasNormalizeMethods: character methods go to .twasMethodLookup", {
     # Each case: a character `methods` (a preset or short names) and the
     # method list it expands to.
@@ -3024,7 +3330,7 @@ test_that("QtlDataset: CrossValidationParam(fitFullData) reaches the engine", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        .twasQdsRunGrid = function(grid, marker, ...) {
+        .twasQdsGridWork = function(grid, marker, ...) {
             cap$marker <- marker
             abort("captured")
         },
@@ -3315,7 +3621,6 @@ test_that("multi-study TWAS keeps per-study options", {
             estimatePi = FALSE,
             usePCA = TRUE,
             nPCs = 3L,
-            weightsDataType = "rnaseq",
             fitRetention = "none",
             residualizationParam = ResidualizationParam(
                 residualizeGenotype = FALSE
@@ -3330,7 +3635,6 @@ test_that("multi-study TWAS keeps per-study options", {
     expect_false(cap$cfg$estimatePi)
     expect_true(cap$cfg$usePCA)
     expect_equal(cap$cfg$nPCs, 3L)
-    expect_equal(cap$cfg$weightsDataType, "rnaseq")
     expect_false(cap$cfg$crossValidationParam$fitFullData)
     # "none" is provably not the default, and lasso can honour it.
     expect_equal(cap$cfg$fitRetention, "none")
@@ -3357,18 +3661,19 @@ test_that("MultiStudyQtlDataset: components get fitRetention as asked", {
         cfg <- list(
             methods = "lasso",
             fitRetention = level,
+            retainX = identical(level, "full"),
             usePCA = TRUE,
-            nPCs = 3L,
-            weightsDataType = "rnaseq"
+            nPCs = 3L
         )
         pecotmr:::.twasPerStudy(qd, cfg)
         expect_equal(cap$args$fitRetention, level)
+        expect_equal(cap$args$retainX, identical(level, "full"))
         expect_true(cap$args$usePCA)
         expect_equal(cap$args$nPCs, 3L)
-        expect_equal(cap$args$weightsDataType, "rnaseq")
         pecotmr:::.twasSumStats(ss, cfg)
         expect_equal(cap$args$fitRetention, level)
-        expect_equal(cap$args$weightsDataType, "rnaseq")
+        # Summary statistics have no X to keep.
+        expect_false("retainX" %in% names(cap$args))
     }
 })
 
@@ -4164,8 +4469,7 @@ test_that(".twasQssMultivariateFitOne returns no rows when the fit is absent", {
             NULL,
             methodArgs = list(),
             fitRetention = "none",
-            fineMappingResult = NULL,
-            weightsDataType = NULL
+            fineMappingResult = NULL
         ),
         "no 'mvsusie' fit found"
     )
@@ -4191,8 +4495,7 @@ test_that(".twasQssMultivariateFitOne promotes vector weights to a matrix", {
         NULL,
         methodArgs = list(),
         fitRetention = "none",
-        fineMappingResult = NULL,
-        weightsDataType = "rnaseq"
+        fineMappingResult = NULL
     )
     expect_length(rows, 1L)
     expect_equal(rows[[1L]]$context, "cA")
@@ -4235,7 +4538,9 @@ test_that(".twasMsJointPhase aborts when only mrmash asked and it fails", {
 
 test_that(".twasRunJointSpecGrid returns NULL when every region is empty", {
     local_mocked_bindings(
-        .twasJointSpecRegion = function(...) NULL,
+        .twasJointSpecRegionWork = function(...) {
+            pecotmr:::.qtlWorkValue(NULL)
+        },
         .twasRegionLabel = function(x) "rX",
         .package = "pecotmr"
     )
@@ -4410,6 +4715,324 @@ test_that("a fine-mapping method's TWAS rows keep none of its fit", {
     cfg <- list(fitRetention = "none")
     expect_identical(pecotmr:::.jointRetentionLevel(cfg, "mvsusie"), "none")
     expect_identical(pecotmr:::.jointRetentionLevel(cfg, "mrmash"), "slim")
+})
+
+test_that("both kinds of method run together with no joint spec", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mr.mashr")
+    window <- .fitSamplesWindow()
+    alone <- function(method) {
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            .fitSamplesDataset(),
+            methods = method,
+            region = window,
+            seed = 1L
+        )))
+    }
+    lasso <- alone("lasso")
+    mrmash <- alone("mrmash")
+    run <- .countBlocks(suppressWarnings(twasWeightsPipeline(
+        .fitSamplesDataset(),
+        methods = c("lasso", "mrmash"),
+        region = window,
+        seed = 1L
+    )))
+    # One read of the window serves both kinds of fit.
+    expect_equal(run$reads, 1L)
+    both <- S4Vectors::mcols(run$result)
+    expect_equal(nrow(run$result), nrow(lasso) + nrow(mrmash))
+    # Each method's fits are what asking for it alone gives.
+    weightsAt <- function(res, method, context, trait) {
+        weights(
+            res,
+            studyName = "s",
+            context = context,
+            trait = trait,
+            method = method
+        )
+    }
+    for (context in c("brain", "liver")) {
+        for (trait in c("g1", "g2", "g3")) {
+            expect_equal(
+                weightsAt(run$result, "lasso", context, trait),
+                weightsAt(lasso, "lasso", context, trait)
+            )
+            expect_equal(
+                weightsAt(run$result, "mrmash", context, trait),
+                weightsAt(mrmash, "mrmash", context, trait)
+            )
+        }
+    }
+})
+
+test_that("a multi-study run takes both kinds of method with no joint spec", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mr.mashr")
+    res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
+        .fitSamplesTwoStudies(),
+        methods = c("lasso", "mrmash"),
+        region = .fitSamplesWindow(),
+        seed = 1L
+    )))
+    expect_setequal(methodNames(res), c("lasso", "mrmash"))
+    expect_setequal(as.character(S4Vectors::mcols(res)$study), c("s", "s2"))
+    expect_equal(nrow(res), 24L)
+})
+
+test_that(".twasQdsGridResult takes a path that fitted nothing", {
+    result <- pecotmr:::.twasQdsGridResult
+    expect_null(result(list(NULL, NULL)))
+    expect_identical(result(list(NULL, "fits")), "fits")
+    expect_identical(result(list("fits", NULL)), "fits")
+})
+
+test_that(".twasNormKeep keeps a multi-word method's options", {
+    # Their list keys (bayes_r_weights) do not strip to their tokens (bayesR).
+    norm <- pecotmr:::.twasNormalizeMethods(c(
+        "mrmash",
+        "bayesR",
+        "dprVb",
+        "lasso"
+    ))
+    norm$methodList$dpr_vb_weights <- list(nK = 4L)
+    kept <- pecotmr:::.twasNormKeep(norm, c("dprVb", "lasso"))
+    expect_equal(kept$tokens, c("dprVb", "lasso"))
+    expect_setequal(
+        pecotmr:::.twasTokensFromMethodList(kept$methodList),
+        c("dprVb", "lasso")
+    )
+    expect_equal(kept$methodList$dpr_vb_weights, list(nK = 4L))
+})
+
+test_that("a worker's engine error reaches the caller of the pipeline", {
+    skip_if_not_installed("pgenlibr")
+    local_mocked_bindings(
+        lassoWeights = function(...) stop("the engine's own message"),
+        .package = "pecotmr"
+    )
+    expect_error(
+        suppressMessages(twasWeightsPipeline(
+            .fitSamplesDataset(),
+            methods = "lasso",
+            region = .fitSamplesWindow(),
+            seed = 1L
+        )),
+        "the engine's own message",
+        fixed = TRUE
+    )
+})
+
+test_that("retainX reaches only a full fit that can hold X", {
+    # Told by each weight function's own formal.
+    expect_setequal(
+        pecotmr:::.twasTokensKeepingX(),
+        c(
+            "lasso",
+            "enet",
+            "ridge",
+            "scad",
+            "mcp",
+            "mrash",
+            "dprGibbs",
+            "dprVb",
+            "dprAdaptiveGibbs"
+        )
+    )
+    apply <- pecotmr:::.twasApplyRetainFit
+    expect_identical(
+        apply(list(), "full", TRUE, "lassoWeights"),
+        list(fitRetention = "full", retainX = TRUE)
+    )
+    expect_identical(
+        apply(list(), "full", FALSE, "lassoWeights"),
+        list(fitRetention = "full")
+    )
+    # A fit with no copy of X takes no such argument...
+    expect_identical(
+        apply(list(), "full", TRUE, "mrmashWeights"),
+        list(fitRetention = "full")
+    )
+    # ...and a method's own lower level stands, with nothing to keep it in.
+    expect_identical(
+        apply(list(fitRetention = "slim"), "full", TRUE, "lassoWeights"),
+        list(fitRetention = "slim")
+    )
+    expect_identical(apply(list(), "none", FALSE, "lassoWeights"), list())
+})
+
+test_that("twasWeightsPipeline rejects retainX unless the fit is full", {
+    qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    required <- "requires `fitRetention = \"full\"`"
+    # The default level included, before any genotypes are read.
+    expect_error(
+        twasWeightsPipeline(qd, methods = "lasso", retainX = TRUE),
+        required,
+        fixed = TRUE
+    )
+    for (level in c("slim", "none")) {
+        expect_error(
+            twasWeightsPipeline(
+                qd,
+                methods = "lasso",
+                fitRetention = level,
+                retainX = TRUE
+            ),
+            required,
+            fixed = TRUE
+        )
+    }
+    expect_error(
+        twasWeightsPipeline(
+            qd,
+            methods = "lasso",
+            fitRetention = "full",
+            retainX = NA
+        ),
+        "retainX"
+    )
+    # Summary statistics have no X to keep.
+    expect_error(
+        twasWeightsPipeline(
+            .tp_makeQtlSumStats(),
+            methods = "lasso",
+            fitRetention = "full",
+            retainX = TRUE
+        ),
+        "unused argument"
+    )
+})
+
+test_that("a multi-study run rejects retainX before any study runs", {
+    local_mocked_bindings(
+        .twasPerStudy = function(qd, cfg) abort("a study ran"),
+        .package = "pecotmr"
+    )
+    expect_error(
+        twasWeightsPipeline(
+            .tp_makeMultiStudy(),
+            methods = "lasso",
+            retainX = TRUE
+        ),
+        "requires `fitRetention = \"full\"`",
+        fixed = TRUE
+    )
+})
+
+test_that("a multi-study joint record carries retainX", {
+    record <- pecotmr:::.twasMsJointCfg(
+        list(
+            retainX = TRUE,
+            genotypeFilterParam = GenotypeFilterParam(),
+            phenotypeFilterParam = PhenotypeFilterParam()
+        ),
+        NULL,
+        NULL
+    )
+    expect_true(record$retainX)
+})
+
+test_that("retainX says when no method's fit has a copy of X", {
+    check <- pecotmr:::.twasCheckRetainX
+    expect_error(
+        check(TRUE, "full", c("bayesR", "mrmash")),
+        "bayesR, mrmash hold no copy of X"
+    )
+    # A method with no copy loses nothing beside one that keeps it.
+    expect_silent(check(TRUE, "full", c("lasso", "bayesR")))
+    expect_silent(check(FALSE, "slim", "bayesR"))
+    expect_silent(check(TRUE, "full", NULL))
+})
+
+test_that("a TWAS fit keeps X only if asked", {
+    skip_if_not_installed("pgenlibr")
+    fitsAt <- function(retainX) {
+        res <- suppressMessages(twasWeightsPipeline(
+            .fitSamplesDataset(),
+            methods = "lasso",
+            region = .fitSamplesWindow(),
+            fitRetention = "full",
+            retainX = retainX,
+            seed = 1L
+        ))
+        cell <- list(
+            res,
+            studyName = "s",
+            context = "brain",
+            trait = "g1",
+            method = "lasso"
+        )
+        list(
+            weights = exec(weights, !!!cell),
+            fit = exec(methodFits, !!!cell)
+        )
+    }
+    full <- fitsAt(FALSE)
+    withX <- fitsAt(TRUE)
+    expect_identical(full$fit$call$x, quote(x))
+    expect_true(is.matrix(withX$fit$call$x))
+    # Dropping it changes nothing else the fit knows.
+    expect_equal(full$weights, withX$weights)
+    expect_equal(full$fit$cvm, withX$fit$cvm)
+    expect_lt(
+        length(serialize(full$fit, NULL)),
+        length(serialize(withX$fit, NULL))
+    )
+})
+
+test_that("retainX leaves a fine-mapping method's rows keeping no fit", {
+    skip_if_not_installed("pgenlibr")
+    ds <- .fitSamplesDataset()
+    window <- .fitSamplesWindow()
+    fm <- suppressMessages(fineMappingPipeline(
+        ds,
+        methods = "susie",
+        region = window,
+        seed = 1L
+    ))
+    res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
+        ds,
+        methods = c("lasso", "susie"),
+        fineMappingResult = fm,
+        region = window,
+        fitRetention = "full",
+        retainX = TRUE,
+        seed = 1L
+    )))
+    fitOf <- function(method) {
+        methodFits(
+            res,
+            studyName = "s",
+            context = "brain",
+            trait = "g1",
+            method = method
+        )
+    }
+    expect_true(is.matrix(fitOf("lasso")$call$x))
+    expect_length(fitOf("susie"), 0L)
+})
+
+test_that("a multi-study run keeps X in its individual-level fits if asked", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mr.mashr")
+    res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
+        .fitSamplesTwoStudies(),
+        methods = c("lasso", "mrmash"),
+        jointSpecification = "context",
+        region = .fitSamplesWindow(),
+        fitRetention = "full",
+        retainX = TRUE,
+        seed = 1L
+    )))
+    for (study in c("s", "s2")) {
+        fit <- methodFits(
+            res,
+            studyName = study,
+            context = "brain",
+            trait = "g1",
+            method = "lasso"
+        )
+        expect_true(is.matrix(fit$call$x))
+    }
 })
 
 test_that("twasWeightsPipeline says when fitRetention = 'full' can't be kept", {
@@ -4813,7 +5436,6 @@ test_that("QtlDataset: explicit joint fits get every caller setting", {
                 fitFullData = FALSE
             ),
             fitRetention = "full",
-            weightsDataType = "rnaseq",
             seed = 7L
         )),
         "no joint fits produced"
@@ -4823,7 +5445,6 @@ test_that("QtlDataset: explicit joint fits get every caller setting", {
     expect_equal(ind$config$crossValidationParam$folds, 2)
     expect_false(ind$config$crossValidationParam$fitFullData)
     expect_equal(ind$config$fitRetention, "full")
-    expect_equal(ind$config$dataType, "rnaseq")
     # Honest now that the setting reaches the fit.
     expect_false(ind$config$standardized)
     expect_equal(ind$args$methodList$mrmash_weights$max_iter, 5)
@@ -4837,14 +5458,12 @@ test_that("QtlSumStats: joint fits get fitRetention and the mr.mash options", {
             .tp_makeMultiCtxQtlSumStats(),
             methods = list(mrmash = list(max_iter = 5)),
             jointSpecification = "context",
-            fitRetention = "full",
-            weightsDataType = "rnaseq"
+            fitRetention = "full"
         )),
         "no joint fits produced"
     )
     ss <- .capturedCall(cap, "sumstats")
     expect_equal(ss$config$fitRetention, "full")
-    expect_equal(ss$config$dataType, "rnaseq")
     expect_equal(ss$args$methodArgs$mrmash$max_iter, 5)
 })
 
@@ -4862,7 +5481,6 @@ test_that("MultiStudyQtlDataset: joint fits get every caller setting", {
             crossValidationParam = CrossValidationParam(folds = 2),
             genotypeFilterParam = GenotypeFilterParam(mafCutoff = 0.05),
             fitRetention = "full",
-            weightsDataType = "rnaseq",
             seed = 7L
         )),
         "no joint fits produced"
@@ -4871,12 +5489,10 @@ test_that("MultiStudyQtlDataset: joint fits get every caller setting", {
     expect_identical(ind$args$residualizationParam, rp)
     expect_equal(ind$config$crossValidationParam$folds, 2)
     expect_equal(ind$config$fitRetention, "full")
-    expect_equal(ind$config$dataType, "rnaseq")
     expect_equal(ind$args$methodList$mrmash_weights$max_iter, 5)
     expect_equal(ind$args$genotypeFilter$mafCutoff, 0.05)
     ss <- .capturedCall(cap, "sumstats")
     expect_equal(ss$config$fitRetention, "full")
-    expect_equal(ss$config$dataType, "rnaseq")
     expect_equal(ss$args$methodArgs$mrmash$max_iter, 5)
 })
 
@@ -5204,4 +5820,77 @@ test_that("an alphabet method's plain options are built for its backend", {
     expect_equal(split$backend, "hibayes")
     expect_equal(S4Vectors::metadata(split$methodArgs)$engine, "hibayes")
     expect_equal(split$methodArgs$dfvg, 5)
+})
+
+# ---------------------------------------------------------------------------
+# The molecular type the weights take from their data
+# ---------------------------------------------------------------------------
+
+test_that("twasWeightsPipeline records each context's type from the dataset", {
+    plain <- .tp_makeQtlDataset(contexts = c("brain", "liver"))
+    qd <- QtlDataset(
+        studyName = "study1",
+        genotypes = pecotmr:::.qtlGenotypeSe(plain),
+        phenotypes = as.list(MultiAssayExperiment::experiments(plain))[
+            c("brain", "liver")
+        ],
+        dataType = c(brain = "expression", liver = "splicing")
+    )
+    mockArgs <- list(
+        .handleDosage = .tp_mockExtractor(),
+        lassoWeights = function(X, Y, ...) {
+            matrix(0.1, ncol(X), 1L, dimnames = list(colnames(X), NULL))
+        },
+        .package = "pecotmr"
+    )
+    exec(local_mocked_bindings, !!!mockArgs)
+    res <- suppressMessages(twasWeightsPipeline(
+        qd,
+        methods = "lasso",
+        cisWindow = 1e6,
+        verbose = 0
+    ))
+    types <- map2_chr(
+        as.character(res$context),
+        as.character(res$trait),
+        function(context, trait) {
+            dataType(
+                res,
+                studyName = "study1",
+                context = context,
+                trait = trait,
+                method = "lasso"
+            )
+        }
+    )
+    expect_equal(
+        types,
+        unname(c(brain = "expression", liver = "splicing")[
+            as.character(res$context)
+        ])
+    )
+    # A dataset that records none leaves the weights without one.
+    untyped <- suppressMessages(twasWeightsPipeline(
+        plain,
+        methods = "lasso",
+        cisWindow = 1e6,
+        verbose = 0
+    ))
+    expect_null(dataType(
+        untyped,
+        studyName = "study1",
+        context = "brain",
+        trait = as.character(untyped$trait)[[1L]],
+        method = "lasso"
+    ))
+})
+
+test_that(".twasRecordDataTypes leaves alone what the data does not answer", {
+    expect_null(pecotmr:::.twasRecordDataTypes(NULL, NULL))
+    row <- list(lasso = NULL, enet = "old")
+    expect_identical(pecotmr:::.twasRowDataType(row, NA_character_), row)
+    expect_identical(
+        pecotmr:::.twasRowDataType(row, "expression"),
+        list(lasso = "expression", enet = "expression")
+    )
 })

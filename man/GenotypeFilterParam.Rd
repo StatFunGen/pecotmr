@@ -31,10 +31,13 @@ it.}
 \item{keepSamples}{Sample ids to restrict to; \code{character(0)} keeps
 all samples.}
 
-\item{keepVariants}{Variant ids to restrict to; \code{character(0)} keeps
-all variants.}
+\item{keepVariants}{Variant ids or rsIDs to restrict to; \code{character(0)}
+keeps all variants. Alleles match in either order and on either strand,
+and an rsID is matched against the panel's own variant ids.}
 
-\item{keepIndel}{Logical. Retain insertions and deletions.}
+\item{keepIndel}{Logical. Retain variants other than SNPs. A SNP has exactly
+one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*} and
+\code{N} count as indels.}
 }
 \value{
 A \code{GenotypeFilterParam} object, a \code{\link{MethodParam}}.
@@ -46,7 +49,7 @@ Which variants and samples survive when a genotype matrix is
   or \code{\link{colocboostPipeline}} on a \code{\link{QtlDataset}}.
   A \code{QtlDataset} records no filter of its own; \code{keepSamples}
   narrows it once at the start of the run, and the other fields apply to
-  each extracted block, against that block's samples.
+  each extracted block, against the samples being fit.
 }
 \section{Unset fields}{
 

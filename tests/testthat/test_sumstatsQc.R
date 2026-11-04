@@ -2325,14 +2325,14 @@ context("summaryStatsQc")
 }
 
 .ssQ_mockExtractor <- function(seed = 13, n_samples = 60L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -2728,6 +2728,22 @@ test_that("summaryStatsQc: keepVariants subsets entries, records the drop", {
     expect_equal(ea$variantsOut, 2L)
 })
 
+test_that("summaryStatsQc: keepVariants match as every keep list is matched", {
+    # rs1 to rs4 sit at chr1:100 to chr1:400 with alleles G/A.
+    ss <- .ssQ_makeGwasSumStats()
+    nKept <- function(...) {
+        res <- summaryStatsQc(ss, keepVariants = c(...))
+        res$qcAudit[[1L]]$variantsOut
+    }
+    other <- "chr1:400:G:A"
+    expect_equal(nKept("chr1:100:G:A", other), 2L)
+    expect_equal(nKept("chr1:100:A:G", other), 2L)
+    expect_equal(nKept("1_100_G_A", other), 2L)
+    expect_equal(nKept("chr1:100:G:A", "chr1:100:A:G", other), 2L)
+    # Ids and rsIDs together, each matched by what it carries.
+    expect_equal(nKept("rs3", other), 2L)
+})
+
 test_that("summaryStatsQc: skipRegion drops overlapping variants", {
     ss <- .ssQ_makeGwasSumStats()
     res <- summaryStatsQc(
@@ -2785,6 +2801,10 @@ test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
     res <- summaryStatsQc(ss)
     expect_s4_class(res, "QtlSumStats")
     expect_equal(length(res$qcAudit), 1L)
+    # What the rows record comes through the rebuild.
+    typed <- `$<-`(ss, "dataType", "expression")
+    expect_equal(dataType(summaryStatsQc(typed)), "expression")
+    expect_true(is.na(dataType(res)))
 })
 
 # ===========================================================================
@@ -3299,14 +3319,14 @@ context("sumstatsQc internal helpers")
 }
 
 .ssh_mockExtractor <- function(seed = 42, n_samples = 30L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 

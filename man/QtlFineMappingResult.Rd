@@ -57,8 +57,8 @@ forward as provenance; not part of the identity key. \code{NULL}
 (default) omits the column, and \code{\link{genomicRegion}} then
 derives the window from the span of the variants present.}
 
-\item{dataType}{Optional assay / modality label ("bulk_rnaseq",
-"methylation"), recorded as a per-row provenance column. Length 1 or
+\item{dataType}{Optional molecular type ("expression", "methylation"),
+recorded as a per-row provenance column. Length 1 or
 one per row; \code{NULL} (default) omits the column.}
 
 \item{dataSource}{Optional per-row label for the kind of input the fit saw,

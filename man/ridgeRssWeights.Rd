@@ -17,8 +17,8 @@ ridgeRssWeights(
 \item{stat}{A list of summary statistics: \code{n} (per-variant sample
 sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 \code{b} with \code{seb}, or \code{b} alone, taken as already
-standardized. The engine receives the standardized effects z / sqrt(n),
-with n the median of \code{n}.}
+standardized. The engine receives the correlation each z stands for,
+z / sqrt(z^2 + n - 2), with n the median of \code{n}.}
 
 \item{ldReference}{The LD reference the statistics' variants are matched
 to by \code{stat$variantNames}: a genotype panel (see

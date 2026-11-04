@@ -21,7 +21,9 @@ fineMappingAnnotations(
 \item{ldRef}{The \code{\linkS4class{LdStatistic}} the annotations will be
 used with.}
 
-\item{types}{Which annotation types to build; see above. Default all four.}
+\item{types}{Which annotation types to build; see above. Default
+\code{"maxCpp"}, \code{"sumPip"}, \code{"credibleSet"} and
+\code{"highPip"}.}
 
 \item{coverage}{Credible-set coverage for \code{"credibleSet"}. Default
 \code{0.95}.}
@@ -57,6 +59,13 @@ Turn fine-mapping results -- typically molecular QTLs -- into
       trait at \code{coverage} (and \code{minPurity}), else 0.}
     \item{\code{"highPip"}}{1 when its largest PIP is at least
       \code{pipThreshold}, else 0.}
+    \item{\code{"maxCppCs"}, \code{"sumPipCs"}}{\code{"maxCpp"} and
+      \code{"sumPip"} from the effects that produced a credible set
+      alone: each variant's \code{within_cs_pip}, its posterior in the
+      effect of its credible set at the fit's primary coverage and
+      purity, 0 outside any (continuous). Every effect a fit keeps spreads
+      a whole unit of posterior over its variants, however weak its
+      evidence, and these leave that low-confidence mass out.}
   }
 
   Variants are matched to the reference allele-aware (id format, ref/alt
